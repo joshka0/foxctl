@@ -19,7 +19,11 @@ description: "Durable multi-agent room coordination with transport-first partici
 
 ## Mental model
 
+- `agentctl` is the headless room/runtime kernel.
+- CLI, web/API, `gui-agent`, mux panes, and chat adapters are clients or presentation layers on top of that kernel.
 - `agentctl room` is the source of truth.
+- room-scoped clients should use `GET /api/rooms/{room-id}/events?workspace_id=...` instead of subscribing to the global `/api/events` feed and filtering `room.message` client-side.
+- room member payloads expose `delivery_binding` as the authoritative routing/binding record; older top-level fields like `backend`, `session`, `pane_id`, `transport_endpoint`, and `transport_kind` are compatibility mirrors while clients migrate.
 - `room send` writes durable chat messages and triggers participant transport first; mux viewer delivery is secondary.
 - **`room send` routing:** prefer **`--to <participant-id>`** for anything meant for **one** agent so relay and inbox routing stay unambiguous; omit `--to` only when you **intentionally** broadcast to everyone else in the room.
 - **`room send` identity:** prefer **`--sender <your-participant-id>`** whenever the shell is not clearly bound to a mux pane (running outside tmux/zellij, scripts, or MCP); when you are inside the correct pane, sender can be omitted because agentctl infers it.
@@ -30,15 +34,21 @@ description: "Durable multi-agent room coordination with transport-first partici
   - reminder creation/cancel is a durable room action, not a browser timer
 - `room ack` marks a specific room message as acknowledged.
 - `room resolve` lets the coordinator clear stale room messages once they have been handled out-of-band, and it resolves reminder chains by the original request id.
+- reply-required satisfaction is chain-aware:
+  a later message only satisfies an earlier request when it is from the intended recipient and belongs to the same room message chain.
 - `room inbox` shows actionable direct requests and pending ack/reply work for one participant.
 - `room status` shows the coordinator-facing room pulse: participants, task counts, stale work, and compact actionable backlog summaries.
 - `room status` is the coordinator-facing room/task pulse; `room pulse` is a separate room-wide epic mission-control surface.
 - `room status --only blocked,stale,reply` narrows the action summary to the coordinator lane you care about right now.
 - `room status --verbose` includes richer top-entry detail for debugging without making the default coordinator view noisy.
+- `room status` and the room-loop API expose persisted `last_delivery_trace` data:
+  use that trace to inspect the chosen binding, transport, fallback attempt, outcome, and cursor movement for the most recent delivery decision.
 - `room coordinator set` transfers coordinator ownership to another room participant.
 - `room send --to @coordinator` resolves to the current coordinator without hard-coding an actor id.
 - `room relay` mirrors room messages into terminal panes when you want a viewer layer, but room transport no longer depends on viewer attachment.
 - `room task assign`, `room task claim`, `room task complete`, and other task transitions persist first, then use the same transport-first relay path as `room loop`.
+- task/control transitions are intentionally strict:
+  assigning already-claimed work, claiming canceled work, reassigning unowned work, completing non-`in_progress` work, or unblocking non-`blocked` work should be treated as invalid state-machine transitions.
 - `room send` inside tmux/zellij may still use a sender-pane submit convenience when sender identity is inferred from the current pane; when you pass an explicit `--sender`, agentctl skips that local mux-submit hook by default.
 - `room interview` runs a durable round-robin clarification loop inside the room.
 - `room epic`, `room milestone`, `room story`, and `room log` give the room an agile-shaped long-running delivery structure.
@@ -49,7 +59,14 @@ description: "Durable multi-agent room coordination with transport-first partici
   - use the same request body as the original request being followed up on
   - choose the reminder recipient explicitly
   - treat the reminder as loop-owned follow-up, not a second ad hoc chat thread
+- recurring reminder schedules are not cleared by acknowledging one emitted reminder instance:
+  the schedule continues until the root request is satisfied, `max_iterations` is reached, or linked work is completed.
+- reminders may optionally link to `task_id`, `story_id`, or `milestone_id` so loop-owned follow-ups can auto-stop when that tracked work is finished.
 - `room task` links shared tasks to the room.
+- `room task add` now uses an explicit lane contract:
+  - when you omit `--milestone-id`, new room tasks attach to the newest open epic's default quiet `Chores` milestone when one exists
+  - when you need milestone-scoped work instead of quiet chores, pass `--milestone-id <milestone-id>` explicitly
+  - do not infer task lane from title keywords or free-form text
 - `room loop` runs the central coordination loop:
   - trigger participant delivery for new messages
   - watch room tasks
@@ -58,6 +75,13 @@ description: "Durable multi-agent room coordination with transport-first partici
   - nudge the coordinator when unresolved work still needs oversight
 
 Do not rely on scrollback as canonical history. The room log is canonical.
+
+Architecture rule:
+
+- runtime behavior belongs in shared room services
+- the CLI is a client, not the canonical implementation
+- mux attachment is presentation, not room truth
+- `bash tests/regression/run.sh` is the canonical regression entrypoint for the hardened room-runtime invariants.
 
 Membership rule:
 
@@ -91,6 +115,8 @@ When you are working inside an active room, follow this behavior by default:
 - When work is done, use `room task complete --notes ...` so the outcome is durable and visible in the room.
 - Use `room send --to @coordinator` when you need escalation, reassignment, or a decision from the coordinator.
 - Do not duplicate work on a task that is already claimed unless the coordinator explicitly reassigns or reclaims it.
+- If a task action is rejected, do not brute-force it with a different command:
+  pick the explicit lifecycle action that matches the current state (`reassign`, `reclaim`, `unblock`, or `abandon`).
 - Treat the room timeline as the durable audit trail; use direct room messages for requests, not ad hoc pane-only chat.
 - Treat participant transport state as distinct from mux viewer state. A named pane or session does not prove a live participant runtime.
 
@@ -100,6 +126,7 @@ Role expectations:
   - keeps assignments, replies, and stale work moving
   - uses `room status`, `room resolve`, `room coordinator set`, and coordinator-only task actions
   - is the final authority on task routing and review closure
+  - owns high-privilege room mutations such as room patching, full member replacement, and role-changing member binding updates
 - `reviewer`
   - posts findings first, then approval or block verdict
   - uses room tasks and direct requests instead of passive observation
@@ -127,6 +154,8 @@ Two valid operating modes:
   - use when agents need to actively receive room messages and work tasks
   - prefer `agentctl room restore <room-id> <actor-id> --agent <provider> [--agent-session-id <provider-session>]` when reviving an existing participant
 - `room loop` is not required just to preserve the room; it is required when you need reminders, stale-work nudges, coordinator pulses, or automatic rebroadcast behavior
+- persisted loop state now includes reminder/pulse operational memory:
+  restart should resume counters, suppression windows, and coordinator pulse state rather than behaving like a fresh loop.
 
 Interview protocol:
 
@@ -186,6 +215,12 @@ agentctl room send <room-id> --to @coordinator --sender <you> --reply-expected "
 # 5. close with durable notes
 agentctl room task complete <room-id> --id <task-id> --notes "..." --sender <you>
 ```
+
+Task creation rule:
+
+- low-urgency chores and follow-up debt should usually use plain `room task add` and rely on the default quiet chores lane
+- milestone execution work should use `room task add --milestone-id <milestone-id>` so the task is explicitly attached to the current delivery lane
+- if you are not sure which milestone owns the work, check `room milestone show` first instead of guessing
 
 When the room is in a meaning-check or spec-clarification phase, use this interview loop instead:
 
@@ -372,6 +407,9 @@ Task lifecycle is intentionally lightweight:
 - `complete` requires the current participant to claim the task first
 - `touch` refreshes the owner heartbeat without changing task state
 - `block` / `unblock` preserve ownership while making the stall visible to everyone
+- `complete` and `block` are only valid from a real `in_progress` owner state.
+- `reassign` is for retargeting already-owned or explicitly assigned work; `assign` is for untouched or reclaimed work.
+- `reclaim` and `abandon` return work to a clean pending state so the next claim starts from explicit ownership.
 
 Use `room task claim` before doing real work. That is the guardrail that keeps multiple top-level agents from stepping on the same task.
 
@@ -381,7 +419,7 @@ Use `room task claim` before doing real work. That is the guardrail that keeps m
 
 ```bash
 agentctl room relay alpha --backend tmux
-agentctl room loop alpha --backend tmux --pulse 30s --reply-stale 2m --task-stale 5m
+agentctl room loop alpha --backend tmux
 ```
 
 ### zellij
@@ -424,6 +462,9 @@ agentctl room join alpha --current --role <room-role>
 - Use `room relay` when you only need room-message fanout into panes/viewers.
 - Use `room loop` when you need reminders, stale-reply nudges, coordinator pulses, or task-state broadcasts in addition to message fanout.
 - If a room is using `room remind` or coordinator stale detection, `room loop` must be running; `room relay` alone is not enough.
+- `room loop` reads persisted loop policy; change timing through `room loop patch` or the API, not runtime flags.
+- `task_followup_interval` is independent from `pulse_interval`.
+- `task_followup_interval=0` disables task follow-up check-ins while leaving reminder pulses active.
 - `room join <room-id> --current` registers the current pane without hand-writing the id.
 - `room rebind <room-id> <actor-id> --backend <tmux|zellij> --session <session> --pane-id <pane>`
   repairs a moved pane binding for an existing participant.
@@ -434,6 +475,8 @@ agentctl room join alpha --current --role <room-role>
 - The sender should also be a room member if you want them excluded from fanout.
 - Child panes launched with `agentctl tmux create --parent-participant ...` should usually use `agentctl tmux send-parent ...` instead of joining the room directly.
 - Coordinator-only actions include `room resolve`, `room coordinator set`, `room task assign`, `room task reassign`, and `room task reclaim`.
+- high-privilege API/control-surface mutations are coordinator-only too:
+  room patch, full member replacement, and role-changing binding updates should not be treated as self-service operations.
 - `room send --to @coordinator` is preferred over hard-coding the coordinator actor id.
 - Direct room requests should usually carry either `--ack-required` or `--reply-expected`; broadcasts usually should not.
 

@@ -93,7 +93,7 @@ func newTmuxRemindCommand() *cobra.Command {
 				}
 				resolvedRecipient = identity.Sender
 			}
-			return runRoomRemindAdd(cmd, workspace, sender, roomID, resolvedRecipient, subject, body, every, maxIterations, ackRequired, replyExpected, interrupt, false)
+			return runRoomRemindAdd(cmd, workspace, sender, roomID, resolvedRecipient, subject, body, "", "", "", every, maxIterations, ackRequired, replyExpected, interrupt, false)
 		},
 	}
 

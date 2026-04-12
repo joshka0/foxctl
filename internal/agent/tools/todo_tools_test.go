@@ -80,7 +80,44 @@ func TestTodoComplete_UpdatesStatus(t *testing.T) {
 	updated, err := store.Get(ctx, t1.ID)
 	require.NoError(t, err)
 	assert.Equal(t, tasks.StatusCompleted, updated.Status)
+	assert.NotNil(t, updated.CompletedAt)
 	assert.Contains(t, updated.Notes, "Done")
+}
+
+func TestTodoAdd_UpdatesParentChildren(t *testing.T) {
+	ctx := context.Background()
+	rootDir := t.TempDir()
+	store, err := tasks.Open(ctx, rootDir)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, store.Close()) }()
+
+	parent, err := store.Add(ctx, tasks.Task{
+		WorkspaceID: "ws-1",
+		Title:       "Parent",
+	})
+	require.NoError(t, err)
+
+	cfg := Config{
+		WorkspaceRoot: rootDir,
+		WorkspaceID:   "ws-1",
+		OpenTasksStore: func(ctx context.Context) (tasks.Store, error) {
+			return tasks.Open(ctx, rootDir)
+		},
+	}
+	r, err := NewRegistry(cfg, nil)
+	require.NoError(t, err)
+
+	result, err := r.todoAdd(ctx, map[string]any{
+		"title":     "Child",
+		"parent_id": parent.ID,
+	})
+	require.NoError(t, err)
+	parsed := parseResult(t, result)
+	assert.True(t, parsed["success"].(bool))
+
+	parent, err = store.Get(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Len(t, parent.Children, 1)
 }
 
 func TestTodoQuery_FiltersStatus(t *testing.T) {

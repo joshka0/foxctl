@@ -319,12 +319,19 @@ The intended model is:
 - `--reply-expected` is for direct requests only; broadcasts stay FYI by default
 - `--ack-required` marks a message as requiring an explicit acknowledgment
 - `room ack` marks one or more room messages as `acked` in the durable log
-- `room resolve` lets the coordinator clear stale handled reminders from the room surface and resolves reminder chains by original request
+- `room resolve` lets the coordinator clear stale handled reminders from the room surface and resolves the whole related message chain by original request id, not just one later recipient message
+- `room remind add` creates a durable reminder schedule owned by the room loop, not a one-off chat resend
+- room patch and full member replacement are coordinator-only control-surface mutations
+- member transport or binding updates are self-service only for the target participant unless the caller has coordinator access
+- role-changing binding updates are coordinator-only even when the caller is updating their own binding
 - `room coordinator set` transfers coordinator ownership to another room participant
 - `room inbox` shows the actionable queue for one participant instead of the full room archive
 - `room status` shows the coordinator-facing pulse for participants, task state, stale owned work, and compact actionable backlog summaries
 - `room status --only blocked,stale,reply` narrows the summary to the exact coordination lane you want to inspect
 - `room status --verbose` keeps the compact default but adds richer actionable entry detail when you need to debug the underlying room traffic
+- `room status` and loop/status surfaces also expose `last_delivery_trace` from the persisted room-loop row
+- use `last_delivery_trace` as the canonical explanation for the latest delivery decision:
+  chosen binding, chosen transport, fallback attempt, outcome, and cursor movement belong there, not in pane guesswork
 - `room subscribe` reads or tails the room log in any terminal
 - `room relay --backend tmux` fans new room messages into tmux member panes by
   matching room member ids to tmux pane labels
@@ -363,15 +370,20 @@ agentctl room task complete alpha \
 write durable room messages with a `task_id`, so every participant sees the
 task lifecycle in the same shared room timeline.
 
-The intended lightweight lifecycle is:
+The intended lifecycle is strict rather than permissive:
 
 - `pending -> in_progress -> blocked -> completed`
 - `assign` records intended ownership and sends a direct request, but the assignee still claims the task explicitly
 - assigned tasks are claimable only by the assignee until they are reassigned, reclaimed, or abandoned
+- `assign` is for untouched or reclaimed work; it should not be used to overwrite already-claimed work
+- `reassign` is for retargeting work that already has an assignee or owner
+- `reclaim` returns work to the unowned pool and clears assignment/ownership so it can be assigned or claimed again cleanly
 - `abandon` returns a task to `pending`
-- `complete` requires the current participant to claim the task first
+- `complete` requires the current participant to claim the task first and only succeeds from a real `in_progress` owner state
 - `touch` refreshes the task heartbeat without changing state
 - `block` / `unblock` keep ownership while making the stall visible
+- `block` is only valid from `in_progress`, and `unblock` is only valid from `blocked`
+- rejected task actions should be treated as state-machine protection, not as a prompt to mutate fields by hand
 
 ### Room Loop
 
@@ -388,21 +400,45 @@ The intended lightweight lifecycle is:
 That gives the room a central coordination loop without making terminal
 scrollback the source of truth.
 
-Useful flags:
+Loop policy is persisted room state, not a `room loop` runtime flag set:
 
 ```bash
-agentctl room loop alpha --backend tmux \
-  --pulse 30s \
-  --reply-stale 2m \
-  --task-stale 5m
+agentctl room loop alpha --backend tmux
 ```
+
+Important policy rule:
+
+- `room loop` executes the stored policy; it does not own timing defaults at runtime
+- use `room loop patch` or the API loop patch surface to change policy
+- `task_followup_interval` is a separate persisted field from `pulse_interval`
+- `task_followup_interval=0` means task follow-up check-ins are disabled even when reminder pulses are enabled
+- this is the intended default after the hard cut, so upgraded rooms must set `task_followup_interval` explicitly if they still want automatic task follow-up messages
+- acknowledging one emitted reminder follow-up does not stop the recurring schedule by itself
+- recurring schedules stop when the root request is satisfied, when linked `task_id`, `story_id`, or `milestone_id` work is completed, when the reminder is cancelled, or when `max_iterations` is exhausted
 
 `room inbox` is the per-participant actionable view that pairs with this pulse
 behavior:
 
 - already-acked messages are hidden
-- direct `reply_expected` requests disappear once the recipient has spoken later in the room
+- direct `reply_expected` requests disappear only after the intended recipient replies within the same message chain
+- `room resolve` follows that same chain model, so resolving a root request clears its related reminder / follow-up chain together
 - the result is a queue of unresolved asks rather than a full transcript
+
+### Canonical Client Surfaces
+
+Room client adoption now follows two stable contracts:
+
+- `GET /api/rooms/{room-id}/events?workspace_id=...` is the room-scoped SSE stream for room timeline updates
+- room member payloads expose `delivery_binding` as the authoritative transport/routing record
+
+Operationally:
+
+- use the room-scoped SSE stream for room views instead of subscribing to the global `/api/events` feed and filtering `room.message` client-side
+- treat `delivery_binding` as canonical when resolving mux backend, session, pane id, transport endpoint, submit mode, health, or fallback policy
+- treat `last_delivery_trace` as the first place to inspect when someone asks “why did this message route here” or “did fallback happen”
+- the older top-level member fields (`backend`, `session`, `pane_id`, `transport_endpoint`, `transport_kind`) are compatibility mirrors and should not be the source of truth for new client work
+- use `bash tests/regression/run.sh` as the default room-runtime verification bundle before reaching for ad hoc command mixes
+- if the symptom is "the message is visible in the pane but looks unsent," run `AGENTCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' ./cmd/agentctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` to verify the relay path is consumed by the target terminal process rather than left as drafted pane input
 
 ### Join vs Subscribe
 

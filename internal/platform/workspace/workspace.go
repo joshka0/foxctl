@@ -206,6 +206,31 @@ func CanonicalID(input string) string {
 	return input
 }
 
+// CanonicalWorkspaceKey returns the canonical persistence key for room-oriented
+// workspace selectors.
+//
+// Unlike CanonicalID, this preserves opaque workspace IDs as-is but normalizes
+// filesystem path selectors to one cleaned absolute path. Room and coordination
+// storage currently key by this selector-shaped value, so callers that pass ".",
+// "/repo", or "/repo/." must converge on the same key without hashing existing
+// path-backed rows into a different identifier.
+func CanonicalWorkspaceKey(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	if LooksLikeID(input) {
+		return input
+	}
+	if looksLikePathSelector(input) || pathExists(input) {
+		if abs, err := filepath.Abs(input); err == nil {
+			return Normalize(abs)
+		}
+		return Normalize(input)
+	}
+	return input
+}
+
 func looksLikePathSelector(s string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" {

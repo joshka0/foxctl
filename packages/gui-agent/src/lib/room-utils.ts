@@ -1,4 +1,4 @@
-import type { Room } from '@/api/types'
+import type { Room, RoomDeliveryBinding, RoomMember } from '@/api/types'
 
 export function roomDisplayName(room: Room): string {
   const title = room.title?.trim()
@@ -60,4 +60,45 @@ export function resolveRoomWorkspacePath(
   if (isPathWorkspace(current)) return current
 
   return ''
+}
+
+export function roomMemberDeliveryBinding(member: RoomMember | null | undefined): RoomDeliveryBinding | undefined {
+  if (!member) return undefined
+  if (member.delivery_binding) return member.delivery_binding
+  if (
+    !member.backend &&
+    !member.session &&
+    !member.pane_id &&
+    !member.transport_endpoint &&
+    !member.transport_kind
+  ) {
+    return undefined
+  }
+  return {
+    mux_backend: member.backend,
+    mux_session: member.session,
+    mux_pane_id: member.pane_id,
+    transport_endpoint: member.transport_endpoint,
+    transport_kind: member.transport_kind,
+  }
+}
+
+export function roomMemberMuxBackend(member: RoomMember | null | undefined): string {
+  return roomMemberDeliveryBinding(member)?.mux_backend?.trim() || member?.backend?.trim() || ''
+}
+
+export function roomMemberMuxSession(member: RoomMember | null | undefined): string {
+  return roomMemberDeliveryBinding(member)?.mux_session?.trim() || member?.session?.trim() || ''
+}
+
+export function roomMemberMuxPaneID(member: RoomMember | null | undefined): string {
+  return roomMemberDeliveryBinding(member)?.mux_pane_id?.trim() || member?.pane_id?.trim() || ''
+}
+
+export function roomMemberTransportEndpoint(member: RoomMember | null | undefined): string {
+  return roomMemberDeliveryBinding(member)?.transport_endpoint?.trim() || member?.transport_endpoint?.trim() || ''
+}
+
+export function roomMemberTransportKind(member: RoomMember | null | undefined): string {
+  return roomMemberDeliveryBinding(member)?.transport_kind?.trim() || member?.transport_kind?.trim() || ''
 }

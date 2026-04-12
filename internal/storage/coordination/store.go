@@ -3,10 +3,12 @@ package coordination
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 )
 
@@ -31,7 +33,17 @@ type RoomLoop struct {
 	Enabled                      bool
 	ManagedBy                    string
 	LastTickAt                   *time.Time
+	DeliveryLeaseName            string
+	DeliveryOwnerID              string
+	DeliveryCursorMessageID      string
+	DeliveryCursorAt             *time.Time
+	LastDeliveryTrace            *RoomLoopDeliveryTrace
+	ReplyPulseState              map[string]RoomLoopPulseState
+	TaskPulseState               map[string]RoomLoopPulseState
+	TaskFollowupState            map[string]time.Time
+	CoordinatorPulseState        map[string]time.Time
 	PulseInterval                time.Duration
+	TaskFollowupInterval         time.Duration
 	ReplyStaleAfter              time.Duration
 	TaskStaleAfter               time.Duration
 	MinPulseFloor                time.Duration
@@ -42,12 +54,49 @@ type RoomLoop struct {
 	UpdatedAt                    time.Time
 }
 
+type RoomLoopDeliveryTrace struct {
+	WorkspaceID             string    `json:"workspace_id,omitempty"`
+	RoomID                  string    `json:"room_id,omitempty"`
+	MessageID               string    `json:"message_id,omitempty"`
+	TaskID                  string    `json:"task_id,omitempty"`
+	Recipient               string    `json:"recipient,omitempty"`
+	DeliveryLeaseName       string    `json:"delivery_lease_name,omitempty"`
+	DeliveryOwnerID         string    `json:"delivery_owner_id,omitempty"`
+	RelayBackend            string    `json:"relay_backend,omitempty"`
+	ChosenActorID           string    `json:"chosen_actor_id,omitempty"`
+	ChosenMuxBackend        string    `json:"chosen_mux_backend,omitempty"`
+	ChosenMuxSession        string    `json:"chosen_mux_session,omitempty"`
+	ChosenMuxPaneID         string    `json:"chosen_mux_pane_id,omitempty"`
+	ChosenTransportEndpoint string    `json:"chosen_transport_endpoint,omitempty"`
+	ChosenTransportKind     string    `json:"chosen_transport_kind,omitempty"`
+	ChosenSubmitMode        string    `json:"chosen_submit_mode,omitempty"`
+	FallbackAttempted       bool      `json:"fallback_attempted,omitempty"`
+	DeliveredCount          int       `json:"delivered_count,omitempty"`
+	FailedCount             int       `json:"failed_count,omitempty"`
+	DeliveredTo             []string  `json:"delivered_to,omitempty"`
+	FailedMembers           []string  `json:"failed_members,omitempty"`
+	Outcome                 string    `json:"outcome,omitempty"`
+	CursorBeforeMessageID   string    `json:"cursor_before_message_id,omitempty"`
+	CursorAfterMessageID    string    `json:"cursor_after_message_id,omitempty"`
+	CursorAdvanced          bool      `json:"cursor_advanced,omitempty"`
+	ObservedAt              time.Time `json:"observed_at,omitempty"`
+}
+
+type RoomLoopPulseState struct {
+	LastSentAt *time.Time `json:"last_sent_at,omitempty"`
+	Count      int        `json:"count,omitempty"`
+	Escalated  bool       `json:"escalated,omitempty"`
+}
+
 // RoomReminder stores one durable scheduled room follow-up.
 type RoomReminder struct {
 	ID            string        `json:"id"`
 	WorkspaceID   string        `json:"workspace_id"`
 	RoomID        string        `json:"room_id"`
 	RootMessageID string        `json:"root_message_id"`
+	TaskID        string        `json:"task_id,omitempty"`
+	StoryID       string        `json:"story_id,omitempty"`
+	MilestoneID   string        `json:"milestone_id,omitempty"`
 	Sender        string        `json:"sender"`
 	Recipient     string        `json:"recipient"`
 	Subject       string        `json:"subject"`
@@ -112,7 +161,17 @@ CREATE TABLE IF NOT EXISTS room_loops (
 	enabled                     INTEGER NOT NULL DEFAULT 1,
 	managed_by                  TEXT NOT NULL DEFAULT '',
 	last_tick_at_ms             INTEGER,
+	delivery_lease_name         TEXT NOT NULL DEFAULT '',
+	delivery_owner_id           TEXT NOT NULL DEFAULT '',
+	delivery_cursor_message_id  TEXT NOT NULL DEFAULT '',
+	delivery_cursor_at_ms       INTEGER,
+	last_delivery_trace_json    TEXT NOT NULL DEFAULT '',
+	reply_pulse_state_json      TEXT NOT NULL DEFAULT '',
+	task_pulse_state_json       TEXT NOT NULL DEFAULT '',
+	task_followup_state_json    TEXT NOT NULL DEFAULT '',
+	coordinator_pulse_state_json TEXT NOT NULL DEFAULT '',
 	pulse_interval_ms           INTEGER NOT NULL,
+	task_followup_interval_ms   INTEGER NOT NULL DEFAULT 0,
 	reply_stale_after_ms        INTEGER NOT NULL,
 	task_stale_after_ms         INTEGER NOT NULL,
 	min_pulse_floor_ms          INTEGER NOT NULL,
@@ -130,6 +189,9 @@ CREATE TABLE IF NOT EXISTS room_reminders (
 	workspace_id      TEXT NOT NULL,
 	room_id           TEXT NOT NULL,
 	root_message_id   TEXT NOT NULL,
+	task_id           TEXT NOT NULL DEFAULT '',
+	story_id          TEXT NOT NULL DEFAULT '',
+	milestone_id      TEXT NOT NULL DEFAULT '',
 	sender            TEXT NOT NULL,
 	recipient         TEXT NOT NULL,
 	subject           TEXT NOT NULL,
@@ -151,9 +213,22 @@ CREATE INDEX IF NOT EXISTS idx_room_reminders_room ON room_reminders(workspace_i
 		return fmt.Errorf("coordination: migrate: %w", err)
 	}
 	for _, stmt := range []string{
+		`ALTER TABLE room_reminders ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_reminders ADD COLUMN story_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_reminders ADD COLUMN milestone_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE room_loops ADD COLUMN interrupt_attempt_limit INTEGER NOT NULL DEFAULT 2`,
 		`ALTER TABLE room_loops ADD COLUMN reminder_backoff_cap INTEGER NOT NULL DEFAULT 8`,
 		`ALTER TABLE room_loops ADD COLUMN coordinator_escalation_enabled INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE room_loops ADD COLUMN task_followup_interval_ms INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE room_loops ADD COLUMN delivery_lease_name TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_loops ADD COLUMN delivery_owner_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_loops ADD COLUMN delivery_cursor_message_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_loops ADD COLUMN delivery_cursor_at_ms INTEGER`,
+		`ALTER TABLE room_loops ADD COLUMN last_delivery_trace_json TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_loops ADD COLUMN reply_pulse_state_json TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_loops ADD COLUMN task_pulse_state_json TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_loops ADD COLUMN task_followup_state_json TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_loops ADD COLUMN coordinator_pulse_state_json TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			errMsg := strings.ToLower(strings.TrimSpace(err.Error()))
@@ -170,7 +245,7 @@ func (s *Store) GetRoomReminder(ctx context.Context, workspaceID, reminderID str
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("coordination: store not initialized")
 	}
-	workspaceID = strings.TrimSpace(workspaceID)
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	reminderID = strings.TrimSpace(reminderID)
 	if workspaceID == "" || reminderID == "" {
 		return nil, fmt.Errorf("coordination: workspace_id and reminder id are required")
@@ -182,7 +257,7 @@ func (s *Store) GetRoomReminder(ctx context.Context, workspaceID, reminderID str
 		updatedMS  int64
 	)
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, workspace_id, room_id, root_message_id, sender, recipient, subject, body,
+		SELECT id, workspace_id, room_id, root_message_id, task_id, story_id, milestone_id, sender, recipient, subject, body,
 		       ack_required, reply_expected, interrupt, interval_ms, max_iterations, sent_count,
 		       active, last_sent_at_ms, created_at_ms, updated_at_ms
 		FROM room_reminders
@@ -192,6 +267,9 @@ func (s *Store) GetRoomReminder(ctx context.Context, workspaceID, reminderID str
 		&reminder.WorkspaceID,
 		&reminder.RoomID,
 		&reminder.RootMessageID,
+		&reminder.TaskID,
+		&reminder.StoryID,
+		&reminder.MilestoneID,
 		&reminder.Sender,
 		&reminder.Recipient,
 		&reminder.Subject,
@@ -227,13 +305,13 @@ func (s *Store) ListRoomReminders(ctx context.Context, workspaceID, roomID strin
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("coordination: store not initialized")
 	}
-	workspaceID = strings.TrimSpace(workspaceID)
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	roomID = strings.TrimSpace(roomID)
 	if workspaceID == "" || roomID == "" {
 		return nil, fmt.Errorf("coordination: workspace_id and room_id are required")
 	}
 	query := `
-		SELECT id, workspace_id, room_id, root_message_id, sender, recipient, subject, body,
+		SELECT id, workspace_id, room_id, root_message_id, task_id, story_id, milestone_id, sender, recipient, subject, body,
 		       ack_required, reply_expected, interrupt, interval_ms, max_iterations, sent_count,
 		       active, last_sent_at_ms, created_at_ms, updated_at_ms
 		FROM room_reminders
@@ -260,6 +338,9 @@ func (s *Store) ListRoomReminders(ctx context.Context, workspaceID, roomID strin
 			&reminder.WorkspaceID,
 			&reminder.RoomID,
 			&reminder.RootMessageID,
+			&reminder.TaskID,
+			&reminder.StoryID,
+			&reminder.MilestoneID,
 			&reminder.Sender,
 			&reminder.Recipient,
 			&reminder.Subject,
@@ -297,9 +378,12 @@ func (s *Store) UpsertRoomReminder(ctx context.Context, reminder RoomReminder) (
 		return RoomReminder{}, fmt.Errorf("coordination: store not initialized")
 	}
 	reminder.ID = strings.TrimSpace(reminder.ID)
-	reminder.WorkspaceID = strings.TrimSpace(reminder.WorkspaceID)
+	reminder.WorkspaceID = workspaceutil.CanonicalWorkspaceKey(reminder.WorkspaceID)
 	reminder.RoomID = strings.TrimSpace(reminder.RoomID)
 	reminder.RootMessageID = strings.TrimSpace(reminder.RootMessageID)
+	reminder.TaskID = strings.TrimSpace(reminder.TaskID)
+	reminder.StoryID = strings.TrimSpace(reminder.StoryID)
+	reminder.MilestoneID = strings.TrimSpace(reminder.MilestoneID)
 	reminder.Sender = strings.TrimSpace(reminder.Sender)
 	reminder.Recipient = strings.TrimSpace(reminder.Recipient)
 	reminder.Subject = strings.TrimSpace(reminder.Subject)
@@ -327,15 +411,18 @@ func (s *Store) UpsertRoomReminder(ctx context.Context, reminder RoomReminder) (
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO room_reminders (
-			id, workspace_id, room_id, root_message_id, sender, recipient, subject, body,
+			id, workspace_id, room_id, root_message_id, task_id, story_id, milestone_id, sender, recipient, subject, body,
 			ack_required, reply_expected, interrupt, interval_ms, max_iterations, sent_count,
 			active, last_sent_at_ms, created_at_ms, updated_at_ms
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 		ON CONFLICT(id) DO UPDATE SET
 			workspace_id = excluded.workspace_id,
 			room_id = excluded.room_id,
 			root_message_id = excluded.root_message_id,
+			task_id = excluded.task_id,
+			story_id = excluded.story_id,
+			milestone_id = excluded.milestone_id,
 			sender = excluded.sender,
 			recipient = excluded.recipient,
 			subject = excluded.subject,
@@ -354,6 +441,9 @@ func (s *Store) UpsertRoomReminder(ctx context.Context, reminder RoomReminder) (
 		reminder.WorkspaceID,
 		reminder.RoomID,
 		reminder.RootMessageID,
+		reminder.TaskID,
+		reminder.StoryID,
+		reminder.MilestoneID,
 		reminder.Sender,
 		reminder.Recipient,
 		reminder.Subject,
@@ -380,7 +470,7 @@ func (s *Store) GetRoomLoop(ctx context.Context, workspaceID, roomID string) (*R
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("coordination: store not initialized")
 	}
-	workspaceID = strings.TrimSpace(workspaceID)
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	roomID = strings.TrimSpace(roomID)
 	if workspaceID == "" || roomID == "" {
 		return nil, fmt.Errorf("coordination: workspace_id and room_id are required")
@@ -388,12 +478,21 @@ func (s *Store) GetRoomLoop(ctx context.Context, workspaceID, roomID string) (*R
 
 	var loop RoomLoop
 	var (
-		lastTickMS sql.NullInt64
-		updatedMS  int64
+		lastTickMS                sql.NullInt64
+		cursorAtMS                sql.NullInt64
+		lastDeliveryTraceJSON     string
+		replyPulseStateJSON       string
+		taskPulseStateJSON        string
+		taskFollowupStateJSON     string
+		coordinatorPulseStateJSON string
+		updatedMS                 int64
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT workspace_id, room_id, enabled, managed_by, last_tick_at_ms,
-		       pulse_interval_ms, reply_stale_after_ms, task_stale_after_ms,
+		       delivery_lease_name, delivery_owner_id, delivery_cursor_message_id, delivery_cursor_at_ms,
+		       last_delivery_trace_json,
+		       reply_pulse_state_json, task_pulse_state_json, task_followup_state_json, coordinator_pulse_state_json,
+		       pulse_interval_ms, task_followup_interval_ms, reply_stale_after_ms, task_stale_after_ms,
 		       min_pulse_floor_ms, interrupt_attempt_limit, reminder_backoff_cap,
 		       coordinator_pulse_enabled, coordinator_escalation_enabled, updated_at_ms
 		FROM room_loops
@@ -404,7 +503,17 @@ func (s *Store) GetRoomLoop(ctx context.Context, workspaceID, roomID string) (*R
 		(*intBool)(&loop.Enabled),
 		&loop.ManagedBy,
 		&lastTickMS,
+		&loop.DeliveryLeaseName,
+		&loop.DeliveryOwnerID,
+		&loop.DeliveryCursorMessageID,
+		&cursorAtMS,
+		&lastDeliveryTraceJSON,
+		&replyPulseStateJSON,
+		&taskPulseStateJSON,
+		&taskFollowupStateJSON,
+		&coordinatorPulseStateJSON,
 		(*durationMillis)(&loop.PulseInterval),
+		(*durationMillis)(&loop.TaskFollowupInterval),
 		(*durationMillis)(&loop.ReplyStaleAfter),
 		(*durationMillis)(&loop.TaskStaleAfter),
 		(*durationMillis)(&loop.MinPulseFloor),
@@ -424,6 +533,25 @@ func (s *Store) GetRoomLoop(ctx context.Context, workspaceID, roomID string) (*R
 		ts := time.UnixMilli(lastTickMS.Int64).UTC()
 		loop.LastTickAt = &ts
 	}
+	if cursorAtMS.Valid {
+		ts := time.UnixMilli(cursorAtMS.Int64).UTC()
+		loop.DeliveryCursorAt = &ts
+	}
+	if err := decodeRoomLoopDeliveryTrace(lastDeliveryTraceJSON, &loop.LastDeliveryTrace); err != nil {
+		return nil, fmt.Errorf("coordination: decode last delivery trace: %w", err)
+	}
+	if err := decodeRoomLoopPulseStateMap(replyPulseStateJSON, &loop.ReplyPulseState); err != nil {
+		return nil, fmt.Errorf("coordination: decode reply pulse state: %w", err)
+	}
+	if err := decodeRoomLoopPulseStateMap(taskPulseStateJSON, &loop.TaskPulseState); err != nil {
+		return nil, fmt.Errorf("coordination: decode task pulse state: %w", err)
+	}
+	if err := decodeRoomLoopTimeMap(taskFollowupStateJSON, &loop.TaskFollowupState); err != nil {
+		return nil, fmt.Errorf("coordination: decode task followup state: %w", err)
+	}
+	if err := decodeRoomLoopTimeMap(coordinatorPulseStateJSON, &loop.CoordinatorPulseState); err != nil {
+		return nil, fmt.Errorf("coordination: decode coordinator pulse state: %w", err)
+	}
 	loop.UpdatedAt = time.UnixMilli(updatedMS).UTC()
 	return &loop, nil
 }
@@ -433,9 +561,12 @@ func (s *Store) UpsertRoomLoop(ctx context.Context, loop RoomLoop) (RoomLoop, er
 	if s == nil || s.db == nil {
 		return RoomLoop{}, fmt.Errorf("coordination: store not initialized")
 	}
-	loop.WorkspaceID = strings.TrimSpace(loop.WorkspaceID)
+	loop.WorkspaceID = workspaceutil.CanonicalWorkspaceKey(loop.WorkspaceID)
 	loop.RoomID = strings.TrimSpace(loop.RoomID)
 	loop.ManagedBy = strings.TrimSpace(loop.ManagedBy)
+	loop.DeliveryLeaseName = strings.TrimSpace(loop.DeliveryLeaseName)
+	loop.DeliveryOwnerID = strings.TrimSpace(loop.DeliveryOwnerID)
+	loop.DeliveryCursorMessageID = strings.TrimSpace(loop.DeliveryCursorMessageID)
 	if loop.WorkspaceID == "" || loop.RoomID == "" {
 		return RoomLoop{}, fmt.Errorf("coordination: workspace_id and room_id are required")
 	}
@@ -446,19 +577,56 @@ func (s *Store) UpsertRoomLoop(ctx context.Context, loop RoomLoop) (RoomLoop, er
 	if loop.LastTickAt != nil && !loop.LastTickAt.IsZero() {
 		lastTick = loop.LastTickAt.UnixMilli()
 	}
-	_, err := s.db.ExecContext(ctx, `
+	var cursorAt any
+	if loop.DeliveryCursorAt != nil && !loop.DeliveryCursorAt.IsZero() {
+		cursorAt = loop.DeliveryCursorAt.UnixMilli()
+	}
+	replyPulseStateJSON, err := encodeRoomLoopPulseStateMap(loop.ReplyPulseState)
+	if err != nil {
+		return RoomLoop{}, fmt.Errorf("coordination: encode reply pulse state: %w", err)
+	}
+	lastDeliveryTraceJSON, err := encodeRoomLoopDeliveryTrace(loop.LastDeliveryTrace)
+	if err != nil {
+		return RoomLoop{}, fmt.Errorf("coordination: encode last delivery trace: %w", err)
+	}
+	taskPulseStateJSON, err := encodeRoomLoopPulseStateMap(loop.TaskPulseState)
+	if err != nil {
+		return RoomLoop{}, fmt.Errorf("coordination: encode task pulse state: %w", err)
+	}
+	taskFollowupStateJSON, err := encodeRoomLoopTimeMap(loop.TaskFollowupState)
+	if err != nil {
+		return RoomLoop{}, fmt.Errorf("coordination: encode task followup state: %w", err)
+	}
+	coordinatorPulseStateJSON, err := encodeRoomLoopTimeMap(loop.CoordinatorPulseState)
+	if err != nil {
+		return RoomLoop{}, fmt.Errorf("coordination: encode coordinator pulse state: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO room_loops (
 			workspace_id, room_id, enabled, managed_by, last_tick_at_ms,
-			pulse_interval_ms, reply_stale_after_ms, task_stale_after_ms,
+			delivery_lease_name, delivery_owner_id, delivery_cursor_message_id, delivery_cursor_at_ms,
+			last_delivery_trace_json,
+			reply_pulse_state_json, task_pulse_state_json, task_followup_state_json, coordinator_pulse_state_json,
+			pulse_interval_ms, task_followup_interval_ms, reply_stale_after_ms, task_stale_after_ms,
 			min_pulse_floor_ms, interrupt_attempt_limit, reminder_backoff_cap,
 			coordinator_pulse_enabled, coordinator_escalation_enabled, updated_at_ms, created_at_ms
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
 		ON CONFLICT(workspace_id, room_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			managed_by = excluded.managed_by,
 			last_tick_at_ms = excluded.last_tick_at_ms,
+			delivery_lease_name = excluded.delivery_lease_name,
+			delivery_owner_id = excluded.delivery_owner_id,
+			delivery_cursor_message_id = excluded.delivery_cursor_message_id,
+			delivery_cursor_at_ms = excluded.delivery_cursor_at_ms,
+			last_delivery_trace_json = excluded.last_delivery_trace_json,
+			reply_pulse_state_json = excluded.reply_pulse_state_json,
+			task_pulse_state_json = excluded.task_pulse_state_json,
+			task_followup_state_json = excluded.task_followup_state_json,
+			coordinator_pulse_state_json = excluded.coordinator_pulse_state_json,
 			pulse_interval_ms = excluded.pulse_interval_ms,
+			task_followup_interval_ms = excluded.task_followup_interval_ms,
 			reply_stale_after_ms = excluded.reply_stale_after_ms,
 			task_stale_after_ms = excluded.task_stale_after_ms,
 			min_pulse_floor_ms = excluded.min_pulse_floor_ms,
@@ -473,7 +641,17 @@ func (s *Store) UpsertRoomLoop(ctx context.Context, loop RoomLoop) (RoomLoop, er
 		boolToIntCoord(loop.Enabled),
 		loop.ManagedBy,
 		lastTick,
+		loop.DeliveryLeaseName,
+		loop.DeliveryOwnerID,
+		loop.DeliveryCursorMessageID,
+		cursorAt,
+		lastDeliveryTraceJSON,
+		replyPulseStateJSON,
+		taskPulseStateJSON,
+		taskFollowupStateJSON,
+		coordinatorPulseStateJSON,
 		loop.PulseInterval.Milliseconds(),
+		loop.TaskFollowupInterval.Milliseconds(),
 		loop.ReplyStaleAfter.Milliseconds(),
 		loop.TaskStaleAfter.Milliseconds(),
 		loop.MinPulseFloor.Milliseconds(),
@@ -510,6 +688,114 @@ func (d *durationMillis) Scan(src any) error {
 	default:
 		return fmt.Errorf("coordination: unsupported duration scan type %T", src)
 	}
+}
+
+func encodeRoomLoopPulseStateMap(states map[string]RoomLoopPulseState) (string, error) {
+	if len(states) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(states)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func decodeRoomLoopPulseStateMap(raw string, target *map[string]RoomLoopPulseState) error {
+	if target == nil {
+		return nil
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		*target = map[string]RoomLoopPulseState{}
+		return nil
+	}
+	out := make(map[string]RoomLoopPulseState)
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return err
+	}
+	*target = out
+	return nil
+}
+
+func encodeRoomLoopDeliveryTrace(trace *RoomLoopDeliveryTrace) (string, error) {
+	if trace == nil {
+		return "", nil
+	}
+	data, err := json.Marshal(trace)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func decodeRoomLoopDeliveryTrace(raw string, target **RoomLoopDeliveryTrace) error {
+	if target == nil {
+		return nil
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		*target = nil
+		return nil
+	}
+	var trace RoomLoopDeliveryTrace
+	if err := json.Unmarshal([]byte(raw), &trace); err != nil {
+		return err
+	}
+	*target = &trace
+	return nil
+}
+
+func encodeRoomLoopTimeMap(states map[string]time.Time) (string, error) {
+	if len(states) == 0 {
+		return "", nil
+	}
+	encoded := make(map[string]string, len(states))
+	for key, value := range states {
+		key = strings.TrimSpace(key)
+		if key == "" || value.IsZero() {
+			continue
+		}
+		encoded[key] = value.UTC().Format(time.RFC3339Nano)
+	}
+	if len(encoded) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(encoded)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func decodeRoomLoopTimeMap(raw string, target *map[string]time.Time) error {
+	if target == nil {
+		return nil
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		*target = map[string]time.Time{}
+		return nil
+	}
+	decoded := make(map[string]string)
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return err
+	}
+	out := make(map[string]time.Time, len(decoded))
+	for key, value := range decoded {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return err
+		}
+		out[key] = ts.UTC()
+	}
+	*target = out
+	return nil
 }
 
 type intBool bool

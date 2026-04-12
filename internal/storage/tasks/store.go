@@ -33,6 +33,8 @@ type Store interface {
 
 	// Add inserts a new task.
 	Add(ctx context.Context, t Task) (Task, error)
+	// AddSubtask inserts a new child task and updates the parent's child list atomically.
+	AddSubtask(ctx context.Context, parentID string, t Task) (Task, error)
 	// Update replaces mutable fields of an existing task.
 	Update(ctx context.Context, t Task) (Task, error)
 	// Get returns a task by ID.
@@ -133,6 +135,8 @@ type Task struct {
 
 	// Epic linkage - groups tasks under a higher-level goal
 	EpicID string // ID of the epic this task belongs to (if any)
+	// Milestone linkage - binds a task to one explicit agile lane or milestone.
+	MilestoneID string // ID of the milestone this task belongs to (if any)
 
 	// Atomic processing fields (SimpleMem-style semantic lossless compression)
 	// See: https://github.com/aiming-lab/SimpleMem
@@ -342,6 +346,7 @@ CREATE INDEX IF NOT EXISTS idx_active_epics_session ON active_epics(session_id);
 		`ALTER TABLE tasks ADD COLUMN embedding_model TEXT`,
 		`ALTER TABLE tasks ADD COLUMN pagerank REAL`,
 		`ALTER TABLE tasks ADD COLUMN epic_id TEXT`,
+		`ALTER TABLE tasks ADD COLUMN milestone_id TEXT`,
 		// Atomic processing columns for SimpleMem-style semantic lossless compression.
 		// See: https://github.com/aiming-lab/SimpleMem
 		`ALTER TABLE tasks ADD COLUMN atomic_description TEXT`, // Self-contained, disambiguated rewrite
@@ -427,6 +432,7 @@ func (s *sqlStore) Add(ctx context.Context, t Task) (Task, error) {
 	if t.DependsOn == nil {
 		t.DependsOn = []string{}
 	}
+	normalizeTaskCompletionFields(&t)
 
 	childrenJSON, err := json.Marshal(t.Children)
 	if err != nil {
@@ -471,16 +477,130 @@ func (s *sqlStore) Add(ctx context.Context, t Task) (Task, error) {
 
 	err = retryTaskBusy(ctx, func() error {
 		_, execErr := s.db.ExecContext(ctx, `
-INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
+INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, epic_id, milestone_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`,
 			t.ID, t.WorkspaceID, t.Title, t.Description, t.ScopePath, t.ParentID,
 			string(childrenJSON), string(dependsOnJSON), t.Status,
 			timeutil.FormatRFC3339Nano(t.CreatedAt), completedAt, t.AssignedActorID, assignedAt, t.OwnerActorID, claimedAt, heartbeatAt, t.BlockedReason, blockedAt, t.Notes, t.Gotchas,
-			t.LastReviewStatus, lastReviewAt, t.LastReviewID, t.PlanFile, t.PlanSection, t.SessionID)
+			t.LastReviewStatus, lastReviewAt, t.LastReviewID, t.PlanFile, t.PlanSection, t.SessionID, t.EpicID, t.MilestoneID)
 		return execErr
 	})
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: insert: %w", err)
+	}
+	return t, nil
+}
+
+// AddSubtask inserts a new child task and updates the parent's child list in one transaction.
+func (s *sqlStore) AddSubtask(ctx context.Context, parentID string, t Task) (Task, error) {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return Task{}, fmt.Errorf("tasks: parent_id is required")
+	}
+
+	t.WorkspaceID = ws.CanonicalID(t.WorkspaceID)
+	t.ParentID = parentID
+	if t.ID == "" {
+		t.ID = ulid.Make().String()
+	}
+	if t.Status == "" {
+		t.Status = StatusPending
+	}
+	if t.CreatedAt.IsZero() {
+		t.CreatedAt = timeutil.NowUTC()
+	}
+	if t.Children == nil {
+		t.Children = []string{}
+	}
+	if t.DependsOn == nil {
+		t.DependsOn = []string{}
+	}
+	normalizeTaskCompletionFields(&t)
+
+	childrenJSON, err := json.Marshal(t.Children)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: marshal children: %w", err)
+	}
+	dependsOnJSON, err := json.Marshal(t.DependsOn)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: marshal depends_on: %w", err)
+	}
+
+	var completedAt *string
+	if t.CompletedAt != nil {
+		s := timeutil.FormatRFC3339Nano(*t.CompletedAt)
+		completedAt = &s
+	}
+	var assignedAt *string
+	if t.AssignedAt != nil {
+		s := timeutil.FormatRFC3339Nano(*t.AssignedAt)
+		assignedAt = &s
+	}
+	var claimedAt *string
+	if t.ClaimedAt != nil {
+		s := timeutil.FormatRFC3339Nano(*t.ClaimedAt)
+		claimedAt = &s
+	}
+	var heartbeatAt *string
+	if t.HeartbeatAt != nil {
+		s := timeutil.FormatRFC3339Nano(*t.HeartbeatAt)
+		heartbeatAt = &s
+	}
+	var blockedAt *string
+	if t.BlockedAt != nil {
+		s := timeutil.FormatRFC3339Nano(*t.BlockedAt)
+		blockedAt = &s
+	}
+	var lastReviewAt *string
+	if t.LastReviewAt != nil {
+		s := timeutil.FormatRFC3339Nano(*t.LastReviewAt)
+		lastReviewAt = &s
+	}
+
+	err = retryTaskBusy(ctx, func() error {
+		tx, beginErr := s.db.BeginTx(ctx, nil)
+		if beginErr != nil {
+			return beginErr
+		}
+		defer tx.Rollback() //nolint:errcheck
+
+		parent, getErr := scanTask(tx.QueryRowContext(ctx, `
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, milestone_id, atomic_description, entities, keywords
+FROM tasks WHERE id = $1`, parentID))
+		if getErr != nil {
+			if dbutil.IsNoRows(getErr) {
+				return fmt.Errorf("tasks: parent task %q not found", parentID)
+			}
+			return getErr
+		}
+		if parent.WorkspaceID != t.WorkspaceID {
+			return fmt.Errorf("tasks: parent task %q is in workspace %q, child workspace is %q", parentID, parent.WorkspaceID, t.WorkspaceID)
+		}
+
+		_, execErr := tx.ExecContext(ctx, `
+INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, epic_id, milestone_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`,
+			t.ID, t.WorkspaceID, t.Title, t.Description, t.ScopePath, t.ParentID,
+			string(childrenJSON), string(dependsOnJSON), t.Status,
+			timeutil.FormatRFC3339Nano(t.CreatedAt), completedAt, t.AssignedActorID, assignedAt, t.OwnerActorID, claimedAt, heartbeatAt, t.BlockedReason, blockedAt, t.Notes, t.Gotchas,
+			t.LastReviewStatus, lastReviewAt, t.LastReviewID, t.PlanFile, t.PlanSection, t.SessionID, t.EpicID, t.MilestoneID)
+		if execErr != nil {
+			return execErr
+		}
+
+		parent.Children = append(parent.Children, t.ID)
+		parentChildrenJSON, marshalErr := json.Marshal(parent.Children)
+		if marshalErr != nil {
+			return fmt.Errorf("tasks: marshal parent children: %w", marshalErr)
+		}
+		if _, execErr = tx.ExecContext(ctx, `UPDATE tasks SET children = $1 WHERE id = $2`, string(parentChildrenJSON), parentID); execErr != nil {
+			return execErr
+		}
+
+		return tx.Commit()
+	})
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: add subtask: %w", err)
 	}
 	return t, nil
 }
@@ -493,6 +613,7 @@ func (s *sqlStore) Update(ctx context.Context, t Task) (Task, error) {
 	if t.DependsOn == nil {
 		t.DependsOn = []string{}
 	}
+	normalizeTaskCompletionFields(&t)
 
 	childrenJSON, err := json.Marshal(t.Children)
 	if err != nil {
@@ -544,13 +665,13 @@ UPDATE tasks SET
 	children = $5, depends_on = $6, status = $7, completed_at = $8,
 	assigned_actor_id = $9, assigned_at = $10, owner_actor_id = $11, claimed_at = $12, heartbeat_at = $13, blocked_reason = $14, blocked_at = $15,
 	notes = $16, gotchas = $17, last_review_status = $18, last_review_at = $19, last_review_id = $20,
-	plan_file = $21, plan_section = $22, session_id = $23
-WHERE id = $24`,
+	plan_file = $21, plan_section = $22, session_id = $23, epic_id = $24, milestone_id = $25
+WHERE id = $26`,
 			t.Title, t.Description, t.ScopePath, t.ParentID,
 			string(childrenJSON), string(dependsOnJSON), t.Status, completedAt,
 			t.AssignedActorID, assignedAt, t.OwnerActorID, claimedAt, heartbeatAt, t.BlockedReason, blockedAt,
 			t.Notes, t.Gotchas, t.LastReviewStatus, lastReviewAt, t.LastReviewID,
-			t.PlanFile, t.PlanSection, t.SessionID, t.ID)
+			t.PlanFile, t.PlanSection, t.SessionID, t.EpicID, t.MilestoneID, t.ID)
 		return execErr
 	})
 	if err != nil {
@@ -567,7 +688,7 @@ WHERE id = $24`,
 // Get returns a task by ID.
 func (s *sqlStore) Get(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, milestone_id, atomic_description, entities, keywords
 FROM tasks WHERE id = $1`, id)
 	return scanTask(row)
 }
@@ -576,7 +697,7 @@ FROM tasks WHERE id = $1`, id)
 func (s *sqlStore) ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error) {
 	workspaceID = ws.CanonicalID(workspaceID)
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, milestone_id, atomic_description, entities, keywords
 FROM tasks WHERE workspace_id = $1 ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
@@ -602,7 +723,7 @@ func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts
 	workspaceID = ws.CanonicalID(workspaceID)
 	// Build query with optional filters
 	argIdx := 2
-	query := `SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords FROM tasks WHERE workspace_id = $1`
+	query := `SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, milestone_id, atomic_description, entities, keywords FROM tasks WHERE workspace_id = $1`
 	args := []any{workspaceID}
 
 	if opts.SessionID != "" {
@@ -650,7 +771,7 @@ func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts
 // ListByPlanFile returns tasks linked to a specific plan file.
 func (s *sqlStore) ListByPlanFile(ctx context.Context, planFile string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, milestone_id, atomic_description, entities, keywords
 FROM tasks WHERE plan_file = $1 ORDER BY created_at ASC`, planFile)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list by plan: %w", err)
@@ -672,7 +793,7 @@ FROM tasks WHERE plan_file = $1 ORDER BY created_at ASC`, planFile)
 func (s *sqlStore) GetActive(ctx context.Context, workspaceID string) (Task, bool, error) {
 	workspaceID = ws.CanonicalID(workspaceID)
 	row := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.assigned_actor_id, t.assigned_at, t.owner_actor_id, t.claimed_at, t.heartbeat_at, t.blocked_reason, t.blocked_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section, t.session_id, t.pagerank, t.epic_id, t.atomic_description, t.entities, t.keywords
+SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.assigned_actor_id, t.assigned_at, t.owner_actor_id, t.claimed_at, t.heartbeat_at, t.blocked_reason, t.blocked_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section, t.session_id, t.pagerank, t.epic_id, t.milestone_id, t.atomic_description, t.entities, t.keywords
 FROM tasks t
 JOIN active_tasks a ON t.id = a.task_id
 WHERE a.workspace_id = $1`, workspaceID)
@@ -763,6 +884,7 @@ func (s *sqlStore) DirtyIfReviewed(ctx context.Context, taskID string) (Task, bo
 
 	// Demote status to in_progress
 	t.Status = StatusInProgress
+	t.CompletedAt = nil
 
 	// Mark any previous passing review as stale
 	if t.LastReviewStatus == ReviewStatusOK {
@@ -777,13 +899,24 @@ func (s *sqlStore) DirtyIfReviewed(ctx context.Context, taskID string) (Task, bo
 	return updated, true, nil
 }
 
+func normalizeTaskCompletionFields(t *Task) {
+	if t.Status == StatusCompleted {
+		if t.CompletedAt == nil {
+			now := timeutil.NowUTC()
+			t.CompletedAt = &now
+		}
+		return
+	}
+	t.CompletedAt = nil
+}
+
 // ListAll returns all tasks up to the specified limit.
 func (s *sqlStore) ListAll(ctx context.Context, limit int) ([]Task, error) {
 	if limit <= 0 {
 		limit = DefaultListAllLimit
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, milestone_id, atomic_description, entities, keywords
 FROM tasks ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list all: %w", err)
@@ -868,14 +1001,14 @@ func scanTask(row *sql.Row) (Task, error) {
 	var planFile, planSection sql.NullString
 	var sessionID sql.NullString
 	var pagerank sql.NullFloat64
-	var epicID sql.NullString
+	var epicID, milestoneID sql.NullString
 	var atomicDescription, entitiesJSON, keywordsJSON sql.NullString
 
 	err := row.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr, &assignedActorID, &assignedAtStr, &ownerActorID, &claimedAtStr, &heartbeatAtStr, &blockedReason, &blockedAtStr,
 		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
-		&planFile, &planSection, &sessionID, &pagerank, &epicID,
+		&planFile, &planSection, &sessionID, &pagerank, &epicID, &milestoneID,
 		&atomicDescription, &entitiesJSON, &keywordsJSON)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
@@ -899,6 +1032,7 @@ func scanTask(row *sql.Row) (Task, error) {
 	t.SessionID = sessionID.String
 	t.PageRank = pagerank.Float64
 	t.EpicID = epicID.String
+	t.MilestoneID = milestoneID.String
 	t.AtomicDescription = atomicDescription.String
 	t.Entities = dbutil.ScanJSONArrayMust(entitiesJSON.String)
 	t.Keywords = dbutil.ScanJSONArrayMust(keywordsJSON.String)
@@ -1059,7 +1193,7 @@ func (s *sqlStore) ClearActiveEpic(ctx context.Context, workspaceID, sessionID s
 // ListTasksByEpic returns tasks linked to a specific epic.
 func (s *sqlStore) ListTasksByEpic(ctx context.Context, epicID string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, atomic_description, entities, keywords
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, assigned_actor_id, assigned_at, owner_actor_id, claimed_at, heartbeat_at, blocked_reason, blocked_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id, milestone_id, atomic_description, entities, keywords
 FROM tasks WHERE epic_id = $1 ORDER BY created_at ASC`, epicID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list by epic: %w", err)
@@ -1185,14 +1319,14 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	var planFile, planSection sql.NullString
 	var sessionID sql.NullString
 	var pagerank sql.NullFloat64
-	var epicID sql.NullString
+	var epicID, milestoneID sql.NullString
 	var atomicDescription, entitiesJSON, keywordsJSON sql.NullString
 
 	err := rows.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr, &assignedActorID, &assignedAtStr, &ownerActorID, &claimedAtStr, &heartbeatAtStr, &blockedReason, &blockedAtStr,
 		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
-		&planFile, &planSection, &sessionID, &pagerank, &epicID,
+		&planFile, &planSection, &sessionID, &pagerank, &epicID, &milestoneID,
 		&atomicDescription, &entitiesJSON, &keywordsJSON)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: scan row: %w", err)
@@ -1213,6 +1347,7 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	t.SessionID = sessionID.String
 	t.PageRank = pagerank.Float64
 	t.EpicID = epicID.String
+	t.MilestoneID = milestoneID.String
 	t.AtomicDescription = atomicDescription.String
 	t.Entities = dbutil.ScanJSONArrayMust(entitiesJSON.String)
 	t.Keywords = dbutil.ScanJSONArrayMust(keywordsJSON.String)

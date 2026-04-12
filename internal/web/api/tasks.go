@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -240,6 +241,8 @@ func handleTaskComplete(w http.ResponseWriter, r *http.Request, cfg config.Confi
 	}
 
 	task.Status = tasks.StatusCompleted
+	now := time.Now().UTC()
+	task.CompletedAt = &now
 	task, err = store.Update(r.Context(), task)
 	if err != nil {
 		log.Error().Err(err).Str("task_id", taskID).Msg("failed to complete task")
@@ -275,6 +278,7 @@ func handleTaskUncomplete(w http.ResponseWriter, r *http.Request, cfg config.Con
 	}
 
 	task.Status = tasks.StatusInProgress
+	task.CompletedAt = nil
 	task, err = store.Update(r.Context(), task)
 	if err != nil {
 		log.Error().Err(err).Str("task_id", taskID).Msg("failed to uncomplete task")

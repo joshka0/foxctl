@@ -2259,17 +2259,25 @@ func (s *Service) handleAgentStatus(params json.RawMessage) (*AgentStatusResult,
 		return nil, fmt.Errorf("session not found: %s", p.SessionID)
 	}
 
+	snapshot := session.GetSession()
+	children := []string{}
+	if overseer, ok := s.agentRuntime.GetSpawnHandler().(*runtime.Overseer); ok && overseer != nil {
+		children = overseer.GetChildren(p.SessionID)
+	} else {
+		children = session.GetChildren()
+	}
+
 	return &AgentStatusResult{
-		SessionID:  session.ID,
-		ActorID:    session.Config.ActorID,
-		Role:       string(session.Config.Role),
-		Status:     string(session.Status),
-		StartedAt:  session.StartedAt,
-		EndedAt:    session.EndedAt,
-		Iterations: session.Iterations,
-		Summary:    session.Summary,
-		Error:      session.Error,
-		Children:   session.Children,
+		SessionID:  snapshot.ID,
+		ActorID:    snapshot.Config.ActorID,
+		Role:       string(snapshot.Config.Role),
+		Status:     string(snapshot.Status),
+		StartedAt:  snapshot.StartedAt,
+		EndedAt:    snapshot.EndedAt,
+		Iterations: snapshot.Iterations,
+		Summary:    snapshot.Summary,
+		Error:      snapshot.Error,
+		Children:   children,
 	}, nil
 }
 

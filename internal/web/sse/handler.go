@@ -9,6 +9,12 @@ import (
 
 // Handler returns an HTTP handler for the SSE endpoint.
 func Handler(hub *Hub) http.HandlerFunc {
+	return TopicHandler(hub)
+}
+
+// TopicHandler returns an SSE handler that subscribes the client to the given
+// topics. Clients with no topics receive the full global event feed.
+func TopicHandler(hub *Hub, topics ...string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Only allow GET
 		if r.Method != http.MethodGet {
@@ -32,10 +38,17 @@ func Handler(hub *Hub) http.HandlerFunc {
 
 		// Create client
 		clientID := ulid.Make().String()
+		topicSet := make(map[string]bool, len(topics))
+		for _, topic := range topics {
+			if topic == "" {
+				continue
+			}
+			topicSet[topic] = true
+		}
 		client := &Client{
 			ID:        clientID,
 			Send:      make(chan []byte, 64),
-			Topics:    make(map[string]bool),
+			Topics:    topicSet,
 			CreatedAt: time.Now(),
 		}
 

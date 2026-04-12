@@ -340,3 +340,20 @@ func TestDetectWithIdentityStructure(t *testing.T) {
 	// but the structure should be valid
 	_ = info.RepoIdentity
 }
+
+func TestCanonicalWorkspaceKeyPreservesOpaqueIDs(t *testing.T) {
+	for _, input := range []string{"ws1", "default", "ws-golden"} {
+		if got := CanonicalWorkspaceKey(input); got != input {
+			t.Fatalf("CanonicalWorkspaceKey(%q) = %q, want %q", input, got, input)
+		}
+	}
+}
+
+func TestCanonicalWorkspaceKeyNormalizesPathSelectors(t *testing.T) {
+	root := t.TempDir()
+	messy := root + string(filepath.Separator) + "."
+
+	if got := CanonicalWorkspaceKey(messy); got != root {
+		t.Fatalf("CanonicalWorkspaceKey(%q) = %q, want %q", messy, got, root)
+	}
+}

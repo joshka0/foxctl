@@ -87,6 +87,12 @@ func TestRegisterParticipantTransportUpdatesExistingMember(t *testing.T) {
 			if m.TransportKind != agent.PaneSocketTransportKind {
 				t.Errorf("TransportKind=%q want %q", m.TransportKind, agent.PaneSocketTransportKind)
 			}
+			if m.DeliveryBinding == nil {
+				t.Fatal("DeliveryBinding=nil want mirrored binding")
+			}
+			if m.DeliveryBinding.TransportEndpoint != socketPath {
+				t.Errorf("DeliveryBinding.TransportEndpoint=%q want %q", m.DeliveryBinding.TransportEndpoint, socketPath)
+			}
 			// Existing fields should be preserved.
 			if m.Backend != "tmux" {
 				t.Errorf("Backend=%q want tmux (preserved)", m.Backend)
@@ -134,6 +140,12 @@ func TestRegisterParticipantTransportCreatesNewMember(t *testing.T) {
 			}
 			if m.TransportKind != agent.PaneSocketTransportKind {
 				t.Errorf("TransportKind=%q want %q", m.TransportKind, agent.PaneSocketTransportKind)
+			}
+			if m.DeliveryBinding == nil {
+				t.Fatal("DeliveryBinding=nil want mirrored binding")
+			}
+			if m.DeliveryBinding.TransportEndpoint != socketPath {
+				t.Errorf("DeliveryBinding.TransportEndpoint=%q want %q", m.DeliveryBinding.TransportEndpoint, socketPath)
 			}
 		}
 	}
@@ -208,6 +220,12 @@ func TestRegisterParticipantTransportConcurrentExistingMembersDoNotClobberEachOt
 	}
 	if got["gemini-a"].TransportKind != agent.PaneSocketTransportKind {
 		t.Fatalf("gemini-a TransportKind=%q want %q", got["gemini-a"].TransportKind, agent.PaneSocketTransportKind)
+	}
+	if got["claude-a"].DeliveryBinding == nil || got["claude-a"].DeliveryBinding.TransportEndpoint != socketA {
+		t.Fatalf("claude-a DeliveryBinding=%+v want endpoint %q", got["claude-a"].DeliveryBinding, socketA)
+	}
+	if got["gemini-a"].DeliveryBinding == nil || got["gemini-a"].DeliveryBinding.TransportEndpoint != socketB {
+		t.Fatalf("gemini-a DeliveryBinding=%+v want endpoint %q", got["gemini-a"].DeliveryBinding, socketB)
 	}
 }
 

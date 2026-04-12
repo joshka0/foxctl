@@ -185,6 +185,11 @@ jobs:
             make test-cgo-short
           fi
 
+      - name: Regression harness
+        run: |
+          export PATH=/usr/local/go/bin:/go/bin:$PATH
+          bash tests/regression/run.sh
+
   integration-tests:
     needs: [race-tests]
     runs-on: ubuntu-latest

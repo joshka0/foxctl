@@ -97,17 +97,51 @@ type roomInboxEntryResponse struct {
 }
 
 type roomLoopResponse struct {
-	Enabled                      bool       `json:"enabled"`
-	ManagedBy                    string     `json:"managed_by"`
-	LastTickAt                   *time.Time `json:"last_tick_at,omitempty"`
-	PulseInterval                string     `json:"pulse_interval"`
-	ReplyStaleAfter              string     `json:"reply_stale_after"`
-	TaskStaleAfter               string     `json:"task_stale_after"`
-	MinPulseFloor                string     `json:"min_pulse_floor"`
-	InterruptAttemptLimit        int        `json:"interrupt_attempt_limit"`
-	ReminderBackoffCap           int        `json:"reminder_backoff_cap"`
-	CoordinatorPulseEnabled      bool       `json:"coordinator_pulse_enabled"`
-	CoordinatorEscalationEnabled bool       `json:"coordinator_escalation_enabled"`
+	Enabled                      bool                           `json:"enabled"`
+	ManagedBy                    string                         `json:"managed_by"`
+	LastTickAt                   *time.Time                     `json:"last_tick_at,omitempty"`
+	DeliveryLeaseName            string                         `json:"delivery_lease_name,omitempty"`
+	DeliveryOwnerID              string                         `json:"delivery_owner_id,omitempty"`
+	DeliveryCursorMessageID      string                         `json:"delivery_cursor_message_id,omitempty"`
+	DeliveryCursorAt             *time.Time                     `json:"delivery_cursor_at,omitempty"`
+	PulseInterval                string                         `json:"pulse_interval"`
+	TaskFollowupInterval         string                         `json:"task_followup_interval"`
+	ReplyStaleAfter              string                         `json:"reply_stale_after"`
+	TaskStaleAfter               string                         `json:"task_stale_after"`
+	MinPulseFloor                string                         `json:"min_pulse_floor"`
+	InterruptAttemptLimit        int                            `json:"interrupt_attempt_limit"`
+	ReminderBackoffCap           int                            `json:"reminder_backoff_cap"`
+	CoordinatorPulseEnabled      bool                           `json:"coordinator_pulse_enabled"`
+	CoordinatorEscalationEnabled bool                           `json:"coordinator_escalation_enabled"`
+	LastDeliveryTrace            *roomLoopDeliveryTraceResponse `json:"last_delivery_trace,omitempty"`
+}
+
+type roomLoopDeliveryTraceResponse struct {
+	WorkspaceID             string     `json:"workspace_id,omitempty"`
+	RoomID                  string     `json:"room_id,omitempty"`
+	MessageID               string     `json:"message_id,omitempty"`
+	TaskID                  string     `json:"task_id,omitempty"`
+	Recipient               string     `json:"recipient,omitempty"`
+	DeliveryLeaseName       string     `json:"delivery_lease_name,omitempty"`
+	DeliveryOwnerID         string     `json:"delivery_owner_id,omitempty"`
+	RelayBackend            string     `json:"relay_backend,omitempty"`
+	ChosenActorID           string     `json:"chosen_actor_id,omitempty"`
+	ChosenMuxBackend        string     `json:"chosen_mux_backend,omitempty"`
+	ChosenMuxSession        string     `json:"chosen_mux_session,omitempty"`
+	ChosenMuxPaneID         string     `json:"chosen_mux_pane_id,omitempty"`
+	ChosenTransportEndpoint string     `json:"chosen_transport_endpoint,omitempty"`
+	ChosenTransportKind     string     `json:"chosen_transport_kind,omitempty"`
+	ChosenSubmitMode        string     `json:"chosen_submit_mode,omitempty"`
+	FallbackAttempted       bool       `json:"fallback_attempted,omitempty"`
+	DeliveredCount          int        `json:"delivered_count,omitempty"`
+	FailedCount             int        `json:"failed_count,omitempty"`
+	DeliveredTo             []string   `json:"delivered_to,omitempty"`
+	FailedMembers           []string   `json:"failed_members,omitempty"`
+	Outcome                 string     `json:"outcome,omitempty"`
+	CursorBeforeMessageID   string     `json:"cursor_before_message_id,omitempty"`
+	CursorAfterMessageID    string     `json:"cursor_after_message_id,omitempty"`
+	CursorAdvanced          bool       `json:"cursor_advanced,omitempty"`
+	ObservedAt              *time.Time `json:"observed_at,omitempty"`
 }
 
 type roomLoopPatchRequest struct {
@@ -115,6 +149,7 @@ type roomLoopPatchRequest struct {
 	ActorID                      string  `json:"actor_id"`
 	Enabled                      *bool   `json:"enabled,omitempty"`
 	PulseInterval                *string `json:"pulse_interval,omitempty"`
+	TaskFollowupInterval         *string `json:"task_followup_interval,omitempty"`
 	ReplyStaleAfter              *string `json:"reply_stale_after,omitempty"`
 	TaskStaleAfter               *string `json:"task_stale_after,omitempty"`
 	MinPulseFloor                *string `json:"min_pulse_floor,omitempty"`
@@ -149,6 +184,17 @@ type roomTaskActionRequest struct {
 	Gotchas     string `json:"gotchas,omitempty"`
 }
 
+type roomTaskCreateRequest struct {
+	WorkspaceID string   `json:"workspace_id"`
+	ActorID     string   `json:"actor_id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	ScopePath   string   `json:"scope_path,omitempty"`
+	ParentID    string   `json:"parent_id,omitempty"`
+	DependsOn   []string `json:"depends_on,omitempty"`
+	MilestoneID string   `json:"milestone_id,omitempty"`
+}
+
 const (
 	apiRoomTaskScanLimit         = 1000
 	apiRoomDefaultLimit          = 200
@@ -168,7 +214,7 @@ func handleRoomStatusGet(w http.ResponseWriter, r *http.Request, cfg config.Conf
 		httpError(w, http.StatusBadRequest, "workspace_id required")
 		return
 	}
-	limit, staleAfter, verbose, filters, err := parseRoomStatusParams(r)
+	limit, verbose, filters, err := parseRoomStatusParams(r)
 	if err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
@@ -203,6 +249,20 @@ func handleRoomStatusGet(w http.ResponseWriter, r *http.Request, cfg config.Conf
 		httpError(w, http.StatusInternalServerError, "failed to load room tasks")
 		return
 	}
+	loopStore, err := coordination.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open coordination store")
+		httpError(w, http.StatusInternalServerError, "failed to open coordination store")
+		return
+	}
+	defer loopStore.Close()
+	loop, err := apiLoadRoomLoop(r.Context(), loopStore, workspaceID, roomID)
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room loop")
+		httpError(w, http.StatusInternalServerError, "failed to load room loop")
+		return
+	}
+	staleAfter := loop.TaskStaleAfter
 	now := time.Now().UTC()
 	taskPulse := apiBuildRoomTaskPulseSummary(tasks, now, staleAfter)
 	backlog := apiBuildRoomStatusBacklog(summary, messages)
@@ -212,7 +272,7 @@ func handleRoomStatusGet(w http.ResponseWriter, r *http.Request, cfg config.Conf
 		"task_pulse":      taskPulse,
 		"backlog":         backlog,
 		"action_required": apiBuildRoomStatusActionRequired(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose),
-		"loop":            defaultRoomLoopResponse(),
+		"loop":            apiConvertRoomLoop(loop),
 	})
 }
 
@@ -333,6 +393,105 @@ func handleRoomTasksGet(w http.ResponseWriter, r *http.Request, cfg config.Confi
 		"room":  convertRoomSummary(summary),
 		"tasks": resp,
 		"count": len(resp),
+	})
+}
+
+func handleRoomTasksPost(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	var req roomTaskCreateRequest
+	if err := readJSON(w, r, &req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	req.normalize()
+	if err := req.validate(); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	boardStore, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer boardStore.Close()
+
+	summary, messages, err := apiLoadRoomState(r.Context(), boardStore, req.WorkspaceID, roomID, req.ActorID, apiRoomTaskScanLimit)
+	if err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room before task create")
+		httpError(w, http.StatusInternalServerError, "failed to load room")
+		return
+	}
+	if !apiRoomHasParticipant(summary, req.ActorID) && !apiRoomIsLocalSuperuser(req.ActorID) {
+		httpError(w, http.StatusForbidden, "only room participants can create room tasks")
+		return
+	}
+	recipient, err := apiRoomTaskEventRecipient(summary.Members)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	epicID, milestoneID, err := apiResolveRoomTaskMilestoneSelection(messages, req.MilestoneID)
+	if err != nil {
+		statusCode := http.StatusBadRequest
+		if errors.Is(err, errAPIRoomTaskMilestoneNotFound) {
+			statusCode = http.StatusNotFound
+		}
+		httpError(w, statusCode, err.Error())
+		return
+	}
+
+	taskStore, err := taskstore.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open task store")
+		httpError(w, http.StatusInternalServerError, "failed to open task store")
+		return
+	}
+	defer taskStore.Close()
+
+	task, err := taskStore.Add(r.Context(), taskstore.Task{
+		WorkspaceID: ws.CanonicalID(req.WorkspaceID),
+		Title:       req.Title,
+		Description: req.Description,
+		ScopePath:   req.ScopePath,
+		ParentID:    req.ParentID,
+		DependsOn:   append([]string(nil), req.DependsOn...),
+		Status:      taskstore.StatusPending,
+		EpicID:      epicID,
+		MilestoneID: milestoneID,
+	})
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to create room task")
+		httpError(w, http.StatusInternalServerError, "failed to create room task")
+		return
+	}
+
+	msg := &agent.BoardMessage{
+		WorkspaceID: req.WorkspaceID,
+		TaskID:      task.ID,
+		Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Sender:      req.ActorID,
+		Recipient:   recipient,
+		Kind:        agent.BoardMessageKindTaskUpdate,
+		Priority:    agent.DefaultPriority,
+		Subject:     fmt.Sprintf("Task added: %s", task.Title),
+		Body:        apiFormatRoomTaskAddedBody(task),
+	}
+	if err := boardStore.SendMessage(r.Context(), msg); err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Str("task_id", task.ID).Msg("failed to write room task message")
+		httpError(w, http.StatusInternalServerError, "failed to create room task")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"room_id": roomID,
+		"task":    convertRoomTask(task),
+		"message": msg,
+		"actor":   req.ActorID,
 	})
 }
 
@@ -1028,22 +1187,14 @@ func resetRoomTaskOwnership(task *taskstore.Task) {
 	task.BlockedAt = nil
 }
 
-func parseRoomStatusParams(r *http.Request) (limit int, staleAfter time.Duration, verbose bool, filters map[string]struct{}, err error) {
+func parseRoomStatusParams(r *http.Request) (limit int, verbose bool, filters map[string]struct{}, err error) {
 	limit = apiRoomDefaultLimit
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		n, convErr := strconv.Atoi(raw)
 		if convErr != nil || n <= 0 || n > apiRoomTaskScanLimit {
-			return 0, 0, false, nil, fmt.Errorf("limit must be between 1 and %d", apiRoomTaskScanLimit)
+			return 0, false, nil, fmt.Errorf("limit must be between 1 and %d", apiRoomTaskScanLimit)
 		}
 		limit = n
-	}
-	staleAfter = apiRoomDefaultStaleAfter
-	if raw := strings.TrimSpace(r.URL.Query().Get("stale_after")); raw != "" {
-		d, parseErr := time.ParseDuration(raw)
-		if parseErr != nil || d < 0 {
-			return 0, 0, false, nil, fmt.Errorf("invalid stale_after duration")
-		}
-		staleAfter = d
 	}
 	verbose = parseBool(r.URL.Query().Get("verbose"))
 	onlyValues := r.URL.Query()["only"]
@@ -1053,7 +1204,7 @@ func parseRoomStatusParams(r *http.Request) (limit int, staleAfter time.Duration
 		}
 	}
 	filters, err = apiNormalizeRoomStatusFilters(onlyValues)
-	return limit, staleAfter, verbose, filters, err
+	return limit, verbose, filters, err
 }
 
 func apiLoadRoomState(ctx context.Context, store blackboard.BoardStore, workspaceID, roomID, actorID string, limit int) (agent.RoomSummary, []agent.BoardMessage, error) {
@@ -1117,10 +1268,193 @@ func apiCollectRoomTaskIDs(messages []agent.BoardMessage) []string {
 	return out
 }
 
+var errAPIRoomTaskMilestoneNotFound = errors.New("room task milestone not found")
+
+func (req *roomTaskCreateRequest) normalize() {
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	req.ActorID = strings.TrimSpace(req.ActorID)
+	req.Title = strings.TrimSpace(req.Title)
+	req.Description = strings.TrimSpace(req.Description)
+	req.ScopePath = strings.TrimSpace(req.ScopePath)
+	req.ParentID = strings.TrimSpace(req.ParentID)
+	req.MilestoneID = strings.TrimSpace(req.MilestoneID)
+	if len(req.DependsOn) == 0 {
+		return
+	}
+	out := make([]string, 0, len(req.DependsOn))
+	for _, dep := range req.DependsOn {
+		dep = strings.TrimSpace(dep)
+		if dep == "" {
+			continue
+		}
+		out = append(out, dep)
+	}
+	req.DependsOn = out
+}
+
+func (req roomTaskCreateRequest) validate() error {
+	if req.WorkspaceID == "" {
+		return fmt.Errorf("workspace_id is required")
+	}
+	if req.ActorID == "" {
+		return fmt.Errorf("actor_id is required")
+	}
+	if req.Title == "" {
+		return fmt.Errorf("title is required")
+	}
+	return nil
+}
+
+func apiRoomTaskEventRecipient(members []agent.RoomMember) (string, error) {
+	for _, member := range members {
+		if strings.EqualFold(strings.TrimSpace(member.Role), "coordinator") {
+			if id := strings.TrimSpace(member.ActorID); id != "" {
+				return id, nil
+			}
+		}
+	}
+	for _, member := range members {
+		if strings.EqualFold(strings.TrimSpace(member.Role), "lead") {
+			if id := strings.TrimSpace(member.ActorID); id != "" {
+				return id, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("room has no coordinator or lead")
+}
+
+type apiRoomMilestoneMeta struct {
+	EpicID   string
+	LaneKind string
+}
+
+func apiParseRoomMilestoneBody(body string) apiRoomMilestoneMeta {
+	meta := apiRoomMilestoneMeta{}
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "EpicID":
+			meta.EpicID = strings.TrimSpace(value)
+		case "LaneKind":
+			meta.LaneKind = strings.TrimSpace(value)
+		}
+	}
+	return meta
+}
+
+func apiResolveRoomTaskMilestoneSelection(messages []agent.BoardMessage, selectedMilestoneID string) (string, string, error) {
+	selectedMilestoneID = strings.TrimSpace(selectedMilestoneID)
+	epics := make(map[string]time.Time)
+	closedEpics := make(map[string]struct{})
+	summarizedMilestones := make(map[string]struct{})
+	type milestoneInfo struct {
+		ID        string
+		EpicID    string
+		LaneKind  string
+		CreatedAt time.Time
+	}
+	milestones := make(map[string]milestoneInfo)
+
+	for _, msg := range messages {
+		switch msg.Kind {
+		case agent.BoardMessageKindEpic:
+			if id := strings.TrimSpace(msg.ID); id != "" {
+				epics[id] = msg.CreatedAt
+			}
+		case agent.BoardMessageKindEpicClose:
+			if epicID := strings.TrimSpace(msg.RelatedMessageID); epicID != "" {
+				closedEpics[epicID] = struct{}{}
+			}
+		case agent.BoardMessageKindMilestone:
+			id := strings.TrimSpace(msg.ID)
+			if id == "" {
+				continue
+			}
+			meta := apiParseRoomMilestoneBody(msg.Body)
+			milestones[id] = milestoneInfo{
+				ID:        id,
+				EpicID:    firstNonEmpty(strings.TrimSpace(meta.EpicID), strings.TrimSpace(msg.RelatedMessageID)),
+				LaneKind:  strings.TrimSpace(meta.LaneKind),
+				CreatedAt: msg.CreatedAt,
+			}
+		case agent.BoardMessageKindMilestoneSummary:
+			if milestoneID := strings.TrimSpace(msg.RelatedMessageID); milestoneID != "" {
+				summarizedMilestones[milestoneID] = struct{}{}
+			}
+		}
+	}
+
+	if selectedMilestoneID == "" {
+		type epicCandidate struct {
+			ID        string
+			CreatedAt time.Time
+		}
+		candidates := make([]epicCandidate, 0, len(epics))
+		for id, createdAt := range epics {
+			if _, closed := closedEpics[id]; closed {
+				continue
+			}
+			candidates = append(candidates, epicCandidate{ID: id, CreatedAt: createdAt})
+		}
+		sort.SliceStable(candidates, func(i, j int) bool {
+			return candidates[i].CreatedAt.After(candidates[j].CreatedAt)
+		})
+		for _, epic := range candidates {
+			for _, milestone := range milestones {
+				if milestone.EpicID == epic.ID && milestone.LaneKind == "chores" {
+					return epic.ID, milestone.ID, nil
+				}
+			}
+		}
+		return "", "", nil
+	}
+
+	milestone, ok := milestones[selectedMilestoneID]
+	if !ok {
+		return "", "", fmt.Errorf("%w: %s", errAPIRoomTaskMilestoneNotFound, selectedMilestoneID)
+	}
+	if _, summarized := summarizedMilestones[selectedMilestoneID]; summarized {
+		return "", "", fmt.Errorf("milestone %q is already summarized", selectedMilestoneID)
+	}
+	if milestone.EpicID == "" {
+		return "", "", fmt.Errorf("milestone %q is missing epic linkage", selectedMilestoneID)
+	}
+	if _, closed := closedEpics[milestone.EpicID]; closed {
+		return "", "", fmt.Errorf("milestone %q belongs to a closed epic", selectedMilestoneID)
+	}
+	return milestone.EpicID, milestone.ID, nil
+}
+
+func apiFormatRoomTaskAddedBody(task taskstore.Task) string {
+	lines := []string{
+		fmt.Sprintf("Task ID: %s", task.ID),
+		fmt.Sprintf("Status: %s", task.Status),
+	}
+	if strings.TrimSpace(task.EpicID) != "" {
+		lines = append(lines, fmt.Sprintf("Epic ID: %s", strings.TrimSpace(task.EpicID)))
+	}
+	if strings.TrimSpace(task.MilestoneID) != "" {
+		lines = append(lines, fmt.Sprintf("Milestone ID: %s", strings.TrimSpace(task.MilestoneID)))
+	}
+	if strings.TrimSpace(task.Description) != "" {
+		lines = append(lines, strings.TrimSpace(task.Description))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func convertRoomTask(task taskstore.Task) roomTaskResponse {
 	return roomTaskResponse{
 		ID:              task.ID,
 		WorkspaceID:     task.WorkspaceID,
+		EpicID:          task.EpicID,
+		MilestoneID:     task.MilestoneID,
 		Title:           task.Title,
 		Description:     task.Description,
 		ScopePath:       task.ScopePath,
@@ -1145,6 +1479,8 @@ func convertRoomTask(task taskstore.Task) roomTaskResponse {
 type roomTaskResponse struct {
 	ID              string     `json:"id"`
 	WorkspaceID     string     `json:"workspace_id"`
+	EpicID          string     `json:"epic_id,omitempty"`
+	MilestoneID     string     `json:"milestone_id,omitempty"`
 	Title           string     `json:"title"`
 	Description     string     `json:"description"`
 	ScopePath       string     `json:"scope_path,omitempty"`
@@ -1170,6 +1506,7 @@ func defaultRoomLoopResponse() roomLoopResponse {
 		Enabled:                      true,
 		ManagedBy:                    apiRoomLoopManager,
 		PulseInterval:                apiRoomPulseInterval.String(),
+		TaskFollowupInterval:         "0s",
 		ReplyStaleAfter:              apiRoomReplyStaleAfter.String(),
 		TaskStaleAfter:               apiRoomTaskStaleAfter.String(),
 		MinPulseFloor:                apiRoomMinimumPulseFloor.String(),
@@ -1187,6 +1524,7 @@ func defaultRoomLoopState(workspaceID, roomID string) coordination.RoomLoop {
 		Enabled:                      true,
 		ManagedBy:                    apiRoomLoopManager,
 		PulseInterval:                apiRoomPulseInterval,
+		TaskFollowupInterval:         0,
 		ReplyStaleAfter:              apiRoomReplyStaleAfter,
 		TaskStaleAfter:               apiRoomTaskStaleAfter,
 		MinPulseFloor:                apiRoomMinimumPulseFloor,
@@ -1235,7 +1573,12 @@ func apiConvertRoomLoop(loop coordination.RoomLoop) roomLoopResponse {
 		Enabled:                      loop.Enabled,
 		ManagedBy:                    loop.ManagedBy,
 		LastTickAt:                   loop.LastTickAt,
+		DeliveryLeaseName:            loop.DeliveryLeaseName,
+		DeliveryOwnerID:              loop.DeliveryOwnerID,
+		DeliveryCursorMessageID:      loop.DeliveryCursorMessageID,
+		DeliveryCursorAt:             loop.DeliveryCursorAt,
 		PulseInterval:                loop.PulseInterval.String(),
+		TaskFollowupInterval:         loop.TaskFollowupInterval.String(),
 		ReplyStaleAfter:              loop.ReplyStaleAfter.String(),
 		TaskStaleAfter:               loop.TaskStaleAfter.String(),
 		MinPulseFloor:                loop.MinPulseFloor.String(),
@@ -1243,7 +1586,45 @@ func apiConvertRoomLoop(loop coordination.RoomLoop) roomLoopResponse {
 		ReminderBackoffCap:           loop.ReminderBackoffCap,
 		CoordinatorPulseEnabled:      loop.CoordinatorPulseEnabled,
 		CoordinatorEscalationEnabled: loop.CoordinatorEscalationEnabled,
+		LastDeliveryTrace:            apiConvertRoomLoopDeliveryTrace(loop.LastDeliveryTrace),
 	}
+}
+
+func apiConvertRoomLoopDeliveryTrace(trace *coordination.RoomLoopDeliveryTrace) *roomLoopDeliveryTraceResponse {
+	if trace == nil {
+		return nil
+	}
+	resp := &roomLoopDeliveryTraceResponse{
+		WorkspaceID:             strings.TrimSpace(trace.WorkspaceID),
+		RoomID:                  strings.TrimSpace(trace.RoomID),
+		MessageID:               strings.TrimSpace(trace.MessageID),
+		TaskID:                  strings.TrimSpace(trace.TaskID),
+		Recipient:               strings.TrimSpace(trace.Recipient),
+		DeliveryLeaseName:       strings.TrimSpace(trace.DeliveryLeaseName),
+		DeliveryOwnerID:         strings.TrimSpace(trace.DeliveryOwnerID),
+		RelayBackend:            strings.TrimSpace(trace.RelayBackend),
+		ChosenActorID:           strings.TrimSpace(trace.ChosenActorID),
+		ChosenMuxBackend:        strings.TrimSpace(trace.ChosenMuxBackend),
+		ChosenMuxSession:        strings.TrimSpace(trace.ChosenMuxSession),
+		ChosenMuxPaneID:         strings.TrimSpace(trace.ChosenMuxPaneID),
+		ChosenTransportEndpoint: strings.TrimSpace(trace.ChosenTransportEndpoint),
+		ChosenTransportKind:     strings.TrimSpace(trace.ChosenTransportKind),
+		ChosenSubmitMode:        strings.TrimSpace(trace.ChosenSubmitMode),
+		FallbackAttempted:       trace.FallbackAttempted,
+		DeliveredCount:          trace.DeliveredCount,
+		FailedCount:             trace.FailedCount,
+		DeliveredTo:             append([]string(nil), trace.DeliveredTo...),
+		FailedMembers:           append([]string(nil), trace.FailedMembers...),
+		Outcome:                 strings.TrimSpace(trace.Outcome),
+		CursorBeforeMessageID:   strings.TrimSpace(trace.CursorBeforeMessageID),
+		CursorAfterMessageID:    strings.TrimSpace(trace.CursorAfterMessageID),
+		CursorAdvanced:          trace.CursorAdvanced,
+	}
+	if !trace.ObservedAt.IsZero() {
+		ts := trace.ObservedAt.UTC()
+		resp.ObservedAt = &ts
+	}
+	return resp
 }
 
 func apiApplyRoomLoopPatch(current coordination.RoomLoop, req roomLoopPatchRequest) (coordination.RoomLoop, error) {
@@ -1263,6 +1644,13 @@ func apiApplyRoomLoopPatch(current coordination.RoomLoop, req roomLoopPatchReque
 			return coordination.RoomLoop{}, err
 		}
 		updated.PulseInterval = d
+	}
+	if req.TaskFollowupInterval != nil {
+		d, err := apiParseNonNegativeDuration(*req.TaskFollowupInterval, "task_followup_interval")
+		if err != nil {
+			return coordination.RoomLoop{}, err
+		}
+		updated.TaskFollowupInterval = d
 	}
 	if req.ReplyStaleAfter != nil {
 		d, err := apiParsePositiveDuration(*req.ReplyStaleAfter, "reply_stale_after")
@@ -1319,6 +1707,18 @@ func apiParsePositiveDuration(raw string, field string) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(value)
 	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("invalid %s duration", field)
+	}
+	return d, nil
+}
+
+func apiParseNonNegativeDuration(raw string, field string) (time.Duration, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, fmt.Errorf("%s is required", field)
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil || d < 0 {
 		return 0, fmt.Errorf("invalid %s duration", field)
 	}
 	return d, nil

@@ -1,7 +1,10 @@
 # Workflow Docs
 
-Workflow-specific notes for integrated or external tooling flows.
+General docs in this directory include room-runtime guidance, API notes, and
+subsystem-specific operational references.
 
-Current docs:
+Current room-runtime references:
 
-- `exa_mcp_context_filter.md`
+- [tmux-collaboration.md](tmux-collaboration.md)
+- [api-server.md](api-server.md)
+- [room-runtime-adoption-pass.md](room-runtime-adoption-pass.md)

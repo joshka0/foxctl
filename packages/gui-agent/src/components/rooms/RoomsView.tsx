@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,7 +10,7 @@ import { archiveRoom, listRooms, listWorkspaces, restoreRoom } from '@/api/clien
 import { useViewStore } from '@/stores/viewStore'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { ArchiveRestore, Hash, RefreshCw } from 'lucide-react'
-import type { Room, RoomMessageEvent } from '@/api/types'
+import type { Room } from '@/api/types'
 import { RoomControlCenter } from './RoomControlCenter'
 
 export function RoomsView() {
@@ -19,7 +19,6 @@ export function RoomsView() {
   const [pendingRoomID, setPendingRoomID] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [bulkArchiveLoading, setBulkArchiveLoading] = useState(false)
-  const eventSourceRef = useRef<EventSource | null>(null)
 
   const workspacesQuery = useQuery({
     queryKey: ['workspaces'],
@@ -53,38 +52,6 @@ export function RoomsView() {
       setSelectedRoom(rooms[0].id, rooms[0].workspace_id)
     }
   }, [rooms, selectedRoomID, setSelectedRoom])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    const eventSource = new EventSource('/api/events')
-    eventSourceRef.current = eventSource
-    eventSource.onmessage = (rawEvent) => {
-      let parsed: { type?: string; data?: unknown } | null = null
-      try {
-        parsed = JSON.parse(rawEvent.data) as { type?: string; data?: unknown }
-      } catch {
-        return
-      }
-      if (parsed?.type !== 'room.message' || !parsed.data || typeof parsed.data !== 'object') {
-        return
-      }
-      const event = parsed.data as RoomMessageEvent
-      if (event.workspace_id !== workspaceID.trim()) {
-        return
-      }
-      void queryClient.invalidateQueries({ queryKey: ['rooms', workspaceID.trim()] })
-      if (selectedRoomID && event.room_id === selectedRoomID) {
-        void queryClient.invalidateQueries({ queryKey: ['room', selectedRoomID] })
-      }
-    }
-    return () => {
-      eventSource.close()
-      if (eventSourceRef.current === eventSource) {
-        eventSourceRef.current = null
-      }
-    }
-  }, [queryClient, selectedRoomID, workspaceID])
 
   const workspaceLabel = (path: string) => {
     if (!path) return 'none'

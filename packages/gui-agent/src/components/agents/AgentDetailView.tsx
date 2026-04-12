@@ -43,6 +43,7 @@ import {
   listWorkspaces,
   patchAgent,
   spawnAgent,
+  subscribeToRoomEvents,
   type CompanionMessage,
   type CompanionMemoryStats,
   type ConsoleMessage,
@@ -1119,24 +1120,6 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
       if (!parsed || !isRecord(parsed.data)) {
         return;
       }
-      if (parsed.type === "room.message") {
-        const roomEvent = parsed.data as unknown as RoomMessageEvent;
-        if (
-          roomEvent.room_id !== controlRoomID ||
-          roomEvent.workspace_id !== roomWorkspacePath
-        ) {
-          return;
-        }
-        void Promise.all([
-          queryClient.invalidateQueries({
-            queryKey: ["rooms", roomWorkspacePath],
-          }),
-          queryClient.invalidateQueries({
-            queryKey: ["agent-room", roomWorkspacePath, controlRoomID],
-          }),
-        ]);
-        return;
-      }
       if (parsed.type !== "agent.chat") {
         return;
       }
@@ -1224,6 +1207,20 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
     refetchRuntime,
     roomWorkspacePath,
   ]);
+
+  useEffect(() => {
+    const cleanup = subscribeToRoomEvents(controlRoomID, roomWorkspacePath, (_event) => {
+      void Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["rooms", roomWorkspacePath],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["agent-room", roomWorkspacePath, controlRoomID],
+        }),
+      ]);
+    });
+    return cleanup;
+  }, [controlRoomID, queryClient, roomWorkspacePath]);
 
   const spawnChildMutation = useMutation({
     mutationFn: async () => {

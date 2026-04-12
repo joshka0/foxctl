@@ -79,6 +79,32 @@ func TestStore_Update(t *testing.T) {
 	}
 }
 
+func TestStore_PersistsMilestoneLinkage(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Linked task",
+		EpicID:      "epic-1",
+		MilestoneID: "mile-1",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	got, err := store.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.EpicID != "epic-1" {
+		t.Fatalf("EpicID=%q want epic-1", got.EpicID)
+	}
+	if got.MilestoneID != "mile-1" {
+		t.Fatalf("MilestoneID=%q want mile-1", got.MilestoneID)
+	}
+}
+
 func TestStore_PersistsClaimAndBlockMetadata(t *testing.T) {
 	ctx := context.Background()
 	store := setupTestStore(t)
@@ -296,6 +322,38 @@ func TestStore_DependsOnAndChildren(t *testing.T) {
 	}
 }
 
+func TestStore_AddSubtask_UpdatesParentChildrenAtomically(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	parent, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Parent",
+	})
+	if err != nil {
+		t.Fatalf("Add parent failed: %v", err)
+	}
+
+	child, err := store.AddSubtask(ctx, parent.ID, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Child",
+	})
+	if err != nil {
+		t.Fatalf("AddSubtask failed: %v", err)
+	}
+	if child.ParentID != parent.ID {
+		t.Fatalf("ParentID = %q, want %q", child.ParentID, parent.ID)
+	}
+
+	parent, err = store.Get(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("Get parent failed: %v", err)
+	}
+	if len(parent.Children) != 1 || parent.Children[0] != child.ID {
+		t.Fatalf("parent children = %v, want [%s]", parent.Children, child.ID)
+	}
+}
+
 func TestStore_DirtyIfReviewed_PendingTask(t *testing.T) {
 	ctx := context.Background()
 	store := setupTestStore(t)
@@ -418,6 +476,9 @@ func TestStore_DirtyIfReviewed_CompletedTask(t *testing.T) {
 	if result.LastReviewStatus != ReviewStatusStale {
 		t.Errorf("expected last_review_status %q, got %q", ReviewStatusStale, result.LastReviewStatus)
 	}
+	if result.CompletedAt != nil {
+		t.Errorf("expected CompletedAt to be cleared, got %v", result.CompletedAt)
+	}
 }
 
 func TestStore_DirtyIfReviewed_FailedReviewNotMarkedStale(t *testing.T) {
@@ -449,6 +510,38 @@ func TestStore_DirtyIfReviewed_FailedReviewNotMarkedStale(t *testing.T) {
 	// Failed review should remain failed, not stale
 	if result.LastReviewStatus != ReviewStatusFailed {
 		t.Errorf("expected last_review_status %q, got %q", ReviewStatusFailed, result.LastReviewStatus)
+	}
+}
+
+func TestStore_Update_NormalizesCompletedAtFromStatus(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Normalize completion",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	task.Status = StatusCompleted
+	task.CompletedAt = nil
+	task, err = store.Update(ctx, task)
+	if err != nil {
+		t.Fatalf("Update completed failed: %v", err)
+	}
+	if task.CompletedAt == nil {
+		t.Fatal("expected CompletedAt to be set for completed task")
+	}
+
+	task.Status = StatusInProgress
+	task, err = store.Update(ctx, task)
+	if err != nil {
+		t.Fatalf("Update in_progress failed: %v", err)
+	}
+	if task.CompletedAt != nil {
+		t.Fatalf("expected CompletedAt to be cleared for non-completed task, got %v", task.CompletedAt)
 	}
 }
 

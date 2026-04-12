@@ -81,9 +81,29 @@ other high-volume responses.
 - `GET|POST|PATCH /api/mailbox`
 - `GET|POST /api/rooms`
 - `GET|POST|PATCH /api/rooms/{id...}`
+- `GET /api/rooms/{id}/events`
 - `GET|POST|DELETE /api/reservations`
 - `GET|POST /api/blackboard`
 - `GET|POST|PATCH|DELETE /api/blackboard/{id...}`
+
+#### Room-specific notes
+
+- `GET /api/events` remains the global invalidation/event feed used by broad UI surfaces.
+- `GET /api/rooms/{id}/events?workspace_id=...` is the stable room-scoped SSE surface for room clients.
+- Existing-room mutation routes are actor-authorized:
+  room patch and full member replacement require coordinator access.
+- Member transport and binding updates are self-service only for the target participant unless the caller has coordinator access.
+- Role-changing member binding updates are coordinator-only even when the caller is updating their own binding.
+- Room member payloads now expose `delivery_binding` as the canonical binding/routing record.
+- Legacy top-level room member fields (`backend`, `session`, `pane_id`, `transport_endpoint`, `transport_kind`) are still mirrored for compatibility while clients migrate.
+- Room status and loop/status responses expose `last_delivery_trace` from the persisted room-loop row.
+- Treat `last_delivery_trace` as the canonical explanation surface for the latest delivery decision:
+  it records the chosen binding, chosen transport endpoint/kind, fallback attempt, outcome, and cursor movement for the last observed delivery.
+- Room reminder schedules are durable room-loop state:
+  acknowledging one emitted reminder follow-up does not cancel the schedule.
+- Reminder schedules can also stop automatically when linked `task_id`, `story_id`, or `milestone_id` work is satisfied, in addition to explicit cancel or `max_iterations`.
+- For room-runtime verification, prefer `bash tests/regression/run.sh` as the canonical regression bundle instead of composing ad hoc command sets.
+- If the symptom is "the message showed up in the pane but did not submit," follow that bundle with `AGENTCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' ./cmd/agentctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` to prove the target terminal process actually consumed the relayed line.
 
 ### Search and inspection
 

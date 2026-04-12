@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -647,7 +646,7 @@ func TestRoomSandboxStatus_IncludesSandboxInfo(t *testing.T) {
 	cmd.SetContext(ctx)
 	cmd.SetOut(buf)
 
-	err := runRoomStatus(cmd, workspace, "status-sandbox-room", 200, 5*time.Minute, nil, "open", false)
+	err := runRoomStatus(cmd, workspace, "status-sandbox-room", 200, nil, "open", false)
 	if err != nil {
 		t.Fatalf("runRoomStatus: %v", err)
 	}
@@ -704,7 +703,7 @@ func TestRoomSandboxStatus_NonSandboxRoomHasNilSandbox(t *testing.T) {
 	cmd.SetContext(ctx)
 	cmd.SetOut(buf)
 
-	err = runRoomStatus(cmd, workspace, "status-plain-room", 200, 5*time.Minute, nil, "open", false)
+	err = runRoomStatus(cmd, workspace, "status-plain-room", 200, nil, "open", false)
 	if err != nil {
 		t.Fatalf("runRoomStatus: %v", err)
 	}
