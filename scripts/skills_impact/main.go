@@ -90,7 +90,7 @@ func main() {
 			fatalf("encode json: %v", err)
 		}
 	case "names":
-		names := make([]string, 0)
+		var names []string
 		switch strings.ToLower(strings.TrimSpace(mode)) {
 		case "skills":
 			names = make([]string, 0, len(report.Skills))
@@ -302,84 +302,8 @@ func buildImpactReportWithRepoRoot(repoRoot, baseRef, headRef string, changedFil
 	sort.Strings(globalTriggers)
 	globalTriggers = dedupeStrings(globalTriggers)
 
-	var impactedPackages []packageImpact
-	for _, pkg := range allPkgs {
-		reasonSet := map[string]struct{}{}
-		if globalAll {
-			for _, trigger := range globalTriggers {
-				reasonSet["global trigger "+trigger] = struct{}{}
-			}
-		} else {
-			if reasons, ok := changedPkgReasons[pkg.ImportPath]; ok {
-				for _, reason := range reasons {
-					reasonSet[reason] = struct{}{}
-				}
-			}
-			for _, dep := range pkg.Deps {
-				for _, reason := range changedPkgReasons[dep] {
-					reasonSet[reason] = struct{}{}
-				}
-			}
-		}
-		if len(reasonSet) == 0 {
-			continue
-		}
-		reasons := make([]string, 0, len(reasonSet))
-		for reason := range reasonSet {
-			reasons = append(reasons, reason)
-		}
-		sort.Strings(reasons)
-		impactedPackages = append(impactedPackages, packageImpact{
-			ImportPath: pkg.ImportPath,
-			Dir:        pkg.Dir,
-			Reasons:    reasons,
-		})
-	}
-	sort.Slice(impactedPackages, func(i, j int) bool { return impactedPackages[i].ImportPath < impactedPackages[j].ImportPath })
-
-	var impacted []skillImpact
-	for _, pkg := range skillPkgs {
-		name := skillNameFromImportPath(pkg.ImportPath)
-		if name == "" {
-			continue
-		}
-		reasonSet := map[string]struct{}{}
-		if globalAll {
-			for _, trigger := range globalTriggers {
-				reasonSet["global trigger "+trigger] = struct{}{}
-			}
-		}
-		for _, reason := range directSkillReasons[name] {
-			reasonSet[reason] = struct{}{}
-		}
-		if !globalAll {
-			for _, dep := range pkg.Deps {
-				for _, reason := range changedPkgReasons[dep] {
-					reasonSet[reason] = struct{}{}
-				}
-			}
-			if reasons, ok := changedPkgReasons[pkg.ImportPath]; ok {
-				for _, reason := range reasons {
-					reasonSet[reason] = struct{}{}
-				}
-			}
-		}
-		if len(reasonSet) == 0 {
-			continue
-		}
-		reasons := make([]string, 0, len(reasonSet))
-		for reason := range reasonSet {
-			reasons = append(reasons, reason)
-		}
-		sort.Strings(reasons)
-		impacted = append(impacted, skillImpact{
-			Name:       name,
-			ImportPath: pkg.ImportPath,
-			Dir:        pkg.Dir,
-			Reasons:    reasons,
-		})
-	}
-	sort.Slice(impacted, func(i, j int) bool { return impacted[i].Name < impacted[j].Name })
+	impactedPackages := buildImpactedPackages(allPkgs, changedPkgReasons, globalTriggers, globalAll)
+	impacted := buildImpactedSkills(skillPkgs, directSkillReasons, changedPkgReasons, globalTriggers, globalAll)
 
 	return impactReport{
 		BaseRef:        baseRef,
@@ -390,6 +314,98 @@ func buildImpactReportWithRepoRoot(repoRoot, baseRef, headRef string, changedFil
 		Packages:       impactedPackages,
 		Skills:         impacted,
 	}
+}
+
+func buildImpactedPackages(allPkgs []goListPackage, changedPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []packageImpact {
+	impactedPackages := make([]packageImpact, 0)
+	for _, pkg := range allPkgs {
+		reasons := collectPackageImpactReasons(pkg, changedPkgReasons, globalTriggers, globalAll)
+		if len(reasons) == 0 {
+			continue
+		}
+		impactedPackages = append(impactedPackages, packageImpact{
+			ImportPath: pkg.ImportPath,
+			Dir:        pkg.Dir,
+			Reasons:    reasons,
+		})
+	}
+	sort.Slice(impactedPackages, func(i, j int) bool { return impactedPackages[i].ImportPath < impactedPackages[j].ImportPath })
+	return impactedPackages
+}
+
+func collectPackageImpactReasons(pkg goListPackage, changedPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []string {
+	reasonSet := map[string]struct{}{}
+	if globalAll {
+		for _, trigger := range globalTriggers {
+			reasonSet["global trigger "+trigger] = struct{}{}
+		}
+		return sortedReasonSet(reasonSet)
+	}
+	for _, reason := range changedPkgReasons[pkg.ImportPath] {
+		reasonSet[reason] = struct{}{}
+	}
+	for _, dep := range pkg.Deps {
+		for _, reason := range changedPkgReasons[dep] {
+			reasonSet[reason] = struct{}{}
+		}
+	}
+	return sortedReasonSet(reasonSet)
+}
+
+func buildImpactedSkills(skillPkgs []goListPackage, directSkillReasons, changedPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []skillImpact {
+	impacted := make([]skillImpact, 0)
+	for _, pkg := range skillPkgs {
+		name := skillNameFromImportPath(pkg.ImportPath)
+		if name == "" {
+			continue
+		}
+		reasons := collectSkillImpactReasons(pkg, name, directSkillReasons, changedPkgReasons, globalTriggers, globalAll)
+		if len(reasons) == 0 {
+			continue
+		}
+		impacted = append(impacted, skillImpact{
+			Name:       name,
+			ImportPath: pkg.ImportPath,
+			Dir:        pkg.Dir,
+			Reasons:    reasons,
+		})
+	}
+	sort.Slice(impacted, func(i, j int) bool { return impacted[i].Name < impacted[j].Name })
+	return impacted
+}
+
+func collectSkillImpactReasons(pkg goListPackage, name string, directSkillReasons, changedPkgReasons map[string][]string, globalTriggers []string, globalAll bool) []string {
+	reasonSet := map[string]struct{}{}
+	if globalAll {
+		for _, trigger := range globalTriggers {
+			reasonSet["global trigger "+trigger] = struct{}{}
+		}
+	} else {
+		for _, dep := range pkg.Deps {
+			for _, reason := range changedPkgReasons[dep] {
+				reasonSet[reason] = struct{}{}
+			}
+		}
+		for _, reason := range changedPkgReasons[pkg.ImportPath] {
+			reasonSet[reason] = struct{}{}
+		}
+	}
+	for _, reason := range directSkillReasons[name] {
+		reasonSet[reason] = struct{}{}
+	}
+	return sortedReasonSet(reasonSet)
+}
+
+func sortedReasonSet(reasonSet map[string]struct{}) []string {
+	if len(reasonSet) == 0 {
+		return nil
+	}
+	reasons := make([]string, 0, len(reasonSet))
+	for reason := range reasonSet {
+		reasons = append(reasons, reason)
+	}
+	sort.Strings(reasons)
+	return reasons
 }
 
 func globalSkillTrigger(path string) string {

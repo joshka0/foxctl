@@ -45,6 +45,9 @@ description: "Durable multi-agent room coordination with transport-first partici
   use that trace to inspect the chosen binding, transport, fallback attempt, outcome, and cursor movement for the most recent delivery decision.
 - `room coordinator set` transfers coordinator ownership to another room participant.
 - `room send --to @coordinator` resolves to the current coordinator without hard-coding an actor id.
+- actor naming should be explicit and distinctive:
+  avoid generic ids like `coordinator`, `reviewer`, or `codex-coordinator` when multiple rooms or agent runtimes may coexist.
+  actor ids should include the feature, branch, room, or workstream they belong to, for example `feat-room-loop-codex`, `room-ci-reviewer-a`, or `docs-runtime-owner`.
 - `room relay` mirrors room messages into terminal panes when you want a viewer layer, but room transport no longer depends on viewer attachment.
 - `room task assign`, `room task claim`, `room task complete`, and other task transitions persist first, then use the same transport-first relay path as `room loop`.
 - task/control transitions are intentionally strict:
@@ -453,7 +456,9 @@ agentctl room join alpha --current --role <room-role>
 
 ## Conventions
 
-- Use stable actor ids like `agent-a`, `agent-b`, `reviewer`, `planner` when you want human-friendly names.
+- Use stable but specific actor ids when you want human-friendly names.
+- Do not use generic labels that can collide across rooms or sessions.
+- Prefer names that include feature, branch, room, or workstream context, for example `feat-room-loop-agent-a`, `room-ci-reviewer-a`, or `docs-planner-a`.
 - `room send` and `room task` derive the sender from the current tmux/zellij pane when possible.
 - Broadcast room messages should not expect a response.
 - Use `--to <participant>` plus `--reply-expected` for direct asks.

@@ -11876,6 +11876,13 @@ func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role, backend, 
 	if value := strings.TrimSpace(transportKind); value != "" {
 		member.TransportKind = strings.ToLower(value)
 	}
+	member.DeliveryBinding = mergeRoomDeliveryBinding(member.DeliveryBinding, &agent.RoomDeliveryBinding{
+		MuxBackend:        member.Backend,
+		MuxSession:        member.Session,
+		MuxPaneID:         member.PaneID,
+		TransportEndpoint: member.TransportEndpoint,
+		TransportKind:     member.TransportKind,
+	})
 	member.Unbound = unbound
 	member = normalizeRoomMember(member)
 	store, err := openRoomBoardStore(cmd.Context())
@@ -11981,6 +11988,13 @@ func runRoomRebind(cmd *cobra.Command, workspace, roomID, actorID, role, backend
 	if value := strings.TrimSpace(transportKind); value != "" {
 		member.TransportKind = strings.ToLower(value)
 	}
+	member.DeliveryBinding = mergeRoomDeliveryBinding(member.DeliveryBinding, &agent.RoomDeliveryBinding{
+		MuxBackend:        member.Backend,
+		MuxSession:        member.Session,
+		MuxPaneID:         member.PaneID,
+		TransportEndpoint: member.TransportEndpoint,
+		TransportKind:     member.TransportKind,
+	})
 	member.Unbound = unbound
 	member = normalizeRoomMember(member)
 
@@ -12680,6 +12694,14 @@ func trimRoomMemberUpdate(member agent.RoomMember) agent.RoomMember {
 			SubmitMode:        strings.TrimSpace(member.DeliveryBinding.SubmitMode),
 			Health:            strings.TrimSpace(member.DeliveryBinding.Health),
 			FallbackPolicy:    strings.TrimSpace(member.DeliveryBinding.FallbackPolicy),
+		}
+	} else if member.Backend != "" || member.Session != "" || member.PaneID != "" || member.TransportEndpoint != "" || member.TransportKind != "" {
+		member.DeliveryBinding = &agent.RoomDeliveryBinding{
+			MuxBackend:        member.Backend,
+			MuxSession:        member.Session,
+			MuxPaneID:         member.PaneID,
+			TransportEndpoint: member.TransportEndpoint,
+			TransportKind:     member.TransportKind,
 		}
 	}
 	return member

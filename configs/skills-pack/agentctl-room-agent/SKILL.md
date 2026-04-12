@@ -28,6 +28,9 @@ This skill is the participant-side companion to:
 - reply-required requests are chain-aware:
   your later message only satisfies an earlier request when it replies within the same room message chain.
 - `room status` and loop/status APIs can expose `last_delivery_trace` for the most recent delivery decision; use that trace when delivery behavior needs explanation.
+- use explicit, distinctive participant ids.
+- avoid generic actor ids like `coordinator`, `reviewer`, or `codex-coordinator` when more than one room or agent runtime may exist.
+- actor ids should include feature, branch, room, or workstream context, for example `feat-room-loop-codex`, `room-ci-reviewer-a`, or `docs-operator-a`.
 - Room context is not room membership. A startup note, env var, or pane label does not prove you are joined.
 - Pane health is not delivery health. Check `room status` before blaming the viewer layer.
 - A room can remain fully valid with no panes and no live participant runtime. In that state, the room is still usable for durable planning and task state, but you should not expect an agent runtime to consume direct work until transport/runtime is live again.

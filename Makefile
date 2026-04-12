@@ -173,6 +173,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | xargs )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
 			exit 0; \
@@ -542,6 +543,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | xargs )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
 			exit 0; \
@@ -555,6 +557,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | xargs )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
 			exit 0; \

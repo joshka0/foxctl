@@ -34,6 +34,9 @@ If the room is explicitly running the agile epic/milestone/story workflow, also 
   a later message only satisfies an earlier request when it is from the intended recipient and belongs to the same room message chain.
 - Room status and loop surfaces expose a durable `last_delivery_trace`:
   use that trace to debug the last chosen binding, transport, fallback attempt, and outcome instead of guessing from pane behavior.
+- use explicit, distinctive participant ids.
+- avoid generic actor ids like `coordinator`, `reviewer`, or `codex-coordinator` when multiple rooms or agent runtimes may coexist.
+- actor ids should include feature, branch, room, or workstream context, for example `feat-room-loop-codex`, `room-ci-reviewer-a`, or `runtime-owner-a`.
 - Room context and room membership are different things. `AGENTCTL_ROOM_ID`, a tmux/zellij session name, or a startup prompt only mean the pane knows about the room. They do **not** prove the participant is joined and routable.
 - Room durability and live execution are different things. A room can continue to hold epic/task/history state even when there are no panes or live participant runtimes.
 - When invoking **`room send`**, **prefer explicit `--to <participant>`** for anything meant for one person (so relay + inbox stay aligned), and **`--sender <you>`** whenever your pane context might not identify you (scripts, MCP, or outside tmux/zellij). Omit `--to` only for deliberate **broadcasts** to the rest of the room.

@@ -2260,7 +2260,7 @@ func (s *Service) handleAgentStatus(params json.RawMessage) (*AgentStatusResult,
 	}
 
 	snapshot := session.GetSession()
-	children := []string{}
+	var children []string
 	if overseer, ok := s.agentRuntime.GetSpawnHandler().(*runtime.Overseer); ok && overseer != nil {
 		children = overseer.GetChildren(p.SessionID)
 	} else {

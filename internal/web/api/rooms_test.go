@@ -423,6 +423,7 @@ func TestRoomDetailHandler_PostMessageQueuesForRoomLoopDelivery(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
 
 	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/messages", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -479,6 +480,7 @@ func TestRoomDetailHandler_PostMessageWithoutRelayHookStillQueuesForRoomLoop(t *
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
 
 	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/messages", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -852,6 +854,7 @@ func TestRoomDetailHandler_ArchiveAndRestore(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "archive-room")
 
 	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/archive-room/messages", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -993,6 +996,7 @@ func TestRoomDetailHandler_PostMessageDispatchesAgentReplies(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "agent-room")
 
 	done := make(chan struct{}, 1)
 	origRunner := runRoomAgentReply
@@ -1150,6 +1154,7 @@ func TestRoomDetailHandler_PostMessageMarksLinkedBoardCardDone(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create room status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "bridge-room")
 
 	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/bridge-room/messages", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -1264,6 +1269,7 @@ func TestRoomDetailHandler_PostMessageUsesPersistedDispatchPolicy(t *testing.T) 
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "agent-room-defaults")
 
 	targets := make(chan string, 2)
 	origRunner := runRoomAgentReply
@@ -1325,6 +1331,7 @@ func TestRoomDetailHandler_GetStatusReturnsCoordinatorSummary(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
 
 	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/messages", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -1374,6 +1381,7 @@ func TestRoomDetailHandler_GetStatusReturnsPersistedLoopState(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
 
 	loopStore, err := coordination.Open(context.Background(), cfg.Storage.Root)
 	if err != nil {
@@ -1554,6 +1562,7 @@ func TestRoomDetailHandler_GetInboxReturnsActorScopedEntries(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
 
 	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/messages", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -1628,6 +1637,7 @@ func TestRoomDetailHandler_CoordinatorSetTransfersRole(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
 
 	setReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/coordinator", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -1689,6 +1699,7 @@ func TestRoomDetailHandler_GetLoopReturnsPersistedState(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
 
 	loopStore, err := coordination.Open(context.Background(), cfg.Storage.Root)
 	if err != nil {
@@ -1885,6 +1896,7 @@ func TestRoomDetailHandler_MessageAckUpdatesStatus(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
 
 	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/messages", strings.NewReader(`{
 		"workspace_id":"ws1",
@@ -1940,6 +1952,7 @@ func TestRoomDetailHandler_GetTasksReturnsRoomLinkedTasks(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
 
 	taskStore, err := taskstore.Open(context.Background(), cfg.Storage.Root)
 	if err != nil {
@@ -2003,6 +2016,7 @@ func TestRoomDetailHandler_TaskClaimActionUpdatesTask(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
 
 	taskStore, err := taskstore.Open(context.Background(), cfg.Storage.Root)
 	if err != nil {

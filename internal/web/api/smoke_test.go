@@ -35,6 +35,7 @@ func TestRoomsHandlers_Smoke(t *testing.T) {
 	if createRR.Code != http.StatusCreated {
 		t.Fatalf("create room status=%d body=%s", createRR.Code, createRR.Body.String())
 	}
+	activateAPIRoomLoop(t, cfg, roomSmokeWorkspacePath, "smoke-room")
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/rooms?workspace_id="+roomSmokeWorkspacePath+"&limit=10", nil)
 	listRR := httptest.NewRecorder()

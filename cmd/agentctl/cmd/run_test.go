@@ -326,12 +326,11 @@ func waitForCachedSkillBinary(out, lockPath string) bool {
 func skillBinaryFingerprint(t *testing.T, pkg string) string {
 	t.Helper()
 	h := sha256.New()
-	io.WriteString(h, runtime.GOOS)
-	io.WriteString(h, "\n")
-	io.WriteString(h, runtime.GOARCH)
-	io.WriteString(h, "\n")
-	io.WriteString(h, pkg)
-	io.WriteString(h, "\n")
+	for _, part := range []string{runtime.GOOS, "\n", runtime.GOARCH, "\n", pkg, "\n"} {
+		if _, err := io.WriteString(h, part); err != nil {
+			t.Fatalf("write skill fingerprint: %v", err)
+		}
+	}
 
 	root := repoRoot(t)
 	for _, name := range []string{"go.mod", "go.sum", "go.work", "go.work.sum"} {
@@ -436,10 +435,10 @@ func addFileToHash(h io.Writer, path string) {
 	if err != nil {
 		return
 	}
-	io.WriteString(h, path)
-	io.WriteString(h, "\n")
-	io.WriteString(h, fmt.Sprintf("%d\n", info.Size()))
-	io.WriteString(h, fmt.Sprintf("%d\n", info.ModTime().UnixNano()))
+	_, _ = io.WriteString(h, path)
+	_, _ = io.WriteString(h, "\n")
+	_, _ = io.WriteString(h, fmt.Sprintf("%d\n", info.Size()))
+	_, _ = io.WriteString(h, fmt.Sprintf("%d\n", info.ModTime().UnixNano()))
 }
 
 func repoRoot(t *testing.T) string {
