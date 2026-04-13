@@ -25,6 +25,7 @@ import (
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/zellijbridge"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
@@ -35,7 +36,6 @@ import (
 	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
 	"github.com/jkatigb/agentctl/internal/v2/core/events"
 	v2services "github.com/jkatigb/agentctl/internal/v2/services"
-	"github.com/jkatigb/agentctl/internal/zellijbridge"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )

@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/zellijbridge"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
-	"github.com/jkatigb/agentctl/internal/zellijbridge"
 )
 
 // roomSendMuxOpts configures an optional mux submit after a successful room send.

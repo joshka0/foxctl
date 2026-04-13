@@ -138,7 +138,7 @@ Primary packages:
 
 - `internal/runtime/terminal/agentpane`
 - `internal/tmuxbridge`
-- `internal/zellijbridge`
+- `internal/runtime/terminal/zellijbridge`
 - `internal/gateway/webterm`
 - `internal/gateway/sshterm`
 
@@ -161,7 +161,7 @@ Current inventory:
 |--------|----------------------------|-------|
 | `internal/runtime/terminal/agentpane` | pane wrapper and transport owner | normalizes submit modes, owns pane socket delivery, allocates tmux/zellij watch panes |
 | `internal/tmuxbridge` | tmux backend | creates panes/sessions and provides tmux-specific send/submit behavior |
-| `internal/zellijbridge` | zellij backend | provides the parallel pane creation and submit contract for zellij |
+| `internal/runtime/terminal/zellijbridge` | zellij backend | provides the parallel pane creation and submit contract for zellij |
 | `internal/gateway/webterm` | browser terminal entrypoint | one shared tmux-backed PTY per room, fanout to multiple WebSocket clients |
 | `internal/gateway/sshterm` | SSH terminal entrypoint | Tailscale-authenticated SSH access, resolves room IDs to tmux sessions |
 
@@ -182,7 +182,7 @@ Chosen target contract for Story 2:
   room-to-terminal identity
 - `internal/runtime/terminal/agentpane` is the current anchor for that contract because it
   already normalizes pane delivery and mux-agnostic submit behavior
-- `internal/tmuxbridge` and `internal/zellijbridge` are backend adapters within
+- `internal/tmuxbridge` and `internal/runtime/terminal/zellijbridge` are backend adapters within
   the same family boundary
 - `internal/gateway/webterm` and `internal/gateway/sshterm` remain
   `interfaces/gateway` entrypoints because they expose terminal access over web
@@ -245,7 +245,7 @@ Expected import fallout:
 - direct tmux session-name construction should be removed from gateway-local
   code paths
 - no import-path changes should be required for `internal/runtime/terminal/agentpane`,
-  `internal/tmuxbridge`, `internal/zellijbridge`, `internal/agent/runtime/*`, or
+  `internal/tmuxbridge`, `internal/runtime/terminal/zellijbridge`, `internal/agent/runtime/*`, or
   `internal/web/api/mux.go` in the first batch
 
 Compatibility notes:

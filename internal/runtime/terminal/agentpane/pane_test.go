@@ -11,8 +11,8 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/zellijbridge"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
-	"github.com/jkatigb/agentctl/internal/zellijbridge"
 )
 
 func TestInheritChildBinding(t *testing.T) {
