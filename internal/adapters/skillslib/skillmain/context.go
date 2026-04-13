@@ -10,7 +10,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
-	"github.com/jkatigb/agentctl/internal/execution/circuitbreaker"
+	"github.com/jkatigb/agentctl/internal/runtime/execution/circuitbreaker"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/rs/zerolog"

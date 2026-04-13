@@ -47,7 +47,7 @@ Important scope note:
 | `internal/context/companion` | Companion chat/memory service and adapter layer into v2 context building |
 | `internal/agent`, `internal/agent/daemon` | Classic mailbox-driven agent runtime, overseer hierarchy, tool wiring, and foreground daemon loop |
 | `internal/runtime/daemon` | Local daemon service; currently mixes classic runtime behavior with newer v2-backed command helpers |
-| `internal/execution/agentmanager` | Legacy spawn/kill management path still used by some CLI flows |
+| `internal/runtime/execution/agentmanager` | Legacy spawn/kill management path still used by some CLI flows |
 
 ## Legacy vs V2 Runtime Boundary
 
@@ -57,7 +57,7 @@ Use this shorthand when talking about “legacy” vs “v2” in runtime discus
 |---------------------|-----------------------|-------|
 | `internal/agent/runtime` | `internal/v2/runtime/*` plus `internal/v2/services/*` | Core agent session/runtime replacement seam |
 | `internal/agent/daemon` | `internal/v2/runtime/{runner,orchestration,supervisor}` | Foreground daemon loop replacement is partial |
-| `internal/execution/agentmanager` | `internal/v2/services/{spawn,kill,list,run}` | Still used as fallback in some CLI flows |
+| `internal/runtime/execution/agentmanager` | `internal/v2/services/{spawn,kill,list,run}` | Still used as fallback in some CLI flows |
 | agent-management logic in `internal/runtime/daemon` | prefer `internal/v2/services/*` semantics | `internal/runtime/daemon` remains the hosting shell in places |
 | live Jido runtime-state dependencies in `internal/v2/adapters/jido` | Go-owned runtime state with Jido optional | Adapter remains, default dependence should shrink |
 

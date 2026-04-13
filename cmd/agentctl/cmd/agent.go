@@ -18,7 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
+	"github.com/jkatigb/agentctl/internal/runtime/execution/agentmanager"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"

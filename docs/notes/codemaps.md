@@ -36,7 +36,7 @@ Each entry has:
   “Map the full skill lifecycle in agentctl from installation to execution.
   Start at the skill installer in `internal/domain/skill/installer.go` (Install,
   LoadManifest, validateManifest), then show how installed skills are invoked by
-  the runner (`internal/execution/runner`, `skills/*/main.go`) using envelope
+  the runner (`internal/runtime/execution/runner`, `skills/*/main.go`) using envelope
   I/O. Include how large outputs go through CAS
   (`internal/storage/cas/store.go`), how jobs are created and tracked for skill
   runs, and where plugins (auth/pagination) integrate with the http/openapi
@@ -54,7 +54,7 @@ Each entry has:
   job CLI or API entrypoints, then show the `Job` type and `HashArgs` in
   `internal/storage/jobs/types/types.go`, how jobs are persisted to SQLite, and
   how they move through states (`queued`, `running`, `ok`, `error`, `canceled`).
-  Then trace how the WFQ scheduler in `internal/execution/scheduler/wfq.go`
+  Then trace how the WFQ scheduler in `internal/runtime/execution/scheduler/wfq.go`
   picks jobs: `NewWFQScheduler`, schedulable Job struct, `SetWeight`, and worker
   loop. Highlight where execution is delegated to the execution layer (WASI/exec
   runners).”
@@ -86,7 +86,7 @@ Each entry has:
   enforced.
 - **Prompt**:\
   “Map the execution runners in agentctl, focusing on WASI and exec. Start at
-  `internal/execution/runner` and relevant subpackages (`wasi`, `exec`). Show
+  `internal/runtime/execution/runner` and relevant subpackages (`wasi`, `exec`). Show
   how a job or skill invocation is turned into a subprocess or WASI invocation,
   how environment, filesystem roots, and network policy are configured, and how
   envelopes are piped via stdin/stdout. Highlight where `policy.PathValidator`
@@ -240,7 +240,7 @@ Each entry has:
   via WASI/exec runners; and how hooks/memory/knowledge integrate. Use
   `docs/spec/core_profile_v1.md` as the canonical reference, then anchor each
   spec concept to its concrete implementation in `internal/envelope`,
-  `internal/storage/cas`, `internal/storage/jobs`, `internal/execution/*`, and
+  `internal/storage/cas`, `internal/storage/jobs`, `internal/runtime/execution/*`, and
   `skills/*`.”
 
 ---

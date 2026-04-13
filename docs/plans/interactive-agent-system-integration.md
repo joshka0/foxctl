@@ -167,7 +167,7 @@ File Change → Hook → Enqueue Job → Worker Claims → Provider API → Stor
 
 ### 5. Skill Ecosystem
 
-**Location**: `skills/`, `internal/domain/skill/`, `internal/execution/`
+**Location**: `skills/`, `internal/domain/skill/`, `internal/runtime/execution/`
 
 **Scale**: 87 skills across 25+ categories
 

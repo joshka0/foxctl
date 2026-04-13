@@ -12,7 +12,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
+	"github.com/jkatigb/agentctl/internal/runtime/execution/agentmanager"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 	"github.com/jkatigb/agentctl/internal/storage/agents"

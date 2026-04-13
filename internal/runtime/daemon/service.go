@@ -26,7 +26,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/context/updater"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/execution/runner"
+	"github.com/jkatigb/agentctl/internal/runtime/execution/runner"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/filesummary"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"

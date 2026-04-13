@@ -82,7 +82,7 @@ func repoPath(t *testing.T, elems ...string) string {
 	if !ok {
 		t.Fatalf("runtime.Caller failed")
 	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
 	path := filepath.Join(append([]string{root}, elems...)...)
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("stat %s: %v", path, err)

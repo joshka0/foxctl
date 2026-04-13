@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/execution"
+	"github.com/jkatigb/agentctl/internal/runtime/execution"
 )
 
 // MockSkillExecutor is a test double for SkillExecutor.

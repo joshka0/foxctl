@@ -21,7 +21,7 @@ With this setup, `make lint` runs successfully but reports ~100+ issues across:
 - `revive` (unused parameters, naming, builtin redefinitions, context usage, etc.).
 - `staticcheck` (QF10xx quickfixes, minor simplifications).
 - `errcheck` (unchecked errors).
-- `depguard` (layering violations between `internal/domain`, `internal/execution`, `internal/platform`, `internal/adapters`, `internal/storage`, etc.).
+- `depguard` (layering violations between `internal/domain`, `internal/runtime/execution`, `internal/platform`, `internal/adapters`, `internal/storage`, etc.).
 
 The original skill test typecheck issues (`ctx`/`cfg` undefined, unused imports) are already fixed and no longer reported. The remaining lints are larger-scope cleanliness and architecture items that should be handled deliberately rather than ad‑hoc.
 

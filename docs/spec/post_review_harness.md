@@ -93,7 +93,7 @@ flowchart TD
   - Storage + idempotence helpers.
 - `internal/intelligence/analysis/overseer`:
   - New **post‑review handler** and wiring into overseer events.
-- `internal/storage/jobs` + `internal/execution/scheduler`:
+- `internal/storage/jobs` + `internal/runtime/execution/scheduler`:
   - Optional job‑backed indexer execution.
 - `skills/*` (semantic/symbol indexers) or internal Go indexers:
   - Executed via Exec/WASI runners per existing patterns.

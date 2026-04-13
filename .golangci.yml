@@ -78,7 +78,7 @@ linters:
           deny:
             - pkg: "github.com/jkatigb/agentctl/internal/storage"
               desc: "domain layer must not depend on storage"
-            - pkg: "github.com/jkatigb/agentctl/internal/execution"
+            - pkg: "github.com/jkatigb/agentctl/internal/runtime/execution"
               desc: "domain layer must not depend on execution"
             - pkg: "github.com/jkatigb/agentctl/internal/platform"
               desc: "domain layer must not depend on platform"
@@ -89,7 +89,7 @@ linters:
         execution-limited-deps:
           list-mode: lax
           files:
-            - "**/internal/execution/**/*.go"
+            - "**/internal/runtime/execution/**/*.go"
           deny:
             - pkg: "github.com/jkatigb/agentctl/internal/adapters"
               desc: "execution layer should not depend on adapters"
