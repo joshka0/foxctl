@@ -623,14 +623,14 @@ The durable split should be:
 | Package/root | Console role | Current boundary decision |
 |------|--------------|---------------------------|
 | `internal/console` | console session contract, lifecycle, and persistence primitives such as correlation tracking for interactive actor console sessions | keep as the canonical console ownership slice |
-| `internal/consoleapp` | console application runtime, LLM runner, stream parsing, and session-turn execution | keep as the console application slice |
+| `internal/console/app` | console application runtime, LLM runner, stream parsing, and session-turn execution | keep as the console application slice |
 | `internal/interfaces/web/consolews` | websocket transport surface for console sessions | treat as the web-facing console transport entrypoint, not as the utility owner |
 
 That yields one explicit rule:
 
 - `internal/console` owns reusable console-session primitives and persistence
   contracts
-- `internal/consoleapp` owns application/runtime behavior for console sessions
+- `internal/console/app` owns application/runtime behavior for console sessions
 - `internal/interfaces/web/consolews` remains the interface/transport layer that hosts the
   console app over web sockets
 
@@ -640,7 +640,7 @@ Current implemented seam:
   internal subscriber event model, in addition to correlation tracking
 - `internal/console` also owns the console session lifecycle and persistence
   contract instead of leaving sessions-store wiring under `consolews`
-- `internal/consoleapp` consumes the narrow session handle/runtime contract and
+- `internal/console/app` consumes the narrow session handle/runtime contract and
   remains the owner of turn execution, tool-event emission, and stream parsing
 - `internal/interfaces/web/consolews` now acts as the websocket host and wire adapter,
   rather than the owner of the session/transcript model
@@ -653,7 +653,7 @@ The first low-risk console batch is now an **implemented boundary cut without
 renames**:
 
 - move console session transcript/config primitives into `internal/console`
-- keep `internal/consoleapp` as the runner/streaming application layer
+- keep `internal/console/app` as the runner/streaming application layer
 - keep `internal/interfaces/web/consolews` as the websocket transport host
 - collapse the duplicate websocket payload wrapper onto the canonical
   `internal/domain/console` payload contract
@@ -678,7 +678,7 @@ documentation-only guardrails**:
 - clarify that `internal/agent/tools` stays runtime-facing rather than generic
   tooling
 - clarify that `internal/console` is the narrow utility layer and
-  `internal/consoleapp` is the application/runtime layer
+  `internal/console/app` is the application/runtime layer
 
 Why this is the right first batch:
 

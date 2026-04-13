@@ -571,7 +571,7 @@ Primary packages:
 - `internal/adapters/skillslib/*`
 - `internal/agent/tools`
 - `internal/console`
-- `internal/consoleapp`
+- `internal/console/app`
 
 Proposed stories:
 
@@ -611,7 +611,7 @@ Required placement rule from Story 2:
 
 - `internal/console` owns reusable console-session primitives such as
   correlation tracking and session persistence contracts
-- `internal/consoleapp` owns runner, stream parsing, and application/runtime
+- `internal/console/app` owns runner, stream parsing, and application/runtime
   behavior for console sessions
 - `internal/interfaces/web/consolews` remains the transport host for console sessions
 
@@ -620,7 +620,7 @@ Story 2 should end with these durable decisions:
 | Package/root | Slice | Decision |
 |------|-------|----------|
 | `internal/console` | console utilities and lifecycle contract | keep as the canonical console ownership slice |
-| `internal/consoleapp` | console application | keep as the runtime/app slice |
+| `internal/console/app` | console application | keep as the runtime/app slice |
 | `internal/interfaces/web/consolews` | interface transport | keep as the web transport entrypoint |
 
 Non-goals for Story 2:
@@ -642,7 +642,7 @@ Implemented first batch:
 - console boundary:
   - `internal/console` owns console session transcript/config/event primitives
     plus the session lifecycle/persistence contract
-  - `internal/consoleapp` consumes the narrow console session handle/runtime
+  - `internal/console/app` consumes the narrow console session handle/runtime
     contract
 - `internal/interfaces/web/consolews` acts as websocket transport host and wire adapter rather
   than session-model owner

@@ -14,7 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	consolepkg "github.com/jkatigb/agentctl/internal/console"
-	"github.com/jkatigb/agentctl/internal/consoleapp"
+	"github.com/jkatigb/agentctl/internal/console/app"
 	"github.com/jkatigb/agentctl/internal/context/companion"
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter/discord"

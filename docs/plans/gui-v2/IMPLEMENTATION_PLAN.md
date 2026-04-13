@@ -231,7 +231,7 @@ Convert `skill.Manifest.Signature.Parameters` to standard JSON Schema:
 **Estimated effort: 2-3 days**
 
 ### Deliverables
-- `internal/consoleapp/skill_tool_executor.go` - Execute skills as tools
+- `internal/console/app/skill_tool_executor.go` - Execute skills as tools
 - `internal/interfaces/web/tools/registry.go` - Tool registry wrapper
 - `internal/interfaces/web/tools/executor.go` - Tool execution implementation
 - `internal/interfaces/web/tools/profiles.go` - Agent profile allowlists
@@ -261,8 +261,8 @@ Convert `skill.Manifest.Signature.Parameters` to standard JSON Schema:
 ### Deliverables
 - `internal/interfaces/web/consolews/hub.go` - WebSocket connection hub
 - `internal/interfaces/web/consolews/session.go` - Console session state + ask loop
-- `internal/consoleapp/runner.go` - LLM engine + tool runner integration
-- `internal/consoleapp/stream.go` - Console payload streaming adapters
+- `internal/console/app/runner.go` - LLM engine + tool runner integration
+- `internal/console/app/stream.go` - Console payload streaming adapters
 
 ### WebSocket Protocol
 ```typescript

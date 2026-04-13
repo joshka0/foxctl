@@ -82,7 +82,7 @@ internal/interfaces/web/
     hub.go
     handler.go
 
-internal/consoleapp/
+internal/console/app/
   runner.go          // “ask loop” that runs LLM engine + tool runner + streams events
   stream.go          // adapters to publish console.Payload events
 ```
@@ -337,7 +337,7 @@ func buildToolDescription(m skill.Manifest) string {
 This plugs into your existing `engine.ToolRunner`.
 
 ```go
-// internal/consoleapp/skill_tool_executor.go
+// internal/console/app/skill_tool_executor.go
 package consoleapp
 
 import (
@@ -493,7 +493,7 @@ func mergeDefaultsAndValidate(m skill.Manifest, args json.RawMessage) ([]byte, e
 
 ## Execution loop
 
-In `internal/consoleapp/runner.go`:
+In `internal/console/app/runner.go`:
 
 1. Load registry tooldefs (or subset based on tools_allow)
 2. Create engine:
@@ -572,7 +572,7 @@ This makes your “agentctl Studio” console show up in existing Sessions tooli
 
 **Files**
 
-* `internal/consoleapp/skill_tool_executor.go`
+* `internal/console/app/skill_tool_executor.go`
 
 **Acceptance**
 
@@ -586,7 +586,7 @@ This makes your “agentctl Studio” console show up in existing Sessions tooli
 
 * `internal/interfaces/web/handlers/console.go`
 * `internal/interfaces/web/sse/*` (hub + SSE handler)
-* `internal/consoleapp/{runner.go,stream.go}`
+* `internal/console/app/{runner.go,stream.go}`
 
 **Acceptance**
 
@@ -632,7 +632,7 @@ This makes your “agentctl Studio” console show up in existing Sessions tooli
 **Files**
 
 * `internal/interfaces/web/handlers/sessions.go` (if not already present)
-* `internal/consoleapp/runner.go` to call sessions store
+* `internal/console/app/runner.go` to call sessions store
 
 **Acceptance**
 
