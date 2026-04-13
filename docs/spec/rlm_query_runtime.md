@@ -211,7 +211,7 @@ Current code that should feed the runtime:
 - `internal/runtime/engine/rlm_tools.go`
 - `internal/intelligence/indexing/repoindex/*`
 - `internal/storage/obsidianindex/*`
-- `internal/trajectorycapture/*`
+- `internal/runtime/trajectorycapture/*`
 - `internal/v2/runtime/*`
 
 ## Non-goals

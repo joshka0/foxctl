@@ -7,7 +7,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/trajectorycapture"
+	"github.com/jkatigb/agentctl/internal/runtime/trajectorycapture"
 )
 
 // AsyncRunner schedules asynchronous job execution.

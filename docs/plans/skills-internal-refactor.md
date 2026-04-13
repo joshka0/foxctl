@@ -45,7 +45,7 @@ Goal: identify refactoring opportunities to consolidate skills into internal pac
 - [x] internal/intelligence/codecontext/expander/brace.go and internal/adapters/skillslib/codeedit/codeedit.go: unify brace matching logic.
 - [x] internal/platform/fsutil/fsutil.go: replace large switch with map/table; share with codeedit language detection.
 - [x] internal/context/todosync/sync.go: split SyncFromProvider into smaller helpers (mapping, dependency inference, updates).
-- [x] internal/trajectorycapture/capture.go: split CaptureResult into event-kind, summary/meta, and persistence helpers.
+- [x] internal/runtime/trajectorycapture/capture.go: split CaptureResult into event-kind, summary/meta, and persistence helpers.
 
 ## Skills -> Internal Extraction Candidates
 - [x] skills/lsp_*: consolidate shared LSP client/types/dispatch into internal/adapters/skillslib/lsp.

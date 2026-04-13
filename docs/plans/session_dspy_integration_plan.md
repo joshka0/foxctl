@@ -67,7 +67,7 @@ CREATE INDEX idx_memory_session ON named_memory(claude_session_id);
 - `internal/storage/trajectory/store.go` - add migration + column
 - `internal/storage/memory/store.go` - add migration + column
 - `skills/todo_manage/main.go` - propagate to task creation
-- `internal/trajectorycapture/capture.go` - propagate to trajectory
+- `internal/runtime/trajectorycapture/capture.go` - propagate to trajectory
 
 ---
 

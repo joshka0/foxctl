@@ -44,7 +44,7 @@ The repo already has several pieces that make an RLM layer practical:
   - code + infra graph indexing
 - `internal/storage/obsidianindex/*`
   - durable knowledge plane index
-- `internal/runtime/runservice/*`, `internal/trajectorycapture/*`
+- `internal/runtime/runservice/*`, `internal/runtime/trajectorycapture/*`
   - event/result/trajectory persistence
 - `internal/v2/runtime/*`, `internal/v2/services/*`
   - clean place to host a future production execution mode
@@ -205,7 +205,7 @@ These map well onto:
 - `internal/context/companion`
 - `internal/intelligence/indexing/repoindex`
 - `internal/storage/obsidianindex`
-- `internal/trajectorycapture`
+- `internal/runtime/trajectorycapture`
 
 ## How Scenes Fit
 

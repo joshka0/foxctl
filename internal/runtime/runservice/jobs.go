@@ -14,7 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/jobs/persist"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
-	"github.com/jkatigb/agentctl/internal/trajectorycapture"
+	"github.com/jkatigb/agentctl/internal/runtime/trajectorycapture"
 )
 
 func (e *Executor) ensureJobStore() (err error) {
