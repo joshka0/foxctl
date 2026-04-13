@@ -14,7 +14,7 @@ The startup path lives in `internal/web/server.go`:
 2. The selected adapter is created and connected.
 3. Slash/text command handlers are wired into the bridge.
 4. Natural-language message handlers are wired into a `SessionBridge` backed by
-   `consolews`.
+   the shared console session manager and websocket transport.
 
 Missing credentials or platform validation failures prevent that adapter from
 starting; the rest of the web server still exists as normal.
@@ -28,8 +28,9 @@ flowchart LR
     Driver --> SessionBridge["chatadapter.SessionBridge"]
     Bridge --> SkillRunner["internal/web/api.SkillRunner"]
     Bridge --> AgentsAPI["/api/agents/* HTTP endpoints"]
-    SessionBridge --> ConsoleHub["internal/web/consolews Hub"]
-    ConsoleHub --> Companion["internal/companion + console runner"]
+    SessionBridge --> ConsoleSessions["internal/console SessionManager"]
+    ConsoleSessions --> ConsoleTransport["internal/web/consolews transport"]
+    ConsoleTransport --> Companion["internal/companion + console runner"]
     Companion --> Context["v2 context builder / optional Jido companion provider"]
 ```
 
@@ -62,12 +63,12 @@ Platform naming differences:
 - Discord
   - Uses explicit command registration from `discord.MVPCommands()`.
   - Supports commands, interactions, and natural-language message mode.
-  - Binds a Discord-specific session bridge over the shared console hub.
+  - Binds a Discord-specific session bridge over the shared console session manager.
 
 - Telegram
   - Uses explicit command registration from `telegram.MVPCommands()`.
   - Supports commands, callback interactions, and natural-language messaging.
-  - Uses a Telegram-specific session bridge over the shared console hub.
+  - Uses a Telegram-specific session bridge over the shared console session manager.
 
 - Teams
   - Uses Bot Framework webhook ingestion at `POST /api/teams/messages`.
@@ -77,7 +78,7 @@ Platform naming differences:
 
 ## Session and concurrency model
 
-- Natural-language chat is routed through `consolews` sessions, not directly
+- Natural-language chat is routed through managed console sessions, not directly
   through the slash-command bridge.
 - `chatadapter.SessionBridge` maps a platform conversation to a console session
   and streams edits/messages back to the platform.

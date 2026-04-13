@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	consolepkg "github.com/jkatigb/agentctl/internal/console"
 	"github.com/jkatigb/agentctl/internal/web/consolews"
 )
 
@@ -63,7 +64,7 @@ func TestCollectAndUpdate_FinalReply(t *testing.T) {
 	sb := NewSessionBridge(hub, nil, SessionBridgeConfig{MaxMessageLen: 2000}, nil)
 
 	ctx := context.Background()
-	ch := make(chan consolews.Payload, 8)
+	ch := make(chan consolepkg.Event, 8)
 
 	var editedContent string
 	evt := NewMessageEvent("test", UserRef{}, "chan1", "", "msg1",
@@ -77,8 +78,8 @@ func TestCollectAndUpdate_FinalReply(t *testing.T) {
 	)
 	ref := MessageRef{ChannelID: "chan1", MessageID: "reply1"}
 
-	ch <- consolews.Payload{
-		Type:    consolews.PayloadTypeReply,
+	ch <- consolepkg.Event{
+		Type:    consolepkg.EventTypeReply,
 		Content: "Hello from the LLM!",
 	}
 
@@ -98,7 +99,7 @@ func TestCollectAndUpdate_PartialEdit_TruncatesToLimit(t *testing.T) {
 	}, nil)
 
 	ctx := context.Background()
-	ch := make(chan consolews.Payload, 8)
+	ch := make(chan consolepkg.Event, 8)
 
 	var edits []string
 	evt := NewMessageEvent("test", UserRef{}, "chan1", "", "msg1",
@@ -113,13 +114,13 @@ func TestCollectAndUpdate_PartialEdit_TruncatesToLimit(t *testing.T) {
 	ref := MessageRef{ChannelID: "chan1", MessageID: "reply1"}
 
 	large := strings.Repeat("a", 2500)
-	ch <- consolews.Payload{
-		Type:     consolews.PayloadTypeEvent,
+	ch <- consolepkg.Event{
+		Type:     consolepkg.EventTypeEvent,
 		Content:  large,
 		Metadata: map[string]any{"partial": true},
 	}
-	ch <- consolews.Payload{
-		Type:    consolews.PayloadTypeReply,
+	ch <- consolepkg.Event{
+		Type:    consolepkg.EventTypeReply,
 		Content: large,
 	}
 

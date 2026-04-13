@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
+	consolepkg "github.com/jkatigb/agentctl/internal/console"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/observability"
-	"github.com/jkatigb/agentctl/internal/web/consolews"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 // Runner executes LLM requests for console sessions.
@@ -38,8 +39,36 @@ func NewRunner(cfg RunnerConfig) *Runner {
 	}
 }
 
-// Run implements consolews.Runner.
-func (r *Runner) Run(ctx context.Context, session consolews.SessionHandle, userMessage string, correlationID string) error {
+// NewDefaultRunnerFactory builds the default console runner factory used by
+// the web transport.
+func NewDefaultRunnerFactory(ctx context.Context) consolepkg.RunnerFactory {
+	config.LoadDotEnv()
+
+	baseCfg := engine.LLMChatConfig{
+		MaxIterations: 20,
+		Temperature:   0.0,
+		MaxTokens:     4096,
+	}
+
+	return func(session consolepkg.SessionHandle) consolepkg.Runner {
+		_, err := engine.NewLLMChatEngine(baseCfg)
+		if err != nil {
+			observability.Emit(ctx, observability.NewEvent("console.runner_factory_invalid").
+				WithComponent("console").
+				WithSession(session.ID(), "").
+				Error(err, 0))
+			return nil
+		}
+
+		return NewRunner(RunnerConfig{
+			BaseConfig: baseCfg,
+			Tools:      nil,
+		})
+	}
+}
+
+// Run implements the console session runner contract.
+func (r *Runner) Run(ctx context.Context, session consolepkg.SessionHandle, userMessage string, correlationID string) error {
 	start := time.Now()
 
 	// Create a new engine each turn so we can apply per-turn overrides.
@@ -122,7 +151,7 @@ func (r *Runner) Run(ctx context.Context, session consolews.SessionHandle, userM
 
 	// Add assistant response to session history with tool calls and injected context metadata
 	if output.AssistantText != "" || len(output.ToolCalls) > 0 {
-		msg := consolews.Message{
+		msg := consolepkg.Message{
 			Role:    "assistant",
 			Content: output.AssistantText,
 		}
@@ -199,7 +228,7 @@ func (r *Runner) Run(ctx context.Context, session consolews.SessionHandle, userM
 }
 
 // buildInput builds the engine input from session history.
-func (r *Runner) buildInput(session consolews.SessionHandle, userMessage string) engine.EngineInput {
+func (r *Runner) buildInput(session consolepkg.SessionHandle, userMessage string) engine.EngineInput {
 	// Convert session messages to engine messages
 	history := session.Messages()
 	messages := make([]engine.Message, 0, len(history)+1)
@@ -225,7 +254,7 @@ func (r *Runner) buildInput(session consolews.SessionHandle, userMessage string)
 
 // StreamCallback handles streaming events from the engine.
 type StreamCallback struct {
-	session       consolews.SessionHandle
+	session       consolepkg.SessionHandle
 	correlationID string
 }
 

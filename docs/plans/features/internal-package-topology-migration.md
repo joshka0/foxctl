@@ -610,7 +610,7 @@ Story 2 target:
 Required placement rule from Story 2:
 
 - `internal/console` owns reusable console-session primitives such as
-  correlation tracking
+  correlation tracking and session persistence contracts
 - `internal/consoleapp` owns runner, stream parsing, and application/runtime
   behavior for console sessions
 - `internal/web/consolews` remains the transport host for console sessions
@@ -619,7 +619,7 @@ Story 2 should end with these durable decisions:
 
 | Package/root | Slice | Decision |
 |------|-------|----------|
-| `internal/console` | console utilities | keep as narrow utility slice |
+| `internal/console` | console utilities and lifecycle contract | keep as the canonical console ownership slice |
 | `internal/consoleapp` | console application | keep as the runtime/app slice |
 | `internal/web/consolews` | interface transport | keep as the web transport entrypoint |
 
@@ -634,18 +634,24 @@ Story 3 target:
 - choose the smallest safe slice that proves the tooling family without a
   package rename
 
-Recommended first batch:
+Implemented first batch:
 
-- package-comment and documentation guardrails only:
-  - clarify generic tooling ownership in `internal/tooling`
-  - clarify runtime-facing ownership in `internal/agent/tools`
-  - clarify the console utility versus console application split in
-    `internal/console` and `internal/consoleapp`
+- generic tooling boundary:
+  - `internal/agent/tools` now exposes its own runtime-facing registry contract
+    instead of exporting the generic tooling registry directly
+- console boundary:
+  - `internal/console` owns console session transcript/config/event primitives
+    plus the session lifecycle/persistence contract
+  - `internal/consoleapp` consumes the narrow console session handle/runtime
+    contract
+- `internal/web/consolews` acts as websocket transport host and wire adapter rather
+  than session-model owner
+  - `internal/domain/console` is now the canonical console payload contract
 
 Why this batch:
 
-- it proves the tooling family contract in code immediately
-- it avoids changing tool execution semantics or console runtime behavior
+- it proves the tooling family contract in code, not just in comments
+- it narrows console ownership without changing user-facing console behavior
 - it keeps later package moves optional and incremental
 
 Non-goals for Story 3:
@@ -659,8 +665,8 @@ Exit criteria:
 - generic tooling packages are clearly separated from `internal/agent/tools`
 - `console` and `consoleapp` stop reading like accidental duplication in the
   target topology
-- the first tooling move batch is small enough to land without a repo-wide
-  rename
+- the first tooling move batch lands as code-boundary changes without a
+  repo-wide rename
 
 ### Final proposal. Verification and adoption
 

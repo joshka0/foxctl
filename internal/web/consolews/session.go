@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	consolepkg "github.com/jkatigb/agentctl/internal/console"
+	domainconsole "github.com/jkatigb/agentctl/internal/domain/console"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/oklog/ulid/v2"
 )
@@ -22,10 +24,10 @@ type Session struct {
 	mu          sync.RWMutex
 	clients     map[*Client]struct{}
 	subMu       sync.RWMutex
-	subscribers map[chan Payload]struct{}
+	subscribers map[chan consolepkg.Event]struct{}
 
 	// Conversation state
-	messages []Message
+	messages []consolepkg.Message
 
 	// Cancellation for in-flight requests
 	cancelMu sync.Mutex
@@ -35,28 +37,10 @@ type Session struct {
 	// This allows REST callers to supply per-turn overrides (e.g., provider/model).
 	inflightMeta map[string]any
 
-	// Runner callback (set by consoleapp)
-	runner Runner
+	// Runner callback (set by console runtime wiring)
+	runner consolepkg.Runner
 
 	created time.Time
-}
-
-// Runner executes LLM requests for the console.
-type Runner interface {
-	// Run executes a user message and streams responses.
-	Run(ctx context.Context, session SessionHandle, userMessage string, correlationID string) error
-}
-
-// SessionHandle is the minimal console session surface used by runtime runners.
-type SessionHandle interface {
-	ID() string
-	Workspace() string
-	SystemPrompt() string
-	Messages() []Message
-	AddMessage(Message)
-	InFlightMetadata(correlationID string) map[string]any
-	BroadcastEvent(correlationID, content string, metadata map[string]any)
-	BroadcastReply(correlationID, content string)
 }
 
 // ID returns the session ID.
@@ -80,18 +64,18 @@ func (s *Session) SystemPrompt() string {
 }
 
 // SetRunner sets the LLM runner for this session.
-func (s *Session) SetRunner(runner Runner) {
+func (s *Session) SetRunner(runner consolepkg.Runner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.runner = runner
 }
 
 // Info returns public session information.
-func (s *Session) Info() SessionInfo {
+func (s *Session) Info() consolepkg.SessionInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return SessionInfo{
+	return consolepkg.SessionInfo{
 		ID:           s.id,
 		Workspace:    s.workspace,
 		Profile:      s.profile,
@@ -102,17 +86,17 @@ func (s *Session) Info() SessionInfo {
 }
 
 // Messages returns the conversation history.
-func (s *Session) Messages() []Message {
+func (s *Session) Messages() []consolepkg.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	msgs := make([]Message, len(s.messages))
+	msgs := make([]consolepkg.Message, len(s.messages))
 	copy(msgs, s.messages)
 	return msgs
 }
 
 // AddMessage adds a message to the conversation history.
-func (s *Session) AddMessage(msg Message) {
+func (s *Session) AddMessage(msg consolepkg.Message) {
 	s.mu.Lock()
 	if msg.Timestamp == 0 {
 		msg.Timestamp = time.Now().UnixMilli()
@@ -148,7 +132,7 @@ func (s *Session) RemoveClient(c *Client) {
 }
 
 // Broadcast sends a payload to all connected clients.
-func (s *Session) Broadcast(p Payload) {
+func (s *Session) Broadcast(p domainconsole.Payload) {
 	data, err := json.Marshal(p)
 	if err != nil {
 		observability.Emit(context.Background(), observability.NewEvent("consolews.marshal_failed").
@@ -164,10 +148,18 @@ func (s *Session) Broadcast(p Payload) {
 	}
 	s.mu.RUnlock()
 
+	event := consolepkg.Event{
+		Type:          consolepkg.EventType(p.Type),
+		ConsoleID:     p.ConsoleID,
+		CorrelationID: p.CorrelationID,
+		Content:       p.Content,
+		Metadata:      cloneMetadata(p.Metadata),
+	}
+
 	s.subMu.RLock()
 	for ch := range s.subscribers {
 		select {
-		case ch <- p:
+		case ch <- event:
 		default:
 			// Subscriber buffer full, best effort
 		}
@@ -177,41 +169,35 @@ func (s *Session) Broadcast(p Payload) {
 
 // BroadcastEvent broadcasts an event to all clients.
 func (s *Session) BroadcastEvent(correlationID, content string, metadata map[string]any) {
-	s.Broadcast(NewEventPayload(s.id, correlationID, content, metadata))
+	s.Broadcast(domainconsole.NewEventPayload("", s.id, correlationID, content, metadata))
 }
 
 // BroadcastReply broadcasts a reply to all clients.
 func (s *Session) BroadcastReply(correlationID, content string) {
-	s.Broadcast(NewReplyPayload(s.id, correlationID, content))
+	s.Broadcast(domainconsole.NewReplyPayload("", s.id, correlationID, content))
 }
 
-// HandlePayload processes an incoming payload from a client.
-func (s *Session) HandlePayload(ctx context.Context, client *Client, p Payload) {
-	switch p.Type {
-	case PayloadTypeAsk:
-		s.handleAsk(ctx, client, p)
-	case PayloadTypeCmd:
-		s.handleCmd(ctx, client, p)
-	default:
-		observability.Emit(ctx, observability.NewEvent("consolews.unknown_payload").
-			WithComponent("consolews").
-			WithSession(s.id, "").
-			WithData("type", string(p.Type)).
-			Error(nil, 0))
-	}
+// HandleAsk processes a console ask request independent of websocket transport.
+func (s *Session) HandleAsk(ctx context.Context, req consolepkg.AskRequest) {
+	s.handleAsk(ctx, req)
 }
 
-// handleAsk processes an ask payload (user message).
-func (s *Session) handleAsk(ctx context.Context, client *Client, p Payload) {
-	correlationID := p.CorrelationID
+// HandleCommand processes a console control command independent of websocket transport.
+func (s *Session) HandleCommand(ctx context.Context, req consolepkg.CommandRequest) {
+	s.handleCommand(ctx, req)
+}
+
+// handleAsk processes an ask request (user message).
+func (s *Session) handleAsk(ctx context.Context, req consolepkg.AskRequest) {
+	correlationID := req.CorrelationID
 	if correlationID == "" {
 		correlationID = ulid.Make().String()
 	}
 
 	// Add user message to history
-	s.AddMessage(Message{
+	s.AddMessage(consolepkg.Message{
 		Role:    "user",
-		Content: p.Content,
+		Content: req.Content,
 	})
 
 	// Check if runner is set
@@ -240,7 +226,7 @@ func (s *Session) handleAsk(ctx context.Context, client *Client, p Payload) {
 	}
 	s.cancel = cancel
 	s.inflight = correlationID
-	s.inflightMeta = cloneMetadata(p.Metadata)
+	s.inflightMeta = cloneMetadata(req.Metadata)
 	s.cancelMu.Unlock()
 
 	// Run in background
@@ -255,7 +241,7 @@ func (s *Session) handleAsk(ctx context.Context, client *Client, p Payload) {
 			s.cancelMu.Unlock()
 		}()
 
-		if err := runner.Run(reqCtx, s, p.Content, correlationID); err != nil {
+		if err := runner.Run(reqCtx, s, req.Content, correlationID); err != nil {
 			// Check if the error itself is due to context cancellation
 			// (not just if the context happens to be cancelled)
 			if errors.Is(err, context.Canceled) {
@@ -273,20 +259,16 @@ func (s *Session) handleAsk(ctx context.Context, client *Client, p Payload) {
 	}()
 }
 
-// handleCmd processes a command payload.
-func (s *Session) handleCmd(ctx context.Context, client *Client, p Payload) {
-	if p.Cmd == nil {
-		return
-	}
-
-	switch p.Cmd.Name {
-	case "cancel":
-		s.handleCancel(p.Cmd.CorrelationID)
+// handleCommand processes a command request.
+func (s *Session) handleCommand(ctx context.Context, req consolepkg.CommandRequest) {
+	switch req.Name {
+	case domainconsole.CommandCancel:
+		s.handleCancel(req.CorrelationID)
 	default:
 		observability.Emit(ctx, observability.NewEvent("consolews.unknown_command").
 			WithComponent("consolews").
 			WithSession(s.id, "").
-			WithData("cmd", p.Cmd.Name).
+			WithData("cmd", req.Name).
 			Error(nil, 0))
 	}
 }
@@ -348,14 +330,14 @@ func (s *Session) InFlightMetadata(correlationID string) map[string]any {
 }
 
 // Subscribe registers a subscriber channel to receive broadcast payloads.
-func (s *Session) Subscribe(buffer int) (<-chan Payload, func()) {
+func (s *Session) Subscribe(buffer int) (<-chan consolepkg.Event, func()) {
 	if buffer <= 0 {
 		buffer = 1
 	}
-	ch := make(chan Payload, buffer)
+	ch := make(chan consolepkg.Event, buffer)
 	s.subMu.Lock()
 	if s.subscribers == nil {
-		s.subscribers = make(map[chan Payload]struct{})
+		s.subscribers = make(map[chan consolepkg.Event]struct{})
 	}
 	s.subscribers[ch] = struct{}{}
 	s.subMu.Unlock()

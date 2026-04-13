@@ -90,7 +90,7 @@ type DiscordSettings struct {
 	// ChatChannelIDs lists channels where the bot responds to all messages (not just mentions).
 	ChatChannelIDs []string `mapstructure:"chat_channel_ids" json:"chat_channel_ids"`
 
-	// ChatProfile is the consolews session profile for chat messages (default: "explorer").
+	// ChatProfile is the console session profile for chat messages (default: "explorer").
 	ChatProfile string `mapstructure:"chat_profile" json:"chat_profile"`
 
 	// ChatSystemPrompt overrides the system prompt for chat sessions.
@@ -122,7 +122,7 @@ type TelegramSettings struct {
 	// ChatIDs lists chats where the bot responds to all messages (not just mentions).
 	ChatIDs []int64 `mapstructure:"chat_ids" json:"chat_ids"`
 
-	// ChatProfile is the consolews session profile for chat messages (default: "explorer").
+	// ChatProfile is the console session profile for chat messages (default: "explorer").
 	ChatProfile string `mapstructure:"chat_profile" json:"chat_profile"`
 
 	// ChatSystemPrompt overrides the system prompt for chat sessions.
@@ -160,7 +160,7 @@ type TeamsSettings struct {
 	// Outside this list: respond only when mentioned (except 1:1 chats).
 	ChatConversationIDs []string `mapstructure:"chat_conversation_ids" json:"chat_conversation_ids"`
 
-	// ChatProfile is the consolews session profile for chat messages (default: "explorer").
+	// ChatProfile is the console session profile for chat messages (default: "explorer").
 	ChatProfile string `mapstructure:"chat_profile" json:"chat_profile"`
 
 	// ChatSystemPrompt overrides the system prompt for chat sessions.

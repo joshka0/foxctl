@@ -35,8 +35,6 @@ type Adapter struct {
 	sseHub    *sse.Hub
 	sseClient *sse.Client
 
-	consoleHub interface{} // *consolews.Hub, stored as interface to avoid import cycle
-
 	threadMap sync.Map // sessionID -> threadID
 
 	msgSem chan struct{} // limits concurrent message handlers
@@ -494,11 +492,6 @@ func toDiscordOptionType(t chatadapter.OptionType) discordgo.ApplicationCommandO
 // SetSSEHub configures the SSE hub for event listening.
 func (a *Adapter) SetSSEHub(hub *sse.Hub) {
 	a.sseHub = hub
-}
-
-// SetConsoleHub stores the console hub reference for session bridge wiring.
-func (a *Adapter) SetConsoleHub(hub interface{}) {
-	a.consoleHub = hub
 }
 
 // handleMessageCreate processes incoming Discord messages for natural language chat.

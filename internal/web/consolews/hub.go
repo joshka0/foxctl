@@ -2,7 +2,6 @@ package consolews
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -11,6 +10,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	consolepkg "github.com/jkatigb/agentctl/internal/console"
+	domainconsole "github.com/jkatigb/agentctl/internal/domain/console"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/oklog/ulid/v2"
 )
@@ -31,15 +32,12 @@ func getAllowedOrigins() []string {
 	}
 }
 
-// RunnerFactory creates a Runner for a new session.
-type RunnerFactory func(session *Session) Runner
-
 // Hub manages WebSocket connections for console sessions.
 type Hub struct {
 	mu            sync.RWMutex
 	sessions      map[string]*Session
-	persistence   *PersistenceAdapter
-	runnerFactory RunnerFactory
+	persistence   consolepkg.SessionPersistence
+	runnerFactory consolepkg.RunnerFactory
 
 	// ctx is the hub's lifecycle context - cancelled on shutdown.
 	ctx context.Context
@@ -61,25 +59,50 @@ func (h *Hub) Wait() {
 	h.wg.Wait()
 }
 
-// SetPersistence sets the persistence adapter for saving sessions.
-func (h *Hub) SetPersistence(p *PersistenceAdapter) {
+// SetPersistence sets the console-owned persistence adapter for saving sessions.
+func (h *Hub) SetPersistence(p consolepkg.SessionPersistence) {
 	h.persistence = p
 }
 
+// persistAsync runs a persistence function asynchronously with a timeout.
+// The goroutine is tracked by wg for graceful shutdown, and derives its
+// context from parentCtx (FC/IS compliant - no context.Background()).
+func persistAsync(parentCtx context.Context, wg *sync.WaitGroup, name string, fn func(ctx context.Context) error) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+		defer cancel()
+		if err := fn(ctx); err != nil {
+			observability.Emit(ctx, observability.NewEvent("consolews.persistence_failed").
+				WithComponent("consolews").
+				WithData("op", name).
+				Error(err, 0))
+		}
+	}()
+}
+
 // SetRunnerFactory sets the factory for creating LLM runners for sessions.
-func (h *Hub) SetRunnerFactory(f RunnerFactory) {
+func (h *Hub) SetRunnerFactory(f consolepkg.RunnerFactory) {
 	h.runnerFactory = f
 }
 
-// GetSession returns an existing session by ID.
-func (h *Hub) GetSession(id string) *Session {
+func (h *Hub) getSession(id string) *Session {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.sessions[id]
 }
 
-// CreateSession creates a new console session.
-func (h *Hub) CreateSession(cfg SessionConfig) *Session {
+// GetSession returns an existing session by ID.
+func (h *Hub) GetSession(id string) consolepkg.Session {
+	session := h.getSession(id)
+	if session == nil {
+		return nil
+	}
+	return session
+}
+
+func (h *Hub) createSession(cfg consolepkg.SessionConfig) *Session {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -94,8 +117,8 @@ func (h *Hub) CreateSession(cfg SessionConfig) *Session {
 		systemPrompt: cfg.SystemPrompt,
 		hub:          h,
 		clients:      make(map[*Client]struct{}),
-		subscribers:  make(map[chan Payload]struct{}),
-		messages:     make([]Message, 0),
+		subscribers:  make(map[chan consolepkg.Event]struct{}),
+		messages:     make([]consolepkg.Message, 0),
 		created:      time.Now(),
 	}
 
@@ -125,8 +148,12 @@ func (h *Hub) CreateSession(cfg SessionConfig) *Session {
 	return session
 }
 
-// RemoveSession removes a session from the hub.
-func (h *Hub) RemoveSession(id string) {
+// CreateSession creates a new console session.
+func (h *Hub) CreateSession(cfg consolepkg.SessionConfig) consolepkg.Session {
+	return h.createSession(cfg)
+}
+
+func (h *Hub) removeSession(id string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -148,34 +175,21 @@ func (h *Hub) RemoveSession(id string) {
 	}
 }
 
+// RemoveSession removes a session from the hub.
+func (h *Hub) RemoveSession(id string) {
+	h.removeSession(id)
+}
+
 // ListSessions returns all active session IDs.
-func (h *Hub) ListSessions() []SessionInfo {
+func (h *Hub) ListSessions() []consolepkg.SessionInfo {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	infos := make([]SessionInfo, 0, len(h.sessions))
+	infos := make([]consolepkg.SessionInfo, 0, len(h.sessions))
 	for _, s := range h.sessions {
 		infos = append(infos, s.Info())
 	}
 	return infos
-}
-
-// SessionInfo contains public session metadata.
-type SessionInfo struct {
-	ID           string    `json:"id"`
-	Workspace    string    `json:"workspace"`
-	Profile      string    `json:"profile"`
-	Created      time.Time `json:"created"`
-	MessageCount int       `json:"message_count"`
-	ClientCount  int       `json:"client_count"`
-}
-
-// SessionConfig configures a new session.
-type SessionConfig struct {
-	ID           string
-	Workspace    string
-	Profile      string
-	SystemPrompt string
 }
 
 // Client represents a WebSocket client connected to a session.
@@ -207,7 +221,7 @@ func HandleWebSocket(hub *Hub) http.HandlerFunc {
 		sessionID := path[len(prefix):]
 
 		// Get or create session
-		session := hub.GetSession(sessionID)
+		session := hub.getSession(sessionID)
 		if session == nil {
 			// Auto-create session with query params
 			workspace := r.URL.Query().Get("workspace")
@@ -216,7 +230,7 @@ func HandleWebSocket(hub *Hub) http.HandlerFunc {
 				profile = "explorer"
 			}
 
-			session = hub.CreateSession(SessionConfig{
+			session = hub.createSession(consolepkg.SessionConfig{
 				ID:        sessionID,
 				Workspace: workspace,
 				Profile:   profile,
@@ -256,15 +270,35 @@ func (c *Client) readPump(ctx context.Context) {
 	}()
 
 	for {
-		var payload Payload
+		var payload domainconsole.Payload
 		err := wsjson.Read(ctx, c.conn, &payload)
 		if err != nil {
 			// Normal closure is expected, don't log
 			return
 		}
 
-		// Handle the payload
-		c.session.HandlePayload(ctx, c, payload)
+		switch payload.Type {
+		case domainconsole.PayloadTypeAsk:
+			c.session.HandleAsk(ctx, consolepkg.AskRequest{
+				CorrelationID: payload.CorrelationID,
+				Content:       payload.Content,
+				Metadata:      payload.Metadata,
+			})
+		case domainconsole.PayloadTypeCmd:
+			if payload.Cmd == nil {
+				continue
+			}
+			c.session.HandleCommand(ctx, consolepkg.CommandRequest{
+				Name:          payload.Cmd.Name,
+				CorrelationID: payload.Cmd.CorrelationID,
+			})
+		default:
+			observability.Emit(ctx, observability.NewEvent("consolews.unknown_payload").
+				WithComponent("consolews").
+				WithSession(c.session.id, "").
+				WithData("type", string(payload.Type)).
+				Error(nil, 0))
+		}
 	}
 }
 
@@ -304,75 +338,5 @@ func (c *Client) Send(data []byte) {
 	case c.send <- data:
 	default:
 		// Buffer full, drop message (best effort)
-	}
-}
-
-// SendPayload sends a typed payload to the client.
-func (c *Client) SendPayload(p Payload) error {
-	data, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-	c.Send(data)
-	return nil
-}
-
-// Payload types
-
-// PayloadType identifies the payload type.
-type PayloadType string
-
-const (
-	PayloadTypeAsk   PayloadType = "ask"
-	PayloadTypeCmd   PayloadType = "cmd"
-	PayloadTypeEvent PayloadType = "event"
-	PayloadTypeReply PayloadType = "reply"
-)
-
-// Payload is the base payload structure.
-type Payload struct {
-	Type          PayloadType    `json:"type"`
-	ActorID       string         `json:"actor_id,omitempty"`
-	ConsoleID     string         `json:"console_id,omitempty"`
-	CorrelationID string         `json:"correlation_id,omitempty"`
-	Content       string         `json:"content,omitempty"`
-	Metadata      map[string]any `json:"metadata,omitempty"`
-	Cmd           *CmdPayload    `json:"cmd,omitempty"`
-}
-
-// CmdPayload is the command payload.
-type CmdPayload struct {
-	Name          string `json:"name"`
-	CorrelationID string `json:"correlation_id,omitempty"`
-}
-
-// Message is a conversation message in the session.
-type Message struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	Timestamp  int64          `json:"timestamp"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	ToolCalls  []any          `json:"tool_calls,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-}
-
-// NewEventPayload creates an event payload.
-func NewEventPayload(consoleID, correlationID, content string, metadata map[string]any) Payload {
-	return Payload{
-		Type:          PayloadTypeEvent,
-		ConsoleID:     consoleID,
-		CorrelationID: correlationID,
-		Content:       content,
-		Metadata:      metadata,
-	}
-}
-
-// NewReplyPayload creates a reply payload.
-func NewReplyPayload(consoleID, correlationID, content string) Payload {
-	return Payload{
-		Type:          PayloadTypeReply,
-		ConsoleID:     consoleID,
-		CorrelationID: correlationID,
-		Content:       content,
 	}
 }

@@ -11,15 +11,16 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
+	consolepkg "github.com/jkatigb/agentctl/internal/console"
+	domainconsole "github.com/jkatigb/agentctl/internal/domain/console"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/conversationsettings"
-	"github.com/jkatigb/agentctl/internal/web/consolews"
 )
 
 // ConsoleSessionsHandler returns a handler for GET /api/console/sessions.
 // Lists all active console sessions.
-func ConsoleSessionsHandler(hub *consolews.Hub, cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+func ConsoleSessionsHandler(hub consolepkg.SessionManager, cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			ConsoleSessionCreateHandler(hub, cfg, log)(w, r)
@@ -35,7 +36,7 @@ func ConsoleSessionsHandler(hub *consolews.Hub, cfg config.Config, log zerolog.L
 
 		sessions := hub.ListSessions()
 		if workspace != "" {
-			filtered := make([]consolews.SessionInfo, 0)
+			filtered := make([]consolepkg.SessionInfo, 0)
 			for _, s := range sessions {
 				if s.Workspace == workspace {
 					filtered = append(filtered, s)
@@ -56,7 +57,7 @@ func ConsoleSessionsHandler(hub *consolews.Hub, cfg config.Config, log zerolog.L
 // It expects a JSON body with fields `workspace`, `profile`, and `system_prompt` (defaults `profile` to "explorer" when empty),
 // creates a session via the provided hub, logs the creation, and responds with HTTP 201 and the session info.
 // Responds with HTTP 400 for invalid JSON and HTTP 405 for non-POST methods.
-func ConsoleSessionCreateHandler(hub *consolews.Hub, cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+func ConsoleSessionCreateHandler(hub consolepkg.SessionManager, cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -84,7 +85,7 @@ func ConsoleSessionCreateHandler(hub *consolews.Hub, cfg config.Config, log zero
 			req.Profile = "explorer"
 		}
 
-		session := hub.CreateSession(consolews.SessionConfig{
+		session := hub.CreateSession(consolepkg.SessionConfig{
 			ID:           ulid.Make().String(),
 			Workspace:    req.Workspace,
 			Profile:      req.Profile,
@@ -136,7 +137,7 @@ func ConsoleSessionCreateHandler(hub *consolews.Hub, cfg config.Config, log zero
 }
 
 // ConsoleSessionDetailHandler returns a handler for GET /api/console/sessions/:id.
-func ConsoleSessionDetailHandler(hub *consolews.Hub, cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+func ConsoleSessionDetailHandler(hub consolepkg.SessionManager, cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract session ID from path: /api/console/sessions/{id}
 		path := r.URL.Path
@@ -210,7 +211,7 @@ func ConsoleSessionDetailHandler(hub *consolews.Hub, cfg config.Config, log zero
 // and dispatched to the session for background processing with a 30-minute timeout; the work is started in the
 // background so it can outlive the HTTP request. On success the handler responds with HTTP 202 and a JSON body
 // containing the `correlation_id` and a confirmation message.
-func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews.Session, cfg config.Config, log zerolog.Logger) {
+func handleSessionAsk(w http.ResponseWriter, r *http.Request, session consolepkg.Session, cfg config.Config, log zerolog.Logger) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -267,15 +268,6 @@ func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews
 		metadata["llm_model"] = effectiveModel
 	}
 
-	// Create a fake payload and handle it
-	payload := consolews.Payload{
-		Type:          consolews.PayloadTypeAsk,
-		ConsoleID:     session.ID(),
-		CorrelationID: req.CorrelationID,
-		Content:       req.Content,
-		Metadata:      metadata,
-	}
-
 	// Handle the payload (async) - use timeout context to prevent unbounded execution
 	// 30 minute timeout for long-running agent tasks
 	// Note: We intentionally use context.Background() to let the work outlive this HTTP request.
@@ -283,7 +275,11 @@ func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	go func() {
 		defer cancel() // Ensure context resources are freed when work completes
-		session.HandlePayload(ctx, nil, payload)
+		session.HandleAsk(ctx, consolepkg.AskRequest{
+			CorrelationID: req.CorrelationID,
+			Content:       req.Content,
+			Metadata:      metadata,
+		})
 	}()
 
 	log.Info().
@@ -302,7 +298,7 @@ func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews
 // It accepts an optional JSON body with a `correlation_id`, sends a cancel
 // command payload to the provided session using the request context, logs the
 // cancellation, and responds with a JSON acknowledgement.
-func handleSessionCancel(w http.ResponseWriter, r *http.Request, session *consolews.Session, log zerolog.Logger) {
+func handleSessionCancel(w http.ResponseWriter, r *http.Request, session consolepkg.Session, log zerolog.Logger) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -313,17 +309,10 @@ func handleSessionCancel(w http.ResponseWriter, r *http.Request, session *consol
 	}
 	_ = readJSON(w, r, &req) // Optional body
 
-	// Create cancel command payload
-	payload := consolews.Payload{
-		Type:      consolews.PayloadTypeCmd,
-		ConsoleID: session.ID(),
-		Cmd: &consolews.CmdPayload{
-			Name:          "cancel",
-			CorrelationID: req.CorrelationID,
-		},
-	}
-
-	session.HandlePayload(r.Context(), nil, payload)
+	session.HandleCommand(r.Context(), consolepkg.CommandRequest{
+		Name:          domainconsole.CommandCancel,
+		CorrelationID: req.CorrelationID,
+	})
 
 	log.Info().
 		Str("session_id", session.ID()).
@@ -337,7 +326,7 @@ func handleSessionCancel(w http.ResponseWriter, r *http.Request, session *consol
 }
 
 // handleSessionMessages handles GET /api/console/sessions/:id/messages.
-func handleSessionMessages(w http.ResponseWriter, r *http.Request, session *consolews.Session, log zerolog.Logger) {
+func handleSessionMessages(w http.ResponseWriter, r *http.Request, session consolepkg.Session, log zerolog.Logger) {
 	if r.Method != http.MethodGet {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -351,7 +340,7 @@ func handleSessionMessages(w http.ResponseWriter, r *http.Request, session *cons
 }
 
 // handleSessionSettings handles GET/PATCH /api/console/sessions/:id/settings.
-func handleSessionSettings(w http.ResponseWriter, r *http.Request, session *consolews.Session, cfg config.Config, log zerolog.Logger) {
+func handleSessionSettings(w http.ResponseWriter, r *http.Request, session consolepkg.Session, cfg config.Config, log zerolog.Logger) {
 	store, err := conversationsettings.Open(r.Context(), cfg.Storage.Root)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to open conversation settings store")
@@ -419,7 +408,7 @@ func handleSessionSettings(w http.ResponseWriter, r *http.Request, session *cons
 }
 
 // handleSessionEvents handles GET /api/console/sessions/:id/events (SSE).
-func handleSessionEvents(w http.ResponseWriter, r *http.Request, session *consolews.Session, log zerolog.Logger) {
+func handleSessionEvents(w http.ResponseWriter, r *http.Request, session consolepkg.Session, log zerolog.Logger) {
 	if r.Method != http.MethodGet {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return

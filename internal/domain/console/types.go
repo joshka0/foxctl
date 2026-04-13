@@ -34,44 +34,12 @@ type Payload struct {
 	// Content is the text message or chunk
 	Content string `json:"content"`
 
-	// Metadata provides additional context
-	Metadata *Metadata `json:"metadata,omitempty"`
+	// Metadata provides additional context for streaming updates, tool events,
+	// request overrides, and other console payload annotations.
+	Metadata map[string]any `json:"metadata,omitempty"`
 
 	// Cmd is populated for control commands
 	Cmd *Command `json:"cmd,omitempty"`
-}
-
-// Metadata provides additional context for console messages.
-type Metadata struct {
-	// MIME type: text/plain, text/markdown, application/json
-	MIME string `json:"mime,omitempty"`
-
-	// Partial indicates this is a streaming chunk, not complete
-	Partial bool `json:"partial,omitempty"`
-
-	// ExitCode is set on final reply if a command was run
-	ExitCode *int `json:"exit_code,omitempty"`
-
-	// Error contains error details if something went wrong
-	Error string `json:"error,omitempty"`
-
-	// Progress provides percentage completion info
-	Progress *Progress `json:"progress,omitempty"`
-
-	// Tool is the name of the tool being invoked
-	Tool string `json:"tool,omitempty"`
-
-	// CASDigest is set when content references CAS storage
-	CASDigest string `json:"cas_digest,omitempty"`
-}
-
-// Progress indicates completion status for long-running operations.
-type Progress struct {
-	// Pct is the percentage complete (0-100)
-	Pct int `json:"pct"`
-
-	// Phase describes the current operation phase
-	Phase string `json:"phase"`
 }
 
 // Command is a control command from console to actor.
@@ -111,16 +79,14 @@ func NewReplyPayload(actorID, consoleID, correlationID, content string) Payload 
 }
 
 // NewEventPayload creates a new streaming event payload.
-func NewEventPayload(actorID, consoleID, correlationID, content string, partial bool) Payload {
+func NewEventPayload(actorID, consoleID, correlationID, content string, metadata map[string]any) Payload {
 	return Payload{
 		Type:          PayloadTypeEvent,
 		ActorID:       actorID,
 		ConsoleID:     consoleID,
 		CorrelationID: correlationID,
 		Content:       content,
-		Metadata: &Metadata{
-			Partial: partial,
-		},
+		Metadata:      metadata,
 	}
 }
 
@@ -142,13 +108,21 @@ func (p Payload) IsComplete() bool {
 	if p.Type == PayloadTypeReply {
 		return true
 	}
-	if p.Metadata != nil && !p.Metadata.Partial {
-		return true
+	if p.Metadata != nil {
+		if partial, ok := p.Metadata["partial"].(bool); ok {
+			return !partial
+		}
 	}
 	return false
 }
 
 // HasError returns true if this payload contains an error.
 func (p Payload) HasError() bool {
-	return p.Metadata != nil && p.Metadata.Error != ""
+	if p.Metadata == nil {
+		return false
+	}
+	if errMsg, ok := p.Metadata["error"].(string); ok {
+		return errMsg != ""
+	}
+	return false
 }

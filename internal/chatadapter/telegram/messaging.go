@@ -3,12 +3,12 @@ package telegram
 import (
 	"github.com/jkatigb/agentctl/internal/chatadapter"
 	"github.com/jkatigb/agentctl/internal/companion"
+	consolepkg "github.com/jkatigb/agentctl/internal/console"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/web/consolews"
 )
 
 // NewSessionBridge returns a shared chatadapter.SessionBridge configured for Telegram.
-func NewSessionBridge(hub *consolews.Hub, adapter *Adapter, cfg config.TelegramSettings, turnLock companion.Locker) *chatadapter.SessionBridge {
+func NewSessionBridge(hub consolepkg.SessionManager, adapter *Adapter, cfg config.TelegramSettings, turnLock companion.Locker) *chatadapter.SessionBridge {
 	return chatadapter.NewSessionBridge(hub, adapter, chatadapter.SessionBridgeConfig{
 		PlatformName:     "telegram",
 		MaxMessageLen:    telegramMaxMessageLen,

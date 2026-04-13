@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/companion"
+	consolepkg "github.com/jkatigb/agentctl/internal/console"
 	"github.com/jkatigb/agentctl/internal/domain/identity"
 	"github.com/jkatigb/agentctl/internal/observability"
-	"github.com/jkatigb/agentctl/internal/web/consolews"
 )
 
 // Clock provides time operations for testability.
@@ -33,25 +33,26 @@ type SessionBridgeConfig struct {
 	PlatformName     string // "discord" | "telegram" | "teams" (observability + metadata)
 	MaxMessageLen    int    // Discord: 2000, Telegram: 4096, Teams: 4000
 	EditIntervalMS   int    // streaming edit cadence (default 1500ms)
-	ChatProfile      string // consolews session profile (default "explorer")
+	ChatProfile      string // console session profile (default "explorer")
 	ChatSystemPrompt string // optional override
 	Clock            Clock  // optional; defaults to realClock{}
 }
 
-// SessionBridge maps chat channels/conversations to consolews sessions for natural language chat.
+// SessionBridge maps chat channels/conversations to console sessions for natural language chat.
 type SessionBridge struct {
-	consoleHub *consolews.Hub
-	typing     TypingIndicator
-	cfg        SessionBridgeConfig
-	clock      Clock
+	consoleSessions consolepkg.SessionManager
+	typing          TypingIndicator
+	cfg             SessionBridgeConfig
+	clock           Clock
 
 	turnLock companion.Locker
 
 	channelSessions sync.Map // channelKey -> sessionID (string)
 }
 
-// NewSessionBridge creates a SessionBridge wired to the given console hub, typing adapter, and turn locker.
-func NewSessionBridge(hub *consolews.Hub, typing TypingIndicator, cfg SessionBridgeConfig, turnLock companion.Locker) *SessionBridge {
+// NewSessionBridge creates a SessionBridge wired to the given console session
+// manager, typing adapter, and turn locker.
+func NewSessionBridge(hub consolepkg.SessionManager, typing TypingIndicator, cfg SessionBridgeConfig, turnLock companion.Locker) *SessionBridge {
 	clk := cfg.Clock
 	if clk == nil {
 		clk = realClock{}
@@ -60,15 +61,16 @@ func NewSessionBridge(hub *consolews.Hub, typing TypingIndicator, cfg SessionBri
 		turnLock = companion.NewTurnLock()
 	}
 	return &SessionBridge{
-		consoleHub: hub,
-		typing:     typing,
-		cfg:        cfg,
-		clock:      clk,
-		turnLock:   turnLock,
+		consoleSessions: hub,
+		typing:          typing,
+		cfg:             cfg,
+		clock:           clk,
+		turnLock:        turnLock,
 	}
 }
 
-// HandleMessage processes a natural language message by routing it through a consolews session.
+// HandleMessage processes a natural language message by routing it through a
+// managed console session.
 func (sb *SessionBridge) HandleMessage(ctx context.Context, evt MessageEvent) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -120,32 +122,30 @@ func (sb *SessionBridge) HandleMessage(ctx context.Context, evt MessageEvent) er
 	if platform == "" {
 		platform = "chat"
 	}
-	payload := consolews.Payload{
-		Type:    consolews.PayloadTypeAsk,
+	session.HandleAsk(reqCtx, consolepkg.AskRequest{
 		Content: evt.Content,
 		Metadata: map[string]any{
 			platform + "_user":    evt.User.Username,
 			platform + "_channel": evt.ChannelID,
 		},
-	}
-	session.HandlePayload(reqCtx, nil, payload)
+	})
 
 	return sb.collectAndUpdate(reqCtx, ch, ref, evt)
 }
 
-// GetOrCreateSession returns the consolews session for the channel key, creating one if needed.
-func (sb *SessionBridge) GetOrCreateSession(ctx context.Context, channelKey string) (*consolews.Session, error) {
+// GetOrCreateSession returns the console session for the channel key, creating one if needed.
+func (sb *SessionBridge) GetOrCreateSession(ctx context.Context, channelKey string) (consolepkg.Session, error) {
 	if strings.TrimSpace(channelKey) == "" {
 		return nil, errors.New("missing channel key")
 	}
-	if sb.consoleHub == nil {
-		return nil, errors.New("console hub not configured")
+	if sb.consoleSessions == nil {
+		return nil, errors.New("console sessions not configured")
 	}
 
 	// Check existing mapping.
 	if sidVal, ok := sb.channelSessions.Load(channelKey); ok {
 		if sid, ok := sidVal.(string); ok && sid != "" {
-			if session := sb.consoleHub.GetSession(sid); session != nil {
+			if session := sb.consoleSessions.GetSession(sid); session != nil {
 				return session, nil
 			}
 		}
@@ -158,7 +158,7 @@ func (sb *SessionBridge) GetOrCreateSession(ctx context.Context, channelKey stri
 		profile = "explorer"
 	}
 
-	session := sb.consoleHub.CreateSession(consolews.SessionConfig{
+	session := sb.consoleSessions.CreateSession(consolepkg.SessionConfig{
 		Profile:      profile,
 		SystemPrompt: sb.cfg.ChatSystemPrompt,
 	})
@@ -196,7 +196,7 @@ func (sb *SessionBridge) editInterval() time.Duration {
 
 // collectAndUpdate loops on the subscriber channel, accumulating text and periodically
 // editing the platform message with progress.
-func (sb *SessionBridge) collectAndUpdate(ctx context.Context, ch <-chan consolews.Payload, ref MessageRef, evt MessageEvent) error {
+func (sb *SessionBridge) collectAndUpdate(ctx context.Context, ch <-chan consolepkg.Event, ref MessageRef, evt MessageEvent) error {
 	var accumulated strings.Builder
 
 	editInterval := sb.editInterval()
@@ -224,7 +224,7 @@ func (sb *SessionBridge) collectAndUpdate(ctx context.Context, ch <-chan console
 			}
 
 			switch p.Type {
-			case consolews.PayloadTypeEvent:
+			case consolepkg.EventTypeEvent:
 				if IsPartial(p.Metadata) {
 					accumulated.WriteString(p.Content)
 					if sb.clock.Now().Sub(lastEdit) >= editInterval {
@@ -239,7 +239,7 @@ func (sb *SessionBridge) collectAndUpdate(ctx context.Context, ch <-chan console
 					accumulated.WriteString(p.Content)
 				}
 
-			case consolews.PayloadTypeReply:
+			case consolepkg.EventTypeReply:
 				final := p.Content
 				if final == "" && accumulated.Len() > 0 {
 					final = accumulated.String()

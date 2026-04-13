@@ -18,8 +18,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/chatadapter/teams"
 	"github.com/jkatigb/agentctl/internal/chatadapter/telegram"
 	"github.com/jkatigb/agentctl/internal/companion"
+	consolepkg "github.com/jkatigb/agentctl/internal/console"
 	"github.com/jkatigb/agentctl/internal/consoleapp"
-	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/convref"
@@ -30,53 +30,55 @@ import (
 
 // Server is the agentctl web server.
 type Server struct {
-	opts         Options
-	cfg          config.Config
-	log          zerolog.Logger
-	sseHub       *sse.Hub
-	consoleHub   *consolews.Hub
-	chatAdapter  chatadapter.ChatAdapter
-	turnLock     companion.Locker
-	convRefStore convref.Store
-	orchRuntime  api.OrchestrationRuntimeHost
+	opts             Options
+	cfg              config.Config
+	log              zerolog.Logger
+	sseHub           *sse.Hub
+	consoleTransport *consolews.Hub
+	consoleSessions  consolepkg.SessionManager
+	chatAdapter      chatadapter.ChatAdapter
+	turnLock         companion.Locker
+	convRefStore     convref.Store
+	orchRuntime      api.OrchestrationRuntimeHost
 }
 
 // NewServer creates and returns a configured Server for the web layer.
-// It initializes the SSE hub and the console websocket hub, configures console
-// session persistence and the console runner factory, and wires observability
-// events to the SSE publisher.
-// The provided ctx is used for console hub persistence goroutines and should be
-// tied to the application's lifecycle.
+// It initializes the SSE hub and console websocket transport, configures
+// console session persistence and the console runner factory, and wires
+// observability events to the SSE publisher.
+// The provided ctx is used for console transport persistence goroutines and
+// should be tied to the application's lifecycle.
 //
 // Index:
 // - Purpose: Initialize the web server and real-time hubs
 // - Flow: create hubs → wire persistence/runner factory → connect SSE publisher → return server
 // - SideEffects: sets global SSE publisher; starts hub dependencies
-// - FailureModes: NewServer does not fail on createConsoleRunnerFactory; runner errors surface when the console hub invokes the per-session factory
-// - Related: createConsoleRunnerFactory, sse.NewHub, consolews.NewHub
-// - Keywords: web_server, sse_hub, consolews, runner_factory
+// - FailureModes: NewServer does not fail on consoleapp.NewDefaultRunnerFactory; runner errors surface when the console transport invokes the per-session factory
+// - Related: consoleapp.NewDefaultRunnerFactory, sse.NewHub, consolews.NewHub
+// - Keywords: web_server, sse_hub, consolews, console_runner_factory
 func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog.Logger) (*Server, error) {
 	sseHub := sse.NewHub()
-	consoleHub := consolews.NewHub(ctx)
+	consoleTransport := consolews.NewHub(ctx)
 
 	// Wire up observability events to SSE for real-time activity streaming
 	observability.SetSSEPublisher(sseHub)
 
 	// Set up persistence adapter for console sessions
-	persistence := consolews.NewPersistenceAdapter(cfg.Storage.Root)
-	consoleHub.SetPersistence(persistence)
+	persistence := consolepkg.NewSessionPersistence(cfg.Storage.Root)
+	consoleTransport.SetPersistence(persistence)
 
 	// Set up runner factory for console sessions (LLM integration)
-	runnerFactory := createConsoleRunnerFactory(cfg)
-	consoleHub.SetRunnerFactory(runnerFactory)
+	runnerFactory := consoleapp.NewDefaultRunnerFactory(ctx)
+	consoleTransport.SetRunnerFactory(runnerFactory)
 
 	s := &Server{
-		opts:       opts,
-		cfg:        cfg,
-		log:        log,
-		sseHub:     sseHub,
-		consoleHub: consoleHub,
-		turnLock:   buildCompanionLocker(ctx, cfg),
+		opts:             opts,
+		cfg:              cfg,
+		log:              log,
+		sseHub:           sseHub,
+		consoleTransport: consoleTransport,
+		consoleSessions:  consoleTransport,
+		turnLock:         buildCompanionLocker(ctx, cfg),
 	}
 
 	orchRuntime, err := api.NewOrchestrationRuntimeHost(ctx, cfg, log)
@@ -187,49 +189,6 @@ func (s *Server) buildConvRefStore(ctx context.Context) convref.Store {
 	return store
 }
 
-// createConsoleRunnerFactory creates a factory function that creates LLM runners for console sessions.
-//
-// Index:
-// - Purpose: Build console runner factory with LLMChat engine defaults
-// - Flow: load env → build engine config → construct engine → wrap runner
-// - SideEffects: reads env vars; may emit failure events
-// - FailureModes: missing API keys, engine construction errors
-// - Observability: emits web.console_engine_failed
-// - Related: engine.NewLLMChatEngine, consoleapp.NewRunner
-// - Keywords: console_runner, llmchat, api_key, web.console_engine_failed
-func createConsoleRunnerFactory(cfg config.Config) consolews.RunnerFactory {
-	// Load .env file to get API keys
-	config.LoadDotEnv()
-
-	return func(session *consolews.Session) consolews.Runner {
-		// Create LLM engine config
-		baseCfg := engine.LLMChatConfig{
-			MaxIterations: 20,
-			Temperature:   0.0,
-			MaxTokens:     4096,
-		}
-
-		// Validate that we have some provider configured (auto-detects API keys).
-		// Per-turn overrides are applied inside the runner.
-		_, err := engine.NewLLMChatEngine(baseCfg)
-		if err != nil {
-			observability.Emit(context.Background(), observability.NewEvent("web.console_engine_failed").
-				WithComponent("web").
-				WithSession(session.ID(), "").
-				Error(err, 0))
-			return nil
-		}
-
-		// Create console runner
-		runner := consoleapp.NewRunner(consoleapp.RunnerConfig{
-			BaseConfig: baseCfg,
-			Tools:      nil, // No tools for now - pure chat
-		})
-
-		return runner
-	}
-}
-
 // Run starts the SSE hub event loop. Call in a goroutine.
 func (s *Server) Run(ctx context.Context) {
 	if s.orchRuntime != nil {
@@ -250,11 +209,6 @@ func (s *Server) Run(ctx context.Context) {
 // SSEHub returns the SSE hub for publishing events.
 func (s *Server) SSEHub() *sse.Hub {
 	return s.sseHub
-}
-
-// ConsoleHub returns the console WebSocket hub.
-func (s *Server) ConsoleHub() *consolews.Hub {
-	return s.consoleHub
 }
 
 // startChatAdapter initializes and connects the chat adapter.
@@ -300,9 +254,8 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 		adapter.OnCommand(bridge.HandleCommand)
 		adapter.OnInteraction(adapter.HandleInteraction)
 
-		// Phase 3: Wire console hub for natural language messaging
-		adapter.SetConsoleHub(s.consoleHub)
-		sessionBridge := discord.NewSessionBridge(s.consoleHub, adapter, s.cfg.Discord, s.turnLock)
+		// Phase 3: Wire console sessions for natural language messaging
+		sessionBridge := discord.NewSessionBridge(s.consoleSessions, adapter, s.cfg.Discord, s.turnLock)
 		adapter.OnMessage(sessionBridge.HandleMessage)
 
 		if err := adapter.Connect(ctx); err != nil {
@@ -322,7 +275,7 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 		adapter.OnCommand(bridge.HandleCommand)
 		adapter.OnInteraction(adapter.HandleInteraction)
 
-		sessionBridge := telegram.NewSessionBridge(s.consoleHub, adapter, s.cfg.Telegram, s.turnLock)
+		sessionBridge := telegram.NewSessionBridge(s.consoleSessions, adapter, s.cfg.Telegram, s.turnLock)
 		adapter.OnMessage(sessionBridge.HandleMessage)
 
 		if err := adapter.Connect(ctx); err != nil {
@@ -354,7 +307,7 @@ func (s *Server) startChatAdapter(ctx context.Context) error {
 		adapter.OnCommand(bridge.HandleCommand)
 		adapter.OnInteraction(adapter.HandleInteraction)
 
-		sessionBridge := chatadapter.NewSessionBridge(s.consoleHub, adapter, chatadapter.SessionBridgeConfig{
+		sessionBridge := chatadapter.NewSessionBridge(s.consoleSessions, adapter, chatadapter.SessionBridgeConfig{
 			PlatformName:     "teams",
 			MaxMessageLen:    4000,
 			EditIntervalMS:   s.cfg.Teams.EditIntervalMS,
@@ -467,8 +420,8 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/skills/", api.SkillsCRUDHandler(s.cfg, s.log))
 
 	// --- Console (Phase 6-8) ---
-	apiMux.HandleFunc("/api/console/sessions", api.ConsoleSessionsHandler(s.consoleHub, s.cfg, s.log))
-	apiMux.HandleFunc("/api/console/sessions/", api.ConsoleSessionDetailHandler(s.consoleHub, s.cfg, s.log))
+	apiMux.HandleFunc("/api/console/sessions", api.ConsoleSessionsHandler(s.consoleSessions, s.cfg, s.log))
+	apiMux.HandleFunc("/api/console/sessions/", api.ConsoleSessionDetailHandler(s.consoleSessions, s.cfg, s.log))
 
 	// --- Tasks (Phase 11) ---
 	apiMux.HandleFunc("/api/tasks", api.TasksListHandler(s.cfg, s.log))
@@ -704,7 +657,7 @@ func (s *Server) Handler() http.Handler {
 			},
 		})
 	})
-	mux.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleHub))
+	mux.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleTransport))
 
 	// --- Kubernetes Probes (root path, not under /api/) ---
 	mux.HandleFunc("/healthz", api.LivenessHandler())

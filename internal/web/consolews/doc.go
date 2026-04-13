@@ -1,2 +1,2 @@
-// Package consolews manages console WebSocket sessions and persistence.
+// Package consolews manages console WebSocket transport.
 package consolews
