@@ -4,9 +4,23 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/codecontext"
-	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
 	"github.com/jkatigb/agentctl/internal/searchindex"
 )
+
+type Group struct {
+	Path    string
+	Score   float64
+	Summary string
+	Anchors []AnchorHit
+}
+
+type AnchorHit struct {
+	Anchor     searchindex.Anchor
+	Score      float64
+	Source     string
+	SymbolID   string
+	SymbolName string
+}
 
 // SearchHitToCandidate converts a retrieval search hit into a codecontext candidate.
 //
@@ -55,8 +69,8 @@ func SearchHitsToCandidates(hits []searchindex.SearchHit) []codecontext.Candidat
 	return out
 }
 
-// GroupsToCandidates converts grouped retrieval-v2 file hits into codecontext candidates.
-func GroupsToCandidates(groups []retrievalv2.Group) []codecontext.Candidate {
+// GroupsToCandidates converts grouped file hits into codecontext candidates.
+func GroupsToCandidates(groups []Group) []codecontext.Candidate {
 	out := make([]codecontext.Candidate, 0, len(groups))
 	for _, group := range groups {
 		path := strings.TrimSpace(group.Path)
@@ -80,7 +94,7 @@ func GroupsToCandidates(groups []retrievalv2.Group) []codecontext.Candidate {
 					StartLine:  anchor.Anchor.StartLine,
 					EndLine:    anchor.Anchor.EndLine,
 					Score:      clampPriority(anchor.Score),
-					Source:     string(anchor.Source),
+					Source:     strings.TrimSpace(anchor.Source),
 					Reason:     "group_hit",
 				})
 			}

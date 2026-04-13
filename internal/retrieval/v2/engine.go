@@ -9,7 +9,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/repoquery"
 	"github.com/jkatigb/agentctl/internal/searchindex"
-	"github.com/jkatigb/agentctl/internal/searchquery"
 )
 
 // Engine runs a retrieval-v2 request end-to-end.
@@ -29,7 +28,7 @@ func (e *Engine) WithRepoQueryService(service *repoquery.QueryService) *Engine {
 	if e == nil {
 		return nil
 	}
-	e.repo = service
+	e.repo = newRepoQueryAdapter(service)
 	return e
 }
 
@@ -49,8 +48,8 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (SearchResponse,
 	}
 
 	request := e.withDefaults(req)
-	parsed := searchquery.ParseQuery(request.Query)
-	lexicalQuery := searchquery.ComposeLexicalQuery(parsed)
+	parsed := ParseQuery(request.Query)
+	lexicalQuery := ComposeLexicalQuery(parsed)
 	if strings.TrimSpace(lexicalQuery) == "" {
 		lexicalQuery = strings.TrimSpace(parsed.Raw)
 	}
@@ -273,7 +272,7 @@ func (e *Engine) embedQuery(ctx context.Context, query string, mode QueryEmbeddi
 	}
 }
 
-func shouldRunRepoIndex(plan searchquery.QueryPlan, sourceGroups map[SourceID][]SourceHit) bool {
+func shouldRunRepoIndex(plan QueryPlan, sourceGroups map[SourceID][]SourceHit) bool {
 	if looksStructuralPlan(plan) {
 		return true
 	}
@@ -303,7 +302,7 @@ func shouldRunRepoIndex(plan searchquery.QueryPlan, sourceGroups map[SourceID][]
 	return false
 }
 
-func looksSparsePlan(plan searchquery.QueryPlan) bool {
+func looksSparsePlan(plan QueryPlan) bool {
 	if len(plan.PathHints) > 0 {
 		return true
 	}
@@ -313,7 +312,7 @@ func looksSparsePlan(plan searchquery.QueryPlan) bool {
 	return len(plan.Terms) <= 2
 }
 
-func looksStructuralPlan(plan searchquery.QueryPlan) bool {
+func looksStructuralPlan(plan QueryPlan) bool {
 	q := strings.ToLower(strings.TrimSpace(plan.Raw))
 	if q == "" {
 		return false
@@ -339,7 +338,7 @@ func isGenericStructuralIdentifier(value string) bool {
 	}
 }
 
-func applyFeatureBoosts(plan searchquery.QueryPlan, hits []FusedHit) []FusedHit {
+func applyFeatureBoosts(plan QueryPlan, hits []FusedHit) []FusedHit {
 	structural := looksStructuralPlan(plan)
 	for i := range hits {
 		bonus := 0.0
@@ -393,7 +392,7 @@ func applyFeatureBoosts(plan searchquery.QueryPlan, hits []FusedHit) []FusedHit 
 	return hits
 }
 
-func tuneFuseForPlan(plan searchquery.QueryPlan, opts FuseOptions) FuseOptions {
+func tuneFuseForPlan(plan QueryPlan, opts FuseOptions) FuseOptions {
 	if !looksStructuralPlan(plan) {
 		return opts
 	}

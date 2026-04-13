@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/codecontext"
-	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
 	"github.com/jkatigb/agentctl/internal/searchindex"
 )
 
@@ -120,16 +119,16 @@ func TestSearchHitToCandidate_RoundTripsToCollectInput(t *testing.T) {
 }
 
 func TestGroupsToCandidates_PreservesAnchors(t *testing.T) {
-	groups := []retrievalv2.Group{
+	groups := []Group{
 		{
 			Path:    "internal/example.go",
 			Score:   0.9,
 			Summary: "example summary",
-			Anchors: []retrievalv2.AnchorHit{
+			Anchors: []AnchorHit{
 				{
 					Anchor:     searchindex.Anchor{Type: searchindex.AnchorSymbol, Path: "internal/example.go", StartLine: 12, EndLine: 20},
 					Score:      0.9,
-					Source:     retrievalv2.SourceLexical,
+					Source:     "lexical",
 					SymbolID:   "internal/example.go:Hello",
 					SymbolName: "Hello",
 				},

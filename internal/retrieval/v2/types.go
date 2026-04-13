@@ -5,14 +5,11 @@ import (
 	"errors"
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 	"github.com/jkatigb/agentctl/internal/searchindex"
-	"github.com/jkatigb/agentctl/internal/searchquery"
-	"github.com/jkatigb/agentctl/internal/searchrank"
 )
 
 // SourceID identifies a recall source in the retrieval-v2 pipeline.
-type SourceID = searchrank.SourceID
+type SourceID string
 
 const (
 	// SourceExact performs exact symbol/title/path recall using the SQL search index.
@@ -81,16 +78,21 @@ type SearchSourcesConfig struct {
 
 const (
 	// FuseModeRRF uses reciprocal-rank fusion.
-	FuseModeRRF FuseMode = searchrank.FuseModeRRF
+	FuseModeRRF FuseMode = "rrf"
 	// FuseModeWeighted uses source-weighted score summation.
-	FuseModeWeighted FuseMode = searchrank.FuseModeWeighted
+	FuseModeWeighted FuseMode = "weighted"
 )
 
 // FuseOptions controls cross-source fusion.
-type (
-	FuseMode    = searchrank.FuseMode
-	FuseOptions = searchrank.FuseOptions
-)
+type FuseMode string
+
+type FuseOptions struct {
+	Mode            FuseMode
+	TopK            int
+	RRFK            float64
+	SourceWeights   map[SourceID]float64
+	MaxContributors int
+}
 
 // GroupOptions controls final file/group-level grouping.
 type GroupOptions struct {
@@ -99,11 +101,28 @@ type GroupOptions struct {
 	MaxMembers int
 }
 
-type (
-	SourceHit          = searchrank.SourceHit[searchindex.Document]
-	SourceContribution = searchrank.SourceContribution
-	FusedHit           = searchrank.FusedHit[searchindex.Document]
-)
+type SourceHit struct {
+	Source   SourceID             `json:"source"`
+	ID       string               `json:"id"`
+	Document searchindex.Document `json:"-"`
+	Score    float64              `json:"score"`
+	Rank     int                  `json:"rank"`
+}
+
+type SourceContribution struct {
+	Source SourceID `json:"source"`
+	Score  float64  `json:"score"`
+	Rank   int      `json:"rank"`
+}
+
+type FusedHit struct {
+	ID            string               `json:"-"`
+	Document      searchindex.Document `json:"document"`
+	Score         float64              `json:"score"`
+	Sources       []SourceID           `json:"sources"`
+	SourceScores  map[SourceID]float64 `json:"source_scores"`
+	Contributions []SourceContribution `json:"contributions"`
+}
 
 // AnchorHit preserves anchor-level detail when grouping file-oriented results.
 type AnchorHit struct {
@@ -131,7 +150,7 @@ type Group struct {
 type ParsedQuery struct {
 	Raw          string
 	LexicalQuery string
-	Plan         searchquery.QueryPlan
+	Plan         QueryPlan
 }
 
 // SourceStats tracks recall request/return/error counts for one source.
@@ -159,10 +178,26 @@ type SearchResponse struct {
 	Embedded bool        `json:"embedded"`
 }
 
+type RepoSearchRequest struct {
+	Query string
+	Limit int
+}
+
+type RepoDAGGrepRequest struct {
+	Query      string
+	Limit      int
+	EdgeSets   []string
+	Direction  string
+	Depth      int
+	Budget     int
+	PerNodeCap int
+	Render     string
+}
+
 // RepoQueryService is the minimal graph-query interface used by Engine.
 type RepoQueryService interface {
-	Search(ctx context.Context, req repoquery.SearchRequest) ([]repoindex.Node, error)
-	DAGGrep(ctx context.Context, req repoquery.DAGGrepRequest) (repoindex.DAGGrepResult, error)
+	Search(ctx context.Context, req RepoSearchRequest) ([]repoindex.Node, error)
+	DAGGrep(ctx context.Context, req RepoDAGGrepRequest) (repoindex.DAGGrepResult, error)
 }
 
 // DefaultSearchRequest returns a conservative starting configuration.

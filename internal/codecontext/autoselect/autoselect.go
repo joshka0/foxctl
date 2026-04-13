@@ -98,7 +98,7 @@ func Select(ctx context.Context, cfg sysconfig.Config, opts Options) (*Result, e
 
 	out := &Result{
 		WorkspaceID: workspaceID,
-		Candidates:  ccadapt.GroupsToCandidates(resp.Groups),
+		Candidates:  ccadapt.GroupsToCandidates(groupsToAdapterGroups(resp.Groups)),
 		Matches:     make([]Match, 0, len(resp.Groups)),
 	}
 	for _, g := range resp.Groups {
@@ -116,6 +116,29 @@ func Select(ctx context.Context, cfg sysconfig.Config, opts Options) (*Result, e
 		})
 	}
 	return out, nil
+}
+
+func groupsToAdapterGroups(groups []retrievalv2.Group) []ccadapt.Group {
+	out := make([]ccadapt.Group, 0, len(groups))
+	for _, group := range groups {
+		converted := ccadapt.Group{
+			Path:    group.Path,
+			Score:   group.Score,
+			Summary: group.Summary,
+			Anchors: make([]ccadapt.AnchorHit, 0, len(group.Anchors)),
+		}
+		for _, anchor := range group.Anchors {
+			converted.Anchors = append(converted.Anchors, ccadapt.AnchorHit{
+				Anchor:     anchor.Anchor,
+				Score:      anchor.Score,
+				Source:     string(anchor.Source),
+				SymbolID:   anchor.SymbolID,
+				SymbolName: anchor.SymbolName,
+			})
+		}
+		out = append(out, converted)
+	}
+	return out
 }
 
 // NormalizeRepoIndexMode canonicalizes repo-index mode values used by the retrieval skills.

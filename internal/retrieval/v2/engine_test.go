@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/searchindex"
-	"github.com/jkatigb/agentctl/internal/searchquery"
 )
 
 type fakeIndex struct {
@@ -179,14 +178,14 @@ func TestSearchRejectsEmptyQueryOrWorkspace(t *testing.T) {
 }
 
 func TestShouldRunRepoIndex(t *testing.T) {
-	plan := searchquery.ParseQuery("searchSymbolsWithRetrieval")
+	plan := ParseQuery("searchSymbolsWithRetrieval")
 	if shouldRunRepoIndex(plan, map[SourceID][]SourceHit{
 		SourceLexical: {{ID: "a", Score: 1}},
 	}) {
 		t.Fatal("expected repoindex disabled when identifier query already has lexical hits")
 	}
 
-	plan = searchquery.ParseQuery("call graph for repo index dag grep")
+	plan = ParseQuery("call graph for repo index dag grep")
 	if !shouldRunRepoIndex(plan, map[SourceID][]SourceHit{
 		SourceLexical: {{ID: "a", Score: 0.1}},
 	}) {
@@ -195,7 +194,7 @@ func TestShouldRunRepoIndex(t *testing.T) {
 }
 
 func TestApplyFeatureBoosts(t *testing.T) {
-	plan := searchquery.ParseQuery("searchSymbolsWithRetrieval")
+	plan := ParseQuery("searchSymbolsWithRetrieval")
 	hits := []FusedHit{
 		{Document: searchindex.Document{Path: "a.go", SymbolName: "Other"}, Score: 0.5},
 		{Document: searchindex.Document{Path: "b.go", SymbolName: "searchSymbolsWithRetrieval"}, Score: 0.4},
@@ -207,7 +206,7 @@ func TestApplyFeatureBoosts(t *testing.T) {
 }
 
 func TestTuneFuseForPlan_StructuralBoostsRepoIndex(t *testing.T) {
-	plan := searchquery.ParseQuery("repo index dag grep")
+	plan := ParseQuery("repo index dag grep")
 	opts := DefaultFuseOptions()
 	tuned := tuneFuseForPlan(plan, opts)
 	if tuned.SourceWeights[SourceRepoIndex] <= tuned.SourceWeights[SourceExact] {
@@ -216,7 +215,7 @@ func TestTuneFuseForPlan_StructuralBoostsRepoIndex(t *testing.T) {
 }
 
 func TestApplyFeatureBoosts_StructuralQueryPrefersRepoIndexSignals(t *testing.T) {
-	plan := searchquery.ParseQuery("repo index dag grep")
+	plan := ParseQuery("repo index dag grep")
 	hits := []FusedHit{
 		{
 			Document: searchindex.Document{Path: "internal/workflow/dag.go", Title: "DAG"},

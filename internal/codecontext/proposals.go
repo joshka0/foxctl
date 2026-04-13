@@ -6,7 +6,6 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/codecontext/expander"
 	"github.com/jkatigb/agentctl/internal/codecontext/files"
-	"github.com/jkatigb/agentctl/internal/searchquery"
 )
 
 const maxLinesPerSnippet = 80
@@ -22,7 +21,7 @@ type snippetProposal struct {
 	finalScore  float64
 }
 
-func proposeForFile(fc *files.FileContent, cand Candidate, plan searchquery.QueryPlan, opts CollectOpts) []snippetProposal {
+func proposeForFile(fc *files.FileContent, cand Candidate, plan QueryPlan, opts CollectOpts) []snippetProposal {
 	var out []snippetProposal
 
 	out = append(out, proposeAnchors(fc, cand, plan, opts)...)
@@ -52,7 +51,7 @@ func proposeForFile(fc *files.FileContent, cand Candidate, plan searchquery.Quer
 	return out
 }
 
-func proposeAnchors(fc *files.FileContent, cand Candidate, plan searchquery.QueryPlan, opts CollectOpts) []snippetProposal {
+func proposeAnchors(fc *files.FileContent, cand Candidate, plan QueryPlan, opts CollectOpts) []snippetProposal {
 	out := make([]snippetProposal, 0, len(cand.Anchors))
 
 	for _, a := range cand.Anchors {
@@ -85,7 +84,7 @@ func proposeAnchors(fc *files.FileContent, cand Candidate, plan searchquery.Quer
 	return out
 }
 
-func proposeQueryMatches(fc *files.FileContent, cand Candidate, plan searchquery.QueryPlan, opts CollectOpts) []snippetProposal {
+func proposeQueryMatches(fc *files.FileContent, cand Candidate, plan QueryPlan, opts CollectOpts) []snippetProposal {
 	if strings.TrimSpace(plan.Raw) == "" {
 		return nil
 	}
@@ -133,7 +132,7 @@ func proposeQueryMatches(fc *files.FileContent, cand Candidate, plan searchquery
 	return out
 }
 
-func fallbackProposal(fc *files.FileContent, cand Candidate, plan searchquery.QueryPlan) snippetProposal {
+func fallbackProposal(fc *files.FileContent, cand Candidate, plan QueryPlan) snippetProposal {
 	end := minInt(fc.LineCount(), maxLinesPerSnippet)
 	text := joinLines(fc.Lines, 0, end-1)
 

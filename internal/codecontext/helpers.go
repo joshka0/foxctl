@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/codecontext/files"
-	"github.com/jkatigb/agentctl/internal/searchquery"
 )
 
 type lineBlock struct {
@@ -181,7 +180,7 @@ func joinLines(lines []string, startZeroIdx, endZeroIdx int) string {
 	return strings.Join(lines[startZeroIdx:endZeroIdx+1], "\n")
 }
 
-func findMatchingLines(lines []string, plan searchquery.QueryPlan) []int {
+func findMatchingLines(lines []string, plan QueryPlan) []int {
 	if len(lines) == 0 {
 		return nil
 	}
@@ -290,8 +289,8 @@ func sortCandidatesByPriority(candidates []Candidate) {
 	})
 }
 
-func matchScore(text string, plan searchquery.QueryPlan) (float64, []string) {
-	ms := searchquery.ScoreText(plan, text)
+func matchScore(text string, plan QueryPlan) (float64, []string) {
+	ms := ScoreText(plan, text)
 	if ms.Score == 0 {
 		return 0, nil
 	}

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
 type fakeRepoQuery struct {
@@ -13,14 +12,14 @@ type fakeRepoQuery struct {
 	dagNodes    []repoindex.Node
 }
 
-func (f *fakeRepoQuery) Search(_ context.Context, req repoquery.SearchRequest) ([]repoindex.Node, error) {
+func (f *fakeRepoQuery) Search(_ context.Context, req RepoSearchRequest) ([]repoindex.Node, error) {
 	if req.Query == "" {
 		return nil, nil
 	}
 	return append([]repoindex.Node(nil), f.searchNodes...), nil
 }
 
-func (f *fakeRepoQuery) DAGGrep(_ context.Context, req repoquery.DAGGrepRequest) (repoindex.DAGGrepResult, error) {
+func (f *fakeRepoQuery) DAGGrep(_ context.Context, req RepoDAGGrepRequest) (repoindex.DAGGrepResult, error) {
 	var result repoindex.DAGGrepResult
 	result.Graph.Nodes = append(result.Graph.Nodes, f.dagNodes...)
 	return result, nil

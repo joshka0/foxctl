@@ -7,7 +7,6 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/codecontext/files"
 	"github.com/jkatigb/agentctl/internal/codecontext/guard"
-	"github.com/jkatigb/agentctl/internal/searchquery"
 )
 
 // Collect is the single extraction engine for retrieval-backed code evidence.
@@ -27,7 +26,7 @@ func Collect(ctx context.Context, opts CollectOpts) (*Evidence, error) {
 		return nil, &CollectError{Message: "path validator is required"}
 	}
 
-	plan := searchquery.ParseQuery(opts.Query)
+	plan := ParseQuery(opts.Query)
 	candidates := mergeCandidates(opts.Candidates, opts.MaxAnchorsPerFile)
 
 	reader := files.NewSafeReader(opts.PathValidator, opts.MaxBytesPerFile)

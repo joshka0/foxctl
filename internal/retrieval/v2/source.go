@@ -168,9 +168,13 @@ func (RepoIndexSource) Recall(ctx context.Context, cfg SourceCall) ([]SourceHit,
 
 	mode := normalizeRepoIndexMode(cfg.Query, cfg.RepoIndexMode)
 	if mode == "dag" {
-		req, err := repoquery.NewDAGGrepRequest(cfg.Query, "", cfg.Limit, nil, []string{"structural"}, nil, "", 2, 80, 20, nil, "")
-		if err != nil {
-			return nil, err
+		req := RepoDAGGrepRequest{
+			Query:      cfg.Query,
+			Limit:      cfg.Limit,
+			EdgeSets:   []string{"structural"},
+			Depth:      2,
+			Budget:     80,
+			PerNodeCap: 20,
 		}
 		result, err := cfg.RepoQuery.DAGGrep(ctx, req)
 		if err != nil {
@@ -183,10 +187,7 @@ func (RepoIndexSource) Recall(ctx context.Context, cfg SourceCall) ([]SourceHit,
 		return searchHitsToSourceHits(SourceRepoIndex, hits), nil
 	}
 
-	req, err := repoquery.NewSearchRequest(cfg.Query, cfg.Limit)
-	if err != nil {
-		return nil, err
-	}
+	req := RepoSearchRequest{Query: cfg.Query, Limit: cfg.Limit}
 	nodes, err := cfg.RepoQuery.Search(ctx, req)
 	if err != nil {
 		return nil, err
@@ -195,9 +196,14 @@ func (RepoIndexSource) Recall(ctx context.Context, cfg SourceCall) ([]SourceHit,
 	if mode == "auto" && shouldEscalateRepoIndexAuto(cfg.Query, nodes, hits, cfg.Limit) {
 		direction := repoIndexFallbackDirection(nodes)
 		edgeSets := repoIndexFallbackEdgeSets(nodes)
-		dagReq, err := repoquery.NewDAGGrepRequest(cfg.Query, "", cfg.Limit, nil, edgeSets, nil, direction, 2, 80, 20, nil, "")
-		if err != nil {
-			return nil, err
+		dagReq := RepoDAGGrepRequest{
+			Query:      cfg.Query,
+			Limit:      cfg.Limit,
+			EdgeSets:   edgeSets,
+			Direction:  direction,
+			Depth:      2,
+			Budget:     80,
+			PerNodeCap: 20,
 		}
 		result, err := cfg.RepoQuery.DAGGrep(ctx, dagReq)
 		if err != nil {
@@ -210,6 +216,46 @@ func (RepoIndexSource) Recall(ctx context.Context, cfg SourceCall) ([]SourceHit,
 		return searchHitsToSourceHits(SourceRepoIndex, hits), nil
 	}
 	return searchHitsToSourceHits(SourceRepoIndex, hits), nil
+}
+
+type repoQueryAdapter struct {
+	service *repoquery.QueryService
+}
+
+func newRepoQueryAdapter(service *repoquery.QueryService) RepoQueryService {
+	if service == nil {
+		return nil
+	}
+	return repoQueryAdapter{service: service}
+}
+
+func (a repoQueryAdapter) Search(ctx context.Context, req RepoSearchRequest) ([]repoindex.Node, error) {
+	built, err := repoquery.NewSearchRequest(req.Query, req.Limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.service.Search(ctx, built)
+}
+
+func (a repoQueryAdapter) DAGGrep(ctx context.Context, req RepoDAGGrepRequest) (repoindex.DAGGrepResult, error) {
+	built, err := repoquery.NewDAGGrepRequest(
+		req.Query,
+		"",
+		req.Limit,
+		nil,
+		req.EdgeSets,
+		nil,
+		req.Direction,
+		req.Depth,
+		req.Budget,
+		req.PerNodeCap,
+		nil,
+		req.Render,
+	)
+	if err != nil {
+		return repoindex.DAGGrepResult{}, err
+	}
+	return a.service.DAGGrep(ctx, built)
 }
 
 func searchHitsToSourceHits(source SourceID, hits []searchindex.SearchHit) []SourceHit {
