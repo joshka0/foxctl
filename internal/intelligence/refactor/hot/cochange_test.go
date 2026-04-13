@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
 )
 
 func TestBuildCochangeIndexRanksRepeatedPairs(t *testing.T) {

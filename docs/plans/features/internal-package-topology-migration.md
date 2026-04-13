@@ -73,7 +73,7 @@ These families are explicit non-targets for the `v2` migration:
 - `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline`,
   `internal/knowledge`
 - `internal/indexing/*`, `internal/intelligence/retrieval*`, `internal/intelligence/codecontext`,
-  `internal/intelligence/codemap`, `internal/refactor`
+  `internal/intelligence/codemap`, `internal/intelligence/refactor`
 - `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi`
 - `internal/domain`, `internal/platform`, `internal/protocol`
 
@@ -428,7 +428,7 @@ Primary packages:
 - `internal/intelligence/repoquery`
 - `internal/intelligence/codecontext`
 - `internal/intelligence/codemap`
-- `internal/refactor`
+- `internal/intelligence/refactor`
 - `internal/intelligence/analysis`
 - `internal/intelligence/verification`
 
@@ -462,7 +462,7 @@ Current mapping to make durable in Story 1:
 | `internal/intelligence/codecontext` | evidence gathering | keep as shared code-evidence extraction |
 | `internal/intelligence/codemap/context` | evidence gathering | treat as evidence-gathering support inside codemap |
 | `internal/intelligence/codemap` | synthesis and refactor planning | keep as codemap synthesis |
-| `internal/refactor` | synthesis and refactor planning | keep as refactor planning/evidence consumer |
+| `internal/intelligence/refactor` | synthesis and refactor planning | keep as refactor planning/evidence consumer |
 | `internal/intelligence/analysis/tasksgraph` | synthesis and refactor planning | keep as planning support |
 | `internal/intelligence/analysis/overseer` | oversight | keep as review/task coordination oversight |
 | `internal/intelligence/verification` | verification | keep as verification-specific slice |
@@ -517,7 +517,7 @@ Story 3 target:
 - separate code-evidence extraction from synthesis, planning, oversight, and
   verification:
   - `internal/intelligence/codecontext` and `internal/intelligence/codemap/context` gather evidence
-  - `internal/intelligence/codemap` and `internal/refactor` synthesize or plan from evidence
+  - `internal/intelligence/codemap` and `internal/intelligence/refactor` synthesize or plan from evidence
   - `internal/intelligence/analysis/overseer` coordinates and scores
   - `internal/intelligence/verification` verifies claims
 
@@ -536,7 +536,7 @@ Story 3 should end with these durable decisions:
 | `internal/intelligence/codecontext` | evidence gathering | keep as the main evidence extractor |
 | `internal/intelligence/codemap/context` | evidence gathering | keep as codemap-specific evidence support |
 | `internal/intelligence/codemap` | synthesis | keep as codemap synthesis |
-| `internal/refactor` | planning/synthesis | keep as refactor planning and evidence consumer |
+| `internal/intelligence/refactor` | planning/synthesis | keep as refactor planning and evidence consumer |
 | `internal/intelligence/analysis/tasksgraph` | planning support | keep as planning/priority support |
 | `internal/intelligence/analysis/overseer` | oversight | keep as coordination oversight |
 | `internal/intelligence/verification` | verification | keep as verification-specific slice |

@@ -41,7 +41,7 @@ Prefer adding new packages under one of these stable families:
 | `internal/storage` | Durable state, CAS, local rebuildable stores, DB helpers | `storage/*` |
 | `internal/v2` | Newer **agent/runtime/orchestration** stack only | `v2/core`, `v2/services`, `v2/runtime`, `v2/adapters` |
 | `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline` | Context/memory/history plane | current context family |
-| `internal/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/refactor` | Retrieval and code intelligence | current intelligence family |
+| `internal/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |
 | `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers | current interface family |
 
 ## Target Shape
@@ -139,7 +139,7 @@ These package families are peer families, not “legacy” in the same sense:
 |------|--------|
 | `internal/storage/*` | Shared persistence layer used by both legacy and v2 paths |
 | `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline` | Context/memory/history plane, not old runtime scaffolding |
-| `internal/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/refactor` | Intelligence and retrieval plane |
+| `internal/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Intelligence and retrieval plane |
 | `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers |
 | `internal/domain`, `internal/platform`, `internal/protocol` | Foundations, not generation-specific runtime code |
 
@@ -447,7 +447,7 @@ The target split for this family is:
 | ingest/builders | `internal/indexing`, `internal/searchindex` | keep as the builder and persisted-index slice |
 | search/query/recall | `internal/intelligence/retrieval`, `internal/intelligence/retrieval/v2`, `internal/intelligence/repoquery`, `internal/searchquery`, `internal/searchrank` | keep as the query and recall slice |
 | evidence gathering | `internal/intelligence/codecontext`, `internal/intelligence/codemap/context` | keep as the code-evidence extraction slice |
-| synthesis and refactor planning | `internal/intelligence/codemap`, `internal/refactor`, `internal/intelligence/analysis/tasksgraph` | keep as the synthesis/planning slice |
+| synthesis and refactor planning | `internal/intelligence/codemap`, `internal/intelligence/refactor`, `internal/intelligence/analysis/tasksgraph` | keep as the synthesis/planning slice |
 | oversight | `internal/intelligence/analysis/overseer` | keep as the review and prioritization oversight slice |
 | verification | `internal/intelligence/verification` | keep as the verification slice |
 
@@ -465,7 +465,7 @@ That yields these routing decisions:
 | `internal/intelligence/codecontext` | evidence gathering | keep | Owns snippet extraction and the shared code-context funnel used by semantic/code search skills |
 | `internal/intelligence/codemap/context` | evidence gathering | bridge inside codemap today | Gathers rich code evidence for codemap generation and should be treated as evidence collection, not as a second synthesis owner |
 | `internal/intelligence/codemap` | synthesis and refactor planning | keep | Produces semantic codemaps and LLM-backed synthesized traces from gathered evidence |
-| `internal/refactor` | synthesis and refactor planning | keep | Owns change analysis, hotspot evidence, dependency analysis, and refactor-oriented planning artifacts |
+| `internal/intelligence/refactor` | synthesis and refactor planning | keep | Owns change analysis, hotspot evidence, dependency analysis, and refactor-oriented planning artifacts |
 | `internal/intelligence/analysis/tasksgraph` | synthesis and refactor planning | keep | Computes graph structure and critical-path style signals that support planning decisions |
 | `internal/intelligence/analysis/overseer` | oversight | keep | Scores tasks, handles post-review coordination, and fans out indexing work |
 | `internal/intelligence/verification` | verification | keep | Implements claim-checking and verification-specific pipelines |
@@ -546,7 +546,7 @@ The durable split should be:
 | `internal/intelligence/codecontext` | shared code-evidence extraction and snippet collection | treat as the main evidence-gathering owner |
 | `internal/intelligence/codemap/context` | codemap-specific evidence gathering from graph, symbols, and search | keep as evidence-gathering support inside codemap |
 | `internal/intelligence/codemap` | synthesized semantic maps and trace generation | keep in the synthesis slice |
-| `internal/refactor` | refactor-oriented evidence consumers, hotspot analysis, and change planning | keep in the planning/synthesis slice |
+| `internal/intelligence/refactor` | refactor-oriented evidence consumers, hotspot analysis, and change planning | keep in the planning/synthesis slice |
 | `internal/intelligence/analysis/tasksgraph` | graph-derived task analysis that supports prioritization and planning | keep in the planning/oversight support slice |
 | `internal/intelligence/analysis/overseer` | post-review coordination, task scoring, and indexer fanout | keep in oversight |
 | `internal/intelligence/verification` | claim extraction and claim verification | keep in verification |

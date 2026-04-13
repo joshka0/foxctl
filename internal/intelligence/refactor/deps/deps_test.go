@@ -6,8 +6,8 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
-	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
+	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
 )
 
 type fakeSearcher struct {
@@ -51,15 +51,15 @@ func TestBuildRequestResolvesQuerySeedsWithinScope(t *testing.T) {
 		output: repoquery.SearchOutput{
 			Nodes: []repoindex.Node{
 				{ID: "repo::sym:outside", Kind: repoindex.NodeSymbol, File: "pkg/other/file.go", Name: "Outside"},
-				{ID: "repo::sym:inside", Kind: repoindex.NodeSymbol, File: "internal/refactor/status/status.go", Name: "Evaluate"},
-				{ID: "repo::pkg:inside", Kind: repoindex.NodePackage, Pkg: "go:internal/refactor/status", Name: "status"},
+				{ID: "repo::sym:inside", Kind: repoindex.NodeSymbol, File: "internal/intelligence/refactor/status/status.go", Name: "Evaluate"},
+				{ID: "repo::pkg:inside", Kind: repoindex.NodePackage, Pkg: "go:internal/intelligence/refactor/status", Name: "status"},
 			},
 		},
 	}
 
 	result, err := BuildRequest(context.Background(), searcher, Input{
 		Scope: refscope.Scope{
-			Path:     "internal/refactor",
+			Path:     "internal/intelligence/refactor",
 			Language: "go",
 		},
 		Status:    refstatus.Status{Mode: refstatus.ModeParserOnly, Reasons: []string{"repoindex_head_mismatch"}},

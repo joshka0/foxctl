@@ -15,9 +15,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
-	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/refactor/snapshotstore"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
+	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
+	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
 )
 
 type SinceKind string

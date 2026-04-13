@@ -9,13 +9,13 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	refevidence "github.com/jkatigb/agentctl/internal/intelligence/refactor/evidence"
+	refhot "github.com/jkatigb/agentctl/internal/intelligence/refactor/hot"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
+	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
+	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
+	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
 	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	refevidence "github.com/jkatigb/agentctl/internal/refactor/evidence"
-	refhot "github.com/jkatigb/agentctl/internal/refactor/hot"
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
-	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/refactor/snapshotstore"
-	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
 )
 
 const (

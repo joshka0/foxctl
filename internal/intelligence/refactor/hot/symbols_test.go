@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
-	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
-	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
+	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
+	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
 )
 
 func TestBuildSymbolHotspotsMatchesChangedFunctionByLineRange(t *testing.T) {

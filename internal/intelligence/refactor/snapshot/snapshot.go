@@ -15,8 +15,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
 	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
 	platformsymbol "github.com/jkatigb/agentctl/internal/platform/symbolutil"
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
-	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
+	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
 )
 
 // BuildError reports a user-correctable snapshot build failure.

@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
+	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
 )
 
 func TestApplyConfidenceScoresAddsStructuredConfidenceToHotspots(t *testing.T) {

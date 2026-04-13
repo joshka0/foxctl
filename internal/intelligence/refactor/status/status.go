@@ -11,7 +11,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
 )
 
 type Mode string

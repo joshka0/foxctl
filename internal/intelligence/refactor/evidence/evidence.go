@@ -9,8 +9,8 @@ import (
 	"io"
 	"strings"
 
-	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/refactor/snapshotstore"
+	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
+	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 )
 

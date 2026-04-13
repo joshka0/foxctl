@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
-	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/refactor/snapshotstore"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
+	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
+	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 )
 
