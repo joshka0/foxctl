@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/searchindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
 )
 
 type fakeIndex struct {

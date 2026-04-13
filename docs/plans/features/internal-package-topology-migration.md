@@ -423,7 +423,7 @@ Primary packages:
 - `internal/intelligence/retrieval`
 - `internal/intelligence/retrieval/v2`
 - `internal/intelligence/searchquery`
-- `internal/searchindex`
+- `internal/intelligence/searchindex`
 - `internal/intelligence/searchrank`
 - `internal/intelligence/repoquery`
 - `internal/intelligence/codecontext`
@@ -453,7 +453,7 @@ Current mapping to make durable in Story 1:
 | Current package/root | Intelligence slice | Decision |
 |------|--------------------|----------|
 | `internal/indexing` | ingest/builders | keep as builder/index-maintenance slice |
-| `internal/searchindex` | ingest/builders | keep as persisted retrieval-document/index slice |
+| `internal/intelligence/searchindex` | ingest/builders | keep as persisted retrieval-document/index slice |
 | `internal/intelligence/retrieval` | search/query/recall | treat as transitional bridge for legacy helpers |
 | `internal/intelligence/retrieval/v2` | search/query/recall | keep as the main retrieval engine |
 | `internal/intelligence/repoquery` | search/query/recall | keep as structural recall/query slice |
@@ -483,7 +483,7 @@ Story 2 target:
   - `internal/intelligence/retrieval` remains a transitional bridge for legacy helpers
   - `internal/intelligence/repoquery`, `internal/intelligence/searchquery`, and `internal/intelligence/searchrank`
     belong with retrieval/search behavior
-  - `internal/searchindex` and `internal/indexing` remain the builder/index
+  - `internal/intelligence/searchindex` and `internal/indexing` remain the builder/index
     substrate
 
 Required placement rule from Story 2:
@@ -502,7 +502,7 @@ Story 2 should end with these durable decisions:
 | `internal/intelligence/repoquery` | retrieval-search | keep with structural recall |
 | `internal/intelligence/searchquery` | retrieval-search | keep with query planning |
 | `internal/intelligence/searchrank` | retrieval-search | keep with ranking/fusion |
-| `internal/searchindex` | builder substrate | keep on builder side |
+| `internal/intelligence/searchindex` | builder substrate | keep on builder side |
 | `internal/indexing` | builder substrate | keep on builder side |
 
 Non-goals for Story 2:

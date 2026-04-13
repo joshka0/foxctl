@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/searchindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
 )
 
 // GroupResults groups fused hits into document-oriented groups.

@@ -3,7 +3,7 @@ package retrievalv2
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/searchindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
 )
 
 func TestGroupResultsByDocumentPath(t *testing.T) {

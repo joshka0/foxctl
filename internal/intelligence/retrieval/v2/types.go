@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/searchindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
 )
 
 // SourceID identifies a recall source in the retrieval-v2 pipeline.

@@ -516,8 +516,8 @@ func TestApplyACAGuidanceSupportAddsSkillmainAnchorAgainstCompetingCandidates(t 
 			Support: 1.0,
 			Symbols: []string{"CandidateBundle"},
 		},
-		"internal/searchindex/model.go": {
-			Path:    "internal/searchindex/model.go",
+		"internal/intelligence/searchindex/model.go": {
+			Path:    "internal/intelligence/searchindex/model.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 			Support: 0.7,
 		},
@@ -664,7 +664,7 @@ func TestPrioritizedFileLocateGroundingCandidatesDoesNotFrontloadSecondPackageAn
 			Support: 1.2,
 		},
 		{
-			Path:    "internal/searchindex/model.go",
+			Path:    "internal/intelligence/searchindex/model.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 			Support: 1.0,
 		},
@@ -729,8 +729,8 @@ func TestRankCodeSearchCandidatesFileLocateDemotesSecondaryPackageAnchor(t *test
 			Sources: map[string]struct{}{"aca_route_package_anchor": {}, "aca_route_package_secondary_anchor": {}, "aca_route_package_exact": {}},
 			Support: 1.0,
 		},
-		"internal/searchindex/model.go": {
-			Path:    "internal/searchindex/model.go",
+		"internal/intelligence/searchindex/model.go": {
+			Path:    "internal/intelligence/searchindex/model.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 			Support: 0.9,
 		},
@@ -792,7 +792,7 @@ func TestBuildFileLocateEvidenceBucketsGroupsSelectedFiles(t *testing.T) {
 	files := []codeSearchEvidenceFile{
 		{Path: "internal/adapters/skillslib/skillmain/main.go"},
 		{Path: "internal/domain/agent/agent.go"},
-		{Path: "internal/searchindex/model.go"},
+		{Path: "internal/intelligence/searchindex/model.go"},
 		{Path: "internal/adapters/skillslib/skillmain/breakers.go"},
 	}
 	rankedByPath := map[string]*codeSearchCandidate{
@@ -804,8 +804,8 @@ func TestBuildFileLocateEvidenceBucketsGroupsSelectedFiles(t *testing.T) {
 			Path:    "internal/domain/agent/agent.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 		},
-		"internal/searchindex/model.go": {
-			Path:    "internal/searchindex/model.go",
+		"internal/intelligence/searchindex/model.go": {
+			Path:    "internal/intelligence/searchindex/model.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 		},
 		"internal/adapters/skillslib/skillmain/breakers.go": {

@@ -32,7 +32,7 @@ providers/models.
 | `internal/storage/sessions/store.go` | per-workspace metadata rows in one DB | yes | workspace-scoped queries fail fast; global queries skip mismatched dims | safe with rebuild | session, chunk, and context-window embeddings now share a workspace-scoped contract |
 | `internal/storage/sessions/turso_store.go` | global table | yes | fail on open | safe with rebuild | stronger than sqlite sessions path |
 | `internal/storage/obsidianindex/store.go` | per-vault DB | yes | fail on semantic ensure/query | safe with rebuild | model-level dimensions metadata now gates note/chunk semantic reuse |
-| `internal/searchindex/sql_store.go` | per-workspace rows in one DB | yes | fail on upsert/query | safe with rebuild | workspace metadata now records model + dimensions and rejects mixed state |
+| `internal/intelligence/searchindex/sql_store.go` | per-workspace rows in one DB | yes | fail on upsert/query | safe with rebuild | workspace metadata now records model + dimensions and rejects mixed state |
 | `skills/code_semantic_search` + `cmd/index.go` | workspace-scoped for primary local flows | yes via config reload + store metadata | local/single-workspace flows consistent; multi-workspace remote still mixed | partial | target-workspace config reload is fixed, but multi-workspace remote retrieval still needs clearer contract handling |
 | `internal/v2/adapters/sourceimport/embedder_factory.go` | n/a | provider/model resolved | dimensions probe available | helper only | useful for probing/embedder introspection, not enough by itself |
 
@@ -84,7 +84,7 @@ operator-facing rebuild workflow before workspace-local embedding overrides
 should be enabled by default.
 
 2. Search index
-- [sql_store.go](../../../internal/searchindex/sql_store.go)
+- [sql_store.go](../../../internal/intelligence/searchindex/sql_store.go)
 
 `searchindex` now persists workspace-level embedding metadata and rejects mixed
 model or dimension state on upsert and vector query. That makes it much closer

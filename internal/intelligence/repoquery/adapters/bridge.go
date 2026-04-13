@@ -5,7 +5,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
 	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	"github.com/jkatigb/agentctl/internal/searchindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
 )
 
 // ToSearchHits converts repoquery anchors into searchindex-style hits for retrieval fusion.

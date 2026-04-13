@@ -7,7 +7,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	repoqueryadapters "github.com/jkatigb/agentctl/internal/intelligence/repoquery/adapters"
-	"github.com/jkatigb/agentctl/internal/searchindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
 )
 
 // Source fetches recall hits for one retrieval input and one upstream source.

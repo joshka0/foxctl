@@ -94,7 +94,7 @@ These rules are non-negotiable for the new design:
 internal/intelligence/searchquery/
   plan.go           // shared terms/identifiers/phrases/path-hints planner
 
-internal/searchindex/
+internal/intelligence/searchindex/
   model.go          // typed retrieval document model
   store.go          // lexical/vector recall API
   sql_store.go      // initial SQL-backed implementation
@@ -187,16 +187,16 @@ Acceptance criteria:
 - normalization is explicit in code and tests
 - no new retrieval logic is added in storage after this phase
 
-### Phase 1: add `internal/searchindex`
+### Phase 1: add `internal/intelligence/searchindex`
 
 **Goal:** Create a dedicated retrieval document index beside the legacy storage paths.
 
 Files to add:
 
-- `internal/searchindex/model.go`
-- `internal/searchindex/store.go`
-- `internal/searchindex/sql_store.go`
-- `internal/searchindex/build_code.go`
+- `internal/intelligence/searchindex/model.go`
+- `internal/intelligence/searchindex/store.go`
+- `internal/intelligence/searchindex/sql_store.go`
+- `internal/intelligence/searchindex/build_code.go`
 
 Changes:
 
@@ -357,7 +357,7 @@ These are good `-spark` slices after the plan is approved:
    - objective: explicit metric contract and correct ordering
 
 2. Searchindex skeleton
-   - write scope: `internal/searchindex/*`
+   - write scope: `internal/intelligence/searchindex/*`
    - objective: model, store interface, SQL store, bootstrap builder
 
 3. Shared query planner
@@ -417,7 +417,7 @@ Add at least one golden path covering:
 ## Definition of Done
 
 - [ ] Storage/vector semantics are explicit and tested
-- [ ] `internal/searchindex` exists and indexes code docs
+- [ ] `internal/intelligence/searchindex` exists and indexes code docs
 - [ ] `internal/intelligence/searchquery` exists and is shared by retrieval and codecontext
 - [ ] retrieval v2 exists and produces ranked node hits and grouped file hits
 - [ ] file grouping preserves multiple anchors

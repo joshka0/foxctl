@@ -11,9 +11,9 @@ import (
 	ccadapt "github.com/jkatigb/agentctl/internal/intelligence/codecontext/adapters"
 	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	retrievalv2 "github.com/jkatigb/agentctl/internal/intelligence/retrieval/v2"
+	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
 	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/searchindex"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
