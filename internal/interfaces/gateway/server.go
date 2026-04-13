@@ -22,8 +22,8 @@ import (
 	"github.com/rs/zerolog"
 	"tailscale.com/tsnet"
 
-	"github.com/jkatigb/agentctl/internal/gateway/sshterm"
-	"github.com/jkatigb/agentctl/internal/gateway/webterm"
+	"github.com/jkatigb/agentctl/internal/interfaces/gateway/sshterm"
+	"github.com/jkatigb/agentctl/internal/interfaces/gateway/webterm"
 	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 )
 

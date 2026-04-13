@@ -42,7 +42,7 @@ Prefer adding new packages under one of these stable families:
 | `internal/v2` | Newer **agent/runtime/orchestration** stack only | `v2/core`, `v2/services`, `v2/runtime`, `v2/adapters` |
 | `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane | current context family |
 | `internal/intelligence/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |
-| `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers | current interface family |
+| `internal/web`, `internal/interfaces/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers | current interface family |
 
 ## Target Shape
 
@@ -140,7 +140,7 @@ These package families are peer families, not “legacy” in the same sense:
 | `internal/storage/*` | Shared persistence layer used by both legacy and v2 paths |
 | `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane, not old runtime scaffolding |
 | `internal/intelligence/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Intelligence and retrieval plane |
-| `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers |
+| `internal/web`, `internal/interfaces/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers |
 | `internal/domain`, `internal/platform`, `internal/protocol` | Foundations, not generation-specific runtime code |
 
 ## Practical Grouping Guidance
@@ -211,8 +211,8 @@ entrypoints:
 | `internal/runtime/terminal/agentpane` | Owns pane-scoped PTY wrappers, submit-mode rendering, unix-socket delivery, and mux-agnostic watch-pane allocation | Calls `tmuxbridge.CreatePane` and `zellijbridge.CreatePane`; persists transport metadata and submit behavior for room delivery |
 | `internal/runtime/terminal/tmuxbridge` | Implements tmux pane/session creation, pane labeling, pane send/submit behavior, and tmux-specific presentation/runtime helpers | Used by `agentpane`; also remains the tmux execution surface that gateway terminal flows ultimately attach to |
 | `internal/runtime/terminal/zellijbridge` | Implements zellij pane creation and submit behavior for named panes | Used by `agentpane` as the zellij backend for the same pane-allocation contract |
-| `internal/gateway/webterm` | Exposes browser terminal access as one shared WebSocket-to-PTY room, backed by `tmux new -A -s <session>` | Registered by `gateway.Server`; starts tmux-backed PTYs per room and multiplexes multiple web clients onto one room session |
-| `internal/gateway/sshterm` | Exposes SSH terminal access for the same room model, authenticated through Tailscale WhoIs | Registered by `gateway.Server`; resolves room IDs to tmux session names and opens interactive SSH sessions against those tmux rooms |
+| `internal/interfaces/gateway/webterm` | Exposes browser terminal access as one shared WebSocket-to-PTY room, backed by `tmux new -A -s <session>` | Registered by `gateway.Server`; starts tmux-backed PTYs per room and multiplexes multiple web clients onto one room session |
+| `internal/interfaces/gateway/sshterm` | Exposes SSH terminal access for the same room model, authenticated through Tailscale WhoIs | Registered by `gateway.Server`; resolves room IDs to tmux session names and opens interactive SSH sessions against those tmux rooms |
 
 Shared coupling points in the current slice:
 
@@ -248,8 +248,8 @@ That means the target logical split is:
 | pane/session lifecycle, submit behavior, room terminal binding, mux-neutral terminal contract | runtime/terminal | `internal/runtime/terminal/agentpane` plus `internal/runtime/terminal` |
 | tmux backend implementation | runtime/terminal backend adapter | `internal/runtime/terminal/tmuxbridge` |
 | zellij backend implementation | runtime/terminal backend adapter | `internal/runtime/terminal/zellijbridge` |
-| browser-facing terminal transport, websocket framing, HTTP integration | interfaces/gateway | `internal/gateway/webterm` |
-| SSH-facing terminal transport, Tailscale auth, SSH server integration | interfaces/gateway | `internal/gateway/sshterm` |
+| browser-facing terminal transport, websocket framing, HTTP integration | interfaces/gateway | `internal/interfaces/gateway/webterm` |
+| SSH-facing terminal transport, Tailscale auth, SSH server integration | interfaces/gateway | `internal/interfaces/gateway/sshterm` |
 
 Explicit ownership rules for the next move batch:
 
@@ -281,7 +281,7 @@ before package relocation**:
 - use the shared runtime-terminal room/session identity seam in
   `internal/runtime/terminal` as the owner of room-to-terminal session naming
   and resolution
-- update `internal/gateway/webterm` and `internal/gateway/sshterm` to depend on
+- update `internal/interfaces/gateway/webterm` and `internal/interfaces/gateway/sshterm` to depend on
   that shared seam instead of each gateway surface owning tmux session mapping
 - keep `webterm` and `sshterm` in `interfaces/gateway` for this batch
 - keep `agentpane`, `tmuxbridge`, and `zellijbridge` at their current import

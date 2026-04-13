@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/jkatigb/agentctl/internal/gateway/static"
+	"github.com/jkatigb/agentctl/internal/interfaces/gateway/static"
 	"github.com/rs/zerolog"
 )
 

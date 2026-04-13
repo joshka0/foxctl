@@ -74,7 +74,7 @@ These families are explicit non-targets for the `v2` migration:
   `internal/context/knowledge`
 - `internal/intelligence/indexing/*`, `internal/intelligence/retrieval*`, `internal/intelligence/codecontext`,
   `internal/intelligence/codemap`, `internal/intelligence/refactor`
-- `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi`
+- `internal/web`, `internal/interfaces/gateway`, `internal/chatadapter`, `internal/openapi`
 - `internal/domain`, `internal/platform`, `internal/protocol`
 
 ## As-Built `v2` Usage Today
@@ -139,8 +139,8 @@ Primary packages:
 - `internal/runtime/terminal/agentpane`
 - `internal/runtime/terminal/tmuxbridge`
 - `internal/runtime/terminal/zellijbridge`
-- `internal/gateway/webterm`
-- `internal/gateway/sshterm`
+- `internal/interfaces/gateway/webterm`
+- `internal/interfaces/gateway/sshterm`
 
 Proposed stories:
 
@@ -162,8 +162,8 @@ Current inventory:
 | `internal/runtime/terminal/agentpane` | pane wrapper and transport owner | normalizes submit modes, owns pane socket delivery, allocates tmux/zellij watch panes |
 | `internal/runtime/terminal/tmuxbridge` | tmux backend | creates panes/sessions and provides tmux-specific send/submit behavior |
 | `internal/runtime/terminal/zellijbridge` | zellij backend | provides the parallel pane creation and submit contract for zellij |
-| `internal/gateway/webterm` | browser terminal entrypoint | one shared tmux-backed PTY per room, fanout to multiple WebSocket clients |
-| `internal/gateway/sshterm` | SSH terminal entrypoint | Tailscale-authenticated SSH access, resolves room IDs to tmux sessions |
+| `internal/interfaces/gateway/webterm` | browser terminal entrypoint | one shared tmux-backed PTY per room, fanout to multiple WebSocket clients |
+| `internal/interfaces/gateway/sshterm` | SSH terminal entrypoint | Tailscale-authenticated SSH access, resolves room IDs to tmux sessions |
 
 Coupling points captured by Story 1:
 
@@ -184,7 +184,7 @@ Chosen target contract for Story 2:
   already normalizes pane delivery and mux-agnostic submit behavior
 - `internal/runtime/terminal/tmuxbridge` and `internal/runtime/terminal/zellijbridge` are backend adapters within
   the same family boundary
-- `internal/gateway/webterm` and `internal/gateway/sshterm` remain
+- `internal/interfaces/gateway/webterm` and `internal/interfaces/gateway/sshterm` remain
   `interfaces/gateway` entrypoints because they expose terminal access over web
   and SSH, but they do not own the terminal runtime contract
 
@@ -212,7 +212,7 @@ Implemented first narrow move batch for Story 3:
 - create one shared runtime-terminal room/session identity seam under the
   runtime-terminal family boundary
 - move room-to-tmux session naming and resolution behind that seam first
-- keep `internal/gateway/webterm` and `internal/gateway/sshterm` as interface
+- keep `internal/interfaces/gateway/webterm` and `internal/interfaces/gateway/sshterm` as interface
   entrypoints that call the shared seam
 - defer any package-path relocation of `agentpane`, `tmuxbridge`, and
   `zellijbridge` until after the shared runtime-owned seam exists
@@ -240,7 +240,7 @@ Current batch scope:
 
 Expected import fallout:
 
-- `internal/gateway/webterm` and `internal/gateway/sshterm` gain one import on
+- `internal/interfaces/gateway/webterm` and `internal/interfaces/gateway/sshterm` gain one import on
   the shared runtime-terminal seam
 - direct tmux session-name construction should be removed from gateway-local
   code paths
