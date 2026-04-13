@@ -15,8 +15,8 @@ import (
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
 
-	codemapctx "github.com/jkatigb/agentctl/internal/codemap/context"
-	"github.com/jkatigb/agentctl/internal/codemap/tools"
+	codemapctx "github.com/jkatigb/agentctl/internal/intelligence/codemap/context"
+	"github.com/jkatigb/agentctl/internal/intelligence/codemap/tools"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/storage/graph"

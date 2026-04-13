@@ -171,8 +171,8 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	// Cancel context to stop persistence goroutines
 	cancel()
 
-	// Wait for console hub persistence goroutines
-	server.ConsoleHub().Wait()
+	// Wait for console transport persistence goroutines
+	server.WaitConsoleTransport()
 
 	// Graceful shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)

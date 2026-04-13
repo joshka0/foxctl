@@ -126,6 +126,15 @@ func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog
 	return s, nil
 }
 
+// WaitConsoleTransport drains background console transport goroutines such as
+// session persistence workers during shutdown.
+func (s *Server) WaitConsoleTransport() {
+	if s == nil || s.consoleTransport == nil {
+		return
+	}
+	s.consoleTransport.Wait()
+}
+
 func buildCompanionLocker(ctx context.Context, cfg config.Config) companion.Locker {
 	if ctx == nil {
 		ctx = context.Background()

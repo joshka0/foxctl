@@ -9,7 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/codemap"
+	"github.com/jkatigb/agentctl/internal/intelligence/codemap"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -9,9 +9,10 @@ import (
 	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
+	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
-func buildHistoryRecordEmbedder(cfg config.Config) transcriptpipeline.HistoryRecordEmbedFunc {
+func buildHistoryRecordEmbedder(cfg config.Config) historypkg.HistoryRecordEmbedFunc {
 	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, cfg)
 	if err != nil {
 		return nil
@@ -25,7 +26,7 @@ func buildHistoryRecordEmbedder(cfg config.Config) transcriptpipeline.HistoryRec
 	}
 }
 
-func persistSingleHistoryRecords(ctx context.Context, store *memorystore.Store, result *transcriptpipeline.SingleRunResult, embed transcriptpipeline.HistoryRecordEmbedFunc) error {
+func persistSingleHistoryRecords(ctx context.Context, store *memorystore.Store, result *transcriptpipeline.SingleRunResult, embed historypkg.HistoryRecordEmbedFunc) error {
 	if store == nil || result == nil {
 		return nil
 	}
@@ -34,11 +35,11 @@ func persistSingleHistoryRecords(ctx context.Context, store *memorystore.Store, 
 	if ownerID == "" {
 		ownerID = strings.TrimSpace(result.ConversationID)
 	}
-	persisted, err := transcriptpipeline.PersistHistoryRecords(ctx, store, workspaceID, ownerID, result.Parsed.SessionID, result.HistoryRecords, embed)
+	persisted, err := historypkg.PersistHistoryRecords(ctx, store, workspaceID, ownerID, result.Parsed.SessionID, result.HistoryRecords, embed)
 	if err != nil {
 		return err
 	}
-	removed, err := transcriptpipeline.ReconcileHistoryRecordPrefix(ctx, store, workspaceID, transcriptpipeline.TranscriptHistoryPrefix(ownerID), persisted)
+	removed, err := historypkg.ReconcileHistoryRecordPrefix(ctx, store, workspaceID, historypkg.TranscriptHistoryPrefix(ownerID), persisted)
 	if err != nil {
 		return err
 	}
@@ -47,7 +48,7 @@ func persistSingleHistoryRecords(ctx context.Context, store *memorystore.Store, 
 	return nil
 }
 
-func persistGroupedHistoryRecords(ctx context.Context, store *memorystore.Store, result *transcriptpipeline.GroupRunResult, embed transcriptpipeline.HistoryRecordEmbedFunc) error {
+func persistGroupedHistoryRecords(ctx context.Context, store *memorystore.Store, result *transcriptpipeline.GroupRunResult, embed historypkg.HistoryRecordEmbedFunc) error {
 	if store == nil || result == nil {
 		return nil
 	}
@@ -64,11 +65,11 @@ func persistGroupedHistoryRecords(ctx context.Context, store *memorystore.Store,
 		} else if len(item.SessionIDs) > 0 {
 			sessionID = strings.TrimSpace(item.SessionIDs[0])
 		}
-		persisted, err := transcriptpipeline.PersistHistoryRecords(ctx, store, workspaceID, ownerID, sessionID, item.HistoryRecords, embed)
+		persisted, err := historypkg.PersistHistoryRecords(ctx, store, workspaceID, ownerID, sessionID, item.HistoryRecords, embed)
 		if err != nil {
 			return err
 		}
-		removed, err := transcriptpipeline.ReconcileHistoryRecordPrefix(ctx, store, workspaceID, transcriptpipeline.TranscriptHistoryPrefix(ownerID), persisted)
+		removed, err := historypkg.ReconcileHistoryRecordPrefix(ctx, store, workspaceID, historypkg.TranscriptHistoryPrefix(ownerID), persisted)
 		if err != nil {
 			return err
 		}

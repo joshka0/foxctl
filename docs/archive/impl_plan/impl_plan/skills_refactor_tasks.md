@@ -73,4 +73,4 @@ Goal: reduce duplication and improve maintainability by consolidating shared log
 
 ## Testing Notes
 
-- go test ./internal/codemap/... and ./cmd/agentctl/cmd currently fail with duplicate sqlite3 symbols (likely needs `-tags=libsqlite3` or CGO/linker config alignment).
+- go test ./internal/intelligence/codemap/... and ./cmd/agentctl/cmd currently fail with duplicate sqlite3 symbols (likely needs `-tags=libsqlite3` or CGO/linker config alignment).
