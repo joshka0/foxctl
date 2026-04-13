@@ -74,7 +74,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
 **Goal:** Durable execution with logs/progress/result envelopes.
 
-* `internal/jobs/`
+* `internal/runtime/jobs/`
 
   * SQLite (modernc): tables + indexes (state, workspace, args_hash)
   * Lifecycle: submit/ls/status/tail/wait/result/cancel, `--dedupe`

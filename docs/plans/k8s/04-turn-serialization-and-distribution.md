@@ -180,7 +180,7 @@ func (pl *PgTurnLock) TryWithTurnLock(ctx context.Context, conversationID string
 Instead of sticky sessions, each incoming turn becomes a River job. River's `SKIP LOCKED` claiming ensures exactly one worker processes each turn.
 
 ```go
-// internal/jobs/workers/conversation_turn.go
+// internal/runtime/jobs/workers/conversation_turn.go
 type ConversationTurnArgs struct {
     ConversationID string          `json:"conversation_id"`
     Content        string          `json:"content"`
@@ -241,7 +241,7 @@ This is an optimization (avoid re-creating consolews sessions on every request),
 | `internal/context/companion/turnlock.go` | In-memory per-conversation mutex (Phase 4a) |
 | `internal/context/companion/turnlock_pg.go` | Postgres advisory lock implementation (Phase 4b) |
 | `internal/context/companion/turnlock_test.go` | Tests for both implementations |
-| `internal/jobs/workers/conversation_turn.go` | River-based turn processing (Phase 4c) |
+| `internal/runtime/jobs/workers/conversation_turn.go` | River-based turn processing (Phase 4c) |
 
 ## Files to Modify
 

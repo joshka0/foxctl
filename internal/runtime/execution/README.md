@@ -4,7 +4,7 @@ The `execution` package provides abstractions for skill execution, implementing 
 
 ## Purpose
 
-This package decouples the persistence layer (`internal/jobs`) from execution details (`internal/runner`), enabling:
+This package decouples the persistence layer (`internal/runtime/jobs`) from execution details (`internal/runner`), enabling:
 
 - **Dependency Injection**: Swap execution strategies easily
 - **Testability**: Mock skill execution in tests
@@ -103,7 +103,7 @@ customExec := execution.ExecutorFunc(func(ctx context.Context, opts execution.Ex
 
 ## Integration with Jobs Package
 
-The `internal/jobs/executor` package now supports the `SkillExecutor` interface:
+The `internal/runtime/jobs/executor` package now supports the `SkillExecutor` interface:
 
 ```go
 // Default: uses RunnerExecutor

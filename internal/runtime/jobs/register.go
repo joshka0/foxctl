@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	workerspkg "github.com/jkatigb/agentctl/internal/jobs/workers"
+	workerspkg "github.com/jkatigb/agentctl/internal/runtime/jobs/workers"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )

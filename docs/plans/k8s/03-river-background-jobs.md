@@ -35,7 +35,7 @@ River covers compression, heartbeat, scheduled tasks, and approval execution. Te
 ### River Client as a Shared Service
 
 ```go
-// internal/jobs/river.go
+// internal/runtime/jobs/river.go
 package jobs
 
 import (
@@ -77,7 +77,7 @@ func NewClient(cfg Config, workers *river.Workers) (*river.Client[pgx.Tx], error
 Replaces `companion.CompressionDaemon` goroutines.
 
 ```go
-// internal/jobs/workers/compression.go
+// internal/runtime/jobs/workers/compression.go
 package workers
 
 type CompressDailyArgs struct {
@@ -201,13 +201,13 @@ periodicJobs := []*river.PeriodicJob{
 
 | File | Purpose |
 |------|---------|
-| `internal/jobs/client.go` | River client factory |
-| `internal/jobs/workers/compression.go` | Daily/weekly compression workers |
-| `internal/jobs/workers/heartbeat.go` | Agent heartbeat check worker |
-| `internal/jobs/workers/approval.go` | Approval execution worker |
-| `internal/jobs/workers/message.go` | Scheduled message delivery worker |
-| `internal/jobs/workers/cleanup.go` | Index janitor worker |
-| `internal/jobs/register.go` | Worker registration (all workers in one place) |
+| `internal/runtime/jobs/client.go` | River client factory |
+| `internal/runtime/jobs/workers/compression.go` | Daily/weekly compression workers |
+| `internal/runtime/jobs/workers/heartbeat.go` | Agent heartbeat check worker |
+| `internal/runtime/jobs/workers/approval.go` | Approval execution worker |
+| `internal/runtime/jobs/workers/message.go` | Scheduled message delivery worker |
+| `internal/runtime/jobs/workers/cleanup.go` | Index janitor worker |
+| `internal/runtime/jobs/register.go` | Worker registration (all workers in one place) |
 
 ## Files to Modify
 
@@ -310,8 +310,8 @@ _, _ = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
 
 ## Verification
 
-1. `go build ./internal/jobs/...` — compiles
-2. `go test ./internal/jobs/...` — worker tests with mock dependencies
+1. `go build ./internal/runtime/jobs/...` — compiles
+2. `go test ./internal/runtime/jobs/...` — worker tests with mock dependencies
 3. Integration: enqueue compression job, verify it runs
 4. Integration: periodic heartbeat check triggers on schedule
 5. Integration: approval execution worker re-checks Casbin before executing
