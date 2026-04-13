@@ -35,7 +35,7 @@ import (
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/queue"
-	"github.com/jkatigb/agentctl/internal/sessionkit/summary"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/summary"
 	"github.com/jkatigb/agentctl/internal/storage"
 	agentstore "github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"

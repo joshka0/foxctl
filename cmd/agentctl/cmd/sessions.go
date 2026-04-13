@@ -16,10 +16,10 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/sessionscmd"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/claudejsonl"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/codexjsonl"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	providertodos "github.com/jkatigb/agentctl/internal/providers/claude/todos"
-	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
-	"github.com/jkatigb/agentctl/internal/sessionkit/codexjsonl"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/todosync"

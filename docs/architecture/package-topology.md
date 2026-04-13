@@ -315,7 +315,7 @@ The target split for this family is:
 | controlplane | `internal/contextplane` | keep as the control-plane anchor |
 | assembly | `internal/companion` | keep as the live assembly anchor |
 | history | `internal/transcriptpipeline`, `internal/contextplane/taskhistory`, `internal/storage/transcriptcache` | keep as one explicit first migration tranche |
-| runtime-helper | `internal/sessionkit`, `internal/context/updater`, `internal/storage/contextbuffer`, `internal/storage/contextvar` | keep as helper/bridge packages until history and assembly seams are narrower |
+| runtime-helper | `internal/context/sessionkit`, `internal/context/updater`, `internal/storage/contextbuffer`, `internal/storage/contextvar` | keep as helper/bridge packages until history and assembly seams are narrower |
 | knowledge | `internal/context/knowledge`, `internal/storage/knowledge` | keep as the durable knowledge slice |
 
 That yields these routing decisions for the current top-level roots:
@@ -327,7 +327,7 @@ That yields these routing decisions for the current top-level roots:
 | `internal/transcriptpipeline` | history | keep | Owns transcript import, preprocessing, claim derivation, and history extraction; it is the main history-processing engine |
 | `internal/contextplane/taskhistory` | history | bridge inside controlplane today | Lives under `contextplane` today but belongs to the same history tranche as `transcriptpipeline`; treat it as coupled history work, not stray control-plane cleanup |
 | `internal/storage/transcriptcache` | history | keep in storage and pair with the history tranche | It is durable transcript-processing cache/state, so it stays under storage while being planned together with history packages |
-| `internal/sessionkit` | runtime-helper | keep as helper slice | Provides session-oriented utilities, archival, snapshotting, and JSONL helpers that support multiple context/history flows without defining the family boundary on their own |
+| `internal/context/sessionkit` | runtime-helper | keep as helper slice | Provides session-oriented utilities, archival, snapshotting, and JSONL helpers that support multiple context/history flows without defining the family boundary on their own |
 | `internal/context/updater` | runtime-helper | bridge | Proactively surfaces relevant context at runtime; it depends on context retrieval/assembly concerns but should not define the control-plane or history boundary |
 | `internal/storage/contextbuffer` | runtime-helper | keep in storage and classify with helper slice | It is a local queue/store for context injection, so it stays storage-owned while routing with runtime helpers |
 | `internal/storage/contextvar` | runtime-helper | keep in storage and classify with helper slice | It is the durable RLM context-variable store, not a separate top-level context family |
@@ -369,7 +369,7 @@ That means the practical boundary for new work is:
   plus `internal/storage/transcriptcache`
 - task-oriented history packaging, control-plane summaries, and ACA/task-facing
   presentation belong to `internal/contextplane/taskhistory`
-- new history work should not drift into `internal/sessionkit` or generic
+- new history work should not drift into `internal/context/sessionkit` or generic
   `internal/contextplane` helpers unless it is clearly a helper or consumer of
   the existing history outputs
 
@@ -411,7 +411,7 @@ The routing rule is:
 
 | Package/root | Slice | Placement rule |
 |------|-------|----------------|
-| `internal/sessionkit` | runtime-helper | keep as the shared helper root for session store-opening, path resolution, archive/snapshot helpers, and transcript JSONL utilities |
+| `internal/context/sessionkit` | runtime-helper | keep as the shared helper root for session store-opening, path resolution, archive/snapshot helpers, and transcript JSONL utilities |
 | `internal/context/updater` | runtime-helper | keep as a runtime helper that analyzes active conversations and injects relevant context; it is not the control-plane anchor or the durable knowledge plane |
 | `internal/storage/contextbuffer` | runtime-helper | keep in `internal/storage/*` as helper-owned injection buffering |
 | `internal/storage/contextvar` | runtime-helper | keep in `internal/storage/*` as helper-owned context-variable persistence |

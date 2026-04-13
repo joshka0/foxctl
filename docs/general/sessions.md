@@ -7,7 +7,7 @@ Machine-friendly reference for session lifecycle, lineage, and retrieval.
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical packages | `internal/storage/sessions`, `cmd/agentctl/cmd/sessions.go`, `skills/session_restore`, `skills/session_summarize`, `skills/session_recall`, `internal/sessionkit` |
+| Canonical packages | `internal/storage/sessions`, `cmd/agentctl/cmd/sessions.go`, `skills/session_restore`, `skills/session_summarize`, `skills/session_recall`, `internal/context/sessionkit` |
 | Last reviewed | 2026-02-20 |
 
 ## Scope
@@ -56,7 +56,7 @@ Behavior:
 
 ## Identity Resolution
 
-Session id fallback chain (from `internal/sessionkit/identity.go`):
+Session id fallback chain (from `internal/context/sessionkit/identity.go`):
 
 1. Explicit id input
 2. `AGENTCTL_SESSION_ID`

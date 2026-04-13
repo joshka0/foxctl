@@ -282,7 +282,7 @@ Primary packages:
 - `internal/companion/*`
 - `internal/transcriptpipeline/*`
 - `internal/contextplane/taskhistory/*`
-- `internal/sessionkit/*`
+- `internal/context/sessionkit/*`
 - `internal/context/updater/*`
 - `internal/storage/context*`
 - `internal/context/knowledge/*`
@@ -314,7 +314,7 @@ Current mapping to make durable in Story 1:
 | `internal/transcriptpipeline` | history | keep as the history-processing anchor |
 | `internal/contextplane/taskhistory` | history | treat as part of the same history tranche even though it currently lives under `contextplane` |
 | `internal/storage/transcriptcache` | history | keep in storage but plan together with the history tranche |
-| `internal/sessionkit` | runtime-helper | keep as a shared helper slice |
+| `internal/context/sessionkit` | runtime-helper | keep as a shared helper slice |
 | `internal/context/updater` | runtime-helper | treat as a helper/bridge package, not the family anchor |
 | `internal/storage/contextbuffer` | runtime-helper | keep in storage and classify with helper work |
 | `internal/storage/contextvar` | runtime-helper | keep in storage and classify with helper work |
@@ -365,7 +365,7 @@ Non-goals for Story 2:
 Story 3 target:
 
 - make the remaining helper roots and knowledge roots unambiguous:
-  - `internal/sessionkit`
+  - `internal/context/sessionkit`
   - `internal/context/updater`
   - `internal/storage/contextbuffer`
   - `internal/storage/contextvar`
@@ -387,7 +387,7 @@ Story 3 should end with these durable decisions:
 
 | Package/root | Slice | Decision |
 |------|-------|----------|
-| `internal/sessionkit` | runtime-helper | keep as shared helper root |
+| `internal/context/sessionkit` | runtime-helper | keep as shared helper root |
 | `internal/context/updater` | runtime-helper | keep as helper/bridge package |
 | `internal/storage/contextbuffer` | runtime-helper | keep in storage with helper ownership |
 | `internal/storage/contextvar` | runtime-helper | keep in storage with helper ownership |

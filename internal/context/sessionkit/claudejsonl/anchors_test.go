@@ -69,7 +69,7 @@ func TestExtractCommands(t *testing.T) {
 					"type":  "tool_use",
 					"name":  "Read",
 					"id":    "tool-read-1",
-					"input": map[string]any{"file_path": "internal/sessionkit/claudejsonl/anchors.go"},
+					"input": map[string]any{"file_path": "internal/context/sessionkit/claudejsonl/anchors.go"},
 				},
 				{
 					"type":  "tool_use",
@@ -112,13 +112,13 @@ func TestExtractFilePaths(t *testing.T) {
 			"content": []map[string]any{
 				{
 					"type": "text",
-					"text": "Update internal/sessionkit/claudejsonl/anchors.go and /tmp/report.txt for debug output.",
+					"text": "Update internal/context/sessionkit/claudejsonl/anchors.go and /tmp/report.txt for debug output.",
 				},
 				{
 					"type":  "tool_use",
 					"name":  "Read",
 					"id":    "tool-read",
-					"input": map[string]any{"file_path": "internal/sessionkit/claudejsonl/anchors.go"},
+					"input": map[string]any{"file_path": "internal/context/sessionkit/claudejsonl/anchors.go"},
 				},
 				{
 					"type":  "tool_use",
@@ -130,19 +130,19 @@ func TestExtractFilePaths(t *testing.T) {
 					"type":  "tool_use",
 					"name":  "Edit",
 					"id":    "tool-edit",
-					"input": map[string]any{"file_path": "internal/sessionkit/claudejsonl/extract.go", "old_string": "a", "new_string": "b"},
+					"input": map[string]any{"file_path": "internal/context/sessionkit/claudejsonl/extract.go", "old_string": "a", "new_string": "b"},
 				},
 				{
 					"type":  "tool_use",
 					"name":  "Glob",
 					"id":    "tool-glob",
-					"input": map[string]any{"pattern": "internal/**/*.go", "path": "internal/sessionkit"},
+					"input": map[string]any{"pattern": "internal/**/*.go", "path": "internal/context/sessionkit"},
 				},
 				{
 					"type":  "tool_use",
 					"name":  "Grep",
 					"id":    "tool-grep",
-					"input": map[string]any{"pattern": "internal/sessionkit/claudejsonl/.*\\.go", "path": "internal/sessionkit/claudejsonl"},
+					"input": map[string]any{"pattern": "internal/context/sessionkit/claudejsonl/.*\\.go", "path": "internal/context/sessionkit/claudejsonl"},
 				},
 			},
 		}),
@@ -165,11 +165,11 @@ func TestExtractFilePaths(t *testing.T) {
 		"/tmp/output.txt",
 		"/tmp/report.txt",
 		"internal/**/*.go",
-		"internal/sessionkit",
-		"internal/sessionkit/claudejsonl/.*\\.go",
-		"internal/sessionkit/claudejsonl/anchors.go",
-		"internal/sessionkit/claudejsonl/extract.go",
-		"internal/sessionkit/claudejsonl",
+		"internal/context/sessionkit",
+		"internal/context/sessionkit/claudejsonl/.*\\.go",
+		"internal/context/sessionkit/claudejsonl/anchors.go",
+		"internal/context/sessionkit/claudejsonl/extract.go",
+		"internal/context/sessionkit/claudejsonl",
 	}
 	for _, expected := range expectedPaths {
 		if !pathSet[expected] {
@@ -213,7 +213,7 @@ func TestExtractErrors(t *testing.T) {
 					"type":  "tool_use",
 					"name":  "Read",
 					"id":    "tool-2",
-					"input": map[string]any{"file_path": "internal/sessionkit/claudejsonl/anchors.go"},
+					"input": map[string]any{"file_path": "internal/context/sessionkit/claudejsonl/anchors.go"},
 				},
 				{
 					"type":        "tool_result",
@@ -248,7 +248,7 @@ func TestExtractSymbols(t *testing.T) {
 			"content": []map[string]any{
 				{
 					"type": "text",
-					"text": "File: internal/sessionkit/claudejsonl/anchors.go\n```go\ntype Runner struct{}\nconst DefaultName = \"runner\"\nvar Enabled = true\nfunc Build() {}\n```\n\nFile: internal/ui/app.ts\n```typescript\nexport interface Config {}\nexport class App {}\nexport function boot() {}\nexport const VERSION = \"1.0.0\"\n```",
+					"text": "File: internal/context/sessionkit/claudejsonl/anchors.go\n```go\ntype Runner struct{}\nconst DefaultName = \"runner\"\nvar Enabled = true\nfunc Build() {}\n```\n\nFile: internal/ui/app.ts\n```typescript\nexport interface Config {}\nexport class App {}\nexport function boot() {}\nexport const VERSION = \"1.0.0\"\n```",
 				},
 			},
 		}),
@@ -266,10 +266,10 @@ func TestExtractSymbols(t *testing.T) {
 	}
 
 	expectations := []symbolExpectation{
-		{Name: "Build", Kind: "func", Path: "internal/sessionkit/claudejsonl/anchors.go"},
-		{Name: "Runner", Kind: "struct", Path: "internal/sessionkit/claudejsonl/anchors.go"},
-		{Name: "DefaultName", Kind: "const", Path: "internal/sessionkit/claudejsonl/anchors.go"},
-		{Name: "Enabled", Kind: "var", Path: "internal/sessionkit/claudejsonl/anchors.go"},
+		{Name: "Build", Kind: "func", Path: "internal/context/sessionkit/claudejsonl/anchors.go"},
+		{Name: "Runner", Kind: "struct", Path: "internal/context/sessionkit/claudejsonl/anchors.go"},
+		{Name: "DefaultName", Kind: "const", Path: "internal/context/sessionkit/claudejsonl/anchors.go"},
+		{Name: "Enabled", Kind: "var", Path: "internal/context/sessionkit/claudejsonl/anchors.go"},
 		{Name: "Config", Kind: "interface", Path: "internal/ui/app.ts"},
 		{Name: "App", Kind: "class", Path: "internal/ui/app.ts"},
 		{Name: "boot", Kind: "function", Path: "internal/ui/app.ts"},
@@ -314,7 +314,7 @@ func TestExtractAllAnchors(t *testing.T) {
 			"content": []map[string]any{
 				{
 					"type": "text",
-					"text": "Edit internal/sessionkit/claudejsonl/anchors.go\n```go\nfunc BuildAll() {}\n```",
+					"text": "Edit internal/context/sessionkit/claudejsonl/anchors.go\n```go\nfunc BuildAll() {}\n```",
 				},
 				{
 					"type":  "tool_use",
@@ -326,7 +326,7 @@ func TestExtractAllAnchors(t *testing.T) {
 					"type":  "tool_use",
 					"name":  "Read",
 					"id":    "tool-read",
-					"input": map[string]any{"file_path": "internal/sessionkit/claudejsonl/anchors.go"},
+					"input": map[string]any{"file_path": "internal/context/sessionkit/claudejsonl/anchors.go"},
 				},
 			},
 		}),
@@ -342,7 +342,7 @@ func TestExtractAllAnchors(t *testing.T) {
 	commandCount := 0
 	for _, anchor := range anchors {
 		typeSet[anchor.Type] = true
-		if anchor.Type == AnchorFilePath && anchor.Content == "internal/sessionkit/claudejsonl/anchors.go" {
+		if anchor.Type == AnchorFilePath && anchor.Content == "internal/context/sessionkit/claudejsonl/anchors.go" {
 			filePathCount++
 		}
 		if anchor.Type == AnchorCommand && anchor.Content == "go test ./..." {

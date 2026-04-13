@@ -140,7 +140,7 @@ Every `.db` file managed by agentctl must appear in this list. Stores are classi
 | `CONTEXTBUFFER` | `contextbuffer.db` | `internal/storage/contextbuffer/` | Context buffer |
 | `GRAPH` | `graph.db` | `internal/storage/graph/` | Code relationship graph (rebuilt per-machine) |
 | `EMBEDDING_QUEUE` | `embedding_queue.db` | `internal/intelligence/indexing/embedding/` | Embedding job queue |
-| `SUMMARY_QUEUE` | `summary_queue.db` | `internal/sessionkit/summary/` | Session summary job queue |
+| `SUMMARY_QUEUE` | `summary_queue.db` | `internal/context/sessionkit/summary/` | Session summary job queue |
 | `DAEMON_DEDUPE` | `daemon_dedupe.db` | `internal/agent/daemon/` | Message deduplication |
 | `PATTERNS` | `patterns.db` | `internal/agent/optimization/` | Agent optimization patterns |
 | `POST_REVIEW` | `post_review_events.db` | `internal/intelligence/indexing/postreview/` | Post-review event tracking |

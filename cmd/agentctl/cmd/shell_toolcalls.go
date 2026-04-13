@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
-	"github.com/jkatigb/agentctl/internal/sessionkit/codexjsonl"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/claudejsonl"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/codexjsonl"
 	"github.com/spf13/cobra"
 )
 

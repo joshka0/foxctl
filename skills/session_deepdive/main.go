@@ -9,7 +9,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/sessionkit/archive"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/archive"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 

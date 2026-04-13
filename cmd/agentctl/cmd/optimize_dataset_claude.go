@@ -20,7 +20,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/llmcompat"
 	config "github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/claudejsonl"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
