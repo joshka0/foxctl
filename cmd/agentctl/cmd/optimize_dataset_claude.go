@@ -17,7 +17,7 @@ import (
 	"unicode"
 
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/llmcompat"
+	"github.com/jkatigb/agentctl/internal/providers/llmcompat"
 	config "github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/context/sessionkit/claudejsonl"
