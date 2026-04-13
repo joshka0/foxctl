@@ -286,7 +286,7 @@ Execute the documentation sweep in focused PRs per subsystem. Each PR adds `doc.
 | 6.7 | Skills (batch 1) | `skills/code/*`, `skills/memory/*` | HIGH |
 | 6.8 | Skills (batch 2) | `skills/todo/*`, `skills/repo_index/*` | MEDIUM |
 | 6.9 | Platform | `internal/platform/*` | MEDIUM |
-| 6.10 | Companion | `internal/companion/*` | LOW |
+| 6.10 | Companion | `internal/context/companion/*` | LOW |
 
 **Files per PR (template):**
 

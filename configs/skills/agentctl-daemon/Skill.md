@@ -248,7 +248,7 @@ Check daemon logs for `memory_enabled: false`.
 | Component | File |
 |-----------|------|
 | Engine routing | `internal/agent/daemon/daemon.go:237` |
-| Companion service | `internal/companion/service.go` |
+| Companion service | `internal/context/companion/service.go` |
 | LLMChatEngine | `internal/engine/llmchat_engine.go` |
 | Message handlers | `internal/agent/daemon/handlers.go` |
 

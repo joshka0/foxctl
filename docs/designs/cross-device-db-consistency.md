@@ -116,7 +116,7 @@ Every `.db` file managed by agentctl must appear in this list. Stores are classi
 | `MAILBOX` | `mailbox.db` | `internal/storage/mailbox/` | Agent messages |
 | `AGENTS` | `agents.db` | `internal/storage/agents/` | Agent registry; also used by the actor system registry (`actor_registry` via `internal/actor/registry_store.go`) |
 | `MEMORY` | `memory.db` | `internal/storage/memory/` | Semantic memory + indexer state. Has `factory.go` (done) |
-| `COMPANION` | `companion.db` | `internal/companion/` | Companion conversation memory (turns + summaries + distilled history) |
+| `COMPANION` | `companion.db` | `internal/context/companion/` | Companion conversation memory (turns + summaries + distilled history) |
 | `CONTEXTVAR` | `contextvar.db` | `internal/storage/contextvar/` | RLM context store |
 
 **Sync-useful stores** (evaluate for Phase 2 or later):

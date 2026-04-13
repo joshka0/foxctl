@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/context/companion"
 )
 
 // InteractionPacket is the deterministic mainline unit for transcript memory derivation.

@@ -154,7 +154,7 @@ if s.enforcer != nil {
 }
 ```
 
-### `internal/companion/service.go`
+### `internal/context/companion/service.go`
 
 Pass enforcer to companion service for inline tool authorization checks.
 

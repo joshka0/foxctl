@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -89,12 +89,12 @@ func initGitRepoForCoChangeAPI(t *testing.T, workspace string) {
 		}
 	}
 	runGit("init", "-b", "main")
-	writeFile("internal/contextplane/store.go", "package contextplane\n\nvar StoreSeed = 1\n")
-	writeFile("internal/contextplane/dispatch.go", "package contextplane\n\nvar DispatchSeed = 1\n")
+	writeFile("internal/context/contextplane/store.go", "package contextplane\n\nvar StoreSeed = 1\n")
+	writeFile("internal/context/contextplane/dispatch.go", "package contextplane\n\nvar DispatchSeed = 1\n")
 	runGit("add", ".")
 	runGit("commit", "-m", "initial")
-	writeFile("internal/contextplane/store.go", "package contextplane\n\nvar StoreSeed = 2\n")
-	writeFile("internal/contextplane/dispatch.go", "package contextplane\n\nvar DispatchSeed = 2\n")
-	runGit("add", "internal/contextplane/store.go", "internal/contextplane/dispatch.go")
+	writeFile("internal/context/contextplane/store.go", "package contextplane\n\nvar StoreSeed = 2\n")
+	writeFile("internal/context/contextplane/dispatch.go", "package contextplane\n\nvar DispatchSeed = 2\n")
+	runGit("add", "internal/context/contextplane/store.go", "internal/context/contextplane/dispatch.go")
 	runGit("commit", "-m", "couple store dispatch")
 }

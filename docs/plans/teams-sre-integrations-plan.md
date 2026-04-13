@@ -1030,7 +1030,7 @@ Primary files:
 
 1. `internal/llm/bedrock/` or current model provider package extension
 2. `internal/platform/config/config.go` (wire Bedrock enterprise config if missing)
-3. `internal/companion/service.go` and/or runtime model call path
+3. `internal/context/companion/service.go` and/or runtime model call path
 4. `internal/v2/runtime/runner/model_call.go`
 5. `docs/plans/aws-bedrock-provider.md` (cross-link / align where needed)
 
@@ -1060,7 +1060,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/llm/bedrock ./internal/v2/runtime/runner ./internal/companion/...`
+1. `go test ./internal/llm/bedrock ./internal/v2/runtime/runner ./internal/context/companion/...`
 
 ## PR-0.5.4: Secret Broker + `secret_ref` Hardening
 

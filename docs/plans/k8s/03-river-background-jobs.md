@@ -214,8 +214,8 @@ periodicJobs := []*river.PeriodicJob{
 | File | Change |
 |------|--------|
 | `internal/web/server.go` | Create River client, start/stop with server lifecycle |
-| `internal/companion/daemon.go` | Replace goroutine compression loops with River periodic jobs |
-| `internal/companion/service.go` | Enqueue compression jobs after turns via `riverClient.InsertTx` |
+| `internal/context/companion/daemon.go` | Replace goroutine compression loops with River periodic jobs |
+| `internal/context/companion/service.go` | Enqueue compression jobs after turns via `riverClient.InsertTx` |
 | `internal/agent/daemon/daemon.go` | Replace heartbeat ticker with River periodic job |
 | `go.mod` | Add `github.com/riverqueue/river`, `riverpgxv5`, `pgxpool` |
 

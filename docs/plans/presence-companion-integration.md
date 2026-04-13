@@ -23,7 +23,7 @@
 
 **Approach: Adapter pattern + default-on settings + progressive frontend rendering**
 
-- The backend presence engine is already complete in `internal/companion/service.go` (`generatePresence()`, `PresenceConfig`, `PresenceBundle`)
+- The backend presence engine is already complete in `internal/context/companion/service.go` (`generatePresence()`, `PresenceConfig`, `PresenceBundle`)
 - We bridge the interface mismatch (`api.SkillRunner` → `companion.SkillRunner`) with a thin adapter
 - Wire `PresenceConfig` into `ServiceConfig` at the existing gap in `companion.go`
 - Forward presence through daemon reply envelopes
@@ -87,7 +87,7 @@ import (
     "context"
     "fmt"
 
-    "github.com/jkatigb/agentctl/internal/companion"
+    "github.com/jkatigb/agentctl/internal/context/companion"
 )
 
 type companionSkillRunnerAdapter struct {
@@ -202,7 +202,7 @@ Presence any `json:"presence,omitempty"`
 Tone     any `json:"tone,omitempty"`
 ```
 
-Use `any` to avoid cross-package coupling with `internal/companion`.
+Use `any` to avoid cross-package coupling with `internal/context/companion`.
 
 ### 7. `packages/gui-agent/src/api/types.ts` (EDIT)
 

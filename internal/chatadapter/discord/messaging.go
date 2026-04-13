@@ -2,8 +2,8 @@ package discord
 
 import (
 	"github.com/jkatigb/agentctl/internal/chatadapter"
-	"github.com/jkatigb/agentctl/internal/companion"
 	consolepkg "github.com/jkatigb/agentctl/internal/console"
+	"github.com/jkatigb/agentctl/internal/context/companion"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 

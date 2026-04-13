@@ -30,7 +30,7 @@ flowchart LR
     Bridge --> AgentsAPI["/api/agents/* HTTP endpoints"]
     SessionBridge --> ConsoleSessions["internal/console SessionManager"]
     ConsoleSessions --> ConsoleTransport["internal/web/consolews transport"]
-    ConsoleTransport --> Companion["internal/companion + console runner"]
+    ConsoleTransport --> Companion["internal/context/companion + console runner"]
     Companion --> Context["v2 context builder / optional Jido companion provider"]
 ```
 

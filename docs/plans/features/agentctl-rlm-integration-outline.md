@@ -26,7 +26,7 @@ The repo already has several pieces that make an RLM layer practical:
   - already supports context variables, semantic memory lookup, and companion DB access
 - `internal/storage/contextvar`
   - persistent external state for context variables
-- `internal/companion/*`
+- `internal/context/companion/*`
   - hybrid companion memory with:
     - conversation events
     - hard state entries
@@ -202,7 +202,7 @@ These map well onto:
 
 - `internal/context/contextplane`
 - `internal/storage/contextvar`
-- `internal/companion`
+- `internal/context/companion`
 - `internal/intelligence/indexing/repoindex`
 - `internal/storage/obsidianindex`
 - `internal/trajectorycapture`
@@ -230,7 +230,7 @@ That is much better than treating the whole history as one blob.
 
 ### Phase 0: harden current proto-RLM pieces
 
-Use the existing `internal/engine/rlm_tools.go` and `internal/companion/*` as
+Use the existing `internal/engine/rlm_tools.go` and `internal/context/companion/*` as
 the seed, but do not let them become the final architecture.
 
 Immediate actions:

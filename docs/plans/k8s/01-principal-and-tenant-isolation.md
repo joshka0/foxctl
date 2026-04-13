@@ -179,7 +179,7 @@ type HookContext struct {
 
 Wire Principal into `hooks.Input` when dispatching PreToolUse/PostToolUse.
 
-### `internal/companion/service.go`
+### `internal/context/companion/service.go`
 
 - Accept Principal in `Chat()` method (via context or explicit parameter)
 - Use tenant-scoped conversation ID for memory lookups

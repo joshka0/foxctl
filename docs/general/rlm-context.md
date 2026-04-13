@@ -112,7 +112,7 @@ Adjust communication style based on feedback.
 }
 ```
 
-### 3. Evolving Personality (`internal/companion/evolving_personality.go`)
+### 3. Evolving Personality (`internal/context/companion/evolving_personality.go`)
 
 Dynamic personality adaptation with six adjustable dimensions:
 
@@ -258,7 +258,7 @@ tools := engine.NewCompositeToolExecutor(rlmExecutor, otherExecutor)
 ### Using Evolving Personality
 
 ```go
-import "github.com/jkatigb/agentctl/internal/companion"
+import "github.com/jkatigb/agentctl/internal/context/companion"
 
 ep := companion.NewEvolvingPersonality(contextvarStore, conversationID)
 

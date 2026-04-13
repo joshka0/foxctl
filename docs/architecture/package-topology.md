@@ -40,7 +40,7 @@ Prefer adding new packages under one of these stable families:
 | `internal/protocol` | Wire/envelope/protocol helpers | `protocol` |
 | `internal/storage` | Durable state, CAS, local rebuildable stores, DB helpers | `storage/*` |
 | `internal/v2` | Newer **agent/runtime/orchestration** stack only | `v2/core`, `v2/services`, `v2/runtime`, `v2/adapters` |
-| `internal/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane | current context family |
+| `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane | current context family |
 | `internal/intelligence/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |
 | `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers | current interface family |
 
@@ -138,7 +138,7 @@ These package families are peer families, not “legacy” in the same sense:
 | Family | Reason |
 |------|--------|
 | `internal/storage/*` | Shared persistence layer used by both legacy and v2 paths |
-| `internal/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane, not old runtime scaffolding |
+| `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane, not old runtime scaffolding |
 | `internal/intelligence/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Intelligence and retrieval plane |
 | `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers |
 | `internal/domain`, `internal/platform`, `internal/protocol` | Foundations, not generation-specific runtime code |
@@ -314,7 +314,7 @@ The target split for this family is:
 | Context concern | Current anchor packages | Current decision |
 |------|--------------------------|------------------|
 | controlplane | `internal/context/contextplane` | keep as the control-plane anchor |
-| assembly | `internal/companion` | keep as the live assembly anchor |
+| assembly | `internal/context/companion` | keep as the live assembly anchor |
 | history | `internal/context/transcriptpipeline`, `internal/context/contextplane/taskhistory`, `internal/storage/transcriptcache` | keep as one explicit first migration tranche |
 | runtime-helper | `internal/context/sessionkit`, `internal/context/updater`, `internal/storage/contextbuffer`, `internal/storage/contextvar` | keep as helper/bridge packages until history and assembly seams are narrower |
 | knowledge | `internal/context/knowledge`, `internal/storage/knowledge` | keep as the durable knowledge slice |
@@ -324,7 +324,7 @@ That yields these routing decisions for the current top-level roots:
 | Package/root | Subfamily | Keep / bridge / move-later | Why |
 |------|-----------|-----------------------------|-----|
 | `internal/context/contextplane` | controlplane | keep | Owns ACA-style orientation, proposals, retrieval inspection, promotion helpers, and `taskhistory`; it is already the control-plane home rather than a generic helper bucket |
-| `internal/companion` | assembly | keep | Owns live prompt/context assembly, conversation memory coordination, and layered context building for active sessions |
+| `internal/context/companion` | assembly | keep | Owns live prompt/context assembly, conversation memory coordination, and layered context building for active sessions |
 | `internal/context/transcriptpipeline` | history | keep | Owns transcript import, preprocessing, claim derivation, and history extraction; it is the main history-processing engine |
 | `internal/context/contextplane/taskhistory` | history | bridge inside controlplane today | Lives under `contextplane` today but belongs to the same history tranche as `transcriptpipeline`; treat it as coupled history work, not stray control-plane cleanup |
 | `internal/storage/transcriptcache` | history | keep in storage and pair with the history tranche | It is durable transcript-processing cache/state, so it stays under storage while being planned together with history packages |
@@ -344,7 +344,7 @@ Explicit placement rules for this family:
 - keep storage-backed context helpers in `internal/storage/*`; classify them
   with the context subfamily they serve rather than promoting them into new
   top-level roots
-- use `internal/companion` for live assembly concerns and `internal/context/contextplane`
+- use `internal/context/companion` for live assembly concerns and `internal/context/contextplane`
   for control-plane concerns unless a narrower subfamily has already been
   carved out
 

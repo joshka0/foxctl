@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/context/companion"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"

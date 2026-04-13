@@ -10,7 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/context/companion"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
 	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
 )

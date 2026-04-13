@@ -16,7 +16,7 @@ The current companion memory runtime already has strong primitives:
 What it does not have is a learned per-event retention policy.
 
 Today the main control surface is the coarse retention preset in
-`internal/companion/memory_behavior.go`, which changes budgets and recall
+`internal/context/companion/memory_behavior.go`, which changes budgets and recall
 limits by agent type, but does not decide whether a specific message, tool
 result, or episode is worth promotion. This is especially visible for tool
 output: `tool_result` events are treated as memory-worthy in the gate, but the
@@ -95,7 +95,7 @@ small, cheap, explainable, and easy to run in shadow mode.
 ### Why this approach
 
 - It fits the existing event-sourced companion runtime in
-  `internal/companion/hybrid_pipeline.go`.
+  `internal/context/companion/hybrid_pipeline.go`.
 - It reuses the existing optimization pattern already present in
   `internal/agent/optimization/*`.
 - It does not require a second memory system or a real-time inference service.
@@ -159,36 +159,36 @@ new policy version
 ## Design Patterns
 
 - **Strategy Pattern**
-  - Where applied: `internal/companion/retention_policy.go`
+  - Where applied: `internal/context/companion/retention_policy.go`
   - Why chosen: allows a rule-only baseline, a shadow learned policy, and a
     future stronger classifier behind the same runtime interface.
 
 - **Event Sourcing + Materialized Views**
-  - Where applied: `internal/companion/memory.go`,
-    `internal/companion/hybrid_pipeline.go`
+  - Where applied: `internal/context/companion/memory.go`,
+    `internal/context/companion/hybrid_pipeline.go`
   - Why chosen: retention decisions and delayed outcomes should be append-like
     audit records derived from immutable events, not hidden mutable state.
 
 - **Shadow Mode / Dual-Run Pattern**
-  - Where applied: `internal/companion/service.go`,
-    `internal/companion/hybrid_pipeline.go`
+  - Where applied: `internal/context/companion/service.go`,
+    `internal/context/companion/hybrid_pipeline.go`
   - Why chosen: allows offline evaluation of policy quality before it changes
     compaction behavior.
 
 - **Repository Pattern**
-  - Where applied: companion memory access in `internal/companion/memory.go`
+  - Where applied: companion memory access in `internal/context/companion/memory.go`
   - Why chosen: keeps SQL, migrations, and policy training queries in one
     explicit boundary instead of scattering them through the chat loop.
 
 - **Delayed Supervision / Credit Assignment**
-  - Where applied: `internal/companion/retention_labels.go`,
+  - Where applied: `internal/context/companion/retention_labels.go`,
     `internal/agent/optimization/retention_trainer.go`
   - Why chosen: final human feedback is only useful after it is attributed back
     to the events and spans that shaped the answer.
 
 ## File Changes
 
-### `internal/companion/hybrid_types.go` (modified)
+### `internal/context/companion/hybrid_types.go` (modified)
 - **Purpose**: Define typed retention-policy and conversation-binding records.
 - **Key changes**:
   - Add `ConversationBinding`
@@ -208,7 +208,7 @@ const (
 )
 ```
 
-### `internal/companion/memory.go` (modified)
+### `internal/context/companion/memory.go` (modified)
 - **Purpose**: Extend companion storage with additive schema for policy
   bindings, decisions, outcomes, and model weights.
 - **Key changes**:
@@ -241,7 +241,7 @@ const (
     - `SaveRetentionWeights`
     - `ListRetentionTrainingExamples`
 
-### `internal/companion/retention_features.go` (new)
+### `internal/context/companion/retention_features.go` (new)
 - **Purpose**: Compute deterministic feature vectors from events before policy
   routing.
 - **Key changes**:
@@ -259,7 +259,7 @@ const (
   - Introduce a payload-preview helper for `tool_result` so routing is not
     limited to `event.Content`
 
-### `internal/companion/retention_policy.go` (new)
+### `internal/context/companion/retention_policy.go` (new)
 - **Purpose**: Runtime inference interface and baseline policy
   implementations.
 - **Key changes**:
@@ -276,7 +276,7 @@ type RetentionPolicy interface {
 }
 ```
 
-### `internal/companion/retention_labels.go` (new)
+### `internal/context/companion/retention_labels.go` (new)
 - **Purpose**: Convert later promotions, recalls, and feedback into delayed
   training labels.
 - **Key changes**:
@@ -291,7 +291,7 @@ type RetentionPolicy interface {
   - Keep labels additive and provenance-bearing
   - Refuse to infer labels when conversation/session binding is missing
 
-### `internal/companion/hybrid_pipeline.go` (modified)
+### `internal/context/companion/hybrid_pipeline.go` (modified)
 - **Purpose**: Hook the router into the existing hybrid pipeline without
   breaking the current path.
 - **Key changes**:
@@ -307,7 +307,7 @@ type RetentionPolicy interface {
     - `keep_recent_only` for low-value ephemeral content
   - Preserve the current fallback if policy evaluation errors
 
-### `internal/companion/v2_context_adapter.go` (modified)
+### `internal/context/companion/v2_context_adapter.go` (modified)
 - **Purpose**: Emit stable refs for surfaced memory items so delayed labels can
   detect what was actually shown to the model.
 - **Key changes**:
@@ -318,7 +318,7 @@ type RetentionPolicy interface {
   - Populate `Meta` with counts of surfaced item types
   - Keep current layered text output unchanged
 
-### `internal/companion/service.go` (modified)
+### `internal/context/companion/service.go` (modified)
 - **Purpose**: Bind conversation metadata, preserve bundle refs, and control the
   rollout mode.
 - **Key changes**:
@@ -353,7 +353,7 @@ type RetentionPolicy interface {
   - Verify sparse feedback does not overfit
   - Verify low-rated trajectories do not poison unrelated workspaces
 
-### `internal/companion/retention_policy_test.go` (new)
+### `internal/context/companion/retention_policy_test.go` (new)
 - **Purpose**: Unit-test feature extraction, routing, and fallback behavior.
 - **Key changes**:
   - Test message vs tool-result feature extraction
@@ -361,7 +361,7 @@ type RetentionPolicy interface {
   - Test `shadow` vs `enforce_low_risk` mode behavior
   - Test deterministic outputs from fixed weights
 
-### `internal/companion/retention_labels_test.go` (new)
+### `internal/context/companion/retention_labels_test.go` (new)
 - **Purpose**: Verify delayed label generation.
 - **Key changes**:
   - Test promotion-driven positive labels
@@ -369,7 +369,7 @@ type RetentionPolicy interface {
   - Test missing binding fallback
   - Test conflicting signals resolution
 
-### `internal/companion/memory_test.go` (modified)
+### `internal/context/companion/memory_test.go` (modified)
 - **Purpose**: Extend existing companion-memory tests to cover schema and
   additive behavior.
 - **Key changes**:
@@ -390,13 +390,13 @@ type RetentionPolicy interface {
 
 ### Unit Tests
 
-- `internal/companion/retention_policy_test.go`
+- `internal/context/companion/retention_policy_test.go`
   - `TestRetentionFeatureExtraction_Message`
   - `TestRetentionFeatureExtraction_ToolResultPreview`
   - `TestLinearWeightPolicy_RouteDeterministic`
   - `TestRuleBaselinePolicy_Fallback`
   - `TestRetentionPolicy_ShadowDoesNotChangeBehavior`
-- `internal/companion/retention_labels_test.go`
+- `internal/context/companion/retention_labels_test.go`
   - `TestRetentionLabels_FromHardStatePromotion`
   - `TestRetentionLabels_FromSurfacedRefs`
   - `TestRetentionLabels_MissingConversationBinding`

@@ -12,7 +12,7 @@ Without it:
 Keep the interface contract unchanged and implement:
 - `func (m *ConversationMemory) SummarizeEpisode(ctx context.Context, conversationID string, episodeID, startEventID, endEventID int64) (string, int, error)`
 
-All new code lives in a dedicated file: `internal/companion/hybrid_summarizer.go`
+All new code lives in a dedicated file: `internal/context/companion/hybrid_summarizer.go`
 
 Decision points:
 - **LLM credentials**: Read from `*LLMSummarizer` fields via type assertion because implementation lives in the same `companion` package, where unexported field access is legal. This avoids additional config plumbing.
@@ -27,7 +27,7 @@ Decision points:
 
 ## File Changes
 
-### 1) `internal/companion/hybrid_summarizer.go` (new)
+### 1) `internal/context/companion/hybrid_summarizer.go` (new)
 
 **Purpose**: Episode-level LLM summarization and structured extraction.
 
@@ -236,7 +236,7 @@ if err := tx.Commit(); err != nil {
 return summary, tokenCount, nil
 ```
 
-### 2) `internal/companion/hybrid_types.go` (modified)
+### 2) `internal/context/companion/hybrid_types.go` (modified)
 
 Add new entry type constants for LLM-extracted types:
 
@@ -286,13 +286,13 @@ No DB schema migration needed. Existing hybrid tables already support all requir
 - No new external dependencies
 
 ## Implementation Order
-1. Create `internal/companion/hybrid_summarizer.go` with method skeleton
+1. Create `internal/context/companion/hybrid_summarizer.go` with method skeleton
 2. Add episode-event query helper and transcript formatter
 3. Add full prompt template + LLM call + JSON parse with fallback
 4. Add extraction persistence with short-lived tx
 5. Add entry-type constants to `hybrid_types.go`
 6. Add tests covering parse fallback, tx persistence, transcript mapping
-7. Verify interface compatibility — `go vet ./internal/companion/...`
+7. Verify interface compatibility — `go vet ./internal/context/companion/...`
 
 ## Open Questions
 1. For unknown `entry_type` from LLM, should we normalize into dedicated constants immediately, or append as generic keys? **Recommendation**: Add constants now (`identity`, `relationship_dynamic`, `technical_context`) and route LLM output through normalization.

@@ -80,7 +80,7 @@ Key packages:
 - `internal/v2/adapters/jido`
 - `internal/v2/runtime/orchestration`
 - `internal/v2/services`
-- `internal/companion`
+- `internal/context/companion`
 - `internal/web/api`
 
 Those packages translate canonical Go-side requests into JSON-RPC runtime calls:

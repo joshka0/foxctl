@@ -212,8 +212,8 @@ ToolDef{
 **Files:**
 - `internal/engine/rlm_tools.go` - tool implementation
 - `internal/engine/interfaces.go` (new) - `ConversationTurnReader` interface
-- `internal/companion/memory_reader.go` (new) - adapter implementation
-- `internal/companion/service.go` - wire adapter into RLMToolExecutor
+- `internal/context/companion/memory_reader.go` (new) - adapter implementation
+- `internal/context/companion/service.go` - wire adapter into RLMToolExecutor
 
 #### Interface (in engine/, cycle-safe)
 
@@ -296,7 +296,7 @@ func (e *RLMToolExecutor) SetTurnReader(reader ConversationTurnReader) {
 
 ### Phase 4: Strengthen Autonomous Instructions
 
-**File:** `internal/companion/service.go` (`addAutonomousInstructions`)
+**File:** `internal/context/companion/service.go` (`addAutonomousInstructions`)
 
 Replace the generic "Use available tools" with specific guidance:
 
@@ -473,8 +473,8 @@ Each phase is independently shippable. Phase 1 is a clear improvement with no do
 |------|-------|--------|
 | `internal/engine/rlm_tools.go` | 1,2,3 | Fix semantic query; add 2 new tools + execute handlers |
 | `internal/engine/interfaces.go` | 3 | New: `ConversationTurnReader` interface + `ConversationTurn` struct |
-| `internal/companion/memory_reader.go` | 3 | New: adapter implementing `ConversationTurnReader` via SQL |
-| `internal/companion/service.go` | 3,4 | Wire turn reader; update autonomous instructions |
+| `internal/context/companion/memory_reader.go` | 3 | New: adapter implementing `ConversationTurnReader` via SQL |
+| `internal/context/companion/service.go` | 3,4 | Wire turn reader; update autonomous instructions |
 | `internal/engine/rlm_tools_test.go` | 1,2,3 | Tests for all phases |
 | `internal/v2/runtime/enrichers/*` | 5 | Event-driven enrichment workers (bucket/artifact producers) |
 | `internal/v2/runtime/contextbuilder/*` | 5 | Context builder + temporal view selection + refs |

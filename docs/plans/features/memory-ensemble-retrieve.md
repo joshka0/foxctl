@@ -115,7 +115,7 @@ Available read surfaces already exist for:
 Relevant existing paths:
 
 - `cmd/agentctl/cmd/agent_memory.go`
-- `internal/companion/service.go`
+- `internal/context/companion/service.go`
 - `internal/agent/runtime/runtime.go`
 - `internal/rlm/env/*`
 
@@ -504,7 +504,7 @@ Preferred integration:
 
 Potential future files:
 
-- `internal/companion/service.go`
+- `internal/context/companion/service.go`
 - `internal/web/api/companion.go`
 - `internal/agent/daemon/daemon.go`
 

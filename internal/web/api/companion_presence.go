@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/context/companion"
 )
 
 // companionSkillRunnerAdapter bridges api.SkillRunner to companion.SkillRunner.

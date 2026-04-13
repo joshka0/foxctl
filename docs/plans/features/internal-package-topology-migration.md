@@ -70,7 +70,7 @@ The current repo already wants to be organized around these families:
 These families are explicit non-targets for the `v2` migration:
 
 - `internal/storage/*`
-- `internal/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline`,
+- `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline`,
   `internal/context/knowledge`
 - `internal/intelligence/indexing/*`, `internal/intelligence/retrieval*`, `internal/intelligence/codecontext`,
   `internal/intelligence/codemap`, `internal/intelligence/refactor`
@@ -85,7 +85,7 @@ The repo already uses `internal/v2/*` in a focused way:
 |--------|----------------|
 | CLI ask flow | `cmd/agentctl/cmd/agent.go` builds `v2services.NewAskService(...)` |
 | orchestration/spawn/list/kill | `cmd/agentctl/cmd/orchestration.go`, `cmd/agentctl/cmd/overseer_v2_orchestration.go`, and `internal/web/api/orchestration.go` construct v2 services |
-| companion context assembly | `internal/companion/service.go` and `internal/companion/v2_context_adapter.go` wire `internal/v2/runtime/contextbuilder` |
+| companion context assembly | `internal/context/companion/service.go` and `internal/context/companion/v2_context_adapter.go` wire `internal/v2/runtime/contextbuilder` |
 | optional runtime backend bridge | `internal/agent/runtime/runtime.go` gates Eino through `internal/v2/adapters/eino` |
 | newer retrieval lane | `internal/intelligence/retrieval/doc.go` already points new work to `internal/intelligence/retrieval/v2` |
 
@@ -279,7 +279,7 @@ Objective:
 Primary packages:
 
 - `internal/context/contextplane/*`
-- `internal/companion/*`
+- `internal/context/companion/*`
 - `internal/context/transcriptpipeline/*`
 - `internal/context/contextplane/taskhistory/*`
 - `internal/context/sessionkit/*`
@@ -310,7 +310,7 @@ Current mapping to make durable in Story 1:
 | Current package/root | Context slice | Decision |
 |------|---------------|----------|
 | `internal/context/contextplane` | controlplane | keep as the control-plane anchor |
-| `internal/companion` | assembly | keep as the live assembly anchor |
+| `internal/context/companion` | assembly | keep as the live assembly anchor |
 | `internal/context/transcriptpipeline` | history | keep as the history-processing anchor |
 | `internal/context/contextplane/taskhistory` | history | treat as part of the same history tranche even though it currently lives under `contextplane` |
 | `internal/storage/transcriptcache` | history | keep in storage but plan together with the history tranche |

@@ -313,7 +313,7 @@ Those follow after the substrate exists.
 
 ### Phase 1
 
-Add anchored frame compilation as a read-only substrate in `internal/companion`.
+Add anchored frame compilation as a read-only substrate in `internal/context/companion`.
 
 ### Phase 2
 
@@ -338,14 +338,14 @@ Add a dream-style consolidation worker over candidates and existing state.
 
 ### New first-slice files
 
-- `internal/companion/anchored_derivation.go`
-- `internal/companion/anchored_derivation_test.go`
+- `internal/context/companion/anchored_derivation.go`
+- `internal/context/companion/anchored_derivation_test.go`
 
 ### Likely later files
 
-- `internal/companion/anchored_derivation_llm.go`
-- `internal/companion/anchored_consolidation.go`
-- `internal/companion/anchored_consolidation_test.go`
+- `internal/context/companion/anchored_derivation_llm.go`
+- `internal/context/companion/anchored_consolidation.go`
+- `internal/context/companion/anchored_consolidation_test.go`
 
 ## Related
 
