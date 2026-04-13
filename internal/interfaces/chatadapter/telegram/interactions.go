@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/chatadapter"
+	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
 )
 
 // HandleInteraction processes inline keyboard callback queries from Telegram.

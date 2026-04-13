@@ -1,18 +1,10 @@
-package telegram
+package discord
 
-import "github.com/jkatigb/agentctl/internal/chatadapter"
+import "github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
 
-// MVPCommands returns the MVP set of commands for Telegram.
-//
-// Telegram commands are names-only (no typed options); this list is used for
-// setMyCommands and for parity with Discord.
+// MVPCommands returns the 6 slash commands for the Discord MVP.
 func MVPCommands() []chatadapter.CommandDef {
 	return []chatadapter.CommandDef{
-		{
-			// Helper for configuring TELEGRAM_* chat IDs.
-			Name:        "chat_id",
-			Description: "Show this chat's numeric chat_id",
-		},
 		{
 			Name:        "search",
 			Description: "Search the codebase by concept",
@@ -76,9 +68,7 @@ func MVPCommands() []chatadapter.CommandDef {
 			},
 		},
 		{
-			// Telegram command names must be lowercase letters, digits, and underscores.
-			// We'll normalize underscores to hyphens when routing into agentctl.
-			Name:        "agent_spawn",
+			Name:        "agent-spawn",
 			Description: "Spawn an autonomous agent",
 			Options: []chatadapter.CommandOption{
 				{
@@ -103,7 +93,7 @@ func MVPCommands() []chatadapter.CommandDef {
 			},
 		},
 		{
-			Name:        "agent_list",
+			Name:        "agent-list",
 			Description: "List running agents",
 		},
 	}

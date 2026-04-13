@@ -1,6 +1,6 @@
 package telegram
 
-import "github.com/jkatigb/agentctl/internal/chatadapter"
+import "github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
 
 const telegramMaxMessageLen = 4096
 

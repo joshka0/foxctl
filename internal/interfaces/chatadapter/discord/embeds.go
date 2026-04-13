@@ -6,7 +6,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/jkatigb/agentctl/internal/chatadapter"
+	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
 	"github.com/jkatigb/agentctl/internal/observability"
 )
 

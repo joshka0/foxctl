@@ -74,7 +74,7 @@ These families are explicit non-targets for the `v2` migration:
   `internal/context/knowledge`
 - `internal/intelligence/indexing/*`, `internal/intelligence/retrieval*`, `internal/intelligence/codecontext`,
   `internal/intelligence/codemap`, `internal/intelligence/refactor`
-- `internal/web`, `internal/interfaces/gateway`, `internal/chatadapter`, `internal/openapi`
+- `internal/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/openapi`
 - `internal/domain`, `internal/platform`, `internal/protocol`
 
 ## As-Built `v2` Usage Today

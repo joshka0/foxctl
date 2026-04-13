@@ -24,13 +24,13 @@ Non-goals for the first cut:
 ## Current Code We Reuse
 
 Telegram should reuse the existing abstractions and helpers:
-- `internal/chatadapter/adapter.go` (interface + `CommandEvent`/`MessageEvent`/`InteractionEvent`)
-- `internal/chatadapter/bridge.go` (slash-style commands -> skills/APIs)
+- `internal/interfaces/chatadapter/adapter.go` (interface + `CommandEvent`/`MessageEvent`/`InteractionEvent`)
+- `internal/interfaces/chatadapter/bridge.go` (slash-style commands -> skills/APIs)
 - `internal/web/consolews/*` (session + streaming events)
 
 Reference implementation patterns:
-- `internal/chatadapter/discord/driver.go` (event filtering + concurrency limits)
-- `internal/chatadapter/discord/messaging.go` (session bridge + streaming edits)
+- `internal/interfaces/chatadapter/discord/driver.go` (event filtering + concurrency limits)
+- `internal/interfaces/chatadapter/discord/messaging.go` (session bridge + streaming edits)
 
 ## Telegram Capabilities (What Changes vs Discord)
 
@@ -111,7 +111,7 @@ Operational knobs:
 
 New package layout (mirrors Discord):
 ```
-internal/chatadapter/telegram/
+internal/interfaces/chatadapter/telegram/
   driver.go        # long polling loop + update routing (commands/messages/callbacks)
   commands.go      # optional: setMyCommands, parsing helpers
   interactions.go  # callback queries -> InteractionEvent

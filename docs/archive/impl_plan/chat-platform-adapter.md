@@ -1,7 +1,7 @@
 # Chat Platform Adapter Layer Design
 
 > **Type:** Implementation plan (historical + execution notes)
-> **Current architecture status:** Core adapter layer is implemented for Discord, Telegram, and Teams in `internal/chatadapter/*` and `internal/web/server.go` (checkout `93bcbb3b`).
+> **Current architecture status:** Core adapter layer is implemented for Discord, Telegram, and Teams in `internal/interfaces/chatadapter/*` and `internal/web/server.go` (checkout `93bcbb3b`).
 > **Remaining work:** Slack/other platform expansion and additional command coverage as backlog items.
 > **Author:** Claude + Josh
 > **Date:** 2026-02-09
@@ -393,7 +393,7 @@ Control via slash commands:
 
 **New packages:**
 ```
-internal/chatadapter/
+internal/interfaces/chatadapter/
     adapter.go          # ChatAdapter interface + types
     registry.go         # Adapter registry (name -> adapter)
     formatter.go        # Generic embed/card formatting helpers
@@ -440,7 +440,7 @@ Telegram is a good early second platform:
 
 **New packages:**
 ```
-internal/chatadapter/
+internal/interfaces/chatadapter/
     telegram/
         driver.go        # long polling loop + update routing
         messaging.go     # SessionBridge + streaming edits (4096-char limit)
@@ -460,7 +460,7 @@ TELEGRAM_CHAT_SYSTEM_PROMPT="..."
 
 **New packages:**
 ```
-internal/chatadapter/
+internal/interfaces/chatadapter/
     teams/
         driver.go       # Bot Framework REST API client
         auth.go         # Azure AD OAuth2 token management
@@ -483,7 +483,7 @@ internal/chatadapter/
 
 **New packages:**
 ```
-internal/chatadapter/
+internal/interfaces/chatadapter/
     slack/
         driver.go       # slack-go based adapter
         blocks.go       # Block Kit formatting

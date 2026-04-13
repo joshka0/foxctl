@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/chatadapter"
+	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 

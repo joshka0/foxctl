@@ -1,6 +1,6 @@
 package teams
 
-import "github.com/jkatigb/agentctl/internal/chatadapter"
+import "github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
 
 const teamsMaxMessageLen = 4000
 
