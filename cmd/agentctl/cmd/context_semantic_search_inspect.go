@@ -8,7 +8,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/evals/retrievaleval"
+	"github.com/jkatigb/agentctl/internal/tooling/evals/retrievaleval"
 	"github.com/spf13/cobra"
 )
 
