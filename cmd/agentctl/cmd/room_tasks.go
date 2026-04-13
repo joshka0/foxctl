@@ -1386,7 +1386,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
-			reminderRoots, err := loadRoomReminderRoots(cmd.Context(), summary.WorkspaceID, roomID, true)
+			reminders, err := loadRoomReminders(cmd.Context(), summary.WorkspaceID, roomID, true)
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
@@ -1394,7 +1394,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
-			suppression := buildRoomActionSuppression(current, roomTasks, reminderRoots)
+			suppression := buildRoomActionSuppression(current, roomTasks, reminders)
 			dirtyRuntime := false
 			if cleanupRoomReplyPulseState(current, roomTasks, time.Now().UTC(), pulse, runtime.ReplyPulseState, suppression) {
 				dirtyRuntime = true
@@ -1755,12 +1755,46 @@ func syncRoomLoopState(ctx context.Context, store *coordination.Store, workspace
 	coerced := coerceRoomLoopPolicy(*loop)
 	loop = &coerced
 	loop.LastTickAt = &tickAt
-	applyRoomLoopRuntimeState(loop, runtime)
+	mergedRuntime := mergeRoomLoopRuntimeState(roomLoopRuntimeStateFromStore(*loop), runtime)
+	applyRoomLoopRuntimeState(loop, mergedRuntime)
 	persisted, err := store.UpsertRoomLoop(ctx, *loop)
 	if err != nil {
 		return coordination.RoomLoop{}, err
 	}
 	return persisted, nil
+}
+
+func mergeRoomLoopRuntimeState(base, override roomLoopRuntimeState) roomLoopRuntimeState {
+	merged := base
+	if v := strings.TrimSpace(override.DeliveryLeaseName); v != "" {
+		merged.DeliveryLeaseName = v
+	}
+	if v := strings.TrimSpace(override.DeliveryOwnerID); v != "" {
+		merged.DeliveryOwnerID = v
+	}
+	if v := strings.TrimSpace(override.DeliveryCursorMessageID); v != "" {
+		merged.DeliveryCursorMessageID = v
+	}
+	if override.DeliveryCursorAt != nil && !override.DeliveryCursorAt.IsZero() {
+		ts := override.DeliveryCursorAt.UTC()
+		merged.DeliveryCursorAt = &ts
+	}
+	if override.LastDeliveryTrace != nil {
+		merged.LastDeliveryTrace = override.LastDeliveryTrace
+	}
+	if len(override.ReplyPulseState) > 0 {
+		merged.ReplyPulseState = override.ReplyPulseState
+	}
+	if len(override.TaskPulseState) > 0 {
+		merged.TaskPulseState = override.TaskPulseState
+	}
+	if len(override.TaskFollowupState) > 0 {
+		merged.TaskFollowupState = override.TaskFollowupState
+	}
+	if len(override.CoordinatorPulseState) > 0 {
+		merged.CoordinatorPulseState = override.CoordinatorPulseState
+	}
+	return merged
 }
 
 func refreshRoomLoopPolicy(ctx context.Context, store *coordination.Store, workspaceID, roomID string, current roomPulseConfig, tickAt time.Time, runtime roomLoopRuntimeState) (roomPulseConfig, roomLoopRuntimeState, bool, error) {
@@ -1903,7 +1937,7 @@ func roomLoopShouldReplayInitialMessage(room agent.RoomSummary, msg agent.BoardM
 	}
 	if recipient == agent.BroadcastRecipient {
 		for actorID := range roomLoopCurrentParticipants(room) {
-			if _, ok := roomInboxEntryForActor(actorID, msg, false, messages); ok {
+			if _, ok := roomInboxEntryForActor(actorID, msg, false, messages, nil); ok {
 				return true
 			}
 		}
@@ -1912,7 +1946,7 @@ func roomLoopShouldReplayInitialMessage(room agent.RoomSummary, msg agent.BoardM
 	if !roomLoopCurrentParticipant(room, recipient) {
 		return false
 	}
-	_, ok := roomInboxEntryForActor(recipient, msg, false, messages)
+	_, ok := roomInboxEntryForActor(recipient, msg, false, messages, nil)
 	return ok
 }
 
@@ -2813,6 +2847,7 @@ func sameRoomReminderContract(a, b coordination.RoomReminder) bool {
 		strings.TrimSpace(a.MilestoneID) == strings.TrimSpace(b.MilestoneID) &&
 		a.AckRequired == b.AckRequired &&
 		a.ReplyExpected == b.ReplyExpected &&
+		a.Passive == b.Passive &&
 		a.Interrupt == b.Interrupt
 }
 

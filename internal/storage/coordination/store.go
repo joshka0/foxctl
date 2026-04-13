@@ -104,6 +104,7 @@ type RoomReminder struct {
 	AckRequired   bool          `json:"ack_required"`
 	ReplyExpected bool          `json:"reply_expected"`
 	Interrupt     bool          `json:"interrupt"`
+	Passive       bool          `json:"passive"`
 	Interval      time.Duration `json:"interval"`
 	MaxIterations int           `json:"max_iterations"`
 	SentCount     int           `json:"sent_count"`
@@ -199,6 +200,7 @@ CREATE TABLE IF NOT EXISTS room_reminders (
 	ack_required      INTEGER NOT NULL DEFAULT 0,
 	reply_expected    INTEGER NOT NULL DEFAULT 0,
 	interrupt         INTEGER NOT NULL DEFAULT 0,
+	passive           INTEGER NOT NULL DEFAULT 0,
 	interval_ms       INTEGER NOT NULL,
 	max_iterations    INTEGER NOT NULL,
 	sent_count        INTEGER NOT NULL DEFAULT 0,
@@ -216,6 +218,7 @@ CREATE INDEX IF NOT EXISTS idx_room_reminders_room ON room_reminders(workspace_i
 		`ALTER TABLE room_reminders ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE room_reminders ADD COLUMN story_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE room_reminders ADD COLUMN milestone_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_reminders ADD COLUMN passive INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE room_loops ADD COLUMN interrupt_attempt_limit INTEGER NOT NULL DEFAULT 2`,
 		`ALTER TABLE room_loops ADD COLUMN reminder_backoff_cap INTEGER NOT NULL DEFAULT 8`,
 		`ALTER TABLE room_loops ADD COLUMN coordinator_escalation_enabled INTEGER NOT NULL DEFAULT 1`,
@@ -258,7 +261,7 @@ func (s *Store) GetRoomReminder(ctx context.Context, workspaceID, reminderID str
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, workspace_id, room_id, root_message_id, task_id, story_id, milestone_id, sender, recipient, subject, body,
-		       ack_required, reply_expected, interrupt, interval_ms, max_iterations, sent_count,
+		       ack_required, reply_expected, interrupt, passive, interval_ms, max_iterations, sent_count,
 		       active, last_sent_at_ms, created_at_ms, updated_at_ms
 		FROM room_reminders
 		WHERE workspace_id = $1 AND id = $2
@@ -277,6 +280,7 @@ func (s *Store) GetRoomReminder(ctx context.Context, workspaceID, reminderID str
 		(*intBool)(&reminder.AckRequired),
 		(*intBool)(&reminder.ReplyExpected),
 		(*intBool)(&reminder.Interrupt),
+		(*intBool)(&reminder.Passive),
 		(*durationMillis)(&reminder.Interval),
 		&reminder.MaxIterations,
 		&reminder.SentCount,
@@ -312,7 +316,7 @@ func (s *Store) ListRoomReminders(ctx context.Context, workspaceID, roomID strin
 	}
 	query := `
 		SELECT id, workspace_id, room_id, root_message_id, task_id, story_id, milestone_id, sender, recipient, subject, body,
-		       ack_required, reply_expected, interrupt, interval_ms, max_iterations, sent_count,
+		       ack_required, reply_expected, interrupt, passive, interval_ms, max_iterations, sent_count,
 		       active, last_sent_at_ms, created_at_ms, updated_at_ms
 		FROM room_reminders
 		WHERE workspace_id = $1 AND room_id = $2`
@@ -348,6 +352,7 @@ func (s *Store) ListRoomReminders(ctx context.Context, workspaceID, roomID strin
 			(*intBool)(&reminder.AckRequired),
 			(*intBool)(&reminder.ReplyExpected),
 			(*intBool)(&reminder.Interrupt),
+			(*intBool)(&reminder.Passive),
 			(*durationMillis)(&reminder.Interval),
 			&reminder.MaxIterations,
 			&reminder.SentCount,
@@ -412,10 +417,10 @@ func (s *Store) UpsertRoomReminder(ctx context.Context, reminder RoomReminder) (
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO room_reminders (
 			id, workspace_id, room_id, root_message_id, task_id, story_id, milestone_id, sender, recipient, subject, body,
-			ack_required, reply_expected, interrupt, interval_ms, max_iterations, sent_count,
+			ack_required, reply_expected, interrupt, passive, interval_ms, max_iterations, sent_count,
 			active, last_sent_at_ms, created_at_ms, updated_at_ms
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
 		ON CONFLICT(id) DO UPDATE SET
 			workspace_id = excluded.workspace_id,
 			room_id = excluded.room_id,
@@ -430,6 +435,7 @@ func (s *Store) UpsertRoomReminder(ctx context.Context, reminder RoomReminder) (
 			ack_required = excluded.ack_required,
 			reply_expected = excluded.reply_expected,
 			interrupt = excluded.interrupt,
+			passive = excluded.passive,
 			interval_ms = excluded.interval_ms,
 			max_iterations = excluded.max_iterations,
 			sent_count = excluded.sent_count,
@@ -451,6 +457,7 @@ func (s *Store) UpsertRoomReminder(ctx context.Context, reminder RoomReminder) (
 		boolToIntCoord(reminder.AckRequired),
 		boolToIntCoord(reminder.ReplyExpected),
 		boolToIntCoord(reminder.Interrupt),
+		boolToIntCoord(reminder.Passive),
 		reminder.Interval.Milliseconds(),
 		reminder.MaxIterations,
 		reminder.SentCount,

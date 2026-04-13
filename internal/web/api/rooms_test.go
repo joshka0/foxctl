@@ -668,6 +668,65 @@ func TestRoomDetailHandler_AddReminderDedupesEquivalentActiveReminder(t *testing
 	}
 }
 
+func TestRoomDetailHandler_AddPassiveReminder(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	h := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha Room",
+		"members":[
+			{"actor_id":"claude-a","role":"participant"},
+			{"actor_id":"coordinator-a","role":"coordinator"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	addReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/reminders", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"sender":"dev-local-user",
+		"recipient":"claude-a",
+		"subject":"Topology hard-cut cadence pulse",
+		"body":"Keep the loop moving.",
+		"every":"15m",
+		"max_iterations":3,
+		"passive":true,
+		"allow_passive":true
+	}`))
+	addRR := httptest.NewRecorder()
+	h.ServeHTTP(addRR, addReq)
+	if addRR.Code != http.StatusCreated {
+		t.Fatalf("add passive reminder status=%d body=%s", addRR.Code, addRR.Body.String())
+	}
+	addBody := decodeResponseBody(t, addRR)
+	reminder, ok := addBody["reminder"].(map[string]any)
+	if !ok {
+		t.Fatalf("reminder type=%T want map[string]any", addBody["reminder"])
+	}
+	if got := reminder["passive"]; got != true {
+		t.Fatalf("passive=%v want true", got)
+	}
+	if got := reminder["reply_expected"]; got != false {
+		t.Fatalf("reply_expected=%v want false", got)
+	}
+	message, ok := addBody["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message type=%T want map[string]any", addBody["message"])
+	}
+	if got, ok := message["reply_expected"]; ok && got != false {
+		t.Fatalf("message.reply_expected=%v want false or omitted", got)
+	}
+	if got, ok := message["ack_required"]; ok && got != false {
+		t.Fatalf("message.ack_required=%v want false or omitted", got)
+	}
+}
+
 func TestRoomDetailHandler_PutMemberBinding(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())

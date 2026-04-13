@@ -157,6 +157,7 @@ type RoomReminderRequest struct {
 	AckRequired   bool   `json:"ack_required,omitempty"`
 	ReplyExpected bool   `json:"reply_expected,omitempty"`
 	Interrupt     bool   `json:"interrupt,omitempty"`
+	Passive       bool   `json:"passive,omitempty"`
 	AllowPassive  bool   `json:"allow_passive,omitempty"`
 }
 
@@ -175,6 +176,7 @@ type RoomReminderResponse struct {
 	AckRequired   bool   `json:"ack_required"`
 	ReplyExpected bool   `json:"reply_expected"`
 	Interrupt     bool   `json:"interrupt"`
+	Passive       bool   `json:"passive"`
 	Interval      string `json:"interval"`
 	MaxIterations int    `json:"max_iterations"`
 	SentCount     int    `json:"sent_count"`
@@ -1002,7 +1004,12 @@ func handleRoomReminderAdd(w http.ResponseWriter, r *http.Request, cfg config.Co
 		httpError(w, http.StatusBadRequest, "body required")
 		return
 	}
-	if !req.AckRequired && !req.ReplyExpected {
+	if req.Passive {
+		if req.AckRequired || req.ReplyExpected {
+			httpError(w, http.StatusBadRequest, "passive reminders cannot require ack_required or reply_expected")
+			return
+		}
+	} else if !req.AckRequired && !req.ReplyExpected {
 		httpError(w, http.StatusBadRequest, "reminders require ack_required or reply_expected")
 		return
 	}
@@ -1069,6 +1076,7 @@ func handleRoomReminderAdd(w http.ResponseWriter, r *http.Request, cfg config.Co
 		AckRequired:   req.AckRequired,
 		ReplyExpected: req.ReplyExpected,
 		Interrupt:     req.Interrupt,
+		Passive:       req.Passive,
 		Interval:      every,
 		MaxIterations: req.MaxIterations,
 		Active:        true,
@@ -2066,6 +2074,7 @@ func apiSameReminderContract(a, b coordination.RoomReminder) bool {
 		strings.TrimSpace(a.MilestoneID) == strings.TrimSpace(b.MilestoneID) &&
 		a.AckRequired == b.AckRequired &&
 		a.ReplyExpected == b.ReplyExpected &&
+		a.Passive == b.Passive &&
 		a.Interrupt == b.Interrupt
 }
 
@@ -2191,6 +2200,7 @@ func convertRoomReminder(reminder coordination.RoomReminder) RoomReminderRespons
 		AckRequired:   reminder.AckRequired,
 		ReplyExpected: reminder.ReplyExpected,
 		Interrupt:     reminder.Interrupt,
+		Passive:       reminder.Passive,
 		Interval:      reminder.Interval.String(),
 		MaxIterations: reminder.MaxIterations,
 		SentCount:     reminder.SentCount,

@@ -106,6 +106,7 @@ func newRoomRemindAddCommand() *cobra.Command {
 		replyExpected bool
 		ackRequired   bool
 		interrupt     bool
+		passive       bool
 		allowPassive  bool
 	)
 	cmd := &cobra.Command{
@@ -113,7 +114,7 @@ func newRoomRemindAddCommand() *cobra.Command {
 		Short: "Create a durable scheduled follow-up for one participant",
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomRemindAdd(cmd, workspace, sender, args[0], args[1], subject, args[2], taskID, storyID, milestoneID, every, maxIterations, ackRequired, replyExpected, interrupt, allowPassive)
+			return runRoomRemindAdd(cmd, workspace, sender, args[0], args[1], subject, args[2], taskID, storyID, milestoneID, every, maxIterations, ackRequired, replyExpected, interrupt, passive, allowPassive)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -127,6 +128,7 @@ func newRoomRemindAddCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&replyExpected, "reply-expected", true, "Require a reply to stop reminders")
 	cmd.Flags().BoolVar(&ackRequired, "ack-required", false, "Mark the root request and reminder alerts as requiring acknowledgment")
 	cmd.Flags().BoolVar(&interrupt, "interrupt", false, "Interrupt the target pane for reminder follow-ups")
+	cmd.Flags().BoolVar(&passive, "passive", false, "Relay reminders durably without creating ack/reply inbox debt")
 	cmd.Flags().BoolVar(&allowPassive, "allow-passive", false, "Allow scheduling reminders even when the room loop is not currently active")
 	return cmd
 }
@@ -2763,11 +2765,12 @@ type roomStatusActionRequired struct {
 }
 
 type roomActionSuppression struct {
-	ReminderRoots     map[string]struct{}
-	ClosedTaskIDs     map[string]struct{}
-	QuietTaskIDs      map[string]struct{}
-	ClosedBoundaryIDs map[string]struct{}
-	QuietBoundaryIDs  map[string]struct{}
+	ReminderRoots        map[string]struct{}
+	PassiveReminderRoots map[string]struct{}
+	ClosedTaskIDs        map[string]struct{}
+	QuietTaskIDs         map[string]struct{}
+	ClosedBoundaryIDs    map[string]struct{}
+	QuietBoundaryIDs     map[string]struct{}
 }
 
 type roomStatusTask struct {
@@ -2837,7 +2840,7 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, only
 	loopCfg := roomPulseConfigFromStore(*loop)
 	staleAfter := loopCfg.TaskStaleAfter
 	now := time.Now().UTC()
-	reminderRoots, err := loadRoomReminderRoots(cmd.Context(), absWorkspace, roomID, true)
+	reminders, err := loadRoomReminders(cmd.Context(), absWorkspace, roomID, true)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
@@ -2845,7 +2848,7 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, only
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	suppression := buildRoomActionSuppression(messages, allTasks, reminderRoots)
+	suppression := buildRoomActionSuppression(messages, allTasks, reminders)
 	taskPulse := buildRoomTaskPulseSummary(tasks, now, staleAfter, suppression)
 	backlog := buildRoomStatusBacklog(summary, messages, suppression)
 	filters, err := normalizeRoomStatusFilters(only)
@@ -2940,7 +2943,12 @@ func runRoomInbox(cmd *cobra.Command, workspace, roomID, actorID string, limit i
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.inbox", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
-	entries := buildRoomInboxEntries(identity.Sender, messages, strings.TrimSpace(filter), includeBroadcasts)
+	reminders, err := loadRoomReminders(cmd.Context(), absWorkspace, roomID, true)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.inbox", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	suppression := &roomActionSuppression{PassiveReminderRoots: roomPassiveReminderRootSet(reminders)}
+	entries := buildRoomInboxEntries(identity.Sender, messages, strings.TrimSpace(filter), includeBroadcasts, suppression)
 	roomPayload := any(summary)
 	if compact {
 		roomPayload = agent.CompactRoomSummaryForInbox(summary)
@@ -3167,12 +3175,21 @@ func annotateRoomSendBody(roomID, sender, recipient, body, hint string, ackRequi
 
 const roomLoopHeartbeatGrace = 15 * time.Second
 
-func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, subject, body, taskID, storyID, milestoneID string, every time.Duration, maxIterations int, ackRequired, replyExpected, interrupt, allowPassive bool) error {
+func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, subject, body, taskID, storyID, milestoneID string, every time.Duration, maxIterations int, ackRequired, replyExpected, interrupt, passive, allowPassive bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
 	}
-	if !ackRequired && !replyExpected {
+	if passive {
+		if cmd.Flags().Changed("ack-required") && ackRequired {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeEARG, "passive reminders cannot require --ack-required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		if cmd.Flags().Changed("reply-expected") && replyExpected {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeEARG, "passive reminders cannot require --reply-expected", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		ackRequired = false
+		replyExpected = false
+	} else if !ackRequired && !replyExpected {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeEARG, "room remind requires --ack-required or --reply-expected", map[string]any{
 			"hint": "Use --reply-expected for check-ins that need a response, or --ack-required for simple confirmation reminders.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -3238,6 +3255,7 @@ func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, 
 		AckRequired:   ackRequired,
 		ReplyExpected: replyExpected,
 		Interrupt:     interrupt,
+		Passive:       passive,
 		Interval:      every,
 		MaxIterations: maxIterations,
 		Active:        true,
@@ -14202,11 +14220,11 @@ func formatRoomRelayContent(room agent.RoomSummary, msg agent.BoardMessage) stri
 	return main
 }
 
-func buildRoomInboxEntries(actorID string, messages []agent.BoardMessage, filter string, includeBroadcasts bool) []roomInboxEntry {
+func buildRoomInboxEntries(actorID string, messages []agent.BoardMessage, filter string, includeBroadcasts bool, suppression *roomActionSuppression) []roomInboxEntry {
 	normalized := normalizeRoomInboxFilter(filter)
 	entries := make([]roomInboxEntry, 0, len(messages))
 	for _, msg := range messages {
-		entry, ok := roomInboxEntryForActor(actorID, msg, includeBroadcasts, messages)
+		entry, ok := roomInboxEntryForActor(actorID, msg, includeBroadcasts, messages, suppression)
 		if !ok {
 			continue
 		}
@@ -14227,12 +14245,19 @@ func buildRoomInboxEntries(actorID string, messages []agent.BoardMessage, filter
 	return entries
 }
 
-func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroadcasts bool, messages []agent.BoardMessage) (roomInboxEntry, bool) {
+func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroadcasts bool, messages []agent.BoardMessage, suppression *roomActionSuppression) (roomInboxEntry, bool) {
 	recipient := normalizeRoomRecipient(msg.Recipient)
 	isDirect := sameRoomParticipant(recipient, actorID)
 	isBroadcast := recipient == agent.BroadcastRecipient
 	if !isDirect && !isBroadcast {
 		return roomInboxEntry{}, false
+	}
+	if suppression != nil {
+		if key := roomMessageChainKey(msg); key != "" {
+			if _, suppressed := suppression.PassiveReminderRoots[key]; suppressed {
+				return roomInboxEntry{}, false
+			}
+		}
 	}
 	if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
 		return roomInboxEntry{}, false
@@ -14742,7 +14767,7 @@ func roomStatusFilteredCount(filters map[string]struct{}, primary string, second
 }
 
 func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage, suppression *roomActionSuppression) []roomInboxEntry {
-	entries := buildRoomInboxEntries(actorID, messages, "all", false)
+	entries := buildRoomInboxEntries(actorID, messages, "all", false, suppression)
 	if len(entries) == 0 {
 		return nil
 	}
@@ -14782,7 +14807,7 @@ func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage, suppr
 	return out
 }
 
-func loadRoomReminderRoots(ctx context.Context, workspaceID, roomID string, includeInactive bool) (map[string]struct{}, error) {
+func loadRoomReminders(ctx context.Context, workspaceID, roomID string, includeInactive bool) ([]coordination.RoomReminder, error) {
 	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return nil, err
@@ -14792,16 +14817,27 @@ func loadRoomReminderRoots(ctx context.Context, workspaceID, roomID string, incl
 		return nil, err
 	}
 	defer coordStore.Close()
-	reminders, err := coordStore.ListRoomReminders(ctx, workspaceID, strings.TrimSpace(roomID), includeInactive)
-	if err != nil {
-		return nil, err
-	}
-	return roomReminderRootSet(reminders), nil
+	return coordStore.ListRoomReminders(ctx, workspaceID, strings.TrimSpace(roomID), includeInactive)
 }
 
 func roomReminderRootSet(reminders []coordination.RoomReminder) map[string]struct{} {
 	out := make(map[string]struct{}, len(reminders))
 	for _, reminder := range reminders {
+		id := strings.TrimSpace(reminder.RootMessageID)
+		if id == "" {
+			continue
+		}
+		out[id] = struct{}{}
+	}
+	return out
+}
+
+func roomPassiveReminderRootSet(reminders []coordination.RoomReminder) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, reminder := range reminders {
+		if !reminder.Passive {
+			continue
+		}
 		id := strings.TrimSpace(reminder.RootMessageID)
 		if id == "" {
 			continue
@@ -14821,13 +14857,14 @@ func roomStatusEntryMoreRecent(left, right roomInboxEntry) bool {
 	return left.ID < right.ID
 }
 
-func buildRoomActionSuppression(messages []agent.BoardMessage, tasks []taskstore.Task, reminderRoots map[string]struct{}) *roomActionSuppression {
+func buildRoomActionSuppression(messages []agent.BoardMessage, tasks []taskstore.Task, reminders []coordination.RoomReminder) *roomActionSuppression {
 	suppression := &roomActionSuppression{
-		ReminderRoots:     copyRoomStringSet(reminderRoots),
-		ClosedTaskIDs:     make(map[string]struct{}),
-		QuietTaskIDs:      make(map[string]struct{}),
-		ClosedBoundaryIDs: make(map[string]struct{}),
-		QuietBoundaryIDs:  make(map[string]struct{}),
+		ReminderRoots:        roomReminderRootSet(reminders),
+		PassiveReminderRoots: roomPassiveReminderRootSet(reminders),
+		ClosedTaskIDs:        make(map[string]struct{}),
+		QuietTaskIDs:         make(map[string]struct{}),
+		ClosedBoundaryIDs:    make(map[string]struct{}),
+		QuietBoundaryIDs:     make(map[string]struct{}),
 	}
 	for _, task := range tasks {
 		switch strings.TrimSpace(task.Status) {

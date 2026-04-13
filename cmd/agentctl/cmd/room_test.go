@@ -2233,7 +2233,7 @@ func TestRunRoomRemindLifecycle(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", "", "", "", 15*time.Minute, 3, false, true, true, false); err != nil {
+	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", "", "", "", 15*time.Minute, 3, false, true, true, false, false); err != nil {
 		t.Fatalf("runRoomRemindAdd: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
@@ -2297,7 +2297,7 @@ func TestRunRoomRemindAddDedupesEquivalentActiveReminder(t *testing.T) {
 	activateTestRoomLoop(t, ctx, workspace, "alpha")
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", "task-1", "", "", 15*time.Minute, 3, false, true, true, false); err != nil {
+	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", "task-1", "", "", 15*time.Minute, 3, false, true, true, false, false); err != nil {
 		t.Fatalf("runRoomRemindAdd first: %v", err)
 	}
 	first := decodeRoomEnvelope(t, out)
@@ -2305,7 +2305,7 @@ func TestRunRoomRemindAddDedupesEquivalentActiveReminder(t *testing.T) {
 	firstID := strings.TrimSpace(fmt.Sprint(firstReminder["id"]))
 
 	cmd, out = newRoomTestCommand(ctx)
-	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", "task-1", "", "", 15*time.Minute, 3, false, true, true, false); err != nil {
+	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", "task-1", "", "", 15*time.Minute, 3, false, true, true, false, false); err != nil {
 		t.Fatalf("runRoomRemindAdd second: %v", err)
 	}
 	second := decodeRoomEnvelope(t, out)
@@ -2348,7 +2348,7 @@ func TestRunRoomRemindAddRequiresActiveLoopByDefault(t *testing.T) {
 
 	var err error
 	cmd, _ = newRoomTestCommand(ctx)
-	err = runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", "", "", "", 15*time.Minute, 3, false, true, true, false)
+	err = runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", "", "", "", 15*time.Minute, 3, false, true, true, false, false)
 	assertRoomErrorContains(t, err, "room loop is not active")
 
 	cfg, err := loadConfig(ctx)
@@ -2603,6 +2603,51 @@ func TestAdvanceRoomLoopCursorTracksNewestMessage(t *testing.T) {
 	}
 }
 
+func TestSyncRoomLoopStatePreservesPersistedCursorOnStartup(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	storageRoot := filepath.Join(t.TempDir(), "storage")
+	store, err := coordination.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatalf("coordination.Open: %v", err)
+	}
+	defer store.Close()
+
+	workspace := "/repo"
+	roomID := "alpha"
+	cursorAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	seed := defaultRoomLoopPolicy(workspace, roomID, roomPulseConfig{})
+	seed.LastTickAt = &cursorAt
+	seed.DeliveryLeaseName = "lease-old"
+	seed.DeliveryOwnerID = "owner-old"
+	seed.DeliveryCursorMessageID = "msg-latest"
+	seed.DeliveryCursorAt = &cursorAt
+	if _, err := store.UpsertRoomLoop(ctx, seed); err != nil {
+		t.Fatalf("UpsertRoomLoop(seed): %v", err)
+	}
+
+	startedAt := time.Now().UTC().Truncate(time.Second)
+	persisted, err := syncRoomLoopState(ctx, store, workspace, roomID, roomPulseConfig{}, startedAt, roomLoopRuntimeState{
+		DeliveryLeaseName: "lease-new",
+		DeliveryOwnerID:   "owner-new",
+	})
+	if err != nil {
+		t.Fatalf("syncRoomLoopState: %v", err)
+	}
+	if got := persisted.DeliveryLeaseName; got != "lease-new" {
+		t.Fatalf("DeliveryLeaseName=%q want lease-new", got)
+	}
+	if got := persisted.DeliveryOwnerID; got != "owner-new" {
+		t.Fatalf("DeliveryOwnerID=%q want owner-new", got)
+	}
+	if got := persisted.DeliveryCursorMessageID; got != "msg-latest" {
+		t.Fatalf("DeliveryCursorMessageID=%q want msg-latest", got)
+	}
+	if persisted.DeliveryCursorAt == nil || !persisted.DeliveryCursorAt.Equal(cursorAt) {
+		t.Fatalf("DeliveryCursorAt=%v want %v", persisted.DeliveryCursorAt, cursorAt)
+	}
+}
+
 func TestRunRoomRemindAddAllowPassive(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
@@ -2614,12 +2659,45 @@ func TestRunRoomRemindAddAllowPassive(t *testing.T) {
 	}
 
 	cmd, out := newRoomTestCommand(ctx)
-	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Passive reminder smoke", "", "", "", 15*time.Minute, 3, false, true, true, true); err != nil {
+	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Passive reminder smoke", "", "", "", 15*time.Minute, 3, false, true, true, false, true); err != nil {
 		t.Fatalf("runRoomRemindAdd: %v", err)
 	}
 	data := decodeRoomEnvelope(t, out)
 	if got := data["recipient"]; got != "gemini-a" {
 		t.Fatalf("recipient=%v want gemini-a", got)
+	}
+}
+
+func TestRunRoomRemindAddPassiveSuppressesInboxDebt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Hard-cut cadence pulse", "", "", "", 15*time.Minute, 3, false, true, false, true, true); err != nil {
+		t.Fatalf("runRoomRemindAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	reminder := data["reminder"].(map[string]any)
+	if got := reminder["passive"]; got != true {
+		t.Fatalf("passive=%v want true", got)
+	}
+	if got := reminder["reply_expected"]; got != false {
+		t.Fatalf("reply_expected=%v want false", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomInbox(cmd, workspace, "alpha", "gemini-a", 50, "all", false, false, false, false); err != nil {
+		t.Fatalf("runRoomInbox: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	if got := data["count"]; got != float64(0) {
+		t.Fatalf("count=%v want 0", got)
 	}
 }
 
@@ -7316,6 +7394,38 @@ func TestBuildRoomStatusEntriesSkipsSystemReminderMessages(t *testing.T) {
 	}
 	if entries[0].ID != "msg-1" {
 		t.Fatalf("entry id=%q want msg-1", entries[0].ID)
+	}
+}
+
+func TestBuildRoomInboxEntriesSuppressesPassiveReminderChains(t *testing.T) {
+	suppression := &roomActionSuppression{
+		PassiveReminderRoots: map[string]struct{}{"msg-root": {}},
+	}
+	entries := buildRoomInboxEntries("gemini-a", []agent.BoardMessage{
+		{
+			ID:        "msg-root",
+			Stream:    "room:alpha",
+			Sender:    "human-a",
+			Recipient: "gemini-a",
+			Subject:   "Pulse",
+			Body:      "keep moving",
+			Status:    agent.BoardMessageStatusUnread,
+			CreatedAt: time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			ID:               "msg-followup",
+			RelatedMessageID: "msg-root",
+			Stream:           "room:alpha",
+			Sender:           "actor:system:room:alpha",
+			Recipient:        "gemini-a",
+			Subject:          "Reminder (1/3): Pulse",
+			Body:             "keep moving",
+			Status:           agent.BoardMessageStatusUnread,
+			CreatedAt:        time.Date(2026, 4, 13, 10, 5, 0, 0, time.UTC),
+		},
+	}, "all", false, suppression)
+	if len(entries) != 0 {
+		t.Fatalf("len(entries)=%d want 0", len(entries))
 	}
 }
 
