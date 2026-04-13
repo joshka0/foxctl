@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
+	historypkg "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
 )
 
 func TestDefaultHistoryProfile_HasCoreQuestions(t *testing.T) {

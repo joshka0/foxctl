@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
+	tphistory "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
@@ -18,8 +20,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
-	tphistory "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
 type fakeGitRunner struct {

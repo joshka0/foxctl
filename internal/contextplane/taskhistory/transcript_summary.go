@@ -3,7 +3,7 @@ package taskhistory
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
+	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
 )
 
 type TranscriptSummaryWorker struct {

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/storage/memory"
-	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
+	historypkg "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
 )
 
 func TestBuildHistoryRecords_AnchorsDerivedTexts(t *testing.T) {

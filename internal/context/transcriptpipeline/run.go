@@ -9,7 +9,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
-	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
+	historypkg "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
 )
 

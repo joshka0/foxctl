@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
+	historypkg "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
 )
 
 type HistoryRecordKind = historypkg.HistoryRecordKind

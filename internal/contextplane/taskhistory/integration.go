@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
@@ -19,7 +20,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
 )
 
 func OpenCollector(ctx context.Context, storageRoot, workspacePath, vaultPath string) (Collector, func(), error) {

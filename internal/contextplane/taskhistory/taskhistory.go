@@ -13,6 +13,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
+	tphistory "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
@@ -21,8 +23,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
-	tphistory "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
 type SessionSource interface {

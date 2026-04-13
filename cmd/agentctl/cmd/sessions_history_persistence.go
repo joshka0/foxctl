@@ -4,12 +4,12 @@ import (
 	"context"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
+	historypkg "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
-	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
 func buildHistoryRecordEmbedder(cfg config.Config) historypkg.HistoryRecordEmbedFunc {

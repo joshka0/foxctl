@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
+	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
 	"gopkg.in/yaml.v3"
 )
 

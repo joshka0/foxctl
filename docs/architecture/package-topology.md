@@ -40,7 +40,7 @@ Prefer adding new packages under one of these stable families:
 | `internal/protocol` | Wire/envelope/protocol helpers | `protocol` |
 | `internal/storage` | Durable state, CAS, local rebuildable stores, DB helpers | `storage/*` |
 | `internal/v2` | Newer **agent/runtime/orchestration** stack only | `v2/core`, `v2/services`, `v2/runtime`, `v2/adapters` |
-| `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline` | Context/memory/history plane | current context family |
+| `internal/companion`, `internal/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane | current context family |
 | `internal/intelligence/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |
 | `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers | current interface family |
 
@@ -138,7 +138,7 @@ These package families are peer families, not “legacy” in the same sense:
 | Family | Reason |
 |------|--------|
 | `internal/storage/*` | Shared persistence layer used by both legacy and v2 paths |
-| `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline` | Context/memory/history plane, not old runtime scaffolding |
+| `internal/companion`, `internal/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane, not old runtime scaffolding |
 | `internal/intelligence/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Intelligence and retrieval plane |
 | `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers |
 | `internal/domain`, `internal/platform`, `internal/protocol` | Foundations, not generation-specific runtime code |
@@ -314,7 +314,7 @@ The target split for this family is:
 |------|--------------------------|------------------|
 | controlplane | `internal/contextplane` | keep as the control-plane anchor |
 | assembly | `internal/companion` | keep as the live assembly anchor |
-| history | `internal/transcriptpipeline`, `internal/contextplane/taskhistory`, `internal/storage/transcriptcache` | keep as one explicit first migration tranche |
+| history | `internal/context/transcriptpipeline`, `internal/contextplane/taskhistory`, `internal/storage/transcriptcache` | keep as one explicit first migration tranche |
 | runtime-helper | `internal/context/sessionkit`, `internal/context/updater`, `internal/storage/contextbuffer`, `internal/storage/contextvar` | keep as helper/bridge packages until history and assembly seams are narrower |
 | knowledge | `internal/context/knowledge`, `internal/storage/knowledge` | keep as the durable knowledge slice |
 
@@ -324,7 +324,7 @@ That yields these routing decisions for the current top-level roots:
 |------|-----------|-----------------------------|-----|
 | `internal/contextplane` | controlplane | keep | Owns ACA-style orientation, proposals, retrieval inspection, promotion helpers, and `taskhistory`; it is already the control-plane home rather than a generic helper bucket |
 | `internal/companion` | assembly | keep | Owns live prompt/context assembly, conversation memory coordination, and layered context building for active sessions |
-| `internal/transcriptpipeline` | history | keep | Owns transcript import, preprocessing, claim derivation, and history extraction; it is the main history-processing engine |
+| `internal/context/transcriptpipeline` | history | keep | Owns transcript import, preprocessing, claim derivation, and history extraction; it is the main history-processing engine |
 | `internal/contextplane/taskhistory` | history | bridge inside controlplane today | Lives under `contextplane` today but belongs to the same history tranche as `transcriptpipeline`; treat it as coupled history work, not stray control-plane cleanup |
 | `internal/storage/transcriptcache` | history | keep in storage and pair with the history tranche | It is durable transcript-processing cache/state, so it stays under storage while being planned together with history packages |
 | `internal/context/sessionkit` | runtime-helper | keep as helper slice | Provides session-oriented utilities, archival, snapshotting, and JSONL helpers that support multiple context/history flows without defining the family boundary on their own |
@@ -358,14 +358,14 @@ Within the context family, the first explicit migration tranche should be the
 
 | Package/root | History role | Current boundary decision |
 |------|--------------|---------------------------|
-| `internal/transcriptpipeline` | transcript import, preprocessing, claim derivation, objective extraction, grouped history runs, and `HistoryPack` production | treat as the history-processing owner |
+| `internal/context/transcriptpipeline` | transcript import, preprocessing, claim derivation, objective extraction, grouped history runs, and `HistoryPack` production | treat as the history-processing owner |
 | `internal/contextplane/taskhistory` | control-plane consumer that assembles task-oriented history views, family overviews, repo anchors, and ACA-facing summaries from transcript/history inputs | keep under `contextplane` for now, but treat as a history consumer rather than a second history-processing engine |
 | `internal/storage/transcriptcache` | durable cache for prederived transcript artifacts | keep in `internal/storage/*` and plan with the history tranche |
 
 That means the practical boundary for new work is:
 
 - transcript parsing, normalization, objective extraction, claim derivation,
-  grouped history runs, and cache semantics belong to `internal/transcriptpipeline`
+  grouped history runs, and cache semantics belong to `internal/context/transcriptpipeline`
   plus `internal/storage/transcriptcache`
 - task-oriented history packaging, control-plane summaries, and ACA/task-facing
   presentation belong to `internal/contextplane/taskhistory`
@@ -378,7 +378,7 @@ That means the practical boundary for new work is:
 The first low-risk history batch should be **boundary tightening without path
 renames**:
 
-- preserve `internal/transcriptpipeline` as the producer of transcript-derived
+- preserve `internal/context/transcriptpipeline` as the producer of transcript-derived
   history artifacts and packs
 - preserve `internal/contextplane/taskhistory` as the control-plane consumer of
   those history outputs

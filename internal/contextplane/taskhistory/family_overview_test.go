@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tphistory "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
+	tphistory "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
 )
 
 func TestDeterministicTranscriptFamilyOverview_PrefersRecentOwners(t *testing.T) {
