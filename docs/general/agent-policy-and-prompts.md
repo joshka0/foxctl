@@ -6,10 +6,10 @@ Machine-friendly reference for capability profiles and role instructions.
 
 | Package | Responsibility |
 |--------|----------------|
-| `internal/agentpolicy` | Authorize/deny agent shell commands based on profile skill allowlists |
+| `internal/runtime/agentpolicy` | Authorize/deny agent shell commands based on profile skill allowlists |
 | `internal/runtime/agentprompt` | Build role-specific system instructions and runtime tool-name aliases |
 
-## Profile Model (`internal/agentpolicy`)
+## Profile Model (`internal/runtime/agentpolicy`)
 
 | Profile | Intent | Restriction model |
 |--------|--------|-------------------|

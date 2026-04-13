@@ -23,7 +23,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/agentpolicy"
+	"github.com/jkatigb/agentctl/internal/runtime/agentpolicy"
 	"github.com/jkatigb/agentctl/internal/runtime/hooks"
 )
 

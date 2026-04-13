@@ -978,8 +978,8 @@ Goal:
 
 Primary files:
 
-1. `internal/agentpolicy/ops_authorizer.go` (new)
-2. `internal/agentpolicy/ops_authorizer_test.go` (new)
+1. `internal/runtime/agentpolicy/ops_authorizer.go` (new)
+2. `internal/runtime/agentpolicy/ops_authorizer_test.go` (new)
 3. `internal/ops/policy/types.go` (new)
 4. `internal/ops/policy/types_test.go` (new)
 5. `internal/interfaces/web/api/ops_*` handlers (policy enforcement)
@@ -1017,7 +1017,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/agentpolicy ./internal/ops/policy ./internal/interfaces/web/...`
+1. `go test ./internal/runtime/agentpolicy ./internal/ops/policy ./internal/interfaces/web/...`
 
 ## PR-0.5.3: Bedrock Runtime Integration + Model Policy
 
