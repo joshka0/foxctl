@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/hooks/sessionmode"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/sessionmode"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
@@ -155,7 +155,7 @@ func TestLinkTaskFileSyncModeAddsContext(t *testing.T) {
 			ToolInput: struct {
 				FilePath string `json:"file_path,omitempty"`
 			}{
-				FilePath: "internal/hooks/lifecycle/lifecycle.go",
+				FilePath: "internal/runtime/hooks/lifecycle/lifecycle.go",
 			},
 		},
 	})

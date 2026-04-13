@@ -351,8 +351,8 @@ BAD (no context):
 
 GOOD (with context):
   "Analyze the hook system. Key files:
-   - internal/hooks/dispatcher.go (main dispatcher, 400 lines)
-   - internal/hooks/types.go (hook types and contracts)
+   - internal/runtime/hooks/dispatcher.go (main dispatcher, 400 lines)
+   - internal/runtime/hooks/types.go (hook types and contracts)
    - internal/engine/tool_runner.go (hook integration in tools)
    Use fs_read_file to read each file and summarize the hook lifecycle."
 

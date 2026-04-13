@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/hooks/lifecycle"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
 	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
 )
 

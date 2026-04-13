@@ -7,7 +7,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 // Embed colors for agent lifecycle states.

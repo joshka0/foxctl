@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 // cardAction defines a button for an Adaptive Card Action.Submit.

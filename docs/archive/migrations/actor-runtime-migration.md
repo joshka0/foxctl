@@ -84,7 +84,7 @@ Environment flags:
 
 Add/extend packages (names can be adjusted, but keep responsibilities stable):
 
-- `internal/hooks/dispatcher/`
+- `internal/runtime/hooks/dispatcher/`
   - load hooks config
   - match events/tool names
   - execute hook skills
@@ -124,7 +124,7 @@ Each PR has:
 
 **Files**
 - `internal/domain/hook/` (extend types)
-- `internal/hooks/dispatcher/*` (new)
+- `internal/runtime/hooks/dispatcher/*` (new)
 - `configs/hooks.yaml` example(s)
 - `cmd/agentctl/cmd/hooks.go` (optional: `agentctl hooks dry-run`)
 
@@ -143,7 +143,7 @@ Each PR has:
 - Map old JSON to `hook.Output`
 
 **Files**
-- `internal/hooks/dispatcher/adapters/*.go`
+- `internal/runtime/hooks/dispatcher/adapters/*.go`
 - `internal/domain/hook/compat.go` (mapping helpers)
 
 **Acceptance**
@@ -225,7 +225,7 @@ Each PR has:
 
 **Files**
 - `internal/actor/actors/*` (where loop lives)
-- `internal/hooks/dispatcher/*` integration
+- `internal/runtime/hooks/dispatcher/*` integration
 
 **Acceptance**
 - A hook can block a tool call (PreToolUse)

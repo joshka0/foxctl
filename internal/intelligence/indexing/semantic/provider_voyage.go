@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog/log"
 )

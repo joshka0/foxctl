@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/hooks/lifecycle"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
 )
 
 func TestIndexEditedFileSkipsUnsupportedPaths(t *testing.T) {
@@ -50,7 +50,7 @@ func TestIndexEditedFileBuildsContext(t *testing.T) {
 			ToolInput: struct {
 				FilePath string `json:"file_path,omitempty"`
 				Path     string `json:"path,omitempty"`
-			}{FilePath: "internal/hooks/runtime.go"},
+			}{FilePath: "internal/runtime/hooks/runtime.go"},
 		},
 	})
 	if err != nil {

@@ -18,8 +18,8 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/context/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"

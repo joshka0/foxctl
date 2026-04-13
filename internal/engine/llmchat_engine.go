@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/hooks"
-	"github.com/jkatigb/agentctl/internal/observability"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 // HookContext provides context for hook dispatch from LLMChatEngine.

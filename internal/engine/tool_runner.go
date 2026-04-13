@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks"
 )
 
 // ToolExecutor executes a tool and returns the result.

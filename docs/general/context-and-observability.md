@@ -7,8 +7,8 @@ Machine-friendly reference for proactive context injection and wide-event tracin
 | Package | Responsibility |
 |--------|----------------|
 | `internal/context/updater` | Background worker that analyzes active sessions and injects relevant context |
-| `internal/observability` | Wide-event emission, trace/span context propagation, NDJSON/SQLite persistence options |
-| `internal/hooks` | Hook pipeline integrating context signals into tool/session lifecycle |
+| `internal/runtime/observability` | Wide-event emission, trace/span context propagation, NDJSON/SQLite persistence options |
+| `internal/runtime/hooks` | Hook pipeline integrating context signals into tool/session lifecycle |
 
 ## Context Updater Flow
 

@@ -51,7 +51,7 @@ func IsUnderWorkspace(workspace, path string) bool {
 }
 ```
 
-**Also fix:** Consolidate with `internal/hooks/pathutil/extract.go:157-174` which has different parameter order. Pick one canonical location.
+**Also fix:** Consolidate with `internal/runtime/hooks/pathutil/extract.go:157-174` which has different parameter order. Pick one canonical location.
 
 **Tests to add:**
 - `.gitignore` under workspace → true

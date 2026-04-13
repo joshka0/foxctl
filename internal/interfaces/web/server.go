@@ -23,8 +23,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/interfaces/web/api"
 	"github.com/jkatigb/agentctl/internal/interfaces/web/consolews"
 	"github.com/jkatigb/agentctl/internal/interfaces/web/sse"
-	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/storage/convref"
 )
 

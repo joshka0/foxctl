@@ -18,7 +18,7 @@ Goal: reduce duplication and improve maintainability by consolidating shared log
 
 ### 1) Internal consolidation
 
-- [x] Unify skill resolution + artifact lookup across `internal/daemon/skill_resolver.go`, `internal/interfaces/web/api/skill_runner.go`, `internal/hooks/resolver.go`, `internal/domain/skill/resolver.go`.
+- [x] Unify skill resolution + artifact lookup across `internal/daemon/skill_resolver.go`, `internal/interfaces/web/api/skill_runner.go`, `internal/runtime/hooks/resolver.go`, `internal/domain/skill/resolver.go`.
 - [x] Centralize skill search-path building (env override, config, dev paths).
 - [x] Share exec/WASI execution primitives between web API runner and runservice/execution.
 - [x] Consolidate CAS helpers and preview/hint building used by skills.

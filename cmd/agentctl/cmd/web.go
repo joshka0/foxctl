@@ -13,8 +13,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jkatigb/agentctl/internal/interfaces/web"
-	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 var webCmd = &cobra.Command{

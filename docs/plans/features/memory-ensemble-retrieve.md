@@ -473,7 +473,7 @@ Files:
 - `cmd/agentctl/cmd/eval.go`
 - `internal/evals/retrievaleval/eval.go`
 - `internal/rlm/llm_runner.go`
-- optional observability wiring in `internal/observability/*`
+- optional observability wiring in `internal/runtime/observability/*`
 
 Key work:
 

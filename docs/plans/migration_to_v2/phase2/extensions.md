@@ -114,7 +114,7 @@ Add `hook.Action` type with **exact** v1 action set:
 - `send_mailbox`
 - `bb_post`
 
-2. `internal/hooks/dispatcher/`
+2. `internal/runtime/hooks/dispatcher/`
 
 - Loads hook config from:
 

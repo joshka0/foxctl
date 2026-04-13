@@ -91,8 +91,8 @@ func extractFilePath(toolInput json.RawMessage) string {
 ```go
 import (
     "github.com/jkatigb/agentctl/internal/domain/hook"
-    "github.com/jkatigb/agentctl/internal/hooks/pathutil"
-    "github.com/jkatigb/agentctl/internal/hooks/toolutil"
+    "github.com/jkatigb/agentctl/internal/runtime/hooks/pathutil"
+    "github.com/jkatigb/agentctl/internal/runtime/hooks/toolutil"
 )
 
 func run(ctx context.Context, in hook.Input) error {

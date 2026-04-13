@@ -262,7 +262,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 129,
           "lineContent": "hooks := d.config.HooksForEvent(input.Event)",
           "title": "Find hooks for event",
@@ -270,7 +270,7 @@
         },
         {
           "id": "5b",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 138,
           "lineContent": "if h.Enabled \u0026\u0026 MatchesInput(h, input) {",
           "title": "Filter by matchers",
@@ -278,7 +278,7 @@
         },
         {
           "id": "5c",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 270,
           "lineContent": "if m.ToolKind != \"\" \u0026\u0026 m.ToolKind != ToolKindAny {",
           "title": "Match tool kind",
@@ -286,7 +286,7 @@
         },
         {
           "id": "5d",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 170,
           "lineContent": "output, err := d.runner.Run(hookCtx, entryHook, hookInput)",
           "title": "Execute hook with timeout",
@@ -294,7 +294,7 @@
         },
         {
           "id": "5e",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 182,
           "lineContent": "if entry.FailOpen {",
           "title": "Handle fail-open errors",
@@ -302,7 +302,7 @@
         },
         {
           "id": "5f",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 198,
           "lineContent": "if output.Decision.IsBlocking() \u0026\u0026 !result.Blocked {",
           "title": "Check for blocking decision",
@@ -310,14 +310,14 @@
         },
         {
           "id": "5g",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 206,
           "lineContent": "result.Output = Merge(outputs)",
           "title": "Merge hook outputs",
           "description": "Combines outputs from all hooks: blocks win, contexts concatenate, last-wins for tool input mutations"
         }
       ],
-      "traceTextDiagram": "Hook Dispatcher: PreToolUse Event Flow\n├── Dispatcher.Dispatch() entrypoint \u003c-- internal/hooks/dispatcher.go:122\n│   ├── Find hooks for event \u003c-- 5a\n│   │   └── config.HooksForEvent(EventPreToolUse) \u003c-- internal/hooks/dispatcher.go:129\n│   ├── Filter hooks by matchers \u003c-- internal/hooks/dispatcher.go:137\n│   │   ├── Check if enabled \u0026 matches \u003c-- 5b\n│   │   ├── Match tool kind (write/read/exec) \u003c-- 5c\n│   │   └── Match tool name/path regex \u003c-- internal/hooks/dispatcher.go:245\n│   ├── Execute each matching hook \u003c-- internal/hooks/dispatcher.go:153\n│   │   ├── Create timeout context (2s default) \u003c-- internal/hooks/dispatcher.go:162\n│   │   ├── runner.Run(hookCtx, hook, input) \u003c-- 5d\n│   │   └── Handle errors \u003c-- internal/hooks/dispatcher.go:181\n│   │       └── Apply fail_open policy \u003c-- 5e\n│   ├── Collect outputs \u0026 check blocks \u003c-- 5f\n│   └── Merge all hook outputs \u003c-- 5g\n│       ├── Blocks take precedence \u003c-- internal/hooks/merge.go:15\n│       ├── Concatenate contexts \u003c-- internal/hooks/merge.go:35\n│       └── Last-wins for tool input mutations \u003c-- internal/hooks/merge.go:41\n└── Return merged Result with decision \u003c-- internal/hooks/dispatcher.go:210",
+      "traceTextDiagram": "Hook Dispatcher: PreToolUse Event Flow\n├── Dispatcher.Dispatch() entrypoint \u003c-- internal/runtime/hooks/dispatcher.go:122\n│   ├── Find hooks for event \u003c-- 5a\n│   │   └── config.HooksForEvent(EventPreToolUse) \u003c-- internal/runtime/hooks/dispatcher.go:129\n│   ├── Filter hooks by matchers \u003c-- internal/runtime/hooks/dispatcher.go:137\n│   │   ├── Check if enabled \u0026 matches \u003c-- 5b\n│   │   ├── Match tool kind (write/read/exec) \u003c-- 5c\n│   │   └── Match tool name/path regex \u003c-- internal/runtime/hooks/dispatcher.go:245\n│   ├── Execute each matching hook \u003c-- internal/runtime/hooks/dispatcher.go:153\n│   │   ├── Create timeout context (2s default) \u003c-- internal/runtime/hooks/dispatcher.go:162\n│   │   ├── runner.Run(hookCtx, hook, input) \u003c-- 5d\n│   │   └── Handle errors \u003c-- internal/runtime/hooks/dispatcher.go:181\n│   │       └── Apply fail_open policy \u003c-- 5e\n│   ├── Collect outputs \u0026 check blocks \u003c-- 5f\n│   └── Merge all hook outputs \u003c-- 5g\n│       ├── Blocks take precedence \u003c-- internal/runtime/hooks/merge.go:15\n│       ├── Concatenate contexts \u003c-- internal/runtime/hooks/merge.go:35\n│       └── Last-wins for tool input mutations \u003c-- internal/runtime/hooks/merge.go:41\n└── Return merged Result with decision \u003c-- internal/runtime/hooks/dispatcher.go:210",
       "traceGuide": "## Motivation\n\nWhen AI agents or automated tools execute operations like editing files, the system needs to **intercept and enforce policies** before those operations run. The hook dispatcher solves this by routing **PreToolUse events** to enforcement hooks (like task_guard and file_guard) that can approve, block, or modify operations based on workspace rules. Without this, there's no way to ensure that write operations have an active task, prevent concurrent file edits, or enforce review gates.\n\n## Details\n\n### Event Routing\n\nThe dispatcher receives a **PreToolUse event** with tool metadata (name, input, kind) and looks up registered hooks for that event type [5a]. Each hook can specify **matchers** to filter when it runs—for example, only triggering on write operations or specific file paths [5b].\n\n### Tool Classification\n\nHooks use **tool kind matching** to target categories of operations: `write` (Edit, Write, fs.write_*), `read` (Read, fs.read_*), `exec` (Bash, tests.*), or `search` (Grep, code.search_*) [5c]. This allows hooks like task_guard to run only on write operations without hardcoding every possible tool name.\n\n### Execution Model\n\nFor each matching hook, the dispatcher creates a **timeout context** (default 2 seconds) and executes the hook via SkillRunner or ShellRunner [5d]. Hooks return a decision: **approve**, **block**, or **none** (advisory). If a hook errors, the `fail_open` flag determines whether to treat it as a no-op or block the operation [5e].\n\n### Output Merging\n\nAfter all hooks execute, the dispatcher **merges their outputs** [5g]. The merge logic is conservative: **any block wins** (operation is blocked if any hook blocks) [5f], contexts are concatenated for injection into the AI's prompt, and tool input mutations use last-wins semantics. This ensures that the strictest enforcement always applies.\n\n### Integration Points\n\nThe dispatcher is called from tool runners in the engine layer (`internal/engine/tool_runner.go`) before executing tools, and from agent actor implementations (`internal/actor/agent_actor.go`) that need hook enforcement. The result's `Blocked` field and `BlockedBy` hook ID tell callers whether to proceed with the operation."
     }
   ],

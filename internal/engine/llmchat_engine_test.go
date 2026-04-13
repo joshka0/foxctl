@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks"
 )
 
 func TestLLMChatEngine_BuildMessages(t *testing.T) {

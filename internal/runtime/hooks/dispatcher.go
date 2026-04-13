@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/pathutil"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 // Dispatcher executes hooks for events and merges their outputs.

@@ -151,7 +151,7 @@ Every `.db` file managed by agentctl must appear in this list. Stores are classi
 
 | Store Name | DB File | Package | Notes |
 |---|---|---|---|
-| `EVENTS` | `events.db` | `internal/observability/` | Stored under `$AGENTCTL_OBS_DIR`, not `~/.agentctl/storage/` |
+| `EVENTS` | `events.db` | `internal/runtime/observability/` | Stored under `$AGENTCTL_OBS_DIR`, not `~/.agentctl/storage/` |
 
 **External** (read-only, not agentctl-owned):
 

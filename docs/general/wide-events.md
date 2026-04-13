@@ -171,10 +171,10 @@ log.Error("failed", obs.Err(err))
 
 ### Building Events (Internal)
 
-For internal packages, use `internal/observability` directly:
+For internal packages, use `internal/runtime/observability` directly:
 
 ```go
-import "github.com/jkatigb/agentctl/internal/observability"
+import "github.com/jkatigb/agentctl/internal/runtime/observability"
 
 // Create an event builder
 event := observability.NewEvent(observability.OpSkillRun).
@@ -435,7 +435,7 @@ Symphony/Kanban runtime surfaces emit orchestration-focused wide events from web
 
 ### SSE-visible fields (contract)
 
-These fields are forwarded by `internal/observability/sse_bridge.go` into GUI activity events:
+These fields are forwarded by `internal/runtime/observability/sse_bridge.go` into GUI activity events:
 
 - always: top-level `trace_id`
 - when present in source event data: `data.request_id`, `data.lane`, `data.last_outcome`
@@ -529,7 +529,7 @@ included to prevent backup size bloat.
 Events can be pruned by age or size to manage disk usage:
 
 ```go
-import "github.com/jkatigb/agentctl/internal/observability"
+import "github.com/jkatigb/agentctl/internal/runtime/observability"
 
 // Prune events older than 30 days
 opts := observability.PruneOptions{

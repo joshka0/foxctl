@@ -13,11 +13,11 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/hooks"
-	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
-	"github.com/jkatigb/agentctl/internal/hooks/toolutil"
 	"github.com/jkatigb/agentctl/internal/context/sessionkit"
+	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/pathutil"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/toolutil"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )

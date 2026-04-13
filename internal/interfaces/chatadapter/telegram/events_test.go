@@ -3,7 +3,7 @@ package telegram
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 func TestAgentKey_PrefersAgentID(t *testing.T) {

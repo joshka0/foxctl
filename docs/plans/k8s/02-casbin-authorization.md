@@ -121,7 +121,7 @@ HTTP Request / Chat Message
 
 ## Files to Modify
 
-### `internal/hooks/dispatcher.go`
+### `internal/runtime/hooks/dispatcher.go`
 
 Add `PolicyHookRunner` as a built-in hook that fires before skill-based hooks:
 
@@ -139,7 +139,7 @@ if d.policyRunner != nil && input.Event == EventPreToolUse {
 }
 ```
 
-### `internal/hooks/types.go`
+### `internal/runtime/hooks/types.go`
 
 Ensure `Input.Principal` (from Plan 01) carries through to policy evaluation.
 

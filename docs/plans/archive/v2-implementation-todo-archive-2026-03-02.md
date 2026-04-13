@@ -273,13 +273,13 @@ Subagent Review
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c9f1e-2ade-78c1-9b68-c00af252fdb1`
-  - scope: `PR-30 gui-agent route audit + event/context alignment` (`internal/interfaces/web/api/agents.go`, `internal/observability/{wide_event.go,sse_bridge.go,sse_bridge_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_internal_test.go,layered_observability_test.go}`, `packages/gui-agent/src/api/types.ts`)
+  - scope: `PR-30 gui-agent route audit + event/context alignment` (`internal/interfaces/web/api/agents.go`, `internal/runtime/observability/{wide_event.go,sse_bridge.go,sse_bridge_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_internal_test.go,layered_observability_test.go}`, `packages/gui-agent/src/api/types.ts`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c9f17-3de5-7ac1-8093-1bcf4faf3022`
-  - scope: `PR-30 gui-agent route audit + event/context alignment` (`internal/interfaces/web/api/agents.go`, `internal/observability/{wide_event.go,sse_bridge.go,sse_bridge_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `packages/gui-agent/src/api/types.ts`)
+  - scope: `PR-30 gui-agent route audit + event/context alignment` (`internal/interfaces/web/api/agents.go`, `internal/runtime/observability/{wide_event.go,sse_bridge.go,sse_bridge_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `packages/gui-agent/src/api/types.ts`)
   - findings: `SSE forwarding scope too broad, plus low test-hardening gaps`
   - decision: `approved-with-known-risks`
 - 2026-02-27: Completed PR-30 gui-agent route audit + v2 contract alignment.
@@ -287,7 +287,7 @@ Subagent Review
   - Added `context.layered_bundle` wide event emission from layered context assembly, including deterministic stable ref slices and ref-count metadata (`refs`, `turn_refs`, `slice_refs`, `episode_refs`, `narrative_refs`, `artifact_refs`).
   - Updated SSE bridge forwarding rules to include exact context operations and scoped v2 runtime prefixes, plus curated extraction of context-ref metadata for GUI activity stream payloads.
   - Added observability/contextbuilder regression tests (`sse_bridge_test.go`, `layered_internal_test.go`, `layered_observability_test.go`) and GUI type alignment for ref metadata (`packages/gui-agent/src/api/types.ts`).
-  - Validation: `CGO_ENABLED=0 go test ./internal/observability ./internal/v2/runtime/contextbuilder ./internal/interfaces/web/api -count=1` and `pnpm -C packages/gui-agent exec tsc --noEmit` (pass).
+  - Validation: `CGO_ENABLED=0 go test ./internal/runtime/observability ./internal/v2/runtime/contextbuilder ./internal/interfaces/web/api -count=1` and `pnpm -C packages/gui-agent exec tsc --noEmit` (pass).
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c9f0f-0aba-7672-af97-284e564f9454`
@@ -540,19 +540,19 @@ Subagent Review
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c750b-7ecd-7980-b862-6ac80123efdb`
-  - scope: `PR-17 tracing propagation slice` (`internal/observability/{span.go,span_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `docs/observability/wide-events.md`)
+  - scope: `PR-17 tracing propagation slice` (`internal/runtime/observability/{span.go,span_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `docs/observability/wide-events.md`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-19: Completed tracing propagation for semantic retrieval wide events.
-  - `StartSpan` now attaches generated `span_id` to context in `internal/observability/span.go`.
+  - `StartSpan` now attaches generated `span_id` to context in `internal/runtime/observability/span.go`.
   - Semantic retrieval events now inherit `trace_id` from context and set `parent_id` from current span when present.
   - Added regression assertions for:
-    - context `span_id` propagation in `internal/observability/span_test.go`
+    - context `span_id` propagation in `internal/runtime/observability/span_test.go`
     - `trace_id` and `parent_id` linkage in `internal/v2/runtime/contextbuilder/layered_observability_test.go`
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c7501-d05a-7352-902e-ca988f39b71e`
-  - scope: `PR-17 wide-event emission slice` (`internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `internal/observability/wide_event.go`, `docs/observability/wide-events.md`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-17 wide-event emission slice` (`internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `internal/runtime/observability/wide_event.go`, `docs/observability/wide-events.md`, `docs/plans/v2-implementation-todo.md`)
   - findings: `none` (vector/error/disabled path coverage confirmed)
   - decision: `approved`
 - 2026-02-19: Implemented PR-17 retrieval counters + semantic wide-event emission.

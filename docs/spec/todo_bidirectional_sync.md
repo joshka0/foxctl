@@ -333,7 +333,7 @@ internal/
 * `internal/storage/tasks`
 * `internal/storage/graph` + pagerank
 * `internal/intelligence/retrieval` + `code/snippet_extract`
-* `internal/observability`
+* `internal/runtime/observability`
 
 ### 12.2 Session file locator
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
 	"github.com/jkatigb/agentctl/internal/interfaces/web/sse"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 // agentThread tracks a root card message for a single agent.

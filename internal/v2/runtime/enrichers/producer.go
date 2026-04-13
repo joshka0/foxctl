@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
 	"github.com/jkatigb/agentctl/internal/v2/core/run"
 )

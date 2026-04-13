@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/hooks/sessionmode"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/sessionmode"
 )
 
 func TestDetectAnchorSetsAnchorAndTodoMode(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
 	"github.com/jkatigb/agentctl/internal/interfaces/web/sse"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 // startEventListener subscribes to the SSE hub and routes agent events to Discord.

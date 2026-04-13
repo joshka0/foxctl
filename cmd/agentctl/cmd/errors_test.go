@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/observability"
 	configpkg "github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 func TestErrorsCommandUsesObservabilityEvents(t *testing.T) {

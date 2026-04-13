@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 // WorkerConfig configures the background worker.

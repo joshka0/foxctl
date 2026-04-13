@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/oklog/ulid/v2"
 )
 

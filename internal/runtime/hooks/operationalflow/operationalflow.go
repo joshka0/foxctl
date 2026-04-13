@@ -10,9 +10,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/hooks/lifecycle"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )

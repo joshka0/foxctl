@@ -57,10 +57,10 @@ ctx, done, span := obs.StartSpan(ctx, "memory.write",
 defer func() { done(err) }()
 ```
 
-### Via internal/observability
+### Via internal/runtime/observability
 
 ```go
-import "github.com/jkatigb/agentctl/internal/observability"
+import "github.com/jkatigb/agentctl/internal/runtime/observability"
 
 // Using span options
 ctx, done, span := observability.StartSpan(ctx, observability.OpSkillRun,
@@ -122,7 +122,7 @@ from NDJSON files and writes to SQLite.
 ### Initialization
 
 ```go
-import "github.com/jkatigb/agentctl/internal/observability"
+import "github.com/jkatigb/agentctl/internal/runtime/observability"
 
 // Initialize persistence at startup (call once)
 if err := observability.InitPersistence(ctx); err != nil {

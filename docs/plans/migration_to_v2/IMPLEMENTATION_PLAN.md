@@ -39,7 +39,7 @@ This plan organizes the v2 migration into **6 phases** spanning approximately 10
 
 **Files to create/modify:**
 ```
-internal/hooks/
+internal/runtime/hooks/
 ├── types.go           # hook.Input, hook.Output, hook.Action
 ├── dispatcher.go      # HookDispatcher interface + implementation
 ├── merge.go           # Deterministic merge rules
@@ -95,7 +95,7 @@ internal/hooks/
 
 **Files:**
 ```
-internal/hooks/
+internal/runtime/hooks/
 ├── adapters/
 │   ├── shell.go       # JSON stdin/stdout shell adapter
 │   ├── skill.go       # Skill envelope adapter
@@ -754,7 +754,7 @@ After full cutover:
 
 ### New Files to Create
 ```
-internal/hooks/
+internal/runtime/hooks/
 ├── types.go
 ├── dispatcher.go
 ├── merge.go
@@ -806,6 +806,6 @@ internal/actor/memory/
 
 ## Next Steps
 
-1. **Start PR0**: Create `internal/hooks/types.go` with canonical types
+1. **Start PR0**: Create `internal/runtime/hooks/types.go` with canonical types
 2. **Review**: Get architecture review on hook types before implementation
 3. **Parallel work**: DB migration helpers can be written alongside PR0

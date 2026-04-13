@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 // Re-export types for skill use

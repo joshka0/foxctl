@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/hooks/lifecycle"
-	"github.com/jkatigb/agentctl/internal/hooks/sessionmode"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/sessionmode"
 )
 
 type Dependencies struct {

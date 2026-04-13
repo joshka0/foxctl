@@ -7,7 +7,7 @@
     "generationSource": "generationWithTraces",
     "generationTimestamp": "2026-01-15T00:43:55+02:00",
     "mode": "SMART",
-    "originalPrompt": "Explore: hook dispatch, matching, and skill-backed hook execution. Start from: internal/hooks/dispatcher.go, internal/hooks/config.go, internal/hooks/skill_runner.go"
+    "originalPrompt": "Explore: hook dispatch, matching, and skill-backed hook execution. Start from: internal/runtime/hooks/dispatcher.go, internal/runtime/hooks/config.go, internal/runtime/hooks/skill_runner.go"
   },
   "title": "Hook Dispatch, Matching, and Skill-Backed Execution",
   "traces": [
@@ -26,7 +26,7 @@
         },
         {
           "id": "1b",
-          "path": "internal/hooks/config.go",
+          "path": "internal/runtime/hooks/config.go",
           "lineNumber": 112,
           "lineContent": "paths := DefaultConfigPaths(workspaceRoot)",
           "title": "Resolve config file paths",
@@ -34,7 +34,7 @@
         },
         {
           "id": "1c",
-          "path": "internal/hooks/config.go",
+          "path": "internal/runtime/hooks/config.go",
           "lineNumber": 78,
           "lineContent": "cfg, err := loadConfigFile(path)",
           "title": "Load and parse YAML config",
@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "internal/hooks/config.go",
+          "path": "internal/runtime/hooks/config.go",
           "lineNumber": 138,
           "lineContent": "hook, err := toHookDef(h, raw.Defaults)",
           "title": "Convert YAML to canonical HookDef",
@@ -50,7 +50,7 @@
         },
         {
           "id": "1e",
-          "path": "internal/hooks/config.go",
+          "path": "internal/runtime/hooks/config.go",
           "lineNumber": 105,
           "lineContent": "merged.buildIndex()",
           "title": "Build event lookup index",
@@ -65,7 +65,7 @@
           "description": "Initializes dispatcher with config and registry that routes to skill/shell runners"
         }
       ],
-      "traceTextDiagram": "Actor System Supervisor Startup\n├── runActorSysSupervisorStart() \u003c-- cmd/agentctl/cmd/actorsys.go:189\n│   ├── Open mailbox store \u003c-- cmd/agentctl/cmd/actorsys.go:206\n│   ├── Create actor system \u003c-- cmd/agentctl/cmd/actorsys.go:230\n│   ├── Load hook configuration \u003c-- 1a\n│   │   └── hooks.LoadConfigWithDefaults() \u003c-- internal/hooks/config.go:111\n│   │       ├── Resolve config paths \u003c-- 1b\n│   │       │   └── DefaultConfigPaths() \u003c-- internal/hooks/config.go:49\n│   │       │       ├── workspace/.agentctl/hooks.yaml \u003c-- internal/hooks/config.go:54\n│   │       │       └── ~/.agentctl/hooks.yaml \u003c-- internal/hooks/config.go:60\n│   │       └── LoadConfig(paths...) \u003c-- internal/hooks/config.go:68\n│   │           └── for each path \u003c-- internal/hooks/config.go:77\n│   │               ├── loadConfigFile() \u003c-- 1c\n│   │               │   ├── yaml.Unmarshal() \u003c-- internal/hooks/config.go:128\n│   │               │   └── toHookDef() \u003c-- 1d\n│   │               │       └── Apply defaults \u003c-- internal/hooks/config.go:242\n│   │               └── Merge hooks by ID \u003c-- internal/hooks/config.go:93\n│   ├── Build event index \u003c-- 1e\n│   │   └── merged.buildIndex() \u003c-- internal/hooks/config.go:31\n│   │       └── map[Event][]HookDef sorted \u003c-- internal/hooks/config.go:40\n│   └── Create dispatcher \u003c-- 1f\n│       └── NewDispatcherWithRegistry() \u003c-- internal/hooks/registry.go:125\n│           ├── NewRegistry() \u003c-- internal/hooks/registry.go:37\n│           │   └── SkillRunner + ShellRunner \u003c-- internal/hooks/registry.go:59\n│           └── NewDispatcher() \u003c-- internal/hooks/dispatcher.go:114",
+      "traceTextDiagram": "Actor System Supervisor Startup\n├── runActorSysSupervisorStart() \u003c-- cmd/agentctl/cmd/actorsys.go:189\n│   ├── Open mailbox store \u003c-- cmd/agentctl/cmd/actorsys.go:206\n│   ├── Create actor system \u003c-- cmd/agentctl/cmd/actorsys.go:230\n│   ├── Load hook configuration \u003c-- 1a\n│   │   └── hooks.LoadConfigWithDefaults() \u003c-- internal/runtime/hooks/config.go:111\n│   │       ├── Resolve config paths \u003c-- 1b\n│   │       │   └── DefaultConfigPaths() \u003c-- internal/runtime/hooks/config.go:49\n│   │       │       ├── workspace/.agentctl/hooks.yaml \u003c-- internal/runtime/hooks/config.go:54\n│   │       │       └── ~/.agentctl/hooks.yaml \u003c-- internal/runtime/hooks/config.go:60\n│   │       └── LoadConfig(paths...) \u003c-- internal/runtime/hooks/config.go:68\n│   │           └── for each path \u003c-- internal/runtime/hooks/config.go:77\n│   │               ├── loadConfigFile() \u003c-- 1c\n│   │               │   ├── yaml.Unmarshal() \u003c-- internal/runtime/hooks/config.go:128\n│   │               │   └── toHookDef() \u003c-- 1d\n│   │               │       └── Apply defaults \u003c-- internal/runtime/hooks/config.go:242\n│   │               └── Merge hooks by ID \u003c-- internal/runtime/hooks/config.go:93\n│   ├── Build event index \u003c-- 1e\n│   │   └── merged.buildIndex() \u003c-- internal/runtime/hooks/config.go:31\n│   │       └── map[Event][]HookDef sorted \u003c-- internal/runtime/hooks/config.go:40\n│   └── Create dispatcher \u003c-- 1f\n│       └── NewDispatcherWithRegistry() \u003c-- internal/runtime/hooks/registry.go:125\n│           ├── NewRegistry() \u003c-- internal/runtime/hooks/registry.go:37\n│           │   └── SkillRunner + ShellRunner \u003c-- internal/runtime/hooks/registry.go:59\n│           └── NewDispatcher() \u003c-- internal/runtime/hooks/dispatcher.go:114",
       "traceGuide": "## Motivation\n\nAgentctl's hook system allows **runtime interception and control** of agent operations at canonical lifecycle events. The problem: agents need to enforce policies (like preventing file conflicts between multiple agents), inject context (like task information), and observe operations (like tracking tool usage) **without hardcoding these concerns into the core agent logic**. Hooks provide a **declarative, configuration-driven** solution where users define YAML rules that match events and execute skills to approve, block, or augment operations.\n\n## Details\n\n### Configuration Loading\n\nAt system startup, the supervisor loads hook definitions from **two locations in precedence order**: workspace-local `.agentctl/hooks.yaml` and global `~/.agentctl/hooks.yaml` [1a]. The `DefaultConfigPaths` function resolves these paths [1b], with workspace config taking precedence to allow per-project customization.\n\nEach YAML file is parsed by `loadConfigFile` [1c], which unmarshals hook definitions and applies defaults for timeout, fail_open behavior, and enabled status [1d]. The `toHookDef` function handles this normalization, resolving fields like `fail_mode: \"open\"` to boolean `fail_open: true` and applying global defaults from the `defaults:` section.\n\n### Event Index Optimization\n\nAfter loading, `buildIndex` creates a **fast lookup map** from event types to matching hooks [1e]. This map structure (`map[Event][]HookDef`) enables **O(1) event-to-hooks lookup** during dispatch, avoiding linear scans through all hooks. Hooks are sorted by priority within each event bucket, ensuring deterministic execution order.\n\n### Dispatcher Creation\n\nThe system creates a dispatcher with an integrated registry [1f] that routes hook execution to the appropriate runner type. The `NewDispatcherWithRegistry` function combines:\n- **Config**: The merged hook definitions with event index\n- **Registry**: Routes to `SkillRunner` (for Go binaries) or `ShellRunner` (for .sh scripts)\n- **Skills directory**: Path to installed hook skills like `hooks/file_guard`\n\nThis dispatcher is then injected into agent actors, making hooks available at all canonical events (SessionStart, PreToolUse, PostToolUse, etc.)."
     },
     {
@@ -83,7 +83,7 @@
         },
         {
           "id": "2b",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 129,
           "lineContent": "hooks := d.config.HooksForEvent(input.Event)",
           "title": "Lookup hooks by event type",
@@ -91,7 +91,7 @@
         },
         {
           "id": "2c",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 138,
           "lineContent": "if h.Enabled \u0026\u0026 MatchesInput(h, input) {",
           "title": "Filter hooks by matchers",
@@ -99,7 +99,7 @@
         },
         {
           "id": "2d",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 246,
           "lineContent": "if !matchRegex(m.ToolName, input.ToolName) {",
           "title": "Match tool name with regex",
@@ -107,7 +107,7 @@
         },
         {
           "id": "2e",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 306,
           "lineContent": "filePath := extractFilePath(input.ToolInput)",
           "title": "Extract file path from tool input",
@@ -115,7 +115,7 @@
         },
         {
           "id": "2f",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 170,
           "lineContent": "output, err := d.runner.Run(hookCtx, entryHook, hookInput)",
           "title": "Execute matched hook",
@@ -123,14 +123,14 @@
         },
         {
           "id": "2g",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 206,
           "lineContent": "result.Output = Merge(outputs)",
           "title": "Merge all hook outputs",
           "description": "Combines outputs from multiple hooks using deterministic merge rules"
         }
       ],
-      "traceTextDiagram": "PreToolUse Event Dispatch Flow\n├── AgentActor.dispatchHook() \u003c-- internal/actor/agent_actor.go:1107\n│   ├── buildHookInput() - prepare context \u003c-- internal/actor/agent_actor.go:1112\n│   └── hooks.Dispatch(ctx, input) \u003c-- 2a\n│       └── Dispatcher.Dispatch() \u003c-- internal/hooks/dispatcher.go:122\n│           ├── HooksForEvent(input.Event) \u003c-- 2b\n│           │   └── return byEvent[event] (indexed) \u003c-- internal/hooks/config.go:27\n│           ├── Filter by matchers \u003c-- internal/hooks/dispatcher.go:137\n│           │   ├── MatchesInput(h, input) \u003c-- 2c\n│           │   │   ├── matchRegex(ToolName) \u003c-- 2d\n│           │   │   ├── matchRegex(PathRegex) \u003c-- internal/hooks/dispatcher.go:305\n│           │   │   │   └── extractFilePath() \u003c-- 2e\n│           │   │   └── other matchers...\n│           │   └── collect matchingHooks \u003c-- internal/hooks/dispatcher.go:139\n│           ├── Execute each hook \u003c-- internal/hooks/dispatcher.go:150\n│           │   └── runner.Run(hookCtx, hook) \u003c-- 2f\n│           └── Merge(outputs) \u003c-- 2g\n│               └── return Result \u003c-- internal/hooks/dispatcher.go:210",
+      "traceTextDiagram": "PreToolUse Event Dispatch Flow\n├── AgentActor.dispatchHook() \u003c-- internal/actor/agent_actor.go:1107\n│   ├── buildHookInput() - prepare context \u003c-- internal/actor/agent_actor.go:1112\n│   └── hooks.Dispatch(ctx, input) \u003c-- 2a\n│       └── Dispatcher.Dispatch() \u003c-- internal/runtime/hooks/dispatcher.go:122\n│           ├── HooksForEvent(input.Event) \u003c-- 2b\n│           │   └── return byEvent[event] (indexed) \u003c-- internal/runtime/hooks/config.go:27\n│           ├── Filter by matchers \u003c-- internal/runtime/hooks/dispatcher.go:137\n│           │   ├── MatchesInput(h, input) \u003c-- 2c\n│           │   │   ├── matchRegex(ToolName) \u003c-- 2d\n│           │   │   ├── matchRegex(PathRegex) \u003c-- internal/runtime/hooks/dispatcher.go:305\n│           │   │   │   └── extractFilePath() \u003c-- 2e\n│           │   │   └── other matchers...\n│           │   └── collect matchingHooks \u003c-- internal/runtime/hooks/dispatcher.go:139\n│           ├── Execute each hook \u003c-- internal/runtime/hooks/dispatcher.go:150\n│           │   └── runner.Run(hookCtx, hook) \u003c-- 2f\n│           └── Merge(outputs) \u003c-- 2g\n│               └── return Result \u003c-- internal/runtime/hooks/dispatcher.go:210",
       "traceGuide": "## Motivation\n\nAgentctl's hook system solves a critical problem: **how do you intercept and control agent operations at key lifecycle points without hardcoding policy logic into the core runtime?** When an AI agent attempts to edit a file, execute a command, or complete a turn, you need the ability to:\n\n- **Block dangerous operations** before they execute (e.g., prevent editing files reserved by other agents)\n- **Inject context** into the agent's prompt (e.g., add task information or warnings)\n- **Mutate tool inputs** (e.g., sanitize paths or add flags)\n- **Observe and log** operations for debugging and compliance\n\nThe hook system provides this through **event-driven dispatch**: at canonical events like `PreToolUse`, `PostToolUse`, or `SessionStart`, the runtime dispatches to configured hooks that can approve, block, or modify the operation.\n\n## Details\n\n### Configuration and Loading\n\nHook definitions live in YAML files at `.agentctl/hooks.yaml` (workspace-level) or `~/.agentctl/hooks.yaml` (global). At system startup [1a], the supervisor loads these configs [1b], which define:\n\n- **Event type** (e.g., `PreToolUse`, `PostAgentTurn`)\n- **Matchers** (regex patterns for tool names, file paths, actor IDs)\n- **Skills to run** (e.g., `hooks/file_guard`, `hooks/task_guard`)\n- **Execution policy** (timeout, fail-open vs fail-closed)\n\nThe config system builds an **event index** [1e] mapping each event type to its hooks, sorted by priority for fast O(1) lookup.\n\n### Dispatch Flow\n\nWhen an event occurs (e.g., agent about to use a tool), the actor calls `Dispatch()` [2a] with a `hooks.Input` containing event context (tool name, file path, session ID, etc.).\n\nThe dispatcher:\n1. **Looks up hooks** for the event type using the pre-built index [2b]\n2. **Filters by matchers** [2c] - each hook can specify regex patterns for tool names [2d], file paths [2e], actor IDs, etc. Only hooks where **all matchers pass** (AND logic) are executed\n3. **Executes matching hooks** sequentially in priority order [2f]\n4. **Merges outputs** [2g] using deterministic rules (block wins, last-wins for mutations, contexts joined with newlines)\n\n### Matching Logic\n\nThe `MatchesInput()` function [2c] implements the filtering logic. For a hook to run, **all specified matchers must match**:\n\n- **Tool name matching** [2d]: Regex against `tool_name` (e.g., `Edit`, `Write`) or `tool_canonical` (e.g., `edit.apply_patch`)\n- **Path matching** [2e]: Extracts file paths from tool input JSON (checks `file_path`, `path`, `current_path` fields) and matches against `path_regex`\n- **Actor/namespace matching**: Regex against `actor_id` or mailbox namespace\n- **Tool kind matching**: Category-based matching (read/write/exec/search)\n\nRegex patterns are **compiled and cached** for performance to avoid recompilation on every dispatch.\n\n### Execution and Output\n\nHooks are executed via **skill-backed runners** [2f] - Go binaries that receive `hooks.Input` on stdin as JSON and return `hooks.Output` on stdout. The output specifies:\n\n- **Decision**: `approve`, `block`, or `none` (advisory)\n- **Reason**: Human-readable explanation\n- **Context**: Markdown text to inject into agent prompt\n- **Actions**: Structured actions like `enqueue_context`, `send_mailbox`, `run_skill`\n- **Mutations**: `updated_tool_input` or `updated_assistant_text` to modify the operation\n\n### Merge Rules\n\nWhen multiple hooks run [2g], their outputs are merged deterministically:\n\n- **Decision**: Block wins over approve; approve wins over none\n- **Reason**: First non-empty reason for the winning decision\n- **Mutations**: Last-wins (later hooks override earlier ones)\n- **Context**: All contexts joined with `\\n\\n`\n- **Actions**: Concatenated in execution order\n\nThis ensures predictable behavior when multiple hooks interact."
     },
     {
@@ -140,7 +140,7 @@
       "locations": [
         {
           "id": "3a",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 30,
           "lineContent": "manifest, artifactPath, err := r.Resolver.Resolve(entry.Skill)",
           "title": "Resolve skill manifest and binary",
@@ -148,7 +148,7 @@
         },
         {
           "id": "3b",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 40,
           "lineContent": "inputBytes, err := json.Marshal(hookInput)",
           "title": "Serialize hook input to JSON",
@@ -156,7 +156,7 @@
         },
         {
           "id": "3c",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 49,
           "lineContent": "result, err := r.Executor.Execute(ctx, execution.ExecuteOptions{",
           "title": "Execute skill via executor",
@@ -180,7 +180,7 @@
         },
         {
           "id": "3f",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 65,
           "lineContent": "output, err := parseSkillOutput(result.Stdout)",
           "title": "Parse skill stdout as envelope",
@@ -188,14 +188,14 @@
         },
         {
           "id": "3g",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 108,
           "lineContent": "if env.Data.HookOutput.Decision != \"\" {",
           "title": "Extract decision from envelope",
           "description": "Returns approve/block/none decision with reason, context, and actions from skill output"
         }
       ],
-      "traceTextDiagram": "Skill-Backed Hook Execution Flow\n├── SkillRunner.Run() entry \u003c-- internal/hooks/skill_runner.go:21\n│   ├── Resolve skill manifest \u0026 binary \u003c-- 3a\n│   │   └── DefaultResolver.Resolve() \u003c-- internal/hooks/resolver.go:32\n│   │       └── skill.LoadManifest() \u003c-- internal/hooks/resolver.go:44\n│   ├── Marshal hook input to JSON \u003c-- 3b\n│   ├── Execute via SkillExecutor \u003c-- 3c\n│   │   └── RunnerExecutor.Execute() \u003c-- 3d\n│   │       └── runner.RunWithOptions() \u003c-- internal/execution/runner/runner.go:67\n│   │           ├── Determine distribution type \u003c-- internal/execution/runner/runner.go:84\n│   │           └── Create exec runner \u003c-- 3e\n│   │               └── execrunner.Runner.Run() \u003c-- internal/execution/runner/runner.go:93\n│   ├── Parse skill stdout output \u003c-- 3f\n│   │   └── json.Unmarshal(envelope) \u003c-- internal/hooks/skill_runner.go:101\n│   └── Extract hook decision \u003c-- 3g\n│       └── Return Output \u003c-- internal/hooks/skill_runner.go:109\n└── Returns to Dispatcher\n    └── Merge with other hook outputs \u003c-- internal/hooks/dispatcher.go:195",
+      "traceTextDiagram": "Skill-Backed Hook Execution Flow\n├── SkillRunner.Run() entry \u003c-- internal/runtime/hooks/skill_runner.go:21\n│   ├── Resolve skill manifest \u0026 binary \u003c-- 3a\n│   │   └── DefaultResolver.Resolve() \u003c-- internal/runtime/hooks/resolver.go:32\n│   │       └── skill.LoadManifest() \u003c-- internal/runtime/hooks/resolver.go:44\n│   ├── Marshal hook input to JSON \u003c-- 3b\n│   ├── Execute via SkillExecutor \u003c-- 3c\n│   │   └── RunnerExecutor.Execute() \u003c-- 3d\n│   │       └── runner.RunWithOptions() \u003c-- internal/execution/runner/runner.go:67\n│   │           ├── Determine distribution type \u003c-- internal/execution/runner/runner.go:84\n│   │           └── Create exec runner \u003c-- 3e\n│   │               └── execrunner.Runner.Run() \u003c-- internal/execution/runner/runner.go:93\n│   ├── Parse skill stdout output \u003c-- 3f\n│   │   └── json.Unmarshal(envelope) \u003c-- internal/runtime/hooks/skill_runner.go:101\n│   └── Extract hook decision \u003c-- 3g\n│       └── Return Output \u003c-- internal/runtime/hooks/skill_runner.go:109\n└── Returns to Dispatcher\n    └── Merge with other hook outputs \u003c-- internal/runtime/hooks/dispatcher.go:195",
       "traceGuide": "## Motivation\n\nHook skills are **executable programs** that run at specific lifecycle events (like before a tool executes) to observe, validate, or modify operations. The challenge is: how do you take a hook configuration that says \"run skill `hooks/file_guard` on `PreToolUse` events\", resolve that skill name to an actual binary, execute it with the right context, and parse its decision back?\n\nThe skill-backed hook execution flow solves this by providing a **complete pipeline** from skill name resolution through binary execution to structured output parsing, enabling hooks to be implemented as standalone programs in any language.\n\n## Details\n\n**Skill Resolution** [3a]: The `SkillRunner` first resolves the skill name (e.g., `\"hooks/file_guard\"`) to a manifest file and binary artifact path. The `DefaultResolver` searches the skills directory for `skill.yaml` and determines the correct binary based on the distribution type (exec vs wasi) and platform.\n\n**Input Serialization** [3b]: The hook input—containing event type, tool context, session IDs, and hook-specific config—is marshaled to JSON. This JSON becomes the skill's stdin, providing all context the skill needs to make decisions.\n\n**Execution Delegation** [3c-3e]: The `SkillRunner` delegates to the `SkillExecutor` interface, which adapts to the unified `runner.RunWithOptions` system. This system handles both native binaries (exec) and WebAssembly modules (wasi), setting up the appropriate environment variables and working directory before spawning the process.\n\n**Output Parsing** [3f-3g]: The skill's stdout is parsed as either an **envelope format** (with `hook_output` in the data field) or direct `Output` JSON. The parser extracts the decision (`approve`, `block`, or `none`), reason, context to inject, and any actions to emit. Empty output defaults to approve, and error status in envelopes is converted to errors.\n\n**Return Path**: The parsed `Output` flows back to the dispatcher, which merges it with outputs from other hooks using deterministic rules (block wins, last-wins for mutations, concatenate actions).\n\nThis architecture enables **polyglot hook development**—skills can be written in Go, Rust, Python, or any language that can read JSON from stdin and write JSON to stdout."
     },
     {
@@ -262,7 +262,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 206,
           "lineContent": "result.Output = Merge(outputs)",
           "title": "Merge outputs from all hooks",
@@ -270,7 +270,7 @@
         },
         {
           "id": "5b",
-          "path": "internal/hooks/merge.go",
+          "path": "internal/runtime/hooks/merge.go",
           "lineNumber": 40,
           "lineContent": "case DecisionBlock:",
           "title": "Track blocking decisions",
@@ -278,7 +278,7 @@
         },
         {
           "id": "5c",
-          "path": "internal/hooks/merge.go",
+          "path": "internal/runtime/hooks/merge.go",
           "lineNumber": 53,
           "lineContent": "if len(out.UpdatedToolInput) \u003e 0 {",
           "title": "Apply last-wins for tool input",
@@ -286,7 +286,7 @@
         },
         {
           "id": "5d",
-          "path": "internal/hooks/merge.go",
+          "path": "internal/runtime/hooks/merge.go",
           "lineNumber": 64,
           "lineContent": "contexts = append(contexts, out.Context)",
           "title": "Collect context strings",
@@ -294,7 +294,7 @@
         },
         {
           "id": "5e",
-          "path": "internal/hooks/merge.go",
+          "path": "internal/runtime/hooks/merge.go",
           "lineNumber": 68,
           "lineContent": "allActions = append(allActions, out.Actions...)",
           "title": "Concatenate actions in order",
@@ -302,7 +302,7 @@
         },
         {
           "id": "5f",
-          "path": "internal/hooks/merge.go",
+          "path": "internal/runtime/hooks/merge.go",
           "lineNumber": 78,
           "lineContent": "result.Context = strings.Join(contexts, \"\\n\\n\")",
           "title": "Join contexts with separator",
@@ -310,14 +310,14 @@
         },
         {
           "id": "5g",
-          "path": "internal/hooks/merge.go",
+          "path": "internal/runtime/hooks/merge.go",
           "lineNumber": 81,
           "lineContent": "if anyBlock {",
           "title": "Apply decision priority rules",
           "description": "Block wins over approve/none; approve wins over none; uses first reason for winning decision"
         }
       ],
-      "traceTextDiagram": "Hook Output Merging Flow\n└── Dispatcher.Dispatch() \u003c-- internal/hooks/dispatcher.go:122\n    ├── Execute all matching hooks \u003c-- internal/hooks/dispatcher.go:150\n    │   └── Collect outputs from each hook \u003c-- internal/hooks/dispatcher.go:195\n    └── Merge all outputs \u003c-- 5a\n        ├── Iterate through outputs \u003c-- internal/hooks/merge.go:37\n        │   ├── Track blocking decisions \u003c-- 5b\n        │   ├── Apply last-wins mutations \u003c-- 5c\n        │   ├── Collect context strings \u003c-- 5d\n        │   ├── Concatenate actions \u003c-- 5e\n        │   └── Merge metadata (last-wins) \u003c-- internal/hooks/merge.go:71\n        ├── Join contexts with separator \u003c-- 5f\n        └── Apply decision priority rules \u003c-- 5g\n            ├── Block wins over all \u003c-- internal/hooks/merge.go:81\n            ├── Approve wins over none \u003c-- internal/hooks/merge.go:84\n            └── Return merged Output \u003c-- internal/hooks/merge.go:94",
+      "traceTextDiagram": "Hook Output Merging Flow\n└── Dispatcher.Dispatch() \u003c-- internal/runtime/hooks/dispatcher.go:122\n    ├── Execute all matching hooks \u003c-- internal/runtime/hooks/dispatcher.go:150\n    │   └── Collect outputs from each hook \u003c-- internal/runtime/hooks/dispatcher.go:195\n    └── Merge all outputs \u003c-- 5a\n        ├── Iterate through outputs \u003c-- internal/runtime/hooks/merge.go:37\n        │   ├── Track blocking decisions \u003c-- 5b\n        │   ├── Apply last-wins mutations \u003c-- 5c\n        │   ├── Collect context strings \u003c-- 5d\n        │   ├── Concatenate actions \u003c-- 5e\n        │   └── Merge metadata (last-wins) \u003c-- internal/runtime/hooks/merge.go:71\n        ├── Join contexts with separator \u003c-- 5f\n        └── Apply decision priority rules \u003c-- 5g\n            ├── Block wins over all \u003c-- internal/runtime/hooks/merge.go:81\n            ├── Approve wins over none \u003c-- internal/runtime/hooks/merge.go:84\n            └── Return merged Output \u003c-- internal/runtime/hooks/merge.go:94",
       "traceGuide": "## Motivation\n\nWhen multiple hooks execute in response to a single event (e.g., PreToolUse), each hook returns its own `Output` containing a decision (approve/block/none), optional context to inject, tool input mutations, and actions to perform. The system needs **deterministic rules** to combine these potentially conflicting outputs into a single coherent result. Without proper merging, you'd have ambiguity: what happens when one hook approves and another blocks? Which context gets injected? The merge logic [5a] solves this by applying strict priority rules that ensure predictable behavior regardless of hook execution order.\n\n## Details\n\n### Decision Priority\n\nThe merge algorithm implements a **strict hierarchy** [5g]: block decisions always win, approve beats none, and none is the default. When iterating through outputs [5b], the first blocking hook's reason is captured and becomes the final reason. This ensures that **any hook can veto an operation**, which is critical for security and policy enforcement hooks like file guards or task guards.\n\n### Mutation Semantics\n\nFor fields like `UpdatedToolInput` and `UpdatedAssistantText`, the system uses **last-wins semantics** [5c]. Later hooks in execution order override earlier ones. This allows hooks to build on each other's transformations - for example, one hook might normalize a file path, and a subsequent hook might add validation parameters.\n\n### Context and Actions\n\nContext strings from all hooks are **concatenated with double newlines** [5d, 5f], preserving all information for the LLM. Actions are **concatenated in execution order** [5e], maintaining the sequence in which hooks want operations performed. Metadata uses shallow merge with last-wins per key, allowing hooks to add debugging information without conflicts.\n\n### Integration Point\n\nThe dispatcher calls `Merge(outputs)` [5a] after executing all matching hooks [2g], before returning the final `Result` to the caller. This ensures the actor or tool runner receives a single, unambiguous decision about whether to proceed, what context to inject, and what actions to execute."
     },
     {
@@ -382,7 +382,7 @@
           "description": "Wraps hooks.Output in envelope format and writes to stdout for skill runner to parse"
         }
       ],
-      "traceTextDiagram": "File Guard Hook Skill Execution Flow\n├── Skill entry point receives Input \u003c-- 6a\n│   ├── Filter: check if write operation \u003c-- 6b\n│   │   └── toolutil.IsWriteOperation() \u003c-- skills/hooks_file_guard/main.go:49\n│   ├── Extract file path from tool JSON \u003c-- 6c\n│   │   └── pathutil.ExtractPath() \u003c-- skills/hooks_file_guard/main.go:86\n│   ├── Query blackboard for conflicts \u003c-- 6d\n│   │   └── boardStore.CheckConflicts() \u003c-- skills/hooks_file_guard/main.go:110\n│   ├── Decision branch: conflict exists? \u003c-- skills/hooks_file_guard/main.go:118\n│   │   ├── YES → Block with reason \u003c-- 6e\n│   │   │   └── hooks.Output{Decision: Block} \u003c-- skills/hooks_file_guard/main.go:124\n│   │   └── NO → Create reservation \u003c-- 6f\n│   │       └── boardStore.Reserve() \u003c-- skills/hooks_file_guard/main.go:171\n│   └── Emit envelope to stdout \u003c-- 6g\n│       └── skillout.Emit() → JSON envelope \u003c-- skills/hooks_file_guard/main.go:253\n└── Skill runner parses stdout \u003c-- internal/hooks/skill_runner.go:65\n    └── Returns Output to dispatcher \u003c-- internal/hooks/skill_runner.go:75",
+      "traceTextDiagram": "File Guard Hook Skill Execution Flow\n├── Skill entry point receives Input \u003c-- 6a\n│   ├── Filter: check if write operation \u003c-- 6b\n│   │   └── toolutil.IsWriteOperation() \u003c-- skills/hooks_file_guard/main.go:49\n│   ├── Extract file path from tool JSON \u003c-- 6c\n│   │   └── pathutil.ExtractPath() \u003c-- skills/hooks_file_guard/main.go:86\n│   ├── Query blackboard for conflicts \u003c-- 6d\n│   │   └── boardStore.CheckConflicts() \u003c-- skills/hooks_file_guard/main.go:110\n│   ├── Decision branch: conflict exists? \u003c-- skills/hooks_file_guard/main.go:118\n│   │   ├── YES → Block with reason \u003c-- 6e\n│   │   │   └── hooks.Output{Decision: Block} \u003c-- skills/hooks_file_guard/main.go:124\n│   │   └── NO → Create reservation \u003c-- 6f\n│   │       └── boardStore.Reserve() \u003c-- skills/hooks_file_guard/main.go:171\n│   └── Emit envelope to stdout \u003c-- 6g\n│       └── skillout.Emit() → JSON envelope \u003c-- skills/hooks_file_guard/main.go:253\n└── Skill runner parses stdout \u003c-- internal/runtime/hooks/skill_runner.go:65\n    └── Returns Output to dispatcher \u003c-- internal/runtime/hooks/skill_runner.go:75",
       "traceGuide": "## Motivation\n\nIn multi-agent systems, **concurrent file modifications create conflicts** when multiple agents try to edit the same file simultaneously. The file guard hook skill solves this by implementing a **reservation system** that detects and prevents edit conflicts before they occur [6d]. When an agent attempts a write operation, the hook checks if another agent has reserved that file, either **blocking the operation** (strict mode) or **warning about the conflict** (advisory mode) [6e].\n\n## Details\n\n### Hook Skill Entry Point\n\nThe file guard skill is invoked as a **PreToolUse hook** whenever tools are about to execute [6a]. It receives a `hooks.Input` struct containing the event context, tool information, and session metadata.\n\n### Write Operation Filtering\n\nThe skill first filters out non-write operations using **cross-platform tool classification** [6b]. This checks tool names (like `Edit`, `Write` from Claude Code), canonical names (like `edit.apply_patch`, `fs.write_file`), and explicit tool kinds to determine if the operation modifies files.\n\n### File Path Extraction\n\nThe skill extracts the target file path from the tool's JSON input arguments [6c]. The `pathutil.ExtractPath()` function checks common field names (`file_path`, `path`, `file`, `current_path`) to handle different tool schemas.\n\n### Conflict Detection\n\nThe core logic queries the **blackboard store** to check for existing reservations [6d]. It passes the workspace ID, file path, actor ID, and reservation mode (exclusive) to `CheckConflicts()`, which returns any conflicting reservations held by other agents.\n\n### Decision Logic\n\nIf conflicts exist, the hook makes a decision based on the configured mode [6e]:\n- **Strict mode**: Returns a `DecisionBlock` output with conflict details, preventing the tool from executing\n- **Advisory mode**: Returns a `DecisionApprove` with warning context, allowing the operation but informing the agent\n\nIf no conflicts exist, the hook **creates a reservation** for the current actor [6f], claiming the file with a default 10-minute TTL and linking it to the active task.\n\n### Output Emission\n\nThe skill wraps its `hooks.Output` (containing decision, reason, context, and metadata) in an **envelope format** and writes it to stdout [6g]. The skill runner parses this JSON envelope to extract the hook output and return it to the dispatcher for merging with other hooks."
     }
   ],

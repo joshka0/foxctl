@@ -12,7 +12,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	consolepkg "github.com/jkatigb/agentctl/internal/console"
 	domainconsole "github.com/jkatigb/agentctl/internal/domain/console"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/oklog/ulid/v2"
 )
 

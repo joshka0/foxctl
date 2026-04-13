@@ -241,7 +241,7 @@ Subagent Review
 
 Subagent Review
 - reviewer: 019cbae8-dfb7-7af3-885c-f8ac07504966
-- scope: internal/observability/sse_bridge.go, internal/observability/sse_bridge_test.go, internal/interfaces/web/api/orchestration.go, internal/interfaces/web/api/orchestration_test.go, docs/observability/wide-events.md, docs/spec/v2_symphony_kanban_orchestration.md
+- scope: internal/runtime/observability/sse_bridge.go, internal/runtime/observability/sse_bridge_test.go, internal/interfaces/web/api/orchestration.go, internal/interfaces/web/api/orchestration_test.go, docs/observability/wide-events.md, docs/spec/v2_symphony_kanban_orchestration.md
 - findings: initial docs contract ambiguity and missing board-get/refresh SSE regression coverage identified; patched and re-reviewed with no remaining substantive findings
 - decision: approved
 

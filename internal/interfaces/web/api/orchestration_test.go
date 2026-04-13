@@ -20,8 +20,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
 	libsqlworkers "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/workers"

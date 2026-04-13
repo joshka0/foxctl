@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 // HandleInteraction processes Adaptive Card Action.Submit callbacks from Teams.

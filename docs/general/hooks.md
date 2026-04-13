@@ -7,7 +7,7 @@ Machine-friendly reference for hook configuration, event dispatch, and action me
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical packages | `internal/hooks/config.go`, `internal/hooks/types.go`, `internal/hooks/dispatcher.go`, `internal/hooks/merge.go`, `internal/hooks/registry.go` |
+| Canonical packages | `internal/runtime/hooks/config.go`, `internal/runtime/hooks/types.go`, `internal/runtime/hooks/dispatcher.go`, `internal/runtime/hooks/merge.go`, `internal/runtime/hooks/registry.go` |
 | Last reviewed | 2026-02-17 |
 
 ## Configuration Contract
@@ -57,7 +57,7 @@ Core fields include event identity, principal/workspace/session metadata, provid
 | `actions[]` | Ordered structured actions (`run_skill`, `inject_context`, `enqueue_context`, `send_mailbox`, `bb_post`, `bb_claim`) |
 | `meta` | Debug/observability metadata |
 
-## Merge Semantics (`internal/hooks/merge.go`)
+## Merge Semantics (`internal/runtime/hooks/merge.go`)
 
 | Rule | Behavior |
 |-----|----------|

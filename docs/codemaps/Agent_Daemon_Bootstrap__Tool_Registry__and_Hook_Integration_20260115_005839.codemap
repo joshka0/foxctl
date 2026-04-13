@@ -156,7 +156,7 @@
         },
         {
           "id": "3b",
-          "path": "internal/hooks/registry.go",
+          "path": "internal/runtime/hooks/registry.go",
           "lineNumber": 125,
           "lineContent": "func NewDispatcherWithRegistry(cfg *Config, skillsDir string) Dispatcher {",
           "title": "Dispatcher factory",
@@ -164,7 +164,7 @@
         },
         {
           "id": "3c",
-          "path": "internal/hooks/registry.go",
+          "path": "internal/runtime/hooks/registry.go",
           "lineNumber": 126,
           "lineContent": "registry := NewRegistry(cfg, RegistryOptions{",
           "title": "Hook registry creation",
@@ -172,7 +172,7 @@
         },
         {
           "id": "3d",
-          "path": "internal/hooks/registry.go",
+          "path": "internal/runtime/hooks/registry.go",
           "lineNumber": 59,
           "lineContent": "skillRunner = \u0026SkillRunner{",
           "title": "Skill runner initialization",
@@ -180,7 +180,7 @@
         },
         {
           "id": "3e",
-          "path": "internal/hooks/config.go",
+          "path": "internal/runtime/hooks/config.go",
           "lineNumber": 68,
           "lineContent": "func LoadConfig(paths ...string) (*Config, error) {",
           "title": "Config loading",
@@ -188,14 +188,14 @@
         },
         {
           "id": "3f",
-          "path": "internal/hooks/config.go",
+          "path": "internal/runtime/hooks/config.go",
           "lineNumber": 105,
           "lineContent": "merged.buildIndex()",
           "title": "Hook indexing",
           "description": "Builds event-to-hooks index for fast lookup during dispatch"
         }
       ],
-      "traceTextDiagram": "Hook System Initialization Flow\n├── CLI Command Entry\n│   └── dspy_agent.go setup\n│       └── NewDispatcherWithRegistry() call \u003c-- 3a\n│\n├── Dispatcher Factory \u003c-- 3b\n│   └── NewDispatcherWithRegistry() \u003c-- internal/hooks/registry.go:125\n│       ├── LoadConfig() from yaml files \u003c-- 3e\n│       │   └── buildIndex() for event lookup \u003c-- 3f\n│       │\n│       └── NewRegistry() creates hook registry \u003c-- 3c\n│           ├── Set up executor (RunnerExecutor) \u003c-- internal/hooks/registry.go:41\n│           ├── Set up resolver (DefaultResolver) \u003c-- internal/hooks/registry.go:47\n│           └── Create SkillRunner \u003c-- 3d\n│               ├── Executor: runs skill binaries \u003c-- internal/hooks/registry.go:60\n│               └── Resolver: finds skill manifests \u003c-- internal/hooks/registry.go:61\n│\n└── Result: Dispatcher with Registry\n    └── Returns hooks.Dispatcher interface \u003c-- internal/hooks/registry.go:129\n        └── Used in runtime config \u003c-- cmd/agentctl/cmd/dspy_agent.go:157",
+      "traceTextDiagram": "Hook System Initialization Flow\n├── CLI Command Entry\n│   └── dspy_agent.go setup\n│       └── NewDispatcherWithRegistry() call \u003c-- 3a\n│\n├── Dispatcher Factory \u003c-- 3b\n│   └── NewDispatcherWithRegistry() \u003c-- internal/runtime/hooks/registry.go:125\n│       ├── LoadConfig() from yaml files \u003c-- 3e\n│       │   └── buildIndex() for event lookup \u003c-- 3f\n│       │\n│       └── NewRegistry() creates hook registry \u003c-- 3c\n│           ├── Set up executor (RunnerExecutor) \u003c-- internal/runtime/hooks/registry.go:41\n│           ├── Set up resolver (DefaultResolver) \u003c-- internal/runtime/hooks/registry.go:47\n│           └── Create SkillRunner \u003c-- 3d\n│               ├── Executor: runs skill binaries \u003c-- internal/runtime/hooks/registry.go:60\n│               └── Resolver: finds skill manifests \u003c-- internal/runtime/hooks/registry.go:61\n│\n└── Result: Dispatcher with Registry\n    └── Returns hooks.Dispatcher interface \u003c-- internal/runtime/hooks/registry.go:129\n        └── Used in runtime config \u003c-- cmd/agentctl/cmd/dspy_agent.go:157",
       "traceGuide": "## Motivation\n\nAgent tools need **policy enforcement** before execution. When an LLM-driven agent calls a tool like `fs.read_file` or `edit.apply_patch`, you want to:\n- **Block dangerous operations** (e.g., reading sensitive files)\n- **Inject context** (e.g., add relevant documentation before a tool runs)\n- **Observe and log** tool usage for debugging and pattern learning\n- **Mutate tool inputs** (e.g., sanitize paths, add default parameters)\n\nThe hook system solves this by **intercepting tool calls** at PreToolUse and PostToolUse events, running user-defined **skills** (Go binaries or WASM modules) that return decisions (approve/block/none) and optional actions. This enables declarative policy without modifying tool implementations.\n\n## Details\n\n### Configuration and Loading\n\nHook configuration lives in `hooks.yaml` files (workspace `.agentctl/hooks.yaml` or global `~/.agentctl/hooks.yaml`). Each hook definition specifies:\n- **Event**: PreToolUse, PostToolUse, SessionStart, etc.\n- **Match criteria**: tool_name regex, path_regex, tool_kind (read/write/exec/search)\n- **Skill to run**: e.g., `hooks/path_validator` or `hooks/context_injector`\n- **Fail mode**: fail_open (errors allow operation) or fail_closed (errors block)\n\n`LoadConfig()` [3e] merges these files by hook ID, with workspace config overriding global. `buildIndex()` [3f] creates an event-to-hooks map for O(1) lookup during dispatch.\n\n### Dispatcher Creation\n\n`NewDispatcherWithRegistry()` [3a, 3b] is the factory function called during daemon/runtime initialization. It:\n1. Creates a **Registry** [3c] that manages hook runners\n2. Initializes a **DefaultResolver** [3d] pointing to `~/.agentctl/skills/` to find skill manifests and binaries\n3. Creates a **SkillRunner** [3d] with an executor (runs binaries) and resolver (finds them)\n4. Returns a `Dispatcher` interface that the tool registry uses\n\nThe resolver uses the skills directory structure: `skills/hooks/path_validator/skill.yaml` + `skills/hooks/path_validator/bin` (or `bin-cgo`, `bin.wasm`).\n\n### Integration with Tool Registry\n\nWhen tools are registered [2b], they're wrapped with `wrapWithTelemetry()` which calls `dispatchPreToolUse()` [4b] before execution. The dispatcher:\n1. Looks up hooks for the PreToolUse event\n2. Filters by matchers (e.g., `tool_canonical: \"fs\\\\..*\"` matches all filesystem tools)\n3. Runs each matching skill via `SkillRunner.Run()` [5c]\n4. Merges outputs using **last-wins** for mutations (if multiple hooks set `updated_tool_input`, the last one wins)\n5. Returns block decision if any hook blocked\n\nSkills receive hook input as JSON on stdin (includes `tool_name`, `tool_input`, `session_id`, `workspace_root`) and return hook output as JSON on stdout (includes `decision`, `reason`, `updated_tool_input`, `actions`).\n\n### Execution Path\n\nThe execution chain is:\n- **Dispatcher** → filters and orchestrates\n- **SkillRunner** [3d] → resolves skill name to binary path\n- **RunnerExecutor** → adapts to runner framework\n- **exec/wasi runner** [6d] → actually runs the binary with proper environment (AGENTCTL_SESSION_ID, etc.)\n\nThis layered design allows hooks to be **portable Go binaries or WASM modules** that work identically whether called from the daemon, runtime, or actor system."
     },
     {
@@ -270,7 +270,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 122,
           "lineContent": "func (d *dispatcher) Dispatch(ctx context.Context, input Input) (Result, error) {",
           "title": "Dispatch entry",
@@ -278,7 +278,7 @@
         },
         {
           "id": "5b",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 138,
           "lineContent": "if h.Enabled \u0026\u0026 MatchesInput(h, input) {",
           "title": "Hook matching",
@@ -286,7 +286,7 @@
         },
         {
           "id": "5c",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 170,
           "lineContent": "output, err := d.runner.Run(hookCtx, entryHook, hookInput)",
           "title": "Hook runner invocation",
@@ -294,7 +294,7 @@
         },
         {
           "id": "5d",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 30,
           "lineContent": "manifest, artifactPath, err := r.Resolver.Resolve(entry.Skill)",
           "title": "Skill resolution",
@@ -302,7 +302,7 @@
         },
         {
           "id": "5e",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 49,
           "lineContent": "result, err := r.Executor.Execute(ctx, execution.ExecuteOptions{",
           "title": "Skill execution",
@@ -310,7 +310,7 @@
         },
         {
           "id": "5f",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 65,
           "lineContent": "output, err := parseSkillOutput(result.Stdout)",
           "title": "Output parsing",
@@ -318,14 +318,14 @@
         },
         {
           "id": "5g",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 206,
           "lineContent": "result.Output = Merge(outputs)",
           "title": "Output merging",
           "description": "Merges outputs from all hooks using last-wins for mutations"
         }
       ],
-      "traceTextDiagram": "Hook Dispatch to Skill Execution Pipeline\n├── Dispatcher.Dispatch() entry \u003c-- 5a\n│   ├── Find hooks for event \u003c-- internal/hooks/dispatcher.go:129\n│   ├── Filter by matchers \u003c-- 5b\n│   │   └── MatchesInput(hook, input) \u003c-- internal/hooks/dispatcher.go:230\n│   └── For each matching hook \u003c-- internal/hooks/dispatcher.go:150\n│       ├── Create timeout context \u003c-- internal/hooks/dispatcher.go:167\n│       ├── runner.Run() \u003c-- 5c\n│       │   └── SkillRunner.Run() \u003c-- internal/hooks/skill_runner.go:21\n│       │       ├── Resolver.Resolve(skill) \u003c-- 5d\n│       │       │   └── Find manifest + binary \u003c-- internal/hooks/resolver.go:44\n│       │       ├── Marshal hook input to JSON \u003c-- internal/hooks/skill_runner.go:40\n│       │       ├── Executor.Execute() \u003c-- 5e\n│       │       │   └── RunnerExecutor \u003c-- internal/execution/runner_adapter.go:21\n│       │       │       └── runner.RunWithOptions() \u003c-- internal/execution/runner_adapter.go:28\n│       │       │           └── exec/wasi.Run() \u003c-- internal/execution/runner/runner.go:93\n│       │       └── parseSkillOutput() \u003c-- 5f\n│       │           └── Parse envelope JSON \u003c-- internal/hooks/skill_runner.go:101\n│       └── Collect hook outputs \u003c-- internal/hooks/dispatcher.go:195\n└── Merge(outputs) \u003c-- 5g\n    └── Return merged Result \u003c-- internal/hooks/dispatcher.go:210",
+      "traceTextDiagram": "Hook Dispatch to Skill Execution Pipeline\n├── Dispatcher.Dispatch() entry \u003c-- 5a\n│   ├── Find hooks for event \u003c-- internal/runtime/hooks/dispatcher.go:129\n│   ├── Filter by matchers \u003c-- 5b\n│   │   └── MatchesInput(hook, input) \u003c-- internal/runtime/hooks/dispatcher.go:230\n│   └── For each matching hook \u003c-- internal/runtime/hooks/dispatcher.go:150\n│       ├── Create timeout context \u003c-- internal/runtime/hooks/dispatcher.go:167\n│       ├── runner.Run() \u003c-- 5c\n│       │   └── SkillRunner.Run() \u003c-- internal/runtime/hooks/skill_runner.go:21\n│       │       ├── Resolver.Resolve(skill) \u003c-- 5d\n│       │       │   └── Find manifest + binary \u003c-- internal/runtime/hooks/resolver.go:44\n│       │       ├── Marshal hook input to JSON \u003c-- internal/runtime/hooks/skill_runner.go:40\n│       │       ├── Executor.Execute() \u003c-- 5e\n│       │       │   └── RunnerExecutor \u003c-- internal/execution/runner_adapter.go:21\n│       │       │       └── runner.RunWithOptions() \u003c-- internal/execution/runner_adapter.go:28\n│       │       │           └── exec/wasi.Run() \u003c-- internal/execution/runner/runner.go:93\n│       │       └── parseSkillOutput() \u003c-- 5f\n│       │           └── Parse envelope JSON \u003c-- internal/runtime/hooks/skill_runner.go:101\n│       └── Collect hook outputs \u003c-- internal/runtime/hooks/dispatcher.go:195\n└── Merge(outputs) \u003c-- 5g\n    └── Return merged Result \u003c-- internal/runtime/hooks/dispatcher.go:210",
       "traceGuide": "## Motivation\n\nWhen an LLM-driven agent calls a tool (like reading a file or searching code), you need a way to **intercept that call** to enforce policies, inject context, or observe behavior. The hook dispatch system solves this by allowing **skills to run before and after every tool execution** [5a], implementing a middleware pattern where hooks can block, mutate, or observe tool calls without modifying the tools themselves.\n\nFor example, a hook might block file writes to sensitive paths, inject relevant documentation before a code search, or log all tool usage for debugging. These hooks are **configured declaratively in YAML** and executed as separate skill binaries, keeping policy logic decoupled from the agent runtime.\n\n## Details\n\n### Hook Configuration and Indexing\n\nHooks are defined in `hooks.yaml` files that specify which events to listen for (PreToolUse, PostToolUse, etc.) and optional matchers like `tool_name` regex or `path_regex` patterns. At startup, the system loads these configs and **builds an event-to-hooks index** for fast lookup during dispatch [5a].\n\n### Dispatch Flow\n\nWhen a tool is about to execute, the dispatcher:\n\n1. **Looks up matching hooks** for the event (e.g., PreToolUse) using the pre-built index\n2. **Filters by matchers** - checking if the hook's regex patterns match the tool name, file paths in arguments, etc. [5b]\n3. **Executes each matching hook sequentially** with a timeout context [5c]\n\n### Skill Resolution and Execution\n\nEach hook references a skill by name (e.g., `\"hooks/task_guard\"`). The **resolver translates this to a manifest and binary path** in the skills directory [5d], supporting both native executables and WASM modules.\n\nThe **executor runs the skill binary** [5e], passing hook input (event type, tool name, arguments, session context) as JSON on stdin. Skills are isolated processes that can't directly affect the agent - they only return decisions via stdout.\n\n### Output Parsing and Merging\n\nThe skill's stdout is **parsed as an envelope containing a hook Output** [5f] with a decision (`approve`, `block`, or `none`), optional context to inject, and actions to enqueue. \n\nWhen multiple hooks run for the same event, their outputs are **merged using last-wins semantics** [5g] - the final hook's mutations override earlier ones, but all actions are concatenated. A single `block` decision blocks the entire operation.\n\n### Integration Points\n\nThis system integrates at the tool wrapper layer - every tool registered with the agent is wrapped to dispatch PreToolUse before execution and PostToolUse after, making hook interception **transparent to both the LLM and the tool implementations**."
     },
     {

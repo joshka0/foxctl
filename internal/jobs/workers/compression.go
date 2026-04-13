@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )

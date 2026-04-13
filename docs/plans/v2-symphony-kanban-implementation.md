@@ -201,7 +201,7 @@ Goal:
 
 Primary files:
 
-1. `internal/observability/sse_bridge.go` (orchestration operation pass-through + curated fields)
+1. `internal/runtime/observability/sse_bridge.go` (orchestration operation pass-through + curated fields)
 2. `docs/observability/wide-events.md` (orchestration event fields)
 3. `docs/spec/v2_symphony_kanban_orchestration.md` (final contract alignment)
 4. `docs/plans/v2-implementation-todo.md` (close checklist items)

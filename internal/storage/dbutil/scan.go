@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 )
 
 // ScanTimestamps scans multiple RFC3339Nano timestamp strings from a row.

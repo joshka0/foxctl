@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/hooks"
-	"github.com/jkatigb/agentctl/internal/hooks/lifecycle"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
 )
 
 type Dependencies struct {

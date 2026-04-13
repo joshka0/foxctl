@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/hooks/lifecycle"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
 	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
 )
 

@@ -161,7 +161,7 @@ principal := identity.Principal{
 - `HandleMessage` extracts Principal from event and stores it in context via `identity.WithPrincipal`
 - Uses `principal.ConversationKey(evt.ChannelID)` as the channel sessions map key
 
-### `internal/hooks/types.go`
+### `internal/runtime/hooks/types.go`
 
 Add to `Input`:
 ```go

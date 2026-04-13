@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/observability"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/storage/jobs"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/executor"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/persist"
