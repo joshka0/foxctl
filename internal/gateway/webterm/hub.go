@@ -31,12 +31,14 @@ type Hub struct {
 	log    zerolog.Logger
 }
 
-var startTmuxAttach = StartTmuxAttach
-var closePTYProcess = func(p *PTYProcess) {
-	if p != nil {
-		p.Close()
+var (
+	startTmuxAttach = StartTmuxAttach
+	closePTYProcess = func(p *PTYProcess) {
+		if p != nil {
+			p.Close()
+		}
 	}
-}
+)
 
 // NewHub creates a new web terminal hub.
 func NewHub(config HubConfig, log zerolog.Logger) *Hub {
