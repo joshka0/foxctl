@@ -1,2 +1,3 @@
-// Package skilltest provides test utilities for skill tests.
+// Package skilltest provides reusable test utilities for skills. It belongs to
+// the generic skillslib tooling-support family.
 package skilltest

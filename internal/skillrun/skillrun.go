@@ -1,3 +1,6 @@
+// Package skillrun provides generic skill resolution, execution, and envelope
+// decoding helpers. It belongs to the reusable tooling family rather than to
+// runtime-facing agent tooling.
 package skillrun
 
 import (

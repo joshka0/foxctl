@@ -1,7 +1,7 @@
-// Package obs provides observability helpers for skills.
-// It wraps internal/observability to provide a clean abstraction layer,
-// allowing skills to emit wide events without importing internal packages directly.
-// It also tracks LLM token usage and costs for skill telemetry.
+// Package obs provides reusable observability helpers for skills. It belongs to
+// the generic skillslib tooling-support family while wrapping
+// internal/observability to keep skill code runtime-neutral. It also tracks
+// LLM token usage and costs for skill telemetry.
 //
 // Usage:
 //
