@@ -8,6 +8,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/companion"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
 )
 
@@ -138,7 +139,7 @@ func RunSingleInsight(ctx context.Context, opts SingleRunOptions) (SingleRunResu
 		return SingleRunResult{}, err
 	}
 
-	cacheStore, cacheRoot, err := OpenTranscriptCacheStore(ctx, opts.StorageRoot)
+	cacheStore, cacheRoot, err := transcriptcache.OpenShared(ctx, opts.StorageRoot)
 	if err != nil {
 		return SingleRunResult{}, err
 	}
@@ -191,7 +192,7 @@ func RunSingleInsight(ctx context.Context, opts SingleRunOptions) (SingleRunResu
 
 // RunGroupedInsight orchestrates a lightweight grouped decision-support pass.
 func RunGroupedInsight(ctx context.Context, opts GroupRunOptions) (GroupRunResult, error) {
-	cacheStore, cacheRoot, err := OpenTranscriptCacheStore(ctx, opts.StorageRoot)
+	cacheStore, cacheRoot, err := transcriptcache.OpenShared(ctx, opts.StorageRoot)
 	if err != nil {
 		return GroupRunResult{}, err
 	}
@@ -299,7 +300,7 @@ func RunSingleDoctrine(ctx context.Context, opts SingleRunOptions) (SingleRunRes
 		return SingleRunResult{}, err
 	}
 
-	cacheStore, cacheRoot, err := OpenTranscriptCacheStore(ctx, opts.StorageRoot)
+	cacheStore, cacheRoot, err := transcriptcache.OpenShared(ctx, opts.StorageRoot)
 	if err != nil {
 		return SingleRunResult{}, err
 	}
@@ -382,7 +383,7 @@ func RunSingleDoctrine(ctx context.Context, opts SingleRunOptions) (SingleRunRes
 
 // RunGroupedDoctrine orchestrates the lighter grouped doctrine-only path.
 func RunGroupedDoctrine(ctx context.Context, opts GroupRunOptions) (GroupRunResult, error) {
-	cacheStore, cacheRoot, err := OpenTranscriptCacheStore(ctx, opts.StorageRoot)
+	cacheStore, cacheRoot, err := transcriptcache.OpenShared(ctx, opts.StorageRoot)
 	if err != nil {
 		return GroupRunResult{}, err
 	}
@@ -510,7 +511,7 @@ func RunSingle(ctx context.Context, opts SingleRunOptions) (SingleRunResult, err
 		return SingleRunResult{}, err
 	}
 
-	cacheStore, cacheRoot, err := OpenTranscriptCacheStore(ctx, opts.StorageRoot)
+	cacheStore, cacheRoot, err := transcriptcache.OpenShared(ctx, opts.StorageRoot)
 	if err != nil {
 		return SingleRunResult{}, err
 	}
@@ -593,7 +594,7 @@ func RunSingle(ctx context.Context, opts SingleRunOptions) (SingleRunResult, err
 
 // RunGrouped orchestrates one full grouped transcript derivation pipeline run.
 func RunGrouped(ctx context.Context, opts GroupRunOptions) (GroupRunResult, error) {
-	cacheStore, cacheRoot, err := OpenTranscriptCacheStore(ctx, opts.StorageRoot)
+	cacheStore, cacheRoot, err := transcriptcache.OpenShared(ctx, opts.StorageRoot)
 	if err != nil {
 		return GroupRunResult{}, err
 	}

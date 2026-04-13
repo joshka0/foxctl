@@ -7,19 +7,6 @@ import (
 	"testing"
 )
 
-func TestTranscriptCacheRoots_PrefersConfiguredStorageRoot(t *testing.T) {
-	got := transcriptCacheRoots("/tmp/storage", "/tmp/home")
-	if len(got) != 2 {
-		t.Fatalf("roots=%v want 2 entries", got)
-	}
-	if got[0] != "/tmp/storage" {
-		t.Fatalf("roots[0]=%q want %q", got[0], "/tmp/storage")
-	}
-	if got[1] != "/tmp/home/.codex/memories/agentctl-transcript-cache" {
-		t.Fatalf("roots[1]=%q want fallback codex cache path", got[1])
-	}
-}
-
 func TestResolveAndParseTranscript_RejectsInvalidProvider(t *testing.T) {
 	_, err := ResolveAndParseTranscript("bogus", "", "", "", "actor:system:test")
 	if err == nil {

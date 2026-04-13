@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
+	tphistory "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
 func TestDeterministicTranscriptFamilyOverview_PrefersRecentOwners(t *testing.T) {
@@ -23,7 +23,7 @@ func TestDeterministicTranscriptFamilyOverview_PrefersRecentOwners(t *testing.T)
 			{
 				OwnerPrefix: "transcript-history:older:",
 				UpdatedAt:   now.Add(-45 * 24 * time.Hour),
-				Pack: &transcriptpipeline.HistoryPack{
+				Pack: &tphistory.HistoryPack{
 					CurrentObjective:  "Compare branch changes with main and adjust code.",
 					ObjectiveLabel:    "compare changes",
 					ContinueWith:      []string{"guard the unguarded"},
@@ -35,7 +35,7 @@ func TestDeterministicTranscriptFamilyOverview_PrefersRecentOwners(t *testing.T)
 			{
 				OwnerPrefix: "transcript-history:newer:",
 				UpdatedAt:   now,
-				Pack: &transcriptpipeline.HistoryPack{
+				Pack: &tphistory.HistoryPack{
 					CurrentObjective:  "Complete backend integration tasks while updating the plan.",
 					ObjectiveLabel:    "complete backend tasks",
 					ContinueWith:      []string{"finalize integration checks"},
@@ -80,7 +80,7 @@ func TestRefineTranscriptFamilyOverview_PreservesDeterministicRecencyOrdering(t 
 		{
 			OwnerPrefix: "transcript-history:newer:",
 			UpdatedAt:   now,
-			Pack: &transcriptpipeline.HistoryPack{
+			Pack: &tphistory.HistoryPack{
 				CurrentObjective:  "Complete backend integration tasks while updating the plan.",
 				ObjectiveLabel:    "complete backend tasks",
 				ContinueWith:      []string{"finalize integration checks"},
@@ -90,7 +90,7 @@ func TestRefineTranscriptFamilyOverview_PreservesDeterministicRecencyOrdering(t 
 		{
 			OwnerPrefix: "transcript-history:older:",
 			UpdatedAt:   now.Add(-30 * 24 * time.Hour),
-			Pack: &transcriptpipeline.HistoryPack{
+			Pack: &tphistory.HistoryPack{
 				CurrentObjective:  "Compare branch changes with main and adjust code.",
 				ObjectiveLabel:    "compare changes",
 				ContinueWith:      []string{"guard the unguarded"},
@@ -112,18 +112,18 @@ func TestRefineTranscriptFamilyOverview_PreservesDeterministicRecencyOrdering(t 
 	}
 
 	collector := Collector{
-		TranscriptWorker: &transcriptpipeline.WorkerConfig{Provider: "lmstudio", Model: "test"},
-		TranscriptRun: func(_ context.Context, _ transcriptpipeline.WorkerConfig, task transcriptpipeline.Task) (transcriptpipeline.Result, error) {
-			switch task.InputKind {
+		TranscriptWorker: &TranscriptSummaryWorker{Provider: "lmstudio", Model: "test"},
+		TranscriptRun: func(_ context.Context, _ TranscriptSummaryWorker, req TranscriptSummaryRequest) (TranscriptSummaryResponse, error) {
+			switch req.InputKind {
 			case "transcript_family_overview":
-				return transcriptpipeline.Result{
+				return TranscriptSummaryResponse{
 					ModelID:    "test:model",
 					OutputText: `{"current_focus":["compare changes"],"next_work":["guard the unguarded"],"top_learnings":["the reflections mismatch came from divergent empty-state handling."],"brief":"Current focus: compare changes\nNext work: guard the unguarded"}`,
 				}, nil
 			case "transcript_family_overview_lists":
-				return transcriptpipeline.Result{}, fmt.Errorf("skip cleanup for this regression")
+				return TranscriptSummaryResponse{}, fmt.Errorf("skip cleanup for this regression")
 			default:
-				return transcriptpipeline.Result{}, fmt.Errorf("unexpected input kind %q", task.InputKind)
+				return TranscriptSummaryResponse{}, fmt.Errorf("unexpected input kind %q", req.InputKind)
 			}
 		},
 	}
@@ -151,7 +151,7 @@ func TestRefineTranscriptFamilyOverview_ReplacesLowerPriorityDeterministicItems(
 		{
 			OwnerPrefix: "transcript-history:newer:",
 			UpdatedAt:   now,
-			Pack: &transcriptpipeline.HistoryPack{
+			Pack: &tphistory.HistoryPack{
 				CurrentObjective: "Complete backend integration tasks while updating the plan.",
 				ObjectiveLabel:   "complete backend tasks",
 				ContinueWith: []string{
@@ -164,7 +164,7 @@ func TestRefineTranscriptFamilyOverview_ReplacesLowerPriorityDeterministicItems(
 		{
 			OwnerPrefix: "transcript-history:older:",
 			UpdatedAt:   now.Add(-30 * 24 * time.Hour),
-			Pack: &transcriptpipeline.HistoryPack{
+			Pack: &tphistory.HistoryPack{
 				CurrentObjective: "Make our app production ready.",
 				ObjectiveLabel:   "make our app production ready",
 				ContinueWith:     []string{"guard the unguarded"},
@@ -185,18 +185,18 @@ func TestRefineTranscriptFamilyOverview_ReplacesLowerPriorityDeterministicItems(
 	}
 
 	collector := Collector{
-		TranscriptWorker: &transcriptpipeline.WorkerConfig{Provider: "lmstudio", Model: "test"},
-		TranscriptRun: func(_ context.Context, _ transcriptpipeline.WorkerConfig, task transcriptpipeline.Task) (transcriptpipeline.Result, error) {
-			switch task.InputKind {
+		TranscriptWorker: &TranscriptSummaryWorker{Provider: "lmstudio", Model: "test"},
+		TranscriptRun: func(_ context.Context, _ TranscriptSummaryWorker, req TranscriptSummaryRequest) (TranscriptSummaryResponse, error) {
+			switch req.InputKind {
 			case "transcript_family_overview":
-				return transcriptpipeline.Result{
+				return TranscriptSummaryResponse{
 					ModelID:    "test:model",
 					OutputText: `{"next_work":["Production readiness hardening"],"current_focus":["Complete backend tasks","Production readiness hardening"]}`,
 				}, nil
 			case "transcript_family_overview_lists":
-				return transcriptpipeline.Result{}, fmt.Errorf("skip cleanup for this regression")
+				return TranscriptSummaryResponse{}, fmt.Errorf("skip cleanup for this regression")
 			default:
-				return transcriptpipeline.Result{}, fmt.Errorf("unexpected input kind %q", task.InputKind)
+				return TranscriptSummaryResponse{}, fmt.Errorf("unexpected input kind %q", req.InputKind)
 			}
 		},
 	}
@@ -232,7 +232,7 @@ func TestDeterministicTranscriptFamilyOverview_PrefersSupportedThemesOverOneOffs
 			{
 				OwnerPrefix: "transcript-history:newest:",
 				UpdatedAt:   now,
-				Pack: &transcriptpipeline.HistoryPack{
+				Pack: &tphistory.HistoryPack{
 					ObjectiveLabel:    "complete backend tasks",
 					AcceptedLearnings: []string{"instrument the feature-flag audit trail before rollout."},
 				},
@@ -240,7 +240,7 @@ func TestDeterministicTranscriptFamilyOverview_PrefersSupportedThemesOverOneOffs
 			{
 				OwnerPrefix: "transcript-history:recent-a:",
 				UpdatedAt:   now.Add(-7 * 24 * time.Hour),
-				Pack: &transcriptpipeline.HistoryPack{
+				Pack: &tphistory.HistoryPack{
 					ObjectiveLabel:    "complete backend tasks",
 					AcceptedLearnings: []string{"non-presence hooks are real instead of client-only scaffolds."},
 				},
@@ -248,7 +248,7 @@ func TestDeterministicTranscriptFamilyOverview_PrefersSupportedThemesOverOneOffs
 			{
 				OwnerPrefix: "transcript-history:recent-b:",
 				UpdatedAt:   now.Add(-10 * 24 * time.Hour),
-				Pack: &transcriptpipeline.HistoryPack{
+				Pack: &tphistory.HistoryPack{
 					ObjectiveLabel:    "map frontend architecture",
 					AcceptedLearnings: []string{"non-presence hooks are real instead of client-only scaffolds."},
 				},
@@ -279,7 +279,7 @@ func TestDeterministicTranscriptFamilyOverview_CollectsRecurringLearningsAcrossO
 			{
 				OwnerPrefix: "transcript-history:a:",
 				UpdatedAt:   now,
-				Pack: &transcriptpipeline.HistoryPack{
+				Pack: &tphistory.HistoryPack{
 					ObjectiveLabel:    "complete backend tasks",
 					AcceptedLearnings: []string{"non-presence hooks are real instead of client-only scaffolds."},
 				},
@@ -287,7 +287,7 @@ func TestDeterministicTranscriptFamilyOverview_CollectsRecurringLearningsAcrossO
 			{
 				OwnerPrefix: "transcript-history:b:",
 				UpdatedAt:   now.Add(-5 * 24 * time.Hour),
-				Pack: &transcriptpipeline.HistoryPack{
+				Pack: &tphistory.HistoryPack{
 					ObjectiveLabel:    "production readiness hardening",
 					AcceptedLearnings: []string{"non-presence hooks are real instead of client-only scaffolds."},
 				},
@@ -313,7 +313,7 @@ func TestBuildTranscriptFamilyOverviewArtifact_IncludesSupportHints(t *testing.T
 		{
 			OwnerPrefix: "transcript-history:a:",
 			UpdatedAt:   now,
-			Pack: &transcriptpipeline.HistoryPack{
+			Pack: &tphistory.HistoryPack{
 				ObjectiveLabel:    "complete backend tasks",
 				AcceptedLearnings: []string{"non-presence hooks are real instead of client-only scaffolds."},
 				ContinueWith:      []string{"finalize integration checks"},
@@ -322,7 +322,7 @@ func TestBuildTranscriptFamilyOverviewArtifact_IncludesSupportHints(t *testing.T
 		{
 			OwnerPrefix: "transcript-history:b:",
 			UpdatedAt:   now.Add(-24 * time.Hour),
-			Pack: &transcriptpipeline.HistoryPack{
+			Pack: &tphistory.HistoryPack{
 				ObjectiveLabel:    "map frontend architecture",
 				AcceptedLearnings: []string{"non-presence hooks are real instead of client-only scaffolds."},
 				ContinueWith:      []string{"finalize integration checks"},
@@ -348,7 +348,7 @@ func TestBuildTranscriptFamilySupportMetadata_IncludesOwnerCountAndRecency(t *te
 		{
 			OwnerPrefix: "transcript-history:a:",
 			UpdatedAt:   now,
-			Pack: &transcriptpipeline.HistoryPack{
+			Pack: &tphistory.HistoryPack{
 				ObjectiveLabel:    "complete backend tasks",
 				AcceptedLearnings: []string{"non-presence hooks are real instead of client-only scaffolds."},
 				ContinueWith:      []string{"finalize integration checks"},
@@ -357,7 +357,7 @@ func TestBuildTranscriptFamilySupportMetadata_IncludesOwnerCountAndRecency(t *te
 		{
 			OwnerPrefix: "transcript-history:b:",
 			UpdatedAt:   now.Add(-48 * time.Hour),
-			Pack: &transcriptpipeline.HistoryPack{
+			Pack: &tphistory.HistoryPack{
 				ObjectiveLabel:    "production readiness hardening",
 				AcceptedLearnings: []string{"non-presence hooks function as real backend components."},
 				ContinueWith:      []string{"finalize integration checks"},
@@ -417,12 +417,12 @@ func TestCleanupTranscriptFamilyOverview_CleansLowerSignalListTail(t *testing.T)
 		TopLearnings: []string{"non-presence hooks are real instead of client-only scaffolds."},
 	}
 	collector := Collector{
-		TranscriptWorker: &transcriptpipeline.WorkerConfig{Provider: "lmstudio", Model: "test"},
-		TranscriptRun: func(_ context.Context, _ transcriptpipeline.WorkerConfig, task transcriptpipeline.Task) (transcriptpipeline.Result, error) {
-			if task.InputKind != "transcript_family_overview_lists" {
-				return transcriptpipeline.Result{}, fmt.Errorf("unexpected input kind %q", task.InputKind)
+		TranscriptWorker: &TranscriptSummaryWorker{Provider: "lmstudio", Model: "test"},
+		TranscriptRun: func(_ context.Context, _ TranscriptSummaryWorker, req TranscriptSummaryRequest) (TranscriptSummaryResponse, error) {
+			if req.InputKind != "transcript_family_overview_lists" {
+				return TranscriptSummaryResponse{}, fmt.Errorf("unexpected input kind %q", req.InputKind)
 			}
-			return transcriptpipeline.Result{
+			return TranscriptSummaryResponse{
 				ModelID:    "test:cleanup",
 				OutputText: `{"current_focus":["complete backend tasks","production readiness hardening"],"recent_changes":["Anonymous guest sessions are now wired back into the canonical app."],"next_work":["map the current rebuilt frontend architecture to these Paper target surfaces","production readiness hardening"],"brief":"Current focus: complete backend tasks | production readiness hardening\nNext work: map the current rebuilt frontend architecture to these Paper target surfaces | production readiness hardening"}`,
 			}, nil

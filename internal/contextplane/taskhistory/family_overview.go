@@ -10,7 +10,7 @@ import (
 
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
+	tphistory "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
 type TranscriptFamilyOverview struct {
@@ -53,7 +53,7 @@ type TranscriptFamilySupportMetadata struct {
 type transcriptOwnerSummary struct {
 	OwnerPrefix string
 	UpdatedAt   time.Time
-	Pack        *transcriptpipeline.HistoryPack
+	Pack        *tphistory.HistoryPack
 	Support     transcriptSupportBundle
 	SourceNames []string
 }
@@ -346,11 +346,11 @@ func (c Collector) recentTranscriptOwnerPrefixes(ctx context.Context, workspaceP
 }
 
 func (c Collector) buildTranscriptOwnerSummary(ctx context.Context, workspacePath, familyPath, ownerPrefix string, scope TranscriptHistoryScope, dateRange TranscriptHistoryDateRange) (transcriptOwnerSummary, bool) {
-	answerEntries := c.ownerHistoryEntries(ctx, workspacePath, familyPath, []string{"history_answer"}, ownerPrefix, scope, len(transcriptpipeline.DefaultHistoryProfile().Questions)+4, dateRange)
+	answerEntries := c.ownerHistoryEntries(ctx, workspacePath, familyPath, []string{"history_answer"}, ownerPrefix, scope, len(tphistory.DefaultHistoryProfile().Questions)+4, dateRange)
 	if len(answerEntries) == 0 {
 		return transcriptOwnerSummary{}, false
 	}
-	answers := make([]transcriptpipeline.HistoryAnswer, 0, len(answerEntries))
+	answers := make([]tphistory.HistoryAnswer, 0, len(answerEntries))
 	sourceNames := make([]string, 0, len(answerEntries))
 	updatedAt := transcriptHistoryEntryTime(answerEntries[0])
 	for _, entry := range answerEntries {
@@ -364,7 +364,7 @@ func (c Collector) buildTranscriptOwnerSummary(ctx context.Context, workspacePat
 			updatedAt = entryTime
 		}
 	}
-	pack := transcriptpipeline.BuildHistoryPack(answers)
+	pack := tphistory.BuildHistoryPack(answers)
 	if pack == nil {
 		return transcriptOwnerSummary{}, false
 	}
@@ -471,10 +471,9 @@ func (c Collector) refineTranscriptFamilyOverview(ctx context.Context, summaries
 	}
 	run := c.TranscriptRun
 	if run == nil {
-		run = transcriptpipeline.RunLLMTask
+		run = defaultTranscriptSummaryRun
 	}
-	result, err := run(ctx, *c.TranscriptWorker, transcriptpipeline.Task{
-		Stage:         transcriptpipeline.StageReview,
+	result, err := run(ctx, *c.TranscriptWorker, TranscriptSummaryRequest{
 		InputKind:     "transcript_family_overview",
 		PromptVersion: "transcript_family_overview_v3",
 		SystemPrompt:  transcriptFamilyOverviewPromptV3,
@@ -539,10 +538,9 @@ func (c Collector) cleanupTranscriptFamilyOverview(ctx context.Context, overview
 	}
 	run := c.TranscriptRun
 	if run == nil {
-		run = transcriptpipeline.RunLLMTask
+		run = defaultTranscriptSummaryRun
 	}
-	result, err := run(ctx, *c.TranscriptWorker, transcriptpipeline.Task{
-		Stage:         transcriptpipeline.StageReview,
+	result, err := run(ctx, *c.TranscriptWorker, TranscriptSummaryRequest{
 		InputKind:     "transcript_family_overview_lists",
 		PromptVersion: "transcript_family_overview_lists_v1",
 		SystemPrompt:  transcriptFamilyOverviewListCleanupPromptV1,

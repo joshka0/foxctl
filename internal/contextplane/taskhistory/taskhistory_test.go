@@ -19,6 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
+	tphistory "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
 type fakeGitRunner struct {
@@ -230,12 +231,12 @@ func TestCollectorCollectIncludesTranscriptHistory(t *testing.T) {
 	}
 	defer memStore.Close()
 
-	answers := []transcriptpipeline.HistoryAnswer{
-		{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Use transcript continuity as the agent handoff layer.", Confidence: 0.8},
-		{QuestionID: transcriptpipeline.HistoryQuestionActiveDirections, Answer: "Inject history_pack.agent_brief into task continuity.", Confidence: 0.74},
-		{QuestionID: transcriptpipeline.HistoryQuestionNextStep, Answer: "Use the transcript handoff in task-history-summary.", Confidence: 0.72},
+	answers := []tphistory.HistoryAnswer{
+		{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Use transcript continuity as the agent handoff layer.", Confidence: 0.8},
+		{QuestionID: tphistory.HistoryQuestionActiveDirections, Answer: "Inject history_pack.agent_brief into task continuity.", Confidence: 0.74},
+		{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Use the transcript handoff in task-history-summary.", Confidence: 0.72},
 	}
-	records := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 		ConversationID: "conv-task-history",
 		SessionIDs:     []string{"sess-history"},
 	}, []transcriptpipeline.DecisionInsight{
@@ -272,12 +273,12 @@ func TestCollectorCollectIncludesTranscriptHistory(t *testing.T) {
 	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-history", "sess-history", records, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords: %v", err)
 	}
-	unrelated := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	unrelated := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 		ConversationID: "conv-other",
 		SessionIDs:     []string{"sess-other"},
-	}, nil, nil, []transcriptpipeline.HistoryAnswer{
-		{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Close the release gate verdict for the mobile app.", Confidence: 0.8},
-		{QuestionID: transcriptpipeline.HistoryQuestionNextStep, Answer: "Finish the release checklist.", Confidence: 0.72},
+	}, nil, nil, []tphistory.HistoryAnswer{
+		{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Close the release gate verdict for the mobile app.", Confidence: 0.8},
+		{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Finish the release checklist.", Confidence: 0.72},
 	})
 	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-other", "sess-other", unrelated, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords(unrelated): %v", err)
@@ -378,21 +379,21 @@ func TestCollectorCollectFallsBackToLatestTranscriptHistoryWithinScope(t *testin
 		t.Fatalf("open memory: %v", err)
 	}
 	defer memStore.Close()
-	records := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 		ConversationID: "conv-family-fallback",
 		SessionIDs:     []string{"sess-family-fallback"},
-	}, nil, nil, []transcriptpipeline.HistoryAnswer{
-		{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Map the rebuilt frontend architecture to the target surfaces.", Confidence: 0.8},
-		{QuestionID: transcriptpipeline.HistoryQuestionActiveDirections, Answer: "Compare the rebuilt surfaces against the target destinations.", Confidence: 0.74},
-		{QuestionID: transcriptpipeline.HistoryQuestionOpenQuestions, Answer: "Do the rebuilt destinations preserve the intended user journey?", Confidence: 0.7},
-		{QuestionID: transcriptpipeline.HistoryQuestionMisunderstandings, Answer: "We initially treated scaffolds as finished destinations.", Confidence: 0.82},
-		{QuestionID: transcriptpipeline.HistoryQuestionGotchas, Answer: "Path-heavy guidance can bury the actual architectural gap.", Confidence: 0.78},
-		{QuestionID: transcriptpipeline.HistoryQuestionRegressions, Answer: "Surface reviews can regress into implementation chatter.", Confidence: 0.72},
-		{QuestionID: transcriptpipeline.HistoryQuestionRecurringMistakes, Answer: "Treating scaffolds as finished destinations.", Confidence: 0.7},
-		{QuestionID: transcriptpipeline.HistoryQuestionSurprises, Answer: "The rebuilt data boundaries were better than expected.", Confidence: 0.8},
-		{QuestionID: transcriptpipeline.HistoryQuestionEpisodicHistory, Answer: "We mapped the rebuilt frontend to the Paper targets.", Confidence: 0.66},
-		{QuestionID: transcriptpipeline.HistoryQuestionNextStep, Answer: "Carry the structural gap forward into the next compare pass.", Confidence: 0.72},
-		{QuestionID: transcriptpipeline.HistoryQuestionAcceptedLearnings, Answer: "Most surfaces are still first-pass renderers over rebuilt endpoints rather than polished destination experiences.", Confidence: 0.8},
+	}, nil, nil, []tphistory.HistoryAnswer{
+		{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Map the rebuilt frontend architecture to the target surfaces.", Confidence: 0.8},
+		{QuestionID: tphistory.HistoryQuestionActiveDirections, Answer: "Compare the rebuilt surfaces against the target destinations.", Confidence: 0.74},
+		{QuestionID: tphistory.HistoryQuestionOpenQuestions, Answer: "Do the rebuilt destinations preserve the intended user journey?", Confidence: 0.7},
+		{QuestionID: tphistory.HistoryQuestionMisunderstandings, Answer: "We initially treated scaffolds as finished destinations.", Confidence: 0.82},
+		{QuestionID: tphistory.HistoryQuestionGotchas, Answer: "Path-heavy guidance can bury the actual architectural gap.", Confidence: 0.78},
+		{QuestionID: tphistory.HistoryQuestionRegressions, Answer: "Surface reviews can regress into implementation chatter.", Confidence: 0.72},
+		{QuestionID: tphistory.HistoryQuestionRecurringMistakes, Answer: "Treating scaffolds as finished destinations.", Confidence: 0.7},
+		{QuestionID: tphistory.HistoryQuestionSurprises, Answer: "The rebuilt data boundaries were better than expected.", Confidence: 0.8},
+		{QuestionID: tphistory.HistoryQuestionEpisodicHistory, Answer: "We mapped the rebuilt frontend to the Paper targets.", Confidence: 0.66},
+		{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Carry the structural gap forward into the next compare pass.", Confidence: 0.72},
+		{QuestionID: tphistory.HistoryQuestionAcceptedLearnings, Answer: "Most surfaces are still first-pass renderers over rebuilt endpoints rather than polished destination experiences.", Confidence: 0.8},
 	})
 	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, mainRepo, "sess-family-fallback", "sess-family-fallback", records, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords: %v", err)
@@ -471,12 +472,12 @@ func TestCollectorCollectAggregatesRecurringMistakesAcrossOwners(t *testing.T) {
 	}
 	defer memStore.Close()
 	for _, owner := range []string{"sess-a", "sess-b"} {
-		records := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 			ConversationID: "conv-" + owner,
 			SessionIDs:     []string{owner},
-		}, nil, nil, []transcriptpipeline.HistoryAnswer{
-			{QuestionID: transcriptpipeline.HistoryQuestionRegressions, Answer: "Sandbox denied while checking git state.", Confidence: 0.72},
-			{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Some task objective.", Confidence: 0.8},
+		}, nil, nil, []tphistory.HistoryAnswer{
+			{QuestionID: tphistory.HistoryQuestionRegressions, Answer: "Sandbox denied while checking git state.", Confidence: 0.72},
+			{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Some task objective.", Confidence: 0.8},
 		})
 		if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, mainRepo, owner, owner, records, nil); err != nil {
 			t.Fatalf("PersistHistoryRecords(%s): %v", owner, err)
@@ -537,12 +538,12 @@ func TestCollectTranscriptRecurringLearningsAcrossOwners(t *testing.T) {
 		"sess-b": "Non-presence hooks function as real backend components. | Guard unguarded components.",
 	}
 	for owner, learning := range fixtures {
-		records := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 			ConversationID: "conv-" + owner,
 			SessionIDs:     []string{owner},
-		}, nil, nil, []transcriptpipeline.HistoryAnswer{
-			{QuestionID: transcriptpipeline.HistoryQuestionAcceptedLearnings, Answer: learning, Confidence: 0.8},
-			{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Some task objective.", Confidence: 0.8},
+		}, nil, nil, []tphistory.HistoryAnswer{
+			{QuestionID: tphistory.HistoryQuestionAcceptedLearnings, Answer: learning, Confidence: 0.8},
+			{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Some task objective.", Confidence: 0.8},
 		})
 		if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, mainRepo, owner, owner, records, nil); err != nil {
 			t.Fatalf("PersistHistoryRecords(%s): %v", owner, err)
@@ -573,14 +574,14 @@ func TestSearchTranscriptHistoryAnswers_UsesRetrievalTextLexically(t *testing.T)
 	}
 	defer memStore.Close()
 
-	answers := []transcriptpipeline.HistoryAnswer{
+	answers := []tphistory.HistoryAnswer{
 		{
-			QuestionID: transcriptpipeline.HistoryQuestionNextStep,
+			QuestionID: tphistory.HistoryQuestionNextStep,
 			Answer:     "Persist history records for retrieval.",
 			Confidence: 0.72,
 		},
 	}
-	records := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 		ConversationID: "conv-lexical",
 		SessionIDs:     []string{"sess-lexical"},
 	}, nil, nil, answers)
@@ -609,20 +610,20 @@ func TestSearchTranscriptHistoryAnswers_ReturnsFullOwnerAnswerBundle(t *testing.
 	}
 	defer memStore.Close()
 
-	answers := []transcriptpipeline.HistoryAnswer{
-		{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Map the rebuilt frontend architecture to the target surfaces.", Confidence: 0.8},
-		{QuestionID: transcriptpipeline.HistoryQuestionActiveDirections, Answer: "Compare rebuilt surfaces to destination-quality targets.", Confidence: 0.74},
-		{QuestionID: transcriptpipeline.HistoryQuestionOpenQuestions, Answer: "Which surfaces still feel scaffold-like?", Confidence: 0.7},
-		{QuestionID: transcriptpipeline.HistoryQuestionMisunderstandings, Answer: "We initially treated scaffolds as finished destinations.", Confidence: 0.82},
-		{QuestionID: transcriptpipeline.HistoryQuestionGotchas, Answer: "Path-heavy guidance can bury the actual architectural gap.", Confidence: 0.78},
-		{QuestionID: transcriptpipeline.HistoryQuestionRegressions, Answer: "Surface reviews can regress into implementation chatter.", Confidence: 0.72},
-		{QuestionID: transcriptpipeline.HistoryQuestionRecurringMistakes, Answer: "Treating scaffolds as finished destinations.", Confidence: 0.7},
-		{QuestionID: transcriptpipeline.HistoryQuestionSurprises, Answer: "The rebuilt data boundaries were better than expected.", Confidence: 0.8},
-		{QuestionID: transcriptpipeline.HistoryQuestionEpisodicHistory, Answer: "We mapped the rebuilt frontend to the Paper targets.", Confidence: 0.66},
-		{QuestionID: transcriptpipeline.HistoryQuestionNextStep, Answer: "Carry the structural gap into the next compare pass.", Confidence: 0.72},
-		{QuestionID: transcriptpipeline.HistoryQuestionAcceptedLearnings, Answer: "Most surfaces are still first-pass renderers over rebuilt endpoints rather than polished destination experiences.", Confidence: 0.8},
+	answers := []tphistory.HistoryAnswer{
+		{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Map the rebuilt frontend architecture to the target surfaces.", Confidence: 0.8},
+		{QuestionID: tphistory.HistoryQuestionActiveDirections, Answer: "Compare rebuilt surfaces to destination-quality targets.", Confidence: 0.74},
+		{QuestionID: tphistory.HistoryQuestionOpenQuestions, Answer: "Which surfaces still feel scaffold-like?", Confidence: 0.7},
+		{QuestionID: tphistory.HistoryQuestionMisunderstandings, Answer: "We initially treated scaffolds as finished destinations.", Confidence: 0.82},
+		{QuestionID: tphistory.HistoryQuestionGotchas, Answer: "Path-heavy guidance can bury the actual architectural gap.", Confidence: 0.78},
+		{QuestionID: tphistory.HistoryQuestionRegressions, Answer: "Surface reviews can regress into implementation chatter.", Confidence: 0.72},
+		{QuestionID: tphistory.HistoryQuestionRecurringMistakes, Answer: "Treating scaffolds as finished destinations.", Confidence: 0.7},
+		{QuestionID: tphistory.HistoryQuestionSurprises, Answer: "The rebuilt data boundaries were better than expected.", Confidence: 0.8},
+		{QuestionID: tphistory.HistoryQuestionEpisodicHistory, Answer: "We mapped the rebuilt frontend to the Paper targets.", Confidence: 0.66},
+		{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Carry the structural gap into the next compare pass.", Confidence: 0.72},
+		{QuestionID: tphistory.HistoryQuestionAcceptedLearnings, Answer: "Most surfaces are still first-pass renderers over rebuilt endpoints rather than polished destination experiences.", Confidence: 0.8},
 	}
-	records := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 		ConversationID: "conv-owner-bundle",
 		SessionIDs:     []string{"sess-owner-bundle"},
 	}, nil, nil, answers)
@@ -641,7 +642,7 @@ func TestSearchTranscriptHistoryAnswers_ReturnsFullOwnerAnswerBundle(t *testing.
 		if !ok {
 			continue
 		}
-		if answer.QuestionID == transcriptpipeline.HistoryQuestionAcceptedLearnings {
+		if answer.QuestionID == tphistory.HistoryQuestionAcceptedLearnings {
 			foundLearning = true
 			break
 		}
@@ -675,11 +676,11 @@ func TestSearchTranscriptHistoryAnswers_ScopeControlsWorkspaceVsFamily(t *testin
 	}
 	defer memStore.Close()
 
-	records := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 		ConversationID: "conv-family",
 		SessionIDs:     []string{"sess-family"},
-	}, nil, nil, []transcriptpipeline.HistoryAnswer{{
-		QuestionID: transcriptpipeline.HistoryQuestionNextStep,
+	}, nil, nil, []tphistory.HistoryAnswer{{
+		QuestionID: tphistory.HistoryQuestionNextStep,
 		Answer:     "Persist history records for retrieval.",
 		Confidence: 0.72,
 	}})
@@ -815,7 +816,7 @@ func TestCollectorCollectUsesTranscriptWorkerForRetrievedBrief(t *testing.T) {
 	}
 	defer memStore.Close()
 
-	records := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 		ConversationID: "conv-worker",
 		SessionIDs:     []string{"sess-worker"},
 	}, []transcriptpipeline.DecisionInsight{
@@ -827,8 +828,8 @@ func TestCollectorCollectUsesTranscriptWorkerForRetrievedBrief(t *testing.T) {
 			SourceBasis:          "user",
 			EvidenceFrameIndices: []int{2},
 		},
-	}, nil, []transcriptpipeline.HistoryAnswer{
-		{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Use transcript continuity.", Label: "use transcript continuity", Confidence: 0.8},
+	}, nil, []tphistory.HistoryAnswer{
+		{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Use transcript continuity.", Label: "use transcript continuity", Confidence: 0.8},
 	})
 	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-worker", "sess-worker", records, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords: %v", err)
@@ -838,15 +839,15 @@ func TestCollectorCollectUsesTranscriptWorkerForRetrievedBrief(t *testing.T) {
 		WorkspaceStore: wsStore,
 		TaskStore:      taskDB,
 		MemoryStore:    memStore,
-		TranscriptWorker: &transcriptpipeline.WorkerConfig{
+		TranscriptWorker: &TranscriptSummaryWorker{
 			Provider: "lmstudio",
 			Model:    transcriptpipeline.DefaultDoctrineBridgeModel,
 		},
-		TranscriptRun: func(_ context.Context, _ transcriptpipeline.WorkerConfig, task transcriptpipeline.Task) (transcriptpipeline.Result, error) {
-			if task.InputKind != "transcript_history_retrieved_bundle" {
-				return transcriptpipeline.Result{}, fmt.Errorf("unexpected input kind %q", task.InputKind)
+		TranscriptRun: func(_ context.Context, _ TranscriptSummaryWorker, req TranscriptSummaryRequest) (TranscriptSummaryResponse, error) {
+			if req.InputKind != "transcript_history_retrieved_bundle" {
+				return TranscriptSummaryResponse{}, fmt.Errorf("unexpected input kind %q", req.InputKind)
 			}
-			return transcriptpipeline.Result{
+			return TranscriptSummaryResponse{
 				ModelID:    "test:worker",
 				OutputText: `{"continue_with":["carry the retrieved transcript bundle"],"recent_learnings":["use typed history records"],"brief":"Continue with: carry the retrieved transcript bundle\nLearned: use typed history records"}`,
 			}, nil
@@ -901,29 +902,29 @@ func TestCollectTranscriptFamilyOverview_AggregatesRecentOwners(t *testing.T) {
 	for _, fixture := range []struct {
 		owner     string
 		workspace string
-		answers   []transcriptpipeline.HistoryAnswer
+		answers   []tphistory.HistoryAnswer
 	}{
 		{
 			owner:     "sess-main",
 			workspace: mainRepo,
-			answers: []transcriptpipeline.HistoryAnswer{
-				{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Compare branch changes with main and adjust code.", Label: "compare changes", Confidence: 0.8},
-				{QuestionID: transcriptpipeline.HistoryQuestionRegressions, Answer: "exec_command sandbox denied", Confidence: 0.72},
+			answers: []tphistory.HistoryAnswer{
+				{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Compare branch changes with main and adjust code.", Label: "compare changes", Confidence: 0.8},
+				{QuestionID: tphistory.HistoryQuestionRegressions, Answer: "exec_command sandbox denied", Confidence: 0.72},
 			},
 		},
 		{
 			owner:     "sess-compare",
 			workspace: worktree,
-			answers: []transcriptpipeline.HistoryAnswer{
-				{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Complete backend integration tasks.", Label: "complete backend tasks", Confidence: 0.8},
-				{QuestionID: transcriptpipeline.HistoryQuestionAcceptedLearnings, Answer: "non-presence hooks are real instead of client-only scaffolds.", Confidence: 0.8},
-				{QuestionID: transcriptpipeline.HistoryQuestionNextStep, Answer: "finalize integration checks", Confidence: 0.72},
-				{QuestionID: transcriptpipeline.HistoryQuestionSurprises, Answer: "split socket targets", Confidence: 0.8},
-				{QuestionID: transcriptpipeline.HistoryQuestionRegressions, Answer: "exec_command sandbox denied", Confidence: 0.72},
+			answers: []tphistory.HistoryAnswer{
+				{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Complete backend integration tasks.", Label: "complete backend tasks", Confidence: 0.8},
+				{QuestionID: tphistory.HistoryQuestionAcceptedLearnings, Answer: "non-presence hooks are real instead of client-only scaffolds.", Confidence: 0.8},
+				{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "finalize integration checks", Confidence: 0.72},
+				{QuestionID: tphistory.HistoryQuestionSurprises, Answer: "split socket targets", Confidence: 0.8},
+				{QuestionID: tphistory.HistoryQuestionRegressions, Answer: "exec_command sandbox denied", Confidence: 0.72},
 			},
 		},
 	} {
-		records := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 			ConversationID: "conv-" + fixture.owner,
 			SessionIDs:     []string{fixture.owner},
 		}, nil, nil, fixture.answers)
@@ -981,27 +982,27 @@ func TestCollectTranscriptFamilyOverview_FocusQuerySelectsMatchingLane(t *testin
 
 	fixtures := []struct {
 		owner   string
-		answers []transcriptpipeline.HistoryAnswer
+		answers []tphistory.HistoryAnswer
 	}{
 		{
 			owner: "sess-memory",
-			answers: []transcriptpipeline.HistoryAnswer{
-				{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Implement transcript-derived recursive memory consolidation.", Label: "recursive memory consolidation", Confidence: 0.8},
-				{QuestionID: transcriptpipeline.HistoryQuestionAcceptedLearnings, Answer: "Use a second-pass consolidation layer over the existing hybrid companion runtime.", Confidence: 0.8},
-				{QuestionID: transcriptpipeline.HistoryQuestionNextStep, Answer: "Wire grouped transcript consensus into durable consolidation.", Confidence: 0.72},
+			answers: []tphistory.HistoryAnswer{
+				{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Implement transcript-derived recursive memory consolidation.", Label: "recursive memory consolidation", Confidence: 0.8},
+				{QuestionID: tphistory.HistoryQuestionAcceptedLearnings, Answer: "Use a second-pass consolidation layer over the existing hybrid companion runtime.", Confidence: 0.8},
+				{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Wire grouped transcript consensus into durable consolidation.", Confidence: 0.72},
 			},
 		},
 		{
 			owner: "sess-aca",
-			answers: []transcriptpipeline.HistoryAnswer{
-				{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Install ACA hooks into workspace Claude settings.", Label: "aca hooks install", Confidence: 0.8},
-				{QuestionID: transcriptpipeline.HistoryQuestionAcceptedLearnings, Answer: "Documentation alignment with official Obsidian CLI syntax matters.", Confidence: 0.8},
-				{QuestionID: transcriptpipeline.HistoryQuestionNextStep, Answer: "Document the hook wiring and Obsidian authoring flow.", Confidence: 0.72},
+			answers: []tphistory.HistoryAnswer{
+				{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Install ACA hooks into workspace Claude settings.", Label: "aca hooks install", Confidence: 0.8},
+				{QuestionID: tphistory.HistoryQuestionAcceptedLearnings, Answer: "Documentation alignment with official Obsidian CLI syntax matters.", Confidence: 0.8},
+				{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Document the hook wiring and Obsidian authoring flow.", Confidence: 0.72},
 			},
 		},
 	}
 	for _, fixture := range fixtures {
-		records := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 			ConversationID: "conv-" + fixture.owner,
 			SessionIDs:     []string{fixture.owner},
 		}, nil, nil, fixture.answers)
@@ -1054,10 +1055,10 @@ func TestCollectTranscriptFamilyOverview_DateRangeFiltersOwners(t *testing.T) {
 	}
 	defer memStore.Close()
 
-	newAnswers := []transcriptpipeline.HistoryAnswer{
-		{QuestionID: transcriptpipeline.HistoryQuestionObjective, Answer: "Implement transcript-derived recursive memory consolidation.", Label: "recursive memory consolidation", Confidence: 0.8},
+	newAnswers := []tphistory.HistoryAnswer{
+		{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Implement transcript-derived recursive memory consolidation.", Label: "recursive memory consolidation", Confidence: 0.8},
 	}
-	newRecords := transcriptpipeline.BuildHistoryRecords(transcriptpipeline.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	newRecords := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
 		ConversationID: "conv-new",
 		SessionIDs:     []string{"sess-new"},
 	}, nil, nil, newAnswers)

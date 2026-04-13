@@ -71,7 +71,7 @@ func OpenCollector(ctx context.Context, storageRoot, workspacePath, vaultPath st
 	}
 
 	var semanticProvider semantic.EmbeddingProvider
-	var transcriptWorker *transcriptpipeline.WorkerConfig
+	var transcriptWorker *TranscriptSummaryWorker
 	if cfg, ok := platformcfg.FromContext(ctx); ok {
 		if provider, err := semantic.NewProviderForScope(semantic.ScopeMemory, cfg); err == nil {
 			semanticProvider = provider
@@ -92,7 +92,7 @@ func OpenCollector(ctx context.Context, storageRoot, workspacePath, vaultPath st
 	}, cleanup, nil
 }
 
-func TranscriptSummaryWorkerConfig(cfg platformcfg.Config, providerOverride, modelOverride string) *transcriptpipeline.WorkerConfig {
+func TranscriptSummaryWorkerConfig(cfg platformcfg.Config, providerOverride, modelOverride string) *TranscriptSummaryWorker {
 	provider := strings.ToLower(strings.TrimSpace(providerOverride))
 	if provider == "" {
 		provider = strings.ToLower(strings.TrimSpace(os.Getenv("AGENTCTL_TRANSCRIPT_SUMMARY_PROVIDER")))
@@ -113,7 +113,7 @@ func TranscriptSummaryWorkerConfig(cfg platformcfg.Config, providerOverride, mod
 	if model == "" {
 		model = llmproviders.DefaultModelForProvider(provider)
 	}
-	return &transcriptpipeline.WorkerConfig{
+	runConfig := transcriptpipeline.WorkerConfig{
 		Provider:         provider,
 		APIKey:           strings.TrimSpace(cfg.LLM.ResolveAPIKey(provider)),
 		AuthMode:         strings.TrimSpace(cfg.LLM.ResolveAuthMode(provider)),
@@ -123,6 +123,11 @@ func TranscriptSummaryWorkerConfig(cfg platformcfg.Config, providerOverride, mod
 		BaseURL:          cfg.LLM.ResolveBaseURL(provider),
 		MaxContextTokens: transcriptpipeline.DefaultMaxContextTokens,
 		Timeout:          20 * time.Second,
+	}
+	return &TranscriptSummaryWorker{
+		Provider:  provider,
+		Model:     model,
+		runConfig: runConfig,
 	}
 }
 

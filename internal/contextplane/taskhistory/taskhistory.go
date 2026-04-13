@@ -22,6 +22,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
+	tphistory "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
 type SessionSource interface {
@@ -151,8 +152,8 @@ type Collector struct {
 	RepoStore        *repoindex.Store
 	VaultIndex       obsidianindex.Store
 	SemanticProvider semantic.EmbeddingProvider
-	TranscriptWorker *transcriptpipeline.WorkerConfig
-	TranscriptRun    func(context.Context, transcriptpipeline.WorkerConfig, transcriptpipeline.Task) (transcriptpipeline.Result, error)
+	TranscriptWorker *TranscriptSummaryWorker
+	TranscriptRun    TranscriptSummaryRunFunc
 	GitRunner        GitRunner
 }
 
@@ -611,7 +612,7 @@ func (c Collector) collectTranscriptHistory(ctx context.Context, workspacePath, 
 	if len(entries) == 0 {
 		return nil, nil
 	}
-	answers := make([]transcriptpipeline.HistoryAnswer, 0, len(entries))
+	answers := make([]tphistory.HistoryAnswer, 0, len(entries))
 	sourceNames := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		answer, ok := historyAnswerFromMemoryEntry(entry)
@@ -621,7 +622,7 @@ func (c Collector) collectTranscriptHistory(ctx context.Context, workspacePath, 
 		answers = append(answers, answer)
 		sourceNames = append(sourceNames, entry.Name)
 	}
-	pack := transcriptpipeline.BuildHistoryPack(answers)
+	pack := tphistory.BuildHistoryPack(answers)
 	if pack == nil {
 		return nil, nil
 	}
@@ -833,7 +834,7 @@ func (c Collector) searchTranscriptHistoryAnswers(ctx context.Context, workspace
 		return ranked[i].prefix < ranked[j].prefix
 	})
 	ownerLimit := limit
-	if profileLimit := len(transcriptpipeline.DefaultHistoryProfile().Questions) + 4; profileLimit > ownerLimit {
+	if profileLimit := len(tphistory.DefaultHistoryProfile().Questions) + 4; profileLimit > ownerLimit {
 		ownerLimit = profileLimit
 	}
 	return c.ownerHistoryEntries(ctx, workspacePath, familyPath, []string{"history_answer"}, ranked[0].prefix, scope, ownerLimit, TranscriptHistoryDateRange{})
@@ -859,7 +860,7 @@ func (c Collector) latestTranscriptHistoryAnswers(ctx context.Context, workspace
 			continue
 		}
 		ownerLimit := limit
-		if profileLimit := len(transcriptpipeline.DefaultHistoryProfile().Questions) + 4; profileLimit > ownerLimit {
+		if profileLimit := len(tphistory.DefaultHistoryProfile().Questions) + 4; profileLimit > ownerLimit {
 			ownerLimit = profileLimit
 		}
 		return c.ownerHistoryEntries(ctx, workspacePath, familyPath, []string{"history_answer"}, ownerPrefix, scope, ownerLimit, TranscriptHistoryDateRange{})
@@ -924,15 +925,15 @@ func (c Collector) collectTranscriptRetrievedBundle(ctx context.Context, workspa
 				continue
 			}
 			switch answer.QuestionID {
-			case transcriptpipeline.HistoryQuestionActiveDirections, transcriptpipeline.HistoryQuestionNextStep:
+			case tphistory.HistoryQuestionActiveDirections, tphistory.HistoryQuestionNextStep:
 				bundle.continueWith = appendUniqueLocalStrings(bundle.continueWith, splitTranscriptAnswerItems(answer.Answer), 4)
-			case transcriptpipeline.HistoryQuestionAcceptedLearnings:
+			case tphistory.HistoryQuestionAcceptedLearnings:
 				bundle.recentLearnings = appendUniqueLocalStrings(bundle.recentLearnings, splitTranscriptAnswerItems(answer.Answer), 3)
-			case transcriptpipeline.HistoryQuestionGotchas, transcriptpipeline.HistoryQuestionRegressions, transcriptpipeline.HistoryQuestionRecurringMistakes, transcriptpipeline.HistoryQuestionMisunderstandings:
+			case tphistory.HistoryQuestionGotchas, tphistory.HistoryQuestionRegressions, tphistory.HistoryQuestionRecurringMistakes, tphistory.HistoryQuestionMisunderstandings:
 				bundle.watchOutFor = appendUniqueLocalStrings(bundle.watchOutFor, splitTranscriptAnswerItems(answer.Answer), 4)
-			case transcriptpipeline.HistoryQuestionSurprises:
+			case tphistory.HistoryQuestionSurprises:
 				bundle.recentSurprises = appendUniqueLocalStrings(bundle.recentSurprises, splitTranscriptAnswerItems(answer.Answer), 3)
-			case transcriptpipeline.HistoryQuestionEpisodicHistory:
+			case tphistory.HistoryQuestionEpisodicHistory:
 				bundle.highlights = appendUniqueLocalStrings(bundle.highlights, splitTranscriptAnswerItems(answer.Answer), 3)
 			}
 			bundle.evidenceRefs = appendUniqueLocalStrings(bundle.evidenceRefs, answer.Evidence, 8)
@@ -1075,10 +1076,9 @@ func (c Collector) refineTranscriptRetrievedBundle(ctx context.Context, query st
 	}
 	run := c.TranscriptRun
 	if run == nil {
-		run = transcriptpipeline.RunLLMTask
+		run = defaultTranscriptSummaryRun
 	}
-	result, err := run(ctx, *c.TranscriptWorker, transcriptpipeline.Task{
-		Stage:         transcriptpipeline.StageReview,
+	result, err := run(ctx, *c.TranscriptWorker, TranscriptSummaryRequest{
 		InputKind:     "transcript_history_retrieved_bundle",
 		PromptVersion: "transcript_history_retrieved_summary_v1",
 		SystemPrompt:  transcriptRetrievedSummaryPromptV1,
@@ -1649,7 +1649,7 @@ func recurringMistakeSummariesFromEntry(entry storage.NamedEntry) []string {
 			return nil
 		}
 		switch answer.QuestionID {
-		case transcriptpipeline.HistoryQuestionGotchas, transcriptpipeline.HistoryQuestionRegressions, transcriptpipeline.HistoryQuestionRecurringMistakes, transcriptpipeline.HistoryQuestionMisunderstandings:
+		case tphistory.HistoryQuestionGotchas, tphistory.HistoryQuestionRegressions, tphistory.HistoryQuestionRecurringMistakes, tphistory.HistoryQuestionMisunderstandings:
 			return splitTranscriptAnswerItems(answer.Answer)
 		default:
 			return nil
@@ -1684,7 +1684,7 @@ func recurringLearningSummariesFromEntry(entry storage.NamedEntry) []string {
 		if !ok {
 			return nil
 		}
-		if answer.QuestionID == transcriptpipeline.HistoryQuestionAcceptedLearnings {
+		if answer.QuestionID == tphistory.HistoryQuestionAcceptedLearnings {
 			return splitTranscriptAnswerItems(answer.Answer)
 		}
 	case "history_notable":
@@ -1750,28 +1750,28 @@ func summarizePack(pack Pack) string {
 	return strings.Join(parts, " | ")
 }
 
-func historyAnswerFromMemoryEntry(entry storage.NamedEntry) (transcriptpipeline.HistoryAnswer, bool) {
+func historyAnswerFromMemoryEntry(entry storage.NamedEntry) (tphistory.HistoryAnswer, bool) {
 	var payload struct {
-		QuestionID transcriptpipeline.HistoryQuestionID `json:"history_question_id"`
-		Summary    string                               `json:"summary"`
-		Label      string                               `json:"answer_label"`
-		Confidence float64                              `json:"confidence"`
-		Evidence   []string                             `json:"evidence_refs"`
+		QuestionID tphistory.HistoryQuestionID `json:"history_question_id"`
+		Summary    string                      `json:"summary"`
+		Label      string                      `json:"answer_label"`
+		Confidence float64                     `json:"confidence"`
+		Evidence   []string                    `json:"evidence_refs"`
 	}
 	if err := json.Unmarshal(entry.Result, &payload); err != nil {
-		return transcriptpipeline.HistoryAnswer{}, false
+		return tphistory.HistoryAnswer{}, false
 	}
 	if strings.TrimSpace(string(payload.QuestionID)) == "" {
-		return transcriptpipeline.HistoryAnswer{}, false
+		return tphistory.HistoryAnswer{}, false
 	}
 	answer := strings.TrimSpace(payload.Summary)
 	if answer == "" {
 		answer = strings.TrimSpace(entry.Summary)
 	}
 	if answer == "" {
-		return transcriptpipeline.HistoryAnswer{}, false
+		return tphistory.HistoryAnswer{}, false
 	}
-	return transcriptpipeline.HistoryAnswer{
+	return tphistory.HistoryAnswer{
 		QuestionID: payload.QuestionID,
 		Answer:     answer,
 		Label:      strings.TrimSpace(payload.Label),
@@ -2012,21 +2012,21 @@ func transcriptRecordEntryWeight(entry storage.NamedEntry) float64 {
 	}
 }
 
-func transcriptAnswerWeight(answer transcriptpipeline.HistoryAnswer) float64 {
+func transcriptAnswerWeight(answer tphistory.HistoryAnswer) float64 {
 	switch answer.QuestionID {
-	case transcriptpipeline.HistoryQuestionObjective:
+	case tphistory.HistoryQuestionObjective:
 		return 42
-	case transcriptpipeline.HistoryQuestionActiveDirections:
+	case tphistory.HistoryQuestionActiveDirections:
 		return 40
-	case transcriptpipeline.HistoryQuestionAcceptedLearnings:
+	case tphistory.HistoryQuestionAcceptedLearnings:
 		return 38
-	case transcriptpipeline.HistoryQuestionNextStep:
+	case tphistory.HistoryQuestionNextStep:
 		return 36
-	case transcriptpipeline.HistoryQuestionGotchas, transcriptpipeline.HistoryQuestionRegressions, transcriptpipeline.HistoryQuestionRecurringMistakes, transcriptpipeline.HistoryQuestionMisunderstandings:
+	case tphistory.HistoryQuestionGotchas, tphistory.HistoryQuestionRegressions, tphistory.HistoryQuestionRecurringMistakes, tphistory.HistoryQuestionMisunderstandings:
 		return 34
-	case transcriptpipeline.HistoryQuestionSurprises:
+	case tphistory.HistoryQuestionSurprises:
 		return 32
-	case transcriptpipeline.HistoryQuestionEpisodicHistory:
+	case tphistory.HistoryQuestionEpisodicHistory:
 		return 24
 	default:
 		return 26

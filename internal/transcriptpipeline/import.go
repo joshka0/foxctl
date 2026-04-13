@@ -1,42 +1,15 @@
 package transcriptpipeline
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
 	"github.com/jkatigb/agentctl/internal/sessionkit/codexjsonl"
-	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
 )
-
-// OpenTranscriptCacheStore opens the shared transcript cache under the configured
-// storage root, falling back to the historical Codex cache path when needed.
-func OpenTranscriptCacheStore(ctx context.Context, storageRoot string) (*transcriptcache.Store, string, error) {
-	homeDir := ""
-	if home, err := os.UserHomeDir(); err == nil {
-		homeDir = home
-	}
-	candidates := transcriptCacheRoots(storageRoot, homeDir)
-
-	var errs []string
-	for _, root := range candidates {
-		if err := os.MkdirAll(root, 0o755); err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", root, err))
-			continue
-		}
-		store, err := transcriptcache.Open(ctx, root)
-		if err == nil {
-			return store, root, nil
-		}
-		errs = append(errs, fmt.Sprintf("%s: %v", root, err))
-	}
-	return nil, "", fmt.Errorf("open transcript cache store: %s", strings.Join(errs, " | "))
-}
 
 // ResolveAndParseTranscript resolves one source session path and parses it.
 func ResolveAndParseTranscript(provider, sourceFile, sessionID, workspace, actorID string) (sourceimport.ParsedSession, error) {
@@ -141,17 +114,6 @@ func LoadSourceBundles(sourceFiles []string, actorID, workspaceHint string) ([]S
 		})
 	}
 	return bundles, nil
-}
-
-func transcriptCacheRoots(storageRoot, homeDir string) []string {
-	candidates := make([]string, 0, 2)
-	if root := strings.TrimSpace(storageRoot); root != "" {
-		candidates = append(candidates, root)
-	}
-	if home := strings.TrimSpace(homeDir); home != "" {
-		candidates = append(candidates, filepath.Join(home, ".codex", "memories", "agentctl-transcript-cache"))
-	}
-	return candidates
 }
 
 func backfillParsedSessionWorkspace(parsed sourceimport.ParsedSession, sourcePath, workspaceHint string) sourceimport.ParsedSession {
