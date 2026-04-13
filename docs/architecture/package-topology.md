@@ -209,7 +209,7 @@ entrypoints:
 | Package | Current responsibility | Most important coupling points |
 |------|-------------------------|--------------------------------|
 | `internal/runtime/terminal/agentpane` | Owns pane-scoped PTY wrappers, submit-mode rendering, unix-socket delivery, and mux-agnostic watch-pane allocation | Calls `tmuxbridge.CreatePane` and `zellijbridge.CreatePane`; persists transport metadata and submit behavior for room delivery |
-| `internal/tmuxbridge` | Implements tmux pane/session creation, pane labeling, pane send/submit behavior, and tmux-specific presentation/runtime helpers | Used by `agentpane`; also remains the tmux execution surface that gateway terminal flows ultimately attach to |
+| `internal/runtime/terminal/tmuxbridge` | Implements tmux pane/session creation, pane labeling, pane send/submit behavior, and tmux-specific presentation/runtime helpers | Used by `agentpane`; also remains the tmux execution surface that gateway terminal flows ultimately attach to |
 | `internal/runtime/terminal/zellijbridge` | Implements zellij pane creation and submit behavior for named panes | Used by `agentpane` as the zellij backend for the same pane-allocation contract |
 | `internal/gateway/webterm` | Exposes browser terminal access as one shared WebSocket-to-PTY room, backed by `tmux new -A -s <session>` | Registered by `gateway.Server`; starts tmux-backed PTYs per room and multiplexes multiple web clients onto one room session |
 | `internal/gateway/sshterm` | Exposes SSH terminal access for the same room model, authenticated through Tailscale WhoIs | Registered by `gateway.Server`; resolves room IDs to tmux session names and opens interactive SSH sessions against those tmux rooms |
@@ -246,7 +246,7 @@ That means the target logical split is:
 | Concern | Target family owner | Current anchor |
 |------|----------------------|----------------|
 | pane/session lifecycle, submit behavior, room terminal binding, mux-neutral terminal contract | runtime/terminal | `internal/runtime/terminal/agentpane` plus `internal/runtime/terminal` |
-| tmux backend implementation | runtime/terminal backend adapter | `internal/tmuxbridge` |
+| tmux backend implementation | runtime/terminal backend adapter | `internal/runtime/terminal/tmuxbridge` |
 | zellij backend implementation | runtime/terminal backend adapter | `internal/runtime/terminal/zellijbridge` |
 | browser-facing terminal transport, websocket framing, HTTP integration | interfaces/gateway | `internal/gateway/webterm` |
 | SSH-facing terminal transport, Tailscale auth, SSH server integration | interfaces/gateway | `internal/gateway/sshterm` |

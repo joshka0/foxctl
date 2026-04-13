@@ -13,7 +13,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
-	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
 )
 
 type muxPaneResponse struct {

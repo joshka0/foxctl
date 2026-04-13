@@ -15,7 +15,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
-	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
 )
 
 func TestMuxPanesHandlerTMUXReturnsViewerMetadata(t *testing.T) {

@@ -8,12 +8,12 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
-	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
 )
 
 const relayTestFieldSep = "\x1f"
 
-// relayTestTmuxListFormat matches internal/tmuxbridge listFormat (describePane metadata line).
+// relayTestTmuxListFormat matches internal/runtime/terminal/tmuxbridge listFormat (describePane metadata line).
 var relayTestTmuxListFormat = "#{pane_id}" + relayTestFieldSep + "#{session_name}" + relayTestFieldSep + "#{window_index}" + relayTestFieldSep + "#{pane_index}" + relayTestFieldSep + "#{window_name}" + relayTestFieldSep + "#{pane_pid}" + relayTestFieldSep + "#{pane_width}" + relayTestFieldSep + "#{pane_height}" + relayTestFieldSep + "#{@name}" + relayTestFieldSep + "#{pane_current_path}" + relayTestFieldSep + "#{pane_current_command}" + relayTestFieldSep + "#{pane_active}" + relayTestFieldSep + "#{@agentctl_participant}" + relayTestFieldSep + "#{@agentctl_provider}" + relayTestFieldSep + "#{@agentctl_room_id}" + relayTestFieldSep + "#{@agentctl_wrapped}"
 
 // relayTmuxRecordingRunner implements tmuxbridge.Runner for tests: repeats list-sessions for
