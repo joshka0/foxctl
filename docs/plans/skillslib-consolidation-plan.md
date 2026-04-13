@@ -776,12 +776,12 @@ func buildArgs(pattern string, opts SearchOpts, jsonOutput bool) []string {
 
 ---
 
-### 3.2 Create `internal/lsp/jsonrpc` Package
+### 3.2 Create `internal/platform/lsp/jsonrpc` Package
 
-**Location:** `~/repos/personal/claude-migration-to-v2/internal/lsp/jsonrpc/client.go`
+**Location:** `~/repos/personal/claude-migration-to-v2/internal/platform/lsp/jsonrpc/client.go`
 
 **Problem:** JSON-RPC transport duplicated in:
-- `internal/lsp/gopls/daemon.go` (lines 281-376) - persistent daemon
+- `internal/platform/lsp/gopls/daemon.go` (lines 281-376) - persistent daemon
 - `skills/lsp_tsserver/main.go` (lines 516-596) - per-request
 - `skills/lsp_pylsp/main.go` (lines 635-719) - per-request
 
@@ -976,7 +976,7 @@ func (c *Client) readContentLength() (int, error) {
 ```
 
 **Migration:**
-1. Update `internal/lsp/gopls/daemon.go` to use `jsonrpc.Client`
+1. Update `internal/platform/lsp/gopls/daemon.go` to use `jsonrpc.Client`
 2. Update `skills/lsp_tsserver` to use `jsonrpc.Client`
 3. Update `skills/lsp_pylsp` to use `jsonrpc.Client`
 
@@ -1288,8 +1288,8 @@ Phase 5 (Future Skills)
 - `internal/adapters/skillslib/oputil/oputil_test.go`
 - `internal/tools/ripgrep/ripgrep.go`
 - `internal/tools/ripgrep/ripgrep_test.go`
-- `internal/lsp/jsonrpc/client.go`
-- `internal/lsp/jsonrpc/client_test.go`
+- `internal/platform/lsp/jsonrpc/client.go`
+- `internal/platform/lsp/jsonrpc/client_test.go`
 
 ### Modified Files (~35)
 - `internal/adapters/skillslib/workspace/workspace.go` (IsUnderWorkspace fix)
@@ -1299,7 +1299,7 @@ Phase 5 (Future Skills)
 - `internal/adapters/skillslib/skillout/emit.go` (keep CAS helpers)
 - `internal/adapters/skillslib/skillout/preview.go` (add PreviewAndPersistNDJSON)
 - `internal/intelligence/retrieval/ripgrep.go` (use tools/ripgrep)
-- `internal/lsp/gopls/daemon.go` (use lsp/jsonrpc)
+- `internal/platform/lsp/gopls/daemon.go` (use lsp/jsonrpc)
 - `skills/code_context_ripgrep/main.go`
 - `skills/text_ripgrep/main.go`
 - `skills/fs_find/main.go`

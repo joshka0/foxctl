@@ -29,7 +29,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/runtime/execution/runner"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/filesummary"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/lsp/gopls"
+	"github.com/jkatigb/agentctl/internal/platform/lsp/gopls"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/deviceid"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"

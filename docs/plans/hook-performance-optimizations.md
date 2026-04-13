@@ -63,13 +63,13 @@ Shell Wrapper (bash)
 **Solution**: Only run impact analysis if gopls daemon is already warm.
 
 **Files to modify**:
-- `internal/lsp/gopls/daemon.go` - Add `IsDaemonReady()` function
+- `internal/platform/lsp/gopls/daemon.go` - Add `IsDaemonReady()` function
 - `skills/hooks_impact_analysis/main.go` - Check before running
 
 **Implementation**:
 
 ```go
-// internal/lsp/gopls/daemon.go
+// internal/platform/lsp/gopls/daemon.go
 
 // IsDaemonReady returns true if a gopls daemon is running for the workspace.
 // This does NOT start the daemon - it only checks existing state.
@@ -185,7 +185,7 @@ agentctl run hooks/task_guard --ephemeral
 
 ### Step 1: Add IsDaemonReady() to gopls package
 
-**File**: `internal/lsp/gopls/daemon.go`
+**File**: `internal/platform/lsp/gopls/daemon.go`
 
 Add after line 107 (after GetDaemon function):
 
@@ -234,7 +234,7 @@ if lang == "go" {
 
 Add to imports:
 ```go
-"github.com/jkatigb/agentctl/internal/lsp/gopls"
+"github.com/jkatigb/agentctl/internal/platform/lsp/gopls"
 ```
 
 ### Step 4: Update shell wrapper timeout (optional)
@@ -249,7 +249,7 @@ The impact_analysis hook currently has a 10s timeout which is too short for cold
 
 ### Unit Tests
 
-1. `internal/lsp/gopls/daemon_test.go`:
+1. `internal/platform/lsp/gopls/daemon_test.go`:
    - Test `IsDaemonReady()` returns false when no daemon
    - Test `IsDaemonReady()` returns false for wrong workspace
    - Test `IsDaemonReady()` returns true for matching warm daemon

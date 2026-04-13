@@ -20,7 +20,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
-	"github.com/jkatigb/agentctl/internal/lsp/gopls"
+	"github.com/jkatigb/agentctl/internal/platform/lsp/gopls"
 )
 
 // defaultTimeout is the maximum time to wait for gopls operations.

@@ -21,7 +21,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
-	"github.com/jkatigb/agentctl/internal/lsp/jsonrpc"
+	"github.com/jkatigb/agentctl/internal/platform/lsp/jsonrpc"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
