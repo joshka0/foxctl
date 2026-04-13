@@ -1,4 +1,5 @@
-// Package consoleapp provides the LLM runner for console sessions.
+// Package consoleapp provides the console application/runtime layer, including
+// turn execution and stream handling for console sessions.
 package consoleapp
 
 import (

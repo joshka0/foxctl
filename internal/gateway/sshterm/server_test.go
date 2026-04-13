@@ -16,11 +16,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/jkatigb/agentctl/internal/agentpane"
 )
 
 // testLogger creates a logger that discards output.
 func testLogger() zerolog.Logger {
 	return zerolog.New(io.Discard).With().Timestamp().Logger()
+}
+
+func registerSSHRoom(rooms *RoomManager, roomID, tmuxSession string, maxSessions int) {
+	rooms.RegisterTerminalRoom(agentpane.ResolveTerminalRoomConfig(roomID, tmuxSession, maxSessions))
 }
 
 // mockWhoIs is a test WhoIsFunc that returns a fixed identity for known addresses.
@@ -54,9 +60,7 @@ func setupTestServer(t *testing.T, whoIs WhoIsFunc) (*Server, *RoomManager, stri
 
 	// Register a test room
 	roomID := "test-room"
-	rooms.RegisterRoom(roomID, RoomConfig{
-		TmuxSession: "test-room-session",
-	})
+	registerSSHRoom(rooms, roomID, "test-room-session", 0)
 
 	return srv, rooms, roomID
 }
@@ -127,26 +131,45 @@ func TestParseRoomIDFromUser(t *testing.T) {
 	}
 }
 
+func TestParseRoomIDFromUser_MatchesAgentpaneContract(t *testing.T) {
+	user := "room-alpha-beta"
+	assert.Equal(t, agentpane.ParseRoomTerminalUser(user), ParseRoomIDFromUser(user))
+}
+
 // --- Test RoomManager ---
 
-func TestRoomManager_RegisterRoom(t *testing.T) {
+func TestRoomManager_RegisterTerminalRoom_Basic(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
 
-	rooms.RegisterRoom("room-1", RoomConfig{
-		TmuxSession: "session-1",
-	})
+	registerSSHRoom(rooms, "room-1", "session-1", 0)
 
 	assert.True(t, rooms.HasRoom("room-1"))
 	assert.False(t, rooms.HasRoom("room-2"))
 }
 
+func TestRoomManager_RegisterTerminalRoom(t *testing.T) {
+	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
+
+	rooms.RegisterTerminalRoom(agentpane.TerminalRoomConfig{
+		RoomID:         "room-1",
+		TmuxSession:    "session-1",
+		MaxConnections: 3,
+	})
+
+	assert.True(t, rooms.HasRoom("room-1"))
+	config, ok := rooms.TerminalRoomConfig("room-1")
+	require.True(t, ok)
+	assert.Equal(t, "session-1", config.TmuxSession)
+	assert.Equal(t, 3, config.MaxConnections)
+}
+
 func TestRoomManager_RegisterRoom_Overwrite(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
 
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "old"})
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "new"})
+	registerSSHRoom(rooms, "room-1", "old", 0)
+	registerSSHRoom(rooms, "room-1", "new", 0)
 
-	config, ok := rooms.RoomConfig("room-1")
+	config, ok := rooms.TerminalRoomConfig("room-1")
 	require.True(t, ok)
 	assert.Equal(t, "new", config.TmuxSession)
 }
@@ -154,7 +177,7 @@ func TestRoomManager_RegisterRoom_Overwrite(t *testing.T) {
 func TestRoomManager_UnregisterRoom(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
 
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "session-1"})
+	registerSSHRoom(rooms, "room-1", "session-1", 0)
 	require.True(t, rooms.HasRoom("room-1"))
 
 	rooms.UnregisterRoom("room-1")
@@ -169,7 +192,7 @@ func TestRoomManager_UnregisterRoom_NotExist(t *testing.T) {
 
 func TestRoomManager_AddSession(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "session-1"})
+	registerSSHRoom(rooms, "room-1", "session-1", 0)
 
 	sess := &SSHSession{
 		ID:         "sess-1",
@@ -205,7 +228,7 @@ func TestRoomManager_AddSession_SessionLimit(t *testing.T) {
 	config := DefaultSSHServerConfig()
 	config.MaxSessions = 2
 	rooms := NewRoomManager(config, testLogger())
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1", MaxSessions: 2})
+	registerSSHRoom(rooms, "room-1", "s1", 2)
 
 	for i := 0; i < 2; i++ {
 		sess := &SSHSession{
@@ -226,7 +249,7 @@ func TestRoomManager_AddSession_SessionLimit(t *testing.T) {
 
 func TestRoomManager_RemoveSession(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerSSHRoom(rooms, "room-1", "s1", 0)
 
 	sess := &SSHSession{ID: "sess-1", RoomID: "room-1"}
 	err := rooms.AddSession("room-1", sess)
@@ -245,7 +268,7 @@ func TestRoomManager_RemoveSession_NotExist(t *testing.T) {
 
 func TestRoomManager_ActiveSessions(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerSSHRoom(rooms, "room-1", "s1", 0)
 
 	sess1 := &SSHSession{
 		ID:         "sess-1",
@@ -271,7 +294,7 @@ func TestRoomManager_ActiveSessions(t *testing.T) {
 
 func TestRoomManager_TmuxSessionForRoom(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "custom-session"})
+	registerSSHRoom(rooms, "room-1", "custom-session", 0)
 
 	session, err := rooms.TmuxSessionForRoom(context.Background(), "room-1")
 	require.NoError(t, err)
@@ -280,11 +303,11 @@ func TestRoomManager_TmuxSessionForRoom(t *testing.T) {
 
 func TestRoomManager_TmuxSessionForRoom_Default(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: ""})
+	registerSSHRoom(rooms, "room-1", "", 0)
 
 	session, err := rooms.TmuxSessionForRoom(context.Background(), "room-1")
 	require.NoError(t, err)
-	assert.Equal(t, "room-room-1", session)
+	assert.Equal(t, agentpane.DefaultRoomTmuxSession("room-1"), session)
 }
 
 func TestRoomManager_TmuxSessionForRoom_NotFound(t *testing.T) {
@@ -298,7 +321,7 @@ func TestRoomManager_TmuxSessionForRoom_NotFound(t *testing.T) {
 
 func TestRoomManager_Close(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerSSHRoom(rooms, "room-1", "s1", 0)
 	sess := &SSHSession{ID: "sess-1", RoomID: "room-1"}
 	require.NoError(t, rooms.AddSession("room-1", sess))
 
@@ -403,9 +426,7 @@ func TestServer_PTYSession(t *testing.T) {
 	srv := NewServer(config, rooms, mockWhoIs, testLogger())
 
 	roomID := "pty-room"
-	rooms.RegisterRoom(roomID, RoomConfig{
-		TmuxSession: sessionName,
-	})
+	registerSSHRoom(rooms, roomID, sessionName, 0)
 
 	addr := startTestServer(t, srv)
 
@@ -490,9 +511,7 @@ func TestServer_WindowResize(t *testing.T) {
 	srv := NewServer(config, rooms, mockWhoIs, testLogger())
 
 	roomID := "resize-room"
-	rooms.RegisterRoom(roomID, RoomConfig{
-		TmuxSession: sessionName,
-	})
+	registerSSHRoom(rooms, roomID, sessionName, 0)
 
 	addr := startTestServer(t, srv)
 
@@ -549,10 +568,7 @@ func TestServer_MultipleSessions(t *testing.T) {
 	srv := NewServer(config, rooms, mockWhoIs, testLogger())
 
 	roomID := "multi-room"
-	rooms.RegisterRoom(roomID, RoomConfig{
-		TmuxSession: sessionName,
-		MaxSessions: 5,
-	})
+	registerSSHRoom(rooms, roomID, sessionName, 5)
 
 	addr := startTestServer(t, srv)
 
@@ -605,10 +621,7 @@ func TestServer_SessionLimit(t *testing.T) {
 	srv := NewServer(config, rooms, mockWhoIs, testLogger())
 
 	roomID := "limit-room"
-	rooms.RegisterRoom(roomID, RoomConfig{
-		TmuxSession: "limit-session",
-		MaxSessions: 2,
-	})
+	registerSSHRoom(rooms, roomID, "limit-session", 2)
 
 	_ = startTestServer(t, srv)
 
@@ -809,7 +822,7 @@ func TestSSHSession_SetTerminal(t *testing.T) {
 
 func TestRoomManager_ConcurrentSessions(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerSSHRoom(rooms, "room-1", "s1", 0)
 
 	var wg sync.WaitGroup
 	errors := make(chan error, 10)
@@ -842,7 +855,7 @@ func TestRoomManager_ConcurrentSessions(t *testing.T) {
 
 func TestRoomManager_ConcurrentAddRemove(t *testing.T) {
 	rooms := NewRoomManager(DefaultSSHServerConfig(), testLogger())
-	rooms.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerSSHRoom(rooms, "room-1", "s1", 0)
 
 	var wg sync.WaitGroup
 
@@ -893,9 +906,7 @@ func TestServer_DetachOnDisconnect(t *testing.T) {
 	srv := NewServer(config, rooms, mockWhoIs, testLogger())
 
 	roomID := "detach-room"
-	rooms.RegisterRoom(roomID, RoomConfig{
-		TmuxSession: sessionName,
-	})
+	registerSSHRoom(rooms, roomID, sessionName, 0)
 
 	addr := startTestServer(t, srv)
 
@@ -976,7 +987,7 @@ func TestServer_WhoIsIdentityLogged(t *testing.T) {
 	srv := NewServer(config, rooms, trackWhoIs, testLogger())
 
 	roomID := "identity-room"
-	rooms.RegisterRoom(roomID, RoomConfig{TmuxSession: "identity-session"})
+	registerSSHRoom(rooms, roomID, "identity-session", 0)
 
 	addr := startTestServer(t, srv)
 

@@ -6,12 +6,13 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog"
+
+	"github.com/jkatigb/agentctl/internal/agentpane"
 )
 
 // Room represents a terminal room with one shared PTY and multiple clients.
 type Room struct {
 	id      string
-	config  RoomConfig
 	hub     *Hub
 	mu      sync.Mutex
 	clients map[*Client]struct{}
@@ -25,10 +26,11 @@ type Room struct {
 
 // Hub manages all web terminal rooms and their connections.
 type Hub struct {
-	mu     sync.RWMutex
-	rooms  map[string]*Room
-	config HubConfig
-	log    zerolog.Logger
+	mu       sync.RWMutex
+	rooms    map[string]*Room
+	registry *agentpane.TerminalRoomRegistry
+	config   HubConfig
+	log      zerolog.Logger
 }
 
 var (
@@ -49,38 +51,38 @@ func NewHub(config HubConfig, log zerolog.Logger) *Hub {
 		config.PingInterval = DefaultPingInterval
 	}
 	return &Hub{
-		rooms:  make(map[string]*Room),
-		config: config,
-		log:    log.With().Str("component", "webterm").Logger(),
+		rooms:    make(map[string]*Room),
+		registry: agentpane.NewTerminalRoomRegistry(),
+		config:   config,
+		log:      log.With().Str("component", "webterm").Logger(),
 	}
 }
 
-// RegisterRoom registers a room for terminal access.
-// If the room is already registered, it updates the config.
-func (h *Hub) RegisterRoom(roomID string, config RoomConfig) {
+// RegisterTerminalRoom registers a room from the canonical runtime-terminal config.
+func (h *Hub) RegisterTerminalRoom(config agentpane.TerminalRoomConfig) {
+	h.registry.Register(config)
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if room, ok := h.rooms[roomID]; ok {
-		room.mu.Lock()
-		room.config = config
-		room.mu.Unlock()
-		h.log.Debug().Str("room", roomID).Msg("Room config updated")
+	if _, ok := h.rooms[config.RoomID]; ok {
+		h.log.Debug().Str("room", config.RoomID).Msg("Room config updated")
 		return
 	}
 
-	h.rooms[roomID] = &Room{
-		id:      roomID,
-		config:  config,
+	h.rooms[config.RoomID] = &Room{
+		id:      config.RoomID,
 		hub:     h,
 		clients: make(map[*Client]struct{}),
 	}
-	h.log.Debug().Str("room", roomID).Msg("Room registered")
+	h.log.Debug().Str("room", config.RoomID).Msg("Room registered")
 }
 
 // UnregisterRoom removes a room from the hub.
 // Active clients are disconnected.
 func (h *Hub) UnregisterRoom(roomID string) {
+	h.registry.Unregister(roomID)
+
 	h.mu.Lock()
 	room, ok := h.rooms[roomID]
 	if !ok {
@@ -114,21 +116,12 @@ func (h *Hub) UnregisterRoom(roomID string) {
 
 // HasRoom returns true if the room is registered.
 func (h *Hub) HasRoom(roomID string) bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	_, ok := h.rooms[roomID]
-	return ok
+	return h.registry.HasRoom(roomID)
 }
 
 // RoomIDs returns all registered room IDs.
 func (h *Hub) RoomIDs() []string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	ids := make([]string, 0, len(h.rooms))
-	for id := range h.rooms {
-		ids = append(ids, id)
-	}
-	return ids
+	return h.registry.RoomIDs()
 }
 
 // AddClient attempts to add a client to a room.
@@ -145,12 +138,13 @@ func (h *Hub) AddClient(roomID string, client *Client) error {
 	room.mu.Lock()
 	defer room.mu.Unlock()
 
-	maxConns := room.config.MaxConnections
-	if maxConns <= 0 {
-		maxConns = h.config.MaxConnectionsPerRoom
+	cfg, cfgOK := h.registry.RoomConfig(roomID)
+	if !cfgOK {
+		return &RoomNotFoundError{RoomID: roomID}
 	}
 
-	if len(room.clients) >= maxConns {
+	maxConns := agentpane.EffectiveRoomLimit(cfg.MaxConnections, h.config.MaxConnectionsPerRoom)
+	if agentpane.RoomLimitReached(len(room.clients), maxConns) {
 		return &ConnectionLimitError{
 			RoomID:     roomID,
 			Current:    len(room.clients),
@@ -258,10 +252,15 @@ func (h *Hub) RoomPTY(ctx context.Context, roomID string, cols, rows uint16) (*P
 		oldPTY := room.pty
 		room.pty = nil
 		room.startWait = wait
-		sessionName := room.config.TmuxSession
-		if sessionName == "" {
-			sessionName = room.id
+		cfg, cfgOK := h.registry.RoomConfig(room.id)
+		if !cfgOK {
+			room.startWait = nil
+			room.mu.Unlock()
+			close(wait)
+			closePTYProcess(oldPTY)
+			return nil, &RoomNotFoundError{RoomID: roomID}
 		}
+		sessionName := cfg.TmuxSession
 		room.mu.Unlock()
 
 		closePTYProcess(oldPTY)
@@ -305,6 +304,7 @@ func (h *Hub) Close() {
 	rooms := h.rooms
 	h.rooms = make(map[string]*Room)
 	h.mu.Unlock()
+	h.registry.Reset()
 
 	for id, room := range rooms {
 		room.mu.Lock()
@@ -328,13 +328,7 @@ func (h *Hub) Close() {
 }
 
 // RoomNotFoundError is returned when a room is not registered.
-type RoomNotFoundError struct {
-	RoomID string
-}
-
-func (e *RoomNotFoundError) Error() string {
-	return fmt.Sprintf("room not found: %s", e.RoomID)
-}
+type RoomNotFoundError = agentpane.RoomNotFoundError
 
 // ConnectionLimitError is returned when a room has reached its connection limit.
 type ConnectionLimitError struct {
@@ -344,5 +338,5 @@ type ConnectionLimitError struct {
 }
 
 func (e *ConnectionLimitError) Error() string {
-	return fmt.Sprintf("room %s: connection limit reached (%d/%d)", e.RoomID, e.Current, e.MaxAllowed)
+	return agentpane.FormatRoomLimitError(e.RoomID, "connection limit reached", e.Current, e.MaxAllowed)
 }

@@ -3,6 +3,8 @@ package sshterm
 import (
 	"fmt"
 	"time"
+
+	"github.com/jkatigb/agentctl/internal/agentpane"
 )
 
 // SSHServerConfig holds the configuration for the SSH server.
@@ -38,16 +40,6 @@ func DefaultSSHServerConfig() SSHServerConfig {
 		DefaultShell: "/bin/sh",
 		MaxSessions:  10,
 	}
-}
-
-// RoomConfig holds per-room SSH terminal configuration.
-type RoomConfig struct {
-	// TmuxSession is the tmux session name for this room.
-	TmuxSession string
-
-	// MaxSessions is the max concurrent SSH sessions for this room.
-	// Zero means use the server default.
-	MaxSessions int
 }
 
 // SessionInfo holds metadata about an active SSH session.
@@ -110,13 +102,7 @@ func (i IdentityInfo) String() string {
 }
 
 // RoomNotFoundError is returned when a room is not registered.
-type RoomNotFoundError struct {
-	RoomID string
-}
-
-func (e *RoomNotFoundError) Error() string {
-	return fmt.Sprintf("room not found: %s", e.RoomID)
-}
+type RoomNotFoundError = agentpane.RoomNotFoundError
 
 // IdentityRejectedError is returned when a non-tailnet connection is rejected.
 type IdentityRejectedError struct {
@@ -136,5 +122,5 @@ type SessionLimitError struct {
 }
 
 func (e *SessionLimitError) Error() string {
-	return fmt.Sprintf("room %s: SSH session limit reached (%d/%d)", e.RoomID, e.Current, e.MaxAllowed)
+	return agentpane.FormatRoomLimitError(e.RoomID, "SSH session limit reached", e.Current, e.MaxAllowed)
 }

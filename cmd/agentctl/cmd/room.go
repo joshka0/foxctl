@@ -12114,6 +12114,14 @@ func runRoomRestore(cmd *cobra.Command, workspace, roomID, actorID, backend, ses
 		TransportEndpoint: result.TransportEndpoint,
 		TransportKind:     result.TransportKind,
 		Unbound:           false,
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			MuxBackend:        result.Backend,
+			MuxSession:        result.Session,
+			MuxPaneID:         result.PaneID,
+			TransportEndpoint: result.TransportEndpoint,
+			TransportKind:     result.TransportKind,
+			SubmitMode:        agent.DefaultRoomDeliverySubmitModeForProvider(agentName, actorID),
+		},
 	}
 	updatedMembers := mergeRoomMembers(summary.Members, member)
 	if _, err := store.ReplaceRoomMembers(cmd.Context(), absWorkspace, roomID, updatedMembers); err != nil {
@@ -12805,6 +12813,15 @@ func provisionRoomMembers(ctx context.Context, workspace string, room agent.Room
 			member.Backend = "tmux"
 			member.Session = result.Session
 			member.PaneID = result.Pane.ID
+			transportEndpoint := agentpane.DefaultSocketPath(result.Session, member.ActorID)
+			member.DeliveryBinding = &agent.RoomDeliveryBinding{
+				MuxBackend:        "tmux",
+				MuxSession:        result.Session,
+				MuxPaneID:         result.Pane.ID,
+				TransportEndpoint: transportEndpoint,
+				TransportKind:     agent.PaneSocketTransportKind,
+				SubmitMode:        agent.DefaultRoomDeliverySubmitModeForProvider(firstNonEmpty(memberAgent, strings.TrimSpace(opts.AgentCLI)), member.ActorID),
+			}
 			updatedMembers = append(updatedMembers, member)
 			provisioned = append(provisioned, map[string]any{
 				"actor_id":       member.ActorID,
@@ -12835,6 +12852,15 @@ func provisionRoomMembers(ctx context.Context, workspace string, room agent.Room
 			member.Backend = "zellij"
 			member.Session = result.Session
 			member.PaneID = result.PaneName
+			transportEndpoint := agentpane.DefaultSocketPath(result.Session, member.ActorID)
+			member.DeliveryBinding = &agent.RoomDeliveryBinding{
+				MuxBackend:        "zellij",
+				MuxSession:        result.Session,
+				MuxPaneID:         result.PaneName,
+				TransportEndpoint: transportEndpoint,
+				TransportKind:     agent.PaneSocketTransportKind,
+				SubmitMode:        agent.DefaultRoomDeliverySubmitModeForProvider(firstNonEmpty(memberAgent, strings.TrimSpace(opts.AgentCLI)), member.ActorID),
+			}
 			updatedMembers = append(updatedMembers, member)
 			provisioned = append(provisioned, map[string]any{
 				"actor_id":       member.ActorID,

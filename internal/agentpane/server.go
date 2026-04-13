@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -115,7 +116,7 @@ func DefaultSocketPath(scopeID, participantID string) string {
 	if participant == "" {
 		participant = "pane"
 	}
-	return filepath.Join(os.TempDir(), "agentctl-pane", scope, participant+".sock")
+	return filepath.Join(socketBaseDir(), scope, participant+".sock")
 }
 
 // DefaultReadyPath derives a stable readiness marker path for a participant-scoped
@@ -129,7 +130,7 @@ func DefaultReadyPath(scopeID, participantID string) string {
 	if participant == "" {
 		participant = "pane"
 	}
-	return filepath.Join(os.TempDir(), "agentctl-pane", scope, participant+".ready")
+	return filepath.Join(socketBaseDir(), scope, participant+".ready")
 }
 
 // DefaultMetaPath derives a stable metadata sidecar path for a participant-scoped
@@ -143,7 +144,19 @@ func DefaultMetaPath(scopeID, participantID string) string {
 	if participant == "" {
 		participant = "pane"
 	}
-	return filepath.Join(os.TempDir(), "agentctl-pane", scope, participant+".json")
+	return filepath.Join(socketBaseDir(), scope, participant+".json")
+}
+
+func socketBaseDir() string {
+	defaultRoot := filepath.Join(os.TempDir(), "agentctl-pane")
+	if runtime.GOOS == "windows" {
+		return defaultRoot
+	}
+	shortRoot := filepath.Join(string(filepath.Separator), "tmp", "agentctl-pane")
+	if len(shortRoot) < len(defaultRoot) {
+		return shortRoot
+	}
+	return defaultRoot
 }
 
 // MetadataPathForSocket returns the metadata sidecar path for a given socket path.

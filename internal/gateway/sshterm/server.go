@@ -6,16 +6,15 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net"
-	"os"
-	"os/exec"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	"github.com/rs/zerolog"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/jkatigb/agentctl/internal/agentpane"
 )
 
 // WhoIsFunc looks up the Tailscale identity for a remote address.
@@ -231,9 +230,8 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 		ptyRequested bool
 		term         string
 		cols, rows   uint16
-		cmd          *exec.Cmd
-		ptmx         *os.File
-		cmdDone      chan struct{}
+		attach       *agentpane.TmuxAttachProcess
+		attachDone   chan struct{}
 		closePty     sync.Once
 		shellStarted bool
 	)
@@ -241,21 +239,21 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 	// Clean up PTY on exit
 	defer func() {
 		closePty.Do(func() {
-			if ptmx != nil {
+			if attach != nil {
 				// Closing the PTY master causes tmux to detach cleanly.
 				// The tmux session survives because tmux attach/new -A only
 				// detaches the client, it doesn't kill the session.
-				_ = ptmx.Close()
+				_ = attach.Close()
 			}
 			// Wait for the tmux process to exit (it should detach quickly)
-			if cmdDone != nil {
+			if attachDone != nil {
 				select {
-				case <-cmdDone:
+				case <-attachDone:
 				case <-time.After(5 * time.Second):
 					// Force kill if it hasn't exited
-					if cmd != nil && cmd.Process != nil {
-						_ = cmd.Process.Kill()
-						<-cmdDone
+					if attach != nil {
+						_ = attach.Signal(syscall.SIGKILL)
+						<-attachDone
 					}
 				}
 			}
@@ -307,11 +305,8 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 				rows = newRows
 				sess.SetTerminal(term, cols, rows)
 
-				if ptmx != nil {
-					_ = pty.Setsize(ptmx, &pty.Winsize{
-						Cols: cols,
-						Rows: rows,
-					})
+				if attach != nil {
+					_ = attach.Resize(cols, rows)
 				}
 			}
 
@@ -338,23 +333,15 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 				return
 			}
 
-			// Start tmux attach in a PTY.
-			// Use exec.Command (not CommandContext) so that context cancellation
-			// doesn't kill the tmux process. We want tmux to detach cleanly,
-			// not be killed, so the session survives for reconnection.
-			tmuxBin := s.config.TmuxPath
-			if tmuxBin == "" {
-				tmuxBin = "tmux"
-			}
-
-			cmd = exec.Command(tmuxBin, "new", "-A", "-s", tmuxSession)
-			cmd.Env = append(os.Environ(),
-				fmt.Sprintf("TERM=%s", term),
-			)
-
-			ptmx, err = pty.StartWithSize(cmd, &pty.Winsize{
-				Cols: cols,
-				Rows: rows,
+			// Start tmux attach in a PTY without binding the child process to the
+			// outer request context so the tmux session can detach cleanly.
+			proc, err := agentpane.StartTmuxAttach(ctx, agentpane.TmuxAttachOptions{
+				Session:    tmuxSession,
+				Cols:       cols,
+				Rows:       rows,
+				TmuxPath:   s.config.TmuxPath,
+				Env:        []string{fmt.Sprintf("TERM=%s", term)},
+				UseContext: false,
 			})
 			if err != nil {
 				s.log.Error().Err(err).
@@ -363,43 +350,22 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 				_, _ = fmt.Fprintf(channel, "Error starting terminal: %s\r\n", err)
 				return
 			}
+			attach = proc
 
-			cmdDone = make(chan struct{})
+			attachDone = make(chan struct{})
 			go func() {
-				defer close(cmdDone)
-				cmd.Wait()
+				defer close(attachDone)
+				_ = attach.Wait()
 			}()
 
 			// Pipe PTY output to SSH channel
 			go func() {
-				buf := make([]byte, 4096)
-				for {
-					n, readErr := ptmx.Read(buf)
-					if n > 0 {
-						if _, writeErr := channel.Write(buf[:n]); writeErr != nil {
-							return
-						}
-					}
-					if readErr != nil {
-						return
-					}
-				}
+				_, _ = attach.CopyOutput(channel)
 			}()
 
 			// Pipe SSH channel input to PTY
 			go func() {
-				buf := make([]byte, 4096)
-				for {
-					n, readErr := channel.Read(buf)
-					if n > 0 {
-						if _, writeErr := ptmx.Write(buf[:n]); writeErr != nil {
-							return
-						}
-					}
-					if readErr != nil {
-						return
-					}
-				}
+				_, _ = attach.CopyInput(channel)
 			}()
 
 			// Don't block: continue processing requests (window-change, signal)
@@ -412,8 +378,8 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 		case "signal":
 			// Forward signals to the PTY process
 			sig := parseSignal(req.Payload)
-			if sig != 0 && cmd != nil && cmd.Process != nil {
-				_ = cmd.Process.Signal(sig)
+			if sig != 0 && attach != nil {
+				_ = attach.Signal(sig)
 			}
 			// Don't reply to signal requests (per RFC 4254)
 
@@ -427,9 +393,9 @@ func (s *Server) handleSession(ctx context.Context, sess *SSHSession, channel ss
 
 	// When the request channel closes (client disconnected), the defer will clean up.
 	// The cmdDone channel ensures we wait for the tmux process to detach.
-	if cmdDone != nil {
+	if attachDone != nil {
 		select {
-		case <-cmdDone:
+		case <-attachDone:
 		case <-time.After(5 * time.Second):
 		}
 	}

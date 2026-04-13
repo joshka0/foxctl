@@ -9,10 +9,16 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/jkatigb/agentctl/internal/agentpane"
 )
 
 func testHubLogger() zerolog.Logger {
 	return zerolog.New(io.Discard).With().Timestamp().Logger()
+}
+
+func registerTestRoom(hub *Hub, roomID, tmuxSession string, maxConnections int) {
+	hub.RegisterTerminalRoom(agentpane.ResolveTerminalRoomConfig(roomID, tmuxSession, maxConnections))
 }
 
 func TestNewHub_Defaults(t *testing.T) {
@@ -30,19 +36,31 @@ func TestNewHub_CustomConfig(t *testing.T) {
 	assert.Equal(t, 15*time.Second, hub.config.PingInterval)
 }
 
-func TestHub_RegisterRoom(t *testing.T) {
+func TestHub_RegisterTerminalRoom_Basic(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
 
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "session-1"})
+	registerTestRoom(hub, "room-1", "session-1", 0)
 	assert.True(t, hub.HasRoom("room-1"))
 	assert.False(t, hub.HasRoom("room-2"))
 }
 
-func TestHub_RegisterRoom_UpdatesConfig(t *testing.T) {
+func TestHub_RegisterTerminalRoom(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
 
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "session-1", MaxConnections: 5})
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "session-1-updated", MaxConnections: 10})
+	hub.RegisterTerminalRoom(agentpane.TerminalRoomConfig{
+		RoomID:         "room-1",
+		TmuxSession:    "session-1",
+		MaxConnections: 3,
+	})
+
+	assert.True(t, hub.HasRoom("room-1"))
+}
+
+func TestHub_RegisterTerminalRoom_UpdatesConfig(t *testing.T) {
+	hub := NewHub(HubConfig{}, testHubLogger())
+
+	registerTestRoom(hub, "room-1", "session-1", 5)
+	registerTestRoom(hub, "room-1", "session-1-updated", 10)
 
 	assert.True(t, hub.HasRoom("room-1"))
 	// Verify config was updated by checking client count behavior later
@@ -51,7 +69,7 @@ func TestHub_RegisterRoom_UpdatesConfig(t *testing.T) {
 func TestHub_UnregisterRoom(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
 
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "session-1"})
+	registerTestRoom(hub, "room-1", "session-1", 0)
 	assert.True(t, hub.HasRoom("room-1"))
 
 	hub.UnregisterRoom("room-1")
@@ -67,9 +85,9 @@ func TestHub_UnregisterRoom_NotFound(t *testing.T) {
 func TestHub_RoomIDs(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
 
-	hub.RegisterRoom("room-1", RoomConfig{})
-	hub.RegisterRoom("room-2", RoomConfig{})
-	hub.RegisterRoom("room-3", RoomConfig{})
+	registerTestRoom(hub, "room-1", "", 0)
+	registerTestRoom(hub, "room-2", "", 0)
+	registerTestRoom(hub, "room-3", "", 0)
 
 	ids := hub.RoomIDs()
 	assert.Len(t, ids, 3)
@@ -92,7 +110,7 @@ func TestHub_AddClient_RoomNotFound(t *testing.T) {
 
 func TestHub_AddClient_ConnectionLimit(t *testing.T) {
 	hub := NewHub(HubConfig{MaxConnectionsPerRoom: 2}, testHubLogger())
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerTestRoom(hub, "room-1", "s1", 0)
 
 	// Add 2 clients — should succeed
 	for i := 0; i < 2; i++ {
@@ -116,7 +134,7 @@ func TestHub_AddClient_ConnectionLimit(t *testing.T) {
 func TestHub_AddClient_RoomOverrideLimit(t *testing.T) {
 	// Hub default is 10, but room overrides to 1
 	hub := NewHub(HubConfig{MaxConnectionsPerRoom: 10}, testHubLogger())
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1", MaxConnections: 1})
+	registerTestRoom(hub, "room-1", "s1", 1)
 
 	client := &Client{output: make(chan []byte, OutputBufferSize)}
 	err := hub.AddClient("room-1", client)
@@ -133,7 +151,7 @@ func TestHub_AddClient_RoomOverrideLimit(t *testing.T) {
 
 func TestHub_RemoveClient(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerTestRoom(hub, "room-1", "s1", 0)
 
 	client := &Client{output: make(chan []byte, OutputBufferSize)}
 	err := hub.AddClient("room-1", client)
@@ -153,7 +171,7 @@ func TestHub_RemoveClient_NilRoom(t *testing.T) {
 
 func TestHub_ClientCount(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerTestRoom(hub, "room-1", "s1", 0)
 
 	assert.Equal(t, 0, hub.ClientCount("room-1"))
 
@@ -172,8 +190,8 @@ func TestHub_ClientCount_NonexistentRoom(t *testing.T) {
 
 func TestHub_Close(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
-	hub.RegisterRoom("room-2", RoomConfig{TmuxSession: "s2"})
+	registerTestRoom(hub, "room-1", "s1", 0)
+	registerTestRoom(hub, "room-2", "s2", 0)
 
 	hub.Close()
 	assert.False(t, hub.HasRoom("room-1"))
@@ -182,7 +200,7 @@ func TestHub_Close(t *testing.T) {
 
 func TestHub_UnregisterRoom_CleansUpClients(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerTestRoom(hub, "room-1", "s1", 0)
 
 	client := &Client{output: make(chan []byte, OutputBufferSize)}
 	_ = hub.AddClient("room-1", client)
@@ -199,18 +217,13 @@ func TestHub_RoomPTY_DoesNotHoldRoomLockDuringStartup(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	startTmuxAttach = func(_ context.Context, _ TmuxOptions) (*PTYProcess, error) {
-		pty := &PTYProcess{
-			subscribers: make(map[uint64]chan<- []byte),
-			done:        make(chan struct{}),
-		}
-		pty.running.Store(true)
 		close(started)
 		<-release
-		return pty, nil
+		return &PTYProcess{}, nil
 	}
 
 	hub := NewHub(HubConfig{}, testHubLogger())
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerTestRoom(hub, "room-1", "s1", 0)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -240,6 +253,27 @@ func TestHub_RoomPTY_DoesNotHoldRoomLockDuringStartup(t *testing.T) {
 	require.NoError(t, <-errCh)
 }
 
+func TestHub_RoomPTY_DefaultSessionUsesRuntimeTerminalContract(t *testing.T) {
+	origStart := startTmuxAttach
+	defer func() { startTmuxAttach = origStart }()
+
+	called := make(chan TmuxOptions, 1)
+	startTmuxAttach = func(_ context.Context, opts TmuxOptions) (*PTYProcess, error) {
+		called <- opts
+		return &PTYProcess{}, nil
+	}
+
+	hub := NewHub(HubConfig{}, testHubLogger())
+	registerTestRoom(hub, "alpha-room", "", 0)
+
+	pty, err := hub.RoomPTY(context.Background(), "alpha-room", 80, 24)
+	require.NoError(t, err)
+	require.NotNil(t, pty)
+
+	opts := <-called
+	assert.Equal(t, agentpane.DefaultRoomTmuxSession("alpha-room"), opts.Session)
+}
+
 func TestHub_UnregisterRoom_DoesNotHoldHubLockWhileClosingPTY(t *testing.T) {
 	origClose := closePTYProcess
 	defer func() { closePTYProcess = origClose }()
@@ -252,12 +286,9 @@ func TestHub_UnregisterRoom_DoesNotHoldHubLockWhileClosingPTY(t *testing.T) {
 	}
 
 	hub := NewHub(HubConfig{}, testHubLogger())
-	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	registerTestRoom(hub, "room-1", "s1", 0)
 	room := hub.rooms["room-1"]
-	room.pty = &PTYProcess{
-		subscribers: make(map[uint64]chan<- []byte),
-		done:        make(chan struct{}),
-	}
+	room.pty = &PTYProcess{}
 
 	done := make(chan struct{})
 	go func() {
@@ -273,7 +304,7 @@ func TestHub_UnregisterRoom_DoesNotHoldHubLockWhileClosingPTY(t *testing.T) {
 
 	registerDone := make(chan struct{})
 	go func() {
-		hub.RegisterRoom("room-2", RoomConfig{TmuxSession: "s2"})
+		registerTestRoom(hub, "room-2", "s2", 0)
 		close(registerDone)
 	}()
 

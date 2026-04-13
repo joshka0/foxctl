@@ -1176,7 +1176,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
-	seenMessages := roomLoopSeedSeenMessages(messages, runtime)
+	seenMessages := roomLoopSeedSeenMessages(summary, messages, history, runtime)
 	announcedStates := make(map[string]string)
 	for _, msg := range messages {
 		if msg.TaskID != "" {
@@ -1185,7 +1185,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 			}
 		}
 	}
-	initial := roomLoopInitialMessages(messages, history, runtime)
+	initial := roomLoopInitialMessages(summary, messages, history, runtime)
 	for _, msg := range initial {
 		seq++
 		result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
@@ -1846,9 +1846,15 @@ func roomLoopMessageAfterCursor(msg agent.BoardMessage, cursorAt *time.Time, cur
 	return strings.TrimSpace(msg.ID) > strings.TrimSpace(cursorID)
 }
 
-func roomLoopSeedSeenMessages(messages []agent.BoardMessage, runtime roomLoopRuntimeState) map[string]struct{} {
+func roomLoopSeedSeenMessages(room agent.RoomSummary, messages []agent.BoardMessage, history int, runtime roomLoopRuntimeState) map[string]struct{} {
 	seen := make(map[string]struct{}, len(messages))
 	if runtime.DeliveryCursorAt == nil || runtime.DeliveryCursorAt.IsZero() {
+		for _, msg := range roomLoopInitialCandidateMessages(messages, history, runtime) {
+			if roomLoopShouldReplayInitialMessage(room, msg, messages) {
+				continue
+			}
+			seen[msg.ID] = struct{}{}
+		}
 		return seen
 	}
 	for _, msg := range messages {
@@ -1857,10 +1863,27 @@ func roomLoopSeedSeenMessages(messages []agent.BoardMessage, runtime roomLoopRun
 		}
 		seen[msg.ID] = struct{}{}
 	}
+	for _, msg := range roomLoopInitialCandidateMessages(messages, history, runtime) {
+		if roomLoopShouldReplayInitialMessage(room, msg, messages) {
+			continue
+		}
+		seen[msg.ID] = struct{}{}
+	}
 	return seen
 }
 
-func roomLoopInitialMessages(messages []agent.BoardMessage, history int, runtime roomLoopRuntimeState) []agent.BoardMessage {
+func roomLoopInitialMessages(room agent.RoomSummary, messages []agent.BoardMessage, history int, runtime roomLoopRuntimeState) []agent.BoardMessage {
+	initial := roomLoopInitialCandidateMessages(messages, history, runtime)
+	out := make([]agent.BoardMessage, 0, len(initial))
+	for _, msg := range initial {
+		if roomLoopShouldReplayInitialMessage(room, msg, messages) {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+func roomLoopInitialCandidateMessages(messages []agent.BoardMessage, history int, runtime roomLoopRuntimeState) []agent.BoardMessage {
 	if runtime.DeliveryCursorAt == nil || runtime.DeliveryCursorAt.IsZero() {
 		return trimRoomHistory(messages, history)
 	}
@@ -1871,6 +1894,46 @@ func roomLoopInitialMessages(messages []agent.BoardMessage, history int, runtime
 		}
 	}
 	return out
+}
+
+func roomLoopShouldReplayInitialMessage(room agent.RoomSummary, msg agent.BoardMessage, messages []agent.BoardMessage) bool {
+	recipient := normalizeRoomRecipient(msg.Recipient)
+	if recipient == "" {
+		return false
+	}
+	if recipient == agent.BroadcastRecipient {
+		for actorID := range roomLoopCurrentParticipants(room) {
+			if _, ok := roomInboxEntryForActor(actorID, msg, false, messages); ok {
+				return true
+			}
+		}
+		return false
+	}
+	if !roomLoopCurrentParticipant(room, recipient) {
+		return false
+	}
+	_, ok := roomInboxEntryForActor(recipient, msg, false, messages)
+	return ok
+}
+
+func roomLoopCurrentParticipants(room agent.RoomSummary) map[string]struct{} {
+	out := make(map[string]struct{}, len(room.Participants)+len(room.Members))
+	for _, member := range room.Members {
+		if id := strings.TrimSpace(member.ActorID); id != "" && !strings.HasPrefix(id, "actor:system:room:") {
+			out[id] = struct{}{}
+		}
+	}
+	for _, participant := range room.Participants {
+		if id := strings.TrimSpace(participant); id != "" && !strings.HasPrefix(id, "actor:system:room:") {
+			out[id] = struct{}{}
+		}
+	}
+	return out
+}
+
+func roomLoopCurrentParticipant(room agent.RoomSummary, actorID string) bool {
+	_, ok := roomLoopCurrentParticipants(room)[strings.TrimSpace(actorID)]
+	return ok
 }
 
 func advanceRoomLoopCursor(runtime *roomLoopRuntimeState, msg agent.BoardMessage) bool {

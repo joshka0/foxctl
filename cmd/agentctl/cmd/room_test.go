@@ -2453,10 +2453,19 @@ func TestRequireActiveRoomLoopRequiresDeliveryOwner(t *testing.T) {
 
 func TestRoomLoopInitialMessagesRespectsPersistedCursor(t *testing.T) {
 	base := time.Now().UTC().Truncate(time.Second)
+	room := agent.RoomSummary{
+		ID:           "alpha",
+		WorkspaceID:  "ws1",
+		Participants: []string{"agent-a", "human-a"},
+		Members: []agent.RoomMember{
+			{ActorID: "agent-a", Role: "reviewer"},
+			{ActorID: "human-a", Role: "coordinator"},
+		},
+	}
 	messages := []agent.BoardMessage{
-		{ID: "m1", CreatedAt: base.Add(-2 * time.Minute)},
-		{ID: "m2", CreatedAt: base.Add(-1 * time.Minute)},
-		{ID: "m3", CreatedAt: base},
+		{ID: "m1", Recipient: "agent-a", Status: agent.BoardMessageStatusUnread, CreatedAt: base.Add(-2 * time.Minute)},
+		{ID: "m2", Recipient: "agent-a", Status: agent.BoardMessageStatusUnread, CreatedAt: base.Add(-1 * time.Minute)},
+		{ID: "m3", Recipient: "agent-a", Status: agent.BoardMessageStatusUnread, CreatedAt: base},
 	}
 	cursorAt := messages[1].CreatedAt
 	runtime := roomLoopRuntimeState{
@@ -2464,9 +2473,113 @@ func TestRoomLoopInitialMessagesRespectsPersistedCursor(t *testing.T) {
 		DeliveryCursorAt:        &cursorAt,
 	}
 
-	got := roomLoopInitialMessages(messages, 2, runtime)
+	got := roomLoopInitialMessages(room, messages, 2, runtime)
 	if len(got) != 1 || got[0].ID != "m3" {
 		t.Fatalf("roomLoopInitialMessages=%v want [m3]", got)
+	}
+}
+
+func TestRoomLoopInitialMessagesFiltersHistoricalBroadcastNoise(t *testing.T) {
+	base := time.Now().UTC().Truncate(time.Second)
+	room := agent.RoomSummary{
+		ID:           "alpha",
+		WorkspaceID:  "ws1",
+		Participants: []string{"agent-a", "human-a"},
+		Members: []agent.RoomMember{
+			{ActorID: "agent-a", Role: "reviewer"},
+			{ActorID: "human-a", Role: "coordinator"},
+		},
+	}
+	messages := []agent.BoardMessage{
+		{ID: "m1", Recipient: agent.BroadcastRecipient, Kind: agent.BoardMessageKindEpic, Status: agent.BoardMessageStatusUnread, CreatedAt: base.Add(-2 * time.Minute)},
+		{ID: "m2", Recipient: agent.BroadcastRecipient, Kind: agent.BoardMessageKindMilestone, Status: agent.BoardMessageStatusUnread, CreatedAt: base.Add(-1 * time.Minute)},
+		{ID: "m3", Recipient: "agent-a", Kind: agent.BoardMessageKindReviewRequest, Status: agent.BoardMessageStatusUnread, CreatedAt: base},
+	}
+
+	got := roomLoopInitialMessages(room, messages, 3, roomLoopRuntimeState{})
+	if len(got) != 1 || got[0].ID != "m3" {
+		t.Fatalf("roomLoopInitialMessages=%v want [m3]", got)
+	}
+}
+
+func TestRoomLoopInitialMessagesKeepsActionableBroadcasts(t *testing.T) {
+	base := time.Now().UTC().Truncate(time.Second)
+	room := agent.RoomSummary{
+		ID:           "alpha",
+		WorkspaceID:  "ws1",
+		Participants: []string{"agent-a", "human-a"},
+		Members: []agent.RoomMember{
+			{ActorID: "agent-a", Role: "reviewer"},
+			{ActorID: "human-a", Role: "coordinator"},
+		},
+	}
+	messages := []agent.BoardMessage{
+		{
+			ID:          "m1",
+			Recipient:   agent.BroadcastRecipient,
+			Kind:        agent.BoardMessageKindInstruction,
+			AckRequired: true,
+			Status:      agent.BoardMessageStatusUnread,
+			CreatedAt:   base,
+		},
+	}
+
+	got := roomLoopInitialMessages(room, messages, 1, roomLoopRuntimeState{})
+	if len(got) != 1 || got[0].ID != "m1" {
+		t.Fatalf("roomLoopInitialMessages=%v want [m1]", got)
+	}
+}
+
+func TestRoomLoopInitialMessagesRespectsPersistedCursorAndFiltersBroadcasts(t *testing.T) {
+	base := time.Now().UTC().Truncate(time.Second)
+	room := agent.RoomSummary{
+		ID:           "alpha",
+		WorkspaceID:  "ws1",
+		Participants: []string{"agent-a", "human-a"},
+		Members: []agent.RoomMember{
+			{ActorID: "agent-a", Role: "reviewer"},
+			{ActorID: "human-a", Role: "coordinator"},
+		},
+	}
+	messages := []agent.BoardMessage{
+		{ID: "m1", Recipient: "agent-a", Status: agent.BoardMessageStatusUnread, CreatedAt: base.Add(-2 * time.Minute)},
+		{ID: "m2", Recipient: "agent-a", Status: agent.BoardMessageStatusUnread, CreatedAt: base.Add(-1 * time.Minute)},
+		{ID: "m3", Recipient: agent.BroadcastRecipient, Kind: agent.BoardMessageKindMilestoneSummary, Status: agent.BoardMessageStatusUnread, CreatedAt: base},
+		{ID: "m4", Recipient: "agent-a", Kind: agent.BoardMessageKindReviewRequest, Status: agent.BoardMessageStatusUnread, CreatedAt: base.Add(30 * time.Second)},
+	}
+	cursorAt := messages[1].CreatedAt
+	runtime := roomLoopRuntimeState{
+		DeliveryCursorMessageID: messages[1].ID,
+		DeliveryCursorAt:        &cursorAt,
+	}
+
+	got := roomLoopInitialMessages(room, messages, 4, runtime)
+	if len(got) != 1 || got[0].ID != "m4" {
+		t.Fatalf("roomLoopInitialMessages=%v want [m4]", got)
+	}
+}
+
+func TestRoomLoopSeedSeenMessagesSuppressesFilteredStartupBroadcasts(t *testing.T) {
+	base := time.Now().UTC().Truncate(time.Second)
+	room := agent.RoomSummary{
+		ID:           "alpha",
+		WorkspaceID:  "ws1",
+		Participants: []string{"agent-a", "human-a"},
+		Members: []agent.RoomMember{
+			{ActorID: "agent-a", Role: "reviewer"},
+			{ActorID: "human-a", Role: "coordinator"},
+		},
+	}
+	messages := []agent.BoardMessage{
+		{ID: "m1", Recipient: agent.BroadcastRecipient, Kind: agent.BoardMessageKindMilestoneContract, Status: agent.BoardMessageStatusUnread, CreatedAt: base},
+		{ID: "m2", Recipient: "agent-a", Kind: agent.BoardMessageKindReviewRequest, Status: agent.BoardMessageStatusUnread, CreatedAt: base.Add(time.Second)},
+	}
+	seen := roomLoopSeedSeenMessages(room, messages, 2, roomLoopRuntimeState{})
+	if _, ok := seen["m1"]; !ok {
+		t.Fatalf("expected filtered broadcast to be seeded as seen: %v", seen)
+	}
+	if _, ok := seen["m2"]; ok {
+		t.Fatalf("expected replayable direct message to remain unseen: %v", seen)
 	}
 }
 
@@ -8836,6 +8949,75 @@ func TestRunRoomRestoreRequiresExistingMember(t *testing.T) {
 	}
 	if env.Error.Code != string(protocol.ErrorCodeENotFound) {
 		t.Fatalf("error.code=%q want %q", env.Error.Code, protocol.ErrorCodeENotFound)
+	}
+}
+
+func TestRunRoomRestorePersistsProviderSubmitModeForFeatureScopedActor(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "restore-room", "Restore Room", "", []string{"human-a=coordinator", "feat-internal-grouping-gemini-review-b=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	originalHook := roomRestoreLaunchHook
+	roomRestoreLaunchHook = func(_ context.Context, opts roomRestoreLaunchOptions) (roomRestoreLaunchResult, error) {
+		if opts.ActorID != "feat-internal-grouping-gemini-review-b" {
+			t.Fatalf("opts.ActorID = %q", opts.ActorID)
+		}
+		if opts.Agent != "gemini" {
+			t.Fatalf("opts.Agent = %q", opts.Agent)
+		}
+		return roomRestoreLaunchResult{
+			Backend:           "tmux",
+			Session:           "room-alpha-gemini",
+			PaneID:            "%31",
+			ParticipantID:     "feat-internal-grouping-gemini-review-b",
+			TransportEndpoint: "/tmp/agentctl-pane/room-alpha-gemini/feat-internal-grouping-gemini-review-b.sock",
+			TransportKind:     "pane_socket",
+			AttachCommand:     "tmux attach-session -t room-alpha-gemini",
+			SocketMode:        "default",
+			Command:           "gemini --resume session-1",
+		}, nil
+	}
+	defer func() { roomRestoreLaunchHook = originalHook }()
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomRestore(cmd, workspace, "restore-room", "feat-internal-grouping-gemini-review-b", "tmux", "room-alpha-gemini", "gemini", "interactive", nil, "session-1", "", "direct", false); err != nil {
+		t.Fatalf("runRoomRestore: %v", err)
+	}
+
+	data := decodeRoomEnvelope(t, out)
+	roomRaw, ok := data["room"].(map[string]any)
+	if !ok {
+		t.Fatalf("room type=%T", data["room"])
+	}
+	members, ok := roomRaw["members"].([]any)
+	if !ok {
+		t.Fatalf("members=%T", roomRaw["members"])
+	}
+	found := false
+	for _, raw := range members {
+		member, ok := raw.(map[string]any)
+		if !ok || member["actor_id"] != "feat-internal-grouping-gemini-review-b" {
+			continue
+		}
+		found = true
+		binding, ok := member["delivery_binding"].(map[string]any)
+		if !ok {
+			t.Fatalf("delivery_binding=%T want map", member["delivery_binding"])
+		}
+		if got := strings.TrimSpace(fmt.Sprint(binding["submit_mode"])); got != agent.RoomDeliverySubmitModeEnterSplit {
+			t.Fatalf("submit_mode=%q want %q", got, agent.RoomDeliverySubmitModeEnterSplit)
+		}
+		if got := strings.TrimSpace(fmt.Sprint(binding["transport_kind"])); got != agent.PaneSocketTransportKind {
+			t.Fatalf("transport_kind=%q want %q", got, agent.PaneSocketTransportKind)
+		}
+	}
+	if !found {
+		t.Fatalf("feature scoped gemini reviewer not found in members=%v", members)
 	}
 }
 

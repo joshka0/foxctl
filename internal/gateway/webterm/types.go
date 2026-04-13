@@ -42,16 +42,6 @@ const (
 	TmuxAttachTimeout = 10 * time.Second
 )
 
-// RoomConfig holds per-room terminal configuration.
-type RoomConfig struct {
-	// TmuxSession is the tmux session name for this room.
-	TmuxSession string
-
-	// MaxConnections is the max concurrent WebSocket connections for this room.
-	// Zero means use the hub default.
-	MaxConnections int
-}
-
 // HubConfig holds hub-level configuration.
 type HubConfig struct {
 	// MaxConnectionsPerRoom is the default maximum concurrent connections per room.

@@ -22,6 +22,7 @@ import (
 	"github.com/rs/zerolog"
 	"tailscale.com/tsnet"
 
+	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/gateway/sshterm"
 	"github.com/jkatigb/agentctl/internal/gateway/webterm"
 )
@@ -111,6 +112,7 @@ type Server struct {
 	termHub  *webterm.Hub
 	sshSrv   *sshterm.Server
 	sshRooms *sshterm.RoomManager
+	rooms    *agentpane.TerminalRoomService
 }
 
 // NewServer creates a new gateway server.
@@ -124,6 +126,7 @@ func NewServer(opts Options, log zerolog.Logger) *Server {
 
 	sshConfig := sshterm.DefaultSSHServerConfig()
 	sshRooms := sshterm.NewRoomManager(sshConfig, log)
+	termHub := webterm.NewHub(webterm.HubConfig{}, log)
 
 	return &Server{
 		opts: opts,
@@ -133,8 +136,9 @@ func NewServer(opts Options, log zerolog.Logger) *Server {
 			Store: "starting",
 			Tmux:  "ok",
 		},
-		termHub:  webterm.NewHub(webterm.HubConfig{}, log),
+		termHub:  termHub,
 		sshRooms: sshRooms,
+		rooms:    agentpane.NewTerminalRoomService(termHub, sshRooms),
 	}
 }
 
@@ -169,38 +173,6 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// RegisterTerminalRoom registers a room for terminal access.
-// The room will be accessible at /terminal/{roomID}, /ws/terminal/{roomID},
-// and via SSH at room-<roomID>@<hostname>.
-func (s *Server) RegisterTerminalRoom(roomID, tmuxSession string, maxConnections int) {
-	config := webterm.RoomConfig{
-		TmuxSession:    tmuxSession,
-		MaxConnections: maxConnections,
-	}
-	s.termHub.RegisterRoom(roomID, config)
-
-	// Also register for SSH access
-	sshConfig := sshterm.RoomConfig{
-		TmuxSession: tmuxSession,
-		MaxSessions: maxConnections,
-	}
-	s.sshRooms.RegisterRoom(roomID, sshConfig)
-
-	s.log.Info().
-		Str("room", roomID).
-		Str("tmux_session", tmuxSession).
-		Msg("Terminal room registered (web + SSH)")
-}
-
-// UnregisterTerminalRoom removes a room's terminal access (web + SSH).
-func (s *Server) UnregisterTerminalRoom(roomID string) {
-	s.termHub.UnregisterRoom(roomID)
-	s.sshRooms.UnregisterRoom(roomID)
-	s.log.Info().
-		Str("room", roomID).
-		Msg("Terminal room unregistered (web + SSH)")
-}
-
 // TerminalHub returns the web terminal hub for direct access.
 func (s *Server) TerminalHub() *webterm.Hub {
 	return s.termHub
@@ -209,20 +181,6 @@ func (s *Server) TerminalHub() *webterm.Hub {
 // SSHRooms returns the SSH room manager for direct access.
 func (s *Server) SSHRooms() *sshterm.RoomManager {
 	return s.sshRooms
-}
-
-// RegisterSSHRoom registers a room for SSH terminal access.
-// The room will be accessible via `ssh room-<roomID>@<hostname>`.
-func (s *Server) RegisterSSHRoom(roomID, tmuxSession string, maxSessions int) {
-	config := sshterm.RoomConfig{
-		TmuxSession: tmuxSession,
-		MaxSessions: maxSessions,
-	}
-	s.sshRooms.RegisterRoom(roomID, config)
-	s.log.Info().
-		Str("room", roomID).
-		Str("tmux_session", tmuxSession).
-		Msg("SSH room registered")
 }
 
 // UnregisterSSHRoom removes a room's SSH terminal access.
@@ -263,13 +221,6 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	_ = enc.Encode(health)
 }
 
-// roomRegisterRequest is the request body for POST /api/rooms.
-type roomRegisterRequest struct {
-	RoomID         string `json:"room_id"`
-	TmuxSession    string `json:"tmux_session"`
-	MaxConnections int    `json:"max_connections,omitempty"`
-}
-
 // handleRooms handles POST /api/rooms (room registration).
 func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -277,30 +228,33 @@ func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req roomRegisterRequest
+	var req struct {
+		RoomID         string `json:"room_id"`
+		TmuxSession    string `json:"tmux_session"`
+		MaxConnections int    `json:"max_connections,omitempty"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeGatewayError(w, http.StatusBadRequest, "EARG", "invalid JSON body: "+err.Error())
 		return
 	}
-	req.RoomID = strings.TrimSpace(req.RoomID)
-	req.TmuxSession = strings.TrimSpace(req.TmuxSession)
-	if req.RoomID == "" {
-		writeGatewayError(w, http.StatusBadRequest, "EARG", "room_id is required")
-		return
-	}
-	if req.TmuxSession == "" {
-		writeGatewayError(w, http.StatusBadRequest, "EARG", "tmux_session is required")
-		return
-	}
 
-	s.RegisterTerminalRoom(req.RoomID, req.TmuxSession, req.MaxConnections)
+	roomConfig, err := agentpane.NormalizeRegisterRequest(agentpane.TerminalRoomRegisterRequest{
+		RoomID:         req.RoomID,
+		TmuxSession:    req.TmuxSession,
+		MaxConnections: req.MaxConnections,
+	})
+	if err != nil {
+		writeGatewayError(w, http.StatusBadRequest, "EARG", err.Error())
+		return
+	}
+	s.rooms.Register(roomConfig)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":       "registered",
-		"room_id":      req.RoomID,
-		"tmux_session": req.TmuxSession,
+		"room_id":      roomConfig.RoomID,
+		"tmux_session": roomConfig.TmuxSession,
 	})
 }
 
@@ -318,7 +272,7 @@ func (s *Server) handleRoomByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.UnregisterTerminalRoom(roomID)
+	s.rooms.Unregister(roomID)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

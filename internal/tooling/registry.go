@@ -1,3 +1,6 @@
+// Package tooling provides generic callable-tool substrate shared across
+// skills, codemap tooling, and other runtime-neutral workflows. It is not the
+// home for runtime-facing agent tool wrappers.
 package tooling
 
 import (

@@ -1935,7 +1935,7 @@ func tmuxPaneSocketPath(scopeID, participantID string) string {
 	if participant == "" {
 		participant = "pane"
 	}
-	return filepath.Join(os.TempDir(), "agentctl-pane", scope, participant+".sock")
+	return filepath.Join(tmuxSocketBaseDir(), scope, participant+".sock")
 }
 
 func tmuxPaneReadyPath(scopeID, participantID string) string {
@@ -1947,7 +1947,16 @@ func tmuxPaneReadyPath(scopeID, participantID string) string {
 	if participant == "" {
 		participant = "pane"
 	}
-	return filepath.Join(os.TempDir(), "agentctl-pane", scope, participant+".ready")
+	return filepath.Join(tmuxSocketBaseDir(), scope, participant+".ready")
+}
+
+func tmuxSocketBaseDir() string {
+	defaultRoot := filepath.Join(os.TempDir(), "agentctl-pane")
+	shortRoot := filepath.Join(string(filepath.Separator), "tmp", "agentctl-pane")
+	if len(shortRoot) < len(defaultRoot) {
+		return shortRoot
+	}
+	return defaultRoot
 }
 
 func tmuxSanitizeSocketComponent(value string) string {

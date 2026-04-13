@@ -115,8 +115,9 @@ type ParticipantState struct {
 func DefaultRoomDeliverySubmitMode(actorID string) string {
 	t := strings.ToLower(strings.TrimSpace(actorID))
 	switch {
-	case strings.HasPrefix(t, "droid"),
-		strings.HasPrefix(t, "codex"),
+	case strings.HasPrefix(t, "droid"):
+		return RoomDeliverySubmitModeEnter
+	case strings.HasPrefix(t, "codex"),
 		strings.HasPrefix(t, "cursor"),
 		strings.HasPrefix(t, "agent"):
 		return RoomDeliverySubmitModeComposerCtrlEnter
@@ -127,6 +128,21 @@ func DefaultRoomDeliverySubmitMode(actorID string) string {
 	default:
 		return RoomDeliverySubmitModeNewline
 	}
+}
+
+func DefaultRoomDeliverySubmitModeForProvider(provider, actorID string) string {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	switch p {
+	case "droid":
+		return RoomDeliverySubmitModeEnter
+	case "codex", "cursor", "agent":
+		return RoomDeliverySubmitModeComposerCtrlEnter
+	case "gemini":
+		return RoomDeliverySubmitModeEnterSplit
+	case "claude":
+		return RoomDeliverySubmitModeEnter
+	}
+	return DefaultRoomDeliverySubmitMode(actorID)
 }
 
 func NormalizeRoomDeliveryBinding(actorID string, binding *RoomDeliveryBinding) *RoomDeliveryBinding {

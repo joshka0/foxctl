@@ -122,6 +122,11 @@ agentctl run code/semantic_search --input '{"format": "tree"}'
 agentctl run code/semantic_search --input '{"query": "your task topic", "format": "tree", "limit": 30}'
 ```
 
+If your change touches `internal/*` package placement, read
+`docs/architecture/package-topology.md` before editing. Use that family map as
+the placement rule, and do not treat `internal/v2/*` as the default destination
+for new non-runtime code.
+
 For relationship navigation (calls/references/imports), build the repo graph:
 
 ```bash

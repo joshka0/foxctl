@@ -10,7 +10,13 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/jkatigb/agentctl/internal/agentpane"
 )
+
+func registerHandlerRoom(hub *Hub, roomID, tmuxSession string, maxConnections int) {
+	hub.RegisterTerminalRoom(agentpane.ResolveTerminalRoomConfig(roomID, tmuxSession, maxConnections))
+}
 
 func TestHandler_RegisterRoutes(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
@@ -20,7 +26,7 @@ func TestHandler_RegisterRoutes(t *testing.T) {
 	handler.RegisterRoutes(mux)
 
 	// Verify routes are registered by making requests
-	hub.RegisterRoom("test-room", RoomConfig{TmuxSession: "test-session"})
+	registerHandlerRoom(hub, "test-room", "test-session", 0)
 
 	// Test terminal page
 	req := httptest.NewRequest(http.MethodGet, "/terminal/test-room", nil)
@@ -33,7 +39,7 @@ func TestHandler_RegisterRoutes(t *testing.T) {
 func TestHandler_TerminalPage_RoomNotFound(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
 	handler := NewHandler(hub, testHubLogger())
-	hub.RegisterRoom("existing-room", RoomConfig{})
+	registerHandlerRoom(hub, "existing-room", "", 0)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -71,7 +77,7 @@ func TestHandler_TerminalPage_MissingRoomID(t *testing.T) {
 func TestHandler_TerminalPage_MethodNotAllowed(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
 	handler := NewHandler(hub, testHubLogger())
-	hub.RegisterRoom("test-room", RoomConfig{})
+	registerHandlerRoom(hub, "test-room", "", 0)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -114,7 +120,7 @@ func TestHandler_ErrorJSON(t *testing.T) {
 func TestHandler_TerminalPage_ContainsHTML(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
 	handler := NewHandler(hub, testHubLogger())
-	hub.RegisterRoom("test-room", RoomConfig{TmuxSession: "test-session"})
+	registerHandlerRoom(hub, "test-room", "test-session", 0)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -256,7 +262,7 @@ func TestGetAllowedOrigins(t *testing.T) {
 func TestHandler_WebSocket_OriginAllowlist(t *testing.T) {
 	hub := NewHub(HubConfig{}, testHubLogger())
 	handler := NewHandler(hub, testHubLogger())
-	hub.RegisterRoom("test-room", RoomConfig{TmuxSession: "test-session"})
+	registerHandlerRoom(hub, "test-room", "test-session", 0)
 
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)

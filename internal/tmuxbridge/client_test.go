@@ -187,6 +187,16 @@ func TestShellQuoteArgs(t *testing.T) {
 	}
 }
 
+func TestTmuxPaneSocketPathUsesSocketSafeLength(t *testing.T) {
+	got := tmuxPaneSocketPath("feat/internal-topology", "feat-internal-grouping-gemini-review-f")
+	if !strings.HasSuffix(got, ".sock") {
+		t.Fatalf("tmuxPaneSocketPath() = %q, want .sock suffix", got)
+	}
+	if len(got) >= 104 {
+		t.Fatalf("tmuxPaneSocketPath() length = %d, want < 104 (%q)", len(got), got)
+	}
+}
+
 func TestBuildAgentPaneCommandResume(t *testing.T) {
 	codexCmd, err := buildAgentPaneCommand("codex", "interactive", []string{"--model", "gpt-5"}, "session-123")
 	if err != nil {

@@ -2,16 +2,18 @@ package sshterm
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/rs/zerolog"
+
+	"github.com/jkatigb/agentctl/internal/agentpane"
 )
 
 // RoomManager manages SSH terminal rooms and tracks active sessions.
 type RoomManager struct {
 	mu       sync.RWMutex
 	rooms    map[string]*sshRoom
+	registry *agentpane.TerminalRoomRegistry
 	sessions map[string]*SSHSession // session ID -> session
 	config   SSHServerConfig
 	log      zerolog.Logger
@@ -19,7 +21,6 @@ type RoomManager struct {
 
 // sshRoom tracks a room and its active SSH sessions.
 type sshRoom struct {
-	config   RoomConfig
 	sessions map[string]*SSHSession // session ID -> session
 }
 
@@ -27,32 +28,35 @@ type sshRoom struct {
 func NewRoomManager(config SSHServerConfig, log zerolog.Logger) *RoomManager {
 	return &RoomManager{
 		rooms:    make(map[string]*sshRoom),
+		registry: agentpane.NewTerminalRoomRegistry(),
 		sessions: make(map[string]*SSHSession),
 		config:   config,
 		log:      log.With().Str("component", "sshterm-rooms").Logger(),
 	}
 }
 
-// RegisterRoom registers a room for SSH terminal access.
-func (m *RoomManager) RegisterRoom(roomID string, config RoomConfig) {
+// RegisterTerminalRoom registers a room from the canonical runtime-terminal config.
+func (m *RoomManager) RegisterTerminalRoom(config agentpane.TerminalRoomConfig) {
+	m.registry.Register(config)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := m.rooms[roomID]; ok {
-		m.log.Debug().Str("room", roomID).Msg("Room already registered, updating config")
-		m.rooms[roomID].config = config
+	if _, ok := m.rooms[config.RoomID]; ok {
+		m.log.Debug().Str("room", config.RoomID).Msg("Room already registered, updating config")
 		return
 	}
 
-	m.rooms[roomID] = &sshRoom{
-		config:   config,
+	m.rooms[config.RoomID] = &sshRoom{
 		sessions: make(map[string]*SSHSession),
 	}
-	m.log.Debug().Str("room", roomID).Msg("Room registered for SSH")
+	m.log.Debug().Str("room", config.RoomID).Msg("Room registered for SSH")
 }
 
 // UnregisterRoom removes a room and disconnects all active sessions.
 func (m *RoomManager) UnregisterRoom(roomID string) {
+	m.registry.Unregister(roomID)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -73,21 +77,12 @@ func (m *RoomManager) UnregisterRoom(roomID string) {
 
 // HasRoom returns true if the room is registered.
 func (m *RoomManager) HasRoom(roomID string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	_, ok := m.rooms[roomID]
-	return ok
+	return m.registry.HasRoom(roomID)
 }
 
-// RoomConfig returns the config for a room.
-func (m *RoomManager) RoomConfig(roomID string) (RoomConfig, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	room, ok := m.rooms[roomID]
-	if !ok {
-		return RoomConfig{}, false
-	}
-	return room.config, true
+// TerminalRoomConfig returns the canonical runtime-terminal config for a room.
+func (m *RoomManager) TerminalRoomConfig(roomID string) (agentpane.TerminalRoomConfig, bool) {
+	return m.registry.RoomConfig(roomID)
 }
 
 // AddSession adds an SSH session to a room.
@@ -101,12 +96,13 @@ func (m *RoomManager) AddSession(roomID string, session *SSHSession) error {
 		return &RoomNotFoundError{RoomID: roomID}
 	}
 
-	maxSessions := room.config.MaxSessions
-	if maxSessions <= 0 {
-		maxSessions = m.config.MaxSessions
+	cfg, cfgOK := m.registry.RoomConfig(roomID)
+	if !cfgOK {
+		return &RoomNotFoundError{RoomID: roomID}
 	}
 
-	if maxSessions > 0 && len(room.sessions) >= maxSessions {
+	maxSessions := agentpane.EffectiveRoomLimit(cfg.MaxConnections, m.config.MaxSessions)
+	if agentpane.RoomLimitReached(len(room.sessions), maxSessions) {
 		return &SessionLimitError{
 			RoomID:     roomID,
 			Current:    len(room.sessions),
@@ -195,32 +191,16 @@ func (m *RoomManager) ActiveSessions(roomID string) []SessionInfo {
 // The expected format is "room-<id>" (e.g., "room-my-room" → "my-room").
 // Returns empty string if the username doesn't match the pattern.
 func ParseRoomIDFromUser(user string) string {
-	prefix := "room-"
-	if len(user) <= len(prefix) {
-		return ""
-	}
-	if user[:len(prefix)] != prefix {
-		return ""
-	}
-	return user[len(prefix):]
+	return agentpane.ParseRoomTerminalUser(user)
 }
 
 // TmuxSessionForRoom returns the tmux session name for a room.
 func (m *RoomManager) TmuxSessionForRoom(_ context.Context, roomID string) (string, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	room, ok := m.rooms[roomID]
+	cfg, ok := m.registry.RoomConfig(roomID)
 	if !ok {
 		return "", &RoomNotFoundError{RoomID: roomID}
 	}
-
-	sessionName := room.config.TmuxSession
-	if sessionName == "" {
-		sessionName = fmt.Sprintf("room-%s", roomID)
-	}
-
-	return sessionName, nil
+	return cfg.TmuxSession, nil
 }
 
 // Close removes all rooms and sessions.
@@ -235,5 +215,6 @@ func (m *RoomManager) Close() {
 	}
 
 	m.rooms = make(map[string]*sshRoom)
+	m.registry.Reset()
 	m.sessions = make(map[string]*SSHSession)
 }

@@ -442,8 +442,8 @@ func TestRelayViaParticipantsUsesPaneSocket(t *testing.T) {
 		if msg.Recipient != "droid-a" {
 			t.Fatalf("recipient=%q want droid-a", msg.Recipient)
 		}
-		if msg.SubmitMode != agentpane.SubmitModeComposerCtrlEnter {
-			t.Fatalf("submit mode=%q want %q", msg.SubmitMode, agentpane.SubmitModeComposerCtrlEnter)
+		if msg.SubmitMode != agentpane.SubmitModeEnter {
+			t.Fatalf("submit mode=%q want %q", msg.SubmitMode, agentpane.SubmitModeEnter)
 		}
 		return agentpane.ControlResponse{OK: true, BytesWritten: len(msg.Content)}, nil
 	}

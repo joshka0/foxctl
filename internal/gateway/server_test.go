@@ -18,6 +18,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/jkatigb/agentctl/internal/agentpane"
 )
 
 // testLogger creates a logger that discards output for tests that don't need
@@ -670,7 +672,7 @@ func TestHandleRooms_MethodNotAllowed(t *testing.T) {
 func TestHandleRoomByID_Unregister(t *testing.T) {
 	srv := NewServer(DefaultOptions(), testLogger())
 	// Pre-register a room so we have something to unregister.
-	srv.RegisterTerminalRoom("del-room", "agentctl-sandbox-del-room", 0)
+	srv.rooms.Register(agentpane.ResolveTerminalRoomConfig("del-room", "agentctl-sandbox-del-room", 0))
 	require.True(t, srv.termHub.HasRoom("del-room"))
 
 	handler := srv.Handler()
@@ -701,6 +703,18 @@ func TestHandleRoomByID_Unregister_MethodNotAllowed(t *testing.T) {
 	handler.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+}
+
+func TestRegisterTerminalRoom_DefaultTmuxSession(t *testing.T) {
+	srv := NewServer(DefaultOptions(), testLogger())
+
+	srv.rooms.Register(agentpane.ResolveTerminalRoomConfig("alpha-room", "", 2))
+
+	assert.True(t, srv.termHub.HasRoom("alpha-room"))
+
+	sshConfig, ok := srv.sshRooms.TerminalRoomConfig("alpha-room")
+	require.True(t, ok)
+	assert.Equal(t, agentpane.DefaultRoomTmuxSession("alpha-room"), sshConfig.TmuxSession)
 }
 
 func TestHandleRoomByID_Unregister_MissingID(t *testing.T) {
