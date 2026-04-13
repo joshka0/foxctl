@@ -32,7 +32,7 @@ import (
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/runtime/hooks"
 	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/shellreduce"
+	"github.com/jkatigb/agentctl/internal/tooling/shellreduce"
 	"github.com/jkatigb/agentctl/internal/storage"
 	einoadapter "github.com/jkatigb/agentctl/internal/v2/adapters/eino"
 )

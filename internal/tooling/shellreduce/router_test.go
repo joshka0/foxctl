@@ -58,14 +58,14 @@ func TestRouteArgvGrep(t *testing.T) {
 }
 
 func TestRouteArgvSedLineRange(t *testing.T) {
-	route, err := RouteArgv([]string{"sed", "-n", "10,20p", "internal/shellreduce/router.go"})
+	route, err := RouteArgv([]string{"sed", "-n", "10,20p", "internal/tooling/shellreduce/router.go"})
 	if err != nil {
 		t.Fatalf("RouteArgv: %v", err)
 	}
 	if route.Intent != "line_range" || route.Skill != "code/context_grep" {
 		t.Fatalf("route=%+v", route)
 	}
-	if route.Input["file_path"] != "internal/shellreduce/router.go" {
+	if route.Input["file_path"] != "internal/tooling/shellreduce/router.go" {
 		t.Fatalf("file_path=%v", route.Input["file_path"])
 	}
 }
@@ -104,20 +104,20 @@ func TestRouteArgvWC(t *testing.T) {
 }
 
 func TestRouteArgvNLPipedToSedLineRange(t *testing.T) {
-	route, err := RouteArgv([]string{"nl", "-ba", "internal/shellreduce/router.go", "|", "sed", "-n", "10,20p"})
+	route, err := RouteArgv([]string{"nl", "-ba", "internal/tooling/shellreduce/router.go", "|", "sed", "-n", "10,20p"})
 	if err != nil {
 		t.Fatalf("RouteArgv: %v", err)
 	}
 	if route.Intent != "line_range" || route.Skill != "code/context_grep" {
 		t.Fatalf("route=%+v", route)
 	}
-	if route.Input["file_path"] != "internal/shellreduce/router.go" {
+	if route.Input["file_path"] != "internal/tooling/shellreduce/router.go" {
 		t.Fatalf("file_path=%v", route.Input["file_path"])
 	}
 }
 
 func TestRouteArgvRGPipedToHead(t *testing.T) {
-	route, err := RouteArgv([]string{"rg", "-n", "func", "internal/shellreduce", "|", "head", "-n", "5"})
+	route, err := RouteArgv([]string{"rg", "-n", "func", "internal/tooling/shellreduce", "|", "head", "-n", "5"})
 	if err != nil {
 		t.Fatalf("RouteArgv: %v", err)
 	}
