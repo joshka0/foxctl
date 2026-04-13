@@ -4,69 +4,31 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
+	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
-type HistoryRecordKind string
+type HistoryRecordKind = historypkg.HistoryRecordKind
 
 const (
-	HistoryRecordKindInsight HistoryRecordKind = "insight"
-	HistoryRecordKindNotable HistoryRecordKind = "notable_insight"
-	HistoryRecordKindAnswer  HistoryRecordKind = "history_answer"
+	HistoryRecordKindInsight = historypkg.HistoryRecordKindInsight
+	HistoryRecordKindNotable = historypkg.HistoryRecordKindNotable
+	HistoryRecordKindAnswer  = historypkg.HistoryRecordKindAnswer
 )
 
-// HistoryRecord is the normalized retrieval unit for transcript-derived history.
-// The intended embedding text is RetrievalText; EvidenceRefs and frame bounds preserve provenance.
-type HistoryRecord struct {
-	RecordID          string             `json:"record_id"`
-	Kind              HistoryRecordKind  `json:"kind"`
-	ConversationID    string             `json:"conversation_id,omitempty"`
-	GroupID           string             `json:"group_id,omitempty"`
-	SessionIDs        []string           `json:"session_ids,omitempty"`
-	SourceStartedAt   time.Time          `json:"source_started_at,omitempty"`
-	Summary           string             `json:"summary"`
-	RetrievalText     string             `json:"retrieval_text"`
-	Confidence        float64            `json:"confidence"`
-	InsightKind       InsightKind        `json:"insight_kind,omitempty"`
-	InsightStatus     InsightStatus      `json:"insight_status,omitempty"`
-	NotableKind       NotableInsightKind `json:"notable_kind,omitempty"`
-	HistoryQuestionID HistoryQuestionID  `json:"history_question_id,omitempty"`
-	AnswerLabel       string             `json:"answer_label,omitempty"`
-	SourceBasis       string             `json:"source_basis,omitempty"`
-	Tags              []string           `json:"tags,omitempty"`
-	FrameStart        *int               `json:"frame_start,omitempty"`
-	FrameEnd          *int               `json:"frame_end,omitempty"`
-	EvidenceRefs      []string           `json:"evidence_refs,omitempty"`
-	NormalizedHash    string             `json:"normalized_hash"`
-}
+type HistoryRecord = historypkg.HistoryRecord
 
-type HistoryRecordContext struct {
-	ConversationID  string
-	GroupID         string
-	SessionIDs      []string
-	SourceStartedAt time.Time
-}
+type HistoryRecordContext = historypkg.HistoryRecordContext
 
-type HistoryRecordEmbedFunc func(context.Context, string) ([]float32, error)
+type HistoryRecordEmbedFunc = historypkg.HistoryRecordEmbedFunc
 
-type PersistedHistoryRecord struct {
-	Name       string            `json:"name"`
-	Type       string            `json:"type"`
-	RecordID   string            `json:"record_id"`
-	Kind       HistoryRecordKind `json:"kind"`
-	Summary    string            `json:"summary"`
-	Embedded   bool              `json:"embedded"`
-	FrameStart *int              `json:"frame_start,omitempty"`
-	FrameEnd   *int              `json:"frame_end,omitempty"`
-}
+type PersistedHistoryRecord = historypkg.PersistedHistoryRecord
 
 func BuildHistoryRecords(profile *HistoryProfile, ctx HistoryRecordContext, insights []DecisionInsight, notable []NotableInsight, answers []HistoryAnswer) []HistoryRecord {
 	out := make([]HistoryRecord, 0, len(insights)+len(notable)+len(answers))
@@ -89,140 +51,19 @@ func BuildHistoryRecords(profile *HistoryProfile, ctx HistoryRecordContext, insi
 }
 
 func PersistHistoryRecords(ctx context.Context, store storage.MemoryStore, workspace, ownerID, sessionID string, records []HistoryRecord, embed HistoryRecordEmbedFunc) ([]PersistedHistoryRecord, error) {
-	workspace = strings.TrimSpace(workspace)
-	ownerID = strings.TrimSpace(ownerID)
-	if workspace == "" {
-		return nil, fmt.Errorf("transcriptpipeline: persist history records: workspace is required")
-	}
-	if ownerID == "" {
-		return nil, fmt.Errorf("transcriptpipeline: persist history records: owner id is required")
-	}
-	if len(records) == 0 {
-		return nil, nil
-	}
-	out := make([]PersistedHistoryRecord, 0, len(records))
-	workspacePath := ws.Normalize(workspace)
-	workspaceFamilyPath := ws.FamilyPath(workspacePath)
-	for _, item := range records {
-		entryType, ok := historyRecordMemoryType(item.Kind)
-		if !ok {
-			continue
-		}
-		summary := summarizeInsightText(firstNonEmpty(item.Summary, item.RetrievalText))
-		if summary == "" {
-			continue
-		}
-		name := HistoryRecordMemoryName(ownerID, item)
-		result, err := json.Marshal(map[string]any{
-			"source":                "sessions/history-records",
-			"record_id":             item.RecordID,
-			"record_kind":           item.Kind,
-			"conversation_id":       item.ConversationID,
-			"group_id":              item.GroupID,
-			"session_ids":           item.SessionIDs,
-			"source_started_at":     formatOptionalRecordTime(item.SourceStartedAt),
-			"workspace_path":        workspacePath,
-			"workspace_family_path": workspaceFamilyPath,
-			"summary":               item.Summary,
-			"retrieval_text":        item.RetrievalText,
-			"confidence":            item.Confidence,
-			"insight_kind":          item.InsightKind,
-			"insight_status":        item.InsightStatus,
-			"notable_kind":          item.NotableKind,
-			"history_question_id":   item.HistoryQuestionID,
-			"answer_label":          item.AnswerLabel,
-			"source_basis":          item.SourceBasis,
-			"tags":                  item.Tags,
-			"frame_start":           item.FrameStart,
-			"frame_end":             item.FrameEnd,
-			"evidence_refs":         item.EvidenceRefs,
-			"normalized_hash":       item.NormalizedHash,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("transcriptpipeline: persist history record marshal: %w", err)
-		}
-		if err := SaveMemoryWithRetry(ctx, store, storage.NamedEntry{
-			Name:      name,
-			Type:      entryType,
-			Workspace: workspace,
-			Summary:   summary,
-			Result:    result,
-			SessionID: strings.TrimSpace(sessionID),
-		}); err != nil {
-			return nil, fmt.Errorf("transcriptpipeline: persist history record save: %w", err)
-		}
-		embedded := false
-		if embed != nil && strings.TrimSpace(item.RetrievalText) != "" {
-			if vec, err := embed(ctx, item.RetrievalText); err == nil && len(vec) > 0 {
-				if err := store.UpdateEmbedding(ctx, name, workspace, vec); err == nil {
-					embedded = true
-				}
-			}
-		}
-		out = append(out, PersistedHistoryRecord{
-			Name:       name,
-			Type:       entryType,
-			RecordID:   item.RecordID,
-			Kind:       item.Kind,
-			Summary:    summary,
-			Embedded:   embedded,
-			FrameStart: item.FrameStart,
-			FrameEnd:   item.FrameEnd,
-		})
-	}
-	return out, nil
+	return historypkg.PersistHistoryRecords(ctx, store, workspace, ownerID, sessionID, records, embed)
 }
 
 func ReconcileHistoryRecordPrefix(ctx context.Context, store storage.MemoryStore, workspace, prefix string, keep []PersistedHistoryRecord) ([]string, error) {
-	workspace = strings.TrimSpace(workspace)
-	prefix = strings.TrimSpace(prefix)
-	if workspace == "" || prefix == "" {
-		return nil, nil
-	}
-
-	keepSet := make(map[string]struct{}, len(keep))
-	for _, item := range keep {
-		keepSet[item.Name] = struct{}{}
-	}
-
-	var removed []string
-	offset := 0
-	for {
-		entries, total, err := store.ListFiltered(ctx, workspace, storage.MemoryListFilter{Types: historyRecordMemoryTypes()}, 200, offset)
-		if err != nil {
-			return nil, fmt.Errorf("transcriptpipeline: reconcile history records list: %w", err)
-		}
-		for _, entry := range entries {
-			if !strings.HasPrefix(entry.Name, prefix) {
-				continue
-			}
-			if _, ok := keepSet[entry.Name]; ok {
-				continue
-			}
-			if err := store.Delete(ctx, entry.Name, workspace); err != nil {
-				return nil, fmt.Errorf("transcriptpipeline: reconcile history records delete %s: %w", entry.Name, err)
-			}
-			removed = append(removed, entry.Name)
-		}
-		offset += len(entries)
-		if offset >= total || len(entries) == 0 {
-			break
-		}
-	}
-	sort.Strings(removed)
-	return removed, nil
+	return historypkg.ReconcileHistoryRecordPrefix(ctx, store, workspace, prefix, keep)
 }
 
 func TranscriptHistoryPrefix(ownerID string) string {
-	return fmt.Sprintf("transcript-history:%s:", strings.TrimSpace(ownerID))
+	return historypkg.TranscriptHistoryPrefix(ownerID)
 }
 
 func HistoryRecordMemoryName(ownerID string, record HistoryRecord) string {
-	hash := strings.TrimPrefix(strings.TrimSpace(record.NormalizedHash), "sha256:")
-	if hash == "" {
-		hash = strings.TrimPrefix(historyRecordHash(record.Kind, string(record.HistoryQuestionID), firstNonEmpty(record.RetrievalText, record.Summary)), "sha256:")
-	}
-	return TranscriptHistoryPrefix(ownerID) + fmt.Sprintf("%s:%s", historyRecordTypeSuffix(record.Kind), hash)
+	return historypkg.HistoryRecordMemoryName(ownerID, record)
 }
 
 func historyRecordMemoryType(kind HistoryRecordKind) (string, bool) {
@@ -268,8 +109,8 @@ func historyRecordsFromInsights(ctx HistoryRecordContext, insights []DecisionIns
 		start, end := frameBoundsFromIndices(item.EvidenceFrameIndices)
 		record := newHistoryRecord(ctx, HistoryRecordKindInsight, summary, truncateInline(fmt.Sprintf("%s (%s): %s", titleLikeLabel(string(item.Kind)), strings.ToLower(string(item.Status)), summary), 320))
 		record.Confidence = clampConfidence(item.Confidence)
-		record.InsightKind = item.Kind
-		record.InsightStatus = item.Status
+		record.InsightKind = string(item.Kind)
+		record.InsightStatus = string(item.Status)
 		record.SourceBasis = strings.TrimSpace(item.SourceBasis)
 		record.Tags = normalizeTagList(item.Tags)
 		record.FrameStart = start
@@ -294,7 +135,7 @@ func historyRecordsFromNotables(ctx HistoryRecordContext, notable []NotableInsig
 		}
 		record := newHistoryRecord(ctx, HistoryRecordKindNotable, headline, truncateInline(buildNotableRetrievalText(item), 360))
 		record.Confidence = notableConfidence(item.Kind)
-		record.NotableKind = item.Kind
+		record.NotableKind = string(item.Kind)
 		record.FrameStart = intPtr(item.StartFrame)
 		record.FrameEnd = intPtr(item.EndFrame)
 		record.EvidenceRefs = []string{fmt.Sprintf("frames:%d-%d", item.StartFrame, item.EndFrame)}

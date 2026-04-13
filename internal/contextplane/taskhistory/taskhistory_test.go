@@ -236,7 +236,7 @@ func TestCollectorCollectIncludesTranscriptHistory(t *testing.T) {
 		{QuestionID: tphistory.HistoryQuestionActiveDirections, Answer: "Inject history_pack.agent_brief into task continuity.", Confidence: 0.74},
 		{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Use the transcript handoff in task-history-summary.", Confidence: 0.72},
 	}
-	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 		ConversationID: "conv-task-history",
 		SessionIDs:     []string{"sess-history"},
 	}, []transcriptpipeline.DecisionInsight{
@@ -273,7 +273,7 @@ func TestCollectorCollectIncludesTranscriptHistory(t *testing.T) {
 	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-history", "sess-history", records, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords: %v", err)
 	}
-	unrelated := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	unrelated := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 		ConversationID: "conv-other",
 		SessionIDs:     []string{"sess-other"},
 	}, nil, nil, []tphistory.HistoryAnswer{
@@ -379,7 +379,7 @@ func TestCollectorCollectFallsBackToLatestTranscriptHistoryWithinScope(t *testin
 		t.Fatalf("open memory: %v", err)
 	}
 	defer memStore.Close()
-	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 		ConversationID: "conv-family-fallback",
 		SessionIDs:     []string{"sess-family-fallback"},
 	}, nil, nil, []tphistory.HistoryAnswer{
@@ -472,7 +472,7 @@ func TestCollectorCollectAggregatesRecurringMistakesAcrossOwners(t *testing.T) {
 	}
 	defer memStore.Close()
 	for _, owner := range []string{"sess-a", "sess-b"} {
-		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 			ConversationID: "conv-" + owner,
 			SessionIDs:     []string{owner},
 		}, nil, nil, []tphistory.HistoryAnswer{
@@ -538,7 +538,7 @@ func TestCollectTranscriptRecurringLearningsAcrossOwners(t *testing.T) {
 		"sess-b": "Non-presence hooks function as real backend components. | Guard unguarded components.",
 	}
 	for owner, learning := range fixtures {
-		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 			ConversationID: "conv-" + owner,
 			SessionIDs:     []string{owner},
 		}, nil, nil, []tphistory.HistoryAnswer{
@@ -581,7 +581,7 @@ func TestSearchTranscriptHistoryAnswers_UsesRetrievalTextLexically(t *testing.T)
 			Confidence: 0.72,
 		},
 	}
-	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 		ConversationID: "conv-lexical",
 		SessionIDs:     []string{"sess-lexical"},
 	}, nil, nil, answers)
@@ -623,7 +623,7 @@ func TestSearchTranscriptHistoryAnswers_ReturnsFullOwnerAnswerBundle(t *testing.
 		{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Carry the structural gap into the next compare pass.", Confidence: 0.72},
 		{QuestionID: tphistory.HistoryQuestionAcceptedLearnings, Answer: "Most surfaces are still first-pass renderers over rebuilt endpoints rather than polished destination experiences.", Confidence: 0.8},
 	}
-	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 		ConversationID: "conv-owner-bundle",
 		SessionIDs:     []string{"sess-owner-bundle"},
 	}, nil, nil, answers)
@@ -676,7 +676,7 @@ func TestSearchTranscriptHistoryAnswers_ScopeControlsWorkspaceVsFamily(t *testin
 	}
 	defer memStore.Close()
 
-	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 		ConversationID: "conv-family",
 		SessionIDs:     []string{"sess-family"},
 	}, nil, nil, []tphistory.HistoryAnswer{{
@@ -816,7 +816,7 @@ func TestCollectorCollectUsesTranscriptWorkerForRetrievedBrief(t *testing.T) {
 	}
 	defer memStore.Close()
 
-	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 		ConversationID: "conv-worker",
 		SessionIDs:     []string{"sess-worker"},
 	}, []transcriptpipeline.DecisionInsight{
@@ -924,7 +924,7 @@ func TestCollectTranscriptFamilyOverview_AggregatesRecentOwners(t *testing.T) {
 			},
 		},
 	} {
-		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 			ConversationID: "conv-" + fixture.owner,
 			SessionIDs:     []string{fixture.owner},
 		}, nil, nil, fixture.answers)
@@ -1002,7 +1002,7 @@ func TestCollectTranscriptFamilyOverview_FocusQuerySelectsMatchingLane(t *testin
 		},
 	}
 	for _, fixture := range fixtures {
-		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+		records := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 			ConversationID: "conv-" + fixture.owner,
 			SessionIDs:     []string{fixture.owner},
 		}, nil, nil, fixture.answers)
@@ -1058,7 +1058,7 @@ func TestCollectTranscriptFamilyOverview_DateRangeFiltersOwners(t *testing.T) {
 	newAnswers := []tphistory.HistoryAnswer{
 		{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Implement transcript-derived recursive memory consolidation.", Label: "recursive memory consolidation", Confidence: 0.8},
 	}
-	newRecords := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), transcriptpipeline.HistoryRecordContext{
+	newRecords := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
 		ConversationID: "conv-new",
 		SessionIDs:     []string{"sess-new"},
 	}, nil, nil, newAnswers)

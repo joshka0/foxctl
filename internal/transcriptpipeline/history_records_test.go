@@ -64,12 +64,12 @@ func TestBuildHistoryRecords_AnchorsDerivedTexts(t *testing.T) {
 			if item.FrameStart == nil || item.FrameEnd == nil || *item.FrameStart != 2 || *item.FrameEnd != 3 {
 				t.Fatalf("insight frame bounds=%v..%v want 2..3", item.FrameStart, item.FrameEnd)
 			}
-			if item.RetrievalText == "" || item.InsightKind != InsightKindDirection {
+			if item.RetrievalText == "" || item.InsightKind != string(InsightKindDirection) {
 				t.Fatalf("insight record=%+v", item)
 			}
 		case HistoryRecordKindNotable:
 			foundNotable = true
-			if item.NotableKind != NotableInsightMisunderstanding {
+			if item.NotableKind != string(NotableInsightMisunderstanding) {
 				t.Fatalf("notable kind=%q want %q", item.NotableKind, NotableInsightMisunderstanding)
 			}
 			if item.FrameStart == nil || item.FrameEnd == nil || *item.FrameStart != 4 || *item.FrameEnd != 5 {
