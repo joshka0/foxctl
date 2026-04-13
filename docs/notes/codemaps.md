@@ -182,7 +182,7 @@ Each entry has:
   plugins hook in.
 - **Prompt**:\
   “Map the http/openapi skill and plugin protocol in agentctl. Start at the core
-  OpenAPI implementation under `internal/openapi/*` (auth, pagination, client,
+  OpenAPI implementation under `internal/interfaces/openapi/*` (auth, pagination, client,
   loader, retry), then show how the `http/openapi` skill wraps it
   (skills/http_openapi). Trace the request flow from CLI or agent through spec
   loading, auth selection, pagination, and retries, down to HTTP client calls.

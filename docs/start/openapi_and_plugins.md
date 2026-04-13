@@ -48,7 +48,7 @@ Key behavior (see `docs/spec/core_profile_v1.md` §3 and
 ## Built-in Auth Strategies
 
 `http/openapi` has built-in auth strategies that map standard security schemes
-onto headers or query parameters (see `internal/openapi/auth`).
+onto headers or query parameters (see `internal/interfaces/openapi/auth`).
 
 Common schemes:
 
@@ -72,7 +72,7 @@ Secrets generally come from:
 ## Pagination Strategies
 
 The skill auto-detects or accepts explicit pagination strategies (see
-`internal/openapi/pagination`):
+`internal/interfaces/openapi/pagination`):
 
 - **Link headers** – `Link: <url>; rel="next"` (GitHub-style)
 - **Cursor fields** – body fields like `next` or `next_page_token`
@@ -118,7 +118,7 @@ The following examples show the **shape** of typical plugins. They mirror the
 (now-simplified) code examples that used to live directly in `AGENTS.md`.
 
 > These are illustrative; prefer the real types and helpers in
-> `docs/spec/plugin_protocol.md` and `internal/openapi/plugin` when implementing
+> `docs/spec/plugin_protocol.md` and `internal/interfaces/openapi/plugin` when implementing
 > production plugins.
 
 ### Auth Plugin (pseudo-code)

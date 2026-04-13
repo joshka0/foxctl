@@ -42,7 +42,7 @@ Prefer adding new packages under one of these stable families:
 | `internal/v2` | Newer **agent/runtime/orchestration** stack only | `v2/core`, `v2/services`, `v2/runtime`, `v2/adapters` |
 | `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane | current context family |
 | `internal/intelligence/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |
-| `internal/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/openapi` | Interface and transport layers | current interface family |
+| `internal/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi` | Interface and transport layers | current interface family |
 
 ## Target Shape
 
@@ -140,7 +140,7 @@ These package families are peer families, not “legacy” in the same sense:
 | `internal/storage/*` | Shared persistence layer used by both legacy and v2 paths |
 | `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane, not old runtime scaffolding |
 | `internal/intelligence/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Intelligence and retrieval plane |
-| `internal/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/openapi` | Interface and transport layers |
+| `internal/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi` | Interface and transport layers |
 | `internal/domain`, `internal/platform`, `internal/protocol` | Foundations, not generation-specific runtime code |
 
 ## Practical Grouping Guidance

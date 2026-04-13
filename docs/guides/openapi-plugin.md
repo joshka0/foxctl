@@ -481,5 +481,5 @@ More plugin examples available at:
 
 - [OpenAPI Skill Specification](../spec/openapi_skill.md) - Skill behavior and plugin integration
 - [Plugin Protocol](../spec/v1/plugin_protocol.md) - Plugin wire contract
-- [Plugin Manager Source](../../internal/openapi/plugin/manager.go)
+- [Plugin Manager Source](../../internal/interfaces/openapi/plugin/manager.go)
 - [Example Plugins](../../plugins/)

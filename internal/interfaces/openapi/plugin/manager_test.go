@@ -222,8 +222,17 @@ func projectRoot(t *testing.T) string {
 	if !ok {
 		t.Fatalf("unable to resolve caller")
 	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
-	return root
+	dir := filepath.Dir(file)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("unable to find repo root from %s", file)
+		}
+		dir = parent
+	}
 }
 
 func pluginBinaryName(name string) string {

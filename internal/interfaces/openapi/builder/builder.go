@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/jkatigb/agentctl/internal/openapi/loader"
+	"github.com/jkatigb/agentctl/internal/interfaces/openapi/loader"
 )
 
 // Params organizes request parameters by OpenAPI location.

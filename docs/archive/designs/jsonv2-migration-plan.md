@@ -35,8 +35,8 @@ fails.
 | `internal/domain/backup/backup.go` | 129 | `Duration` | Add `format:units` |
 | `internal/intelligence/indexing/embedding/worker.go` | 21 | `PollInterval` | Add `format:units` |
 | `internal/intelligence/indexing/embedding/worker.go` | 27 | `ShutdownTimeout` | Add `format:units` |
-| `internal/openapi/retry/retry.go` | 24 | `InitialDelay` | Add `format:units` |
-| `internal/openapi/retry/retry.go` | 25 | `MaxDelay` | Add `format:units` |
+| `internal/interfaces/openapi/retry/retry.go` | 24 | `InitialDelay` | Add `format:units` |
+| `internal/interfaces/openapi/retry/retry.go` | 25 | `MaxDelay` | Add `format:units` |
 | `internal/agent/optimization/reflection.go` | 51 | `AvgDuration` | Add `format:units` |
 | `internal/agent/optimization/prompt_optimizer.go` | 114 | `Duration` | Add `format:units` |
 
@@ -255,7 +255,7 @@ The codebase already follows good practices:
 | 1 | `skills/code_llm_search/main.go` | Add `format:units` |
 | 1 | `internal/domain/backup/backup.go` | Add `format:units` |
 | 1 | `internal/intelligence/indexing/embedding/worker.go` | Add `format:units` (2 fields) |
-| 1 | `internal/openapi/retry/retry.go` | Add `format:units` (2 fields) |
+| 1 | `internal/interfaces/openapi/retry/retry.go` | Add `format:units` (2 fields) |
 | 1 | `internal/agent/optimization/reflection.go` | Add `format:units` |
 | 1 | `internal/agent/optimization/prompt_optimizer.go` | Add `format:units` |
 | 1 | `internal/platform/config/config.go` | Add `format:units` (2 fields) |

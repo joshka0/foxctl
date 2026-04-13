@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
-	"github.com/jkatigb/agentctl/internal/openapi/loader"
+	"github.com/jkatigb/agentctl/internal/interfaces/openapi/loader"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"

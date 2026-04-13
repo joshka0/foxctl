@@ -42,7 +42,7 @@ invoke arbitrary OpenAPI 3.x operations with:
 
 ### 2.1 Packages
 
-- `internal/openapi/`
+- `internal/interfaces/openapi/`
   - `loader.go` — load spec from path / CAS / memory
   - `resolver.go` — map `operationId` → method, path, parameter schema
   - `params.go` — coerce & validate `params` payload
@@ -51,7 +51,7 @@ invoke arbitrary OpenAPI 3.x operations with:
   - `client.go` — request execution, retries, response capture
   - `summarize.go` — CAS wrapping + envelope summaries
 - `skills/http_openapi/` (or similar)
-  - Small `main.go` wiring stdin/stdout envelopes to `internal/openapi`
+  - Small `main.go` wiring stdin/stdout envelopes to `internal/interfaces/openapi`
 - `cmd/agentctl/cmd/openapi.go`
   - CLI helpers: `openapi import|describe|validate|test`
   - `agentctl run http/openapi` uses this skill via normal `run` path
