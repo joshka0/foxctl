@@ -41,7 +41,7 @@ The system keeps one authority per concern:
 
 ### Out of Scope
 
-1. Replacing `internal/workflow/*` DAG skill workflows.
+1. Replacing `internal/runtime/orchestration/workflow/*` DAG skill workflows.
 2. Bypassing overseer with direct scheduler spawn.
 3. Defining provider-specific Codex JSON-RPC details.
 4. Full multi-tenant control plane.
@@ -129,7 +129,7 @@ Use `spawn.Response` as authoritative for service outcome:
 
 ### 7.2 Suggested Package Layout
 
-1. `internal/workflow/frontmatter` for `WORKFLOW.md` parsing/validation.
+1. `internal/runtime/orchestration/workflow/frontmatter` for `WORKFLOW.md` parsing/validation.
 2. `internal/v2/core/orchestration` for canonical orchestration types/state machine.
 3. `internal/v2/services/orchestration_service.go` for orchestration command boundary.
 4. `internal/v2/runtime/orchestration/*` for long-lived dispatcher/reconciler components.

@@ -320,7 +320,7 @@ High-density files:
 | `skills/code_semantic_search/main.go` | 25+ |
 | `internal/storage/interfaces.go` | 20+ |
 | `internal/agent/types/types.go` | 30+ |
-| `internal/workflow/types.go` | 25+ |
+| `internal/runtime/orchestration/workflow/types.go` | 25+ |
 | `internal/domain/envelope/envelope.go` | 25+ |
 
 **v2 Behavior:** `omitempty` works the same by default. Use

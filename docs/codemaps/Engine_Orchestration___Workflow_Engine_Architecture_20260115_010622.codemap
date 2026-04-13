@@ -7,7 +7,7 @@
     "generationSource": "generationWithTraces",
     "generationTimestamp": "2026-01-15T01:06:22+02:00",
     "mode": "SMART",
-    "originalPrompt": "Explore: engine orchestration and workflow engine. Start from: internal/engine/engine.go, internal/engine/llmchat_engine.go, internal/workflow/engine.go"
+    "originalPrompt": "Explore: engine orchestration and workflow engine. Start from: internal/engine/engine.go, internal/engine/llmchat_engine.go, internal/runtime/orchestration/workflow/engine.go"
   },
   "title": "Engine Orchestration \u0026 Workflow Engine Architecture",
   "traces": [
@@ -278,7 +278,7 @@
         },
         {
           "id": "5b",
-          "path": "internal/workflow/engine.go",
+          "path": "internal/runtime/orchestration/workflow/engine.go",
           "lineNumber": 63,
           "lineContent": "func (e *Engine) Run(ctx context.Context, nameOrPath string, inputs map[string]any) (*WorkflowResult, error) {",
           "title": "Engine run entry",
@@ -286,7 +286,7 @@
         },
         {
           "id": "5c",
-          "path": "internal/workflow/engine.go",
+          "path": "internal/runtime/orchestration/workflow/engine.go",
           "lineNumber": 65,
           "lineContent": "\thandle, err := e.loader.Load(nameOrPath)",
           "title": "Workflow loading",
@@ -294,7 +294,7 @@
         },
         {
           "id": "5d",
-          "path": "internal/workflow/engine.go",
+          "path": "internal/runtime/orchestration/workflow/engine.go",
           "lineNumber": 82,
           "lineContent": "\tdag, err := NewDAG(wf.Steps)",
           "title": "DAG construction",
@@ -302,7 +302,7 @@
         },
         {
           "id": "5e",
-          "path": "internal/workflow/engine.go",
+          "path": "internal/runtime/orchestration/workflow/engine.go",
           "lineNumber": 96,
           "lineContent": "\tscheduler := NewScheduler(dag, executor, WithMaxWorkers(e.maxWorkers))",
           "title": "Scheduler creation",
@@ -310,7 +310,7 @@
         },
         {
           "id": "5f",
-          "path": "internal/workflow/engine.go",
+          "path": "internal/runtime/orchestration/workflow/engine.go",
           "lineNumber": 97,
           "lineContent": "\tresult, err := scheduler.Run(ctx, execCtx)",
           "title": "Scheduler execution",
@@ -318,14 +318,14 @@
         },
         {
           "id": "5g",
-          "path": "internal/workflow/engine.go",
+          "path": "internal/runtime/orchestration/workflow/engine.go",
           "lineNumber": 107,
           "lineContent": "\t\toutputs, err := e.extractOutputs(wf.Outputs, execCtx)",
           "title": "Output extraction",
           "description": "Renders output templates from step results"
         }
       ],
-      "traceTextDiagram": "Workflow Engine: Load and Execute DAG Pipeline\n├── CLI Command Entry\n│   └── agentctl workflow run \u003cname\u003e \u003c-- 5a\n│       └── engine.Run(ctx, nameOrPath, inputs) \u003c-- 5b\n│           ├── loader.Load(nameOrPath) \u003c-- 5c\n│           │   └── Parse YAML \u0026 Validate \u003c-- internal/workflow/loader.go:99\n│           ├── NewDAG(wf.Steps) \u003c-- 5d\n│           │   ├── Build dependency graph \u003c-- internal/workflow/dag.go:26\n│           │   ├── Topological sort \u003c-- internal/workflow/dag.go:56\n│           │   └── Compute parallel batches \u003c-- internal/workflow/dag.go:63\n│           ├── NewScheduler(dag, executor) \u003c-- 5e\n│           ├── scheduler.Run(ctx, execCtx) \u003c-- 5f\n│           │   └── Execute steps in batches \u003c-- internal/workflow/scheduler.go:63\n│           └── extractOutputs(wf.Outputs) \u003c-- 5g\n│               └── Render output templates \u003c-- internal/workflow/engine.go:161\n└── Return WorkflowResult \u003c-- internal/workflow/engine.go:112",
+      "traceTextDiagram": "Workflow Engine: Load and Execute DAG Pipeline\n├── CLI Command Entry\n│   └── agentctl workflow run \u003cname\u003e \u003c-- 5a\n│       └── engine.Run(ctx, nameOrPath, inputs) \u003c-- 5b\n│           ├── loader.Load(nameOrPath) \u003c-- 5c\n│           │   └── Parse YAML \u0026 Validate \u003c-- internal/runtime/orchestration/workflow/loader.go:99\n│           ├── NewDAG(wf.Steps) \u003c-- 5d\n│           │   ├── Build dependency graph \u003c-- internal/runtime/orchestration/workflow/dag.go:26\n│           │   ├── Topological sort \u003c-- internal/runtime/orchestration/workflow/dag.go:56\n│           │   └── Compute parallel batches \u003c-- internal/runtime/orchestration/workflow/dag.go:63\n│           ├── NewScheduler(dag, executor) \u003c-- 5e\n│           ├── scheduler.Run(ctx, execCtx) \u003c-- 5f\n│           │   └── Execute steps in batches \u003c-- internal/runtime/orchestration/workflow/scheduler.go:63\n│           └── extractOutputs(wf.Outputs) \u003c-- 5g\n│               └── Render output templates \u003c-- internal/runtime/orchestration/workflow/engine.go:161\n└── Return WorkflowResult \u003c-- internal/runtime/orchestration/workflow/engine.go:112",
       "traceGuide": "## Motivation\n\nAgentctl needs to orchestrate **multi-step automated pipelines** where skills are chained together with data flowing between them. For example: find all Go files, then analyze each one, then aggregate results. The workflow engine solves this by allowing users to define **DAG-based workflows in YAML** that specify steps, dependencies, and data transformations [5c].\n\nWithout this system, users would need to manually chain `agentctl run` commands and pass outputs between them—error-prone and not parallelizable.\n\n## Details\n\n### Workflow Definition\n\nWorkflows are YAML files with **metadata, inputs, steps, and outputs**. Each step specifies a skill to run and its input (which can reference previous step results via templates like `{{.stepId.data}}`). Steps declare dependencies explicitly via `depends_on` or implicitly through template references [5c, 5d].\n\n### Execution Flow\n\nThe engine loads the workflow YAML [5c], builds a **directed acyclic graph (DAG)** from step dependencies [5d], and creates a scheduler with the DAG and a skill executor [5e]. The scheduler runs steps in **topologically-sorted batches** [5f]—steps within a batch execute in parallel (up to `maxWorkers`), while batches execute sequentially to respect dependencies.\n\n### Skill Execution\n\nEach step executes by invoking `agentctl run \u003cskill\u003e --input \u003cjson\u003e` as a subprocess. The executor parses the JSON envelope output and stores results in the execution context, making them available to dependent steps via template rendering [5g].\n\n### Key Features\n\n- **Parallel execution**: Independent steps in the same batch run concurrently\n- **Template-based data flow**: Steps access previous results via Go templates\n- **Loop support**: Steps can iterate over arrays with configurable parallelism\n- **Conditional execution**: Steps can be skipped based on template conditions\n- **Retry logic**: Failed steps can retry with configurable delays"
     },
     {
@@ -335,7 +335,7 @@
       "locations": [
         {
           "id": "6a",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 51,
           "lineContent": "func (s *Scheduler) Run(ctx context.Context, execCtx *ExecutionContext) (*WorkflowResult, error) {",
           "title": "Scheduler run entry",
@@ -343,7 +343,7 @@
         },
         {
           "id": "6b",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 63,
           "lineContent": "\tfor _, batch := range s.dag.Batches() {",
           "title": "Batch iteration",
@@ -351,7 +351,7 @@
         },
         {
           "id": "6c",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 64,
           "lineContent": "\t\tif err := s.executeBatch(ctx, batch, execCtx, completed, \u0026completedMu, result); err != nil {",
           "title": "Batch execution",
@@ -359,7 +359,7 @@
         },
         {
           "id": "6d",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 120,
           "lineContent": "\t\t\t\texecResult := s.executeStep(ctx, stepID, execCtx)",
           "title": "Worker step execution",
@@ -367,7 +367,7 @@
         },
         {
           "id": "6e",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 222,
           "lineContent": "\trenderedInput, err := s.renderStepInput(step, execCtx)",
           "title": "Template rendering",
@@ -375,7 +375,7 @@
         },
         {
           "id": "6f",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 238,
           "lineContent": "\tresult, err := s.executeWithRetry(ctx, step, renderedInput)",
           "title": "Step execution with retry",
@@ -383,14 +383,14 @@
         },
         {
           "id": "6g",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 144,
           "lineContent": "\t\texecCtx.Set(execResult.stepID, execResult.result)",
           "title": "Result storage",
           "description": "Stores step result in execution context for dependent steps"
         }
       ],
-      "traceTextDiagram": "Workflow Scheduler Execution Flow\n└── Scheduler.Run() entry \u003c-- 6a\n    ├── for each DAG batch (topological order) \u003c-- 6b\n    │   └── executeBatch() \u003c-- 6c\n    │       ├── create worker pool (up to maxWorkers) \u003c-- internal/workflow/scheduler.go:104\n    │       ├── spawn worker goroutines \u003c-- internal/workflow/scheduler.go:117\n    │       │   └── worker: executeStep() \u003c-- 6d\n    │       │       ├── renderStepInput() \u003c-- 6e\n    │       │       │   └── template.Render() \u003c-- internal/workflow/template.go:114\n    │       │       └── executeWithRetry() \u003c-- 6f\n    │       │           └── executor.Execute() \u003c-- internal/workflow/scheduler.go:433\n    │       │               └── exec agentctl skill \u003c-- internal/workflow/engine.go:201\n    │       └── collect results \u003c-- internal/workflow/scheduler.go:140\n    │           └── execCtx.Set() \u003c-- 6g\n    └── return WorkflowResult \u003c-- internal/workflow/scheduler.go:76",
+      "traceTextDiagram": "Workflow Scheduler Execution Flow\n└── Scheduler.Run() entry \u003c-- 6a\n    ├── for each DAG batch (topological order) \u003c-- 6b\n    │   └── executeBatch() \u003c-- 6c\n    │       ├── create worker pool (up to maxWorkers) \u003c-- internal/runtime/orchestration/workflow/scheduler.go:104\n    │       ├── spawn worker goroutines \u003c-- internal/runtime/orchestration/workflow/scheduler.go:117\n    │       │   └── worker: executeStep() \u003c-- 6d\n    │       │       ├── renderStepInput() \u003c-- 6e\n    │       │       │   └── template.Render() \u003c-- internal/runtime/orchestration/workflow/template.go:114\n    │       │       └── executeWithRetry() \u003c-- 6f\n    │       │           └── executor.Execute() \u003c-- internal/runtime/orchestration/workflow/scheduler.go:433\n    │       │               └── exec agentctl skill \u003c-- internal/runtime/orchestration/workflow/engine.go:201\n    │       └── collect results \u003c-- internal/runtime/orchestration/workflow/scheduler.go:140\n    │           └── execCtx.Set() \u003c-- 6g\n    └── return WorkflowResult \u003c-- internal/runtime/orchestration/workflow/scheduler.go:76",
       "traceGuide": "## Motivation\n\nWorkflows in agentctl are **multi-step pipelines** that chain together skills (like file operations, code analysis, or test execution). The challenge: steps have **dependencies** - you can't analyze files before you've found them, and some steps can run in parallel while others must wait. The Scheduler solves this by executing workflow steps in **dependency order** while **maximizing parallelism** within each level of the dependency graph.\n\n## Details\n\n### Execution Model\n\nThe Scheduler operates on a **DAG (Directed Acyclic Graph)** that has already computed which steps can run in parallel. It processes the workflow in **batches** [6b], where each batch contains steps at the same dependency level - all their dependencies are satisfied, so they can execute concurrently.\n\n### Worker Pool Architecture\n\nFor each batch, the Scheduler creates a **worker pool** limited by `maxWorkers` (default 10). Workers pull step IDs from a channel and execute them concurrently [6d]. This prevents overwhelming the system when a workflow has many parallel steps.\n\n### Step Execution Pipeline\n\nEach step goes through:\n1. **Template rendering** [6e] - Step inputs like `{{.previous_step.data.files}}` are evaluated using results from completed steps\n2. **Retry logic** [6f] - Steps can fail and retry with configurable delays\n3. **Skill invocation** - The actual work happens by spawning `agentctl run \u003cskill\u003e` as a subprocess, passing rendered inputs as JSON\n\n### Result Flow\n\nAs workers complete steps, results are **immediately stored** in the execution context [6g]. This makes data available to dependent steps in the next batch. The context acts as a shared memory space where `step_id → result` mappings accumulate throughout execution.\n\n### Synchronization\n\nThe Scheduler uses a mutex-protected `completed` map to track which steps have finished. After all workers in a batch complete, it moves to the next batch. If any step fails (and error strategy is \"fail\"), the entire workflow stops."
     },
     {
@@ -400,7 +400,7 @@
       "locations": [
         {
           "id": "7a",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 209,
           "lineContent": "\tif step.Loop != nil {",
           "title": "Loop detection",
@@ -408,7 +408,7 @@
         },
         {
           "id": "7b",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 283,
           "lineContent": "\toverValue, err := s.template.RenderString(step.Loop.Over, execCtx)",
           "title": "Loop array rendering",
@@ -416,7 +416,7 @@
         },
         {
           "id": "7c",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 299,
           "lineContent": "\titems, err := parseAsArray(overValue)",
           "title": "Array parsing",
@@ -424,7 +424,7 @@
         },
         {
           "id": "7d",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 316,
           "lineContent": "\tif step.Parallel != nil \u0026\u0026 *step.Parallel \u003e 0 {",
           "title": "Parallelism check",
@@ -432,7 +432,7 @@
         },
         {
           "id": "7e",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 350,
           "lineContent": "\t\t\t\titerCtx := execCtx.Clone()",
           "title": "Iteration context clone",
@@ -440,7 +440,7 @@
         },
         {
           "id": "7f",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 351,
           "lineContent": "\t\t\t\titerCtx.SetVar(step.Loop.As, itm)",
           "title": "Loop variable binding",
@@ -448,7 +448,7 @@
         },
         {
           "id": "7g",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 354,
           "lineContent": "\t\t\t\titerResult := s.executeSingleStep(ctx, step, iterCtx)",
           "title": "Iteration execution",
@@ -456,14 +456,14 @@
         },
         {
           "id": "7h",
-          "path": "internal/workflow/scheduler.go",
+          "path": "internal/runtime/orchestration/workflow/scheduler.go",
           "lineNumber": 380,
           "lineContent": "\t\tData:       allData,",
           "title": "Result aggregation",
           "description": "Aggregates all iteration results into single step result"
         }
       ],
-      "traceTextDiagram": "Workflow Step Execution Flow\n└── executeStep() - step orchestration \u003c-- internal/workflow/scheduler.go:163\n    ├── Condition evaluation (if present) \u003c-- internal/workflow/scheduler.go:180\n    └── Loop detection \u003c-- 7a\n        └── executeLoopStep() - loop handler \u003c-- internal/workflow/scheduler.go:279\n            ├── Render loop.over template \u003c-- 7b\n            ├── Parse as array \u003c-- 7c\n            ├── Check parallelism config \u003c-- 7d\n            ├── Parallel execution branch \u003c-- internal/workflow/scheduler.go:337\n            │   ├── Spawn goroutines (semaphore-limited) \u003c-- internal/workflow/scheduler.go:343\n            │   │   ├── Clone execution context \u003c-- 7e\n            │   │   ├── Bind loop variable \u003c-- 7f\n            │   │   └── Execute step iteration \u003c-- 7g\n            │   └── Wait for completion \u003c-- internal/workflow/scheduler.go:364\n            ├── Sequential execution branch \u003c-- internal/workflow/scheduler.go:326\n            │   └── For each: clone, bind, execute \u003c-- internal/workflow/scheduler.go:327\n            └── Aggregate iteration results \u003c-- 7h",
+      "traceTextDiagram": "Workflow Step Execution Flow\n└── executeStep() - step orchestration \u003c-- internal/runtime/orchestration/workflow/scheduler.go:163\n    ├── Condition evaluation (if present) \u003c-- internal/runtime/orchestration/workflow/scheduler.go:180\n    └── Loop detection \u003c-- 7a\n        └── executeLoopStep() - loop handler \u003c-- internal/runtime/orchestration/workflow/scheduler.go:279\n            ├── Render loop.over template \u003c-- 7b\n            ├── Parse as array \u003c-- 7c\n            ├── Check parallelism config \u003c-- 7d\n            ├── Parallel execution branch \u003c-- internal/runtime/orchestration/workflow/scheduler.go:337\n            │   ├── Spawn goroutines (semaphore-limited) \u003c-- internal/runtime/orchestration/workflow/scheduler.go:343\n            │   │   ├── Clone execution context \u003c-- 7e\n            │   │   ├── Bind loop variable \u003c-- 7f\n            │   │   └── Execute step iteration \u003c-- 7g\n            │   └── Wait for completion \u003c-- internal/runtime/orchestration/workflow/scheduler.go:364\n            ├── Sequential execution branch \u003c-- internal/runtime/orchestration/workflow/scheduler.go:326\n            │   └── For each: clone, bind, execute \u003c-- internal/runtime/orchestration/workflow/scheduler.go:327\n            └── Aggregate iteration results \u003c-- 7h",
       "traceGuide": "## Motivation\n\nWorkflows in agentctl often need to **process arrays of items** - for example, analyzing multiple files, running tests on several modules, or processing a list of API endpoints. The loop execution system [7a] allows workflow steps to **iterate over arrays** while supporting both **sequential and parallel execution** modes, enabling efficient batch processing without requiring separate workflow definitions for each item.\n\n## Details\n\n### Loop Configuration\n\nA workflow step declares a loop using `loop.over` (a template expression that evaluates to an array) and `loop.as` (the variable name for each item) [7b]. The system renders the template expression [7b] and parses it into an array [7c], supporting JSON arrays, string arrays, or template expressions like `{{.previous_step.data.files}}`.\n\n### Execution Modes\n\nThe scheduler checks the `parallel` configuration [7d] to determine execution strategy. **Sequential mode** (parallel=1 or unset) processes items one at a time [7e-7g], while **parallel mode** spawns goroutines with a semaphore to limit concurrency. For each iteration, the system **clones the execution context** [7e] to provide isolation, **binds the loop variable** [7f] (e.g., setting `item` to the current array element), and executes the step [7g].\n\n### Result Aggregation\n\nAfter all iterations complete, the scheduler **aggregates results** [7h] into a single step result containing an array of outputs. This allows downstream steps to reference either the complete array (`{{.step.data}}`) or individual iteration results (`{{.step.iterations}}`), enabling flexible data flow through the workflow pipeline."
     },
     {
@@ -473,7 +473,7 @@
       "locations": [
         {
           "id": "8a",
-          "path": "internal/workflow/dag.go",
+          "path": "internal/runtime/orchestration/workflow/dag.go",
           "lineNumber": 18,
           "lineContent": "func NewDAG(steps []Step) (*DAG, error) {",
           "title": "DAG creation entry",
@@ -481,7 +481,7 @@
         },
         {
           "id": "8b",
-          "path": "internal/workflow/dag.go",
+          "path": "internal/runtime/orchestration/workflow/dag.go",
           "lineNumber": 40,
           "lineContent": "\tfor _, step := range steps {",
           "title": "Explicit dependency processing",
@@ -489,7 +489,7 @@
         },
         {
           "id": "8c",
-          "path": "internal/workflow/dag.go",
+          "path": "internal/runtime/orchestration/workflow/dag.go",
           "lineNumber": 51,
           "lineContent": "\tif err := d.inferDependencies(steps); err != nil {",
           "title": "Implicit dependency inference",
@@ -497,7 +497,7 @@
         },
         {
           "id": "8d",
-          "path": "internal/workflow/dag.go",
+          "path": "internal/runtime/orchestration/workflow/dag.go",
           "lineNumber": 71,
           "lineContent": "\t\trefs := extractStepReferences(step)",
           "title": "Template reference extraction",
@@ -505,7 +505,7 @@
         },
         {
           "id": "8e",
-          "path": "internal/workflow/dag.go",
+          "path": "internal/runtime/orchestration/workflow/dag.go",
           "lineNumber": 56,
           "lineContent": "\torder, err := d.topologicalSort()",
           "title": "Topological sort",
@@ -513,7 +513,7 @@
         },
         {
           "id": "8f",
-          "path": "internal/workflow/dag.go",
+          "path": "internal/runtime/orchestration/workflow/dag.go",
           "lineNumber": 63,
           "lineContent": "\td.batches = d.computeBatches()",
           "title": "Batch computation",
@@ -521,14 +521,14 @@
         },
         {
           "id": "8g",
-          "path": "internal/workflow/dag.go",
+          "path": "internal/runtime/orchestration/workflow/dag.go",
           "lineNumber": 232,
           "lineContent": "\tif len(order) != len(d.nodes) {",
           "title": "Cycle detection",
           "description": "Detects circular dependencies by checking if all nodes were sorted"
         }
       ],
-      "traceTextDiagram": "Workflow DAG Construction Pipeline\n├── NewDAG(steps) entry \u003c-- 8a\n│   ├── Index all steps into nodes map \u003c-- internal/workflow/dag.go:26\n│   ├── Build explicit dependency edges\n│   │   └── for each step.DependsOn \u003c-- 8b\n│   │       └── add edge: step → dependency \u003c-- internal/workflow/dag.go:45\n│   ├── Infer implicit dependencies \u003c-- 8c\n│   │   └── extractStepReferences(step) \u003c-- 8d\n│   │       └── parse templates for {{.stepId}} \u003c-- internal/workflow/dag.go:155\n│   │           └── add inferred edges \u003c-- internal/workflow/dag.go:77\n│   ├── Compute execution order\n│   │   └── topologicalSort() (Kahn's) \u003c-- 8e\n│   │       └── cycle detection check \u003c-- 8g\n│   └── Group into parallel batches\n│       └── computeBatches() by level \u003c-- 8f\n│           └── return DAG with batches \u003c-- internal/workflow/dag.go:65",
+      "traceTextDiagram": "Workflow DAG Construction Pipeline\n├── NewDAG(steps) entry \u003c-- 8a\n│   ├── Index all steps into nodes map \u003c-- internal/runtime/orchestration/workflow/dag.go:26\n│   ├── Build explicit dependency edges\n│   │   └── for each step.DependsOn \u003c-- 8b\n│   │       └── add edge: step → dependency \u003c-- internal/runtime/orchestration/workflow/dag.go:45\n│   ├── Infer implicit dependencies \u003c-- 8c\n│   │   └── extractStepReferences(step) \u003c-- 8d\n│   │       └── parse templates for {{.stepId}} \u003c-- internal/runtime/orchestration/workflow/dag.go:155\n│   │           └── add inferred edges \u003c-- internal/runtime/orchestration/workflow/dag.go:77\n│   ├── Compute execution order\n│   │   └── topologicalSort() (Kahn's) \u003c-- 8e\n│   │       └── cycle detection check \u003c-- 8g\n│   └── Group into parallel batches\n│       └── computeBatches() by level \u003c-- 8f\n│           └── return DAG with batches \u003c-- internal/runtime/orchestration/workflow/dag.go:65",
       "traceGuide": "## Motivation\n\nWorkflows in agentctl are defined as YAML files with multiple steps that can reference each other's outputs. For example, a step might use `{{.find_files.data.results}}` to access data from a previous `find_files` step. The **DAG construction system** solves the problem of determining the correct execution order: which steps can run in parallel, which must wait for dependencies, and detecting impossible circular dependencies.\n\nWithout this system, the workflow engine wouldn't know that a step referencing `{{.analyze.data}}` must wait for the `analyze` step to complete first, or that steps with no dependencies can safely run concurrently.\n\n## Details\n\n### Dependency Graph Building\n\nThe `NewDAG` function [8a] constructs a directed acyclic graph from workflow steps in three phases:\n\n1. **Explicit dependencies**: Processes `depends_on` declarations from the YAML [8b], creating edges like `step → dependency` [dag.go:45]\n\n2. **Implicit dependencies**: Infers dependencies by parsing template expressions [8c]. The `extractStepReferences` function [8d] scans step inputs for patterns like `{{.stepId.data}}` [dag.go:155], automatically adding edges when one step references another's output [dag.go:77]\n\n3. **Validation**: Runs topological sort using Kahn's algorithm [8e] to compute execution order and detect cycles [8g]\n\n### Parallel Execution Batches\n\nAfter building the dependency graph, `computeBatches` [8f] groups steps into **levels** where all steps in a level have no dependencies on each other. This enables the scheduler to execute entire batches in parallel while respecting dependencies between batches. The final DAG contains both the topological order and these parallel execution batches [dag.go:65].\n\n### Key Insight\n\nThe system makes workflow authoring easier by **automatically inferring dependencies from template references**—users don't need to manually declare `depends_on` for every step relationship, only when the dependency isn't expressed through data flow."
     }
   ],

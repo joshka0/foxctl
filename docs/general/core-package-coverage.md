@@ -7,7 +7,7 @@ Machine-friendly coverage map for core `internal/*` concepts.
 | Group | Core packages | Current docs | Coverage | Recommended action |
 |------|----------------|--------------|----------|--------------------|
 | Agent runtime/orchestration | `internal/agent`, `internal/daemon`, `internal/execution`, `internal/engine` | `docs/general/agent-daemon.md`, `docs/architecture/system-architecture.md` | Partial | Keep architecture canonical; maintain runtime details in `docs/general/runtime-orchestration.md` |
-| Session/run pipeline | `internal/context/sessionkit`, `internal/skillrun`, `internal/runservice`, `internal/queue`, `internal/workflow` | `docs/architecture/system-architecture.md` | Partial | Documented in `docs/general/runtime-orchestration.md` |
+| Session/run pipeline | `internal/context/sessionkit`, `internal/skillrun`, `internal/runservice`, `internal/queue`, `internal/runtime/orchestration/workflow` | `docs/architecture/system-architecture.md` | Partial | Documented in `docs/general/runtime-orchestration.md` |
 | Policy/prompt layer | `internal/agentpolicy`, `internal/agentprompt` | `docs/architecture/system-architecture.md` | Previously missing | Documented in `docs/general/agent-policy-and-prompts.md` |
 | Context/observability | `internal/context/updater`, `internal/runtime/observability`, `internal/runtime/hooks` | `docs/general/context-and-observability.md`, `docs/general/events.md`, `docs/general/hooks.md` | Partial | Documented in `docs/general/context-and-observability.md` |
 | Storage/state | `internal/storage/*` | `docs/general/storage.md` | Covered | Keep as canonical storage reference |

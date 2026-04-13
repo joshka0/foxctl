@@ -17,7 +17,7 @@ What's missing: **Authority/importance signals**. A function called by 50 other 
 | **Task Graph** | `internal/intelligence/analysis/tasksgraph/` | Task → Task (depends_on) |
 | **Symbol Call Graph** | `internal/intelligence/indexing/symbol/` | Symbol → Symbol (calls) |
 | **Import Graph** | `skills/code_imports/` | File → File (imports) |
-| **Workflow DAG** | `internal/workflow/` | Step → Step (depends_on) |
+| **Workflow DAG** | `internal/runtime/orchestration/workflow/` | Step → Step (depends_on) |
 | **Overseer Scoring** | `internal/intelligence/analysis/overseer/` | Combines PageRank + CriticalPath + Mailbox |
 
 ### Gap Analysis

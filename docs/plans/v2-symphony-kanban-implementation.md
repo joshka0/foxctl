@@ -38,12 +38,12 @@ Goal:
 
 Primary files:
 
-1. `internal/workflow/frontmatter/types.go` (new)
-2. `internal/workflow/frontmatter/parser.go` (new)
-3. `internal/workflow/frontmatter/parser_test.go` (new)
-4. `internal/workflow/frontmatter/validate.go` (new)
-5. `internal/workflow/frontmatter/validate_test.go` (new)
-6. `internal/workflow/loader.go` (wire coexistence rule only, no DAG behavior break)
+1. `internal/runtime/orchestration/workflow/frontmatter/types.go` (new)
+2. `internal/runtime/orchestration/workflow/frontmatter/parser.go` (new)
+3. `internal/runtime/orchestration/workflow/frontmatter/parser_test.go` (new)
+4. `internal/runtime/orchestration/workflow/frontmatter/validate.go` (new)
+5. `internal/runtime/orchestration/workflow/frontmatter/validate_test.go` (new)
+6. `internal/runtime/orchestration/workflow/loader.go` (wire coexistence rule only, no DAG behavior break)
 7. `docs/spec/v2_symphony_kanban_orchestration.md` (if minor clarifications needed)
 
 Acceptance:
@@ -54,7 +54,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/workflow/...`
+1. `go test ./internal/runtime/orchestration/workflow/...`
 
 ## PR-43: Core Orchestration Domain + Service Contract
 

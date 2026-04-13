@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/workflow/frontmatter"
+	"github.com/jkatigb/agentctl/internal/runtime/orchestration/workflow/frontmatter"
 )
 
 func TestLoadOrchestrationConfig_DefaultWorkflowPath(t *testing.T) {

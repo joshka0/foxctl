@@ -20,7 +20,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/roomruntime"
+	"github.com/jkatigb/agentctl/internal/runtime/orchestration/roomruntime"
 	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
 	"github.com/jkatigb/agentctl/internal/runtime/terminal/zellijbridge"

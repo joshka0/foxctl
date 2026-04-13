@@ -218,7 +218,7 @@ func TestApplyFeatureBoosts_StructuralQueryPrefersRepoIndexSignals(t *testing.T)
 	plan := ParseQuery("repo index dag grep")
 	hits := []FusedHit{
 		{
-			Document: searchindex.Document{Path: "internal/workflow/dag.go", Title: "DAG"},
+			Document: searchindex.Document{Path: "internal/runtime/orchestration/workflow/dag.go", Title: "DAG"},
 			Score:    0.5,
 			SourceScores: map[SourceID]float64{
 				SourceExact: 0.5,

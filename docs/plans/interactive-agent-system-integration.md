@@ -187,7 +187,7 @@ File Change → Hook → Enqueue Job → Worker Claims → Provider API → Stor
 | EXEC | Native binary | Configurable | Performance-critical |
 | WASI | wazero (WebAssembly) | None (sandboxed) | Security-isolated |
 
-**Workflow Engine** (`internal/workflow/`):
+**Workflow Engine** (`internal/runtime/orchestration/workflow/`):
 - DAG-based scheduling
 - Parallel execution within batches
 - Template expressions for data flow: `{{.stepID.data.field}}`
