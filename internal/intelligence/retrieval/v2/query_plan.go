@@ -1,6 +1,6 @@
 package retrievalv2
 
-import "github.com/jkatigb/agentctl/internal/searchquery"
+import "github.com/jkatigb/agentctl/internal/intelligence/searchquery"
 
 type IdentifierKind string
 

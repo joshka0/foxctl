@@ -91,7 +91,7 @@ These rules are non-negotiable for the new design:
 ## Target Architecture
 
 ```text
-internal/searchquery/
+internal/intelligence/searchquery/
   plan.go           // shared terms/identifiers/phrases/path-hints planner
 
 internal/searchindex/
@@ -211,13 +211,13 @@ Acceptance criteria:
 - lexical recall works without the new retrieval engine
 - vector recall can be enabled without mixing in fusion logic
 
-### Phase 2: add `internal/searchquery`
+### Phase 2: add `internal/intelligence/searchquery`
 
 **Goal:** Share one query-planning path between retrieval and extraction before the codecontext rewrite lands.
 
 Files to add:
 
-- `internal/searchquery/plan.go`
+- `internal/intelligence/searchquery/plan.go`
 
 Changes:
 
@@ -361,7 +361,7 @@ These are good `-spark` slices after the plan is approved:
    - objective: model, store interface, SQL store, bootstrap builder
 
 3. Shared query planner
-   - write scope: `internal/searchquery/*`
+   - write scope: `internal/intelligence/searchquery/*`
    - objective: one parsed query model reused by retrieval and codecontext
 
 4. Retrieval v2 skeleton
@@ -418,7 +418,7 @@ Add at least one golden path covering:
 
 - [ ] Storage/vector semantics are explicit and tested
 - [ ] `internal/searchindex` exists and indexes code docs
-- [ ] `internal/searchquery` exists and is shared by retrieval and codecontext
+- [ ] `internal/intelligence/searchquery` exists and is shared by retrieval and codecontext
 - [ ] retrieval v2 exists and produces ranked node hits and grouped file hits
 - [ ] file grouping preserves multiple anchors
 - [ ] tree mode is a pure projection over file hits

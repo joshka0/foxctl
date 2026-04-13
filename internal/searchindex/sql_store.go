@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/intelligence/searchquery"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/searchquery"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 )

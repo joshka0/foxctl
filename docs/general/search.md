@@ -7,7 +7,7 @@ Machine-friendly reference for semantic retrieval, reranking, and repo graph sea
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical packages | `skills/code_semantic_search`, `skills/code_smart_search`, `skills/code_snippet_extract`, `internal/searchquery`, `internal/searchindex`, `internal/intelligence/retrieval/v2`, `internal/intelligence/codecontext`, `internal/indexing/semantic`, `internal/indexing/rerank`, `internal/indexing/repoindex`, `internal/storage/dbdriver/search.go` |
+| Canonical packages | `skills/code_semantic_search`, `skills/code_smart_search`, `skills/code_snippet_extract`, `internal/intelligence/searchquery`, `internal/searchindex`, `internal/intelligence/retrieval/v2`, `internal/intelligence/codecontext`, `internal/indexing/semantic`, `internal/indexing/rerank`, `internal/indexing/repoindex`, `internal/storage/dbdriver/search.go` |
 | Last reviewed | 2026-03-07 |
 
 ## Search Surfaces
@@ -23,7 +23,7 @@ Machine-friendly reference for semantic retrieval, reranking, and repo graph sea
 
 Current code-search flow is layered as:
 
-- `internal/searchquery`
+- `internal/intelligence/searchquery`
   Shared query parsing (`terms`, `phrases`, `identifiers`, `path hints`)
 - `internal/searchindex`
   Typed lexical/vector recall over code documents

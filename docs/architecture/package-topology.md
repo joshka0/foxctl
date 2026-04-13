@@ -445,7 +445,7 @@ The target split for this family is:
 | Intelligence concern | Current anchors | Current decision |
 |------|-----------------|------------------|
 | ingest/builders | `internal/indexing`, `internal/searchindex` | keep as the builder and persisted-index slice |
-| search/query/recall | `internal/intelligence/retrieval`, `internal/intelligence/retrieval/v2`, `internal/intelligence/repoquery`, `internal/searchquery`, `internal/intelligence/searchrank` | keep as the query and recall slice |
+| search/query/recall | `internal/intelligence/retrieval`, `internal/intelligence/retrieval/v2`, `internal/intelligence/repoquery`, `internal/intelligence/searchquery`, `internal/intelligence/searchrank` | keep as the query and recall slice |
 | evidence gathering | `internal/intelligence/codecontext`, `internal/intelligence/codemap/context` | keep as the code-evidence extraction slice |
 | synthesis and refactor planning | `internal/intelligence/codemap`, `internal/intelligence/refactor`, `internal/intelligence/analysis/tasksgraph` | keep as the synthesis/planning slice |
 | oversight | `internal/intelligence/analysis/overseer` | keep as the review and prioritization oversight slice |
@@ -460,7 +460,7 @@ That yields these routing decisions:
 | `internal/intelligence/retrieval` | search/query/recall | bridge | Holds remaining non-v2 retrieval helpers; new code-search entrypoints should favor `internal/intelligence/retrieval/v2` |
 | `internal/intelligence/retrieval/v2` | search/query/recall | keep | It is the main fused search and recall engine |
 | `internal/intelligence/repoquery` | search/query/recall | keep | Provides typed repo-index query, expand, open, and DAG-grep requests for structural recall |
-| `internal/searchquery` | search/query/recall | keep | Owns parsed lexical query plans and path/identifier extraction |
+| `internal/intelligence/searchquery` | search/query/recall | keep | Owns parsed lexical query plans and path/identifier extraction |
 | `internal/intelligence/searchrank` | search/query/recall | keep | Owns cross-source ranking and fusion logic |
 | `internal/intelligence/codecontext` | evidence gathering | keep | Owns snippet extraction and the shared code-context funnel used by semantic/code search skills |
 | `internal/intelligence/codemap/context` | evidence gathering | bridge inside codemap today | Gathers rich code evidence for codemap generation and should be treated as evidence collection, not as a second synthesis owner |
@@ -495,7 +495,7 @@ retrieval/query slice. The durable boundary should be:
 | `internal/intelligence/retrieval/v2` | main retrieval engine, source orchestration, grouped search, lexical/vector/repo-index fusion | treat as the main retrieval-search owner |
 | `internal/intelligence/retrieval` | legacy helpers such as semantic tree building and file summary generation | keep as a bridge until those helpers are either retired or rehomed intentionally |
 | `internal/intelligence/repoquery` | typed repo-index search, expand, open, and DAG requests | keep in the retrieval-search slice as structural recall support |
-| `internal/searchquery` | parsed lexical query plans, identifiers, phrases, and path hints | keep in the retrieval-search slice as query planning |
+| `internal/intelligence/searchquery` | parsed lexical query plans, identifiers, phrases, and path hints | keep in the retrieval-search slice as query planning |
 | `internal/intelligence/searchrank` | cross-source fusion and ranking | keep in the retrieval-search slice as ranking/fusion |
 | `internal/searchindex` | persisted retrieval-document model and recall store contract | keep on the builder side as shared index infrastructure, not as the retrieval owner |
 | `internal/indexing` | post-review indexing pipelines and embedding/index maintenance | keep on the builder side |
