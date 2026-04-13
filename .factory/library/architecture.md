@@ -88,5 +88,5 @@ agentctl CLI
 | zellij bridge | internal/zellijbridge/client.go | Use for zellij sessions |
 | WebSocket hub | internal/web/consolews/hub.go | Reference for WS patterns |
 | Web server | internal/web/server.go | Reference for HTTP patterns |
-| OpenSandbox | internal/sandbox/opensandbox/client.go | Extend, don't rewrite |
+| OpenSandbox | internal/runtime/sandbox/opensandbox/client.go | Extend, don't rewrite |
 | Cobra root | cmd/agentctl/cmd/root.go | Register gateway command |
