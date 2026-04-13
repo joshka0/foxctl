@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/prompts"
-	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/jkatigb/agentctl/internal/zellijbridge"

@@ -14,7 +14,7 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/crypto/ssh"
 
-	"github.com/jkatigb/agentctl/internal/agentpane"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 )
 
 // WhoIsFunc looks up the Tailscale identity for a remote address.

@@ -7,8 +7,8 @@ import (
 
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
 	"github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/agentpane"
 	domainagent "github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 )
 
 // OverseerActorID is the canonical actor ID for the overseer.

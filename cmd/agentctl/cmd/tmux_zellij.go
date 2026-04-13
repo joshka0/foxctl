@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agentpane"
 	domainagent "github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 	agentstore "github.com/jkatigb/agentctl/internal/storage/agents"
 )
 

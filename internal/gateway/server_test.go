@@ -19,8 +19,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jkatigb/agentctl/internal/agentpane"
 	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 )
 
 // testLogger creates a logger that discards output for tests that don't need

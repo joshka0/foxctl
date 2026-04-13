@@ -136,7 +136,7 @@ Objective:
 
 Primary packages:
 
-- `internal/agentpane`
+- `internal/runtime/terminal/agentpane`
 - `internal/tmuxbridge`
 - `internal/zellijbridge`
 - `internal/gateway/webterm`
@@ -159,7 +159,7 @@ Current inventory:
 
 | Package | Current role in the slice | Notes |
 |--------|----------------------------|-------|
-| `internal/agentpane` | pane wrapper and transport owner | normalizes submit modes, owns pane socket delivery, allocates tmux/zellij watch panes |
+| `internal/runtime/terminal/agentpane` | pane wrapper and transport owner | normalizes submit modes, owns pane socket delivery, allocates tmux/zellij watch panes |
 | `internal/tmuxbridge` | tmux backend | creates panes/sessions and provides tmux-specific send/submit behavior |
 | `internal/zellijbridge` | zellij backend | provides the parallel pane creation and submit contract for zellij |
 | `internal/gateway/webterm` | browser terminal entrypoint | one shared tmux-backed PTY per room, fanout to multiple WebSocket clients |
@@ -180,7 +180,7 @@ Chosen target contract for Story 2:
 - the repo will treat **runtime-terminal support** as one explicit family whose
   owner is terminal session lifecycle, pane allocation, submit behavior, and
   room-to-terminal identity
-- `internal/agentpane` is the current anchor for that contract because it
+- `internal/runtime/terminal/agentpane` is the current anchor for that contract because it
   already normalizes pane delivery and mux-agnostic submit behavior
 - `internal/tmuxbridge` and `internal/zellijbridge` are backend adapters within
   the same family boundary
@@ -244,7 +244,7 @@ Expected import fallout:
   the shared runtime-terminal seam
 - direct tmux session-name construction should be removed from gateway-local
   code paths
-- no import-path changes should be required for `internal/agentpane`,
+- no import-path changes should be required for `internal/runtime/terminal/agentpane`,
   `internal/tmuxbridge`, `internal/zellijbridge`, `internal/agent/runtime/*`, or
   `internal/web/api/mux.go` in the first batch
 

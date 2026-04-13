@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jkatigb/agentctl/internal/agentpane"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 )
 
 func registerHandlerRoom(hub *Hub, roomID, tmuxSession string, maxConnections int) {

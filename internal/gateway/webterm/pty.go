@@ -3,7 +3,7 @@ package webterm
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/agentpane"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 )
 
 // PTYProcess manages a PTY connected to a tmux attach session.

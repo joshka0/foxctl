@@ -22,9 +22,9 @@ import (
 	"github.com/rs/zerolog"
 	"tailscale.com/tsnet"
 
-	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/gateway/sshterm"
 	"github.com/jkatigb/agentctl/internal/gateway/webterm"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 )
 
 const (

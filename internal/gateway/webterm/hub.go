@@ -7,7 +7,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/agentpane"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 )
 
 // Room represents a terminal room with one shared PTY and multiple clients.

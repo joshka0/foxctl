@@ -6,8 +6,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/agentpane"
 	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 )
 
 // RoomManager manages SSH terminal rooms and tracks active sessions.
