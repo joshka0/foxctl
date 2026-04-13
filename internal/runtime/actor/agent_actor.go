@@ -12,7 +12,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/actor/memory"
+	"github.com/jkatigb/agentctl/internal/runtime/actor/memory"
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
 	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/runtime/agentprompt"

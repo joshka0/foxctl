@@ -380,7 +380,7 @@ This brings your existing progressive-memory design into the new engine.
 
 ### Implement
 
-* `internal/actor/memory/worker.go` started by supervisor
+* `internal/runtime/actor/memory/worker.go` started by supervisor
 * It:
 
   * reads turns beyond cursor

@@ -282,7 +282,7 @@ No DB schema migration needed. Existing hybrid tables already support all requir
 
 ## Dependencies
 - `internal/runtime/engine` for `LLMChatConfig` and `NewLLMChatEngine`
-- `internal/actor/memory` for `EstimateTokens`
+- `internal/runtime/actor/memory` for `EstimateTokens`
 - No new external dependencies
 
 ## Implementation Order

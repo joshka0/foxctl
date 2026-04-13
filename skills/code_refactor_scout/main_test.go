@@ -333,8 +333,8 @@ func TestBuildScoutStatusScopeUsesWorkspaceRelativePath(t *testing.T) {
 		Detected: []string{"go"},
 	}, false)
 
-	if scope.Path != "internal/actor" {
-		t.Fatalf("scope path=%q want internal/actor", scope.Path)
+	if scope.Path != "internal/runtime/actor" {
+		t.Fatalf("scope path=%q want internal/runtime/actor", scope.Path)
 	}
 	if scope.Absolute != searchPath {
 		t.Fatalf("scope absolute=%q want %q", scope.Absolute, searchPath)

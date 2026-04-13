@@ -16,9 +16,9 @@ Implement progressive memory for long-running actors. L0 is raw turns, L1 is sum
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Short-term memory | `internal/actor/memory/shortterm.go` | ✅ Done |
-| Token counting | `internal/actor/memory/tokens.go` | ✅ Done |
-| Redactor | `internal/actor/memory/redactor.go` | ✅ Done |
+| Short-term memory | `internal/runtime/actor/memory/shortterm.go` | ✅ Done |
+| Token counting | `internal/runtime/actor/memory/tokens.go` | ✅ Done |
+| Redactor | `internal/runtime/actor/memory/redactor.go` | ✅ Done |
 
 ### Memory State Fields
 
@@ -56,7 +56,7 @@ CREATE TABLE actor_summaries (
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Summarizer | `internal/actor/memory/summarizer.go` | ✅ Done |
+| Summarizer | `internal/runtime/actor/memory/summarizer.go` | ✅ Done |
 | Worker loop | Supervisor-managed | ⚠️ Needs implementation |
 
 ### Worker Behavior
@@ -73,7 +73,7 @@ CREATE TABLE actor_summaries (
 
 ### Remaining Work
 
-- [ ] Create `internal/actor/memory/worker.go`
+- [ ] Create `internal/runtime/actor/memory/worker.go`
 - [ ] Add worker to supervisor startup
 - [ ] Implement crash-safe cursor advancement
 - [ ] Add L1 → L2 distillation logic
@@ -88,7 +88,7 @@ CREATE TABLE actor_summaries (
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Token budgets | `internal/actor/memory/shortterm.go` | ✅ Done |
+| Token budgets | `internal/runtime/actor/memory/shortterm.go` | ✅ Done |
 
 ### Budget Allocation (Hard)
 

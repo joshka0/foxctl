@@ -653,7 +653,7 @@ type MemoryMetrics struct {
 ## File Structure
 
 ```
-internal/actor/memory/
+internal/runtime/actor/memory/
 ├── shortterm.go        # ShortTermMemory implementation
 ├── summarizer.go       # LLM-based summarization
 ├── prompts.go          # Summarization/distillation prompts

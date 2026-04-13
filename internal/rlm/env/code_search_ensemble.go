@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	memtokens "github.com/jkatigb/agentctl/internal/actor/memory"
+	memtokens "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
 	skillobs "github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
 	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/runtime/engine"

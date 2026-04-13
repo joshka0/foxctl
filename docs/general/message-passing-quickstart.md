@@ -16,7 +16,7 @@ import (
 **Three layers:**
 1. **Domain** (`internal/domain/agent`) - Message types and builders
 2. **Storage** (`internal/storage/mailbox`) - SQLite persistence  
-3. **Actor** (`internal/actor`) - Event-driven processing
+3. **Actor** (`internal/runtime/actor`) - Event-driven processing
 
 **Four message types:**
 - `agent.ask` - Request/Response

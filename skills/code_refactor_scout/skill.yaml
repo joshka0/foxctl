@@ -225,8 +225,8 @@ signature:
         agentctl run code/refactor_scout --input '{"path":"./internal/intelligence/indexing","language":"go","min_score":60}'
         agentctl run code/refactor_scout --input '{"path":"./crates/my-crate/src","language":"rust","focus":"dead"}'
         agentctl run code/refactor_scout --input '{"path":"./internal","language":"go","focus":"slop"}'
-        agentctl run code/refactor_scout --input '{"path":"./internal/actor","language":"go","focus":"dead"}'
-        agentctl run code/refactor_scout --input '{"path":"./internal/actor","language":"go","focus":"slop","min_score":80,"max_results":8}'
+        agentctl run code/refactor_scout --input '{"path":"./internal/runtime/actor","language":"go","focus":"dead"}'
+        agentctl run code/refactor_scout --input '{"path":"./internal/runtime/actor","language":"go","focus":"slop","min_score":80,"max_results":8}'
         agentctl skills run code/refactor_scout --path ./internal --rule_set aggressive
     workflows:
       - id: go-hotspots
@@ -238,14 +238,14 @@ signature:
       - id: slop-scan
         description: "Narrow the scout output toward duplicated recovery and orchestration cleanup"
         example_input:
-          path: "./internal/actor"
+          path: "./internal/runtime/actor"
           language: "go"
           focus: "slop"
           min_score: 75
       - id: dead-code-candidates
         description: "Find conservative dead-code candidates on a fully index-backed scope"
         example_input:
-          path: "./internal/actor"
+          path: "./internal/runtime/actor"
           language: "go"
           focus: "dead"
       - id: rust-dead-code-candidates

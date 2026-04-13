@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/actor"
+	"github.com/jkatigb/agentctl/internal/runtime/actor"
 	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"

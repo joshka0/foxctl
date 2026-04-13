@@ -39,7 +39,7 @@ Machine-friendly reference for capability profiles and role instructions.
 | Location | Usage |
 |---------|-------|
 | `internal/agent/runtime` | Applies role prompts to session/system prompts |
-| `internal/actor` | Uses role prompts when running agent actors |
+| `internal/runtime/actor` | Uses role prompts when running agent actors |
 
 ## Related Docs
 

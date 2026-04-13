@@ -17,14 +17,14 @@
 | Shell Adapter | ✅ | `internal/runtime/hooks/shell_runner.go` |
 | Skill Adapter | ✅ | `internal/runtime/hooks/skill_runner.go` |
 | Hook Registry | ✅ | `internal/runtime/hooks/registry.go` |
-| Mailbox Watcher | ✅ | `internal/actor/watcher.go` |
-| Supervisor | ✅ | `internal/actor/supervisor.go` |
+| Mailbox Watcher | ✅ | `internal/runtime/actor/watcher.go` |
+| Supervisor | ✅ | `internal/runtime/actor/supervisor.go` |
 | AgentEngine Interface | ✅ | `internal/runtime/engine/engine.go` |
 | DSPyAdapter | ✅ | `internal/runtime/engine/dspy_adapter.go` |
 | LLMChatEngine | ✅ | `internal/runtime/engine/llmchat_engine.go` |
 | ToolRunner | ✅ | `internal/runtime/engine/tool_runner.go` |
-| AgentActor (renamed from DspyActor) | ✅ | `internal/actor/agent_actor.go` |
-| Hooks in Actor Loop | ✅ | `internal/actor/agent_actor.go` |
+| AgentActor (renamed from DspyActor) | ✅ | `internal/runtime/actor/agent_actor.go` |
+| Hooks in Actor Loop | ✅ | `internal/runtime/actor/agent_actor.go` |
 
 ### Required by New Docs (Gaps)
 

@@ -529,7 +529,7 @@ CREATE TABLE IF NOT EXISTS actor_memory_state (
 
 **Files:**
 ```
-internal/actor/memory/
+internal/runtime/actor/memory/
 ├── turns.go           # L0 turn persistence
 ├── summarize.go       # L0→L1 summarization
 ├── distill.go         # L1→L2 distillation
@@ -786,7 +786,7 @@ internal/sessions/
 ├── lineage.go
 ├── identity.go
 
-internal/actor/memory/
+internal/runtime/actor/memory/
 ├── turns.go
 ├── summarize.go
 ├── distill.go

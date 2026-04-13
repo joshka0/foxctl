@@ -43,7 +43,7 @@ After migration, we should be able to say:
 ## 1) Compatibility architecture (target steady state)
 
 ### 1.1 Core (agentctl)
-- `internal/actor/*` (Supervisor, Watcher, EventBus, Actors)
+- `internal/runtime/actor/*` (Supervisor, Watcher, EventBus, Actors)
 - `internal/runtime/hooks/dispatcher/*` (hooks v1)
 - `skills/hooks_dispatch` (thin skill wrapper around dispatcher; optional but recommended)
 - `internal/agent/engine/*` (Engine interface; dspy_engine optional; llmchat_engine optional)

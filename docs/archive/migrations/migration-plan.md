@@ -284,7 +284,7 @@ Apply `unified-session-lineage.md`:
 
 **Migration steps**
 
-1. **Add `internal/actor/memory/` implementation**
+1. **Add `internal/runtime/actor/memory/` implementation**
 
    * As per `actor-progressive-memory.md`
 2. **Add `actor_memory_state` table to sessions.db**

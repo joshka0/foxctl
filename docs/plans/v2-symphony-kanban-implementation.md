@@ -248,7 +248,7 @@ Acceptance:
 Tests:
 
 1. `pnpm -C packages/gui-agent build`
-2. `go test ./cmd/agentctl/cmd ./internal/providers/llm ./internal/actor`
+2. `go test ./cmd/agentctl/cmd ./internal/providers/llm ./internal/runtime/actor`
 
 ## PR-50: Events Signal Quality + Session-Persisted Filters
 

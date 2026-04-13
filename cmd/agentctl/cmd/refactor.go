@@ -186,7 +186,7 @@ workspace.`,
   agentctl refactor deps --path ./internal --language go --query handleAsk --depth 2
 
   # Expand incoming dependencies from an explicit seed
-  agentctl refactor deps --path ./internal --language go --seed symbol:go:internal/actor/agent_actor.go:*AgentActor.handleAsk --direction in`,
+  agentctl refactor deps --path ./internal --language go --seed symbol:go:internal/runtime/actor/agent_actor.go:*AgentActor.handleAsk --direction in`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runRefactorDeps(cmd, workspace, path, language, includeTests, seeds, query, seedLimit, edgeSets, edgeTypes, direction, depth, budget, perNodeCap)
@@ -359,7 +359,7 @@ For DB/persistence review:
   agentctl refactor scout --path apps/praze-api/lib --language elixir --focus slop --view grouped
 
   # Raw machine-oriented output
-  agentctl refactor scout --path ./internal/actor --language go --focus dead --view raw --min-score 0`,
+  agentctl refactor scout --path ./internal/runtime/actor --language go --focus dead --view raw --min-score 0`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			input := map[string]any{

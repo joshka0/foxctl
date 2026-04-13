@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/actor"
+	"github.com/jkatigb/agentctl/internal/runtime/actor"
 )
 
 // ReviewerHandler handles messages for reviewer role actors.

@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	actormemory "github.com/jkatigb/agentctl/internal/actor/memory"
+	actormemory "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
 	_ "modernc.org/sqlite"
 )
 

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/actor"
+	"github.com/jkatigb/agentctl/internal/runtime/actor"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
 	"github.com/rs/zerolog"

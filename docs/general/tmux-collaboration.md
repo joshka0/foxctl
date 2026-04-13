@@ -522,7 +522,7 @@ Examples:
 ```bash
 agentctl tmux observe agent-b --lines 80
 agentctl tmux observe agent-b \
-  --statement "agent-b is reviewing mailbox ack semantics in internal/actor/supervisor.go"
+  --statement "agent-b is reviewing mailbox ack semantics in internal/runtime/actor/supervisor.go"
 ```
 
 `agentctl tmux observe` reads the latest bridge message in the target pane, converts it into an ACA observation, and stores pane/session bridge refs as evidence.

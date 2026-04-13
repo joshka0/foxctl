@@ -270,14 +270,14 @@ context injection + stop gating real.
 
 ### Implement
 
-1. `internal/actor/llm_actor.go`
+1. `internal/runtime/actor/llm_actor.go`
 
 - Implements your Actor interface (`OnMailReceived`, etc.)
 - Uses the engine in PR5
 - Persists turns/inbox items via actorstore
 - Uses hook dispatcher in PR3
 
-2. Update `internal/actor/system` to construct LLMActor
+2. Update `internal/runtime/actor/system` to construct LLMActor
 
 - `actor.NewLLMActor(config, deps...)`
 

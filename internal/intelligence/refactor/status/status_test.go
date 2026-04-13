@@ -266,7 +266,7 @@ func TestEvaluateParserOnlyWhenScopePathNotFullyIndexed(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "internal", "other", "other.go"), []byte("package other\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, ctx, workspace, "add", "internal/actor/actor.go", "internal/other/other.go")
+	runGit(t, ctx, workspace, "add", "internal/runtime/actor/actor.go", "internal/other/other.go")
 	runGit(t, ctx, workspace, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "add internal files")
 
 	store, err := repoindex.Open(ctx, storageRoot, workspace)
@@ -286,17 +286,17 @@ func TestEvaluateParserOnlyWhenScopePathNotFullyIndexed(t *testing.T) {
 	}
 	if err := store.ReplaceAll(ctx, []repoindex.Node{
 		{
-			ID:        repoindex.PackageID(store.RepoKey(), "go:example/internal/actor"),
+			ID:        repoindex.PackageID(store.RepoKey(), "go:example/internal/runtime/actor"),
 			Kind:      repoindex.NodePackage,
-			Pkg:       "go:example/internal/actor",
-			Name:      "internal/actor",
+			Pkg:       "go:example/internal/runtime/actor",
+			Name:      "internal/runtime/actor",
 			UpdatedAt: time.Now().UTC(),
 		},
 		{
-			ID:        repoindex.FileID(store.RepoKey(), "go:example/internal/actor", "internal/actor/actor.go"),
+			ID:        repoindex.FileID(store.RepoKey(), "go:example/internal/runtime/actor", "internal/runtime/actor/actor.go"),
 			Kind:      repoindex.NodeFile,
-			Pkg:       "go:example/internal/actor",
-			File:      "internal/actor/actor.go",
+			Pkg:       "go:example/internal/runtime/actor",
+			File:      "internal/runtime/actor/actor.go",
 			Name:      "actor.go",
 			UpdatedAt: time.Now().UTC(),
 		},
@@ -338,7 +338,7 @@ func TestEvaluateParserOnlyWhenScopePathNotFullyIndexed(t *testing.T) {
 	actorScope := refscope.Scope{
 		Workspace:    workspace,
 		RepoRoot:     workspace,
-		Path:         "internal/actor",
+		Path:         "internal/runtime/actor",
 		Absolute:     filepath.Join(workspace, "internal", "actor"),
 		Mode:         "explicit",
 		Language:     "go",
@@ -372,7 +372,7 @@ func TestEvaluateCoverageIncludesTestsWhenRequested(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "internal", "actor", "actor_test.go"), []byte("package actor\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, ctx, workspace, "add", "internal/actor/actor.go", "internal/actor/actor_test.go")
+	runGit(t, ctx, workspace, "add", "internal/runtime/actor/actor.go", "internal/runtime/actor/actor_test.go")
 	runGit(t, ctx, workspace, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "add actor files")
 
 	store, err := repoindex.Open(ctx, storageRoot, workspace)
@@ -392,17 +392,17 @@ func TestEvaluateCoverageIncludesTestsWhenRequested(t *testing.T) {
 	}
 	if err := store.ReplaceAll(ctx, []repoindex.Node{
 		{
-			ID:        repoindex.PackageID(store.RepoKey(), "go:example/internal/actor"),
+			ID:        repoindex.PackageID(store.RepoKey(), "go:example/internal/runtime/actor"),
 			Kind:      repoindex.NodePackage,
-			Pkg:       "go:example/internal/actor",
-			Name:      "internal/actor",
+			Pkg:       "go:example/internal/runtime/actor",
+			Name:      "internal/runtime/actor",
 			UpdatedAt: time.Now().UTC(),
 		},
 		{
-			ID:        repoindex.FileID(store.RepoKey(), "go:example/internal/actor", "internal/actor/actor.go"),
+			ID:        repoindex.FileID(store.RepoKey(), "go:example/internal/runtime/actor", "internal/runtime/actor/actor.go"),
 			Kind:      repoindex.NodeFile,
-			Pkg:       "go:example/internal/actor",
-			File:      "internal/actor/actor.go",
+			Pkg:       "go:example/internal/runtime/actor",
+			File:      "internal/runtime/actor/actor.go",
 			Name:      "actor.go",
 			UpdatedAt: time.Now().UTC(),
 		},
@@ -413,7 +413,7 @@ func TestEvaluateCoverageIncludesTestsWhenRequested(t *testing.T) {
 	scopeWithoutTests := refscope.Scope{
 		Workspace:    workspace,
 		RepoRoot:     workspace,
-		Path:         "internal/actor",
+		Path:         "internal/runtime/actor",
 		Absolute:     filepath.Join(workspace, "internal", "actor"),
 		Mode:         "explicit",
 		Language:     "go",
@@ -432,7 +432,7 @@ func TestEvaluateCoverageIncludesTestsWhenRequested(t *testing.T) {
 	scopeWithTests := refscope.Scope{
 		Workspace:    workspace,
 		RepoRoot:     workspace,
-		Path:         "internal/actor",
+		Path:         "internal/runtime/actor",
 		Absolute:     filepath.Join(workspace, "internal", "actor"),
 		Mode:         "explicit",
 		Language:     "go",
@@ -453,8 +453,8 @@ func TestEvaluateCoverageIncludesTestsWhenRequested(t *testing.T) {
 	if gotWithTests.RepoIndex.Coverage.MissingFileCount != 1 {
 		t.Fatalf("with tests coverage=%+v want missing=1", gotWithTests.RepoIndex.Coverage)
 	}
-	if len(gotWithTests.RepoIndex.Coverage.MissingFilesSample) != 1 || gotWithTests.RepoIndex.Coverage.MissingFilesSample[0] != "internal/actor/actor_test.go" {
-		t.Fatalf("with tests missing_files_sample=%v want [internal/actor/actor_test.go]", gotWithTests.RepoIndex.Coverage.MissingFilesSample)
+	if len(gotWithTests.RepoIndex.Coverage.MissingFilesSample) != 1 || gotWithTests.RepoIndex.Coverage.MissingFilesSample[0] != "internal/runtime/actor/actor_test.go" {
+		t.Fatalf("with tests missing_files_sample=%v want [internal/runtime/actor/actor_test.go]", gotWithTests.RepoIndex.Coverage.MissingFilesSample)
 	}
 }
 

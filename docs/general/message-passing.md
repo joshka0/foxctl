@@ -30,9 +30,9 @@ flowchart TD
 | Component | Location | Purpose |
 |-----------|----------|---------|
 | `mailbox.Store` | `internal/storage/mailbox/store.go` | SQLite persistence |
-| `MailboxAdapter` | `internal/actor/mailbox_adapter.go` | Storage → Actor bridge |
-| `BaseActor` | `internal/actor/base_actor.go` | Message handling |
-| `Supervisor` | `internal/actor/supervisor.go` | Lifecycle & routing |
+| `MailboxAdapter` | `internal/runtime/actor/mailbox_adapter.go` | Storage → Actor bridge |
+| `BaseActor` | `internal/runtime/actor/base_actor.go` | Message handling |
+| `Supervisor` | `internal/runtime/actor/supervisor.go` | Lifecycle & routing |
 
 ## Message Types
 
@@ -385,5 +385,5 @@ SELECT to_ns, visible_at, attempt FROM mailbox ORDER BY visible_at ASC LIMIT 20;
 ## See Also
 
 - [Events System](./events.md) - Event bus for system-wide notifications
-- [Actors](https://github.com/jkatigb/agentctl/tree/main/internal/actor) - Actor implementation
+- [Actors](https://github.com/jkatigb/agentctl/tree/main/internal/runtime/actor) - Actor implementation
 - [Mailbox Storage](https://github.com/jkatigb/agentctl/tree/main/internal/storage/mailbox) - Persistence layer

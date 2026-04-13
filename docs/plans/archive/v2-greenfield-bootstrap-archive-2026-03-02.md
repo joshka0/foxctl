@@ -433,7 +433,7 @@ routing/bridge files that were removed during hard-cut cleanup.
 | `internal/v2/ports/daemon/router.go` | new |
 | `cmd/agentctl/cmd/agent.go` | modified |
 | `internal/interfaces/web/api/agents.go` | modified |
-| `internal/actor/agent_actor.go` | modified |
+| `internal/runtime/actor/agent_actor.go` | modified |
 | `internal/agent/runtime/runtime.go` | modified |
 
 **Key implementation points**:

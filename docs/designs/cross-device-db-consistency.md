@@ -114,7 +114,7 @@ Every `.db` file managed by agentctl must appear in this list. Stores are classi
 | `SESSIONS` | `sessions.db` | `internal/storage/sessions/` | Session history |
 | `TASKS` | `tasks.db` | `internal/storage/tasks/` | Task continuity across devices |
 | `MAILBOX` | `mailbox.db` | `internal/storage/mailbox/` | Agent messages |
-| `AGENTS` | `agents.db` | `internal/storage/agents/` | Agent registry; also used by the actor system registry (`actor_registry` via `internal/actor/registry_store.go`) |
+| `AGENTS` | `agents.db` | `internal/storage/agents/` | Agent registry; also used by the actor system registry (`actor_registry` via `internal/runtime/actor/registry_store.go`) |
 | `MEMORY` | `memory.db` | `internal/storage/memory/` | Semantic memory + indexer state. Has `factory.go` (done) |
 | `COMPANION` | `companion.db` | `internal/context/companion/` | Companion conversation memory (turns + summaries + distilled history) |
 | `CONTEXTVAR` | `contextvar.db` | `internal/storage/contextvar/` | RLM context store |
@@ -163,8 +163,8 @@ Every `.db` file managed by agentctl must appear in this list. Stores are classi
 
 **Note on shared DB files:** Some `.db` files are used by multiple packages and may contain additional tables created by those packages. Examples:
 
-- `agents.db`: `actor_registry` is created by `internal/actor/registry_store.go` (actor system registry).
-- `mailbox.db`: `mailbox_notify` is created by `internal/actor/watcher.go` when the watcher is enabled.
+- `agents.db`: `actor_registry` is created by `internal/runtime/actor/registry_store.go` (actor system registry).
+- `mailbox.db`: `mailbox_notify` is created by `internal/runtime/actor/watcher.go` when the watcher is enabled.
 
 > **Cross-reference:** See also `docs/designs/store-migration-plan.md` for the `sqliteutil.OpenDB` -> `dbdriver` migration tiers. Where tier classifications differ, this document takes precedence.
 

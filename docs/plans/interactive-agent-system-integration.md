@@ -48,7 +48,7 @@ This section captures findings from deep exploration of six system areas.
 
 ### 2. DSPy Integration
 
-**Location**: `internal/actor/dspy_actor.go`, `internal/storage/trajectory/`, `skills/session_export_dspy/`
+**Location**: `internal/runtime/actor/dspy_actor.go`, `internal/storage/trajectory/`, `skills/session_export_dspy/`
 
 **Architecture**:
 ```
@@ -65,7 +65,7 @@ Learnable Scorer (weight adaptation)
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| DspyActor | `internal/actor/dspy_actor.go` (592 lines) | LLM-driven agent runtime |
+| DspyActor | `internal/runtime/actor/dspy_actor.go` (592 lines) | LLM-driven agent runtime |
 | Trajectory Types | `internal/storage/trajectory/types.go` (347 lines) | Episode schema |
 | Feedback Collector | `internal/agent/optimization/feedback.go` (174 lines) | Human ratings |
 | Learnable Scorer | `internal/agent/optimization/learnable_scorer.go` (453 lines) | Weight learning |
@@ -91,7 +91,7 @@ Learnable Scorer (weight adaptation)
 
 ### 3. Actor/Orchestration System
 
-**Location**: `internal/actor/`
+**Location**: `internal/runtime/actor/`
 
 **Core Actors**:
 
@@ -293,7 +293,7 @@ Based on research, the highest-impact integrations are:
 ├──────────────────────────┼──────────────────────────────────────────┤
 │                          ▼                                           │
 │  ┌─────────────────────────────────────────────────────────────┐    │
-│  │ Actor System (internal/actor/)                              │    │
+│  │ Actor System (internal/runtime/actor/)                              │    │
 │  │ ├── Supervisor (lifecycle, restart, backoff)               │    │
 │  │ ├── Watcher (50ms reactive notifications)                  │    │
 │  │ ├── EventBus (pub/sub with selective persistence)          │    │
@@ -532,7 +532,7 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 |-----------|--------|----------|
 | Console CLI commands | ✅ Complete | `cmd/agentctl/cmd/console.go` (attach, list, rm) |
 | Console store (SQLite) | ✅ Complete | `internal/storage/console/store.go` |
-| DspyActor runtime | ✅ Complete | `internal/actor/dspy_actor.go` (agent.* handlers) |
+| DspyActor runtime | ✅ Complete | `internal/runtime/actor/dspy_actor.go` (agent.* handlers) |
 | Console message types | ⚠️ Defined only | `internal/domain/agent/mailbox.go` |
 | Trajectory capture | ✅ Complete | `internal/storage/trajectory/` |
 | HumanRating field | ✅ Complete | `Outcome.HumanRating *int` (1-5 scale) |
@@ -556,7 +556,7 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 
 **Goal**: Enable DspyActor to receive user input and stream results
 
-**Files to modify**: `internal/actor/dspy_actor.go`
+**Files to modify**: `internal/runtime/actor/dspy_actor.go`
 
 **New handlers to add:**
 ```go
@@ -996,8 +996,8 @@ type SSEEvent =
 ### Existing Components (Ready)
 - OpenTUI framework (packages/tui)
 - Express API server (packages/gui/server)
-- Actor system (internal/actor)
-- DspyActor (internal/actor/dspy_actor.go)
+- Actor system (internal/runtime/actor)
+- DspyActor (internal/runtime/actor/dspy_actor.go)
 - Memory storage (internal/storage/memory)
 - Trajectory capture (internal/storage/trajectory)
 - 87 skills (skills/*)

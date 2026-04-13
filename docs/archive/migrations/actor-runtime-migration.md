@@ -62,7 +62,7 @@ This plan is intentionally incremental and reversible.
 - mailbox: durable SQLite, but wakeups are polling-based
 
 ### Target (runtime spine)
-- `internal/actor/*`: Supervisor + Watcher + EventBus + Actor implementations
+- `internal/runtime/actor/*`: Supervisor + Watcher + EventBus + Actor implementations
 - Hooks are first-class and Go-native (skills remain the executable unit)
 - dspy-go becomes just an engine implementation behind an interface (optional)
 - Unified propagation of session_id/agent_id/workspace across everything
@@ -90,7 +90,7 @@ Add/extend packages (names can be adjusted, but keep responsibilities stable):
   - execute hook skills
   - merge outputs deterministically
 
-- `internal/actor/`
+- `internal/runtime/actor/`
   - `supervisor/` (lifecycle + routing)
   - `watcher/` (mailbox_notify polling)
   - `eventbus/` (ephemeral pub/sub + selective persister)
@@ -163,7 +163,7 @@ Each PR has:
 
 **Files**
 - `internal/storage/mailbox/migrations.go` (or equivalent)
-- `internal/actor/watcher/mailbox_watcher.go` (new)
+- `internal/runtime/actor/watcher/mailbox_watcher.go` (new)
 
 **Acceptance**
 - Send message → notify row appears → watcher wakes within ~50–100ms
@@ -181,8 +181,8 @@ Each PR has:
 - Route mailbox via watcher wakeups
 
 **Files**
-- `internal/actor/supervisor/*.go`
-- `internal/actor/actors/runner_actor.go`
+- `internal/runtime/actor/supervisor/*.go`
+- `internal/runtime/actor/actors/runner_actor.go`
 - `cmd/agentctl/cmd/actor_supervisor.go` (start/stop/status)
 
 **Acceptance**
@@ -224,7 +224,7 @@ Each PR has:
 - For now, dispatcher can be configured to do nothing
 
 **Files**
-- `internal/actor/actors/*` (where loop lives)
+- `internal/runtime/actor/actors/*` (where loop lives)
 - `internal/runtime/hooks/dispatcher/*` integration
 
 **Acceptance**
@@ -269,9 +269,9 @@ Each PR has:
   - retrieved context
 
 **Files**
-- `internal/actor/memory/*` (implementation)
+- `internal/runtime/actor/memory/*` (implementation)
 - `internal/storage/sessions/*` (tables/migrations)
-- `internal/actor/actors/*` (wire into context builder)
+- `internal/runtime/actor/actors/*` (wire into context builder)
 
 **Acceptance**
 - Crash safety: kill during summarize → restart → cursor resumes deterministically
@@ -289,7 +289,7 @@ Each PR has:
 - Keep old daemon path as fallback
 
 **Files**
-- `internal/actor/actors/dspy_actor.go` (or equivalent)
+- `internal/runtime/actor/actors/dspy_actor.go` (or equivalent)
 - `cmd/agentctl/cmd/daemon.go` adjust startup instructions
 
 **Acceptance**

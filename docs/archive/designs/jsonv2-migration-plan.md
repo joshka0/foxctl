@@ -334,7 +334,7 @@ Key files:
 | File | Usage |
 |------|-------|
 | `internal/domain/hook/types.go` | `ToolInput`, `ToolResponse` |
-| `internal/actor/event_bus.go` | `Data` field |
+| `internal/runtime/actor/event_bus.go` | `Data` field |
 | `skills/session_archive/main.go` | Message content |
 
 **v2 Benefit:** `jsontext.Value` provides better streaming performance.
@@ -353,7 +353,7 @@ ActiveTask *TaskInfo    `json:"active_task,omitempty"`
 
 | File | Line | Field |
 |------|------|-------|
-| `internal/actor/registry_store.go` | 69 | `Config` |
+| `internal/runtime/actor/registry_store.go` | 69 | `Config` |
 | `internal/agent/types/types.go` | 268 | `LLMAPIKey` |
 
 **v2:** No change needed, `json:"-"` works the same.

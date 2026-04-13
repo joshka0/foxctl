@@ -282,7 +282,7 @@ Execute the documentation sweep in focused PRs per subsystem. Each PR adds `doc.
 | 6.3 | Storage core | `internal/storage/*` | HIGH |
 | 6.4 | Indexing | `internal/intelligence/indexing/*` | HIGH |
 | 6.5 | Retrieval | `internal/intelligence/retrieval/*` | HIGH |
-| 6.6 | Actor system | `internal/actor/*` | MEDIUM |
+| 6.6 | Actor system | `internal/runtime/actor/*` | MEDIUM |
 | 6.7 | Skills (batch 1) | `skills/code/*`, `skills/memory/*` | HIGH |
 | 6.8 | Skills (batch 2) | `skills/todo/*`, `skills/repo_index/*` | MEDIUM |
 | 6.9 | Platform | `internal/platform/*` | MEDIUM |

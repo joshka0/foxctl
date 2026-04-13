@@ -32,12 +32,12 @@ func TestFindingSeedQueriesNormalizesMethodNames(t *testing.T) {
 
 func TestPickFindingSeedNodeMatchesExactFileAndNormalizedName(t *testing.T) {
 	item := finding{
-		File:   "internal/actor/agent_actor.go",
+		File:   "internal/runtime/actor/agent_actor.go",
 		Symbol: "*AgentActor.handleAsk",
 	}
 	node, ok := pickFindingSeedNode([]repoindex.Node{
 		{ID: "wrong-file", Kind: repoindex.NodeSymbol, File: "internal/other.go", Name: "handleAsk"},
-		{ID: "target", Kind: repoindex.NodeSymbol, File: "internal/actor/agent_actor.go", Name: "AgentActor.handleAsk"},
+		{ID: "target", Kind: repoindex.NodeSymbol, File: "internal/runtime/actor/agent_actor.go", Name: "AgentActor.handleAsk"},
 	}, item)
 	if !ok {
 		t.Fatal("expected match")
@@ -70,19 +70,19 @@ func TestAttachEvidenceToHotspotsAddsSnapshotAndHotFieldsWithoutRepoGraph(t *tes
 	findings := []finding{
 		{
 			RuleID: "function_hotspot",
-			File:   "internal/actor/agent_actor.go",
+			File:   "internal/runtime/actor/agent_actor.go",
 			Symbol: "*AgentActor.handleAsk",
 		},
 		{
 			RuleID: "duplicate_recovery_block",
-			File:   "internal/actor/agent_actor.go",
+			File:   "internal/runtime/actor/agent_actor.go",
 			Symbol: "*AgentActor.handleAsk",
 		},
 	}
 	pack := refevidence.HotspotPack{}
 	symbolHotIndex := buildFindingSymbolHotIndex([]refhot.SymbolHotspot{
 		{
-			Path:             "internal/actor/agent_actor.go",
+			Path:             "internal/runtime/actor/agent_actor.go",
 			Name:             "AgentActor.handleAsk",
 			Score:            5.5,
 			TouchCount:       3,
@@ -92,15 +92,15 @@ func TestAttachEvidenceToHotspotsAddsSnapshotAndHotFieldsWithoutRepoGraph(t *tes
 		},
 	})
 	got := attachEvidenceToHotspots(context.Background(), findings, nil, map[string]refhot.FileHotspot{
-		"internal/actor/agent_actor.go": {
-			Path:       "internal/actor/agent_actor.go",
+		"internal/runtime/actor/agent_actor.go": {
+			Path:       "internal/runtime/actor/agent_actor.go",
 			TouchCount: 7,
 			Score:      42.5,
 		},
 	}, symbolHotIndex, map[string][]refhot.CochangeNeighbor{
-		"internal/actor/agent_actor.go": {
-			{Path: "internal/actor/base_actor.go", Count: 2, Score: 1.75},
-			{Path: "internal/actor/actor.go", Count: 1, Score: 0.9},
+		"internal/runtime/actor/agent_actor.go": {
+			{Path: "internal/runtime/actor/base_actor.go", Count: 2, Score: 1.75},
+			{Path: "internal/runtime/actor/actor.go", Count: 1, Score: 0.9},
 		},
 	}, "refsnap-1", "sha256:test", &pack)
 
@@ -170,7 +170,7 @@ func TestAttachEvidenceToHotspotsAddsSnapshotAndHotFieldsWithoutRepoGraph(t *tes
 func TestLookupFindingSymbolHotspotNormalizesReceiverNames(t *testing.T) {
 	index := buildFindingSymbolHotIndex([]refhot.SymbolHotspot{
 		{
-			Path:             "internal/actor/agent_actor.go",
+			Path:             "internal/runtime/actor/agent_actor.go",
 			Name:             "AgentActor.handleAsk",
 			Score:            4.2,
 			ChangedLineCount: 9,
@@ -179,7 +179,7 @@ func TestLookupFindingSymbolHotspotNormalizesReceiverNames(t *testing.T) {
 		},
 	})
 	got, ok := lookupFindingSymbolHotspot(index, finding{
-		File:   "internal/actor/agent_actor.go",
+		File:   "internal/runtime/actor/agent_actor.go",
 		Symbol: "*AgentActor.handleAsk",
 		Line:   320,
 	})
@@ -288,13 +288,13 @@ func TestPersistScoutEvidencePackAddsArtifactToHotspots(t *testing.T) {
 		Findings: []finding{
 			{
 				RuleID:   "function_hotspot",
-				File:     "internal/actor/agent_actor.go",
+				File:     "internal/runtime/actor/agent_actor.go",
 				Symbol:   "*AgentActor.handleAsk",
 				Evidence: map[string]any{"scope_snapshot_id": "refsnap-1"},
 			},
 			{
 				RuleID:   "duplicate_recovery_block",
-				File:     "internal/actor/agent_actor.go",
+				File:     "internal/runtime/actor/agent_actor.go",
 				Symbol:   "*AgentActor.handleAsk",
 				Evidence: map[string]any{"duplicate_count": 2},
 			},
@@ -304,7 +304,7 @@ func TestPersistScoutEvidencePackAddsArtifactToHotspots(t *testing.T) {
 		SnapshotID: "refsnap-1",
 		Hotspots: []refevidence.HotspotRow{
 			{
-				File:              "internal/actor/agent_actor.go",
+				File:              "internal/runtime/actor/agent_actor.go",
 				Symbol:            "*AgentActor.handleAsk",
 				RuleID:            "function_hotspot",
 				RecentChangeCount: 3,
