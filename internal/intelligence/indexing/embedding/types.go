@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/queue"
+	"github.com/jkatigb/agentctl/internal/storage/queue"
 )
 
 // JobState represents the state of an embedding job.

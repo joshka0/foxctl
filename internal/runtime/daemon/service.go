@@ -34,7 +34,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/deviceid"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/queue"
+	"github.com/jkatigb/agentctl/internal/storage/queue"
 	"github.com/jkatigb/agentctl/internal/runtime/hooks"
 	"github.com/jkatigb/agentctl/internal/storage"
 	agentstore "github.com/jkatigb/agentctl/internal/storage/agents"

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/queue"
+	"github.com/jkatigb/agentctl/internal/storage/queue"
 )
 
 const annotationQueueTable = "annotation_embedding_jobs"
