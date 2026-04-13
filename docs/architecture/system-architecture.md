@@ -72,7 +72,7 @@ flowchart TD
 | Retrieval and indexing | `internal/intelligence/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap` | Semantic/symbol/repo indexing and context extraction | `docs/general/search.md`, `docs/general/repoindex.md` |
 | Interface layers | `internal/interfaces/web`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi`, `internal/providers` | API/server surfaces and external platform integrations | `docs/general/api-server.md`, `docs/architecture/chat-platform-adapter.md` |
 | Observability and hooks | `internal/runtime/observability`, `internal/runtime/hooks`, `internal/context/updater` | Trace/event propagation, hook execution, proactive context surfacing | `docs/general/context-and-observability.md`, `docs/general/hooks.md` |
-| Foundations | `internal/domain`, `internal/platform`, `internal/protocol`, `internal/tools`, `internal/tooling` | Core types, config/platform utilities, protocol helpers | `docs/general/architecture.md`, `docs/spec/README.md` |
+| Foundations | `internal/domain`, `internal/platform`, `internal/protocol`, `internal/tooling/tools`, `internal/tooling` | Core types, config/platform utilities, protocol helpers | `docs/general/architecture.md`, `docs/spec/README.md` |
 
 For the canonical grouping target for `internal/*` and the explicit legacy-runtime
 vs `v2` replacement map, see `docs/architecture/package-topology.md`.

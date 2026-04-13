@@ -3,7 +3,7 @@ package rgutil
 import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/tools/ripgrep"
+	"github.com/jkatigb/agentctl/internal/tooling/tools/ripgrep"
 )
 
 const DefaultMaxMatches = 10000

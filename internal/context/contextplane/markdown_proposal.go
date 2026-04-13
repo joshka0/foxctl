@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	obsidiantool "github.com/jkatigb/agentctl/internal/tools/obsidian"
+	obsidiantool "github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
 	"gopkg.in/yaml.v3"
 )
 

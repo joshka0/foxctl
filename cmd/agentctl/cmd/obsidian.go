@@ -9,7 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
-	"github.com/jkatigb/agentctl/internal/tools/obsidian"
+	"github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
 	"github.com/spf13/cobra"
 )
 

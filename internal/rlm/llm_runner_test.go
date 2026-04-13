@@ -281,14 +281,14 @@ func TestRerankCandidatePaths(t *testing.T) {
 	}
 
 	webPaths := rerankCandidatePaths("web api handlers transport", []string{
-		"internal/tools/obsidian/client.go",
+		"internal/tooling/tools/obsidian/client.go",
 		"internal/interfaces/web/transport.go",
 		"internal/http/handler.go",
 	})
 	if len(webPaths) == 0 {
 		t.Fatal("web rerank produced no paths")
 	}
-	if webPaths[0] == "internal/tools/obsidian/client.go" {
+	if webPaths[0] == "internal/tooling/tools/obsidian/client.go" {
 		t.Fatalf("web rerank=%v should prefer web/http paths over obsidian", webPaths)
 	}
 }

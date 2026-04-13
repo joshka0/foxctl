@@ -249,7 +249,7 @@ This is the surface to use when you want:
 
 ## Obsidian Adapter
 
-Phase 1 Obsidian adapter paths now exist under `internal/tools/obsidian/`.
+Phase 1 Obsidian adapter paths now exist under `internal/tooling/tools/obsidian/`.
 
 Implemented now:
 

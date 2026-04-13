@@ -15,7 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
-	obsidiantool "github.com/jkatigb/agentctl/internal/tools/obsidian"
+	obsidiantool "github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
 	"gopkg.in/yaml.v3"
 )
 

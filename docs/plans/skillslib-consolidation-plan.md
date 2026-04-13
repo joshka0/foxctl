@@ -623,9 +623,9 @@ func Dispatch(op string, handlers map[string]Handler) (map[string]any, error) {
 
 ## Phase 3: Consolidate External Tool Logic
 
-### 3.1 Create `internal/tools/ripgrep` Package
+### 3.1 Create `internal/tooling/tools/ripgrep` Package
 
-**Location:** `~/repos/personal/claude-migration-to-v2/internal/tools/ripgrep/ripgrep.go`
+**Location:** `~/repos/personal/claude-migration-to-v2/internal/tooling/tools/ripgrep/ripgrep.go`
 
 **Problem:** Ripgrep execution logic duplicated in:
 - `internal/intelligence/retrieval/ripgrep.go` (text output, files-with-matches)
@@ -1286,8 +1286,8 @@ Phase 5 (Future Skills)
 - `internal/adapters/skillslib/diffutil/diffutil_test.go`
 - `internal/adapters/skillslib/oputil/oputil.go`
 - `internal/adapters/skillslib/oputil/oputil_test.go`
-- `internal/tools/ripgrep/ripgrep.go`
-- `internal/tools/ripgrep/ripgrep_test.go`
+- `internal/tooling/tools/ripgrep/ripgrep.go`
+- `internal/tooling/tools/ripgrep/ripgrep_test.go`
 - `internal/platform/lsp/jsonrpc/client.go`
 - `internal/platform/lsp/jsonrpc/client_test.go`
 

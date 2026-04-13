@@ -13,7 +13,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
-	obsidiantool "github.com/jkatigb/agentctl/internal/tools/obsidian"
+	obsidiantool "github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
 )
 
 // WorkspaceStore persists workspace-local ACA runtime files under .agentctl/.

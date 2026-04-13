@@ -35,7 +35,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
-	obsidiantool "github.com/jkatigb/agentctl/internal/tools/obsidian"
+	obsidiantool "github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
 )
 
 const (

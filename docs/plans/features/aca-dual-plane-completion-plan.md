@@ -104,7 +104,7 @@ vault/
 
 Objective:
 
-Implement the first real knowledge-plane adapter under `internal/tools/obsidian` or equivalent package boundary.
+Implement the first real knowledge-plane adapter under `internal/tooling/tools/obsidian` or equivalent package boundary.
 
 Deliverables:
 
@@ -126,11 +126,11 @@ Requirements:
 
 Primary files:
 
-- `internal/tools/obsidian/search.go`
-- `internal/tools/obsidian/read.go`
-- `internal/tools/obsidian/write.go`
-- `internal/tools/obsidian/links.go`
-- `internal/tools/obsidian/policy.go`
+- `internal/tooling/tools/obsidian/search.go`
+- `internal/tooling/tools/obsidian/read.go`
+- `internal/tooling/tools/obsidian/write.go`
+- `internal/tooling/tools/obsidian/links.go`
+- `internal/tooling/tools/obsidian/policy.go`
 - `cmd/agentctl/cmd/obsidian.go`
 
 Verification:
@@ -204,7 +204,7 @@ Required read order:
 Primary files:
 
 - `internal/context/contextplane/retrieval.go`
-- `internal/tools/obsidian/search.go`
+- `internal/tooling/tools/obsidian/search.go`
 - `internal/storage/obsidianindex/*`
 
 Verification:
@@ -269,7 +269,7 @@ Deliverables:
 Primary files:
 
 - `internal/context/contextplane/promotion.go`
-- `internal/tools/obsidian/policy.go`
+- `internal/tooling/tools/obsidian/policy.go`
 - `cmd/agentctl/cmd/context_promote_review.go`
 
 Verification:
@@ -329,7 +329,7 @@ Deliverables:
 
 Primary files:
 
-- `internal/tools/obsidian/links.go`
+- `internal/tooling/tools/obsidian/links.go`
 - `internal/intelligence/indexing/repoindex/*`
 - `internal/context/contextplane/retrieval.go`
 

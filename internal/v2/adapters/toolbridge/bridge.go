@@ -15,7 +15,7 @@ import (
 	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/tooling"
-	obsidiantool "github.com/jkatigb/agentctl/internal/tools/obsidian"
+	obsidiantool "github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
 	sourceimport "github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
 	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
 	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"

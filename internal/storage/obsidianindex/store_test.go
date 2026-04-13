@@ -190,7 +190,7 @@ func fixtureVaultRoot(t *testing.T) string {
 	if !ok {
 		t.Fatalf("runtime caller unavailable")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "tools", "obsidian", "testdata", "vaults", "basic"))
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "tooling", "tools", "obsidian", "testdata", "vaults", "basic"))
 }
 
 type fakeEmbeddingProvider struct{}

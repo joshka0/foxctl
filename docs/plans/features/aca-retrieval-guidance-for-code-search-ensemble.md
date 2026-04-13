@@ -471,8 +471,8 @@ Likely code touch points:
 - [retrieval.go](../../../internal/context/contextplane/retrieval.go)
 - [store.go](../../../internal/context/contextplane/store.go)
 - [store.go](../../../internal/storage/obsidianindex/store.go)
-- [graph.go](../../../internal/tools/obsidian/graph.go)
-- [bridge.go](../../../internal/tools/obsidian/bridge.go)
+- [graph.go](../../../internal/tooling/tools/obsidian/graph.go)
+- [bridge.go](../../../internal/tooling/tools/obsidian/bridge.go)
 - [code_search_ensemble.go](../../../internal/rlm/env/code_search_ensemble.go)
 
 Likely docs touch points:
