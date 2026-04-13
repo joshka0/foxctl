@@ -12,10 +12,10 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
+	repoqueryadapters "github.com/jkatigb/agentctl/internal/intelligence/repoquery/adapters"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/repoquery"
-	repoqueryadapters "github.com/jkatigb/agentctl/internal/repoquery/adapters"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/spf13/cobra"
 )

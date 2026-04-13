@@ -10,8 +10,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	"github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
 const Command = "repo/index_dag_grep"

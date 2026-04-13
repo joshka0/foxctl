@@ -11,8 +11,8 @@ import (
 	tooling "github.com/jkatigb/agentctl/internal/tooling"
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	"github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
 type repoInlineMode string

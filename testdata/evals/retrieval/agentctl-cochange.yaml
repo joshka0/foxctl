@@ -28,8 +28,8 @@ queries:
   - id: repoquery-terraform
     query: "terraform repoquery disambiguation"
     expected_any_of:
-      - internal/repoquery/repoquery.go
-      - internal/repoquery/project.go
+      - internal/intelligence/repoquery/repoquery.go
+      - internal/intelligence/repoquery/project.go
       - internal/indexing/repoindex/builder_infra.go
     notes: "Should land in the co-change cluster around repoquery and infra indexing."
   - id: v2-layered-context

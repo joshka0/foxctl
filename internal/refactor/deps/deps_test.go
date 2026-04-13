@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
 	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
 type fakeSearcher struct {

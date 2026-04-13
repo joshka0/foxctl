@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/repoquery"
-	repoqueryadapters "github.com/jkatigb/agentctl/internal/repoquery/adapters"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
+	repoqueryadapters "github.com/jkatigb/agentctl/internal/intelligence/repoquery/adapters"
 	"github.com/jkatigb/agentctl/internal/searchindex"
 )
 

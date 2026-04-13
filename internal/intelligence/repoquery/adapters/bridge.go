@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
-	"github.com/jkatigb/agentctl/internal/repoquery"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	"github.com/jkatigb/agentctl/internal/searchindex"
 )
 

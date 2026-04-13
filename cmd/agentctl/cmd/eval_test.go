@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
-	"github.com/jkatigb/agentctl/internal/repoquery"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 )
 
 func TestNormalizeEvalModes_IncludesSkillModesWhenRequested(t *testing.T) {

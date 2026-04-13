@@ -8,10 +8,10 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	refevidence "github.com/jkatigb/agentctl/internal/refactor/evidence"
 	refhot "github.com/jkatigb/agentctl/internal/refactor/hot"
 	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
 func TestFindingSeedQueriesNormalizesMethodNames(t *testing.T) {

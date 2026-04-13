@@ -425,7 +425,7 @@ Primary packages:
 - `internal/searchquery`
 - `internal/searchindex`
 - `internal/searchrank`
-- `internal/repoquery`
+- `internal/intelligence/repoquery`
 - `internal/intelligence/codecontext`
 - `internal/intelligence/codemap`
 - `internal/refactor`
@@ -456,7 +456,7 @@ Current mapping to make durable in Story 1:
 | `internal/searchindex` | ingest/builders | keep as persisted retrieval-document/index slice |
 | `internal/retrieval` | search/query/recall | treat as transitional bridge for legacy helpers |
 | `internal/intelligence/retrieval/v2` | search/query/recall | keep as the main retrieval engine |
-| `internal/repoquery` | search/query/recall | keep as structural recall/query slice |
+| `internal/intelligence/repoquery` | search/query/recall | keep as structural recall/query slice |
 | `internal/searchquery` | search/query/recall | keep as query-planning slice |
 | `internal/searchrank` | search/query/recall | keep as ranking/fusion slice |
 | `internal/intelligence/codecontext` | evidence gathering | keep as shared code-evidence extraction |
@@ -481,7 +481,7 @@ Story 2 target:
 - make the retrieval-search tranche explicit:
   - `internal/intelligence/retrieval/v2` is the default retrieval/search owner
   - `internal/retrieval` remains a transitional bridge for legacy helpers
-  - `internal/repoquery`, `internal/searchquery`, and `internal/searchrank`
+  - `internal/intelligence/repoquery`, `internal/searchquery`, and `internal/searchrank`
     belong with retrieval/search behavior
   - `internal/searchindex` and `internal/indexing` remain the builder/index
     substrate
@@ -499,7 +499,7 @@ Story 2 should end with these durable decisions:
 |------|-------|----------|
 | `internal/intelligence/retrieval/v2` | retrieval-search | keep as default owner |
 | `internal/retrieval` | retrieval-search | keep as transitional bridge |
-| `internal/repoquery` | retrieval-search | keep with structural recall |
+| `internal/intelligence/repoquery` | retrieval-search | keep with structural recall |
 | `internal/searchquery` | retrieval-search | keep with query planning |
 | `internal/searchrank` | retrieval-search | keep with ranking/fusion |
 | `internal/searchindex` | builder substrate | keep on builder side |

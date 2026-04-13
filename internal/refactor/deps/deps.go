@@ -8,9 +8,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
 	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
 // Searcher is the minimal repo query search surface used by refactor deps.

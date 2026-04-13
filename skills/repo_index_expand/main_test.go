@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/repoquery"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 )
 
 func TestParseInlineMode(t *testing.T) {

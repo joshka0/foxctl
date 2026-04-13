@@ -10,7 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/evals/retrievaleval"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/repoquery"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	"github.com/spf13/cobra"
 )
 

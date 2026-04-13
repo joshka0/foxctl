@@ -63,7 +63,7 @@ The repo already has most of the hard primitives:
 - query/expand/open over the graph in
   [internal/indexing/repoindex/query.go](../../../internal/indexing/repoindex/query.go)
 - graph-to-code anchor projection in
-  [internal/repoquery/project.go](../../../internal/repoquery/project.go)
+  [internal/intelligence/repoquery/project.go](../../../internal/intelligence/repoquery/project.go)
 - user-facing repo graph skills such as
   [skills/repo_index_search/main.go](../../../skills/repo_index_search/main.go)
 - semantic tree and retrieval-adjacent reading lanes documented in
@@ -272,7 +272,7 @@ Example shape:
     ],
     "suggested_reads": [
       "internal/indexing/repoindex/query.go",
-      "internal/repoquery/project.go"
+      "internal/intelligence/repoquery/project.go"
     ]
   }
 }
