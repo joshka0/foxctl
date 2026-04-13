@@ -13,7 +13,7 @@ It does two things:
 |------|-------|
 | Status | Current guidance |
 | Canonical scope | Package grouping and migration boundaries for `internal/*` |
-| Last reviewed | 2026-04-13 |
+| Last reviewed | 2026-04-14 |
 
 ## Why This Exists
 
@@ -23,7 +23,7 @@ It does two things:
 - technical layer: `storage`, `platform`, `domain`, `protocol`
 - feature area: `companion`, `contextplane`, `transcriptpipeline`
 - interface/transport: `web`, `gateway`, `chatadapter`, `openapi`
-- utilities and local tooling: `tools`, `tooling`, `skillrun`
+- utilities and local tooling: `tooling`, reusable adapters, and specialized runtime leaves
 
 That mix makes package placement feel inconsistent even when individual packages are reasonable.
 
@@ -39,11 +39,15 @@ Prefer adding new packages under one of these stable families:
 | `internal/platform` | Cross-cutting platform/config/runtime utilities | `platform/config`, `platform/workspace`, `platform/timeutil` |
 | `internal/protocol` | Wire/envelope/protocol helpers | `protocol` |
 | `internal/storage` | Durable state, CAS, local rebuildable stores, DB helpers | `storage/*` |
+| `internal/auth` | Authn/authz helpers, OAuth token brokerage, and identity-facing persistence | `auth/*`, `auth/broker` |
+| `internal/console` | Console session primitives and console application/runtime behavior | `console`, `console/app` |
+| `internal/providers` | External provider integrations and provider-specific compatibility helpers | `providers/*`, `providers/llmcompat` |
 | `internal/runtime` | Runtime-owned execution, orchestration support, daemon hosting, terminal, hooks, and observability | `runtime/engine`, `runtime/execution`, `runtime/runservice`, `runtime/orchestration`, `runtime/daemon`, `runtime/terminal`, `runtime/hooks`, `runtime/observability` |
 | `internal/v2` | Newer **agent/runtime/orchestration** stack only | `v2/core`, `v2/services`, `v2/runtime`, `v2/adapters` |
-| `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane | current context family |
-| `internal/intelligence/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |
+| `internal/context/*` | Context/memory/history plane | `context/companion`, `context/contextplane`, `context/transcriptpipeline`, `context/calibration`, `context/todosync` |
+| `internal/intelligence/*` | Retrieval and code intelligence | `intelligence/indexing`, `intelligence/retrieval`, `intelligence/codecontext`, `intelligence/codemap`, `intelligence/refactor` |
 | `internal/interfaces/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi` | Interface and transport layers | current interface family |
+| `internal/tooling` | Runtime-neutral tooling, eval harnesses, and reusable standalone tools | `tooling/evals`, `tooling/skillrun`, `tooling/tools/*` |
 
 ## Target Shape
 
@@ -51,53 +55,39 @@ This is the intended logical grouping. It is not a command to rename everything 
 
 ```text
 internal/
-  core/
-    domain/
-    platform/
-    protocol/
-
-  runtime/
-    legacy/
-    orchestration/
-    hooks/
-    observability/
-    terminal/
-
+  agent/
+  auth/
+    broker/
+  console/
+    app/
   context/
-    memory/
-    assembly/
-    history/
-    knowledge/
-
+  domain/
   intelligence/
-    indexing/
-    retrieval/
-    codecontext/
-    codemap/
-    refactor/
-    search/
-    analysis/
-    verification/
-
   interfaces/
-    web/
-    gateway/
-    chat/
-    openapi/
-    console/
-
+  platform/
+  protocol/
+  providers/
+  rlm/
+  runtime/
+    actor/
+    agentpolicy/
+    agentprompt/
+    daemon/
+    engine/
+    execution/
+    jobs/
+    observability/
+    orchestration/
+    runservice/
+    sandbox/
+    terminal/
+    trajectorycapture/
+  storage/
   tooling/
+    evals/
     skillrun/
     tools/
-    adapters/
-
-  storage/
-
   v2/
-    core/
-    services/
-    runtime/
-    adapters/
 ```
 
 ## Important Constraint
@@ -182,7 +172,7 @@ Its current execution order is:
 2. Consolidate runtime terminal support.
 3. Consolidate context family boundaries.
 4. Consolidate intelligence and retrieval families.
-5. Consolidate tooling and console surfaces.
+5. Consolidate tooling, console, auth, and remaining leaf roots.
 
 The first execution slice is intentionally documentation-first:
 
@@ -199,7 +189,7 @@ These are the lowest-ambiguity cleanups:
 | 1 | `agentpane`, `tmuxbridge`, `zellijbridge`, terminal-facing parts of `gateway` | runtime/terminal with gateway terminal entrypoints kept under interfaces/gateway |
 | 2 | `companion`, `context`, `contextplane`, `sessionkit`, `transcriptpipeline`, `knowledge` | one explicit context family |
 | 3 | `indexing`, `retrieval`, `codecontext`, `codemap`, `repoquery`, `refactor`, `search*`, `analysis`, `verification` | one explicit intelligence family |
-| 4 | `tools`, `tooling`, `skillrun`, `adapters/skillslib` | one explicit tooling family |
+| 4 | `tooling/*`, `adapters/skillslib/*`, `console/*`, `auth/*` | explicit tooling, console, and auth families |
 
 ## Runtime-Terminal Inventory
 
@@ -660,7 +650,7 @@ renames**:
 
 Explicit non-goals for this first batch:
 
-- do not merge `console` into `consoleapp`
+- do not merge `console` into `console/app`
 - do not move websocket hosting into `internal/console`
 - do not redesign console UX or LLM streaming behavior as part of topology work
 

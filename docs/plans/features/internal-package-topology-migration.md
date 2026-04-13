@@ -48,10 +48,13 @@ The current repo already wants to be organized around these families:
 | Family | Current anchors | Meaning |
 |--------|------------------|---------|
 | runtime | `runtime/*`, `agent/*`, `v2/*` | agent execution, orchestration, lifecycle, runtime state |
-| context | `companion`, `context/*`, `contextplane/*`, `sessionkit`, `transcriptpipeline`, `knowledge/*` | ACA/control-plane, context assembly, transcript history, durable knowledge |
-| intelligence | `indexing/*`, `retrieval*`, `repoquery`, `search*`, `codecontext/*`, `codemap/*`, `refactor/*`, `analysis/*`, `verification/*` | ingestion, retrieval, evidence extraction, synthesis, refactor planning, verification |
-| interfaces | `web/*`, `gateway/*`, `chatadapter/*`, `openapi/*`, `console`, `consoleapp` | server, UI, transport, platform-facing entrypoints |
-| tooling | `tooling`, `tools/*`, `skillrun`, `adapters/skillslib/*` | generic tool registry, skill execution, reusable tooling adapters |
+| context | `context/*` | ACA/control-plane, context assembly, transcript history, durable knowledge |
+| intelligence | `intelligence/*` | ingestion, retrieval, evidence extraction, synthesis, refactor planning, verification |
+| interfaces | `interfaces/*` | server, UI, transport, platform-facing entrypoints |
+| console | `console/*` | console session contracts, persistence, and application/runtime behavior |
+| auth | `auth/*` | authn/authz, OAuth brokerage, and token lifecycle |
+| providers | `providers/*` | provider integrations and provider-specific compatibility helpers |
+| tooling | `tooling/*`, `adapters/skillslib/*` | generic tool registry, skill execution, eval harnesses, and reusable tooling adapters |
 | foundations | `storage/*`, `domain/*`, `platform/*`, `protocol` | shared persistence, contracts, platform helpers, wire helpers |
 
 ## What `v2` Is Replacing
@@ -625,7 +628,7 @@ Story 2 should end with these durable decisions:
 
 Non-goals for Story 2:
 
-- do not merge `console` and `consoleapp`
+- do not merge `console` and `console/app`
 - do not move websocket hosting into `internal/console`
 - do not redesign console UX or streaming behavior as part of the topology pass
 
@@ -663,7 +666,7 @@ Non-goals for Story 3:
 Exit criteria:
 
 - generic tooling packages are clearly separated from `internal/agent/tools`
-- `console` and `consoleapp` stop reading like accidental duplication in the
+- `console` and `console/app` stop reading like accidental duplication in the
   target topology
 - the first tooling move batch lands as code-boundary changes without a
   repo-wide rename
