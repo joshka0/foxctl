@@ -22,7 +22,7 @@ cases:
     method: repoindex_dag
     query: "web api transport"
     expected_any_of:
-      - internal/web/api/agents.go
+      - internal/interfaces/web/api/agents.go
     expected_classification: "anchor_mismatch"
     expected_fix_contains: "anchor projection"
     notes: "DAG currently returns structural anchors, but not the expected web API handler file first."

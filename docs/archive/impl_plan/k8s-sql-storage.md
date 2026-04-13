@@ -529,7 +529,7 @@ Add flags:
 | `internal/context/companion/memory.go` | PG migration DDL |
 | `internal/platform/config/config.go` | Extend `DatabaseSettings` with Postgres settings + redaction |
 | `cmd/agentctl/cmd/web.go` | Add `--db-driver`/`--db-dsn` flags |
-| `internal/web/server.go` | Health check endpoints |
+| `internal/interfaces/web/server.go` | Health check endpoints |
 | `go.mod` / `go.sum` | Add pgx/v5, pgvector-go, aws-sdk-go-v2 (S3) |
 
 ---

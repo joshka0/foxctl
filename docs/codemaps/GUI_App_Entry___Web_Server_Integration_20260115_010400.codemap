@@ -99,7 +99,7 @@
         },
         {
           "id": "2d",
-          "path": "internal/web/server.go",
+          "path": "internal/interfaces/web/server.go",
           "lineNumber": 71,
           "lineContent": "mux.HandleFunc(\"/api/jobs\", api.JobsListHandler(s.cfg, s.log))",
           "title": "Route Registration",
@@ -107,7 +107,7 @@
         },
         {
           "id": "2e",
-          "path": "internal/web/api/jobs.go",
+          "path": "internal/interfaces/web/api/jobs.go",
           "lineNumber": 69,
           "lineContent": "jobList, err := store.List(r.Context(), limit)",
           "title": "Store Query",
@@ -115,14 +115,14 @@
         },
         {
           "id": "2f",
-          "path": "internal/web/api/jobs.go",
+          "path": "internal/interfaces/web/api/jobs.go",
           "lineNumber": 97,
           "lineContent": "writeJSON(w, http.StatusOK, map[string]any{",
           "title": "JSON Response",
           "description": "Handler serializes job list to JSON and writes HTTP 200 response to client"
         }
       ],
-      "traceTextDiagram": "Jobs Page Data Fetching Flow\n│\n├── Frontend (React/TypeScript)\n│   ├── JobsPage component renders \u003c-- 2a\n│   │   └── useJobs() hook called\n│   ├── TanStack Query setup \u003c-- 2b\n│   │   └── useQuery({ queryFn }) \u003c-- packages/gui/src/api/hooks.ts:40\n│   └── API client fetch \u003c-- 2c\n│       └── fetch with credentials \u003c-- packages/gui/src/api/client.ts:29\n│\n├── Network Layer\n│   └── HTTP Request → Vite proxy → Go server\n│\n└── Backend (Go)\n    ├── Route handler registration \u003c-- 2d\n    │   └── mux.HandleFunc(\"/api/jobs\", handler)\n    ├── JobsListHandler execution \u003c-- internal/web/api/jobs.go:43\n    │   ├── store.Open(cfg.Paths.Jobs) \u003c-- internal/web/api/jobs.go:60\n    │   ├── store.List(ctx, limit) \u003c-- 2e\n    │   └── Convert jobs to response format \u003c-- internal/web/api/jobs.go:78\n    └── JSON response sent \u003c-- 2f\n        └── writeJSON(w, 200, { jobs, count })",
+      "traceTextDiagram": "Jobs Page Data Fetching Flow\n│\n├── Frontend (React/TypeScript)\n│   ├── JobsPage component renders \u003c-- 2a\n│   │   └── useJobs() hook called\n│   ├── TanStack Query setup \u003c-- 2b\n│   │   └── useQuery({ queryFn }) \u003c-- packages/gui/src/api/hooks.ts:40\n│   └── API client fetch \u003c-- 2c\n│       └── fetch with credentials \u003c-- packages/gui/src/api/client.ts:29\n│\n├── Network Layer\n│   └── HTTP Request → Vite proxy → Go server\n│\n└── Backend (Go)\n    ├── Route handler registration \u003c-- 2d\n    │   └── mux.HandleFunc(\"/api/jobs\", handler)\n    ├── JobsListHandler execution \u003c-- internal/interfaces/web/api/jobs.go:43\n    │   ├── store.Open(cfg.Paths.Jobs) \u003c-- internal/interfaces/web/api/jobs.go:60\n    │   ├── store.List(ctx, limit) \u003c-- 2e\n    │   └── Convert jobs to response format \u003c-- internal/interfaces/web/api/jobs.go:78\n    └── JSON response sent \u003c-- 2f\n        └── writeJSON(w, 200, { jobs, count })",
       "traceGuide": "## Motivation\n\nThe agentctl GUI needs to display job execution data to users. **Jobs are asynchronous tasks** (like skill executions) that run in the background, and users need to see their status, results, and history. The challenge is getting this data from the Go backend's persistent storage into a React frontend efficiently, with **proper caching and real-time updates**.\n\nThe system solves this by implementing a **REST API data flow**: the React component requests data through a typed hook, which uses TanStack Query for caching and automatic refetching, while the Go backend reads from SQLite storage and returns JSON responses.\n\n## Details\n\n### Frontend Data Request\n\nThe **JobsPage component** [2a] initiates data fetching by calling `useJobs()`, a custom hook that wraps TanStack Query. This hook [2b] sets up a query with a unique key (for cache identification) and a query function that calls the API client. The separation between the component and data fetching logic enables **automatic caching, background refetching, and loading state management** without manual state handling.\n\nThe **API client** [2c] executes a standard `fetch()` request to `/api/jobs` with `credentials: \"include\"` to send workspace cookies. In development, Vite's proxy forwards this to `localhost:8090`; in production, the Go server serves both the static files and API from the same origin.\n\n### Backend Data Response\n\nThe Go web server registers the `/api/jobs` route [2d] during startup, mapping it to `JobsListHandler`. When a request arrives, the handler opens the jobs store (a SQLite database wrapper) and calls `store.List()` [2e] to retrieve recent jobs with a configurable limit.\n\nThe handler then **transforms internal job structs into API response format** [2f], parsing command strings to extract job type, category, and skill name. Finally, it serializes the data to JSON and writes an HTTP 200 response, which flows back through the network stack to the frontend where TanStack Query caches it and triggers a re-render.\n\n### Key Design Decisions\n\n- **TanStack Query** handles all caching, deduplication, and background refetching automatically\n- **Typed API client** provides type-safe request/response handling across the frontend\n- **Handler functions** are pure, stateless, and easy to test independently\n- **Store abstraction** isolates SQLite details from HTTP handlers"
     },
     {
@@ -148,7 +148,7 @@
         },
         {
           "id": "3c",
-          "path": "internal/web/server.go",
+          "path": "internal/interfaces/web/server.go",
           "lineNumber": 68,
           "lineContent": "mux.HandleFunc(\"/api/events\", sse.Handler(s.sseHub, s.log))",
           "title": "SSE Route Registration",
@@ -156,7 +156,7 @@
         },
         {
           "id": "3d",
-          "path": "internal/web/sse/handler.go",
+          "path": "internal/interfaces/web/sse/handler.go",
           "lineNumber": 44,
           "lineContent": "hub.Register(client)",
           "title": "Client Registration",
@@ -164,7 +164,7 @@
         },
         {
           "id": "3e",
-          "path": "internal/web/sse/hub.go",
+          "path": "internal/interfaces/web/sse/hub.go",
           "lineNumber": 110,
           "lineContent": "case event := \u003c-h.broadcast:",
           "title": "Event Broadcasting",
@@ -179,7 +179,7 @@
           "description": "Event handler invalidates relevant queries causing automatic refetch of stale data"
         }
       ],
-      "traceTextDiagram": "SSE Real-time Update Flow\n│\n├── Frontend: React Component\n│   ├── Layout mounts \u003c-- packages/gui/src/api/hooks.ts:232\n│   │   └── useSSE() hook called \u003c-- 3a\n│   │       └── subscribeToEvents() \u003c-- packages/gui/src/api/client.ts:326\n│   │           └── new EventSource() \u003c-- 3b\n│   │               └── GET /api/events\n│   │\n│   └── Event received\n│       └── onmessage handler \u003c-- packages/gui/src/api/client.ts:332\n│           └── invalidateQueries() \u003c-- 3f\n│\n└── Backend: Go Web Server\n    ├── Route registration\n    │   └── mux.HandleFunc() \u003c-- 3c\n    │       └── sse.Handler() \u003c-- internal/web/sse/handler.go:12\n    │\n    ├── Client connection\n    │   └── hub.Register() \u003c-- 3d\n    │       └── client added to hub.clients \u003c-- internal/web/sse/hub.go:97\n    │\n    └── Event broadcasting\n        └── h.broadcast channel \u003c-- 3e\n            └── broadcastEvent() \u003c-- internal/web/sse/hub.go:111\n                └── client.Send \u003c- msg \u003c-- internal/web/sse/hub.go:191\n                    └── w.Write() to EventSource \u003c-- internal/web/sse/handler.go:67",
+      "traceTextDiagram": "SSE Real-time Update Flow\n│\n├── Frontend: React Component\n│   ├── Layout mounts \u003c-- packages/gui/src/api/hooks.ts:232\n│   │   └── useSSE() hook called \u003c-- 3a\n│   │       └── subscribeToEvents() \u003c-- packages/gui/src/api/client.ts:326\n│   │           └── new EventSource() \u003c-- 3b\n│   │               └── GET /api/events\n│   │\n│   └── Event received\n│       └── onmessage handler \u003c-- packages/gui/src/api/client.ts:332\n│           └── invalidateQueries() \u003c-- 3f\n│\n└── Backend: Go Web Server\n    ├── Route registration\n    │   └── mux.HandleFunc() \u003c-- 3c\n    │       └── sse.Handler() \u003c-- internal/interfaces/web/sse/handler.go:12\n    │\n    ├── Client connection\n    │   └── hub.Register() \u003c-- 3d\n    │       └── client added to hub.clients \u003c-- internal/interfaces/web/sse/hub.go:97\n    │\n    └── Event broadcasting\n        └── h.broadcast channel \u003c-- 3e\n            └── broadcastEvent() \u003c-- internal/interfaces/web/sse/hub.go:111\n                └── client.Send \u003c- msg \u003c-- internal/interfaces/web/sse/hub.go:191\n                    └── w.Write() to EventSource \u003c-- internal/interfaces/web/sse/handler.go:67",
       "traceGuide": "## Motivation\n\nThe GUI needs to stay synchronized with backend state changes without constantly polling. When jobs complete, tasks update, or agents change state, the frontend must **immediately reflect these changes** across all open browser tabs. Server-Sent Events (SSE) provides a lightweight, unidirectional push mechanism where the Go backend can broadcast invalidation events to all connected React clients, triggering automatic data refetches only when necessary.\n\n## Details\n\n### Frontend Connection\n\nThe React app establishes an SSE connection during layout initialization [3a]. The `useSSE()` hook creates an **EventSource** pointing to `/api/events` [3b], which maintains a persistent HTTP connection. This hook runs once when the Layout component mounts, ensuring all pages benefit from real-time updates.\n\nWhen events arrive, the `onmessage` handler parses the event type and calls `queryClient.invalidateQueries()` [3f] for the relevant query keys (e.g., \"jobs\", \"tasks\"). TanStack Query then **automatically refetches** any active queries matching those keys, updating the UI without manual intervention.\n\n### Backend Broadcasting\n\nThe Go web server registers the `/api/events` endpoint with an SSE handler [3c] that upgrades incoming HTTP connections to streaming responses. Each connection creates a client with a buffered send channel and registers it with the central SSE hub [3d].\n\nThe hub runs an event loop that listens on a broadcast channel [3e]. When backend operations (job completion, task updates) need to notify clients, they publish events to this channel. The hub's `broadcastEvent()` function marshals events to JSON and writes them to all registered client channels [3e], which are then flushed to the HTTP response streams.\n\n### Key Design Points\n\n- **No polling overhead**: Clients maintain a single long-lived connection instead of repeatedly hitting endpoints\n- **Automatic invalidation**: The frontend doesn't need to know what changed, just which query keys to refresh\n- **Multi-tab support**: All browser tabs receive the same events and stay synchronized\n- **Graceful degradation**: If SSE fails, the app still works via manual refresh or navigation"
     },
     {
@@ -205,7 +205,7 @@
         },
         {
           "id": "4c",
-          "path": "internal/web/server.go",
+          "path": "internal/interfaces/web/server.go",
           "lineNumber": 91,
           "lineContent": "mux.HandleFunc(\"/ws/console/\", consolews.HandleWebSocket(s.consoleHub, s.log))",
           "title": "WebSocket Route",
@@ -213,7 +213,7 @@
         },
         {
           "id": "4d",
-          "path": "internal/web/consolews/hub.go",
+          "path": "internal/interfaces/web/consolews/hub.go",
           "lineNumber": 184,
           "lineContent": "conn, err := websocket.Accept(w, r, \u0026websocket.AcceptOptions{",
           "title": "WebSocket Upgrade",
@@ -221,7 +221,7 @@
         },
         {
           "id": "4e",
-          "path": "internal/web/consolews/hub.go",
+          "path": "internal/interfaces/web/consolews/hub.go",
           "lineNumber": 176,
           "lineContent": "session = hub.CreateSession(SessionConfig{",
           "title": "Session Creation",
@@ -229,7 +229,7 @@
         },
         {
           "id": "4f",
-          "path": "internal/web/consolews/session.go",
+          "path": "internal/interfaces/web/consolews/session.go",
           "lineNumber": 236,
           "lineContent": "if err := runner.Run(reqCtx, s, p.Content, correlationID); err != nil {",
           "title": "Message Processing",
@@ -237,14 +237,14 @@
         },
         {
           "id": "4g",
-          "path": "internal/web/consolews/session.go",
+          "path": "internal/interfaces/web/consolews/session.go",
           "lineNumber": 164,
           "lineContent": "s.Broadcast(NewEventPayload(s.id, correlationID, content, metadata))",
           "title": "Response Broadcast",
           "description": "Session broadcasts streaming events and replies to all connected WebSocket clients"
         }
       ],
-      "traceTextDiagram": "Console WebSocket Session Flow\n├── Frontend: ConsolePage Component\n│   └── useConsoleWebSocket() hook call \u003c-- 4a\n│       └── WebSocket connection setup\n│           └── new WebSocket(wsUrl) \u003c-- 4b\n│\n├── Backend: Web Server Routes\n│   └── /ws/console/ route registration \u003c-- 4c\n│       └── HandleWebSocket() handler \u003c-- internal/web/consolews/hub.go:155\n│           ├── websocket.Accept() upgrade \u003c-- 4d\n│           └── Session management\n│               ├── CreateSession() \u003c-- 4e\n│               └── Client registration \u003c-- internal/web/consolews/hub.go:199\n│                   └── readPump() / writePump() \u003c-- internal/web/consolews/hub.go:202\n│\n└── Session: Message Processing\n    ├── HandlePayload() receives message \u003c-- internal/web/consolews/hub.go:225\n    │   └── handleAsk() processes user input \u003c-- internal/web/consolews/session.go:176\n    │       └── runner.Run() executes LLM \u003c-- 4f\n    │           └── Broadcast() sends response \u003c-- 4g\n    │               └── All clients receive events \u003c-- internal/web/consolews/session.go:146",
+      "traceTextDiagram": "Console WebSocket Session Flow\n├── Frontend: ConsolePage Component\n│   └── useConsoleWebSocket() hook call \u003c-- 4a\n│       └── WebSocket connection setup\n│           └── new WebSocket(wsUrl) \u003c-- 4b\n│\n├── Backend: Web Server Routes\n│   └── /ws/console/ route registration \u003c-- 4c\n│       └── HandleWebSocket() handler \u003c-- internal/interfaces/web/consolews/hub.go:155\n│           ├── websocket.Accept() upgrade \u003c-- 4d\n│           └── Session management\n│               ├── CreateSession() \u003c-- 4e\n│               └── Client registration \u003c-- internal/interfaces/web/consolews/hub.go:199\n│                   └── readPump() / writePump() \u003c-- internal/interfaces/web/consolews/hub.go:202\n│\n└── Session: Message Processing\n    ├── HandlePayload() receives message \u003c-- internal/interfaces/web/consolews/hub.go:225\n    │   └── handleAsk() processes user input \u003c-- internal/interfaces/web/consolews/session.go:176\n    │       └── runner.Run() executes LLM \u003c-- 4f\n    │           └── Broadcast() sends response \u003c-- 4g\n    │               └── All clients receive events \u003c-- internal/interfaces/web/consolews/session.go:146",
       "traceGuide": "## Motivation\n\nThe **Console WebSocket system** enables real-time, interactive chat sessions between the GUI and backend LLM agents. Users need to send questions to AI agents and receive streaming responses without page refreshes or polling. The system maintains **persistent bidirectional connections** where multiple browser clients can connect to the same console session, see each other's messages, and receive streaming AI responses as they're generated [4g].\n\n## Details\n\n### Frontend Connection\n\nThe `ConsolePage` component uses the `useConsoleWebSocket` hook [4a] to establish a **WebSocket connection** to a specific session ID [4b]. The hook manages connection state (connected, connecting, error), message history, and provides functions to send messages and cancel in-flight requests. When a user types a message and hits send, it's transmitted over the WebSocket with a correlation ID for tracking.\n\n### Backend Session Management\n\nThe Go web server registers a `/ws/console/` endpoint [4c] that **upgrades HTTP connections to WebSocket** using the `websocket.Accept()` function with origin validation [4d]. If a session doesn't exist for the requested ID, the hub **auto-creates one** with workspace and profile configuration [4e]. Each WebSocket client is registered with the session, and two goroutines are spawned: `readPump()` for receiving messages and `writePump()` for sending responses.\n\n### Message Processing Flow\n\nWhen a client sends an \"ask\" payload (user message), the session's `HandlePayload()` function routes it to `handleAsk()`, which adds the message to conversation history and invokes the **LLM runner** in a background goroutine [4f]. The runner can stream partial responses by calling `BroadcastEvent()`, and sends the final complete response via `BroadcastReply()` [4g]. The broadcast mechanism sends messages to **all connected clients** for that session, enabling multi-client collaboration.\n\n### Cancellation and Persistence\n\nEach session maintains a cancellable context for the current in-flight request. Users can cancel long-running requests via a \"cancel\" command. The system includes a `PersistenceAdapter` that asynchronously saves session metadata and conversation turns to disk, allowing sessions to be resumed later."
     },
     {
@@ -262,7 +262,7 @@
         },
         {
           "id": "5b",
-          "path": "internal/web/server.go",
+          "path": "internal/interfaces/web/server.go",
           "lineNumber": 27,
           "lineContent": "sseHub := sse.NewHub(log.With().Str(\"component\", \"sse\").Logger())",
           "title": "SSE Hub Creation",
@@ -278,7 +278,7 @@
         },
         {
           "id": "5d",
-          "path": "internal/web/server.go",
+          "path": "internal/interfaces/web/server.go",
           "lineNumber": 62,
           "lineContent": "mux := http.NewServeMux()",
           "title": "Route Multiplexer",
@@ -301,7 +301,7 @@
           "description": "HTTP server begins listening on configured address (default :8090) for requests"
         }
       ],
-      "traceTextDiagram": "Web Server Startup Flow\n├── cmd/agentctl_web/main.go\n│   ├── main() entry point \u003c-- cmd/agentctl_web/main.go:38\n│   │   ├── config.LoadCached() \u003c-- cmd/agentctl_web/main.go:55\n│   │   ├── web.NewServer() call \u003c-- 5a\n│   │   ├── go srv.Run(ctx) \u003c-- 5c\n│   │   ├── http.Server creation \u003c-- cmd/agentctl_web/main.go:82\n│   │   │   └── Handler: srv.Handler() \u003c-- 5e\n│   │   └── httpSrv.ListenAndServe() \u003c-- 5f\n│   └── signal handling \u0026 shutdown \u003c-- cmd/agentctl_web/main.go:105\n│\n└── internal/web/server.go\n    ├── NewServer() initialization \u003c-- internal/web/server.go:26\n    │   ├── sse.NewHub() creation \u003c-- 5b\n    │   ├── consolews.NewHub() creation \u003c-- internal/web/server.go:28\n    │   └── return Server instance \u003c-- internal/web/server.go:42\n    │\n    └── Handler() route registration \u003c-- internal/web/server.go:61\n        ├── http.NewServeMux() \u003c-- 5d\n        ├── register /api/jobs endpoint \u003c-- internal/web/server.go:71\n        ├── register /api/events (SSE) \u003c-- internal/web/server.go:68\n        ├── register /ws/console/* \u003c-- internal/web/server.go:91\n        ├── register all other API routes\n        └── apply CORS + logging \u003c-- internal/web/server.go:152",
+      "traceTextDiagram": "Web Server Startup Flow\n├── cmd/agentctl_web/main.go\n│   ├── main() entry point \u003c-- cmd/agentctl_web/main.go:38\n│   │   ├── config.LoadCached() \u003c-- cmd/agentctl_web/main.go:55\n│   │   ├── web.NewServer() call \u003c-- 5a\n│   │   ├── go srv.Run(ctx) \u003c-- 5c\n│   │   ├── http.Server creation \u003c-- cmd/agentctl_web/main.go:82\n│   │   │   └── Handler: srv.Handler() \u003c-- 5e\n│   │   └── httpSrv.ListenAndServe() \u003c-- 5f\n│   └── signal handling \u0026 shutdown \u003c-- cmd/agentctl_web/main.go:105\n│\n└── internal/interfaces/web/server.go\n    ├── NewServer() initialization \u003c-- internal/interfaces/web/server.go:26\n    │   ├── sse.NewHub() creation \u003c-- 5b\n    │   ├── consolews.NewHub() creation \u003c-- internal/interfaces/web/server.go:28\n    │   └── return Server instance \u003c-- internal/interfaces/web/server.go:42\n    │\n    └── Handler() route registration \u003c-- internal/interfaces/web/server.go:61\n        ├── http.NewServeMux() \u003c-- 5d\n        ├── register /api/jobs endpoint \u003c-- internal/interfaces/web/server.go:71\n        ├── register /api/events (SSE) \u003c-- internal/interfaces/web/server.go:68\n        ├── register /ws/console/* \u003c-- internal/interfaces/web/server.go:91\n        ├── register all other API routes\n        └── apply CORS + logging \u003c-- internal/interfaces/web/server.go:152",
       "traceGuide": "## Motivation\n\nThe agentctl web server needs to **start up reliably** and **expose multiple communication channels** to the frontend GUI. The system must support traditional REST APIs for data queries, Server-Sent Events (SSE) for real-time push notifications, and WebSocket connections for bidirectional console sessions. The startup sequence must initialize these subsystems in the correct order, register all HTTP routes, and begin listening for connections—all while handling graceful shutdown.\n\n## Details\n\n### Entry Point and Configuration\n\nThe server starts in `cmd/agentctl_web/main.go` [5a], which loads the agentctl configuration including paths to jobs, CAS storage, and database settings. This configuration is passed to all handlers that need to access persistent data.\n\n### Server Initialization\n\n`web.NewServer()` creates the core server instance with three key components:\n\n1. **SSE Hub** [5b] - A goroutine-based event broadcaster that maintains connected clients and distributes invalidation events when data changes\n2. **Console Hub** - Manages WebSocket sessions for interactive console communication\n3. **HTTP Handler** - A multiplexer that routes requests to appropriate handlers\n\nThe SSE hub is immediately started in a background goroutine [5c] so it can begin accepting client registrations before the HTTP server starts listening.\n\n### Route Registration\n\nThe `Handler()` method [5d] creates an `http.ServeMux` and registers all endpoints:\n\n- **REST APIs** like `/api/jobs` for querying job data\n- **SSE endpoint** at `/api/events` for real-time updates\n- **WebSocket endpoint** at `/ws/console/*` for console sessions\n- **Static file serving** (optional) for production deployments\n\nRoutes are registered with handler functions that receive the config and logger, enabling them to access storage and emit structured logs.\n\n### HTTP Server Start\n\nThe HTTP server is configured [5e] with the handler and appropriate timeouts (note: `WriteTimeout` is 0 to support long-lived SSE connections). The server begins listening on port 8090 by default [5f], blocking until shutdown is requested.\n\n### Graceful Shutdown\n\nSignal handlers catch SIGTERM/SIGINT, cancel the context (stopping the SSE hub), and call `httpSrv.Shutdown()` with a 5-second timeout to drain in-flight requests."
     },
     {
@@ -343,14 +343,14 @@
         },
         {
           "id": "6e",
-          "path": "internal/web/server.go",
+          "path": "internal/interfaces/web/server.go",
           "lineNumber": 168,
           "lineContent": "w.Header().Set(\"Access-Control-Allow-Origin\", origin)",
           "title": "CORS Middleware",
           "description": "Development CORS middleware allows localhost:5173 origin for Vite dev server"
         }
       ],
-      "traceTextDiagram": "Development Environment Setup\n├── Vite Dev Server (localhost:5173)\n│   ├── vite.config.ts configuration \u003c-- packages/gui/vite.config.ts:6\n│   │   ├── proxy.\"/api\" config \u003c-- 6a\n│   │   │   └── target: localhost:8090 \u003c-- 6b\n│   │   └── proxy.\"/ws\" config \u003c-- packages/gui/vite.config.ts:20\n│   │       └── ws target: localhost:8090 \u003c-- 6c\n│   └── package.json scripts \u003c-- packages/gui/package.json:6\n│       └── dev:all runs both servers \u003c-- 6d\n│\n└── Go Backend Server (localhost:8090)\n    ├── HTTP request arrives\n    │   └── CORS middleware intercepts \u003c-- internal/web/server.go:162\n    │       └── Set Allow-Origin header \u003c-- 6e\n    └── Routes registered \u003c-- internal/web/server.go:62\n        ├── /api/* endpoints \u003c-- internal/web/server.go:71\n        └── /ws/* WebSocket endpoints \u003c-- internal/web/server.go:91",
+      "traceTextDiagram": "Development Environment Setup\n├── Vite Dev Server (localhost:5173)\n│   ├── vite.config.ts configuration \u003c-- packages/gui/vite.config.ts:6\n│   │   ├── proxy.\"/api\" config \u003c-- 6a\n│   │   │   └── target: localhost:8090 \u003c-- 6b\n│   │   └── proxy.\"/ws\" config \u003c-- packages/gui/vite.config.ts:20\n│   │       └── ws target: localhost:8090 \u003c-- 6c\n│   └── package.json scripts \u003c-- packages/gui/package.json:6\n│       └── dev:all runs both servers \u003c-- 6d\n│\n└── Go Backend Server (localhost:8090)\n    ├── HTTP request arrives\n    │   └── CORS middleware intercepts \u003c-- internal/interfaces/web/server.go:162\n    │       └── Set Allow-Origin header \u003c-- 6e\n    └── Routes registered \u003c-- internal/interfaces/web/server.go:62\n        ├── /api/* endpoints \u003c-- internal/interfaces/web/server.go:71\n        └── /ws/* WebSocket endpoints \u003c-- internal/interfaces/web/server.go:91",
       "traceGuide": "## Motivation\n\nWhen developing a React SPA with a Go backend, you need to run **two separate servers**: the Vite dev server (for hot module reload) on port 5173 and the Go API server on port 8090. Without proper configuration, the frontend cannot communicate with the backend due to **CORS restrictions** and **different origins**. The development proxy setup [6a-6e] solves this by making Vite transparently forward API and WebSocket requests to the Go server, allowing seamless local development.\n\n## Details\n\n### Vite Proxy Configuration\n\nThe `vite.config.ts` file [6a] configures Vite's dev server to **proxy specific paths** to the backend:\n\n- **API requests** (`/api/*`) are forwarded to `http://localhost:8090` [6b], so frontend code can call `/api/jobs` and it reaches the Go server\n- **WebSocket connections** (`/ws/*`) are upgraded and proxied to `ws://localhost:8090` [6c], enabling real-time console sessions\n\nThis means frontend code uses **relative paths** like `/api/jobs` without hardcoding the backend URL.\n\n### Running Both Servers\n\nThe `package.json` defines a `dev:all` script [6d] that uses `concurrently` to start both the Go backend (`npm run server` which calls `agentctl web serve --dev-cors`) and the Vite dev server simultaneously. This is the **single command** developers run for local development.\n\n### CORS Handling\n\nThe Go server's CORS middleware [6e] detects the development environment and sets `Access-Control-Allow-Origin` headers to allow requests from `localhost:5173`. Without this, the browser would block API calls even with the proxy, since the WebSocket upgrade and some requests need explicit CORS approval.\n\n### Route Registration\n\nThe Go server registers all endpoints [6a] including REST APIs at `/api/*` and WebSocket handlers at `/ws/*`. The proxy ensures these routes are accessible from the frontend running on a different port."
     },
     {
@@ -376,7 +376,7 @@
         },
         {
           "id": "7c",
-          "path": "internal/web/server.go",
+          "path": "internal/interfaces/web/server.go",
           "lineNumber": 130,
           "lineContent": "if s.opts.UIDir != \"\" {",
           "title": "Static Serving Check",
@@ -384,7 +384,7 @@
         },
         {
           "id": "7d",
-          "path": "internal/web/server.go",
+          "path": "internal/interfaces/web/server.go",
           "lineNumber": 131,
           "lineContent": "fs := http.FileServer(http.Dir(s.opts.UIDir))",
           "title": "FileServer Creation",
@@ -392,14 +392,14 @@
         },
         {
           "id": "7e",
-          "path": "internal/web/server.go",
+          "path": "internal/interfaces/web/server.go",
           "lineNumber": 134,
           "lineContent": "if strings.HasPrefix(r.URL.Path, \"/api/\") || strings.HasPrefix(r.URL.Path, \"/ws/\") {",
           "title": "Route Precedence",
           "description": "Handler checks for API/WS prefixes first, preventing static files from shadowing endpoints"
         }
       ],
-      "traceTextDiagram": "Production Build \u0026 Deployment Flow\n├── Frontend Build Process\n│   └── npm run build \u003c-- 7a\n│       └── Outputs to packages/gui/dist/\n├── CLI Command Setup\n│   └── agentctl web serve \u003c-- cmd/agentctl/cmd/web.go:25\n│       └── --ui-dir flag definition \u003c-- 7b\n│           └── Accepts path to built UI files\n├── Server Initialization\n│   └── web.NewServer(opts) \u003c-- cmd/agentctl/cmd/web.go:84\n│       └── opts.UIDir set from flag \u003c-- cmd/agentctl/cmd/web.go:81\n│           └── UIDir != \"\" check \u003c-- 7c\n│               ├── http.FileServer() \u003c-- 7d\n│               │   └── Serves static files\n│               └── Route handler logic \u003c-- internal/web/server.go:132\n│                   └── API/WS prefix check \u003c-- 7e\n│                       ├── /api/* → 404 \u003c-- internal/web/server.go:135\n│                       ├── /ws/* → 404 (not static)\n│                       └── /* → serve \u003c-- internal/web/server.go:138\n└── Result: Single binary serves both\n    API + SPA",
+      "traceTextDiagram": "Production Build \u0026 Deployment Flow\n├── Frontend Build Process\n│   └── npm run build \u003c-- 7a\n│       └── Outputs to packages/gui/dist/\n├── CLI Command Setup\n│   └── agentctl web serve \u003c-- cmd/agentctl/cmd/web.go:25\n│       └── --ui-dir flag definition \u003c-- 7b\n│           └── Accepts path to built UI files\n├── Server Initialization\n│   └── web.NewServer(opts) \u003c-- cmd/agentctl/cmd/web.go:84\n│       └── opts.UIDir set from flag \u003c-- cmd/agentctl/cmd/web.go:81\n│           └── UIDir != \"\" check \u003c-- 7c\n│               ├── http.FileServer() \u003c-- 7d\n│               │   └── Serves static files\n│               └── Route handler logic \u003c-- internal/interfaces/web/server.go:132\n│                   └── API/WS prefix check \u003c-- 7e\n│                       ├── /api/* → 404 \u003c-- internal/interfaces/web/server.go:135\n│                       ├── /ws/* → 404 (not static)\n│                       └── /* → serve \u003c-- internal/interfaces/web/server.go:138\n└── Result: Single binary serves both\n    API + SPA",
       "traceGuide": "## Motivation\n\nThe agentctl GUI is a **React single-page application** that needs to be deployed alongside a **Go backend server**. In development, developers want hot-reload for frontend changes, but in production, they want a **single binary** that serves both the API and the UI. This trace shows how the system supports both modes: development uses Vite's dev server with proxying [6b, 6c], while production bundles the React app into static files that the Go server can optionally serve [7a, 7d].\n\n## Details\n\n### Build Process\n\nThe frontend build is triggered via `npm run build` [7a], which runs TypeScript compilation followed by Vite's production bundler. This outputs optimized static files (HTML, JS, CSS) to `packages/gui/dist/`.\n\n### Server Configuration\n\nThe `agentctl web serve` command accepts a `--ui-dir` flag [7b] that specifies where built UI files are located. When this flag is provided, the server enables static file serving [7c].\n\n### Route Handling\n\nThe Go server creates an `http.FileServer` [7d] to serve files from the specified directory. **Critically**, the route handler checks incoming requests first [7e]: if the path starts with `/api/` or `/ws/`, it returns 404 (preventing static files from shadowing API endpoints). Otherwise, it serves the static file, allowing the React router to handle client-side navigation.\n\n### Development vs Production\n\nIn **development**, the `--ui-dir` flag is omitted, so the server only serves API endpoints. Developers run Vite separately on port 5173, which proxies `/api` and `/ws` requests to the Go server on port 8090 [6b, 6c].\n\nIn **production**, operators build the frontend once, then start the server with `--ui-dir ./packages/gui/dist`, creating a single process that handles everything."
     }
   ],

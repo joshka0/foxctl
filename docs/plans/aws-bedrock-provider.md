@@ -131,7 +131,7 @@ if e.bedrockClient != nil {
 
 ## Step 5: Register in Provider Availability
 
-**File:** `internal/web/api/companion.go`
+**File:** `internal/interfaces/web/api/companion.go`
 
 Add to `CompanionProvidersHandler` providers list:
 ```go
@@ -154,7 +154,7 @@ This is the only new dependency — the core AWS SDK and credential chain module
 | `internal/providers/llm/defaults.go` | MODIFY — add bedrock default model |
 | `internal/engine/bedrock.go` | CREATE — Bedrock Converse adapter |
 | `internal/engine/llmchat_engine.go` | MODIFY — add bedrockClient field, detection, callLLM branch |
-| `internal/web/api/companion.go` | MODIFY — add bedrock to providers list |
+| `internal/interfaces/web/api/companion.go` | MODIFY — add bedrock to providers list |
 | `go.mod` / `go.sum` | MODIFY — add bedrockruntime dependency |
 
 ## Environment Variables

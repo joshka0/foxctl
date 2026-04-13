@@ -145,8 +145,8 @@ Goal:
 
 Primary files:
 
-1. `internal/web/api/orchestration.go` (new handlers)
-2. `internal/web/server.go` (route registration)
+1. `internal/interfaces/web/api/orchestration.go` (new handlers)
+2. `internal/interfaces/web/server.go` (route registration)
 3. `internal/v2/services/orchestration_service.go` (command methods)
 4. `internal/v2/services/orchestration_service_test.go` (idempotency + error cases)
 
@@ -165,7 +165,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/web/... ./internal/v2/services`
+1. `go test ./internal/interfaces/web/... ./internal/v2/services`
 
 ## PR-47: GUI Kanban Surface (Runtime-First Integration)
 

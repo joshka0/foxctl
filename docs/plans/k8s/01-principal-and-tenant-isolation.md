@@ -184,7 +184,7 @@ Wire Principal into `hooks.Input` when dispatching PreToolUse/PostToolUse.
 - Accept Principal in `Chat()` method (via context or explicit parameter)
 - Use tenant-scoped conversation ID for memory lookups
 
-### `internal/web/server.go`
+### `internal/interfaces/web/server.go`
 
 - Teams adapter path: extract TenantID from Teams config/JWT and propagate
 - Web/API path: extract from session/JWT (placeholder for Phase 2 HTTP auth)

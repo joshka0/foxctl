@@ -42,11 +42,11 @@ func TestExtractRepoAnchorPaths(t *testing.T) {
 	t.Parallel()
 
 	got := extractRepoAnchorPaths([]repoquery.Anchor{
-		{Path: "internal/web/api/agents.go"},
-		{Path: " internal/web/api/agents.go "},
-		{Path: "internal/web/api/openapi.go"},
+		{Path: "internal/interfaces/web/api/agents.go"},
+		{Path: " internal/interfaces/web/api/agents.go "},
+		{Path: "internal/interfaces/web/api/openapi.go"},
 	})
-	want := []string{"internal/web/api/agents.go", "internal/web/api/openapi.go"}
+	want := []string{"internal/interfaces/web/api/agents.go", "internal/interfaces/web/api/openapi.go"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("extractRepoAnchorPaths()=%v want %v", got, want)
 	}

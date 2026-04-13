@@ -249,7 +249,7 @@ This is an optimization (avoid re-creating consolews sessions on every request),
 |------|--------|
 | `internal/context/companion/service.go` | Add TurnLock; serialize Chat() per conversation |
 | `internal/interfaces/chatadapter/session_bridge.go` | Replace cancel-previous with turn lock |
-| `internal/web/server.go` | Initialize TurnLock (memory or Postgres based on config) |
+| `internal/interfaces/web/server.go` | Initialize TurnLock (memory or Postgres based on config) |
 
 ## Implementation Order
 

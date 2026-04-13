@@ -35,10 +35,10 @@ Current limitations:
 
 Relevant code:
 
-- [internal/web/api/agents.go](../../../internal/web/api/agents.go)
+- [internal/interfaces/web/api/agents.go](../../../internal/interfaces/web/api/agents.go)
 - [internal/daemon/service.go](../../../internal/daemon/service.go)
 - [internal/agent/runtime/runtime.go](../../../internal/agent/runtime/runtime.go)
-- [internal/web/api/workspaces.go](../../../internal/web/api/workspaces.go)
+- [internal/interfaces/web/api/workspaces.go](../../../internal/interfaces/web/api/workspaces.go)
 
 ## Why OpenSandbox Fits
 

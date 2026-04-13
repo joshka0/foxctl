@@ -9,7 +9,7 @@ cd "${REPO_ROOT}"
 go test -tags=libsqlite3 \
   ./cmd/agentctl/cmd \
   ./internal/storage/coordination \
-  ./internal/web/api \
-  ./internal/web/sse \
+  ./internal/interfaces/web/api \
+  ./internal/interfaces/web/sse \
   -run 'Test(Store_RoomLoopDeliveryRuntimeRoundTrip|RequireActiveRoomLoopRequiresDeliveryOwner|RequireActiveRoomLoopAPIRequiresDeliveryOwner|MergeRelayResultsAllowsLegacyFallbackAfterPrimaryFailure|RoomLoopRuntimeStateFromStoreRestoresOperationalMemory|DetectRoomPulseMessagesSkipsSatisfiedReplyExpected|ProcessRoomReminderTickIgnoresAckedReminderInstance|RoomDetailHandler_GetStatusReturnsPersistedLoopState|RoomDetailHandler_PatchRequiresCoordinator|RoomDetailHandler_MembersPatchRequiresCoordinator|RoomDetailHandler_PutMemberBindingRejectsSelfRoleChange|Handler_GlobalClientReceivesScopedEvent)' \
   -count=1

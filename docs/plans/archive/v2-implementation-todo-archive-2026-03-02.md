@@ -52,7 +52,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 - [x] PR-11: Live command-surface cutover (v2 routing in real CLI/API/daemon handlers)
   - [x] wire daemon `agent.spawn`/`agent.list`/`agent.kill` request handling to v2 command handlers in `internal/daemon/service.go`
   - [x] wire CLI `spawn/run/list/kill` entrypoints to v2 command handlers in `cmd/agentctl/cmd/agent.go`
-  - [x] wire API agent spawn/daemon action handlers to v2 command handlers in `internal/web/api/agents.go`
+  - [x] wire API agent spawn/daemon action handlers to v2 command handlers in `internal/interfaces/web/api/agents.go`
   - [x] remove transitional per-command v1 fallback/shadow routing from active command surfaces
   - [x] add integration tests proving real handler routing (not router-only unit tests)
 - [x] PR-12: Libsql turn/artifact stores (production `TurnRecorder` + `TurnReader`)
@@ -114,7 +114,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [x] retired in hard-cut cleanup (runtime command-level routing flags removed from active command surfaces)
 - [x] PR-21: command-surface de-legacy dedup (remove no-op v2 passthrough wrappers)
   - [x] point CLI/API v2 function pointers at canonical handlers directly
-  - [x] remove no-op `*V2` wrappers in `cmd/agentctl/cmd/agent.go` and `internal/web/api/agents.go`
+  - [x] remove no-op `*V2` wrappers in `cmd/agentctl/cmd/agent.go` and `internal/interfaces/web/api/agents.go`
   - [x] remove daemon `handleAgent*V2` passthrough methods and route both branches to canonical handlers
   - [x] reduced duplicated behavior paths during transition; finalized as hard-cut direct routing
 - [x] PR-22: explicit v2 list command path (no v2->v1 aliasing)
@@ -256,7 +256,7 @@ Subagent Review
   - Removed transitional routing packages under `internal/v2/ports/*`.
   - Removed unused legacy bridge package `internal/v2/adapters/v1bridge/*`.
   - Updated active Wave/Decision sections to reflect direct v2 command-surface wiring and retired runtime command-level fallback/shadow flags.
-  - Validation: `go test ./internal/v2/... ./internal/daemon ./internal/web/api ./cmd/agentctl/cmd` and `make check-doc-links` (pass).
+  - Validation: `go test ./internal/v2/... ./internal/daemon ./internal/interfaces/web/api ./cmd/agentctl/cmd` and `make check-doc-links` (pass).
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c9f4e-b7fc-7e40-9263-8f23d1bf411e`
@@ -273,13 +273,13 @@ Subagent Review
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c9f1e-2ade-78c1-9b68-c00af252fdb1`
-  - scope: `PR-30 gui-agent route audit + event/context alignment` (`internal/web/api/agents.go`, `internal/observability/{wide_event.go,sse_bridge.go,sse_bridge_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_internal_test.go,layered_observability_test.go}`, `packages/gui-agent/src/api/types.ts`)
+  - scope: `PR-30 gui-agent route audit + event/context alignment` (`internal/interfaces/web/api/agents.go`, `internal/observability/{wide_event.go,sse_bridge.go,sse_bridge_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_internal_test.go,layered_observability_test.go}`, `packages/gui-agent/src/api/types.ts`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c9f17-3de5-7ac1-8093-1bcf4faf3022`
-  - scope: `PR-30 gui-agent route audit + event/context alignment` (`internal/web/api/agents.go`, `internal/observability/{wide_event.go,sse_bridge.go,sse_bridge_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `packages/gui-agent/src/api/types.ts`)
+  - scope: `PR-30 gui-agent route audit + event/context alignment` (`internal/interfaces/web/api/agents.go`, `internal/observability/{wide_event.go,sse_bridge.go,sse_bridge_test.go}`, `internal/v2/runtime/contextbuilder/{layered.go,layered_observability_test.go}`, `packages/gui-agent/src/api/types.ts`)
   - findings: `SSE forwarding scope too broad, plus low test-hardening gaps`
   - decision: `approved-with-known-risks`
 - 2026-02-27: Completed PR-30 gui-agent route audit + v2 contract alignment.
@@ -287,7 +287,7 @@ Subagent Review
   - Added `context.layered_bundle` wide event emission from layered context assembly, including deterministic stable ref slices and ref-count metadata (`refs`, `turn_refs`, `slice_refs`, `episode_refs`, `narrative_refs`, `artifact_refs`).
   - Updated SSE bridge forwarding rules to include exact context operations and scoped v2 runtime prefixes, plus curated extraction of context-ref metadata for GUI activity stream payloads.
   - Added observability/contextbuilder regression tests (`sse_bridge_test.go`, `layered_internal_test.go`, `layered_observability_test.go`) and GUI type alignment for ref metadata (`packages/gui-agent/src/api/types.ts`).
-  - Validation: `CGO_ENABLED=0 go test ./internal/observability ./internal/v2/runtime/contextbuilder ./internal/web/api -count=1` and `pnpm -C packages/gui-agent exec tsc --noEmit` (pass).
+  - Validation: `CGO_ENABLED=0 go test ./internal/observability ./internal/v2/runtime/contextbuilder ./internal/interfaces/web/api -count=1` and `pnpm -C packages/gui-agent exec tsc --noEmit` (pass).
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c9f0f-0aba-7672-af97-284e564f9454`
@@ -359,18 +359,18 @@ Subagent Review
 - 2026-02-22:
   Subagent Review
   - reviewer: `019c8604-5703-7ec2-92f3-3d797ac316e7` (final), `019c8602-a782-7b21-8f1a-e611a302cb8d` (initial)
-  - scope: `PR-24 explicit v2 spawn path` (`cmd/agentctl/cmd/agent.go`, `internal/web/api/agents.go`, `internal/daemon/service.go`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-24 explicit v2 spawn path` (`cmd/agentctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/daemon/service.go`, `docs/plans/v2-implementation-todo.md`)
   - findings: `initial review found one medium issue (unused route flag in daemon helper), fixed; final re-review found none`
   - decision: `approved`
 - 2026-02-22: Completed PR-24 explicit v2 spawn command path.
   - Added dedicated daemon `handleAgentSpawnV2(ctx, params)` route for v2 dispatch (no v2 branch alias in method dispatch).
   - Switched CLI/API spawn v2 function pointers to explicit v2 handlers while retaining existing behavior.
   - Consolidated spawn behavior in shared helpers to preserve parity and keep v1 fallback unchanged.
-  - Verification: `go test ./cmd/agentctl/cmd ./internal/web/api ./internal/daemon ./internal/v2/...` (pass).
+  - Verification: `go test ./cmd/agentctl/cmd ./internal/interfaces/web/api ./internal/daemon ./internal/v2/...` (pass).
 - 2026-02-22:
   Subagent Review
   - reviewer: `019c85f4-8d2e-7731-ac25-934560901d63`, `019c85f4-8e14-7f20-b676-f7bd9124913d`, `019c85fb-d4a5-7650-a26a-291b252c4cf6` (post-review follow-up)
-  - scope: `PR-23 explicit v2 kill path` (`internal/daemon/service.go`, `internal/web/api/agents.go`, `cmd/agentctl/cmd/agent.go`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-23 explicit v2 kill path` (`internal/daemon/service.go`, `internal/interfaces/web/api/agents.go`, `cmd/agentctl/cmd/agent.go`, `docs/plans/v2-implementation-todo.md`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-22: Completed PR-23 explicit v2 kill command path.
@@ -379,33 +379,33 @@ Subagent Review
   - Preserved kill side effects (agent session map + agents.db stopped-state updates) via shared post-kill helper.
   - Switched CLI/API kill v2 function pointers to explicit v2 handlers while preserving payload behavior.
   - Post-review follow-up: threaded request `context.Context` through v1 kill route in daemon dispatch to preserve cancellation/timeout propagation.
-  - Verification: `go test ./cmd/agentctl/cmd ./internal/web/api ./internal/daemon ./internal/v2/...` (pass).
+  - Verification: `go test ./cmd/agentctl/cmd ./internal/interfaces/web/api ./internal/daemon ./internal/v2/...` (pass).
 - 2026-02-22:
   Subagent Review
   - reviewer: `019c8583-da9f-7122-8f64-cca0d7544e33`, `019c8583-de8e-79a2-a6bd-fc225e5acd7c`
-  - scope: `PR-22 explicit v2 list path` (`cmd/agentctl/cmd/agent.go`, `internal/web/api/agents.go`, `internal/daemon/service.go`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-22 explicit v2 list path` (`cmd/agentctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/daemon/service.go`, `docs/plans/v2-implementation-todo.md`)
   - findings: `none blocking`; one reviewer noted pending placeholders in this tracker entry, now resolved
   - decision: `approved`
 - 2026-02-22: Completed PR-22 explicit v2 list command path.
   - Added dedicated daemon `handleAgentListV2(ctx)` route for v2 branch dispatch (no v2->v1 alias call).
   - Unified list result shaping through shared builder to preserve payload parity.
   - Switched CLI/API list v2 function pointers to explicit v2 handler functions while keeping behavior stable.
-  - Verification: `go test ./cmd/agentctl/cmd ./internal/web/api ./internal/daemon` and `go test ./internal/v2/...` (pass).
+  - Verification: `go test ./cmd/agentctl/cmd ./internal/interfaces/web/api ./internal/daemon` and `go test ./internal/v2/...` (pass).
 - 2026-02-21:
   Subagent Review
   - reviewer: `019c829e-2f38-7e31-9e78-b22e43ed600f`, `019c829e-305d-7e41-90f5-acdb7875d24b`
-  - scope: `PR-21 command-surface de-legacy dedup` (`cmd/agentctl/cmd/agent.go`, `internal/web/api/agents.go`, `internal/daemon/service.go`, targeted routing tests)
+  - scope: `PR-21 command-surface de-legacy dedup` (`cmd/agentctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/daemon/service.go`, targeted routing tests)
   - findings: `none blocking`; both reviewers flagged follow-up visibility for eventual v2-native replacement paths
   - decision: `approved-with-known-risks`
 - 2026-02-21: Completed PR-21 command-surface de-legacy dedup.
   - Removed no-op v2 passthrough wrappers and directly aliased v2 branch defaults to canonical handlers in CLI/API.
   - Simplified daemon method dispatch to call canonical handlers from both v1/v2 branches and removed redundant `handleAgent*V2` methods.
   - Kept `AGENTCTL_V2_COMMANDS` command routing contract intact while reducing duplicate implementation paths.
-  - Verification: `go test ./cmd/agentctl/cmd ./internal/web/api ./internal/daemon ./internal/v2/...` (pass).
+  - Verification: `go test ./cmd/agentctl/cmd ./internal/interfaces/web/api ./internal/daemon ./internal/v2/...` (pass).
 - 2026-02-20:
   Subagent Review
   - reviewer: `019c7a42-5bc2-7fa1-9945-68904fac8326`
-  - scope: `PR-20 routing-default slice` (`internal/v2/ports/config/{v2flags.go,v2flags_test.go}`, `cmd/agentctl/cmd/agent_v2_routing_test.go`, `internal/web/api/agents_v2_routing_test.go`, `internal/daemon/service_v2_routing_test.go`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-20 routing-default slice` (`internal/v2/ports/config/{v2flags.go,v2flags_test.go}`, `cmd/agentctl/cmd/agent_v2_routing_test.go`, `internal/interfaces/web/api/agents_v2_routing_test.go`, `internal/daemon/service_v2_routing_test.go`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-20: Completed PR-20 v2-primary routing defaults.
@@ -642,10 +642,10 @@ Subagent Review
   - Added daemon routing tests in `internal/daemon/service_v2_routing_test.go` to assert v1/v2 decision switching via `AGENTCTL_V2_COMMANDS`.
 - 2026-02-18: PR-11 completed for CLI/API/daemon command surfaces.
   - Routed real CLI handlers (`agent spawn/run/list/kill`) through `internal/v2/ports/cli` in `cmd/agentctl/cmd/agent.go` with v1 fallback and v2 command opt-in via `AGENTCTL_V2_COMMANDS`.
-  - Routed API agent spawn and daemon action handlers through `internal/v2/ports/api` in `internal/web/api/agents.go` while preserving current behavior in v2 delegates.
+  - Routed API agent spawn and daemon action handlers through `internal/v2/ports/api` in `internal/interfaces/web/api/agents.go` while preserving current behavior in v2 delegates.
   - Added handler-level routing tests:
     - `cmd/agentctl/cmd/agent_v2_routing_test.go`
-    - `internal/web/api/agents_v2_routing_test.go`
+    - `internal/interfaces/web/api/agents_v2_routing_test.go`
     - extended daemon fallback coverage in `internal/daemon/service_v2_routing_test.go`
 - 2026-02-18: Completed PR-12 libsql turn/artifact persistence slice.
   - Added new v2 libsql turns adapter package: `internal/v2/adapters/libsql/turns`.
@@ -694,7 +694,7 @@ Subagent Review
   - Wired CLI/API/daemon command dispatchers to `NewRouterWithShadow(...)` with sanitized shadow flags.
   - Added parity routing tests for non-mutating shadow execution and mutating opt-in behavior:
     - `cmd/agentctl/cmd/agent_v2_routing_test.go`
-    - `internal/web/api/agents_v2_routing_test.go`
+    - `internal/interfaces/web/api/agents_v2_routing_test.go`
     - `internal/daemon/service_v2_routing_test.go`
   - Added explicit PR-16 parity-window and promotion thresholds in `docs/plans/v2-greenfield-bootstrap.md`.
 - 2026-02-18: Completed PR-16 v1 decommission readiness gates.
@@ -704,21 +704,21 @@ Subagent Review
   - Added freeze-routing coverage in:
     - `internal/v2/ports/router_shadow_test.go`
     - `cmd/agentctl/cmd/agent_v2_routing_test.go`
-    - `internal/web/api/agents_v2_routing_test.go`
+    - `internal/interfaces/web/api/agents_v2_routing_test.go`
     - `internal/daemon/service_v2_routing_test.go`
   - Validated with:
-    - `go test ./internal/v2/ports/config ./internal/v2/ports ./cmd/agentctl/cmd ./internal/web/api ./internal/daemon`
+    - `go test ./internal/v2/ports/config ./internal/v2/ports ./cmd/agentctl/cmd ./internal/interfaces/web/api ./internal/daemon`
     - `go test ./internal/v2/...`
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c7315-8761-7543-9035-f8ad55dab480`
-  - scope: `PR-16 freeze-gate completion slice` (`internal/v2/ports/{config/v2flags.go,router.go,router_shadow_test.go,cli/router.go,api/router.go,daemon/router.go}`, `cmd/agentctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-16 freeze-gate completion slice` (`internal/v2/ports/{config/v2flags.go,router.go,router_shadow_test.go,cli/router.go,api/router.go,daemon/router.go}`, `cmd/agentctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/interfaces/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/v2-implementation-todo.md`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c730f-e7ef-7a01-af53-4f912ff57574`
-  - scope: `PR-16 partial decommission readiness slice` (`internal/v2/ports/config/{v2flags,v2flags_test}.go`, `cmd/agentctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/{v2-greenfield-bootstrap,v2-implementation-todo}.md`)
+  - scope: `PR-16 partial decommission readiness slice` (`internal/v2/ports/config/{v2flags,v2flags_test}.go`, `cmd/agentctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/interfaces/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/{v2-greenfield-bootstrap,v2-implementation-todo}.md`)
   - findings: `none` (overall `pass`; note: reviewer requested a full-suite run before merge, completed in local verification step)
   - decision: `approved-with-known-risks`
 - 2026-02-18:
@@ -730,7 +730,7 @@ Subagent Review
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c72ca-4cd5-74a0-b5bd-548700eaee61`
-  - scope: `PR-11 expanded routing slice` (`cmd/agentctl/cmd/agent.go`, `cmd/agentctl/cmd/agent_v2_routing_test.go`, `internal/web/api/agents.go`, `internal/web/api/agents_v2_routing_test.go`, `internal/daemon/service.go`, `internal/daemon/service_v2_routing_test.go`)
+  - scope: `PR-11 expanded routing slice` (`cmd/agentctl/cmd/agent.go`, `cmd/agentctl/cmd/agent_v2_routing_test.go`, `internal/interfaces/web/api/agents.go`, `internal/interfaces/web/api/agents_v2_routing_test.go`, `internal/daemon/service.go`, `internal/daemon/service_v2_routing_test.go`)
   - findings: `none` (non-blocking note addressed by adding daemon invalid-env fallback test coverage)
   - decision: `approved`
 - 2026-02-18:

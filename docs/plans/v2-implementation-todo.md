@@ -229,7 +229,7 @@ Subagent Review
 
 Subagent Review
 - reviewer: 019cbae8-dfb7-7af3-885c-f8ac07504966
-- scope: internal/web/api/orchestration.go, internal/web/api/orchestration_test.go, internal/web/server.go
+- scope: internal/interfaces/web/api/orchestration.go, internal/interfaces/web/api/orchestration_test.go, internal/interfaces/web/server.go
 - findings: initial refresh no-op and coalescing race identified; patched with replay-backed refresh and concurrency-safe queue semantics
 - decision: approved
 
@@ -241,13 +241,13 @@ Subagent Review
 
 Subagent Review
 - reviewer: 019cbae8-dfb7-7af3-885c-f8ac07504966
-- scope: internal/observability/sse_bridge.go, internal/observability/sse_bridge_test.go, internal/web/api/orchestration.go, internal/web/api/orchestration_test.go, docs/observability/wide-events.md, docs/spec/v2_symphony_kanban_orchestration.md
+- scope: internal/observability/sse_bridge.go, internal/observability/sse_bridge_test.go, internal/interfaces/web/api/orchestration.go, internal/interfaces/web/api/orchestration_test.go, docs/observability/wide-events.md, docs/spec/v2_symphony_kanban_orchestration.md
 - findings: initial docs contract ambiguity and missing board-get/refresh SSE regression coverage identified; patched and re-reviewed with no remaining substantive findings
 - decision: approved
 
 Subagent Review
 - reviewer: 019cbae8-dfb7-7af3-885c-f8ac07504966
-- scope: internal/web/api/orchestration_test.go (end-to-end replay/projection lane transitions)
+- scope: internal/interfaces/web/api/orchestration_test.go (end-to-end replay/projection lane transitions)
 - findings: none
 - decision: approved
 

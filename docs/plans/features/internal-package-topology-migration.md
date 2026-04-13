@@ -74,7 +74,7 @@ These families are explicit non-targets for the `v2` migration:
   `internal/context/knowledge`
 - `internal/intelligence/indexing/*`, `internal/intelligence/retrieval*`, `internal/intelligence/codecontext`,
   `internal/intelligence/codemap`, `internal/intelligence/refactor`
-- `internal/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi`
+- `internal/interfaces/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi`
 - `internal/domain`, `internal/platform`, `internal/protocol`
 
 ## As-Built `v2` Usage Today
@@ -84,7 +84,7 @@ The repo already uses `internal/v2/*` in a focused way:
 | Surface | Current usage |
 |--------|----------------|
 | CLI ask flow | `cmd/agentctl/cmd/agent.go` builds `v2services.NewAskService(...)` |
-| orchestration/spawn/list/kill | `cmd/agentctl/cmd/orchestration.go`, `cmd/agentctl/cmd/overseer_v2_orchestration.go`, and `internal/web/api/orchestration.go` construct v2 services |
+| orchestration/spawn/list/kill | `cmd/agentctl/cmd/orchestration.go`, `cmd/agentctl/cmd/overseer_v2_orchestration.go`, and `internal/interfaces/web/api/orchestration.go` construct v2 services |
 | companion context assembly | `internal/context/companion/service.go` and `internal/context/companion/v2_context_adapter.go` wire `internal/v2/runtime/contextbuilder` |
 | optional runtime backend bridge | `internal/agent/runtime/runtime.go` gates Eino through `internal/v2/adapters/eino` |
 | newer retrieval lane | `internal/intelligence/retrieval/doc.go` already points new work to `internal/intelligence/retrieval/v2` |
@@ -223,7 +223,7 @@ Why this is the lowest-risk batch:
   from two interface entrypoints, so extracting that seam reduces duplicated
   runtime ownership without changing transport behavior
 - `agentpane` already imports `tmuxbridge` and `zellijbridge`, and other runtime
-  callers such as `internal/agent/runtime/*` and `internal/web/api/mux.go`
+  callers such as `internal/agent/runtime/*` and `internal/interfaces/web/api/mux.go`
   already depend on `agentpane`; a package move there would create wider import
   fallout than the seam-extraction batch
 - gateway terminal behavior can stay stable while the ownership boundary becomes
@@ -246,7 +246,7 @@ Expected import fallout:
   code paths
 - no import-path changes should be required for `internal/runtime/terminal/agentpane`,
   `internal/runtime/terminal/tmuxbridge`, `internal/runtime/terminal/zellijbridge`, `internal/agent/runtime/*`, or
-  `internal/web/api/mux.go` in the first batch
+  `internal/interfaces/web/api/mux.go` in the first batch
 
 Compatibility notes:
 
@@ -613,7 +613,7 @@ Required placement rule from Story 2:
   correlation tracking and session persistence contracts
 - `internal/consoleapp` owns runner, stream parsing, and application/runtime
   behavior for console sessions
-- `internal/web/consolews` remains the transport host for console sessions
+- `internal/interfaces/web/consolews` remains the transport host for console sessions
 
 Story 2 should end with these durable decisions:
 
@@ -621,7 +621,7 @@ Story 2 should end with these durable decisions:
 |------|-------|----------|
 | `internal/console` | console utilities and lifecycle contract | keep as the canonical console ownership slice |
 | `internal/consoleapp` | console application | keep as the runtime/app slice |
-| `internal/web/consolews` | interface transport | keep as the web transport entrypoint |
+| `internal/interfaces/web/consolews` | interface transport | keep as the web transport entrypoint |
 
 Non-goals for Story 2:
 
@@ -644,7 +644,7 @@ Implemented first batch:
     plus the session lifecycle/persistence contract
   - `internal/consoleapp` consumes the narrow console session handle/runtime
     contract
-- `internal/web/consolews` acts as websocket transport host and wire adapter rather
+- `internal/interfaces/web/consolews` acts as websocket transport host and wire adapter rather
   than session-model owner
   - `internal/domain/console` is now the canonical console payload contract
 

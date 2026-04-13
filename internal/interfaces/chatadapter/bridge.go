@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/api"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/web/api"
 )
 
 // Bridge connects chat adapter commands to agentctl skills and APIs.

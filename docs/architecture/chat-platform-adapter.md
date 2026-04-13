@@ -8,7 +8,7 @@ runtime.
 `agentctl web serve --chat <discord|telegram|teams>` enables one inbound chat
 adapter in the web process.
 
-The startup path lives in `internal/web/server.go`:
+The startup path lives in `internal/interfaces/web/server.go`:
 
 1. The server builds a shared `chatadapter.Bridge`.
 2. The selected adapter is created and connected.
@@ -26,10 +26,10 @@ flowchart LR
     Platform["Discord / Telegram / Teams"] --> Driver["chatadapter driver"]
     Driver --> Bridge["chatadapter.Bridge"]
     Driver --> SessionBridge["chatadapter.SessionBridge"]
-    Bridge --> SkillRunner["internal/web/api.SkillRunner"]
+    Bridge --> SkillRunner["internal/interfaces/web/api.SkillRunner"]
     Bridge --> AgentsAPI["/api/agents/* HTTP endpoints"]
     SessionBridge --> ConsoleSessions["internal/console SessionManager"]
-    ConsoleSessions --> ConsoleTransport["internal/web/consolews transport"]
+    ConsoleSessions --> ConsoleTransport["internal/interfaces/web/consolews transport"]
     ConsoleTransport --> Companion["internal/context/companion + console runner"]
     Companion --> Context["v2 context builder / optional Jido companion provider"]
 ```

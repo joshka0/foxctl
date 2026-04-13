@@ -81,7 +81,7 @@ Key packages:
 - `internal/v2/runtime/orchestration`
 - `internal/v2/services`
 - `internal/context/companion`
-- `internal/web/api`
+- `internal/interfaces/web/api`
 
 Those packages translate canonical Go-side requests into JSON-RPC runtime calls:
 

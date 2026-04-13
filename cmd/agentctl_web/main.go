@@ -30,9 +30,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/interfaces/web"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
-	"github.com/jkatigb/agentctl/internal/web"
 )
 
 func main() {

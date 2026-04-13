@@ -15,9 +15,9 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/identity"
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/sse"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/web/sse"
 )
 
 // Adapter implements chatadapter.ChatAdapter for Telegram.

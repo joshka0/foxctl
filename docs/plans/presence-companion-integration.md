@@ -76,7 +76,7 @@ func (s *Settings) IsPresenceEnabled() bool {
 }
 ```
 
-### 2. `internal/web/api/companion_presence.go` (NEW)
+### 2. `internal/interfaces/web/api/companion_presence.go` (NEW)
 
 Adapter bridging `api.SkillRunner` → `companion.SkillRunner`.
 
@@ -115,7 +115,7 @@ func (a *companionSkillRunnerAdapter) Run(ctx context.Context, skillName string,
 }
 ```
 
-### 3. `internal/web/api/companion.go` (EDIT)
+### 3. `internal/interfaces/web/api/companion.go` (EDIT)
 
 Update `CompanionChatHandler` signature and wire `PresenceConfig` into `ServiceConfig`.
 
@@ -150,7 +150,7 @@ if presenceEnabled {
 }
 ```
 
-### 4. `internal/web/server.go` (EDIT)
+### 4. `internal/interfaces/web/server.go` (EDIT)
 
 Update route registration (~line 496) to pass `skillRunner` (already created at ~line 561 for character routes):
 
@@ -308,10 +308,10 @@ Add Presence section in conversation inspector panel:
 1. `internal/storage/conversationsettings/settings.go` — `*bool` field + helper
    → Verify: `go build ./internal/storage/conversationsettings`
 
-2. `internal/web/api/companion_presence.go` — adapter file
-   → Verify: `go build ./internal/web/api`
+2. `internal/interfaces/web/api/companion_presence.go` — adapter file
+   → Verify: `go build ./internal/interfaces/web/api`
 
-3. `internal/web/api/companion.go` + `internal/web/server.go` — wire PresenceConfig + route registration
+3. `internal/interfaces/web/api/companion.go` + `internal/interfaces/web/server.go` — wire PresenceConfig + route registration
    → Verify: `make build`
 
 4. `internal/agent/daemon/handlers.go` + `internal/domain/agent/types.go` — daemon presence forwarding
@@ -330,7 +330,7 @@ Add Presence section in conversation inspector panel:
 
 - **SkillRunner adapter divergence**: If `companion.SkillRunResult` and `api.RunResult` add fields independently, adapter needs updating. Consider unifying long-term.
 - **Presence latency**: Voice generation adds 2-5s per turn. Phase 1 (emotion only) is <100ms. Don't enable voice by default.
-- **CAS CORS**: If GUI runs on different port than API (Vite dev), CAS asset requests need CORS headers. Check `internal/web/server.go` CORS middleware.
+- **CAS CORS**: If GUI runs on different port than API (Vite dev), CAS asset requests need CORS headers. Check `internal/interfaces/web/server.go` CORS middleware.
 - **`heartbeat_at` zero value**: Agents with `0001-01-01T00:00:00Z` heartbeat may cause issues in time comparisons (handled in Plan 1's utility).
 
 ## Open Questions

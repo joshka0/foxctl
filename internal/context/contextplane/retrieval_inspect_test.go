@@ -84,7 +84,7 @@ func TestInspectRetrievalClassifiesBridgeMetadataGap(t *testing.T) {
 	vaultRoot := t.TempDir()
 
 	store := NewWorkspaceStore(workspacePath)
-	expectedPath := "internal/web/api/handlers.go"
+	expectedPath := "internal/interfaces/web/api/handlers.go"
 	candidateNote := firstPackageNoteCandidate(filepath.Base(workspacePath), []string{expectedPath})
 	writeVaultNote(t, filepath.Join(vaultRoot, candidateNote), `---
 title: Web API

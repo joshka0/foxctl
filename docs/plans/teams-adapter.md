@@ -233,7 +233,7 @@ Respond/Edit implementation:
 - `Edit(...)` should `UpdateActivity(...)` on the previously sent activity.
 - If `UpdateActivity` fails, log and stop editing (MVP). Optional: send a new message and finish (Phase 3).
 
-### 2.7 Wiring: `internal/web/server.go` + routes
+### 2.7 Wiring: `internal/interfaces/web/server.go` + routes
 
 - Add `--chat teams` option and update help text exactly:
   - `cmd/agentctl/cmd/web.go`: `"Chat adapter to enable (discord|telegram|teams)"`

@@ -1,7 +1,7 @@
 # Chat Platform Adapter Layer Design
 
 > **Type:** Implementation plan (historical + execution notes)
-> **Current architecture status:** Core adapter layer is implemented for Discord, Telegram, and Teams in `internal/interfaces/chatadapter/*` and `internal/web/server.go` (checkout `93bcbb3b`).
+> **Current architecture status:** Core adapter layer is implemented for Discord, Telegram, and Teams in `internal/interfaces/chatadapter/*` and `internal/interfaces/web/server.go` (checkout `93bcbb3b`).
 > **Remaining work:** Slack/other platform expansion and additional command coverage as backlog items.
 > **Author:** Claude + Josh
 > **Date:** 2026-02-09

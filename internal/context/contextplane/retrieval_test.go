@@ -302,7 +302,7 @@ func TestNoteQueryCoverageBias_PrefersMatchingPackageOverNeighbor(t *testing.T) 
 	webHit := obsidianindex.SearchHit{
 		Path:      "notes/repo/agentctl/packages/internal-web-api.md",
 		Title:     "internal web api",
-		RepoPaths: []string{"internal/web/api/agents.go"},
+		RepoPaths: []string{"internal/interfaces/web/api/agents.go"},
 		Symbols:   []string{"AgentDetailHandler"},
 	}
 	configHit := obsidianindex.SearchHit{
@@ -645,7 +645,7 @@ func retrievalFixtureVaultRoot(t *testing.T) string {
 	if !ok {
 		t.Fatalf("runtime caller unavailable")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "tools", "obsidian", "testdata", "vaults", "basic"))
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "tools", "obsidian", "testdata", "vaults", "basic"))
 }
 
 func createCoChangeVault(t *testing.T) string {

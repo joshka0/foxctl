@@ -42,7 +42,7 @@ Prefer adding new packages under one of these stable families:
 | `internal/v2` | Newer **agent/runtime/orchestration** stack only | `v2/core`, `v2/services`, `v2/runtime`, `v2/adapters` |
 | `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane | current context family |
 | `internal/intelligence/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |
-| `internal/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi` | Interface and transport layers | current interface family |
+| `internal/interfaces/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi` | Interface and transport layers | current interface family |
 
 ## Target Shape
 
@@ -140,7 +140,7 @@ These package families are peer families, not “legacy” in the same sense:
 | `internal/storage/*` | Shared persistence layer used by both legacy and v2 paths |
 | `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane, not old runtime scaffolding |
 | `internal/intelligence/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Intelligence and retrieval plane |
-| `internal/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi` | Interface and transport layers |
+| `internal/interfaces/web`, `internal/interfaces/gateway`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi` | Interface and transport layers |
 | `internal/domain`, `internal/platform`, `internal/protocol` | Foundations, not generation-specific runtime code |
 
 ## Practical Grouping Guidance
@@ -623,14 +623,14 @@ The durable split should be:
 |------|--------------|---------------------------|
 | `internal/console` | console session contract, lifecycle, and persistence primitives such as correlation tracking for interactive actor console sessions | keep as the canonical console ownership slice |
 | `internal/consoleapp` | console application runtime, LLM runner, stream parsing, and session-turn execution | keep as the console application slice |
-| `internal/web/consolews` | websocket transport surface for console sessions | treat as the web-facing console transport entrypoint, not as the utility owner |
+| `internal/interfaces/web/consolews` | websocket transport surface for console sessions | treat as the web-facing console transport entrypoint, not as the utility owner |
 
 That yields one explicit rule:
 
 - `internal/console` owns reusable console-session primitives and persistence
   contracts
 - `internal/consoleapp` owns application/runtime behavior for console sessions
-- `internal/web/consolews` remains the interface/transport layer that hosts the
+- `internal/interfaces/web/consolews` remains the interface/transport layer that hosts the
   console app over web sockets
 
 Current implemented seam:
@@ -641,7 +641,7 @@ Current implemented seam:
   contract instead of leaving sessions-store wiring under `consolews`
 - `internal/consoleapp` consumes the narrow session handle/runtime contract and
   remains the owner of turn execution, tool-event emission, and stream parsing
-- `internal/web/consolews` now acts as the websocket host and wire adapter,
+- `internal/interfaces/web/consolews` now acts as the websocket host and wire adapter,
   rather than the owner of the session/transcript model
 - `internal/domain/console` is the canonical console payload contract; the
   websocket layer no longer carries a separate payload schema
@@ -653,7 +653,7 @@ renames**:
 
 - move console session transcript/config primitives into `internal/console`
 - keep `internal/consoleapp` as the runner/streaming application layer
-- keep `internal/web/consolews` as the websocket transport host
+- keep `internal/interfaces/web/consolews` as the websocket transport host
 - collapse the duplicate websocket payload wrapper onto the canonical
   `internal/domain/console` payload contract
 

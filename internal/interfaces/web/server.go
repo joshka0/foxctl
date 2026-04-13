@@ -20,12 +20,12 @@ import (
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter/discord"
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter/teams"
 	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter/telegram"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/api"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/consolews"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/sse"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/convref"
-	"github.com/jkatigb/agentctl/internal/web/api"
-	"github.com/jkatigb/agentctl/internal/web/consolews"
-	"github.com/jkatigb/agentctl/internal/web/sse"
 )
 
 // Server is the agentctl web server.

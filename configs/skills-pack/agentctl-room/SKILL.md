@@ -323,7 +323,7 @@ Example completion note:
 
 ```text
 changed: wired durable loop GET/PATCH and runtime persistence
-verified: go test -tags=libsqlite3 ./internal/web/api ./cmd/agentctl/cmd -run '...'; go build -tags=libsqlite3 ./cmd/agentctl
+verified: go test -tags=libsqlite3 ./internal/interfaces/web/api ./cmd/agentctl/cmd -run '...'; go build -tags=libsqlite3 ./cmd/agentctl
 remaining: gui-agent auth still uses local dev identity in local mode
 ```
 

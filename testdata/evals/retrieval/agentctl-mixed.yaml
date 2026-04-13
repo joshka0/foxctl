@@ -47,6 +47,6 @@ queries:
     expected_any_of:
       - notes/repo/agentctl/packages/internal-web-api.md
       - notes/repo/agentctl/platform-and-web.md
-      - internal/web/api/agents.go
-      - internal/web/api/orchestration.go
+      - internal/interfaces/web/api/agents.go
+      - internal/interfaces/web/api/orchestration.go
     notes: "Accept either the package note, platform map, or a representative web API handler file."

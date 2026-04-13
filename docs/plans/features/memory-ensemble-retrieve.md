@@ -505,7 +505,7 @@ Preferred integration:
 Potential future files:
 
 - `internal/context/companion/service.go`
-- `internal/web/api/companion.go`
+- `internal/interfaces/web/api/companion.go`
 - `internal/agent/daemon/daemon.go`
 
 ## File Changes

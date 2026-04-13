@@ -944,7 +944,7 @@ Primary files:
 2. `internal/identity/enterprise/resolver.go` (new)
 3. `internal/identity/enterprise/resolver_test.go` (new)
 4. `internal/interfaces/chatadapter/teams/driver.go` (attach mapped principal metadata)
-5. `internal/web/api/*` relevant handlers (principal extraction / attribution)
+5. `internal/interfaces/web/api/*` relevant handlers (principal extraction / attribution)
 6. `docs/architecture/auth-identity.md` (clarify enterprise principal flow)
 
 Package scaffolding:
@@ -967,7 +967,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/identity/enterprise ./internal/interfaces/chatadapter/teams ./internal/web/...`
+1. `go test ./internal/identity/enterprise ./internal/interfaces/chatadapter/teams ./internal/interfaces/web/...`
 
 ## PR-0.5.2: Authorization Layer For Runs, Tools, and Approvals
 
@@ -982,7 +982,7 @@ Primary files:
 2. `internal/agentpolicy/ops_authorizer_test.go` (new)
 3. `internal/ops/policy/types.go` (new)
 4. `internal/ops/policy/types_test.go` (new)
-5. `internal/web/api/ops_*` handlers (policy enforcement)
+5. `internal/interfaces/web/api/ops_*` handlers (policy enforcement)
 6. `internal/v2/adapters/jido/types.go` or adjacent profile policy payloads
 
 Package scaffolding:
@@ -1017,7 +1017,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/agentpolicy ./internal/ops/policy ./internal/web/...`
+1. `go test ./internal/agentpolicy ./internal/ops/policy ./internal/interfaces/web/...`
 
 ## PR-0.5.3: Bedrock Runtime Integration + Model Policy
 
@@ -1112,7 +1112,7 @@ Primary files:
 
 1. `internal/storage/opsaudit/` (new)
 2. `internal/ops/audit/` service layer (new)
-3. `internal/web/api/ops_audit.go` (new)
+3. `internal/interfaces/web/api/ops_audit.go` (new)
 4. `internal/storage/opsruns/store.go` (audit hooks)
 5. `internal/storage/opsactions/store.go` (audit hooks)
 
@@ -1139,7 +1139,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/storage/opsaudit ./internal/ops/audit ./internal/web/...`
+1. `go test ./internal/storage/opsaudit ./internal/ops/audit ./internal/interfaces/web/...`
 
 ## PR-0.5.6: Connector Inventory + Lifecycle Controls
 
@@ -1152,7 +1152,7 @@ Primary files:
 1. `internal/storage/connectors/` (new)
 2. `internal/connectors/k8sbridge/inventory.go` (new)
 3. `internal/connectors/k8sbridge/inventory_test.go` (new)
-4. `internal/web/api/connectors.go` (new)
+4. `internal/interfaces/web/api/connectors.go` (new)
 
 Package scaffolding:
 
@@ -1187,7 +1187,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/storage/connectors ./internal/connectors/k8sbridge ./internal/web/...`
+1. `go test ./internal/storage/connectors ./internal/connectors/k8sbridge ./internal/interfaces/web/...`
 
 ## PR-0.5.7: Admin Control-Plane APIs
 
@@ -1198,8 +1198,8 @@ Goal:
 
 Primary files:
 
-1. `internal/web/api/ops_admin.go` (new)
-2. `internal/web/server.go` (route wiring)
+1. `internal/interfaces/web/api/ops_admin.go` (new)
+2. `internal/interfaces/web/server.go` (route wiring)
 3. `cmd/agentctl/cmd/ops.go` (admin-oriented command coverage)
 4. `cmd/agentctl/cmd/mcp.go` (optional admin MCP exposure later)
 
@@ -1212,7 +1212,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/web/... ./cmd/agentctl/cmd/...`
+1. `go test ./internal/interfaces/web/... ./cmd/agentctl/cmd/...`
 
 ## API and Command Surface
 
@@ -1321,8 +1321,8 @@ Primary files:
 2. `internal/ops/bindings/resolver_test.go` (new)
 3. `internal/ops/investigator/service.go` (new)
 4. `internal/ops/investigator/service_test.go` (new)
-5. `internal/web/api/ops_investigations.go` (new)
-6. `internal/web/server.go` (route wiring)
+5. `internal/interfaces/web/api/ops_investigations.go` (new)
+6. `internal/interfaces/web/server.go` (route wiring)
 7. `internal/interfaces/chatadapter/teams/driver.go` (binding lookup + mode dispatch)
 8. `internal/interfaces/chatadapter/teams/events.go` (associate root activity / run id where helpful)
 
@@ -1351,7 +1351,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/ops/bindings ./internal/ops/investigator ./internal/interfaces/chatadapter/teams ./internal/web/...`
+1. `go test ./internal/ops/bindings ./internal/ops/investigator ./internal/interfaces/chatadapter/teams ./internal/interfaces/web/...`
 
 ## PR-3: Jido Signal + Plugin + Workflow Contract
 
@@ -1561,8 +1561,8 @@ New packages and commands likely needed:
 Existing areas likely to change:
 
 - `internal/interfaces/chatadapter/teams/*`
-- `internal/web/server.go`
-- `internal/web/api/*`
+- `internal/interfaces/web/server.go`
+- `internal/interfaces/web/api/*`
 - `cmd/agentctl/cmd/mcp.go`
 - `docs/architecture/chat-platform-adapter.md`
 - `docs/architecture/kubernetes-runtime.md`

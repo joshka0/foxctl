@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	consolepkg "github.com/jkatigb/agentctl/internal/console"
-	"github.com/jkatigb/agentctl/internal/web/consolews"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/consolews"
 )
 
 func TestGetOrCreateSession_ReusesAndRecreates(t *testing.T) {

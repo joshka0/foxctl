@@ -221,7 +221,7 @@ Relevant files:
 
 - [`packages/gui-agent/src/api/client.ts`](../../packages/gui-agent/src/api/client.ts)
 - [`packages/gui-agent/src/api/types.ts`](../../packages/gui-agent/src/api/types.ts)
-- [`internal/web/server.go`](../../internal/web/server.go)
+- [`internal/interfaces/web/server.go`](../../internal/interfaces/web/server.go)
 
 Symptoms:
 

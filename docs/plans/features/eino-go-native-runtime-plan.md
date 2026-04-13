@@ -137,8 +137,8 @@ Deliverables:
 
 Files likely touched:
 
-- `internal/web/api/orchestration.go`
-- `internal/web/api/agents.go`
+- `internal/interfaces/web/api/orchestration.go`
+- `internal/interfaces/web/api/agents.go`
 - `internal/v2/runtime/orchestration/*`
 - new Go reconciler adapter package
 

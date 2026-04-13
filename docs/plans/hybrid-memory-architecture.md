@@ -182,7 +182,7 @@ flowchart TD
 - **Purpose**: Add type constants for new memory entry types
 - **Key changes**: Add constants, no interface breakage
 
-### `internal/web/api/companion.go` (modified)
+### `internal/interfaces/web/api/companion.go` (modified)
 - **Purpose**: Return hybrid-aware debug context
 - **Key changes**: Optionally include hybrid metadata, keep API compatibility
 

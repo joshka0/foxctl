@@ -282,7 +282,7 @@ func TestRerankCandidatePaths(t *testing.T) {
 
 	webPaths := rerankCandidatePaths("web api handlers transport", []string{
 		"internal/tools/obsidian/client.go",
-		"internal/web/transport.go",
+		"internal/interfaces/web/transport.go",
 		"internal/http/handler.go",
 	})
 	if len(webPaths) == 0 {

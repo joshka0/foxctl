@@ -118,7 +118,7 @@ func TestWorkerRunOnceWithVaultHealth(t *testing.T) {
 	workspace := t.TempDir()
 	storageRoot := t.TempDir()
 	cfg := config.Config{Storage: config.StorageSettings{Root: storageRoot}}
-	vaultRoot := filepath.Clean(filepath.Join(repoRootForWorkerTest(t), "..", "tools", "obsidian", "testdata", "vaults", "basic"))
+	vaultRoot := filepath.Clean(filepath.Join(repoRootForWorkerTest(t), "..", "..", "tools", "obsidian", "testdata", "vaults", "basic"))
 
 	worker := NewWorker(WorkerConfig{
 		Config:    cfg,

@@ -2,7 +2,7 @@
 
 Status: draft  
 Owner: companion / contextplane / rlm  
-Scope: `internal/context/companion`, `internal/rlm`, `internal/context/contextplane`, `internal/web/api`, `packages/gui-agent`
+Scope: `internal/context/companion`, `internal/rlm`, `internal/context/contextplane`, `internal/interfaces/web/api`, `packages/gui-agent`
 
 ## Goal
 
@@ -271,7 +271,7 @@ Files:
 
 - `internal/context/contextplane/store.go`
 - `internal/context/contextplane/taskhistory/*`
-- `internal/web/api/companion.go`
+- `internal/interfaces/web/api/companion.go`
 - `internal/context/companion/service.go`
 
 ### Phase 3 — Bounded RLM Controller State
@@ -409,7 +409,7 @@ Add:
 - `internal/rlm/llm_runner.go`
 - `internal/rlm/env/adapter.go`
 - `internal/rlm/env/tools.go`
-- `internal/web/api/companion.go`
+- `internal/interfaces/web/api/companion.go`
 - `packages/gui-agent/src/api/client.ts`
 - `packages/gui-agent/src/components/conversations/ConversationsList.tsx`
 - `packages/gui-agent/src/components/conversations/ConversationInspector.tsx`

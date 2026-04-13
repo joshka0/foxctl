@@ -26,7 +26,7 @@ Non-goals for the first cut:
 Telegram should reuse the existing abstractions and helpers:
 - `internal/interfaces/chatadapter/adapter.go` (interface + `CommandEvent`/`MessageEvent`/`InteractionEvent`)
 - `internal/interfaces/chatadapter/bridge.go` (slash-style commands -> skills/APIs)
-- `internal/web/consolews/*` (session + streaming events)
+- `internal/interfaces/web/consolews/*` (session + streaming events)
 
 Reference implementation patterns:
 - `internal/interfaces/chatadapter/discord/driver.go` (event filtering + concurrency limits)

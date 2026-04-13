@@ -13,9 +13,9 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/interfaces/web/api"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
-	"github.com/jkatigb/agentctl/internal/web/api"
 )
 
 const (

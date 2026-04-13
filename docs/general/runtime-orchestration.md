@@ -76,7 +76,7 @@ For the broader package topology, including what `v2` is **not** replacing, see
 | `agent spawn` | CLI prefers daemon path, then falls back to legacy `agentmanager` | Not hard-cut to v2 everywhere |
 | `agent list` | CLI -> local agents store | Not v2-service-only in current CLI |
 | `agent kill` | Mixed; CLI still uses legacy/local management path in places | v2 kill service exists but is not the only live path |
-| Web/API runtime tree views | `internal/web/api` plus optional Jido client for some runtime state | This is one of the main parity gaps for making Jido optional |
+| Web/API runtime tree views | `internal/interfaces/web/api` plus optional Jido client for some runtime state | This is one of the main parity gaps for making Jido optional |
 
 ## Runtime ownership seams that matter now
 

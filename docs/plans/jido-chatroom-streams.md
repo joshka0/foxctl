@@ -226,12 +226,12 @@ schema yet.
 ## Verification
 
 1. `go test ./internal/storage/blackboard ./internal/domain/agent`
-2. `go test ./internal/web/api`
+2. `go test ./internal/interfaces/web/api`
 3. `make check-doc-links`
 
 Note:
 
-`internal/web/api` currently has unrelated compile failures in the active
+`internal/interfaces/web/api` currently has unrelated compile failures in the active
 worktree. Phase 1 implementation should still add handler coverage, but the
 package test run may stay blocked until that in-flight work is resolved.
 
@@ -239,7 +239,7 @@ package test run may stay blocked until that in-flight work is resolved.
 
 1. `internal/domain/agent/board_message.go`
 2. `internal/storage/blackboard/board_store.go`
-3. `internal/web/api/mailbox.go`
+3. `internal/interfaces/web/api/mailbox.go`
 4. `packages/gui-agent/src/components/conversations/ConversationsList.tsx`
 5. `packages/gui-agent/src/components/v2/RuntimeSummaryPanel.tsx`
 6. `~/repos/githubs/jido/lib/jido/thread.ex`

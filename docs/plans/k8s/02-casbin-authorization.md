@@ -143,7 +143,7 @@ if d.policyRunner != nil && input.Event == EventPreToolUse {
 
 Ensure `Input.Principal` (from Plan 01) carries through to policy evaluation.
 
-### `internal/web/server.go`
+### `internal/interfaces/web/server.go`
 
 Wire auth middleware into the HTTP mux:
 
