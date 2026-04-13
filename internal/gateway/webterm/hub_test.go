@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/jkatigb/agentctl/internal/agentpane"
+	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
 )
 
 func testHubLogger() zerolog.Logger {
@@ -271,7 +272,7 @@ func TestHub_RoomPTY_DefaultSessionUsesRuntimeTerminalContract(t *testing.T) {
 	require.NotNil(t, pty)
 
 	opts := <-called
-	assert.Equal(t, agentpane.DefaultRoomTmuxSession("alpha-room"), opts.Session)
+	assert.Equal(t, terminalruntime.DefaultRoomTmuxSession("alpha-room"), opts.Session)
 }
 
 func TestHub_UnregisterRoom_DoesNotHoldHubLockWhileClosingPTY(t *testing.T) {

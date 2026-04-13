@@ -7,6 +7,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/agentpane"
+	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
 )
 
 // RoomManager manages SSH terminal rooms and tracks active sessions.
@@ -191,7 +192,7 @@ func (m *RoomManager) ActiveSessions(roomID string) []SessionInfo {
 // The expected format is "room-<id>" (e.g., "room-my-room" → "my-room").
 // Returns empty string if the username doesn't match the pattern.
 func ParseRoomIDFromUser(user string) string {
-	return agentpane.ParseRoomTerminalUser(user)
+	return terminalruntime.ParseRoomTerminalUser(user)
 }
 
 // TmuxSessionForRoom returns the tmux session name for a room.

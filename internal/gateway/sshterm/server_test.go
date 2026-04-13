@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/jkatigb/agentctl/internal/agentpane"
+	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
 )
 
 // testLogger creates a logger that discards output.
@@ -133,7 +134,7 @@ func TestParseRoomIDFromUser(t *testing.T) {
 
 func TestParseRoomIDFromUser_MatchesAgentpaneContract(t *testing.T) {
 	user := "room-alpha-beta"
-	assert.Equal(t, agentpane.ParseRoomTerminalUser(user), ParseRoomIDFromUser(user))
+	assert.Equal(t, terminalruntime.ParseRoomTerminalUser(user), ParseRoomIDFromUser(user))
 }
 
 // --- Test RoomManager ---
@@ -307,7 +308,7 @@ func TestRoomManager_TmuxSessionForRoom_Default(t *testing.T) {
 
 	session, err := rooms.TmuxSessionForRoom(context.Background(), "room-1")
 	require.NoError(t, err)
-	assert.Equal(t, agentpane.DefaultRoomTmuxSession("room-1"), session)
+	assert.Equal(t, terminalruntime.DefaultRoomTmuxSession("room-1"), session)
 }
 
 func TestRoomManager_TmuxSessionForRoom_NotFound(t *testing.T) {

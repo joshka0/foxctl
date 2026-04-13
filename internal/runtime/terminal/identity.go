@@ -1,4 +1,4 @@
-package agentpane
+package terminal
 
 import "strings"
 

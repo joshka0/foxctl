@@ -1,6 +1,10 @@
 package agentpane
 
-import "strings"
+import (
+	"strings"
+
+	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
+)
 
 // TerminalRoomConfig is the canonical runtime-terminal room registration shape.
 type TerminalRoomConfig struct {
@@ -15,7 +19,7 @@ func ResolveTerminalRoomConfig(roomID, tmuxSession string, maxConnections int) T
 	roomID = strings.TrimSpace(roomID)
 	return TerminalRoomConfig{
 		RoomID:         roomID,
-		TmuxSession:    ResolveRoomTmuxSession(roomID, tmuxSession),
+		TmuxSession:    terminalruntime.ResolveRoomTmuxSession(roomID, tmuxSession),
 		MaxConnections: maxConnections,
 	}
 }

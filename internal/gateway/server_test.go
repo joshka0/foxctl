@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/jkatigb/agentctl/internal/agentpane"
+	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
 )
 
 // testLogger creates a logger that discards output for tests that don't need
@@ -714,7 +715,7 @@ func TestRegisterTerminalRoom_DefaultTmuxSession(t *testing.T) {
 
 	sshConfig, ok := srv.sshRooms.TerminalRoomConfig("alpha-room")
 	require.True(t, ok)
-	assert.Equal(t, agentpane.DefaultRoomTmuxSession("alpha-room"), sshConfig.TmuxSession)
+	assert.Equal(t, terminalruntime.DefaultRoomTmuxSession("alpha-room"), sshConfig.TmuxSession)
 }
 
 func TestHandleRoomByID_Unregister_MissingID(t *testing.T) {

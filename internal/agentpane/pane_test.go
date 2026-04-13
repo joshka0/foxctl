@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/jkatigb/agentctl/internal/zellijbridge"
 )
@@ -109,7 +110,7 @@ func TestCreateWatchPaneZellij(t *testing.T) {
 }
 
 func TestRoomTerminalUser(t *testing.T) {
-	if got := RoomTerminalUser("alpha-beta"); got != "room-alpha-beta" {
+	if got := terminalruntime.RoomTerminalUser("alpha-beta"); got != "room-alpha-beta" {
 		t.Fatalf("RoomTerminalUser() = %q, want room-alpha-beta", got)
 	}
 }
@@ -128,7 +129,7 @@ func TestParseRoomTerminalUser(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ParseRoomTerminalUser(tt.user); got != tt.want {
+			if got := terminalruntime.ParseRoomTerminalUser(tt.user); got != tt.want {
 				t.Fatalf("ParseRoomTerminalUser(%q) = %q, want %q", tt.user, got, tt.want)
 			}
 		})
@@ -136,16 +137,16 @@ func TestParseRoomTerminalUser(t *testing.T) {
 }
 
 func TestDefaultRoomTmuxSession(t *testing.T) {
-	if got := DefaultRoomTmuxSession("room-1"); got != "room-room-1" {
+	if got := terminalruntime.DefaultRoomTmuxSession("room-1"); got != "room-room-1" {
 		t.Fatalf("DefaultRoomTmuxSession() = %q, want room-room-1", got)
 	}
 }
 
 func TestResolveRoomTmuxSession(t *testing.T) {
-	if got := ResolveRoomTmuxSession("room-1", ""); got != "room-room-1" {
+	if got := terminalruntime.ResolveRoomTmuxSession("room-1", ""); got != "room-room-1" {
 		t.Fatalf("ResolveRoomTmuxSession() fallback = %q, want room-room-1", got)
 	}
-	if got := ResolveRoomTmuxSession("room-1", "custom-session"); got != "custom-session" {
+	if got := terminalruntime.ResolveRoomTmuxSession("room-1", "custom-session"); got != "custom-session" {
 		t.Fatalf("ResolveRoomTmuxSession() override = %q, want custom-session", got)
 	}
 }

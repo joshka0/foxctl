@@ -207,7 +207,7 @@ Temporary compatibility seam:
 - the next move batch should reduce direct gateway dependence on tmux semantics
   instead of spreading them further
 
-Planned first narrow move batch for Story 3:
+Implemented first narrow move batch for Story 3:
 
 - create one shared runtime-terminal room/session identity seam under the
   runtime-terminal family boundary
@@ -229,11 +229,11 @@ Why this is the lowest-risk batch:
 - gateway terminal behavior can stay stable while the ownership boundary becomes
   explicit
 
-Batch scope:
+Current batch scope:
 
 | In batch 1 | Deferred after batch 1 |
 |-----------|-------------------------|
-| shared room/session identity helper owned by runtime-terminal support | package renames for `agentpane`, `tmuxbridge`, or `zellijbridge` |
+| shared room/session identity helper owned by `internal/runtime/terminal` | package renames for `agentpane`, `tmuxbridge`, or `zellijbridge` |
 | `gateway/webterm` switched to use the shared identity seam | gateway package relocation |
 | `gateway/sshterm` switched to use the shared identity seam | mux backend relocation |
 | documentation and package comments updated to reflect the new seam | broader API or console cleanup |

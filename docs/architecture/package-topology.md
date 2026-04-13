@@ -245,7 +245,7 @@ That means the target logical split is:
 
 | Concern | Target family owner | Current anchor |
 |------|----------------------|----------------|
-| pane/session lifecycle, submit behavior, room terminal binding, mux-neutral terminal contract | runtime/terminal | `internal/agentpane` plus a future shared runtime-terminal package boundary |
+| pane/session lifecycle, submit behavior, room terminal binding, mux-neutral terminal contract | runtime/terminal | `internal/agentpane` plus `internal/runtime/terminal` |
 | tmux backend implementation | runtime/terminal backend adapter | `internal/tmuxbridge` |
 | zellij backend implementation | runtime/terminal backend adapter | `internal/zellijbridge` |
 | browser-facing terminal transport, websocket framing, HTTP integration | interfaces/gateway | `internal/gateway/webterm` |
@@ -268,8 +268,8 @@ Explicit ownership rules for the next move batch:
 The compatibility seam for the current repo state is therefore explicit:
 
 - room identity still resolves to a tmux session name in gateway terminal flows
-- gateway entrypoints may continue to depend on that mapping until a shared
-  runtime-terminal session contract exists
+- gateway entrypoints may continue to depend on that mapping while broader
+  lifecycle ownership still lives in `agentpane`
 - new package moves in this slice should reduce direct gateway ownership of tmux
   semantics rather than expand it
 
@@ -278,8 +278,9 @@ The compatibility seam for the current repo state is therefore explicit:
 The first low-risk move batch for this family should be **semantic extraction
 before package relocation**:
 
-- introduce one shared runtime-terminal room/session identity seam that owns
-  room-to-terminal session naming and resolution
+- use the shared runtime-terminal room/session identity seam in
+  `internal/runtime/terminal` as the owner of room-to-terminal session naming
+  and resolution
 - update `internal/gateway/webterm` and `internal/gateway/sshterm` to depend on
   that shared seam instead of each gateway surface owning tmux session mapping
 - keep `webterm` and `sshterm` in `interfaces/gateway` for this batch
