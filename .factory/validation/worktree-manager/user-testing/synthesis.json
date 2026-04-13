@@ -55,7 +55,7 @@
   "appliedUpdates": [
     {
       "target": "user-testing.md",
-      "description": "Added Flow Validator Guidance for go test (internal/worktree) surface with test-to-assertion mapping and concurrency guidance",
+      "description": "Added Flow Validator Guidance for go test (internal/platform/worktree) surface with test-to-assertion mapping and concurrency guidance",
       "source": "setup"
     }
   ],

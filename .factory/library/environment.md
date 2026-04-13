@@ -27,7 +27,7 @@ Environment variables, external dependencies, and setup notes.
 ## Platform Notes
 
 - **macOS (primary):** PTY handling via creack/pty works on macOS
-- **macOS symlink gotcha:** `/var` is a symlink to `/private/var` on macOS. Any code comparing paths from git output (which resolves symlinks) against filesystem paths must use `filepath.EvalSymlinks()` on both sides before comparison. See `internal/worktree/manager.go` for the pattern.
+- **macOS symlink gotcha:** `/var` is a symlink to `/private/var` on macOS. Any code comparing paths from git output (which resolves symlinks) against filesystem paths must use `filepath.EvalSymlinks()` on both sides before comparison. See `internal/platform/worktree/manager.go` for the pattern.
 - **Linux:** Gateway SSH server may need permissions for port 22 on Tailscale IP
 - **tsnet:** Userspace networking only (no TUN device). Performance adequate for terminal use (~1-2ms latency overhead)
 - **Binary size:** tsnet adds ~15-20 MB to binary (gVisor netstack + WireGuard)
@@ -38,5 +38,5 @@ Environment variables, external dependencies, and setup notes.
 
 ## Git Subprocess Patterns
 
-- **GIT_CONFIG_NOSYSTEM=1:** Set on all git command executions in the worktree manager to prevent system-level git config from interfering with operations. Append to `os.Environ()` when building cmd.Env. See `internal/worktree/manager.go`.
-- **filepath.Walk does not follow directory symlinks:** By design, for safety (prevents infinite loops). Symlinks to directories are visited but not recursed into. Code in `internal/worktree/manager.go` handles symlinks via `os.ModeSymlink` branch before `IsDir` check.
+- **GIT_CONFIG_NOSYSTEM=1:** Set on all git command executions in the worktree manager to prevent system-level git config from interfering with operations. Append to `os.Environ()` when building cmd.Env. See `internal/platform/worktree/manager.go`.
+- **filepath.Walk does not follow directory symlinks:** By design, for safety (prevents infinite loops). Symlinks to directories are visited but not recursed into. Code in `internal/platform/worktree/manager.go` handles symlinks via `os.ModeSymlink` branch before `IsDir` check.

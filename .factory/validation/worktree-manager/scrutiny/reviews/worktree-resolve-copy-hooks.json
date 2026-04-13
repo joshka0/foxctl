@@ -9,19 +9,19 @@
     "summary": "Well-structured implementation of three features (Resolve, CopyFiles, lifecycle hooks) with thorough TDD approach. The worker followed the go-backend skill procedure correctly: wrote 29 tests first, implemented to make them pass, then verified with full test suite, race detection, vet, lint, and formatting checks. All VAL-WT-021 through VAL-WT-033 assertions are covered. The implementation respects the functional core / imperative shell pattern — RunHook is properly documented as imperative shell, types are pure, and the domain logic is clean.",
     "issues": [
       {
-        "file": "internal/worktree/manager.go",
+        "file": "internal/platform/worktree/manager.go",
         "line": 395,
         "severity": "non_blocking",
         "description": "CopyFiles symlink handling creates symlinks with relative targets (e.g., 'link.txt -> real.txt'), but the symlink will be dangling if the target file doesn't exist in the destination or was excluded by patterns. For example, copying with Include('.env*') when the source has '.env -> .env.production' would create a dangling symlink. The test (TestCopyFiles_Symlinks) only tests the case where the symlink target is also copied. This is acceptable for now since the feature description says 'handles symlinks' without specifying dangling symlink behavior, but future consumers should be aware."
       },
       {
-        "file": "internal/worktree/manager.go",
+        "file": "internal/platform/worktree/manager.go",
         "line": 456,
         "severity": "non_blocking",
         "description": "shouldCopyFile has a redundant dotfile matching block (lines ~463-466) that duplicates the baseName match already done in lines ~451-453. The 'if strings.Contains(pattern, \"*\")' block will always be true for patterns like '.env*' since they contain '*', and the filepath.Match against baseName was already tried above. This is harmless but adds unnecessary confusion when reading the code."
       },
       {
-        "file": "internal/worktree/hooks.go",
+        "file": "internal/platform/worktree/hooks.go",
         "line": 30,
         "severity": "non_blocking",
         "description": "RunHook comment says 'The hook runs in its own process group' but the implementation does not set cmd.SysProcAttr to create a new process group. On Unix, exec.CommandContext sends SIGKILL to the child process, but any grandchild processes spawned by the shell could survive. This is a documentation accuracy issue, not a functional bug — for the typical use case of short-lived shell scripts, the behavior is correct. True process group isolation would require cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}."
@@ -32,7 +32,7 @@
     {
       "area": "conventions",
       "observation": "The isDirExcluded and shouldCopyFile functions in manager.go use os.PathSeparator for building glob patterns (e.g., strings.TrimSuffix(pattern, string(os.PathSeparator)+\"**\")). This is correct for POSIX but on Windows os.PathSeparator is '\\\\', which would break glob patterns that use '/' as separator. Since the mission AGENTS.md says the target is Linux/macOS (tmux, zellij), this is acceptable, but it's not documented as a platform limitation for CopyFiles specifically.",
-      "evidence": "internal/worktree/manager.go lines 418-445 (isDirExcluded and shouldCopyFile using os.PathSeparator for pattern construction)"
+      "evidence": "internal/platform/worktree/manager.go lines 418-445 (isDirExcluded and shouldCopyFile using os.PathSeparator for pattern construction)"
     },
     {
       "area": "skills",
@@ -42,7 +42,7 @@
     {
       "area": "knowledge",
       "observation": "The filepath.Walk function used in copyDir does not follow symlinks to directories by default. This means if a source directory contains a symlink pointing to another directory, the symlink is handled by the os.ModeSymlink branch (line 388) rather than being recursed into. This is the correct behavior for safety (prevents infinite loops and unexpected traversal), but it's an implicit design decision not documented anywhere.",
-      "evidence": "internal/worktree/manager.go:362 — filepath.Walk callback handles symlinks via the os.ModeSymlink check before the IsDir check, and filepath.Walk itself never follows directory symlinks"
+      "evidence": "internal/platform/worktree/manager.go:362 — filepath.Walk callback handles symlinks via the os.ModeSymlink check before the IsDir check, and filepath.Walk itself never follows directory symlinks"
     }
   ],
   "addressesFailureFrom": null,

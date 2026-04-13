@@ -3,9 +3,9 @@
   "round": 1,
   "status": "pass",
   "validatorsRun": {
-    "test": { "passed": true, "command": "go test ./internal/worktree/... -count=1 -v", "exitCode": 0 },
-    "typecheck": { "passed": true, "command": "go vet ./internal/worktree/...", "exitCode": 0 },
-    "lint": { "passed": true, "command": "golangci-lint run --timeout 10m ./internal/worktree/...", "exitCode": 0 }
+    "test": { "passed": true, "command": "go test ./internal/platform/worktree/... -count=1 -v", "exitCode": 0 },
+    "typecheck": { "passed": true, "command": "go vet ./internal/platform/worktree/...", "exitCode": 0 },
+    "lint": { "passed": true, "command": "golangci-lint run --timeout 10m ./internal/platform/worktree/...", "exitCode": 0 }
   },
   "reviewsSummary": {
     "total": 3,
@@ -18,49 +18,49 @@
     {
       "featureId": "worktree-create-list-remove",
       "severity": "non_blocking",
-      "file": "internal/worktree/manager.go:101",
+      "file": "internal/platform/worktree/manager.go:101",
       "description": "Create() uses time.Now().UTC() directly instead of an injected clock. Acceptable in imperative shell but noted per AGENTS.md code smell guidance."
     },
     {
       "featureId": "worktree-create-list-remove",
       "severity": "non_blocking",
-      "file": "internal/worktree/manager.go:51",
+      "file": "internal/platform/worktree/manager.go:51",
       "description": "Create() does not ensure base directory exists before running git worktree add. Previous implementation had os.MkdirAll which was removed during refactor."
     },
     {
       "featureId": "worktree-create-list-remove",
       "severity": "non_blocking",
-      "file": "internal/worktree/manager.go:141",
+      "file": "internal/platform/worktree/manager.go:141",
       "description": "Remove() has redundant filepath.Abs(path) calls — absPath is computed twice."
     },
     {
       "featureId": "worktree-create-list-remove",
       "severity": "non_blocking",
-      "file": "internal/worktree/manager.go:395",
+      "file": "internal/platform/worktree/manager.go:395",
       "description": "shouldCopyFile has duplicated dotfile pattern matching block — dead code."
     },
     {
       "featureId": "worktree-create-list-remove",
       "severity": "non_blocking",
-      "file": "internal/worktree/sanitize.go:62",
+      "file": "internal/platform/worktree/sanitize.go:62",
       "description": "Double emptiness check in SanitizeBranchName is correct but slightly confusing structure."
     },
     {
       "featureId": "worktree-resolve-copy-hooks",
       "severity": "non_blocking",
-      "file": "internal/worktree/manager.go:395",
+      "file": "internal/platform/worktree/manager.go:395",
       "description": "CopyFiles symlink handling creates relative symlinks that may be dangling if the target file is excluded by patterns."
     },
     {
       "featureId": "worktree-resolve-copy-hooks",
       "severity": "non_blocking",
-      "file": "internal/worktree/manager.go:456",
+      "file": "internal/platform/worktree/manager.go:456",
       "description": "shouldCopyFile has redundant dotfile matching block duplicating earlier logic. Same issue as worktree-create-list-remove."
     },
     {
       "featureId": "worktree-resolve-copy-hooks",
       "severity": "non_blocking",
-      "file": "internal/worktree/hooks.go:30",
+      "file": "internal/platform/worktree/hooks.go:30",
       "description": "RunHook doc comment says 'own process group' but doesn't set cmd.SysProcAttr with Setpgid. Documentation accuracy issue, not functional bug."
     }
   ],

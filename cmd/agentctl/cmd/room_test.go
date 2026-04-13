@@ -23,7 +23,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/jkatigb/agentctl/internal/worktree"
+	"github.com/jkatigb/agentctl/internal/platform/worktree"
 	"github.com/spf13/cobra"
 )
 
