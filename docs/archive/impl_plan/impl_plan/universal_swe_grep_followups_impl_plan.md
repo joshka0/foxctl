@@ -106,7 +106,7 @@ This section anchors the plan in the current code layout.
 - Event producer (currently allows empty file list):
   - `internal/indexing/postreview/producer.go`
 - Overseer post-review handler:
-  - `internal/analysis/overseer/post_review.go`
+  - `internal/intelligence/analysis/overseer/post_review.go`
 
 ### 2.5 Trajectory storage
 
@@ -278,7 +278,7 @@ of `mode="callers"|"callees"`.
   - Update post-review golden(s) and tests that currently assume an empty
     `Files` list:
     - `test/golden/envelopes/post_review_event.json`
-    - `internal/analysis/overseer/post_review_test.go`
+    - `internal/intelligence/analysis/overseer/post_review_test.go`
 
 - **Validation**
   - `CGO_ENABLED=0 go test ./...`

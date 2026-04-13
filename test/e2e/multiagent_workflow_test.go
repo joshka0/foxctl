@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/analysis/overseer"
-	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/intelligence/analysis/overseer"
+	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )

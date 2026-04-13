@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
+	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )

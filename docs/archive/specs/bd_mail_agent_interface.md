@@ -22,11 +22,11 @@ current code:
 
 ## 1. Task graph analyzer + `todo/manage.graph_insights`
 
-### 1.1 New package: `internal/analysis/tasksgraph`
+### 1.1 New package: `internal/intelligence/analysis/tasksgraph`
 
 **Package shape:**
 
-- `internal/analysis/tasksgraph/graph.go`:
+- `internal/intelligence/analysis/tasksgraph/graph.go`:
 
   ```go
   package tasksgraph
@@ -358,6 +358,6 @@ My suggestion for actual coding order:
 3. **Hooks (`mail_router`, `file_guard`)** wired into the existing hook spec.
 
 If you’d like, I can start with step 1 and draft the
-`internal/analysis/tasksgraph` package plus the new `graph_insights` operation
+`internal/intelligence/analysis/tasksgraph` package plus the new `graph_insights` operation
 in `skills/todo/main.go` (no wiring into CLI yet), or would you rather start on
 the mailbox side first?

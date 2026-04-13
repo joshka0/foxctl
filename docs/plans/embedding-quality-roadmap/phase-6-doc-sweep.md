@@ -25,13 +25,13 @@ Create a CLI tool that analyzes the codebase and outputs actionable Markdown che
 
 **Files Touched:**
 - `cmd/agentctl/cmd/doc_coverage.go` - CLI command implementation
-- `internal/analysis/doc_coverage.go` - Core analysis logic
-- `internal/analysis/doc_coverage_test.go` - Unit tests
+- `internal/intelligence/analysis/doc_coverage.go` - Core analysis logic
+- `internal/intelligence/analysis/doc_coverage_test.go` - Unit tests
 
 **Implementation Details:**
 
 ```go
-// internal/analysis/doc_coverage.go
+// internal/intelligence/analysis/doc_coverage.go
 
 // Report represents documentation coverage analysis results
 type Report struct {
@@ -150,15 +150,15 @@ Create a doc linter that can run in CI to enforce documentation standards. Initi
 
 **Files Touched:**
 - `scripts/lint-doc.sh` - CI entrypoint script
-- `internal/analysis/doc_lint.go` - Linting rules implementation
-- `internal/analysis/doc_lint_test.go` - Unit tests
+- `internal/intelligence/analysis/doc_lint.go` - Linting rules implementation
+- `internal/intelligence/analysis/doc_lint_test.go` - Unit tests
 - `Makefile` - Add `lint-doc` target
 - `.github/workflows/ci.yml` - Optional CI integration (warn-only)
 
 **Implementation Details:**
 
 ```go
-// internal/analysis/doc_lint.go
+// internal/intelligence/analysis/doc_lint.go
 
 // Rule represents a documentation lint rule
 type Rule interface {

@@ -87,7 +87,7 @@ Gate: no new features until this is solid.
   - [x] Given a review artifact with `inputs.files` and `inputs.diff_digest`,
         assert the handler produces the expected input payload:
     - `(workspace_id, files[{path, digest, change_kind}], task_id, review_id)`.
-    - `internal/analysis/overseer/post_review_test.go` – 6 tests covering happy
+    - `internal/intelligence/analysis/overseer/post_review_test.go` – 6 tests covering happy
       path, idempotence, non-ok rejection, files passthrough.
     - `internal/indexing/postreview/producer_test.go` – event building tests.
 

@@ -91,7 +91,7 @@ flowchart TD
 - `internal/indexing/postreview` (new):
   - `PostReviewEvent` type.
   - Storage + idempotence helpers.
-- `internal/analysis/overseer`:
+- `internal/intelligence/analysis/overseer`:
   - New **post‑review handler** and wiring into overseer events.
 - `internal/storage/jobs` + `internal/execution/scheduler`:
   - Optional job‑backed indexer execution.

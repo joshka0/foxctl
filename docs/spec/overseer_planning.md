@@ -94,7 +94,7 @@ Hooks do **not** own the plan. They:
 		"description": "E2E for task graph, mailbox, file_guard, overseer scoring",
 		"scope_paths": [
 			"agentctl/test/e2e",
-			"agentctl/internal/analysis"
+			"agentctl/internal/intelligence/analysis"
 		],
 		"attach_to_task_id": "optional-epic-id-or-empty",
 		"mode": "draft|apply",
@@ -274,7 +274,7 @@ agent.BoardMessage{
 7. Overseer periodically or on-demand:
    - Runs `task_graph_insights` on the epic subtree.
    - Runs overseer
-     [Recommend](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/analysis/overseer/scorer.go:64:0-198:1)
+     [Recommend](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/analysis/overseer/scorer.go:64:0-198:1)
      to evaluate scores.
    - Decides whether to:
      - Split tasks (finer-grained), or
@@ -392,11 +392,11 @@ graph insights.
 - **Task graph insights**
   - `todo/manage.graph_insights` operation is available on the `todo/manage`
     skill.
-  - `internal/analysis/tasksgraph` is built into the `agentctl` binary.
+  - `internal/intelligence/analysis/tasksgraph` is built into the `agentctl` binary.
   - `task_graph_insights.md` is included in the overseer / Factory spec pack.
 
 - **Overseer scoring**
-  - [[overseer.Scorer](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/analysis/overseer/scorer.go:51:0-54:1)](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/analysis/overseer/scorer.go:51:0-54:1)
+  - [[overseer.Scorer](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/analysis/overseer/scorer.go:51:0-54:1)](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/analysis/overseer/scorer.go:51:0-54:1)
     is built and reachable from `todo/manage.recommend` (or an equivalent
     operation).
   - [[multiagent_workflow_test.go](cci:7://file://~/repos/personal/claude-harness/agentctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/agentctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)

@@ -19,7 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/stringutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
+	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )

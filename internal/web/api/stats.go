@@ -5,7 +5,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
+	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/jobs"
 	jobtypes "github.com/jkatigb/agentctl/internal/storage/jobs/types"

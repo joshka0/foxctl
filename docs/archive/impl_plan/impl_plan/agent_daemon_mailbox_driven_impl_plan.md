@@ -172,7 +172,7 @@ type Task struct {
     LastReviewAt *time.Time
 }
 
-// tasksgraph.Insights (internal/analysis/tasksgraph/graph.go)
+// tasksgraph.Insights (internal/intelligence/analysis/tasksgraph/graph.go)
 type Insights struct {
     WorkspaceID      string
     GeneratedAt      time.Time

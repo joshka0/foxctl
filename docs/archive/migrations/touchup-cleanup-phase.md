@@ -233,7 +233,7 @@ Only after llmchat_engine (or equivalent) is stable:
 ### 6.4 Remove duplicated “overseer” implementations
 You currently have:
 - `internal/agent/runtime/overseer*`
-- `internal/analysis/overseer/*`
+- `internal/intelligence/analysis/overseer/*`
 Decide:
 - analysis overseer = scoring + post-review handling (keep)
 - runtime overseer = actor/supervisor spawn policy (keep)

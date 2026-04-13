@@ -37,9 +37,9 @@ paths, interfaces, schemas, and test requirements.
 
 ## Phase 1: Task Graph Analyzer
 
-### 1.1 New Package: `internal/analysis/tasksgraph`
+### 1.1 New Package: `internal/intelligence/analysis/tasksgraph`
 
-**Location:** `internal/analysis/tasksgraph/`
+**Location:** `internal/intelligence/analysis/tasksgraph/`
 
 **Files:**
 
@@ -881,7 +881,7 @@ go.mod                         # add gonum/graph dependency
 
 ## Implementation Order
 
-1. **Phase 1.1** – `internal/analysis/tasksgraph` package with tests.
+1. **Phase 1.1** – `internal/intelligence/analysis/tasksgraph` package with tests.
 2. **Phase 1.2** – `todo/manage.graph_insights` operation.
 3. **Phase 1.3** – `agentctl todo insights` CLI command.
 4. **Phase 2.1-2.3** – Domain types + storage interface + schema.

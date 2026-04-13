@@ -68,7 +68,7 @@ single internal event to configured indexers.
 ### B1. Implement handler entrypoint
 
 - [x] Add a post-review handler in the overseer (see impl plan Phase 2):
-  - `internal/analysis/overseer/post_review.go` – `PostReviewHandler` struct.
+  - `internal/intelligence/analysis/overseer/post_review.go` – `PostReviewHandler` struct.
   - `HandleReviewApproved(ctx, artifact, files)` – main entrypoint.
   - `HandleReviewApprovedStub(ctx, artifact)` – convenience for stub (no files).
   - Triggered when a `ReviewArtifact` transitions to `ok` and the diff is
@@ -97,7 +97,7 @@ single internal event to configured indexers.
   - Verify idempotence (same artifact → same event ID).
   - Verify rejection of non-ok status.
   - Verify files are passed through to event.
-  - `internal/analysis/overseer/post_review_test.go` – 5 tests.
+  - `internal/intelligence/analysis/overseer/post_review_test.go` – 5 tests.
 
 ---
 
@@ -154,7 +154,7 @@ semantic/symbol indexers implemented.
   - No event on non-`ok` statuses (error returned).
   - Idempotence: same artifact → same event ID.
   - Files passthrough to event.
-  - `internal/analysis/overseer/post_review_test.go` – 6 tests.
+  - `internal/intelligence/analysis/overseer/post_review_test.go` – 6 tests.
 - [x] Add integration-style tests that:
   - Wire a fake indexer subscriber.
   - Assert that it receives the expected events for a synthetic review flow.
