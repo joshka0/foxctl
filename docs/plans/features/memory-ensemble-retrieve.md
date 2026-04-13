@@ -95,7 +95,7 @@ Important current constraint:
 
 - runtime system instructions do **not** come from
   `internal/agent/prompts/prompts.go`
-- they come from `internal/agentprompt/signature.go`
+- they come from `internal/runtime/agentprompt/signature.go`
 - existing scout roles are not explicitly represented there today
 
 That means a new scout role is not fully wired until both layers are updated.
@@ -377,7 +377,7 @@ Files:
 
 - `internal/agent/types/types.go`
 - `internal/agent/prompts/prompts.go`
-- `internal/agentprompt/signature.go`
+- `internal/runtime/agentprompt/signature.go`
 
 Key work:
 
@@ -518,14 +518,14 @@ Add the new role constants.
 
 Add spawn-time default prompts for each memory scout role.
 
-### `internal/agentprompt/signature.go` (modified)
+### `internal/runtime/agentprompt/signature.go` (modified)
 
 Add runtime system instructions for the new roles.
 
 Important:
 
 - do not rely on `internal/agent/prompts/prompts.go` alone
-- the runtime currently uses `internal/agentprompt/signature.go`
+- the runtime currently uses `internal/runtime/agentprompt/signature.go`
 
 ### `internal/agent/runtime/runtime.go` (modified)
 

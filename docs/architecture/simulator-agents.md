@@ -107,7 +107,7 @@ Relevant files:
 - [tools.go](../../internal/agent/tools/tools.go)
 - [registry_executor.go](../../internal/agent/tools/registry_executor.go)
 - [registry.go](../../internal/agent/toolnames/registry.go)
-- [signature.go](../../internal/agentprompt/signature.go)
+- [signature.go](../../internal/runtime/agentprompt/signature.go)
 
 ### Jido owns scheduling/orchestration
 

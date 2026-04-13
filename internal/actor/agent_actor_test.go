@@ -10,7 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/agentprompt"
+	"github.com/jkatigb/agentctl/internal/runtime/agentprompt"
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
