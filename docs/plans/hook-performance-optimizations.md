@@ -142,7 +142,7 @@ func createModifiedEdge(ctx context.Context, cfg config.Config, workspaceID, tas
 
 **Files to modify**:
 - `cmd/agentctl/cmd/run.go` - Add `--ephemeral` flag
-- `internal/runservice/executor.go` - Skip job store when ephemeral
+- `internal/runtime/runservice/executor.go` - Skip job store when ephemeral
 - `internal/storage/jobs/executor/executor.go` - Direct execution path
 
 **New execution path**:

@@ -47,7 +47,7 @@ The current repo already wants to be organized around these families:
 
 | Family | Current anchors | Meaning |
 |--------|------------------|---------|
-| runtime | `agent/*`, `execution/*`, `runservice`, `daemon`, `v2/*` | agent execution, orchestration, lifecycle, runtime state |
+| runtime | `runtime/*`, `agent/*`, `execution/*`, `daemon`, `v2/*` | agent execution, orchestration, lifecycle, runtime state |
 | context | `companion`, `context/*`, `contextplane/*`, `sessionkit`, `transcriptpipeline`, `knowledge/*` | ACA/control-plane, context assembly, transcript history, durable knowledge |
 | intelligence | `indexing/*`, `retrieval*`, `repoquery`, `search*`, `codecontext/*`, `codemap/*`, `refactor/*`, `analysis/*`, `verification/*` | ingestion, retrieval, evidence extraction, synthesis, refactor planning, verification |
 | interfaces | `web/*`, `gateway/*`, `chatadapter/*`, `openapi/*`, `console`, `consoleapp` | server, UI, transport, platform-facing entrypoints |

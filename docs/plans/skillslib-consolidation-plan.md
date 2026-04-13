@@ -66,14 +66,14 @@ func IsUnderWorkspace(workspace, path string) bool {
 
 ### 0.2 Fix CAS Pinning Race Condition
 
-**Problem:** In `internal/runservice/result.go`, the order is:
+**Problem:** In `internal/runtime/runservice/result.go`, the order is:
 1. `handleArtifacts()` - pins digests found in original result
 2. `enforceOutputLimit()` - may create NEW CAS object for truncated output
 3. The new digest from step 2 is NOT pinned
 
 If CAS GC runs, the truncated output reference becomes dangling.
 
-**Fix Location:** `~/repos/personal/claude-migration-to-v2/internal/runservice/result.go`
+**Fix Location:** `~/repos/personal/claude-migration-to-v2/internal/runtime/runservice/result.go`
 
 **Solution Options:**
 
@@ -1293,7 +1293,7 @@ Phase 5 (Future Skills)
 
 ### Modified Files (~35)
 - `internal/adapters/skillslib/workspace/workspace.go` (IsUnderWorkspace fix)
-- `internal/runservice/result.go` (CAS pinning fix)
+- `internal/runtime/runservice/result.go` (CAS pinning fix)
 - `internal/adapters/skillslib/skillmain/context.go` (Close fix, remove CAS helpers)
 - `internal/adapters/skillslib/runner/context.go` (type alias, remove duplicates)
 - `internal/adapters/skillslib/skillout/emit.go` (keep CAS helpers)

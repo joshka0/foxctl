@@ -42,13 +42,13 @@ On cache hit, envelope includes:
 ### Code
 
 - `internal/protocol/errors.go` — Add `ECACHE_MISS`, `ECACHE_UNAVAILABLE`
-- `internal/runservice/cache.go` — Non-fatal errors in auto mode, proper
+- `internal/runtime/runservice/cache.go` — Non-fatal errors in auto mode, proper
   envelope in only mode
 - `internal/storage/cache/store_test.go` — BuildKey variation tests
 
 ### Tests
 
-- `internal/runservice/executor_test.go` — Cache mode tests
+- `internal/runtime/runservice/executor_test.go` — Cache mode tests
 - `test/integration/cache_test.go` — Full integration tests for hit/miss
   scenarios
 

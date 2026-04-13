@@ -299,7 +299,7 @@ agentctl run command execution
 
 - **5c:** Lazy-open job store on first use\
   **Path:**
-  `internal/runservice/jobs.go:18`\
+  `internal/runtime/runservice/jobs.go:18`\
   **Description:** Opens SQLite database at ~/.agentctl/jobs/jobs.db only when
   needed
 
@@ -627,7 +627,7 @@ func decodeConfig(v *viper.Viper) (Config, error) {
 	defer executor.Close()
 ```
 
-### File: internal/runservice/jobs.go
+### File: internal/runtime/runservice/jobs.go
 
 ```go
 // Lines: 16-20

@@ -39,6 +39,7 @@ Prefer adding new packages under one of these stable families:
 | `internal/platform` | Cross-cutting platform/config/runtime utilities | `platform/config`, `platform/workspace`, `platform/timeutil` |
 | `internal/protocol` | Wire/envelope/protocol helpers | `protocol` |
 | `internal/storage` | Durable state, CAS, local rebuildable stores, DB helpers | `storage/*` |
+| `internal/runtime` | Runtime-owned execution, orchestration support, terminal, hooks, and observability | `runtime/runservice`, `runtime/orchestration`, `runtime/terminal`, `runtime/hooks`, `runtime/observability` |
 | `internal/v2` | Newer **agent/runtime/orchestration** stack only | `v2/core`, `v2/services`, `v2/runtime`, `v2/adapters` |
 | `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane | current context family |
 | `internal/intelligence/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |

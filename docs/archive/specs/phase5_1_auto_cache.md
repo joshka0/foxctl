@@ -77,13 +77,13 @@ supported.
 **`internal/storage/cache/store.go`** ✅ Defines `ModeAuto`, `ModeOff`,
 `ModeOnly`
 
-**`internal/runservice/cache.go:TryServeCache`** ✅ Implements read path
+**`internal/runtime/runservice/cache.go:TryServeCache`** ✅ Implements read path
 
 - Skips lookup if `Async` or `CacheMode == ModeOff` ✅
 - Returns cached entry with annotation on hit ✅
 - Returns error (simple `fmt.Errorf`) on miss when `ModeOnly` ⚠️ (see gap below)
 
-**`internal/runservice/result.go:HandleResult`** → **`PersistCache`** ✅
+**`internal/runtime/runservice/result.go:HandleResult`** → **`PersistCache`** ✅
 Implements write path
 
 - Only writes if `ModeAuto` ✅

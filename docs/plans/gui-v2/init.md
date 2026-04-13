@@ -1577,7 +1577,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/daemon"
-	"github.com/jkatigb/agentctl/internal/runservice"
+	"github.com/jkatigb/agentctl/internal/runtime/runservice"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 )
@@ -2288,7 +2288,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/daemon"
 	"github.com/jkatigb/agentctl/internal/engine"
-	"github.com/jkatigb/agentctl/internal/runservice"
+	"github.com/jkatigb/agentctl/internal/runtime/runservice"
 )
 
 func (e *SkillToolExecutor) buildTools() {
@@ -2777,7 +2777,7 @@ Implement agentctl_web scaffolding:
 - Add cmd/agentctl_web with Go HTTP server at 127.0.0.1:8090.
 - Add internal/interfaces/web server with routes:
   - GET /api/status
-  - POST /api/skills/run (ephemeral/job) using internal/runservice (CAS limiting + artifacts)
+  - POST /api/skills/run (ephemeral/job) using internal/runtime/runservice (CAS limiting + artifacts)
   - GET /api/skills (can be stub)
   - WS /ws/console/:consoleID implementing domain console payloads ask/event/reply/cmd
 
@@ -2902,7 +2902,7 @@ Even if you don’t stream token-by-token yet, you can still stream:
 
 ### C) Skill execution layer (jobs + CAS + artifacts)
 
-`internal/runservice` is your “run skills with all the correct side effects” layer:
+`internal/runtime/runservice` is your “run skills with all the correct side effects” layer:
 
 * output limiting to CAS (`enforceOutputLimit`)
 * artifact pinning (`handleArtifacts` + `adapters/artifacts`)

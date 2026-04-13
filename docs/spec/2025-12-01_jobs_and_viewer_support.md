@@ -40,7 +40,7 @@ This makes it hard to build a beads_viewer-style inspector or other tooling.
   - SQLite schema in [internal/storage/jobs/persist/store.go](cci:7://file://internal/storage/jobs/persist/store.go:0:0-0:0) (`jobs` table + indexes).
 - **Job directories**: `~/.agentctl/jobs/<id>/`
   - `input.json`, `result.json`, `progress.ndjson`, `stderr.log`, `workspace`, optional `artifacts.json`.
-- **Execution**: `internal/storage/jobs/executor`, `internal/runservice`
+- **Execution**: `internal/storage/jobs/executor`, `internal/runtime/runservice`
   - `result.json` is always a validated Core Profile v1 envelope.
   - `meta.workspace`, `meta.skill_version`, `meta.source` set via `protocol.AnnotateRunBytes`.
 - **Progress**:
