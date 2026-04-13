@@ -2,7 +2,7 @@
 
 Status: draft  
 Owner: companion / contextplane / rlm  
-Scope: `internal/companion`, `internal/rlm`, `internal/contextplane`, `internal/web/api`, `packages/gui-agent`
+Scope: `internal/companion`, `internal/rlm`, `internal/context/contextplane`, `internal/web/api`, `packages/gui-agent`
 
 ## Goal
 
@@ -269,8 +269,8 @@ Changes:
 
 Files:
 
-- `internal/contextplane/store.go`
-- `internal/contextplane/taskhistory/*`
+- `internal/context/contextplane/store.go`
+- `internal/context/contextplane/taskhistory/*`
 - `internal/web/api/companion.go`
 - `internal/companion/service.go`
 
@@ -402,10 +402,10 @@ Add:
 
 - `internal/companion/service.go`
 - `internal/companion/personality.go`
-- `internal/contextplane/store.go`
-- `internal/contextplane/orienter.go`
-- `internal/contextplane/taskhistory/taskhistory.go`
-- `internal/contextplane/taskhistory/render.go`
+- `internal/context/contextplane/store.go`
+- `internal/context/contextplane/orienter.go`
+- `internal/context/contextplane/taskhistory/taskhistory.go`
+- `internal/context/contextplane/taskhistory/render.go`
 - `internal/rlm/llm_runner.go`
 - `internal/rlm/env/adapter.go`
 - `internal/rlm/env/tools.go`

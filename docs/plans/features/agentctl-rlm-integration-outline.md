@@ -33,7 +33,7 @@ The repo already has several pieces that make an RLM layer practical:
     - soft episodes
     - evidence snippets
     - assumptions ledger
-- `internal/contextplane/*`
+- `internal/context/contextplane/*`
   - ACA control plane:
     - top-of-mind
     - handoffs
@@ -200,7 +200,7 @@ Expose typed read tools instead of generic DB access:
 
 These map well onto:
 
-- `internal/contextplane`
+- `internal/context/contextplane`
 - `internal/storage/contextvar`
 - `internal/companion`
 - `internal/intelligence/indexing/repoindex`

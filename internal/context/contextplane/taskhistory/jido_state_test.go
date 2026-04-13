@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 )
@@ -36,7 +36,7 @@ func TestRefreshJidoRuntimeStateAddsTaskContinuity(t *testing.T) {
 		ID:          "task-1",
 		WorkspaceID: wsID,
 		Title:       "Stabilize task continuity",
-		ScopePath:   "internal/contextplane/taskhistory/taskhistory.go",
+		ScopePath:   "internal/context/contextplane/taskhistory/taskhistory.go",
 		Status:      taskstore.StatusInProgress,
 	}); err != nil {
 		t.Fatalf("Add task: %v", err)

@@ -274,7 +274,7 @@ Use:
 - `RetrievalCorrectionRun`
 - `GraphCorrectionRun`
 
-from [types.go](../../../internal/contextplane/types.go).
+from [types.go](../../../internal/context/contextplane/types.go).
 
 Promotion trigger:
 
@@ -468,8 +468,8 @@ Mitigation:
 
 Likely code touch points:
 
-- [retrieval.go](../../../internal/contextplane/retrieval.go)
-- [store.go](../../../internal/contextplane/store.go)
+- [retrieval.go](../../../internal/context/contextplane/retrieval.go)
+- [store.go](../../../internal/context/contextplane/store.go)
 - [store.go](../../../internal/storage/obsidianindex/store.go)
 - [graph.go](../../../internal/tools/obsidian/graph.go)
 - [bridge.go](../../../internal/tools/obsidian/bridge.go)

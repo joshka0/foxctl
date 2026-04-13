@@ -15,7 +15,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
 	tphistory "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"

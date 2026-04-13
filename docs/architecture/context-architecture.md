@@ -500,7 +500,7 @@ The goal of the current implementation is to make the dual-plane mechanics concr
 
 Primary implementation paths:
 
-- `internal/contextplane/`
+- `internal/context/contextplane/`
 - `cmd/agentctl/cmd/orient.go`
 
 Related existing sources used by the orienter:

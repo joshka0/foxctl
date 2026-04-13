@@ -125,16 +125,16 @@ func initArtifactGitRepo(t *testing.T, workspace string) {
 	}
 
 	runGit("init", "-b", "main")
-	writeFile("internal/contextplane/store.go", "package contextplane\n\nvar StoreSeed = 1\n")
-	writeFile("internal/contextplane/dispatch.go", "package contextplane\n\nvar DispatchSeed = 1\n")
+	writeFile("internal/context/contextplane/store.go", "package contextplane\n\nvar StoreSeed = 1\n")
+	writeFile("internal/context/contextplane/dispatch.go", "package contextplane\n\nvar DispatchSeed = 1\n")
 	writeFile("internal/runtime/worker.go", "package runtime\n\nvar WorkerSeed = 1\n")
 	runGit("add", ".")
 	runGit("commit", "-m", "initial")
 
 	for i := 2; i <= 4; i++ {
-		writeFile("internal/contextplane/store.go", fmt.Sprintf("package contextplane\n\nvar StoreSeed = %d\n", i))
-		writeFile("internal/contextplane/dispatch.go", fmt.Sprintf("package contextplane\n\nvar DispatchSeed = %d\n", i))
-		runGit("add", "internal/contextplane/store.go", "internal/contextplane/dispatch.go")
+		writeFile("internal/context/contextplane/store.go", fmt.Sprintf("package contextplane\n\nvar StoreSeed = %d\n", i))
+		writeFile("internal/context/contextplane/dispatch.go", fmt.Sprintf("package contextplane\n\nvar DispatchSeed = %d\n", i))
+		runGit("add", "internal/context/contextplane/store.go", "internal/context/contextplane/dispatch.go")
 		runGit("commit", "-m", fmt.Sprintf("couple store dispatch %d", i))
 	}
 

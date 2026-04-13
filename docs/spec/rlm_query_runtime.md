@@ -206,7 +206,7 @@ Recommended routing:
 
 Current code that should feed the runtime:
 
-- `internal/contextplane/*`
+- `internal/context/contextplane/*`
 - `internal/companion/*`
 - `internal/engine/rlm_tools.go`
 - `internal/intelligence/indexing/repoindex/*`

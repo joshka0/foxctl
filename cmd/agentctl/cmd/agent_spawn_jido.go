@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
+	"github.com/jkatigb/agentctl/internal/context/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"

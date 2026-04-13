@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 )
 
 func TestRenderHookContextWithArtifact_IncludesTranscriptHistory(t *testing.T) {

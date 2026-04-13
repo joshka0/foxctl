@@ -89,18 +89,18 @@ func TestRetrieveBoostsCodeLinkedNotesFromRepoIndex(t *testing.T) {
 	defer repo.Close()
 	if err := repo.ReplaceAll(ctx, []repoindex.Node{
 		{
-			ID:        repoindex.FileID(repo.RepoKey(), "internal/contextplane", "store.go"),
+			ID:        repoindex.FileID(repo.RepoKey(), "internal/context/contextplane", "store.go"),
 			Kind:      repoindex.NodeFile,
-			Pkg:       "internal/contextplane",
-			File:      "internal/contextplane/store.go",
+			Pkg:       "internal/context/contextplane",
+			File:      "internal/context/contextplane/store.go",
 			Name:      "store.go",
 			UpdatedAt: time.Now().UTC(),
 		},
 		{
-			ID:        repoindex.SymbolID(repo.RepoKey(), "internal/contextplane", "WorkspaceStore"),
+			ID:        repoindex.SymbolID(repo.RepoKey(), "internal/context/contextplane", "WorkspaceStore"),
 			Kind:      repoindex.NodeSymbol,
-			Pkg:       "internal/contextplane",
-			File:      "internal/contextplane/store.go",
+			Pkg:       "internal/context/contextplane",
+			File:      "internal/context/contextplane/store.go",
 			Name:      "WorkspaceStore",
 			Signature: "type WorkspaceStore struct",
 			UpdatedAt: time.Now().UTC(),
@@ -157,11 +157,11 @@ func TestRetrieveBoostsCodeLinkedNotesFromRepoMotifs(t *testing.T) {
 	}
 	defer memStore.Close()
 	motif := RepoMotif{
-		Signature:    "call_path|internal/contextplane/store.go|internal/contextplane/dispatch.go|CALLS",
+		Signature:    "call_path|internal/context/contextplane/store.go|internal/context/contextplane/dispatch.go|CALLS",
 		MotifType:    "call_path",
-		AnchorPath:   "internal/contextplane/store.go",
-		Paths:        []string{"internal/contextplane/store.go", "internal/contextplane/dispatch.go"},
-		RelatedPaths: []string{"internal/contextplane/dispatch.go"},
+		AnchorPath:   "internal/context/contextplane/store.go",
+		Paths:        []string{"internal/context/contextplane/store.go", "internal/context/contextplane/dispatch.go"},
+		RelatedPaths: []string{"internal/context/contextplane/dispatch.go"},
 		Symbols:      []string{"WorkspaceStore"},
 		EdgeTypes:    []string{"CALLS"},
 		Summary:      "call_path motif linking WorkspaceStore to dispatch flow",
@@ -457,17 +457,17 @@ func TestLoadRetrievalOptions_PackageFallbackFromPolicy(t *testing.T) {
 
 func TestFilterNoisyPaths(t *testing.T) {
 	got := filterNoisyPaths([]string{
-		"internal/contextplane/store.go",
+		"internal/context/contextplane/store.go",
 		"bun.lock",
 		"vendor/github.com/x/y.go",
 		"node_modules/pkg/index.js",
 		"go.sum",
-		"internal/contextplane/dispatch.go",
+		"internal/context/contextplane/dispatch.go",
 	})
 	if len(got) != 2 {
 		t.Fatalf("filtered paths=%v", got)
 	}
-	if got[0] != "internal/contextplane/store.go" || got[1] != "internal/contextplane/dispatch.go" {
+	if got[0] != "internal/context/contextplane/store.go" || got[1] != "internal/context/contextplane/dispatch.go" {
 		t.Fatalf("unexpected filtered paths=%v", got)
 	}
 }
@@ -475,14 +475,14 @@ func TestFilterNoisyPaths(t *testing.T) {
 func TestContinuityBundlePaths(t *testing.T) {
 	top := &TopOfMind{
 		RelevantRefs: []string{
-			"path:internal/contextplane/store.go",
+			"path:internal/context/contextplane/store.go",
 			"note:ignored",
 		},
 	}
 	handoff := &HandoffRecord{
 		Handoff: Handoff{
-			FilesTouched: []string{"internal/contextplane/dispatch.go"},
-			EvidenceRefs: []string{"path:internal/contextplane/retrieval.go"},
+			FilesTouched: []string{"internal/context/contextplane/dispatch.go"},
+			EvidenceRefs: []string{"path:internal/context/contextplane/retrieval.go"},
 		},
 	}
 	opts := DefaultRetrievalOptions()
@@ -507,7 +507,7 @@ func TestRetrieveWithOptions_CoChangePriorBoostsRelatedRepoPaths(t *testing.T) {
 		WorkspaceID:  "ws-test",
 		Objective:    "Refine ACA retrieval",
 		Phase:        "design",
-		RelevantRefs: []string{"path:internal/contextplane/store.go"},
+		RelevantRefs: []string{"path:internal/context/contextplane/store.go"},
 		UpdatedAt:    time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)
@@ -665,7 +665,7 @@ func createCoChangeVault(t *testing.T) string {
 type: pattern
 trust: canonical
 paths:
-  - internal/contextplane/dispatch.go
+  - internal/context/contextplane/dispatch.go
 ---
 # Retrieval Cluster Dispatch
 
@@ -713,16 +713,16 @@ func initCoChangeGitRepo(t *testing.T, workspace string) {
 
 	runGit("init", "-b", "main")
 
-	writeFile("internal/contextplane/store.go", "package contextplane\n\nvar StoreSeed = 1\n")
-	writeFile("internal/contextplane/dispatch.go", "package contextplane\n\nvar DispatchSeed = 1\n")
+	writeFile("internal/context/contextplane/store.go", "package contextplane\n\nvar StoreSeed = 1\n")
+	writeFile("internal/context/contextplane/dispatch.go", "package contextplane\n\nvar DispatchSeed = 1\n")
 	writeFile("internal/other/other.go", "package other\n\nvar OtherSeed = 1\n")
 	runGit("add", ".")
 	runGit("commit", "-m", "initial graph")
 
 	for i := 2; i <= 3; i++ {
-		writeFile("internal/contextplane/store.go", fmt.Sprintf("package contextplane\n\nvar StoreSeed = %d\n", i))
-		writeFile("internal/contextplane/dispatch.go", fmt.Sprintf("package contextplane\n\nvar DispatchSeed = %d\n", i))
-		runGit("add", "internal/contextplane/store.go", "internal/contextplane/dispatch.go")
+		writeFile("internal/context/contextplane/store.go", fmt.Sprintf("package contextplane\n\nvar StoreSeed = %d\n", i))
+		writeFile("internal/context/contextplane/dispatch.go", fmt.Sprintf("package contextplane\n\nvar DispatchSeed = %d\n", i))
+		runGit("add", "internal/context/contextplane/store.go", "internal/context/contextplane/dispatch.go")
 		runGit("commit", "-m", fmt.Sprintf("couple store and dispatch %d", i))
 	}
 

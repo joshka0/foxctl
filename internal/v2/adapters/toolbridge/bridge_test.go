@@ -10,7 +10,7 @@ import (
 	"time"
 
 	classictools "github.com/jkatigb/agentctl/internal/agent/tools"
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"

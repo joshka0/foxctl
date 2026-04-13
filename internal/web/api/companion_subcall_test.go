@@ -68,8 +68,8 @@ func TestDecodeCompanionSubcallResult_DerivesSummaryFromEnvelope(t *testing.T) {
 						"command": "code/smart_search",
 						"data": {
 							"candidates": [
-								{"path":"internal/contextplane/dispatch.go"},
-								{"path":"internal/contextplane/taskhistory/taskhistory.go"}
+								{"path":"internal/context/contextplane/dispatch.go"},
+								{"path":"internal/context/contextplane/taskhistory/taskhistory.go"}
 							],
 							"summary": {
 								"files_relevant": 23,

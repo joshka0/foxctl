@@ -9,7 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
+	"github.com/jkatigb/agentctl/internal/context/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
 	libsqlworkers "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/workers"

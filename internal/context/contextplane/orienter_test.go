@@ -41,7 +41,7 @@ func TestOrienterBuildUsesTasksAndSessions(t *testing.T) {
 		Status:    tasks.StatusInProgress,
 		Gotchas:   "Preserve provenance; keep the vault human-readable",
 		PlanFile:  "docs/plans/context-architecture.md",
-		ScopePath: "internal/contextplane",
+		ScopePath: "internal/context/contextplane",
 	}
 	taskItems := []tasks.Task{
 		active,

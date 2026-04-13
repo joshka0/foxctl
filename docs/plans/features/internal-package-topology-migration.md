@@ -70,7 +70,7 @@ The current repo already wants to be organized around these families:
 These families are explicit non-targets for the `v2` migration:
 
 - `internal/storage/*`
-- `internal/companion`, `internal/contextplane`, `internal/context/transcriptpipeline`,
+- `internal/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline`,
   `internal/context/knowledge`
 - `internal/intelligence/indexing/*`, `internal/intelligence/retrieval*`, `internal/intelligence/codecontext`,
   `internal/intelligence/codemap`, `internal/intelligence/refactor`
@@ -278,10 +278,10 @@ Objective:
 
 Primary packages:
 
-- `internal/contextplane/*`
+- `internal/context/contextplane/*`
 - `internal/companion/*`
 - `internal/context/transcriptpipeline/*`
-- `internal/contextplane/taskhistory/*`
+- `internal/context/contextplane/taskhistory/*`
 - `internal/context/sessionkit/*`
 - `internal/context/updater/*`
 - `internal/storage/context*`
@@ -309,10 +309,10 @@ Current mapping to make durable in Story 1:
 
 | Current package/root | Context slice | Decision |
 |------|---------------|----------|
-| `internal/contextplane` | controlplane | keep as the control-plane anchor |
+| `internal/context/contextplane` | controlplane | keep as the control-plane anchor |
 | `internal/companion` | assembly | keep as the live assembly anchor |
 | `internal/context/transcriptpipeline` | history | keep as the history-processing anchor |
-| `internal/contextplane/taskhistory` | history | treat as part of the same history tranche even though it currently lives under `contextplane` |
+| `internal/context/contextplane/taskhistory` | history | treat as part of the same history tranche even though it currently lives under `contextplane` |
 | `internal/storage/transcriptcache` | history | keep in storage but plan together with the history tranche |
 | `internal/context/sessionkit` | runtime-helper | keep as a shared helper slice |
 | `internal/context/updater` | runtime-helper | treat as a helper/bridge package, not the family anchor |
@@ -337,7 +337,7 @@ Story 2 target:
 - scope the **history** tranche as one bounded workflow:
   - `internal/context/transcriptpipeline` produces transcript-derived history artifacts
     and packs
-  - `internal/contextplane/taskhistory` consumes those outputs for
+  - `internal/context/contextplane/taskhistory` consumes those outputs for
     control-plane and task-oriented views
   - `internal/storage/transcriptcache` persists the prederived transcript
     artifacts
@@ -348,7 +348,7 @@ Recommended first batch for Story 2:
   - route new transcript parsing, normalization, derivation, and cache work
     into `internal/context/transcriptpipeline` plus `internal/storage/transcriptcache`
   - route new task-facing history presentation and control-plane summaries into
-    `internal/contextplane/taskhistory`
+    `internal/context/contextplane/taskhistory`
   - avoid adding new transcript-history logic to generic `contextplane`,
     `sessionkit`, or other nearby helper roots unless it is clearly a helper
 
@@ -700,7 +700,7 @@ on a stable vocabulary before package moves begin.
 ## Non-Goals
 
 - repo-wide import rewrites in one pass
-- moving `internal/storage/*`, `internal/contextplane`, or intelligence families
+- moving `internal/storage/*`, `internal/context/contextplane`, or intelligence families
   under `internal/v2`
 - hiding behavioral runtime changes inside topology cleanups
 - renaming packages only to satisfy aesthetics with no family-boundary payoff

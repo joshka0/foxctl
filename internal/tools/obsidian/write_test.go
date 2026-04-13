@@ -197,7 +197,7 @@ esac
 	w := NewWriter(script, "TestVault", DefaultPolicy())
 	w.PostCreateDelay = 0
 	draftPath := "inbox/drafted-from-agentctl/promotion.md"
-	draft := "---\ntitle: Compact Handoff Pattern\ntype: pattern\nstatus: draft\ntrust: reviewed\nprimary_anchor_path: internal/contextplane/store.go\nimpl_anchor_paths:\n  - internal/contextplane/store.go\nsupport_anchor_paths:\n  - internal/contextplane/retrieval.go\nprovenance_refs:\n  - observation:O-887\n---\n\n# Compact Handoff Pattern\n\nCompact handoffs work better.\n"
+	draft := "---\ntitle: Compact Handoff Pattern\ntype: pattern\nstatus: draft\ntrust: reviewed\nprimary_anchor_path: internal/context/contextplane/store.go\nimpl_anchor_paths:\n  - internal/context/contextplane/store.go\nsupport_anchor_paths:\n  - internal/context/contextplane/retrieval.go\nprovenance_refs:\n  - observation:O-887\n---\n\n# Compact Handoff Pattern\n\nCompact handoffs work better.\n"
 	if err := w.CreateNote(context.Background(), draftPath, draft, true); err != nil {
 		t.Fatalf("CreateNote draft: %v", err)
 	}
@@ -215,7 +215,7 @@ esac
 	if !strings.Contains(got, "status: reviewed") || !strings.Contains(got, "trust: canonical") {
 		t.Fatalf("canonical frontmatter not updated:\n%s", got)
 	}
-	if !strings.Contains(got, "primary_anchor_path: internal/contextplane/store.go") {
+	if !strings.Contains(got, "primary_anchor_path: internal/context/contextplane/store.go") {
 		t.Fatalf("primary anchor path not preserved:\n%s", got)
 	}
 	if !strings.Contains(got, "impl_anchor_paths:") || !strings.Contains(got, "support_anchor_paths:") {

@@ -12,7 +12,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
 	tphistory "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
@@ -41,7 +41,7 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 		WorkspaceID:  wsID,
 		Objective:    "Compact Handoff Pattern",
 		Phase:        "design",
-		RelevantRefs: []string{"path:internal/contextplane/store.go"},
+		RelevantRefs: []string{"path:internal/context/contextplane/store.go"},
 		UpdatedAt:    time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)
@@ -51,8 +51,8 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 		Phase:        "design",
 		Outcome:      "partial",
 		Summary:      "Collected compact handoff evidence.",
-		FilesTouched: []string{"internal/contextplane/store.go"},
-		EvidenceRefs: []string{"path:internal/contextplane/store.go"},
+		FilesTouched: []string{"internal/context/contextplane/store.go"},
+		EvidenceRefs: []string{"path:internal/context/contextplane/store.go"},
 		CreatedAt:    time.Date(2026, 3, 14, 1, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveHandoff: %v", err)
@@ -68,7 +68,7 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 		WorkspaceID: wsID,
 		Title:       "Compact Handoff Pattern",
 		Description: "Trace the compact handoff implementation.",
-		ScopePath:   "internal/contextplane/store.go",
+		ScopePath:   "internal/context/contextplane/store.go",
 		Status:      taskstore.StatusInProgress,
 		SessionID:   "sess-1",
 	})
@@ -89,7 +89,7 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 		Summary:       "Worked on the compact handoff flow.",
 		Decisions:     []string{"Prefer a bounded handoff envelope."},
 		Gotchas:       []string{"Do not inline large restore context."},
-		KeyFiles:      []string{"internal/contextplane/store.go"},
+		KeyFiles:      []string{"internal/context/contextplane/store.go"},
 		StartedAt:     time.Date(2026, 3, 14, 0, 30, 0, 0, time.UTC),
 		EndedAt:       time.Date(2026, 3, 14, 1, 30, 0, 0, time.UTC),
 	}); err != nil {
@@ -104,18 +104,18 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 	repoKey := repo.RepoKey()
 	if err := repo.ReplaceAll(ctx, []repoindex.Node{
 		{
-			ID:      repoindex.FileID(repoKey, "internal/contextplane", "internal/contextplane/store.go"),
+			ID:      repoindex.FileID(repoKey, "internal/context/contextplane", "internal/context/contextplane/store.go"),
 			Kind:    repoindex.NodeFile,
-			Pkg:     "internal/contextplane",
-			File:    "internal/contextplane/store.go",
+			Pkg:     "internal/context/contextplane",
+			File:    "internal/context/contextplane/store.go",
 			Name:    "store.go",
 			Summary: "Workspace ACA store implementation.",
 		},
 		{
 			ID:      repoindex.NamespacedID(repoKey, "concept:compact-handoff-pattern"),
 			Kind:    repoindex.NodeConcept,
-			Pkg:     "internal/contextplane",
-			File:    "internal/contextplane/store.go",
+			Pkg:     "internal/context/contextplane",
+			File:    "internal/context/contextplane/store.go",
 			Name:    "Compact Handoff Pattern",
 			Summary: "Compact handoff pattern for ACA.",
 		},
@@ -141,7 +141,7 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 		VaultIndex:     index,
 		GitRunner: fakeGitRunner{
 			commits: map[string][]GitCommit{
-				"internal/contextplane/store.go": {{
+				"internal/context/contextplane/store.go": {{
 					Hash:    "abc123",
 					Date:    "2026-03-14",
 					Subject: "refine compact handoff storage",
@@ -170,13 +170,13 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 	if len(pack.Handoffs) != 1 {
 		t.Fatalf("handoffs=%d", len(pack.Handoffs))
 	}
-	if len(pack.FilesTouched) == 0 || pack.FilesTouched[0] != "internal/contextplane/store.go" {
+	if len(pack.FilesTouched) == 0 || pack.FilesTouched[0] != "internal/context/contextplane/store.go" {
 		t.Fatalf("files=%v", pack.FilesTouched)
 	}
 	if len(pack.Sessions) == 0 || pack.Sessions[0].ID != "sess-1" {
 		t.Fatalf("sessions=%v", pack.Sessions)
 	}
-	if len(pack.GitHistory) == 0 || pack.GitHistory[0].Path != "internal/contextplane/store.go" {
+	if len(pack.GitHistory) == 0 || pack.GitHistory[0].Path != "internal/context/contextplane/store.go" {
 		t.Fatalf("git history=%v", pack.GitHistory)
 	}
 	if len(pack.RepoAnchors) == 0 {
@@ -218,7 +218,7 @@ func TestCollectorCollectIncludesTranscriptHistory(t *testing.T) {
 		ID:          "T-history",
 		WorkspaceID: wsID,
 		Title:       "Use transcript continuity",
-		ScopePath:   "internal/contextplane/taskhistory/taskhistory.go",
+		ScopePath:   "internal/context/contextplane/taskhistory/taskhistory.go",
 		Status:      taskstore.StatusInProgress,
 	})
 	if err != nil {
@@ -755,7 +755,7 @@ func TestCollectorPrefersInRepoTaskWhenTaskIDOmitted(t *testing.T) {
 		ID:          "repo-task",
 		WorkspaceID: wsID,
 		Title:       "Refine ACA retrieval",
-		ScopePath:   "internal/contextplane/retrieval.go",
+		ScopePath:   "internal/context/contextplane/retrieval.go",
 		Status:      taskstore.StatusPending,
 		CreatedAt:   time.Date(2026, 3, 14, 1, 0, 0, 0, time.UTC),
 	}); err != nil {
@@ -803,7 +803,7 @@ func TestCollectorCollectUsesTranscriptWorkerForRetrievedBrief(t *testing.T) {
 		ID:          "T-worker",
 		WorkspaceID: wsID,
 		Title:       "Use transcript continuity",
-		ScopePath:   "internal/contextplane/taskhistory/taskhistory.go",
+		ScopePath:   "internal/context/contextplane/taskhistory/taskhistory.go",
 		Status:      taskstore.StatusInProgress,
 	})
 	if err != nil {

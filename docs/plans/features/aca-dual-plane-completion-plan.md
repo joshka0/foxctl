@@ -203,7 +203,7 @@ Required read order:
 
 Primary files:
 
-- `internal/contextplane/retrieval.go`
+- `internal/context/contextplane/retrieval.go`
 - `internal/tools/obsidian/search.go`
 - `internal/storage/obsidianindex/*`
 
@@ -238,8 +238,8 @@ Requirements:
 
 Primary files:
 
-- `internal/contextplane/tasks.go`
-- `internal/contextplane/dispatch.go`
+- `internal/context/contextplane/tasks.go`
+- `internal/context/contextplane/dispatch.go`
 - `cmd/agentctl/cmd/context_next.go`
 - `cmd/agentctl/cmd/context_dispatch.go`
 
@@ -268,7 +268,7 @@ Deliverables:
 
 Primary files:
 
-- `internal/contextplane/promotion.go`
+- `internal/context/contextplane/promotion.go`
 - `internal/tools/obsidian/policy.go`
 - `cmd/agentctl/cmd/context_promote_review.go`
 
@@ -301,9 +301,9 @@ Daemon loops:
 
 Primary files:
 
-- `internal/contextplane/daemon.go`
-- `internal/contextplane/health.go`
-- `internal/contextplane/contradictions.go`
+- `internal/context/contextplane/daemon.go`
+- `internal/context/contextplane/health.go`
+- `internal/context/contextplane/contradictions.go`
 
 Verification:
 
@@ -331,7 +331,7 @@ Primary files:
 
 - `internal/tools/obsidian/links.go`
 - `internal/intelligence/indexing/repoindex/*`
-- `internal/contextplane/retrieval.go`
+- `internal/context/contextplane/retrieval.go`
 
 Verification:
 
@@ -358,7 +358,7 @@ Deliverables:
 
 Primary files:
 
-- `internal/contextplane/daemon.go`
+- `internal/context/contextplane/daemon.go`
 - `cmd/agentctl/cmd/contextd.go`
 - `cmd/agentctl/cmd/mcp.go`
 

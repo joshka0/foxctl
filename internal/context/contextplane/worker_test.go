@@ -26,7 +26,7 @@ func TestWorkerRunOnce(t *testing.T) {
 		WorkspaceID: ws.ID(workspace),
 		Title:       "Formalize ACA",
 		Status:      taskstore.StatusPending,
-		ScopePath:   "internal/contextplane",
+		ScopePath:   "internal/context/contextplane",
 	}); err != nil {
 		t.Fatalf("Add task: %v", err)
 	}

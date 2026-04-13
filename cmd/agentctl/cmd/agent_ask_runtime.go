@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
+	"github.com/jkatigb/agentctl/internal/context/contextplane/taskhistory"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
 	libsqlevents "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/events"
