@@ -159,17 +159,17 @@ Each entry has:
 - **Goal**: Make it clear how planning picks providers/models and where
   integration tests live.
 - **Prompt**:\
-  “Map the planning LLM stack in `internal/planning/llm`. Start with the auto
+  “Map the planning LLM stack in `internal/intelligence/planning/llm`. Start with the auto
   planner in `auto.go` and show how it selects providers and models based on
   config/env. Then map the OpenAI-compatible planner
-  ([openai.go](cci:7://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:0:0-0:0)),
+  ([openai.go](cci:7://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/planning/llm/openai.go:0:0-0:0)),
   including
-  [OpenAIConfig](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:14:0-20:1),
-  [NewOpenAIPlanner](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:29:0-90:1)
+  [OpenAIConfig](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/planning/llm/openai.go:14:0-20:1),
+  [NewOpenAIPlanner](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/planning/llm/openai.go:29:0-90:1)
   provider detection (OPENROUTER_API_KEY, GROQ_API_KEY, OPENAI_API_KEY), BaseURL
   and model selection, and
-  [Plan](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:125:0-195:1).
-  Include how integration tests in `internal/planning/llm/planner_test.go` are
+  [Plan](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/planning/llm/openai.go:125:0-195:1).
+  Include how integration tests in `internal/intelligence/planning/llm/planner_test.go` are
   structured (e.g., OpenRouter integration) and how CI wires env vars and test
   gating.”
 

@@ -264,7 +264,7 @@ The codebase already follows good practices:
 | 2 | `internal/storage/dbdriver/vector.go` | Delete Vector marshaler (14 lines) |
 | 2 | `internal/platform/config/config.go` | Add TODO for MarshalerTo |
 | 3 | `internal/platform/jsoncompat/compat.go` | Created - compatibility docs |
-| 4 | `internal/planning/llm/openai.go` | Add `unknown` field |
+| 4 | `internal/intelligence/planning/llm/openai.go` | Add `unknown` field |
 | 4 | `internal/indexing/semantic/provider_voyage.go` | Add `unknown` field |
 | 4 | `internal/indexing/semantic/provider_gemini.go` | Add `unknown` fields (2) |
 | 4 | `internal/indexing/semantic/provider_mistral.go` | Add `unknown` field |

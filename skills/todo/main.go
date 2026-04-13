@@ -23,7 +23,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/intelligence/analysis/overseer"
 	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
-	"github.com/jkatigb/agentctl/internal/planning/llm"
+	"github.com/jkatigb/agentctl/internal/intelligence/planning/llm"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/env"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
