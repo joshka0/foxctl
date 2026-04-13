@@ -17,7 +17,7 @@ func TestFSReadCommandOutputsPreview(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow end-to-end fs/read preview test")
 	}
-	cfg := installTextGrepSkill(t)
+	cfg := newSkillTestConfig(t)
 	installFSReadSkill(t, cfg)
 
 	tmp := t.TempDir()
@@ -63,7 +63,7 @@ func TestFSReadCommandRemember(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow end-to-end fs/read remember test")
 	}
-	cfg := installTextGrepSkill(t)
+	cfg := newSkillTestConfig(t)
 	installFSReadSkill(t, cfg)
 
 	workdir := t.TempDir()

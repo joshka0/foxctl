@@ -156,6 +156,20 @@ func findSkill(cfg config.Config, requested string) (SkillHandle, error) {
 	return SkillHandle{}, fmt.Errorf("skill %s not found; run make skills-build or agentctl skills install", requested)
 }
 
+func findSkillManifest(cfg config.Config, requested string) (skill.Manifest, error) {
+	resolver := createSkillResolver(cfg)
+	handle, err := resolver.Resolve(requested)
+	if err != nil {
+		if installed, installErr := installEmbeddedSkill(cfg, requested, false); installErr == nil && installed {
+			return findSkillManifest(cfg, requested)
+		} else if installErr != nil && !errors.Is(installErr, errUnknownEmbeddedSkill) {
+			return skill.Manifest{}, installErr
+		}
+		return skill.Manifest{}, err
+	}
+	return loadValidatedManifest(handle.ManifestPath)
+}
+
 // createSkillResolver creates a resolver with paths from config.
 func createSkillResolver(cfg config.Config) *skill.Resolver {
 	searchPaths := append([]string{}, skill.EnvSearchPaths()...)

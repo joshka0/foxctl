@@ -24,14 +24,29 @@ If the room is explicitly running the agile epic/milestone/story workflow, also 
 
 ## Core rules
 
+- `agentctl` is the headless room/runtime kernel.
+- CLI, web/API, `gui-agent`, mux panes, and chat adapters are clients or presentation layers over that kernel.
 - The room timeline is canonical. Pane scrollback is not.
 - Participant transport and mux presentation are different things. A pane label or mux session is not proof of live delivery.
+- Room-scoped clients should prefer `GET /api/rooms/{room-id}/events?workspace_id=...` over the global `/api/events` feed for room timeline updates.
+- Room member `delivery_binding` is the canonical transport/routing record. The mirrored top-level member transport fields are compatibility-only and should not be treated as new source-of-truth state.
+- Reply-required work is chain-aware:
+  a later message only satisfies an earlier request when it is from the intended recipient and belongs to the same room message chain.
+- Room status and loop surfaces expose a durable `last_delivery_trace`:
+  use that trace to debug the last chosen binding, transport, fallback attempt, and outcome instead of guessing from pane behavior.
+- use explicit, distinctive participant ids.
+- avoid generic actor ids like `coordinator`, `reviewer`, or `codex-coordinator` when multiple rooms or agent runtimes may coexist.
+- actor ids should include feature, branch, room, or workstream context, for example `feat-room-loop-codex`, `room-ci-reviewer-a`, or `runtime-owner-a`.
 - Room context and room membership are different things. `AGENTCTL_ROOM_ID`, a tmux/zellij session name, or a startup prompt only mean the pane knows about the room. They do **not** prove the participant is joined and routable.
 - Room durability and live execution are different things. A room can continue to hold epic/task/history state even when there are no panes or live participant runtimes.
 - When invoking **`room send`**, **prefer explicit `--to <participant>`** for anything meant for one person (so relay + inbox stay aligned), and **`--sender <you>`** whenever your pane context might not identify you (scripts, MCP, or outside tmux/zellij). Omit `--to` only for deliberate **broadcasts** to the rest of the room.
 - Start with `room status`, then `room inbox --actor <you>`.
 - Direct obligations beat casual browsing of the timeline.
 - If a task is assigned to you, `claim` it before doing real work.
+- When creating a new room task, treat lane selection as explicit contract:
+  - plain `room task add` defaults to the newest open epic's quiet `Chores` milestone when one exists
+  - use `room task add --milestone-id <milestone-id>` for milestone-scoped execution work
+  - do not use title keywords to decide where a task belongs
 - If work takes time, `touch` the task instead of posting vague status chat.
 - If blocked, `room task block --reason ...` with a concrete reason.
 - When done, `room task complete --notes ...` so the outcome is durable.
@@ -92,6 +107,7 @@ Practical rule:
 - do not assume a session-wide broadcast will reach unmanaged panes
 - task assign/claim/complete use the same transport-first relay path as `room relay`; pane delivery is a viewer effect, not the room’s source of truth
 - if no agents are meant to execute right now, it is valid to leave the room in durable-room-only mode and avoid rebuilding panes until they are actually needed
+- operator surfaces must converge on the same shared runtime truth; if CLI, API, and GUI disagree, treat that as a room-runtime bug, not normal behavior
 
 Then decide:
 
@@ -123,6 +139,24 @@ Use:
 ```bash
 agentctl room task claim <room-id> --id <task-id>
 ```
+
+### I need to create new work
+
+Use plain task creation for quiet chores:
+
+```bash
+agentctl room task add <room-id> --title "Follow up on reviewer debt"
+```
+
+Use explicit milestone linkage for active delivery work:
+
+```bash
+agentctl room task add <room-id> \
+  --title "Implement current slice" \
+  --milestone-id <milestone-id>
+```
+
+If you do not know the correct milestone, inspect `room milestone show <room-id>` first.
 
 ### I am still working and want to keep heartbeat current
 
@@ -176,6 +210,10 @@ Operator rule:
 
 - if you set or expect reminders, confirm `room loop` is running for that room
 - `room relay` alone is only pane fanout; it will not drive reminder follow-ups or stale-reply nudges
+- `room loop` reads persisted policy; do not expect runtime flags to change reminder or stale-work behavior
+- `task_followup_interval=0` disables automatic task follow-up check-ins while leaving reminder follow-ups active
+- acknowledging one emitted reminder instance does not stop the recurring schedule
+- recurring reminders can also stop when linked `task_id`, `story_id`, or `milestone_id` work is completed
 
 ### I need to understand the current milestone
 
@@ -232,6 +270,8 @@ Coordinator responsibility:
 - close reminder noise when it has already been handled
 - make the final call on routing and review closure
 - distinguish transport failures from viewer-only problems before escalating relay bugs
+- own coordinator-only mutation surfaces:
+  full room patching, full member replacement, and role-changing member binding updates should not be delegated as self-service room actions
 
 ### I am the reviewer
 
@@ -282,6 +322,12 @@ Do not:
 - silently start assigned work without `claim`
 - resolve coordinator-only items if you are not acting with coordinator authority
 - close a review gate without an explicit `approved` or `blocked` outcome
+- treat a rejected task transition as a bug before you check the task lifecycle:
+  `assign`, `reassign`, `claim`, `block`, `unblock`, `complete`, `reclaim`, and `abandon` now enforce a stricter state machine
+
+## Verification
+
+- Prefer `bash tests/regression/run.sh` as the canonical regression entrypoint when you need to re-check the hardened room-runtime invariants end to end.
 
 ## Related
 

@@ -8,6 +8,18 @@ import (
 // agentctl pane serve wrapper socket registered.
 const PaneSocketTransportKind = "pane_socket"
 
+const (
+	RoomDeliverySubmitModeNewline           = "newline"
+	RoomDeliverySubmitModeEnter             = "enter"
+	RoomDeliverySubmitModeEnterSplit        = "enter_split"
+	RoomDeliverySubmitModeComposerCtrlEnter = "composer_ctrl_enter"
+
+	RoomDeliveryHealthUnknown = "unknown"
+	RoomDeliveryHealthReady   = "ready"
+
+	RoomDeliveryFallbackAllowLegacyMux = "allow_legacy_mux"
+)
+
 // ParticipantMembership describes whether a participant is a known room member.
 type ParticipantMembership string
 
@@ -100,6 +112,49 @@ type ParticipantState struct {
 	CanTriggerTurn bool `json:"can_trigger_turn"`
 }
 
+func DefaultRoomDeliverySubmitMode(actorID string) string {
+	t := strings.ToLower(strings.TrimSpace(actorID))
+	switch {
+	case strings.HasPrefix(t, "droid"),
+		strings.HasPrefix(t, "codex"),
+		strings.HasPrefix(t, "cursor"),
+		strings.HasPrefix(t, "agent"):
+		return RoomDeliverySubmitModeComposerCtrlEnter
+	case strings.HasPrefix(t, "gemini"):
+		return RoomDeliverySubmitModeEnterSplit
+	case strings.HasPrefix(t, "claude"):
+		return RoomDeliverySubmitModeEnter
+	default:
+		return RoomDeliverySubmitModeNewline
+	}
+}
+
+func NormalizeRoomDeliveryBinding(actorID string, binding *RoomDeliveryBinding) *RoomDeliveryBinding {
+	if binding == nil {
+		return nil
+	}
+	normalized := &RoomDeliveryBinding{
+		MuxBackend:        strings.ToLower(strings.TrimSpace(binding.MuxBackend)),
+		MuxSession:        strings.TrimSpace(binding.MuxSession),
+		MuxPaneID:         strings.TrimSpace(binding.MuxPaneID),
+		TransportEndpoint: strings.TrimSpace(binding.TransportEndpoint),
+		TransportKind:     strings.ToLower(strings.TrimSpace(binding.TransportKind)),
+		SubmitMode:        strings.TrimSpace(binding.SubmitMode),
+		Health:            strings.TrimSpace(binding.Health),
+		FallbackPolicy:    strings.TrimSpace(binding.FallbackPolicy),
+	}
+	if normalized.SubmitMode == "" {
+		normalized.SubmitMode = DefaultRoomDeliverySubmitMode(actorID)
+	}
+	if normalized.Health == "" {
+		normalized.Health = RoomDeliveryHealthUnknown
+	}
+	if normalized.FallbackPolicy == "" {
+		normalized.FallbackPolicy = RoomDeliveryFallbackAllowLegacyMux
+	}
+	return normalized
+}
+
 // ParticipantStateFromRoomMember computes the initial ParticipantState from a RoomMember
 // record without performing live probes. Transport and Runtime are set to Unknown;
 // Presentation is derived from the member's Backend/Session/PaneID fields.
@@ -112,6 +167,7 @@ type ParticipantState struct {
 func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 	member = NormalizeRoomMember(member)
 	actorID := strings.TrimSpace(member.ActorID)
+	binding := NormalizeRoomDeliveryBinding(actorID, member.DeliveryBinding)
 	state := ParticipantState{
 		ActorID:    actorID,
 		Membership: MembershipActive,
@@ -121,11 +177,11 @@ func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 	// Pane socket transport: the member registered an agentctl pane wrapper.
 	// Presentation may still exist (via Backend/Session/PaneID) but transport
 	// goes through the socket, not the mux plugin.
-	if member.TransportEndpoint != "" && strings.ToLower(member.TransportKind) == PaneSocketTransportKind {
-		state.TransportEndpoint = member.TransportEndpoint
+	if binding != nil && binding.TransportEndpoint != "" && strings.ToLower(binding.TransportKind) == PaneSocketTransportKind {
+		state.TransportEndpoint = binding.TransportEndpoint
 		state.Transport = TransportUnknown // caller should probe with ApplySocketProbe
-		state.MuxBackend = strings.ToLower(member.Backend)
-		if member.Backend != "" && member.PaneID != "" {
+		state.MuxBackend = strings.ToLower(binding.MuxBackend)
+		if binding.MuxBackend != "" && binding.MuxPaneID != "" {
 			state.Presentation = PresentationDetached
 		} else {
 			state.Presentation = PresentationNone
@@ -134,7 +190,7 @@ func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 		return state
 	}
 
-	if member.Unbound || strings.TrimSpace(member.PaneID) == "" && strings.TrimSpace(member.Session) == "" {
+	if member.Unbound || binding == nil || (strings.TrimSpace(binding.MuxPaneID) == "" && strings.TrimSpace(binding.MuxSession) == "") && strings.TrimSpace(binding.TransportEndpoint) == "" {
 		state.Membership = MembershipUnbound
 		state.Transport = TransportNone
 		state.Presentation = PresentationNone
@@ -147,11 +203,11 @@ func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 		return state
 	}
 
-	state.MuxBackend = strings.ToLower(member.Backend)
+	state.MuxBackend = strings.ToLower(binding.MuxBackend)
 	switch state.MuxBackend {
 	case "tmux":
-		session := member.Session
-		paneID := member.PaneID
+		session := binding.MuxSession
+		paneID := binding.MuxPaneID
 		if session != "" && paneID != "" {
 			state.TransportEndpoint = "tmux:" + session + ":" + paneID
 		} else if paneID != "" {
@@ -160,8 +216,8 @@ func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 		state.Transport = TransportUnknown
 		state.Presentation = PresentationDetached
 	case "zellij":
-		session := member.Session
-		paneID := member.PaneID
+		session := binding.MuxSession
+		paneID := binding.MuxPaneID
 		if session != "" && paneID != "" {
 			state.TransportEndpoint = "zellij:" + session + ":" + paneID
 		} else if paneID != "" {
@@ -228,7 +284,43 @@ func NormalizeRoomMember(m RoomMember) RoomMember {
 	m.PaneID = strings.TrimSpace(m.PaneID)
 	m.TransportEndpoint = strings.TrimSpace(m.TransportEndpoint)
 	m.TransportKind = strings.TrimSpace(m.TransportKind)
+	if m.DeliveryBinding == nil {
+		m.DeliveryBinding = &RoomDeliveryBinding{
+			MuxBackend:        m.Backend,
+			MuxSession:        m.Session,
+			MuxPaneID:         m.PaneID,
+			TransportEndpoint: m.TransportEndpoint,
+			TransportKind:     m.TransportKind,
+		}
+	}
+	m.DeliveryBinding = NormalizeRoomDeliveryBinding(m.ActorID, m.DeliveryBinding)
+	if m.DeliveryBinding != nil {
+		m.Backend = m.DeliveryBinding.MuxBackend
+		m.Session = m.DeliveryBinding.MuxSession
+		m.PaneID = m.DeliveryBinding.MuxPaneID
+		m.TransportEndpoint = m.DeliveryBinding.TransportEndpoint
+		m.TransportKind = m.DeliveryBinding.TransportKind
+	}
+	if !m.Unbound && !roomMemberHasNormalizedTransportRoute(m) {
+		m.Unbound = true
+	}
 	return m
+}
+
+func roomMemberHasNormalizedTransportRoute(m RoomMember) bool {
+	if binding := m.DeliveryBinding; binding != nil {
+		if strings.TrimSpace(binding.TransportEndpoint) != "" {
+			return true
+		}
+		if strings.TrimSpace(binding.MuxPaneID) != "" {
+			return true
+		}
+		if strings.TrimSpace(binding.MuxSession) != "" {
+			return true
+		}
+	}
+	actorID := strings.TrimSpace(m.ActorID)
+	return strings.HasPrefix(actorID, "tmux:") || strings.HasPrefix(actorID, "zellij:")
 }
 
 // BuildParticipantStates computes ParticipantState for every member in a room summary.

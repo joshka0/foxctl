@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	"github.com/jkatigb/agentctl/internal/web/api"
 )
 
@@ -22,6 +23,47 @@ const (
 	serverOrchestrationSmokeWorkspacePath = "/tmp/agentctl-server-orchestration-smoke-workspace"
 	serverRoomBoardSmokeWorkspacePath     = "/tmp/agentctl-server-room-board-smoke-workspace"
 )
+
+type smokeTestServer struct {
+	*httptest.Server
+	cfg config.Config
+}
+
+func activateServerRoomLoop(t *testing.T, cfg config.Config, workspaceID, roomID string) {
+	t.Helper()
+	store, err := coordination.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open coordination store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	leaseName := "room-loop:" + workspaceID + ":" + roomID + ":delivery"
+	acquired, err := store.TryAcquireLease(context.Background(), leaseName, "owner-a", time.Minute)
+	if err != nil {
+		t.Fatalf("TryAcquireLease: %v", err)
+	}
+	if !acquired {
+		t.Fatal("expected lease acquisition")
+	}
+	_, err = store.UpsertRoomLoop(context.Background(), coordination.RoomLoop{
+		WorkspaceID:             workspaceID,
+		RoomID:                  roomID,
+		Enabled:                 true,
+		ManagedBy:               "agentctl.room.loop/test",
+		LastTickAt:              &now,
+		DeliveryLeaseName:       leaseName,
+		DeliveryOwnerID:         "owner-a",
+		PulseInterval:           45 * time.Minute,
+		ReplyStaleAfter:         90 * time.Minute,
+		TaskStaleAfter:          6 * time.Hour,
+		MinPulseFloor:           24 * time.Hour,
+		CoordinatorPulseEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("upsert room loop: %v", err)
+	}
+}
 
 func TestServerHandler_RoomsSmoke(t *testing.T) {
 	t.Setenv("AGENTCTL_DB_DRIVER", "")
@@ -43,6 +85,7 @@ func TestServerHandler_RoomsSmoke(t *testing.T) {
 	if createResp.StatusCode != http.StatusCreated {
 		t.Fatalf("create room status=%d body=%s", createResp.StatusCode, readBody(t, createResp))
 	}
+	activateServerRoomLoop(t, server.cfg, serverRoomSmokeWorkspacePath, "server-room")
 
 	listResp := mustJSONRequest(t, server, http.MethodGet, "/api/rooms?workspace_id="+serverRoomSmokeWorkspacePath+"&limit=10", "")
 	if listResp.StatusCode != http.StatusOK {
@@ -140,6 +183,7 @@ func TestServerHandler_RoomBoardWorkflowSmoke(t *testing.T) {
 	if createRoomResp.StatusCode != http.StatusCreated {
 		t.Fatalf("create room status=%d body=%s", createRoomResp.StatusCode, readBody(t, createRoomResp))
 	}
+	activateServerRoomLoop(t, server.cfg, serverRoomBoardSmokeWorkspacePath, "room-board-smoke")
 
 	seedResp := mustJSONRequest(t, server, http.MethodPost, "/api/orchestration/seed-cards", `{
 		"request_id":"req-server-room-board-seed-001",
@@ -190,7 +234,7 @@ func TestServerHandler_RoomBoardWorkflowSmoke(t *testing.T) {
 	}
 }
 
-func newSmokeTestServer(t *testing.T) *httptest.Server {
+func newSmokeTestServer(t *testing.T) *smokeTestServer {
 	t.Helper()
 
 	originalRelayHook := api.RoomSendLiveRelayHookForTests()
@@ -214,10 +258,13 @@ func newSmokeTestServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatalf("new web server: %v", err)
 	}
-	return httptest.NewServer(s.Handler())
+	return &smokeTestServer{
+		Server: httptest.NewServer(s.Handler()),
+		cfg:    cfg,
+	}
 }
 
-func mustJSONRequest(t *testing.T, server *httptest.Server, method, path, body string) *http.Response {
+func mustJSONRequest(t *testing.T, server *smokeTestServer, method, path, body string) *http.Response {
 	t.Helper()
 
 	client := server.Client()

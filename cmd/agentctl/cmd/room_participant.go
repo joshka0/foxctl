@@ -74,6 +74,10 @@ func (p relayParticipant) isPaneSocketDelivery() bool {
 	return strings.EqualFold(strings.TrimSpace(p.TransportKind), agent.PaneSocketTransportKind)
 }
 
+func (p relayParticipant) submitMode() string {
+	return roomMemberSubmitMode(p.Member)
+}
+
 // collectRelayParticipants builds the delivery list using explicit participant state
 // rather than raw member field heuristics. This is the transport-first relay path:
 // it decides who gets delivery based on CanTriggerTurn and transport endpoint availability,
@@ -165,7 +169,6 @@ func relayViaParticipants(ctx context.Context, client *tmuxbridge.Client, room a
 				participantTarget = strings.TrimSpace(p.Target)
 			}
 			content := formatRoomRelayContentForTarget(room, msg, participantTarget)
-			submitMode := targetSubmitMode(participantTarget)
 			_, err := deliverAgentPane(ctx, socketPath, agentpane.ControlMessage{
 				Kind:       "room_message",
 				RoomID:     room.ID,
@@ -174,7 +177,7 @@ func relayViaParticipants(ctx context.Context, client *tmuxbridge.Client, room a
 				Recipient:  participantTarget,
 				Interrupt:  msg.Interrupt,
 				Content:    content,
-				SubmitMode: submitMode,
+				SubmitMode: p.submitMode(),
 			})
 			if err != nil {
 				result.FailedCount++

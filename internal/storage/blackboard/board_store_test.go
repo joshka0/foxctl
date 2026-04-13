@@ -104,6 +104,52 @@ func TestBoardStore_BroadcastMessage(t *testing.T) {
 	}
 }
 
+func TestBoardStore_RoomWorkspaceKeyNormalizesPathSelectors(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	root := t.TempDir()
+	messy := root + string(filepath.Separator) + "."
+
+	if _, err := store.EnsureRoom(ctx, messy, "alpha", "Alpha"); err != nil {
+		t.Fatalf("EnsureRoom: %v", err)
+	}
+	if err := store.SendMessage(ctx, &agent.BoardMessage{
+		WorkspaceID: messy,
+		Stream:      agent.RoomStreamName("alpha"),
+		Sender:      "tester",
+		Recipient:   "*",
+		Subject:     "hello",
+		Body:        "world",
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	room, err := store.GetRoom(ctx, root, "alpha", "")
+	if err != nil {
+		t.Fatalf("GetRoom(clean): %v", err)
+	}
+	if room.WorkspaceID != root {
+		t.Fatalf("room.WorkspaceID=%q want %q", room.WorkspaceID, root)
+	}
+	msgs, err := store.ListRoomMessages(ctx, root, "alpha", 10)
+	if err != nil {
+		t.Fatalf("ListRoomMessages(clean): %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("len(msgs)=%d want 1", len(msgs))
+	}
+	if msgs[0].WorkspaceID != root {
+		t.Fatalf("msg.WorkspaceID=%q want %q", msgs[0].WorkspaceID, root)
+	}
+}
+
 func TestBoardStore_AckMessages(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -1310,6 +1356,12 @@ func TestBoardStore_UpdateRoomMemberTransport(t *testing.T) {
 	if got := byActor["claude-a"].Backend; got != "tmux" {
 		t.Errorf("claude-a Backend=%q want tmux (must be preserved)", got)
 	}
+	if byActor["claude-a"].DeliveryBinding == nil {
+		t.Fatalf("claude-a DeliveryBinding=nil want mirrored binding")
+	}
+	if got := byActor["claude-a"].DeliveryBinding.TransportEndpoint; got != endpoint {
+		t.Errorf("claude-a DeliveryBinding.TransportEndpoint=%q want %q", got, endpoint)
+	}
 }
 
 func TestBoardStore_UpdateRoomMemberTransport_NotFound(t *testing.T) {
@@ -1363,12 +1415,17 @@ func TestBoardStore_UpdateRoomMemberBinding(t *testing.T) {
 	}
 
 	err = store.UpdateRoomMemberBinding(ctx, "ws1", "bind-room", agent.RoomMember{
-		ActorID:           "droid-a",
-		Backend:           "tmux",
-		Session:           "new-session",
-		PaneID:            "%42",
-		TransportEndpoint: "/tmp/droid-rebind.sock",
-		TransportKind:     "pane_socket",
+		ActorID: "droid-a",
+		DeliveryBinding: &agent.RoomDeliveryBinding{
+			MuxBackend:        "tmux",
+			MuxSession:        "new-session",
+			MuxPaneID:         "%42",
+			TransportEndpoint: "/tmp/droid-rebind.sock",
+			TransportKind:     "pane_socket",
+			SubmitMode:        agent.RoomDeliverySubmitModeComposerCtrlEnter,
+			Health:            agent.RoomDeliveryHealthReady,
+			FallbackPolicy:    agent.RoomDeliveryFallbackAllowLegacyMux,
+		},
 	})
 	if err != nil {
 		t.Fatalf("UpdateRoomMemberBinding: %v", err)
@@ -1388,6 +1445,15 @@ func TestBoardStore_UpdateRoomMemberBinding(t *testing.T) {
 	}
 	if got.TransportEndpoint != "/tmp/droid-rebind.sock" || got.TransportKind != "pane_socket" {
 		t.Fatalf("droid-a transport=(%q,%q) want updated pane_socket", got.TransportEndpoint, got.TransportKind)
+	}
+	if got.DeliveryBinding == nil {
+		t.Fatal("droid-a DeliveryBinding=nil want persisted binding")
+	}
+	if got.DeliveryBinding.SubmitMode != agent.RoomDeliverySubmitModeComposerCtrlEnter {
+		t.Fatalf("droid-a submit_mode=%q want %q", got.DeliveryBinding.SubmitMode, agent.RoomDeliverySubmitModeComposerCtrlEnter)
+	}
+	if got.DeliveryBinding.Health != agent.RoomDeliveryHealthReady {
+		t.Fatalf("droid-a health=%q want %q", got.DeliveryBinding.Health, agent.RoomDeliveryHealthReady)
 	}
 	if byActor["claude-a"].Session != "" || byActor["claude-a"].TransportEndpoint != "" {
 		t.Fatalf("claude-a was unexpectedly modified: %+v", byActor["claude-a"])

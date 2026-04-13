@@ -10,7 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils'
 import { addRoomReminder, cancelRoomReminder, listRoomReminders, readMuxPane } from '@/api/client'
 import { participantTransportKind } from '@/api/types'
-import type { MuxPane, RoomReminder, RoomSendMessageResult, RoomStatusParticipant } from '@/api/types'
+import type { MuxPane, RoomDeliveryBinding, RoomReminder, RoomSendMessageResult, RoomStatusParticipant } from '@/api/types'
 import { Monitor, RefreshCw, SendHorizonal, TerminalSquare } from 'lucide-react'
 
 interface RoomTerminalViewProps {
@@ -35,6 +35,7 @@ interface RoomTerminalViewProps {
     pane_id?: string
     transport_endpoint?: string
     transport_kind?: string
+    delivery_binding?: RoomDeliveryBinding
   }) => Promise<void>
   sending?: boolean
   rebinding?: boolean
@@ -263,7 +264,7 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
         : lastReminderResult
           ? `last reminder · ${lastReminderResult.recipient} · every ${lastReminderResult.interval} · ${lastReminderResult.sent_count}/${lastReminderResult.max_iterations}`
           : lastSendResult
-            ? `last send · ${lastSendResult.status} · ${summarizeLiveRelay(lastSendResult.live_relay)}`
+            ? `last send · ${lastSendResult.status} · ${summarizeSendDelivery(lastSendResult)}`
             : 'No recent dispatch activity.'
 
   return (
@@ -646,6 +647,13 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
                       pane_id: selectedPane.id,
                       transport_endpoint: selectedPane.socket_path || participant?.transport?.transport_endpoint,
                       transport_kind: selectedPane.socket_path ? 'pane_socket' : participantTransportKind(participant?.transport),
+                      delivery_binding: {
+                        mux_backend: selectedPane.backend,
+                        mux_session: selectedPane.session,
+                        mux_pane_id: selectedPane.id,
+                        transport_endpoint: selectedPane.socket_path || participant?.transport?.transport_endpoint,
+                        transport_kind: selectedPane.socket_path ? 'pane_socket' : participantTransportKind(participant?.transport),
+                      },
                     })
                     setRebindNotice(`rebound ${bindActor} to ${selectedPane.session_pane || selectedPane.id || selectedPane.session}`)
                   } catch (error) {
@@ -699,8 +707,9 @@ export function RoomTerminalView({ roomId, workspaceId, panes, participants, sen
                       id: result.message.id,
                       room_id: roomId,
                       stream: result.message.stream || '',
-                      status: 'sent',
-                      live_relay: result.live_relay,
+                      status: 'queued',
+                      delivery_owner: 'room_loop',
+                      delivery_pending: true,
                     })
                   } catch (error) {
                     setReminderError(error instanceof Error ? error.message : 'Failed to schedule reminder')
@@ -777,6 +786,17 @@ function summarizeLiveRelay(results?: RoomSendMessageResult['live_relay']): stri
     return `${backends}; error: ${errors[0]}`
   }
   return `${backends}; delivered ${totalDelivered}, failed ${totalFailed}`
+}
+
+function summarizeSendDelivery(result?: RoomSendMessageResult): string {
+  if (!result) return 'not reported'
+  if (result.live_relay && result.live_relay.length > 0) {
+    return summarizeLiveRelay(result.live_relay)
+  }
+  if (result.delivery_owner === 'room_loop' || result.delivery_pending || result.status === 'queued') {
+    return 'queued for room loop'
+  }
+  return 'not reported'
 }
 
 const MESSAGE_PRESETS: MessagePreset[] = [

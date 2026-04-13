@@ -255,6 +255,17 @@ func CompactRoomSummaryForInbox(s RoomSummary) map[string]any {
 }
 
 // RoomMember is an explicit membership record for one room.
+type RoomDeliveryBinding struct {
+	MuxBackend        string `json:"mux_backend,omitempty"`
+	MuxSession        string `json:"mux_session,omitempty"`
+	MuxPaneID         string `json:"mux_pane_id,omitempty"`
+	TransportEndpoint string `json:"transport_endpoint,omitempty"`
+	TransportKind     string `json:"transport_kind,omitempty"`
+	SubmitMode        string `json:"submit_mode,omitempty"`
+	Health            string `json:"health,omitempty"`
+	FallbackPolicy    string `json:"fallback_policy,omitempty"`
+}
+
 type RoomMember struct {
 	ActorID  string    `json:"actor_id"`
 	Role     string    `json:"role,omitempty"`
@@ -271,6 +282,10 @@ type RoomMember struct {
 	// "pane_socket" when a pane wrapper is registered,
 	// "mux_pane" for legacy direct mux injection, or "" (unknown/none).
 	TransportKind string `json:"transport_kind,omitempty"`
+	// DeliveryBinding is the authoritative persisted routing/binding record for
+	// this member. Legacy top-level backend/session/pane/transport fields remain
+	// mirrored for compatibility with older call sites while the planner migrates.
+	DeliveryBinding *RoomDeliveryBinding `json:"delivery_binding,omitempty"`
 }
 
 // SandboxConfig holds sandbox-related metadata for a room that was created

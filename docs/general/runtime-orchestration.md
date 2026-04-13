@@ -24,6 +24,15 @@ The runtime is still hybrid:
 That means Jido is not yet purely optional in practice even though that is the intended
 direction.
 
+Important scope note:
+
+- `internal/v2/*` should be read as the newer **agent/runtime/orchestration**
+  lane.
+- It is not the intended replacement namespace for context, retrieval, storage,
+  or interface packages outside that lane.
+- The canonical package grouping map and explicit legacy-to-v2 replacement table
+  live in `docs/architecture/package-topology.md`.
+
 ## Core packages
 
 | Package(s) | Responsibility |
@@ -39,6 +48,21 @@ direction.
 | `internal/agent`, `internal/agent/daemon` | Classic mailbox-driven agent runtime, overseer hierarchy, tool wiring, and foreground daemon loop |
 | `internal/daemon` | Local daemon service; currently mixes classic runtime behavior with newer v2-backed command helpers |
 | `internal/execution/agentmanager` | Legacy spawn/kill management path still used by some CLI flows |
+
+## Legacy vs V2 Runtime Boundary
+
+Use this shorthand when talking about “legacy” vs “v2” in runtime discussions:
+
+| Legacy/current path | V2 replacement target | Notes |
+|---------------------|-----------------------|-------|
+| `internal/agent/runtime` | `internal/v2/runtime/*` plus `internal/v2/services/*` | Core agent session/runtime replacement seam |
+| `internal/agent/daemon` | `internal/v2/runtime/{runner,orchestration,supervisor}` | Foreground daemon loop replacement is partial |
+| `internal/execution/agentmanager` | `internal/v2/services/{spawn,kill,list,run}` | Still used as fallback in some CLI flows |
+| agent-management logic in `internal/daemon` | prefer `internal/v2/services/*` semantics | `internal/daemon` remains the hosting shell in places |
+| live Jido runtime-state dependencies in `internal/v2/adapters/jido` | Go-owned runtime state with Jido optional | Adapter remains, default dependence should shrink |
+
+For the broader package topology, including what `v2` is **not** replacing, see
+`docs/architecture/package-topology.md`.
 
 ## Surface map
 
@@ -123,16 +147,18 @@ default path no longer requires them for core orchestration/runtime behavior.
 ## Reading order
 
 1. `docs/architecture/system-architecture.md`
-2. `docs/architecture/go-native-runtime-and-optional-jido.md`
-3. `docs/architecture/jido-hybrid-runtime.md`
-4. `docs/spec/runtime-backend-contracts.md`
-5. `docs/general/agent-daemon.md`
-6. `docs/spec/agent_hierarchy.md`
-7. `docs/spec/overseer_profile.md`
+2. `docs/architecture/package-topology.md`
+3. `docs/architecture/go-native-runtime-and-optional-jido.md`
+4. `docs/architecture/jido-hybrid-runtime.md`
+5. `docs/spec/runtime-backend-contracts.md`
+6. `docs/general/agent-daemon.md`
+7. `docs/spec/agent_hierarchy.md`
+8. `docs/spec/overseer_profile.md`
 
 ## Related docs
 
 - `docs/architecture/system-architecture.md`
+- `docs/architecture/package-topology.md`
 - `docs/architecture/go-native-runtime-and-optional-jido.md`
 - `docs/architecture/jido-hybrid-runtime.md`
 - `docs/spec/runtime-backend-contracts.md`

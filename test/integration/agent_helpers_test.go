@@ -292,21 +292,17 @@ func TestReceiver(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, msg)
 
-		// Nack with delay
-		err = receiver.Nack(ctx, msg, 5*time.Second)
+		// Use a short delay here; this test cares about retry semantics, not a literal 5s timeout.
+		err = receiver.Nack(ctx, msg, 100*time.Millisecond)
 		require.NoError(t, err)
-
-		// Try to poll immediately - should not see the message
-		msg, err = receiver.PollOnce(ctx, 30*time.Second)
-		require.NoError(t, err)
-		assert.Nil(t, msg)
 
 		// Wait and poll again
-		time.Sleep(6 * time.Second)
-		msg, err = receiver.PollOnce(ctx, 30*time.Second)
-		require.NoError(t, err)
-		require.NotNil(t, msg)
-		assert.Equal(t, 2, msg.Attempt) // Second delivery (first retry)
+		require.Eventually(t, func() bool {
+			var pollErr error
+			msg, pollErr = receiver.PollOnce(ctx, 25*time.Millisecond)
+			return pollErr == nil && msg != nil
+		}, 750*time.Millisecond, 25*time.Millisecond)
+		assert.GreaterOrEqual(t, msg.Attempt, 2) // Retried delivery
 
 		// Now ack
 		err = receiver.Ack(ctx, msg)

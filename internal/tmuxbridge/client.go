@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -37,6 +38,9 @@ var (
 	digitsPattern     = regexp.MustCompile(`^[0-9]+$`)
 	bridgeLinePattern = regexp.MustCompile(`^\[tmux-bridge\s+from=([^\s\]]+)\s+pane=([^\s\]]+)\s+reply_to=([^\s\]]+)\]\s*(.*)$`)
 	writePaneTTY      = defaultWritePaneTTY
+
+	queuedDraftProbeAttempts = 3
+	queuedDraftProbeDelay    = 50 * time.Millisecond
 )
 
 // Runner executes subprocesses for tmuxbridge operations.
@@ -237,11 +241,12 @@ type InterruptResult struct {
 
 // DeliverResult describes one plain-text delivery into a pane.
 type DeliverResult struct {
-	Target         string `json:"target"`
-	ResolvedTarget string `json:"resolved_target"`
-	Pane           Pane   `json:"pane"`
-	Mode           string `json:"mode"`
-	Payload        string `json:"payload"`
+	Target          string `json:"target"`
+	ResolvedTarget  string `json:"resolved_target"`
+	Pane            Pane   `json:"pane"`
+	Mode            string `json:"mode"`
+	Payload         string `json:"payload"`
+	DispatchRetried bool   `json:"dispatch_retried,omitempty"`
 }
 
 type DeliverOptions struct {
@@ -625,13 +630,55 @@ func (c *Client) DeliverTextWithOptions(ctx context.Context, target string, text
 	if err != nil {
 		return DeliverResult{}, err
 	}
+	dispatchRetried, err := c.retryQueuedDraftDispatch(ctx, resolvedTarget, targetPane, payload)
+	if err != nil {
+		return DeliverResult{}, err
+	}
 	return DeliverResult{
-		Target:         target,
-		ResolvedTarget: resolvedTarget,
-		Pane:           targetPane,
-		Mode:           mode,
-		Payload:        payload,
+		Target:          target,
+		ResolvedTarget:  resolvedTarget,
+		Pane:            targetPane,
+		Mode:            mode,
+		Payload:         payload,
+		DispatchRetried: dispatchRetried,
 	}, nil
+}
+
+func (c *Client) retryQueuedDraftDispatch(ctx context.Context, resolvedTarget string, pane Pane, payload string) (bool, error) {
+	if !paneNeedsQueuedDraftRetry(pane) || strings.TrimSpace(payload) == "" {
+		return false, nil
+	}
+	for attempt := 0; attempt < queuedDraftProbeAttempts; attempt++ {
+		stdout, err := c.runTmux(ctx, "capture-pane", "-t", resolvedTarget, "-p", "-J", "-S", "-12")
+		if err == nil && paneCaptureShowsQueuedDraft(stdout, payload) {
+			if _, err := c.runTmux(ctx, "send-keys", "-t", resolvedTarget, "Enter"); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+		if attempt+1 < queuedDraftProbeAttempts {
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			case <-time.After(queuedDraftProbeDelay):
+			}
+		}
+	}
+	return false, nil
+}
+
+func paneNeedsQueuedDraftRetry(pane Pane) bool {
+	label := strings.ToLower(strings.TrimSpace(pane.Label))
+	return strings.HasPrefix(label, "gemini") || strings.HasPrefix(label, "claude")
+}
+
+func paneCaptureShowsQueuedDraft(content, payload string) bool {
+	trimmedPayload := strings.TrimSpace(payload)
+	if trimmedPayload == "" {
+		return false
+	}
+	lower := strings.ToLower(content)
+	return strings.Contains(lower, "queued (") && strings.Contains(content, trimmedPayload)
 }
 
 // Doctor inspects tmux reachability and reports likely issues.

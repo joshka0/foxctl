@@ -102,6 +102,61 @@ func TestRelayRoomMessageTmuxSendsPayloadThenEnter(t *testing.T) {
 	}
 }
 
+func TestRelayRoomMessageTmuxUsesBindingOnlyPaneTarget(t *testing.T) {
+	t.Parallel()
+
+	room := agent.RoomSummary{
+		ID: "alpha",
+		Members: []agent.RoomMember{
+			{ActorID: "agent-a"},
+			{
+				ActorID: "agent-b",
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					MuxBackend:        "tmux",
+					MuxSession:        "collab",
+					MuxPaneID:         "%2",
+					TransportEndpoint: "tmux:collab:%2",
+					TransportKind:     "mux_pane",
+				},
+			},
+		},
+	}
+	msg := agent.BoardMessage{
+		Sender:    "agent-a",
+		Recipient: agent.BroadcastRecipient,
+		Body:      "hello",
+	}
+	content := formatRoomRelayContent(room, msg)
+
+	paneLine := "%2" + relayTestFieldSep + "collab" + relayTestFieldSep + "0" + relayTestFieldSep + "1" + relayTestFieldSep + "main" + relayTestFieldSep + "222" + relayTestFieldSep + "80" + relayTestFieldSep + "24" + relayTestFieldSep + "codex-b" + relayTestFieldSep + "/repo" + relayTestFieldSep + "codex" + relayTestFieldSep + "0\n"
+
+	payloadKey := "tmux send-keys -t %2 -l -- " + content
+	enterKey := "tmux send-keys -t %2 C-Enter"
+
+	r := &relayTmuxRecordingRunner{
+		responses: map[string]struct {
+			stdout string
+			stderr string
+			err    error
+		}{
+			"tmux display-message -t %2 -p #{pane_id}":                 {stdout: "%2\n"},
+			"tmux display-message -t %2 -p " + relayTestTmuxListFormat: {stdout: paneLine},
+			payloadKey: {},
+			enterKey:   {},
+		},
+	}
+	client := tmuxbridge.NewWithRunner(r, map[string]string{})
+
+	got := relayRoomMessageTmux(context.Background(), client, room, msg)
+	if got.DeliveredCount != 1 {
+		t.Fatalf("DeliveredCount=%d want 1; Failed=%v Skipped=%v Error=%q",
+			got.DeliveredCount, got.FailedMembers, got.SkippedMembers, got.Error)
+	}
+	if len(got.DeliveredTo) != 1 || got.DeliveredTo[0] != "%2" {
+		t.Fatalf("DeliveredTo=%v want [%%2]", got.DeliveredTo)
+	}
+}
+
 // TestRelayRoomMessageDirectToHumanADeliversToCoordinatorPane asserts a direct send to "human-a"
 // still relays to the coordinator member when membership stores a tmux participant id (common
 // when join uses --current).
@@ -320,6 +375,35 @@ func TestMergeRelayResultsDedupesPaneTargetToActorID(t *testing.T) {
 	}
 }
 
+func TestMergeRelayResultsAllowsLegacyFallbackAfterPrimaryFailure(t *testing.T) {
+	primary := roomRelayResult{
+		Backend:       "participant_transport",
+		FailedCount:   1,
+		FailedMembers: []string{"claude-a"},
+	}
+	legacy := roomRelayResult{
+		Backend:        "auto",
+		DeliveredCount: 1,
+		DeliveredTo:    []string{"%42"},
+	}
+	members := []agent.RoomMember{
+		{ActorID: "claude-a", Backend: "tmux", Session: "collab", PaneID: "%42"},
+	}
+	merged := mergeRelayResults(primary, legacy, members)
+	if merged.DeliveredCount != 1 {
+		t.Fatalf("DeliveredCount=%d want 1", merged.DeliveredCount)
+	}
+	if len(merged.DeliveredTo) != 1 || merged.DeliveredTo[0] != "claude-a" {
+		t.Fatalf("DeliveredTo=%v want [claude-a]", merged.DeliveredTo)
+	}
+	if merged.FailedCount != 0 {
+		t.Fatalf("FailedCount=%d want 0 after legacy fallback delivery", merged.FailedCount)
+	}
+	if len(merged.FailedMembers) != 0 {
+		t.Fatalf("FailedMembers=%v want empty after legacy fallback delivery", merged.FailedMembers)
+	}
+}
+
 func TestCollectRelayParticipantsUsesParticipantStateNotPresentation(t *testing.T) {
 	// Key test: a member with Backend/Session/PaneID (presentation=detached)
 	// should still be included because CanTriggerTurn=true via transport endpoint.
@@ -396,6 +480,51 @@ func TestRelayViaParticipantsUsesPaneSocket(t *testing.T) {
 	}
 	if len(result.DeliveredTo) != 1 || result.DeliveredTo[0] != "droid-a" {
 		t.Fatalf("DeliveredTo=%v want [droid-a]", result.DeliveredTo)
+	}
+}
+
+func TestRelayViaParticipantsUsesBindingSubmitModeOverride(t *testing.T) {
+	origDeliver := deliverAgentPane
+	defer func() { deliverAgentPane = origDeliver }()
+
+	socketPath := "/tmp/test-agentctl-socket-submit-override"
+	deliverAgentPane = func(ctx context.Context, socket string, msg agentpane.ControlMessage) (agentpane.ControlResponse, error) {
+		if socket != socketPath {
+			t.Fatalf("socket=%q want %q", socket, socketPath)
+		}
+		if msg.SubmitMode != agentpane.SubmitModeEnter {
+			t.Fatalf("submit mode=%q want %q", msg.SubmitMode, agentpane.SubmitModeEnter)
+		}
+		return agentpane.ControlResponse{OK: true, BytesWritten: len(msg.Content)}, nil
+	}
+
+	room := agent.RoomSummary{
+		ID: "test-room",
+		Members: []agent.RoomMember{
+			{
+				ActorID:           "codex-a",
+				TransportEndpoint: socketPath,
+				TransportKind:     agent.PaneSocketTransportKind,
+				DeliveryBinding: &agent.RoomDeliveryBinding{
+					TransportEndpoint: socketPath,
+					TransportKind:     agent.PaneSocketTransportKind,
+					SubmitMode:        agentpane.SubmitModeEnter,
+				},
+			},
+		},
+	}
+	client := tmuxbridge.NewWithRunner(&relayTmuxRecordingRunner{
+		responses: map[string]struct {
+			stdout string
+			stderr string
+			err    error
+		}{},
+	}, map[string]string{})
+	result := relayViaParticipants(context.Background(), client, room, agent.BoardMessage{
+		Sender: "sender", Body: "hello", Subject: "test",
+	})
+	if result.DeliveredCount != 1 {
+		t.Fatalf("DeliveredCount=%d want 1", result.DeliveredCount)
 	}
 }
 

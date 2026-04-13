@@ -33,6 +33,14 @@ Create a dedicated `gui-agent` room-management panel that lets a coordinator:
 4. hand off coordinator responsibility explicitly
 5. keep the room loop active and correctly tuned without losing auditability
 
+## Canonical Position
+
+`gui-agent` is a client of the headless `agentctl` room/runtime kernel.
+
+It must not depend on CLI-shaped implementation details or mux-shaped runtime
+truth. Its room surfaces should be built against shared room services and
+persisted/evented room state.
+
 ## Success Criteria
 
 The first production-quality panel should let an operator do all of the following without leaving `gui-agent`:

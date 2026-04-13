@@ -3,6 +3,7 @@ package sse
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"sync"
 	"time"
 
@@ -19,6 +20,9 @@ type Event struct {
 
 	// Timestamp is when the event was created.
 	Timestamp time.Time `json:"ts"`
+
+	// Topic scopes delivery to subscribed clients. Empty means unscoped/global.
+	Topic string `json:"-"`
 }
 
 // InvalidateData is the payload for invalidation events.
@@ -137,12 +141,25 @@ func (h *Hub) Unregister(client *Client) {
 
 // Publish sends an event to all connected clients.
 func (h *Hub) Publish(eventType string, data any) {
-	event := Event{
+	h.publish(Event{
 		Type:      eventType,
 		Data:      data,
 		Timestamp: time.Now().UTC(),
-	}
+	})
+}
 
+// PublishTopic sends an event to global clients and to clients subscribed to the
+// given topic. The topic is not serialized into the SSE payload.
+func (h *Hub) PublishTopic(topic, eventType string, data any) {
+	h.publish(Event{
+		Type:      eventType,
+		Data:      data,
+		Timestamp: time.Now().UTC(),
+		Topic:     topic,
+	})
+}
+
+func (h *Hub) publish(event Event) {
 	select {
 	case h.broadcast <- event:
 	case <-h.done:
@@ -150,7 +167,8 @@ func (h *Hub) Publish(eventType string, data any) {
 		// Channel full, drop event
 		observability.Emit(context.Background(), observability.NewEvent("sse.broadcast_channel_full").
 			WithComponent("sse").
-			WithData("event_type", eventType).
+			WithData("event_type", event.Type).
+			WithData("event_topic", event.Topic).
 			Error(nil, 0))
 	}
 }
@@ -158,6 +176,11 @@ func (h *Hub) Publish(eventType string, data any) {
 // Invalidate publishes an invalidation event for the given query keys.
 func (h *Hub) Invalidate(keys ...string) {
 	h.Publish("invalidate", InvalidateData{Keys: keys})
+}
+
+// TopicHandler returns an SSE handler bound to the given topic set.
+func (h *Hub) TopicHandler(topics ...string) http.HandlerFunc {
+	return TopicHandler(h, topics...)
 }
 
 // ClientCount returns the number of connected clients.
@@ -195,6 +218,11 @@ func (h *Hub) broadcastEvent(ctx context.Context, event Event) {
 	defer h.mu.RUnlock()
 
 	for _, client := range h.clients {
+		if len(client.Topics) > 0 {
+			if event.Topic != "" && !client.Topics[event.Topic] {
+				continue
+			}
+		}
 		select {
 		case client.Send <- msg:
 		default:

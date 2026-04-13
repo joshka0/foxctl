@@ -21,6 +21,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/roomruntime"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
@@ -97,6 +98,9 @@ func newRoomRemindAddCommand() *cobra.Command {
 		workspace     string
 		sender        string
 		subject       string
+		taskID        string
+		storyID       string
+		milestoneID   string
 		every         time.Duration
 		maxIterations int
 		replyExpected bool
@@ -109,16 +113,19 @@ func newRoomRemindAddCommand() *cobra.Command {
 		Short: "Create a durable scheduled follow-up for one participant",
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomRemindAdd(cmd, workspace, sender, args[0], args[1], subject, args[2], every, maxIterations, ackRequired, replyExpected, interrupt, allowPassive)
+			return runRoomRemindAdd(cmd, workspace, sender, args[0], args[1], subject, args[2], taskID, storyID, milestoneID, every, maxIterations, ackRequired, replyExpected, interrupt, allowPassive)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&subject, "subject", "", "Optional root message subject")
+	cmd.Flags().StringVar(&taskID, "task-id", "", "Optional linked task id that auto-stops the reminder when completed or canceled")
+	cmd.Flags().StringVar(&storyID, "story-id", "", "Optional linked story id that auto-stops the reminder when the story is done, waived, or deferred")
+	cmd.Flags().StringVar(&milestoneID, "milestone-id", "", "Optional linked milestone id that auto-stops the reminder once the milestone has a summary")
 	cmd.Flags().DurationVar(&every, "every", 15*time.Minute, "Reminder interval")
 	cmd.Flags().IntVar(&maxIterations, "max-iterations", 3, "Maximum reminder follow-ups after the initial request")
 	cmd.Flags().BoolVar(&replyExpected, "reply-expected", true, "Require a reply to stop reminders")
-	cmd.Flags().BoolVar(&ackRequired, "ack-required", false, "Require an ack to stop reminders")
+	cmd.Flags().BoolVar(&ackRequired, "ack-required", false, "Mark the root request and reminder alerts as requiring acknowledgment")
 	cmd.Flags().BoolVar(&interrupt, "interrupt", false, "Interrupt the target pane for reminder follow-ups")
 	cmd.Flags().BoolVar(&allowPassive, "allow-passive", false, "Allow scheduling reminders even when the room loop is not currently active")
 	return cmd
@@ -434,7 +441,6 @@ func newRoomStatusCommand() *cobra.Command {
 	var (
 		workspace  string
 		limit      int
-		staleAfter time.Duration
 		only       []string
 		taskFilter string
 		verbose    bool
@@ -444,12 +450,11 @@ func newRoomStatusCommand() *cobra.Command {
 		Short: "Show a coordinator-facing room summary",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomStatus(cmd, workspace, args[0], limit, staleAfter, only, taskFilter, verbose)
+			return runRoomStatus(cmd, workspace, args[0], limit, only, taskFilter, verbose)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().IntVar(&limit, "limit", 200, "Maximum room messages to inspect for status derivation")
-	cmd.Flags().DurationVar(&staleAfter, "stale-after", 5*time.Minute, "Participant idle threshold")
 	cmd.Flags().StringSliceVar(&only, "only", nil, "Filter coordinator action summary (ack,reply,assigned,blocked,stale,all)")
 	cmd.Flags().StringVar(&taskFilter, "filter", "open", "Tasks to include in status payload: open (excludes completed and canceled), all, or completed")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Include verbose actionable entry detail for debugging")
@@ -528,7 +533,7 @@ func newRoomSendCommand() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "send <room-id> <text>",
-		Short: "Append a durable message and fan out to mux panes (live relay on by default)",
+		Short: "Append a durable message for room-loop delivery",
 		Long: "Stores the message in the room timeline, then delivers it to other participants' tmux/zellij panes " +
 			"(same path as room relay / room loop) so targets see the line and an implicit submit. " +
 			"When this command runs inside tmux or zellij, agentctl also mux-submits the current pane by default " +
@@ -545,7 +550,7 @@ func newRoomSendCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
-	cmd.Flags().StringVar(&recipient, "to", "", "Direct recipient participant id (omit for broadcast). Use --to so live relay targets exactly that pane; broadcast delivers to all other members")
+	cmd.Flags().StringVar(&recipient, "to", "", "Direct recipient participant id (omit for broadcast). Use --to so the room loop targets exactly that participant; broadcast delivers to all other members")
 	cmd.Flags().StringVar(&subject, "subject", "", "Optional subject line")
 	cmd.Flags().StringVar(&hint, "hint", "", "Optional explicit hint for how the recipient should respond")
 	cmd.Flags().StringVar(&kind, "kind", string(agent.BoardMessageKindInfo), "Message kind (info|instruction|alert|review_request)")
@@ -557,7 +562,7 @@ func newRoomSendCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&autoCreate, "auto-create", true, "Create the room if it does not exist")
 	cmd.Flags().BoolVar(&noMuxSubmit, "no-mux-submit", false, "Do not send mux submit keys to the current pane after a successful send")
 	cmd.Flags().StringVar(&muxSubmitMode, "mux-submit-mode", "enter-only", "Submit mode after send when inside tmux/zellij (escape-enter|enter-only)")
-	cmd.Flags().BoolVar(&noLiveRelay, "no-live-relay", false, "Do not fan out this message to other participants' mux panes (use when room relay or room loop already delivers)")
+	cmd.Flags().BoolVar(&noLiveRelay, "no-live-relay", false, "Deprecated no-op: room send no longer performs immediate live relay; the room loop owns delivery")
 	return cmd
 }
 
@@ -2757,6 +2762,14 @@ type roomStatusActionRequired struct {
 	VerboseTopEntries       []roomInboxEntry  `json:"verbose_top_entries,omitempty"`
 }
 
+type roomActionSuppression struct {
+	ReminderRoots     map[string]struct{}
+	ClosedTaskIDs     map[string]struct{}
+	QuietTaskIDs      map[string]struct{}
+	ClosedBoundaryIDs map[string]struct{}
+	QuietBoundaryIDs  map[string]struct{}
+}
+
 type roomStatusTask struct {
 	ID              string     `json:"id"`
 	Title           string     `json:"title"`
@@ -2768,10 +2781,14 @@ type roomStatusTask struct {
 	Signals         []string   `json:"signals,omitempty"`
 }
 
-func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, staleAfter time.Duration, only []string, taskFilter string, verbose bool) error {
+func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, only []string, taskFilter string, verbose bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
+	}
+	cfg, err := loadConfig(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	store, err := openRoomBoardStore(cmd.Context())
 	if err != nil {
@@ -2801,13 +2818,36 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, stal
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	coordStore, err := coordination.Open(cmd.Context(), cfg.Storage.Root)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer coordStore.Close()
+	loop, err := coordStore.GetRoomLoop(cmd.Context(), absWorkspace, roomID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if loop == nil {
+		def := defaultRoomLoopPolicy(absWorkspace, roomID, roomPulseConfig{})
+		loop = &def
+	} else {
+		persisted := coerceRoomLoopPolicy(*loop)
+		loop = &persisted
+	}
+	loopCfg := roomPulseConfigFromStore(*loop)
+	staleAfter := loopCfg.TaskStaleAfter
 	now := time.Now().UTC()
-	taskPulse := buildRoomTaskPulseSummary(tasks, now, staleAfter)
 	reminderRoots, err := loadRoomReminderRoots(cmd.Context(), absWorkspace, roomID, true)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	backlog := buildRoomStatusBacklog(summary, messages, reminderRoots)
+	allTasks, err := listRoomTasks(cmd.Context(), taskStore, ws.CanonicalID(absWorkspace), messages, "", false, false)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	suppression := buildRoomActionSuppression(messages, allTasks, reminderRoots)
+	taskPulse := buildRoomTaskPulseSummary(tasks, now, staleAfter, suppression)
+	backlog := buildRoomStatusBacklog(summary, messages, suppression)
 	filters, err := normalizeRoomStatusFilters(only)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.status", protocol.ErrorCodeEARG, err.Error(), map[string]any{
@@ -2816,10 +2856,10 @@ func runRoomStatus(cmd *cobra.Command, workspace, roomID string, limit int, stal
 	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.status", map[string]any{
 		"room":            summary,
-		"participants":    buildRoomStatusParticipants(summary, messages, tasks, staleAfter, reminderRoots),
+		"participants":    buildRoomStatusParticipants(summary, messages, tasks, staleAfter, suppression),
 		"task_pulse":      taskPulse,
 		"backlog":         backlog,
-		"action_required": buildRoomStatusActionRequired(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose, reminderRoots),
+		"action_required": buildRoomStatusActionRequired(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose, suppression),
 		"sandbox":         buildRoomSandboxInfo(summary),
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
@@ -2991,40 +3031,63 @@ func runRoomSendWithHint(cmd *cobra.Command, workspace, roomID, sender, recipien
 			"hint": "Add the participant to the room first with `agentctl room join`, or send a broadcast without --to.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	cfg, err := loadConfig(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	coordStore, err := coordination.Open(cmd.Context(), cfg.Storage.Root)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer coordStore.Close()
+	if err := requireActiveRoomLoop(cmd.Context(), coordStore, absWorkspace, roomID, time.Now().UTC()); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeERuntime, err.Error(), map[string]any{
+			"hint": fmt.Sprintf("Start the room loop first with `agentctl room loop %s --workspace %s ...` before sending direct or broadcast room messages.", roomID, absWorkspace),
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	if strings.TrimSpace(subject) == "" {
 		subject = deriveRoomSubject(body)
 	}
 	body = annotateRoomSendBody(roomID, identity.Sender, recipient, body, hint, ackRequired, replyExpected)
 
-	msg := &agent.BoardMessage{
-		WorkspaceID:   absWorkspace,
-		TaskID:        strings.TrimSpace(taskID),
-		Stream:        agent.RoomStreamName(roomID),
-		Sender:        identity.Sender,
-		Recipient:     recipient,
-		Kind:          agent.BoardMessageKind(strings.TrimSpace(kind)),
-		Priority:      priority,
-		AckRequired:   ackRequired,
-		ReplyExpected: replyExpected,
-		Interrupt:     interrupt,
-		Subject:       subject,
-		Body:          strings.TrimSpace(body),
+	result, err := roomruntime.SendMessage(cmd.Context(), store, roomruntime.SendMessageInput{
+		WorkspaceID:              absWorkspace,
+		RoomID:                   roomID,
+		RoomTitle:                roomID,
+		Sender:                   identity.Sender,
+		Recipient:                recipient,
+		Subject:                  subject,
+		Body:                     body,
+		TaskID:                   taskID,
+		Kind:                     agent.BoardMessageKind(strings.TrimSpace(kind)),
+		Priority:                 priority,
+		AckRequired:              ackRequired,
+		ReplyExpected:            replyExpected,
+		Interrupt:                interrupt,
+		EnsureRoom:               autoCreate,
+		RequireExistingRecipient: recipient != agent.BroadcastRecipient,
+	})
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		data := map[string]any{}
+		if strings.Contains(err.Error(), "recipient ") && strings.Contains(err.Error(), "is not a participant") {
+			code = protocol.ErrorCodeEARG
+			data["hint"] = "Add the participant to the room first with `agentctl room join`, or send a broadcast without --to."
+		} else if strings.Contains(err.Error(), "reply_expected requires") || strings.Contains(err.Error(), "interrupt requires") {
+			code = protocol.ErrorCodeEARG
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", code, err.Error(), data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	if msg.Kind == "" {
-		msg.Kind = agent.BoardMessageKindInfo
-	}
-	if msg.Priority <= 0 {
-		msg.Priority = agent.DefaultPriority
-	}
-	if err := store.SendMessage(cmd.Context(), msg); err != nil {
-		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.send", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
-	}
+	msg := result.Message
 	warnings := make([]string, 0, 4)
 	if !senderProvided {
 		warnings = append(warnings, fmt.Sprintf("sender was inferred as %s from the current execution context", identity.Sender))
 	}
 	if msg.Recipient == agent.BroadcastRecipient {
-		warnings = append(warnings, "broadcast: live relay (unless --no-live-relay) notifies every other participant; pass --to <participant-id> to deliver only to that target")
+		warnings = append(warnings, "broadcast: room-loop delivery notifies every other participant; pass --to <participant-id> to queue only that target")
+	}
+	if mux.NoLiveRelay {
+		warnings = append(warnings, "--no-live-relay is deprecated; room send always queues for room-loop delivery")
 	}
 	autoSkipMuxSubmit := senderProvided
 	var muxSubmit map[string]any
@@ -3045,23 +3108,21 @@ func runRoomSendWithHint(cmd *cobra.Command, workspace, roomID, sender, recipien
 		warnings = append(warnings, "mux submit skipped because --sender was provided explicitly; send/interrupt should not depend on current mux pane state")
 	}
 	data := map[string]any{
-		"room_id":         roomID,
-		"stream":          msg.Stream,
-		"message_id":      msg.ID,
-		"message":         msg,
-		"sender_identity": identity,
-		"warnings":        warnings,
+		"room_id":          roomID,
+		"stream":           msg.Stream,
+		"message_id":       msg.ID,
+		"message":          msg,
+		"status":           "queued",
+		"delivery_owner":   "room_loop",
+		"delivery_pending": true,
+		"sender_identity":  identity,
+		"warnings":         warnings,
 	}
 	if msg.Recipient != agent.BroadcastRecipient {
 		data["delivery"] = "direct"
 		data["recipient"] = msg.Recipient
 	} else {
 		data["delivery"] = "broadcast"
-	}
-	if !mux.NoLiveRelay {
-		data["live_relay"] = roomSendRelayHook(cmd.Context(), store, absWorkspace, roomID, []*agent.BoardMessage{msg})
-	} else {
-		data["live_relay_skipped"] = true
 	}
 	if muxSubmit != nil {
 		data["mux_submit"] = muxSubmit
@@ -3106,7 +3167,7 @@ func annotateRoomSendBody(roomID, sender, recipient, body, hint string, ackRequi
 
 const roomLoopHeartbeatGrace = 15 * time.Second
 
-func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, subject, body string, every time.Duration, maxIterations int, ackRequired, replyExpected, interrupt, allowPassive bool) error {
+func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, subject, body, taskID, storyID, milestoneID string, every time.Duration, maxIterations int, ackRequired, replyExpected, interrupt, allowPassive bool) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -3145,22 +3206,9 @@ func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, 
 	if strings.TrimSpace(subject) == "" {
 		subject = deriveRoomSubject(body)
 	}
-	root := &agent.BoardMessage{
-		WorkspaceID:   absWorkspace,
-		Stream:        agent.RoomStreamName(strings.TrimSpace(roomID)),
-		Sender:        identity.Sender,
-		Recipient:     recipient,
-		Kind:          agent.BoardMessageKindInstruction,
-		Priority:      agent.DefaultPriority,
-		AckRequired:   ackRequired,
-		ReplyExpected: replyExpected,
-		Interrupt:     interrupt,
-		Subject:       subject,
-		Body:          strings.TrimSpace(body),
-	}
-	if err := boardStore.SendMessage(cmd.Context(), root); err != nil {
-		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
-	}
+	taskID = strings.TrimSpace(taskID)
+	storyID = strings.TrimSpace(storyID)
+	milestoneID = strings.TrimSpace(milestoneID)
 	cfg, err := loadConfig(cmd.Context())
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -3177,11 +3225,12 @@ func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, 
 			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
 	}
-	reminder, err := coordStore.UpsertRoomReminder(cmd.Context(), coordination.RoomReminder{
-		ID:            root.ID,
+	candidate := coordination.RoomReminder{
 		WorkspaceID:   absWorkspace,
 		RoomID:        strings.TrimSpace(roomID),
-		RootMessageID: root.ID,
+		TaskID:        taskID,
+		StoryID:       storyID,
+		MilestoneID:   milestoneID,
 		Sender:        identity.Sender,
 		Recipient:     recipient,
 		Subject:       subject,
@@ -3191,9 +3240,45 @@ func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, 
 		Interrupt:     interrupt,
 		Interval:      every,
 		MaxIterations: maxIterations,
-		LastSentAt:    &root.CreatedAt,
 		Active:        true,
-	})
+	}
+	reminders, err := coordStore.ListRoomReminders(cmd.Context(), absWorkspace, strings.TrimSpace(roomID), false)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if existing := findEquivalentActiveReminder(reminders, candidate); existing != nil {
+		data := map[string]any{
+			"room_id":          roomID,
+			"reminder":         existing,
+			"actor_id":         identity.Sender,
+			"recipient":        recipient,
+			"delivery_owner":   "room_loop",
+			"delivery_pending": false,
+			"deduped":          true,
+		}
+		return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.remind.add", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	root := &agent.BoardMessage{
+		WorkspaceID:   absWorkspace,
+		Stream:        agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Sender:        identity.Sender,
+		Recipient:     recipient,
+		Kind:          agent.BoardMessageKindInstruction,
+		Priority:      agent.DefaultPriority,
+		AckRequired:   ackRequired,
+		ReplyExpected: replyExpected,
+		Interrupt:     interrupt,
+		Subject:       subject,
+		Body:          strings.TrimSpace(body),
+		TaskID:        taskID,
+	}
+	if err := boardStore.SendMessage(cmd.Context(), root); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	candidate.ID = root.ID
+	candidate.RootMessageID = root.ID
+	candidate.LastSentAt = &root.CreatedAt
+	reminder, err := coordStore.UpsertRoomReminder(cmd.Context(), candidate)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
@@ -3204,10 +3289,10 @@ func runRoomRemindAdd(cmd *cobra.Command, workspace, sender, roomID, recipient, 
 		"actor_id":  identity.Sender,
 		"recipient": recipient,
 	}
-	if !roomTaskNoLiveRelay(cmd) {
-		data["live_relay"] = roomSendRelayHook(cmd.Context(), boardStore, absWorkspace, roomID, []*agent.BoardMessage{root})
-	} else {
-		data["live_relay_skipped"] = true
+	data["delivery_owner"] = "room_loop"
+	data["delivery_pending"] = true
+	if roomTaskNoLiveRelay(cmd) {
+		data["warnings"] = []string{"--no-live-relay is deprecated for reminders; reminder delivery is room-loop owned"}
 	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.remind.add", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
@@ -3225,6 +3310,16 @@ func requireActiveRoomLoop(ctx context.Context, coordStore *coordination.Store, 
 	}
 	if now.Sub(loop.LastTickAt.UTC()) > roomLoopHeartbeatGrace {
 		return fmt.Errorf("room loop heartbeat for %q is stale (last tick %s)", roomID, loop.LastTickAt.UTC().Format(time.RFC3339))
+	}
+	if strings.TrimSpace(loop.DeliveryLeaseName) == "" || strings.TrimSpace(loop.DeliveryOwnerID) == "" {
+		return fmt.Errorf("room loop for %q has no active delivery owner", roomID)
+	}
+	lease, err := coordStore.GetLease(ctx, loop.DeliveryLeaseName)
+	if err != nil {
+		return err
+	}
+	if lease == nil || strings.TrimSpace(lease.OwnerID) != strings.TrimSpace(loop.DeliveryOwnerID) || now.After(lease.ExpiresAt.UTC()) {
+		return fmt.Errorf("room loop delivery owner for %q is not active", roomID)
 	}
 	return nil
 }
@@ -3570,6 +3665,8 @@ type roomMilestoneMeta struct {
 	Goal                  string   `json:"goal"`
 	Objective             string   `json:"objective"`
 	Owner                 string   `json:"owner"`
+	LaneKind              string   `json:"lane_kind"`
+	FollowupPolicy        string   `json:"followup_policy"`
 	Scope                 []string `json:"scope"`
 	Risks                 []string `json:"risks"`
 	Exclusions            []string `json:"exclusions"`
@@ -3598,6 +3695,13 @@ type roomStoryMeta struct {
 	Owner       string `json:"owner"`
 	Description string `json:"description"`
 }
+
+const (
+	roomMilestoneLaneKindChores     = "chores"
+	roomFollowupPolicyDefault       = "default"
+	roomFollowupPolicyNone          = "none"
+	roomDefaultChoresMilestoneTitle = "Chores"
+)
 
 type roomStoryStateMeta struct {
 	State     string `json:"state"`
@@ -3708,16 +3812,42 @@ func runRoomEpicStart(cmd *cobra.Command, workspace, sender, roomID, title, goal
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	choresMeta, err := normalizeRoomMilestoneContract(roomMilestoneMeta{
+		EpicID:         msg.ID,
+		Goal:           goal,
+		Objective:      "Durable low-urgency chores and follow-up debt that should stay visible without generating reminder noise.",
+		Owner:          firstNonEmpty(strings.TrimSpace(owner), strings.TrimSpace(identity.Sender)),
+		LaneKind:       roomMilestoneLaneKindChores,
+		FollowupPolicy: roomFollowupPolicyNone,
+	})
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	choresMsg := &agent.BoardMessage{
+		WorkspaceID:      absWorkspace,
+		RelatedMessageID: msg.ID,
+		Stream:           agent.RoomStreamName(roomID),
+		Sender:           identity.Sender,
+		Recipient:        agent.BroadcastRecipient,
+		Kind:             agent.BoardMessageKindMilestone,
+		Priority:         agent.DefaultPriority,
+		Subject:          "Milestone: " + roomDefaultChoresMilestoneTitle,
+		Body:             buildRoomMilestoneBody(msg.ID, roomDefaultChoresMilestoneTitle, choresMeta.Goal, choresMeta.Objective, choresMeta.Owner, choresMeta.Scope, choresMeta.Risks, choresMeta.Exclusions, choresMeta.Dependencies, choresMeta.ValidatorsExpected, choresMeta.RequiredEvidenceLanes, choresMeta.OptionalEvidenceLanes, roomMilestoneEnforcePolicyPtr(choresMeta), choresMeta.ExitCriteria, choresMeta.LaneKind, choresMeta.FollowupPolicy),
+	}
+	if err := store.SendMessage(cmd.Context(), choresMsg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, msg.ID); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.epic.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.epic.start", map[string]any{
-		"room_id":         roomID,
-		"epic_id":         msg.ID,
-		"message":         msg,
-		"sender_identity": identity,
-		"room":            summary,
+		"room_id":             roomID,
+		"epic_id":             msg.ID,
+		"chores_milestone_id": choresMsg.ID,
+		"message":             msg,
+		"sender_identity":     identity,
+		"room":                summary,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -4375,7 +4505,7 @@ func runRoomMilestoneStartWithPolicy(cmd *cobra.Command, workspace, sender, room
 		Kind:             agent.BoardMessageKindMilestone,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Milestone: " + title,
-		Body:             buildRoomMilestoneBody(epicMsg.ID, title, meta.Goal, meta.Objective, meta.Owner, meta.Scope, meta.Risks, meta.Exclusions, meta.Dependencies, meta.ValidatorsExpected, meta.RequiredEvidenceLanes, meta.OptionalEvidenceLanes, &meta.EnforceExitPolicy, meta.ExitCriteria),
+		Body:             buildRoomMilestoneBody(epicMsg.ID, title, meta.Goal, meta.Objective, meta.Owner, meta.Scope, meta.Risks, meta.Exclusions, meta.Dependencies, meta.ValidatorsExpected, meta.RequiredEvidenceLanes, meta.OptionalEvidenceLanes, &meta.EnforceExitPolicy, meta.ExitCriteria, meta.LaneKind, meta.FollowupPolicy),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.start", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -4447,7 +4577,7 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 		Kind:             agent.BoardMessageKindMilestoneContract,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Milestone Contract: " + strings.TrimPrefix(strings.TrimSpace(milestoneMsg.Subject), "Milestone: "),
-		Body:             buildRoomMilestoneBody("", "", "", patch.Objective, "", nil, patch.Risks, patch.Exclusions, patch.Dependencies, patch.ValidatorsExpected, patch.RequiredEvidenceLanes, patch.OptionalEvidenceLanes, roomMilestoneEnforcePolicyPtr(patch), patch.ExitCriteria),
+		Body:             buildRoomMilestoneBody("", "", "", patch.Objective, "", nil, patch.Risks, patch.Exclusions, patch.Dependencies, patch.ValidatorsExpected, patch.RequiredEvidenceLanes, patch.OptionalEvidenceLanes, roomMilestoneEnforcePolicyPtr(patch), patch.ExitCriteria, patch.LaneKind, patch.FollowupPolicy),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.milestone.contract", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -6362,7 +6492,7 @@ func parseRoomEpicCheckpointBody(body string) roomEpicCheckpointMeta {
 	return meta
 }
 
-func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes []string, enforceExitPolicy *bool, exitCriteria []string) string {
+func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope, risks, exclusions, dependencies, validatorsExpected, requiredEvidenceLanes, optionalEvidenceLanes []string, enforceExitPolicy *bool, exitCriteria []string, laneKind, followupPolicy string) string {
 	var b strings.Builder
 	if strings.TrimSpace(epicID) != "" {
 		fmt.Fprintf(&b, "EpicID: %s\n", strings.TrimSpace(epicID))
@@ -6378,6 +6508,12 @@ func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope,
 	}
 	if strings.TrimSpace(owner) != "" {
 		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
+	}
+	if strings.TrimSpace(laneKind) != "" {
+		fmt.Fprintf(&b, "LaneKind: %s\n", strings.TrimSpace(laneKind))
+	}
+	if normalized := strings.TrimSpace(followupPolicy); normalized != "" && normalized != roomFollowupPolicyDefault {
+		fmt.Fprintf(&b, "FollowupPolicy: %s\n", normalized)
 	}
 	appendRoomSection(&b, "Scope", scope)
 	appendRoomSection(&b, "Risks", risks)
@@ -6471,6 +6607,10 @@ func parseRoomMilestoneBody(body string) roomMilestoneMeta {
 			meta.Objective = value
 		case "Owner":
 			meta.Owner = value
+		case "LaneKind":
+			meta.LaneKind = value
+		case "FollowupPolicy":
+			meta.FollowupPolicy = value
 		case "EnforceExitPolicy":
 			meta.EnforceExitPolicy = strings.EqualFold(value, "true")
 			meta.EnforceExitPolicySet = true
@@ -6769,6 +6909,19 @@ func normalizeRoomMilestoneContract(meta roomMilestoneMeta) (roomMilestoneMeta, 
 	meta.Goal = strings.TrimSpace(meta.Goal)
 	meta.Objective = strings.TrimSpace(meta.Objective)
 	meta.Owner = strings.TrimSpace(meta.Owner)
+	laneKind, err := normalizeRoomMilestoneLaneKind(meta.LaneKind)
+	if err != nil {
+		return roomMilestoneMeta{}, err
+	}
+	meta.LaneKind = laneKind
+	followupPolicy, err := normalizeRoomFollowupPolicy(meta.FollowupPolicy)
+	if err != nil {
+		return roomMilestoneMeta{}, err
+	}
+	if meta.LaneKind == roomMilestoneLaneKindChores && followupPolicy == roomFollowupPolicyDefault {
+		followupPolicy = roomFollowupPolicyNone
+	}
+	meta.FollowupPolicy = followupPolicy
 	meta.Scope = normalizeRoomList(meta.Scope, false)
 	meta.Risks = normalizeRoomList(meta.Risks, true)
 	meta.Exclusions = normalizeRoomList(meta.Exclusions, true)
@@ -6806,6 +6959,34 @@ func normalizeRoomMilestoneContract(meta roomMilestoneMeta) (roomMilestoneMeta, 
 	return meta, nil
 }
 
+func normalizeRoomMilestoneLaneKind(raw string) (string, error) {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	switch value {
+	case "", "default", "standard":
+		return "", nil
+	case roomMilestoneLaneKindChores:
+		return value, nil
+	default:
+		return "", fmt.Errorf("unsupported milestone lane kind %q", raw)
+	}
+}
+
+func normalizeRoomFollowupPolicy(raw string) (string, error) {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	switch value {
+	case "", roomFollowupPolicyDefault:
+		return roomFollowupPolicyDefault, nil
+	case roomFollowupPolicyNone:
+		return value, nil
+	default:
+		return "", fmt.Errorf("unsupported followup policy %q", raw)
+	}
+}
+
+func roomMilestoneIsQuiet(meta roomMilestoneMeta) bool {
+	return meta.FollowupPolicy == roomFollowupPolicyNone || meta.LaneKind == roomMilestoneLaneKindChores
+}
+
 func mergeRoomList(base, patch []string, sortItems bool) []string {
 	if len(base) == 0 && len(patch) == 0 {
 		return nil
@@ -6838,6 +7019,12 @@ func mergeRoomMilestoneMeta(base roomMilestoneMeta, patch roomMilestoneMeta) roo
 	}
 	if patch.Owner != "" {
 		base.Owner = patch.Owner
+	}
+	if patch.LaneKind != "" {
+		base.LaneKind = patch.LaneKind
+	}
+	if patch.FollowupPolicy != "" {
+		base.FollowupPolicy = patch.FollowupPolicy
 	}
 	if len(patch.Scope) > 0 {
 		base.Scope = append([]string(nil), patch.Scope...)
@@ -7380,7 +7567,20 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 		} else if len(questions) > 0 {
 			status = "intake_in_progress"
 		}
-		milestones := milestonesByEpic[msg.ID]
+		allMilestones := milestonesByEpic[msg.ID]
+		milestones := make([]map[string]any, 0, len(allMilestones))
+		quietMilestones := make([]map[string]any, 0, len(allMilestones))
+		choresMilestoneID := ""
+		for _, milestone := range allMilestones {
+			if boolField(milestone, "quiet") {
+				quietMilestones = append(quietMilestones, milestone)
+				if choresMilestoneID == "" && stringField(milestone, "lane_kind") == roomMilestoneLaneKindChores {
+					choresMilestoneID = stringField(milestone, "id")
+				}
+				continue
+			}
+			milestones = append(milestones, milestone)
+		}
 		logs := logsByEpic[msg.ID]
 		guidanceUpdates := append([]map[string]any(nil), guidanceByEpic[msg.ID]...)
 		checkpoints := append([]map[string]any(nil), checkpointsByEpic[msg.ID]...)
@@ -7400,6 +7600,12 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 				storyCount += count
 			}
 		}
+		quietStoryCount := 0
+		for _, milestone := range quietMilestones {
+			if count, ok := milestone["story_count"].(int); ok {
+				quietStoryCount += count
+			}
+		}
 		epicMessageIDs := uniqueStrings(append(
 			append(
 				append([]string{msg.ID}, collectRoomMapIDs(milestones)...),
@@ -7407,6 +7613,7 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 			),
 			append(collectRoomMapIDs(guidanceUpdates), collectRoomMapIDs(checkpoints)...)...,
 		))
+		epicMessageIDs = uniqueStrings(append(epicMessageIDs, collectRoomMapIDs(quietMilestones)...))
 		if finalizeMsg := finalizeByEpic[msg.ID]; strings.TrimSpace(finalizeMsg.ID) != "" {
 			epicMessageIDs = uniqueStrings(append(epicMessageIDs, finalizeMsg.ID))
 		}
@@ -7414,47 +7621,51 @@ func buildRoomEpicViews(messages []agent.BoardMessage) []map[string]any {
 			epicMessageIDs = uniqueStrings(append(epicMessageIDs, closeMsg.ID))
 		}
 		out = append(out, map[string]any{
-			"id":                      msg.ID,
-			"title":                   strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Epic: "),
-			"status":                  status,
-			"closed":                  closeMsg.ID != "",
-			"close_reason":            closeMeta.Reason,
-			"close_summary":           closeMeta.Summary,
-			"template":                meta.Template,
-			"default_small_work":      meta.DefaultSmallWork,
-			"source_kind":             "epic",
-			"source_id":               msg.ID,
-			"room_message_ids":        epicMessageIDs,
-			"workpack_root":           roomAgileWorkpackRootPath(msg.ID),
-			"epic_markdown":           roomAgileEpicMarkdownPath(msg.ID),
-			"meta_json_path":          roomAgileEpicMetaJSONPath(msg.ID),
-			"delivery_log_markdown":   roomAgileDeliveryLogMarkdownPath(msg.ID),
-			"retro_markdown":          roomAgileRetroMarkdownPath(msg.ID),
-			"checkpoint_dir":          roomAgileEpicCheckpointDir(msg.ID),
-			"root":                    msg,
-			"meta":                    meta,
-			"questions":               questions,
-			"question_kinds":          questionKinds,
-			"question_count":          len(questions),
-			"answers":                 answers,
-			"answer_count":            len(answers),
-			"open_questions":          openQuestions,
-			"finalized":               finalizeByEpic[msg.ID].ID != "",
-			"final_brief":             finalizeByEpic[msg.ID],
-			"close":                   closeMsg,
-			"proposals":               proposalsByEpic[msg.ID],
-			"proposal_count":          len(proposalsByEpic[msg.ID]),
-			"milestones":              milestones,
-			"milestone_count":         len(milestones),
-			"story_count":             storyCount,
-			"logs":                    logs,
-			"log_count":               len(logs),
-			"guidance_updates":        guidanceUpdates,
-			"guidance_update_count":   len(guidanceUpdates),
-			"latest_guidance_updates": truncateRoomMapSlice(guidanceUpdates, 3),
-			"checkpoints":             checkpoints,
-			"checkpoint_count":        len(checkpoints),
-			"latest_checkpoint":       firstRoomMap(checkpoints),
+			"id":                          msg.ID,
+			"title":                       strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Epic: "),
+			"status":                      status,
+			"closed":                      closeMsg.ID != "",
+			"close_reason":                closeMeta.Reason,
+			"close_summary":               closeMeta.Summary,
+			"template":                    meta.Template,
+			"default_small_work":          meta.DefaultSmallWork,
+			"source_kind":                 "epic",
+			"source_id":                   msg.ID,
+			"room_message_ids":            epicMessageIDs,
+			"workpack_root":               roomAgileWorkpackRootPath(msg.ID),
+			"epic_markdown":               roomAgileEpicMarkdownPath(msg.ID),
+			"meta_json_path":              roomAgileEpicMetaJSONPath(msg.ID),
+			"delivery_log_markdown":       roomAgileDeliveryLogMarkdownPath(msg.ID),
+			"retro_markdown":              roomAgileRetroMarkdownPath(msg.ID),
+			"checkpoint_dir":              roomAgileEpicCheckpointDir(msg.ID),
+			"root":                        msg,
+			"meta":                        meta,
+			"questions":                   questions,
+			"question_kinds":              questionKinds,
+			"question_count":              len(questions),
+			"answers":                     answers,
+			"answer_count":                len(answers),
+			"open_questions":              openQuestions,
+			"finalized":                   finalizeByEpic[msg.ID].ID != "",
+			"final_brief":                 finalizeByEpic[msg.ID],
+			"close":                       closeMsg,
+			"proposals":                   proposalsByEpic[msg.ID],
+			"proposal_count":              len(proposalsByEpic[msg.ID]),
+			"milestones":                  milestones,
+			"milestone_count":             len(milestones),
+			"quiet_milestones":            quietMilestones,
+			"quiet_milestone_count":       len(quietMilestones),
+			"default_chores_milestone_id": choresMilestoneID,
+			"story_count":                 storyCount,
+			"quiet_story_count":           quietStoryCount,
+			"logs":                        logs,
+			"log_count":                   len(logs),
+			"guidance_updates":            guidanceUpdates,
+			"guidance_update_count":       len(guidanceUpdates),
+			"latest_guidance_updates":     truncateRoomMapSlice(guidanceUpdates, 3),
+			"checkpoints":                 checkpoints,
+			"checkpoint_count":            len(checkpoints),
+			"latest_checkpoint":           firstRoomMap(checkpoints),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -8926,6 +9137,9 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 		for _, update := range contractsByMilestone[msg.ID] {
 			meta = mergeRoomMilestoneMeta(meta, parseRoomMilestoneBody(update.Body))
 		}
+		if normalizedMeta, err := normalizeRoomMilestoneContract(meta); err == nil {
+			meta = normalizedMeta
+		}
 		reviews := reviewsByMilestone[msg.ID]
 		summaryMessages := summariesByMilestone[msg.ID]
 		summaryViews := make([]map[string]any, 0, len(summaryMessages))
@@ -9068,6 +9282,9 @@ func buildRoomMilestoneViews(messages []agent.BoardMessage) []map[string]any {
 			"epic_id":                      meta.EpicID,
 			"title":                        strings.TrimPrefix(strings.TrimSpace(msg.Subject), "Milestone: "),
 			"status":                       status,
+			"lane_kind":                    meta.LaneKind,
+			"followup_policy":              meta.FollowupPolicy,
+			"quiet":                        roomMilestoneIsQuiet(meta),
 			"source_kind":                  "milestone",
 			"source_id":                    msg.ID,
 			"workpack_dir":                 roomAgileMilestoneWorkpackDir(meta.EpicID, msg.ID),
@@ -9959,7 +10176,7 @@ func syncRoomAgileWorkpack(ctx context.Context, store blackboard.BoardStore, wor
 			return err
 		}
 	}
-	for _, milestone := range mapSlice(epic["milestones"]) {
+	for _, milestone := range append(mapSlice(epic["milestones"]), mapSlice(epic["quiet_milestones"])...) {
 		if err := syncRoomAgileMilestoneWorkpack(workspaceID, roomID, epicID, milestone); err != nil {
 			return err
 		}
@@ -10078,7 +10295,9 @@ func renderRoomEpicMarkdown(epic map[string]any) string {
 	fmt.Fprintf(&b, "- ID: `%s`\n", stringField(epic, "id"))
 	fmt.Fprintf(&b, "- Status: `%s`\n", stringField(epic, "status"))
 	fmt.Fprintf(&b, "- Milestones: `%d`\n", intField(epic, "milestone_count"))
+	fmt.Fprintf(&b, "- Quiet milestones: `%d`\n", intField(epic, "quiet_milestone_count"))
 	fmt.Fprintf(&b, "- Stories: `%d`\n", intField(epic, "story_count"))
+	fmt.Fprintf(&b, "- Quiet stories: `%d`\n", intField(epic, "quiet_story_count"))
 	fmt.Fprintf(&b, "- Guidance updates: `%d`\n", intField(epic, "guidance_update_count"))
 	fmt.Fprintf(&b, "- Checkpoints: `%d`\n", intField(epic, "checkpoint_count"))
 	if meta := anyMap(epic["meta"]); meta != nil {
@@ -10103,6 +10322,12 @@ func renderRoomEpicMarkdown(epic map[string]any) string {
 		}
 	} else {
 		appendMarkdownEmptyState(&b, "Milestones", "No milestones shaped yet.")
+	}
+	if quietMilestones := mapSlice(epic["quiet_milestones"]); len(quietMilestones) > 0 {
+		fmt.Fprintf(&b, "\n## Quiet Milestones\n")
+		for _, milestone := range quietMilestones {
+			fmt.Fprintf(&b, "- `%s` %s (`%s`)\n", stringField(milestone, "id"), stringField(milestone, "title"), firstNonEmpty(stringField(milestone, "followup_policy"), roomFollowupPolicyDefault))
+		}
 	}
 	return b.String()
 }
@@ -11651,6 +11876,13 @@ func runRoomJoin(cmd *cobra.Command, workspace, roomID, actorID, role, backend, 
 	if value := strings.TrimSpace(transportKind); value != "" {
 		member.TransportKind = strings.ToLower(value)
 	}
+	member.DeliveryBinding = mergeRoomDeliveryBinding(member.DeliveryBinding, &agent.RoomDeliveryBinding{
+		MuxBackend:        member.Backend,
+		MuxSession:        member.Session,
+		MuxPaneID:         member.PaneID,
+		TransportEndpoint: member.TransportEndpoint,
+		TransportKind:     member.TransportKind,
+	})
 	member.Unbound = unbound
 	member = normalizeRoomMember(member)
 	store, err := openRoomBoardStore(cmd.Context())
@@ -11756,6 +11988,13 @@ func runRoomRebind(cmd *cobra.Command, workspace, roomID, actorID, role, backend
 	if value := strings.TrimSpace(transportKind); value != "" {
 		member.TransportKind = strings.ToLower(value)
 	}
+	member.DeliveryBinding = mergeRoomDeliveryBinding(member.DeliveryBinding, &agent.RoomDeliveryBinding{
+		MuxBackend:        member.Backend,
+		MuxSession:        member.Session,
+		MuxPaneID:         member.PaneID,
+		TransportEndpoint: member.TransportEndpoint,
+		TransportKind:     member.TransportKind,
+	})
 	member.Unbound = unbound
 	member = normalizeRoomMember(member)
 
@@ -12399,7 +12638,7 @@ func mergeRoomMembers(existing []agent.RoomMember, additions ...agent.RoomMember
 		out = append(out, member)
 	}
 	for _, member := range additions {
-		member = normalizeRoomMember(member)
+		member = trimRoomMemberUpdate(member)
 		if member.ActorID == "" {
 			continue
 		}
@@ -12422,16 +12661,22 @@ func mergeRoomMembers(existing []agent.RoomMember, additions ...agent.RoomMember
 			if member.TransportKind != "" {
 				out[pos].TransportKind = member.TransportKind
 			}
+			out[pos].DeliveryBinding = mergeRoomDeliveryBinding(out[pos].DeliveryBinding, member.DeliveryBinding)
 			out[pos].Unbound = member.Unbound
+			out[pos] = normalizeRoomMember(out[pos])
 			continue
 		}
 		index[member.ActorID] = len(out)
-		out = append(out, member)
+		out = append(out, normalizeRoomMember(member))
 	}
 	return out
 }
 
 func normalizeRoomMember(member agent.RoomMember) agent.RoomMember {
+	return agent.NormalizeRoomMember(member)
+}
+
+func trimRoomMemberUpdate(member agent.RoomMember) agent.RoomMember {
 	member.ActorID = strings.TrimSpace(member.ActorID)
 	member.Role = strings.TrimSpace(member.Role)
 	member.Backend = strings.ToLower(strings.TrimSpace(member.Backend))
@@ -12439,7 +12684,67 @@ func normalizeRoomMember(member agent.RoomMember) agent.RoomMember {
 	member.PaneID = strings.TrimSpace(member.PaneID)
 	member.TransportEndpoint = strings.TrimSpace(member.TransportEndpoint)
 	member.TransportKind = strings.ToLower(strings.TrimSpace(member.TransportKind))
+	if member.DeliveryBinding != nil {
+		member.DeliveryBinding = &agent.RoomDeliveryBinding{
+			MuxBackend:        strings.ToLower(strings.TrimSpace(member.DeliveryBinding.MuxBackend)),
+			MuxSession:        strings.TrimSpace(member.DeliveryBinding.MuxSession),
+			MuxPaneID:         strings.TrimSpace(member.DeliveryBinding.MuxPaneID),
+			TransportEndpoint: strings.TrimSpace(member.DeliveryBinding.TransportEndpoint),
+			TransportKind:     strings.ToLower(strings.TrimSpace(member.DeliveryBinding.TransportKind)),
+			SubmitMode:        strings.TrimSpace(member.DeliveryBinding.SubmitMode),
+			Health:            strings.TrimSpace(member.DeliveryBinding.Health),
+			FallbackPolicy:    strings.TrimSpace(member.DeliveryBinding.FallbackPolicy),
+		}
+	} else if member.Backend != "" || member.Session != "" || member.PaneID != "" || member.TransportEndpoint != "" || member.TransportKind != "" {
+		member.DeliveryBinding = &agent.RoomDeliveryBinding{
+			MuxBackend:        member.Backend,
+			MuxSession:        member.Session,
+			MuxPaneID:         member.PaneID,
+			TransportEndpoint: member.TransportEndpoint,
+			TransportKind:     member.TransportKind,
+		}
+	}
 	return member
+}
+
+func mergeRoomDeliveryBinding(base, update *agent.RoomDeliveryBinding) *agent.RoomDeliveryBinding {
+	if base == nil && update == nil {
+		return nil
+	}
+	if base == nil {
+		base = &agent.RoomDeliveryBinding{}
+	} else {
+		copied := *base
+		base = &copied
+	}
+	if update == nil {
+		return base
+	}
+	if update.MuxBackend != "" {
+		base.MuxBackend = update.MuxBackend
+	}
+	if update.MuxSession != "" {
+		base.MuxSession = update.MuxSession
+	}
+	if update.MuxPaneID != "" {
+		base.MuxPaneID = update.MuxPaneID
+	}
+	if update.TransportEndpoint != "" {
+		base.TransportEndpoint = update.TransportEndpoint
+	}
+	if update.TransportKind != "" {
+		base.TransportKind = update.TransportKind
+	}
+	if update.SubmitMode != "" {
+		base.SubmitMode = update.SubmitMode
+	}
+	if update.Health != "" {
+		base.Health = update.Health
+	}
+	if update.FallbackPolicy != "" {
+		base.FallbackPolicy = update.FallbackPolicy
+	}
+	return base
 }
 
 func provisionRoomMembers(ctx context.Context, workspace string, room agent.Room, specs []roomProvisionMemberSpec, opts roomCreateProvisionOptions) (map[string]any, error) {
@@ -13544,14 +13849,15 @@ type roomRelayDeliveryFailure struct {
 }
 
 type roomRelayResult struct {
-	Backend          string                     `json:"backend"`
-	DeliveredCount   int                        `json:"delivered_count"`
-	FailedCount      int                        `json:"failed_count"`
-	DeliveredTo      []string                   `json:"delivered_to,omitempty"`
-	FailedMembers    []string                   `json:"failed_members,omitempty"`
-	DeliveryFailures []roomRelayDeliveryFailure `json:"delivery_failures,omitempty"`
-	SkippedMembers   []string                   `json:"skipped_members,omitempty"`
-	Error            string                     `json:"error,omitempty"`
+	Backend           string                     `json:"backend"`
+	DeliveredCount    int                        `json:"delivered_count"`
+	FailedCount       int                        `json:"failed_count"`
+	FallbackAttempted bool                       `json:"fallback_attempted,omitempty"`
+	DeliveredTo       []string                   `json:"delivered_to,omitempty"`
+	FailedMembers     []string                   `json:"failed_members,omitempty"`
+	DeliveryFailures  []roomRelayDeliveryFailure `json:"delivery_failures,omitempty"`
+	SkippedMembers    []string                   `json:"skipped_members,omitempty"`
+	Error             string                     `json:"error,omitempty"`
 }
 
 func defaultRoomRelayOptions() roomRelayOptions {
@@ -13577,9 +13883,6 @@ func relayPersistedRoomMessages(ctx context.Context, boardStore blackboard.Board
 	}
 	return out
 }
-
-// roomSendRelayHook runs after a successful room send to fan out to participant mux panes. Tests may replace it.
-var roomSendRelayHook = relayPersistedRoomMessages
 
 // roomTaskNoLiveRelay is true when `room task --no-live-relay` was set (skip mux fan-out because
 // a long-running room loop/relay already delivers new messages).
@@ -13701,6 +14004,9 @@ func relayRoomMessageAutoLegacy(ctx context.Context, client *tmuxbridge.Client, 
 // legacy path records pane targets (e.g. "%42"), we normalize legacy targets
 // to actor IDs using the room member list before deduplication.
 func mergeRelayResults(primary, legacy roomRelayResult, members []agent.RoomMember) roomRelayResult {
+	if legacy.DeliveredCount > 0 || legacy.FailedCount > 0 || len(legacy.SkippedMembers) > 0 || len(legacy.DeliveryFailures) > 0 || strings.TrimSpace(legacy.Error) != "" {
+		primary.FallbackAttempted = true
+	}
 	// Build pane-target → actor-ID map for legacy deduplication.
 	paneToActor := make(map[string]string, len(members))
 	for _, m := range members {
@@ -13719,43 +14025,74 @@ func mergeRelayResults(primary, legacy roomRelayResult, members []agent.RoomMemb
 		}
 	}
 
-	// Record primary deliveries by actor ID.
-	seenActor := make(map[string]struct{}, len(primary.DeliveredTo)+len(primary.FailedMembers))
+	// Only successful primary deliveries are authoritative. Primary skips and
+	// primary transport failures must still permit legacy mux fallback.
+	seenDelivered := make(map[string]struct{}, len(primary.DeliveredTo))
 	for _, id := range primary.DeliveredTo {
-		seenActor[id] = struct{}{}
+		seenDelivered[id] = struct{}{}
 	}
+	seenFailed := make(map[string]struct{}, len(primary.FailedMembers))
 	for _, id := range primary.FailedMembers {
-		seenActor[id] = struct{}{}
-	}
-	for _, id := range primary.SkippedMembers {
-		seenActor[id] = struct{}{}
+		seenFailed[id] = struct{}{}
 	}
 
 	// Merge legacy deliveries, normalizing pane targets to actor IDs.
 	for _, id := range legacy.DeliveredTo {
 		actorID := resolveActorIDForLegacyTarget(id, paneToActor)
-		if _, dup := seenActor[actorID]; dup {
+		if _, dup := seenDelivered[actorID]; dup {
 			continue
 		}
-		seenActor[actorID] = struct{}{}
+		seenDelivered[actorID] = struct{}{}
+		if _, failed := seenFailed[actorID]; failed {
+			removeActorID(&primary.FailedMembers, actorID)
+			if primary.FailedCount > 0 {
+				primary.FailedCount--
+			}
+			delete(seenFailed, actorID)
+		}
 		primary.DeliveredCount++
 		primary.DeliveredTo = append(primary.DeliveredTo, actorID)
 	}
 	for _, id := range legacy.FailedMembers {
 		actorID := resolveActorIDForLegacyTarget(id, paneToActor)
-		if _, dup := seenActor[actorID]; dup {
+		if _, delivered := seenDelivered[actorID]; delivered {
 			continue
 		}
-		seenActor[actorID] = struct{}{}
+		if _, dup := seenFailed[actorID]; dup {
+			continue
+		}
+		seenFailed[actorID] = struct{}{}
 		primary.FailedCount++
 		primary.FailedMembers = append(primary.FailedMembers, actorID)
 	}
-	primary.SkippedMembers = append(primary.SkippedMembers, legacy.SkippedMembers...)
+	for _, id := range legacy.SkippedMembers {
+		actorID := resolveActorIDForLegacyTarget(id, paneToActor)
+		if _, delivered := seenDelivered[actorID]; delivered {
+			continue
+		}
+		primary.SkippedMembers = append(primary.SkippedMembers, actorID)
+	}
 	primary.DeliveryFailures = append(primary.DeliveryFailures, legacy.DeliveryFailures...)
 	if primary.Error == "" && legacy.Error != "" {
 		primary.Error = legacy.Error
 	}
 	return primary
+}
+
+func removeActorID(values *[]string, target string) {
+	if values == nil || len(*values) == 0 {
+		return
+	}
+	out := (*values)[:0]
+	removed := false
+	for _, value := range *values {
+		if !removed && value == target {
+			removed = true
+			continue
+		}
+		out = append(out, value)
+	}
+	*values = out
 }
 
 // resolveActorIDForLegacyTarget maps a legacy relay target (pane ID like "%42"
@@ -13841,10 +14178,9 @@ func formatRoomRelayContent(room agent.RoomSummary, msg agent.BoardMessage) stri
 
 func buildRoomInboxEntries(actorID string, messages []agent.BoardMessage, filter string, includeBroadcasts bool) []roomInboxEntry {
 	normalized := normalizeRoomInboxFilter(filter)
-	latestBySender := latestRoomSenderActivity(messages)
 	entries := make([]roomInboxEntry, 0, len(messages))
 	for _, msg := range messages {
-		entry, ok := roomInboxEntryForActor(actorID, msg, includeBroadcasts, latestBySender)
+		entry, ok := roomInboxEntryForActor(actorID, msg, includeBroadcasts, messages)
 		if !ok {
 			continue
 		}
@@ -13865,7 +14201,7 @@ func buildRoomInboxEntries(actorID string, messages []agent.BoardMessage, filter
 	return entries
 }
 
-func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroadcasts bool, latestBySender map[string]roomSenderActivity) (roomInboxEntry, bool) {
+func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroadcasts bool, messages []agent.BoardMessage) (roomInboxEntry, bool) {
 	recipient := normalizeRoomRecipient(msg.Recipient)
 	isDirect := sameRoomParticipant(recipient, actorID)
 	isBroadcast := recipient == agent.BroadcastRecipient
@@ -13875,7 +14211,7 @@ func roomInboxEntryForActor(actorID string, msg agent.BoardMessage, includeBroad
 	if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
 		return roomInboxEntry{}, false
 	}
-	if msg.ReplyExpected && !messageStillAwaitsReply(msg, latestBySender) {
+	if msg.ReplyExpected && !messageStillAwaitsReply(msg, messages) {
 		return roomInboxEntry{}, false
 	}
 
@@ -13942,25 +14278,35 @@ func latestRoomSenderActivity(messages []agent.BoardMessage) map[string]roomSend
 	return latest
 }
 
-func messageStillAwaitsReply(msg agent.BoardMessage, latestBySender map[string]roomSenderActivity) bool {
+func messageStillAwaitsReply(msg agent.BoardMessage, messages []agent.BoardMessage) bool {
 	if !msg.ReplyExpected {
 		return false
 	}
 	recipient := normalizeRoomRecipient(msg.Recipient)
-	if recipient == agent.BroadcastRecipient {
+	if recipient == agent.BroadcastRecipient || recipient == "" {
 		return false
 	}
-	latestReply, ok := latestBySender[recipient]
-	if !ok {
-		return true
+	chain := roomMessageChainKey(msg)
+	if chain == "" {
+		chain = strings.TrimSpace(msg.ID)
 	}
-	// A reply counts when the recipient speaks later, or when a different
-	// message from that recipient lands at the same timestamp.
-	if latestReply.CreatedAt.After(msg.CreatedAt) {
-		return false
-	}
-	if latestReply.CreatedAt.Equal(msg.CreatedAt) && latestReply.MessageID != strings.TrimSpace(msg.ID) {
-		return false
+	rootID := strings.TrimSpace(msg.ID)
+	for _, candidate := range messages {
+		if strings.TrimSpace(candidate.ID) == rootID {
+			continue
+		}
+		if roomMessageChainKey(candidate) != chain {
+			continue
+		}
+		if !sameRoomParticipant(strings.TrimSpace(candidate.Sender), recipient) {
+			continue
+		}
+		if candidate.CreatedAt.After(msg.CreatedAt) {
+			return false
+		}
+		if candidate.CreatedAt.Equal(msg.CreatedAt) {
+			return false
+		}
 	}
 	return true
 }
@@ -13990,7 +14336,7 @@ func summarizeRoomPreview(body string) string {
 	return body[:140] + "..."
 }
 
-func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, staleAfter time.Duration, reminderRoots map[string]struct{}) []roomStatusParticipant {
+func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, staleAfter time.Duration, suppression *roomActionSuppression) []roomStatusParticipant {
 	latestBySender := latestRoomSenderActivity(messages)
 	memberByID := make(map[string]agent.RoomMember, len(room.Members))
 	for _, member := range room.Members {
@@ -14037,7 +14383,7 @@ func buildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardM
 				p.OwnedTaskCount++
 			}
 		}
-		entries := buildRoomStatusEntries(actorID, messages, reminderRoots)
+		entries := buildRoomStatusEntries(actorID, messages, suppression)
 		p.ActionableInboxCount = len(entries)
 		if len(entries) > 0 {
 			entry := entries[0]
@@ -14065,9 +14411,12 @@ func deriveParticipantTransportState(m agent.RoomMember) agent.ParticipantState 
 	return state
 }
 
-func buildRoomTaskPulseSummary(tasks []taskstore.Task, now time.Time, staleAfter time.Duration) roomTaskPulseSummary {
+func buildRoomTaskPulseSummary(tasks []taskstore.Task, now time.Time, staleAfter time.Duration, suppression *roomActionSuppression) roomTaskPulseSummary {
 	var pulse roomTaskPulseSummary
 	for _, task := range tasks {
+		if roomActionSuppressesTask(task, suppression) {
+			continue
+		}
 		switch task.Status {
 		case taskstore.StatusPending:
 			pulse.Pending++
@@ -14088,13 +14437,13 @@ func buildRoomTaskPulseSummary(tasks []taskstore.Task, now time.Time, staleAfter
 	return pulse
 }
 
-func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessage, reminderRoots map[string]struct{}) roomStatusBacklog {
+func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessage, suppression *roomActionSuppression) roomStatusBacklog {
 	backlog := roomStatusBacklog{}
 	for _, participant := range room.Participants {
 		if strings.HasPrefix(strings.TrimSpace(participant), "actor:system:room:") {
 			continue
 		}
-		entries := buildRoomStatusEntries(participant, messages, reminderRoots)
+		entries := buildRoomStatusEntries(participant, messages, suppression)
 		if len(entries) == 0 {
 			continue
 		}
@@ -14120,7 +14469,7 @@ func buildRoomStatusBacklog(room agent.RoomSummary, messages []agent.BoardMessag
 	return backlog
 }
 
-func buildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, backlog roomStatusBacklog, taskPulse roomTaskPulseSummary, filters map[string]struct{}, staleAfter time.Duration, now time.Time, verbose bool, reminderRoots map[string]struct{}) roomStatusActionRequired {
+func buildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, backlog roomStatusBacklog, taskPulse roomTaskPulseSummary, filters map[string]struct{}, staleAfter time.Duration, now time.Time, verbose bool, suppression *roomActionSuppression) roomStatusActionRequired {
 	summary := roomStatusActionRequired{
 		Filter:                  sortedRoomStatusFilters(filters),
 		ParticipantsWithPending: roomStatusFilteredCount(filters, "ack", "reply", "interview", backlog.ParticipantsWithPending),
@@ -14130,22 +14479,22 @@ func buildRoomStatusActionRequired(room agent.RoomSummary, messages []agent.Boar
 		BlockedTasks:            roomStatusFilteredCount(filters, "blocked", "", "", taskPulse.Blocked),
 		StaleTasks:              roomStatusFilteredCount(filters, "stale", "", "", taskPulse.Stale),
 		TopEntries:              filterRoomStatusEntries(backlog.LatestByParticipant, filters),
-		TopTasks:                buildRoomStatusTaskEntries(tasks, filters, now, staleAfter),
+		TopTasks:                buildRoomStatusTaskEntries(tasks, filters, now, staleAfter, suppression),
 	}
 	if !verbose {
 		return summary
 	}
-	summary.VerboseTopEntries = filterRoomStatusVerboseEntries(buildRoomStatusVerboseEntries(room, messages, reminderRoots), filters)
+	summary.VerboseTopEntries = filterRoomStatusVerboseEntries(buildRoomStatusVerboseEntries(room, messages, suppression), filters)
 	return summary
 }
 
-func buildRoomStatusVerboseEntries(room agent.RoomSummary, messages []agent.BoardMessage, reminderRoots map[string]struct{}) []roomInboxEntry {
+func buildRoomStatusVerboseEntries(room agent.RoomSummary, messages []agent.BoardMessage, suppression *roomActionSuppression) []roomInboxEntry {
 	out := make([]roomInboxEntry, 0, len(room.Participants))
 	for _, participant := range room.Participants {
 		if strings.HasPrefix(strings.TrimSpace(participant), "actor:system:room:") {
 			continue
 		}
-		entries := buildRoomStatusEntries(participant, messages, reminderRoots)
+		entries := buildRoomStatusEntries(participant, messages, suppression)
 		if len(entries) == 0 {
 			continue
 		}
@@ -14160,9 +14509,12 @@ func buildRoomStatusVerboseEntries(room agent.RoomSummary, messages []agent.Boar
 	return out
 }
 
-func buildRoomStatusTaskEntries(tasks []taskstore.Task, filters map[string]struct{}, now time.Time, staleAfter time.Duration) []roomStatusTask {
+func buildRoomStatusTaskEntries(tasks []taskstore.Task, filters map[string]struct{}, now time.Time, staleAfter time.Duration, suppression *roomActionSuppression) []roomStatusTask {
 	out := make([]roomStatusTask, 0, len(tasks))
 	for _, task := range tasks {
+		if roomActionSuppressesTask(task, suppression) {
+			continue
+		}
 		signals := roomStatusTaskSignals(task, now, staleAfter)
 		if len(signals) == 0 {
 			continue
@@ -14363,7 +14715,7 @@ func roomStatusFilteredCount(filters map[string]struct{}, primary string, second
 	return 0
 }
 
-func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage, reminderRoots map[string]struct{}) []roomInboxEntry {
+func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage, suppression *roomActionSuppression) []roomInboxEntry {
 	entries := buildRoomInboxEntries(actorID, messages, "all", false)
 	if len(entries) == 0 {
 		return nil
@@ -14376,12 +14728,12 @@ func buildRoomStatusEntries(actorID string, messages []agent.BoardMessage, remin
 		if len(entry.Flags) == 0 {
 			continue
 		}
+		if roomActionSuppressesMessage(entry.Message, suppression) {
+			continue
+		}
 		key := roomMessageChainKey(entry.Message)
 		if key == "" {
 			key = entry.ID
-		}
-		if _, suppressed := reminderRoots[key]; suppressed {
-			continue
 		}
 		current, ok := latestByChain[key]
 		if !ok || roomStatusEntryMoreRecent(entry, current) {
@@ -14441,6 +14793,124 @@ func roomStatusEntryMoreRecent(left, right roomInboxEntry) bool {
 		return left.Priority < right.Priority
 	}
 	return left.ID < right.ID
+}
+
+func buildRoomActionSuppression(messages []agent.BoardMessage, tasks []taskstore.Task, reminderRoots map[string]struct{}) *roomActionSuppression {
+	suppression := &roomActionSuppression{
+		ReminderRoots:     copyRoomStringSet(reminderRoots),
+		ClosedTaskIDs:     make(map[string]struct{}),
+		QuietTaskIDs:      make(map[string]struct{}),
+		ClosedBoundaryIDs: make(map[string]struct{}),
+		QuietBoundaryIDs:  make(map[string]struct{}),
+	}
+	for _, task := range tasks {
+		switch strings.TrimSpace(task.Status) {
+		case taskstore.StatusCompleted, taskstore.StatusCanceled:
+			if id := strings.TrimSpace(task.ID); id != "" {
+				suppression.ClosedTaskIDs[id] = struct{}{}
+			}
+		}
+	}
+	for _, story := range buildRoomStoryViews(messages) {
+		switch strings.TrimSpace(stringField(story, "state")) {
+		case "validated", "done", "waived", "deferred":
+			if id := strings.TrimSpace(stringField(story, "id")); id != "" {
+				suppression.ClosedBoundaryIDs[id] = struct{}{}
+			}
+		}
+	}
+	for _, milestone := range buildRoomMilestoneViews(messages) {
+		if id := strings.TrimSpace(stringField(milestone, "id")); id != "" {
+			if mapField(milestone, "latest_summary") != nil || intField(milestone, "summary_count") > 0 {
+				suppression.ClosedBoundaryIDs[id] = struct{}{}
+			}
+			if boolField(milestone, "quiet") {
+				suppression.QuietBoundaryIDs[id] = struct{}{}
+				for _, story := range mapSlice(milestone["stories"]) {
+					if storyID := strings.TrimSpace(stringField(story, "id")); storyID != "" {
+						suppression.QuietBoundaryIDs[storyID] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	for _, epic := range buildRoomEpicViews(messages) {
+		if id := strings.TrimSpace(stringField(epic, "id")); id != "" && (boolField(epic, "closed") || boolField(epic, "finalized")) {
+			suppression.ClosedBoundaryIDs[id] = struct{}{}
+		}
+	}
+	for _, task := range tasks {
+		if taskID := strings.TrimSpace(task.ID); taskID != "" {
+			if milestoneID := strings.TrimSpace(task.MilestoneID); milestoneID != "" {
+				if _, quiet := suppression.QuietBoundaryIDs[milestoneID]; quiet {
+					suppression.QuietTaskIDs[taskID] = struct{}{}
+				}
+			}
+		}
+	}
+	return suppression
+}
+
+func copyRoomStringSet(src map[string]struct{}) map[string]struct{} {
+	if len(src) == 0 {
+		return map[string]struct{}{}
+	}
+	out := make(map[string]struct{}, len(src))
+	for key := range src {
+		out[key] = struct{}{}
+	}
+	return out
+}
+
+func roomActionSuppressesMessage(msg agent.BoardMessage, suppression *roomActionSuppression) bool {
+	if suppression == nil {
+		return false
+	}
+	if key := roomMessageChainKey(msg); key != "" {
+		if _, suppressed := suppression.ReminderRoots[key]; suppressed {
+			return true
+		}
+	}
+	if taskID := strings.TrimSpace(msg.TaskID); taskID != "" {
+		if _, closed := suppression.ClosedTaskIDs[taskID]; closed {
+			return true
+		}
+	}
+	if boundaryID := roomMessageBoundaryID(msg); boundaryID != "" {
+		if _, quiet := suppression.QuietBoundaryIDs[boundaryID]; quiet {
+			return true
+		}
+		if _, closed := suppression.ClosedBoundaryIDs[boundaryID]; closed {
+			return true
+		}
+	}
+	return false
+}
+
+func roomActionSuppressesTask(task taskstore.Task, suppression *roomActionSuppression) bool {
+	if suppression == nil {
+		return false
+	}
+	if taskID := strings.TrimSpace(task.ID); taskID != "" {
+		if _, quiet := suppression.QuietTaskIDs[taskID]; quiet {
+			return true
+		}
+	}
+	return false
+}
+
+func roomMessageBoundaryID(msg agent.BoardMessage) string {
+	if related := strings.TrimSpace(msg.RelatedMessageID); related != "" {
+		return related
+	}
+	switch msg.Kind {
+	case agent.BoardMessageKindEpic,
+		agent.BoardMessageKindMilestone,
+		agent.BoardMessageKindStory:
+		return strings.TrimSpace(msg.ID)
+	default:
+		return ""
+	}
 }
 
 func roomStatusEntryFromInbox(entry roomInboxEntry) roomStatusEntry {
@@ -14559,15 +15029,13 @@ func muxSubmitForRoomMember(ctx context.Context, member agent.RoomMember, submit
 	member = normalizeRoomMember(member)
 	switch roomMemberRelayBackend(member) {
 	case "zellij":
-		session, _, ok := resolveRoomMemberZellijTarget(member)
+		session, target, ok := resolveRoomMemberZellijTarget(member)
 		if !ok || strings.TrimSpace(session) == "" {
 			return nil, "", fmt.Errorf("member %q has no resolvable zellij session", member.ActorID)
 		}
-		pane := strings.TrimSpace(member.PaneID)
-		if pane == "" {
-			if _, p, ok := parseZellijParticipantID(member.ActorID); ok {
-				pane = p
-			}
+		pane := strings.TrimSpace(target)
+		if _, p, ok := parseZellijParticipantID(pane); ok {
+			pane = p
 		}
 		if pane != "" && !isResolvableZellijPaneID(pane) {
 			return nil, "", fmt.Errorf("member %q stores zellij pane binding %q by title only; rebind from the live pane with --current or pass a terminal_N pane id for exact submit targeting", member.ActorID, pane)
@@ -14723,8 +15191,38 @@ func collectRoomRelayTargetsByBackend(room agent.RoomSummary, msg agent.BoardMes
 }
 
 func roomMemberRelayBackend(member agent.RoomMember) string {
-	if member.Backend != "" {
-		return member.Backend
+	member = normalizeRoomMember(member)
+	binding := member.DeliveryBinding
+	if binding != nil {
+		if backend := strings.TrimSpace(binding.MuxBackend); backend != "" {
+			return backend
+		}
+		if strings.EqualFold(strings.TrimSpace(binding.TransportKind), "mux_pane") {
+			if endpoint := strings.TrimSpace(binding.TransportEndpoint); endpoint != "" {
+				if _, _, ok := parseZellijParticipantID(endpoint); ok {
+					return "zellij"
+				}
+				if _, ok := tmuxbridge.ParseParticipantID(endpoint); ok {
+					return "tmux"
+				}
+			}
+		}
+		if paneID := strings.TrimSpace(binding.MuxPaneID); paneID != "" {
+			if strings.HasPrefix(paneID, "%") {
+				return "tmux"
+			}
+			if strings.TrimSpace(binding.MuxSession) != "" {
+				return "zellij"
+			}
+		}
+		if endpoint := strings.TrimSpace(binding.TransportEndpoint); endpoint != "" {
+			if strings.HasPrefix(endpoint, "%") || strings.HasPrefix(endpoint, "tmux:") {
+				return "tmux"
+			}
+			if strings.HasPrefix(endpoint, "zellij:") {
+				return "zellij"
+			}
+		}
 	}
 	if strings.HasPrefix(member.ActorID, "zellij:") {
 		return "zellij"
@@ -14733,31 +15231,78 @@ func roomMemberRelayBackend(member agent.RoomMember) string {
 }
 
 func resolveRoomMemberZellijTarget(member agent.RoomMember) (string, string, bool) {
+	member = normalizeRoomMember(member)
+	binding := member.DeliveryBinding
+	if binding != nil {
+		if strings.EqualFold(strings.TrimSpace(binding.TransportKind), "mux_pane") {
+			if endpoint := strings.TrimSpace(binding.TransportEndpoint); endpoint != "" {
+				if session, paneID, ok := parseZellijParticipantID(endpoint); ok {
+					return session, formatZellijParticipantID(session, paneID), true
+				}
+			}
+		}
+		session := strings.TrimSpace(binding.MuxSession)
+		if session != "" && !member.Unbound {
+			if paneID := strings.TrimSpace(binding.MuxPaneID); paneID != "" {
+				if isResolvableZellijPaneID(paneID) {
+					return session, formatZellijParticipantID(session, paneID), true
+				}
+				return session, paneID, true
+			}
+			if endpoint := strings.TrimSpace(binding.TransportEndpoint); endpoint != "" && !strings.HasPrefix(endpoint, "tmux:") {
+				return session, endpoint, true
+			}
+			if actorID := strings.TrimSpace(member.ActorID); actorID != "" {
+				return session, actorID, true
+			}
+		}
+	}
 	if session, paneID, ok := parseZellijParticipantID(member.ActorID); ok {
 		return session, formatZellijParticipantID(session, paneID), true
-	}
-	session := strings.TrimSpace(member.Session)
-	if session == "" || member.Unbound {
-		return "", "", false
-	}
-	if paneID := strings.TrimSpace(member.PaneID); paneID != "" {
-		if isResolvableZellijPaneID(paneID) {
-			return session, formatZellijParticipantID(session, paneID), true
-		}
-		return session, paneID, true
-	}
-	if actorID := strings.TrimSpace(member.ActorID); actorID != "" {
-		return session, actorID, true
 	}
 	return "", "", false
 }
 
 func roomMemberTmuxTarget(member agent.RoomMember) string {
 	member = normalizeRoomMember(member)
-	if paneID := strings.TrimSpace(member.PaneID); paneID != "" {
-		return paneID
+	binding := member.DeliveryBinding
+	if binding != nil {
+		if strings.EqualFold(strings.TrimSpace(binding.TransportKind), "mux_pane") {
+			if endpoint := strings.TrimSpace(binding.TransportEndpoint); endpoint != "" {
+				if ref, ok := tmuxbridge.ParseParticipantID(endpoint); ok {
+					return ref.Target
+				}
+				if strings.HasPrefix(endpoint, "%") {
+					return endpoint
+				}
+			}
+		}
+		if paneID := strings.TrimSpace(binding.MuxPaneID); paneID != "" {
+			return paneID
+		}
+		if endpoint := strings.TrimSpace(binding.TransportEndpoint); endpoint != "" {
+			if ref, ok := tmuxbridge.ParseParticipantID(endpoint); ok {
+				return ref.Target
+			}
+			if strings.HasPrefix(endpoint, "%") {
+				return endpoint
+			}
+		}
+	}
+	if ref, ok := tmuxbridge.ParseParticipantID(strings.TrimSpace(member.ActorID)); ok {
+		return ref.Target
 	}
 	return strings.TrimSpace(member.ActorID)
+}
+
+func roomMemberSubmitMode(member agent.RoomMember) string {
+	member = normalizeRoomMember(member)
+	if member.DeliveryBinding != nil {
+		if mode := strings.TrimSpace(member.DeliveryBinding.SubmitMode); mode != "" {
+			return mode
+		}
+	}
+	return targetSubmitMode(strings.TrimSpace(member.ActorID))
 }
 
 func normalizeRoomRecipient(recipient string) string {

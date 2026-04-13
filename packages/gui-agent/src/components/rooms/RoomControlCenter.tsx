@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Textarea } from '@/components/ui/textarea'
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { 
   getRoomStatus, 
@@ -18,9 +20,11 @@ import {
   updateRoomMemberBinding,
   bulkResolveRoomMessages,
   claimRoomTask,
+  createRoomTask,
   touchRoomTask,
   completeRoomTask,
   sendRoomMessage,
+  subscribeToRoomEvents,
   unblockRoomTask,
   archiveRoom,
 } from '@/api/client'
@@ -28,6 +32,7 @@ import { useRoomControlStore } from '@/stores/roomControlStore'
 import { useAuthSession } from '@/hooks/useAuthSession'
 import { useViewStore } from '@/stores/viewStore'
 import { cn } from '@/lib/utils'
+import { roomMemberMuxBackend, roomMemberMuxPaneID, roomMemberMuxSession } from '@/lib/room-utils'
 import { TaskCard } from './TaskCard'
 import { InboxRow } from './InboxRow'
 import { RoomDialogs } from './RoomDialogs'
@@ -85,7 +90,9 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   const [replyTarget, setReplyTarget] = useState<MailboxMessage | null>(null)
   const [recentRoomEvents, setRecentRoomEvents] = useState<RoomMessageEvent[]>([])
   const [adminDispatchSummary, setAdminDispatchSummary] = useState<AdminDispatchSummary | null>(null)
-  const eventSourceRef = useRef<EventSource | null>(null)
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newTaskDescription, setNewTaskDescription] = useState('')
+  const [newTaskMilestoneID, setNewTaskMilestoneID] = useState('__default__')
   const isLocalDevSuperuser = currentActorID === 'dev-local-user' || currentActorID === 'local-dev-user'
 
   // Queries
@@ -140,24 +147,27 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
       const tmuxBindingBySessionPane = new Map<string, string>()
       const roomTmuxSessions = new Set(
         (status?.room?.members ?? [])
-          .filter((m) => m.backend === 'tmux' && m.session)
-          .map((m) => String(m.session))
+          .filter((m) => roomMemberMuxBackend(m) === 'tmux' && roomMemberMuxSession(m))
+          .map((m) => roomMemberMuxSession(m))
       )
       const tmuxParticipantSessions = new Map<string, Set<string>>()
       ;(status?.room?.members ?? []).forEach((m) => {
-        if (m.backend !== 'tmux' || !m.session || !m.actor_id) return
+        const backend = roomMemberMuxBackend(m)
+        const session = roomMemberMuxSession(m)
+        const paneID = roomMemberMuxPaneID(m)
+        if (backend !== 'tmux' || !session || !m.actor_id) return
         const key = String(m.actor_id)
         const current = tmuxParticipantSessions.get(key) ?? new Set<string>()
-        current.add(String(m.session))
+        current.add(session)
         tmuxParticipantSessions.set(key, current)
-        if (m.pane_id) {
-          tmuxBindingBySessionPane.set(`${String(m.session)}:${String(m.pane_id)}`, key)
+        if (paneID) {
+          tmuxBindingBySessionPane.set(`${session}:${paneID}`, key)
         }
       })
       const zellijSessions = Array.from(new Set(
         (status?.room?.members ?? [])
-          .filter((m) => m.backend === 'zellij' && m.session)
-          .map((m) => m.session as string)
+          .filter((m) => roomMemberMuxBackend(m) === 'zellij' && roomMemberMuxSession(m))
+          .map((m) => roomMemberMuxSession(m))
       ))
 
       const panes = await Promise.all([
@@ -228,6 +238,22 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
   const completeMutation = useMutation({
     mutationFn: (taskId: string) => completeRoomTask(roomId, taskId, { workspace_id: workspaceId, actor: currentActorID }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['room', roomId] }),
+  })
+
+  const createTaskMutation = useMutation({
+    mutationFn: () => createRoomTask(roomId, {
+      workspace_id: workspaceId,
+      actor_id: roomDispatchActorID,
+      title: newTaskTitle.trim(),
+      description: newTaskDescription.trim() || undefined,
+      milestone_id: newTaskMilestoneID !== '__default__' ? newTaskMilestoneID : undefined,
+    }),
+    onSuccess: () => {
+      setNewTaskTitle('')
+      setNewTaskDescription('')
+      setNewTaskMilestoneID('__default__')
+      void queryClient.invalidateQueries({ queryKey: ['room', roomId] })
+    },
   })
 
   const sendReplyMutation = useMutation({
@@ -328,9 +354,11 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
         id: results.map((result) => result.id).join(','),
         room_id: roomId,
         stream: results[0]?.stream || '',
-        status: 'sent',
+        status: results.every((result) => result.status === 'queued') ? 'queued' : 'sent',
         dispatched: results.reduce((sum, result) => sum + (result.dispatched ?? 0), 0),
         skipped: results.reduce((sum, result) => sum + (result.skipped ?? 0), 0),
+        delivery_owner: results.every((result) => result.delivery_owner === 'room_loop') ? 'room_loop' : undefined,
+        delivery_pending: results.some((result) => result.delivery_pending),
         live_relay: results.flatMap((result) => result.live_relay ?? []),
       }))
     },
@@ -347,6 +375,16 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
       pane_id?: string
       transport_endpoint?: string
       transport_kind?: string
+      delivery_binding?: {
+        mux_backend?: string
+        mux_session?: string
+        mux_pane_id?: string
+        transport_endpoint?: string
+        transport_kind?: string
+        submit_mode?: string
+        health?: string
+        fallback_policy?: string
+      }
     }) =>
       updateRoomMemberBinding(roomId, params.actorId, {
         workspace_id: workspaceId,
@@ -355,6 +393,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
         pane_id: params.pane_id,
         transport_endpoint: params.transport_endpoint,
         transport_kind: params.transport_kind,
+        delivery_binding: params.delivery_binding,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['room', roomId] })
@@ -377,20 +416,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
     : status?.participants.find(p => p.actor_id === currentActorID)?.role || 'member'
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    const eventSource = new EventSource('/api/events')
-    eventSourceRef.current = eventSource
-    eventSource.onmessage = (rawEvent) => {
-      let parsed: { type?: string; data?: unknown } | null = null
-      try {
-        parsed = JSON.parse(rawEvent.data) as { type?: string; data?: unknown }
-      } catch {
-        return
-      }
-      if (parsed?.type !== 'room.message' || !parsed.data || typeof parsed.data !== 'object') return
-      const event = parsed.data as RoomMessageEvent
-      if (event.workspace_id !== workspaceId || event.room_id !== roomId) return
+    const cleanup = subscribeToRoomEvents(roomId, workspaceId, (event) => {
       setRecentRoomEvents((prev) => {
         const duplicate = prev.find(
           (candidate) =>
@@ -408,14 +434,9 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
       })
       void queryClient.invalidateQueries({ queryKey: ['room', roomId] })
       void queryClient.invalidateQueries({ queryKey: ['rooms', workspaceId] })
-    }
+    })
 
-    return () => {
-      eventSource.close()
-      if (eventSourceRef.current === eventSource) {
-        eventSourceRef.current = null
-      }
-    }
+    return cleanup
   }, [queryClient, roomId, workspaceId])
 
   if (!status) return <div className="p-8 text-center text-muted-foreground animate-pulse text-sm font-mono tracking-tighter">LOADING ROOM_CONTROL_PLANE...</div>
@@ -447,6 +468,9 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
     if (timelineFilter === 'reassignments') return msg.kind === 'task_update' && msg.body.includes('reassigned')
     return true
   })
+
+  const milestoneOptions = buildTaskMilestoneOptions(messages?.messages ?? [])
+  const taskLaneLabels = buildTaskLaneLabels(messages?.messages ?? [])
 
   return (
     <TooltipProvider>
@@ -745,12 +769,63 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                   </Badge>
                 </div>
               </div>
+              <div className="border-b bg-background/70 px-4 py-3">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_220px_auto]">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="room-task-title" className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Task Title</Label>
+                    <Input
+                      id="room-task-title"
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      placeholder="Add a durable room task"
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="room-task-description" className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Description</Label>
+                    <Textarea
+                      id="room-task-description"
+                      value={newTaskDescription}
+                      onChange={(e) => setNewTaskDescription(e.target.value)}
+                      placeholder="Optional task context"
+                      className="min-h-[32px] h-8 py-1.5 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="room-task-milestone" className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Lane</Label>
+                    <select
+                      id="room-task-milestone"
+                      value={newTaskMilestoneID}
+                      onChange={(e) => setNewTaskMilestoneID(e.target.value)}
+                      className="flex h-8 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="__default__">Default chores lane</option>
+                      {milestoneOptions.map((milestone) => (
+                        <option key={milestone.id} value={milestone.id}>
+                          {milestone.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      size="sm"
+                      className="w-full font-black uppercase tracking-tighter"
+                      disabled={!newTaskTitle.trim() || createTaskMutation.isPending}
+                      onClick={() => createTaskMutation.mutate()}
+                    >
+                      {createTaskMutation.isPending ? 'Creating...' : 'Add Task'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
               <div className="flex-1 flex gap-4 p-4 overflow-x-auto min-h-0 bg-muted/5">
                 <TaskColumn title="Pending" count={filteredTasks?.filter(t => t.status === 'pending').length || 0}>
                   {filteredTasks?.filter(t => t.status === 'pending').map(task => (
                     <TaskCard 
                       key={task.id} 
                       task={task} 
+                      laneLabel={taskLaneLabels.get(task.milestone_id || '')}
                       onClaim={() => claimMutation.mutate(task.id)}
                       onReassign={() => openReassignTask(task)}
                       isCoordinator={canAdminRoom}
@@ -762,6 +837,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                     <TaskCard 
                       key={task.id} 
                       task={task} 
+                      laneLabel={taskLaneLabels.get(task.milestone_id || '')}
                       onTouch={() => touchMutation.mutate(task.id)}
                       onBlock={() => openBlockTask(task)}
                       onComplete={() => openConfirm("Complete Task", `Mark "${task.title}" as done?`, () => completeMutation.mutate(task.id))}
@@ -776,6 +852,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                     <TaskCard 
                       key={task.id} 
                       task={task} 
+                      laneLabel={taskLaneLabels.get(task.milestone_id || '')}
                       onTouch={() => unblockMutation.mutate(task.id)}
                       onAbandon={() => openAbandonTask(task)}
                       onReclaim={() => openReclaimTask(task)}
@@ -789,6 +866,7 @@ export function RoomControlCenter({ roomId }: { roomId: string }) {
                     <TaskCard 
                       key={task.id} 
                       task={task} 
+                      laneLabel={taskLaneLabels.get(task.milestone_id || '')}
                       isCoordinator={canAdminRoom}
                       onReclaim={() => openReclaimTask(task)}
                       onReassign={() => openReassignTask(task)}
@@ -1000,4 +1078,95 @@ function TimelinePlaceholder() {
       </p>
     </div>
   )
+}
+
+type TaskMilestoneOption = {
+  id: string
+  label: string
+}
+
+function buildTaskMilestoneOptions(messages: MailboxMessage[]): TaskMilestoneOption[] {
+  const epicTitles = new Map<string, string>()
+  const closedEpics = new Set<string>()
+  const summarizedMilestones = new Set<string>()
+  const milestones = new Map<string, { id: string; title: string; epicID: string; epicTitle: string; laneKind: string; createdAt: string }>()
+
+  for (const message of messages) {
+    if (message.kind === 'epic') {
+      epicTitles.set(message.id, message.subject.replace(/^Epic:\s*/, '').trim())
+      continue
+    }
+    if (message.kind === 'epic_close' && message.related_message_id) {
+      closedEpics.add(message.related_message_id)
+      continue
+    }
+    if (message.kind === 'milestone_summary' && message.related_message_id) {
+      summarizedMilestones.add(message.related_message_id)
+      continue
+    }
+    if (message.kind !== 'milestone') {
+      continue
+    }
+    const meta = parseTaskMilestoneBody(message.body)
+    const epicID = (meta.epicID || message.related_message_id || '').trim()
+    milestones.set(message.id, {
+      id: message.id,
+      title: message.subject.replace(/^Milestone:\s*/, '').trim(),
+      epicID,
+      epicTitle: epicTitles.get(epicID) || '',
+      laneKind: meta.laneKind,
+      createdAt: message.created_at,
+    })
+  }
+
+  return Array.from(milestones.values())
+    .filter((milestone) => milestone.id && milestone.epicID && !closedEpics.has(milestone.epicID) && !summarizedMilestones.has(milestone.id) && milestone.laneKind !== 'chores')
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .map((milestone) => ({
+      id: milestone.id,
+      label: milestone.epicTitle ? `${milestone.epicTitle} / ${milestone.title}` : milestone.title,
+    }))
+}
+
+function parseTaskMilestoneBody(body: string): { epicID: string; laneKind: string } {
+  let epicID = ''
+  let laneKind = ''
+  for (const rawLine of body.split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const separator = line.indexOf(':')
+    if (separator <= 0) continue
+    const key = line.slice(0, separator).trim()
+    const value = line.slice(separator + 1).trim()
+    if (key === 'EpicID') epicID = value
+    if (key === 'LaneKind') laneKind = value
+  }
+  return { epicID, laneKind }
+}
+
+function buildTaskLaneLabels(messages: MailboxMessage[]): Map<string, string> {
+  const epicTitles = new Map<string, string>()
+  const labels = new Map<string, string>()
+
+  for (const message of messages) {
+    if (message.kind === 'epic') {
+      epicTitles.set(message.id, message.subject.replace(/^Epic:\s*/, '').trim())
+    }
+  }
+
+  for (const message of messages) {
+    if (message.kind !== 'milestone') continue
+    const meta = parseTaskMilestoneBody(message.body)
+    const milestoneID = message.id.trim()
+    if (!milestoneID) continue
+    const title = message.subject.replace(/^Milestone:\s*/, '').trim()
+    if (meta.laneKind === 'chores') {
+      labels.set(milestoneID, 'Chores')
+      continue
+    }
+    const epicTitle = epicTitles.get((meta.epicID || message.related_message_id || '').trim())
+    labels.set(milestoneID, epicTitle ? `${epicTitle} / ${title}` : title)
+  }
+
+  return labels
 }

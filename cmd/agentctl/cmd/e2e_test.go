@@ -71,6 +71,7 @@ func newCASHarness(t *testing.T) *casHarness {
 		t.Skip("slow end-to-end cache/memory workflow")
 	}
 	cfg := installTextGrepSkill(t)
+	cfg.InlineOutputKB = 1
 	installHTTPOpenAPISkill(t, cfg)
 	workdir := t.TempDir()
 	samplePath := filepath.Join(workdir, "sample.txt")
@@ -114,7 +115,7 @@ paths:
 func buildSampleFile(t *testing.T, path string) {
 	t.Helper()
 	var builder strings.Builder
-	for i := 0; i < 400; i++ {
+	for i := 0; i < 96; i++ {
 		if _, err := builder.WriteString("needle line "); err != nil {
 			t.Fatalf("build sample prefix: %v", err)
 		}

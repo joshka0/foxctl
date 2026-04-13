@@ -18,6 +18,9 @@ type Room struct {
 	pty     *PTYProcess
 	// started is true once the PTY process has been launched for this room.
 	started bool
+	// startWait is non-nil while a PTY launch is in progress.
+	startWait chan struct{}
+	closed    bool
 }
 
 // Hub manages all web terminal rooms and their connections.
@@ -27,6 +30,15 @@ type Hub struct {
 	config HubConfig
 	log    zerolog.Logger
 }
+
+var (
+	startTmuxAttach = StartTmuxAttach
+	closePTYProcess = func(p *PTYProcess) {
+		if p != nil {
+			p.Close()
+		}
+	}
+)
 
 // NewHub creates a new web terminal hub.
 func NewHub(config HubConfig, log zerolog.Logger) *Hub {
@@ -79,19 +91,23 @@ func (h *Hub) UnregisterRoom(roomID string) {
 	h.mu.Unlock()
 
 	room.mu.Lock()
-	defer room.mu.Unlock()
+	room.closed = true
+	clients := make([]*Client, 0, len(room.clients))
+	for c := range room.clients {
+		clients = append(clients, c)
+	}
+	room.clients = make(map[*Client]struct{})
+	pty := room.pty
+	room.pty = nil
+	room.mu.Unlock()
 
 	// Close all clients
-	for c := range room.clients {
+	for _, c := range clients {
 		c.close()
-		delete(room.clients, c)
 	}
 
 	// Close PTY if running
-	if room.pty != nil {
-		room.pty.Close()
-		room.pty = nil
-	}
+	closePTYProcess(pty)
 
 	h.log.Debug().Str("room", roomID).Msg("Room unregistered")
 }
@@ -186,44 +202,6 @@ func (h *Hub) ClientCount(roomID string) int {
 	return len(room.clients)
 }
 
-// getOrCreatePTY returns the PTY for a room, creating one if needed.
-// The caller must hold room.mu.
-func (h *Hub) getOrCreatePTY(ctx context.Context, room *Room, cols, rows uint16) (*PTYProcess, error) {
-	if room.pty != nil && room.pty.IsRunning() {
-		return room.pty, nil
-	}
-
-	if room.pty != nil {
-		room.pty.Close()
-		room.pty = nil
-	}
-
-	sessionName := room.config.TmuxSession
-	if sessionName == "" {
-		sessionName = room.id
-	}
-
-	pty, err := StartTmuxAttach(ctx, TmuxOptions{
-		Session:  sessionName,
-		Cols:     cols,
-		Rows:     rows,
-		TmuxPath: h.config.TmuxPath,
-		Shell:    h.config.Shell,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("start tmux attach for room %s: %w", room.id, err)
-	}
-
-	room.pty = pty
-	room.started = true
-	h.log.Info().
-		Str("room", room.id).
-		Str("session", sessionName).
-		Msg("PTY created for room")
-
-	return pty, nil
-}
-
 // ResizePTY resizes the PTY for a room.
 func (h *Hub) ResizePTY(roomID string, cols, rows uint16) error {
 	h.mu.RLock()
@@ -254,29 +232,98 @@ func (h *Hub) RoomPTY(ctx context.Context, roomID string, cols, rows uint16) (*P
 		return nil, &RoomNotFoundError{RoomID: roomID}
 	}
 
-	room.mu.Lock()
-	defer room.mu.Unlock()
+	for {
+		room.mu.Lock()
+		if room.closed {
+			room.mu.Unlock()
+			return nil, &RoomNotFoundError{RoomID: roomID}
+		}
+		if room.pty != nil && room.pty.IsRunning() {
+			pty := room.pty
+			room.mu.Unlock()
+			return pty, nil
+		}
+		if room.startWait != nil {
+			wait := room.startWait
+			room.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-wait:
+				continue
+			}
+		}
 
-	return h.getOrCreatePTY(ctx, room, cols, rows)
+		wait := make(chan struct{})
+		oldPTY := room.pty
+		room.pty = nil
+		room.startWait = wait
+		sessionName := room.config.TmuxSession
+		if sessionName == "" {
+			sessionName = room.id
+		}
+		room.mu.Unlock()
+
+		closePTYProcess(oldPTY)
+		pty, err := startTmuxAttach(ctx, TmuxOptions{
+			Session:  sessionName,
+			Cols:     cols,
+			Rows:     rows,
+			TmuxPath: h.config.TmuxPath,
+			Shell:    h.config.Shell,
+		})
+
+		room.mu.Lock()
+		room.startWait = nil
+		roomClosed := room.closed
+		if err == nil && !roomClosed {
+			room.pty = pty
+			room.started = true
+		}
+		room.mu.Unlock()
+		close(wait)
+
+		if roomClosed {
+			closePTYProcess(pty)
+			return nil, &RoomNotFoundError{RoomID: roomID}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("start tmux attach for room %s: %w", room.id, err)
+		}
+
+		h.log.Info().
+			Str("room", room.id).
+			Str("session", sessionName).
+			Msg("PTY created for room")
+		return pty, nil
+	}
 }
 
 // Close shuts down the hub and all rooms/clients.
 func (h *Hub) Close() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	rooms := h.rooms
+	h.rooms = make(map[string]*Room)
+	h.mu.Unlock()
 
-	for id, room := range h.rooms {
+	for id, room := range rooms {
 		room.mu.Lock()
+		room.closed = true
+		clients := make([]*Client, 0, len(room.clients))
 		for c := range room.clients {
-			c.close()
-			delete(room.clients, c)
+			clients = append(clients, c)
 		}
-		if room.pty != nil {
-			room.pty.Close()
-			room.pty = nil
-		}
+		room.clients = make(map[*Client]struct{})
+		pty := room.pty
+		room.pty = nil
 		room.mu.Unlock()
-		delete(h.rooms, id)
+
+		for _, c := range clients {
+			c.close()
+		}
+		closePTYProcess(pty)
+
+		h.log.Debug().Str("room", id).Msg("Room closed")
 	}
 }
 

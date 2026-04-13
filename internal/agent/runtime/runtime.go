@@ -4261,6 +4261,16 @@ func (s *Session) GetToolCalls() []types.ToolCall {
 	return calls
 }
 
+// GetChildren returns a copy of child session IDs.
+func (s *Session) GetChildren() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	children := make([]string, len(s.Children))
+	copy(children, s.Children)
+	return children
+}
+
 // Helper functions for tool execution
 
 // readFileWithLimit reads a file up to the given size limit.

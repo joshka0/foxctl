@@ -23,7 +23,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-agentctl-package eval-code-search-praze-infra eval-code-search-agentctl-repo-grounded eval-code-search-agentctl-change-impact eval-code-search-agentctl-trace-symbol eval-code-search-agentctl-bridge-esoteric eval-retrieval-agentctl eval-retrieval-agentctl-mixed eval-retrieval-agentctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-agentctl-package eval-code-search-praze-infra eval-code-search-agentctl-repo-grounded eval-code-search-agentctl-change-impact eval-code-search-agentctl-trace-symbol eval-code-search-agentctl-bridge-esoteric eval-retrieval-agentctl eval-retrieval-agentctl-mixed eval-retrieval-agentctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -167,8 +167,35 @@ RACE_P ?= 1
 test-race:
 	@$(GO_CMD_CGO) test -race -short -p $(RACE_P) $(RACE_PKGS)
 
+test-race-impacted:
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make test-race-impacted BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | xargs )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No impacted packages"; \
+			exit 0; \
+		fi; \
+		echo "Race-testing impacted packages: $$pkgs"; \
+		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
+
 test-integration:
 	@$(GO_CMD) test -tags=integration ./test/integration/... -timeout 15m -v
+
+test-integration-impacted:
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make test-integration-impacted BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		if ! echo "$$pkgs" | tr ' ' '\n' | grep -qx 'github.com/jkatigb/agentctl/test/integration'; then \
+			echo "Integration package not impacted"; \
+			exit 0; \
+		fi; \
+		echo "Running impacted integration package"; \
+		$(GO_CMD) test -tags=integration ./test/integration/... -timeout 15m -v
 
 test-integration-cmd:
 	@$(GO_CMD) test -tags=integration ./cmd/agentctl/cmd/... -timeout 15m -v
@@ -462,6 +489,81 @@ skills-build-cgo:
 
 skills-build-all: skills-build skills-build-cgo
 	@echo "Built both non-CGO and CGO skill variants"
+
+skills-impact:
+	@$(GO_CMD) run ./scripts/skills_impact $(ARGS)
+
+packages-impact:
+	@$(GO_CMD) run ./scripts/skills_impact --mode packages $(ARGS)
+
+BASE_REF ?=
+HEAD_REF ?= HEAD
+
+skills-build-impacted:
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make skills-build-impacted BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		skills="$$( $(GO_CMD) run ./scripts/skills_impact --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		if [ -z "$$skills" ]; then \
+			echo "No impacted skills"; \
+			exit 0; \
+		fi; \
+		echo "Building impacted skills: $$skills"; \
+		mkdir -p dist/skills; \
+		for name in $$skills; do \
+			dir="skills/$$name"; \
+			outdir="dist/skills/$$name"; \
+			mkdir -p "$$outdir"; \
+			if [ ! -d "$$dir" ]; then \
+				echo "Skipping missing skill dir $$dir"; \
+				continue; \
+			fi; \
+			if ls "$$dir"/*.go >/dev/null 2>&1; then \
+				if echo " $(CGO_SKILLS) " | grep -q " $$name "; then \
+					echo " - $$name (skipped in non-CGO impacted build; requires CGO)"; \
+				elif grep -qE '^//go:build cgo|^// +build cgo' "$$dir"/*.go; then \
+					echo " - $$name (skipped in non-CGO impacted build; requires CGO)"; \
+				else \
+					echo " - $$name"; \
+					$(GO_CMD) build -trimpath -ldflags="-s -w" -o "$$outdir/bin" "./$$dir"; \
+				fi; \
+			fi; \
+			if [ -f "$$dir/module.wasm" ]; then \
+				cp "$$dir/module.wasm" "$$outdir/module.wasm"; \
+			fi; \
+			if [ -f "$$dir/skill.yaml" ]; then \
+				cp "$$dir/skill.yaml" "$$outdir/skill.yaml"; \
+			fi; \
+		done
+
+test-short-impacted:
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make test-short-impacted BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | xargs )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No impacted packages"; \
+			exit 0; \
+		fi; \
+		echo "Testing impacted packages: $$pkgs"; \
+		$(GO_CMD) test -short -v -count=1 -timeout 20m $$pkgs
+
+test-cgo-short-impacted:
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make test-cgo-short-impacted BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | xargs )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No impacted packages"; \
+			exit 0; \
+		fi; \
+		echo "CGO-testing impacted packages: $$pkgs"; \
+		$(GO_CMD_CGO) test -short -tags=libsqlite3 $$pkgs
 
 skills-install: skills-build-all build
 	@set -euo pipefail; \

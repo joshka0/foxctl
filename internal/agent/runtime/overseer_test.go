@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	domainagent "github.com/jkatigb/agentctl/internal/domain/agent"
@@ -283,5 +284,46 @@ func TestInheritChildTerminalBinding(t *testing.T) {
 	}
 	if got.PaneID != "" {
 		t.Fatalf("PaneID = %q, want empty", got.PaneID)
+	}
+}
+
+func TestWaitForChildrenUsesSessionDone(t *testing.T) {
+	rt := NewRuntime(Config{})
+	o := NewOverseer(rt, OverseerConfig{
+		MaxDepth:            5,
+		MaxConcurrentAgents: 10,
+	})
+
+	parent := &Session{ID: "parent", done: make(chan struct{})}
+	child := &Session{
+		ID:     "child",
+		Status: types.StatusRunning,
+		done:   make(chan struct{}),
+	}
+
+	rt.mu.Lock()
+	rt.sessions[parent.ID] = parent
+	rt.sessions[child.ID] = child
+	rt.mu.Unlock()
+
+	o.mu.Lock()
+	o.children[parent.ID] = []string{child.ID}
+	o.mu.Unlock()
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		close(child.done)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	if err := o.WaitForChildren(ctx, parent.ID); err != nil {
+		t.Fatalf("WaitForChildren() error = %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed >= 100*time.Millisecond {
+		t.Fatalf("WaitForChildren() took %v, want completion before polling-scale delay", elapsed)
 	}
 }

@@ -10,6 +10,7 @@ import type {
   MailboxMessage,
   BulkResolveRequest,
   Room,
+  RoomMessageEvent,
   RoomMember,
   RoomStatus,
   RoomInbox,
@@ -57,6 +58,40 @@ export class APIUnauthorizedError extends Error {
     super(message);
     this.name = "APIUnauthorizedError";
   }
+}
+
+export function subscribeToRoomEvents(
+  roomId: string,
+  workspaceId: string,
+  onEvent: (event: RoomMessageEvent) => void,
+): () => void {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+  const scopedRoomID = roomId.trim();
+  const scopedWorkspaceID = workspaceId.trim();
+  if (!scopedRoomID || !scopedWorkspaceID) {
+    return () => {};
+  }
+  const query = new URLSearchParams({ workspace_id: scopedWorkspaceID });
+  const eventSource = new EventSource(
+    `${API_BASE}/rooms/${encodeURIComponent(scopedRoomID)}/events?${query.toString()}`,
+  );
+  eventSource.onmessage = (rawEvent) => {
+    let parsed: { type?: string; data?: unknown } | null = null;
+    try {
+      parsed = JSON.parse(rawEvent.data) as { type?: string; data?: unknown };
+    } catch {
+      return;
+    }
+    if (parsed?.type !== "room.message" || !parsed.data || typeof parsed.data !== "object") {
+      return;
+    }
+    onEvent(parsed.data as RoomMessageEvent);
+  };
+  return () => {
+    eventSource.close();
+  };
 }
 
 function mergeHeaders(
@@ -998,6 +1033,7 @@ export async function updateRoomMemberBinding(
     unbound?: boolean;
     transport_endpoint?: string;
     transport_kind?: string;
+    delivery_binding?: RoomMember["delivery_binding"];
   },
 ): Promise<{ member?: RoomMember }> {
   return request(`/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(actorId)}/binding?workspace_id=${encodeURIComponent(params.workspace_id)}`, {
@@ -1009,6 +1045,7 @@ export async function updateRoomMemberBinding(
       unbound: params.unbound,
       transport_endpoint: params.transport_endpoint,
       transport_kind: params.transport_kind,
+      delivery_binding: params.delivery_binding,
     }),
   });
 }
@@ -1166,6 +1203,32 @@ export async function getRoomTasks(
     `/rooms/${encodeURIComponent(roomId)}/tasks?${query}`,
   );
   return response.tasks ?? [];
+}
+
+export async function createRoomTask(
+  roomId: string,
+  params: {
+    workspace_id: string;
+    actor_id: string;
+    title: string;
+    description?: string;
+    scope_path?: string;
+    parent_id?: string;
+    depends_on?: string[];
+    milestone_id?: string;
+  },
+): Promise<RoomTask> {
+  const response = await request<{ task?: RoomTask }>(
+    `/rooms/${encodeURIComponent(roomId)}/tasks`,
+    {
+      method: "POST",
+      body: JSON.stringify(params),
+    },
+  );
+  if (!response.task) {
+    throw new Error("Room task payload missing");
+  }
+  return response.task;
 }
 
 export async function getRoomLoop(

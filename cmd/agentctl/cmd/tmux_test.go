@@ -274,6 +274,7 @@ func TestResolveMuxSendConfirmationRejectsNonMember(t *testing.T) {
 	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "cursor-a=reviewer"}); err != nil {
 		t.Fatalf("runRoomCreate: %v", err)
 	}
+	activateTestRoomLoop(t, ctx, workspace, "alpha")
 	cmd, out := newRoomTestCommand(ctx)
 	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "cursor-a", "", "please reply", "info", "", 0, false, true, false, true); err != nil {
 		t.Fatalf("runRoomSend: %v", err)
@@ -295,6 +296,7 @@ func TestWaitForMuxRoomConfirmationDetectsRoomReply(t *testing.T) {
 	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "cursor-a=reviewer"}); err != nil {
 		t.Fatalf("runRoomCreate: %v", err)
 	}
+	activateTestRoomLoop(t, ctx, workspace, "alpha")
 	cmd, out := newRoomTestCommand(ctx)
 	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "cursor-a", "", "please reply", "info", "", 0, false, true, false, true); err != nil {
 		t.Fatalf("runRoomSend: %v", err)
@@ -340,6 +342,7 @@ func TestWaitForMuxRoomConfirmationTimesOutWithoutReply(t *testing.T) {
 	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "cursor-a=reviewer"}); err != nil {
 		t.Fatalf("runRoomCreate: %v", err)
 	}
+	activateTestRoomLoop(t, ctx, workspace, "alpha")
 	cmd, out := newRoomTestCommand(ctx)
 	if err := runRoomSend(cmd, workspace, "alpha", "human-a", "cursor-a", "", "please reply", "info", "", 0, false, true, false, true); err != nil {
 		t.Fatalf("runRoomSend: %v", err)

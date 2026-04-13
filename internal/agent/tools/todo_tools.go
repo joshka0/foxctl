@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
@@ -328,35 +329,20 @@ func (r *Registry) todoAdd(ctx context.Context, args map[string]any) (*models.Ca
 		Status:      tasks.StatusPending,
 	}
 
-	// Validate parent exists BEFORE creating the child to avoid orphaned tasks
-	var parent *tasks.Task
+	var (
+		created tasks.Task
+		addErr  error
+	)
 	if parentID != "" {
-		p, err := store.Get(ctx, parentID)
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return errorResult(fmt.Sprintf("parent task %q not found (hint: use 'todo.query' to list available task IDs)", parentID)), nil
-			}
-			return errorResult(fmt.Sprintf("validate parent task: %v", err)), nil
-		}
-		parent = &p
+		created, addErr = store.AddSubtask(ctx, parentID, newTask)
+	} else {
+		created, addErr = store.Add(ctx, newTask)
 	}
-
-	created, err := store.Add(ctx, newTask)
-	if err != nil {
-		return errorResult(fmt.Sprintf("add task: %v", err)), nil
-	}
-
-	// Update parent's Children list after successful child creation
-	if parent != nil {
-		parent.Children = append(parent.Children, created.ID)
-		if _, err := store.Update(ctx, *parent); err != nil {
-			// Child was created but parent update failed - log but return the created task
-			return successResult(map[string]any{
-				"task":    created,
-				"success": true,
-				"warning": fmt.Sprintf("task created but parent update failed: %v", err),
-			}), nil
+	if addErr != nil {
+		if errors.Is(addErr, sql.ErrNoRows) || strings.Contains(addErr.Error(), "parent task") {
+			return errorResult(fmt.Sprintf("parent task %q not found (hint: use 'todo.query' to list available task IDs)", parentID)), nil
 		}
+		return errorResult(fmt.Sprintf("add task: %v", addErr)), nil
 	}
 
 	return successResult(map[string]any{

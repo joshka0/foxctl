@@ -9,6 +9,7 @@ import { Clock, Ban, User, MoreHorizontal, HandMetal, RotateCcw, UserPlus } from
 
 interface TaskCardProps {
   task: RoomTask
+  laneLabel?: string
   onClaim?: () => void
   onTouch?: () => void
   onBlock?: () => void
@@ -21,6 +22,7 @@ interface TaskCardProps {
 
 export function TaskCard({ 
   task, 
+  laneLabel,
   onClaim, 
   onTouch, 
   onBlock, 
@@ -63,6 +65,13 @@ export function TaskCard({
       </div>
 
       <div className="space-y-1.5 mb-3">
+        {laneLabel && (
+          <div className="flex items-center gap-1.5">
+            <Badge variant="outline" className="h-4 px-1.5 text-[9px] font-black uppercase tracking-tight border-primary/20 bg-primary/5 text-primary">
+              {laneLabel}
+            </Badge>
+          </div>
+        )}
         <div className="flex items-center gap-1.5 text-muted-foreground text-[10px]">
           <User className="w-3 h-3 text-foreground/50" />
           <span className={cn("truncate font-medium", !task.owner_actor_id && "italic")}>

@@ -15,9 +15,22 @@ This skill is the participant-side companion to:
 
 ## Core rules
 
+- `agentctl` is the headless room/runtime kernel.
+- CLI, web/API, `gui-agent`, and mux surfaces are clients or presentation layers over that kernel.
 - `agentctl room` is the source of truth.
 - Participant transport is canonical delivery.
 - `tmux`, `zellij`, GUI PTY previews, and xterm/webterm are presentation only.
+- room-aware clients should consume `GET /api/rooms/{room-id}/events?workspace_id=...` for room timeline updates rather than watching the global `/api/events` feed.
+- when you inspect room member records, treat `delivery_binding` as canonical and treat the older top-level transport fields as compatibility mirrors.
+- when you create room tasks, do not guess the lane from prose:
+  - plain `room task add` defaults to the newest open epic's quiet `Chores` milestone when one exists
+  - use `room task add --milestone-id <milestone-id>` when the work belongs to a specific active milestone
+- reply-required requests are chain-aware:
+  your later message only satisfies an earlier request when it replies within the same room message chain.
+- `room status` and loop/status APIs can expose `last_delivery_trace` for the most recent delivery decision; use that trace when delivery behavior needs explanation.
+- use explicit, distinctive participant ids.
+- avoid generic actor ids like `coordinator`, `reviewer`, or `codex-coordinator` when more than one room or agent runtime may exist.
+- actor ids should include feature, branch, room, or workstream context, for example `feat-room-loop-codex`, `room-ci-reviewer-a`, or `docs-operator-a`.
 - Room context is not room membership. A startup note, env var, or pane label does not prove you are joined.
 - Pane health is not delivery health. Check `room status` before blaming the viewer layer.
 - A room can remain fully valid with no panes and no live participant runtime. In that state, the room is still usable for durable planning and task state, but you should not expect an agent runtime to consume direct work until transport/runtime is live again.
@@ -84,6 +97,7 @@ agentctl room task claim <room-id> --id <task-id>
 - Use `room task touch` during longer work instead of vague status chatter.
 - Use `room task block` with a concrete reason when blocked.
 - Close work durably with `room task complete --notes ...`.
+- If a task transition is rejected, assume the strict lifecycle guardrails are in effect and use the correct action for the current state (`reassign`, `reclaim`, `unblock`, or `abandon`).
 
 ## Reminders and loops
 
@@ -91,6 +105,15 @@ agentctl room task claim <room-id> --id <task-id>
 - `room loop` is required for reminder follow-ups, stale-reply nudges, and coordinator pulses.
 - If you receive or set reminders, confirm the room loop is running.
 - `room loop` is not the thing that makes the room exist; it is the thing that drives room automation.
+- acknowledging one reminder follow-up does not cancel the recurring schedule by itself.
+- reminders may stop automatically when linked `task_id`, `story_id`, or `milestone_id` work is completed.
+- loop restart should preserve reminder and pulse memory instead of resetting the scheduler state.
+
+Architecture rule:
+
+- do not treat CLI behavior or pane behavior as the canonical implementation
+- durable room state and shared room services are the source of truth
+- use `bash tests/regression/run.sh` when you need the canonical regression bundle for room-runtime hardening.
 
 ## Escalation
 

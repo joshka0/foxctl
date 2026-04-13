@@ -7,14 +7,34 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/evals/retrievaleval"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 func TestContextRepoIndexSearchInspectSuite_PersistsRun(t *testing.T) {
+	orig := buildRepoIndexSearchInspectionReportHook
+	buildRepoIndexSearchInspectionReportHook = func(_ context.Context, _ string, workspacePath string, suite retrievaleval.Suite, _ int) (graphInspectionSuiteReport, error) {
+		return graphInspectionSuiteReport{
+			Method:        "repoindex_search",
+			Suite:         suite.Name,
+			WorkspacePath: workspacePath,
+			GeneratedAt:   time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
+			Inspections: []graphInspection{{
+				Query:          "storage memory package",
+				ExpectedPaths:  []string{"internal/storage/memory/store.go"},
+				Anchors:        []string{"internal/storage/memory/store.go"},
+				Matched:        true,
+				Classification: "matched",
+			}},
+		}, nil
+	}
+	t.Cleanup(func() { buildRepoIndexSearchInspectionReportHook = orig })
+
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	cfg, err := config.Load(context.Background())

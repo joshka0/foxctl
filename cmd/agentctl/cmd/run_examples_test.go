@@ -42,7 +42,7 @@ func TestRunCommandExamplesWithoutSkill(t *testing.T) {
 }
 
 func TestRunCommandExamplesForSkill(t *testing.T) {
-	cfg := installTodoSkill(t)
+	cfg := installTodoManifestOnly(t)
 	cmd := newRunCommand()
 	cmd.SetContext(config.WithContext(context.Background(), cfg))
 	stdout := &bytes.Buffer{}

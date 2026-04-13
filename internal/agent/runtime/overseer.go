@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
 	"github.com/jkatigb/agentctl/internal/agent/types"
@@ -70,9 +69,6 @@ func NewOverseer(rt *Runtime, cfg OverseerConfig) *Overseer {
 // HandleSpawnRequest implements SpawnHandler.
 // It validates the spawn request and creates new agent sessions for approved subagents.
 func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnRequest) (*types.SpawnResponse, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
 	resp := &types.SpawnResponse{
 		SpawnedAgents: []types.SpawnedAgent{},
 		DeniedAgents:  []types.DeniedAgent{},
@@ -167,7 +163,8 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 			LLMAuthHeader: sub.LLMAuthHeader,
 			LLMAuthPrefix: sub.LLMAuthPrefix,
 		}
-		if parentSessionID := o.runtime.FindSessionByActorID(req.CallerActorID); parentSessionID != "" {
+		parentSessionID := o.runtime.FindSessionByActorID(req.CallerActorID)
+		if parentSessionID != "" {
 			if parentSession, ok := o.runtime.Get(parentSessionID); ok {
 				childCfg.TerminalBinding = inheritChildTerminalBinding(parentSession.Config.TerminalBinding, req.CallerActorID)
 			}
@@ -185,15 +182,10 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 		}
 
 		// Track parent-child relationship using thread-safe methods
-		parentSessionID := o.runtime.FindSessionByActorID(req.CallerActorID)
 		if parentSessionID != "" {
+			o.mu.Lock()
 			o.children[parentSessionID] = append(o.children[parentSessionID], session.ID)
-			// Update parent session's children list
-			if parentSession, ok := o.runtime.Get(parentSessionID); ok {
-				parentSession.mu.Lock()
-				parentSession.Children = append(parentSession.Children, session.ID)
-				parentSession.mu.Unlock()
-			}
+			o.mu.Unlock()
 		}
 
 		resp.SpawnedAgents = append(resp.SpawnedAgents, types.SpawnedAgent{
@@ -306,36 +298,17 @@ func (o *Overseer) WaitForChildren(ctx context.Context, parentSessionID string) 
 	childIDs := o.GetChildren(parentSessionID)
 
 	for _, childID := range childIDs {
-		// Poll until session completes or context is cancelled
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+		session, ok := o.runtime.Get(childID)
+		if !ok {
+			// Session no longer exists, move to next child.
+			continue
+		}
 
-			session, ok := o.runtime.Get(childID)
-			if !ok {
-				// Session no longer exists, move to next child
-				break
-			}
-
-			session.mu.RLock()
-			status := session.Status
-			session.mu.RUnlock()
-
-			if status != types.StatusRunning {
-				// Session completed, move to next child
-				break
-			}
-
-			// Sleep to avoid busy loop
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(100 * time.Millisecond):
-				// Continue polling
-			}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-session.Done():
+			// Session has exited.
 		}
 	}
 

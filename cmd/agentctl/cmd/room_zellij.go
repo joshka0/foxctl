@@ -66,12 +66,13 @@ func relayRoomMessageZellijTargets(ctx context.Context, room agent.RoomSummary, 
 	}
 	remaining := make([]string, 0, len(targets))
 	for _, target := range targets {
-		if deliverErr := relayRoomMessageZellijPaneSocket(ctx, room, msg, session, target); deliverErr == nil {
+		submitMode := roomRelayTargetSubmitMode(room, msg, session, target)
+		if deliverErr := relayRoomMessageZellijPaneSocket(ctx, room, msg, session, target, submitMode); deliverErr == nil {
 			result.DeliveredCount++
 			result.DeliveredTo = append(result.DeliveredTo, target)
 			continue
 		}
-		if deliverErr := relayRoomMessageZellijTTY(session, target, formatRoomRelayContentForTarget(room, msg, target), msg.Interrupt); deliverErr == nil {
+		if deliverErr := relayRoomMessageZellijTTY(session, target, formatRoomRelayContentForTarget(room, msg, target), msg.Interrupt, submitMode); deliverErr == nil {
 			result.DeliveredCount++
 			result.DeliveredTo = append(result.DeliveredTo, target)
 			continue
@@ -137,7 +138,30 @@ func relayRoomMessageZellijTargets(ctx context.Context, room agent.RoomSummary, 
 	return result
 }
 
-func relayRoomMessageZellijPaneSocket(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, session, target string) error {
+func roomRelayTargetSubmitMode(room agent.RoomSummary, msg agent.BoardMessage, session, target string) string {
+	recipient := normalizeRoomRecipient(msg.Recipient)
+	for _, member := range room.Members {
+		member = normalizeRoomMember(member)
+		if roomMemberRelayBackend(member) != "zellij" {
+			continue
+		}
+		memberSession, memberTarget, ok := resolveRoomMemberZellijTarget(member)
+		if !ok || strings.TrimSpace(memberSession) != strings.TrimSpace(session) || strings.TrimSpace(memberTarget) != strings.TrimSpace(target) {
+			continue
+		}
+		if recipient != agent.BroadcastRecipient && !relayRecipientMatchesMember(room, member, recipient) {
+			continue
+		}
+		if sameRoomParticipant(strings.TrimSpace(member.ActorID), strings.TrimSpace(msg.Sender)) &&
+			(recipient == agent.BroadcastRecipient || !relayRecipientMatchesMember(room, member, recipient)) {
+			continue
+		}
+		return roomMemberSubmitMode(member)
+	}
+	return targetSubmitMode(target)
+}
+
+func relayRoomMessageZellijPaneSocket(ctx context.Context, room agent.RoomSummary, msg agent.BoardMessage, session, target, submitMode string) error {
 	target = strings.TrimSpace(target)
 	if strings.TrimSpace(session) == "" || target == "" || target == zellijRelaySingletonTarget {
 		return fmt.Errorf("no pane socket route")
@@ -145,7 +169,6 @@ func relayRoomMessageZellijPaneSocket(ctx context.Context, room agent.RoomSummar
 	if strings.HasPrefix(target, "zellij:") || isResolvableZellijPaneID(target) {
 		return fmt.Errorf("pane socket route requires named participant target")
 	}
-	submitMode := targetSubmitMode(target)
 	candidates := []string{agentpane.DefaultSocketPath(session, target)}
 	if roomID := strings.TrimSpace(room.ID); roomID != "" {
 		candidates = append(candidates, agentpane.DefaultSocketPath(roomID, target))
@@ -170,12 +193,12 @@ func relayRoomMessageZellijPaneSocket(ctx context.Context, room agent.RoomSummar
 	return fmt.Errorf("deliver pane socket for %s in %s: %w", target, session, lastErr)
 }
 
-func relayRoomMessageZellijTTY(session, target, content string, interrupt bool) error {
+func relayRoomMessageZellijTTY(session, target, content string, interrupt bool, submitMode string) error {
 	ttyPath, ok := zellijTTYPath(session, target)
 	if !ok {
 		return fmt.Errorf("no tty registry for %s", target)
 	}
-	payload := zellijTTYRelayPayload(target, content, interrupt)
+	payload := zellijTTYRelayPayload(target, content, interrupt, submitMode)
 	f, err := os.OpenFile(ttyPath, os.O_WRONLY, 0)
 	if err != nil {
 		return err
@@ -205,13 +228,13 @@ func zellijTTYPath(session, target string) (string, bool) {
 	return "", false
 }
 
-func zellijTTYRelayPayload(target, content string, interrupt bool) string {
+func zellijTTYRelayPayload(target, content string, interrupt bool, submitMode string) string {
 	var b strings.Builder
-	if interrupt && !targetUsesComposerSubmit(target) {
+	if interrupt && !usesComposerSubmitMode(submitMode) {
 		b.WriteByte(0x1b)
 	}
 	b.WriteString(content)
-	switch targetSubmitMode(target) {
+	switch strings.TrimSpace(submitMode) {
 	case agentpane.SubmitModeComposerCtrlEnter:
 		b.WriteString("\x1b[13;5u")
 	case agentpane.SubmitModeEnterSplit:
@@ -224,21 +247,12 @@ func zellijTTYRelayPayload(target, content string, interrupt bool) string {
 	return b.String()
 }
 
+func usesComposerSubmitMode(mode string) bool {
+	return strings.TrimSpace(mode) == agentpane.SubmitModeComposerCtrlEnter
+}
+
 func targetSubmitMode(target string) string {
-	t := strings.ToLower(strings.TrimSpace(target))
-	switch {
-	case strings.HasPrefix(t, "droid"),
-		strings.HasPrefix(t, "codex"),
-		strings.HasPrefix(t, "cursor"),
-		strings.HasPrefix(t, "agent"):
-		return agentpane.SubmitModeComposerCtrlEnter
-	case strings.HasPrefix(t, "gemini"):
-		return agentpane.SubmitModeEnterSplit
-	case strings.HasPrefix(t, "claude"):
-		return agentpane.SubmitModeEnter
-	default:
-		return agentpane.SubmitModeNewline
-	}
+	return agent.DefaultRoomDeliverySubmitMode(target)
 }
 
 func targetUsesComposerSubmit(target string) bool {

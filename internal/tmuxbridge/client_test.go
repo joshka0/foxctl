@@ -1215,6 +1215,70 @@ func TestDeliverTextUsesRawAndEnterForGeminiPane(t *testing.T) {
 	}
 }
 
+func TestDeliverTextRetriesQueuedDraftForGeminiPane(t *testing.T) {
+	origAttempts := queuedDraftProbeAttempts
+	origDelay := queuedDraftProbeDelay
+	queuedDraftProbeAttempts = 1
+	queuedDraftProbeDelay = 0
+	defer func() {
+		queuedDraftProbeAttempts = origAttempts
+		queuedDraftProbeDelay = origDelay
+	}()
+
+	payload := "[room alpha] hello gemini"
+	client := NewWithRunner(&sequenceRunner{
+		steps: []sequenceStep{
+			{key: "tmux list-sessions", stdout: "ok\n"},
+			{key: "tmux display-message -t %31 -p #{pane_id}", stdout: "%31\n"},
+			{key: "tmux display-message -t %31 -p " + listFormat, stdout: "%31" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "2" + fieldSep + "main" + fieldSep + "333" + fieldSep + "80" + fieldSep + "24" + fieldSep + "gemini-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n"},
+			{key: "tmux send-keys -t %31 -l -- " + payload},
+			{key: "tmux send-keys -t %31 Enter"},
+			{key: "tmux capture-pane -t %31 -p -J -S -12", stdout: "Queued (press up to edit): " + payload + "\n"},
+			{key: "tmux send-keys -t %31 Enter"},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverText(context.Background(), "%31", payload)
+	if err != nil {
+		t.Fatalf("DeliverText() error = %v", err)
+	}
+	if !got.DispatchRetried {
+		t.Fatal("DispatchRetried = false, want true")
+	}
+}
+
+func TestDeliverTextDoesNotRetryQueuedDraftForNonGeminiPane(t *testing.T) {
+	origAttempts := queuedDraftProbeAttempts
+	origDelay := queuedDraftProbeDelay
+	queuedDraftProbeAttempts = 1
+	queuedDraftProbeDelay = 0
+	defer func() {
+		queuedDraftProbeAttempts = origAttempts
+		queuedDraftProbeDelay = origDelay
+	}()
+
+	payload := "[room alpha] hello codex"
+	client := NewWithRunner(fakeRunner{
+		responses: map[string]fakeResponse{
+			"tmux list-sessions":                        {stdout: "ok\n"},
+			"tmux display-message -t %15 -p #{pane_id}": {stdout: "%15\n"},
+			"tmux display-message -t %15 -p " + listFormat: {
+				stdout: "%15" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
+			},
+			"tmux send-keys -t %15 -l -- " + payload: {},
+			"tmux send-keys -t %15 C-Enter":          {},
+		},
+	}, map[string]string{})
+
+	got, err := client.DeliverText(context.Background(), "%15", payload)
+	if err != nil {
+		t.Fatalf("DeliverText() error = %v", err)
+	}
+	if got.DispatchRetried {
+		t.Fatal("DispatchRetried = true, want false")
+	}
+}
+
 func TestDeliverTextUsesRawAndEnterForClaudeLabeledPane(t *testing.T) {
 	client := NewWithRunner(fakeRunner{
 		responses: map[string]fakeResponse{
@@ -1438,6 +1502,14 @@ type sequenceStep struct {
 
 func (s *sequenceRunner) Run(_ context.Context, name string, args ...string) (string, string, error) {
 	key := strings.TrimSpace(name + " " + strings.Join(args, " "))
+	if strings.Contains(key, "list-sessions") {
+		if s.pos < len(s.steps) && s.steps[s.pos].key == key {
+			step := s.steps[s.pos]
+			s.pos++
+			return step.stdout, step.stderr, step.err
+		}
+		return "ok\n", "", nil
+	}
 	if s.pos >= len(s.steps) {
 		return "", "", fmt.Errorf("unexpected command after sequence end: %s", key)
 	}

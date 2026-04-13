@@ -12,6 +12,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 	"github.com/oklog/ulid/v2"
@@ -86,6 +87,7 @@ func (s *boardSQLStore) Close() error {
 // SendMessage inserts a new BoardMessage.
 // The msg.ID is populated with a ULID if not already set.
 func (s *boardSQLStore) SendMessage(ctx context.Context, msg *agent.BoardMessage) error {
+	msg.WorkspaceID = workspaceutil.CanonicalWorkspaceKey(msg.WorkspaceID)
 	if msg.ID == "" {
 		msg.ID = ulid.Make().String()
 	}
@@ -192,7 +194,7 @@ func (s *boardSQLStore) UpsertRoom(ctx context.Context, room agent.Room) (agent.
 }
 
 func (s *boardSQLStore) EnsureRoom(ctx context.Context, workspaceID, roomID, title string) (agent.Room, error) {
-	workspaceID = strings.TrimSpace(workspaceID)
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	roomID = strings.TrimSpace(roomID)
 	if workspaceID == "" {
 		return agent.Room{}, fmt.Errorf("board: ensure room: workspace_id is required")
@@ -228,7 +230,7 @@ func (s *boardSQLStore) EnsureRoom(ctx context.Context, workspaceID, roomID, tit
 }
 
 func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roomID string, members []agent.RoomMember) ([]agent.RoomMember, error) {
-	workspaceID = strings.TrimSpace(workspaceID)
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	roomID = strings.TrimSpace(roomID)
 	if workspaceID == "" {
 		return nil, fmt.Errorf("board: replace room members: workspace_id is required")
@@ -260,13 +262,7 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 	out := make([]agent.RoomMember, 0, len(members))
 	seen := make(map[string]struct{}, len(members))
 	for _, member := range members {
-		member.ActorID = strings.TrimSpace(member.ActorID)
-		member.Role = strings.TrimSpace(member.Role)
-		member.Backend = strings.ToLower(strings.TrimSpace(member.Backend))
-		member.Session = strings.TrimSpace(member.Session)
-		member.PaneID = strings.TrimSpace(member.PaneID)
-		member.TransportEndpoint = strings.TrimSpace(member.TransportEndpoint)
-		member.TransportKind = strings.TrimSpace(member.TransportKind)
+		member = agent.NormalizeRoomMember(member)
 		if member.ActorID == "" {
 			continue
 		}
@@ -279,10 +275,14 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 		}
 		if err := retryBoardBusy(ctx, func() error {
 			_, execErr := tx.ExecContext(ctx, `
-			INSERT INTO room_members (workspace_id, room_id, actor_id, role, backend, session, pane_id, unbound, joined_at, transport_endpoint, transport_kind)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			INSERT INTO room_members (
+				workspace_id, room_id, actor_id, role, backend, session, pane_id, unbound, joined_at,
+				transport_endpoint, transport_kind, delivery_submit_mode, delivery_health, delivery_fallback_policy
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				workspaceID, roomID, member.ActorID, member.Role, member.Backend, member.Session, member.PaneID, boardBoolToInt(member.Unbound), member.JoinedAt.Unix(),
 				member.TransportEndpoint, member.TransportKind,
+				member.DeliveryBinding.SubmitMode, member.DeliveryBinding.Health, member.DeliveryBinding.FallbackPolicy,
 			)
 			return execErr
 		}); err != nil {
@@ -308,7 +308,7 @@ func (s *boardSQLStore) ReplaceRoomMembers(ctx context.Context, workspaceID, roo
 }
 
 func (s *boardSQLStore) UpdateRoomMemberTransport(ctx context.Context, workspaceID, roomID, actorID, endpoint, kind string) error {
-	workspaceID = strings.TrimSpace(workspaceID)
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	roomID = strings.TrimSpace(roomID)
 	actorID = strings.TrimSpace(actorID)
 	endpoint = strings.TrimSpace(endpoint)
@@ -348,7 +348,7 @@ func (s *boardSQLStore) UpdateRoomMemberTransport(ctx context.Context, workspace
 }
 
 func (s *boardSQLStore) UpdateRoomMemberBinding(ctx context.Context, workspaceID, roomID string, member agent.RoomMember) error {
-	workspaceID = strings.TrimSpace(workspaceID)
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	roomID = strings.TrimSpace(roomID)
 	member = agent.NormalizeRoomMember(member)
 	if workspaceID == "" {
@@ -366,7 +366,8 @@ func (s *boardSQLStore) UpdateRoomMemberBinding(ctx context.Context, workspaceID
 		var execErr error
 		result, execErr = s.db.ExecContext(ctx, `
 			UPDATE room_members
-			SET backend = ?, session = ?, pane_id = ?, unbound = ?, transport_endpoint = ?, transport_kind = ?
+			SET backend = ?, session = ?, pane_id = ?, unbound = ?, transport_endpoint = ?, transport_kind = ?,
+			    delivery_submit_mode = ?, delivery_health = ?, delivery_fallback_policy = ?
 			WHERE workspace_id = ? AND room_id = ? AND actor_id = ?`,
 			member.Backend,
 			member.Session,
@@ -374,6 +375,9 @@ func (s *boardSQLStore) UpdateRoomMemberBinding(ctx context.Context, workspaceID
 			boardBoolToInt(member.Unbound),
 			member.TransportEndpoint,
 			member.TransportKind,
+			member.DeliveryBinding.SubmitMode,
+			member.DeliveryBinding.Health,
+			member.DeliveryBinding.FallbackPolicy,
 			workspaceID,
 			roomID,
 			member.ActorID,
@@ -394,7 +398,7 @@ func (s *boardSQLStore) UpdateRoomMemberBinding(ctx context.Context, workspaceID
 }
 
 func (s *boardSQLStore) DeleteRoom(ctx context.Context, workspaceID, roomID string) error {
-	workspaceID = strings.TrimSpace(workspaceID)
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	roomID = strings.TrimSpace(roomID)
 	if workspaceID == "" {
 		return fmt.Errorf("board: delete room: workspace_id is required")
@@ -442,7 +446,7 @@ func (s *boardSQLStore) DeleteRoom(ctx context.Context, workspaceID, roomID stri
 }
 
 func (s *boardSQLStore) ArchiveRoom(ctx context.Context, workspaceID, roomID string) error {
-	workspaceID = strings.TrimSpace(workspaceID)
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	roomID = strings.TrimSpace(roomID)
 	if workspaceID == "" {
 		return fmt.Errorf("board: archive room: workspace_id is required")
@@ -468,7 +472,7 @@ func (s *boardSQLStore) ArchiveRoom(ctx context.Context, workspaceID, roomID str
 }
 
 func (s *boardSQLStore) RestoreRoom(ctx context.Context, workspaceID, roomID string) error {
-	workspaceID = strings.TrimSpace(workspaceID)
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	roomID = strings.TrimSpace(roomID)
 	if workspaceID == "" {
 		return fmt.Errorf("board: restore room: workspace_id is required")
@@ -556,6 +560,7 @@ func (s *boardSQLStore) Inbox(ctx context.Context, filter agent.InboxFilter) ([]
 }
 
 func (s *boardSQLStore) ListRooms(ctx context.Context, workspaceID, actorID string, limit int, archivedOnly bool) ([]agent.RoomSummary, error) {
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	if limit <= 0 {
 		limit = 50
 	}
@@ -622,11 +627,13 @@ func (s *boardSQLStore) ListRooms(ctx context.Context, workspaceID, actorID stri
 }
 
 func (s *boardSQLStore) GetRoom(ctx context.Context, workspaceID, roomID, actorID string) (agent.RoomSummary, error) {
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	stream := agent.RoomStreamName(roomID)
 	return s.roomSummary(ctx, workspaceID, stream, actorID)
 }
 
 func (s *boardSQLStore) ListRoomMessages(ctx context.Context, workspaceID, roomID string, limit int) ([]agent.BoardMessage, error) {
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	if limit <= 0 {
 		limit = 100
 	}
@@ -671,6 +678,7 @@ func (s *boardSQLStore) ListRoomMessages(ctx context.Context, workspaceID, roomI
 
 // MarkRead marks messages as read.
 func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, _ string, messageIDs []string) (int, error) {
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	if len(messageIDs) == 0 {
 		return 0, nil
 	}
@@ -710,6 +718,7 @@ func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, _ string, mes
 // This is used by hooks to suppress re-injecting the same messages forever,
 // without claiming the user has explicitly read them.
 func (s *boardSQLStore) MarkSurfaced(ctx context.Context, workspaceID, _ string, messageIDs []string) (int, error) {
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	if len(messageIDs) == 0 {
 		return 0, nil
 	}
@@ -743,6 +752,7 @@ func (s *boardSQLStore) MarkSurfaced(ctx context.Context, workspaceID, _ string,
 
 // AckMessages marks messages as acknowledged.
 func (s *boardSQLStore) AckMessages(ctx context.Context, workspaceID, _ string, messageIDs []string) (int, error) {
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	if len(messageIDs) == 0 {
 		return 0, nil
 	}
@@ -774,6 +784,7 @@ func (s *boardSQLStore) AckMessages(ctx context.Context, workspaceID, _ string, 
 // Reserve creates a file reservation.
 // The res.ID is populated with a ULID if not already set.
 func (s *boardSQLStore) Reserve(ctx context.Context, res *agent.FileReservation) error {
+	res.WorkspaceID = workspaceutil.CanonicalWorkspaceKey(res.WorkspaceID)
 	if res.ID == "" {
 		res.ID = ulid.Make().String()
 	}
@@ -796,6 +807,7 @@ func (s *boardSQLStore) Reserve(ctx context.Context, res *agent.FileReservation)
 
 // CheckConflicts checks for existing reservations that would conflict with the requested paths.
 func (s *boardSQLStore) CheckConflicts(ctx context.Context, workspaceID string, paths []string, holder string, mode agent.ReservationMode) ([]agent.ReservationConflict, error) {
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	if len(paths) == 0 {
 		return nil, nil
 	}
@@ -857,6 +869,7 @@ func (s *boardSQLStore) CheckConflicts(ctx context.Context, workspaceID string, 
 
 // Release releases reservations by path and holder.
 func (s *boardSQLStore) Release(ctx context.Context, workspaceID, actorID string, paths []string) (int, error) {
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	if len(paths) == 0 {
 		return 0, nil
 	}
@@ -913,6 +926,7 @@ func (s *boardSQLStore) ReleaseByID(ctx context.Context, reservationIDs []string
 
 // ListReservations lists all active reservations for a workspace.
 func (s *boardSQLStore) ListReservations(ctx context.Context, workspaceID string) ([]agent.FileReservation, error) {
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	now := time.Now().UTC().Unix()
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, workspace_id, task_id, path, holder, mode, reason, expires_at, created_at
@@ -988,6 +1002,11 @@ CREATE TABLE IF NOT EXISTS room_members (
 	pane_id      TEXT NOT NULL DEFAULT '',
 	unbound      INTEGER NOT NULL DEFAULT 0,
 	joined_at    INTEGER NOT NULL,
+	transport_endpoint TEXT NOT NULL DEFAULT '',
+	transport_kind TEXT NOT NULL DEFAULT '',
+	delivery_submit_mode TEXT NOT NULL DEFAULT '',
+	delivery_health TEXT NOT NULL DEFAULT '',
+	delivery_fallback_policy TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (workspace_id, room_id, actor_id)
 );
 CREATE INDEX IF NOT EXISTS idx_room_members_workspace_room ON room_members(workspace_id, room_id);
@@ -1026,6 +1045,9 @@ CREATE INDEX IF NOT EXISTS idx_res_expires ON file_reservations(expires_at);
 		`ALTER TABLE room_members ADD COLUMN unbound INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE room_members ADD COLUMN transport_endpoint TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE room_members ADD COLUMN transport_kind TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_members ADD COLUMN delivery_submit_mode TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_members ADD COLUMN delivery_health TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE room_members ADD COLUMN delivery_fallback_policy TEXT NOT NULL DEFAULT ''`,
 	} {
 		if err := retryBoardBusy(ctx, func() error {
 			_, err := db.ExecContext(ctx, stmt)
@@ -1165,6 +1187,7 @@ func isBoardBusyErr(err error) bool {
 
 // CountMessagesByTask counts unread messages per task grouped by sender type.
 func (s *boardSQLStore) CountMessagesByTask(ctx context.Context, workspaceID, taskID string) (admin, overseer, total int, err error) {
+	workspaceID = workspaceutil.CanonicalWorkspaceKey(workspaceID)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT sender FROM board_messages
 		WHERE workspace_id = ? AND task_id = ? AND status IN (?, ?)`,
@@ -1468,7 +1491,8 @@ func roomMetadataMatchesArchiveFilter(meta roomMetadataRow, archivedOnly bool) b
 
 func (s *boardSQLStore) listRoomMembers(ctx context.Context, workspaceID, roomID string) ([]agent.RoomMember, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT actor_id, role, backend, session, pane_id, unbound, joined_at, transport_endpoint, transport_kind
+		SELECT actor_id, role, backend, session, pane_id, unbound, joined_at,
+		       transport_endpoint, transport_kind, delivery_submit_mode, delivery_health, delivery_fallback_policy
 		FROM room_members
 		WHERE workspace_id = ? AND room_id = ?
 		ORDER BY joined_at ASC, actor_id ASC`, workspaceID, roomID)
@@ -1482,12 +1506,16 @@ func (s *boardSQLStore) listRoomMembers(ctx context.Context, workspaceID, roomID
 	var members []agent.RoomMember
 	for rows.Next() {
 		var actorID, role, backend, session, paneID, transportEndpoint, transportKind string
+		var submitMode, health, fallbackPolicy string
 		var unbound int
 		var joinedAt int64
-		if err := rows.Scan(&actorID, &role, &backend, &session, &paneID, &unbound, &joinedAt, &transportEndpoint, &transportKind); err != nil {
+		if err := rows.Scan(
+			&actorID, &role, &backend, &session, &paneID, &unbound, &joinedAt,
+			&transportEndpoint, &transportKind, &submitMode, &health, &fallbackPolicy,
+		); err != nil {
 			return nil, fmt.Errorf("board: scan room member: %w", err)
 		}
-		members = append(members, agent.RoomMember{
+		members = append(members, agent.NormalizeRoomMember(agent.RoomMember{
 			ActorID:           actorID,
 			Role:              role,
 			Backend:           backend,
@@ -1497,7 +1525,17 @@ func (s *boardSQLStore) listRoomMembers(ctx context.Context, workspaceID, roomID
 			JoinedAt:          time.Unix(joinedAt, 0).UTC(),
 			TransportEndpoint: transportEndpoint,
 			TransportKind:     transportKind,
-		})
+			DeliveryBinding: &agent.RoomDeliveryBinding{
+				MuxBackend:        backend,
+				MuxSession:        session,
+				MuxPaneID:         paneID,
+				TransportEndpoint: transportEndpoint,
+				TransportKind:     transportKind,
+				SubmitMode:        submitMode,
+				Health:            health,
+				FallbackPolicy:    fallbackPolicy,
+			},
+		}))
 	}
 	return members, nil
 }

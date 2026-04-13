@@ -11,6 +11,7 @@ This directory contains active planning documents and implementation roadmaps.
 
 ## High-Signal Entrypoints
 
+- `features/internal-package-topology-migration.md` — incremental `internal/*` family cleanup plan; makes the legacy runtime vs `v2` boundary explicit and sequences package-family consolidation.
 - `features/eino-go-native-runtime-plan.md` — Eino `AgentEngine` integration + Go-native `RuntimeSpawner`/reconciler; Jido optional path.
 - `tui-agent-control-plane.md`
 - `v2-implementation-todo.md`

@@ -19,9 +19,11 @@ This is the canonical map for docs in this repository.
 - [docs/general/code-search-evals.md](general/code-search-evals.md) - Stable code-search eval suites, checked-in policies, and wrapper commands.
 - [docs/general/retrieval-evals.md](general/retrieval-evals.md) - Stable ACA retrieval eval suites, wrapper commands, and current expected bands.
 - [docs/general/tmux-collaboration.md](general/tmux-collaboration.md) - tmux-based live collaboration setup, structured pane inspection, and ACA promotion flow.
+- [docs/general/room-runtime-adoption-pass.md](general/room-runtime-adoption-pass.md) - Current adoption matrix for hardened room-runtime semantics and the remaining queued-draft dispatch gap.
 - [configs/skills-pack/agentctl-room/SKILL.md](../configs/skills-pack/agentctl-room/SKILL.md) - Durable shared room coordination skill for room chat, relay, loop, and room tasks.
 - [docs/architecture/](architecture/) - Current runtime architecture docs.
 - [docs/architecture/context-architecture.md](architecture/context-architecture.md) - Workspace-local ACA control plane and top-of-mind slice.
+- [docs/architecture/package-topology.md](architecture/package-topology.md) - Canonical grouping map for `internal/*`, including what is legacy runtime and what `internal/v2/*` is replacing.
 - [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md) - Canonical hybrid-runtime split for Jido orchestration + `agentctl` semantics.
 - [docs/architecture/go-native-runtime-and-optional-jido.md](architecture/go-native-runtime-and-optional-jido.md) - Go-native replacements for Jido dependencies, optional frameworks, and where Eino fits (Jido optional for Elixir/BEAM users).
 - [docs/architecture/auth-identity.md](architecture/auth-identity.md) - Auth, identity, and verification architecture map.
@@ -42,13 +44,14 @@ This is the canonical map for docs in this repository.
 ## Current Runtime Reading Order
 
 1. [docs/architecture/system-architecture.md](architecture/system-architecture.md)
-2. [docs/architecture/context-architecture.md](architecture/context-architecture.md)
-3. [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md)
-3b. [docs/architecture/go-native-runtime-and-optional-jido.md](architecture/go-native-runtime-and-optional-jido.md) (target / migration alignment)
-4. [docs/general/runtime-orchestration.md](general/runtime-orchestration.md)
-5. [docs/general/agent-daemon.md](general/agent-daemon.md)
-6. [docs/spec/agent_hierarchy.md](spec/agent_hierarchy.md)
-7. [docs/spec/overseer_profile.md](spec/overseer_profile.md)
+2. [docs/architecture/package-topology.md](architecture/package-topology.md)
+3. [docs/architecture/context-architecture.md](architecture/context-architecture.md)
+4. [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md)
+4b. [docs/architecture/go-native-runtime-and-optional-jido.md](architecture/go-native-runtime-and-optional-jido.md) (target / migration alignment)
+5. [docs/general/runtime-orchestration.md](general/runtime-orchestration.md)
+6. [docs/general/agent-daemon.md](general/agent-daemon.md)
+7. [docs/spec/agent_hierarchy.md](spec/agent_hierarchy.md)
+8. [docs/spec/overseer_profile.md](spec/overseer_profile.md)
 
 ## Planning Docs
 

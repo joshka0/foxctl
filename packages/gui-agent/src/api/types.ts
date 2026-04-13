@@ -134,8 +134,11 @@ export interface RoomSendMessageResult {
   room_id: string;
   stream: string;
   status: string;
+  message?: string;
   dispatched?: number;
   skipped?: number;
+  delivery_owner?: string;
+  delivery_pending?: boolean;
   live_relay?: RoomLiveRelayResult[];
 }
 
@@ -291,6 +294,7 @@ export function participantTransportKind(state?: ParticipantState): "pane_socket
 export interface RoomMember {
   actor_id: string;
   role?: string;
+  // Legacy mirrored fields; delivery_binding is the canonical source when present.
   backend?: string;
   session?: string;
   pane_id?: string;
@@ -301,6 +305,18 @@ export interface RoomMember {
   unbound?: boolean;
   transport_endpoint?: string;
   transport_kind?: string;
+  delivery_binding?: RoomDeliveryBinding;
+}
+
+export interface RoomDeliveryBinding {
+  mux_backend?: string;
+  mux_session?: string;
+  mux_pane_id?: string;
+  transport_endpoint?: string;
+  transport_kind?: string;
+  submit_mode?: string;
+  health?: string;
+  fallback_policy?: string;
 }
 
 // RoomStatusParticipant is what room status returns — it extends basic membership
@@ -364,6 +380,8 @@ export interface RoomTask {
   id: string;
   workspace_id: string;
   room_id: string;
+  epic_id?: string;
+  milestone_id?: string;
   title: string;
   description?: string;
   status: "pending" | "in_progress" | "blocked" | "completed" | "abandoned";

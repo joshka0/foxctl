@@ -2,18 +2,22 @@ package cmd
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/jkatigb/agentctl/internal/zellijbridge"
@@ -21,12 +25,18 @@ import (
 )
 
 const (
-	roomTaskScanLimit         = 1000
-	roomLoopManagedBy         = "agentctl.room.loop"
-	roomLoopMinimumPulseFloor = 24 * time.Hour
-	roomPulseInterruptLimit   = 2
-	roomPulseBackoffCap       = 8
+	roomTaskScanLimit            = 1000
+	roomLoopManagedBy            = "agentctl.room.loop"
+	roomLoopDefaultPulseInterval = 30 * time.Minute
+	roomLoopDefaultReplyStale    = 2 * time.Hour
+	roomLoopDefaultTaskStale     = 4 * time.Hour
+	roomLoopMinimumPulseFloor    = 24 * time.Hour
+	roomLoopLeaseTTL             = 20 * time.Second
+	roomPulseInterruptLimit      = 2
+	roomPulseBackoffCap          = 8
 )
+
+var errRoomTaskMilestoneNotFound = errors.New("room task milestone not found")
 
 func newRoomTaskCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -115,14 +125,15 @@ func newRoomTaskReassignCommand() *cobra.Command {
 
 func newRoomTaskAddCommand() *cobra.Command {
 	var (
-		workspace  string
-		sender     string
-		title      string
-		desc       string
-		scopePath  string
-		parentID   string
-		dependsOn  []string
-		autoCreate bool
+		workspace   string
+		sender      string
+		title       string
+		desc        string
+		scopePath   string
+		parentID    string
+		milestoneID string
+		dependsOn   []string
+		autoCreate  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "add <room-id>",
@@ -138,9 +149,11 @@ func newRoomTaskAddCommand() *cobra.Command {
 	cmd.Flags().StringVar(&desc, "description", "", "Task description")
 	cmd.Flags().StringVar(&scopePath, "scope", "", "Scope path for the task")
 	cmd.Flags().StringVar(&parentID, "parent", "", "Parent task id")
+	cmd.Flags().StringVar(&milestoneID, "milestone-id", "", "Explicit milestone id to link this task to (defaults to the newest open epic's quiet chores milestone when omitted)")
 	cmd.Flags().StringSliceVar(&dependsOn, "depends-on", nil, "Dependency task ids")
 	cmd.Flags().BoolVar(&autoCreate, "create-room", true, "Create the room if it does not exist")
 	_ = cmd.MarkFlagRequired("title")
+	_ = milestoneID
 	return cmd
 }
 
@@ -343,22 +356,19 @@ func newRoomTaskAbandonCommand() *cobra.Command {
 
 func newRoomLoopCommand() *cobra.Command {
 	var (
-		workspace          string
-		backend            string
-		session            string
-		plugin             string
-		quiet              bool
-		verbose            bool
-		poll               time.Duration
-		taskPoll           time.Duration
-		history            int
-		pulse              time.Duration
-		replyStale         time.Duration
-		taskHeartbeatStale time.Duration
+		workspace string
+		backend   string
+		session   string
+		plugin    string
+		quiet     bool
+		verbose   bool
+		poll      time.Duration
+		taskPoll  time.Duration
+		history   int
 	)
 	cmd := &cobra.Command{
 		Use:   "loop <room-id>",
-		Short: "Run the room coordination loop with relay and task completion broadcasts",
+		Short: "Run the room coordination loop using persisted loop policy",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if quiet && verbose {
@@ -375,17 +385,7 @@ func newRoomLoopCommand() *cobra.Command {
 				ZellijSession:    session,
 				ZellijPluginPath: plugin,
 				TaskEventMode:    taskEventMode,
-			}, poll, taskPoll, history, roomPulseConfig{
-				Enabled:                      pulse > 0,
-				Interval:                     pulse,
-				ReplyStaleAfter:              replyStale,
-				TaskStaleAfter:               taskHeartbeatStale,
-				MinPulseFloor:                roomLoopMinimumPulseFloor,
-				InterruptAttemptLimit:        roomPulseInterruptLimit,
-				ReminderBackoffCap:           roomPulseBackoffCap,
-				CoordinatorPulseEnabled:      true,
-				CoordinatorEscalationEnabled: true,
-			})
+			}, poll, taskPoll, history, roomPulseConfig{})
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -397,9 +397,6 @@ func newRoomLoopCommand() *cobra.Command {
 	cmd.Flags().DurationVar(&poll, "poll", 2*time.Second, "Room message polling interval")
 	cmd.Flags().DurationVar(&taskPoll, "task-poll", 3*time.Second, "Room task polling interval")
 	cmd.Flags().IntVar(&history, "history", 0, "Number of most recent room messages to replay into participants on startup")
-	cmd.Flags().DurationVar(&pulse, "pulse", 30*time.Second, "Reminder pulse interval (0 disables reminders)")
-	cmd.Flags().DurationVar(&replyStale, "reply-stale", 2*time.Minute, "Reminder threshold for direct ack/reply requests")
-	cmd.Flags().DurationVar(&taskHeartbeatStale, "task-stale", 5*time.Minute, "Reminder threshold for claimed or blocked tasks without task heartbeat movement")
 	return cmd
 }
 
@@ -426,7 +423,7 @@ func runRoomTaskAdd(cmd *cobra.Command, workspace, roomID, sender, title, desc, 
 		}
 	}
 	roomID = strings.TrimSpace(roomID)
-	summary, err := boardStore.GetRoom(cmd.Context(), absWorkspace, roomID, "")
+	summary, messages, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, "", roomTaskScanLimit)
 	if err != nil {
 		code := protocol.ErrorCodeERuntime
 		if errors.Is(err, blackboard.ErrRoomNotFound) {
@@ -452,6 +449,22 @@ func runRoomTaskAdd(cmd *cobra.Command, workspace, roomID, sender, title, desc, 
 	if resolved := resolveSandboxScopePath(cmd.Context(), boardStore, absWorkspace, roomID, effectiveScopePath); resolved != effectiveScopePath {
 		effectiveScopePath = resolved
 	}
+	selectedMilestoneID := ""
+	if cmd != nil && cmd.Flags() != nil {
+		if flag := cmd.Flags().Lookup("milestone-id"); flag != nil {
+			selectedMilestoneID = strings.TrimSpace(flag.Value.String())
+		}
+	}
+	selectedEpicID, selectedMilestoneID, err := resolveRoomTaskMilestoneSelection(messages, selectedMilestoneID)
+	if err != nil {
+		code := protocol.ErrorCodeEARG
+		if errors.Is(err, errRoomTaskMilestoneNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.add", code, err.Error(), map[string]any{
+			"hint": "Use a milestone id returned by `agentctl room milestone start` or listed in `agentctl room milestone show`, or omit --milestone-id to use the default chores lane.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 
 	task, err := taskStore.Add(cmd.Context(), taskstore.Task{
 		WorkspaceID: taskWorkspaceID,
@@ -461,6 +474,8 @@ func runRoomTaskAdd(cmd *cobra.Command, workspace, roomID, sender, title, desc, 
 		ParentID:    strings.TrimSpace(parentID),
 		DependsOn:   append([]string(nil), dependsOn...),
 		Status:      taskstore.StatusPending,
+		EpicID:      selectedEpicID,
+		MilestoneID: selectedMilestoneID,
 	})
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -565,16 +580,25 @@ func runRoomTaskComplete(cmd *cobra.Command, workspace, roomID, sender, taskID, 
 	if task.Status == taskstore.StatusBlocked {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeEARG, "blocked tasks must be unblocked before completion", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	if task.Status != taskstore.StatusInProgress {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeEARG, "only in-progress tasks can be completed", map[string]any{
+			"status": task.Status,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 
 	now := time.Now().UTC()
 	task.Status = taskstore.StatusCompleted
 	task.CompletedAt = &now
 	task.OwnerActorID = ""
+	task.ClaimedAt = nil
 	task.HeartbeatAt = &now
 	task.BlockedReason = ""
 	task.BlockedAt = nil
 	task.Notes = strings.TrimSpace(notes)
 	task.Gotchas = strings.TrimSpace(gotchas)
+	if err := validateRoomTaskLifecycle(task); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeEARG, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	task, err = taskStore.Update(cmd.Context(), task)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.complete", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -644,11 +668,28 @@ func runRoomTaskAssign(cmd *cobra.Command, workspace, roomID, sender, taskID, re
 	if task.Status == taskstore.StatusCompleted {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeEARG, "completed tasks cannot be assigned", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	if task.Status == taskstore.StatusCanceled {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeEARG, "canceled tasks cannot be assigned", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if strings.TrimSpace(task.OwnerActorID) != "" || task.Status == taskstore.StatusInProgress || task.Status == taskstore.StatusBlocked {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeEARG, "claimed tasks must be reassigned instead of assigned", map[string]any{
+			"status":         task.Status,
+			"owner_actor_id": task.OwnerActorID,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	now := time.Now().UTC()
+	if assigned := strings.TrimSpace(task.AssignedActorID); assigned != "" && !sameRoomParticipant(assigned, recipient) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeEARG, "task is already assigned; use reassign to change assignee", map[string]any{
+			"assigned_actor_id": task.AssignedActorID,
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	task.AssignedActorID = recipient
 	task.AssignedAt = &now
 	if strings.TrimSpace(notes) != "" {
 		task.Notes = strings.TrimSpace(notes)
+	}
+	if err := validateRoomTaskLifecycle(task); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeEARG, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	task, err = taskStore.Update(cmd.Context(), task)
 	if err != nil {
@@ -686,16 +727,17 @@ func runRoomTaskAssign(cmd *cobra.Command, workspace, roomID, sender, taskID, re
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.assign", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	out := map[string]any{
-		"room_id":         strings.TrimSpace(roomID),
-		"task":            task,
-		"assignee":        recipient,
-		"message_id":      direct.ID,
-		"sender_identity": identity,
+		"room_id":          strings.TrimSpace(roomID),
+		"task":             task,
+		"assignee":         recipient,
+		"message_id":       direct.ID,
+		"status":           "queued",
+		"delivery_owner":   "room_loop",
+		"delivery_pending": true,
+		"sender_identity":  identity,
 	}
 	if roomTaskNoLiveRelay(cmd) {
-		out["live_relay_skipped"] = true
-	} else {
-		out["live_relay"] = relayPersistedRoomMessages(cmd.Context(), boardStore, absWorkspace, roomID, []*agent.BoardMessage{direct})
+		out["warnings"] = []string{"--no-live-relay is deprecated for task assignment; assignment delivery is room-loop owned"}
 	}
 	if opts.ProvisionPane {
 		provisioned, provisionErr := provisionAssigneePane(cmd.Context(), absWorkspace, strings.TrimSpace(roomID), summary, recipient, opts)
@@ -728,8 +770,14 @@ func runRoomTaskReassign(cmd *cobra.Command, workspace, roomID, sender, taskID, 
 	if task.Status == taskstore.StatusCompleted {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reassign", protocol.ErrorCodeEARG, "completed tasks cannot be reassigned", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	if task.Status == taskstore.StatusCanceled {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reassign", protocol.ErrorCodeEARG, "canceled tasks cannot be reassigned", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	previousOwner := strings.TrimSpace(task.OwnerActorID)
 	previousAssignee := strings.TrimSpace(task.AssignedActorID)
+	if previousOwner == "" && previousAssignee == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reassign", protocol.ErrorCodeEARG, "task has no current assignee or owner; use assign instead", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	now := time.Now().UTC()
 	task.Status = taskstore.StatusPending
 	task.AssignedActorID = recipient
@@ -739,6 +787,9 @@ func runRoomTaskReassign(cmd *cobra.Command, workspace, roomID, sender, taskID, 
 	task.HeartbeatAt = nil
 	task.BlockedReason = ""
 	task.BlockedAt = nil
+	if err := validateRoomTaskLifecycle(task); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reassign", protocol.ErrorCodeEARG, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	task, err = taskStore.Update(cmd.Context(), task)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reassign", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -770,6 +821,9 @@ func runRoomTaskReclaim(cmd *cobra.Command, workspace, roomID, sender, taskID, r
 	if task.Status == taskstore.StatusCompleted {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reclaim", protocol.ErrorCodeEARG, "completed tasks cannot be reclaimed", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	if task.Status == taskstore.StatusCanceled {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reclaim", protocol.ErrorCodeEARG, "canceled tasks cannot be reclaimed", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	task.Status = taskstore.StatusPending
 	task.AssignedActorID = ""
 	task.AssignedAt = nil
@@ -778,6 +832,9 @@ func runRoomTaskReclaim(cmd *cobra.Command, workspace, roomID, sender, taskID, r
 	task.HeartbeatAt = nil
 	task.BlockedReason = ""
 	task.BlockedAt = nil
+	if err := validateRoomTaskLifecycle(task); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reclaim", protocol.ErrorCodeEARG, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	task, err = taskStore.Update(cmd.Context(), task)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.reclaim", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -846,6 +903,14 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 		if task.Status == taskstore.StatusCompleted {
 			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.claim", protocol.ErrorCodeEARG, "completed tasks cannot be claimed", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
+		if task.Status == taskstore.StatusCanceled {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.claim", protocol.ErrorCodeEARG, "canceled tasks cannot be claimed", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		if task.Status != taskstore.StatusPending {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.claim", protocol.ErrorCodeEARG, "only pending tasks can be claimed", map[string]any{
+				"status": task.Status,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
 		if assigned := strings.TrimSpace(task.AssignedActorID); assigned != "" && !sameRoomParticipant(assigned, identity.Sender) {
 			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.claim", protocol.ErrorCodeEARG, "task is assigned to another participant", map[string]any{
 				"assigned_actor_id": task.AssignedActorID,
@@ -893,6 +958,11 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 				"owner_actor_id": task.OwnerActorID,
 			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
+		if task.Status != taskstore.StatusInProgress {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.block", protocol.ErrorCodeEARG, "only in-progress tasks can be blocked", map[string]any{
+				"status": task.Status,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
 		task.Status = taskstore.StatusBlocked
 		task.BlockedReason = strings.TrimSpace(reason)
 		task.BlockedAt = &now
@@ -906,11 +976,21 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 				"owner_actor_id": task.OwnerActorID,
 			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 		}
+		if task.Status != taskstore.StatusBlocked {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.unblock", protocol.ErrorCodeEARG, "only blocked tasks can be unblocked", map[string]any{
+				"status": task.Status,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
 		task.Status = taskstore.StatusInProgress
 		task.BlockedReason = ""
 		task.BlockedAt = nil
 		task.HeartbeatAt = &now
 	case "abandon":
+		if task.Status == taskstore.StatusCompleted || task.Status == taskstore.StatusCanceled {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.abandon", protocol.ErrorCodeEARG, "completed or canceled tasks cannot be abandoned", map[string]any{
+				"status": task.Status,
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
 		if task.OwnerActorID != "" && task.OwnerActorID != identity.Sender {
 			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task.abandon", protocol.ErrorCodeEARG, "only the current owner can abandon this task", map[string]any{
 				"owner_actor_id": task.OwnerActorID,
@@ -930,6 +1010,9 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 	default:
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeEARG, "unsupported room task action", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	if err := validateRoomTaskLifecycle(task); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.task."+action, protocol.ErrorCodeEARG, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 
 	task, err = taskStore.Update(cmd.Context(), task)
 	if err != nil {
@@ -944,9 +1027,74 @@ func runRoomTaskTransition(cmd *cobra.Command, workspace, roomID, sender, taskID
 	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.room.task."+action, out, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
+func validateRoomTaskLifecycle(task taskstore.Task) error {
+	assigned := strings.TrimSpace(task.AssignedActorID)
+	owner := strings.TrimSpace(task.OwnerActorID)
+	blockedReason := strings.TrimSpace(task.BlockedReason)
+	switch task.Status {
+	case taskstore.StatusPending:
+		if owner != "" || task.ClaimedAt != nil {
+			return fmt.Errorf("pending task cannot retain an owner or claimed timestamp")
+		}
+		if blockedReason != "" || task.BlockedAt != nil {
+			return fmt.Errorf("pending task cannot retain blocked state")
+		}
+		if task.CompletedAt != nil {
+			return fmt.Errorf("pending task cannot retain completed state")
+		}
+	case taskstore.StatusInProgress:
+		if owner == "" || task.ClaimedAt == nil {
+			return fmt.Errorf("in-progress task requires an owner and claimed timestamp")
+		}
+		if assigned != "" && !sameRoomParticipant(assigned, owner) {
+			return fmt.Errorf("in-progress task assignee must match current owner")
+		}
+		if blockedReason != "" || task.BlockedAt != nil {
+			return fmt.Errorf("in-progress task cannot retain blocked state")
+		}
+		if task.CompletedAt != nil {
+			return fmt.Errorf("in-progress task cannot retain completed state")
+		}
+	case taskstore.StatusBlocked:
+		if owner == "" || task.ClaimedAt == nil {
+			return fmt.Errorf("blocked task requires an owner and claimed timestamp")
+		}
+		if assigned != "" && !sameRoomParticipant(assigned, owner) {
+			return fmt.Errorf("blocked task assignee must match current owner")
+		}
+		if blockedReason == "" || task.BlockedAt == nil {
+			return fmt.Errorf("blocked task requires blocked reason and blocked timestamp")
+		}
+		if task.CompletedAt != nil {
+			return fmt.Errorf("blocked task cannot retain completed state")
+		}
+	case taskstore.StatusCompleted:
+		if task.CompletedAt == nil {
+			return fmt.Errorf("completed task requires completed timestamp")
+		}
+		if owner != "" || task.ClaimedAt != nil {
+			return fmt.Errorf("completed task cannot retain an owner or claimed timestamp")
+		}
+		if blockedReason != "" || task.BlockedAt != nil {
+			return fmt.Errorf("completed task cannot retain blocked state")
+		}
+	case taskstore.StatusCanceled:
+		if owner != "" || task.ClaimedAt != nil {
+			return fmt.Errorf("canceled task cannot retain an owner or claimed timestamp")
+		}
+		if blockedReason != "" || task.BlockedAt != nil {
+			return fmt.Errorf("canceled task cannot retain blocked state")
+		}
+	default:
+		return fmt.Errorf("unsupported task status %q", task.Status)
+	}
+	return nil
+}
+
 type roomPulseConfig struct {
 	Enabled                      bool
 	Interval                     time.Duration
+	TaskFollowupInterval         time.Duration
 	ReplyStaleAfter              time.Duration
 	TaskStaleAfter               time.Duration
 	MinPulseFloor                time.Duration
@@ -954,6 +1102,18 @@ type roomPulseConfig struct {
 	ReminderBackoffCap           int
 	CoordinatorPulseEnabled      bool
 	CoordinatorEscalationEnabled bool
+}
+
+type roomLoopRuntimeState struct {
+	DeliveryLeaseName       string
+	DeliveryOwnerID         string
+	DeliveryCursorMessageID string
+	DeliveryCursorAt        *time.Time
+	LastDeliveryTrace       *coordination.RoomLoopDeliveryTrace
+	ReplyPulseState         map[string]roomPulseState
+	TaskPulseState          map[string]roomPulseState
+	TaskFollowupState       map[string]time.Time
+	CoordinatorPulseState   map[string]time.Time
 }
 
 func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOptions, poll, taskPoll time.Duration, history int, pulse roomPulseConfig) error {
@@ -984,12 +1144,28 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 	client := tmuxbridge.New()
 	writer := envelope.NewWriter(cmd.OutOrStdout())
 	seq := 0
-
-	persistedLoop, err := syncRoomLoopState(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC())
+	startedAt := time.Now().UTC()
+	runtime := roomLoopRuntimeState{
+		DeliveryLeaseName: roomLoopLeaseName(absWorkspace, roomID),
+		DeliveryOwnerID:   roomLoopOwnerID(startedAt),
+	}
+	acquired, err := coordStore.TryAcquireLease(cmd.Context(), runtime.DeliveryLeaseName, runtime.DeliveryOwnerID, roomLoopLeaseTTL)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	pulse = persistedLoop
+	if !acquired {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeEPolicy, fmt.Sprintf("room delivery owner already active for %q", roomID), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer func() {
+		errs.Ignore(coordStore.ReleaseLease(context.Background(), runtime.DeliveryLeaseName, runtime.DeliveryOwnerID), "release room loop delivery lease")
+	}()
+
+	persistedLoop, err := syncRoomLoopState(cmd.Context(), coordStore, absWorkspace, roomID, pulse, startedAt, runtime)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	pulse = roomPulseConfigFromStore(persistedLoop)
+	runtime = roomLoopRuntimeStateFromStore(persistedLoop)
 
 	summary, messages, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, "", roomTaskScanLimit)
 	if err != nil {
@@ -1000,20 +1176,23 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
-	seenMessages := make(map[string]struct{}, len(messages))
+	seenMessages := roomLoopSeedSeenMessages(messages, runtime)
 	announcedStates := make(map[string]string)
 	for _, msg := range messages {
-		seenMessages[msg.ID] = struct{}{}
 		if msg.TaskID != "" {
 			if task, err := taskStore.Get(cmd.Context(), msg.TaskID); err == nil {
 				announcedStates[msg.TaskID] = task.Status
 			}
 		}
 	}
-	initial := trimRoomHistory(messages, history)
+	initial := roomLoopInitialMessages(messages, history, runtime)
 	for _, msg := range initial {
 		seq++
 		result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+		if err := persistRoomLoopRelayObservation(cmd.Context(), coordStore, absWorkspace, roomID, pulse, summary, msg, result, time.Now().UTC(), &runtime); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		seenMessages[msg.ID] = struct{}{}
 		if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 			"event":   "room_relay",
 			"room_id": roomID,
@@ -1035,16 +1214,10 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 	defer taskTicker.Stop()
 	configTicker := time.NewTicker(5 * time.Second)
 	defer configTicker.Stop()
-	var pulseTicker *time.Ticker
-	if pulse.Enabled && pulse.Interval > 0 {
-		pulseTicker = time.NewTicker(pulse.Interval)
+	pulseTicker := resetRoomPulseTicker(nil, pulse)
+	if pulseTicker != nil {
 		defer pulseTicker.Stop()
 	}
-	remindedMessages := map[string]roomPulseState{}
-	remindedTasks := map[string]roomPulseState{}
-	remindedTaskFollowups := map[string]time.Time{}
-	remindedCoordinators := map[string]time.Time{}
-
 	for {
 		select {
 		case <-cmd.Context().Done():
@@ -1057,10 +1230,11 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				m.Final = &final
 			})))
 		case <-messageTicker.C:
-			updatedPulse, pulseChanged, err := refreshRoomLoopPolicy(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC())
+			updatedPulse, updatedRuntime, pulseChanged, err := refreshRoomLoopPolicy(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC(), runtime)
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
+			runtime = updatedRuntime
 			if pulseChanged {
 				pulse = updatedPulse
 				pulseTicker = resetRoomPulseTicker(pulseTicker, pulse)
@@ -1073,6 +1247,10 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				if _, ok := seenMessages[msg.ID]; ok {
 					continue
 				}
+				if !roomLoopMessageAfterCursor(msg, runtime.DeliveryCursorAt, runtime.DeliveryCursorMessageID) {
+					seenMessages[msg.ID] = struct{}{}
+					continue
+				}
 				seenMessages[msg.ID] = struct{}{}
 				if msg.TaskID != "" {
 					if task, err := taskStore.Get(cmd.Context(), msg.TaskID); err == nil {
@@ -1082,6 +1260,9 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				}
 				seq++
 				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := persistRoomLoopRelayObservation(cmd.Context(), coordStore, absWorkspace, roomID, pulse, summary, msg, result, time.Now().UTC(), &runtime); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 					"event":   "room_relay",
 					"room_id": roomID,
@@ -1092,10 +1273,11 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				}
 			}
 		case <-taskTicker.C:
-			updatedPulse, pulseChanged, err := refreshRoomLoopPolicy(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC())
+			updatedPulse, updatedRuntime, pulseChanged, err := refreshRoomLoopPolicy(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC(), runtime)
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
+			runtime = updatedRuntime
 			if pulseChanged {
 				pulse = updatedPulse
 				pulseTicker = resetRoomPulseTicker(pulseTicker, pulse)
@@ -1138,6 +1320,9 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
 				relayResult := relayRoomMessage(cmd.Context(), client, summary, *msg, relay)
+				if err := persistRoomLoopRelayObservation(cmd.Context(), coordStore, absWorkspace, roomID, pulse, summary, *msg, relayResult, time.Now().UTC(), &runtime); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
 				seq++
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 					"event":   "task_transition",
@@ -1151,10 +1336,11 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				}
 			}
 		case <-configTicker.C:
-			updatedPulse, pulseChanged, err := refreshRoomLoopPolicy(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC())
+			updatedPulse, updatedRuntime, pulseChanged, err := refreshRoomLoopPolicy(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC(), runtime)
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
+			runtime = updatedRuntime
 			if pulseChanged {
 				pulse = updatedPulse
 				pulseTicker = resetRoomPulseTicker(pulseTicker, pulse)
@@ -1174,6 +1360,9 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				seenMessages[msg.ID] = struct{}{}
 				seq++
 				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := persistRoomLoopRelayObservation(cmd.Context(), coordStore, absWorkspace, roomID, pulse, summary, msg, result, time.Now().UTC(), &runtime); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 					"event":   "room_reminder",
 					"room_id": roomID,
@@ -1184,6 +1373,15 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 				}
 			}
 		case <-roomPulseChan(pulseTicker):
+			updatedPulse, updatedRuntime, pulseChanged, err := refreshRoomLoopPolicy(cmd.Context(), coordStore, absWorkspace, roomID, pulse, time.Now().UTC(), runtime)
+			if err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			runtime = updatedRuntime
+			if pulseChanged {
+				pulse = updatedPulse
+				pulseTicker = resetRoomPulseTicker(pulseTicker, pulse)
+			}
 			summary, current, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, "", roomTaskScanLimit)
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -1196,18 +1394,30 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
-			cleanupRoomReplyPulseState(current, time.Now().UTC(), pulse, remindedMessages)
-			cleanupRoomTaskPulseState(roomTasks, time.Now().UTC(), pulse, remindedTasks)
-			cleanupRoomTaskFollowupState(roomTasks, remindedTaskFollowups)
-			for _, pulseMsg := range detectRoomPulseMessages(roomID, current, time.Now().UTC(), pulse, remindedMessages, reminderRoots) {
+			suppression := buildRoomActionSuppression(current, roomTasks, reminderRoots)
+			dirtyRuntime := false
+			if cleanupRoomReplyPulseState(current, roomTasks, time.Now().UTC(), pulse, runtime.ReplyPulseState, suppression) {
+				dirtyRuntime = true
+			}
+			if cleanupRoomTaskPulseState(roomTasks, time.Now().UTC(), pulse, runtime.TaskPulseState, suppression) {
+				dirtyRuntime = true
+			}
+			if cleanupRoomTaskFollowupState(roomTasks, runtime.TaskFollowupState, suppression) {
+				dirtyRuntime = true
+			}
+			for _, pulseMsg := range detectRoomPulseMessages(roomID, current, roomTasks, time.Now().UTC(), pulse, runtime.ReplyPulseState, suppression) {
 				msg := pulseMsg.Message
 				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
-				markRoomPulseState(remindedMessages, pulseMsg.Key, msg.CreatedAt, false)
+				markRoomPulseState(runtime.ReplyPulseState, pulseMsg.Key, msg.CreatedAt, false)
+				dirtyRuntime = true
 				seenMessages[msg.ID] = struct{}{}
 				seq++
 				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := persistRoomLoopRelayObservation(cmd.Context(), coordStore, absWorkspace, roomID, pulse, summary, msg, result, time.Now().UTC(), &runtime); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 					"event":   "room_pulse",
 					"room_id": roomID,
@@ -1217,15 +1427,19 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					return fmt.Errorf("write room loop pulse envelope: %w", err)
 				}
 			}
-			for _, pulseMsg := range detectRoomTaskFollowupMessages(summary, roomTasks, time.Now().UTC(), pulse, remindedTaskFollowups) {
+			for _, pulseMsg := range detectRoomTaskFollowupMessages(summary, roomTasks, time.Now().UTC(), pulse, runtime.TaskFollowupState, suppression) {
 				msg := pulseMsg.Message
 				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
-				remindedTaskFollowups[pulseMsg.Key] = msg.CreatedAt
+				runtime.TaskFollowupState[pulseMsg.Key] = msg.CreatedAt
+				dirtyRuntime = true
 				seenMessages[msg.ID] = struct{}{}
 				seq++
 				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := persistRoomLoopRelayObservation(cmd.Context(), coordStore, absWorkspace, roomID, pulse, summary, msg, result, time.Now().UTC(), &runtime); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 					"event":   "task_followup",
 					"room_id": roomID,
@@ -1235,15 +1449,19 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					return fmt.Errorf("write room loop task follow-up envelope: %w", err)
 				}
 			}
-			for _, pulseMsg := range detectRoomTaskPulseMessages(absWorkspace, roomID, roomTasks, time.Now().UTC(), pulse, remindedTasks) {
+			for _, pulseMsg := range detectRoomTaskPulseMessages(absWorkspace, roomID, roomTasks, time.Now().UTC(), pulse, runtime.TaskPulseState, suppression) {
 				msg := pulseMsg.Message
 				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
-				markRoomPulseState(remindedTasks, pulseMsg.Key, msg.CreatedAt, false)
+				markRoomPulseState(runtime.TaskPulseState, pulseMsg.Key, msg.CreatedAt, false)
+				dirtyRuntime = true
 				seenMessages[msg.ID] = struct{}{}
 				seq++
 				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := persistRoomLoopRelayObservation(cmd.Context(), coordStore, absWorkspace, roomID, pulse, summary, msg, result, time.Now().UTC(), &runtime); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 					"event":   "task_pulse",
 					"room_id": roomID,
@@ -1253,15 +1471,19 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					return fmt.Errorf("write room loop task pulse envelope: %w", err)
 				}
 			}
-			for _, pulseMsg := range detectRoomPulseEscalationMessages(summary, current, time.Now().UTC(), pulse, remindedMessages, reminderRoots) {
+			for _, pulseMsg := range detectRoomPulseEscalationMessages(summary, current, roomTasks, time.Now().UTC(), pulse, runtime.ReplyPulseState, suppression) {
 				msg := pulseMsg.Message
 				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
-				markRoomPulseState(remindedMessages, pulseMsg.Key, msg.CreatedAt, true)
+				markRoomPulseState(runtime.ReplyPulseState, pulseMsg.Key, msg.CreatedAt, true)
+				dirtyRuntime = true
 				seenMessages[msg.ID] = struct{}{}
 				seq++
 				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := persistRoomLoopRelayObservation(cmd.Context(), coordStore, absWorkspace, roomID, pulse, summary, msg, result, time.Now().UTC(), &runtime); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 					"event":   "room_pulse_escalation",
 					"room_id": roomID,
@@ -1271,15 +1493,19 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					return fmt.Errorf("write room loop pulse escalation envelope: %w", err)
 				}
 			}
-			for _, pulseMsg := range detectRoomTaskEscalationMessages(summary, roomTasks, time.Now().UTC(), pulse, remindedTasks) {
+			for _, pulseMsg := range detectRoomTaskEscalationMessages(summary, roomTasks, time.Now().UTC(), pulse, runtime.TaskPulseState, suppression) {
 				msg := pulseMsg.Message
 				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
-				markRoomPulseState(remindedTasks, pulseMsg.Key, msg.CreatedAt, true)
+				markRoomPulseState(runtime.TaskPulseState, pulseMsg.Key, msg.CreatedAt, true)
+				dirtyRuntime = true
 				seenMessages[msg.ID] = struct{}{}
 				seq++
 				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := persistRoomLoopRelayObservation(cmd.Context(), coordStore, absWorkspace, roomID, pulse, summary, msg, result, time.Now().UTC(), &runtime); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 					"event":   "task_pulse_escalation",
 					"room_id": roomID,
@@ -1289,15 +1515,19 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					return fmt.Errorf("write room loop task escalation envelope: %w", err)
 				}
 			}
-			for _, pulseMsg := range detectRoomCoordinatorPulseMessages(summary, current, roomTasks, time.Now().UTC(), pulse, remindedCoordinators, reminderRoots) {
+			for _, pulseMsg := range detectRoomCoordinatorPulseMessages(summary, current, roomTasks, time.Now().UTC(), pulse, runtime.CoordinatorPulseState, suppression) {
 				msg := pulseMsg.Message
 				if err := boardStore.SendMessage(cmd.Context(), &msg); err != nil {
 					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
-				remindedCoordinators[pulseMsg.Key] = msg.CreatedAt
+				runtime.CoordinatorPulseState[pulseMsg.Key] = msg.CreatedAt
+				dirtyRuntime = true
 				seenMessages[msg.ID] = struct{}{}
 				seq++
 				result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
+				if err := persistRoomLoopRelayObservation(cmd.Context(), coordStore, absWorkspace, roomID, pulse, summary, msg, result, time.Now().UTC(), &runtime); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
 				if err := writer.Write(roomProgressEnvelope("agentctl.room.loop", seq, false, map[string]any{
 					"event":   "coordinator_pulse",
 					"room_id": roomID,
@@ -1305,6 +1535,11 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 					"relay":   result,
 				}, absWorkspace)); err != nil {
 					return fmt.Errorf("write room loop coordinator pulse envelope: %w", err)
+				}
+			}
+			if dirtyRuntime {
+				if err := persistRoomLoopRuntime(cmd.Context(), coordStore, absWorkspace, roomID, pulse, runtime); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 				}
 			}
 		}
@@ -1319,6 +1554,15 @@ func roomPulseChan(t *time.Ticker) <-chan time.Time {
 }
 
 func defaultRoomLoopPolicy(workspaceID, roomID string, pulse roomPulseConfig) coordination.RoomLoop {
+	if pulse.Interval <= 0 {
+		pulse.Interval = roomLoopDefaultPulseInterval
+	}
+	if pulse.ReplyStaleAfter <= 0 {
+		pulse.ReplyStaleAfter = roomLoopDefaultReplyStale
+	}
+	if pulse.TaskStaleAfter <= 0 {
+		pulse.TaskStaleAfter = roomLoopDefaultTaskStale
+	}
 	if pulse.MinPulseFloor <= 0 {
 		pulse.MinPulseFloor = roomLoopMinimumPulseFloor
 	}
@@ -1328,8 +1572,8 @@ func defaultRoomLoopPolicy(workspaceID, roomID string, pulse roomPulseConfig) co
 	if pulse.ReminderBackoffCap <= 0 {
 		pulse.ReminderBackoffCap = roomPulseBackoffCap
 	}
-	if pulse.Interval <= 0 {
-		pulse.Enabled = false
+	if !pulse.Enabled {
+		pulse.Enabled = true
 	}
 	return coordination.RoomLoop{
 		WorkspaceID:                  strings.TrimSpace(workspaceID),
@@ -1337,6 +1581,7 @@ func defaultRoomLoopPolicy(workspaceID, roomID string, pulse roomPulseConfig) co
 		Enabled:                      pulse.Enabled,
 		ManagedBy:                    roomLoopManagedBy,
 		PulseInterval:                pulse.Interval,
+		TaskFollowupInterval:         pulse.TaskFollowupInterval,
 		ReplyStaleAfter:              pulse.ReplyStaleAfter,
 		TaskStaleAfter:               pulse.TaskStaleAfter,
 		MinPulseFloor:                pulse.MinPulseFloor,
@@ -1347,51 +1592,197 @@ func defaultRoomLoopPolicy(workspaceID, roomID string, pulse roomPulseConfig) co
 	}
 }
 
-func syncRoomLoopState(ctx context.Context, store *coordination.Store, workspaceID, roomID string, current roomPulseConfig, tickAt time.Time) (roomPulseConfig, error) {
+func roomLoopLeaseName(workspaceID, roomID string) string {
+	return fmt.Sprintf("room-loop:%s:%s:delivery", ws.CanonicalWorkspaceKey(workspaceID), strings.TrimSpace(roomID))
+}
+
+func roomLoopOwnerID(now time.Time) string {
+	host, err := os.Hostname()
+	if err != nil || strings.TrimSpace(host) == "" {
+		host = "unknown"
+	}
+	return fmt.Sprintf("%s:%s:%d:%d", roomLoopManagedBy, strings.TrimSpace(host), os.Getpid(), now.UTC().UnixNano())
+}
+
+func roomLoopRuntimeStateFromStore(loop coordination.RoomLoop) roomLoopRuntimeState {
+	return roomLoopRuntimeState{
+		DeliveryLeaseName:       strings.TrimSpace(loop.DeliveryLeaseName),
+		DeliveryOwnerID:         strings.TrimSpace(loop.DeliveryOwnerID),
+		DeliveryCursorMessageID: strings.TrimSpace(loop.DeliveryCursorMessageID),
+		DeliveryCursorAt:        loop.DeliveryCursorAt,
+		LastDeliveryTrace:       loop.LastDeliveryTrace,
+		ReplyPulseState:         coordinationPulseStatesToRuntime(loop.ReplyPulseState),
+		TaskPulseState:          coordinationPulseStatesToRuntime(loop.TaskPulseState),
+		TaskFollowupState:       copyRoomLoopTimeMap(loop.TaskFollowupState),
+		CoordinatorPulseState:   copyRoomLoopTimeMap(loop.CoordinatorPulseState),
+	}
+}
+
+func applyRoomLoopRuntimeState(loop *coordination.RoomLoop, runtime roomLoopRuntimeState) {
+	if loop == nil {
+		return
+	}
+	loop.DeliveryLeaseName = strings.TrimSpace(runtime.DeliveryLeaseName)
+	loop.DeliveryOwnerID = strings.TrimSpace(runtime.DeliveryOwnerID)
+	loop.DeliveryCursorMessageID = strings.TrimSpace(runtime.DeliveryCursorMessageID)
+	loop.DeliveryCursorAt = runtime.DeliveryCursorAt
+	loop.LastDeliveryTrace = runtime.LastDeliveryTrace
+	loop.ReplyPulseState = runtimePulseStatesToCoordination(runtime.ReplyPulseState)
+	loop.TaskPulseState = runtimePulseStatesToCoordination(runtime.TaskPulseState)
+	loop.TaskFollowupState = copyRoomLoopTimeMap(runtime.TaskFollowupState)
+	loop.CoordinatorPulseState = copyRoomLoopTimeMap(runtime.CoordinatorPulseState)
+}
+
+func updateRoomLoopLastDeliveryTrace(room agent.RoomSummary, msg agent.BoardMessage, relayResult roomRelayResult, before roomLoopRuntimeState, after roomLoopRuntimeState, observedAt time.Time) *coordination.RoomLoopDeliveryTrace {
+	trace := &coordination.RoomLoopDeliveryTrace{
+		WorkspaceID:           strings.TrimSpace(room.WorkspaceID),
+		RoomID:                strings.TrimSpace(room.ID),
+		MessageID:             strings.TrimSpace(msg.ID),
+		TaskID:                strings.TrimSpace(msg.TaskID),
+		Recipient:             normalizeRoomRecipient(msg.Recipient),
+		DeliveryLeaseName:     strings.TrimSpace(after.DeliveryLeaseName),
+		DeliveryOwnerID:       strings.TrimSpace(after.DeliveryOwnerID),
+		RelayBackend:          strings.TrimSpace(relayResult.Backend),
+		FallbackAttempted:     relayResult.FallbackAttempted,
+		DeliveredCount:        relayResult.DeliveredCount,
+		FailedCount:           relayResult.FailedCount,
+		DeliveredTo:           append([]string(nil), relayResult.DeliveredTo...),
+		FailedMembers:         append([]string(nil), relayResult.FailedMembers...),
+		CursorBeforeMessageID: strings.TrimSpace(before.DeliveryCursorMessageID),
+		CursorAfterMessageID:  strings.TrimSpace(after.DeliveryCursorMessageID),
+		CursorAdvanced:        strings.TrimSpace(before.DeliveryCursorMessageID) != strings.TrimSpace(after.DeliveryCursorMessageID),
+		ObservedAt:            observedAt.UTC(),
+	}
+	switch {
+	case relayResult.DeliveredCount > 0 && relayResult.FailedCount > 0:
+		trace.Outcome = "partial"
+	case relayResult.DeliveredCount > 0:
+		trace.Outcome = "delivered"
+	case relayResult.FailedCount > 0 || strings.TrimSpace(relayResult.Error) != "":
+		trace.Outcome = "failed"
+	case len(relayResult.SkippedMembers) > 0:
+		trace.Outcome = "skipped"
+	default:
+		trace.Outcome = "no_targets"
+	}
+	if recipient := normalizeRoomRecipient(msg.Recipient); recipient != "" && recipient != agent.BroadcastRecipient {
+		for _, member := range room.Members {
+			member = normalizeRoomMember(member)
+			if !sameRoomParticipant(member.ActorID, recipient) {
+				continue
+			}
+			trace.ChosenActorID = strings.TrimSpace(member.ActorID)
+			if binding := member.DeliveryBinding; binding != nil {
+				trace.ChosenMuxBackend = strings.TrimSpace(binding.MuxBackend)
+				trace.ChosenMuxSession = strings.TrimSpace(binding.MuxSession)
+				trace.ChosenMuxPaneID = strings.TrimSpace(binding.MuxPaneID)
+				trace.ChosenTransportEndpoint = strings.TrimSpace(binding.TransportEndpoint)
+				trace.ChosenTransportKind = strings.TrimSpace(binding.TransportKind)
+			}
+			trace.ChosenSubmitMode = roomMemberSubmitMode(member)
+			break
+		}
+	}
+	return trace
+}
+
+func persistRoomLoopRelayObservation(ctx context.Context, store *coordination.Store, workspaceID, roomID string, pulse roomPulseConfig, room agent.RoomSummary, msg agent.BoardMessage, relayResult roomRelayResult, observedAt time.Time, runtime *roomLoopRuntimeState) error {
+	if runtime == nil {
+		return nil
+	}
+	before := *runtime
+	advanceRoomLoopCursor(runtime, msg)
+	runtime.LastDeliveryTrace = updateRoomLoopLastDeliveryTrace(room, msg, relayResult, before, *runtime, observedAt)
+	return persistRoomLoopRuntime(ctx, store, workspaceID, roomID, pulse, *runtime)
+}
+
+func coordinationPulseStatesToRuntime(states map[string]coordination.RoomLoopPulseState) map[string]roomPulseState {
+	out := make(map[string]roomPulseState, len(states))
+	for key, state := range states {
+		var lastSentAt time.Time
+		if state.LastSentAt != nil {
+			lastSentAt = state.LastSentAt.UTC()
+		}
+		out[key] = roomPulseState{
+			LastSentAt: lastSentAt,
+			Count:      state.Count,
+			Escalated:  state.Escalated,
+		}
+	}
+	return out
+}
+
+func runtimePulseStatesToCoordination(states map[string]roomPulseState) map[string]coordination.RoomLoopPulseState {
+	out := make(map[string]coordination.RoomLoopPulseState, len(states))
+	for key, state := range states {
+		var lastSentAt *time.Time
+		if !state.LastSentAt.IsZero() {
+			ts := state.LastSentAt.UTC()
+			lastSentAt = &ts
+		}
+		out[key] = coordination.RoomLoopPulseState{
+			LastSentAt: lastSentAt,
+			Count:      state.Count,
+			Escalated:  state.Escalated,
+		}
+	}
+	return out
+}
+
+func copyRoomLoopTimeMap(states map[string]time.Time) map[string]time.Time {
+	out := make(map[string]time.Time, len(states))
+	for key, value := range states {
+		out[key] = value.UTC()
+	}
+	return out
+}
+
+func syncRoomLoopState(ctx context.Context, store *coordination.Store, workspaceID, roomID string, current roomPulseConfig, tickAt time.Time, runtime roomLoopRuntimeState) (coordination.RoomLoop, error) {
 	loop, err := store.GetRoomLoop(ctx, workspaceID, roomID)
 	if err != nil {
-		return roomPulseConfig{}, err
+		return coordination.RoomLoop{}, err
 	}
 	if loop == nil {
 		seed := defaultRoomLoopPolicy(workspaceID, roomID, current)
 		seed.LastTickAt = &tickAt
+		applyRoomLoopRuntimeState(&seed, runtime)
 		persisted, err := store.UpsertRoomLoop(ctx, seed)
 		if err != nil {
-			return roomPulseConfig{}, err
+			return coordination.RoomLoop{}, err
 		}
-		return roomPulseConfigFromStore(persisted), nil
+		return persisted, nil
 	}
-	if strings.TrimSpace(loop.ManagedBy) != roomLoopManagedBy {
-		loop.ManagedBy = roomLoopManagedBy
-	}
-	if loop.MinPulseFloor <= 0 {
-		loop.MinPulseFloor = roomLoopMinimumPulseFloor
-	}
-	if loop.InterruptAttemptLimit <= 0 {
-		loop.InterruptAttemptLimit = roomPulseInterruptLimit
-	}
-	if loop.ReminderBackoffCap <= 0 {
-		loop.ReminderBackoffCap = roomPulseBackoffCap
-	}
+	coerced := coerceRoomLoopPolicy(*loop)
+	loop = &coerced
 	loop.LastTickAt = &tickAt
+	applyRoomLoopRuntimeState(loop, runtime)
 	persisted, err := store.UpsertRoomLoop(ctx, *loop)
 	if err != nil {
-		return roomPulseConfig{}, err
+		return coordination.RoomLoop{}, err
 	}
-	return roomPulseConfigFromStore(persisted), nil
+	return persisted, nil
 }
 
-func refreshRoomLoopPolicy(ctx context.Context, store *coordination.Store, workspaceID, roomID string, current roomPulseConfig, tickAt time.Time) (roomPulseConfig, bool, error) {
-	next, err := syncRoomLoopState(ctx, store, workspaceID, roomID, current, tickAt)
+func refreshRoomLoopPolicy(ctx context.Context, store *coordination.Store, workspaceID, roomID string, current roomPulseConfig, tickAt time.Time, runtime roomLoopRuntimeState) (roomPulseConfig, roomLoopRuntimeState, bool, error) {
+	acquired, err := store.TryAcquireLease(ctx, runtime.DeliveryLeaseName, runtime.DeliveryOwnerID, roomLoopLeaseTTL)
 	if err != nil {
-		return roomPulseConfig{}, false, err
+		return roomPulseConfig{}, roomLoopRuntimeState{}, false, err
 	}
-	return next, !sameRoomPulseConfig(current, next), nil
+	if !acquired {
+		return roomPulseConfig{}, roomLoopRuntimeState{}, false, fmt.Errorf("room delivery owner already active for %q", roomID)
+	}
+	loop, err := syncRoomLoopState(ctx, store, workspaceID, roomID, current, tickAt, runtime)
+	if err != nil {
+		return roomPulseConfig{}, roomLoopRuntimeState{}, false, err
+	}
+	next := roomPulseConfigFromStore(loop)
+	return next, roomLoopRuntimeStateFromStore(loop), !sameRoomPulseConfig(current, next), nil
 }
 
 func sameRoomPulseConfig(a, b roomPulseConfig) bool {
 	return a.Enabled == b.Enabled &&
 		a.Interval == b.Interval &&
+		a.TaskFollowupInterval == b.TaskFollowupInterval &&
 		a.ReplyStaleAfter == b.ReplyStaleAfter &&
 		a.TaskStaleAfter == b.TaskStaleAfter &&
 		a.MinPulseFloor == b.MinPulseFloor &&
@@ -1405,6 +1796,7 @@ func roomPulseConfigFromStore(loop coordination.RoomLoop) roomPulseConfig {
 	return roomPulseConfig{
 		Enabled:                      loop.Enabled,
 		Interval:                     loop.PulseInterval,
+		TaskFollowupInterval:         loop.TaskFollowupInterval,
 		ReplyStaleAfter:              loop.ReplyStaleAfter,
 		TaskStaleAfter:               loop.TaskStaleAfter,
 		MinPulseFloor:                loop.MinPulseFloor,
@@ -1415,21 +1807,119 @@ func roomPulseConfigFromStore(loop coordination.RoomLoop) roomPulseConfig {
 	}
 }
 
+func coerceRoomLoopPolicy(loop coordination.RoomLoop) coordination.RoomLoop {
+	if strings.TrimSpace(loop.ManagedBy) == "" {
+		loop.ManagedBy = roomLoopManagedBy
+	}
+	if loop.PulseInterval <= 0 {
+		loop.PulseInterval = roomLoopDefaultPulseInterval
+	}
+	if loop.ReplyStaleAfter <= 0 {
+		loop.ReplyStaleAfter = roomLoopDefaultReplyStale
+	}
+	if loop.TaskStaleAfter <= 0 {
+		loop.TaskStaleAfter = roomLoopDefaultTaskStale
+	}
+	if loop.MinPulseFloor <= 0 {
+		loop.MinPulseFloor = roomLoopMinimumPulseFloor
+	}
+	if loop.InterruptAttemptLimit <= 0 {
+		loop.InterruptAttemptLimit = roomPulseInterruptLimit
+	}
+	if loop.ReminderBackoffCap <= 0 {
+		loop.ReminderBackoffCap = roomPulseBackoffCap
+	}
+	return loop
+}
+
+func roomLoopMessageAfterCursor(msg agent.BoardMessage, cursorAt *time.Time, cursorID string) bool {
+	if cursorAt == nil || cursorAt.IsZero() {
+		return true
+	}
+	at := cursorAt.UTC()
+	if msg.CreatedAt.After(at) {
+		return true
+	}
+	if msg.CreatedAt.Before(at) {
+		return false
+	}
+	return strings.TrimSpace(msg.ID) > strings.TrimSpace(cursorID)
+}
+
+func roomLoopSeedSeenMessages(messages []agent.BoardMessage, runtime roomLoopRuntimeState) map[string]struct{} {
+	seen := make(map[string]struct{}, len(messages))
+	if runtime.DeliveryCursorAt == nil || runtime.DeliveryCursorAt.IsZero() {
+		return seen
+	}
+	for _, msg := range messages {
+		if roomLoopMessageAfterCursor(msg, runtime.DeliveryCursorAt, runtime.DeliveryCursorMessageID) {
+			continue
+		}
+		seen[msg.ID] = struct{}{}
+	}
+	return seen
+}
+
+func roomLoopInitialMessages(messages []agent.BoardMessage, history int, runtime roomLoopRuntimeState) []agent.BoardMessage {
+	if runtime.DeliveryCursorAt == nil || runtime.DeliveryCursorAt.IsZero() {
+		return trimRoomHistory(messages, history)
+	}
+	out := make([]agent.BoardMessage, 0, len(messages))
+	for _, msg := range messages {
+		if roomLoopMessageAfterCursor(msg, runtime.DeliveryCursorAt, runtime.DeliveryCursorMessageID) {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+func advanceRoomLoopCursor(runtime *roomLoopRuntimeState, msg agent.BoardMessage) bool {
+	if runtime == nil {
+		return false
+	}
+	if !roomLoopMessageAfterCursor(msg, runtime.DeliveryCursorAt, runtime.DeliveryCursorMessageID) {
+		return false
+	}
+	ts := msg.CreatedAt.UTC()
+	runtime.DeliveryCursorAt = &ts
+	runtime.DeliveryCursorMessageID = strings.TrimSpace(msg.ID)
+	return true
+}
+
+func persistRoomLoopRuntime(ctx context.Context, store *coordination.Store, workspaceID, roomID string, pulse roomPulseConfig, runtime roomLoopRuntimeState) error {
+	_, err := syncRoomLoopState(ctx, store, workspaceID, roomID, pulse, time.Now().UTC(), runtime)
+	return err
+}
+
 func resetRoomPulseTicker(current *time.Ticker, pulse roomPulseConfig) *time.Ticker {
 	if current != nil {
 		current.Stop()
 	}
-	if !roomPulseEnabled(pulse) || pulse.Interval <= 0 {
+	interval := roomPulseTickerInterval(pulse)
+	if !roomPulseEnabled(pulse) || interval <= 0 {
 		return nil
 	}
-	return time.NewTicker(pulse.Interval)
+	return time.NewTicker(interval)
 }
 
 func roomPulseEnabled(cfg roomPulseConfig) bool {
 	if cfg.Enabled {
 		return true
 	}
-	return cfg.Interval > 0 || cfg.ReplyStaleAfter > 0 || cfg.TaskStaleAfter > 0 || cfg.CoordinatorPulseEnabled
+	return cfg.Interval > 0 || cfg.TaskFollowupInterval > 0 || cfg.ReplyStaleAfter > 0 || cfg.TaskStaleAfter > 0 || cfg.CoordinatorPulseEnabled
+}
+
+func roomPulseTickerInterval(cfg roomPulseConfig) time.Duration {
+	var interval time.Duration
+	for _, candidate := range []time.Duration{cfg.Interval, cfg.TaskFollowupInterval} {
+		if candidate <= 0 {
+			continue
+		}
+		if interval <= 0 || candidate < interval {
+			interval = candidate
+		}
+	}
+	return interval
 }
 
 type roomTaskTransition struct {
@@ -1462,13 +1952,30 @@ func processRoomReminderTick(ctx context.Context, coordStore *coordination.Store
 	if len(reminders) == 0 {
 		return nil, nil
 	}
-	latestBySender := latestRoomSenderActivity(messages)
+	storyViews := buildRoomStoryViews(messages)
+	milestoneViews := buildRoomMilestoneViews(messages)
+	var taskStore taskstore.Store
+	for _, reminder := range reminders {
+		if strings.TrimSpace(reminder.TaskID) == "" {
+			continue
+		}
+		taskStore, err = openRoomTaskStore(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer taskStore.Close()
+		break
+	}
 	out := make([]agent.BoardMessage, 0, len(reminders))
 	for _, reminder := range reminders {
 		if !reminder.Active {
 			continue
 		}
-		if roomReminderSatisfied(reminder.RootMessageID, messages, latestBySender) || reminder.SentCount >= reminder.MaxIterations {
+		satisfied, err := roomReminderSatisfied(ctx, taskStore, reminder, messages, storyViews, milestoneViews)
+		if err != nil {
+			return nil, err
+		}
+		if satisfied || reminder.SentCount >= reminder.MaxIterations {
 			reminder.Active = false
 			if _, err := coordStore.UpsertRoomReminder(ctx, reminder); err != nil {
 				return nil, err
@@ -1492,10 +1999,13 @@ func processRoomReminderTick(ctx context.Context, coordStore *coordination.Store
 	return out, nil
 }
 
-func roomReminderSatisfied(rootMessageID string, messages []agent.BoardMessage, latestBySender map[string]roomSenderActivity) bool {
-	rootMessageID = strings.TrimSpace(rootMessageID)
+func roomReminderSatisfied(ctx context.Context, taskStore taskstore.Store, reminder coordination.RoomReminder, messages []agent.BoardMessage, storyViews, milestoneViews []map[string]any) (bool, error) {
+	if roomReminderLinkedWorkSatisfied(ctx, taskStore, reminder, messages, storyViews, milestoneViews) {
+		return true, nil
+	}
+	rootMessageID := strings.TrimSpace(reminder.RootMessageID)
 	if rootMessageID == "" {
-		return true
+		return true, nil
 	}
 	var root *agent.BoardMessage
 	for i := range messages {
@@ -1505,20 +2015,41 @@ func roomReminderSatisfied(rootMessageID string, messages []agent.BoardMessage, 
 		}
 	}
 	if root == nil {
-		return true
+		return true, nil
 	}
-	chainKey := rootMessageID
-	for _, msg := range messages {
-		if roomMessageChainKey(msg) != chainKey && strings.TrimSpace(msg.ID) != chainKey {
-			continue
+	if root.Status == agent.BoardMessageStatusAcked || root.Status == agent.BoardMessageStatusRead {
+		return true, nil
+	}
+	if root.ReplyExpected && !messageStillAwaitsReply(*root, messages) {
+		return true, nil
+	}
+	return false, nil
+}
+
+func roomReminderLinkedWorkSatisfied(ctx context.Context, taskStore taskstore.Store, reminder coordination.RoomReminder, messages []agent.BoardMessage, storyViews, milestoneViews []map[string]any) bool {
+	if taskID := strings.TrimSpace(reminder.TaskID); taskID != "" && taskStore != nil {
+		task, err := taskStore.Get(ctx, taskID)
+		if err == nil {
+			return task.Status == taskstore.StatusCompleted || task.Status == taskstore.StatusCanceled
 		}
-		if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
-			return true
+		if !errors.Is(err, sql.ErrNoRows) && !dbutil.IsNoRows(err) {
+			return false
 		}
 	}
-	if root.ReplyExpected && !messageStillAwaitsReply(*root, latestBySender) {
-		return true
+	if storyID := strings.TrimSpace(reminder.StoryID); storyID != "" {
+		if story := roomStoryViewByID(storyViews, storyID); story != nil {
+			switch stringField(story, "state") {
+			case "done", "waived", "deferred":
+				return true
+			}
+		}
 	}
+	if milestoneID := strings.TrimSpace(reminder.MilestoneID); milestoneID != "" {
+		if milestone := roomMilestoneViewByID(milestoneViews, milestoneID); milestone != nil {
+			return mapField(milestone, "latest_summary") != nil || intField(milestone, "summary_count") > 0
+		}
+	}
+	_ = messages
 	return false
 }
 
@@ -1529,6 +2060,10 @@ func buildRoomReminderMessage(room agent.RoomSummary, reminder coordination.Room
 		body += "\nOriginal body: " + strings.TrimSpace(reminder.Body)
 	}
 	body += fmt.Sprintf("\nReminder iteration: %d of %d", reminder.SentCount+1, reminder.MaxIterations)
+	interrupt := reminder.Interrupt
+	if sameRoomParticipant(strings.TrimSpace(reminder.Sender), strings.TrimSpace(reminder.Recipient)) {
+		interrupt = false
+	}
 	return agent.BoardMessage{
 		WorkspaceID:      room.WorkspaceID,
 		RelatedMessageID: strings.TrimSpace(reminder.RootMessageID),
@@ -1537,7 +2072,7 @@ func buildRoomReminderMessage(room agent.RoomSummary, reminder coordination.Room
 		Recipient:        strings.TrimSpace(reminder.Recipient),
 		Kind:             agent.BoardMessageKindAlert,
 		Priority:         2,
-		Interrupt:        reminder.Interrupt,
+		Interrupt:        interrupt,
 		Subject:          subject,
 		Body:             body,
 		CreatedAt:        now,
@@ -1578,8 +2113,8 @@ func roomPulseReady(now time.Time, base time.Duration, capMultiplier int, state 
 	return now.Sub(state.LastSentAt) >= roomPulseReminderInterval(base, capMultiplier, state)
 }
 
-func cleanupRoomReplyPulseState(messages []agent.BoardMessage, now time.Time, cfg roomPulseConfig, states map[string]roomPulseState) {
-	latestBySender := latestRoomSenderActivity(messages)
+func cleanupRoomReplyPulseState(messages []agent.BoardMessage, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, states map[string]roomPulseState, suppression *roomActionSuppression) bool {
+	_ = tasks
 	active := make(map[string]struct{})
 	for _, msg := range messages {
 		recipient := normalizeRoomRecipient(msg.Recipient)
@@ -1595,7 +2130,10 @@ func cleanupRoomReplyPulseState(messages []agent.BoardMessage, now time.Time, cf
 		if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
 			continue
 		}
-		if msg.ReplyExpected && !messageStillAwaitsReply(msg, latestBySender) {
+		if msg.ReplyExpected && !messageStillAwaitsReply(msg, messages) {
+			continue
+		}
+		if roomActionSuppressesMessage(msg, suppression) {
 			continue
 		}
 		if now.Sub(msg.CreatedAt) < cfg.ReplyStaleAfter {
@@ -1603,16 +2141,22 @@ func cleanupRoomReplyPulseState(messages []agent.BoardMessage, now time.Time, cf
 		}
 		active[msg.ID] = struct{}{}
 	}
+	dirty := false
 	for key := range states {
 		if _, ok := active[key]; !ok {
 			delete(states, key)
+			dirty = true
 		}
 	}
+	return dirty
 }
 
-func cleanupRoomTaskPulseState(tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, states map[string]roomPulseState) {
+func cleanupRoomTaskPulseState(tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, states map[string]roomPulseState, suppression *roomActionSuppression) bool {
 	active := make(map[string]struct{})
 	for _, task := range tasks {
+		if roomActionSuppressesTask(task, suppression) {
+			continue
+		}
 		if task.OwnerActorID == "" {
 			continue
 		}
@@ -1630,16 +2174,22 @@ func cleanupRoomTaskPulseState(tasks []taskstore.Task, now time.Time, cfg roomPu
 		}
 		active[task.ID] = struct{}{}
 	}
+	dirty := false
 	for key := range states {
 		if _, ok := active[key]; !ok {
 			delete(states, key)
+			dirty = true
 		}
 	}
+	return dirty
 }
 
-func cleanupRoomTaskFollowupState(tasks []taskstore.Task, states map[string]time.Time) {
+func cleanupRoomTaskFollowupState(tasks []taskstore.Task, states map[string]time.Time, suppression *roomActionSuppression) bool {
 	active := make(map[string]struct{})
 	for _, task := range tasks {
+		if roomActionSuppressesTask(task, suppression) {
+			continue
+		}
 		if task.OwnerActorID == "" {
 			continue
 		}
@@ -1648,11 +2198,14 @@ func cleanupRoomTaskFollowupState(tasks []taskstore.Task, states map[string]time
 		}
 		active[task.ID] = struct{}{}
 	}
+	dirty := false
 	for key := range states {
 		if _, ok := active[key]; !ok {
 			delete(states, key)
+			dirty = true
 		}
 	}
+	return dirty
 }
 
 func openRoomTaskStore(ctx context.Context) (taskstore.Store, error) {
@@ -1801,7 +2354,8 @@ func roomLoopShouldRelayTaskTransition(mode string, update roomTaskTransition) b
 	}
 }
 
-func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState, reminderRoots map[string]struct{}) []roomPulseMessage {
+func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState, suppression *roomActionSuppression) []roomPulseMessage {
+	_ = tasks
 	if !roomPulseEnabled(cfg) || cfg.ReplyStaleAfter <= 0 {
 		return nil
 	}
@@ -1809,12 +2363,8 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 	if cfg.MinPulseFloor > reminderFloor {
 		reminderFloor = cfg.MinPulseFloor
 	}
-	latestBySender := latestRoomSenderActivity(messages)
 	latestOutstanding := make(map[string]agent.BoardMessage)
 	for _, msg := range messages {
-		if _, suppressed := reminderRoots[roomMessageChainKey(msg)]; suppressed {
-			continue
-		}
 		recipient := normalizeRoomRecipient(msg.Recipient)
 		if recipient == agent.BroadcastRecipient || recipient == "" {
 			continue
@@ -1828,7 +2378,10 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 		if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
 			continue
 		}
-		if msg.ReplyExpected && !messageStillAwaitsReply(msg, latestBySender) {
+		if msg.ReplyExpected && !messageStillAwaitsReply(msg, messages) {
+			continue
+		}
+		if roomActionSuppressesMessage(msg, suppression) {
 			continue
 		}
 		if now.Sub(msg.CreatedAt) < cfg.ReplyStaleAfter {
@@ -1869,7 +2422,7 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 				Recipient:        recipient,
 				Kind:             agent.BoardMessageKindAlert,
 				Priority:         2,
-				Interrupt:        true,
+				Interrupt:        !sameRoomParticipant(strings.TrimSpace(msg.Sender), recipient),
 				Subject:          subject,
 				Body:             body,
 				CreatedAt:        now,
@@ -1879,7 +2432,8 @@ func detectRoomPulseMessages(roomID string, messages []agent.BoardMessage, now t
 	return out
 }
 
-func detectRoomPulseEscalationMessages(room agent.RoomSummary, messages []agent.BoardMessage, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState, reminderRoots map[string]struct{}) []roomPulseMessage {
+func detectRoomPulseEscalationMessages(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState, suppression *roomActionSuppression) []roomPulseMessage {
+	_ = tasks
 	if !cfg.CoordinatorEscalationEnabled {
 		return nil
 	}
@@ -1891,12 +2445,8 @@ func detectRoomPulseEscalationMessages(room agent.RoomSummary, messages []agent.
 	if limit <= 0 {
 		limit = roomPulseInterruptLimit
 	}
-	latestBySender := latestRoomSenderActivity(messages)
 	out := make([]roomPulseMessage, 0)
 	for _, msg := range messages {
-		if _, suppressed := reminderRoots[roomMessageChainKey(msg)]; suppressed {
-			continue
-		}
 		state, ok := reminded[msg.ID]
 		if !ok || state.Count < limit || state.Escalated {
 			continue
@@ -1908,7 +2458,10 @@ func detectRoomPulseEscalationMessages(room agent.RoomSummary, messages []agent.
 		if msg.Status == agent.BoardMessageStatusAcked || msg.Status == agent.BoardMessageStatusRead {
 			continue
 		}
-		if msg.ReplyExpected && !messageStillAwaitsReply(msg, latestBySender) {
+		if msg.ReplyExpected && !messageStillAwaitsReply(msg, messages) {
+			continue
+		}
+		if roomActionSuppressesMessage(msg, suppression) {
 			continue
 		}
 		subject := fmt.Sprintf("Escalation: repeated unanswered request for %s", recipient)
@@ -1918,7 +2471,7 @@ func detectRoomPulseEscalationMessages(room agent.RoomSummary, messages []agent.
 	return out
 }
 
-func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState) []roomPulseMessage {
+func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState, suppression *roomActionSuppression) []roomPulseMessage {
 	if !roomPulseEnabled(cfg) || cfg.TaskStaleAfter <= 0 {
 		return nil
 	}
@@ -1928,6 +2481,9 @@ func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Tas
 	}
 	out := make([]roomPulseMessage, 0)
 	for _, task := range tasks {
+		if roomActionSuppressesTask(task, suppression) {
+			continue
+		}
 		if task.OwnerActorID == "" {
 			continue
 		}
@@ -1979,8 +2535,8 @@ func detectRoomTaskPulseMessages(workspace, roomID string, tasks []taskstore.Tas
 	return out
 }
 
-func detectRoomTaskFollowupMessages(room agent.RoomSummary, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time) []roomPulseMessage {
-	if !roomPulseEnabled(cfg) || cfg.Interval <= 0 {
+func detectRoomTaskFollowupMessages(room agent.RoomSummary, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time, suppression *roomActionSuppression) []roomPulseMessage {
+	if !roomPulseEnabled(cfg) || cfg.TaskFollowupInterval <= 0 {
 		return nil
 	}
 	coordinator := roomCoordinatorActorID(room.Members)
@@ -1989,6 +2545,9 @@ func detectRoomTaskFollowupMessages(room agent.RoomSummary, tasks []taskstore.Ta
 	}
 	out := make([]roomPulseMessage, 0)
 	for _, task := range tasks {
+		if roomActionSuppressesTask(task, suppression) {
+			continue
+		}
 		if task.OwnerActorID == "" {
 			continue
 		}
@@ -2001,10 +2560,10 @@ func detectRoomTaskFollowupMessages(room agent.RoomSummary, tasks []taskstore.Ta
 		} else if task.ClaimedAt != nil {
 			reference = *task.ClaimedAt
 		}
-		if now.Sub(reference) < cfg.Interval {
+		if now.Sub(reference) < cfg.TaskFollowupInterval {
 			continue
 		}
-		if last, ok := reminded[task.ID]; ok && now.Sub(last) < cfg.Interval {
+		if last, ok := reminded[task.ID]; ok && now.Sub(last) < cfg.TaskFollowupInterval {
 			continue
 		}
 		if cfg.TaskStaleAfter > 0 && now.Sub(reference) >= cfg.TaskStaleAfter {
@@ -2038,7 +2597,7 @@ func detectRoomTaskFollowupMessages(room agent.RoomSummary, tasks []taskstore.Ta
 	return out
 }
 
-func detectRoomTaskEscalationMessages(room agent.RoomSummary, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState) []roomPulseMessage {
+func detectRoomTaskEscalationMessages(room agent.RoomSummary, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]roomPulseState, suppression *roomActionSuppression) []roomPulseMessage {
 	if !cfg.CoordinatorEscalationEnabled {
 		return nil
 	}
@@ -2052,6 +2611,9 @@ func detectRoomTaskEscalationMessages(room agent.RoomSummary, tasks []taskstore.
 	}
 	out := make([]roomPulseMessage, 0)
 	for _, task := range tasks {
+		if roomActionSuppressesTask(task, suppression) {
+			continue
+		}
 		state, ok := reminded[task.ID]
 		if !ok || state.Count < limit || state.Escalated {
 			continue
@@ -2078,7 +2640,45 @@ func detectRoomTaskEscalationMessages(room agent.RoomSummary, tasks []taskstore.
 	return out
 }
 
-func detectRoomCoordinatorPulseMessages(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time, reminderRoots map[string]struct{}) []roomPulseMessage {
+func latestRoomDefaultChoresMilestone(messages []agent.BoardMessage) (string, string) {
+	for _, epic := range buildRoomEpicViews(messages) {
+		if boolField(epic, "closed") {
+			continue
+		}
+		epicID := strings.TrimSpace(stringField(epic, "id"))
+		milestoneID := strings.TrimSpace(stringField(epic, "default_chores_milestone_id"))
+		if epicID == "" || milestoneID == "" {
+			continue
+		}
+		return epicID, milestoneID
+	}
+	return "", ""
+}
+
+func resolveRoomTaskMilestoneSelection(messages []agent.BoardMessage, selectedMilestoneID string) (string, string, error) {
+	selectedMilestoneID = strings.TrimSpace(selectedMilestoneID)
+	if selectedMilestoneID == "" {
+		epicID, milestoneID := latestRoomDefaultChoresMilestone(messages)
+		return epicID, milestoneID, nil
+	}
+	milestone := roomMilestoneViewByID(buildRoomMilestoneViews(messages), selectedMilestoneID)
+	if milestone == nil {
+		return "", "", fmt.Errorf("%w: %s", errRoomTaskMilestoneNotFound, selectedMilestoneID)
+	}
+	if mapField(milestone, "latest_summary") != nil || intField(milestone, "summary_count") > 0 {
+		return "", "", fmt.Errorf("milestone %q is already summarized", selectedMilestoneID)
+	}
+	epicID := strings.TrimSpace(stringField(milestone, "epic_id"))
+	if epicID == "" {
+		return "", "", fmt.Errorf("milestone %q is missing epic linkage", selectedMilestoneID)
+	}
+	if epic := roomEpicViewByID(buildRoomEpicViews(messages), epicID); epic != nil && boolField(epic, "closed") {
+		return "", "", fmt.Errorf("milestone %q belongs to a closed epic", selectedMilestoneID)
+	}
+	return epicID, selectedMilestoneID, nil
+}
+
+func detectRoomCoordinatorPulseMessages(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, now time.Time, cfg roomPulseConfig, reminded map[string]time.Time, suppression *roomActionSuppression) []roomPulseMessage {
 	if !roomPulseEnabled(cfg) || !cfg.CoordinatorPulseEnabled || cfg.Interval <= 0 {
 		return nil
 	}
@@ -2086,9 +2686,9 @@ func detectRoomCoordinatorPulseMessages(room agent.RoomSummary, messages []agent
 	if coordinator == "" {
 		return nil
 	}
-	backlog := buildRoomStatusBacklog(room, messages, reminderRoots)
-	taskPulse := buildRoomTaskPulseSummary(tasks, now, cfg.TaskStaleAfter)
-	action := buildRoomStatusActionRequired(room, messages, tasks, backlog, taskPulse, map[string]struct{}{"all": {}}, cfg.TaskStaleAfter, now, false, reminderRoots)
+	backlog := buildRoomStatusBacklog(room, messages, suppression)
+	taskPulse := buildRoomTaskPulseSummary(tasks, now, cfg.TaskStaleAfter, suppression)
+	action := buildRoomStatusActionRequired(room, messages, tasks, backlog, taskPulse, map[string]struct{}{"all": {}}, cfg.TaskStaleAfter, now, false, suppression)
 	if action.ParticipantsWithPending == 0 && action.AssignedUnclaimed == 0 && action.BlockedTasks == 0 && action.StaleTasks == 0 {
 		return nil
 	}
@@ -2097,7 +2697,7 @@ func detectRoomCoordinatorPulseMessages(room agent.RoomSummary, messages []agent
 	if cfg.MinPulseFloor > reminderFloor {
 		reminderFloor = cfg.MinPulseFloor
 	}
-	if last, ok := reminded[key]; ok && now.Sub(last) < reminderFloor {
+	if _, ok := reminded[key]; ok {
 		return nil
 	}
 	subject := fmt.Sprintf("Coordinator pulse: %d pending participants, %d blocked, %d stale", action.ParticipantsWithPending, action.BlockedTasks, action.StaleTasks)
@@ -2116,12 +2716,41 @@ func detectRoomCoordinatorPulseMessages(room agent.RoomSummary, messages []agent
 			Recipient:   coordinator,
 			Kind:        agent.BoardMessageKindCoordinatorPulse,
 			Priority:    2,
-			Interrupt:   true,
+			Interrupt:   false,
 			Subject:     subject,
 			Body:        body,
 			CreatedAt:   now,
 		},
 	}}
+}
+
+func findEquivalentActiveReminder(reminders []coordination.RoomReminder, candidate coordination.RoomReminder) *coordination.RoomReminder {
+	for i := range reminders {
+		reminder := reminders[i]
+		if !reminder.Active {
+			continue
+		}
+		if !sameRoomReminderContract(reminder, candidate) {
+			continue
+		}
+		dup := reminder
+		return &dup
+	}
+	return nil
+}
+
+func sameRoomReminderContract(a, b coordination.RoomReminder) bool {
+	return ws.CanonicalID(strings.TrimSpace(a.WorkspaceID)) == ws.CanonicalID(strings.TrimSpace(b.WorkspaceID)) &&
+		strings.TrimSpace(a.RoomID) == strings.TrimSpace(b.RoomID) &&
+		strings.TrimSpace(a.Recipient) == strings.TrimSpace(b.Recipient) &&
+		strings.TrimSpace(a.Subject) == strings.TrimSpace(b.Subject) &&
+		strings.TrimSpace(a.Body) == strings.TrimSpace(b.Body) &&
+		strings.TrimSpace(a.TaskID) == strings.TrimSpace(b.TaskID) &&
+		strings.TrimSpace(a.StoryID) == strings.TrimSpace(b.StoryID) &&
+		strings.TrimSpace(a.MilestoneID) == strings.TrimSpace(b.MilestoneID) &&
+		a.AckRequired == b.AckRequired &&
+		a.ReplyExpected == b.ReplyExpected &&
+		a.Interrupt == b.Interrupt
 }
 
 func roomLoopSender(roomID string) string {
@@ -2182,6 +2811,12 @@ func formatRoomTaskAddedBody(task taskstore.Task) string {
 	lines := []string{
 		fmt.Sprintf("Task ID: %s", task.ID),
 		fmt.Sprintf("Status: %s", task.Status),
+	}
+	if strings.TrimSpace(task.EpicID) != "" {
+		lines = append(lines, fmt.Sprintf("Epic ID: %s", strings.TrimSpace(task.EpicID)))
+	}
+	if strings.TrimSpace(task.MilestoneID) != "" {
+		lines = append(lines, fmt.Sprintf("Milestone ID: %s", strings.TrimSpace(task.MilestoneID)))
 	}
 	if strings.TrimSpace(task.Description) != "" {
 		lines = append(lines, task.Description)

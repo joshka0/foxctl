@@ -73,12 +73,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Unit tests
         run: |
           export PATH=/usr/local/go/bin:/go/bin:$PATH
-          CGO_ENABLED=0 go test -short -v -count=1 -timeout 20m ./...
+          base_ref=""
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            head_ref="$(git rev-parse HEAD)"
+            main_ref="$(git rev-parse origin/main)"
+            if [ "$head_ref" != "$main_ref" ]; then
+              base_ref="$(git merge-base HEAD origin/main)"
+            fi
+          fi
+          if [ -n "$base_ref" ]; then
+            make test-short-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+          else
+            CGO_ENABLED=0 go test -short -v -count=1 -timeout 20m ./...
+          fi
 
   race-tests:
     needs: [cgo-build-and-tests]
@@ -89,10 +101,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Race tests
-        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make test-race
+        run: |
+          export PATH=/usr/local/go/bin:/go/bin:$PATH
+          base_ref=""
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            head_ref="$(git rev-parse HEAD)"
+            main_ref="$(git rev-parse origin/main)"
+            if [ "$head_ref" != "$main_ref" ]; then
+              base_ref="$(git merge-base HEAD origin/main)"
+            fi
+          fi
+          if [ -n "$base_ref" ]; then
+            make test-race-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+          else
+            make test-race
+          fi
 
   build:
     needs: [unit-tests]
@@ -109,7 +135,21 @@ jobs:
         run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make build
 
       - name: Build skills pack
-        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make skills-build
+        run: |
+          export PATH=/usr/local/go/bin:/go/bin:$PATH
+          base_ref=""
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            head_ref="$(git rev-parse HEAD)"
+            main_ref="$(git rev-parse origin/main)"
+            if [ "$head_ref" != "$main_ref" ]; then
+              base_ref="$(git merge-base HEAD origin/main)"
+            fi
+          fi
+          if [ -n "$base_ref" ]; then
+            make skills-build-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+          else
+            make skills-build
+          fi
 
       - name: Check skill manifests (policy)
         run: export PATH=/usr/local/go/bin:/go/bin:$PATH && go run ./scripts/checkmanifests
@@ -129,7 +169,26 @@ jobs:
         run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make build-cgo
 
       - name: Unit tests (CGO + libsqlite3)
-        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make test-cgo-short
+        run: |
+          export PATH=/usr/local/go/bin:/go/bin:$PATH
+          base_ref=""
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            head_ref="$(git rev-parse HEAD)"
+            main_ref="$(git rev-parse origin/main)"
+            if [ "$head_ref" != "$main_ref" ]; then
+              base_ref="$(git merge-base HEAD origin/main)"
+            fi
+          fi
+          if [ -n "$base_ref" ]; then
+            make test-cgo-short-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+          else
+            make test-cgo-short
+          fi
+
+      - name: Regression harness
+        run: |
+          export PATH=/usr/local/go/bin:/go/bin:$PATH
+          bash tests/regression/run.sh
 
   integration-tests:
     needs: [race-tests]
@@ -140,7 +199,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Run integration tests
-        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make test-integration
+        run: |
+          export PATH=/usr/local/go/bin:/go/bin:$PATH
+          base_ref=""
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            head_ref="$(git rev-parse HEAD)"
+            main_ref="$(git rev-parse origin/main)"
+            if [ "$head_ref" != "$main_ref" ]; then
+              base_ref="$(git merge-base HEAD origin/main)"
+            fi
+          fi
+          if [ -n "$base_ref" ]; then
+            make test-integration-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+          else
+            make test-integration
+          fi

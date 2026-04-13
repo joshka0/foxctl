@@ -1,6 +1,7 @@
 package webterm
 
 import (
+	"context"
 	"io"
 	"testing"
 	"time"
@@ -189,6 +190,105 @@ func TestHub_UnregisterRoom_CleansUpClients(t *testing.T) {
 	hub.UnregisterRoom("room-1")
 	assert.False(t, hub.HasRoom("room-1"))
 	// Client's room should still be set but room is gone from hub
+}
+
+func TestHub_RoomPTY_DoesNotHoldRoomLockDuringStartup(t *testing.T) {
+	origStart := startTmuxAttach
+	defer func() { startTmuxAttach = origStart }()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	startTmuxAttach = func(_ context.Context, _ TmuxOptions) (*PTYProcess, error) {
+		pty := &PTYProcess{
+			subscribers: make(map[uint64]chan<- []byte),
+			done:        make(chan struct{}),
+		}
+		pty.running.Store(true)
+		close(started)
+		<-release
+		return pty, nil
+	}
+
+	hub := NewHub(HubConfig{}, testHubLogger())
+	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := hub.RoomPTY(context.Background(), "room-1", 80, 24)
+		errCh <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for PTY startup")
+	}
+
+	addDone := make(chan error, 1)
+	go func() {
+		addDone <- hub.AddClient("room-1", &Client{output: make(chan []byte, OutputBufferSize)})
+	}()
+
+	select {
+	case err := <-addDone:
+		require.NoError(t, err)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("AddClient blocked while PTY startup was in progress")
+	}
+
+	close(release)
+	require.NoError(t, <-errCh)
+}
+
+func TestHub_UnregisterRoom_DoesNotHoldHubLockWhileClosingPTY(t *testing.T) {
+	origClose := closePTYProcess
+	defer func() { closePTYProcess = origClose }()
+
+	blocked := make(chan struct{})
+	release := make(chan struct{})
+	closePTYProcess = func(_ *PTYProcess) {
+		close(blocked)
+		<-release
+	}
+
+	hub := NewHub(HubConfig{}, testHubLogger())
+	hub.RegisterRoom("room-1", RoomConfig{TmuxSession: "s1"})
+	room := hub.rooms["room-1"]
+	room.pty = &PTYProcess{
+		subscribers: make(map[uint64]chan<- []byte),
+		done:        make(chan struct{}),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		hub.UnregisterRoom("room-1")
+		close(done)
+	}()
+
+	select {
+	case <-blocked:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("timed out waiting for PTY close")
+	}
+
+	registerDone := make(chan struct{})
+	go func() {
+		hub.RegisterRoom("room-2", RoomConfig{TmuxSession: "s2"})
+		close(registerDone)
+	}()
+
+	select {
+	case <-registerDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("RegisterRoom blocked while UnregisterRoom was waiting on PTY close")
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("UnregisterRoom did not finish after PTY close release")
+	}
 }
 
 func TestRoomNotFoundError(t *testing.T) {

@@ -13,11 +13,10 @@ func newSkillsDescribeCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := config.MustFromContext(cmd.Context())
-			handle, err := findSkill(cfg, args[0])
+			m, err := findSkillManifest(cfg, args[0])
 			if err != nil {
 				return err
 			}
-			m := handle.Manifest
 			details := map[string]any{
 				"name":         m.Metadata.Name,
 				"version":      m.Metadata.Version,
@@ -52,11 +51,10 @@ func newSkillsHelpCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			handle, err := findSkill(cfg, args[0])
+			m, err := findSkillManifest(cfg, args[0])
 			if err != nil {
 				return err
 			}
-			m := handle.Manifest
 			help := map[string]any{
 				"skill":       m.Metadata.Name,
 				"version":     m.Metadata.Version,

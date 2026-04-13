@@ -44,11 +44,21 @@ flowchart TD
 
 1. The repo is not a single-runtime system yet. Legacy mailbox-driven agent
    execution and newer v2/Jido-backed services both exist.
-2. The clearest v2 ownership today is ask/projection handling, orchestration
+2. `internal/v2/*` should be read as the newer **agent/runtime/orchestration**
+   lane, not as a generic replacement namespace for all of `internal/*`.
+   See `docs/architecture/package-topology.md`.
+3. The clearest v2 ownership today is ask/projection handling, orchestration
    scheduling/reconciliation, v2 event stores, context building, and companion
    integration points.
-3. Some CLI agent management surfaces still route through legacy stores or
+4. Some CLI agent management surfaces still route through legacy stores or
    `agentmanager` fallback paths.
+5. Room runtime observability now includes a persisted `last_delivery_trace`
+   on the room-loop row, and the API/status surfaces expose that trace as the
+   canonical explanation for the latest room delivery decision.
+6. `bash tests/regression/run.sh` is the canonical room-runtime regression
+   entrypoint; targeted integration tests such as
+   `TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux` are follow-on
+   checks for symptoms that involve real pane submission behavior.
 
 ## Core Package Groups
 
@@ -64,6 +74,9 @@ flowchart TD
 | Observability and hooks | `internal/observability`, `internal/hooks`, `internal/context/updater` | Trace/event propagation, hook execution, proactive context surfacing | `docs/general/context-and-observability.md`, `docs/general/hooks.md` |
 | Foundations | `internal/domain`, `internal/platform`, `internal/protocol`, `internal/tools`, `internal/tooling` | Core types, config/platform utilities, protocol helpers | `docs/general/architecture.md`, `docs/spec/README.md` |
 
+For the canonical grouping target for `internal/*` and the explicit legacy-runtime
+vs `v2` replacement map, see `docs/architecture/package-topology.md`.
+
 ## Architectural Invariants
 
 | Invariant | Why it matters |
@@ -78,6 +91,7 @@ flowchart TD
 ## Related Architecture Docs
 
 - `docs/general/runtime-orchestration.md`
+- `docs/architecture/package-topology.md`
 - `docs/architecture/jido-hybrid-runtime.md`
 - `docs/general/agent-daemon.md`
 - `docs/architecture/chat-platform-adapter.md`

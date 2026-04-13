@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var buildRepoIndexSearchInspectionReportHook = buildRepoIndexSearchInspectionReport
+
 func newContextRepoIndexSearchInspectSuiteCommand() *cobra.Command {
 	var workspacePath string
 	var suiteRef string
@@ -40,7 +42,7 @@ func newContextRepoIndexSearchInspectSuiteCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			report, err := buildRepoIndexSearchInspectionReport(ctx, cfg.Storage.Root, target, suite, limit)
+			report, err := buildRepoIndexSearchInspectionReportHook(ctx, cfg.Storage.Root, target, suite, limit)
 			if err != nil {
 				return err
 			}

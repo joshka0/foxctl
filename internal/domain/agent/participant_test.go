@@ -84,7 +84,7 @@ func TestParticipantStateFromRoomMember(t *testing.T) {
 				Runtime:        RuntimeUnknown,
 				Presentation:   PresentationNone,
 				CanTriggerTurn: false,
-				Reason:         "no transport endpoint configured",
+				Reason:         "member is unbound (no live transport binding)",
 			},
 		},
 		{
@@ -306,6 +306,74 @@ func TestNormalizeRoomMember(t *testing.T) {
 	}
 	if got.PaneID != "%1" {
 		t.Errorf("PaneID = %q, want %q", got.PaneID, "%1")
+	}
+	if got.DeliveryBinding == nil {
+		t.Fatal("DeliveryBinding = nil, want synthesized binding")
+	}
+	if got.DeliveryBinding.MuxBackend != "tmux" {
+		t.Errorf("DeliveryBinding.MuxBackend = %q, want %q", got.DeliveryBinding.MuxBackend, "tmux")
+	}
+	if got.DeliveryBinding.SubmitMode != RoomDeliverySubmitModeNewline {
+		t.Errorf("DeliveryBinding.SubmitMode = %q, want %q", got.DeliveryBinding.SubmitMode, RoomDeliverySubmitModeNewline)
+	}
+	if got.DeliveryBinding.Health != RoomDeliveryHealthUnknown {
+		t.Errorf("DeliveryBinding.Health = %q, want %q", got.DeliveryBinding.Health, RoomDeliveryHealthUnknown)
+	}
+}
+
+func TestNormalizeRoomMemberUsesExplicitDeliveryBinding(t *testing.T) {
+	m := RoomMember{
+		ActorID: " codex-a ",
+		DeliveryBinding: &RoomDeliveryBinding{
+			MuxBackend:        " zellij ",
+			MuxSession:        " dev-session ",
+			MuxPaneID:         " terminal_2 ",
+			TransportEndpoint: " /tmp/agentctl-pane/dev-session/codex-a.sock ",
+			TransportKind:     " pane_socket ",
+			SubmitMode:        RoomDeliverySubmitModeComposerCtrlEnter,
+			Health:            RoomDeliveryHealthReady,
+			FallbackPolicy:    RoomDeliveryFallbackAllowLegacyMux,
+		},
+	}
+
+	got := NormalizeRoomMember(m)
+
+	if got.Backend != "zellij" {
+		t.Fatalf("Backend = %q, want zellij", got.Backend)
+	}
+	if got.Session != "dev-session" {
+		t.Fatalf("Session = %q, want dev-session", got.Session)
+	}
+	if got.PaneID != "terminal_2" {
+		t.Fatalf("PaneID = %q, want terminal_2", got.PaneID)
+	}
+	if got.TransportEndpoint != "/tmp/agentctl-pane/dev-session/codex-a.sock" {
+		t.Fatalf("TransportEndpoint = %q", got.TransportEndpoint)
+	}
+	if got.TransportKind != PaneSocketTransportKind {
+		t.Fatalf("TransportKind = %q, want %q", got.TransportKind, PaneSocketTransportKind)
+	}
+	if got.DeliveryBinding == nil {
+		t.Fatal("DeliveryBinding = nil, want explicit binding")
+	}
+	if got.DeliveryBinding.SubmitMode != RoomDeliverySubmitModeComposerCtrlEnter {
+		t.Fatalf("DeliveryBinding.SubmitMode = %q, want %q", got.DeliveryBinding.SubmitMode, RoomDeliverySubmitModeComposerCtrlEnter)
+	}
+	if got.DeliveryBinding.Health != RoomDeliveryHealthReady {
+		t.Fatalf("DeliveryBinding.Health = %q, want %q", got.DeliveryBinding.Health, RoomDeliveryHealthReady)
+	}
+}
+
+func TestNormalizeRoomMemberMarksMemberUnboundWhenNoRouteExists(t *testing.T) {
+	got := NormalizeRoomMember(RoomMember{
+		ActorID: "reviewer-a",
+		DeliveryBinding: &RoomDeliveryBinding{
+			MuxBackend: "tmux",
+		},
+	})
+
+	if !got.Unbound {
+		t.Fatal("Unbound=false want true when no transport route exists")
 	}
 }
 
