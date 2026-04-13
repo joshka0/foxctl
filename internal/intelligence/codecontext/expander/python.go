@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/codecontext/files"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
 )
 
 // pythonExpander handles Python code block detection using indentation.

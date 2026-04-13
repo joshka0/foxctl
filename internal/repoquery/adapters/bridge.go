@@ -3,7 +3,7 @@ package adapters
 import (
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/codecontext"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
 	"github.com/jkatigb/agentctl/internal/repoquery"
 	"github.com/jkatigb/agentctl/internal/searchindex"
 )

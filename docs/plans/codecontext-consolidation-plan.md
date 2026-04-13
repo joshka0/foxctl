@@ -1,6 +1,6 @@
 # Code Context Consolidation Plan
 
-> **Goal:** Unify code extraction logic into `internal/codecontext/` so skills
+> **Goal:** Unify code extraction logic into `internal/intelligence/codecontext/` so skills
 > become thin wrappers. Eliminate 1000+ LOC of duplication across
 > `code_swe_grep`, `code_context_ripgrep`, `code_semantic_search`, and
 > `code_smart_write`.
@@ -45,7 +45,7 @@
 │    Candidates[]           Evidence{}         Analysis{}             │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
-│                    internal/codecontext/                            │
+│                    internal/intelligence/codecontext/                            │
 ├─────────────────────────────────────────────────────────────────────┤
 │  collect.go    │ Collect(query, candidates, opts) → Evidence        │
 │  render.go     │ Render(evidence, mode) → string/ndjson             │
@@ -60,14 +60,14 @@
 
 ## Implementation Phases
 
-### Phase 1: Foundation (internal/codecontext/) — High Impact
+### Phase 1: Foundation (internal/intelligence/codecontext/) — High Impact
 
 **Goal:** Create the shared package with core types and safe file reading.
 
 **Files to create:**
 
 ```
-internal/codecontext/
+internal/intelligence/codecontext/
 ├── types.go          # Candidate, Snippet, Evidence, RenderMode
 ├── collect.go        # Collect() main entry point
 ├── render.go         # Render() with mode dispatch
@@ -148,7 +148,7 @@ type FileContent struct {
 
 ---
 
-### Phase 2: Block Expansion (internal/codecontext/expander/) — High Impact
+### Phase 2: Block Expansion (internal/intelligence/codecontext/expander/) — High Impact
 
 **Goal:** Consolidate the two 500-LOC block expansion implementations.
 
@@ -159,7 +159,7 @@ type FileContent struct {
 **Files to create:**
 
 ```
-internal/codecontext/expander/
+internal/intelligence/codecontext/expander/
 ├── expander.go       # BlockExpander interface + registry
 ├── go.go             # Go: AST-based (from code_swe_grep)
 ├── python.go         # Python: indentation-based
@@ -221,14 +221,14 @@ func (e *GoExpander) FindBlock(content *files.FileContent, line int) (int, int, 
 
 ---
 
-### Phase 3: Selector Abstraction (internal/codecontext/selector/) — Medium Impact
+### Phase 3: Selector Abstraction (internal/intelligence/codecontext/selector/) — Medium Impact
 
 **Goal:** Make snippet selection pluggable (heuristic vs LLM-assisted).
 
 **Files to create:**
 
 ```
-internal/codecontext/selector/
+internal/intelligence/codecontext/selector/
 ├── selector.go       # Selector interface
 ├── heuristic.go      # Keyword matching + symbol priority
 └── llm.go            # LLM-assisted selection (for swe_grep)
@@ -283,7 +283,7 @@ func (s *HeuristicSelector) Select(ctx context.Context, query string, content *f
 
 ### Phase 4: Skill Migration — Medium Impact
 
-**Goal:** Convert skills to thin wrappers over `internal/codecontext/`.
+**Goal:** Convert skills to thin wrappers over `internal/intelligence/codecontext/`.
 
 **Migration order (by impact):**
 
@@ -348,7 +348,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 2. Delete duplicate `detectLanguage()` from all skills
 3. Remove `findBraceEnd`, `findIndentEnd` from `code_swe_grep`
 4. Update `docs/skills/` with new architecture
-5. Add `internal/codecontext/README.md`
+5. Add `internal/intelligence/codecontext/README.md`
 
 ---
 
@@ -380,7 +380,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 
 **New packages:**
 ```
-internal/codecontext/
+internal/intelligence/codecontext/
 ├── types.go              # ~50 LOC
 ├── collect.go            # ~150 LOC
 ├── render.go             # ~100 LOC

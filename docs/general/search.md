@@ -7,7 +7,7 @@ Machine-friendly reference for semantic retrieval, reranking, and repo graph sea
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical packages | `skills/code_semantic_search`, `skills/code_smart_search`, `skills/code_snippet_extract`, `internal/searchquery`, `internal/searchindex`, `internal/intelligence/retrieval/v2`, `internal/codecontext`, `internal/indexing/semantic`, `internal/indexing/rerank`, `internal/indexing/repoindex`, `internal/storage/dbdriver/search.go` |
+| Canonical packages | `skills/code_semantic_search`, `skills/code_smart_search`, `skills/code_snippet_extract`, `internal/searchquery`, `internal/searchindex`, `internal/intelligence/retrieval/v2`, `internal/intelligence/codecontext`, `internal/indexing/semantic`, `internal/indexing/rerank`, `internal/indexing/repoindex`, `internal/storage/dbdriver/search.go` |
 | Last reviewed | 2026-03-07 |
 
 ## Search Surfaces
@@ -29,7 +29,7 @@ Current code-search flow is layered as:
   Typed lexical/vector recall over code documents
 - `internal/intelligence/retrieval/v2`
   Fusion and grouped file hits with anchors
-- `internal/codecontext`
+- `internal/intelligence/codecontext`
   Anchor-aware snippet extraction and output preparation
 
 `internal/retrieval` is no longer the active code-search engine. It remains only for tree helpers and summary-generation utilities still used elsewhere.

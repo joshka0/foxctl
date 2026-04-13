@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/codecontext/files"
-	"github.com/jkatigb/agentctl/internal/codecontext/guard"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/guard"
 )
 
 // Collect is the single extraction engine for retrieval-backed code evidence.

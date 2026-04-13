@@ -4,8 +4,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/codecontext/expander"
-	"github.com/jkatigb/agentctl/internal/codecontext/files"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/expander"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
 )
 
 const maxLinesPerSnippet = 80

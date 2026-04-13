@@ -3,8 +3,8 @@ package expander_test
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/codecontext/expander"
-	"github.com/jkatigb/agentctl/internal/codecontext/files"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/expander"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
 )
 
 // mockFileContent creates a FileContent from source lines for testing.

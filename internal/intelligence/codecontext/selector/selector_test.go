@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/codecontext/files"
-	"github.com/jkatigb/agentctl/internal/codecontext/selector"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/selector"
 )
 
 // mockFileContent creates a FileContent from source lines for testing.

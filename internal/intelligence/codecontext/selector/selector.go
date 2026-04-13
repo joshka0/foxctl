@@ -3,7 +3,7 @@ package selector
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/codecontext/files"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
 )
 
 // Selector finds relevant code spans within file content.

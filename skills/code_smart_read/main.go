@@ -19,10 +19,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/codecontext"
-	"github.com/jkatigb/agentctl/internal/codecontext/autoselect"
-	"github.com/jkatigb/agentctl/internal/codecontext/guard"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/autoselect"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/guard"
 )
 
 const command = "code/smart_read"

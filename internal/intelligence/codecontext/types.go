@@ -3,8 +3,8 @@ package codecontext
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/codecontext/files"
-	"github.com/jkatigb/agentctl/internal/codecontext/guard"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/guard"
 )
 
 // Candidate is the upstream extraction target.

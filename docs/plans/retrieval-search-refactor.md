@@ -49,8 +49,8 @@ This refactor covers **code retrieval only**:
 ### Current entrypoints
 
 - Retrieval candidates are produced by `internal/retrieval/candidates.go`.
-- Shared code-context types and rendering already exist in `internal/codecontext/types.go`, `internal/codecontext/collect.go`, and `internal/codecontext/render.go`.
-- Safe file reading already exists in `internal/codecontext/files/reader.go`.
+- Shared code-context types and rendering already exist in `internal/intelligence/codecontext/types.go`, `internal/intelligence/codecontext/collect.go`, and `internal/intelligence/codecontext/render.go`.
+- Safe file reading already exists in `internal/intelligence/codecontext/files/reader.go`.
 - `skills/code_smart_search/main.go` still treats retrieval as candidate generation plus a second skill invocation.
 - `skills/code_snippet_extract/main.go` still owns code extraction logic directly.
 - `skills/code_semantic_search/main.go` still has a separate tree path and direct snippet extraction path.
@@ -66,7 +66,7 @@ This refactor covers **code retrieval only**:
    - Multiple relevant symbols in the same file cannot survive cleanly through the pipeline.
 
 3. Duplicate snippet extraction logic
-   - `internal/codecontext` exists, but `skills/code_snippet_extract/main.go` still implements extraction/fallback/rendering itself.
+   - `internal/intelligence/codecontext` exists, but `skills/code_snippet_extract/main.go` still implements extraction/fallback/rendering itself.
 
 4. Ambiguous vector score semantics
    - Distance and similarity handling are not explicit enough at backend boundaries.
@@ -108,7 +108,7 @@ internal/retrieval/
   tree.go           // file hits -> tree projection
   legacy_adapter.go // temporary bridge for Generator callers
 
-internal/codecontext/
+internal/intelligence/codecontext/
   collect.go        // anchor-aware evidence collection
   proposals.go      // anchor/query-based snippet proposals
   scoring.go        // local snippet scoring and dedupe
@@ -281,18 +281,18 @@ Acceptance criteria:
 - existing callers of `retrieval.Generator` continue to compile
 - `code/smart_search` can move to retrieval v2 without a flag day
 
-### Phase 5: unify snippet extraction under `internal/codecontext`
+### Phase 5: unify snippet extraction under `internal/intelligence/codecontext`
 
-**Goal:** Make `internal/codecontext` the only owner of code evidence extraction.
+**Goal:** Make `internal/intelligence/codecontext` the only owner of code evidence extraction.
 
 Files to add/modify:
 
-- `internal/codecontext/types.go`
-- `internal/codecontext/collect.go`
-- `internal/codecontext/proposals.go`
-- `internal/codecontext/scoring.go`
-- `internal/codecontext/output.go`
-- `internal/codecontext/adapters/retrieval.go`
+- `internal/intelligence/codecontext/types.go`
+- `internal/intelligence/codecontext/collect.go`
+- `internal/intelligence/codecontext/proposals.go`
+- `internal/intelligence/codecontext/scoring.go`
+- `internal/intelligence/codecontext/output.go`
+- `internal/intelligence/codecontext/adapters/retrieval.go`
 
 Changes:
 
@@ -369,7 +369,7 @@ These are good `-spark` slices after the plan is approved:
    - objective: compile-ready engine with tests
 
 5. Codecontext extraction consolidation
-   - write scope: `internal/codecontext/{collect.go,proposals.go,scoring.go,output.go,adapters/*}`
+   - write scope: `internal/intelligence/codecontext/{collect.go,proposals.go,scoring.go,output.go,adapters/*}`
    - objective: `CollectEvidence` and anchor-aware extraction path
 
 6. Skill cutover wrappers
@@ -422,7 +422,7 @@ Add at least one golden path covering:
 - [ ] retrieval v2 exists and produces ranked node hits and grouped file hits
 - [ ] file grouping preserves multiple anchors
 - [ ] tree mode is a pure projection over file hits
-- [ ] `internal/codecontext` owns code evidence extraction
+- [ ] `internal/intelligence/codecontext` owns code evidence extraction
 - [ ] `code/smart_search` uses retrieval v2 + codecontext
 - [ ] `code/smart_search` no longer shells out to `code/snippet_extract`
 - [ ] `code/snippet_extract` is a compatibility wrapper

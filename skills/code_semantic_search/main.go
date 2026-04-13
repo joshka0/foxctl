@@ -1337,7 +1337,7 @@ func searchSymbolsWithRetrieval(
 		if repoStore, err := repoindex.Open(ctx, cfg.Storage.Root, workspacePath); err == nil {
 			defer repoStore.Close()
 			repoQuerySvc = repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore))
-			engine = engine.WithRepoQueryService(repoQuerySvc)
+			engine = engine.WithRepoQueryService(repoQueryAdapter{service: repoQuerySvc})
 		}
 	}
 	req := retrievalv2.DefaultSearchRequest(workspaceID, query)
@@ -1417,6 +1417,39 @@ func searchSymbolsWithRetrieval(
 	}
 
 	return results, resp.Groups, nil
+}
+
+type repoQueryAdapter struct {
+	service *repoquery.QueryService
+}
+
+func (a repoQueryAdapter) Search(ctx context.Context, req retrievalv2.RepoSearchRequest) ([]repoindex.Node, error) {
+	built, err := repoquery.NewSearchRequest(req.Query, req.Limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.service.Search(ctx, built)
+}
+
+func (a repoQueryAdapter) DAGGrep(ctx context.Context, req retrievalv2.RepoDAGGrepRequest) (repoindex.DAGGrepResult, error) {
+	built, err := repoquery.NewDAGGrepRequest(
+		req.Query,
+		"",
+		req.Limit,
+		nil,
+		req.EdgeSets,
+		nil,
+		req.Direction,
+		req.Depth,
+		req.Budget,
+		req.PerNodeCap,
+		nil,
+		req.Render,
+	)
+	if err != nil {
+		return repoindex.DAGGrepResult{}, err
+	}
+	return a.service.DAGGrep(ctx, built)
 }
 
 func searchRepoIndexProjectedFallback(ctx context.Context, service *repoquery.QueryService, workspaceID, query string, limit int) ([]Result, error) {

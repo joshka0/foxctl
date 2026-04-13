@@ -3,7 +3,7 @@ package adapters
 import (
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/codecontext"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
 	"github.com/jkatigb/agentctl/internal/searchindex"
 )
 

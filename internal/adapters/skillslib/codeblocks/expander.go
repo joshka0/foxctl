@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	codeexpander "github.com/jkatigb/agentctl/internal/codecontext/expander"
+	codeexpander "github.com/jkatigb/agentctl/internal/intelligence/codecontext/expander"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 )
 

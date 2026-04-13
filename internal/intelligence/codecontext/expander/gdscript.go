@@ -3,7 +3,7 @@ package expander
 import (
 	"regexp"
 
-	"github.com/jkatigb/agentctl/internal/codecontext/files"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
 )
 
 // gdscriptExpander handles GDScript code block detection using indentation.

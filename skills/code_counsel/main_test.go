@@ -7,8 +7,8 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/secretutil"
-	"github.com/jkatigb/agentctl/internal/codecontext"
-	"github.com/jkatigb/agentctl/internal/codecontext/guard"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/guard"
 )
 
 func TestScanForSecrets_NoSecrets(t *testing.T) {

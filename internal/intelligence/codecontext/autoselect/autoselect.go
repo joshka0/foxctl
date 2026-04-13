@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/codecontext"
-	ccadapt "github.com/jkatigb/agentctl/internal/codecontext/adapters"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
+	ccadapt "github.com/jkatigb/agentctl/internal/intelligence/codecontext/adapters"
 	retrievalv2 "github.com/jkatigb/agentctl/internal/intelligence/retrieval/v2"
 	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"

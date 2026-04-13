@@ -3,7 +3,7 @@ package selector
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/codecontext/files"
+	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
 )
 
 // LLMSelector uses a language model to select relevant code spans.

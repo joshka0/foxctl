@@ -72,7 +72,7 @@ These families are explicit non-targets for the `v2` migration:
 - `internal/storage/*`
 - `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline`,
   `internal/knowledge`
-- `internal/indexing/*`, `internal/retrieval*`, `internal/codecontext`,
+- `internal/indexing/*`, `internal/retrieval*`, `internal/intelligence/codecontext`,
   `internal/codemap`, `internal/refactor`
 - `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi`
 - `internal/domain`, `internal/platform`, `internal/protocol`
@@ -426,7 +426,7 @@ Primary packages:
 - `internal/searchindex`
 - `internal/searchrank`
 - `internal/repoquery`
-- `internal/codecontext`
+- `internal/intelligence/codecontext`
 - `internal/codemap`
 - `internal/refactor`
 - `internal/analysis`
@@ -459,7 +459,7 @@ Current mapping to make durable in Story 1:
 | `internal/repoquery` | search/query/recall | keep as structural recall/query slice |
 | `internal/searchquery` | search/query/recall | keep as query-planning slice |
 | `internal/searchrank` | search/query/recall | keep as ranking/fusion slice |
-| `internal/codecontext` | evidence gathering | keep as shared code-evidence extraction |
+| `internal/intelligence/codecontext` | evidence gathering | keep as shared code-evidence extraction |
 | `internal/codemap/context` | evidence gathering | treat as evidence-gathering support inside codemap |
 | `internal/codemap` | synthesis and refactor planning | keep as codemap synthesis |
 | `internal/refactor` | synthesis and refactor planning | keep as refactor planning/evidence consumer |
@@ -516,7 +516,7 @@ Story 3 target:
 
 - separate code-evidence extraction from synthesis, planning, oversight, and
   verification:
-  - `internal/codecontext` and `internal/codemap/context` gather evidence
+  - `internal/intelligence/codecontext` and `internal/codemap/context` gather evidence
   - `internal/codemap` and `internal/refactor` synthesize or plan from evidence
   - `internal/analysis/overseer` coordinates and scores
   - `internal/verification` verifies claims
@@ -533,7 +533,7 @@ Story 3 should end with these durable decisions:
 
 | Package/root | Slice | Decision |
 |------|-------|----------|
-| `internal/codecontext` | evidence gathering | keep as the main evidence extractor |
+| `internal/intelligence/codecontext` | evidence gathering | keep as the main evidence extractor |
 | `internal/codemap/context` | evidence gathering | keep as codemap-specific evidence support |
 | `internal/codemap` | synthesis | keep as codemap synthesis |
 | `internal/refactor` | planning/synthesis | keep as refactor planning and evidence consumer |
