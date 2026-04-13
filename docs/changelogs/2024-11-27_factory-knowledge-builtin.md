@@ -14,18 +14,18 @@ knowledge registry on `agentctl knowledge sync`.
 
 ### Embedded Assets
 
-- `internal/knowledge/builtin/data/droids/orchestrator.md` - Master coordinator
+- `internal/context/knowledge/builtin/data/droids/orchestrator.md` - Master coordinator
   droid
-- `internal/knowledge/builtin/data/droids/backend-architect.md` - API/database
+- `internal/context/knowledge/builtin/data/droids/backend-architect.md` - API/database
   design droid
-- `internal/knowledge/builtin/data/droids/frontend-developer.md` - Next.js/React
+- `internal/context/knowledge/builtin/data/droids/frontend-developer.md` - Next.js/React
   droid
 
 ### Package
 
-- `internal/knowledge/builtin/factory.go` - Embedding, parsing, and seeding
+- `internal/context/knowledge/builtin/factory.go` - Embedding, parsing, and seeding
   logic
-- `internal/knowledge/builtin/factory_test.go` - Unit tests
+- `internal/context/knowledge/builtin/factory_test.go` - Unit tests
 
 ## Modified Files
 
@@ -61,7 +61,7 @@ Each droid has keyword triggers extracted from its description, plus standard
 ┌─────────────────────────────────────────────────────┐
 │                   agentctl binary                    │
 │  ┌─────────────────────────────────────────────┐    │
-│  │  internal/knowledge/builtin/                │    │
+│  │  internal/context/knowledge/builtin/                │    │
 │  │  ├── data/droids/*.md  (go:embed)          │    │
 │  │  └── factory.go        (SeedFactoryKnowledge) │  │
 │  └─────────────────────────────────────────────┘    │

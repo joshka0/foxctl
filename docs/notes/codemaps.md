@@ -199,7 +199,7 @@ Each entry has:
 - **Goal**: Explain the knowledge registry and built-in Factory droid documents.
 - **Prompt**:\
   “Map the knowledge system in agentctl, focusing on builtin Factory droids.
-  Start at `internal/knowledge/builtin` (`factory.go`, `data/droids/*.md`) and
+  Start at `internal/context/knowledge/builtin` (`factory.go`, `data/droids/*.md`) and
   show how `SeedFactoryKnowledge` / `ListFactoryDroids` work. Then connect to
   the CLI flows for `agentctl knowledge sync/search` (if present) and the specs
   in `docs/spec/knowledge_registry.md` and

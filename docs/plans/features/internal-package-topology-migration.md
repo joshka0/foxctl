@@ -71,7 +71,7 @@ These families are explicit non-targets for the `v2` migration:
 
 - `internal/storage/*`
 - `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline`,
-  `internal/knowledge`
+  `internal/context/knowledge`
 - `internal/intelligence/indexing/*`, `internal/intelligence/retrieval*`, `internal/intelligence/codecontext`,
   `internal/intelligence/codemap`, `internal/intelligence/refactor`
 - `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi`
@@ -285,7 +285,7 @@ Primary packages:
 - `internal/sessionkit/*`
 - `internal/context/updater/*`
 - `internal/storage/context*`
-- `internal/knowledge/*`
+- `internal/context/knowledge/*`
 - `internal/storage/knowledge/*`
 
 Proposed stories:
@@ -318,7 +318,7 @@ Current mapping to make durable in Story 1:
 | `internal/context/updater` | runtime-helper | treat as a helper/bridge package, not the family anchor |
 | `internal/storage/contextbuffer` | runtime-helper | keep in storage and classify with helper work |
 | `internal/storage/contextvar` | runtime-helper | keep in storage and classify with helper work |
-| `internal/knowledge` | knowledge | keep as the knowledge slice |
+| `internal/context/knowledge` | knowledge | keep as the knowledge slice |
 | `internal/storage/knowledge` | knowledge | keep in storage and plan with knowledge work |
 
 Why this sequencing:
@@ -369,7 +369,7 @@ Story 3 target:
   - `internal/context/updater`
   - `internal/storage/contextbuffer`
   - `internal/storage/contextvar`
-  - `internal/knowledge`
+  - `internal/context/knowledge`
   - `internal/storage/knowledge`
 
 Required placement rule from Story 3:
@@ -391,7 +391,7 @@ Story 3 should end with these durable decisions:
 | `internal/context/updater` | runtime-helper | keep as helper/bridge package |
 | `internal/storage/contextbuffer` | runtime-helper | keep in storage with helper ownership |
 | `internal/storage/contextvar` | runtime-helper | keep in storage with helper ownership |
-| `internal/knowledge` | knowledge | keep as durable knowledge-plane logic |
+| `internal/context/knowledge` | knowledge | keep as durable knowledge-plane logic |
 | `internal/storage/knowledge` | knowledge | keep in storage with knowledge ownership |
 
 Non-goals for Story 3:

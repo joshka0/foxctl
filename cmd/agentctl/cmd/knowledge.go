@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/context/knowledge/builtin"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/knowledge/builtin"
 	"github.com/jkatigb/agentctl/internal/storage/knowledge"
 	"github.com/spf13/cobra"
 )

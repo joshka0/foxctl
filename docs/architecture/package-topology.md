@@ -316,7 +316,7 @@ The target split for this family is:
 | assembly | `internal/companion` | keep as the live assembly anchor |
 | history | `internal/transcriptpipeline`, `internal/contextplane/taskhistory`, `internal/storage/transcriptcache` | keep as one explicit first migration tranche |
 | runtime-helper | `internal/sessionkit`, `internal/context/updater`, `internal/storage/contextbuffer`, `internal/storage/contextvar` | keep as helper/bridge packages until history and assembly seams are narrower |
-| knowledge | `internal/knowledge`, `internal/storage/knowledge` | keep as the durable knowledge slice |
+| knowledge | `internal/context/knowledge`, `internal/storage/knowledge` | keep as the durable knowledge slice |
 
 That yields these routing decisions for the current top-level roots:
 
@@ -331,7 +331,7 @@ That yields these routing decisions for the current top-level roots:
 | `internal/context/updater` | runtime-helper | bridge | Proactively surfaces relevant context at runtime; it depends on context retrieval/assembly concerns but should not define the control-plane or history boundary |
 | `internal/storage/contextbuffer` | runtime-helper | keep in storage and classify with helper slice | It is a local queue/store for context injection, so it stays storage-owned while routing with runtime helpers |
 | `internal/storage/contextvar` | runtime-helper | keep in storage and classify with helper slice | It is the durable RLM context-variable store, not a separate top-level context family |
-| `internal/knowledge` | knowledge | keep | Represents the durable knowledge-plane logic rather than runtime assembly or history processing |
+| `internal/context/knowledge` | knowledge | keep | Represents the durable knowledge-plane logic rather than runtime assembly or history processing |
 | `internal/storage/knowledge` | knowledge | keep in storage and pair with knowledge slice | It is the persistence layer for knowledge packs/registry state and should move only with explicit knowledge work |
 
 Explicit placement rules for this family:
@@ -415,7 +415,7 @@ The routing rule is:
 | `internal/context/updater` | runtime-helper | keep as a runtime helper that analyzes active conversations and injects relevant context; it is not the control-plane anchor or the durable knowledge plane |
 | `internal/storage/contextbuffer` | runtime-helper | keep in `internal/storage/*` as helper-owned injection buffering |
 | `internal/storage/contextvar` | runtime-helper | keep in `internal/storage/*` as helper-owned context-variable persistence |
-| `internal/knowledge` | knowledge | keep as the durable knowledge-plane logic and embedded knowledge root |
+| `internal/context/knowledge` | knowledge | keep as the durable knowledge-plane logic and embedded knowledge root |
 | `internal/storage/knowledge` | knowledge | keep in `internal/storage/*` as durable knowledge persistence and sync state |
 
 Practical placement rules:

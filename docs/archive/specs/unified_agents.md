@@ -241,7 +241,7 @@ Instructions for the command using $ARGUMENTS placeholder.
 
 ### Phase 2: Builtin Embedding
 
-1. Add curated core agents to `internal/knowledge/builtin/data/agents/`
+1. Add curated core agents to `internal/context/knowledge/builtin/data/agents/`
 2. Embed as knowledge items with `kind: agent`
 3. Make available via `agentctl knowledge sync`
 
