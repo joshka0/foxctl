@@ -270,7 +270,7 @@ func TestCollectorCollectIncludesTranscriptHistory(t *testing.T) {
 			EndFrame:     5,
 		},
 	}, answers)
-	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-history", "sess-history", records, nil); err != nil {
+	if _, err := tphistory.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-history", "sess-history", records, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords: %v", err)
 	}
 	unrelated := transcriptpipeline.BuildHistoryRecords(tphistory.DefaultHistoryProfile(), tphistory.HistoryRecordContext{
@@ -280,7 +280,7 @@ func TestCollectorCollectIncludesTranscriptHistory(t *testing.T) {
 		{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Close the release gate verdict for the mobile app.", Confidence: 0.8},
 		{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Finish the release checklist.", Confidence: 0.72},
 	})
-	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-other", "sess-other", unrelated, nil); err != nil {
+	if _, err := tphistory.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-other", "sess-other", unrelated, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords(unrelated): %v", err)
 	}
 
@@ -395,7 +395,7 @@ func TestCollectorCollectFallsBackToLatestTranscriptHistoryWithinScope(t *testin
 		{QuestionID: tphistory.HistoryQuestionNextStep, Answer: "Carry the structural gap forward into the next compare pass.", Confidence: 0.72},
 		{QuestionID: tphistory.HistoryQuestionAcceptedLearnings, Answer: "Most surfaces are still first-pass renderers over rebuilt endpoints rather than polished destination experiences.", Confidence: 0.8},
 	})
-	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, mainRepo, "sess-family-fallback", "sess-family-fallback", records, nil); err != nil {
+	if _, err := tphistory.PersistHistoryRecords(ctx, memStore, mainRepo, "sess-family-fallback", "sess-family-fallback", records, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords: %v", err)
 	}
 
@@ -479,7 +479,7 @@ func TestCollectorCollectAggregatesRecurringMistakesAcrossOwners(t *testing.T) {
 			{QuestionID: tphistory.HistoryQuestionRegressions, Answer: "Sandbox denied while checking git state.", Confidence: 0.72},
 			{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Some task objective.", Confidence: 0.8},
 		})
-		if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, mainRepo, owner, owner, records, nil); err != nil {
+		if _, err := tphistory.PersistHistoryRecords(ctx, memStore, mainRepo, owner, owner, records, nil); err != nil {
 			t.Fatalf("PersistHistoryRecords(%s): %v", owner, err)
 		}
 	}
@@ -545,7 +545,7 @@ func TestCollectTranscriptRecurringLearningsAcrossOwners(t *testing.T) {
 			{QuestionID: tphistory.HistoryQuestionAcceptedLearnings, Answer: learning, Confidence: 0.8},
 			{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Some task objective.", Confidence: 0.8},
 		})
-		if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, mainRepo, owner, owner, records, nil); err != nil {
+		if _, err := tphistory.PersistHistoryRecords(ctx, memStore, mainRepo, owner, owner, records, nil); err != nil {
 			t.Fatalf("PersistHistoryRecords(%s): %v", owner, err)
 		}
 	}
@@ -585,7 +585,7 @@ func TestSearchTranscriptHistoryAnswers_UsesRetrievalTextLexically(t *testing.T)
 		ConversationID: "conv-lexical",
 		SessionIDs:     []string{"sess-lexical"},
 	}, nil, nil, answers)
-	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-lexical", "sess-lexical", records, nil); err != nil {
+	if _, err := tphistory.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-lexical", "sess-lexical", records, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords: %v", err)
 	}
 
@@ -627,7 +627,7 @@ func TestSearchTranscriptHistoryAnswers_ReturnsFullOwnerAnswerBundle(t *testing.
 		ConversationID: "conv-owner-bundle",
 		SessionIDs:     []string{"sess-owner-bundle"},
 	}, nil, nil, answers)
-	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-owner-bundle", "sess-owner-bundle", records, nil); err != nil {
+	if _, err := tphistory.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-owner-bundle", "sess-owner-bundle", records, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords: %v", err)
 	}
 
@@ -684,7 +684,7 @@ func TestSearchTranscriptHistoryAnswers_ScopeControlsWorkspaceVsFamily(t *testin
 		Answer:     "Persist history records for retrieval.",
 		Confidence: 0.72,
 	}})
-	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, mainRepo, "sess-family", "sess-family", records, nil); err != nil {
+	if _, err := tphistory.PersistHistoryRecords(ctx, memStore, mainRepo, "sess-family", "sess-family", records, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords: %v", err)
 	}
 
@@ -831,7 +831,7 @@ func TestCollectorCollectUsesTranscriptWorkerForRetrievedBrief(t *testing.T) {
 	}, nil, []tphistory.HistoryAnswer{
 		{QuestionID: tphistory.HistoryQuestionObjective, Answer: "Use transcript continuity.", Label: "use transcript continuity", Confidence: 0.8},
 	})
-	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-worker", "sess-worker", records, nil); err != nil {
+	if _, err := tphistory.PersistHistoryRecords(ctx, memStore, workspacePath, "sess-worker", "sess-worker", records, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords: %v", err)
 	}
 
@@ -928,7 +928,7 @@ func TestCollectTranscriptFamilyOverview_AggregatesRecentOwners(t *testing.T) {
 			ConversationID: "conv-" + fixture.owner,
 			SessionIDs:     []string{fixture.owner},
 		}, nil, nil, fixture.answers)
-		if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, fixture.workspace, fixture.owner, fixture.owner, records, nil); err != nil {
+		if _, err := tphistory.PersistHistoryRecords(ctx, memStore, fixture.workspace, fixture.owner, fixture.owner, records, nil); err != nil {
 			t.Fatalf("PersistHistoryRecords(%s): %v", fixture.owner, err)
 		}
 	}
@@ -1006,7 +1006,7 @@ func TestCollectTranscriptFamilyOverview_FocusQuerySelectsMatchingLane(t *testin
 			ConversationID: "conv-" + fixture.owner,
 			SessionIDs:     []string{fixture.owner},
 		}, nil, nil, fixture.answers)
-		if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, mainRepo, fixture.owner, fixture.owner, records, nil); err != nil {
+		if _, err := tphistory.PersistHistoryRecords(ctx, memStore, mainRepo, fixture.owner, fixture.owner, records, nil); err != nil {
 			t.Fatalf("PersistHistoryRecords(%s): %v", fixture.owner, err)
 		}
 	}
@@ -1062,7 +1062,7 @@ func TestCollectTranscriptFamilyOverview_DateRangeFiltersOwners(t *testing.T) {
 		ConversationID: "conv-new",
 		SessionIDs:     []string{"sess-new"},
 	}, nil, nil, newAnswers)
-	if _, err := transcriptpipeline.PersistHistoryRecords(ctx, memStore, mainRepo, "sess-new", "sess-new", newRecords, nil); err != nil {
+	if _, err := tphistory.PersistHistoryRecords(ctx, memStore, mainRepo, "sess-new", "sess-new", newRecords, nil); err != nil {
 		t.Fatalf("PersistHistoryRecords(new): %v", err)
 	}
 

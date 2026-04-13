@@ -3,12 +3,14 @@ package transcriptpipeline
 import (
 	"strings"
 	"testing"
+
+	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
 func TestDefaultHistoryProfile_HasCoreQuestions(t *testing.T) {
 	t.Parallel()
 
-	got := DefaultHistoryProfile()
+	got := historypkg.DefaultHistoryProfile()
 	if got == nil {
 		t.Fatal("expected profile")
 		return
@@ -27,7 +29,7 @@ func TestDefaultHistoryProfile_HasCoreQuestions(t *testing.T) {
 func TestBuildHistoryAnswers_UsesInsightSurfaces(t *testing.T) {
 	t.Parallel()
 
-	profile := DefaultHistoryProfile()
+	profile := historypkg.DefaultHistoryProfile()
 	brief := &InsightBrief{
 		ActiveDirections: []string{"Finalize the release gate verdict."},
 		LatestLearnings:  []string{"Use named_memory as the durable sink for transcript-derived memories."},
@@ -70,7 +72,7 @@ func TestBuildHistoryAnswers_UsesInsightSurfaces(t *testing.T) {
 func TestBuildHistoryAnswers_UsesRiskFallbackForGotchas(t *testing.T) {
 	t.Parallel()
 
-	profile := DefaultHistoryProfile()
+	profile := historypkg.DefaultHistoryProfile()
 	brief := &InsightBrief{
 		Risks: []string{"exec_command failed: sandbox denied"},
 	}
@@ -92,7 +94,7 @@ func TestBuildHistoryAnswers_UsesRiskFallbackForGotchas(t *testing.T) {
 func TestBuildHistoryAnswers_AddsRegressionAndRecurringMistakeSlots(t *testing.T) {
 	t.Parallel()
 
-	profile := DefaultHistoryProfile()
+	profile := historypkg.DefaultHistoryProfile()
 	notable := []NotableInsight{
 		{Kind: NotableInsightMisunderstanding, Headline: "We initially pushed doctrine too hard.", StartFrame: 3, EndFrame: 4},
 		{Kind: NotableInsightGotcha, Headline: "Sandbox denied while checking git state.", StartFrame: 5, EndFrame: 5},
@@ -126,7 +128,7 @@ func TestBuildHistoryAnswers_AddsRegressionAndRecurringMistakeSlots(t *testing.T
 func TestBuildHistoryAnswers_UsesInsightFallbacksForLearningsAndSurprises(t *testing.T) {
 	t.Parallel()
 
-	profile := DefaultHistoryProfile()
+	profile := historypkg.DefaultHistoryProfile()
 	brief := &InsightBrief{}
 	got := BuildHistoryAnswers(profile, nil, brief, nil, []DecisionInsight{
 		{
@@ -163,7 +165,7 @@ func TestBuildHistoryAnswers_UsesInsightFallbacksForLearningsAndSurprises(t *tes
 func TestBuildHistoryAnswers_UsesProvisionalAssistantGuidanceAsLearningFallback(t *testing.T) {
 	t.Parallel()
 
-	profile := DefaultHistoryProfile()
+	profile := historypkg.DefaultHistoryProfile()
 	got := BuildHistoryAnswers(profile, nil, &InsightBrief{}, []NotableInsight{
 		{Kind: NotableInsightSurprise, Headline: "Pulse Feed should hang off the main feed route, while Reader Workspace should center on the reader screen.", StartFrame: 0, EndFrame: 0},
 	}, []DecisionInsight{
@@ -191,7 +193,7 @@ func TestBuildHistoryAnswers_UsesProvisionalAssistantGuidanceAsLearningFallback(
 func TestBuildHistoryAnswers_UsesCompactedAssistantGuidanceAsLearningFallback(t *testing.T) {
 	t.Parallel()
 
-	profile := DefaultHistoryProfile()
+	profile := historypkg.DefaultHistoryProfile()
 	got := BuildHistoryAnswers(profile, nil, &InsightBrief{}, []NotableInsight{
 		{Kind: NotableInsightSurprise, Headline: "most surfaces are still first-pass renderers over rebuilt endpoints rather than polished flows", StartFrame: 0, EndFrame: 0},
 	}, []DecisionInsight{
@@ -221,7 +223,7 @@ func TestBuildHistoryAnswers_UsesCompactedAssistantGuidanceAsLearningFallback(t 
 func TestBuildHistoryAnswers_DoesNotPromoteOperationalProgressAsLearningWithoutNotable(t *testing.T) {
 	t.Parallel()
 
-	profile := DefaultHistoryProfile()
+	profile := historypkg.DefaultHistoryProfile()
 	got := BuildHistoryAnswers(profile, nil, &InsightBrief{}, nil, []DecisionInsight{
 		{
 			Kind:        InsightKindDirection,
@@ -242,7 +244,7 @@ func TestBuildHistoryAnswers_DoesNotPromoteOperationalProgressAsLearningWithoutN
 func TestBuildHistoryPack_ComposesAgentAndHumanViews(t *testing.T) {
 	t.Parallel()
 
-	pack := BuildHistoryPack([]HistoryAnswer{
+	pack := historypkg.BuildHistoryPack([]historypkg.HistoryAnswer{
 		{QuestionID: HistoryQuestionObjective, Answer: "Build a usable transcript history layer for agents and humans.", Confidence: 0.8},
 		{QuestionID: HistoryQuestionActiveDirections, Answer: "Continue the second-pass consolidator direction. | Persist history records for retrieval.", Confidence: 0.74},
 		{QuestionID: HistoryQuestionAcceptedLearnings, Answer: "Use named_memory as the durable sink for transcript-derived memories.", Confidence: 0.8},
@@ -275,7 +277,7 @@ func TestBuildHistoryPack_ComposesAgentAndHumanViews(t *testing.T) {
 func TestBuildHistoryPack_DedupesObjectiveAndContinueWith(t *testing.T) {
 	t.Parallel()
 
-	pack := BuildHistoryPack([]HistoryAnswer{
+	pack := historypkg.BuildHistoryPack([]historypkg.HistoryAnswer{
 		{QuestionID: HistoryQuestionObjective, Answer: "Map the rebuilt frontend architecture to the Paper target surfaces.", Confidence: 0.8},
 		{QuestionID: HistoryQuestionActiveDirections, Answer: "Map the rebuilt frontend architecture to the Paper target surfaces.", Confidence: 0.74},
 		{QuestionID: HistoryQuestionNextStep, Answer: "Map the rebuilt frontend architecture to the Paper target surfaces.", Confidence: 0.72},
@@ -298,7 +300,7 @@ func TestBuildHistoryPack_DedupesObjectiveAndContinueWith(t *testing.T) {
 func TestBuildHistoryPack_PrefersCompactObjectiveLabelWhenMeaningfullyShorter(t *testing.T) {
 	t.Parallel()
 
-	pack := BuildHistoryPack([]HistoryAnswer{
+	pack := historypkg.BuildHistoryPack([]historypkg.HistoryAnswer{
 		{QuestionID: HistoryQuestionObjective, Answer: "Can we go over our app as well and try to look at all the possible error states and error boundaries and make our app production ready for that.", Label: "make our app production ready", Confidence: 0.8},
 		{QuestionID: HistoryQuestionAcceptedLearnings, Answer: "The reflections list was fetched from optional seed state.", Confidence: 0.8},
 	})
@@ -320,7 +322,7 @@ func TestBuildHistoryPack_PrefersCompactObjectiveLabelWhenMeaningfullyShorter(t 
 func TestBuildHistoryAnswers_PrefersUserDirectionsForActiveDirections(t *testing.T) {
 	t.Parallel()
 
-	profile := DefaultHistoryProfile()
+	profile := historypkg.DefaultHistoryProfile()
 	brief := &InsightBrief{
 		ActiveDirections: []string{
 			"Guard the unguarded",
@@ -358,7 +360,7 @@ func TestBuildHistoryAnswers_PrefersUserDirectionsForActiveDirections(t *testing
 func TestBuildHistoryPack_CarriesRegressionFields(t *testing.T) {
 	t.Parallel()
 
-	pack := BuildHistoryPack([]HistoryAnswer{
+	pack := historypkg.BuildHistoryPack([]historypkg.HistoryAnswer{
 		{QuestionID: HistoryQuestionObjective, Answer: "Stabilize transcript continuity.", Confidence: 0.8},
 		{QuestionID: HistoryQuestionRegressions, Answer: "Sandbox denied while checking git state.", Confidence: 0.72},
 		{QuestionID: HistoryQuestionRecurringMistakes, Answer: "We initially pushed doctrine too hard. | Sandbox denied while checking git state.", Confidence: 0.7},

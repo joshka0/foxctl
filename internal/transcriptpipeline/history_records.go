@@ -1,7 +1,6 @@
 package transcriptpipeline
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage"
 	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
@@ -30,7 +28,7 @@ type HistoryRecordEmbedFunc = historypkg.HistoryRecordEmbedFunc
 
 type PersistedHistoryRecord = historypkg.PersistedHistoryRecord
 
-func BuildHistoryRecords(profile *HistoryProfile, ctx HistoryRecordContext, insights []DecisionInsight, notable []NotableInsight, answers []HistoryAnswer) []HistoryRecord {
+func BuildHistoryRecords(profile *historypkg.HistoryProfile, ctx HistoryRecordContext, insights []DecisionInsight, notable []NotableInsight, answers []historypkg.HistoryAnswer) []HistoryRecord {
 	out := make([]HistoryRecord, 0, len(insights)+len(notable)+len(answers))
 	out = append(out, historyRecordsFromInsights(ctx, insights)...)
 	out = append(out, historyRecordsFromNotables(ctx, notable)...)
@@ -48,22 +46,6 @@ func BuildHistoryRecords(profile *HistoryProfile, ctx HistoryRecordContext, insi
 		return out[i].RecordID < out[j].RecordID
 	})
 	return out
-}
-
-func PersistHistoryRecords(ctx context.Context, store storage.MemoryStore, workspace, ownerID, sessionID string, records []HistoryRecord, embed HistoryRecordEmbedFunc) ([]PersistedHistoryRecord, error) {
-	return historypkg.PersistHistoryRecords(ctx, store, workspace, ownerID, sessionID, records, embed)
-}
-
-func ReconcileHistoryRecordPrefix(ctx context.Context, store storage.MemoryStore, workspace, prefix string, keep []PersistedHistoryRecord) ([]string, error) {
-	return historypkg.ReconcileHistoryRecordPrefix(ctx, store, workspace, prefix, keep)
-}
-
-func TranscriptHistoryPrefix(ownerID string) string {
-	return historypkg.TranscriptHistoryPrefix(ownerID)
-}
-
-func HistoryRecordMemoryName(ownerID string, record HistoryRecord) string {
-	return historypkg.HistoryRecordMemoryName(ownerID, record)
 }
 
 func historyRecordMemoryType(kind HistoryRecordKind) (string, bool) {
@@ -147,7 +129,7 @@ func historyRecordsFromNotables(ctx HistoryRecordContext, notable []NotableInsig
 	return out
 }
 
-func historyRecordsFromAnswers(profile *HistoryProfile, ctx HistoryRecordContext, answers []HistoryAnswer) []HistoryRecord {
+func historyRecordsFromAnswers(profile *historypkg.HistoryProfile, ctx HistoryRecordContext, answers []historypkg.HistoryAnswer) []HistoryRecord {
 	if len(answers) == 0 {
 		return nil
 	}
@@ -233,7 +215,7 @@ func notableTags(item NotableInsight) []string {
 	return normalizeTagList(tags)
 }
 
-func historyQuestionPrompt(profile *HistoryProfile, id HistoryQuestionID) string {
+func historyQuestionPrompt(profile *historypkg.HistoryProfile, id HistoryQuestionID) string {
 	if profile == nil {
 		return ""
 	}

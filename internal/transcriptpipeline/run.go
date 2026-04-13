@@ -9,6 +9,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
+	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
 )
 
@@ -39,9 +40,9 @@ type SingleRunResult struct {
 	InsightBrief            *InsightBrief                        `json:"insight_brief,omitempty"`
 	InsightTimeline         []InsightTimelineEntry               `json:"insight_timeline,omitempty"`
 	NotableInsights         []NotableInsight                     `json:"notable_insights,omitempty"`
-	HistoryProfile          *HistoryProfile                      `json:"history_profile,omitempty"`
-	HistoryAnswers          []HistoryAnswer                      `json:"history_answers,omitempty"`
-	HistoryPack             *HistoryPack                         `json:"history_pack,omitempty"`
+	HistoryProfile          *historypkg.HistoryProfile           `json:"history_profile,omitempty"`
+	HistoryAnswers          []historypkg.HistoryAnswer           `json:"history_answers,omitempty"`
+	HistoryPack             *historypkg.HistoryPack              `json:"history_pack,omitempty"`
 	HistoryRecords          []HistoryRecord                      `json:"history_records,omitempty"`
 	PersistedHistory        []PersistedHistoryRecord             `json:"persisted_history,omitempty"`
 	RemovedHistory          []string                             `json:"removed_history,omitempty"`
@@ -97,8 +98,8 @@ type GroupRunItem struct {
 	InsightBrief            *InsightBrief                        `json:"insight_brief,omitempty"`
 	InsightTimeline         []InsightTimelineEntry               `json:"insight_timeline,omitempty"`
 	NotableInsights         []NotableInsight                     `json:"notable_insights,omitempty"`
-	HistoryAnswers          []HistoryAnswer                      `json:"history_answers,omitempty"`
-	HistoryPack             *HistoryPack                         `json:"history_pack,omitempty"`
+	HistoryAnswers          []historypkg.HistoryAnswer           `json:"history_answers,omitempty"`
+	HistoryPack             *historypkg.HistoryPack              `json:"history_pack,omitempty"`
 	HistoryRecords          []HistoryRecord                      `json:"history_records,omitempty"`
 	PersistedHistory        []PersistedHistoryRecord             `json:"persisted_history,omitempty"`
 	RemovedHistory          []string                             `json:"removed_history,omitempty"`
@@ -126,10 +127,10 @@ type GroupRunItem struct {
 
 // GroupRunResult is the stage output for one grouped transcript run.
 type GroupRunResult struct {
-	Groups              []GroupRunItem  `json:"groups"`
-	TranscriptCacheRoot string          `json:"transcript_cache_root"`
-	TranscriptCachePath string          `json:"transcript_cache_path"`
-	HistoryProfile      *HistoryProfile `json:"history_profile,omitempty"`
+	Groups              []GroupRunItem             `json:"groups"`
+	TranscriptCacheRoot string                     `json:"transcript_cache_root"`
+	TranscriptCachePath string                     `json:"transcript_cache_path"`
+	HistoryProfile      *historypkg.HistoryProfile `json:"history_profile,omitempty"`
 }
 
 // RunSingleInsight orchestrates a lightweight decision-support pass over one transcript.
@@ -163,7 +164,7 @@ func RunSingleInsight(ctx context.Context, opts SingleRunOptions) (SingleRunResu
 	insights := FinalizeDecisionInsights(rawInsights, 8)
 	brief := BuildInsightBrief(insights)
 	notables := BuildNotableInsights(anchored.Derivations, rawInsights, 6)
-	profile := DefaultHistoryProfile()
+	profile := historypkg.DefaultHistoryProfile()
 	historyAnswers := BuildHistoryAnswers(profile, &objective, brief, notables, insights)
 	return SingleRunResult{
 		Parsed:              prederived.Parsed,
@@ -177,7 +178,7 @@ func RunSingleInsight(ctx context.Context, opts SingleRunOptions) (SingleRunResu
 		NotableInsights:     notables,
 		HistoryProfile:      profile,
 		HistoryAnswers:      historyAnswers,
-		HistoryPack:         BuildHistoryPack(historyAnswers),
+		HistoryPack:         historypkg.BuildHistoryPack(historyAnswers),
 		HistoryRecords: BuildHistoryRecords(profile, HistoryRecordContext{
 			ConversationID:  anchored.ConversationID,
 			SessionIDs:      []string{prederived.Parsed.SessionID},
@@ -208,7 +209,7 @@ func RunGroupedInsight(ctx context.Context, opts GroupRunOptions) (GroupRunResul
 		Groups:              make([]GroupRunItem, 0, len(groups)),
 		TranscriptCacheRoot: cacheRoot,
 		TranscriptCachePath: cacheStore.Path(),
-		HistoryProfile:      DefaultHistoryProfile(),
+		HistoryProfile:      historypkg.DefaultHistoryProfile(),
 	}
 
 	for _, group := range groups {
@@ -264,7 +265,7 @@ func RunGroupedInsight(ctx context.Context, opts GroupRunOptions) (GroupRunResul
 			InsightTimeline:       BuildInsightTimeline(anchored.Derivations, insights, 6),
 			NotableInsights:       notables,
 			HistoryAnswers:        historyAnswers,
-			HistoryPack:           BuildHistoryPack(historyAnswers),
+			HistoryPack:           historypkg.BuildHistoryPack(historyAnswers),
 			HistoryRecords: BuildHistoryRecords(result.HistoryProfile, HistoryRecordContext{
 				ConversationID:  group.GroupID,
 				GroupID:         group.GroupID,

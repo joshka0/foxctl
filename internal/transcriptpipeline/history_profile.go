@@ -23,26 +23,13 @@ const (
 	HistoryQuestionNextStep          = historypkg.HistoryQuestionNextStep
 )
 
-type HistoryQuestion = historypkg.HistoryQuestion
-type HistoryProfile = historypkg.HistoryProfile
-type HistoryAnswer = historypkg.HistoryAnswer
-type HistoryPack = historypkg.HistoryPack
-
-func DefaultHistoryProfile() *HistoryProfile {
-	return historypkg.DefaultHistoryProfile()
-}
-
-func BuildHistoryPack(answers []HistoryAnswer) *HistoryPack {
-	return historypkg.BuildHistoryPack(answers)
-}
-
-func BuildHistoryAnswers(profile *HistoryProfile, objective *SessionObjective, brief *InsightBrief, notable []NotableInsight, insights []DecisionInsight) []HistoryAnswer {
+func BuildHistoryAnswers(profile *historypkg.HistoryProfile, objective *SessionObjective, brief *InsightBrief, notable []NotableInsight, insights []DecisionInsight) []historypkg.HistoryAnswer {
 	if profile == nil {
 		return nil
 	}
-	answers := make([]HistoryAnswer, 0, len(profile.Questions))
+	answers := make([]historypkg.HistoryAnswer, 0, len(profile.Questions))
 	if objectiveAnswer := objectiveAnswer(objective); objectiveAnswer != "" {
-		answers = append(answers, HistoryAnswer{
+		answers = append(answers, historypkg.HistoryAnswer{
 			QuestionID: HistoryQuestionObjective,
 			Answer:     objectiveAnswer,
 			Label:      normalizeObjectiveLabel(objective.Label, objective.Objective),
@@ -56,7 +43,7 @@ func BuildHistoryAnswers(profile *HistoryProfile, objective *SessionObjective, b
 			activeDirections = brief.ActiveDirections
 		}
 		if len(activeDirections) > 0 {
-			answers = append(answers, HistoryAnswer{
+			answers = append(answers, historypkg.HistoryAnswer{
 				QuestionID: HistoryQuestionActiveDirections,
 				Answer:     strings.Join(activeDirections, " | "),
 				Confidence: 0.74,
@@ -67,14 +54,14 @@ func BuildHistoryAnswers(profile *HistoryProfile, objective *SessionObjective, b
 			learningAnswers = fallbackAcceptedLearningInsights(notable, insights, 3)
 		}
 		if len(learningAnswers) > 0 {
-			answers = append(answers, HistoryAnswer{
+			answers = append(answers, historypkg.HistoryAnswer{
 				QuestionID: HistoryQuestionAcceptedLearnings,
 				Answer:     strings.Join(learningAnswers, " | "),
 				Confidence: 0.8,
 			})
 		}
 		if len(brief.OpenQuestions) > 0 {
-			answers = append(answers, HistoryAnswer{
+			answers = append(answers, historypkg.HistoryAnswer{
 				QuestionID: HistoryQuestionOpenQuestions,
 				Answer:     strings.Join(brief.OpenQuestions, " | "),
 				Confidence: 0.7,
@@ -86,7 +73,7 @@ func BuildHistoryAnswers(profile *HistoryProfile, objective *SessionObjective, b
 		if len(items) == 0 {
 			return
 		}
-		answers = append(answers, HistoryAnswer{
+		answers = append(answers, historypkg.HistoryAnswer{
 			QuestionID: questionID,
 			Answer:     joinNotableHeadlines(items, 3),
 			Confidence: confidence,
@@ -97,7 +84,7 @@ func BuildHistoryAnswers(profile *HistoryProfile, objective *SessionObjective, b
 	appendNotableAnswer(HistoryQuestionGotchas, NotableInsightGotcha, 0.78)
 	if !hasHistoryAnswer(answers, HistoryQuestionRegressions) {
 		if fallback := fallbackRegressionInsights(insights, notable, 3); len(fallback) > 0 {
-			answers = append(answers, HistoryAnswer{
+			answers = append(answers, historypkg.HistoryAnswer{
 				QuestionID: HistoryQuestionRegressions,
 				Answer:     strings.Join(fallback, " | "),
 				Confidence: 0.72,
@@ -106,7 +93,7 @@ func BuildHistoryAnswers(profile *HistoryProfile, objective *SessionObjective, b
 	}
 	if !hasHistoryAnswer(answers, HistoryQuestionRecurringMistakes) {
 		if fallback := fallbackRecurringMistakeInsights(insights, notable, 3); len(fallback) > 0 {
-			answers = append(answers, HistoryAnswer{
+			answers = append(answers, historypkg.HistoryAnswer{
 				QuestionID: HistoryQuestionRecurringMistakes,
 				Answer:     strings.Join(fallback, " | "),
 				Confidence: 0.7,
@@ -117,7 +104,7 @@ func BuildHistoryAnswers(profile *HistoryProfile, objective *SessionObjective, b
 	appendNotableAnswer(HistoryQuestionEpisodicHistory, NotableInsightEpisodic, 0.66)
 	if !hasHistoryAnswer(answers, HistoryQuestionSurprises) {
 		if fallback := fallbackSurpriseInsights(insights, 3); len(fallback) > 0 {
-			answers = append(answers, HistoryAnswer{
+			answers = append(answers, historypkg.HistoryAnswer{
 				QuestionID: HistoryQuestionSurprises,
 				Answer:     strings.Join(fallback, " | "),
 				Confidence: 0.66,
@@ -125,7 +112,7 @@ func BuildHistoryAnswers(profile *HistoryProfile, objective *SessionObjective, b
 		}
 	}
 	if brief != nil && len(brief.Risks) > 0 && !hasHistoryAnswer(answers, HistoryQuestionGotchas) {
-		answers = append(answers, HistoryAnswer{
+		answers = append(answers, historypkg.HistoryAnswer{
 			QuestionID: HistoryQuestionGotchas,
 			Answer:     strings.Join(brief.Risks, " | "),
 			Confidence: 0.68,
@@ -133,7 +120,7 @@ func BuildHistoryAnswers(profile *HistoryProfile, objective *SessionObjective, b
 	}
 
 	if nextStep := nextStepAnswer(brief, notable); nextStep != "" {
-		answers = append(answers, HistoryAnswer{
+		answers = append(answers, historypkg.HistoryAnswer{
 			QuestionID: HistoryQuestionNextStep,
 			Answer:     nextStep,
 			Confidence: 0.72,
@@ -242,7 +229,7 @@ func fallbackRecurringMistakeInsights(insights []DecisionInsight, notable []Nota
 	return candidates
 }
 
-func hasHistoryAnswer(in []HistoryAnswer, id HistoryQuestionID) bool {
+func hasHistoryAnswer(in []historypkg.HistoryAnswer, id HistoryQuestionID) bool {
 	for _, item := range in {
 		if item.QuestionID == id && strings.TrimSpace(item.Answer) != "" {
 			return true

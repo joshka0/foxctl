@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/storage/memory"
+	historypkg "github.com/jkatigb/agentctl/internal/transcriptpipeline/history"
 )
 
 func TestBuildHistoryRecords_AnchorsDerivedTexts(t *testing.T) {
 	t.Parallel()
 
-	profile := DefaultHistoryProfile()
+	profile := historypkg.DefaultHistoryProfile()
 	records := BuildHistoryRecords(profile, HistoryRecordContext{
 		ConversationID: "conv-1",
 		GroupID:        "group-1",
@@ -37,7 +38,7 @@ func TestBuildHistoryRecords_AnchorsDerivedTexts(t *testing.T) {
 			Resolution:   "corrected",
 			Reaction:     "corrected",
 		},
-	}, []HistoryAnswer{
+	}, []historypkg.HistoryAnswer{
 		{
 			QuestionID: HistoryQuestionOpenQuestions,
 			Answer:     "Do we still need manual QA signoff?",
@@ -97,8 +98,8 @@ func TestBuildHistoryRecords_AnchorsDerivedTexts(t *testing.T) {
 func TestBuildHistoryRecords_PreservesQuestionPromptInRetrievalText(t *testing.T) {
 	t.Parallel()
 
-	profile := DefaultHistoryProfile()
-	records := BuildHistoryRecords(profile, HistoryRecordContext{ConversationID: "conv-2"}, nil, nil, []HistoryAnswer{
+	profile := historypkg.DefaultHistoryProfile()
+	records := BuildHistoryRecords(profile, HistoryRecordContext{ConversationID: "conv-2"}, nil, nil, []historypkg.HistoryAnswer{
 		{
 			QuestionID: HistoryQuestionNextStep,
 			Answer:     "Continue the second-pass consolidator direction.",
@@ -119,7 +120,7 @@ func TestBuildHistoryRecords_PreservesQuestionPromptInRetrievalText(t *testing.T
 func TestBuildHistoryRecords_PreservesAnswerLabel(t *testing.T) {
 	t.Parallel()
 
-	records := BuildHistoryRecords(DefaultHistoryProfile(), HistoryRecordContext{ConversationID: "conv-label"}, nil, nil, []HistoryAnswer{
+	records := BuildHistoryRecords(historypkg.DefaultHistoryProfile(), HistoryRecordContext{ConversationID: "conv-label"}, nil, nil, []historypkg.HistoryAnswer{
 		{
 			QuestionID: HistoryQuestionObjective,
 			Answer:     "Complete and verify all planned backend integration tasks while updating the plan.",
@@ -145,7 +146,7 @@ func TestPersistHistoryRecords_SavesRetrievalUnits(t *testing.T) {
 	}
 	defer store.Close()
 
-	records := BuildHistoryRecords(DefaultHistoryProfile(), HistoryRecordContext{
+	records := BuildHistoryRecords(historypkg.DefaultHistoryProfile(), HistoryRecordContext{
 		ConversationID: "conv-persist",
 		SessionIDs:     []string{"sess-1"},
 	}, []DecisionInsight{{
@@ -155,14 +156,14 @@ func TestPersistHistoryRecords_SavesRetrievalUnits(t *testing.T) {
 		Confidence:           0.75,
 		EvidenceFrameIndices: []int{2, 3},
 		SourceBasis:          "user",
-	}}, nil, []HistoryAnswer{{
+	}}, nil, []historypkg.HistoryAnswer{{
 		QuestionID: HistoryQuestionNextStep,
 		Answer:     "Close the release gate verdict.",
 		Confidence: 0.72,
 		Evidence:   []string{"frames:2-3"},
 	}})
 
-	got, err := PersistHistoryRecords(ctx, store, "/tmp/ws", "sess-1", "sess-1", records, nil)
+	got, err := historypkg.PersistHistoryRecords(ctx, store, "/tmp/ws", "sess-1", "sess-1", records, nil)
 	if err != nil {
 		t.Fatalf("PersistHistoryRecords() error = %v", err)
 	}
@@ -174,8 +175,8 @@ func TestPersistHistoryRecords_SavesRetrievalUnits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get(%q) error = %v", got[0].Name, err)
 	}
-	if !strings.HasPrefix(entry.Name, TranscriptHistoryPrefix("sess-1")) {
-		t.Fatalf("entry name=%q want prefix %q", entry.Name, TranscriptHistoryPrefix("sess-1"))
+	if !strings.HasPrefix(entry.Name, historypkg.TranscriptHistoryPrefix("sess-1")) {
+		t.Fatalf("entry name=%q want prefix %q", entry.Name, historypkg.TranscriptHistoryPrefix("sess-1"))
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(entry.Result, &payload); err != nil {
@@ -200,7 +201,7 @@ func TestReconcileHistoryRecordPrefix_RemovesStaleEntries(t *testing.T) {
 	defer store.Close()
 
 	workspace := "/tmp/ws"
-	prefix := TranscriptHistoryPrefix("sess-reconcile")
+	prefix := historypkg.TranscriptHistoryPrefix("sess-reconcile")
 	for _, item := range []struct {
 		name string
 		typ  string
@@ -220,10 +221,10 @@ func TestReconcileHistoryRecordPrefix_RemovesStaleEntries(t *testing.T) {
 		}
 	}
 
-	removed, err := ReconcileHistoryRecordPrefix(ctx, store, workspace, prefix, []PersistedHistoryRecord{{
+	removed, err := historypkg.ReconcileHistoryRecordPrefix(ctx, store, workspace, prefix, []historypkg.PersistedHistoryRecord{{
 		Name:    prefix + "insight:keep",
 		Type:    "history_insight",
-		Kind:    HistoryRecordKindInsight,
+		Kind:    historypkg.HistoryRecordKindInsight,
 		Summary: "keep",
 	}})
 	if err != nil {
