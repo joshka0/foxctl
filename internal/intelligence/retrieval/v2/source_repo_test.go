@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 )
 
 type fakeRepoQuery struct {

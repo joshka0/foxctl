@@ -273,10 +273,10 @@ func TestRerankCandidatePaths(t *testing.T) {
 
 	semanticPaths := rerankCandidatePaths("semantic indexing package", []string{
 		"internal/v2/core/events/repository.go",
-		"internal/indexing/semantic/indexer.go",
+		"internal/intelligence/indexing/semantic/indexer.go",
 		"builder.go",
 	})
-	if len(semanticPaths) == 0 || semanticPaths[0] != "internal/indexing/semantic/indexer.go" {
+	if len(semanticPaths) == 0 || semanticPaths[0] != "internal/intelligence/indexing/semantic/indexer.go" {
 		t.Fatalf("semantic rerank=%v", semanticPaths)
 	}
 

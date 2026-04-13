@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"

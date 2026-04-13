@@ -12,7 +12,7 @@ import (
 	ts "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hashutil"
-	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
+	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 )
 
 func analyzeTypeScriptDuplicateRecoveryBlocks(path, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {

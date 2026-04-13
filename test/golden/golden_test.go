@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
 	"github.com/jkatigb/agentctl/internal/protocol"
 )
 

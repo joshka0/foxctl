@@ -222,7 +222,7 @@ signature:
 
       Example commands:
         agentctl run code/refactor_scout --input '{"path":"./internal","rule_set":"default"}'
-        agentctl run code/refactor_scout --input '{"path":"./internal/indexing","language":"go","min_score":60}'
+        agentctl run code/refactor_scout --input '{"path":"./internal/intelligence/indexing","language":"go","min_score":60}'
         agentctl run code/refactor_scout --input '{"path":"./crates/my-crate/src","language":"rust","focus":"dead"}'
         agentctl run code/refactor_scout --input '{"path":"./internal","language":"go","focus":"slop"}'
         agentctl run code/refactor_scout --input '{"path":"./internal/actor","language":"go","focus":"dead"}'

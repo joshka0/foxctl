@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 )
 
 func TestBuildRepoGraphDrafts(t *testing.T) {
@@ -32,20 +32,20 @@ func TestBuildRepoGraphDrafts(t *testing.T) {
 	key := repo.RepoKey()
 
 	nodes := []repoindex.Node{
-		{ID: repoindex.PackageID(key, "go:internal/contextplane"), Kind: repoindex.NodePackage, Pkg: "go:internal/contextplane", Name: "internal/contextplane", UpdatedAt: time.Now().UTC()},
-		{ID: repoindex.FileID(key, "go:internal/contextplane", "internal/contextplane/store.go"), Kind: repoindex.NodeFile, Pkg: "go:internal/contextplane", File: "internal/contextplane/store.go", Name: "store.go", UpdatedAt: time.Now().UTC()},
-		{ID: repoindex.SymbolID(key, "go:internal/contextplane", "WorkspaceStore"), Kind: repoindex.NodeSymbol, Pkg: "go:internal/contextplane", File: "internal/contextplane/store.go", Name: "WorkspaceStore", UpdatedAt: time.Now().UTC()},
+		{ID: repoindex.PackageID(key, "go:internal/context/contextplane"), Kind: repoindex.NodePackage, Pkg: "go:internal/context/contextplane", Name: "internal/context/contextplane", UpdatedAt: time.Now().UTC()},
+		{ID: repoindex.FileID(key, "go:internal/context/contextplane", "internal/context/contextplane/store.go"), Kind: repoindex.NodeFile, Pkg: "go:internal/context/contextplane", File: "internal/context/contextplane/store.go", Name: "store.go", UpdatedAt: time.Now().UTC()},
+		{ID: repoindex.SymbolID(key, "go:internal/context/contextplane", "WorkspaceStore"), Kind: repoindex.NodeSymbol, Pkg: "go:internal/context/contextplane", File: "internal/context/contextplane/store.go", Name: "WorkspaceStore", UpdatedAt: time.Now().UTC()},
 		{ID: repoindex.PackageID(key, "go:internal/storage/obsidianindex"), Kind: repoindex.NodePackage, Pkg: "go:internal/storage/obsidianindex", Name: "internal/storage/obsidianindex", UpdatedAt: time.Now().UTC()},
 		{ID: repoindex.FileID(key, "go:internal/storage/obsidianindex", "internal/storage/obsidianindex/store.go"), Kind: repoindex.NodeFile, Pkg: "go:internal/storage/obsidianindex", File: "internal/storage/obsidianindex/store.go", Name: "store.go", UpdatedAt: time.Now().UTC()},
 		{ID: repoindex.SymbolID(key, "go:internal/storage/obsidianindex", "Store"), Kind: repoindex.NodeSymbol, Pkg: "go:internal/storage/obsidianindex", File: "internal/storage/obsidianindex/store.go", Name: "Store", UpdatedAt: time.Now().UTC()},
 	}
 	edges := []repoindex.Edge{
-		{Src: repoindex.PackageID(key, "go:internal/contextplane"), Dst: repoindex.FileID(key, "go:internal/contextplane", "internal/contextplane/store.go"), Type: repoindex.EdgeContains, Weight: 1},
-		{Src: repoindex.FileID(key, "go:internal/contextplane", "internal/contextplane/store.go"), Dst: repoindex.SymbolID(key, "go:internal/contextplane", "WorkspaceStore"), Type: repoindex.EdgeContains, Weight: 1},
-		{Src: repoindex.PackageID(key, "go:internal/contextplane"), Dst: repoindex.PackageID(key, "go:internal/storage/obsidianindex"), Type: repoindex.EdgeImports, Weight: 1},
+		{Src: repoindex.PackageID(key, "go:internal/context/contextplane"), Dst: repoindex.FileID(key, "go:internal/context/contextplane", "internal/context/contextplane/store.go"), Type: repoindex.EdgeContains, Weight: 1},
+		{Src: repoindex.FileID(key, "go:internal/context/contextplane", "internal/context/contextplane/store.go"), Dst: repoindex.SymbolID(key, "go:internal/context/contextplane", "WorkspaceStore"), Type: repoindex.EdgeContains, Weight: 1},
+		{Src: repoindex.PackageID(key, "go:internal/context/contextplane"), Dst: repoindex.PackageID(key, "go:internal/storage/obsidianindex"), Type: repoindex.EdgeImports, Weight: 1},
 		{Src: repoindex.PackageID(key, "go:internal/storage/obsidianindex"), Dst: repoindex.FileID(key, "go:internal/storage/obsidianindex", "internal/storage/obsidianindex/store.go"), Type: repoindex.EdgeContains, Weight: 1},
 		{Src: repoindex.FileID(key, "go:internal/storage/obsidianindex", "internal/storage/obsidianindex/store.go"), Dst: repoindex.SymbolID(key, "go:internal/storage/obsidianindex", "Store"), Type: repoindex.EdgeContains, Weight: 1},
-		{Src: repoindex.SymbolID(key, "go:internal/contextplane", "WorkspaceStore"), Dst: repoindex.SymbolID(key, "go:internal/storage/obsidianindex", "Store"), Type: repoindex.EdgeRefersTo, Weight: 1},
+		{Src: repoindex.SymbolID(key, "go:internal/context/contextplane", "WorkspaceStore"), Dst: repoindex.SymbolID(key, "go:internal/storage/obsidianindex", "Store"), Type: repoindex.EdgeRefersTo, Weight: 1},
 	}
 	if err := repo.ReplaceAll(ctx, nodes, edges); err != nil {
 		t.Fatalf("replace all: %v", err)
@@ -105,7 +105,7 @@ esac
 	if err != nil {
 		t.Fatalf("read root note: %v", err)
 	}
-	if !strings.Contains(string(rootBody), "[[contextplane]]") {
+	if !strings.Contains(string(rootBody), "[[context contextplane]]") {
 		t.Fatalf("expected package wikilink in root note:\n%s", string(rootBody))
 	}
 

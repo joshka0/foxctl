@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
+	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 )
 
 func TestAnalyzeElixirDuplicateRecoveryBlocks(t *testing.T) {

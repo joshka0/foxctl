@@ -10,7 +10,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 )
 
 // applyDefaultsAndValidate applies defaults and validates required fields (mirrors run function).

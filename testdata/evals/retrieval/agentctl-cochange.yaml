@@ -30,7 +30,7 @@ queries:
     expected_any_of:
       - internal/intelligence/repoquery/repoquery.go
       - internal/intelligence/repoquery/project.go
-      - internal/indexing/repoindex/builder_infra.go
+      - internal/intelligence/indexing/repoindex/builder_infra.go
     notes: "Should land in the co-change cluster around repoquery and infra indexing."
   - id: v2-layered-context
     query: "v2 layered context budget"

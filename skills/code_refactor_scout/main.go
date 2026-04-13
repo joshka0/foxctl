@@ -22,7 +22,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
+	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
 	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
 )

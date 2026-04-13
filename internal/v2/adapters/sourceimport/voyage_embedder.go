@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 )
 
 // VoyageEmbedder adapts semantic.VoyageProvider to the sourceimport Embedder interface.

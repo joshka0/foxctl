@@ -1,4 +1,4 @@
 {"id":"package-skillmain","question":"Which file anchors the skills main runtime wiring package?","expected_paths":["internal/adapters/skillslib/skillmain/main.go"],"task_type":"file_locate","requires_grounding":true,"category":"package"}
 {"id":"package-platform-config","question":"Which file anchors the platform config package?","expected_paths":["internal/platform/config/config.go"],"task_type":"file_locate","requires_grounding":true,"category":"package"}
 {"id":"package-storage-memory","question":"Which file anchors the storage memory package?","expected_paths":["internal/storage/memory/store.go"],"task_type":"file_locate","requires_grounding":true,"category":"package"}
-{"id":"package-semantic-indexing","question":"Which file anchors the semantic indexing package?","expected_paths":["internal/indexing/semantic/indexer.go"],"task_type":"file_locate","requires_grounding":true,"category":"package"}
+{"id":"package-semantic-indexing","question":"Which file anchors the semantic indexing package?","expected_paths":["internal/intelligence/indexing/semantic/indexer.go"],"task_type":"file_locate","requires_grounding":true,"category":"package"}

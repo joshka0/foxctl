@@ -33,7 +33,7 @@ queries:
     expected_any_of:
       - notes/repo/agentctl/packages/internal-indexing-semantic.md
       - notes/repo/agentctl/semantic-and-memory.md
-      - internal/indexing/semantic/indexer.go
+      - internal/intelligence/indexing/semantic/indexer.go
     notes: "Accept either the package note, memory/semantic map, or the semantic indexer implementation."
   - id: storage-memory
     query: "storage memory package"

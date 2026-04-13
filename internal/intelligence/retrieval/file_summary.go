@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -484,7 +484,7 @@ func (g *FileSummaryGenerator) deterministicRootSummary(summaries []string) stri
 	return strings.Join(parts, "; ") + "."
 }
 
-// SymbolSummaryGenerator moved to internal/indexing/symbol.
+// SymbolSummaryGenerator moved to internal/intelligence/indexing/symbol.
 
 func providerNameFromModel(model string) string {
 	lower := strings.ToLower(strings.TrimSpace(model))

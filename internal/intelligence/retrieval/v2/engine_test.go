@@ -225,7 +225,7 @@ func TestApplyFeatureBoosts_StructuralQueryPrefersRepoIndexSignals(t *testing.T)
 			},
 		},
 		{
-			Document: searchindex.Document{Path: "internal/indexing/repoindex/dag_grep.go", Title: "dag_grep"},
+			Document: searchindex.Document{Path: "internal/intelligence/indexing/repoindex/dag_grep.go", Title: "dag_grep"},
 			Score:    0.45,
 			SourceScores: map[SourceID]float64{
 				SourceRepoIndex: 0.45,
@@ -233,7 +233,7 @@ func TestApplyFeatureBoosts_StructuralQueryPrefersRepoIndexSignals(t *testing.T)
 		},
 	}
 	out := applyFeatureBoosts(plan, hits)
-	if out[0].Document.Path != "internal/indexing/repoindex/dag_grep.go" {
+	if out[0].Document.Path != "internal/intelligence/indexing/repoindex/dag_grep.go" {
 		t.Fatalf("expected structural repo hit first, got %q", out[0].Document.Path)
 	}
 }

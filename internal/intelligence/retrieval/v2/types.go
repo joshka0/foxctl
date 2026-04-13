@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
 )
 

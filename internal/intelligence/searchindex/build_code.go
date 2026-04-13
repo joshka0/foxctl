@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/indexing/codefilter"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/codefilter"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage"
 )

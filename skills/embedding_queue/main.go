@@ -13,8 +13,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/indexing/embedding"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/embedding"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 )
 
 var allowedOps = []string{"enqueue", "stats", "get", "get_by_file", "job_status", "cleanup"}

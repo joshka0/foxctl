@@ -9,9 +9,9 @@ import (
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	classictools "github.com/jkatigb/agentctl/internal/agent/tools"
-	"github.com/jkatigb/agentctl/internal/contextplane"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/tooling"

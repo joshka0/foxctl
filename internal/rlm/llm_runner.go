@@ -779,7 +779,7 @@ func queryGuidanceHints(query, phaseName string, candidatePaths []string) []stri
 		hints = append(hints, "Prefer directory or package matches over basename-only coincidences.")
 	}
 	if strings.Contains(q, "semantic") && strings.Contains(q, "index") {
-		hints = append(hints, "Prefer paths under internal/indexing/semantic or closely related indexing directories.")
+		hints = append(hints, "Prefer paths under internal/intelligence/indexing/semantic or closely related indexing directories.")
 		hints = append(hints, "Avoid generic repository or events files unless they explicitly mention semantic indexing.")
 	}
 	if containsAny(q, "web", "api", "handler", "transport") {

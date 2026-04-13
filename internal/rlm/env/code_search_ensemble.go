@@ -15,9 +15,9 @@ import (
 
 	memtokens "github.com/jkatigb/agentctl/internal/actor/memory"
 	skillobs "github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/engine"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	"github.com/jkatigb/agentctl/internal/observability"
 	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"

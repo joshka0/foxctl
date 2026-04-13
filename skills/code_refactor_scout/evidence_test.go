@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	refevidence "github.com/jkatigb/agentctl/internal/intelligence/refactor/evidence"
 	refhot "github.com/jkatigb/agentctl/internal/intelligence/refactor/hot"
 	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
