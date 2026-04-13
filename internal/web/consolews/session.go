@@ -44,7 +44,19 @@ type Session struct {
 // Runner executes LLM requests for the console.
 type Runner interface {
 	// Run executes a user message and streams responses.
-	Run(ctx context.Context, session *Session, userMessage string, correlationID string) error
+	Run(ctx context.Context, session SessionHandle, userMessage string, correlationID string) error
+}
+
+// SessionHandle is the minimal console session surface used by runtime runners.
+type SessionHandle interface {
+	ID() string
+	Workspace() string
+	SystemPrompt() string
+	Messages() []Message
+	AddMessage(Message)
+	InFlightMetadata(correlationID string) map[string]any
+	BroadcastEvent(correlationID, content string, metadata map[string]any)
+	BroadcastReply(correlationID, content string)
 }
 
 // ID returns the session ID.

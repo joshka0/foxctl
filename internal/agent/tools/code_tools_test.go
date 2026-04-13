@@ -684,7 +684,7 @@ func TestTelemetry_RecordsNewToolNames(t *testing.T) {
 	}
 
 	// Call via the tool registry to test telemetry wrapper
-	tool, err := registry.GetRegistry().Get("code.symbol_search")
+	tool, err := registry.Get("code.symbol_search")
 	if err != nil {
 		t.Fatalf("Get tool: %v", err)
 	}

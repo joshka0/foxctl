@@ -43,7 +43,7 @@ func (r *RegistryToolExecutor) Execute(ctx context.Context, name string, args js
 		name = repoindex.ToolDAGGrep
 	}
 
-	coreTool, err := r.registry.GetRegistry().Get(name)
+	coreTool, err := r.registry.Get(name)
 	if err != nil {
 		return "", fmt.Errorf("tool %q not found: %w", name, err)
 	}

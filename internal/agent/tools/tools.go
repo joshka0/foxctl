@@ -51,6 +51,12 @@ type Registry struct {
 	trajID string
 }
 
+// Tool is the runtime-facing tool contract exposed by the agent tools package.
+type Tool = tooling.Tool
+
+// ToolFunc is the runtime-facing callable tool function shape.
+type ToolFunc = tooling.ToolFunc
+
 // Config configures tool behavior.
 type Config struct {
 	// WorkspaceRoot is the root directory for file operations.
@@ -281,13 +287,16 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 	return r, nil
 }
 
-// GetRegistry returns the underlying tool registry.
-func (r *Registry) GetRegistry() *tooling.InMemoryToolRegistry {
-	return r.tools
+// Get returns one registered tool by name.
+func (r *Registry) Get(name string) (Tool, error) {
+	if r == nil {
+		return nil, fmt.Errorf("tool registry not configured")
+	}
+	return r.tools.Get(name)
 }
 
 // List returns all registered tools.
-func (r *Registry) List() []tooling.Tool {
+func (r *Registry) List() []Tool {
 	if r == nil {
 		return nil
 	}
@@ -319,7 +328,7 @@ func hooksAlreadyDispatched(ctx context.Context) bool {
 func (r *Registry) wrapWithTelemetry(
 	name string,
 	fn func(ctx context.Context, args map[string]any) (*models.CallToolResult, error),
-) tooling.ToolFunc {
+) ToolFunc {
 	return func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 		start := time.Now()
 		argsForCall := args

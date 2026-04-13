@@ -39,7 +39,7 @@ func NewRunner(cfg RunnerConfig) *Runner {
 }
 
 // Run implements consolews.Runner.
-func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessage string, correlationID string) error {
+func (r *Runner) Run(ctx context.Context, session consolews.SessionHandle, userMessage string, correlationID string) error {
 	start := time.Now()
 
 	// Create a new engine each turn so we can apply per-turn overrides.
@@ -199,7 +199,7 @@ func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessag
 }
 
 // buildInput builds the engine input from session history.
-func (r *Runner) buildInput(session *consolews.Session, userMessage string) engine.EngineInput {
+func (r *Runner) buildInput(session consolews.SessionHandle, userMessage string) engine.EngineInput {
 	// Convert session messages to engine messages
 	history := session.Messages()
 	messages := make([]engine.Message, 0, len(history)+1)
@@ -225,7 +225,7 @@ func (r *Runner) buildInput(session *consolews.Session, userMessage string) engi
 
 // StreamCallback handles streaming events from the engine.
 type StreamCallback struct {
-	session       *consolews.Session
+	session       consolews.SessionHandle
 	correlationID string
 }
 

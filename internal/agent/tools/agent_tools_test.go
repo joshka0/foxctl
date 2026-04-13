@@ -8,7 +8,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,7 +31,7 @@ func TestAgentSpawnTool(t *testing.T) {
 	require.NoError(t, err)
 
 	// Call agent.spawn
-	var tool tooling.Tool
+	var tool Tool
 	for _, t := range registry.List() {
 		if t.Name() == "agent.spawn" {
 			tool = t
