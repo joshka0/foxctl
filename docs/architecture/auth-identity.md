@@ -7,7 +7,7 @@ Canonical map for identity propagation, authorization, token brokerage, and veri
 | Field | Value |
 |------|-------|
 | Status | Current (with known TODO boundaries) |
-| Canonical scope | `internal/domain/identity`, `internal/auth`, `internal/authbroker`, `internal/verification` |
+| Canonical scope | `internal/domain/identity`, `internal/auth`, `internal/authbroker`, `internal/intelligence/verification` |
 | Last reviewed | 2026-02-17 |
 
 ## Runtime Topology
@@ -37,7 +37,7 @@ flowchart TD
 | `internal/domain/identity` | Canonical principal model + context propagation | `Principal`, `Subject()`, `ConversationKey()`, `WithPrincipal`, `FromContext` |
 | `internal/auth` | Casbin authorization for HTTP and hook/tool resources | `NewEnforcer`, `Enforce`, `Middleware`, `PolicyHookRunner` |
 | `internal/authbroker` | OAuth token/auth-request lifecycle and encrypted persistence | `Broker`, `Store`, `TokenRow`, `AuthRequestRow`, `Encrypt/Decrypt`, `OpenSQLite/OpenPostgres` |
-| `internal/verification` | Chain-of-Verification (baseline → claims → parallel verify → refine) | `CoVe`, `Spawner`, `CoVeRequest`, `CoVeResponse` |
+| `internal/intelligence/verification` | Chain-of-Verification (baseline → claims → parallel verify → refine) | `CoVe`, `Spawner`, `CoVeRequest`, `CoVeResponse` |
 
 ## Identity Propagation Contract
 
@@ -74,7 +74,7 @@ Known boundary: `/api/oauth/callback` handler exists but is currently stubbed (n
 
 ## Verification Subsystem Boundary
 
-`internal/verification` is identity-adjacent, not identity-owning.
+`internal/intelligence/verification` is identity-adjacent, not identity-owning.
 
 | Stage | Function |
 |------|----------|

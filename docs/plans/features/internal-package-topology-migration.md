@@ -430,7 +430,7 @@ Primary packages:
 - `internal/intelligence/codemap`
 - `internal/refactor`
 - `internal/analysis`
-- `internal/verification`
+- `internal/intelligence/verification`
 
 Proposed stories:
 
@@ -465,7 +465,7 @@ Current mapping to make durable in Story 1:
 | `internal/refactor` | synthesis and refactor planning | keep as refactor planning/evidence consumer |
 | `internal/analysis/tasksgraph` | synthesis and refactor planning | keep as planning support |
 | `internal/analysis/overseer` | oversight | keep as review/task coordination oversight |
-| `internal/verification` | verification | keep as verification-specific slice |
+| `internal/intelligence/verification` | verification | keep as verification-specific slice |
 
 Why this sequencing:
 
@@ -519,7 +519,7 @@ Story 3 target:
   - `internal/intelligence/codecontext` and `internal/intelligence/codemap/context` gather evidence
   - `internal/intelligence/codemap` and `internal/refactor` synthesize or plan from evidence
   - `internal/analysis/overseer` coordinates and scores
-  - `internal/verification` verifies claims
+  - `internal/intelligence/verification` verifies claims
 
 Required placement rule from Story 3:
 
@@ -539,7 +539,7 @@ Story 3 should end with these durable decisions:
 | `internal/refactor` | planning/synthesis | keep as refactor planning and evidence consumer |
 | `internal/analysis/tasksgraph` | planning support | keep as planning/priority support |
 | `internal/analysis/overseer` | oversight | keep as coordination oversight |
-| `internal/verification` | verification | keep as verification-specific slice |
+| `internal/intelligence/verification` | verification | keep as verification-specific slice |
 
 Non-goals for Story 3:
 

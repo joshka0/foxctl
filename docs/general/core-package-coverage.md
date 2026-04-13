@@ -13,7 +13,7 @@ Machine-friendly coverage map for core `internal/*` concepts.
 | Storage/state | `internal/storage/*` | `docs/general/storage.md` | Covered | Keep as canonical storage reference |
 | Retrieval/index/search | `internal/indexing/*`, `internal/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap` | `docs/general/search.md`, `docs/general/repoindex.md` | Covered | Keep index/search docs current with indexer changes |
 | API/platform adapters | `internal/web`, `internal/chatadapter`, `internal/openapi`, `internal/providers` | `docs/general/api-server.md`, `docs/architecture/chat-platform-adapter.md`, `docs/start/openapi_and_plugins.md` | Covered | Keep adapter/runtime docs in sync with command surface |
-| Security/identity/auth | `internal/auth`, `internal/authbroker`, `internal/verification`, `internal/domain/identity` | `docs/architecture/auth-identity.md` | Covered | Keep auth/identity architecture doc aligned with OAuth callback and policy backend changes |
+| Security/identity/auth | `internal/auth`, `internal/authbroker`, `internal/intelligence/verification`, `internal/domain/identity` | `docs/architecture/auth-identity.md` | Covered | Keep auth/identity architecture doc aligned with OAuth callback and policy backend changes |
 
 ## Notes
 

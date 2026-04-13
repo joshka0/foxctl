@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/verification"
+	"github.com/jkatigb/agentctl/internal/intelligence/verification"
 )
 
 // applyDefaults sets default values for input fields (mirrors run function).

@@ -17,6 +17,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/intelligence/verification"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/runservice"
@@ -26,7 +27,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
-	"github.com/jkatigb/agentctl/internal/verification"
 	"github.com/spf13/cobra"
 )
 

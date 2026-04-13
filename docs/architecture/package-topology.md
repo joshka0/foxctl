@@ -449,7 +449,7 @@ The target split for this family is:
 | evidence gathering | `internal/intelligence/codecontext`, `internal/intelligence/codemap/context` | keep as the code-evidence extraction slice |
 | synthesis and refactor planning | `internal/intelligence/codemap`, `internal/refactor`, `internal/analysis/tasksgraph` | keep as the synthesis/planning slice |
 | oversight | `internal/analysis/overseer` | keep as the review and prioritization oversight slice |
-| verification | `internal/verification` | keep as the verification slice |
+| verification | `internal/intelligence/verification` | keep as the verification slice |
 
 That yields these routing decisions:
 
@@ -468,7 +468,7 @@ That yields these routing decisions:
 | `internal/refactor` | synthesis and refactor planning | keep | Owns change analysis, hotspot evidence, dependency analysis, and refactor-oriented planning artifacts |
 | `internal/analysis/tasksgraph` | synthesis and refactor planning | keep | Computes graph structure and critical-path style signals that support planning decisions |
 | `internal/analysis/overseer` | oversight | keep | Scores tasks, handles post-review coordination, and fans out indexing work |
-| `internal/verification` | verification | keep | Implements claim-checking and verification-specific pipelines |
+| `internal/intelligence/verification` | verification | keep | Implements claim-checking and verification-specific pipelines |
 
 Practical placement rules for this family:
 
@@ -549,7 +549,7 @@ The durable split should be:
 | `internal/refactor` | refactor-oriented evidence consumers, hotspot analysis, and change planning | keep in the planning/synthesis slice |
 | `internal/analysis/tasksgraph` | graph-derived task analysis that supports prioritization and planning | keep in the planning/oversight support slice |
 | `internal/analysis/overseer` | post-review coordination, task scoring, and indexer fanout | keep in oversight |
-| `internal/verification` | claim extraction and claim verification | keep in verification |
+| `internal/intelligence/verification` | claim extraction and claim verification | keep in verification |
 
 Practical placement rules:
 
