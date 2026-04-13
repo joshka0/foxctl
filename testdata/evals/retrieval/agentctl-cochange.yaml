@@ -16,7 +16,7 @@ queries:
     query: "agent runtime llm backend"
     expected_any_of:
       - cmd/agentctl/cmd/agent.go
-      - internal/daemon/service.go
+      - internal/runtime/daemon/service.go
     notes: "Should surface the new agent/backend propagation cluster."
   - id: config-llm-auth-baseurl
     query: "workspace config llm auth base url"

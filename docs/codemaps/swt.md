@@ -411,35 +411,35 @@ Daemon Startup & Pre-Warming Flow
 
 - **7b:** Create shared connection pool\
   **Path:**
-  `internal/daemon/service.go:67`\
+  `internal/runtime/daemon/service.go:67`\
   **Description:** Pre-allocates database connection pool for reuse across
   requests
 
 - **7c:** Set global pool for reuse\
   **Path:**
-  `internal/daemon/service.go:68`\
+  `internal/runtime/daemon/service.go:68`\
   **Description:** Makes pool available to all storage backends opened by daemon
 
 - **7d:** Create Unix socket listener\
   **Path:**
-  `internal/daemon/service.go:100`\
+  `internal/runtime/daemon/service.go:100`\
   **Description:** Opens /tmp/agentctl-{uid}.sock for IPC with CLI clients
 
 - **7e:** Start connection accept loop\
   **Path:**
-  `internal/daemon/service.go:120`\
+  `internal/runtime/daemon/service.go:120`\
   **Description:** Begins accepting skill execution requests from CLI clients
 
 - **7f:** Lazy-open cache store on first use\
   **Path:**
-  `internal/daemon/service.go:495`\
+  `internal/runtime/daemon/service.go:495`\
   **Description:** Opens cache database only when first skill execution needs it
 
 ---
 
 ## Code Snippets
 
-### File: internal/daemon/service.go
+### File: internal/runtime/daemon/service.go
 
 ```go
 // Lines: 65-70

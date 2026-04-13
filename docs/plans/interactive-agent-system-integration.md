@@ -213,7 +213,7 @@ capabilities:
 
 ### 6. Daemon & API Server
 
-**Daemon** (`internal/daemon/`):
+**Daemon** (`internal/runtime/daemon/`):
 - Unix socket: `/tmp/agentctl-{uid}.sock`
 - Pre-loaded SQLite pool for sub-50ms hook latency
 - JSON-RPC-like protocol: `status`, `run`, `warm`, `shutdown`

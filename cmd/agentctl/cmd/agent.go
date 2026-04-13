@@ -15,7 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/jkatigb/agentctl/internal/agent/prompts"
 	"github.com/jkatigb/agentctl/internal/agent/toolnames"
-	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"

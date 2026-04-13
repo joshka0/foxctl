@@ -18,7 +18,7 @@ Goal: reduce duplication and improve maintainability by consolidating shared log
 
 ### 1) Internal consolidation
 
-- [x] Unify skill resolution + artifact lookup across `internal/daemon/skill_resolver.go`, `internal/interfaces/web/api/skill_runner.go`, `internal/runtime/hooks/resolver.go`, `internal/domain/skill/resolver.go`.
+- [x] Unify skill resolution + artifact lookup across `internal/runtime/daemon/skill_resolver.go`, `internal/interfaces/web/api/skill_runner.go`, `internal/runtime/hooks/resolver.go`, `internal/domain/skill/resolver.go`.
 - [x] Centralize skill search-path building (env override, config, dev paths).
 - [x] Share exec/WASI execution primitives between web API runner and runservice/execution.
 - [x] Consolidate CAS helpers and preview/hint building used by skills.
@@ -34,7 +34,7 @@ Goal: reduce duplication and improve maintainability by consolidating shared log
 
 ### 3) Anti-pattern cleanup
 
-- [x] Replace panics in non-test helpers (`internal/platform/errors/errors.go`, `internal/adapters/skillslib/pathutil/pathutil.go`, `internal/storage/memory/factory.go`, `internal/daemon/client.go`) with error returns or confine to init-only `Must*`.
+- [x] Replace panics in non-test helpers (`internal/platform/errors/errors.go`, `internal/adapters/skillslib/pathutil/pathutil.go`, `internal/storage/memory/factory.go`, `internal/runtime/daemon/client.go`) with error returns or confine to init-only `Must*`.
 - [x] Remove `os.Exit` from `internal/adapters/skillslib/skillout/emit.go`; prefer returning errors to main.
 - [x] Fix result-without-error pattern in `internal/interfaces/web/api/skill_runner.go` to return errors on failures.
 

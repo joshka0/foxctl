@@ -47,7 +47,7 @@ The current repo already wants to be organized around these families:
 
 | Family | Current anchors | Meaning |
 |--------|------------------|---------|
-| runtime | `runtime/*`, `agent/*`, `execution/*`, `daemon`, `v2/*` | agent execution, orchestration, lifecycle, runtime state |
+| runtime | `runtime/*`, `agent/*`, `execution/*`, `v2/*` | agent execution, orchestration, lifecycle, runtime state |
 | context | `companion`, `context/*`, `contextplane/*`, `sessionkit`, `transcriptpipeline`, `knowledge/*` | ACA/control-plane, context assembly, transcript history, durable knowledge |
 | intelligence | `indexing/*`, `retrieval*`, `repoquery`, `search*`, `codecontext/*`, `codemap/*`, `refactor/*`, `analysis/*`, `verification/*` | ingestion, retrieval, evidence extraction, synthesis, refactor planning, verification |
 | interfaces | `web/*`, `gateway/*`, `chatadapter/*`, `openapi/*`, `console`, `consoleapp` | server, UI, transport, platform-facing entrypoints |
@@ -63,7 +63,7 @@ The current repo already wants to be organized around these families:
 | `internal/agent/runtime` | `internal/v2/runtime/*` plus `internal/v2/services/*` | core agent session/runtime replacement seam |
 | `internal/agent/daemon` | `internal/v2/runtime/{runner,orchestration,supervisor}` | partial replacement today |
 | `internal/execution/agentmanager` | `internal/v2/services/{spawn,kill,list,run}` | fallback path remains in places |
-| agent-management paths in `internal/daemon` | prefer `internal/v2/services/*` semantics | keep `internal/daemon` as hosting shell where needed |
+| agent-management paths in `internal/runtime/daemon` | prefer `internal/v2/services/*` semantics | keep `internal/runtime/daemon` as hosting shell where needed |
 | some runtime-facing management in `internal/agent/tools` | should increasingly delegate to v2 services or Go-owned runtime state | transitional |
 | `internal/v2/adapters/jido` live runtime dependence | Go-owned runtime state with Jido optional | adapter should shrink in the default path |
 

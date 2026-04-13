@@ -36,7 +36,7 @@ Current limitations:
 Relevant code:
 
 - [internal/interfaces/web/api/agents.go](../../../internal/interfaces/web/api/agents.go)
-- [internal/daemon/service.go](../../../internal/daemon/service.go)
+- [internal/runtime/daemon/service.go](../../../internal/runtime/daemon/service.go)
 - [internal/agent/runtime/runtime.go](../../../internal/agent/runtime/runtime.go)
 - [internal/interfaces/web/api/workspaces.go](../../../internal/interfaces/web/api/workspaces.go)
 

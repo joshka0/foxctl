@@ -19,7 +19,7 @@ import (
 
 	agentprompts "github.com/jkatigb/agentctl/internal/agent/prompts"
 	"github.com/jkatigb/agentctl/internal/context/companion"
-	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	agenttypes "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"

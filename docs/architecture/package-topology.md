@@ -19,7 +19,7 @@ It does two things:
 
 `internal/` is currently grouped by several competing ideas at once:
 
-- runtime generation: `agent`, `v2`, `daemon`
+- runtime generation: `agent`, `runtime`, `v2`
 - technical layer: `storage`, `platform`, `domain`, `protocol`
 - feature area: `companion`, `contextplane`, `transcriptpipeline`
 - interface/transport: `web`, `gateway`, `chatadapter`, `openapi`
@@ -39,7 +39,7 @@ Prefer adding new packages under one of these stable families:
 | `internal/platform` | Cross-cutting platform/config/runtime utilities | `platform/config`, `platform/workspace`, `platform/timeutil` |
 | `internal/protocol` | Wire/envelope/protocol helpers | `protocol` |
 | `internal/storage` | Durable state, CAS, local rebuildable stores, DB helpers | `storage/*` |
-| `internal/runtime` | Runtime-owned execution, orchestration support, terminal, hooks, and observability | `runtime/runservice`, `runtime/orchestration`, `runtime/terminal`, `runtime/hooks`, `runtime/observability` |
+| `internal/runtime` | Runtime-owned execution, orchestration support, daemon hosting, terminal, hooks, and observability | `runtime/runservice`, `runtime/orchestration`, `runtime/daemon`, `runtime/terminal`, `runtime/hooks`, `runtime/observability` |
 | `internal/v2` | Newer **agent/runtime/orchestration** stack only | `v2/core`, `v2/services`, `v2/runtime`, `v2/adapters` |
 | `internal/context/companion`, `internal/context/contextplane`, `internal/context/transcriptpipeline` | Context/memory/history plane | current context family |
 | `internal/intelligence/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |
@@ -128,7 +128,7 @@ This is the explicit map for what `v2` is replacing.
 | `internal/agent/runtime` | Mailbox-driven agent sessions, overseer hierarchy, tool wiring | `internal/v2/runtime/*` plus `internal/v2/services/*` | Active replacement in progress |
 | `internal/agent/daemon` | Classic foreground daemon loop and mailbox polling runtime | `internal/v2/runtime/{runner,orchestration,supervisor}` and service entrypoints | Partial replacement |
 | `internal/execution/agentmanager` | Legacy spawn/kill and runtime management fallback | `internal/v2/services/{spawn,kill,list,run}` | Partial replacement |
-| `internal/daemon` agent-management paths | Mixed legacy runtime control plus newer helper wiring | Prefer `internal/v2/services/*` for command semantics; keep `internal/daemon` as hosting shell | Mixed transitional |
+| `internal/runtime/daemon` agent-management paths | Mixed legacy runtime control plus newer helper wiring | Prefer `internal/v2/services/*` for command semantics; keep `internal/runtime/daemon` as hosting shell | Mixed transitional |
 | `internal/agent/tools` agent-management tools such as spawn/list/status/wait | Runtime-facing tools for the classic agent stack | Should increasingly delegate to `internal/v2/services` or Go-owned runtime state | Partial replacement |
 | `internal/v2/adapters/jido` dependency on live runtime state | Runtime transport and state bridge for some orchestration paths | Long-term target is Go-owned runtime state with Jido optional | Adapter retained, default role should shrink |
 

@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/spf13/cobra"
 )

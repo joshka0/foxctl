@@ -208,7 +208,7 @@ Daemon behavior:
 - Follower: does not process background work, but can remain running and periodically retry acquisition.
 - CLI should have an escape hatch for debugging (`--leader=force`), but default is safe (`--leader=auto`).
 
-Leader-only subsystems (from `internal/daemon/service.go` and `internal/agent/daemon/`):
+Leader-only subsystems (from `internal/runtime/daemon/service.go` and `internal/agent/daemon/`):
 
 - **Agent Runtime + Overseer** — spawned agent management and `actor:system:overseer` polling
 - **Mailbox Poll Loop** — per-agent mailbox polling and message processing

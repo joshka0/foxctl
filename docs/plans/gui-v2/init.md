@@ -346,7 +346,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/execution"
@@ -1008,7 +1008,7 @@ Implement a `ToolExecutor` that calls skills through your daemon (fast path) or 
 
 * **Recommended**: daemon client path
 
-  * `internal/daemon.Client.Run(skill, input, workspace, ephemeral=true)`
+  * `internal/runtime/daemon.Client.Run(skill, input, workspace, ephemeral=true)`
 * `ToolDef.Parameters` from skill manifests (signature → JSON schema)
 
 ### Acceptance
@@ -1398,7 +1398,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/interfaces/web/api"
 	"github.com/jkatigb/agentctl/internal/interfaces/web/consolews"
@@ -1576,7 +1576,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/runtime/runservice"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
@@ -2207,7 +2207,7 @@ func SystemPromptForProfile(name string) string {
 package tools
 
 import (
-	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/rs/zerolog"
@@ -2286,7 +2286,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/runtime/runservice"
 )
@@ -2843,7 +2843,7 @@ This gives you the best UX because you can do **true streaming** and consistent 
 
 ### Option B: **Thin HTTP server that proxies to the daemon over Unix socket**
 
-* Web server uses `internal/daemon.Client` (`status`, `run`, `warm`, `shutdown`)
+* Web server uses `internal/runtime/daemon.Client` (`status`, `run`, `warm`, `shutdown`)
 * Fast to implement, minimal refactor
 * Downsides:
 
@@ -2926,7 +2926,7 @@ These are straightforward wrappers around existing packages:
 
   * return daemon status + app status + warm workspaces
 
-If you’re embedding daemon logic, reuse `handleStatus()` shape from `internal/daemon/service.go`.
+If you’re embedding daemon logic, reuse `handleStatus()` shape from `internal/runtime/daemon/service.go`.
 
 #### Skills
 
