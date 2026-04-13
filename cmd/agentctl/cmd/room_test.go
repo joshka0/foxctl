@@ -2285,6 +2285,84 @@ func TestRunRoomRemindLifecycle(t *testing.T) {
 	}
 }
 
+func TestRunRoomRemindCancelFallsBackToReminderSender(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("TMUX", "")
+	t.Setenv("TMUX_PANE", "")
+	t.Setenv("AGENTCTL_PARTICIPANT", "")
+	t.Setenv("AGENTCTL_PARTICIPANT_ID", "")
+	t.Setenv("ZELLIJ", "")
+	t.Setenv("ZELLIJ_SESSION_NAME", "")
+	t.Setenv("ZELLIJ_PANE_ID", "")
+	t.Setenv("AGENTCTL_ZELLIJ_PARTICIPANT", "")
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	coordStore, err := coordination.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("coordination.Open: %v", err)
+	}
+	defer coordStore.Close()
+	now := time.Now().UTC()
+	leaseName := roomLoopLeaseName(workspace, "alpha")
+	ownerID := "test-room-loop"
+	acquired, err := coordStore.TryAcquireLease(ctx, leaseName, ownerID, 30*time.Second)
+	if err != nil {
+		t.Fatalf("TryAcquireLease: %v", err)
+	}
+	if !acquired {
+		t.Fatal("expected test room loop lease acquisition")
+	}
+	if _, err := coordStore.UpsertRoomLoop(ctx, coordination.RoomLoop{
+		WorkspaceID:                  workspace,
+		RoomID:                       "alpha",
+		Enabled:                      true,
+		ManagedBy:                    roomLoopManagedBy,
+		LastTickAt:                   &now,
+		DeliveryLeaseName:            leaseName,
+		DeliveryOwnerID:              ownerID,
+		PulseInterval:                30 * time.Second,
+		ReplyStaleAfter:              2 * time.Minute,
+		TaskStaleAfter:               5 * time.Minute,
+		MinPulseFloor:                roomLoopMinimumPulseFloor,
+		InterruptAttemptLimit:        roomPulseInterruptLimit,
+		ReminderBackoffCap:           roomPulseBackoffCap,
+		CoordinatorPulseEnabled:      true,
+		CoordinatorEscalationEnabled: true,
+	}); err != nil {
+		t.Fatalf("UpsertRoomLoop: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomRemindAdd(cmd, workspace, "human-a", "alpha", "gemini-a", "", "Check MR !26 and report status", "", "", "", 15*time.Minute, 3, false, true, true, false, false); err != nil {
+		t.Fatalf("runRoomRemindAdd: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	reminderID := data["reminder"].(map[string]any)["id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomRemindCancel(cmd, workspace, "", "alpha", reminderID); err != nil {
+		t.Fatalf("runRoomRemindCancel fallback: %v", err)
+	}
+	data = decodeRoomEnvelope(t, out)
+	if got := fmt.Sprint(data["actor_id"]); got != "human-a" {
+		t.Fatalf("actor_id=%q want human-a", got)
+	}
+	cancelled := data["reminder"].(map[string]any)
+	if cancelled["active"] != false {
+		t.Fatalf("active=%v want false", cancelled["active"])
+	}
+}
+
 func TestRunRoomRemindAddDedupesEquivalentActiveReminder(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()

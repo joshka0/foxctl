@@ -3372,30 +3372,6 @@ func runRoomRemindCancel(cmd *cobra.Command, workspace, actorID, roomID, reminde
 	if err != nil {
 		return err
 	}
-	identity, err := resolveRoomSender(cmd.Context(), actorID)
-	if err != nil {
-		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeEARG, err.Error(), map[string]any{
-			"hint": "Pass --actor when outside tmux/zellij, or run inside a prepared pane so agentctl can derive the participant id.",
-		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
-	}
-	boardStore, err := openRoomBoardStore(cmd.Context())
-	if err != nil {
-		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
-	}
-	defer boardStore.Close()
-	summary, _, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, identity.Sender, 1)
-	if err != nil {
-		code := protocol.ErrorCodeERuntime
-		if errors.Is(err, blackboard.ErrRoomNotFound) {
-			code = protocol.ErrorCodeENotFound
-		}
-		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
-	}
-	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
-		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeEARG, "room remind cancel requires coordinator role", map[string]any{
-			"hint": "Run the command as the room coordinator or transfer coordinator ownership first.",
-		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
-	}
 	cfg, err := loadConfig(cmd.Context())
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -3411,6 +3387,33 @@ func runRoomRemindCancel(cmd *cobra.Command, workspace, actorID, roomID, reminde
 	}
 	if reminder == nil || strings.TrimSpace(reminder.RoomID) != strings.TrimSpace(roomID) {
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeENotFound, fmt.Sprintf("reminder %q not found", reminderID), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	identity, err := resolveRoomSender(cmd.Context(), actorID)
+	if err != nil {
+		if strings.TrimSpace(actorID) != "" || strings.TrimSpace(reminder.Sender) == "" {
+			return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+				"hint": "Pass --actor when outside tmux/zellij, or omit it to let cancel fall back to the reminder sender.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		identity = classifyExplicitRoomSender(reminder.Sender)
+	}
+	boardStore, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer boardStore.Close()
+	summary, _, err := loadRoomState(cmd.Context(), boardStore, absWorkspace, roomID, identity.Sender, 1)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") && !sameRoomParticipant(identity.Sender, reminder.Sender) {
+		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.remind.cancel", protocol.ErrorCodeEARG, "room remind cancel requires coordinator role or reminder sender identity", map[string]any{
+			"hint": "Run the command as the room coordinator, or omit --actor to fall back to the reminder sender.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	reminder.Active = false
 	updated, err := coordStore.UpsertRoomReminder(cmd.Context(), *reminder)
