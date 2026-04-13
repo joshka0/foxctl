@@ -9,10 +9,10 @@ import (
 	ccadapt "github.com/jkatigb/agentctl/internal/codecontext/adapters"
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	retrievalv2 "github.com/jkatigb/agentctl/internal/intelligence/retrieval/v2"
 	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/repoquery"
-	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
 	"github.com/jkatigb/agentctl/internal/searchindex"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -80,7 +80,7 @@ func Select(ctx context.Context, cfg sysconfig.Config, opts Options) (*Result, e
 	engine := retrievalv2.NewEngine(indexStore, opts.EmbedProvider)
 	if repoStore, err := repoindex.Open(ctx, cfg.Storage.Root, workspacePath); err == nil {
 		defer repoStore.Close()
-		engine = engine.WithRepoQueryService(repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore)))
+		engine = engine.WithRepoQueryService(repoQueryAdapter{service: repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore))})
 	}
 
 	repoMode := NormalizeRepoIndexMode(opts.RepoIndexMode)
@@ -166,6 +166,39 @@ func resolveWorkspaceID(workspacePath, override string) string {
 
 type memoryListByTypeSource struct {
 	store storage.MemoryStore
+}
+
+type repoQueryAdapter struct {
+	service *repoquery.QueryService
+}
+
+func (a repoQueryAdapter) Search(ctx context.Context, req retrievalv2.RepoSearchRequest) ([]repoindex.Node, error) {
+	built, err := repoquery.NewSearchRequest(req.Query, req.Limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.service.Search(ctx, built)
+}
+
+func (a repoQueryAdapter) DAGGrep(ctx context.Context, req retrievalv2.RepoDAGGrepRequest) (repoindex.DAGGrepResult, error) {
+	built, err := repoquery.NewDAGGrepRequest(
+		req.Query,
+		"",
+		req.Limit,
+		nil,
+		req.EdgeSets,
+		nil,
+		req.Direction,
+		req.Depth,
+		req.Budget,
+		req.PerNodeCap,
+		nil,
+		req.Render,
+	)
+	if err != nil {
+		return repoindex.DAGGrepResult{}, err
+	}
+	return a.service.DAGGrep(ctx, built)
 }
 
 func (s memoryListByTypeSource) ListByType(ctx context.Context, workspaceID, entryType string, limit int) ([]storage.NamedEntry, error) {

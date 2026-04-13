@@ -87,7 +87,7 @@ The repo already uses `internal/v2/*` in a focused way:
 | orchestration/spawn/list/kill | `cmd/agentctl/cmd/orchestration.go`, `cmd/agentctl/cmd/overseer_v2_orchestration.go`, and `internal/web/api/orchestration.go` construct v2 services |
 | companion context assembly | `internal/companion/service.go` and `internal/companion/v2_context_adapter.go` wire `internal/v2/runtime/contextbuilder` |
 | optional runtime backend bridge | `internal/agent/runtime/runtime.go` gates Eino through `internal/v2/adapters/eino` |
-| newer retrieval lane | `internal/retrieval/doc.go` already points new work to `internal/retrieval/v2` |
+| newer retrieval lane | `internal/retrieval/doc.go` already points new work to `internal/intelligence/retrieval/v2` |
 
 This is why the topology doc must keep saying "`v2` is the newer
 agent/runtime/orchestration lane" instead of implying repo-wide succession.
@@ -421,7 +421,7 @@ Objective:
 Primary packages:
 
 - `internal/retrieval`
-- `internal/retrieval/v2`
+- `internal/intelligence/retrieval/v2`
 - `internal/searchquery`
 - `internal/searchindex`
 - `internal/searchrank`
@@ -455,7 +455,7 @@ Current mapping to make durable in Story 1:
 | `internal/indexing` | ingest/builders | keep as builder/index-maintenance slice |
 | `internal/searchindex` | ingest/builders | keep as persisted retrieval-document/index slice |
 | `internal/retrieval` | search/query/recall | treat as transitional bridge for legacy helpers |
-| `internal/retrieval/v2` | search/query/recall | keep as the main retrieval engine |
+| `internal/intelligence/retrieval/v2` | search/query/recall | keep as the main retrieval engine |
 | `internal/repoquery` | search/query/recall | keep as structural recall/query slice |
 | `internal/searchquery` | search/query/recall | keep as query-planning slice |
 | `internal/searchrank` | search/query/recall | keep as ranking/fusion slice |
@@ -479,7 +479,7 @@ Why this sequencing:
 Story 2 target:
 
 - make the retrieval-search tranche explicit:
-  - `internal/retrieval/v2` is the default retrieval/search owner
+  - `internal/intelligence/retrieval/v2` is the default retrieval/search owner
   - `internal/retrieval` remains a transitional bridge for legacy helpers
   - `internal/repoquery`, `internal/searchquery`, and `internal/searchrank`
     belong with retrieval/search behavior
@@ -497,7 +497,7 @@ Story 2 should end with these durable decisions:
 
 | Package/root | Slice | Decision |
 |------|-------|----------|
-| `internal/retrieval/v2` | retrieval-search | keep as default owner |
+| `internal/intelligence/retrieval/v2` | retrieval-search | keep as default owner |
 | `internal/retrieval` | retrieval-search | keep as transitional bridge |
 | `internal/repoquery` | retrieval-search | keep with structural recall |
 | `internal/searchquery` | retrieval-search | keep with query planning |

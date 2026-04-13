@@ -9,9 +9,9 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	retrievalv2 "github.com/jkatigb/agentctl/internal/intelligence/retrieval/v2"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/repoquery"
-	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
 	"github.com/jkatigb/agentctl/internal/searchindex"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"

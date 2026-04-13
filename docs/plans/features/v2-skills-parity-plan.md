@@ -194,7 +194,7 @@ Current implementation direction:
 
 ### Checks
 
-- use `internal/searchquery`, `internal/searchindex`, `internal/retrieval/v2`, and `internal/codecontext` consistently
+- use `internal/searchquery`, `internal/searchindex`, `internal/intelligence/retrieval/v2`, and `internal/codecontext` consistently
 - remove stale assumptions from docs/specs that still describe the old retrieval split
 - keep result contracts stable unless versioned explicitly
 
