@@ -587,7 +587,7 @@ The durable split should be:
 | Package/root | Tooling role | Current boundary decision |
 |------|--------------|---------------------------|
 | `internal/tooling` | generic in-memory tool registry and callable tool substrate | keep as generic tooling |
-| `internal/skillrun` | generic skill resolution, execution, and envelope decoding | keep as generic tooling |
+| `internal/tooling/skillrun` | generic skill resolution, execution, and envelope decoding | keep as generic tooling |
 | `internal/tools/*` | standalone generic tools such as obsidian and ripgrep integrations | keep as generic tooling |
 | `internal/adapters/skillslib/*` | reusable helpers for building and testing skills | keep as generic tooling support |
 | `internal/agent/tools` | runtime-facing tool implementations that wrap agentctl skills for agent sessions | keep separate as agent-runtime tooling |
@@ -674,7 +674,7 @@ The first low-risk tooling batch should be **package-comment and
 documentation-only guardrails**:
 
 - clarify generic tooling ownership in `internal/tooling`,
-  `internal/skillrun`, `internal/tools/*`, and `internal/adapters/skillslib/*`
+  `internal/tooling/skillrun`, `internal/tools/*`, and `internal/adapters/skillslib/*`
 - clarify that `internal/agent/tools` stays runtime-facing rather than generic
   tooling
 - clarify that `internal/console` is the narrow utility layer and

@@ -567,7 +567,7 @@ Primary packages:
 
 - `internal/tooling`
 - `internal/tools/*`
-- `internal/skillrun`
+- `internal/tooling/skillrun`
 - `internal/adapters/skillslib/*`
 - `internal/agent/tools`
 - `internal/console`
@@ -588,7 +588,7 @@ Current mapping to make durable in Story 1:
 | Current package/root | Tooling slice | Decision |
 |------|---------------|----------|
 | `internal/tooling` | generic tooling | keep as the tool-registry substrate |
-| `internal/skillrun` | generic tooling | keep as generic skill execution/runtime-neutral wrapper |
+| `internal/tooling/skillrun` | generic tooling | keep as generic skill execution/runtime-neutral wrapper |
 | `internal/tools/*` | generic tooling | keep as standalone generic tools |
 | `internal/adapters/skillslib/*` | generic tooling support | keep as reusable skill-helper libraries |
 | `internal/agent/tools` | agent-runtime tooling | keep separate from the generic tooling family |

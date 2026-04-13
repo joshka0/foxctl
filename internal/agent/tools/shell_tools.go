@@ -13,7 +13,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/tooling/shellreduce"
-	"github.com/jkatigb/agentctl/internal/skillrun"
+	"github.com/jkatigb/agentctl/internal/tooling/skillrun"
 )
 
 func (r *Registry) registerShellTool() error {

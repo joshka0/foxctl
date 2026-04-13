@@ -13,7 +13,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/skillrun"
+	"github.com/jkatigb/agentctl/internal/tooling/skillrun"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	tooling "github.com/jkatigb/agentctl/internal/tooling"
 )
