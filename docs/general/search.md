@@ -7,7 +7,7 @@ Machine-friendly reference for semantic retrieval, reranking, and repo graph sea
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical packages | `skills/code_semantic_search`, `skills/code_smart_search`, `skills/code_snippet_extract`, `internal/intelligence/searchquery`, `internal/intelligence/searchindex`, `internal/intelligence/retrieval/v2`, `internal/intelligence/codecontext`, `internal/indexing/semantic`, `internal/indexing/rerank`, `internal/indexing/repoindex`, `internal/storage/dbdriver/search.go` |
+| Canonical packages | `skills/code_semantic_search`, `skills/code_smart_search`, `skills/code_snippet_extract`, `internal/intelligence/searchquery`, `internal/intelligence/searchindex`, `internal/intelligence/retrieval/v2`, `internal/intelligence/codecontext`, `internal/intelligence/indexing/semantic`, `internal/intelligence/indexing/rerank`, `internal/intelligence/indexing/repoindex`, `internal/storage/dbdriver/search.go` |
 | Last reviewed | 2026-03-07 |
 
 ## Search Surfaces
@@ -66,7 +66,7 @@ For exact symbol lookup, the exact lane should usually dominate regardless of re
 
 ## Embedding Model Selection
 
-Source of truth: `internal/indexing/semantic/provider.go`.
+Source of truth: `internal/intelligence/indexing/semantic/provider.go`.
 
 | Scope category | Default model |
 |---------------|---------------|
@@ -81,7 +81,7 @@ Override order:
 
 ## Rerank Configuration
 
-Source of truth: `internal/indexing/rerank/config.go`.
+Source of truth: `internal/intelligence/indexing/rerank/config.go`.
 
 | Env var | Purpose |
 |--------|---------|

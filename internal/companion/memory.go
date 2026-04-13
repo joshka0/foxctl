@@ -16,7 +16,7 @@ import (
 	actormemory "github.com/jkatigb/agentctl/internal/actor/memory"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 	"github.com/jkatigb/agentctl/internal/engine"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
 )

@@ -41,7 +41,7 @@ Prefer adding new packages under one of these stable families:
 | `internal/storage` | Durable state, CAS, local rebuildable stores, DB helpers | `storage/*` |
 | `internal/v2` | Newer **agent/runtime/orchestration** stack only | `v2/core`, `v2/services`, `v2/runtime`, `v2/adapters` |
 | `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline` | Context/memory/history plane | current context family |
-| `internal/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |
+| `internal/intelligence/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Retrieval and code intelligence | current intelligence family |
 | `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers | current interface family |
 
 ## Target Shape
@@ -139,7 +139,7 @@ These package families are peer families, not “legacy” in the same sense:
 |------|--------|
 | `internal/storage/*` | Shared persistence layer used by both legacy and v2 paths |
 | `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline` | Context/memory/history plane, not old runtime scaffolding |
-| `internal/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Intelligence and retrieval plane |
+| `internal/intelligence/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/refactor` | Intelligence and retrieval plane |
 | `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi` | Interface and transport layers |
 | `internal/domain`, `internal/platform`, `internal/protocol` | Foundations, not generation-specific runtime code |
 
@@ -444,7 +444,7 @@ The target split for this family is:
 
 | Intelligence concern | Current anchors | Current decision |
 |------|-----------------|------------------|
-| ingest/builders | `internal/indexing`, `internal/intelligence/searchindex` | keep as the builder and persisted-index slice |
+| ingest/builders | `internal/intelligence/indexing`, `internal/intelligence/searchindex` | keep as the builder and persisted-index slice |
 | search/query/recall | `internal/intelligence/retrieval`, `internal/intelligence/retrieval/v2`, `internal/intelligence/repoquery`, `internal/intelligence/searchquery`, `internal/intelligence/searchrank` | keep as the query and recall slice |
 | evidence gathering | `internal/intelligence/codecontext`, `internal/intelligence/codemap/context` | keep as the code-evidence extraction slice |
 | synthesis and refactor planning | `internal/intelligence/codemap`, `internal/intelligence/refactor`, `internal/intelligence/analysis/tasksgraph` | keep as the synthesis/planning slice |
@@ -455,7 +455,7 @@ That yields these routing decisions:
 
 | Package/root | Subfamily | Keep / bridge / move-later | Why |
 |------|-----------|-----------------------------|-----|
-| `internal/indexing` | ingest/builders | keep | Coordinates post-review indexing pipelines and embedding/index maintenance rather than end-user retrieval |
+| `internal/intelligence/indexing` | ingest/builders | keep | Coordinates post-review indexing pipelines and embedding/index maintenance rather than end-user retrieval |
 | `internal/intelligence/searchindex` | ingest/builders | keep | Defines the persisted retrieval-document model and recall store contract that retrieval engines consume |
 | `internal/intelligence/retrieval` | search/query/recall | bridge | Holds remaining non-v2 retrieval helpers; new code-search entrypoints should favor `internal/intelligence/retrieval/v2` |
 | `internal/intelligence/retrieval/v2` | search/query/recall | keep | It is the main fused search and recall engine |
@@ -473,7 +473,7 @@ That yields these routing decisions:
 Practical placement rules for this family:
 
 - new indexing or persisted recall-document work belongs with
-  `internal/indexing` or `internal/intelligence/searchindex`, not under generic retrieval
+  `internal/intelligence/indexing` or `internal/intelligence/searchindex`, not under generic retrieval
 - new query parsing, repo-index recall, lexical/vector fusion, and grouped
   search behavior belongs in the search/query/recall slice
 - new code-evidence extraction belongs in `internal/intelligence/codecontext` or other
@@ -498,7 +498,7 @@ retrieval/query slice. The durable boundary should be:
 | `internal/intelligence/searchquery` | parsed lexical query plans, identifiers, phrases, and path hints | keep in the retrieval-search slice as query planning |
 | `internal/intelligence/searchrank` | cross-source fusion and ranking | keep in the retrieval-search slice as ranking/fusion |
 | `internal/intelligence/searchindex` | persisted retrieval-document model and recall store contract | keep on the builder side as shared index infrastructure, not as the retrieval owner |
-| `internal/indexing` | post-review indexing pipelines and embedding/index maintenance | keep on the builder side |
+| `internal/intelligence/indexing` | post-review indexing pipelines and embedding/index maintenance | keep on the builder side |
 
 That yields one explicit rule:
 

@@ -139,12 +139,12 @@ Every `.db` file managed by agentctl must appear in this list. Stores are classi
 | `TESTWATCH` | `test_watch.db` | `internal/storage/testwatch/` | Test watching state |
 | `CONTEXTBUFFER` | `contextbuffer.db` | `internal/storage/contextbuffer/` | Context buffer |
 | `GRAPH` | `graph.db` | `internal/storage/graph/` | Code relationship graph (rebuilt per-machine) |
-| `EMBEDDING_QUEUE` | `embedding_queue.db` | `internal/indexing/embedding/` | Embedding job queue |
+| `EMBEDDING_QUEUE` | `embedding_queue.db` | `internal/intelligence/indexing/embedding/` | Embedding job queue |
 | `SUMMARY_QUEUE` | `summary_queue.db` | `internal/sessionkit/summary/` | Session summary job queue |
 | `DAEMON_DEDUPE` | `daemon_dedupe.db` | `internal/agent/daemon/` | Message deduplication |
 | `PATTERNS` | `patterns.db` | `internal/agent/optimization/` | Agent optimization patterns |
-| `POST_REVIEW` | `post_review_events.db` | `internal/indexing/postreview/` | Post-review event tracking |
-| `REPOINDEX` | `repoindex/<key>.db` | `internal/indexing/repoindex/` | Per-repo code index (dynamic filename -- see note) |
+| `POST_REVIEW` | `post_review_events.db` | `internal/intelligence/indexing/postreview/` | Post-review event tracking |
+| `REPOINDEX` | `repoindex/<key>.db` | `internal/intelligence/indexing/repoindex/` | Per-repo code index (dynamic filename -- see note) |
 | `CAS` | `cas.db` | `internal/storage/cas/` | CAS metadata. Has `factory.go` (done) |
 
 **Observability** (different storage root):

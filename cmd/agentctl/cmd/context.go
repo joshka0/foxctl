@@ -7,7 +7,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"

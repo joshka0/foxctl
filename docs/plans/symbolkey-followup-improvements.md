@@ -53,7 +53,7 @@ func DeriveSymbolPackage(filePath, lang string) string {
 func KeyEntryName(workspace, pkg, symbolKey string) string
 ```
 
-### `internal/indexing/symbol/types.go` (modified)
+### `internal/intelligence/indexing/symbol/types.go` (modified)
 
 - Bump `CurrentFileMetaSchema = 3`
 - Update `SymbolSummaryKeyEntryName(workspace, pkg, symbolKey string) string` — format: `symbol-summary://<workspace>/<pkg>::<symbolKey>`
@@ -68,7 +68,7 @@ func KeyEntryName(workspace, pkg, symbolKey string) string
 
 ## Step 2: Go Non-Exported Constructors, Python Keys, and Export Detection
 
-### `internal/indexing/symbol/symbolkey.go` (modified)
+### `internal/intelligence/indexing/symbol/symbolkey.go` (modified)
 
 ```go
 // GoNonExportedSymbolKey creates a key for Go non-exported symbols.
@@ -80,7 +80,7 @@ func GoNonExportedSymbolKey(name, fileBasename string) SymbolKey
 func PythonSymbolKey(name string) SymbolKey
 ```
 
-### `internal/indexing/repoindex/builder.go` (modified)
+### `internal/intelligence/indexing/repoindex/builder.go` (modified)
 
 - Update `goSymbolKeyFromName(name, fileRelPath string)`:
   - `init` → `GoInitSymbolKey(filepath.Base(fileRelPath))`
@@ -91,7 +91,7 @@ func PythonSymbolKey(name string) SymbolKey
 
 ## Step 3: Key-Only Writes in Main Indexer and Incremental Skill
 
-### `internal/indexing/symbol/indexer.go` (modified)
+### `internal/intelligence/indexing/symbol/indexer.go` (modified)
 
 **Key assignment** — In `indexFile`, compute `pkg := symbolutil.DeriveSymbolPackage(file.Path, lang)` and update key assignment:
 - Go: `init` → `GoInitSymbolKey`, exported → `GoSymbolKey`, non-exported → `GoNonExportedSymbolKey`
@@ -119,11 +119,11 @@ name := symbolutil.KeyEntryName(event.WorkspaceID, pkg, sym.EffectiveID())
 
 ## Step 4: Downstream Consumers Thread Package Through Lookups
 
-### `internal/indexing/repoindex/types.go` (modified)
+### `internal/intelligence/indexing/repoindex/types.go` (modified)
 
 - `SymbolSummaryProvider.Summary(ctx, symbolID, symbolKey, pkg string) (string, error)`
 
-### `internal/indexing/repoindex/builder.go` (modified)
+### `internal/intelligence/indexing/repoindex/builder.go` (modified)
 
 - `applySymbolSummary` passes `pkg := symbolutil.DeriveSymbolPackage(sym.FilePath, lang)` — NOT repoindex `pkgID`
 - Repoindex node IDs continue using `pkgID` (unchanged)
@@ -149,7 +149,7 @@ name := symbolutil.KeyEntryName(event.WorkspaceID, pkg, sym.EffectiveID())
 ### Cross-component validation
 
 These four call sites MUST all use `symbolutil.DeriveSymbolPackage`:
-1. `internal/indexing/symbol/indexer.go`
+1. `internal/intelligence/indexing/symbol/indexer.go`
 2. `skills/code_incremental_index/main.go`
 3. `cmd/agentctl/cmd/index.go`
 4. `cmd/agentctl/cmd/index_repo.go`
@@ -160,13 +160,13 @@ These four call sites MUST all use `symbolutil.DeriveSymbolPackage`:
 
 ### Unit Tests
 - `internal/platform/symbolutil`: `DeriveSymbolPackage` output matrix for go/ts/python/elixir, `KeyEntryName` format with `::` separator
-- `internal/indexing/symbol/symbolkey_test.go`: `GoNonExportedSymbolKey`, `PythonSymbolKey`, Unicode export detection
-- `internal/indexing/symbol/indexer_test.go`: key-only writes, stale deletion with pkg, `IndexSchema=3` behavior
+- `internal/intelligence/indexing/symbol/symbolkey_test.go`: `GoNonExportedSymbolKey`, `PythonSymbolKey`, Unicode export detection
+- `internal/intelligence/indexing/symbol/indexer_test.go`: key-only writes, stale deletion with pkg, `IndexSchema=3` behavior
 - `internal/intelligence/retrieval/semantic_search_test.go`: `<pkg>::<key>` parsing and payload fallback
 - `skills/code_semantic_search`: `extractSymbolName` for new format
 
 ### Integration Tests
-- `internal/indexing/repoindex/builder_test.go`: summary lookup uses shared pkg derivation
+- `internal/intelligence/indexing/repoindex/builder_test.go`: summary lookup uses shared pkg derivation
 - `skills/code_incremental_index`: `setSymbolKeys` handles Go exported/non-exported + Python
 - `cmd/agentctl/cmd`: summary cache uses pkg-scoped names
 
@@ -203,13 +203,13 @@ These four call sites MUST all use `symbolutil.DeriveSymbolPackage`:
 | File | Status | Step |
 |------|--------|------|
 | `internal/platform/symbolutil/symbolutil.go` | MODIFY | 1 |
-| `internal/indexing/symbol/types.go` | MODIFY | 1 |
-| `internal/indexing/symbol/symbolkey.go` | MODIFY | 2 |
-| `internal/indexing/repoindex/builder.go` | MODIFY | 2, 4 |
-| `internal/indexing/symbol/indexer.go` | MODIFY | 3 |
+| `internal/intelligence/indexing/symbol/types.go` | MODIFY | 1 |
+| `internal/intelligence/indexing/symbol/symbolkey.go` | MODIFY | 2 |
+| `internal/intelligence/indexing/repoindex/builder.go` | MODIFY | 2, 4 |
+| `internal/intelligence/indexing/symbol/indexer.go` | MODIFY | 3 |
 | `skills/code_incremental_index/main.go` | MODIFY | 3 |
 | `internal/intelligence/retrieval/file_summary.go` | MODIFY | 1, 4 |
-| `internal/indexing/repoindex/types.go` | MODIFY | 4 |
+| `internal/intelligence/indexing/repoindex/types.go` | MODIFY | 4 |
 | `internal/intelligence/retrieval/semantic_search.go` | MODIFY | 4 |
 | `cmd/agentctl/cmd/index.go` | MODIFY | 4 |
 | `cmd/agentctl/cmd/index_repo.go` | MODIFY | 4 |

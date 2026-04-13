@@ -25,7 +25,7 @@ Example entry:
   "type": "file_summary",
   "summary": "Implements the embedding queue store, including enqueueing jobs and persisting embeddings.",
   "result": {
-    "file_path": "internal/indexing/embedding/store.go",
+    "file_path": "internal/intelligence/indexing/embedding/store.go",
     "package": "embedding",
     "symbols": ["Store", "OpenStore", "Enqueue", "ClaimNext", "Complete"],
     "digest": "sha256:<hash>"
@@ -63,19 +63,19 @@ Example entry:
 - `internal/intelligence/retrieval/merge.go`: `mergeCandidates`, `mergedCandidate.merge`, `mergedCandidate.finalize`, `MergeOptions`, `DefaultMergeOptions`.
 
 ### Indexing and Embeddings
-- `internal/indexing/symbol/indexer.go`: `Indexer`, `NewIndexer`, `Indexer.Index`, `indexFile`.
-- `internal/indexing/symbol/types.go`: `Symbol`, `SymbolType`, `KindFileSummary`, `ComputeDigest`.
-- `internal/indexing/semantic/indexer.go`: `Indexer`, `NewIndexer`, `Indexer.Index`, `indexFile`, `indexSingleFile`, `indexChunkedFile`.
-- `internal/indexing/semantic/jobs.go`: `JobArgs`, `JobFileInput`, `JobResult`, `JobSummary`, `JobFailure`.
-- `internal/indexing/embedding/store.go`: `OpenStore`, `OpenStoreFromConfig`, `Store.Enqueue`, `Store.ClaimNext`, `Store.Complete`, `Store.Fail`.
-- `internal/indexing/embedding/worker.go`: `Worker.Start`, `Worker.dispatchJobs`, `Worker.processJob`.
+- `internal/intelligence/indexing/symbol/indexer.go`: `Indexer`, `NewIndexer`, `Indexer.Index`, `indexFile`.
+- `internal/intelligence/indexing/symbol/types.go`: `Symbol`, `SymbolType`, `KindFileSummary`, `ComputeDigest`.
+- `internal/intelligence/indexing/semantic/indexer.go`: `Indexer`, `NewIndexer`, `Indexer.Index`, `indexFile`, `indexSingleFile`, `indexChunkedFile`.
+- `internal/intelligence/indexing/semantic/jobs.go`: `JobArgs`, `JobFileInput`, `JobResult`, `JobSummary`, `JobFailure`.
+- `internal/intelligence/indexing/embedding/store.go`: `OpenStore`, `OpenStoreFromConfig`, `Store.Enqueue`, `Store.ClaimNext`, `Store.Complete`, `Store.Fail`.
+- `internal/intelligence/indexing/embedding/worker.go`: `Worker.Start`, `Worker.dispatchJobs`, `Worker.processJob`.
 
 ### Storage, Search, and Rerank
 - `internal/storage/memory/store.go`: `Store.Save`, `Store.Get`, `Store.OpenFromConfig`, `NamedEntry`.
 - `internal/storage/memory/search.go`: `Store.EnableSearch`, `SearchableStore.Search`, `searchBM25`, `searchVector`.
 - `internal/storage/memory/vector.go`: `VectorStore.SaveWithEmbedding`, `SearchSimilar`, `GetWithEmbedding`.
 - `internal/storage/vector/vector.go`: `vector.Store`, `SearchOptions` (vector-enabled builds).
-- `internal/indexing/rerank/provider.go`: `Provider.Rerank`, `Candidate`, `RankedResult`, `UsageTrackingProvider`.
+- `internal/intelligence/indexing/rerank/provider.go`: `Provider.Rerank`, `Candidate`, `RankedResult`, `UsageTrackingProvider`.
 
 ## Implementation Sketch (Touchpoint-Focused)
 1) Tree output in semantic search
@@ -86,17 +86,17 @@ Example entry:
 2) File-level candidate retrieval
 - Open memory store via `memory.OpenWithConfig`, enable advanced search via `Store.EnableSearch` and `SearchableStore.Search` in `internal/storage/memory/search.go`.
 - For file-level entries, filter results by entry `Type == "file_summary"` and/or `Entry.Name` prefix `file://` (compatible with `internal/intelligence/retrieval/extractFilePath`).
-- Optionally rerank top-k using `internal/indexing/rerank.Provider.Rerank` with content set to the file summary text.
+- Optionally rerank top-k using `internal/intelligence/indexing/rerank.Provider.Rerank` with content set to the file summary text.
 
 3) Lazy summary generation (on-demand)
 - When a file candidate lacks a cached summary, build one from symbol data:
-  - Pull symbols by file path via memory store (existing `Store.Search` + `symbol.UnmarshalResult` in `internal/indexing/symbol`).
-  - Compute digest using `internal/indexing/symbol.ComputeDigest` over the summary input payload.
+  - Pull symbols by file path via memory store (existing `Store.Search` + `symbol.UnmarshalResult` in `internal/intelligence/indexing/symbol`).
+  - Compute digest using `internal/intelligence/indexing/symbol.ComputeDigest` over the summary input payload.
   - Generate summary via LLM (same provider used in `skills/code_semantic_search/main.go`) or deterministic fallback.
   - Persist as `NamedEntry` via `Store.Save` in `internal/storage/memory/store.go`.
 
 4) Embedding for file summaries
-- Embed the summary text with `internal/indexing/semantic.EmbeddingProvider` (already imported in `skills/code_semantic_search/main.go`).
+- Embed the summary text with `internal/intelligence/indexing/semantic.EmbeddingProvider` (already imported in `skills/code_semantic_search/main.go`).
 - Store embedding alongside the summary entry using `VectorStore.SaveWithEmbedding` in `internal/storage/memory/vector.go`.
 - If vector search is disabled, fall back to BM25 via `SearchableStore.searchBM25`.
 
@@ -111,7 +111,7 @@ Example entry:
 - Result JSON (example payload):
   ```json
   {
-    "file_path": "internal/indexing/embedding/store.go",
+    "file_path": "internal/intelligence/indexing/embedding/store.go",
     "package": "embedding",
     "symbols": ["Store", "OpenStore", "Enqueue", "ClaimNext", "Complete"],
     "digest": "sha256:<hash>"
@@ -165,17 +165,17 @@ sequenceDiagram
       "summary": "Core runtime, indexing, and storage subsystems with skills and tooling.",
       "children": [
         {
-          "path": "internal/indexing",
+          "path": "internal/intelligence/indexing",
           "score": 0.78,
           "summary": null,
           "children": [
             {
-              "path": "internal/indexing/embedding",
+              "path": "internal/intelligence/indexing/embedding",
               "score": 0.74,
               "summary": null,
               "children": [
                 {
-                  "path": "internal/indexing/embedding/store.go",
+                  "path": "internal/intelligence/indexing/embedding/store.go",
                   "score": 0.71,
                   "summary": "Implements the embedding queue store, including enqueueing jobs and persisting embeddings.",
                   "children": []
@@ -224,11 +224,11 @@ sequenceDiagram
       "summary": "Core runtime, indexing, and storage subsystems with skills and tooling.",
       "children": [
         {
-          "path": "internal/indexing",
+          "path": "internal/intelligence/indexing",
           "score": 0.78,
           "children": [
             {
-              "path": "internal/indexing/embedding/store.go",
+              "path": "internal/intelligence/indexing/embedding/store.go",
               "score": 0.71,
               "summary": "Implements the embedding queue store, including enqueueing jobs and persisting embeddings."
             }

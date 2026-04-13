@@ -34,7 +34,7 @@ consumers.
 
 - [x] Define in-memory schema for:
   - `symbols` → `Symbol`, `Result`, `Source` in
-    `internal/indexing/symbol/types.go` (stored as named memory entries with
+    `internal/intelligence/indexing/symbol/types.go` (stored as named memory entries with
     `type = "code_symbol"`).
   - `calls` → `CallEdge` in `types.go` (currently conceptual; persistence via
     named memory still to be wired).
@@ -42,7 +42,7 @@ consumers.
 - [x] Cross-check these structs against `code_symbol_index_and_swe_grep.md` §3
       and update docs/comments if any fields diverge (without changing
       wire-level contracts).
-  - Updated Go docstrings in `internal/indexing/symbol/types.go` to reference
+  - Updated Go docstrings in `internal/intelligence/indexing/symbol/types.go` to reference
     spec sections and note implementation additions (`StartLine`, `EndLine`,
     `Documentation`, `symbol_count`) permitted by "Implementations MAY add
     additional columns".
@@ -63,7 +63,7 @@ consumers.
     `"symbol://<workspace>/<file_path>:<symbol_name>"`.
   - `FileMetaEntryName(workspace, file_path)` →
     `"symbol-meta://<workspace>/<file_path>"`.
-  - Implemented in `internal/indexing/symbol/types.go` with tests in
+  - Implemented in `internal/intelligence/indexing/symbol/types.go` with tests in
     `indexer_test.go`.
 - [x] Write a short design note (or extend the spec) describing identifier
       stability guarantees and how renames should be handled:
@@ -85,7 +85,7 @@ and testable.
 ### B1. Language extractors (Go-first)
 
 - [x] Implement a Go-only extractor that does not require Tree-sitter:
-  - `GoExtractor` in `internal/indexing/symbol/extractor_go.go` using `go/ast`.
+  - `GoExtractor` in `internal/intelligence/indexing/symbol/extractor_go.go` using `go/ast`.
   - Extracts functions, methods, types, interfaces, variables, and constants.
   - Populates `Symbol` (ids, kinds, byte ranges, doc comments, signatures,
     `BodyDigest`).
@@ -149,10 +149,10 @@ pipeline.
 ### C1. Post-review integration
 
 - [x] Integrate symbol indexer with the Phase 2 post-review handler:
-  - `internal/indexing/symbol/factory.go` – `Factory` + `RegisterWithHandler`.
-  - `internal/indexing/indexer.go` – `PostReviewHandler` fanout to symbol
+  - `internal/intelligence/indexing/symbol/factory.go` – `Factory` + `RegisterWithHandler`.
+  - `internal/intelligence/indexing/indexer.go` – `PostReviewHandler` fanout to symbol
     indexer via `Indexer` interface.
-  - `internal/indexing/symbol/indexer.go` – `Indexer.Index` consumes
+  - `internal/intelligence/indexing/symbol/indexer.go` – `Indexer.Index` consumes
     `PostReviewEvent` and updates named memory.
 - [x] Document the end-to-end flow:
   - Review → `ReviewArtifact` → `PostReviewEvent` → `PostReviewHandler` → symbol
@@ -167,7 +167,7 @@ pipeline.
   - Reuse the same conceptual input as semantic index jobs (`workspace_id`,
     files `{path, digest, change_kind}`, task/review ids).
   - No new wire-level fields; stick to Core Profile v1 envelopes.
-  - Implemented in `internal/indexing/symbol/jobs.go` with:
+  - Implemented in `internal/intelligence/indexing/symbol/jobs.go` with:
     - `JobTypeInitFiles` = `"code_symbol_index.init_files"`
     - `JobTypeUpdateFiles` = `"code_symbol_index.update_files"`
     - `JobArgs`, `JobSummary`, `JobFailure`, `JobResult` types.
@@ -202,7 +202,7 @@ with focused unit, integration, and golden tests.
 
 - [x] Ensure basic unit coverage for:
   - Symbol extraction (functions, methods, types, interfaces) – existing tests
-    in `internal/indexing/symbol/indexer_test.go`.
+    in `internal/intelligence/indexing/symbol/indexer_test.go`.
   - Naming helpers (`ID`, `EntryName`, `FileMetaEntryName`).
   - File meta and unchanged-file handling.
 - [x] Add explicit unit tests for call extraction:

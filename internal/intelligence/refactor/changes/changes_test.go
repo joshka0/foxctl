@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
 	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
 	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
 	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"

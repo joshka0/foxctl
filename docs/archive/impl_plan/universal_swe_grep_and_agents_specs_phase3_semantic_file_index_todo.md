@@ -33,7 +33,7 @@ explicit and stable across re-runs and config changes.
   - `type = "file_embedding"` and `"file_embedding_chunk"`.
   - `FileEmbeddingResult` and `ChunkEmbeddingResult` structs per
     `semantic_file_index.md` data model.
-  - Implemented in `internal/indexing/semantic/types.go`.
+  - Implemented in `internal/intelligence/indexing/semantic/types.go`.
 - [ ] Ensure schema is fully documented and aligned with spec:
   - Cross-check fields (`path`, `digest`, `language`, `embedding`,
     `chunk_count`, `chunking_config_hash`, `source`, etc.) against
@@ -52,7 +52,7 @@ explicit and stable across re-runs and config changes.
   - `FileEmbeddingName(workspace, path)` → `file://<workspace>/<path>`.
   - `ChunkEmbeddingName(workspace, path, chunkID, cfgHash)` →
     `file://<workspace>/<path>#chunk-<id>?cfg=<hash>`.
-  - Implemented in `internal/indexing/semantic/types.go`.
+  - Implemented in `internal/intelligence/indexing/semantic/types.go`.
 - [x] Implement `ChunkingConfigHash()` on `semantic.Config` to detect when chunk
       boundaries must be recomputed.
 - [ ] Document naming + hashing behavior in the spec and/or README:
@@ -102,10 +102,10 @@ and explicit CLI entrypoints.
 ### C1. Post-review integration (overseer + handler)
 
 - [x] Integrate semantic indexer with the Phase 2 post-review handler:
-  - `internal/indexing/semantic/factory.go` – `Factory` + `RegisterWithHandler`.
-  - `internal/indexing/handler.go` – `PostReviewHandler` fanout to semantic
+  - `internal/intelligence/indexing/semantic/factory.go` – `Factory` + `RegisterWithHandler`.
+  - `internal/intelligence/indexing/handler.go` – `PostReviewHandler` fanout to semantic
     indexer via `Indexer` interface.
-  - `internal/indexing/semantic/integration_test.go` – integration test
+  - `internal/intelligence/indexing/semantic/integration_test.go` – integration test
     `TestSemanticIndexerWithPostReviewHandler`.
 - [ ] Document the end-to-end flow:
   - Review becomes `ok` → overseer emits `PostReviewEvent` → post-review handler

@@ -19,7 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/hooks"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/maputil"

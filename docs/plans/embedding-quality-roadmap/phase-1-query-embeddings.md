@@ -33,7 +33,7 @@ vec, err := g.embedProvider.Embed(ctx, question)
 The `VoyageProvider` already implements `EmbedQuery`:
 
 ```go
-// internal/indexing/semantic/provider_voyage.go (line 411)
+// internal/intelligence/indexing/semantic/provider_voyage.go (line 411)
 func (p *VoyageProvider) EmbedQuery(ctx context.Context, query string) ([]float32, error) {
     embeddings, err := p.doEmbedRequest(ctx, []string{query}, "query")
     // ...
@@ -62,7 +62,7 @@ import (
     "path/filepath"
     "strings"
 
-    "github.com/jkatigb/agentctl/internal/indexing/semantic"
+    "github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
     "github.com/jkatigb/agentctl/internal/platform/config"
     "github.com/jkatigb/agentctl/internal/storage/dbdriver"
     "github.com/jkatigb/agentctl/internal/storage/memory"
@@ -195,7 +195,7 @@ import (
     "context"
     "testing"
 
-    "github.com/jkatigb/agentctl/internal/indexing/semantic"
+    "github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
     "github.com/jkatigb/agentctl/internal/platform/config"
     "github.com/rs/zerolog"
     "github.com/stretchr/testify/assert"

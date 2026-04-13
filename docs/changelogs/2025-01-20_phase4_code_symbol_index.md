@@ -12,7 +12,7 @@ symbols from source code using Go AST parsing (CGO-free).
 
 ### 4a. Defined symbol index types and schema
 
-New package: `internal/indexing/symbol/`
+New package: `internal/intelligence/indexing/symbol/`
 
 **Types (`types.go`):**
 
@@ -95,12 +95,12 @@ New package: `internal/indexing/symbol/`
 
 ## Files Added
 
-- `internal/indexing/symbol/types.go` – data types and helpers
-- `internal/indexing/symbol/extractor.go` – extractor interface and registry
-- `internal/indexing/symbol/extractor_go.go` – Go AST-based extractor
-- `internal/indexing/symbol/indexer.go` – main indexer implementation
-- `internal/indexing/symbol/factory.go` – factory and registration
-- `internal/indexing/symbol/indexer_test.go` – comprehensive tests
+- `internal/intelligence/indexing/symbol/types.go` – data types and helpers
+- `internal/intelligence/indexing/symbol/extractor.go` – extractor interface and registry
+- `internal/intelligence/indexing/symbol/extractor_go.go` – Go AST-based extractor
+- `internal/intelligence/indexing/symbol/indexer.go` – main indexer implementation
+- `internal/intelligence/indexing/symbol/factory.go` – factory and registration
+- `internal/intelligence/indexing/symbol/indexer_test.go` – comprehensive tests
 
 ## Technical Notes
 

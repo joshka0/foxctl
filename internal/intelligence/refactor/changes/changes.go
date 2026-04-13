@@ -14,7 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
 	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
 	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
 	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"

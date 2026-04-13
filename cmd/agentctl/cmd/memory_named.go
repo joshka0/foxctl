@@ -13,7 +13,7 @@ import (
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/indexing/atomic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/atomic"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"

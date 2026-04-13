@@ -330,7 +330,7 @@ Deliverables:
 Primary files:
 
 - `internal/tools/obsidian/links.go`
-- `internal/indexing/repoindex/*`
+- `internal/intelligence/indexing/repoindex/*`
 - `internal/contextplane/retrieval.go`
 
 Verification:

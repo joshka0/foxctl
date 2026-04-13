@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 )
 
 const (

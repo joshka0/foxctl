@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"

@@ -74,7 +74,7 @@ func (r *Report) FormatMarkdown(w io.Writer) error
 agentctl doc-coverage ./...
 
 # Specific packages
-agentctl doc-coverage ./internal/indexing/... ./skills/...
+agentctl doc-coverage ./internal/intelligence/indexing/... ./skills/...
 
 # Output to file for tracking
 agentctl doc-coverage ./... > docs/doc-coverage-checklist.md
@@ -98,7 +98,7 @@ Generated: 2024-01-15T10:30:00Z
 
 ---
 
-## internal/indexing/repoindex/store
+## internal/intelligence/indexing/repoindex/store
 
 - [ ] Add `doc.go` for package
 
@@ -216,7 +216,7 @@ make lint-doc
 agentctl lint-doc ./...
 
 # Specific packages
-agentctl lint-doc ./internal/indexing/...
+agentctl lint-doc ./internal/intelligence/indexing/...
 
 # Exit with error on warnings (for enforcement)
 agentctl lint-doc ./... --fail-on-warn
@@ -280,7 +280,7 @@ Execute the documentation sweep in focused PRs per subsystem. Each PR adds `doc.
 | PR | Subsystem | Packages | Priority |
 |----|-----------|----------|----------|
 | 6.3 | Storage core | `internal/storage/*` | HIGH |
-| 6.4 | Indexing | `internal/indexing/*` | HIGH |
+| 6.4 | Indexing | `internal/intelligence/indexing/*` | HIGH |
 | 6.5 | Retrieval | `internal/intelligence/retrieval/*` | HIGH |
 | 6.6 | Actor system | `internal/actor/*` | MEDIUM |
 | 6.7 | Skills (batch 1) | `skills/code/*`, `skills/memory/*` | HIGH |
@@ -333,7 +333,7 @@ package repoindex
 //   - [NewStore] - Constructor with migration support
 //   - [Node] - Graph node representation
 //   - [Edge] - Graph edge representation
-//   - internal/indexing/repoindex/builder - Populates store
+//   - internal/intelligence/indexing/repoindex/builder - Populates store
 type Store struct {
     // ...
 }

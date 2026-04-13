@@ -89,7 +89,7 @@ Gate: no new features until this is solid.
     - `(workspace_id, files[{path, digest, change_kind}], task_id, review_id)`.
     - `internal/intelligence/analysis/overseer/post_review_test.go` – 6 tests covering happy
       path, idempotence, non-ok rejection, files passthrough.
-    - `internal/indexing/postreview/producer_test.go` – event building tests.
+    - `internal/intelligence/indexing/postreview/producer_test.go` – event building tests.
 
 - **Integration tests**
   - [x] Simulate a successful review and ensure:
@@ -98,7 +98,7 @@ Gate: no new features until this is solid.
       interfering.
     - `TestPostReviewHandler_IntegrationWithFakeIndexer` – full flow with fake
       indexer subscriber.
-    - `internal/indexing/handler_test.go` – multi-indexer fanout tests.
+    - `internal/intelligence/indexing/handler_test.go` – multi-indexer fanout tests.
 
 - **Golden tests**
   - [x] Capture one or two canonical post-review events as JSON in

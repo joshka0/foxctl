@@ -216,7 +216,7 @@ internal/storage/memory
 ├── SearchableStore
 └── SearchResult
 
-internal/indexing/semantic
+internal/intelligence/indexing/semantic
 └── EmbeddingProvider (interface)
 ```
 

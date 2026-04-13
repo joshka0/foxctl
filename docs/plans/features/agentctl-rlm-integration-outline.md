@@ -40,7 +40,7 @@ The repo already has several pieces that make an RLM layer practical:
     - observations
     - tensions
     - retrieve/report/rethink/dispatch
-- `internal/indexing/repoindex/*`
+- `internal/intelligence/indexing/repoindex/*`
   - code + infra graph indexing
 - `internal/storage/obsidianindex/*`
   - durable knowledge plane index
@@ -203,7 +203,7 @@ These map well onto:
 - `internal/contextplane`
 - `internal/storage/contextvar`
 - `internal/companion`
-- `internal/indexing/repoindex`
+- `internal/intelligence/indexing/repoindex`
 - `internal/storage/obsidianindex`
 - `internal/trajectorycapture`
 

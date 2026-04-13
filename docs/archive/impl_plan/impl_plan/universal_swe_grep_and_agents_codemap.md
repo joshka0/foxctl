@@ -91,7 +91,7 @@ You can refer to these as “CM3” etc. in comments, issues, or docs.
 ### Phase 2 – Post-Review Pipeline Harness
 
 - **Task:** Implement overseer post-review handler
-  ([PostReviewHandler](cci:2://file://internal/indexing/handler.go:14:0-20:1),
+  ([PostReviewHandler](cci:2://file://internal/intelligence/indexing/handler.go:14:0-20:1),
   events, indexer fanout)\
   **Codemaps:** CM9, CM7, CM8, CM13
 

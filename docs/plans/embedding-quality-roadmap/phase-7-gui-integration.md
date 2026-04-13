@@ -135,7 +135,7 @@ agentctl run repo_index/expand --input '{
 
 # Include soft edges from Index: blocks
 agentctl run repo_index/expand --input '{
-  "seed": "type:internal/indexing/repoindex/store.Store",
+  "seed": "type:internal/intelligence/indexing/repoindex/store.Store",
   "edge_types": ["CALLS", "SOFT"]
 }'
 ```

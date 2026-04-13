@@ -40,7 +40,7 @@ These still embed fine - you just feed a smaller, consistent representation.
 
 ## Normalization Single Source
 
-- All doc/code normalization should live in `internal/indexing/embeddingtext`.
+- All doc/code normalization should live in `internal/intelligence/indexing/embeddingtext`.
 - Avoid duplicate normalize helpers in feature-specific packages.
 
 ---

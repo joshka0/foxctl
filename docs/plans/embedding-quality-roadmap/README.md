@@ -80,14 +80,14 @@ The roadmap uses feature flags to gate behavior and enable gradual rollout:
 ## Key Files by Phase
 
 ### Phase 0-2 (Embeddings)
-- `internal/indexing/embeddingtext/` - New utility package
+- `internal/intelligence/indexing/embeddingtext/` - New utility package
 - `internal/intelligence/retrieval/semantic_search.go` - Query embedding changes
-- `internal/indexing/symbol/` - Symbol embedding enqueue
+- `internal/intelligence/indexing/symbol/` - Symbol embedding enqueue
 
 ### Phase 4-5 (Repo Graph)
-- `internal/indexing/repoindex/store/` - New SQLite DAG store
-- `internal/indexing/repoindex/builder/` - Graph construction
-- `internal/indexing/repoindex/query/` - Search/expand engine
+- `internal/intelligence/indexing/repoindex/store/` - New SQLite DAG store
+- `internal/intelligence/indexing/repoindex/builder/` - Graph construction
+- `internal/intelligence/indexing/repoindex/query/` - Search/expand engine
 
 ### Phase 7 (Tools)
 - `skills/repo_index_search/` - Search tool

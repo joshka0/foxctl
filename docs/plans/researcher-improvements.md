@@ -17,7 +17,7 @@
 
 ## File Changes
 
-### 1. `internal/indexing/repoindex/query.go` (modified)
+### 1. `internal/intelligence/indexing/repoindex/query.go` (modified)
 
 **Purpose**: Add OR-fallback when multi-word FTS5 queries return 0 results.
 
@@ -121,7 +121,7 @@ func searchWithFallback[T any](
 
 ---
 
-### 2. `internal/indexing/repoindex/query_test.go` (new)
+### 2. `internal/intelligence/indexing/repoindex/query_test.go` (new)
 
 **Purpose**: Unit tests and benchmarks for OR-fallback behavior.
 
@@ -308,11 +308,11 @@ Research-only agent using agentctl code intelligence tools. Read-only investigat
 
 ## Testing Strategy
 
-### Unit Tests (`internal/indexing/repoindex/query_test.go`)
+### Unit Tests (`internal/intelligence/indexing/repoindex/query_test.go`)
 - 7 test cases covering: multi-word OR, operator stripping, single-word no-fallback, candidate ordering, zero-result fallback with store, syntax error fallback
 - Test store setup: `testing.T.TempDir()` + `repoindex.Open` + `store.ReplaceAll` with deterministic nodes
 
-### Benchmarks (`internal/indexing/repoindex/query_test.go`)
+### Benchmarks (`internal/intelligence/indexing/repoindex/query_test.go`)
 - 3 benchmarks: multi-word OR fallback overhead, scored fallback overhead, syntax error path
 - Small deterministic corpus for stable baselines
 
@@ -340,7 +340,7 @@ agentctl index repo search --workspace . --query "BuildHybridContextLayers" --li
 3. **Modify `Search` and `SearchScored`** to use the shared executor
 4. **Write unit tests** — all 7 test cases
 5. **Write benchmarks** — all 3 benchmark cases
-6. **Run tests** — `go test ./internal/indexing/repoindex/... -v -bench=.`
+6. **Run tests** — `go test ./internal/intelligence/indexing/repoindex/... -v -bench=.`
 7. **Integration test** — verify with actual repo graph queries
 8. **Update SKILL.md** — apply all section changes
 9. **Update opencode variant** — apply condensed version

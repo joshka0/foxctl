@@ -9,7 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/agent/toolnames"
 	"github.com/jkatigb/agentctl/internal/engine"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 )
 
 // RegistryToolExecutor adapts a tools.Registry to the engine.ToolExecutor interface.

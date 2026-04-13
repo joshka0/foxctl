@@ -13,7 +13,7 @@ import (
 
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	refchanges "github.com/jkatigb/agentctl/internal/intelligence/refactor/changes"
 	refdeps "github.com/jkatigb/agentctl/internal/intelligence/refactor/deps"
 	refevidence "github.com/jkatigb/agentctl/internal/intelligence/refactor/evidence"

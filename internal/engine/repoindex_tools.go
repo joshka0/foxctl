@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	"github.com/jkatigb/agentctl/internal/observability"
 )

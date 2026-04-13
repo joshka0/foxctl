@@ -96,15 +96,15 @@ This section anchors the plan in the current code layout.
 ### 2.3 Symbol index (data model + persistence)
 
 - Named memory type mapping and structs:
-  - `internal/indexing/symbol/types.go`
+  - `internal/intelligence/indexing/symbol/types.go`
 - Indexer implementation/tests:
-  - `internal/indexing/symbol/indexer.go`
-  - `internal/indexing/symbol/indexer_test.go`
+  - `internal/intelligence/indexing/symbol/indexer.go`
+  - `internal/intelligence/indexing/symbol/indexer_test.go`
 
 ### 2.4 Post-review event production
 
 - Event producer (currently allows empty file list):
-  - `internal/indexing/postreview/producer.go`
+  - `internal/intelligence/indexing/postreview/producer.go`
 - Overseer post-review handler:
   - `internal/intelligence/analysis/overseer/post_review.go`
 
@@ -197,7 +197,7 @@ Status: Completed
 - **Scope**
   - Replace stub implementation in `internal/agent/tools/code_tools.go`.
   - Query named memory for entries with type `"code_symbol"` (see
-    `internal/indexing/symbol/types.go`).
+    `internal/intelligence/indexing/symbol/types.go`).
   - Provide a minimal v1 ranking strategy that is deterministic and safe:
     - Prefer exact/substring matches against `symbol.name`, then
       `symbol.signature`.

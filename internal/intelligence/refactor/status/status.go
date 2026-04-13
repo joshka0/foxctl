@@ -10,7 +10,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
 )
 

@@ -13,10 +13,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
-	platformsymbol "github.com/jkatigb/agentctl/internal/platform/symbolutil"
+	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
 	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
+	platformsymbol "github.com/jkatigb/agentctl/internal/platform/symbolutil"
 )
 
 // BuildError reports a user-correctable snapshot build failure.

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/tools/obsidian"
 	"github.com/spf13/cobra"
 )

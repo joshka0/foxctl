@@ -6,8 +6,8 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/spf13/cobra"

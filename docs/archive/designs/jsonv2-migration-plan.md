@@ -33,8 +33,8 @@ fails.
 | `skills/hooks_impact_analysis/main.go` | 83 | `Timeout` | Add `format:units` |
 | `skills/code_llm_search/main.go` | 72 | `Timeout` | Add `format:units` |
 | `internal/domain/backup/backup.go` | 129 | `Duration` | Add `format:units` |
-| `internal/indexing/embedding/worker.go` | 21 | `PollInterval` | Add `format:units` |
-| `internal/indexing/embedding/worker.go` | 27 | `ShutdownTimeout` | Add `format:units` |
+| `internal/intelligence/indexing/embedding/worker.go` | 21 | `PollInterval` | Add `format:units` |
+| `internal/intelligence/indexing/embedding/worker.go` | 27 | `ShutdownTimeout` | Add `format:units` |
 | `internal/openapi/retry/retry.go` | 24 | `InitialDelay` | Add `format:units` |
 | `internal/openapi/retry/retry.go` | 25 | `MaxDelay` | Add `format:units` |
 | `internal/agent/optimization/reflection.go` | 51 | `AvgDuration` | Add `format:units` |
@@ -254,7 +254,7 @@ The codebase already follows good practices:
 | 1 | `skills/hooks_impact_analysis/main.go` | Add `format:units` |
 | 1 | `skills/code_llm_search/main.go` | Add `format:units` |
 | 1 | `internal/domain/backup/backup.go` | Add `format:units` |
-| 1 | `internal/indexing/embedding/worker.go` | Add `format:units` (2 fields) |
+| 1 | `internal/intelligence/indexing/embedding/worker.go` | Add `format:units` (2 fields) |
 | 1 | `internal/openapi/retry/retry.go` | Add `format:units` (2 fields) |
 | 1 | `internal/agent/optimization/reflection.go` | Add `format:units` |
 | 1 | `internal/agent/optimization/prompt_optimizer.go` | Add `format:units` |
@@ -265,11 +265,11 @@ The codebase already follows good practices:
 | 2 | `internal/platform/config/config.go` | Add TODO for MarshalerTo |
 | 3 | `internal/platform/jsoncompat/compat.go` | Created - compatibility docs |
 | 4 | `internal/intelligence/planning/llm/openai.go` | Add `unknown` field |
-| 4 | `internal/indexing/semantic/provider_voyage.go` | Add `unknown` field |
-| 4 | `internal/indexing/semantic/provider_gemini.go` | Add `unknown` fields (2) |
-| 4 | `internal/indexing/semantic/provider_mistral.go` | Add `unknown` field |
-| 4 | `internal/indexing/semantic/provider_codestral.go` | Add `unknown` field |
-| 4 | `internal/indexing/rerank/voyage.go` | Add `unknown` field |
+| 4 | `internal/intelligence/indexing/semantic/provider_voyage.go` | Add `unknown` field |
+| 4 | `internal/intelligence/indexing/semantic/provider_gemini.go` | Add `unknown` fields (2) |
+| 4 | `internal/intelligence/indexing/semantic/provider_mistral.go` | Add `unknown` field |
+| 4 | `internal/intelligence/indexing/semantic/provider_codestral.go` | Add `unknown` field |
+| 4 | `internal/intelligence/indexing/rerank/voyage.go` | Add `unknown` field |
 | 4 | `skills/ci_github_checks/main.go` | Add `unknown` fields (4) |
 
 ### Final Impact

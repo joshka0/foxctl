@@ -201,7 +201,7 @@ func Get(language string) BlockExpander {
 ```go
 package expander
 
-import "github.com/jkatigb/agentctl/internal/indexing/symbol"
+import "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 
 type GoExpander struct{}
 
@@ -372,7 +372,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 
 ## Dependencies
 
-- `internal/indexing/symbol/` - GoExtractor (already exists, good quality)
+- `internal/intelligence/indexing/symbol/` - GoExtractor (already exists, good quality)
 - `internal/platform/fsutil/` - DetectLanguage (already exists, comprehensive)
 - `internal/adapters/skillslib/pathvalidator/` - PathValidator (already exists)
 

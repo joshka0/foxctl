@@ -33,22 +33,22 @@ other consumers can rely on it.
   - `review_id`
   - `files[{path, digest, change_kind}]`
   - Optional metadata needed by semantic/symbol indexers (e.g. branch, commit).
-  - Extended in `internal/indexing/types.go` with: `id`, `review_kind`,
+  - Extended in `internal/intelligence/indexing/types.go` with: `id`, `review_kind`,
     `review_status`, `diff_applied_at`, `source`, `metadata`, `created_at`,
     `sequence` per `docs/spec/post_review_harness.md` §4.1.
 - [x] Ensure this shape matches `review_gate.md` and `semantic_file_index.md`
   where they talk about post-review triggers.
-- [x] Add a small internal package (e.g. `internal/indexing/postreview`) that
+- [x] Add a small internal package (e.g. `internal/intelligence/indexing/postreview`) that
   owns this event type and any helpers:
-  - `internal/indexing/postreview/store.go` – idempotent SQLite store.
-  - `internal/indexing/postreview/store_test.go` – unit tests for Put, Get,
+  - `internal/intelligence/indexing/postreview/store.go` – idempotent SQLite store.
+  - `internal/intelligence/indexing/postreview/store_test.go` – unit tests for Put, Get,
     GetByReview, List, and idempotence/duplicate detection.
 
 ### A2. Wire review artifacts → post-review events
 
 - [x] Decide how post-review events are produced when a review goes `ok` and a
   diff is applied:
-  - `Producer.Produce(ctx, artifact, files)` in `internal/indexing/postreview/producer.go`.
+  - `Producer.Produce(ctx, artifact, files)` in `internal/intelligence/indexing/postreview/producer.go`.
   - `BuildPostReviewEvent(artifact, files)` constructs the event from a `ReviewArtifact`.
   - **Stub behavior:** Files field is empty until diff layer exists
     (see `docs/impl_plan/universal_swe_grep_and_agents_deferred.md` D1).
@@ -113,7 +113,7 @@ Goal: configure which indexers run post-review and how they subscribe to events.
   - `mode` (`inline` | `jobs`), with **production default = `jobs`**.
   - `indexers[]` entries (at minimum semantic and symbol indexers).
   - `concurrency_per_indexer` (default 3) for jobs mode.
-  - Implemented in `internal/indexing/types.go` `PostReviewConfig`.
+  - Implemented in `internal/intelligence/indexing/types.go` `PostReviewConfig`.
 - [x] Decide where this configuration lives (e.g. `config.Config`, a dedicated
   indexing settings struct, or both):
   - Lives in `indexing.PostReviewConfig` (dedicated struct).
@@ -128,7 +128,7 @@ Goal: configure which indexers run post-review and how they subscribe to events.
 
 - [x] Define a small interface that indexers implement to consume
   post-review events (e.g. `HandlePostReviewEvent(ctx, event)`):
-  - `Indexer.Index(ctx, event)` in `internal/indexing/types.go`.
+  - `Indexer.Index(ctx, event)` in `internal/intelligence/indexing/types.go`.
 - [x] Implement basic fanout over the configured indexers:
   - For `mode="inline"`, sequential fanout in current goroutine.
   - For `mode="jobs"`, **stub behavior**: falls back to async goroutine.

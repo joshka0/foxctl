@@ -88,7 +88,7 @@ flowchart TD
 ### 3.2 Key Components
 
 - `internal/domain/agent.ReviewArtifact`
-- `internal/indexing/postreview` (new):
+- `internal/intelligence/indexing/postreview` (new):
   - `PostReviewEvent` type.
   - Storage + idempotence helpers.
 - `internal/intelligence/analysis/overseer`:

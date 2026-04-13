@@ -12,7 +12,7 @@ file embeddings in named memory entries.
 
 ### 3a. Defined file_embedding memory schema + helper lib
 
-New package: `internal/indexing/semantic/`
+New package: `internal/intelligence/indexing/semantic/`
 
 **Types (`types.go`):**
 
@@ -98,12 +98,12 @@ semantic.RegisterWithHandler(handler, memoryStore, workspaceRoot, indexerCfg, lo
 
 ## Files Added
 
-- `internal/indexing/semantic/types.go` – data types and helpers
-- `internal/indexing/semantic/provider.go` – embedding provider interface
-- `internal/indexing/semantic/indexer.go` – main indexer implementation
-- `internal/indexing/semantic/factory.go` – factory and registration
-- `internal/indexing/semantic/indexer_test.go` – unit tests
-- `internal/indexing/semantic/integration_test.go` – integration test
+- `internal/intelligence/indexing/semantic/types.go` – data types and helpers
+- `internal/intelligence/indexing/semantic/provider.go` – embedding provider interface
+- `internal/intelligence/indexing/semantic/indexer.go` – main indexer implementation
+- `internal/intelligence/indexing/semantic/factory.go` – factory and registration
+- `internal/intelligence/indexing/semantic/indexer_test.go` – unit tests
+- `internal/intelligence/indexing/semantic/integration_test.go` – integration test
 
 ## Spec Alignment
 

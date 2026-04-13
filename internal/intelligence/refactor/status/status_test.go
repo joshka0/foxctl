@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )

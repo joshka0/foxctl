@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
 	_ "modernc.org/sqlite"
 )

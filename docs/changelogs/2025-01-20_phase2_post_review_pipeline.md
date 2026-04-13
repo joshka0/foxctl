@@ -12,7 +12,7 @@ by semantic file index, code symbol index, and future indexers.
 
 ### 2a. Defined PostReviewEvent struct and Indexer interface
 
-New package: `internal/indexing/`
+New package: `internal/intelligence/indexing/`
 
 **Types:**
 
@@ -78,7 +78,7 @@ indexing:
 
 ### 2d. Added comprehensive tests
 
-Tests in `internal/indexing/handler_test.go`:
+Tests in `internal/intelligence/indexing/handler_test.go`:
 
 - `TestPostReviewHandler_Handle_Disabled` – skips when disabled
 - `TestPostReviewHandler_Handle_NoFiles` – skips when no files
@@ -95,10 +95,10 @@ Tests in `internal/indexing/handler_test.go`:
 
 ## Files Added
 
-- `internal/indexing/types.go` – PostReviewEvent, Indexer interface, config
+- `internal/intelligence/indexing/types.go` – PostReviewEvent, Indexer interface, config
   types
-- `internal/indexing/handler.go` – PostReviewHandler implementation
-- `internal/indexing/handler_test.go` – comprehensive tests
+- `internal/intelligence/indexing/handler.go` – PostReviewHandler implementation
+- `internal/intelligence/indexing/handler_test.go` – comprehensive tests
 
 ## Files Modified
 

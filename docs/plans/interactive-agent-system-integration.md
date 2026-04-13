@@ -127,7 +127,7 @@ Learnable Scorer (weight adaptation)
 
 ### 4. Memory & Embedding Architecture
 
-**Location**: `internal/storage/memory/`, `internal/indexing/`
+**Location**: `internal/storage/memory/`, `internal/intelligence/indexing/`
 
 **3-Tier Progressive Memory**:
 ```
@@ -155,8 +155,8 @@ Tier 3: Full Conversations    → On-demand JSONL decompression
 **Key Files**:
 - `internal/storage/memory/store.go` - SQLite MemoryStore
 - `internal/storage/memory/turso_store.go` - Turso with vector search
-- `internal/indexing/embedding/worker.go` - Background embedding processor
-- `internal/indexing/semantic/provider_voyage.go` - Voyage API client
+- `internal/intelligence/indexing/embedding/worker.go` - Background embedding processor
+- `internal/intelligence/indexing/semantic/provider_voyage.go` - Voyage API client
 
 **Embedding Pipeline**:
 ```

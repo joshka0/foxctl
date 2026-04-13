@@ -72,7 +72,7 @@ These families are explicit non-targets for the `v2` migration:
 - `internal/storage/*`
 - `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline`,
   `internal/knowledge`
-- `internal/indexing/*`, `internal/intelligence/retrieval*`, `internal/intelligence/codecontext`,
+- `internal/intelligence/indexing/*`, `internal/intelligence/retrieval*`, `internal/intelligence/codecontext`,
   `internal/intelligence/codemap`, `internal/intelligence/refactor`
 - `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi`
 - `internal/domain`, `internal/platform`, `internal/protocol`
@@ -452,7 +452,7 @@ Current mapping to make durable in Story 1:
 
 | Current package/root | Intelligence slice | Decision |
 |------|--------------------|----------|
-| `internal/indexing` | ingest/builders | keep as builder/index-maintenance slice |
+| `internal/intelligence/indexing` | ingest/builders | keep as builder/index-maintenance slice |
 | `internal/intelligence/searchindex` | ingest/builders | keep as persisted retrieval-document/index slice |
 | `internal/intelligence/retrieval` | search/query/recall | treat as transitional bridge for legacy helpers |
 | `internal/intelligence/retrieval/v2` | search/query/recall | keep as the main retrieval engine |
@@ -483,7 +483,7 @@ Story 2 target:
   - `internal/intelligence/retrieval` remains a transitional bridge for legacy helpers
   - `internal/intelligence/repoquery`, `internal/intelligence/searchquery`, and `internal/intelligence/searchrank`
     belong with retrieval/search behavior
-  - `internal/intelligence/searchindex` and `internal/indexing` remain the builder/index
+  - `internal/intelligence/searchindex` and `internal/intelligence/indexing` remain the builder/index
     substrate
 
 Required placement rule from Story 2:
@@ -503,7 +503,7 @@ Story 2 should end with these durable decisions:
 | `internal/intelligence/searchquery` | retrieval-search | keep with query planning |
 | `internal/intelligence/searchrank` | retrieval-search | keep with ranking/fusion |
 | `internal/intelligence/searchindex` | builder substrate | keep on builder side |
-| `internal/indexing` | builder substrate | keep on builder side |
+| `internal/intelligence/indexing` | builder substrate | keep on builder side |
 
 Non-goals for Story 2:
 

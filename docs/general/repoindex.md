@@ -67,7 +67,7 @@ agentctl index repo search --workspace . --query "Builder.addGoReferenceEdges" -
 
 # Expand relationships
 agentctl index repo expand --workspace . \
-  --seed "sym:go:github.com/jkatigb/agentctl/internal/indexing/repoindex:internal/indexing/repoindex/builder.go:Builder.addGoReferenceEdges" \
+  --seed "sym:go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:Builder.addGoReferenceEdges" \
   --edge CALLS --edge REFERS_TO --direction out --depth 2 --budget 50
 
 Example output (truncated):
@@ -78,22 +78,22 @@ Example output (truncated):
     "result": {
       "nodes": [
         {
-          "id": "sym:go:github.com/jkatigb/agentctl/internal/indexing/repoindex:internal/indexing/repoindex/builder.go:Builder.addGoReferenceEdges",
+          "id": "sym:go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:Builder.addGoReferenceEdges",
           "kind": "symbol",
-          "file": "internal/indexing/repoindex/builder.go",
+          "file": "internal/intelligence/indexing/repoindex/builder.go",
           "name": "Builder.addGoReferenceEdges"
         },
         {
-          "id": "sym:go:github.com/jkatigb/agentctl/internal/indexing/repoindex:internal/indexing/repoindex/builder.go:goCallTargetNodeID",
+          "id": "sym:go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:goCallTargetNodeID",
           "kind": "symbol",
-          "file": "internal/indexing/repoindex/builder.go",
+          "file": "internal/intelligence/indexing/repoindex/builder.go",
           "name": "goCallTargetNodeID"
         }
       ],
       "edges": [
         {
-          "src": "sym:go:github.com/jkatigb/agentctl/internal/indexing/repoindex:internal/indexing/repoindex/builder.go:Builder.addGoReferenceEdges",
-          "dst": "sym:go:github.com/jkatigb/agentctl/internal/indexing/repoindex:internal/indexing/repoindex/builder.go:goCallTargetNodeID",
+          "src": "sym:go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:Builder.addGoReferenceEdges",
+          "dst": "sym:go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:goCallTargetNodeID",
           "type": "CALLS",
           "weight": 1
         }

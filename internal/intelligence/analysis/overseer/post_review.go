@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/indexing"
-	"github.com/jkatigb/agentctl/internal/indexing/postreview"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/postreview"
 	"github.com/jkatigb/agentctl/internal/trajectorycapture"
 	"github.com/rs/zerolog"
 )

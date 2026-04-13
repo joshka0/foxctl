@@ -284,7 +284,7 @@ systemPrompt, _ := ep.BuildSystemPrompt(ctx, basePrompt)
 | ContextVar Store | SQLite | Persistence |
 | RLM Tools | `internal/storage/contextvar` | Variable storage |
 | Semantic Query | `internal/storage` (MemoryStore) | Memory search |
-| Semantic Query | `internal/indexing/semantic` (EmbedProvider) | Embeddings |
+| Semantic Query | `internal/intelligence/indexing/semantic` (EmbedProvider) | Embeddings |
 | Personality | `internal/storage/contextvar` | Profile storage |
 
 ## Environment Variables

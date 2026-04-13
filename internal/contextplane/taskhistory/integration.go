@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/contextplane"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	platformcfg "github.com/jkatigb/agentctl/internal/platform/config"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/storage/cas"

@@ -386,17 +386,17 @@ Recommended artifact shape:
   },
   "files": [
     {
-      "path": "internal/indexing/repoindex/builder.go",
+      "path": "internal/intelligence/indexing/repoindex/builder.go",
       "language": "go",
       "line_count": 910,
       "hash": "sha256:...",
       "symbol_count": 21,
-      "package": "go:github.com/jkatigb/agentctl/internal/indexing/repoindex"
+      "package": "go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
     }
   ],
   "symbols": [
     {
-      "path": "internal/indexing/repoindex/builder.go",
+      "path": "internal/intelligence/indexing/repoindex/builder.go",
       "symbol_id": "rk::sym:...",
       "name": "Builder.Build",
       "kind": "function",
