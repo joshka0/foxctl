@@ -216,7 +216,7 @@ Each entry has:
 - **Prompt**:\
   “Map the test infrastructure in agentctl, focusing on the test watcher and CI
   targets. Start with `internal/storage/testwatch/` and
-  `internal/testwatch/runner.go`, showing how test watch configs are parsed, how
+  `internal/tooling/testwatch/runner.go`, showing how test watch configs are parsed, how
   fsnotify watching works, and how test runs are triggered and parsed. Then map
   the CLI commands in `cmd/agentctl/cmd/testwatch.go` and `watch.go`. Finally,
   connect to the CI-facing Makefile targets (`test`, `test-short`, `test-race`,

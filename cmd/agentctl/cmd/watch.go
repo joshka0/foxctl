@@ -15,7 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/storage/testwatch"
-	testwatchrunner "github.com/jkatigb/agentctl/internal/testwatch"
+	testwatchrunner "github.com/jkatigb/agentctl/internal/tooling/testwatch"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )

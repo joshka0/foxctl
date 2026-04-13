@@ -17,7 +17,7 @@ results to Claude via a PostToolUse hook.
 - **`config.go`** — YAML config parsing for `.agentctl/test-watch.yaml`
 - **`store_test.go`** — Unit tests for store and config
 
-### Runtime (`internal/testwatch/`)
+### Runtime (`internal/tooling/testwatch/`)
 
 - **`runner.go`** — Test watcher runtime with:
   - File change detection via fsnotify
