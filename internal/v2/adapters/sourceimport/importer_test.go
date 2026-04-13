@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/todosync"
+	"github.com/jkatigb/agentctl/internal/context/todosync"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/libsql/turns"
 	"github.com/jkatigb/agentctl/internal/v2/core/run"
 )

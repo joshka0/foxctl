@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/todosync"
+	"github.com/jkatigb/agentctl/internal/context/todosync"
 	"github.com/stretchr/testify/assert"
 )
 

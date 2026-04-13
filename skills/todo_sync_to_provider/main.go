@@ -14,7 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/providers/claude/todos"
-	"github.com/jkatigb/agentctl/internal/todosync"
+	"github.com/jkatigb/agentctl/internal/context/todosync"
 )
 
 const command = "todo/sync_to_provider"

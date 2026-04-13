@@ -15,7 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/todosync"
+	"github.com/jkatigb/agentctl/internal/context/todosync"
 )
 
 type Dependencies struct {

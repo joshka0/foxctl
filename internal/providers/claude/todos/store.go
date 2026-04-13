@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/todosync"
+	"github.com/jkatigb/agentctl/internal/context/todosync"
 )
 
 // Store provides read/write access to Claude Code todo files

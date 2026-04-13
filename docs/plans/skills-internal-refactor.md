@@ -44,7 +44,7 @@ Goal: identify refactoring opportunities to consolidate skills into internal pac
 - [x] internal/intelligence/indexing/semantic/embedder.go: add config-driven embedder constructor to reduce per-skill provider logic.
 - [x] internal/intelligence/codecontext/expander/brace.go and internal/adapters/skillslib/codeedit/codeedit.go: unify brace matching logic.
 - [x] internal/platform/fsutil/fsutil.go: replace large switch with map/table; share with codeedit language detection.
-- [x] internal/todosync/sync.go: split SyncFromProvider into smaller helpers (mapping, dependency inference, updates).
+- [x] internal/context/todosync/sync.go: split SyncFromProvider into smaller helpers (mapping, dependency inference, updates).
 - [x] internal/trajectorycapture/capture.go: split CaptureResult into event-kind, summary/meta, and persistence helpers.
 
 ## Skills -> Internal Extraction Candidates
@@ -54,7 +54,7 @@ Goal: identify refactoring opportunities to consolidate skills into internal pac
 - [x] skills/code_context_*: centralize block expander/types into skillslib/codeblocks.
 - [x] skills/code_context_*: move match grouping/expansion into skillslib/codeblocks.
 - [x] skills/embedding_*: move shared queue/worker/provider selection logic into internal/intelligence/indexing/semantic.
-- [x] skills/todo*: expose internal/todosync mapping helpers for consistent status handling.
+- [x] skills/todo*: expose internal/context/todosync mapping helpers for consistent status handling.
 - [x] skills/fs_*: shared include/exclude matcher and hidden filtering in internal/platform/fsutil or skillslib/fsfilter.
 - [x] skills/session_* + code_semantic_search: centralize LLM provider selection in internal/providers/llm.
 - [x] skills/*_ripgrep: centralize ripgrep availability checks into skillslib/rgutil.

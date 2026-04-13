@@ -16,7 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/runtime/hooks/sessionmode"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/jkatigb/agentctl/internal/todosync"
+	"github.com/jkatigb/agentctl/internal/context/todosync"
 )
 
 type Dependencies struct {
