@@ -117,7 +117,7 @@ Generated: 2024-01-15T10:30:00Z
 
 ---
 
-## internal/retrieval
+## internal/intelligence/retrieval
 
 - [x] Has `doc.go`
 
@@ -281,7 +281,7 @@ Execute the documentation sweep in focused PRs per subsystem. Each PR adds `doc.
 |----|-----------|----------|----------|
 | 6.3 | Storage core | `internal/storage/*` | HIGH |
 | 6.4 | Indexing | `internal/indexing/*` | HIGH |
-| 6.5 | Retrieval | `internal/retrieval/*` | HIGH |
+| 6.5 | Retrieval | `internal/intelligence/retrieval/*` | HIGH |
 | 6.6 | Actor system | `internal/actor/*` | MEDIUM |
 | 6.7 | Skills (batch 1) | `skills/code/*`, `skills/memory/*` | HIGH |
 | 6.8 | Skills (batch 2) | `skills/todo/*`, `skills/repo_index/*` | MEDIUM |
@@ -312,7 +312,7 @@ For each package in the subsystem:
 //   - [Store] - Core DAG storage operations
 //   - [Builder] - Graph construction from AST
 //   - [Query] - Search and expansion engine
-//   - internal/retrieval - Uses graph for enhanced retrieval
+//   - internal/intelligence/retrieval - Uses graph for enhanced retrieval
 //   - skills/repo_index_search - Agent-facing search tool
 package repoindex
 ```

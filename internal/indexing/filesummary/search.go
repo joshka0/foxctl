@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
-	"github.com/jkatigb/agentctl/internal/retrieval"
+	"github.com/jkatigb/agentctl/internal/intelligence/retrieval"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 

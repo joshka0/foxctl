@@ -452,7 +452,7 @@ Files:
 - new package:
   - `internal/rlm/memoryensemble/`
   or
-  - `internal/retrieval/memoryensemble/`
+  - `internal/intelligence/retrieval/memoryensemble/`
 
 Preferred implementation split:
 
@@ -567,7 +567,7 @@ Implement:
 - role-aware `subcallTool`
 - `memory_ensemble_retrieve` adapter entrypoint
 
-### `internal/rlm/memoryensemble/*` or `internal/retrieval/memoryensemble/*` (new)
+### `internal/rlm/memoryensemble/*` or `internal/intelligence/retrieval/memoryensemble/*` (new)
 
 Implement:
 

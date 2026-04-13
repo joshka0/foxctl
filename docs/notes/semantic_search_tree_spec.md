@@ -57,10 +57,10 @@ Example entry:
 - `skills/code_incremental_index/main.go`: `extractSymbols`, `upsertSymbols`, `queueEmbeddings`, `ingestGraphEdges`.
 
 ### Retrieval and Tree Construction
-- `internal/retrieval/candidates.go`: `NewGenerator`, `WithSearchableStore`, `Generator.Generate`, `Candidate`, `GenerateResult`.
-- `internal/retrieval/semantic_search.go`: `searchSemanticIndex`, `semanticBM25Fallback`, `memoryResultsToCandidates`, `extractFilePath`.
-- `internal/retrieval/symbol_search.go`: `searchSymbolIndex`, `buildSearchTerms`, `tokenize`, `symbolHit`.
-- `internal/retrieval/merge.go`: `mergeCandidates`, `mergedCandidate.merge`, `mergedCandidate.finalize`, `MergeOptions`, `DefaultMergeOptions`.
+- `internal/intelligence/retrieval/candidates.go`: `NewGenerator`, `WithSearchableStore`, `Generator.Generate`, `Candidate`, `GenerateResult`.
+- `internal/intelligence/retrieval/semantic_search.go`: `searchSemanticIndex`, `semanticBM25Fallback`, `memoryResultsToCandidates`, `extractFilePath`.
+- `internal/intelligence/retrieval/symbol_search.go`: `searchSymbolIndex`, `buildSearchTerms`, `tokenize`, `symbolHit`.
+- `internal/intelligence/retrieval/merge.go`: `mergeCandidates`, `mergedCandidate.merge`, `mergedCandidate.finalize`, `MergeOptions`, `DefaultMergeOptions`.
 
 ### Indexing and Embeddings
 - `internal/indexing/symbol/indexer.go`: `Indexer`, `NewIndexer`, `Indexer.Index`, `indexFile`.
@@ -85,7 +85,7 @@ Example entry:
 
 2) File-level candidate retrieval
 - Open memory store via `memory.OpenWithConfig`, enable advanced search via `Store.EnableSearch` and `SearchableStore.Search` in `internal/storage/memory/search.go`.
-- For file-level entries, filter results by entry `Type == "file_summary"` and/or `Entry.Name` prefix `file://` (compatible with `internal/retrieval/extractFilePath`).
+- For file-level entries, filter results by entry `Type == "file_summary"` and/or `Entry.Name` prefix `file://` (compatible with `internal/intelligence/retrieval/extractFilePath`).
 - Optionally rerank top-k using `internal/indexing/rerank.Provider.Rerank` with content set to the file summary text.
 
 3) Lazy summary generation (on-demand)
@@ -105,7 +105,7 @@ Example entry:
 - Root summary: use top-k child summaries as input; emit under `path: "."`.
 
 ## File Summary Entry Format and Flow
-- Name: `file://<workspace>/<file_path>` (compatible with `internal/retrieval.extractFilePath`).
+- Name: `file://<workspace>/<file_path>` (compatible with `internal/intelligence/retrieval.extractFilePath`).
 - Type: `file_summary` (distinct from `code_symbol` entries).
 - Summary: short, deterministic or LLM-generated text (<= 40 words).
 - Result JSON (example payload):
@@ -205,7 +205,7 @@ sequenceDiagram
 - Root summary should always have deterministic fallback (top-k child summaries stitched) when LLM is disabled.
 
 ## Next Steps
-1) Add internal tree builder (e.g., `internal/retrieval/tree.go`) to group file results by path prefix, score nodes, and render `TreeText`.
+1) Add internal tree builder (e.g., `internal/intelligence/retrieval/tree.go`) to group file results by path prefix, score nodes, and render `TreeText`.
 2) Wire `skills/code_semantic_search/main.go` to call the tree builder when `format == "tree"`, and to lazily generate/store `file_summary` entries.
 3) Restrict tree-mode search results to `file_summary` entries (type or name prefix).
 

@@ -23,7 +23,7 @@ func TestTreeBuilder_Build_Empty(t *testing.T) {
 
 func TestTreeBuilder_Build_SingleFile(t *testing.T) {
 	entries := []FileEntry{
-		{Path: "internal/retrieval/tree.go", Score: 0.85, Summary: "Tree builder implementation"},
+		{Path: "internal/intelligence/retrieval/tree.go", Score: 0.85, Summary: "Tree builder implementation"},
 	}
 
 	builder := NewTreeBuilder(DefaultTreeOptions())
@@ -48,8 +48,8 @@ func TestTreeBuilder_Build_SingleFile(t *testing.T) {
 
 func TestTreeBuilder_Build_MultipleFiles(t *testing.T) {
 	entries := []FileEntry{
-		{Path: "internal/retrieval/tree.go", Score: 0.85},
-		{Path: "internal/retrieval/candidates.go", Score: 0.75},
+		{Path: "internal/intelligence/retrieval/tree.go", Score: 0.85},
+		{Path: "internal/intelligence/retrieval/candidates.go", Score: 0.75},
 		{Path: "internal/storage/memory/store.go", Score: 0.70},
 		{Path: "skills/code_semantic_search/main.go", Score: 0.65},
 	}

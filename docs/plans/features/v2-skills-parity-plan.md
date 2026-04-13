@@ -130,7 +130,7 @@ Make the v2 tool executor actually run the newer read-only ACA/Obsidian surfaces
 
 ### Goal
 
-Align the “v2 skills” story with the newer retrieval stack instead of the older `internal/retrieval` mental model.
+Align the “v2 skills” story with the newer retrieval stack instead of the older `internal/intelligence/retrieval` mental model.
 
 ### Current Eval Findings
 

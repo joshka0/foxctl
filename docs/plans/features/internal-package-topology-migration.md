@@ -72,7 +72,7 @@ These families are explicit non-targets for the `v2` migration:
 - `internal/storage/*`
 - `internal/companion`, `internal/contextplane`, `internal/transcriptpipeline`,
   `internal/knowledge`
-- `internal/indexing/*`, `internal/retrieval*`, `internal/intelligence/codecontext`,
+- `internal/indexing/*`, `internal/intelligence/retrieval*`, `internal/intelligence/codecontext`,
   `internal/intelligence/codemap`, `internal/refactor`
 - `internal/web`, `internal/gateway`, `internal/chatadapter`, `internal/openapi`
 - `internal/domain`, `internal/platform`, `internal/protocol`
@@ -87,7 +87,7 @@ The repo already uses `internal/v2/*` in a focused way:
 | orchestration/spawn/list/kill | `cmd/agentctl/cmd/orchestration.go`, `cmd/agentctl/cmd/overseer_v2_orchestration.go`, and `internal/web/api/orchestration.go` construct v2 services |
 | companion context assembly | `internal/companion/service.go` and `internal/companion/v2_context_adapter.go` wire `internal/v2/runtime/contextbuilder` |
 | optional runtime backend bridge | `internal/agent/runtime/runtime.go` gates Eino through `internal/v2/adapters/eino` |
-| newer retrieval lane | `internal/retrieval/doc.go` already points new work to `internal/intelligence/retrieval/v2` |
+| newer retrieval lane | `internal/intelligence/retrieval/doc.go` already points new work to `internal/intelligence/retrieval/v2` |
 
 This is why the topology doc must keep saying "`v2` is the newer
 agent/runtime/orchestration lane" instead of implying repo-wide succession.
@@ -420,7 +420,7 @@ Objective:
 
 Primary packages:
 
-- `internal/retrieval`
+- `internal/intelligence/retrieval`
 - `internal/intelligence/retrieval/v2`
 - `internal/searchquery`
 - `internal/searchindex`
@@ -454,7 +454,7 @@ Current mapping to make durable in Story 1:
 |------|--------------------|----------|
 | `internal/indexing` | ingest/builders | keep as builder/index-maintenance slice |
 | `internal/searchindex` | ingest/builders | keep as persisted retrieval-document/index slice |
-| `internal/retrieval` | search/query/recall | treat as transitional bridge for legacy helpers |
+| `internal/intelligence/retrieval` | search/query/recall | treat as transitional bridge for legacy helpers |
 | `internal/intelligence/retrieval/v2` | search/query/recall | keep as the main retrieval engine |
 | `internal/intelligence/repoquery` | search/query/recall | keep as structural recall/query slice |
 | `internal/searchquery` | search/query/recall | keep as query-planning slice |
@@ -480,7 +480,7 @@ Story 2 target:
 
 - make the retrieval-search tranche explicit:
   - `internal/intelligence/retrieval/v2` is the default retrieval/search owner
-  - `internal/retrieval` remains a transitional bridge for legacy helpers
+  - `internal/intelligence/retrieval` remains a transitional bridge for legacy helpers
   - `internal/intelligence/repoquery`, `internal/searchquery`, and `internal/searchrank`
     belong with retrieval/search behavior
   - `internal/searchindex` and `internal/indexing` remain the builder/index
@@ -498,7 +498,7 @@ Story 2 should end with these durable decisions:
 | Package/root | Slice | Decision |
 |------|-------|----------|
 | `internal/intelligence/retrieval/v2` | retrieval-search | keep as default owner |
-| `internal/retrieval` | retrieval-search | keep as transitional bridge |
+| `internal/intelligence/retrieval` | retrieval-search | keep as transitional bridge |
 | `internal/intelligence/repoquery` | retrieval-search | keep with structural recall |
 | `internal/searchquery` | retrieval-search | keep with query planning |
 | `internal/searchrank` | retrieval-search | keep with ranking/fusion |
@@ -509,7 +509,7 @@ Non-goals for Story 2:
 
 - do not merge indexing or persisted index schema work into retrieval packages
 - do not pull `codecontext` or `codemap/context` into the same tranche
-- do not retire legacy `internal/retrieval` helpers until the replacement
+- do not retire legacy `internal/intelligence/retrieval` helpers until the replacement
   boundary is explicitly complete
 
 Story 3 target:

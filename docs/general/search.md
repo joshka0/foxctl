@@ -32,7 +32,7 @@ Current code-search flow is layered as:
 - `internal/intelligence/codecontext`
   Anchor-aware snippet extraction and output preparation
 
-`internal/retrieval` is no longer the active code-search engine. It remains only for tree helpers and summary-generation utilities still used elsewhere.
+`internal/intelligence/retrieval` is no longer the active code-search engine. It remains only for tree helpers and summary-generation utilities still used elsewhere.
 
 ## `code/semantic_search` Input Contract
 

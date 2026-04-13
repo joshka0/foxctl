@@ -127,7 +127,7 @@ agentctl run repo_index/expand --input '{"seed": "func:internal/storage.Store.Pu
 
 # Follow only call edges, 2 levels deep
 agentctl run repo_index/expand --input '{
-  "seed": "func:internal/retrieval.Search",
+  "seed": "func:internal/intelligence/retrieval.Search",
   "edge_types": ["CALLS"],
   "depth": 2,
   "direction": "out"

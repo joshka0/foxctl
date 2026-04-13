@@ -81,7 +81,7 @@ The roadmap uses feature flags to gate behavior and enable gradual rollout:
 
 ### Phase 0-2 (Embeddings)
 - `internal/indexing/embeddingtext/` - New utility package
-- `internal/retrieval/semantic_search.go` - Query embedding changes
+- `internal/intelligence/retrieval/semantic_search.go` - Query embedding changes
 - `internal/indexing/symbol/` - Symbol embedding enqueue
 
 ### Phase 4-5 (Repo Graph)

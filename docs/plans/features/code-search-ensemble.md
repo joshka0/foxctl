@@ -654,7 +654,7 @@ Short answer:
 
 Possible extraction targets later:
 
-- `internal/retrieval/codesearchensemble/`
+- `internal/intelligence/retrieval/codesearchensemble/`
 - `internal/rlm/codesearchensemble/`
 
 ### Should the ensemble call tools directly or always subcall scouts?

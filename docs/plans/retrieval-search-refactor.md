@@ -4,12 +4,12 @@
 
 ## Problem Statement
 
-> Status note (2026-03-07): the main code-search migration described below is now largely implemented on this branch. The historical references to `internal/retrieval/candidates.go` and the legacy generator path are retained here for change history, not as the current runtime architecture.
+> Status note (2026-03-07): the main code-search migration described below is now largely implemented on this branch. The historical references to `internal/intelligence/retrieval/candidates.go` and the legacy generator path are retained here for change history, not as the current runtime architecture.
 
 Code search is currently spread across several overlapping paths:
 
 - `internal/storage/memory/search.go` and `internal/storage/dbdriver/search.go` mix backend recall with hybrid ranking logic.
-- `internal/retrieval/candidates.go` merges symbol, semantic, and ripgrep candidates after collapsing too early to file-path-oriented candidates.
+- `internal/intelligence/retrieval/candidates.go` merges symbol, semantic, and ripgrep candidates after collapsing too early to file-path-oriented candidates.
 - `skills/code_smart_search/main.go` generates candidates, then shells out to `code/snippet_extract` as a second-stage pipeline.
 - `skills/code_snippet_extract/main.go` owns its own extraction, fallback, rendering, and related-session logic.
 - `skills/code_semantic_search/main.go` still carries separate tree-building and snippet-reading logic, including direct file reads.
@@ -48,7 +48,7 @@ This refactor covers **code retrieval only**:
 
 ### Current entrypoints
 
-- Retrieval candidates are produced by `internal/retrieval/candidates.go`.
+- Retrieval candidates are produced by `internal/intelligence/retrieval/candidates.go`.
 - Shared code-context types and rendering already exist in `internal/intelligence/codecontext/types.go`, `internal/intelligence/codecontext/collect.go`, and `internal/intelligence/codecontext/render.go`.
 - Safe file reading already exists in `internal/intelligence/codecontext/files/reader.go`.
 - `skills/code_smart_search/main.go` still treats retrieval as candidate generation plus a second skill invocation.
@@ -100,7 +100,7 @@ internal/searchindex/
   sql_store.go      // initial SQL-backed implementation
   build_code.go     // bootstrap docs from current symbol/file-summary data
 
-internal/retrieval/
+internal/intelligence/retrieval/
   engine.go         // orchestration
   sources_*.go      // lexical/vector/ripgrep recall sources
   fuse.go           // RRF + feature reranking
@@ -237,14 +237,14 @@ Acceptance criteria:
 
 Files to add/reshape:
 
-- `internal/retrieval/engine.go`
-- `internal/retrieval/sources_symbols.go`
-- `internal/retrieval/sources_files.go`
-- `internal/retrieval/sources_ripgrep.go`
-- `internal/retrieval/fuse.go`
-- `internal/retrieval/group.go`
-- `internal/retrieval/tree.go`
-- optional `internal/retrieval/legacy_adapter.go`
+- `internal/intelligence/retrieval/engine.go`
+- `internal/intelligence/retrieval/sources_symbols.go`
+- `internal/intelligence/retrieval/sources_files.go`
+- `internal/intelligence/retrieval/sources_ripgrep.go`
+- `internal/intelligence/retrieval/fuse.go`
+- `internal/intelligence/retrieval/group.go`
+- `internal/intelligence/retrieval/tree.go`
+- optional `internal/intelligence/retrieval/legacy_adapter.go`
 
 Changes:
 
@@ -267,8 +267,8 @@ Acceptance criteria:
 
 Files:
 
-- `internal/retrieval/candidates.go`
-- `internal/retrieval/options.go`
+- `internal/intelligence/retrieval/candidates.go`
+- `internal/intelligence/retrieval/options.go`
 
 Changes:
 
@@ -344,7 +344,7 @@ Acceptance criteria:
 
 Candidates for removal after verification:
 
-- legacy merge helpers in `internal/retrieval`
+- legacy merge helpers in `internal/intelligence/retrieval`
 - old symbol/semantic-specific ranking paths that the new engine replaces
 - duplicated extraction logic in `skills/code_snippet_extract/main.go`
 
@@ -365,7 +365,7 @@ These are good `-spark` slices after the plan is approved:
    - objective: one parsed query model reused by retrieval and codecontext
 
 4. Retrieval v2 skeleton
-   - write scope: `internal/retrieval/{engine.go,sources_*.go,fuse.go,group.go,tree.go}`
+   - write scope: `internal/intelligence/retrieval/{engine.go,sources_*.go,fuse.go,group.go,tree.go}`
    - objective: compile-ready engine with tests
 
 5. Codecontext extraction consolidation

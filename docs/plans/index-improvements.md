@@ -417,7 +417,7 @@ builder.WriteString(symbolKey)
 
 No schema change needed — `symbol_id TEXT` column now stores SymbolKey strings. `file_path` column continues to be populated for file-based cleanup queries. `dedupeKeyForSymbol()` works as-is since it hashes `symbolID` opaquely — add defensive trim/normalize.
 
-### `internal/retrieval/semantic_search.go` (modified)
+### `internal/intelligence/retrieval/semantic_search.go` (modified)
 
 **`extractFilePath()` recognizes `key:` prefix:**
 ```go
@@ -446,7 +446,7 @@ func extractFilePathFromEntryPayload(raw json.RawMessage) string {
 }
 ```
 
-### `internal/retrieval/file_summary.go` (modified)
+### `internal/intelligence/retrieval/file_summary.go` (modified)
 
 **Key-aware summary entry name selector:**
 ```go
@@ -511,7 +511,7 @@ Update `extractSymbolName()` to handle SymbolKey format from `key:` entry names.
 ### Existing tests needing format updates
 
 - `internal/indexing/repoindex/builder_test.go` — expected node IDs drop file path segment
-- `internal/retrieval/candidates_test.go` — expected entry names include `key:` format
+- `internal/intelligence/retrieval/candidates_test.go` — expected entry names include `key:` format
 - `internal/indexing/embeddingtext/digest_test.go` — v1→v2 assertions
 
 ---
@@ -570,7 +570,7 @@ go vet ./internal/indexing/...
 go test ./internal/indexing/symbol/... -run TestSymbolKey -v
 go test ./internal/indexing/repoindex/... -v
 go test ./internal/indexing/embeddingtext/... -v
-go test ./internal/retrieval/... -v
+go test ./internal/intelligence/retrieval/... -v
 
 # Integration: rebuild index and verify stable IDs
 agentctl index repo build --workspace . --go --typescript
@@ -602,8 +602,8 @@ agentctl run code/semantic_search --input '{"query": "symbol extraction", "limit
 | `internal/indexing/symbol/indexer.go` | MODIFY | 5 |
 | `internal/indexing/embeddingtext/digest.go` | MODIFY | 6 |
 | `internal/indexing/embedding/store.go` | MODIFY | 6 |
-| `internal/retrieval/semantic_search.go` | MODIFY | 7 |
-| `internal/retrieval/file_summary.go` | MODIFY | 7 |
+| `internal/intelligence/retrieval/semantic_search.go` | MODIFY | 7 |
+| `internal/intelligence/retrieval/file_summary.go` | MODIFY | 7 |
 | `cmd/agentctl/cmd/index.go` | MODIFY | 8 |
 | `cmd/agentctl/cmd/index_repo.go` | MODIFY | 8 |
 | `skills/code_incremental_index/main.go` | MODIFY | 8 |

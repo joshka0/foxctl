@@ -59,7 +59,7 @@ func KeyEntryName(workspace, pkg, symbolKey string) string
 - Update `SymbolSummaryKeyEntryName(workspace, pkg, symbolKey string) string` — format: `symbol-summary://<workspace>/<pkg>::<symbolKey>`
 - Add `Pkg string` to `SymbolSummaryInput` and `SymbolSummaryResult`
 
-### `internal/retrieval/file_summary.go` (modified)
+### `internal/intelligence/retrieval/file_summary.go` (modified)
 
 - Update `symbolSummaryEntryName` to use `symbol.SymbolSummaryKeyEntryName(workspace, input.Pkg, input.SymbolKey)` when both present
 - Fallback to legacy name only for compatibility reads
@@ -137,7 +137,7 @@ name := symbolutil.KeyEntryName(event.WorkspaceID, pkg, sym.EffectiveID())
 
 - `memorySymbolSummaryProvider.Summary(ctx, symbolID, symbolKey, pkg)` derives pkg from file path, NOT repoindex `pkgID`
 
-### `internal/retrieval/semantic_search.go` (modified)
+### `internal/intelligence/retrieval/semantic_search.go` (modified)
 
 - `extractFilePath` treats `<pkg>::<symbolKey>` format as no-file-path → payload fallback
 - BM25 fallback dedup unchanged
@@ -162,7 +162,7 @@ These four call sites MUST all use `symbolutil.DeriveSymbolPackage`:
 - `internal/platform/symbolutil`: `DeriveSymbolPackage` output matrix for go/ts/python/elixir, `KeyEntryName` format with `::` separator
 - `internal/indexing/symbol/symbolkey_test.go`: `GoNonExportedSymbolKey`, `PythonSymbolKey`, Unicode export detection
 - `internal/indexing/symbol/indexer_test.go`: key-only writes, stale deletion with pkg, `IndexSchema=3` behavior
-- `internal/retrieval/semantic_search_test.go`: `<pkg>::<key>` parsing and payload fallback
+- `internal/intelligence/retrieval/semantic_search_test.go`: `<pkg>::<key>` parsing and payload fallback
 - `skills/code_semantic_search`: `extractSymbolName` for new format
 
 ### Integration Tests
@@ -208,9 +208,9 @@ These four call sites MUST all use `symbolutil.DeriveSymbolPackage`:
 | `internal/indexing/repoindex/builder.go` | MODIFY | 2, 4 |
 | `internal/indexing/symbol/indexer.go` | MODIFY | 3 |
 | `skills/code_incremental_index/main.go` | MODIFY | 3 |
-| `internal/retrieval/file_summary.go` | MODIFY | 1, 4 |
+| `internal/intelligence/retrieval/file_summary.go` | MODIFY | 1, 4 |
 | `internal/indexing/repoindex/types.go` | MODIFY | 4 |
-| `internal/retrieval/semantic_search.go` | MODIFY | 4 |
+| `internal/intelligence/retrieval/semantic_search.go` | MODIFY | 4 |
 | `cmd/agentctl/cmd/index.go` | MODIFY | 4 |
 | `cmd/agentctl/cmd/index_repo.go` | MODIFY | 4 |
 | `skills/code_semantic_search/main.go` | MODIFY | 4 |

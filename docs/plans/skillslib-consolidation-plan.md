@@ -628,7 +628,7 @@ func Dispatch(op string, handlers map[string]Handler) (map[string]any, error) {
 **Location:** `~/repos/personal/claude-migration-to-v2/internal/tools/ripgrep/ripgrep.go`
 
 **Problem:** Ripgrep execution logic duplicated in:
-- `internal/retrieval/ripgrep.go` (text output, files-with-matches)
+- `internal/intelligence/retrieval/ripgrep.go` (text output, files-with-matches)
 - `skills/code_context_ripgrep/main.go` (JSON output, match expansion)
 - `skills/text_ripgrep/main.go` (JSON output, snippet extraction)
 - `internal/agent/tools/code_tools.go` (text output, simple parsing)
@@ -767,7 +767,7 @@ func buildArgs(pattern string, opts SearchOpts, jsonOutput bool) []string {
 ```
 
 **Migration:**
-1. Update `internal/retrieval/ripgrep.go` to use `tools/ripgrep.FilesWithMatches`
+1. Update `internal/intelligence/retrieval/ripgrep.go` to use `tools/ripgrep.FilesWithMatches`
 2. Update `skills/code_context_ripgrep` to use `tools/ripgrep.SearchJSON`
 3. Update `skills/text_ripgrep` to use `tools/ripgrep.SearchJSON`
 
@@ -1298,7 +1298,7 @@ Phase 5 (Future Skills)
 - `internal/adapters/skillslib/runner/context.go` (type alias, remove duplicates)
 - `internal/adapters/skillslib/skillout/emit.go` (keep CAS helpers)
 - `internal/adapters/skillslib/skillout/preview.go` (add PreviewAndPersistNDJSON)
-- `internal/retrieval/ripgrep.go` (use tools/ripgrep)
+- `internal/intelligence/retrieval/ripgrep.go` (use tools/ripgrep)
 - `internal/lsp/gopls/daemon.go` (use lsp/jsonrpc)
 - `skills/code_context_ripgrep/main.go`
 - `skills/text_ripgrep/main.go`

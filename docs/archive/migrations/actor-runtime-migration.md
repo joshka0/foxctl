@@ -303,7 +303,7 @@ Each PR has:
 
 ### PR9+ — Post-spine alignment (search/graph/summarization)
 After runtime spine is stable:
-- refactor `code/semantic_search` to `internal/retrieval`
+- refactor `code/semantic_search` to `internal/intelligence/retrieval`
 - enable unified graph ingestion and pagerank
 - unify summarization for tasks/memories/digests
 

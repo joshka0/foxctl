@@ -40,8 +40,8 @@ Add an `agentctl eval retrieval` command that runs a curated query set and repor
   query: "hybrid search scoring"
   scope: files
   expected_any_of:
-    - file://<workspace>/internal/retrieval/semantic_search.go
-    - <repo_key>::file:internal/retrieval/semantic_search.go
+    - file://<workspace>/internal/intelligence/retrieval/semantic_search.go
+    - <repo_key>::file:internal/intelligence/retrieval/semantic_search.go
   notes: "Should land in retrieval path"
 ```
 
