@@ -208,7 +208,7 @@ Current code that should feed the runtime:
 
 - `internal/context/contextplane/*`
 - `internal/context/companion/*`
-- `internal/engine/rlm_tools.go`
+- `internal/runtime/engine/rlm_tools.go`
 - `internal/intelligence/indexing/repoindex/*`
 - `internal/storage/obsidianindex/*`
 - `internal/trajectorycapture/*`

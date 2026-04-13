@@ -168,7 +168,7 @@ Add to `Input`:
 Principal identity.Principal // Unified identity for policy decisions
 ```
 
-### `internal/engine/llmchat_engine.go`
+### `internal/runtime/engine/llmchat_engine.go`
 
 Replace `HookContext` with `identity.Principal` or embed it:
 ```go

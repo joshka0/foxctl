@@ -7,7 +7,7 @@ import (
 	"time"
 
 	actormemory "github.com/jkatigb/agentctl/internal/actor/memory"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 // Stage identifies the transcript pipeline stage being executed.

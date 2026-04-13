@@ -9,7 +9,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 // EinoEngineAdapter bridges Eino's adk.Agent to agentctl's engine.AgentEngine.

@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 // LLMToolExecutor adapts the RLM tool surface to the engine.ToolExecutor contract.

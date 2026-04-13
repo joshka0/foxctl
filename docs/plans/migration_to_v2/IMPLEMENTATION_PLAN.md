@@ -267,7 +267,7 @@ internal/supervisor/
 
 **Files:**
 ```
-internal/engine/
+internal/runtime/engine/
 ├── engine.go          # AgentEngine interface
 ├── context.go         # EngineContext (cancellable)
 ├── dspy_adapter.go    # DSPy wrapped as AgentEngine
@@ -334,7 +334,7 @@ type EngineOutput struct {
 
 **Files to modify:**
 ```
-internal/engine/
+internal/runtime/engine/
 ├── dspy_adapter.go    # Add hook dispatch points
 ├── hooks_integration.go
 └── hooks_integration_test.go
@@ -775,7 +775,7 @@ internal/supervisor/
 ├── router.go
 ├── preemption.go
 
-internal/engine/
+internal/runtime/engine/
 ├── engine.go
 ├── context.go
 ├── dspy_adapter.go

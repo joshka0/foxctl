@@ -281,7 +281,7 @@ const (
 No DB schema migration needed. Existing hybrid tables already support all required writes.
 
 ## Dependencies
-- `internal/engine` for `LLMChatConfig` and `NewLLMChatEngine`
+- `internal/runtime/engine` for `LLMChatConfig` and `NewLLMChatEngine`
 - `internal/actor/memory` for `EstimateTokens`
 - No new external dependencies
 

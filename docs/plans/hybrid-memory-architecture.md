@@ -111,7 +111,7 @@ flowchart TD
   - Why: use existing per-turn hook point without changing the upstream chat request/response flow
 
 - **Adapter Pattern**
-  - Where: `internal/engine/rlm_tools.go` query path
+  - Where: `internal/runtime/engine/rlm_tools.go` query path
   - Why: keep existing `rlm_context_query` contract while adapting sources
 
 ## File Changes
@@ -170,7 +170,7 @@ flowchart TD
   - Episode summary janitor: find episodes with `needs_summary=1`, generate LLM summary, update row
   - Staging janitor: process pending `companion_extraction_staging` entries (LLM normalization, capped attempts)
 
-### `internal/engine/rlm_tools.go` (modified)
+### `internal/runtime/engine/rlm_tools.go` (modified)
 - **Purpose**: Extend semantic query to include hybrid memory sources + query-time evidence
 - **Key changes**:
   - Add hybrid sources: `companion_hard_state_entries`, `companion_soft_episodes`, `companion_evidence_snippets`

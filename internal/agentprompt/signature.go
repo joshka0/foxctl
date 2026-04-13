@@ -353,7 +353,7 @@ GOOD (with context):
   "Analyze the hook system. Key files:
    - internal/runtime/hooks/dispatcher.go (main dispatcher, 400 lines)
    - internal/runtime/hooks/types.go (hook types and contracts)
-   - internal/engine/tool_runner.go (hook integration in tools)
+   - internal/runtime/engine/tool_runner.go (hook integration in tools)
    Use fs_read_file to read each file and summarize the hook lifecycle."
 
 Always provide: file paths, expected sizes, which tools to use, what to look for.`

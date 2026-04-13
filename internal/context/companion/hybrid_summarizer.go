@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	actormemory "github.com/jkatigb/agentctl/internal/actor/memory"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/rs/zerolog"
 )
 

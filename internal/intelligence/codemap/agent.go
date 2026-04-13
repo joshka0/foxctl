@@ -18,7 +18,7 @@ import (
 	codemapctx "github.com/jkatigb/agentctl/internal/intelligence/codemap/context"
 	"github.com/jkatigb/agentctl/internal/intelligence/codemap/tools"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 )
 

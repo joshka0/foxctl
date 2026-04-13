@@ -222,7 +222,7 @@ import (
 	"sort"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 type ToolSpec struct {
@@ -348,7 +348,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/execution"
 	"github.com/jkatigb/agentctl/internal/skills"
 )
@@ -605,7 +605,7 @@ This makes your “agentctl Studio” console show up in existing Sessions tooli
 
 **Modify**
 
-* `internal/engine/llmchat_engine.go`
+* `internal/runtime/engine/llmchat_engine.go`
 
 **Plan**
 
@@ -1912,7 +1912,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/interfaces/web/tools"
 )
 
@@ -2208,7 +2208,7 @@ package tools
 
 import (
 	"github.com/jkatigb/agentctl/internal/runtime/daemon"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/rs/zerolog"
 )
@@ -2287,7 +2287,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/jkatigb/agentctl/internal/runtime/daemon"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/runtime/runservice"
 )
 
@@ -2717,7 +2717,7 @@ Acceptance:
 
 Tasks:
 
-* Implement a small wrapper around `LLMChatEngine` loop or implement `StreamingLLMChatEngine` in `internal/engine`:
+* Implement a small wrapper around `LLMChatEngine` loop or implement `StreamingLLMChatEngine` in `internal/runtime/engine`:
 
   * callback hooks per iteration
   * callback before/after each tool call

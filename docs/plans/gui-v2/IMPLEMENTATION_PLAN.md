@@ -354,7 +354,7 @@ Support `?format=payload` query param:
 **Estimated effort: 2-3 days**
 
 ### Deliverables
-- Extend `internal/engine/llmchat_engine.go` with streaming support
+- Extend `internal/runtime/engine/llmchat_engine.go` with streaming support
 - `StreamConfig` with `OnDelta` callback
 
 ### Streaming Implementation

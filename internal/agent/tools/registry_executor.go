@@ -8,7 +8,7 @@ import (
 	mcpmodels "github.com/XiaoConstantine/mcp-go/pkg/model"
 
 	"github.com/jkatigb/agentctl/internal/agent/toolnames"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 )
 

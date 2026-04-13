@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 func TestWorkspaceRootForConfig_UsesOverride(t *testing.T) {

@@ -27,7 +27,7 @@ Do **not** fold the ensemble into `rlm_context_query`.
 
 Reason:
 
-- `internal/engine/rlm_tools.go` is the older conversation-scoped contextvar
+- `internal/runtime/engine/rlm_tools.go` is the older conversation-scoped contextvar
   and companion-memory lane
 - it mixes read and write concerns
 - it is not the best home for a typed, read-only, multi-scout retrieval flow
@@ -618,13 +618,13 @@ Track:
 
 ## Open Questions
 
-### Should `memory_ensemble_retrieve` live in `internal/rlm/env` or `internal/engine/rlm_tools.go`?
+### Should `memory_ensemble_retrieve` live in `internal/rlm/env` or `internal/runtime/engine/rlm_tools.go`?
 
 Decision for this plan:
 
 - tool definition lives in `internal/rlm/env`
 - reusable orchestration logic lives in a dedicated package
-- do not use `internal/engine/rlm_tools.go` as the primary home
+- do not use `internal/runtime/engine/rlm_tools.go` as the primary home
 
 ### Should the first slice use real child agents or inline scout emulation?
 

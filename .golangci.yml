@@ -107,7 +107,7 @@ linters:
       # TODO: Remove these exclusions as files are migrated
       - linters:
           - forbidigo
-        path: '(cmd/.*/main\.go|cmd/agentctl/cmd/.*|cmd/agentctl_viewer/.*|cmd/synctest/.*|internal/adapters/skillslib/.*|internal/actor/.*|internal/agent/.*|internal/analysis/.*|internal/codemap/.*|internal/companion/.*|internal/runtime/daemon/.*|internal/engine/.*|internal/gateway/.*|internal/indexing/.*|internal/lsp/.*|internal/platform/.*|internal/retrieval/.*|internal/storage/.*|internal/testwatch/.*|internal/web/.*|plugins/.*|scripts/.*|skills/.*|.*_test\.go)'
+        path: '(cmd/.*/main\.go|cmd/agentctl/cmd/.*|cmd/agentctl_viewer/.*|cmd/synctest/.*|internal/adapters/skillslib/.*|internal/actor/.*|internal/agent/.*|internal/analysis/.*|internal/codemap/.*|internal/companion/.*|internal/runtime/daemon/.*|internal/runtime/engine/.*|internal/gateway/.*|internal/indexing/.*|internal/lsp/.*|internal/platform/.*|internal/retrieval/.*|internal/storage/.*|internal/testwatch/.*|internal/web/.*|plugins/.*|scripts/.*|skills/.*|.*_test\.go)'
       # Keep complexity pressure on smaller units, but don't block branch work on the
       # known command aggregators and long integration tests.
       - linters:

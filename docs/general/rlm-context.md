@@ -58,7 +58,7 @@ A SQLite-backed key-value store with three persistence scopes:
 - Semantic embedding support for vector search
 - CAS integration for large values (>64KB)
 
-### 2. RLM Tool Executor (`internal/engine/rlm_tools.go`)
+### 2. RLM Tool Executor (`internal/runtime/engine/rlm_tools.go`)
 
 Provides four tools that the LLM can call:
 
@@ -237,7 +237,7 @@ CREATE INDEX idx_context_vars_expires ON context_vars(expires_at);
 
 ```go
 import (
-    "github.com/jkatigb/agentctl/internal/engine"
+    "github.com/jkatigb/agentctl/internal/runtime/engine"
     "github.com/jkatigb/agentctl/internal/storage/contextvar"
 )
 
