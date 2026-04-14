@@ -107,7 +107,7 @@ unit-tests:
       fi
     - grep -E '(^--- |ok\s+|FAIL\s+|panic)' test-output.txt | head -100 || true
 
-race-tests:
+.race-tests-template:
   stage: check
   script:
     - |
@@ -118,10 +118,65 @@ race-tests:
         base_ref="$(git merge-base HEAD "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME")"
       fi
       if [ -n "$base_ref" ] && [ "$CI_COMMIT_BRANCH" != "main" ]; then
-        make test-race-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
+        make test-race-shard-impacted SHARD="$RACE_SHARD" BASE_REF="$base_ref" HEAD_REF=HEAD
       else
-        make test-race
+        make test-race-shard SHARD="$RACE_SHARD"
       fi
+
+race-tests-core-cmd:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: core-cmd
+
+race-tests-core-internal:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: core-internal
+
+race-tests-runtime:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: runtime
+
+race-tests-context-tooling:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: context-tooling
+
+race-tests-intelligence:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: intelligence
+
+race-tests-platform-interfaces:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: platform-interfaces
+
+race-tests-storage:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: storage
+
+race-tests-v2:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: v2
+
+race-tests-skills-a-g:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: skills-a-g
+
+race-tests-skills-h-o:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: skills-h-o
+
+race-tests-skills-p-x:
+  extends: .race-tests-template
+  variables:
+    RACE_SHARD: skills-p-x
 
 cgo-build-and-tests:
   stage: check
@@ -200,7 +255,17 @@ all-checks:
   needs:
     - job: static-analysis
     - job: unit-tests
-    - job: race-tests
+    - job: race-tests-core-cmd
+    - job: race-tests-core-internal
+    - job: race-tests-runtime
+    - job: race-tests-context-tooling
+    - job: race-tests-intelligence
+    - job: race-tests-platform-interfaces
+    - job: race-tests-storage
+    - job: race-tests-v2
+    - job: race-tests-skills-a-g
+    - job: race-tests-skills-h-o
+    - job: race-tests-skills-p-x
     - job: cgo-build-and-tests
     - job: integration-tests
     - job: llm-planner-integration
