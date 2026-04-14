@@ -65,6 +65,10 @@ type errorEnvelope struct {
 	Errors        map[string]string `json:"errors"`
 }
 
+type issuesMutation struct {
+	Issues []string `json:"issues"`
+}
+
 // NewClient returns a Jira client from explicit config.
 func NewClient(cfg Config) (*Client, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
@@ -171,21 +175,77 @@ func (c *Client) ListBoardSprints(ctx context.Context, boardID int, state string
 	return out, nil
 }
 
-// SearchIssues executes a JQL search.
-func (c *Client) SearchIssues(ctx context.Context, jql string, startAt, maxResults int, fields, expand []string) (map[string]any, error) {
-	body := map[string]any{
-		"jql":        jql,
-		"startAt":    startAt,
-		"maxResults": maxResults,
-	}
-	if len(fields) > 0 {
-		body["fields"] = fields
-	}
-	if len(expand) > 0 {
-		body["expand"] = expand
-	}
+// ListBacklogIssues lists issues in the backlog for a specific board.
+func (c *Client) ListBacklogIssues(ctx context.Context, boardID int, jql string, fields []string, startAt, maxResults int) (map[string]any, error) {
+	query := url.Values{}
+	addPagination(query, startAt, maxResults)
+	addIfNonEmpty(query, "jql", jql)
+	addCSV(query, "fields", fields)
 	var out map[string]any
-	if err := c.doJSON(ctx, http.MethodPost, platformAPIBase+"/search", nil, body, &out); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("%s/board/%d/backlog", boardAPIBase, boardID), query, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListSprintIssues lists issues for a specific sprint.
+func (c *Client) ListSprintIssues(ctx context.Context, sprintID int, jql string, fields []string, startAt, maxResults int) (map[string]any, error) {
+	query := url.Values{}
+	addPagination(query, startAt, maxResults)
+	addIfNonEmpty(query, "jql", jql)
+	addCSV(query, "fields", fields)
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("%s/sprint/%d/issue", boardAPIBase, sprintID), query, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// MoveIssuesToSprint places issues into a sprint.
+func (c *Client) MoveIssuesToSprint(ctx context.Context, sprintID int, issues []string) error {
+	return c.doJSON(ctx, http.MethodPost, fmt.Sprintf("%s/sprint/%d/issue", boardAPIBase, sprintID), nil, issuesMutation{Issues: issues}, nil)
+}
+
+// MoveIssuesToBacklog removes issues from active or future sprints into backlog.
+func (c *Client) MoveIssuesToBacklog(ctx context.Context, issues []string) error {
+	return c.doJSON(ctx, http.MethodPost, boardAPIBase+"/backlog/issue", nil, issuesMutation{Issues: issues}, nil)
+}
+
+// SearchIssues executes a JQL search using Jira's enhanced search endpoint.
+func (c *Client) SearchIssues(ctx context.Context, jql, nextPageToken string, maxResults int, fields, expand []string) (map[string]any, error) {
+	query := url.Values{}
+	addIfNonEmpty(query, "jql", jql)
+	addIfNonEmpty(query, "nextPageToken", nextPageToken)
+	if maxResults > 0 {
+		query.Set("maxResults", fmt.Sprintf("%d", maxResults))
+	}
+	addCSV(query, "fields", fields)
+	addCSV(query, "expand", expand)
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, platformAPIBase+"/search/jql", query, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListProjects lists accessible Jira projects.
+func (c *Client) ListProjects(ctx context.Context, startAt, maxResults int, queryText string) (map[string]any, error) {
+	query := url.Values{}
+	addPagination(query, startAt, maxResults)
+	addIfNonEmpty(query, "query", queryText)
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, platformAPIBase+"/project/search", query, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetProject returns one project and optional expansions.
+func (c *Client) GetProject(ctx context.Context, projectKey string, expand []string) (map[string]any, error) {
+	query := url.Values{}
+	addCSV(query, "expand", expand)
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, platformAPIBase+"/project/"+url.PathEscape(projectKey), query, nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -198,6 +258,17 @@ func (c *Client) GetIssue(ctx context.Context, key string, fields, expand []stri
 	addCSV(query, "expand", expand)
 	var out map[string]any
 	if err := c.doJSON(ctx, http.MethodGet, platformAPIBase+"/issue/"+url.PathEscape(key), query, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListComments lists comments for an issue.
+func (c *Client) ListComments(ctx context.Context, key string, startAt, maxResults int) (map[string]any, error) {
+	query := url.Values{}
+	addPagination(query, startAt, maxResults)
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, platformAPIBase+"/issue/"+url.PathEscape(key)+"/comment", query, nil, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -247,6 +318,41 @@ func (c *Client) AddComment(ctx context.Context, key, bodyText string, bodyADF, 
 		return nil, err
 	}
 	return out, nil
+}
+
+// ListLinkTypes returns the available Jira issue link types.
+func (c *Client) ListLinkTypes(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, platformAPIBase+"/issueLinkType", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// CreateIssueLink creates a Jira issue link between two issues.
+func (c *Client) CreateIssueLink(ctx context.Context, outwardIssueKey, inwardIssueKey, linkTypeName, commentText string, commentADF map[string]any) error {
+	body := map[string]any{
+		"type": map[string]any{
+			"name": linkTypeName,
+		},
+		"outwardIssue": map[string]any{
+			"key": outwardIssueKey,
+		},
+		"inwardIssue": map[string]any{
+			"key": inwardIssueKey,
+		},
+	}
+	if strings.TrimSpace(commentText) != "" || len(commentADF) > 0 {
+		body["comment"] = map[string]any{
+			"body": normalizeADF(commentText, commentADF),
+		}
+	}
+	return c.doJSON(ctx, http.MethodPost, platformAPIBase+"/issueLink", nil, body, nil)
+}
+
+// DeleteIssueLink removes a Jira issue link by id.
+func (c *Client) DeleteIssueLink(ctx context.Context, linkID string) error {
+	return c.doJSON(ctx, http.MethodDelete, platformAPIBase+"/issueLink/"+url.PathEscape(linkID), nil, nil, nil)
 }
 
 // ListTransitions returns available transitions for an issue.

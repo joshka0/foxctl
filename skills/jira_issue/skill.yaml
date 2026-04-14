@@ -3,7 +3,7 @@ kind: Skill
 metadata:
   name: jira/issue
   version: 0.1.0
-  description: "Search, create, update, comment on, and transition Jira issues using stable Jira Cloud API token auth"
+  description: "Search, create, update, comment on, link, assign, label, and transition Jira issues using stable Jira Cloud API token auth"
   tags: ["jira", "issue", "ticket"]
 distribution:
   type: exec
@@ -18,8 +18,8 @@ signature:
     - name: operation
       type: string
       required: false
-      description: "Operation: search, get, create, update, comment, list_transitions, transition"
-      enum: ["search", "get", "create", "update", "comment", "list_transitions", "transition"]
+      description: "Operation: search, get, projects, project, create, update, list_comments, comment, list_link_types, link, unlink, list_transitions, transition"
+      enum: ["search", "get", "projects", "project", "create", "update", "list_comments", "comment", "list_link_types", "link", "unlink", "list_transitions", "transition"]
       default: "search"
     - name: get
       type: object
@@ -49,7 +49,10 @@ signature:
           description: "JQL query. Empty means Jira default search scope"
         start_at:
           type: integer
-          description: "Pagination offset"
+          description: "Deprecated for Jira enhanced search; use next_page_token instead"
+        next_page_token:
+          type: string
+          description: "Pagination token returned by Jira enhanced search"
         max_results:
           type: integer
           description: "Max issues to return (default: 25)"
@@ -63,6 +66,33 @@ signature:
           items:
             type: string
           description: "Expand parameters"
+    - name: projects
+      type: object
+      required: false
+      description: "Options for listing Jira projects"
+      properties:
+        start_at:
+          type: integer
+          description: "Pagination offset"
+        max_results:
+          type: integer
+          description: "Max projects to return (default: 50)"
+        query:
+          type: string
+          description: "Project name/key filter"
+    - name: project
+      type: object
+      required: false
+      description: "Options for fetching one project and its metadata"
+      properties:
+        key:
+          type: string
+          description: "Project key or id"
+        expand:
+          type: array
+          items:
+            type: string
+          description: "Project expansions, defaults to issueTypes"
     - name: create
       type: object
       required: false
@@ -80,6 +110,17 @@ signature:
         description:
           type: string
           description: "Plain text description converted to Atlassian Document Format"
+        parent_key:
+          type: string
+          description: "Optional parent issue key"
+        assignee_account_id:
+          type: string
+          description: "Atlassian account id to assign"
+        labels:
+          type: array
+          items:
+            type: string
+          description: "Labels to set on create"
         fields:
           type: object
           description: "Raw Jira fields object for advanced creation cases"
@@ -100,6 +141,30 @@ signature:
         description:
           type: string
           description: "Replace description with plain text converted to Atlassian Document Format"
+        parent_key:
+          type: string
+          description: "Re-parent to another issue key"
+        assignee_account_id:
+          type: string
+          description: "Set assignee by Atlassian account id"
+        clear_assignee:
+          type: boolean
+          description: "Clear the assignee"
+        set_labels:
+          type: array
+          items:
+            type: string
+          description: "Replace labels with this exact set"
+        add_labels:
+          type: array
+          items:
+            type: string
+          description: "Labels to add"
+        remove_labels:
+          type: array
+          items:
+            type: string
+          description: "Labels to remove"
         fields:
           type: object
           description: "Raw Jira fields object"
@@ -109,6 +174,20 @@ signature:
         notify_users:
           type: boolean
           description: "Whether Jira should notify watchers"
+    - name: list_comments
+      type: object
+      required: false
+      description: "Options for listing comments"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        start_at:
+          type: integer
+          description: "Pagination offset"
+        max_results:
+          type: integer
+          description: "Max comments to return (default: 50)"
     - name: comment
       type: object
       required: false
@@ -126,6 +205,34 @@ signature:
         visibility:
           type: object
           description: "Optional Jira visibility restriction object"
+    - name: link
+      type: object
+      required: false
+      description: "Options for creating an issue link"
+      properties:
+        outward_issue_key:
+          type: string
+          description: "Outward issue key"
+        inward_issue_key:
+          type: string
+          description: "Inward issue key"
+        type_name:
+          type: string
+          description: "Link type name, for example Blocks or Relates"
+        comment:
+          type: string
+          description: "Optional plain text comment"
+        comment_adf:
+          type: object
+          description: "Optional Atlassian Document Format comment"
+    - name: unlink
+      type: object
+      required: false
+      description: "Options for deleting an issue link"
+      properties:
+        link_id:
+          type: string
+          description: "Issue link id"
     - name: list_transitions
       type: object
       required: false
@@ -160,8 +267,9 @@ signature:
   help:
     short: "Search and mutate Jira issues."
     long: |
-      Use jira/issue to search for tickets, inspect one ticket, create new issues,
-      update fields, add comments, and move issues through workflow transitions.
+      Use jira/issue to search for tickets, inspect project metadata, create new
+      issues, update fields, add comments, manage labels/assignees, create issue
+      links, and move issues through workflow transitions.
 
       Authentication is read from:
         JIRA_BASE_URL
@@ -170,8 +278,10 @@ signature:
 
       Example commands:
         agentctl run jira/issue --input '{"operation":"search","search":{"jql":"project = ENG AND statusCategory != Done","fields":["summary","status","assignee"]}}'
+        agentctl run jira/issue --input '{"operation":"projects","projects":{"query":"DEVOPS"}}'
         agentctl run jira/issue --input '{"operation":"create","create":{"project_key":"ENG","issue_type":"Task","summary":"Wire Jira MCP tools","description":"Create native Jira skills."}}'
         agentctl run jira/issue --input '{"operation":"comment","comment":{"key":"ENG-123","body":"Investigated and updated the implementation plan."}}'
+        agentctl run jira/issue --input '{"operation":"update","update":{"key":"ENG-123","add_labels":["Devops"],"clear_assignee":true}}'
     workflows:
       - id: search-issues
         description: "Search issues using JQL."
@@ -189,6 +299,14 @@ signature:
             issue_type: "Task"
             summary: "Wire Jira MCP tools"
             description: "Create stable Jira skills with API token auth."
+      - id: link-issues
+        description: "Create a Jira issue link."
+        example_input:
+          operation: "link"
+          link:
+            outward_issue_key: "ENG-123"
+            inward_issue_key: "ENG-456"
+            type_name: "Blocks"
       - id: transition-issue
         description: "Move an issue through a workflow transition."
         example_input:
@@ -207,6 +325,12 @@ returns:
   - name: transitions
     type: array
     description: "Available workflow transitions"
+  - name: values
+    type: array
+    description: "Projects or link types returned by Jira"
+  - name: comments
+    type: array
+    description: "Comments returned by Jira"
 capabilities:
   network: "egress"
   filesystem:

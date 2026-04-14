@@ -27,19 +27,17 @@ func TestTextToADF(t *testing.T) {
 func TestSearchIssuesUsesBasicAuthAndBody(t *testing.T) {
 	t.Helper()
 	var gotAuth string
-	var gotBody map[string]any
+	var gotQuery string
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-		if r.Method != http.MethodPost {
-			t.Fatalf("method = %s, want POST", r.Method)
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
 		}
-		if r.URL.Path != "/rest/api/3/search" {
+		if r.URL.Path != "/rest/api/3/search/jql" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
+		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"issues":[{"key":"TEST-1"}],"total":1}`))
 	}))
@@ -55,7 +53,7 @@ func TestSearchIssuesUsesBasicAuthAndBody(t *testing.T) {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	result, err := client.SearchIssues(context.Background(), "project = TEST", 5, 10, []string{"summary"}, nil)
+	result, err := client.SearchIssues(context.Background(), "project = TEST", "next-token", 10, []string{"summary"}, nil)
 	if err != nil {
 		t.Fatalf("SearchIssues() error = %v", err)
 	}
@@ -64,15 +62,92 @@ func TestSearchIssuesUsesBasicAuthAndBody(t *testing.T) {
 	if gotAuth != wantAuth {
 		t.Fatalf("Authorization = %q, want %q", gotAuth, wantAuth)
 	}
-	if gotBody["jql"] != "project = TEST" {
-		t.Fatalf("jql = %v", gotBody["jql"])
+	if !strings.Contains(gotQuery, "jql=project+%3D+TEST") {
+		t.Fatalf("query = %q", gotQuery)
 	}
-	if gotBody["startAt"] != float64(5) {
-		t.Fatalf("startAt = %v", gotBody["startAt"])
+	if !strings.Contains(gotQuery, "nextPageToken=next-token") {
+		t.Fatalf("query = %q", gotQuery)
 	}
 	issues, ok := result["issues"].([]any)
 	if !ok || len(issues) != 1 {
 		t.Fatalf("issues = %#v", result["issues"])
+	}
+}
+
+func TestMoveIssuesToBacklogUsesAgileEndpoint(t *testing.T) {
+	t.Helper()
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/rest/agile/1.0/backlog/issue" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    srv.URL,
+		Email:      "user@example.com",
+		APIToken:   "secret",
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	if err := client.MoveIssuesToBacklog(context.Background(), []string{"TEST-1", "TEST-2"}); err != nil {
+		t.Fatalf("MoveIssuesToBacklog() error = %v", err)
+	}
+	issues, ok := gotBody["issues"].([]any)
+	if !ok || len(issues) != 2 {
+		t.Fatalf("issues = %#v", gotBody["issues"])
+	}
+}
+
+func TestCreateIssueLinkUsesExpectedPayload(t *testing.T) {
+	t.Helper()
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/rest/api/3/issueLink" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    srv.URL,
+		Email:      "user@example.com",
+		APIToken:   "secret",
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	if err := client.CreateIssueLink(context.Background(), "TEST-1", "TEST-2", "Blocks", "hello", nil); err != nil {
+		t.Fatalf("CreateIssueLink() error = %v", err)
+	}
+	if gotBody["type"].(map[string]any)["name"] != "Blocks" {
+		t.Fatalf("type = %#v", gotBody["type"])
+	}
+	if gotBody["outwardIssue"].(map[string]any)["key"] != "TEST-1" {
+		t.Fatalf("outwardIssue = %#v", gotBody["outwardIssue"])
+	}
+	if gotBody["inwardIssue"].(map[string]any)["key"] != "TEST-2" {
+		t.Fatalf("inwardIssue = %#v", gotBody["inwardIssue"])
 	}
 }
 
