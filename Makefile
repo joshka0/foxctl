@@ -13,6 +13,7 @@ GOCACHE_DIR := $(shell $(GO) env GOCACHE)
 # symbols (both define sqlite3_data_directory). See AGENTS.md "Testing Requirements"
 # for details and manual vector test commands.
 RACE_PKGS := $(shell $(GO_CMD_CGO) list ./... | grep -v 'github.com/jkatigb/agentctl/internal/storage/vector')
+RACE_SHARDS := core-cmd core-internal runtime context-tooling intelligence platform-interfaces storage v2 skills-a-g skills-h-o skills-p-x
 BINARY ?= agentctl
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
@@ -23,7 +24,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-agentctl-package eval-code-search-praze-infra eval-code-search-agentctl-repo-grounded eval-code-search-agentctl-change-impact eval-code-search-agentctl-trace-symbol eval-code-search-agentctl-bridge-esoteric eval-retrieval-agentctl eval-retrieval-agentctl-mixed eval-retrieval-agentctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-agentctl-package eval-code-search-praze-infra eval-code-search-agentctl-repo-grounded eval-code-search-agentctl-change-impact eval-code-search-agentctl-trace-symbol eval-code-search-agentctl-bridge-esoteric eval-retrieval-agentctl eval-retrieval-agentctl-mixed eval-retrieval-agentctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -165,7 +166,38 @@ eval-retrieval-praze-k8s:
 RACE_P ?= 1
 
 test-race:
-	@$(GO_CMD_CGO) test -race -short -p $(RACE_P) $(RACE_PKGS)
+	@set -euo pipefail; \
+		for shard in $(RACE_SHARDS); do \
+			$(MAKE) --no-print-directory test-race-shard SHARD="$$shard"; \
+		done
+
+test-race-shard:
+ifndef SHARD
+	$(error SHARD is required. Usage: make test-race-shard SHARD=runtime)
+endif
+	@set -euo pipefail; \
+		case "$(SHARD)" in \
+			core-cmd) include_re='^github.com/jkatigb/agentctl/(cmd|plugins|scripts|test)(/|$$)' ;; \
+			core-internal) include_re='^github.com/jkatigb/agentctl/internal/(adapters|agent|auth|console|domain|protocol|providers|rlm)(/|$$)' ;; \
+			runtime) include_re='^github.com/jkatigb/agentctl/internal/runtime(/|$$)' ;; \
+			context-tooling) include_re='^github.com/jkatigb/agentctl/internal/(context|tooling)(/|$$)' ;; \
+			intelligence) include_re='^github.com/jkatigb/agentctl/internal/intelligence(/|$$)' ;; \
+			platform-interfaces) include_re='^github.com/jkatigb/agentctl/internal/(interfaces|platform)(/|$$)' ;; \
+			storage) include_re='^github.com/jkatigb/agentctl/internal/storage(/|$$)' ;; \
+			v2) include_re='^github.com/jkatigb/agentctl/internal/v2(/|$$)' ;; \
+			skills-a-g) include_re='^github.com/jkatigb/agentctl/skills($$|/[a-g][^/]*($$|/))' ;; \
+			skills-h-o) include_re='^github.com/jkatigb/agentctl/skills/[h-o][^/]*($$|/)' ;; \
+			skills-p-x) include_re='^github.com/jkatigb/agentctl/skills/[p-x][^/]*($$|/)' ;; \
+			*) echo "Unknown race shard: $(SHARD)" >&2; exit 1 ;; \
+		esac; \
+		pkgs="$$( $(GO_CMD_CGO) list ./... | grep -E "$$include_re" | grep -Ev '^github.com/jkatigb/agentctl/internal/storage/vector($$|/)' || true )"; \
+		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No packages for race shard $(SHARD)"; \
+			exit 0; \
+		fi; \
+		echo "Race-testing shard $(SHARD): $$pkgs"; \
+		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
 
 test-race-impacted:
 ifndef BASE_REF
@@ -173,12 +205,45 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | xargs )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | grep -Ev '^github.com/jkatigb/agentctl/internal/storage/vector($$|/)' || true )"; \
+		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
 			exit 0; \
 		fi; \
 		echo "Race-testing impacted packages: $$pkgs"; \
+		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
+
+test-race-shard-impacted:
+ifndef SHARD
+	$(error SHARD is required. Usage: make test-race-shard-impacted SHARD=runtime BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+ifndef BASE_REF
+	$(error BASE_REF is required. Usage: make test-race-shard-impacted SHARD=runtime BASE_REF=origin/main [HEAD_REF=HEAD])
+endif
+	@set -euo pipefail; \
+		case "$(SHARD)" in \
+			core-cmd) include_re='^github.com/jkatigb/agentctl/(cmd|plugins|scripts|test)(/|$$)' ;; \
+			core-internal) include_re='^github.com/jkatigb/agentctl/internal/(adapters|agent|auth|console|domain|protocol|providers|rlm)(/|$$)' ;; \
+			runtime) include_re='^github.com/jkatigb/agentctl/internal/runtime(/|$$)' ;; \
+			context-tooling) include_re='^github.com/jkatigb/agentctl/internal/(context|tooling)(/|$$)' ;; \
+			intelligence) include_re='^github.com/jkatigb/agentctl/internal/intelligence(/|$$)' ;; \
+			platform-interfaces) include_re='^github.com/jkatigb/agentctl/internal/(interfaces|platform)(/|$$)' ;; \
+			storage) include_re='^github.com/jkatigb/agentctl/internal/storage(/|$$)' ;; \
+			v2) include_re='^github.com/jkatigb/agentctl/internal/v2(/|$$)' ;; \
+			skills-a-g) include_re='^github.com/jkatigb/agentctl/skills($$|/[a-g][^/]*($$|/))' ;; \
+			skills-h-o) include_re='^github.com/jkatigb/agentctl/skills/[h-o][^/]*($$|/)' ;; \
+			skills-p-x) include_re='^github.com/jkatigb/agentctl/skills/[p-x][^/]*($$|/)' ;; \
+			*) echo "Unknown race shard: $(SHARD)" >&2; exit 1 ;; \
+		esac; \
+		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E "$$include_re" | grep -vx 'github.com/jkatigb/agentctl/test/integration' | grep -Ev '^github.com/jkatigb/agentctl/internal/storage/vector($$|/)' || true )"; \
+		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
+		if [ -z "$$pkgs" ]; then \
+			echo "No impacted packages for race shard $(SHARD)"; \
+			exit 0; \
+		fi; \
+		echo "Race-testing impacted shard $(SHARD): $$pkgs"; \
 		$(GO_CMD_CGO) test -race -short -p $(RACE_P) $$pkgs
 
 test-integration:
