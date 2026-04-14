@@ -1,0 +1,133 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: jira/board
+  version: 0.1.0
+  description: "Navigate Jira boards, board issues, and sprints using stable Jira Cloud API token auth"
+  tags: ["jira", "board", "agile", "sprint"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/jira_board/jira_board
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: jira/board
+  parameters:
+    - name: operation
+      type: string
+      required: false
+      description: "Operation: list, issues, sprints"
+      enum: ["list", "issues", "sprints"]
+      default: "list"
+    - name: list
+      type: object
+      required: false
+      description: "Options for listing boards"
+      properties:
+        start_at:
+          type: integer
+          description: "Pagination offset"
+        max_results:
+          type: integer
+          description: "Max boards to return (default: 50)"
+        project_key_or_id:
+          type: string
+          description: "Filter boards for a Jira project key or id"
+        name:
+          type: string
+          description: "Filter by board name"
+        type:
+          type: string
+          description: "Board type filter, for example scrum or kanban"
+    - name: issues
+      type: object
+      required: false
+      description: "Options for listing issues on one board"
+      properties:
+        board_id:
+          type: integer
+          description: "Board id"
+        jql:
+          type: string
+          description: "Additional JQL filter scoped within the board"
+        fields:
+          type: array
+          items:
+            type: string
+          description: "Issue fields to return"
+        start_at:
+          type: integer
+          description: "Pagination offset"
+        max_results:
+          type: integer
+          description: "Max issues to return (default: 50)"
+    - name: sprints
+      type: object
+      required: false
+      description: "Options for listing sprints on one board"
+      properties:
+        board_id:
+          type: integer
+          description: "Board id"
+        state:
+          type: string
+          description: "Sprint state filter, for example active, future, closed"
+        start_at:
+          type: integer
+          description: "Pagination offset"
+        max_results:
+          type: integer
+          description: "Max sprints to return (default: 50)"
+  help:
+    short: "Navigate Jira boards and sprints."
+    long: |
+      Use jira/board to explore Jira boards, inspect the issues currently on a board,
+      and list sprints without relying on interactive OAuth flows.
+
+      Authentication is read from:
+        JIRA_BASE_URL
+        JIRA_EMAIL
+        JIRA_API_TOKEN
+
+      Example commands:
+        agentctl run jira/board --input '{"operation":"list"}'
+        agentctl run jira/board --input '{"operation":"issues","issues":{"board_id":12,"fields":["summary","status","assignee"]}}'
+        agentctl run jira/board --input '{"operation":"sprints","sprints":{"board_id":12,"state":"active,future"}}'
+    workflows:
+      - id: list-boards
+        description: "List Jira boards."
+        example_input:
+          operation: "list"
+      - id: board-issues
+        description: "List issues for a specific board."
+        example_input:
+          operation: "issues"
+          issues:
+            board_id: 12
+            fields: ["summary", "status", "assignee"]
+      - id: board-sprints
+        description: "List sprints for a specific board."
+        example_input:
+          operation: "sprints"
+          sprints:
+            board_id: 12
+            state: "active,future"
+returns:
+  - name: values
+    type: array
+    description: "Boards or sprints returned by Jira"
+  - name: issues
+    type: array
+    description: "Issues returned by Jira"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: list
+    POST: issues

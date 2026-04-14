@@ -1,0 +1,220 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: jira/issue
+  version: 0.1.0
+  description: "Search, create, update, comment on, and transition Jira issues using stable Jira Cloud API token auth"
+  tags: ["jira", "issue", "ticket"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/jira_issue/jira_issue
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: jira/issue
+  parameters:
+    - name: operation
+      type: string
+      required: false
+      description: "Operation: search, get, create, update, comment, list_transitions, transition"
+      enum: ["search", "get", "create", "update", "comment", "list_transitions", "transition"]
+      default: "search"
+    - name: get
+      type: object
+      required: false
+      description: "Options for fetching one issue"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        fields:
+          type: array
+          items:
+            type: string
+          description: "Specific fields to return"
+        expand:
+          type: array
+          items:
+            type: string
+          description: "Expand parameters"
+    - name: search
+      type: object
+      required: false
+      description: "Options for JQL issue search"
+      properties:
+        jql:
+          type: string
+          description: "JQL query. Empty means Jira default search scope"
+        start_at:
+          type: integer
+          description: "Pagination offset"
+        max_results:
+          type: integer
+          description: "Max issues to return (default: 25)"
+        fields:
+          type: array
+          items:
+            type: string
+          description: "Issue fields to return"
+        expand:
+          type: array
+          items:
+            type: string
+          description: "Expand parameters"
+    - name: create
+      type: object
+      required: false
+      description: "Options for issue creation"
+      properties:
+        project_key:
+          type: string
+          description: "Jira project key"
+        issue_type:
+          type: string
+          description: "Issue type name, for example Story, Task, Bug"
+        summary:
+          type: string
+          description: "Issue summary"
+        description:
+          type: string
+          description: "Plain text description converted to Atlassian Document Format"
+        fields:
+          type: object
+          description: "Raw Jira fields object for advanced creation cases"
+        update:
+          type: object
+          description: "Optional Jira update operations"
+    - name: update
+      type: object
+      required: false
+      description: "Options for issue updates"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        summary:
+          type: string
+          description: "Replace summary with this text"
+        description:
+          type: string
+          description: "Replace description with plain text converted to Atlassian Document Format"
+        fields:
+          type: object
+          description: "Raw Jira fields object"
+        update:
+          type: object
+          description: "Raw Jira update operations"
+        notify_users:
+          type: boolean
+          description: "Whether Jira should notify watchers"
+    - name: comment
+      type: object
+      required: false
+      description: "Options for adding a comment"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        body:
+          type: string
+          description: "Plain text comment converted to Atlassian Document Format"
+        body_adf:
+          type: object
+          description: "Raw Atlassian Document Format comment body"
+        visibility:
+          type: object
+          description: "Optional Jira visibility restriction object"
+    - name: list_transitions
+      type: object
+      required: false
+      description: "Options for listing transitions"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+    - name: transition
+      type: object
+      required: false
+      description: "Options for applying a transition"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        transition_id:
+          type: string
+          description: "Transition id returned by list_transitions"
+        fields:
+          type: object
+          description: "Optional Jira fields set during transition"
+        update:
+          type: object
+          description: "Optional Jira update operations applied during transition"
+        comment:
+          type: string
+          description: "Plain text transition comment converted to Atlassian Document Format"
+        comment_adf:
+          type: object
+          description: "Raw Atlassian Document Format comment body"
+  help:
+    short: "Search and mutate Jira issues."
+    long: |
+      Use jira/issue to search for tickets, inspect one ticket, create new issues,
+      update fields, add comments, and move issues through workflow transitions.
+
+      Authentication is read from:
+        JIRA_BASE_URL
+        JIRA_EMAIL
+        JIRA_API_TOKEN
+
+      Example commands:
+        agentctl run jira/issue --input '{"operation":"search","search":{"jql":"project = ENG AND statusCategory != Done","fields":["summary","status","assignee"]}}'
+        agentctl run jira/issue --input '{"operation":"create","create":{"project_key":"ENG","issue_type":"Task","summary":"Wire Jira MCP tools","description":"Create native Jira skills."}}'
+        agentctl run jira/issue --input '{"operation":"comment","comment":{"key":"ENG-123","body":"Investigated and updated the implementation plan."}}'
+    workflows:
+      - id: search-issues
+        description: "Search issues using JQL."
+        example_input:
+          operation: "search"
+          search:
+            jql: "project = ENG AND statusCategory != Done"
+            fields: ["summary", "status", "assignee"]
+      - id: create-issue
+        description: "Create a new issue using convenience fields."
+        example_input:
+          operation: "create"
+          create:
+            project_key: "ENG"
+            issue_type: "Task"
+            summary: "Wire Jira MCP tools"
+            description: "Create stable Jira skills with API token auth."
+      - id: transition-issue
+        description: "Move an issue through a workflow transition."
+        example_input:
+          operation: "transition"
+          transition:
+            key: "ENG-123"
+            transition_id: "31"
+            comment: "Moving this into In Progress."
+returns:
+  - name: issue
+    type: object
+    description: "Issue returned by Jira"
+  - name: issues
+    type: array
+    description: "Issues returned by Jira search"
+  - name: transitions
+    type: array
+    description: "Available workflow transitions"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: get
+    POST: create
+    PUT: update

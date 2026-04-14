@@ -739,6 +739,7 @@ func TestSkillGroupsIncludeFocusedProfiles(t *testing.T) {
 		"mobile":  {"mobile/android", "mobile/ios", "mobile/expo"},
 		"godot":   {"build/godot", "editor/godot"},
 		"api":     {"http/openapi"},
+		"jira":    {"jira/board", "jira/issue"},
 		"context": {"session/recall", "session/timeline", "session/query", "session/summarize"},
 	}
 	for group, expectedSkills := range cases {

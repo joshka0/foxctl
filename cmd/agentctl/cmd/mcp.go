@@ -96,6 +96,11 @@ var skillGroups = map[string][]string{
 	"api": {
 		"http/openapi",
 	},
+	// jira: stable Jira Cloud board and issue automation.
+	"jira": {
+		"jira/board",
+		"jira/issue",
+	},
 	// refactor: refactor discovery/planning without the broader retrieval set.
 	"refactor": {
 		"code/refactor_scout",
