@@ -89,7 +89,7 @@ thresholds:
 }
 
 func TestLoadSuite(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "testdata", "evals", "retrieval", "agentctl.yaml")
+	path := filepath.Join("..", "..", "..", "..", "testdata", "evals", "retrieval", "agentctl.yaml")
 	suite, err := LoadSuite(path)
 	if err != nil {
 		t.Fatalf("LoadSuite: %v", err)

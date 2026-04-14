@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoadSuite(t *testing.T) {
-	suite, err := LoadSuite(filepath.Join("..", "..", "..", "testdata", "evals", "corrections", "agentctl-inspectors.yaml"))
+	suite, err := LoadSuite(filepath.Join("..", "..", "..", "..", "testdata", "evals", "corrections", "agentctl-inspectors.yaml"))
 	if err != nil {
 		t.Fatalf("LoadSuite: %v", err)
 	}

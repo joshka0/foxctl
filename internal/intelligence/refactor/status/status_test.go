@@ -254,13 +254,13 @@ func TestEvaluateParserOnlyWhenScopePathNotFullyIndexed(t *testing.T) {
 
 	ctx := context.Background()
 	_, storageRoot, workspace := setupGitWorkspace(t, ctx)
-	if err := os.MkdirAll(filepath.Join(workspace, "internal", "actor"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspace, "internal", "runtime", "actor"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(workspace, "internal", "other"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, "internal", "actor", "actor.go"), []byte("package actor\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "internal", "runtime", "actor", "actor.go"), []byte("package actor\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(workspace, "internal", "other", "other.go"), []byte("package other\n"), 0o644); err != nil {
@@ -339,7 +339,7 @@ func TestEvaluateParserOnlyWhenScopePathNotFullyIndexed(t *testing.T) {
 		Workspace:    workspace,
 		RepoRoot:     workspace,
 		Path:         "internal/runtime/actor",
-		Absolute:     filepath.Join(workspace, "internal", "actor"),
+		Absolute:     filepath.Join(workspace, "internal", "runtime", "actor"),
 		Mode:         "explicit",
 		Language:     "go",
 		Detected:     []string{"go"},
@@ -363,13 +363,13 @@ func TestEvaluateCoverageIncludesTestsWhenRequested(t *testing.T) {
 
 	ctx := context.Background()
 	_, storageRoot, workspace := setupGitWorkspace(t, ctx)
-	if err := os.MkdirAll(filepath.Join(workspace, "internal", "actor"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspace, "internal", "runtime", "actor"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, "internal", "actor", "actor.go"), []byte("package actor\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "internal", "runtime", "actor", "actor.go"), []byte("package actor\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, "internal", "actor", "actor_test.go"), []byte("package actor\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "internal", "runtime", "actor", "actor_test.go"), []byte("package actor\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, ctx, workspace, "add", "internal/runtime/actor/actor.go", "internal/runtime/actor/actor_test.go")
@@ -414,7 +414,7 @@ func TestEvaluateCoverageIncludesTestsWhenRequested(t *testing.T) {
 		Workspace:    workspace,
 		RepoRoot:     workspace,
 		Path:         "internal/runtime/actor",
-		Absolute:     filepath.Join(workspace, "internal", "actor"),
+		Absolute:     filepath.Join(workspace, "internal", "runtime", "actor"),
 		Mode:         "explicit",
 		Language:     "go",
 		Detected:     []string{"go"},
@@ -433,7 +433,7 @@ func TestEvaluateCoverageIncludesTestsWhenRequested(t *testing.T) {
 		Workspace:    workspace,
 		RepoRoot:     workspace,
 		Path:         "internal/runtime/actor",
-		Absolute:     filepath.Join(workspace, "internal", "actor"),
+		Absolute:     filepath.Join(workspace, "internal", "runtime", "actor"),
 		Mode:         "explicit",
 		Language:     "go",
 		Detected:     []string{"go"},

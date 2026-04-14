@@ -1,3 +1,4 @@
+//nolint:forbidigo // The web server still owns a zerolog seam until the wider observability migration is completed.
 package web
 
 import (

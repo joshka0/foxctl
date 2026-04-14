@@ -258,14 +258,6 @@ func summarizeRecordSummary(text string) string {
 	return text[:199] + "…"
 }
 
-func shortRecordHash(value string) string {
-	value = strings.TrimPrefix(strings.TrimSpace(value), "sha256:")
-	if len(value) > 16 {
-		return value[:16]
-	}
-	return value
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {

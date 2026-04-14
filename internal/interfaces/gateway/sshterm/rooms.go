@@ -1,3 +1,4 @@
+//nolint:forbidigo // Interface transport still threads zerolog until the wider observability migration is completed.
 package sshterm
 
 import (

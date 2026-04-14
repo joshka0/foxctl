@@ -318,7 +318,7 @@ func TestResolveLanguageScopeInfersSingleDirectoryLanguage(t *testing.T) {
 
 func TestBuildScoutStatusScopeUsesWorkspaceRelativePath(t *testing.T) {
 	workspace := t.TempDir()
-	searchPath := filepath.Join(workspace, "internal", "actor")
+	searchPath := filepath.Join(workspace, "internal", "runtime", "actor")
 	if err := os.MkdirAll(searchPath, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

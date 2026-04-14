@@ -1,3 +1,4 @@
+//nolint:forbidigo // REST console handlers still thread zerolog until the wider observability migration is completed.
 package api
 
 import (

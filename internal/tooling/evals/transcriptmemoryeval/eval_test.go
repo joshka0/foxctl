@@ -8,7 +8,7 @@ import (
 )
 
 func TestLoadSuite(t *testing.T) {
-	suite, err := LoadSuite(filepath.Join("..", "..", "..", "testdata", "evals", "transcriptmemory", "march25-root.yaml"))
+	suite, err := LoadSuite(filepath.Join("..", "..", "..", "..", "testdata", "evals", "transcriptmemory", "march25-root.yaml"))
 	if err != nil {
 		t.Fatalf("LoadSuite: %v", err)
 	}

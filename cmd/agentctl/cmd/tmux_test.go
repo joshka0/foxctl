@@ -390,8 +390,8 @@ func TestTmuxSubmitModeForParticipant(t *testing.T) {
 	if got := tmuxSubmitModeForParticipant("claude-a"); got != tmuxbridge.SubmitModeEnterOnly {
 		t.Fatalf("claude submit mode = %q want %q", got, tmuxbridge.SubmitModeEnterOnly)
 	}
-	if got := tmuxSubmitModeForParticipant("droid-a"); got != tmuxbridge.SubmitModeEscapeEnter {
-		t.Fatalf("droid submit mode = %q want %q", got, tmuxbridge.SubmitModeEscapeEnter)
+	if got := tmuxSubmitModeForParticipant("droid-a"); got != tmuxbridge.SubmitModeEnterOnly {
+		t.Fatalf("droid submit mode = %q want %q", got, tmuxbridge.SubmitModeEnterOnly)
 	}
 }
 
