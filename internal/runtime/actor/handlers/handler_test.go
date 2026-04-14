@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/actor"
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/runtime/actor"
 )
 
 func TestNewRegistry(t *testing.T) {

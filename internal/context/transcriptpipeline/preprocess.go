@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	actormemory "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
 	"github.com/jkatigb/agentctl/internal/context/companion"
+	actormemory "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
 	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
 	"github.com/jkatigb/agentctl/internal/v2/core/run"

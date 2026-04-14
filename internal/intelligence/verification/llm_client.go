@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/providers/llmcompat"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/providers/llmcompat"
 )
 
 // LLMClient executes a single-turn chat completion.

@@ -53,7 +53,7 @@ func (r *mockRecorder) GetToolNames() []string {
 // callTool is a helper that gets a tool by name and executes it.
 func callTool(t *testing.T, registry *agenttools.Registry, name string, params map[string]any) (any, error) {
 	t.Helper()
-	tool, err := registry.GetRegistry().Get(name)
+	tool, err := registry.Get(name)
 	if err != nil {
 		return nil, err
 	}

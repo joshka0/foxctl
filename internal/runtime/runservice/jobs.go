@@ -9,12 +9,12 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
 	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/trajectorycapture"
 	"github.com/jkatigb/agentctl/internal/storage/jobs"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/executor"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/persist"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
-	"github.com/jkatigb/agentctl/internal/runtime/trajectorycapture"
 )
 
 func (e *Executor) ensureJobStore() (err error) {

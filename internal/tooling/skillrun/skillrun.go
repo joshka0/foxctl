@@ -9,8 +9,8 @@ import (
 	"fmt"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/runtime/execution/runner"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/runtime/execution/runner"
 )
 
 // Resolver abstracts skill resolution for callers that don't need the full Resolver type.

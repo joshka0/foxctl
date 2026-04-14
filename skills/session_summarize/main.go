@@ -27,8 +27,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/storage/queue"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/jkatigb/agentctl/internal/storage/queue"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/vector"
 )

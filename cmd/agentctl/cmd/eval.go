@@ -15,9 +15,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/tooling/evals/correctioneval"
-	"github.com/jkatigb/agentctl/internal/tooling/evals/retrievaleval"
-	"github.com/jkatigb/agentctl/internal/tooling/evals/transcriptmemoryeval"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
@@ -30,6 +27,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/jkatigb/agentctl/internal/tooling/evals/correctioneval"
+	"github.com/jkatigb/agentctl/internal/tooling/evals/retrievaleval"
+	"github.com/jkatigb/agentctl/internal/tooling/evals/transcriptmemoryeval"
 	"github.com/spf13/cobra"
 )
 

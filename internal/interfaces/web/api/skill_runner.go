@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/runtime/execution/runner"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/runtime/execution/runner"
 )
 
 // SkillRunner executes skills via subprocess.

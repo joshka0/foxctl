@@ -9,8 +9,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/tooling/skillrun"
 	tooling "github.com/jkatigb/agentctl/internal/tooling"
+	"github.com/jkatigb/agentctl/internal/tooling/skillrun"
 )
 
 func (r *Registry) registerHeartwoodTools() error {

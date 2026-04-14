@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/runtime/execution/circuitbreaker"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/runtime/execution/circuitbreaker"
 	"github.com/spf13/cobra"
 )
 

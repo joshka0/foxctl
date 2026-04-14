@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
 	"github.com/jkatigb/agentctl/internal/context/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	platformcfg "github.com/jkatigb/agentctl/internal/platform/config"

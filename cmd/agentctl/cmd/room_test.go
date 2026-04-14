@@ -17,13 +17,13 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/platform/worktree"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/jkatigb/agentctl/internal/platform/worktree"
 	"github.com/spf13/cobra"
 )
 

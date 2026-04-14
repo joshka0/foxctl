@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/runtime/actor"
-	"github.com/jkatigb/agentctl/internal/runtime/actor/memory"
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/runtime/actor"
+	"github.com/jkatigb/agentctl/internal/runtime/actor/memory"
 )
 
 // AgentExecutor abstracts agent execution for handlers.

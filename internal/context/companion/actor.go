@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/actor"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/runtime/actor"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/rs/zerolog"
 )

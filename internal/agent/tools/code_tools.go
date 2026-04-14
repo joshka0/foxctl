@@ -16,9 +16,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/tooling/skillrun"
 	"github.com/jkatigb/agentctl/internal/storage"
 	tooling "github.com/jkatigb/agentctl/internal/tooling"
+	"github.com/jkatigb/agentctl/internal/tooling/skillrun"
 )
 
 // registerCodeTools registers code search and retrieval tools.

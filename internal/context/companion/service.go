@@ -14,9 +14,9 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/runtime/hooks"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"

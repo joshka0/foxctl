@@ -13,10 +13,10 @@ import (
 
 	"github.com/rs/zerolog"
 
-	actormemory "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
+	actormemory "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
 )

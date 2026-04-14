@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/context/todosync"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
 	"github.com/jkatigb/agentctl/internal/runtime/hooks/sessionmode"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/jkatigb/agentctl/internal/context/todosync"
 )
 
 type Dependencies struct {

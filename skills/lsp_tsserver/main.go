@@ -21,8 +21,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
-	"github.com/jkatigb/agentctl/internal/platform/lsp/jsonrpc"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/lsp/jsonrpc"
 )
 
 // defaultTimeout is the maximum time to wait for LSP operations.

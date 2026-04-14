@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 const RepoIndexAskPrompt = "You are a repo index assistant. Use repo_index_search to find multiple relevant nodes, repo_index_expand to map relationships, and repo_index_open for details. Edge types include structural edges (CONTAINS, IMPORTS, REFERS_TO, CALLS, IMPLEMENTS, EMBEDS, TESTS) and doc/comment edges (HAS_KEYWORD, HAS_OUTPUT_FIELD, TOUCHES_RESOURCE, EMITS_EVENT, DOC_RELATED, DOC_FLOW). When answering, list up to 5 relevant files or symbols with node IDs and file paths, plus a 1-2 sentence summary (use node summaries when available). If a tool call fails, retry with valid arguments; if unsure, say so."

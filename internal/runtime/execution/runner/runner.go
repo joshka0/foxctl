@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	execrunner "github.com/jkatigb/agentctl/internal/runtime/execution/exec"
-	wasirunner "github.com/jkatigb/agentctl/internal/runtime/execution/wasi"
 	"github.com/jkatigb/agentctl/internal/platform/env"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	execrunner "github.com/jkatigb/agentctl/internal/runtime/execution/exec"
+	wasirunner "github.com/jkatigb/agentctl/internal/runtime/execution/wasi"
 )
 
 // sessionEnvVars lists environment variables that should be propagated to skills
