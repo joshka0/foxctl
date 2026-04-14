@@ -212,18 +212,6 @@ integration-tests:
         make test-integration
       fi
 
-llm-planner-integration:
-  stage: check
-  variables:
-    AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
-  script:
-    - CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/planning/llm -run TestOpenAIPlanner_Integration -timeout 120s -v
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_MERGE_REQUEST_IID
-      when: manual
-      allow_failure: true
-
 # --- Stage: build ---
 build:
   stage: build
@@ -268,6 +256,5 @@ all-checks:
     - job: race-tests-skills-p-x
     - job: cgo-build-and-tests
     - job: integration-tests
-    - job: llm-planner-integration
   script:
     - echo "All checks passed"

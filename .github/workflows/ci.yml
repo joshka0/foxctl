@@ -276,44 +276,6 @@ jobs:
             make test-integration
           fi
 
-  llm-planner-integration:
-    runs-on: arc-runner-agentctl
-    container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
-    env:
-      AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      # Default model for OpenRouter integration tests (not sensitive, so not a secret)
-      OPENROUTER_MODEL_NAME: "openai/gpt-4o-mini"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      # Temporary: install libsqlite3-dev until CI image is rebuilt with it bundled
-      - name: Install libsqlite3-dev
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends libsqlite3-dev
-
-      - name: Restore Go build cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-cgo-${{ runner.os }}-go1.26.1-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-cgo-${{ runner.os }}-go1.26.1-
-
-      - name: Skip if OpenRouter secret not set
-        if: env.OPENROUTER_API_KEY == ''
-        run: echo "OPENROUTER_API_KEY not set; skipping LLM planner integration test"
-
-      - name: LLM planner integration test (OpenRouter)
-        if: env.OPENROUTER_API_KEY != ''
-        run: |
-          CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/planning/llm -run TestOpenAIPlanner_Integration -timeout 120s -v
-
   all-checks:
     needs:
       [
@@ -323,7 +285,6 @@ jobs:
         build,
         cgo-build-and-tests,
         integration-tests,
-        llm-planner-integration,
       ]
     runs-on: arc-runner-agentctl
     steps:

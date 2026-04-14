@@ -188,8 +188,6 @@ using a pre-warmed Go image built from `Dockerfile.ci`. Key jobs:
   floor (currently 40%).
 - **race/tests/coverage** – additional jobs for race detection and coverage
   reporting, aligned with local `make` targets.
-- **LLM planner integration** – gated on env vars and secrets; only runs when an
-  OpenRouter API key is configured.
 
 Agents proposing CI changes should:
 
