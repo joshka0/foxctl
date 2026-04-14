@@ -9,514 +9,319 @@ vault_refs:
 
 # agentctl
 
-> **AI Agent Toolkit** — Skills, memory, hooks, and orchestration for AI coding assistants
+> AI agent toolkit for local skills, retrieval, memory, provider integrations, and multi-agent workflows.
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/jkatigb/agentctl)](https://goreportcard.com/report/github.com/jkatigb/agentctl)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 [![Go Version](https://img.shields.io/badge/go-1.26.1+-blue.svg)](https://golang.org/dl/)
 
-**agentctl** provides infrastructure for AI coding assistants: discoverable skills,
-persistent memory, hook-based context injection, semantic code search, and
-multi-agent orchestration.
+`agentctl` is the repo-local control plane behind a lot of this project’s AI workflow:
 
----
+- skill execution and installation
+- semantic/code retrieval and repo indexing
+- session continuity and memory storage
+- MCP and web/API serving
+- provider bootstrap for Claude Code, Codex, OpenCode, and Gemini
+- durable room / agent / mailbox orchestration
 
-## What is agentctl?
+The repository is primarily Go, with Bun-based packages for the web GUI and TUI.
 
-```mermaid
-flowchart LR
-    subgraph "AI Assistants"
-        CC[Claude Code]
-        OC[Opencode]
-        CX[Codex]
-    end
+## What’s Here
 
-    subgraph "agentctl"
-        H[Hooks]
-        S[Skills]
-        M[Memory]
-        I[Index]
-    end
+- `cmd/agentctl/` - Cobra CLI entrypoints
+- `skills/` - installable skill implementations
+- `configs/hooks/` - provider hook/runtime glue
+- `configs/skills-pack/` - provider-facing skill packs
+- `internal/` - runtime, storage, indexing, context, and web internals
+- `packages/gui-agent/` - web operator surface
+- `packages/tui-agent/` - TUI workbench
+- `docs/` - canonical architecture, guides, specs, and plans
 
-    subgraph "Storage"
-        DB[(SQLite)]
-        CAS[CAS]
-        VEC[Vectors]
-    end
+### Internal Layout
 
-    CC --> H
-    OC --> H
-    CX --> H
-    H --> S
-    S --> M
-    S --> I
-    M --> DB
-    M --> CAS
-    I --> VEC
+This is the short version of the `internal/*` grouping. The canonical placement
+rules live in [docs/architecture/package-topology.md](docs/architecture/package-topology.md).
+
+```text
+internal/
+  domain/        core contracts and value types
+  platform/      config, workspace, logging, cross-cutting helpers
+  protocol/      wire/envelope/protocol helpers
+  storage/       SQLite/libsql/postgres stores, CAS, durable state
+  auth/          authn/authz and identity-facing helpers
+  providers/     provider-specific integrations and compatibility layers
+  runtime/       execution, daemon, orchestration, terminal, hooks, observability
+  v2/            newer agent/runtime/orchestration lane only
+  context/       memory, session continuity, transcript/context plane
+  intelligence/  retrieval, indexing, codemaps, refactor/code intelligence
+  interfaces/    web, gateway, chat adapter, OpenAPI transport layers
+  tooling/       evals, standalone tools, runtime-neutral tooling
 ```
 
-**Core capabilities:**
+Two important rules:
 
-- **Skills** — Discoverable tools (code analysis, semantic search, LSP, mobile automation)
-- **Hooks** — Context injection at tool boundaries (PreToolUse, PostToolUse, SessionStart)
-- **Memory** — Persistent gotchas, decisions, and learnings with vector search
-- **Sessions** — Context preservation across compaction with lineage tracking
-- **Codemaps** — AI-generated semantic code traces with mermaid diagrams
-- **MCP Server** — Expose skills as MCP tools via SSE for any client
-- **ACA + Vault** — Dual-plane context architecture with a workspace control plane and an Obsidian knowledge layer
+- new top-level `internal/*` roots should be rare
+- `internal/v2/*` is not the default destination for new code; it is scoped to
+  the newer agent/runtime/orchestration stack
 
----
+## Install
 
-## Architecture
+### Recommended
 
-```mermaid
-flowchart TD
-    subgraph CLI["CLI Layer"]
-        CMD[agentctl commands]
-        MCP[MCP Server]
-    end
-
-    subgraph Skills["Skills System"]
-        SR[Skill Resolver]
-        EX[Exec Runner]
-        WA[WASI Runner]
-    end
-
-    subgraph Hooks["Hook System"]
-        PRE[PreToolUse]
-        POST[PostToolUse]
-        SESS[SessionStart]
-        STOP[Stop]
-    end
-
-    subgraph Storage["Storage Layer"]
-        MEM[(memory.db)]
-        TASK[(tasks.db)]
-        SESDB[(sessions.db)]
-        CASDB[CAS sha256]
-    end
-
-    subgraph Agents["Agent System"]
-        DSPY[dspy-go ReAct]
-        CMAP[Codemap Agent]
-    end
-
-    CMD --> SR
-    CMD --> Hooks
-    MCP --> SR
-    SR --> EX
-    SR --> WA
-    EX --> Storage
-    WA --> Storage
-    Hooks --> Skills
-    DSPY --> Skills
-    CMAP --> DSPY
-```
-
-### Directory Structure
-
-```
-agentctl/
-├── cmd/agentctl/           # CLI (Cobra commands)
-├── internal/
-│   ├── domain/             # Core types (envelope, skill, policy)
-│   ├── storage/            # SQLite, CAS, vector stores
-│   ├── execution/          # Skill runners (exec, WASI)
-│   ├── codemap/            # Codemap agent system
-│   ├── codecontext/        # Code snippet extraction
-│   └── platform/           # Config, workspace, logging
-├── skills/                 # Skill implementations
-├── configs/
-│   ├── hooks/              # Claude Code hooks
-│   ├── skills/             # Skill documentation
-│   └── agents/             # Agent profiles
-├── packages/               # TypeScript (GUI, TUI, API)
-└── docs/                   # Specifications and guides
-```
-
----
-
-## Agents
-
-Agents are mailbox-driven workers. Spawn a profile, run it in the foreground, and ask questions through the mailbox interface.
+Run the interactive installer from the repo root:
 
 ```bash
-# Spawn a chat companion
-agentctl agent spawn \
-  --chat \
-  --name "Stormscribe" \
-  --slug "stormscribe" \
-  --llm-provider openrouter \
-  --llm-model "z-ai/glm-4.7-flash"
-
-# Run the agent daemon
-agentctl agent run <agent-id>
-
-# Ask a question with memory continuity
-agentctl agent ask <agent-id> --conversation-id story-loop --question "..." --wait
-
-# Rename the agent later
-agentctl agent rename <agent-ref> --name "Stormscribe" --slug "stormscribe"
-
-# Stop the agent
-agentctl agent kill <agent-id>
+./install.sh
 ```
 
-See `docs/general/agent-daemon.md` for engine routing and execution modes.
+That flow is intended to:
 
-### V2 Routing Flags
+- verify or install core local dependencies
+- optionally install CGO/SQLite headers for `agentctl-cgo`
+- optionally install Bun for GUI/TUI and OpenCode plugin workflows
+- build the CLI and skills
+- wire up provider integrations via `scripts/init.sh`
 
-Agent command routing defaults to v2 for supported commands (`spawn`, `ask`,
-`run`, `list`, `kill`) when `AGENTCTL_V2_COMMANDS` is unset/empty.
+If you run the installer outside an existing checkout, it clones the repo from GitLab.
+
+### Non-interactive
 
 ```bash
-# Default behavior (unset/empty): v2-primary routing for supported commands
-unset AGENTCTL_V2_COMMANDS
-
-# Global fallback to v1 handlers
-export AGENTCTL_V2_COMMANDS=none
-
-# Scoped routing override
-export AGENTCTL_V2_COMMANDS=spawn,ask
+./install.sh --yes
 ```
 
----
-
-## Quick Start
-
-### Installation
+Useful flags:
 
 ```bash
-git clone https://github.com/jkatigb/agentctl.git
-cd agentctl
+./install.sh --yes --skip-cgo
+./install.sh --yes --skip-bun
+./install.sh --yes --skip-provider-setup
+./install.sh --yes --repo-dir "$HOME/src/agentctl"
+```
+
+### Manual / Dev Setup
+
+If you already have the toolchain installed and want the repo-native flow:
+
+```bash
+make init
+```
+
+`make init` runs:
+
+- `build-all`
+- `skills-install-all`
+- `./scripts/init.sh`
+
+If you only want the pure-Go CLI path:
+
+```bash
 make build
 make skills-install
-
-# Set up hooks for Claude Code
 ./scripts/init.sh
 ```
 
-### Environment Setup
+## Prerequisites
+
+### Required
+
+- `bash`
+- `git`
+- `make`
+- `jq`
+- Go `1.26.1+`
+
+### Recommended For Full Setup
+
+- C compiler + SQLite development headers/libs
+  - needed for `make build-cgo`, `make test-cgo-short`, and `agentctl-cgo`
+- Bun
+  - needed for `packages/gui-agent`, `packages/tui-agent`, and OpenCode plugin install flows
+
+On macOS, the full path usually means Homebrew `go`, `jq`, `sqlite`, and `bun`.
+
+On Debian/Ubuntu, the full path usually means `build-essential`, `pkg-config`,
+`libsqlite3-dev`, `jq`, and a current Go toolchain.
+
+## Environment
+
+`agentctl` loads env files in this order:
+
+1. `~/.agentctl/.env`
+2. the git-root `.env`
+3. the current working directory `.env`
+
+Common variables:
 
 ```bash
-# Required for semantic search
-export VOYAGE_API_KEY=...
+# Embeddings / semantic retrieval
+VOYAGE_API_KEY=...
+GEMINI_API_KEY=...
 
-# Optional: For codemap generation
-export ANTHROPIC_API_KEY=...
-# or
-export OPENROUTER_API_KEY=...
+# Optional LLM-backed flows
+OPENROUTER_API_KEY=...
+ANTHROPIC_API_KEY=...
+
+# Optional remote / cross-workspace storage
+TURSO_DATABASE_URL=...
+TURSO_AUTH_TOKEN=...
+AGENTCTL_POSTGRES_DSN=...
 ```
 
-### Basic Usage
+`scripts/init.sh` will copy repo `.env` to `~/.agentctl/.env` if present and no
+global env file exists yet.
+
+## First Run
+
+Verify the install:
 
 ```bash
-# Run a skill
-agentctl run code/symbols --input '{"path": "main.go"}'
-
-# Semantic code search
-agentctl run code/semantic_search --input '{"query": "error handling", "limit": 10}'
-
-# Task management
-agentctl todo add --title "Implement feature" --description "Details..."
-agentctl todo list -f table
-
-# Memory operations
-agentctl memory put --name "gotcha-auth" --type "gotcha" --summary "Watch out for..."
-agentctl memory search "authentication"
-
-# Generate a codemap
-agentctl codemap generate "trace user authentication flow"
-```
-
-### ACA / Obsidian Refresh
-
-`agentctl` now includes the ACA *(AgentCTL Context Architecture)* knowledge layer described in [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md). When repo docs or repo structure change, refresh the Obsidian layer with:
-
-```bash
-agentctl obsidian graph build --workspace . --vault-path "/path/to/vault"
-agentctl obsidian graph promote --workspace . --vault-path "/path/to/vault"
-agentctl obsidian bridge reconcile --workspace . --vault-path "/path/to/vault"
-agentctl obsidian index build --vault-path "/path/to/vault"
-```
-
-That regenerates repo graph notes, refreshes docs↔vault bridge drafts, and rebuilds the local vault search index.
-
----
-
-## Skills
-
-Skills are the primary interface for AI assistants to interact with code and infrastructure.
-
-| Category | Skills | Description |
-|----------|--------|-------------|
-| **Code Analysis** | `code/symbols`, `code/complexity`, `code/imports` | Extract symbols, measure complexity, analyze imports |
-| **Code Search** | `code/semantic_search`, `code/smart_search`, `code/context_ripgrep` | Vector search, smart candidate generation, full function bodies |
-| **Code Editing** | `code/smart_write`, `code/snippet_extract` | Symbol-based editing, code extraction |
-| **Testing** | `test/run` | Run tests with coverage |
-| **LSP** | `lsp/gopls` | Go language server operations |
-| **Mobile** | `mobile/ios`, `mobile/android` | Simulator/emulator automation |
-| **Sessions** | `session/restore`, `session/summarize`, `session/recall` | Context preservation |
-| **Memory** | `memory/put`, `memory/search`, `memory/query` | Persistent knowledge |
-| **Codemaps** | `codemap/generate`, `codemap/search` | Semantic code traces |
-| **Game Engines** | `build/unity`, `unity/packages`, `unity/scenes`, `unity/input` | Unity project management |
-
-```bash
-# List all available skills
+agentctl version
 agentctl skills list
-
-# Get skill details
-agentctl skills info code/semantic_search
-```
-
----
-
-## Hook System
-
-Hooks inject context at tool boundaries in AI coding sessions.
-
-```mermaid
-flowchart LR
-    subgraph "Claude Code"
-        TP[Tool Call]
-    end
-
-    subgraph "PreToolUse Hooks"
-        SS[semantic-search]
-        FMR[file-memory-recall]
-        OI[overseer-inbox]
-    end
-
-    subgraph "PostToolUse Hooks"
-        RCS[read-context-suggestions]
-        LD[lsp-diagnostics]
-        MP[memory-prompt]
-    end
-
-    TP --> SS
-    TP --> FMR
-    TP --> OI
-    SS --> TP
-    FMR --> TP
-    OI --> TP
-    TP --> RCS
-    TP --> LD
-    TP --> MP
-```
-
-### Active Hooks
-
-> **Canonical source:** [docs/general/hooks.md](docs/general/hooks.md)
-
-| Event | Hook | Purpose |
-|-------|------|---------|
-| PreToolUse | `semantic-search` | Vector search on Grep/Glob |
-| PreToolUse | `file-memory-recall` | Surface memories before editing |
-| PreToolUse | `overseer-inbox` | Human-in-the-loop messages |
-| PostToolUse | `read-context-suggestions` | Suggest context after reading code |
-| PostToolUse | `lsp-diagnostics` | Show LSP errors after editing |
-| SessionStart | `session-restore` | Restore context on resume |
-| PreCompact | `session-summarize` | Extract learnings before compaction |
-| Stop | `todo-continuation` | Block stop if tasks remain |
-| UserPromptSubmit | `skill-advisor` | Suggest skills based on prompt |
-
----
-
-## Memory System
-
-Persistent knowledge storage with vector search.
-
-```bash
-# Store a gotcha
-agentctl memory put \
-  --name "gotcha-session-archives" \
-  --type "gotcha" \
-  --summary "Session JSONL files are gzipped in archives"
-
-# Search memories
-agentctl memory search "session archives"
-
-# Types: gotcha, decision, pattern, learning, reference
-```
-
-### Memory Types
-
-| Type | Purpose | Example |
-|------|---------|---------|
-| `gotcha` | Pitfalls and warnings | "Skills must call config.LoadDotEnv()" |
-| `decision` | Architectural choices | "Using Voyage AI for embeddings (better benchmarks)" |
-| `pattern` | Code patterns | "TOCTOU-safe file reading pattern" |
-| `learning` | Discovered knowledge | "Session lineage via parent_session_id" |
-
----
-
-## Session Management
-
-Sessions track context across compaction boundaries.
-
-```mermaid
-flowchart TD
-    S1[Session 1] --> |compaction| W1[Window 1]
-    S1 --> |compaction| W2[Window 2]
-    S1 --> |fork| S2[Session 2]
-    S2 --> |compaction| W3[Window 3]
-
-    W1 --> |summarize| L1[Learnings]
-    W2 --> |summarize| L2[Learnings]
-    W3 --> |summarize| L3[Learnings]
-```
-
-```bash
-# View session chain
-agentctl sessions chain
-
-# Restore context
-agentctl run session/restore --input '{"session_id": "..."}'
-
-# Summarize session learnings
-agentctl run session/summarize --input '{"session_id": "..."}'
-```
-
----
-
-## Codemaps
-
-AI-generated semantic code traces.
-
-```bash
-# Generate a codemap
-agentctl codemap generate "trace the skill execution flow"
-
-# Search existing codemaps
-agentctl codemap search "authentication"
-```
-
-Codemaps include:
-- **ASCII Trees** — Hierarchical file/function traces
-- **Mermaid Diagrams** — Visual flowcharts
-- **Annotations** — Detailed explanations with file:line references
-
----
-
-## MCP Server
-
-Expose skills as MCP tools for any client.
-
-```bash
-# Start MCP server
-agentctl mcp serve
-
-# Check status
 agentctl mcp status
-
-# Stop server
-agentctl mcp stop
 ```
 
-The MCP server exposes all available skills as MCP tools via SSE transport,
-allowing any MCP-compatible client to discover and invoke them.
-
-For agent use, prefer the narrow optimized retrieval surface instead of the full MCP facade:
+Get oriented in a repo:
 
 ```bash
-# Start only the compact retrieval tools we optimized for agents
-agentctl mcp serve --optimized-retrieval
+agentctl run code/semantic_search --input '{"format":"tree"}'
 ```
 
-That profile exposes:
-- `structured_shell`
-- `repo_index_search`
-- `repo_index_expand`
-- `repo_index_dag_grep`
-- optimized retrieval skills such as `code/semantic_search`, `code/smart_search`, `code/snippet_extract`, `code/context_grep`, `code/dag_grep`, and `codemap/get`
-
-Use this when you want agent-friendly retrieval without overloading the tool surface with unrelated browser, web, or project-management tools.
-
----
-
-## GUI & TUI
-
-### Web GUI
+Build the repo graph index when you need call/reference navigation:
 
 ```bash
-# Start API server + Web GUI
+agentctl index repo build --workspace . --go --typescript --elixir
+```
+
+For non-Go repos, disable Go explicitly:
+
+```bash
+agentctl index repo build --workspace . --go=false --typescript --elixir
+```
+
+## Common Commands
+
+```bash
+# Skills
+agentctl run code/semantic_search --input '{"query":"error handling","limit":10}'
+agentctl run code/smart_search --input '{"query":"session restore"}'
+agentctl run code/context_grep --input '{"pattern":"Run\\(ctx","path":"internal"}'
+
+# Memory
+agentctl memory put --name "gotcha-x" --type "gotcha" --summary "..."
+agentctl memory search "gotcha"
+
+# Sessions / continuity
+agentctl sessions list
+agentctl context task-history-summary --task-id <id>
+
+# Agents
+agentctl agent spawn --role researcher --prompt "trace the room runtime"
+agentctl agent ask <id> --question "what did you find?" --wait
+
+# Rooms / durable coordination
+agentctl room create my-room
+agentctl room status my-room
+agentctl room inbox my-room
+
+# Web / MCP
+agentctl web serve --dev-cors
+agentctl mcp serve --skills
+```
+
+## Provider Bootstrap
+
+`scripts/init.sh` is the current source of truth for local provider wiring. It
+handles:
+
+- symlinking `agentctl` and `agentctl-cgo` into `~/.local/bin`
+- creating `~/.agentctl/{storage,cache,cas,skills,jobs,observability,backups}`
+- installing provider skill packs from `configs/skills-pack`
+- configuring Claude Code hooks/settings
+- wiring OpenCode plugin + skills + agents
+- creating Codex MCP config and skill links
+- linking Gemini skill packs
+- starting the shared MCP daemon with `agentctl mcp serve --daemon --skills`
+
+Today that bootstrap targets:
+
+- Claude Code
+- Codex
+- OpenCode
+- Gemini
+
+## Web GUI And TUI
+
+Install Bun dependencies first:
+
+```bash
+bun install
+```
+
+Run the web operator surface:
+
+```bash
 make gui-agent
-# Open http://localhost:5174
-
-# GUI only (requires API server already running)
-bun run dev:gui
 ```
 
-### Terminal UI
+Run the TUI package directly:
 
 ```bash
-# Start the new TUI control-plane shell (requires API server)
 bun run dev:tui
 ```
 
-The legacy diagnostics-first TUI has been archived. Active terminal work now targets `packages/tui-agent`, which is being rebuilt as an operator control plane alongside `gui-agent`.
+The API server entrypoint is:
 
----
+```bash
+agentctl web serve --dev-cors
+```
 
 ## Development
 
+Core Go workflow:
+
 ```bash
-# Build
-make build              # Pure Go
-make build-cgo          # With CGO (required for Turso)
-make skills-install     # Build and install skills
-
-# Test
-make test               # Unit tests
-make test-race          # Race detection
-make lint               # Linting
-
-# TypeScript
-bun install             # Install deps
-make gui-agent          # Start API + GUI
+make fmt
+make lint
+make test
+make test-race
+make test-cgo-short
 ```
 
-### CGO Build Note
+Builds:
 
-Never use raw `CGO_ENABLED=1 go build` — it causes duplicate SQLite symbol errors.
-Always use `make build-cgo` which includes `-tags=libsqlite3`.
+```bash
+make build
+make build-cgo
+make skills-install-all
+```
 
----
+Important CGO rule: do not use raw `CGO_ENABLED=1 go build` for the full CLI.
+Use `make build-cgo`, which adds `-tags=libsqlite3` and avoids duplicate SQLite
+symbol problems.
 
-## Storage
+For markdown/doc changes:
 
-| Database | Path | Purpose |
-|----------|------|---------|
-| `memory.db` | `~/.agentctl/storage/` | Memories, codemaps, symbols |
-| `tasks.db` | `~/.agentctl/storage/` | Task management |
-| `sessions.db` | `~/.agentctl/storage/` | Session lineage |
-| `trajectory.db` | `~/.agentctl/storage/` | Agent audit trail |
-| CAS | `~/.agentctl/cas/sha256/` | Content-addressable storage |
-
----
+```bash
+make check-doc-links
+```
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [AGENTS.md](AGENTS.md) | AI assistant contribution guide |
-| [docs/README.md](docs/README.md) | Canonical documentation map |
-| [.claude/CLAUDE.md](.claude/CLAUDE.md) | Claude Code integration reference |
-| [docs/spec/](docs/spec/) | Technical specifications |
-| [docs/general/events.md](docs/general/events.md) | Observability event stream documentation |
+Start with:
 
----
+- [AGENTS.md](AGENTS.md)
+- [docs/README.md](docs/README.md)
+- [docs/start/README.md](docs/start/README.md)
+- [docs/architecture/package-topology.md](docs/architecture/package-topology.md)
+
+Current high-signal docs:
+
+- [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md)
+- [docs/architecture/jido-hybrid-runtime.md](docs/architecture/jido-hybrid-runtime.md)
+- [docs/general/agent-daemon.md](docs/general/agent-daemon.md)
+- [docs/guides/kubernetes.md](docs/guides/kubernetes.md)
+- [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md)
 
 ## License
 
 Apache License 2.0
-
----
-
-<div align="center">
-
-**agentctl** — Infrastructure for AI coding assistants
-
-[Documentation](docs/README.md) • [Contributing](AGENTS.md) • [Specifications](docs/spec/)
-
-</div>

@@ -1,0 +1,427 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: jira/issue
+  version: 0.1.0
+  description: "Search, create, update, comment on, link, watch, assign, label, and transition Jira issues using stable Jira Cloud API token auth"
+  tags: ["jira", "issue", "ticket"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/jira_issue/jira_issue
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: jira/issue
+  parameters:
+    - name: operation
+      type: string
+      required: false
+      description: "Operation: search, get, list_links, projects, project, create, update, list_comments, comment, update_comment, delete_comment, list_link_types, link, unlink, list_watchers, add_watcher, remove_watcher, list_transitions, transition"
+      enum: ["search", "get", "list_links", "projects", "project", "create", "update", "list_comments", "comment", "update_comment", "delete_comment", "list_link_types", "link", "unlink", "list_watchers", "add_watcher", "remove_watcher", "list_transitions", "transition"]
+      default: "search"
+    - name: get
+      type: object
+      required: false
+      description: "Options for fetching one issue"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        fields:
+          type: array
+          items:
+            type: string
+          description: "Specific fields to return"
+        expand:
+          type: array
+          items:
+            type: string
+          description: "Expand parameters"
+    - name: search
+      type: object
+      required: false
+      description: "Options for JQL issue search"
+      properties:
+        jql:
+          type: string
+          description: "JQL query. Empty means Jira default search scope"
+        start_at:
+          type: integer
+          description: "Deprecated for Jira enhanced search; use next_page_token instead"
+        next_page_token:
+          type: string
+          description: "Pagination token returned by Jira enhanced search"
+        max_results:
+          type: integer
+          description: "Max issues to return (default: 25)"
+        fields:
+          type: array
+          items:
+            type: string
+          description: "Issue fields to return"
+        expand:
+          type: array
+          items:
+            type: string
+          description: "Expand parameters"
+    - name: list_links
+      type: object
+      required: false
+      description: "Options for discovering issue links on one issue"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+    - name: projects
+      type: object
+      required: false
+      description: "Options for listing Jira projects"
+      properties:
+        start_at:
+          type: integer
+          description: "Pagination offset"
+        max_results:
+          type: integer
+          description: "Max projects to return (default: 50)"
+        query:
+          type: string
+          description: "Project name/key filter"
+    - name: project
+      type: object
+      required: false
+      description: "Options for fetching one project and its metadata"
+      properties:
+        key:
+          type: string
+          description: "Project key or id"
+        expand:
+          type: array
+          items:
+            type: string
+          description: "Project expansions, defaults to issueTypes"
+    - name: create
+      type: object
+      required: false
+      description: "Options for issue creation"
+      properties:
+        project_key:
+          type: string
+          description: "Jira project key"
+        issue_type:
+          type: string
+          description: "Issue type name, for example Story, Task, Bug"
+        summary:
+          type: string
+          description: "Issue summary"
+        description:
+          type: string
+          description: "Plain text description converted to Atlassian Document Format"
+        parent_key:
+          type: string
+          description: "Optional parent issue key"
+        assignee_account_id:
+          type: string
+          description: "Atlassian account id to assign"
+        labels:
+          type: array
+          items:
+            type: string
+          description: "Labels to set on create"
+        fields:
+          type: object
+          description: "Raw Jira fields object for advanced creation cases"
+        update:
+          type: object
+          description: "Optional Jira update operations"
+    - name: update
+      type: object
+      required: false
+      description: "Options for issue updates"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        summary:
+          type: string
+          description: "Replace summary with this text"
+        description:
+          type: string
+          description: "Replace description with plain text converted to Atlassian Document Format"
+        parent_key:
+          type: string
+          description: "Re-parent to another issue key"
+        assignee_account_id:
+          type: string
+          description: "Set assignee by Atlassian account id"
+        clear_assignee:
+          type: boolean
+          description: "Clear the assignee"
+        set_labels:
+          type: array
+          items:
+            type: string
+          description: "Replace labels with this exact set"
+        add_labels:
+          type: array
+          items:
+            type: string
+          description: "Labels to add"
+        remove_labels:
+          type: array
+          items:
+            type: string
+          description: "Labels to remove"
+        fields:
+          type: object
+          description: "Raw Jira fields object"
+        update:
+          type: object
+          description: "Raw Jira update operations"
+        notify_users:
+          type: boolean
+          description: "Whether Jira should notify watchers"
+    - name: list_comments
+      type: object
+      required: false
+      description: "Options for listing comments"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        start_at:
+          type: integer
+          description: "Pagination offset"
+        max_results:
+          type: integer
+          description: "Max comments to return (default: 50)"
+    - name: comment
+      type: object
+      required: false
+      description: "Options for adding a comment"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        body:
+          type: string
+          description: "Plain text comment converted to Atlassian Document Format"
+        body_adf:
+          type: object
+          description: "Raw Atlassian Document Format comment body"
+        visibility:
+          type: object
+          description: "Optional Jira visibility restriction object"
+    - name: update_comment
+      type: object
+      required: false
+      description: "Options for updating a comment"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        comment_id:
+          type: string
+          description: "Comment id"
+        body:
+          type: string
+          description: "Plain text comment converted to Atlassian Document Format"
+        body_adf:
+          type: object
+          description: "Raw Atlassian Document Format comment body"
+        visibility:
+          type: object
+          description: "Optional Jira visibility restriction object"
+    - name: delete_comment
+      type: object
+      required: false
+      description: "Options for deleting a comment"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        comment_id:
+          type: string
+          description: "Comment id"
+    - name: link
+      type: object
+      required: false
+      description: "Options for creating an issue link"
+      properties:
+        outward_issue_key:
+          type: string
+          description: "Outward issue key"
+        inward_issue_key:
+          type: string
+          description: "Inward issue key"
+        type_name:
+          type: string
+          description: "Link type name, for example Blocks or Relates"
+        comment:
+          type: string
+          description: "Optional plain text comment"
+        comment_adf:
+          type: object
+          description: "Optional Atlassian Document Format comment"
+    - name: unlink
+      type: object
+      required: false
+      description: "Options for deleting an issue link"
+      properties:
+        link_id:
+          type: string
+          description: "Issue link id"
+    - name: list_watchers
+      type: object
+      required: false
+      description: "Options for listing watchers"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+    - name: add_watcher
+      type: object
+      required: false
+      description: "Options for adding a watcher"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        account_id:
+          type: string
+          description: "Atlassian account id to add; omit to add the caller"
+    - name: remove_watcher
+      type: object
+      required: false
+      description: "Options for removing a watcher"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        account_id:
+          type: string
+          description: "Atlassian account id to remove"
+    - name: list_transitions
+      type: object
+      required: false
+      description: "Options for listing transitions"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+    - name: transition
+      type: object
+      required: false
+      description: "Options for applying a transition"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        transition_id:
+          type: string
+          description: "Transition id returned by list_transitions"
+        fields:
+          type: object
+          description: "Optional Jira fields set during transition"
+        update:
+          type: object
+          description: "Optional Jira update operations applied during transition"
+        comment:
+          type: string
+          description: "Plain text transition comment converted to Atlassian Document Format"
+        comment_adf:
+          type: object
+          description: "Raw Atlassian Document Format comment body"
+  help:
+    short: "Search and mutate Jira issues."
+    long: |
+      Use jira/issue to search for tickets, inspect project metadata and issue
+      links, create new issues, update fields, manage comments, manage
+      labels/assignees/watchers, create issue links, and move issues through
+      workflow transitions.
+
+      Authentication is read from:
+        JIRA_BASE_URL
+        JIRA_EMAIL
+        JIRA_API_TOKEN
+
+      Example commands:
+        agentctl run jira/issue --input '{"operation":"search","search":{"jql":"project = ENG AND statusCategory != Done","fields":["summary","status","assignee"]}}'
+        agentctl run jira/issue --input '{"operation":"projects","projects":{"query":"DEVOPS"}}'
+        agentctl run jira/issue --input '{"operation":"list_links","list_links":{"key":"ENG-123"}}'
+        agentctl run jira/issue --input '{"operation":"create","create":{"project_key":"ENG","issue_type":"Task","summary":"Wire Jira MCP tools","description":"Create native Jira skills."}}'
+        agentctl run jira/issue --input '{"operation":"comment","comment":{"key":"ENG-123","body":"Investigated and updated the implementation plan."}}'
+        agentctl run jira/issue --input '{"operation":"update_comment","update_comment":{"key":"ENG-123","comment_id":"10001","body":"Adjusted after review."}}'
+        agentctl run jira/issue --input '{"operation":"update","update":{"key":"ENG-123","add_labels":["Devops"],"clear_assignee":true}}'
+        agentctl run jira/issue --input '{"operation":"list_watchers","list_watchers":{"key":"ENG-123"}}'
+    workflows:
+      - id: search-issues
+        description: "Search issues using JQL."
+        example_input:
+          operation: "search"
+          search:
+            jql: "project = ENG AND statusCategory != Done"
+            fields: ["summary", "status", "assignee"]
+      - id: create-issue
+        description: "Create a new issue using convenience fields."
+        example_input:
+          operation: "create"
+          create:
+            project_key: "ENG"
+            issue_type: "Task"
+            summary: "Wire Jira MCP tools"
+            description: "Create stable Jira skills with API token auth."
+      - id: link-issues
+        description: "Create a Jira issue link."
+        example_input:
+          operation: "link"
+          link:
+            outward_issue_key: "ENG-123"
+            inward_issue_key: "ENG-456"
+            type_name: "Blocks"
+      - id: manage-watchers
+        description: "List watchers or add one by account id."
+        example_input:
+          operation: "add_watcher"
+          add_watcher:
+            key: "ENG-123"
+            account_id: "712020:abc123"
+      - id: transition-issue
+        description: "Move an issue through a workflow transition."
+        example_input:
+          operation: "transition"
+          transition:
+            key: "ENG-123"
+            transition_id: "31"
+            comment: "Moving this into In Progress."
+returns:
+  - name: issue
+    type: object
+    description: "Issue returned by Jira"
+  - name: issues
+    type: array
+    description: "Issues returned by Jira search"
+  - name: transitions
+    type: array
+    description: "Available workflow transitions"
+  - name: values
+    type: array
+    description: "Projects or link types returned by Jira"
+  - name: comments
+    type: array
+    description: "Comments returned by Jira"
+  - name: links
+    type: array
+    description: "Issue links returned by Jira"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: get
+    POST: create
+    PUT: update

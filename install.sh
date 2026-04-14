@@ -1,84 +1,83 @@
 #!/usr/bin/env bash
-# install.sh - One-step agentctl installation
-#
-# Usage:
-#   From repo:     ./install.sh
-#   Standalone:    curl -fsSL https://raw.githubusercontent.com/jkatigb/agentctl/main/install.sh | bash
-#
-# Options:
-#   --provider <name>   Install for specific provider (claude-code, opencode, codex, all)
-#   --skip-hooks        Skip hooks installation
-#   --skip-skills       Skip skills installation
-#   --no-build          Skip building (use pre-built or existing binary)
-#   --validate          Only validate installation, don't install
-#   --help              Show this help
-#
-# Environment:
-#   AGENTCTL_HOME       Installation directory (default: ~/.agentctl)
-#   AGENTCTL_PROVIDER   Default provider (default: auto-detect)
 
 set -euo pipefail
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+readonly REPO_URL="https://gitlab.com/joshka0/agentctl.git"
+readonly GO_VERSION_REQUIRED="1.26.1"
+readonly DEFAULT_REPO_DIR="${HOME}/.agentctl/src/agentctl"
+readonly AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.agentctl}"
+readonly LOCAL_BIN="${HOME}/.local/bin"
 
-# Logging
-info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-success() { echo -e "${GREEN}[OK]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; }
-step() { echo -e "\n${CYAN}==> $1${NC}"; }
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+NC=$'\033[0m'
 
-# Defaults
-AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.agentctl}"
-LOCAL_BIN="${HOME}/.local/bin"
-PROVIDER="${AGENTCTL_PROVIDER:-auto}"
-SKIP_HOOKS=false
-SKIP_SKILLS=false
-NO_BUILD=false
-VALIDATE_ONLY=false
-REPO_URL="https://github.com/jkatigb/agentctl"
+ASSUME_YES=false
+SKIP_CGO=false
+SKIP_BUN=false
+SKIP_PROVIDER_SETUP=false
+REPO_DIR="${AGENTCTL_REPO_DIR:-}"
 
-# Detect if running from repo
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR/Makefile" && -d "$SCRIPT_DIR/configs" ]]; then
-    REPO_ROOT="$SCRIPT_DIR"
-    FROM_REPO=true
-else
-    REPO_ROOT=""
-    FROM_REPO=false
-fi
+info() { printf "%s[INFO]%s %s\n" "$BLUE" "$NC" "$1"; }
+success() { printf "%s[OK]%s %s\n" "$GREEN" "$NC" "$1"; }
+warn() { printf "%s[WARN]%s %s\n" "$YELLOW" "$NC" "$1" >&2; }
+error() { printf "%s[ERROR]%s %s\n" "$RED" "$NC" "$1" >&2; }
+step() { printf "\n%s==> %s%s\n" "$CYAN" "$1" "$NC"; }
 
-# Parse arguments
+show_help() {
+    cat <<'EOF'
+agentctl installer
+
+Usage:
+  ./install.sh
+  ./install.sh --yes
+  curl -fsSL https://gitlab.com/joshka0/agentctl/-/raw/main/install.sh | bash
+
+Options:
+  --yes, -y               Run non-interactively with recommended defaults
+  --skip-cgo              Skip CGO/SQLite support and agentctl-cgo
+  --skip-bun              Skip Bun installation and bun install
+  --skip-provider-setup   Skip scripts/init.sh
+  --repo-dir <path>       Repo checkout directory when not run from a clone
+  --help, -h              Show this help
+
+Environment:
+  AGENTCTL_HOME           Defaults to ~/.agentctl
+  AGENTCTL_REPO_DIR       Default checkout dir when cloning outside a repo
+EOF
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --provider)
-            PROVIDER="$2"
+        --yes|-y)
+            ASSUME_YES=true
+            shift
+            ;;
+        --skip-cgo)
+            SKIP_CGO=true
+            shift
+            ;;
+        --skip-bun)
+            SKIP_BUN=true
+            shift
+            ;;
+        --skip-provider-setup)
+            SKIP_PROVIDER_SETUP=true
+            shift
+            ;;
+        --repo-dir)
+            if [[ -z "${2:-}" ]]; then
+                error "--repo-dir requires a path"
+                exit 1
+            fi
+            REPO_DIR="$2"
             shift 2
             ;;
-        --skip-hooks)
-            SKIP_HOOKS=true
-            shift
-            ;;
-        --skip-skills)
-            SKIP_SKILLS=true
-            shift
-            ;;
-        --no-build)
-            NO_BUILD=true
-            shift
-            ;;
-        --validate)
-            VALIDATE_ONLY=true
-            shift
-            ;;
         --help|-h)
-            head -19 "$0" | tail -17
+            show_help
             exit 0
             ;;
         *)
@@ -88,213 +87,412 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# =============================================================================
-# Helper Functions
-# =============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/Makefile" && -d "$SCRIPT_DIR/configs" ]]; then
+    FROM_REPO=true
+    REPO_ROOT="$SCRIPT_DIR"
+else
+    FROM_REPO=false
+    REPO_ROOT=""
+fi
 
-detect_provider() {
-    if [[ "$PROVIDER" != "auto" ]]; then
-        echo "$PROVIDER"
+is_tty() {
+    [[ -t 0 && -t 1 ]]
+}
+
+confirm() {
+    local prompt="$1"
+    local default="${2:-y}"
+    local reply=""
+
+    if [[ "$ASSUME_YES" == true ]]; then
+        [[ "$default" == "y" ]]
         return
     fi
 
-    # Claude Code (most common)
-    if [[ -d "$HOME/.claude" ]] || command -v claude &>/dev/null; then
-        echo "claude-code"
+    if ! is_tty; then
+        [[ "$default" == "y" ]]
         return
     fi
 
-    # OpenCode
-    if [[ -d "$HOME/.opencode" ]] || command -v opencode &>/dev/null; then
-        echo "opencode"
+    local suffix="[y/N]"
+    if [[ "$default" == "y" ]]; then
+        suffix="[Y/n]"
+    fi
+
+    read -r -p "$prompt $suffix " reply
+    reply="${reply:-$default}"
+    [[ "$reply" =~ ^[Yy]$ ]]
+}
+
+prompt_install_options() {
+    if [[ "$ASSUME_YES" == true ]]; then
+        return
+    fi
+    if ! is_tty; then
         return
     fi
 
-    # Default to claude-code
-    echo "claude-code"
+    printf "%s\n" "Recommended install profile:"
+    printf "%s\n" "- build the pure-Go CLI and skills"
+    printf "%s\n" "- build agentctl-cgo with SQLite/libsqlite3 support"
+    printf "%s\n" "- install Bun for GUI/TUI/OpenCode workflows"
+    printf "%s\n" "- run provider setup for Claude/Codex/OpenCode/Gemini"
+    printf "\n"
+
+    if ! confirm "Install CGO/SQLite support?" "y"; then
+        SKIP_CGO=true
+    fi
+    if ! confirm "Install Bun and bootstrap JS workspaces?" "y"; then
+        SKIP_BUN=true
+    fi
+    if ! confirm "Run provider setup via scripts/init.sh?" "y"; then
+        SKIP_PROVIDER_SETUP=true
+    fi
 }
 
-ensure_directories() {
-    mkdir -p "$AGENTCTL_HOME"/{storage,skills,cache,cas}
-    mkdir -p "$LOCAL_BIN"
+detect_os() {
+    case "$(uname -s)" in
+        Darwin) echo "darwin" ;;
+        Linux) echo "linux" ;;
+        *) echo "unknown" ;;
+    esac
 }
 
-# =============================================================================
-# Build/Download
-# =============================================================================
+version_ge() {
+    local left="$1"
+    local right="$2"
+    local IFS=.
+    local left_parts=()
+    local right_parts=()
+    local count=0
+    local i=0
 
-build_agentctl() {
-    if [[ "$NO_BUILD" == true ]]; then
-        info "Skipping build (--no-build)"
-        return 0
+    read -r -a left_parts <<< "$left"
+    read -r -a right_parts <<< "$right"
+
+    count="${#left_parts[@]}"
+    if (( ${#right_parts[@]} > count )); then
+        count="${#right_parts[@]}"
     fi
 
-    if [[ "$FROM_REPO" != true ]]; then
-        warn "Not in repo, skipping build"
-        return 0
-    fi
-
-    step "Building agentctl"
-    cd "$REPO_ROOT"
-
-    # Prefer CGO build for full functionality
-    if [[ -n "${CGO_ENABLED:-}" ]] || command -v gcc &>/dev/null; then
-        info "Building with CGO support"
-        make build-cgo 2>/dev/null || make build
-    else
-        info "Building without CGO"
-        make build
-    fi
-
-    success "Built agentctl"
-}
-
-link_binary() {
-    local binary="$AGENTCTL_HOME/bin/agentctl"
-
-    # Check various locations for the binary
-    if [[ -f "$REPO_ROOT/bin/agentctl" ]]; then
-        binary="$REPO_ROOT/bin/agentctl"
-    elif [[ -f "$AGENTCTL_HOME/bin/agentctl" ]]; then
-        binary="$AGENTCTL_HOME/bin/agentctl"
-    fi
-
-    if [[ -f "$binary" ]]; then
-        ln -sf "$binary" "$LOCAL_BIN/agentctl"
-        success "Linked agentctl to $LOCAL_BIN/agentctl"
-        return 0
-    fi
-
-    # Check if already in PATH
-    if command -v agentctl &>/dev/null; then
-        success "agentctl already in PATH"
-        return 0
-    fi
-
-    warn "agentctl binary not found"
-    return 1
-}
-
-build_skills() {
-    if [[ "$SKIP_SKILLS" == true ]]; then
-        info "Skipping skills build (--skip-skills)"
-        return 0
-    fi
-
-    if [[ "$FROM_REPO" != true ]]; then
-        return 0
-    fi
-
-    step "Building skills"
-    cd "$REPO_ROOT"
-    make skills-install 2>/dev/null || warn "Skills build failed (non-fatal)"
-    success "Built skills"
-}
-
-# =============================================================================
-# Main Installation via Skill
-# =============================================================================
-
-run_setup_skill() {
-    local provider
-    provider=$(detect_provider)
-
-    step "Running setup/install skill"
-
-    # Build the JSON input
-    local input
-    input=$(jq -nc \
-        --arg provider "$provider" \
-        --argjson skip_hooks "$SKIP_HOOKS" \
-        --argjson skip_skills "$SKIP_SKILLS" \
-        --argjson validate_only "$VALIDATE_ONLY" \
-        --arg repo_root "$REPO_ROOT" \
-        '{
-            provider: $provider,
-            skip_hooks: $skip_hooks,
-            skip_skills: $skip_skills,
-            validate_only: $validate_only,
-            repo_root: (if $repo_root == "" then null else $repo_root end)
-        }')
-
-    # Run the skill
-    local result
-    if result=$(agentctl run setup/install --input "$input" 2>&1); then
-        # Parse and display results
-        local status hook_count
-        status=$(echo "$result" | jq -r '.data.status // "unknown"')
-        hook_count=$(echo "$result" | jq -r '.data.hooks.hook_count // 0')
-
-        if [[ "$status" == "ok" ]]; then
-            success "Installation complete"
-            info "Provider: $provider"
-            info "Hooks installed: $hook_count"
-
-            if [[ "$VALIDATE_ONLY" == true ]]; then
-                info "Validation mode - no changes made"
-            fi
-        else
-            local err_msg
-            err_msg=$(echo "$result" | jq -r '.error.message // "Unknown error"')
-            error "Installation failed: $err_msg"
+    for ((i = 0; i < count; i++)); do
+        local left_part="${left_parts[i]:-0}"
+        local right_part="${right_parts[i]:-0}"
+        if (( 10#$left_part > 10#$right_part )); then
+            return 0
+        fi
+        if (( 10#$left_part < 10#$right_part )); then
             return 1
         fi
+    done
+
+    return 0
+}
+
+detect_pkg_manager() {
+    if command -v brew >/dev/null 2>&1; then
+        echo "brew"
+    elif command -v apt-get >/dev/null 2>&1; then
+        echo "apt-get"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "dnf"
+    elif command -v yum >/dev/null 2>&1; then
+        echo "yum"
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "pacman"
     else
-        error "Failed to run setup/install skill"
-        echo "$result" >&2
-        return 1
+        echo "unknown"
     fi
 }
 
-# =============================================================================
-# Main
-# =============================================================================
-
-main() {
-    echo -e "${CYAN}"
-    echo "╔═══════════════════════════════════════════════════════════════╗"
-    echo "║                    agentctl installer                         ║"
-    echo "╚═══════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-
-    if [[ "$FROM_REPO" == true ]]; then
-        info "Installing from repository: $REPO_ROOT"
-    else
-        info "Standalone installation"
+go_version_ok() {
+    if ! command -v go >/dev/null 2>&1; then
+        return 1
     fi
 
-    # Step 1: Ensure directories exist
-    step "Creating directories"
-    ensure_directories
-    success "Directories ready"
+    local current
+    current="$(go version | awk '{print $3}' | sed 's/^go//')"
+    [[ -n "$current" ]] || return 1
 
-    # Step 2: Build agentctl (if from repo)
-    build_agentctl
+    version_ge "$current" "$GO_VERSION_REQUIRED"
+}
 
-    # Step 3: Link binary to PATH
-    step "Linking binary"
-    link_binary || true
+need_cmd() {
+    command -v "$1" >/dev/null 2>&1
+}
 
-    # Step 4: Build skills (if from repo)
-    build_skills
+run_with_sudo() {
+    if [[ "$(id -u)" -eq 0 ]]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
 
-    # Step 5: Run setup/install skill for hooks and config
-    if ! command -v agentctl &>/dev/null; then
-        error "agentctl not found in PATH after installation"
-        info "Add $LOCAL_BIN to your PATH and re-run"
+install_core_packages() {
+    local pkg_manager="$1"
+    local want_bun="$2"
+    local want_cgo="$3"
+
+    case "$pkg_manager" in
+        brew)
+            local packages=(git make jq go)
+            if [[ "$want_cgo" == "true" ]]; then
+                packages+=(sqlite)
+            fi
+            info "Installing core packages with Homebrew: ${packages[*]}"
+            brew install "${packages[@]}"
+            if [[ "$want_bun" == "true" ]] && ! need_cmd bun; then
+                info "Installing Bun with Homebrew"
+                brew install oven-sh/bun/bun
+            fi
+            ;;
+        apt-get)
+            info "Installing core packages with apt-get"
+            run_with_sudo apt-get update
+            local packages=(git make jq curl golang-go)
+            if [[ "$want_cgo" == "true" ]]; then
+                packages+=(build-essential pkg-config libsqlite3-dev)
+            fi
+            run_with_sudo apt-get install -y "${packages[@]}"
+            ;;
+        dnf)
+            info "Installing core packages with dnf"
+            local packages=(git make jq curl golang)
+            if [[ "$want_cgo" == "true" ]]; then
+                packages+=(gcc gcc-c++ make pkgconf-pkg-config sqlite-devel)
+            fi
+            run_with_sudo dnf install -y "${packages[@]}"
+            ;;
+        yum)
+            info "Installing core packages with yum"
+            local packages=(git make jq curl golang)
+            if [[ "$want_cgo" == "true" ]]; then
+                packages+=(gcc gcc-c++ make pkgconfig sqlite-devel)
+            fi
+            run_with_sudo yum install -y "${packages[@]}"
+            ;;
+        pacman)
+            info "Installing core packages with pacman"
+            local packages=(git make jq curl go)
+            if [[ "$want_cgo" == "true" ]]; then
+                packages+=(base-devel pkgconf sqlite)
+            fi
+            run_with_sudo pacman -Sy --noconfirm "${packages[@]}"
+            ;;
+        *)
+            warn "No supported package manager found. Install git, make, jq, and Go ${GO_VERSION_REQUIRED}+ manually."
+            if [[ "$want_cgo" == "true" ]]; then
+                warn "Also install a C toolchain and SQLite development headers for CGO support."
+            fi
+            ;;
+    esac
+}
+
+install_bun_if_needed() {
+    local pkg_manager="$1"
+    if [[ "$SKIP_BUN" == true ]]; then
+        return
+    fi
+    if need_cmd bun; then
+        return
+    fi
+
+    if ! confirm "Bun is missing. Install it now?" "y"; then
+        warn "Skipping Bun install. GUI/TUI/OpenCode plugin setup will be limited."
+        SKIP_BUN=true
+        return
+    fi
+
+    case "$pkg_manager" in
+        brew)
+            brew install oven-sh/bun/bun
+            ;;
+        *)
+            if need_cmd curl; then
+                info "Installing Bun via the official install script"
+                curl -fsSL https://bun.sh/install | bash
+                export PATH="${HOME}/.bun/bin:${PATH}"
+            else
+                warn "curl is required to install Bun automatically. Install Bun manually and re-run if needed."
+                SKIP_BUN=true
+            fi
+            ;;
+    esac
+}
+
+ensure_dependencies() {
+    local pkg_manager
+    pkg_manager="$(detect_pkg_manager)"
+    local want_bun="true"
+    local want_cgo="true"
+
+    if [[ "$SKIP_BUN" == true ]]; then
+        want_bun="false"
+    fi
+    if [[ "$SKIP_CGO" == true ]]; then
+        want_cgo="false"
+    fi
+
+    local missing_core=false
+    if ! need_cmd git || ! need_cmd make || ! need_cmd jq || ! go_version_ok; then
+        missing_core=true
+    fi
+
+    if [[ "$missing_core" == true ]]; then
+        step "Installing core dependencies"
+        info "Package manager: $pkg_manager"
+        if confirm "Install or update the required toolchain packages?" "y"; then
+            install_core_packages "$pkg_manager" "$want_bun" "$want_cgo"
+        else
+            warn "Skipping automatic dependency installation."
+        fi
+    fi
+
+    if ! need_cmd git; then
+        error "git is required"
+        exit 1
+    fi
+    if ! need_cmd make; then
+        error "make is required"
+        exit 1
+    fi
+    if ! need_cmd jq; then
+        error "jq is required"
+        exit 1
+    fi
+    if ! go_version_ok; then
+        error "Go ${GO_VERSION_REQUIRED}+ is required"
         exit 1
     fi
 
-    run_setup_skill
+    install_bun_if_needed "$pkg_manager"
+}
 
-    # Done
-    echo ""
-    success "Installation complete!"
-    echo ""
-    info "Next steps:"
-    echo "  1. Ensure $LOCAL_BIN is in your PATH"
-    echo "  2. Run 'agentctl --help' to get started"
-    echo "  3. Run 'agentctl run setup/install --input '{\"validate_only\": true}'' to verify"
+prepare_repo() {
+    if [[ "$FROM_REPO" == true ]]; then
+        REPO_ROOT="$SCRIPT_DIR"
+        success "Using current repository checkout: $REPO_ROOT"
+        return
+    fi
+
+    REPO_ROOT="${REPO_DIR:-$DEFAULT_REPO_DIR}"
+    mkdir -p "$(dirname "$REPO_ROOT")"
+
+    step "Preparing repository checkout"
+    if [[ -d "$REPO_ROOT/.git" ]]; then
+        info "Updating existing checkout at $REPO_ROOT"
+        git -C "$REPO_ROOT" fetch --depth 1 origin main
+        git -C "$REPO_ROOT" checkout main
+        git -C "$REPO_ROOT" pull --ff-only origin main
+    else
+        info "Cloning $REPO_URL into $REPO_ROOT"
+        git clone --depth 1 "$REPO_URL" "$REPO_ROOT"
+    fi
+}
+
+ensure_local_layout() {
+    mkdir -p "$LOCAL_BIN" "$AGENTCTL_HOME"
+    mkdir -p "$AGENTCTL_HOME"/{storage,cache,cas,skills,jobs,observability/events,backups}
+    export PATH="$LOCAL_BIN:$PATH"
+}
+
+build_agentctl() {
+    step "Building agentctl"
+    cd "$REPO_ROOT"
+
+    make build
+    if [[ "$SKIP_CGO" == false ]]; then
+        make build-cgo
+    fi
+}
+
+install_skills() {
+    step "Installing skills"
+    cd "$REPO_ROOT"
+
+    make skills-install
+    if [[ "$SKIP_CGO" == false ]]; then
+        make skills-install-cgo
+    fi
+}
+
+link_binaries() {
+    step "Linking binaries into $LOCAL_BIN"
+    cd "$REPO_ROOT"
+
+    ln -sf "$REPO_ROOT/bin/agentctl" "$LOCAL_BIN/agentctl"
+    if [[ -f "$REPO_ROOT/bin/agentctl-cgo" ]]; then
+        ln -sf "$REPO_ROOT/bin/agentctl-cgo" "$LOCAL_BIN/agentctl-cgo"
+    fi
+    if [[ -f "$REPO_ROOT/bin/agentctl-mail" ]]; then
+        ln -sf "$REPO_ROOT/bin/agentctl-mail" "$LOCAL_BIN/agentctl-mail"
+    fi
+}
+
+bootstrap_bun_workspace() {
+    if [[ "$SKIP_BUN" == true ]]; then
+        info "Skipping Bun workspace bootstrap"
+        return
+    fi
+    if ! need_cmd bun; then
+        warn "Bun is not available; skipping bun install"
+        return
+    fi
+
+    step "Installing Bun workspace dependencies"
+    cd "$REPO_ROOT"
+    bun install
+}
+
+run_provider_setup() {
+    if [[ "$SKIP_PROVIDER_SETUP" == true ]]; then
+        info "Skipping provider setup"
+        return
+    fi
+
+    step "Running provider bootstrap"
+    cd "$REPO_ROOT"
+    ./scripts/init.sh
+}
+
+print_summary() {
+    printf "\n"
+    success "agentctl installation finished"
+    printf "\n"
+    printf "%s\n" "Repo:        $REPO_ROOT"
+    printf "%s\n" "AGENTCTL_HOME: $AGENTCTL_HOME"
+    printf "%s\n" "PATH link:   $LOCAL_BIN/agentctl"
+    printf "\n"
+    printf "%s\n" "Next steps:"
+    printf "%s\n" "  1. Ensure $LOCAL_BIN is in your PATH"
+    printf "%s\n" "  2. Run 'agentctl version'"
+    printf "%s\n" "  3. Run 'agentctl skills list'"
+    printf "%s\n" "  4. Add API keys to ~/.agentctl/.env as needed"
+    if [[ "$SKIP_PROVIDER_SETUP" == false ]]; then
+        printf "%s\n" "  5. Restart Claude/Codex/OpenCode/Gemini if you want them to pick up new config"
+    fi
+}
+
+main() {
+    printf "%s" "$CYAN"
+    printf "╔═══════════════════════════════════════════════════════════════╗\n"
+    printf "║                    agentctl installer                        ║\n"
+    printf "╚═══════════════════════════════════════════════════════════════╝\n"
+    printf "%s" "$NC"
+    printf "\n"
+
+    prompt_install_options
+    ensure_dependencies
+    prepare_repo
+    ensure_local_layout
+    build_agentctl
+    install_skills
+    link_binaries
+    bootstrap_bun_workspace
+    run_provider_setup
+    print_summary
 }
 
 main "$@"
