@@ -3,7 +3,7 @@ kind: Skill
 metadata:
   name: jira/issue
   version: 0.1.0
-  description: "Search, create, update, comment on, link, assign, label, and transition Jira issues using stable Jira Cloud API token auth"
+  description: "Search, create, update, comment on, link, watch, assign, label, and transition Jira issues using stable Jira Cloud API token auth"
   tags: ["jira", "issue", "ticket"]
 distribution:
   type: exec
@@ -18,8 +18,8 @@ signature:
     - name: operation
       type: string
       required: false
-      description: "Operation: search, get, projects, project, create, update, list_comments, comment, list_link_types, link, unlink, list_transitions, transition"
-      enum: ["search", "get", "projects", "project", "create", "update", "list_comments", "comment", "list_link_types", "link", "unlink", "list_transitions", "transition"]
+      description: "Operation: search, get, list_links, projects, project, create, update, list_comments, comment, update_comment, delete_comment, list_link_types, link, unlink, list_watchers, add_watcher, remove_watcher, list_transitions, transition"
+      enum: ["search", "get", "list_links", "projects", "project", "create", "update", "list_comments", "comment", "update_comment", "delete_comment", "list_link_types", "link", "unlink", "list_watchers", "add_watcher", "remove_watcher", "list_transitions", "transition"]
       default: "search"
     - name: get
       type: object
@@ -66,6 +66,14 @@ signature:
           items:
             type: string
           description: "Expand parameters"
+    - name: list_links
+      type: object
+      required: false
+      description: "Options for discovering issue links on one issue"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
     - name: projects
       type: object
       required: false
@@ -205,6 +213,37 @@ signature:
         visibility:
           type: object
           description: "Optional Jira visibility restriction object"
+    - name: update_comment
+      type: object
+      required: false
+      description: "Options for updating a comment"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        comment_id:
+          type: string
+          description: "Comment id"
+        body:
+          type: string
+          description: "Plain text comment converted to Atlassian Document Format"
+        body_adf:
+          type: object
+          description: "Raw Atlassian Document Format comment body"
+        visibility:
+          type: object
+          description: "Optional Jira visibility restriction object"
+    - name: delete_comment
+      type: object
+      required: false
+      description: "Options for deleting a comment"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        comment_id:
+          type: string
+          description: "Comment id"
     - name: link
       type: object
       required: false
@@ -233,6 +272,36 @@ signature:
         link_id:
           type: string
           description: "Issue link id"
+    - name: list_watchers
+      type: object
+      required: false
+      description: "Options for listing watchers"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+    - name: add_watcher
+      type: object
+      required: false
+      description: "Options for adding a watcher"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        account_id:
+          type: string
+          description: "Atlassian account id to add; omit to add the caller"
+    - name: remove_watcher
+      type: object
+      required: false
+      description: "Options for removing a watcher"
+      properties:
+        key:
+          type: string
+          description: "Issue key or id"
+        account_id:
+          type: string
+          description: "Atlassian account id to remove"
     - name: list_transitions
       type: object
       required: false
@@ -267,9 +336,10 @@ signature:
   help:
     short: "Search and mutate Jira issues."
     long: |
-      Use jira/issue to search for tickets, inspect project metadata, create new
-      issues, update fields, add comments, manage labels/assignees, create issue
-      links, and move issues through workflow transitions.
+      Use jira/issue to search for tickets, inspect project metadata and issue
+      links, create new issues, update fields, manage comments, manage
+      labels/assignees/watchers, create issue links, and move issues through
+      workflow transitions.
 
       Authentication is read from:
         JIRA_BASE_URL
@@ -279,9 +349,12 @@ signature:
       Example commands:
         agentctl run jira/issue --input '{"operation":"search","search":{"jql":"project = ENG AND statusCategory != Done","fields":["summary","status","assignee"]}}'
         agentctl run jira/issue --input '{"operation":"projects","projects":{"query":"DEVOPS"}}'
+        agentctl run jira/issue --input '{"operation":"list_links","list_links":{"key":"ENG-123"}}'
         agentctl run jira/issue --input '{"operation":"create","create":{"project_key":"ENG","issue_type":"Task","summary":"Wire Jira MCP tools","description":"Create native Jira skills."}}'
         agentctl run jira/issue --input '{"operation":"comment","comment":{"key":"ENG-123","body":"Investigated and updated the implementation plan."}}'
+        agentctl run jira/issue --input '{"operation":"update_comment","update_comment":{"key":"ENG-123","comment_id":"10001","body":"Adjusted after review."}}'
         agentctl run jira/issue --input '{"operation":"update","update":{"key":"ENG-123","add_labels":["Devops"],"clear_assignee":true}}'
+        agentctl run jira/issue --input '{"operation":"list_watchers","list_watchers":{"key":"ENG-123"}}'
     workflows:
       - id: search-issues
         description: "Search issues using JQL."
@@ -307,6 +380,13 @@ signature:
             outward_issue_key: "ENG-123"
             inward_issue_key: "ENG-456"
             type_name: "Blocks"
+      - id: manage-watchers
+        description: "List watchers or add one by account id."
+        example_input:
+          operation: "add_watcher"
+          add_watcher:
+            key: "ENG-123"
+            account_id: "712020:abc123"
       - id: transition-issue
         description: "Move an issue through a workflow transition."
         example_input:
@@ -331,6 +411,9 @@ returns:
   - name: comments
     type: array
     description: "Comments returned by Jira"
+  - name: links
+    type: array
+    description: "Issue links returned by Jira"
 capabilities:
   network: "egress"
   filesystem:

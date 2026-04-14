@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -148,6 +149,108 @@ func TestCreateIssueLinkUsesExpectedPayload(t *testing.T) {
 	}
 	if gotBody["inwardIssue"].(map[string]any)["key"] != "TEST-2" {
 		t.Fatalf("inwardIssue = %#v", gotBody["inwardIssue"])
+	}
+}
+
+func TestAddWatcherUsesWatcherEndpoint(t *testing.T) {
+	t.Helper()
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/rest/api/3/issue/TEST-1/watchers" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		gotBody = string(data)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    srv.URL,
+		Email:      "user@example.com",
+		APIToken:   "secret",
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	if err := client.AddWatcher(context.Background(), "TEST-1", "712020:abc123"); err != nil {
+		t.Fatalf("AddWatcher() error = %v", err)
+	}
+	if gotBody != `"712020:abc123"` {
+		t.Fatalf("body = %q", gotBody)
+	}
+}
+
+func TestUpdateCommentUsesExpectedEndpoint(t *testing.T) {
+	t.Helper()
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if r.URL.Path != "/rest/api/3/issue/TEST-1/comment/10001" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"10001"}`))
+	}))
+	defer srv.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    srv.URL,
+		Email:      "user@example.com",
+		APIToken:   "secret",
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	if _, err := client.UpdateComment(context.Background(), "TEST-1", "10001", "updated", nil, nil); err != nil {
+		t.Fatalf("UpdateComment() error = %v", err)
+	}
+	body, ok := gotBody["body"].(map[string]any)
+	if !ok || body["type"] != "doc" {
+		t.Fatalf("body = %#v", gotBody["body"])
+	}
+}
+
+func TestDeleteCommentUsesExpectedEndpoint(t *testing.T) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Fatalf("method = %s, want DELETE", r.Method)
+		}
+		if r.URL.Path != "/rest/api/3/issue/TEST-1/comment/10001" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	client, err := NewClient(Config{
+		BaseURL:    srv.URL,
+		Email:      "user@example.com",
+		APIToken:   "secret",
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	if err := client.DeleteComment(context.Background(), "TEST-1", "10001"); err != nil {
+		t.Fatalf("DeleteComment() error = %v", err)
 	}
 }
 

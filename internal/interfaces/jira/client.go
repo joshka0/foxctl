@@ -263,6 +263,11 @@ func (c *Client) GetIssue(ctx context.Context, key string, fields, expand []stri
 	return out, nil
 }
 
+// ListIssueLinks returns issue link information for an issue.
+func (c *Client) ListIssueLinks(ctx context.Context, key string) (map[string]any, error) {
+	return c.GetIssue(ctx, key, []string{"issuelinks", "summary", "status"}, nil)
+}
+
 // ListComments lists comments for an issue.
 func (c *Client) ListComments(ctx context.Context, key string, startAt, maxResults int) (map[string]any, error) {
 	query := url.Values{}
@@ -272,6 +277,26 @@ func (c *Client) ListComments(ctx context.Context, key string, startAt, maxResul
 		return nil, err
 	}
 	return out, nil
+}
+
+// UpdateComment updates an existing issue comment.
+func (c *Client) UpdateComment(ctx context.Context, key, commentID, bodyText string, bodyADF, visibility map[string]any) (map[string]any, error) {
+	body := map[string]any{
+		"body": normalizeADF(bodyText, bodyADF),
+	}
+	if len(visibility) > 0 {
+		body["visibility"] = visibility
+	}
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodPut, platformAPIBase+"/issue/"+url.PathEscape(key)+"/comment/"+url.PathEscape(commentID), nil, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// DeleteComment removes a comment from an issue.
+func (c *Client) DeleteComment(ctx context.Context, key, commentID string) error {
+	return c.doJSON(ctx, http.MethodDelete, platformAPIBase+"/issue/"+url.PathEscape(key)+"/comment/"+url.PathEscape(commentID), nil, nil, nil)
 }
 
 // CreateIssue creates a Jira issue.
@@ -353,6 +378,37 @@ func (c *Client) CreateIssueLink(ctx context.Context, outwardIssueKey, inwardIss
 // DeleteIssueLink removes a Jira issue link by id.
 func (c *Client) DeleteIssueLink(ctx context.Context, linkID string) error {
 	return c.doJSON(ctx, http.MethodDelete, platformAPIBase+"/issueLink/"+url.PathEscape(linkID), nil, nil, nil)
+}
+
+// ListWatchers returns watcher information for an issue.
+func (c *Client) ListWatchers(ctx context.Context, key string) (map[string]any, error) {
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, platformAPIBase+"/issue/"+url.PathEscape(key)+"/watchers", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AddWatcher adds a watcher account id to an issue. Empty account id adds the caller.
+func (c *Client) AddWatcher(ctx context.Context, key, accountID string) error {
+	payload := strings.TrimSpace(accountID)
+	if payload == "" {
+		payload = `""`
+	} else {
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal watcher account id: %w", err)
+		}
+		payload = string(payloadBytes)
+	}
+	return c.doRaw(ctx, http.MethodPost, platformAPIBase+"/issue/"+url.PathEscape(key)+"/watchers", nil, []byte(payload))
+}
+
+// RemoveWatcher removes a watcher account id from an issue.
+func (c *Client) RemoveWatcher(ctx context.Context, key, accountID string) error {
+	query := url.Values{}
+	addIfNonEmpty(query, "accountId", accountID)
+	return c.doJSON(ctx, http.MethodDelete, platformAPIBase+"/issue/"+url.PathEscape(key)+"/watchers", query, nil, nil)
 }
 
 // ListTransitions returns available transitions for an issue.
@@ -440,6 +496,40 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("decode jira response: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) doRaw(ctx context.Context, method, path string, query url.Values, body []byte) error {
+	fullURL := c.baseURL + path
+	if len(query) > 0 {
+		fullURL += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create jira request: %w", err)
+	}
+	req.SetBasicAuth(c.email, c.apiToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("jira request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read jira response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		jiraErr := &Error{StatusCode: resp.StatusCode, RawBody: strings.TrimSpace(string(data))}
+		var env errorEnvelope
+		if err := json.Unmarshal(data, &env); err == nil {
+			jiraErr.ErrorMessages = env.ErrorMessages
+			jiraErr.Errors = env.Errors
+		}
+		return jiraErr
 	}
 	return nil
 }

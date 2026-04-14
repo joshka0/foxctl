@@ -18,6 +18,7 @@ const command = "jira/issue"
 type input struct {
 	Operation       string              `json:"operation"`
 	Get             *getReq             `json:"get"`
+	ListLinks       *listLinksReq       `json:"list_links"`
 	Search          *searchReq          `json:"search"`
 	Projects        *projectsReq        `json:"projects"`
 	Project         *projectReq         `json:"project"`
@@ -25,9 +26,14 @@ type input struct {
 	Update          *updateReq          `json:"update"`
 	ListComments    *listCommentsReq    `json:"list_comments"`
 	Comment         *commentReq         `json:"comment"`
+	UpdateComment   *updateCommentReq   `json:"update_comment"`
+	DeleteComment   *deleteCommentReq   `json:"delete_comment"`
 	ListLinkTypes   bool                `json:"list_link_types"`
 	Link            *linkReq            `json:"link"`
 	Unlink          *unlinkReq          `json:"unlink"`
+	ListWatchers    *listWatchersReq    `json:"list_watchers"`
+	AddWatcher      *watcherReq         `json:"add_watcher"`
+	RemoveWatcher   *watcherReq         `json:"remove_watcher"`
 	ListTransitions *listTransitionsReq `json:"list_transitions"`
 	Transition      *transitionReq      `json:"transition"`
 }
@@ -36,6 +42,10 @@ type getReq struct {
 	Key    string   `json:"key"`
 	Fields []string `json:"fields"`
 	Expand []string `json:"expand"`
+}
+
+type listLinksReq struct {
+	Key string `json:"key"`
 }
 
 type searchReq struct {
@@ -98,6 +108,19 @@ type commentReq struct {
 	Visibility map[string]any `json:"visibility"`
 }
 
+type updateCommentReq struct {
+	Key        string         `json:"key"`
+	CommentID  string         `json:"comment_id"`
+	Body       string         `json:"body"`
+	BodyADF    map[string]any `json:"body_adf"`
+	Visibility map[string]any `json:"visibility"`
+}
+
+type deleteCommentReq struct {
+	Key       string `json:"key"`
+	CommentID string `json:"comment_id"`
+}
+
 type linkReq struct {
 	OutwardIssueKey string         `json:"outward_issue_key"`
 	InwardIssueKey  string         `json:"inward_issue_key"`
@@ -108,6 +131,15 @@ type linkReq struct {
 
 type unlinkReq struct {
 	LinkID string `json:"link_id"`
+}
+
+type listWatchersReq struct {
+	Key string `json:"key"`
+}
+
+type watcherReq struct {
+	Key       string `json:"key"`
+	AccountID string `json:"account_id"`
 }
 
 type listTransitionsReq struct {
@@ -141,6 +173,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	data, err := oputil.NewSwitch(in.Operation).
 		Case("get", func() (map[string]any, error) { return getIssue(ctx, rc, client, in.Get) }).
+		Case("list_links", func() (map[string]any, error) { return listIssueLinks(ctx, rc, client, in.ListLinks) }).
 		Case("search", func() (map[string]any, error) { return searchIssues(ctx, rc, client, in.Search) }).
 		Case("projects", func() (map[string]any, error) { return listProjects(ctx, rc, client, in.Projects) }).
 		Case("project", func() (map[string]any, error) { return getProject(ctx, rc, client, in.Project) }).
@@ -148,16 +181,21 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		Case("update", func() (map[string]any, error) { return updateIssue(ctx, rc, client, in.Update) }).
 		Case("list_comments", func() (map[string]any, error) { return listComments(ctx, rc, client, in.ListComments) }).
 		Case("comment", func() (map[string]any, error) { return addComment(ctx, rc, client, in.Comment) }).
+		Case("update_comment", func() (map[string]any, error) { return updateComment(ctx, rc, client, in.UpdateComment) }).
+		Case("delete_comment", func() (map[string]any, error) { return deleteComment(ctx, rc, client, in.DeleteComment) }).
 		Case("list_link_types", func() (map[string]any, error) { return listLinkTypes(ctx, rc, client) }).
 		Case("link", func() (map[string]any, error) { return createLink(ctx, rc, client, in.Link) }).
 		Case("unlink", func() (map[string]any, error) { return deleteLink(ctx, rc, client, in.Unlink) }).
+		Case("list_watchers", func() (map[string]any, error) { return listWatchers(ctx, rc, client, in.ListWatchers) }).
+		Case("add_watcher", func() (map[string]any, error) { return addWatcher(ctx, rc, client, in.AddWatcher) }).
+		Case("remove_watcher", func() (map[string]any, error) { return removeWatcher(ctx, rc, client, in.RemoveWatcher) }).
 		Case("list_transitions", func() (map[string]any, error) { return listTransitions(ctx, rc, client, in.ListTransitions) }).
 		Case("transition", func() (map[string]any, error) { return transitionIssue(ctx, rc, client, in.Transition) }).
 		Run()
 	if err != nil {
 		var invalid *oputil.InvalidOpError
 		if errors.As(err, &invalid) {
-			return skillerr.Arg(err.Error(), skillerr.WithHint("Use one of: comment, create, get, link, list_comments, list_link_types, list_transitions, project, projects, search, transition, unlink, update."))
+			return skillerr.Arg(err.Error(), skillerr.WithHint("Use one of: add_watcher, comment, create, delete_comment, get, link, list_comments, list_link_types, list_links, list_transitions, list_watchers, project, projects, remove_watcher, search, transition, unlink, update, update_comment."))
 		}
 		return err
 	}
@@ -180,6 +218,54 @@ func getIssue(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.
 	}
 	result["operation"] = "get"
 	return result, nil
+}
+
+func listIssueLinks(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *listLinksReq) (map[string]any, error) {
+	if req == nil || strings.TrimSpace(req.Key) == "" {
+		return nil, skillerr.Arg("list_links.key is required")
+	}
+	var issue map[string]any
+	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var callErr error
+		issue, callErr = client.ListIssueLinks(ctx, req.Key)
+		return callErr
+	})
+	if err != nil {
+		return nil, wrapJiraErr("list issue links", err)
+	}
+	fields, _ := issue["fields"].(map[string]any)
+	rawLinks, _ := fields["issuelinks"].([]any)
+	links := make([]map[string]any, 0, len(rawLinks))
+	for _, item := range rawLinks {
+		link, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		entry := map[string]any{
+			"id": link["id"],
+		}
+		if linkType, ok := link["type"].(map[string]any); ok {
+			entry["type"] = map[string]any{
+				"id":      linkType["id"],
+				"name":    linkType["name"],
+				"inward":  linkType["inward"],
+				"outward": linkType["outward"],
+			}
+		}
+		if outward, ok := link["outwardIssue"].(map[string]any); ok {
+			entry["outward_issue"] = summarizeLinkedIssue(outward)
+		}
+		if inward, ok := link["inwardIssue"].(map[string]any); ok {
+			entry["inward_issue"] = summarizeLinkedIssue(inward)
+		}
+		links = append(links, entry)
+	}
+	return map[string]any{
+		"operation": "list_links",
+		"key":       req.Key,
+		"links":     links,
+		"count":     len(links),
+	}, nil
 }
 
 func searchIssues(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *searchReq) (map[string]any, error) {
@@ -350,6 +436,52 @@ func addComment(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 	return result, nil
 }
 
+func updateComment(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *updateCommentReq) (map[string]any, error) {
+	if req == nil || strings.TrimSpace(req.Key) == "" {
+		return nil, skillerr.Arg("update_comment.key is required")
+	}
+	if strings.TrimSpace(req.CommentID) == "" {
+		return nil, skillerr.Arg("update_comment.comment_id is required")
+	}
+	if strings.TrimSpace(req.Body) == "" && len(req.BodyADF) == 0 {
+		return nil, skillerr.Arg("update_comment requires body or body_adf")
+	}
+	var result map[string]any
+	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var callErr error
+		result, callErr = client.UpdateComment(ctx, req.Key, req.CommentID, req.Body, req.BodyADF, req.Visibility)
+		return callErr
+	})
+	if err != nil {
+		return nil, wrapJiraErr("update comment", err)
+	}
+	result["operation"] = "update_comment"
+	result["key"] = req.Key
+	result["comment_id"] = req.CommentID
+	return result, nil
+}
+
+func deleteComment(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *deleteCommentReq) (map[string]any, error) {
+	if req == nil || strings.TrimSpace(req.Key) == "" {
+		return nil, skillerr.Arg("delete_comment.key is required")
+	}
+	if strings.TrimSpace(req.CommentID) == "" {
+		return nil, skillerr.Arg("delete_comment.comment_id is required")
+	}
+	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		return client.DeleteComment(ctx, req.Key, req.CommentID)
+	})
+	if err != nil {
+		return nil, wrapJiraErr("delete comment", err)
+	}
+	return map[string]any{
+		"operation":  "delete_comment",
+		"key":        req.Key,
+		"comment_id": req.CommentID,
+		"updated":    true,
+	}, nil
+}
+
 func listLinkTypes(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client) (map[string]any, error) {
 	var result map[string]any
 	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
@@ -403,6 +535,63 @@ func deleteLink(ctx context.Context, rc *skillmain.RunContext, client *jiraclien
 		"operation": "unlink",
 		"link_id":   req.LinkID,
 		"updated":   true,
+	}, nil
+}
+
+func listWatchers(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *listWatchersReq) (map[string]any, error) {
+	if req == nil || strings.TrimSpace(req.Key) == "" {
+		return nil, skillerr.Arg("list_watchers.key is required")
+	}
+	var result map[string]any
+	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		var callErr error
+		result, callErr = client.ListWatchers(ctx, req.Key)
+		return callErr
+	})
+	if err != nil {
+		return nil, wrapJiraErr("list watchers", err)
+	}
+	result["operation"] = "list_watchers"
+	result["key"] = req.Key
+	return result, nil
+}
+
+func addWatcher(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *watcherReq) (map[string]any, error) {
+	if req == nil || strings.TrimSpace(req.Key) == "" {
+		return nil, skillerr.Arg("add_watcher.key is required")
+	}
+	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		return client.AddWatcher(ctx, req.Key, req.AccountID)
+	})
+	if err != nil {
+		return nil, wrapJiraErr("add watcher", err)
+	}
+	return map[string]any{
+		"operation":  "add_watcher",
+		"key":        req.Key,
+		"account_id": strings.TrimSpace(req.AccountID),
+		"updated":    true,
+	}, nil
+}
+
+func removeWatcher(ctx context.Context, rc *skillmain.RunContext, client *jiraclient.Client, req *watcherReq) (map[string]any, error) {
+	if req == nil || strings.TrimSpace(req.Key) == "" {
+		return nil, skillerr.Arg("remove_watcher.key is required")
+	}
+	if strings.TrimSpace(req.AccountID) == "" {
+		return nil, skillerr.Arg("remove_watcher.account_id is required")
+	}
+	err := skillmain.GuardCall(rc, skillmain.BreakerHTTP, ctx, func(ctx context.Context) error {
+		return client.RemoveWatcher(ctx, req.Key, req.AccountID)
+	})
+	if err != nil {
+		return nil, wrapJiraErr("remove watcher", err)
+	}
+	return map[string]any{
+		"operation":  "remove_watcher",
+		"key":        req.Key,
+		"account_id": strings.TrimSpace(req.AccountID),
+		"updated":    true,
 	}, nil
 }
 
@@ -502,6 +691,20 @@ func buildLabelUpdate(add, remove []string) []map[string]any {
 		ops = append(ops, map[string]any{"remove": value})
 	}
 	return ops
+}
+
+func summarizeLinkedIssue(issue map[string]any) map[string]any {
+	out := map[string]any{
+		"id":  issue["id"],
+		"key": issue["key"],
+	}
+	if fields, ok := issue["fields"].(map[string]any); ok {
+		out["summary"] = fields["summary"]
+		if status, ok := fields["status"].(map[string]any); ok {
+			out["status"] = status["name"]
+		}
+	}
+	return out
 }
 
 func wrapJiraErr(action string, err error) error {
