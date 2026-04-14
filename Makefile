@@ -125,31 +125,31 @@ gepa-leaderboard:
 	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/foxctl optimize dataset claude leaderboard $(ARGS)
 
 eval-code-search-foxctl-package:
-	@bash ./scripts/eval_code_search_agentctl_package.sh $(ARGS)
+	@bash ./scripts/eval_code_search_foxctl_package.sh $(ARGS)
 
 eval-code-search-praze-infra:
 	@bash ./scripts/eval_code_search_praze_infra.sh $(ARGS)
 
 eval-code-search-foxctl-repo-grounded:
-	@bash ./scripts/eval_code_search_agentctl_repo_grounded.sh $(ARGS)
+	@bash ./scripts/eval_code_search_foxctl_repo_grounded.sh $(ARGS)
 
 eval-code-search-foxctl-change-impact:
-	@bash ./scripts/eval_code_search_agentctl_change_impact.sh $(ARGS)
+	@bash ./scripts/eval_code_search_foxctl_change_impact.sh $(ARGS)
 
 eval-code-search-foxctl-trace-symbol:
-	@bash ./scripts/eval_code_search_agentctl_trace_symbol.sh $(ARGS)
+	@bash ./scripts/eval_code_search_foxctl_trace_symbol.sh $(ARGS)
 
 eval-code-search-foxctl-bridge-esoteric:
-	@bash ./scripts/eval_code_search_agentctl_bridge_esoteric.sh $(ARGS)
+	@bash ./scripts/eval_code_search_foxctl_bridge_esoteric.sh $(ARGS)
 
 eval-retrieval-foxctl:
-	@bash ./scripts/eval_retrieval_agentctl.sh $(ARGS)
+	@bash ./scripts/eval_retrieval_foxctl.sh $(ARGS)
 
 eval-retrieval-foxctl-mixed:
-	@bash ./scripts/eval_retrieval_agentctl_mixed.sh $(ARGS)
+	@bash ./scripts/eval_retrieval_foxctl_mixed.sh $(ARGS)
 
 eval-retrieval-foxctl-cochange:
-	@bash ./scripts/eval_retrieval_agentctl_cochange.sh $(ARGS)
+	@bash ./scripts/eval_retrieval_foxctl_cochange.sh $(ARGS)
 
 eval-retrieval-jido:
 	@bash ./scripts/eval_retrieval_jido.sh $(ARGS)
@@ -348,7 +348,7 @@ init: build-all skills-install-all
 	@./scripts/init.sh
 
 viewer:
-	@$(GO_CMD) build -trimpath -o bin/foxctl-viewer ./cmd/agentctl_viewer
+	@$(GO_CMD) build -trimpath -o bin/foxctl-viewer ./cmd/foxctl_viewer
 
 install-mail:
 	@./scripts/install-mail.sh
@@ -356,10 +356,10 @@ install-mail:
 # Web UI targets
 web-templ:
 	@command -v templ >/dev/null 2>&1 || { echo "templ not installed. Run: go install github.com/a-h/templ/cmd/templ@latest"; exit 1; }
-	@templ generate ./cmd/agentctl_web/templates/
+	@templ generate ./cmd/foxctl_web/templates/
 
 web-build: web-templ
-	@$(GO_CMD) build -trimpath -o bin/foxctl-web ./cmd/agentctl_web
+	@$(GO_CMD) build -trimpath -o bin/foxctl-web ./cmd/foxctl_web
 
 web-run: web-build
 	@./bin/foxctl-web
@@ -731,7 +731,7 @@ check: fmt lint vet test check-coverage check-doc-links check-large-files check-
 completions: build
 	@mkdir -p dist
 	@bin/$(BINARY) completion bash > dist/completion.bash
-	@bin/$(BINARY) completion zsh > dist/_agentctl
+	@bin/$(BINARY) completion zsh > dist/_foxctl
 
 # Environment file sync (repo → ~/.foxctl)
 # Use real files, not symlinks, for sandbox/remote compatibility
