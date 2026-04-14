@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/spf13/cobra"
 )
 

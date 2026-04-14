@@ -57,7 +57,7 @@ func TestRebuildSearchRelatedAndStats(t *testing.T) {
 	if len(tagHits) == 0 {
 		t.Fatalf("expected tag-aware search hits")
 	}
-	repoPathHits, err := store.SearchNotes(ctx, "internal/contextplane", 10)
+	repoPathHits, err := store.SearchNotes(ctx, "internal/context/contextplane", 10)
 	if err != nil {
 		t.Fatalf("SearchNotes repo paths: %v", err)
 	}
@@ -74,8 +74,8 @@ func TestRebuildSearchRelatedAndStats(t *testing.T) {
 	if len(primaryAnchorHits) == 0 {
 		t.Fatalf("expected primary-anchor-aware search hits")
 	}
-	if primaryAnchorHits[0].PrimaryAnchorPath != "internal/contextplane/store.go" {
-		t.Fatalf("primary anchor=%q want internal/contextplane/store.go", primaryAnchorHits[0].PrimaryAnchorPath)
+	if primaryAnchorHits[0].PrimaryAnchorPath != "internal/context/contextplane/store.go" {
+		t.Fatalf("primary anchor=%q want internal/context/contextplane/store.go", primaryAnchorHits[0].PrimaryAnchorPath)
 	}
 	if got := primaryAnchorHits[0].AnchorRoles["impl"]; len(got) != 0 {
 		t.Fatalf("unexpected impl anchor roles in fixture hit: %v", got)
@@ -190,7 +190,7 @@ func fixtureVaultRoot(t *testing.T) string {
 	if !ok {
 		t.Fatalf("runtime caller unavailable")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "tools", "obsidian", "testdata", "vaults", "basic"))
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "tooling", "tools", "obsidian", "testdata", "vaults", "basic"))
 }
 
 type fakeEmbeddingProvider struct{}

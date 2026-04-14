@@ -3,7 +3,7 @@ package hookutil
 import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks"
 )
 
 // EmitOutput emits a standard hook output envelope with optional extra fields.

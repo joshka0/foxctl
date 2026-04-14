@@ -15,7 +15,7 @@ This is the canonical current-state architecture map for `agentctl`.
 ```mermaid
 flowchart TD
     CLI[cmd/agentctl]
-    Web[internal/web + API handlers]
+    Web[internal/interfaces/web + API handlers]
     Legacy[legacy agent runtime\ninternal/agent + internal/agent/daemon]
     V2[v2 services/runtime\ninternal/v2/services + internal/v2/runtime/*]
     Jido[Jido bridge\ninternal/v2/adapters/jido]
@@ -64,15 +64,15 @@ flowchart TD
 
 | Group | Key packages | Responsibility | Primary docs |
 |------|--------------|----------------|--------------|
-| Legacy agent runtime | `internal/agent`, `internal/agent/daemon`, `internal/execution/agentmanager` | Mailbox-driven sessions, overseer hierarchy, legacy spawn/list/run/kill paths still used by some CLI flows | `docs/general/agent-daemon.md`, `docs/spec/agent_hierarchy.md` |
+| Legacy agent runtime | `internal/agent`, `internal/agent/daemon`, `internal/runtime/execution/agentmanager` | Mailbox-driven sessions, overseer hierarchy, legacy spawn/list/run/kill paths still used by some CLI flows | `docs/general/agent-daemon.md`, `docs/spec/agent_hierarchy.md` |
 | V2 command and orchestration stack | `internal/v2/core/*`, `internal/v2/services`, `internal/v2/runtime/{runner,orchestration,supervisor,tools,snapshots,profiles}` | Typed v2 commands, event-sourced orchestration, staged turn execution, long-lived components | `docs/general/runtime-orchestration.md`, `docs/spec/v2_symphony_kanban_orchestration.md` |
 | Jido execution bridge | `internal/v2/adapters/jido` | JSON-RPC client, child spawn bridge, ask/runtime adapter, orchestration reconciliation, companion provider | `docs/general/runtime-orchestration.md` |
-| Companion and context assembly | `internal/companion`, `internal/v2/runtime/contextbuilder`, `internal/v2/runtime/enrichers` | Conversation memory, layered context assembly, async derived artifacts, companion bridge integration | `docs/general/companion-memory.md`, `docs/general/context-and-observability.md` |
+| Companion and context assembly | `internal/context/companion`, `internal/v2/runtime/contextbuilder`, `internal/v2/runtime/enrichers` | Conversation memory, layered context assembly, async derived artifacts, companion bridge integration | `docs/general/companion-memory.md`, `docs/general/context-and-observability.md` |
 | State and persistence | `internal/storage/*`, `internal/v2/adapters/libsql/*` | Durable stores, CAS, mailbox/task/session persistence, v2 events and projections | `docs/general/storage.md`, `docs/architecture/postgres-storage.md` |
-| Retrieval and indexing | `internal/indexing/*`, `internal/retrieval`, `internal/codecontext`, `internal/codemap` | Semantic/symbol/repo indexing and context extraction | `docs/general/search.md`, `docs/general/repoindex.md` |
-| Interface layers | `internal/web`, `internal/chatadapter`, `internal/openapi`, `internal/providers` | API/server surfaces and external platform integrations | `docs/general/api-server.md`, `docs/architecture/chat-platform-adapter.md` |
-| Observability and hooks | `internal/observability`, `internal/hooks`, `internal/context/updater` | Trace/event propagation, hook execution, proactive context surfacing | `docs/general/context-and-observability.md`, `docs/general/hooks.md` |
-| Foundations | `internal/domain`, `internal/platform`, `internal/protocol`, `internal/tools`, `internal/tooling` | Core types, config/platform utilities, protocol helpers | `docs/general/architecture.md`, `docs/spec/README.md` |
+| Retrieval and indexing | `internal/intelligence/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap` | Semantic/symbol/repo indexing and context extraction | `docs/general/search.md`, `docs/general/repoindex.md` |
+| Interface layers | `internal/interfaces/web`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi`, `internal/providers` | API/server surfaces and external platform integrations | `docs/general/api-server.md`, `docs/architecture/chat-platform-adapter.md` |
+| Observability and hooks | `internal/runtime/observability`, `internal/runtime/hooks`, `internal/context/updater` | Trace/event propagation, hook execution, proactive context surfacing | `docs/general/context-and-observability.md`, `docs/general/hooks.md` |
+| Foundations | `internal/domain`, `internal/platform`, `internal/protocol`, `internal/tooling/tools`, `internal/tooling` | Core types, config/platform utilities, protocol helpers | `docs/general/architecture.md`, `docs/spec/README.md` |
 
 For the canonical grouping target for `internal/*` and the explicit legacy-runtime
 vs `v2` replacement map, see `docs/architecture/package-topology.md`.

@@ -75,7 +75,7 @@ The viewer must not change the core envelope contract or mutate jobs/CAS/memory.
   - Viewer backend uses direct Go imports:
     - `internal/view/jobs` (read model from core spec),
     - `internal/storage/jobs`, `internal/storage/cas`,
-    - `internal/analysis/tasksgraph`, overseer/agent runtime as needed.
+    - `internal/intelligence/analysis/tasksgraph`, overseer/agent runtime as needed.
 
 - **External skills and extensions**  
   - Viewer treats envelopes as the contract boundary:
@@ -150,7 +150,7 @@ reach directly into storage or CAS packages.
 - **Behavior**:
   - Node selection (up/down/left/right).
   - Node details (type, status, summary).
-  - Optional metrics (critical path, degree) reusing [tasksgraph](cci:7://file://internalinternal/analysis/tasksgraph:0:0-0:0).
+  - Optional metrics (critical path, degree) reusing [tasksgraph](cci:7://file://internalinternal/intelligence/analysis/tasksgraph:0:0-0:0).
 
 
 ### 3.4 Artifacts View

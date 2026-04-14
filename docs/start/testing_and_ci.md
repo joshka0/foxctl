@@ -163,7 +163,7 @@ The test infrastructure is designed to give fast, local feedback and surface it
 back to agents:
 
 - `agentctl watch tests` – daemon that watches the workspace and runs configured
-  test commands (see `cmd/agentctl/cmd/watch.go` and `internal/testwatch/`).
+  test commands (see `cmd/agentctl/cmd/watch.go` and `internal/tooling/testwatch/`).
 - Status is persisted in SQLite (`~/.agentctl/storage/test_watch.db`) via the
   `testwatch` store.
 - The `hooks/test_feedback` skill reads this store and returns a summary of

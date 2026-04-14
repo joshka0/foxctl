@@ -25,13 +25,13 @@ Create a CLI tool that analyzes the codebase and outputs actionable Markdown che
 
 **Files Touched:**
 - `cmd/agentctl/cmd/doc_coverage.go` - CLI command implementation
-- `internal/analysis/doc_coverage.go` - Core analysis logic
-- `internal/analysis/doc_coverage_test.go` - Unit tests
+- `internal/intelligence/analysis/doc_coverage.go` - Core analysis logic
+- `internal/intelligence/analysis/doc_coverage_test.go` - Unit tests
 
 **Implementation Details:**
 
 ```go
-// internal/analysis/doc_coverage.go
+// internal/intelligence/analysis/doc_coverage.go
 
 // Report represents documentation coverage analysis results
 type Report struct {
@@ -74,7 +74,7 @@ func (r *Report) FormatMarkdown(w io.Writer) error
 agentctl doc-coverage ./...
 
 # Specific packages
-agentctl doc-coverage ./internal/indexing/... ./skills/...
+agentctl doc-coverage ./internal/intelligence/indexing/... ./skills/...
 
 # Output to file for tracking
 agentctl doc-coverage ./... > docs/doc-coverage-checklist.md
@@ -98,7 +98,7 @@ Generated: 2024-01-15T10:30:00Z
 
 ---
 
-## internal/indexing/repoindex/store
+## internal/intelligence/indexing/repoindex/store
 
 - [ ] Add `doc.go` for package
 
@@ -117,7 +117,7 @@ Generated: 2024-01-15T10:30:00Z
 
 ---
 
-## internal/retrieval
+## internal/intelligence/retrieval
 
 - [x] Has `doc.go`
 
@@ -150,15 +150,15 @@ Create a doc linter that can run in CI to enforce documentation standards. Initi
 
 **Files Touched:**
 - `scripts/lint-doc.sh` - CI entrypoint script
-- `internal/analysis/doc_lint.go` - Linting rules implementation
-- `internal/analysis/doc_lint_test.go` - Unit tests
+- `internal/intelligence/analysis/doc_lint.go` - Linting rules implementation
+- `internal/intelligence/analysis/doc_lint_test.go` - Unit tests
 - `Makefile` - Add `lint-doc` target
 - `.github/workflows/ci.yml` - Optional CI integration (warn-only)
 
 **Implementation Details:**
 
 ```go
-// internal/analysis/doc_lint.go
+// internal/intelligence/analysis/doc_lint.go
 
 // Rule represents a documentation lint rule
 type Rule interface {
@@ -216,7 +216,7 @@ make lint-doc
 agentctl lint-doc ./...
 
 # Specific packages
-agentctl lint-doc ./internal/indexing/...
+agentctl lint-doc ./internal/intelligence/indexing/...
 
 # Exit with error on warnings (for enforcement)
 agentctl lint-doc ./... --fail-on-warn
@@ -280,13 +280,13 @@ Execute the documentation sweep in focused PRs per subsystem. Each PR adds `doc.
 | PR | Subsystem | Packages | Priority |
 |----|-----------|----------|----------|
 | 6.3 | Storage core | `internal/storage/*` | HIGH |
-| 6.4 | Indexing | `internal/indexing/*` | HIGH |
-| 6.5 | Retrieval | `internal/retrieval/*` | HIGH |
-| 6.6 | Actor system | `internal/actor/*` | MEDIUM |
+| 6.4 | Indexing | `internal/intelligence/indexing/*` | HIGH |
+| 6.5 | Retrieval | `internal/intelligence/retrieval/*` | HIGH |
+| 6.6 | Actor system | `internal/runtime/actor/*` | MEDIUM |
 | 6.7 | Skills (batch 1) | `skills/code/*`, `skills/memory/*` | HIGH |
 | 6.8 | Skills (batch 2) | `skills/todo/*`, `skills/repo_index/*` | MEDIUM |
 | 6.9 | Platform | `internal/platform/*` | MEDIUM |
-| 6.10 | Companion | `internal/companion/*` | LOW |
+| 6.10 | Companion | `internal/context/companion/*` | LOW |
 
 **Files per PR (template):**
 
@@ -312,7 +312,7 @@ For each package in the subsystem:
 //   - [Store] - Core DAG storage operations
 //   - [Builder] - Graph construction from AST
 //   - [Query] - Search and expansion engine
-//   - internal/retrieval - Uses graph for enhanced retrieval
+//   - internal/intelligence/retrieval - Uses graph for enhanced retrieval
 //   - skills/repo_index_search - Agent-facing search tool
 package repoindex
 ```
@@ -333,7 +333,7 @@ package repoindex
 //   - [NewStore] - Constructor with migration support
 //   - [Node] - Graph node representation
 //   - [Edge] - Graph edge representation
-//   - internal/indexing/repoindex/builder - Populates store
+//   - internal/intelligence/indexing/repoindex/builder - Populates store
 type Store struct {
     // ...
 }

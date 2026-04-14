@@ -12,7 +12,7 @@
 ## Architecture Decision
 
 - **Dual-write** in `session/annotate`: always write legacy `session_chunks`, and additionally write rich `TurnAnnotation` rows to `annotations.db`.
-- Dedicated **annotation queue wrapper** in `internal/storage/annotations` using generic `internal/queue` package.
+- Dedicated **annotation queue wrapper** in `internal/storage/annotations` using generic `internal/storage/queue` package.
 - **Option-based retrieval methods** on `SessionStore` (non-breaking): filtered chunk/context-window search by `workspace`/`session_id`.
 - Keep inline annotation flow unchanged by default; add opt-in queue-backed embedding and optional queue-based backfill in `embedding_worker`.
 - Hook-triggered auto-annotation through `hooks/session_end` via `hooks.ActionRunSkill`.
@@ -78,7 +78,7 @@ Mirror new methods for interface conformance.
 
 ### `internal/storage/annotations/queue.go` (new)
 
-Annotation-specific queue wrapper using `internal/queue`:
+Annotation-specific queue wrapper using `internal/storage/queue`:
 
 ```go
 type AnnotationEmbeddingPayload struct {

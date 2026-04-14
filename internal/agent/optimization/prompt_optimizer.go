@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/intelligence/verification"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
-	"github.com/jkatigb/agentctl/internal/verification"
 )
 
 // PromptOptimizer optimizes agent prompts based on execution outcomes.

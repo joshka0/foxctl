@@ -9,4 +9,4 @@
   `meta.correlation_id` and `meta.job_id` where available.
 - Persisted `Trajectory`, `UserRequestCapture`, and `TrajectoryEvent` records to
   the trajectory store with secrets redaction applied prior to persistence.
-- Added unit tests for the `internal/trajectorycapture` package.
+- Added unit tests for the `internal/runtime/trajectorycapture` package.

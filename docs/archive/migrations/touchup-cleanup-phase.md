@@ -43,8 +43,8 @@ After migration, we should be able to say:
 ## 1) Compatibility architecture (target steady state)
 
 ### 1.1 Core (agentctl)
-- `internal/actor/*` (Supervisor, Watcher, EventBus, Actors)
-- `internal/hooks/dispatcher/*` (hooks v1)
+- `internal/runtime/actor/*` (Supervisor, Watcher, EventBus, Actors)
+- `internal/runtime/hooks/dispatcher/*` (hooks v1)
 - `skills/hooks_dispatch` (thin skill wrapper around dispatcher; optional but recommended)
 - `internal/agent/engine/*` (Engine interface; dspy_engine optional; llmchat_engine optional)
 
@@ -233,7 +233,7 @@ Only after llmchat_engine (or equivalent) is stable:
 ### 6.4 Remove duplicated “overseer” implementations
 You currently have:
 - `internal/agent/runtime/overseer*`
-- `internal/analysis/overseer/*`
+- `internal/intelligence/analysis/overseer/*`
 Decide:
 - analysis overseer = scoring + post-review handling (keep)
 - runtime overseer = actor/supervisor spawn policy (keep)

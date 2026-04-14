@@ -66,7 +66,7 @@ agentctl run graph/manage --input '{"op": "stats"}'
 | Component | Location | Status |
 |-----------|----------|--------|
 | PageRank skill | `skills/graph_pagerank/main.go` | ✅ Done |
-| Tasks graph | `internal/analysis/tasksgraph/graph.go` | ✅ Done |
+| Tasks graph | `internal/intelligence/analysis/tasksgraph/graph.go` | ✅ Done |
 
 ### Stored Metrics
 
@@ -96,7 +96,7 @@ agentctl run graph/manage --input '{"op": "top", "node_type": "task", "limit": 2
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Overseer scorer | `internal/analysis/overseer/scorer.go` | ✅ Done |
+| Overseer scorer | `internal/intelligence/analysis/overseer/scorer.go` | ✅ Done |
 
 ### Scoring Formula (Hard)
 

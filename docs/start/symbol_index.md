@@ -13,7 +13,7 @@ Review accepted
 ReviewArtifact (status="ok")
       │
       ▼
-PostReviewHandler (internal/indexing/handler.go)
+PostReviewHandler (internal/intelligence/indexing/handler.go)
       │
       ├── Emits PostReviewEvent with:
       │     workspace_id, task_id, review_id, reason
@@ -21,7 +21,7 @@ PostReviewHandler (internal/indexing/handler.go)
       │     (note: files may be empty until the diff application layer is wired)
       │
       ▼
-Symbol Indexer (internal/indexing/symbol/indexer.go)
+Symbol Indexer (internal/intelligence/indexing/symbol/indexer.go)
       │
       ├── For each file:
       │     1. Check file freshness via FileMeta (content_hash)

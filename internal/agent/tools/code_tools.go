@@ -12,13 +12,13 @@ import (
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/skillrun"
 	"github.com/jkatigb/agentctl/internal/storage"
 	tooling "github.com/jkatigb/agentctl/internal/tooling"
+	"github.com/jkatigb/agentctl/internal/tooling/skillrun"
 )
 
 // registerCodeTools registers code search and retrieval tools.

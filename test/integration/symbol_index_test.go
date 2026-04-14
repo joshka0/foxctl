@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/indexing"
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 	platformsymbol "github.com/jkatigb/agentctl/internal/platform/symbolutil"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/memory"

@@ -99,8 +99,8 @@ agentctl console rm <console-id>
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Event bus | `internal/actor/event_bus.go` | ✅ Done |
-| Agent actor hooks | `internal/actor/agent_actor.go` | ✅ Done |
+| Event bus | `internal/runtime/actor/event_bus.go` | ✅ Done |
+| Agent actor hooks | `internal/runtime/actor/agent_actor.go` | ✅ Done |
 | AgentProgress event | Hook dispatch | ⚠️ Needs verification |
 
 ### Expected Behavior
@@ -125,7 +125,7 @@ When inbound mailbox message has `console_id`:
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Trajectory persister | `internal/actor/trajectory_persister.go` | ✅ Done |
+| Trajectory persister | `internal/runtime/actor/trajectory_persister.go` | ✅ Done |
 | Trajectory store | `internal/storage/trajectory/` | ✅ Done |
 | Export skill | `skills/trajectory_export/` | ✅ Done |
 

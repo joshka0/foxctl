@@ -8,10 +8,10 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
-	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
+	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
 )
 
 const (

@@ -135,6 +135,6 @@ Comprehensive test coverage for:
 ## Future Improvements
 
 - AST-backed expansion for Go (optional precision mode)
-- Integration with `internal/indexing/symbol` for index-backed lookups
+- Integration with `internal/intelligence/indexing/symbol` for index-backed lookups
 - Support for additional languages (Rust, C/C++, Java)
 - Method-level extraction within classes

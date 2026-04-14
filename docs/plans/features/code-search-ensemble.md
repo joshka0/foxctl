@@ -443,7 +443,7 @@ Return one compact evidence pack.
   ],
   "snippets": [
     {
-      "path": "internal/agentprompt/signature.go",
+      "path": "internal/runtime/agentprompt/signature.go",
       "start_line": 160,
       "end_line": 220,
       "reason": "runtime instructions for scout roles"
@@ -654,7 +654,7 @@ Short answer:
 
 Possible extraction targets later:
 
-- `internal/retrieval/codesearchensemble/`
+- `internal/intelligence/retrieval/codesearchensemble/`
 - `internal/rlm/codesearchensemble/`
 
 ### Should the ensemble call tools directly or always subcall scouts?

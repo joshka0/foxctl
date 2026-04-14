@@ -249,7 +249,7 @@ This is the surface to use when you want:
 
 ## Obsidian Adapter
 
-Phase 1 Obsidian adapter paths now exist under `internal/tools/obsidian/`.
+Phase 1 Obsidian adapter paths now exist under `internal/tooling/tools/obsidian/`.
 
 Implemented now:
 
@@ -500,7 +500,7 @@ The goal of the current implementation is to make the dual-plane mechanics concr
 
 Primary implementation paths:
 
-- `internal/contextplane/`
+- `internal/context/contextplane/`
 - `cmd/agentctl/cmd/orient.go`
 
 Related existing sources used by the orienter:

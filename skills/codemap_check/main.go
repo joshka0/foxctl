@@ -20,7 +20,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/codemap"
+	"github.com/jkatigb/agentctl/internal/intelligence/codemap"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )

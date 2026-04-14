@@ -9,7 +9,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/eino-contrib/jsonschema"
 
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 // einoToolBridge implements Eino's tool.InvokableTool by wrapping an agentctl

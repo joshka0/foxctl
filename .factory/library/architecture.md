@@ -20,7 +20,7 @@ agentctl CLI
 │   └── SSH server
 │       └── room-<id>@<hostname> (SSH→PTY bridge)
 ├── agentctl room create --sandbox
-│   ├── Git worktree (via internal/worktree/)
+│   ├── Git worktree (via internal/platform/worktree/)
 │   ├── tmux/zellij session
 │   └── Gateway registration
 └── agentctl room destroy
@@ -34,7 +34,7 @@ agentctl CLI
 ### Room Create --sandbox
 1. CLI parses `--sandbox` flag and options (--worktree-root, --base-ref, --runtime)
 2. If runtime=opensandbox: provision container via OpenSandbox client
-3. If runtime=worktree (default): create git worktree via internal/worktree/
+3. If runtime=worktree (default): create git worktree via internal/platform/worktree/
 4. Create tmux session named after room
 5. Persist SandboxConfig in Room struct (board store)
 6. Register room with gateway (terminal route)
@@ -61,7 +61,7 @@ agentctl CLI
 ### Room Destroy
 1. Verify no active agents in room
 2. Kill tmux session (`tmux kill-session -t <name>`)
-3. Remove worktree (via internal/worktree/)
+3. Remove worktree (via internal/platform/worktree/)
 4. Or: delete OpenSandbox container
 5. Deregister from gateway
 6. Clear SandboxConfig from Room struct
@@ -88,5 +88,5 @@ agentctl CLI
 | zellij bridge | internal/zellijbridge/client.go | Use for zellij sessions |
 | WebSocket hub | internal/web/consolews/hub.go | Reference for WS patterns |
 | Web server | internal/web/server.go | Reference for HTTP patterns |
-| OpenSandbox | internal/sandbox/opensandbox/client.go | Extend, don't rewrite |
+| OpenSandbox | internal/runtime/sandbox/opensandbox/client.go | Extend, don't rewrite |
 | Cobra root | cmd/agentctl/cmd/root.go | Register gateway command |

@@ -3,8 +3,8 @@ package skillmain
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/indexing/rerank"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/rerank"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 )
 
 // Well-known circuit breaker names for external service calls.

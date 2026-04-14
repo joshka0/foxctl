@@ -15,12 +15,12 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/zellijbridge"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/coordination"
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/jkatigb/agentctl/internal/tmuxbridge"
-	"github.com/jkatigb/agentctl/internal/zellijbridge"
 	"github.com/spf13/cobra"
 )
 
@@ -1176,7 +1176,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 		return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", code, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
-	seenMessages := roomLoopSeedSeenMessages(messages, runtime)
+	seenMessages := roomLoopSeedSeenMessages(summary, messages, history, runtime)
 	announcedStates := make(map[string]string)
 	for _, msg := range messages {
 		if msg.TaskID != "" {
@@ -1185,7 +1185,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 			}
 		}
 	}
-	initial := roomLoopInitialMessages(messages, history, runtime)
+	initial := roomLoopInitialMessages(summary, messages, history, runtime)
 	for _, msg := range initial {
 		seq++
 		result := relayRoomMessage(cmd.Context(), client, summary, msg, relay)
@@ -1386,7 +1386,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
-			reminderRoots, err := loadRoomReminderRoots(cmd.Context(), summary.WorkspaceID, roomID, true)
+			reminders, err := loadRoomReminders(cmd.Context(), summary.WorkspaceID, roomID, true)
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
@@ -1394,7 +1394,7 @@ func runRoomLoop(cmd *cobra.Command, workspace, roomID string, relay roomRelayOp
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "agentctl.room.loop", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 			}
-			suppression := buildRoomActionSuppression(current, roomTasks, reminderRoots)
+			suppression := buildRoomActionSuppression(current, roomTasks, reminders)
 			dirtyRuntime := false
 			if cleanupRoomReplyPulseState(current, roomTasks, time.Now().UTC(), pulse, runtime.ReplyPulseState, suppression) {
 				dirtyRuntime = true
@@ -1755,12 +1755,46 @@ func syncRoomLoopState(ctx context.Context, store *coordination.Store, workspace
 	coerced := coerceRoomLoopPolicy(*loop)
 	loop = &coerced
 	loop.LastTickAt = &tickAt
-	applyRoomLoopRuntimeState(loop, runtime)
+	mergedRuntime := mergeRoomLoopRuntimeState(roomLoopRuntimeStateFromStore(*loop), runtime)
+	applyRoomLoopRuntimeState(loop, mergedRuntime)
 	persisted, err := store.UpsertRoomLoop(ctx, *loop)
 	if err != nil {
 		return coordination.RoomLoop{}, err
 	}
 	return persisted, nil
+}
+
+func mergeRoomLoopRuntimeState(base, override roomLoopRuntimeState) roomLoopRuntimeState {
+	merged := base
+	if v := strings.TrimSpace(override.DeliveryLeaseName); v != "" {
+		merged.DeliveryLeaseName = v
+	}
+	if v := strings.TrimSpace(override.DeliveryOwnerID); v != "" {
+		merged.DeliveryOwnerID = v
+	}
+	if v := strings.TrimSpace(override.DeliveryCursorMessageID); v != "" {
+		merged.DeliveryCursorMessageID = v
+	}
+	if override.DeliveryCursorAt != nil && !override.DeliveryCursorAt.IsZero() {
+		ts := override.DeliveryCursorAt.UTC()
+		merged.DeliveryCursorAt = &ts
+	}
+	if override.LastDeliveryTrace != nil {
+		merged.LastDeliveryTrace = override.LastDeliveryTrace
+	}
+	if len(override.ReplyPulseState) > 0 {
+		merged.ReplyPulseState = override.ReplyPulseState
+	}
+	if len(override.TaskPulseState) > 0 {
+		merged.TaskPulseState = override.TaskPulseState
+	}
+	if len(override.TaskFollowupState) > 0 {
+		merged.TaskFollowupState = override.TaskFollowupState
+	}
+	if len(override.CoordinatorPulseState) > 0 {
+		merged.CoordinatorPulseState = override.CoordinatorPulseState
+	}
+	return merged
 }
 
 func refreshRoomLoopPolicy(ctx context.Context, store *coordination.Store, workspaceID, roomID string, current roomPulseConfig, tickAt time.Time, runtime roomLoopRuntimeState) (roomPulseConfig, roomLoopRuntimeState, bool, error) {
@@ -1846,9 +1880,15 @@ func roomLoopMessageAfterCursor(msg agent.BoardMessage, cursorAt *time.Time, cur
 	return strings.TrimSpace(msg.ID) > strings.TrimSpace(cursorID)
 }
 
-func roomLoopSeedSeenMessages(messages []agent.BoardMessage, runtime roomLoopRuntimeState) map[string]struct{} {
+func roomLoopSeedSeenMessages(room agent.RoomSummary, messages []agent.BoardMessage, history int, runtime roomLoopRuntimeState) map[string]struct{} {
 	seen := make(map[string]struct{}, len(messages))
 	if runtime.DeliveryCursorAt == nil || runtime.DeliveryCursorAt.IsZero() {
+		for _, msg := range roomLoopInitialCandidateMessages(messages, history, runtime) {
+			if roomLoopShouldReplayInitialMessage(room, msg, messages) {
+				continue
+			}
+			seen[msg.ID] = struct{}{}
+		}
 		return seen
 	}
 	for _, msg := range messages {
@@ -1857,10 +1897,27 @@ func roomLoopSeedSeenMessages(messages []agent.BoardMessage, runtime roomLoopRun
 		}
 		seen[msg.ID] = struct{}{}
 	}
+	for _, msg := range roomLoopInitialCandidateMessages(messages, history, runtime) {
+		if roomLoopShouldReplayInitialMessage(room, msg, messages) {
+			continue
+		}
+		seen[msg.ID] = struct{}{}
+	}
 	return seen
 }
 
-func roomLoopInitialMessages(messages []agent.BoardMessage, history int, runtime roomLoopRuntimeState) []agent.BoardMessage {
+func roomLoopInitialMessages(room agent.RoomSummary, messages []agent.BoardMessage, history int, runtime roomLoopRuntimeState) []agent.BoardMessage {
+	initial := roomLoopInitialCandidateMessages(messages, history, runtime)
+	out := make([]agent.BoardMessage, 0, len(initial))
+	for _, msg := range initial {
+		if roomLoopShouldReplayInitialMessage(room, msg, messages) {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+func roomLoopInitialCandidateMessages(messages []agent.BoardMessage, history int, runtime roomLoopRuntimeState) []agent.BoardMessage {
 	if runtime.DeliveryCursorAt == nil || runtime.DeliveryCursorAt.IsZero() {
 		return trimRoomHistory(messages, history)
 	}
@@ -1871,6 +1928,46 @@ func roomLoopInitialMessages(messages []agent.BoardMessage, history int, runtime
 		}
 	}
 	return out
+}
+
+func roomLoopShouldReplayInitialMessage(room agent.RoomSummary, msg agent.BoardMessage, messages []agent.BoardMessage) bool {
+	recipient := normalizeRoomRecipient(msg.Recipient)
+	if recipient == "" {
+		return false
+	}
+	if recipient == agent.BroadcastRecipient {
+		for actorID := range roomLoopCurrentParticipants(room) {
+			if _, ok := roomInboxEntryForActor(actorID, msg, false, messages, nil); ok {
+				return true
+			}
+		}
+		return false
+	}
+	if !roomLoopCurrentParticipant(room, recipient) {
+		return false
+	}
+	_, ok := roomInboxEntryForActor(recipient, msg, false, messages, nil)
+	return ok
+}
+
+func roomLoopCurrentParticipants(room agent.RoomSummary) map[string]struct{} {
+	out := make(map[string]struct{}, len(room.Participants)+len(room.Members))
+	for _, member := range room.Members {
+		if id := strings.TrimSpace(member.ActorID); id != "" && !strings.HasPrefix(id, "actor:system:room:") {
+			out[id] = struct{}{}
+		}
+	}
+	for _, participant := range room.Participants {
+		if id := strings.TrimSpace(participant); id != "" && !strings.HasPrefix(id, "actor:system:room:") {
+			out[id] = struct{}{}
+		}
+	}
+	return out
+}
+
+func roomLoopCurrentParticipant(room agent.RoomSummary, actorID string) bool {
+	_, ok := roomLoopCurrentParticipants(room)[strings.TrimSpace(actorID)]
+	return ok
 }
 
 func advanceRoomLoopCursor(runtime *roomLoopRuntimeState, msg agent.BoardMessage) bool {
@@ -2750,6 +2847,7 @@ func sameRoomReminderContract(a, b coordination.RoomReminder) bool {
 		strings.TrimSpace(a.MilestoneID) == strings.TrimSpace(b.MilestoneID) &&
 		a.AckRequired == b.AckRequired &&
 		a.ReplyExpected == b.ReplyExpected &&
+		a.Passive == b.Passive &&
 		a.Interrupt == b.Interrupt
 }
 

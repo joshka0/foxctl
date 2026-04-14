@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/context/companion"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/rlm"

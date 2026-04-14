@@ -13,19 +13,19 @@ import (
 
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	refchanges "github.com/jkatigb/agentctl/internal/intelligence/refactor/changes"
+	refdeps "github.com/jkatigb/agentctl/internal/intelligence/refactor/deps"
+	refevidence "github.com/jkatigb/agentctl/internal/intelligence/refactor/evidence"
+	refhot "github.com/jkatigb/agentctl/internal/intelligence/refactor/hot"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
+	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
+	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
+	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
-	refchanges "github.com/jkatigb/agentctl/internal/refactor/changes"
-	refdeps "github.com/jkatigb/agentctl/internal/refactor/deps"
-	refevidence "github.com/jkatigb/agentctl/internal/refactor/evidence"
-	refhot "github.com/jkatigb/agentctl/internal/refactor/hot"
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
-	refsnapshot "github.com/jkatigb/agentctl/internal/refactor/snapshot"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/refactor/snapshotstore"
-	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/spf13/cobra"
 )
@@ -186,7 +186,7 @@ workspace.`,
   agentctl refactor deps --path ./internal --language go --query handleAsk --depth 2
 
   # Expand incoming dependencies from an explicit seed
-  agentctl refactor deps --path ./internal --language go --seed symbol:go:internal/actor/agent_actor.go:*AgentActor.handleAsk --direction in`,
+  agentctl refactor deps --path ./internal --language go --seed symbol:go:internal/runtime/actor/agent_actor.go:*AgentActor.handleAsk --direction in`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runRefactorDeps(cmd, workspace, path, language, includeTests, seeds, query, seedLimit, edgeSets, edgeTypes, direction, depth, budget, perNodeCap)
@@ -359,7 +359,7 @@ For DB/persistence review:
   agentctl refactor scout --path apps/praze-api/lib --language elixir --focus slop --view grouped
 
   # Raw machine-oriented output
-  agentctl refactor scout --path ./internal/actor --language go --focus dead --view raw --min-score 0`,
+  agentctl refactor scout --path ./internal/runtime/actor --language go --focus dead --view raw --min-score 0`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			input := map[string]any{

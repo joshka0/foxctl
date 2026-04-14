@@ -10,9 +10,9 @@ import (
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	tooling "github.com/jkatigb/agentctl/internal/tooling"
 
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
 	"github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/repoquery"
 )
 
 type repoInlineMode string

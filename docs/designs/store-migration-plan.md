@@ -44,8 +44,8 @@ These stores are inherently local and don't need sync:
 | `contextbuffer` | `internal/storage/contextbuffer/store.go` | Context buffering |
 | `quotas` | `internal/storage/quotas/store.go` | Rate limiting |
 | `graph` | `internal/storage/graph/store.go` | Knowledge graph |
-| `embedding` | `internal/indexing/embedding/store.go` | Embedding cache |
-| `postreview` | `internal/indexing/postreview/store.go` | Post-review events |
+| `embedding` | `internal/intelligence/indexing/embedding/store.go` | Embedding cache |
+| `postreview` | `internal/intelligence/indexing/postreview/store.go` | Post-review events |
 
 ## Migration Pattern
 

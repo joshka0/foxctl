@@ -8,7 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/workflow"
+	"github.com/jkatigb/agentctl/internal/runtime/orchestration/workflow"
 	"github.com/spf13/cobra"
 )
 

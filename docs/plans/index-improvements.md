@@ -59,7 +59,7 @@ Full node ID transformation:
 
 ## File Changes
 
-### `internal/indexing/symbol/symbolkey.go` (new)
+### `internal/intelligence/indexing/symbol/symbolkey.go` (new)
 
 SymbolKey type, constructors for each language, and helpers.
 
@@ -105,7 +105,7 @@ func ElixirSymbolKey(name string) SymbolKey {
 }
 ```
 
-### `internal/indexing/symbol/types.go` (modified)
+### `internal/intelligence/indexing/symbol/types.go` (modified)
 
 **Add to Symbol struct:**
 ```go
@@ -166,7 +166,7 @@ func KeyEntryName(workspace, symbolKey string) string {
 }
 ```
 
-### `internal/indexing/repoindex/types.go` (modified)
+### `internal/intelligence/indexing/repoindex/types.go` (modified)
 
 **Add LocatorEntry type:**
 ```go
@@ -191,7 +191,7 @@ type SymbolSummaryProvider interface {
 }
 ```
 
-### `internal/indexing/repoindex/store.go` (modified)
+### `internal/intelligence/indexing/repoindex/store.go` (modified)
 
 **Bump schema version** (triggers auto-reset via existing `resetSchema` at line 484):
 ```go
@@ -226,7 +226,7 @@ DROP TABLE IF EXISTS symbol_locator;
 - `LookupLocator(ctx, symbolKey, pkg string) (*LocatorEntry, error)`
 - `LookupLocatorsByFile(ctx, filePath string) ([]LocatorEntry, error)`
 
-### `internal/indexing/repoindex/builder.go` (modified)
+### `internal/intelligence/indexing/repoindex/builder.go` (modified)
 
 **1. `Build()` orchestrates locator batch-write:**
 ```go
@@ -302,7 +302,7 @@ func applySymbolSummary(ctx context.Context, opts BuildOptions, node *Node, symb
 **6. `pendingNameEdge` resolution** (for TS/Elixir call edges):
 Build `nameToKeys[pkg][name]` index during symbol ingestion. Resolver uses `SymbolID(repoKey, pkgID, dstKey)` where `dstKey` comes from this index.
 
-### `internal/indexing/symbol/indexer.go` (modified)
+### `internal/intelligence/indexing/symbol/indexer.go` (modified)
 
 **1. `indexFile()` map keys use `EffectiveID()`:**
 ```go
@@ -380,7 +380,7 @@ embedding.SymbolInput{
 }
 ```
 
-### `internal/indexing/embeddingtext/digest.go` (modified)
+### `internal/intelligence/indexing/embeddingtext/digest.go` (modified)
 
 **Add `SymbolKey` field, bump digest version:**
 ```go
@@ -413,11 +413,11 @@ builder.WriteString("\nkey:")
 builder.WriteString(symbolKey)
 ```
 
-### `internal/indexing/embedding/store.go` (modified)
+### `internal/intelligence/indexing/embedding/store.go` (modified)
 
 No schema change needed — `symbol_id TEXT` column now stores SymbolKey strings. `file_path` column continues to be populated for file-based cleanup queries. `dedupeKeyForSymbol()` works as-is since it hashes `symbolID` opaquely — add defensive trim/normalize.
 
-### `internal/retrieval/semantic_search.go` (modified)
+### `internal/intelligence/retrieval/semantic_search.go` (modified)
 
 **`extractFilePath()` recognizes `key:` prefix:**
 ```go
@@ -446,7 +446,7 @@ func extractFilePathFromEntryPayload(raw json.RawMessage) string {
 }
 ```
 
-### `internal/retrieval/file_summary.go` (modified)
+### `internal/intelligence/retrieval/file_summary.go` (modified)
 
 **Key-aware summary entry name selector:**
 ```go
@@ -482,7 +482,7 @@ Update `extractSymbolName()` to handle SymbolKey format from `key:` entry names.
 
 ### Unit tests
 
-**`internal/indexing/symbol/symbolkey_test.go`** (new):
+**`internal/intelligence/indexing/symbol/symbolkey_test.go`** (new):
 - `GoSymbolKey` produces correct keys for functions, methods, types
 - `GoInitSymbolKey` handles `init` with filename
 - `TSSymbolKey` with `exported=true` produces name-only key
@@ -492,12 +492,12 @@ Update `extractSymbolName()` to handle SymbolKey format from `key:` entry names.
 - `SymbolKey.Name()` extracts human-readable name from all formats
 - Go test functions (`TestFoo`) work correctly (no special handling needed)
 
-**`internal/indexing/repoindex/store_test.go`** (modified):
+**`internal/intelligence/indexing/repoindex/store_test.go`** (modified):
 - UpsertLocator: insert new, upsert same (symbol_key, pkg) updates fields
 - LookupLocator: by key+pkg
 - LookupLocatorsByFile: returns all locators for a file path
 
-**`internal/indexing/embeddingtext/digest_test.go`** (modified):
+**`internal/intelligence/indexing/embeddingtext/digest_test.go`** (modified):
 - Assert version prefix is `v2`
 - Assert digest uses `symbol_key` field
 - Assert file move with same symbol key produces same digest
@@ -510,9 +510,9 @@ Update `extractSymbolName()` to handle SymbolKey format from `key:` entry names.
 
 ### Existing tests needing format updates
 
-- `internal/indexing/repoindex/builder_test.go` — expected node IDs drop file path segment
-- `internal/retrieval/candidates_test.go` — expected entry names include `key:` format
-- `internal/indexing/embeddingtext/digest_test.go` — v1→v2 assertions
+- `internal/intelligence/indexing/repoindex/builder_test.go` — expected node IDs drop file path segment
+- `internal/intelligence/retrieval/candidates_test.go` — expected entry names include `key:` format
+- `internal/intelligence/indexing/embeddingtext/digest_test.go` — v1→v2 assertions
 
 ---
 
@@ -564,13 +564,13 @@ Each step compiles and passes tests independently.
 make build
 
 # Type check
-go vet ./internal/indexing/...
+go vet ./internal/intelligence/indexing/...
 
 # Unit tests
-go test ./internal/indexing/symbol/... -run TestSymbolKey -v
-go test ./internal/indexing/repoindex/... -v
-go test ./internal/indexing/embeddingtext/... -v
-go test ./internal/retrieval/... -v
+go test ./internal/intelligence/indexing/symbol/... -run TestSymbolKey -v
+go test ./internal/intelligence/indexing/repoindex/... -v
+go test ./internal/intelligence/indexing/embeddingtext/... -v
+go test ./internal/intelligence/retrieval/... -v
 
 # Integration: rebuild index and verify stable IDs
 agentctl index repo build --workspace . --go --typescript
@@ -592,18 +592,18 @@ agentctl run code/semantic_search --input '{"query": "symbol extraction", "limit
 
 | File | Status | Step |
 |------|--------|------|
-| `internal/indexing/symbol/symbolkey.go` | NEW | 1 |
-| `internal/indexing/symbol/symbolkey_test.go` | NEW | 9 |
-| `internal/indexing/symbol/types.go` | MODIFY | 1, 2 |
+| `internal/intelligence/indexing/symbol/symbolkey.go` | NEW | 1 |
+| `internal/intelligence/indexing/symbol/symbolkey_test.go` | NEW | 9 |
+| `internal/intelligence/indexing/symbol/types.go` | MODIFY | 1, 2 |
 | `internal/platform/symbolutil/symbolutil.go` | MODIFY | 2 |
-| `internal/indexing/repoindex/types.go` | MODIFY | 3 |
-| `internal/indexing/repoindex/store.go` | MODIFY | 3 |
-| `internal/indexing/repoindex/builder.go` | MODIFY | 4 |
-| `internal/indexing/symbol/indexer.go` | MODIFY | 5 |
-| `internal/indexing/embeddingtext/digest.go` | MODIFY | 6 |
-| `internal/indexing/embedding/store.go` | MODIFY | 6 |
-| `internal/retrieval/semantic_search.go` | MODIFY | 7 |
-| `internal/retrieval/file_summary.go` | MODIFY | 7 |
+| `internal/intelligence/indexing/repoindex/types.go` | MODIFY | 3 |
+| `internal/intelligence/indexing/repoindex/store.go` | MODIFY | 3 |
+| `internal/intelligence/indexing/repoindex/builder.go` | MODIFY | 4 |
+| `internal/intelligence/indexing/symbol/indexer.go` | MODIFY | 5 |
+| `internal/intelligence/indexing/embeddingtext/digest.go` | MODIFY | 6 |
+| `internal/intelligence/indexing/embedding/store.go` | MODIFY | 6 |
+| `internal/intelligence/retrieval/semantic_search.go` | MODIFY | 7 |
+| `internal/intelligence/retrieval/file_summary.go` | MODIFY | 7 |
 | `cmd/agentctl/cmd/index.go` | MODIFY | 8 |
 | `cmd/agentctl/cmd/index_repo.go` | MODIFY | 8 |
 | `skills/code_incremental_index/main.go` | MODIFY | 8 |

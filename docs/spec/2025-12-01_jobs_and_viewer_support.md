@@ -40,7 +40,7 @@ This makes it hard to build a beads_viewer-style inspector or other tooling.
   - SQLite schema in [internal/storage/jobs/persist/store.go](cci:7://file://internal/storage/jobs/persist/store.go:0:0-0:0) (`jobs` table + indexes).
 - **Job directories**: `~/.agentctl/jobs/<id>/`
   - `input.json`, `result.json`, `progress.ndjson`, `stderr.log`, `workspace`, optional `artifacts.json`.
-- **Execution**: `internal/storage/jobs/executor`, `internal/runservice`
+- **Execution**: `internal/storage/jobs/executor`, `internal/runtime/runservice`
   - `result.json` is always a validated Core Profile v1 envelope.
   - `meta.workspace`, `meta.skill_version`, `meta.source` set via `protocol.AnnotateRunBytes`.
 - **Progress**:
@@ -50,7 +50,7 @@ This makes it hard to build a beads_viewer-style inspector or other tooling.
   - `internal/storage/cas` with verifying [Get](cci:1://file://internal/storage/jobs/store.go:112:0-115:1).
   - `handleArtifacts` pins `data.artifact` / `data.artifacts[]` digests.
 - **Task graph**:
-  - [internal/analysis/tasksgraph](cci:7://file://internalinternal/analysis/tasksgraph:0:0-0:0) computes metrics over `internal/storage/tasks.Task`.
+  - [internal/intelligence/analysis/tasksgraph](cci:7://file://internalinternal/intelligence/analysis/tasksgraph:0:0-0:0) computes metrics over `internal/storage/tasks.Task`.
   - Mapping between “job” and “task graph” is not yet a documented contract.
 
 ---

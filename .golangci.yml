@@ -78,7 +78,7 @@ linters:
           deny:
             - pkg: "github.com/jkatigb/agentctl/internal/storage"
               desc: "domain layer must not depend on storage"
-            - pkg: "github.com/jkatigb/agentctl/internal/execution"
+            - pkg: "github.com/jkatigb/agentctl/internal/runtime/execution"
               desc: "domain layer must not depend on execution"
             - pkg: "github.com/jkatigb/agentctl/internal/platform"
               desc: "domain layer must not depend on platform"
@@ -89,7 +89,7 @@ linters:
         execution-limited-deps:
           list-mode: lax
           files:
-            - "**/internal/execution/**/*.go"
+            - "**/internal/runtime/execution/**/*.go"
           deny:
             - pkg: "github.com/jkatigb/agentctl/internal/adapters"
               desc: "execution layer should not depend on adapters"
@@ -107,7 +107,7 @@ linters:
       # TODO: Remove these exclusions as files are migrated
       - linters:
           - forbidigo
-        path: '(cmd/.*/main\.go|cmd/agentctl/cmd/.*|cmd/agentctl_viewer/.*|cmd/synctest/.*|internal/adapters/skillslib/.*|internal/actor/.*|internal/agent/.*|internal/analysis/.*|internal/codemap/.*|internal/companion/.*|internal/daemon/.*|internal/engine/.*|internal/gateway/.*|internal/indexing/.*|internal/lsp/.*|internal/platform/.*|internal/retrieval/.*|internal/storage/.*|internal/testwatch/.*|internal/web/.*|plugins/.*|scripts/.*|skills/.*|.*_test\.go)'
+        path: '(cmd/.*/main\.go|cmd/agentctl/cmd/.*|cmd/agentctl_viewer/.*|cmd/synctest/.*|internal/adapters/skillslib/.*|internal/runtime/actor/.*|internal/agent/.*|internal/analysis/.*|internal/codemap/.*|internal/companion/.*|internal/runtime/daemon/.*|internal/runtime/engine/.*|internal/gateway/.*|internal/indexing/.*|internal/platform/lsp/.*|internal/platform/.*|internal/retrieval/.*|internal/storage/.*|internal/tooling/testwatch/.*|internal/web/.*|plugins/.*|scripts/.*|skills/.*|.*_test\.go)'
       # Keep complexity pressure on smaller units, but don't block branch work on the
       # known command aggregators and long integration tests.
       - linters:

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
+	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 )
 
 func TestSplitTopLevel(t *testing.T) {
@@ -318,7 +318,7 @@ func TestResolveLanguageScopeInfersSingleDirectoryLanguage(t *testing.T) {
 
 func TestBuildScoutStatusScopeUsesWorkspaceRelativePath(t *testing.T) {
 	workspace := t.TempDir()
-	searchPath := filepath.Join(workspace, "internal", "actor")
+	searchPath := filepath.Join(workspace, "internal", "runtime", "actor")
 	if err := os.MkdirAll(searchPath, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -333,8 +333,8 @@ func TestBuildScoutStatusScopeUsesWorkspaceRelativePath(t *testing.T) {
 		Detected: []string{"go"},
 	}, false)
 
-	if scope.Path != "internal/actor" {
-		t.Fatalf("scope path=%q want internal/actor", scope.Path)
+	if scope.Path != "internal/runtime/actor" {
+		t.Fatalf("scope path=%q want internal/runtime/actor", scope.Path)
 	}
 	if scope.Absolute != searchPath {
 		t.Fatalf("scope absolute=%q want %q", scope.Absolute, searchPath)

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"

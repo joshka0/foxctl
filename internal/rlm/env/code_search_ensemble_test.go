@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 )
 
@@ -410,7 +410,7 @@ func TestApplyACAGuidanceSupportDoesNotIntroduceNewCandidates(t *testing.T) {
 	hits := []contextplane.RetrievalHit{
 		{
 			Path:      "notes/repo/agentctl/packages/internal-rlm-env.md",
-			RepoPaths: []string{"internal/contextplane/retrieval.go"},
+			RepoPaths: []string{"internal/context/contextplane/retrieval.go"},
 			Symbols:   []string{"WorkspaceStore"},
 			Title:     "internal rlm env",
 		},
@@ -429,8 +429,8 @@ func TestApplyACAGuidanceSupportBoostsPackageSymbolOverlap(t *testing.T) {
 	t.Parallel()
 
 	candidates := map[string]*codeSearchCandidate{
-		"internal/contextplane/retrieval.go": {
-			Path:    "internal/contextplane/retrieval.go",
+		"internal/context/contextplane/retrieval.go": {
+			Path:    "internal/context/contextplane/retrieval.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 			Support: 1.0,
 			Symbols: []string{"WorkspaceStore"},
@@ -439,7 +439,7 @@ func TestApplyACAGuidanceSupportBoostsPackageSymbolOverlap(t *testing.T) {
 	hits := []contextplane.RetrievalHit{
 		{
 			Path:      "notes/repo/agentctl/packages/internal-contextplane.md",
-			RepoPaths: []string{"internal/contextplane/types.go", "internal/contextplane/retrieval.go"},
+			RepoPaths: []string{"internal/context/contextplane/types.go", "internal/context/contextplane/retrieval.go"},
 			Symbols:   []string{"WorkspaceStore"},
 			Title:     "internal contextplane",
 		},
@@ -449,7 +449,7 @@ func TestApplyACAGuidanceSupportBoostsPackageSymbolOverlap(t *testing.T) {
 	if applied < 2 {
 		t.Fatalf("applied=%d", applied)
 	}
-	candidate := candidates["internal/contextplane/retrieval.go"]
+	candidate := candidates["internal/context/contextplane/retrieval.go"]
 	if !candidateHasSource(candidate, "aca_route_package_exact") {
 		t.Fatalf("sources=%v", candidate.Sources)
 	}
@@ -516,8 +516,8 @@ func TestApplyACAGuidanceSupportAddsSkillmainAnchorAgainstCompetingCandidates(t 
 			Support: 1.0,
 			Symbols: []string{"CandidateBundle"},
 		},
-		"internal/searchindex/model.go": {
-			Path:    "internal/searchindex/model.go",
+		"internal/intelligence/searchindex/model.go": {
+			Path:    "internal/intelligence/searchindex/model.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 			Support: 0.7,
 		},
@@ -664,7 +664,7 @@ func TestPrioritizedFileLocateGroundingCandidatesDoesNotFrontloadSecondPackageAn
 			Support: 1.2,
 		},
 		{
-			Path:    "internal/searchindex/model.go",
+			Path:    "internal/intelligence/searchindex/model.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 			Support: 1.0,
 		},
@@ -729,8 +729,8 @@ func TestRankCodeSearchCandidatesFileLocateDemotesSecondaryPackageAnchor(t *test
 			Sources: map[string]struct{}{"aca_route_package_anchor": {}, "aca_route_package_secondary_anchor": {}, "aca_route_package_exact": {}},
 			Support: 1.0,
 		},
-		"internal/searchindex/model.go": {
-			Path:    "internal/searchindex/model.go",
+		"internal/intelligence/searchindex/model.go": {
+			Path:    "internal/intelligence/searchindex/model.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 			Support: 0.9,
 		},
@@ -792,7 +792,7 @@ func TestBuildFileLocateEvidenceBucketsGroupsSelectedFiles(t *testing.T) {
 	files := []codeSearchEvidenceFile{
 		{Path: "internal/adapters/skillslib/skillmain/main.go"},
 		{Path: "internal/domain/agent/agent.go"},
-		{Path: "internal/searchindex/model.go"},
+		{Path: "internal/intelligence/searchindex/model.go"},
 		{Path: "internal/adapters/skillslib/skillmain/breakers.go"},
 	}
 	rankedByPath := map[string]*codeSearchCandidate{
@@ -804,8 +804,8 @@ func TestBuildFileLocateEvidenceBucketsGroupsSelectedFiles(t *testing.T) {
 			Path:    "internal/domain/agent/agent.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 		},
-		"internal/searchindex/model.go": {
-			Path:    "internal/searchindex/model.go",
+		"internal/intelligence/searchindex/model.go": {
+			Path:    "internal/intelligence/searchindex/model.go",
 			Sources: map[string]struct{}{"search_repo": {}},
 		},
 		"internal/adapters/skillslib/skillmain/breakers.go": {
@@ -1313,7 +1313,7 @@ func TestInferCodeSearchRouteFamilyCochange(t *testing.T) {
 	hits := []contextplane.RetrievalHit{
 		{
 			Path:      "notes/repo/agentctl/retrieval-ensemble-next-steps.md",
-			RepoPaths: []string{"internal/rlm/env/code_search_ensemble.go", "internal/contextplane/retrieval.go"},
+			RepoPaths: []string{"internal/rlm/env/code_search_ensemble.go", "internal/context/contextplane/retrieval.go"},
 		},
 	}
 	if got := inferCodeSearchRouteFamily(codeSearchTaskChangeImpact, hits); got != codeSearchRouteCochangeHistory {

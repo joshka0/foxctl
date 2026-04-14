@@ -6,10 +6,10 @@ Machine-friendly reference for capability profiles and role instructions.
 
 | Package | Responsibility |
 |--------|----------------|
-| `internal/agentpolicy` | Authorize/deny agent shell commands based on profile skill allowlists |
-| `internal/agentprompt` | Build role-specific system instructions and runtime tool-name aliases |
+| `internal/runtime/agentpolicy` | Authorize/deny agent shell commands based on profile skill allowlists |
+| `internal/runtime/agentprompt` | Build role-specific system instructions and runtime tool-name aliases |
 
-## Profile Model (`internal/agentpolicy`)
+## Profile Model (`internal/runtime/agentpolicy`)
 
 | Profile | Intent | Restriction model |
 |--------|--------|-------------------|
@@ -27,7 +27,7 @@ Machine-friendly reference for capability profiles and role instructions.
 | Restricted profile + non-allowlisted skill | Blocked |
 | Restricted profile + non-`agentctl run` bash command | Blocked |
 
-## Prompt Construction (`internal/agentprompt`)
+## Prompt Construction (`internal/runtime/agentprompt`)
 
 | Function | Purpose |
 |---------|---------|
@@ -39,7 +39,7 @@ Machine-friendly reference for capability profiles and role instructions.
 | Location | Usage |
 |---------|-------|
 | `internal/agent/runtime` | Applies role prompts to session/system prompts |
-| `internal/actor` | Uses role prompts when running agent actors |
+| `internal/runtime/actor` | Uses role prompts when running agent actors |
 
 ## Related Docs
 

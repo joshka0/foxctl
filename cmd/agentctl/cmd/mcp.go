@@ -26,16 +26,16 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
-	obsidiantool "github.com/jkatigb/agentctl/internal/tools/obsidian"
+	obsidiantool "github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
 )
 
 const (

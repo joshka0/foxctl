@@ -33,22 +33,22 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
-	"github.com/jkatigb/agentctl/internal/indexing/codefilter"
-	"github.com/jkatigb/agentctl/internal/indexing/filesummary"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/indexing/rerank"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/codefilter"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/filesummary"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/rerank"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
+	"github.com/jkatigb/agentctl/internal/intelligence/retrieval"
+	retrievalv2 "github.com/jkatigb/agentctl/internal/intelligence/retrieval/v2"
+	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/repoquery"
-	"github.com/jkatigb/agentctl/internal/retrieval"
-	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
-	"github.com/jkatigb/agentctl/internal/searchindex"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
@@ -1337,7 +1337,7 @@ func searchSymbolsWithRetrieval(
 		if repoStore, err := repoindex.Open(ctx, cfg.Storage.Root, workspacePath); err == nil {
 			defer repoStore.Close()
 			repoQuerySvc = repoquery.NewQueryService(repoindex.NewQueryEngine(repoStore))
-			engine = engine.WithRepoQueryService(repoQuerySvc)
+			engine = engine.WithRepoQueryService(repoQueryAdapter{service: repoQuerySvc})
 		}
 	}
 	req := retrievalv2.DefaultSearchRequest(workspaceID, query)
@@ -1417,6 +1417,39 @@ func searchSymbolsWithRetrieval(
 	}
 
 	return results, resp.Groups, nil
+}
+
+type repoQueryAdapter struct {
+	service *repoquery.QueryService
+}
+
+func (a repoQueryAdapter) Search(ctx context.Context, req retrievalv2.RepoSearchRequest) ([]repoindex.Node, error) {
+	built, err := repoquery.NewSearchRequest(req.Query, req.Limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.service.Search(ctx, built)
+}
+
+func (a repoQueryAdapter) DAGGrep(ctx context.Context, req retrievalv2.RepoDAGGrepRequest) (repoindex.DAGGrepResult, error) {
+	built, err := repoquery.NewDAGGrepRequest(
+		req.Query,
+		"",
+		req.Limit,
+		nil,
+		req.EdgeSets,
+		nil,
+		req.Direction,
+		req.Depth,
+		req.Budget,
+		req.PerNodeCap,
+		nil,
+		req.Render,
+	)
+	if err != nil {
+		return repoindex.DAGGrepResult{}, err
+	}
+	return a.service.DAGGrep(ctx, built)
 }
 
 func searchRepoIndexProjectedFallback(ctx context.Context, service *repoquery.QueryService, workspaceID, query string, limit int) ([]Result, error) {

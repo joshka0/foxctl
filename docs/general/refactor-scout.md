@@ -96,7 +96,7 @@ agentctl refactor scout --path ./scripts --language python
 agentctl refactor scout --path ./crates/my-crate/src --language rust
 agentctl refactor scout --path apps/praze-api/lib --language elixir
 agentctl refactor scout --path ./internal --language go --focus slop
-agentctl refactor scout --path ./internal/actor --language go --focus dead
+agentctl refactor scout --path ./internal/runtime/actor --language go --focus dead
 ```
 
 Run the two-stage advisor:

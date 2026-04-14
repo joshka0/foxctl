@@ -22,6 +22,7 @@ contributors
 | [docs/README.md](docs/README.md)                   | Canonical documentation map                      |
 | [docs/DOC_LIFECYCLE.md](docs/DOC_LIFECYCLE.md)     | Documentation lifecycle policy                   |
 | [docs/start/README.md](docs/start/README.md)       | Fast orientation guides                          |
+| [docs/architecture/package-topology.md](docs/architecture/package-topology.md) | Canonical `internal/*` package placement map |
 | [.claude/CLAUDE.md](.claude/CLAUDE.md)             | Claude Code hooks, commands, environment         |
 | [docs/general/](docs/general/)                     | Detailed documentation                           |
 | [docs/architecture/](docs/architecture/)           | Current architecture overviews (runtime + storage + adapters) |
@@ -78,6 +79,22 @@ contributors
 14. **ACA vault refresh** — after repo docs, repo graph, or bridge metadata changes, rebuild the Obsidian layer with `agentctl obsidian graph build`, `graph promote`, `bridge reconcile`, and `index build`
 15. **Task continuity split** — use `agentctl context task-history-summary` for Codex/agents/scripts *(structured summary + artifact pointer)* and `configs/hooks/task-continuity-summary.sh` for hook injection *(prompt-ready wrapper output)*
 16. **Never use keyword heuristics** — do not route, classify, promote, or suppress behavior using ad hoc substring/keyword matching; these heuristics are brittle. Prefer explicit schemas, typed signals, scored features, tests, or learned policies.
+17. **`internal/*` placement rule** — before adding a new `internal/*` package or extending `internal/v2/*`, read [docs/architecture/package-topology.md](docs/architecture/package-topology.md) and place the work by family model, not by local preference
+
+## Internal Package Placement
+
+When touching `internal/*`, treat
+[docs/architecture/package-topology.md](docs/architecture/package-topology.md)
+as the review gate for package placement.
+
+- New top-level `internal/*` roots should be rare.
+- `internal/v2/*` is reserved for the newer
+  agent/runtime/orchestration lane; it is not the generic destination for new
+  context, retrieval, storage, or interface code.
+- If a change introduces a new package or relocates an existing one, explain the
+  chosen family boundary in the PR or review notes.
+- If the correct family is unclear, update the topology doc or the migration
+  epic before adding more ambiguous structure.
 
 ## ACA / Obsidian Refresh
 

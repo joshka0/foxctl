@@ -32,12 +32,12 @@ Create the foundational SQLite store with proper schema, migrations, and pragmas
 
 | File | Action | Description |
 |------|--------|-------------|
-| `internal/indexing/repoindex/store/store.go` | Create | Core store struct, Open/Close, CRUD operations |
-| `internal/indexing/repoindex/store/schema.go` | Create | Schema definitions, table DDL |
-| `internal/indexing/repoindex/store/migrations.go` | Create | Migration runner, version tracking |
-| `internal/indexing/repoindex/store/store_test.go` | Create | Unit tests for store operations |
+| `internal/intelligence/indexing/repoindex/store/store.go` | Create | Core store struct, Open/Close, CRUD operations |
+| `internal/intelligence/indexing/repoindex/store/schema.go` | Create | Schema definitions, table DDL |
+| `internal/intelligence/indexing/repoindex/store/migrations.go` | Create | Migration runner, version tracking |
+| `internal/intelligence/indexing/repoindex/store/store_test.go` | Create | Unit tests for store operations |
 
-**Note**: The existing `internal/indexing/repoindex/store.go` will be refactored into the `store/` subpackage for cleaner separation.
+**Note**: The existing `internal/intelligence/indexing/repoindex/store.go` will be refactored into the `store/` subpackage for cleaner separation.
 
 ### Schema Definition
 
@@ -256,10 +256,10 @@ Implement the graph builder that populates nodes and edges for packages, files, 
 
 | File | Action | Description |
 |------|--------|-------------|
-| `internal/indexing/repoindex/builder/builder.go` | Create | Main Builder struct and orchestration |
-| `internal/indexing/repoindex/builder/nodes.go` | Create | Node extraction from AST |
-| `internal/indexing/repoindex/builder/edges.go` | Create | Edge extraction (CONTAINS, IMPORTS) |
-| `internal/indexing/repoindex/builder/builder_test.go` | Create | Integration tests |
+| `internal/intelligence/indexing/repoindex/builder/builder.go` | Create | Main Builder struct and orchestration |
+| `internal/intelligence/indexing/repoindex/builder/nodes.go` | Create | Node extraction from AST |
+| `internal/intelligence/indexing/repoindex/builder/edges.go` | Create | Edge extraction (CONTAINS, IMPORTS) |
+| `internal/intelligence/indexing/repoindex/builder/builder_test.go` | Create | Integration tests |
 
 **Note**: Existing `builder.go` in repoindex root will be refactored/migrated.
 
@@ -415,9 +415,9 @@ Implement the query layer for searching and expanding the repo graph. Add CLI co
 
 | File | Action | Description |
 |------|--------|-------------|
-| `internal/indexing/repoindex/query/query.go` | Create | Core query functions |
-| `internal/indexing/repoindex/query/expand.go` | Create | Graph expansion algorithm |
-| `internal/indexing/repoindex/query/query_test.go` | Create | Query tests |
+| `internal/intelligence/indexing/repoindex/query/query.go` | Create | Core query functions |
+| `internal/intelligence/indexing/repoindex/query/expand.go` | Create | Graph expansion algorithm |
+| `internal/intelligence/indexing/repoindex/query/query_test.go` | Create | Query tests |
 | `cmd/agentctl/cmd/repoindex.go` | Create | CLI commands |
 | `cmd/agentctl/cmd/root.go` | Modify | Register repoindex command |
 
@@ -596,10 +596,10 @@ Implement incremental rebuild that only reprocesses packages with changed files,
 
 | File | Action | Description |
 |------|--------|-------------|
-| `internal/indexing/repoindex/store/incremental.go` | Create | Transaction helpers for package replacement |
-| `internal/indexing/repoindex/builder/incremental.go` | Create | Diff detection and selective rebuild |
-| `internal/indexing/repoindex/builder/hash.go` | Create | File/package hash computation |
-| `internal/indexing/repoindex/builder/incremental_test.go` | Create | Tests for incremental behavior |
+| `internal/intelligence/indexing/repoindex/store/incremental.go` | Create | Transaction helpers for package replacement |
+| `internal/intelligence/indexing/repoindex/builder/incremental.go` | Create | Diff detection and selective rebuild |
+| `internal/intelligence/indexing/repoindex/builder/hash.go` | Create | File/package hash computation |
+| `internal/intelligence/indexing/repoindex/builder/incremental_test.go` | Create | Tests for incremental behavior |
 
 ### Implementation Details
 

@@ -127,7 +127,7 @@ agentctl run repo_index/expand --input '{"seed": "func:internal/storage.Store.Pu
 
 # Follow only call edges, 2 levels deep
 agentctl run repo_index/expand --input '{
-  "seed": "func:internal/retrieval.Search",
+  "seed": "func:internal/intelligence/retrieval.Search",
   "edge_types": ["CALLS"],
   "depth": 2,
   "direction": "out"
@@ -135,7 +135,7 @@ agentctl run repo_index/expand --input '{
 
 # Include soft edges from Index: blocks
 agentctl run repo_index/expand --input '{
-  "seed": "type:internal/indexing/repoindex/store.Store",
+  "seed": "type:internal/intelligence/indexing/repoindex/store.Store",
   "edge_types": ["CALLS", "SOFT"]
 }'
 ```

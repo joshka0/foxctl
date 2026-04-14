@@ -94,10 +94,10 @@ Testing surface, required tools, and resource cost classification for validation
 - VAL-RS-018 → TestRoomSandboxRedgreen_InitOnSandboxRoom
 - VAL-RS-019 → TestRoomSandboxAgile_EpicStartOnSandboxRoom, TestRoomSandboxAgile_MilestoneStartOnSandboxRoom, TestRoomSandboxAgile_StoryAddOnSandboxRoom
 
-## Flow Validator Guidance: go test (internal/worktree)
+## Flow Validator Guidance: go test (internal/platform/worktree)
 
-**Surface:** Go unit tests in `internal/worktree/` package
-**Tool:** `go test ./internal/worktree/... -v -count=1`
+**Surface:** Go unit tests in `internal/platform/worktree/` package
+**Tool:** `go test ./internal/platform/worktree/... -v -count=1`
 **Isolation:** Each test function creates its own temp git repo via `t.TempDir()`. No shared state between tests.
 **Concurrency:** Safe to run multiple test subets concurrently — they operate on independent temp directories.
 **Assertions covered:** VAL-WT-001 through VAL-WT-040

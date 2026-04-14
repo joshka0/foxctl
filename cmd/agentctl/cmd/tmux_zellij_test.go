@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agentpane"
 	domainagent "github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
 )
 
 func TestListZellijBoundPanesFiltersAndDedupesByLatestPane(t *testing.T) {

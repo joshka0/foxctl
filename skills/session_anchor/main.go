@@ -15,8 +15,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/stringutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 

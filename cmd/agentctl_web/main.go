@@ -30,9 +30,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/interfaces/web"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
-	"github.com/jkatigb/agentctl/internal/web"
 )
 
 func main() {
@@ -131,8 +131,8 @@ func main() {
 	// Cancel context to stop SSE hub and persistence goroutines
 	cancel()
 
-	// Wait for console hub persistence goroutines
-	srv.ConsoleHub().Wait()
+	// Wait for console transport persistence goroutines
+	srv.WaitConsoleTransport()
 
 	// Graceful HTTP shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)

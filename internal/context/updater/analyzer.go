@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/planning/llm"
+	"github.com/jkatigb/agentctl/internal/intelligence/planning/llm"
 )
 
 // Analyzer uses a cheap LLM to analyze conversations and extract context needs.

@@ -335,7 +335,7 @@
       "locations": [
         {
           "id": "6a",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 122,
           "lineContent": "func (d *dispatcher) Dispatch(ctx context.Context, input Input) (Result, error) {",
           "title": "Hook dispatcher entry",
@@ -343,7 +343,7 @@
         },
         {
           "id": "6b",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 170,
           "lineContent": "output, err := d.runner.Run(hookCtx, entryHook, hookInput)",
           "title": "Execute hook via runner",
@@ -351,7 +351,7 @@
         },
         {
           "id": "6c",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 49,
           "lineContent": "result, err := r.Executor.Execute(ctx, execution.ExecuteOptions{",
           "title": "Hook skill execution",
@@ -359,7 +359,7 @@
         },
         {
           "id": "6d",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 46,
           "lineContent": "extraEnv := buildSkillExtraEnv(input)",
           "title": "Build hook environment",
@@ -367,7 +367,7 @@
         },
         {
           "id": "6e",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 136,
           "lineContent": "env = append(env, \"AGENTCTL_SESSION_ID=\"+input.SessionID)",
           "title": "Propagate session to hook",
@@ -375,14 +375,14 @@
         },
         {
           "id": "6f",
-          "path": "internal/hooks/skill_runner.go",
+          "path": "internal/runtime/hooks/skill_runner.go",
           "lineNumber": 65,
           "lineContent": "output, err := parseSkillOutput(result.Stdout)",
           "title": "Parse hook output",
           "description": "Extracts hook.Output from skill envelope response"
         }
       ],
-      "traceTextDiagram": "Hook System Skill Execution Flow\n├── Event arrives at dispatcher\n│   └── Dispatch(ctx, input) \u003c-- 6a\n│       ├── Find matching hooks \u003c-- internal/hooks/dispatcher.go:129\n│       ├── For each hook entry \u003c-- internal/hooks/dispatcher.go:150\n│       │   └── runner.Run(hookCtx, hook, input) \u003c-- 6b\n│       │       └── SkillRunner.Run() \u003c-- internal/hooks/skill_runner.go:21\n│       │           ├── buildSkillExtraEnv(input) \u003c-- 6d\n│       │           │   └── append session vars \u003c-- 6e\n│       │           ├── Marshal hook input to JSON \u003c-- internal/hooks/skill_runner.go:40\n│       │           └── Executor.Execute(ctx, opts) \u003c-- 6c\n│       │               └── runner.RunWithOptions() \u003c-- internal/execution/runner_adapter.go:28\n│       │                   └── exec/WASI runtime\n│       └── parseSkillOutput(stdout) \u003c-- 6f\n│           └── Extract hook.Output \u003c-- internal/hooks/skill_runner.go:108\n└── Merge outputs and return Result \u003c-- internal/hooks/dispatcher.go:206",
+      "traceTextDiagram": "Hook System Skill Execution Flow\n├── Event arrives at dispatcher\n│   └── Dispatch(ctx, input) \u003c-- 6a\n│       ├── Find matching hooks \u003c-- internal/runtime/hooks/dispatcher.go:129\n│       ├── For each hook entry \u003c-- internal/runtime/hooks/dispatcher.go:150\n│       │   └── runner.Run(hookCtx, hook, input) \u003c-- 6b\n│       │       └── SkillRunner.Run() \u003c-- internal/runtime/hooks/skill_runner.go:21\n│       │           ├── buildSkillExtraEnv(input) \u003c-- 6d\n│       │           │   └── append session vars \u003c-- 6e\n│       │           ├── Marshal hook input to JSON \u003c-- internal/runtime/hooks/skill_runner.go:40\n│       │           └── Executor.Execute(ctx, opts) \u003c-- 6c\n│       │               └── runner.RunWithOptions() \u003c-- internal/execution/runner_adapter.go:28\n│       │                   └── exec/WASI runtime\n│       └── parseSkillOutput(stdout) \u003c-- 6f\n│           └── Extract hook.Output \u003c-- internal/runtime/hooks/skill_runner.go:108\n└── Merge outputs and return Result \u003c-- internal/runtime/hooks/dispatcher.go:206",
       "traceGuide": "## Motivation\n\nThe hook system enables **lifecycle-aware skill execution** triggered by events during agent runtime (e.g., before a tool is used, after an LLM response, when a session starts). The problem: agents need to observe, validate, or augment operations at specific points in their execution flow, but the core runtime shouldn't be tightly coupled to these extensions. Hooks solve this by **dispatching events to skills** that can approve, block, inject context, or trigger side effects—all while maintaining clean separation between the core runtime and extension logic [6a].\n\n## Details\n\n### Event Dispatching\n\nWhen an event occurs (like `PreToolUse` or `PostToolUse`), the **dispatcher** receives a `hooks.Input` containing event metadata, session context, and tool information [6a]. It finds matching hooks from configuration, filters by matchers (tool name patterns, event types), and executes them in priority order.\n\n### Hook Execution Path\n\nFor each matching hook, the dispatcher calls `runner.Run()` [6b], which routes to either `SkillRunner` (for Go-based skills) or `ShellRunner` (for shell scripts). The **SkillRunner** is the primary path [6c]:\n\n1. **Environment construction** [6d]: Builds extra environment variables from the hook input, including `AGENTCTL_SESSION_ID`, `AGENTCTL_AGENT_ID`, `AGENTCTL_TRACE_ID`, and `AGENTCTL_CORRELATION_ID` [6e]. This ensures hooks can track lineage across the execution chain.\n\n2. **Input marshaling**: Serializes the `hooks.Input` struct to JSON, which becomes stdin for the skill process.\n\n3. **Execution delegation**: Calls `Executor.Execute()` [6c], which ultimately invokes `runner.RunWithOptions()` to run the skill through either the exec or WASI runtime (same path as regular skill execution).\n\n### Output Processing\n\nThe skill returns a JSON envelope on stdout. The **parseSkillOutput** function [6f] extracts the `hook_output` field from the envelope's data section, which contains a `hooks.Output` struct with:\n- **Decision**: `approve`, `block`, or `none`\n- **Context**: Text to inject into the LLM context\n- **Actions**: Structured actions like `enqueue_context`, `run_skill`, or `send_mailbox`\n- **Updated tool input**: For `PreToolUse` hooks that want to modify tool arguments\n\n### Output Merging\n\nThe dispatcher collects outputs from all executed hooks and **merges them** using precedence rules: any `block` decision blocks the operation, `updated_tool_input` uses last-wins semantics, and actions are concatenated in execution order. This merged result determines whether the original operation proceeds and what side effects occur."
     },
     {

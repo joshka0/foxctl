@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	refscope "github.com/jkatigb/agentctl/internal/refactor/scope"
-	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
+	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
 )
 
 func TestApplyFocusDeadFiltersToDeadFindings(t *testing.T) {

@@ -11,20 +11,20 @@
 
 | Component | Status | Location |
 |-----------|--------|----------|
-| Hook v1 Types | ✅ | `internal/hooks/types.go` |
-| Hook Dispatcher | ✅ | `internal/hooks/dispatcher.go` |
-| Hook Merge Logic | ✅ | `internal/hooks/merge.go` |
-| Shell Adapter | ✅ | `internal/hooks/shell_runner.go` |
-| Skill Adapter | ✅ | `internal/hooks/skill_runner.go` |
-| Hook Registry | ✅ | `internal/hooks/registry.go` |
-| Mailbox Watcher | ✅ | `internal/actor/watcher.go` |
-| Supervisor | ✅ | `internal/actor/supervisor.go` |
-| AgentEngine Interface | ✅ | `internal/engine/engine.go` |
-| DSPyAdapter | ✅ | `internal/engine/dspy_adapter.go` |
-| LLMChatEngine | ✅ | `internal/engine/llmchat_engine.go` |
-| ToolRunner | ✅ | `internal/engine/tool_runner.go` |
-| AgentActor (renamed from DspyActor) | ✅ | `internal/actor/agent_actor.go` |
-| Hooks in Actor Loop | ✅ | `internal/actor/agent_actor.go` |
+| Hook v1 Types | ✅ | `internal/runtime/hooks/types.go` |
+| Hook Dispatcher | ✅ | `internal/runtime/hooks/dispatcher.go` |
+| Hook Merge Logic | ✅ | `internal/runtime/hooks/merge.go` |
+| Shell Adapter | ✅ | `internal/runtime/hooks/shell_runner.go` |
+| Skill Adapter | ✅ | `internal/runtime/hooks/skill_runner.go` |
+| Hook Registry | ✅ | `internal/runtime/hooks/registry.go` |
+| Mailbox Watcher | ✅ | `internal/runtime/actor/watcher.go` |
+| Supervisor | ✅ | `internal/runtime/actor/supervisor.go` |
+| AgentEngine Interface | ✅ | `internal/runtime/engine/engine.go` |
+| DSPyAdapter | ✅ | `internal/runtime/engine/dspy_adapter.go` |
+| LLMChatEngine | ✅ | `internal/runtime/engine/llmchat_engine.go` |
+| ToolRunner | ✅ | `internal/runtime/engine/tool_runner.go` |
+| AgentActor (renamed from DspyActor) | ✅ | `internal/runtime/actor/agent_actor.go` |
+| Hooks in Actor Loop | ✅ | `internal/runtime/actor/agent_actor.go` |
 
 ### Required by New Docs (Gaps)
 
@@ -49,7 +49,7 @@
 - Returns `data.hook_output` with merged result
 
 **Current State**:
-- We have `internal/hooks/dispatcher.go` with `Dispatcher` interface
+- We have `internal/runtime/hooks/dispatcher.go` with `Dispatcher` interface
 - It's a Go library, not a standalone skill
 - Shell hooks call skills directly, not through a central dispatcher
 
@@ -89,7 +89,7 @@ hooks:
 ```
 
 **Current State**:
-- We have `internal/hooks/registry.go` but it doesn't load YAML config
+- We have `internal/runtime/hooks/registry.go` but it doesn't load YAML config
 - Hooks are registered programmatically or via shell scripts in `.claude/settings.json`
 
 **Gap**: Need config loader that:
@@ -100,7 +100,7 @@ hooks:
 
 **Refactor Plan**:
 ```go
-// internal/hooks/config.go
+// internal/runtime/hooks/config.go
 type HooksConfig struct {
     Version  int            `yaml:"version"`
     Defaults HookDefaults   `yaml:"defaults"`
@@ -161,12 +161,12 @@ type HookMatch struct {
 
 **Refactor Plan**:
 ```go
-// internal/hooks/pathutil/extract.go
+// internal/runtime/hooks/pathutil/extract.go
 func ExtractPath(input json.RawMessage) string {
     // Try file_path, path, file, current_path in order
 }
 
-// internal/hooks/toolutil/classify.go
+// internal/runtime/hooks/toolutil/classify.go
 func IsWriteOperation(toolName, toolCanonical, toolKind string) bool {
     // CC: Edit, Write, MultiEdit, NotebookEdit
     // Canonical: edit.*
@@ -182,7 +182,7 @@ func IsWriteOperation(toolName, toolCanonical, toolKind string) bool {
 
 **Goal**: Single dispatcher skill that all adapters call
 
-1. **A1**: Add `hooks.yaml` config loader to `internal/hooks/`
+1. **A1**: Add `hooks.yaml` config loader to `internal/runtime/hooks/`
    - YAML parsing with validation
    - Workspace + global config merge
    - Match resolution
@@ -205,11 +205,11 @@ func IsWriteOperation(toolName, toolCanonical, toolKind string) bool {
 **Goal**: Hook skills work across CC/OC/agentctl runtime
 
 4. **B1**: Add path extraction utility
-   - `internal/hooks/pathutil/` package
+   - `internal/runtime/hooks/pathutil/` package
    - Handles `file_path`, `path`, `file`, `current_path`
 
 5. **B2**: Add tool classification utility
-   - `internal/hooks/toolutil/` package
+   - `internal/runtime/hooks/toolutil/` package
    - `IsWriteOperation()`, `IsSearchOperation()`, etc.
 
 6. **B3**: Update hook skills to use utilities
@@ -256,16 +256,16 @@ skills/hooks_dispatch/
 ├── skill.yaml
 └── config.go
 
-internal/hooks/
+internal/runtime/hooks/
 ├── config.go         # hooks.yaml loader (NEW)
 ├── yaml_types.go     # YAML struct types (NEW)
 └── loader.go         # Config file resolution (NEW)
 
-internal/hooks/pathutil/
+internal/runtime/hooks/pathutil/
 ├── extract.go        # Path extraction (NEW)
 └── normalize.go      # Path normalization (NEW)
 
-internal/hooks/toolutil/
+internal/runtime/hooks/toolutil/
 ├── classify.go       # Tool classification (NEW)
 └── kind.go           # Tool kind constants (NEW)
 
@@ -276,8 +276,8 @@ configs/hooks/claude/
 ### Existing Files to Modify
 
 ```
-internal/hooks/registry.go     # Add hooks.yaml integration
-internal/hooks/dispatcher.go   # Wire config loader
+internal/runtime/hooks/registry.go     # Add hooks.yaml integration
+internal/runtime/hooks/dispatcher.go   # Wire config loader
 
 skills/hooks_task_guard/main.go      # Use pathutil, toolutil
 skills/hooks_file_guard/main.go      # Use pathutil

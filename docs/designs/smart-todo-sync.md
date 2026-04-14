@@ -112,7 +112,7 @@ If no tag, use title hash. But titles can be edited, causing false removals.
 
 ## File Changes
 
-1. `internal/todosync/sync.go` - Add removal detection to `SyncFromProvider`
-2. `internal/todosync/types.go` - Add `Removed` to `SyncResult`
+1. `internal/context/todosync/sync.go` - Add removal detection to `SyncFromProvider`
+2. `internal/context/todosync/types.go` - Add `Removed` to `SyncResult`
 3. `internal/storage/tasks/task.go` - Add `Source` field (Phase 2)
 4. `configs/hooks/todo-sync.sh` - Update context message with removal count

@@ -71,7 +71,7 @@ core imports no adapters
 | Supervisor | `internal/v2/runtime/supervisor/*` | Standard `Run(ctx)` lifecycle for background components |
 | Single Writer | `internal/v2/runtime/*` state loops | Clear ownership of mutable state, fewer race conditions |
 | Snapshot Cache | `internal/v2/runtime/snapshots/*` | Lock-light reads for hot paths and status surfaces |
-| Direct Surface Wiring | `cmd/agentctl/cmd/agent.go`, `internal/web/api/agents.go`, `internal/daemon/service.go` | Hard-cut v2 command surfaces without runtime v1/v2 routing toggles |
+| Direct Surface Wiring | `cmd/agentctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/runtime/daemon/service.go` | Hard-cut v2 command surfaces without runtime v1/v2 routing toggles |
 
 ## Error Contract
 
@@ -432,8 +432,8 @@ routing/bridge files that were removed during hard-cut cleanup.
 | `internal/v2/ports/api/mappers.go` | new |
 | `internal/v2/ports/daemon/router.go` | new |
 | `cmd/agentctl/cmd/agent.go` | modified |
-| `internal/web/api/agents.go` | modified |
-| `internal/actor/agent_actor.go` | modified |
+| `internal/interfaces/web/api/agents.go` | modified |
+| `internal/runtime/actor/agent_actor.go` | modified |
 | `internal/agent/runtime/runtime.go` | modified |
 
 **Key implementation points**:

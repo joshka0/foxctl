@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/rlm"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"

@@ -237,7 +237,7 @@ const handleTrashOldAgents = async () => {
 
 - Same utility replacement for header, metadata, system prompt strings
 
-### 7. `internal/web/api/agents.go` (EDIT — P2)
+### 7. `internal/interfaces/web/api/agents.go` (EDIT — P2)
 
 - Add `PromptSummary string` to `AgentResponse`
 - Add `summarizePrompt` helper (rune-safe truncation at 100 chars)

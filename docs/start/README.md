@@ -6,7 +6,15 @@ Use this directory for fast orientation before diving into detailed subsystem do
 
 1. Read [AGENTS.md](../../AGENTS.md) for repository operating rules.
 2. Scan [docs/README.md](../README.md) for the docs map.
-3. Use one of the focused quick-start guides below.
+3. If your change touches `internal/*`, read [docs/architecture/package-topology.md](../architecture/package-topology.md) before choosing a package location.
+4. Use one of the focused quick-start guides below.
+
+Package-placement rule:
+
+- new top-level `internal/*` roots should be rare
+- `internal/v2/*` is only for the newer agent/runtime/orchestration lane
+- context, retrieval, storage, and interface work should stay in their own
+  documented families unless the topology doc says otherwise
 
 ## Quick-Start Guides
 

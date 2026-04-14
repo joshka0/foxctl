@@ -78,9 +78,9 @@ Create a parser that extracts `Index:` blocks from doc comments and produces str
 
 | File | Action | Description |
 |------|--------|-------------|
-| `internal/indexing/repoindex/parser/index_block.go` | Create | Index block parser |
-| `internal/indexing/repoindex/parser/types.go` | Create | Parsed metadata types |
-| `internal/indexing/repoindex/parser/parser_test.go` | Create | Parser tests with fixtures |
+| `internal/intelligence/indexing/repoindex/parser/index_block.go` | Create | Index block parser |
+| `internal/intelligence/indexing/repoindex/parser/types.go` | Create | Parsed metadata types |
+| `internal/intelligence/indexing/repoindex/parser/parser_test.go` | Create | Parser tests with fixtures |
 
 ### Implementation Details
 
@@ -308,10 +308,10 @@ Generate concept nodes from parsed metadata and create weighted edges linking sy
 
 | File | Action | Description |
 |------|--------|-------------|
-| `internal/indexing/repoindex/builder/concepts.go` | Create | Concept node creation |
-| `internal/indexing/repoindex/builder/comment_edges.go` | Create | Comment-derived edge generation |
-| `internal/indexing/repoindex/types.go` | Modify | Add concept-related constants |
-| `internal/indexing/repoindex/builder/concepts_test.go` | Create | Tests |
+| `internal/intelligence/indexing/repoindex/builder/concepts.go` | Create | Concept node creation |
+| `internal/intelligence/indexing/repoindex/builder/comment_edges.go` | Create | Comment-derived edge generation |
+| `internal/intelligence/indexing/repoindex/types.go` | Modify | Add concept-related constants |
+| `internal/intelligence/indexing/repoindex/builder/concepts_test.go` | Create | Tests |
 
 ### Schema Additions
 
@@ -573,9 +573,9 @@ Enhance the expand algorithm to conditionally include comment edges based on que
 
 | File | Action | Description |
 |------|--------|-------------|
-| `internal/indexing/repoindex/query/smart_expand.go` | Create | Query-aware expansion |
-| `internal/indexing/repoindex/query/trail.go` | Create | Expansion trail formatting |
-| `internal/indexing/repoindex/query/smart_expand_test.go` | Create | Tests |
+| `internal/intelligence/indexing/repoindex/query/smart_expand.go` | Create | Query-aware expansion |
+| `internal/intelligence/indexing/repoindex/query/trail.go` | Create | Expansion trail formatting |
+| `internal/intelligence/indexing/repoindex/query/smart_expand_test.go` | Create | Tests |
 
 ### Implementation Details
 
@@ -894,9 +894,9 @@ Validate comment-derived edges by checking if the documented behavior exists in 
 
 | File | Action | Description |
 |------|--------|-------------|
-| `internal/indexing/repoindex/validation/validate_edges.go` | Create | Edge validation logic |
-| `internal/indexing/repoindex/validation/patterns.go` | Create | Code pattern matchers |
-| `internal/indexing/repoindex/validation/validate_edges_test.go` | Create | Tests |
+| `internal/intelligence/indexing/repoindex/validation/validate_edges.go` | Create | Edge validation logic |
+| `internal/intelligence/indexing/repoindex/validation/patterns.go` | Create | Code pattern matchers |
+| `internal/intelligence/indexing/repoindex/validation/validate_edges_test.go` | Create | Tests |
 
 ### Implementation Details
 

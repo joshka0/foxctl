@@ -49,7 +49,7 @@ go test ./internal/<package>/ -run TestXxx -v
 
 1. Write the minimum implementation to make tests pass
 2. Follow the plan/apply pattern: pure functions for business logic, thin shell for IO
-3. Domain types in `internal/worktree/` or `internal/gateway/` — no IO imports in core
+3. Domain types in `internal/platform/worktree/` or `internal/gateway/` — no IO imports in core
 4. Use `context.Context` through all calls
 5. Return structured errors — never leak raw git/tmux stderr
 6. All CLI output as JSON envelopes (version, status, command, data, meta, error)
@@ -86,21 +86,21 @@ For features that involve CLI commands:
 
 ```json
 {
-  "salientSummary": "Implemented worktree Create, List, Remove, and Prune in internal/worktree/ with full TDD. 28 tests passing, no races. go vet and lint clean.",
-  "whatWasImplemented": "internal/worktree/manager.go (Manager struct with Create/List/Remove/Prune), internal/worktree/sanitize.go (SanitizeBranchName), internal/worktree/porcelain.go (porcelain parser), internal/worktree/manager_test.go (28 test cases), internal/worktree/sanitize_test.go (12 test cases), internal/worktree/porcelain_test.go (8 test cases including golden files)",
+  "salientSummary": "Implemented worktree Create, List, Remove, and Prune in internal/platform/worktree/ with full TDD. 28 tests passing, no races. go vet and lint clean.",
+  "whatWasImplemented": "internal/platform/worktree/manager.go (Manager struct with Create/List/Remove/Prune), internal/platform/worktree/sanitize.go (SanitizeBranchName), internal/platform/worktree/porcelain.go (porcelain parser), internal/platform/worktree/manager_test.go (28 test cases), internal/platform/worktree/sanitize_test.go (12 test cases), internal/platform/worktree/porcelain_test.go (8 test cases including golden files)",
   "whatWasLeftUndone": "",
   "verification": {
     "commandsRun": [
-      {"command": "go test ./internal/worktree/ -v", "exitCode": 0, "observation": "28 tests passing"},
-      {"command": "go test -race ./internal/worktree/...", "exitCode": 0, "observation": "No races detected"},
-      {"command": "go vet ./internal/worktree/...", "exitCode": 0, "observation": "Clean"},
-      {"command": "golangci-lint run --timeout 10m ./internal/worktree/...", "exitCode": 0, "observation": "No issues"}
+      {"command": "go test ./internal/platform/worktree/ -v", "exitCode": 0, "observation": "28 tests passing"},
+      {"command": "go test -race ./internal/platform/worktree/...", "exitCode": 0, "observation": "No races detected"},
+      {"command": "go vet ./internal/platform/worktree/...", "exitCode": 0, "observation": "Clean"},
+      {"command": "golangci-lint run --timeout 10m ./internal/platform/worktree/...", "exitCode": 0, "observation": "No issues"}
     ],
     "interactiveChecks": []
   },
   "tests": {
     "added": [
-      {"file": "internal/worktree/manager_test.go", "cases": [
+      {"file": "internal/platform/worktree/manager_test.go", "cases": [
         {"name": "TestCreate_NewBranch", "verifies": "VAL-WT-001"},
         {"name": "TestCreate_ExistingBranch", "verifies": "VAL-WT-002"},
         {"name": "TestCreate_FromRef", "verifies": "VAL-WT-003"},
@@ -108,7 +108,7 @@ For features that involve CLI commands:
         {"name": "TestRemove_CleanWorktree", "verifies": "VAL-WT-015"},
         {"name": "TestRemove_DirtyWithoutForce", "verifies": "VAL-WT-016"}
       ]},
-      {"file": "internal/worktree/sanitize_test.go", "cases": [
+      {"file": "internal/platform/worktree/sanitize_test.go", "cases": [
         {"name": "TestSanitizeBranchName_UnsafeChars", "verifies": "VAL-WT-004"},
         {"name": "TestSanitizeBranchName_EmptyResult", "verifies": "VAL-WT-005"},
         {"name": "TestSanitizeBranchName_SafePreserved", "verifies": "VAL-WT-006"}

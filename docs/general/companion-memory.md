@@ -42,10 +42,10 @@ Runtime context assembly is hybrid-only and built from event-derived layers:
 3. Inject bounded context into the companion system prompt
 
 Implementation reference:
-- `internal/companion/service.go` (`buildSystemPrompt`, `autoCompress`, `GetMemoryContext`)
-- `internal/companion/v2_context_adapter.go`
-- `internal/companion/hybrid_pipeline.go`
-- `internal/companion/hybrid_context.go`
+- `internal/context/companion/service.go` (`buildSystemPrompt`, `autoCompress`, `GetMemoryContext`)
+- `internal/context/companion/v2_context_adapter.go`
+- `internal/context/companion/hybrid_pipeline.go`
+- `internal/context/companion/hybrid_context.go`
 
 V2 policy note: layered runtime assembly uses a deterministic char-budget split
 under one total cap:

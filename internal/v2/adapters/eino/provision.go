@@ -8,7 +8,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 // ProvisionFromLLMConfig constructs a real Eino-backed engine adapter from a

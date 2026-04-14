@@ -48,7 +48,7 @@ This section captures findings from deep exploration of six system areas.
 
 ### 2. DSPy Integration
 
-**Location**: `internal/actor/dspy_actor.go`, `internal/storage/trajectory/`, `skills/session_export_dspy/`
+**Location**: `internal/runtime/actor/dspy_actor.go`, `internal/storage/trajectory/`, `skills/session_export_dspy/`
 
 **Architecture**:
 ```
@@ -65,7 +65,7 @@ Learnable Scorer (weight adaptation)
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| DspyActor | `internal/actor/dspy_actor.go` (592 lines) | LLM-driven agent runtime |
+| DspyActor | `internal/runtime/actor/dspy_actor.go` (592 lines) | LLM-driven agent runtime |
 | Trajectory Types | `internal/storage/trajectory/types.go` (347 lines) | Episode schema |
 | Feedback Collector | `internal/agent/optimization/feedback.go` (174 lines) | Human ratings |
 | Learnable Scorer | `internal/agent/optimization/learnable_scorer.go` (453 lines) | Weight learning |
@@ -91,7 +91,7 @@ Learnable Scorer (weight adaptation)
 
 ### 3. Actor/Orchestration System
 
-**Location**: `internal/actor/`
+**Location**: `internal/runtime/actor/`
 
 **Core Actors**:
 
@@ -127,7 +127,7 @@ Learnable Scorer (weight adaptation)
 
 ### 4. Memory & Embedding Architecture
 
-**Location**: `internal/storage/memory/`, `internal/indexing/`
+**Location**: `internal/storage/memory/`, `internal/intelligence/indexing/`
 
 **3-Tier Progressive Memory**:
 ```
@@ -155,8 +155,8 @@ Tier 3: Full Conversations    → On-demand JSONL decompression
 **Key Files**:
 - `internal/storage/memory/store.go` - SQLite MemoryStore
 - `internal/storage/memory/turso_store.go` - Turso with vector search
-- `internal/indexing/embedding/worker.go` - Background embedding processor
-- `internal/indexing/semantic/provider_voyage.go` - Voyage API client
+- `internal/intelligence/indexing/embedding/worker.go` - Background embedding processor
+- `internal/intelligence/indexing/semantic/provider_voyage.go` - Voyage API client
 
 **Embedding Pipeline**:
 ```
@@ -167,7 +167,7 @@ File Change → Hook → Enqueue Job → Worker Claims → Provider API → Stor
 
 ### 5. Skill Ecosystem
 
-**Location**: `skills/`, `internal/domain/skill/`, `internal/execution/`
+**Location**: `skills/`, `internal/domain/skill/`, `internal/runtime/execution/`
 
 **Scale**: 87 skills across 25+ categories
 
@@ -187,7 +187,7 @@ File Change → Hook → Enqueue Job → Worker Claims → Provider API → Stor
 | EXEC | Native binary | Configurable | Performance-critical |
 | WASI | wazero (WebAssembly) | None (sandboxed) | Security-isolated |
 
-**Workflow Engine** (`internal/workflow/`):
+**Workflow Engine** (`internal/runtime/orchestration/workflow/`):
 - DAG-based scheduling
 - Parallel execution within batches
 - Template expressions for data flow: `{{.stepID.data.field}}`
@@ -213,7 +213,7 @@ capabilities:
 
 ### 6. Daemon & API Server
 
-**Daemon** (`internal/daemon/`):
+**Daemon** (`internal/runtime/daemon/`):
 - Unix socket: `/tmp/agentctl-{uid}.sock`
 - Pre-loaded SQLite pool for sub-50ms hook latency
 - JSON-RPC-like protocol: `status`, `run`, `warm`, `shutdown`
@@ -293,7 +293,7 @@ Based on research, the highest-impact integrations are:
 ├──────────────────────────┼──────────────────────────────────────────┤
 │                          ▼                                           │
 │  ┌─────────────────────────────────────────────────────────────┐    │
-│  │ Actor System (internal/actor/)                              │    │
+│  │ Actor System (internal/runtime/actor/)                              │    │
 │  │ ├── Supervisor (lifecycle, restart, backoff)               │    │
 │  │ ├── Watcher (50ms reactive notifications)                  │    │
 │  │ ├── EventBus (pub/sub with selective persistence)          │    │
@@ -532,7 +532,7 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 |-----------|--------|----------|
 | Console CLI commands | ✅ Complete | `cmd/agentctl/cmd/console.go` (attach, list, rm) |
 | Console store (SQLite) | ✅ Complete | `internal/storage/console/store.go` |
-| DspyActor runtime | ✅ Complete | `internal/actor/dspy_actor.go` (agent.* handlers) |
+| DspyActor runtime | ✅ Complete | `internal/runtime/actor/dspy_actor.go` (agent.* handlers) |
 | Console message types | ⚠️ Defined only | `internal/domain/agent/mailbox.go` |
 | Trajectory capture | ✅ Complete | `internal/storage/trajectory/` |
 | HumanRating field | ✅ Complete | `Outcome.HumanRating *int` (1-5 scale) |
@@ -556,7 +556,7 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 
 **Goal**: Enable DspyActor to receive user input and stream results
 
-**Files to modify**: `internal/actor/dspy_actor.go`
+**Files to modify**: `internal/runtime/actor/dspy_actor.go`
 
 **New handlers to add:**
 ```go
@@ -996,8 +996,8 @@ type SSEEvent =
 ### Existing Components (Ready)
 - OpenTUI framework (packages/tui)
 - Express API server (packages/gui/server)
-- Actor system (internal/actor)
-- DspyActor (internal/actor/dspy_actor.go)
+- Actor system (internal/runtime/actor)
+- DspyActor (internal/runtime/actor/dspy_actor.go)
 - Memory storage (internal/storage/memory)
 - Trajectory capture (internal/storage/trajectory)
 - 87 skills (skills/*)

@@ -33,7 +33,7 @@ These three primitives cover horizontal scaling to ~50 pods with zero new infras
 Fix the concurrency bug without changing deployment model.
 
 ```go
-// internal/companion/turnlock.go
+// internal/context/companion/turnlock.go
 package companion
 
 import "sync"
@@ -101,7 +101,7 @@ func (sb *SessionBridge) HandleMessage(ctx context.Context, evt MessageEvent) er
 For multi-pod deployments, replace in-memory `TurnLock` with Postgres advisory locks.
 
 ```go
-// internal/companion/turnlock_pg.go
+// internal/context/companion/turnlock_pg.go
 package companion
 
 import (
@@ -180,7 +180,7 @@ func (pl *PgTurnLock) TryWithTurnLock(ctx context.Context, conversationID string
 Instead of sticky sessions, each incoming turn becomes a River job. River's `SKIP LOCKED` claiming ensures exactly one worker processes each turn.
 
 ```go
-// internal/jobs/workers/conversation_turn.go
+// internal/runtime/jobs/workers/conversation_turn.go
 type ConversationTurnArgs struct {
     ConversationID string          `json:"conversation_id"`
     Content        string          `json:"content"`
@@ -238,18 +238,18 @@ This is an optimization (avoid re-creating consolews sessions on every request),
 
 | File | Purpose |
 |------|---------|
-| `internal/companion/turnlock.go` | In-memory per-conversation mutex (Phase 4a) |
-| `internal/companion/turnlock_pg.go` | Postgres advisory lock implementation (Phase 4b) |
-| `internal/companion/turnlock_test.go` | Tests for both implementations |
-| `internal/jobs/workers/conversation_turn.go` | River-based turn processing (Phase 4c) |
+| `internal/context/companion/turnlock.go` | In-memory per-conversation mutex (Phase 4a) |
+| `internal/context/companion/turnlock_pg.go` | Postgres advisory lock implementation (Phase 4b) |
+| `internal/context/companion/turnlock_test.go` | Tests for both implementations |
+| `internal/runtime/jobs/workers/conversation_turn.go` | River-based turn processing (Phase 4c) |
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `internal/companion/service.go` | Add TurnLock; serialize Chat() per conversation |
-| `internal/chatadapter/session_bridge.go` | Replace cancel-previous with turn lock |
-| `internal/web/server.go` | Initialize TurnLock (memory or Postgres based on config) |
+| `internal/context/companion/service.go` | Add TurnLock; serialize Chat() per conversation |
+| `internal/interfaces/chatadapter/session_bridge.go` | Replace cancel-previous with turn lock |
+| `internal/interfaces/web/server.go` | Initialize TurnLock (memory or Postgres based on config) |
 
 ## Implementation Order
 

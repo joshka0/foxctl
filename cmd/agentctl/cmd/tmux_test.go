@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agentpane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
 )
 
 func TestNewTmuxCommandHasSendParentSubcommand(t *testing.T) {
@@ -390,8 +390,8 @@ func TestTmuxSubmitModeForParticipant(t *testing.T) {
 	if got := tmuxSubmitModeForParticipant("claude-a"); got != tmuxbridge.SubmitModeEnterOnly {
 		t.Fatalf("claude submit mode = %q want %q", got, tmuxbridge.SubmitModeEnterOnly)
 	}
-	if got := tmuxSubmitModeForParticipant("droid-a"); got != tmuxbridge.SubmitModeEscapeEnter {
-		t.Fatalf("droid submit mode = %q want %q", got, tmuxbridge.SubmitModeEscapeEnter)
+	if got := tmuxSubmitModeForParticipant("droid-a"); got != tmuxbridge.SubmitModeEnterOnly {
+		t.Fatalf("droid submit mode = %q want %q", got, tmuxbridge.SubmitModeEnterOnly)
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/agentpolicy"
+	"github.com/jkatigb/agentctl/internal/runtime/agentpolicy"
 )
 
 const command = "agent/handbook"

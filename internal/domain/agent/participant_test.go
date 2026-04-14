@@ -211,6 +211,31 @@ func TestBuildParticipantStates(t *testing.T) {
 	}
 }
 
+func TestDefaultRoomDeliverySubmitModeForProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		actorID  string
+		want     string
+	}{
+		{name: "droid provider uses plain enter", provider: "droid", actorID: "feat-internal-grouping-droid-review-b", want: RoomDeliverySubmitModeEnter},
+		{name: "gemini provider overrides feature scoped actor id", provider: "gemini", actorID: "feat-internal-grouping-gemini-review-b", want: RoomDeliverySubmitModeEnterSplit},
+		{name: "codex provider overrides feature scoped actor id", provider: "codex", actorID: "feat-internal-grouping-codex", want: RoomDeliverySubmitModeComposerCtrlEnter},
+		{name: "claude provider overrides feature scoped actor id", provider: "claude", actorID: "feat-docs-claude-review", want: RoomDeliverySubmitModeEnter},
+		{name: "falls back to actor id heuristic for droid", provider: "", actorID: "droid-a", want: RoomDeliverySubmitModeEnter},
+		{name: "falls back to actor id heuristic when provider missing", provider: "", actorID: "gemini-a", want: RoomDeliverySubmitModeEnterSplit},
+		{name: "falls back to newline when neither provider nor actor indicate one", provider: "", actorID: "feat-misc-reviewer", want: RoomDeliverySubmitModeNewline},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DefaultRoomDeliverySubmitModeForProvider(tt.provider, tt.actorID); got != tt.want {
+				t.Fatalf("DefaultRoomDeliverySubmitModeForProvider(%q, %q) = %q, want %q", tt.provider, tt.actorID, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildParticipantStatesSkipsEmptyActorID(t *testing.T) {
 	now := time.Now().UTC()
 	members := []RoomMember{

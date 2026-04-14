@@ -1,3 +1,4 @@
-// Package pathutil provides path resolution helpers for skills.
-// It wraps internal/platform/pathutil and adds skill-specific utilities.
+// Package pathutil provides reusable path resolution helpers for skills. It
+// belongs to the generic skillslib tooling-support family while wrapping
+// internal/platform/pathutil for skill use.
 package pathutil

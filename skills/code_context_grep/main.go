@@ -24,7 +24,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/tools/ripgrep"
+	"github.com/jkatigb/agentctl/internal/tooling/tools/ripgrep"
 )
 
 // Mode determines which search engine to use for code context search with different capabilities.

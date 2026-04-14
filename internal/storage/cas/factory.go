@@ -3,7 +3,7 @@ package cas
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 

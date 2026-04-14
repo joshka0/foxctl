@@ -24,9 +24,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/hooks"
-	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
-	"github.com/jkatigb/agentctl/internal/lsp/gopls"
+	"github.com/jkatigb/agentctl/internal/platform/lsp/gopls"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks/pathutil"
 )
 
 const (

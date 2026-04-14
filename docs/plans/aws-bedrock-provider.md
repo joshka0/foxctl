@@ -10,7 +10,7 @@ AWS SDK v2 is already in `go.mod` (used by S3 CAS store).
 
 ## Architecture
 
-All companion/RLM agents use `LLMChatEngine` (`internal/engine/llmchat_engine.go`) which makes OpenAI-compatible HTTP calls via `callLLM`. The dspy-go framework is no longer used by agents.
+All companion/RLM agents use `LLMChatEngine` (`internal/runtime/engine/llmchat_engine.go`) which makes OpenAI-compatible HTTP calls via `callLLM`. The dspy-go framework is no longer used by agents.
 
 The integration point is a single function: `callLLM` — add a Bedrock branch that uses the AWS SDK instead of raw HTTP.
 
@@ -49,7 +49,7 @@ case "bedrock":
     return "anthropic.claude-3-5-sonnet-20241022-v2:0"
 ```
 
-**File:** `internal/engine/llmchat_engine.go`
+**File:** `internal/runtime/engine/llmchat_engine.go`
 
 Add to `detectProvider()`:
 ```go
@@ -66,7 +66,7 @@ case "bedrock":
 
 ## Step 3: Create Bedrock Adapter
 
-**File:** `internal/engine/bedrock.go` (NEW)
+**File:** `internal/runtime/engine/bedrock.go` (NEW)
 
 This file translates between the engine's OpenAI message types and Bedrock's Converse API:
 
@@ -100,7 +100,7 @@ Translation mapping:
 
 ## Step 4: Wire Bedrock into callLLM
 
-**File:** `internal/engine/llmchat_engine.go`
+**File:** `internal/runtime/engine/llmchat_engine.go`
 
 Add a `bedrockClient *BedrockClient` field to `LLMChatEngine`.
 
@@ -131,7 +131,7 @@ if e.bedrockClient != nil {
 
 ## Step 5: Register in Provider Availability
 
-**File:** `internal/web/api/companion.go`
+**File:** `internal/interfaces/web/api/companion.go`
 
 Add to `CompanionProvidersHandler` providers list:
 ```go
@@ -152,9 +152,9 @@ This is the only new dependency — the core AWS SDK and credential chain module
 |------|--------|
 | `internal/platform/config/config.go` | MODIFY — add BedrockRegion field, env loading, resolve methods |
 | `internal/providers/llm/defaults.go` | MODIFY — add bedrock default model |
-| `internal/engine/bedrock.go` | CREATE — Bedrock Converse adapter |
-| `internal/engine/llmchat_engine.go` | MODIFY — add bedrockClient field, detection, callLLM branch |
-| `internal/web/api/companion.go` | MODIFY — add bedrock to providers list |
+| `internal/runtime/engine/bedrock.go` | CREATE — Bedrock Converse adapter |
+| `internal/runtime/engine/llmchat_engine.go` | MODIFY — add bedrockClient field, detection, callLLM branch |
+| `internal/interfaces/web/api/companion.go` | MODIFY — add bedrock to providers list |
 | `go.mod` / `go.sum` | MODIFY — add bedrockruntime dependency |
 
 ## Environment Variables
@@ -172,8 +172,8 @@ The AWS SDK credential chain handles all these automatically — no custom crede
 
 ## Verification
 
-1. `go build ./internal/engine/...` — compiles
-2. `go test ./internal/engine/...` — existing tests pass
+1. `go build ./internal/runtime/engine/...` — compiles
+2. `go test ./internal/runtime/engine/...` — existing tests pass
 3. Unit test for `bedrock.go`: mock Bedrock client, verify OAI→Bedrock message translation
 4. Integration test (manual):
    ```bash

@@ -105,7 +105,7 @@ The message passing system was already fully implemented:
 - Session lineage tracking
 - Workspace filtering
 
-**Actor Layer** (`internal/actor/`):
+**Actor Layer** (`internal/runtime/actor/`):
 - `base_actor.go` - Message handler registration
 - `mailbox_adapter.go` - Storage ↔ Actor bridge
 - `event_bus.go` - Event pub/sub

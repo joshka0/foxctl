@@ -11,7 +11,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/context/companion"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"

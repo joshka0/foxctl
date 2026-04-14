@@ -15,8 +15,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
-	"github.com/jkatigb/agentctl/internal/tmuxbridge"
 	"github.com/spf13/cobra"
 )
 

@@ -39,10 +39,10 @@ Modify the symbol embedding enqueue path to use `embeddingtext.BuildSymbolEmbedd
 
 | File | Changes |
 |------|---------|
-| `internal/indexing/symbol/enqueue.go` | Add `embeddingtext.BuildSymbolEmbeddingText()` call, conditional on flag |
-| `internal/indexing/symbol/enqueue_test.go` | Add tests for new text building logic |
-| `internal/indexing/embeddingtext/symbol_text.go` | Add `BuildSymbolEmbeddingText()` implementation |
-| `internal/indexing/embeddingtext/symbol_text_test.go` | Add unit tests for text builder |
+| `internal/intelligence/indexing/symbol/enqueue.go` | Add `embeddingtext.BuildSymbolEmbeddingText()` call, conditional on flag |
+| `internal/intelligence/indexing/symbol/enqueue_test.go` | Add tests for new text building logic |
+| `internal/intelligence/indexing/embeddingtext/symbol_text.go` | Add `BuildSymbolEmbeddingText()` implementation |
+| `internal/intelligence/indexing/embeddingtext/symbol_text_test.go` | Add unit tests for text builder |
 | `internal/platform/config/config.go` | Add `EmbedSymbolTextMode` field |
 
 ### Implementation Details
@@ -50,7 +50,7 @@ Modify the symbol embedding enqueue path to use `embeddingtext.BuildSymbolEmbedd
 #### 1. Text Builder Function
 
 ```go
-// internal/indexing/embeddingtext/symbol_text.go
+// internal/intelligence/indexing/embeddingtext/symbol_text.go
 
 // BuildSymbolEmbeddingText constructs embedding-optimized text for a symbol.
 // Doc-enriched mode uses NormalizeDoc and caps code/relationship sections.
@@ -65,7 +65,7 @@ func BuildSymbolEmbeddingText(info SymbolInfo, opts SymbolTextOptions) string {
 #### 1b. Content Digest Helper
 
 ```go
-// internal/indexing/embeddingtext/digest.go
+// internal/intelligence/indexing/embeddingtext/digest.go
 
 type SymbolDigestInput struct {
     Doc         string
@@ -86,7 +86,7 @@ func BuildSymbolContentDigest(input SymbolDigestInput) string {
 #### 2. Enqueue Integration
 
 ```go
-// internal/indexing/symbol/enqueue.go
+// internal/intelligence/indexing/symbol/enqueue.go
 
 func (e *Enqueuer) EnqueueSymbol(ctx context.Context, sym Symbol) error {
     var content string
@@ -179,17 +179,17 @@ Use the embedding store as the source of truth for content digests. Before enque
 
 | File | Changes |
 |------|---------|
-| `internal/indexing/embedding/store.go` | Add `GetContentDigest()` (workspaceID, symbolID) helper |
-| `internal/indexing/symbol/enqueue.go` | Check embed-store digest before enqueuing |
-| `internal/indexing/embedding/store_test.go` | Tests for digest lookup |
-| `internal/indexing/symbol/enqueue_test.go` | Tests for enqueue skip behavior |
+| `internal/intelligence/indexing/embedding/store.go` | Add `GetContentDigest()` (workspaceID, symbolID) helper |
+| `internal/intelligence/indexing/symbol/enqueue.go` | Check embed-store digest before enqueuing |
+| `internal/intelligence/indexing/embedding/store_test.go` | Tests for digest lookup |
+| `internal/intelligence/indexing/symbol/enqueue_test.go` | Tests for enqueue skip behavior |
 
 ### Implementation Details
 
 #### 1. Query embedding store
 
 ```go
-// internal/indexing/embedding/store.go
+// internal/intelligence/indexing/embedding/store.go
 
 // GetContentDigest returns the last stored content digest and model for a symbol.
 func (s *Store) GetContentDigest(ctx context.Context, workspaceID, symbolID string) (digest string, model string, ok bool, err error) {
@@ -200,7 +200,7 @@ func (s *Store) GetContentDigest(ctx context.Context, workspaceID, symbolID stri
 #### 2. Skip Logic in Enqueue
 
 ```go
-// internal/indexing/symbol/enqueue.go
+// internal/intelligence/indexing/symbol/enqueue.go
 
 func (e *Enqueuer) EnqueueSymbol(ctx context.Context, sym Symbol) error {
     content := e.buildContent(sym)
@@ -289,8 +289,8 @@ Add a CLI command to backfill doc-enriched embeddings for symbols that were embe
 | `cmd/agentctl/cmd/embedding_backfill.go` | **New file** - CLI command implementation |
 | `cmd/agentctl/cmd/embedding_backfill_test.go` | **New file** - command tests |
 | `cmd/agentctl/cmd/root.go` | Register backfill command |
-| `internal/indexing/symbol/backfill.go` | **New file** - backfill business logic |
-| `internal/indexing/symbol/backfill_test.go` | **New file** - backfill logic tests |
+| `internal/intelligence/indexing/symbol/backfill.go` | **New file** - backfill business logic |
+| `internal/intelligence/indexing/symbol/backfill_test.go` | **New file** - backfill logic tests |
 
 ### Implementation Details
 
@@ -381,7 +381,7 @@ func runEmbeddingBackfill(cmd *cobra.Command, args []string) error {
 #### 2. Backfill Logic
 
 ```go
-// internal/indexing/symbol/backfill.go
+// internal/intelligence/indexing/symbol/backfill.go
 
 type Backfiller struct {
     store   *memory.Store

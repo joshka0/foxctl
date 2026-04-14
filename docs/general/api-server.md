@@ -4,7 +4,7 @@ Current HTTP surface for `agentctl web serve`.
 
 ## Current status
 
-This is the live `/api` server surface registered in `internal/web/server.go`.
+This is the live `/api` server surface registered in `internal/interfaces/web/server.go`.
 It is not the older `/api/v1` draft contract.
 
 - Base path: `/api`

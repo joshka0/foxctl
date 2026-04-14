@@ -2,7 +2,7 @@
 
 Status: draft  
 Owner: companion / contextplane / rlm  
-Scope: `internal/companion`, `internal/rlm`, `internal/contextplane`, `internal/web/api`, `packages/gui-agent`
+Scope: `internal/context/companion`, `internal/rlm`, `internal/context/contextplane`, `internal/interfaces/web/api`, `packages/gui-agent`
 
 ## Goal
 
@@ -240,7 +240,7 @@ Goal: make the OpenViking-style `L0/L1/L2` core plus `agentctl` continuity exten
 
 Changes:
 
-- add a structured `HarnessState` model in `internal/companion`
+- add a structured `HarnessState` model in `internal/context/companion`
 - replace ad hoc string sections with typed lane payloads internally
 - add response/debug metadata:
   - `layer_hits`
@@ -251,8 +251,8 @@ Changes:
 
 Files:
 
-- `internal/companion/service.go`
-- `internal/companion/personality.go`
+- `internal/context/companion/service.go`
+- `internal/context/companion/personality.go`
 - `packages/gui-agent/src/api/client.ts`
 - `packages/gui-agent/src/components/conversations/*`
 
@@ -269,10 +269,10 @@ Changes:
 
 Files:
 
-- `internal/contextplane/store.go`
-- `internal/contextplane/taskhistory/*`
-- `internal/web/api/companion.go`
-- `internal/companion/service.go`
+- `internal/context/contextplane/store.go`
+- `internal/context/contextplane/taskhistory/*`
+- `internal/interfaces/web/api/companion.go`
+- `internal/context/companion/service.go`
 
 ### Phase 3 — Bounded RLM Controller State
 
@@ -292,8 +292,8 @@ Likely shape:
 
 Files:
 
-- `internal/companion/service.go`
-- new `internal/companion/controller_state.go`
+- `internal/context/companion/service.go`
+- new `internal/context/companion/controller_state.go`
 
 ### Phase 4 — Recursive Subcall Lane
 
@@ -310,7 +310,7 @@ Files:
 
 - `internal/rlm/env/adapter.go`
 - `internal/rlm/env/tools.go`
-- `internal/companion/service.go`
+- `internal/context/companion/service.go`
 - potentially `cmd/agentctl/cmd/rlm.go`
 
 ### Phase 5 — Parallel Branches for Independent Retrieval
@@ -400,16 +400,16 @@ Add:
 
 ## Repo Touchpoints
 
-- `internal/companion/service.go`
-- `internal/companion/personality.go`
-- `internal/contextplane/store.go`
-- `internal/contextplane/orienter.go`
-- `internal/contextplane/taskhistory/taskhistory.go`
-- `internal/contextplane/taskhistory/render.go`
+- `internal/context/companion/service.go`
+- `internal/context/companion/personality.go`
+- `internal/context/contextplane/store.go`
+- `internal/context/contextplane/orienter.go`
+- `internal/context/contextplane/taskhistory/taskhistory.go`
+- `internal/context/contextplane/taskhistory/render.go`
 - `internal/rlm/llm_runner.go`
 - `internal/rlm/env/adapter.go`
 - `internal/rlm/env/tools.go`
-- `internal/web/api/companion.go`
+- `internal/interfaces/web/api/companion.go`
 - `packages/gui-agent/src/api/client.ts`
 - `packages/gui-agent/src/components/conversations/ConversationsList.tsx`
 - `packages/gui-agent/src/components/conversations/ConversationInspector.tsx`

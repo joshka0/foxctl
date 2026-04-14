@@ -1,2 +1,3 @@
-// Package fsutil re-exports platform fsutil helpers for skills.
+// Package fsutil re-exports reusable filesystem helpers for skills. It belongs
+// to the generic skillslib tooling-support family.
 package fsutil

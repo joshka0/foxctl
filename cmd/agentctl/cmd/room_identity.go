@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
 )
 
 type roomIdentity struct {

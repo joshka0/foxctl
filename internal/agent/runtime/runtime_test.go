@@ -12,8 +12,8 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/agentprompt"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/agentprompt"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	einoadapter "github.com/jkatigb/agentctl/internal/v2/adapters/eino"
 )

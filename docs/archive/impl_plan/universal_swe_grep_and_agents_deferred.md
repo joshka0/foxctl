@@ -38,7 +38,7 @@ digests) doesn't exist yet. Wiring the file list requires that layer.
 - `docs/impl_plan/universal_swe_grep_and_agents_specs_phase2_post_review_harness_todo.md` A2
 
 **Stub behavior:**  
-`BuildPostReviewEvent` in `internal/indexing/postreview/producer.go` currently
+`BuildPostReviewEvent` in `internal/intelligence/indexing/postreview/producer.go` currently
 sets `Files: nil`. Indexers should gracefully handle empty file lists (skip or
 no-op) until this is wired.
 
@@ -94,7 +94,7 @@ in-flight indexers will observe `ctx.Done()` for cancellation/shutdown.
 
 **Cross-refs:**
 - `docs/spec/post_review_harness.md` §7 (ConcurrencyPerIndexer)
-- `internal/indexing/handler.go` `Handle()` switch on mode
+- `internal/intelligence/indexing/handler.go` `Handle()` switch on mode
 - `internal/storage/jobs` (target for integration)
 - `docs/impl_plan/universal_swe_grep_and_agents_specs_phase2_post_review_harness_todo.md` C2
 

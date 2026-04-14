@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/evals/retrievaleval"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/tooling/evals/retrievaleval"
 )
 
 func TestContextRepoIndexDAGInspectSuite_PersistsRun(t *testing.T) {
@@ -26,8 +26,8 @@ func TestContextRepoIndexDAGInspectSuite_PersistsRun(t *testing.T) {
 			GeneratedAt:   time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
 			Inspections: []graphInspection{{
 				Query:          "web api transport",
-				ExpectedPaths:  []string{"internal/web/api/agents.go"},
-				Anchors:        []string{"internal/web/api/agents.go"},
+				ExpectedPaths:  []string{"internal/interfaces/web/api/agents.go"},
+				Anchors:        []string{"internal/interfaces/web/api/agents.go"},
 				Matched:        true,
 				Classification: "matched",
 			}},
@@ -52,18 +52,18 @@ func TestContextRepoIndexDAGInspectSuite_PersistsRun(t *testing.T) {
 	repoKey := store.RepoKey()
 	if err := store.ReplaceAll(context.Background(), []repoindex.Node{
 		{
-			ID:      repoindex.FileID(repoKey, "internal/web/api", "internal/web/api/agents.go"),
+			ID:      repoindex.FileID(repoKey, "internal/interfaces/web/api", "internal/interfaces/web/api/agents.go"),
 			Kind:    repoindex.NodeFile,
-			Pkg:     "internal/web/api",
-			File:    "internal/web/api/agents.go",
+			Pkg:     "internal/interfaces/web/api",
+			File:    "internal/interfaces/web/api/agents.go",
 			Name:    "agents.go",
 			Summary: "Agent HTTP handlers.",
 		},
 		{
 			ID:      repoindex.NamespacedID(repoKey, "concept:web-api-transport"),
 			Kind:    repoindex.NodeConcept,
-			Pkg:     "internal/web/api",
-			File:    "internal/web/api/agents.go",
+			Pkg:     "internal/interfaces/web/api",
+			File:    "internal/interfaces/web/api/agents.go",
 			Name:    "web api transport",
 			Summary: "Web API transport anchor.",
 		},
@@ -78,7 +78,7 @@ queries:
   - id: web-api
     query: web api transport
     expected_any_of:
-      - internal/web/api/agents.go
+      - internal/interfaces/web/api/agents.go
 `), 0o644); err != nil {
 		t.Fatalf("write suite: %v", err)
 	}

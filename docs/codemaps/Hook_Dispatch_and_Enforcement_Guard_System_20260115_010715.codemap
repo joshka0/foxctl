@@ -42,7 +42,7 @@
         },
         {
           "id": "1d",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 129,
           "lineContent": "hooks := d.config.HooksForEvent(input.Event)",
           "title": "Find Matching Hooks",
@@ -50,7 +50,7 @@
         },
         {
           "id": "1e",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 170,
           "lineContent": "output, err := d.runner.Run(hookCtx, entryHook, hookInput)",
           "title": "Execute Hook Skill",
@@ -58,14 +58,14 @@
         },
         {
           "id": "1f",
-          "path": "internal/hooks/dispatcher.go",
+          "path": "internal/runtime/hooks/dispatcher.go",
           "lineNumber": 206,
           "lineContent": "result.Output = Merge(outputs)",
           "title": "Merge Hook Outputs",
           "description": "Combines all hook outputs using deterministic merge rules"
         }
       ],
-      "traceTextDiagram": "Hook Dispatch Processing\n├── hooks_dispatch/main.go entrypoint \u003c-- skills/hooks_dispatch/main.go:25\n│   ├── LoadConfigWithDefaults() \u003c-- 1a\n│   ├── NewDispatcherWithRegistry() \u003c-- 1b\n│   └── dispatcher.Dispatch() \u003c-- 1c\n└── Dispatcher execution flow \u003c-- internal/hooks/dispatcher.go:122\n    ├── HooksForEvent() lookup \u003c-- 1d\n    ├── runner.Run() execution \u003c-- 1e\n    └── Merge() combine results \u003c-- 1f",
+      "traceTextDiagram": "Hook Dispatch Processing\n├── hooks_dispatch/main.go entrypoint \u003c-- skills/hooks_dispatch/main.go:25\n│   ├── LoadConfigWithDefaults() \u003c-- 1a\n│   ├── NewDispatcherWithRegistry() \u003c-- 1b\n│   └── dispatcher.Dispatch() \u003c-- 1c\n└── Dispatcher execution flow \u003c-- internal/runtime/hooks/dispatcher.go:122\n    ├── HooksForEvent() lookup \u003c-- 1d\n    ├── runner.Run() execution \u003c-- 1e\n    └── Merge() combine results \u003c-- 1f",
       "traceGuide": "## Motivation\n\nThe hook dispatch system solves the problem of **enforcing organizational policies and coordination** across multi-agent environments. Without this system, agents could modify files without task context, create edit conflicts, or bypass required workflows. The system provides a centralized way to intercept tool usage, validate operations against business rules, and coordinate shared resources through event-driven guards.\n\n## Details\n\nThe system operates through a **central dispatcher** that loads hook configurations from `hooks.yaml` files [1a]. When an agent attempts to use a tool, the dispatcher receives an event (like `PreToolUse`), finds matching hooks based on tool type, file paths, or actor context [1d], and executes them through either shell scripts or Go skills [1e]. \n\nThe dispatcher uses a **registry pattern** to route different hook types to appropriate runners [1b]. Each hook returns a decision (approve/block), optional context to inject, or actions to perform. The results are merged using deterministic rules where blocks override approvals [1f]. This enables use cases like:\n\n- **Task guards** that ensure active tasks exist before write operations\n- **File guards** that prevent edit conflicts through reservation systems  \n- **Context injection** that automatically adds relevant documentation\n- **Policy enforcement** that blocks prohibited operations\n\nThe system is designed to be **extensible and configurable**, allowing workspace-specific hook configurations while maintaining a stable execution contract across all hook skills [1c]."
     },
     {

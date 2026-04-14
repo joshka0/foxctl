@@ -57,13 +57,13 @@ refactor workflow inherit future repoindex improvements instead of forking them.
 The repo already has most of the hard primitives:
 
 - repo graph nodes, edges, and metadata in
-  [internal/indexing/repoindex/types.go](../../../internal/indexing/repoindex/types.go)
+  [internal/intelligence/indexing/repoindex/types.go](../../../internal/intelligence/indexing/repoindex/types.go)
 - repo graph build orchestration in
-  [internal/indexing/repoindex/builder.go](../../../internal/indexing/repoindex/builder.go)
+  [internal/intelligence/indexing/repoindex/builder.go](../../../internal/intelligence/indexing/repoindex/builder.go)
 - query/expand/open over the graph in
-  [internal/indexing/repoindex/query.go](../../../internal/indexing/repoindex/query.go)
+  [internal/intelligence/indexing/repoindex/query.go](../../../internal/intelligence/indexing/repoindex/query.go)
 - graph-to-code anchor projection in
-  [internal/repoquery/project.go](../../../internal/repoquery/project.go)
+  [internal/intelligence/repoquery/project.go](../../../internal/intelligence/repoquery/project.go)
 - user-facing repo graph skills such as
   [skills/repo_index_search/main.go](../../../skills/repo_index_search/main.go)
 - semantic tree and retrieval-adjacent reading lanes documented in
@@ -140,7 +140,7 @@ Recommended CLI surface:
 agentctl refactor status --workspace .
 agentctl refactor snapshot --path ./internal --language go
 agentctl refactor tree --path ./internal --language go
-agentctl refactor outline --path internal/indexing/repoindex/builder.go
+agentctl refactor outline --path internal/intelligence/indexing/repoindex/builder.go
 agentctl refactor symbol --query "Builder.Build" --workspace .
 agentctl refactor deps --seed "sym:..." --direction in --edge-set structural
 agentctl refactor hot --path ./internal --since HEAD~20
@@ -257,7 +257,7 @@ Example shape:
 {
   "rule_id": "function_hotspot",
   "score": 92,
-  "file": "internal/indexing/repoindex/builder.go",
+  "file": "internal/intelligence/indexing/repoindex/builder.go",
   "symbol": "Builder.Build",
   "evidence": {
     "index_mode": "index_backed",
@@ -271,8 +271,8 @@ Example shape:
       "same_file_extraction_candidate"
     ],
     "suggested_reads": [
-      "internal/indexing/repoindex/query.go",
-      "internal/repoquery/project.go"
+      "internal/intelligence/indexing/repoindex/query.go",
+      "internal/intelligence/repoquery/project.go"
     ]
   }
 }

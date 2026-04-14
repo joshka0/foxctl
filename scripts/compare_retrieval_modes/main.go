@@ -7,18 +7,22 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
+	retrievalv2 "github.com/jkatigb/agentctl/internal/intelligence/retrieval/v2"
+	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/repoquery"
-	retrievalv2 "github.com/jkatigb/agentctl/internal/retrieval/v2"
-	"github.com/jkatigb/agentctl/internal/searchindex"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
 type memoryListByTypeSource struct {
 	store storage.MemoryStore
+}
+
+type repoQueryAdapter struct {
+	service *repoquery.QueryService
 }
 
 func (s memoryListByTypeSource) ListByType(ctx context.Context, workspaceID, entryType string, limit int) ([]storage.NamedEntry, error) {
@@ -40,6 +44,35 @@ func (s memoryListByTypeSource) ListByType(ctx context.Context, workspaceID, ent
 		}
 	}
 	return out, nil
+}
+
+func (a repoQueryAdapter) Search(ctx context.Context, req retrievalv2.RepoSearchRequest) ([]repoindex.Node, error) {
+	built, err := repoquery.NewSearchRequest(req.Query, req.Limit)
+	if err != nil {
+		return nil, err
+	}
+	return a.service.Search(ctx, built)
+}
+
+func (a repoQueryAdapter) DAGGrep(ctx context.Context, req retrievalv2.RepoDAGGrepRequest) (repoindex.DAGGrepResult, error) {
+	built, err := repoquery.NewDAGGrepRequest(
+		req.Query,
+		"",
+		req.Limit,
+		nil,
+		req.EdgeSets,
+		nil,
+		req.Direction,
+		req.Depth,
+		req.Budget,
+		req.PerNodeCap,
+		nil,
+		req.Render,
+	)
+	if err != nil {
+		return repoindex.DAGGrepResult{}, err
+	}
+	return a.service.DAGGrep(ctx, built)
 }
 
 func main() {
@@ -100,7 +133,7 @@ func main() {
 	for _, mode := range []string{"off", "search", "dag", "auto"} {
 		engine := retrievalv2.NewEngine(indexStore, embedder)
 		if repoSvc != nil {
-			engine = engine.WithRepoQueryService(repoSvc)
+			engine = engine.WithRepoQueryService(repoQueryAdapter{service: repoSvc})
 		}
 
 		req := retrievalv2.DefaultSearchRequest(workspace, query)

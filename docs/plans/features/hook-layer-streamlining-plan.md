@@ -14,20 +14,20 @@ into typed Go components, while keeping shell wrappers as thin provider adapters
 This is not a manifest-version migration. `agentctl/v1` is still the current
 skill manifest contract. The real cleanup target is the split between:
 
-- a reasonably coherent Go hook engine under `internal/hooks/`
+- a reasonably coherent Go hook engine under `internal/runtime/hooks/`
 - a large shell-hook estate under `configs/hooks/`
 
 ## Current State
 
 Stable now:
 
-- hook configuration and merge semantics in `internal/hooks/config.go`,
-  `internal/hooks/types.go`, `internal/hooks/dispatcher.go`, and
-  `internal/hooks/merge.go`
+- hook configuration and merge semantics in `internal/runtime/hooks/config.go`,
+  `internal/runtime/hooks/types.go`, `internal/runtime/hooks/dispatcher.go`, and
+  `internal/runtime/hooks/merge.go`
 - hook execution adapters in:
-  - `internal/hooks/shell_runner.go`
-  - `internal/hooks/skill_runner.go`
-  - `internal/hooks/executor.go`
+  - `internal/runtime/hooks/shell_runner.go`
+  - `internal/runtime/hooks/skill_runner.go`
+  - `internal/runtime/hooks/executor.go`
 - ACA/session lifecycle behavior in shell scripts under `configs/hooks/`
 
 Pain points now:
@@ -106,7 +106,7 @@ Behavior to preserve:
 Primary files:
 
 - `cmd/agentctl/cmd/hooks_runtime.go`
-- `internal/hooks/lifecycle/*` or equivalent command helpers
+- `internal/runtime/hooks/lifecycle/*` or equivalent command helpers
 - `configs/hooks/session-init.sh`
 
 Verification:

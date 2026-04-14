@@ -114,9 +114,9 @@ Every `.db` file managed by agentctl must appear in this list. Stores are classi
 | `SESSIONS` | `sessions.db` | `internal/storage/sessions/` | Session history |
 | `TASKS` | `tasks.db` | `internal/storage/tasks/` | Task continuity across devices |
 | `MAILBOX` | `mailbox.db` | `internal/storage/mailbox/` | Agent messages |
-| `AGENTS` | `agents.db` | `internal/storage/agents/` | Agent registry; also used by the actor system registry (`actor_registry` via `internal/actor/registry_store.go`) |
+| `AGENTS` | `agents.db` | `internal/storage/agents/` | Agent registry; also used by the actor system registry (`actor_registry` via `internal/runtime/actor/registry_store.go`) |
 | `MEMORY` | `memory.db` | `internal/storage/memory/` | Semantic memory + indexer state. Has `factory.go` (done) |
-| `COMPANION` | `companion.db` | `internal/companion/` | Companion conversation memory (turns + summaries + distilled history) |
+| `COMPANION` | `companion.db` | `internal/context/companion/` | Companion conversation memory (turns + summaries + distilled history) |
 | `CONTEXTVAR` | `contextvar.db` | `internal/storage/contextvar/` | RLM context store |
 
 **Sync-useful stores** (evaluate for Phase 2 or later):
@@ -139,19 +139,19 @@ Every `.db` file managed by agentctl must appear in this list. Stores are classi
 | `TESTWATCH` | `test_watch.db` | `internal/storage/testwatch/` | Test watching state |
 | `CONTEXTBUFFER` | `contextbuffer.db` | `internal/storage/contextbuffer/` | Context buffer |
 | `GRAPH` | `graph.db` | `internal/storage/graph/` | Code relationship graph (rebuilt per-machine) |
-| `EMBEDDING_QUEUE` | `embedding_queue.db` | `internal/indexing/embedding/` | Embedding job queue |
-| `SUMMARY_QUEUE` | `summary_queue.db` | `internal/sessionkit/summary/` | Session summary job queue |
+| `EMBEDDING_QUEUE` | `embedding_queue.db` | `internal/intelligence/indexing/embedding/` | Embedding job queue |
+| `SUMMARY_QUEUE` | `summary_queue.db` | `internal/context/sessionkit/summary/` | Session summary job queue |
 | `DAEMON_DEDUPE` | `daemon_dedupe.db` | `internal/agent/daemon/` | Message deduplication |
 | `PATTERNS` | `patterns.db` | `internal/agent/optimization/` | Agent optimization patterns |
-| `POST_REVIEW` | `post_review_events.db` | `internal/indexing/postreview/` | Post-review event tracking |
-| `REPOINDEX` | `repoindex/<key>.db` | `internal/indexing/repoindex/` | Per-repo code index (dynamic filename -- see note) |
+| `POST_REVIEW` | `post_review_events.db` | `internal/intelligence/indexing/postreview/` | Post-review event tracking |
+| `REPOINDEX` | `repoindex/<key>.db` | `internal/intelligence/indexing/repoindex/` | Per-repo code index (dynamic filename -- see note) |
 | `CAS` | `cas.db` | `internal/storage/cas/` | CAS metadata. Has `factory.go` (done) |
 
 **Observability** (different storage root):
 
 | Store Name | DB File | Package | Notes |
 |---|---|---|---|
-| `EVENTS` | `events.db` | `internal/observability/` | Stored under `$AGENTCTL_OBS_DIR`, not `~/.agentctl/storage/` |
+| `EVENTS` | `events.db` | `internal/runtime/observability/` | Stored under `$AGENTCTL_OBS_DIR`, not `~/.agentctl/storage/` |
 
 **External** (read-only, not agentctl-owned):
 
@@ -163,8 +163,8 @@ Every `.db` file managed by agentctl must appear in this list. Stores are classi
 
 **Note on shared DB files:** Some `.db` files are used by multiple packages and may contain additional tables created by those packages. Examples:
 
-- `agents.db`: `actor_registry` is created by `internal/actor/registry_store.go` (actor system registry).
-- `mailbox.db`: `mailbox_notify` is created by `internal/actor/watcher.go` when the watcher is enabled.
+- `agents.db`: `actor_registry` is created by `internal/runtime/actor/registry_store.go` (actor system registry).
+- `mailbox.db`: `mailbox_notify` is created by `internal/runtime/actor/watcher.go` when the watcher is enabled.
 
 > **Cross-reference:** See also `docs/designs/store-migration-plan.md` for the `sqliteutil.OpenDB` -> `dbdriver` migration tiers. Where tier classifications differ, this document takes precedence.
 
@@ -208,7 +208,7 @@ Daemon behavior:
 - Follower: does not process background work, but can remain running and periodically retry acquisition.
 - CLI should have an escape hatch for debugging (`--leader=force`), but default is safe (`--leader=auto`).
 
-Leader-only subsystems (from `internal/daemon/service.go` and `internal/agent/daemon/`):
+Leader-only subsystems (from `internal/runtime/daemon/service.go` and `internal/agent/daemon/`):
 
 - **Agent Runtime + Overseer** — spawned agent management and `actor:system:overseer` polling
 - **Mailbox Poll Loop** — per-agent mailbox polling and message processing

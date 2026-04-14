@@ -31,7 +31,7 @@ func TestToolTrajectoryCapture_CodeSymbolSearch_EmitsToolCallAndResult(t *testin
 	}
 
 	// Invoke via the exported tool registry to ensure wrapWithTelemetry is exercised.
-	tool, err := reg.GetRegistry().Get("code.symbol_search")
+	tool, err := reg.Get("code.symbol_search")
 	if err != nil {
 		t.Fatalf("get tool: %v", err)
 	}

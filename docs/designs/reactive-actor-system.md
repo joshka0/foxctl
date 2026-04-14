@@ -546,7 +546,7 @@ Complete the reactive architecture with EventBus and integrations.
 ## File Structure
 
 ```
-internal/actor/
+internal/runtime/actor/
 ├── actor.go           # Actor interface and types
 ├── supervisor.go      # Supervisor implementation
 ├── watcher.go         # SQLite change notifications

@@ -110,12 +110,12 @@ Each adapter builds a `Principal` and uses it to generate scoped conversation ke
 
 ## Files to Modify
 
-### `internal/chatadapter/adapter.go`
+### `internal/interfaces/chatadapter/adapter.go`
 
 - Add `Principal identity.Principal` field to `MessageEvent`, `CommandEvent`, `InteractionEvent`
 - Keep `UserRef` for backward compat but populate Principal too
 
-### `internal/chatadapter/teams/driver.go`
+### `internal/interfaces/chatadapter/teams/driver.go`
 
 Construct Principal from Teams activity + JWT:
 
@@ -135,7 +135,7 @@ Use `convKey` instead of raw `convID` for:
 - `dispatchWithLimit(a.ctx, "teams.message", convKey, ...)`
 - `handleCommand(ctx, serviceURL, activity, cmd, args)` — pass principal via context
 
-### `internal/chatadapter/discord/driver.go`
+### `internal/interfaces/chatadapter/discord/driver.go`
 
 ```go
 principal := identity.Principal{
@@ -146,7 +146,7 @@ principal := identity.Principal{
 }
 ```
 
-### `internal/chatadapter/telegram/driver.go`
+### `internal/interfaces/chatadapter/telegram/driver.go`
 
 ```go
 principal := identity.Principal{
@@ -156,19 +156,19 @@ principal := identity.Principal{
 }
 ```
 
-### `internal/chatadapter/session_bridge.go`
+### `internal/interfaces/chatadapter/session_bridge.go`
 
 - `HandleMessage` extracts Principal from event and stores it in context via `identity.WithPrincipal`
 - Uses `principal.ConversationKey(evt.ChannelID)` as the channel sessions map key
 
-### `internal/hooks/types.go`
+### `internal/runtime/hooks/types.go`
 
 Add to `Input`:
 ```go
 Principal identity.Principal // Unified identity for policy decisions
 ```
 
-### `internal/engine/llmchat_engine.go`
+### `internal/runtime/engine/llmchat_engine.go`
 
 Replace `HookContext` with `identity.Principal` or embed it:
 ```go
@@ -179,12 +179,12 @@ type HookContext struct {
 
 Wire Principal into `hooks.Input` when dispatching PreToolUse/PostToolUse.
 
-### `internal/companion/service.go`
+### `internal/context/companion/service.go`
 
 - Accept Principal in `Chat()` method (via context or explicit parameter)
 - Use tenant-scoped conversation ID for memory lookups
 
-### `internal/web/server.go`
+### `internal/interfaces/web/server.go`
 
 - Teams adapter path: extract TenantID from Teams config/JWT and propagate
 - Web/API path: extract from session/JWT (placeholder for Phase 2 HTTP auth)
@@ -214,6 +214,6 @@ Existing in-memory maps (sync.Map) are ephemeral and don't need migration. For p
 1. `go build ./internal/domain/identity/...` — compiles
 2. `go test ./internal/domain/identity/...` — unit tests pass
 3. `go build ./internal/...` — full build passes
-4. `go test ./internal/chatadapter/...` — adapter tests pass
+4. `go test ./internal/interfaces/chatadapter/...` — adapter tests pass
 5. Manual: Teams messages from two tenants produce distinct conversation keys
 6. Manual: hooks.Input carries populated Principal

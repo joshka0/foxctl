@@ -36,7 +36,7 @@ Each entry has:
   “Map the full skill lifecycle in agentctl from installation to execution.
   Start at the skill installer in `internal/domain/skill/installer.go` (Install,
   LoadManifest, validateManifest), then show how installed skills are invoked by
-  the runner (`internal/execution/runner`, `skills/*/main.go`) using envelope
+  the runner (`internal/runtime/execution/runner`, `skills/*/main.go`) using envelope
   I/O. Include how large outputs go through CAS
   (`internal/storage/cas/store.go`), how jobs are created and tracked for skill
   runs, and where plugins (auth/pagination) integrate with the http/openapi
@@ -54,7 +54,7 @@ Each entry has:
   job CLI or API entrypoints, then show the `Job` type and `HashArgs` in
   `internal/storage/jobs/types/types.go`, how jobs are persisted to SQLite, and
   how they move through states (`queued`, `running`, `ok`, `error`, `canceled`).
-  Then trace how the WFQ scheduler in `internal/execution/scheduler/wfq.go`
+  Then trace how the WFQ scheduler in `internal/runtime/execution/scheduler/wfq.go`
   picks jobs: `NewWFQScheduler`, schedulable Job struct, `SetWeight`, and worker
   loop. Highlight where execution is delegated to the execution layer (WASI/exec
   runners).”
@@ -86,7 +86,7 @@ Each entry has:
   enforced.
 - **Prompt**:\
   “Map the execution runners in agentctl, focusing on WASI and exec. Start at
-  `internal/execution/runner` and relevant subpackages (`wasi`, `exec`). Show
+  `internal/runtime/execution/runner` and relevant subpackages (`wasi`, `exec`). Show
   how a job or skill invocation is turned into a subprocess or WASI invocation,
   how environment, filesystem roots, and network policy are configured, and how
   envelopes are piped via stdin/stdout. Highlight where `policy.PathValidator`
@@ -159,17 +159,17 @@ Each entry has:
 - **Goal**: Make it clear how planning picks providers/models and where
   integration tests live.
 - **Prompt**:\
-  “Map the planning LLM stack in `internal/planning/llm`. Start with the auto
+  “Map the planning LLM stack in `internal/intelligence/planning/llm`. Start with the auto
   planner in `auto.go` and show how it selects providers and models based on
   config/env. Then map the OpenAI-compatible planner
-  ([openai.go](cci:7://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:0:0-0:0)),
+  ([openai.go](cci:7://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/planning/llm/openai.go:0:0-0:0)),
   including
-  [OpenAIConfig](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:14:0-20:1),
-  [NewOpenAIPlanner](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:29:0-90:1)
+  [OpenAIConfig](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/planning/llm/openai.go:14:0-20:1),
+  [NewOpenAIPlanner](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/planning/llm/openai.go:29:0-90:1)
   provider detection (OPENROUTER_API_KEY, GROQ_API_KEY, OPENAI_API_KEY), BaseURL
   and model selection, and
-  [Plan](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/planning/llm/openai.go:125:0-195:1).
-  Include how integration tests in `internal/planning/llm/planner_test.go` are
+  [Plan](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/planning/llm/openai.go:125:0-195:1).
+  Include how integration tests in `internal/intelligence/planning/llm/planner_test.go` are
   structured (e.g., OpenRouter integration) and how CI wires env vars and test
   gating.”
 
@@ -182,7 +182,7 @@ Each entry has:
   plugins hook in.
 - **Prompt**:\
   “Map the http/openapi skill and plugin protocol in agentctl. Start at the core
-  OpenAPI implementation under `internal/openapi/*` (auth, pagination, client,
+  OpenAPI implementation under `internal/interfaces/openapi/*` (auth, pagination, client,
   loader, retry), then show how the `http/openapi` skill wraps it
   (skills/http_openapi). Trace the request flow from CLI or agent through spec
   loading, auth selection, pagination, and retries, down to HTTP client calls.
@@ -199,7 +199,7 @@ Each entry has:
 - **Goal**: Explain the knowledge registry and built-in Factory droid documents.
 - **Prompt**:\
   “Map the knowledge system in agentctl, focusing on builtin Factory droids.
-  Start at `internal/knowledge/builtin` (`factory.go`, `data/droids/*.md`) and
+  Start at `internal/context/knowledge/builtin` (`factory.go`, `data/droids/*.md`) and
   show how `SeedFactoryKnowledge` / `ListFactoryDroids` work. Then connect to
   the CLI flows for `agentctl knowledge sync/search` (if present) and the specs
   in `docs/spec/knowledge_registry.md` and
@@ -216,7 +216,7 @@ Each entry has:
 - **Prompt**:\
   “Map the test infrastructure in agentctl, focusing on the test watcher and CI
   targets. Start with `internal/storage/testwatch/` and
-  `internal/testwatch/runner.go`, showing how test watch configs are parsed, how
+  `internal/tooling/testwatch/runner.go`, showing how test watch configs are parsed, how
   fsnotify watching works, and how test runs are triggered and parsed. Then map
   the CLI commands in `cmd/agentctl/cmd/testwatch.go` and `watch.go`. Finally,
   connect to the CI-facing Makefile targets (`test`, `test-short`, `test-race`,
@@ -240,7 +240,7 @@ Each entry has:
   via WASI/exec runners; and how hooks/memory/knowledge integrate. Use
   `docs/spec/core_profile_v1.md` as the canonical reference, then anchor each
   spec concept to its concrete implementation in `internal/envelope`,
-  `internal/storage/cas`, `internal/storage/jobs`, `internal/execution/*`, and
+  `internal/storage/cas`, `internal/storage/jobs`, `internal/runtime/execution/*`, and
   `skills/*`.”
 
 ---

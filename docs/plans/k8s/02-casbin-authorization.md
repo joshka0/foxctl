@@ -121,7 +121,7 @@ HTTP Request / Chat Message
 
 ## Files to Modify
 
-### `internal/hooks/dispatcher.go`
+### `internal/runtime/hooks/dispatcher.go`
 
 Add `PolicyHookRunner` as a built-in hook that fires before skill-based hooks:
 
@@ -139,11 +139,11 @@ if d.policyRunner != nil && input.Event == EventPreToolUse {
 }
 ```
 
-### `internal/hooks/types.go`
+### `internal/runtime/hooks/types.go`
 
 Ensure `Input.Principal` (from Plan 01) carries through to policy evaluation.
 
-### `internal/web/server.go`
+### `internal/interfaces/web/server.go`
 
 Wire auth middleware into the HTTP mux:
 
@@ -154,7 +154,7 @@ if s.enforcer != nil {
 }
 ```
 
-### `internal/companion/service.go`
+### `internal/context/companion/service.go`
 
 Pass enforcer to companion service for inline tool authorization checks.
 

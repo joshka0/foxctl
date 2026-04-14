@@ -69,7 +69,7 @@ internal/skills/
   schema.go          // Parameter -> JSONSchema conversion
   names.go           // NormalizeToolName + Reverse mapping helpers
 
-internal/web/
+internal/interfaces/web/
   (as previously proposed)
   handlers/
     skills.go         // GET /api/skills, GET /api/tools
@@ -82,7 +82,7 @@ internal/web/
     hub.go
     handler.go
 
-internal/consoleapp/
+internal/console/app/
   runner.go          // “ask loop” that runs LLM engine + tool runner + streams events
   stream.go          // adapters to publish console.Payload events
 ```
@@ -222,7 +222,7 @@ import (
 	"sort"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 type ToolSpec struct {
@@ -337,7 +337,7 @@ func buildToolDescription(m skill.Manifest) string {
 This plugs into your existing `engine.ToolRunner`.
 
 ```go
-// internal/consoleapp/skill_tool_executor.go
+// internal/console/app/skill_tool_executor.go
 package consoleapp
 
 import (
@@ -346,10 +346,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/engine"
-	"github.com/jkatigb/agentctl/internal/execution"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/execution"
 	"github.com/jkatigb/agentctl/internal/skills"
 )
 
@@ -493,7 +493,7 @@ func mergeDefaultsAndValidate(m skill.Manifest, args json.RawMessage) ([]byte, e
 
 ## Execution loop
 
-In `internal/consoleapp/runner.go`:
+In `internal/console/app/runner.go`:
 
 1. Load registry tooldefs (or subset based on tools_allow)
 2. Create engine:
@@ -555,7 +555,7 @@ This makes your “agentctl Studio” console show up in existing Sessions tooli
 **Files**
 
 * `internal/skills/{names.go,schema.go,registry.go}`
-* `internal/web/handlers/skills.go`
+* `internal/interfaces/web/handlers/skills.go`
 
 **Endpoints**
 
@@ -572,7 +572,7 @@ This makes your “agentctl Studio” console show up in existing Sessions tooli
 
 **Files**
 
-* `internal/consoleapp/skill_tool_executor.go`
+* `internal/console/app/skill_tool_executor.go`
 
 **Acceptance**
 
@@ -584,9 +584,9 @@ This makes your “agentctl Studio” console show up in existing Sessions tooli
 
 **Files**
 
-* `internal/web/handlers/console.go`
-* `internal/web/sse/*` (hub + SSE handler)
-* `internal/consoleapp/{runner.go,stream.go}`
+* `internal/interfaces/web/handlers/console.go`
+* `internal/interfaces/web/sse/*` (hub + SSE handler)
+* `internal/console/app/{runner.go,stream.go}`
 
 **Acceptance**
 
@@ -605,7 +605,7 @@ This makes your “agentctl Studio” console show up in existing Sessions tooli
 
 **Modify**
 
-* `internal/engine/llmchat_engine.go`
+* `internal/runtime/engine/llmchat_engine.go`
 
 **Plan**
 
@@ -631,8 +631,8 @@ This makes your “agentctl Studio” console show up in existing Sessions tooli
 
 **Files**
 
-* `internal/web/handlers/sessions.go` (if not already present)
-* `internal/consoleapp/runner.go` to call sessions store
+* `internal/interfaces/web/handlers/sessions.go` (if not already present)
+* `internal/console/app/runner.go` to call sessions store
 
 **Acceptance**
 
@@ -754,7 +754,7 @@ This server will:
 # Backend package layout (scaffold)
 
 ```
-internal/web/
+internal/interfaces/web/
   server.go                // Server struct, wiring, Start()
   router.go                // http routes
   middleware/
@@ -865,11 +865,11 @@ Your current `useSSE()` can simply invalidate the matching React Query keys.
 **Deliverables**
 
 * `cmd/agentctl_web/main.go` starts server
-* `internal/web/router.go` mounts:
+* `internal/interfaces/web/router.go` mounts:
 
   * `/api/health`
   * `/api/events`
-* `internal/web/sse/*`: hub with:
+* `internal/interfaces/web/sse/*`: hub with:
 
   * `Publish(topic string, payload any)`
   * fanout to clients
@@ -1008,7 +1008,7 @@ Implement a `ToolExecutor` that calls skills through your daemon (fast path) or 
 
 * **Recommended**: daemon client path
 
-  * `internal/daemon.Client.Run(skill, input, workspace, ephemeral=true)`
+  * `internal/runtime/daemon.Client.Run(skill, input, workspace, ephemeral=true)`
 * `ToolDef.Parameters` from skill manifests (signature → JSON schema)
 
 ### Acceptance
@@ -1254,22 +1254,22 @@ Create a new command + internal web module:
 cmd/agentctl_web/
   main.go
 
-internal/web/
+internal/interfaces/web/
   server.go
   options.go
 
-internal/web/api/
+internal/interfaces/web/api/
   helpers.go
   status.go
   skills.go
   jobs.go
   cas.go
 
-internal/web/consolews/
+internal/interfaces/web/consolews/
   hub.go
   session.go
 
-internal/web/tools/
+internal/interfaces/web/tools/
   registry.go
   executor.go
   profiles.go
@@ -1309,7 +1309,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
-	"github.com/jkatigb/agentctl/internal/web"
+	"github.com/jkatigb/agentctl/internal/interfaces/web"
 )
 
 func main() {
@@ -1373,7 +1373,7 @@ func main() {
 
 ---
 
-## 3.2 `internal/web/options.go`
+## 3.2 `internal/interfaces/web/options.go`
 
 ```go
 package web
@@ -1387,7 +1387,7 @@ type Options struct {
 
 ---
 
-## 3.3 `internal/web/server.go`
+## 3.3 `internal/interfaces/web/server.go`
 
 ```go
 package web
@@ -1398,11 +1398,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/web/api"
-	"github.com/jkatigb/agentctl/internal/web/consolews"
-	"github.com/jkatigb/agentctl/internal/web/tools"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/api"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/consolews"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/tools"
 )
 
 type Server struct {
@@ -1499,7 +1499,7 @@ func withRequestLogging(log zerolog.Logger, next http.Handler) http.Handler {
 
 # 4) REST Handlers (scaffold)
 
-## 4.1 `internal/web/api/helpers.go`
+## 4.1 `internal/interfaces/web/api/helpers.go`
 
 ```go
 package api
@@ -1526,7 +1526,7 @@ func httpError(w http.ResponseWriter, status int, msg string) {
 
 ---
 
-## 4.2 `internal/web/api/status.go`
+## 4.2 `internal/interfaces/web/api/status.go`
 
 ```go
 package api
@@ -1558,7 +1558,7 @@ func StatusHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 
 ---
 
-## 4.3 `internal/web/api/skills.go`
+## 4.3 `internal/interfaces/web/api/skills.go`
 
 This one is important: it uses **runservice** so you get CAS limiting + artifacts + proper envelopes.
 
@@ -1576,8 +1576,8 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/daemon"
-	"github.com/jkatigb/agentctl/internal/runservice"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/runservice"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 )
@@ -1771,7 +1771,7 @@ Use `nhooyr.io/websocket` (recommended). Add dependency:
 go get nhooyr.io/websocket
 ```
 
-## 5.1 `internal/web/consolews/hub.go`
+## 5.1 `internal/interfaces/web/consolews/hub.go`
 
 ```go
 package consolews
@@ -1789,7 +1789,7 @@ import (
 	domainconsole "github.com/jkatigb/agentctl/internal/domain/console"
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/web/tools"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/tools"
 )
 
 type Hub struct {
@@ -1885,7 +1885,7 @@ func mustJSON(v any) json.RawMessage {
 
 ---
 
-## 5.2 `internal/web/consolews/session.go`
+## 5.2 `internal/interfaces/web/consolews/session.go`
 
 This is a **working non-token-streaming** console. It streams:
 
@@ -1912,8 +1912,8 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/engine"
-	"github.com/jkatigb/agentctl/internal/web/tools"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/jkatigb/agentctl/internal/interfaces/web/tools"
 )
 
 type Session struct {
@@ -2132,7 +2132,7 @@ func previewText(s string, n int) string {
 
 # 6) Tools Layer (Profiles + Skill Executor)
 
-## 6.1 `internal/web/tools/profiles.go`
+## 6.1 `internal/interfaces/web/tools/profiles.go`
 
 ```go
 package tools
@@ -2201,14 +2201,14 @@ func SystemPromptForProfile(name string) string {
 
 ---
 
-## 6.2 `internal/web/tools/registry.go`
+## 6.2 `internal/interfaces/web/tools/registry.go`
 
 ```go
 package tools
 
 import (
-	"github.com/jkatigb/agentctl/internal/daemon"
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/rs/zerolog"
 )
@@ -2271,7 +2271,7 @@ func (e *SkillToolExecutor) List() []engine.ToolDef { return e.tools }
 
 ---
 
-## 6.3 `internal/web/tools/executor.go`
+## 6.3 `internal/interfaces/web/tools/executor.go`
 
 ```go
 package tools
@@ -2286,9 +2286,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/jkatigb/agentctl/internal/daemon"
-	"github.com/jkatigb/agentctl/internal/engine"
-	"github.com/jkatigb/agentctl/internal/runservice"
+	"github.com/jkatigb/agentctl/internal/runtime/daemon"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/runservice"
 )
 
 func (e *SkillToolExecutor) buildTools() {
@@ -2644,7 +2644,7 @@ import { ConsolePage } from "@/pages";
 Tasks:
 
 * Add `cmd/agentctl_web/main.go`
-* Add `internal/web/{options.go,server.go}`
+* Add `internal/interfaces/web/{options.go,server.go}`
 * Add `/api/status` handler
 
 Acceptance:
@@ -2698,7 +2698,7 @@ Acceptance:
 
 Tasks:
 
-* Add `internal/web/consolews/*` + `internal/web/tools/*`
+* Add `internal/interfaces/web/consolews/*` + `internal/interfaces/web/tools/*`
 * Implement `/ws/console/:consoleID`
 * Engine: `engine.LLMChatEngine` with `SkillToolExecutor` tool allowlist
 * Cancel: maintain correlation → cancel func map
@@ -2717,7 +2717,7 @@ Acceptance:
 
 Tasks:
 
-* Implement a small wrapper around `LLMChatEngine` loop or implement `StreamingLLMChatEngine` in `internal/engine`:
+* Implement a small wrapper around `LLMChatEngine` loop or implement `StreamingLLMChatEngine` in `internal/runtime/engine`:
 
   * callback hooks per iteration
   * callback before/after each tool call
@@ -2775,18 +2775,18 @@ Paste this as the instruction to Codex/Claude:
 Implement agentctl_web scaffolding:
 
 - Add cmd/agentctl_web with Go HTTP server at 127.0.0.1:8090.
-- Add internal/web server with routes:
+- Add internal/interfaces/web server with routes:
   - GET /api/status
-  - POST /api/skills/run (ephemeral/job) using internal/runservice (CAS limiting + artifacts)
+  - POST /api/skills/run (ephemeral/job) using internal/runtime/runservice (CAS limiting + artifacts)
   - GET /api/skills (can be stub)
   - WS /ws/console/:consoleID implementing domain console payloads ask/event/reply/cmd
 
-- Add internal/web/tools:
+- Add internal/interfaces/web/tools:
   - profiles: explorer/reviewer/implementer allowlists
   - registry: build tool defs from allowlisted skills
   - executor: implements engine.ToolExecutor by running allowlisted skills ephemerally via runservice
 
-- Add internal/web/consolews:
+- Add internal/interfaces/web/consolews:
   - hub: accept websocket connections and route payloads
   - session: per console session, correlation tracking, cancel, run engine.LLMChatEngine with tool runner
 
@@ -2843,7 +2843,7 @@ This gives you the best UX because you can do **true streaming** and consistent 
 
 ### Option B: **Thin HTTP server that proxies to the daemon over Unix socket**
 
-* Web server uses `internal/daemon.Client` (`status`, `run`, `warm`, `shutdown`)
+* Web server uses `internal/runtime/daemon.Client` (`status`, `run`, `warm`, `shutdown`)
 * Fast to implement, minimal refactor
 * Downsides:
 
@@ -2902,7 +2902,7 @@ Even if you don’t stream token-by-token yet, you can still stream:
 
 ### C) Skill execution layer (jobs + CAS + artifacts)
 
-`internal/runservice` is your “run skills with all the correct side effects” layer:
+`internal/runtime/runservice` is your “run skills with all the correct side effects” layer:
 
 * output limiting to CAS (`enforceOutputLimit`)
 * artifact pinning (`handleArtifacts` + `adapters/artifacts`)
@@ -2926,7 +2926,7 @@ These are straightforward wrappers around existing packages:
 
   * return daemon status + app status + warm workspaces
 
-If you’re embedding daemon logic, reuse `handleStatus()` shape from `internal/daemon/service.go`.
+If you’re embedding daemon logic, reuse `handleStatus()` shape from `internal/runtime/daemon/service.go`.
 
 #### Skills
 

@@ -35,7 +35,7 @@ mail_router hook enhancements for plan event surfacing.
   - **Fallback**: Simple epic creation when no LLM
 - Plan events emitted: `plan.created`, `plan.updated`
 
-### LLM Planning (`internal/planning/llm/`)
+### LLM Planning (`internal/intelligence/planning/llm/`)
 
 - **planner.go**: Interface and prompt/response parsing
 - **openai.go**: OpenAI-compatible client (works with Groq, OpenAI)
@@ -86,13 +86,13 @@ agentctl todo plan --goal "Implement caching layer" --apply
 
 ```bash
 # Unit tests (no API key needed)
-go test ./internal/planning/llm/...
+go test ./internal/intelligence/planning/llm/...
 
 # E2E tests  
 go test ./test/e2e/...
 
 # Integration test (requires API key)
-GROQ_API_KEY=... go test -v ./internal/planning/llm/... -run Integration
+GROQ_API_KEY=... go test -v ./internal/intelligence/planning/llm/... -run Integration
 ```
 
 ## Architecture Notes

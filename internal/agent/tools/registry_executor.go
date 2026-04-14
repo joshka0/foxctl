@@ -8,8 +8,8 @@ import (
 	mcpmodels "github.com/XiaoConstantine/mcp-go/pkg/model"
 
 	"github.com/jkatigb/agentctl/internal/agent/toolnames"
-	"github.com/jkatigb/agentctl/internal/engine"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 // RegistryToolExecutor adapts a tools.Registry to the engine.ToolExecutor interface.
@@ -43,7 +43,7 @@ func (r *RegistryToolExecutor) Execute(ctx context.Context, name string, args js
 		name = repoindex.ToolDAGGrep
 	}
 
-	coreTool, err := r.registry.GetRegistry().Get(name)
+	coreTool, err := r.registry.Get(name)
 	if err != nil {
 		return "", fmt.Errorf("tool %q not found: %w", name, err)
 	}

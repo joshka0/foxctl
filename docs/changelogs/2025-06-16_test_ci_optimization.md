@@ -35,7 +35,7 @@ and code quality fixes for the agentctl project.
 
 ### 3. OpenAI Planner API Key Detection Refactor
 
-**Files**: `internal/planning/llm/openai.go`
+**Files**: `internal/intelligence/planning/llm/openai.go`
 
 - Cached environment variable reads once instead of repeated `os.Getenv()` calls
 - Added explicit `Provider` field to `OpenAIConfig` to track detected provider

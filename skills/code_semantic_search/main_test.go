@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
+	"github.com/jkatigb/agentctl/internal/intelligence/retrieval"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
@@ -388,8 +388,8 @@ func TestSearchMemoriesBM25_LabelsCoChangeArtifacts(t *testing.T) {
 	}
 	defer store.Close()
 
-	payload := []byte(`{"anchor_path":"internal/contextplane/dispatch.go","neighbor_paths":["internal/contextplane/store.go"],"summary":"dispatch cluster"}`)
-	if _, err := store.SaveFromResult(ctx, "cochange://internal/contextplane/dispatch.go", contextplane.CoChangeClusterType, "ws", "dispatch changes with store", payload); err != nil {
+	payload := []byte(`{"anchor_path":"internal/context/contextplane/dispatch.go","neighbor_paths":["internal/context/contextplane/store.go"],"summary":"dispatch cluster"}`)
+	if _, err := store.SaveFromResult(ctx, "cochange://internal/context/contextplane/dispatch.go", contextplane.CoChangeClusterType, "ws", "dispatch changes with store", payload); err != nil {
 		t.Fatalf("save cochange artifact: %v", err)
 	}
 
@@ -403,8 +403,8 @@ func TestSearchMemoriesBM25_LabelsCoChangeArtifacts(t *testing.T) {
 	if results[0].Source != "cochange" {
 		t.Fatalf("source=%q want cochange", results[0].Source)
 	}
-	if results[0].Path != "internal/contextplane/dispatch.go" {
-		t.Fatalf("path=%q want internal/contextplane/dispatch.go", results[0].Path)
+	if results[0].Path != "internal/context/contextplane/dispatch.go" {
+		t.Fatalf("path=%q want internal/context/contextplane/dispatch.go", results[0].Path)
 	}
 }
 

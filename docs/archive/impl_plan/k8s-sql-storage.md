@@ -260,7 +260,7 @@ Expect real edits here:
 | sessions | `internal/storage/sessions/store.go` | Replace `pragma_table_info`; embedding metadata compatibility |
 | tasks | `internal/storage/tasks/store.go` | Placeholder normalization + any embedding columns |
 | agents | `internal/storage/agents/store.go` | Straightforward TEXT columns |
-| companion | `internal/companion/memory.go` | Conversation titles, messages |
+| companion | `internal/context/companion/memory.go` | Conversation titles, messages |
 | mailbox | `internal/storage/mailbox/store.go` | Simple TEXT + JSON columns |
 | coordination | `internal/storage/coordination/store.go` | Lease upserts + placeholder normalization |
 | contextvar | `internal/storage/contextvar/store.go` | Tier 1 store in `internal/storage/registry.go` |
@@ -526,10 +526,10 @@ Add flags:
 | `internal/storage/sqlutil/migration.go` | Replace `INSERT OR IGNORE` |
 | `internal/storage/cas/config.go` | Add `DriverS3` + S3 config/env vars |
 | `internal/storage/cas/factory.go` | Add `DriverS3` case |
-| `internal/companion/memory.go` | PG migration DDL |
+| `internal/context/companion/memory.go` | PG migration DDL |
 | `internal/platform/config/config.go` | Extend `DatabaseSettings` with Postgres settings + redaction |
 | `cmd/agentctl/cmd/web.go` | Add `--db-driver`/`--db-dsn` flags |
-| `internal/web/server.go` | Health check endpoints |
+| `internal/interfaces/web/server.go` | Health check endpoints |
 | `go.mod` / `go.sum` | Add pgx/v5, pgvector-go, aws-sdk-go-v2 (S3) |
 
 ---

@@ -9,7 +9,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 )
 
 var updateGolden = flag.Bool("update", false, "update golden files")

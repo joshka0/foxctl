@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/gateway"
+	"github.com/jkatigb/agentctl/internal/interfaces/gateway"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
 	"github.com/jkatigb/agentctl/internal/protocol"
 )

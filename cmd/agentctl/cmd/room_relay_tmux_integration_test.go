@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
 )
 
 // TestIntegrationRelayRoomMessageTmuxRealTmux runs against a live tmux server: creates a detached

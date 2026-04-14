@@ -33,10 +33,10 @@ fails.
 | `skills/hooks_impact_analysis/main.go` | 83 | `Timeout` | Add `format:units` |
 | `skills/code_llm_search/main.go` | 72 | `Timeout` | Add `format:units` |
 | `internal/domain/backup/backup.go` | 129 | `Duration` | Add `format:units` |
-| `internal/indexing/embedding/worker.go` | 21 | `PollInterval` | Add `format:units` |
-| `internal/indexing/embedding/worker.go` | 27 | `ShutdownTimeout` | Add `format:units` |
-| `internal/openapi/retry/retry.go` | 24 | `InitialDelay` | Add `format:units` |
-| `internal/openapi/retry/retry.go` | 25 | `MaxDelay` | Add `format:units` |
+| `internal/intelligence/indexing/embedding/worker.go` | 21 | `PollInterval` | Add `format:units` |
+| `internal/intelligence/indexing/embedding/worker.go` | 27 | `ShutdownTimeout` | Add `format:units` |
+| `internal/interfaces/openapi/retry/retry.go` | 24 | `InitialDelay` | Add `format:units` |
+| `internal/interfaces/openapi/retry/retry.go` | 25 | `MaxDelay` | Add `format:units` |
 | `internal/agent/optimization/reflection.go` | 51 | `AvgDuration` | Add `format:units` |
 | `internal/agent/optimization/prompt_optimizer.go` | 114 | `Duration` | Add `format:units` |
 
@@ -254,8 +254,8 @@ The codebase already follows good practices:
 | 1 | `skills/hooks_impact_analysis/main.go` | Add `format:units` |
 | 1 | `skills/code_llm_search/main.go` | Add `format:units` |
 | 1 | `internal/domain/backup/backup.go` | Add `format:units` |
-| 1 | `internal/indexing/embedding/worker.go` | Add `format:units` (2 fields) |
-| 1 | `internal/openapi/retry/retry.go` | Add `format:units` (2 fields) |
+| 1 | `internal/intelligence/indexing/embedding/worker.go` | Add `format:units` (2 fields) |
+| 1 | `internal/interfaces/openapi/retry/retry.go` | Add `format:units` (2 fields) |
 | 1 | `internal/agent/optimization/reflection.go` | Add `format:units` |
 | 1 | `internal/agent/optimization/prompt_optimizer.go` | Add `format:units` |
 | 1 | `internal/platform/config/config.go` | Add `format:units` (2 fields) |
@@ -264,12 +264,12 @@ The codebase already follows good practices:
 | 2 | `internal/storage/dbdriver/vector.go` | Delete Vector marshaler (14 lines) |
 | 2 | `internal/platform/config/config.go` | Add TODO for MarshalerTo |
 | 3 | `internal/platform/jsoncompat/compat.go` | Created - compatibility docs |
-| 4 | `internal/planning/llm/openai.go` | Add `unknown` field |
-| 4 | `internal/indexing/semantic/provider_voyage.go` | Add `unknown` field |
-| 4 | `internal/indexing/semantic/provider_gemini.go` | Add `unknown` fields (2) |
-| 4 | `internal/indexing/semantic/provider_mistral.go` | Add `unknown` field |
-| 4 | `internal/indexing/semantic/provider_codestral.go` | Add `unknown` field |
-| 4 | `internal/indexing/rerank/voyage.go` | Add `unknown` field |
+| 4 | `internal/intelligence/planning/llm/openai.go` | Add `unknown` field |
+| 4 | `internal/intelligence/indexing/semantic/provider_voyage.go` | Add `unknown` field |
+| 4 | `internal/intelligence/indexing/semantic/provider_gemini.go` | Add `unknown` fields (2) |
+| 4 | `internal/intelligence/indexing/semantic/provider_mistral.go` | Add `unknown` field |
+| 4 | `internal/intelligence/indexing/semantic/provider_codestral.go` | Add `unknown` field |
+| 4 | `internal/intelligence/indexing/rerank/voyage.go` | Add `unknown` field |
 | 4 | `skills/ci_github_checks/main.go` | Add `unknown` fields (4) |
 
 ### Final Impact
@@ -320,7 +320,7 @@ High-density files:
 | `skills/code_semantic_search/main.go` | 25+ |
 | `internal/storage/interfaces.go` | 20+ |
 | `internal/agent/types/types.go` | 30+ |
-| `internal/workflow/types.go` | 25+ |
+| `internal/runtime/orchestration/workflow/types.go` | 25+ |
 | `internal/domain/envelope/envelope.go` | 25+ |
 
 **v2 Behavior:** `omitempty` works the same by default. Use
@@ -334,7 +334,7 @@ Key files:
 | File | Usage |
 |------|-------|
 | `internal/domain/hook/types.go` | `ToolInput`, `ToolResponse` |
-| `internal/actor/event_bus.go` | `Data` field |
+| `internal/runtime/actor/event_bus.go` | `Data` field |
 | `skills/session_archive/main.go` | Message content |
 
 **v2 Benefit:** `jsontext.Value` provides better streaming performance.
@@ -353,7 +353,7 @@ ActiveTask *TaskInfo    `json:"active_task,omitempty"`
 
 | File | Line | Field |
 |------|------|-------|
-| `internal/actor/registry_store.go` | 69 | `Config` |
+| `internal/runtime/actor/registry_store.go` | 69 | `Config` |
 | `internal/agent/types/types.go` | 268 | `LLMAPIKey` |
 
 **v2:** No change needed, `json:"-"` works the same.

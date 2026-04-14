@@ -32,7 +32,7 @@ agentctl refactor scout --language elixir --path . --max-results 8
 
 Top shortlist:
 
-1. `internal/actor/agent_actor.go` — `*AgentActor.handleAsk`
+1. `internal/runtime/actor/agent_actor.go` — `*AgentActor.handleAsk`
 2. `internal/adapters/skillslib/codeblocks/expander.go` — `buildGoIndex`
 3. `internal/agent/runtime/runtime.go` — `sessionResearchSummary`
 4. `internal/adapters/skillslib/codeblocks/matches.go` — `ExpandMatchesWithOptions`
@@ -182,7 +182,7 @@ logic, the strongest current candidates are:
 1. `cmd/agentctl/cmd/agent.go`
    - Extract shared orchestration from `runAgentWatch` and `runAgentAskWithRoute`
    - This is the clearest repeated-logic reduction target
-2. `internal/actor/agent_actor.go`
+2. `internal/runtime/actor/agent_actor.go`
    - Decompose `*AgentActor.handleAsk`
    - Good complexity-reduction target in a core runtime path
 3. `internal/adapters/skillslib/codeblocks/expander.go`

@@ -13,17 +13,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/indexing"
-	"github.com/jkatigb/agentctl/internal/indexing/filesummary"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/filesummary"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	"github.com/jkatigb/agentctl/internal/platform/symbolutil"
 	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -314,7 +314,7 @@ func newIndexSymbolIndexCommand() *cobra.Command {
 		Long: `Run the symbol indexer over a selected file set. This uses the doc-aware
 embedding text pipeline and updates named-memory symbol entries.`,
 		Example: `  # Index symbols for a single file
-  agentctl index symbol-index --glob "internal/indexing/repoindex/comment_edges.go"
+  agentctl index symbol-index --glob "internal/intelligence/indexing/repoindex/comment_edges.go"
 
   # Index symbols for Go and TS
   agentctl index symbol-index --glob "**/*.{go,ts,tsx}" --exclude "*_test.go,vendor/**"

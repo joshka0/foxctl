@@ -104,7 +104,7 @@ vault/
 
 Objective:
 
-Implement the first real knowledge-plane adapter under `internal/tools/obsidian` or equivalent package boundary.
+Implement the first real knowledge-plane adapter under `internal/tooling/tools/obsidian` or equivalent package boundary.
 
 Deliverables:
 
@@ -126,11 +126,11 @@ Requirements:
 
 Primary files:
 
-- `internal/tools/obsidian/search.go`
-- `internal/tools/obsidian/read.go`
-- `internal/tools/obsidian/write.go`
-- `internal/tools/obsidian/links.go`
-- `internal/tools/obsidian/policy.go`
+- `internal/tooling/tools/obsidian/search.go`
+- `internal/tooling/tools/obsidian/read.go`
+- `internal/tooling/tools/obsidian/write.go`
+- `internal/tooling/tools/obsidian/links.go`
+- `internal/tooling/tools/obsidian/policy.go`
 - `cmd/agentctl/cmd/obsidian.go`
 
 Verification:
@@ -203,8 +203,8 @@ Required read order:
 
 Primary files:
 
-- `internal/contextplane/retrieval.go`
-- `internal/tools/obsidian/search.go`
+- `internal/context/contextplane/retrieval.go`
+- `internal/tooling/tools/obsidian/search.go`
 - `internal/storage/obsidianindex/*`
 
 Verification:
@@ -238,8 +238,8 @@ Requirements:
 
 Primary files:
 
-- `internal/contextplane/tasks.go`
-- `internal/contextplane/dispatch.go`
+- `internal/context/contextplane/tasks.go`
+- `internal/context/contextplane/dispatch.go`
 - `cmd/agentctl/cmd/context_next.go`
 - `cmd/agentctl/cmd/context_dispatch.go`
 
@@ -268,8 +268,8 @@ Deliverables:
 
 Primary files:
 
-- `internal/contextplane/promotion.go`
-- `internal/tools/obsidian/policy.go`
+- `internal/context/contextplane/promotion.go`
+- `internal/tooling/tools/obsidian/policy.go`
 - `cmd/agentctl/cmd/context_promote_review.go`
 
 Verification:
@@ -301,9 +301,9 @@ Daemon loops:
 
 Primary files:
 
-- `internal/contextplane/daemon.go`
-- `internal/contextplane/health.go`
-- `internal/contextplane/contradictions.go`
+- `internal/context/contextplane/daemon.go`
+- `internal/context/contextplane/health.go`
+- `internal/context/contextplane/contradictions.go`
 
 Verification:
 
@@ -329,9 +329,9 @@ Deliverables:
 
 Primary files:
 
-- `internal/tools/obsidian/links.go`
-- `internal/indexing/repoindex/*`
-- `internal/contextplane/retrieval.go`
+- `internal/tooling/tools/obsidian/links.go`
+- `internal/intelligence/indexing/repoindex/*`
+- `internal/context/contextplane/retrieval.go`
 
 Verification:
 
@@ -358,7 +358,7 @@ Deliverables:
 
 Primary files:
 
-- `internal/contextplane/daemon.go`
+- `internal/context/contextplane/daemon.go`
 - `cmd/agentctl/cmd/contextd.go`
 - `cmd/agentctl/cmd/mcp.go`
 

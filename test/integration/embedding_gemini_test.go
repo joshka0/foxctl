@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 )
 
 // TestGeminiProvider_Integration tests the Gemini embedding provider against the live API.

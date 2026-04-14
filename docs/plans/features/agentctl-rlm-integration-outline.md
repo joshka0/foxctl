@@ -21,30 +21,30 @@ to give the model a better way to inspect them.
 
 The repo already has several pieces that make an RLM layer practical:
 
-- `internal/engine/rlm_tools.go`
+- `internal/runtime/engine/rlm_tools.go`
   - existing RLM-style tool executor over external context state
   - already supports context variables, semantic memory lookup, and companion DB access
 - `internal/storage/contextvar`
   - persistent external state for context variables
-- `internal/companion/*`
+- `internal/context/companion/*`
   - hybrid companion memory with:
     - conversation events
     - hard state entries
     - soft episodes
     - evidence snippets
     - assumptions ledger
-- `internal/contextplane/*`
+- `internal/context/contextplane/*`
   - ACA control plane:
     - top-of-mind
     - handoffs
     - observations
     - tensions
     - retrieve/report/rethink/dispatch
-- `internal/indexing/repoindex/*`
+- `internal/intelligence/indexing/repoindex/*`
   - code + infra graph indexing
 - `internal/storage/obsidianindex/*`
   - durable knowledge plane index
-- `internal/runservice/*`, `internal/trajectorycapture/*`
+- `internal/runtime/runservice/*`, `internal/runtime/trajectorycapture/*`
   - event/result/trajectory persistence
 - `internal/v2/runtime/*`, `internal/v2/services/*`
   - clean place to host a future production execution mode
@@ -200,12 +200,12 @@ Expose typed read tools instead of generic DB access:
 
 These map well onto:
 
-- `internal/contextplane`
+- `internal/context/contextplane`
 - `internal/storage/contextvar`
-- `internal/companion`
-- `internal/indexing/repoindex`
+- `internal/context/companion`
+- `internal/intelligence/indexing/repoindex`
 - `internal/storage/obsidianindex`
-- `internal/trajectorycapture`
+- `internal/runtime/trajectorycapture`
 
 ## How Scenes Fit
 
@@ -230,7 +230,7 @@ That is much better than treating the whole history as one blob.
 
 ### Phase 0: harden current proto-RLM pieces
 
-Use the existing `internal/engine/rlm_tools.go` and `internal/companion/*` as
+Use the existing `internal/runtime/engine/rlm_tools.go` and `internal/context/companion/*` as
 the seed, but do not let them become the final architecture.
 
 Immediate actions:

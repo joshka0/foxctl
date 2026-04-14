@@ -74,7 +74,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
 **Goal:** Durable execution with logs/progress/result envelopes.
 
-* `internal/jobs/`
+* `internal/runtime/jobs/`
 
   * SQLite (modernc): tables + indexes (state, workspace, args_hash)
   * Lifecycle: submit/ls/status/tail/wait/result/cancel, `--dedupe`
@@ -134,7 +134,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
 **Goal:** Call any OpenAPI 3.x operation; summaries + CAS; dry-run; retries; pagination; auth.
 
-* `internal/openapi/`
+* `internal/interfaces/openapi/`
 
   * Spec loader: path | CAS digest | `memory:<name>`
   * Resolver: `operationId` → method/path/params; **lenient** parse by default; `--strict` option
@@ -166,7 +166,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
 **Goal:** Extensibility without bloating core—subprocess plugins via envelopes.
 
-* `internal/openapi/plugin/`
+* `internal/interfaces/openapi/plugin/`
 
   * Protocol: stdin/stdout **JSON envelopes** (`plugin/auth`, `plugin/pagination`)
   * Discovery: `AGENTCTL_OPENAPI_PLUGIN_PATH`, explicit `plugin:<name>` in hints/flags

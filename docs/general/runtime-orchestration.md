@@ -44,10 +44,10 @@ Important scope note:
 | `internal/v2/runtime/contextbuilder`, `internal/v2/runtime/enrichers`, `internal/v2/runtime/supervisor` | Context assembly, async enrichment, and component lifecycle management |
 | `internal/v2/adapters/jido` | Jido JSON-RPC client, child spawner, ask/runtime adapter, orchestration reconciler, and optional companion provider |
 | `internal/v2/adapters/libsql/*` | v2 events, projections, orchestration, idmap, and turn stores |
-| `internal/companion` | Companion chat/memory service and adapter layer into v2 context building |
+| `internal/context/companion` | Companion chat/memory service and adapter layer into v2 context building |
 | `internal/agent`, `internal/agent/daemon` | Classic mailbox-driven agent runtime, overseer hierarchy, tool wiring, and foreground daemon loop |
-| `internal/daemon` | Local daemon service; currently mixes classic runtime behavior with newer v2-backed command helpers |
-| `internal/execution/agentmanager` | Legacy spawn/kill management path still used by some CLI flows |
+| `internal/runtime/daemon` | Local daemon service; currently mixes classic runtime behavior with newer v2-backed command helpers |
+| `internal/runtime/execution/agentmanager` | Legacy spawn/kill management path still used by some CLI flows |
 
 ## Legacy vs V2 Runtime Boundary
 
@@ -57,8 +57,8 @@ Use this shorthand when talking about “legacy” vs “v2” in runtime discus
 |---------------------|-----------------------|-------|
 | `internal/agent/runtime` | `internal/v2/runtime/*` plus `internal/v2/services/*` | Core agent session/runtime replacement seam |
 | `internal/agent/daemon` | `internal/v2/runtime/{runner,orchestration,supervisor}` | Foreground daemon loop replacement is partial |
-| `internal/execution/agentmanager` | `internal/v2/services/{spawn,kill,list,run}` | Still used as fallback in some CLI flows |
-| agent-management logic in `internal/daemon` | prefer `internal/v2/services/*` semantics | `internal/daemon` remains the hosting shell in places |
+| `internal/runtime/execution/agentmanager` | `internal/v2/services/{spawn,kill,list,run}` | Still used as fallback in some CLI flows |
+| agent-management logic in `internal/runtime/daemon` | prefer `internal/v2/services/*` semantics | `internal/runtime/daemon` remains the hosting shell in places |
 | live Jido runtime-state dependencies in `internal/v2/adapters/jido` | Go-owned runtime state with Jido optional | Adapter remains, default dependence should shrink |
 
 For the broader package topology, including what `v2` is **not** replacing, see
@@ -71,12 +71,12 @@ For the broader package topology, including what `v2` is **not** replacing, see
 | `agent ask` | `cmd/agentctl/cmd/agent.go` -> `internal/v2/services.AskService` | Default can be mailbox-backed; Jido remains an optional dispatcher path |
 | `agent ask-status` | CLI -> v2 projections/events | Reads v2 run state and terminal callback metadata |
 | Overseer orchestration component | `cmd/agentctl/cmd/overseer_v2_orchestration.go` -> `internal/v2/runtime/orchestration` + runtime adapter | Still effectively Jido-oriented in important flows today |
-| Companion layered context | `internal/companion` -> `internal/v2/runtime/contextbuilder` -> optional provider | Jido-backed provider is optional, not the desired default |
+| Companion layered context | `internal/context/companion` -> `internal/v2/runtime/contextbuilder` -> optional provider | Jido-backed provider is optional, not the desired default |
 | `agent run` | CLI -> `internal/agent/daemon.Run` | Still classic mailbox-driven runtime |
 | `agent spawn` | CLI prefers daemon path, then falls back to legacy `agentmanager` | Not hard-cut to v2 everywhere |
 | `agent list` | CLI -> local agents store | Not v2-service-only in current CLI |
 | `agent kill` | Mixed; CLI still uses legacy/local management path in places | v2 kill service exists but is not the only live path |
-| Web/API runtime tree views | `internal/web/api` plus optional Jido client for some runtime state | This is one of the main parity gaps for making Jido optional |
+| Web/API runtime tree views | `internal/interfaces/web/api` plus optional Jido client for some runtime state | This is one of the main parity gaps for making Jido optional |
 
 ## Runtime ownership seams that matter now
 

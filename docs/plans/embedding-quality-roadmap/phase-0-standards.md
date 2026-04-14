@@ -239,20 +239,20 @@ func ParseConfig(path string) (*Config, error)
 
 ### Summary
 
-Create a new package `internal/indexing/embeddingtext` with utilities for building and normalizing text that will be embedded. This centralizes the logic for converting symbols, docs, and code into high-quality embedding input.
+Create a new package `internal/intelligence/indexing/embeddingtext` with utilities for building and normalizing text that will be embedded. This centralizes the logic for converting symbols, docs, and code into high-quality embedding input.
 
 ### Files Touched
 
 | File | Action | Description |
 |------|--------|-------------|
-| `internal/indexing/embeddingtext/normalize.go` | Create | Text normalization functions |
-| `internal/indexing/embeddingtext/digest.go` | Create | SHA256 digest for change detection |
-| `internal/indexing/embeddingtext/symbol_text.go` | Create | Build symbol embedding text |
-| `internal/indexing/embeddingtext/doc.go` | Create | Package documentation |
+| `internal/intelligence/indexing/embeddingtext/normalize.go` | Create | Text normalization functions |
+| `internal/intelligence/indexing/embeddingtext/digest.go` | Create | SHA256 digest for change detection |
+| `internal/intelligence/indexing/embeddingtext/symbol_text.go` | Create | Build symbol embedding text |
+| `internal/intelligence/indexing/embeddingtext/doc.go` | Create | Package documentation |
 
 ### Implementation Details
 
-#### `internal/indexing/embeddingtext/doc.go`
+#### `internal/intelligence/indexing/embeddingtext/doc.go`
 
 ```go
 // Package embeddingtext provides utilities for building and normalizing
@@ -269,7 +269,7 @@ Create a new package `internal/indexing/embeddingtext` with utilities for buildi
 package embeddingtext
 ```
 
-#### `internal/indexing/embeddingtext/normalize.go`
+#### `internal/intelligence/indexing/embeddingtext/normalize.go`
 
 ```go
 package embeddingtext
@@ -400,7 +400,7 @@ Implementation notes:
 - Compile regexes at package scope (avoid per-call MustCompile).
 - Add NormalizeFirstComment in embeddingtext for file headers.
 
-#### `internal/indexing/embeddingtext/digest.go`
+#### `internal/intelligence/indexing/embeddingtext/digest.go`
 
 ```go
 package embeddingtext
@@ -440,7 +440,7 @@ func DigestSHA256Prefix(text string, n int) string {
 }
 ```
 
-#### `internal/indexing/embeddingtext/symbol_text.go`
+#### `internal/intelligence/indexing/embeddingtext/symbol_text.go`
 
 ```go
 package embeddingtext

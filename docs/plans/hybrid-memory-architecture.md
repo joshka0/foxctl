@@ -95,28 +95,28 @@ flowchart TD
   - Why: separates canonical log from derived state; both event log and hard state entries are never UPDATEd — supersede/retract by INSERTing new rows. Cache invalidation is trivial (compare max entry id).
 
 - **Repository Pattern**
-  - Where: `internal/companion/memory.go`, new `internal/companion/hybrid_memory.go`
+  - Where: `internal/context/companion/memory.go`, new `internal/context/companion/hybrid_memory.go`
   - Why: centralize SQL access and make update pipelines deterministic/unit-testable
 
 - **Strategy Pattern**
-  - Where: deterministic extractor vs LLM extractor in `internal/companion/hybrid_memory.go`
+  - Where: deterministic extractor vs LLM extractor in `internal/context/companion/hybrid_memory.go`
   - Why: default to deterministic rules; fallback to LLM only when confidence/coverage is low
 
 - **State Machine**
-  - Where: episode lifecycle in `internal/companion/hybrid_memory.go`
+  - Where: episode lifecycle in `internal/context/companion/hybrid_memory.go`
   - Why: explicit transitions (`exploration`, `decision`, `tangent`, `completion`) with deterministic boundary rules
 
 - **Observer (event hook)**
-  - Where: `autoCompress` in `internal/companion/service.go`
+  - Where: `autoCompress` in `internal/context/companion/service.go`
   - Why: use existing per-turn hook point without changing the upstream chat request/response flow
 
 - **Adapter Pattern**
-  - Where: `internal/engine/rlm_tools.go` query path
+  - Where: `internal/runtime/engine/rlm_tools.go` query path
   - Why: keep existing `rlm_context_query` contract while adapting sources
 
 ## File Changes
 
-### `internal/companion/memory.go` (modified)
+### `internal/context/companion/memory.go` (modified)
 - **Purpose**: Extend schema with new hybrid memory tables
 - **Key changes**:
   - Add new `CREATE TABLE` statements in `ensureSchema()` with dialect-aware DDL (SQLite/PostgreSQL)
@@ -126,7 +126,7 @@ flowchart TD
   - Tool events always include a receipt in `payload_json`; `payload_ref` is optional for large outputs
   - Keep existing L1/L2 APIs as fallback-only
 
-### `internal/companion/hybrid_memory.go` (new)
+### `internal/context/companion/hybrid_memory.go` (new)
 - **Purpose**: Hybrid memory pipeline — signal gating, deterministic extraction, episode segmentation, context assembly
 - **Key changes**:
   - **Two-tier signal gate**: Tier 0 (always: cursors + open episode state) + Tier 1 (gated for chat, **always-on for `tool_result`**)
@@ -154,7 +154,7 @@ flowchart TD
   - **Promotion metadata**: records `promoted_by`, `original_assumption_id` when soft→hard
   - LLM fallback for ambiguous extraction (Strategy pattern)
 
-### `internal/companion/service.go` (modified)
+### `internal/context/companion/service.go` (modified)
 - **Purpose**: Wire autoCompress and context building to hybrid pipeline
 - **Key changes**:
   - Add `UseHybridMemory` config knob
@@ -162,7 +162,7 @@ flowchart TD
   - Update `buildSystemPrompt`/`GetContext` to prefer `GetHybridContext`
   - `buildChatMessages` callsite unchanged — consumes richer sectioned prompt
 
-### `internal/companion/daemon.go` (modified)
+### `internal/context/companion/daemon.go` (modified)
 - **Purpose**: Skip legacy compression for hybrid-mode conversations + background janitors
 - **Key changes**:
   - Migration guard: check `companion_memory_mode_state.mode` before running L1/L2 compression
@@ -170,7 +170,7 @@ flowchart TD
   - Episode summary janitor: find episodes with `needs_summary=1`, generate LLM summary, update row
   - Staging janitor: process pending `companion_extraction_staging` entries (LLM normalization, capped attempts)
 
-### `internal/engine/rlm_tools.go` (modified)
+### `internal/runtime/engine/rlm_tools.go` (modified)
 - **Purpose**: Extend semantic query to include hybrid memory sources + query-time evidence
 - **Key changes**:
   - Add hybrid sources: `companion_hard_state_entries`, `companion_soft_episodes`, `companion_evidence_snippets`
@@ -182,11 +182,11 @@ flowchart TD
 - **Purpose**: Add type constants for new memory entry types
 - **Key changes**: Add constants, no interface breakage
 
-### `internal/web/api/companion.go` (modified)
+### `internal/interfaces/web/api/companion.go` (modified)
 - **Purpose**: Return hybrid-aware debug context
 - **Key changes**: Optionally include hybrid metadata, keep API compatibility
 
-### `internal/companion/memory_hybrid_test.go` (new)
+### `internal/context/companion/memory_hybrid_test.go` (new)
 - **Purpose**: Unit tests for hybrid memory pipeline
 - **Key changes**:
   - Tests for two-tier signal gating (Tier 0 always runs, Tier 1 gated)
@@ -797,7 +797,7 @@ The schema above is SQLite-flavored. For PostgreSQL deployments, a dialect layer
 | Partial indexes (`WHERE ...`) | Same syntax | Both support partial indexes |
 | `json_extract()` / `json()` | `jsonb` operators (`->`, `->>`) | Use dialect-aware JSON helpers |
 
-Implementation: add a `Dialect` interface in `internal/companion/memory.go` (or `internal/storage/`) with `CreateTable(name, columns)`, `TimestampNow()`, `JSONExtract(col, path)` methods. The existing codebase already has SQLite/PostgreSQL branching in `internal/storage/` — follow the same pattern.
+Implementation: add a `Dialect` interface in `internal/context/companion/memory.go` (or `internal/storage/`) with `CreateTable(name, columns)`, `TimestampNow()`, `JSONExtract(col, path)` methods. The existing codebase already has SQLite/PostgreSQL branching in `internal/storage/` — follow the same pattern.
 
 **Recommendation:** Keep all DDL in Go string constants with `%s` placeholders for dialect-specific tokens. Run migrations through the same `ensureSchema()` path that existing companion tables use.
 
@@ -874,7 +874,7 @@ ALTER TABLE companion_soft_episodes ADD COLUMN deleted_at TEXT;
 ## Testing Strategy
 
 ### Unit Tests
-- `internal/companion/memory_hybrid_test.go`:
+- `internal/context/companion/memory_hybrid_test.go`:
   - `TestSignalGateTier0` — cursor advance + open episode state update runs on every turn
   - `TestSignalGateTier1Chat` — routine messages ("ok", "thanks") skip extraction; preference/decision messages trigger it
   - `TestSignalGateTier1ToolResult` — `tool_result` events always bypass Tier 1 gate

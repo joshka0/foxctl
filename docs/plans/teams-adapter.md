@@ -13,7 +13,7 @@ At the same time, Microsoft Teams is the default chat surface for enterprise tea
 
 ## Goals (This Branch)
 
-1. Extract a **generic** `SessionBridge` into `internal/chatadapter` and refactor Discord/Telegram to use it (no behavior change).
+1. Extract a **generic** `SessionBridge` into `internal/interfaces/chatadapter` and refactor Discord/Telegram to use it (no behavior change).
 2. Implement a **Teams adapter MVP** that supports:
    - Incoming Bot Framework webhooks (Activity schema)
    - Natural-language chat routed through `consolews` via the shared `SessionBridge`
@@ -30,9 +30,9 @@ At the same time, Microsoft Teams is the default chat surface for enterprise tea
 
 ## Phase 1: Generic SessionBridge Extraction (No Behavior Change)
 
-### 1.1 `internal/chatadapter/helpers.go`
+### 1.1 `internal/interfaces/chatadapter/helpers.go`
 
-Move duplicated helpers from Discord/Telegram into `internal/chatadapter`:
+Move duplicated helpers from Discord/Telegram into `internal/interfaces/chatadapter`:
 
 ```go
 func TruncateRunes(s string, maxLen int) string
@@ -45,7 +45,7 @@ func FormatDuration(ms int64) string
 Notes:
 - Keep these **small + deterministic**. This should not become a “misc utils” dump.
 
-### 1.2 `internal/chatadapter/session_bridge.go`
+### 1.2 `internal/interfaces/chatadapter/session_bridge.go`
 
 Define a platform-agnostic bridge that only depends on:
 - `chatadapter.MessageEvent` (`Respond`, `Edit`)
@@ -72,7 +72,7 @@ Implementation requirements:
 - Per-channel cancellation: cancel previous in-flight request when a new message arrives.
 - Emit observability events using `PlatformName` (avoid hard-coding “discord”).
 
-### 1.3 `internal/chatadapter/session_bridge_test.go`
+### 1.3 `internal/interfaces/chatadapter/session_bridge_test.go`
 
 Consolidate and keep coverage for:
 - “partial then final” edit behavior
@@ -81,13 +81,13 @@ Consolidate and keep coverage for:
 
 ### 1.4 Refactor Discord + Telegram SessionBridge Files
 
-Make `internal/chatadapter/discord/messaging.go` and `internal/chatadapter/telegram/messaging.go` thin wrappers that only build `chatadapter.SessionBridgeConfig` and call `chatadapter.NewSessionBridge(...)`.
+Make `internal/interfaces/chatadapter/discord/messaging.go` and `internal/interfaces/chatadapter/telegram/messaging.go` thin wrappers that only build `chatadapter.SessionBridgeConfig` and call `chatadapter.NewSessionBridge(...)`.
 
 ### 1.5 Refactor Embed/Event Helpers
 
 Replace local helper copies in:
-- `internal/chatadapter/discord/embeds.go`
-- `internal/chatadapter/telegram/events.go`
+- `internal/interfaces/chatadapter/discord/embeds.go`
+- `internal/interfaces/chatadapter/telegram/events.go`
 
 to call `chatadapter.TruncateRunes`, `chatadapter.GetDataString`, `chatadapter.FormatDuration`, etc.
 
@@ -95,7 +95,7 @@ to call `chatadapter.TruncateRunes`, `chatadapter.GetDataString`, `chatadapter.F
 
 ```bash
 make build
-go test ./internal/chatadapter/...
+go test ./internal/interfaces/chatadapter/...
 ```
 
 ## Phase 2: Microsoft Teams Adapter (Enterprise MVP)
@@ -140,7 +140,7 @@ Env vars:
 - `TEAMS_EDIT_INTERVAL_MS` (default `1500`)
 - `TEAMS_SKIP_JWT_VERIFY` (default `false`; only allow when `--dev-cors` is set; enforced at runtime in `startChatAdapter()`)
 
-### 2.2 Types: `internal/chatadapter/teams/types.go`
+### 2.2 Types: `internal/interfaces/chatadapter/teams/types.go`
 
 Define minimal Bot Framework Activity types needed for:
 - message routing
@@ -153,7 +153,7 @@ Minimum fields:
 - `conversation` (id + tenant id)
 - `entities` (for mentions)
 
-### 2.3 Inbound Auth: `internal/chatadapter/teams/jwt.go`
+### 2.3 Inbound Auth: `internal/interfaces/chatadapter/teams/jwt.go`
 
 Enterprise requirement: verify inbound JWT for webhook calls.
 
@@ -175,7 +175,7 @@ Implementation shape:
 Design note:
 - Make JWT verification injectable/testable via a small interface so driver tests can use a fake verifier.
 
-### 2.4 Outbound OAuth: `internal/chatadapter/teams/auth.go`
+### 2.4 Outbound OAuth: `internal/interfaces/chatadapter/teams/auth.go`
 
 Implement a token manager for Bot Framework Connector calls:
 - Client credentials flow:
@@ -185,7 +185,7 @@ Implement a token manager for Bot Framework Connector calls:
 - Cache token, refresh ~5 minutes before expiry
 - Thread-safe via mutex
 
-### 2.5 Bot Connector Client: `internal/chatadapter/teams/botclient.go`
+### 2.5 Bot Connector Client: `internal/interfaces/chatadapter/teams/botclient.go`
 
 Teams requires **reply-to-activity** to keep messages in the right thread.
 
@@ -204,7 +204,7 @@ Also:
 - Always set outbound `type: "message"` (or `"typing"`)
 - Keep `http.Client` timeout at 15s and handle 429/5xx with limited retries/backoff
 
-### 2.6 Adapter Driver: `internal/chatadapter/teams/driver.go`
+### 2.6 Adapter Driver: `internal/interfaces/chatadapter/teams/driver.go`
 
 Key behaviors:
 - `Connect()` validates config and initializes dependencies (no long-lived connection).
@@ -233,7 +233,7 @@ Respond/Edit implementation:
 - `Edit(...)` should `UpdateActivity(...)` on the previously sent activity.
 - If `UpdateActivity` fails, log and stop editing (MVP). Optional: send a new message and finish (Phase 3).
 
-### 2.7 Wiring: `internal/web/server.go` + routes
+### 2.7 Wiring: `internal/interfaces/web/server.go` + routes
 
 - Add `--chat teams` option and update help text exactly:
   - `cmd/agentctl/cmd/web.go`: `"Chat adapter to enable (discord|telegram|teams)"`

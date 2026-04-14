@@ -7,7 +7,7 @@ import (
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
-	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
+	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 )
 
 var elixirSemanticBoolSyntax = semanticBoolSyntax{And: "and", Or: "or", Not: "not "}

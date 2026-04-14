@@ -14,11 +14,11 @@ What's missing: **Authority/importance signals**. A function called by 50 other 
 
 | Component | Location | What It Tracks |
 |-----------|----------|----------------|
-| **Task Graph** | `internal/analysis/tasksgraph/` | Task → Task (depends_on) |
-| **Symbol Call Graph** | `internal/indexing/symbol/` | Symbol → Symbol (calls) |
+| **Task Graph** | `internal/intelligence/analysis/tasksgraph/` | Task → Task (depends_on) |
+| **Symbol Call Graph** | `internal/intelligence/indexing/symbol/` | Symbol → Symbol (calls) |
 | **Import Graph** | `skills/code_imports/` | File → File (imports) |
-| **Workflow DAG** | `internal/workflow/` | Step → Step (depends_on) |
-| **Overseer Scoring** | `internal/analysis/overseer/` | Combines PageRank + CriticalPath + Mailbox |
+| **Workflow DAG** | `internal/runtime/orchestration/workflow/` | Step → Step (depends_on) |
+| **Overseer Scoring** | `internal/intelligence/analysis/overseer/` | Combines PageRank + CriticalPath + Mailbox |
 
 ### Gap Analysis
 
@@ -378,7 +378,7 @@ This enables:
 
 ## References
 
-- Existing PageRank: `internal/analysis/tasksgraph/graph.go`
-- Overseer scoring: `internal/analysis/overseer/scoring.go`
-- Symbol indexing: `internal/indexing/symbol/`
+- Existing PageRank: `internal/intelligence/analysis/tasksgraph/graph.go`
+- Overseer scoring: `internal/intelligence/analysis/overseer/scoring.go`
+- Symbol indexing: `internal/intelligence/indexing/symbol/`
 - Semantic search: `skills/code_semantic_search/main.go`

@@ -16,9 +16,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/claudejsonl"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/codexjsonl"
 	platformpath "github.com/jkatigb/agentctl/internal/platform/pathutil"
-	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
-	"github.com/jkatigb/agentctl/internal/sessionkit/codexjsonl"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )

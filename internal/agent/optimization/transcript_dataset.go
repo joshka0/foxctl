@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/sessionkit/codexjsonl"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/codexjsonl"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 

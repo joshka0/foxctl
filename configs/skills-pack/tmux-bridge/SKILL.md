@@ -105,7 +105,7 @@ Promote only derived facts:
 ```bash
 agentctl mux observe agent-b --lines 80
 agentctl mux observe agent-b \
-  --statement "agent-b is reviewing mailbox ack semantics in internal/actor/supervisor.go"
+  --statement "agent-b is reviewing mailbox ack semantics in internal/runtime/actor/supervisor.go"
 ```
 
 Do not treat raw pane scrollback as canonical history.

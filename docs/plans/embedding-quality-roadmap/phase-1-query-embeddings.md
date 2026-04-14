@@ -23,7 +23,7 @@ Voyage AI (and some other providers) support different embedding modes:
 - `document` - For content being indexed (optimized for being found)
 - `query` - For search queries (optimized for finding)
 
-Currently, `internal/retrieval/semantic_search.go` always uses `Embed()`:
+Currently, `internal/intelligence/retrieval/semantic_search.go` always uses `Embed()`:
 
 ```go
 // Current implementation (line 29)
@@ -33,7 +33,7 @@ vec, err := g.embedProvider.Embed(ctx, question)
 The `VoyageProvider` already implements `EmbedQuery`:
 
 ```go
-// internal/indexing/semantic/provider_voyage.go (line 411)
+// internal/intelligence/indexing/semantic/provider_voyage.go (line 411)
 func (p *VoyageProvider) EmbedQuery(ctx context.Context, query string) ([]float32, error) {
     embeddings, err := p.doEmbedRequest(ctx, []string{query}, "query")
     // ...
@@ -46,13 +46,13 @@ We need to wire these together.
 
 | File | Action | Description |
 |------|--------|-------------|
-| `internal/retrieval/semantic_search.go` | Modify | Use EmbedQuery when available |
-| `internal/retrieval/semantic_search_test.go` | Create | Unit tests for query embedding selection |
-| `internal/retrieval/generator.go` | Modify (minor) | Ensure embed provider is accessible |
+| `internal/intelligence/retrieval/semantic_search.go` | Modify | Use EmbedQuery when available |
+| `internal/intelligence/retrieval/semantic_search_test.go` | Create | Unit tests for query embedding selection |
+| `internal/intelligence/retrieval/generator.go` | Modify (minor) | Ensure embed provider is accessible |
 
 ### Implementation Details
 
-#### `internal/retrieval/semantic_search.go`
+#### `internal/intelligence/retrieval/semantic_search.go`
 
 ```go
 package retrieval
@@ -62,7 +62,7 @@ import (
     "path/filepath"
     "strings"
 
-    "github.com/jkatigb/agentctl/internal/indexing/semantic"
+    "github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
     "github.com/jkatigb/agentctl/internal/platform/config"
     "github.com/jkatigb/agentctl/internal/storage/dbdriver"
     "github.com/jkatigb/agentctl/internal/storage/memory"
@@ -165,7 +165,7 @@ func (g *Generator) embedForQuery(ctx context.Context, question string) ([]float
 // Rest of file unchanged...
 ```
 
-#### Generator struct update (`internal/retrieval/generator.go`)
+#### Generator struct update (`internal/intelligence/retrieval/generator.go`)
 
 Add the query mode field to the Generator:
 
@@ -186,7 +186,7 @@ func WithEmbedQueryMode(mode config.EmbedQueryMode) GeneratorOption {
 }
 ```
 
-#### `internal/retrieval/semantic_search_test.go`
+#### `internal/intelligence/retrieval/semantic_search_test.go`
 
 ```go
 package retrieval
@@ -195,7 +195,7 @@ import (
     "context"
     "testing"
 
-    "github.com/jkatigb/agentctl/internal/indexing/semantic"
+    "github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
     "github.com/jkatigb/agentctl/internal/platform/config"
     "github.com/rs/zerolog"
     "github.com/stretchr/testify/assert"

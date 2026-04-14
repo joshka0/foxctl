@@ -27,7 +27,7 @@ Do **not** fold the ensemble into `rlm_context_query`.
 
 Reason:
 
-- `internal/engine/rlm_tools.go` is the older conversation-scoped contextvar
+- `internal/runtime/engine/rlm_tools.go` is the older conversation-scoped contextvar
   and companion-memory lane
 - it mixes read and write concerns
 - it is not the best home for a typed, read-only, multi-scout retrieval flow
@@ -95,7 +95,7 @@ Important current constraint:
 
 - runtime system instructions do **not** come from
   `internal/agent/prompts/prompts.go`
-- they come from `internal/agentprompt/signature.go`
+- they come from `internal/runtime/agentprompt/signature.go`
 - existing scout roles are not explicitly represented there today
 
 That means a new scout role is not fully wired until both layers are updated.
@@ -115,7 +115,7 @@ Available read surfaces already exist for:
 Relevant existing paths:
 
 - `cmd/agentctl/cmd/agent_memory.go`
-- `internal/companion/service.go`
+- `internal/context/companion/service.go`
 - `internal/agent/runtime/runtime.go`
 - `internal/rlm/env/*`
 
@@ -377,7 +377,7 @@ Files:
 
 - `internal/agent/types/types.go`
 - `internal/agent/prompts/prompts.go`
-- `internal/agentprompt/signature.go`
+- `internal/runtime/agentprompt/signature.go`
 
 Key work:
 
@@ -452,7 +452,7 @@ Files:
 - new package:
   - `internal/rlm/memoryensemble/`
   or
-  - `internal/retrieval/memoryensemble/`
+  - `internal/intelligence/retrieval/memoryensemble/`
 
 Preferred implementation split:
 
@@ -471,9 +471,9 @@ Key work:
 Files:
 
 - `cmd/agentctl/cmd/eval.go`
-- `internal/evals/retrievaleval/eval.go`
+- `internal/tooling/evals/retrievaleval/eval.go`
 - `internal/rlm/llm_runner.go`
-- optional observability wiring in `internal/observability/*`
+- optional observability wiring in `internal/runtime/observability/*`
 
 Key work:
 
@@ -504,8 +504,8 @@ Preferred integration:
 
 Potential future files:
 
-- `internal/companion/service.go`
-- `internal/web/api/companion.go`
+- `internal/context/companion/service.go`
+- `internal/interfaces/web/api/companion.go`
 - `internal/agent/daemon/daemon.go`
 
 ## File Changes
@@ -518,14 +518,14 @@ Add the new role constants.
 
 Add spawn-time default prompts for each memory scout role.
 
-### `internal/agentprompt/signature.go` (modified)
+### `internal/runtime/agentprompt/signature.go` (modified)
 
 Add runtime system instructions for the new roles.
 
 Important:
 
 - do not rely on `internal/agent/prompts/prompts.go` alone
-- the runtime currently uses `internal/agentprompt/signature.go`
+- the runtime currently uses `internal/runtime/agentprompt/signature.go`
 
 ### `internal/agent/runtime/runtime.go` (modified)
 
@@ -567,7 +567,7 @@ Implement:
 - role-aware `subcallTool`
 - `memory_ensemble_retrieve` adapter entrypoint
 
-### `internal/rlm/memoryensemble/*` or `internal/retrieval/memoryensemble/*` (new)
+### `internal/rlm/memoryensemble/*` or `internal/intelligence/retrieval/memoryensemble/*` (new)
 
 Implement:
 
@@ -618,13 +618,13 @@ Track:
 
 ## Open Questions
 
-### Should `memory_ensemble_retrieve` live in `internal/rlm/env` or `internal/engine/rlm_tools.go`?
+### Should `memory_ensemble_retrieve` live in `internal/rlm/env` or `internal/runtime/engine/rlm_tools.go`?
 
 Decision for this plan:
 
 - tool definition lives in `internal/rlm/env`
 - reusable orchestration logic lives in a dedicated package
-- do not use `internal/engine/rlm_tools.go` as the primary home
+- do not use `internal/runtime/engine/rlm_tools.go` as the primary home
 
 ### Should the first slice use real child agents or inline scout emulation?
 

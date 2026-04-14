@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/spf13/cobra"
 )

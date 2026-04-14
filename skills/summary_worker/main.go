@@ -14,10 +14,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/summary"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/queue"
-	"github.com/jkatigb/agentctl/internal/sessionkit/summary"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/queue"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 

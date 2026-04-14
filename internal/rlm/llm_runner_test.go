@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/runtime/engine"
 )
 
 type fakeLLMToolExecutor struct{}
@@ -273,22 +273,22 @@ func TestRerankCandidatePaths(t *testing.T) {
 
 	semanticPaths := rerankCandidatePaths("semantic indexing package", []string{
 		"internal/v2/core/events/repository.go",
-		"internal/indexing/semantic/indexer.go",
+		"internal/intelligence/indexing/semantic/indexer.go",
 		"builder.go",
 	})
-	if len(semanticPaths) == 0 || semanticPaths[0] != "internal/indexing/semantic/indexer.go" {
+	if len(semanticPaths) == 0 || semanticPaths[0] != "internal/intelligence/indexing/semantic/indexer.go" {
 		t.Fatalf("semantic rerank=%v", semanticPaths)
 	}
 
 	webPaths := rerankCandidatePaths("web api handlers transport", []string{
-		"internal/tools/obsidian/client.go",
-		"internal/web/transport.go",
+		"internal/tooling/tools/obsidian/client.go",
+		"internal/interfaces/web/transport.go",
 		"internal/http/handler.go",
 	})
 	if len(webPaths) == 0 {
 		t.Fatal("web rerank produced no paths")
 	}
-	if webPaths[0] == "internal/tools/obsidian/client.go" {
+	if webPaths[0] == "internal/tooling/tools/obsidian/client.go" {
 		t.Fatalf("web rerank=%v should prefer web/http paths over obsidian", webPaths)
 	}
 }

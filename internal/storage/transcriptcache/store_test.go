@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+func TestSharedRoots_PrefersConfiguredStorageRoot(t *testing.T) {
+	got := SharedRoots("/tmp/storage", "/tmp/home")
+	if len(got) != 2 {
+		t.Fatalf("roots=%v want 2 entries", got)
+	}
+	if got[0] != "/tmp/storage" {
+		t.Fatalf("roots[0]=%q want %q", got[0], "/tmp/storage")
+	}
+	if got[1] != "/tmp/home/.codex/memories/agentctl-transcript-cache" {
+		t.Fatalf("roots[1]=%q want fallback codex cache path", got[1])
+	}
+}
+
 func TestStorePutAndGetByNormalizedHash(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

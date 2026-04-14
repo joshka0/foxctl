@@ -48,7 +48,7 @@ From beads + bv graph:
 
 For agentctl, I’d:
 
-- Define an internal package, e.g. `internal/analysis/tasksgraph`:
+- Define an internal package, e.g. `internal/intelligence/analysis/tasksgraph`:
   - Load all tasks for a `workspace_id`.
   - Build a directed graph:
     - Node = `task_id`.
@@ -280,7 +280,7 @@ same files can be connected via shared reservations.
   - Graph model (nodes, edges from `DependsOn`, how we treat parent-child).
   - Metrics (pagerank, impact depth, degrees, cycles).
   - New `todo/manage` op and JSON schema.
-- [ ] Impl: `internal/analysis/tasksgraph` + `todo/manage` extension.
+- [ ] Impl: `internal/intelligence/analysis/tasksgraph` + `todo/manage` extension.
 - [ ] CLI: `agentctl todo list --sort impact` and/or `agentctl todo insights`.
 
 ### Phase 2 – Memory ranking & context injection

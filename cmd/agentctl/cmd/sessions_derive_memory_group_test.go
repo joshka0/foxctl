@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/transcriptpipeline"
 	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
 )
 

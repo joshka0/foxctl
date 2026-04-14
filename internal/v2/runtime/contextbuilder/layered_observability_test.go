@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/runtime/observability"
 	"github.com/jkatigb/agentctl/internal/v2/core/run"
 	"github.com/jkatigb/agentctl/internal/v2/runtime/contextbuilder"
 )

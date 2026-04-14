@@ -7,6 +7,7 @@ This is the canonical map for docs in this repository.
 - [AGENTS.md](../AGENTS.md) - Contributor + AI assistant operating rules.
 - [README.md](../README.md) - Product overview and quick start.
 - [docs/start/README.md](start/README.md) - Fast orientation for common workflows.
+- [docs/architecture/package-topology.md](architecture/package-topology.md) - Read this first before introducing a new `internal/*` root or placing new code under `internal/v2/*`.
 - [docs/DOC_LIFECYCLE.md](DOC_LIFECYCLE.md) - Documentation lifecycle and maintenance policy.
 
 ## Current Reference Docs

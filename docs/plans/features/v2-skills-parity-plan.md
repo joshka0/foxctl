@@ -130,7 +130,7 @@ Make the v2 tool executor actually run the newer read-only ACA/Obsidian surfaces
 
 ### Goal
 
-Align the “v2 skills” story with the newer retrieval stack instead of the older `internal/retrieval` mental model.
+Align the “v2 skills” story with the newer retrieval stack instead of the older `internal/intelligence/retrieval` mental model.
 
 ### Current Eval Findings
 
@@ -194,7 +194,7 @@ Current implementation direction:
 
 ### Checks
 
-- use `internal/searchquery`, `internal/searchindex`, `internal/retrieval/v2`, and `internal/codecontext` consistently
+- use `internal/intelligence/searchquery`, `internal/intelligence/searchindex`, `internal/intelligence/retrieval/v2`, and `internal/intelligence/codecontext` consistently
 - remove stale assumptions from docs/specs that still describe the old retrieval split
 - keep result contracts stable unless versioned explicitly
 

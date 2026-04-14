@@ -39,7 +39,7 @@ This plan organizes the v2 migration into **6 phases** spanning approximately 10
 
 **Files to create/modify:**
 ```
-internal/hooks/
+internal/runtime/hooks/
 ├── types.go           # hook.Input, hook.Output, hook.Action
 ├── dispatcher.go      # HookDispatcher interface + implementation
 ├── merge.go           # Deterministic merge rules
@@ -95,7 +95,7 @@ internal/hooks/
 
 **Files:**
 ```
-internal/hooks/
+internal/runtime/hooks/
 ├── adapters/
 │   ├── shell.go       # JSON stdin/stdout shell adapter
 │   ├── skill.go       # Skill envelope adapter
@@ -267,7 +267,7 @@ internal/supervisor/
 
 **Files:**
 ```
-internal/engine/
+internal/runtime/engine/
 ├── engine.go          # AgentEngine interface
 ├── context.go         # EngineContext (cancellable)
 ├── dspy_adapter.go    # DSPy wrapped as AgentEngine
@@ -334,7 +334,7 @@ type EngineOutput struct {
 
 **Files to modify:**
 ```
-internal/engine/
+internal/runtime/engine/
 ├── dspy_adapter.go    # Add hook dispatch points
 ├── hooks_integration.go
 └── hooks_integration_test.go
@@ -529,7 +529,7 @@ CREATE TABLE IF NOT EXISTS actor_memory_state (
 
 **Files:**
 ```
-internal/actor/memory/
+internal/runtime/actor/memory/
 ├── turns.go           # L0 turn persistence
 ├── summarize.go       # L0→L1 summarization
 ├── distill.go         # L1→L2 distillation
@@ -754,7 +754,7 @@ After full cutover:
 
 ### New Files to Create
 ```
-internal/hooks/
+internal/runtime/hooks/
 ├── types.go
 ├── dispatcher.go
 ├── merge.go
@@ -775,7 +775,7 @@ internal/supervisor/
 ├── router.go
 ├── preemption.go
 
-internal/engine/
+internal/runtime/engine/
 ├── engine.go
 ├── context.go
 ├── dspy_adapter.go
@@ -786,7 +786,7 @@ internal/sessions/
 ├── lineage.go
 ├── identity.go
 
-internal/actor/memory/
+internal/runtime/actor/memory/
 ├── turns.go
 ├── summarize.go
 ├── distill.go
@@ -806,6 +806,6 @@ internal/actor/memory/
 
 ## Next Steps
 
-1. **Start PR0**: Create `internal/hooks/types.go` with canonical types
+1. **Start PR0**: Create `internal/runtime/hooks/types.go` with canonical types
 2. **Review**: Get architecture review on hook types before implementation
 3. **Parallel work**: DB migration helpers can be written alongside PR0

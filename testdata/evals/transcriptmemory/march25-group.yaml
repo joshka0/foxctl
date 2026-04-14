@@ -19,7 +19,7 @@ cases:
           - Avoid brittle text-canonicalization path; prefer abstractable approaches.
     forbidden_claims:
       - text: The remaining import/bootstrap shell is out of the CLI now.
-      - text: I added import.go to /Users/joshka/repos/personal/agentctl/internal/transcriptpipeline/
+      - text: I added import.go to /Users/joshka/repos/personal/agentctl/internal/context/transcriptpipeline/
       - text: experiment loop is built and working
       - text: The smaller-grained classifier works better.
     expected_kinds:

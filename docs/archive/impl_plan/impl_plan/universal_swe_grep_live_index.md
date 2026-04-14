@@ -37,7 +37,7 @@ This plan builds on `universal_swe_grep_and_agents.md` to add:
 │  Agent/Hook/CLI: "How does authentication work?"                     │
 │         ↓                                                            │
 │  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  internal/retrieval - Candidate Generator                    │    │
+│  │  internal/intelligence/retrieval - Candidate Generator                    │    │
 │  │  ├── Symbol Index (BM25)                                    │    │
 │  │  ├── Semantic Index (Hybrid if embeddings available)        │    │
 │  │  └── Ripgrep Fallback (if too few candidates)               │    │
@@ -53,7 +53,7 @@ This plan builds on `universal_swe_grep_and_agents.md` to add:
 
 | Component | Type | Purpose |
 |-----------|------|---------|
-| `internal/retrieval/` | Go package | Shared candidate generation logic |
+| `internal/intelligence/retrieval/` | Go package | Shared candidate generation logic |
 | `code/incremental_index` | Exec skill | Index single file (symbols + optional embed) |
 | `live-index.sh` | Hook | Trigger indexing on edit |
 | `code/smart_search` | Exec skill | Standalone auto-candidate SWE grep |
@@ -65,12 +65,12 @@ This plan builds on `universal_swe_grep_and_agents.md` to add:
 
 **Goal**: Create reusable candidate generation logic for both skill and tool.
 
-**Location**: `internal/retrieval/`
+**Location**: `internal/intelligence/retrieval/`
 
 ### Files
 
 ```
-internal/retrieval/
+internal/intelligence/retrieval/
 ├── candidates.go      # CandidateGenerator implementation
 ├── candidates_test.go # Unit tests
 ├── merge.go           # Candidate merging and ranking
@@ -81,7 +81,7 @@ internal/retrieval/
 ### Key Types
 
 ```go
-// internal/retrieval/candidates.go
+// internal/intelligence/retrieval/candidates.go
 
 package retrieval
 
@@ -121,17 +121,17 @@ func (g *Generator) Generate(ctx context.Context, workspaceID, question string, 
 ### Dependencies
 
 - `internal/storage/memory` - Memory store access
-- `internal/indexing/symbol` - Symbol types
-- `internal/indexing/semantic` - Embedding provider interface
+- `internal/intelligence/indexing/symbol` - Symbol types
+- `internal/intelligence/indexing/semantic` - Embedding provider interface
 
 ### Tasks
 
-- [ ] Create `internal/retrieval/options.go` with Options type and defaults
-- [ ] Create `internal/retrieval/candidates.go` with Generator struct
+- [ ] Create `internal/intelligence/retrieval/options.go` with Options type and defaults
+- [ ] Create `internal/intelligence/retrieval/candidates.go` with Generator struct
 - [ ] Implement `searchSymbolIndex()` - reuse logic from `code_tools.go`
 - [ ] Implement `searchSemanticIndex()` - use SearchableStore
 - [ ] Implement `ripgrepFallback()` - simple keyword grep
-- [ ] Create `internal/retrieval/merge.go` with candidate merging/ranking
+- [ ] Create `internal/intelligence/retrieval/merge.go` with candidate merging/ranking
 - [ ] Write unit tests with mock stores
 - [ ] Integration test with real SQLite store
 
@@ -256,7 +256,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 - [ ] Create `skills/code_incremental_index/main.go` entry point
 - [ ] Implement `detectLanguage()` based on file extension
 - [ ] Implement `upsertSymbols()` - upsert to named memory, delete stale
-- [ ] Wire up existing Go extractor (`internal/indexing/symbol/extractor_go.go`)
+- [ ] Wire up existing Go extractor (`internal/intelligence/indexing/symbol/extractor_go.go`)
 - [ ] Add support for Python (tree-sitter or simple regex)
 - [ ] Add support for TypeScript/JavaScript (tree-sitter or simple regex)
 - [ ] Implement `queueEmbeddingJob()` stub (Phase 6)
@@ -458,7 +458,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
     }
     defer store.Close()
 
-    // 2. Create candidate generator (uses internal/retrieval)
+    // 2. Create candidate generator (uses internal/intelligence/retrieval)
     generator := retrieval.NewGenerator(store, embedProvider, workspaceRoot, logger)
 
     // 3. Generate candidates
@@ -519,7 +519,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 
 - [ ] Create `skills/code_universal_swe_grep/skill.yaml` manifest
 - [ ] Create `skills/code_universal_swe_grep/main.go` entry point
-- [ ] Import and use `internal/retrieval.Generator`
+- [ ] Import and use `internal/intelligence/retrieval.Generator`
 - [ ] Implement `invokeSweGrep()` - invoke existing skill
 - [ ] Handle case when no candidates found
 - [ ] Write integration tests
@@ -663,7 +663,7 @@ func (r *Registry) generateCandidates(ctx context.Context, workspaceID, question
 
 **Goal**: Replace regex-based extraction with proper AST parsing for Python and TypeScript.
 
-**Location**: `internal/indexing/symbol/`
+**Location**: `internal/intelligence/indexing/symbol/`
 
 ### Current State
 
@@ -694,7 +694,7 @@ Tree-sitter provides fast, accurate parsing with incremental updates - ideal for
 ### Files
 
 ```
-internal/indexing/symbol/
+internal/intelligence/indexing/symbol/
 ├── extractor.go          # Common interface
 ├── extractor_go.go       # Go AST (existing)
 ├── extractor_treesitter.go # Tree-sitter wrapper
@@ -708,7 +708,7 @@ internal/indexing/symbol/
 ### Implementation
 
 ```go
-// internal/indexing/symbol/extractor_treesitter.go
+// internal/intelligence/indexing/symbol/extractor_treesitter.go
 
 package symbol
 
@@ -836,7 +836,7 @@ func (e *TreeSitterExtractor) extractPythonSymbols(root *sitter.Node, path strin
 - [ ] Add tree-sitter dependency: `go get github.com/tree-sitter/go-tree-sitter`
 - [ ] Add Python grammar: `go get github.com/tree-sitter/tree-sitter-python/bindings/go`
 - [ ] Add TypeScript grammar: `go get github.com/tree-sitter/tree-sitter-typescript/bindings/go`
-- [ ] Create `internal/indexing/symbol/extractor_treesitter.go` base
+- [ ] Create `internal/intelligence/indexing/symbol/extractor_treesitter.go` base
 - [ ] Implement Python extractor with queries for functions, classes, decorators
 - [ ] Implement TypeScript extractor with queries for all symbol types
 - [ ] Handle method extraction (Parent.method format)
@@ -874,7 +874,7 @@ skills-build-cgo:
 
 **Goal**: Async embedding for edited files without blocking hooks.
 
-**Location**: `internal/indexing/embedding/queue.go`
+**Location**: `internal/intelligence/indexing/embedding/queue.go`
 
 ### Design
 
@@ -918,10 +918,10 @@ skills-build-cgo:
 ```
 Phase 1 ──────────────────────────────────────────────────────────────
    │
-   ├── internal/retrieval/options.go
-   ├── internal/retrieval/candidates.go
-   ├── internal/retrieval/merge.go
-   └── internal/retrieval/candidates_test.go
+   ├── internal/intelligence/retrieval/options.go
+   ├── internal/intelligence/retrieval/candidates.go
+   ├── internal/intelligence/retrieval/merge.go
+   └── internal/intelligence/retrieval/candidates_test.go
    │
 Phase 2 ──────────────────────────────────────────────────────────────
    │                                    (depends on Phase 1)
@@ -947,9 +947,9 @@ Phase 5 ────────────────────────
 Phase 6 ──────────────────────────────────────────────────────────────
    │                                    (enhances Phase 2)
    ├── go get tree-sitter dependencies
-   ├── internal/indexing/symbol/extractor_treesitter.go
-   ├── internal/indexing/symbol/extractor_python.go
-   ├── internal/indexing/symbol/extractor_typescript.go
+   ├── internal/intelligence/indexing/symbol/extractor_treesitter.go
+   ├── internal/intelligence/indexing/symbol/extractor_python.go
+   ├── internal/intelligence/indexing/symbol/extractor_typescript.go
    └── skills/code_incremental_index/main.go (update)
    │
 Phase 7 ──────────────────────────────────────────────────────────────
@@ -962,7 +962,7 @@ Phase 7 ────────────────────────
 
 ### Unit Tests
 
-- `internal/retrieval/` - Mock memory store, test scoring/merging
+- `internal/intelligence/retrieval/` - Mock memory store, test scoring/merging
 - `code/incremental_index` - Test with fixture Go/Python/TS files
 - `code/smart_search` - Mock retrieval, test flow
 

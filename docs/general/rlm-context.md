@@ -58,7 +58,7 @@ A SQLite-backed key-value store with three persistence scopes:
 - Semantic embedding support for vector search
 - CAS integration for large values (>64KB)
 
-### 2. RLM Tool Executor (`internal/engine/rlm_tools.go`)
+### 2. RLM Tool Executor (`internal/runtime/engine/rlm_tools.go`)
 
 Provides four tools that the LLM can call:
 
@@ -112,7 +112,7 @@ Adjust communication style based on feedback.
 }
 ```
 
-### 3. Evolving Personality (`internal/companion/evolving_personality.go`)
+### 3. Evolving Personality (`internal/context/companion/evolving_personality.go`)
 
 Dynamic personality adaptation with six adjustable dimensions:
 
@@ -237,7 +237,7 @@ CREATE INDEX idx_context_vars_expires ON context_vars(expires_at);
 
 ```go
 import (
-    "github.com/jkatigb/agentctl/internal/engine"
+    "github.com/jkatigb/agentctl/internal/runtime/engine"
     "github.com/jkatigb/agentctl/internal/storage/contextvar"
 )
 
@@ -258,7 +258,7 @@ tools := engine.NewCompositeToolExecutor(rlmExecutor, otherExecutor)
 ### Using Evolving Personality
 
 ```go
-import "github.com/jkatigb/agentctl/internal/companion"
+import "github.com/jkatigb/agentctl/internal/context/companion"
 
 ep := companion.NewEvolvingPersonality(contextvarStore, conversationID)
 
@@ -284,7 +284,7 @@ systemPrompt, _ := ep.BuildSystemPrompt(ctx, basePrompt)
 | ContextVar Store | SQLite | Persistence |
 | RLM Tools | `internal/storage/contextvar` | Variable storage |
 | Semantic Query | `internal/storage` (MemoryStore) | Memory search |
-| Semantic Query | `internal/indexing/semantic` (EmbedProvider) | Embeddings |
+| Semantic Query | `internal/intelligence/indexing/semantic` (EmbedProvider) | Embeddings |
 | Personality | `internal/storage/contextvar` | Profile storage |
 
 ## Environment Variables

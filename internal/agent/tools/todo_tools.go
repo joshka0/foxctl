@@ -9,7 +9,7 @@ import (
 	"time"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
-	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
+	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 	tooling "github.com/jkatigb/agentctl/internal/tooling"

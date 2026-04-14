@@ -81,7 +81,7 @@ func TestFallbackAdvisorOutput(t *testing.T) {
 
 func TestFallbackAdvisorOutputMatchesMethodByShortName(t *testing.T) {
 	candidates := []candidateBrief{
-		{File: "internal/actor/agent_actor.go", Symbol: "*AgentActor.handleAsk", Severity: "high", Detail: "detail"},
+		{File: "internal/runtime/actor/agent_actor.go", Symbol: "*AgentActor.handleAsk", Severity: "high", Detail: "detail"},
 	}
 	raw := "The best starting point is handleAsk in agent_actor.go because it combines multiple structural smells."
 	got, ok := fallbackAdvisorOutput(raw, candidates, 1)

@@ -67,7 +67,7 @@
 ┌─────────┴────────────────┴─────────────────────┴───────────────┐
 │                    cmd/agentctl_web                            │
 │  ┌────────────────────────────────────────────────────────────┐│
-│  │                  internal/web/                             ││
+│  │                  internal/interfaces/web/                             ││
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────────────────────┐ ││
 │  │  │ api/     │  │ consolews│  │ sse/                     │ ││
 │  │  │ handlers │  │ hub.go   │  │ hub.go                   │ ││
@@ -89,11 +89,11 @@
 
 ### Deliverables
 - `cmd/agentctl_web/main.go` - Server entrypoint
-- `internal/web/server.go` - HTTP handler wiring
-- `internal/web/options.go` - Configuration struct
-- `internal/web/sse/hub.go` - Global SSE pub/sub for invalidation
-- `internal/web/sse/handler.go` - `/api/events` SSE endpoint
-- `internal/web/api/status.go` - `/api/health` endpoint
+- `internal/interfaces/web/server.go` - HTTP handler wiring
+- `internal/interfaces/web/options.go` - Configuration struct
+- `internal/interfaces/web/sse/hub.go` - Global SSE pub/sub for invalidation
+- `internal/interfaces/web/sse/handler.go` - `/api/events` SSE endpoint
+- `internal/interfaces/web/api/status.go` - `/api/health` endpoint
 
 ### API Endpoints
 | Method | Path | Description |
@@ -122,9 +122,9 @@ type InvalidateEvent struct {
 **Estimated effort: 2-3 days**
 
 ### Deliverables
-- `internal/web/api/jobs.go` - Jobs list/detail handlers
-- `internal/web/api/cas.go` - CAS metadata/content handlers
-- `internal/web/services/jobs_service.go` - Storage wrapper
+- `internal/interfaces/web/api/jobs.go` - Jobs list/detail handlers
+- `internal/interfaces/web/api/cas.go` - CAS metadata/content handlers
+- `internal/interfaces/web/services/jobs_service.go` - Storage wrapper
 
 ### API Endpoints
 | Method | Path | Description |
@@ -157,10 +157,10 @@ Current GUI uses legacy states. Align to canonical:
 **Estimated effort: 2-3 days**
 
 ### Deliverables
-- `internal/web/api/mailbox.go` - BoardMessages endpoints
-- `internal/web/api/blackboard.go` - Blackboard CRUD
-- `internal/web/api/agents.go` - Agent list + daemon control
-- `internal/web/api/reservations.go` - File reservations
+- `internal/interfaces/web/api/mailbox.go` - BoardMessages endpoints
+- `internal/interfaces/web/api/blackboard.go` - Blackboard CRUD
+- `internal/interfaces/web/api/agents.go` - Agent list + daemon control
+- `internal/interfaces/web/api/reservations.go` - File reservations
 
 ### API Endpoints
 | Method | Path | Description |
@@ -191,7 +191,7 @@ Current GUI uses legacy states. Align to canonical:
 - `internal/skills/names.go` - Tool name normalization (`code/symbols` → `code_symbols`)
 - `internal/skills/schema.go` - `skill.Parameter` → JSON Schema conversion
 - `internal/skills/registry.go` - Discover skills, build tool defs, mapping
-- `internal/web/api/skills.go` - `/api/skills` and `/api/tools` endpoints
+- `internal/interfaces/web/api/skills.go` - `/api/skills` and `/api/tools` endpoints
 
 ### Tool Name Normalization
 OpenAI-compatible function names can't contain `/`:
@@ -231,10 +231,10 @@ Convert `skill.Manifest.Signature.Parameters` to standard JSON Schema:
 **Estimated effort: 2-3 days**
 
 ### Deliverables
-- `internal/consoleapp/skill_tool_executor.go` - Execute skills as tools
-- `internal/web/tools/registry.go` - Tool registry wrapper
-- `internal/web/tools/executor.go` - Tool execution implementation
-- `internal/web/tools/profiles.go` - Agent profile allowlists
+- `internal/console/app/skill_tool_executor.go` - Execute skills as tools
+- `internal/interfaces/web/tools/registry.go` - Tool registry wrapper
+- `internal/interfaces/web/tools/executor.go` - Tool execution implementation
+- `internal/interfaces/web/tools/profiles.go` - Agent profile allowlists
 
 ### Execution Paths
 1. **Daemon path (preferred):** `daemon.Client.Run(skill, input, workspace, ephemeral=true)`
@@ -259,10 +259,10 @@ Convert `skill.Manifest.Signature.Parameters` to standard JSON Schema:
 **Estimated effort: 3-4 days**
 
 ### Deliverables
-- `internal/web/consolews/hub.go` - WebSocket connection hub
-- `internal/web/consolews/session.go` - Console session state + ask loop
-- `internal/consoleapp/runner.go` - LLM engine + tool runner integration
-- `internal/consoleapp/stream.go` - Console payload streaming adapters
+- `internal/interfaces/web/consolews/hub.go` - WebSocket connection hub
+- `internal/interfaces/web/consolews/session.go` - Console session state + ask loop
+- `internal/console/app/runner.go` - LLM engine + tool runner integration
+- `internal/console/app/stream.go` - Console payload streaming adapters
 
 ### WebSocket Protocol
 ```typescript
@@ -325,7 +325,7 @@ type ReplyPayload = {
 **Estimated effort: 2-3 days**
 
 ### Deliverables
-- `internal/web/handlers/console.go` - REST endpoints for console
+- `internal/interfaces/web/handlers/console.go` - REST endpoints for console
 - Console SSE endpoint as WebSocket alternative
 
 ### API Endpoints
@@ -354,7 +354,7 @@ Support `?format=payload` query param:
 **Estimated effort: 2-3 days**
 
 ### Deliverables
-- Extend `internal/engine/llmchat_engine.go` with streaming support
+- Extend `internal/runtime/engine/llmchat_engine.go` with streaming support
 - `StreamConfig` with `OnDelta` callback
 
 ### Streaming Implementation
@@ -636,7 +636,7 @@ require (
 
 ```bash
 # Phase 1: Create skeleton
-mkdir -p cmd/agentctl_web internal/web/{api,sse,consolews,tools}
+mkdir -p cmd/agentctl_web internal/interfaces/web/{api,sse,consolews,tools}
 
 # Run Go server
 go run ./cmd/agentctl_web --addr=:8090 --dev-cors

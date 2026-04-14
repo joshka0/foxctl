@@ -38,12 +38,12 @@ Goal:
 
 Primary files:
 
-1. `internal/workflow/frontmatter/types.go` (new)
-2. `internal/workflow/frontmatter/parser.go` (new)
-3. `internal/workflow/frontmatter/parser_test.go` (new)
-4. `internal/workflow/frontmatter/validate.go` (new)
-5. `internal/workflow/frontmatter/validate_test.go` (new)
-6. `internal/workflow/loader.go` (wire coexistence rule only, no DAG behavior break)
+1. `internal/runtime/orchestration/workflow/frontmatter/types.go` (new)
+2. `internal/runtime/orchestration/workflow/frontmatter/parser.go` (new)
+3. `internal/runtime/orchestration/workflow/frontmatter/parser_test.go` (new)
+4. `internal/runtime/orchestration/workflow/frontmatter/validate.go` (new)
+5. `internal/runtime/orchestration/workflow/frontmatter/validate_test.go` (new)
+6. `internal/runtime/orchestration/workflow/loader.go` (wire coexistence rule only, no DAG behavior break)
 7. `docs/spec/v2_symphony_kanban_orchestration.md` (if minor clarifications needed)
 
 Acceptance:
@@ -54,7 +54,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/workflow/...`
+1. `go test ./internal/runtime/orchestration/workflow/...`
 
 ## PR-43: Core Orchestration Domain + Service Contract
 
@@ -145,8 +145,8 @@ Goal:
 
 Primary files:
 
-1. `internal/web/api/orchestration.go` (new handlers)
-2. `internal/web/server.go` (route registration)
+1. `internal/interfaces/web/api/orchestration.go` (new handlers)
+2. `internal/interfaces/web/server.go` (route registration)
 3. `internal/v2/services/orchestration_service.go` (command methods)
 4. `internal/v2/services/orchestration_service_test.go` (idempotency + error cases)
 
@@ -165,7 +165,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/web/... ./internal/v2/services`
+1. `go test ./internal/interfaces/web/... ./internal/v2/services`
 
 ## PR-47: GUI Kanban Surface (Runtime-First Integration)
 
@@ -201,7 +201,7 @@ Goal:
 
 Primary files:
 
-1. `internal/observability/sse_bridge.go` (orchestration operation pass-through + curated fields)
+1. `internal/runtime/observability/sse_bridge.go` (orchestration operation pass-through + curated fields)
 2. `docs/observability/wide-events.md` (orchestration event fields)
 3. `docs/spec/v2_symphony_kanban_orchestration.md` (final contract alignment)
 4. `docs/plans/v2-implementation-todo.md` (close checklist items)
@@ -248,7 +248,7 @@ Acceptance:
 Tests:
 
 1. `pnpm -C packages/gui-agent build`
-2. `go test ./cmd/agentctl/cmd ./internal/providers/llm ./internal/actor`
+2. `go test ./cmd/agentctl/cmd ./internal/providers/llm ./internal/runtime/actor`
 
 ## PR-50: Events Signal Quality + Session-Persisted Filters
 

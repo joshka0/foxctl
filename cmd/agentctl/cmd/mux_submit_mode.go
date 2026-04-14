@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
 )
 
 // parseMuxSubmitModeString maps CLI values to tmuxbridge/zellijbridge submit modes.

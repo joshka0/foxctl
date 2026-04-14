@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/spf13/cobra"

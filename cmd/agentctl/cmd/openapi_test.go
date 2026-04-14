@@ -34,7 +34,7 @@ func TestOpenAPIImportCommandStoresSpec(t *testing.T) {
 		}
 	})
 
-	specPath := filepath.Join("..", "..", "..", "internal", "openapi", "loader", "testdata", "valid-3.0.json")
+	specPath := filepath.Join("..", "..", "..", "internal", "interfaces", "openapi", "loader", "testdata", "valid-3.0.json")
 	cmd := newOpenAPICommand()
 	cmd.SetContext(config.WithContext(context.Background(), cfg))
 	stdout := &bytes.Buffer{}

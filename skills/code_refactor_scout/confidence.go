@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	refstatus "github.com/jkatigb/agentctl/internal/refactor/status"
+	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
 )
 
 func applyConfidenceScores(findings []finding, mode refstatus.Mode) []finding {

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/evals/retrievaleval"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/tooling/evals/retrievaleval"
 )
 
 func TestContextRepoIndexSearchInspectSuite_PersistsRun(t *testing.T) {

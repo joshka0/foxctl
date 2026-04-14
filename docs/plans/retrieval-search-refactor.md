@@ -4,12 +4,12 @@
 
 ## Problem Statement
 
-> Status note (2026-03-07): the main code-search migration described below is now largely implemented on this branch. The historical references to `internal/retrieval/candidates.go` and the legacy generator path are retained here for change history, not as the current runtime architecture.
+> Status note (2026-03-07): the main code-search migration described below is now largely implemented on this branch. The historical references to `internal/intelligence/retrieval/candidates.go` and the legacy generator path are retained here for change history, not as the current runtime architecture.
 
 Code search is currently spread across several overlapping paths:
 
 - `internal/storage/memory/search.go` and `internal/storage/dbdriver/search.go` mix backend recall with hybrid ranking logic.
-- `internal/retrieval/candidates.go` merges symbol, semantic, and ripgrep candidates after collapsing too early to file-path-oriented candidates.
+- `internal/intelligence/retrieval/candidates.go` merges symbol, semantic, and ripgrep candidates after collapsing too early to file-path-oriented candidates.
 - `skills/code_smart_search/main.go` generates candidates, then shells out to `code/snippet_extract` as a second-stage pipeline.
 - `skills/code_snippet_extract/main.go` owns its own extraction, fallback, rendering, and related-session logic.
 - `skills/code_semantic_search/main.go` still carries separate tree-building and snippet-reading logic, including direct file reads.
@@ -48,9 +48,9 @@ This refactor covers **code retrieval only**:
 
 ### Current entrypoints
 
-- Retrieval candidates are produced by `internal/retrieval/candidates.go`.
-- Shared code-context types and rendering already exist in `internal/codecontext/types.go`, `internal/codecontext/collect.go`, and `internal/codecontext/render.go`.
-- Safe file reading already exists in `internal/codecontext/files/reader.go`.
+- Retrieval candidates are produced by `internal/intelligence/retrieval/candidates.go`.
+- Shared code-context types and rendering already exist in `internal/intelligence/codecontext/types.go`, `internal/intelligence/codecontext/collect.go`, and `internal/intelligence/codecontext/render.go`.
+- Safe file reading already exists in `internal/intelligence/codecontext/files/reader.go`.
 - `skills/code_smart_search/main.go` still treats retrieval as candidate generation plus a second skill invocation.
 - `skills/code_snippet_extract/main.go` still owns code extraction logic directly.
 - `skills/code_semantic_search/main.go` still has a separate tree path and direct snippet extraction path.
@@ -66,7 +66,7 @@ This refactor covers **code retrieval only**:
    - Multiple relevant symbols in the same file cannot survive cleanly through the pipeline.
 
 3. Duplicate snippet extraction logic
-   - `internal/codecontext` exists, but `skills/code_snippet_extract/main.go` still implements extraction/fallback/rendering itself.
+   - `internal/intelligence/codecontext` exists, but `skills/code_snippet_extract/main.go` still implements extraction/fallback/rendering itself.
 
 4. Ambiguous vector score semantics
    - Distance and similarity handling are not explicit enough at backend boundaries.
@@ -91,16 +91,16 @@ These rules are non-negotiable for the new design:
 ## Target Architecture
 
 ```text
-internal/searchquery/
+internal/intelligence/searchquery/
   plan.go           // shared terms/identifiers/phrases/path-hints planner
 
-internal/searchindex/
+internal/intelligence/searchindex/
   model.go          // typed retrieval document model
   store.go          // lexical/vector recall API
   sql_store.go      // initial SQL-backed implementation
   build_code.go     // bootstrap docs from current symbol/file-summary data
 
-internal/retrieval/
+internal/intelligence/retrieval/
   engine.go         // orchestration
   sources_*.go      // lexical/vector/ripgrep recall sources
   fuse.go           // RRF + feature reranking
@@ -108,7 +108,7 @@ internal/retrieval/
   tree.go           // file hits -> tree projection
   legacy_adapter.go // temporary bridge for Generator callers
 
-internal/codecontext/
+internal/intelligence/codecontext/
   collect.go        // anchor-aware evidence collection
   proposals.go      // anchor/query-based snippet proposals
   scoring.go        // local snippet scoring and dedupe
@@ -187,16 +187,16 @@ Acceptance criteria:
 - normalization is explicit in code and tests
 - no new retrieval logic is added in storage after this phase
 
-### Phase 1: add `internal/searchindex`
+### Phase 1: add `internal/intelligence/searchindex`
 
 **Goal:** Create a dedicated retrieval document index beside the legacy storage paths.
 
 Files to add:
 
-- `internal/searchindex/model.go`
-- `internal/searchindex/store.go`
-- `internal/searchindex/sql_store.go`
-- `internal/searchindex/build_code.go`
+- `internal/intelligence/searchindex/model.go`
+- `internal/intelligence/searchindex/store.go`
+- `internal/intelligence/searchindex/sql_store.go`
+- `internal/intelligence/searchindex/build_code.go`
 
 Changes:
 
@@ -211,13 +211,13 @@ Acceptance criteria:
 - lexical recall works without the new retrieval engine
 - vector recall can be enabled without mixing in fusion logic
 
-### Phase 2: add `internal/searchquery`
+### Phase 2: add `internal/intelligence/searchquery`
 
 **Goal:** Share one query-planning path between retrieval and extraction before the codecontext rewrite lands.
 
 Files to add:
 
-- `internal/searchquery/plan.go`
+- `internal/intelligence/searchquery/plan.go`
 
 Changes:
 
@@ -237,14 +237,14 @@ Acceptance criteria:
 
 Files to add/reshape:
 
-- `internal/retrieval/engine.go`
-- `internal/retrieval/sources_symbols.go`
-- `internal/retrieval/sources_files.go`
-- `internal/retrieval/sources_ripgrep.go`
-- `internal/retrieval/fuse.go`
-- `internal/retrieval/group.go`
-- `internal/retrieval/tree.go`
-- optional `internal/retrieval/legacy_adapter.go`
+- `internal/intelligence/retrieval/engine.go`
+- `internal/intelligence/retrieval/sources_symbols.go`
+- `internal/intelligence/retrieval/sources_files.go`
+- `internal/intelligence/retrieval/sources_ripgrep.go`
+- `internal/intelligence/retrieval/fuse.go`
+- `internal/intelligence/retrieval/group.go`
+- `internal/intelligence/retrieval/tree.go`
+- optional `internal/intelligence/retrieval/legacy_adapter.go`
 
 Changes:
 
@@ -267,8 +267,8 @@ Acceptance criteria:
 
 Files:
 
-- `internal/retrieval/candidates.go`
-- `internal/retrieval/options.go`
+- `internal/intelligence/retrieval/candidates.go`
+- `internal/intelligence/retrieval/options.go`
 
 Changes:
 
@@ -281,18 +281,18 @@ Acceptance criteria:
 - existing callers of `retrieval.Generator` continue to compile
 - `code/smart_search` can move to retrieval v2 without a flag day
 
-### Phase 5: unify snippet extraction under `internal/codecontext`
+### Phase 5: unify snippet extraction under `internal/intelligence/codecontext`
 
-**Goal:** Make `internal/codecontext` the only owner of code evidence extraction.
+**Goal:** Make `internal/intelligence/codecontext` the only owner of code evidence extraction.
 
 Files to add/modify:
 
-- `internal/codecontext/types.go`
-- `internal/codecontext/collect.go`
-- `internal/codecontext/proposals.go`
-- `internal/codecontext/scoring.go`
-- `internal/codecontext/output.go`
-- `internal/codecontext/adapters/retrieval.go`
+- `internal/intelligence/codecontext/types.go`
+- `internal/intelligence/codecontext/collect.go`
+- `internal/intelligence/codecontext/proposals.go`
+- `internal/intelligence/codecontext/scoring.go`
+- `internal/intelligence/codecontext/output.go`
+- `internal/intelligence/codecontext/adapters/retrieval.go`
 
 Changes:
 
@@ -344,7 +344,7 @@ Acceptance criteria:
 
 Candidates for removal after verification:
 
-- legacy merge helpers in `internal/retrieval`
+- legacy merge helpers in `internal/intelligence/retrieval`
 - old symbol/semantic-specific ranking paths that the new engine replaces
 - duplicated extraction logic in `skills/code_snippet_extract/main.go`
 
@@ -357,19 +357,19 @@ These are good `-spark` slices after the plan is approved:
    - objective: explicit metric contract and correct ordering
 
 2. Searchindex skeleton
-   - write scope: `internal/searchindex/*`
+   - write scope: `internal/intelligence/searchindex/*`
    - objective: model, store interface, SQL store, bootstrap builder
 
 3. Shared query planner
-   - write scope: `internal/searchquery/*`
+   - write scope: `internal/intelligence/searchquery/*`
    - objective: one parsed query model reused by retrieval and codecontext
 
 4. Retrieval v2 skeleton
-   - write scope: `internal/retrieval/{engine.go,sources_*.go,fuse.go,group.go,tree.go}`
+   - write scope: `internal/intelligence/retrieval/{engine.go,sources_*.go,fuse.go,group.go,tree.go}`
    - objective: compile-ready engine with tests
 
 5. Codecontext extraction consolidation
-   - write scope: `internal/codecontext/{collect.go,proposals.go,scoring.go,output.go,adapters/*}`
+   - write scope: `internal/intelligence/codecontext/{collect.go,proposals.go,scoring.go,output.go,adapters/*}`
    - objective: `CollectEvidence` and anchor-aware extraction path
 
 6. Skill cutover wrappers
@@ -417,12 +417,12 @@ Add at least one golden path covering:
 ## Definition of Done
 
 - [ ] Storage/vector semantics are explicit and tested
-- [ ] `internal/searchindex` exists and indexes code docs
-- [ ] `internal/searchquery` exists and is shared by retrieval and codecontext
+- [ ] `internal/intelligence/searchindex` exists and indexes code docs
+- [ ] `internal/intelligence/searchquery` exists and is shared by retrieval and codecontext
 - [ ] retrieval v2 exists and produces ranked node hits and grouped file hits
 - [ ] file grouping preserves multiple anchors
 - [ ] tree mode is a pure projection over file hits
-- [ ] `internal/codecontext` owns code evidence extraction
+- [ ] `internal/intelligence/codecontext` owns code evidence extraction
 - [ ] `code/smart_search` uses retrieval v2 + codecontext
 - [ ] `code/smart_search` no longer shells out to `code/snippet_extract`
 - [ ] `code/snippet_extract` is a compatibility wrapper

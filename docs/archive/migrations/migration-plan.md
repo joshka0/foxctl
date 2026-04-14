@@ -67,7 +67,7 @@ These keep you safe while reshaping the system:
 
 ### Phase 6 — Pull the “higher layers” into alignment
 
-* Unified semantic search refactor (`internal/retrieval`)
+* Unified semantic search refactor (`internal/intelligence/retrieval`)
 * Unified dependency graph + pagerank integration
 * Unified summarization & compaction (sessions/tasks/memories/digests)
 
@@ -284,7 +284,7 @@ Apply `unified-session-lineage.md`:
 
 **Migration steps**
 
-1. **Add `internal/actor/memory/` implementation**
+1. **Add `internal/runtime/actor/memory/` implementation**
 
    * As per `actor-progressive-memory.md`
 2. **Add `actor_memory_state` table to sessions.db**
@@ -315,7 +315,7 @@ Once the runtime spine is stable, pull the rest into alignment.
 
 #### 6.1 Unified semantic search (Phase 3 plan)
 
-* Refactor `code/semantic_search` to use `internal/retrieval.Generator`
+* Refactor `code/semantic_search` to use `internal/intelligence/retrieval.Generator`
 * Keep sessions search separate but fuse with RRF
 * Introduce canonical IDs (`symbol:...`, `session:...`, etc.)
 
@@ -391,7 +391,7 @@ Once the runtime spine is stable, pull the rest into alignment.
 
 ### Step 8 — Align search + graph + summaries
 
-* [ ] Refactor semantic_search to `internal/retrieval`
+* [ ] Refactor semantic_search to `internal/intelligence/retrieval`
 * [ ] Introduce graph tables + pagerank
 * [ ] Add task/memory compaction summaries + daily digest
 

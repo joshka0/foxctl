@@ -234,7 +234,7 @@ Definition of done:
 1. `docs/plans/v2-implementation-todo.md`
 2. `docs/general/companion-memory.md`
 3. `docs/observability/wide-events.md`
-4. `internal/observability/sse_bridge.go`
+4. `internal/runtime/observability/sse_bridge.go`
 5. `packages/gui-agent/src/App.tsx`
 6. `packages/gui-agent/src/stores/viewStore.ts`
 7. `packages/gui-agent/src/components/layout/AgentSidebar.tsx`

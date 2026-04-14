@@ -9,7 +9,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
-	"github.com/jkatigb/agentctl/internal/companion"
+	"github.com/jkatigb/agentctl/internal/context/companion"
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"

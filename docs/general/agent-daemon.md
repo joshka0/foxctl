@@ -154,7 +154,7 @@ Task continuity surfaces:
 | CLI agent command routing | `cmd/agentctl/cmd/agent.go` |
 | V2 command services | `internal/v2/services/` |
 | Jido bridge | `internal/v2/adapters/jido/` |
-| Companion memory service | `internal/companion/` |
+| Companion memory service | `internal/context/companion/` |
 
 ## Related Docs
 

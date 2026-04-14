@@ -70,7 +70,7 @@ same scope resolver.
 
 Recommended extracted package:
 
-- `internal/refactor/scope`
+- `internal/intelligence/refactor/scope`
 
 Shared input:
 
@@ -146,7 +146,7 @@ and why.
 
 Recommended internal package:
 
-- `internal/refactor/status`
+- `internal/intelligence/refactor/status`
 
 ### Mode Semantics
 
@@ -297,9 +297,9 @@ Freeze a refactor scope into a deterministic snapshot that can later support:
 
 Recommended internal packages:
 
-- `internal/refactor/status`
-- `internal/refactor/snapshot`
-- `internal/refactor/snapshotstore`
+- `internal/intelligence/refactor/status`
+- `internal/intelligence/refactor/snapshot`
+- `internal/intelligence/refactor/snapshotstore`
 
 ### Snapshot ID
 
@@ -386,17 +386,17 @@ Recommended artifact shape:
   },
   "files": [
     {
-      "path": "internal/indexing/repoindex/builder.go",
+      "path": "internal/intelligence/indexing/repoindex/builder.go",
       "language": "go",
       "line_count": 910,
       "hash": "sha256:...",
       "symbol_count": 21,
-      "package": "go:github.com/jkatigb/agentctl/internal/indexing/repoindex"
+      "package": "go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
     }
   ],
   "symbols": [
     {
-      "path": "internal/indexing/repoindex/builder.go",
+      "path": "internal/intelligence/indexing/repoindex/builder.go",
       "symbol_id": "rk::sym:...",
       "name": "Builder.Build",
       "kind": "function",

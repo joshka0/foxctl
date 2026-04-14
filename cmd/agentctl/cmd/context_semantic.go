@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	sourceimport "github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
 )

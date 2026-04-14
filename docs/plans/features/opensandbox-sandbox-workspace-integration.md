@@ -35,10 +35,10 @@ Current limitations:
 
 Relevant code:
 
-- [internal/web/api/agents.go](../../../internal/web/api/agents.go)
-- [internal/daemon/service.go](../../../internal/daemon/service.go)
+- [internal/interfaces/web/api/agents.go](../../../internal/interfaces/web/api/agents.go)
+- [internal/runtime/daemon/service.go](../../../internal/runtime/daemon/service.go)
 - [internal/agent/runtime/runtime.go](../../../internal/agent/runtime/runtime.go)
-- [internal/web/api/workspaces.go](../../../internal/web/api/workspaces.go)
+- [internal/interfaces/web/api/workspaces.go](../../../internal/interfaces/web/api/workspaces.go)
 
 ## Why OpenSandbox Fits
 
@@ -214,7 +214,7 @@ New agent metadata fields:
 
 Add a new internal adapter package, for example:
 
-- `internal/sandbox/`
+- `internal/runtime/sandbox/`
 
 With responsibilities:
 
@@ -325,7 +325,7 @@ Success:
 
 Implement:
 
-1. `internal/sandbox/opensandbox` client
+1. `internal/runtime/sandbox/opensandbox` client
 2. sandbox-backed spawn mode for one agent role
 3. shallow clone bootstrap command
 4. `WorkspaceRoot` plumbing from sandbox path into runtime

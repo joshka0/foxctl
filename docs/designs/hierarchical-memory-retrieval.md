@@ -7,7 +7,7 @@
 ## Scope Note (V2-first)
 
 This design targets the v2 runtime context-builder/event-pipeline path.
-Phase 1/2 items that touch current `internal/engine/rlm_tools.go` are
+Phase 1/2 items that touch current `internal/runtime/engine/rlm_tools.go` are
 transitional options; the canonical target lives under `internal/v2/runtime/*`.
 
 Historical note: sections below reference earlier transitional storage terms
@@ -101,7 +101,7 @@ All date bucketing and day-boundary logic uses **UTC**:
 
 ### Phase 1: Fix `executeSemanticQuery` (Quick Win)
 
-**Files:** `internal/engine/rlm_tools.go`
+**Files:** `internal/runtime/engine/rlm_tools.go`
 
 Tighten the existing semantic query path without adding new tools:
 
@@ -132,7 +132,7 @@ Tighten the existing semantic query path without adding new tools:
 
 ### Phase 2: Add `rlm_memory_retrieve` Tool
 
-**Files:** `internal/engine/rlm_tools.go`
+**Files:** `internal/runtime/engine/rlm_tools.go`
 
 New purpose-built tool for hierarchical retrieval:
 
@@ -210,10 +210,10 @@ ToolDef{
 ### Phase 3: Add `rlm_memory_expand` Tool (L1→L0 Drill-Down)
 
 **Files:**
-- `internal/engine/rlm_tools.go` - tool implementation
-- `internal/engine/interfaces.go` (new) - `ConversationTurnReader` interface
-- `internal/companion/memory_reader.go` (new) - adapter implementation
-- `internal/companion/service.go` - wire adapter into RLMToolExecutor
+- `internal/runtime/engine/rlm_tools.go` - tool implementation
+- `internal/runtime/engine/interfaces.go` (new) - `ConversationTurnReader` interface
+- `internal/context/companion/memory_reader.go` (new) - adapter implementation
+- `internal/context/companion/service.go` - wire adapter into RLMToolExecutor
 
 #### Interface (in engine/, cycle-safe)
 
@@ -296,7 +296,7 @@ func (e *RLMToolExecutor) SetTurnReader(reader ConversationTurnReader) {
 
 ### Phase 4: Strengthen Autonomous Instructions
 
-**File:** `internal/companion/service.go` (`addAutonomousInstructions`)
+**File:** `internal/context/companion/service.go` (`addAutonomousInstructions`)
 
 Replace the generic "Use available tools" with specific guidance:
 
@@ -471,10 +471,10 @@ Each phase is independently shippable. Phase 1 is a clear improvement with no do
 
 | File | Phase | Change |
 |------|-------|--------|
-| `internal/engine/rlm_tools.go` | 1,2,3 | Fix semantic query; add 2 new tools + execute handlers |
-| `internal/engine/interfaces.go` | 3 | New: `ConversationTurnReader` interface + `ConversationTurn` struct |
-| `internal/companion/memory_reader.go` | 3 | New: adapter implementing `ConversationTurnReader` via SQL |
-| `internal/companion/service.go` | 3,4 | Wire turn reader; update autonomous instructions |
-| `internal/engine/rlm_tools_test.go` | 1,2,3 | Tests for all phases |
+| `internal/runtime/engine/rlm_tools.go` | 1,2,3 | Fix semantic query; add 2 new tools + execute handlers |
+| `internal/runtime/engine/interfaces.go` | 3 | New: `ConversationTurnReader` interface + `ConversationTurn` struct |
+| `internal/context/companion/memory_reader.go` | 3 | New: adapter implementing `ConversationTurnReader` via SQL |
+| `internal/context/companion/service.go` | 3,4 | Wire turn reader; update autonomous instructions |
+| `internal/runtime/engine/rlm_tools_test.go` | 1,2,3 | Tests for all phases |
 | `internal/v2/runtime/enrichers/*` | 5 | Event-driven enrichment workers (bucket/artifact producers) |
 | `internal/v2/runtime/contextbuilder/*` | 5 | Context builder + temporal view selection + refs |

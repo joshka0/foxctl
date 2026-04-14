@@ -788,7 +788,7 @@ Environment overrides:
 
 ### Ranking, fusion, and deduplication
 
-- Use shared `internal/retrieval` generators for symbols/semantic/ripgrep
+- Use shared `internal/intelligence/retrieval` generators for symbols/semantic/ripgrep
   candidates; `code/semantic_search` layers additional session/memory searches
   on top.
 - Stable IDs per source:

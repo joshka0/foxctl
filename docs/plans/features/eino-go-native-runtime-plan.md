@@ -50,7 +50,7 @@ runtime ownership back into Go so Jido becomes optional in fact, not just in doc
 | Seam | Current state | Why it matters |
 |------|---------------|----------------|
 | `internal/v2/services.RuntimeSpawner` | Already an interface boundary | Correct starting point for Go-native child spawn |
-| `internal/engine.AgentEngine` | Stable classic engine contract | Good place for later engine pluggability |
+| `internal/runtime/engine.AgentEngine` | Stable classic engine contract | Good place for later engine pluggability |
 | `internal/v2/runtime/runner.Model` | Stable v2 model contract | Good place for a later v2 engine adapter |
 | Tool execution | Already routed through Go executors | Prevents tool semantics from fragmenting across runtimes |
 
@@ -137,8 +137,8 @@ Deliverables:
 
 Files likely touched:
 
-- `internal/web/api/orchestration.go`
-- `internal/web/api/agents.go`
+- `internal/interfaces/web/api/orchestration.go`
+- `internal/interfaces/web/api/agents.go`
 - `internal/v2/runtime/orchestration/*`
 - new Go reconciler adapter package
 

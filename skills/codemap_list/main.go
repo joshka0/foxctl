@@ -10,7 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"

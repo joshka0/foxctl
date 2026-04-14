@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -46,6 +47,42 @@ func Open(ctx context.Context, root string) (*Store, error) {
 		path:  filepath.Join(root, "transcript_cache.db"),
 		close: closeFn,
 	}, nil
+}
+
+// OpenShared opens the shared transcript cache under the configured storage root,
+// falling back to the historical Codex cache path when needed.
+func OpenShared(ctx context.Context, storageRoot string) (*Store, string, error) {
+	homeDir := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		homeDir = home
+	}
+	candidates := SharedRoots(storageRoot, homeDir)
+
+	var errs []string
+	for _, root := range candidates {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", root, err))
+			continue
+		}
+		store, err := Open(ctx, root)
+		if err == nil {
+			return store, root, nil
+		}
+		errs = append(errs, fmt.Sprintf("%s: %v", root, err))
+	}
+	return nil, "", fmt.Errorf("open transcript cache store: %s", strings.Join(errs, " | "))
+}
+
+// SharedRoots returns the preferred transcript-cache roots in priority order.
+func SharedRoots(storageRoot, homeDir string) []string {
+	candidates := make([]string, 0, 2)
+	if root := strings.TrimSpace(storageRoot); root != "" {
+		candidates = append(candidates, root)
+	}
+	if home := strings.TrimSpace(homeDir); home != "" {
+		candidates = append(candidates, filepath.Join(home, ".codex", "memories", "agentctl-transcript-cache"))
+	}
+	return candidates
 }
 
 // Close releases resources.

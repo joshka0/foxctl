@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/runtime/hooks"
 )
 
 // WorkspaceID returns the preferred workspace ID for a path.

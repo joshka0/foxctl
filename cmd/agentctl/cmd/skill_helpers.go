@@ -12,10 +12,10 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/execution/runner"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runservice"
+	"github.com/jkatigb/agentctl/internal/runtime/execution/runner"
+	"github.com/jkatigb/agentctl/internal/runtime/runservice"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/spf13/cobra"
 )

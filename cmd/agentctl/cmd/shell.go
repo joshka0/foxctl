@@ -17,7 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/shellreduce"
+	"github.com/jkatigb/agentctl/internal/tooling/shellreduce"
 	"github.com/spf13/cobra"
 )
 
@@ -578,7 +578,7 @@ func shellReportPresetSpecs(preset, workspace, transcriptSource string, transcri
 			specs = append(specs, shellReportSpec{Operation: "pytest", Command: "python -m pytest .", Weight: 4, Source: "preset:typical-bash"})
 		}
 		if profile.HasGo {
-			specs = append(specs, shellReportSpec{Operation: "go test", Command: "go test ./internal/shellreduce", Weight: 3, Source: "preset:typical-bash"})
+			specs = append(specs, shellReportSpec{Operation: "go test", Command: "go test ./internal/tooling/shellreduce", Weight: 3, Source: "preset:typical-bash"})
 		}
 		specs = append(specs, shellReportSpec{Operation: "docker ps", Command: "docker ps", Weight: 3, Source: "preset:typical-bash", Optional: true})
 		return specs, nil
@@ -669,7 +669,7 @@ func transcriptDerivedReportSpecs(workspace string, acc *transcriptAccumulator) 
 	add("head", choose("head", "head -n 20 go.mod"), weights["head"], !profile.HasGo, "")
 	add("tail", choose("tail", "tail -n 20 go.mod"), weights["tail"], !profile.HasGo, "")
 	add("wc", choose("wc", "wc -l go.mod"), weights["wc"], !profile.HasGo, "")
-	add("go test", choose("go test", "go test ./internal/shellreduce"), weights["go test"], !profile.HasGo, "")
+	add("go test", choose("go test", "go test ./internal/tooling/shellreduce"), weights["go test"], !profile.HasGo, "")
 	if profile.HasNode {
 		add("node test", choose("node test", "npm test --prefix packages/gui-agent"), weights["node test"], false, "")
 	} else {

@@ -1,6 +1,6 @@
 # Semantic Search Phase 3: Retrieval Integration Plan
 
-> Refactor `code/semantic_search` to use `internal/retrieval` infrastructure instead of ad-hoc search.
+> Refactor `code/semantic_search` to use `internal/intelligence/retrieval` infrastructure instead of ad-hoc search.
 
 ## Current State (Phase 2)
 
@@ -12,7 +12,7 @@ The skill implements custom symbol/session search with:
 
 ## Target State (Phase 3)
 
-Leverage existing `internal/retrieval` infrastructure:
+Leverage existing `internal/intelligence/retrieval` infrastructure:
 - `Generator.Generate()` for symbols + semantic + ripgrep
 - `SearchableStore.SearchHybrid/SearchBM25` for FTS5 + vector
 - Built-in RRF fusion and fallbacks
@@ -180,7 +180,7 @@ defer cancel()
 | `skills/code_semantic_search/main.go` | Add ID normalization |
 | `skills/code_semantic_search/main.go` | Provider-agnostic embedding creation |
 | `skills/code_semantic_search/skill.yaml` | Update help text for BM25 fallback |
-| `internal/retrieval/candidates.go` | (optional) Add session source |
+| `internal/intelligence/retrieval/candidates.go` | (optional) Add session source |
 
 ---
 
@@ -205,7 +205,7 @@ defer cancel()
 ## Dependencies
 
 ```
-internal/retrieval
+internal/intelligence/retrieval
 ├── Generator
 ├── Candidate
 ├── GenerateResult
@@ -216,7 +216,7 @@ internal/storage/memory
 ├── SearchableStore
 └── SearchResult
 
-internal/indexing/semantic
+internal/intelligence/indexing/semantic
 └── EmbeddingProvider (interface)
 ```
 

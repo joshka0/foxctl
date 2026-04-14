@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"

@@ -3,7 +3,7 @@ package cmd
 import (
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/contextplane/taskhistory"
+	"github.com/jkatigb/agentctl/internal/context/contextplane/taskhistory"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/spf13/cobra"
 )

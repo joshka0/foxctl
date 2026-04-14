@@ -11,13 +11,13 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/prompts"
-	"github.com/jkatigb/agentctl/internal/agentpane"
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
+	"github.com/jkatigb/agentctl/internal/runtime/terminal/zellijbridge"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
-	"github.com/jkatigb/agentctl/internal/tmuxbridge"
-	"github.com/jkatigb/agentctl/internal/zellijbridge"
 	"github.com/spf13/cobra"
 )
 
@@ -70,6 +70,7 @@ func newTmuxRemindCommand() *cobra.Command {
 		replyExpected bool
 		ackRequired   bool
 		interrupt     bool
+		passive       bool
 	)
 
 	cmd := &cobra.Command{
@@ -93,7 +94,7 @@ func newTmuxRemindCommand() *cobra.Command {
 				}
 				resolvedRecipient = identity.Sender
 			}
-			return runRoomRemindAdd(cmd, workspace, sender, roomID, resolvedRecipient, subject, body, "", "", "", every, maxIterations, ackRequired, replyExpected, interrupt, false)
+			return runRoomRemindAdd(cmd, workspace, sender, roomID, resolvedRecipient, subject, body, "", "", "", every, maxIterations, ackRequired, replyExpected, interrupt, passive, false)
 		},
 	}
 
@@ -106,6 +107,7 @@ func newTmuxRemindCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&replyExpected, "reply-expected", true, "Require a reply to stop reminders")
 	cmd.Flags().BoolVar(&ackRequired, "ack-required", false, "Require an ack to stop reminders")
 	cmd.Flags().BoolVar(&interrupt, "interrupt", false, "Interrupt the target pane for reminder follow-ups")
+	cmd.Flags().BoolVar(&passive, "passive", false, "Relay reminders durably without creating ack/reply inbox debt")
 	return cmd
 }
 
@@ -869,7 +871,7 @@ func detectMuxRoomReplyConfirmation(summary agent.RoomSummary, messages []agent.
 	if root == nil {
 		return "", false
 	}
-	entries := buildRoomInboxEntries(actorID, messages, "all", false)
+	entries := buildRoomInboxEntries(actorID, messages, "all", false, nil)
 	inboxCleared := true
 	for _, entry := range entries {
 		if strings.TrimSpace(entry.ID) == strings.TrimSpace(replyTo) {

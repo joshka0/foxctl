@@ -11,7 +11,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 

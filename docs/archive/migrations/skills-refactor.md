@@ -189,7 +189,7 @@ You have two variants:
 
 **Refactor direction:**
 
-* Keep both, but make them share one internal library `internal/hooks/mail/`:
+* Keep both, but make them share one internal library `internal/runtime/hooks/mail/`:
 
   * `FetchInbox(workspace, actorID, taskID, mode)`
 * Ensure both can be called from dispatcher with consistent behavior:

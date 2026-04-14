@@ -7,7 +7,7 @@ Machine-friendly reference for skill contracts and execution.
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical packages | `internal/domain/skill`, `internal/execution/*`, `internal/runservice` |
+| Canonical packages | `internal/domain/skill`, `internal/runtime/execution/*`, `internal/runtime/runservice` |
 | Last reviewed | 2026-02-17 |
 
 ## Runtime Flow

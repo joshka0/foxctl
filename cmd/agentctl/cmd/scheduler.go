@@ -5,8 +5,8 @@ import (
 	"os"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/execution/scheduler"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/runtime/execution/scheduler"
 	"github.com/spf13/cobra"
 )
 

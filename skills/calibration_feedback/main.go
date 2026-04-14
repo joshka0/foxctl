@@ -12,7 +12,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/calibration"
+	"github.com/jkatigb/agentctl/internal/context/calibration"
 )
 
 const command = "calibration/feedback"

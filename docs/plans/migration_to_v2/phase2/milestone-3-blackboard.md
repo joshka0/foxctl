@@ -147,8 +147,8 @@ Compact transcript (bounded), with paging token. Returns **text**, not raw DB ro
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| Overseer scorer | `internal/analysis/overseer/scorer.go` | ✅ Done |
-| Task graph analysis | `internal/analysis/tasksgraph/` | ✅ Done |
+| Overseer scorer | `internal/intelligence/analysis/overseer/scorer.go` | ✅ Done |
+| Task graph analysis | `internal/intelligence/analysis/tasksgraph/` | ✅ Done |
 
 ### Scheduling Rule (Deterministic)
 

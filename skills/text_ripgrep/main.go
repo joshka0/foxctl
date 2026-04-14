@@ -9,7 +9,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textmatch"
-	"github.com/jkatigb/agentctl/internal/tools/ripgrep"
+	"github.com/jkatigb/agentctl/internal/tooling/tools/ripgrep"
 )
 
 const command = "text/ripgrep"

@@ -183,7 +183,7 @@ agentctl workflow run my-workflow --input '{}' --dry-run
 ## Programmatic API (Go)
 
 ```go
-import "github.com/jkatigb/agentctl/internal/workflow"
+import "github.com/jkatigb/agentctl/internal/runtime/orchestration/workflow"
 
 // Using the engine
 engine := workflow.NewEngine()

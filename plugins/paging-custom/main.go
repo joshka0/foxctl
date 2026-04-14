@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	plugin "github.com/jkatigb/agentctl/internal/openapi/plugin"
+	plugin "github.com/jkatigb/agentctl/internal/interfaces/openapi/plugin"
 )
 
 func main() {

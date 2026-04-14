@@ -33,7 +33,7 @@ queries:
     expected_any_of:
       - notes/repo/agentctl/packages/internal-indexing-semantic.md
       - notes/repo/agentctl/semantic-and-memory.md
-      - internal/indexing/semantic/indexer.go
+      - internal/intelligence/indexing/semantic/indexer.go
     notes: "Accept either the package note, memory/semantic map, or the semantic indexer implementation."
   - id: storage-memory
     query: "storage memory package"
@@ -47,6 +47,6 @@ queries:
     expected_any_of:
       - notes/repo/agentctl/packages/internal-web-api.md
       - notes/repo/agentctl/platform-and-web.md
-      - internal/web/api/agents.go
-      - internal/web/api/orchestration.go
+      - internal/interfaces/web/api/agents.go
+      - internal/interfaces/web/api/orchestration.go
     notes: "Accept either the package note, platform map, or a representative web API handler file."

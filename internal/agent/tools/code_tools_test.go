@@ -8,7 +8,7 @@ import (
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/storage"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 )
@@ -684,7 +684,7 @@ func TestTelemetry_RecordsNewToolNames(t *testing.T) {
 	}
 
 	// Call via the tool registry to test telemetry wrapper
-	tool, err := registry.GetRegistry().Get("code.symbol_search")
+	tool, err := registry.Get("code.symbol_search")
 	if err != nil {
 		t.Fatalf("Get tool: %v", err)
 	}

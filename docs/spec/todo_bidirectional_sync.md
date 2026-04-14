@@ -332,8 +332,8 @@ internal/
 **Reuse:**
 * `internal/storage/tasks`
 * `internal/storage/graph` + pagerank
-* `internal/retrieval` + `code/snippet_extract`
-* `internal/observability`
+* `internal/intelligence/retrieval` + `code/snippet_extract`
+* `internal/runtime/observability`
 
 ### 12.2 Session file locator
 

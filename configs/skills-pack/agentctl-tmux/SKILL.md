@@ -80,7 +80,7 @@ Promote only derived facts, not raw pane dumps. Good examples:
 ```bash
 agentctl mux observe agent-b --lines 80
 agentctl mux observe agent-b \
-  --statement "agent-b is reviewing mailbox ack semantics in internal/actor/supervisor.go"
+  --statement "agent-b is reviewing mailbox ack semantics in internal/runtime/actor/supervisor.go"
 ```
 
 If a tmux exchange produced durable repo knowledge, capture it through the existing ACA and Obsidian flow after review.

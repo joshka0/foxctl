@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
+	"github.com/jkatigb/agentctl/internal/context/sessionkit/claudejsonl"
 	config "github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )

@@ -11,7 +11,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/skillrun"
+	"github.com/jkatigb/agentctl/internal/tooling/skillrun"
 )
 
 // registerContextGrepTool registers the context_grep tool backed by the code/context_grep skill.

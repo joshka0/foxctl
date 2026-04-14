@@ -35,17 +35,17 @@ Apply normalization to `PackageDoc` and `FirstComment` fields before they're use
 
 | File | Changes |
 |------|---------|
-| `internal/retrieval/file_summary.go` | Normalize docs before processing |
-| `internal/indexing/symbol/summary_input.go` | Add normalization to `FileSummaryInput` construction |
-| `internal/indexing/embeddingtext/normalize.go` | Reuse normalization utilities |
-| `internal/indexing/embeddingtext/normalize_test.go` | Add/extend normalization tests |
-| `internal/retrieval/file_summary_test.go` | Tests for normalized summary generation |
+| `internal/intelligence/retrieval/file_summary.go` | Normalize docs before processing |
+| `internal/intelligence/indexing/symbol/summary_input.go` | Add normalization to `FileSummaryInput` construction |
+| `internal/intelligence/indexing/embeddingtext/normalize.go` | Reuse normalization utilities |
+| `internal/intelligence/indexing/embeddingtext/normalize_test.go` | Add/extend normalization tests |
+| `internal/intelligence/retrieval/file_summary_test.go` | Tests for normalized summary generation |
 
 ### Implementation Details
 
 #### 1. Normalization Utilities
 
-Use the canonical helpers from `internal/indexing/embeddingtext` introduced in Phase 0.2:
+Use the canonical helpers from `internal/intelligence/indexing/embeddingtext` introduced in Phase 0.2:
 
 - `embeddingtext.NormalizeDoc`
 - `embeddingtext.NormalizeFirstComment`
@@ -55,7 +55,7 @@ Do not add new normalization helpers in Phase 3.
 #### 2. FileSummaryInput Construction
 
 ```go
-// internal/indexing/symbol/summary_input.go
+// internal/intelligence/indexing/symbol/summary_input.go
 
 package symbol
 
@@ -138,12 +138,12 @@ func (f *FileSummaryInput) HasChanged(storedDigest string) bool {
 #### 3. Integration with File Summary Generation
 
 ```go
-// internal/retrieval/file_summary.go
+// internal/intelligence/retrieval/file_summary.go
 
 package retrieval
 
 import (
-    "github.com/jkatigb/agentctl/internal/indexing/symbol"
+    "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 )
 
 // GenerateFileSummary creates a summary for a file using normalized inputs.
@@ -226,10 +226,10 @@ Change the semantic file indexer to optionally embed "intent text" - a structure
 
 | File | Changes |
 |------|---------|
-| `internal/indexing/semantic/indexer.go` | Add intent text mode support |
-| `internal/indexing/semantic/intent_text.go` | **New file** - intent text builder |
-| `internal/indexing/semantic/intent_text_test.go` | **New file** - intent text tests |
-| `internal/retrieval/semantic_search.go` | Option A: prioritize summaries in retrieval |
+| `internal/intelligence/indexing/semantic/indexer.go` | Add intent text mode support |
+| `internal/intelligence/indexing/semantic/intent_text.go` | **New file** - intent text builder |
+| `internal/intelligence/indexing/semantic/intent_text_test.go` | **New file** - intent text tests |
+| `internal/intelligence/retrieval/semantic_search.go` | Option A: prioritize summaries in retrieval |
 | `internal/platform/config/config.go` | Add `EmbedFileTextMode` config |
 
 ### Implementation Details
@@ -239,7 +239,7 @@ Change the semantic file indexer to optionally embed "intent text" - a structure
 This approach keeps the existing file embedding unchanged but modifies retrieval to prioritize file summaries and symbols over raw file matches.
 
 ```go
-// internal/retrieval/semantic_search.go
+// internal/intelligence/retrieval/semantic_search.go
 
 type SearchOptions struct {
     Query       string
@@ -298,14 +298,14 @@ func (s *SemanticSearcher) boostSummaryResults(results []SearchResult, factor fl
 This approach changes what gets embedded for files, using structured "intent text" that captures file purpose and structure.
 
 ```go
-// internal/indexing/semantic/intent_text.go
+// internal/intelligence/indexing/semantic/intent_text.go
 
 package semantic
 
 import (
     "strings"
     
-    "github.com/jkatigb/agentctl/internal/indexing/symbol"
+    "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 )
 
 // IntentText represents the semantic essence of a file for embedding.
@@ -431,7 +431,7 @@ func extractExports(symbols []Symbol) []ExportedSymbol {
 #### Indexer Integration (Option B)
 
 ```go
-// internal/indexing/semantic/indexer.go
+// internal/intelligence/indexing/semantic/indexer.go
 
 type IndexerConfig struct {
     // ... existing fields ...

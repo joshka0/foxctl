@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/rgutil"
-	"github.com/jkatigb/agentctl/internal/tools/ripgrep"
+	"github.com/jkatigb/agentctl/internal/tooling/tools/ripgrep"
 )
 
 func TestBuildSearchOpts(t *testing.T) {

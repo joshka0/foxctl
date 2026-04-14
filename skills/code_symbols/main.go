@@ -19,7 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
-	symindex "github.com/jkatigb/agentctl/internal/indexing/symbol"
+	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
 )
 
 // Input defines the input parameters for code/symbols operations.

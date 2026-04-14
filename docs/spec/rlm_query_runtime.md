@@ -206,12 +206,12 @@ Recommended routing:
 
 Current code that should feed the runtime:
 
-- `internal/contextplane/*`
-- `internal/companion/*`
-- `internal/engine/rlm_tools.go`
-- `internal/indexing/repoindex/*`
+- `internal/context/contextplane/*`
+- `internal/context/companion/*`
+- `internal/runtime/engine/rlm_tools.go`
+- `internal/intelligence/indexing/repoindex/*`
 - `internal/storage/obsidianindex/*`
-- `internal/trajectorycapture/*`
+- `internal/runtime/trajectorycapture/*`
 - `internal/v2/runtime/*`
 
 ## Non-goals

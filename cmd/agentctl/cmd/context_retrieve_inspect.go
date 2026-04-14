@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/contextplane"
+	"github.com/jkatigb/agentctl/internal/context/contextplane"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
+	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
 	"github.com/spf13/cobra"
 )
