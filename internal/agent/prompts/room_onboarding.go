@@ -38,20 +38,20 @@ func RoomOnboardingBlock(opts RoomOnboardingOptions) string {
 	lines := []string{
 		roomOnboardingHeader,
 		fmt.Sprintf("- You are attached to room %q in workspace %q as %q.", roomID, firstNonEmpty(strings.TrimSpace(opts.WorkspaceID), "default"), roleLabel),
-		"- Read the shared room skills first: `agentctl-room` and `agentctl-room-agent`.",
-		fmt.Sprintf("- On entry, orient with: `agentctl room status %s`, `agentctl room inbox %s --actor <you>`, and `agentctl room task list %s`.", roomID, roomID, roomID),
+		"- Read the shared room skills first: `foxctl-room` and `foxctl-room-agent`.",
+		fmt.Sprintf("- On entry, orient with: `foxctl room status %s`, `foxctl room inbox %s --actor <you>`, and `foxctl room task list %s`.", roomID, roomID, roomID),
 		"- Use durable room actions instead of pane-only status updates: claim, touch, block, complete, send, ack, resolve.",
 	}
 	switch strings.TrimSpace(strings.ToLower(roleLabel)) {
 	case "coordinator", "overseer":
 		lines = append(lines,
-			"- Because you are acting as coordinator, also read `agentctl-room-operator`.",
+			"- Because you are acting as coordinator, also read `foxctl-room-operator`.",
 			"- You are responsible for routing, stale work, review closure, and final coordinator decisions.",
-			fmt.Sprintf("- Coordinator controls: `agentctl room resolve %s <message-id> --mode read`, `agentctl room task assign|reassign|reclaim %s ...`, `agentctl room coordinator set %s <participant>`.", roomID, roomID, roomID),
+			fmt.Sprintf("- Coordinator controls: `foxctl room resolve %s <message-id> --mode read`, `foxctl room task assign|reassign|reclaim %s ...`, `foxctl room coordinator set %s <participant>`.", roomID, roomID, roomID),
 		)
 	case "reviewer", "security-review":
 		lines = append(lines,
-			"- Because you are acting as reviewer, also read `agentctl-room-operator`.",
+			"- Because you are acting as reviewer, also read `foxctl-room-operator`.",
 			"- Review behavior: findings first, then verdict (`approved` or `blocked`), then scope and any non-blocking follow-ups.",
 			"- Write review conclusions into the room timeline or task notes, not only pane chat.",
 		)

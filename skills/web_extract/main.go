@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 // Input defines the extraction parameters with URL list, query filtering, and content options.
@@ -116,7 +116,7 @@ func extractURL(ctx context.Context, client *http.Client, url string, maxBytes i
 		extraction.Error = fmt.Sprintf("create request: %v", err)
 		return extraction
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; agentctl/1.0; +https://github.com/jkatigb/agentctl)")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; foxctl/1.0; +https://github.com/joshka0/foxctl)")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 
 	resp, err := client.Do(req)

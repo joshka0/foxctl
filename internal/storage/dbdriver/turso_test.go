@@ -263,7 +263,7 @@ func TestVectorSQLExpressionFormats(t *testing.T) {
 }
 
 func TestConfigFromPlatformSettings(t *testing.T) {
-	loader := NewConfigLoader("/tmp/agentctl-test")
+	loader := NewConfigLoader("/tmp/foxctl-test")
 
 	// Test SQLite default
 	cfg := loader.ConfigFromPlatformSettings(PlatformDatabaseSettings{
@@ -280,7 +280,7 @@ func TestConfigFromPlatformSettings(t *testing.T) {
 	if cfg.Driver != DriverSQLite {
 		t.Errorf("Expected SQLite driver, got %s", cfg.Driver)
 	}
-	if cfg.SQLite.Path != "/tmp/agentctl-test/test.db" {
+	if cfg.SQLite.Path != "/tmp/foxctl-test/test.db" {
 		t.Errorf("Unexpected SQLite path: %s", cfg.SQLite.Path)
 	}
 
@@ -329,7 +329,7 @@ func TestConfigFromPlatformSettings(t *testing.T) {
 	if cfg.Driver != DriverLibSQL {
 		t.Errorf("Expected LibSQL driver, got %s", cfg.Driver)
 	}
-	if cfg.LibSQL.Path != "/tmp/agentctl-test/memory.db" {
+	if cfg.LibSQL.Path != "/tmp/foxctl-test/memory.db" {
 		t.Errorf("Unexpected LibSQL path: %s", cfg.LibSQL.Path)
 	}
 	if !cfg.LibSQL.EnableVectorSearch {

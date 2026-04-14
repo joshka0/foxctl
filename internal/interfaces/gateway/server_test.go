@@ -19,8 +19,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
+	terminalruntime "github.com/joshka0/foxctl/internal/runtime/terminal"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
 )
 
 // testLogger creates a logger that discards output for tests that don't need
@@ -610,7 +610,7 @@ func TestHandleRooms_RegisterRoom(t *testing.T) {
 	srv := NewServer(DefaultOptions(), testLogger())
 	handler := srv.Handler()
 
-	body := `{"room_id":"test-room","tmux_session":"agentctl-sandbox-test-room","max_connections":5}`
+	body := `{"room_id":"test-room","tmux_session":"foxctl-sandbox-test-room","max_connections":5}`
 	req := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -623,7 +623,7 @@ func TestHandleRooms_RegisterRoom(t *testing.T) {
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, "registered", resp["status"])
 	assert.Equal(t, "test-room", resp["room_id"])
-	assert.Equal(t, "agentctl-sandbox-test-room", resp["tmux_session"])
+	assert.Equal(t, "foxctl-sandbox-test-room", resp["tmux_session"])
 
 	// Verify room is actually registered in the hub and ssh rooms
 	assert.True(t, srv.termHub.HasRoom("test-room"), "web terminal hub should have room")
@@ -673,7 +673,7 @@ func TestHandleRooms_MethodNotAllowed(t *testing.T) {
 func TestHandleRoomByID_Unregister(t *testing.T) {
 	srv := NewServer(DefaultOptions(), testLogger())
 	// Pre-register a room so we have something to unregister.
-	srv.rooms.Register(agentpane.ResolveTerminalRoomConfig("del-room", "agentctl-sandbox-del-room", 0))
+	srv.rooms.Register(agentpane.ResolveTerminalRoomConfig("del-room", "foxctl-sandbox-del-room", 0))
 	require.True(t, srv.termHub.HasRoom("del-room"))
 
 	handler := srv.Handler()

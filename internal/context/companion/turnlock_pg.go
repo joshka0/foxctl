@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // PgTurnLock uses Postgres session-level advisory locks for cross-pod turn serialization.

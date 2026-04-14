@@ -4,7 +4,7 @@
 **Status:** Specification (Optional Extension)
 **Last Updated:** 2025-11-15
 
-> **Purpose:** This document defines the Agent Profile v1, an optional additive extension to agentctl Core Profile v1 that adds multi-agent orchestration capabilities including mailbox messaging, blackboard coordination, quotas, and advanced scheduling.
+> **Purpose:** This document defines the Agent Profile v1, an optional additive extension to foxctl Core Profile v1 that adds multi-agent orchestration capabilities including mailbox messaging, blackboard coordination, quotas, and advanced scheduling.
 
 ---
 
@@ -104,7 +104,7 @@ Envelopes from Agent Profile MUST include:
 | `agent/send` | Send message to agent mailbox | Agent v1 |
 | `agent/watch` | Stream agent events | Agent v1 |
 
-**Implementation note (agentctl):** The current skill/tool names use
+**Implementation note (foxctl):** The current skill/tool names use
 `agent.spawn` and `mailbox/manage.*` for execution. The envelope contract
 retains `agent/*` and `mailbox/*`; adapters should map between these forms.
 
@@ -518,7 +518,7 @@ The **OCI runner** executes skills in hardened containers for maximum isolation.
 ### 7.2 Skill Manifest for OCI
 
 ```yaml
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: data/analyze
@@ -670,7 +670,7 @@ To prepare for Agent Profile, Core v1 includes:
 
 ```bash
 # Spawn agent
-agentctl agent spawn \
+foxctl agent spawn \
   --id agent-001 \
   --goal "Process Stripe webhooks" \
   --skills http/openapi,fs/write \
@@ -678,47 +678,47 @@ agentctl agent spawn \
   --quota-memory-mb 512
 
 # List agents
-agentctl agent list
+foxctl agent list
 
 # Kill agent
-agentctl agent kill agent-001 --graceful
+foxctl agent kill agent-001 --graceful
 
 # Watch agent events
-agentctl agent watch agent-001
+foxctl agent watch agent-001
 ```
 
 ### A.2 Mailbox
 
 ```bash
 # Send message
-agentctl mailbox send agent-002 \
+foxctl mailbox send agent-002 \
   --from agent-001 \
   --type ask \
   --payload '{"skill":"fs/read","params":{"path":"README.md"}}'
 
 # Poll messages
-agentctl mailbox poll agent-001 --timeout 30s
+foxctl mailbox poll agent-001 --timeout 30s
 
 # Ack message
-agentctl mailbox ack msg-12345
+foxctl mailbox ack msg-12345
 ```
 
 ### A.3 Blackboard
 
 ```bash
 # Post item
-agentctl bb post webhooks/stripe \
+foxctl bb post webhooks/stripe \
   --item '{"webhook_id":"wh_123"}' \
   --priority 5 \
   --ttl 3600
 
 # Claim item
-agentctl bb claim webhooks/stripe \
+foxctl bb claim webhooks/stripe \
   --agent agent-001 \
   --lease-duration 300
 
 # Release item
-agentctl bb release lease-789 --result completed
+foxctl bb release lease-789 --result completed
 ```
 
 ---

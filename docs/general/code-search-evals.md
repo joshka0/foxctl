@@ -9,17 +9,17 @@ Stable entrypoints for the direct `code_search_ensemble` suites live in three pl
 The wrappers use:
 
 - `AGENTCTL_STORAGE_ROOT` if set
-- `AGENTCTL_VAULT_PATH` if set, otherwise `~/.agentctl/templates/obsidian-vault`
+- `AGENTCTL_VAULT_PATH` if set, otherwise `~/.foxctl/templates/obsidian-vault`
 
 ## Common Runs
 
 Use these make targets:
 
-- `make eval-code-search-agentctl-package`
-- `make eval-code-search-agentctl-repo-grounded`
-- `make eval-code-search-agentctl-change-impact`
-- `make eval-code-search-agentctl-trace-symbol`
-- `make eval-code-search-agentctl-bridge-esoteric`
+- `make eval-code-search-foxctl-package`
+- `make eval-code-search-foxctl-repo-grounded`
+- `make eval-code-search-foxctl-change-impact`
+- `make eval-code-search-foxctl-trace-symbol`
+- `make eval-code-search-foxctl-bridge-esoteric`
 
 For the checked-in `praze` infra smoke:
 
@@ -27,7 +27,7 @@ For the checked-in `praze` infra smoke:
 
 All of these targets call checked-in wrapper scripts which in turn call:
 
-- `agentctl eval code-search-ensemble`
+- `foxctl eval code-search-ensemble`
 - `--eval-dataset-file <checked-in dataset>`
 - `--policy-file <checked-in policy>`
 - `--tool-profile repo-grounded`
@@ -35,20 +35,20 @@ All of these targets call checked-in wrapper scripts which in turn call:
 
 ## Datasets
 
-- `testdata/evals/code-search-ensemble/agentctl-package.jsonl`
-- `testdata/evals/code-search-ensemble/agentctl-repo-grounded.jsonl`
-- `testdata/evals/code-search-ensemble/agentctl-change-impact.jsonl`
-- `testdata/evals/code-search-ensemble/agentctl-trace-symbol.jsonl`
-- `testdata/evals/code-search-ensemble/agentctl-bridge-esoteric.jsonl`
+- `testdata/evals/code-search-ensemble/foxctl-package.jsonl`
+- `testdata/evals/code-search-ensemble/foxctl-repo-grounded.jsonl`
+- `testdata/evals/code-search-ensemble/foxctl-change-impact.jsonl`
+- `testdata/evals/code-search-ensemble/foxctl-trace-symbol.jsonl`
+- `testdata/evals/code-search-ensemble/foxctl-bridge-esoteric.jsonl`
 - `testdata/evals/code-search-ensemble/praze-infra-smoke.jsonl`
 
 ## Policies
 
-- `testdata/evals/code-search-ensemble/agentctl-package-policy.yaml`
-- `testdata/evals/code-search-ensemble/agentctl-repo-grounded-policy.yaml`
-- `testdata/evals/code-search-ensemble/agentctl-change-impact-policy.yaml`
-- `testdata/evals/code-search-ensemble/agentctl-trace-symbol-policy.yaml`
-- `testdata/evals/code-search-ensemble/agentctl-bridge-esoteric-policy.yaml`
+- `testdata/evals/code-search-ensemble/foxctl-package-policy.yaml`
+- `testdata/evals/code-search-ensemble/foxctl-repo-grounded-policy.yaml`
+- `testdata/evals/code-search-ensemble/foxctl-change-impact-policy.yaml`
+- `testdata/evals/code-search-ensemble/foxctl-trace-symbol-policy.yaml`
+- `testdata/evals/code-search-ensemble/foxctl-bridge-esoteric-policy.yaml`
 - `testdata/evals/code-search-ensemble/praze-infra-policy.yaml`
 
 ## Failure Mode

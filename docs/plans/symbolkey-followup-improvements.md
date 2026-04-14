@@ -128,12 +128,12 @@ name := symbolutil.KeyEntryName(event.WorkspaceID, pkg, sym.EffectiveID())
 - `applySymbolSummary` passes `pkg := symbolutil.DeriveSymbolPackage(sym.FilePath, lang)` — NOT repoindex `pkgID`
 - Repoindex node IDs continue using `pkgID` (unchanged)
 
-### `cmd/agentctl/cmd/index.go` (modified)
+### `cmd/foxctl/cmd/index.go` (modified)
 
 - `buildSymbolSummaryInput` sets `Pkg: symbolutil.DeriveSymbolPackage(sym.FilePath, sym.Language)`
 - Cache checks use pkg-scoped key names
 
-### `cmd/agentctl/cmd/index_repo.go` (modified)
+### `cmd/foxctl/cmd/index_repo.go` (modified)
 
 - `memorySymbolSummaryProvider.Summary(ctx, symbolID, symbolKey, pkg)` derives pkg from file path, NOT repoindex `pkgID`
 
@@ -151,8 +151,8 @@ name := symbolutil.KeyEntryName(event.WorkspaceID, pkg, sym.EffectiveID())
 These four call sites MUST all use `symbolutil.DeriveSymbolPackage`:
 1. `internal/intelligence/indexing/symbol/indexer.go`
 2. `skills/code_incremental_index/main.go`
-3. `cmd/agentctl/cmd/index.go`
-4. `cmd/agentctl/cmd/index_repo.go`
+3. `cmd/foxctl/cmd/index.go`
+4. `cmd/foxctl/cmd/index_repo.go`
 
 ---
 
@@ -168,7 +168,7 @@ These four call sites MUST all use `symbolutil.DeriveSymbolPackage`:
 ### Integration Tests
 - `internal/intelligence/indexing/repoindex/builder_test.go`: summary lookup uses shared pkg derivation
 - `skills/code_incremental_index`: `setSymbolKeys` handles Go exported/non-exported + Python
-- `cmd/agentctl/cmd`: summary cache uses pkg-scoped names
+- `cmd/foxctl/cmd`: summary cache uses pkg-scoped names
 
 ### Edge Cases
 - Two non-exported Go symbols with same name in different files (must get different keys)
@@ -193,7 +193,7 @@ These four call sites MUST all use `symbolutil.DeriveSymbolPackage`:
 
 1. Bump `CurrentFileMetaSchema` to 3 → forces full re-index of all files
 2. Embedding digest stays v2 → non-exported Go symbols get new digests naturally (different key = different digest)
-3. Run `agentctl index init --scope symbols` after deployment to re-embed
+3. Run `foxctl index init --scope symbols` after deployment to re-embed
 4. Old legacy entries coexist until garbage collected; no migration needed
 
 ---
@@ -211,8 +211,8 @@ These four call sites MUST all use `symbolutil.DeriveSymbolPackage`:
 | `internal/intelligence/retrieval/file_summary.go` | MODIFY | 1, 4 |
 | `internal/intelligence/indexing/repoindex/types.go` | MODIFY | 4 |
 | `internal/intelligence/retrieval/semantic_search.go` | MODIFY | 4 |
-| `cmd/agentctl/cmd/index.go` | MODIFY | 4 |
-| `cmd/agentctl/cmd/index_repo.go` | MODIFY | 4 |
+| `cmd/foxctl/cmd/index.go` | MODIFY | 4 |
+| `cmd/foxctl/cmd/index_repo.go` | MODIFY | 4 |
 | `skills/code_semantic_search/main.go` | MODIFY | 4 |
 | Test files (various) | NEW/MODIFY | all |
 

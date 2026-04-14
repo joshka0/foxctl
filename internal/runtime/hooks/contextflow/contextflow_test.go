@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
+	"github.com/joshka0/foxctl/internal/storage/contextbuffer"
 )
 
 func TestDrainUpdaterContext(t *testing.T) {

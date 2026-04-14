@@ -9,9 +9,9 @@ import (
 	"io"
 	"strings"
 
-	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
+	refsnapshot "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshot"
+	refsnapshotstore "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshotstore"
+	"github.com/joshka0/foxctl/internal/storage/cas"
 )
 
 type ArtifactKind string
@@ -142,7 +142,7 @@ func Load(ctx context.Context, storageRoot, casRoot string, opts Options) (Resul
 			return Result{}, &LoadError{
 				Kind:    ErrorKindInvalidArtifact,
 				Message: fmt.Sprintf("snapshot artifact %q does not match snapshot id %q", artifact, snapshotID),
-				Hint:    "Re-run `agentctl refactor snapshot ...` and use the returned snapshot id or artifact digest together.",
+				Hint:    "Re-run `foxctl refactor snapshot ...` and use the returned snapshot id or artifact digest together.",
 			}
 		}
 		if result.SnapshotRecord == nil && result.SnapshotID != "" {
@@ -185,7 +185,7 @@ func loadSnapshotRecord(ctx context.Context, storageRoot, snapshotID string) (re
 			return refsnapshotstore.Record{}, &LoadError{
 				Kind:    ErrorKindNotFound,
 				Message: fmt.Sprintf("snapshot %q not found", snapshotID),
-				Hint:    "Create a snapshot first with `agentctl refactor snapshot ...`, then re-run `refactor evidence --snapshot-id <id>`.",
+				Hint:    "Create a snapshot first with `foxctl refactor snapshot ...`, then re-run `refactor evidence --snapshot-id <id>`.",
 			}
 		}
 		return refsnapshotstore.Record{}, fmt.Errorf("read refactor snapshot metadata: %w", err)
@@ -217,7 +217,7 @@ func readArtifact(ctx context.Context, casRoot, artifact string) ([]byte, error)
 			return nil, &LoadError{
 				Kind:    ErrorKindNotFound,
 				Message: fmt.Sprintf("artifact %q not found", strings.TrimSpace(artifact)),
-				Hint:    "Pass a digest returned by `refactor snapshot` or `refactor scout`, and ensure you are using the same ~/.agentctl CAS store.",
+				Hint:    "Pass a digest returned by `refactor snapshot` or `refactor scout`, and ensure you are using the same ~/.foxctl CAS store.",
 			}
 		}
 		return nil, fmt.Errorf("read CAS artifact: %w", err)

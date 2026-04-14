@@ -1,3 +1,3 @@
-// Package builtin provides embedded knowledge assets that ship with agentctl.
+// Package builtin provides embedded knowledge assets that ship with foxctl.
 // This includes Factory AI droids and orchestrator documentation.
 package builtin

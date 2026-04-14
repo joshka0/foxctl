@@ -1,6 +1,6 @@
 # Mobile Companion Architecture
 
-> Design document for building a proactive, autonomous mobile companion on the agentctl framework.
+> Design document for building a proactive, autonomous mobile companion on the foxctl framework.
 
 **Status**: Draft
 **Author**: Design Session
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-This document outlines the architecture for a mobile companion application that leverages agentctl's multi-agent orchestration to provide:
+This document outlines the architecture for a mobile companion application that leverages foxctl's multi-agent orchestration to provide:
 
 - **Reactive interactions**: Natural conversation with personality and memory
 - **Proactive assistance**: Context-aware suggestions without prompting
@@ -80,7 +80,7 @@ The system uses the Overseer as the central coordinator, with specialized sub-ag
          │               │               │                   │
          ▼               ▼               ▼                   ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        agentctl API Server                               │
+│                        foxctl API Server                               │
 │                                                                          │
 │  POST /companion/chat          GET /activities                           │
 │  POST /companion/context       GET /approvals/pending                    │
@@ -146,7 +146,7 @@ two endpoints below can also be combined into a hybrid flow.
 | Model | Description | Pros | Tradeoffs |
 |-------|-------------|------|-----------|
 | **On-device daemon** | Agentctl runs locally on the phone; API server is local or minimal. | Lowest latency; stronger privacy boundary; works offline for some features. | OS background limits; battery use; model/runtime size constraints. |
-| **Server-hosted daemon** | Mobile app is a thin client; agentctl runs on a server. | Reliable background execution; easier scaling/monitoring; shared compute. | Higher privacy risk; dependency on connectivity; must secure PII. |
+| **Server-hosted daemon** | Mobile app is a thin client; foxctl runs on a server. | Reliable background execution; easier scaling/monitoring; shared compute. | Higher privacy risk; dependency on connectivity; must secure PII. |
 | **Hybrid** | Context capture + UI on device; planning/execution on server. | Balances privacy + uptime; can shift work based on consent and cost. | More complex state sync; requires clear data ownership. |
 
 **Note:** Networked skills (search, payments, weather) can be routed through a
@@ -1176,7 +1176,7 @@ CREATE TABLE activity_feed (
 ### Skill: mobile/location
 
 ```yaml
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: mobile/location
@@ -1210,7 +1210,7 @@ capabilities:
 ### Skill: x402/pay
 
 ```yaml
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: x402/pay

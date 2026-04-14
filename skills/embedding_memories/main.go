@@ -7,12 +7,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 const (

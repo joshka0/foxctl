@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	cihelpers "github.com/jkatigb/agentctl/internal/adapters/skillslib/ci"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	cihelpers "github.com/joshka0/foxctl/internal/adapters/skillslib/ci"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 // Input defines the skill input parameters for ci/checks operations.

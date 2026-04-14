@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
 )
 
 func TestPersistClassifiedClaims_PersistsDurableTypedClaims(t *testing.T) {

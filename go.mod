@@ -1,4 +1,4 @@
-module github.com/jkatigb/agentctl
+module github.com/joshka0/foxctl
 
 go 1.26.1
 

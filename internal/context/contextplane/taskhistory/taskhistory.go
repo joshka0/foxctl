@@ -13,16 +13,16 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
-	tphistory "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
-	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
+	tphistory "github.com/joshka0/foxctl/internal/context/transcriptpipeline/history"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 type SessionSource interface {

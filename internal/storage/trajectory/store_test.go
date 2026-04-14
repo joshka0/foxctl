@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 const testWorkspaceID = "0123456789abcdef0123456789abcdef"
@@ -282,7 +282,7 @@ func TestUserRequest_InsertAndGet(t *testing.T) {
 		Source:      trajectory.SourceCLI,
 		Text:        "Fix the bug in auth.go",
 		CommandContext: &trajectory.CommandContext{
-			CLICommand:      "agentctl agent spawn --role coder",
+			CLICommand:      "foxctl agent spawn --role coder",
 			ProtocolCommand: "agent/spawn",
 			TraceID:         "trace-xyz",
 		},
@@ -319,8 +319,8 @@ func TestUserRequest_InsertAndGet(t *testing.T) {
 	if got.CommandContext == nil {
 		t.Fatal("expected command_context to be set")
 	}
-	if got.CommandContext.CLICommand != "agentctl agent spawn --role coder" {
-		t.Errorf("cli_command: got %q, want %q", got.CommandContext.CLICommand, "agentctl agent spawn --role coder")
+	if got.CommandContext.CLICommand != "foxctl agent spawn --role coder" {
+		t.Errorf("cli_command: got %q, want %q", got.CommandContext.CLICommand, "foxctl agent spawn --role coder")
 	}
 	if got.TaskHints == nil {
 		t.Fatal("expected task_hints to be set")

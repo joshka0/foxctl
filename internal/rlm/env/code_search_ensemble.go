@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
-	skillobs "github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	memtokens "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
+	skillobs "github.com/joshka0/foxctl/internal/adapters/skillslib/obs"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
+	memtokens "github.com/joshka0/foxctl/internal/runtime/actor/memory"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	memorystore "github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
 
 const (

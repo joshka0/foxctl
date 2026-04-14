@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/context/companion"
 )
 
 func TestBuildDecisionInsights_ExtractsActionableKinds(t *testing.T) {

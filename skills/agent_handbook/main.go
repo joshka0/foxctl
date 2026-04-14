@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/runtime/agentpolicy"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/runtime/agentpolicy"
 )
 
 const command = "agent/handbook"
@@ -79,7 +79,7 @@ func generateBriefing(cfg agentpolicy.ProfileConfig) string {
 
 	// Allowed skills section
 	if len(cfg.AllowedSkills) > 0 {
-		b.WriteString("## Allowed agentctl Skills\n\n")
+		b.WriteString("## Allowed foxctl Skills\n\n")
 		b.WriteString("Use these skills via bash:\n\n")
 
 		for _, skill := range cfg.AllowedSkills {
@@ -89,7 +89,7 @@ func generateBriefing(cfg agentpolicy.ProfileConfig) string {
 		}
 	} else {
 		b.WriteString("## Skills\n\n")
-		b.WriteString("This profile has unrestricted access to all agentctl skills.\n\n")
+		b.WriteString("This profile has unrestricted access to all foxctl skills.\n\n")
 	}
 
 	// Rules section
@@ -104,7 +104,7 @@ func generateBriefing(cfg agentpolicy.ProfileConfig) string {
 	// Bash guard note
 	if cfg.Profile != agentpolicy.ProfileUnrestricted {
 		b.WriteString("## Important Notes\n\n")
-		b.WriteString("- **Bash commands are restricted**: Only `agentctl run <skill>` commands are allowed\n")
+		b.WriteString("- **Bash commands are restricted**: Only `foxctl run <skill>` commands are allowed\n")
 		b.WriteString("- Any attempt to run other bash commands (e.g., `rm`, `cat`, `curl`) will be blocked\n")
 		b.WriteString("- Use the skills above for all file reading, searching, and code analysis\n\n")
 	}

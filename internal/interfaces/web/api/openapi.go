@@ -8,8 +8,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 // OpenAPISpec generates an OpenAPI 3.0.3 specification from skill manifests.
@@ -155,12 +155,12 @@ func OpenAPISpec(manifests []skill.Manifest, serverURL string) map[string]any {
 	return map[string]any{
 		"openapi": "3.0.3",
 		"info": map[string]any{
-			"title":       "agentctl Skills API",
-			"description": "REST API for agentctl skills. Only skills with openapi.enabled: true in their skill.yaml are exposed.",
+			"title":       "foxctl Skills API",
+			"description": "REST API for foxctl skills. Only skills with openapi.enabled: true in their skill.yaml are exposed.",
 			"version":     "1.0.0",
 		},
 		"servers": []map[string]any{
-			{"url": serverURL, "description": "agentctl server"},
+			{"url": serverURL, "description": "foxctl server"},
 		},
 		"paths": paths,
 	}
@@ -369,7 +369,7 @@ const swaggerUIHTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>agentctl API - Swagger UI</title>
+  <title>foxctl API - Swagger UI</title>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
   <style>
     body { margin: 0; padding: 0; }

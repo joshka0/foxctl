@@ -42,4 +42,4 @@ Ready to implement: YES/NO
 
 **STOP** if checklist incomplete - ask questions instead.
 
-Full docs: `~/.agentctl/share/configs/skills/pre-impl/Skill.md`
+Full docs: `~/.foxctl/share/configs/skills/pre-impl/Skill.md`

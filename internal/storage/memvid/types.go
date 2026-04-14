@@ -106,7 +106,7 @@ type Stats struct {
 
 // SessionExportOptions configures session export to MV2.
 type SessionExportOptions struct {
-	// SessionID is the agentctl session to export
+	// SessionID is the foxctl session to export
 	SessionID string
 
 	// OutputPath is the destination .mv2 file path

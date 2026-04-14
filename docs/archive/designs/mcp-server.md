@@ -1,14 +1,14 @@
-# agentctl MCP Server Design
+# foxctl MCP Server Design
 
 ## Overview
 
-Expose agentctl skills as MCP (Model Context Protocol) tools, enabling Codex CLI, Cursor, and other MCP-compatible AI assistants to use the same enhanced tooling.
+Expose foxctl skills as MCP (Model Context Protocol) tools, enabling Codex CLI, Cursor, and other MCP-compatible AI assistants to use the same enhanced tooling.
 
 ## Architecture
 
 ```
 ┌─────────────────┐     stdio      ┌──────────────────┐
-│  Codex / Cursor │ ◄────────────► │ agentctl-mcp     │
+│  Codex / Cursor │ ◄────────────► │ foxctl-mcp     │
 │  (MCP Client)   │    JSON-RPC    │ (MCP Server)     │
 └─────────────────┘                └────────┬─────────┘
                                             │
@@ -32,7 +32,7 @@ Expose agentctl skills as MCP (Model Context Protocol) tools, enabling Codex CLI
 
 These replace standard file/search operations:
 
-| MCP Tool Name | agentctl Skill | Description |
+| MCP Tool Name | foxctl Skill | Description |
 |---------------|----------------|-------------|
 | `smart_search` | code/smart_search | Semantic search + snippet extraction |
 | `semantic_search` | code/semantic_search | Vector similarity search |
@@ -42,7 +42,7 @@ These replace standard file/search operations:
 
 ### CI/GitHub Tools
 
-| MCP Tool Name | agentctl Skill | Description |
+| MCP Tool Name | foxctl Skill | Description |
 |---------------|----------------|-------------|
 | `pr_comments` | ci/prcomments | Get PR review comments |
 | `checks` | ci/checks | Get CI status and checks |
@@ -50,7 +50,7 @@ These replace standard file/search operations:
 
 ### Memory/Context Tools
 
-| MCP Tool Name | agentctl Skill | Description |
+| MCP Tool Name | foxctl Skill | Description |
 |---------------|----------------|-------------|
 | `memory_query` | memory/query | Query workspace memories |
 | `memory_put` | memory/put | Store new memory |
@@ -61,7 +61,7 @@ These replace standard file/search operations:
 ### Package Structure
 
 ```
-cmd/agentctl-mcp/
+cmd/foxctl-mcp/
 ├── main.go           # MCP server entry point
 ├── tools.go          # Tool definitions and handlers
 └── transport.go      # Stdio transport wrapper
@@ -122,7 +122,7 @@ func SmartSearch(ctx context.Context, req *mcp.CallToolRequest, input SmartSearc
 ```go
 func main() {
     server := mcp.NewServer(&mcp.Implementation{
-        Name:    "agentctl",
+        Name:    "foxctl",
         Version: version.Version,
     }, nil)
 
@@ -156,8 +156,8 @@ func main() {
 ```json
 {
   "mcpServers": {
-    "agentctl": {
-      "command": "agentctl-mcp",
+    "foxctl": {
+      "command": "foxctl-mcp",
       "args": ["--workspace", "${workspaceFolder}"]
     }
   }
@@ -169,8 +169,8 @@ func main() {
 ```json
 {
   "mcp.servers": {
-    "agentctl": {
-      "command": "agentctl-mcp",
+    "foxctl": {
+      "command": "foxctl-mcp",
       "args": ["--workspace", "${workspaceFolder}"]
     }
   }
@@ -182,8 +182,8 @@ func main() {
 ```json
 {
   "mcpServers": {
-    "agentctl": {
-      "command": "agentctl-mcp",
+    "foxctl": {
+      "command": "foxctl-mcp",
       "args": []
     }
   }
@@ -268,7 +268,7 @@ func CodemapGenerate(ctx context.Context, req *mcp.CallToolRequest, input Codema
 
 ```bash
 # Build MCP server binary
-go build -o ~/.local/bin/agentctl-mcp ./cmd/agentctl-mcp/
+go build -o ~/.local/bin/foxctl-mcp ./cmd/foxctl-mcp/
 
 # Or via make
 make mcp-server
@@ -278,10 +278,10 @@ make mcp-server
 
 ```bash
 # Test with MCP inspector
-npx @anthropic-ai/mcp-inspector agentctl-mcp
+npx @anthropic-ai/mcp-inspector foxctl-mcp
 
 # Test tool directly
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"smart_search","arguments":{"query":"func main"}}}' | agentctl-mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"smart_search","arguments":{"query":"func main"}}}' | foxctl-mcp
 ```
 
 ## Phase 4 Implementation Steps
@@ -291,7 +291,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"smart_sear
    go get github.com/modelcontextprotocol/go-sdk@latest
    ```
 
-2. **Create cmd/agentctl-mcp/main.go** - Basic server with tool registration
+2. **Create cmd/foxctl-mcp/main.go** - Basic server with tool registration
 
 3. **Implement core tools**
    - smart_search

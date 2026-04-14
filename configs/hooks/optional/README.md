@@ -1,6 +1,6 @@
 # Optional Hooks
 
-These hooks are **disabled by default** because they enhance tools that are blocked in agentctl mode.
+These hooks are **disabled by default** because they enhance tools that are blocked in foxctl mode.
 
 ## Hooks in this Directory
 
@@ -14,7 +14,7 @@ These hooks are **disabled by default** because they enhance tools that are bloc
 
 ## When to Enable
 
-Enable these hooks if you're **not** using agentctl mode and want enhanced tool behavior.
+Enable these hooks if you're **not** using foxctl mode and want enhanced tool behavior.
 
 ## How to Enable
 
@@ -26,25 +26,25 @@ Add the hooks to your `~/.claude/settings.json`:
     "PreToolUse": [
       {
         "matcher": "Grep|Glob",
-        "hooks": ["~/.claude/hooks/agentctl/optional/semantic-search.sh"]
+        "hooks": ["~/.claude/hooks/foxctl/optional/semantic-search.sh"]
       },
       {
         "matcher": "Glob",
-        "hooks": ["~/.claude/hooks/agentctl/optional/smart-find.sh"]
+        "hooks": ["~/.claude/hooks/foxctl/optional/smart-find.sh"]
       },
       {
         "matcher": "Grep",
-        "hooks": ["~/.claude/hooks/agentctl/optional/smart-grep.sh"]
+        "hooks": ["~/.claude/hooks/foxctl/optional/smart-grep.sh"]
       },
       {
         "matcher": "Read",
-        "hooks": ["~/.claude/hooks/agentctl/optional/smart-read.sh"]
+        "hooks": ["~/.claude/hooks/foxctl/optional/smart-read.sh"]
       }
     ],
     "PostToolUse": [
       {
         "matcher": "Read",
-        "hooks": ["~/.claude/hooks/agentctl/optional/read-context-suggestions.sh"]
+        "hooks": ["~/.claude/hooks/foxctl/optional/read-context-suggestions.sh"]
       }
     ]
   }

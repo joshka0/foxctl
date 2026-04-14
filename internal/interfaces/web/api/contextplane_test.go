@@ -13,9 +13,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func TestContextNextProposalMergeHandlerAndRelease(t *testing.T) {
@@ -32,7 +32,7 @@ func TestContextNextProposalMergeHandlerAndRelease(t *testing.T) {
 		BlastRadius:    "medium",
 		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
 			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
@@ -102,7 +102,7 @@ func TestContextOverviewHandler(t *testing.T) {
 	vaultPath := t.TempDir()
 	cfg := config.Config{Storage: config.StorageSettings{Root: t.TempDir()}}
 	store := contextplane.NewWorkspaceStore(workspace)
-	targetNotePath := filepath.Join(vaultPath, "notes", "repo", "agentctl", "platform-and-web.md")
+	targetNotePath := filepath.Join(vaultPath, "notes", "repo", "foxctl", "platform-and-web.md")
 	if err := os.MkdirAll(filepath.Dir(targetNotePath), 0o755); err != nil {
 		t.Fatalf("mkdir target note: %v", err)
 	}
@@ -146,8 +146,8 @@ reviewed merge actions, and GUI control-plane integration.
 		BlastRadius:    "medium",
 		Summary:        "Review imported ACA GUI evidence for merge consideration.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/agentctl/aca-gui-pending.md",
-			"suggested_target_note_path": "notes/repo/agentctl/platform-and-web.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/foxctl/aca-gui-pending.md",
+			"suggested_target_note_path": "notes/repo/foxctl/platform-and-web.md",
 			"suggested_target_heading":   "ACA GUI",
 		},
 		EvaluationStatus: "accepted",

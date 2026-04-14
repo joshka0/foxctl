@@ -14,18 +14,18 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	v2goruntime "github.com/jkatigb/agentctl/internal/v2/adapters/goruntime"
-	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
-	libsqlevents "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/events"
-	libsqlorchestration "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/orchestration"
-	libsqlworkers "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/workers"
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
-	corespawn "github.com/jkatigb/agentctl/internal/v2/core/spawn"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
-	runtimeworkers "github.com/jkatigb/agentctl/internal/v2/runtime/workers"
-	v2services "github.com/jkatigb/agentctl/internal/v2/services"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	v2goruntime "github.com/joshka0/foxctl/internal/v2/adapters/goruntime"
+	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
+	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
+	libsqlorchestration "github.com/joshka0/foxctl/internal/v2/adapters/libsql/orchestration"
+	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	corespawn "github.com/joshka0/foxctl/internal/v2/core/spawn"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
+	runtimeworkers "github.com/joshka0/foxctl/internal/v2/runtime/workers"
+	v2services "github.com/joshka0/foxctl/internal/v2/services"
 )
 
 const (

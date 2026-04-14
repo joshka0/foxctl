@@ -4,7 +4,7 @@ import (
 	"io/fs"
 	"strings"
 
-	platformfs "github.com/jkatigb/agentctl/internal/platform/fsutil"
+	platformfs "github.com/joshka0/foxctl/internal/platform/fsutil"
 )
 
 // DetectLanguage returns the language identifier based on file extension.

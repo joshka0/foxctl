@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useCASObjects, useCASContent } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { CASObject } from "@agentctl/data";
+import type { CASObject } from "@foxctl/data";
 
 function formatBytes(bytes: number | undefined): string {
   if (bytes === undefined) return "?";

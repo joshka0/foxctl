@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 func TestBuildSessionObjective_Deterministic(t *testing.T) {

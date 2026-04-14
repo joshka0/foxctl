@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/platform/env"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/platform/env"
 )
 
 // NormalizeOwnerRepo splits a combined owner/repo input and trims values.

@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext"
 )
 
 func TestApplyDefaultLimits(t *testing.T) {

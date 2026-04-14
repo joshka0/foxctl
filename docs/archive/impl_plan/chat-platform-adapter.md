@@ -11,9 +11,9 @@ For current runtime architecture, use [`docs/architecture/chat-platform-adapter.
 
 ## Problem Statement
 
-agentctl currently uses a custom GUI (`packages/gui-agent`) and internal primitives (mailbox, blackboard, SSE) for agent coordination. This works well for developers running locally, but doesn't scale to team-wide adoption or enterprise use cases where people already live inside Discord, Telegram, Slack, or Teams.
+foxctl currently uses a custom GUI (`packages/gui-agent`) and internal primitives (mailbox, blackboard, SSE) for agent coordination. This works well for developers running locally, but doesn't scale to team-wide adoption or enterprise use cases where people already live inside Discord, Telegram, Slack, or Teams.
 
-**Goal:** Build a generic `ChatAdapter` interface that enables agentctl's full agent coordination capabilities through any chat platform, starting with Discord, then Telegram, then Teams, then Slack.
+**Goal:** Build a generic `ChatAdapter` interface that enables foxctl's full agent coordination capabilities through any chat platform, starting with Discord, then Telegram, then Teams, then Slack.
 
 ## Architecture
 
@@ -27,7 +27,7 @@ Chat Platform (Discord / Telegram / Teams / Slack)
 [ChatAdapter Interface]  <-- generic abstraction
     |
     v
-[agentctl Engine]
+[foxctl Engine]
     |-- Skill Runner (130 skills, JSON I/O)
     |-- Mailbox (8 message types, priority/deadline)
     |-- Blackboard (shared state, TTL, leases)
@@ -38,7 +38,7 @@ Chat Platform (Discord / Telegram / Teams / Slack)
     +-- Memory / CAS / Storage
 ```
 
-The adapter sits between the platform and agentctl's existing internals. Each platform driver translates platform-native events into adapter calls and formats adapter responses back into platform-native rich messages.
+The adapter sits between the platform and foxctl's existing internals. Each platform driver translates platform-native events into adapter calls and formats adapter responses back into platform-native rich messages.
 
 ## Platform Capability Matrix
 
@@ -274,7 +274,7 @@ type UserRef struct {
 }
 ```
 
-## Mapping agentctl Primitives to Chat Features
+## Mapping foxctl Primitives to Chat Features
 
 ### 1. Mailbox (8 message types)
 
@@ -402,7 +402,7 @@ internal/interfaces/chatadapter/
         commands.go     # Slash command registration + dispatch
         embeds.go       # Discord-specific embed formatting
         interactions.go # Button/select/modal handlers
-    bridge.go           # agentctl skill/API -> adapter message bridge
+    bridge.go           # foxctl skill/API -> adapter message bridge
 ```
 
 **Dependencies:**
@@ -421,7 +421,7 @@ github.com/bwmarrin/discordgo  # Discord Go library (5.8k stars)
 
 **Configuration:**
 ```yaml
-# ~/.agentctl/chat-adapters.yaml
+# ~/.foxctl/chat-adapters.yaml
 discord:
   token: "${DISCORD_BOT_TOKEN}"
   guild_id: "123456789"           # for dev; omit for global commands
@@ -511,15 +511,15 @@ github.com/slack-go/slack  # Community Go library
 
 ```bash
 # Start chat adapter alongside web server
-agentctl web serve --chat discord
-agentctl web serve --chat telegram
-agentctl web serve --chat teams
-agentctl web serve --chat discord,telegram,teams  # multiple adapters
+foxctl web serve --chat discord
+foxctl web serve --chat telegram
+foxctl web serve --chat teams
+foxctl web serve --chat discord,telegram,teams  # multiple adapters
 
 # Standalone adapter mode (no web GUI)
-agentctl chat connect discord
-agentctl chat connect telegram
-agentctl chat connect teams --tenant-id <id>
+foxctl chat connect discord
+foxctl chat connect telegram
+foxctl chat connect teams --tenant-id <id>
 ```
 
 ## Critical Findings
@@ -537,7 +537,7 @@ agentctl chat connect teams --tenant-id <id>
 - First-class threads (1000 active/guild, unlimited archived)
 - Structured slash commands with autocomplete
 - No Marketplace requirement for production use
-- Developer-friendly (most agentctl users are developers)
+- Developer-friendly (most foxctl users are developers)
 
 ### Teams is the Enterprise Play
 
@@ -560,7 +560,7 @@ agentctl chat connect teams --tenant-id <id>
 
 ## Open Questions
 
-1. **Should the adapter run in-process with `agentctl web serve` or as a separate binary?**
+1. **Should the adapter run in-process with `foxctl web serve` or as a separate binary?**
    - In-process is simpler but couples lifecycle
    - Separate binary allows independent scaling
 
@@ -579,6 +579,6 @@ agentctl chat connect teams --tenant-id <id>
    - Teams: one tenant may have multiple workspaces
 
 5. **Authentication mapping?**
-   - How to map Discord/Teams/Slack users to agentctl identities?
+   - How to map Discord/Teams/Slack users to foxctl identities?
    - Simple: config file mapping user IDs
    - Advanced: OAuth flow linking accounts

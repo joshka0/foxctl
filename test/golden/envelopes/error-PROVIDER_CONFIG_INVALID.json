@@ -10,6 +10,6 @@
 	"error": {
 		"code": "PROVIDER_CONFIG_INVALID",
 		"message": "Invalid embedding provider configuration: API key not set",
-		"hint": "Set GEMINI_API_KEY environment variable or configure provider in agentctl config"
+		"hint": "Set GEMINI_API_KEY environment variable or configure provider in foxctl config"
 	}
 }

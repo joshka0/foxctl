@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 // Job represents a schedulable unit of work.

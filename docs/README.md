@@ -1,4 +1,4 @@
-# agentctl Documentation
+# foxctl Documentation
 
 This is the canonical map for docs in this repository.
 
@@ -21,11 +21,11 @@ This is the canonical map for docs in this repository.
 - [docs/general/retrieval-evals.md](general/retrieval-evals.md) - Stable ACA retrieval eval suites, wrapper commands, and current expected bands.
 - [docs/general/tmux-collaboration.md](general/tmux-collaboration.md) - tmux-based live collaboration setup, structured pane inspection, and ACA promotion flow.
 - [docs/general/room-runtime-adoption-pass.md](general/room-runtime-adoption-pass.md) - Current adoption matrix for hardened room-runtime semantics and the remaining queued-draft dispatch gap.
-- [configs/skills-pack/agentctl-room/SKILL.md](../configs/skills-pack/agentctl-room/SKILL.md) - Durable shared room coordination skill for room chat, relay, loop, and room tasks.
+- [configs/skills-pack/foxctl-room/SKILL.md](../configs/skills-pack/foxctl-room/SKILL.md) - Durable shared room coordination skill for room chat, relay, loop, and room tasks.
 - [docs/architecture/](architecture/) - Current runtime architecture docs.
 - [docs/architecture/context-architecture.md](architecture/context-architecture.md) - Workspace-local ACA control plane and top-of-mind slice.
 - [docs/architecture/package-topology.md](architecture/package-topology.md) - Canonical grouping map for `internal/*`, including what is legacy runtime and what `internal/v2/*` is replacing.
-- [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md) - Canonical hybrid-runtime split for Jido orchestration + `agentctl` semantics.
+- [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md) - Canonical hybrid-runtime split for Jido orchestration + `foxctl` semantics.
 - [docs/architecture/go-native-runtime-and-optional-jido.md](architecture/go-native-runtime-and-optional-jido.md) - Go-native replacements for Jido dependencies, optional frameworks, and where Eino fits (Jido optional for Elixir/BEAM users).
 - [docs/architecture/auth-identity.md](architecture/auth-identity.md) - Auth, identity, and verification architecture map.
 - [docs/guides/kubernetes.md](guides/kubernetes.md) - Kubernetes deployment guide tied to current overlays.
@@ -60,11 +60,11 @@ This is the canonical map for docs in this repository.
 - [docs/plans/features/eino-go-native-runtime-plan.md](plans/features/eino-go-native-runtime-plan.md) - Eino `AgentEngine` integration + Go-native orchestration runtime; Jido optional.
 - [docs/plans/gui-agent-improvement-roadmap.md](plans/gui-agent-improvement-roadmap.md) - Converged roadmap for turning `gui-agent` into a coherent operator control plane.
 - [docs/plans/features/v2-skills-parity-plan.md](plans/features/v2-skills-parity-plan.md) - Bring v2 profiles/tooling up to parity with ACA, Obsidian, and newer retrieval surfaces.
-- [docs/plans/features/agentctl-rlm-integration-outline.md](plans/features/agentctl-rlm-integration-outline.md) - Concrete outline for adding an RLM query-time runtime over ACA, companion memory, and repo/vault state.
-- [docs/plans/features/agentctl-rlm-next-steps.md](plans/features/agentctl-rlm-next-steps.md) - Routed and staged next-step plan for turning the experimental RLM runtime into a practical retrieval/controller layer.
+- [docs/plans/features/foxctl-rlm-integration-outline.md](plans/features/foxctl-rlm-integration-outline.md) - Concrete outline for adding an RLM query-time runtime over ACA, companion memory, and repo/vault state.
+- [docs/plans/features/foxctl-rlm-next-steps.md](plans/features/foxctl-rlm-next-steps.md) - Routed and staged next-step plan for turning the experimental RLM runtime into a practical retrieval/controller layer.
 - [docs/plans/features/slop-function-detection.md](plans/features/slop-function-detection.md) - Plan for treating "slop" as deterministic structural findings on top of refactor scout, with optional advisor reranking.
 - [docs/plans/features/refactor-intelligence-substrate.md](plans/features/refactor-intelligence-substrate.md) - Plan for making refactor scout index-aware through status, snapshots, dependency queries, change cursors, and evidence packs.
-- [docs/plans/features/refactor-phase1-status-and-snapshot.md](plans/features/refactor-phase1-status-and-snapshot.md) - Concrete Phase 1 spec for `agentctl refactor status` and `agentctl refactor snapshot`, including CLI contract, envelopes, and snapshot persistence.
+- [docs/plans/features/refactor-phase1-status-and-snapshot.md](plans/features/refactor-phase1-status-and-snapshot.md) - Concrete Phase 1 spec for `foxctl refactor status` and `foxctl refactor snapshot`, including CLI contract, envelopes, and snapshot persistence.
 - [docs/plans/features/refactor-deterministic-detection-backlog.md](plans/features/refactor-deterministic-detection-backlog.md) - Prioritized backlog for improving refactor scout through symbol hotness, opportunity scoring, co-change signals, stronger dead-code roots, and other deterministic detection upgrades.
 - [docs/plans/features/agent-mux-room-hierarchy.md](plans/features/agent-mux-room-hierarchy.md) - Proposed policy for mux-backed agent panes, parent-private subagents, and room membership boundaries.
 - [docs/plans/features/rlm-retrieval-findings.md](plans/features/rlm-retrieval-findings.md) - Current benchmark snapshot comparing ACA, direct repoindex lanes, and RLM retrieval modes.

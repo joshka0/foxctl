@@ -50,7 +50,7 @@ const (
 	StoreOpenCode             StoreName = "OPENCODE"
 )
 
-// StoreSpec describes one database-backed store used by agentctl.
+// StoreSpec describes one database-backed store used by foxctl.
 type StoreSpec struct {
 	Name StoreName
 	// DefaultFile is the default filename (relative to the store's root dir)
@@ -104,7 +104,7 @@ var canonicalStoreByName = func() map[string]StoreSpec {
 	return out
 }()
 
-// CanonicalStores returns the canonical registry of agentctl-managed stores.
+// CanonicalStores returns the canonical registry of foxctl-managed stores.
 //
 // Index:
 // - Purpose: Provide a single source of truth for store names, default DB filenames, and sync classification

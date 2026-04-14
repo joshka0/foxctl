@@ -179,7 +179,7 @@ function SessionStateScreen({
               <p>Authentication is handled by the public Better Auth gateway.</p>
               <p>
                 After sign-in, the gateway proxies authenticated <code>/api</code> and{' '}
-                <code>/ws</code> traffic to the private <code>agentctl</code> service.
+                <code>/ws</code> traffic to the private <code>foxctl</code> service.
               </p>
               <p>
                 If this screen appears unexpectedly, your session likely expired or the

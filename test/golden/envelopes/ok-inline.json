@@ -1,7 +1,7 @@
 {
   "version": 1,
   "status": "ok",
-  "command": "agentctl.example.inline",
+  "command": "foxctl.example.inline",
   "data": {
     "message": "Hello from inline envelope",
     "items": [

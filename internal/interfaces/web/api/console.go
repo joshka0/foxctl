@@ -12,11 +12,11 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	consolepkg "github.com/jkatigb/agentctl/internal/console"
-	domainconsole "github.com/jkatigb/agentctl/internal/domain/console"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/conversationsettings"
+	consolepkg "github.com/joshka0/foxctl/internal/console"
+	domainconsole "github.com/joshka0/foxctl/internal/domain/console"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/conversationsettings"
 )
 
 // ConsoleSessionsHandler returns a handler for GET /api/console/sessions.

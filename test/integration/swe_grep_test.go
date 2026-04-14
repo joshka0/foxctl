@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package integration contains integration tests for agentctl subsystems.
+// Package integration contains integration tests for foxctl subsystems.
 // These tests require the "integration" build tag to run.
 package integration
 
@@ -25,10 +25,10 @@ func TestSWEGrep_CandidatesToSnippets(t *testing.T) {
 	// Ensure we don't accidentally use globally installed skills.
 	t.Setenv("HOME", t.TempDir())
 
-	// Skip if agentctl binary not available
+	// Skip if foxctl binary not available
 	binPath := findAgentctlBinary(t)
 	if binPath == "" {
-		t.Skip("agentctl binary not found; run 'make skills-build' first")
+		t.Skip("foxctl binary not found; run 'make skills-build' first")
 	}
 
 	// Create temp workspace
@@ -460,14 +460,14 @@ func getString(t *testing.T, parent map[string]any, key string) string {
 	return v
 }
 
-// findAgentctlBinary locates the agentctl binary.
+// findAgentctlBinary locates the foxctl binary.
 func findAgentctlBinary(t *testing.T) string {
 	t.Helper()
 
 	// Try common locations
 	candidates := []string{
-		"./bin/agentctl",
-		"../../bin/agentctl",
+		"./bin/foxctl",
+		"../../bin/foxctl",
 		os.Getenv("AGENTCTL_BIN"),
 	}
 

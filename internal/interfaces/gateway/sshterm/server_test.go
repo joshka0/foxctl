@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
 
-	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
+	terminalruntime "github.com/joshka0/foxctl/internal/runtime/terminal"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
 )
 
 // testLogger creates a logger that discards output.

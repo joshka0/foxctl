@@ -20,7 +20,7 @@ type Policy struct {
 // DefaultPolicy returns conservative write boundaries for vault automation.
 func DefaultPolicy() Policy {
 	return Policy{
-		InboxPrefix:           "inbox/drafted-from-agentctl",
+		InboxPrefix:           "inbox/drafted-from-foxctl",
 		SessionsPrefix:        "sessions",
 		OpsPrefix:             "ops",
 		CanonicalPrefixes:     []string{"00-home", "atlas", "notes"},

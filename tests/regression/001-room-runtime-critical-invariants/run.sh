@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "${CASE_DIR}/../../.." && pwd)"
 cd "${REPO_ROOT}"
 
 go test -tags=libsqlite3 \
-  ./cmd/agentctl/cmd \
+  ./cmd/foxctl/cmd \
   ./internal/storage/coordination \
   ./internal/interfaces/web/api \
   ./internal/interfaces/web/sse \

@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package integration provides integration tests for agentctl.
+// Package integration provides integration tests for foxctl.
 // These tests require the "integration" build tag to run.
 package integration
 
@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runtime/runservice"
-	"github.com/jkatigb/agentctl/internal/storage/cache"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/runservice"
+	"github.com/joshka0/foxctl/internal/storage/cache"
 )
 
 // TestCacheHitSameInput verifies that caching is currently disabled even if

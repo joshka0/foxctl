@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This spec defines two closely related capabilities for `agentctl`:
+This spec defines two closely related capabilities for `foxctl`:
 
 - A **code symbol index** (code-symbol DAG) that stores per-symbol embeddings
   and call relationships for source code in a workspace.

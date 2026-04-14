@@ -1,6 +1,6 @@
 # skill/inspect
 
-A meta-skill for inspecting other agentctl skills. Designed to help LLMs (and humans) understand, troubleshoot, and analyze skill implementations.
+A meta-skill for inspecting other foxctl skills. Designed to help LLMs (and humans) understand, troubleshoot, and analyze skill implementations.
 
 ## Overview
 
@@ -137,7 +137,7 @@ echo '{"skill_name":"data/jq","view":"examples"}' | skill_inspect
       "name": "basic",
       "description": "Basic usage with required parameters",
       "input": "{\n  \"query\": \"example\",\n  \"input\": \"example\"\n}",
-      "command": "echo '{...}' | agentctl run data/jq"
+      "command": "echo '{...}' | foxctl run data/jq"
     },
     {
       "name": "full",

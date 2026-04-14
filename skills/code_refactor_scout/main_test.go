@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+	symindex "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
 
 func TestSplitTopLevel(t *testing.T) {
@@ -1233,7 +1233,7 @@ func TestObservationKeyNormalizesPointerReceiver(t *testing.T) {
 }
 
 func TestAgentGoHasStructurallySimilarRoutePair(t *testing.T) {
-	content, err := os.ReadFile("../../cmd/agentctl/cmd/agent.go")
+	content, err := os.ReadFile("../../cmd/foxctl/cmd/agent.go")
 	if err != nil {
 		t.Fatalf("read agent.go: %v", err)
 	}
@@ -1253,7 +1253,7 @@ func TestAgentGoHasStructurallySimilarRoutePair(t *testing.T) {
 		if !ok {
 			continue
 		}
-		_ = analyzeGoFuncDecl(fn, fset, "cmd/agentctl/cmd/agent.go", state)
+		_ = analyzeGoFuncDecl(fn, fset, "cmd/foxctl/cmd/agent.go", state)
 	}
 
 	candidates := []string{
@@ -1266,12 +1266,12 @@ func TestAgentGoHasStructurallySimilarRoutePair(t *testing.T) {
 	bestScore := 0
 	bestPair := ""
 	for i := 0; i < len(candidates); i++ {
-		left := state.Symbols[observationKey("cmd/agentctl/cmd/agent.go", candidates[i])]
+		left := state.Symbols[observationKey("cmd/foxctl/cmd/agent.go", candidates[i])]
 		if left == nil {
 			continue
 		}
 		for j := i + 1; j < len(candidates); j++ {
-			right := state.Symbols[observationKey("cmd/agentctl/cmd/agent.go", candidates[j])]
+			right := state.Symbols[observationKey("cmd/foxctl/cmd/agent.go", candidates[j])]
 			if right == nil {
 				continue
 			}

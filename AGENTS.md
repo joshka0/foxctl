@@ -1,9 +1,9 @@
 ---
 vault_refs:
-  - notes/repo/agentctl/platform-and-web.md
-  - notes/repo/agentctl/semantic-and-memory.md
-  - notes/repo/agentctl/skills-runtime-wiring.md
-  - notes/repo/agentctl/index.md
+  - notes/repo/foxctl/platform-and-web.md
+  - notes/repo/foxctl/semantic-and-memory.md
+  - notes/repo/foxctl/skills-runtime-wiring.md
+  - notes/repo/foxctl/index.md
   - 00-home/index.md
 ---
 
@@ -52,7 +52,7 @@ contributors
   - Request-based (mail to overseer),
   - Depth-governed (`Depth`, `MaxDepth`, `LocalMaxDepth`),
   - Potentially denied when limits are exceeded.
-- CLI agent daemons still support direct `agentctl agent spawn` for session creation; protocol-level behavior is now defined by the overseer/agent hierarchy specs.
+- CLI agent daemons still support direct `foxctl agent spawn` for session creation; protocol-level behavior is now defined by the overseer/agent hierarchy specs.
 - If you need to coordinate subagents, consult these first:
   - [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md)
   - [docs/spec/overseer_profile.md](docs/spec/overseer_profile.md)
@@ -61,8 +61,8 @@ contributors
 
 ## TL;DR
 
-1. **Start with a tree** — `agentctl run code/semantic_search --input '{"query": "your task", "format": "tree"}'`
-2. **Build the repo graph** — `agentctl index repo build --workspace . --go --typescript --elixir` *(use `--go=false` for non-Go repos)* for call/ref navigation
+1. **Start with a tree** — `foxctl run code/semantic_search --input '{"query": "your task", "format": "tree"}'`
+2. **Build the repo graph** — `foxctl index repo build --workspace . --go --typescript --elixir` *(use `--go=false` for non-Go repos)* for call/ref navigation
 3. **Envelope contract is sacred** — never change `meta.*` fields without spec
    updates (downstream tooling relies on stable envelope shape; breaking it breaks hooks, GUIs, and golden tests)
 4. **WASI = `network:"none"`** — Core v1 mandates isolation
@@ -70,14 +70,14 @@ contributors
 6. **Check gotchas first** — read
    [docs/general/gotchas.md](docs/general/gotchas.md)
 7. **Task titles** — generate based on current work; do not require user-provided titles
-8. **Native tools** — prefer agentctl skills, but if a skill is unavailable or makes completion harder, fall back to native tools
-9. **Structured shell first for command-shaped retrieval** — for supported read-only repo inspection commands *(for example: `find`, `rg`, `grep`, `sed -n`, `git status --short`, `git diff --stat`, `git log --stat`)*, prefer `agentctl shell` because it returns compact structured output; fall back to raw/native tools for already-compact or exact-value commands *(for example: `git diff --name-only`, `wc`, plain `head`/`tail`)*
+8. **Native tools** — prefer foxctl skills, but if a skill is unavailable or makes completion harder, fall back to native tools
+9. **Structured shell first for command-shaped retrieval** — for supported read-only repo inspection commands *(for example: `find`, `rg`, `grep`, `sed -n`, `git status --short`, `git diff --stat`, `git log --stat`)*, prefer `foxctl shell` because it returns compact structured output; fall back to raw/native tools for already-compact or exact-value commands *(for example: `git diff --name-only`, `wc`, plain `head`/`tail`)*
 10. **Subagent-aware planning** — before requesting agent splits, verify current spawning rules in [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md) (depth constraints, actor roles, rejection paths).
 11. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
 12. **Docs link hygiene** — run `make check-doc-links` for markdown/doc updates; CI enforces this via `.github/workflows/docs.yml`
 13. **Go-native runtime rules (v2)** — prefer `Run(ctx)` components, bounded channels, single-writer state ownership, and immutable snapshots for high-read paths
-14. **ACA vault refresh** — after repo docs, repo graph, or bridge metadata changes, rebuild the Obsidian layer with `agentctl obsidian graph build`, `graph promote`, `bridge reconcile`, and `index build`
-15. **Task continuity split** — use `agentctl context task-history-summary` for Codex/agents/scripts *(structured summary + artifact pointer)* and `configs/hooks/task-continuity-summary.sh` for hook injection *(prompt-ready wrapper output)*
+14. **ACA vault refresh** — after repo docs, repo graph, or bridge metadata changes, rebuild the Obsidian layer with `foxctl obsidian graph build`, `graph promote`, `bridge reconcile`, and `index build`
+15. **Task continuity split** — use `foxctl context task-history-summary` for Codex/agents/scripts *(structured summary + artifact pointer)* and `configs/hooks/task-continuity-summary.sh` for hook injection *(prompt-ready wrapper output)*
 16. **Never use keyword heuristics** — do not route, classify, promote, or suppress behavior using ad hoc substring/keyword matching; these heuristics are brittle. Prefer explicit schemas, typed signals, scored features, tests, or learned policies.
 17. **`internal/*` placement rule** — before adding a new `internal/*` package or extending `internal/v2/*`, read [docs/architecture/package-topology.md](docs/architecture/package-topology.md) and place the work by family model, not by local preference
 
@@ -101,10 +101,10 @@ as the review gate for package placement.
 When repo docs or structure change, refresh the ACA knowledge layer *(in this system: graph rebuild + docs bridge reconcile + vault reindex)*:
 
 ```bash
-agentctl obsidian graph build --workspace . --vault-path "/path/to/vault"
-agentctl obsidian graph promote --workspace . --vault-path "/path/to/vault"
-agentctl obsidian bridge reconcile --workspace . --vault-path "/path/to/vault"
-agentctl obsidian index build --vault-path "/path/to/vault"
+foxctl obsidian graph build --workspace . --vault-path "/path/to/vault"
+foxctl obsidian graph promote --workspace . --vault-path "/path/to/vault"
+foxctl obsidian bridge reconcile --workspace . --vault-path "/path/to/vault"
+foxctl obsidian index build --vault-path "/path/to/vault"
 ```
 
 See [docs/architecture/context-architecture.md](docs/architecture/context-architecture.md) for the dual-plane model and the full command surface.
@@ -115,13 +115,13 @@ Use this table as the deterministic execution contract.
 
 | Condition | Required action | Verification |
 |-----------|------------------|--------------|
-| Exploring unfamiliar code | Run semantic tree and (when needed) repo graph index before deep edits | `agentctl run code/semantic_search --input '{"format":"tree"}'` and relevant `agentctl index repo ...` command succeeds |
+| Exploring unfamiliar code | Run semantic tree and (when needed) repo graph index before deep edits | `foxctl run code/semantic_search --input '{"format":"tree"}'` and relevant `foxctl index repo ...` command succeeds |
 | Any state-changing command (DB writes, workspace edits, CAS writes, agent spawn, task edits) | Prefer feature-flagged rollout + idempotency keys + append-only writes for safety | Rollout can be scoped/rolled back and repeated requests are safe |
 | Editing envelope/protocol behavior | Preserve `version/status/command/data/meta/error` shape; do not change `meta.*` without spec update | Existing envelope tests or golden files still pass |
 | Routing, classification, or memory-promotion logic | Do **not** use keyword heuristics *(ad hoc substring matching)* for behavior decisions; use explicit fields, typed signals, scoring, or learned policies instead | Behavior is driven by structured inputs/tests rather than string-trigger lists |
 | WASI skill manifest or runtime change | Keep `capabilities.network: "none"` | Manifest validation (`ValidateWASIPolicy`) continues to pass |
 | Large output result (>64KB or blob-like) | Persist to CAS and return `data.summary` + `data.artifact` pointer | Output envelope contains artifact digest instead of large inline payload |
-| Read-only repo inspection via shell-shaped commands | Prefer `agentctl shell` for supported retrieval commands; fall back to raw/native when the command is already compact, exact-value oriented, unsupported, or the reducer reports `keep_raw`/`raw_unavailable` | Agent uses structured shell for noisy command-shaped retrieval and reopens raw file/context before editing |
+| Read-only repo inspection via shell-shaped commands | Prefer `foxctl shell` for supported retrieval commands; fall back to raw/native when the command is already compact, exact-value oriented, unsupported, or the reducer reports `keep_raw`/`raw_unavailable` | Agent uses structured shell for noisy command-shaped retrieval and reopens raw file/context before editing |
 | Documentation changed (`*.md`) | Run doc link checker | `make check-doc-links` passes |
 | User asks for terminology clarification | Include corrected term in parentheses with the fix | Response includes concise term mapping |
 | Skill unavailable or unsuitable | Fall back to native tools and continue | Completion does not block on missing skill |
@@ -136,20 +136,20 @@ Use this table as the deterministic execution contract.
 
 ## Agent Orchestration
 
-`agentctl` supports persistent, multi-agent coordination via the daemon. Agents persist to `agents.db`, maintain conversation history across turns, and can be queried after autonomous research completes.
+`foxctl` supports persistent, multi-agent coordination via the daemon. Agents persist to `agents.db`, maintain conversation history across turns, and can be queried after autonomous research completes.
 
 ### Commands
 
 | Command | Purpose |
 |---------|---------|
-| `agentctl agent spawn` | Create and start a new agent |
-| `agentctl agent list` | List all agents |
-| `agentctl agent info <id>` | Detailed agent status |
-| `agentctl agent ask <id> --question "..." --wait` | Send a question and wait for reply |
-| `agentctl agent kill <id>` | Stop an agent |
-| `agentctl agent resume <session-id> --prompt "..."` | Continue a previous session |
-| `agentctl agent hierarchy [session-id]` | Show agent tree |
-| `agentctl agent watch <id>` | Live activity stream |
+| `foxctl agent spawn` | Create and start a new agent |
+| `foxctl agent list` | List all agents |
+| `foxctl agent info <id>` | Detailed agent status |
+| `foxctl agent ask <id> --question "..." --wait` | Send a question and wait for reply |
+| `foxctl agent kill <id>` | Stop an agent |
+| `foxctl agent resume <session-id> --prompt "..."` | Continue a previous session |
+| `foxctl agent hierarchy [session-id]` | Show agent tree |
+| `foxctl agent watch <id>` | Live activity stream |
 
 ### Execution Modes
 
@@ -163,22 +163,22 @@ Use this table as the deterministic execution contract.
 
 ```bash
 # Research agent — autonomous turns + stays available for asks
-agentctl agent spawn --role researcher \
+foxctl agent spawn --role researcher \
   --prompt "Research the hook system architecture" \
   --exec-mode proactive \
   --llm-provider openrouter --llm-model openrouter/aurora-alpha \
   --max-auto-turns 3 --max-iterations 20 --think-interval 60
 
 # Wait for research, then query findings
-agentctl agent ask <id> --question "What did you find?" --wait --timeout 120s
+foxctl agent ask <id> --question "What did you find?" --wait --timeout 120s
 
 # Overseer — coordinates subagents
-agentctl agent spawn --role overseer \
+foxctl agent spawn --role overseer \
   --prompt "Coordinate a code review of the storage layer" \
   --exec-mode autonomous --max-auto-turns 5
 
 # Simple reactive agent
-agentctl agent spawn --role coder --prompt "Help with Go code"
+foxctl agent spawn --role coder --prompt "Help with Go code"
 ```
 
 ### Spawn Flags
@@ -222,7 +222,7 @@ CLI (agent ask) → mailbox.Send(ask) → daemon polls → engine.Run(with histo
 Execution-path note:
 - Be explicit about whether a smoke test or bug report is exercising the classic `agent run` runtime path or the Jido-backed ask/dispatch path (`agent ask --dispatcher jido` plus the Jido socket/runtime).
 - Do not treat findings from classic `agent run` as evidence about the Jido bridge unless the Jido dispatcher/runtime was actually used.
-- When debugging nested tool execution, record which binary path invoked `agentctl` and which dispatcher/runtime path was active.
+- When debugging nested tool execution, record which binary path invoked `foxctl` and which dispatcher/runtime path was active.
 
 ### LLM Provider Priority
 
@@ -236,13 +236,13 @@ Use these commands to inspect progress and retrieve responses:
 
 ```bash
 # View agent metadata/status
-agentctl agent info <agent-id>
+foxctl agent info <agent-id>
 
 # Stream live events
-agentctl agent watch <agent-id>
+foxctl agent watch <agent-id>
 
 # Ask a follow-up and wait for the reply
-agentctl agent ask <agent-id> --question "What did you find?" --wait
+foxctl agent ask <agent-id> --question "What did you find?" --wait
 ```
 
 ### Researcher Workflow
@@ -252,7 +252,7 @@ The hybrid researcher combines semantic search tools with file access tools for 
 **Recommended spawn command:**
 
 ```bash
-agentctl agent spawn --role researcher \
+foxctl agent spawn --role researcher \
   --prompt "Research <topic>. Read the actual source files and include code snippets." \
   --exec-mode autonomous \
   --llm-provider openrouter --llm-model openrouter/aurora-alpha \
@@ -290,7 +290,7 @@ Aurora-alpha with `--max-auto-turns 3 --max-iterations 20` produces ~52% of Opus
 ```mermaid
 flowchart LR
     subgraph Input
-        CLI[agentctl CLI]
+        CLI[foxctl CLI]
         HOOK[Claude Hooks]
     end
 
@@ -332,10 +332,10 @@ Use the semantic tree to understand the codebase structure:
 
 ```bash
 # Full repo tree with LLM-generated file summaries
-agentctl run code/semantic_search --input '{"format": "tree"}'
+foxctl run code/semantic_search --input '{"format": "tree"}'
 
 # Focused tree for your task (recommended)
-agentctl run code/semantic_search --input '{"query": "storage memory", "format": "tree", "limit": 25}'
+foxctl run code/semantic_search --input '{"query": "storage memory", "format": "tree", "limit": 25}'
 ```
 
 **Output includes:**
@@ -357,10 +357,10 @@ Use repoindex when you need relationships (calls, references, imports):
 ```bash
 # Build the repo graph index.
 # For TS/Elixir-only repos, add `--go=false` (otherwise Go indexing may fail).
-agentctl index repo build --workspace . --go --typescript --elixir
+foxctl index repo build --workspace . --go --typescript --elixir
 
-agentctl index repo search --workspace . --query "repoindex" --limit 10
-agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
+foxctl index repo search --workspace . --query "repoindex" --limit 10
+foxctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
 ```
 
 #### DAG grep (Explanation Subgraph)
@@ -368,7 +368,7 @@ agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge 
 Use `code/dag_grep` when you want a small explanation subgraph in one call (similar to `code/context_grep`, but for the repo graph index):
 
 ```bash
-agentctl run code/dag_grep --input '{
+foxctl run code/dag_grep --input '{
   "query": "buildEvidencePack",
   "workspace": ".",
   "render": "tree",
@@ -381,7 +381,7 @@ agentctl run code/dag_grep --input '{
 
 Notes:
 - TypeScript adds heuristic `CALLS` edges; Elixir adds heuristic `REFERS_TO` edges. These are best-effort (no type-checking) and conservative (ambiguous targets are skipped).
-- If you run skills in a restricted filesystem sandbox, set writable paths (CAS + storage + observability), e.g. `AGENTCTL_STORAGE_ROOT=/tmp/agentctl/storage AGENTCTL_PATHS_CAS=/tmp/agentctl/cas AGENTCTL_OBS_DIR=/tmp/agentctl/observability`.
+- If you run skills in a restricted filesystem sandbox, set writable paths (CAS + storage + observability), e.g. `AGENTCTL_STORAGE_ROOT=/tmp/foxctl/storage AGENTCTL_PATHS_CAS=/tmp/foxctl/cas AGENTCTL_OBS_DIR=/tmp/foxctl/observability`.
 
 ---
 
@@ -451,7 +451,7 @@ Use CAS for large results (threshold: **64KB** or large blobs):
 
 ## Engineering Principles
 
-These principles keep agentctl **safe, deterministic, and testable**.
+These principles keep foxctl **safe, deterministic, and testable**.
 
 | Principle             | Rule                                                         | Why                                             |
 | --------------------- | ------------------------------------------------------------ | ----------------------------------------------- |
@@ -551,7 +551,7 @@ Use these skills for code exploration, search, and analysis.
 | Find code semantically    | `code/semantic_search` | `--input '{"query": "auth middleware"}'`           |
 | Search + extract snippets | `code/smart_search`    | `--input '{"query": "error handling"}'`            |
 | Extract from known files  | `code/snippet_extract` | `--input '{"query": "...", "candidates": [...]}'`  |
-| Repo graph navigation     | repoindex (CLI)        | `agentctl index repo search --query "Supervisor"`  |
+| Repo graph navigation     | repoindex (CLI)        | `foxctl index repo search --query "Supervisor"`  |
 | Get stored codemap        | `codemap/get`          | `--input '{"id": "01KES..."}'`                     |
 | Generate new codemap      | `codemap/generate`     | `--input '{"query": "trace auth flow"}'`           |
 | Full function bodies      | `code/context_ripgrep` | `--input '{"pattern": "func.*Auth", "path": "."}'` |
@@ -562,13 +562,13 @@ Find code by meaning, not just text matching.
 
 ```bash
 # Basic search
-agentctl run code/semantic_search --input '{"query": "database connection pooling"}'
+foxctl run code/semantic_search --input '{"query": "database connection pooling"}'
 
 # With scope filter (symbols, sessions, memory, codemaps)
-agentctl run code/semantic_search --input '{"query": "auth", "scope": ["symbols"]}'
+foxctl run code/semantic_search --input '{"query": "auth", "scope": ["symbols"]}'
 
 # Limit results
-agentctl run code/semantic_search --input '{"query": "error handling", "limit": 5}'
+foxctl run code/semantic_search --input '{"query": "error handling", "limit": 5}'
 ```
 
 **Output:** Ranked candidates with `path`, `symbol`, `line`, `score`.
@@ -580,10 +580,10 @@ when you don't have specific files.
 
 ```bash
 # Find and extract code about a topic
-agentctl run code/smart_search --input '{"query": "how does session restore work"}'
+foxctl run code/smart_search --input '{"query": "how does session restore work"}'
 
 # With file pattern filter
-agentctl run code/smart_search --input '{"query": "error types", "glob": "*.go"}'
+foxctl run code/smart_search --input '{"query": "error types", "glob": "*.go"}'
 ```
 
 **Output:** Extracted snippets with full context (function bodies, surrounding
@@ -595,7 +595,7 @@ Use when you already have candidate files (from semantic_search or manual list).
 
 ```bash
 # Extract snippets from specific candidates
-agentctl run code/snippet_extract --input '{
+foxctl run code/snippet_extract --input '{
   "query": "authentication logic",
   "candidates": [
     {"path": "internal/auth/handler.go", "line": 45},
@@ -604,7 +604,7 @@ agentctl run code/snippet_extract --input '{
 }'
 
 # With masked mode (structure only)
-agentctl run code/snippet_extract --input '{
+foxctl run code/snippet_extract --input '{
   "query": "API endpoints",
   "candidates": [{"path": "cmd/server/routes.go"}],
   "mode": "masked"
@@ -619,10 +619,10 @@ Fetch a previously generated codemap by ID.
 
 ```bash
 # Get full codemap with traces
-agentctl run codemap/get --input '{"id": "01KES88RGGVWG0T33WY7NH3AFR"}'
+foxctl run codemap/get --input '{"id": "01KES88RGGVWG0T33WY7NH3AFR"}'
 
 # List available codemaps first
-agentctl run codemap/list --input '{"limit": 10}'
+foxctl run codemap/list --input '{"limit": 10}'
 ```
 
 **Output:** Full codemap with traces, mermaid diagrams, annotations, file
@@ -634,10 +634,10 @@ Generate semantic code traces using an AI agent.
 
 ```bash
 # Generate codemap for a topic
-agentctl run codemap/generate --input '{"query": "trace the authentication flow"}'
+foxctl run codemap/generate --input '{"query": "trace the authentication flow"}'
 
 # With workspace scope
-agentctl run codemap/generate --input '{
+foxctl run codemap/generate --input '{
   "query": "how does session management work",
   "workspace": "/path/to/repo"
 }'
@@ -653,10 +653,10 @@ classes).
 
 ```bash
 # Find functions matching pattern
-agentctl run code/context_ripgrep --input '{"pattern": "func.*Handle", "path": "."}'
+foxctl run code/context_ripgrep --input '{"pattern": "func.*Handle", "path": "."}'
 
 # With file type filter
-agentctl run code/context_ripgrep --input '{
+foxctl run code/context_ripgrep --input '{
   "pattern": "class.*Service",
   "path": "src/",
   "glob": "*.py"
@@ -677,13 +677,13 @@ semantic_search → snippet_extract → counsel
 
 ```bash
 # 1. Find candidates
-agentctl run code/semantic_search --input '{"query": "error handling"}' > candidates.json
+foxctl run code/semantic_search --input '{"query": "error handling"}' > candidates.json
 
 # 2. Extract snippets
-agentctl run code/snippet_extract --input "$(cat candidates.json | jq '{query: "error handling", candidates: .data.results}')"
+foxctl run code/snippet_extract --input "$(cat candidates.json | jq '{query: "error handling", candidates: .data.results}')"
 
 # 3. Or use smart_search for steps 1+2 combined
-agentctl run code/smart_search --input '{"query": "error handling"}'
+foxctl run code/smart_search --input '{"query": "error handling"}'
 ```
 
 ---
@@ -696,7 +696,7 @@ agentctl run code/smart_search --input '{"query": "error handling"}'
 2. Implement with JSON envelope I/O
 3. Add `config.LoadDotEnv()` if using API keys
 4. Build:
-   `CGO_ENABLED=0 go build -o ~/.agentctl/skills/my/skill/bin ./skills/my_skill`
+   `CGO_ENABLED=0 go build -o ~/.foxctl/skills/my/skill/bin ./skills/my_skill`
 
 **Detailed docs:** [docs/general/skills.md](docs/general/skills.md)
 
@@ -711,8 +711,8 @@ agentctl run code/smart_search --input '{"query": "error handling"}'
 ### Working with Memory
 
 ```bash
-agentctl memory put --name "gotcha-x" --type "gotcha" --summary "..."
-agentctl memory search "query"
+foxctl memory put --name "gotcha-x" --type "gotcha" --summary "..."
+foxctl memory search "query"
 ```
 
 **Detailed docs:** [docs/general/memory.md](docs/general/memory.md)
@@ -733,11 +733,11 @@ Always include `data.hint` to help users fix the problem.
 ## Quick Reference
 
 ```yaml
-Project: agentctl
+Project: foxctl
 Language: Go 1.25+ (CGO off by default)
 CLI: Cobra + Viper
 I/O: JSON envelopes (version: 1)
-  Storage: SQLite + CAS (~/.agentctl/)
+  Storage: SQLite + CAS (~/.foxctl/)
   Runners: Exec (default), WASI (isolated)
   Lint: golangci-lint + gofumpt
   Tests: go test ./... -race

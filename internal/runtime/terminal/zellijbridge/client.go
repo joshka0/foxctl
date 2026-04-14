@@ -82,7 +82,7 @@ type InterruptResult struct {
 func TTYRegistryFile(session, participantID string) string {
 	session = strings.TrimSpace(session)
 	participantID = strings.TrimSpace(participantID)
-	return filepath.Join(os.TempDir(), "agentctl-zellij-tty", sanitizeTTYRegistryComponent(session), sanitizeTTYRegistryComponent(participantID)+".tty")
+	return filepath.Join(os.TempDir(), "foxctl-zellij-tty", sanitizeTTYRegistryComponent(session), sanitizeTTYRegistryComponent(participantID)+".tty")
 }
 
 // Client exposes minimal zellij pane creation for agent tenancy.

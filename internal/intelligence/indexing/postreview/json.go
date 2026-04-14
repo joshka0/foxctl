@@ -3,7 +3,7 @@ package postreview
 import (
 	"encoding/json"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
 )
 
 func marshalFiles(files []indexing.FileChange) (string, error) {

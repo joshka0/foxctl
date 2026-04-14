@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/bash_guard
@@ -37,7 +37,7 @@ signature:
       The bash_guard hook enforces agent profile restrictions on bash commands.
 
       For restricted profiles (explorer, reviewer, implementer):
-      - Only "agentctl run <skill>" commands are allowed
+      - Only "foxctl run <skill>" commands are allowed
       - The skill must be in the profile's allowlist
       - All other bash commands are blocked
 
@@ -58,7 +58,7 @@ signature:
             - matcher: "Bash"
               hooks:
                 - type: command
-                  command: "agentctl run hooks/bash_guard --ephemeral"
+                  command: "foxctl run hooks/bash_guard --ephemeral"
 returns:
   - name: hook_output
     type: object

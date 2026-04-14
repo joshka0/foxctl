@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 func TestWorkerRunOnce(t *testing.T) {
@@ -83,7 +83,7 @@ func TestWorkerRunOnceGeneratesProposalMergeMaintenanceTasks(t *testing.T) {
 		BlastRadius:    "medium",
 		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
 			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},

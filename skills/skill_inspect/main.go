@@ -14,9 +14,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/textutil"
 )
 
 const command = "skill/inspect"
@@ -44,7 +44,7 @@ func main() {
 // run orchestrates skill inspection with multiple view modes including manifest, types, API, implementation, and examples.
 //
 // Index:
-// - Purpose: Analyze and document agentctl skills with multiple view modes for API discovery, type inspection, and example generation
+// - Purpose: Analyze and document foxctl skills with multiple view modes for API discovery, type inspection, and example generation
 // - Flow: validate input → find skill directory → dispatch to view handler → parse source code → generate documentation → emit results
 // - SideEffects: reads skill files; parses Go source code; extracts type information; generates usage examples; analyzes manifests
 // - FailureModes: missing skill directories, file access errors, Go parsing failures, invalid view specifications
@@ -517,7 +517,7 @@ func generateExamples(skillName string, params []map[string]string) []map[string
 				"name":        "basic",
 				"description": "Basic usage with required parameters",
 				"input":       string(inputJSON),
-				"command":     fmt.Sprintf("echo '%s' | agentctl run %s", string(inputJSON), skillName),
+				"command":     fmt.Sprintf("echo '%s' | foxctl run %s", string(inputJSON), skillName),
 			})
 		}
 	}
@@ -534,7 +534,7 @@ func generateExamples(skillName string, params []map[string]string) []map[string
 				"name":        "full",
 				"description": "Full usage with all parameters",
 				"input":       string(inputJSON),
-				"command":     fmt.Sprintf("echo '%s' | agentctl run %s", string(inputJSON), skillName),
+				"command":     fmt.Sprintf("echo '%s' | foxctl run %s", string(inputJSON), skillName),
 			})
 		}
 	}

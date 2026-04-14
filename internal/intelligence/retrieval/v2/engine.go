@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
+	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
 )
 
 // Engine runs a retrieval-v2 request end-to-end.

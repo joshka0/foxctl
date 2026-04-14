@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 if ! command -v "$AGENTCTL_BIN" >/dev/null 2>&1; then
   echo '{"decision":"approve"}'
   exit 0

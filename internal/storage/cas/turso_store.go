@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/metrics"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/platform/metrics"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
 // TursoStore implements CASStore using Turso as the backend.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # task-guard.sh - Claude Code PreToolUse hook wrapper for hooks/task_guard skill
 #
-# This script wraps the agentctl hooks/task_guard skill for use as a Claude Code hook.
-# It reads the hook event from stdin, calls agentctl, and extracts the hook_output.
+# This script wraps the foxctl hooks/task_guard skill for use as a Claude Code hook.
+# It reads the hook event from stdin, calls foxctl, and extracts the hook_output.
 #
 # Usage in .claude/settings.json:
 #   {
@@ -17,7 +17,7 @@
 #   }
 #
 # Environment variables:
-#   AGENTCTL_BIN           - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN           - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_TASK_GUARD_MODE - Mode: 'auto' (default) or 'strict'
 
 set -euo pipefail
@@ -26,7 +26,7 @@ set -euo pipefail
 trap 'kill $(jobs -p) 2>/dev/null || true' SIGTERM SIGINT EXIT
 
 # Configuration
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 
 # Read hook input from stdin
 payload="$(cat)"
@@ -34,7 +34,7 @@ payload="$(cat)"
 # Extract workspace root from CLAUDE_PROJECT_DIR or derive from tool input
 workspace_root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
-# Transform Claude hook input to agentctl hook.Input format
+# Transform Claude hook input to foxctl hook.Input format
 # Claude provides: tool_name, tool_input, session_id, etc.
 hook_input=$(printf '%s' "$payload" | jq -c --arg ws "$workspace_root" '{
   event: "PreToolUse",
@@ -44,7 +44,7 @@ hook_input=$(printf '%s' "$payload" | jq -c --arg ws "$workspace_root" '{
   tool_input: (.tool_input // {})
 }')
 
-# Call agentctl skill with --ephemeral for faster execution (skip job persistence)
+# Call foxctl skill with --ephemeral for faster execution (skip job persistence)
 result="$(printf '%s' "$hook_input" | "$AGENTCTL_BIN" run --daemon hooks/task_guard --ephemeral --input-file - 2>/dev/null)" || {
   # On error, allow the operation to proceed (fail-open)
   echo '{}' 

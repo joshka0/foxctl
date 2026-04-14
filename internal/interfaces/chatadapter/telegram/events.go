@@ -9,9 +9,9 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/sse"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter"
+	"github.com/joshka0/foxctl/internal/interfaces/web/sse"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 type agentThread struct {

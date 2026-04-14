@@ -7,11 +7,11 @@ import (
 	"slices"
 	"testing"
 
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/runner"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/tools"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	"github.com/joshka0/foxctl/internal/v2/runtime/profiles"
+	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
+	"github.com/joshka0/foxctl/internal/v2/runtime/tools"
 )
 
 func TestToolCatalog_AllowsOnlyProfileTools(t *testing.T) {

@@ -16,7 +16,7 @@ if [[ "${AGENTCTL_COUNSEL_SUGGEST_DISABLED:-}" == "1" ]]; then
 fi
 
 THRESHOLD="${AGENTCTL_COUNSEL_SUGGEST_THRESHOLD:-3}"
-COUNTER_DIR="${AGENTCTL_HOME:-$HOME/.agentctl}/cache/counsel-counter"
+COUNTER_DIR="${AGENTCTL_HOME:-$HOME/.foxctl}/cache/counsel-counter"
 
 INPUT=$(cat)
 file_path=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')

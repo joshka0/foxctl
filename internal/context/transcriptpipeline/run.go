@@ -5,12 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	historypkg "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	historypkg "github.com/joshka0/foxctl/internal/context/transcriptpipeline/history"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	memstore "github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/transcriptcache"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
 )
 
 // SingleRunOptions configures one single-transcript derivation run.

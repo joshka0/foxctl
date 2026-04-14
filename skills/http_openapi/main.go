@@ -9,19 +9,19 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	openapiauth "github.com/jkatigb/agentctl/internal/interfaces/openapi/auth"
-	"github.com/jkatigb/agentctl/internal/interfaces/openapi/builder"
-	"github.com/jkatigb/agentctl/internal/interfaces/openapi/client"
-	"github.com/jkatigb/agentctl/internal/interfaces/openapi/loader"
-	"github.com/jkatigb/agentctl/internal/interfaces/openapi/pagination"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/secrets"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
+	openapiauth "github.com/joshka0/foxctl/internal/interfaces/openapi/auth"
+	"github.com/joshka0/foxctl/internal/interfaces/openapi/builder"
+	"github.com/joshka0/foxctl/internal/interfaces/openapi/client"
+	"github.com/joshka0/foxctl/internal/interfaces/openapi/loader"
+	"github.com/joshka0/foxctl/internal/interfaces/openapi/pagination"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/secrets"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 // Input defines the parameters for OpenAPI operation execution.
@@ -84,7 +84,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.OperationID == "" {
 		return skillerr.Arg(
 			"operationId is required",
-			skillerr.WithHint("Use `agentctl openapi describe <spec>` to list available operations."),
+			skillerr.WithHint("Use `foxctl openapi describe <spec>` to list available operations."),
 		)
 	}
 
@@ -107,7 +107,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if err != nil {
 		hint := "Verify the spec path exists and is a valid OpenAPI 3.0+ specification"
 		if strings.HasPrefix(in.Spec, "memory:") {
-			hint = fmt.Sprintf("Memory reference not found. Use 'agentctl openapi import <spec> --as %s' to import it first", strings.TrimPrefix(in.Spec, "memory:"))
+			hint = fmt.Sprintf("Memory reference not found. Use 'foxctl openapi import <spec> --as %s' to import it first", strings.TrimPrefix(in.Spec, "memory:"))
 		} else if strings.HasPrefix(in.Spec, "http://") || strings.HasPrefix(in.Spec, "https://") {
 			hint = "Check the URL is accessible and returns a valid OpenAPI specification"
 		}
@@ -121,7 +121,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Check if operation exists and provide helpful error
 	if _, err := spec.GetOperation(in.OperationID); err != nil {
 		available := suggestOperations(spec, in.OperationID)
-		hint := fmt.Sprintf("Operation %q not found. Available operations: %s. Use 'agentctl openapi describe %s' to list all operations",
+		hint := fmt.Sprintf("Operation %q not found. Available operations: %s. Use 'foxctl openapi describe %s' to list all operations",
 			in.OperationID, available, in.Spec)
 		return skillerr.NotFound(hint, skillerr.WithCause(fmt.Errorf("operation not found: %s", in.OperationID)))
 	}
@@ -467,9 +467,9 @@ func generateHint(code string, statusCode int) string {
 		}
 		return "Authentication error. Verify your credentials are correct and not expired."
 	case "EOPENAPI":
-		return "Failed to load or parse OpenAPI specification. Verify the spec path or memory reference is correct. Use 'agentctl openapi validate <spec>' to check for errors."
+		return "Failed to load or parse OpenAPI specification. Verify the spec path or memory reference is correct. Use 'foxctl openapi validate <spec>' to check for errors."
 	case "EARG":
-		return "Invalid parameters. Check that all required parameters are provided and have correct types. Use 'agentctl openapi describe <spec>' to see parameter requirements."
+		return "Invalid parameters. Check that all required parameters are provided and have correct types. Use 'foxctl openapi describe <spec>' to see parameter requirements."
 	case "ERATELIMIT":
 		return "Rate limit exceeded. Wait before retrying, or reduce request frequency. Check the X-RateLimit-Reset header for when limits reset."
 	case "ERUNTIME":
@@ -515,7 +515,7 @@ func generateBuildHint(err error, spec *loader.Spec, operationID string) string 
 		return "Some path parameters were not provided. Check that all {param} placeholders have corresponding values."
 	}
 
-	return "Review the operation parameters in the OpenAPI spec or use 'agentctl openapi describe <spec>' for details."
+	return "Review the operation parameters in the OpenAPI spec or use 'foxctl openapi describe <spec>' for details."
 }
 
 // suggestOperations suggests similar operation IDs when a requested operation is not found.

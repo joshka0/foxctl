@@ -22,7 +22,7 @@ def main():
     turso_url = os.environ.get('TURSO_DATABASE_URL')
     turso_token = os.environ.get('TURSO_AUTH_TOKEN')
     local_db = os.environ.get('LOCAL_SESSIONS_DB',
-                              os.path.expanduser('~/.agentctl/storage/sessions.db'))
+                              os.path.expanduser('~/.foxctl/storage/sessions.db'))
 
     if not turso_url or not turso_token:
         print("Error: TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set")

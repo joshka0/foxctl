@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/interfaces/openapi/client"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/interfaces/openapi/client"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/cas"
 )
 
 func TestExecuteInlineJSON(t *testing.T) {

@@ -4,7 +4,7 @@
 
 ## Executive Summary
 
-Migrate the agentctl React GUI (`packages/gui/`) to a Svelte SPA (`packages/gui-svelte/`). The migration follows a phased approach, starting with scaffolding and simple pages, progressing to complex interactive pages like Console.
+Migrate the foxctl React GUI (`packages/gui/`) to a Svelte SPA (`packages/gui-svelte/`). The migration follows a phased approach, starting with scaffolding and simple pages, progressing to complex interactive pages like Console.
 
 **Estimated Effort**: 4-5 weeks (following port order from simplest to most complex)
 
@@ -17,7 +17,7 @@ Migrate the agentctl React GUI (`packages/gui/`) to a Svelte SPA (`packages/gui-
 ```
 packages/gui-svelte/
 ├── index.html
-├── package.json              # @agentctl/gui-svelte
+├── package.json              # @foxctl/gui-svelte
 ├── tsconfig.json
 ├── vite.config.ts
 ├── postcss.config.cjs
@@ -33,7 +33,7 @@ packages/gui-svelte/
 │   │   ├── api/
 │   │   │   ├── queryClient.ts      # TanStack Query client
 │   │   │   ├── sse.ts              # SSE invalidation
-│   │   │   ├── client.ts           # Re-export from @agentctl/data
+│   │   │   ├── client.ts           # Re-export from @foxctl/data
 │   │   │   ├── consoleApi.ts       # Console-specific endpoints
 │   │   │   └── consoleTypes.ts     # Console type definitions
 │   │   │
@@ -82,7 +82,7 @@ packages/gui-svelte/
 
 ```json
 {
-  "name": "@agentctl/gui-svelte",
+  "name": "@foxctl/gui-svelte",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -93,7 +93,7 @@ packages/gui-svelte/
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
-    "@agentctl/data": "workspace:*",
+    "@foxctl/data": "workspace:*",
     "@tanstack/svelte-query": "^5.64.0",
     "lucide-svelte": "^0.500.0",
     "svelte": "^4.2.19",
@@ -181,7 +181,7 @@ export default defineConfig({
 
 #### A.2 Core Infrastructure
 - [ ] Create `src/lib/api/queryClient.ts`
-- [ ] Create `src/lib/api/client.ts` (re-export from `@agentctl/data`)
+- [ ] Create `src/lib/api/client.ts` (re-export from `@foxctl/data`)
 - [ ] Create `src/lib/api/sse.ts` (invalidate on events)
 - [ ] Create `src/lib/utils/time.ts` (formatRelativeTime)
 - [ ] Create `src/lib/utils/format.ts` (cn, formatBytes)

@@ -8,8 +8,8 @@ Awesome — here are the appendices to paste at the bottom of the spec.
 This is the **canonical** config format for hook dispatch. It is intentionally small and deterministic.
 
 ### File locations (precedence)
-1. `<workspace>/.agentctl/hooks.yaml`
-2. `~/.agentctl/hooks.yaml`
+1. `<workspace>/.foxctl/hooks.yaml`
+2. `~/.foxctl/hooks.yaml`
 
 ### Merge rules (deterministic)
 - Both files are loaded.
@@ -69,7 +69,7 @@ hooks:
 
 ## Appendix B — Canonical mailbox message shapes (v1)
 
-There are **two messaging layers** in agentctl:
+There are **two messaging layers** in foxctl:
 
 1. **Mailbox Queue (SQLite queue)**: durable, leased messages for actor scheduling. (Ask/Cmd/Event/Reply, Console.*)
 2. **Board/Inbox (blackboard board store)**: human/agent messages, reservations, surfaced inbox context. (Handled by `mail.*` tools and `hooks/*_inbox` style hooks.)
@@ -108,7 +108,7 @@ This appendix defines the **Mailbox Queue** message format (the actor scheduler 
 
 ### Payload envelope (canonical)
 
-All payloads in mailbox messages are agentctl envelopes:
+All payloads in mailbox messages are foxctl envelopes:
 
 ```json
 {
@@ -265,7 +265,7 @@ This is a pragmatic default mapping that:
 > NOTE: any skill referenced here must be a **hook skill** (accepts `hook.Input`).
 > If a non-hook skill is needed (e.g., `session/restore`), it should be invoked via a hook action (`run_skill`) from a hook skill wrapper.
 
-### `~/.agentctl/hooks.yaml` (default)
+### `~/.foxctl/hooks.yaml` (default)
 
 ```yaml
 version: 1
@@ -391,7 +391,7 @@ These are the **canonical runtime contracts** between the hook dispatcher and ho
 
 ### Envelope contract
 
-Hook skills MUST write a normal agentctl envelope with:
+Hook skills MUST write a normal foxctl envelope with:
 
 - `status: "ok"` on success
 - `data.hook_output` containing a `hook.Output`
@@ -569,7 +569,7 @@ type Action struct {
 	// send_mailbox
 	ToNS         string          `json:"to_ns,omitempty"`
 	MessageType  string          `json:"message_type,omitempty"` // ask|cmd|event|reply|console.ask|...
-	Payload      json.RawMessage `json:"payload,omitempty"`      // agentctl envelope
+	Payload      json.RawMessage `json:"payload,omitempty"`      // foxctl envelope
 	Headers      map[string]string `json:"headers,omitempty"`
 	TTLMS        int64           `json:"ttl_ms,omitempty"`
 	DeliveryHint string          `json:"delivery_hint,omitempty"` // optional: "interrupt"|"next_turn"

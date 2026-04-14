@@ -91,7 +91,7 @@ func TestRebuildSearchRelatedAndStats(t *testing.T) {
 		t.Fatalf("repo symbol hit=%q want compact handoff pattern", repoSymbolHits[0].Path)
 	}
 
-	related, err := store.RelatedNotes(ctx, "notes/moc/agentctl-context.md", 10)
+	related, err := store.RelatedNotes(ctx, "notes/moc/foxctl-context.md", 10)
 	if err != nil {
 		t.Fatalf("RelatedNotes: %v", err)
 	}

@@ -1,12 +1,12 @@
 # LSP Skills Extension Guide
 
-This document describes how to add new language server skills to agentctl.
+This document describes how to add new language server skills to foxctl.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   agentctl                          │
+│                   foxctl                          │
 │  ┌───────────┐  ┌───────────┐  ┌───────────────┐   │
 │  │ lsp/gopls │  │lsp/tsserver│ │lsp/rust-analyzer│  │
 │  └─────┬─────┘  └─────┬─────┘  └───────┬───────┘   │
@@ -68,7 +68,7 @@ skills/lsp_<server>/
 ### 2. Skill Manifest Template
 
 ```yaml
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: lsp/<server>
@@ -218,11 +218,11 @@ func skipIfNoServer(t *testing.T) {
 
 ### Skill Documentation
 
-Create `.claude/skills/agentctl-lsp-<lang>/Skill.md`:
+Create `.claude/skills/foxctl-lsp-<lang>/Skill.md`:
 
 ```markdown
 ---
-name: agentctl LSP <Language>
+name: foxctl LSP <Language>
 description: <Language> language server operations
 ---
 
@@ -241,7 +241,7 @@ Update `.claude/commands/pre-impl.md` to include the new language:
 Use LSP for deeper understanding:
 
 \`\`\`bash
-agentctl run lsp/<server> --input '{"operation": "references", ...}'
+foxctl run lsp/<server> --input '{"operation": "references", ...}'
 \`\`\`
 ```
 
@@ -267,5 +267,5 @@ This allows running the LSP as an MCP server, eliminating the need for CLI wrapp
 Set `AGENTCTL_DEBUG=1` to see raw LSP output:
 
 ```bash
-AGENTCTL_DEBUG=1 agentctl run lsp/gopls --input '...'
+AGENTCTL_DEBUG=1 foxctl run lsp/gopls --input '...'
 ```

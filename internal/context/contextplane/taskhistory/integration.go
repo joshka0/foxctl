@@ -9,17 +9,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	platformcfg "github.com/jkatigb/agentctl/internal/platform/config"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
-	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	platformcfg "github.com/joshka0/foxctl/internal/platform/config"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/storage/cas"
+	memorystore "github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
+	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 func OpenCollector(ctx context.Context, storageRoot, workspacePath, vaultPath string) (Collector, func(), error) {

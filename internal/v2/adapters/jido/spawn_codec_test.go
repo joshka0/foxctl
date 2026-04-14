@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
 )
 
 func TestSpawnRequestToSignalRequest(t *testing.T) {
@@ -23,7 +23,7 @@ func TestSpawnRequestToSignalRequest(t *testing.T) {
 		Metadata: map[string]any{
 			"issue_id": "ISSUE-42",
 			"plugin_config": map[string]any{
-				"binary": "/tmp/agentctl",
+				"binary": "/tmp/foxctl",
 			},
 		},
 		MaxIterations:    3,
@@ -82,8 +82,8 @@ func TestSpawnRequestToSignalRequest(t *testing.T) {
 		t.Fatalf("signal.data.metadata.issue_id=%v want ISSUE-42", got)
 	}
 	pluginConfig, _ := metadata["plugin_config"].(map[string]any)
-	if got := pluginConfig["binary"]; got != "/tmp/agentctl" {
-		t.Fatalf("signal.data.metadata.plugin_config.binary=%v want /tmp/agentctl", got)
+	if got := pluginConfig["binary"]; got != "/tmp/foxctl" {
+		t.Fatalf("signal.data.metadata.plugin_config.binary=%v want /tmp/foxctl", got)
 	}
 }
 

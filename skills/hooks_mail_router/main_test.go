@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/agent"
 	"github.com/stretchr/testify/assert"
 )
 

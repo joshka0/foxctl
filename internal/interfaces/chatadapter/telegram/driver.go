@@ -13,11 +13,11 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
-	"github.com/jkatigb/agentctl/internal/domain/identity"
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/sse"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/domain/identity"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter"
+	"github.com/joshka0/foxctl/internal/interfaces/web/sse"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // Adapter implements chatadapter.ChatAdapter for Telegram.
@@ -329,7 +329,7 @@ func (a *Adapter) dispatchCommand(m *tgbotapi.Message, chatKey string) {
 	cmd = strings.ReplaceAll(cmd, "_", "-")
 	args := strings.TrimSpace(m.CommandArguments())
 
-	// Adapter-local helper commands (not routed to agentctl).
+	// Adapter-local helper commands (not routed to foxctl).
 	switch cmd {
 	case "chat-id":
 		content := fmt.Sprintf("chat_id: %d\nchannel_key: %s", m.Chat.ID, chatKey)

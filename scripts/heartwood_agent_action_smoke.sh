@@ -3,18 +3,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DEFAULT_AGENTCTL_BIN="${REPO_ROOT}/bin/agentctl-cgo"
+DEFAULT_AGENTCTL_BIN="${REPO_ROOT}/bin/foxctl-cgo"
 DEFAULT_HEARTWOOD_ROOT="$(cd "${REPO_ROOT}/../heartwood" 2>/dev/null && pwd || true)"
 
 if [ -z "${AGENTCTL_BIN:-}" ]; then
   if [ -x "${DEFAULT_AGENTCTL_BIN}" ]; then
     AGENTCTL_BIN="${DEFAULT_AGENTCTL_BIN}"
   else
-    AGENTCTL_BIN="$(command -v agentctl || true)"
+    AGENTCTL_BIN="$(command -v foxctl || true)"
   fi
 fi
 if [ -z "${AGENTCTL_BIN}" ]; then
-  echo "AGENTCTL_BIN is not set and no agentctl binary was found on PATH" >&2
+  echo "AGENTCTL_BIN is not set and no foxctl binary was found on PATH" >&2
   exit 1
 fi
 

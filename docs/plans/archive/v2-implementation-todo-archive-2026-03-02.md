@@ -51,7 +51,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 
 - [x] PR-11: Live command-surface cutover (v2 routing in real CLI/API/daemon handlers)
   - [x] wire daemon `agent.spawn`/`agent.list`/`agent.kill` request handling to v2 command handlers in `internal/runtime/daemon/service.go`
-  - [x] wire CLI `spawn/run/list/kill` entrypoints to v2 command handlers in `cmd/agentctl/cmd/agent.go`
+  - [x] wire CLI `spawn/run/list/kill` entrypoints to v2 command handlers in `cmd/foxctl/cmd/agent.go`
   - [x] wire API agent spawn/daemon action handlers to v2 command handlers in `internal/interfaces/web/api/agents.go`
   - [x] remove transitional per-command v1 fallback/shadow routing from active command surfaces
   - [x] add integration tests proving real handler routing (not router-only unit tests)
@@ -102,7 +102,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 - [x] PR-19: source conversation resynthesis for v2 artifact surfaces
   - [x] add source-import adapter for Claude/Codex JSONL -> canonical v2 turn lineage
   - [x] add deterministic artifact derivation (`annotation`, `classification`, `learning`, optional `embedding`)
-  - [x] add `agentctl sessions resynthesize-v2` command for direct v2 backfill writes
+  - [x] add `foxctl sessions resynthesize-v2` command for direct v2 backfill writes
   - [x] support optional Claude todo snapshot ingestion in artifact synthesis context
   - [x] enforce embedding dimension compatibility with turns store settings
 
@@ -114,7 +114,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
   - [x] retired in hard-cut cleanup (runtime command-level routing flags removed from active command surfaces)
 - [x] PR-21: command-surface de-legacy dedup (remove no-op v2 passthrough wrappers)
   - [x] point CLI/API v2 function pointers at canonical handlers directly
-  - [x] remove no-op `*V2` wrappers in `cmd/agentctl/cmd/agent.go` and `internal/interfaces/web/api/agents.go`
+  - [x] remove no-op `*V2` wrappers in `cmd/foxctl/cmd/agent.go` and `internal/interfaces/web/api/agents.go`
   - [x] remove daemon `handleAgent*V2` passthrough methods and route both branches to canonical handlers
   - [x] reduced duplicated behavior paths during transition; finalized as hard-cut direct routing
 - [x] PR-22: explicit v2 list command path (no v2->v1 aliasing)
@@ -185,7 +185,7 @@ Wave 4 scope and contracts live in:
   - [x] add deterministic tests for embedder resolver/factory, runtime artifact enricher behavior, and command helper wiring
   - Subagent Review
     - reviewer: Ampere (explorer) `019c9f4e-b7fc-7e40-9263-8f23d1bf411e`
-    - scope: `cmd/agentctl/cmd/sessions.go`, `cmd/agentctl/cmd/sessions_embedder_test.go`, `internal/v2/adapters/sourceimport/{embedder_factory.go,embedder_factory_test.go,types.go,artifacts.go,importer_test.go}`, `internal/v2/runtime/enrichers/{artifact_enricher.go,artifact_enricher_test.go}`
+    - scope: `cmd/foxctl/cmd/sessions.go`, `cmd/foxctl/cmd/sessions_embedder_test.go`, `internal/v2/adapters/sourceimport/{embedder_factory.go,embedder_factory_test.go,types.go,artifacts.go,importer_test.go}`, `internal/v2/runtime/enrichers/{artifact_enricher.go,artifact_enricher_test.go}`
     - findings: initial review found runtime provenance tagging, provider default attribution, and duplicate resolve issues; follow-up review found none
     - decision: approved
 - [x] PR-26 (M4): WorkingContext gate on retrieval
@@ -212,7 +212,7 @@ Wave 4 scope and contracts live in:
 
 - [x] libsql embedding storage format and vector indexing policy for artifact tables
 - [x] context budget policy across L2/L1/L0 (resolved: global default split + per-command overrides via `LayerBudget`)
-- [x] whether and how to backfill selected v1 turns into v2 retrieval surfaces (resolved via `agentctl sessions resynthesize-v2` source-log import/resynthesis path)
+- [x] whether and how to backfill selected v1 turns into v2 retrieval surfaces (resolved via `foxctl sessions resynthesize-v2` source-log import/resynthesis path)
 - [x] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (CI now runs strict native-vector gate with `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`)
 - [x] episode boundary heuristics and landmark thresholds for M3 (resolved: deterministic rule set with `cosine_distance>=0.30`, todo-completion boundaries, decision-transition boundaries, landmark criteria)
 - [x] WorkingContext default strictness for M4 (resolved: fallback ladder `strict -> relax_labels -> relax_salience -> temporal_only` with explicit metadata)
@@ -256,20 +256,20 @@ Subagent Review
   - Removed transitional routing packages under `internal/v2/ports/*`.
   - Removed unused legacy bridge package `internal/v2/adapters/v1bridge/*`.
   - Updated active Wave/Decision sections to reflect direct v2 command-surface wiring and retired runtime command-level fallback/shadow flags.
-  - Validation: `go test ./internal/v2/... ./internal/runtime/daemon ./internal/interfaces/web/api ./cmd/agentctl/cmd` and `make check-doc-links` (pass).
+  - Validation: `go test ./internal/v2/... ./internal/runtime/daemon ./internal/interfaces/web/api ./cmd/foxctl/cmd` and `make check-doc-links` (pass).
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c9f4e-b7fc-7e40-9263-8f23d1bf411e`
-  - scope: `PR-32 embedding stack unification` (`cmd/agentctl/cmd/sessions.go`, `cmd/agentctl/cmd/sessions_embedder_test.go`, `internal/v2/adapters/sourceimport/{embedder_factory.go,embedder_factory_test.go,types.go,artifacts.go,importer_test.go}`, `internal/v2/runtime/enrichers/{artifact_enricher.go,artifact_enricher_test.go}`)
+  - scope: `PR-32 embedding stack unification` (`cmd/foxctl/cmd/sessions.go`, `cmd/foxctl/cmd/sessions_embedder_test.go`, `internal/v2/adapters/sourceimport/{embedder_factory.go,embedder_factory_test.go,types.go,artifacts.go,importer_test.go}`, `internal/v2/runtime/enrichers/{artifact_enricher.go,artifact_enricher_test.go}`)
   - findings: `initial review found three issues (runtime provenance tag mismatch, provider default attribution, duplicate resolver pass); all fixed; final review found none`
   - decision: `approved`
 - 2026-02-27: Completed PR-32 embedding stack unification (hash/lmstudio/voyage) across runtime + resynthesis.
   - Added shared embedder resolver/factory in `internal/v2/adapters/sourceimport/embedder_factory.go` with provider defaults, env fallback handling, and probe helpers.
-  - Rewired `agentctl sessions resynthesize-v2` embedder setup to use one resolve pass + resolved constructor path.
+  - Rewired `foxctl sessions resynthesize-v2` embedder setup to use one resolve pass + resolved constructor path.
   - Added runtime artifact enricher tests and runtime provenance override (`metadata.artifact_from=runtime`) while preserving source-import provenance defaults.
   - Changed runtime artifact enricher default provider to `ProviderAuto` to avoid codex mislabeling in mixed/unspecified runtime contexts.
-  - Added command-level helper coverage for resynthesize embedder resolution (`cmd/agentctl/cmd/sessions_embedder_test.go`).
-  - Validation: `CGO_ENABLED=0 go test ./internal/v2/adapters/sourceimport ./internal/v2/runtime/enrichers ./cmd/agentctl/cmd -count=1` (pass).
+  - Added command-level helper coverage for resynthesize embedder resolution (`cmd/foxctl/cmd/sessions_embedder_test.go`).
+  - Validation: `CGO_ENABLED=0 go test ./internal/v2/adapters/sourceimport ./internal/v2/runtime/enrichers ./cmd/foxctl/cmd -count=1` (pass).
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c9f1e-2ade-78c1-9b68-c00af252fdb1`
@@ -304,17 +304,17 @@ Subagent Review
   - Added `LongLivedRunService` and deterministic `BuildLongLivedRunSpecs` wiring in `internal/v2/services/long_lived_run_service.go`.
   - Added lifecycle hardening: run/close gate, invalid-spec host suppression, and non-retryable terminal dependency classification.
   - Added regression coverage in `internal/v2/services/long_lived_run_service_test.go` for host start-once, host failure surfacing, no-host behavior, post-close behavior, timeout-close retry, invalid specs, and in-flight run shutdown gating.
-  - Validation: `go test ./internal/v2/services -count=1` and `go test ./internal/v2/runtime/... ./internal/v2/services/... ./cmd/agentctl/cmd -run 'AgentRun|V2Routing|LongLivedRunService' -count=1` (pass).
+  - Validation: `go test ./internal/v2/services -count=1` and `go test ./internal/v2/runtime/... ./internal/v2/services/... ./cmd/foxctl/cmd -run 'AgentRun|V2Routing|LongLivedRunService' -count=1` (pass).
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c9efa-c142-7731-a9bf-75b1744da466`
-  - scope: `PR-28 explicit v2 run command path` (`cmd/agentctl/cmd/agent.go`)
+  - scope: `PR-28 explicit v2 run command path` (`cmd/foxctl/cmd/agent.go`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-27: Completed PR-28 explicit v2 run command path.
   - Replaced `runAgentRunV2Fn = runAgentRunV1` alias with explicit `runAgentRunV2`.
   - Added shared helper `runAgentRunWithRoute(cmd, args)` and routed both v1/v2 run handlers through it for parity.
-  - Validation: `go test ./cmd/agentctl/cmd` (pass).
+  - Validation: `go test ./cmd/foxctl/cmd` (pass).
 - 2026-02-27:
   Subagent Review
   - reviewer: `019c8797-2d35-7802-bd3e-87b68a229994`
@@ -359,18 +359,18 @@ Subagent Review
 - 2026-02-22:
   Subagent Review
   - reviewer: `019c8604-5703-7ec2-92f3-3d797ac316e7` (final), `019c8602-a782-7b21-8f1a-e611a302cb8d` (initial)
-  - scope: `PR-24 explicit v2 spawn path` (`cmd/agentctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/runtime/daemon/service.go`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-24 explicit v2 spawn path` (`cmd/foxctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/runtime/daemon/service.go`, `docs/plans/v2-implementation-todo.md`)
   - findings: `initial review found one medium issue (unused route flag in daemon helper), fixed; final re-review found none`
   - decision: `approved`
 - 2026-02-22: Completed PR-24 explicit v2 spawn command path.
   - Added dedicated daemon `handleAgentSpawnV2(ctx, params)` route for v2 dispatch (no v2 branch alias in method dispatch).
   - Switched CLI/API spawn v2 function pointers to explicit v2 handlers while retaining existing behavior.
   - Consolidated spawn behavior in shared helpers to preserve parity and keep v1 fallback unchanged.
-  - Verification: `go test ./cmd/agentctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon ./internal/v2/...` (pass).
+  - Verification: `go test ./cmd/foxctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon ./internal/v2/...` (pass).
 - 2026-02-22:
   Subagent Review
   - reviewer: `019c85f4-8d2e-7731-ac25-934560901d63`, `019c85f4-8e14-7f20-b676-f7bd9124913d`, `019c85fb-d4a5-7650-a26a-291b252c4cf6` (post-review follow-up)
-  - scope: `PR-23 explicit v2 kill path` (`internal/runtime/daemon/service.go`, `internal/interfaces/web/api/agents.go`, `cmd/agentctl/cmd/agent.go`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-23 explicit v2 kill path` (`internal/runtime/daemon/service.go`, `internal/interfaces/web/api/agents.go`, `cmd/foxctl/cmd/agent.go`, `docs/plans/v2-implementation-todo.md`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-22: Completed PR-23 explicit v2 kill command path.
@@ -379,33 +379,33 @@ Subagent Review
   - Preserved kill side effects (agent session map + agents.db stopped-state updates) via shared post-kill helper.
   - Switched CLI/API kill v2 function pointers to explicit v2 handlers while preserving payload behavior.
   - Post-review follow-up: threaded request `context.Context` through v1 kill route in daemon dispatch to preserve cancellation/timeout propagation.
-  - Verification: `go test ./cmd/agentctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon ./internal/v2/...` (pass).
+  - Verification: `go test ./cmd/foxctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon ./internal/v2/...` (pass).
 - 2026-02-22:
   Subagent Review
   - reviewer: `019c8583-da9f-7122-8f64-cca0d7544e33`, `019c8583-de8e-79a2-a6bd-fc225e5acd7c`
-  - scope: `PR-22 explicit v2 list path` (`cmd/agentctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/runtime/daemon/service.go`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-22 explicit v2 list path` (`cmd/foxctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/runtime/daemon/service.go`, `docs/plans/v2-implementation-todo.md`)
   - findings: `none blocking`; one reviewer noted pending placeholders in this tracker entry, now resolved
   - decision: `approved`
 - 2026-02-22: Completed PR-22 explicit v2 list command path.
   - Added dedicated daemon `handleAgentListV2(ctx)` route for v2 branch dispatch (no v2->v1 alias call).
   - Unified list result shaping through shared builder to preserve payload parity.
   - Switched CLI/API list v2 function pointers to explicit v2 handler functions while keeping behavior stable.
-  - Verification: `go test ./cmd/agentctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon` and `go test ./internal/v2/...` (pass).
+  - Verification: `go test ./cmd/foxctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon` and `go test ./internal/v2/...` (pass).
 - 2026-02-21:
   Subagent Review
   - reviewer: `019c829e-2f38-7e31-9e78-b22e43ed600f`, `019c829e-305d-7e41-90f5-acdb7875d24b`
-  - scope: `PR-21 command-surface de-legacy dedup` (`cmd/agentctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/runtime/daemon/service.go`, targeted routing tests)
+  - scope: `PR-21 command-surface de-legacy dedup` (`cmd/foxctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/runtime/daemon/service.go`, targeted routing tests)
   - findings: `none blocking`; both reviewers flagged follow-up visibility for eventual v2-native replacement paths
   - decision: `approved-with-known-risks`
 - 2026-02-21: Completed PR-21 command-surface de-legacy dedup.
   - Removed no-op v2 passthrough wrappers and directly aliased v2 branch defaults to canonical handlers in CLI/API.
   - Simplified daemon method dispatch to call canonical handlers from both v1/v2 branches and removed redundant `handleAgent*V2` methods.
   - Kept `AGENTCTL_V2_COMMANDS` command routing contract intact while reducing duplicate implementation paths.
-  - Verification: `go test ./cmd/agentctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon ./internal/v2/...` (pass).
+  - Verification: `go test ./cmd/foxctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon ./internal/v2/...` (pass).
 - 2026-02-20:
   Subagent Review
   - reviewer: `019c7a42-5bc2-7fa1-9945-68904fac8326`
-  - scope: `PR-20 routing-default slice` (`internal/v2/ports/config/{v2flags.go,v2flags_test.go}`, `cmd/agentctl/cmd/agent_v2_routing_test.go`, `internal/interfaces/web/api/agents_v2_routing_test.go`, `internal/runtime/daemon/service_v2_routing_test.go`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-20 routing-default slice` (`internal/v2/ports/config/{v2flags.go,v2flags_test.go}`, `cmd/foxctl/cmd/agent_v2_routing_test.go`, `internal/interfaces/web/api/agents_v2_routing_test.go`, `internal/runtime/daemon/service_v2_routing_test.go`, `docs/spec/v2_greenfield_bootstrap.md`, `docs/plans/v2-greenfield-bootstrap.md`, `docs/plans/v2-implementation-todo.md`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-20: Completed PR-20 v2-primary routing defaults.
@@ -417,7 +417,7 @@ Subagent Review
 - 2026-02-20:
   Subagent Review
   - reviewer: `019c7a17-f8a4-71a3-8a7a-3fa2dd05ca9c`
-  - scope: `PR-19 source resynthesis slice` (`cmd/agentctl/cmd/sessions.go`, `internal/v2/adapters/sourceimport/*`, `internal/v2/adapters/libsql/turns/store.go`)
+  - scope: `PR-19 source resynthesis slice` (`cmd/foxctl/cmd/sessions.go`, `internal/v2/adapters/sourceimport/*`, `internal/v2/adapters/libsql/turns/store.go`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-20: Completed PR-19 source conversation resynthesis into v2 turns/artifacts.
@@ -425,7 +425,7 @@ Subagent Review
     - provider detection + parsing for Claude/Codex JSONL sources
     - canonical lineage mapping (`Turn -> Iteration -> ToolCall`)
     - deterministic artifact derivation (`annotation`, `classification`, `learning`, optional `embedding`)
-  - Added CLI surface `agentctl sessions resynthesize-v2` in `cmd/agentctl/cmd/sessions.go` with provider/source/session/workspace controls and `--dry-run`.
+  - Added CLI surface `foxctl sessions resynthesize-v2` in `cmd/foxctl/cmd/sessions.go` with provider/source/session/workspace controls and `--dry-run`.
   - Added optional Claude todo ingestion and integration into synthesized artifact context (`--include-todos`).
   - Added `VectorDimensions()` accessor on turns store and switched embedder dimensions to store-configured values to avoid vector-dimension mismatch in environments with non-default settings.
   - Added parser/artifact derivation tests under `internal/v2/adapters/sourceimport/importer_test.go`.
@@ -641,10 +641,10 @@ Subagent Review
   - Disabled daemon shadow execution for these mutating RPC methods to avoid duplicate side effects during routing rollout.
   - Added daemon routing tests in `internal/runtime/daemon/service_v2_routing_test.go` to assert v1/v2 decision switching via `AGENTCTL_V2_COMMANDS`.
 - 2026-02-18: PR-11 completed for CLI/API/daemon command surfaces.
-  - Routed real CLI handlers (`agent spawn/run/list/kill`) through `internal/v2/ports/cli` in `cmd/agentctl/cmd/agent.go` with v1 fallback and v2 command opt-in via `AGENTCTL_V2_COMMANDS`.
+  - Routed real CLI handlers (`agent spawn/run/list/kill`) through `internal/v2/ports/cli` in `cmd/foxctl/cmd/agent.go` with v1 fallback and v2 command opt-in via `AGENTCTL_V2_COMMANDS`.
   - Routed API agent spawn and daemon action handlers through `internal/v2/ports/api` in `internal/interfaces/web/api/agents.go` while preserving current behavior in v2 delegates.
   - Added handler-level routing tests:
-    - `cmd/agentctl/cmd/agent_v2_routing_test.go`
+    - `cmd/foxctl/cmd/agent_v2_routing_test.go`
     - `internal/interfaces/web/api/agents_v2_routing_test.go`
     - extended daemon fallback coverage in `internal/runtime/daemon/service_v2_routing_test.go`
 - 2026-02-18: Completed PR-12 libsql turn/artifact persistence slice.
@@ -693,7 +693,7 @@ Subagent Review
     - mutating shadow commands (`spawn`,`run`,`kill`) blocked unless explicitly enabled
   - Wired CLI/API/daemon command dispatchers to `NewRouterWithShadow(...)` with sanitized shadow flags.
   - Added parity routing tests for non-mutating shadow execution and mutating opt-in behavior:
-    - `cmd/agentctl/cmd/agent_v2_routing_test.go`
+    - `cmd/foxctl/cmd/agent_v2_routing_test.go`
     - `internal/interfaces/web/api/agents_v2_routing_test.go`
     - `internal/runtime/daemon/service_v2_routing_test.go`
   - Added explicit PR-16 parity-window and promotion thresholds in `docs/plans/v2-greenfield-bootstrap.md`.
@@ -703,22 +703,22 @@ Subagent Review
   - Wired CLI/API/daemon routers and dispatchers to pass freeze flags with shadow flags via `NewRouterWithShadowAndFreeze(...)`.
   - Added freeze-routing coverage in:
     - `internal/v2/ports/router_shadow_test.go`
-    - `cmd/agentctl/cmd/agent_v2_routing_test.go`
+    - `cmd/foxctl/cmd/agent_v2_routing_test.go`
     - `internal/interfaces/web/api/agents_v2_routing_test.go`
     - `internal/runtime/daemon/service_v2_routing_test.go`
   - Validated with:
-    - `go test ./internal/v2/ports/config ./internal/v2/ports ./cmd/agentctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon`
+    - `go test ./internal/v2/ports/config ./internal/v2/ports ./cmd/foxctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon`
     - `go test ./internal/v2/...`
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c7315-8761-7543-9035-f8ad55dab480`
-  - scope: `PR-16 freeze-gate completion slice` (`internal/v2/ports/{config/v2flags.go,router.go,router_shadow_test.go,cli/router.go,api/router.go,daemon/router.go}`, `cmd/agentctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/interfaces/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/runtime/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/v2-implementation-todo.md`)
+  - scope: `PR-16 freeze-gate completion slice` (`internal/v2/ports/{config/v2flags.go,router.go,router_shadow_test.go,cli/router.go,api/router.go,daemon/router.go}`, `cmd/foxctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/interfaces/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/runtime/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/v2-implementation-todo.md`)
   - findings: `none`
   - decision: `approved`
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c730f-e7ef-7a01-af53-4f912ff57574`
-  - scope: `PR-16 partial decommission readiness slice` (`internal/v2/ports/config/{v2flags,v2flags_test}.go`, `cmd/agentctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/interfaces/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/runtime/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/{v2-greenfield-bootstrap,v2-implementation-todo}.md`)
+  - scope: `PR-16 partial decommission readiness slice` (`internal/v2/ports/config/{v2flags,v2flags_test}.go`, `cmd/foxctl/cmd/{agent.go,agent_v2_routing_test.go}`, `internal/interfaces/web/api/{agents.go,agents_v2_routing_test.go}`, `internal/runtime/daemon/{service.go,service_v2_routing_test.go}`, `docs/plans/{v2-greenfield-bootstrap,v2-implementation-todo}.md`)
   - findings: `none` (overall `pass`; note: reviewer requested a full-suite run before merge, completed in local verification step)
   - decision: `approved-with-known-risks`
 - 2026-02-18:
@@ -730,7 +730,7 @@ Subagent Review
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c72ca-4cd5-74a0-b5bd-548700eaee61`
-  - scope: `PR-11 expanded routing slice` (`cmd/agentctl/cmd/agent.go`, `cmd/agentctl/cmd/agent_v2_routing_test.go`, `internal/interfaces/web/api/agents.go`, `internal/interfaces/web/api/agents_v2_routing_test.go`, `internal/runtime/daemon/service.go`, `internal/runtime/daemon/service_v2_routing_test.go`)
+  - scope: `PR-11 expanded routing slice` (`cmd/foxctl/cmd/agent.go`, `cmd/foxctl/cmd/agent_v2_routing_test.go`, `internal/interfaces/web/api/agents.go`, `internal/interfaces/web/api/agents_v2_routing_test.go`, `internal/runtime/daemon/service.go`, `internal/runtime/daemon/service_v2_routing_test.go`)
   - findings: `none` (non-blocking note addressed by adding daemon invalid-env fallback test coverage)
   - decision: `approved`
 - 2026-02-18:
@@ -914,14 +914,14 @@ Subagent Review
   - Added shadow command parsing via `AGENTCTL_V2_SHADOW_COMMANDS` in `internal/v2/ports/config/v2flags.go` (+ tests).
   - Added non-blocking-capable shadow execution contract in `internal/v2/ports/router.go` with `DispatchWithShadow`, `ShadowReport`, comparator support, and parity tests.
   - Wired CLI/API/daemon v2 routers to pass shadow configuration (`internal/v2/ports/{cli,api,daemon}/router.go`).
-  - Added real CLI `agent ask` shadow validation hook in `cmd/agentctl/cmd/agent_ask_shadow.go` and called it from `runAgentAsk` after v1 ack/write.
+  - Added real CLI `agent ask` shadow validation hook in `cmd/foxctl/cmd/agent_ask_shadow.go` and called it from `runAgentAsk` after v1 ack/write.
   - Shadow run is side-effect safe (no second mailbox send) by using v2 ask service with an in-memory dispatcher and emits `agent.ask.shadow` observability events.
   - Updated parity verification docs to include `AGENTCTL_V2_SHADOW_COMMANDS=ask` bootstrap.
-  - Validated with `go test ./cmd/agentctl/cmd ./internal/v2/ports/... ./internal/v2/...`, `go test -tags=libsqlite3 ./...`, and `make check-doc-links`.
+  - Validated with `go test ./cmd/foxctl/cmd ./internal/v2/ports/... ./internal/v2/...`, `go test -tags=libsqlite3 ./...`, and `make check-doc-links`.
 - 2026-02-18:
   Subagent Review
   - reviewer: `019c71bb-e52a-7a52-a5a9-53e57fd0268b`
-  - scope: `PR-10 ask shadow plumbing` (`cmd/agentctl/cmd/{agent.go,agent_ask_shadow.go,agent_ask_shadow_test.go}`, `internal/v2/ports/{config,router,cli,api,daemon}/*`, plan docs)
+  - scope: `PR-10 ask shadow plumbing` (`cmd/foxctl/cmd/{agent.go,agent_ask_shadow.go,agent_ask_shadow_test.go}`, `internal/v2/ports/{config,router,cli,api,daemon}/*`, plan docs)
   - findings: `none`
   - decision: `approved`
 - 2026-02-23: Completed PR-27 (M5) narrative artifact wiring.
@@ -929,11 +929,11 @@ Subagent Review
   - Extended narrative contract + persistence for compiler progress metadata (`source_turn_id`, `source_turn_index`, `source_turn_count`) across `internal/v2/core/run/narrative_record.go` and `internal/v2/adapters/libsql/turns/store.go`.
   - Added validation + regression tests for uncited claims and session-scoped idempotent narrative upsert in `internal/v2/adapters/libsql/turns/store_test.go`.
   - Integrated narrative blocks and staleness metadata into layered context assembly (`narrative_stale`, `narrative_age_seconds`, `narrative_max_age_seconds`) with test coverage in `internal/v2/runtime/contextbuilder/layered_test.go`.
-  - Added source-resynthesis manual narrative build/save path via `internal/v2/adapters/sourceimport/narrative.go` and `cmd/agentctl/cmd/sessions.go`.
-  - Validation: `go test ./internal/v2/...`, `go test ./cmd/agentctl/cmd`, and `make check-doc-links`.
+  - Added source-resynthesis manual narrative build/save path via `internal/v2/adapters/sourceimport/narrative.go` and `cmd/foxctl/cmd/sessions.go`.
+  - Validation: `go test ./internal/v2/...`, `go test ./cmd/foxctl/cmd`, and `make check-doc-links`.
 - 2026-02-23:
   Subagent Review
   - reviewer: `019c8a46-26b6-71f1-a004-67816b9d2652`
-  - scope: `PR-27 narrative slice` (`internal/v2/core/run/narrative_record.go`, `internal/v2/adapters/libsql/turns/store.go`, `internal/v2/runtime/contextbuilder/{builder.go,layered.go,layered_test.go}`, `internal/v2/runtime/enrichers/narrative_compiler.go`, `internal/v2/adapters/sourceimport/narrative.go`, `cmd/agentctl/cmd/sessions.go`)
+  - scope: `PR-27 narrative slice` (`internal/v2/core/run/narrative_record.go`, `internal/v2/adapters/libsql/turns/store.go`, `internal/v2/runtime/contextbuilder/{builder.go,layered.go,layered_test.go}`, `internal/v2/runtime/enrichers/narrative_compiler.go`, `internal/v2/adapters/sourceimport/narrative.go`, `cmd/foxctl/cmd/sessions.go`)
   - findings: `one determinism issue found initially (store SaveNarrative defaulted to time.Now instead of store clock); fixed by defaulting UpdatedAt from s.now before persistence, then re-reviewed clean`
   - decision: `approved`

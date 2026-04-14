@@ -57,7 +57,7 @@ func TestOpenDBAcceptsRelativeFilePath(t *testing.T) {
 	workspace := t.TempDir()
 	t.Chdir(workspace)
 
-	db, err := OpenDB(ctx, filepath.Join(".agentctl", "runtime", "contextplane.db"), nil)
+	db, err := OpenDB(ctx, filepath.Join(".foxctl", "runtime", "contextplane.db"), nil)
 	if err != nil {
 		t.Fatalf("open db with relative path: %v", err)
 	}

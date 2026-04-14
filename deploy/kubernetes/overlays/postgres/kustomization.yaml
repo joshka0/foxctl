@@ -13,4 +13,4 @@ patches:
 - path: deployment-patch.yaml
   target:
     kind: Deployment
-    name: agentctl
+    name: foxctl

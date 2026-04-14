@@ -69,7 +69,7 @@ type AppendSectionRequest struct {
 	CreateIfMissing bool    `json:"create_if_missing,omitempty"`
 }
 
-// KnowledgeLayer is the stable dual-plane interface the rest of agentctl should
+// KnowledgeLayer is the stable dual-plane interface the rest of foxctl should
 // program against.
 type KnowledgeLayer interface {
 	Search(ctx context.Context, q SearchQuery) ([]SearchHit, error)

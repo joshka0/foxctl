@@ -2,7 +2,7 @@
   "groupId": "gateway-core",
   "testedAt": "2026-04-09T12:00:00Z",
   "isolation": {
-    "workingDirectory": "/Users/joshka/repos/personal/agentctl",
+    "workingDirectory": "/Users/joshka/repos/personal/foxctl",
     "testCommand": "go test ./internal/gateway/ -v -count=1 -run 'TestStartDevMode|TestStartDevMode_GracefulShutdown|TestShutdown_SetsStoppedHealth|TestAuthKeyError|TestRun_AuthKeyError|TestAuthKeyError_NoStateNoKey|TestHandleHealthz|TestRun_DevMode|TestStateDirResolution|TestStartTwiceReturnsError'",
     "isolationMethod": "Each test creates its own server instance on a random free port via findFreePort(). No shared state between tests."
   },

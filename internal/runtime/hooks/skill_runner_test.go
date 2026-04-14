@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/runtime/execution"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/runtime/execution"
 )
 
 // MockSkillExecutor is a test double for SkillExecutor.

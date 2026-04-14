@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: quality/gate
@@ -50,7 +50,7 @@ signature:
       This skill is language-agnostic. It does not assume Go or any specific stack.
 
       Example:
-        agentctl run quality/gate --input '{
+        foxctl run quality/gate --input '{
           "subject":"companion memory pipeline",
           "language_hints":["go","sql","typescript"],
           "findings":[

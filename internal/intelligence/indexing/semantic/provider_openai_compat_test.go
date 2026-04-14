@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func TestOpenAICompatProviderEmbedBatch(t *testing.T) {
@@ -92,7 +92,7 @@ func TestNewProviderForModel_WorkspaceVoyageOverrideWins(t *testing.T) {
 		}
 	})
 
-	home := filepath.Join(tmp, ".agentctl")
+	home := filepath.Join(tmp, ".foxctl")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatalf("mkdir home: %v", err)
 	}
@@ -105,11 +105,11 @@ embedding:
 		t.Fatalf("write global config: %v", err)
 	}
 
-	workspace := filepath.Join(tmp, "agentctl")
-	if err := os.MkdirAll(filepath.Join(workspace, ".agentctl"), 0o755); err != nil {
+	workspace := filepath.Join(tmp, "foxctl")
+	if err := os.MkdirAll(filepath.Join(workspace, ".foxctl"), 0o755); err != nil {
 		t.Fatalf("mkdir workspace config dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, ".agentctl", "config.yaml"), []byte(`
+	if err := os.WriteFile(filepath.Join(workspace, ".foxctl", "config.yaml"), []byte(`
 embedding:
   provider: voyage
   model: voyage-3.5

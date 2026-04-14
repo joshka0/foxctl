@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useSessions, useSessionMessages, useSessionContextWindows } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { Session, SessionMessage, ContextWindow } from "@agentctl/data";
+import type { Session, SessionMessage, ContextWindow } from "@foxctl/data";
 import { useKeyboardStable } from "../hooks/useKeyboardStable";
 
 function statusColor(status: string): string {

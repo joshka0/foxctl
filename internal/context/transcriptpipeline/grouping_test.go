@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
 )
 
 func TestGroupSourceBundlesSeparatesSubagents(t *testing.T) {

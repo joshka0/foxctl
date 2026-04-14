@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: git/status
@@ -55,10 +55,10 @@ signature:
       Use git/status to summarize repository state, show diffs, or list recent
       commits.
       Example commands:
-        agentctl run git/status --input '{"operation":"status"}'
-        agentctl skills run git/status --operation status
-        agentctl run git/status --input '{"operation":"diff","staged":true,"stat":true}'
-        agentctl skills run git/status --operation diff --staged --stat
+        foxctl run git/status --input '{"operation":"status"}'
+        foxctl skills run git/status --operation status
+        foxctl run git/status --input '{"operation":"diff","staged":true,"stat":true}'
+        foxctl skills run git/status --operation diff --staged --stat
     workflows:
       - id: status
         description: "Show repository status for the current directory."

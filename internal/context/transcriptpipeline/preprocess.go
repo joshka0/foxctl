@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	actormemory "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
-	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	actormemory "github.com/joshka0/foxctl/internal/runtime/actor/memory"
+	"github.com/joshka0/foxctl/internal/storage/transcriptcache"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 // PreprocessOptions configures transcript artifact preprocessing.

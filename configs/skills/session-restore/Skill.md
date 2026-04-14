@@ -13,7 +13,7 @@ This skill runs automatically via the SessionStart hook, but can be invoked
 manually:
 
 ```bash
-agentctl run session/restore --input '{"trigger": "compact"}'
+foxctl run session/restore --input '{"trigger": "compact"}'
 ```
 
 ## What Gets Restored
@@ -73,13 +73,13 @@ The `session-restore.sh` hook runs on `SessionStart` events:
   is active unless `--force`.
 - Active is determined by status (e.g., `running`); terminal statuses set
   `ended_at`, non-terminal clear it on reopen.
-- Identity fallback file: `~/.agentctl/sessions/active/<workspace_hash>.json`
+- Identity fallback file: `~/.foxctl/sessions/active/<workspace_hash>.json`
   (stores `session_id`, `agent_id`, lineage) for hooks without env access.
 - Env to skills: `AGENTCTL_SESSION_ID`, `AGENTCTL_AGENT_ID` + fallbacks
   (`CLAUDE_SESSION_ID`, `OPENCODE_SESSION_ID`, `CURSOR_SESSION_ID`,
   `TERM_SESSION_ID`) are forwarded by exec/WASI runners so restored sessions
   attribute correctly.
-- Lineage inspection: `agentctl sessions chain --session <id>`; trajectories
+- Lineage inspection: `foxctl sessions chain --session <id>`; trajectories
   store `session_id` for joins.
 
 ## Context Format

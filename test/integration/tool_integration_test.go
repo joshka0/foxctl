@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package integration contains integration tests for agentctl subsystems.
+// Package integration contains integration tests for foxctl subsystems.
 // These tests require the "integration" build tag to run.
 package integration
 
@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
-	"github.com/jkatigb/agentctl/internal/agent/types"
+	agenttools "github.com/joshka0/foxctl/internal/agent/tools"
+	"github.com/joshka0/foxctl/internal/agent/types"
 )
 
 // D3 Integration Tests: Tool workflow tests per PR5 spec

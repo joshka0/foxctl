@@ -14,12 +14,12 @@ import (
 
 	"github.com/rs/zerolog"
 
-	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/storage/agents"
-	"github.com/jkatigb/agentctl/internal/storage/blackboard"
-	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
-	libsqlworkers "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/workers"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	agentdomain "github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/storage/agents"
+	"github.com/joshka0/foxctl/internal/storage/blackboard"
+	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
+	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 type testAgentEventPublisher struct {
@@ -54,7 +54,7 @@ func TestAgentRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T) {
 				"agent_id": agentID,
 				"status":   "ok",
 				"state": map[string]any{
-					"agentctl": map[string]any{
+					"foxctl": map[string]any{
 						"status": "running",
 						"agent":  agentID,
 					},
@@ -205,7 +205,7 @@ func TestAgentRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing.T) {
 		BackendKind: coreworker.BackendSubprocess,
 		AgentID:     "agent-go-root",
 		Status:      coreworker.StatusRunning,
-		RawState:    json.RawMessage(`{"agentctl":{"status":"running","agent":"agent-go-root"}}`),
+		RawState:    json.RawMessage(`{"foxctl":{"status":"running","agent":"agent-go-root"}}`),
 	}); err != nil {
 		t.Fatalf("upsert root worker: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestAgentRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing.T) {
 		ParentAgentID:  "agent-go-root",
 		ParentWorkerID: "subprocess:agent-go-root",
 		Status:         coreworker.StatusRunning,
-		RawState:       json.RawMessage(`{"agentctl":{"status":"running","agent":"agent-go-child-1"}}`),
+		RawState:       json.RawMessage(`{"foxctl":{"status":"running","agent":"agent-go-child-1"}}`),
 	}); err != nil {
 		t.Fatalf("upsert child worker: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestAgentRuntimeLogsGetHandler_ReturnsGoRuntimeRecentLogs(t *testing.T) {
 		BackendKind: coreworker.BackendSubprocess,
 		AgentID:     "agent-go-logs-1",
 		Status:      coreworker.StatusRunning,
-		RawState: json.RawMessage(`{"agentctl":{"status":"running","recent_logs":[
+		RawState: json.RawMessage(`{"foxctl":{"status":"running","recent_logs":[
 			{"stream":"stdout","text":"first line","ts":"2026-04-06T12:40:01Z"},
 			{"stream":"stderr","text":"second line","ts":"2026-04-06T12:40:02Z"}
 		]}}`),
@@ -436,7 +436,7 @@ func TestAgentRuntimeLogsStreamHandler_StreamsGoRuntimeLogUpdates(t *testing.T) 
 		BackendKind: coreworker.BackendSubprocess,
 		AgentID:     "agent-go-stream-logs-1",
 		Status:      coreworker.StatusRunning,
-		RawState: json.RawMessage(`{"agentctl":{"status":"running","recent_logs":[
+		RawState: json.RawMessage(`{"foxctl":{"status":"running","recent_logs":[
 			{"stream":"stdout","text":"first line","ts":"2026-04-06T12:50:01Z"}
 		]}}`),
 	}); err != nil {
@@ -459,7 +459,7 @@ func TestAgentRuntimeLogsStreamHandler_StreamsGoRuntimeLogUpdates(t *testing.T) 
 		BackendKind: coreworker.BackendSubprocess,
 		AgentID:     "agent-go-stream-logs-1",
 		Status:      coreworker.StatusRunning,
-		RawState: json.RawMessage(`{"agentctl":{"status":"running","recent_logs":[
+		RawState: json.RawMessage(`{"foxctl":{"status":"running","recent_logs":[
 			{"stream":"stdout","text":"first line","ts":"2026-04-06T12:50:01Z"},
 			{"stream":"stderr","text":"second line","ts":"2026-04-06T12:50:02Z"}
 		]}}`),
@@ -544,8 +544,8 @@ func TestResolveAgentSpawnPrompt_UsesRoomRoleDefaultAndOnboarding(t *testing.T) 
 	for _, want := range []string{
 		"You are a frontend engineering agent.",
 		"ROOM ONBOARDING:",
-		"`agentctl-room` and `agentctl-room-agent`",
-		"`agentctl room status triad-123`",
+		"`foxctl-room` and `foxctl-room-agent`",
+		"`foxctl room status triad-123`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("prompt missing %q\n%s", want, got)
@@ -658,9 +658,9 @@ func TestAgentRuntimeGetHandler_ReturnsSandboxRuntimeSummary(t *testing.T) {
 	if got := strings.TrimSpace(fmt.Sprint(state["profile"])); got != "sandbox" {
 		t.Fatalf("state.profile=%q want sandbox", got)
 	}
-	agentctlState, _ := state["agentctl"].(map[string]any)
+	agentctlState, _ := state["foxctl"].(map[string]any)
 	if got := strings.TrimSpace(fmt.Sprint(agentctlState["status"])); got != "running" {
-		t.Fatalf("state.agentctl.status=%q want running", got)
+		t.Fatalf("state.foxctl.status=%q want running", got)
 	}
 }
 

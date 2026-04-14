@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	"github.com/jkatigb/agentctl/internal/v2/core/orchestration"
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
-	"github.com/jkatigb/agentctl/internal/v2/services"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	"github.com/joshka0/foxctl/internal/v2/core/orchestration"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
+	"github.com/joshka0/foxctl/internal/v2/services"
 )
 
 func TestOrchestrationService_DispatchIssue_UsesSpawnAndIdempotency(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 )
 
 // applyDefaults sets default values for input fields (mirrors run function).

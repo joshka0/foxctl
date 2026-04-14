@@ -1,6 +1,6 @@
 # Observability Event Stream (NDJSON)
 
-This document specifies the optional **on-disk event stream** that agentctl and
+This document specifies the optional **on-disk event stream** that foxctl and
 skills MAY emit for observability. The goal is to provide a **backend-agnostic
 surface** that can be scraped or tailed by separate processes (e.g. OTEL
 Collector, Prometheus node_exporter via textfile collector), without coupling
@@ -12,7 +12,7 @@ Core to any specific monitoring stack.
   - Envelopes (Protocol v1) remain the only thing written to **stdout**.
   - Structured logs remain on **stderr** (zerolog JSON), as today.
 - **Optional behavior (this doc):**
-  - When enabled, agentctl and skills **append NDJSON events** to files under a
+  - When enabled, foxctl and skills **append NDJSON events** to files under a
     configured observability directory.
   - Each line is a single JSON object (no arrays, no pretty-printing).
   - Files are **append-only**; rotation and shipping are the operators
@@ -200,11 +200,11 @@ The NDJSON event stream is designed to be consumed by external tools.
 
 ### 5.2 Prometheus via node_exporter
 
-- Run a small sidecar (or future `agentctl obs export` helper) that:
+- Run a small sidecar (or future `foxctl obs export` helper) that:
   - Tails the NDJSON files and aggregates counters in memory.
   - Periodically writes a textfile-format `.prom` snapshot into a directory
     watched by node_exporters textfile collector.
-- This keeps the agentctl binary free of Prometheus-specific formatting.
+- This keeps the foxctl binary free of Prometheus-specific formatting.
 
 ## 6. Extension Guidelines
 

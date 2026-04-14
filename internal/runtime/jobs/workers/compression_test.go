@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )

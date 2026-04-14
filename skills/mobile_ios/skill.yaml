@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: mobile/ios
@@ -95,10 +95,10 @@ signature:
     long: |
       Use mobile/ios for device control, app lifecycle, and UI actions.
       Example commands:
-        agentctl run mobile/ios --input '{"operation":"list_devices"}'
-        agentctl skills run mobile/ios --operation list_devices
-        agentctl run mobile/ios --input '{"operation":"tap","x":150,"y":300}'
-        agentctl skills run mobile/ios --operation tap --x 150 --y 300
+        foxctl run mobile/ios --input '{"operation":"list_devices"}'
+        foxctl skills run mobile/ios --operation list_devices
+        foxctl run mobile/ios --input '{"operation":"tap","x":150,"y":300}'
+        foxctl skills run mobile/ios --operation tap --x 150 --y 300
     workflows:
       - id: list-devices
         description: "List iOS devices."

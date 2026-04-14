@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/storage/contextbuffer"
 )
 
 // MockActionSkillRunner implements ActionSkillRunner for testing.

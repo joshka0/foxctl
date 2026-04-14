@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
 )
 
 // BuildExplorerPrompt renders a compact comparison prompt for free-form transcript memoryization.

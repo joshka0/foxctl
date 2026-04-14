@@ -4,12 +4,12 @@
 # Non-blocking (advisory only) - always approves but may inject context.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_SECURITY_THRESHOLD - Minimum severity: low, medium, high, critical (default: medium)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 SEVERITY_THRESHOLD="${AGENTCTL_SECURITY_THRESHOLD:-medium}"
 
 # Read hook input from stdin
@@ -65,7 +65,7 @@ context+=$(echo "$vulns" | jq -r '
 
 context+="
 
-*Review before committing. Use \`agentctl run code/security\` for full scan.*"
+*Review before committing. Use \`foxctl run code/security\` for full scan.*"
 
 # Return approve with context (non-blocking warning)
 jq -n --arg ctx "$context" '{

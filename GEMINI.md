@@ -1,15 +1,15 @@
-# Gemini Agent Context for agentctl
+# Gemini Agent Context for foxctl
 
-> For the canonical agentctl protocol, profiles, and invariants, see
+> For the canonical foxctl protocol, profiles, and invariants, see
 > `AGENTS.md`. This file focuses on **Gemini-specific** integration and the MCP
 > bridge skills.
 
 ## Project Overview
-`agentctl` is a CLI tool for building structured, deterministic AI workflows ("Unix pipelines for AI agents").
+`foxctl` is a CLI tool for building structured, deterministic AI workflows ("Unix pipelines for AI agents").
 It uses "skills" (sandboxed tools) and structured JSON envelopes for communication.
 
 ## Build Instructions
-- **Build CLI**: `make build` (Output: `agentctl`)
+- **Build CLI**: `make build` (Output: `foxctl`)
 - **Build Skills**: `make skills-build` (Output: `dist/skills/`)
 - **Test**: `make test`
 - **Lint**: `make lint`
@@ -18,18 +18,18 @@ It uses "skills" (sandboxed tools) and structured JSON envelopes for communicati
 
 ### Running Skills
 Skills are located in `skills/` (source) or `dist/skills/` (built).
-The CLI finds skills in standard paths. You might need to set `AGENTCTL_SKILL_PATH` if running from dev directories, but usually `agentctl run <category>/<skill>` works if installed or if pointing to local sources.
+The CLI finds skills in standard paths. You might need to set `AGENTCTL_SKILL_PATH` if running from dev directories, but usually `foxctl run <category>/<skill>` works if installed or if pointing to local sources.
 
 **Common Commands:**
 ```bash
 # List files
-./agentctl run fs/ls --path .
+./foxctl run fs/ls --path .
 
 # Read file
-./agentctl run fs/read --path README.md
+./foxctl run fs/read --path README.md
 
 # Grep
-./agentctl run text/grep --pattern "func main" --path .
+./foxctl run text/grep --pattern "func main" --path .
 ```
 
 **Input/Output:**
@@ -38,18 +38,18 @@ The CLI finds skills in standard paths. You might need to set `AGENTCTL_SKILL_PA
 - Look for `.data` in the JSON output for the actual result.
 
 ### Managing State
-- **Memory**: `./agentctl memory ...`
-- **Jobs**: `./agentctl jobs ...`
+- **Memory**: `./foxctl memory ...`
+- **Jobs**: `./foxctl jobs ...`
 
 ## Implemented Feature: MCP Tool Adapter
 
-To enable `agentctl` to interact with Model Context Protocol (MCP) servers, we have implemented a generic **MCP Bridge Skill**.
+To enable `foxctl` to interact with Model Context Protocol (MCP) servers, we have implemented a generic **MCP Bridge Skill**.
 
 ### 1. Concept
 We created a generic "bridge" binary (`skills/mcp_bridge`) that acts as an MCP Client. It:
 1.  Connects to a specified MCP Server (via Stdio).
 2.  Calls a specific Tool on that server.
-3.  Returns the result in `agentctl` envelope format.
+3.  Returns the result in `foxctl` envelope format.
 
 ### 2. Components
 
@@ -61,11 +61,11 @@ We created a generic "bridge" binary (`skills/mcp_bridge`) that acts as an MCP C
 #### B. The Installer Skill (`skills/mcp_install`)
 - **Source**: `skills/mcp_install/main.go`
 - **Manifest**: `skills/mcp_install/skill.yaml`
-- **Purpose**: Introspects an MCP server and generates persistent `agentctl` skills for all available tools.
+- **Purpose**: Introspects an MCP server and generates persistent `foxctl` skills for all available tools.
 - **Usage**:
   ```bash
   # Install skills from a local python MCP server
-  ./agentctl run mcp/install --input '{
+  ./foxctl run mcp/install --input '{
     "server_cmd": "python3",
     "server_args": ["/absolute/path/to/server.py"],
     "output_dir": "./my_skills",
@@ -74,7 +74,7 @@ We created a generic "bridge" binary (`skills/mcp_bridge`) that acts as an MCP C
   
   # Install skills from a remote MCP server (HTTP/SSE)
   # Example: Exa (requires Accept header for Streamable HTTP)
-  ./agentctl run mcp/install --input '{
+  ./foxctl run mcp/install --input '{
     "server_url": "https://mcp.exa.ai/mcp",
     "server_headers": {"Accept": "application/json, text/event-stream"},
     "output_dir": "./exa_skills",
@@ -92,7 +92,7 @@ When working with the MCP adapter, keep these "gotchas" in mind:
     *   **Fix**: Always check if the server requires `Accept: application/json, text/event-stream` and pass it in `server_headers`.
 
 2.  **Network Capabilities**:
-    *   `agentctl`'s `exec` runner currently enforces a strict `network: none` policy for sandboxing.
+    *   `foxctl`'s `exec` runner currently enforces a strict `network: none` policy for sandboxing.
     *   However, the `mcp_bridge` is a native binary that *inherits* the host's network access.
     *   **Fix**: Generated skills must declare `network: none` in their manifest to pass validation, even though the bridge performs network I/O.
 

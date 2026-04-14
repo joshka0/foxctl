@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/expand
@@ -32,8 +32,8 @@ signature:
     long: |
       Use session/expand to retrieve conversation turns for a session.
       Example commands:
-        agentctl run session/expand --input '{"session_id":"01HXYZ...","limit":20}'
-        agentctl skills run session/expand --session_id 01HXYZ... --limit 20
+        foxctl run session/expand --input '{"session_id":"01HXYZ...","limit":20}'
+        foxctl skills run session/expand --session_id 01HXYZ... --limit 20
     workflows:
       - id: expand-session
         description: "Expand a session with a limit."

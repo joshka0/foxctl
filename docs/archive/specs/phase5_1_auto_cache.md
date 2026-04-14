@@ -7,7 +7,7 @@
 
 ## 1. Summary
 
-This document specifies the auto-cache system for `agentctl run`, including
+This document specifies the auto-cache system for `foxctl run`, including
 cache key computation, read/write semantics, and envelope annotation on hits.
 
 ---

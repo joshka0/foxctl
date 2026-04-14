@@ -7,7 +7,7 @@
 The foreground daemon loop is still the mailbox-driven agent runner launched by:
 
 ```bash
-agentctl agent run <agent-id>
+foxctl agent run <agent-id>
 ```
 
 That path reads mailbox messages for an agent namespace, executes turns, and
@@ -28,7 +28,7 @@ orchestration state.
 
 ```bash
 # Create an agent
-agentctl agent spawn \
+foxctl agent spawn \
   --role researcher \
   --prompt "Research the storage architecture" \
   --exec-mode proactive \
@@ -36,7 +36,7 @@ agentctl agent spawn \
   --max-iterations 20
 
 # Create a tick-driven simulation agent that can run indefinitely
-agentctl agent spawn \
+foxctl agent spawn \
   --role researcher \
   --prompt "Advance the simulation one step per tick" \
   --exec-mode tick \
@@ -44,19 +44,19 @@ agentctl agent spawn \
   --timeout 0
 
 # Run daemon loop for that agent
-agentctl agent run <agent-id>
+foxctl agent run <agent-id>
 
 # Ask a question and wait for reply
-agentctl agent ask <agent-id> --question "What did you find?" --wait
+foxctl agent ask <agent-id> --question "What did you find?" --wait
 
 # Inspect status
-agentctl agent info <agent-id>
+foxctl agent info <agent-id>
 
 # Watch live events
-agentctl agent watch <agent-id>
+foxctl agent watch <agent-id>
 
 # Stop the agent
-agentctl agent kill <agent-id>
+foxctl agent kill <agent-id>
 ```
 
 ## Current Routing Status
@@ -135,13 +135,13 @@ and idling forever.
   Jido state includes `workspace_root`.
 - The Jido bridge now supports tick-driven bridge agents:
   - bridge children can start with `exec_mode=tick` and `think_interval`
-  - the Jido side schedules recurring `agentctl.tick` signals
-  - each tick drives a persistent backing `agentctl` worker through daemon RPC
+  - the Jido side schedules recurring `foxctl.tick` signals
+  - each tick drives a persistent backing `foxctl` worker through daemon RPC
 
 Task continuity surfaces:
 
 - structured command for agents/scripts:
-  - `agentctl context task-history-summary`
+  - `foxctl context task-history-summary`
 - hook wrapper for prompt injection:
   - `configs/hooks/task-continuity-summary.sh`
 
@@ -151,7 +151,7 @@ Task continuity surfaces:
 |-----------|----------|
 | Foreground daemon loop | `internal/agent/daemon/daemon.go` |
 | Mailbox handlers | `internal/agent/daemon/handlers.go` |
-| CLI agent command routing | `cmd/agentctl/cmd/agent.go` |
+| CLI agent command routing | `cmd/foxctl/cmd/agent.go` |
 | V2 command services | `internal/v2/services/` |
 | Jido bridge | `internal/v2/adapters/jido/` |
 | Companion memory service | `internal/context/companion/` |

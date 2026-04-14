@@ -1,7 +1,7 @@
 {
   "version": 1,
   "status": "error",
-  "command": "agentctl.proto.validate",
+  "command": "foxctl.proto.validate",
   "data": {
     "hint": "Envelope missing meta.ts field",
     "validation_errors": ["meta.ts is required"]

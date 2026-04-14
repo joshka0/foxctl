@@ -15,8 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 
 	_ "modernc.org/sqlite" // register sqlite driver
 )

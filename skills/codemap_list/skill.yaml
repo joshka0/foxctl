@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: codemap/list
@@ -48,10 +48,10 @@ signature:
     long: |
       Use codemap/list to page through codemap entries.
       Example commands:
-        agentctl run codemap/list --input '{"limit":5,"offset":0}'
-        agentctl skills run codemap/list --limit 5 --offset 0
-        agentctl run codemap/list --input '{"query":"auth","summary_only":true}'
-        agentctl skills run codemap/list --query auth --summary_only
+        foxctl run codemap/list --input '{"limit":5,"offset":0}'
+        foxctl skills run codemap/list --limit 5 --offset 0
+        foxctl run codemap/list --input '{"query":"auth","summary_only":true}'
+        foxctl skills run codemap/list --query auth --summary_only
     workflows:
       - id: list-basic
         description: "List codemaps with pagination."

@@ -13,7 +13,7 @@ request**.
 ### Key Principles
 
 1. **One event per operation** - A single event captures all context needed for
-   debugging. In agentctl, an operation is the unit of work (skill run, hook,
+   debugging. In foxctl, an operation is the unit of work (skill run, hook,
    job, agent iteration), linked via `parent_id`.
 2. **Business context included** - Session IDs, workspace IDs, not just
    technical details
@@ -40,7 +40,7 @@ request**.
 Set `AGENTCTL_OBS_DIR` to enable observability:
 
 ```bash
-export AGENTCTL_OBS_DIR=~/.agentctl/observability
+export AGENTCTL_OBS_DIR=~/.foxctl/observability
 ```
 
 Events are written to `$AGENTCTL_OBS_DIR/events/wide_events.ndjson`.
@@ -55,7 +55,7 @@ Each line in the NDJSON file is a `WideEvent`:
   "trace_id": "01JFXYZ...",
   "span_id": "01JFXYZ...",
   "parent_id": "",
-  "service": "agentctl",
+  "service": "foxctl",
   "version": "0.1.0",
   "component": "skill",
   "operation": "skill.run",
@@ -93,7 +93,7 @@ Each line in the NDJSON file is a `WideEvent`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `service` | string | Always "agentctl" |
+| `service` | string | Always "foxctl" |
 | `version` | string | Build version |
 | `component` | string | "cli", "web", "hook", "skill", "job", "agent", "contextbuilder" |
 
@@ -144,7 +144,7 @@ The `skillslib/obs` package provides a clean API for skills to emit wide events
 without importing internal packages directly:
 
 ```go
-import "github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
+import "github.com/joshka0/foxctl/internal/adapters/skillslib/obs"
 
 // Start a span for an operation
 ctx, done, span := obs.StartSpan(ctx, "skill.run",
@@ -174,7 +174,7 @@ log.Error("failed", obs.Err(err))
 For internal packages, use `internal/runtime/observability` directly:
 
 ```go
-import "github.com/jkatigb/agentctl/internal/runtime/observability"
+import "github.com/joshka0/foxctl/internal/runtime/observability"
 
 // Create an event builder
 event := observability.NewEvent(observability.OpSkillRun).
@@ -495,30 +495,30 @@ format with domain-specific data in the `data` map.
 Wide events are stored under the observability directory:
 
 ```
-~/.agentctl/observability/
+~/.foxctl/observability/
 └── events/
     ├── wide_events.ndjson    # Main wide event stream
     └── code_swe_grep.ndjson  # Legacy narrow events (if enabled)
 ```
 
-The default observability path is `~/.agentctl/observability`. CLI/daemon loads
+The default observability path is `~/.foxctl/observability`. CLI/daemon loads
 `paths.observability` and sets `AGENTCTL_OBS_DIR` at startup unless it is already
 set in the environment.
 
 ### Backup Integration
 
-Observability logs are included in agentctl backups as the `observability`
+Observability logs are included in foxctl backups as the `observability`
 component:
 
 ```bash
 # Include observability in backup (default)
-agentctl backup create
+foxctl backup create
 
 # Exclude observability from backup
-agentctl backup create --exclude observability
+foxctl backup create --exclude observability
 
 # Backup only observability
-agentctl backup create --components observability
+foxctl backup create --components observability
 ```
 
 **Retention in backups**: Only event files modified in the last 7 days are
@@ -529,7 +529,7 @@ included to prevent backup size bloat.
 Events can be pruned by age or size to manage disk usage:
 
 ```go
-import "github.com/jkatigb/agentctl/internal/runtime/observability"
+import "github.com/joshka0/foxctl/internal/runtime/observability"
 
 // Prune events older than 30 days
 opts := observability.PruneOptions{
@@ -565,7 +565,7 @@ Example cron job for daily pruning:
 
 ```bash
 # Prune events older than 7 days
-0 2 * * * agentctl observability prune --older-than 7d
+0 2 * * * foxctl observability prune --older-than 7d
 ```
 
 ## Persistence Options

@@ -175,7 +175,7 @@ graph TD
   D -->|small| E[snippets_inline only]
   D -->|large| F[snippets_inline + CAS artifact]
 
-  G[agentctl run] --> H[meta.correlation_id]
+  G[foxctl run] --> H[meta.correlation_id]
   H --> I[trajectory capture]
   I --> J[(trajectory.db)]
 ```

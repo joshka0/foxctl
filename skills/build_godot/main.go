@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 const skillName = "build/godot"

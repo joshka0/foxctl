@@ -11,7 +11,7 @@ I’m going to describe it as a **single process** (because you want a single su
 Add a command like:
 
 ```bash
-agentctl gui --workspace /path/to/repo --addr 127.0.0.1:8080
+foxctl gui --workspace /path/to/repo --addr 127.0.0.1:8080
 ```
 
 This single process hosts:
@@ -194,9 +194,9 @@ That’s the Manus-like “agent studio” part.
 
 # What has to exist in code to support this GUI (concrete)
 
-## A) A single Go HTTP server inside agentctl
+## A) A single Go HTTP server inside foxctl
 
-Create `cmd/agentctl/cmd/gui.go`:
+Create `cmd/foxctl/cmd/gui.go`:
 
 * starts supervisor + watcher + API + SSE
 * serves embedded UI assets

@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
-	"github.com/jkatigb/agentctl/internal/platform/symbolutil"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
+	"github.com/joshka0/foxctl/internal/platform/symbolutil"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )
 

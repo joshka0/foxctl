@@ -9,7 +9,7 @@ import (
 // AuthorizeBash checks if a bash command is allowed for the given profile.
 //
 // For restricted profiles (explorer, reviewer, implementer):
-//   - Only "agentctl run <skill>" commands are allowed where <skill> is in the profile's allowlist
+//   - Only "foxctl run <skill>" commands are allowed where <skill> is in the profile's allowlist
 //   - All other bash commands are blocked
 //
 // For unrestricted profiles or empty profiles:
@@ -27,7 +27,7 @@ func AuthorizeBash(profile Profile, command string) AuthorizationResult {
 	// Parse the command
 	parsed := ParseCommand(command)
 
-	// If it's an agentctl run command, check if the skill is allowed
+	// If it's an foxctl run command, check if the skill is allowed
 	if parsed.IsAgentctlRun {
 		if IsSkillAllowed(profile, parsed.Skill) {
 			return AuthorizationResult{
@@ -45,22 +45,22 @@ func AuthorizeBash(profile Profile, command string) AuthorizationResult {
 		}
 	}
 
-	// Not an agentctl run command - block for restricted profiles
+	// Not an foxctl run command - block for restricted profiles
 	return AuthorizationResult{
 		Decision: DecisionBlock,
-		Reason:   fmt.Sprintf("only agentctl run commands are allowed for profile %q", profile),
+		Reason:   fmt.Sprintf("only foxctl run commands are allowed for profile %q", profile),
 		Profile:  profile,
 	}
 }
 
-// ParseCommand parses a bash command to determine if it's an agentctl run command
+// ParseCommand parses a bash command to determine if it's an foxctl run command
 // and extracts the skill name if so.
 //
 // Handles:
-//   - Simple: "agentctl run code/symbols --input '{}'"
-//   - With env vars: "AGENTCTL_WORKSPACE=/foo agentctl run code/symbols"
-//   - With path: "/usr/local/bin/agentctl run code/symbols"
-//   - Quoted args: agentctl run 'code/symbols' --input '{}'
+//   - Simple: "foxctl run code/symbols --input '{}'"
+//   - With env vars: "AGENTCTL_WORKSPACE=/foo foxctl run code/symbols"
+//   - With path: "/usr/local/bin/foxctl run code/symbols"
+//   - Quoted args: foxctl run 'code/symbols' --input '{}'
 func ParseCommand(command string) ParsedCommand {
 	result := ParsedCommand{
 		RawCommand: command,
@@ -90,7 +90,7 @@ func ParseCommand(command string) ParsedCommand {
 		return result
 	}
 
-	// Check if it's agentctl (possibly with path)
+	// Check if it's foxctl (possibly with path)
 	cmd := remaining[0]
 	if !isAgentctlCommand(cmd) {
 		return result
@@ -206,15 +206,15 @@ func parseEnvAssignment(token string) (string, string) {
 	return token[:idx], token[idx+1:]
 }
 
-// isAgentctlCommand checks if a token is the agentctl command.
+// isAgentctlCommand checks if a token is the foxctl command.
 func isAgentctlCommand(token string) bool {
 	// Direct match
-	if token == "agentctl" {
+	if token == "foxctl" {
 		return true
 	}
 
-	// Check if it ends with /agentctl (path)
-	if strings.HasSuffix(token, "/agentctl") {
+	// Check if it ends with /foxctl (path)
+	if strings.HasSuffix(token, "/foxctl") {
 		return true
 	}
 

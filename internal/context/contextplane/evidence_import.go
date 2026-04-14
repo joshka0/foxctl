@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/verification"
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
-	obsidiantool "github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
+	"github.com/joshka0/foxctl/internal/intelligence/verification"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/storage/cas"
+	obsidiantool "github.com/joshka0/foxctl/internal/tooling/tools/obsidian"
 	"gopkg.in/yaml.v3"
 )
 

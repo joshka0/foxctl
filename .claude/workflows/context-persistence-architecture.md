@@ -1,6 +1,6 @@
 # Context Persistence Architecture
 
-This document describes how to survive context compaction and maintain continuity across Claude Code sessions using agentctl.
+This document describes how to survive context compaction and maintain continuity across Claude Code sessions using foxctl.
 
 ## The Problem
 
@@ -25,7 +25,7 @@ This document describes how to survive context compaction and maintain continuit
 │         └─────────┬────────┴──────────────────┘                             │
 │                   ▼                                                         │
 │  ┌──────────────────────────────────────────────────────────────┐          │
-│  │                    agentctl HARNESS                           │          │
+│  │                    foxctl HARNESS                           │          │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐        │          │
 │  │  │   Memory     │  │    Tasks     │  │   Mailbox    │        │          │
 │  │  │  (persist)   │  │  (tracking)  │  │  (comms)     │        │          │
@@ -41,7 +41,7 @@ This document describes how to survive context compaction and maintain continuit
 │  │                 PERSISTENT STORAGE                            │          │
 │  │  • SQLite (tasks, agents, memory, mailbox)                   │          │
 │  │  • CAS (artifacts, code snapshots, large outputs)            │          │
-│  │  • ~/.agentctl/storage/                                       │          │
+│  │  • ~/.foxctl/storage/                                       │          │
 │  └──────────────────────────────────────────────────────────────┘          │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -55,7 +55,7 @@ This document describes how to survive context compaction and maintain continuit
 
 ```bash
 # Save important context before compaction
-agentctl memory put session-context --payload '{
+foxctl memory put session-context --payload '{
   "session_id": "2025-12-22-daemon-tests",
   "key_decisions": [
     "daemon.Run has complexity 43 - needs refactoring",
@@ -71,32 +71,32 @@ agentctl memory put session-context --payload '{
 }'
 
 # Retrieve at session start
-agentctl memory get session-context
+foxctl memory get session-context
 ```
 
 **Auto-save hook** (add to `.claude/hooks/session-save.sh`):
 ```bash
 #!/bin/bash
 # Called before compaction via UserPromptSubmit with specific triggers
-# Saves current session state to agentctl memory
+# Saves current session state to foxctl memory
 ```
 
 ### 2. Task Persistence
 
-**Purpose**: Track all work across sessions with agentctl todo.
+**Purpose**: Track all work across sessions with foxctl todo.
 
 ```bash
 # At session start, check pending tasks
-agentctl todo list --status pending
+foxctl todo list --status pending
 
 # When starting work
-agentctl todo add --title "Implement feature X" --description "Context..."
+foxctl todo add --title "Implement feature X" --description "Context..."
 
 # During work - update progress
-agentctl todo update --id <id> --notes "Progress: completed step 1"
+foxctl todo update --id <id> --notes "Progress: completed step 1"
 
 # At completion
-agentctl todo complete --id <id> --notes "Final notes..."
+foxctl todo complete --id <id> --notes "Final notes..."
 ```
 
 **Benefits**:
@@ -120,23 +120,23 @@ At the start of each session:
 
 ```bash
 # Check for recent session memories
-agentctl memory search "session"
+foxctl memory search "session"
 
 # Get last session context
-agentctl memory get pre-compaction-latest
+foxctl memory get pre-compaction-latest
 
 # Show pending tasks
-agentctl todo list --status pending
+foxctl todo list --status pending
 
 # Check mailbox for any pending messages
-agentctl mailbox list claude-agent
+foxctl mailbox list claude-agent
 ```
 
 ## LLM Configuration for Daemon
 
 ### Setup
 
-Create `~/.agentctl/config.yaml`:
+Create `~/.foxctl/config.yaml`:
 
 ```yaml
 llm:
@@ -145,11 +145,11 @@ llm:
   # API key via environment variable: AGENTCTL_LLM_API_KEY
 
 storage:
-  root: ~/.agentctl/storage
+  root: ~/.foxctl/storage
 
 paths:
-  cas: ~/.agentctl/cas
-  jobs: ~/.agentctl/jobs
+  cas: ~/.foxctl/cas
+  jobs: ~/.foxctl/jobs
 ```
 
 ### Environment Variables
@@ -184,7 +184,7 @@ export AGENTCTL_LLM_API_KEY=<your-groq-key>
 
 | Task Type | Model | Reason |
 |-----------|-------|--------|
-| Quick analysis | agentctl skills | <100ms, structured |
+| Quick analysis | foxctl skills | <100ms, structured |
 | Code generation | Claude Opus 4.5 (current) | Best quality |
 | Second opinion | Gemini 2.5 Pro | Different perspective |
 | Background daemon | Gemini 2.5 Flash | Cost-effective |
@@ -193,8 +193,8 @@ export AGENTCTL_LLM_API_KEY=<your-groq-key>
 ### Integration Pattern
 
 ```bash
-# Pattern 1: agentctl for structured data (fastest)
-result=$(agentctl run code/complexity --input '{"path": "."}')
+# Pattern 1: foxctl for structured data (fastest)
+result=$(foxctl run code/complexity --input '{"path": "."}')
 
 # Pattern 2: Gemini for async deep work
 echo "Complex question..." | gemini -p "Analyze thoroughly"
@@ -203,8 +203,8 @@ echo "Complex question..." | gemini -p "Analyze thoroughly"
 # Use Task tool with subagent_type for parallel work
 
 # Pattern 4: Daemon agents for background work
-agentctl agent spawn --role analyzer --skills "code/complexity,code/symbols"
-agentctl agent run <agent-id> &
+foxctl agent spawn --role analyzer --skills "code/complexity,code/symbols"
+foxctl agent run <agent-id> &
 ```
 
 ## Pre-warm Gemini Worker
@@ -215,7 +215,7 @@ Gemini CLI has ~60s startup time due to MCP initialization.
 ### Solution
 Background worker that keeps Gemini warm and accepts requests via mailbox.
 
-**Worker script** (`~/.agentctl/workers/gemini-worker.sh`):
+**Worker script** (`~/.foxctl/workers/gemini-worker.sh`):
 ```bash
 #!/bin/bash
 # Gemini pre-warm worker
@@ -225,7 +225,7 @@ WORKER_NS="gemini-worker"
 
 while true; do
   # Poll for messages (5s timeout)
-  msg=$(agentctl mailbox poll $WORKER_NS --timeout 5 --max 1 2>/dev/null)
+  msg=$(foxctl mailbox poll $WORKER_NS --timeout 5 --max 1 2>/dev/null)
 
   if [[ $(echo "$msg" | jq -r '.data.count') -gt 0 ]]; then
     # Extract payload
@@ -237,13 +237,13 @@ while true; do
     response=$(echo "$query" | gemini -p "Answer concisely:")
 
     # Send reply
-    agentctl mailbox send "$reply_to" \
+    foxctl mailbox send "$reply_to" \
       --from $WORKER_NS \
       --type agent.reply \
       --payload "{\"response\": $(echo "$response" | jq -Rs .)}"
 
     # Ack original message
-    agentctl mailbox ack "$msg_id"
+    foxctl mailbox ack "$msg_id"
   fi
 done
 ```
@@ -251,7 +251,7 @@ done
 **Start worker**:
 ```bash
 # Start in background
-nohup ~/.agentctl/workers/gemini-worker.sh &
+nohup ~/.foxctl/workers/gemini-worker.sh &
 
 # Or via launchd/systemd for persistence
 ```
@@ -259,13 +259,13 @@ nohup ~/.agentctl/workers/gemini-worker.sh &
 **Use from Claude**:
 ```bash
 # Send request to warm worker
-agentctl mailbox send gemini-worker \
+foxctl mailbox send gemini-worker \
   --from claude-agent \
   --type agent.ask \
   --payload '{"query": "What refactoring approach for high complexity functions?"}'
 
 # Poll for response (worker responds in ~2s instead of 60s)
-agentctl mailbox poll claude-agent --timeout 10
+foxctl mailbox poll claude-agent --timeout 10
 ```
 
 ## Compaction Survival Checklist
@@ -274,35 +274,35 @@ agentctl mailbox poll claude-agent --timeout 10
 
 1. **Save session summary**:
    ```bash
-   agentctl memory put session-$(date +%Y%m%d) --payload '{...}'
+   foxctl memory put session-$(date +%Y%m%d) --payload '{...}'
    ```
 
 2. **Complete or annotate tasks**:
    ```bash
-   agentctl todo list | jq '.data.tasks[] | select(.status=="in_progress")'
+   foxctl todo list | jq '.data.tasks[] | select(.status=="in_progress")'
    # Update each with current status
    ```
 
 3. **Log key decisions to blackboard**:
    ```bash
-   agentctl bb post decisions --payload '{"decision": "...", "rationale": "..."}'
+   foxctl bb post decisions --payload '{"decision": "...", "rationale": "..."}'
    ```
 
 ### After Compaction (session start)
 
 1. **Load session context**:
    ```bash
-   agentctl memory get session-latest
+   foxctl memory get session-latest
    ```
 
 2. **Review pending tasks**:
    ```bash
-   agentctl todo list --status pending
+   foxctl todo list --status pending
    ```
 
 3. **Check for messages**:
    ```bash
-   agentctl mailbox list claude-agent
+   foxctl mailbox list claude-agent
    ```
 
 ## Implementation Priority

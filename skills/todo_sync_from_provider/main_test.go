@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/context/todosync"
+	"github.com/joshka0/foxctl/internal/context/todosync"
 	"github.com/stretchr/testify/assert"
 )
 

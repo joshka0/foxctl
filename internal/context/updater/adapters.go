@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/blackboard"
-	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/blackboard"
+	"github.com/joshka0/foxctl/internal/storage/contextbuffer"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
 )
 
 // SessionStoreAdapter adapts the sessions.Store to the SessionProvider interface.

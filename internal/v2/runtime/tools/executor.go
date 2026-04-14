@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/runner"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
 )
 
 // DelegateExecutor executes resolved, validated tool calls.

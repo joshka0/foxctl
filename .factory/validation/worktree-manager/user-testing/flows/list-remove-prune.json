@@ -2,7 +2,7 @@
   "groupId": "list-remove-prune",
   "testedAt": "2026-04-08T00:00:00Z",
   "isolation": {
-    "workingDirectory": "/Users/joshka/repos/personal/agentctl",
+    "workingDirectory": "/Users/joshka/repos/personal/foxctl",
     "isolationMethod": "Each test creates its own temp git repo via t.TempDir(), no shared state"
   },
   "toolsUsed": ["go test"],
@@ -186,7 +186,7 @@
         { "action": "go test -race ./internal/platform/worktree/... -v -count=1 -run TestCreate_ConcurrentDifferentBranches", "expected": "PASS with no race detector warnings", "observed": "PASS (0.36s), no race conditions detected" }
       ],
       "evidence": {
-        "testOutput": "=== RUN   TestCreate_ConcurrentDifferentBranches\n--- PASS: TestCreate_ConcurrentDifferentBranches (0.36s)\nPASS\nok  github.com/jkatigb/agentctl/internal/platform/worktree  1.580s",
+        "testOutput": "=== RUN   TestCreate_ConcurrentDifferentBranches\n--- PASS: TestCreate_ConcurrentDifferentBranches (0.36s)\nPASS\nok  github.com/joshka0/foxctl/internal/platform/worktree  1.580s",
         "consoleErrors": "none"
       },
       "issues": null

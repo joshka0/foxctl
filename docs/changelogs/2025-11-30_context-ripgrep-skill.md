@@ -96,21 +96,21 @@ CAS artifact (NDJSON):
 
 ```bash
 # Find all functions using PathValidator in Go files
-./agentctl run code/context_ripgrep --input '{
+./foxctl run code/context_ripgrep --input '{
   "pattern": "PathValidator",
   "glob": ["*.go"],
   "max_blocks": 20
 }'
 
 # Find error handling in Python
-./agentctl run code/context_ripgrep --input '{
+./foxctl run code/context_ripgrep --input '{
   "pattern": "except.*Exception",
   "glob": ["*.py"],
   "case_insensitive": true
 }'
 
 # Find GDScript signal emissions
-./agentctl run code/context_ripgrep --input '{
+./foxctl run code/context_ripgrep --input '{
   "pattern": "\\.emit\\(",
   "glob": ["*.gd"]
 }'

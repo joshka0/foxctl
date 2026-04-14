@@ -4,7 +4,7 @@ Here’s the **top-down architecture goal** we’re converging on — independen
 
 ## What we’re trying to achieve
 
-Build `agentctl` into an **always-on, multi-actor, event-driven agent system** where:
+Build `foxctl` into an **always-on, multi-actor, event-driven agent system** where:
 
 * **Work is driven by durable queues** (SQLite mailbox/blackboard), not in-memory loops.
 * A single **Supervisor** process runs many **Actors** (per workspace / per role).

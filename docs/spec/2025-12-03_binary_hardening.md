@@ -1,8 +1,8 @@
 ---
-description: Binary hardening for the agentctl CLI (garble, PIE, UPX, runtime hooks)
+description: Binary hardening for the foxctl CLI (garble, PIE, UPX, runtime hooks)
 ---
 
-# Binary Hardening for agentctl CLI
+# Binary Hardening for foxctl CLI
 
 > **Status:** Draft (Phase 0 – design only; no code changes yet) **Version:**
 > 0.1 **Author:** AI assistant (to be updated by human owner) **Related specs:**
@@ -11,7 +11,7 @@ description: Binary hardening for the agentctl CLI (garble, PIE, UPX, runtime ho
 > - `docs/spec/review_gate.md` (review + CI invariants)
 >
 > **Goal:** Define a hardened build pipeline and runtime behavior for the
-> `agentctl` CLI that makes reverse‑engineering and live debugging _more
+> `foxctl` CLI that makes reverse‑engineering and live debugging _more
 > expensive_ while preserving Core Profile v1 contracts and existing CLI
 > semantics.
 
@@ -21,7 +21,7 @@ description: Binary hardening for the agentctl CLI (garble, PIE, UPX, runtime ho
 
 ### 1.1 Context
 
-`agentctl` is a single‑binary Go CLI that:
+`foxctl` is a single‑binary Go CLI that:
 
 - Encodes significant runtime metadata into the binary (Go symbol/table, DWARF,
   file paths).
@@ -67,7 +67,7 @@ description: Binary hardening for the agentctl CLI (garble, PIE, UPX, runtime ho
 
 We assume attackers may:
 
-- Download a released `agentctl` binary.
+- Download a released `foxctl` binary.
 - Run it in local VMs/containers with root access.
 - Attach common debuggers (e.g., `gdb`, `lldb`, `dlv`), disassemblers, and
   decompilers.
@@ -175,7 +175,7 @@ Release jobs **MAY** pack already‑hardened binaries using UPX:
 
 - Recommended flags: `upx --best --lzma`.
 - The packed binary **MUST** pass minimal smoke tests (e.g.,
-  `agentctl --version`, a basic command) before being published.
+  `foxctl --version`, a basic command) before being published.
 
 The spec acknowledges that UPX is reversible by skilled analysts and treats it
 as a convenience and size optimization, not a core security guarantee.
@@ -204,7 +204,7 @@ first iteration of this spec.
 
 ### 5.2 Panic Handling & Stack Trace Suppression
 
-For hardened builds, the `agentctl` entrypoint **SHOULD**:
+For hardened builds, the `foxctl` entrypoint **SHOULD**:
 
 - Wrap its main execution path in a `defer`‑`recover` block.
 - On panic:
@@ -249,7 +249,7 @@ only constrains what is emitted when unexpected panics occur.
 - Hardened build jobs **MUST NOT** skip lint, vet, or unit tests on the
   underlying codebase.
 - Smoke tests for hardened binaries **MUST** include at least:
-  - `agentctl --version`.
+  - `foxctl --version`.
   - One representative command that exercises envelope emission.
 - Any failures in hardened jobs **MUST** block publishing hardened artifacts but
   **MUST NOT** block normal dev builds unless explicitly configured to do so.

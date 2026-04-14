@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // WorkerConfig configures the background worker.

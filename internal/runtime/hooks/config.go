@@ -51,13 +51,13 @@ func DefaultConfigPaths(workspaceRoot string) []string {
 
 	// Workspace config (highest precedence)
 	if workspaceRoot != "" {
-		paths = append(paths, filepath.Join(workspaceRoot, ".agentctl", "hooks.yaml"))
+		paths = append(paths, filepath.Join(workspaceRoot, ".foxctl", "hooks.yaml"))
 	}
 
 	// Global config
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
-		paths = append(paths, filepath.Join(homeDir, ".agentctl", "hooks.yaml"))
+		paths = append(paths, filepath.Join(homeDir, ".foxctl", "hooks.yaml"))
 	}
 
 	return paths

@@ -12,26 +12,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/artifacts"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/intelligence/analysis/overseer"
-	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/atomic"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/intelligence/planning/llm"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/env"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage/blackboard"
-	"github.com/jkatigb/agentctl/internal/storage/graph"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/adapters/artifacts"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/intelligence/analysis/overseer"
+	"github.com/joshka0/foxctl/internal/intelligence/analysis/tasksgraph"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/atomic"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/intelligence/planning/llm"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/env"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage/blackboard"
+	"github.com/joshka0/foxctl/internal/storage/graph"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 	"github.com/rs/zerolog"
 )
 
@@ -91,7 +91,7 @@ type input struct {
 	List          *listReq          `json:"list"`
 	Dedupe        *dedupeReq        `json:"dedupe"`
 
-	// CLI metadata (added by agentctl todo subcommands)
+	// CLI metadata (added by foxctl todo subcommands)
 	CLICommand    string `json:"cli_command,omitempty"`
 	CorrelationID string `json:"correlation_id,omitempty"`
 }

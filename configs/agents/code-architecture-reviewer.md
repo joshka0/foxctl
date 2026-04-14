@@ -41,7 +41,7 @@ When reviewing code, you will:
    - Validate that authentication follows the JWT cookie-based pattern
    - Confirm proper use of the WorkflowEngine V3 for workflow-related features
    - Verify API hooks follow the established TanStack Query patterns
-   - Use `agentctl index repo search/expand` to trace callers, references, and imports for integration checks
+   - Use `foxctl index repo search/expand` to trace callers, references, and imports for integration checks
 
 4. **Assess Architectural Fit**:
    - Evaluate if the code belongs in the correct service/module

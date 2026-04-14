@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	libsqlorchestration "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/orchestration"
-	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
-	v2orchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	libsqlorchestration "github.com/joshka0/foxctl/internal/v2/adapters/libsql/orchestration"
+	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
+	v2orchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 func TestOrchestrationReconciler_RecordDispatchSpawned_ProjectsRunningLane(t *testing.T) {
@@ -212,7 +212,7 @@ func TestOrchestrationReconciler_Reconcile_ProjectsTransientWorkerFailureToRetry
 					ParentAgentID: "agent:overseer",
 					RunID:         "run-2",
 					Status:        coreworker.StatusFailed,
-					StopReason:    "dial unix /tmp/agentctl-jido.sock: connect: connection refused",
+					StopReason:    "dial unix /tmp/foxctl-jido.sock: connect: connection refused",
 					Metadata: map[string]any{
 						"workspace_id":     "ws-1",
 						"issue_id":         "issue-2",

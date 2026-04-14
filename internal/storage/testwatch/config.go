@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// DefaultConfigFileName is the canonical config file name within .agentctl/.
+// DefaultConfigFileName is the canonical config file name within .foxctl/.
 const DefaultConfigFileName = "test-watch.yaml"
 
 // Config represents the test watch configuration for a workspace.
@@ -59,7 +59,7 @@ const DefaultMinInterval = 20 * time.Second
 
 // ConfigPath returns the path to the test-watch.yaml config file for a workspace.
 func ConfigPath(workspaceRoot string) string {
-	return filepath.Join(workspaceRoot, ".agentctl", DefaultConfigFileName)
+	return filepath.Join(workspaceRoot, ".foxctl", DefaultConfigFileName)
 }
 
 // LoadConfig reads and parses the test watch config from a workspace.
@@ -91,7 +91,7 @@ func LoadConfigFromPath(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// SaveConfig writes the config to the workspace's .agentctl/ directory.
+// SaveConfig writes the config to the workspace's .foxctl/ directory.
 func SaveConfig(workspaceRoot string, cfg *Config) error {
 	path := ConfigPath(workspaceRoot)
 	return SaveConfigToPath(path, cfg)

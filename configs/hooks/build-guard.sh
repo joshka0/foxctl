@@ -38,7 +38,7 @@ if echo "$command" | grep -qE '^(CGO_ENABLED=[01]\s+)?go\s+build\s+\./skills/' &
   skill_name=$(echo "$command" | grep -oE 'skills/[^/\s]+' | head -1 | sed 's|skills/||')
   jq -n --arg skill "$skill_name" '{
     decision: "block",
-    reason: ("**[Build Guard] BLOCKED: go build ./skills/ without -o**\n\nCreates binary at repo root instead of ~/.agentctl/skills/\n\n**Use instead:**\n- `make skill SKILL=" + $skill + "` — Builds & installs correctly\n- `make skills-build` — Build all skills to dist/skills/")
+    reason: ("**[Build Guard] BLOCKED: go build ./skills/ without -o**\n\nCreates binary at repo root instead of ~/.foxctl/skills/\n\n**Use instead:**\n- `make skill SKILL=" + $skill + "` — Builds & installs correctly\n- `make skills-build` — Build all skills to dist/skills/")
   }'
   exit 0
 fi

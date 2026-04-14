@@ -8,7 +8,7 @@ import (
 
 func TestLoadManifestValidates(t *testing.T) {
 	dir := t.TempDir()
-	manifest := []byte(`apiVersion: agentctl/v1
+	manifest := []byte(`apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: text/grep
@@ -44,7 +44,7 @@ func TestDiscover(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "skill"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "skill", "skill.yaml"), []byte(`apiVersion: agentctl/v1
+	if err := os.WriteFile(filepath.Join(dir, "skill", "skill.yaml"), []byte(`apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: text/grep

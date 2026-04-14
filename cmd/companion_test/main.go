@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/contextvar"
 	"github.com/rs/zerolog"
 )
 

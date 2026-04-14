@@ -1148,15 +1148,15 @@ func (v *Validator) ValidateAll(ctx context.Context) ([]ValidationResult, error)
 
 ```bash
 # Build with comment edges
-agentctl repoindex build --workspace . --go --comments
+foxctl repoindex build --workspace . --go --comments
 
 # Smart expand with query
-agentctl repoindex expand "sym:pkg:Handler" \
+foxctl repoindex expand "sym:pkg:Handler" \
   --query "payment events" \
   --depth 2
 
 # Validate comment edges
-agentctl repoindex validate --workspace .
+foxctl repoindex validate --workspace .
 ```
 
 ### Future: GUI Integration (Phase 7)

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // RepoIndexToolExecutor provides repo index tools for LLM access.

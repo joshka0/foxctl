@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	repoqueryadapters "github.com/jkatigb/agentctl/internal/intelligence/repoquery/adapters"
-	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
+	repoqueryadapters "github.com/joshka0/foxctl/internal/intelligence/repoquery/adapters"
+	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
 )
 
 // Source fetches recall hits for one retrieval input and one upstream source.

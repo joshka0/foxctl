@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: todo/manage
@@ -72,9 +72,9 @@ signature:
       When you think a task is done, prefer gating with verification/cove_verify before marking it complete.
 
       Example commands:
-        agentctl run todo/manage --input '{"operation":"add","add":{"title":"Implement feature X"}}'
-        agentctl run todo/manage --input '{"operation":"list","list":{"ranked":true,"sort_by":"pagerank"}}'
-        agentctl run todo/manage --input '{"operation":"recommend","recommend":{"limit":5}}'
+        foxctl run todo/manage --input '{"operation":"add","add":{"title":"Implement feature X"}}'
+        foxctl run todo/manage --input '{"operation":"list","list":{"ranked":true,"sort_by":"pagerank"}}'
+        foxctl run todo/manage --input '{"operation":"recommend","recommend":{"limit":5}}'
     workflows:
       - id: add-task
         description: "Add a new task with a title and optional description."

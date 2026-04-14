@@ -1,4 +1,4 @@
-// API Types - matching Go structs from agentctl backend
+// API Types - matching Go structs from foxctl backend
 
 export interface JobSummary {
   id: string;

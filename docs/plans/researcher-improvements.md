@@ -1,16 +1,16 @@
-# Implementation Plan: agentctl Researcher Improvements
+# Implementation Plan: foxctl Researcher Improvements
 
 ## Problem Statement
 
 - **Repo graph search returns 0 results for natural language queries**: FTS5 uses implicit AND — `"hybrid memory pipeline episode evidence"` requires ALL 5 words in a single node. No node has all 5, so 0 results. The fallback in `query.go:34` only triggers on FTS5 syntax errors, not on empty results.
-- **agentctl-research skill underutilizes available tools**: Comparison testing showed the research agent was slower and shallower than a direct file-reading agent. Key tools like `summarize: true`, `repo ask`, and `codemap/generate` are ignored or poorly integrated.
-- **Data from comparison test**: Reviewer agent (Glob/Grep/Read) completed in 2m31s with 15 tool calls and produced a deeply detailed report. agentctl-research (Bash/CLI) took 2m53s with 30 tool calls but produced comparable depth only after falling back to direct file reading because CLI tools returned shallow results.
+- **foxctl-research skill underutilizes available tools**: Comparison testing showed the research agent was slower and shallower than a direct file-reading agent. Key tools like `summarize: true`, `repo ask`, and `codemap/generate` are ignored or poorly integrated.
+- **Data from comparison test**: Reviewer agent (Glob/Grep/Read) completed in 2m31s with 15 tool calls and produced a deeply detailed report. foxctl-research (Bash/CLI) took 2m53s with 30 tool calls but produced comparable depth only after falling back to direct file reading because CLI tools returned shallow results.
 
 ## Decisions Made
 
 - OR fallback triggers on **zero results**, not just syntax errors
 - Auto-retry in existing `QueryEngine.Search` method (no new API)
-- Update both `~/.claude/skills/agentctl-research/SKILL.md` AND `configs/opencode/agents-pack/agentctl-research.md`
+- Update both `~/.claude/skills/foxctl-research/SKILL.md` AND `configs/opencode/agents-pack/foxctl-research.md`
 - Include unit tests AND benchmarks for the code change
 
 ---
@@ -149,7 +149,7 @@ func searchWithFallback[T any](
 
 ---
 
-### 3. `~/.claude/skills/agentctl-research/SKILL.md` (modified)
+### 3. `~/.claude/skills/foxctl-research/SKILL.md` (modified)
 
 **Purpose**: Integrate `summarize: true`, `repo ask`, `codemap/generate`, parallelization, and standardize on `context_grep`.
 
@@ -161,12 +161,12 @@ Add two new entries, fix `context_grep`:
 
 | Tool | Command | Best For |
 |------|---------|----------|
-| **Semantic Search** | `agentctl run code/semantic_search --input '{"query": "...", "format": "tree", "limit": 25, "summarize": true}'` | Conceptual search with LLM synthesis |
-| **DAG Grep** | `agentctl run code/dag_grep --input '{"query": "...", "render": "tree", "depth": 2, "budget": 80}'` | Relationship graphs — "what calls/uses X?" |
-| **Context Grep** | `agentctl run code/context_grep --input '{"pattern": "...", "path": ".", "mode": "ripgrep", "expand_functions": true}'` | Regex + AST + function bodies — exact matches with context |
-| **Smart Search** | `agentctl run code/smart_search --input '{"question": "...", "limits": {"max_snippets": 20}}'` | Auto-candidate + extract — when you don't know which files |
-| **Codemap Generate** | `agentctl codemap generate "trace auth flow"` | AI-traced code relationship maps |
-| **Text Grep** | `agentctl run text/grep --input '{"pattern": "...", "path": "."}'` | Fast literal search — exact strings |
+| **Semantic Search** | `foxctl run code/semantic_search --input '{"query": "...", "format": "tree", "limit": 25, "summarize": true}'` | Conceptual search with LLM synthesis |
+| **DAG Grep** | `foxctl run code/dag_grep --input '{"query": "...", "render": "tree", "depth": 2, "budget": 80}'` | Relationship graphs — "what calls/uses X?" |
+| **Context Grep** | `foxctl run code/context_grep --input '{"pattern": "...", "path": ".", "mode": "ripgrep", "expand_functions": true}'` | Regex + AST + function bodies — exact matches with context |
+| **Smart Search** | `foxctl run code/smart_search --input '{"question": "...", "limits": {"max_snippets": 20}}'` | Auto-candidate + extract — when you don't know which files |
+| **Codemap Generate** | `foxctl codemap generate "trace auth flow"` | AI-traced code relationship maps |
+| **Text Grep** | `foxctl run text/grep --input '{"pattern": "...", "path": "."}'` | Fast literal search — exact strings |
 
 **Note**: `context_ripgrep` is deprecated. Use `context_grep` which supports ripgrep, ast-grep, and line expansion modes.
 
@@ -181,9 +181,9 @@ Rewrite to promote `repo ask` as PRIMARY:
 
 | Tool | Command | Best For |
 |------|---------|----------|
-| **Graph Ask** | `agentctl index repo ask --workspace . --question "..."` | **PRIMARY** — architecture, call graphs, impact, ownership, coupling |
-| **Graph Search** | `agentctl index repo search --workspace . --query "..." --limit 10` | Find specific nodes by name |
-| **Graph Expand** | `agentctl index repo expand --workspace . --seed "<id>" --edge CALLS --edge REFERS_TO --depth 2` | Manual edge traversal from known node |
+| **Graph Ask** | `foxctl index repo ask --workspace . --question "..."` | **PRIMARY** — architecture, call graphs, impact, ownership, coupling |
+| **Graph Search** | `foxctl index repo search --workspace . --query "..." --limit 10` | Find specific nodes by name |
+| **Graph Expand** | `foxctl index repo expand --workspace . --seed "<id>" --edge CALLS --edge REFERS_TO --depth 2` | Manual edge traversal from known node |
 
 **When to use `repo ask` over manual search+expand:**
 - "How does X work?" → `repo ask`
@@ -241,22 +241,22 @@ Update to show richer `semantic_search` usage:
 Task(
   subagent_type="Bash",
   description="Research: <short description>",
-  prompt="You are a research-only agent using agentctl CLI tools.
+  prompt="You are a research-only agent using foxctl CLI tools.
 
 WORKSPACE: <repo_dir>
 
 ## Research Strategy
 1. Run discovery tools IN PARALLEL:
-   - `agentctl run code/semantic_search --input '{\"query\": \"...\", \"summarize\": true, \"limit\": 30}'`
-   - `agentctl index repo ask --workspace . --question \"...\"` (for architecture/relationship questions)
-   - `agentctl run memory/query --input '{\"query\": \"...\", \"types\": \"gotcha,decision,pattern\"}'`
+   - `foxctl run code/semantic_search --input '{\"query\": \"...\", \"summarize\": true, \"limit\": 30}'`
+   - `foxctl index repo ask --workspace . --question \"...\"` (for architecture/relationship questions)
+   - `foxctl run memory/query --input '{\"query\": \"...\", \"types\": \"gotcha,decision,pattern\"}'`
 
 2. If discovery is insufficient, run targeted extraction:
-   - `agentctl run code/context_grep --input '{\"pattern\": \"...\", \"path\": \".\", \"mode\": \"ripgrep\", \"expand_functions\": true}'`
-   - `agentctl run code/snippet_extract --input '{\"candidates\": [...], \"question\": \"...\"}'`
+   - `foxctl run code/context_grep --input '{\"pattern\": \"...\", \"path\": \".\", \"mode\": \"ripgrep\", \"expand_functions\": true}'`
+   - `foxctl run code/snippet_extract --input '{\"candidates\": [...], \"question\": \"...\"}'`
 
 3. For architecture questions, ensure map freshness:
-   - `agentctl codemap generate \"trace <topic>\"` (if needed)
+   - `foxctl codemap generate \"trace <topic>\"` (if needed)
 
 CONSTRAINT: Read-only. Do NOT modify files or run git commands.
 RESEARCH TASK: <detailed query>"
@@ -265,16 +265,16 @@ RESEARCH TASK: <detailed query>"
 
 ---
 
-### 4. `configs/opencode/agents-pack/agentctl-research.md` (modified)
+### 4. `configs/opencode/agents-pack/foxctl-research.md` (modified)
 
 **Purpose**: Align opencode variant with the updated SKILL.md strategy.
 
 Replace body content (preserve any existing frontmatter) with:
 
 ```markdown
-# agentctl-research
+# foxctl-research
 
-Research-only agent using agentctl code intelligence tools. Read-only investigation.
+Research-only agent using foxctl code intelligence tools. Read-only investigation.
 
 ## Primary Tools
 
@@ -319,15 +319,15 @@ Research-only agent using agentctl code intelligence tools. Read-only investigat
 ### Integration Verification
 ```bash
 # Verify OR fallback works
-agentctl index repo search --workspace . --query "hybrid memory pipeline episode evidence" --limit 10
+foxctl index repo search --workspace . --query "hybrid memory pipeline episode evidence" --limit 10
 # Should return results now (was 0 before)
 
 # Verify single-word still works
-agentctl index repo search --workspace . --query "BuildHybridContextLayers" --limit 5
+foxctl index repo search --workspace . --query "BuildHybridContextLayers" --limit 5
 # Should return same results as before
 
 # Verify SKILL.md loads correctly
-# Launch Claude Code, invoke /agentctl-research "how does companion memory work?"
+# Launch Claude Code, invoke /foxctl-research "how does companion memory work?"
 # Verify it uses repo ask and summarize: true
 ```
 
@@ -344,7 +344,7 @@ agentctl index repo search --workspace . --query "BuildHybridContextLayers" --li
 7. **Integration test** — verify with actual repo graph queries
 8. **Update SKILL.md** — apply all section changes
 9. **Update opencode variant** — apply condensed version
-10. **Verify skills load** — test with `/agentctl-research`
+10. **Verify skills load** — test with `/foxctl-research`
 
 ## Open Questions
 

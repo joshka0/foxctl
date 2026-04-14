@@ -4,7 +4,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: agentctl-public-gui
+namespace: foxctl-public-gui
 
 resources:
 - ../local
@@ -16,10 +16,10 @@ resources:
 - llm-egress-network-policy.yaml
 
 patches:
-- path: agentctl-deployment-patch.yaml
+- path: foxctl-deployment-patch.yaml
   target:
     kind: Deployment
-    name: agentctl
+    name: foxctl
 - path: gateway-configmap-patch.yaml
   target:
     kind: ConfigMap
@@ -34,10 +34,10 @@ patches:
     name: gui-auth-gateway
 - target:
     kind: Ingress
-    name: agentctl
+    name: foxctl
   patch: |
     $patch: delete
     apiVersion: networking.k8s.io/v1
     kind: Ingress
     metadata:
-      name: agentctl
+      name: foxctl

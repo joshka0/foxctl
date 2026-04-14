@@ -24,7 +24,7 @@ This phase systematically documents the codebase by:
 Create a CLI tool that analyzes the codebase and outputs actionable Markdown checklists identifying documentation gaps. The tool leverages the repo graph to identify "hub" symbols that would benefit most from documentation.
 
 **Files Touched:**
-- `cmd/agentctl/cmd/doc_coverage.go` - CLI command implementation
+- `cmd/foxctl/cmd/doc_coverage.go` - CLI command implementation
 - `internal/intelligence/analysis/doc_coverage.go` - Core analysis logic
 - `internal/intelligence/analysis/doc_coverage_test.go` - Unit tests
 
@@ -71,16 +71,16 @@ func (r *Report) FormatMarkdown(w io.Writer) error
 **CLI Interface:**
 ```bash
 # Full repo scan
-agentctl doc-coverage ./...
+foxctl doc-coverage ./...
 
 # Specific packages
-agentctl doc-coverage ./internal/intelligence/indexing/... ./skills/...
+foxctl doc-coverage ./internal/intelligence/indexing/... ./skills/...
 
 # Output to file for tracking
-agentctl doc-coverage ./... > docs/doc-coverage-checklist.md
+foxctl doc-coverage ./... > docs/doc-coverage-checklist.md
 
 # With hub analysis (requires repo graph)
-agentctl doc-coverage ./... --include-hubs
+foxctl doc-coverage ./... --include-hubs
 ```
 
 **Output Format:**
@@ -133,7 +133,7 @@ Generated: 2024-01-15T10:30:00Z
 - Integration test against actual codebase packages
 
 **Acceptance Criteria:**
-- [ ] `agentctl doc-coverage ./...` runs without error
+- [ ] `foxctl doc-coverage ./...` runs without error
 - [ ] Report correctly identifies exported symbols missing GoDoc
 - [ ] Report correctly identifies packages missing `doc.go`
 - [ ] Hub candidates sorted by priority (fan-in * fan-out weight)
@@ -213,13 +213,13 @@ func (l *Linter) Lint(ctx context.Context, patterns []string) ([]Violation, erro
 make lint-doc
 
 # Or directly
-agentctl lint-doc ./...
+foxctl lint-doc ./...
 
 # Specific packages
-agentctl lint-doc ./internal/intelligence/indexing/...
+foxctl lint-doc ./internal/intelligence/indexing/...
 
 # Exit with error on warnings (for enforcement)
-agentctl lint-doc ./... --fail-on-warn
+foxctl lint-doc ./... --fail-on-warn
 ```
 
 **scripts/lint-doc.sh:**
@@ -229,7 +229,7 @@ set -e
 
 # Run doc linter in warn-only mode
 echo "Running documentation linter..."
-agentctl lint-doc ./... 2>&1 | tee lint-doc-output.txt
+foxctl lint-doc ./... 2>&1 | tee lint-doc-output.txt
 
 # Count violations
 VIOLATIONS=$(grep -c "^WARN:" lint-doc-output.txt || true)
@@ -388,7 +388,7 @@ To keep reviews manageable:
 After PR 6.1 ships, generate the initial coverage report:
 
 ```bash
-agentctl doc-coverage ./... > docs/doc-coverage-baseline.md
+foxctl doc-coverage ./... > docs/doc-coverage-baseline.md
 ```
 
 Track progress by regenerating after each sweep PR and comparing coverage percentages.

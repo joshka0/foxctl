@@ -1,6 +1,6 @@
 package discord
 
-import "github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
+import "github.com/joshka0/foxctl/internal/interfaces/chatadapter"
 
 // MVPCommands returns the 6 slash commands for the Discord MVP.
 func MVPCommands() []chatadapter.CommandDef {

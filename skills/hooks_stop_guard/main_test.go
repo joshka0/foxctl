@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/storage/testwatch"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/storage/testwatch"
 	"github.com/stretchr/testify/assert"
 )
 

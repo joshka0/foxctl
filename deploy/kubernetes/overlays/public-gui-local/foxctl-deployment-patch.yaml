@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: foxctl
+spec:
+  template:
+    spec:
+      containers:
+      - name: foxctl
+        command: ["sh", "-c"]
+        args:
+        - |
+          mkdir -p /var/cache/foxctl /var/cache/foxctl/.foxctl /var/cache/foxctl/storage /var/cache/foxctl/cas
+          foxctl-cgo daemon start >/tmp/foxctl-daemon.log 2>&1 &
+          daemon_pid=$!
+          cleanup() {
+            kill "$daemon_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT INT TERM
+          for i in $(seq 1 50); do
+            [ -S "${AGENTCTL_DAEMON_SOCKET}" ] && break
+            sleep 0.2
+          done
+          foxctl-cgo web serve --port=8080 &
+          web_pid=$!
+          wait "$web_pid"
+        env:
+        - name: HOME
+          value: "/var/cache/foxctl"
+        - name: AGENTCTL_DAEMON_SOCKET
+          value: "/tmp/foxctl.sock"
+        - name: AGENTCTL_AGENTS_DB_DRIVER
+          value: "sqlite"
+        - name: AGENTCTL_MAILBOX_DB_DRIVER
+          value: "sqlite"
+        - name: AGENTCTL_BOARD_DB_DRIVER
+          value: "sqlite"
+        - name: AGENTCTL_LLM_PROVIDER
+          value: "lmstudio"
+        - name: AGENTCTL_LLM_BASE_URL
+          value: "http://0.250.250.254:1234/v1"
+        - name: AGENTCTL_LLM_AUTH_MODE
+          value: "none"
+        - name: AGENTCTL_LLM_MODEL
+          value: "liquid/lfm2-24b-a2b"

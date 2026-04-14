@@ -5,8 +5,8 @@ import (
 	stderrors "errors"
 	"strings"
 
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 // RunService executes the canonical v2 turn pipeline.

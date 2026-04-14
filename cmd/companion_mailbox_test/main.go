@@ -13,15 +13,15 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runtime/actor"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/blackboard"
-	"github.com/jkatigb/agentctl/internal/storage/contextvar"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/actor"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/blackboard"
+	"github.com/joshka0/foxctl/internal/storage/contextvar"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )
 
@@ -293,7 +293,7 @@ func main() {
 		fmt.Println("  (Memories are created during daily/weekly compression)")
 		fmt.Println("\n  To see semantic search in action:")
 		fmt.Println("  1. Run daily compression to create summaries")
-		fmt.Println("  2. Use: agentctl run code/semantic_search --input '{\"query\": \"consciousness\", \"scope\": [\"memories\"]}'")
+		fmt.Println("  2. Use: foxctl run code/semantic_search --input '{\"query\": \"consciousness\", \"scope\": [\"memories\"]}'")
 	} else {
 		fmt.Printf("  Found %d companion memories:\n", len(memories))
 		for _, m := range memories {

@@ -4,13 +4,13 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
 )
 
 // DaemonConfig provides dependencies for the context updater worker.
 type DaemonConfig struct {
-	// Config is the full agentctl configuration
+	// Config is the full foxctl configuration
 	Config config.Config
 
 	// Logger is the logger to use

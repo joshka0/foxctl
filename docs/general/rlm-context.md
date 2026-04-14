@@ -229,7 +229,7 @@ CREATE INDEX idx_context_vars_scope ON context_vars(scope);
 CREATE INDEX idx_context_vars_expires ON context_vars(expires_at);
 ```
 
-**Database location:** `~/.agentctl/storage/contextvar.db`
+**Database location:** `~/.foxctl/storage/contextvar.db`
 
 ## Usage
 
@@ -237,8 +237,8 @@ CREATE INDEX idx_context_vars_expires ON context_vars(expires_at);
 
 ```go
 import (
-    "github.com/jkatigb/agentctl/internal/runtime/engine"
-    "github.com/jkatigb/agentctl/internal/storage/contextvar"
+    "github.com/joshka0/foxctl/internal/runtime/engine"
+    "github.com/joshka0/foxctl/internal/storage/contextvar"
 )
 
 // Create contextvar store
@@ -258,7 +258,7 @@ tools := engine.NewCompositeToolExecutor(rlmExecutor, otherExecutor)
 ### Using Evolving Personality
 
 ```go
-import "github.com/jkatigb/agentctl/internal/context/companion"
+import "github.com/joshka0/foxctl/internal/context/companion"
 
 ep := companion.NewEvolvingPersonality(contextvarStore, conversationID)
 
@@ -291,7 +291,7 @@ systemPrompt, _ := ep.BuildSystemPrompt(ctx, basePrompt)
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `AGENTCTL_HOME` | `~/.agentctl` | Storage root |
+| `AGENTCTL_HOME` | `~/.foxctl` | Storage root |
 | `VOYAGE_API_KEY` | - | Semantic embeddings |
 
 ## Related

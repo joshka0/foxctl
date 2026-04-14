@@ -1,10 +1,10 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: memory/query
   description: Query memories with type filtering, file association, and semantic search
   version: 0.1.0
-  author: agentctl
+  author: foxctl
   tags: [memory, search, gotcha, decision, pattern, embedding]
 distribution:
   type: exec
@@ -69,7 +69,7 @@ signature:
   help:
     short: "Query memories by type, file, or semantic similarity"
     long: |
-      memory/query provides filtered access to the agentctl memory store,
+      memory/query provides filtered access to the foxctl memory store,
       designed for plugin/hook integration where you need to surface relevant
       context before operations.
 
@@ -109,10 +109,10 @@ signature:
       - Get all decisions: { "types": "decision", "limit": 20 }
 
       Example commands:
-        agentctl run memory/query --input '{"file":"internal/storage/memory/store.go","types":"gotcha,decision","limit":5}'
-        agentctl skills run memory/query --file internal/storage/memory/store.go --types gotcha,decision --limit 5
-        agentctl run memory/query --input '{"query":"authentication middleware","types":"pattern","limit":10}'
-        agentctl skills run memory/query --query "authentication middleware" --types pattern --limit 10
+        foxctl run memory/query --input '{"file":"internal/storage/memory/store.go","types":"gotcha,decision","limit":5}'
+        foxctl skills run memory/query --file internal/storage/memory/store.go --types gotcha,decision --limit 5
+        foxctl run memory/query --input '{"query":"authentication middleware","types":"pattern","limit":10}'
+        foxctl skills run memory/query --query "authentication middleware" --types pattern --limit 10
     workflows:
       - id: file-gotchas
         description: "Get gotchas before editing a file"

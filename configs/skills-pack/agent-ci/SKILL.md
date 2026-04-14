@@ -57,7 +57,7 @@ npx agent-ci abort --name <runner-name>
 - agent-ci emulates the GitHub Actions API locally using the real `actions-runner` binary.
 - Your working tree is synced into the container — uncommitted changes are included.
 - `actions/checkout`, `actions/setup-go`, and `actions/cache` work natively.
-- The `ci-local.yml` workflow in this repo uses the local `agentctl-ci:go1.26.1` container image.
+- The `ci-local.yml` workflow in this repo uses the local `foxctl-ci:go1.26.1` container image.
 - Local CI container resource caps belong in the workflow `container.options`, not in ad hoc shell wrappers.
 - On macOS, OrbStack is the preferred Docker provider, but broad CI should still be treated as host-load-sensitive.
 

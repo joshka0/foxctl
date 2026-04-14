@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/sessionkit/codexjsonl"
-	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/context/sessionkit/codexjsonl"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 // TranscriptDatasetRequest configures transcript export into optimizer-friendly examples.

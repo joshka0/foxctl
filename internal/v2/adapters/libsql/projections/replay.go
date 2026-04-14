@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
+	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 // EventProjector applies events into an additional projection.

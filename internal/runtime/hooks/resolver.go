@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/buildinfo"
 )
 
 // SkillResolver finds skill manifests and artifact paths.
@@ -20,7 +20,7 @@ type SkillResolver interface {
 // DefaultResolver implements SkillResolver using the standard skills directory.
 // DefaultResolver resolves skills from a local skills directory.
 type DefaultResolver struct {
-	// SkillsDir is the root directory for installed skills (e.g., ~/.agentctl/skills).
+	// SkillsDir is the root directory for installed skills (e.g., ~/.foxctl/skills).
 	SkillsDir string
 }
 

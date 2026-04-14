@@ -12,15 +12,15 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
-	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
-	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/runtime/actor/memory"
-	"github.com/jkatigb/agentctl/internal/runtime/agentprompt"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/storage"
+	agenttools "github.com/joshka0/foxctl/internal/agent/tools"
+	agenttypes "github.com/joshka0/foxctl/internal/agent/types"
+	agentdomain "github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/runtime/actor/memory"
+	"github.com/joshka0/foxctl/internal/runtime/agentprompt"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 // AgentActor wraps an LLMChatEngine as a reactive actor.

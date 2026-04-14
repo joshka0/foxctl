@@ -3,7 +3,7 @@ package retrievalv2
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
+	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
 )
 
 func TestFuseReciprocalRank(t *testing.T) {

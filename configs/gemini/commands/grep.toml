@@ -1,10 +1,10 @@
 # Smart code search command
-description = "Search codebase with agentctl"
+description = "Search codebase with foxctl"
 
 prompt = """Search the codebase for: {{args}}
 
 ```bash
-!{agentctl run text/ripgrep --input '{"pattern": "{{args}}", "path": "."}'}
+!{foxctl run text/ripgrep --input '{"pattern": "{{args}}", "path": "."}'}
 ```
 
 Summarize the findings:

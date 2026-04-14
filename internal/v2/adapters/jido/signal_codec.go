@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/ask"
+	"github.com/joshka0/foxctl/internal/v2/core/ask"
 )
 
 type askSignalData struct {

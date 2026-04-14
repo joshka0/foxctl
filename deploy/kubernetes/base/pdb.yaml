@@ -1,20 +1,20 @@
 # Pod Disruption Budgets for high availability
 
 ---
-# Core agentctl deployment
+# Core foxctl deployment
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: agentctl
-  namespace: agentctl
+  name: foxctl
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: core
 spec:
   minAvailable: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: agentctl
+      app.kubernetes.io/name: foxctl
       app.kubernetes.io/component: core
 
 ---
@@ -22,14 +22,14 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: agentctl-embedding-worker
-  namespace: agentctl
+  name: foxctl-embedding-worker
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: embedding-worker
 spec:
   maxUnavailable: "50%"
   selector:
     matchLabels:
-      app.kubernetes.io/name: agentctl
+      app.kubernetes.io/name: foxctl
       app.kubernetes.io/component: embedding-worker

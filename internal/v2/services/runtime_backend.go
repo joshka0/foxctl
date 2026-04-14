@@ -1,6 +1,6 @@
 package services
 
-import coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+import coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 
 // RuntimeSpawner creates one child worker from a canonical spawn request.
 type RuntimeSpawner = coreworker.Spawner

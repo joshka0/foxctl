@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/api"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/interfaces/web/api"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
-// Bridge connects chat adapter commands to agentctl skills and APIs.
+// Bridge connects chat adapter commands to foxctl skills and APIs.
 type Bridge struct {
 	runner     *api.SkillRunner
 	cfg        config.Config
@@ -341,7 +341,7 @@ func (b *Bridge) handleAgentSpawn(ctx context.Context, evt CommandEvent) error {
 
 	resp, err := b.httpClient.Do(req)
 	if err != nil {
-		return evt.Respond(fmt.Sprintf("Daemon unreachable: %s\nHint: ensure the daemon is running (`agentctl web serve`).", err), nil)
+		return evt.Respond(fmt.Sprintf("Daemon unreachable: %s\nHint: ensure the daemon is running (`foxctl web serve`).", err), nil)
 	}
 	defer resp.Body.Close()
 
@@ -367,7 +367,7 @@ func (b *Bridge) handleAgentList(ctx context.Context, evt CommandEvent) error {
 
 	resp, err := b.httpClient.Do(req)
 	if err != nil {
-		return evt.Respond(fmt.Sprintf("Daemon unreachable: %s\nHint: ensure the daemon is running (`agentctl web serve`).", err), nil)
+		return evt.Respond(fmt.Sprintf("Daemon unreachable: %s\nHint: ensure the daemon is running (`foxctl web serve`).", err), nil)
 	}
 	defer resp.Body.Close()
 

@@ -15,11 +15,11 @@ import (
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	codemapctx "github.com/jkatigb/agentctl/internal/intelligence/codemap/context"
-	"github.com/jkatigb/agentctl/internal/intelligence/codemap/tools"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
-	"github.com/jkatigb/agentctl/internal/storage/graph"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	codemapctx "github.com/joshka0/foxctl/internal/intelligence/codemap/context"
+	"github.com/joshka0/foxctl/internal/intelligence/codemap/tools"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/storage/graph"
 )
 
 // Agent generates semantic codemaps using the LLM chat engine.

@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
+	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
 )
 
 func TestLoadSuite(t *testing.T) {

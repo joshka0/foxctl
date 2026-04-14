@@ -10,7 +10,7 @@ This document defines the reusable pattern for simulator agents that act like
 users against external app APIs.
 
 The goal is to avoid one-off runtime hacks per integration. Instead, each app
-integration should expose a stable two-tool contract through `agentctl`, and
+integration should expose a stable two-tool contract through `foxctl`, and
 then use either:
 
 1. a deterministic scheduled probe
@@ -55,7 +55,7 @@ The runtime contract is:
 
 Current insertion point:
 
-- `~/repos/githubs/jido/lib/jido/integrations/agentctl/actions/tick_bridge.ex`
+- `~/repos/githubs/jido/lib/jido/integrations/foxctl/actions/tick_bridge.ex`
 
 Current smoke:
 
@@ -90,7 +90,7 @@ Verified flow:
 
 ## Runtime Layer Responsibilities
 
-### agentctl owns semantic tool behavior
+### foxctl owns semantic tool behavior
 
 That includes:
 
@@ -120,9 +120,9 @@ That includes:
 
 Relevant files:
 
-- `~/repos/githubs/jido/lib/jido/integrations/agentctl/actions/tick_bridge.ex`
-- `~/repos/githubs/jido/lib/jido/integrations/agentctl/actions/run_tool.ex`
-- `~/repos/githubs/jido/lib/jido/integrations/agentctl/actions/ask_bridge.ex`
+- `~/repos/githubs/jido/lib/jido/integrations/foxctl/actions/tick_bridge.ex`
+- `~/repos/githubs/jido/lib/jido/integrations/foxctl/actions/run_tool.ex`
+- `~/repos/githubs/jido/lib/jido/integrations/foxctl/actions/ask_bridge.ex`
 
 ## Implementation Checklist For New App Integrations
 

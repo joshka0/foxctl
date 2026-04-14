@@ -3,7 +3,7 @@ package skillmain
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func TestNewStoreProvider(t *testing.T) {

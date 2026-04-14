@@ -17,7 +17,7 @@ The room agile backend now gives us a durable execution ledger:
 - milestone synthesis
 - retro guidance
 - epic health
-- work-pack mirrors under `~/.agentctl/epics`
+- work-pack mirrors under `~/.foxctl/epics`
 
 What it still does not give us is a strong semantic memory layer over completed
 work.
@@ -40,7 +40,7 @@ This slice should keep the layers explicit:
 1. `room`
    - canonical operational ledger
    - source of truth for workflow state
-2. `~/.agentctl/epics/...`
+2. `~/.foxctl/epics/...`
    - rich work-pack mirror
    - human/agent-editable artifacts
 3. ACA / Obsidian
@@ -114,9 +114,9 @@ Canonical ids should remain:
 
 Human-readable note paths are still fine, for example:
 
-- `projects/agentctl/room-epics/<epic-id>-room-agile.md`
-- `projects/agentctl/room-milestones/<milestone-id>-foundation.md`
-- `projects/agentctl/room-retro/<guidance-update-id>-ack-no-blocker-followups.md`
+- `projects/foxctl/room-epics/<epic-id>-room-agile.md`
+- `projects/foxctl/room-milestones/<milestone-id>-foundation.md`
+- `projects/foxctl/room-retro/<guidance-update-id>-ack-no-blocker-followups.md`
 
 But the frontmatter must carry the stable ids.
 
@@ -137,9 +137,9 @@ Example:
 note_type: room_epic
 schema_version: 1
 generated_at: 2026-04-07T18:00:00Z
-workspace: /Users/joshka/repos/personal/agentctl
-workspace_id: /Users/joshka/repos/personal/agentctl
-project: agentctl
+workspace: /Users/joshka/repos/personal/foxctl
+workspace_id: /Users/joshka/repos/personal/foxctl
+project: foxctl
 room_id: triad-20260404-202656
 epic_id: 01ABC...
 milestone_id:
@@ -148,8 +148,8 @@ validation_id:
 guidance_update_id:
 room_message_ids:
   - 01XYZ...
-workpack_root: ~/.agentctl/epics/01ABC...
-workpack_path: ~/.agentctl/epics/01ABC.../epic.md
+workpack_root: ~/.foxctl/epics/01ABC...
+workpack_path: ~/.foxctl/epics/01ABC.../epic.md
 status: completed
 promotion_source: room_agile
 promotion_review_state: drafted
@@ -348,10 +348,10 @@ over-automating.
 Possible command surface:
 
 ```bash
-agentctl room aca promote epic <room-id> <epic-id>
-agentctl room aca promote milestone <room-id> <milestone-id>
-agentctl room aca promote retro <room-id> <guidance-update-id>
-agentctl room aca promote validation <room-id> <validation-id>
+foxctl room aca promote epic <room-id> <epic-id>
+foxctl room aca promote milestone <room-id> <milestone-id>
+foxctl room aca promote retro <room-id> <guidance-update-id>
+foxctl room aca promote validation <room-id> <validation-id>
 ```
 
 These commands should likely produce:
@@ -406,5 +406,5 @@ This slice is done when:
 
 1. Should epic and milestone promotion be manual-only at first, or suggested automatically when completion occurs?
 2. Should retro and validation promotions go into the ACA proposal lane automatically when they match high-signal criteria?
-3. Should promoted room notes live in a dedicated vault folder such as `projects/agentctl/room-*`, or merge directly into existing repo-note hierarchies after review?
+3. Should promoted room notes live in a dedicated vault folder such as `projects/foxctl/room-*`, or merge directly into existing repo-note hierarchies after review?
 4. Should story-level notes ever be promoted directly, or should stories mostly surface through milestone/validation promotion?

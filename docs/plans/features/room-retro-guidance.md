@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | Status | Reviewed, implementing |
-| Scope | durable retrospective and guidance updates for `agentctl room` agile workflow |
+| Scope | durable retrospective and guidance updates for `foxctl room` agile workflow |
 | Related | [room-epic-factory-mission-parity.md](./room-epic-factory-mission-parity.md) |
 
 ## Why this slice
@@ -81,7 +81,7 @@ happened in the work; guidance update explains what should change next time.
 Add:
 
 ```bash
-agentctl room retro add <room-id> <epic-id> \
+foxctl room retro add <room-id> <epic-id> \
   --kind coordination \
   --summary "Follow-up review threads should be acked when no reply is needed." \
   --impact "Prevents reminder churn and stale reply-expected inbox items." \
@@ -94,7 +94,7 @@ agentctl room retro add <room-id> <epic-id> \
 Optional milestone-attached variant:
 
 ```bash
-agentctl room retro add <room-id> <epic-id> \
+foxctl room retro add <room-id> <epic-id> \
   --milestone <milestone-id> \
   --kind tooling \
   --summary "Node-pane submit behavior needs deterministic room-state confirmation." \
@@ -105,7 +105,7 @@ agentctl room retro add <room-id> <epic-id> \
 Read surface:
 
 ```bash
-agentctl room retro show <room-id> <epic-id>
+foxctl room retro show <room-id> <epic-id>
 ```
 
 ## Read-model shape
@@ -182,7 +182,7 @@ Arguments for `retro_add`:
 
 ## Skill implications
 
-Update `agentctl-room-agile` to teach:
+Update `foxctl-room-agile` to teach:
 
 - use `milestone summary` for what happened
 - use `retro add` for what should change next time

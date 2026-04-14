@@ -1,4 +1,4 @@
-# Gotchas & Rules (agentctl)
+# Gotchas & Rules (foxctl)
 
 This document works together with `AGENTS.md`'s **Gotchas Graveyard** section.
 
@@ -32,4 +32,4 @@ corresponding Gotcha row.
    incident.
 
 This file is the canonical, growing list of **"never again" rules** for the
-agentctl repo.
+foxctl repo.

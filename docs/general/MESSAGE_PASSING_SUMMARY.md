@@ -2,7 +2,7 @@
 
 ## What Was Done
 
-agentctl already had a robust message passing system in place! I've made it significantly easier to use through:
+foxctl already had a robust message passing system in place! I've made it significantly easier to use through:
 
 ### 1. Documentation
 
@@ -113,7 +113,7 @@ The message passing system was already fully implemented:
 
 ## Key Features
 
-1. **Persistent Messages** - Stored in SQLite at `~/.agentctl/mailbox.db`
+1. **Persistent Messages** - Stored in SQLite at `~/.foxctl/mailbox.db`
 2. **Lease-Based Delivery** - Prevents duplicate processing
 3. **Session Lineage** - Trace conversations across agents
 4. **Workspace Context** - Messages tied to workspace paths

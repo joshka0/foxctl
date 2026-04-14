@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/secrets"
+	"github.com/joshka0/foxctl/internal/platform/secrets"
 	"github.com/mattn/go-colorable"
 	"github.com/rs/zerolog"
 )

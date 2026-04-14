@@ -5,25 +5,25 @@ description: Sync Claude Code plans and optionally import as tasks
 
 # Plan Sync
 
-Syncs Claude Code plans from `~/.claude/plans/` and optionally imports plan steps as agentctl tasks.
+Syncs Claude Code plans from `~/.claude/plans/` and optionally imports plan steps as foxctl tasks.
 
 ## Usage
 
 ```bash
 # Dry run - preview what would change
-agentctl run plan/sync --input '{"dry_run": true}'
+foxctl run plan/sync --input '{"dry_run": true}'
 
 # Sync plans (detect changes)
-agentctl run plan/sync --input '{}'
+foxctl run plan/sync --input '{}'
 
 # Sync and import steps as tasks
-agentctl run plan/sync --input '{"import_tasks": true}'
+foxctl run plan/sync --input '{"import_tasks": true}'
 
 # Force re-sync even if unchanged
-agentctl run plan/sync --input '{"force": true}'
+foxctl run plan/sync --input '{"force": true}'
 
 # Sync specific plan file
-agentctl run plan/sync --input '{"plan_file": "~/.claude/plans/my-plan.md"}'
+foxctl run plan/sync --input '{"plan_file": "~/.claude/plans/my-plan.md"}'
 ```
 
 ## Parameters

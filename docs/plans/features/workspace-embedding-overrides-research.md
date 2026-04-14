@@ -14,8 +14,8 @@ discipline because embedding model changes alter persisted vector contracts.
 
 Current behavior:
 
-- workspace-local `.agentctl/config.yaml` may override `llm.*`
-- workspace-local `.agentctl/config.yaml` may also override `embedding.*`
+- workspace-local `.foxctl/config.yaml` may override `llm.*`
+- workspace-local `.foxctl/config.yaml` may also override `embedding.*`
 - `code/semantic_search` and the `index` command family now reload config for
   the resolved target workspace instead of reusing a stale process-global config
 
@@ -93,7 +93,7 @@ embedding overrides should be enabled by default.
 
 3. Semantic/code retrieval stack
 - [main.go](../../../skills/code_semantic_search/main.go)
-- [index.go](../../../cmd/agentctl/cmd/index.go)
+- [index.go](../../../cmd/foxctl/cmd/index.go)
 
 These paths now reload workspace-local embedding config for the resolved target
 workspace, which fixes the main single-workspace CLI and `code/semantic_search`

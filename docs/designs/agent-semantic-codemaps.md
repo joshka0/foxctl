@@ -846,11 +846,11 @@ func generateCodemap(ctx context.Context, opts GenerateOptions) (*Codemap, error
     return &codemap, nil
 }
 
-// runSkill executes an agentctl skill and returns parsed output
+// runSkill executes an foxctl skill and returns parsed output
 func (a *CodemapAgent) runSkill(ctx context.Context, skillName string, input map[string]any) (any, error) {
     inputJSON, _ := json.Marshal(input)
 
-    cmd := exec.CommandContext(ctx, "agentctl", "run", skillName, "--input", string(inputJSON))
+    cmd := exec.CommandContext(ctx, "foxctl", "run", skillName, "--input", string(inputJSON))
     cmd.Dir = a.workspace
 
     output, err := cmd.Output()
@@ -1036,14 +1036,14 @@ func searchCodemaps(ctx context.Context, query string, limit int) ([]SearchResul
 - [ ] Implement `storeCodemap()` and retrieval
 
 ### Phase 6: CLI
-- [ ] `agentctl codemap generate "query" [--depth 1-5]` - Generate new codemap
+- [ ] `foxctl codemap generate "query" [--depth 1-5]` - Generate new codemap
   - Default depth=2, use --depth 5 for exhaustive exploration
-- [ ] `agentctl codemap list` - List stored codemaps
-- [ ] `agentctl codemap show <id>` - Display formatted codemap
-- [ ] `agentctl codemap delete <id>` - Remove codemap
+- [ ] `foxctl codemap list` - List stored codemaps
+- [ ] `foxctl codemap show <id>` - Display formatted codemap
+- [ ] `foxctl codemap delete <id>` - Remove codemap
 
 ### Phase 7: Testing
 - [ ] Unit tests for context gatherers
 - [ ] Integration test with mock agent
 - [ ] Golden tests for codemap output format
-- [ ] End-to-end test on agentctl codebase itself
+- [ ] End-to-end test on foxctl codebase itself

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	historypkg "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
+	historypkg "github.com/joshka0/foxctl/internal/context/transcriptpipeline/history"
 )
 
 type HistoryRecordKind = historypkg.HistoryRecordKind

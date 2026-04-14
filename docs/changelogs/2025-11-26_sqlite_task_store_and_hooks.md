@@ -6,9 +6,9 @@
 
 ## Summary
 
-Implemented a SQLite-backed task store for `agentctl`'s `todo/manage` skill and
+Implemented a SQLite-backed task store for `foxctl`'s `todo/manage` skill and
 created the `hooks/task_guard` skill for Claude Code integration. This
-establishes the foundation for task-centric traceability in the agentctl
+establishes the foundation for task-centric traceability in the foxctl
 ecosystem.
 
 ## Changes
@@ -37,9 +37,9 @@ Migrated from JSON file storage to SQLite:
 - **Preserved envelope shape** for backward compatibility
 - **Version bump** to 0.2.0
 
-### 3. Extended CLI (`agentctl todo`)
+### 3. Extended CLI (`foxctl todo`)
 
-- Added `agentctl todo active` command to show the active task
+- Added `foxctl todo active` command to show the active task
 - Updated all commands to use `--workspace` instead of `--store`
 - Added `--scope` flag to `add` command
 
@@ -78,8 +78,8 @@ Claude Code PreToolUse hook that enforces task-centric model:
 
 Claude Code integration script that:
 
-- Transforms Claude hook input to agentctl format
-- Calls `agentctl run hooks/task_guard`
+- Transforms Claude hook input to foxctl format
+- Calls `foxctl run hooks/task_guard`
 - Extracts and returns hook_output
 
 ## Usage
@@ -88,13 +88,13 @@ Claude Code integration script that:
 
 ```bash
 # Add a task
-agentctl todo add --title "Implement feature X"
+foxctl todo add --title "Implement feature X"
 
 # Show active task
-agentctl todo active
+foxctl todo active
 
 # List all tasks
-agentctl todo list
+foxctl todo list
 ```
 
 ### Claude Code Integration
@@ -128,9 +128,9 @@ All tests pass:
 
 ## Migration Notes
 
-- **Breaking**: JSON task storage at `~/.agentctl/todo/tasks.json` is no longer
+- **Breaking**: JSON task storage at `~/.foxctl/todo/tasks.json` is no longer
   used
-- **New location**: SQLite database at `~/.agentctl/storage/tasks.db`
+- **New location**: SQLite database at `~/.foxctl/storage/tasks.db`
 - No migration tool provided (app is unreleased)
 
 ## Next Steps

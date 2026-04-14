@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/agentpolicy"
+	"github.com/joshka0/foxctl/internal/runtime/agentpolicy"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -77,7 +77,7 @@ func TestGenerateBriefing_WithSkills(t *testing.T) {
 			{
 				Name:        "code/semantic_search",
 				Description: "Search code by meaning",
-				Example:     "agentctl run code/semantic_search --input '{\"query\": \"auth\"}'",
+				Example:     "foxctl run code/semantic_search --input '{\"query\": \"auth\"}'",
 			},
 		},
 		Rules: []string{
@@ -90,7 +90,7 @@ func TestGenerateBriefing_WithSkills(t *testing.T) {
 
 	assert.Contains(t, result, "# Agent Capabilities: Explorer Agent")
 	assert.Contains(t, result, "Read-only access for exploration")
-	assert.Contains(t, result, "## Allowed agentctl Skills")
+	assert.Contains(t, result, "## Allowed foxctl Skills")
 	assert.Contains(t, result, "### code/semantic_search")
 	assert.Contains(t, result, "Search code by meaning")
 	assert.Contains(t, result, "**Example:**")
@@ -115,7 +115,7 @@ func TestGenerateBriefing_NoSkills(t *testing.T) {
 	assert.Contains(t, result, "# Agent Capabilities: Unrestricted Agent")
 	assert.Contains(t, result, "Full access to all capabilities")
 	assert.Contains(t, result, "## Skills")
-	assert.Contains(t, result, "unrestricted access to all agentctl skills")
+	assert.Contains(t, result, "unrestricted access to all foxctl skills")
 	// Should NOT contain the bash restriction note for unrestricted profile
 	assert.NotContains(t, result, "## Important Notes")
 }
@@ -129,17 +129,17 @@ func TestGenerateBriefing_MultipleSkills(t *testing.T) {
 			{
 				Name:        "code/semantic_search",
 				Description: "Search code semantically",
-				Example:     "agentctl run code/semantic_search",
+				Example:     "foxctl run code/semantic_search",
 			},
 			{
 				Name:        "code/complexity",
 				Description: "Analyze code complexity",
-				Example:     "agentctl run code/complexity",
+				Example:     "foxctl run code/complexity",
 			},
 			{
 				Name:        "code/security",
 				Description: "Security analysis",
-				Example:     "agentctl run code/security",
+				Example:     "foxctl run code/security",
 			},
 		},
 		Rules: []string{},
@@ -158,7 +158,7 @@ func TestGenerateBriefing_NoRules(t *testing.T) {
 		Title:       "Implementer Agent",
 		Description: "Implementation capabilities",
 		AllowedSkills: []agentpolicy.SkillInfo{
-			{Name: "test/skill", Description: "Test", Example: "agentctl run test/skill"},
+			{Name: "test/skill", Description: "Test", Example: "foxctl run test/skill"},
 		},
 		Rules: []string{},
 	}
@@ -200,7 +200,7 @@ func TestGenerateBriefing_SpecialCharacters(t *testing.T) {
 			{
 				Name:        "code/search",
 				Description: "Search with <query> parameter",
-				Example:     "agentctl run code/search --input '{\"query\": \"foo && bar\"}'",
+				Example:     "foxctl run code/search --input '{\"query\": \"foo && bar\"}'",
 			},
 		},
 		Rules: []string{"Don't use `rm -rf`"},
@@ -241,7 +241,7 @@ func TestGenerateBriefing_BashRestrictionNote_Explorer(t *testing.T) {
 
 	assert.Contains(t, result, "## Important Notes")
 	assert.Contains(t, result, "Bash commands are restricted")
-	assert.Contains(t, result, "Only `agentctl run <skill>` commands are allowed")
+	assert.Contains(t, result, "Only `foxctl run <skill>` commands are allowed")
 }
 
 func TestGenerateBriefing_BashRestrictionNote_Unrestricted(t *testing.T) {
@@ -269,7 +269,7 @@ func TestGenerateBriefing_CodeBlockFormatting(t *testing.T) {
 			{
 				Name:        "code/edit",
 				Description: "Edit code files",
-				Example:     "agentctl run code/edit --input '{\"path\": \"file.go\"}'",
+				Example:     "foxctl run code/edit --input '{\"path\": \"file.go\"}'",
 			},
 		},
 		Rules: []string{},
@@ -295,7 +295,7 @@ func TestGenerateBriefing_SkillSectionHeader(t *testing.T) {
 	}
 
 	resultWithSkills := generateBriefing(cfgWithSkills)
-	assert.Contains(t, resultWithSkills, "## Allowed agentctl Skills")
+	assert.Contains(t, resultWithSkills, "## Allowed foxctl Skills")
 	assert.Contains(t, resultWithSkills, "Use these skills via bash:")
 
 	// Without skills

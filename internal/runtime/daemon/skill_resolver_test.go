@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func TestSkillResolver_Resolve_NotFound(t *testing.T) {
@@ -44,7 +44,7 @@ func TestSkillResolver_SearchPaths(t *testing.T) {
 	}
 
 	// Write manifest (must be valid per skill.LoadManifest validation)
-	manifest := `apiVersion: agentctl.dev/v1
+	manifest := `apiVersion: foxctl.dev/v1
 kind: Skill
 metadata:
   name: test/skill
@@ -157,7 +157,7 @@ func TestLoadSkillDir_MissingArtifact(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Write manifest only (no binary)
-	manifest := `apiVersion: agentctl.dev/v1
+	manifest := `apiVersion: foxctl.dev/v1
 kind: Skill
 metadata:
   name: test/skill

@@ -19,14 +19,14 @@ package main
 
 import (
     "context"
-    "github.com/jkatigb/agentctl/internal/storage/dbdriver"
+    "github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
 func main() {
     ctx := context.Background()
 
     // Load configuration from environment variables
-    loader := dbdriver.NewConfigLoader("~/.agentctl")
+    loader := dbdriver.NewConfigLoader("~/.foxctl")
     cfg := loader.LoadMemoryConfig()
 
     // Open database (SQLite or Turso based on env vars)
@@ -55,7 +55,7 @@ package main
 
 import (
     "context"
-    "github.com/jkatigb/agentctl/internal/storage/dbutil"
+    "github.com/joshka0/foxctl/internal/storage/dbutil"
 )
 
 func main() {
@@ -63,7 +63,7 @@ func main() {
 
     // Automatically uses SQLite/libSQL/Turso based on env vars.
     // Env var prefix is derived from storeName: e.g., AGENTCTL_MEMORY_DB_DRIVER, AGENTCTL_DB_DRIVER.
-    db, closeFn, err := dbutil.OpenStoreDB(ctx, "~/.agentctl/storage", "MEMORY", "memory.db", nil)
+    db, closeFn, err := dbutil.OpenStoreDB(ctx, "~/.foxctl/storage", "MEMORY", "memory.db", nil)
     if err != nil {
         panic(err)
     }
@@ -82,7 +82,7 @@ Configure the database backend using environment variables:
 ```bash
 # Use SQLite (default)
 export AGENTCTL_MEMORY_DB_DRIVER=sqlite
-export AGENTCTL_MEMORY_DB_PATH=~/.agentctl/memory.db
+export AGENTCTL_MEMORY_DB_PATH=~/.foxctl/memory.db
 
 # Use Turso
 export AGENTCTL_MEMORY_DB_DRIVER=turso
@@ -98,7 +98,7 @@ export AGENTCTL_MEMORY_VECTOR_DIMS=384
 
 ```go
 // SQLite configuration
-cfg := dbdriver.DefaultSQLiteConfig("~/.agentctl/memory.db")
+cfg := dbdriver.DefaultSQLiteConfig("~/.foxctl/memory.db")
 
 // Turso configuration
 cfg := dbdriver.DefaultTursoConfig(

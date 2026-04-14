@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 type fakeLLMToolExecutor struct{}
@@ -221,7 +221,7 @@ func TestCollectRetrievedPaths(t *testing.T) {
 
 	results := []engine.ToolResult{
 		{
-			Content: `{"results":[{"path":"internal/auth/handler.go"},{"full_path":"/repo/internal/auth/middleware.go"},{"path":".agentctl/runtime/handoff.json"}]}`,
+			Content: `{"results":[{"path":"internal/auth/handler.go"},{"full_path":"/repo/internal/auth/middleware.go"},{"path":".foxctl/runtime/handoff.json"}]}`,
 		},
 		{
 			Content: `{"path":"internal/auth/handler.go"}`,

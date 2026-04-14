@@ -5,13 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	platformfs "github.com/jkatigb/agentctl/internal/platform/fsutil"
+	platformfs "github.com/joshka0/foxctl/internal/platform/fsutil"
 )
 
 // PathFields are the field names to check for file paths, in order of preference.
 var PathFields = []string{
 	"file_path",    // CC Edit/Write standard
-	"path",         // agentctl canonical
+	"path",         // foxctl canonical
 	"file",         // alternative
 	"current_path", // OC/alternative
 }

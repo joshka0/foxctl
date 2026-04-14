@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/ask"
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	"github.com/jkatigb/agentctl/internal/v2/core/events"
-	"github.com/jkatigb/agentctl/internal/v2/core/kill"
-	"github.com/jkatigb/agentctl/internal/v2/core/list"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
-	"github.com/jkatigb/agentctl/internal/v2/services"
+	"github.com/joshka0/foxctl/internal/v2/core/ask"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	"github.com/joshka0/foxctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/core/kill"
+	"github.com/joshka0/foxctl/internal/v2/core/list"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
+	"github.com/joshka0/foxctl/internal/v2/services"
 )
 
 func TestSpawnService_ValidInputCreatesV2Record(t *testing.T) {

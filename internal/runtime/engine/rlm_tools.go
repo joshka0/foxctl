@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/contextvar"
 )
 
 // RLMToolExecutor implements ToolExecutor for RLM context operations.

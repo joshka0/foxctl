@@ -14,9 +14,9 @@ import (
 )
 
 // Detect returns the workspace path using the standard fallback chain:
-// 1. AGENTCTL_WORKSPACE env var (highest priority - set by agentctl for sandboxes)
+// 1. AGENTCTL_WORKSPACE env var (highest priority - set by foxctl for sandboxes)
 // 2. CLAUDE_PROJECT_DIR env var (set by Claude Code)
-// 3. Walk up from start looking for .git or .agentctl markers
+// 3. Walk up from start looking for .git or .foxctl markers
 // 4. Return start directory if no markers found
 //
 // Pass empty string for start to use current working directory.
@@ -44,7 +44,7 @@ func Detect(start string) string {
 	dir = filepath.Clean(dir)
 	candidate := dir
 	for {
-		if hasMarker(candidate, ".agentctl") || hasMarker(candidate, ".git") {
+		if hasMarker(candidate, ".foxctl") || hasMarker(candidate, ".git") {
 			return candidate
 		}
 		parent := filepath.Dir(candidate)
@@ -293,7 +293,7 @@ func hasMarker(dir, name string) bool {
 	if err != nil {
 		return false
 	}
-	// .agentctl must be a directory, but .git can be either a directory
+	// .foxctl must be a directory, but .git can be either a directory
 	// (normal repo) or a file (git worktree pointing to main repo)
 	if name == ".git" {
 		return true // exists as file or directory

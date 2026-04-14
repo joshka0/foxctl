@@ -42,7 +42,7 @@ it reduced the amount of room replay and reconstruction needed after long gaps.
 
 Add:
 
-- `agentctl room epic checkpoint <room-id> <epic-id>`
+- `foxctl room epic checkpoint <room-id> <epic-id>`
 
 Optional inputs:
 
@@ -114,8 +114,8 @@ derivation. It is a pointer and convenience snapshot only.
 
 Add a checkpoint directory under the epic work-pack:
 
-- `~/.agentctl/epics/<epic-id>/checkpoints/<checkpoint-id>.md`
-- `~/.agentctl/epics/<epic-id>/checkpoints/<checkpoint-id>.json`
+- `~/.foxctl/epics/<epic-id>/checkpoints/<checkpoint-id>.md`
+- `~/.foxctl/epics/<epic-id>/checkpoints/<checkpoint-id>.json`
 
 The markdown artifact should include:
 
@@ -182,7 +182,7 @@ Inputs should mirror CLI:
 
 ## Definition of done
 
-1. `agentctl room epic checkpoint` writes a durable checkpoint artifact.
+1. `foxctl room epic checkpoint` writes a durable checkpoint artifact.
 2. checkpoint content is derived from existing `epic resume` and `epic next`
    logic plus optional note/label.
 3. epic read models expose latest-checkpoint metadata.

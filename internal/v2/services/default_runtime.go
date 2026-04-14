@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"time"
 
-	classictools "github.com/jkatigb/agentctl/internal/agent/tools"
-	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
-	toolbridge "github.com/jkatigb/agentctl/internal/v2/adapters/toolbridge"
-	"github.com/jkatigb/agentctl/internal/v2/core/events"
-	corerun "github.com/jkatigb/agentctl/internal/v2/core/run"
-	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"
-	runner "github.com/jkatigb/agentctl/internal/v2/runtime/runner"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/supervisor"
+	classictools "github.com/joshka0/foxctl/internal/agent/tools"
+	sysconfig "github.com/joshka0/foxctl/internal/platform/config"
+	toolbridge "github.com/joshka0/foxctl/internal/v2/adapters/toolbridge"
+	"github.com/joshka0/foxctl/internal/v2/core/events"
+	corerun "github.com/joshka0/foxctl/internal/v2/core/run"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	"github.com/joshka0/foxctl/internal/v2/runtime/profiles"
+	runner "github.com/joshka0/foxctl/internal/v2/runtime/runner"
+	"github.com/joshka0/foxctl/internal/v2/runtime/supervisor"
 )
 
 // DefaultRuntimeDependencies assembles the canonical production v2 runner with

@@ -8,7 +8,7 @@
 
 The current todo system creates friction for AI agents (Claude) in several ways:
 
-1. **Dual System Overhead**: Claude Code has built-in `TodoWrite` tool, agentctl has
+1. **Dual System Overhead**: Claude Code has built-in `TodoWrite` tool, foxctl has
    persistent `todo` commands. Maintaining both creates cognitive load and sync issues.
 
 2. **Strict Dependency Enforcement**: Tasks with `depends_on` block completion if
@@ -26,14 +26,14 @@ The current todo system creates friction for AI agents (Claude) in several ways:
 
 **Option A: Hook-Based Sync**
 ```
-TodoWrite call → PostToolUse hook → agentctl todo sync
+TodoWrite call → PostToolUse hook → foxctl todo sync
 ```
 - Intercept TodoWrite operations
-- Mirror to agentctl storage
-- Bidirectional: session-restore populates TodoWrite from agentctl
+- Mirror to foxctl storage
+- Bidirectional: session-restore populates TodoWrite from foxctl
 
 **Option B: Replace TodoWrite**
-- Custom MCP tool that wraps agentctl todo
+- Custom MCP tool that wraps foxctl todo
 - Same interface, persistent backend
 - Eliminates dual-system entirely
 
@@ -41,16 +41,16 @@ TodoWrite call → PostToolUse hook → agentctl todo sync
 
 ```bash
 # Current: Error if dependency incomplete
-agentctl todo complete --id <id>
+foxctl todo complete --id <id>
 # Error: task depends on incomplete task X
 
 # Proposed: Allow with warning
-agentctl todo complete --id <id>
+foxctl todo complete --id <id>
 # Warning: completing task with incomplete dependency: X
 # Completed: <task title>
 
 # Or explicit force flag
-agentctl todo complete --id <id> --force
+foxctl todo complete --id <id> --force
 ```
 
 **Implementation**: Change `depends_on` from hard constraint to advisory.
@@ -60,19 +60,19 @@ Store completion timestamp even if deps incomplete. Surface warnings in `todo li
 
 ```bash
 # By title substring (case-insensitive)
-agentctl todo complete "turn persistence"
+foxctl todo complete "turn persistence"
 # Matched: "Implement Turn persistence in sessions.db" - Completed
 
 # By position in list (1-indexed)
-agentctl todo done 3
+foxctl todo done 3
 # Completed: <3rd task in list>
 
 # By partial ID
-agentctl todo complete 01JFX
+foxctl todo complete 01JFX
 # Matched: 01JFXYZ... - Completed
 
 # Interactive picker (if multiple matches)
-agentctl todo complete "memory"
+foxctl todo complete "memory"
 # Multiple matches:
 #   1. Implement ShortTermMemory
 #   2. Add memory hooks
@@ -83,16 +83,16 @@ agentctl todo complete "memory"
 
 ```bash
 # Complete task and all its incomplete dependencies
-agentctl todo complete-chain <id>
+foxctl todo complete-chain <id>
 # Completing dependency: X
 # Completing dependency: Y
 # Completing: Z
 
 # Complete all tasks matching pattern
-agentctl todo complete-all "Phase 1"
+foxctl todo complete-all "Phase 1"
 
 # Mark multiple by position
-agentctl todo done 1,3,5
+foxctl todo done 1,3,5
 ```
 
 ### 5. Auto-Detection Hooks
@@ -115,9 +115,9 @@ agentctl todo done 1,3,5
 
 ```bash
 # Instead of structured commands
-agentctl todo "mark the turn persistence task as done"
-agentctl todo "what's left for phase 1?"
-agentctl todo "add: write integration tests for actor system"
+foxctl todo "mark the turn persistence task as done"
+foxctl todo "what's left for phase 1?"
+foxctl todo "add: write integration tests for actor system"
 ```
 
 Uses LLM to parse intent → maps to structured operations.
@@ -126,11 +126,11 @@ Uses LLM to parse intent → maps to structured operations.
 
 ```bash
 # Show todos relevant to current file/directory
-agentctl todo list --context .
+foxctl todo list --context .
 # Filters to todos mentioning files in current directory
 
 # Show todos relevant to git diff
-agentctl todo list --changed
+foxctl todo list --changed
 # Shows todos related to uncommitted changes
 ```
 
@@ -150,13 +150,13 @@ agentctl todo list --changed
 
 ### Todo Templates
 ```bash
-agentctl todo add --template feature
+foxctl todo add --template feature
 # Creates: Design, Implement, Test, Document sub-tasks
 ```
 
 ### Kanban-Style Status
 ```bash
-agentctl todo move <id> --to in-review
+foxctl todo move <id> --to in-review
 # Statuses: backlog → todo → in-progress → in-review → done
 ```
 
@@ -171,7 +171,7 @@ agentctl todo move <id> --to in-review
 
 ## Open Questions
 
-1. Should agentctl todos replace TodoWrite entirely, or coexist?
+1. Should foxctl todos replace TodoWrite entirely, or coexist?
 2. How to handle multi-agent scenarios where different agents have different views?
 3. Should todos be workspace-scoped or global?
 

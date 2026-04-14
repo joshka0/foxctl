@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
-	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
+	"github.com/joshka0/foxctl/internal/storage/contextbuffer"
 )
 
 func TestReadInboxPreTool(t *testing.T) {

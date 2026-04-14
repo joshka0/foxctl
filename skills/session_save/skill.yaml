@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/save
@@ -36,8 +36,8 @@ signature:
     long: |
       Use session/save to capture session context for continuity.
       Example commands:
-        agentctl run session/save --input '{"trigger":"pre_compact","workspace":"./"}'
-        agentctl skills run session/save --trigger pre_compact --workspace ./
+        foxctl run session/save --input '{"trigger":"pre_compact","workspace":"./"}'
+        foxctl skills run session/save --trigger pre_compact --workspace ./
     workflows:
       - id: save-session
         description: "Capture session state."

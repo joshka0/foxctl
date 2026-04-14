@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/smart_read
@@ -90,16 +90,16 @@ signature:
 
       Example commands:
         # Auto-select files and extract snippets
-        agentctl run code/smart_read --input '{"query": "user authentication flow"}'
+        foxctl run code/smart_read --input '{"query": "user authentication flow"}'
 
         # Structural search with precise repo-index mode
-        agentctl run code/smart_read --input '{"query": "repo index dag grep", "repo_index_mode": "search"}'
+        foxctl run code/smart_read --input '{"query": "repo index dag grep", "repo_index_mode": "search"}'
 
         # Read specific files
-        agentctl run code/smart_read --input '{"query": "how does login work", "files": ["auth/login.go"]}'
+        foxctl run code/smart_read --input '{"query": "how does login work", "files": ["auth/login.go"]}'
 
         # Get API structure only
-        agentctl run code/smart_read --input '{"query": "auth API", "mode": "structure", "max_files": 5}'
+        foxctl run code/smart_read --input '{"query": "auth API", "mode": "structure", "max_files": 5}'
 
     workflows:
       - id: explore-codebase

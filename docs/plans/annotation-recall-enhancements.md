@@ -259,7 +259,7 @@ func resolveSessionScope(ctx, sessionStore, in) ([]string, error)
 ### `skills/session_query/skill.yaml` (new)
 
 ```yaml
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/query

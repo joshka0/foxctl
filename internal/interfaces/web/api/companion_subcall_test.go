@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
+	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
 )
 
 func TestDecodeCompanionSubcallResult(t *testing.T) {
@@ -15,7 +15,7 @@ func TestDecodeCompanionSubcallResult(t *testing.T) {
 	stateResp := v2jido.StateResponse{
 		Status: "ok",
 		State: json.RawMessage(`{
-			"agentctl": {
+			"foxctl": {
 				"last_result": {
 					"summary": "Child found the prior session and extracted the key travel constraints.",
 					"evidence_refs": ["session:abc", "memory:def"],
@@ -62,7 +62,7 @@ func TestDecodeCompanionSubcallResult_DerivesSummaryFromEnvelope(t *testing.T) {
 	stateResp := v2jido.StateResponse{
 		Status: "ok",
 		State: json.RawMessage(`{
-			"agentctl": {
+			"foxctl": {
 				"last_result": {
 					"envelope": {
 						"command": "code/smart_search",

@@ -3,7 +3,7 @@ package hook
 import "encoding/json"
 
 // Input represents the standardized input from Claude Code hooks.
-// This is what the bash wrapper passes to agentctl hook skills.
+// This is what the bash wrapper passes to foxctl hook skills.
 type Input struct {
 	// Event is the hook event type (e.g., "PreToolUse", "PostToolUse", "Stop")
 	Event string `json:"event"`

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
-	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
+	"github.com/joshka0/foxctl/internal/protocol"
 )
 
 func TestGoldenEnvelopes(t *testing.T) {

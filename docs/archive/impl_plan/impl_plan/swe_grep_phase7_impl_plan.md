@@ -26,11 +26,11 @@ are gated by workspace-level opt-in and optional role checks.
       and mapping envelopes/jobs → `TrajectoryEvent` rows, with stable
       correlation metadata (`trace_id`, `job_id`, `task_id`, `epic_id`).
   - **Codemaps most relevant**:
-    - **agentctl Envelope Protocol & CLI Pipeline** (where capture logic can
+    - **foxctl Envelope Protocol & CLI Pipeline** (where capture logic can
       hook into validated envelopes).
-    - **agentctl Job System: Types, Storage, and WFQ Scheduler** / **Job System:
+    - **foxctl Job System: Types, Storage, and WFQ Scheduler** / **Job System:
       Submission, SQLite Storage, State Transitions, and WFQ Scheduler**.
-    - **agentctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow**.
+    - **foxctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow**.
 
 - **Section B – Jobs, export operations, and CAS**
   - B1/B2/B3 cover:
@@ -43,10 +43,10 @@ are gated by workspace-level opt-in and optional role checks.
       `protocol.Validate`, optional `meta.cas_digest` matching `data.artifact`
       (when set), CAS pinning for exported artifacts.
   - **Codemaps**:
-    - **CAS Storage & Integrity Verification in agentctl** / **agentctl CAS:
+    - **CAS Storage & Integrity Verification in foxctl** / **foxctl CAS:
       Put, Get, Integrity, Deduplication & Integration**.
-    - **agentctl Job System…** (preparation, execution, result handling).
-    - **agentctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow**.
+    - **foxctl Job System…** (preparation, execution, result handling).
+    - **foxctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow**.
 
 - **Section C – Knowledge, privacy, and configuration**
   - C1/C2/C3 cover:
@@ -58,8 +58,8 @@ are gated by workspace-level opt-in and optional role checks.
       gating `trajectory.export` behind workspace config and optional actor/role
       checks.
   - **Codemaps**:
-    - **agentctl Knowledge System & Factory Droids**.
-    - **agentctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow**.
+    - **foxctl Knowledge System & Factory Droids**.
+    - **foxctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow**.
 
 - **Section D – Tests, goldens, and CI integration**
   - D1–D5 cover:
@@ -71,9 +71,9 @@ are gated by workspace-level opt-in and optional role checks.
     - Job system + CLI integration tests for long-running exports.
     - CI integration via existing test/watch + coverage targets.
   - **Codemaps**:
-    - **agentctl Test Infrastructure: Test-Watch, Feedback Hooks, and CI
+    - **foxctl Test Infrastructure: Test-Watch, Feedback Hooks, and CI
       Targets**.
-    - **agentctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow**.
+    - **foxctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow**.
 
 ---
 
@@ -112,7 +112,7 @@ are gated by workspace-level opt-in and optional role checks.
 
 - **Scope**
   - Enumerate and implement capture points from `dspy_trajectory_capture.md` §4:
-    - CLI user requests (e.g., `agentctl dspy-agent`, `todo.*`, SWE Grep flows).
+    - CLI user requests (e.g., `foxctl dspy-agent`, `todo.*`, SWE Grep flows).
     - dspy-go agent runs (session start/end, tool calls, significant internal
       steps).
     - Review outcomes and task state transitions.
@@ -203,7 +203,7 @@ are gated by workspace-level opt-in and optional role checks.
 - **Scope**
   - Implement the `trajectory.export` operation per
     `docs/spec/skills_spec/README.md` §5.1 and `dspy_trajectory_capture.md` §7:
-    - CLI entry point (e.g., `agentctl trajectory export`) that accepts filters,
+    - CLI entry point (e.g., `foxctl trajectory export`) that accepts filters,
       format (`ndjson`), and `include_raw_traces` flag.
     - Uses the exporter library to generate episodes.
     - Either:
@@ -328,6 +328,6 @@ are gated by workspace-level opt-in and optional role checks.
 
 - **Tests & CI**
   - New unit, integration, and golden tests live under `internal/*`,
-    `cmd/agentctl/cmd`, and `test/golden/trajectories/`.
+    `cmd/foxctl/cmd`, and `test/golden/trajectories/`.
   - CI runs all relevant tests and coverage for Phase 7 code without
     regressions.

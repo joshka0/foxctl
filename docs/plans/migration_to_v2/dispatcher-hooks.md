@@ -38,7 +38,7 @@ Use one **union input shape** for all events.
   "correlation_id": "optional",               // ask_id/cmd_id/tool_call_id
 
   "tool_name": "Edit",                        // platform tool name (CC/OC)
-  "tool_canonical": "edit.apply_patch",       // optional canonical name (agentctl runtime)
+  "tool_canonical": "edit.apply_patch",       // optional canonical name (foxctl runtime)
   "tool_kind": "read|write|search|exec|any",  // optional but recommended
 
   "tool_input": { /* any */ },                // JSON object (or {}); raw tool args
@@ -108,8 +108,8 @@ Use one **union input shape** for all events.
   ],
 
   "config_files": [
-    "/workspace/.agentctl/hooks.yaml",
-    "/home/user/.agentctl/hooks.yaml"
+    "/workspace/.foxctl/hooks.yaml",
+    "/home/user/.foxctl/hooks.yaml"
   ],
   "blocked": false,
   "blocked_by": "",
@@ -240,8 +240,8 @@ This keeps your current “fail open” behavior for CC hooks, while letting you
 
 Dispatcher loads configs in this order (later overrides earlier by `id`, execution order remains deterministic by `priority`):
 
-1. `~/.agentctl/hooks.yaml` (if exists)
-2. `<workspace>/.agentctl/hooks.yaml` (if exists)
+1. `~/.foxctl/hooks.yaml` (if exists)
+2. `<workspace>/.foxctl/hooks.yaml` (if exists)
 
 Merge rules:
 - Entries are merged by `id` (required).

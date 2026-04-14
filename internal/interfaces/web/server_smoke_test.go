@@ -13,15 +13,15 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/interfaces/web/api"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/coordination"
+	"github.com/joshka0/foxctl/internal/interfaces/web/api"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/coordination"
 )
 
 const (
-	serverRoomSmokeWorkspacePath          = "/tmp/agentctl-server-room-smoke-workspace"
-	serverOrchestrationSmokeWorkspacePath = "/tmp/agentctl-server-orchestration-smoke-workspace"
-	serverRoomBoardSmokeWorkspacePath     = "/tmp/agentctl-server-room-board-smoke-workspace"
+	serverRoomSmokeWorkspacePath          = "/tmp/foxctl-server-room-smoke-workspace"
+	serverOrchestrationSmokeWorkspacePath = "/tmp/foxctl-server-orchestration-smoke-workspace"
+	serverRoomBoardSmokeWorkspacePath     = "/tmp/foxctl-server-room-board-smoke-workspace"
 )
 
 type smokeTestServer struct {
@@ -50,7 +50,7 @@ func activateServerRoomLoop(t *testing.T, cfg config.Config, workspaceID, roomID
 		WorkspaceID:             workspaceID,
 		RoomID:                  roomID,
 		Enabled:                 true,
-		ManagedBy:               "agentctl.room.loop/test",
+		ManagedBy:               "foxctl.room.loop/test",
 		LastTickAt:              &now,
 		DeliveryLeaseName:       leaseName,
 		DeliveryOwnerID:         "owner-a",

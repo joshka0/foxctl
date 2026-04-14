@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/intelligence/verification"
-	"github.com/jkatigb/agentctl/internal/platform/env"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/intelligence/verification"
+	"github.com/joshka0/foxctl/internal/platform/env"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
 )
 
 const command = "verification/cove_verify"

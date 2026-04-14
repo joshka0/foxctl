@@ -14,7 +14,7 @@ implementation.
 
 ## 1. Scope & Dependencies
 
-**Goal:** Implement the `http/openapi` Tier‑1 skill and CLI so that agentctl can
+**Goal:** Implement the `http/openapi` Tier‑1 skill and CLI so that foxctl can
 invoke arbitrary OpenAPI 3.x operations with:
 
 - Spec‑as‑memory (`spec` from path / CAS / named memory)
@@ -33,7 +33,7 @@ invoke arbitrary OpenAPI 3.x operations with:
 **Out of scope for Phase 6:**
 
 - Plugin SPI for custom auth/pagination (Phase 7)
-- Tier‑2 generated wrappers (`agentctl openapi generate`, Phase 9)
+- Tier‑2 generated wrappers (`foxctl openapi generate`, Phase 9)
 - Non‑HTTP protocols
 
 ---
@@ -52,9 +52,9 @@ invoke arbitrary OpenAPI 3.x operations with:
   - `summarize.go` — CAS wrapping + envelope summaries
 - `skills/http_openapi/` (or similar)
   - Small `main.go` wiring stdin/stdout envelopes to `internal/interfaces/openapi`
-- `cmd/agentctl/cmd/openapi.go`
+- `cmd/foxctl/cmd/openapi.go`
   - CLI helpers: `openapi import|describe|validate|test`
-  - `agentctl run http/openapi` uses this skill via normal `run` path
+  - `foxctl run http/openapi` uses this skill via normal `run` path
 
 ### 2.2 Execution Model
 
@@ -296,16 +296,16 @@ Summaries should capture:
 
 ### 11.1 Spec Management Commands
 
-- `agentctl openapi import <file|url> --as=<name> [--strict]`
+- `foxctl openapi import <file|url> --as=<name> [--strict]`
   - Store spec in CAS and named memory (type `openapi_spec`).
-- `agentctl openapi describe memory:<name>`
+- `foxctl openapi describe memory:<name>`
   - List available operations, params, and auth hints.
-- `agentctl openapi validate <spec-ref>`
+- `foxctl openapi validate <spec-ref>`
   - Run parser and basic checks; emit `ok` or `EOPENAPI`.
 
 ### 11.2 Execution
 
-- `agentctl run http/openapi --spec=memory:<name> --operationId=<id> --params='{}' [--dry_run]`
+- `foxctl run http/openapi --spec=memory:<name> --operationId=<id> --params='{}' [--dry_run]`
   - CLI wrapper is thin: it only helps construct the `data` payload for the
     `http/openapi` skill and defers to the normal `run` machinery.
 

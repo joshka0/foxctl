@@ -77,13 +77,13 @@ Keep the current public-facing path:
 
 - `gui-auth-gateway`
 - authenticated `gui-agent`
-- private `agentctl` service
+- private `foxctl` service
 
 That remains the operator/control layer.
 
 ### 2. Sandbox Provisioning Layer
 
-Add an `agentctl` sandbox provider abstraction:
+Add an `foxctl` sandbox provider abstraction:
 
 - create sandbox
 - inspect sandbox
@@ -143,7 +143,7 @@ Do not give sandboxes raw write access to canonical memory stores by default.
 
 Recommended access model:
 
-- shared read-only retrieval API from `agentctl`
+- shared read-only retrieval API from `foxctl`
 - optional prebuilt context/evidence pack artifact injected into sandbox
 
 Good candidates:
@@ -187,7 +187,7 @@ Recommended defaults:
   - git host
   - package registries if needed
   - LLM provider
-  - `agentctl` retrieval endpoint
+  - `foxctl` retrieval endpoint
 - no direct host-path mounts in public or shared deployments
 - no direct write access to canonical memory DBs
 - explicit artifact/promotion write-back only
@@ -234,7 +234,7 @@ Add a narrow read-only retrieval surface for sandboxes:
 This could be exposed as:
 
 - authenticated internal HTTP endpoint
-- artifact generation path in `agentctl`
+- artifact generation path in `foxctl`
 
 ### GUI
 
@@ -256,7 +256,7 @@ And show:
 
 Goal:
 
-- prove `agentctl` can launch an OpenSandbox-backed task workspace locally
+- prove `foxctl` can launch an OpenSandbox-backed task workspace locally
 
 Scope:
 
@@ -313,7 +313,7 @@ Goal:
 Scope:
 
 - OpenSandbox service in cluster
-- internal auth between `agentctl` and OpenSandbox
+- internal auth between `foxctl` and OpenSandbox
 - egress policy
 - sandbox lifecycle cleanup
 

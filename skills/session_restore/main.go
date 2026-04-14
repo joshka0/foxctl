@@ -8,17 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/context/calibration"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/joshka0/foxctl/internal/context/calibration"
+	"github.com/joshka0/foxctl/internal/context/sessionkit"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 // Input defines the skill input parameters for session restoration with workspace and trigger options.
@@ -376,7 +376,7 @@ func countItems(snap SessionSnapshot) int {
 	return count
 }
 
-// runSemanticSearches executes semantic search for each key question using agentctl CLI.
+// runSemanticSearches executes semantic search for each key question using foxctl CLI.
 func runSemanticSearches(ctx context.Context, keyQuestions []string, workspace string, maxResults int) []SemanticSearchResult {
 	if len(keyQuestions) == 0 {
 		return nil
@@ -399,7 +399,7 @@ func runSemanticSearches(ctx context.Context, keyQuestions []string, workspace s
 			continue
 		}
 
-		// Execute agentctl run code/semantic_search
+		// Execute foxctl run code/semantic_search
 		searchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		var data struct {
 			TreeText string `json:"tree_text"`
@@ -640,11 +640,11 @@ func formatContextWithSearch(snap SessionSnapshot, trigger string, todoQueries [
 		sb.WriteString("*To explore further:*\n")
 		sb.WriteString("```bash\n")
 		sb.WriteString("# Semantic search across sessions:\n")
-		sb.WriteString("agentctl run session/recall --input '{\"query\": \"<topic>\"}'\n")
+		sb.WriteString("foxctl run session/recall --input '{\"query\": \"<topic>\"}'\n")
 		if len(similarSessions) > 0 {
 			sb.WriteString("\n# View specific session:\n")
 			for _, s := range similarSessions {
-				sb.WriteString(fmt.Sprintf("agentctl sessions get %s  # %s\n", s.SessionID, skillout.TruncateSingleLine(s.Summary, 40)))
+				sb.WriteString(fmt.Sprintf("foxctl sessions get %s  # %s\n", s.SessionID, skillout.TruncateSingleLine(s.Summary, 40)))
 				break // Just show first one as example
 			}
 		}
@@ -768,7 +768,7 @@ func formatContextWithSearch(snap SessionSnapshot, trigger string, todoQueries [
 
 	// Note: Summary is shown at the top as "Context Window Summary"
 
-	// Append agentctl skills reference
+	// Append foxctl skills reference
 	sb.WriteString(getSkillsReference())
 
 	sb.WriteString("---\n")
@@ -780,11 +780,11 @@ func formatContextWithSearch(snap SessionSnapshot, trigger string, todoQueries [
 	return sb.String()
 }
 
-// getSkillsReference returns the agentctl skills quick reference.
+// getSkillsReference returns the foxctl skills quick reference.
 func getSkillsReference() string {
-	return `### agentctl Skills Reference
+	return `### foxctl Skills Reference
 
-Run: ` + "`agentctl run <skill> --input '<json>'`" + ` | Help: ` + "`agentctl run <skill> --help`" + `
+Run: ` + "`foxctl run <skill> --input '<json>'`" + ` | Help: ` + "`foxctl run <skill> --help`" + `
 
 **Files & Search**
 | Skill | Purpose |
@@ -817,10 +817,10 @@ Run: ` + "`agentctl run <skill> --input '<json>'`" + ` | Help: ` + "`agentctl ru
 
 **CLI Shortcuts**
 ` + "```bash" + `
-agentctl todo list|add|complete    # Task management
-agentctl ci status --pr 123        # CI + comments + merge
-agentctl memory list|get|put       # Named memories
-agentctl search "pattern"          # Quick ripgrep
+foxctl todo list|add|complete    # Task management
+foxctl ci status --pr 123        # CI + comments + merge
+foxctl memory list|get|put       # Named memories
+foxctl search "pattern"          # Quick ripgrep
 ` + "```" + `
 
 `
@@ -1048,7 +1048,7 @@ func fetchAnchor(ctx context.Context, workspace, sessionID string) *AnchorInfo {
 		return nil
 	}
 
-	// Execute agentctl run session/anchor
+	// Execute foxctl run session/anchor
 	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 

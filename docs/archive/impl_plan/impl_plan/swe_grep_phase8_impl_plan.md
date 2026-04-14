@@ -94,7 +94,7 @@ Status: complete.
     - `teams/manage.describe` – details + members.
     - `teams/manage.upsert` – create/update team fields.
     - `teams/manage.add_member` / `teams/manage.remove_member` – membership.
-  - Optionally add `agentctl teams ...` CLI commands that call these skills.
+  - Optionally add `foxctl teams ...` CLI commands that call these skills.
 
 - **Constraints**
   - All outputs are Protocol v1 envelopes.

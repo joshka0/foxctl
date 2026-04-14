@@ -7,12 +7,12 @@
 # first and can target specific functions/types by line number.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_SMART_READ_INCLUDE_PRIVATE - Include private symbols (default: true)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 INCLUDE_PRIVATE="${AGENTCTL_SMART_READ_INCLUDE_PRIVATE:-true}"
 
 # Read hook input from stdin

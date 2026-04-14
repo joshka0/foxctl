@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/agent"
 )
 
 // BoardStore captures the room message persistence operations needed by the

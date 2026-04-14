@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/restore
@@ -28,8 +28,8 @@ signature:
     long: |
       Use session/restore to load snapshot context on resume.
       Example commands:
-        agentctl run session/restore --input '{"trigger":"resume","workspace":"./"}'
-        agentctl skills run session/restore --trigger resume --workspace ./
+        foxctl run session/restore --input '{"trigger":"resume","workspace":"./"}'
+        foxctl skills run session/restore --trigger resume --workspace ./
     workflows:
       - id: restore-session
         description: "Restore after resume."

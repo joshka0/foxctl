@@ -13,11 +13,11 @@ workspace or vault.
 
 | Surface | Rebuild command | Notes |
 | --- | --- | --- |
-| Workspace memory embeddings | `agentctl index init --workspace /path/to/workspace --scope memory` | Rebuilds named-memory embeddings for that workspace. |
-| Workspace task embeddings | `agentctl index init --workspace /path/to/workspace --scope tasks` | Rebuilds task embeddings for that workspace. |
-| Workspace session embeddings | `agentctl index init --workspace /path/to/workspace --scope sessions` | Rebuilds session summary embeddings for that workspace. |
-| Workspace symbol/search embeddings | `agentctl index init --workspace /path/to/workspace --scope symbols` | Rebuilds symbol embeddings and the code-search/searchindex side of the workspace. |
-| Obsidian semantic note/chunk embeddings | `agentctl obsidian index build --vault-path /path/to/vault` | Rebuilds the local vault index and semantic note/chunk embeddings. |
+| Workspace memory embeddings | `foxctl index init --workspace /path/to/workspace --scope memory` | Rebuilds named-memory embeddings for that workspace. |
+| Workspace task embeddings | `foxctl index init --workspace /path/to/workspace --scope tasks` | Rebuilds task embeddings for that workspace. |
+| Workspace session embeddings | `foxctl index init --workspace /path/to/workspace --scope sessions` | Rebuilds session summary embeddings for that workspace. |
+| Workspace symbol/search embeddings | `foxctl index init --workspace /path/to/workspace --scope symbols` | Rebuilds symbol embeddings and the code-search/searchindex side of the workspace. |
+| Obsidian semantic note/chunk embeddings | `foxctl obsidian index build --vault-path /path/to/vault` | Rebuilds the local vault index and semantic note/chunk embeddings. |
 
 ## Full ACA Refresh
 
@@ -25,10 +25,10 @@ When repo docs, bridge metadata, or vault structure changed alongside embedding
 model changes, rebuild the full ACA layer:
 
 ```bash
-agentctl obsidian graph build --workspace /path/to/workspace --vault-path /path/to/vault
-agentctl obsidian graph promote --workspace /path/to/workspace --vault-path /path/to/vault
-agentctl obsidian bridge reconcile --workspace /path/to/workspace --vault-path /path/to/vault
-agentctl obsidian index build --vault-path /path/to/vault
+foxctl obsidian graph build --workspace /path/to/workspace --vault-path /path/to/vault
+foxctl obsidian graph promote --workspace /path/to/workspace --vault-path /path/to/vault
+foxctl obsidian bridge reconcile --workspace /path/to/workspace --vault-path /path/to/vault
+foxctl obsidian index build --vault-path /path/to/vault
 ```
 
 ## Notes

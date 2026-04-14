@@ -1,4 +1,4 @@
-# agentctl Claude Code Integration
+# foxctl Claude Code Integration
 
 > Quick links: [README](../README.md) | [AGENTS.md](../AGENTS.md) |
 > [Detailed docs](../docs/general/)
@@ -7,11 +7,11 @@
 
 ## Getting Started (New Repo Setup)
 
-Initialize a new repository for full agentctl tooling support:
+Initialize a new repository for full foxctl tooling support:
 
 ### 1. Environment Setup
 
-Ensure API keys are configured in `~/.agentctl/.env`:
+Ensure API keys are configured in `~/.foxctl/.env`:
 
 ```bash
 # Required for embeddings
@@ -28,13 +28,13 @@ Creates a graph of code relationships (calls, references, imports):
 
 ```bash
 # For Go + TypeScript projects
-agentctl index repo build --workspace . --go --typescript
+foxctl index repo build --workspace . --go --typescript
 
 # Go only
-agentctl index repo build --workspace . --go --typescript=false
+foxctl index repo build --workspace . --go --typescript=false
 
 # TypeScript only
-agentctl index repo build --workspace . --go=false --typescript
+foxctl index repo build --workspace . --go=false --typescript
 ```
 
 ### 3. Generate File & Symbol Summaries
@@ -43,13 +43,13 @@ LLM-powered summaries for better semantic search (requires OPENROUTER_API_KEY):
 
 ```bash
 # File summaries - describes what each file does
-agentctl index file-summaries --workspace .
+foxctl index file-summaries --workspace .
 
 # Symbol summaries - describes functions/types in repo graph
-agentctl index symbol-summaries --workspace .
+foxctl index symbol-summaries --workspace .
 
 # Use --llm for richer symbol summaries (slower)
-agentctl index symbol-summaries --workspace . --llm
+foxctl index symbol-summaries --workspace . --llm
 ```
 
 ### 4. Initialize Embeddings
@@ -58,32 +58,32 @@ Embed all knowledge scopes for vector search:
 
 ```bash
 # All scopes at once (recommended for new repos)
-agentctl index init --workspace .
+foxctl index init --workspace .
 
 # Specific scopes
-agentctl index init --workspace . --scope symbols        # Code files
-agentctl index init --workspace . --scope memory         # Gotchas/notes
-agentctl index init --workspace . --scope tasks          # Task descriptions
-agentctl index init --workspace . --scope sessions       # Session context
+foxctl index init --workspace . --scope symbols        # Code files
+foxctl index init --workspace . --scope memory         # Gotchas/notes
+foxctl index init --workspace . --scope tasks          # Task descriptions
+foxctl index init --workspace . --scope sessions       # Session context
 
 # For TypeScript-only repos, specify glob pattern
-agentctl index init --workspace . --scope symbols --glob '**/*.{ts,tsx,js,jsx}'
+foxctl index init --workspace . --scope symbols --glob '**/*.{ts,tsx,js,jsx}'
 ```
 
 ### 5. Verify Setup
 
 ```bash
 # Check all index status
-agentctl index status --workspace .
+foxctl index status --workspace .
 
 # Check repo graph status
-agentctl index repo status --workspace .
+foxctl index repo status --workspace .
 
 # Test semantic search
-agentctl run code/semantic_search --input '{"format": "tree", "limit": 20}'
+foxctl run code/semantic_search --input '{"format": "tree", "limit": 20}'
 
 # Test repo graph search
-agentctl index repo search --workspace . --query "authentication" --limit 10
+foxctl index repo search --workspace . --query "authentication" --limit 10
 ```
 
 ### Quick Setup Script
@@ -91,22 +91,22 @@ agentctl index repo search --workspace . --query "authentication" --limit 10
 For a new TypeScript repo:
 ```bash
 # Build all indexes
-agentctl index repo build --workspace . --go=false --typescript
-agentctl index file-summaries --workspace .
-agentctl index symbol-summaries --workspace .
-agentctl index init --workspace . --scope symbols --glob '**/*.{ts,tsx}'
-agentctl index init --workspace . --scope memory,tasks,sessions
+foxctl index repo build --workspace . --go=false --typescript
+foxctl index file-summaries --workspace .
+foxctl index symbol-summaries --workspace .
+foxctl index init --workspace . --scope symbols --glob '**/*.{ts,tsx}'
+foxctl index init --workspace . --scope memory,tasks,sessions
 ```
 
 ### Available Tools After Setup
 
 | Tool | Command | Purpose |
 |------|---------|---------|
-| **Semantic Search** | `agentctl run code/semantic_search --input '{"query": "..."}'` | Find code by concept |
-| **Graph Search** | `agentctl index repo search --query "..."` | Find nodes by text |
-| **Graph Expand** | `agentctl index repo expand --seed "<id>" --edge CALLS` | Traverse relationships |
-| **Graph Ask** | `agentctl index repo ask --question "..."` | Natural language queries |
-| **Codemap** | `agentctl codemap generate "trace flow"` | AI-traced relationships |
+| **Semantic Search** | `foxctl run code/semantic_search --input '{"query": "..."}'` | Find code by concept |
+| **Graph Search** | `foxctl index repo search --query "..."` | Find nodes by text |
+| **Graph Expand** | `foxctl index repo expand --seed "<id>" --edge CALLS` | Traverse relationships |
+| **Graph Ask** | `foxctl index repo ask --question "..."` | Natural language queries |
+| **Codemap** | `foxctl codemap generate "trace flow"` | AI-traced relationships |
 
 ---
 
@@ -116,10 +116,10 @@ Get oriented with the codebase tree:
 
 ```bash
 # Full repo overview (no query needed)
-agentctl run code/semantic_search --input '{"format": "tree"}'
+foxctl run code/semantic_search --input '{"format": "tree"}'
 
 # Focused tree for your task
-agentctl run code/semantic_search --input '{"query": "your task topic", "format": "tree", "limit": 30}'
+foxctl run code/semantic_search --input '{"query": "your task topic", "format": "tree", "limit": 30}'
 ```
 
 If your change touches `internal/*` package placement, read
@@ -130,7 +130,7 @@ for new non-runtime code.
 For relationship navigation (calls/references/imports), build the repo graph:
 
 ```bash
-agentctl index repo build --workspace . --go --typescript
+foxctl index repo build --workspace . --go --typescript
 ```
 
 Also read: `configs/USER_PREFS.md` and `configs/RECENT_GOTCHAS.md`
@@ -149,37 +149,37 @@ Keep corrections brief and parenthetical — don't lecture, just annotate.
 ## Architecture
 
 ```
-Claude Code → Hooks → agentctl skills → SQLite/CAS → JSON envelope
+Claude Code → Hooks → foxctl skills → SQLite/CAS → JSON envelope
 ```
 
 ---
 
 ## Command Patterns
 
-agentctl has two command styles:
+foxctl has two command styles:
 
 | Style | Pattern | When to Use |
 |-------|---------|-------------|
-| **Skill invocation** | `agentctl run <skill> --input '<json>'` | Full skill with JSON input/output |
-| **Convenience commands** | `agentctl <noun> <verb> [flags]` | Quick CLI access to common operations |
+| **Skill invocation** | `foxctl run <skill> --input '<json>'` | Full skill with JSON input/output |
+| **Convenience commands** | `foxctl <noun> <verb> [flags]` | Quick CLI access to common operations |
 
 **Examples:**
 ```bash
 # Skill invocation (programmatic, JSON I/O)
-agentctl run code/semantic_search --input '{"query": "auth", "limit": 10}'
-agentctl run todo/manage --input '{"action": "list"}'
+foxctl run code/semantic_search --input '{"query": "auth", "limit": 10}'
+foxctl run todo/manage --input '{"action": "list"}'
 
 # Convenience commands (interactive, flags)
-agentctl todo list -f table
-agentctl memory search "auth"
-agentctl ci status --pr 123
+foxctl todo list -f table
+foxctl memory search "auth"
+foxctl ci status --pr 123
 ```
 
 ## Structured Shell For Retrieval
 
-For command-shaped, read-only repo inspection, prefer `agentctl shell` before reconstructing the same request with multiple raw tools. This is the compact structured shell path, not an arbitrary shell executor.
+For command-shaped, read-only repo inspection, prefer `foxctl shell` before reconstructing the same request with multiple raw tools. This is the compact structured shell path, not an arbitrary shell executor.
 
-Use `agentctl shell` first for supported noisy inspection commands such as:
+Use `foxctl shell` first for supported noisy inspection commands such as:
 - `find`
 - `rg`, `grep`
 - `sed -n 'A,Bp' file`
@@ -193,14 +193,14 @@ Prefer raw/native tools instead when the command is already compact or exact-val
 - plain `head` / `tail`
 - exact-value queries such as `kubectl get -o jsonpath`
 
-If `agentctl shell` reports unsupported, `keep_raw`, or `raw_unavailable`, fall back immediately to the raw/native command. Before editing, reread the target with a raw file/context tool such as `fs_read_file` or `context_grep`.
+If `foxctl shell` reports unsupported, `keep_raw`, or `raw_unavailable`, fall back immediately to the raw/native command. Before editing, reread the target with a raw file/context tool such as `fs_read_file` or `context_grep`.
 
 Examples:
 ```bash
-agentctl shell --command "rg -n 'spawn' internal/agent | head -n 10"
-agentctl shell --command "sed -n '1,120p' cmd/agentctl/cmd/agent.go"
-agentctl shell --command "git status --short"
-agentctl shell --measure --command "git log --stat -5"
+foxctl shell --command "rg -n 'spawn' internal/agent | head -n 10"
+foxctl shell --command "sed -n '1,120p' cmd/foxctl/cmd/agent.go"
+foxctl shell --command "git status --short"
+foxctl shell --measure --command "git log --stat -5"
 ```
 
 Many convenience commands wrap skills internally. **Prefer convenience commands** for interactive use; **prefer skill invocation** for scripting.
@@ -226,8 +226,8 @@ Many convenience commands wrap skills internally. **Prefer convenience commands*
 ### Human-in-the-Loop
 
 ```bash
-agentctl-mail "Subject" "Message body"
-agentctl-mail -p 1 "URGENT" "Stop and review"
+foxctl-mail "Subject" "Message body"
+foxctl-mail -p 1 "URGENT" "Stop and review"
 ```
 
 ---
@@ -247,37 +247,37 @@ agentctl-mail -p 1 "URGENT" "Stop and review"
 
 ```bash
 # Tasks
-agentctl todo add --title "Task" --description "Details"
-agentctl todo list -f table
-agentctl todo complete --id <id>
+foxctl todo add --title "Task" --description "Details"
+foxctl todo list -f table
+foxctl todo complete --id <id>
 
 # Memory
-agentctl memory put --name "gotcha-x" --type "gotcha" --summary "..."
-agentctl memory search "query"
+foxctl memory put --name "gotcha-x" --type "gotcha" --summary "..."
+foxctl memory search "query"
 
 # Skills (run any skill)
-agentctl run <skill> --input '<json>'
-agentctl skills list
+foxctl run <skill> --input '<json>'
+foxctl skills list
 
 # Code search
-agentctl run code/semantic_search --input '{"query": "auth", "limit": 10}'
+foxctl run code/semantic_search --input '{"query": "auth", "limit": 10}'
 
 # CI
-agentctl ci status --pr 123
-agentctl ci comments --pr 123
+foxctl ci status --pr 123
+foxctl ci comments --pr 123
 
 # Codemap
-agentctl codemap generate "trace auth flow"
+foxctl codemap generate "trace auth flow"
 
 # Repo index
-agentctl index repo build --workspace .
-agentctl index repo search --workspace . --query "Supervisor" --limit 10
-agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
-agentctl index repo ask --workspace . --question "Where is task guard implemented?"
+foxctl index repo build --workspace .
+foxctl index repo search --workspace . --query "Supervisor" --limit 10
+foxctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
+foxctl index repo ask --workspace . --question "Where is task guard implemented?"
 
 # Observability
-agentctl run obs/logs --input '{}'
-agentctl run obs/logs --input '{"errors_only": true, "since": "1h"}'
+foxctl run obs/logs --input '{}'
+foxctl run obs/logs --input '{"errors_only": true, "since": "1h"}'
 ```
 
 ---
@@ -288,19 +288,19 @@ Spawn persistent daemon agents that maintain conversation history across turns.
 
 ```bash
 # Research agent — autonomous research, then queryable via ask
-agentctl agent spawn --role researcher \
+foxctl agent spawn --role researcher \
   --prompt "Research the hook system architecture" \
   --exec-mode autonomous_reactive \
   --llm-provider openrouter --llm-model openrouter/aurora-alpha \
   --max-auto-turns 3 --max-iterations 20
 
 # Query findings after autonomous phase completes
-agentctl agent ask <id> --question "What did you find?" --wait --timeout 120s
+foxctl agent ask <id> --question "What did you find?" --wait --timeout 120s
 
 # Management
-agentctl agent list
-agentctl agent info <id>
-agentctl agent kill <id>
+foxctl agent list
+foxctl agent info <id>
+foxctl agent kill <id>
 ```
 
 ### Key Flags
@@ -330,8 +330,8 @@ agentctl agent kill <id>
 
 ## Environment
 
-Environment variables are loaded from `~/.agentctl/.env` (global). The loader checks:
-1. `~/.agentctl/.env` (global defaults)
+Environment variables are loaded from `~/.foxctl/.env` (global). The loader checks:
+1. `~/.foxctl/.env` (global defaults)
 2. `$AGENTCTL_HOME/.env` (if set)
 3. `$PWD/.env` (project overrides)
 
@@ -347,7 +347,7 @@ Environment variables are loaded from `~/.agentctl/.env` (global). The loader ch
 
 | Variable                   | Default       | Purpose                              |
 | -------------------------- | ------------- | ------------------------------------ |
-| `AGENTCTL_HOME`            | `~/.agentctl` | Storage root                         |
+| `AGENTCTL_HOME`            | `~/.foxctl` | Storage root                         |
 | `ANTHROPIC_API_KEY`        | -             | Codemap generation                   |
 | `OPENROUTER_API_KEY`       | -             | Atomic fact processing (SimpleMem)   |
 | `TAVILY_API_KEY`           | -             | Web search (Tavily provider)         |
@@ -365,7 +365,7 @@ Environment variables are loaded from `~/.agentctl/.env` (global). The loader ch
 | `codemaps` | `voyage-3.5`     | Mixed |
 
 ```bash
-make env-sync        # Manual: copy repo .env → ~/.agentctl/.env
+make env-sync        # Manual: copy repo .env → ~/.foxctl/.env
 make env-watch       # Auto: watch and sync on changes (requires fswatch)
 make env-watch-stop  # Stop the watcher
 ```
@@ -419,13 +419,13 @@ make build-cgo  # Correct - includes -tags=libsqlite3
 
 ```bash
 make skill SKILL=my_skill  # Correct - builds AND installs
-# Binary must be at ~/.agentctl/skills/my/skill/bin
+# Binary must be at ~/.foxctl/skills/my/skill/bin
 ```
 
 ### Skills Must Load .env
 
 ```go
-import "github.com/jkatigb/agentctl/internal/platform/config"
+import "github.com/joshka0/foxctl/internal/platform/config"
 func main() {
     config.LoadDotEnv() // BEFORE os.Getenv()
 }
@@ -484,7 +484,7 @@ Replies are for the caller to consume; acking in daemon poller drops async repli
 
 ### .env Must Be a Real File
 
-`~/.agentctl/.env` must be a real file, not a symlink to the repo. Symlinks break in sandboxed/remote environments where the repo path doesn't exist.
+`~/.foxctl/.env` must be a real file, not a symlink to the repo. Symlinks break in sandboxed/remote environments where the repo path doesn't exist.
 
 ### Logging via Wide Events (Not stderr)
 
@@ -506,7 +506,7 @@ For LLM token tracking, use the constants from `internal/adapters/skillslib/obs`
 - `obs.KeyLLMModel`, `obs.KeyLLMInputTokens`, `obs.KeyLLMOutputTokens`
 - `obs.KeyLLMTotalTokens`, `obs.KeyLLMInputCostUSD`, `obs.KeyLLMTotalCostUSD`
 
-View logs with: `agentctl run obs/logs --input '{}'`
+View logs with: `foxctl run obs/logs --input '{}'`
 
 **All gotchas:** [docs/general/gotchas.md](../docs/general/gotchas.md)
 
@@ -526,7 +526,7 @@ skills/ → internal/adapters/skillslib/ → internal/platform/
 ### Workspace Detection
 
 ```go
-import "github.com/jkatigb/agentctl/internal/platform/workspace"
+import "github.com/joshka0/foxctl/internal/platform/workspace"
 ws := workspace.Detect("")  // Handles sandboxes correctly
 ```
 
@@ -551,10 +551,10 @@ semantic_search → snippet_extract → counsel
 
 | Path                              | Purpose            |
 | --------------------------------- | ------------------ |
-| `~/.agentctl/storage/memory.db`   | Memories, codemaps |
-| `~/.agentctl/storage/tasks.db`    | Tasks              |
-| `~/.agentctl/storage/sessions.db` | Sessions           |
-| `~/.agentctl/cas/sha256/`         | Large artifacts    |
+| `~/.foxctl/storage/memory.db`   | Memories, codemaps |
+| `~/.foxctl/storage/tasks.db`    | Tasks              |
+| `~/.foxctl/storage/sessions.db` | Sessions           |
+| `~/.foxctl/cas/sha256/`         | Large artifacts    |
 
 ---
 

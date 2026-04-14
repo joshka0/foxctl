@@ -20,14 +20,14 @@ func TestInput_AllFields(t *testing.T) {
 		Provider:     "claude-code",
 		SkipHooks:    true,
 		SkipSkills:   true,
-		RepoRoot:     "/path/to/agentctl",
+		RepoRoot:     "/path/to/foxctl",
 		ValidateOnly: true,
 	}
 
 	assert.Equal(t, "claude-code", in.Provider)
 	assert.True(t, in.SkipHooks)
 	assert.True(t, in.SkipSkills)
-	assert.Equal(t, "/path/to/agentctl", in.RepoRoot)
+	assert.Equal(t, "/path/to/foxctl", in.RepoRoot)
 	assert.True(t, in.ValidateOnly)
 }
 
@@ -96,7 +96,7 @@ func TestOutput_AllFields(t *testing.T) {
 		Status:   "ok",
 		Provider: "claude-code",
 		Directories: []directoryStatus{
-			{Path: "/home/.agentctl", Exists: true, Created: false},
+			{Path: "/home/.foxctl", Exists: true, Created: false},
 		},
 		Hooks: hooksStatus{
 			Provider:  "claude-code",
@@ -105,7 +105,7 @@ func TestOutput_AllFields(t *testing.T) {
 			Hooks:     []string{"hook1.sh", "hook2.sh"},
 		},
 		Binary: binaryStatus{
-			Path:    "/usr/local/bin/agentctl",
+			Path:    "/usr/local/bin/foxctl",
 			Exists:  true,
 			Version: "1.0.0",
 		},
@@ -174,12 +174,12 @@ func TestOutput_StatusValues(t *testing.T) {
 
 func TestDirectoryStatus_AllFields(t *testing.T) {
 	ds := directoryStatus{
-		Path:    "/home/user/.agentctl",
+		Path:    "/home/user/.foxctl",
 		Exists:  true,
 		Created: true,
 	}
 
-	assert.Equal(t, "/home/user/.agentctl", ds.Path)
+	assert.Equal(t, "/home/user/.foxctl", ds.Path)
 	assert.True(t, ds.Exists)
 	assert.True(t, ds.Created)
 }
@@ -293,19 +293,19 @@ func TestHooksStatus_JSONFieldNames(t *testing.T) {
 
 func TestBinaryStatus_AllFields(t *testing.T) {
 	bs := binaryStatus{
-		Path:    "/usr/local/bin/agentctl",
+		Path:    "/usr/local/bin/foxctl",
 		Exists:  true,
 		Version: "1.2.3",
 	}
 
-	assert.Equal(t, "/usr/local/bin/agentctl", bs.Path)
+	assert.Equal(t, "/usr/local/bin/foxctl", bs.Path)
 	assert.True(t, bs.Exists)
 	assert.Equal(t, "1.2.3", bs.Version)
 }
 
 func TestBinaryStatus_JSONSerialization(t *testing.T) {
 	bs := binaryStatus{
-		Path:    "/home/user/.local/bin/agentctl",
+		Path:    "/home/user/.local/bin/foxctl",
 		Exists:  true,
 		Version: "0.9.0",
 	}
@@ -463,7 +463,7 @@ func TestOutput_FullJSONRoundTrip(t *testing.T) {
 			Hooks:     []string{"h1.sh", "h2.sh"},
 		},
 		Binary: binaryStatus{
-			Path:    "/bin/agentctl",
+			Path:    "/bin/foxctl",
 			Exists:  true,
 			Version: "1.0.0",
 		},
@@ -511,11 +511,11 @@ func TestInput_InstallMode(t *testing.T) {
 
 func TestOutput_MultipleDirectories(t *testing.T) {
 	dirs := []directoryStatus{
-		{Path: "~/.agentctl", Exists: true},
-		{Path: "~/.agentctl/storage", Exists: true},
-		{Path: "~/.agentctl/skills", Exists: true},
-		{Path: "~/.agentctl/cache", Exists: true},
-		{Path: "~/.agentctl/cas", Exists: true},
+		{Path: "~/.foxctl", Exists: true},
+		{Path: "~/.foxctl/storage", Exists: true},
+		{Path: "~/.foxctl/skills", Exists: true},
+		{Path: "~/.foxctl/cache", Exists: true},
+		{Path: "~/.foxctl/cas", Exists: true},
 	}
 
 	out := output{

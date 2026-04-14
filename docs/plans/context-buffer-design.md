@@ -2,7 +2,7 @@
 
 ## Problem
 
-Current "pending context" approach uses temp files (`~/.agentctl/cache/pending-context/<session>.json`) which creates:
+Current "pending context" approach uses temp files (`~/.foxctl/cache/pending-context/<session>.json`) which creates:
 - Race conditions between hooks writing and transforms reading
 - No TTL enforcement (manual expiry checks)
 - No deduplication (same context can accumulate)
@@ -293,7 +293,7 @@ type Output struct {
 
 ## Integration Points
 
-### Claude Code (`configs/hooks/agentctl-hook.sh`)
+### Claude Code (`configs/hooks/foxctl-hook.sh`)
 
 ```bash
 #!/bin/bash
@@ -313,7 +313,7 @@ esac
 
 # Run dispatcher
 result=$(cat | jq --argjson provider "$PROVIDER" '. + {provider: $provider}' | \
-  agentctl run hooks/dispatch --ephemeral --no-cas)
+  foxctl run hooks/dispatch --ephemeral --no-cas)
 
 # Output decision + context
 echo "$result" | jq '{
@@ -382,7 +382,7 @@ echo "$result" | jq '{
 | `skills/hooks_context_drain/main.go` | Create | Drain skill for inject-capable events |
 | `skills/hooks_dispatch/main.go` | Modify | Add Context Buffer integration |
 | `configs/opencode-hooks/index.ts` | Modify | Use hooks/dispatch + context_drain |
-| `configs/hooks/agentctl-hook.sh` | Create | Unified Claude Code hook adapter |
+| `configs/hooks/foxctl-hook.sh` | Create | Unified Claude Code hook adapter |
 
 ---
 

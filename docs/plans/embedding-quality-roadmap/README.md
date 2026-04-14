@@ -4,7 +4,7 @@
 
 ## Overview
 
-This roadmap transforms agentctl's code understanding from "keyword search" to "semantic navigation" through:
+This roadmap transforms foxctl's code understanding from "keyword search" to "semantic navigation" through:
 
 1. **Better embeddings** - Query-optimized vectors + doc-enriched symbol text
 2. **Repo graph index** - SQLite DAG store with containment, imports, and call edges

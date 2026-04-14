@@ -2,26 +2,26 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gui-auth-gateway
-  namespace: agentctl
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: gui-auth-gateway
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: agentctl
+      app.kubernetes.io/name: foxctl
       app.kubernetes.io/component: gui-auth-gateway
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: agentctl
+        app.kubernetes.io/name: foxctl
         app.kubernetes.io/component: gui-auth-gateway
     spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: gui-auth-gateway
-        image: agentctl-gui-auth-gateway:latest
+        image: foxctl-gui-auth-gateway:latest
         imagePullPolicy: IfNotPresent
         ports:
         - name: http

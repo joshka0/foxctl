@@ -8,7 +8,7 @@ last_updated: 2026-01-08
 
 # Agentctl Actor Architecture Spec v1
 
-This document is the **canonical** top-level spec for `agentctl`’s always-on, multi-actor, event-driven agent runtime. It defines what the system **is**, what it **guarantees**, and the **non-negotiable contracts** that all implementations and refactors must preserve.
+This document is the **canonical** top-level spec for `foxctl`’s always-on, multi-actor, event-driven agent runtime. It defines what the system **is**, what it **guarantees**, and the **non-negotiable contracts** that all implementations and refactors must preserve.
 
 It intentionally avoids an implementation plan. This spec is the target that future PRs should be judged against.
 
@@ -147,8 +147,8 @@ These are the only canonical hook attach points in v1. Names are stable.
 
 ### Hook configuration
 Hooks are configured from (in this precedence order):
-1. `<workspace>/.agentctl/hooks.yaml`
-2. `~/.agentctl/hooks.yaml`
+1. `<workspace>/.foxctl/hooks.yaml`
+2. `~/.foxctl/hooks.yaml`
 
 Each mapping is: **event + optional matcher → ordered list of hook skills**.
 
@@ -331,7 +331,7 @@ Sessions MUST support:
 * `forked_from`
 * `relates_to` (optional/weak)
 
-Identity file fallback MAY exist (e.g., `~/.agentctl/sessions/active/<workspace_hash>-<agent_id>.json`) for environments that can’t pass env vars reliably.
+Identity file fallback MAY exist (e.g., `~/.foxctl/sessions/active/<workspace_hash>-<agent_id>.json`) for environments that can’t pass env vars reliably.
 
 ---
 

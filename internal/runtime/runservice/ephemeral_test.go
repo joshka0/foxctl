@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/maputil"
-	"github.com/jkatigb/agentctl/internal/runtime/execution"
-	"github.com/jkatigb/agentctl/internal/storage/cache"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/maputil"
+	"github.com/joshka0/foxctl/internal/runtime/execution"
+	"github.com/joshka0/foxctl/internal/storage/cache"
 )
 
 func TestExecuteEphemeral_SkipsJobStore(t *testing.T) {

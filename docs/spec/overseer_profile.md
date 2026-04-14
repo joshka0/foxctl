@@ -1,7 +1,7 @@
 # Overseer Profile
 
 **Status:** Draft\
-**Scope:** Canonical profile for the overseer in agentctl-based workspaces.\
+**Scope:** Canonical profile for the overseer in foxctl-based workspaces.\
 **Related specs:** [overseer_planning.md](./overseer_planning.md),
 [../archive/specs/bd_mail_agent_interface.md](../archive/specs/bd_mail_agent_interface.md),
 [mailbox_blackboard.md](./mailbox_blackboard.md),

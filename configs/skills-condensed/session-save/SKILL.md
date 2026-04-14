@@ -1,6 +1,6 @@
 ---
 name: Session Save
-description: Save current session context to agentctl memory before compaction
+description: Save current session context to foxctl memory before compaction
 ---
 
 # Session Save
@@ -10,7 +10,7 @@ Captures session state before compaction via PreCompact hook.
 ## Usage
 
 ```bash
-agentctl run session/save --input '{"trigger": "manual", "summary": "Working on X"}'
+foxctl run session/save --input '{"trigger": "manual", "summary": "Working on X"}'
 ```
 
 ## What Gets Captured
@@ -28,4 +28,4 @@ agentctl run session/save --input '{"trigger": "manual", "summary": "Working on 
 | `trigger` | string | `pre_compact`, `manual`, `session_end` |
 | `summary` | string | Optional user summary |
 
-Full docs: `~/.agentctl/share/configs/skills/session-save/Skill.md`
+Full docs: `~/.foxctl/share/configs/skills/session-save/Skill.md`

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
 
 func TestGolden(t *testing.T) {
@@ -121,7 +121,7 @@ func appendUsageHint(command string, err *skillerr.Error) {
 	if command == "" {
 		return
 	}
-	usage := "For examples, run: agentctl run " + command + " --examples"
+	usage := "For examples, run: foxctl run " + command + " --examples"
 	if err.Hint == "" {
 		err.Hint = usage
 		return

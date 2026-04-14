@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/sessionmode"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/sessionmode"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 func TestSyncTodoWriteBuildsContext(t *testing.T) {
@@ -83,7 +83,7 @@ func TestContinueTodoSessionBlocksWhenSkillRequiresContinuation(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	sessionID := "sid-123"
-	modeDir := filepath.Join(home, ".agentctl", "cache", "session-modes")
+	modeDir := filepath.Join(home, ".foxctl", "cache", "session-modes")
 	if err := os.MkdirAll(modeDir, 0o755); err != nil {
 		t.Fatalf("mkdir mode dir: %v", err)
 	}

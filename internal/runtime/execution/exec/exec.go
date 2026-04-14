@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 // Buffer pool configuration
@@ -79,7 +79,7 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	workDir := r.Options.WorkDir
 	var cleanup func()
 	if workDir == "" {
-		tmp, err := os.MkdirTemp("", "agentctl-skill-")
+		tmp, err := os.MkdirTemp("", "foxctl-skill-")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -151,10 +151,10 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	// Ensure AGENTCTL_HOME is available when not explicitly set.
 	// Read from env slice for consistency.
 	if getEnvVar(env, "AGENTCTL_HOME") == "" && home != "" {
-		env = ensureEnvVar(env, "AGENTCTL_HOME", filepath.Join(home, ".agentctl"))
+		env = ensureEnvVar(env, "AGENTCTL_HOME", filepath.Join(home, ".foxctl"))
 	}
 
-	// Ensure AGENTCTL_BIN is available so skills can invoke agentctl.
+	// Ensure AGENTCTL_BIN is available so skills can invoke foxctl.
 	// If not already set, use the current executable path.
 	if getEnvVar(env, "AGENTCTL_BIN") == "" {
 		if exe, err := os.Executable(); err == nil {

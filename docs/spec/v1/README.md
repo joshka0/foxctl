@@ -1,6 +1,6 @@
 # v1 Foundational Specifications
 
-Core protocol and profile specifications that define the agentctl system architecture.
+Core protocol and profile specifications that define the foxctl system architecture.
 
 ## Specs
 

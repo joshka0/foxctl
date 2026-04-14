@@ -28,4 +28,4 @@ Execute refactoring with precision.
 - Complete dependency map
 - Step-by-step migration with import updates
 
-Full docs: `~/repos/personal/agentctl/configs/agents/code-refactor-master.md`
+Full docs: `~/repos/personal/foxctl/configs/agents/code-refactor-master.md`

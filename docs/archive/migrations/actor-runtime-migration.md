@@ -8,7 +8,7 @@ last_updated: 2026-01-08
 
 ## 0. Purpose
 
-Migrate agentctl’s current poll/daemon + mixed hook ecosystem into a single, always-on, **reactive actor runtime** with:
+Migrate foxctl’s current poll/daemon + mixed hook ecosystem into a single, always-on, **reactive actor runtime** with:
 
 - **Supervisor-managed actors** (one process, many actors)
 - **SQLite mailbox as durable queue** with leased delivery (at-least-once)
@@ -126,7 +126,7 @@ Each PR has:
 - `internal/domain/hook/` (extend types)
 - `internal/runtime/hooks/dispatcher/*` (new)
 - `configs/hooks.yaml` example(s)
-- `cmd/agentctl/cmd/hooks.go` (optional: `agentctl hooks dry-run`)
+- `cmd/foxctl/cmd/hooks.go` (optional: `foxctl hooks dry-run`)
 
 **Acceptance**
 - Can run dispatcher in a unit test with fake hook skills and get deterministic merged output
@@ -183,7 +183,7 @@ Each PR has:
 **Files**
 - `internal/runtime/actor/supervisor/*.go`
 - `internal/runtime/actor/actors/runner_actor.go`
-- `cmd/agentctl/cmd/actor_supervisor.go` (start/stop/status)
+- `cmd/foxctl/cmd/actor_supervisor.go` (start/stop/status)
 
 **Acceptance**
 - Supervisor starts, registers actor, processes a mailbox message, ack/nack works
@@ -290,7 +290,7 @@ Each PR has:
 
 **Files**
 - `internal/runtime/actor/actors/dspy_actor.go` (or equivalent)
-- `cmd/agentctl/cmd/daemon.go` adjust startup instructions
+- `cmd/foxctl/cmd/daemon.go` adjust startup instructions
 
 **Acceptance**
 - End-to-end message flow works with real tool calls

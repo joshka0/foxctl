@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 func TestStartAndCaptureResult_TodoReviewRequest(t *testing.T) {
@@ -32,7 +32,7 @@ func TestStartAndCaptureResult_TodoReviewRequest(t *testing.T) {
 		WorkspaceID:     "ws-1",
 		Actor:           "actor:human:cli",
 		Source:          trajectory.SourceCLI,
-		CLICommand:      "agentctl run todo/manage",
+		CLICommand:      "foxctl run todo/manage",
 		ProtocolCommand: "todo/manage",
 		JobID:           "job-1",
 		CorrelationID:   "corr-1",
@@ -107,7 +107,7 @@ func TestStart_RedactsSecrets(t *testing.T) {
 		WorkspaceID:     "ws-1",
 		Actor:           "actor:human:cli",
 		Source:          trajectory.SourceCLI,
-		CLICommand:      "agentctl run http/openapi --header Authorization: Bearer secret",
+		CLICommand:      "foxctl run http/openapi --header Authorization: Bearer secret",
 		ProtocolCommand: "http/openapi",
 		CorrelationID:   "corr-1",
 	})
@@ -123,7 +123,7 @@ func TestStart_RedactsSecrets(t *testing.T) {
 	if ur.Text == "" {
 		t.Fatalf("expected user request text to be set")
 	}
-	if ur.Text == "agentctl run http/openapi --header Authorization: Bearer secret" {
+	if ur.Text == "foxctl run http/openapi --header Authorization: Bearer secret" {
 		t.Fatalf("expected redaction to modify stored text")
 	}
 }

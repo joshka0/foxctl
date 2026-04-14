@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: agentctl-local-cache
-  namespace: agentctl
+  name: foxctl-local-cache
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: storage
 spec:
   accessModes:

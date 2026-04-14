@@ -10,7 +10,7 @@ import (
 
 // ConfigLoader loads database configuration from environment variables
 type ConfigLoader struct {
-	// Root directory for SQLite databases (default: ~/.agentctl)
+	// Root directory for SQLite databases (default: ~/.foxctl)
 	rootDir string
 }
 
@@ -461,5 +461,5 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 //
 // Where <DB> is one of: CACHE, JOBS, or MEMORY
 //
-// For store configuration beyond those core stores, agentctl uses the same
+// For store configuration beyond those core stores, foxctl uses the same
 // `AGENTCTL_<STORE>_...` environment variable pattern (e.g., `AGENTCTL_SESSIONS_DB_DRIVER`).

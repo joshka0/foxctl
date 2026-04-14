@@ -137,7 +137,7 @@ These keep you safe while reshaping the system:
 
 **Deliverable checkpoints**
 
-* You can run: `agentctl hooks run --event PreToolUse --input <json>` and get deterministic results.
+* You can run: `foxctl hooks run --event PreToolUse --input <json>` and get deterministic results.
 
 ---
 
@@ -238,7 +238,7 @@ Apply `unified-session-lineage.md`:
 
 * Existing rows:
 
-  * `agent_id='agentctl'`
+  * `agent_id='foxctl'`
   * `status='ok'` (or infer)
   * timestamps inferred from existing fields if present
 

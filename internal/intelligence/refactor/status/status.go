@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/langutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
 )
 
 type Mode string

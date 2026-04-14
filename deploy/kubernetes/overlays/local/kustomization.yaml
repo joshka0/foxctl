@@ -23,14 +23,14 @@ patches:
 - path: patches.yaml
 - target:
     kind: Deployment
-    name: agentctl
+    name: foxctl
   patch: |
     - op: replace
       path: /spec/template/spec/volumes/0
       value:
         name: cache
         persistentVolumeClaim:
-          claimName: agentctl-local-cache
+          claimName: foxctl-local-cache
     - op: replace
       path: /spec/template/spec/containers/0/livenessProbe
       value:
@@ -58,7 +58,7 @@ patches:
 # Scale down embedding worker to 0
 - target:
     kind: Deployment
-    name: agentctl-embedding-worker
+    name: foxctl-embedding-worker
   patch: |
     - op: replace
       path: /spec/replicas
@@ -67,55 +67,55 @@ patches:
 # Remove HPA for embedding worker (0 replicas)
 - target:
     kind: HorizontalPodAutoscaler
-    name: agentctl-embedding-worker
+    name: foxctl-embedding-worker
   patch: |
     $patch: delete
     apiVersion: autoscaling/v2
     kind: HorizontalPodAutoscaler
     metadata:
-      name: agentctl-embedding-worker
+      name: foxctl-embedding-worker
 
 # Remove HPA for main deployment (single replica)
 - target:
     kind: HorizontalPodAutoscaler
-    name: agentctl
+    name: foxctl
   patch: |
     $patch: delete
     apiVersion: autoscaling/v2
     kind: HorizontalPodAutoscaler
     metadata:
-      name: agentctl
+      name: foxctl
 
 # Remove PDB (single replica)
 - target:
     kind: PodDisruptionBudget
-    name: agentctl
+    name: foxctl
   patch: |
     $patch: delete
     apiVersion: policy/v1
     kind: PodDisruptionBudget
     metadata:
-      name: agentctl
+      name: foxctl
 
 # Suspend cronjobs in local mode. They run as separate pods and should not
 # point at the pod-local libsql files used by the single-replica dev server.
 - target:
     kind: CronJob
-    name: agentctl-pagerank
+    name: foxctl-pagerank
   patch: |
     - op: add
       path: /spec/suspend
       value: true
 - target:
     kind: CronJob
-    name: agentctl-cas-gc
+    name: foxctl-cas-gc
   patch: |
     - op: add
       path: /spec/suspend
       value: true
 - target:
     kind: CronJob
-    name: agentctl-session-cleanup
+    name: foxctl-session-cleanup
   patch: |
     - op: add
       path: /spec/suspend

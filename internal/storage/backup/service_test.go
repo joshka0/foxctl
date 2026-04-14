@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/backup"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/domain/backup"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func TestBackupCreateAndRestore(t *testing.T) {

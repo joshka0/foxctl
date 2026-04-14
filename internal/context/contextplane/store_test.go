@@ -30,7 +30,7 @@ func TestWorkspaceStoreEnsureLayoutAndSaveTopOfMind(t *testing.T) {
 	}
 
 	top := TopOfMind{
-		WorkspaceID:     "agentctl",
+		WorkspaceID:     "foxctl",
 		Objective:       "Formalize ACA",
 		Phase:           "design",
 		ActiveTaskIDs:   []string{"T-1042"},

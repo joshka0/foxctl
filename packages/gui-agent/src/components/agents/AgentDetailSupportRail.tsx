@@ -180,8 +180,8 @@ export function AgentDetailSupportRail({
             <div className="rounded-lg border border-border bg-background/60 p-3 space-y-2 text-xs text-muted-foreground">
               <div>
                 {sandboxBacked
-                  ? "Sandbox-backed agents keep their repo clone and prompt execution context outside the local agentctl pod runtime."
-                  : "Local agents read and write against the runtime workspace managed by the current agentctl deployment."}
+                  ? "Sandbox-backed agents keep their repo clone and prompt execution context outside the local foxctl pod runtime."
+                  : "Local agents read and write against the runtime workspace managed by the current foxctl deployment."}
               </div>
               <div className="grid gap-1 text-[11px]">
                 <div>

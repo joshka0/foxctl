@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-`semantic_file_index` defines how agentctl maintains a semantic index of
+`semantic_file_index` defines how foxctl maintains a semantic index of
 workspace files using the existing memory store and optional vector search.
 
 The index is updated at **trusted points in the workflow**:
@@ -167,7 +167,7 @@ The first time a file is indexed, the indexer performs an **initial index**.
 
 **Trigger options:**
 
-- Explicit CLI command (e.g. `agentctl semantic-index init ...`).
+- Explicit CLI command (e.g. `foxctl semantic-index init ...`).
 - Background job initiated by overseer when a file is first seen in a task.
 - Future: automatic on first semantic search hit for that file.
 
@@ -228,7 +228,7 @@ latest reviewed contents, not stale pre-review versions.
 
 Users may request explicit reindexing, for example:
 
-- `agentctl semantic-index update --workspace <id> --path <file>...`
+- `foxctl semantic-index update --workspace <id> --path <file>...`
 
 Behavior mirrors post-review updates but without requiring a review record.
 

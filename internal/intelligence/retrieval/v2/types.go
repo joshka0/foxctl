@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
 )
 
 // SourceID identifies a recall source in the retrieval-v2 pipeline.

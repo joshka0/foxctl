@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/feedback
@@ -68,8 +68,8 @@ signature:
     long: |
       Use session/feedback to capture ratings and outcomes.
       Example commands:
-        agentctl run session/feedback --input '{"session_id":"abc123","rating":5,"outcome":"success"}'
-        agentctl skills run session/feedback --session_id abc123 --rating 5 --outcome success
+        foxctl run session/feedback --input '{"session_id":"abc123","rating":5,"outcome":"success"}'
+        foxctl skills run session/feedback --session_id abc123 --rating 5 --outcome success
     workflows:
       - id: record-feedback
         description: "Record a session rating."

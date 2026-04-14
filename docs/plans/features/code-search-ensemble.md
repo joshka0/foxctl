@@ -6,7 +6,7 @@ Last Updated: 2026-03-23
 
 ## Goal
 
-Add a staged `code_search_ensemble` retrieval controller to `agentctl` that
+Add a staged `code_search_ensemble` retrieval controller to `foxctl` that
 gets the right code evidence into model context with the least possible context
 rot.
 

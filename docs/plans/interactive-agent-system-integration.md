@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-agentctl has a rich foundation with **87 skills**, a **reactive actor system**, **DSPy-go agents**, **progressive memory with embeddings**, and an **OpenTUI viewer**. This plan unifies these into an **interactive agent orchestration platform** - a "Codex/Claude Code" style tool that's fully observable, trainable, and user-driven.
+foxctl has a rich foundation with **87 skills**, a **reactive actor system**, **DSPy-go agents**, **progressive memory with embeddings**, and an **OpenTUI viewer**. This plan unifies these into an **interactive agent orchestration platform** - a "Codex/Claude Code" style tool that's fully observable, trainable, and user-driven.
 
 ---
 
@@ -21,7 +21,7 @@ This section captures findings from deep exploration of six system areas.
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | TUI | React 19 + @opentui/core | Terminal rendering at 30 FPS |
-| Data Client | TypeScript + fetch | API abstraction (`@agentctl/data`) |
+| Data Client | TypeScript + fetch | API abstraction (`@foxctl/data`) |
 | API Server | Express.js (port 8090) | Backend aggregation layer |
 
 **Current Views (9 total)**:
@@ -40,9 +40,9 @@ This section captures findings from deep exploration of six system areas.
 2. Export from `src/views/index.ts`
 3. Add to `App.tsx` (header, keyboard, render switch)
 4. Add hook in `useData.ts`
-5. Add client function in `@agentctl/data`
+5. Add client function in `@foxctl/data`
 
-**Real-time**: `@agentctl/data.subscribeToEvents()` expects an `/api/events` SSE endpoint; GUI wires this via `useSSE`, but `packages/gui/server/index.js` does not currently implement `/api/events` and the TUI does not yet subscribe.
+**Real-time**: `@foxctl/data.subscribeToEvents()` expects an `/api/events` SSE endpoint; GUI wires this via `useSSE`, but `packages/gui/server/index.js` does not currently implement `/api/events` and the TUI does not yet subscribe.
 
 ---
 
@@ -149,7 +149,7 @@ Tier 3: Full Conversations    → On-demand JSONL decompression
 - `memory`, `sessions`, `tasks`, `codemaps` → voyage-3.5 (cost-effective)
 
 **Storage Backends**:
-- SQLite (local): `~/.agentctl/storage/memory.db`
+- SQLite (local): `~/.foxctl/storage/memory.db`
 - Turso (remote): Native F32_BLOB vectors, `vector_top_k()` for fast search
 
 **Key Files**:
@@ -195,7 +195,7 @@ File Change → Hook → Enqueue Job → Worker Claims → Provider API → Stor
 
 **Manifest Structure**:
 ```yaml
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/symbols
@@ -214,10 +214,10 @@ capabilities:
 ### 6. Daemon & API Server
 
 **Daemon** (`internal/runtime/daemon/`):
-- Unix socket: `/tmp/agentctl-{uid}.sock`
+- Unix socket: `/tmp/foxctl-{uid}.sock`
 - Pre-loaded SQLite pool for sub-50ms hook latency
 - JSON-RPC-like protocol: `status`, `run`, `warm`, `shutdown`
-- CLI: `agentctl daemon start|stop|status`
+- CLI: `foxctl daemon start|stop|status`
 
 **Express API Server** (`packages/gui/server/index.js`):
 - Port 8090, CORS + cookie parsing
@@ -241,7 +241,7 @@ TUI/GUI → Express API (HTTP:8090) ─────┘
 Based on research, the highest-impact integrations are:
 
 1. **SSE Event Stream**: Implement `/api/events` in Express to emit coarse invalidation events (`job|task|mailbox|blackboard`) for TUI/GUI; optionally extend later with rich agent/console events.
-2. **Interactive Session Mode**: Re-use `agentctl console attach` / console sessions (`console.*` mailbox messages) as the interactive bridge.
+2. **Interactive Session Mode**: Re-use `foxctl console attach` / console sessions (`console.*` mailbox messages) as the interactive bridge.
 3. **Memory Panel**: Surface `code/semantic_search` results in dedicated view
 4. **Feedback Widget**: Inline 1-5 rating → `trajectory.outcome.human_rating`
 5. **Agent Hierarchy View**: Visualize spawned agents with mailbox activity
@@ -252,7 +252,7 @@ Based on research, the highest-impact integrations are:
 
 | Current State | Target State |
 |---------------|--------------|
-| CLI-driven (`agentctl run`) | Interactive TUI agent session |
+| CLI-driven (`foxctl run`) | Interactive TUI agent session |
 | Passive viewers (jobs/tasks) | Real-time agent coordination |
 | Batch DSPy export | Live trajectory capture + feedback |
 | Memory hooks (async) | Progressive context surfacing |
@@ -267,7 +267,7 @@ Based on research, the highest-impact integrations are:
 │                         USER INTERFACE LAYER                         │
 ├─────────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────────┐  │
-│  │ OpenTUI     │  │ Web GUI     │  │ CLI (agentctl)              │  │
+│  │ OpenTUI     │  │ Web GUI     │  │ CLI (foxctl)              │  │
 │  │ (Terminal)  │  │ (Browser)   │  │ • console attach --actor ...│
 │  │ • AgentView │  │ • AgentView │  │ • agent watch <agent-id>    │  │
 │  │ • MemoryView│  │ • MemoryView│  │ • actorsys logs <ns> --follow│ │
@@ -355,7 +355,7 @@ Based on research, the highest-impact integrations are:
 ├──────────────────────────────────────────────────────────────────────┤
 │                         STORAGE LAYER                                │
 ├──────────────────────────────────────────────────────────────────────┤
-│  ~/.agentctl/                                                        │
+│  ~/.foxctl/                                                        │
 │  ├── storage/                                                        │
 │  │   ├── tasks.db (PageRank, dependencies)                          │
 │  │   ├── sessions.db (embeddings, summaries)                        │
@@ -431,7 +431,7 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 - After each agent action, prompt for optional quick rating (1-5 keys)
 - `f` key opens feedback modal
 - Ratings flow directly to `trajectory.outcome.human_rating`
-- Background worker runs `agentctl optimize session analyze` periodically
+- Background worker runs `foxctl optimize session analyze` periodically
 
 ### 3. Subagent Orchestration → Visual Hierarchy
 
@@ -511,7 +511,7 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 
 | Task | Effort | Impact |
 |------|--------|--------|
-| `agentctl console attach` | Medium | High |
+| `foxctl console attach` | Medium | High |
 | TUI <-> DspyActor bridge | High | Critical |
 | Human-in-loop for `agent.ask` | Medium | High |
 | Inline feedback collection | Low | High |
@@ -530,7 +530,7 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 
 | Component | Status | Location |
 |-----------|--------|----------|
-| Console CLI commands | ✅ Complete | `cmd/agentctl/cmd/console.go` (attach, list, rm) |
+| Console CLI commands | ✅ Complete | `cmd/foxctl/cmd/console.go` (attach, list, rm) |
 | Console store (SQLite) | ✅ Complete | `internal/storage/console/store.go` |
 | DspyActor runtime | ✅ Complete | `internal/runtime/actor/dspy_actor.go` (agent.* handlers) |
 | Console message types | ⚠️ Defined only | `internal/domain/agent/mailbox.go` |
@@ -971,7 +971,7 @@ POST /api/trajectory/feedback    - Submit feedback (proposed)
 ### Event Types for SSE
 
 ```typescript
-// Matches @agentctl/data.subscribeToEvents() and packages/gui/src/api/hooks.ts useSSE().
+// Matches @foxctl/data.subscribeToEvents() and packages/gui/src/api/hooks.ts useSSE().
 type SSEEvent =
   | { type: "job"; data: { id?: string; state?: string } }
   | { type: "task"; data: { id?: string } }

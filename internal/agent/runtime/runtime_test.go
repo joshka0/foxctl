@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/runtime/agentprompt"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	einoadapter "github.com/jkatigb/agentctl/internal/v2/adapters/eino"
+	"github.com/joshka0/foxctl/internal/agent/optimization"
+	"github.com/joshka0/foxctl/internal/agent/types"
+	"github.com/joshka0/foxctl/internal/runtime/agentprompt"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
+	einoadapter "github.com/joshka0/foxctl/internal/v2/adapters/eino"
 )
 
 func TestAgentInstruction_CoderRole(t *testing.T) {
@@ -698,7 +698,7 @@ func TestBuildToolDefsForRole_ACAContextScout(t *testing.T) {
 func TestBuildToolDefsForRole_ResearcherUnchanged(t *testing.T) {
 	names := toolNamesForRole(types.RoleResearcher)
 
-	// Researcher must still have base tools + agentctl tools
+	// Researcher must still have base tools + foxctl tools
 	for _, want := range []string{"fs_read_file", "code_search", "think", "shell", "context_search", "semantic_search_code", "semantic_search_sessions", "semantic_search_memories", "semantic_search_context", "smart_search", "refactor_scout", "code_search_ensemble", "context_grep", "code_symbols", "repo_index_search", "annotation_recall", "context_show", "context_retrieve", "obsidian_index_search", "obsidian_read", "obsidian_related"} {
 		if !hasToolName(names, want) {
 			t.Errorf("researcher should still have %q, got %v", want, names)
@@ -744,8 +744,8 @@ func TestInferRefactorScoutPath(t *testing.T) {
 	if got := inferRefactorScoutPath("In the Go code under internal/ find refactor hotspots"); got != "internal" {
 		t.Fatalf("got %q want internal", got)
 	}
-	if got := inferRefactorScoutPath("In the Go code under cmd/agentctl/cmd find refactor hotspots"); got != "cmd/agentctl/cmd" {
-		t.Fatalf("got %q want cmd/agentctl/cmd", got)
+	if got := inferRefactorScoutPath("In the Go code under cmd/foxctl/cmd find refactor hotspots"); got != "cmd/foxctl/cmd" {
+		t.Fatalf("got %q want cmd/foxctl/cmd", got)
 	}
 }
 

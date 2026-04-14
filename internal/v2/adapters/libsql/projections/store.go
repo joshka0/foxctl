@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
-	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 // ErrNotFound indicates projection rows are absent.

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: mcp/install
@@ -52,8 +52,8 @@ signature:
     long: |
       Use mcp/install to discover MCP tools and generate skill manifests.
       Example commands:
-        agentctl run mcp/install --input '{"server_url":"http://localhost:8080/sse","output_dir":"./skills"}'
-        agentctl skills run mcp/install --server_url http://localhost:8080/sse --output_dir ./skills
+        foxctl run mcp/install --input '{"server_url":"http://localhost:8080/sse","output_dir":"./skills"}'
+        foxctl skills run mcp/install --server_url http://localhost:8080/sse --output_dir ./skills
     workflows:
       - id: install-from-url
         description: "Install MCP tools from a server URL."

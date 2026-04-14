@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/storage/knowledge"
+	"github.com/joshka0/foxctl/internal/storage/knowledge"
 )
 
 func TestStore_ItemCRUD(t *testing.T) {
@@ -243,7 +243,7 @@ func TestSync_KnowledgePacks(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 
-	// Use the actual agentctl directory as workspace
+	// Use the actual foxctl directory as workspace
 	workspaceRoot := filepath.Join(tmpDir, "workspace")
 
 	// Create a minimal knowledge pack structure

@@ -212,7 +212,7 @@ retrieval_kinds:
   - direct_dispatch
   - implementation
 companion_paths:
-  - cmd/agentctl/cmd/eval_code_search_ensemble.go
+  - cmd/foxctl/cmd/eval_code_search_ensemble.go
 bridge_queries:
   - ReadOnlyAdapter Execute code_search_ensemble
 ```
@@ -233,7 +233,7 @@ seed_query: Which files connect runSingleCodeSearchEnsembleEval to code_search_e
 bridge_queries:
   - ReadOnlyAdapter Execute code_search_ensemble
 paths:
-  - cmd/agentctl/cmd/eval_code_search_ensemble.go
+  - cmd/foxctl/cmd/eval_code_search_ensemble.go
   - internal/rlm/env/adapter.go
   - internal/rlm/env/code_search_ensemble.go
 retrieval_kinds:
@@ -248,7 +248,7 @@ Use wiki-links for durable semantic relations such as:
 - `[[pattern/dispatch/adapter-dispatch]]`
 - `[[runtime/tool/code-search-ensemble]]`
 - `[[skill/code-semantic-search]]`
-- `[[bridge/run-agentctl-skill-decode]]`
+- `[[bridge/run-foxctl-skill-decode]]`
 
 The note text should explain the pattern briefly, but the retrieval-critical
 signals must remain in frontmatter:

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 )
 
 func TestEvaluateParserOnlyWhenIndexMissing(t *testing.T) {

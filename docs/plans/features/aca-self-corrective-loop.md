@@ -19,8 +19,8 @@ human intuition to recover. It should:
 
 Implemented through:
 
-- `agentctl context retrieve-inspect`
-- `agentctl context retrieve-inspect-suite`
+- `foxctl context retrieve-inspect`
+- `foxctl context retrieve-inspect-suite`
 
 That command:
 
@@ -63,14 +63,14 @@ requiring the note path itself to be the expected target.
 
 Read surfaces:
 
-- `agentctl context retrieve-inspect-runs`
+- `foxctl context retrieve-inspect-runs`
   - list or fetch persisted ACA correction runs
-- `agentctl context retrieve-inspect-artifact --artifact <digest>`
+- `foxctl context retrieve-inspect-artifact --artifact <digest>`
   - expand the full CAS-backed correction report
 
 Correction-effectiveness eval:
 
-- `agentctl eval corrections --suite agentctl-inspectors --workspace <repo> --vault-path <vault>`
+- `foxctl eval corrections --suite foxctl-inspectors --workspace <repo> --vault-path <vault>`
   - scores expected `classification`
   - scores expected fix-family substring matches when a fix is expected
 
@@ -83,7 +83,7 @@ The only auto-apply path in this slice is:
 via:
 
 ```bash
-agentctl context retrieve-inspect \
+foxctl context retrieve-inspect \
   --workspace . \
   --vault-path "/path/to/vault" \
   --query "storage memory package" \
@@ -95,17 +95,17 @@ agentctl context retrieve-inspect \
 That path:
 
 - persists the miss as an ACA observation
-- patches `.agentctl/policy/retrieval.yaml`
+- patches `.foxctl/policy/retrieval.yaml`
 - reruns the retrieval
 - returns the post-patch inspection result
 
 For suite-level inspection, the equivalent command is:
 
 ```bash
-agentctl context retrieve-inspect-suite \
+foxctl context retrieve-inspect-suite \
   --workspace . \
   --vault-path "/path/to/vault" \
-  --suite agentctl-mixed \
+  --suite foxctl-mixed \
   --control-suite praze-mixed \
   --apply \
   --apply-policy-patch \

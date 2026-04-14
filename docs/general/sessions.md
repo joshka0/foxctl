@@ -7,14 +7,14 @@ Machine-friendly reference for session lifecycle, lineage, and retrieval.
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical packages | `internal/storage/sessions`, `cmd/agentctl/cmd/sessions.go`, `skills/session_restore`, `skills/session_summarize`, `skills/session_recall`, `internal/context/sessionkit` |
+| Canonical packages | `internal/storage/sessions`, `cmd/foxctl/cmd/sessions.go`, `skills/session_restore`, `skills/session_summarize`, `skills/session_recall`, `internal/context/sessionkit` |
 | Last reviewed | 2026-02-20 |
 
 ## Scope
 
 Sessions capture agent/user interaction history, lineage edges, context windows, chunk summaries, and restore metadata for continuity across compaction and resume.
 
-## CLI Surfaces (`agentctl sessions`)
+## CLI Surfaces (`foxctl sessions`)
 
 | Command | Purpose |
 |--------|---------|
@@ -63,7 +63,7 @@ Session id fallback chain (from `internal/context/sessionkit/identity.go`):
 3. `CLAUDE_SESSION_ID`
 4. `OPENCODE_SESSION_ID`
 5. `CURSOR_SESSION_ID`
-6. Identity file under `~/.agentctl/sessions/active/<workspace_hash>-<agent>.json`
+6. Identity file under `~/.foxctl/sessions/active/<workspace_hash>-<agent>.json`
 7. `TERM_SESSION_ID` (last resort)
 
 ## Storage Contract
@@ -92,11 +92,11 @@ Source of truth: `internal/storage/sessions/store.go`.
 ## Operational Examples
 
 ```bash
-agentctl sessions list --limit 20
-agentctl sessions chain --session <session-id> --depth 10
-agentctl sessions close --status ok
-agentctl run session/restore --input '{"session_id":"<id>","trigger":"session_start"}'
-agentctl run session/recall --input '{"query":"oauth callback failure","limit":10}'
+foxctl sessions list --limit 20
+foxctl sessions chain --session <session-id> --depth 10
+foxctl sessions close --status ok
+foxctl run session/restore --input '{"session_id":"<id>","trigger":"session_start"}'
+foxctl run session/recall --input '{"query":"oauth callback failure","limit":10}'
 ```
 
 ## Invariants

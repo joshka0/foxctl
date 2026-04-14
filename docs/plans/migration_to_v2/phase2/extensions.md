@@ -83,7 +83,7 @@ schemas**, and edits are **blocked unless reserved**.
 
 5. Add `artifact.read` tool now
 
-- Reads a CAS digest in pages/bytes (so the LLM never needs “agentctl cas …”)
+- Reads a CAS digest in pages/bytes (so the LLM never needs “foxctl cas …”)
 - Output: `{digest, page, text, has_more}`
 
 ### Done when
@@ -118,8 +118,8 @@ Add `hook.Action` type with **exact** v1 action set:
 
 - Loads hook config from:
 
-  - `<workspace>/.agentctl/hooks.yaml`
-  - `~/.agentctl/hooks.yaml`
+  - `<workspace>/.foxctl/hooks.yaml`
+  - `~/.foxctl/hooks.yaml`
 - Matches: `event` + optional regex on `tool_name`
 - Executes hooks as skills using your existing skill runner
 - Aggregates deterministically:
@@ -155,7 +155,7 @@ to prefer actor identity over session lineage).
 
 ### Implement
 
-In `~/.agentctl/storage/sessions.db` migrate these tables:
+In `~/.foxctl/storage/sessions.db` migrate these tables:
 
 1. `actor_turns`
 
@@ -281,7 +281,7 @@ context injection + stop gating real.
 
 - `actor.NewLLMActor(config, deps...)`
 
-3. Update `cmd/agentctl/cmd/actorsys.go`
+3. Update `cmd/foxctl/cmd/actorsys.go`
 
 - `respawnRegisteredActors` uses `NewLLMActor` (not dspy)
 - `actorsys spawn` stores provider/model/api-key references in actor config
@@ -296,7 +296,7 @@ context injection + stop gating real.
 
 ### Done when
 
-- `agentctl actorsys supervisor start` runs, spawns multiple LLMActors, and they
+- `foxctl actorsys supervisor start` runs, spawns multiple LLMActors, and they
   process mailbox events.
 - Parent/human interrupt preempts a running actor.
 

@@ -6,19 +6,19 @@ import (
 	"strings"
 	"time"
 
-	toolbridge "github.com/jkatigb/agentctl/internal/v2/adapters/toolbridge"
-	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"
-	runtimetoolnames "github.com/jkatigb/agentctl/internal/v2/runtime/toolnames"
+	toolbridge "github.com/joshka0/foxctl/internal/v2/adapters/toolbridge"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	"github.com/joshka0/foxctl/internal/v2/runtime/profiles"
+	runtimetoolnames "github.com/joshka0/foxctl/internal/v2/runtime/toolnames"
 )
 
 const (
-	defaultAgentctlBinary    = "agentctl"
+	defaultAgentctlBinary    = "foxctl"
 	defaultToolCallTimeout   = 2 * time.Minute
 	agentctlRunInputFileFlag = "--input-file"
 )
 
-// ToolCommandSpec configures how Jido agents invoke Go-backed agentctl tools.
+// ToolCommandSpec configures how Jido agents invoke Go-backed foxctl tools.
 type ToolCommandSpec struct {
 	BinaryPath     string
 	Workspace      string
@@ -34,7 +34,7 @@ type ToolCommandRequest struct {
 	Timeout  time.Duration
 }
 
-// ToolCommand is a process-ready command for `agentctl run`.
+// ToolCommand is a process-ready command for `foxctl run`.
 type ToolCommand struct {
 	Path    string
 	Args    []string
@@ -43,7 +43,7 @@ type ToolCommand struct {
 }
 
 // BuildToolCommand returns a deterministic command line for running one tool
-// through the local Go `agentctl` binary.
+// through the local Go `foxctl` binary.
 func BuildToolCommand(spec ToolCommandSpec, req ToolCommandRequest) (ToolCommand, error) {
 	toolName := strings.TrimSpace(req.ToolName)
 	if toolName == "" {

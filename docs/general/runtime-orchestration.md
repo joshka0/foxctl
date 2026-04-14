@@ -68,9 +68,9 @@ For the broader package topology, including what `v2` is **not** replacing, see
 
 | Surface | Current path | Notes |
 |--------|--------------|-------|
-| `agent ask` | `cmd/agentctl/cmd/agent.go` -> `internal/v2/services.AskService` | Default can be mailbox-backed; Jido remains an optional dispatcher path |
+| `agent ask` | `cmd/foxctl/cmd/agent.go` -> `internal/v2/services.AskService` | Default can be mailbox-backed; Jido remains an optional dispatcher path |
 | `agent ask-status` | CLI -> v2 projections/events | Reads v2 run state and terminal callback metadata |
-| Overseer orchestration component | `cmd/agentctl/cmd/overseer_v2_orchestration.go` -> `internal/v2/runtime/orchestration` + runtime adapter | Still effectively Jido-oriented in important flows today |
+| Overseer orchestration component | `cmd/foxctl/cmd/overseer_v2_orchestration.go` -> `internal/v2/runtime/orchestration` + runtime adapter | Still effectively Jido-oriented in important flows today |
 | Companion layered context | `internal/context/companion` -> `internal/v2/runtime/contextbuilder` -> optional provider | Jido-backed provider is optional, not the desired default |
 | `agent run` | CLI -> `internal/agent/daemon.Run` | Still classic mailbox-driven runtime |
 | `agent spawn` | CLI prefers daemon path, then falls back to legacy `agentmanager` | Not hard-cut to v2 everywhere |
@@ -97,7 +97,7 @@ This is the important current path to understand before changing it:
 
 1. CLI or daemon wiring enables the orchestration component when Jido-oriented runtime
    configuration is present.
-2. `cmd/agentctl/cmd/overseer_v2_orchestration.go` opens the v2 event store and
+2. `cmd/foxctl/cmd/overseer_v2_orchestration.go` opens the v2 event store and
    orchestration projection store.
 3. The Jido adapter creates:
    - a JSON-RPC client to the Jido runtime

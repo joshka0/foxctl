@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/agent"
 )
 
 func TestMailboxStore(t *testing.T) {

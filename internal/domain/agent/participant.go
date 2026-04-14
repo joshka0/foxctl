@@ -5,7 +5,7 @@ import (
 )
 
 // PaneSocketTransportKind is the TransportKind value used when a member has an
-// agentctl pane serve wrapper socket registered.
+// foxctl pane serve wrapper socket registered.
 const PaneSocketTransportKind = "pane_socket"
 
 const (
@@ -106,7 +106,7 @@ type ParticipantState struct {
 	Reason string `json:"reason,omitempty"`
 
 	// CanTriggerTurn is true when this participant should be considered eligible for
-	// turn triggering through the agentctl-owned transport path. This is independent
+	// turn triggering through the foxctl-owned transport path. This is independent
 	// of presentation attachment — a detached mux pane does not prevent trigger delivery
 	// if the transport endpoint is still reachable.
 	CanTriggerTurn bool `json:"can_trigger_turn"`
@@ -176,7 +176,7 @@ func NormalizeRoomDeliveryBinding(actorID string, binding *RoomDeliveryBinding) 
 // Presentation is derived from the member's Backend/Session/PaneID fields.
 //
 // When a member has TransportKind=PaneSocketTransportKind, the TransportEndpoint is
-// the unix socket path for an agentctl pane serve wrapper. Otherwise the endpoint is
+// the unix socket path for an foxctl pane serve wrapper. Otherwise the endpoint is
 // derived from Backend/Session/PaneID.
 //
 // This is a pure function (no IO) suitable for the functional core.
@@ -190,7 +190,7 @@ func ParticipantStateFromRoomMember(member RoomMember) ParticipantState {
 		Runtime:    RuntimeUnknown,
 	}
 
-	// Pane socket transport: the member registered an agentctl pane wrapper.
+	// Pane socket transport: the member registered an foxctl pane wrapper.
 	// Presentation may still exist (via Backend/Session/PaneID) but transport
 	// goes through the socket, not the mux plugin.
 	if binding != nil && binding.TransportEndpoint != "" && strings.ToLower(binding.TransportKind) == PaneSocketTransportKind {

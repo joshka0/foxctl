@@ -18,7 +18,7 @@ get_description() {
 echo "=== Processing skills ==="
 
 # Process each skill
-for skill_dir in "$USER_SKILLS"/agentctl-*/; do
+for skill_dir in "$USER_SKILLS"/foxctl-*/; do
     skill_name=$(basename "$skill_dir")
     skill_file="$skill_dir/Skill.md"
 
@@ -34,7 +34,7 @@ for skill_dir in "$USER_SKILLS"/agentctl-*/; do
     desc=$(grep "^description:" "$skill_file" | sed 's/description: //')
 
     # Copy full content (minus frontmatter) to docs/skills/
-    doc_name=$(echo "$skill_name" | sed 's/agentctl-//')
+    doc_name=$(echo "$skill_name" | sed 's/foxctl-//')
     tail -n +6 "$skill_file" > "$DOCS_DIR/${doc_name}.md"
 
     echo "  -> Created docs/skills/${doc_name}.md"

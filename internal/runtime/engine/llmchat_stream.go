@@ -295,8 +295,8 @@ func (e *LLMChatEngine) callLLMStreaming(ctx context.Context, messages []oaiMess
 
 	// OpenRouter-specific headers
 	if e.config.Provider == "openrouter" {
-		req.Header.Set("HTTP-Referer", "https://agentctl.dev")
-		req.Header.Set("X-Title", "agentctl")
+		req.Header.Set("HTTP-Referer", "https://foxctl.dev")
+		req.Header.Set("X-Title", "foxctl")
 	}
 
 	resp, err := e.client.Do(req)

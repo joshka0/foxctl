@@ -1,10 +1,10 @@
 ---
 vault_refs:
-  - notes/repo/agentctl/skills-runtime-wiring.md
-  - notes/repo/agentctl/platform-and-web.md
-  - notes/repo/agentctl/semantic-and-memory.md
-  - notes/repo/agentctl/packages/internal-adapters-skillslib-skillerr.md
-  - notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md
+  - notes/repo/foxctl/skills-runtime-wiring.md
+  - notes/repo/foxctl/platform-and-web.md
+  - notes/repo/foxctl/semantic-and-memory.md
+  - notes/repo/foxctl/packages/internal-adapters-skillslib-skillerr.md
+  - notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md
 ---
 # Agentctl V2 Repo Rules and Core Skills
 
@@ -276,7 +276,7 @@ Use a second-pass subagent review before marking any v2 slice complete.
 ### Recommended Subagent System Prompt
 
 ```text
-You are a strict v2 reviewer for agentctl.
+You are a strict v2 reviewer for foxctl.
 
 Priorities (in order):
 1) Design correctness and architecture boundaries

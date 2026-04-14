@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/todosync"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/sessionmode"
-	"github.com/jkatigb/agentctl/internal/storage/graph"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/context/todosync"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/sessionmode"
+	"github.com/joshka0/foxctl/internal/storage/graph"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 type Dependencies struct {

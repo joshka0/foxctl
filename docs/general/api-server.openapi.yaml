@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: agentctl API
+  title: foxctl API
   version: 1.0.0-draft
   description: |
     Draft HTTP API for local-only usage.

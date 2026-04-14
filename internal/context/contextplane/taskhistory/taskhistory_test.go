@@ -10,16 +10,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
-	tphistory "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
+	tphistory "github.com/joshka0/foxctl/internal/context/transcriptpipeline/history"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
+	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 type fakeGitRunner struct {
@@ -85,7 +85,7 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 		ID:            "sess-1",
 		WorkspaceID:   wsID,
 		WorkspacePath: workspacePath,
-		ProjectName:   "agentctl",
+		ProjectName:   "foxctl",
 		Summary:       "Worked on the compact handoff flow.",
 		Decisions:     []string{"Prefer a bounded handoff envelope."},
 		Gotchas:       []string{"Do not inline large restore context."},
@@ -959,8 +959,8 @@ func TestCollectTranscriptFamilyOverview_AggregatesRecentOwners(t *testing.T) {
 func TestCollectTranscriptFamilyOverview_FocusQuerySelectsMatchingLane(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	mainRepo := filepath.Join(root, "agentctl")
-	worktree := filepath.Join(root, "agentctl-compare")
+	mainRepo := filepath.Join(root, "foxctl")
+	worktree := filepath.Join(root, "foxctl-compare")
 	storageRoot := t.TempDir()
 	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
 		t.Fatalf("mkdir main repo: %v", err)
@@ -969,7 +969,7 @@ func TestCollectTranscriptFamilyOverview_FocusQuerySelectsMatchingLane(t *testin
 		t.Fatalf("mkdir worktree: %v", err)
 	}
 	gitFile := filepath.Join(worktree, ".git")
-	content := []byte("gitdir: " + filepath.Join(mainRepo, ".git", "worktrees", "agentctl-compare") + "\n")
+	content := []byte("gitdir: " + filepath.Join(mainRepo, ".git", "worktrees", "foxctl-compare") + "\n")
 	if err := os.WriteFile(gitFile, content, 0o644); err != nil {
 		t.Fatalf("write .git file: %v", err)
 	}
@@ -1034,8 +1034,8 @@ func TestCollectTranscriptFamilyOverview_FocusQuerySelectsMatchingLane(t *testin
 func TestCollectTranscriptFamilyOverview_DateRangeFiltersOwners(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	mainRepo := filepath.Join(root, "agentctl")
-	worktree := filepath.Join(root, "agentctl-compare")
+	mainRepo := filepath.Join(root, "foxctl")
+	worktree := filepath.Join(root, "foxctl-compare")
 	storageRoot := t.TempDir()
 	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
 		t.Fatalf("mkdir main repo: %v", err)
@@ -1044,7 +1044,7 @@ func TestCollectTranscriptFamilyOverview_DateRangeFiltersOwners(t *testing.T) {
 		t.Fatalf("mkdir worktree: %v", err)
 	}
 	gitFile := filepath.Join(worktree, ".git")
-	content := []byte("gitdir: " + filepath.Join(mainRepo, ".git", "worktrees", "agentctl-compare") + "\n")
+	content := []byte("gitdir: " + filepath.Join(mainRepo, ".git", "worktrees", "foxctl-compare") + "\n")
 	if err := os.WriteFile(gitFile, content, 0o644); err != nil {
 		t.Fatalf("write .git file: %v", err)
 	}

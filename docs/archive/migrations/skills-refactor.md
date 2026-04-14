@@ -23,7 +23,7 @@ In the new in-process engine:
 * Tools may run:
 
   * internal Go APIs directly (fast path), or
-  * `agentctl run <skill>` (portable path) for “heavy compute” or “already implemented” features
+  * `foxctl run <skill>` (portable path) for “heavy compute” or “already implemented” features
 
 So you don’t delete skills — you **stop making runtime depend on dspy-go**.
 
@@ -156,7 +156,7 @@ Result: task_guard becomes the *single source of truth* for “task required”.
 
 #### A3) `hooks/impact_analysis`
 
-**Now:** PostToolUse impact. Has debounce; uses gopls daemon for speed; spawns agentctl subcommands for symbols/refs.
+**Now:** PostToolUse impact. Has debounce; uses gopls daemon for speed; spawns foxctl subcommands for symbols/refs.
 
 **Refactors:**
 
@@ -166,7 +166,7 @@ Result: task_guard becomes the *single source of truth* for “task required”.
 
    * For CC, you still want context after edit; but for OC & engine you can enqueue “run impact analysis” async and inject result next turn.
    * That avoids timeouts and makes behavior consistent.
-4. Replace hardcoded `agentctl run code/symbols` spawning where possible with internal calls (later). Not required for migration.
+4. Replace hardcoded `foxctl run code/symbols` spawning where possible with internal calls (later). Not required for migration.
 
 #### A4) `hooks/knowledge_router`
 

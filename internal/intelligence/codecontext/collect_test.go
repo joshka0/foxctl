@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/policy"
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
+	"github.com/joshka0/foxctl/internal/domain/policy"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext"
 )
 
 // createTestFile creates a temporary file with the given content.

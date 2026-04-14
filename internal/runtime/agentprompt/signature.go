@@ -3,7 +3,7 @@ package agentprompt
 import (
 	"strings"
 
-	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
+	agenttypes "github.com/joshka0/foxctl/internal/agent/types"
 )
 
 // Instruction returns the agent system instruction for a role.

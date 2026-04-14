@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: optimize/reflect
@@ -32,10 +32,10 @@ signature:
     long: |
       Use optimize/reflect to generate insights from trajectories.
       Example commands:
-        agentctl run optimize/reflect --input '{"role":"coder"}'
-        agentctl skills run optimize/reflect --role coder
-        agentctl run optimize/reflect --input '{"role":"coder","trajectory_id":"01HXYZ"}'
-        agentctl skills run optimize/reflect --role coder --trajectory_id 01HXYZ
+        foxctl run optimize/reflect --input '{"role":"coder"}'
+        foxctl skills run optimize/reflect --role coder
+        foxctl run optimize/reflect --input '{"role":"coder","trajectory_id":"01HXYZ"}'
+        foxctl skills run optimize/reflect --role coder --trajectory_id 01HXYZ
     workflows:
       - id: reflect-role
         description: "Reflect on recent trajectories."

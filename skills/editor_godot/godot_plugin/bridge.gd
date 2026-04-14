@@ -1,6 +1,6 @@
 @tool
 extends EditorPlugin
-## GodotAIBridge - HTTP server for agentctl editor/godot skill.
+## GodotAIBridge - HTTP server for foxctl editor/godot skill.
 ##
 ## This plugin exposes the Godot Editor's scene manipulation APIs over HTTP,
 ## allowing AI agents to inspect and modify scenes programmatically.
@@ -333,7 +333,7 @@ func _validate_workspace(workspace_root: String) -> String:
 
 	return _error_response("EWORKSPACE_MISMATCH",
 		"Workspace mismatch: agent workspace '%s' != Godot project '%s'" % [workspace_root, project_root],
-		"Ensure agentctl is running from the Godot project directory, or use --workspace to specify the correct path.")
+		"Ensure foxctl is running from the Godot project directory, or use --workspace to specify the correct path.")
 
 
 # -- RESPONSE HELPERS --

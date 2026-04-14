@@ -12,12 +12,12 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
-	"github.com/jkatigb/agentctl/internal/storage/vector"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	"github.com/joshka0/foxctl/internal/storage/vector"
 )
 
 // TurnAnnotation aliases the shared storage type.
@@ -53,7 +53,7 @@ SELECT id, session_id, turn_index, context_window_index,
 FROM turn_annotations`
 
 // Open opens (or creates) a standalone annotations database.
-// If dbPath is empty, it defaults to ~/.agentctl/storage/annotations.db.
+// If dbPath is empty, it defaults to ~/.foxctl/storage/annotations.db.
 func Open(ctx context.Context, dbPath string) (store *Store, err error) {
 	resolvedPath, err := resolveDBPath(dbPath)
 	if err != nil {
@@ -760,7 +760,7 @@ func resolveDBPath(dbPath string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("get user home: %w", err)
 		}
-		return filepath.Join(home, ".agentctl", "storage", "annotations.db"), nil
+		return filepath.Join(home, ".foxctl", "storage", "annotations.db"), nil
 	}
 	if dbPath == "~" || strings.HasPrefix(dbPath, "~/") {
 		home, err := os.UserHomeDir()

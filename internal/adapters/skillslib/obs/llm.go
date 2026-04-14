@@ -77,7 +77,7 @@ func LoadPricing() map[string]ModelPricing {
 
 		// Add user home directory path
 		if home, err := os.UserHomeDir(); err == nil {
-			paths = append(paths, home+"/.agentctl/configs/openrouter_pricing.json")
+			paths = append(paths, home+"/.foxctl/configs/openrouter_pricing.json")
 		}
 
 		var loaded bool

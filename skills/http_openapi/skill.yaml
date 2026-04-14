@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: http/openapi
@@ -49,8 +49,8 @@ signature:
       Use http/openapi to load an OpenAPI 3.x spec, build an operation request,
       apply auth, and optionally execute it with pagination and retry support.
       Example commands:
-        agentctl run http/openapi --input '{"spec":"./openapi.yaml","operationId":"listRepos","params":{"path":{},"query":{"per_page":10}},"dry_run":true}'
-        agentctl run http/openapi --input '{"spec":"memory:github","operationId":"createIssue","params":{"body":{"title":"Bug"}},"auth":{"bearer_env":"GITHUB_TOKEN"},"dry_run":false}'
+        foxctl run http/openapi --input '{"spec":"./openapi.yaml","operationId":"listRepos","params":{"path":{},"query":{"per_page":10}},"dry_run":true}'
+        foxctl run http/openapi --input '{"spec":"memory:github","operationId":"createIssue","params":{"body":{"title":"Bug"}},"auth":{"bearer_env":"GITHUB_TOKEN"},"dry_run":false}'
     workflows:
       - id: dry-run-operation
         description: "Build a request plan without executing it."

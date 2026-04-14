@@ -6,7 +6,7 @@ if [[ "${AGENTCTL_TODO_CONTINUATION_DISABLED:-}" == "1" ]]; then
   exit 0
 fi
 
-AGENTCTL="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL="${AGENTCTL_BIN:-foxctl}"
 MIN_PENDING="${AGENTCTL_TODO_CONTINUATION_MIN_PENDING:-1}"
 TOP_N="${AGENTCTL_TODO_CONTINUATION_TOP_N:-5}"
 
@@ -22,7 +22,7 @@ if [[ -z "$SESSION_ID" || "$SESSION_ID" == "null" ]]; then
   SESSION_ID="$(echo "$INPUT" | jq -r '.sessionID // .session_id // ""' 2>/dev/null || true)"
 fi
 if [[ -z "$SESSION_ID" || "$SESSION_ID" == "null" ]]; then
-  agentctl_home="${AGENTCTL_HOME:-$HOME/.agentctl}"
+  agentctl_home="${AGENTCTL_HOME:-$HOME/.foxctl}"
   workspace_hash="$(printf '%s' "$WORKSPACE" | shasum -a 256 | cut -c1-16)"
   identity_dir="$agentctl_home/sessions/active"
   for f in "$identity_dir/${workspace_hash}-"*.json; do
@@ -41,7 +41,7 @@ fi
 
 TODO_MODE="false"
 TODO_MODE_TTL_MS=$((6 * 60 * 60 * 1000))
-mode_dir="${AGENTCTL_HOME:-$HOME/.agentctl}/cache/session-modes"
+mode_dir="${AGENTCTL_HOME:-$HOME/.foxctl}/cache/session-modes"
 mode_hash="$(printf '%s' "todo:${SESSION_ID}" | shasum -a 256 | cut -c1-16)"
 mode_file="${mode_dir}/todo-${mode_hash}.json"
 if [[ -f "$mode_file" ]]; then

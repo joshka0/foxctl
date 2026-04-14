@@ -13,9 +13,9 @@ mail_router hook enhancements for plan event surfacing.
 
 ## Changes
 
-### CLI (`cmd/agentctl/cmd/todo.go`)
+### CLI (`cmd/foxctl/cmd/todo.go`)
 
-- Added `agentctl todo plan` command with flags:
+- Added `foxctl todo plan` command with flags:
   - `--goal` (required): One-sentence goal
   - `--description`: Detailed context
   - `--scope`: Directories/files likely touched (repeatable)
@@ -64,22 +64,22 @@ Supported environment variables:
 
 ```bash
 # Draft a plan (preview only)
-agentctl todo plan --goal "Add OAuth2 authentication"
+foxctl todo plan --goal "Add OAuth2 authentication"
 
 # Apply a plan with scope paths
-agentctl todo plan --goal "Add Google OAuth" \
+foxctl todo plan --goal "Add Google OAuth" \
   --scope internal/auth \
   --scope cmd/auth \
   --apply
 
 # Refine an existing epic
-agentctl todo plan --goal "Add GitHub provider" \
+foxctl todo plan --goal "Add GitHub provider" \
   --attach-to <epic-id> \
   --apply
 
 # With LLM (auto-detected from env)
 export GROQ_API_KEY=gsk_...
-agentctl todo plan --goal "Implement caching layer" --apply
+foxctl todo plan --goal "Implement caching layer" --apply
 ```
 
 ## Testing

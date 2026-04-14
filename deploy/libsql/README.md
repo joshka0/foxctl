@@ -1,6 +1,6 @@
 # libSQL Server Deployment
 
-Self-hosted libSQL (sqld) server for cross-machine agentctl sync with native vector search.
+Self-hosted libSQL (sqld) server for cross-machine foxctl sync with native vector search.
 
 ## Quick Start
 
@@ -10,10 +10,10 @@ cd deployments/libsql
 docker compose up -d
 
 # Preview migration (dry run)
-agentctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080", "dry_run": true}'
+foxctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080", "dry_run": true}'
 
 # Run migration
-agentctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080"}'
+foxctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080"}'
 ```
 
 ## Tailscale Access
@@ -22,7 +22,7 @@ For cross-machine access via Tailscale:
 
 ```bash
 # From remote machine, use Tailscale IP of the host
-agentctl run libsql/migrate --input '{"libsql_url": "http://100.x.x.x:8080"}'
+foxctl run libsql/migrate --input '{"libsql_url": "http://100.x.x.x:8080"}'
 ```
 
 ## Migration Options
@@ -32,7 +32,7 @@ agentctl run libsql/migrate --input '{"libsql_url": "http://100.x.x.x:8080"}'
 | `libsql_url` | (required) | sqld server URL |
 | `auth_token` | - | JWT auth token if server requires auth |
 | `scope` | `all` | What to migrate: `all`, `memories`, `sessions` |
-| `source_dir` | `~/.agentctl/storage` | Source SQLite directory |
+| `source_dir` | `~/.foxctl/storage` | Source SQLite directory |
 | `batch_size` | `100` | Records per batch |
 | `dry_run` | `false` | Preview without writing |
 | `vector_dims` | `1024` | Embedding dimensions (1024 for Voyage) |

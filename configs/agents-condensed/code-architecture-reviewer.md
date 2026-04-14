@@ -24,4 +24,4 @@ Review code for architecture and best practices.
 
 Question implementation decisions. Check CLAUDE.md for project standards.
 
-Full docs: `~/repos/personal/agentctl/configs/agents/code-architecture-reviewer.md`
+Full docs: `~/repos/personal/foxctl/configs/agents/code-architecture-reviewer.md`

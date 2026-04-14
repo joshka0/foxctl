@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: optimize/bootstrap
@@ -40,8 +40,8 @@ signature:
     long: |
       Use optimize/bootstrap to generate few-shot examples for a role.
       Example commands:
-        agentctl run optimize/bootstrap --input '{"role":"coder","max_examples":5}'
-        agentctl skills run optimize/bootstrap --role coder --max_examples 5
+        foxctl run optimize/bootstrap --input '{"role":"coder","max_examples":5}'
+        foxctl skills run optimize/bootstrap --role coder --max_examples 5
     workflows:
       - id: bootstrap-examples
         description: "Generate example prompts."

@@ -1,10 +1,10 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/semantic_search
   description: Unified semantic search across code, session, memory, and ACA context with BM25/vector fallback
   version: 0.3.0
-  author: agentctl
+  author: foxctl
   tags: [search, semantic, embedding, symbols, sessions, memories, codemaps]
 distribution:
   type: exec
@@ -212,11 +212,11 @@ signature:
       - Embedding dimensions must match (all 1024 for Voyage)
 
       Example commands:
-        agentctl run code/semantic_search --input '{"query":"authentication middleware","scope":["symbols"],"limit":10}'
-        agentctl run code/semantic_search --input '{"query":"repo index dag grep","scope":["symbols"],"repo_index_mode":"search"}'
-        agentctl skills run code/semantic_search --query "authentication middleware" --scope symbols --limit 10
-        agentctl run code/semantic_search --input '{"query":"database migration issues","scope":["sessions"],"include_context":true}'
-        agentctl skills run code/semantic_search --query "database migration issues" --scope sessions --include_context
+        foxctl run code/semantic_search --input '{"query":"authentication middleware","scope":["symbols"],"limit":10}'
+        foxctl run code/semantic_search --input '{"query":"repo index dag grep","scope":["symbols"],"repo_index_mode":"search"}'
+        foxctl skills run code/semantic_search --query "authentication middleware" --scope symbols --limit 10
+        foxctl run code/semantic_search --input '{"query":"database migration issues","scope":["sessions"],"include_context":true}'
+        foxctl skills run code/semantic_search --query "database migration issues" --scope sessions --include_context
     workflows:
       - id: search-all
         description: "Search all sources for a question"

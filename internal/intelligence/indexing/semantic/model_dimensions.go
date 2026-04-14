@@ -3,7 +3,7 @@ package semantic
 import (
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
 // DimensionsForModel returns the expected embedding dimensions for a model.

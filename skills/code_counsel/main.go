@@ -19,14 +19,14 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/secretutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/autoselect"
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/guard"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/secretutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext/autoselect"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext/guard"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 )
 
 const command = "code/counsel"

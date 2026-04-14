@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: epic/complete
@@ -35,9 +35,9 @@ signature:
     short: "Complete an epic and surface related learnings."
     long: |
       Example commands:
-        agentctl run epic/complete --input '{"epic_id":"01HEPIC..."}'
-        agentctl run epic/complete --input '{"epic_id":"01HEPIC...","force":true}'
-        agentctl run epic/complete --input '{"epic_id":"01HEPIC...","dry_run":true}'
+        foxctl run epic/complete --input '{"epic_id":"01HEPIC..."}'
+        foxctl run epic/complete --input '{"epic_id":"01HEPIC...","force":true}'
+        foxctl run epic/complete --input '{"epic_id":"01HEPIC...","dry_run":true}'
 capabilities:
   network: "none"
   filesystem:

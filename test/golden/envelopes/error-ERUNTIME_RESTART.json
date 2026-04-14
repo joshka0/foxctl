@@ -1,7 +1,7 @@
 {
   "version": 1,
   "status": "error",
-  "command": "agentctl.example.run",
+  "command": "foxctl.example.run",
   "data": {
     "hint": "Execution environment restarted mid-run; no state was persisted",
     "attempt": 2

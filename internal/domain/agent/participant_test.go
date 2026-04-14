@@ -19,14 +19,14 @@ func TestParticipantStateFromRoomMember(t *testing.T) {
 			member: RoomMember{
 				ActorID:  "claude-a",
 				Backend:  "tmux",
-				Session:  "agentctl-collab",
+				Session:  "foxctl-collab",
 				PaneID:   "%42",
 				JoinedAt: now,
 			},
 			want: ParticipantState{
 				ActorID:           "claude-a",
 				Membership:        MembershipActive,
-				TransportEndpoint: "tmux:agentctl-collab:%42",
+				TransportEndpoint: "tmux:foxctl-collab:%42",
 				Transport:         TransportUnknown,
 				Runtime:           RuntimeUnknown,
 				Presentation:      PresentationDetached,
@@ -353,7 +353,7 @@ func TestNormalizeRoomMemberUsesExplicitDeliveryBinding(t *testing.T) {
 			MuxBackend:        " zellij ",
 			MuxSession:        " dev-session ",
 			MuxPaneID:         " terminal_2 ",
-			TransportEndpoint: " /tmp/agentctl-pane/dev-session/codex-a.sock ",
+			TransportEndpoint: " /tmp/foxctl-pane/dev-session/codex-a.sock ",
 			TransportKind:     " pane_socket ",
 			SubmitMode:        RoomDeliverySubmitModeComposerCtrlEnter,
 			Health:            RoomDeliveryHealthReady,
@@ -372,7 +372,7 @@ func TestNormalizeRoomMemberUsesExplicitDeliveryBinding(t *testing.T) {
 	if got.PaneID != "terminal_2" {
 		t.Fatalf("PaneID = %q, want terminal_2", got.PaneID)
 	}
-	if got.TransportEndpoint != "/tmp/agentctl-pane/dev-session/codex-a.sock" {
+	if got.TransportEndpoint != "/tmp/foxctl-pane/dev-session/codex-a.sock" {
 		t.Fatalf("TransportEndpoint = %q", got.TransportEndpoint)
 	}
 	if got.TransportKind != PaneSocketTransportKind {
@@ -409,7 +409,7 @@ func TestParticipantStateFromRoomMember_PaneSocket(t *testing.T) {
 		Backend:           "zellij",
 		Session:           "dev-session",
 		PaneID:            "terminal_0",
-		TransportEndpoint: "/tmp/agentctl-pane/dev-session/claude-a.sock",
+		TransportEndpoint: "/tmp/foxctl-pane/dev-session/claude-a.sock",
 		TransportKind:     PaneSocketTransportKind,
 		JoinedAt:          now,
 	}
@@ -419,7 +419,7 @@ func TestParticipantStateFromRoomMember_PaneSocket(t *testing.T) {
 	if state.Membership != MembershipActive {
 		t.Errorf("Membership = %q, want active", state.Membership)
 	}
-	if state.TransportEndpoint != "/tmp/agentctl-pane/dev-session/claude-a.sock" {
+	if state.TransportEndpoint != "/tmp/foxctl-pane/dev-session/claude-a.sock" {
 		t.Errorf("TransportEndpoint = %q, want socket path", state.TransportEndpoint)
 	}
 	// Transport starts Unknown — caller must apply a socket probe.
@@ -441,7 +441,7 @@ func TestParticipantStateFromRoomMember_PaneSocket(t *testing.T) {
 
 func TestApplySocketProbe_SocketExists(t *testing.T) {
 	state := ParticipantState{
-		TransportEndpoint: "/tmp/agentctl-pane/s/claude-a.sock",
+		TransportEndpoint: "/tmp/foxctl-pane/s/claude-a.sock",
 		Transport:         TransportUnknown,
 		Runtime:           RuntimeUnknown,
 		CanTriggerTurn:    true,
@@ -461,7 +461,7 @@ func TestApplySocketProbe_SocketExists(t *testing.T) {
 
 func TestApplySocketProbe_SocketMissing(t *testing.T) {
 	state := ParticipantState{
-		TransportEndpoint: "/tmp/agentctl-pane/s/claude-a.sock",
+		TransportEndpoint: "/tmp/foxctl-pane/s/claude-a.sock",
 		Transport:         TransportUnknown,
 		Runtime:           RuntimeUnknown,
 		CanTriggerTurn:    true,
@@ -500,7 +500,7 @@ func TestParticipantStateCanTriggerTurnDecoupledFromPresentation(t *testing.T) {
 	member := RoomMember{
 		ActorID:  "claude-a",
 		Backend:  "tmux",
-		Session:  "agentctl-collab",
+		Session:  "foxctl-collab",
 		PaneID:   "%42",
 		JoinedAt: time.Now().UTC(),
 	}

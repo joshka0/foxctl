@@ -112,7 +112,7 @@ type MigrationConfig struct {
 	AutoMigrate bool `json:"auto_migrate" yaml:"auto_migrate"`
 
 	// SourcePath is the path to the legacy file-based CAS.
-	// If empty, defaults to ~/.agentctl/cas.
+	// If empty, defaults to ~/.foxctl/cas.
 	SourcePath string `json:"source_path,omitempty" yaml:"source_path,omitempty"`
 }
 

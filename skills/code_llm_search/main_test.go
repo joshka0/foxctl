@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 )
 
 // applyDefaultsAndValidate applies defaults and validates required fields (mirrors run function).

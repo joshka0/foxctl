@@ -1,0 +1,7 @@
+suite: foxctl-cochange
+limit: 10
+format: markdown
+modes:
+  - aca_default
+  - aca_cochange
+  - aca_cochange_continuity

@@ -27,7 +27,7 @@ func main() {
 	}
 	if localDB == "" {
 		home, _ := os.UserHomeDir()
-		localDB = home + "/.agentctl/storage/sessions.db"
+		localDB = home + "/.foxctl/storage/sessions.db"
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

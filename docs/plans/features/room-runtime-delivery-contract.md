@@ -13,7 +13,7 @@ unstable.
 This contract sits underneath the broader architectural direction in
 [room-headless-kernel-and-clients.md](./room-headless-kernel-and-clients.md):
 
-- `agentctl` is the headless room/runtime kernel
+- `foxctl` is the headless room/runtime kernel
 - CLI, web, GUI, mux, and chat adapters are clients or presentation layers
 - runtime behavior should converge into shared services rather than CLI-shaped
   implementations

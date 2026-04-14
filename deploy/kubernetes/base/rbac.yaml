@@ -1,22 +1,22 @@
-# RBAC configuration for agentctl
+# RBAC configuration for foxctl
 
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: agentctl
-  namespace: agentctl
+  name: foxctl
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: rbac
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: agentctl
-  namespace: agentctl
+  name: foxctl
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: rbac
 rules:
 # Read configmaps for configuration
@@ -27,7 +27,7 @@ rules:
 # Read specific secrets
 - apiGroups: [""]
   resources: ["secrets"]
-  resourceNames: ["agentctl-secrets", "git-creds"]
+  resourceNames: ["foxctl-secrets", "git-creds"]
   verbs: ["get"]
 
 # Read pod info for distributed coordination
@@ -39,16 +39,16 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: agentctl
-  namespace: agentctl
+  name: foxctl
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: rbac
 subjects:
 - kind: ServiceAccount
-  name: agentctl
-  namespace: agentctl
+  name: foxctl
+  namespace: foxctl
 roleRef:
   kind: Role
-  name: agentctl
+  name: foxctl
   apiGroup: rbac.authorization.k8s.io

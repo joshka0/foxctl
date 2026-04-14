@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/runtime/supervisor"
+	"github.com/joshka0/foxctl/internal/v2/runtime/supervisor"
 )
 
 func TestSupervisor_StartsAndStopsAllComponents(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
 )
 
 const defaultSpawnChildTimeout = 10 * time.Second

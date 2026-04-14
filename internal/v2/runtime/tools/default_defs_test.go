@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/tools"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	"github.com/joshka0/foxctl/internal/v2/runtime/profiles"
+	"github.com/joshka0/foxctl/internal/v2/runtime/tools"
 )
 
 func TestDefaultDefsIncludeACAAndObsidianReadTools(t *testing.T) {

@@ -7,10 +7,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 // Emit writes a success envelope to stdout with standard metadata.
@@ -48,8 +48,8 @@ func BuildCASHint(artifact Artifact, linesPerPage int) envelope.CASHint {
 		Digest:      artifact.Digest,
 		TotalBytes:  artifact.Size,
 		ContentType: artifact.Kind,
-		ReadCommand: fmt.Sprintf("agentctl cas read %s", artifact.Digest),
-		GetCommand:  fmt.Sprintf("agentctl cas get %s", artifact.Digest),
+		ReadCommand: fmt.Sprintf("foxctl cas read %s", artifact.Digest),
+		GetCommand:  fmt.Sprintf("foxctl cas get %s", artifact.Digest),
 	}
 
 	// Calculate pagination if applicable (~80 bytes per line heuristic)
@@ -58,7 +58,7 @@ func BuildCASHint(artifact Artifact, linesPerPage int) envelope.CASHint {
 		if int(artifact.Size) > bytesPerPage {
 			hint.PageCount = (int(artifact.Size) + bytesPerPage - 1) / bytesPerPage
 			hint.PageSize = bytesPerPage
-			hint.ReadCommand = fmt.Sprintf("agentctl cas read %s --page-size %d", artifact.Digest, bytesPerPage)
+			hint.ReadCommand = fmt.Sprintf("foxctl cas read %s --page-size %d", artifact.Digest, bytesPerPage)
 		}
 	}
 

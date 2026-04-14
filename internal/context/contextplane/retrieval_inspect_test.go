@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
 
 func TestSetRetrievalPackageNoteFallback(t *testing.T) {
@@ -166,7 +166,7 @@ func TestSummarizeRetrievalInspections(t *testing.T) {
 func TestRecordAndReadRetrievalCorrectionRuns(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	run := RetrievalCorrectionRun{
-		Suite:          "agentctl-mixed",
+		Suite:          "foxctl-mixed",
 		ControlSuite:   "praze-mixed",
 		ArtifactDigest: "sha256:test",
 		Summary: RetrievalInspectionBatchSummary{
@@ -197,7 +197,7 @@ func TestRecordAndReadRetrievalCorrectionRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRetrievalCorrectionRun: %v", err)
 	}
-	if got == nil || got.Suite != "agentctl-mixed" {
+	if got == nil || got.Suite != "foxctl-mixed" {
 		t.Fatalf("run=%+v", got)
 	}
 	if got.Summary.Classifications["missing_package_note"] != 1 {

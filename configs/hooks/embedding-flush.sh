@@ -7,7 +7,7 @@ if [[ "${AGENTCTL_EMBED_QUEUE:-1}" == "0" ]]; then
   exit 0
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 if ! command -v "$AGENTCTL_BIN" >/dev/null 2>&1; then
   exit 0
 fi

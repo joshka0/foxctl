@@ -18,8 +18,8 @@ func TestNewEvent(t *testing.T) {
 	if built.Operation != "test.operation" {
 		t.Errorf("Operation = %q, want test.operation", built.Operation)
 	}
-	if built.Service != "agentctl" {
-		t.Errorf("Service = %q, want agentctl", built.Service)
+	if built.Service != "foxctl" {
+		t.Errorf("Service = %q, want foxctl", built.Service)
 	}
 	if built.SpanID == "" {
 		t.Error("SpanID should be auto-generated")

@@ -22,7 +22,7 @@ The storage layer supports per-store database drivers through `internal/storage/
 
 ### Control-plane design
 
-- `agentctl` runs most logical stores as separate PostgreSQL schemas.
+- `foxctl` runs most logical stores as separate PostgreSQL schemas.
 - Default schema name is lower-cased store name (for example: `sessions`, `tasks`, `memory`).
 - DB is opened via `AGENTCTL_<STORE>_POSTGRES_DSN`, then fallback to:
   - `AGENTCTL_POSTGRES_DSN`

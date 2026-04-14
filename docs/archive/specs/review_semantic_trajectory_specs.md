@@ -1,7 +1,7 @@
 # Review, Semantic Index, and Trajectory Specs
 
 This file groups the related specs that define the review gate, semantic file
-indexing, dspy-go agents, and trajectory capture for agentctl. It is an
+indexing, dspy-go agents, and trajectory capture for foxctl. It is an
 orientation hub only; the authoritative normative details live in the linked
 specs.
 

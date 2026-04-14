@@ -1,17 +1,17 @@
 // Package main implements the todo/sync_from_provider skill.
 //
-// This skill syncs todos FROM a provider (e.g., Claude Code) INTO agentctl's
+// This skill syncs todos FROM a provider (e.g., Claude Code) INTO foxctl's
 // task management system. It is the inbound sync direction.
 package main
 
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/context/todosync"
-	"github.com/jkatigb/agentctl/internal/providers/claude/todos"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/context/todosync"
+	"github.com/joshka0/foxctl/internal/providers/claude/todos"
 )
 
 const command = "todo/sync_from_provider"
@@ -52,10 +52,10 @@ func main() {
 	skillmain.Main(command, run)
 }
 
-// run orchestrates inbound todo synchronization from external providers into agentctl's task system.
+// run orchestrates inbound todo synchronization from external providers into foxctl's task system.
 //
 // Index:
-// - Purpose: Sync todos FROM a provider (e.g., Claude Code) INTO agentctl's task management system
+// - Purpose: Sync todos FROM a provider (e.g., Claude Code) INTO foxctl's task management system
 // - Flow: open task store → resolve session ID → get todos from input or file → run inbound sync → emit results
 // - SideEffects: task creation/updates; completion tracking; dependency management; dry-run simulation
 // - FailureModes: task store access failures, provider file read errors, sync operation failures

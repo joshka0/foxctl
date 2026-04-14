@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
-	ccadapt "github.com/jkatigb/agentctl/internal/intelligence/codecontext/adapters"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	retrievalv2 "github.com/jkatigb/agentctl/internal/intelligence/retrieval/v2"
-	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
-	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext"
+	ccadapt "github.com/joshka0/foxctl/internal/intelligence/codecontext/adapters"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
+	retrievalv2 "github.com/joshka0/foxctl/internal/intelligence/retrieval/v2"
+	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
+	sysconfig "github.com/joshka0/foxctl/internal/platform/config"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 // Options configures shared file auto-selection for read/search/analyze skills.

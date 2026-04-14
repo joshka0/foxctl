@@ -13,7 +13,7 @@ keyword search.
 
 ### Code Fixes
 
-- **`cmd/agentctl/cmd/knowledge.go`**: Fixed variable shadowing (`err` →
+- **`cmd/foxctl/cmd/knowledge.go`**: Fixed variable shadowing (`err` →
   `pathErr`) in `MatchByPath` call
 - **`internal/storage/knowledge/store.go`**: Fixed case mismatch in keyword
   search by lowercasing input keywords to match `LOWER(t.pattern)` in SQL
@@ -47,7 +47,7 @@ keyword search.
   - Made `cosineSimilarity` example valid Go code with `math.Sqrt` and zero-norm
     guard
 - **`docs/spec/test_watch_feedback.md`**: Aligned hook directory paths
-  (`.agentctl/hooks/` → `.claude/hooks/`)
+  (`.foxctl/hooks/` → `.claude/hooks/`)
 
 ## Testing
 

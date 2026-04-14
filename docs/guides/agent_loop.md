@@ -4,14 +4,14 @@
 **Status:** Implementation Guide
 **Last Updated:** 2025-11-15
 
-> **Purpose:** This document provides a complete implementation guide for building LLM agent loops using agentctl as the execution substrate. It includes JSON contracts, Go reference implementation, and concrete examples.
+> **Purpose:** This document provides a complete implementation guide for building LLM agent loops using foxctl as the execution substrate. It includes JSON contracts, Go reference implementation, and concrete examples.
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#1-overview)
-2. [Why Agentctl for Agents](#2-why-agentctl-for-agents)
+2. [Why Agentctl for Agents](#2-why-foxctl-for-agents)
 3. [Agent Loop JSON Contract](#3-agent-loop-json-contract)
 4. [Go Implementation](#4-go-implementation)
 5. [Complete Walkthrough](#5-complete-walkthrough)
@@ -28,7 +28,7 @@
 An **agent loop** is a system that:
 1. Takes a high-level goal from the user
 2. Breaks it down into executable tool calls
-3. Invokes tools (skills) via agentctl
+3. Invokes tools (skills) via foxctl
 4. Feeds results back to an LLM for decision-making
 5. Repeats until the goal is achieved
 
@@ -42,7 +42,7 @@ Problems: huge token usage, inconsistent outputs, hard to debug
 
 **Agentctl approach** (efficient):
 ```
-User → LLM → tiny JSON → agentctl skill → structured envelope → LLM → ...
+User → LLM → tiny JSON → foxctl skill → structured envelope → LLM → ...
 ```
 Benefits:
 - **Token efficiency**: Small JSON schemas, no repeated tool descriptions
@@ -54,7 +54,7 @@ Benefits:
 
 - **Minimal LLM context**: Only show small tool hints and recent summaries
 - **Structured I/O**: JSON envelopes eliminate prompt engineering for tool outputs
-- **Separation of concerns**: LLM does planning, agentctl does execution
+- **Separation of concerns**: LLM does planning, foxctl does execution
 - **Transparency**: All side effects captured in envelopes and CAS
 
 ---
@@ -185,7 +185,7 @@ Minimal state for each planning step:
       "status": "ok",
       "summary": {
         "path": "README.md",
-        "preview": "agentctl is a CLI for structured AI workflows..."
+        "preview": "foxctl is a CLI for structured AI workflows..."
       }
     }
   ]
@@ -236,7 +236,7 @@ Two modes: **tool call** or **final answer**
 ### 3.4 LLM Prompt Template
 
 ```text
-You are an agent that uses tools via agentctl. You MUST respond with valid JSON only.
+You are an agent that uses tools via foxctl. You MUST respond with valid JSON only.
 
 GOAL:
 {{ .State.Goal }}
@@ -293,7 +293,7 @@ import (
     "encoding/json"
     "time"
 
-    "github.com/jkatigb/agentctl/internal/protocol"
+    "github.com/joshka0/foxctl/internal/protocol"
 )
 
 // ToolDescriptor shown to the model
@@ -365,7 +365,7 @@ import (
     "context"
     "encoding/json"
 
-    "github.com/jkatigb/agentctl/internal/protocol"
+    "github.com/joshka0/foxctl/internal/protocol"
 )
 
 // LLMClient abstracts the language model
@@ -392,7 +392,7 @@ import (
     "text/template"
 )
 
-const promptTemplate = `You are an agent that uses tools via agentctl.
+const promptTemplate = `You are an agent that uses tools via foxctl.
 You MUST respond with valid JSON only.
 
 GOAL:
@@ -532,7 +532,7 @@ import (
     "context"
     "fmt"
 
-    "github.com/jkatigb/agentctl/internal/protocol"
+    "github.com/joshka0/foxctl/internal/protocol"
 )
 
 type LoopConfig struct {
@@ -712,7 +712,7 @@ func summarizeEnvelope(tool string, env protocol.Envelope) HistoryEntry {
 }
 ```
 
-**Invoker executes**: `agentctl run fs/ls --path services/payments --max_depth 2`
+**Invoker executes**: `foxctl run fs/ls --path services/payments --max_depth 2`
 
 **Envelope returned**:
 ```json

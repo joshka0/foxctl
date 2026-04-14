@@ -3,7 +3,7 @@ package plugin
 import (
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/protocol"
 )
 
 // InvocationError represents a plugin invocation failure surfaced to callers.

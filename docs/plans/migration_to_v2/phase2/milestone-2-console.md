@@ -17,7 +17,7 @@ Consoles are first-class, attachable, and use mailbox transport. Users can inter
 | Component | Location | Status |
 |-----------|----------|--------|
 | Console store | `internal/storage/console/store.go` | ✅ Done |
-| Console CLI | `cmd/agentctl/cmd/console.go` | ✅ Done |
+| Console CLI | `cmd/foxctl/cmd/console.go` | ✅ Done |
 | Mailbox skill | `skills/mailbox/` | ✅ Done |
 
 ### Schema
@@ -53,16 +53,16 @@ CREATE TABLE console_sessions (
 
 ```bash
 # Attach to actor console
-agentctl console attach --actor my-coder
+foxctl console attach --actor my-coder
 
 # Attach to specific console
-agentctl console attach --actor my-coder --console 01JFXYZ...
+foxctl console attach --actor my-coder --console 01JFXYZ...
 
 # List consoles
-agentctl console list
+foxctl console list
 
 # Remove console
-agentctl console rm <console-id>
+foxctl console rm <console-id>
 ```
 
 ---
@@ -140,14 +140,14 @@ When inbound mailbox message has `console_id`:
 
 ```bash
 # View console interactions
-agentctl trajectory tail --actor <id>
+foxctl trajectory tail --actor <id>
 ```
 
 ---
 
 ## Acceptance Criteria
 
-- [x] `agentctl console attach --actor <id>` creates/attaches console session
+- [x] `foxctl console attach --actor <id>` creates/attaches console session
 - [x] Console ask/reply works through mailbox
 - [ ] Streaming events render in viewer
 - [ ] Cancel interrupts in-progress turn

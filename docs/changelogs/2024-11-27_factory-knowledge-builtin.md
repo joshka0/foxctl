@@ -6,9 +6,9 @@
 
 ## Summary
 
-Integrated FactoryAI DROID assets as builtin knowledge in agentctl. Factory
-droids are now embedded in the agentctl binary and automatically seeded into the
-knowledge registry on `agentctl knowledge sync`.
+Integrated FactoryAI DROID assets as builtin knowledge in foxctl. Factory
+droids are now embedded in the foxctl binary and automatically seeded into the
+knowledge registry on `foxctl knowledge sync`.
 
 ## New Files
 
@@ -29,11 +29,11 @@ knowledge registry on `agentctl knowledge sync`.
 
 ## Modified Files
 
-- `cmd/agentctl/cmd/knowledge.go` - Added builtin seeding to sync command
+- `cmd/foxctl/cmd/knowledge.go` - Added builtin seeding to sync command
 
 ## CLI Changes
 
-### `agentctl knowledge sync`
+### `foxctl knowledge sync`
 
 New flags:
 
@@ -59,7 +59,7 @@ Each droid has keyword triggers extracted from its description, plus standard
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   agentctl binary                    │
+│                   foxctl binary                    │
 │  ┌─────────────────────────────────────────────┐    │
 │  │  internal/context/knowledge/builtin/                │    │
 │  │  ├── data/droids/*.md  (go:embed)          │    │
@@ -69,7 +69,7 @@ Each droid has keyword triggers extracted from its description, plus standard
                           │
                           ▼
 ┌─────────────────────────────────────────────────────┐
-│           ~/.agentctl/storage/knowledge.db          │
+│           ~/.foxctl/storage/knowledge.db          │
 │  ┌─────────────────────────────────────────────┐    │
 │  │  knowledge_items (kind=agent)               │    │
 │  │  knowledge_triggers (keywords)              │    │

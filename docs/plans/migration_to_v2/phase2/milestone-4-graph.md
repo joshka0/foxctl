@@ -23,13 +23,13 @@ Tasks, sessions, symbols, and memories become graph nodes. Edges are added via h
 
 ```bash
 # Add edge
-agentctl run graph/manage --input '{"op": "add_edge", "from": "task:123", "to": "symbol:foo", "edge_type": "modified"}'
+foxctl run graph/manage --input '{"op": "add_edge", "from": "task:123", "to": "symbol:foo", "edge_type": "modified"}'
 
 # Query neighbors
-agentctl run graph/manage --input '{"op": "query_neighbors", "node_id": "task:123"}'
+foxctl run graph/manage --input '{"op": "query_neighbors", "node_id": "task:123"}'
 
 # Get stats
-agentctl run graph/manage --input '{"op": "stats"}'
+foxctl run graph/manage --input '{"op": "stats"}'
 ```
 
 ---
@@ -83,7 +83,7 @@ agentctl run graph/manage --input '{"op": "stats"}'
 
 ```bash
 # View top tasks by PageRank
-agentctl run graph/manage --input '{"op": "top", "node_type": "task", "limit": 20}'
+foxctl run graph/manage --input '{"op": "top", "node_type": "task", "limit": 20}'
 ```
 
 ---
@@ -144,6 +144,6 @@ This belongs in `hooks_context_router` (Milestone 3.3).
 
 - [x] Add edges and query neighbors deterministically
 - [x] Graph populated automatically from normal work
-- [x] `agentctl graph top --type task --limit 20` is stable and reproducible
+- [x] `foxctl graph top --type task --limit 20` is stable and reproducible
 - [x] Overseer uses graph importance for scheduling
 - [ ] Agents working on related tasks "notice" each other automatically

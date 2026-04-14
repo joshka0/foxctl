@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/annotations"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/annotations"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -219,7 +219,7 @@ func TestOutput_NoMatches(t *testing.T) {
 func TestSessionMatch_Fields(t *testing.T) {
 	match := SessionMatch{
 		SessionID:    "sess-123",
-		ProjectName:  "agentctl",
+		ProjectName:  "foxctl",
 		GitBranch:    "main",
 		Summary:      "Test session",
 		Accomplished: []string{"Task 1", "Task 2"},
@@ -233,7 +233,7 @@ func TestSessionMatch_Fields(t *testing.T) {
 	}
 
 	assert.Equal(t, "sess-123", match.SessionID)
-	assert.Equal(t, "agentctl", match.ProjectName)
+	assert.Equal(t, "foxctl", match.ProjectName)
 	assert.Equal(t, "main", match.GitBranch)
 	assert.Equal(t, 0.87, match.Similarity)
 	assert.Len(t, match.Accomplished, 2)

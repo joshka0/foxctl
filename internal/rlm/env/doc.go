@@ -1,2 +1,2 @@
-// Package env bootstraps a read-only RLM environment from existing agentctl state.
+// Package env bootstraps a read-only RLM environment from existing foxctl state.
 package env

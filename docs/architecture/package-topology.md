@@ -580,7 +580,7 @@ The durable split should be:
 | `internal/tooling/skillrun` | generic skill resolution, execution, and envelope decoding | keep as generic tooling |
 | `internal/tooling/tools/*` | standalone generic tools such as obsidian and ripgrep integrations | keep as generic tooling |
 | `internal/adapters/skillslib/*` | reusable helpers for building and testing skills | keep as generic tooling support |
-| `internal/agent/tools` | runtime-facing tool implementations that wrap agentctl skills for agent sessions | keep separate as agent-runtime tooling |
+| `internal/agent/tools` | runtime-facing tool implementations that wrap foxctl skills for agent sessions | keep separate as agent-runtime tooling |
 
 That yields one explicit placement rule:
 

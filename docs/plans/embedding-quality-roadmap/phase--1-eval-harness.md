@@ -15,11 +15,11 @@ This phase adds a lightweight evaluation tool so each PR can prove search qualit
 
 ### Summary
 
-Add an `agentctl eval retrieval` command that runs a curated query set and reports simple, comparable metrics across index types.
+Add an `foxctl eval retrieval` command that runs a curated query set and reports simple, comparable metrics across index types.
 
 ### Deliverables
 
-- CLI: `agentctl eval retrieval`
+- CLI: `foxctl eval retrieval`
 - Query set file: `docs/plans/embedding-quality-roadmap/eval-queries.yaml`
 - Output formats: JSON (machine), Markdown (human)
 
@@ -64,7 +64,7 @@ Expected target formats:
 
 ### Acceptance Criteria
 
-- [ ] `agentctl eval retrieval` runs end-to-end on a workspace
+- [ ] `foxctl eval retrieval` runs end-to-end on a workspace
 - [ ] Reports hit_rate@k and first_correct_rank per query
 - [ ] Supports multiple sources (symbols, file summaries, semantic index)
 - [ ] Query set lives in versioned YAML under roadmap docs

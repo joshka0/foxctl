@@ -21,12 +21,12 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/platform/lsp/gopls"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/pathutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/hookutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/platform/lsp/gopls"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/pathutil"
 )
 
 const (
@@ -294,7 +294,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 
 // getSymbols retrieves code symbols from a file using the code/symbols skill.
 func getSymbols(ctx context.Context, filePath string, maxResults int, workspace string) ([]Symbol, error) {
-	// Use agentctl run code/symbols
+	// Use foxctl run code/symbols
 	input := map[string]any{
 		"path":            filePath,
 		"include_private": false,
@@ -440,12 +440,12 @@ func getLSPReferences(ctx context.Context, skill, filePath string, line, col int
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// For Go files, use the gopls daemon directly (bypasses agentctl run overhead)
+	// For Go files, use the gopls daemon directly (bypasses foxctl run overhead)
 	if skill == "lsp/gopls" {
 		return getGoplsReferences(ctx, filePath, line, col, workspace)
 	}
 
-	// For other languages, fall back to agentctl run
+	// For other languages, fall back to foxctl run
 	return getLSPReferencesViaAgentctl(ctx, skill, filePath, line, col, timeout, workspace)
 }
 
@@ -468,7 +468,7 @@ func getGoplsReferences(ctx context.Context, filePath string, line, col int, wor
 	return refs
 }
 
-// getLSPReferencesViaAgentctl falls back to spawning agentctl run for non-Go languages.
+// getLSPReferencesViaAgentctl falls back to spawning foxctl run for non-Go languages.
 func getLSPReferencesViaAgentctl(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
 	// Pass timeout to skill (in seconds)
 	timeoutSec := int(timeout.Seconds())
@@ -515,12 +515,12 @@ func getLSPImplementations(ctx context.Context, skill, filePath string, line, co
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// For Go files, use the gopls daemon directly (bypasses agentctl run overhead)
+	// For Go files, use the gopls daemon directly (bypasses foxctl run overhead)
 	if skill == "lsp/gopls" {
 		return getGoplsImplementations(ctx, filePath, line, col, workspace)
 	}
 
-	// For other languages, fall back to agentctl run
+	// For other languages, fall back to foxctl run
 	return getLSPImplementationsViaAgentctl(ctx, skill, filePath, line, col, timeout, workspace)
 }
 
@@ -543,7 +543,7 @@ func getGoplsImplementations(ctx context.Context, filePath string, line, col int
 	return impls
 }
 
-// getLSPImplementationsViaAgentctl falls back to spawning agentctl run for non-Go languages.
+// getLSPImplementationsViaAgentctl falls back to spawning foxctl run for non-Go languages.
 func getLSPImplementationsViaAgentctl(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
 	// Pass timeout to skill (in seconds)
 	timeoutSec := int(timeout.Seconds())
@@ -585,7 +585,7 @@ func getLSPImplementationsViaAgentctl(ctx context.Context, skill, filePath strin
 	return impls
 }
 
-// workspaceArgs builds workspace arguments for agentctl commands.
+// workspaceArgs builds workspace arguments for foxctl commands.
 func workspaceArgs(workspace string) []string {
 	if workspace == "" {
 		return nil
@@ -594,7 +594,7 @@ func workspaceArgs(workspace string) []string {
 }
 
 // Debounce support using temp file timestamps.
-var debounceDir = filepath.Join(os.TempDir(), "agentctl-impact-debounce")
+var debounceDir = filepath.Join(os.TempDir(), "foxctl-impact-debounce")
 
 // shouldDebounce checks if impact analysis should be skipped due to recent analysis.
 func shouldDebounce(filePath string) bool {

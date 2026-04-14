@@ -22,7 +22,7 @@ Editor instance. It provides:
 
 ```
 ┌─────────────────┐     JSON/HTTP      ┌──────────────────────┐
-│  agentctl CLI   │◄──────────────────►│  Godot Editor        │
+│  foxctl CLI   │◄──────────────────►│  Godot Editor        │
 │  editor/godot   │   localhost:7777   │  GodotAIBridge       │
 │  (exec skill)   │                    │  (EditorPlugin)      │
 └─────────────────┘                    └──────────────────────┘
@@ -71,7 +71,7 @@ JSON response.
 
 ```json
 {
-  "workspace_root": "/path/to/agentctl/workspace",
+  "workspace_root": "/path/to/foxctl/workspace",
   "action": "scene_tree",
   "params": { ... }
 }

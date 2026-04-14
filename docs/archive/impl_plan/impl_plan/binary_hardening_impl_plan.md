@@ -1,10 +1,10 @@
-### Binary Hardening for agentctl – Implementation Plan
+### Binary Hardening for foxctl – Implementation Plan
 
 This plan assumes the spec in `docs/spec/2025-12-03_binary_hardening.md` is the
 source of truth. No code changes should land that contradict the spec.
 
 Focus: build‑time hardening (flags, garble, UPX) and runtime hooks (anti‑debug,
-panic handling) for the `agentctl` CLI, while keeping Core Profile v1 contracts
+panic handling) for the `foxctl` CLI, while keeping Core Profile v1 contracts
 intact.
 
 ---
@@ -50,7 +50,7 @@ _You are here._
 
 - **Validation**
   - `make build-hardened` (for at least one platform) produces a binary that:
-    - Runs `agentctl --version` successfully.
+    - Runs `foxctl --version` successfully.
     - Runs at least one representative command that emits a JSON envelope.
   - Compare file size and `go tool nm` output between dev vs hardened builds to
     confirm that symbols and DWARF are removed.
@@ -207,7 +207,7 @@ suppresses stack traces while preserving Core Profile v1 behavior.
     - Return "not debugged" (or `nil` error) for now.
 
 - **Integration**
-  - Call `DetectDebugger` early in `cmd/agentctl/main.go` before CLI dispatch.
+  - Call `DetectDebugger` early in `cmd/foxctl/main.go` before CLI dispatch.
   - On detection:
     - Emit a clearly‑typed error (log and/or envelope) with error code `EPOLICY`
       (debugger attachment is a policy violation per Core Profile v1 §13).
@@ -224,7 +224,7 @@ suppresses stack traces while preserving Core Profile v1 behavior.
 ### PR E2 – Panic Wrapper at CLI Entry
 
 - **Scope**
-  - Wrap the main CLI execution path in `cmd/agentctl/main.go` with a
+  - Wrap the main CLI execution path in `cmd/foxctl/main.go` with a
     `defer`/`recover` block that:
     - Catches unexpected panics.
     - Suppresses default Go stack trace printing.

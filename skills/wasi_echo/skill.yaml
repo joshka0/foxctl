@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: wasi/echo
@@ -21,8 +21,8 @@ signature:
     long: |
       Use wasi/echo as a minimal WASI skill for testing.
       Example commands:
-        agentctl run wasi/echo --input '{}'
-        agentctl skills run wasi/echo
+        foxctl run wasi/echo --input '{}'
+        foxctl skills run wasi/echo
     workflows:
       - id: echo
         description: "Run the WASI echo skill."

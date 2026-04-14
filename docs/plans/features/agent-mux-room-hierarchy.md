@@ -40,7 +40,7 @@ If only parent agents can publish to the room:
 - the parent becomes the summarizer/filter
 - task broadcasts remain understandable
 
-This matches the overseer model already used elsewhere in `agentctl`: authority
+This matches the overseer model already used elsewhere in `foxctl`: authority
 and coordination should stay explicit.
 
 ## Mental model
@@ -365,13 +365,13 @@ layer, not just at the UX layer.
 Implemented in the launcher and room/tmux surfaces:
 
 1. room sender identity resolves from tmux/zellij pane bindings and canonical pane ids
-2. `agentctl tmux create` can inject child-pane hierarchy env into launched panes
+2. `foxctl tmux create` can inject child-pane hierarchy env into launched panes
 3. child-pane default policy is parent-private when `--parent-participant` is set
-4. `agentctl tmux send-parent` gives child panes a direct parent path without joining rooms
-5. `agentctl agent spawn` / daemon spawn / persisted agent metadata now carry a typed `terminal_binding` object
+4. `foxctl tmux send-parent` gives child panes a direct parent path without joining rooms
+5. `foxctl agent spawn` / daemon spawn / persisted agent metadata now carry a typed `terminal_binding` object
 6. overseer child sessions inherit backend/session/parent-private defaults from the parent session binding
-7. `agentctl agent spawn --spawn-in-pane --mux-backend tmux` can allocate an exact tmux pane, derive a canonical participant id from that pane, and repurpose it into `agentctl agent watch <agent-id>`
-8. `agentctl agent spawn --spawn-in-pane --mux-backend zellij` can create a named zellij pane for the agent watch stream, using the pane title as the durable participant id
+7. `foxctl agent spawn --spawn-in-pane --mux-backend tmux` can allocate an exact tmux pane, derive a canonical participant id from that pane, and repurpose it into `foxctl agent watch <agent-id>`
+8. `foxctl agent spawn --spawn-in-pane --mux-backend zellij` can create a named zellij pane for the agent watch stream, using the pane title as the durable participant id
 
 Still pending:
 
@@ -385,4 +385,4 @@ Still pending:
 - [tmux-collaboration.md](../../general/tmux-collaboration.md)
 - [agent_hierarchy.md](../../spec/agent_hierarchy.md)
 - [overseer_profile.md](../../spec/overseer_profile.md)
-- [agentctl-room](../../../configs/skills-pack/agentctl-room/SKILL.md)
+- [foxctl-room](../../../configs/skills-pack/foxctl-room/SKILL.md)

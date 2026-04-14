@@ -97,10 +97,10 @@ temporal drill-down refs) rather than only using chronological context.
 
 ```bash
 # Quick spawn with chat defaults
-agentctl agent spawn --name "Luna" --chat --prompt-file prompt.txt
+foxctl agent spawn --name "Luna" --chat --prompt-file prompt.txt
 
 # Explicit configuration
-agentctl agent spawn \
+foxctl agent spawn \
   --name "Luna" \
   --role companion \
   --exec-mode reactive \
@@ -111,23 +111,23 @@ agentctl agent spawn \
 
 ```bash
 # Auto-detects companion role, enables roleplay memory
-agentctl agent run <agent-id>
+foxctl agent run <agent-id>
 
 # Explicit mode selection
-agentctl agent run <agent-id> --companion-mode roleplay
+foxctl agent run <agent-id> --companion-mode roleplay
 ```
 
 ### Conversation Continuity
 
 ```bash
 # Use consistent conversation ID for memory continuity
-agentctl agent ask <agent-id> \
+foxctl agent ask <agent-id> \
   --question "Hi, my name is Sarah" \
   --conversation-id "sarah-session-1" \
   --wait
 
 # Same conversation ID recalls previous context
-agentctl agent ask <agent-id> \
+foxctl agent ask <agent-id> \
   --question "What's my name?" \
   --conversation-id "sarah-session-1" \
   --wait
@@ -233,7 +233,7 @@ The hybrid memory context is formatted as trust-labeled sections:
 | `companion_assumptions_ledger` | Explicit assumptions and retractions |
 | `companion_memory_mode_state` | Hybrid processing cursor/state |
 
-Location: `~/.agentctl/storage/companion.db`
+Location: `~/.foxctl/storage/companion.db`
 
 ## Compression Schedule
 
@@ -258,6 +258,6 @@ The `CompressionDaemon` runs automatically when companion memory is enabled:
 
 ## Related
 
-- [Memory System](./memory.md) - General agentctl memory
+- [Memory System](./memory.md) - General foxctl memory
 - [Sessions](./sessions.md) - Session tracking and learnings
 - [Architecture](./architecture.md) - Overall system design

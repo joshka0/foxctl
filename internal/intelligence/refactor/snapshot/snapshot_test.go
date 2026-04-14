@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	refstatus "github.com/joshka0/foxctl/internal/intelligence/refactor/status"
 )
 
 func TestBuildSnapshotCollectsSortedFilesAndSymbols(t *testing.T) {

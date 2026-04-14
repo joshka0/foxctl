@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // HandleInteraction processes Adaptive Card Action.Submit callbacks from Teams.

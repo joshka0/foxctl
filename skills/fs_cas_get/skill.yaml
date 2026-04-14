@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: fs/cas_get
@@ -28,10 +28,10 @@ signature:
     long: |
       Use fs/cas_get to fetch content from CAS by digest.
       Example commands:
-        agentctl run fs/cas_get --input '{"digest":"sha256:..."}'
-        agentctl skills run fs/cas_get --digest sha256:...
-        agentctl run fs/cas_get --input '{"digest":"sha256:...","output":"./artifact.bin"}'
-        agentctl skills run fs/cas_get --digest sha256:... --output ./artifact.bin
+        foxctl run fs/cas_get --input '{"digest":"sha256:..."}'
+        foxctl skills run fs/cas_get --digest sha256:...
+        foxctl run fs/cas_get --input '{"digest":"sha256:...","output":"./artifact.bin"}'
+        foxctl skills run fs/cas_get --digest sha256:... --output ./artifact.bin
     workflows:
       - id: cas-to-temp
         description: "Fetch content to a temp file."

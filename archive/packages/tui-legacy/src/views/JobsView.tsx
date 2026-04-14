@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useJobs, useJobDetail } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { JobSummary } from "@agentctl/data";
+import type { JobSummary } from "@foxctl/data";
 
 function stateColor(state: string): string {
   switch (state) {

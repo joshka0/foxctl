@@ -2,7 +2,7 @@
   "groupId": "webterm-handler",
   "testedAt": "2026-04-09T16:15:00Z",
   "isolation": {
-    "workingDirectory": "/Users/joshka/repos/personal/agentctl",
+    "workingDirectory": "/Users/joshka/repos/personal/foxctl",
     "testCommand": "go test ./internal/gateway/webterm/ -v -count=1 -run \"TestHandler_TerminalPage_ContainsHTML|TestHandler_TerminalPage_RoomNotFound|TestHandler_ErrorJSON|TestHandler_RegisterRoutes|TestHandler_StaticAssets\"",
     "isolationModel": "Each test creates its own hub/handler instances via test helpers. No shared state. No external services needed."
   },

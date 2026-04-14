@@ -3,7 +3,7 @@
 Run this checklist before exposing any web-facing service. Every unchecked box
 is a risk you are choosing to ship with.
 
-Complements [docs/SECURITY.md](../SECURITY.md) (agentctl's internal security
+Complements [docs/SECURITY.md](../SECURITY.md) (foxctl's internal security
 model) and the hard-fails table in [AGENTS.md](../../AGENTS.md).
 
 ---

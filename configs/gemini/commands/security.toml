@@ -4,7 +4,7 @@ description = "Scan code for security vulnerabilities"
 prompt = """Run security analysis:
 
 ```bash
-!{agentctl run code/security --input '{"path": "{{args}}"}'}
+!{foxctl run code/security --input '{"path": "{{args}}"}'}
 ```
 
 Report findings:

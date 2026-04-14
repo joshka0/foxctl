@@ -1,19 +1,19 @@
-# sqld - libSQL server for agentctl cross-machine sync
+# sqld - libSQL server for foxctl cross-machine sync
 #
 # Usage:
 #   docker compose up -d
 #
 # Then migrate:
-#   agentctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080", "dry_run": true}'
-#   agentctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080"}'
+#   foxctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080", "dry_run": true}'
+#   foxctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080"}'
 #
 # For Tailscale access, use Tailscale IP:
-#   agentctl run libsql/migrate --input '{"libsql_url": "http://100.x.x.x:8080"}'
+#   foxctl run libsql/migrate --input '{"libsql_url": "http://100.x.x.x:8080"}'
 
 services:
   sqld:
     image: ghcr.io/tursodatabase/libsql-server:latest
-    container_name: agentctl-sqld
+    container_name: foxctl-sqld
     ports:
       - "8080:8080"   # HTTP API
       - "5001:5001"   # gRPC (for replication)

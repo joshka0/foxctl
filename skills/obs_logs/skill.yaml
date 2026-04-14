@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: obs/logs
@@ -61,11 +61,11 @@ signature:
       - Error-only mode for quick debugging
 
       Example commands:
-        agentctl run obs/logs
-        agentctl run obs/logs --input '{"limit": 50}'
-        agentctl run obs/logs --input '{"errors_only": true}'
-        agentctl run obs/logs --input '{"command": "code/semantic_search", "stats": true}'
-        agentctl run obs/logs --input '{"since": "1h"}'
+        foxctl run obs/logs
+        foxctl run obs/logs --input '{"limit": 50}'
+        foxctl run obs/logs --input '{"errors_only": true}'
+        foxctl run obs/logs --input '{"command": "code/semantic_search", "stats": true}'
+        foxctl run obs/logs --input '{"since": "1h"}'
     workflows:
       - id: recent
         description: "View recent events"
@@ -100,7 +100,7 @@ capabilities:
   network: "none"
   filesystem:
     - type: home
-      path: ".agentctl/observability"
+      path: ".foxctl/observability"
   pure: true
 openapi:
   enabled: true

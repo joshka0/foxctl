@@ -16,7 +16,7 @@ Instead of stashing changes and switching branches, use git worktrees!
 ### 1. Check current worktrees
 
 ```bash
-echo '{"operation":"list"}' | agentctl run git/worktree
+echo '{"operation":"list"}' | foxctl run git/worktree
 ```
 
 Output shows your main worktree:
@@ -41,7 +41,7 @@ echo '{
   "path": "/tmp/myproject-hotfix",
   "branch": "hotfix-123",
   "new_branch": true
-}' | agentctl run git/worktree
+}' | foxctl run git/worktree
 ```
 
 Now you have two working directories:
@@ -65,7 +65,7 @@ echo '{
   "operation": "add",
   "path": "/tmp/myproject-pr-review",
   "branch": "colleague-feature"
-}' | agentctl run git/worktree
+}' | foxctl run git/worktree
 ```
 
 ### 5. Review the changes
@@ -82,16 +82,16 @@ cd /tmp/myproject-pr-review
 echo '{
   "operation": "remove",
   "path": "/tmp/myproject-hotfix"
-}' | agentctl run git/worktree
+}' | foxctl run git/worktree
 
 # Remove the PR review worktree
 echo '{
   "operation": "remove",
   "path": "/tmp/myproject-pr-review"
-}' | agentctl run git/worktree
+}' | foxctl run git/worktree
 
 # Prune any stale references
-echo '{"operation":"prune"}' | agentctl run git/worktree
+echo '{"operation":"prune"}' | foxctl run git/worktree
 ```
 
 ### 7. Continue your feature work
@@ -110,7 +110,7 @@ cd /home/user/myproject
 
 ## Advanced: Using with Jobs
 
-For long-running operations, use agentctl jobs (note: CLI flag syntax for jobs is planned but not yet implemented):
+For long-running operations, use foxctl jobs (note: CLI flag syntax for jobs is planned but not yet implemented):
 
 ```bash
 # Current workaround: use synchronous run command
@@ -119,11 +119,11 @@ echo '{
   "path": "/tmp/big-refactor",
   "branch": "refactor-v2",
   "new_branch": true
-}' | agentctl run git/worktree
+}' | foxctl run git/worktree
 
 # Async jobs support is planned for future releases
 # Future syntax (not yet implemented):
-# JOB_ID=$(agentctl jobs submit git/worktree \
+# JOB_ID=$(foxctl jobs submit git/worktree \
 #   --operation add \
 #   --path /tmp/big-refactor \
 #   --branch refactor-v2 \
@@ -132,22 +132,22 @@ echo '{
 
 ## Integration with Other Skills
 
-Combine with other agentctl skills:
+Combine with other foxctl skills:
 
 ```bash
 # 1. List worktrees
-agentctl run git/worktree --operation list --remember worktrees
+foxctl run git/worktree --operation list --remember worktrees
 
 # 2. For each worktree, check for TODOs
-agentctl memory get worktrees | jq -r '.worktrees[].path' | while read path; do
+foxctl memory get worktrees | jq -r '.worktrees[].path' | while read path; do
   echo "Checking $path for TODOs..."
-  agentctl run text/grep --pattern "TODO" --path "$path"
+  foxctl run text/grep --pattern "TODO" --path "$path"
 done
 
 # 3. List files in each worktree
-agentctl memory get worktrees | jq -r '.worktrees[].path' | while read path; do
+foxctl memory get worktrees | jq -r '.worktrees[].path' | while read path; do
   echo "Files in $path:"
-  agentctl run fs/ls --path "$path"
+  foxctl run fs/ls --path "$path"
 done
 ```
 
@@ -164,7 +164,7 @@ done
 ```bash
 # Create worktrees for different test configurations
 for config in unit integration e2e; do
-  agentctl run git/worktree \
+  foxctl run git/worktree \
     --operation add \
     --path "/tmp/test-$config" \
     --branch "test-$config"
@@ -181,7 +181,7 @@ git fetch origin
 
 # Create worktree for each PR to review
 for pr in 123 124 125; do
-  agentctl run git/worktree \
+  foxctl run git/worktree \
     --operation add \
     --path "/tmp/pr-$pr" \
     --branch "origin/pr-$pr"
@@ -191,12 +191,12 @@ done
 ### Multi-version Support
 ```bash
 # Maintain multiple release branches
-agentctl run git/worktree \
+foxctl run git/worktree \
   --operation add \
   --path "/opt/app-v1" \
   --branch "release-v1"
 
-agentctl run git/worktree \
+foxctl run git/worktree \
   --operation add \
   --path "/opt/app-v2" \
   --branch "release-v2"

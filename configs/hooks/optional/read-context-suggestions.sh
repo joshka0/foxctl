@@ -6,7 +6,7 @@
 # - Editing symbols via code/smart_write
 #
 # Environment:
-#   AGENTCTL_BIN - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_READ_SUGGESTIONS_DISABLED - Set to 1 to disable
 #   AGENTCTL_READ_SUGGESTIONS_MAX_SYMBOLS - Max symbols to suggest (default: 5)
 
@@ -17,7 +17,7 @@ if [[ "${AGENTCTL_READ_SUGGESTIONS_DISABLED:-}" == "1" ]]; then
   exit 0
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 MAX_SYMBOLS="${AGENTCTL_READ_SUGGESTIONS_MAX_SYMBOLS:-5}"
 
 INPUT=$(cat)
@@ -29,7 +29,7 @@ if [[ -z "$file_path" || "$file_path" == "null" || ! -f "$file_path" ]]; then
   exit 0
 fi
 
-# Resolve to absolute path for agentctl
+# Resolve to absolute path for foxctl
 abs_path=$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")
 
 # Only analyze code files
@@ -130,7 +130,7 @@ esac
 # Suggest context_ripgrep for key functions (returns full function bodies)
 for func in $key_functions; do
   if [[ $suggestion_count -ge $MAX_SYMBOLS ]]; then break; fi
-  suggestions+="- Find usages of \`$func\` (full context): \`agentctl run code/context_ripgrep --input '{\"pattern\": \"$func\", \"glob\": [\"$glob\"]}'\`
+  suggestions+="- Find usages of \`$func\` (full context): \`foxctl run code/context_ripgrep --input '{\"pattern\": \"$func\", \"glob\": [\"$glob\"]}'\`
 "
   suggestion_count=$((suggestion_count + 1))
 done
@@ -138,7 +138,7 @@ done
 # Suggest context_ripgrep for key types
 for type in $key_types; do
   if [[ $suggestion_count -ge $((MAX_SYMBOLS * 2)) ]]; then break; fi
-  suggestions+="- Find usages of \`$type\` (full context): \`agentctl run code/context_ripgrep --input '{\"pattern\": \"$type\", \"glob\": [\"$glob\"]}'\`
+  suggestions+="- Find usages of \`$type\` (full context): \`foxctl run code/context_ripgrep --input '{\"pattern\": \"$type\", \"glob\": [\"$glob\"]}'\`
 "
   suggestion_count=$((suggestion_count + 1))
 done

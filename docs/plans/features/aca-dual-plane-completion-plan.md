@@ -2,7 +2,7 @@
 
 Status: active plan
 
-Owner: agentctl
+Owner: foxctl
 
 Last updated: 2026-03-09
 
@@ -25,18 +25,18 @@ The current implementation already covers orientation, capture, inference, clust
 
 Implemented now:
 
-- `agentctl orient`
-- `agentctl capture`
-- `agentctl observe`
-- `agentctl tension`
-- `agentctl context show|report|retrieve|contradictions|next|dispatch|rethink|handoffs|observations|tensions|infer|promote|merge-promotion|hooks install`
+- `foxctl orient`
+- `foxctl capture`
+- `foxctl observe`
+- `foxctl tension`
+- `foxctl context show|report|retrieve|contradictions|next|dispatch|rethink|handoffs|observations|tensions|infer|promote|merge-promotion|hooks install`
 - clustered observations and tensions
 - maintenance queue generation
 - promotion drafts from handoffs and repeated observations
 - reviewed merge path from promotion drafts into canonical notes
 - Claude lifecycle hook wiring for `SessionStart`, `Stop`, and `SubagentStop`
 - first-class ACA MCP tools for read/report/retrieve/contradictions/rethink/promote/merge
-- workspace-local mutable ACA store in `.agentctl/runtime/contextplane.db`
+- workspace-local mutable ACA store in `.foxctl/runtime/contextplane.db`
 - Obsidian adapter (`search`, `read`, `related`, controlled writes)
 - vault indexing and graph-backed related lookup
 - daemonized ACA maintenance refresh
@@ -56,7 +56,7 @@ Not implemented yet:
 Keep local, deterministic, and write-optimized:
 
 ```text
-.agentctl/
+.foxctl/
   runtime/
     state.db
     top_of_mind.json
@@ -88,7 +88,7 @@ vault/
     sources/
     moc/
   inbox/
-    drafted-from-agentctl/
+    drafted-from-foxctl/
   ops/
 ```
 
@@ -131,7 +131,7 @@ Primary files:
 - `internal/tooling/tools/obsidian/write.go`
 - `internal/tooling/tools/obsidian/links.go`
 - `internal/tooling/tools/obsidian/policy.go`
-- `cmd/agentctl/cmd/obsidian.go`
+- `cmd/foxctl/cmd/obsidian.go`
 
 Verification:
 
@@ -166,7 +166,7 @@ Suggested schema:
 Primary files:
 
 - `internal/storage/obsidianindex/`
-- `cmd/agentctl/cmd/obsidian_index.go`
+- `cmd/foxctl/cmd/obsidian_index.go`
 
 Verification:
 
@@ -221,8 +221,8 @@ Implement the spec’s missing `select -> dispatch` path and fresh worker packet
 Deliverables:
 
 - explicit ACA task model
-- `agentctl next`
-- `agentctl dispatch <task-id>`
+- `foxctl next`
+- `foxctl dispatch <task-id>`
 - packet builder with bounded context
 - packet sources:
   - top-of-mind
@@ -240,8 +240,8 @@ Primary files:
 
 - `internal/context/contextplane/tasks.go`
 - `internal/context/contextplane/dispatch.go`
-- `cmd/agentctl/cmd/context_next.go`
-- `cmd/agentctl/cmd/context_dispatch.go`
+- `cmd/foxctl/cmd/context_next.go`
+- `cmd/foxctl/cmd/context_dispatch.go`
 
 Verification:
 
@@ -270,7 +270,7 @@ Primary files:
 
 - `internal/context/contextplane/promotion.go`
 - `internal/tooling/tools/obsidian/policy.go`
-- `cmd/agentctl/cmd/context_promote_review.go`
+- `cmd/foxctl/cmd/context_promote_review.go`
 
 Verification:
 
@@ -346,7 +346,7 @@ Unify ACA maintenance and knowledge access behind one long-lived service.
 
 Deliverables:
 
-- `agentctl-contextd` or equivalent embedded daemon mode
+- `foxctl-contextd` or equivalent embedded daemon mode
 - single state service for:
   - orientation
   - compaction
@@ -359,8 +359,8 @@ Deliverables:
 Primary files:
 
 - `internal/context/contextplane/daemon.go`
-- `cmd/agentctl/cmd/contextd.go`
-- `cmd/agentctl/cmd/mcp.go`
+- `cmd/foxctl/cmd/contextd.go`
+- `cmd/foxctl/cmd/mcp.go`
 
 Verification:
 
@@ -466,7 +466,7 @@ Reason:
 
 ## Out Of Scope For This Plan
 
-- redesigning the broader agentctl task system outside ACA needs
+- redesigning the broader foxctl task system outside ACA needs
 - replacing existing memory/session/task stores wholesale
 - forcing a specific Obsidian plugin dependency
 - automatic editing of canonical vault content without review gates

@@ -5,7 +5,7 @@ runtime.
 
 ## Scope and entry point
 
-`agentctl web serve --chat <discord|telegram|teams>` enables one inbound chat
+`foxctl web serve --chat <discord|telegram|teams>` enables one inbound chat
 adapter in the web process.
 
 The startup path lives in `internal/interfaces/web/server.go`:
@@ -134,7 +134,7 @@ engines behind the boundary.
 ## Operational characteristics
 
 - Adapter startup is platform-specific; only one adapter is selected per
-  `agentctl web serve` process.
+  `foxctl web serve` process.
 - SSE hooks are available to adapters that render live agent state updates.
 - Teams JWT verification can be skipped only in dev mode and requires
   `--dev-cors`.

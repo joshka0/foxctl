@@ -10,7 +10,7 @@
 ## Overview
 
 This document is the implementation blueprint for integrating task graph
-analysis and a local mailbox/blackboard system into `agentctl`. It consolidates
+analysis and a local mailbox/blackboard system into `foxctl`. It consolidates
 the designs from `task_graph_insights.md`, `mailbox_blackboard.md`, and
 `bd_mail_agent_interface.md` into an actionable, phased plan with concrete file
 paths, interfaces, schemas, and test requirements.
@@ -53,7 +53,7 @@ package tasksgraph
 
 import (
     "time"
-    "github.com/jkatigb/agentctl/internal/storage/tasks"
+    "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 // NodeMetrics holds computed metrics for a single task node.
@@ -210,9 +210,9 @@ case "graph_insights":
 
 ---
 
-### 1.3 CLI: `agentctl todo insights`
+### 1.3 CLI: `foxctl todo insights`
 
-**Location:** `cmd/agentctl/cmd/todo.go`
+**Location:** `cmd/foxctl/cmd/todo.go`
 
 ```go
 func newTodoInsightsCommand() *cobra.Command {
@@ -352,7 +352,7 @@ import (
     "context"
     "time"
 
-    "github.com/jkatigb/agentctl/internal/domain/mailbox"
+    "github.com/joshka0/foxctl/internal/domain/mailbox"
 )
 
 // BlackboardStore handles messages and file reservations.
@@ -736,7 +736,7 @@ type messageStats struct {
 }
 ```
 
-### 4.3 CLI: `agentctl todo recommend`
+### 4.3 CLI: `foxctl todo recommend`
 
 ```go
 func newTodoRecommendCommand() *cobra.Command {
@@ -866,7 +866,7 @@ skills/
     ├── main_test.go
     └── skill.yaml
 
-cmd/agentctl/cmd/
+cmd/foxctl/cmd/
 └── todo.go                    # extend with insights, recommend
 ```
 
@@ -883,7 +883,7 @@ go.mod                         # add gonum/graph dependency
 
 1. **Phase 1.1** – `internal/intelligence/analysis/tasksgraph` package with tests.
 2. **Phase 1.2** – `todo/manage.graph_insights` operation.
-3. **Phase 1.3** – `agentctl todo insights` CLI command.
+3. **Phase 1.3** – `foxctl todo insights` CLI command.
 4. **Phase 2.1-2.3** – Domain types + storage interface + schema.
 5. **Phase 2.4** – Reservation logic.
 6. **Phase 2.5** – `mailbox/manage` skill.
@@ -896,7 +896,7 @@ go.mod                         # add gonum/graph dependency
 
 ## Success Criteria
 
-- [ ] `agentctl todo insights` returns valid graph metrics for workspaces with
+- [ ] `foxctl todo insights` returns valid graph metrics for workspaces with
       tasks.
 - [ ] `mailbox/manage send` + `inbox` roundtrip works.
 - [ ] `reserve` correctly detects conflicts.

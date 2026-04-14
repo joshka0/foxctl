@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: plan/sync
@@ -34,7 +34,7 @@ signature:
     - name: import_tasks
       type: boolean
       required: false
-      description: "Create agentctl tasks from plan steps"
+      description: "Create foxctl tasks from plan steps"
     - name: dry_run
       type: boolean
       required: false
@@ -52,10 +52,10 @@ signature:
     long: |
       Use plan/sync to ingest Claude Code or OpenCode plans and optionally create tasks.
       Example commands:
-        agentctl run plan/sync --input '{"workspace":"./","dry_run":true}'
-        agentctl run plan/sync --workspace ./ --dry_run
-        agentctl run plan/sync --input '{"workspace":"./","import_tasks":true}'
-        agentctl run plan/sync --workspace ./ --import_tasks
+        foxctl run plan/sync --input '{"workspace":"./","dry_run":true}'
+        foxctl run plan/sync --workspace ./ --dry_run
+        foxctl run plan/sync --input '{"workspace":"./","import_tasks":true}'
+        foxctl run plan/sync --workspace ./ --import_tasks
     workflows:
       - id: sync-preview
         description: "Preview plan sync."

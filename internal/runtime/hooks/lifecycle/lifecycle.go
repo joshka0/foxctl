@@ -11,17 +11,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/context/contextplane/taskhistory"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit"
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/runtime/daemon"
-	"github.com/jkatigb/agentctl/internal/runtime/runservice"
-	"github.com/jkatigb/agentctl/internal/storage/cache"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/context/contextplane/taskhistory"
+	"github.com/joshka0/foxctl/internal/context/sessionkit"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/runtime/daemon"
+	"github.com/joshka0/foxctl/internal/runtime/runservice"
+	"github.com/joshka0/foxctl/internal/storage/cache"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 type StartRequest struct {
@@ -233,7 +233,7 @@ func resolveSkillHandle(cfg config.Config, requested string) (runservice.SkillHa
 
 func DetectIdentity(workspacePath string) (sessionID, provider, agentID string) {
 	if sid := strings.TrimSpace(os.Getenv("AGENTCTL_SESSION_ID")); sid != "" {
-		return sid, nonEmptyOr("agentctl", os.Getenv("AGENTCTL_PROVIDER")), defaultAgentID("agentctl")
+		return sid, nonEmptyOr("foxctl", os.Getenv("AGENTCTL_PROVIDER")), defaultAgentID("foxctl")
 	}
 	if sid := strings.TrimSpace(os.Getenv("CLAUDE_SESSION_ID")); sid != "" {
 		return sid, "claude", defaultAgentID("claude")
@@ -366,17 +366,17 @@ func persistIdentity(workspacePath, sessionID, provider, agentID string) {
 func identityPath(workspacePath string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".agentctl", "sessions", "active", sessionkit.ComputeWorkspaceHash(workspacePath)+"-claude.json")
+		return filepath.Join(".foxctl", "sessions", "active", sessionkit.ComputeWorkspaceHash(workspacePath)+"-claude.json")
 	}
-	return filepath.Join(home, ".agentctl", "sessions", "active", sessionkit.ComputeWorkspaceHash(workspacePath)+"-claude.json")
+	return filepath.Join(home, ".foxctl", "sessions", "active", sessionkit.ComputeWorkspaceHash(workspacePath)+"-claude.json")
 }
 
 func pendingRestoreMarkerPath(workspacePath string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".agentctl", "sessions", "pending-restore", sessionkit.ComputeWorkspaceHash(workspacePath)+".json")
+		return filepath.Join(".foxctl", "sessions", "pending-restore", sessionkit.ComputeWorkspaceHash(workspacePath)+".json")
 	}
-	return filepath.Join(home, ".agentctl", "sessions", "pending-restore", sessionkit.ComputeWorkspaceHash(workspacePath)+".json")
+	return filepath.Join(home, ".foxctl", "sessions", "pending-restore", sessionkit.ComputeWorkspaceHash(workspacePath)+".json")
 }
 
 func AppendSummaryNotes(workspacePath string, prefs, gotchas, timeSinks []string) bool {

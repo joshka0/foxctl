@@ -1,6 +1,6 @@
 Totally — here’s a **post-migration cleanup + compatibility plan** that keeps CC + OpenCode working, while aggressively removing dead paths. It’s designed around one rule:
 
-**All “logic” lives in agentctl hook skills + shared hook config.
+**All “logic” lives in foxctl hook skills + shared hook config.
 All platform-specific stuff becomes thin adapters.**
 
 ---
@@ -19,7 +19,7 @@ last_updated: 2026-01-08
 After migration, we should be able to say:
 
 1) **Core behavior is consistent** across:
-- agentctl actor runtime (Supervisor + Actors)
+- foxctl actor runtime (Supervisor + Actors)
 - Claude Code hooks (shell adapters)
 - OpenCode plugin (TS adapter)
 
@@ -34,7 +34,7 @@ After migration, we should be able to say:
 - no “almost used” subsystems left half wired
 
 4) **Skills remain stable**
-- `agentctl run <skill>` keeps working for CC + OC
+- `foxctl run <skill>` keeps working for CC + OC
 - stable envelope outputs
 - stable skill names (or explicit aliases)
 
@@ -42,7 +42,7 @@ After migration, we should be able to say:
 
 ## 1) Compatibility architecture (target steady state)
 
-### 1.1 Core (agentctl)
+### 1.1 Core (foxctl)
 - `internal/runtime/actor/*` (Supervisor, Watcher, EventBus, Actors)
 - `internal/runtime/hooks/dispatcher/*` (hooks v1)
 - `skills/hooks_dispatch` (thin skill wrapper around dispatcher; optional but recommended)
@@ -51,23 +51,23 @@ After migration, we should be able to say:
 ### 1.2 Platform adapters (thin shims)
 
 #### Claude Code adapter
-- **Goal:** Claude Code hook events → canonical agentctl events → dispatcher
+- **Goal:** Claude Code hook events → canonical foxctl events → dispatcher
 - Keep `.claude/settings.json` referencing adapter scripts.
 - Adapter scripts do:
   - normalize CC payload into `hook.Input`
-  - call `agentctl run hooks/dispatch` (or `hooks/dispatch` skill name)
+  - call `foxctl run hooks/dispatch` (or `hooks/dispatch` skill name)
   - map `hook.Output` back into CC hook output JSON
 
 #### OpenCode adapter
-- **Goal:** OpenCode hook events → canonical agentctl events → dispatcher
+- **Goal:** OpenCode hook events → canonical foxctl events → dispatcher
 - Keep `configs/opencode-hooks/` plugin.
 - Plugin does:
-  - on tool hooks: call `agentctl run hooks/dispatch` (for PreToolUse/PostToolUse equivalents)
-  - for context injection: keep `experimental.chat.system.transform` reading a shared “pending-context” inbox file OR a lightweight `agentctl` tool call
+  - on tool hooks: call `foxctl run hooks/dispatch` (for PreToolUse/PostToolUse equivalents)
+  - for context injection: keep `experimental.chat.system.transform` reading a shared “pending-context” inbox file OR a lightweight `foxctl` tool call
   - custom tools remain (memory/search/symbols/task/inbox)
 
 ### 1.3 Canonical hooks config
-- `~/.agentctl/hooks.yaml` and `<workspace>/.agentctl/hooks.yaml`
+- `~/.foxctl/hooks.yaml` and `<workspace>/.foxctl/hooks.yaml`
 - Used by:
   - actor runtime
   - Claude Code adapter
@@ -77,7 +77,7 @@ After migration, we should be able to say:
 
 ---
 
-## 2) Canonical event mapping (CC + OC → agentctl)
+## 2) Canonical event mapping (CC + OC → foxctl)
 
 ### 2.1 Canonical event names (v1)
 - SessionStart
@@ -145,7 +145,7 @@ Platform tools (CC/OC) are `Read/Edit/Write/Bash/...`.
 
 **Hook Input must include both:**
 - `tool.name` (platform name, e.g., “Edit”)
-- `tool.canonical` (agentctl canonical, e.g., “edit.apply_patch”) where applicable
+- `tool.canonical` (foxctl canonical, e.g., “edit.apply_patch”) where applicable
 - `tool.kind` (read/write/exec/search)
 
 This avoids brittle matchers and keeps CC/OC behavior stable.
@@ -155,7 +155,7 @@ This avoids brittle matchers and keeps CC/OC behavior stable.
 ## 4) Skills compatibility guarantees (must keep working)
 
 ### 4.1 CLI contract stays stable
-- `agentctl run <skill> --input <json>` remains stable
+- `foxctl run <skill> --input <json>` remains stable
 - envelope remains stable
 - skill names remain stable OR you ship aliases
 
@@ -171,7 +171,7 @@ Ensure these are always available to skills:
 - `AGENTCTL_AGENT_ID`
 
 Both CC adapters and OpenCode plugin should:
-- set these env vars when calling `agentctl run ...`
+- set these env vars when calling `foxctl run ...`
 - or pass in hook.Input fields and dispatcher sets env for downstream skills
 
 ---
@@ -181,22 +181,22 @@ Both CC adapters and OpenCode plugin should:
 ### 5.1 Claude Code: single adapter script
 Replace dozens of hook scripts with ONE canonical adapter:
 
-`configs/hooks/claude/agentctl-hook.sh`
+`configs/hooks/claude/foxctl-hook.sh`
 
 It:
 - reads CC hook payload
 - maps to `hook.Input`
-- calls `agentctl run hooks/dispatch`
+- calls `foxctl run hooks/dispatch`
 - prints CC-compatible response (`{decision, reason, context, hookSpecificOutput...}`)
 
 Optional: keep old scripts as **thin wrappers** calling the new adapter for 1 release:
-- `configs/hooks/task-guard.sh` → exec agentctl-hook.sh --event PreToolUse --matcher Edit|Write...
+- `configs/hooks/task-guard.sh` → exec foxctl-hook.sh --event PreToolUse --matcher Edit|Write...
 Then delete them.
 
 ### 5.2 OpenCode plugin: call dispatcher from hooks
 Update `configs/opencode-hooks/index.ts` so:
 - in `tool.execute.before`, normalize into `hook.Input{event:PreToolUse,...}`
-- call `agentctl run hooks/dispatch`
+- call `foxctl run hooks/dispatch`
 - apply `UpdatedToolInput` when available (where OpenCode API allows)
 - store `inject_context` actions into pending-context file for system.transform
 
@@ -274,7 +274,7 @@ After cutover:
   - blocking works where allowed
   - context injection is done via pending-context file consistently
 - custom tools:
-  - memory/search/inbox/symbols/task still resolve to agentctl skills
+  - memory/search/inbox/symbols/task still resolve to foxctl skills
 
 ### 7.3 Skills
 - `code/semantic_search` runs under both:

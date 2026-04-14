@@ -52,7 +52,7 @@ func TestShellTool_CatGoMod(t *testing.T) {
 
 	content := extractResultContent(t, result)
 	summary, _ := content["summary"].(string)
-	if !strings.Contains(summary, "module github.com/jkatigb/agentctl") {
+	if !strings.Contains(summary, "module github.com/joshka0/foxctl") {
 		t.Fatalf("summary=%q missing module line", summary)
 	}
 	route, _ := content["route"].(map[string]any)
@@ -112,7 +112,7 @@ func TestRegistryToolExecutor_Shell(t *testing.T) {
 	if !strings.Contains(got, `"summary":"`) {
 		t.Fatalf("expected JSON payload with summary, got %s", got)
 	}
-	if !strings.Contains(got, `module github.com/jkatigb/agentctl`) {
+	if !strings.Contains(got, `module github.com/joshka0/foxctl`) {
 		t.Fatalf("expected go.mod preview, got %s", got)
 	}
 }
@@ -122,7 +122,7 @@ func makeShellToolWorkspace(t *testing.T) string {
 
 	sourceRoot := findRepoRoot(t)
 	workspaceRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workspaceRoot, "go.mod"), []byte("module github.com/jkatigb/agentctl\n\ngo 1.26.1\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "go.mod"), []byte("module github.com/joshka0/foxctl\n\ngo 1.26.1\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
 	skillDir := filepath.Join(workspaceRoot, "skills", "fs_read")

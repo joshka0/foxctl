@@ -25,7 +25,7 @@ import type {
   OrchestrationCard,
   OrchestrationCardAction,
   OrchestrationRuntimeTreeNode,
-} from "@agentctl/data";
+} from "@foxctl/data";
 
 function stateColor(state: string): string {
   switch (state) {

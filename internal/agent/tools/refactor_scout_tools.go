@@ -6,12 +6,12 @@ import (
 	"fmt"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
+	tooling "github.com/joshka0/foxctl/internal/tooling"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/tooling/skillrun"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/buildinfo"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/tooling/skillrun"
 )
 
 func (r *Registry) registerRefactorScoutTool() error {

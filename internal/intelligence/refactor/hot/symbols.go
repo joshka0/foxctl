@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	refsnapshot "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshot"
 )
 
 var diffHunkRangePattern = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)

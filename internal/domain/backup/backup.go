@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// Component represents a backupable component of agentctl.
+// Component represents a backupable component of foxctl.
 type Component string
 
 const (
@@ -40,7 +40,7 @@ type Manifest struct {
 	Version string `json:"version"`
 	// CreatedAt is when the backup was created.
 	CreatedAt time.Time `json:"created_at"`
-	// AgentctlVersion is the agentctl version that created the backup.
+	// AgentctlVersion is the foxctl version that created the backup.
 	AgentctlVersion string `json:"agentctl_version"`
 	// Components lists which components are included.
 	Components []Component `json:"components"`

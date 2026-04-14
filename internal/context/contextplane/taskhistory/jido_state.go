@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
 // RefreshJidoRuntimeState enriches one decoded Jido runtime state map with a

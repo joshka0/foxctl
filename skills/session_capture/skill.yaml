@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/capture
@@ -56,10 +56,10 @@ signature:
     long: |
       Use session/capture to ingest the latest or a specific session.
       Example commands:
-        agentctl run session/capture --input '{"workspace":"./","summarize":true}'
-        agentctl skills run session/capture --workspace ./ --summarize
-        agentctl run session/capture --input '{"session_id":"abc123","force":true}'
-        agentctl skills run session/capture --session_id abc123 --force
+        foxctl run session/capture --input '{"workspace":"./","summarize":true}'
+        foxctl skills run session/capture --workspace ./ --summarize
+        foxctl run session/capture --input '{"session_id":"abc123","force":true}'
+        foxctl skills run session/capture --session_id abc123 --force
     workflows:
       - id: capture-latest
         description: "Capture the most recent session."

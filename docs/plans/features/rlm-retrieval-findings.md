@@ -17,7 +17,7 @@ It is intentionally short and benchmark-focused.
 
 ## Current Eval Modes
 
-The current retrieval harness in [cmd/agentctl/cmd/eval.go](../../../cmd/agentctl/cmd/eval.go) supports:
+The current retrieval harness in [cmd/foxctl/cmd/eval.go](../../../cmd/foxctl/cmd/eval.go) supports:
 
 - `skill_context`
   - ACA-only retrieval
@@ -40,7 +40,7 @@ Important note:
 
 Suite:
 
-- [agentctl-mixed.yaml](../../../testdata/evals/retrieval/agentctl-mixed.yaml)
+- [foxctl-mixed.yaml](../../../testdata/evals/retrieval/foxctl-mixed.yaml)
 
 Current results:
 
@@ -66,7 +66,7 @@ Current results:
 
 Interpretation:
 
-- ACA-only is clearly the strongest lane on `agentctl-mixed`
+- ACA-only is clearly the strongest lane on `foxctl-mixed`
 - the mixed ACA + code lane is still strong, but below ACA-only on ranking quality
 - `repoindex_dag` is the strongest non-ACA structural lane
 - free-form RLM is currently no better than plain `repoindex_search`
@@ -138,6 +138,6 @@ Interpret them as:
 
 ## Related Docs
 
-- [agentctl-rlm-next-steps.md](agentctl-rlm-next-steps.md)
-- [agentctl-rlm-integration-outline.md](agentctl-rlm-integration-outline.md)
+- [foxctl-rlm-next-steps.md](foxctl-rlm-next-steps.md)
+- [foxctl-rlm-integration-outline.md](foxctl-rlm-integration-outline.md)
 - [rlm_query_runtime.md](../../spec/rlm_query_runtime.md)

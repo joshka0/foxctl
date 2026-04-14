@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: codemap/get
@@ -44,10 +44,10 @@ signature:
     long: |
       Use codemap/get to fetch a codemap and its traces.
       Example commands:
-        agentctl run codemap/get --input '{"id":"codemap://auth-flow"}'
-        agentctl skills run codemap/get --id codemap://auth-flow
-        agentctl run codemap/get --input '{"id":"auth-flow","include_traces":false}'
-        agentctl skills run codemap/get --id auth-flow --include_traces=false
+        foxctl run codemap/get --input '{"id":"codemap://auth-flow"}'
+        foxctl skills run codemap/get --id codemap://auth-flow
+        foxctl run codemap/get --input '{"id":"auth-flow","include_traces":false}'
+        foxctl skills run codemap/get --id auth-flow --include_traces=false
     workflows:
       - id: get-codemap
         description: "Get a codemap by ID."

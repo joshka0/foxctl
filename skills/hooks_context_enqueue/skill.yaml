@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/context_enqueue
@@ -65,7 +65,7 @@ signature:
       - Multi-agent safety (scoped by workspace/session/agent)
 
       Example:
-        agentctl run hooks/context_enqueue --input '{
+        foxctl run hooks/context_enqueue --input '{
           "workspace_id": "/workspace",
           "session_id": "abc123",
           "source": "smart-grep",

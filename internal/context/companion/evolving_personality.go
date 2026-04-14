@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+	"github.com/joshka0/foxctl/internal/storage/contextvar"
 )
 
 // PersonalityDimension represents an adjustable aspect of the companion's personality.

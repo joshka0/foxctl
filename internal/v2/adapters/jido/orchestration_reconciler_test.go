@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	libsqlorchestration "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/orchestration"
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
-	v2orchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	libsqlorchestration "github.com/joshka0/foxctl/internal/v2/adapters/libsql/orchestration"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
+	v2orchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
 )
 
 func TestOrchestrationReconciler_RecordDispatchSpawned_ProjectsRunningLane(t *testing.T) {
@@ -224,7 +224,7 @@ func TestOrchestrationReconciler_RecordDispatchFailed_ProjectsRetryQueueForTrans
 			"title":            "Retry child spawn",
 			"attempt":          2,
 		},
-	}, fmt.Errorf("dial unix /tmp/agentctl-jido.sock: connect: connection refused"))
+	}, fmt.Errorf("dial unix /tmp/foxctl-jido.sock: connect: connection refused"))
 	if err != nil {
 		t.Fatalf("RecordDispatchFailed() error = %v", err)
 	}
@@ -333,7 +333,7 @@ func TestOrchestrationReconciler_Reconcile_ProjectsCompletedChildToReview(t *tes
 			AgentID: "agent:worker-1",
 			Status:  "ok",
 			State: json.RawMessage(`{
-				"agentctl": {
+				"foxctl": {
 					"status": "completed",
 					"last_result": {
 						"tool": "code/context_ripgrep",
@@ -449,7 +449,7 @@ func TestOrchestrationReconciler_Reconcile_ProjectsFailedChildToBlocked(t *testi
 			AgentID: "agent:worker-2",
 			Status:  "ok",
 			State: json.RawMessage(`{
-				"agentctl": {
+				"foxctl": {
 					"status": "completed",
 					"last_result": {
 						"envelope": {"status":"error","error":{"message":"tool failed"}}
@@ -564,7 +564,7 @@ func TestOrchestrationReconciler_Reconcile_ProjectsTransientFailedChildToRetryQu
 			AgentID: "agent:worker-retry",
 			Status:  "ok",
 			State: json.RawMessage(`{
-				"agentctl": {
+				"foxctl": {
 					"status": "completed",
 					"last_result": {
 						"envelope": {"status":"error","error":{"message":"database is locked"}}
@@ -678,7 +678,7 @@ func TestOrchestrationReconciler_Reconcile_SkipsNonRunningCard(t *testing.T) {
 		stateResp: StateResponse{
 			AgentID: "agent:worker-3",
 			Status:  "ok",
-			State:   json.RawMessage(`{"agentctl":{"status":"completed"}}`),
+			State:   json.RawMessage(`{"foxctl":{"status":"completed"}}`),
 		},
 	}
 

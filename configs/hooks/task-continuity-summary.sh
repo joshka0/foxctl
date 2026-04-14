@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Thin wrapper for prompt-ready task continuity summaries.
-# Use `agentctl context task-history-summary` directly for Codex/agent/script callers.
+# Use `foxctl context task-history-summary` directly for Codex/agent/script callers.
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 if ! command -v "$AGENTCTL_BIN" >/dev/null 2>&1; then
   echo '{}'
   exit 0

@@ -282,7 +282,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 # for faster code search and universal SWE grep.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_LIVE_INDEX_DISABLED - Set to "1" to disable
 
 set -euo pipefail
@@ -290,7 +290,7 @@ set -euo pipefail
 # Check if disabled
 [[ "${AGENTCTL_LIVE_INDEX_DISABLED:-}" == "1" ]] && echo '{}' && exit 0
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 
 # Read hook input
 INPUT=$(cat)
@@ -381,7 +381,7 @@ fi
 - [ ] Make executable: `chmod +x .claude/hooks/live-index.sh`
 - [ ] Register in `.claude/settings.json` (add to existing PostToolUse array)
 - [ ] Test with manual file edit
-- [ ] Verify symbols appear in `agentctl memory list`
+- [ ] Verify symbols appear in `foxctl memory list`
 
 ---
 
@@ -862,7 +862,7 @@ Tree-sitter uses CGO for the core parser. Ensure:
 ```makefile
 # Makefile update
 build-cgo:
-    CGO_ENABLED=1 go build -o bin/agentctl ./cmd/agentctl
+    CGO_ENABLED=1 go build -o bin/foxctl ./cmd/foxctl
 
 skills-build-cgo:
     CGO_ENABLED=1 go build -o skills/code_incremental_index/code_incremental_index ./skills/code_incremental_index
@@ -881,7 +881,7 @@ skills-build-cgo:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  live-index.sh (hook)                                       │
-│  └── agentctl run code/incremental_index --embed-queue=true │
+│  └── foxctl run code/incremental_index --embed-queue=true │
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -894,7 +894,7 @@ skills-build-cgo:
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Background Worker (agentctl embed-worker)                  │
+│  Background Worker (foxctl embed-worker)                  │
 │  ├── Polls queue every N seconds                            │
 │  ├── Batches files for efficiency                           │
 │  ├── Calls embedding provider                               │
@@ -906,7 +906,7 @@ skills-build-cgo:
 
 - [ ] Create `embedding_queue` table schema
 - [ ] Implement queue operations (enqueue, dequeue, mark done/failed)
-- [ ] Create `agentctl embed-worker` command
+- [ ] Create `foxctl embed-worker` command
 - [ ] Implement batch processing with rate limiting
 - [ ] Add retry logic with exponential backoff
 - [ ] Wire into `code/incremental_index` skill
@@ -977,10 +977,10 @@ Phase 7 ────────────────────────
 ```bash
 # Test live index
 echo 'package foo\nfunc Bar() {}' > /tmp/test.go
-agentctl run code/incremental_index --input '{"file":"/tmp/test.go","symbols":true}'
+foxctl run code/incremental_index --input '{"file":"/tmp/test.go","symbols":true}'
 
 # Test universal swe grep
-agentctl run code/smart_search --input '{"question":"How does Bar work?"}'
+foxctl run code/smart_search --input '{"question":"How does Bar work?"}'
 
 # Test tool via agent
 # (requires agent runtime)

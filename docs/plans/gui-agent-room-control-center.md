@@ -6,7 +6,7 @@ Scope: `gui-agent` room-management panel for coordinator-driven multi-agent coll
 
 ## Why This Exists
 
-`agentctl room` now has the backend primitives needed for durable multi-agent coordination:
+`foxctl room` now has the backend primitives needed for durable multi-agent coordination:
 
 - direct and broadcast room messages
 - `ack` and coordinator `resolve`
@@ -35,7 +35,7 @@ Create a dedicated `gui-agent` room-management panel that lets a coordinator:
 
 ## Canonical Position
 
-`gui-agent` is a client of the headless `agentctl` room/runtime kernel.
+`gui-agent` is a client of the headless `foxctl` room/runtime kernel.
 
 It must not depend on CLI-shaped implementation details or mux-shaped runtime
 truth. Its room surfaces should be built against shared room services and
@@ -377,7 +377,7 @@ The panel should not shell out to CLI commands. It needs HTTP-level read models 
 
 #### `GET /api/rooms/:id/status`
 
-Returns the coordinator-facing compact status model currently exposed by `agentctl room status`.
+Returns the coordinator-facing compact status model currently exposed by `foxctl room status`.
 
 Parameters:
 

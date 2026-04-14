@@ -5,7 +5,7 @@ import "testing"
 func TestInferInsights(t *testing.T) {
 	result := InferInsights(
 		"Compact handoffs work better than swollen transcripts, but stale vault notes create drift.",
-		"agentctl",
+		"foxctl",
 		"runtime",
 		[]string{"handoff:T-1038"},
 	)
@@ -15,7 +15,7 @@ func TestInferInsights(t *testing.T) {
 	if len(result.Tensions) != 1 {
 		t.Fatalf("tensions=%d want 1", len(result.Tensions))
 	}
-	if result.Observations[0].Project != "agentctl" {
+	if result.Observations[0].Project != "foxctl" {
 		t.Fatalf("project=%q", result.Observations[0].Project)
 	}
 	if result.Tensions[0].Kind != "contradiction" {

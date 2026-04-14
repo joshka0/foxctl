@@ -5,7 +5,7 @@
 
 ## Overview
 
-This document defines a unified agent format that merges agentctl agents and
+This document defines a unified agent format that merges foxctl agents and
 Factory droids into a cohesive system. The goal is to:
 
 1. Create a single, consistent format for all agents
@@ -105,7 +105,7 @@ multi-phase work **Key capabilities**:
 
 ### 2. code-reviewer
 
-**Source**: Factory (merged with agentctl's code-architecture-reviewer)
+**Source**: Factory (merged with foxctl's code-architecture-reviewer)
 **Purpose**: Comprehensive code review for quality, security, performance **Key
 capabilities**:
 
@@ -116,7 +116,7 @@ capabilities**:
 
 ### 3. debugger
 
-**Source**: Factory (merged with agentctl's auto-error-resolver) **Purpose**:
+**Source**: Factory (merged with foxctl's auto-error-resolver) **Purpose**:
 Systematic debugging and error resolution **Key capabilities**:
 
 - Root cause analysis
@@ -126,7 +126,7 @@ Systematic debugging and error resolution **Key capabilities**:
 
 ### 4. refactorer
 
-**Source**: agentctl's code-refactor-master (enhanced) **Purpose**: Plan and
+**Source**: foxctl's code-refactor-master (enhanced) **Purpose**: Plan and
 execute comprehensive refactoring **Key capabilities**:
 
 - Dependency tracking
@@ -136,7 +136,7 @@ execute comprehensive refactoring **Key capabilities**:
 
 ### 5. documentation-architect
 
-**Source**: agentctl (merged with Factory's docs-architect) **Purpose**: Create
+**Source**: foxctl (merged with Factory's docs-architect) **Purpose**: Create
 and maintain comprehensive documentation **Key capabilities**:
 
 - API documentation
@@ -166,7 +166,7 @@ capabilities**:
 
 ### 8. web-researcher
 
-**Source**: agentctl (merged with Factory's search-specialist) **Purpose**:
+**Source**: foxctl (merged with Factory's search-specialist) **Purpose**:
 Research technical issues and solutions **Key capabilities**:
 
 - Error investigation
@@ -176,17 +176,17 @@ Research technical issues and solutions **Key capabilities**:
 
 ## Workspace Init Integration
 
-`agentctl workspace init` should support deploying agents:
+`foxctl workspace init` should support deploying agents:
 
 ```bash
 # Initialize with core agents
-agentctl workspace init --agents core
+foxctl workspace init --agents core
 
 # Initialize with specific categories
-agentctl workspace init --agents core,golang,devops
+foxctl workspace init --agents core,golang,devops
 
 # List available agent sets
-agentctl workspace init --list-agents
+foxctl workspace init --list-agents
 ```
 
 ### File Layout After Init
@@ -207,14 +207,14 @@ agentctl workspace init --list-agents
 
 ## Commands Merge Strategy
 
-### agentctl Commands (keep)
+### foxctl Commands (keep)
 
 - `dev-docs.md` - Strategic planning command
 - `dev-docs-update.md` - Update existing docs
 
 ### Factory Commands (adapt)
 
-- `orchestrator.md` - Invoke orchestrator (adapt to agentctl format)
+- `orchestrator.md` - Invoke orchestrator (adapt to foxctl format)
 
 ### Unified Command Format
 
@@ -231,23 +231,23 @@ Instructions for the command using $ARGUMENTS placeholder.
 
 ### Phase 1: Core Agent Curation
 
-1. Merge `code-reviewer` (Factory) + `code-architecture-reviewer` (agentctl)
-2. Merge `debugger` (Factory) + `auto-error-resolver` (agentctl)
+1. Merge `code-reviewer` (Factory) + `code-architecture-reviewer` (foxctl)
+2. Merge `debugger` (Factory) + `auto-error-resolver` (foxctl)
 3. Merge `documentation-specialist` (Factory) + `documentation-architect`
-   (agentctl)
+   (foxctl)
 4. Keep `orchestrator`, `test-automator`, `security-auditor` from Factory
-5. Keep `code-refactor-master` from agentctl (as `refactorer`)
-6. Merge `search-specialist` (Factory) + `web-research-specialist` (agentctl)
+5. Keep `code-refactor-master` from foxctl (as `refactorer`)
+6. Merge `search-specialist` (Factory) + `web-research-specialist` (foxctl)
 
 ### Phase 2: Builtin Embedding
 
 1. Add curated core agents to `internal/context/knowledge/builtin/data/agents/`
 2. Embed as knowledge items with `kind: agent`
-3. Make available via `agentctl knowledge sync`
+3. Make available via `foxctl knowledge sync`
 
 ### Phase 3: Workspace Init
 
-1. Implement `agentctl workspace init --agents` flag
+1. Implement `foxctl workspace init --agents` flag
 2. Copy selected agents to `.claude/agents/`
 3. Support category selection (core, language/X, domain/X)
 

@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/langutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	symindex "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	refstatus "github.com/joshka0/foxctl/internal/intelligence/refactor/status"
 )
 
 const (

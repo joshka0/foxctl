@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/transcriptpipeline"
+	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
 	"gopkg.in/yaml.v3"
 )
 
@@ -117,7 +117,7 @@ func RunSuite(ctx context.Context, suite Suite, opts RunOptions) (RunResult, err
 }
 
 func runCase(ctx context.Context, c Case, opts RunOptions) (CaseResult, error) {
-	tmpRoot, err := os.MkdirTemp("", "agentctl-transcriptmemoryeval-*")
+	tmpRoot, err := os.MkdirTemp("", "foxctl-transcriptmemoryeval-*")
 	if err != nil {
 		return CaseResult{}, err
 	}

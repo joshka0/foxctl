@@ -3,7 +3,7 @@ package expander
 import (
 	"regexp"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext/files"
 )
 
 // jstsExpander handles JavaScript and TypeScript code block detection.

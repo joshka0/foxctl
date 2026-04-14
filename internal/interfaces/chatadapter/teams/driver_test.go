@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 type fakeVerifier struct {

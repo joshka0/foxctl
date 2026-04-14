@@ -236,7 +236,7 @@ Respond/Edit implementation:
 ### 2.7 Wiring: `internal/interfaces/web/server.go` + routes
 
 - Add `--chat teams` option and update help text exactly:
-  - `cmd/agentctl/cmd/web.go`: `"Chat adapter to enable (discord|telegram|teams)"`
+  - `cmd/foxctl/cmd/web.go`: `"Chat adapter to enable (discord|telegram|teams)"`
 - In `startChatAdapter()` add `case "teams"`:
   - `adapter := teams.New(s.cfg.Teams, daemonURL)`
   - `adapter.SetSSEHub(s.sseHub)` (even if proactive messaging is Phase 3, keep parity with other adapters)
@@ -277,7 +277,7 @@ HTTP handler:
 1. Start server:
    ```bash
    TEAMS_TENANT_ID=... TEAMS_CLIENT_ID=... TEAMS_CLIENT_SECRET=... \
-   agentctl web serve --chat teams
+   foxctl web serve --chat teams
    ```
 2. Expose HTTPS (dev): `ngrok http 8090`
 3. Configure Azure Bot “Messaging endpoint” to:

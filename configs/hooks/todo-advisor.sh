@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # todo-advisor.sh - PreToolUse advisory for TodoWrite
 #
-# Provides context about agentctl todo integration when Claude uses TodoWrite.
-# FAST: Uses direct sqlite3 query instead of spawning agentctl process.
+# Provides context about foxctl todo integration when Claude uses TodoWrite.
+# FAST: Uses direct sqlite3 query instead of spawning foxctl process.
 #
 # Environment:
 #   AGENTCTL_TODO_ADVISOR_DISABLED - Set to "1" to disable
@@ -17,7 +17,7 @@ fi
 
 # IDEMPOTENCY: Skip if we've run recently (within 60 seconds)
 # This prevents repeated slow queries when Claude uses TodoWrite multiple times
-CACHE_FILE="/tmp/.agentctl-todo-advisor-cache"
+CACHE_FILE="/tmp/.foxctl-todo-advisor-cache"
 CACHE_TTL=60
 
 if [[ -f "$CACHE_FILE" ]]; then
@@ -43,8 +43,8 @@ sql_escape() {
   printf '%s' "$1" | sed "s/'/''/g"
 }
 
-# FAST PATH: Direct sqlite3 query instead of spawning agentctl
-DB_PATH="$HOME/.agentctl/storage/tasks.db"
+# FAST PATH: Direct sqlite3 query instead of spawning foxctl
+DB_PATH="$HOME/.foxctl/storage/tasks.db"
 
 if [[ -f "$DB_PATH" ]] && command -v sqlite3 &>/dev/null; then
   # Quick count query - use sql_escape to prevent SQL injection
@@ -58,12 +58,12 @@ else
 fi
 
 # Build advisory context
-context="**agentctl tasks:** $pending pending"
+context="**foxctl tasks:** $pending pending"
 if [[ -n "$active_task" ]]; then
   context="$context | Active: \"$active_task\""
 fi
 context="$context
-Use \`/agentctl-todo\` to sync or \`agentctl todo list\` to see tasks."
+Use \`/foxctl-todo\` to sync or \`foxctl todo list\` to see tasks."
 
 # Build and cache response
 response=$(jq -nc --arg ctx "$context" '{

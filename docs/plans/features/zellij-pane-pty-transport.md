@@ -2,10 +2,10 @@
 
 ## Goal
 
-Replace unreliable cross-pane input injection with an `agentctl`-owned pane wrapper that
+Replace unreliable cross-pane input injection with an `foxctl`-owned pane wrapper that
 launches each agent CLI behind a PTY and accepts room messages through a local control channel.
 
-Zellij remains the visual multiplexer. `agentctl` becomes the transport owner.
+Zellij remains the visual multiplexer. `foxctl` becomes the transport owner.
 
 ## Problem
 
@@ -26,7 +26,7 @@ Launch a wrapper process inside each pane instead of launching the agent CLI dir
 
 ```text
 zellij pane
-  -> agentctl pane serve
+  -> foxctl pane serve
        -> owns PTY master
        -> child agent CLI attached to PTY slave
        -> control socket / inbox for room messages
@@ -35,9 +35,9 @@ zellij pane
 Example launch shape:
 
 ```bash
-agentctl pane serve --participant claude-a --room-id room-123 -- claude
-agentctl pane serve --participant gemini-a --room-id room-123 -- gemini
-agentctl pane serve --participant droid-a --room-id room-123 -- droid
+foxctl pane serve --participant claude-a --room-id room-123 -- claude
+foxctl pane serve --participant gemini-a --room-id room-123 -- gemini
+foxctl pane serve --participant droid-a --room-id room-123 -- droid
 ```
 
 ## Responsibilities
@@ -49,7 +49,7 @@ agentctl pane serve --participant droid-a --room-id room-123 -- droid
 - focus management
 - nothing transport-critical
 
-### `agentctl pane serve`
+### `foxctl pane serve`
 
 - create PTY pair
 - spawn child with slave PTY as stdin/stdout/stderr
@@ -166,7 +166,7 @@ The adapter returns the exact PTY bytes to write.
 For Zellij pane-backed agents, replace direct command launch with:
 
 ```text
-agentctl pane serve --participant <id> --room-id <id> -- <agent command>
+foxctl pane serve --participant <id> --room-id <id> -- <agent command>
 ```
 
 ### room membership
@@ -189,7 +189,7 @@ Delivery order:
 
 ### Slice 1
 
-Add `agentctl pane serve` with:
+Add `foxctl pane serve` with:
 
 - PTY spawn
 - stdout forwarding

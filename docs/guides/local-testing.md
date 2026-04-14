@@ -1,6 +1,6 @@
 # Local Testing with libSQL
 
-This guide explains how to test agentctl with full vector search support locally, without requiring Turso cloud access or internet connectivity.
+This guide explains how to test foxctl with full vector search support locally, without requiring Turso cloud access or internet connectivity.
 
 ## Overview
 
@@ -63,7 +63,7 @@ go test -v ./...
 # Driver selection
 export AGENTCTL_MEMORY_DB_DRIVER=libsql
 
-# Database path (optional, defaults to ~/.agentctl/memory.libsql)
+# Database path (optional, defaults to ~/.foxctl/memory.libsql)
 export AGENTCTL_MEMORY_DB_PATH=/tmp/test-memory.libsql
 
 # Enable vector search
@@ -81,7 +81,7 @@ package mytest
 import (
     "context"
     "testing"
-    "github.com/jkatigb/agentctl/internal/storage/dbdriver"
+    "github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
 func TestWithLibSQL(t *testing.T) {
@@ -278,8 +278,8 @@ import (
     "os"
     "testing"
 
-    "github.com/jkatigb/agentctl/internal/storage/dbdriver"
-    "github.com/jkatigb/agentctl/internal/storage/memory"
+    "github.com/joshka0/foxctl/internal/storage/dbdriver"
+    "github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 func TestMemorySearchWithLibSQL(t *testing.T) {
@@ -417,7 +417,7 @@ func TestMain(m *testing.M) {
 Or use temporary directories:
 
 ```go
-tmpDir, _ := os.MkdirTemp("", "agentctl-test-*")
+tmpDir, _ := os.MkdirTemp("", "foxctl-test-*")
 defer os.RemoveAll(tmpDir)
 
 cfg := dbdriver.DefaultLibSQLConfig(

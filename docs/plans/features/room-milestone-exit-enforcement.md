@@ -48,7 +48,7 @@ Add an opt-in enforcement switch on the milestone contract layer:
 Example:
 
 ```bash
-agentctl room milestone contract <room-id> <milestone-id> \
+foxctl room milestone contract <room-id> <milestone-id> \
   --enforce-exit-policy
 ```
 
@@ -81,7 +81,7 @@ Expose:
 
 Only gate:
 
-- `agentctl room milestone review <room-id> <milestone-id> pass ...`
+- `foxctl room milestone review <room-id> <milestone-id> pass ...`
 
 When blocked, return:
 

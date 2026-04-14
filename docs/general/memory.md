@@ -1,6 +1,6 @@
 ---
 vault_refs:
-  - notes/repo/agentctl/semantic-and-memory.md
+  - notes/repo/foxctl/semantic-and-memory.md
 ---
 
 # Memory
@@ -12,7 +12,7 @@ Machine-friendly reference for named memory persistence and retrieval.
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical packages | `internal/storage/memory`, `cmd/agentctl/cmd/memory*`, `skills/session_*` |
+| Canonical packages | `internal/storage/memory`, `cmd/foxctl/cmd/memory*`, `skills/session_*` |
 | Last reviewed | 2026-02-17 |
 
 ## Scope
@@ -21,9 +21,9 @@ Machine-friendly reference for named memory persistence and retrieval.
 
 ## Command Surfaces
 
-### CLI (`agentctl memory`)
+### CLI (`foxctl memory`)
 
-Source: `cmd/agentctl/cmd/memory.go`.
+Source: `cmd/foxctl/cmd/memory.go`.
 
 | Subcommand | Purpose |
 |-----------|---------|
@@ -66,8 +66,8 @@ Important `named_memory` constraints:
 
 | Mode | Command path | Notes |
 |-----|---------------|-------|
-| Lexical | `agentctl memory search --query ...` | String match in memory store |
-| Semantic | `agentctl run code/semantic_search --input '{"query":"...","scope":["memories"]}'` | Uses embedding-backed retrieval pipeline |
+| Lexical | `foxctl memory search --query ...` | String match in memory store |
+| Semantic | `foxctl run code/semantic_search --input '{"query":"...","scope":["memories"]}'` | Uses embedding-backed retrieval pipeline |
 
 ## Embedding and Model Selection
 
@@ -83,11 +83,11 @@ Defaults and overrides come from config + semantic provider logic.
 ## Operational Examples
 
 ```bash
-agentctl memory list --limit 20
-agentctl memory search --query "oauth callback" --limit 10
-agentctl memory get gotcha-oauth-state
-agentctl memory put --name gotcha-oauth-state --type gotcha --summary "state must be validated" --data '{"note":"..."}'
-agentctl run code/semantic_search --input '{"query":"oauth gotcha","scope":["memories"],"limit":5}'
+foxctl memory list --limit 20
+foxctl memory search --query "oauth callback" --limit 10
+foxctl memory get gotcha-oauth-state
+foxctl memory put --name gotcha-oauth-state --type gotcha --summary "state must be validated" --data '{"note":"..."}'
+foxctl run code/semantic_search --input '{"query":"oauth gotcha","scope":["memories"],"limit":5}'
 ```
 
 ## Invariants

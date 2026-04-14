@@ -67,7 +67,7 @@ CREATE INDEX idx_sessions_chain_root ON sessions(chain_root_id);
 
 Per-workspace persistent file that survives compaction:
 
-**Location:** `~/.agentctl/sessions/active/<workspace_hash>.json`
+**Location:** `~/.foxctl/sessions/active/<workspace_hash>.json`
 
 ```json
 {
@@ -102,7 +102,7 @@ Per-workspace persistent file that survives compaction:
 
 trigger="$1"  # compact, resume, startup
 workspace_hash=$(echo -n "$CLAUDE_PROJECT_DIR" | sha256sum | cut -c1-16)
-identity_file="$HOME/.agentctl/sessions/active/${workspace_hash}.json"
+identity_file="$HOME/.foxctl/sessions/active/${workspace_hash}.json"
 
 case "$trigger" in
   compact)
@@ -130,7 +130,7 @@ EOF
 
     # Create graph edge
     if [[ -n "$parent_id" ]]; then
-      agentctl run graph/add_edge --input "{
+      foxctl run graph/add_edge --input "{
         \"from_id\": \"session:$new_session_id\",
         \"to_id\": \"session:$parent_id\",
         \"edge_type\": \"continues\",
@@ -139,7 +139,7 @@ EOF
     fi
 
     # Get ancestor chain summaries for context injection
-    agentctl run session/chain --input "{
+    foxctl run session/chain --input "{
       \"session_id\": \"$new_session_id\",
       \"include_summaries\": true,
       \"limit\": 5
@@ -187,7 +187,7 @@ esac
 ```bash
 # Enhanced to record parent_session_id
 workspace_hash=$(echo -n "$CLAUDE_PROJECT_DIR" | sha256sum | cut -c1-16)
-identity_file="$HOME/.agentctl/sessions/active/${workspace_hash}.json"
+identity_file="$HOME/.foxctl/sessions/active/${workspace_hash}.json"
 
 # Read current session identity
 identity=$(cat "$identity_file" 2>/dev/null || echo '{}')
@@ -197,7 +197,7 @@ chain_root=$(jq -r '.chain_root_id' <<< "$identity")
 chain_depth=$(jq -r '.chain_depth // 0' <<< "$identity")
 
 # Pass to session/capture skill
-agentctl run session/capture --input "{
+foxctl run session/capture --input "{
   \"session_id\": \"$session_id\",
   \"parent_session_id\": $parent_id,
   \"chain_root_id\": \"$chain_root\",
@@ -369,7 +369,7 @@ With this system, agents can answer:
 ## Implementation Phases
 
 ### Phase 1: Session Identity (Foundation)
-1. Create `~/.agentctl/sessions/active/` directory structure
+1. Create `~/.foxctl/sessions/active/` directory structure
 2. Update `session-restore.sh` to write identity file
 3. Update `session-capture.sh` to read and pass identity
 4. Add `parent_session_id`, `chain_root_id`, `chain_depth` to sessions table
@@ -390,9 +390,9 @@ With this system, agents can answer:
 3. Create "related" edges for workspace+time matches
 
 ### Phase 5: UI/CLI
-1. `agentctl session chain` - Show session lineage
-2. `agentctl session context` - Get long-horizon summary
-3. `agentctl session handoff` - Create handoff message
+1. `foxctl session chain` - Show session lineage
+2. `foxctl session context` - Get long-horizon summary
+3. `foxctl session handoff` - Create handoff message
 
 ## Relationship to Unified Graph
 

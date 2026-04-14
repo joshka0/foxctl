@@ -3,8 +3,8 @@ package cas
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 // OpenCAS opens a CAS store based on the provided configuration.

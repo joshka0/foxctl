@@ -274,7 +274,7 @@ type RoomMember struct {
 	PaneID   string    `json:"pane_id,omitempty"`
 	Unbound  bool      `json:"unbound,omitempty"`
 	JoinedAt time.Time `json:"joined_at"`
-	// TransportEndpoint is the unix socket path of an agentctl pane serve
+	// TransportEndpoint is the unix socket path of an foxctl pane serve
 	// wrapper that owns this participant's child PTY. Empty means no pane
 	// wrapper is registered; use the legacy mux-pane path instead.
 	TransportEndpoint string `json:"transport_endpoint,omitempty"`

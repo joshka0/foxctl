@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	"github.com/jkatigb/agentctl/internal/v2/core/events"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	"github.com/joshka0/foxctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
 )
 
 // SpawnDependencies wires SpawnService collaborators.

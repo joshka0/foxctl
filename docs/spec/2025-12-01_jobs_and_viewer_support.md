@@ -1,18 +1,18 @@
 ---
-title: Jobs & Viewer Support in agentctl Core
+title: Jobs & Viewer Support in foxctl Core
 status: Draft
-owners: [@jkatigb]
+owners: [@joshka0]
 ---
 
 ## 1. Overview
 
 ### 1.1 Problem
 
-agentctl already has a robust jobs system (SQLite + job dirs), CAS, and envelope validation, but:
+foxctl already has a robust jobs system (SQLite + job dirs), CAS, and envelope validation, but:
 
 - There is no **stable, documented JSON shape** for job listings or “job detail”.
 - There is no first-class **task/agent graph** export per job.
-- Existing `agentctl jobs` subcommands are mainly plumbing (`result`, `stderr`, `wait`, `tail`, `cancel`).
+- Existing `foxctl jobs` subcommands are mainly plumbing (`result`, `stderr`, `wait`, `tail`, `cancel`).
 
 This makes it hard to build a beads_viewer-style inspector or other tooling.
 
@@ -38,7 +38,7 @@ This makes it hard to build a beads_viewer-style inspector or other tooling.
 - **Job record**: [internal/storage/jobs/types/types.go](cci:7://file://internal/storage/jobs/types/types.go:0:0-0:0)
   - `Job { id, command, args_json, args_hash, state, result_path, error, created_at, updated_at }`
   - SQLite schema in [internal/storage/jobs/persist/store.go](cci:7://file://internal/storage/jobs/persist/store.go:0:0-0:0) (`jobs` table + indexes).
-- **Job directories**: `~/.agentctl/jobs/<id>/`
+- **Job directories**: `~/.foxctl/jobs/<id>/`
   - `input.json`, `result.json`, `progress.ndjson`, `stderr.log`, `workspace`, optional `artifacts.json`.
 - **Execution**: `internal/storage/jobs/executor`, `internal/runtime/runservice`
   - `result.json` is always a validated Core Profile v1 envelope.
@@ -121,16 +121,16 @@ All of this must reuse **existing** primitives:
 
 Define **envelope-based** commands that use the read model:
 
-1. `agentctl jobs list`
+1. `foxctl jobs list`
 
-   - **Command**: `agentctl jobs list [--limit N] [--state ...] [--command-prefix ...] [--workspace ...]`
+   - **Command**: `foxctl jobs list [--limit N] [--state ...] [--command-prefix ...] [--workspace ...]`
    - **Output**: Core Profile v1 envelope:
 
      ```jsonc
      {
        "version": 1,
        "status": "ok",
-       "command": "agentctl.jobs.list",
+       "command": "foxctl.jobs.list",
        "data": {
          "jobs": [ JobSummary, ... ]
        },
@@ -141,7 +141,7 @@ Define **envelope-based** commands that use the read model:
      }
      ```
 
-2. `agentctl jobs show <job-id>`
+2. `foxctl jobs show <job-id>`
 
    - **Output**:
 
@@ -149,7 +149,7 @@ Define **envelope-based** commands that use the read model:
      {
        "version": 1,
        "status": "ok",
-       "command": "agentctl.jobs.show",
+       "command": "foxctl.jobs.show",
        "data": JobDetail,
        "meta": {
          "ts": "...",
@@ -160,10 +160,10 @@ Define **envelope-based** commands that use the read model:
 
    - Error cases: `error.code` like `EJOB_NOT_FOUND`, `EJOB_RESULT_MISSING` etc.
 
-3. `agentctl jobs graph <job-id>`
+3. `foxctl jobs graph <job-id>`
 
    - Returns a **task/agent graph view** for the job (nodes + edges + basic metadata).
-   - This command is a prerequisite for the task/agent graph pane in `agentctl-viewer`.
+   - This command is a prerequisite for the task/agent graph pane in `foxctl-viewer`.
 
 ### 3.3 CAS Preview Rules
 
@@ -173,9 +173,9 @@ Define **envelope-based** commands that use the read model:
   - `kind` is text-like (`text/*`, `application/json`, etc.).
 - On digest mismatch, the CLI should emit an **error envelope** with `ECAS_DIGEST_MISMATCH`.
 
-### 3.4 Job Graph Schema (`agentctl jobs graph`)
+### 3.4 Job Graph Schema (`foxctl jobs graph`)
 
-The `agentctl jobs graph <job-id>` command returns a task/agent graph view
+The `foxctl jobs graph <job-id>` command returns a task/agent graph view
 for a single job. The envelope data shape:
 
 ```jsonc
@@ -218,7 +218,7 @@ The CLI wraps this in a Core Profile v1 envelope:
 {
   "version": 1,
   "status": "ok",
-  "command": "agentctl.jobs.graph",
+  "command": "foxctl.jobs.graph",
   "data": { /* as above */ },
   "meta": {
     "ts": "…",
@@ -242,10 +242,10 @@ collection is expected (see Gotcha R2).
 ```mermaid
 flowchart LR
   subgraph Core
-    A["agentctl jobs list/show\n(CLI)"]
+    A["foxctl jobs list/show\n(CLI)"]
     B["jobs.Store\n(jobs.db)"]
     C["Job Dir\ninput.json, result.json,\nprogress.ndjson, stderr.log, workspace"]
-    D["CAS Store\n~/.agentctl/cas"]
+    D["CAS Store\n~/.foxctl/cas"]
   end
 
   A --> B
@@ -261,14 +261,14 @@ flowchart LR
 1. **Phase 1: Internal read model**
    - Implement `JobSummary`, `JobDetail`, `ListJobs`, `GetJobDetail` in an internal package.
    - Unit tests, using temp jobs root + CAS.
-2. **Phase 2: `agentctl jobs list/show` commands**
+2. **Phase 2: `foxctl jobs list/show` commands**
    - Cobra commands wired to read model.
    - Output envelopes validated via `envelope.Validate` in tests.
 3. **Phase 3: CAS preview + artifact summaries**
    - Wire CAS metadata into `ArtifactSummary`.
    - Add tests for pinned vs. GC-eligible artifacts.
 4. **Phase 4: `jobs graph` (required for viewer v1)**
-   - Implement `agentctl jobs graph` using the schema above, backed by
+   - Implement `foxctl jobs graph` using the schema above, backed by
      `tasksgraph` and the overseer/agent runtime.
    - Add tests that validate the JSON shape and ensure metrics are
      populated (or explicitly zero-valued) in a stable way.

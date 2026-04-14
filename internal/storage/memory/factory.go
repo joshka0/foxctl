@@ -6,9 +6,9 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 	"github.com/rs/zerolog"
 )
 

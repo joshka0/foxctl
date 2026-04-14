@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 // AnchoredDerivationResult is the mainline anchored-frame output for one parsed session.
@@ -47,7 +47,7 @@ func BuildAnchoredDerivations(ctx context.Context, parsed sourceimport.ParsedSes
 }
 
 func buildConversationMemoryFromParsedSession(ctx context.Context, parsed sourceimport.ParsedSession) (*companion.ConversationMemory, func() error, string, error) {
-	tmpFile, err := os.CreateTemp("", "agentctl-derive-memory-*.db")
+	tmpFile, err := os.CreateTemp("", "foxctl-derive-memory-*.db")
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("create temp sqlite path: %w", err)
 	}

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +27,7 @@ func createTestSkill(t *testing.T, distType string) (manifestPath, artifactPath 
 	// Create manifest
 	var manifestContent string
 	if distType == "exec" {
-		manifestContent = `apiVersion: agentctl/v1
+		manifestContent = `apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: test/skill
@@ -45,7 +45,7 @@ capabilities:
     - type: workdir
 `
 	} else {
-		manifestContent = `apiVersion: agentctl/v1
+		manifestContent = `apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: test/skill
@@ -199,7 +199,7 @@ func TestInstaller_Install_InvalidSkillName(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create manifest with invalid name (path traversal attempt)
-	manifestContent := `apiVersion: agentctl/v1
+	manifestContent := `apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: ../../../etc/passwd
@@ -236,7 +236,7 @@ func TestInstaller_Install_PolicyViolation(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create manifest that violates policy (WASI with network enabled)
-	manifestContent := `apiVersion: agentctl/v1
+	manifestContent := `apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: test/bad-skill

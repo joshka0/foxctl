@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/rlm"
+	"github.com/joshka0/foxctl/internal/rlm"
 )
 
 func TestFilterToolsCodeIntel(t *testing.T) {

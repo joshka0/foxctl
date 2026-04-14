@@ -228,7 +228,7 @@ For WebSocket connections, use ingress cookie affinity:
 metadata:
   annotations:
     nginx.ingress.kubernetes.io/affinity: "cookie"
-    nginx.ingress.kubernetes.io/session-cookie-name: "agentctl-affinity"
+    nginx.ingress.kubernetes.io/session-cookie-name: "foxctl-affinity"
     nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
 ```
 

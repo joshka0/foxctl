@@ -3,7 +3,7 @@ package archive
 import (
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 // ChunkResult contains chunks and context windows from parsing a JSONL file.

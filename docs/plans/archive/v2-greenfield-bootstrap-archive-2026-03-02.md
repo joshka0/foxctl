@@ -19,7 +19,7 @@ Working Tracker: `docs/plans/v2-implementation-todo.md`
 
 ## Problem Statement
 
-The current v1 agentctl runtime has accumulated dual tool systems (Registry for MCP, Runtime executor for daemon agents), duplicate spawn/ask logic across CLI/API/daemon transports, and no unified event stream. This plan bootstraps a clean v2 runtime with:
+The current v1 foxctl runtime has accumulated dual tool systems (Registry for MCP, Runtime executor for daemon agents), duplicate spawn/ask logic across CLI/API/daemon transports, and no unified event stream. This plan bootstraps a clean v2 runtime with:
 
 - One execution loop (staged pipeline)
 - One tool system (catalog + executor)
@@ -71,7 +71,7 @@ core imports no adapters
 | Supervisor | `internal/v2/runtime/supervisor/*` | Standard `Run(ctx)` lifecycle for background components |
 | Single Writer | `internal/v2/runtime/*` state loops | Clear ownership of mutable state, fewer race conditions |
 | Snapshot Cache | `internal/v2/runtime/snapshots/*` | Lock-light reads for hot paths and status surfaces |
-| Direct Surface Wiring | `cmd/agentctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/runtime/daemon/service.go` | Hard-cut v2 command surfaces without runtime v1/v2 routing toggles |
+| Direct Surface Wiring | `cmd/foxctl/cmd/agent.go`, `internal/interfaces/web/api/agents.go`, `internal/runtime/daemon/service.go` | Hard-cut v2 command surfaces without runtime v1/v2 routing toggles |
 
 ## Error Contract
 
@@ -431,7 +431,7 @@ routing/bridge files that were removed during hard-cut cleanup.
 | `internal/v2/ports/api/router.go` | new |
 | `internal/v2/ports/api/mappers.go` | new |
 | `internal/v2/ports/daemon/router.go` | new |
-| `cmd/agentctl/cmd/agent.go` | modified |
+| `cmd/foxctl/cmd/agent.go` | modified |
 | `internal/interfaces/web/api/agents.go` | modified |
 | `internal/runtime/actor/agent_actor.go` | modified |
 | `internal/agent/runtime/runtime.go` | modified |
@@ -549,8 +549,8 @@ can be validated under real command flow while keeping v1 as the primary path.
 |------|--------|
 | `internal/v2/ports/router.go` | modified |
 | `internal/v2/ports/router_shadow_test.go` | new |
-| `cmd/agentctl/cmd/agent_ask_shadow.go` | new |
-| `cmd/agentctl/cmd/agent_ask_shadow_test.go` | new |
+| `cmd/foxctl/cmd/agent_ask_shadow.go` | new |
+| `cmd/foxctl/cmd/agent_ask_shadow_test.go` | new |
 
 **Key implementation points**:
 - Shadow runs are opt-in per command via `AGENTCTL_V2_SHADOW_COMMANDS`.
@@ -858,7 +858,7 @@ storage.
 1. Parse source logs into canonical lineage (`Turn -> Iteration -> ToolCall`).
 2. Derive deterministic artifacts (`annotation`, `classification`, `learning`,
    optional `embedding`) from imported turns.
-3. Add CLI entrypoint `agentctl sessions resynthesize-v2` with provider/source
+3. Add CLI entrypoint `foxctl sessions resynthesize-v2` with provider/source
    resolution and dry-run mode.
 4. Include optional Claude todo snapshots as classification/learning context.
 

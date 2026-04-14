@@ -8,7 +8,7 @@ current web/runtime behavior in code.
 ```mermaid
 flowchart LR
     Internet[Users / APIs] --> Ingress
-    Ingress --> AgentCtl["agentctl Deployment\n(web API + websocket + optional chat adapter)"]
+    Ingress --> AgentCtl["foxctl Deployment\n(web API + websocket + optional chat adapter)"]
     AgentCtl --> Store[Logical stores via dbdriver]
     Store --> PostgreSQL[(PostgreSQL)] 
     Store --> SQLite[(SQLite local fallback)]
@@ -31,7 +31,7 @@ flowchart LR
 
 `deploy/kubernetes/base/` is the base set used as the foundation:
 
-- `deployment.yaml`: `agentctl` pod with web service and readiness/liveness probes using `agentctl health` exec checks.
+- `deployment.yaml`: `foxctl` pod with web service and readiness/liveness probes using `foxctl health` exec checks.
 - `configmap.yaml`: defaulting to `AGENTCTL_DB_DRIVER=turso` and old CAS key names (`AGENTCTL_CAS_BACKEND`/`AGENTCTL_CAS_BUCKET`).
 - `workspace-deployment.yaml`: optional dedicated workspace pod with git-sync sidecar for mounted source.
 - `cronjobs.yaml`: scheduled companion workloads (rerank, sqlite maintenance), still wired for the same env style as base.
@@ -56,7 +56,7 @@ contains mixed configuration generations.
 
 This overlay matches current server behavior where:
 
-- `agentctl web serve` exposes application routes under `/api`
+- `foxctl web serve` exposes application routes under `/api`
 - `/api/v1` is deprecated
 - root-level `/healthz` and `/readyz` are used for probes
 
@@ -65,7 +65,7 @@ This overlay matches current server behavior where:
 `deploy/kubernetes/overlays/local/`:
 
 - Runs a single pod and local state directories in `emptyDir`.
-- Executes `agentctl web serve --port=8080` from the container command.
+- Executes `foxctl web serve --port=8080` from the container command.
 - Includes local PostgreSQL + pgvector statefulset (`local-postgres.yaml`) when local multi-component testing is desired.
 
 ## Runtime notes for Kubernetes
@@ -84,9 +84,9 @@ This overlay matches current server behavior where:
 
 Adapters are not selected in manifests. They are runtime CLI flags:
 
-- `agentctl web serve --chat discord`
-- `agentctl web serve --chat telegram`
-- `agentctl web serve --chat teams`
+- `foxctl web serve --chat discord`
+- `foxctl web serve --chat telegram`
+- `foxctl web serve --chat teams`
 
 Teams webhooks use `POST /api/teams/messages`; this endpoint must remain
 reachable in whichever ingress/network policies are in use.

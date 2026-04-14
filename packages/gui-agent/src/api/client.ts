@@ -45,7 +45,7 @@ const DEV_AUTH_SESSION: AuthSessionResponse = {
   },
   user: {
     id: "dev-local-user",
-    email: "local@agentctl.dev",
+    email: "local@foxctl.dev",
     name: "Local Dev",
     emailVerified: true,
   },
@@ -192,7 +192,7 @@ async function request<T>(
   }
 }
 
-// ApiEnvelope matches the canonical agentctl envelope returned by some API endpoints.
+// ApiEnvelope matches the canonical foxctl envelope returned by some API endpoints.
 interface ApiEnvelope<T> {
   version: number;
   status: "ok" | "error" | "progress";

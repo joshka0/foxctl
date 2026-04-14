@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
 func TestAgentStore(t *testing.T) {

@@ -10,12 +10,12 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/gitutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/gitutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 const command = "git/status"

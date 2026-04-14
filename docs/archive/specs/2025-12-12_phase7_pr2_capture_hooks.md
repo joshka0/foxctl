@@ -11,10 +11,10 @@ owner: jkatigbak
 Implement initial trajectory capture hooks per
 `docs/spec/dspy_trajectory_capture.md` §4:
 
-- Capture **CLI user requests** that trigger work (initially via `agentctl run`
+- Capture **CLI user requests** that trigger work (initially via `foxctl run`
   flows).
 - Capture **job/skill results** as `trajectory.Event` records.
-- Capture **agent-related CLI activity** for `agentctl dspy-agent spawn` as a
+- Capture **agent-related CLI activity** for `foxctl dspy-agent spawn` as a
   minimal agent-run capture point.
 
 All persisted records must be **redacted** (no secrets) and stored in the
@@ -42,7 +42,7 @@ For PR2 we map correlation as follows (no wire changes):
 
 ## Capture Points (implemented in PR2)
 
-### A) `agentctl run <skill>`
+### A) `foxctl run <skill>`
 
 - On job creation:
   - Persist a `UserRequestCapture` (source `cli`).
@@ -58,7 +58,7 @@ For PR2 we map correlation as follows (no wire changes):
       - `review_request` / `review_result` (review gate operations)
   - Update the trajectory `status` to `ok`/`error`.
 
-### B) `agentctl dspy-agent spawn`
+### B) `foxctl dspy-agent spawn`
 
 - Persist a `UserRequestCapture` and `Trajectory` at spawn time:
   - Use `--workspace`, `--task`, `--epic`, `--role` as correlation hints.
@@ -76,13 +76,13 @@ Before any persistence:
 
 ```mermaid
 graph TD
-  A[CLI: agentctl run] --> B[runservice.PrepareJob]
+  A[CLI: foxctl run] --> B[runservice.PrepareJob]
   B --> C[trajectory: InsertUserRequest + InsertTrajectory + user_request Event]
   A --> D[runservice.HandleResult]
   D --> E[parse result envelope]
   E --> F[trajectory: Insert result Event + UpdateTrajectory status]
 
-  G[CLI: agentctl dspy-agent spawn] --> H[capture spawn request]
+  G[CLI: foxctl dspy-agent spawn] --> H[capture spawn request]
   H --> I[trajectory: InsertUserRequest + InsertTrajectory + user_request Event]
 ```
 

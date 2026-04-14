@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 )
 
 // Settings contains per-conversation overrides for the web API layer.

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/zellijbridge"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/tmuxbridge"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/zellijbridge"
 )
 
 var (

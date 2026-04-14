@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
+	tooling "github.com/joshka0/foxctl/internal/tooling"
 )
 
 // registerFSTools registers filesystem tools.

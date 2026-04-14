@@ -28,4 +28,4 @@ Fix frontend errors systematically.
 
 Check browser console, build output, and React DevTools.
 
-Full docs: `~/repos/personal/agentctl/configs/agents/frontend-error-fixer.md`
+Full docs: `~/repos/personal/foxctl/configs/agents/frontend-error-fixer.md`

@@ -3,7 +3,7 @@ package companion
 import (
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/agent"
 )
 
 // MemoryBehavior controls how the companion chat loop uses memory during reply generation.

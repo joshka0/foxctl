@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/domain/skill"
 )
 
 func TestBuildKeyDeterministic(t *testing.T) {

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: git/worktree
@@ -47,10 +47,10 @@ signature:
     long: |
       Use git/worktree to list, add, remove, or prune worktrees.
       Example commands:
-        agentctl run git/worktree --input '{"operation":"list"}'
-        agentctl skills run git/worktree --operation list
-        agentctl run git/worktree --input '{"operation":"add","path":"../feature","branch":"feat/one"}'
-        agentctl skills run git/worktree --operation add --path ../feature --branch feat/one
+        foxctl run git/worktree --input '{"operation":"list"}'
+        foxctl skills run git/worktree --operation list
+        foxctl run git/worktree --input '{"operation":"add","path":"../feature","branch":"feat/one"}'
+        foxctl skills run git/worktree --operation add --path ../feature --branch feat/one
     workflows:
       - id: list-worktrees
         description: "List worktrees."

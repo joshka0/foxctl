@@ -17,7 +17,7 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	expectedHome := filepath.Join(tmp, ".agentctl")
+	expectedHome := filepath.Join(tmp, ".foxctl")
 	if cfg.Home != expectedHome {
 		t.Fatalf("expected home %s got %s", expectedHome, cfg.Home)
 	}
@@ -55,13 +55,13 @@ func TestLoadWithConfigFile(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
-	home := filepath.Join(tmp, ".agentctl")
+	home := filepath.Join(tmp, ".foxctl")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
 	cfgFile := filepath.Join(home, "config.yaml")
-	content := []byte("inline_output_kb: 1024\nlogging:\n  level: warn\n  format: json\n  output: /tmp/agentctl-json.log\npaths:\n  cas: custom/cas\nopenapi:\n  plugin_path: plugins:/opt/agentctl/plugins\n")
+	content := []byte("inline_output_kb: 1024\nlogging:\n  level: warn\n  format: json\n  output: /tmp/foxctl-json.log\npaths:\n  cas: custom/cas\nopenapi:\n  plugin_path: plugins:/opt/foxctl/plugins\n")
 	if err := os.WriteFile(cfgFile, content, 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -84,12 +84,12 @@ func TestLoadWithConfigFile(t *testing.T) {
 	if cfg.Logging.Format != "json" {
 		t.Fatalf("expected logging format json got %s", cfg.Logging.Format)
 	}
-	if cfg.Logging.Output != "/tmp/agentctl-json.log" {
-		t.Fatalf("expected logging output /tmp/agentctl-json.log got %s", cfg.Logging.Output)
+	if cfg.Logging.Output != "/tmp/foxctl-json.log" {
+		t.Fatalf("expected logging output /tmp/foxctl-json.log got %s", cfg.Logging.Output)
 	}
 	expectedPluginPaths := []string{
 		filepath.Join(cfg.Home, "plugins"),
-		"/opt/agentctl/plugins",
+		"/opt/foxctl/plugins",
 	}
 	if diff := cmpSlices(expectedPluginPaths, cfg.OpenAPI.PluginPath); diff != "" {
 		t.Fatalf("unexpected plugin paths: %s", diff)
@@ -112,8 +112,8 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	t.Setenv("AGENTCTL_PATHS_CAS", "~/custom/cas")
 	t.Setenv("AGENTCTL_LOGGING_LEVEL", "DEBUG")
 	t.Setenv("AGENTCTL_LOGGING_FORMAT", "JSON")
-	t.Setenv("AGENTCTL_LOGGING_OUTPUT", "/tmp/env-agentctl.log")
-	t.Setenv("AGENTCTL_OPENAPI_PLUGIN_PATH", "~/plugins:/usr/local/agentctl/plugins")
+	t.Setenv("AGENTCTL_LOGGING_OUTPUT", "/tmp/env-foxctl.log")
+	t.Setenv("AGENTCTL_OPENAPI_PLUGIN_PATH", "~/plugins:/usr/local/foxctl/plugins")
 
 	cfg, err := Load(context.Background())
 	if err != nil {
@@ -157,12 +157,12 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	if cfg.Logging.Format != "json" {
 		t.Fatalf("expected logging format json got %s", cfg.Logging.Format)
 	}
-	if cfg.Logging.Output != "/tmp/env-agentctl.log" {
-		t.Fatalf("expected logging output /tmp/env-agentctl.log got %s", cfg.Logging.Output)
+	if cfg.Logging.Output != "/tmp/env-foxctl.log" {
+		t.Fatalf("expected logging output /tmp/env-foxctl.log got %s", cfg.Logging.Output)
 	}
 	expectedPluginPaths := []string{
 		filepath.Join(tmp, "plugins"),
-		"/usr/local/agentctl/plugins",
+		"/usr/local/foxctl/plugins",
 	}
 	if diff := cmpSlices(expectedPluginPaths, cfg.OpenAPI.PluginPath); diff != "" {
 		t.Fatalf("unexpected plugin paths: %s", diff)
@@ -186,7 +186,7 @@ func TestInvalidInlineOutputFallsBackToDefault(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
-	home := filepath.Join(tmp, ".agentctl")
+	home := filepath.Join(tmp, ".foxctl")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestLoadWithWorkspaceConfigOverridesLLMAndEmbedding(t *testing.T) {
 	t.Setenv("HOME", tmp)
 	t.Setenv("AGENTCTL_LLM_PROVIDER", "lmstudio")
 
-	home := filepath.Join(tmp, ".agentctl")
+	home := filepath.Join(tmp, ".foxctl")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatalf("mkdir home: %v", err)
 	}
@@ -226,10 +226,10 @@ embedding:
 	}
 
 	workspace := filepath.Join(tmp, "foxway")
-	if err := os.MkdirAll(filepath.Join(workspace, ".agentctl"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(workspace, ".foxctl"), 0o755); err != nil {
 		t.Fatalf("mkdir workspace config dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, ".agentctl", "config.yaml"), []byte(`
+	if err := os.WriteFile(filepath.Join(workspace, ".foxctl", "config.yaml"), []byte(`
 llm:
   provider: openrouter
   model: workspace-model

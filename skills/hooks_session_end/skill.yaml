@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/session_end
@@ -44,8 +44,8 @@ signature:
     long: |
       Use hooks/session_end to collect session metrics on SessionEnd events.
       Example commands:
-        agentctl run hooks/session_end --input '{"event":"SessionEnd","workspace_root":"/workspace/project","session_id":"abc123"}'
-        agentctl skills run hooks/session_end --event SessionEnd --workspace_root /workspace/project --session_id abc123
+        foxctl run hooks/session_end --input '{"event":"SessionEnd","workspace_root":"/workspace/project","session_id":"abc123"}'
+        foxctl skills run hooks/session_end --event SessionEnd --workspace_root /workspace/project --session_id abc123
     workflows:
       - id: session-stop
         description: "Capture metrics on Stop."

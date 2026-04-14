@@ -51,7 +51,7 @@ env:
 
 jobs:
   label-ai:
-    runs-on: arc-runner-agentctl
+    runs-on: arc-runner-foxctl
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions-ecosystem/action-add-labels@v1
@@ -61,9 +61,9 @@ jobs:
           labels: ai-generated
 
   static-analysis:
-    runs-on: arc-runner-agentctl
+    runs-on: arc-runner-foxctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
+      image: ghcr.io/${{ github.repository_owner }}/foxctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -106,9 +106,9 @@ jobs:
         run: make check-tech-debt
 
   unit-tests:
-    runs-on: arc-runner-agentctl
+    runs-on: arc-runner-foxctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
+      image: ghcr.io/${{ github.repository_owner }}/foxctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -138,9 +138,9 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   race-tests:
-    runs-on: arc-runner-agentctl
+    runs-on: arc-runner-foxctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
+      image: ghcr.io/${{ github.repository_owner }}/foxctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -164,9 +164,9 @@ jobs:
           fi
 
   build:
-    runs-on: arc-runner-agentctl
+    runs-on: arc-runner-foxctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
+      image: ghcr.io/${{ github.repository_owner }}/foxctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -199,15 +199,15 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: agentctl-${{ runner.os }}-go1.26.1
+          name: foxctl-${{ runner.os }}-go1.26.1
           path: |
-            bin/agentctl
+            bin/foxctl
             dist/skills/**
 
   cgo-build-and-tests:
-    runs-on: arc-runner-agentctl
+    runs-on: arc-runner-foxctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
+      image: ghcr.io/${{ github.repository_owner }}/foxctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -251,9 +251,9 @@ jobs:
             -count=1 -v
 
   integration-tests:
-    runs-on: arc-runner-agentctl
+    runs-on: arc-runner-foxctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
+      image: ghcr.io/${{ github.repository_owner }}/foxctl-ci:go1.26.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -286,7 +286,7 @@ jobs:
         cgo-build-and-tests,
         integration-tests,
       ]
-    runs-on: arc-runner-agentctl
+    runs-on: arc-runner-foxctl
     steps:
       - run: echo "✅ All checks passed"
 
@@ -294,7 +294,7 @@ jobs:
     name: Release (tags only)
     if: startsWith(github.ref, 'refs/tags/')
     needs: [static-analysis, unit-tests, race-tests, build]
-    runs-on: arc-runner-agentctl
+    runs-on: arc-runner-foxctl
     steps:
       - uses: actions/checkout@v4
         with:

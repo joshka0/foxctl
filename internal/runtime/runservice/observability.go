@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/maputil"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/platform/maputil"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // resultArtifacts holds CAS digests extracted from execution results.

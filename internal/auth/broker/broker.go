@@ -3,7 +3,7 @@ package authbroker
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/domain/identity"
+	"github.com/joshka0/foxctl/internal/domain/identity"
 )
 
 type Provider string

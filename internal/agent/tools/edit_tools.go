@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
-	"github.com/jkatigb/agentctl/internal/platform/maputil"
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
+	"github.com/joshka0/foxctl/internal/platform/maputil"
+	tooling "github.com/joshka0/foxctl/internal/tooling"
 )
 
 // StructuredDiff represents a diff output from code/diff skill.

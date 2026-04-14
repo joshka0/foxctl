@@ -16,14 +16,14 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/sse"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage/agents"
-	"github.com/jkatigb/agentctl/internal/storage/blackboard"
-	"github.com/jkatigb/agentctl/internal/storage/coordination"
-	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/interfaces/web/sse"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage/agents"
+	"github.com/joshka0/foxctl/internal/storage/blackboard"
+	"github.com/joshka0/foxctl/internal/storage/coordination"
+	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 type testRoomEventPublisher struct {
@@ -53,7 +53,7 @@ func activateAPIRoomLoop(t *testing.T, cfg config.Config, workspaceID, roomID st
 		WorkspaceID:             workspaceID,
 		RoomID:                  roomID,
 		Enabled:                 true,
-		ManagedBy:               "agentctl.room.loop/test",
+		ManagedBy:               "foxctl.room.loop/test",
 		LastTickAt:              &now,
 		DeliveryLeaseName:       leaseName,
 		DeliveryOwnerID:         "owner-a",
@@ -263,7 +263,7 @@ func TestRoomDetailHandler_GetAndPostMessages(t *testing.T) {
 
 	memberPatchReq := httptest.NewRequest(http.MethodPatch, "/api/rooms/alpha/members?workspace_id=ws1", strings.NewReader(`{
 		"actor_id":"actor:agent:a",
-		"members":[{"actor_id":"actor:agent:c","role":"owner","delivery_binding":{"mux_backend":"tmux","mux_session":"room-alpha","mux_pane_id":"%9","transport_endpoint":"/tmp/agentctl-pane/actor-c.sock","transport_kind":"pane_socket","submit_mode":"composer_ctrl_enter"}}]
+		"members":[{"actor_id":"actor:agent:c","role":"owner","delivery_binding":{"mux_backend":"tmux","mux_session":"room-alpha","mux_pane_id":"%9","transport_endpoint":"/tmp/foxctl-pane/actor-c.sock","transport_kind":"pane_socket","submit_mode":"composer_ctrl_enter"}}]
 	}`))
 	memberPatchRR := httptest.NewRecorder()
 	h.ServeHTTP(memberPatchRR, memberPatchReq)
@@ -1454,7 +1454,7 @@ func TestRoomDetailHandler_GetStatusReturnsPersistedLoopState(t *testing.T) {
 		WorkspaceID:             "ws1",
 		RoomID:                  "alpha",
 		Enabled:                 false,
-		ManagedBy:               "agentctl.room.loop/test",
+		ManagedBy:               "foxctl.room.loop/test",
 		LastTickAt:              &lastTick,
 		DeliveryLeaseName:       "room-loop:ws1:alpha:delivery",
 		DeliveryOwnerID:         "owner-a",
@@ -1507,8 +1507,8 @@ func TestRoomDetailHandler_GetStatusReturnsPersistedLoopState(t *testing.T) {
 	if got := loop["enabled"].(bool); got {
 		t.Fatalf("enabled=%v want false", got)
 	}
-	if got := strings.TrimSpace(loop["managed_by"].(string)); got != "agentctl.room.loop/test" {
-		t.Fatalf("managed_by=%q want agentctl.room.loop/test", got)
+	if got := strings.TrimSpace(loop["managed_by"].(string)); got != "foxctl.room.loop/test" {
+		t.Fatalf("managed_by=%q want foxctl.room.loop/test", got)
 	}
 	if got := strings.TrimSpace(loop["pulse_interval"].(string)); got != "45m0s" {
 		t.Fatalf("pulse_interval=%q want 45m0s", got)
@@ -1556,7 +1556,7 @@ func TestRequireActiveRoomLoopAPIRequiresDeliveryOwner(t *testing.T) {
 		WorkspaceID:             "ws1",
 		RoomID:                  "alpha",
 		Enabled:                 true,
-		ManagedBy:               "agentctl.room.loop/test",
+		ManagedBy:               "foxctl.room.loop/test",
 		LastTickAt:              &now,
 		PulseInterval:           45 * time.Minute,
 		ReplyStaleAfter:         90 * time.Minute,
@@ -1584,7 +1584,7 @@ func TestRequireActiveRoomLoopAPIRequiresDeliveryOwner(t *testing.T) {
 		WorkspaceID:             "ws1",
 		RoomID:                  "alpha",
 		Enabled:                 true,
-		ManagedBy:               "agentctl.room.loop/test",
+		ManagedBy:               "foxctl.room.loop/test",
 		LastTickAt:              &now,
 		DeliveryLeaseName:       leaseName,
 		DeliveryOwnerID:         "owner-a",
@@ -1770,7 +1770,7 @@ func TestRoomDetailHandler_GetLoopReturnsPersistedState(t *testing.T) {
 		WorkspaceID:             "ws1",
 		RoomID:                  "alpha",
 		Enabled:                 true,
-		ManagedBy:               "agentctl.room.loop/test",
+		ManagedBy:               "foxctl.room.loop/test",
 		LastTickAt:              &lastTick,
 		PulseInterval:           45 * time.Minute,
 		ReplyStaleAfter:         90 * time.Minute,
@@ -1790,8 +1790,8 @@ func TestRoomDetailHandler_GetLoopReturnsPersistedState(t *testing.T) {
 	}
 	body := decodeResponseBody(t, rr)
 	loop := body["loop"].(map[string]any)
-	if got := strings.TrimSpace(loop["managed_by"].(string)); got != "agentctl.room.loop/test" {
-		t.Fatalf("managed_by=%q want agentctl.room.loop/test", got)
+	if got := strings.TrimSpace(loop["managed_by"].(string)); got != "foxctl.room.loop/test" {
+		t.Fatalf("managed_by=%q want foxctl.room.loop/test", got)
 	}
 	if got := strings.TrimSpace(loop["pulse_interval"].(string)); got != "45m0s" {
 		t.Fatalf("pulse_interval=%q want 45m0s", got)

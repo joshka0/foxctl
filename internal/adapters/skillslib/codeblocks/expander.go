@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	codeexpander "github.com/jkatigb/agentctl/internal/intelligence/codecontext/expander"
-	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	codeexpander "github.com/joshka0/foxctl/internal/intelligence/codecontext/expander"
+	"github.com/joshka0/foxctl/internal/platform/fsutil"
 )
 
 // Language represents a supported programming language.

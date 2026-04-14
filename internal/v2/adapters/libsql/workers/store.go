@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 // ErrNotFound indicates missing worker rows.

@@ -49,7 +49,7 @@ func _handle_script_create(params: Dictionary) -> Dictionary:
 
 	# Build script content
 	var content := "extends %s\n" % extends_class
-	content += "## Auto-generated script by agentctl\n\n"
+	content += "## Auto-generated script by foxctl\n\n"
 
 	# Add signals
 	for sig in signals_list:

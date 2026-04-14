@@ -3,7 +3,7 @@ package optimization_test
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/agent/optimization"
+	"github.com/joshka0/foxctl/internal/agent/optimization"
 )
 
 func TestPromptJudgeScoresTargetAlignedOutputHigherThanGeneric(t *testing.T) {

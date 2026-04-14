@@ -14,13 +14,13 @@ func TestRecordRetrievalProposalDedupes(t *testing.T) {
 	inspection := RetrievalInspection{
 		Query:          "storage memory package",
 		ExpectedPaths:  []string{"internal/storage/memory/store.go"},
-		RetrievedPaths: []string{"notes/repo/agentctl/semantic-and-memory.md"},
+		RetrievedPaths: []string{"notes/repo/foxctl/semantic-and-memory.md"},
 		Classification: "package_note_fallback_disabled",
 		Observation: Observation{
 			Statement:    "ACA retrieval missed deterministic package-note fallback.",
 			Confidence:   0.82,
 			Count:        1,
-			Project:      "agentctl",
+			Project:      "foxctl",
 			Area:         "aca-retrieval",
 			EvidenceRefs: []string{"query:storage memory package"},
 			FirstSeen:    time.Now().UTC(),
@@ -29,7 +29,7 @@ func TestRecordRetrievalProposalDedupes(t *testing.T) {
 		Proposal: RetrievalCorrectionAction{
 			Kind:       "policy_patch",
 			Summary:    "Enable deterministic ACA package-note fallback for this workspace.",
-			PolicyPath: ".agentctl/policy/retrieval.yaml",
+			PolicyPath: ".foxctl/policy/retrieval.yaml",
 			PolicyPatch: "aca:\n" +
 				"  package_note_fallback: true\n",
 		},
@@ -136,7 +136,7 @@ func TestApplyEvidenceProposalPreparesReviewJob(t *testing.T) {
 		ProposedChange: map[string]any{
 			"evidence_import_id":         "E-123",
 			"title":                      "ACA Vocabulary Review",
-			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
 			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
@@ -204,7 +204,7 @@ Existing review block.
 `), 0o644); err != nil {
 		t.Fatalf("write target note: %v", err)
 	}
-	draftRel := "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-vocabulary-review.md"
+	draftRel := "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md"
 	draftAbs := filepath.Join(vaultRoot, filepath.FromSlash(draftRel))
 	if err := os.MkdirAll(filepath.Dir(draftAbs), 0o755); err != nil {
 		t.Fatalf("mkdir draft dir: %v", err)
@@ -281,7 +281,7 @@ func TestClaimAndReleaseProposalMergeTask(t *testing.T) {
 		BlastRadius:    "medium",
 		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
 			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},

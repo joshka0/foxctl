@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/storage/agents"
-	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	"github.com/joshka0/foxctl/internal/agent/types"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/storage/agents"
+	"github.com/joshka0/foxctl/internal/storage/mailbox"
 	"github.com/oklog/ulid/v2"
 	"github.com/stretchr/testify/require"
 )

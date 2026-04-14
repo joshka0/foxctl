@@ -21,10 +21,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -629,7 +629,7 @@ func initLocalWallet(ctx context.Context, rc *skillmain.RunContext, network, key
 		}
 
 		// Save generated key
-		keyDir := filepath.Join(os.Getenv("HOME"), ".agentctl", "keys")
+		keyDir := filepath.Join(os.Getenv("HOME"), ".foxctl", "keys")
 		if err := os.MkdirAll(keyDir, 0o700); err != nil {
 			return nil, skillerr.IO("create key directory", skillerr.WithCause(err))
 		}
@@ -656,7 +656,7 @@ func initLocalWallet(ctx context.Context, rc *skillmain.RunContext, network, key
 func walletConfigPath(rc *skillmain.RunContext) string {
 	home := os.Getenv("AGENTCTL_HOME")
 	if home == "" {
-		home = filepath.Join(os.Getenv("HOME"), ".agentctl")
+		home = filepath.Join(os.Getenv("HOME"), ".foxctl")
 	}
 	return filepath.Join(home, "x402_wallet.json")
 }

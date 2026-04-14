@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	"github.com/joshka0/foxctl/internal/storage/mailbox"
 )
 
 func TestNewSystem(t *testing.T) {

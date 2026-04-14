@@ -69,7 +69,7 @@ func ResolveObsDir() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(homeDir, ".agentctl", "observability")
+	return filepath.Join(homeDir, ".foxctl", "observability")
 }
 
 // QueryEventRecords returns observability events in the same shape consumed by the GUI logs view.

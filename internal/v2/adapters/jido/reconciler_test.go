@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
+	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 func TestReconciler_RecordAskDispatchedAndCallback(t *testing.T) {

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/counsel
@@ -82,7 +82,7 @@ signature:
 
       1. **Auto-select and analyze:**
          ```bash
-         agentctl run code/counsel --input '{"query": "review auth flow"}'
+         foxctl run code/counsel --input '{"query": "review auth flow"}'
          ```
 
       Repo-index modes for auto-selection:
@@ -93,7 +93,7 @@ signature:
 
       2. **Specific perspectives:**
          ```bash
-         agentctl run code/counsel --input '{
+         foxctl run code/counsel --input '{
            "query": "check for security issues",
            "perspectives": ["security", "correctness"]
          }'
@@ -101,7 +101,7 @@ signature:
 
       3. **Specific files:**
          ```bash
-         agentctl run code/counsel --input '{
+         foxctl run code/counsel --input '{
            "query": "review this implementation",
            "files": ["internal/auth/handler.go"],
            "perspectives": ["security"]
@@ -111,10 +111,10 @@ signature:
       4. **Pipeline with smart_read:**
          ```bash
          # First gather context
-         evidence=$(agentctl run code/smart_read --input '{"query": "auth"}' --jq '.data.evidence')
+         evidence=$(foxctl run code/smart_read --input '{"query": "auth"}' --jq '.data.evidence')
 
          # Then analyze
-         agentctl run code/counsel --input "{\"query\": \"security review\", \"evidence\": $evidence}"
+         foxctl run code/counsel --input "{\"query\": \"security review\", \"evidence\": $evidence}"
          ```
 
       **Environment Variables:**

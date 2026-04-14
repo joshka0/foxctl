@@ -9,8 +9,8 @@
 
 - **Goal:** Make named memories a first-class, ergonomic feature:
   - Stable _storage model_ for named memories.
-  - Predictable _CLI UX_ around `agentctl memory …`.
-  - Clear _integration_ with `agentctl run --remember …`.
+  - Predictable _CLI UX_ around `foxctl memory …`.
+  - Clear _integration_ with `foxctl run --remember …`.
 - **Non-goals (for later phases):**
   - Vector/semantic search over memories (embedding column exists but is
     optional).
@@ -82,7 +82,7 @@ found.
 
 ## 4. Creation Flows
 
-### 4.1 `agentctl run --remember`
+### 4.1 `foxctl run --remember`
 
 Primary creation path via `runservice.remember.go`.
 
@@ -239,12 +239,12 @@ Primary creation path via `runservice.remember.go`.
 ## 9. Acceptance Criteria
 
 - [ ] `UNIQUE(name, workspace)` enforced at DB level and via tests.
-- [ ] `agentctl run … --remember foo` creates named memory in inferred
+- [ ] `foxctl run … --remember foo` creates named memory in inferred
       workspace.
 - [ ] Omitted `--remember-summary` uses `protocol.SummarizeForMemoryBytes`.
-- [ ] `agentctl memory get foo` replays same envelope as original result.
-- [ ] `agentctl memory list` shows recently updated memories.
-- [ ] `agentctl memory relevant` returns high-value memories.
+- [ ] `foxctl memory get foo` replays same envelope as original result.
+- [ ] `foxctl memory list` shows recently updated memories.
+- [ ] `foxctl memory relevant` returns high-value memories.
 - [ ] `memory get <missing>` → `ENOTFOUND` with hint.
 - [ ] `run --remember` still succeeds when memory DB unavailable.
 - [ ] Section "Memory" in `core_profile_v1.md` updated.

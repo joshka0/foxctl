@@ -10,7 +10,7 @@ Restores session state after compaction via SessionStart hook.
 ## Usage
 
 ```bash
-agentctl run session/restore --input '{"trigger": "compact"}'
+foxctl run session/restore --input '{"trigger": "compact"}'
 ```
 
 ## What Gets Restored
@@ -25,4 +25,4 @@ agentctl run session/restore --input '{"trigger": "compact"}'
 
 Sets `AGENTCTL_SESSION_RESTORED=true` and injects markdown context.
 
-Full docs: `~/.agentctl/share/configs/skills/session-restore/Skill.md`
+Full docs: `~/.foxctl/share/configs/skills/session-restore/Skill.md`

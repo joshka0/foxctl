@@ -6,13 +6,13 @@
 # - Returns formatted findings as context injection
 #
 # Environment:
-#   AGENTCTL_BIN - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_COUNSEL_PERSPECTIVES - Comma-separated perspectives (default: security,correctness)
 #   AGENTCTL_COUNSEL_MAX_FILES - Max files to analyze (default: 8)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 PERSPECTIVES="${AGENTCTL_COUNSEL_PERSPECTIVES:-security,correctness}"
 MAX_FILES="${AGENTCTL_COUNSEL_MAX_FILES:-8}"
 

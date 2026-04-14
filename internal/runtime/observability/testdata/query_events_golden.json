@@ -6,7 +6,7 @@
     "component": "agent",
     "trace_id": "trace-b",
     "span_id": "span-b",
-    "service": "agentctl"
+    "service": "foxctl"
   },
   {
     "ts": "2026-03-20T08:00:00Z",
@@ -15,7 +15,7 @@
     "component": "cli",
     "trace_id": "trace-a",
     "span_id": "span-a",
-    "service": "agentctl",
+    "service": "foxctl",
     "error_code": "EWATCH",
     "error_message": "watch failed"
   }

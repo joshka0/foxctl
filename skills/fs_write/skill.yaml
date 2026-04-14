@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: fs/write
@@ -48,10 +48,10 @@ signature:
     long: |
       Use fs/write to create, overwrite, or append to files in the workspace.
       Example commands:
-        agentctl run fs/write --input '{"path":"./notes.txt","content":"Hello","mode":"overwrite"}'
-        agentctl skills run fs/write --path ./notes.txt --content "Hello" --mode overwrite
-        agentctl run fs/write --input '{"path":"./logs/output.txt","content":"Line","mode":"append","create_dirs":true}'
-        agentctl skills run fs/write --path ./logs/output.txt --content "Line" --mode append --create_dirs
+        foxctl run fs/write --input '{"path":"./notes.txt","content":"Hello","mode":"overwrite"}'
+        foxctl skills run fs/write --path ./notes.txt --content "Hello" --mode overwrite
+        foxctl run fs/write --input '{"path":"./logs/output.txt","content":"Line","mode":"append","create_dirs":true}'
+        foxctl skills run fs/write --path ./logs/output.txt --content "Line" --mode append --create_dirs
     workflows:
       - id: write-overwrite
         description: "Overwrite a file with new content."

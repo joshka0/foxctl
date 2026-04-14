@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	actormemory "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	actormemory "github.com/joshka0/foxctl/internal/runtime/actor/memory"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 	"github.com/rs/zerolog"
 )
 

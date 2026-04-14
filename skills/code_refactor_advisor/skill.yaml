@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/refactor_advisor
@@ -134,7 +134,7 @@ signature:
       - model: google/gemini-3.1-flash-lite-preview
 
       Example:
-        agentctl run code/refactor_advisor --input '{
+        foxctl run code/refactor_advisor --input '{
           "path":"./internal",
           "language":"go",
           "focus":"slop",

@@ -1,0 +1,556 @@
+package cmd
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/joshka0/foxctl/internal/intelligence/codemap"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/oklog/ulid/v2"
+	"github.com/spf13/cobra"
+)
+
+func newCodemapCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "codemap",
+		Short: "Generate and manage semantic codemaps",
+		Long: `Semantic codemaps show how different parts of a codebase connect.
+
+A codemap contains:
+- Traces: Execution paths or relationships
+- Annotations: Specific code locations with explanations
+- ASCII trees: Visual representation of connections
+
+Use codemaps to understand complex codebases, trace data flows,
+and document architectural relationships.`,
+	}
+	cmd.AddCommand(
+		newCodemapGenerateCommand(),
+		newCodemapListCommand(),
+		newCodemapShowCommand(),
+		newCodemapDeleteCommand(),
+		newCodemapSearchCommand(),
+		newCodemapImportCommand(),
+	)
+	return cmd
+}
+
+func newCodemapGenerateCommand() *cobra.Command {
+	var workspace string
+	var depth int
+	var timeout string
+
+	cmd := &cobra.Command{
+		Use:   "generate <query>",
+		Short: "Generate a semantic codemap for a query",
+		Long: `Generate a semantic codemap that answers a natural language query.
+
+The agent explores the codebase, gathering context from:
+- Dependency graph (imports, calls, references)
+- Code symbols (functions, types, methods)
+- Pattern matching (ripgrep search)
+
+Depth controls exploration thoroughness:
+  1 = Quick (~5 tool calls)
+  2 = Standard (~10 tool calls, default)
+  3 = Detailed (~15 tool calls)
+  4 = Deep (~25 tool calls)
+  5 = Exhaustive (~40 tool calls)
+
+Examples:
+  foxctl codemap generate "how does authentication connect to database"
+  foxctl codemap generate "trace the request handling flow" --depth 3
+  foxctl codemap generate "what files share the logging package" --timeout 5m`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			query := args[0]
+			payload := map[string]any{
+				"query":          query,
+				"depth":          depth,
+				"correlation_id": ulid.Make().String(),
+				"cli_command":    cmd.CommandPath(),
+			}
+			if workspace != "" {
+				payload["workspace"] = workspace
+			}
+			return runCodemapSkillWithTimeout(cmd, "codemap/generate", payload, timeout)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (defaults to current directory)")
+	cmd.Flags().IntVar(&depth, "depth", 2, "Exploration depth: 1=quick, 2=standard, 3=detailed, 4=deep, 5=exhaustive")
+	cmd.Flags().StringVar(&timeout, "timeout", "5m", "Maximum execution time (e.g., 30s, 2m, 5m)")
+	return cmd
+}
+
+func newCodemapListCommand() *cobra.Command {
+	var workspace string
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List stored codemaps",
+		Long: `List all codemaps stored for the workspace.
+
+Codemaps are stored in the memory store with type="codemap".
+
+Examples:
+  foxctl codemap list
+  foxctl codemap list --limit 20
+  foxctl codemap list --workspace /path/to/project`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+
+			memStore, workspacePath, err := openCodemapMemoryStore(cmd, workspace)
+			if err != nil {
+				return err
+			}
+			defer memStore.Close()
+
+			// List all entries and filter by type=codemap
+			allEntries, err := memStore.List(ctx, workspacePath, limit*5) // Fetch more to filter
+			if err != nil {
+				return fmt.Errorf("list entries: %w", err)
+			}
+
+			// Filter to only codemap entries
+			var entries []memory.NamedEntry
+			for _, entry := range allEntries {
+				if entry.Type == "codemap" {
+					entries = append(entries, entry)
+					if len(entries) >= limit {
+						break
+					}
+				}
+			}
+
+			if len(entries) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "No codemaps found. Generate one with: foxctl codemap generate \"<query>\"")
+				return nil
+			}
+
+			// Output as formatted list
+			fmt.Fprintf(cmd.OutOrStdout(), "Found %d codemap(s):\n\n", len(entries))
+			for i, entry := range entries {
+				// Extract title and query from result JSON
+				var data map[string]any
+				title := entry.Name
+				query := ""
+				fileCount := 0
+				if entry.Result != nil {
+					if json.Unmarshal(entry.Result, &data) == nil {
+						if t, ok := data["title"].(string); ok {
+							title = t
+						}
+						if q, ok := data["query"].(string); ok {
+							query = q
+						}
+						if fc, ok := data["file_count"].(float64); ok {
+							fileCount = int(fc)
+						}
+					}
+				}
+
+				fmt.Fprintf(cmd.OutOrStdout(), "%d. %s\n", i+1, title)
+				fmt.Fprintf(cmd.OutOrStdout(), "   ID: %s\n", entry.Name)
+				if query != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "   Query: %s\n", truncateString(query, 60))
+				}
+				if fileCount > 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "   Files: %d\n", fileCount)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "   Created: %s\n", entry.CreatedAt.Format("2006-01-02 15:04:05"))
+				fmt.Fprintln(cmd.OutOrStdout())
+			}
+
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (defaults to current directory)")
+	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum number of codemaps to list")
+	return cmd
+}
+
+func newCodemapShowCommand() *cobra.Command {
+	var workspace string
+	var jsonOutput bool
+
+	cmd := &cobra.Command{
+		Use:   "show <id>",
+		Short: "Show a stored codemap",
+		Long: `Display a stored codemap by ID.
+
+The codemap is rendered with traces, annotations, and ASCII trees.
+
+Examples:
+  foxctl codemap show my-codemap-id
+  foxctl codemap show my-codemap-id --json`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			codemapID := args[0]
+			ctx := cmd.Context()
+
+			memStore, workspacePath, err := openCodemapMemoryStore(cmd, workspace)
+			if err != nil {
+				return err
+			}
+			defer memStore.Close()
+
+			// Fetch the codemap
+			entry, err := memStore.Get(ctx, codemapID, workspacePath)
+			if err != nil {
+				return fmt.Errorf("get codemap: %w", err)
+			}
+
+			if jsonOutput {
+				// Output raw JSON
+				if entry.Result != nil {
+					fmt.Fprintln(cmd.OutOrStdout(), string(entry.Result))
+				} else {
+					fmt.Fprintln(cmd.OutOrStdout(), "{}")
+				}
+				return nil
+			}
+
+			// Parse and render formatted output
+			return renderCodemap(cmd, entry.Result)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (defaults to current directory)")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output raw JSON")
+	return cmd
+}
+
+func newCodemapDeleteCommand() *cobra.Command {
+	var workspace string
+
+	cmd := &cobra.Command{
+		Use:   "delete <id>",
+		Short: "Delete a stored codemap",
+		Long: `Delete a codemap by ID.
+
+Examples:
+  foxctl codemap delete my-codemap-id`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			codemapID := args[0]
+			ctx := cmd.Context()
+
+			memStore, workspacePath, err := openCodemapMemoryStore(cmd, workspace)
+			if err != nil {
+				return err
+			}
+			defer memStore.Close()
+
+			// Delete the codemap
+			if err := memStore.Delete(ctx, codemapID, workspacePath); err != nil {
+				return fmt.Errorf("delete codemap: %w", err)
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Deleted codemap: %s\n", codemapID)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (defaults to current directory)")
+	return cmd
+}
+
+func newCodemapSearchCommand() *cobra.Command {
+	var workspace string
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "search <query>",
+		Short: "Search codemaps using semantic similarity",
+		Long: `Search stored codemaps using semantic similarity.
+
+This uses the code/semantic_search skill with scope=codemaps.
+
+Examples:
+  foxctl codemap search "authentication flow"
+  foxctl codemap search "database connections" --limit 5`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			query := args[0]
+			payload := map[string]any{
+				"query":          query,
+				"scope":          []string{"codemaps"},
+				"limit":          limit,
+				"correlation_id": ulid.Make().String(),
+				"cli_command":    cmd.CommandPath(),
+			}
+			if workspace != "" {
+				payload["workspace"] = workspace
+			}
+			return runCodemapSkill(cmd, "code/semantic_search", payload)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (defaults to current directory)")
+	cmd.Flags().IntVar(&limit, "limit", 10, "Maximum number of results")
+	return cmd
+}
+
+func newCodemapImportCommand() *cobra.Command {
+	var workspace string
+	var recursive bool
+	var skipExisting bool
+	var embed bool
+
+	cmd := &cobra.Command{
+		Use:   "import <path>",
+		Short: "Import codemap files",
+		Long: `Import codemap JSON files into the memory store.
+
+Examples:
+  foxctl codemap import docs/codemaps/Skill_Resolution__Input_Loading__and_Run_Execution_Flow_20260115_003130.codemap
+  foxctl codemap import docs/codemaps --recursive`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := args[0]
+			payload := map[string]any{
+				"path":           path,
+				"recursive":      recursive,
+				"skip_existing":  skipExisting,
+				"embed":          embed,
+				"correlation_id": ulid.Make().String(),
+				"cli_command":    cmd.CommandPath(),
+			}
+			if workspace != "" {
+				payload["workspace"] = workspace
+			}
+			return runCodemapSkill(cmd, "codemap/import", payload)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (defaults to current directory)")
+	cmd.Flags().BoolVar(&recursive, "recursive", false, "Recursively scan directories for .codemap files")
+	cmd.Flags().BoolVar(&skipExisting, "skip-existing", true, "Skip codemaps that already exist")
+	cmd.Flags().BoolVar(&embed, "embed", true, "Generate embeddings for imported codemaps")
+	return cmd
+}
+
+func openCodemapMemoryStore(cmd *cobra.Command, workspaceFlag string) (*memory.Store, string, error) {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+
+	workspacePath := workspaceFlag
+	var err error
+	if workspacePath == "" {
+		workspacePath, err = os.Getwd()
+		if err != nil {
+			return nil, "", fmt.Errorf("get working directory: %w", err)
+		}
+	}
+	workspacePath, err = filepath.Abs(workspacePath)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	store, err := memory.OpenFromConfig(ctx, cfg)
+	if err != nil {
+		return nil, "", fmt.Errorf("open memory store: %w", err)
+	}
+	return store, workspacePath, nil
+}
+
+func runCodemapSkill(cmd *cobra.Command, skillName string, payload map[string]any) error {
+	return runCodemapSkillWithTimeout(cmd, skillName, payload, "")
+}
+
+func runCodemapSkillWithTimeout(cmd *cobra.Command, skillName string, payload map[string]any, timeout string) error {
+	cfg := config.MustFromContext(cmd.Context())
+	if _, err := findSkill(cfg, skillName); err != nil {
+		return fmt.Errorf("%s skill not found (run make skills-install): %w", skillName, err)
+	}
+	input, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	runCmd := newRunCommand()
+	runCmd.SetContext(cmd.Context())
+	runCmd.SetOut(cmd.OutOrStdout())
+	runCmd.SetErr(cmd.ErrOrStderr())
+	// Silence usage/errors since we're calling this programmatically
+	runCmd.SilenceUsage = true
+	runCmd.SilenceErrors = true
+	// Skill name must come first as the positional arg, then flags
+	args := []string{skillName, "--input", string(input)}
+	if timeout != "" {
+		args = append(args, "--timeout", timeout)
+	}
+	runCmd.SetArgs(args)
+	return runCmd.Execute()
+}
+
+func renderCodemap(cmd *cobra.Command, data []byte) error {
+	if data == nil {
+		return fmt.Errorf("codemap has no data")
+	}
+
+	if ws, ok, err := codemap.ParseWindsurfCodemap(data); err != nil {
+		return fmt.Errorf("parse codemap: %w", err)
+	} else if ok {
+		return renderWindsurfCodemap(cmd, ws)
+	}
+
+	var codemap struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Query       string `json:"query"`
+		FileCount   int    `json:"file_count"`
+		SymbolCount int    `json:"symbol_count"`
+		Traces      []struct {
+			Number      int    `json:"number"`
+			Title       string `json:"title"`
+			Summary     string `json:"summary"`
+			Tree        string `json:"tree"`
+			Annotations []struct {
+				Label       string `json:"label"`
+				Title       string `json:"title"`
+				Description string `json:"description"`
+				Path        string `json:"path"`
+			} `json:"annotations"`
+		} `json:"traces"`
+	}
+
+	if err := json.Unmarshal(data, &codemap); err != nil {
+		return fmt.Errorf("parse codemap: %w", err)
+	}
+
+	out := cmd.OutOrStdout()
+
+	// Header
+	fmt.Fprintf(out, "# %s\n\n", codemap.Title)
+	if codemap.Description != "" {
+		fmt.Fprintf(out, "%s\n\n", codemap.Description)
+	}
+	fmt.Fprintf(out, "**Query:** %s\n", codemap.Query)
+	fmt.Fprintf(out, "**Files:** %d | **Symbols:** %d\n\n", codemap.FileCount, codemap.SymbolCount)
+
+	// Traces
+	for _, trace := range codemap.Traces {
+		fmt.Fprintf(out, "## Trace %d: %s\n\n", trace.Number, trace.Title)
+		if trace.Summary != "" {
+			fmt.Fprintf(out, "%s\n\n", trace.Summary)
+		}
+		if trace.Tree != "" {
+			fmt.Fprintf(out, "```\n%s\n```\n\n", trace.Tree)
+		}
+
+		// Annotations
+		if len(trace.Annotations) > 0 {
+			fmt.Fprintln(out, "### Annotations")
+			for _, ann := range trace.Annotations {
+				fmt.Fprintf(out, "**[%s] %s**\n", ann.Label, ann.Title)
+				fmt.Fprintf(out, "  %s\n", ann.Description)
+				fmt.Fprintf(out, "  `%s`\n\n", ann.Path)
+			}
+		}
+	}
+
+	return nil
+}
+
+func renderWindsurfCodemap(cmd *cobra.Command, cm *codemap.WindsurfCodemap) error {
+	if cm == nil {
+		return fmt.Errorf("codemap has no data")
+	}
+
+	out := cmd.OutOrStdout()
+	title := cm.Title
+	if title == "" {
+		title = cm.ID
+	}
+
+	fmt.Fprintf(out, "# %s\n\n", title)
+	if cm.Description != "" {
+		fmt.Fprintf(out, "%s\n\n", cm.Description)
+	}
+	if cm.Metadata.OriginalPrompt != "" {
+		fmt.Fprintf(out, "**Prompt:** %s\n", cm.Metadata.OriginalPrompt)
+	}
+	if cm.Metadata.GenerationTimestamp != "" {
+		fmt.Fprintf(out, "**Generated:** %s\n", cm.Metadata.GenerationTimestamp)
+	}
+	if cm.Metadata.Mode != "" {
+		fmt.Fprintf(out, "**Mode:** %s\n", cm.Metadata.Mode)
+	}
+	if cm.Metadata.OriginalPrompt != "" || cm.Metadata.GenerationTimestamp != "" || cm.Metadata.Mode != "" {
+		fmt.Fprintln(out)
+	}
+
+	for i, trace := range cm.Traces {
+		traceTitle := trace.Title
+		if traceTitle == "" {
+			traceTitle = fmt.Sprintf("Trace %d", i+1)
+		}
+		if trace.ID != "" {
+			fmt.Fprintf(out, "## Trace %d: %s (%s)\n\n", i+1, traceTitle, trace.ID)
+		} else {
+			fmt.Fprintf(out, "## Trace %d: %s\n\n", i+1, traceTitle)
+		}
+		if trace.Description != "" {
+			fmt.Fprintf(out, "%s\n\n", trace.Description)
+		}
+		if trace.TraceTextDiagram != "" {
+			fmt.Fprintf(out, "```\n%s\n```\n\n", trace.TraceTextDiagram)
+		}
+		if trace.TraceGuide != "" {
+			fmt.Fprintf(out, "%s\n\n", trace.TraceGuide)
+		}
+
+		if len(trace.Locations) > 0 {
+			fmt.Fprintln(out, "### Locations")
+			for _, loc := range trace.Locations {
+				label := loc.ID
+				if label == "" {
+					label = "loc"
+				}
+				title := loc.Title
+				if title == "" {
+					title = loc.Path
+				}
+				fmt.Fprintf(out, "**[%s] %s**\n", label, title)
+				if loc.Description != "" {
+					fmt.Fprintf(out, "  %s\n", loc.Description)
+				}
+				if loc.Path != "" {
+					if loc.LineNumber > 0 {
+						fmt.Fprintf(out, "  `%s:%d`\n\n", loc.Path, loc.LineNumber)
+					} else {
+						fmt.Fprintf(out, "  `%s`\n\n", loc.Path)
+					}
+				} else {
+					fmt.Fprintln(out)
+				}
+			}
+		}
+	}
+
+	if cm.MermaidDiagram != "" {
+		fmt.Fprintln(out, "## Mermaid Diagram")
+		fmt.Fprintln(out)
+		fmt.Fprintf(out, "```mermaid\n%s\n```\n", cm.MermaidDiagram)
+	}
+
+	return nil
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
+func init() {
+	rootCmd.AddCommand(newCodemapCommand())
+}

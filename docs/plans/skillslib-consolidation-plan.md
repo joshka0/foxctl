@@ -148,7 +148,7 @@ func (rc *RunContext) Close() error {
 // runner/context.go
 package runner
 
-import "github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+import "github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 
 // RunnerContext wraps skillmain.RunContext for backward compatibility.
 // Deprecated: Use skillmain.RunContext directly.
@@ -187,11 +187,11 @@ func NewRunnerContext(cfg config.Config, stdout io.Writer) (*RunnerContext, erro
 **Update imports in skills that use `skillslib.PreparePreview`:**
 ```go
 // Before
-import "github.com/jkatigb/agentctl/internal/adapters/skillslib"
+import "github.com/joshka0/foxctl/internal/adapters/skillslib"
 preview, truncated := skillslib.PreparePreview(items, limit)
 
 // After
-import "github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+import "github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 preview, truncated := skillout.PreparePreview(items, limit)
 ```
 
@@ -345,7 +345,7 @@ import (
     "path/filepath"
     "strings"
 
-    "github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+    "github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 )
 
 // ResolveSearchPath validates and resolves a path for searching.
@@ -565,7 +565,7 @@ import (
     "fmt"
     "strings"
 
-    "github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+    "github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 )
 
 // Op normalizes an operation string (lowercase, trimmed).
@@ -644,7 +644,7 @@ import (
     "encoding/json"
     "fmt"
 
-    "github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+    "github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 )
 
 // DefaultExcludeGlobs are common directories to exclude from searches.

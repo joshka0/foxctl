@@ -17,22 +17,22 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	agentprompts "github.com/jkatigb/agentctl/internal/agent/prompts"
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	agenttypes "github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/runtime/daemon"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/agents"
-	"github.com/jkatigb/agentctl/internal/storage/blackboard"
-	"github.com/jkatigb/agentctl/internal/storage/contextvar"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	agentprompts "github.com/joshka0/foxctl/internal/agent/prompts"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	agenttypes "github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/runtime/daemon"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/agents"
+	"github.com/joshka0/foxctl/internal/storage/blackboard"
+	"github.com/joshka0/foxctl/internal/storage/contextvar"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	memorystore "github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 // AgentResponse represents an agent in API responses.
@@ -784,7 +784,7 @@ func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg 
 			AgentID:   agentID,
 			RequestID: "kill:" + agentID,
 			Signal:    "terminate",
-			Reason:    "agentctl web kill",
+			Reason:    "foxctl web kill",
 		})
 		if signalErr == nil {
 			if err := store.UpdateState(r.Context(), agentID, agenttypes.StateStopped); err != nil {
@@ -2585,7 +2585,7 @@ func loadSandboxRuntimeTree(agent agenttypes.Agent) *agentRuntimeTreeNode {
 		},
 		State: map[string]any{
 			"profile": "sandbox",
-			"agentctl": map[string]any{
+			"foxctl": map[string]any{
 				"status":           strings.TrimSpace(string(agent.State)),
 				"workspace_source": strings.TrimSpace(agent.WorkspaceSource),
 			},

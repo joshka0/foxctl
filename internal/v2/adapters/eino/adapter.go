@@ -9,10 +9,10 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
-// EinoEngineAdapter bridges Eino's adk.Agent to agentctl's engine.AgentEngine.
+// EinoEngineAdapter bridges Eino's adk.Agent to foxctl's engine.AgentEngine.
 //
 // This is an integration adapter — it is instantiated when AGENTCTL_ENGINE_BACKEND=eino
 // is set. The default LLMChatEngine path is unaffected when the gate is off.

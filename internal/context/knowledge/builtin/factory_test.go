@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/storage/knowledge"
+	"github.com/joshka0/foxctl/internal/storage/knowledge"
 )
 
 func TestListFactoryDroids(t *testing.T) {

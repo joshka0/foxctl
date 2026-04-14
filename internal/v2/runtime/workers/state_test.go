@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 func TestStateComponent_AppliesEventsAndBuildsSnapshot(t *testing.T) {

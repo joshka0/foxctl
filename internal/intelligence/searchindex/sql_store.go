@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/searchquery"
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
+	"github.com/joshka0/foxctl/internal/intelligence/searchquery"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 )
 
 const defaultSearchIndexLimit = 20
@@ -282,10 +282,10 @@ func (s *sqlStore) ValidateEmbeddingMetadata(ctx context.Context, workspaceID, m
 		return nil
 	}
 	if dimensions > 0 && meta.Dimensions != dimensions {
-		return fmt.Errorf("searchindex: embedding dimension mismatch: workspace %q expects model %q with %d dimensions, got %d; run `agentctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, meta.Model, meta.Dimensions, dimensions)
+		return fmt.Errorf("searchindex: embedding dimension mismatch: workspace %q expects model %q with %d dimensions, got %d; run `foxctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, meta.Model, meta.Dimensions, dimensions)
 	}
 	if model != "" && meta.Model != "" && meta.Model != model {
-		return fmt.Errorf("searchindex: embedding model mismatch: workspace %q expects model %q with %d dimensions, got model %q; run `agentctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, meta.Model, meta.Dimensions, model)
+		return fmt.Errorf("searchindex: embedding model mismatch: workspace %q expects model %q with %d dimensions, got model %q; run `foxctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, meta.Model, meta.Dimensions, model)
 	}
 	return nil
 }
@@ -594,10 +594,10 @@ VALUES ($1, $2, $3, $4, $5)
 		return fmt.Errorf("searchindex: read embedding metadata: %w", err)
 	}
 	if existingDims != dimensions {
-		return fmt.Errorf("searchindex: embedding dimension mismatch: workspace %q expects model %q with %d dimensions, got %d; run `agentctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, existingModel, existingDims, dimensions)
+		return fmt.Errorf("searchindex: embedding dimension mismatch: workspace %q expects model %q with %d dimensions, got %d; run `foxctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, existingModel, existingDims, dimensions)
 	}
 	if existingModel != "" && existingModel != model {
-		return fmt.Errorf("searchindex: embedding model mismatch: workspace %q expects model %q with %d dimensions, got model %q; run `agentctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, existingModel, existingDims, model)
+		return fmt.Errorf("searchindex: embedding model mismatch: workspace %q expects model %q with %d dimensions, got model %q; run `foxctl index init --workspace <workspace-path> --scope symbols` to rebuild symbol/search embeddings", workspaceID, existingModel, existingDims, model)
 	}
 	return nil
 }

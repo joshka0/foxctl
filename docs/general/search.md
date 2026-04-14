@@ -14,10 +14,10 @@ Machine-friendly reference for semantic retrieval, reranking, and repo graph sea
 
 | Surface | Command | Best use |
 |--------|---------|----------|
-| Unified semantic search | `agentctl run code/semantic_search --input ...` | Cross-source retrieval (`symbols`, `sessions`, `memories`, `tasks`, `codemaps`) |
-| Smart code search | `agentctl run code/smart_search --input ...` | Code-file retrieval plus evidence extraction |
-| Snippet extraction | `agentctl run code/snippet_extract --input ...` | Anchor-aware code evidence extraction from known candidates |
-| Repo graph index | `agentctl index repo <build|search|expand|open|ask>` | Structural relationships (calls/refers/imports) |
+| Unified semantic search | `foxctl run code/semantic_search --input ...` | Cross-source retrieval (`symbols`, `sessions`, `memories`, `tasks`, `codemaps`) |
+| Smart code search | `foxctl run code/smart_search --input ...` | Code-file retrieval plus evidence extraction |
+| Snippet extraction | `foxctl run code/snippet_extract --input ...` | Anchor-aware code evidence extraction from known candidates |
+| Repo graph index | `foxctl index repo <build|search|expand|open|ask>` | Structural relationships (calls/refers/imports) |
 
 ## Code Search Stack
 
@@ -109,10 +109,10 @@ Formula: `score = alpha * bm25_scaled + (1 - alpha) * vector_scaled`
 ## Repo Graph Index Flow
 
 ```bash
-agentctl index repo build --dry-run --workspace . --go --typescript --elixir
-agentctl index repo build --workspace . --go --typescript --elixir
-agentctl index repo search --workspace . --query "Supervisor" --limit 10
-agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
+foxctl index repo build --dry-run --workspace . --go --typescript --elixir
+foxctl index repo build --workspace . --go --typescript --elixir
+foxctl index repo search --workspace . --query "Supervisor" --limit 10
+foxctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
 ```
 
 ## Common Failure Modes

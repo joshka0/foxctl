@@ -27,7 +27,7 @@ hot path with background synchronization to SQLite for querying.
 ### Via skillslib/obs (Recommended)
 
 ```go
-import "github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
+import "github.com/joshka0/foxctl/internal/adapters/skillslib/obs"
 
 // Default persistence (NDJSON)
 ctx, done, span := obs.StartSpan(ctx, "skill.run",
@@ -60,7 +60,7 @@ defer func() { done(err) }()
 ### Via internal/runtime/observability
 
 ```go
-import "github.com/jkatigb/agentctl/internal/runtime/observability"
+import "github.com/joshka0/foxctl/internal/runtime/observability"
 
 // Using span options
 ctx, done, span := observability.StartSpan(ctx, observability.OpSkillRun,
@@ -122,7 +122,7 @@ from NDJSON files and writes to SQLite.
 ### Initialization
 
 ```go
-import "github.com/jkatigb/agentctl/internal/runtime/observability"
+import "github.com/joshka0/foxctl/internal/runtime/observability"
 
 // Initialize persistence at startup (call once)
 if err := observability.InitPersistence(ctx); err != nil {

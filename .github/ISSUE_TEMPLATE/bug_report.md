@@ -17,7 +17,7 @@ body:
       label: Steps to reproduce
       description: Commands or actions that trigger the issue
       placeholder: |
-        1. Run `agentctl ...`
+        1. Run `foxctl ...`
         2. ...
     validations:
       required: true
@@ -25,11 +25,11 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: OS, Go version, agentctl version
+      description: OS, Go version, foxctl version
       placeholder: |
         - OS: macOS 15 / Ubuntu 24.04
         - Go: 1.25
-        - agentctl: v0.X.Y
+        - foxctl: v0.X.Y
     validations:
       required: false
   - type: textarea

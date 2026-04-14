@@ -11,13 +11,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/codeedit"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/diffutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/codeedit"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/diffutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
+	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 // applyDefaultsAndValidate applies defaults and validates required fields (mirrors run function).

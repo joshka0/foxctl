@@ -148,11 +148,11 @@ func DefaultMetaPath(scopeID, participantID string) string {
 }
 
 func socketBaseDir() string {
-	defaultRoot := filepath.Join(os.TempDir(), "agentctl-pane")
+	defaultRoot := filepath.Join(os.TempDir(), "foxctl-pane")
 	if runtime.GOOS == "windows" {
 		return defaultRoot
 	}
-	shortRoot := filepath.Join(string(filepath.Separator), "tmp", "agentctl-pane")
+	shortRoot := filepath.Join(string(filepath.Separator), "tmp", "foxctl-pane")
 	if len(shortRoot) < len(defaultRoot) {
 		return shortRoot
 	}

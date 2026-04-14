@@ -1,18 +1,18 @@
-# Horizontal Pod Autoscaler for agentctl
+# Horizontal Pod Autoscaler for foxctl
 
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: agentctl
-  namespace: agentctl
+  name: foxctl
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: autoscaling
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: agentctl
+    name: foxctl
 
   minReplicas: 2
   maxReplicas: 10

@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 // FakeEventStore is an in-memory deterministic events appender for tests.

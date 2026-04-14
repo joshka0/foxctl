@@ -33,7 +33,7 @@ export async function sendMagicLinkEmail(
     from: config.smtp.from,
     to: email,
     replyTo: config.smtp.replyTo,
-    subject: "Your agentctl gui-agent sign-in link",
+    subject: "Your foxctl gui-agent sign-in link",
     text: `Sign in to gui-agent by opening this link:\n\n${url}\n\nIf you did not request this link, you can ignore this email.`,
     html: `<p>Sign in to <strong>gui-agent</strong> by opening this link:</p><p><a href="${url}">${url}</a></p><p>If you did not request this link, you can ignore this email.</p>`,
   });

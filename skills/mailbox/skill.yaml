@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: mailbox/manage
@@ -48,10 +48,10 @@ signature:
     long: |
       Use mailbox/manage to send messages or check inbox state.
       Example commands:
-        agentctl run mailbox/manage --input '{"operation":"send","send":{"sender":"agent-a","recipient":"agent-b","subject":"Review","body":"Please review PR 123"}}'
-        agentctl skills run mailbox/manage --operation send --send '{"sender":"agent-a","recipient":"agent-b","subject":"Review","body":"Please review PR 123"}'
-        agentctl run mailbox/manage --input '{"operation":"inbox","inbox":{"actor_id":"agent-b","only_unread":true,"limit":5}}'
-        agentctl skills run mailbox/manage --operation inbox --inbox '{"actor_id":"agent-b","only_unread":true,"limit":5}'
+        foxctl run mailbox/manage --input '{"operation":"send","send":{"sender":"agent-a","recipient":"agent-b","subject":"Review","body":"Please review PR 123"}}'
+        foxctl skills run mailbox/manage --operation send --send '{"sender":"agent-a","recipient":"agent-b","subject":"Review","body":"Please review PR 123"}'
+        foxctl run mailbox/manage --input '{"operation":"inbox","inbox":{"actor_id":"agent-b","only_unread":true,"limit":5}}'
+        foxctl skills run mailbox/manage --operation inbox --inbox '{"actor_id":"agent-b","only_unread":true,"limit":5}'
     workflows:
       - id: send-message
         description: "Send a mailbox message."

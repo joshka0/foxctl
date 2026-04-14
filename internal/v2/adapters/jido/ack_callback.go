@@ -59,7 +59,7 @@ func callbackFieldsFromResponse(resp SignalResponse) (status, summary, errMsg st
 	}
 
 	state := mapAt(payload, "state")
-	target := mapAt(state, "agentctl")
+	target := mapAt(state, "foxctl")
 	if len(target) == 0 {
 		target = state
 	}

@@ -193,7 +193,7 @@ func _get_handler_for_action(action: String) -> RefCounted:
 ## Testing Strategy
 
 1. **After each handler extraction**: Test that existing functionality still works
-2. **After each new handler**: Test the new actions via `agentctl run editor/godot`
+2. **After each new handler**: Test the new actions via `foxctl run editor/godot`
 3. **Integration test**: Run through all workflows in skill.yaml
 
 ## Success Criteria
@@ -208,7 +208,7 @@ func _get_handler_for_action(action: String) -> RefCounted:
 
 - Godot 4.x (EditorInterface API)
 - GodotAIBridge plugin framework
-- agentctl v0.2.0+ (for new skill.yaml)
+- foxctl v0.2.0+ (for new skill.yaml)
 
 ## Risks
 

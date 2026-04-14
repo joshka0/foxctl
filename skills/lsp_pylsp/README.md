@@ -29,19 +29,19 @@ uv tool install python-lsp-server
 
 ```bash
 # List symbols in a file
-agentctl run lsp/pylsp --input '{"operation": "symbols", "file": "src/main.py"}'
+foxctl run lsp/pylsp --input '{"operation": "symbols", "file": "src/main.py"}'
 
 # Find definition
-agentctl run lsp/pylsp --input '{"operation": "definition", "file": "src/main.py", "line": 10, "column": 5}'
+foxctl run lsp/pylsp --input '{"operation": "definition", "file": "src/main.py", "line": 10, "column": 5}'
 
 # Find references
-agentctl run lsp/pylsp --input '{"operation": "references", "file": "src/main.py", "line": 10, "column": 5}'
+foxctl run lsp/pylsp --input '{"operation": "references", "file": "src/main.py", "line": 10, "column": 5}'
 
 # Workspace symbol search
-agentctl run lsp/pylsp --input '{"operation": "workspace_symbol", "query": "Handler"}'
+foxctl run lsp/pylsp --input '{"operation": "workspace_symbol", "query": "Handler"}'
 
 # Get hover documentation
-agentctl run lsp/pylsp --input '{"operation": "hover", "file": "src/main.py", "line": 10, "column": 5}'
+foxctl run lsp/pylsp --input '{"operation": "hover", "file": "src/main.py", "line": 10, "column": 5}'
 ```
 
 ## Output Format

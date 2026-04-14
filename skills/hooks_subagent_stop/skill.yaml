@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/subagent_stop
@@ -44,7 +44,7 @@ signature:
           "matcher": "explorer|reviewer|implementer",
           "hooks": [{
             "type": "command",
-            "command": "agentctl run hooks/subagent_stop --ephemeral"
+            "command": "foxctl run hooks/subagent_stop --ephemeral"
           }]
         }]
 returns:

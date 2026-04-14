@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func TestCodeStatsBasic(t *testing.T) {

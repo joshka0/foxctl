@@ -31,7 +31,7 @@ current code:
   ```go
   package tasksgraph
 
-  import "github.com/jkatigb/agentctl/internal/storage/tasks"
+  import "github.com/joshka0/foxctl/internal/storage/tasks"
 
   type NodeMetrics struct {
       TaskID             string
@@ -125,9 +125,9 @@ You already have `skills/todo/main.go`. We extend:
   - Add return fields `nodes`, `topological_order`, `cycles` as non-breaking
     additions.
 
-### 1.3 CLI: `agentctl todo insights`
+### 1.3 CLI: `foxctl todo insights`
 
-In `cmd/agentctl/cmd/todo.go`:
+In `cmd/foxctl/cmd/todo.go`:
 
 - Add a new subcommand:
 
@@ -182,9 +182,9 @@ In `cmd/agentctl/cmd/todo.go`:
 **Types (from spec):**
 
 - `Message` and `Reservation` matching
-  [mailbox_blackboard.md](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/mailbox_blackboard.md:0:0-0:0).
+  [mailbox_blackboard.md](cci:7://file://~/repos/personal/claude-harness/foxctl/docs/spec/mailbox_blackboard.md:0:0-0:0).
 
-- [Store](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:18:0-38:1)
+- [Store](cci:2://file://~/repos/personal/claude-harness/foxctl/internal/storage/tasks/store.go:18:0-38:1)
   interface:
 
   ```go
@@ -207,7 +207,7 @@ In `cmd/agentctl/cmd/todo.go`:
   }
   ```
 
-- [sqlStore](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:63:0-65:1)
+- [sqlStore](cci:2://file://~/repos/personal/claude-harness/foxctl/internal/storage/tasks/store.go:63:0-65:1)
   implementation:
   - New DB `mailbox.db` under `cfg.Storage.Root`.
   - Schema as in spec:
@@ -245,9 +245,9 @@ Single skill `mailbox/manage` with `operation` field, mirroring todo/manage.
 
   - Use `runner.NewRunnerContext` + `config.Load` identical to todo skill.
   - Open
-    [mailbox.Store](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:18:0-38:1)
+    [mailbox.Store](cci:2://file://~/repos/personal/claude-harness/foxctl/internal/storage/tasks/store.go:18:0-38:1)
     via
-    [internal/storage/mailbox.Open](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:67:0-75:1).
+    [internal/storage/mailbox.Open](cci:1://file://~/repos/personal/claude-harness/foxctl/internal/storage/tasks/store.go:67:0-75:1).
 
 - **`skill.yaml`**:
 

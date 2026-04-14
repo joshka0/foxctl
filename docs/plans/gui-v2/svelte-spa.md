@@ -98,7 +98,7 @@ Server proxy targets:
 
 ## Data Flow
 
-- REST data uses `@agentctl/data` client methods.
+- REST data uses `@foxctl/data` client methods.
 - SSE invalidation uses `/api/events` and invalidates query keys.
 - Console page uses `/api/console/sessions` and
   `/api/console/sessions/:id/events?format=payload`.

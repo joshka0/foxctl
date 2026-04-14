@@ -209,7 +209,7 @@ For each file:
 
 ## Original Prompt
 
-You are editing Go source code in the agentctl repo.
+You are editing Go source code in the foxctl repo.
 
 Task:
 

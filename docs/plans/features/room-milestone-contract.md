@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | Status | Draft for review |
-| Scope | richer milestone contract for `agentctl room` agile workflow |
+| Scope | richer milestone contract for `foxctl room` agile workflow |
 | Related | [room-epic-factory-mission-parity.md](./room-epic-factory-mission-parity.md) |
 
 ## Why this slice
@@ -80,7 +80,7 @@ becomes the richer contract narrative.
 Allow milestone start to set richer contract fields:
 
 ```bash
-agentctl room milestone start <room-id> <epic-id> "Foundation" \
+foxctl room milestone start <room-id> <epic-id> "Foundation" \
   --goal "Ship the first validation slice" \
   --objective "Make story validation and work-pack sync operational" \
   --owner human-a \
@@ -100,7 +100,7 @@ agentctl room milestone start <room-id> <epic-id> "Foundation" \
 Add:
 
 ```bash
-agentctl room milestone contract <room-id> <milestone-id> \
+foxctl room milestone contract <room-id> <milestone-id> \
   --objective "..." \
   --risk "..." \
   --exclude "..." \
@@ -217,7 +217,7 @@ Arguments:
 
 ## Skill implications
 
-Update `agentctl-room-agile` to teach:
+Update `foxctl-room-agile` to teach:
 
 - define milestone contract before or immediately after implementation starts
 - do not treat `milestone summary` as a substitute for milestone contract
@@ -228,7 +228,7 @@ Update `agentctl-room-agile` to teach:
 This slice is done when:
 
 1. milestone start accepts the richer contract fields
-2. `agentctl room milestone contract` updates them explicitly
+2. `foxctl room milestone contract` updates them explicitly
 3. `milestone show` exposes the richer contract
 4. work-pack rendering includes the new sections
 5. `room_agile` exposes the new action

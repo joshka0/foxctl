@@ -9,11 +9,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
-	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/runtime/agentprompt"
+	agenttypes "github.com/joshka0/foxctl/internal/agent/types"
+	agentdomain "github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/runtime/agentprompt"
 )
 
 func TestAgentActorConfig(t *testing.T) {

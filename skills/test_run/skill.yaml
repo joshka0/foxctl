@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: test/run
@@ -49,12 +49,12 @@ signature:
     long: |
       Use test/run to execute Go tests, Cargo tests, pytest suites, or JS test scripts via npm/pnpm/yarn.
       Example commands:
-        agentctl run test/run --input '{"path":"./...","mode":"test"}'
-        agentctl skills run test/run --path ./... --mode test
-        agentctl run test/run --input '{"path":"./...","mode":"race","timeout":"20m"}'
-        agentctl skills run test/run --path ./... --mode race --timeout 20m
-        agentctl run test/run --input '{"path":".","mode":"pytest","pattern":"unit"}'
-        agentctl run test/run --input '{"path":".","mode":"npm"}'
+        foxctl run test/run --input '{"path":"./...","mode":"test"}'
+        foxctl skills run test/run --path ./... --mode test
+        foxctl run test/run --input '{"path":"./...","mode":"race","timeout":"20m"}'
+        foxctl skills run test/run --path ./... --mode race --timeout 20m
+        foxctl run test/run --input '{"path":".","mode":"pytest","pattern":"unit"}'
+        foxctl run test/run --input '{"path":".","mode":"npm"}'
     workflows:
       - id: run-tests
         description: "Run tests."

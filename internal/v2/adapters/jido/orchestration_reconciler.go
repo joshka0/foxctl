@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
-	v2orchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
+	v2orchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
 )
 
 const commandDispatchIssue = "orchestration/dispatch-issue"
@@ -519,7 +519,7 @@ func decodeChildLifecycle(resp StateResponse) (childLifecycle, error) {
 		return childLifecycle{}, err
 	}
 
-	target := mapAt(root, "agentctl")
+	target := mapAt(root, "foxctl")
 	if len(target) == 0 {
 		target = root
 	}

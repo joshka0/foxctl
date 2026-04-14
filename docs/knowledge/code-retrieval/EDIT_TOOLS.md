@@ -2,7 +2,7 @@
 
 ## Overview
 
-agentctl provides two edit tools for modifying code files:
+foxctl provides two edit tools for modifying code files:
 
 | Tool                         | Use Case                | Complexity |
 | ---------------------------- | ----------------------- | ---------- |

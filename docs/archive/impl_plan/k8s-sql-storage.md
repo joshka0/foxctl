@@ -6,9 +6,9 @@
 
 ## Context
 
-agentctl already supports Kubernetes deployments backed by Turso/libSQL (see `docs/guides/kubernetes.md`). This plan is for environments that require a self-hosted/shared SQL control-plane (AWS RDS PostgreSQL) for enterprise multi-pod deployments.
+foxctl already supports Kubernetes deployments backed by Turso/libSQL (see `docs/guides/kubernetes.md`). This plan is for environments that require a self-hosted/shared SQL control-plane (AWS RDS PostgreSQL) for enterprise multi-pod deployments.
 
-agentctl currently uses per-store SQLite/libSQL databases selected via the dbdriver env-var convention (e.g. `AGENTCTL_SESSIONS_DB_DRIVER`). This works well for single-node CLI usage but is not sufficient for enterprise K8s deployments where multiple pods (GUI server, chat adapters, background workers) need shared state.
+foxctl currently uses per-store SQLite/libSQL databases selected via the dbdriver env-var convention (e.g. `AGENTCTL_SESSIONS_DB_DRIVER`). This works well for single-node CLI usage but is not sufficient for enterprise K8s deployments where multiple pods (GUI server, chat adapters, background workers) need shared state.
 
 **Goal:** Add PostgreSQL (AWS RDS + pgvector) as an alternative storage backend using the repository pattern (Option B). Local dev stays SQLite; enterprise deploys use PostgreSQL with native vector search.
 
@@ -31,7 +31,7 @@ agentctl currently uses per-store SQLite/libSQL databases selected via the dbdri
 ```
 Local Dev (unchanged):          Enterprise K8s:
 ┌──────────┐                    ┌──────────┐  ┌──────────┐
-│ agentctl │                    │ pod: GUI │  │ pod: Teams│
+│ foxctl │                    │ pod: GUI │  │ pod: Teams│
 │ CLI/Web  │                    │ + Web    │  │ adapter   │
 └────┬─────┘                    └────┬─────┘  └────┬──────┘
      │                               │              │
@@ -228,12 +228,12 @@ go get github.com/pgvector/pgvector-go
 ### 2.7 Checkpoint
 
 ```bash
-docker run -d --name agentctl-pg -p 5432:5432 \
-  -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=agentctl \
+docker run -d --name foxctl-pg -p 5432:5432 \
+  -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=foxctl \
   pgvector/pgvector:pg17-v0.8.0
 
 AGENTCTL_DB_DRIVER=postgres \
-AGENTCTL_POSTGRES_DSN="postgres://postgres:dev@localhost:5432/agentctl?sslmode=disable" \
+AGENTCTL_POSTGRES_DSN="postgres://postgres:dev@localhost:5432/foxctl?sslmode=disable" \
   go test ./internal/storage/dbdriver/...
 ```
 
@@ -427,10 +427,10 @@ Update `internal/storage/cas/factory.go` to include `DriverS3`.
 
 The repo already contains `deploy/kubernetes/` (kustomize). Prefer adding a Postgres/RDS overlay there, unless you intentionally want Helm.
 
-Optional Helm chart path (if desired): `deploy/helm/agentctl/`
+Optional Helm chart path (if desired): `deploy/helm/foxctl/`
 
 ```
-deploy/helm/agentctl/
+deploy/helm/foxctl/
 ├── Chart.yaml
 ├── values.yaml
 ├── templates/
@@ -465,7 +465,7 @@ Extend the existing `DatabaseSettings` with a `postgres` block (and redaction), 
 
 Note: the store-opening path is currently env-var driven (`internal/storage/dbdriver/ConfigLoader`). Platform-config wiring can be added once Postgres is stable.
 
-### 7.2 Update `cmd/agentctl/cmd/web.go`
+### 7.2 Update `cmd/foxctl/cmd/web.go`
 
 Add flags:
 - `--db-driver string` (sqlite|postgres, default sqlite)
@@ -499,7 +499,7 @@ Add flags:
 | `internal/storage/dbutil/migrate_postgres.go` | PG migration helpers |
 | `internal/storage/cas/s3_store.go` | CAS S3/MinIO backend (S3 blobs + Postgres metadata) |
 | `internal/storage/cas/s3_store_test.go` | CAS S3 tests (MinIO integration) |
-| `deploy/helm/agentctl/*` | Helm chart |
+| `deploy/helm/foxctl/*` | Helm chart |
 
 ### Modified Files
 
@@ -528,7 +528,7 @@ Add flags:
 | `internal/storage/cas/factory.go` | Add `DriverS3` case |
 | `internal/context/companion/memory.go` | PG migration DDL |
 | `internal/platform/config/config.go` | Extend `DatabaseSettings` with Postgres settings + redaction |
-| `cmd/agentctl/cmd/web.go` | Add `--db-driver`/`--db-dsn` flags |
+| `cmd/foxctl/cmd/web.go` | Add `--db-driver`/`--db-dsn` flags |
 | `internal/interfaces/web/server.go` | Health check endpoints |
 | `go.mod` / `go.sum` | Add pgx/v5, pgvector-go, aws-sdk-go-v2 (S3) |
 
@@ -569,12 +569,12 @@ Add flags:
 
 ### Integration Tests (Docker)
 ```bash
-docker run -d --name agentctl-pg -p 5432:5432 \
-  -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=agentctl \
+docker run -d --name foxctl-pg -p 5432:5432 \
+  -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=foxctl \
   pgvector/pgvector:pg17-v0.8.0
 
 AGENTCTL_DB_DRIVER=postgres \
-AGENTCTL_POSTGRES_DSN="postgres://postgres:dev@localhost:5432/agentctl?sslmode=disable" \
+AGENTCTL_POSTGRES_DSN="postgres://postgres:dev@localhost:5432/foxctl?sslmode=disable" \
   go test ./internal/storage/...
 ```
 
@@ -593,7 +593,7 @@ services:
 ### Smoke Test
 ```bash
 AGENTCTL_DB_DRIVER=postgres AGENTCTL_POSTGRES_DSN="..." \
-  agentctl web serve --chat teams
+  foxctl web serve --chat teams
 # Verify: tables created, vector search works, sessions persist across restart
 ```
 

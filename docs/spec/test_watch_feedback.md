@@ -10,7 +10,7 @@
 This spec defines a **generic test watcher** mechanism and a **PostTool feedback
 hook** so that:
 
-- agentctl can run one or more **per-workspace test commands** in the background
+- foxctl can run one or more **per-workspace test commands** in the background
   ("watch mode"),
 - test results are persisted in a small SQLite-backed store, and
 - Claude receives **immediate, advisory feedback** about failing tests via a
@@ -35,7 +35,7 @@ The design is **language-agnostic** and must support at least:
 - **G2: Language-Agnostic Watchers**\
   Test commands are arbitrary shell commands (e.g. `go test`, `npm test`,
   `pytest`), configured per workspace. No hard-coded framework logic is required
-  in agentctl.
+  in foxctl.
 
 - **G3: CPU-Friendly Behavior**\
   Watchers must not aggressively re-run tests on every save. Debouncing, minimum
@@ -50,7 +50,7 @@ The design is **language-agnostic** and must support at least:
   **advisory-only** and MUST NOT block writes or change tool error codes.
 
 - **G5: Simple, Queryable Storage**\
-  Test watcher state is persisted in SQLite alongside other agentctl storage so
+  Test watcher state is persisted in SQLite alongside other foxctl storage so
   hooks and CLI commands can query the latest status per workspace.
 
 ### 2.2 Non-Goals
@@ -79,14 +79,14 @@ The design is **language-agnostic** and must support at least:
 
 ### 4.1 Test Watch Config File
 
-Per workspace, test watching is configured via a YAML file under the agentctl
-workspace config directory (`.agentctl/`). This file is **owned by agentctl**
+Per workspace, test watching is configured via a YAML file under the foxctl
+workspace config directory (`.foxctl/`). This file is **owned by foxctl**
 and is harness-agnostic; harnesses (Claude, Cursor, etc.) may read it but SHOULD
 NOT write other agents' config into harness-specific directories such as
 `.claude/`.
 
 ```yaml
-# .agentctl/test-watch.yaml
+# .foxctl/test-watch.yaml
 
 # Optional default debounce for all watchers (overridden per-watcher).
 debounce: 2s
@@ -151,19 +151,19 @@ watchers:
   If unspecified, implementations SHOULD use conservative defaults, e.g.
   `debounce: 2s`, `min_interval: 20s`.
 
-### 4.3 CLI Configuration: `agentctl test-watch`
+### 4.3 CLI Configuration: `foxctl test-watch`
 
-While `.agentctl/test-watch.yaml` is the source of truth, users and agents
+While `.foxctl/test-watch.yaml` is the source of truth, users and agents
 SHOULD normally configure watchers via dedicated CLI commands rather than
 editing YAML directly.
 
 Proposed subcommands (v1):
 
 ```bash
-agentctl test-watch list \
+foxctl test-watch list \
   [--workspace <path>]
 
-agentctl test-watch add \
+foxctl test-watch add \
   --id <id> \
   --command <command> \
   [--include <glob> ...] \
@@ -172,18 +172,18 @@ agentctl test-watch add \
   [--min-interval <duration>] \
   [--workspace <path>]
 
-agentctl test-watch remove \
+foxctl test-watch remove \
   --id <id> \
   [--workspace <path>]
 ```
 
 Semantics:
 
-- `test-watch list` reads `.agentctl/test-watch.yaml` for the resolved workspace
+- `test-watch list` reads `.foxctl/test-watch.yaml` for the resolved workspace
   and prints the configured watchers.
 - `test-watch add`:
   - Resolves the workspace (current dir or `--workspace`).
-  - Loads `.agentctl/test-watch.yaml` (creating it if missing).
+  - Loads `.foxctl/test-watch.yaml` (creating it if missing).
   - Upserts a watcher with the given `id`, `command`, and fields into the
     `watchers:` list.
   - Writes back a human-editable YAML file.
@@ -196,12 +196,12 @@ structure.
 
 ---
 
-## 5. CLI: `agentctl watch tests`
+## 5. CLI: `foxctl watch tests`
 
 ### 5.1 Command
 
 ```bash
-agentctl watch tests \
+foxctl watch tests \
   [--workspace <path>] \
   [--once]             \
   [--status-only]
@@ -217,7 +217,7 @@ agentctl watch tests \
 
 ### 5.2 Behavior
 
-- Load `.agentctl/test-watch.yaml` from the workspace root (or a path provided
+- Load `.foxctl/test-watch.yaml` from the workspace root (or a path provided
   via a future `--config` flag). If the file does not exist, print a helpful
   message and exit non-zero.
 - Resolve `workspace_id` using the same mechanism as `todo` / hooks (see
@@ -241,7 +241,7 @@ agentctl watch tests \
     completion instead of starting immediately.
   - When safe, execute `command` as a child process with:
     - Working directory = workspace root.
-    - Inherited environment (plus any agentctl-specific vars, e.g.
+    - Inherited environment (plus any foxctl-specific vars, e.g.
       `AGENTCTL_WORKSPACE`).
   - Capture:
     - Exit code.
@@ -266,7 +266,7 @@ agentctl watch tests \
 
 ### 6.1 Database
 
-- File: `~/.agentctl/storage/test_watch.db`
+- File: `~/.foxctl/storage/test_watch.db`
 - Backend: SQLite via the same storage layer used for `tasks` and `knowledge`.
 
 ### 6.2 Tables (v1)
@@ -362,7 +362,7 @@ included in each failure:
 - **Wrapper:** A standard Claude hook wrapper under `.claude/hooks/`, similar to
   `task-guard.sh` and `knowledge-router.sh`, that:
   - Reads hook payload JSON from stdin.
-  - Invokes `agentctl run hooks/test_feedback --input-file -`.
+  - Invokes `foxctl run hooks/test_feedback --input-file -`.
   - Emits `data.hook_output` as the hook’s JSON output.
 
 - **Settings:** The harness example SHOULD wire this hook for `PostToolUse`
@@ -511,7 +511,7 @@ To avoid saturating CPU from frequent test runs, implementations MUST:
    - Add `internal/storage/testwatch` package.
    - Implement migrations for `test_status` table.
 
-3. **`agentctl watch tests` CLI**
+3. **`foxctl watch tests` CLI**
    - Implement watch and `--once` / `--status-only` modes.
    - Add basic parsers for Go, Pytest, and Jest/Vitest where cheap; otherwise
      default to `summary` + `raw_tail`.
@@ -523,7 +523,7 @@ To avoid saturating CPU from frequent test runs, implementations MUST:
      `.claude/settings.json` for `PostToolUse`.
 
 5. **Harness Integration**
-   - Provide an example `.agentctl/test-watch.yaml` in the harness repo.
+   - Provide an example `.foxctl/test-watch.yaml` in the harness repo.
    - Document the workflow in `AGENTCTL.md`.
 
 6. **Future Enhancements**
@@ -540,10 +540,10 @@ To avoid saturating CPU from frequent test runs, implementations MUST:
    `raw_tail` and a simple `summary`?
 
 2. **Multiple Workspaces / Monorepos:**\
-   Should a single `agentctl watch tests` instance support multiple workspace
+   Should a single `foxctl watch tests` instance support multiple workspace
    roots (e.g. Nx monorepos), or is one instance per workspace sufficient for
    now?
 
 3. **Opt-In vs. Auto-Start:**\
-   Should the harness auto-start `agentctl watch tests` when Claude attaches to
+   Should the harness auto-start `foxctl watch tests` when Claude attaches to
    a workspace, or should this always be a manual step for the user?

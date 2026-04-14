@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Label must match filename (without .plist) -->
+    <key>Label</key>
+    <string>com.foxctl.mcp-daemon</string>
+
+    <!-- Path to foxctl binary - UPDATE THIS -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/foxctl</string>
+        <string>mcp</string>
+        <string>serve</string>
+        <string>--http</string>
+        <string>:8092</string>
+        <string>--skills</string>
+    </array>
+
+    <!-- Start automatically at login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Keep alive - restart if it exits -->
+    <key>KeepAlive</key>
+    <dict>
+        <!-- Only restart on non-zero exit (crash) -->
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Throttle restart attempts (wait 10 seconds between restarts) -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>/tmp</string>
+
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <!-- Add any required API keys here -->
+        <!-- <key>VOYAGE_API_KEY</key> -->
+        <!-- <string>your-key-here</string> -->
+    </dict>
+
+    <!-- Logging -->
+    <key>StandardOutPath</key>
+    <string>/tmp/foxctl-mcp-daemon.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/foxctl-mcp-daemon.stderr.log</string>
+
+    <!-- Process type - background agent -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- Nice value (lower priority) -->
+    <key>Nice</key>
+    <integer>5</integer>
+</dict>
+</plist>

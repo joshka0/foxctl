@@ -62,10 +62,10 @@ import (
     "path/filepath"
     "strings"
 
-    "github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-    "github.com/jkatigb/agentctl/internal/platform/config"
-    "github.com/jkatigb/agentctl/internal/storage/dbdriver"
-    "github.com/jkatigb/agentctl/internal/storage/memory"
+    "github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+    "github.com/joshka0/foxctl/internal/platform/config"
+    "github.com/joshka0/foxctl/internal/storage/dbdriver"
+    "github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 // searchSemanticIndex searches the semantic index using vector similarity.
@@ -195,8 +195,8 @@ import (
     "context"
     "testing"
 
-    "github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-    "github.com/jkatigb/agentctl/internal/platform/config"
+    "github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+    "github.com/joshka0/foxctl/internal/platform/config"
     "github.com/rs/zerolog"
     "github.com/stretchr/testify/assert"
     "github.com/stretchr/testify/require"

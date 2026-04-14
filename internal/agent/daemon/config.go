@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/agent/optimization"
+	"github.com/joshka0/foxctl/internal/context/companion"
 )
 
 // OptimizationContext holds optimization components for handler use.

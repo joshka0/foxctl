@@ -4,7 +4,7 @@
 # It is advisory only (never blocks) and provides test failure context via PostToolUse.
 #
 # Environment:
-#   AGENTCTL_BIN                          - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN                          - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_TEST_FEEDBACK_MAX_FAILURES   - Max failures to show per watcher (default: 3)
 #   CLAUDE_PROJECT_DIR                    - Workspace root (set by Claude Code)
 
@@ -13,8 +13,8 @@ set -euo pipefail
 # Ensure child processes are killed when this script is terminated (e.g., by Claude Code timeout)
 trap 'kill $(jobs -p) 2>/dev/null || true' SIGTERM SIGINT EXIT
 
-# Resolve agentctl binary
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+# Resolve foxctl binary
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 
 # Read hook input from stdin
 INPUT=$(cat)

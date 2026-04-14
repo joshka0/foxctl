@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: lsp/pylsp
@@ -46,10 +46,10 @@ signature:
     long: |
       Use lsp/pylsp to query Python language server operations.
       Example commands:
-        agentctl run lsp/pylsp --input '{"operation":"definition","file":"app.py","line":12,"column":4}'
-        agentctl skills run lsp/pylsp --operation definition --file app.py --line 12 --column 4
-        agentctl run lsp/pylsp --input '{"operation":"workspace_symbol","query":"Client"}'
-        agentctl skills run lsp/pylsp --operation workspace_symbol --query Client
+        foxctl run lsp/pylsp --input '{"operation":"definition","file":"app.py","line":12,"column":4}'
+        foxctl skills run lsp/pylsp --operation definition --file app.py --line 12 --column 4
+        foxctl run lsp/pylsp --input '{"operation":"workspace_symbol","query":"Client"}'
+        foxctl skills run lsp/pylsp --operation workspace_symbol --query Client
     workflows:
       - id: find-definition
         description: "Find a definition in a file."

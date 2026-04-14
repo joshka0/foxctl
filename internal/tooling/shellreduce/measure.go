@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	actormemory "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
+	actormemory "github.com/joshka0/foxctl/internal/runtime/actor/memory"
 	tiktoken "github.com/pkoukk/tiktoken-go"
 )
 

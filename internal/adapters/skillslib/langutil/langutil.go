@@ -1,6 +1,6 @@
 package langutil
 
-import "github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+import "github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
 
 // CommonCodeLanguages covers Go, Python, JS, TS, Elixir, and Rust.
 var CommonCodeLanguages = map[string]struct{}{

@@ -14,12 +14,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/hookutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage/contextbuffer"
 )
 
 const skillName = "hooks/dispatch"
@@ -75,7 +75,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	skillsDir := rc.Config.Paths.Skills
 	if skillsDir == "" {
 		home, _ := os.UserHomeDir()
-		skillsDir = filepath.Join(home, ".agentctl", "skills")
+		skillsDir = filepath.Join(home, ".foxctl", "skills")
 	}
 
 	// Create dispatcher with registry

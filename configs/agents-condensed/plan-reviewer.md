@@ -25,4 +25,4 @@ Review plans to catch issues before implementation.
 
 Focus on preventing real-world failures. Reference actual docs and known limitations.
 
-Full docs: `~/repos/personal/agentctl/configs/agents/plan-reviewer.md`
+Full docs: `~/repos/personal/foxctl/configs/agents/plan-reviewer.md`

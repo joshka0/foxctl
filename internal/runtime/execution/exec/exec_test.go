@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/domain/skill"
 )
 
 func TestRunnerExecutesBinary(t *testing.T) {
@@ -132,7 +132,7 @@ func main() {
 	}
 	workdir := string(stdout)
 	// Verify it's in a temp directory
-	if !strings.HasPrefix(workdir, os.TempDir()) && !strings.Contains(workdir, "agentctl-skill-") {
+	if !strings.HasPrefix(workdir, os.TempDir()) && !strings.Contains(workdir, "foxctl-skill-") {
 		t.Fatalf("expected workdir in temp, got: %s", workdir)
 	}
 }

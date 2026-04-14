@@ -5,11 +5,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/jobs"
-	jobtypes "github.com/jkatigb/agentctl/internal/storage/jobs/types"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/intelligence/analysis/tasksgraph"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/jobs"
+	jobtypes "github.com/joshka0/foxctl/internal/storage/jobs/types"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 // StatsHandler returns a handler for GET /api/stats.

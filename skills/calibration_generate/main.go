@@ -14,16 +14,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/context/calibration"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/obs"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/joshka0/foxctl/internal/context/calibration"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
 )
 
 const command = "calibration/generate"
@@ -444,7 +444,7 @@ func extractWithAPI(ctx context.Context, provider llmproviders.Provider, prompt 
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 
 	if strings.HasPrefix(provider.Name, "openrouter") {
-		req.Header.Set("HTTP-Referer", "https://github.com/jkatigb/agentctl")
+		req.Header.Set("HTTP-Referer", "https://github.com/joshka0/foxctl")
 	}
 
 	client := &http.Client{Timeout: 90 * time.Second}

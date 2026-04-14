@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VAULT_PATH="${AGENTCTL_VAULT_PATH:-$HOME/.agentctl/templates/obsidian-vault}"
+VAULT_PATH="${AGENTCTL_VAULT_PATH:-$HOME/.foxctl/templates/obsidian-vault}"
 WORKSPACE="${PRAZE_WORKSPACE:-${1:-}}"
 
 if [[ -z "${WORKSPACE}" ]]; then
-  echo "usage: PRAZE_WORKSPACE=/path/to/praze $0 [extra agentctl flags]" >&2
+  echo "usage: PRAZE_WORKSPACE=/path/to/praze $0 [extra foxctl flags]" >&2
   exit 1
 fi
 
@@ -15,7 +15,7 @@ if [[ "${1:-}" == "${WORKSPACE}" ]]; then
 fi
 
 cd "$ROOT"
-exec env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 go run -tags=libsqlite3 ./cmd/agentctl \
+exec env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 go run -tags=libsqlite3 ./cmd/foxctl \
   eval code-search-ensemble \
   --workspace "$WORKSPACE" \
   --vault-path "$VAULT_PATH" \

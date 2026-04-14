@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
-	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/runner"
-	"github.com/jkatigb/agentctl/internal/v2/services"
-	"github.com/jkatigb/agentctl/internal/v2/testkit/fakes"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	sysconfig "github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
+	"github.com/joshka0/foxctl/internal/v2/services"
+	"github.com/joshka0/foxctl/internal/v2/testkit/fakes"
 )
 
 func TestNewDefaultRunService_ContextShowUsesRealDefaultExecutor(t *testing.T) {
@@ -23,7 +23,7 @@ func TestNewDefaultRunService_ContextShowUsesRealDefaultExecutor(t *testing.T) {
 	workspace := t.TempDir()
 	store := contextplane.NewWorkspaceStore(workspace)
 	_, err := store.SaveTopOfMind(contextplane.TopOfMind{
-		WorkspaceID: "agentctl",
+		WorkspaceID: "foxctl",
 		Objective:   "Streamline hooks and ACA parity",
 		Phase:       "design",
 		UpdatedAt:   time.Date(2026, time.March, 12, 11, 0, 0, 0, time.UTC),
@@ -83,7 +83,7 @@ func TestNewDefaultRunService_ContextShowUsesRealDefaultExecutor(t *testing.T) {
 	if call.Name != "context/show" {
 		t.Fatalf("tool name=%q want context/show", call.Name)
 	}
-	if !strings.Contains(call.ResultRef.Text, `"workspace_id":"agentctl"`) {
+	if !strings.Contains(call.ResultRef.Text, `"workspace_id":"foxctl"`) {
 		t.Fatalf("tool result=%q missing workspace_id", call.ResultRef.Text)
 	}
 	if !strings.Contains(call.ResultRef.Text, `"objective":"Streamline hooks and ACA parity"`) {

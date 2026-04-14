@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 const (

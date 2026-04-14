@@ -71,7 +71,7 @@ export function buildHistoricalFollowUpPrompt(
     .join("\n\n");
 
   return [
-    "You are continuing work from a historical agentctl session.",
+    "You are continuing work from a historical foxctl session.",
     `Project: ${project}`,
     `Workspace: ${workspace}`,
     summary ? `Session summary:\n${summary}` : "",

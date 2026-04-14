@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/init.sh - Initialize agentctl system setup
+# scripts/init.sh - Initialize foxctl system setup
 #
 # This script:
 # 1. Creates required directories
@@ -23,12 +23,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 BIN_DIR="$REPO_ROOT/bin"
 LOCAL_BIN="${HOME}/.local/bin"
-AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.agentctl}"
+AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.foxctl}"
 CLAUDE_DIR="$HOME/.claude"
 CODEX_DIR="$HOME/.codex"
 GEMINI_DIR="$HOME/.gemini"
 
-echo -e "${BLUE}=== agentctl System Initialization ===${NC}"
+echo -e "${BLUE}=== foxctl System Initialization ===${NC}"
 echo ""
 
 # Track status
@@ -101,16 +101,16 @@ provider_cfg_list() {
 
 # 1. Check binaries exist
 echo -e "${BLUE}1. Checking binaries...${NC}"
-if [[ ! -f "$BIN_DIR/agentctl" ]]; then
-    error "bin/agentctl not found. Run 'make build' first."
+if [[ ! -f "$BIN_DIR/foxctl" ]]; then
+    error "bin/foxctl not found. Run 'make build' first."
 else
-    success "bin/agentctl exists"
+    success "bin/foxctl exists"
 fi
 
-if [[ ! -f "$BIN_DIR/agentctl-cgo" ]]; then
-    warn "bin/agentctl-cgo not found. Run 'make build-cgo' for Turso support."
+if [[ ! -f "$BIN_DIR/foxctl-cgo" ]]; then
+    warn "bin/foxctl-cgo not found. Run 'make build-cgo' for Turso support."
 else
-    success "bin/agentctl-cgo exists"
+    success "bin/foxctl-cgo exists"
 fi
 echo ""
 
@@ -122,18 +122,18 @@ success "Created $LOCAL_BIN"
 mkdir -p "$AGENTCTL_HOME"/{storage,cache,cas,skills,jobs,observability/events,backups}
 success "Created $AGENTCTL_HOME structure"
 
-info "Ensuring agentctl share configs link"
+info "Ensuring foxctl share configs link"
 AGENTCTL_SHARE="$AGENTCTL_HOME/share"
 mkdir -p "$AGENTCTL_SHARE"
 
 if [[ -L "$AGENTCTL_SHARE/configs" ]]; then
     rm "$AGENTCTL_SHARE/configs"
 elif [[ -e "$AGENTCTL_SHARE/configs" ]]; then
-    warn "agentctl share path exists (skipping): $AGENTCTL_SHARE/configs"
+    warn "foxctl share path exists (skipping): $AGENTCTL_SHARE/configs"
 else
     REPO_CONFIGS_ABS="$(cd "$REPO_ROOT/configs" && pwd)"
     ln -s "$REPO_CONFIGS_ABS" "$AGENTCTL_SHARE/configs"
-    success "Symlinked agentctl configs -> $AGENTCTL_SHARE/configs"
+    success "Symlinked foxctl configs -> $AGENTCTL_SHARE/configs"
 fi
 
 mkdir -p "$CLAUDE_DIR"
@@ -166,8 +166,8 @@ symlink_binary() {
     success "Symlinked $name -> $dst"
 }
 
-symlink_binary "$BIN_DIR/agentctl" "$LOCAL_BIN/agentctl" "agentctl"
-symlink_binary "$BIN_DIR/agentctl-cgo" "$LOCAL_BIN/agentctl-cgo" "agentctl-cgo"
+symlink_binary "$BIN_DIR/foxctl" "$LOCAL_BIN/foxctl" "foxctl"
+symlink_binary "$BIN_DIR/foxctl-cgo" "$LOCAL_BIN/foxctl-cgo" "foxctl-cgo"
 echo ""
 
 # 4. Check PATH
@@ -187,9 +187,9 @@ echo -e "${BLUE}5. Setting up Claude Code integration...${NC}"
 # Create hooks directory
 mkdir -p "$CLAUDE_DIR/hooks"
 
-# Symlink agentctl hooks folder
+# Symlink foxctl hooks folder
 HOOKS_SOURCE="$REPO_ROOT/configs/hooks"
-HOOKS_TARGET="$CLAUDE_DIR/hooks/agentctl"
+HOOKS_TARGET="$CLAUDE_DIR/hooks/foxctl"
 
 if [[ -d "$HOOKS_SOURCE" ]]; then
     # Remove existing symlink (including broken ones) or directory
@@ -198,7 +198,7 @@ if [[ -d "$HOOKS_SOURCE" ]]; then
         rm "$HOOKS_TARGET"
     elif [[ -e "$HOOKS_TARGET" ]]; then
         # Only warn and remove if it's a real directory (not a symlink)
-        warn "Removing existing agentctl hooks directory"
+        warn "Removing existing foxctl hooks directory"
         rm -rf "$HOOKS_TARGET"
     fi
 
@@ -208,12 +208,12 @@ if [[ -d "$HOOKS_SOURCE" ]]; then
 
     # Create symlink to hooks folder using absolute path
     ln -s "$HOOKS_SOURCE_ABS" "$HOOKS_TARGET"
-    success "Symlinked agentctl hooks -> $HOOKS_TARGET"
+    success "Symlinked foxctl hooks -> $HOOKS_TARGET"
 else
     warn "No hooks to symlink (configs/hooks not found)"
 fi
 
-# Configure Claude Code settings.json with agentctl hooks
+# Configure Claude Code settings.json with foxctl hooks
 echo -e "${BLUE}5a1. Configuring Claude Code settings.json...${NC}"
 
 CLAUDE_SETTINGS_TEMPLATE="$REPO_ROOT/configs/claude-settings.json"
@@ -231,14 +231,14 @@ if [[ -f "$CLAUDE_SETTINGS_TEMPLATE" ]]; then
                 # Backup existing settings
                 cp "$CLAUDE_SETTINGS_TARGET" "$CLAUDE_SETTINGS_TARGET.bak"
                 echo "$MERGED" > "$CLAUDE_SETTINGS_TARGET"
-                success "Merged agentctl hooks into $CLAUDE_SETTINGS_TARGET (backup: .bak)"
+                success "Merged foxctl hooks into $CLAUDE_SETTINGS_TARGET (backup: .bak)"
             else
                 warn "Failed to merge settings.json, keeping existing"
             fi
         else
             # No existing settings, use template directly
             cp "$CLAUDE_SETTINGS_TEMPLATE" "$CLAUDE_SETTINGS_TARGET"
-            success "Created $CLAUDE_SETTINGS_TARGET with agentctl hooks"
+            success "Created $CLAUDE_SETTINGS_TARGET with foxctl hooks"
         fi
     else
         warn "jq not found. Manually configure $CLAUDE_SETTINGS_TARGET with hooks from:"
@@ -309,7 +309,7 @@ while IFS= read -r source_root; do
 done < <(provider_cfg_list claude sources "$REPO_ROOT/configs/skills-pack")
 
 if [[ "$claude_installed_any" == "1" ]]; then
-    success "Installed agentctl Claude skills"
+    success "Installed foxctl Claude skills"
 else
     warn "No Claude skills to install (sources not found)"
 fi
@@ -332,19 +332,19 @@ if [[ -d "$OPENCODE_HOOKS_SOURCE" ]]; then
     # Create or update package.json with file:// dependency
     OPENCODE_PKG="$OPENCODE_CONFIG_DIR/package.json"
     if [[ -f "$OPENCODE_PKG" ]]; then
-        # Check if agentctl-opencode-hooks is already in package.json
-        if grep -q '"agentctl-opencode-hooks"' "$OPENCODE_PKG"; then
-            success "OpenCode package.json already has agentctl-opencode-hooks"
+        # Check if foxctl-opencode-hooks is already in package.json
+        if grep -q '"foxctl-opencode-hooks"' "$OPENCODE_PKG"; then
+            success "OpenCode package.json already has foxctl-opencode-hooks"
         else
             # Add the dependency using jq if available, otherwise warn
             if command -v jq &>/dev/null; then
                 jq --arg path "file://$OPENCODE_HOOKS_SOURCE_ABS" \
-                   '.dependencies["agentctl-opencode-hooks"] = $path' \
+                   '.dependencies["foxctl-opencode-hooks"] = $path' \
                    "$OPENCODE_PKG" > "${OPENCODE_PKG}.tmp" && mv "${OPENCODE_PKG}.tmp" "$OPENCODE_PKG"
-                success "Added agentctl-opencode-hooks to OpenCode package.json"
+                success "Added foxctl-opencode-hooks to OpenCode package.json"
             else
                 warn "jq not found. Manually add to $OPENCODE_PKG:"
-                echo "    \"agentctl-opencode-hooks\": \"file://$OPENCODE_HOOKS_SOURCE_ABS\""
+                echo "    \"foxctl-opencode-hooks\": \"file://$OPENCODE_HOOKS_SOURCE_ABS\""
             fi
         fi
     else
@@ -352,11 +352,11 @@ if [[ -d "$OPENCODE_HOOKS_SOURCE" ]]; then
         cat > "$OPENCODE_PKG" <<EOF
 {
   "dependencies": {
-    "agentctl-opencode-hooks": "file://$OPENCODE_HOOKS_SOURCE_ABS"
+    "foxctl-opencode-hooks": "file://$OPENCODE_HOOKS_SOURCE_ABS"
   }
 }
 EOF
-        success "Created OpenCode package.json with agentctl-opencode-hooks"
+        success "Created OpenCode package.json with foxctl-opencode-hooks"
     fi
 
     # Run bun install to link the plugin
@@ -370,10 +370,10 @@ EOF
     # Check if plugin is in opencode.json plugin array
     OPENCODE_JSON="$OPENCODE_CONFIG_DIR/opencode.json"
     if [[ -f "$OPENCODE_JSON" ]]; then
-        if grep -q '"agentctl-opencode-hooks"' "$OPENCODE_JSON"; then
-            success "OpenCode config has agentctl-opencode-hooks in plugin array"
+        if grep -q '"foxctl-opencode-hooks"' "$OPENCODE_JSON"; then
+            success "OpenCode config has foxctl-opencode-hooks in plugin array"
         else
-            warn "Add 'agentctl-opencode-hooks' to plugin array in $OPENCODE_JSON"
+            warn "Add 'foxctl-opencode-hooks' to plugin array in $OPENCODE_JSON"
         fi
     else
         info "OpenCode config not found at $OPENCODE_JSON"
@@ -436,7 +436,7 @@ while IFS= read -r source_root; do
 done < <(provider_cfg_list opencode sources "$REPO_ROOT/configs/skills-pack")
 
 if [[ "$opencode_installed_any" == "1" ]]; then
-    success "Installed agentctl OpenCode skills"
+    success "Installed foxctl OpenCode skills"
 else
     warn "No OpenCode skills to install (sources not found)"
 fi
@@ -483,7 +483,7 @@ if [[ -d "$OPENCODE_AGENTS_SOURCE" ]]; then
         ln -s "$agent_abs" "$target"
     done
 
-    success "Installed agentctl OpenCode agents"
+    success "Installed foxctl OpenCode agents"
 else
     warn "No OpenCode agents to install (configs/opencode/agents-pack not found)"
 fi
@@ -494,16 +494,16 @@ echo ""
 echo -e "${BLUE}5c. Starting MCP daemon...${NC}"
 
 # Check if daemon is already running
-if "$BIN_DIR/agentctl" mcp status 2>/dev/null | grep -q "running"; then
+if "$BIN_DIR/foxctl" mcp status 2>/dev/null | grep -q "running"; then
     success "MCP daemon already running"
 else
     # Start the daemon with skills enabled
-    if "$BIN_DIR/agentctl" mcp serve --daemon --skills 2>/dev/null; then
+    if "$BIN_DIR/foxctl" mcp serve --daemon --skills 2>/dev/null; then
         success "MCP daemon started on http://localhost:8091"
         info "Claude Code and OpenCode will use SSE connection"
     else
         warn "Failed to start MCP daemon"
-        echo "    Start manually: agentctl mcp serve --daemon --skills"
+        echo "    Start manually: foxctl mcp serve --daemon --skills"
     fi
 fi
 
@@ -520,7 +520,7 @@ success "Created $CODEX_DIR"
 CODEX_CONFIG="$CODEX_DIR/config.toml"
 if [[ ! -f "$CODEX_CONFIG" ]]; then
     cat > "$CODEX_CONFIG" <<EOF
-# Autogenerated by agentctl scripts/init.sh
+# Autogenerated by foxctl scripts/init.sh
 #
 # If you want MCP tools that use network (web search, etc) to work from Codex,
 # set sandbox_workspace_write.network_access=true.
@@ -534,14 +534,14 @@ network_access = false
 # Enable Codex built-in web search tool (optional)
 # tools.web_search = true
 
-[mcp_servers.agentctl]
-command = "agentctl"
+[mcp_servers.foxctl]
+command = "foxctl"
 args = ["mcp", "serve", "--skills"]
 EOF
     success "Created $CODEX_CONFIG"
 else
     info "Codex config already exists at $CODEX_CONFIG"
-    info "Ensure it contains [mcp_servers.agentctl] if you want agentctl MCP tools"
+    info "Ensure it contains [mcp_servers.foxctl] if you want foxctl MCP tools"
 fi
 
 CODEX_SKILLS_DIR="$(provider_cfg codex target_dir "$CODEX_DIR/skills")"
@@ -596,7 +596,7 @@ while IFS= read -r source_root; do
 done < <(provider_cfg_list codex sources "$REPO_ROOT/configs/skills-pack")
 
 if [[ "$codex_installed_any" == "1" ]]; then
-    success "Installed agentctl Codex skills (restart Codex to load)"
+    success "Installed foxctl Codex skills (restart Codex to load)"
 else
     warn "No Codex skills to install (sources not found)"
 fi
@@ -609,7 +609,7 @@ if [[ -f "$CODEX_AGENTS_SOURCE" ]]; then
         rm "$CODEX_AGENTS"
     elif [[ -e "$CODEX_AGENTS" ]]; then
         warn "Codex AGENTS.md already exists (skipping): $CODEX_AGENTS"
-        warn "To use agentctl version: rm $CODEX_AGENTS"
+        warn "To use foxctl version: rm $CODEX_AGENTS"
     fi
 
     if [[ ! -e "$CODEX_AGENTS" ]]; then
@@ -677,7 +677,7 @@ while IFS= read -r source_root; do
 done < <(provider_cfg_list gemini sources "$REPO_ROOT/configs/skills-pack")
 
 if [[ "$gemini_installed_any" == "1" ]]; then
-    success "Installed agentctl Gemini skills (restart Gemini to load)"
+    success "Installed foxctl Gemini skills (restart Gemini to load)"
 else
     warn "No Gemini skills to install (sources not found)"
 fi
@@ -752,21 +752,21 @@ if [[ $WARNINGS -gt 0 ]]; then
 fi
 
 if [[ $ERRORS -eq 0 ]]; then
-    success "agentctl initialized successfully!"
+    success "foxctl initialized successfully!"
     echo ""
     echo "Next steps:"
-    echo "  1. Verify installation: agentctl version"
-    echo "  2. List skills: agentctl skills list"
+    echo "  1. Verify installation: foxctl version"
+    echo "  2. List skills: foxctl skills list"
     echo "  3. Configure .env at $ENV_FILE"
     echo "  4. Restart Claude Code/OpenCode to use shared MCP server"
     echo ""
     echo "MCP daemon commands:"
-    echo "  agentctl mcp status  - Check if daemon is running"
-    echo "  agentctl mcp stop    - Stop the daemon"
-    echo "  agentctl mcp serve --daemon --skills  - Start daemon"
+    echo "  foxctl mcp status  - Check if daemon is running"
+    echo "  foxctl mcp stop    - Stop the daemon"
+    echo "  foxctl mcp serve --daemon --skills  - Start daemon"
     echo ""
     echo "For Turso remote search (cross-workspace):"
-    echo "  - Use agentctl-cgo binary (built with CGO)"
+    echo "  - Use foxctl-cgo binary (built with CGO)"
     echo "  - Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN"
 else
     error "Initialization completed with errors. Please fix and re-run."

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/diff
@@ -45,10 +45,10 @@ signature:
       Use code/diff to compare two files and produce unified diffs or summary
       statistics.
       Example commands:
-        agentctl run code/diff --input '{"old_path":"./before.go","new_path":"./after.go","format":"unified"}'
-        agentctl skills run code/diff --old_path ./before.go --new_path ./after.go --format unified
-        agentctl run code/diff --input '{"old_path":"./before.go","new_path":"./after.go","format":"stats","ignore_whitespace":true}'
-        agentctl skills run code/diff --old_path ./before.go --new_path ./after.go --format stats --ignore_whitespace
+        foxctl run code/diff --input '{"old_path":"./before.go","new_path":"./after.go","format":"unified"}'
+        foxctl skills run code/diff --old_path ./before.go --new_path ./after.go --format unified
+        foxctl run code/diff --input '{"old_path":"./before.go","new_path":"./after.go","format":"stats","ignore_whitespace":true}'
+        foxctl skills run code/diff --old_path ./before.go --new_path ./after.go --format stats --ignore_whitespace
     workflows:
       - id: unified-diff
         description: "Show a unified diff."

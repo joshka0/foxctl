@@ -20,7 +20,7 @@ per-symbol incremental updates.
 >   `docs/spec/post_review_harness.md`, `docs/spec/core_profile_v1.md`
 > - Job & skill infra:
 >   - Job system + WFQ: see job system codemaps.
->   - Skill/runtime: see agentctl skill system codemaps.
+>   - Skill/runtime: see foxctl skill system codemaps.
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-agentctl is currently in pre-1.0 development. Security updates are provided for:
+foxctl is currently in pre-1.0 development. Security updates are provided for:
 
 | Version | Supported          |
 | ------- | ------------------ |
@@ -15,7 +15,7 @@ Once v1.0 is released, we will maintain security updates for the current major v
 
 ## Security Model
 
-agentctl implements defense-in-depth security across multiple layers:
+foxctl implements defense-in-depth security across multiple layers:
 
 ### 1. Workspace Confinement
 
@@ -24,7 +24,7 @@ agentctl implements defense-in-depth security across multiple layers:
 **Mechanisms**:
 - All file operations route through `policy.PathValidator`
 - Workspace detection via Git repository root or current directory
-- Explicit allowlist for safe directories (`$HOME/.agentctl/`, `$TMPDIR`)
+- Explicit allowlist for safe directories (`$HOME/.foxctl/`, `$TMPDIR`)
 - Rejection of:
   - Path traversal attempts (`../`, absolute paths outside workspace)
   - Symlinks pointing outside workspace
@@ -119,11 +119,11 @@ func redactHeaders(headers map[string]string) map[string]string {
 **Workflow**:
 ```bash
 # Store content
-digest=$(agentctl cas put < data.json)
+digest=$(foxctl cas put < data.json)
 # → sha256:abc123...
 
 # Retrieve with verification
-agentctl cas get sha256:abc123...
+foxctl cas get sha256:abc123...
 # → Recomputes digest, fails if mismatch
 ```
 
@@ -186,7 +186,7 @@ agentctl cas get sha256:abc123...
 ### Out of Scope (for Core v1)
 
 1. **Multi-Tenancy**: Core v1 is single-user, single-workspace
-2. **Sandboxing of agentctl itself**: Assumes trusted execution environment
+2. **Sandboxing of foxctl itself**: Assumes trusted execution environment
 3. **Side-Channel Attacks**: Timing, cache-based attacks not addressed
 4. **Physical Access**: Assumes adversary cannot access host filesystem directly
 
@@ -229,16 +229,16 @@ agentctl cas get sha256:abc123...
 
 ### Reporting Process
 
-1. **Email**: Send details to security@agentctl.dev (or maintainer directly if available)
-2. **GitHub Security Advisory**: Use [private security advisory](https://github.com/jkatigb/agentctl/security/advisories/new) (preferred)
-3. **PGP Key**: Available at [https://keybase.io/agentctl](https://keybase.io/agentctl) (if available)
+1. **Email**: Send details to security@foxctl.dev (or maintainer directly if available)
+2. **GitHub Security Advisory**: Use [private security advisory](https://github.com/joshka0/foxctl/security/advisories/new) (preferred)
+3. **PGP Key**: Available at [https://keybase.io/foxctl](https://keybase.io/foxctl) (if available)
 
 ### What to Include
 
 - **Description**: Nature of the vulnerability
 - **Impact**: What an attacker could achieve
 - **Reproduction**: Steps to reproduce (including code snippets)
-- **Environment**: OS, Go version, agentctl version
+- **Environment**: OS, Go version, foxctl version
 - **Severity**: Your assessment (Critical/High/Medium/Low)
 - **Suggested Fix**: If you have ideas (optional)
 
@@ -265,7 +265,7 @@ We appreciate responsible disclosure. With your permission, we will:
 ## Security Advisories
 
 Security advisories are published at:
-- **GitHub**: [Security Advisories](https://github.com/jkatigb/agentctl/security/advisories)
+- **GitHub**: [Security Advisories](https://github.com/joshka0/foxctl/security/advisories)
 - **Releases**: Mentioned in release notes for patched versions
 
 ---
@@ -276,7 +276,7 @@ Security advisories are published at:
 
 ```bash
 # Only install skills from trusted sources
-agentctl skills install --manifest ./skill.yaml --binary ./skill
+foxctl skills install --manifest ./skill.yaml --binary ./skill
 
 # Check skill manifest before installation
 cat skill.yaml  # Review network, filesystem policies
@@ -301,11 +301,11 @@ egressAllow:
 ```bash
 # Use environment variables (not CLI args)
 export GITHUB_TOKEN=ghp_...
-agentctl run http/openapi --spec memory:github
+foxctl run http/openapi --spec memory:github
 
 # Avoid secrets in command history
-# BAD:  agentctl run ... --auth '{"token":"ghp_..."}'
-# GOOD: agentctl run ... --auth '{"token":"$GITHUB_TOKEN"}'
+# BAD:  foxctl run ... --auth '{"token":"ghp_..."}'
+# GOOD: foxctl run ... --auth '{"token":"$GITHUB_TOKEN"}'
 
 # Mount secrets in /run/secrets/ when possible
 mkdir -p /run/secrets
@@ -317,42 +317,42 @@ chmod 0600 /run/secrets/api-key
 
 ```bash
 # Logs may contain workspace paths, not secrets (redacted)
-agentctl run fs/ls --path ./src 2>agentctl.log
+foxctl run fs/ls --path ./src 2>foxctl.log
 
 # Before sharing logs, review for sensitive info:
-grep -i "token\|password\|key" agentctl.log
+grep -i "token\|password\|key" foxctl.log
 ```
 
 ### 5. Pin CAS Artifacts
 
 ```bash
 # Pin important artifacts to prevent GC deletion
-agentctl cas pin sha256:abc123...
+foxctl cas pin sha256:abc123...
 
 # Unpin when no longer needed
-agentctl cas unpin sha256:abc123...
+foxctl cas unpin sha256:abc123...
 ```
 
 ### 6. Workspace Isolation
 
 ```bash
-# Run agentctl from repository root (automatic workspace detection)
+# Run foxctl from repository root (automatic workspace detection)
 cd /path/to/project
-agentctl run fs/ls --path ./src
+foxctl run fs/ls --path ./src
 
 # Avoid running with elevated privileges
-# BAD:  sudo agentctl run ...
-# GOOD: agentctl run ...  (as regular user)
+# BAD:  sudo foxctl run ...
+# GOOD: foxctl run ...  (as regular user)
 ```
 
-### 7. Keep agentctl Updated
+### 7. Keep foxctl Updated
 
 ```bash
 # Check version
-agentctl version
+foxctl version
 
 # Update to latest (once releases available)
-curl -sSL https://install.agentctl.dev | sh
+curl -sSL https://install.foxctl.dev | sh
 ```
 
 ---
@@ -450,4 +450,4 @@ Future plans include:
 **Last Updated**: February 2026
 **Version**: Pre-1.0 (subject to change)
 
-We take security seriously. Thank you for helping us keep agentctl secure!
+We take security seriously. Thank you for helping us keep foxctl secure!

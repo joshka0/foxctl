@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	obsidiantool "github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
+	obsidiantool "github.com/joshka0/foxctl/internal/tooling/tools/obsidian"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,7 +70,7 @@ func (s *WorkspaceStore) DraftMarkdownProposal(ctx context.Context, in MarkdownP
 	if folder == "" {
 		folder = filepath.ToSlash(filepath.Join("room-agile", safeFileSlug(project, "workspace"), noteType))
 	}
-	draftRel := filepath.ToSlash(filepath.Join("inbox", "drafted-from-agentctl", folder, safeFileSlug(sourceID, "draft")+".md"))
+	draftRel := filepath.ToSlash(filepath.Join("inbox", "drafted-from-foxctl", folder, safeFileSlug(sourceID, "draft")+".md"))
 	rendered, err := renderMarkdownProposalContent(noteType, title, in.Frontmatter, in.Body)
 	if err != nil {
 		return MarkdownProposalResult{}, err

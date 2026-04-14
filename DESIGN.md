@@ -2,7 +2,7 @@
 
 ## Scope
 
-This file is the visual and interaction source of truth for `agentctl` UI work.
+This file is the visual and interaction source of truth for `foxctl` UI work.
 
 The primary target is:
 
@@ -360,7 +360,7 @@ All major surfaces should support:
 
 ## Working References
 
-Current `agentctl` files that should stay aligned with this document:
+Current `foxctl` files that should stay aligned with this document:
 
 - `packages/gui-agent/src/App.tsx`
 - `packages/gui-agent/src/components/layout/AppShell.tsx`

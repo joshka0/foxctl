@@ -3,7 +3,7 @@ package expander
 import (
 	"sync"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext/files"
 )
 
 // BlockExpander finds code block boundaries for a specific language.

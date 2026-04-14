@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: context/filter
@@ -41,8 +41,8 @@ signature:
     long: |
       Use context/filter to select the most relevant context chunks for a prompt.
       Example commands:
-        agentctl run context/filter --input '{"prompt":"Summarize auth flow","source":{"text":"..."},"budget":{"max_tokens":400}}'
-        agentctl skills run context/filter --prompt "Summarize auth flow" --source '{"text":"..."}' --budget '{"max_tokens":400}'
+        foxctl run context/filter --input '{"prompt":"Summarize auth flow","source":{"text":"..."},"budget":{"max_tokens":400}}'
+        foxctl skills run context/filter --prompt "Summarize auth flow" --source '{"text":"..."}' --budget '{"max_tokens":400}'
     workflows:
       - id: filter-text
         description: "Filter a single text blob."

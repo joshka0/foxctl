@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// SessionTurn represents a single turn from an agentctl session.
+// SessionTurn represents a single turn from an foxctl session.
 // This is a simplified representation - actual implementation would
 // use the session store types.
 type SessionTurn struct {

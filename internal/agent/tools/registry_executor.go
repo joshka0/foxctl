@@ -7,9 +7,9 @@ import (
 
 	mcpmodels "github.com/XiaoConstantine/mcp-go/pkg/model"
 
-	"github.com/jkatigb/agentctl/internal/agent/toolnames"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/agent/toolnames"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 // RegistryToolExecutor adapts a tools.Registry to the engine.ToolExecutor interface.

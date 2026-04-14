@@ -3,7 +3,7 @@ package workflow
 import (
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/runtime/orchestration/workflow/frontmatter"
+	"github.com/joshka0/foxctl/internal/runtime/orchestration/workflow/frontmatter"
 )
 
 // NewOrchestrationConfigReloader builds a WORKFLOW.md frontmatter reloader

@@ -122,7 +122,7 @@ func TestDefaultSocketPath(t *testing.T) {
 	t.Parallel()
 
 	got := DefaultSocketPath("room/alpha", "claude-a")
-	if !strings.HasSuffix(got, filepath.Join("agentctl-pane", "room_alpha", "claude-a.sock")) {
+	if !strings.HasSuffix(got, filepath.Join("foxctl-pane", "room_alpha", "claude-a.sock")) {
 		t.Fatalf("DefaultSocketPath() = %q", got)
 	}
 }
@@ -131,7 +131,7 @@ func TestDefaultReadyPath(t *testing.T) {
 	t.Parallel()
 
 	got := DefaultReadyPath("room/alpha", "claude-a")
-	if !strings.HasSuffix(got, filepath.Join("agentctl-pane", "room_alpha", "claude-a.ready")) {
+	if !strings.HasSuffix(got, filepath.Join("foxctl-pane", "room_alpha", "claude-a.ready")) {
 		t.Fatalf("DefaultReadyPath() = %q", got)
 	}
 }
@@ -140,12 +140,12 @@ func TestDefaultSocketPathPrefersShortRootWhenTmpDirIsLong(t *testing.T) {
 	t.Setenv("TMPDIR", filepath.Join(string(filepath.Separator), "very", "long", "tmp", strings.Repeat("segment", 8)))
 	got := DefaultSocketPath("feat/internal-topology", "feat-internal-grouping-gemini-review-f")
 	if runtime.GOOS == "windows" {
-		if !strings.Contains(got, "agentctl-pane") {
-			t.Fatalf("DefaultSocketPath() = %q, want agentctl-pane path", got)
+		if !strings.Contains(got, "foxctl-pane") {
+			t.Fatalf("DefaultSocketPath() = %q, want foxctl-pane path", got)
 		}
 		return
 	}
-	if !strings.HasPrefix(got, filepath.Join(string(filepath.Separator), "tmp", "agentctl-pane")+string(filepath.Separator)) {
+	if !strings.HasPrefix(got, filepath.Join(string(filepath.Separator), "tmp", "foxctl-pane")+string(filepath.Separator)) {
 		t.Fatalf("DefaultSocketPath() = %q, want short /tmp root", got)
 	}
 	if len(got) >= 104 {

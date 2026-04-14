@@ -24,7 +24,7 @@ permissions:
 
 jobs:
     build-and-push:
-        runs-on: arc-runner-agentctl
+        runs-on: arc-runner-foxctl
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -43,5 +43,5 @@ jobs:
                   file: ./Dockerfile.ci
                   push: true
                   tags: |
-                      ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1
-                      ghcr.io/${{ github.repository_owner }}/agentctl-ci:latest
+                      ghcr.io/${{ github.repository_owner }}/foxctl-ci:go1.26.1
+                      ghcr.io/${{ github.repository_owner }}/foxctl-ci:latest

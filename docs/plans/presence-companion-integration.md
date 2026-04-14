@@ -87,7 +87,7 @@ import (
     "context"
     "fmt"
 
-    "github.com/jkatigb/agentctl/internal/context/companion"
+    "github.com/joshka0/foxctl/internal/context/companion"
 )
 
 type companionSkillRunnerAdapter struct {

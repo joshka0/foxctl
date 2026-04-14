@@ -23,19 +23,19 @@ func TestFindFilesRespectingGitignoreSkipsIgnoredFiles(t *testing.T) {
 	}
 
 	run("init")
-	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".agentctl/\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(".foxctl/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, ".agentctl", "exports"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, ".foxctl", "exports"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "src", "main.ts"), []byte("export const main = true;\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".agentctl", "exports", "eval.json"), []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".foxctl", "exports", "eval.json"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -47,7 +47,7 @@ func TestFindFilesRespectingGitignoreSkipsIgnoredFiles(t *testing.T) {
 		t.Fatal("expected non-empty file set")
 	}
 	for _, file := range files {
-		if file == filepath.Clean(filepath.Join(".agentctl", "exports", "eval.json")) {
+		if file == filepath.Clean(filepath.Join(".foxctl", "exports", "eval.json")) {
 			t.Fatalf("ignored file leaked into results: %v", files)
 		}
 	}

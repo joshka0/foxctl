@@ -1,14 +1,14 @@
-# Scheduled jobs for agentctl maintenance
+# Scheduled jobs for foxctl maintenance
 
 ---
 # PageRank recalculation for task prioritization
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: agentctl-pagerank
-  namespace: agentctl
+  name: foxctl-pagerank
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: cronjob
 spec:
   schedule: "0 * * * *"  # Every hour
@@ -22,10 +22,10 @@ spec:
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: agentctl
+            app.kubernetes.io/name: foxctl
             app.kubernetes.io/component: cronjob
         spec:
-          serviceAccountName: agentctl
+          serviceAccountName: foxctl
           restartPolicy: OnFailure
 
           securityContext:
@@ -34,9 +34,9 @@ spec:
 
           containers:
           - name: pagerank
-            image: agentctl:latest
+            image: foxctl:latest
             command:
-            - agentctl
+            - foxctl
             - overseer
             - rerank
 
@@ -46,12 +46,12 @@ spec:
             - name: TURSO_URL
               valueFrom:
                 secretKeyRef:
-                  name: agentctl-secrets
+                  name: foxctl-secrets
                   key: turso-url
             - name: TURSO_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: agentctl-secrets
+                  name: foxctl-secrets
                   key: turso-token
 
             resources:
@@ -80,10 +80,10 @@ spec:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: agentctl-cas-gc
-  namespace: agentctl
+  name: foxctl-cas-gc
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: cronjob
 spec:
   schedule: "0 3 * * *"  # Daily at 3 AM
@@ -97,10 +97,10 @@ spec:
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: agentctl
+            app.kubernetes.io/name: foxctl
             app.kubernetes.io/component: cronjob
         spec:
-          serviceAccountName: agentctl
+          serviceAccountName: foxctl
           restartPolicy: OnFailure
 
           securityContext:
@@ -109,9 +109,9 @@ spec:
 
           containers:
           - name: gc
-            image: agentctl:latest
+            image: foxctl:latest
             command:
-            - agentctl
+            - foxctl
             - cas
             - gc
             args:
@@ -124,17 +124,17 @@ spec:
             - name: TURSO_URL
               valueFrom:
                 secretKeyRef:
-                  name: agentctl-secrets
+                  name: foxctl-secrets
                   key: turso-url
             - name: TURSO_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: agentctl-secrets
+                  name: foxctl-secrets
                   key: turso-token
             - name: AGENTCTL_CAS_BACKEND
               value: "s3"
             - name: AGENTCTL_CAS_BUCKET
-              value: "agentctl-cas"
+              value: "foxctl-cas"
 
             resources:
               requests:
@@ -162,10 +162,10 @@ spec:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: agentctl-session-cleanup
-  namespace: agentctl
+  name: foxctl-session-cleanup
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: cronjob
 spec:
   schedule: "30 4 * * 0"  # Weekly on Sunday at 4:30 AM
@@ -179,10 +179,10 @@ spec:
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: agentctl
+            app.kubernetes.io/name: foxctl
             app.kubernetes.io/component: cronjob
         spec:
-          serviceAccountName: agentctl
+          serviceAccountName: foxctl
           restartPolicy: OnFailure
 
           securityContext:
@@ -191,9 +191,9 @@ spec:
 
           containers:
           - name: cleanup
-            image: agentctl:latest
+            image: foxctl:latest
             command:
-            - agentctl
+            - foxctl
             - sessions
             - cleanup
             args:
@@ -206,12 +206,12 @@ spec:
             - name: TURSO_URL
               valueFrom:
                 secretKeyRef:
-                  name: agentctl-secrets
+                  name: foxctl-secrets
                   key: turso-url
             - name: TURSO_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: agentctl-secrets
+                  name: foxctl-secrets
                   key: turso-token
 
             resources:

@@ -11,7 +11,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
 func main() {
@@ -25,7 +25,7 @@ func main() {
 
 	replicaPath := os.Getenv("AGENTCTL_LIBSQL_PATH")
 	if replicaPath == "" {
-		replicaPath = os.ExpandEnv("$HOME/.agentctl/sync-test/replica.db")
+		replicaPath = os.ExpandEnv("$HOME/.foxctl/sync-test/replica.db")
 	}
 
 	cfg := dbdriver.Config{

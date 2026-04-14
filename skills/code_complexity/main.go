@@ -15,11 +15,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/sliceutil"
 )
 
 // Input defines the input parameters for code/complexity operations.

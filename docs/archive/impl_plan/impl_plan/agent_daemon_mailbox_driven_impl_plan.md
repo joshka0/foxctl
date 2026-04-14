@@ -1,7 +1,7 @@
 ### Mailbox-driven Agent Daemon – Implementation Plan
 
 This plan implements an **always-on, mailbox-driven, fully agentic** Agent
-Profile runtime for `agentctl`.
+Profile runtime for `foxctl`.
 
 It is written as an implementation blueprint (deliverables + file touchpoints +
 acceptance criteria) and is intended to be tracked via the project TODO list IDs
@@ -235,13 +235,13 @@ type Insights struct {
 ### 2.4 CLI
 
 - Native agent lifecycle commands:
-  - `cmd/agentctl/cmd/agent.go`
+  - `cmd/foxctl/cmd/agent.go`
 - Mailbox store CLI:
-  - `cmd/agentctl/cmd/mailbox.go`
+  - `cmd/foxctl/cmd/mailbox.go`
 - Blackboard store CLI:
-  - `cmd/agentctl/cmd/bb.go`
+  - `cmd/foxctl/cmd/bb.go`
 - Todo skill CLI wrappers:
-  - `cmd/agentctl/cmd/todo.go`
+  - `cmd/foxctl/cmd/todo.go`
 
 ### 2.5 Skills (reference semantics)
 
@@ -501,7 +501,7 @@ task persistence and **tasksgraph.Analyzer** for graph insights.
    ```
 
 - **Acceptance criteria**:
-  - Result matches `agentctl todo list` output for the same workspace.
+  - Result matches `foxctl todo list` output for the same workspace.
 
 ##### T2.1 — Implement `todo.add`
 
@@ -532,7 +532,7 @@ task persistence and **tasksgraph.Analyzer** for graph insights.
 4. Return `{"task": created, "success": true}`.
 
 - **Acceptance criteria**:
-  - Task appears in subsequent `todo.query` and `agentctl todo list`.
+  - Task appears in subsequent `todo.query` and `foxctl todo list`.
 
 ##### T2.2 — Implement `todo.complete`
 
@@ -588,7 +588,7 @@ task persistence and **tasksgraph.Analyzer** for graph insights.
 
 - **Acceptance criteria**:
   - Output is deterministic for a fixed task graph.
-  - Matches `agentctl todo insights` output.
+  - Matches `foxctl todo insights` output.
 
 ##### T2.4 — Implement `todo.set_active`
 
@@ -787,7 +787,7 @@ sends `agent.reply` responses.
 // internal/agent/daemon/config.go
 type Options struct {
     AgentID           string
-    StorageRoot       string        // ~/.agentctl
+    StorageRoot       string        // ~/.foxctl
     PollInterval      time.Duration // default 500ms
     HeartbeatInterval time.Duration // default 10s
     MaxPollMessages   int           // default 10
@@ -806,7 +806,7 @@ func Run(ctx context.Context, opts Options) error {
 ```
 
 - **Acceptance criteria**:
-  - `agentctl agent run <id>` starts the daemon and blocks until stopped.
+  - `foxctl agent run <id>` starts the daemon and blocks until stopped.
 
 #### D1.1 — Daemon startup
 
@@ -1087,7 +1087,7 @@ go func() {
 ```
 
 - **Acceptance criteria**:
-  - `agentctl agent info <id>` shows recent `heartbeat_at`.
+  - `foxctl agent info <id>` shows recent `heartbeat_at`.
 
 #### D1.9 — Stop/kill semantics
 
@@ -1115,7 +1115,7 @@ go func() {
    ```
 
 - **Acceptance criteria**:
-  - `agentctl agent kill <id>` causes daemon to exit within one poll interval.
+  - `foxctl agent kill <id>` causes daemon to exit within one poll interval.
 
 #### D1.10 — Observability
 
@@ -1276,7 +1276,7 @@ CREATE INDEX IF NOT EXISTS idx_dedupe_processed_at ON daemon_dedupe(processed_at
 
 - **Acceptance criteria**:
   - `SQLiteDedupeStore` implements `DedupeStore` interface.
-  - Database file created at `~/.agentctl/daemon_dedupe.db`.
+  - Database file created at `~/.foxctl/daemon_dedupe.db`.
 
 #### B2.2 — Add TTL-based cleanup
 
@@ -1409,10 +1409,10 @@ func TestSQLiteDedupeStore_Persistence(t *testing.T) {
 
 ### Milestone C — CLI UX (run + ask + wait)
 
-#### C1.0 — `agentctl agent run <agent-id>`
+#### C1.0 — `foxctl agent run <agent-id>`
 
 - **Touchpoints**
-  - `cmd/agentctl/cmd/agent.go` (new subcommand)
+  - `cmd/foxctl/cmd/agent.go` (new subcommand)
   - `internal/agent/daemon/*`
 
 **Implementation steps**:
@@ -1447,13 +1447,13 @@ func TestSQLiteDedupeStore_Persistence(t *testing.T) {
    ```
 
 - **Acceptance criteria**:
-  - `agentctl agent run <id>` blocks until SIGINT/SIGTERM or agent state becomes
+  - `foxctl agent run <id>` blocks until SIGINT/SIGTERM or agent state becomes
     `stopped`.
 
-#### C1.1 — `agentctl agent ask <agent-id> --question ... [--wait]`
+#### C1.1 — `foxctl agent ask <agent-id> --question ... [--wait]`
 
 - **Touchpoints**
-  - `cmd/agentctl/cmd/agent.go`
+  - `cmd/foxctl/cmd/agent.go`
   - `internal/storage/mailbox/store.go`
   - `internal/domain/agent/mailbox.go`
 
@@ -1546,7 +1546,7 @@ func TestSQLiteDedupeStore_Persistence(t *testing.T) {
   - Ask message appears in agent's mailbox.
   - Output envelope contains `ask_id` for correlation.
 
-#### C1.2 — `agentctl agent cmd <agent-id> --action ...`
+#### C1.2 — `foxctl agent cmd <agent-id> --action ...`
 
 **Implementation steps**:
 
@@ -1615,7 +1615,7 @@ func waitForReply(ctx context.Context, store mailbox.Store, callerNS, askID stri
   - Reply envelope is printed to stdout.
   - Reply message is acked.
 
-#### C1.4 — Improve `agentctl agent watch`
+#### C1.4 — Improve `foxctl agent watch`
 
 - **Current state**: `runAgentWatch` in `agent.go:321-501` emits message counts
   only.
@@ -1818,7 +1818,7 @@ func (r *Registry) agentSpawn(ctx context.Context, args map[string]any) (*models
 }
 ```
 
-#### O1.3 — CLI: `agentctl overseer run`
+#### O1.3 — CLI: `foxctl overseer run`
 
 **Implementation steps**:
 
@@ -2088,7 +2088,7 @@ func TestDaemon_ToolExecution(t *testing.T) {
    An agent can run as a long-lived daemon that polls for mailbox messages:
 
    ```bash
-   agentctl agent run <agent-id>
+   foxctl agent run <agent-id>
    ```
    ````
 
@@ -2106,10 +2106,10 @@ func TestDaemon_ToolExecution(t *testing.T) {
 
    ```bash
    # Fire-and-forget ask
-   agentctl agent ask <agent-id> --question "What files need refactoring?"
+   foxctl agent ask <agent-id> --question "What files need refactoring?"
 
    # Wait for reply (blocks until response or timeout)
-   agentctl agent ask <agent-id> --question "..." --wait --timeout 5m
+   foxctl agent ask <agent-id> --question "..." --wait --timeout 5m
    ```
    ````
 
@@ -2183,14 +2183,14 @@ go test -v ./test/integration/...
 
 **Steps**:
 
-1. Build: `go build -o bin/agentctl ./cmd/agentctl`
+1. Build: `go build -o bin/foxctl ./cmd/foxctl`
 2. Spawn agent:
-   `./agentctl agent spawn --role coder --prompt "You are a coder"`
-3. Run daemon in background: `./agentctl agent run <agent-id> &`
+   `./foxctl agent spawn --role coder --prompt "You are a coder"`
+3. Run daemon in background: `./foxctl agent run <agent-id> &`
 4. Send ask:
-   `./agentctl agent ask <agent-id> --question "Hello" --wait --timeout 30s`
+   `./foxctl agent ask <agent-id> --question "Hello" --wait --timeout 30s`
 5. Verify reply envelope is printed.
-6. Kill agent: `./agentctl agent kill <agent-id>`
+6. Kill agent: `./foxctl agent kill <agent-id>`
 7. Verify daemon process exits.
 
 - **Acceptance criteria**:

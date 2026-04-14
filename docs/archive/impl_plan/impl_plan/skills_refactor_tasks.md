@@ -61,7 +61,7 @@ Goal: reduce duplication and improve maintainability by consolidating shared log
 
 ### 8) Verification
 
-- [x] Update `~/.agentctl/config.yaml` embedding model to Voyage.
+- [x] Update `~/.foxctl/config.yaml` embedding model to Voyage.
 - [ ] Enqueue + run `embedding/worker` and confirm stored model metadata (blocked: voyage DNS lookup failure).
 - [x] Run `go test ./skills/session_summarize`.
 
@@ -73,4 +73,4 @@ Goal: reduce duplication and improve maintainability by consolidating shared log
 
 ## Testing Notes
 
-- go test ./internal/intelligence/codemap/... and ./cmd/agentctl/cmd currently fail with duplicate sqlite3 symbols (likely needs `-tags=libsqlite3` or CGO/linker config alignment).
+- go test ./internal/intelligence/codemap/... and ./cmd/foxctl/cmd currently fail with duplicate sqlite3 symbols (likely needs `-tags=libsqlite3` or CGO/linker config alignment).

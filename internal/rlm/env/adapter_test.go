@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/rlm"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/rlm"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 func writeFakeExecSkill(t *testing.T, workspaceRoot, skillName, artifactBody string) string {
@@ -26,7 +26,7 @@ func writeFakeExecSkill(t *testing.T, workspaceRoot, skillName, artifactBody str
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest := `apiVersion: agentctl/v1
+	manifest := `apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: ` + skillName + `
@@ -386,7 +386,7 @@ func TestReadOnlyAdapterResolvePreferredSkillArtifactPrefersWorkspaceOverConfigu
 	if err := os.MkdirAll(configuredSkillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configuredSkillDir, "skill.yaml"), []byte(`apiVersion: agentctl/v1
+	if err := os.WriteFile(filepath.Join(configuredSkillDir, "skill.yaml"), []byte(`apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/semantic_search
@@ -780,8 +780,8 @@ func TestReadOnlyAdapterCodeSearchEnsembleRegistrationTrace(t *testing.T) {
 	workspace := t.TempDir()
 	storageRoot := t.TempDir()
 
-	writeTestFile(t, filepath.Join(workspace, "cmd", "agentctl", "cmd", "eval.go"), "package cmd\n\nfunc newEvalCommand() *cobra.Command {\n\tcmd := &cobra.Command{}\n\tcmd.AddCommand(newEvalCodeSearchEnsembleCommand())\n\treturn cmd\n}\n")
-	writeTestFile(t, filepath.Join(workspace, "cmd", "agentctl", "cmd", "eval_code_search_ensemble.go"), "package cmd\n\nfunc newEvalCodeSearchEnsembleCommand() *cobra.Command {\n\treturn &cobra.Command{}\n}\n")
+	writeTestFile(t, filepath.Join(workspace, "cmd", "foxctl", "cmd", "eval.go"), "package cmd\n\nfunc newEvalCommand() *cobra.Command {\n\tcmd := &cobra.Command{}\n\tcmd.AddCommand(newEvalCodeSearchEnsembleCommand())\n\treturn cmd\n}\n")
+	writeTestFile(t, filepath.Join(workspace, "cmd", "foxctl", "cmd", "eval_code_search_ensemble.go"), "package cmd\n\nfunc newEvalCodeSearchEnsembleCommand() *cobra.Command {\n\treturn &cobra.Command{}\n}\n")
 
 	store, err := repoindex.Open(ctx, storageRoot, workspace)
 	if err != nil {
@@ -814,7 +814,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleRegistrationTrace(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatalf("files=%v", out["files"])
 	}
-	if files[0].Path != "cmd/agentctl/cmd/eval.go" {
+	if files[0].Path != "cmd/foxctl/cmd/eval.go" {
 		t.Fatalf("files=%+v", files)
 	}
 }
@@ -828,7 +828,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleChangeImpact(t *testing.T) {
 
 	writeTestFile(t, filepath.Join(workspace, "internal", "rlm", "env", "code_search_ensemble.go"), "package env\n\nfunc codeSearchEnsemble() {}\nfunc helper() {}\n")
 	writeTestFile(t, filepath.Join(workspace, "internal", "rlm", "env", "adapter.go"), "package env\n\nfunc execute() { codeSearchEnsemble() }\n")
-	writeTestFile(t, filepath.Join(workspace, "cmd", "agentctl", "cmd", "eval_code_search_ensemble.go"), "package cmd\n\nfunc runSingleCodeSearchEnsembleEval() {}\n")
+	writeTestFile(t, filepath.Join(workspace, "cmd", "foxctl", "cmd", "eval_code_search_ensemble.go"), "package cmd\n\nfunc runSingleCodeSearchEnsembleEval() {}\n")
 
 	store, err := repoindex.Open(ctx, storageRoot, workspace)
 	if err != nil {
@@ -866,7 +866,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleChangeImpact(t *testing.T) {
 			ID:        evalID,
 			Kind:      repoindex.NodeSymbol,
 			Pkg:       "cmd",
-			File:      "cmd/agentctl/cmd/eval_code_search_ensemble.go",
+			File:      "cmd/foxctl/cmd/eval_code_search_ensemble.go",
 			Name:      "runSingleCodeSearchEnsembleEval",
 			Summary:   "CLI eval path for code_search_ensemble.",
 			SpanStart: 3,
@@ -941,7 +941,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleExecutionTracePromotesBridgeFile(t *te
 
 	writeTestFile(t, filepath.Join(workspace, "internal", "rlm", "env", "code_search_ensemble.go"), "package env\n\nfunc codeSearchEnsemble() {}\n")
 	writeTestFile(t, filepath.Join(workspace, "internal", "rlm", "env", "adapter.go"), "package env\n\ntype ReadOnlyAdapter struct{}\n\nfunc NewReadOnlyAdapter() *ReadOnlyAdapter { return &ReadOnlyAdapter{} }\n\nfunc (a *ReadOnlyAdapter) Execute(name string) { if name == \"code_search_ensemble\" { codeSearchEnsemble() } }\n")
-	writeTestFile(t, filepath.Join(workspace, "cmd", "agentctl", "cmd", "eval_code_search_ensemble.go"), "package cmd\n\nfunc runSingleCodeSearchEnsembleEval() { adapter := NewReadOnlyAdapter(); adapter.Execute(\"code_search_ensemble\") }\n")
+	writeTestFile(t, filepath.Join(workspace, "cmd", "foxctl", "cmd", "eval_code_search_ensemble.go"), "package cmd\n\nfunc runSingleCodeSearchEnsembleEval() { adapter := NewReadOnlyAdapter(); adapter.Execute(\"code_search_ensemble\") }\n")
 
 	store, err := repoindex.Open(ctx, storageRoot, workspace)
 	if err != nil {
@@ -979,7 +979,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleExecutionTracePromotesBridgeFile(t *te
 			ID:        evalID,
 			Kind:      repoindex.NodeSymbol,
 			Pkg:       "cmd",
-			File:      "cmd/agentctl/cmd/eval_code_search_ensemble.go",
+			File:      "cmd/foxctl/cmd/eval_code_search_ensemble.go",
 			Name:      "runSingleCodeSearchEnsembleEval",
 			Summary:   "CLI eval path for code_search_ensemble.",
 			SpanStart: 3,
@@ -1022,7 +1022,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleExecutionTracePromotesBridgeFile(t *te
 	for _, file := range files {
 		paths[file.Path] = true
 	}
-	if !paths["cmd/agentctl/cmd/eval_code_search_ensemble.go"] || !paths["internal/rlm/env/adapter.go"] || !paths["internal/rlm/env/code_search_ensemble.go"] {
+	if !paths["cmd/foxctl/cmd/eval_code_search_ensemble.go"] || !paths["internal/rlm/env/adapter.go"] || !paths["internal/rlm/env/code_search_ensemble.go"] {
 		t.Fatalf("files=%+v", files)
 	}
 	metadata, ok := out["metadata"].(map[string]any)

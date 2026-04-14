@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+	symindex "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
 
 func TestAnalyzeTypeScriptDuplicateRecoveryBlocks(t *testing.T) {

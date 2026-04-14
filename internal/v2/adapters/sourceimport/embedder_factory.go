@@ -166,7 +166,7 @@ func ProbeEmbedderDimensions(ctx context.Context, embedder Embedder, timeout tim
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	res, err := embedder.Embed(probeCtx, "agentctl embedding dimension probe")
+	res, err := embedder.Embed(probeCtx, "foxctl embedding dimension probe")
 	if err != nil {
 		return 0, "", err
 	}

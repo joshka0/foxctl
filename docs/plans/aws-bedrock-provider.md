@@ -179,7 +179,7 @@ The AWS SDK credential chain handles all these automatically — no custom crede
    ```bash
    export BEDROCK_REGION=us-east-1
    export AWS_PROFILE=your-profile  # or IAM role
-   agentctl web serve --port=8080
+   foxctl web serve --port=8080
    # In GUI: select "bedrock" provider → chat works
    ```
 5. `curl localhost:8080/api/companion/providers` — shows `bedrock: true`

@@ -4,28 +4,28 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: agentctl-workspace
-  namespace: agentctl
+  name: foxctl-workspace
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: workspace
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: agentctl
+      app.kubernetes.io/name: foxctl
       app.kubernetes.io/component: workspace
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: agentctl
+        app.kubernetes.io/name: foxctl
         app.kubernetes.io/component: workspace
       annotations:
         # Customize these for your repository
-        agentctl.io/repo: "https://github.com/org/repo"
-        agentctl.io/branch: "main"
+        foxctl.io/repo: "https://github.com/org/repo"
+        foxctl.io/branch: "main"
     spec:
-      serviceAccountName: agentctl
+      serviceAccountName: foxctl
       terminationGracePeriodSeconds: 60
 
       securityContext:
@@ -49,9 +49,9 @@ spec:
           sizeLimit: 100Mi
 
       containers:
-      # Main agentctl container
-      - name: agentctl
-        image: agentctl:latest
+      # Main foxctl container
+      - name: foxctl
+        image: foxctl:latest
         imagePullPolicy: IfNotPresent
 
         env:
@@ -65,19 +65,19 @@ spec:
         - name: TURSO_URL
           valueFrom:
             secretKeyRef:
-              name: agentctl-secrets
+              name: foxctl-secrets
               key: turso-url
         - name: TURSO_AUTH_TOKEN
           valueFrom:
             secretKeyRef:
-              name: agentctl-secrets
+              name: foxctl-secrets
               key: turso-token
 
         # Embedding provider
         - name: VOYAGE_API_KEY
           valueFrom:
             secretKeyRef:
-              name: agentctl-secrets
+              name: foxctl-secrets
               key: voyage-key
 
         # Pod identity
@@ -92,7 +92,7 @@ spec:
 
         # Observability
         - name: AGENTCTL_OBS_DIR
-          value: "/var/log/agentctl"
+          value: "/var/log/foxctl"
 
         resources:
           requests:
@@ -114,22 +114,22 @@ spec:
           mountPath: /workspace
           readOnly: true
         - name: cache
-          mountPath: /var/cache/agentctl
+          mountPath: /var/cache/foxctl
         - name: logs
-          mountPath: /var/log/agentctl
+          mountPath: /var/log/foxctl
         - name: tmp
           mountPath: /tmp
 
         livenessProbe:
           exec:
-            command: ["agentctl", "health"]
+            command: ["foxctl", "health"]
           initialDelaySeconds: 30
           periodSeconds: 30
           timeoutSeconds: 5
 
         readinessProbe:
           exec:
-            command: ["agentctl", "health", "--ready"]
+            command: ["foxctl", "health", "--ready"]
           initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 3

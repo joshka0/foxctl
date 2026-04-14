@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/test_feedback
@@ -60,8 +60,8 @@ signature:
     long: |
       Use hooks/test_feedback to surface failing tests for recent edits.
       Example commands:
-        agentctl run hooks/test_feedback --input '{"event":"PostToolUse","workspace_root":"/workspace/project","tool_name":"Edit"}'
-        agentctl skills run hooks/test_feedback --event PostToolUse --workspace_root /workspace/project --tool_name Edit
+        foxctl run hooks/test_feedback --input '{"event":"PostToolUse","workspace_root":"/workspace/project","tool_name":"Edit"}'
+        foxctl skills run hooks/test_feedback --event PostToolUse --workspace_root /workspace/project --tool_name Edit
     workflows:
       - id: post-edit-feedback
         description: "Report failures after an edit."

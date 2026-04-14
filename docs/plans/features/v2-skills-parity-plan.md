@@ -1,10 +1,10 @@
 ---
 vault_refs:
-  - notes/repo/agentctl/skills-runtime-wiring.md
-  - notes/repo/agentctl/packages/internal-adapters-skillslib-skillerr.md
-  - notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md
-  - notes/repo/agentctl/packages/internal-adapters-skillslib-skillout.md
-  - notes/repo/agentctl/packages/cmd-agentctl-cmd.md
+  - notes/repo/foxctl/skills-runtime-wiring.md
+  - notes/repo/foxctl/packages/internal-adapters-skillslib-skillerr.md
+  - notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md
+  - notes/repo/foxctl/packages/internal-adapters-skillslib-skillout.md
+  - notes/repo/foxctl/packages/cmd-foxctl-cmd.md
 ---
 # V2 Skills Parity Plan
 
@@ -134,7 +134,7 @@ Align the “v2 skills” story with the newer retrieval stack instead of the ol
 
 ### Current Eval Findings
 
-Recent eval work on the `agentctl` clean vault shows two important things:
+Recent eval work on the `foxctl` clean vault shows two important things:
 
 1. `code/semantic_search` with the explicit ACA-backed `context` scope is materially better than the current default skill path for knowledge-oriented repo questions.
 2. That is not enough evidence to make `context` part of the unconditional default yet, because the current default semantic-search path still underperforms badly on implementation-flow queries and needs its own quality work.
@@ -147,11 +147,11 @@ Practical decision for now:
 
 Reference eval shapes now in use:
 
-- `testdata/evals/retrieval/agentctl.yaml`
-- `testdata/evals/retrieval/agentctl-mixed.yaml`
+- `testdata/evals/retrieval/foxctl.yaml`
+- `testdata/evals/retrieval/foxctl-mixed.yaml`
 - `testdata/evals/retrieval/praze.yaml`
 
-Most recent mixed-suite comparison (`agentctl-mixed`) after stabilizing the query-time search path:
+Most recent mixed-suite comparison (`foxctl-mixed`) after stabilizing the query-time search path:
 
 - `skill_default`: `hit@5 0.86`, `MRR 0.71`
 - `skill_context`: `hit@5 0.86`, `MRR 0.79`
@@ -163,7 +163,7 @@ Interpretation:
 - `context` remains valuable
 - `default + context` currently gives the strongest overall recall on the mixed suite
 
-That is stronger evidence for eventually blending `context` into the default search story, but it is still worth keeping the rollout repo-aware until more suites beyond `agentctl` are measured.
+That is stronger evidence for eventually blending `context` into the default search story, but it is still worth keeping the rollout repo-aware until more suites beyond `foxctl` are measured.
 
 Follow-up `praze-mixed` results show the opposite shape:
 
@@ -181,7 +181,7 @@ Current implementation direction:
 
 - `code/semantic_search` reads an optional workspace-local ACA retrieval policy key:
   - `semantic_search_default_scopes`
-- `agentctl` can opt into default `context` through that workspace-local policy
+- `foxctl` can opt into default `context` through that workspace-local policy
 - `praze` can stay code-first by leaving that policy unset
 
 ### Surfaces to review

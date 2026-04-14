@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter"
 )
 
 // HandleInteraction processes button clicks from Discord.

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
-	runtimeworkers "github.com/jkatigb/agentctl/internal/v2/runtime/workers"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
+	runtimeworkers "github.com/joshka0/foxctl/internal/v2/runtime/workers"
 )
 
 func openTestStore(t *testing.T) *Store {

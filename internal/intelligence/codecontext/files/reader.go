@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/joshka0/foxctl/internal/platform/fsutil"
 )
 
 // PathValidator validates file paths against allowed roots.

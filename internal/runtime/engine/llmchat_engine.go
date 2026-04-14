@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // HookContext provides context for hook dispatch from LLMChatEngine.
@@ -752,8 +752,8 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 
 	// OpenRouter-specific headers
 	if e.config.Provider == "openrouter" {
-		req.Header.Set("HTTP-Referer", "https://agentctl.dev")
-		req.Header.Set("X-Title", "agentctl")
+		req.Header.Set("HTTP-Referer", "https://foxctl.dev")
+		req.Header.Set("X-Title", "foxctl")
 	}
 
 	resp, err := e.client.Do(req)

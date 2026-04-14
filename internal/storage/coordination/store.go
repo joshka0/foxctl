@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	workspaceutil "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
+	workspaceutil "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
 )
 
 // Store provides coordination primitives (leader leases) backed by coordination.db.

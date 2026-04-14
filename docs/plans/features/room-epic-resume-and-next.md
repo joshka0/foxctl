@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | Status | Draft for review |
-| Scope | `agentctl room epic resume` and `agentctl room epic next` |
+| Scope | `foxctl room epic resume` and `foxctl room epic next` |
 | Related | [room-epic-factory-mission-parity.md](./room-epic-factory-mission-parity.md) |
 
 ## Why this slice first
@@ -46,10 +46,10 @@ This is deliberately narrower than “richer milestone contracts” or “retro�
 
 ## Command surface
 
-### `agentctl room epic resume`
+### `foxctl room epic resume`
 
 ```bash
-agentctl room epic resume <room-id> <epic-id> \
+foxctl room epic resume <room-id> <epic-id> \
   --workspace /path/to/repo
 ```
 
@@ -64,10 +64,10 @@ This is intentionally different from `room status`:
 - `epic resume` is epic-scoped and continuity-oriented
 - `epic resume` should not duplicate generic coordinator pulse/task backlog output
 
-### `agentctl room epic next`
+### `foxctl room epic next`
 
 ```bash
-agentctl room epic next <room-id> <epic-id> \
+foxctl room epic next <room-id> <epic-id> \
   --workspace /path/to/repo \
   --actor human-a
 ```
@@ -320,14 +320,14 @@ This is for operator convenience only. Room state remains canonical.
 
 ## Command hints
 
-`command_hint` should use concrete `agentctl` commands whenever the next step is
+`command_hint` should use concrete `foxctl` commands whenever the next step is
 stable enough to express as a command.
 
 Examples:
 
-- `agentctl room epic finalize <room-id> <epic-id> "..."`
-- `agentctl room milestone start <room-id> <epic-id> --proposal <proposal-id>`
-- `agentctl room story validate <room-id> <story-id> review pass "..."`
+- `foxctl room epic finalize <room-id> <epic-id> "..."`
+- `foxctl room milestone start <room-id> <epic-id> --proposal <proposal-id>`
+- `foxctl room story validate <room-id> <story-id> review pass "..."`
 
 Avoid prose-only hints when a deterministic command exists.
 
@@ -347,7 +347,7 @@ Arguments:
 
 ## Skill implications
 
-Update `agentctl-room-agile` to teach:
+Update `foxctl-room-agile` to teach:
 
 - use `epic resume` to restart work after a gap
 - use `epic next` before inventing new scope or rereading the entire room
@@ -372,8 +372,8 @@ Recommended helpers:
 
 This slice is done when:
 
-1. `agentctl room epic resume` returns a coherent operational summary
-2. `agentctl room epic next` returns ordered actionable items
+1. `foxctl room epic resume` returns a coherent operational summary
+2. `foxctl room epic next` returns ordered actionable items
 3. `room_agile` exposes `epic_resume` and `epic_next`
 4. focused tests cover:
    - discovery epic

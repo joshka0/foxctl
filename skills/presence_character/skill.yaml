@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: presence/character
@@ -69,7 +69,7 @@ signature:
 
       Example:
         # Register a character
-        agentctl run presence/character --input '{
+        foxctl run presence/character --input '{
           "action": "register",
           "conversation_id": "conv-123",
           "name": "Aria",
@@ -77,7 +77,7 @@ signature:
         }'
 
         # Select overlay for emotion
-        agentctl run presence/character --input '{
+        foxctl run presence/character --input '{
           "action": "select",
           "character_id": "char-123",
           "emotion": "joy",

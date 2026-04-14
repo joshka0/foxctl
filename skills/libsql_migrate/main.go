@@ -14,9 +14,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/tursodatabase/go-libsql"
 )
@@ -34,7 +34,7 @@ type Input struct {
 	// Scope determines what to migrate: "all", "memories", "sessions"
 	Scope string `json:"scope" validate:"omitempty,oneof=all memories sessions"`
 
-	// SourceDir is the source SQLite storage directory (defaults to ~/.agentctl/storage)
+	// SourceDir is the source SQLite storage directory (defaults to ~/.foxctl/storage)
 	SourceDir string `json:"source_dir,omitempty"`
 
 	// BatchSize is the number of records to migrate per batch
@@ -103,7 +103,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		in.VectorDims = 1024 // Voyage default
 	}
 	if in.SourceDir == "" {
-		in.SourceDir = filepath.Join(os.Getenv("HOME"), ".agentctl", "storage")
+		in.SourceDir = filepath.Join(os.Getenv("HOME"), ".foxctl", "storage")
 	}
 
 	start := time.Now()
@@ -424,7 +424,7 @@ func migrateSessions(ctx context.Context, in Input, destDB *sql.DB, output *Outp
 			updated_at TEXT NOT NULL,
 			user_insights TEXT,
 			parent_session_id TEXT,
-			agent_id TEXT NOT NULL DEFAULT 'agentctl',
+			agent_id TEXT NOT NULL DEFAULT 'foxctl',
 			status TEXT NOT NULL DEFAULT 'ok',
 			key_questions TEXT
 		)

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: unity/scenes
@@ -49,13 +49,13 @@ signature:
     long: |
       Use unity/scenes to manage scene build settings in ProjectSettings/EditorBuildSettings.asset.
       Example commands:
-        agentctl run unity/scenes --input '{"operation":"list"}'
-        agentctl run unity/scenes --input '{"operation":"add","scene_path":"Assets/Scenes/MainMenu.unity"}'
-        agentctl run unity/scenes --input '{"operation":"remove","scene_path":"Assets/Scenes/MainMenu.unity"}'
-        agentctl run unity/scenes --input '{"operation":"enable","scene_path":"Assets/Scenes/MainMenu.unity"}'
-        agentctl run unity/scenes --input '{"operation":"disable","scene_path":"Assets/Scenes/MainMenu.unity"}'
-        agentctl run unity/scenes --input '{"operation":"reorder","scene_path":"Assets/Scenes/MainMenu.unity","index":0}'
-        agentctl run unity/scenes --input '{"operation":"find"}'
+        foxctl run unity/scenes --input '{"operation":"list"}'
+        foxctl run unity/scenes --input '{"operation":"add","scene_path":"Assets/Scenes/MainMenu.unity"}'
+        foxctl run unity/scenes --input '{"operation":"remove","scene_path":"Assets/Scenes/MainMenu.unity"}'
+        foxctl run unity/scenes --input '{"operation":"enable","scene_path":"Assets/Scenes/MainMenu.unity"}'
+        foxctl run unity/scenes --input '{"operation":"disable","scene_path":"Assets/Scenes/MainMenu.unity"}'
+        foxctl run unity/scenes --input '{"operation":"reorder","scene_path":"Assets/Scenes/MainMenu.unity","index":0}'
+        foxctl run unity/scenes --input '{"operation":"find"}'
   returns:
     - name: scenes
       type: array

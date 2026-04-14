@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
 
 // writeJSON writes v as JSON to w and sets the HTTP status code.

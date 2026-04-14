@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKSPACE="${PRAZE_WORKSPACE:-${1:-}}"
 
 if [[ -z "${WORKSPACE}" ]]; then
-  echo "usage: PRAZE_WORKSPACE=/path/to/praze $0 [extra agentctl flags]" >&2
+  echo "usage: PRAZE_WORKSPACE=/path/to/praze $0 [extra foxctl flags]" >&2
   exit 1
 fi
 

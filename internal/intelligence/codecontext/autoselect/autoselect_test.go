@@ -3,7 +3,7 @@ package autoselect
 import (
 	"testing"
 
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
 func TestNormalizeRepoIndexMode(t *testing.T) {
@@ -39,7 +39,7 @@ func TestNormalizeRepoIndexMode(t *testing.T) {
 func TestResolveWorkspaceID(t *testing.T) {
 	t.Parallel()
 
-	workspacePath := "/tmp/agentctl"
+	workspacePath := "/tmp/foxctl"
 	if got := resolveWorkspaceID(workspacePath, "custom-id"); got != "custom-id" {
 		t.Fatalf("override workspace id=%q want custom-id", got)
 	}

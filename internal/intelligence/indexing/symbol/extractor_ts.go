@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/expander"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext/expander"
 )
 
 // TypeScriptExtractor extracts symbols from TypeScript sources using line-based heuristics.

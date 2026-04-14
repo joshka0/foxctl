@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
 
 func pathsFromCandidates(candidates []*codeSearchCandidate) []string {
@@ -122,7 +122,7 @@ func TestCodeSearchPathTermScore(t *testing.T) {
 
 	terms := codeSearchPathTerms("Where does memory_ensemble_retrieve live?")
 	gotMemoryEnsemble := codeSearchPathTermScore("internal/rlm/env/memory_ensemble.go", terms)
-	gotAgentMemory := codeSearchPathTermScore("cmd/agentctl/cmd/agent_memory.go", terms)
+	gotAgentMemory := codeSearchPathTermScore("cmd/foxctl/cmd/agent_memory.go", terms)
 	if gotMemoryEnsemble <= gotAgentMemory {
 		t.Fatalf("memory_ensemble score=%v agent_memory score=%v", gotMemoryEnsemble, gotAgentMemory)
 	}
@@ -409,7 +409,7 @@ func TestApplyACAGuidanceSupportDoesNotIntroduceNewCandidates(t *testing.T) {
 	}
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:      "notes/repo/agentctl/packages/internal-rlm-env.md",
+			Path:      "notes/repo/foxctl/packages/internal-rlm-env.md",
 			RepoPaths: []string{"internal/context/contextplane/retrieval.go"},
 			Symbols:   []string{"WorkspaceStore"},
 			Title:     "internal rlm env",
@@ -438,7 +438,7 @@ func TestApplyACAGuidanceSupportBoostsPackageSymbolOverlap(t *testing.T) {
 	}
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:      "notes/repo/agentctl/packages/internal-contextplane.md",
+			Path:      "notes/repo/foxctl/packages/internal-contextplane.md",
 			RepoPaths: []string{"internal/context/contextplane/types.go", "internal/context/contextplane/retrieval.go"},
 			Symbols:   []string{"WorkspaceStore"},
 			Title:     "internal contextplane",
@@ -485,7 +485,7 @@ func TestApplyACAGuidanceSupportAddsPackageFamilyRepoPaths(t *testing.T) {
 	}
 	hits := []contextplane.RetrievalHit{
 		{
-			Path: "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md",
+			Path: "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md",
 			RepoPaths: []string{
 				"internal/adapters/skillslib/skillmain/context.go",
 				"internal/adapters/skillslib/skillmain/main.go",
@@ -529,7 +529,7 @@ func TestApplyACAGuidanceSupportAddsSkillmainAnchorAgainstCompetingCandidates(t 
 	}
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:              "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md",
+			Path:              "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md",
 			PrimaryAnchorPath: "internal/adapters/skillslib/skillmain/main.go",
 			RepoPaths: []string{
 				"internal/adapters/skillslib/skillmain/context.go",
@@ -556,7 +556,7 @@ func TestPackageGuidanceSpecificityScorePrefersPrimaryAnchorPath(t *testing.T) {
 	t.Parallel()
 
 	hit := contextplane.RetrievalHit{
-		Path:              "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md",
+		Path:              "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md",
 		Title:             "internal adapters skillslib skillmain",
 		PrimaryAnchorPath: "internal/adapters/skillslib/skillmain/main.go",
 		AnchorPaths: []string{
@@ -589,7 +589,7 @@ func TestApplyACAGuidanceSupportPrefersPrimaryPackageAnchor(t *testing.T) {
 	}
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:              "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md",
+			Path:              "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md",
 			Title:             "internal adapters skillslib skillmain",
 			PrimaryAnchorPath: "internal/adapters/skillslib/skillmain/main.go",
 			AnchorPaths: []string{
@@ -1067,7 +1067,7 @@ func TestPackageACAGuidanceHitsFromSearchHitsPrefersSkillmainOverSemanticSearch(
 
 	hits := []obsidianindex.SearchHit{
 		{
-			Path:      "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md",
+			Path:      "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md",
 			Title:     "internal adapters skillslib skillmain",
 			Trust:     "canonical",
 			Score:     34,
@@ -1075,7 +1075,7 @@ func TestPackageACAGuidanceHitsFromSearchHitsPrefersSkillmainOverSemanticSearch(
 			Symbols:   []string{"RunContext"},
 		},
 		{
-			Path:      "notes/repo/agentctl/packages/skills-codesemanticsearch.md",
+			Path:      "notes/repo/foxctl/packages/skills-codesemanticsearch.md",
 			Title:     "skills code_semantic_search",
 			Trust:     "canonical",
 			Score:     31,
@@ -1084,8 +1084,8 @@ func TestPackageACAGuidanceHitsFromSearchHitsPrefersSkillmainOverSemanticSearch(
 		},
 	}
 
-	got := packageACAGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/agentctl", "skills main runtime wiring", hits, 1)
-	if len(got) != 1 || got[0].Path != "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md" {
+	got := packageACAGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/foxctl", "skills main runtime wiring", hits, 1)
+	if len(got) != 1 || got[0].Path != "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md" {
 		t.Fatalf("got=%v", got)
 	}
 }
@@ -1095,7 +1095,7 @@ func TestTopACAGuidanceSupportHitsPrefersSkillmainOverSemanticSearch(t *testing.
 
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:      "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md",
+			Path:      "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md",
 			Title:     "internal adapters skillslib skillmain",
 			Trust:     "canonical",
 			Score:     60,
@@ -1103,7 +1103,7 @@ func TestTopACAGuidanceSupportHitsPrefersSkillmainOverSemanticSearch(t *testing.
 			Symbols:   []string{"RunContext"},
 		},
 		{
-			Path:      "notes/repo/agentctl/packages/skills-codesemanticsearch.md",
+			Path:      "notes/repo/foxctl/packages/skills-codesemanticsearch.md",
 			Title:     "skills code_semantic_search",
 			Trust:     "canonical",
 			Score:     40,
@@ -1113,7 +1113,7 @@ func TestTopACAGuidanceSupportHitsPrefersSkillmainOverSemanticSearch(t *testing.
 	}
 
 	got := topACAGuidanceSupportHits("skills main runtime wiring", hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate)
-	if len(got) != 1 || got[0].Path != "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md" {
+	if len(got) != 1 || got[0].Path != "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md" {
 		t.Fatalf("got=%v", got)
 	}
 }
@@ -1123,7 +1123,7 @@ func TestPackageGuidancePipelinePrefersSkillmainOverSemanticSearch(t *testing.T)
 
 	searchHits := []obsidianindex.SearchHit{
 		{
-			Path:      "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md",
+			Path:      "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md",
 			Title:     "internal adapters skillslib skillmain",
 			Trust:     "canonical",
 			Score:     34,
@@ -1131,7 +1131,7 @@ func TestPackageGuidancePipelinePrefersSkillmainOverSemanticSearch(t *testing.T)
 			Symbols:   []string{"RunContext"},
 		},
 		{
-			Path:      "notes/repo/agentctl/packages/skills-codesemanticsearch.md",
+			Path:      "notes/repo/foxctl/packages/skills-codesemanticsearch.md",
 			Title:     "skills code_semantic_search",
 			Trust:     "canonical",
 			Score:     31,
@@ -1140,9 +1140,9 @@ func TestPackageGuidancePipelinePrefersSkillmainOverSemanticSearch(t *testing.T)
 		},
 	}
 
-	hits := packageACAGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/agentctl", "skills main runtime wiring", searchHits, 6)
+	hits := packageACAGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/foxctl", "skills main runtime wiring", searchHits, 6)
 	got := topACAGuidanceSupportHits("skills main runtime wiring", hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate)
-	if len(got) != 1 || got[0].Path != "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md" {
+	if len(got) != 1 || got[0].Path != "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md" {
 		t.Fatalf("got=%v", got)
 	}
 }
@@ -1152,7 +1152,7 @@ func TestPackageGuidancePipelinePrefersSkillmainOverSemanticSearchWithRealScores
 
 	searchHits := []obsidianindex.SearchHit{
 		{
-			Path:      "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md",
+			Path:      "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md",
 			Title:     "internal adapters skillslib skillmain",
 			Trust:     "canonical",
 			Score:     46,
@@ -1160,7 +1160,7 @@ func TestPackageGuidancePipelinePrefersSkillmainOverSemanticSearchWithRealScores
 			Symbols:   []string{"RunContext"},
 		},
 		{
-			Path:      "notes/repo/agentctl/packages/skills-codesemanticsearch.md",
+			Path:      "notes/repo/foxctl/packages/skills-codesemanticsearch.md",
 			Title:     "skills code_semantic_search",
 			Trust:     "canonical",
 			Score:     47,
@@ -1169,9 +1169,9 @@ func TestPackageGuidancePipelinePrefersSkillmainOverSemanticSearchWithRealScores
 		},
 	}
 
-	hits := packageACAGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/agentctl", "Which file anchors the skills main runtime wiring package?", searchHits, 6)
+	hits := packageACAGuidanceHitsFromSearchHits("/Users/joshka/repos/personal/foxctl", "Which file anchors the skills main runtime wiring package?", searchHits, 6)
 	got := topACAGuidanceSupportHits("Which file anchors the skills main runtime wiring package?", hits, codeSearchRoutePackageOwner, codeSearchTaskFileLocate)
-	if len(got) != 1 || got[0].Path != "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md" {
+	if len(got) != 1 || got[0].Path != "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md" {
 		t.Fatalf("got=%v", got)
 	}
 }
@@ -1181,7 +1181,7 @@ func TestShouldUsePackageACAGuidanceAcceptsSpecificSkillmainNote(t *testing.T) {
 
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:        "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md",
+			Path:        "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md",
 			Title:       "internal adapters skillslib skillmain",
 			Trust:       "canonical",
 			AnchorPaths: []string{"internal/adapters/skillslib/skillmain/main.go"},
@@ -1198,7 +1198,7 @@ func TestShouldUsePackageACAGuidanceRejectsWeakGenericPackageMatch(t *testing.T)
 
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:        "notes/repo/agentctl/packages/internal-storage-memory.md",
+			Path:        "notes/repo/foxctl/packages/internal-storage-memory.md",
 			Title:       "internal storage memory",
 			Trust:       "canonical",
 			AnchorPaths: []string{"internal/storage/memory/search.go"},
@@ -1215,7 +1215,7 @@ func TestPromoteCodeSearchRouteFamilyRejectsWeakPackagePromotion(t *testing.T) {
 
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:        "notes/repo/agentctl/packages/internal-storage-memory.md",
+			Path:        "notes/repo/foxctl/packages/internal-storage-memory.md",
 			Title:       "internal storage memory",
 			Trust:       "canonical",
 			AnchorPaths: []string{"internal/storage/memory/search.go"},
@@ -1233,7 +1233,7 @@ func TestPromoteCodeSearchRouteFamilyAcceptsSpecificPackagePromotion(t *testing.
 
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:        "notes/repo/agentctl/packages/internal-adapters-skillslib-skillmain.md",
+			Path:        "notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md",
 			Title:       "internal adapters skillslib skillmain",
 			Trust:       "canonical",
 			AnchorPaths: []string{"internal/adapters/skillslib/skillmain/main.go"},
@@ -1298,7 +1298,7 @@ func TestInferCodeSearchRouteFamilyPackage(t *testing.T) {
 
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:      "notes/repo/agentctl/packages/internal-rlm-env.md",
+			Path:      "notes/repo/foxctl/packages/internal-rlm-env.md",
 			RepoPaths: []string{"internal/rlm/env/code_search_ensemble.go"},
 		},
 	}
@@ -1312,7 +1312,7 @@ func TestInferCodeSearchRouteFamilyCochange(t *testing.T) {
 
 	hits := []contextplane.RetrievalHit{
 		{
-			Path:      "notes/repo/agentctl/retrieval-ensemble-next-steps.md",
+			Path:      "notes/repo/foxctl/retrieval-ensemble-next-steps.md",
 			RepoPaths: []string{"internal/rlm/env/code_search_ensemble.go", "internal/context/contextplane/retrieval.go"},
 		},
 	}
@@ -1403,8 +1403,8 @@ func TestInferCodeSearchRouteFamilyFromCandidatesKeepsCode(t *testing.T) {
 			Support: 1.3,
 			Symbols: []string{"ReadOnlyAdapter"},
 		},
-		"cmd/agentctl/cmd/eval_code_search_ensemble.go": {
-			Path:    "cmd/agentctl/cmd/eval_code_search_ensemble.go",
+		"cmd/foxctl/cmd/eval_code_search_ensemble.go": {
+			Path:    "cmd/foxctl/cmd/eval_code_search_ensemble.go",
 			Sources: map[string]struct{}{"exact_probe": {}},
 			Support: 1.1,
 		},
@@ -1767,7 +1767,7 @@ func TestRankCodeSearchCandidatesExecutionTracePrefersSourceAnchor(t *testing.T)
 			Support: 1.0,
 		},
 		"target.go": {
-			Path:    "cmd/agentctl/cmd/context_semantic_search_inspect.go",
+			Path:    "cmd/foxctl/cmd/context_semantic_search_inspect.go",
 			Sources: map[string]struct{}{"trace_target_anchor": {}, "execution_bridge": {}},
 			Support: 1.0,
 		},

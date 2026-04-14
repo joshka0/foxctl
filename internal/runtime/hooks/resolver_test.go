@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/buildinfo"
 )
 
 func TestDefaultResolver_FindsArtifact(t *testing.T) {
@@ -17,7 +17,7 @@ func TestDefaultResolver_FindsArtifact(t *testing.T) {
 	}
 
 	// Create manifest
-	manifest := `apiVersion: agentctl/v1
+	manifest := `apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: test/skill
@@ -70,7 +70,7 @@ func TestDefaultResolver_PrefersCGO(t *testing.T) {
 	}
 
 	// Create manifest
-	manifest := `apiVersion: agentctl/v1
+	manifest := `apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: test/skill
@@ -140,7 +140,7 @@ func TestDefaultResolver_MissingArtifact(t *testing.T) {
 	}
 
 	// Create manifest but no artifact
-	manifest := `apiVersion: agentctl/v1
+	manifest := `apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: test/skill

@@ -17,10 +17,10 @@ import (
 
 	"golang.org/x/tools/go/packages"
 
-	docparser "github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex/parser"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
-	"github.com/jkatigb/agentctl/internal/platform/fsutil"
-	"github.com/jkatigb/agentctl/internal/platform/symbolutil"
+	docparser "github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex/parser"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
+	"github.com/joshka0/foxctl/internal/platform/fsutil"
+	"github.com/joshka0/foxctl/internal/platform/symbolutil"
 )
 
 const (

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
 )
 
 func TestService_StartsAndStops(t *testing.T) {
@@ -205,7 +205,7 @@ func waitForSocket(t *testing.T, socketPath string, errCh <-chan error) {
 
 func skipIfUnixSocketsUnavailable(t *testing.T, dir string) {
 	t.Helper()
-	socketPath := filepath.Join(dir, "agentctl-test.sock")
+	socketPath := filepath.Join(dir, "foxctl-test.sock")
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EINVAL) || os.IsPermission(err) {
@@ -252,7 +252,7 @@ func TestSocketPath(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", tmp)
 
 	path := SocketPath()
-	expected := filepath.Join(tmp, "agentctl.sock")
+	expected := filepath.Join(tmp, "foxctl.sock")
 	if path != expected {
 		t.Fatalf("expected %s, got %s", expected, path)
 	}

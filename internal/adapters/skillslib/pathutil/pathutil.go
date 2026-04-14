@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	platformpath "github.com/jkatigb/agentctl/internal/platform/pathutil"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	platformpath "github.com/joshka0/foxctl/internal/platform/pathutil"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
 // Re-export commonly used functions from internal/platform/pathutil

@@ -75,7 +75,7 @@ func TestWideEvent_AllFields(t *testing.T) {
 		Timestamp:   "2026-01-15T10:30:00Z",
 		TraceID:     "trace-123",
 		SpanID:      "span-456",
-		Service:     "agentctl",
+		Service:     "foxctl",
 		Version:     "1.0.0",
 		Component:   "skill",
 		Operation:   "run",
@@ -92,7 +92,7 @@ func TestWideEvent_AllFields(t *testing.T) {
 	assert.Equal(t, "2026-01-15T10:30:00Z", evt.Timestamp)
 	assert.Equal(t, "trace-123", evt.TraceID)
 	assert.Equal(t, "span-456", evt.SpanID)
-	assert.Equal(t, "agentctl", evt.Service)
+	assert.Equal(t, "foxctl", evt.Service)
 	assert.Equal(t, "1.0.0", evt.Version)
 	assert.Equal(t, "skill", evt.Component)
 	assert.Equal(t, "run", evt.Operation)
@@ -340,7 +340,7 @@ func TestWideEvent_FullJSONRoundTrip(t *testing.T) {
 		Timestamp:   "2026-01-15T12:00:00Z",
 		TraceID:     "trace-round-trip",
 		SpanID:      "span-round-trip",
-		Service:     "agentctl",
+		Service:     "foxctl",
 		Version:     "2.0.0",
 		Component:   "skill",
 		Operation:   "execute",

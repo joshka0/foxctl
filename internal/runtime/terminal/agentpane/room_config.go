@@ -3,7 +3,7 @@ package agentpane
 import (
 	"strings"
 
-	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
+	terminalruntime "github.com/joshka0/foxctl/internal/runtime/terminal"
 )
 
 // TerminalRoomConfig is the canonical runtime-terminal room registration shape.

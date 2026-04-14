@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/storage/agents"
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
-	runtimeworkers "github.com/jkatigb/agentctl/internal/v2/runtime/workers"
+	agentdomain "github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/storage/agents"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
+	runtimeworkers "github.com/joshka0/foxctl/internal/v2/runtime/workers"
 )
 
 func TestChildSpawner_SpawnChild_EmitsRunningAndCompleted(t *testing.T) {
@@ -361,7 +361,7 @@ func TestManagedAgentSpawner_CreatesAgentRecordAndLaunchesProcess(t *testing.T) 
 func TestDefaultAgentRunCommandBuilder_UsesAgentctlRun(t *testing.T) {
 	t.Parallel()
 
-	builder := defaultAgentRunCommandBuilder("/tmp/agentctl-bin", "/tmp/workspace")
+	builder := defaultAgentRunCommandBuilder("/tmp/foxctl-bin", "/tmp/workspace")
 	spec, err := builder(agentdomain.Agent{
 		ID:            "agent:run-1",
 		WorkspaceRoot: "/tmp/workspace",
@@ -369,8 +369,8 @@ func TestDefaultAgentRunCommandBuilder_UsesAgentctlRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("builder() error = %v", err)
 	}
-	if spec.Path != "/tmp/agentctl-bin" {
-		t.Fatalf("path=%q want /tmp/agentctl-bin", spec.Path)
+	if spec.Path != "/tmp/foxctl-bin" {
+		t.Fatalf("path=%q want /tmp/foxctl-bin", spec.Path)
 	}
 	if len(spec.Args) != 3 || spec.Args[0] != "agent" || spec.Args[1] != "run" || spec.Args[2] != "agent:run-1" {
 		t.Fatalf("args=%v", spec.Args)
@@ -476,7 +476,7 @@ func waitForRecentLogs(t *testing.T, state *runtimeworkers.StateComponent, worke
 		if ok && len(record.RawState) > 0 {
 			var raw map[string]any
 			if err := json.Unmarshal(record.RawState, &raw); err == nil {
-				agentctlState, _ := raw["agentctl"].(map[string]any)
+				agentctlState, _ := raw["foxctl"].(map[string]any)
 				recentLogs, _ := agentctlState["recent_logs"].([]any)
 				if len(recentLogs) >= minCount {
 					return recentLogs

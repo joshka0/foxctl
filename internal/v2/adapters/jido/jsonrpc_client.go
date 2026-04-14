@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	defaultSocketPath = "/tmp/agentctl-jido.sock"
+	defaultSocketPath = "/tmp/foxctl-jido.sock"
 	defaultRPCPath    = "/rpc"
 	defaultTimeout    = 10 * time.Second
 )

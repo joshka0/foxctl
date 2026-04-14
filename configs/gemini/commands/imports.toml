@@ -4,7 +4,7 @@ description = "Analyze code dependencies and imports"
 prompt = """Analyze dependencies:
 
 ```bash
-!{agentctl run code/imports --input '{"path": "{{args}}"}'}
+!{foxctl run code/imports --input '{"path": "{{args}}"}'}
 ```
 
 Summarize:

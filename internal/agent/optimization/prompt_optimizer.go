@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/verification"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/intelligence/verification"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 // PromptOptimizer optimizes agent prompts based on execution outcomes.
@@ -45,7 +45,7 @@ type PromptOptimizerConfig struct {
 	// "mipro-heavy", "gepa" (reflective GEPA-style prompt evolution)
 	Mode string
 
-	// Backend selects the optimizer backend. Options: "auto", "agentctl", "dspy-go".
+	// Backend selects the optimizer backend. Options: "auto", "foxctl", "dspy-go".
 	Backend string
 
 	// BreadthCandidates is the number of candidates in breadth iteration.
@@ -86,7 +86,7 @@ func (t PromptOptimizerLLMTarget) String() string {
 func DefaultPromptOptimizerConfig() PromptOptimizerConfig {
 	return PromptOptimizerConfig{
 		Mode:              "copro",
-		Backend:           "agentctl",
+		Backend:           "foxctl",
 		BreadthCandidates: 5,
 		DepthIterations:   3,
 		MinImprovement:    0.05,
@@ -116,7 +116,7 @@ func NewPromptOptimizer(trajStore trajectory.Store, patternStore PatternStore, c
 
 func (p *PromptOptimizer) resolvedBackend() string {
 	if p == nil {
-		return "agentctl"
+		return "foxctl"
 	}
 	backend := strings.ToLower(strings.TrimSpace(p.config.Backend))
 	switch backend {
@@ -124,11 +124,11 @@ func (p *PromptOptimizer) resolvedBackend() string {
 		if p.isGEPAMode() {
 			return "dspy-go"
 		}
-		return "agentctl"
-	case "dspy-go", "agentctl":
+		return "foxctl"
+	case "dspy-go", "foxctl":
 		return backend
 	default:
-		return "agentctl"
+		return "foxctl"
 	}
 }
 

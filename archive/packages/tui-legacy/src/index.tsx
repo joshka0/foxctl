@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * agentctl-tui - Terminal UI for agentctl
+ * foxctl-tui - Terminal UI for foxctl
  *
  * Built with OpenTUI + React
  */
@@ -10,7 +10,7 @@ import { createRoot } from "@opentui/react";
 import { App } from "./App";
 
 async function main() {
-  console.log("Starting agentctl-tui...");
+  console.log("Starting foxctl-tui...");
 
   try {
     // Create the OpenTUI renderer
@@ -26,7 +26,7 @@ async function main() {
     const root = createRoot(renderer);
     root.render(<App />);
 
-    console.log("agentctl-tui started. Press Ctrl+C to exit.");
+    console.log("foxctl-tui started. Press Ctrl+C to exit.");
 
     let shuttingDown = false;
     const shutdown = (code = 0) => {
@@ -51,7 +51,7 @@ async function main() {
     process.once("SIGTERM", () => shutdown(0));
     process.once("SIGQUIT", () => shutdown(0));
   } catch (error) {
-    console.error("Failed to start agentctl-tui:", error);
+    console.error("Failed to start foxctl-tui:", error);
     process.exit(1);
   }
 }

@@ -2,7 +2,7 @@
 
 Status: active plan
 
-Owner: agentctl
+Owner: foxctl
 
 Last updated: 2026-03-11
 
@@ -11,7 +11,7 @@ Last updated: 2026-03-11
 Reduce hook complexity by moving lifecycle orchestration out of shell scripts and
 into typed Go components, while keeping shell wrappers as thin provider adapters.
 
-This is not a manifest-version migration. `agentctl/v1` is still the current
+This is not a manifest-version migration. `foxctl/v1` is still the current
 skill manifest contract. The real cleanup target is the split between:
 
 - a reasonably coherent Go hook engine under `internal/runtime/hooks/`
@@ -48,7 +48,7 @@ Desired shell responsibilities:
 
 - read hook stdin/env from provider
 - resolve workspace/binary
-- invoke a single `agentctl hooks ...` command
+- invoke a single `foxctl hooks ...` command
 - emit provider-compatible JSON
 
 Desired Go responsibilities:
@@ -70,7 +70,7 @@ In scope:
   - `SessionEnd`
   - `SubagentStop`
 - shared ACA/session helper consolidation
-- new CLI/runtime entrypoints under `agentctl hooks ...`
+- new CLI/runtime entrypoints under `foxctl hooks ...`
 - tests for lifecycle behavior without shelling through bash
 
 Out of scope for this pass:
@@ -78,7 +78,7 @@ Out of scope for this pass:
 - rewriting every advisory shell hook
 - removing shell-hook support entirely
 - changing hook config schema
-- changing the `agentctl/v1` skill manifest contract
+- changing the `foxctl/v1` skill manifest contract
 
 ## Phases
 
@@ -90,7 +90,7 @@ Move the current `configs/hooks/session-init.sh` orchestration into Go.
 
 Deliverables:
 
-- `agentctl hooks session-start`
+- `foxctl hooks session-start`
 - typed response contract for provider shell wrappers
 - wrapper script becomes a thin adapter
 
@@ -105,7 +105,7 @@ Behavior to preserve:
 
 Primary files:
 
-- `cmd/agentctl/cmd/hooks_runtime.go`
+- `cmd/foxctl/cmd/hooks_runtime.go`
 - `internal/runtime/hooks/lifecycle/*` or equivalent command helpers
 - `configs/hooks/session-init.sh`
 
@@ -122,7 +122,7 @@ Move `configs/hooks/session-end.sh` orchestration into Go.
 
 Deliverables:
 
-- `agentctl hooks session-end`
+- `foxctl hooks session-end`
 - Go-owned async capture/summarize/ACA-infer flow
 - shell wrapper reduced to payload pass-through
 
@@ -147,7 +147,7 @@ Move `configs/hooks/subagent-stop.sh` into Go.
 
 Deliverables:
 
-- `agentctl hooks subagent-stop`
+- `foxctl hooks subagent-stop`
 - bounded subagent ACA capture
 - shared lifecycle helper reuse from Phases 1-2
 

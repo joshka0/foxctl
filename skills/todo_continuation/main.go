@@ -12,16 +12,16 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mathutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/stringutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit"
-	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/mathutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/sliceutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/stringutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/joshka0/foxctl/internal/context/sessionkit"
+	"github.com/joshka0/foxctl/internal/intelligence/analysis/tasksgraph"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 // input defines the skill input parameters for todo continuation analysis with workspace and session targeting.

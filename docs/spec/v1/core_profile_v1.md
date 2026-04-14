@@ -6,13 +6,13 @@ interfaces/stubs where code helps pin down behavior.
 
 ---
 
-# agentctl Core Profile v1 — JSON Envelope Edition (with OpenAPI Integration, Go-first)
+# foxctl Core Profile v1 — JSON Envelope Edition (with OpenAPI Integration, Go-first)
 
 > **Purpose:** A practical, single‑agent runtime for structured LLM workflows
 > with memory and artifact management, plus a first‑class path to invoke
 > real-world REST APIs described by OpenAPI. **Audience:** Developers building
 > LLM‑powered tools who need deterministic I/O, token efficiency, and persistent
-> context. **Scope:** Minimal, production‑ready `agentctl` for daily use. The
+> context. **Scope:** Minimal, production‑ready `foxctl` for daily use. The
 > **Agent Profile** (separate spec) adds multi‑agent orchestration,
 > mailbox/blackboard, quotas, and OCI skills.
 
@@ -28,9 +28,9 @@ spec uses **“JSON envelope”** for the canonical wire format. Future adapters
 support encoding/decoding to real TOON for prompt efficiency, but JSON remains
 authoritative in Core v1.
 
-### 0.2 What is agentctl Core?
+### 0.2 What is foxctl Core?
 
-`agentctl` is a **single‑binary CLI** that provides:
+`foxctl` is a **single‑binary CLI** that provides:
 
 - **Structured I/O:** predictable **JSON envelopes** for every operation.
 - **Skills:** discoverable, typed tools with WASI/exec isolation.
@@ -79,8 +79,8 @@ Executable, typed capability with:
 ### 1.2 Job
 
 One skill execution: `queued → running → ok|error|canceled` (terminal).
-**Sync:** `agentctl run <skill>` blocks. **Async:**
-`agentctl jobs submit <skill>` returns `job_id`.
+**Sync:** `foxctl run <skill>` blocks. **Async:**
+`foxctl jobs submit <skill>` returns `job_id`.
 
 ### 1.3 Artifact (CAS)
 
@@ -186,7 +186,7 @@ mapping, and CAS handling.
 ### 3.2 Skill signature
 
 ```yaml
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: http/openapi
@@ -248,7 +248,7 @@ capabilities:
 
 ### 3.3 Spec‑as‑memory
 
-- `agentctl openapi import <file|url> --as=<name>` **MUST** store the original
+- `foxctl openapi import <file|url> --as=<name>` **MUST** store the original
   spec as a CAS artifact and create a **named memory** entry
   (`type: openapi_spec`) pointing to it.
 - Invocations may reference `--spec=memory:<name>`.
@@ -316,11 +316,11 @@ are referenced by **name** or **path** and are discoverable via
   response and requested max items; output indicates the next request or
   termination.
 
-**Vendor extensions (hints):** Specs MAY include `x-agentctl` hints; the skill
+**Vendor extensions (hints):** Specs MAY include `x-foxctl` hints; the skill
 **MUST** prefer explicit hints over heuristics.
 
 ```yaml
-x-agentctl:
+x-foxctl:
   auth: bearer | apiKey | basic | oauth2 | plugin:<name>
   pagination:
     strategy: link|cursor|offset|plugin:<name>
@@ -379,44 +379,44 @@ call.
 
 ```
 # discovery
-agentctl skills list [--format=json|compact|toon]
-agentctl skills describe <name> [--json]
-agentctl skills search <query>
-agentctl skills install|uninstall|upgrade <ref>
+foxctl skills list [--format=json|compact|toon]
+foxctl skills describe <name> [--json]
+foxctl skills search <query>
+foxctl skills install|uninstall|upgrade <ref>
 
 # openapi
-agentctl openapi import <file|url> --as=<name> [--strict]   # store spec as memory+CAS
-agentctl openapi validate <memory:<name>|path> [--strict]
-agentctl openapi test <memory:<name>> [--op=<operationId>|--tag=<tag>]  # smoke tests
-agentctl openapi generate <memory:<name>> [--install] [--group-by=tag|path]  # optional Tier-2 codegen
+foxctl openapi import <file|url> --as=<name> [--strict]   # store spec as memory+CAS
+foxctl openapi validate <memory:<name>|path> [--strict]
+foxctl openapi test <memory:<name>> [--op=<operationId>|--tag=<tag>]  # smoke tests
+foxctl openapi generate <memory:<name>> [--install] [--group-by=tag|path]  # optional Tier-2 codegen
 
 # execution
-agentctl run <skill> [--flags...] [--cache=off] \
+foxctl run <skill> [--flags...] [--cache=off] \
   [--input=stdin|sha256:<hex>] [--remember=<name>] [--ttl=<dur>] [--workspace=<path>]
 # generic OpenAPI
-agentctl run http/openapi --spec=memory:github --operationId=listRepos --params='{"path":{"username":"octocat"},"query":{"per_page":100}}' [--dry_run]
+foxctl run http/openapi --spec=memory:github --operationId=listRepos --params='{"path":{"username":"octocat"},"query":{"per_page":100}}' [--dry_run]
 
 # async jobs
-agentctl jobs submit <skill> [...] [--dedupe]
-agentctl jobs ls [--state=queued|running|ok|error|canceled] [--since=24h]
-agentctl jobs status|wait|tail|result <job_id>
-agentctl jobs cancel <job_id>
+foxctl jobs submit <skill> [...] [--dedupe]
+foxctl jobs ls [--state=queued|running|ok|error|canceled] [--since=24h]
+foxctl jobs status|wait|tail|result <job_id>
+foxctl jobs cancel <job_id>
 
 # artifacts (CAS)
-agentctl cas put|head|get|list|pin|unpin|rm ...
+foxctl cas put|head|get|list|pin|unpin|rm ...
 
 # memory
-agentctl memory recent|cache|put|save|get|search|list|update|delete|relevant ...
+foxctl memory recent|cache|put|save|get|search|list|update|delete|relevant ...
 
 # adapters (optional)
-agentctl skills index --format=json|compact|toon
-agentctl toon encode|decode           # optional adapter
+foxctl skills index --format=json|compact|toon
+foxctl toon encode|decode           # optional adapter
 
 # admin
-agentctl doctor
-agentctl gc [--dry-run]
-agentctl config show|edit
-agentctl version
+foxctl doctor
+foxctl gc [--dry-run]
+foxctl config show|edit
+foxctl version
 ```
 
 **Envelopes everywhere:** All commands **MUST** emit JSON envelopes on stdout.
@@ -595,10 +595,10 @@ by workspace.
 
 ### 12.2 Creation
 
-**Via `agentctl run --remember`:**
+**Via `foxctl run --remember`:**
 
 ```bash
-agentctl run skill/name --input '{}' \
+foxctl run skill/name --input '{}' \
   --remember my-result \
   --remember-type result \
   --remember-summary "Brief description"
@@ -612,23 +612,23 @@ agentctl run skill/name --input '{}' \
 
 ```bash
 # From job result
-agentctl memory save <job_id> --as=<name>
+foxctl memory save <job_id> --as=<name>
 
 # From envelope
-agentctl memory put --name=<name> --data='{"version":1,...}'
+foxctl memory put --name=<name> --data='{"version":1,...}'
 ```
 
 ### 12.3 Retrieval
 
 ```bash
 # Get specific memory (writes original envelope to stdout)
-agentctl memory get <name> --workspace=/path
+foxctl memory get <name> --workspace=/path
 
 # List all memories in workspace
-agentctl memory list --workspace=/path --limit=20
+foxctl memory list --workspace=/path --limit=20
 
 # Search by name/summary
-agentctl memory search --query="term" --workspace=/path
+foxctl memory search --query="term" --workspace=/path
 ```
 
 **On not found:** Emit `ENOTFOUND` error envelope with hint.
@@ -638,7 +638,7 @@ agentctl memory search --query="term" --workspace=/path
 **Detection priority:**
 
 1. `--workspace` flag if provided
-2. Auto-detect from `.agentctl/`, `.git/`, or project files
+2. Auto-detect from `.foxctl/`, `.git/`, or project files
 3. Current working directory
 
 **Relevance ranking:**
@@ -648,17 +648,17 @@ score = 0.6 * recency + 0.4 * log1p(access_count)
 ```
 
 ```bash
-agentctl memory relevant --workspace=/path --limit=10
+foxctl memory relevant --workspace=/path --limit=10
 ```
 
 ### 12.5 Mutation
 
 ```bash
 # Update metadata
-agentctl memory update <name> --summary="New summary" --type=plan
+foxctl memory update <name> --summary="New summary" --type=plan
 
 # Delete
-agentctl memory delete <name> --workspace=/path
+foxctl memory delete <name> --workspace=/path
 ```
 
 **On not found:** Emit `ENOTFOUND` error envelope.
@@ -694,7 +694,7 @@ agentctl memory delete <name> --workspace=/path
 ```yaml
 version: 1
 storage:
-  base_path: ~/.agentctl
+  base_path: ~/.foxctl
   artifacts_path: ${base_path}/cas
   jobs_path: ${base_path}/jobs
 
@@ -721,7 +721,7 @@ gc:
 
 openapi:
   strict_validate: false
-  plugin_path: ~/.agentctl/plugins
+  plugin_path: ~/.foxctl/plugins
   spec_cache_ttl: 24h
   default_retry:
     base_ms: 250
@@ -912,17 +912,17 @@ pooled `http.Client` with sane transport defaults.)_
 **Import spec & call operation (generic):**
 
 ```bash
-agentctl openapi import github.yaml --as=github
+foxctl openapi import github.yaml --as=github
 
 # Dry-run to inspect the request:
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:github \
   --operationId=listReposForUser \
   --params='{"path":{"username":"octocat"},"query":{"per_page":100}}' \
   --dry_run
 
 # Real call with pagination and retry defaults:
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:github \
   --operationId=listReposForUser \
   --params='{"path":{"username":"octocat"},"query":{"per_page":100}}'
@@ -987,7 +987,7 @@ agentctl run http/openapi \
 
 - **Spec:** `v1`.
 - **Envelope:** `version: 1`.
-- **Skill API:** `agentctl/v1`. Backward‑compatible changes MAY add optional
+- **Skill API:** `foxctl/v1`. Backward‑compatible changes MAY add optional
   fields. Breaking changes MUST bump versions. The `http/openapi` skill **MUST**
   include `min_spec_version` and `max_spec_version` compatibility metadata.
 
@@ -1000,14 +1000,14 @@ agentctl run http/openapi \
 - **Tier 1:** real APIs (GitHub, Stripe, OpenWeatherMap).
 - **Tier 2:** tricky specs (multiple auth schemes, non‑standard pagination, huge
   bodies).
-- **CLI:** `agentctl openapi test` generates smoke tests for each operation
+- **CLI:** `foxctl openapi test` generates smoke tests for each operation
   (HEAD/GET if safe).
 
 ---
 
 ### Appendix A — Optional Tier‑2 Codegen (DX)
 
-If desired, `agentctl openapi generate` MAY emit a “skillpack” with **one skill
+If desired, `foxctl openapi generate` MAY emit a “skillpack” with **one skill
 per operationId** (or grouped by tag) whose wrappers simply call `http/openapi`.
 This improves human CLI discovery while keeping logic centralized.
 

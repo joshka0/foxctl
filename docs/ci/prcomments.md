@@ -5,7 +5,7 @@ Summarize merge conflicts, CI failures, and PR review comments for a GitHub pull
 This is a thin wrapper around the `ci/prcomments` skill with an ergonomic CLI front-end:
 
 ```bash
-agentctl ci prcomments --pr <number-or-branch> [flags]
+foxctl ci prcomments --pr <number-or-branch> [flags]
 ```
 
 ## Requirements
@@ -23,9 +23,9 @@ agentctl ci prcomments --pr <number-or-branch> [flags]
 - `--pr` (string, required)
   - PR number or branch name.
 - `--owner` (string, optional)
-  - Repository owner (e.g. `jkatigb`).
+  - Repository owner (e.g. `joshka0`).
 - `--repo` (string, optional)
-  - Repository name (e.g. `agentctl`), or `owner/repo` shorthand.
+  - Repository name (e.g. `foxctl`), or `owner/repo` shorthand.
 - `--with-context` (bool, default: false)
   - Include PR description and timestamps in the markdown output.
 - `--format` (string, optional)
@@ -53,10 +53,10 @@ agentctl ci prcomments --pr <number-or-branch> [flags]
 ### Task-focused report for a PR in this repo
 
 ```bash
-agentctl ci prcomments \
+foxctl ci prcomments \
   --pr 66 \
-  --owner jkatigb \
-  --repo agentctl \
+  --owner joshka0 \
+  --repo foxctl \
   --with-context \
   --errors-only \
   --output-path docs/prcomments/pr66.md
@@ -64,7 +64,7 @@ agentctl ci prcomments \
 
 This will:
 
-- Fetch PR #66 from `jkatigb/agentctl`.
+- Fetch PR #66 from `joshka0/foxctl`.
 - Resolve CI failures and merge conflicts.
 - Collect issue + review comments, filtering out bot noise.
 - Print a JSON envelope to stdout containing:
@@ -76,10 +76,10 @@ This will:
 ### JSON-centric output for tool integration
 
 ```bash
-agentctl ci prcomments \
+foxctl ci prcomments \
   --pr 66 \
-  --owner jkatigb \
-  --repo agentctl \
+  --owner joshka0 \
+  --repo foxctl \
   --format json \
   --errors-only
 ```
@@ -103,11 +103,11 @@ Useful when another tool wants to reason over the comments and CI data:
 To turn the current CI/review tasks for a PR into persistent TODOs, use:
 
 ```bash
-agentctl ci todos \
+foxctl ci todos \
   --pr 78 \
-  --owner jkatigb \
-  --repo agentctl \
-  --store ~/.agentctl/todo/tasks.json
+  --owner joshka0 \
+  --repo foxctl \
+  --store ~/.foxctl/todo/tasks.json
 ```
 
 This helper:

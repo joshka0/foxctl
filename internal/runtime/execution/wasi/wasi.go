@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
@@ -33,7 +33,7 @@ var bufferPool = sync.Pool{
 	},
 }
 
-// Runner executes WASI modules that follow the agentctl contract.
+// Runner executes WASI modules that follow the foxctl contract.
 type Runner struct {
 	Manifest   skill.Manifest
 	ModulePath string
@@ -139,7 +139,7 @@ func (r Runner) prepareWorkDir() (string, func(), error) {
 	if r.Options.WorkDir != "" {
 		return r.Options.WorkDir, func() {}, nil
 	}
-	tmp, err := os.MkdirTemp("", "agentctl-wasi-")
+	tmp, err := os.MkdirTemp("", "foxctl-wasi-")
 	if err != nil {
 		return "", nil, err
 	}

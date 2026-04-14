@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 // mockTrajectoryStore is a test implementation of trajectory.Store.

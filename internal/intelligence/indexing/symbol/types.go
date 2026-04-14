@@ -13,9 +13,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/embeddingtext"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	platformsymbol "github.com/jkatigb/agentctl/internal/platform/symbolutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embeddingtext"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	platformsymbol "github.com/joshka0/foxctl/internal/platform/symbolutil"
 )
 
 // SymbolType is the memory entry type for symbol entries.

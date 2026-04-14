@@ -1,5 +1,5 @@
 // Package todosync provides bidirectional synchronization between
-// Claude Code's native todo system and agentctl's task management.
+// Claude Code's native todo system and foxctl's task management.
 package todosync
 
 import (

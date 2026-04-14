@@ -8,10 +8,10 @@ Testing surface, required tools, and resource cost classification for validation
 
 ## Validation Surface
 
-### Surface 1: CLI (agentctl commands)
+### Surface 1: CLI (foxctl commands)
 - **Tools:** `tuistory`, shell assertions
-- **Entry points:** `agentctl room create --sandbox`, `agentctl room list`, `agentctl room show`, `agentctl room destroy`, `agentctl gateway`
-- **Setup:** Build agentctl binary, ensure git/tmux/zellij on PATH
+- **Entry points:** `foxctl room create --sandbox`, `foxctl room list`, `foxctl room show`, `foxctl room destroy`, `foxctl gateway`
+- **Setup:** Build foxctl binary, ensure git/tmux/zellij on PATH
 
 ### Surface 2: Web Terminal (xterm.js)
 - **Tools:** `agent-browser`
@@ -51,10 +51,10 @@ Testing surface, required tools, and resource cost classification for validation
 - SSH validation in --dev mode: SSH server listens on localhost in dev mode
 - tmux must be available for all terminal tests; skip gracefully if missing
 
-## Flow Validator Guidance: go test (cmd/agentctl/cmd - room-sandbox)
+## Flow Validator Guidance: go test (cmd/foxctl/cmd - room-sandbox)
 
-**Surface:** Go unit tests in `cmd/agentctl/cmd/` package for room sandbox features
-**Tool:** `env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 go test ./cmd/agentctl/cmd/ -run "<pattern>" -v -count=1`
+**Surface:** Go unit tests in `cmd/foxctl/cmd/` package for room sandbox features
+**Tool:** `env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 go test ./cmd/foxctl/cmd/ -run "<pattern>" -v -count=1`
 **Isolation:** Each test function creates its own temp directory and git repo via `t.TempDir()`. No shared state between tests. Tests use mock/fake implementations for gateway and worktree where needed.
 **Concurrency:** Safe to run multiple test subsets concurrently — they operate on independent temp directories.
 **Assertions covered:** VAL-RS-001 through VAL-RS-021

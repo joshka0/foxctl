@@ -15,7 +15,7 @@ submission, follow it with:
 
 ```bash
 AGENTCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' \
-  ./cmd/agentctl/cmd \
+  ./cmd/foxctl/cmd \
   -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' \
   -count=1 -v
 ```

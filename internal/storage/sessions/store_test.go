@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
 )
 
 func TestOpenAndClose(t *testing.T) {
@@ -821,7 +821,7 @@ func TestSession_GetActive(t *testing.T) {
 	running := storage.Session{
 		ID:            "sess-running",
 		WorkspacePath: "/workspace",
-		AgentID:       "agentctl",
+		AgentID:       "foxctl",
 		Status:        storage.SessionStatusRunning,
 	}
 	if _, err := store.Save(ctx, running); err != nil {
@@ -832,7 +832,7 @@ func TestSession_GetActive(t *testing.T) {
 	completed := storage.Session{
 		ID:            "sess-completed",
 		WorkspacePath: "/workspace",
-		AgentID:       "agentctl",
+		AgentID:       "foxctl",
 		Status:        storage.SessionStatusOK,
 	}
 	if _, err := store.Save(ctx, completed); err != nil {
@@ -840,7 +840,7 @@ func TestSession_GetActive(t *testing.T) {
 	}
 
 	// GetActive should return running session
-	active, err := store.GetActive(ctx, "/workspace", "agentctl")
+	active, err := store.GetActive(ctx, "/workspace", "foxctl")
 	if err != nil {
 		t.Fatalf("get active: %v", err)
 	}

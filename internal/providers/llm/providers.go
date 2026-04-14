@@ -282,8 +282,8 @@ func (s *SummaryLLM) GenerateSummary(ctx context.Context, prompt string) (string
 
 	// OpenRouter-specific headers
 	if strings.Contains(s.provider.Endpoint, "openrouter.ai") {
-		req.Header.Set("HTTP-Referer", "https://github.com/jkatigb/agentctl")
-		req.Header.Set("X-Title", "agentctl")
+		req.Header.Set("HTTP-Referer", "https://github.com/joshka0/foxctl")
+		req.Header.Set("X-Title", "foxctl")
 	}
 
 	// Execute request with timeout

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/storage/testwatch"
+	"github.com/joshka0/foxctl/internal/storage/testwatch"
 	"github.com/stretchr/testify/assert"
 )
 

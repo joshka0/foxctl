@@ -2,7 +2,7 @@
   "groupId": "copyfiles-hooks",
   "testedAt": "2026-04-08T00:00:00Z",
   "isolation": {
-    "workingDirectory": "/Users/joshka/repos/personal/agentctl",
+    "workingDirectory": "/Users/joshka/repos/personal/foxctl",
     "isolationMethod": "Each test creates its own temp git repo — no shared state"
   },
   "toolsUsed": ["go test"],

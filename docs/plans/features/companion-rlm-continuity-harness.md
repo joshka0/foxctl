@@ -29,7 +29,7 @@ OpenViking’s formal layering is `L0/L1/L2`:
 - `L1`: overview / planning context
 - `L2`: full detail / on-demand load
 
-In this plan, earlier shorthand like `L3-L5` should be read as `agentctl` continuity extensions above the OpenViking core, not as something OpenViking itself defines.
+In this plan, earlier shorthand like `L3-L5` should be read as `foxctl` continuity extensions above the OpenViking core, not as something OpenViking itself defines.
 
 For this harness, the effective lane model is:
 
@@ -81,7 +81,7 @@ The article’s useful idea is not “use Python everywhere”, but:
 - intermediate results persist across bounded steps
 - final answers may be generated text or structured values composed from intermediate bindings
 
-For `agentctl`, the analogous runtime is:
+For `foxctl`, the analogous runtime is:
 
 - structured harness state
 - bounded read-only tools
@@ -163,7 +163,7 @@ The main answer turn should then run with only the lanes/tools the controller se
 
 ## Jupyter / REPL Mapping
 
-The article’s Jupyter framing maps well to a future `agentctl` harness:
+The article’s Jupyter framing maps well to a future `foxctl` harness:
 
 ### Needed Semantics
 
@@ -172,7 +172,7 @@ The article’s Jupyter framing maps well to a future `agentctl` harness:
 - persistent bindings across controller steps in one turn
 - explicit `FINAL(value)` semantics for structured results
 
-### `agentctl`-native Mapping
+### `foxctl`-native Mapping
 
 - scratch bindings live in a bounded in-memory turn state, not a real notebook kernel at first
 - inspect actions are explicit helper tools or structured lane reads
@@ -236,7 +236,7 @@ Example parent-visible result:
 
 ### Phase 1 — Explicit Layer Contract
 
-Goal: make the OpenViking-style `L0/L1/L2` core plus `agentctl` continuity extensions explicit in the companion/runtime contract.
+Goal: make the OpenViking-style `L0/L1/L2` core plus `foxctl` continuity extensions explicit in the companion/runtime contract.
 
 Changes:
 
@@ -311,7 +311,7 @@ Files:
 - `internal/rlm/env/adapter.go`
 - `internal/rlm/env/tools.go`
 - `internal/context/companion/service.go`
-- potentially `cmd/agentctl/cmd/rlm.go`
+- potentially `cmd/foxctl/cmd/rlm.go`
 
 ### Phase 5 — Parallel Branches for Independent Retrieval
 

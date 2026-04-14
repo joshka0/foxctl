@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/rlm"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/rlm"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
 
 func TestBootstrapBuildIncludesACAAndHandles(t *testing.T) {

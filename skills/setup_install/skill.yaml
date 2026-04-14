@@ -1,9 +1,9 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: setup/install
   version: 1.0.0
-  description: Programmatic agentctl installation and configuration
+  description: Programmatic foxctl installation and configuration
 distribution:
   type: exec
   exec:
@@ -35,24 +35,24 @@ signature:
     - name: repo_root
       type: string
       required: false
-      description: Path to agentctl repository (for source installations)
+      description: Path to foxctl repository (for source installations)
     - name: validate_only
       type: boolean
       required: false
       description: Only validate installation, don't install
       default: false
   help:
-    short: "Install and configure agentctl"
+    short: "Install and configure foxctl"
     long: |
-      Programmatic installation of agentctl with hooks and skills.
+      Programmatic installation of foxctl with hooks and skills.
 
       Example commands:
-        agentctl run setup/install --input '{"provider":"claude-code"}'
-        agentctl run setup/install --input '{"validate_only":true}'
-        agentctl run setup/install --input '{"provider":"all","skip_skills":true}'
+        foxctl run setup/install --input '{"provider":"claude-code"}'
+        foxctl run setup/install --input '{"validate_only":true}'
+        foxctl run setup/install --input '{"provider":"all","skip_skills":true}'
     workflows:
       - id: install-claude-code
-        description: "Install agentctl for Claude Code"
+        description: "Install foxctl for Claude Code"
         example_input:
           provider: "claude-code"
       - id: validate-installation

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: exa/search
@@ -106,12 +106,12 @@ signature:
       Requires EXA_API_KEY environment variable.
 
       Examples:
-        agentctl run exa --input '{"query": "AI startups 2025"}'
-        agentctl run exa --input '{"query": "transformer architecture", "type": "deep", "category": "research paper"}'
-        agentctl run exa --input '{"query": "OpenAI news", "include_domains": ["techcrunch.com"], "highlights": true}'
-        agentctl run exa --input '{"action": "find_similar", "url": "https://arxiv.org/abs/2303.08774"}'
-        agentctl run exa --input '{"action": "contents", "urls": ["https://example.com/article"]}'
-        agentctl run exa --input '{"action": "answer", "query": "What is the latest valuation of SpaceX?"}'
+        foxctl run exa --input '{"query": "AI startups 2025"}'
+        foxctl run exa --input '{"query": "transformer architecture", "type": "deep", "category": "research paper"}'
+        foxctl run exa --input '{"query": "OpenAI news", "include_domains": ["techcrunch.com"], "highlights": true}'
+        foxctl run exa --input '{"action": "find_similar", "url": "https://arxiv.org/abs/2303.08774"}'
+        foxctl run exa --input '{"action": "contents", "urls": ["https://example.com/article"]}'
+        foxctl run exa --input '{"action": "answer", "query": "What is the latest valuation of SpaceX?"}'
     workflows:
       - id: basic-search
         description: "Simple web search with text"

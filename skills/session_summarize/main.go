@@ -16,21 +16,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hashutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit/codexjsonl"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/queue"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	"github.com/jkatigb/agentctl/internal/storage/vector"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/hashutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/obs"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/sliceutil"
+	"github.com/joshka0/foxctl/internal/context/sessionkit/codexjsonl"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/queue"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/storage/vector"
 )
 
 const (
@@ -168,7 +168,7 @@ type ProviderCost struct {
 // Prices as of January 2026 - update as needed.
 // Sources: cerebras.ai/pricing, groq.com/pricing, openrouter.ai/pricing
 var providerCosts = map[string]ProviderCost{
-	// Primary providers used by agentctl
+	// Primary providers used by foxctl
 	"cerebras":       {InputPerMillion: 0.60, OutputPerMillion: 2.20}, // GLM-4.7 (Z.ai pricing)
 	"cerebras:llama": {InputPerMillion: 0.60, OutputPerMillion: 0.60}, // Llama 3.3 70B
 	"groq":           {InputPerMillion: 0.59, OutputPerMillion: 0.79}, // Llama 3.3 70B Versatile
@@ -1188,8 +1188,8 @@ func summarizeWithProvider(ctx context.Context, provider LLMProvider, filtered [
 
 	// OpenRouter requires additional headers
 	if strings.HasPrefix(provider.Name, "openrouter:") {
-		req.Header.Set("HTTP-Referer", "https://github.com/jkatigb/agentctl")
-		req.Header.Set("X-Title", "agentctl")
+		req.Header.Set("HTTP-Referer", "https://github.com/joshka0/foxctl")
+		req.Header.Set("X-Title", "foxctl")
 	}
 
 	client := &http.Client{Timeout: 90 * time.Second}
@@ -3463,8 +3463,8 @@ func callAPIForWindowSummary(ctx context.Context, provider LLMProvider, prompt s
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 
 	if strings.HasPrefix(provider.Name, "openrouter:") {
-		req.Header.Set("HTTP-Referer", "https://github.com/jkatigb/agentctl")
-		req.Header.Set("X-Title", "agentctl")
+		req.Header.Set("HTTP-Referer", "https://github.com/joshka0/foxctl")
+		req.Header.Set("X-Title", "foxctl")
 	}
 
 	client := &http.Client{Timeout: 60 * time.Second}

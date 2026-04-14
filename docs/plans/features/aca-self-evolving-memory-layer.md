@@ -1,9 +1,9 @@
 ---
 vault_refs:
-  - notes/repo/agentctl/self-evolving-memory-layer.md
-  - notes/repo/agentctl/semantic-and-memory.md
-  - notes/repo/agentctl/aca-memory-stack-comparison.md
-  - notes/repo/agentctl/index.md
+  - notes/repo/foxctl/self-evolving-memory-layer.md
+  - notes/repo/foxctl/semantic-and-memory.md
+  - notes/repo/foxctl/aca-memory-stack-comparison.md
+  - notes/repo/foxctl/index.md
 ---
 # ACA Self-Evolving Memory Layer Plan
 
@@ -67,7 +67,7 @@ memory structure over time.
 
 ### Dual-plane stays intact
 
-- control-plane truth remains in `.agentctl/runtime/`
+- control-plane truth remains in `.foxctl/runtime/`
 - durable human-readable knowledge remains in the vault
 
 ### Typed proposals, not freeform mutation
@@ -245,10 +245,10 @@ before they are applied or promoted.
 
 ### Likely surfaces
 
-- `agentctl context proposals`
-- `agentctl context proposal <id>`
-- `agentctl context proposal apply <id>`
-- `agentctl context proposal reject <id>`
+- `foxctl context proposals`
+- `foxctl context proposal <id>`
+- `foxctl context proposal apply <id>`
+- `foxctl context proposal reject <id>`
 
 ### Acceptance
 
@@ -271,10 +271,10 @@ Make `L5 External Sources` operational instead of conceptual.
 
 ### Likely surfaces
 
-- `agentctl context import-evidence --url ...`
-- `agentctl context import-evidence --transcript ...`
-- `agentctl context import-evidence --file ...`
-- `agentctl obsidian promote-evidence-draft`
+- `foxctl context import-evidence --url ...`
+- `foxctl context import-evidence --transcript ...`
+- `foxctl context import-evidence --file ...`
+- `foxctl obsidian promote-evidence-draft`
 
 ### Output contract
 
@@ -523,8 +523,8 @@ This order matters because:
 
 ### ACA retrieval checks
 
-- `agentctl obsidian index build --vault-path <vault>`
-- targeted `agentctl obsidian index search` queries for the new note set
+- `foxctl obsidian index build --vault-path <vault>`
+- targeted `foxctl obsidian index search` queries for the new note set
 
 ### Evaluation checks
 

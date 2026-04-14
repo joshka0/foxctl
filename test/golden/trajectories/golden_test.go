@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 var updateGolden = flag.Bool("update", false, "update golden files")
@@ -24,7 +24,7 @@ var updateGolden = flag.Bool("update", false, "update golden files")
 func TestGoldenTrajectoryExportEpisodes(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
-	t.Setenv("AGENTCTL_HOME", filepath.Join(tmp, "agentctl"))
+	t.Setenv("AGENTCTL_HOME", filepath.Join(tmp, "foxctl"))
 	t.Setenv("AGENTCTL_PATHS_CAS", filepath.Join(tmp, "cas"))
 	t.Setenv("AGENTCTL_PATHS_JOBS", filepath.Join(tmp, "jobs"))
 	t.Setenv("AGENTCTL_PATHS_CACHE", filepath.Join(tmp, "cache"))
@@ -36,7 +36,7 @@ func TestGoldenTrajectoryExportEpisodes(t *testing.T) {
 		t.Fatalf("config load: %v", err)
 	}
 	if err := os.MkdirAll(cfg.Home, 0o755); err != nil {
-		t.Fatalf("ensure agentctl home: %v", err)
+		t.Fatalf("ensure foxctl home: %v", err)
 	}
 	if err := os.MkdirAll(cfg.Paths.CAS, 0o755); err != nil {
 		t.Fatalf("ensure cas dir: %v", err)

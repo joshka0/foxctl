@@ -10,8 +10,8 @@ System-level architectural knowledge that workers need to understand how compone
 ## Component Overview
 
 ```
-agentctl CLI
-├── agentctl gateway (long-lived daemon)
+foxctl CLI
+├── foxctl gateway (long-lived daemon)
 │   ├── tsnet listener (Tailscale networking, userspace WireGuard)
 │   ├── HTTP server
 │   │   ├── /healthz (subsystem status)
@@ -19,11 +19,11 @@ agentctl CLI
 │   │   └── /ws/terminal/{room-id} (WebSocket→PTY bridge)
 │   └── SSH server
 │       └── room-<id>@<hostname> (SSH→PTY bridge)
-├── agentctl room create --sandbox
+├── foxctl room create --sandbox
 │   ├── Git worktree (via internal/platform/worktree/)
 │   ├── tmux/zellij session
 │   └── Gateway registration
-└── agentctl room destroy
+└── foxctl room destroy
     ├── Worktree cleanup
     ├── tmux session kill
     └── Gateway deregistration
@@ -82,11 +82,11 @@ agentctl CLI
 |-----------|----------|-------------|
 | Room struct | internal/domain/agent/board_message.go | Add SandboxConfig field |
 | Board store | internal/storage/blackboard/board_store.go | Persist/restore SandboxConfig |
-| Room create | cmd/agentctl/cmd/room.go | Add --sandbox flag handling |
-| Room destroy | cmd/agentctl/cmd/room.go | Add sandbox cleanup |
+| Room create | cmd/foxctl/cmd/room.go | Add --sandbox flag handling |
+| Room destroy | cmd/foxctl/cmd/room.go | Add sandbox cleanup |
 | tmux bridge | internal/tmuxbridge/client.go | Use for session creation |
 | zellij bridge | internal/zellijbridge/client.go | Use for zellij sessions |
 | WebSocket hub | internal/web/consolews/hub.go | Reference for WS patterns |
 | Web server | internal/web/server.go | Reference for HTTP patterns |
 | OpenSandbox | internal/runtime/sandbox/opensandbox/client.go | Extend, don't rewrite |
-| Cobra root | cmd/agentctl/cmd/root.go | Register gateway command |
+| Cobra root | cmd/foxctl/cmd/root.go | Register gateway command |

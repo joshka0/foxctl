@@ -5,7 +5,7 @@
 runtime plan updates.\
 **Related specs:** `overseer_profile.md`, `mailbox_blackboard.md`,
 `task_graph_insights.md`,
-[bd_mail_agent_interface.md](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0),
+[bd_mail_agent_interface.md](cci:7://file://~/repos/personal/claude-harness/foxctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0),
 `unified_agents.md`
 
 ---
@@ -93,8 +93,8 @@ Hooks do **not** own the plan. They:
 		"goal": "Ship multi-agent E2E tests",
 		"description": "E2E for task graph, mailbox, file_guard, overseer scoring",
 		"scope_paths": [
-			"agentctl/test/e2e",
-			"agentctl/internal/intelligence/analysis"
+			"foxctl/test/e2e",
+			"foxctl/internal/intelligence/analysis"
 		],
 		"attach_to_task_id": "optional-epic-id-or-empty",
 		"mode": "draft|apply",
@@ -138,13 +138,13 @@ Hooks do **not** own the plan. They:
 				"title": "Epic: Ship multi-agent E2E tests",
 				"status": "pending",
 				"depends_on": [],
-				"scope_paths": ["agentctl/test/e2e"]
+				"scope_paths": ["foxctl/test/e2e"]
 			},
 			{
 				"id": "01KB3K5N...",
 				"title": "Write multiagent_workflow_test.go",
 				"depends_on": ["01KB3K4M..."],
-				"scope_paths": ["agentctl/test/e2e"],
+				"scope_paths": ["foxctl/test/e2e"],
 				"status": "pending"
 			}
 		],
@@ -189,7 +189,7 @@ Overseer publishes **plan events** to the mailbox so agents and hooks can react.
 ### 4.1 Event vocabulary
 
 Using
-[BoardMessage](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/domain/agent/board_message.go:25:0-39:1)
+[BoardMessage](cci:2://file://~/repos/personal/claude-harness/foxctl/internal/domain/agent/board_message.go:25:0-39:1)
 `Subject` conventions:
 
 - `plan.created:<epic-id>`
@@ -274,7 +274,7 @@ agent.BoardMessage{
 7. Overseer periodically or on-demand:
    - Runs `task_graph_insights` on the epic subtree.
    - Runs overseer
-     [Recommend](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/analysis/overseer/scorer.go:64:0-198:1)
+     [Recommend](cci:1://file://~/repos/personal/claude-harness/foxctl/internal/intelligence/analysis/overseer/scorer.go:64:0-198:1)
      to evaluate scores.
    - Decides whether to:
      - Split tasks (finer-grained), or
@@ -392,14 +392,14 @@ graph insights.
 - **Task graph insights**
   - `todo/manage.graph_insights` operation is available on the `todo/manage`
     skill.
-  - `internal/intelligence/analysis/tasksgraph` is built into the `agentctl` binary.
+  - `internal/intelligence/analysis/tasksgraph` is built into the `foxctl` binary.
   - `task_graph_insights.md` is included in the overseer / Factory spec pack.
 
 - **Overseer scoring**
-  - [[overseer.Scorer](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/analysis/overseer/scorer.go:51:0-54:1)](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/intelligence/analysis/overseer/scorer.go:51:0-54:1)
+  - [[overseer.Scorer](cci:2://file://~/repos/personal/claude-harness/foxctl/internal/intelligence/analysis/overseer/scorer.go:51:0-54:1)](cci:2://file://~/repos/personal/claude-harness/foxctl/internal/intelligence/analysis/overseer/scorer.go:51:0-54:1)
     is built and reachable from `todo/manage.recommend` (or an equivalent
     operation).
-  - [[multiagent_workflow_test.go](cci:7://file://~/repos/personal/claude-harness/agentctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/agentctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)
+  - [[multiagent_workflow_test.go](cci:7://file://~/repos/personal/claude-harness/foxctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/foxctl/test/e2e/multiagent_workflow_test.go:0:0-0:0)
     E2E tests are part of the default test suite for this workspace.
 
 ### 9.2 Planning operation
@@ -409,7 +409,7 @@ graph insights.
   - Only `actor:system:overseer` (and optionally CI/test agents) are allowed to
     call `mode="apply"`; other actors are restricted to `mode="draft"` or
     disallowed.
-  - `agentctl todo plan` CLI helper is exposed for humans / overseer to drive
+  - `foxctl todo plan` CLI helper is exposed for humans / overseer to drive
     planning.
 
 ### 9.3 Hooks & routers
@@ -445,8 +445,8 @@ graph insights.
     - Allowed to call `todo/manage.graph_insights`, `todo/manage.recommend`, and
       `mailbox/manage.*`.
   - Given knowledge of:
-    - [[overseer_planning.md](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/overseer_planning.md:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/overseer_planning.md:0:0-0:0)
-    - [[bd_mail_agent_interface.md](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0)
+    - [[overseer_planning.md](cci:7://file://~/repos/personal/claude-harness/foxctl/docs/spec/overseer_planning.md:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/foxctl/docs/spec/overseer_planning.md:0:0-0:0)
+    - [[bd_mail_agent_interface.md](cci:7://file://~/repos/personal/claude-harness/foxctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0)](cci:7://file://~/repos/personal/claude-harness/foxctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0)
     - `mailbox_blackboard.md`
     - `task_graph_insights.md`
     - `unified_agents.md`
@@ -461,8 +461,8 @@ graph insights.
 
 ```yaml
 workspace:
-    name: agentctl-core
-    root: /workspace/agentctl
+    name: foxctl-core
+    root: /workspace/foxctl
 
     skills:
         - name: todo/manage
@@ -483,8 +483,8 @@ workspace:
               - list_reservations
 
     storage:
-        tasks_db: ~/.agentctl/storage/tasks.db
-        blackboard_db: ~/.agentctl/storage/blackboard.db
+        tasks_db: ~/.foxctl/storage/tasks.db
+        blackboard_db: ~/.foxctl/storage/blackboard.db
 
     hooks:
         - name: mail_router

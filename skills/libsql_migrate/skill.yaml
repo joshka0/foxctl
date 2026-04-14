@@ -1,10 +1,10 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: libsql/migrate
   description: Migrate SQLite databases to self-hosted libsql with vector support
   version: 0.1.0
-  author: agentctl
+  author: foxctl
   tags: [libsql, migration, vector, sqlite]
 distribution:
   type: exec
@@ -33,7 +33,7 @@ signature:
     - name: source_dir
       type: string
       required: false
-      description: Source SQLite storage directory (defaults to ~/.agentctl/storage)
+      description: Source SQLite storage directory (defaults to ~/.foxctl/storage)
     - name: batch_size
       type: integer
       required: false
@@ -77,12 +77,12 @@ signature:
   help:
     short: "Migrate SQLite to self-hosted libsql"
     long: |
-      Migrates agentctl's SQLite databases (memories, sessions) to a self-hosted
+      Migrates foxctl's SQLite databases (memories, sessions) to a self-hosted
       libsql server with vector search support.
 
       Prerequisites:
       1. Start sqld server: docker run -p 8080:8080 ghcr.io/tursodatabase/libsql-server
-      2. Run migration: agentctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080"}'
+      2. Run migration: foxctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080"}'
 
       The skill preserves all embeddings and creates F32_BLOB vector columns
       for native libsql vector search.

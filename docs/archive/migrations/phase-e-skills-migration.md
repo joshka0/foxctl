@@ -14,7 +14,7 @@ This document tracks the migration of individual hook skills to use the shared
 **Goal**: All hook skills work correctly when invoked via:
 - Claude Code (CC) shell hooks
 - OpenCode (OC) plugin
-- agentctl actor runtime (hooks/dispatch)
+- foxctl actor runtime (hooks/dispatch)
 
 ---
 
@@ -65,7 +65,7 @@ These skills extract file paths and need `pathutil.ExtractPath()`:
 ### Before (CC-only)
 
 ```go
-import "github.com/jkatigb/agentctl/internal/domain/hook"
+import "github.com/joshka0/foxctl/internal/domain/hook"
 
 func run(ctx context.Context, in hook.Input) error {
     // Only works with CC tool names
@@ -90,13 +90,13 @@ func extractFilePath(toolInput json.RawMessage) string {
 
 ```go
 import (
-    "github.com/jkatigb/agentctl/internal/domain/hook"
-    "github.com/jkatigb/agentctl/internal/runtime/hooks/pathutil"
-    "github.com/jkatigb/agentctl/internal/runtime/hooks/toolutil"
+    "github.com/joshka0/foxctl/internal/domain/hook"
+    "github.com/joshka0/foxctl/internal/runtime/hooks/pathutil"
+    "github.com/joshka0/foxctl/internal/runtime/hooks/toolutil"
 )
 
 func run(ctx context.Context, in hook.Input) error {
-    // Works with CC, OC, and agentctl runtime
+    // Works with CC, OC, and foxctl runtime
     // TODO: When hooks.Input adds ToolCanonical/ToolKind, pass them here
     if !toolutil.IsWriteOperation(in.ToolName, "", "") {
         return emitApprove("non-write")

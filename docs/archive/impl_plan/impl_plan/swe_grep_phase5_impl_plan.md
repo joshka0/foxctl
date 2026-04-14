@@ -79,7 +79,7 @@ we design Phase 5.
 
 - **Maps to Phase 5 todo**
   - **A1** (skill manifest and wiring).
-  - **A2** (CLI/runner integration: “`agentctl run code/snippet_extract` works” at a
+  - **A2** (CLI/runner integration: “`foxctl run code/snippet_extract` works” at a
     smoke level).
 
 - **Validation**
@@ -243,7 +243,7 @@ we design Phase 5.
     - Sets up a small fixture workspace (few files with obvious matches).
     - Uses a trivial candidate generator (hard‑coded list or simple grep) to
       construct `candidates`.
-    - Invokes `code/snippet_extract` via the normal runner path (or `agentctl run`
+    - Invokes `code/snippet_extract` via the normal runner path (or `foxctl run`
       harness).
     - Asserts end‑to‑end behavior:
       - Correct summary counts.

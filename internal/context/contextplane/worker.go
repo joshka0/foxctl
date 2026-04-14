@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
+	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 // WorkerConfig configures the daemonized ACA maintenance worker.

@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | Status | Draft for review |
-| Depends on | Existing `agentctl room epic|milestone|story|log` agile protocol |
+| Depends on | Existing `foxctl room epic|milestone|story|log` agile protocol |
 | Review requested from | `cursor-c-a` in `triad-20260404-202656` |
 
 ## Summary
@@ -11,20 +11,20 @@
 Extend the room agile backend with two linked capabilities:
 
 1. **Story-owned validation** as the primary durable proof of completion.
-2. **Filesystem work-packs** under `~/.agentctl/epics` as a rich markdown/artifact mirror of the canonical room state.
+2. **Filesystem work-packs** under `~/.foxctl/epics` as a rich markdown/artifact mirror of the canonical room state.
 
 The room database remains the source of truth. The filesystem mirror exists to
 make briefs, summaries, reviews, and validation artifacts easy for humans and
 agents to inspect and edit over long-running work.
 
 This follows the strongest part of the Droid `.factory` pattern without
-copying its exact filenames or moving source-of-truth semantics out of `agentctl room`.
+copying its exact filenames or moving source-of-truth semantics out of `foxctl room`.
 
 ## Goals
 
 1. Make validation attach to the smallest durable unit of work: the **story**.
 2. Make milestone summary a **rollup** of story evidence instead of a second copy.
-3. Materialize a stable work-pack tree under `~/.agentctl/epics` keyed by room ids.
+3. Materialize a stable work-pack tree under `~/.foxctl/epics` keyed by room ids.
 4. Keep room state canonical and machine-readable while allowing richer markdown artifacts.
 5. Preserve transport independence: this belongs to `room`, not to tmux/zellij.
 
@@ -51,7 +51,7 @@ In short:
 - `story` owns evidence
 - `milestone` owns synthesis
 - `epic` owns continuity
-- `~/.agentctl/epics` owns rich human-facing artifacts
+- `~/.foxctl/epics` owns rich human-facing artifacts
 
 ## Proposed room model additions
 
@@ -109,12 +109,12 @@ This avoids stringly typed ad hoc validation names.
 
 ## Work-pack layout
 
-Each epic gets a stable root under `~/.agentctl/epics/<epic-id>/`.
+Each epic gets a stable root under `~/.foxctl/epics/<epic-id>/`.
 
 Recommended layout:
 
 ```text
-~/.agentctl/epics/<epic-id>/
+~/.foxctl/epics/<epic-id>/
   epic.md
   meta.json
   delivery-log.md
@@ -177,7 +177,7 @@ Filesystem artifacts should be regenerateable from room state where practical.
 Add:
 
 ```bash
-agentctl room story validate <room-id> <story-id> <validator-type> <pass|fail|blocked|waived> <summary>
+foxctl room story validate <room-id> <story-id> <validator-type> <pass|fail|blocked|waived> <summary>
 ```
 
 Flags:
@@ -202,10 +202,10 @@ Command invariants:
 
 Add later if needed:
 
-- `agentctl room story validation show <room-id> <story-id>`
-- `agentctl room story validation list <room-id> <story-id>`
-- `agentctl room workpack materialize <room-id> <epic-id>`
-- `agentctl room workpack sync <room-id> <epic-id>`
+- `foxctl room story validation show <room-id> <story-id>`
+- `foxctl room story validation list <room-id> <story-id>`
+- `foxctl room workpack materialize <room-id> <epic-id>`
+- `foxctl room workpack sync <room-id> <epic-id>`
 
 For the first slice, `story validate` plus automatic work-pack materialization is enough.
 
@@ -325,12 +325,12 @@ Waiver policy:
 ### Phase 1
 
 - add `story_validation` room kind
-- add `agentctl room story validate`
+- add `foxctl room story validate`
 - teach `milestone show` and `milestone summary` to aggregate story validation
 
 ### Phase 2
 
-- materialize work-pack directories under `~/.agentctl/epics`
+- materialize work-pack directories under `~/.foxctl/epics`
 - generate `epic.md`, `milestone.md`, `story.md`, and validation markdown
 
 ### Phase 3

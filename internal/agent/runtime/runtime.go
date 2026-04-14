@@ -18,26 +18,26 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agent/optimization"
+	"github.com/joshka0/foxctl/internal/agent/optimization"
 	"github.com/oklog/ulid/v2"
 
-	agentprompts "github.com/jkatigb/agentctl/internal/agent/prompts"
-	"github.com/jkatigb/agentctl/internal/agent/toolnames"
-	"github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/protocol"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/runtime/agentprompt"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/tooling/shellreduce"
-	einoadapter "github.com/jkatigb/agentctl/internal/v2/adapters/eino"
+	agentprompts "github.com/joshka0/foxctl/internal/agent/prompts"
+	"github.com/joshka0/foxctl/internal/agent/toolnames"
+	"github.com/joshka0/foxctl/internal/agent/types"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/protocol"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/runtime/agentprompt"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/tooling/shellreduce"
+	einoadapter "github.com/joshka0/foxctl/internal/v2/adapters/eino"
 )
 
-var traceIDContextKey = struct{ Name string }{Name: "agentctl.trace_id"}
+var traceIDContextKey = struct{ Name string }{Name: "foxctl.trace_id"}
 
 func traceIDFromContext(ctx context.Context) string {
 	if ctx == nil {
@@ -417,7 +417,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 		}
 		if _, err := r.config.SessionStore.Save(ctx, dbSession); err != nil {
 			// Log but don't fail - in-memory tracking is sufficient
-			// The session will just not be visible in agentctl session list
+			// The session will just not be visible in foxctl session list
 			_ = err // TODO: Add logging
 		}
 	}
@@ -501,7 +501,7 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (engine.
 	// Milestone 1 mailbox-owned default path.
 	//
 	// When the gate is on, we provision a real adk.ChatModelAgent using the provider-resolved
-	// connection parameters from llmEngine.Config() and bridge the real agentctl ToolExecutor
+	// connection parameters from llmEngine.Config() and bridge the real foxctl ToolExecutor
 	// and ToolDefs into the Eino substrate.
 	if einoadapter.IsEinoEnabled() {
 		einoAdapter, err := einoadapter.ProvisionFromLLMConfig(llmEngine.Config(), executor, toolDefs)
@@ -1506,7 +1506,7 @@ func (e *agentToolExecutor) executeCodeSearchEnsemble(ctx context.Context, args 
 		taskType = "file_locate"
 	}
 
-	tmpDir, err := os.MkdirTemp("", "agentctl-code-search-ensemble-*")
+	tmpDir, err := os.MkdirTemp("", "foxctl-code-search-ensemble-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
@@ -2062,7 +2062,7 @@ func (e *agentToolExecutor) executeAnnotationListSessions(ctx context.Context) (
 }
 
 func (e *agentToolExecutor) newAgentctlCommand(ctx context.Context, args ...string) *exec.Cmd {
-	bin := "agentctl"
+	bin := "foxctl"
 	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
 		bin = exe
 	}
@@ -2332,7 +2332,7 @@ func mergeRefactorScoutTaskPrompt(taskPrompt, preface string) string {
 }
 
 func agentctlExecutablePath() string {
-	bin := "agentctl"
+	bin := "foxctl"
 	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
 		bin = exe
 	}

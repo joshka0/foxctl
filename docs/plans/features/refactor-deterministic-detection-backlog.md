@@ -2,7 +2,7 @@
 
 Status: active backlog
 
-Owner: agentctl
+Owner: foxctl
 
 Last updated: 2026-04-02
 
@@ -14,7 +14,7 @@ Related plans:
 
 ## Goal
 
-Improve `agentctl refactor scout` primarily through deterministic detection and
+Improve `foxctl refactor scout` primarily through deterministic detection and
 scoring rather than by expanding the LLM layer.
 
 This backlog is intentionally scoped to:
@@ -464,7 +464,7 @@ Recommended non-role:
 For each backlog item:
 
 1. add at least one fixture in `skills/code_refactor_scout/*_test.go`
-2. add one live smoke example from `agentctl` or `praze`
+2. add one live smoke example from `foxctl` or `praze`
 3. keep all new scoring factors visible in finding evidence
 4. ensure parser-only fallback remains valid
 5. avoid keyword-trigger routing or suppression

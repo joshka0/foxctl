@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/snapshots"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/runtime/snapshots"
 )
 
 func TestSnapshotStore_LoadStoreAtomic(t *testing.T) {

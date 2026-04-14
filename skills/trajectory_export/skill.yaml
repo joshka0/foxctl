@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: trajectory/export
@@ -57,8 +57,8 @@ signature:
     long: |
       Use trajectory/export to export stored trajectories.
       Example commands:
-        agentctl run trajectory/export --input '{"workspace_id":"default","limit":10}'
-        agentctl skills run trajectory/export --workspace_id default --limit 10
+        foxctl run trajectory/export --input '{"workspace_id":"default","limit":10}'
+        foxctl skills run trajectory/export --workspace_id default --limit 10
     workflows:
       - id: export-trajectories
         description: "Export the latest trajectories."

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: codemap/generate
@@ -35,8 +35,8 @@ signature:
     long: |
       Use codemap/generate to explore relationships in a codebase.
       Example commands:
-        agentctl run codemap/generate --input '{"query":"map authentication flow","depth":2}'
-        agentctl skills run codemap/generate --query "map authentication flow" --depth 2
+        foxctl run codemap/generate --input '{"query":"map authentication flow","depth":2}'
+        foxctl skills run codemap/generate --query "map authentication flow" --depth 2
     workflows:
       - id: auth-map
         description: "Generate an authentication codemap."

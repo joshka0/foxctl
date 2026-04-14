@@ -3,7 +3,7 @@ package hooks
 import (
 	"encoding/json"
 
-	"github.com/jkatigb/agentctl/internal/domain/identity"
+	"github.com/joshka0/foxctl/internal/domain/identity"
 )
 
 // Event is the canonical event name.
@@ -155,7 +155,7 @@ func (d Decision) IsBlocking() bool {
 //
 // The Context Buffer is drained on inject-capable events.
 type ProviderCapabilities struct {
-	Name             string `json:"name"`               // "claude-code", "opencode", "agentctl"
+	Name             string `json:"name"`               // "claude-code", "opencode", "foxctl"
 	Event            string `json:"event"`              // Current event name
 	CanInjectContext bool   `json:"can_inject_context"` // Can this event inject context?
 	CanBlock         bool   `json:"can_block"`          // Can this event block the operation?
@@ -197,7 +197,7 @@ type Input struct {
 	// Tool context (for PreToolUse/PostToolUse)
 	ToolUseID     string          `json:"tool_use_id,omitempty"`    // tool call ID from the provider (e.g. Claude Code)
 	ToolName      string          `json:"tool_name,omitempty"`      // platform tool name (e.g. Edit, Write for CC; edit for OC)
-	ToolCanonical string          `json:"tool_canonical,omitempty"` // agentctl canonical tool name (e.g. edit.apply_patch)
+	ToolCanonical string          `json:"tool_canonical,omitempty"` // foxctl canonical tool name (e.g. edit.apply_patch)
 	ToolKind      ToolKind        `json:"tool_kind,omitempty"`      // tool category: read|write|exec|search|any
 	ToolInput     json.RawMessage `json:"tool_input,omitempty"`     // JSON args being executed
 
@@ -330,7 +330,7 @@ type Action struct {
 	// send_mailbox
 	ToNS         string            `json:"to_ns,omitempty"`
 	MessageType  string            `json:"message_type,omitempty"` // ask|cmd|event|reply|console.ask|...
-	Payload      json.RawMessage   `json:"payload,omitempty"`      // agentctl envelope
+	Payload      json.RawMessage   `json:"payload,omitempty"`      // foxctl envelope
 	Headers      map[string]string `json:"headers,omitempty"`
 	TTLMS        int64             `json:"ttl_ms,omitempty"`
 	DeliveryHint string            `json:"delivery_hint,omitempty"` // optional: "interrupt"|"next_turn"

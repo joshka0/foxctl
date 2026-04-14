@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
-	coreorchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 )
 
 func TestStore_ApplyAndBoard(t *testing.T) {

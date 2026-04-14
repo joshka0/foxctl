@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: text/replace
@@ -115,10 +115,10 @@ signature:
       Use text/replace to apply regex or literal replacements, with dry-run
       previews when needed.
       Example commands:
-        agentctl run text/replace --input '{"pattern":"TODO","replacement":"DONE","paths":["./src"],"dry_run":true}'
-        agentctl skills run text/replace --pattern TODO --replacement DONE --paths ./src --dry_run
-        agentctl run text/replace --input '{"pattern":"foo","replacement":"bar","paths":["./README.md"],"literal":true}'
-        agentctl skills run text/replace --pattern foo --replacement bar --paths ./README.md --literal
+        foxctl run text/replace --input '{"pattern":"TODO","replacement":"DONE","paths":["./src"],"dry_run":true}'
+        foxctl skills run text/replace --pattern TODO --replacement DONE --paths ./src --dry_run
+        foxctl run text/replace --input '{"pattern":"foo","replacement":"bar","paths":["./README.md"],"literal":true}'
+        foxctl skills run text/replace --pattern foo --replacement bar --paths ./README.md --literal
     workflows:
       - id: replace-preview
         description: "Preview a replacement without writing files."

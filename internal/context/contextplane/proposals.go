@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
 )
 
 func (s *WorkspaceStore) RecordMemoryProposal(ctx context.Context, proposal MemoryProposal) (MemoryProposal, error) {
@@ -568,7 +568,7 @@ func buildApplyProposalWorkPacket(proposal *MemoryProposal, result map[string]an
 		if job, ok := result["promotion_job"].(PromotionJob); ok {
 			packet.PromotionJobID = job.ID
 		}
-		packet.NextCommand = "agentctl context proposal merge " + proposal.ID + " --vault-path <vault-path>"
+		packet.NextCommand = "foxctl context proposal merge " + proposal.ID + " --vault-path <vault-path>"
 	}
 	return packet
 }
@@ -619,7 +619,7 @@ func buildStoredPreparedProposalWorkPacket(proposal *MemoryProposal) (ProposalWo
 		TargetPath:        targetPath,
 		Heading:           firstNonEmpty(changeString(proposal.ProposedChange, "suggested_target_heading"), "Review"),
 		RequiresVaultPath: true,
-		NextCommand:       "agentctl context proposal merge " + proposal.ID + " --vault-path <vault-path>",
+		NextCommand:       "foxctl context proposal merge " + proposal.ID + " --vault-path <vault-path>",
 	}
 	return packet, true
 }

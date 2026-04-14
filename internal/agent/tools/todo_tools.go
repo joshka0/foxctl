@@ -9,10 +9,10 @@ import (
 	"time"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
-	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
-	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
+	"github.com/joshka0/foxctl/internal/intelligence/analysis/tasksgraph"
+	errspkg "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
+	tooling "github.com/joshka0/foxctl/internal/tooling"
 )
 
 // registerTodoTools registers task/todo management tools.

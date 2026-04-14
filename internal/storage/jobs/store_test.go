@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/storage/jobs/fsutil"
-	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/storage/jobs/fsutil"
+	"github.com/joshka0/foxctl/internal/storage/jobs/types"
 )
 
 func TestSubmitEchoCreatesResult(t *testing.T) {
@@ -481,7 +481,7 @@ func buildTestSkill(t *testing.T, src string) string {
 
 func testExecManifest(name string) skill.Manifest {
 	return skill.Manifest{
-		APIVersion: "agentctl/v1",
+		APIVersion: "foxctl/v1",
 		Kind:       "Skill",
 		Metadata: skill.Metadata{
 			Name:        name,

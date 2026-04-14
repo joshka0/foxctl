@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/agent/optimization"
+	"github.com/joshka0/foxctl/internal/agent/optimization"
 )
 
 func TestParsePromptPreferenceDatasetJSONL(t *testing.T) {

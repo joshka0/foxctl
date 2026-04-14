@@ -14,13 +14,13 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
-	"github.com/jkatigb/agentctl/internal/storage/vector"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	"github.com/joshka0/foxctl/internal/storage/vector"
 )
 
 // Ensure TursoStore implements storage.SessionStore.
@@ -148,7 +148,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 			embedding F32_BLOB(%d),
 			embedding_model TEXT,
 			parent_session_id TEXT,
-			agent_id TEXT NOT NULL DEFAULT 'agentctl',
+			agent_id TEXT NOT NULL DEFAULT 'foxctl',
 			agent_type TEXT NOT NULL DEFAULT 'claude',
 			status TEXT NOT NULL DEFAULT 'ok',
 			created_at TEXT NOT NULL,
@@ -198,7 +198,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 	}{
 		{"workspace_id", "ALTER TABLE sessions ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''"},
 		{"parent_session_id", "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT"},
-		{"agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'agentctl'"},
+		{"agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'foxctl'"},
 		{"agent_type", "ALTER TABLE sessions ADD COLUMN agent_type TEXT NOT NULL DEFAULT 'claude'"},
 		{"status", "ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'"},
 		{"content_hash", "ALTER TABLE sessions ADD COLUMN content_hash TEXT"},
@@ -389,7 +389,7 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 
 	// Set default agent_id if empty
 	if session.AgentID == "" {
-		session.AgentID = "agentctl"
+		session.AgentID = "foxctl"
 	}
 	if session.AgentType == "" {
 		session.AgentType = "claude"
@@ -803,7 +803,7 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryE
 		session.ParentSessionID = parentSessionID.String
 		session.AgentID = agentID.String
 		if session.AgentID == "" {
-			session.AgentID = "agentctl"
+			session.AgentID = "foxctl"
 		}
 		session.AgentType = agentType.String
 		if session.AgentType == "" {
@@ -1980,7 +1980,7 @@ func scanSessionRow(row *sql.Row) (Session, error) {
 	if agentID.Valid && agentID.String != "" {
 		session.AgentID = agentID.String
 	} else {
-		session.AgentID = "agentctl"
+		session.AgentID = "foxctl"
 	}
 	if agentType.Valid && agentType.String != "" {
 		session.AgentType = agentType.String
@@ -2103,7 +2103,7 @@ func scanSessionRows(rows *sql.Rows) (Session, error) {
 	if agentID.Valid && agentID.String != "" {
 		session.AgentID = agentID.String
 	} else {
-		session.AgentID = "agentctl"
+		session.AgentID = "foxctl"
 	}
 	if agentType.Valid && agentType.String != "" {
 		session.AgentType = agentType.String
@@ -2159,7 +2159,7 @@ func scanSessionRows(rows *sql.Rows) (Session, error) {
 // Uses status-based detection: only sessions with status = 'running' are considered active.
 func (s *TursoStore) GetActive(ctx context.Context, workspace, agentID string) (*Session, error) {
 	if agentID == "" {
-		agentID = "agentctl"
+		agentID = "foxctl"
 	}
 
 	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
@@ -2547,7 +2547,7 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []f
 		session.ParentSessionID = parentSessionID.String
 		session.AgentID = agentID.String
 		if session.AgentID == "" {
-			session.AgentID = "agentctl"
+			session.AgentID = "foxctl"
 		}
 		session.AgentType = agentType.String
 		if session.AgentType == "" {
@@ -2714,7 +2714,7 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 		session.ParentSessionID = parentSessionID.String
 		session.AgentID = agentID.String
 		if session.AgentID == "" {
-			session.AgentID = "agentctl"
+			session.AgentID = "foxctl"
 		}
 		session.AgentType = agentType.String
 		if session.AgentType == "" {

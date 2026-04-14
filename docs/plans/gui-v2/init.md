@@ -123,7 +123,7 @@ package skills
 import (
 	"encoding/json"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/domain/skill"
 )
 
 func ParametersToJSONSchema(params []skill.Parameter) (json.RawMessage, error) {
@@ -221,8 +221,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 type ToolSpec struct {
@@ -346,11 +346,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jkatigb/agentctl/internal/runtime/daemon"
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
-	"github.com/jkatigb/agentctl/internal/runtime/execution"
-	"github.com/jkatigb/agentctl/internal/skills"
+	"github.com/joshka0/foxctl/internal/runtime/daemon"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/execution"
+	"github.com/joshka0/foxctl/internal/skills"
 )
 
 type SkillToolExecutor struct {
@@ -533,7 +533,7 @@ You already have a full sessions DB (`internal/storage/sessions`) and your GUI h
 
 * When a console session is created:
 
-  * create a `sessions.Session{Status: running, AgentID: "agentctl", WorkspacePath: ...}`
+  * create a `sessions.Session{Status: running, AgentID: "foxctl", WorkspacePath: ...}`
   * store its session_id on the console session row
 * Each `ask` saves a `sessions.SessionTurn`:
 
@@ -544,7 +544,7 @@ You already have a full sessions DB (`internal/storage/sessions`) and your GUI h
 
   * `sessions.Store.SetStatus(id, ok/error/canceled)`
 
-This makes your “agentctl Studio” console show up in existing Sessions tooling.
+This makes your “foxctl Studio” console show up in existing Sessions tooling.
 
 ---
 
@@ -717,7 +717,7 @@ Canonical states: `queued | running | ok | error | canceled`.
 
 ---
 
-# Concrete scaffolding: “agentctl Studio” (Go backend + React GUI)
+# Concrete scaffolding: “foxctl Studio” (Go backend + React GUI)
 
 ## Goal
 
@@ -952,7 +952,7 @@ Use `blackboard.OpenBoardStore(ctx, cfg.Storage.Root)` (note: board uses `root/b
 * Update `packages/gui/package.json` scripts:
 
   * `dev:all` → `concurrently "go run ./cmd/agentctl_web" "vite"`
-* Update GUI to use `@agentctl/data` client everywhere:
+* Update GUI to use `@foxctl/data` client everywhere:
 
   * remove `packages/gui/src/api/client.ts` + `packages/gui/src/types/*` duplication (or keep temporarily but migrate)
 * Fix Jobs state labels to canonical:
@@ -1023,7 +1023,7 @@ Implement a `ToolExecutor` that calls skills through your daemon (fast path) or 
 
 ---
 
-# UI additions to make this feel like “Claude Code but agentctl-native”
+# UI additions to make this feel like “Claude Code but foxctl-native”
 
 Add a new route/page:
 
@@ -1211,7 +1211,7 @@ If you paste **just these**, it’s enough to generate precise code:
 
 Below is a **concrete scaffolding + implementation plan** you can hand to Codex/Claude. It’s designed to:
 
-* Keep your existing **agentctl internal architecture** (runservice/daemon/engine/protocol/console payloads)
+* Keep your existing **foxctl internal architecture** (runservice/daemon/engine/protocol/console payloads)
 * Add a new **Go HTTP+WS server** (`cmd/agentctl_web`)
 * Extend your existing **React GUI** (`packages/gui`) with a **Console** page that streams events over WebSocket
 * Start minimal (skills run + basic console), then iterate into full “alternative to Claude Code/OpenCode”
@@ -1241,8 +1241,8 @@ Below is a **concrete scaffolding + implementation plan** you can hand to Codex/
 
 * Agent profiles (explorer/reviewer/implementer) with skill/tool allowlists
 * Tool call loop with **tool events** (tool_call/tool_result) streamed in real time
-* Persist conversation transcripts + trajectories in agentctl storage
-* Bidirectional todo sync (agentctl ↔ provider files) behind a security gate
+* Persist conversation transcripts + trajectories in foxctl storage
+* Bidirectional todo sync (foxctl ↔ provider files) behind a security gate
 
 ---
 
@@ -1307,9 +1307,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/logging"
-	"github.com/jkatigb/agentctl/internal/interfaces/web"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/logging"
+	"github.com/joshka0/foxctl/internal/interfaces/web"
 )
 
 func main() {
@@ -1398,11 +1398,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/runtime/daemon"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/api"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/consolews"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/tools"
+	"github.com/joshka0/foxctl/internal/runtime/daemon"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/interfaces/web/api"
+	"github.com/joshka0/foxctl/internal/interfaces/web/consolews"
+	"github.com/joshka0/foxctl/internal/interfaces/web/tools"
 )
 
 type Server struct {
@@ -1536,7 +1536,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func StatusHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
@@ -1576,10 +1576,10 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/runtime/daemon"
-	"github.com/jkatigb/agentctl/internal/runtime/runservice"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/runtime/daemon"
+	"github.com/joshka0/foxctl/internal/runtime/runservice"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
 type RunSkillRequest struct {
@@ -1732,7 +1732,7 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func JobsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
@@ -1786,10 +1786,10 @@ import (
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
-	domainconsole "github.com/jkatigb/agentctl/internal/domain/console"
+	domainconsole "github.com/joshka0/foxctl/internal/domain/console"
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/interfaces/web/tools"
+	"github.com/joshka0/foxctl/internal/interfaces/web/tools"
 )
 
 type Hub struct {
@@ -1907,13 +1907,13 @@ import (
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
-	consoletrack "github.com/jkatigb/agentctl/internal/console"
-	domainconsole "github.com/jkatigb/agentctl/internal/domain/console"
+	consoletrack "github.com/joshka0/foxctl/internal/console"
+	domainconsole "github.com/joshka0/foxctl/internal/domain/console"
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/tools"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/interfaces/web/tools"
 )
 
 type Session struct {
@@ -2175,7 +2175,7 @@ Focus: correctness, security, complexity, tests.
 		{
 			Name: "implementer",
 			System: strings.TrimSpace(`
-You are Implementer. You can make changes via agentctl skills. Prefer smart edits.
+You are Implementer. You can make changes via foxctl skills. Prefer smart edits.
 Use tasks/todos when relevant. Keep changes minimal and verified.
 `),
 			SkillsAllow: []string{
@@ -2207,9 +2207,9 @@ func SystemPromptForProfile(name string) string {
 package tools
 
 import (
-	"github.com/jkatigb/agentctl/internal/runtime/daemon"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/daemon"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/rs/zerolog"
 )
 
@@ -2286,9 +2286,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/jkatigb/agentctl/internal/runtime/daemon"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
-	"github.com/jkatigb/agentctl/internal/runtime/runservice"
+	"github.com/joshka0/foxctl/internal/runtime/daemon"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/runservice"
 )
 
 func (e *SkillToolExecutor) buildTools() {

@@ -1,30 +1,30 @@
-# Core agentctl deployment
+# Core foxctl deployment
 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: agentctl
-  namespace: agentctl
+  name: foxctl
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: core
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app.kubernetes.io/name: agentctl
+      app.kubernetes.io/name: foxctl
       app.kubernetes.io/component: core
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: agentctl
+        app.kubernetes.io/name: foxctl
         app.kubernetes.io/component: core
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: agentctl
+      serviceAccountName: foxctl
       terminationGracePeriodSeconds: 60
 
       securityContext:
@@ -34,8 +34,8 @@ spec:
         fsGroup: 1000
 
       containers:
-      - name: agentctl
-        image: agentctl:latest
+      - name: foxctl
+        image: foxctl:latest
         imagePullPolicy: IfNotPresent
 
         ports:
@@ -46,29 +46,29 @@ spec:
         # Configuration from ConfigMap
         envFrom:
         - configMapRef:
-            name: agentctl-config
+            name: foxctl-config
 
         env:
         # Secrets
         - name: TURSO_URL
           valueFrom:
             secretKeyRef:
-              name: agentctl-secrets
+              name: foxctl-secrets
               key: turso-url
         - name: TURSO_AUTH_TOKEN
           valueFrom:
             secretKeyRef:
-              name: agentctl-secrets
+              name: foxctl-secrets
               key: turso-token
         - name: VOYAGE_API_KEY
           valueFrom:
             secretKeyRef:
-              name: agentctl-secrets
+              name: foxctl-secrets
               key: voyage-key
         - name: AGENTCTL_OAUTH_ENC_KEY
           valueFrom:
             secretKeyRef:
-              name: agentctl-secrets
+              name: foxctl-secrets
               key: oauth-enc-key
               optional: true
 
@@ -88,7 +88,7 @@ spec:
 
         # Observability directory
         - name: AGENTCTL_OBS_DIR
-          value: "/var/log/agentctl"
+          value: "/var/log/foxctl"
 
         resources:
           requests:
@@ -107,7 +107,7 @@ spec:
 
         livenessProbe:
           exec:
-            command: ["agentctl", "health"]
+            command: ["foxctl", "health"]
           initialDelaySeconds: 10
           periodSeconds: 30
           timeoutSeconds: 5
@@ -115,7 +115,7 @@ spec:
 
         readinessProbe:
           exec:
-            command: ["agentctl", "health", "--ready"]
+            command: ["foxctl", "health", "--ready"]
           initialDelaySeconds: 5
           periodSeconds: 10
           timeoutSeconds: 3
@@ -124,13 +124,13 @@ spec:
         lifecycle:
           preStop:
             exec:
-              command: ["agentctl", "drain"]
+              command: ["foxctl", "drain"]
 
         volumeMounts:
         - name: cache
-          mountPath: /var/cache/agentctl
+          mountPath: /var/cache/foxctl
         - name: logs
-          mountPath: /var/log/agentctl
+          mountPath: /var/log/foxctl
         - name: tmp
           mountPath: /tmp
 
@@ -152,7 +152,7 @@ spec:
             podAffinityTerm:
               labelSelector:
                 matchLabels:
-                  app.kubernetes.io/name: agentctl
+                  app.kubernetes.io/name: foxctl
               topologyKey: kubernetes.io/hostname
 
       topologySpreadConstraints:
@@ -161,4 +161,4 @@ spec:
         whenUnsatisfiable: ScheduleAnyway
         labelSelector:
           matchLabels:
-            app.kubernetes.io/name: agentctl
+            app.kubernetes.io/name: foxctl

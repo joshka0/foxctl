@@ -1,9 +1,9 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: todo/sync_from_provider
   version: 0.1.0
-  description: "Sync todos FROM a provider (Claude Code) INTO agentctl task store"
+  description: "Sync todos FROM a provider (Claude Code) INTO foxctl task store"
   tags: ["todo", "sync", "claude"]
 distribution:
   type: exec
@@ -36,20 +36,20 @@ signature:
       required: false
       description: "Preview changes without applying"
   help:
-    short: "Sync todos from Claude Code to agentctl"
+    short: "Sync todos from Claude Code to foxctl"
     long: |
-      Imports todos from Claude Code's native todo system into agentctl's
-      task management. This is the inbound sync direction (Claude → agentctl).
+      Imports todos from Claude Code's native todo system into foxctl's
+      task management. This is the inbound sync direction (Claude → foxctl).
 
       The skill:
-      - Maps todos to agentctl tasks by task ID tag (〔T:<id>〕)
+      - Maps todos to foxctl tasks by task ID tag (〔T:<id>〕)
       - Falls back to title matching for untagged todos
       - Creates new tasks for unmatched todos
       - Infers dependencies from todo ordering
       - Updates task status based on todo status
 
       Example:
-        agentctl run todo/sync_from_provider --input '{
+        foxctl run todo/sync_from_provider --input '{
           "provider": "claude",
           "workspace_id": "/path/to/project"
         }'

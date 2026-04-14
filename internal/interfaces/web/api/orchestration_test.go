@@ -20,15 +20,15 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
-	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
-	libsqlworkers "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/workers"
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
-	coreorchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
-	corespawn "github.com/jkatigb/agentctl/internal/v2/core/spawn"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
+	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
+	corespawn "github.com/joshka0/foxctl/internal/v2/core/spawn"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 func TestOrchestrationBoardGetHandler_ReturnsEnvelope(t *testing.T) {
@@ -151,7 +151,7 @@ func TestOrchestrationBoardCardGetHandler_IncludeRuntimeReturnsLiveState(t *test
 				"agent_id": "agent:worker-runtime-1",
 				"status":   "ok",
 				"state": map[string]any{
-					"agentctl": map[string]any{
+					"foxctl": map[string]any{
 						"status": "running",
 					},
 				},
@@ -246,7 +246,7 @@ func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T
 				"agent_id": agentID,
 				"status":   "ok",
 				"state": map[string]any{
-					"agentctl": map[string]any{
+					"foxctl": map[string]any{
 						"status": "running",
 						"agent":  agentID,
 					},
@@ -404,7 +404,7 @@ func TestOrchestrationBoardCardGetHandler_ReturnsGoRuntimeSummary(t *testing.T) 
 		ParentAgentID: "agent:dispatch-root",
 		RunID:         "run-runtime-go-001",
 		Status:        coreworker.StatusRunning,
-		RawState:      json.RawMessage(`{"agentctl":{"status":"running","agent":"agent:worker-runtime-go-1"}}`),
+		RawState:      json.RawMessage(`{"foxctl":{"status":"running","agent":"agent:worker-runtime-go-1"}}`),
 	}); err != nil {
 		t.Fatalf("upsert root worker: %v", err)
 	}
@@ -494,7 +494,7 @@ func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing
 		AgentID:     "agent:worker-runtime-go-tree-1",
 		RunID:       "run-runtime-go-tree-001",
 		Status:      coreworker.StatusRunning,
-		RawState:    json.RawMessage(`{"agentctl":{"status":"running","agent":"agent:worker-runtime-go-tree-1"}}`),
+		RawState:    json.RawMessage(`{"foxctl":{"status":"running","agent":"agent:worker-runtime-go-tree-1"}}`),
 	}); err != nil {
 		t.Fatalf("upsert root worker: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing
 		ParentWorkerID: "subprocess:agent:worker-runtime-go-tree-1",
 		RunID:          "run-runtime-go-tree-001",
 		Status:         coreworker.StatusCompleted,
-		RawState:       json.RawMessage(`{"agentctl":{"status":"completed","agent":"agent:child-runtime-go-tree-1"}}`),
+		RawState:       json.RawMessage(`{"foxctl":{"status":"completed","agent":"agent:child-runtime-go-tree-1"}}`),
 	}); err != nil {
 		t.Fatalf("upsert child worker: %v", err)
 	}
@@ -1495,7 +1495,7 @@ func TestOrchestrationRefreshHandler_ReconcilesJidoCompletedChildIntoReviewLane(
 				"agent_id": "agent:worker-1",
 				"status":   "ok",
 				"state": map[string]any{
-					"agentctl": map[string]any{
+					"foxctl": map[string]any{
 						"status": "completed",
 						"last_result": map[string]any{
 							"envelope": map[string]any{
@@ -1812,7 +1812,7 @@ type jsonrpcTestHandler func(method string, params json.RawMessage) (any, *jsonr
 func startOrchestrationJSONRPCServer(t *testing.T, handle jsonrpcTestHandler) (*http.Server, string) {
 	t.Helper()
 
-	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("agentctl-jido-refresh-%d.sock", time.Now().UnixNano()))
+	socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("foxctl-jido-refresh-%d.sock", time.Now().UnixNano()))
 	_ = os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {

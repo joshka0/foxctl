@@ -1,10 +1,10 @@
 ---
-description: Add a sticky note to agentctl todo without interrupting current work
+description: Add a sticky note to foxctl todo without interrupting current work
 argument-hint: <note text>
 ---
 # Sticky Note
 
-Add this note to the agentctl todo list so we don't forget, then continue with what you were doing.
+Add this note to the foxctl todo list so we don't forget, then continue with what you were doing.
 
 ## Note to capture
 
@@ -12,10 +12,10 @@ $ARGUMENTS
 
 ## Instructions
 
-1. Use the agentctl todo/manage skill to add a task:
+1. Use the foxctl todo/manage skill to add a task:
    - Title: `[NOTE] ` followed by a brief summary of the note
    - Description: The full note text, properly escaped for JSON
-   - Example: `agentctl run todo/manage --input '{"operation":"add","add":{"title":"[NOTE] Brief summary here","description":"Full note details here"}}'`
+   - Example: `foxctl run todo/manage --input '{"operation":"add","add":{"title":"[NOTE] Brief summary here","description":"Full note details here"}}'`
 
 2. Briefly confirm the note was added (one short line like "Added note: ...")
 

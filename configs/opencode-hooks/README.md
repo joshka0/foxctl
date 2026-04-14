@@ -1,12 +1,12 @@
-# agentctl OpenCode Plugin
+# foxctl OpenCode Plugin
 
-OpenCode plugin for integrating agentctl capabilities.
+OpenCode plugin for integrating foxctl capabilities.
 
 ## Installation
 
 ```bash
 # Option 1: Copy to project
-cp -r configs/opencode-hooks .opencode/plugin/agentctl
+cp -r configs/opencode-hooks .opencode/plugin/foxctl
 
 # Option 2: Add to opencode.json
 {
@@ -47,7 +47,7 @@ This runs before every AI turn. Use for:
 
 ```typescript
 tool: {
-  "agentctl-memory": tool({
+  "foxctl-memory": tool({
     description: "Search memories",
     args: { query: z.string() },
     async execute({ query }) {
@@ -68,14 +68,14 @@ AI calls these explicitly. Use for:
 
 | Tool | Description |
 |------|-------------|
-| `agentctl-memory` | Query gotchas, decisions, patterns |
-| `agentctl-search` | Semantic vector search (format=`tree` for directory tree) |
-| `agentctl-inbox` | Check overseer messages |
-| `agentctl-symbols` | Get file structure |
-| `agentctl-task` | Get active task |
-| `agentctl-counsel` | Multi-perspective code analysis with LLM review |
-| `agentctl-context` | Quick code context gathering (no LLM) |
-| `agentctl-ripgrep` | Search code and return full function bodies |
+| `foxctl-memory` | Query gotchas, decisions, patterns |
+| `foxctl-search` | Semantic vector search (format=`tree` for directory tree) |
+| `foxctl-inbox` | Check overseer messages |
+| `foxctl-symbols` | Get file structure |
+| `foxctl-task` | Get active task |
+| `foxctl-counsel` | Multi-perspective code analysis with LLM review |
+| `foxctl-context` | Quick code context gathering (no LLM) |
+| `foxctl-ripgrep` | Search code and return full function bodies |
 
 ### Slash Commands
 
@@ -142,7 +142,7 @@ Note: todo continuation runs only when an anchor goal is set (via `/anchor`) or 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AGENTCTL_TASK_GUARD_MODE` | `auto` | Set to `strict` to require tasks |
-| `AGENTCTL_HOME` | `~/.agentctl` | Storage root |
+| `AGENTCTL_HOME` | `~/.foxctl` | Storage root |
 | `AGENTCTL_OPENCODE_IDLE_CAPTURE_MS` | `60000` | Min interval between idle captures (0 disables) |
 | `AGENTCTL_OPENCODE_IDLE_FLUSH_MS` | `300000` | Min interval between embedding flushes (0 disables) |
 | `AGENTCTL_OPENCODE_IDLE_PLAN_SYNC_MS` | `60000` | Min interval between plan sync runs (0 disables) |
@@ -166,7 +166,7 @@ bun test
 configs/opencode-hooks/
 ├── index.ts           # Main plugin (custom tools + hooks)
 ├── lib/
-│   └── agentctl.ts    # CLI wrapper utilities
+│   └── foxctl.ts    # CLI wrapper utilities
 ├── HOOK_ANALYSIS.md   # Platform comparison research
 └── README.md          # This file
 ```

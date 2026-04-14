@@ -7,16 +7,16 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: agentctl
-  namespace: agentctl
+  name: foxctl
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: ingress
   annotations:
     # Session affinity via cookie - routes repeat WebSocket connections
     # to the same pod, avoiding consolews session recreation.
     nginx.ingress.kubernetes.io/affinity: "cookie"
-    nginx.ingress.kubernetes.io/session-cookie-name: "agentctl-affinity"
+    nginx.ingress.kubernetes.io/session-cookie-name: "foxctl-affinity"
     nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
     nginx.ingress.kubernetes.io/session-cookie-max-age: "3600"
     # WebSocket support
@@ -36,6 +36,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: agentctl
+            name: foxctl
             port:
               number: 8080

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage"
-	memorystore "github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/storage"
+	memorystore "github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
 )
 
 func TestSessionStoreRecallProvider_EnrichesTimeline(t *testing.T) {
@@ -37,10 +37,10 @@ func TestSessionStoreRecallProvider_EnrichesTimeline(t *testing.T) {
 	sessionRecord, err := sessionStore.Save(ctx, sessions.Session{
 		ID:            "sess-jido-1",
 		WorkspacePath: workspacePath,
-		ProjectName:   "agentctl",
+		ProjectName:   "foxctl",
 		GitBranch:     "feat/jido",
-		Summary:       "Wired Jido orchestration into agentctl runtime flows.",
-		Decisions:     []string{"Keep agentctl as the semantic tool layer."},
+		Summary:       "Wired Jido orchestration into foxctl runtime flows.",
+		Decisions:     []string{"Keep foxctl as the semantic tool layer."},
 		Gotchas:       []string{"Runtime child state must reconcile back into the board."},
 		KeyFiles:      []string{"internal/v2/adapters/jido/orchestration_reconciler.go"},
 		StartedAt:     startedAt,
@@ -111,8 +111,8 @@ func TestSessionStoreRecallProvider_EnrichesTimeline(t *testing.T) {
 			Type:      "decision",
 			Workspace: workspacePath,
 			SessionID: sessionRecord.ID,
-			Summary:   "Use Jido for orchestration and keep agentctl authoritative for tool semantics.",
-			Result:    []byte(`{"summary":"Use Jido for orchestration and keep agentctl authoritative for tool semantics.","window_index":1}`),
+			Summary:   "Use Jido for orchestration and keep foxctl authoritative for tool semantics.",
+			Result:    []byte(`{"summary":"Use Jido for orchestration and keep foxctl authoritative for tool semantics.","window_index":1}`),
 		},
 		{
 			Name:      "learning:gotcha:jido:1",
@@ -135,7 +135,7 @@ func TestSessionStoreRecallProvider_EnrichesTimeline(t *testing.T) {
 	}
 
 	matches, err := provider.RecallSessions(ctx, SessionRecallRequest{
-		Query:                 "Jido orchestration into agentctl runtime",
+		Query:                 "Jido orchestration into foxctl runtime",
 		Workspace:             workspacePath,
 		Limit:                 1,
 		MinSimilarity:         0.2,
@@ -157,7 +157,7 @@ func TestSessionStoreRecallProvider_EnrichesTimeline(t *testing.T) {
 	if !strings.Contains(strings.Join(match.TimelineSummaryLines, "\n"), "kanban state") {
 		t.Fatalf("timeline summary lines=%v want kanban state detail", match.TimelineSummaryLines)
 	}
-	if len(match.TimelineDecisions) == 0 || !strings.Contains(match.TimelineDecisions[0], "agentctl authoritative") {
+	if len(match.TimelineDecisions) == 0 || !strings.Contains(match.TimelineDecisions[0], "foxctl authoritative") {
 		t.Fatalf("timeline decisions=%v want enriched decision", match.TimelineDecisions)
 	}
 	if len(match.TimelineGotchas) == 0 || !strings.Contains(match.TimelineGotchas[0], "terminal outcomes") {

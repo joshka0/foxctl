@@ -1,13 +1,13 @@
 Great — below is a **minimal, portable `hooks.yaml` schema** + a **single Claude Code adapter script interface** that:
 
-* works for **CC + OpenCode + agentctl runtime**
+* works for **CC + OpenCode + foxctl runtime**
 * matches on **platform tool names** (`Edit`, `Write`, …) *and/or* **canonical tool names** (`edit.apply_patch`, `fs.read_file`, …)
 * centralizes behavior in **hook skills + dispatcher**
 * keeps adapters *thin*
 
 ---
 
-## 1) `hooks.yaml` minimal schema (portable across CC/OC/agentctl)
+## 1) `hooks.yaml` minimal schema (portable across CC/OC/foxctl)
 
 ### Schema (v1, minimal)
 
@@ -27,7 +27,7 @@ hooks:
     match:
       # Match on platform tool names (Claude/OpenCode): Edit/Write/Read/Bash/Grep/Glob/TodoWrite…
       tool_name: "^(Edit|Write|MultiEdit|NotebookEdit)$"
-      # Match on canonical tool names (agentctl runtime): edit.*, fs.*, code.*
+      # Match on canonical tool names (foxctl runtime): edit.*, fs.*, code.*
       tool_canonical: "^edit\\."
       # Optional coarse class (recommended):
       tool_kind: "write"  # read|write|exec|search|any
@@ -108,12 +108,12 @@ That’s enough to cover your current CC hooks + OC plugin behavior.
 One script that Claude calls for all hook events. It:
 
 1. **Normalizes Claude payload → `hook.Input`**
-2. Calls `agentctl run hooks/dispatch`
+2. Calls `foxctl run hooks/dispatch`
 3. **Translates `hook.Output` → Claude hook response**
 
 ### Interface
 
-* File: `configs/hooks/claude/agentctl-hook.sh`
+* File: `configs/hooks/claude/foxctl-hook.sh`
 * Called with `--event <ClaudeEvent>` (e.g., `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`)
 * Reads JSON payload from stdin
 * Outputs JSON Claude understands
@@ -124,17 +124,17 @@ One script that Claude calls for all hook events. It:
 #!/usr/bin/env bash
 set -euo pipefail
 
-# configs/hooks/claude/agentctl-hook.sh
+# configs/hooks/claude/foxctl-hook.sh
 #
 # Usage:
-#   agentctl-hook.sh --event PreToolUse
-#   agentctl-hook.sh --event PostToolUse
-#   agentctl-hook.sh --event UserPromptSubmit
-#   agentctl-hook.sh --event SessionStart
-#   agentctl-hook.sh --event Stop
+#   foxctl-hook.sh --event PreToolUse
+#   foxctl-hook.sh --event PostToolUse
+#   foxctl-hook.sh --event UserPromptSubmit
+#   foxctl-hook.sh --event SessionStart
+#   foxctl-hook.sh --event Stop
 #
 # Reads Claude hook payload JSON on stdin.
-# Calls: agentctl run hooks/dispatch
+# Calls: foxctl run hooks/dispatch
 # Emits Claude-compatible hook output JSON.
 
 EVENT=""
@@ -150,7 +150,7 @@ if [[ -z "${EVENT}" ]]; then
   exit 0
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 WORKSPACE_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 PAYLOAD="$(cat)"
 
@@ -330,7 +330,7 @@ The key is: **match everything**, let hooks.yaml decide what applies.
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/agentctl-hook.sh --event SessionStart",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/foxctl-hook.sh --event SessionStart",
             "timeout": 8
           }
         ]
@@ -342,7 +342,7 @@ The key is: **match everything**, let hooks.yaml decide what applies.
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/agentctl-hook.sh --event UserPromptSubmit",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/foxctl-hook.sh --event UserPromptSubmit",
             "timeout": 5
           }
         ]
@@ -354,7 +354,7 @@ The key is: **match everything**, let hooks.yaml decide what applies.
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/agentctl-hook.sh --event PreToolUse",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/foxctl-hook.sh --event PreToolUse",
             "timeout": 5
           }
         ]
@@ -366,7 +366,7 @@ The key is: **match everything**, let hooks.yaml decide what applies.
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/agentctl-hook.sh --event PostToolUse",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/foxctl-hook.sh --event PostToolUse",
             "timeout": 10
           }
         ]
@@ -378,7 +378,7 @@ The key is: **match everything**, let hooks.yaml decide what applies.
         "hooks": [
           {
             "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/agentctl-hook.sh --event Stop",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/foxctl-hook.sh --event Stop",
             "timeout": 20
           }
         ]
@@ -402,7 +402,7 @@ To make matchers portable, your dispatcher should compute `tool_kind` like:
   * Bash → `exec`
   * TodoWrite → `write` or `plan` (your call; I’d use `plan`)
 
-* agentctl canonical tools:
+* foxctl canonical tools:
 
   * `fs.*` → read
   * `edit.*` → write

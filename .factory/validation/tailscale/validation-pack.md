@@ -13,7 +13,7 @@ These assertions require a real Tailscale tailnet and cannot be validated in loc
 | TS_AUTHKEY | Tailscale auth key with `--ephemeral` flag. Generate: `tailscale authkeys create --ephemeral` |
 | Another tailnet device | Laptop/phone on same tailnet for cross-device testing |
 | `curl` with TLS | Standard curl (any version with HTTPS support) |
-| Built binary | `CGO_ENABLED=0 go build -o bin/agentctl ./cmd/agentctl/` |
+| Built binary | `CGO_ENABLED=0 go build -o bin/foxctl ./cmd/foxctl/` |
 
 ## Environment Setup
 
@@ -38,7 +38,7 @@ tmux -V  # expected: 3.6a or later
 
 ```bash
 # Step 1: Start gateway in Tailscale mode
-bin/agentctl gateway --ts-authkey "$TS_AUTHKEY" --hostname test-validation &
+bin/foxctl gateway --ts-authkey "$TS_AUTHKEY" --hostname test-validation &
 GATEWAY_PID=$!
 sleep 10  # Wait for tsnet connection + TLS cert provisioning
 
@@ -88,7 +88,7 @@ wait $GATEWAY_PID 2>/dev/null
 
 ```bash
 # Step 1: Start gateway
-bin/agentctl gateway --ts-authkey "$TS_AUTHKEY" --hostname test-validation &
+bin/foxctl gateway --ts-authkey "$TS_AUTHKEY" --hostname test-validation &
 GATEWAY_PID=$!
 sleep 10
 
@@ -139,7 +139,7 @@ wait $GATEWAY_PID 2>/dev/null
 
 ```bash
 # Step 1: Start gateway in Tailscale mode (NOT --dev)
-bin/agentctl gateway --ts-authkey "$TS_AUTHKEY" --hostname test-validation &
+bin/foxctl gateway --ts-authkey "$TS_AUTHKEY" --hostname test-validation &
 GATEWAY_PID=$!
 sleep 10
 
@@ -148,7 +148,7 @@ curl -sf http://localhost:8765/healthz 2>&1
 # Expected: connection refused
 
 # Step 3: Verify no listener on public interfaces
-lsof -i :443 -i :80 -i :8765 | grep agentctl || echo "No public listeners found"
+lsof -i :443 -i :80 -i :8765 | grep foxctl || echo "No public listeners found"
 
 # Step 4: Verify gateway IS accessible from another tailnet device via the FQDN
 curl -sf "https://test-validation.<your-tailnet>.ts.net/healthz"
@@ -173,7 +173,7 @@ wait $GATEWAY_PID 2>/dev/null
 | Step | Expected |
 |------|----------|
 | Step 2 | `curl: (7) Failed to connect to localhost port 8765: Connection refused` |
-| Step 3 | No agentctl listeners on public interfaces |
+| Step 3 | No foxctl listeners on public interfaces |
 | Step 4 | 200 via Tailscale IP |
 | Step 5 | 200 from another tailnet device |
 | Step 6 | Connection failure from outside tailnet |
@@ -202,10 +202,10 @@ set -euo pipefail
 export TS_AUTHKEY="${TS_AUTHKEY:?Set TS_AUTHKEY}"
 
 # Build
-CGO_ENABLED=0 go build -o bin/agentctl ./cmd/agentctl/
+CGO_ENABLED=0 go build -o bin/foxctl ./cmd/foxctl/
 
 # Start gateway
-bin/agentctl gateway --ts-authkey "$TS_AUTHKEY" --hostname test-validation &
+bin/foxctl gateway --ts-authkey "$TS_AUTHKEY" --hostname test-validation &
 GPID=$!
 sleep 15
 

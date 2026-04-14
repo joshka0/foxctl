@@ -1,6 +1,6 @@
-# agentctl Viewer Applications
+# foxctl Viewer Applications
 
-agentctl includes TypeScript viewer applications for monitoring agents, activity,
+foxctl includes TypeScript viewer applications for monitoring agents, activity,
 mailbox/blackboard state, and companion conversations.
 
 ## Current Packages
@@ -13,14 +13,14 @@ mailbox/blackboard state, and companion conversations.
 
 ```
 GUI Agent (Vite :5174) ─┐
-TUI                     ├──> agentctl API server (:8090)
+TUI                     ├──> foxctl API server (:8090)
 CLI                     ┘
 ```
 
 The GUI and TUI both consume backend APIs served by:
 
 ```bash
-agentctl web serve --dev-cors
+foxctl web serve --dev-cors
 ```
 
 ## Quick Start

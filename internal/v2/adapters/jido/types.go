@@ -23,7 +23,7 @@ const (
 )
 
 const (
-	DefaultSignalSource = "/agentctl/v2"
+	DefaultSignalSource = "/foxctl/v2"
 	DefaultAskSignal    = "agent.ask"
 )
 

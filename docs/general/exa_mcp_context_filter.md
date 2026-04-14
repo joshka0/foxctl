@@ -1,11 +1,11 @@
 # Exa MCP + context/filter Workflow
 
-This doc shows how to wire the Exa MCP server into `agentctl` and feed its
+This doc shows how to wire the Exa MCP server into `foxctl` and feed its
 results into the `context/filter` skill.
 
 It assumes you:
 
-- Have `agentctl` checked out and built.
+- Have `foxctl` checked out and built.
 - Have valid API keys:
   - `EXA_API_KEY` for Exa MCP.
   - An LLM key for `context/filter` (e.g., `GROQ_API_KEY`, `OPENAI_API_KEY`,
@@ -18,7 +18,7 @@ It assumes you:
 From the repo root:
 
 ```bash
-make build        # builds ./agentctl
+make build        # builds ./foxctl
 make skills-build # builds skills into dist/skills/
 ```
 
@@ -39,7 +39,7 @@ The Exa MCP server is hosted at `https://mcp.exa.ai/mcp`.
    ```bash
    BRIDGE="$(pwd)/dist/skills/mcp_bridge/bin"
 
-   ./agentctl run mcp/install --input '{
+   ./foxctl run mcp/install --input '{
      "server_url": "https://mcp.exa.ai/mcp",
      "server_headers": {
        "Accept": "application/json, text/event-stream",
@@ -53,9 +53,9 @@ The Exa MCP server is hosted at `https://mcp.exa.ai/mcp`.
    This will:
    - Connect to the Exa MCP server.
    - Discover its tools.
-   - Generate one `agentctl` skill per tool under `./exa_skills/<tool-name>/`.
+   - Generate one `foxctl` skill per tool under `./exa_skills/<tool-name>/`.
 
-3. Point `agentctl` at the generated skills:
+3. Point `foxctl` at the generated skills:
 
    ```bash
    export AGENTCTL_SKILL_PATH="$(pwd)/exa_skills"
@@ -80,8 +80,8 @@ Example call:
 
 ```bash
 AGENTCTL_SKILL_PATH="$(pwd)/exa_skills" \
-  ./agentctl run search --input '{
-    "query": "agentctl CAS integrity failures",
+  ./foxctl run search --input '{
+    "query": "foxctl CAS integrity failures",
     "num_results": 10
   }' > exa_raw.json
 ```
@@ -89,7 +89,7 @@ AGENTCTL_SKILL_PATH="$(pwd)/exa_skills" \
 Notes:
 
 - The exact input schema comes from the generated `skill.yaml`.
-- The result will be an `agentctl` envelope; the payload will be under `.data`.
+- The result will be an `foxctl` envelope; the payload will be under `.data`.
 
 Inspect the result shape:
 
@@ -125,12 +125,12 @@ feed it into `context/filter`.
 
    # Use jq -Rs to safely embed file contents as a JSON string
    jq -Rs '{
-     prompt: "Explain how agentctl handles CAS integrity failures.",
+     prompt: "Explain how foxctl handles CAS integrity failures.",
      scope: "code",
      source: { text: . },
      budget: { target_tokens: 2000, max_chunks: 16 },
      llm: { provider: "groq", model: "llama-3.3-70b-versatile" }
-   }' exa_text.txt | ./agentctl run context/filter --input-file -
+   }' exa_text.txt | ./foxctl run context/filter --input-file -
    ```
 
 3. The `context/filter` envelope will contain:
@@ -144,7 +144,7 @@ Use `data.chunks` as the retrieval context for downstream agents or tools.
 
 ## 5. Piping data directly into `context/filter`
 
-`agentctl run` already supports stdin-friendly patterns:
+`foxctl run` already supports stdin-friendly patterns:
 
 - `--input-file -` — read **raw stdin** as the JSON input to a skill.
 - `--input stdin` — read an **envelope** from stdin and pass its `.data` field
@@ -166,7 +166,7 @@ some-command-producing-text \
       budget: { target_tokens: 2000, max_chunks: 16 },
       llm: { provider: "groq", model: "llama-3.3-70b-versatile" }
     }' \
-  | ./agentctl run context/filter --input-file -
+  | ./foxctl run context/filter --input-file -
 ```
 
 Notes:
@@ -181,8 +181,8 @@ valid `context/filter` input object, you can chain runs directly using
 `--input stdin`:
 
 ```bash
-./agentctl run some/producer --input '{ ... }' \
-  | ./agentctl run context/filter --input stdin
+./foxctl run some/producer --input '{ ... }' \
+  | ./foxctl run context/filter --input stdin
 ```
 
 In this pattern:

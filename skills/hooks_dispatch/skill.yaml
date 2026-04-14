@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/dispatch
@@ -70,7 +70,7 @@ signature:
       properties:
         name:
           type: string
-          description: "Provider name: claude-code, opencode, agentctl"
+          description: "Provider name: claude-code, opencode, foxctl"
         event:
           type: string
           description: "Current event name"
@@ -84,7 +84,7 @@ signature:
     short: "Dispatch hooks from hooks.yaml configuration."
     long: |
       The central hook dispatcher that:
-      1. Loads hooks.yaml from workspace (.agentctl/hooks.yaml) and global (~/.agentctl/hooks.yaml)
+      1. Loads hooks.yaml from workspace (.foxctl/hooks.yaml) and global (~/.foxctl/hooks.yaml)
       2. Matches hooks by event + tool_name/tool_canonical/tool_kind
       3. Runs matched hook skills in order
       4. Merges outputs using deterministic rules (block wins, context concatenated, etc.)
@@ -100,10 +100,10 @@ signature:
       This skill is called by platform adapters (CC, OC) to centralize hook behavior.
 
       Example:
-        agentctl run hooks/dispatch --input '{"event":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
+        foxctl run hooks/dispatch --input '{"event":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
 
       With provider capabilities:
-        agentctl run hooks/dispatch --input '{
+        foxctl run hooks/dispatch --input '{
           "event": "UserPromptSubmit",
           "session_id": "abc123",
           "provider": {"name": "claude-code", "can_inject_context": true}

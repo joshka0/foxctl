@@ -9,10 +9,10 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/zellijbridge"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	terminalruntime "github.com/joshka0/foxctl/internal/runtime/terminal"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/tmuxbridge"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/zellijbridge"
 )
 
 func TestInheritChildBinding(t *testing.T) {
@@ -55,9 +55,9 @@ func TestCreateWatchPaneTmux(t *testing.T) {
 		{key: "tmux new-session -d -P -F #{pane_id} -s collab -c /repo " + tmuxDefaultShell(), stdout: "%71\n"},
 		{key: "tmux set-option -p -t %71 @name child-a"},
 		{key: "tmux select-layout -t collab tiled"},
-		{key: "tmux respawn-pane -k -t %71 -c /repo env AGENTCTL_PARTICIPANT_ID=tmux:collab:%71 AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=collab AGENTCTL_MUX_PANE_ID=%71 AGENTCTL_PARENT_PARTICIPANT_ID=parent-a AGENTCTL_PARENT_AGENT_ID=agent:parent-1 agentctl agent watch agent-123"},
-		{key: "tmux display-message -t %71 -p " + tmuxListFormat, stdout: "%71" + tmuxFieldSep + "collab" + tmuxFieldSep + "0" + tmuxFieldSep + "0" + tmuxFieldSep + "main" + tmuxFieldSep + "111" + tmuxFieldSep + "80" + tmuxFieldSep + "24" + tmuxFieldSep + "child-a" + tmuxFieldSep + "/repo" + tmuxFieldSep + "agentctl" + tmuxFieldSep + "1" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + "\n"},
-		{key: "tmux display-message -t %71 -p " + tmuxListFormat, stdout: "%71" + tmuxFieldSep + "collab" + tmuxFieldSep + "0" + tmuxFieldSep + "0" + tmuxFieldSep + "main" + tmuxFieldSep + "111" + tmuxFieldSep + "80" + tmuxFieldSep + "24" + tmuxFieldSep + "child-a" + tmuxFieldSep + "/repo" + tmuxFieldSep + "agentctl" + tmuxFieldSep + "1" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + "\n"},
+		{key: "tmux respawn-pane -k -t %71 -c /repo env AGENTCTL_PARTICIPANT_ID=tmux:collab:%71 AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=collab AGENTCTL_MUX_PANE_ID=%71 AGENTCTL_PARENT_PARTICIPANT_ID=parent-a AGENTCTL_PARENT_AGENT_ID=agent:parent-1 foxctl agent watch agent-123"},
+		{key: "tmux display-message -t %71 -p " + tmuxListFormat, stdout: "%71" + tmuxFieldSep + "collab" + tmuxFieldSep + "0" + tmuxFieldSep + "0" + tmuxFieldSep + "main" + tmuxFieldSep + "111" + tmuxFieldSep + "80" + tmuxFieldSep + "24" + tmuxFieldSep + "child-a" + tmuxFieldSep + "/repo" + tmuxFieldSep + "foxctl" + tmuxFieldSep + "1" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + "\n"},
+		{key: "tmux display-message -t %71 -p " + tmuxListFormat, stdout: "%71" + tmuxFieldSep + "collab" + tmuxFieldSep + "0" + tmuxFieldSep + "0" + tmuxFieldSep + "main" + tmuxFieldSep + "111" + tmuxFieldSep + "80" + tmuxFieldSep + "24" + tmuxFieldSep + "child-a" + tmuxFieldSep + "/repo" + tmuxFieldSep + "foxctl" + tmuxFieldSep + "1" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + tmuxFieldSep + "" + "\n"},
 	}}
 	newTmuxClient = func() *tmuxbridge.Client { return tmuxbridge.NewWithRunner(runner, map[string]string{}) }
 
@@ -67,7 +67,7 @@ func TestCreateWatchPaneTmux(t *testing.T) {
 		ParentParticipantID: "parent-a",
 		ParentAgentID:       "agent:parent-1",
 		RoomAccess:          "none",
-	}, "/repo", "child-a", "agentctl agent watch agent-123")
+	}, "/repo", "child-a", "foxctl agent watch agent-123")
 	if err != nil {
 		t.Fatalf("CreateWatchPane() error = %v", err)
 	}
@@ -94,7 +94,7 @@ func TestCreateWatchPaneZellij(t *testing.T) {
 		ParentParticipantID: "lead-a",
 		ParentAgentID:       "agent:parent-1",
 		RoomAccess:          "none",
-	}, "/repo", "reviewer-a1b2", "agentctl agent watch agent-123")
+	}, "/repo", "reviewer-a1b2", "foxctl agent watch agent-123")
 	if err != nil {
 		t.Fatalf("CreateWatchPane() error = %v", err)
 	}

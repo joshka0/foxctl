@@ -13,11 +13,11 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mcputil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/mcputil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 const command = "mcp/bridge"
@@ -138,7 +138,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 	}()
 
-	if err := mcputil.Initialize(ctx, mcpClient, "agentctl-mcp-bridge", "1.0.0"); err != nil {
+	if err := mcputil.Initialize(ctx, mcpClient, "foxctl-mcp-bridge", "1.0.0"); err != nil {
 		return skillerr.WrapRuntime("mcp initialization failed", err)
 	}
 

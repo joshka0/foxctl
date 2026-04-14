@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/enrichers"
-	"github.com/jkatigb/agentctl/internal/v2/testkit/fakes"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/runtime/enrichers"
+	"github.com/joshka0/foxctl/internal/v2/testkit/fakes"
 )
 
 func TestEnricherQueue_IdempotentByArtifactVersion(t *testing.T) {

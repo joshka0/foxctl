@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
+	tooling "github.com/joshka0/foxctl/internal/tooling"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	"github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
+	"github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 type repoInlineMode string

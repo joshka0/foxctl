@@ -37,52 +37,52 @@ var explorerSkills = []SkillInfo{
 	{
 		Name:        "code/semantic_search",
 		Description: "Search code using vector embeddings for semantic similarity",
-		Example:     `agentctl run code/semantic_search --input '{"query":"auth middleware"}'`,
+		Example:     `foxctl run code/semantic_search --input '{"query":"auth middleware"}'`,
 	},
 	{
 		Name:        "code/snippet_extract",
 		Description: "Extract code snippets from candidate files",
-		Example:     `agentctl run code/snippet_extract --input '{"question":"Where is auth enforced?","candidates":[{"path":"..."}]}'`,
+		Example:     `foxctl run code/snippet_extract --input '{"question":"Where is auth enforced?","candidates":[{"path":"..."}]}'`,
 	},
 	{
 		Name:        "code/smart_search",
 		Description: "Smart code search with auto-candidate generation",
-		Example:     `agentctl run code/smart_search --input '{"question":"Where is auth enforced?"}'`,
+		Example:     `foxctl run code/smart_search --input '{"question":"Where is auth enforced?"}'`,
 	},
 	{
 		Name:        "code/context_ripgrep",
 		Description: "Search and return full function bodies containing matches",
-		Example:     `agentctl run code/context_ripgrep --input '{"pattern":"handleAuth","path":"."}'`,
+		Example:     `foxctl run code/context_ripgrep --input '{"pattern":"handleAuth","path":"."}'`,
 	},
 	{
 		Name:        "code/symbols",
 		Description: "Extract functions, types, and variables from files",
-		Example:     `agentctl run code/symbols --input '{"path":"internal/auth"}'`,
+		Example:     `foxctl run code/symbols --input '{"path":"internal/auth"}'`,
 	},
 	{
 		Name:        "fs/read",
 		Description: "Read file contents with line ranges",
-		Example:     `agentctl run fs/read --input '{"path":"main.go"}'`,
+		Example:     `foxctl run fs/read --input '{"path":"main.go"}'`,
 	},
 	{
 		Name:        "fs/find",
 		Description: "Find files by glob pattern",
-		Example:     `agentctl run fs/find --input '{"pattern":"**/*.go"}'`,
+		Example:     `foxctl run fs/find --input '{"pattern":"**/*.go"}'`,
 	},
 	{
 		Name:        "text/ripgrep",
 		Description: "Fast regex search across files",
-		Example:     `agentctl run text/ripgrep --input '{"pattern":"TODO","path":"."}'`,
+		Example:     `foxctl run text/ripgrep --input '{"pattern":"TODO","path":"."}'`,
 	},
 	{
 		Name:        "session/recall",
 		Description: "Search past session context",
-		Example:     `agentctl run session/recall --input '{"query":"auth implementation"}'`,
+		Example:     `foxctl run session/recall --input '{"query":"auth implementation"}'`,
 	},
 	{
 		Name:        "memory/query",
 		Description: "Query stored memories and gotchas",
-		Example:     `agentctl run memory/query --input '{"query":"database gotchas"}'`,
+		Example:     `foxctl run memory/query --input '{"query":"database gotchas"}'`,
 	},
 }
 
@@ -91,27 +91,27 @@ var reviewerSkills = []SkillInfo{
 	{
 		Name:        "code/complexity",
 		Description: "Analyze cyclomatic complexity and hotspots",
-		Example:     `agentctl run code/complexity --input '{"path":"internal/auth"}'`,
+		Example:     `foxctl run code/complexity --input '{"path":"internal/auth"}'`,
 	},
 	{
 		Name:        "code/security",
 		Description: "Scan for security vulnerabilities",
-		Example:     `agentctl run code/security --input '{"path":"."}'`,
+		Example:     `foxctl run code/security --input '{"path":"."}'`,
 	},
 	{
 		Name:        "code/imports",
 		Description: "Analyze import dependencies",
-		Example:     `agentctl run code/imports --input '{"path":"internal/auth"}'`,
+		Example:     `foxctl run code/imports --input '{"path":"internal/auth"}'`,
 	},
 	{
 		Name:        "lsp/gopls",
 		Description: "Go LSP: definitions, references, hover",
-		Example:     `agentctl run lsp/gopls --input '{"method":"definition","path":"main.go","line":10,"column":5}'`,
+		Example:     `foxctl run lsp/gopls --input '{"method":"definition","path":"main.go","line":10,"column":5}'`,
 	},
 	{
 		Name:        "git/status",
 		Description: "Show git working tree status",
-		Example:     `agentctl run git/status --input '{}'`,
+		Example:     `foxctl run git/status --input '{}'`,
 	},
 }
 
@@ -120,12 +120,12 @@ var implementerSkills = []SkillInfo{
 	{
 		Name:        "test/run",
 		Description: "Run tests with coverage",
-		Example:     `agentctl run test/run --input '{"path":"./..."}'`,
+		Example:     `foxctl run test/run --input '{"path":"./..."}'`,
 	},
 	{
 		Name:        "code/smart_write",
 		Description: "Symbol-based editing with diff preview",
-		Example:     `agentctl run code/smart_write --input '{"path":"main.go","symbol":"handleAuth","content":"..."}'`,
+		Example:     `foxctl run code/smart_write --input '{"path":"main.go","symbol":"handleAuth","content":"..."}'`,
 	},
 }
 
@@ -133,7 +133,7 @@ var implementerSkills = []SkillInfo{
 var explorerRules = []string{
 	"Do not propose code changes - your role is investigation only",
 	"Keep output focused: 3-8 key files, 3-10 key symbols",
-	"Use agentctl skills for retrieval, not raw grep/cat",
+	"Use foxctl skills for retrieval, not raw grep/cat",
 	"Include file:line references in findings",
 }
 
@@ -147,7 +147,7 @@ var reviewerRules = []string{
 
 // implementerRules are the rules for the implementer profile.
 var implementerRules = []string{
-	"Use agentctl run test/run for testing (not raw go test)",
+	"Use foxctl run test/run for testing (not raw go test)",
 	"Keep diffs minimal and focused on the task",
 	"Verify changes compile before marking complete",
 }
@@ -182,7 +182,7 @@ func DefaultProfiles() map[Profile]ProfileConfig {
 		ProfileUnrestricted: {
 			Profile:       ProfileUnrestricted,
 			Title:         "Unrestricted",
-			Description:   "Full access to all agentctl skills",
+			Description:   "Full access to all foxctl skills",
 			AllowedSkills: nil, // nil means all skills allowed
 			Rules:         nil,
 		},

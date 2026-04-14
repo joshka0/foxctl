@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-This guide helps you diagnose and resolve common issues with agentctl.
+This guide helps you diagnose and resolve common issues with foxctl.
 
 ---
 
@@ -26,17 +26,17 @@ This guide helps you diagnose and resolve common issues with agentctl.
 ### Check Version and Environment
 
 ```bash
-# Check agentctl version
-agentctl version
+# Check foxctl version
+foxctl version
 
 # Check Go version (for building from source)
 go version
 
 # Check environment
-agentctl config show
+foxctl config show
 
 # Check logs (stderr output)
-agentctl run fs/ls --path . 2>debug.log
+foxctl run fs/ls --path . 2>debug.log
 ```
 
 ### Enable Verbose Logging
@@ -44,10 +44,10 @@ agentctl run fs/ls --path . 2>debug.log
 ```bash
 # Set log level to debug
 export AGENTCTL_LOG_LEVEL=debug
-agentctl run <skill> 2>debug.log
+foxctl run <skill> 2>debug.log
 
 # Or use config file
-cat > ~/.agentctl/config.yaml <<EOF
+cat > ~/.foxctl/config.yaml <<EOF
 log:
   level: debug
   format: json
@@ -74,30 +74,30 @@ EOF
 
 ## Installation Issues
 
-### Issue: `agentctl: command not found`
+### Issue: `foxctl: command not found`
 
 **Cause**: Binary not in PATH or not installed.
 
 **Solution**:
 ```bash
 # If built from source
-export PATH="$PATH:/path/to/agentctl/bin"
+export PATH="$PATH:/path/to/foxctl/bin"
 
 # Or install to a PATH directory
-sudo cp ./agentctl /usr/local/bin/
+sudo cp ./foxctl /usr/local/bin/
 
 # Verify installation
-which agentctl
-agentctl version
+which foxctl
+foxctl version
 ```
 
-### Issue: Permission denied when running agentctl
+### Issue: Permission denied when running foxctl
 
 **Cause**: Binary not executable.
 
 **Solution**:
 ```bash
-chmod +x ./agentctl
+chmod +x ./foxctl
 ```
 
 ---
@@ -110,7 +110,7 @@ chmod +x ./agentctl
 
 **Solution**:
 ```bash
-cd /path/to/agentctl
+cd /path/to/foxctl
 make build
 ```
 
@@ -127,7 +127,7 @@ make build
 
 ### Issue: Build fails with CGO errors
 
-**Cause**: CGO enabled, but agentctl requires pure Go.
+**Cause**: CGO enabled, but foxctl requires pure Go.
 
 **Solution**:
 ```bash
@@ -168,10 +168,10 @@ go test ./...
 **Solution**:
 ```bash
 # List installed skills
-agentctl skills list
+foxctl skills list
 
 # Install missing skill
-agentctl skills install --manifest ./dist/skills/<skill>/skill.yaml
+foxctl skills install --manifest ./dist/skills/<skill>/skill.yaml
 
 # Build skills from source
 make skills-build
@@ -184,15 +184,15 @@ make skills-build
 **Solution**:
 ```bash
 # Check current workspace
-agentctl config show | grep workspace
+foxctl config show | grep workspace
 
 # Use relative paths within workspace
-agentctl run fs/read --path ./src/main.go  # Good
-# Not: agentctl run fs/read --path /etc/passwd  # Bad
+foxctl run fs/read --path ./src/main.go  # Good
+# Not: foxctl run fs/read --path /etc/passwd  # Bad
 
 # Or move to repository root
 cd /path/to/project
-agentctl run fs/read --path ./README.md
+foxctl run fs/read --path ./README.md
 ```
 
 ### Issue: `ERUNTIME: skill execution failed`
@@ -202,15 +202,15 @@ agentctl run fs/read --path ./README.md
 **Solution**:
 ```bash
 # Check stderr for details
-agentctl run <skill> 2>error.log
+foxctl run <skill> 2>error.log
 cat error.log
 
 # Try with debug logging
 export AGENTCTL_LOG_LEVEL=debug
-agentctl run <skill>
+foxctl run <skill>
 
 # Check skill manifest for requirements
-agentctl skills describe <skill>
+foxctl skills describe <skill>
 ```
 
 ### Issue: WASI skill fails to run
@@ -223,7 +223,7 @@ agentctl skills describe <skill>
 make skills-build
 
 # Check skill distribution type
-agentctl skills describe <skill> | grep distribution
+foxctl skills describe <skill> | grep distribution
 
 # Try exec version if WASI fails
 # (check if exec version exists)
@@ -236,11 +236,11 @@ agentctl skills describe <skill> | grep distribution
 **Solution**:
 ```bash
 # Use jobs for long-running operations
-agentctl jobs submit <skill> --args '...'
-agentctl jobs tail <job-id>
+foxctl jobs submit <skill> --args '...'
+foxctl jobs tail <job-id>
 
 # Or increase timeout (if supported)
-agentctl run <skill> --timeout 10m
+foxctl run <skill> --timeout 10m
 ```
 
 ---
@@ -254,13 +254,13 @@ agentctl run <skill> --timeout 10m
 **Solution**:
 ```bash
 # List all jobs
-agentctl jobs list
+foxctl jobs list
 
 # List recent jobs
-agentctl jobs list --status all --limit 10
+foxctl jobs list --status all --limit 10
 
 # Check if job was deleted
-agentctl jobs list --include-deleted
+foxctl jobs list --include-deleted
 ```
 
 ### Issue: Job stuck in `queued` state
@@ -270,14 +270,14 @@ agentctl jobs list --include-deleted
 **Solution**:
 ```bash
 # Check job queue status
-agentctl jobs list --status queued
+foxctl jobs list --status queued
 
-# Restart agentctl (if running as daemon)
+# Restart foxctl (if running as daemon)
 # Or submit a simple test job
-agentctl jobs submit fs/ls --path .
+foxctl jobs submit fs/ls --path .
 
 # Check database for corruption
-sqlite3 ~/.agentctl/agentctl.db "SELECT * FROM jobs WHERE status='queued';"
+sqlite3 ~/.foxctl/foxctl.db "SELECT * FROM jobs WHERE status='queued';"
 ```
 
 ### Issue: Job stuck in `running` state after crash
@@ -287,10 +287,10 @@ sqlite3 ~/.agentctl/agentctl.db "SELECT * FROM jobs WHERE status='queued';"
 **Solution**:
 ```bash
 # Manually mark as error (if supported)
-agentctl jobs cancel <job-id>
+foxctl jobs cancel <job-id>
 
 # Or clean up via database (last resort)
-sqlite3 ~/.agentctl/agentctl.db "UPDATE jobs SET status='error' WHERE id='<job-id>';"
+sqlite3 ~/.foxctl/foxctl.db "UPDATE jobs SET status='error' WHERE id='<job-id>';"
 ```
 
 ### Issue: Job result not found
@@ -300,13 +300,13 @@ sqlite3 ~/.agentctl/agentctl.db "UPDATE jobs SET status='error' WHERE id='<job-i
 **Solution**:
 ```bash
 # Check job status first
-agentctl jobs get <job-id>
+foxctl jobs get <job-id>
 
 # If error, check stderr
-agentctl jobs get <job-id> --show-stderr
+foxctl jobs get <job-id> --show-stderr
 
 # If artifact missing, check CAS
-agentctl cas list | grep <digest>
+foxctl cas list | grep <digest>
 ```
 
 ---
@@ -320,10 +320,10 @@ agentctl cas list | grep <digest>
 **Solution**:
 ```bash
 # Cache is currently disabled
-agentctl run <skill> --cache off
+foxctl run <skill> --cache off
 
 # Check memory status
-agentctl memory stats
+foxctl memory stats
 ```
 
 ### Issue: `memory not found`
@@ -333,10 +333,10 @@ agentctl memory stats
 **Solution**:
 ```bash
 # List all memories
-agentctl memory list
+foxctl memory list
 
 # Search for memory
-agentctl memory search "keyword"
+foxctl memory search "keyword"
 
 # Check if memory was in auto-cache (24h TTL expired)
 # → Named memories are persistent; auto-cache is not
@@ -349,13 +349,13 @@ agentctl memory search "keyword"
 **Solution**:
 ```bash
 # List all memories (bypass search)
-agentctl memory list
+foxctl memory list
 
 # Check memory stats
-agentctl memory stats
+foxctl memory stats
 
 # Rebuild search index (if supported)
-agentctl memory reindex
+foxctl memory reindex
 ```
 
 ---
@@ -369,13 +369,13 @@ agentctl memory reindex
 **Solution**:
 ```bash
 # Delete corrupted artifact
-agentctl cas delete <digest> --force
+foxctl cas delete <digest> --force
 
 # Re-run operation to regenerate artifact
-agentctl run <skill> --cache off
+foxctl run <skill> --cache off
 
 # Check filesystem for corruption
-ls -lh ~/.agentctl/cas/sha256/<digest>
+ls -lh ~/.foxctl/cas/sha256/<digest>
 ```
 
 ### Issue: `ENOTFOUND: artifact not found`
@@ -385,13 +385,13 @@ ls -lh ~/.agentctl/cas/sha256/<digest>
 **Solution**:
 ```bash
 # Check if digest exists
-agentctl cas list | grep <digest>
+foxctl cas list | grep <digest>
 
 # Pin important artifacts to prevent GC
-agentctl cas pin <digest>
+foxctl cas pin <digest>
 
 # Re-run operation to recreate
-agentctl run <skill> --remember <name>
+foxctl run <skill> --remember <name>
 ```
 
 ### Issue: CAS storage growing too large
@@ -401,17 +401,17 @@ agentctl run <skill> --remember <name>
 **Solution**:
 ```bash
 # Check CAS usage
-du -sh ~/.agentctl/cas/
+du -sh ~/.foxctl/cas/
 
 # List unpinned artifacts
-agentctl cas list --unpinned
+foxctl cas list --unpinned
 
 # Run garbage collection (dry-run first)
-agentctl cas gc --older-than 168h --dry-run
-agentctl cas gc --older-than 168h --confirm
+foxctl cas gc --older-than 168h --dry-run
+foxctl cas gc --older-than 168h --confirm
 
 # Pin important artifacts before GC
-agentctl cas pin <digest>
+foxctl cas pin <digest>
 ```
 
 ---
@@ -425,16 +425,16 @@ agentctl cas pin <digest>
 **Solution**:
 ```bash
 # List imported specs
-agentctl openapi list
+foxctl openapi list
 
 # Import spec
-agentctl openapi import https://api.github.com/openapi.yaml --as github
+foxctl openapi import https://api.github.com/openapi.yaml --as github
 
 # Or use file path
-agentctl openapi import ./openapi.yaml --as myapi
+foxctl openapi import ./openapi.yaml --as myapi
 
 # Or use CAS digest
-agentctl openapi import sha256:<digest> --as myapi
+foxctl openapi import sha256:<digest> --as myapi
 ```
 
 ### Issue: `EOPENAPI: operationId not found`
@@ -444,10 +444,10 @@ agentctl openapi import sha256:<digest> --as myapi
 **Solution**:
 ```bash
 # List operations in spec
-agentctl openapi operations --spec memory:github
+foxctl openapi operations --spec memory:github
 
 # Search for operation
-agentctl openapi operations --spec memory:github | grep -i "list"
+foxctl openapi operations --spec memory:github | grep -i "list"
 
 # Check spec for correct operationId
 ```
@@ -459,7 +459,7 @@ agentctl openapi operations --spec memory:github | grep -i "list"
 **Solution**:
 ```bash
 # Check auth configuration
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec memory:github \
   --operationId listRepos \
   --auth '{"type":"bearer","token":"'$GITHUB_TOKEN'"}' \
@@ -469,7 +469,7 @@ agentctl run http/openapi \
 echo $GITHUB_TOKEN
 
 # Try different auth type (apiKey, basic, oauth2)
-agentctl run http/openapi \
+foxctl run http/openapi \
   --auth '{"type":"apiKey","name":"X-API-Key","value":"'$API_KEY'","in":"header"}'
 ```
 
@@ -480,13 +480,13 @@ agentctl run http/openapi \
 **Solution**:
 ```bash
 # Use retry with backoff
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec memory:github \
   --operationId listRepos \
   --retry '{"max_attempts":3,"backoff":"exponential"}'
 
 # Check rate limit headers in response
-agentctl run http/openapi ... | jq '.meta.response_headers'
+foxctl run http/openapi ... | jq '.meta.response_headers'
 
 # Wait before retrying or use different credentials
 ```
@@ -498,14 +498,14 @@ agentctl run http/openapi ... | jq '.meta.response_headers'
 **Solution**:
 ```bash
 # Check pagination strategy
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec memory:stripe \
   --operationId CustomerList \
   --paging '{"strategy":"cursor","max_pages":10}' \
   --dry-run
 
 # Try different strategies: link, cursor, offset
-agentctl run http/openapi \
+foxctl run http/openapi \
   --paging '{"strategy":"link","max_pages":5}'
 
 # Check if API supports pagination
@@ -523,14 +523,14 @@ agentctl run http/openapi \
 **Solution**:
 ```bash
 # Use jobs for large operations
-agentctl jobs submit text/grep --pattern "error" --path ./logs/
+foxctl jobs submit text/grep --pattern "error" --path ./logs/
 
 # Check if result is being artifactized (expected for large outputs)
 # → First run may be slow; subsequent runs use cache
 
 # Profile with debug logging
 export AGENTCTL_LOG_LEVEL=debug
-time agentctl run <skill>
+time foxctl run <skill>
 ```
 
 ### Issue: High memory usage
@@ -543,7 +543,7 @@ time agentctl run <skill>
 # (outputs >32 KB should go to CAS automatically)
 
 # Run garbage collection
-agentctl cas gc --older-than 24h --confirm
+foxctl cas gc --older-than 24h --confirm
 
 # Check for memory leaks (development only)
 go test -memprofile mem.prof ./...
@@ -556,15 +556,15 @@ go tool pprof mem.prof
 
 **Solution**:
 ```bash
-# Ensure only one agentctl instance modifies DB
+# Ensure only one foxctl instance modifies DB
 # SQLite has limited concurrency
 
 # Check for stale locks
-rm -f ~/.agentctl/agentctl.db-shm ~/.agentctl/agentctl.db-wal
+rm -f ~/.foxctl/foxctl.db-shm ~/.foxctl/foxctl.db-wal
 
 # If persistent, backup and recreate
-cp ~/.agentctl/agentctl.db ~/.agentctl/agentctl.db.bak
-sqlite3 ~/.agentctl/agentctl.db "VACUUM;"
+cp ~/.foxctl/foxctl.db ~/.foxctl/foxctl.db.bak
+sqlite3 ~/.foxctl/foxctl.db "VACUUM;"
 ```
 
 ---
@@ -578,14 +578,14 @@ sqlite3 ~/.agentctl/agentctl.db "VACUUM;"
 **Solution**:
 ```bash
 # Check database integrity
-sqlite3 ~/.agentctl/agentctl.db "PRAGMA integrity_check;"
+sqlite3 ~/.foxctl/foxctl.db "PRAGMA integrity_check;"
 
 # If corrupted, restore from backup (if available)
-cp ~/.agentctl/agentctl.db.bak ~/.agentctl/agentctl.db
+cp ~/.foxctl/foxctl.db.bak ~/.foxctl/foxctl.db
 
 # Or rebuild database (loses job history and memories)
-rm ~/.agentctl/agentctl.db
-agentctl config init  # Recreates database
+rm ~/.foxctl/foxctl.db
+foxctl config init  # Recreates database
 ```
 
 ### Issue: Migration failed
@@ -595,13 +595,13 @@ agentctl config init  # Recreates database
 **Solution**:
 ```bash
 # Check current schema version
-sqlite3 ~/.agentctl/agentctl.db "SELECT version FROM schema_migrations;"
+sqlite3 ~/.foxctl/foxctl.db "SELECT version FROM schema_migrations;"
 
 # Backup before manual migration
-cp ~/.agentctl/agentctl.db ~/.agentctl/agentctl.db.bak
+cp ~/.foxctl/foxctl.db ~/.foxctl/foxctl.db.bak
 
 # Re-run migration (if supported)
-agentctl migrate --force
+foxctl migrate --force
 ```
 
 ---
@@ -625,14 +625,14 @@ ulimit -a
 
 ### macOS
 
-**Issue**: "agentctl is damaged and can't be opened"
+**Issue**: "foxctl is damaged and can't be opened"
 
 **Cause**: Gatekeeper security policy.
 
 **Solution**:
 ```bash
 # Remove quarantine attribute
-xattr -d com.apple.quarantine ./agentctl
+xattr -d com.apple.quarantine ./foxctl
 
 # Or build from source instead of downloading binary
 make build
@@ -646,11 +646,11 @@ make build
 
 **Solution**:
 ```bash
-# Use forward slashes in agentctl (even on Windows)
-agentctl run fs/read --path ./src/main.go
+# Use forward slashes in foxctl (even on Windows)
+foxctl run fs/read --path ./src/main.go
 
 # Or use PowerShell escaping
-agentctl run fs/read --path .\src\main.go
+foxctl run fs/read --path .\src\main.go
 ```
 
 **Issue**: `CGO_ENABLED=0` not recognized
@@ -668,7 +668,7 @@ $env:CGO_ENABLED=0
 make build
 
 REM Or use Go directly
-go build ./cmd/agentctl
+go build ./cmd/foxctl
 ```
 
 ---
@@ -691,8 +691,8 @@ go build ./cmd/agentctl
 
 ### Community Support
 
-- **GitHub Issues**: [Report bugs](https://github.com/jkatigb/agentctl/issues)
-- **GitHub Discussions**: [Ask questions](https://github.com/jkatigb/agentctl/discussions)
+- **GitHub Issues**: [Report bugs](https://github.com/joshka0/foxctl/issues)
+- **GitHub Discussions**: [Ask questions](https://github.com/joshka0/foxctl/discussions)
 - **Contributing**: See [CONTRIBUTING.md](../CONTRIBUTING.md)
 
 ### Reporting Bugs
@@ -703,10 +703,10 @@ When opening an issue, include:
 # System info
 uname -a           # OS and kernel
 go version         # Go version
-agentctl version   # agentctl version
+foxctl version   # foxctl version
 
 # Reproduction
-agentctl run <skill> --input '{}' 2>error.log
+foxctl run <skill> --input '{}' 2>error.log
 
 # Relevant logs (redact secrets!)
 cat error.log
@@ -717,7 +717,7 @@ cat error.log
 ### Before Asking for Help
 
 1. **Check this troubleshooting guide**
-2. **Search existing issues**: [GitHub Issues](https://github.com/jkatigb/agentctl/issues)
+2. **Search existing issues**: [GitHub Issues](https://github.com/joshka0/foxctl/issues)
 3. **Enable debug logging**: `export AGENTCTL_LOG_LEVEL=debug`
 4. **Try a minimal reproduction**: Simplify to smallest failing case
 5. **Check recent changes**: Did it work before? What changed?
@@ -730,7 +730,7 @@ cat error.log
 
 ```bash
 export AGENTCTL_LOG_LEVEL=debug
-agentctl run <skill> 2>debug.log
+foxctl run <skill> 2>debug.log
 cat debug.log
 ```
 
@@ -738,18 +738,18 @@ cat debug.log
 
 ```bash
 # Pretty-print JSON envelope
-agentctl run fs/ls --path . | jq .
+foxctl run fs/ls --path . | jq .
 
 # Check envelope fields
-agentctl run fs/ls --path . | jq '.meta'
+foxctl run fs/ls --path . | jq '.meta'
 ```
 
 ### Test with Simple Skills
 
 ```bash
 # Test basic functionality
-agentctl run fs/ls --path .
-agentctl run wasi/echo --message "hello"
+foxctl run fs/ls --path .
+foxctl run wasi/echo --message "hello"
 
 # If these fail, issue is in core, not skills
 ```
@@ -757,27 +757,27 @@ agentctl run wasi/echo --message "hello"
 ### Check Filesystem Permissions
 
 ```bash
-# Check agentctl directories
-ls -la ~/.agentctl/
-ls -la ~/.agentctl/cas/
-ls -la ~/.agentctl/jobs/
+# Check foxctl directories
+ls -la ~/.foxctl/
+ls -la ~/.foxctl/cas/
+ls -la ~/.foxctl/jobs/
 
 # Ensure writable
-touch ~/.agentctl/test && rm ~/.agentctl/test
+touch ~/.foxctl/test && rm ~/.foxctl/test
 ```
 
 ### Reset to Clean State
 
 ```bash
 # Backup first!
-cp -r ~/.agentctl ~/.agentctl.bak
+cp -r ~/.foxctl ~/.foxctl.bak
 
 # Remove state
-rm -rf ~/.agentctl/
+rm -rf ~/.foxctl/
 
 # Reinitialize
-agentctl config init
-agentctl skills list  # Should be empty
+foxctl config init
+foxctl skills list  # Should be empty
 ```
 
 ---
@@ -818,7 +818,7 @@ agentctl skills list  # Should be empty
 
 ## Known Issues
 
-See [GitHub Issues](https://github.com/jkatigb/agentctl/issues) for current known issues.
+See [GitHub Issues](https://github.com/joshka0/foxctl/issues) for current known issues.
 
 ### Planned Fixes
 
@@ -839,4 +839,4 @@ See [GitHub Issues](https://github.com/jkatigb/agentctl/issues) for current know
 
 **Last Updated**: February 2026
 
-If this guide didn't solve your problem, please [open an issue](https://github.com/jkatigb/agentctl/issues) with details!
+If this guide didn't solve your problem, please [open an issue](https://github.com/joshka0/foxctl/issues) with details!

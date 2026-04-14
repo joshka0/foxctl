@@ -15,7 +15,7 @@ steps focused on **teams, routing, and team-aware agents/skills**.
 >   - `docs/spec/skills_spec/README.md` (§6 Teams & Routing future skills).
 >   - `docs/spec/core_profile_v1.md`.
 > - Codemaps for this phase (from codemap index):
->   - CM6 – Dspy-Go Agent Runtime & Tools Integration in agentctl.
+>   - CM6 – Dspy-Go Agent Runtime & Tools Integration in foxctl.
 >   - CM9 – Agentctl Overseer & Agent Hierarchy.
 >   - CM10 – Knowledge System & Factory Droids.
 >   - CM13 – Core Profile v1: End-to-End Envelope, Jobs & CAS Flow.
@@ -89,7 +89,7 @@ Protocol v1 envelopes, per `skills_spec/README.md` §6.
 ### B2. CLI and tool integration
 
 - [ ] Decide whether to expose teams management via:
-  - CLI commands (`agentctl teams ...`) that call the skills.
+  - CLI commands (`foxctl teams ...`) that call the skills.
   - dspy-go tools wrapping these skills for agents/admins.
 - [ ] Ensure any new tools obey existing patterns:
   - Tools only; no direct SQL exposed to LLMs.

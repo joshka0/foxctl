@@ -4,7 +4,7 @@ description = "Extract symbols (functions, types, methods) from code"
 prompt = """Extract and analyze code symbols from:
 
 ```bash
-!{agentctl run code/symbols --input '{"path": "{{args}}"}'}
+!{foxctl run code/symbols --input '{"path": "{{args}}"}'}
 ```
 
 Interpret the results:

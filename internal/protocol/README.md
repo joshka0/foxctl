@@ -1,6 +1,6 @@
 # Protocol Package
 
-The `protocol` package centralizes wire-level protocol semantics for agentctl,
+The `protocol` package centralizes wire-level protocol semantics for foxctl,
 providing a single source of truth for envelope construction, validation, and
 error codes according to the Core Profile v1 specification.
 
@@ -46,10 +46,10 @@ const (
 
 ```go
 // Simple success envelope
-env := protocol.OK("agentctl.test", map[string]string{"status": "healthy"})
+env := protocol.OK("foxctl.test", map[string]string{"status": "healthy"})
 
 // With metadata options
-env := protocol.OK("agentctl.run", data,
+env := protocol.OK("foxctl.run", data,
     protocol.WithSource("run"),
     protocol.WithWorkspace("/path/to/workspace"),
     protocol.WithSkillVersion("v1.0.0"),
@@ -60,7 +60,7 @@ env := protocol.OK("agentctl.run", data,
 
 ```go
 env := protocol.Error(
-    "agentctl.test",
+    "foxctl.test",
     protocol.ErrorCodeEAuth,
     "authentication failed",
     map[string]string{"hint": "check credentials"},
@@ -307,19 +307,19 @@ if protocol.IsRetryable(code) {
 ### Before
 
 ```go
-import "github.com/jkatigb/agentctl/internal/domain/envelope"
+import "github.com/joshka0/foxctl/internal/domain/envelope"
 
 data := map[string]any{"config": cfg}
-return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.doctor", data))
+return envelope.Write(cmd.OutOrStdout(), envelope.OK("foxctl.doctor", data))
 ```
 
 ### After
 
 ```go
-import "github.com/jkatigb/agentctl/internal/protocol"
+import "github.com/joshka0/foxctl/internal/protocol"
 
 data := map[string]any{"config": cfg}
-return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.doctor", data,
+return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.doctor", data,
     protocol.WithSource("run"))
 ```
 

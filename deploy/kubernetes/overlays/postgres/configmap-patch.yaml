@@ -2,8 +2,8 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: agentctl-config
-  namespace: agentctl
+  name: foxctl-config
+  namespace: foxctl
 data:
   # Override database driver to PostgreSQL
   AGENTCTL_DB_DRIVER: "postgres"
@@ -16,5 +16,5 @@ data:
 
   # CAS configuration (S3)
   AGENTCTL_CAS_DRIVER: "s3"
-  AGENTCTL_CAS_S3_BUCKET: "agentctl-cas"
+  AGENTCTL_CAS_S3_BUCKET: "foxctl-cas"
   AWS_REGION: "us-west-2"

@@ -1,10 +1,10 @@
 package telegram
 
 import (
-	consolepkg "github.com/jkatigb/agentctl/internal/console"
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	consolepkg "github.com/joshka0/foxctl/internal/console"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 // NewSessionBridge returns a shared chatadapter.SessionBridge configured for Telegram.

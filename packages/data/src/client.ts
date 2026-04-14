@@ -1,4 +1,4 @@
-// API Client - connects to the agentctl backend
+// API Client - connects to the foxctl backend
 // Works in both browser (Vite) and Bun environments
 
 import type {

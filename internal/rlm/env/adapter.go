@@ -15,22 +15,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	skillobs "github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/rlm"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	skillobs "github.com/joshka0/foxctl/internal/adapters/skillslib/obs"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/rlm"
+	"github.com/joshka0/foxctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
-// ReadOnlyAdapter executes the first read-only RLM tool surface against current agentctl state.
+// ReadOnlyAdapter executes the first read-only RLM tool surface against current foxctl state.
 type ReadOnlyAdapter struct {
 	cfg           config.Config
 	workspaceRoot string
@@ -906,7 +906,7 @@ func (a *ReadOnlyAdapter) runCurrentSkillDecode(ctx context.Context, skill strin
 		}
 		executable, execErr := os.Executable()
 		if execErr != nil {
-			executable = "agentctl"
+			executable = "foxctl"
 		}
 		searchPaths := resolveSkillSearchPaths(a.cfg, a.workspaceRoot)
 		env := []string{}
@@ -1128,7 +1128,7 @@ func resolveAgentctlRepoRoot() (string, error) {
 		}
 		dir = parent
 	}
-	return "", fmt.Errorf("resolve agentctl repo root: could not locate skills/code_semantic_search/main.go")
+	return "", fmt.Errorf("resolve foxctl repo root: could not locate skills/code_semantic_search/main.go")
 }
 
 func sliceLines(content string, start, end int) string {

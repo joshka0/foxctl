@@ -7,7 +7,7 @@ Claude Code hooks are experiencing significant latency:
 | Hook | Avg Latency | Max Latency | Primary Bottleneck |
 |------|-------------|-------------|-------------------|
 | `hooks/impact_analysis` | 8.8s | 85s | gopls cold start (30-40s) |
-| `hooks/test_feedback` | 1.5s | 11.7s | agentctl CLI overhead |
+| `hooks/test_feedback` | 1.5s | 11.7s | foxctl CLI overhead |
 | `hooks/task_guard` | 1.2s | 11.7s | Multiple SQLite opens |
 
 ## Root Cause Analysis
@@ -16,7 +16,7 @@ Claude Code hooks are experiencing significant latency:
 
 ```
 Shell Wrapper (bash)
-└── agentctl run hooks/<skill>
+└── foxctl run hooks/<skill>
     ├── config.Load()                      # ~50ms
     ├── skill resolution (findSkill)       # ~20ms
     ├── jobs.Open()                        # ~30ms SQLite
@@ -39,14 +39,14 @@ Shell Wrapper (bash)
 ### Per-Hook Issues
 
 #### 1. hooks/impact_analysis (max 85s)
-- Spawns `agentctl run code/symbols` subprocess
+- Spawns `foxctl run code/symbols` subprocess
 - For Go files: calls `gopls.GetDaemon()` which cold-starts in 30-40s
 - Global singleton restarts when workspace changes
 - Multiple parallel symbol lookups compound the problem
 
 #### 2. hooks/test_feedback & hooks/task_guard (max 11.7s)
 - Simple skills with trivial logic
-- 90%+ of time is agentctl overhead
+- 90%+ of time is foxctl overhead
 - task_guard opens 3 databases: runner CAS, tasks.db, graph.db
 - SQLite contention when multiple hooks run in parallel
 
@@ -134,20 +134,20 @@ func createModifiedEdge(ctx context.Context, cfg config.Config, workspaceID, tas
 
 ### Phase 2: Ephemeral Mode (Future PR)
 
-#### 2.1 Add --ephemeral flag to agentctl run
+#### 2.1 Add --ephemeral flag to foxctl run
 
 **Problem**: Job persistence adds ~300-400ms overhead per hook invocation.
 
 **Solution**: Skip job tracking for hooks since their results aren't queried later.
 
 **Files to modify**:
-- `cmd/agentctl/cmd/run.go` - Add `--ephemeral` flag
+- `cmd/foxctl/cmd/run.go` - Add `--ephemeral` flag
 - `internal/runtime/runservice/executor.go` - Skip job store when ephemeral
 - `internal/storage/jobs/executor/executor.go` - Direct execution path
 
 **New execution path**:
 ```
-agentctl run hooks/task_guard --ephemeral
+foxctl run hooks/task_guard --ephemeral
 └── config.Load()
 └── skill resolution
 └── exec.Runner.Run() directly  # Skip all job machinery
@@ -159,7 +159,7 @@ agentctl run hooks/task_guard --ephemeral
 
 ### Phase 3: Daemon Architecture (Future)
 
-#### 3.1 Persistent agentctl daemon
+#### 3.1 Persistent foxctl daemon
 
 **Problem**: Each hook spawns a new process with full initialization.
 
@@ -167,13 +167,13 @@ agentctl run hooks/task_guard --ephemeral
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    agentctl daemon                       │
+│                    foxctl daemon                       │
 │  ┌──────────┐  ┌───────────┐  ┌─────────────────────┐  │
 │  │  Config  │  │  SQLite   │  │   gopls daemon      │  │
 │  │  (once)  │  │  Pool     │  │   (pre-warmed)      │  │
 │  └──────────┘  └───────────┘  └─────────────────────┘  │
 │                       │                                  │
-│              Unix Socket /tmp/agentctl.sock             │
+│              Unix Socket /tmp/foxctl.sock             │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -234,7 +234,7 @@ if lang == "go" {
 
 Add to imports:
 ```go
-"github.com/jkatigb/agentctl/internal/platform/lsp/gopls"
+"github.com/joshka0/foxctl/internal/platform/lsp/gopls"
 ```
 
 ### Step 4: Update shell wrapper timeout (optional)
@@ -269,13 +269,13 @@ The impact_analysis hook currently has a 10s timeout which is too short for cold
 
 ```bash
 # Cold start - should skip quickly
-AGENTCTL_GOPLS_DEBUG=1 agentctl run hooks/impact_analysis --input '{"file_path":"main.go"}'
+AGENTCTL_GOPLS_DEBUG=1 foxctl run hooks/impact_analysis --input '{"file_path":"main.go"}'
 
 # Warm up gopls
-agentctl run lsp/gopls --input '{"operation":"references","path":"main.go","line":10,"col":5}'
+foxctl run lsp/gopls --input '{"operation":"references","path":"main.go","line":10,"col":5}'
 
 # Now should provide results
-agentctl run hooks/impact_analysis --input '{"file_path":"main.go"}'
+foxctl run hooks/impact_analysis --input '{"file_path":"main.go"}'
 ```
 
 ---
@@ -304,4 +304,4 @@ If issues arise:
 1. **Pre-warm gopls on session start**: Could add SessionStart hook to warm gopls
 2. **LSP daemon pool**: Support multiple workspaces without restart penalty
 3. **Ephemeral mode**: Skip job persistence for all hooks
-4. **Full daemon architecture**: Persistent agentctl with connection pooling
+4. **Full daemon architecture**: Persistent foxctl with connection pooling

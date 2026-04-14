@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
-	runtimeevents "github.com/jkatigb/agentctl/internal/v2/runtime/events"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	runtimeevents "github.com/joshka0/foxctl/internal/v2/runtime/events"
 )
 
 func TestEventBus_BoundedQueue_OverflowPolicy(t *testing.T) {

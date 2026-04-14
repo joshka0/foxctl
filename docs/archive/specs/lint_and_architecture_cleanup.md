@@ -4,7 +4,7 @@
 
 ## 1. Context & Motivation
 
-`agentctl` now targets **Go 1.24** with toolchain **go1.24.7** and uses **golangci-lint v2.1.5** via the v2 module path.
+`foxctl` now targets **Go 1.24** with toolchain **go1.24.7** and uses **golangci-lint v2.1.5** via the v2 module path.
 
 - `go.mod`:
   - `go 1.24`

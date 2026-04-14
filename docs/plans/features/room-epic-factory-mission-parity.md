@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | Status | Updated |
-| Scope | `agentctl room` epic/milestone/story backend, work-pack model, and mission-style coordinator surfaces |
+| Scope | `foxctl room` epic/milestone/story backend, work-pack model, and mission-style coordinator surfaces |
 | Related | [room-agile-workpacks-and-validation.md](./room-agile-workpacks-and-validation.md), [room-epic-resume-and-next.md](./room-epic-resume-and-next.md), [room-epic-health-pulse.md](./room-epic-health-pulse.md), [room-milestone-contract.md](./room-milestone-contract.md), [room-story-lifecycle.md](./room-story-lifecycle.md), [room-milestone-synthesis.md](./room-milestone-synthesis.md), [room-retro-guidance.md](./room-retro-guidance.md), [room-evidence-lanes.md](./room-evidence-lanes.md), [room-workpack-templates.md](./room-workpack-templates.md), [room-agile-provenance-backlinks.md](./room-agile-provenance-backlinks.md), [room-agile-aca-promotion.md](./room-agile-aca-promotion.md), [room-epic-checkpoint.md](./room-epic-checkpoint.md), [go-native-runtime-and-optional-jido.md](../../architecture/go-native-runtime-and-optional-jido.md) |
 
 ## Why this note exists

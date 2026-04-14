@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: heartwood/action
@@ -55,9 +55,9 @@ signature:
     long: |
       Use heartwood/action to invoke a whitelisted participant action against Heartwood.
       Example commands:
-        agentctl run heartwood/action --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token","operation":"upsert_profile","args":{"alias":"Mira","city":"Tallinn","intent":"long_term"}}'
-        agentctl run heartwood/action --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token","operation":"join_space","args":{"spaceId":"1"}}'
-        agentctl run heartwood/action --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token","operation":"send_thread_message","args":{"threadId":"3","body":"I'd stay with this conversation a little longer."}}'
+        foxctl run heartwood/action --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token","operation":"upsert_profile","args":{"alias":"Mira","city":"Tallinn","intent":"long_term"}}'
+        foxctl run heartwood/action --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token","operation":"join_space","args":{"spaceId":"1"}}'
+        foxctl run heartwood/action --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token","operation":"send_thread_message","args":{"threadId":"3","body":"I'd stay with this conversation a little longer."}}'
 returns:
   - name: ok
     type: boolean

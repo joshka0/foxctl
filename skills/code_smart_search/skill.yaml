@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/smart_search
@@ -102,7 +102,7 @@ signature:
       files, use code/snippet_extract directly.
 
       Example:
-        agentctl run code/smart_search --input '{
+        foxctl run code/smart_search --input '{
           "question": "How does user authentication work?",
           "sources": ["symbols", "ripgrep"],
           "limits": {"max_candidates": 30, "max_snippets": 15}

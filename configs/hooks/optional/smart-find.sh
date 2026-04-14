@@ -4,12 +4,12 @@
 # modification times, sizes, and provides smarter relevance ranking.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_SMART_FIND_MAX_RESULTS - Max results to show (default: 10)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 MAX_RESULTS="${AGENTCTL_SMART_FIND_MAX_RESULTS:-10}"
 
 # Read hook input from stdin

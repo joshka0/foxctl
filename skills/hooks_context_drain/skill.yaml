@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/context_drain
@@ -62,10 +62,10 @@ signature:
       raw entries.
 
       Example:
-        agentctl run hooks/context_drain --input '{"workspace_id":"/workspace","session_id":"abc123"}'
+        foxctl run hooks/context_drain --input '{"workspace_id":"/workspace","session_id":"abc123"}'
 
       With filters:
-        agentctl run hooks/context_drain --input '{"workspace_id":"/workspace","session_id":"abc123","sources":["smart-grep"],"min_priority":1}'
+        foxctl run hooks/context_drain --input '{"workspace_id":"/workspace","session_id":"abc123","sources":["smart-grep"],"min_priority":1}'
     workflows:
       - id: inject-on-turn
         description: "Drain context before AI turn for injection."

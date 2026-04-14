@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
-	v2orchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
+	v2orchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 const (

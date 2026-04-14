@@ -52,11 +52,11 @@ output contracts, manifest, and CLI surface.
 
 ### A2. CLI/runner integration
 
-- [x] Ensure `agentctl run code/snippet_extract` works end-to-end:
+- [x] Ensure `foxctl run code/snippet_extract` works end-to-end:
   - Discovery via existing skill resolver (`skills_run.go` +
     `skill_helpers.go`).
   - Execution via exec runner with `AGENTCTL_WORKSPACE` correctly set.
-- [x] Decide whether any dedicated CLI aliases (e.g. `agentctl code swe-grep`)
+- [x] Decide whether any dedicated CLI aliases (e.g. `foxctl code swe-grep`)
       are needed for developer UX; if added, they MUST be thin wrappers around
       the existing `run` path and reuse Protocol v1 envelopes.
 

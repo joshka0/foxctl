@@ -2,7 +2,7 @@
 
 Status: active plan
 
-Owner: agentctl
+Owner: foxctl
 
 Last updated: 2026-04-01
 
@@ -14,8 +14,8 @@ Parent plan:
 
 Define the first concrete refactor intelligence primitives:
 
-- `agentctl refactor status`
-- `agentctl refactor snapshot`
+- `foxctl refactor status`
+- `foxctl refactor snapshot`
 
 These commands establish the baseline questions that the current refactor
 workflow cannot answer cleanly today:
@@ -30,7 +30,7 @@ workflow cannot answer cleanly today:
 
 Phase 1 will be:
 
-- CLI-first under `agentctl refactor ...`
+- CLI-first under `foxctl refactor ...`
 - implemented in shared internal packages, not bespoke command-local logic
 - compatible with current `refactor scout`
 - single-language by default, matching current scout invariants
@@ -108,14 +108,14 @@ Invariants:
 4. Relative `--path` is resolved from the workspace root.
 5. The output `Scope` is the canonical scope object reused across commands.
 
-## `agentctl refactor status`
+## `foxctl refactor status`
 
 ### Command
 
 ```bash
-agentctl refactor status --workspace .
-agentctl refactor status --workspace . --path ./internal --language go
-agentctl refactor status --workspace . --path apps/praze-api/lib --language elixir
+foxctl refactor status --workspace .
+foxctl refactor status --workspace . --path ./internal --language go
+foxctl refactor status --workspace . --path apps/praze-api/lib --language elixir
 ```
 
 ### Flags
@@ -209,7 +209,7 @@ Envelope `data` shape:
   },
   "repo_index": {
     "available": true,
-    "store_path": "/Users/me/.agentctl/storage/repoindex/example.db",
+    "store_path": "/Users/me/.foxctl/storage/repoindex/example.db",
     "meta": {
       "repo_root": "/repo",
       "head_sha": "abc1234",
@@ -258,14 +258,14 @@ type IndexMeta struct {
 
 The builder should persist languages from build options, not infer them later.
 
-## `agentctl refactor snapshot`
+## `foxctl refactor snapshot`
 
 ### Command
 
 ```bash
-agentctl refactor snapshot --workspace . --path ./internal --language go
-agentctl refactor snapshot --workspace . --path src/api/core --language typescript
-agentctl refactor snapshot --workspace . --path apps/praze-api/lib --language elixir
+foxctl refactor snapshot --workspace . --path ./internal --language go
+foxctl refactor snapshot --workspace . --path src/api/core --language typescript
+foxctl refactor snapshot --workspace . --path apps/praze-api/lib --language elixir
 ```
 
 ### Flags
@@ -324,7 +324,7 @@ Phase 1 should persist two things:
 Recommended store path:
 
 ```text
-~/.agentctl/storage/refactor_snapshots.db
+~/.foxctl/storage/refactor_snapshots.db
 ```
 
 Recommended metadata table:
@@ -391,7 +391,7 @@ Recommended artifact shape:
       "line_count": 910,
       "hash": "sha256:...",
       "symbol_count": 21,
-      "package": "go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+      "package": "go:github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
     }
   ],
   "symbols": [
@@ -488,12 +488,12 @@ without waiting for later evidence-pack work.
 
 ## CLI Placement
 
-Recommended additions to `agentctl refactor`:
+Recommended additions to `foxctl refactor`:
 
 - `newRefactorStatusCommand()`
 - `newRefactorSnapshotCommand()`
 
-in [cmd/agentctl/cmd/refactor.go](../../../cmd/agentctl/cmd/refactor.go).
+in [cmd/foxctl/cmd/refactor.go](../../../cmd/foxctl/cmd/refactor.go).
 
 Implementation should reuse common helpers instead of copying scout’s current
 scope logic into new command-local branches.
@@ -510,9 +510,9 @@ scope logic into new command-local branches.
 
 Phase 1 is complete when:
 
-1. `agentctl refactor status` returns a stable machine-readable mode decision
+1. `foxctl refactor status` returns a stable machine-readable mode decision
    for the current scope.
-2. `agentctl refactor snapshot` persists a deterministic artifact plus metadata
+2. `foxctl refactor snapshot` persists a deterministic artifact plus metadata
    row keyed by `snapshot_id`.
 3. repoindex metadata records built languages explicitly.
 4. `refactor scout` emits `index_mode`.
@@ -522,7 +522,7 @@ Phase 1 is complete when:
 
 Once this lands, the next immediate follow-up should be:
 
-- `agentctl refactor deps`
+- `foxctl refactor deps`
 
 That command is the biggest evidence upgrade per unit of complexity after
 freshness and snapshots are in place.

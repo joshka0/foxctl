@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useInsights } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { GraphNode } from "@agentctl/data";
+import type { GraphNode } from "@foxctl/data";
 
 interface NodeRowProps {
   node: GraphNode;

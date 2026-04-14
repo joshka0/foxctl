@@ -6,7 +6,7 @@
 ## Summary
 
 Implemented the test watcher and feedback hook feature per the spec. This
-enables agentctl to run test commands in watch mode and surface failing test
+enables foxctl to run test commands in watch mode and surface failing test
 results to Claude via a PostToolUse hook.
 
 ## New Components
@@ -14,7 +14,7 @@ results to Claude via a PostToolUse hook.
 ### Storage Layer (`internal/storage/testwatch/`)
 
 - **`store.go`** — SQLite-backed store for test status per (workspace, watcher)
-- **`config.go`** — YAML config parsing for `.agentctl/test-watch.yaml`
+- **`config.go`** — YAML config parsing for `.foxctl/test-watch.yaml`
 - **`store_test.go`** — Unit tests for store and config
 
 ### Runtime (`internal/tooling/testwatch/`)
@@ -27,10 +27,10 @@ results to Claude via a PostToolUse hook.
 
 ### CLI Commands
 
-- **`agentctl test-watch list`** — List configured watchers
-- **`agentctl test-watch add`** — Add or update a watcher
-- **`agentctl test-watch remove`** — Remove a watcher
-- **`agentctl watch tests`** — Run watchers (watch mode, --once, --status-only)
+- **`foxctl test-watch list`** — List configured watchers
+- **`foxctl test-watch add`** — Add or update a watcher
+- **`foxctl test-watch remove`** — Remove a watcher
+- **`foxctl watch tests`** — Run watchers (watch mode, --once, --status-only)
 
 ### Hook Skill (`skills/hooks_test_feedback/`)
 
@@ -44,7 +44,7 @@ results to Claude via a PostToolUse hook.
 
 ## Configuration
 
-Per-workspace config lives in `.agentctl/test-watch.yaml`:
+Per-workspace config lives in `.foxctl/test-watch.yaml`:
 
 ```yaml
 debounce: 2s
@@ -61,21 +61,21 @@ watchers:
 
 ```bash
 # Configure a Go watcher
-agentctl test-watch add --id go --command "go test ./..." --include "**/*.go"
+foxctl test-watch add --id go --command "go test ./..." --include "**/*.go"
 
 # Start watching
-agentctl watch tests
+foxctl watch tests
 
 # Run once and exit
-agentctl watch tests --once
+foxctl watch tests --once
 
 # Check status only
-agentctl watch tests --status-only
+foxctl watch tests --status-only
 ```
 
 ## Database
 
-Test status stored in `~/.agentctl/storage/test_watch.db`:
+Test status stored in `~/.foxctl/storage/test_watch.db`:
 
 | Column        | Type | Description                     |
 | ------------- | ---- | ------------------------------- |

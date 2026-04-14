@@ -24,7 +24,7 @@ func TestSignalAckToCallback_CompletedFromAgentctlState(t *testing.T) {
 		Status:    "processed",
 		Data: json.RawMessage(`{
 			"state": {
-				"agentctl": {
+				"foxctl": {
 					"status": "completed",
 					"last_result": {
 						"tool": "fs/ls",
@@ -68,7 +68,7 @@ func TestSignalAckToCallback_FailedWhenErrorPresent(t *testing.T) {
 		Status:   "processed",
 		Data: json.RawMessage(`{
 			"state": {
-				"agentctl": {
+				"foxctl": {
 					"status": "failed",
 					"last_error": {"message":"tool failed"}
 				}
@@ -107,7 +107,7 @@ func TestSignalAckToCallback_IgnoresNilLikeErrors(t *testing.T) {
 		Status:    "processed",
 		Data: json.RawMessage(`{
 			"state": {
-				"agentctl": {
+				"foxctl": {
 					"status": "completed",
 					"last_error": null,
 					"last_result": {
@@ -147,11 +147,11 @@ func TestSignalAckToCallback_ExtractsNestedTransportError(t *testing.T) {
 		Status:    "processed",
 		Data: json.RawMessage(`{
 			"state": {
-				"agentctl": {
+				"foxctl": {
 					"status": "failed",
 					"last_error": {
 						"stage":"transport",
-						"transport_error":{"reason":"dial unix /tmp/agentctl.sock: connect: no such file"},
+						"transport_error":{"reason":"dial unix /tmp/foxctl.sock: connect: no such file"},
 						"cli_error":{"message":"fallback failed"}
 					}
 				}
@@ -166,7 +166,7 @@ func TestSignalAckToCallback_ExtractsNestedTransportError(t *testing.T) {
 	if cb.Error == "" {
 		t.Fatal("expected non-empty error")
 	}
-	if cb.Error != "dial unix /tmp/agentctl.sock: connect: no such file" {
+	if cb.Error != "dial unix /tmp/foxctl.sock: connect: no such file" {
 		t.Fatalf("error=%q unexpected", cb.Error)
 	}
 }
@@ -190,7 +190,7 @@ func TestSignalAckToCallback_ExtractsCompanionMetadata(t *testing.T) {
 		Status:    "processed",
 		Data: json.RawMessage(`{
 			"state": {
-				"agentctl": {
+				"foxctl": {
 					"status": "completed",
 					"last_result": {
 						"companion_context": {

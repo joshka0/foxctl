@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 const (
@@ -94,7 +94,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if apiKey == "" {
 		return skillerr.Arg(
 			"EXA_API_KEY not set",
-			skillerr.WithHint("Set EXA_API_KEY in ~/.agentctl/.env"),
+			skillerr.WithHint("Set EXA_API_KEY in ~/.foxctl/.env"),
 		)
 	}
 

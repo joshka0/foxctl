@@ -2,7 +2,7 @@
   "groupId": "webterm-pty",
   "testedAt": "2026-04-09T15:30:00Z",
   "isolation": {
-    "workingDirectory": "/Users/joshka/repos/personal/agentctl",
+    "workingDirectory": "/Users/joshka/repos/personal/foxctl",
     "testCommand": "go test ./internal/gateway/webterm/ -v -count=1 -run 'TestStartTmuxAttach|TestPTY_|TestHub_'",
     "goVersion": "go 1.25+",
     "tmuxVersion": "3.6a",

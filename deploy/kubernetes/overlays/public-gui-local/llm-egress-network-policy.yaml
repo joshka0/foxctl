@@ -1,14 +1,14 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: agentctl-llm-egress-local
+  name: foxctl-llm-egress-local
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: local-llm-egress
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: agentctl
+      app.kubernetes.io/name: foxctl
   policyTypes:
   - Egress
   egress:

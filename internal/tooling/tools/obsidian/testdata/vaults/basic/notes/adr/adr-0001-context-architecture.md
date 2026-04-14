@@ -1,7 +1,7 @@
 ---
 title: ADR-0001 Context Architecture
 type: adr
-project: agentctl
+project: foxctl
 status: reviewed
 trust: canonical
 provenance_refs:

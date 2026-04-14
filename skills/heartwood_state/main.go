@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 const skillName = "heartwood/state"
@@ -66,7 +66,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.Runtime("marshal input", skillerr.WithCause(err))
 	}
 
-	cmd := exec.CommandContext(ctx, "pnpm", "--dir", root, "exec", "tsx", "scripts/heartwood-agentctl.ts", "state")
+	cmd := exec.CommandContext(ctx, "pnpm", "--dir", root, "exec", "tsx", "scripts/heartwood-foxctl.ts", "state")
 	cmd.Stdin = bytes.NewReader(body)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

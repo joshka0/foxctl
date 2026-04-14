@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/casbin/casbin/v2"
-	"github.com/jkatigb/agentctl/internal/domain/identity"
+	"github.com/joshka0/foxctl/internal/domain/identity"
 )
 
 // Middleware returns an HTTP middleware that authorizes requests with Casbin.

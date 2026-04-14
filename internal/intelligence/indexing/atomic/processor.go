@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/obs"
 )
 
 // LLMUsage tracks raw token counts from an LLM call.
@@ -231,8 +231,8 @@ func (p *Processor) callLLM(ctx context.Context, prompt string) (string, *obs.To
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Header.Set("HTTP-Referer", "https://github.com/jkatigb/agentctl")
-	req.Header.Set("X-Title", "agentctl")
+	req.Header.Set("HTTP-Referer", "https://github.com/joshka0/foxctl")
+	req.Header.Set("X-Title", "foxctl")
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)

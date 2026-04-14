@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	obsidiantool "github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	obsidiantool "github.com/joshka0/foxctl/internal/tooling/tools/obsidian"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -1681,7 +1681,7 @@ WHERE model = ?
 		return fmt.Errorf("obsidianindex: embedding metadata lookup: %w", err)
 	}
 	if dims != provider.Dimensions() {
-		return fmt.Errorf("obsidianindex: embedding dimension mismatch for model %q: stored=%d, provider=%d; run `agentctl obsidian index build --vault-path <vault-path>` to rebuild vault semantic embeddings", provider.Model(), dims, provider.Dimensions())
+		return fmt.Errorf("obsidianindex: embedding dimension mismatch for model %q: stored=%d, provider=%d; run `foxctl obsidian index build --vault-path <vault-path>` to rebuild vault semantic embeddings", provider.Model(), dims, provider.Dimensions())
 	}
 	return nil
 }

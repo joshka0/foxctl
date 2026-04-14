@@ -1,11 +1,11 @@
 ---
 name: hybrid-research
-description: "Hybrid research agent combining native Claude Code tools (Read/Grep/Glob) with agentctl MCP tools (semantic_search, snippet_extract, memory_query). Best of both: fast direct file access + semantic discovery. Use for: hybrid research, smart research, investigate code, deep search, codebase analysis, architecture questions."
+description: "Hybrid research agent combining native Claude Code tools (Read/Grep/Glob) with foxctl MCP tools (semantic_search, snippet_extract, memory_query). Best of both: fast direct file access + semantic discovery. Use for: hybrid research, smart research, investigate code, deep search, codebase analysis, architecture questions."
 ---
 
 # hybrid-research
 
-A hybrid research agent that combines **native Claude Code tools** (fast, exact) with **agentctl MCP tools** (semantic, conceptual) for optimal codebase investigation. Read-only.
+A hybrid research agent that combines **native Claude Code tools** (fast, exact) with **foxctl MCP tools** (semantic, conceptual) for optimal codebase investigation. Read-only.
 
 ## Command
 
@@ -18,7 +18,7 @@ A hybrid research agent that combines **native Claude Code tools** (fast, exact)
 ## Strategy: Right Tool for the Job
 
 ### Discovery Phase (conceptual → files)
-Use agentctl MCP tools to find relevant code by concept:
+Use foxctl MCP tools to find relevant code by concept:
 
 | Tool | When to Use |
 |------|-------------|
@@ -39,7 +39,7 @@ Use native Claude Code tools for fast, exact extraction:
 | `Glob` | Find files by name pattern (instant) |
 
 ### Deep Analysis (when needed)
-Use agentctl MCP tools for AI-powered analysis:
+Use foxctl MCP tools for AI-powered analysis:
 
 | Tool | When to Use |
 |------|-------------|
@@ -50,7 +50,7 @@ Use agentctl MCP tools for AI-powered analysis:
 ## Pipeline
 
 ```
-Round 1: DISCOVER (agentctl MCP — semantic)
+Round 1: DISCOVER (foxctl MCP — semantic)
   ├─ code_semantic_search: find files by concept
   ├─ memory_query: check for gotchas/decisions
   └─ session_recall: check past session context
@@ -60,7 +60,7 @@ Round 2: EXTRACT (native tools — fast)
   ├─ Grep: find exact patterns, callsites
   └─ Glob: find related files by naming convention
 
-Round 3: ANALYZE (agentctl MCP — deep, if needed)
+Round 3: ANALYZE (foxctl MCP — deep, if needed)
   ├─ code_snippet_extract: AI-extract relevant sections
   ├─ code_symbols: type signatures
   └─ code_dag_grep: relationship graphs
@@ -69,7 +69,7 @@ Round 3: ANALYZE (agentctl MCP — deep, if needed)
 ### Key Principle
 
 - **Semantic discovery → exact extraction**: Use MCP tools to find WHAT matters, native tools to read it fast
-- **Never use Bash for agentctl**: MCP tools are first-class — call them directly, not via `agentctl run`
+- **Never use Bash for foxctl**: MCP tools are first-class — call them directly, not via `foxctl run`
 - **Parallelize**: Run independent MCP + native tool calls in the same message
 
 ## Execution
@@ -122,13 +122,13 @@ Round 3: ANALYZE (agentctl MCP — deep, if needed)
 
 ## Prerequisites
 
-Requires the agentctl MCP server configured in `.mcp.json`:
+Requires the foxctl MCP server configured in `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
-    "agentctl": {
-      "command": "agentctl",
+    "foxctl": {
+      "command": "foxctl",
       "args": ["mcp", "serve", "--groups", "code-intel,project"]
     }
   }
@@ -143,7 +143,7 @@ Use as a Task subagent:
 Task(
   subagent_type="Explore",
   description="Hybrid research: <topic>",
-  prompt="You are a hybrid research agent. Use BOTH native tools (Read, Grep, Glob) AND agentctl MCP tools for investigation.
+  prompt="You are a hybrid research agent. Use BOTH native tools (Read, Grep, Glob) AND foxctl MCP tools for investigation.
 
 STRATEGY:
 1. DISCOVER with MCP tools: code_semantic_search, memory_query

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
 // repairWorkspaceIDs best-effort migrates legacy absolute-path workspace keys to stable IDs.

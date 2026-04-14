@@ -9,10 +9,10 @@ import (
 func TestEvaluateModeAndSummarize(t *testing.T) {
 	mode := EvaluateMode("lexical",
 		[]string{
-			"notes/repo/agentctl/index.md",
-			"notes/repo/agentctl/packages/cmd-agentctl-cmd.md",
+			"notes/repo/foxctl/index.md",
+			"notes/repo/foxctl/packages/cmd-foxctl-cmd.md",
 		},
-		[]string{"notes/repo/agentctl/packages/cmd-agentctl-cmd.md"},
+		[]string{"notes/repo/foxctl/packages/cmd-foxctl-cmd.md"},
 		2,
 		nil,
 	)
@@ -26,7 +26,7 @@ func TestEvaluateModeAndSummarize(t *testing.T) {
 	results := []QueryResult{
 		{
 			ID:    "q1",
-			Query: "cmd agentctl cmd",
+			Query: "cmd foxctl cmd",
 			Modes: map[string]ModeResult{"lexical": mode},
 		},
 	}
@@ -46,7 +46,7 @@ func TestLoadPolicyAndBuildAlerts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "policy.yaml")
 	body := []byte(`
-suite: agentctl
+suite: foxctl
 limit: 10
 format: markdown
 modes:
@@ -67,8 +67,8 @@ thresholds:
 	if err != nil {
 		t.Fatalf("LoadPolicy() error = %v", err)
 	}
-	if policy.Suite != "agentctl" {
-		t.Fatalf("suite=%q want agentctl", policy.Suite)
+	if policy.Suite != "foxctl" {
+		t.Fatalf("suite=%q want foxctl", policy.Suite)
 	}
 	if !policy.FailOnAlerts {
 		t.Fatalf("FailOnAlerts=false want true")
@@ -89,12 +89,12 @@ thresholds:
 }
 
 func TestLoadSuite(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "..", "testdata", "evals", "retrieval", "agentctl.yaml")
+	path := filepath.Join("..", "..", "..", "..", "testdata", "evals", "retrieval", "foxctl.yaml")
 	suite, err := LoadSuite(path)
 	if err != nil {
 		t.Fatalf("LoadSuite: %v", err)
 	}
-	if suite.Name != "agentctl" {
+	if suite.Name != "foxctl" {
 		t.Fatalf("name=%q", suite.Name)
 	}
 	if len(suite.Queries) == 0 {

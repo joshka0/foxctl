@@ -2,7 +2,7 @@
 
 ## Overview
 
-Unify session tracking across all agentctl storage systems and add end-of-session elicitation for DSPy trajectory optimization.
+Unify session tracking across all foxctl storage systems and add end-of-session elicitation for DSPy trajectory optimization.
 
 ## Goals
 
@@ -265,7 +265,7 @@ Start with Option A (no changes). Evaluate Option B when:
 ### Phase 3: Optimization Pipeline
 1. Add optimization skill
 2. Integrate with pattern collector
-3. Add CLI command: `agentctl optimize`
+3. Add CLI command: `foxctl optimize`
 4. Test with sample trajectories
 
 ### Phase 4: (Optional) Claude SDK Adapter

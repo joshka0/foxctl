@@ -92,7 +92,7 @@ Add columns; do NOT change PK.
 Columns:
 
 * `workspace_id TEXT` (canonical workspace root path OR existing workspace_path; choose one canonical and fill it)
-* `agent_id TEXT NOT NULL DEFAULT 'agentctl'`
+* `agent_id TEXT NOT NULL DEFAULT 'foxctl'`
 * `status TEXT NOT NULL DEFAULT 'ok'` (queued|running|ok|error|canceled)
 * `parent_session_id TEXT`
 * `started_at TEXT`
@@ -102,7 +102,7 @@ DDL fragments:
 
 ```sql
 ALTER TABLE sessions ADD COLUMN workspace_id TEXT;
-ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'agentctl';
+ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'foxctl';
 ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok';
 ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;
 ALTER TABLE sessions ADD COLUMN started_at TEXT;
@@ -126,7 +126,7 @@ Backfill:
 
 * For legacy Claude sessions:
 
-  * `agent_id='claude'` (if you can detect source) else keep 'agentctl'
+  * `agent_id='claude'` (if you can detect source) else keep 'foxctl'
   * `workspace_id` = existing workspace_path
   * timestamps inferred if available
 

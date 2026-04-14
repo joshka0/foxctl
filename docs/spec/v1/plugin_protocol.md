@@ -4,7 +4,7 @@
 **Status:** Final Draft
 **Last Updated:** 2025-11-15
 
-> **Purpose:** This document defines the plugin protocol for extending agentctl with custom authentication and pagination strategies. Plugins are out-of-process executables that communicate via JSON envelopes over stdin/stdout.
+> **Purpose:** This document defines the plugin protocol for extending foxctl with custom authentication and pagination strategies. Plugins are out-of-process executables that communicate via JSON envelopes over stdin/stdout.
 
 ---
 
@@ -27,7 +27,7 @@
 
 ### 1.1 Purpose
 
-The plugin system allows extending agentctl's `http/openapi` skill with custom:
+The plugin system allows extending foxctl's `http/openapi` skill with custom:
 - **Authentication schemes** (e.g., AWS SigV4, HMAC, custom OAuth flows)
 - **Pagination strategies** (e.g., vendor-specific cursor formats, GraphQL-style pagination)
 
@@ -37,7 +37,7 @@ Built-in auth and pagination cover ~90% of APIs (Bearer, API Key, Basic, OAuth2 
 
 ### 1.3 Design Principles
 
-- **Out-of-process**: Plugins run as subprocesses, isolated from agentctl
+- **Out-of-process**: Plugins run as subprocesses, isolated from foxctl
 - **Envelope-based**: All I/O uses Protocol v1 JSON envelopes
 - **Language-agnostic**: Any language that can read/write JSON on stdin/stdout
 - **Sandboxed**: Parent enforces strict timeouts, memory, and IO limits
@@ -109,7 +109,7 @@ Plugins SHOULD NOT rely on environment variables for secrets. Secrets are passed
       "url": "https://api.example.com/items",
       "headers": {
         "Accept": "application/json",
-        "User-Agent": "agentctl/1.0"
+        "User-Agent": "foxctl/1.0"
       },
       "body": null                        // Raw string for signing; omitted for large bodies
     },
@@ -122,7 +122,7 @@ Plugins SHOULD NOT rely on environment variables for secrets. Secrets are passed
       "credentials": {                    // Redacted in logs
         "api_key": "secret_key_value"
       },
-      "spec_hints": {                     // x-agentctl extensions copied verbatim
+      "spec_hints": {                     // x-foxctl extensions copied verbatim
         "signing_algorithm": "HMAC-SHA256"
       },
       "paging_state": {                   // Only for pagination plugins
@@ -164,7 +164,7 @@ Contextual information for plugin processing:
 - **Auth plugins**:
   - `security_scheme`: OpenAPI security scheme definition
   - `credentials`: Secret values (API keys, tokens, etc.) - **redacted in logs**
-  - `spec_hints`: `x-agentctl` vendor extensions from spec
+  - `spec_hints`: `x-foxctl` vendor extensions from spec
 - **Pagination plugins**:
   - `paging_state`: Accumulated state from previous pages
   - `response`: Last HTTP response (status, headers, body)
@@ -271,7 +271,7 @@ Auth plugins modify HTTP requests to add authentication:
         "type": "apiKey",
         "name": "X-API-Key",
         "in": "header",
-        "x-agentctl": {
+        "x-foxctl": {
           "signing": "HMAC-SHA256"
         }
       },
@@ -444,30 +444,30 @@ Pagination stops when:
 
 Plugins are discovered via:
 1. **Environment variable**: `AGENTCTL_PLUGIN_PATH` (colon-separated paths)
-2. **Default path**: `~/.agentctl/plugins`
+2. **Default path**: `~/.foxctl/plugins`
 3. **Explicit path**: `--auth.scheme=plugin:/absolute/path/to/plugin`
 
 ### 7.2 Naming Convention
 
-Plugins MUST be named: `agentctl-plugin-<name>`
+Plugins MUST be named: `foxctl-plugin-<name>`
 
 Examples:
-- `agentctl-plugin-aws-sigv4`
-- `agentctl-plugin-stripe-pagination`
-- `agentctl-plugin-hmac-auth`
+- `foxctl-plugin-aws-sigv4`
+- `foxctl-plugin-stripe-pagination`
+- `foxctl-plugin-hmac-auth`
 
 ### 7.3 Plugin Invocation
 
 Plugins are referenced by name:
 ```bash
 # Auth plugin
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec memory:api \
   --operationId createItem \
   --auth.scheme=plugin:aws-sigv4
 
 # Pagination plugin
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec memory:api \
   --operationId listItems \
   --paging.strategy=plugin:custom-cursor
@@ -478,7 +478,7 @@ agentctl run http/openapi \
 When invoked with `--handshake` flag, plugins MUST output capabilities:
 
 ```bash
-$ agentctl-plugin-aws-sigv4 --handshake
+$ foxctl-plugin-aws-sigv4 --handshake
 ```
 
 Output:
@@ -826,7 +826,7 @@ func main() {
 In future versions, plugins MAY include a manifest file:
 
 ```yaml
-# agentctl-plugin-aws-sigv4.yaml
+# foxctl-plugin-aws-sigv4.yaml
 name: aws-sigv4
 version: 1.0.0
 commands:
@@ -868,7 +868,7 @@ echo '{
     },
     "limits": {"cpu_ms": 200, "wall_ms": 500, "max_out_kb": 32}
   }
-}' | agentctl-plugin-custom-auth | jq
+}' | foxctl-plugin-custom-auth | jq
 
 # Test pagination plugin
 echo '{
@@ -884,7 +884,7 @@ echo '{
     },
     "limits": {"cpu_ms": 200, "wall_ms": 500, "max_out_kb": 32}
   }
-}' | agentctl-plugin-custom-pagination | jq
+}' | foxctl-plugin-custom-pagination | jq
 ```
 
 ---

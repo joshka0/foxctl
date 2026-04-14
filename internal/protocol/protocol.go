@@ -1,4 +1,4 @@
-// Package protocol provides centralized wire-level protocol semantics for agentctl.
+// Package protocol provides centralized wire-level protocol semantics for foxctl.
 // It wraps the internal/domain/envelope package and provides canonical error codes,
 // helper functions for building and writing envelopes, and validation utilities.
 package protocol
@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
 
 // Option is a function that modifies an envelope.

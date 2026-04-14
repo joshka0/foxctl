@@ -2,7 +2,7 @@
   "groupId": "ssh-terminal",
   "testedAt": "2026-04-09T15:30:00Z",
   "isolation": {
-    "workingDirectory": "/Users/joshka/repos/personal/agentctl",
+    "workingDirectory": "/Users/joshka/repos/personal/foxctl",
     "testCommand": "go test ./internal/gateway/sshterm/ -v -count=1 -run 'TestServer_PTYSession|TestServer_WindowResize|TestServer_MultipleSessions|TestServer_DetachOnDisconnect|TestServer_WhoIsIdentityLogged|TestServer_ServeAndConnect|TestServer_SessionLimit|TestParseRoomIDFromUser|TestRoomManager_|TestParseSignal'",
     "package": "internal/gateway/sshterm",
     "isolationMechanism": "Each test creates its own SSH server on a random port via net.Listen('tcp', '127.0.0.1:0'). tmux sessions use unique timestamped names. No shared state between tests."

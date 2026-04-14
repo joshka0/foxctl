@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/contextbuilder"
+	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/runtime/contextbuilder"
 )
 
 func newCompanionContextBuilder(memory *ConversationMemory) *contextbuilder.Builder {

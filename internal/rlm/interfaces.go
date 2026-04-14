@@ -15,7 +15,7 @@ type Sandbox interface {
 	Close(ctx context.Context) error
 }
 
-// Bootstrapper prepares a runtime environment from existing agentctl state.
+// Bootstrapper prepares a runtime environment from existing foxctl state.
 type Bootstrapper interface {
 	Build(ctx context.Context, task Task) (Environment, error)
 }

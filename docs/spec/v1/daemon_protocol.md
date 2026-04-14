@@ -12,7 +12,7 @@
 The agent daemon is a long-lived process started with:
 
 ```bash
-agentctl agent run <agent-id>
+foxctl agent run <agent-id>
 ```
 
 It is responsible for:
@@ -192,7 +192,7 @@ Each daemon mailbox message includes:
 High-level flow:
 
 ```text
-agentctl agent ask
+foxctl agent ask
   -> mailbox.Send(type=agent.ask, headers.correlation=<ask_id>)
   -> daemon polls + leases message
   -> daemon executes LLM tool-loop turn
@@ -230,7 +230,7 @@ The daemon parses `payload.data` as `EventData` and logs the event.
 
 ## 9. Configuration Defaults (CLI)
 
-When started via `agentctl agent run`, defaults are:
+When started via `foxctl agent run`, defaults are:
 
 - `PollInterval`: 500ms
 - `HeartbeatInterval`: 10s

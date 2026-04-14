@@ -1,6 +1,6 @@
 ---
 name: go-backend
-description: Go backend implementation worker for agentctl features — writes Go code, tests, and CLI commands following the project's functional core / imperative shell architecture.
+description: Go backend implementation worker for foxctl features — writes Go code, tests, and CLI commands following the project's functional core / imperative shell architecture.
 ---
 
 # Go Backend Worker
@@ -70,7 +70,7 @@ After implementation passes tests:
 
 For features that involve CLI commands:
 
-1. Build: `make build` or `go build ./cmd/agentctl/...`
+1. Build: `make build` or `go build ./cmd/foxctl/...`
 2. Run the new command manually and verify output is valid JSON envelope
 3. For gateway features: test with `--dev` mode on localhost
 4. For worktree features: verify with real git operations

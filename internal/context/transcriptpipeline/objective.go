@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/storage/transcriptcache"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
 )
 
 const sessionObjectiveSystemPromptV1 = `Identify the overarching session objective from a transcript.

@@ -12,9 +12,9 @@ GOCACHE_DIR := $(shell $(GO) env GOCACHE)
 # which conflicts with github.com/tursodatabase/go-libsql's embedded SQLite
 # symbols (both define sqlite3_data_directory). See AGENTS.md "Testing Requirements"
 # for details and manual vector test commands.
-RACE_PKGS := $(shell $(GO_CMD_CGO) list ./... | grep -v 'github.com/jkatigb/agentctl/internal/storage/vector')
+RACE_PKGS := $(shell $(GO_CMD_CGO) list ./... | grep -v 'github.com/joshka0/foxctl/internal/storage/vector')
 RACE_SHARDS := core-cmd core-internal runtime context-tooling intelligence platform-interfaces storage v2 skills-a-g skills-h-o skills-p-x
-BINARY ?= agentctl
+BINARY ?= foxctl
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
 GOLANGCI_TIMEOUT ?= 10m
@@ -24,7 +24,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-agentctl-package eval-code-search-praze-infra eval-code-search-agentctl-repo-grounded eval-code-search-agentctl-change-impact eval-code-search-agentctl-trace-symbol eval-code-search-agentctl-bridge-esoteric eval-retrieval-agentctl eval-retrieval-agentctl-mixed eval-retrieval-agentctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -98,57 +98,57 @@ test-cgo-short:
 	@$(GO_CMD_CGO) test -short -tags=libsqlite3 ./...
 
 gepa-prompt:
-	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize prompt $(ARGS)
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/foxctl optimize prompt $(ARGS)
 
 gepa-cycle:
-	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize prompt cycle $(ARGS)
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/foxctl optimize prompt cycle $(ARGS)
 
 gepa-compare-batch:
-	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize prompts compare-batch $(ARGS)
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/foxctl optimize prompts compare-batch $(ARGS)
 
 gepa-judge-baseline:
 	@python3 scripts/preference_judge_baseline.py $(ARGS)
 
 gepa-dataset-export:
-	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset export $(ARGS)
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/foxctl optimize dataset export $(ARGS)
 
 gepa-dataset-export-ranked:
-	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset export-ranked $(ARGS)
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/foxctl optimize dataset export-ranked $(ARGS)
 
 gepa-claude-export:
-	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset claude export $(ARGS)
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/foxctl optimize dataset claude export $(ARGS)
 
 gepa-claude-rewrite:
-	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset claude rewrite $(ARGS)
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/foxctl optimize dataset claude rewrite $(ARGS)
 
 gepa-leaderboard:
-	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/agentctl optimize dataset claude leaderboard $(ARGS)
+	@$(GO_CMD_CGO) run -tags=libsqlite3 ./cmd/foxctl optimize dataset claude leaderboard $(ARGS)
 
-eval-code-search-agentctl-package:
+eval-code-search-foxctl-package:
 	@bash ./scripts/eval_code_search_agentctl_package.sh $(ARGS)
 
 eval-code-search-praze-infra:
 	@bash ./scripts/eval_code_search_praze_infra.sh $(ARGS)
 
-eval-code-search-agentctl-repo-grounded:
+eval-code-search-foxctl-repo-grounded:
 	@bash ./scripts/eval_code_search_agentctl_repo_grounded.sh $(ARGS)
 
-eval-code-search-agentctl-change-impact:
+eval-code-search-foxctl-change-impact:
 	@bash ./scripts/eval_code_search_agentctl_change_impact.sh $(ARGS)
 
-eval-code-search-agentctl-trace-symbol:
+eval-code-search-foxctl-trace-symbol:
 	@bash ./scripts/eval_code_search_agentctl_trace_symbol.sh $(ARGS)
 
-eval-code-search-agentctl-bridge-esoteric:
+eval-code-search-foxctl-bridge-esoteric:
 	@bash ./scripts/eval_code_search_agentctl_bridge_esoteric.sh $(ARGS)
 
-eval-retrieval-agentctl:
+eval-retrieval-foxctl:
 	@bash ./scripts/eval_retrieval_agentctl.sh $(ARGS)
 
-eval-retrieval-agentctl-mixed:
+eval-retrieval-foxctl-mixed:
 	@bash ./scripts/eval_retrieval_agentctl_mixed.sh $(ARGS)
 
-eval-retrieval-agentctl-cochange:
+eval-retrieval-foxctl-cochange:
 	@bash ./scripts/eval_retrieval_agentctl_cochange.sh $(ARGS)
 
 eval-retrieval-jido:
@@ -177,20 +177,20 @@ ifndef SHARD
 endif
 	@set -euo pipefail; \
 		case "$(SHARD)" in \
-			core-cmd) include_re='^github.com/jkatigb/agentctl/(cmd|plugins|scripts|test)(/|$$)' ;; \
-			core-internal) include_re='^github.com/jkatigb/agentctl/internal/(adapters|agent|auth|console|domain|protocol|providers|rlm)(/|$$)' ;; \
-			runtime) include_re='^github.com/jkatigb/agentctl/internal/runtime(/|$$)' ;; \
-			context-tooling) include_re='^github.com/jkatigb/agentctl/internal/(context|tooling)(/|$$)' ;; \
-			intelligence) include_re='^github.com/jkatigb/agentctl/internal/intelligence(/|$$)' ;; \
-			platform-interfaces) include_re='^github.com/jkatigb/agentctl/internal/(interfaces|platform)(/|$$)' ;; \
-			storage) include_re='^github.com/jkatigb/agentctl/internal/storage(/|$$)' ;; \
-			v2) include_re='^github.com/jkatigb/agentctl/internal/v2(/|$$)' ;; \
-			skills-a-g) include_re='^github.com/jkatigb/agentctl/skills($$|/[a-g][^/]*($$|/))' ;; \
-			skills-h-o) include_re='^github.com/jkatigb/agentctl/skills/[h-o][^/]*($$|/)' ;; \
-			skills-p-x) include_re='^github.com/jkatigb/agentctl/skills/[p-x][^/]*($$|/)' ;; \
+			core-cmd) include_re='^github.com/joshka0/foxctl/(cmd|plugins|scripts|test)(/|$$)' ;; \
+			core-internal) include_re='^github.com/joshka0/foxctl/internal/(adapters|agent|auth|console|domain|protocol|providers|rlm)(/|$$)' ;; \
+			runtime) include_re='^github.com/joshka0/foxctl/internal/runtime(/|$$)' ;; \
+			context-tooling) include_re='^github.com/joshka0/foxctl/internal/(context|tooling)(/|$$)' ;; \
+			intelligence) include_re='^github.com/joshka0/foxctl/internal/intelligence(/|$$)' ;; \
+			platform-interfaces) include_re='^github.com/joshka0/foxctl/internal/(interfaces|platform)(/|$$)' ;; \
+			storage) include_re='^github.com/joshka0/foxctl/internal/storage(/|$$)' ;; \
+			v2) include_re='^github.com/joshka0/foxctl/internal/v2(/|$$)' ;; \
+			skills-a-g) include_re='^github.com/joshka0/foxctl/skills($$|/[a-g][^/]*($$|/))' ;; \
+			skills-h-o) include_re='^github.com/joshka0/foxctl/skills/[h-o][^/]*($$|/)' ;; \
+			skills-p-x) include_re='^github.com/joshka0/foxctl/skills/[p-x][^/]*($$|/)' ;; \
 			*) echo "Unknown race shard: $(SHARD)" >&2; exit 1 ;; \
 		esac; \
-		pkgs="$$( $(GO_CMD_CGO) list ./... | grep -E "$$include_re" | grep -Ev '^github.com/jkatigb/agentctl/internal/storage/vector($$|/)' || true )"; \
+		pkgs="$$( $(GO_CMD_CGO) list ./... | grep -E "$$include_re" | grep -Ev '^github.com/joshka0/foxctl/internal/storage/vector($$|/)' || true )"; \
 		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No packages for race shard $(SHARD)"; \
@@ -205,7 +205,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | grep -Ev '^github.com/jkatigb/agentctl/internal/storage/vector($$|/)' || true )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/test/integration' | grep -Ev '^github.com/joshka0/foxctl/internal/storage/vector($$|/)' || true )"; \
 		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
@@ -223,21 +223,21 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		case "$(SHARD)" in \
-			core-cmd) include_re='^github.com/jkatigb/agentctl/(cmd|plugins|scripts|test)(/|$$)' ;; \
-			core-internal) include_re='^github.com/jkatigb/agentctl/internal/(adapters|agent|auth|console|domain|protocol|providers|rlm)(/|$$)' ;; \
-			runtime) include_re='^github.com/jkatigb/agentctl/internal/runtime(/|$$)' ;; \
-			context-tooling) include_re='^github.com/jkatigb/agentctl/internal/(context|tooling)(/|$$)' ;; \
-			intelligence) include_re='^github.com/jkatigb/agentctl/internal/intelligence(/|$$)' ;; \
-			platform-interfaces) include_re='^github.com/jkatigb/agentctl/internal/(interfaces|platform)(/|$$)' ;; \
-			storage) include_re='^github.com/jkatigb/agentctl/internal/storage(/|$$)' ;; \
-			v2) include_re='^github.com/jkatigb/agentctl/internal/v2(/|$$)' ;; \
-			skills-a-g) include_re='^github.com/jkatigb/agentctl/skills($$|/[a-g][^/]*($$|/))' ;; \
-			skills-h-o) include_re='^github.com/jkatigb/agentctl/skills/[h-o][^/]*($$|/)' ;; \
-			skills-p-x) include_re='^github.com/jkatigb/agentctl/skills/[p-x][^/]*($$|/)' ;; \
+			core-cmd) include_re='^github.com/joshka0/foxctl/(cmd|plugins|scripts|test)(/|$$)' ;; \
+			core-internal) include_re='^github.com/joshka0/foxctl/internal/(adapters|agent|auth|console|domain|protocol|providers|rlm)(/|$$)' ;; \
+			runtime) include_re='^github.com/joshka0/foxctl/internal/runtime(/|$$)' ;; \
+			context-tooling) include_re='^github.com/joshka0/foxctl/internal/(context|tooling)(/|$$)' ;; \
+			intelligence) include_re='^github.com/joshka0/foxctl/internal/intelligence(/|$$)' ;; \
+			platform-interfaces) include_re='^github.com/joshka0/foxctl/internal/(interfaces|platform)(/|$$)' ;; \
+			storage) include_re='^github.com/joshka0/foxctl/internal/storage(/|$$)' ;; \
+			v2) include_re='^github.com/joshka0/foxctl/internal/v2(/|$$)' ;; \
+			skills-a-g) include_re='^github.com/joshka0/foxctl/skills($$|/[a-g][^/]*($$|/))' ;; \
+			skills-h-o) include_re='^github.com/joshka0/foxctl/skills/[h-o][^/]*($$|/)' ;; \
+			skills-p-x) include_re='^github.com/joshka0/foxctl/skills/[p-x][^/]*($$|/)' ;; \
 			*) echo "Unknown race shard: $(SHARD)" >&2; exit 1 ;; \
 		esac; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E "$$include_re" | grep -vx 'github.com/jkatigb/agentctl/test/integration' | grep -Ev '^github.com/jkatigb/agentctl/internal/storage/vector($$|/)' || true )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -E "$$include_re" | grep -vx 'github.com/joshka0/foxctl/test/integration' | grep -Ev '^github.com/joshka0/foxctl/internal/storage/vector($$|/)' || true )"; \
 		pkgs="$$( printf '%s\n' "$$pkgs" | sed '/^$$/d' | paste -sd' ' - )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages for race shard $(SHARD)"; \
@@ -255,7 +255,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		if ! echo "$$pkgs" | tr ' ' '\n' | grep -qx 'github.com/jkatigb/agentctl/test/integration'; then \
+		if ! echo "$$pkgs" | tr ' ' '\n' | grep -qx 'github.com/joshka0/foxctl/test/integration'; then \
 			echo "Integration package not impacted"; \
 			exit 0; \
 		fi; \
@@ -263,7 +263,7 @@ endif
 		$(GO_CMD) test -tags=integration ./test/integration/... -timeout 15m -v
 
 test-integration-cmd:
-	@$(GO_CMD) test -tags=integration ./cmd/agentctl/cmd/... -timeout 15m -v
+	@$(GO_CMD) test -tags=integration ./cmd/foxctl/cmd/... -timeout 15m -v
 
 cover:
 	@mkdir -p coverage
@@ -323,11 +323,11 @@ build:
 	DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ); \
 	$(GO_CMD) build -trimpath \
 		-ldflags="-s -w \
-		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Version=$$VERSION \
-		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Commit=$$COMMIT \
-		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Date=$$DATE" \
-		-o bin/$(BINARY) ./cmd/agentctl
-	@$(GO_CMD) build -trimpath -ldflags="-s -w" -o bin/agentctl-mail ./cmd/agentctl-mail
+		-X github.com/joshka0/foxctl/internal/platform/buildinfo.Version=$$VERSION \
+		-X github.com/joshka0/foxctl/internal/platform/buildinfo.Commit=$$COMMIT \
+		-X github.com/joshka0/foxctl/internal/platform/buildinfo.Date=$$DATE" \
+		-o bin/$(BINARY) ./cmd/foxctl
+	@$(GO_CMD) build -trimpath -ldflags="-s -w" -o bin/foxctl-mail ./cmd/foxctl-mail
 
 build-cgo:
 	@set -euo pipefail; \
@@ -336,10 +336,10 @@ build-cgo:
 	DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ); \
 	$(GO_CMD_CGO) build -tags=libsqlite3 -trimpath \
 		-ldflags="-s -w \
-		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Version=$$VERSION \
-		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Commit=$$COMMIT \
-		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Date=$$DATE" \
-		-o bin/$(BINARY)-cgo ./cmd/agentctl
+		-X github.com/joshka0/foxctl/internal/platform/buildinfo.Version=$$VERSION \
+		-X github.com/joshka0/foxctl/internal/platform/buildinfo.Commit=$$COMMIT \
+		-X github.com/joshka0/foxctl/internal/platform/buildinfo.Date=$$DATE" \
+		-o bin/$(BINARY)-cgo ./cmd/foxctl
 
 build-all: build build-cgo
 	@echo "Built bin/$(BINARY) and bin/$(BINARY)-cgo"
@@ -348,7 +348,7 @@ init: build-all skills-install-all
 	@./scripts/init.sh
 
 viewer:
-	@$(GO_CMD) build -trimpath -o bin/agentctl-viewer ./cmd/agentctl_viewer
+	@$(GO_CMD) build -trimpath -o bin/foxctl-viewer ./cmd/agentctl_viewer
 
 install-mail:
 	@./scripts/install-mail.sh
@@ -359,10 +359,10 @@ web-templ:
 	@templ generate ./cmd/agentctl_web/templates/
 
 web-build: web-templ
-	@$(GO_CMD) build -trimpath -o bin/agentctl-web ./cmd/agentctl_web
+	@$(GO_CMD) build -trimpath -o bin/foxctl-web ./cmd/agentctl_web
 
 web-run: web-build
-	@./bin/agentctl-web
+	@./bin/foxctl-web
 
 # TypeScript/Bun targets
 .PHONY: ts-install ts-dev-tui ts-dev-gui ts-build ts-typecheck ts-typecheck-fast ts-lint ts-lint-fix ts-check
@@ -374,8 +374,8 @@ ts-install:
 # Build the standalone TUI agent binary
 ts-build-tui: ts-install
 	@mkdir -p bin
-	@bun build --compile --minify packages/tui-agent/src/index.ts --outfile bin/agentctl-tui
-	@echo "Built bin/agentctl-tui"
+	@bun build --compile --minify packages/tui-agent/src/index.ts --outfile bin/foxctl-tui
+	@echo "Built bin/foxctl-tui"
 
 ts-dev-tui: ts-install
 	@cd packages/tui-agent && bun run dev
@@ -387,7 +387,7 @@ ts-dev-gui: gui-agent
 
 GUI_API_PORT ?= 8090
 GUI_VITE_PORT ?= 5174
-GUI_WEB_LOG ?= /tmp/agentctl-web.log
+GUI_WEB_LOG ?= /tmp/foxctl-web.log
 GUI_DB_DRIVER ?= sqlite
 GUI_V2_EVENTS_DB_DRIVER ?= sqlite
 
@@ -396,7 +396,7 @@ gui-agent-dev: build ts-install
 	@echo "Building gui-agent frontend..."
 	@cd packages/gui-agent && bun run build
 	@echo "Stopping any running servers..."
-	@pkill -f 'agentctl web serve' 2>/dev/null || true
+	@pkill -f 'foxctl web serve' 2>/dev/null || true
 	@lsof -ti :$(GUI_API_PORT) | xargs kill 2>/dev/null || true
 	@lsof -ti :$(GUI_VITE_PORT) | xargs kill 2>/dev/null || true
 
@@ -404,7 +404,7 @@ room-board-live-e2e:
 	@./scripts/room_board_live_e2e.sh
 	@sleep 1
 	@echo "Starting web server on :$(GUI_API_PORT)..."
-	@AGENTCTL_DB_DRIVER=$${AGENTCTL_DB_DRIVER:-$(GUI_DB_DRIVER)} AGENTCTL_V2_EVENTS_DB_DRIVER=$${AGENTCTL_V2_EVENTS_DB_DRIVER:-$(GUI_V2_EVENTS_DB_DRIVER)} ./bin/agentctl web serve --dev-cors --port $(GUI_API_PORT) --ui-dir packages/gui-agent/dist > $(GUI_WEB_LOG) 2>&1 &
+	@AGENTCTL_DB_DRIVER=$${AGENTCTL_DB_DRIVER:-$(GUI_DB_DRIVER)} AGENTCTL_V2_EVENTS_DB_DRIVER=$${AGENTCTL_V2_EVENTS_DB_DRIVER:-$(GUI_V2_EVENTS_DB_DRIVER)} ./bin/foxctl web serve --dev-cors --port $(GUI_API_PORT) --ui-dir packages/gui-agent/dist > $(GUI_WEB_LOG) 2>&1 &
 	@sleep 2
 	@echo "Web server running at http://localhost:$(GUI_API_PORT) (logs: $(GUI_WEB_LOG))"
 	@curl -sf http://localhost:$(GUI_API_PORT)/api/health > /dev/null || (echo "Health check failed; tailing $(GUI_WEB_LOG)"; tail -n 80 $(GUI_WEB_LOG); exit 1)
@@ -418,12 +418,12 @@ gui-agent-build: ts-install
 # Build Go backend + start API server + Vite dev mode with hot reload
 gui-agent: build ts-install
 	@echo "Stopping any running servers..."
-	@pkill -f 'agentctl web serve' 2>/dev/null || true
+	@pkill -f 'foxctl web serve' 2>/dev/null || true
 	@lsof -ti :$(GUI_API_PORT) | xargs kill 2>/dev/null || true
 	@lsof -ti :$(GUI_VITE_PORT) | xargs kill 2>/dev/null || true
 	@sleep 1
 	@echo "Starting API server on :$(GUI_API_PORT)..."
-	@AGENTCTL_DB_DRIVER=$${AGENTCTL_DB_DRIVER:-$(GUI_DB_DRIVER)} AGENTCTL_V2_EVENTS_DB_DRIVER=$${AGENTCTL_V2_EVENTS_DB_DRIVER:-$(GUI_V2_EVENTS_DB_DRIVER)} ./bin/agentctl web serve --dev-cors --port $(GUI_API_PORT) > $(GUI_WEB_LOG) 2>&1 &
+	@AGENTCTL_DB_DRIVER=$${AGENTCTL_DB_DRIVER:-$(GUI_DB_DRIVER)} AGENTCTL_V2_EVENTS_DB_DRIVER=$${AGENTCTL_V2_EVENTS_DB_DRIVER:-$(GUI_V2_EVENTS_DB_DRIVER)} ./bin/foxctl web serve --dev-cors --port $(GUI_API_PORT) > $(GUI_WEB_LOG) 2>&1 &
 	@sleep 2
 	@curl -sf http://localhost:$(GUI_API_PORT)/api/health > /dev/null || (echo "Health check failed; tailing $(GUI_WEB_LOG)"; tail -n 80 $(GUI_WEB_LOG); exit 1)
 	@curl -sf "http://localhost:$(GUI_API_PORT)/api/orchestration/board-get?request_id=make-gui-preflight" > /dev/null || (echo "Orchestration preflight failed; tailing $(GUI_WEB_LOG)"; tail -n 120 $(GUI_WEB_LOG); exit 1)
@@ -442,11 +442,11 @@ gui-smoke-seed:
 # Runs both API server and TUI binary together
 ts-tui: ts-build-tui build
 	@echo "Starting API server and TUI..."
-	@./bin/agentctl web serve --dev-cors > /dev/null 2>&1 & \
+	@./bin/foxctl web serve --dev-cors > /dev/null 2>&1 & \
 	SERVER_PID=$$!; \
 	trap "kill $$SERVER_PID 2>/dev/null || true" EXIT; \
 	sleep 1; \
-	AGENTCTL_API_URL=http://localhost:8090 ./bin/agentctl-tui
+	AGENTCTL_API_URL=http://localhost:8090 ./bin/foxctl-tui
 
 ts-build: ts-install
 	@bun run build
@@ -608,7 +608,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | xargs )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/test/integration' | xargs )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
 			exit 0; \
@@ -622,7 +622,7 @@ ifndef BASE_REF
 endif
 	@set -euo pipefail; \
 		pkgs="$$( $(GO_CMD) run ./scripts/skills_impact --mode packages --base-ref "$(BASE_REF)" --head-ref "$(HEAD_REF)" --format names )"; \
-		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/jkatigb/agentctl/test/integration' | xargs )"; \
+		pkgs="$$( echo "$$pkgs" | tr ' ' '\n' | grep -vx 'github.com/joshka0/foxctl/test/integration' | xargs )"; \
 		if [ -z "$$pkgs" ]; then \
 			echo "No impacted packages"; \
 			exit 0; \
@@ -649,13 +649,13 @@ skills-install: skills-build-all build
 			fi; \
 			if [ -f "$$manifest" ] && [ -f "$$binaryCgo" ]; then \
 				skillName=$$(grep -E '^  name:' "$$manifest" | head -1 | sed 's/.*name: *//'); \
-				destDir="$${HOME}/.agentctl/skills/$$skillName"; \
+				destDir="$${HOME}/.foxctl/skills/$$skillName"; \
 				if [ -d "$$destDir" ]; then \
 					cp "$$binaryCgo" "$$destDir/bin-cgo"; \
 				fi; \
 			fi; \
 		done; \
-		echo "Done. Run 'bin/agentctl skills list' to verify."
+		echo "Done. Run 'bin/foxctl skills list' to verify."
 
 # Install CGO skill binaries alongside non-CGO ones
 skills-install-cgo: skills-build-cgo
@@ -667,7 +667,7 @@ skills-install-cgo: skills-build-cgo
 			binaryCgo="dist/skills/$$name/bin-cgo"; \
 			if [ -f "$$manifest" ] && [ -f "$$binaryCgo" ]; then \
 				skillName=$$(grep -E '^  name:' "$$manifest" | head -1 | sed 's/.*name: *//'); \
-				destDir="$${HOME}/.agentctl/skills/$$skillName"; \
+				destDir="$${HOME}/.foxctl/skills/$$skillName"; \
 				if [ -d "$$destDir" ]; then \
 					echo " - $$skillName (cgo)"; \
 					cp "$$binaryCgo" "$$destDir/bin-cgo"; \
@@ -733,32 +733,32 @@ completions: build
 	@bin/$(BINARY) completion bash > dist/completion.bash
 	@bin/$(BINARY) completion zsh > dist/_agentctl
 
-# Environment file sync (repo → ~/.agentctl)
+# Environment file sync (repo → ~/.foxctl)
 # Use real files, not symlinks, for sandbox/remote compatibility
 .PHONY: env-sync env-watch env-watch-stop
 
 env-sync:
 	@if [ -f .env ]; then \
-		mkdir -p ~/.agentctl; \
-		cp .env ~/.agentctl/.env; \
-		echo "Synced .env → ~/.agentctl/.env"; \
+		mkdir -p ~/.foxctl; \
+		cp .env ~/.foxctl/.env; \
+		echo "Synced .env → ~/.foxctl/.env"; \
 	else \
 		echo "No .env file found in repo root"; \
 		exit 1; \
 	fi
 
 # Watch .env and auto-sync on changes (requires fswatch: brew install fswatch)
-ENV_WATCH_PID := /tmp/agentctl-env-watch.pid
+ENV_WATCH_PID := /tmp/foxctl-env-watch.pid
 env-watch:
 	@command -v fswatch >/dev/null 2>&1 || { echo "fswatch not installed. Run: brew install fswatch"; exit 1; }
 	@if [ -f $(ENV_WATCH_PID) ] && kill -0 $$(cat $(ENV_WATCH_PID)) 2>/dev/null; then \
 		echo "env-watch already running (PID $$(cat $(ENV_WATCH_PID)))"; \
 	else \
 		echo "Starting env-watch..."; \
-		nohup bash -c 'fswatch -o "$(CURDIR)/.env" | while read; do cp "$(CURDIR)/.env" ~/.agentctl/.env && echo "[env-watch] synced .env"; done' \
-			> /tmp/agentctl-env-watch.log 2>&1 & echo $$! > $(ENV_WATCH_PID); \
+		nohup bash -c 'fswatch -o "$(CURDIR)/.env" | while read; do cp "$(CURDIR)/.env" ~/.foxctl/.env && echo "[env-watch] synced .env"; done' \
+			> /tmp/foxctl-env-watch.log 2>&1 & echo $$! > $(ENV_WATCH_PID); \
 		sleep 0.5; \
-		echo "env-watch started (PID $$(cat $(ENV_WATCH_PID))), log: /tmp/agentctl-env-watch.log"; \
+		echo "env-watch started (PID $$(cat $(ENV_WATCH_PID))), log: /tmp/foxctl-env-watch.log"; \
 	fi
 
 env-watch-stop:
@@ -775,8 +775,8 @@ env-watch-stop:
 .PHONY: db-backup db-backup-list db-backup-clean
 
 db-backup:
-	@BACKUP_DIR="$$HOME/.agentctl/backups"; \
-	STORAGE_DIR="$$HOME/.agentctl/storage"; \
+	@BACKUP_DIR="$$HOME/.foxctl/backups"; \
+	STORAGE_DIR="$$HOME/.foxctl/storage"; \
 	mkdir -p "$$BACKUP_DIR"; \
 	TIMESTAMP=$$(date +%Y%m%d_%H%M%S); \
 	BACKUP_PATH="$$BACKUP_DIR/$$TIMESTAMP"; \
@@ -794,7 +794,7 @@ db-backup:
 	echo "Backed up $$count databases to: $$BACKUP_PATH"
 
 db-backup-list:
-	`@BACKUP_DIR`="$$HOME/.agentctl/backups"; \
+	`@BACKUP_DIR`="$$HOME/.foxctl/backups"; \
 	echo "Available backups:"; \
 	backups=$$(ls -dt "$$BACKUP_DIR"/2* 2>/dev/null | head -10); \
 	if [ -z "$$backups" ]; then \
@@ -809,7 +809,7 @@ db-backup-list:
 	fi
 
 db-backup-clean:
-	@BACKUP_DIR="$$HOME/.agentctl/backups"; \
+	@BACKUP_DIR="$$HOME/.foxctl/backups"; \
 	echo "Keeping 2 most recent backups, removing older ones..."; \
 	ls -dt "$$BACKUP_DIR"/2* 2>/dev/null | tail -n +3 | while read dir; do \
 		echo "  Removing: $$(basename $$dir)"; \

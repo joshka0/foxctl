@@ -4,7 +4,7 @@ Status: Draft (2026-02-08)
 
 ## Summary
 
-Make agentctl's DB-backed state consistent across multiple computers for a single user by:
+Make foxctl's DB-backed state consistent across multiple computers for a single user by:
 
 - Using libSQL sync or Turso as the shared source of truth (local-first embedded replicas).
 - Standardizing database driver configuration across all stores (not just cache/jobs/memory).
@@ -13,7 +13,7 @@ Make agentctl's DB-backed state consistent across multiple computers for a singl
 
 ## Motivation
 
-Today, agentctl persists state across many SQLite databases under `~/.agentctl`. This works well on one machine but breaks down across machines due to:
+Today, foxctl persists state across many SQLite databases under `~/.foxctl`. This works well on one machine but breaks down across machines due to:
 
 - Databases being strictly local by default.
 - Some identity and indexing logic still depending on absolute workspace paths.
@@ -51,7 +51,7 @@ Today, agentctl persists state across many SQLite databases under `~/.agentctl`.
 
 ### 1. Local-First Replicas Everywhere
 
-Each store continues to use a local file under `~/.agentctl` as its primary read path, with optional sync:
+Each store continues to use a local file under `~/.foxctl` as its primary read path, with optional sync:
 
 - `sqlite`: local-only
 - `libsql`: local libSQL file, optionally with `SyncURL` + `SyncToken`
@@ -88,7 +88,7 @@ Proposed env conventions:
 Notes:
 
 - `<STORE>` should be a stable, uppercase logical name matching the DB file. See the full canonical store list in section 2.2 below.
-- Default file paths should remain under `~/.agentctl` but use distinct extensions (`.db`, `.libsql`) to avoid accidental reuse.
+- Default file paths should remain under `~/.foxctl` but use distinct extensions (`.db`, `.libsql`) to avoid accidental reuse.
 
 ### 2.1 Multi-DB vs Single DB (Direction)
 
@@ -104,7 +104,7 @@ Long-term direction:
 
 ### 2.2 Canonical Store List
 
-Every `.db` file managed by agentctl must appear in this list. Stores are classified as **sync** (should replicate across devices), **local** (safe to remain device-local), or **external** (read-only, not agentctl-owned).
+Every `.db` file managed by foxctl must appear in this list. Stores are classified as **sync** (should replicate across devices), **local** (safe to remain device-local), or **external** (read-only, not foxctl-owned).
 
 **Sync-critical stores** (Phase 2 MVP):
 
@@ -151,9 +151,9 @@ Every `.db` file managed by agentctl must appear in this list. Stores are classi
 
 | Store Name | DB File | Package | Notes |
 |---|---|---|---|
-| `EVENTS` | `events.db` | `internal/runtime/observability/` | Stored under `$AGENTCTL_OBS_DIR`, not `~/.agentctl/storage/` |
+| `EVENTS` | `events.db` | `internal/runtime/observability/` | Stored under `$AGENTCTL_OBS_DIR`, not `~/.foxctl/storage/` |
 
-**External** (read-only, not agentctl-owned):
+**External** (read-only, not foxctl-owned):
 
 | Store Name | DB File | Package | Notes |
 |---|---|---|---|
@@ -199,7 +199,7 @@ Lease database:
 
 Lease ownership:
 
-- Introduce a stable per-machine `device_id` stored locally (for example `~/.agentctl/device.json`).
+- Introduce a stable per-machine `device_id` stored locally (for example `~/.foxctl/device.json`).
 - Lease owner uses `device_id` plus a per-process suffix for debugging (`device_id:pid:ulid`).
 
 Daemon behavior:
@@ -228,7 +228,7 @@ Leader-only subsystems (from `internal/runtime/daemon/service.go` and `internal/
 
 Acceptance:
 
-- Running `agentctl doctor` prints device id, workspace id, and DB driver summaries per store.
+- Running `foxctl doctor` prints device id, workspace id, and DB driver summaries per store.
 
 ### Phase 1: Make Every Store Configurable (dbdriver)
 
@@ -270,8 +270,8 @@ Acceptance:
 Sync frequency / latency:
 
 - Default (proposed): auto-sync on write with periodic background sync (configurable interval, e.g., 30s).
-- Implementation note: libSQL and Turso drivers can run an optional background sync loop when `SyncInterval > 0` (and for libSQL, when `SyncURL` is configured). `agentctl sync` provides an explicit on-demand sync for configured stores.
-- Provide `agentctl sync` as an explicit manual command for on-demand sync.
+- Implementation note: libSQL and Turso drivers can run an optional background sync loop when `SyncInterval > 0` (and for libSQL, when `SyncURL` is configured). `foxctl sync` provides an explicit on-demand sync for configured stores.
+- Provide `foxctl sync` as an explicit manual command for on-demand sync.
 - Expected cross-device lag: seconds in normal operation, minutes if one device is offline.
 
 Acceptance:
@@ -285,7 +285,7 @@ Acceptance:
 
 Acceptance:
 
-- Two machines can run `agentctl daemon` concurrently and only one processes mailbox messages.
+- Two machines can run `foxctl daemon` concurrently and only one processes mailbox messages.
 
 ### Phase 4: Cleanup and Hardening
 
@@ -317,7 +317,7 @@ If needed later:
 - CGO requirement for libSQL/Turso. Mitigation: keep `sqlite` fallback always available; sync is an opt-in capability.
 - Initial data migration to remote. Mitigation: make migration explicit and reversible; do not auto-overwrite local DBs.
 - Duplicate work without leader gating. Mitigation: lease gate all daemon loops; keep at-least-once invariants, add dedupe where possible.
-- Workspace identity drift during migration. Mitigation: Phase 1 adds repair logic to all workspace-scoped stores before Phase 2 enables sync. Run `agentctl doctor` to verify workspace IDs are consistent.
+- Workspace identity drift during migration. Mitigation: Phase 1 adds repair logic to all workspace-scoped stores before Phase 2 enables sync. Run `foxctl doctor` to verify workspace IDs are consistent.
 
 ## Open Questions
 

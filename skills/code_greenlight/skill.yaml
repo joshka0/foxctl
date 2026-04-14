@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/greenlight
@@ -64,7 +64,7 @@ signature:
     long: |
       Use code/greenlight to run rule-based scans for App Store policy risks.
       Example:
-        agentctl run code/greenlight --path . --scan_mode scan --severity_threshold medium
+        foxctl run code/greenlight --path . --scan_mode scan --severity_threshold medium
   returns:
     - name: findings
       type: array

@@ -201,7 +201,7 @@ func Get(language string) BlockExpander {
 ```go
 package expander
 
-import "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+import "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 
 type GoExpander struct{}
 

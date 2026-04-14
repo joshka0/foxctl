@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useReservations } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { Reservation } from "@agentctl/data";
+import type { Reservation } from "@foxctl/data";
 
 function modeColor(mode: string): string {
   return mode === "exclusive" ? "#ff0000" : "#00ff00";

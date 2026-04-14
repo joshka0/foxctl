@@ -20,7 +20,7 @@ export function createAuth(config: GatewayConfig) {
 
   const auth = betterAuth({
     secret: config.authSecret,
-    appName: "agentctl gui-agent",
+    appName: "foxctl gui-agent",
     baseURL: config.publicBaseURL,
     trustedOrigins: config.trustedOrigins,
     database,

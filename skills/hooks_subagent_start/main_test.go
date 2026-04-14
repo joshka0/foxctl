@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/agentpolicy"
+	"github.com/joshka0/foxctl/internal/runtime/agentpolicy"
 	"github.com/stretchr/testify/assert"
 )
 

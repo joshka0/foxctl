@@ -2,14 +2,14 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: gui-auth-gateway
-  namespace: agentctl
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: gui-auth-gateway
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: agentctl
+      app.kubernetes.io/name: foxctl
       app.kubernetes.io/component: gui-auth-gateway
   policyTypes:
   - Ingress
@@ -22,7 +22,7 @@ spec:
   - to:
     - podSelector:
         matchLabels:
-          app.kubernetes.io/name: agentctl
+          app.kubernetes.io/name: foxctl
           app.kubernetes.io/component: core
     ports:
     - protocol: TCP

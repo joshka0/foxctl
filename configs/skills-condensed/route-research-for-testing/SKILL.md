@@ -23,4 +23,4 @@ Map changed routes and launch tests.
 
 4. **Launch tester**: Call Task tool with `auth-route-tester` sub-agent
 
-Full docs: `~/.agentctl/share/configs/skills/route-research-for-testing/Skill.md`
+Full docs: `~/.foxctl/share/configs/skills/route-research-for-testing/Skill.md`

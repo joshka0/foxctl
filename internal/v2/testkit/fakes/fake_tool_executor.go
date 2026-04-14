@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/jkatigb/agentctl/internal/v2/runtime/runner"
+	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
 )
 
 // ToolExecution captures one Execute invocation.

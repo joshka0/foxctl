@@ -253,7 +253,7 @@ Subagent Review
 
 Subagent Review
 - reviewer: 019cbae8-dfb7-7af3-885c-f8ac07504966
-- scope: packages/gui-agent/src/{App.tsx,components/layout/AppShell.tsx,components/layout/AgentSidebar.tsx,components/actions/LogsViewer.tsx,components/v2/V2Explorers.tsx,components/conversations/ConversationsList.tsx,components/agents/AgentDetailView.tsx,components/layout/SpawnAgentPanel.tsx,stores/{viewStore.ts,activityFocusStore.ts},hooks/useActivityStream.ts}, internal/providers/llm/{defaults.go,providers.go}, cmd/agentctl/cmd/web.go
+- scope: packages/gui-agent/src/{App.tsx,components/layout/AppShell.tsx,components/layout/AgentSidebar.tsx,components/actions/LogsViewer.tsx,components/v2/V2Explorers.tsx,components/conversations/ConversationsList.tsx,components/agents/AgentDetailView.tsx,components/layout/SpawnAgentPanel.tsx,stores/{viewStore.ts,activityFocusStore.ts},hooks/useActivityStream.ts}, internal/providers/llm/{defaults.go,providers.go}, cmd/foxctl/cmd/web.go
 - findings: initial startup event-loss, focus-filter guard, and dev-cors message mismatch identified; patched and re-reviewed with no remaining substantive findings
 - decision: approved
 

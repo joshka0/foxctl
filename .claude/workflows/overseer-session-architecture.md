@@ -212,7 +212,7 @@ Overseer → Blackboard: Log decision for future reference
 
 while session_active:
     # 1. Poll for agent messages
-    messages = agentctl mailbox poll overseer --timeout 30 --max 10
+    messages = foxctl mailbox poll overseer --timeout 30 --max 10
 
     # 2. Process each message
     for msg in messages:
@@ -240,10 +240,10 @@ while session_active:
                 escalate_to_user(msg)
 
         # Acknowledge message
-        agentctl mailbox ack msg.id
+        foxctl mailbox ack msg.id
 
     # 3. Check blackboard for status updates
-    status = agentctl bb list status --ns overseer
+    status = foxctl bb list status --ns overseer
     update_session_state(status)
 
     # 4. Periodic checkpoint
@@ -264,11 +264,11 @@ export AGENTCTL_LLM_API_KEY=$(grep OPENROUTER_API_KEY ~/.claude/.env | cut -d= -
 export AGENTCTL_LLM_MODEL=anthropic/claude-haiku-4-5
 
 # 2. Spawn subagents
-agentctl agent spawn --role coder --prompt "You help with code tasks"
-agentctl agent spawn --role analyzer --prompt "You analyze code quality"
+foxctl agent spawn --role coder --prompt "You help with code tasks"
+foxctl agent spawn --role analyzer --prompt "You analyze code quality"
 
 # 3. Start daemon in background
-agentctl agent daemon &
+foxctl agent daemon &
 
 # 4. Claude Code takes over as overseer
 # (This happens in the conversation - Claude polls and coordinates)
@@ -280,7 +280,7 @@ agentctl agent daemon &
 
 ```bash
 # Session context - survives compaction
-agentctl bb post context --ns overseer --payload '{
+foxctl bb post context --ns overseer --payload '{
   "session_id": "2025-12-22-overseer",
   "started_at": "2025-12-22T11:00:00Z",
   "objective": "Implement multi-agent coordination",
@@ -289,7 +289,7 @@ agentctl bb post context --ns overseer --payload '{
 }'
 
 # Decision log - for continuity
-agentctl bb post decisions --ns overseer --payload '{
+foxctl bb post decisions --ns overseer --payload '{
   "decision_id": "dec-001",
   "question": "Which LLM provider?",
   "decision": "openrouter",
@@ -298,7 +298,7 @@ agentctl bb post decisions --ns overseer --payload '{
 }'
 
 # Task status
-agentctl bb post tasks --ns overseer --payload '{
+foxctl bb post tasks --ns overseer --payload '{
   "task_id": "task-123",
   "assigned_to": "coder-agent",
   "status": "in_progress",
@@ -312,13 +312,13 @@ When resuming a session (after compaction or new conversation):
 
 ```bash
 # 1. Load session context
-agentctl bb list context --ns overseer
+foxctl bb list context --ns overseer
 
 # 2. Check agent status
-agentctl agent list
+foxctl agent list
 
 # 3. Review pending messages
-agentctl mailbox list overseer
+foxctl mailbox list overseer
 
 # 4. Resume coordination
 # Claude Code picks up from last state
@@ -330,23 +330,23 @@ agentctl mailbox list overseer
 
 ```bash
 # Poll for messages (do this periodically)
-agentctl mailbox poll overseer --timeout 30 --max 10
+foxctl mailbox poll overseer --timeout 30 --max 10
 
 # Send task to agent
-agentctl mailbox send coder-agent \
+foxctl mailbox send coder-agent \
   --from overseer \
   --type overseer.task \
   --payload '{"task_id": "task-123", "description": "Fix the bug in X"}'
 
 # Check agent status
-agentctl agent list
+foxctl agent list
 
 # Log decision to blackboard
-agentctl bb post decisions --ns overseer \
+foxctl bb post decisions --ns overseer \
   --payload '{"decision": "...", "rationale": "..."}'
 
 # Checkpoint session
-agentctl memory put session-checkpoint \
+foxctl memory put session-checkpoint \
   --name "overseer-$(date +%Y%m%d-%H%M)" \
   --summary "Session checkpoint" \
   --type session \
@@ -357,13 +357,13 @@ agentctl memory put session-checkpoint \
 
 ```bash
 # Watch for agent events in real-time
-agentctl agent watch
+foxctl agent watch
 
 # Watch blackboard updates
-agentctl bb watch status --ns overseer
+foxctl bb watch status --ns overseer
 
 # Check task completion
-agentctl todo list
+foxctl todo list
 ```
 
 ## Implementation Phases

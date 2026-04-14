@@ -3,8 +3,8 @@ package adapters
 import (
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
-	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext"
+	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
 )
 
 type Group struct {

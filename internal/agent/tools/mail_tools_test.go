@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/storage/blackboard"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/rerank"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/rerank"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 )
 
 func TestRetrieveBlendsACAStateAndVaultHits(t *testing.T) {
@@ -226,14 +226,14 @@ func TestConceptNoteSpecificityBias_IgnoresNonConceptNotes(t *testing.T) {
 }
 
 func TestWorkspaceProjectNoteBias_UsesAbsoluteRepoNameForDotWorkspace(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "agentctl")
+	root := filepath.Join(t.TempDir(), "foxctl")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 	t.Chdir(root)
 
 	agentctlHit := obsidianindex.SearchHit{
-		Path: "notes/repo/agentctl/packages/internal-web-api.md",
+		Path: "notes/repo/foxctl/packages/internal-web-api.md",
 	}
 	prazeHit := obsidianindex.SearchHit{
 		Path: "notes/repo/praze/packages/apps-praze-api-lib-prazeweb-api.md",
@@ -247,66 +247,66 @@ func TestWorkspaceProjectNoteBias_UsesAbsoluteRepoNameForDotWorkspace(t *testing
 }
 
 func TestPackageNoteSpecificityBias_UsesAbsoluteRepoNameForDotWorkspace(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "agentctl")
+	root := filepath.Join(t.TempDir(), "foxctl")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 	t.Chdir(root)
 
 	rootHit := obsidianindex.SearchHit{
-		Path:  "notes/repo/agentctl/index.md",
-		Title: "agentctl Repo Graph",
+		Path:  "notes/repo/foxctl/index.md",
+		Title: "foxctl Repo Graph",
 	}
 	packageHit := obsidianindex.SearchHit{
-		Path:  "notes/repo/agentctl/packages/cmd-agentctl-cmd.md",
-		Title: "cmd agentctl cmd",
+		Path:  "notes/repo/foxctl/packages/cmd-foxctl-cmd.md",
+		Title: "cmd foxctl cmd",
 	}
 
-	rootBias := packageNoteSpecificityBias(".", "agentctl repo graph", rootHit)
-	packageBias := packageNoteSpecificityBias(".", "agentctl repo graph", packageHit)
+	rootBias := packageNoteSpecificityBias(".", "foxctl repo graph", rootHit)
+	packageBias := packageNoteSpecificityBias(".", "foxctl repo graph", packageHit)
 	if rootBias <= packageBias {
 		t.Fatalf("expected root bias > package bias for repo graph query, got root=%d package=%d", rootBias, packageBias)
 	}
 }
 
 func TestNoteQueryCoverageBias_PrefersCurrentProjectRootNote(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "agentctl")
+	root := filepath.Join(t.TempDir(), "foxctl")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 	t.Chdir(root)
 
 	rootHit := obsidianindex.SearchHit{
-		Path:  "notes/repo/agentctl/index.md",
-		Title: "agentctl Repo Graph",
+		Path:  "notes/repo/foxctl/index.md",
+		Title: "foxctl Repo Graph",
 	}
 	packageHit := obsidianindex.SearchHit{
-		Path:  "notes/repo/agentctl/packages/cmd-agentctl-cmd.md",
-		Title: "cmd agentctl cmd",
+		Path:  "notes/repo/foxctl/packages/cmd-foxctl-cmd.md",
+		Title: "cmd foxctl cmd",
 	}
 
-	rootBias := noteQueryCoverageBias(".", "agentctl repo graph", rootHit)
-	packageBias := noteQueryCoverageBias(".", "agentctl repo graph", packageHit)
+	rootBias := noteQueryCoverageBias(".", "foxctl repo graph", rootHit)
+	packageBias := noteQueryCoverageBias(".", "foxctl repo graph", packageHit)
 	if rootBias <= packageBias {
 		t.Fatalf("expected root coverage bias > package coverage bias, got root=%d package=%d", rootBias, packageBias)
 	}
 }
 
 func TestNoteQueryCoverageBias_PrefersMatchingPackageOverNeighbor(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "agentctl")
+	root := filepath.Join(t.TempDir(), "foxctl")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir root: %v", err)
 	}
 	t.Chdir(root)
 
 	webHit := obsidianindex.SearchHit{
-		Path:      "notes/repo/agentctl/packages/internal-web-api.md",
+		Path:      "notes/repo/foxctl/packages/internal-web-api.md",
 		Title:     "internal web api",
 		RepoPaths: []string{"internal/interfaces/web/api/agents.go"},
 		Symbols:   []string{"AgentDetailHandler"},
 	}
 	configHit := obsidianindex.SearchHit{
-		Path:      "notes/repo/agentctl/packages/internal-platform-config.md",
+		Path:      "notes/repo/foxctl/packages/internal-platform-config.md",
 		Title:     "internal platform config",
 		RepoPaths: []string{"internal/platform/config/config.go"},
 		Symbols:   []string{"Config"},

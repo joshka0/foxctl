@@ -30,7 +30,7 @@ func TestCreatePaneBuildsNamedZellijNewPaneCommand(t *testing.T) {
 		Session:           "collab",
 		CWD:               "/repo",
 		Name:              "researcher-a1b2",
-		Command:           "agentctl agent watch agent-123",
+		Command:           "foxctl agent watch agent-123",
 		ParticipantID:     "researcher-a1b2",
 		ParentParticipant: "lead-a",
 		ParentAgentID:     "agent:parent-1",
@@ -56,7 +56,7 @@ func TestCreatePaneBuildsNamedZellijNewPaneCommand(t *testing.T) {
 		"AGENTCTL_PARENT_PARTICIPANT_ID=lead-a",
 		"AGENTCTL_PARENT_AGENT_ID=agent:parent-1",
 		"sh -lc if [ -n",
-		"exec agentctl agent watch agent-123",
+		"exec foxctl agent watch agent-123",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("command %q missing %q", cmd, want)
@@ -121,7 +121,7 @@ func TestCreatePaneDirectRoomAddsRoomID(t *testing.T) {
 	_, err := client.CreatePane(context.Background(), CreatePaneOptions{
 		Session:       "collab",
 		Name:          "lead-a1b2",
-		Command:       "agentctl agent watch agent-123",
+		Command:       "foxctl agent watch agent-123",
 		ParticipantID: "lead-a1b2",
 		RoomID:        "room-alpha",
 		RoomAccess:    "direct",

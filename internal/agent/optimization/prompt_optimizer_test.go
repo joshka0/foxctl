@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/agent/optimization"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 func TestDefaultPromptOptimizerConfig(t *testing.T) {
@@ -336,7 +336,7 @@ func TestPromptOptimizer_GEPAModeUsesReflectionSignals(t *testing.T) {
 
 	config := optimization.PromptOptimizerConfig{
 		Mode:              "gepa",
-		Backend:           "agentctl",
+		Backend:           "foxctl",
 		BreadthCandidates: 4,
 		DepthIterations:   1,
 		MinImprovement:    0.01,
@@ -389,7 +389,7 @@ func TestPromptOptimizer_GEPAModeUsesDatasetExamples(t *testing.T) {
 
 	optimizer := optimization.NewPromptOptimizer(trajStore, patternStore, optimization.PromptOptimizerConfig{
 		Mode:              "gepa",
-		Backend:           "agentctl",
+		Backend:           "foxctl",
 		BreadthCandidates: 5,
 		DepthIterations:   1,
 		MinImprovement:    0.01,
@@ -469,7 +469,7 @@ func TestPromptOptimizer_ProposeCandidates(t *testing.T) {
 
 	optimizer := optimization.NewPromptOptimizer(trajStore, patternStore, optimization.PromptOptimizerConfig{
 		Mode:              "gepa",
-		Backend:           "agentctl",
+		Backend:           "foxctl",
 		BreadthCandidates: 4,
 		DepthIterations:   2,
 		MinImprovement:    0.01,

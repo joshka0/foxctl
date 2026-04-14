@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/platform/secrets"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/platform/secrets"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 // CaptureReviewOutcome records a review outcome event on the latest trajectory.
@@ -87,7 +87,7 @@ func CaptureReviewOutcome(ctx context.Context, storageRoot string, review agent.
 		TraceID:   strings.TrimSpace(traj.TraceID),
 		TaskID:    strings.TrimSpace(review.TaskID),
 		ReviewID:  review.ID,
-		CreatedBy: "agentctl",
+		CreatedBy: "foxctl",
 		CASDigest: artifactDigest,
 	}
 

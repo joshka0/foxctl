@@ -7,10 +7,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/runtime/agentpolicy"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/runtime/agentpolicy"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -182,7 +182,7 @@ func TestBashGuard_RewritesSedRangeFromCat(t *testing.T) {
 	assert.Contains(t, command, `"line_end":12`)
 }
 
-// Tests for explorer profile blocking non-agentctl commands
+// Tests for explorer profile blocking non-foxctl commands
 
 func TestBashGuard_ExplorerBlocksArbitraryCommand(t *testing.T) {
 	var buf bytes.Buffer
@@ -200,17 +200,17 @@ func TestBashGuard_ExplorerBlocksArbitraryCommand(t *testing.T) {
 	data := getData(t, env)
 	hookOutput := getHookOutput(t, data)
 	assert.Equal(t, "block", hookOutput["decision"])
-	assert.Contains(t, hookOutput["reason"], "only agentctl run commands are allowed")
+	assert.Contains(t, hookOutput["reason"], "only foxctl run commands are allowed")
 }
 
-// Tests for explorer profile allowing agentctl skills
+// Tests for explorer profile allowing foxctl skills
 
 func TestBashGuard_ExplorerAllowsAllowedSkill(t *testing.T) {
 	var buf bytes.Buffer
 	rc, cleanup := newTestContext(t, &buf)
 	defer cleanup()
 
-	in := bashInput("agentctl run code/semantic_search --input '{}'")
+	in := bashInput("foxctl run code/semantic_search --input '{}'")
 	in.HookConfig = map[string]any{"profile": "explorer"}
 
 	err := run(context.Background(), rc, in)
@@ -236,7 +236,7 @@ func TestBashGuard_ExplorerBlocksDisallowedSkill(t *testing.T) {
 	rc, cleanup := newTestContext(t, &buf)
 	defer cleanup()
 
-	in := bashInput("agentctl run test/run --input '{}'")
+	in := bashInput("foxctl run test/run --input '{}'")
 	in.HookConfig = map[string]any{"profile": "explorer"}
 
 	err := run(context.Background(), rc, in)
@@ -328,7 +328,7 @@ func TestBashGuard_ReviewerAllowsAnalysisSkills(t *testing.T) {
 	rc, cleanup := newTestContext(t, &buf)
 	defer cleanup()
 
-	in := bashInput("agentctl run code/complexity --input '{}'")
+	in := bashInput("foxctl run code/complexity --input '{}'")
 	in.HookConfig = map[string]any{"profile": "reviewer"}
 
 	err := run(context.Background(), rc, in)
@@ -348,7 +348,7 @@ func TestBashGuard_ImplementerAllowsTestRun(t *testing.T) {
 	rc, cleanup := newTestContext(t, &buf)
 	defer cleanup()
 
-	in := bashInput("agentctl run test/run --input '{}'")
+	in := bashInput("foxctl run test/run --input '{}'")
 	in.HookConfig = map[string]any{"profile": "implementer"}
 
 	err := run(context.Background(), rc, in)
@@ -384,7 +384,7 @@ func TestBashGuard_BlockIncludesAllowedSkillsList(t *testing.T) {
 	contextStr, ok := hookOutput["context"].(string)
 	require.True(t, ok, "context should be a string")
 	assert.Contains(t, contextStr, "Allowed Skills")
-	assert.Contains(t, contextStr, "agentctl run")
+	assert.Contains(t, contextStr, "foxctl run")
 }
 
 // Tests for malformed tool input
@@ -418,7 +418,7 @@ func TestBashGuard_MetaIncludesProfile(t *testing.T) {
 	rc, cleanup := newTestContext(t, &buf)
 	defer cleanup()
 
-	in := bashInput("agentctl run fs/read --input '{}'")
+	in := bashInput("foxctl run fs/read --input '{}'")
 	in.HookConfig = map[string]any{"profile": "explorer"}
 
 	err := run(context.Background(), rc, in)

@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/maputil"
-	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/runtime/execution"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/maputil"
+	"github.com/joshka0/foxctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/runtime/execution"
 )
 
 // SkillRunner executes Go-based hook skills using the execution framework.

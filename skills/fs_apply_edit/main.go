@@ -9,12 +9,12 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/editutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/editutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/textutil"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
 
 // MatchMode defines how to match the search string.

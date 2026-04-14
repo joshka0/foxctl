@@ -10,19 +10,19 @@
 
 ---
 
-## agentctl Integration
+## foxctl Integration
 
-agentctl is available for structured code analysis and automation. Use it for precise, deterministic operations.
+foxctl is available for structured code analysis and automation. Use it for precise, deterministic operations.
 
 ### Running Skills
 ```bash
 # Basic usage
-agentctl run <skill> --input '<json>'
+foxctl run <skill> --input '<json>'
 
 # Examples
-agentctl run code/complexity --input '{"path": "src/"}'
-agentctl run code/symbols --input '{"path": "main.go"}'
-agentctl run text/grep --input '{"pattern": "TODO", "path": "."}'
+foxctl run code/complexity --input '{"path": "src/"}'
+foxctl run code/symbols --input '{"path": "main.go"}'
+foxctl run text/grep --input '{"pattern": "TODO", "path": "."}'
 ```
 
 ### Key Skills
@@ -45,10 +45,10 @@ agentctl run text/grep --input '{"pattern": "TODO", "path": "."}'
 
 ### Task Management
 ```bash
-agentctl todo add --title "Task" --description "Details"
-agentctl todo list
-agentctl todo active
-agentctl todo complete --id <id> --notes "Done"
+foxctl todo add --title "Task" --description "Details"
+foxctl todo list
+foxctl todo active
+foxctl todo complete --id <id> --notes "Done"
 ```
 
 ### Output Format
@@ -62,7 +62,7 @@ All skills return JSON envelope:
 ```
 Check `status` field, extract useful info from `data`.
 
-### When to Use agentctl
+### When to Use foxctl
 - **Precise searches**: Use `text/grep` or `code/smart_search` over manual searching
 - **Code analysis**: Use `code/complexity`, `code/symbols` for structured analysis
 - **File operations**: Use `fs/tree`, `fs/read` for exploration
@@ -79,13 +79,13 @@ Check `status` field, extract useful info from `data`.
 - `/explain <target>` - Detailed explanation
 - `/security <path>` - Security vulnerability scan
 
-### agentctl Integration (runs shell commands)
-- `/symbols <path>` - Extract code symbols via agentctl
-- `/grep <pattern>` - Search with ripgrep via agentctl
-- `/tree <path>` - Directory structure via agentctl
-- `/imports <path>` - Dependency analysis via agentctl
-- `/todos` - Show agentctl tasks
-- `/agentctl <skill>` - Run any agentctl skill
+### foxctl Integration (runs shell commands)
+- `/symbols <path>` - Extract code symbols via foxctl
+- `/grep <pattern>` - Search with ripgrep via foxctl
+- `/tree <path>` - Directory structure via foxctl
+- `/imports <path>` - Dependency analysis via foxctl
+- `/todos` - Show foxctl tasks
+- `/foxctl <skill>` - Run any foxctl skill
 - `/test <target>` - Generate tests
 
 ## Project Files

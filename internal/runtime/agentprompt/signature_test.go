@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
+	agenttypes "github.com/joshka0/foxctl/internal/agent/types"
 )
 
 func TestInstruction_CodeScoutsRequireStructuredJSON(t *testing.T) {

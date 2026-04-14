@@ -167,7 +167,7 @@ When reviewing PRs that add or modify exported symbols:
 
 ## Enforcement
 
-The `agentctl index symbol-summaries` command will extract Index blocks and include them in embedding text. Symbols without Index blocks will use only their GoDoc header.
+The `foxctl index symbol-summaries` command will extract Index blocks and include them in embedding text. Symbols without Index blocks will use only their GoDoc header.
 
 Future: A linter could warn on exported symbols missing Index blocks.
 ```

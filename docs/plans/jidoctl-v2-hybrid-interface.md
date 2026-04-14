@@ -8,10 +8,10 @@ Last Updated: 2026-03-05
 
 Completed in current slice:
 
-1. Jido bridge plugin calls `agentctl` tools through daemon RPC transport (persistent, Unix socket) with CLI fallback.
-2. `agentctl` v2 Jido dispatcher writes `run.started` and reconciles runtime signal acks into `run.completed`/`run.failed`.
-3. `agentctl agent ask --dispatcher jido --wait` is supported via projection polling of `ask:<ask_id>` run state.
-4. `agentctl agent ask-status <ask-id>` returns non-blocking run status + callback details from v2 projections/events.
+1. Jido bridge plugin calls `foxctl` tools through daemon RPC transport (persistent, Unix socket) with CLI fallback.
+2. `foxctl` v2 Jido dispatcher writes `run.started` and reconciles runtime signal acks into `run.completed`/`run.failed`.
+3. `foxctl agent ask --dispatcher jido --wait` is supported via projection polling of `ask:<ask_id>` run state.
+4. `foxctl agent ask-status <ask-id>` returns non-blocking run status + callback details from v2 projections/events.
 
 Notes:
 
@@ -22,13 +22,13 @@ Notes:
 
 Define a greenfield-friendly hybrid where:
 
-1. `agentctl` remains the v2 control plane and contract owner.
+1. `foxctl` remains the v2 control plane and contract owner.
 2. Jido is used as the runtime kernel for multi-agent orchestration on BEAM.
 3. Existing v2 guarantees (envelopes, append-only evidence, policy gates, durable mailbox semantics) are preserved.
 
 ## Non-Goals
 
-1. Rewrite all `agentctl` tools in Elixir in phase 1.
+1. Rewrite all `foxctl` tools in Elixir in phase 1.
 2. Replace v2 event/projection storage contract with Jido internals.
 3. Couple orchestration correctness to process-local (ephemeral) queues.
 
@@ -41,7 +41,7 @@ Jido is strong at runtime concerns:
 - signal routing (`call/cast`, CloudEvents-style signal envelope)
 - await/fan-out patterns (`await`, `await_all`, `await_child`, `await_any`)
 
-`agentctl` v2 is strong at control-plane concerns:
+`foxctl` v2 is strong at control-plane concerns:
 
 - command envelopes and stable API contract
 - append-only event history and read projections
@@ -52,7 +52,7 @@ The hybrid model keeps each system in its strongest role.
 
 ## Responsibility Split
 
-### Keep in `agentctl` (Go, v2)
+### Keep in `foxctl` (Go, v2)
 
 1. Command/API surfaces (`spawn`, `ask`, `run`, `list`, `kill`, orchestration commands).
 2. Envelope normalization and response shaping.
@@ -116,7 +116,7 @@ All bridge requests/responses are wrapped by v2 envelopes at Go edges.
     "signal": {
       "id": "sig-1",
       "type": "agent.ask",
-      "source": "/agentctl/v2",
+      "source": "/foxctl/v2",
       "subject": "/agents/session-123",
       "data": {
         "prompt": "What did you find?",
@@ -152,7 +152,7 @@ Important distinction:
 
 Therefore:
 
-1. Keep durable mailbox in `agentctl` storage.
+1. Keep durable mailbox in `foxctl` storage.
 2. Use Jido mailbox only as execution queue after Go has accepted and persisted message intent.
 3. Ack/reply is considered complete only after Go append + projection write succeeds.
 
@@ -187,7 +187,7 @@ Flow:
 
 ## Proposed New Modules
 
-### Go (`agentctl`)
+### Go (`foxctl`)
 
 1. `internal/v2/adapters/jido/client.go`
 2. `internal/v2/adapters/jido/types.go`
@@ -219,15 +219,15 @@ Flow:
 
 These remain service calls from runtime actions, not reimplemented inside Jido initially.
 
-## Tool Execution Contract (`Jido` -> `agentctl` binary)
+## Tool Execution Contract (`Jido` -> `foxctl` binary)
 
-For phase 1, Jido agents execute `agentctl` tools by invoking the Go binary
+For phase 1, Jido agents execute `foxctl` tools by invoking the Go binary
 locally and consuming standard envelopes.
 
 Canonical command shape:
 
 ```bash
-agentctl run <tool-name> --workspace <workspace> --input-file -
+foxctl run <tool-name> --workspace <workspace> --input-file -
 ```
 
 Notes:
@@ -240,7 +240,7 @@ Notes:
 
 Dispatcher runtime selection (current CLI cut):
 
-1. `agentctl agent ask --dispatcher mailbox|jido`
+1. `foxctl agent ask --dispatcher mailbox|jido`
 2. `AGENTCTL_V2_ASK_DISPATCHER=mailbox|jido`
 3. Jido bridge socket settings:
    - `AGENTCTL_JIDO_SOCKET`

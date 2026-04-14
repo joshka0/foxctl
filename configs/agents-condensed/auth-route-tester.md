@@ -27,4 +27,4 @@ Test routes for complete functionality.
 - Issues found
 - Implementation review suggestions
 
-Full docs: `~/repos/personal/agentctl/configs/agents/auth-route-tester.md`
+Full docs: `~/repos/personal/foxctl/configs/agents/auth-route-tester.md`

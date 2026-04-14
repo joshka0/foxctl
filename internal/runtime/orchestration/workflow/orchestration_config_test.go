@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/orchestration/workflow/frontmatter"
+	"github.com/joshka0/foxctl/internal/runtime/orchestration/workflow/frontmatter"
 )
 
 func TestLoadOrchestrationConfig_DefaultWorkflowPath(t *testing.T) {
@@ -39,7 +39,7 @@ func TestYAMLWorkflowLoaderUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	yamlPath := filepath.Join(dir, "wf.yaml")
 	content := `
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Workflow
 metadata:
   name: test-yaml

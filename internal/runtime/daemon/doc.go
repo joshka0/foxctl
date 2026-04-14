@@ -1,4 +1,4 @@
-// Package daemon provides the agentctl hosting daemon and client surfaces.
+// Package daemon provides the foxctl hosting daemon and client surfaces.
 //
 // Package-topology note:
 // this package may host mixed legacy and newer wiring, but command semantics

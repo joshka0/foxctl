@@ -4,7 +4,7 @@ import { useKeyboard } from "@opentui/react";
 import { useMemoryEntry, useMemoryEntries, useMemoryTypes, useSearch, usePinMemory, useDeleteMemory, useSaveMemory } from "../hooks/useData";
 import { useTimeoutManager } from "../hooks/useTimeoutManager";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { MemoryEntry, MemoryTypeCount, MemoryEntryDetail, SearchResult } from "@agentctl/data";
+import type { MemoryEntry, MemoryTypeCount, MemoryEntryDetail, SearchResult } from "@foxctl/data";
 
 // Filter out embedding arrays from data for display (they're just walls of numbers)
 function filterEmbeddings(data: unknown): unknown {

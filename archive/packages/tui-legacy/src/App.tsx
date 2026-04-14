@@ -142,7 +142,7 @@ function Header({ currentView, activeCategory }: HeaderProps) {
     <box height={2} flexDirection="column">
       {/* Row 1: Categories */}
       <box height={1} flexDirection="row" justifyContent="space-between">
-        <text fg="#00ff00"><b>agentctl</b></text>
+        <text fg="#00ff00"><b>foxctl</b></text>
         <box flexDirection="row">
           {CATEGORIES.map((cat) => {
             const isActive = activeCategory === cat.key;

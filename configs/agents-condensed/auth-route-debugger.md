@@ -32,4 +32,4 @@ Debug authentication and route issues.
 - Specific fix with code example
 - Prevention recommendations
 
-Full docs: `~/repos/personal/agentctl/configs/agents/auth-route-debugger.md`
+Full docs: `~/repos/personal/foxctl/configs/agents/auth-route-debugger.md`

@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package integration provides integration tests for the agentctl dspy-go agent.
+// Package integration provides integration tests for the foxctl dspy-go agent.
 package integration
 
 import (
@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agent/runtime"
-	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/joshka0/foxctl/internal/agent/runtime"
+	"github.com/joshka0/foxctl/internal/agent/types"
 )
 
 // TestHierarchySpawn tests the full overseer -> agent spawning flow.

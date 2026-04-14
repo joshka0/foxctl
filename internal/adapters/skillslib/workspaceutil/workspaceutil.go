@@ -3,7 +3,7 @@ package workspaceutil
 import (
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/context/sessionkit"
+	"github.com/joshka0/foxctl/internal/context/sessionkit"
 )
 
 // Resolve returns the workspace after applying workspaceRoot overrides and defaults.

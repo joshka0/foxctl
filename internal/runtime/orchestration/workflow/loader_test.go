@@ -8,7 +8,7 @@ import (
 
 func TestParse_ValidWorkflow(t *testing.T) {
 	yaml := `
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Workflow
 metadata:
   name: test-workflow
@@ -66,7 +66,7 @@ steps:
 
 func TestParse_MissingName(t *testing.T) {
 	yaml := `
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Workflow
 metadata:
   description: no name
@@ -82,7 +82,7 @@ steps:
 
 func TestParse_NoSteps(t *testing.T) {
 	yaml := `
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Workflow
 metadata:
   name: test
@@ -96,7 +96,7 @@ steps: []
 
 func TestParse_StepWithLoop(t *testing.T) {
 	yaml := `
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Workflow
 metadata:
   name: loop-workflow
@@ -141,7 +141,7 @@ func TestLoader_LoadFromPath(t *testing.T) {
 
 	wfPath := filepath.Join(tmpDir, "test.yaml")
 	content := `
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Workflow
 metadata:
   name: test-from-file
@@ -174,7 +174,7 @@ func TestLoader_LoadFromSearchPaths(t *testing.T) {
 
 	wfPath := filepath.Join(tmpDir, "my-workflow.yaml")
 	content := `
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Workflow
 metadata:
   name: my-workflow
@@ -207,7 +207,7 @@ func TestLoader_List(t *testing.T) {
 
 	// Create two workflow files
 	wf1 := `
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Workflow
 metadata:
   name: workflow-1
@@ -217,7 +217,7 @@ steps:
     skill: test/skill
 `
 	wf2 := `
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Workflow
 metadata:
   name: workflow-2

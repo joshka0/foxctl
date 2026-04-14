@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 type mockExecutor struct {

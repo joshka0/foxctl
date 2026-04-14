@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
-	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 // Store persists append-only runtime events to a libsql-backed database.

@@ -1,6 +1,6 @@
 package retrievalv2
 
-import "github.com/jkatigb/agentctl/internal/intelligence/searchquery"
+import "github.com/joshka0/foxctl/internal/intelligence/searchquery"
 
 type IdentifierKind string
 

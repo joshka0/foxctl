@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/testwatch"
+	"github.com/joshka0/foxctl/internal/storage/testwatch"
 )
 
 func TestStore_UpsertAndGet(t *testing.T) {
@@ -385,9 +385,9 @@ func TestConfig_SaveCreatesDirectory(t *testing.T) {
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
-	// Verify .agentctl dir was created
-	agentctlDir := filepath.Join(workspaceRoot, ".agentctl")
+	// Verify .foxctl dir was created
+	agentctlDir := filepath.Join(workspaceRoot, ".foxctl")
 	if _, err := os.Stat(agentctlDir); err != nil {
-		t.Errorf("expected .agentctl dir to exist: %v", err)
+		t.Errorf("expected .foxctl dir to exist: %v", err)
 	}
 }

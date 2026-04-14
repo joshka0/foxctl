@@ -68,8 +68,8 @@ func TestComposeRoomAwarePrompt_AppendsOnboardingOnce(t *testing.T) {
 	}
 	for _, want := range []string{
 		"ROOM ONBOARDING:",
-		"`agentctl-room` and `agentctl-room-agent`",
-		"`agentctl room status triad-123`",
+		"`foxctl-room` and `foxctl-room-agent`",
+		"`foxctl room status triad-123`",
 		"Prioritize user-facing correctness",
 	} {
 		if !strings.Contains(once, want) {

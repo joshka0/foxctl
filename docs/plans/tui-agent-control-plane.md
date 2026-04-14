@@ -6,7 +6,7 @@ Last Updated: 2026-04-01
 
 ## Goal
 
-Build a new terminal-first operator control plane for `agentctl` that complements `packages/gui-agent` without creating a second agent runtime.
+Build a new terminal-first operator control plane for `foxctl` that complements `packages/gui-agent` without creating a second agent runtime.
 
 The TUI should be fast for day-to-day operator work:
 
@@ -18,7 +18,7 @@ The TUI should be fast for day-to-day operator work:
 
 ## Decision
 
-Create a new `packages/tui-agent/` package and treat `agentctl` as the only backend/runtime authority.
+Create a new `packages/tui-agent/` package and treat `foxctl` as the only backend/runtime authority.
 
 Do **not** treat `pi-mono` as a drop-in application shell. Use it as a design and interaction reference for:
 
@@ -46,7 +46,7 @@ Those files show a clear runtime / companion / events / orchestration model. Rep
 - coding-agent UX patterns from `pi-coding-agent`
 - clean session/message UX from `pi-web-ui`
 
-But `agentctl` should remain the owner of:
+But `foxctl` should remain the owner of:
 
 1. agent lifecycle
 2. orchestration data
@@ -57,7 +57,7 @@ But `agentctl` should remain the owner of:
 ## Constraints
 
 1. No dependency installation or vendoring work is required for the planning phase.
-2. The new TUI should compose over existing `agentctl` APIs and event streams where possible.
+2. The new TUI should compose over existing `foxctl` APIs and event streams where possible.
 3. The TUI must not invent parallel session, room, or agent identifiers.
 4. The TUI must remain tmux-friendly and work cleanly in a terminal-only workflow.
 5. Legacy `packages/tui/` should be archived instead of quietly continuing as an implied active surface.
@@ -98,7 +98,7 @@ This mirrors the intent already captured in [`DESIGN.md`](../../DESIGN.md): summ
 
 ### 1. Backend Ownership
 
-`agentctl` remains the system of record.
+`foxctl` remains the system of record.
 
 The TUI consumes:
 
@@ -108,7 +108,7 @@ The TUI consumes:
 
 ### 2. Adapter Layer
 
-Create a thin adapter inside `packages/tui-agent` that converts `agentctl` transport payloads into TUI view models.
+Create a thin adapter inside `packages/tui-agent` that converts `foxctl` transport payloads into TUI view models.
 
 Responsibilities:
 

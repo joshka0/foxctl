@@ -1,7 +1,7 @@
 # Repo Graph Index (repoindex)
 
 The repo graph index is a local, per-repo SQLite graph for navigating code by
-relationships. It powers `agentctl index repo ...` and the agent tools
+relationships. It powers `foxctl index repo ...` and the agent tools
 `repo_index_search`, `repo_index_expand`, and `repo_index_open`.
 
 Behavior contract:
@@ -35,10 +35,10 @@ Behavior contract:
 ## Build the index
 
 ```bash
-agentctl index repo build --workspace . --go --typescript
+foxctl index repo build --workspace . --go --typescript
 
 # Infra / config / script indexing
-agentctl index repo build --workspace . --terraform --kubernetes --shell
+foxctl index repo build --workspace . --terraform --kubernetes --shell
 ```
 
 Optional flags:
@@ -53,8 +53,8 @@ summary generation to populate file node summaries and package/repo rollups,
 then generate symbol summaries to populate symbol node summaries:
 
 ```bash
-agentctl index file-summaries --workspace .
-agentctl index symbol-summaries --workspace .
+foxctl index file-summaries --workspace .
+foxctl index symbol-summaries --workspace .
 ```
 
 ---
@@ -63,11 +63,11 @@ agentctl index symbol-summaries --workspace .
 
 ```bash
 # Text search (FTS)
-agentctl index repo search --workspace . --query "Builder.addGoReferenceEdges" --limit 10
+foxctl index repo search --workspace . --query "Builder.addGoReferenceEdges" --limit 10
 
 # Expand relationships
-agentctl index repo expand --workspace . \
-  --seed "sym:go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:Builder.addGoReferenceEdges" \
+foxctl index repo expand --workspace . \
+  --seed "sym:go:github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:Builder.addGoReferenceEdges" \
   --edge CALLS --edge REFERS_TO --direction out --depth 2 --budget 50
 
 Example output (truncated):
@@ -78,13 +78,13 @@ Example output (truncated):
     "result": {
       "nodes": [
         {
-          "id": "sym:go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:Builder.addGoReferenceEdges",
+          "id": "sym:go:github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:Builder.addGoReferenceEdges",
           "kind": "symbol",
           "file": "internal/intelligence/indexing/repoindex/builder.go",
           "name": "Builder.addGoReferenceEdges"
         },
         {
-          "id": "sym:go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:goCallTargetNodeID",
+          "id": "sym:go:github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:goCallTargetNodeID",
           "kind": "symbol",
           "file": "internal/intelligence/indexing/repoindex/builder.go",
           "name": "goCallTargetNodeID"
@@ -92,8 +92,8 @@ Example output (truncated):
       ],
       "edges": [
         {
-          "src": "sym:go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:Builder.addGoReferenceEdges",
-          "dst": "sym:go:github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:goCallTargetNodeID",
+          "src": "sym:go:github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:Builder.addGoReferenceEdges",
+          "dst": "sym:go:github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex:internal/intelligence/indexing/repoindex/builder.go:goCallTargetNodeID",
           "type": "CALLS",
           "weight": 1
         }
@@ -104,17 +104,17 @@ Example output (truncated):
 ```
 
 # Open a node by ID
-agentctl index repo open --workspace . --id "<node-id>"
+foxctl index repo open --workspace . --id "<node-id>"
 
 # Ask (LLM tool loop over repoindex)
-agentctl index repo ask --workspace . --question "Where is repoindex built?"
+foxctl index repo ask --workspace . --question "Where is repoindex built?"
 ```
 
 ---
 
 ## Relationship to the semantic tree
 
-The semantic tree (`agentctl run code/semantic_search --input '{"format":"tree"}'`)
+The semantic tree (`foxctl run code/semantic_search --input '{"format":"tree"}'`)
 and repoindex share the same file summary store. File summaries become file node
 summaries in repoindex, and package/repo rollups are generated from those file
 summaries. This lets you navigate top-down (tree) and sideways (graph edges)
@@ -127,10 +127,10 @@ using the same source summaries.
 Repoindex databases live under:
 
 ```
-~/.agentctl/storage/repoindex/<repo>-repoindex-<hash>.db
+~/.foxctl/storage/repoindex/<repo>-repoindex-<hash>.db
 ```
 
-Use `agentctl index repo status --workspace .` to see the active DB path.
+Use `foxctl index repo status --workspace .` to see the active DB path.
 
 ---
 

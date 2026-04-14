@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 // mockCASStore is a test double for storage.CASStore

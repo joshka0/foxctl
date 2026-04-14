@@ -10,9 +10,9 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	consolepkg "github.com/jkatigb/agentctl/internal/console"
-	domainconsole "github.com/jkatigb/agentctl/internal/domain/console"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	consolepkg "github.com/joshka0/foxctl/internal/console"
+	domainconsole "github.com/joshka0/foxctl/internal/domain/console"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/oklog/ulid/v2"
 )
 

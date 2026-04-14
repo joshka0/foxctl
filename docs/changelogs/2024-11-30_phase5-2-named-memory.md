@@ -8,7 +8,7 @@
 
 ## Summary
 
-Implemented Phase 5.2 of the agentctl spec, focusing on named memory ergonomics
+Implemented Phase 5.2 of the foxctl spec, focusing on named memory ergonomics
 and proper error handling for memory CLI commands.
 
 ---
@@ -42,13 +42,13 @@ Memory commands now emit proper error envelopes instead of returning raw errors:
 
 ### Code
 
-- `cmd/agentctl/cmd/memorycmd/helper.go` — Add error envelope helpers
-- `cmd/agentctl/cmd/memory_named.go` — Use error envelopes for not found/invalid
+- `cmd/foxctl/cmd/memorycmd/helper.go` — Add error envelope helpers
+- `cmd/foxctl/cmd/memory_named.go` — Use error envelopes for not found/invalid
   args
 
 ### Tests
 
-- `cmd/agentctl/cmd/memory_test.go` — 5 new tests for error cases
+- `cmd/foxctl/cmd/memory_test.go` — 5 new tests for error cases
 
 ### Documentation
 
@@ -74,10 +74,10 @@ Memory commands now emit proper error envelopes instead of returning raw errors:
 ## Acceptance Criteria
 
 - [x] `UNIQUE(name, workspace)` enforced at DB level
-- [x] `agentctl run … --remember foo` creates named memory
-- [x] `agentctl memory get foo` replays same envelope as original result
-- [x] `agentctl memory list` shows recently updated memories
-- [x] `agentctl memory relevant` returns high-value memories
+- [x] `foxctl run … --remember foo` creates named memory
+- [x] `foxctl memory get foo` replays same envelope as original result
+- [x] `foxctl memory list` shows recently updated memories
+- [x] `foxctl memory relevant` returns high-value memories
 - [x] `memory get <missing>` → `ENOTFOUND` with hint
 - [x] `memory update` without flags → `EARG` envelope
 - [x] Section "Memory" in `core_profile_v1.md` updated

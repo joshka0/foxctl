@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // register pgx for database/sql
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 )
 
 // OpenSQLite opens a SQLite-backed conversation ref store at the given path and runs migrations.

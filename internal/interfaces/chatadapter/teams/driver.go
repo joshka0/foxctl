@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/identity"
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/sse"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/storage/convref"
+	"github.com/joshka0/foxctl/internal/domain/identity"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter"
+	"github.com/joshka0/foxctl/internal/interfaces/web/sse"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage/convref"
 )
 
 // serviceURLEntry holds the normalized service URL together with the raw

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: editor/godot
@@ -186,7 +186,7 @@ signature:
       type: string
       description: "Human-readable summary"
   help:
-    short: "Control the Godot Editor from agentctl"
+    short: "Control the Godot Editor from foxctl"
     long: |
       This skill communicates with a running Godot Editor that has the GodotAIBridge
       plugin enabled. It allows inspection and manipulation of the current scene.

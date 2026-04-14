@@ -1,6 +1,6 @@
 # gui-agent
 
-Web UI for agentctl runtime operations (agents, activity, chat, mailbox, logs).
+Web UI for foxctl runtime operations (agents, activity, chat, mailbox, logs).
 
 ## Stack
 

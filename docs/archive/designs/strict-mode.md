@@ -62,7 +62,7 @@ UserPromptSubmit ─────────────────────
 ├── /strict on|off|status  →  strict-mode-detect.sh
 │                               │
 │                               ▼
-│                         State File: ~/.agentctl/cache/session-modes/
+│                         State File: ~/.foxctl/cache/session-modes/
 │                               strict-{session_hash}.json
 │
 PreToolUse ───────────────────────────────────────────────────────────

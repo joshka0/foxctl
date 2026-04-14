@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/rlm"
+	"github.com/joshka0/foxctl/internal/rlm"
 )
 
 type memoryEnsembleInput struct {

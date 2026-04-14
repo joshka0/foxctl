@@ -1,10 +1,10 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: embedding/memories
   description: Generate embeddings for memories in a workspace
   version: 0.1.0
-  author: agentctl
+  author: foxctl
   tags: [embedding, memories, indexing]
 distribution:
   type: exec
@@ -70,9 +70,9 @@ signature:
       Uses Voyage AI (preferred) or Gemini for embedding generation.
 
       Examples:
-      - Process one batch: agentctl run embedding/memories
-      - Process all: agentctl run embedding/memories --input '{"process_all": true}'
-      - Dry run: agentctl run embedding/memories --input '{"dry_run": true}'
+      - Process one batch: foxctl run embedding/memories
+      - Process all: foxctl run embedding/memories --input '{"process_all": true}'
+      - Dry run: foxctl run embedding/memories --input '{"dry_run": true}'
     workflows:
       - id: embed-all
         description: "Embed all memories in workspace"

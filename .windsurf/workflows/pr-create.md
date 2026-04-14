@@ -92,7 +92,7 @@ is auto-blocked by the AUTO-REJECT rules.
 
 ### Notes
 
-- This workflow is Go/agentctl-specific and assumes the `Makefile` targets
+- This workflow is Go/foxctl-specific and assumes the `Makefile` targets
   defined in the repo.
 - If you need to adjust the required checks or branching scheme, update this
   file in the same PR where you change the rules, and call that out explicitly

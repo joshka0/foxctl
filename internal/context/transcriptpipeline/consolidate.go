@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/transcriptcache"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
 )
 
 // PersistedMemory is one transcript-derived durable memory write result.

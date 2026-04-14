@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
 // IdentityFile represents the session identity JSON structure.
@@ -45,12 +45,12 @@ func ResolveSessionID(ws, explicit string) string {
 		return sid
 	}
 
-	// TERM_SESSION_ID is last resort (generic terminal session, not agentctl)
+	// TERM_SESSION_ID is last resort (generic terminal session, not foxctl)
 	return os.Getenv("TERM_SESSION_ID")
 }
 
 // ResolveSessionIDFromIdentityFile reads the session ID from the identity file.
-// Identity files are stored at ~/.agentctl/sessions/active/<workspace_hash>-<agent_id>.json
+// Identity files are stored at ~/.foxctl/sessions/active/<workspace_hash>-<agent_id>.json
 func ResolveSessionIDFromIdentityFile(ws string) string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -71,10 +71,10 @@ func ResolveSessionIDFromIdentityFile(ws string) string {
 	workspaceHash := fmt.Sprintf("%x", hash)[:16]
 
 	// Try agent-specific identity files, then base
-	identityDir := filepath.Join(homeDir, ".agentctl", "sessions", "active")
+	identityDir := filepath.Join(homeDir, ".foxctl", "sessions", "active")
 	candidates := []string{
 		filepath.Join(identityDir, workspaceHash+"-claude.json"),
-		filepath.Join(identityDir, workspaceHash+"-agentctl.json"),
+		filepath.Join(identityDir, workspaceHash+"-foxctl.json"),
 		filepath.Join(identityDir, workspaceHash+".json"),
 	}
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
 )
 
 // Entry is one persisted prederived transcript artifact.
@@ -80,7 +80,7 @@ func SharedRoots(storageRoot, homeDir string) []string {
 		candidates = append(candidates, root)
 	}
 	if home := strings.TrimSpace(homeDir); home != "" {
-		candidates = append(candidates, filepath.Join(home, ".codex", "memories", "agentctl-transcript-cache"))
+		candidates = append(candidates, filepath.Join(home, ".codex", "memories", "foxctl-transcript-cache"))
 	}
 	return candidates
 }

@@ -9,14 +9,14 @@
 
 ## Problem Statement
 
-We want agentctl to support Teams-first SRE workflows for real organizational use:
+We want foxctl to support Teams-first SRE workflows for real organizational use:
 
 - Teams-triggered investigations into AWS infrastructure
 - Grafana Cloud and log/metrics-driven triage
 - controlled read and write operations against EKS clusters
 - Azure DevOps inspection and selected management operations
 
-IncidentFox already demonstrates a workable product shape for this domain, but its implementation is split across Python services, a separate config service, a dedicated web UI, a sandbox runtime, and a cluster gateway. agentctl already has a materially different foundation:
+IncidentFox already demonstrates a workable product shape for this domain, but its implementation is split across Python services, a separate config service, a dedicated web UI, a sandbox runtime, and a cluster gateway. foxctl already has a materially different foundation:
 
 - a production Teams adapter in Go
 - a shared chat/session bridge
@@ -25,17 +25,17 @@ IncidentFox already demonstrates a workable product shape for this domain, but i
 - ACA / Obsidian for durable knowledge capture
 - existing review-gate and mailbox approval primitives
 
-The correct move is not to port IncidentFox service-for-service. The correct move is to import the useful product boundaries and rebuild them around agentctl's existing Go + Elixir runtime.
+The correct move is not to port IncidentFox service-for-service. The correct move is to import the useful product boundaries and rebuild them around foxctl's existing Go + Elixir runtime.
 
 ## Objective
 
-Build an agentctl-native SRE ChatOps layer that:
+Build an foxctl-native SRE ChatOps layer that:
 
 1. uses Microsoft Teams as a primary incident entry point
 2. routes each Teams channel or conversation to the correct workspace/room binding
 3. supports read-only investigations across AWS, Grafana Cloud, EKS, and Azure DevOps first
 4. introduces approval-gated write actions for Kubernetes and Azure DevOps after read paths are stable
-5. records run history, evidence, approvals, and outcomes in agentctl-native stores and ACA artifacts
+5. records run history, evidence, approvals, and outcomes in foxctl-native stores and ACA artifacts
 6. remains safe for multi-team and enterprise deployment
 
 ## Core Domain Model
@@ -103,7 +103,7 @@ Teams mapping rule:
 
 ## Assumptions
 
-- We will prefer agentctl-native stores and APIs over introducing a separate config-service clone.
+- We will prefer foxctl-native stores and APIs over introducing a separate config-service clone.
 - We will treat the existing Teams adapter as reusable ingress, not legacy code to bypass.
 - We will not weaken WASI's `network:"none"` guarantee; networked SRE integrations will live in Go services or exec/native skills, not in WASI skills.
 - We will prefer typed tool surfaces over generic remote shell access.
@@ -126,10 +126,10 @@ The following surfaces already exist and should be treated as foundations:
 - daemon-backed agent APIs and the existing agent hierarchy protocol
 - Teams Adaptive Card interactions for stop/retry/details style actions
 - SSE / observability activity feeds that already drive Teams agent status cards
-- MCP tool registration and skill exposure under `agentctl mcp serve`
+- MCP tool registration and skill exposure under `foxctl mcp serve`
 - review-gate and mailbox approval patterns
 - ACA / Obsidian capture and retrieval for durable incident learnings
-- in-repo Kubernetes deployment patterns for `agentctl web serve`
+- in-repo Kubernetes deployment patterns for `foxctl web serve`
 
 Important constraint:
 
@@ -154,7 +154,7 @@ IncidentFox suggests the right feature boundaries even where we should not copy 
 
 ## Architecture Decision
 
-Build this as six agentctl-native layers.
+Build this as six foxctl-native layers.
 
 ### 1. Chat Binding Layer
 
@@ -326,9 +326,9 @@ For production EKS access, prefer an outbound connector model over central kubec
 
 Proposed shape:
 
-- control-plane service mode inside agentctl: `agentctl connector k8s serve`
-- lightweight in-cluster agent deployment: `agentctl-k8s-agent`
-- outbound SSE or WebSocket connection from cluster -> agentctl connector
+- control-plane service mode inside foxctl: `foxctl connector k8s serve`
+- lightweight in-cluster agent deployment: `foxctl-k8s-agent`
+- outbound SSE or WebSocket connection from cluster -> foxctl connector
 - internal typed execution API from run controller -> connector -> cluster agent
 
 Proposed internal package split:
@@ -397,7 +397,7 @@ Audit requirements:
 The Jido material is useful here, but only if we keep the current hybrid ownership split intact:
 
 - Jido should own runtime lifecycle, signals, workflows, and reusable plugin packs
-- agentctl should continue to own tool semantics, memory/session retrieval, durable stores, CAS artifacts, and control-plane projections
+- foxctl should continue to own tool semantics, memory/session retrieval, durable stores, CAS artifacts, and control-plane projections
 
 That means the SRE plan should use Jido to structure and supervise workflows, not to reimplement AWS, Grafana, Kubernetes, or retrieval semantics inside Elixir.
 
@@ -412,7 +412,7 @@ Jido's sensors model is a strong fit for external event ingress:
 How to apply that here:
 
 - keep Teams HTTP webhook handling in Go
-- normalize inbound Teams, CloudWatch, Grafana, Azure DevOps, and connector-heartbeat events into canonical ops events in agentctl
+- normalize inbound Teams, CloudWatch, Grafana, Azure DevOps, and connector-heartbeat events into canonical ops events in foxctl
 - optionally forward those canonical ops events into Jido as runtime Signals such as:
   - `ops.teams.message`
   - `ops.alert.cloudwatch`
@@ -430,7 +430,7 @@ The biggest immediate value is context-aware routing:
 
 ### Memory and Retrieval-Augmented Agents
 
-Jido's memory material is useful, but it should stay subordinate to agentctl's existing semantic memory stack.
+Jido's memory material is useful, but it should stay subordinate to foxctl's existing semantic memory stack.
 
 Use Jido memory features for:
 
@@ -443,15 +443,15 @@ Do not use Jido as the primary durable knowledge system for this plan.
 
 Instead:
 
-- agentctl remains the durable retrieval and memory system
+- foxctl remains the durable retrieval and memory system
 - ACA / Obsidian remains the long-lived human-readable knowledge plane
 - `memory/query`, `session/recall`, `session/timeline`, and ACA retrieval stay on the Go side
-- Jido runtime hooks should call back into agentctl to augment prompts before reasoning steps
+- Jido runtime hooks should call back into foxctl to augment prompts before reasoning steps
 
 Practical rule:
 
 - Jido memory = runtime-local and checkpoint-oriented
-- agentctl memory = durable and organization-facing
+- foxctl memory = durable and organization-facing
 
 ### Plugins and Composable Agents
 
@@ -471,7 +471,7 @@ What plugins should own:
 - runtime-local state slices
 - signal routing tables
 - per-agent or per-workflow config
-- action bundles that orchestrate existing agentctl semantics
+- action bundles that orchestrate existing foxctl semantics
 
 What plugins should not own:
 
@@ -495,7 +495,7 @@ This plan should use workflow-style action chains for steps like:
 
 The important constraint is that these actions should stay thin:
 
-- workflow actions should call back into agentctl APIs, services, or tools
+- workflow actions should call back into foxctl APIs, services, or tools
 - they should not reimplement SRE integrations inside Elixir
 - directive output is the right place for approval prompts, notifications, and follow-up signals
 
@@ -1200,8 +1200,8 @@ Primary files:
 
 1. `internal/interfaces/web/api/ops_admin.go` (new)
 2. `internal/interfaces/web/server.go` (route wiring)
-3. `cmd/agentctl/cmd/ops.go` (admin-oriented command coverage)
-4. `cmd/agentctl/cmd/mcp.go` (optional admin MCP exposure later)
+3. `cmd/foxctl/cmd/ops.go` (admin-oriented command coverage)
+4. `cmd/foxctl/cmd/mcp.go` (optional admin MCP exposure later)
 
 Acceptance:
 
@@ -1212,7 +1212,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./internal/interfaces/web/... ./cmd/agentctl/cmd/...`
+1. `go test ./internal/interfaces/web/... ./cmd/foxctl/cmd/...`
 
 ## API and Command Surface
 
@@ -1243,7 +1243,7 @@ Proposed management skills or commands:
 - `ops/approvals.approve`
 - `ops/approvals.reject`
 
-These can later be exposed as first-class MCP tools through `agentctl mcp serve`.
+These can later be exposed as first-class MCP tools through `foxctl mcp serve`.
 
 ## Phase 0 PR Sequence (Execution-Ready)
 
@@ -1357,7 +1357,7 @@ Tests:
 
 Goal:
 
-1. Define how investigation-mode runs are represented at the Jido boundary without moving semantic ownership out of agentctl.
+1. Define how investigation-mode runs are represented at the Jido boundary without moving semantic ownership out of foxctl.
 
 Primary files:
 
@@ -1388,7 +1388,7 @@ Acceptance:
 
 1. A normalized ops event can be converted into a Jido runtime signal with explicit metadata.
 2. Jido payloads carry profile, allowed-tools, and retention policy without embedding cloud logic.
-3. The contract remains aligned with `docs/architecture/jido-hybrid-runtime.md`: Jido owns runtime, agentctl owns semantics.
+3. The contract remains aligned with `docs/architecture/jido-hybrid-runtime.md`: Jido owns runtime, foxctl owns semantics.
 
 Tests:
 
@@ -1406,8 +1406,8 @@ Primary files:
 2. `skills/chat_bindings/skill.yaml` (new)
 3. `skills/ops_integrations/main.go` (new)
 4. `skills/ops_integrations/skill.yaml` (new)
-5. `cmd/agentctl/cmd/ops.go` (new or extend existing command groups)
-6. `cmd/agentctl/cmd/mcp.go` (optional first-class exposure later)
+5. `cmd/foxctl/cmd/ops.go` (new or extend existing command groups)
+6. `cmd/foxctl/cmd/mcp.go` (optional first-class exposure later)
 
 Package scaffolding:
 
@@ -1419,7 +1419,7 @@ skills/
   ops_integrations/
     main.go
     skill.yaml
-cmd/agentctl/cmd/
+cmd/foxctl/cmd/
   ops.go
 ```
 
@@ -1437,7 +1437,7 @@ Acceptance:
 
 Tests:
 
-1. `go test ./skills/chat_bindings ./skills/ops_integrations ./cmd/agentctl/cmd/...`
+1. `go test ./skills/chat_bindings ./skills/ops_integrations ./cmd/foxctl/cmd/...`
 
 ## Proposed Rollout Slices
 
@@ -1555,15 +1555,15 @@ New packages and commands likely needed:
 - `skills/kubernetes_state`
 - `skills/kubernetes_action`
 - `skills/azuredevops_action`
-- `cmd/agentctl/cmd/ops.go`
-- `cmd/agentctl/cmd/chat_bindings.go`
+- `cmd/foxctl/cmd/ops.go`
+- `cmd/foxctl/cmd/chat_bindings.go`
 
 Existing areas likely to change:
 
 - `internal/interfaces/chatadapter/teams/*`
 - `internal/interfaces/web/server.go`
 - `internal/interfaces/web/api/*`
-- `cmd/agentctl/cmd/mcp.go`
+- `cmd/foxctl/cmd/mcp.go`
 - `docs/architecture/chat-platform-adapter.md`
 - `docs/architecture/kubernetes-runtime.md`
 
@@ -1639,7 +1639,7 @@ Mitigation:
 - ship read-only tools first
 - block all write tools behind `AGENTCTL_OPS_APPROVALS`
 
-### Risk: Creating a shadow config-service inside agentctl
+### Risk: Creating a shadow config-service inside foxctl
 
 Mitigation:
 
@@ -1650,7 +1650,7 @@ Mitigation:
 ## Open Questions
 
 1. Should the first UI surface live in the existing GUI, a minimal web API + JSON consumer, or Teams-only cards first?
-2. Should the connector bridge run inside `agentctl web serve` initially or as a separate service mode from day one?
+2. Should the connector bridge run inside `foxctl web serve` initially or as a separate service mode from day one?
 3. Which Azure DevOps write operations are actually needed first: rerun pipeline, work-item changes, PR actions, or release approvals?
 4. For Grafana Cloud, do we need only Loki/Mimir/API access first, or also dashboard annotation and on-call alert correlation?
 5. Which AWS surfaces matter first for your org: CloudWatch alarms/log groups, EKS, ECS, Lambda, or deployment metadata?

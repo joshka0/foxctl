@@ -1,31 +1,31 @@
 ---
 vault_refs:
-  - notes/repo/agentctl/skills-runtime-wiring.md
-  - notes/repo/agentctl/index.md
-  - notes/repo/agentctl/platform-and-web.md
-  - notes/repo/agentctl/semantic-and-memory.md
+  - notes/repo/foxctl/skills-runtime-wiring.md
+  - notes/repo/foxctl/index.md
+  - notes/repo/foxctl/platform-and-web.md
+  - notes/repo/foxctl/semantic-and-memory.md
   - 00-home/index.md
 ---
 # Jido Hybrid Runtime
 
-This is the canonical architecture note for the current hybrid `agentctl` + Jido runtime shape.
+This is the canonical architecture note for the current hybrid `foxctl` + Jido runtime shape.
 
 ## Metadata
 
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical scope | Ownership split between `agentctl` and Jido, transport boundaries, deployment shape |
+| Canonical scope | Ownership split between `foxctl` and Jido, transport boundaries, deployment shape |
 | Last reviewed | 2026-03-20 |
 
 ## Why This Exists
 
 The repo is currently not a single-runtime system.
 
-- `agentctl` still owns tool semantics, memory/session retrieval, companion context assembly, and most Go-side control-plane state.
+- `foxctl` still owns tool semantics, memory/session retrieval, companion context assembly, and most Go-side control-plane state.
 - Jido is now a viable runtime substrate for hierarchical orchestration, especially where BEAM process supervision and parent/child trees are the right primitive.
 
-The purpose of the hybrid architecture is to avoid rewriting mature `agentctl` semantics in Elixir while still gaining BEAM-native orchestration.
+The purpose of the hybrid architecture is to avoid rewriting mature `foxctl` semantics in Elixir while still gaining BEAM-native orchestration.
 
 ## Ownership Split
 
@@ -37,7 +37,7 @@ The purpose of the hybrid architecture is to avoid rewriting mature `agentctl` s
 - subtree inspection and await behavior
 - orchestration runtime substrate for overseer-style dispatch
 
-### agentctl Owns
+### foxctl Owns
 
 - `code_*` skills such as semantic search, smart search, context grep, and codemap-related context
 - `memory_*` retrieval and persistence
@@ -45,20 +45,20 @@ The purpose of the hybrid architecture is to avoid rewriting mature `agentctl` s
 - layered companion context shaping
 - kanban/control-plane state, v2 events, and projections
 
-That split is deliberate. Jido is the runtime. `agentctl` remains the semantic system.
+That split is deliberate. Jido is the runtime. `foxctl` remains the semantic system.
 
 ## Topology
 
 ```mermaid
 flowchart TD
-    CLI[agentctl CLI / web / GUI / TUI]
+    CLI[foxctl CLI / web / GUI / TUI]
     V2[v2 services + orchestration runtime]
     Proj[v2 events + projections]
     Ctx[companion + contextbuilder]
     JidoBridge[internal/v2/adapters/jido]
     JR[Jido JSON-RPC bridge]
     Jido[Jido runtime / AgentServer tree]
-    Tools[agentctl tool + memory + session stack]
+    Tools[foxctl tool + memory + session stack]
 
     CLI --> V2
     CLI --> Ctx
@@ -73,7 +73,7 @@ flowchart TD
 
 ## Runtime Boundaries
 
-### Inside agentctl
+### Inside foxctl
 
 Key packages:
 
@@ -97,11 +97,11 @@ Those packages translate canonical Go-side requests into JSON-RPC runtime calls:
 The bridge side exposes:
 
 - `agent.ask`
-- `agentctl.tool.run`
-- `agentctl.companion.context`
-- `agentctl.child.spawn`
+- `foxctl.tool.run`
+- `foxctl.companion.context`
+- `foxctl.child.spawn`
 
-Those actions are generic. They call back into `agentctl` instead of reimplementing code search or memory/session semantics inside Elixir.
+Those actions are generic. They call back into `foxctl` instead of reimplementing code search or memory/session semantics inside Elixir.
 
 ## Socket Model
 
@@ -110,12 +110,12 @@ There are two Unix sockets in the clean production shape:
 | Socket | Purpose |
 |------|---------|
 | `AGENTCTL_JIDO_SOCKET` | JSON-RPC socket exposed by the Jido bridge |
-| `AGENTCTL_DAEMON_SOCKET` | `agentctl` daemon socket used by bridge-side `daemon_rpc` tool execution |
+| `AGENTCTL_DAEMON_SOCKET` | `foxctl` daemon socket used by bridge-side `daemon_rpc` tool execution |
 
 This separation matters:
 
 - the Jido bridge socket is the runtime-control boundary
-- the `agentctl` daemon socket is the semantic-execution boundary
+- the `foxctl` daemon socket is the semantic-execution boundary
 
 Keeping them separate lets you isolate transport failures and keep tool/memory/session execution authoritative on the Go side.
 
@@ -139,10 +139,10 @@ That payload is derived from the shared v2 catalog/profile model on the Go side,
 
 Current intended flow:
 
-1. `agentctl` enqueues or projects work into the kanban/control-plane model.
+1. `foxctl` enqueues or projects work into the kanban/control-plane model.
 2. v2 orchestration decides dispatch and converts that into Jido runtime child-spawn requests.
 3. Jido owns the live child tree and runtime lifecycle.
-4. Jido children call back into `agentctl` for `code_*`, `memory_*`, `session_*`, and companion context.
+4. Jido children call back into `foxctl` for `code_*`, `memory_*`, `session_*`, and companion context.
 5. Runtime outcomes reconcile back into append-only v2 events and projections.
 
 This is why kanban, overseer policy, and Jido runtime fit together without collapsing into one implementation layer.
@@ -155,7 +155,7 @@ architecture well, as long as the ownership split above remains intact.
 ### Sensors and real-time signals
 
 Use Jido sensors and direct signal injection for runtime reactivity, but only
-after `agentctl` has normalized external inputs into canonical domain events.
+after `foxctl` has normalized external inputs into canonical domain events.
 
 Good fit:
 
@@ -183,7 +183,7 @@ Use Jido plugins for reusable runtime-local capability packs:
 - isolated state slices
 - signal routes
 - per-agent runtime config
-- action bundles that orchestrate existing `agentctl` semantics
+- action bundles that orchestrate existing `foxctl` semantics
 
 Good examples for future work:
 
@@ -213,7 +213,7 @@ Good fit:
 7. resume after approval and capture outcome evidence
 
 The actions in those workflows should remain thin: they should call back into
-`agentctl` services, tools, or APIs instead of reimplementing cloud- or
+`foxctl` services, tools, or APIs instead of reimplementing cloud- or
 retrieval-specific semantics inside Elixir.
 
 ## Memory and Retention
@@ -222,7 +222,7 @@ The hybrid shape also preserves retention policy on the semantic side.
 
 - Jido agents can carry `profile` and `memory_retention`.
 - Bridge-side companion context uses those values to decide how much `memory/query`, `session/recall`, and `session/timeline` context to assemble.
-- `agentctl` remains the place where retrieval quality evolves, including vector search, semantic recall, and timeline shaping.
+- `foxctl` remains the place where retrieval quality evolves, including vector search, semantic recall, and timeline shaping.
 
 That is important because retention behavior is not just runtime state. It depends on the retrieval stack you already have in Go.
 
@@ -230,11 +230,11 @@ Practical rule:
 
 - Jido memory is runtime-local, checkpoint-oriented, and useful for transient
   working state
-- `agentctl` memory remains the durable semantic system of record
+- `foxctl` memory remains the durable semantic system of record
 
 That means Jido memory, thread, and lightweight retrieval features are useful
 for live workflows and restores, but long-lived organization-facing knowledge
-should continue to live in `agentctl` memory/session surfaces and ACA / Obsidian.
+should continue to live in `foxctl` memory/session surfaces and ACA / Obsidian.
 
 ## Future Workflow Domains
 
@@ -247,7 +247,7 @@ domains such as:
 
 The runtime pattern should stay the same:
 
-1. `agentctl` owns ingress normalization, policy, storage, and semantic tools
+1. `foxctl` owns ingress normalization, policy, storage, and semantic tools
 2. Jido owns live workflow execution, signals, parent/child trees, and
    directives
 3. durable outcomes reconcile back into Go-side events, stores, and ACA notes
@@ -257,13 +257,13 @@ The runtime pattern should stay the same:
 Recommended production shape:
 
 1. run your Jido instance and bridge under one OTP supervision tree
-2. point the bridge at an explicit `agentctl` binary and daemon socket
-3. let `agentctl` own storage, CAS, memory/session indexes, and control-plane projections
+2. point the bridge at an explicit `foxctl` binary and daemon socket
+3. let `foxctl` own storage, CAS, memory/session indexes, and control-plane projections
 
 In other words:
 
 - Jido should be supervised like runtime infrastructure
-- `agentctl` should be treated as the semantic backend
+- `foxctl` should be treated as the semantic backend
 
 ## Related Docs
 
@@ -271,4 +271,4 @@ In other words:
 - [docs/general/runtime-orchestration.md](../general/runtime-orchestration.md)
 - [docs/general/companion-memory.md](../general/companion-memory.md)
 - [docs/spec/agent_hierarchy.md](../spec/agent_hierarchy.md)
-- [Jido guide: Agentctl Bridge](https://github.com/agentjido/jido/blob/main/guides/agentctl-bridge.md)
+- [Jido guide: Agentctl Bridge](https://github.com/agentjido/jido/blob/main/guides/foxctl-bridge.md)

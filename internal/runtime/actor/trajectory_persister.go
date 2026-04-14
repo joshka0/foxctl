@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 	"github.com/oklog/ulid/v2"
 )
 

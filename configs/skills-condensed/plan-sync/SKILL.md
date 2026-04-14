@@ -5,14 +5,14 @@ description: Sync Claude Code plans and optionally import as tasks
 
 # Plan Sync
 
-Sync plans from `~/.claude/plans/` via `agentctl run plan/sync`.
+Sync plans from `~/.claude/plans/` via `foxctl run plan/sync`.
 
 ## Usage
 
 ```bash
-agentctl run plan/sync --input '{"dry_run": true}'
-agentctl run plan/sync --input '{"import_tasks": true}'
-agentctl run plan/sync --input '{"force": true}'
+foxctl run plan/sync --input '{"dry_run": true}'
+foxctl run plan/sync --input '{"import_tasks": true}'
+foxctl run plan/sync --input '{"force": true}'
 ```
 
 ## Parameters
@@ -26,4 +26,4 @@ agentctl run plan/sync --input '{"force": true}'
 
 Runs on Stop hook automatically.
 
-Full docs: `~/.agentctl/share/configs/skills/plan-sync/Skill.md`
+Full docs: `~/.foxctl/share/configs/skills/plan-sync/Skill.md`

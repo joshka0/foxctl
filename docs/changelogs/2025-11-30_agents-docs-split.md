@@ -4,7 +4,7 @@ Date: 2025-11-30
 
 ## Summary
 
-- Restructured `AGENTS.md` to be a concise, agentctl-specific guide that supplements `global_rules.md`. Removed generic guardrails, Go conventions, and checklists that are now covered by the global rules. Updated provider-specific docs (`CLAUDE.md`, `GEMINI.md`) to defer to `AGENTS.md` as the canonical source for agentctl conventions.
+- Restructured `AGENTS.md` to be a concise, foxctl-specific guide that supplements `global_rules.md`. Removed generic guardrails, Go conventions, and checklists that are now covered by the global rules. Updated provider-specific docs (`CLAUDE.md`, `GEMINI.md`) to defer to `AGENTS.md` as the canonical source for foxctl conventions.
 - Updated branch naming guidance from `codex/<feature-name>` to `feature/<short-name>`.
 - Bumped Quick Reference Go version in `AGENTS.md` to Go >= 1.24 to match `go.mod`.
 - Added new canonical source links from `AGENTS.md` to:

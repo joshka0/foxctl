@@ -8,7 +8,7 @@
 ## 1. Overview
 
 This document defines how **Factory AI / DROID** assets ("droids", orchestrator
-configuration, and documentation) are represented inside the **agentctl
+configuration, and documentation) are represented inside the **foxctl
 knowledge registry**.
 
 Goals:
@@ -16,7 +16,7 @@ Goals:
 - **Unify discovery** of Factory droids and orchestrator docs with existing
   knowledge packs, agents, and commands.
 - **Avoid per-repo copies** of Factory assets; instead, treat them as **builtin
-  knowledge** available to all workspaces via `agentctl knowledge`.
+  knowledge** available to all workspaces via `foxctl knowledge`.
 - **Align concepts** so that Factory _droids_ and Claude _agents_ share a common
   representation (`kind: "agent"`), enabling joint recommendation and routing.
 
@@ -55,19 +55,19 @@ will be updated accordingly, but initial integration relies only on conventions.
 
 ## 3. Factory Source Assets
 
-Factory assets are authored and maintained outside of agentctl, typically under:
+Factory assets are authored and maintained outside of foxctl, typically under:
 
 - `~/.factory/droids/*.md` – role definitions and workflows ("droids").
 - `~/.factory/orchestrator/*` – orchestrator configuration and docs.
 - Additional docs under `~/.factory/docs/`.
 
 For development of this bridge, a subset of these assets is vendored in this
-repo under `Droid-CLI-Orchestrator/`. At runtime, agentctl treats Factory
+repo under `Droid-CLI-Orchestrator/`. At runtime, foxctl treats Factory
 content as **builtin knowledge**, not as files in the user workspace.
 
 ### 3.1 Embedded Subset
 
-To avoid embedding the entire Factory tree and to keep agentctl focused, we only
+To avoid embedding the entire Factory tree and to keep foxctl focused, we only
 embed a **curated subset** of Factory content:
 
 - **Orchestrator overview** (markdown):
@@ -153,7 +153,7 @@ workspace, we use a **synthetic source path scheme** in `knowledge_items` and
   ```
 
 The `builtin://` prefix is reserved for embedded, read-only content that is
-shipped with agentctl itself.
+shipped with foxctl itself.
 
 ### 4.4 Triggers
 
@@ -185,16 +185,16 @@ mechanisms:
 1. **Automatic bootstrap** (recommended default):
 
    - On first use of:
-     - `agentctl knowledge list` or
-     - `agentctl knowledge search` or
+     - `foxctl knowledge list` or
+     - `foxctl knowledge search` or
      - `hooks/knowledge_router` hook,
-   - agentctl ensures that builtin Factory items exist in the `knowledge_items`
+   - foxctl ensures that builtin Factory items exist in the `knowledge_items`
      and related tables.
 
 2. **Explicit sync command** (optional):
 
    ```bash
-   agentctl knowledge sync --builtin
+   foxctl knowledge sync --builtin
    ```
 
    - Ensures all builtin knowledge sources (including Factory) are present in
@@ -217,20 +217,20 @@ ingested from the filesystem as described in `knowledge_registry.md`.
 
 ## 6. CLI and Hook Integration
 
-### 6.1 CLI: `agentctl knowledge`
+### 6.1 CLI: `foxctl knowledge`
 
 Factory knowledge appears alongside user-authored knowledge:
 
 - List all Factory items:
 
   ```bash
-  agentctl knowledge list --prefix factory/
+  foxctl knowledge list --prefix factory/
   ```
 
 - Search with Factory filters:
 
   ```bash
-  agentctl knowledge search --query "orchestrator phases" --prefix factory/
+  foxctl knowledge search --query "orchestrator phases" --prefix factory/
   ```
 
 Exact flags and filtering semantics are defined by the `knowledge` CLI, but this
@@ -291,7 +291,7 @@ Potential future enhancements (out of scope for this draft):
 
 - **Task pattern integration**
   - Represent orchestrator `task-patterns.json` as structured knowledge that can
-    inform planning skills or future `agentctl` features.
+    inform planning skills or future `foxctl` features.
 
 Any such changes must update this spec, preserve backwards compatibility for
 existing knowledge entries, and avoid breaking the JSON envelope wire contract.

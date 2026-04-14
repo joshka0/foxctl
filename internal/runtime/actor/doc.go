@@ -1,4 +1,4 @@
-// Package actor provides a reactive actor system for agentctl agents.
+// Package actor provides a reactive actor system for foxctl agents.
 //
 // The actor system transforms poll-based agent daemons into event-driven actors
 // that react to messages as they arrive. A supervisor manages actor lifecycles

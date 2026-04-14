@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: presence/orchestrate
@@ -100,7 +100,7 @@ signature:
       The companion service uses this to run them in parallel.
 
       Example:
-        agentctl run presence/orchestrate --input '{
+        foxctl run presence/orchestrate --input '{
           "text": "*softly* I understand... 😢",
           "conversation_id": "conv-123",
           "generate_voice": true,

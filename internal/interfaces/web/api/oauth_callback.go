@@ -5,7 +5,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 // OAuthCallbackHandler handles OAuth provider callbacks.

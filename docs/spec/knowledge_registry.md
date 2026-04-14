@@ -15,8 +15,8 @@ knowledge packs, agents, and commands. It enables:
 - **Embedding-based retrieval** (optional, for semantic similarity).
 - **Threshold-gated surfacing** via `hooks/knowledge_router`.
 
-This is distinct from **agentctl skills**, which are executable Go/WASI/exec
-plugins managed via `agentctl skills ...`.
+This is distinct from **foxctl skills**, which are executable Go/WASI/exec
+plugins managed via `foxctl skills ...`.
 
 ---
 
@@ -39,7 +39,7 @@ plugins managed via `agentctl skills ...`.
 ### 3.1 Filesystem (authoring)
 
 ```
-agentctl/
+foxctl/
 ├── docs/knowledge/
 │   ├── backend-dev-guidelines/
 │   │   ├── SKILL.md              # Main knowledge pack doc
@@ -61,7 +61,7 @@ agentctl/
 
 ### 3.2 SQLite (runtime)
 
-Database: `~/.agentctl/storage/knowledge.db`
+Database: `~/.foxctl/storage/knowledge.db`
 
 #### Tables
 
@@ -111,14 +111,14 @@ CREATE TABLE knowledge_embeddings (
 
 ---
 
-## 4. CLI: `agentctl knowledge`
+## 4. CLI: `foxctl knowledge`
 
-### 4.1 `agentctl knowledge sync`
+### 4.1 `foxctl knowledge sync`
 
 Indexes knowledge from the filesystem into SQLite.
 
 ```bash
-agentctl knowledge sync [--embed] [--model <model>] [--workspace <path>]
+foxctl knowledge sync [--embed] [--model <model>] [--workspace <path>]
 ```
 
 **Flags:**
@@ -136,20 +136,20 @@ agentctl knowledge sync [--embed] [--model <model>] [--workspace <path>]
 
 **Output:** JSON envelope with sync summary.
 
-### 4.2 `agentctl knowledge list`
+### 4.2 `foxctl knowledge list`
 
 List all knowledge items.
 
 ```bash
-agentctl knowledge list [--kind <pack|agent|command>]
+foxctl knowledge list [--kind <pack|agent|command>]
 ```
 
-### 4.3 `agentctl knowledge search`
+### 4.3 `foxctl knowledge search`
 
 Search knowledge by query (rule-based + optional embedding).
 
 ```bash
-agentctl knowledge search --query "frontend component patterns" [--threshold 0.7]
+foxctl knowledge search --query "frontend component patterns" [--threshold 0.7]
 ```
 
 **Output:** Ranked list of matching items with scores.
@@ -304,7 +304,7 @@ No SQLite vector extension required (stays CGO-free).
 
 ### Phase 1: Rule-based only
 
-- Implement `agentctl knowledge sync` (no embeddings).
+- Implement `foxctl knowledge sync` (no embeddings).
 - Implement `hooks/knowledge_router` with rule matching only.
 
 ### Phase 2: Add embeddings

@@ -718,9 +718,9 @@ func TestGetSkillsReference_ContainsCommonSkills(t *testing.T) {
 func TestGetSkillsReference_ContainsCLIShortcuts(t *testing.T) {
 	ref := getSkillsReference()
 	assert.Contains(t, ref, "CLI Shortcuts")
-	assert.Contains(t, ref, "agentctl todo")
-	assert.Contains(t, ref, "agentctl ci")
-	assert.Contains(t, ref, "agentctl memory")
+	assert.Contains(t, ref, "foxctl todo")
+	assert.Contains(t, ref, "foxctl ci")
+	assert.Contains(t, ref, "foxctl memory")
 }
 
 // Edge case tests

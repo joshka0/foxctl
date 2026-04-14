@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | Status | Draft for review |
-| Scope | structured milestone summary / synthesis for `agentctl room` agile workflow |
+| Scope | structured milestone summary / synthesis for `foxctl room` agile workflow |
 | Related | [room-epic-factory-mission-parity.md](./room-epic-factory-mission-parity.md) |
 
 ## Why this slice
@@ -80,7 +80,7 @@ This makes `milestone summary` the milestone-level synthesis artifact.
 Add flags to enrich the synthesis:
 
 ```bash
-agentctl room milestone summary <room-id> <milestone-id> \
+foxctl room milestone summary <room-id> <milestone-id> \
   --summary "Foundation passed with one waived audit and no blocking validations." \
   --passed-criterion "Epic hierarchy is visible" \
   --passed-criterion "Accepted stories are validated" \
@@ -94,7 +94,7 @@ agentctl room milestone summary <room-id> <milestone-id> \
 To preserve a compact CLI, keep the current positional notes form as a shorthand:
 
 ```bash
-agentctl room milestone summary <room-id> <milestone-id> "Review synthesis..."
+foxctl room milestone summary <room-id> <milestone-id> "Review synthesis..."
 ```
 
 That shorthand should populate `summary` only.
@@ -181,7 +181,7 @@ Extend `room_agile` summary support so `milestone_summary` accepts:
 
 ## Skill implications
 
-Update `agentctl-room-agile` to teach:
+Update `foxctl-room-agile` to teach:
 
 - `milestone review` is verdict
 - `milestone summary` is synthesis

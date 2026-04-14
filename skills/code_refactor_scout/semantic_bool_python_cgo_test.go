@@ -5,7 +5,7 @@ package main
 import (
 	"testing"
 
-	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+	symindex "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
 
 func TestAnalyzePythonSemanticSimplificationsFindsBooleanLiteralComparison(t *testing.T) {

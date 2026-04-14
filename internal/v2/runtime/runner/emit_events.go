@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	"github.com/jkatigb/agentctl/internal/v2/core/events"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	"github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 func (p *Pipeline) stageEmitEvents(ctx context.Context, st *executionState) *v2errors.V2Error {

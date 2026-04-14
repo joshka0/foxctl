@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/codeblocks"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/codeblocks"
 	"github.com/stretchr/testify/assert"
 )
 

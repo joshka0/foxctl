@@ -15,7 +15,7 @@ const (
 	GlyphCanceled   = "✕"
 )
 
-// Status constants matching agentctl task status values
+// Status constants matching foxctl task status values
 const (
 	StatusPending    = "pending"
 	StatusInProgress = "in_progress"
@@ -111,7 +111,7 @@ type ClaudeTodo struct {
 	ActiveForm string `json:"activeForm"`
 }
 
-// MapClaudeStatus maps Claude Code status to agentctl task status
+// MapClaudeStatus maps Claude Code status to foxctl task status
 func MapClaudeStatus(claudeStatus string) string {
 	switch claudeStatus {
 	case "in_progress":
@@ -125,7 +125,7 @@ func MapClaudeStatus(claudeStatus string) string {
 	}
 }
 
-// MapAgentctlStatus maps agentctl task status to Claude Code status
+// MapAgentctlStatus maps foxctl task status to Claude Code status
 func MapAgentctlStatus(agentctlStatus string) string {
 	switch agentctlStatus {
 	case StatusInProgress:

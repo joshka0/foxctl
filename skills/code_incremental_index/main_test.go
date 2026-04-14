@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/langutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
 
 // applyDefaultsAndValidate applies defaults and validates required fields (mirrors run function).

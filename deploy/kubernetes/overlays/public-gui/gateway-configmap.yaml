@@ -2,14 +2,14 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: gui-auth-gateway-config
-  namespace: agentctl
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: gui-auth-gateway
 data:
   PORT: "8080"
   BETTER_AUTH_URL: "https://gui.example.com"
-  GUI_AUTH_UPSTREAM_URL: "http://agentctl:8080"
+  GUI_AUTH_UPSTREAM_URL: "http://foxctl:8080"
   GUI_AUTH_DIST_DIR: "/app/packages/gui-agent/dist"
   GUI_AUTH_MAGIC_LINK_LOG_ONLY: "false"
   GUI_AUTH_ALLOWED_EMAILS: "operator@example.com"

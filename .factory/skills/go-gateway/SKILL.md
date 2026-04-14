@@ -29,7 +29,7 @@ Before writing any code, read:
 6. Existing server patterns: `internal/web/server.go`
 7. Existing tmux bridge: `internal/tmuxbridge/client.go`
 8. Existing zellij bridge: `internal/zellijbridge/client.go`
-9. Existing Cobra patterns: `cmd/agentctl/cmd/web.go`
+9. Existing Cobra patterns: `cmd/foxctl/cmd/web.go`
 
 ### 2. Add Dependencies (if needed)
 
@@ -55,7 +55,7 @@ Note: `github.com/coder/websocket` is already in the project.
 
 Key architectural patterns:
 
-**Gateway command (`cmd/agentctl/cmd/gateway.go`):**
+**Gateway command (`cmd/foxctl/cmd/gateway.go`):**
 ```go
 func newGatewayCommand() *cobra.Command {
     cmd := &cobra.Command{
@@ -89,7 +89,7 @@ func newGatewayCommand() *cobra.Command {
 2. `go test -race ./internal/gateway/...` — no races
 3. `go vet ./internal/gateway/...` — clean
 4. `golangci-lint run --timeout 10m ./internal/gateway/...`
-5. Build: `go build ./cmd/agentctl/...` — compiles cleanly
+5. Build: `go build ./cmd/foxctl/...` — compiles cleanly
 6. Manual test with `--dev` mode: start gateway, curl healthz, open terminal in browser
 
 ### 6. Commit
@@ -102,15 +102,15 @@ func newGatewayCommand() *cobra.Command {
 
 ```json
 {
-  "salientSummary": "Implemented gateway tsnet core + web terminal. agentctl gateway starts with --dev mode, serves xterm.js at /terminal/{room-id}, WebSocket bridge to tmux sessions. 15 tests passing including concurrent access.",
-  "whatWasImplemented": "cmd/agentctl/cmd/gateway.go (Cobra command), internal/gateway/server.go (tsnet+HTTP server), internal/gateway/webterm/handler.go (WebSocket→PTY bridge), internal/gateway/static/ (embedded xterm.js assets), tests for each",
+  "salientSummary": "Implemented gateway tsnet core + web terminal. foxctl gateway starts with --dev mode, serves xterm.js at /terminal/{room-id}, WebSocket bridge to tmux sessions. 15 tests passing including concurrent access.",
+  "whatWasImplemented": "cmd/foxctl/cmd/gateway.go (Cobra command), internal/gateway/server.go (tsnet+HTTP server), internal/gateway/webterm/handler.go (WebSocket→PTY bridge), internal/gateway/static/ (embedded xterm.js assets), tests for each",
   "whatWasLeftUndone": "",
   "verification": {
     "commandsRun": [
       {"command": "go test ./internal/gateway/... -v", "exitCode": 0, "observation": "15 tests passing"},
       {"command": "go test -race ./internal/gateway/...", "exitCode": 0, "observation": "No races"},
       {"command": "make build", "exitCode": 0, "observation": "Binary builds cleanly"},
-      {"command": "./bin/agentctl gateway --dev & sleep 2 && curl -sf http://localhost:8765/healthz", "exitCode": 0, "observation": "Returns {\"tsnet\":\"dev-mode\",\"tmux\":\"ok\"}"}
+      {"command": "./bin/foxctl gateway --dev & sleep 2 && curl -sf http://localhost:8765/healthz", "exitCode": 0, "observation": "Returns {\"tsnet\":\"dev-mode\",\"tmux\":\"ok\"}"}
     ],
     "interactiveChecks": [
       {"action": "Opened http://localhost:8765/terminal/test-room in browser", "observed": "xterm.js terminal rendered, shell prompt visible, typed 'echo hello' and saw output"}
@@ -124,7 +124,7 @@ func newGatewayCommand() *cobra.Command {
         {"name": "TestConcurrentClients", "verifies": "VAL-GW-014"},
         {"name": "TestMaxConnections", "verifies": "VAL-GW-029"}
       ]},
-      {"file": "cmd/agentctl/cmd/gateway_test.go", "cases": [
+      {"file": "cmd/foxctl/cmd/gateway_test.go", "cases": [
         {"name": "TestGatewayDevMode", "verifies": "VAL-GW-027"},
         {"name": "TestGatewayHealthz", "verifies": "VAL-GW-028"}
       ]}

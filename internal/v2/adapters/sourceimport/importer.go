@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/sessionkit/claudejsonl"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit/codexjsonl"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/context/sessionkit/claudejsonl"
+	"github.com/joshka0/foxctl/internal/context/sessionkit/codexjsonl"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 const (

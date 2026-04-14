@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sync"
 
-	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
-	"github.com/jkatigb/agentctl/internal/agent/types"
-	domainagent "github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
+	agenttools "github.com/joshka0/foxctl/internal/agent/tools"
+	"github.com/joshka0/foxctl/internal/agent/types"
+	domainagent "github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
 )
 
 // OverseerActorID is the canonical actor ID for the overseer.

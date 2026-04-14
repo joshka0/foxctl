@@ -10,10 +10,10 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/tmuxbridge"
 )
 
 type muxPaneResponse struct {

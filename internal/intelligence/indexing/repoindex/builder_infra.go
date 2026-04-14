@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
-	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
+	"github.com/joshka0/foxctl/internal/platform/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -83,7 +83,7 @@ func (b *Builder) buildKubernetes(ctx context.Context, opts BuildOptions, nodes 
 		".git/**",
 		"node_modules/**",
 		"vendor/**",
-		".agentctl/**",
+		".foxctl/**",
 	}
 	fileSet := map[string]struct{}{}
 	for _, pattern := range []string{"**/*.yaml", "**/*.yml", "**/*.tpl"} {
@@ -176,7 +176,7 @@ func (b *Builder) buildShell(ctx context.Context, opts BuildOptions, nodes map[s
 		".git/**",
 		"node_modules/**",
 		"vendor/**",
-		".agentctl/**",
+		".foxctl/**",
 	}
 	files, err := fsutil.FindFilesRespectingGitignore(opts.RepoRoot, "**/*.sh", exclude)
 	if err != nil {

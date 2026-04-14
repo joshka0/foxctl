@@ -21,13 +21,13 @@ npm install -g typescript typescript-language-server
 
 ```bash
 # List symbols in a file
-agentctl run lsp/tsserver --input '{"operation": "symbols", "file": "src/index.ts"}'
+foxctl run lsp/tsserver --input '{"operation": "symbols", "file": "src/index.ts"}'
 
 # Find references
-agentctl run lsp/tsserver --input '{"operation": "references", "file": "src/index.ts", "line": 10, "column": 5}'
+foxctl run lsp/tsserver --input '{"operation": "references", "file": "src/index.ts", "line": 10, "column": 5}'
 
 # Workspace symbol search
-agentctl run lsp/tsserver --input '{"operation": "workspace_symbol", "query": "Handler"}'
+foxctl run lsp/tsserver --input '{"operation": "workspace_symbol", "query": "Handler"}'
 ```
 
 ## Architecture

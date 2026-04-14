@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/env"
+	"github.com/joshka0/foxctl/internal/platform/env"
 )
 
 // ActiveSession represents the currently active session identity for a workspace.
@@ -23,7 +23,7 @@ type ActiveSession struct {
 }
 
 // IdentityManager handles active session tracking via identity files.
-// These files are stored in ~/.agentctl/sessions/active/<workspace_hash>.json
+// These files are stored in ~/.foxctl/sessions/active/<workspace_hash>.json
 type IdentityManager struct {
 	baseDir string
 }
@@ -88,7 +88,7 @@ func (m *IdentityManager) SetActive(session ActiveSession) error {
 
 	session.AgentID = strings.TrimSpace(session.AgentID)
 	if session.AgentID == "" {
-		session.AgentID = "agentctl"
+		session.AgentID = "foxctl"
 	}
 
 	data, err := json.MarshalIndent(session, "", "  ")

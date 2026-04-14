@@ -6,15 +6,15 @@ import (
 	"strings"
 	"time"
 
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/logging"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/runtime/trajectorycapture"
-	"github.com/jkatigb/agentctl/internal/storage/jobs"
-	"github.com/jkatigb/agentctl/internal/storage/jobs/executor"
-	"github.com/jkatigb/agentctl/internal/storage/jobs/persist"
-	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/logging"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/runtime/trajectorycapture"
+	"github.com/joshka0/foxctl/internal/storage/jobs"
+	"github.com/joshka0/foxctl/internal/storage/jobs/executor"
+	"github.com/joshka0/foxctl/internal/storage/jobs/persist"
+	"github.com/joshka0/foxctl/internal/storage/jobs/types"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 func (e *Executor) ensureJobStore() (err error) {
@@ -52,7 +52,7 @@ func (e *Executor) ensureJobStore() (err error) {
 		observability.Emit(e.ctx, event.Success(time.Since(recoveryStart)))
 	}
 	// NOTE: We avoid full orphan recovery here to prevent races when multiple
-	// agentctl processes run concurrently (e.g., parallel hooks). RecoverStaleJobs
+	// foxctl processes run concurrently (e.g., parallel hooks). RecoverStaleJobs
 	// handles stale-job recovery using DefaultMaxJobAge, which is safe for
 	// concurrent runs and avoids erroring active jobs.
 	e.jobStore = store
@@ -174,7 +174,7 @@ func (e *Executor) ExecuteSync(job jobs.Job) error {
 	// Set no-CAS mode in environment if requested (disables output truncation)
 	//
 	// KNOWN LIMITATION: This uses os.Setenv which affects the entire process.
-	// In rare cases where multiple concurrent agentctl processes run with
+	// In rare cases where multiple concurrent foxctl processes run with
 	// different NoCAS settings, there could be a race condition. This is
 	// acceptable because:
 	//   1. CLI is typically used sequentially (one command at a time)

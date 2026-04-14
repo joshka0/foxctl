@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agent/types"
-	domainagent "github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/agent/types"
+	domainagent "github.com/joshka0/foxctl/internal/domain/agent"
 )
 
 func TestValidateSpawnDepth(t *testing.T) {

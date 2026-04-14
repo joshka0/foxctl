@@ -59,11 +59,11 @@ func TestDetectWithGitWorktreeFile(t *testing.T) {
 }
 
 func TestDetectWithAgentctlDirectory(t *testing.T) {
-	// Create temp dir with .agentctl directory
+	// Create temp dir with .foxctl directory
 	root := t.TempDir()
-	agentctlDir := filepath.Join(root, ".agentctl")
+	agentctlDir := filepath.Join(root, ".foxctl")
 	if err := os.Mkdir(agentctlDir, 0o755); err != nil {
-		t.Fatalf("failed to create .agentctl directory: %v", err)
+		t.Fatalf("failed to create .foxctl directory: %v", err)
 	}
 
 	// Detect should find the root
@@ -124,24 +124,24 @@ func TestNormalize(t *testing.T) {
 func TestHasMarkerAgentctlMustBeDirectory(t *testing.T) {
 	root := t.TempDir()
 
-	// .agentctl as file should NOT be detected
-	agentctlFile := filepath.Join(root, ".agentctl")
+	// .foxctl as file should NOT be detected
+	agentctlFile := filepath.Join(root, ".foxctl")
 	if err := os.WriteFile(agentctlFile, []byte("not a dir"), 0o644); err != nil {
-		t.Fatalf("failed to create .agentctl file: %v", err)
+		t.Fatalf("failed to create .foxctl file: %v", err)
 	}
 
-	if hasMarker(root, ".agentctl") {
-		t.Error("hasMarker should return false for .agentctl file (must be directory)")
+	if hasMarker(root, ".foxctl") {
+		t.Error("hasMarker should return false for .foxctl file (must be directory)")
 	}
 
 	// Clean up and create as directory
 	os.Remove(agentctlFile)
 	if err := os.Mkdir(agentctlFile, 0o755); err != nil {
-		t.Fatalf("failed to create .agentctl directory: %v", err)
+		t.Fatalf("failed to create .foxctl directory: %v", err)
 	}
 
-	if !hasMarker(root, ".agentctl") {
-		t.Error("hasMarker should return true for .agentctl directory")
+	if !hasMarker(root, ".foxctl") {
+		t.Error("hasMarker should return true for .foxctl directory")
 	}
 }
 
@@ -213,7 +213,7 @@ func TestLooksLikeID(t *testing.T) {
 		{"ws-0123456789abcdef00", true},
 		{"ws-foo/bar", false},
 		{"ws-", false},
-		{"/Users/joshka/repos/personal/agentctl", false},
+		{"/Users/joshka/repos/personal/foxctl", false},
 	}
 	for _, tt := range tests {
 		got := LooksLikeID(tt.input)

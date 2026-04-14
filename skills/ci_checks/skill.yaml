@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: ci/checks
@@ -43,10 +43,10 @@ signature:
     long: |
       Use ci/checks to fetch CI check results for a pull request.
       Example commands:
-        agentctl run ci/checks --input '{"pr":"123","mode":"summary"}'
-        agentctl skills run ci/checks --pr 123 --mode summary
-        agentctl run ci/checks --input '{"pr":"123","mode":"detailed","errors_only":true}'
-        agentctl skills run ci/checks --pr 123 --mode detailed --errors_only
+        foxctl run ci/checks --input '{"pr":"123","mode":"summary"}'
+        foxctl skills run ci/checks --pr 123 --mode summary
+        foxctl run ci/checks --input '{"pr":"123","mode":"detailed","errors_only":true}'
+        foxctl skills run ci/checks --pr 123 --mode detailed --errors_only
     workflows:
       - id: checks-summary
         description: "Fetch a summary of check runs."

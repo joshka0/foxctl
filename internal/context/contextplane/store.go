@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
-	obsidiantool "github.com/jkatigb/agentctl/internal/tooling/tools/obsidian"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	obsidiantool "github.com/joshka0/foxctl/internal/tooling/tools/obsidian"
 )
 
-// WorkspaceStore persists workspace-local ACA runtime files under .agentctl/.
+// WorkspaceStore persists workspace-local ACA runtime files under .foxctl/.
 type WorkspaceStore struct {
 	layout Layout
 }
@@ -24,7 +24,7 @@ type WorkspaceStore struct {
 // NewWorkspaceStore returns a file-backed control-plane store for a workspace.
 func NewWorkspaceStore(workspacePath string) *WorkspaceStore {
 	clean := ws.Normalize(workspacePath)
-	rootDir := filepath.Join(clean, ".agentctl")
+	rootDir := filepath.Join(clean, ".foxctl")
 	runtimeDir := filepath.Join(rootDir, "runtime")
 	queueDir := filepath.Join(runtimeDir, "queue")
 	handoffsDir := filepath.Join(runtimeDir, "handoffs")
@@ -61,7 +61,7 @@ func NewWorkspaceStore(workspacePath string) *WorkspaceStore {
 			ObsidianFrontierPath:   filepath.Join(templatesDir, "00-home", "active-frontier.md"),
 			ObsidianAtlasPath:      filepath.Join(templatesDir, "atlas", "projects.md"),
 			ObsidianProjectMOCPath: filepath.Join(templatesDir, "notes", "moc", "project-index.md"),
-			ObsidianInboxDraftsDir: filepath.Join(templatesDir, "inbox", "drafted-from-agentctl"),
+			ObsidianInboxDraftsDir: filepath.Join(templatesDir, "inbox", "drafted-from-foxctl"),
 		},
 	}
 }
@@ -1165,7 +1165,7 @@ trust: reviewed
 - [[projects]]
 - [[project-index]]
 
-Use this vault as the durable knowledge plane. Runtime truth stays in workspace-local .agentctl/runtime/.
+Use this vault as the durable knowledge plane. Runtime truth stays in workspace-local .foxctl/runtime/.
 `
 
 const defaultObsidianFrontier = `---
@@ -1204,7 +1204,7 @@ Group project maps here and link canonical ADR, pattern, and incident indexes.
 const defaultObsidianProjectMOC = `---
 title: Project Index
 type: map
-project: agentctl
+project: foxctl
 status: draft
 trust: reviewed
 ---

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
 )
 
 // MockHookDispatcher is a test double for hooks.Dispatcher.

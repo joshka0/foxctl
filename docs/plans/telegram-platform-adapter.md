@@ -7,12 +7,12 @@
 
 ## Problem Statement
 
-agentctl has a working Discord chat adapter, including natural language chat via
+foxctl has a working Discord chat adapter, including natural language chat via
 console sessions with streaming edits. We want the same surface area for
-Telegram so teams can use agentctl from Telegram DMs and group chats.
+Telegram so teams can use foxctl from Telegram DMs and group chats.
 
 **Goal:** Implement a Telegram `ChatAdapter` that supports:
-- Text-command routing (Telegram-style `/commands`) to agentctl skills/APIs via `chatadapter.Bridge`
+- Text-command routing (Telegram-style `/commands`) to foxctl skills/APIs via `chatadapter.Bridge`
 - Inline keyboard interactions (buttons) for Phase 2 agent controls (stop/retry/details)
 - Natural language chat in configured chats (or @mentions elsewhere) routed through `consolews` sessions via a `SessionBridge`
 - Streaming responses by editing a single Telegram message on an interval
@@ -160,7 +160,7 @@ Unit:
 - `/chat_id` helper response
 
 Integration (manual):
-1. `agentctl web serve --chat telegram` with `TELEGRAM_BOT_TOKEN` set.
+1. `foxctl web serve --chat telegram` with `TELEGRAM_BOT_TOKEN` set.
 2. In any target group/DM, run `/chat_id` to get the numeric chat ID for `TELEGRAM_CHAT_IDS`, `TELEGRAM_ACTIVITY_CHAT_ID`, and `TELEGRAM_AGENT_CHAT_ID`.
 3. DM the bot: send a natural language prompt -> gets streamed edits -> final answer.
 4. Group chat:

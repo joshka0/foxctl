@@ -3,7 +3,7 @@ package repoquery
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 )
 
 func TestRerankSearchNodes_PrioritizesInfraNodesForMatchingQueries(t *testing.T) {

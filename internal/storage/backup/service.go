@@ -1,4 +1,4 @@
-// Package backup implements backup and restore operations for agentctl data.
+// Package backup implements backup and restore operations for foxctl data.
 package backup
 
 import (
@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/backup"
-	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/domain/backup"
+	"github.com/joshka0/foxctl/internal/platform/buildinfo"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 const (

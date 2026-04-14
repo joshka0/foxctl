@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	workerspkg "github.com/jkatigb/agentctl/internal/runtime/jobs/workers"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	workerspkg "github.com/joshka0/foxctl/internal/runtime/jobs/workers"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )

@@ -76,13 +76,13 @@ linters:
           files:
             - "**/internal/domain/**/*.go"
           deny:
-            - pkg: "github.com/jkatigb/agentctl/internal/storage"
+            - pkg: "github.com/joshka0/foxctl/internal/storage"
               desc: "domain layer must not depend on storage"
-            - pkg: "github.com/jkatigb/agentctl/internal/runtime/execution"
+            - pkg: "github.com/joshka0/foxctl/internal/runtime/execution"
               desc: "domain layer must not depend on execution"
-            - pkg: "github.com/jkatigb/agentctl/internal/platform"
+            - pkg: "github.com/joshka0/foxctl/internal/platform"
               desc: "domain layer must not depend on platform"
-            - pkg: "github.com/jkatigb/agentctl/internal/adapters"
+            - pkg: "github.com/joshka0/foxctl/internal/adapters"
               desc: "domain layer must not depend on adapters"
 
         # Execution layer restrictions
@@ -91,7 +91,7 @@ linters:
           files:
             - "**/internal/runtime/execution/**/*.go"
           deny:
-            - pkg: "github.com/jkatigb/agentctl/internal/adapters"
+            - pkg: "github.com/joshka0/foxctl/internal/adapters"
               desc: "execution layer should not depend on adapters"
 
   exclusions:
@@ -107,11 +107,11 @@ linters:
       # TODO: Remove these exclusions as files are migrated
       - linters:
           - forbidigo
-        path: '(cmd/.*/main\.go|cmd/agentctl/cmd/.*|cmd/agentctl_viewer/.*|cmd/synctest/.*|internal/adapters/skillslib/.*|internal/runtime/actor/.*|internal/agent/.*|internal/analysis/.*|internal/codemap/.*|internal/companion/.*|internal/runtime/daemon/.*|internal/runtime/engine/.*|internal/gateway/.*|internal/indexing/.*|internal/platform/lsp/.*|internal/platform/.*|internal/retrieval/.*|internal/storage/.*|internal/tooling/testwatch/.*|internal/web/.*|plugins/.*|scripts/.*|skills/.*|.*_test\.go)'
+        path: '(cmd/.*/main\.go|cmd/foxctl/cmd/.*|cmd/agentctl_viewer/.*|cmd/synctest/.*|internal/adapters/skillslib/.*|internal/runtime/actor/.*|internal/agent/.*|internal/analysis/.*|internal/codemap/.*|internal/companion/.*|internal/runtime/daemon/.*|internal/runtime/engine/.*|internal/gateway/.*|internal/indexing/.*|internal/platform/lsp/.*|internal/platform/.*|internal/retrieval/.*|internal/storage/.*|internal/tooling/testwatch/.*|internal/web/.*|plugins/.*|scripts/.*|skills/.*|.*_test\.go)'
       # Keep complexity pressure on smaller units, but don't block branch work on the
       # known command aggregators and long integration tests.
       - linters:
           - gocyclo
-        path: '(cmd/agentctl/cmd/mcp\.go|cmd/agentctl/cmd/room\.go|cmd/agentctl/cmd/room_tasks\.go|.*_test\.go)'
+        path: '(cmd/foxctl/cmd/mcp\.go|cmd/foxctl/cmd/room\.go|cmd/foxctl/cmd/room_tasks\.go|.*_test\.go)'
     # Exclude generated code
     generated: strict

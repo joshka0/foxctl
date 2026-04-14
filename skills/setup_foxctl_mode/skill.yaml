@@ -1,0 +1,51 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: setup/agentctl_mode
+  version: 0.1.0
+  description: "Get/set foxctl mode state for a workspace"
+  tags: ["setup", "mode", "workspace"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 4
+signature:
+  command: setup/agentctl_mode
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation: 'get' or 'set'"
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Workspace path (defaults to cwd)"
+    - name: enabled
+      type: boolean
+      required: false
+      description: "For 'set' operation: enable or disable"
+  returns:
+    - name: enabled
+      type: boolean
+      description: "Whether foxctl mode is enabled"
+    - name: workspace_id
+      type: string
+      description: "The workspace ID"
+  help:
+    short: "Get/set foxctl mode state"
+    long: |
+      Manages foxctl mode state per workspace.
+
+      Examples:
+        foxctl run setup/agentctl_mode --input '{"operation": "get"}'
+        foxctl run setup/agentctl_mode --input '{"operation": "set", "enabled": true}'
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 func TestToolTrajectoryCapture_CodeSymbolSearch_EmitsToolCallAndResult(t *testing.T) {

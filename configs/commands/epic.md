@@ -38,10 +38,10 @@ Create 3-8 actionable todos that, when completed, achieve the goal. Each todo sh
 1. **Set the epic anchor** using sqlite3 (requires workspace + session ID):
 ```bash
 WORKSPACE="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-SESSION_ID="${CLAUDE_SESSION_ID:-$(cat ~/.agentctl/sessions/active/*.json 2>/dev/null | jq -r '.session_id' | head -1)}"
+SESSION_ID="${CLAUDE_SESSION_ID:-$(cat ~/.foxctl/sessions/active/*.json 2>/dev/null | jq -r '.session_id' | head -1)}"
 EPIC_ID="$(python3 -c 'import ulid; print(ulid.new().str)' 2>/dev/null || uuidgen | tr -d '-' | tr '[:upper:]' '[:lower:]' | head -c 26)"
 
-sqlite3 ~/.agentctl/storage/tasks.db "
+sqlite3 ~/.foxctl/storage/tasks.db "
 INSERT INTO epics (id, workspace_id, title, goal, status, created_at, session_id)
 VALUES ('$EPIC_ID', '$WORKSPACE', 'Epic Title Here', 'Goal statement here', 'active', datetime('now'), '$SESSION_ID');
 

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
 )
 
 func TestIndexEditedFileSkipsUnsupportedPaths(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/events"
-	"github.com/jkatigb/agentctl/internal/v2/testkit/fakes"
-	"github.com/jkatigb/agentctl/internal/v2/testkit/golden"
+	"github.com/joshka0/foxctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/testkit/fakes"
+	"github.com/joshka0/foxctl/internal/v2/testkit/golden"
 )
 
 func TestEventsJSONL_GoldenStableOutput(t *testing.T) {

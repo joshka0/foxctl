@@ -5,8 +5,8 @@ import (
 	"context"
 	"testing"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func TestRunHttpOpenApi(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 // SyncResult contains the outcome of a sync operation
@@ -20,7 +20,7 @@ type SyncResult struct {
 	Warnings  []string `json:"warnings,omitempty"`
 }
 
-// InboundSyncInput defines parameters for syncing from provider to agentctl
+// InboundSyncInput defines parameters for syncing from provider to foxctl
 type InboundSyncInput struct {
 	WorkspaceID string       `json:"workspace_id" validate:"required"`
 	SessionID   string       `json:"session_id"`
@@ -34,7 +34,7 @@ type InboundSyncResult struct {
 	Tasks []tasks.Task `json:"tasks,omitempty"` // Tasks that were created/updated (dry run shows what would happen)
 }
 
-// OutboundSyncInput defines parameters for syncing from agentctl to provider
+// OutboundSyncInput defines parameters for syncing from foxctl to provider
 type OutboundSyncInput struct {
 	WorkspaceID string           `json:"workspace_id" validate:"required"`
 	SessionID   string           `json:"session_id"`
@@ -71,8 +71,8 @@ func NewService(taskStore tasks.Store) *Service {
 	return &Service{taskStore: taskStore}
 }
 
-// SyncFromProvider imports todos from Claude Code into agentctl task store.
-// This is the inbound sync direction (Claude → agentctl).
+// SyncFromProvider imports todos from Claude Code into foxctl task store.
+// This is the inbound sync direction (Claude → foxctl).
 func (s *Service) SyncFromProvider(ctx context.Context, in InboundSyncInput) (*InboundSyncResult, error) {
 	result := &InboundSyncResult{}
 
@@ -91,7 +91,7 @@ func (s *Service) SyncFromProvider(ctx context.Context, in InboundSyncInput) (*I
 		result.Tasks = append(result.Tasks, task)
 	}
 
-	// Removal detection: find tasks that were in agentctl but not in incoming list
+	// Removal detection: find tasks that were in foxctl but not in incoming list
 	// Skip if incoming list is empty (conservative approach - empty doesn't mean "clear all")
 	s.cancelRemovedInboundTasks(ctx, in, state.existingTasks, result)
 
@@ -318,8 +318,8 @@ func collectSeenTaskIDs(tasks []tasks.Task) map[string]bool {
 	return seenTaskIDs
 }
 
-// SyncToProvider exports agentctl tasks to Claude Code todo file.
-// This is the outbound sync direction (agentctl → Claude).
+// SyncToProvider exports foxctl tasks to Claude Code todo file.
+// This is the outbound sync direction (foxctl → Claude).
 func (s *Service) SyncToProvider(ctx context.Context, in OutboundSyncInput) (*OutboundSyncResult, error) {
 	result := &OutboundSyncResult{}
 

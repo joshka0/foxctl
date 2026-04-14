@@ -1,2 +1,2 @@
-// Package api provides HTTP handlers for the agentctl web API.
+// Package api provides HTTP handlers for the foxctl web API.
 package api

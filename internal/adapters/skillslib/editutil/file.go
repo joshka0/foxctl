@@ -5,9 +5,9 @@ import (
 	"context"
 	"os"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/diffutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/diffutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 )
 
 // FileOptions configures how edits are applied to a file.

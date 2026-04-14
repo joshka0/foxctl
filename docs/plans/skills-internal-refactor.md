@@ -9,8 +9,8 @@ Goal: identify refactoring opportunities to consolidate skills into internal pac
 - [x] Propose a prioritized sequence for refactors (internal first, then skills), including risks and test impact.
 
 ## Active TODOs
-- [x] Update hooks/dispatch input to accept `meta` (fix hook decode errors from agentctl-hook).
-- [x] Apply executil typed decode helper to remaining agentctl callsites.
+- [x] Update hooks/dispatch input to accept `meta` (fix hook decode errors from foxctl-hook).
+- [x] Apply executil typed decode helper to remaining foxctl callsites.
 - [x] Add executil.Start helper and replace remaining background Start callsites.
 - [x] Move adb/idb helpers into skillslib/mobileutil and update mobile/expo skills to use them.
 - [x] Extract adb device listing parsing into skillslib/mobileutil and reuse in mobile skills.
@@ -91,7 +91,7 @@ Goal: identify refactoring opportunities to consolidate skills into internal pac
 - [x] skills/{embedding_memories,embedding_refresh,embedding_queue,plan_sync}: centralize workspace defaulting via skillslib/workspaceutil.
 - [x] skills/{session_*,todo_continuation,epic_complete}: route workspace defaults through skillslib/workspaceutil.
 - [x] skills/test_run: use skillslib/executil for command execution + stderr capture.
-- [x] skills invoking agentctl CLI: centralize subprocess + envelope decode in skillslib/executil.
+- [x] skills invoking foxctl CLI: centralize subprocess + envelope decode in skillslib/executil.
 - [x] Continue executil sweep for remaining common skills (code_git, git_status, git_worktree, text_replace, data_jq, hooks_impact_analysis, hooks_subagent_start, session_restore).
 - [x] Add helper to decode envelope data into typed structs to reduce marshal/unmarshal repetition.
 
@@ -107,9 +107,9 @@ Goal: identify refactoring opportunities to consolidate skills into internal pac
 ## Phase 2 (Beyond Skills/Internal)
 - [x] Inventory skill manifest/artifact resolution callsites (hooks, daemon, codemap, agent tools, web/api) and draft a shared helper in internal/domain/skill.
 - [x] Consolidate skill run envelope parsing/error mapping into a shared helper for internal callers.
-- [x] Standardize config.Load + workspace resolution across cmd/agentctl/cmd with a shared helper and consistent error wrapping.
+- [x] Standardize config.Load + workspace resolution across cmd/foxctl/cmd with a shared helper and consistent error wrapping.
 - [x] Replace remaining inline map assertions in internal/agent/tools and runservice with maputil helpers or typed envelope decode.
-- [x] Reduce duplicated testwatch config loading flows in cmd/agentctl/cmd/watch.go and cmd/agentctl/cmd/testwatch.go.
+- [x] Reduce duplicated testwatch config loading flows in cmd/foxctl/cmd/watch.go and cmd/foxctl/cmd/testwatch.go.
 
 ## Phase 3 (Next Refactor Pass)
 - [x] Extend protocol.DecodeEnvelope usage to hook skill output parsing (hooks/skill_runner).

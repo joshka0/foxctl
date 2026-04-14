@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/runner"
-	"github.com/jkatigb/agentctl/internal/v2/testkit/fakes"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
+	"github.com/joshka0/foxctl/internal/v2/testkit/fakes"
 )
 
 func TestTurnRecord_PersistsIterationAndToolCallLineage(t *testing.T) {

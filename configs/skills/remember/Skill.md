@@ -1,6 +1,6 @@
 # Remember
 
-Save a key learning, decision, or gotcha to agentctl memory for future reference.
+Save a key learning, decision, or gotcha to foxctl memory for future reference.
 
 ## Usage
 
@@ -16,7 +16,7 @@ Save a key learning, decision, or gotcha to agentctl memory for future reference
 
 ## Instructions
 
-When the user runs this command, save the memory to agentctl:
+When the user runs this command, save the memory to foxctl:
 
 1. Extract the key insight from `$ARGUMENTS`
 2. Determine the memory type:
@@ -27,10 +27,10 @@ When the user runs this command, save the memory to agentctl:
 
 3. Create a descriptive name (kebab-case, max 50 chars)
 
-4. Run the agentctl command:
+4. Run the foxctl command:
 ```bash
 echo '{"version":1,"status":"ok","command":"memory/remember","data":{"content":"<the insight>"}}' | \
-  agentctl memory put \
+  foxctl memory put \
     --name "<name>" \
     --type "<type>" \
     --summary "<the insight>" \

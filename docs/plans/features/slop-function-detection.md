@@ -2,7 +2,7 @@
 
 Status: active plan
 
-Owner: agentctl
+Owner: foxctl
 
 Last updated: 2026-03-30
 
@@ -33,7 +33,7 @@ Instead:
 
 - extend `code/refactor_scout` with a `slop` finding family
 - preserve `code/refactor_advisor` as the optional model-backed second stage
-- optionally add a convenience CLI wrapper such as `agentctl refactor slop`
+- optionally add a convenience CLI wrapper such as `foxctl refactor slop`
   later if the UX proves useful
 
 This keeps one deterministic hotspot engine as the source of discovery truth and
@@ -103,8 +103,8 @@ Keep the current entrypoints and add a narrow selector for this family.
 Recommended first-pass command surface:
 
 ```bash
-agentctl refactor scout --path ./internal --language go --focus slop
-agentctl refactor advisor --path ./packages/gui-agent --language typescript --focus slop
+foxctl refactor scout --path ./internal --language go --focus slop
+foxctl refactor advisor --path ./packages/gui-agent --language typescript --focus slop
 ```
 
 If `--focus` feels too narrow for the long term, it can be generalized later to
@@ -408,7 +408,7 @@ Deliverables:
 - `slop_hotspot` composite finding
 - CLI docs and examples
 - optional convenience wrapper:
-  - `agentctl refactor slop`
+  - `foxctl refactor slop`
 
 Acceptance criteria:
 
@@ -498,7 +498,7 @@ The test bar should explicitly include:
 2. Should `slop_hotspot` suppress its constituent rules the way
    `function_hotspot` currently suppresses some constituents, or should both be
    returned together?
-3. Is `agentctl refactor slop` worth adding early, or should the first pass stay
+3. Is `foxctl refactor slop` worth adding early, or should the first pass stay
    behind `refactor scout --focus slop`?
 4. For TypeScript, should the parser path live inside the scout directly or in a
    shared structural-analysis package first?

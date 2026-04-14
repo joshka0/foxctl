@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/diffutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/diffutil"
 )
 
 func TestApplyExactMatch(t *testing.T) {

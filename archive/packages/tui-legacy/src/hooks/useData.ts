@@ -1,5 +1,5 @@
 // Data fetching hooks for TUI
-// Uses @agentctl/data client with simple React state management
+// Uses @foxctl/data client with simple React state management
 
 import { useState, useEffect, useCallback, useReducer, useRef } from "react";
 import {
@@ -73,7 +73,7 @@ import {
   type OrchestrationCardAction,
   type OrchestrationLaneID,
   type OrchestrationCard,
-} from "@agentctl/data";
+} from "@foxctl/data";
 
 export interface UseQueryResult<T> {
   data: T | undefined;

@@ -17,7 +17,7 @@ const SURFACES: SurfaceDef[] = [
     label: "Runtime",
     summary: "Active agents, states, and direct operator actions.",
     nextSteps: [
-      "Add runtime inventory backed by agentctl read models.",
+      "Add runtime inventory backed by foxctl read models.",
       "Add selected-agent detail and bounded follow-up actions.",
     ],
   },
@@ -116,7 +116,7 @@ export class App implements Component {
     const current = SURFACES[this.activeSurfaceIndex] ?? SURFACES[0];
     const lines: string[] = [];
 
-    lines.push(pad("agentctl tui-agent  |  pi-tui control-plane scaffold", width));
+    lines.push(pad("foxctl tui-agent  |  pi-tui control-plane scaffold", width));
     lines.push(
       pad(
         SURFACES.map((surface, index) => {

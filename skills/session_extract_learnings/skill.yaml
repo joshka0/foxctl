@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/extract_learnings
@@ -51,9 +51,9 @@ signature:
     short: "Extract structured learnings from a session transcript."
     long: |
       Example commands:
-        agentctl run session/extract_learnings --input '{"session_id":"01HXYZ..."}'
-        agentctl run session/extract_learnings --input '{"session_id":"01HXYZ...","epic_id":"01HEPIC..."}'
-        agentctl run session/extract_learnings --input '{"session_id":"01HXYZ...","dry_run":true}'
+        foxctl run session/extract_learnings --input '{"session_id":"01HXYZ..."}'
+        foxctl run session/extract_learnings --input '{"session_id":"01HXYZ...","epic_id":"01HEPIC..."}'
+        foxctl run session/extract_learnings --input '{"session_id":"01HXYZ...","dry_run":true}'
 capabilities:
   network: "egress"
   filesystem:

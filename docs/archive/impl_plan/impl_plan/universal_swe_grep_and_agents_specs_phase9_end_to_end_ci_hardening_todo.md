@@ -21,7 +21,7 @@ steps focused on **end-to-end flows, examples, and CI hardening**.
 >   - `docs/spec/dspy_trajectory_capture.md`
 >   - `docs/spec/skills_spec/README.md`
 > - Codemaps (from universal codemap Phase 9):
->   - CM3 – agentctl Envelope Protocol & CLI Pipeline.
+>   - CM3 – foxctl Envelope Protocol & CLI Pipeline.
 >   - CM13 – Core Profile v1: End-to-End Envelope, Jobs & CAS Flow.
 >   - CM14 – Test Infrastructure: Test-Watch, Feedback Hooks, CI Targets.
 >   - CM17 – Test Infrastructure & CI Pipeline: Test Watcher, Makefile Targets,
@@ -54,7 +54,7 @@ small workspace.
   - **Workflow 2 (optional):** Agent-driven change using dspy-go tools + SWE
     Grep, followed by review and indexing.
 - [ ] For each example, include:
-  - CLI commands (`agentctl todo`, `agentctl run`, `agentctl dspy-agent`)
+  - CLI commands (`foxctl todo`, `foxctl run`, `foxctl dspy-agent`)
     showing the path end-to-end.
   - Pointers to relevant specs and Phase docs.
   - Notes on where envelopes/jobs/CAS artifacts end up on disk.

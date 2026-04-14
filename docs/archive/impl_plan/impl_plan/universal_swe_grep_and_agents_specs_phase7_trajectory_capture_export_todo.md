@@ -21,7 +21,7 @@ exporting dspy-ready episodes via jobs, envelopes, and CAS.
 > - Skills/Jobs spec: `docs/spec/skills_spec/README.md` (§5.1
 >   `trajectory.export`)
 > - Codemaps for this phase (from `universal_swe_grep_and_agents_codemap.md`):
->   - CM3 – agentctl Envelope Protocol & CLI Pipeline.
+>   - CM3 – foxctl Envelope Protocol & CLI Pipeline.
 >   - CM5 / CM12 – CAS storage, integrity, and integration.
 >   - CM7 / CM8 – Job System: types, storage, submission, WFQ scheduler.
 >   - CM10 – Knowledge System & Factory Droids.
@@ -61,7 +61,7 @@ Goal: define a **concrete, implementation-backed mapping** from existing systems
 ### A2. Capture points and event mapping
 
 - [ ] Identify and enumerate capture points per `dspy_trajectory_capture.md` §4:
-  - CLI user requests (e.g. `agentctl dspy-agent spawn`, `todo.add`).
+  - CLI user requests (e.g. `foxctl dspy-agent spawn`, `todo.add`).
   - dspy-go agent runs (runtime spawn + tool calls).
   - Review outcomes (review gate artifacts).
   - Task state transitions.
@@ -123,7 +123,7 @@ the existing job system, CAS, and envelope pipeline.
     - Stream as NDJSON envelopes or write NDJSON to CAS and return a digest.
 - [ ] Decide implementation shape for v1:
   - Option A: internal job only (no public skill); invoked via CLI command
-    `agentctl trajectory export` that streams or returns CAS digest.
+    `foxctl trajectory export` that streams or returns CAS digest.
   - Option B: job backed by a dedicated skill manifest, following existing
     `jobs + exec` patterns.
 - [ ] Integrate with the job system per CM7/CM8:
@@ -223,7 +223,7 @@ spec, and everything obeys envelope/Jobs/CAS invariants**.
 
 - [ ] Add tests ensuring that **long-running exports use the job system**
       (CM7/CM8):
-  - `agentctl trajectory export` (or equivalent) creates jobs with expected
+  - `foxctl trajectory export` (or equivalent) creates jobs with expected
     states (`queued → running → ok/error`).
   - WFQ scheduling honors existing policies when exports are queued.
 - [ ] Add CLI-level tests exercising the full pipeline (CM3, CM13):

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/runtime/actor"
+	"github.com/joshka0/foxctl/internal/runtime/actor"
 )
 
 // CoderHandler handles messages for coder role actors.

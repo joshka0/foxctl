@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
 )
 
 // SSHServerConfig holds the configuration for the SSH server.

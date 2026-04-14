@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useBlackboard } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { BlackboardRecord } from "@agentctl/data";
+import type { BlackboardRecord } from "@foxctl/data";
 
 interface RecordRowProps {
   record: BlackboardRecord;

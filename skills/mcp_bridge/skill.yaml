@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: mcp/bridge
@@ -52,8 +52,8 @@ signature:
     long: |
       Use mcp/bridge to invoke a tool on a running MCP server.
       Example commands:
-        agentctl run mcp/bridge --input '{"server_url":"http://localhost:8080/sse","tool_name":"search","tool_args":{"query":"example"}}'
-        agentctl skills run mcp/bridge --server_url http://localhost:8080/sse --tool_name search --tool_args '{"query":"example"}'
+        foxctl run mcp/bridge --input '{"server_url":"http://localhost:8080/sse","tool_name":"search","tool_args":{"query":"example"}}'
+        foxctl skills run mcp/bridge --server_url http://localhost:8080/sse --tool_name search --tool_args '{"query":"example"}'
     workflows:
       - id: bridge-tool
         description: "Call a tool on an MCP server."

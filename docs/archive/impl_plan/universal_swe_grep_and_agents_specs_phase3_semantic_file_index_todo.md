@@ -112,11 +112,11 @@ and explicit CLI entrypoints.
     filters + routes files → semantic indexer updates named memory.
   - Clarify how `EmbeddingSource` is populated from `PostReviewEvent`.
 
-### C2. Optional CLI (`agentctl semantic-index ...`)
+### C2. Optional CLI (`foxctl semantic-index ...`)
 
 - [x] Design and implement a CLI entrypoint for semantic indexing:
-  - `agentctl semantic-index init` – run init job(s) over a workspace subset.
-  - `agentctl semantic-index update` – reindex changed files.
+  - `foxctl semantic-index init` – run init job(s) over a workspace subset.
+  - `foxctl semantic-index update` – reindex changed files.
   - Flags for chunking config, include/exclude globs, dry-run.
 - [x] Ensure CLI emits envelopes aligned with `core_profile_v1` and reuses
       existing job primitives (no new wire contracts):

@@ -5,7 +5,7 @@ Audience: room runtime, web/API, CLI, gui-agent, mux, future desktop/mobile clie
 
 ## Canonical Direction
 
-`agentctl` is the headless multi-agent room/runtime kernel.
+`foxctl` is the headless multi-agent room/runtime kernel.
 
 That kernel owns:
 
@@ -207,7 +207,7 @@ The product is not “the CLI plus some attached UIs.”
 
 The product is:
 
-- `agentctl` as the room/runtime kernel
+- `foxctl` as the room/runtime kernel
 - multiple clients on top of one shared runtime truth
 
 That is the model future work should optimize for.

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: text/grep
@@ -52,10 +52,10 @@ signature:
       Provide a required pattern and optional path, include/exclude globs, and max_matches
       to control the output size.
       Example commands:
-        agentctl run text/grep --input '{"pattern":"TODO","path":"."}'
-        agentctl skills run text/grep --pattern TODO --path .
-        agentctl run text/grep --input '{"pattern":"TODO","path":"./src","include":["*.go"]}'
-        agentctl skills run text/grep --pattern TODO --path ./src --include '*.go'
+        foxctl run text/grep --input '{"pattern":"TODO","path":"."}'
+        foxctl skills run text/grep --pattern TODO --path .
+        foxctl run text/grep --input '{"pattern":"TODO","path":"./src","include":["*.go"]}'
+        foxctl skills run text/grep --pattern TODO --path ./src --include '*.go'
     workflows:
       - id: basic-search
         description: "Search recursively for a pattern in the current workspace."

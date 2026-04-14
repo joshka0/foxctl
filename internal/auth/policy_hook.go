@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/casbin/casbin/v2"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
 )
 
 // PolicyHookRunner evaluates Casbin policies for hook events.

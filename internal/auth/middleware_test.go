@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/identity"
+	"github.com/joshka0/foxctl/internal/domain/identity"
 )
 
 func TestMiddlewareAuthenticatedRequestWithRolePasses(t *testing.T) {

@@ -9,31 +9,31 @@
     "summary": "Well-structured implementation of --sandbox flag for room create. The feature adds SandboxConfig to domain types, board store persistence, CLI flags, and sandbox provisioning (worktree + tmux + gateway route). All 7 validation assertions are covered by tests. Code follows the project's functional core / imperative shell pattern. A few non-blocking observations noted below.",
     "issues": [
       {
-        "file": "cmd/agentctl/cmd/room.go",
+        "file": "cmd/foxctl/cmd/room.go",
         "line": 2151,
         "severity": "non_blocking",
         "description": "provisionSandbox() creates its own tmuxbridge.New() client directly instead of using the injectable newRoomTmuxClient factory. This means the rollback test (TestProvisionSandbox_RollbackOnTmuxFailure) saves/restores newRoomTmuxClient but provisionSandbox doesn't use it — the test's mock injection is dead code. The test works around this by temporarily removing tmux from PATH, which is valid but the newRoomTmuxClient save/restore lines in the test (lines 7343-7344, 7370) are misleading dead code. Consider having provisionSandbox use the injectable factory for better testability."
       },
       {
-        "file": "cmd/agentctl/cmd/room.go",
+        "file": "cmd/foxctl/cmd/room.go",
         "line": 2130,
         "severity": "non_blocking",
         "description": "Terminal URL is a hardcoded placeholder: \"/terminal/\" + roomID. The comment acknowledges this ('placeholder — gateway URL construction depends on deployment'). This is acceptable for this feature scope but should be revisited when gateway integration is complete to construct proper URLs (e.g., including host, scheme, port)."
       },
       {
-        "file": "cmd/agentctl/cmd/room.go",
+        "file": "cmd/foxctl/cmd/room.go",
         "line": 2096,
         "severity": "non_blocking",
         "description": "Git repo detection checks for .git directory or symlink, which is reasonable for worktrees but won't handle bare repos or GIT_DIR env var. Low risk since rooms are expected to be in normal working directories."
       },
       {
-        "file": "cmd/agentctl/cmd/room_test.go",
+        "file": "cmd/foxctl/cmd/room_test.go",
         "line": 7370,
         "severity": "non_blocking",
         "description": "In TestProvisionSandbox_RollbackOnTmuxFailure: 'mockTmux' variable and 'failingTmuxClient' type alias are unused dead code. The test's actual mechanism (removing tmux from PATH) is sound, but the leftover mock injection code should be cleaned up."
       },
       {
-        "file": "cmd/agentctl/cmd/room.go",
+        "file": "cmd/foxctl/cmd/room.go",
         "line": 2088,
         "severity": "non_blocking",
         "description": "When a stale sandbox is detected (worktree missing or tmux session gone), the code falls through to re-provision without cleaning up the stale resources. This could leave orphaned worktrees or tmux sessions if only one of the two was lost. Consider adding explicit cleanup before re-provisioning."

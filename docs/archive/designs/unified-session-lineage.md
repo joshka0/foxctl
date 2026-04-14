@@ -22,7 +22,7 @@ Agents need reliable session identity and lineage tracking to:
 | **Workspace scoping**   | Always scope by `workspace_id` (hashed path)                                                                |
 | **Agent identity**      | Tag sessions with `agent_id`; one active per (workspace, agent_id)                                          |
 | **Artifact routing**    | All messages/artifacts tagged with `session_id`                                                             |
-| **Cross-agent clarity** | Use a registry of `agent_id` values (e.g., `agentctl`, `opencode`, `claude`, `windsurf`, `subagent:<name>`) |
+| **Cross-agent clarity** | Use a registry of `agent_id` values (e.g., `foxctl`, `opencode`, `claude`, `windsurf`, `subagent:<name>`) |
 
 ## Data Model
 
@@ -31,7 +31,7 @@ Agents need reliable session identity and lineage tracking to:
 ```sql
 -- Add to existing sessions table
 ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;
-ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'agentctl';
+ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'foxctl';
 ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'running';
   -- status: 'queued' | 'running' | 'ok' | 'error' | 'canceled'
 ALTER TABLE sessions ADD COLUMN started_at TEXT;
@@ -89,7 +89,7 @@ CREATE INDEX idx_session_edges_type
 │                                                                  │
 │  1. Generate session_id (ULID)                                  │
 │  2. Set workspace_id = hash(canonical_path)                     │
-│  3. Set agent_id (from caller or default "agentctl")            │
+│  3. Set agent_id (from caller or default "foxctl")            │
 │  4. Check for active session in (workspace, agent_id)           │
 │     └─► If exists: require --new-session or auto-close          │
 │  5. Set parent_session_id (optional)                            │
@@ -285,7 +285,7 @@ workspace="$AGENTCTL_WORKSPACE"
 agent_id="$AGENTCTL_AGENT_ID"
 
 # Use in skill calls
-agentctl run session/capture --input "{
+foxctl run session/capture --input "{
   \"session_id\": \"$session_id\",
   \"workspace\": \"$workspace\"
 }"
@@ -295,12 +295,12 @@ agentctl run session/capture --input "{
 
 For hooks without env access (e.g., some shell contexts), maintain a file:
 
-**Location:** `~/.agentctl/sessions/active/<workspace_hash>.json`
+**Location:** `~/.foxctl/sessions/active/<workspace_hash>.json`
 
 ```json
 {
   "session_id": "01HXYZ...",
-  "agent_id": "agentctl",
+  "agent_id": "foxctl",
   "workspace": "/Users/user/repos/project",
   "workspace_hash": "a1b2c3d4",
   "parent_session_id": "01HABC...",
@@ -320,22 +320,22 @@ For hooks without env access (e.g., some shell contexts), maintain a file:
 
 ```bash
 # List sessions for workspace
-agentctl session list [--agent-id <id>] [--status running|ok|error]
+foxctl session list [--agent-id <id>] [--status running|ok|error]
 
 # Start new session
-agentctl session new [--agent-id <id>] [--parent <session-id>]
+foxctl session new [--agent-id <id>] [--parent <session-id>]
 
 # Resume last session (creates 'continues' edge)
-agentctl session resume [--agent-id <id>] [--session <id>]
+foxctl session resume [--agent-id <id>] [--session <id>]
 
 # Fork from existing session (creates 'forked_from' edge)
-agentctl session fork --parent <session-id> [--agent-id <id>]
+foxctl session fork --parent <session-id> [--agent-id <id>]
 
 # Show session lineage
-agentctl session chain [--session <id>] [--depth 5]
+foxctl session chain [--session <id>] [--depth 5]
 
 # Close current session
-agentctl session close [--status ok|error|canceled]
+foxctl session close [--status ok|error|canceled]
 ```
 
 ## Integration Points
@@ -415,10 +415,10 @@ ORDER BY depth ASC;
   - Subagents: `agent_id=subagent:<name>` when spawned by overseer.
 - Hooks export or recover session identity:
   - Prefer env (AGENTCTL_SESSION_ID, AGENTCTL_WORKSPACE, AGENTCTL_AGENT_ID).
-  - If missing, read `~/.agentctl/sessions/active/<workspace_hash>.json`; if
+  - If missing, read `~/.foxctl/sessions/active/<workspace_hash>.json`; if
     absent, start a new session and write the file.
 - Start/resume:
-  - On start/resume, call `agentctl session new|resume` with the mapped
+  - On start/resume, call `foxctl session new|resume` with the mapped
     agent_id; create `continues` edge on resume, `forked_from` on subagent
     spawn.
 - Close:
@@ -442,16 +442,16 @@ ORDER BY depth ASC;
 
 1. Add `parent_session_id`, `agent_id`, `status` to sessions table
 2. Create `session_edges` table with indexes
-3. Migration for existing sessions (set agent_id='agentctl', status='ok')
+3. Migration for existing sessions (set agent_id='foxctl', status='ok')
    - Backfill `started_at`/`updated_at` from existing timestamps if present to
      preserve ordering.
    - Ensure `id` remains PK/UNIQUE; add workspace/agent indexes.
-   - CLI: `agentctl session migrate` (idempotent) to apply columns/indexes and
+   - CLI: `foxctl session migrate` (idempotent) to apply columns/indexes and
      backfill timestamps.
 
 ### Agent ID Registry (convention)
 
-- Reserved: `agentctl`, `opencode`, `claude`, `windsurf`
+- Reserved: `foxctl`, `opencode`, `claude`, `windsurf`
 - Subagents: `subagent:<name>` (spawned children)
 - Allow explicit override via `AGENTCTL_AGENT_ID`
 
@@ -464,7 +464,7 @@ ORDER BY depth ASC;
 
 ### Phase 3: CLI
 
-1. `agentctl session new|resume|fork|list|chain|close`
+1. `foxctl session new|resume|fork|list|chain|close`
 2. Enforce one active session per (workspace, agent_id) unless --force
 3. Session identity file for fallback
 
@@ -506,7 +506,7 @@ ORDER BY depth ASC;
 
 ## Test Plan (outline)
 
-- Data model migration: run `agentctl session migrate`; verify columns/indexes;
+- Data model migration: run `foxctl session migrate`; verify columns/indexes;
   backfill of started_at/updated_at.
 - Start/resume/close: create session, resume (creates continues edge), close
   with status updates.

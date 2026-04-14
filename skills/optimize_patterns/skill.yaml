@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: optimize/patterns
@@ -40,10 +40,10 @@ signature:
     long: |
       Use optimize/patterns to list, clear, or get hints.
       Example commands:
-        agentctl run optimize/patterns --input '{"action":"list","role":"coder"}'
-        agentctl skills run optimize/patterns --action list --role coder
-        agentctl run optimize/patterns --input '{"action":"hints","context":"refactor"}'
-        agentctl skills run optimize/patterns --action hints --context refactor
+        foxctl run optimize/patterns --input '{"action":"list","role":"coder"}'
+        foxctl skills run optimize/patterns --action list --role coder
+        foxctl run optimize/patterns --input '{"action":"hints","context":"refactor"}'
+        foxctl skills run optimize/patterns --action hints --context refactor
     workflows:
       - id: list-patterns
         description: "List patterns for a role."

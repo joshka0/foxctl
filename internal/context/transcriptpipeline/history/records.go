@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 type HistoryRecordKind string

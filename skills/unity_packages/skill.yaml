@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: unity/packages
@@ -42,10 +42,10 @@ signature:
     long: |
       Use unity/packages to manage Unity Package Manager (UPM) dependencies in Packages/manifest.json.
       Example commands:
-        agentctl run unity/packages --input '{"operation":"list"}'
-        agentctl run unity/packages --input '{"operation":"add","package_name":"com.unity.inputsystem","version":"1.7.0"}'
-        agentctl run unity/packages --input '{"operation":"remove","package_name":"com.unity.inputsystem"}'
-        agentctl run unity/packages --input '{"operation":"get","package_name":"com.unity.inputsystem"}'
+        foxctl run unity/packages --input '{"operation":"list"}'
+        foxctl run unity/packages --input '{"operation":"add","package_name":"com.unity.inputsystem","version":"1.7.0"}'
+        foxctl run unity/packages --input '{"operation":"remove","package_name":"com.unity.inputsystem"}'
+        foxctl run unity/packages --input '{"operation":"get","package_name":"com.unity.inputsystem"}'
   returns:
     - name: packages
       type: object

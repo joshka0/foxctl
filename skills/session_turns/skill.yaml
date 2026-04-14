@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/turns
@@ -44,8 +44,8 @@ signature:
     long: |
       Use session/turns to search for error patterns or tool usage.
       Example commands:
-        agentctl run session/turns --input '{"errors_only":true,"limit":20}'
-        agentctl skills run session/turns --errors_only --limit 20
+        foxctl run session/turns --input '{"errors_only":true,"limit":20}'
+        foxctl skills run session/turns --errors_only --limit 20
     workflows:
       - id: find-errors
         description: "Find error turns."

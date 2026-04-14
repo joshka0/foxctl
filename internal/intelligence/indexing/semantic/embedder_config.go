@@ -3,7 +3,7 @@ package semantic
 import (
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 // DetectProviderForConfig resolves the effective embedding provider for a repo/workspace config.

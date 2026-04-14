@@ -13,23 +13,23 @@ import (
 	"time"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
-	"github.com/jkatigb/agentctl/internal/tooling"
+	"github.com/joshka0/foxctl/internal/tooling"
 
-	"github.com/jkatigb/agentctl/internal/agent/toolnames"
-	"github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/domain/policy"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
-	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/maputil"
-	"github.com/jkatigb/agentctl/internal/platform/secrets"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/agents"
-	"github.com/jkatigb/agentctl/internal/storage/blackboard"
-	"github.com/jkatigb/agentctl/internal/storage/mailbox"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/agent/toolnames"
+	"github.com/joshka0/foxctl/internal/agent/types"
+	"github.com/joshka0/foxctl/internal/domain/policy"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	sysconfig "github.com/joshka0/foxctl/internal/platform/config"
+	errspkg "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/maputil"
+	"github.com/joshka0/foxctl/internal/platform/secrets"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/agents"
+	"github.com/joshka0/foxctl/internal/storage/blackboard"
+	"github.com/joshka0/foxctl/internal/storage/mailbox"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 // Registry holds all registered agent tools.
@@ -539,7 +539,7 @@ func (r *Registry) captureToolEvent(ctx context.Context, kind trajectory.EventKi
 		TaskID:    strings.TrimSpace(r.config.TaskID),
 		EpicID:    strings.TrimSpace(r.config.EpicID),
 		ActorID:   strings.TrimSpace(r.config.ActorID),
-		CreatedBy: "agentctl",
+		CreatedBy: "foxctl",
 		CASDigest: strings.TrimSpace(artifact),
 	}
 

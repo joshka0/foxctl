@@ -1,6 +1,6 @@
 package telegram
 
-import "github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
+import "github.com/joshka0/foxctl/internal/interfaces/chatadapter"
 
 // MVPCommands returns the MVP set of commands for Telegram.
 //
@@ -77,7 +77,7 @@ func MVPCommands() []chatadapter.CommandDef {
 		},
 		{
 			// Telegram command names must be lowercase letters, digits, and underscores.
-			// We'll normalize underscores to hyphens when routing into agentctl.
+			// We'll normalize underscores to hyphens when routing into foxctl.
 			Name:        "agent_spawn",
 			Description: "Spawn an autonomous agent",
 			Options: []chatadapter.CommandOption{

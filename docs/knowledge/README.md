@@ -207,7 +207,7 @@ prevent MUI v6→v7 incompatibilities.
 - Extracting code context before editing
 - Planning complex refactors
 
-**Customization:** ✅ None - agentctl-specific patterns
+**Customization:** ✅ None - foxctl-specific patterns
 
 **[View Skill →](code-retrieval/)**
 

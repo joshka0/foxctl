@@ -17,12 +17,12 @@ import (
 	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v3"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mcputil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/mcputil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 const command = "mcp/install"
@@ -86,7 +86,7 @@ func runMain() error {
 // run orchestrates MCP server installation with client creation, tool discovery, and skill generation.
 //
 // Index:
-// - Purpose: Install MCP server configurations by discovering tools and generating agentctl skills
+// - Purpose: Install MCP server configurations by discovering tools and generating foxctl skills
 // - Flow: validate input → create MCP client → initialize connection → list tools → generate skills → emit results
 // - SideEffects: creates skill directories; generates wrapper scripts; writes skill manifests; validates paths
 // - FailureModes: missing server configuration, MCP client failures, tool discovery errors, file system errors
@@ -121,7 +121,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 	}()
 
-	if err := mcputil.Initialize(ctx, mcpClient, "agentctl-mcp-install", "1.0.0"); err != nil {
+	if err := mcputil.Initialize(ctx, mcpClient, "foxctl-mcp-install", "1.0.0"); err != nil {
 		return skillerr.WrapRuntime("mcp initialization failed", err)
 	}
 
@@ -140,7 +140,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		in.OutputDir = "."
 	}
 
-	// Validate output directory (must be within workspace per agentctl policy)
+	// Validate output directory (must be within workspace per foxctl policy)
 	validDir, err := skillmain.ValidatePath(
 		rc,
 		in.OutputDir,
@@ -170,7 +170,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	})
 }
 
-// generateSkill creates an agentctl skill wrapper for an MCP tool with script generation and manifest creation.
+// generateSkill creates an foxctl skill wrapper for an MCP tool with script generation and manifest creation.
 func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 	// Sanitize tool name to prevent path traversal
 	sanitized := filepath.Base(tool.Name)
@@ -219,7 +219,7 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 
 	// Generate wrapper script 'bin'
 
-	// We use "$@" to pass through any extra args (though agentctl currently passes stdin)
+	// We use "$@" to pass through any extra args (though foxctl currently passes stdin)
 
 	scriptContent := "#!/bin/sh\nexec "
 
@@ -287,7 +287,7 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 	}
 
 	manifest := map[string]any{
-		"apiVersion": "agentctl/v1",
+		"apiVersion": "foxctl/v1",
 
 		"kind": "Skill",
 

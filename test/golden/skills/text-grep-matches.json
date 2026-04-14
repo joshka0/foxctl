@@ -9,7 +9,7 @@
     "files_touched": 8,
     "preview": [
       {
-        "file": "cmd/agentctl/main.go",
+        "file": "cmd/foxctl/main.go",
         "line_no": 42,
         "line": "// TODO: replace stub",
         "snippet": "// TODO: replace stub"
@@ -23,7 +23,7 @@
     ],
     "top_files": [
       { "file": "docs/README.md", "matches": 35 },
-      { "file": "cmd/agentctl/main.go", "matches": 20 }
+      { "file": "cmd/foxctl/main.go", "matches": 20 }
     ],
     "max_matches": 200,
     "artifact": "sha256:0b8b1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f"

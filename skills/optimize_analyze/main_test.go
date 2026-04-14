@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 	"github.com/stretchr/testify/assert"
 )
 

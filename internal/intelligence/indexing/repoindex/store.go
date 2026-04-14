@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
 )
 
 const (

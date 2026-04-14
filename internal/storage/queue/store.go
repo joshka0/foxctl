@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"time"
 
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -57,7 +57,7 @@ func Open(ctx context.Context, dbPath string, opts Options) (*Store, error) {
 // OpenStore opens a queue Store using the canonical per-store dbdriver configuration.
 //
 // This is preferred over Open/OpenInRoot when the queue corresponds to a named store in the
-// agentctl store registry (e.g., SUMMARY_QUEUE).
+// foxctl store registry (e.g., SUMMARY_QUEUE).
 //
 // Index:
 // - Purpose: Open a queue DB via standardized store configuration (sqlite/libsql/turso)

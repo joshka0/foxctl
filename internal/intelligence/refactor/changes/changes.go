@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/langutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	refsnapshot "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshot"
+	refsnapshotstore "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshotstore"
+	"github.com/joshka0/foxctl/internal/storage/cas"
 )
 
 type SinceKind string
@@ -141,7 +141,7 @@ func buildSnapshotChanges(ctx context.Context, storageRoot, casRoot, snapshotID 
 	if err != nil {
 		return Result{}, &BuildError{
 			Message: fmt.Sprintf("snapshot %q not found", snapshotID),
-			Hint:    "Create a snapshot first with `agentctl refactor snapshot ...`, then re-run `refactor changes --since <snapshot-id>`.",
+			Hint:    "Create a snapshot first with `foxctl refactor snapshot ...`, then re-run `refactor changes --since <snapshot-id>`.",
 		}
 	}
 

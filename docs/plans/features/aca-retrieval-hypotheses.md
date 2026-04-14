@@ -14,7 +14,7 @@ The emphasis here is:
 
 ## Eval Modes
 
-The current branch exposes these ACA ablation modes in [eval.go](../../../cmd/agentctl/cmd/eval.go):
+The current branch exposes these ACA ablation modes in [eval.go](../../../cmd/foxctl/cmd/eval.go):
 
 - `aca_control_only`
 - `aca_vault_only`
@@ -133,7 +133,7 @@ Why it matters:
 
 - this is deterministic and agent-friendly
 - it turns repo structure into durable ACA retrieval hints without requiring model judgment
-- it is now wired into workspace policy through `.agentctl/policy/retrieval.yaml` via `aca.package_note_fallback`
+- it is now wired into workspace policy through `.foxctl/policy/retrieval.yaml` via `aca.package_note_fallback`
 
 ## Hypothesis 6: Query-Typed Bias Beats Flat ACA Weighting
 
@@ -192,4 +192,4 @@ and avoid over-relying on prompt-only ACA behavior.
 ## Related Docs
 
 - [rlm-retrieval-findings.md](rlm-retrieval-findings.md)
-- [agentctl-rlm-next-steps.md](agentctl-rlm-next-steps.md)
+- [foxctl-rlm-next-steps.md](foxctl-rlm-next-steps.md)

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/execution"
+	"github.com/joshka0/foxctl/internal/runtime/execution"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

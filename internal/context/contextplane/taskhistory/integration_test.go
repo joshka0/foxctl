@@ -3,7 +3,7 @@ package taskhistory
 import (
 	"testing"
 
-	platformcfg "github.com/jkatigb/agentctl/internal/platform/config"
+	platformcfg "github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func TestTranscriptSummaryWorkerConfig_PrefersOpenRouterWhenAvailable(t *testing.T) {

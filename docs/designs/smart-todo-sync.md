@@ -2,7 +2,7 @@
 
 ## Problem
 
-When a task is removed from Claude's TodoWrite list, agentctl doesn't know to remove it. Tasks accumulate indefinitely.
+When a task is removed from Claude's TodoWrite list, foxctl doesn't know to remove it. Tasks accumulate indefinitely.
 
 ## Current Flow
 
@@ -15,7 +15,7 @@ Claude TodoWrite → todo-sync.sh → todo/sync_from_provider
                                         └── Update status if changed
 ```
 
-**Missing:** Detection of tasks that were in agentctl but NOT in incoming list.
+**Missing:** Detection of tasks that were in foxctl but NOT in incoming list.
 
 ## Solution: Removal Detection
 
@@ -101,9 +101,9 @@ If no tag, use title hash. But titles can be edited, causing false removals.
 - Skip if incoming list is empty (conservative)
 
 ### Phase 2: Source Tracking
-- Add `Source` field to tasks (claude, agentctl, etc.)
+- Add `Source` field to tasks (claude, foxctl, etc.)
 - Only remove tasks where `Source == "claude"`
-- Prevents removing manually created agentctl tasks
+- Prevents removing manually created foxctl tasks
 
 ### Phase 3: Hash-Based Stability
 - Store hash of last synced list per session

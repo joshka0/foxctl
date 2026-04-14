@@ -1,6 +1,6 @@
 # git/worktree Skill
 
-A skill for managing git worktrees through agentctl.
+A skill for managing git worktrees through foxctl.
 
 ## Overview
 
@@ -31,7 +31,7 @@ List all worktrees associated with a repository.
     "worktree_count": 2,
     "worktrees": [
       {
-        "path": "/home/user/agentctl",
+        "path": "/home/user/foxctl",
         "branch": "refs/heads/main",
         "commit": "abc123...",
         "bare": false
@@ -172,26 +172,26 @@ echo '{
 echo '{"operation":"prune","repo_path":"."}' | ./dist/skills/git_worktree/bin
 ```
 
-### Using with agentctl (when integrated)
+### Using with foxctl (when integrated)
 
 ```bash
 # List worktrees
-agentctl run git/worktree --operation list --repo_path .
+foxctl run git/worktree --operation list --repo_path .
 
 # Add a worktree
-agentctl run git/worktree \
+foxctl run git/worktree \
   --operation add \
   --path /tmp/my-feature \
   --branch my-feature \
   --new_branch true
 
 # Remove a worktree
-agentctl run git/worktree \
+foxctl run git/worktree \
   --operation remove \
   --path /tmp/my-feature
 
 # Prune worktrees
-agentctl run git/worktree --operation prune
+foxctl run git/worktree --operation prune
 ```
 
 ## Security
@@ -212,5 +212,5 @@ This skill:
 
 - All worktree paths must be within the allowed workspace
 - The skill uses workspace path validation to prevent directory traversal
-- Follows the agentctl envelope protocol (Version 1)
+- Follows the foxctl envelope protocol (Version 1)
 - Pure skill: false (has side effects on filesystem and git state)

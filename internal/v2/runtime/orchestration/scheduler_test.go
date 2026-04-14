@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	coreorchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
+	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 )
 
 func TestScheduler_Tick_DispatchesAndQueuesRetry(t *testing.T) {

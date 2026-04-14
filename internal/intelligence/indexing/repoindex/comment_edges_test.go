@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	docparser "github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex/parser"
+	docparser "github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex/parser"
 )
 
 func TestApplyCommentEdges(t *testing.T) {

@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/pathutil"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/toolutil"
-	"github.com/jkatigb/agentctl/internal/storage/graph"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/hookutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/context/sessionkit"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/pathutil"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/toolutil"
+	"github.com/joshka0/foxctl/internal/storage/graph"
 )
 
 // Mode controls task_guard behavior.
@@ -127,7 +127,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 
 		if !found {
 			output = hooks.NewBlock(
-				"No active task. Create one with: agentctl todo add --title \"<task>\" or use /start-task",
+				"No active task. Create one with: foxctl todo add --title \"<task>\" or use /start-task",
 			)
 		} else {
 			// Check if task needs dirtying (ready_for_review or completed -> in_progress)

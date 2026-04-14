@@ -1,7 +1,7 @@
 package lang
 
 import (
-	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/joshka0/foxctl/internal/platform/fsutil"
 )
 
 // DetectLanguage returns the programming language based on file extension.

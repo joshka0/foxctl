@@ -1,10 +1,10 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: embedding/queue
   description: Background queue for generating symbol embeddings
   version: 0.1.0
-  author: agentctl
+  author: foxctl
   tags: [embedding, queue, indexing, async]
 distribution:
   type: exec

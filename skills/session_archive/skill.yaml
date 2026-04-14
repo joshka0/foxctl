@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/archive
@@ -40,8 +40,8 @@ signature:
     long: |
       Use session/archive to compress and chunk a session JSONL file.
       Example commands:
-        agentctl run session/archive --input '{"session_id":"01HXYZ...","dry_run":true}'
-        agentctl skills run session/archive --session_id 01HXYZ... --dry_run
+        foxctl run session/archive --input '{"session_id":"01HXYZ...","dry_run":true}'
+        foxctl skills run session/archive --session_id 01HXYZ... --dry_run
     workflows:
       - id: archive-session
         description: "Archive a session."

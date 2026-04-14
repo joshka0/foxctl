@@ -235,7 +235,7 @@ build:
     - go run ./scripts/checkmanifests
   artifacts:
     paths:
-      - bin/agentctl
+      - bin/foxctl
     expire_in: 7 days
 
 all-checks:

@@ -24,16 +24,16 @@ go install golang.org/x/tools/gopls@latest
 
 ```bash
 # List symbols in a file
-agentctl run lsp/gopls --input '{"operation": "symbols", "file": "main.go"}'
+foxctl run lsp/gopls --input '{"operation": "symbols", "file": "main.go"}'
 
 # Find references
-agentctl run lsp/gopls --input '{"operation": "references", "file": "main.go", "line": 25, "column": 6}'
+foxctl run lsp/gopls --input '{"operation": "references", "file": "main.go", "line": 25, "column": 6}'
 
 # Call hierarchy
-agentctl run lsp/gopls --input '{"operation": "call_hierarchy", "file": "main.go", "line": 25, "column": 6}'
+foxctl run lsp/gopls --input '{"operation": "call_hierarchy", "file": "main.go", "line": 25, "column": 6}'
 
 # Workspace symbol search
-agentctl run lsp/gopls --input '{"operation": "workspace_symbol", "query": "Handler"}'
+foxctl run lsp/gopls --input '{"operation": "workspace_symbol", "query": "Handler"}'
 ```
 
 ## Output Format

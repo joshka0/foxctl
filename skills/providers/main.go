@@ -12,11 +12,11 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/oputil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 // Provider represents a supported AI coding assistant with configuration paths and metadata.

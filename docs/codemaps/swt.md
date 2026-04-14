@@ -35,29 +35,29 @@ Binary Startup to Command Execution
 ### Location Details
 
 - **1a:** First action: Load .env files\
-  **Path:** `cmd/agentctl/main.go:15`\
+  **Path:** `cmd/foxctl/main.go:15`\
   **Description:** Called before anything else to populate environment variables
   from .env files
 
 - **1b:** Load .env files in reverse priority order\
   **Path:**
   `internal/platform/config/dotenv.go:48`\
-  **Description:** Loads ~/.agentctl/.env, $AGENTCTL_HOME/.env, then $PWD/.env
+  **Description:** Loads ~/.foxctl/.env, $AGENTCTL_HOME/.env, then $PWD/.env
   (later files override)
 
 - **1c:** Execute Cobra root command\
-  **Path:** `cmd/agentctl/main.go:17`\
+  **Path:** `cmd/foxctl/main.go:17`\
   **Description:** Hands control to Cobra which triggers initialization hooks
   and command routing
 
 - **1d:** Register Cobra initialization callback\
   **Path:**
-  `cmd/agentctl/cmd/root.go:36`\
+  `cmd/foxctl/cmd/root.go:36`\
   **Description:** Sets up initConfig to run before any command executes
 
 - **1e:** Register pre-run hook for all commands\
   **Path:**
-  `cmd/agentctl/cmd/root.go:38`\
+  `cmd/foxctl/cmd/root.go:38`\
   **Description:** Ensures config and logger are loaded into context before any
   command runs
 
@@ -72,9 +72,9 @@ additional .env files
 Cobra Initialization Hooks: Viper + .env Loading
 ├── cobra.OnInitialize(initConfig) registration <-- root.go:36
 │   └── initConfig() callback execution <-- root.go:62
-│       ├── viper.SetEnvPrefix("agentctl") <-- 2a
+│       ├── viper.SetEnvPrefix("foxctl") <-- 2a
 │       ├── viper.AutomaticEnv() <-- 2b
-│       ├── Load ~/.agentctl/.env (global) <-- 2c
+│       ├── Load ~/.foxctl/.env (global) <-- 2c
 │       ├── Walk up to find .git directory <-- root.go:77
 │       │   └── Load {git_root}/.env <-- 2d
 │       └── Load ./.env (highest priority) <-- 2e
@@ -86,30 +86,30 @@ Cobra Initialization Hooks: Viper + .env Loading
 
 - **2a:** Configure viper for AGENTCTL_* env vars\
   **Path:**
-  `cmd/agentctl/cmd/root.go:63`\
+  `cmd/foxctl/cmd/root.go:63`\
   **Description:** Sets up automatic environment variable binding with AGENTCTL
   prefix
 
 - **2b:** Enable automatic env var reading\
   **Path:**
-  `cmd/agentctl/cmd/root.go:64`\
+  `cmd/foxctl/cmd/root.go:64`\
   **Description:** Allows viper to read AGENTCTL_* environment variables
   automatically
 
 - **2c:** Load global .env file\
   **Path:**
-  `cmd/agentctl/cmd/root.go:71`\
-  **Description:** Loads ~/.agentctl/.env for global defaults
+  `cmd/foxctl/cmd/root.go:71`\
+  **Description:** Loads ~/.foxctl/.env for global defaults
 
 - **2d:** Load git root .env file\
   **Path:**
-  `cmd/agentctl/cmd/root.go:79`\
+  `cmd/foxctl/cmd/root.go:79`\
   **Description:** Walks up directory tree to find .git and loads .env from git
   root
 
 - **2e:** Load current directory .env (highest priority)\
   **Path:**
-  `cmd/agentctl/cmd/root.go:86`\
+  `cmd/foxctl/cmd/root.go:86`\
   **Description:** Loads ./.env which overrides all previous .env files
 
 ---
@@ -163,7 +163,7 @@ config.Load() - Configuration Materialization <-- config.go:249
 - **3c:** Set default home directory\
   **Path:**
   `internal/platform/config/config.go:291`\
-  **Description:** Defaults to ~/.agentctl for all persistent data
+  **Description:** Defaults to ~/.foxctl for all persistent data
 
 - **3d:** Default to libsql driver\
   **Path:**
@@ -174,7 +174,7 @@ config.Load() - Configuration Materialization <-- config.go:249
 - **3e:** Read YAML config file\
   **Path:**
   `internal/platform/config/config.go:334`\
-  **Description:** Loads ~/.agentctl/config.yaml if present, merging with
+  **Description:** Loads ~/.foxctl/config.yaml if present, merging with
   defaults
 
 - **3f:** Unmarshal into Config struct\
@@ -221,34 +221,34 @@ Cobra Command Execution Flow
 
 - **4a:** Check if config already in context\
   **Path:**
-  `cmd/agentctl/cmd/root.go:39`\
+  `cmd/foxctl/cmd/root.go:39`\
   **Description:** Skip loading if config was already injected (e.g., by tests
   or parent command)
 
 - **4b:** Load configuration\
   **Path:**
-  `cmd/agentctl/cmd/root.go:47`\
+  `cmd/foxctl/cmd/root.go:47`\
   **Description:** Materializes full config from defaults, YAML, and env vars
 
 - **4c:** Create logger from config\
   **Path:**
-  `cmd/agentctl/cmd/root.go:51`\
+  `cmd/foxctl/cmd/root.go:51`\
   **Description:** Builds zerolog logger with level and format from
   config.Logging
 
 - **4d:** Store config in context\
   **Path:**
-  `cmd/agentctl/cmd/root.go:55`\
+  `cmd/foxctl/cmd/root.go:55`\
   **Description:** Makes config available to all downstream code via context
 
 - **4e:** Store logger in context\
   **Path:**
-  `cmd/agentctl/cmd/root.go:56`\
+  `cmd/foxctl/cmd/root.go:56`\
   **Description:** Makes logger available to all downstream code via context
 
 - **4f:** Update command context\
   **Path:**
-  `cmd/agentctl/cmd/root.go:57`\
+  `cmd/foxctl/cmd/root.go:57`\
   **Description:** Replaces command's context with enriched version containing
   config and logger
 
@@ -256,11 +256,11 @@ Cobra Command Execution Flow
 
 ## Trace 5: Lazy Storage Initialization: Run Command → Job Store
 
-**Description:** Demonstrates on-demand storage initialization when agentctl run
+**Description:** Demonstrates on-demand storage initialization when foxctl run
 executes a skill
 
 ```
-agentctl run command execution
+foxctl run command execution
 ├── CLI command handler
 │   └── executeRunCommand() <-- 5a
 │       └── config.MustFromContext() <-- run.go:61
@@ -289,18 +289,18 @@ agentctl run command execution
 
 - **5a:** Retrieve config from context\
   **Path:**
-  `cmd/agentctl/cmd/run.go:61`\
+  `cmd/foxctl/cmd/run.go:61`\
   **Description:** Extracts config that was injected by PersistentPreRunE
 
 - **5b:** Create executor with config\
   **Path:**
-  `cmd/agentctl/cmd/run.go:105`\
+  `cmd/foxctl/cmd/run.go:105`\
   **Description:** Constructs executor that will lazily open storage when needed
 
 - **5c:** Lazy-open job store on first use\
   **Path:**
   `internal/runtime/runservice/jobs.go:18`\
-  **Description:** Opens SQLite database at ~/.agentctl/jobs/jobs.db only when
+  **Description:** Opens SQLite database at ~/.foxctl/jobs/jobs.db only when
   needed
 
 - **5d:** Open persistent job storage\
@@ -406,7 +406,7 @@ Daemon Startup & Pre-Warming Flow
 
 - **7a:** Load config in daemon start\
   **Path:**
-  `cmd/agentctl/cmd/daemon.go:133`\
+  `cmd/foxctl/cmd/daemon.go:133`\
   **Description:** Daemon loads config once at startup instead of per-request
 
 - **7b:** Create shared connection pool\
@@ -423,7 +423,7 @@ Daemon Startup & Pre-Warming Flow
 - **7d:** Create Unix socket listener\
   **Path:**
   `internal/runtime/daemon/service.go:100`\
-  **Description:** Opens /tmp/agentctl-{uid}.sock for IPC with CLI clients
+  **Description:** Opens /tmp/foxctl-{uid}.sock for IPC with CLI clients
 
 - **7e:** Start connection accept loop\
   **Path:**
@@ -486,7 +486,7 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 	}
 ```
 
-### File: cmd/agentctl/cmd/root.go
+### File: cmd/foxctl/cmd/root.go
 
 ```go
 // Lines: 34-41
@@ -521,7 +521,7 @@ func init() {
 ```go
 // Lines: 61-66
 func initConfig() {
-	viper.SetEnvPrefix("agentctl")
+	viper.SetEnvPrefix("foxctl")
 	viper.AutomaticEnv()
 
 	// Load .env files from multiple locations (later files override earlier ones)
@@ -531,7 +531,7 @@ func initConfig() {
 // Lines: 69-73
 	// 3. ./.env (current directory)
 	if home, err := os.UserHomeDir(); err == nil {
-		_ = godotenv.Load(filepath.Join(home, ".agentctl", ".env"))
+		_ = godotenv.Load(filepath.Join(home, ".foxctl", ".env"))
 	}
 ```
 
@@ -559,7 +559,7 @@ func initConfig() {
 	}
 
 	v := newConfiguredViper()
-	defaultHome := filepath.Join(home, ".agentctl")
+	defaultHome := filepath.Join(home, ".foxctl")
 	applyDefaults(v, defaultHome)
 	configureConfigFile(v, l, defaultHome)
 	if err := readConfig(v, l.configFile); err != nil {
@@ -607,7 +607,7 @@ func decodeConfig(v *viper.Viper) (Config, error) {
 	}
 ```
 
-### File: cmd/agentctl/cmd/run.go
+### File: cmd/foxctl/cmd/run.go
 
 ```go
 // Lines: 59-63
@@ -649,12 +649,12 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 		return nil, err
 ```
 
-### File: cmd/agentctl/main.go
+### File: cmd/foxctl/main.go
 
 ```go
 // Lines: 13-19
 	// Load .env files before anything else
-	// Priority: ~/.agentctl/.env → $PWD/.env (project overrides global)
+	// Priority: ~/.foxctl/.env → $PWD/.env (project overrides global)
 	config.LoadDotEnv()
 
 	if err := cmd.Execute(context.Background()); err != nil {
@@ -724,7 +724,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 		return openSQLite(ctx, cfg.SQLite, migrate)
 ```
 
-### File: cmd/agentctl/cmd/daemon.go
+### File: cmd/foxctl/cmd/daemon.go
 
 ```go
 // Lines: 131-135

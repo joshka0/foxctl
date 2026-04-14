@@ -15,7 +15,7 @@ func TestOKSetsDefaults(t *testing.T) {
 	now = func() time.Time { return fixed }
 	t.Cleanup(func() { now = origNow })
 
-	env := OK("agentctl.test", map[string]string{"hello": "world"})
+	env := OK("foxctl.test", map[string]string{"hello": "world"})
 
 	if env.Version != Version {
 		t.Fatalf("expected version %d got %d", Version, env.Version)
@@ -32,7 +32,7 @@ func TestOKSetsDefaults(t *testing.T) {
 }
 
 func TestOKMarshalIncludesErrorField(t *testing.T) {
-	env := OK("agentctl.test", map[string]any{"ok": true})
+	env := OK("foxctl.test", map[string]any{"ok": true})
 	data, err := json.Marshal(env)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

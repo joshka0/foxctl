@@ -1,8 +1,8 @@
 package retrievalv2
 
 import (
-	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/searchrank"
+	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
+	"github.com/joshka0/foxctl/internal/intelligence/searchrank"
 )
 
 // Fuse combines per-source results into cross-source ranked hits.

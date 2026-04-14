@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	tphistory "github.com/jkatigb/agentctl/internal/context/transcriptpipeline/history"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage"
+	tphistory "github.com/joshka0/foxctl/internal/context/transcriptpipeline/history"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 type TranscriptFamilyOverview struct {

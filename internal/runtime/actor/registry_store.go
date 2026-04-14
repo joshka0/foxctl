@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 )
 
 // RegistryStore persists actor configurations for supervisor auto-respawn.

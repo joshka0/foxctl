@@ -66,7 +66,7 @@ Goal: Generate MV2 files that `memvid find` can read.
 **Option A: Skip Indices (Simplest)**
 - Write data + time index only
 - No search capability in exported files
-- Use for archival/transfer, search via agentctl
+- Use for archival/transfer, search via foxctl
 
 **Option B: Bleve for Full-Text**
 - Use [blevesearch/bleve](https://github.com/blevesearch/bleve) for BM25

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/cache"
+	"github.com/joshka0/foxctl/internal/storage/cache"
 )
 
 // DefaultTimeout is the default execution timeout if none is specified.

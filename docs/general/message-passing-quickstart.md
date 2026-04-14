@@ -6,8 +6,8 @@ Get started with agent-to-agent communication in 5 minutes.
 
 ```go
 import (
-    "github.com/jkatigb/agentctl/internal/domain/agent"
-    "github.com/jkatigb/agentctl/internal/storage/mailbox"
+    "github.com/joshka0/foxctl/internal/domain/agent"
+    "github.com/joshka0/foxctl/internal/storage/mailbox"
 )
 ```
 

@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 // main demonstrates a runnable Companion conversation-memory temporal-decay demo.
@@ -229,8 +229,8 @@ func main() {
 		}
 		if embedder != nil {
 			fmt.Println("\n📌 Vector embeddings were generated! These memories are now searchable via:")
-			fmt.Println("   agentctl run code/semantic_search --input '{\"query\": \"hobbies\", \"scope\": [\"memories\"]}'")
-			fmt.Println("   agentctl run code/semantic_search --input '{\"query\": \"guitar learning\", \"scope\": [\"memories\"]}'")
+			fmt.Println("   foxctl run code/semantic_search --input '{\"query\": \"hobbies\", \"scope\": [\"memories\"]}'")
+			fmt.Println("   foxctl run code/semantic_search --input '{\"query\": \"guitar learning\", \"scope\": [\"memories\"]}'")
 		} else {
 			fmt.Println("\n⚠️  No embeddings generated. Set VOYAGE_API_KEY to enable vector search.")
 			fmt.Println("   Without embeddings, only text search (not semantic/vector) will work.")

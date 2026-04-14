@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/riverqueue/river"
 )
 

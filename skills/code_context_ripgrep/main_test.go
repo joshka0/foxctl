@@ -6,10 +6,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/codeblocks"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/rgutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/codeblocks"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/rgutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 func TestParseInput(t *testing.T) {

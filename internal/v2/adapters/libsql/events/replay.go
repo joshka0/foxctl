@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 // Replay iterates matching events in stable order and applies handler.

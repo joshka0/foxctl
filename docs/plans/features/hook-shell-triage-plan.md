@@ -2,7 +2,7 @@
 
 Status: active plan
 
-Owner: agentctl
+Owner: foxctl
 
 Last updated: 2026-03-11
 
@@ -91,8 +91,8 @@ Status: strongest Go-migration candidates
 These scripts still carry meaningful orchestration, state handling, background
 execution, or DB/file mutations:
 
-- `agentctl-mode.sh`
-- `agentctl-mode-enforce.sh`
+- `foxctl-mode.sh`
+- `foxctl-mode-enforce.sh`
 
 These are the scripts most likely to benefit from typed Go extraction because
 they already behave like mini runtime components.

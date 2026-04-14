@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/codeedit"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/codeedit"
 )
 
 // Alias for concise edit literals in tests.

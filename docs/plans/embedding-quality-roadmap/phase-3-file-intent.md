@@ -143,7 +143,7 @@ func (f *FileSummaryInput) HasChanged(storedDigest string) bool {
 package retrieval
 
 import (
-    "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+    "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
 
 // GenerateFileSummary creates a summary for a file using normalized inputs.
@@ -305,7 +305,7 @@ package semantic
 import (
     "strings"
     
-    "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+    "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
 
 // IntentText represents the semantic essence of a file for embedding.

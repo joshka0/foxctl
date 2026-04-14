@@ -2,7 +2,7 @@
 
 Status: draft design
 
-This document adapts the `autoresearch` pattern into a generic `agentctl`
+This document adapts the `autoresearch` pattern into a generic `foxctl`
 autonomy model for feature work, refactors, retrieval improvements, and other
 engineering tasks that can be treated as bounded experiments.
 
@@ -17,11 +17,11 @@ execution contract:
 4. keep or discard based on evidence
 5. log the result and continue
 
-For `agentctl`, that should become a general autonomy mode for software work.
+For `foxctl`, that should become a general autonomy mode for software work.
 
-## Why This Fits `agentctl`
+## Why This Fits `foxctl`
 
-`agentctl` already has most of the machinery needed:
+`foxctl` already has most of the machinery needed:
 
 - durable task state
 - task continuity packs
@@ -62,7 +62,7 @@ reversibility first-class.
 - keep/discard branch advancement
 - experiment log
 
-### `agentctl`
+### `foxctl`
 
 - bounded editable scope:
   - task scope path
@@ -104,11 +104,11 @@ This keeps long autonomous runs legible and auditable.
 Hypothesis:
 
 - "Adding deterministic package-note fallback will improve `praze-mixed`
-  `hit@5` without hurting `agentctl-mixed`."
+  `hit@5` without hurting `foxctl-mixed`."
 
 Evaluator:
 
-- `agentctl eval retrieval ...`
+- `foxctl eval retrieval ...`
 
 Keep rule:
 
@@ -356,16 +356,16 @@ That profile would:
 ## Candidate Future Commands
 
 ```bash
-agentctl experiment init --task-id T-123 --profile retrieval_experiment
-agentctl experiment run --spec .agentctl/runtime/experiments/E-123.json
-agentctl experiment status --id E-123
-agentctl experiment review --id E-123
+foxctl experiment init --task-id T-123 --profile retrieval_experiment
+foxctl experiment run --spec .foxctl/runtime/experiments/E-123.json
+foxctl experiment status --id E-123
+foxctl experiment review --id E-123
 ```
 
 For agents:
 
 ```bash
-agentctl agent spawn --role researcher \
+foxctl agent spawn --role researcher \
   --exec-mode tick \
   --autonomy-profile experiment
 ```

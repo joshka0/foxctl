@@ -4,14 +4,14 @@
 # It is advisory only (never blocks) and injects context hints when matches exceed threshold.
 #
 # Environment:
-#   AGENTCTL_BIN           - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN           - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_KNOWLEDGE_THRESHOLD - Minimum score threshold (default: 0.5)
 #   CLAUDE_PROJECT_DIR     - Workspace root (set by Claude Code)
 
 set -euo pipefail
 
-# Resolve agentctl binary
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+# Resolve foxctl binary
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 
 # Read hook input from stdin
 INPUT=$(cat)

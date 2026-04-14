@@ -231,7 +231,7 @@ on it.
 **Focus:** correctness of recorded events and exported episodes.
 
 - **Unit tests**
-  - [x] Capture hooks for `agentctl run`:
+  - [x] Capture hooks for `foxctl run`:
     - Ensure `user_request` + `tool_result` events are persisted and correlated.
     - Correlation uses `meta.correlation_id` (stored as `trace_id` internally).
   - [ ] Mapping from agent tool calls to `TrajectoryEvent`:

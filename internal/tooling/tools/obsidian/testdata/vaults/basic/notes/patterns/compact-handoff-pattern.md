@@ -1,7 +1,7 @@
 ---
 title: Compact Handoff Pattern
 type: pattern
-project: agentctl
+project: foxctl
 status: reviewed
 trust: canonical
 tags:

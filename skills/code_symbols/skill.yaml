@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/symbols
@@ -51,10 +51,10 @@ signature:
     long: |
       Use code/symbols to list functions, types, and other symbols.
       Example commands:
-        agentctl run code/symbols --input '{"path":"./src","symbol_type":"function"}'
-        agentctl skills run code/symbols --path ./src --symbol_type function
-        agentctl run code/symbols --input '{"path":"./src","include_private":true}'
-        agentctl skills run code/symbols --path ./src --include_private
+        foxctl run code/symbols --input '{"path":"./src","symbol_type":"function"}'
+        foxctl skills run code/symbols --path ./src --symbol_type function
+        foxctl run code/symbols --input '{"path":"./src","include_private":true}'
+        foxctl skills run code/symbols --path ./src --include_private
     workflows:
       - id: functions
         description: "List functions in a directory."

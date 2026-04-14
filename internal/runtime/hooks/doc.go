@@ -1,4 +1,4 @@
-// Package hooks defines the hook contract and execution pipeline for agentctl events.
+// Package hooks defines the hook contract and execution pipeline for foxctl events.
 // It resolves hook skills, runs hook executors, and merges outputs into decisions.
 //
 // Hooks are skills invoked at canonical events during actor execution.

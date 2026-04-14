@@ -8,18 +8,18 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit/claudejsonl"
-	"github.com/jkatigb/agentctl/internal/intelligence/analysis/tasksgraph"
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/plans"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/joshka0/foxctl/internal/context/sessionkit"
+	"github.com/joshka0/foxctl/internal/context/sessionkit/claudejsonl"
+	"github.com/joshka0/foxctl/internal/intelligence/analysis/tasksgraph"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/plans"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 // Input defines the skill input parameters for session state capture.
@@ -340,8 +340,8 @@ func triggerArchiveAndSummarize(sessionID, workspace string) {
 	// Use nohup to ensure it survives parent exit
 	script := fmt.Sprintf(`
 nohup sh -c '
-agentctl run session/archive --input '\''%s'\'' --ephemeral >/dev/null 2>&1
-agentctl run session/summarize --input '\''{"session_id":"%s","mode":"windows"}'\'' --ephemeral >/dev/null 2>&1
+foxctl run session/archive --input '\''%s'\'' --ephemeral >/dev/null 2>&1
+foxctl run session/summarize --input '\''{"session_id":"%s","mode":"windows"}'\'' --ephemeral >/dev/null 2>&1
 ' >/dev/null 2>&1 &
 `, string(archiveJSON), sessionID)
 

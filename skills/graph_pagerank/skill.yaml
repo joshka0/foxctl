@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: graph/pagerank
@@ -33,8 +33,8 @@ signature:
     long: |
       Use graph/pagerank to recompute PageRank scores for graph nodes.
       Example commands:
-        agentctl run graph/pagerank --input '{"workspace":"./","damping_factor":0.85}'
-        agentctl skills run graph/pagerank --workspace ./ --damping_factor 0.85
+        foxctl run graph/pagerank --input '{"workspace":"./","damping_factor":0.85}'
+        foxctl skills run graph/pagerank --workspace ./ --damping_factor 0.85
     workflows:
       - id: recompute
         description: "Recompute PageRank for the current workspace."

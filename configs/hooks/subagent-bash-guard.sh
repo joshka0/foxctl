@@ -4,7 +4,7 @@
 # This script is called by Claude Code as a PreToolUse hook on Bash commands
 # when running subagents with profile restrictions.
 #
-# It forwards the hook payload to agentctl run hooks/bash_guard and returns
+# It forwards the hook payload to foxctl run hooks/bash_guard and returns
 # the result to Claude Code.
 #
 # Usage:
@@ -22,4 +22,4 @@ set -euo pipefail
 payload="$(cat)"
 
 # Forward to hooks/bash_guard skill
-echo "$payload" | agentctl run hooks/bash_guard --ephemeral --input-file -
+echo "$payload" | foxctl run hooks/bash_guard --ephemeral --input-file -

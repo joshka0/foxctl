@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: presence/background
@@ -59,7 +59,7 @@ signature:
       Generated images are stored in CAS and cached by prompt hash.
 
       Example:
-        agentctl run presence/background --input '{"emotion": "joy", "scene": "garden"}'
+        foxctl run presence/background --input '{"emotion": "joy", "scene": "garden"}'
 
     workflows:
       - id: emotion-background

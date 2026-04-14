@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	consolepkg "github.com/jkatigb/agentctl/internal/console"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/consolews"
+	consolepkg "github.com/joshka0/foxctl/internal/console"
+	"github.com/joshka0/foxctl/internal/interfaces/web/consolews"
 )
 
 func TestGetOrCreateSession_ReusesAndRecreates(t *testing.T) {

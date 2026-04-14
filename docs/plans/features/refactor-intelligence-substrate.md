@@ -2,13 +2,13 @@
 
 Status: active plan
 
-Owner: agentctl
+Owner: foxctl
 
 Last updated: 2026-04-01
 
 ## Goal
 
-Turn `agentctl refactor scout` from a mostly local parser pass into an
+Turn `foxctl refactor scout` from a mostly local parser pass into an
 index-aware refactor intelligence workflow with stable evidence, dependency
 context, and change-aware prioritization.
 
@@ -137,16 +137,16 @@ as evidence and navigation helpers, not become a generic editor shell.
 Recommended CLI surface:
 
 ```bash
-agentctl refactor status --workspace .
-agentctl refactor snapshot --path ./internal --language go
-agentctl refactor tree --path ./internal --language go
-agentctl refactor outline --path internal/intelligence/indexing/repoindex/builder.go
-agentctl refactor symbol --query "Builder.Build" --workspace .
-agentctl refactor deps --seed "sym:..." --direction in --edge-set structural
-agentctl refactor hot --path ./internal --since HEAD~20
-agentctl refactor changes --since HEAD~5 --path ./internal
-agentctl refactor scout --path ./internal --language go --focus slop
-agentctl refactor advisor --path ./internal --language go --focus slop
+foxctl refactor status --workspace .
+foxctl refactor snapshot --path ./internal --language go
+foxctl refactor tree --path ./internal --language go
+foxctl refactor outline --path internal/intelligence/indexing/repoindex/builder.go
+foxctl refactor symbol --query "Builder.Build" --workspace .
+foxctl refactor deps --seed "sym:..." --direction in --edge-set structural
+foxctl refactor hot --path ./internal --since HEAD~20
+foxctl refactor changes --since HEAD~5 --path ./internal
+foxctl refactor scout --path ./internal --language go --focus slop
+foxctl refactor advisor --path ./internal --language go --focus slop
 ```
 
 Notes:

@@ -1,4 +1,4 @@
-# OpenTUI Migration Plan for agentctl-viewer
+# OpenTUI Migration Plan for foxctl-viewer
 
 **Date:** 2026-01-01
 **Status:** RFC
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-Migrate the terminal UI component of agentctl-viewer from Go/Bubble Tea to
+Migrate the terminal UI component of foxctl-viewer from Go/Bubble Tea to
 TypeScript/OpenTUI, enabling code sharing with the existing React web-ui and
 providing a more maintainable unified codebase.
 
@@ -14,7 +14,7 @@ providing a more maintainable unified codebase.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     agentctl-viewer (Go)                        │
+│                     foxctl-viewer (Go)                        │
 │  cmd/agentctl_viewer/ (~5K lines)                               │
 │  ├── Bubble Tea framework                                       │
 │  ├── Lipgloss styling                                           │
@@ -25,9 +25,9 @@ providing a more maintainable unified codebase.
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Data Sources                                │
-│  ├── ~/.agentctl/jobs/{ULID}/result.json (filesystem)           │
-│  ├── ~/.agentctl/storage/*.db (SQLite)                          │
-│  └── agentctl run <skill> (CLI execution)                       │
+│  ├── ~/.foxctl/jobs/{ULID}/result.json (filesystem)           │
+│  ├── ~/.foxctl/storage/*.db (SQLite)                          │
+│  └── foxctl run <skill> (CLI execution)                       │
 └─────────────────────────────────────────────────────────────────┘
                           ▲
                           │ HTTP API
@@ -68,7 +68,7 @@ providing a more maintainable unified codebase.
           ┌───────────────┼───────────────┐
           ▼               ▼               ▼
     ┌──────────┐   ┌──────────┐   ┌──────────┐
-    │ HTTP API │   │ Bun SQL  │   │ agentctl │
+    │ HTTP API │   │ Bun SQL  │   │ foxctl │
     │ (remote) │   │ (local)  │   │   CLI    │
     └──────────┘   └──────────┘   └──────────┘
 ```
@@ -136,7 +136,7 @@ import { readdir, readFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const AGENTCTL_HOME = process.env.AGENTCTL_HOME || join(homedir(), '.agentctl')
+const AGENTCTL_HOME = process.env.AGENTCTL_HOME || join(homedir(), '.foxctl')
 
 export const native = {
   jobs: {
@@ -285,7 +285,7 @@ Port the jobs list with split-pane layout.
 ```typescript
 // packages/ui/src/JobsList.tsx
 import { useState } from 'react'
-import { useJobs } from '@agentctl/data'
+import { useJobs } from '@foxctl/data'
 
 interface Props {
   onSelect: (jobId: string) => void
@@ -316,8 +316,8 @@ export function JobsList({ onSelect, selectedId }: Props) {
 // packages/tui/src/views/JobsView.tsx
 import { useState } from 'react'
 import { useKeyboard } from '@opentui/react'
-import { JobsList, JobDetail } from '@agentctl/ui'
-import { useJobs, useJobDetail } from '@agentctl/data'
+import { JobsList, JobDetail } from '@foxctl/ui'
+import { useJobs, useJobDetail } from '@foxctl/data'
 
 export function JobsView() {
   const [selectedId, setSelectedId] = useState<string>()
@@ -362,7 +362,7 @@ Three-pane database explorer using OpenTUI's built-in components.
 // packages/tui/src/views/SQLiteView.tsx
 import { useState } from 'react'
 import { useKeyboard } from '@opentui/react'
-import { useDatabases, useTables, useTableData } from '@agentctl/data'
+import { useDatabases, useTables, useTableData } from '@foxctl/data'
 
 export function SQLiteView() {
   const [selectedDb, setSelectedDb] = useState<string>()
@@ -411,7 +411,7 @@ export function SQLiteView() {
 ```typescript
 // packages/tui/src/views/SearchView.tsx
 import { useState } from 'react'
-import { useSearch } from '@agentctl/data'
+import { useSearch } from '@foxctl/data'
 
 export function SearchView() {
   const [query, setQuery] = useState('')
@@ -466,7 +466,7 @@ Port JSON output mode for AI agent consumption.
 
 ```typescript
 // packages/tui/src/robot.ts
-import { api } from '@agentctl/data'
+import { api } from '@foxctl/data'
 
 interface RobotArgs {
   jobs?: boolean

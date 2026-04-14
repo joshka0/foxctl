@@ -119,7 +119,7 @@ type CopyOptions struct {
 }
 
 // Option is a function that configures operation options.
-// This follows the functional options pattern used throughout agentctl.
+// This follows the functional options pattern used throughout foxctl.
 type Option func(*Options)
 
 // Options is the unified option bag for all worktree operations.

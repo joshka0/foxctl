@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 )
 
 func TestBoardStore_SendAndInbox(t *testing.T) {
@@ -325,7 +325,7 @@ CREATE TABLE IF NOT EXISTS room_members (
 		SandboxConfig: &agent.SandboxConfig{
 			WorktreePath:   "/tmp/wt/migrate-test",
 			WorktreeBranch: "sandbox/room-migrate-test-room",
-			TmuxSession:    "agentctl-sandbox-migrate-test-room",
+			TmuxSession:    "foxctl-sandbox-migrate-test-room",
 			Runtime:        "worktree",
 		},
 	}
@@ -718,7 +718,7 @@ func TestBoardStore_SandboxConfigPersistence(t *testing.T) {
 		SandboxConfig: &agent.SandboxConfig{
 			WorktreePath:   "/tmp/worktrees/sandbox/room-sandbox-room",
 			WorktreeBranch: "sandbox/room-sandbox-room",
-			TmuxSession:    "agentctl-sandbox-sandbox-room",
+			TmuxSession:    "foxctl-sandbox-sandbox-room",
 			TerminalURL:    "/terminal/sandbox-room",
 			Runtime:        "worktree",
 			BaseRef:        "main",
@@ -749,8 +749,8 @@ func TestBoardStore_SandboxConfigPersistence(t *testing.T) {
 	if summary.SandboxConfig.WorktreePath != "/tmp/worktrees/sandbox/room-sandbox-room" {
 		t.Errorf("WorktreePath = %q, want %q", summary.SandboxConfig.WorktreePath, "/tmp/worktrees/sandbox/room-sandbox-room")
 	}
-	if summary.SandboxConfig.TmuxSession != "agentctl-sandbox-sandbox-room" {
-		t.Errorf("TmuxSession = %q, want %q", summary.SandboxConfig.TmuxSession, "agentctl-sandbox-sandbox-room")
+	if summary.SandboxConfig.TmuxSession != "foxctl-sandbox-sandbox-room" {
+		t.Errorf("TmuxSession = %q, want %q", summary.SandboxConfig.TmuxSession, "foxctl-sandbox-sandbox-room")
 	}
 	if summary.SandboxConfig.TerminalURL != "/terminal/sandbox-room" {
 		t.Errorf("TerminalURL = %q, want %q", summary.SandboxConfig.TerminalURL, "/terminal/sandbox-room")
@@ -799,7 +799,7 @@ func TestBoardStore_SandboxConfig_Update(t *testing.T) {
 	room.SandboxConfig = &agent.SandboxConfig{
 		WorktreePath:   "/tmp/worktrees/sandbox/room-upgrade-room",
 		WorktreeBranch: "sandbox/room-upgrade-room",
-		TmuxSession:    "agentctl-sandbox-upgrade-room",
+		TmuxSession:    "foxctl-sandbox-upgrade-room",
 		TerminalURL:    "/terminal/upgrade-room",
 		Runtime:        "worktree",
 	}
@@ -1253,7 +1253,7 @@ func TestBoardStore_RoomMemberTransportEndpointRoundtrip(t *testing.T) {
 			Backend:           "zellij",
 			Session:           "test-session",
 			PaneID:            "terminal_0",
-			TransportEndpoint: "/tmp/agentctl-pane/test-session/claude-a.sock",
+			TransportEndpoint: "/tmp/foxctl-pane/test-session/claude-a.sock",
 			TransportKind:     "pane_socket",
 		},
 		{
@@ -1288,8 +1288,8 @@ func TestBoardStore_RoomMemberTransportEndpointRoundtrip(t *testing.T) {
 	}
 
 	claudeA := byActor["claude-a"]
-	if claudeA.TransportEndpoint != "/tmp/agentctl-pane/test-session/claude-a.sock" {
-		t.Errorf("claude-a TransportEndpoint=%q want /tmp/agentctl-pane/test-session/claude-a.sock", claudeA.TransportEndpoint)
+	if claudeA.TransportEndpoint != "/tmp/foxctl-pane/test-session/claude-a.sock" {
+		t.Errorf("claude-a TransportEndpoint=%q want /tmp/foxctl-pane/test-session/claude-a.sock", claudeA.TransportEndpoint)
 	}
 	if claudeA.TransportKind != "pane_socket" {
 		t.Errorf("claude-a TransportKind=%q want pane_socket", claudeA.TransportKind)
@@ -1327,7 +1327,7 @@ func TestBoardStore_UpdateRoomMemberTransport(t *testing.T) {
 	}
 
 	// Update transport for claude-a.
-	endpoint := "/tmp/agentctl-pane/s1/claude-a.sock"
+	endpoint := "/tmp/foxctl-pane/s1/claude-a.sock"
 	if err := store.UpdateRoomMemberTransport(ctx, "ws1", "tr-room", "claude-a", endpoint, "pane_socket"); err != nil {
 		t.Fatalf("UpdateRoomMemberTransport: %v", err)
 	}

@@ -1,4 +1,4 @@
-// Package main implements the setup/install skill for programmatic agentctl installation.
+// Package main implements the setup/install skill for programmatic foxctl installation.
 package main
 
 import (
@@ -10,16 +10,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 const command = "setup/install"
 
-// input defines the skill input parameters for agentctl installation with provider selection and installation options.
+// input defines the skill input parameters for foxctl installation with provider selection and installation options.
 type input struct {
 	Provider     string `json:"provider"`
 	SkipHooks    bool   `json:"skip_hooks"`
@@ -56,7 +56,7 @@ type hooksStatus struct {
 	Hooks     []string `json:"hooks,omitempty"`
 }
 
-// binaryStatus represents the status of the agentctl binary with path and version information.
+// binaryStatus represents the status of the foxctl binary with path and version information.
 type binaryStatus struct {
 	Path    string `json:"path"`
 	Exists  bool   `json:"exists"`
@@ -70,15 +70,15 @@ type envStatus struct {
 	Required bool   `json:"required"`
 }
 
-// main is the skill entry point for setup/install with comprehensive agentctl installation capabilities.
+// main is the skill entry point for setup/install with comprehensive foxctl installation capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
-// run orchestrates agentctl installation with validation and setup operations for multiple providers.
+// run orchestrates foxctl installation with validation and setup operations for multiple providers.
 //
 // Index:
-// - Purpose: Install and validate agentctl setup with directory creation, hook installation, and environment configuration
+// - Purpose: Install and validate foxctl setup with directory creation, hook installation, and environment configuration
 // - Flow: validate input → execute validation or installation → check directories → install hooks → verify binary → check environment → emit results
 // - SideEffects: creates directories; installs provider hooks; validates environment; manages configuration files; performs system checks
 // - FailureModes: permission errors, missing directories, hook installation failures, environment issues, binary access problems
@@ -100,7 +100,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, out)
 }
 
-// validate performs comprehensive validation of agentctl setup without making changes.
+// validate performs comprehensive validation of foxctl setup without making changes.
 func validate(in input) output {
 	out := output{Status: "ok", Provider: in.Provider}
 
@@ -113,7 +113,7 @@ func validate(in input) output {
 
 	agentctlHome := os.Getenv("AGENTCTL_HOME")
 	if agentctlHome == "" {
-		agentctlHome = filepath.Join(homeDir, ".agentctl")
+		agentctlHome = filepath.Join(homeDir, ".foxctl")
 	}
 
 	dirs := []string{
@@ -135,10 +135,10 @@ func validate(in input) output {
 		}
 	}
 
-	binaryPath, err := exec.LookPath("agentctl")
+	binaryPath, err := exec.LookPath("foxctl")
 	if err != nil {
 		out.Binary = binaryStatus{Exists: false}
-		out.Warnings = append(out.Warnings, "agentctl binary not found in PATH")
+		out.Warnings = append(out.Warnings, "foxctl binary not found in PATH")
 	} else {
 		out.Binary = binaryStatus{Path: binaryPath, Exists: true}
 		result := executil.Run(context.Background(), "", binaryPath, "--version")
@@ -168,7 +168,7 @@ func validate(in input) output {
 	return out
 }
 
-// install performs complete agentctl setup with directory creation, hook installation, and configuration.
+// install performs complete foxctl setup with directory creation, hook installation, and configuration.
 func install(in input) output {
 	out := output{Status: "ok", Provider: in.Provider}
 
@@ -181,7 +181,7 @@ func install(in input) output {
 
 	agentctlHome := os.Getenv("AGENTCTL_HOME")
 	if agentctlHome == "" {
-		agentctlHome = filepath.Join(homeDir, ".agentctl")
+		agentctlHome = filepath.Join(homeDir, ".foxctl")
 	}
 
 	dirs := []string{
@@ -215,7 +215,7 @@ func install(in input) output {
 		}
 	}
 
-	binaryPath, err := exec.LookPath("agentctl")
+	binaryPath, err := exec.LookPath("foxctl")
 	if err != nil {
 		out.Binary = binaryStatus{Exists: false}
 		out.Instructions = append(out.Instructions, fmt.Sprintf("Add %s to your PATH", filepath.Join(homeDir, ".local", "bin")))
@@ -247,7 +247,7 @@ func checkHooks(homeDir, provider string) hooksStatus {
 
 	switch provider {
 	case "claude-code", "claude":
-		hooksDir := filepath.Join(homeDir, ".claude", "hooks", "agentctl")
+		hooksDir := filepath.Join(homeDir, ".claude", "hooks", "foxctl")
 		if entries, err := os.ReadDir(hooksDir); err == nil && len(entries) > 0 {
 			status.Installed = true
 			for _, e := range entries {
@@ -258,11 +258,11 @@ func checkHooks(homeDir, provider string) hooksStatus {
 			status.HookCount = len(status.Hooks)
 		}
 	case "opencode":
-		pluginDir := filepath.Join(homeDir, ".opencode", "plugins", "agentctl")
+		pluginDir := filepath.Join(homeDir, ".opencode", "plugins", "foxctl")
 		if _, err := os.Stat(pluginDir); err == nil {
 			status.Installed = true
 			status.HookCount = 1
-			status.Hooks = []string{"agentctl-opencode-hooks"}
+			status.Hooks = []string{"foxctl-opencode-hooks"}
 		}
 	case "codex":
 		agentsFile := filepath.Join(homeDir, ".codex", "AGENTS.md")
@@ -308,7 +308,7 @@ func installHooks(homeDir, provider, repoRoot string) hooksStatus {
 	return status
 }
 
-// findRepoRoot attempts to locate the agentctl repository root using multiple search strategies.
+// findRepoRoot attempts to locate the foxctl repository root using multiple search strategies.
 func findRepoRoot(homeDir string) string {
 	if exePath, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exePath)
@@ -323,9 +323,9 @@ func findRepoRoot(homeDir string) string {
 	}
 
 	candidates := []string{
-		filepath.Join(homeDir, "repos", "personal", "agentctl"),
-		filepath.Join(homeDir, "code", "agentctl"),
-		filepath.Join(homeDir, "src", "agentctl"),
+		filepath.Join(homeDir, "repos", "personal", "foxctl"),
+		filepath.Join(homeDir, "code", "foxctl"),
+		filepath.Join(homeDir, "src", "foxctl"),
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(filepath.Join(c, "Makefile")); err == nil {
@@ -345,7 +345,7 @@ func installClaudeCodeHooks(homeDir, repoRoot string) hooksStatus {
 	}
 
 	claudeDir := filepath.Join(homeDir, ".claude")
-	hooksDir := filepath.Join(claudeDir, "hooks", "agentctl")
+	hooksDir := filepath.Join(claudeDir, "hooks", "foxctl")
 	sourceDir := filepath.Join(repoRoot, "configs", "hooks")
 
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
@@ -446,12 +446,12 @@ func installOpenCodeHooks(homeDir, repoRoot string) hooksStatus {
 		return status
 	}
 
-	target := filepath.Join(pluginsDir, "agentctl")
+	target := filepath.Join(pluginsDir, "foxctl")
 	os.Remove(target)
 	if err := os.Symlink(sourceDir, target); err == nil {
 		status.Installed = true
 		status.HookCount = 1
-		status.Hooks = []string{"agentctl-opencode-hooks"}
+		status.Hooks = []string{"foxctl-opencode-hooks"}
 	}
 
 	return status
@@ -546,7 +546,7 @@ func mergeSettings(sourceFile, targetFile string) error {
 	return os.WriteFile(targetFile, merged, 0o600)
 }
 
-// checkEnvironment validates required and optional environment variables for agentctl operation.
+// checkEnvironment validates required and optional environment variables for foxctl operation.
 func checkEnvironment() []envStatus {
 	envVars := []struct {
 		name     string

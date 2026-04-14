@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: presence/parse
@@ -40,7 +40,7 @@ signature:
       Returns structured emotion data for use by other presence skills.
 
       Example:
-        agentctl run presence/parse --input '{"text": "That is so exciting! *giggles*"}'
+        foxctl run presence/parse --input '{"text": "That is so exciting! *giggles*"}'
 
       Output:
         {

@@ -71,7 +71,7 @@ export function RoomPlanningView({ messages, currentActorID }: RoomPlanningViewP
             ))}
             {sessions.length === 0 && (
               <div className="p-6 text-center text-sm text-muted-foreground italic">
-                No planning sessions found. Start one with `agentctl room plan start`.
+                No planning sessions found. Start one with `foxctl room plan start`.
               </div>
             )}
           </div>

@@ -24,4 +24,4 @@ Update documentation before context reset.
 
 Focus on info hard to rediscover from code alone.
 
-Full docs: `~/.agentctl/share/configs/skills/dev-docs-update/Skill.md`
+Full docs: `~/.foxctl/share/configs/skills/dev-docs-update/Skill.md`

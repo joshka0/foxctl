@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/timeline
@@ -78,8 +78,8 @@ signature:
       up to a specific anchor within a session.
 
       Example commands:
-        agentctl run session/timeline --input '{"session_id":"01HXYZ...","summary_id":"chunk_summary_abc"}'
-        agentctl run session/timeline --input '{"session_id":"01HXYZ...","window_index":2,"chunk_index":34}'
+        foxctl run session/timeline --input '{"session_id":"01HXYZ...","summary_id":"chunk_summary_abc"}'
+        foxctl run session/timeline --input '{"session_id":"01HXYZ...","window_index":2,"chunk_index":34}'
     workflows:
       - id: timeline-anchor
         description: "Fetch timeline up to an anchor summary."

@@ -21,4 +21,4 @@ Fix TypeScript errors systematically.
 
 Prefer root cause fixes over `@ts-ignore`. Keep changes minimal.
 
-Full docs: `~/repos/personal/agentctl/configs/agents/auto-error-resolver.md`
+Full docs: `~/repos/personal/foxctl/configs/agents/auto-error-resolver.md`

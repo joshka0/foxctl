@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/secrets"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/secrets"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -134,7 +134,7 @@ func Start(ctx context.Context, opts StartOptions) (*RunCapture, error) {
 	meta := &trajectory.EventMeta{
 		TraceID:    opts.CorrelationID,
 		JobID:      strings.TrimSpace(opts.JobID),
-		CreatedBy:  "agentctl",
+		CreatedBy:  "foxctl",
 		TaskID:     "",
 		EpicID:     "",
 		CASDigest:  "",
@@ -248,7 +248,7 @@ func (c *RunCapture) CaptureHookCall(ctx context.Context, command string, input 
 	meta := &trajectory.EventMeta{
 		TraceID:   traceID,
 		JobID:     jobID,
-		CreatedBy: "agentctl",
+		CreatedBy: "foxctl",
 		CASDigest: "",
 	}
 	if c.taskHint != nil {
@@ -373,7 +373,7 @@ func (c *RunCapture) buildResultMeta(
 	meta := &trajectory.EventMeta{
 		TraceID:   strings.TrimSpace(correlationID),
 		JobID:     strings.TrimSpace(jobID),
-		CreatedBy: "agentctl",
+		CreatedBy: "foxctl",
 		CASDigest: artifact,
 	}
 	if c.taskHint != nil {

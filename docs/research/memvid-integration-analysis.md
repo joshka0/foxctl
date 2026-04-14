@@ -1,19 +1,19 @@
-# Memvid Integration Analysis for agentctl
+# Memvid Integration Analysis for foxctl
 
 **Status**: Research\
 **Date**: 2026-01-07\
-**Purpose**: Evaluate how memvid (MV2 file format) could fit into agentctl's architecture as a potential vector search provider or storage backend
+**Purpose**: Evaluate how memvid (MV2 file format) could fit into foxctl's architecture as a potential vector search provider or storage backend
 
 ## Executive Summary
 
-Memvid represents a **single-file memory infrastructure** with embedded search capabilities, designed for portable, offline-first AI memory. agentctl uses a **multi-database architecture** with pluggable vector providers. This analysis explores:
+Memvid represents a **single-file memory infrastructure** with embedded search capabilities, designed for portable, offline-first AI memory. foxctl uses a **multi-database architecture** with pluggable vector providers. This analysis explores:
 
-1. **Architectural compatibility**: How memvid's approach aligns with agentctl's design
+1. **Architectural compatibility**: How memvid's approach aligns with foxctl's design
 2. **Integration strategies**: Replace, augment, or hybrid approaches
 3. **Tradeoffs**: Portability vs flexibility, embedded vs pluggable
 4. **Recommendations**: Where memvid adds value and where existing architecture is stronger
 
-**Key Finding**: Memvid is best suited as an **optional portable export format** or **offline-first alternative** rather than replacing agentctl's core architecture. The multi-database approach with pluggable providers offers superior flexibility for agentctl's use cases.
+**Key Finding**: Memvid is best suited as an **optional portable export format** or **offline-first alternative** rather than replacing foxctl's core architecture. The multi-database approach with pluggable providers offers superior flexibility for foxctl's use cases.
 
 ---
 
@@ -58,10 +58,10 @@ Memvid represents a **single-file memory infrastructure** with embedded search c
 - **Offline-first**: No external dependencies
 - **384 dimensions**: Fixed vector size for HNSW
 
-### agentctl Architecture
+### foxctl Architecture
 
 ```
-~/.agentctl/
+~/.foxctl/
 ├── storage/              # Persistent data
 │   ├── memory.db         # Named memories (gotchas, decisions, symbols, codemaps)
 │   │   └── memories (with optional embeddings: 1024d Voyage/Gemini/Mistral)
@@ -94,7 +94,7 @@ Memvid represents a **single-file memory infrastructure** with embedded search c
 
 ## 2. Vector Search Comparison
 
-| Feature | Memvid | agentctl Current |
+| Feature | Memvid | foxctl Current |
 |---------|--------|-----------------|
 | **Embedding dimensions** | 384 (fixed) | 1024 (Voyage), 768 (Gemini), 3072 (Gemini large) |
 | **Vector index** | HNSW (embedded in .mv2) | External providers (Voyage/Gemini/Mistral APIs) |
@@ -107,10 +107,10 @@ Memvid represents a **single-file memory infrastructure** with embedded search c
 | **Cost** | Free (local compute) | $0.06-0.18 per 1M tokens (Voyage) |
 
 **Observations:**
-1. Memvid's **384d** is smaller than agentctl's **1024d** (Voyage) — potential quality tradeoff
+1. Memvid's **384d** is smaller than foxctl's **1024d** (Voyage) — potential quality tradeoff
 2. Memvid's **embedded HNSW** eliminates API costs and latency but increases file size
-3. agentctl's **multi-scope** approach (different models for different content types) is more flexible
-4. Memvid's **Tantivy** offers superior lexical search vs agentctl's SQLite FTS5
+3. foxctl's **multi-scope** approach (different models for different content types) is more flexible
+4. Memvid's **Tantivy** offers superior lexical search vs foxctl's SQLite FTS5
 
 ---
 
@@ -138,7 +138,7 @@ Frame Format:
 - **Single file grows**: No natural sharding/partitioning
 - **Lock contention**: All operations on one file (WAL mitigates this)
 
-### agentctl: Multi-Database + CAS
+### foxctl: Multi-Database + CAS
 
 ```
 Separation of Concerns:
@@ -163,7 +163,7 @@ Separation of Concerns:
 
 ## 4. Progressive Memory: Fit Analysis
 
-### agentctl's Progressive Memory (Actor System)
+### foxctl's Progressive Memory (Actor System)
 
 ```
 L0: Raw Turns (8K tokens)
@@ -201,7 +201,7 @@ Archive: sessions.db + .jsonl.gz
 - ✅ **Offline search**: No API keys needed
 - ❌ **Schema flexibility**: Harder to evolve turn metadata
 - ❌ **Cursor management**: Need to map memvid frames to L0/L1/L2 cursors
-- ❌ **Dimension mismatch**: 384d vs agentctl's 1024d (Voyage)
+- ❌ **Dimension mismatch**: 384d vs foxctl's 1024d (Voyage)
 
 **Option 2: Export format for portability**
 - Keep sessions.db for live operations
@@ -224,10 +224,10 @@ Archive: sessions.db + .jsonl.gz
 
 **How**:
 1. Create per-scope `.mv2` files:
-   - `~/.agentctl/vectors/symbols.mv2`
-   - `~/.agentctl/vectors/memory.mv2`
-   - `~/.agentctl/vectors/sessions.mv2`
-   - `~/.agentctl/vectors/tasks.mv2`
+   - `~/.foxctl/vectors/symbols.mv2`
+   - `~/.foxctl/vectors/memory.mv2`
+   - `~/.foxctl/vectors/sessions.mv2`
+   - `~/.foxctl/vectors/tasks.mv2`
 2. Implement `MemvidVectorStore` as alternative to `VoyageEmbedder`
 3. Store embeddings in memvid, metadata in SQLite
 
@@ -243,7 +243,7 @@ Archive: sessions.db + .jsonl.gz
 - ❌ **File management**: Multiple .mv2 files vs single memory.db
 - ❌ **Cross-scope search**: Harder to search across all scopes simultaneously
 
-**Recommendation**: ❌ **Not recommended** — agentctl's pluggable provider approach is more flexible
+**Recommendation**: ❌ **Not recommended** — foxctl's pluggable provider approach is more flexible
 
 ---
 
@@ -252,7 +252,7 @@ Archive: sessions.db + .jsonl.gz
 **What**: Export completed sessions to `.mv2` for portability/sharing
 
 **How**:
-1. Add `agentctl sessions export --format mv2 --output session.mv2`
+1. Add `foxctl sessions export --format mv2 --output session.mv2`
 2. Convert session_turns + chunks + context_windows to memvid frames
 3. Embed full JSONL content as frames with temporal ordering
 4. Use memvid's time-travel for session replay
@@ -278,13 +278,13 @@ Archive: sessions.db + .jsonl.gz
 **What**: Export named memories, gotchas, decisions to `.mv2` for offline knowledge base
 
 **How**:
-1. Add `agentctl memory export --workspace . --output kb.mv2`
+1. Add `foxctl memory export --workspace . --output kb.mv2`
 2. Convert memories, codemaps, symbols to frames
 3. Use memvid's hierarchical URIs: `mv2://workspace/memories/gotcha-auth`
 4. Leverage Tantivy for full-text search over knowledge base
 
 **Pros**:
-- ✅ **Offline knowledge base**: No agentctl needed to query memories
+- ✅ **Offline knowledge base**: No foxctl needed to query memories
 - ✅ **Superior search**: Tantivy > SQLite FTS5 for full-text
 - ✅ **Portable**: Share team knowledge in single file
 - ✅ **Hierarchical**: URI structure maps well to memory organization
@@ -334,7 +334,7 @@ Archive/Export (New):
 
 ### Vector Dimension Compatibility
 
-| Content Type | agentctl Current | Memvid | Compatibility |
+| Content Type | foxctl Current | Memvid | Compatibility |
 |--------------|------------------|--------|---------------|
 | Code symbols | 1024d (Voyage Code-3) | 384d | ⚠️ Re-embed required |
 | Memories | 1024d (Voyage 3.5) | 384d | ⚠️ Re-embed required |
@@ -364,7 +364,7 @@ Archive/Export (New):
 
 ### Concurrency Model
 
-**SQLite (agentctl current)**:
+**SQLite (foxctl current)**:
 - **WAL mode**: Multiple readers + single writer
 - **Lock granularity**: Database-level (but separate DBs reduce contention)
 - **Concurrent access**: Excellent for read-heavy workloads
@@ -382,7 +382,7 @@ Archive/Export (New):
 
 ### Use Case 1: Symbol Indexing (Phase 4 of SWE Grep Plan)
 
-**Current agentctl approach**:
+**Current foxctl approach**:
 - Extract symbols (Go AST, tree-sitter)
 - Store in `memory.db` with type `symbol`
 - Embed symbol bodies with Voyage Code-3 (1024d)
@@ -401,7 +401,7 @@ Archive/Export (New):
 
 ### Use Case 2: Session Archive & Deep Retrieval (Phase 4 of Progressive Memory)
 
-**Current agentctl approach**:
+**Current foxctl approach**:
 - Capture sessions to `sessions.db`
 - Archive JSONL to `.jsonl.gz`
 - Extract chunks with embeddings (Gemini 768d)
@@ -416,13 +416,13 @@ Archive/Export (New):
 **Verdict**: ✅ **Recommended** (as export format)
 - Reason: **Portability** is key for session sharing. A single `.mv2` file is easier to share with team members than "sessions.db + .jsonl.gz + embedding schema".
 - Tradeoff: Dimension mismatch (768d → 384d) acceptable for archived sessions (not used for live retrieval).
-- Implementation: Add `agentctl sessions export --format mv2`
+- Implementation: Add `foxctl sessions export --format mv2`
 
 ---
 
 ### Use Case 3: Named Memories & Gotchas
 
-**Current agentctl approach**:
+**Current foxctl approach**:
 - Store in `memory.db` with type (gotcha, decision, pattern, etc.)
 - Optional embeddings (Voyage 3.5, 1024d)
 - Workspace-scoped + cross-workspace sync (Turso)
@@ -435,13 +435,13 @@ Archive/Export (New):
 **Verdict**: ✅ **Recommended** (as export format)
 - Reason: **Offline knowledge base** is valuable for team sharing. Tantivy's superior full-text search is a bonus.
 - Tradeoff: Read-only export (not for live editing). Keep `memory.db` as source of truth.
-- Implementation: Add `agentctl memory export --workspace . --output kb.mv2`
+- Implementation: Add `foxctl memory export --workspace . --output kb.mv2`
 
 ---
 
 ### Use Case 4: Cross-Workspace Search (Turso Sync)
 
-**Current agentctl approach**:
+**Current foxctl approach**:
 - Push embeddings to Turso (remote libSQL)
 - Query across all workspaces with `--global` flag
 - Voyage Rerank-2.5 for improved relevance
@@ -466,11 +466,11 @@ Archive/Export (New):
 **Tasks**:
 1. **Add memvid Go library dependency**
    - Evaluate existing Rust crates with Go bindings vs pure Go implementation
-   - Prefer pure Go to avoid CGO complexity (agentctl is CGO-optional)
+   - Prefer pure Go to avoid CGO complexity (foxctl is CGO-optional)
 
 2. **Implement session export**
    ```bash
-   agentctl sessions export --session-id <id> --format mv2 --output session.mv2
+   foxctl sessions export --session-id <id> --format mv2 --output session.mv2
    ```
    - Convert session_turns to frames
    - Embed chunk previews at 384d (using local model or skip embeddings)
@@ -479,7 +479,7 @@ Archive/Export (New):
 
 3. **Implement memory export**
    ```bash
-   agentctl memory export --workspace . --output kb.mv2
+   foxctl memory export --workspace . --output kb.mv2
    ```
    - Convert memories to frames with hierarchical URIs
    - Include gotchas, decisions, patterns, codemaps
@@ -487,7 +487,7 @@ Archive/Export (New):
 
 4. **Add import for verification**
    ```bash
-   agentctl sessions import --file session.mv2 --verify
+   foxctl sessions import --file session.mv2 --verify
    ```
    - Parse .mv2 frames back to internal format
    - Verify checksums and temporal ordering
@@ -495,7 +495,7 @@ Archive/Export (New):
 
 **Success Criteria**:
 - ✅ Exported .mv2 files are self-contained and portable
-- ✅ Can share sessions with team members (no agentctl DB needed to view)
+- ✅ Can share sessions with team members (no foxctl DB needed to view)
 - ✅ Tantivy search provides better UX than SQLite FTS5
 
 ---
@@ -511,7 +511,7 @@ Archive/Export (New):
 
 2. **Add embedding config**
    ```yaml
-   # ~/.agentctl/config.yaml
+   # ~/.foxctl/config.yaml
    memvid:
      embedding:
        provider: ollama
@@ -532,7 +532,7 @@ Archive/Export (New):
 
 ### Phase 3: Read-Only Viewer (Optional)
 
-**Goal**: Standalone viewer for .mv2 files (no agentctl installation needed)
+**Goal**: Standalone viewer for .mv2 files (no foxctl installation needed)
 
 **Tasks**:
 1. **Build minimal viewer binary**
@@ -547,8 +547,8 @@ Archive/Export (New):
    - Search by keyword or vector similarity
 
 3. **Distribute as standalone**
-   - `agentctl-viewer` binary
-   - Shareable with non-agentctl users
+   - `foxctl-viewer` binary
+   - Shareable with non-foxctl users
 
 **Success Criteria**:
 - ✅ Non-technical users can view/search exported sessions
@@ -580,8 +580,8 @@ Archive/Export (New):
 - No disruption to existing architecture
 
 **How**:
-- Implement `agentctl sessions export --format mv2`
-- Implement `agentctl memory export --workspace . --output kb.mv2`
+- Implement `foxctl sessions export --format mv2`
+- Implement `foxctl memory export --workspace . --output kb.mv2`
 - Add standalone viewer for .mv2 files (optional)
 
 ---
@@ -615,7 +615,7 @@ Archive/Export (New):
 
 ## 11. Conclusion
 
-Memvid represents a well-designed **single-file memory infrastructure** optimized for **portability and offline-first operation**. However, agentctl's current **multi-database architecture** with **pluggable vector providers** is better suited for the system's core use cases:
+Memvid represents a well-designed **single-file memory infrastructure** optimized for **portability and offline-first operation**. However, foxctl's current **multi-database architecture** with **pluggable vector providers** is better suited for the system's core use cases:
 
 1. **High write throughput** (symbol indexing, task updates)
 2. **Flexible embedding models** (Voyage Code-3 for symbols, Gemini for sessions)
@@ -627,7 +627,7 @@ Memvid represents a well-designed **single-file memory infrastructure** optimize
 - Creating portable knowledge bases (memories, gotchas, decisions)
 - Offline session replay and time-travel debugging
 
-This approach preserves agentctl's architectural strengths while leveraging memvid's portability and superior lexical search (Tantivy) where it adds clear value.
+This approach preserves foxctl's architectural strengths while leveraging memvid's portability and superior lexical search (Tantivy) where it adds clear value.
 
 ---
 
@@ -635,7 +635,7 @@ This approach preserves agentctl's architectural strengths while leveraging memv
 
 1. **Prototype session export** (Phase 1.2 from roadmap)
    - Add memvid dependency (evaluate pure Go vs CGO)
-   - Implement `agentctl sessions export --format mv2`
+   - Implement `foxctl sessions export --format mv2`
    - Test with real session data
 
 2. **Evaluate embedding options** (Phase 2)
@@ -656,7 +656,7 @@ This approach preserves agentctl's architectural strengths while leveraging memv
 
 ## Appendix A: Memvid API Surface (Hypothetical)
 
-If agentctl integrates memvid, the API might look like:
+If foxctl integrates memvid, the API might look like:
 
 ```go
 // Export session to .mv2
@@ -698,7 +698,7 @@ type MemvidSession struct {
 
 - Memvid MV2 Spec: https://github.com/memvid/memvid/blob/main/MV2_SPEC.md
 - Memvid README: https://github.com/memvid/memvid/blob/main/README.md
-- agentctl Implementation Plan: `docs/impl_plan/universal_swe_grep_and_agents.md`
-- agentctl Unified Agents: `docs/spec/unified_agents.md`
-- agentctl Progressive Memory: `docs/designs/progressive-memory-system.md`
-- agentctl Actor Progressive Memory: `docs/designs/actor-progressive-memory.md`
+- foxctl Implementation Plan: `docs/impl_plan/universal_swe_grep_and_agents.md`
+- foxctl Unified Agents: `docs/spec/unified_agents.md`
+- foxctl Progressive Memory: `docs/designs/progressive-memory-system.md`
+- foxctl Actor Progressive Memory: `docs/designs/actor-progressive-memory.md`

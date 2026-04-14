@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 // MarshalEventsJSONL encodes events to canonical JSONL bytes.

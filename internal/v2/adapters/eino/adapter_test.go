@@ -7,7 +7,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 // stubAgent is a minimal adk.Agent for testing the adapter seam.

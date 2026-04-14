@@ -137,7 +137,7 @@ Context router uses feedback to rank future injections:
 ### Required Command
 
 ```bash
-agentctl eval replay --from trajectory.db
+foxctl eval replay --from trajectory.db
 ```
 
 ### Behavior
@@ -160,7 +160,7 @@ Compare baseline vs improved router/tooling policies.
 
 ### Remaining Work
 
-- [ ] Create `cmd/agentctl/cmd/eval.go`
+- [ ] Create `cmd/foxctl/cmd/eval.go`
 - [ ] Implement trajectory replay logic
 - [ ] Implement prompt rebuild from historical state
 - [ ] Add metrics aggregation and reporting

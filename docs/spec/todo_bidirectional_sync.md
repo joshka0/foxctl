@@ -1,13 +1,13 @@
-# Spec: Bidirectional Todo Sync (Claude Code ⇄ agentctl) v1
+# Spec: Bidirectional Todo Sync (Claude Code ⇄ foxctl) v1
 
 ## 1. Overview
 
 This feature provides **bidirectional synchronization** between:
 
 * **Claude Code native todos** (stored as JSON files under `~/.claude/todos/`)
-* **agentctl tasks** (the canonical source of truth, enriched, ranked, graph-aware)
+* **foxctl tasks** (the canonical source of truth, enriched, ranked, graph-aware)
 
-Claude's todo UI is treated as a **thin projection**: it can only display `content` + `status`, and strips any extra metadata fields. Therefore, the projection encodes only minimal hints (glyphs + a stable task id tag), while full task context lives in agentctl and is retrievable on-demand.
+Claude's todo UI is treated as a **thin projection**: it can only display `content` + `status`, and strips any extra metadata fields. Therefore, the projection encodes only minimal hints (glyphs + a stable task id tag), while full task context lives in foxctl and is retrievable on-demand.
 
 ---
 
@@ -15,13 +15,13 @@ Claude's todo UI is treated as a **thin projection**: it can only display `conte
 
 ### 2.1 Goals
 
-1. **Source of truth:** agentctl task store is canonical.
+1. **Source of truth:** foxctl task store is canonical.
 2. **Bidirectional sync:**
-   * Claude → agentctl: TodoWrite changes become agentctl task updates.
-   * agentctl → Claude: task changes in agentctl update Claude's todo file.
-3. **Stable mapping:** each Claude todo line maps to exactly one agentctl task via an embedded stable tag.
-4. **Low-noise UI:** Claude todo `content` remains short; rich context is obtained via agentctl tools (`todo/context`).
-5. **Graph-aware ordering:** Claude todo list can be re-ordered from agentctl ranking (pagerank/critical-path/readiness), with a controlled cadence.
+   * Claude → foxctl: TodoWrite changes become foxctl task updates.
+   * foxctl → Claude: task changes in foxctl update Claude's todo file.
+3. **Stable mapping:** each Claude todo line maps to exactly one foxctl task via an embedded stable tag.
+4. **Low-noise UI:** Claude todo `content` remains short; rich context is obtained via foxctl tools (`todo/context`).
+5. **Graph-aware ordering:** Claude todo list can be re-ordered from foxctl ranking (pagerank/critical-path/readiness), with a controlled cadence.
 6. **Safe + contained:** writing `~/.claude/todos` is privileged (hooks/daemon), not generally available to arbitrary agents/skills unless explicitly allowed.
 
 ### 2.2 Non-goals (v1)
@@ -53,14 +53,14 @@ Format:
 Priority order:
 1. `CLAUDE_SESSION_ID` env var
 2. `AGENTCTL_SESSION_ID` env var
-3. Identity file scan in `~/.agentctl/sessions/active/`
+3. Identity file scan in `~/.foxctl/sessions/active/`
 4. Newest file in `~/.claude/todos/` matching workspace
 
 ---
 
 ## 4. Stable Task ID Tag (MUST)
 
-Every projected todo line MUST include an agentctl task ID tag.
+Every projected todo line MUST include an foxctl task ID tag.
 
 ### 4.1 Tag format
 
@@ -77,8 +77,8 @@ Example:
 
 ### 4.2 Mapping rules
 
-* If `〔T:<id>〕` exists, it is the **primary key** linking Claude todo ↔ agentctl task.
-* If missing, agentctl MUST treat it as "unmapped" and create or match heuristically (see §7).
+* If `〔T:<id>〕` exists, it is the **primary key** linking Claude todo ↔ foxctl task.
+* If missing, foxctl MUST treat it as "unmapped" and create or match heuristically (see §7).
 
 ---
 
@@ -99,7 +99,7 @@ Because Claude todos are short, we use glyphs for quick "readiness".
 | Glyph | Meaning |
 |-------|---------|
 | `⛓<n>` | Number of unresolved dependencies |
-| `⛔` | Blocked (agentctl status `blocked`; Claude status remains `pending`) |
+| `⛔` | Blocked (foxctl status `blocked`; Claude status remains `pending`) |
 
 Example:
 ```
@@ -115,11 +115,11 @@ Example:
 
 ## 6. Public Operations (Conceptual API)
 
-These are **agentctl-internal services** and optionally surfaced as commands/skills with strict capability gating.
+These are **foxctl-internal services** and optionally surfaced as commands/skills with strict capability gating.
 
-### 6.1 `todo/sync_from_provider` (Claude → agentctl)
+### 6.1 `todo/sync_from_provider` (Claude → foxctl)
 
-Reads provider todos and applies diffs to agentctl tasks.
+Reads provider todos and applies diffs to foxctl tasks.
 
 **Input:**
 | Field | Type | Description |
@@ -135,9 +135,9 @@ Reads provider todos and applies diffs to agentctl tasks.
 * warnings: duplicates, conflicts
 * optional artifact with full diff details
 
-### 6.2 `todo/sync_to_provider` (agentctl → Claude)
+### 6.2 `todo/sync_to_provider` (foxctl → Claude)
 
-Computes projection from agentctl tasks and writes provider todo file.
+Computes projection from foxctl tasks and writes provider todo file.
 
 **Input:**
 | Field | Type | Description |
@@ -156,7 +156,7 @@ Computes projection from agentctl tasks and writes provider todo file.
 
 ### 6.3 `todo/context` (on-demand)
 
-Returns rich task context from agentctl (story, deps, files, symbols, snippets).
+Returns rich task context from foxctl (story, deps, files, symbols, snippets).
 
 This is how Claude gets full context without bloating the todo list.
 
@@ -166,11 +166,11 @@ Generates richer story/AC/subtasks/files/symbols using:
 * semantic_search + symbols + swe_grep
 * optional Cerebras synthesis pass
 
-Persists results to agentctl task context storage.
+Persists results to foxctl task context storage.
 
 ---
 
-## 7. Inbound Sync Rules (Claude → agentctl)
+## 7. Inbound Sync Rules (Claude → foxctl)
 
 ### 7.1 Trigger points
 
@@ -187,34 +187,34 @@ For each provider todo item:
    * Upsert that exact task.
 2. If it has no tag:
    * Try to match by normalized title against existing tasks in the same `(workspace_id, session_id)` scope.
-   * If no match: create a new agentctl task and assign an id, then schedule outbound sync to insert the tag.
+   * If no match: create a new foxctl task and assign an id, then schedule outbound sync to insert the tag.
 
 ### 7.3 Status mapping
 
-Provider → agentctl:
+Provider → foxctl:
 
-| Provider Status | agentctl Status |
+| Provider Status | foxctl Status |
 |-----------------|-----------------|
 | `pending` | `pending` |
 | `in_progress` | `in_progress` (also set active task) |
 | `completed` | `completed` |
 
-If provider marks completed but agentctl task is blocked/in_progress, agentctl SHOULD accept provider completion as authoritative *unless configured otherwise*.
+If provider marks completed but foxctl task is blocked/in_progress, foxctl SHOULD accept provider completion as authoritative *unless configured otherwise*.
 
 ---
 
-## 8. Outbound Sync Rules (agentctl → Claude)
+## 8. Outbound Sync Rules (foxctl → Claude)
 
 ### 8.1 Trigger points
 
-Outbound sync SHOULD run when agentctl changes tasks via:
+Outbound sync SHOULD run when foxctl changes tasks via:
 * `todo/manage add|update|complete|set_active|block|unblock`
 * `todo/enrich` completion
 * optional: after pagerank/graph update (rate-limited)
 
 ### 8.2 Projection computation
 
-Projection list is derived from agentctl tasks filtered by:
+Projection list is derived from foxctl tasks filtered by:
 * workspace_id
 * session_id (if using session-scoped todos) OR "workspace global" mode (configurable)
 
@@ -230,7 +230,7 @@ Default ordering SHOULD be:
 4. completed last (optional; or omit completed from projection)
 
 Within groups:
-* sort by agentctl rank score (pagerank + critical path + recency + signals)
+* sort by foxctl rank score (pagerank + critical path + recency + signals)
 
 **Config knobs:**
 * `AGENTCTL_TODO_PROJECTION_ORDER=agentctl_rank|stable|off`
@@ -242,7 +242,7 @@ Within groups:
 
 Conflicts happen when:
 * Claude writes todos (TodoWrite)
-* agentctl writes projection
+* foxctl writes projection
 * user manually edits `~/.claude/todos/*.json`
 
 ### 9.1 Writer strategy
@@ -254,13 +254,13 @@ Outbound sync MUST write atomically:
 
 ### 9.2 Merge strategy (recommended)
 
-Maintain a "last-written hash" in agentctl:
-* Store `{provider_file_path, last_projection_sha256, updated_at}` in agentctl storage (sqlite)
+Maintain a "last-written hash" in foxctl:
+* Store `{provider_file_path, last_projection_sha256, updated_at}` in foxctl storage (sqlite)
 
 When writing outbound:
 * If provider file hash == last_projection_sha256: safe overwrite
 * Else: perform a merge:
-  * preserve any items that agentctl cannot map (no tag) as "unmapped" section
+  * preserve any items that foxctl cannot map (no tag) as "unmapped" section
   * re-apply projection items by tag (id wins)
   * keep provider ordering if `order=stable`
 
@@ -289,8 +289,8 @@ Either:
 Each sync run SHOULD emit a wide event:
 
 **Operation names:**
-* `todo.sync_in` (provider → agentctl)
-* `todo.sync_out` (agentctl → provider)
+* `todo.sync_in` (provider → foxctl)
+* `todo.sync_out` (foxctl → provider)
 * `todo.enrich` (enrichment lifecycle)
 
 **Event data examples:**
@@ -350,7 +350,7 @@ Use existing identity/session detection:
 
 ### Phase 1: Inbound refactor (now)
 
-* Ensure every imported task gets a stable `task_id` stored in agentctl
+* Ensure every imported task gets a stable `task_id` stored in foxctl
 * Add `todo/sync_from_provider` internal service
 * Refactor `todo-sync.sh` hook to call it
 * Parse and preserve `〔T:<id>〕` tags from existing content
@@ -358,14 +358,14 @@ Use existing identity/session detection:
 ### Phase 2: Outbound projection + id tags
 
 * Implement `todo/sync_to_provider`
-* On any agentctl task mutation, update Claude file
+* On any foxctl task mutation, update Claude file
 * Add atomic write with temp file + rename
 * Store last-written hash for conflict detection
 
 ### Phase 3: Ranking + glyphs
 
 * Format `content` with `⛓n`, `⛔`, status glyph
-* Reorder according to agentctl rank with cadence controls
+* Reorder according to foxctl rank with cadence controls
 * Add config knobs for ordering preferences
 
 ### Phase 4: Enrichment pipeline (future)
@@ -413,7 +413,7 @@ func AppendTaskID(content, taskID string) string {
 
 ## 16. Example Projection
 
-**agentctl tasks:**
+**foxctl tasks:**
 ```json
 [
   {"id": "01HF1234", "title": "Add auth middleware", "status": "in_progress", "depends_on": []},

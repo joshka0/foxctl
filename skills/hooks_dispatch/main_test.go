@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
 	"github.com/stretchr/testify/assert"
 )
 

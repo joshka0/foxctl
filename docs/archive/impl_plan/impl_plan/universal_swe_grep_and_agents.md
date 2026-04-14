@@ -120,7 +120,7 @@ Dependencies: Phase 1.
     data/behavior from §6.
 - [x] Wire to post-review handler:
   - Subscribe to Phase 2 output and reindex touched files.
-- [x] Implement optional CLI (`agentctl semantic-index ...`).
+- [x] Implement optional CLI (`foxctl semantic-index ...`).
 - [x] Add tests + golden outputs for:
   - No chunking.
   - Chunking and config changes.
@@ -213,7 +213,7 @@ Dependencies: Phases 3–5.
 
 **Tasks**
 
-- [x] Implement initial trajectory store + capture hooks for `agentctl run`:
+- [x] Implement initial trajectory store + capture hooks for `foxctl run`:
   - Capture `user_request` and `tool_result` events.
   - Use `meta.correlation_id` as the correlation source for capture (stored as
     `trace_id` in trajectory records).

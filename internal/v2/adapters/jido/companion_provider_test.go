@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/v2/runtime/contextbuilder"
+	"github.com/joshka0/foxctl/internal/v2/runtime/contextbuilder"
 )
 
 func TestCompanionProvider_GetLayeredContext(t *testing.T) {
@@ -17,7 +17,7 @@ func TestCompanionProvider_GetLayeredContext(t *testing.T) {
 			Status: "processed",
 			Data: json.RawMessage(`{
 				"state": {
-					"agentctl": {
+					"foxctl": {
 						"status": "completed",
 						"last_result": {
 							"companion_context": {
@@ -104,7 +104,7 @@ func TestCompanionProvider_StrictReturnsError(t *testing.T) {
 		Client: &fakeCompanionClient{
 			signalResp: SignalResponse{
 				Status: "processed",
-				Data:   json.RawMessage(`{"state":{"agentctl":{"last_result":{}}}}`),
+				Data:   json.RawMessage(`{"state":{"foxctl":{"last_result":{}}}}`),
 			},
 		},
 		AgentID: "agent:bridge",

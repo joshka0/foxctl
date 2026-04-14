@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: providers/config
@@ -178,8 +178,8 @@ signature:
         "operation": "add-skill",
         "provider": "claude",
         "skill": {
-          "name": "agentctl-smart-edit",
-          "source": "/path/to/configs/skills-condensed/agentctl-smart-edit"
+          "name": "foxctl-smart-edit",
+          "source": "/path/to/configs/skills-condensed/foxctl-smart-edit"
         }
       }
       ```

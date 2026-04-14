@@ -7,15 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	refevidence "github.com/jkatigb/agentctl/internal/intelligence/refactor/evidence"
-	refhot "github.com/jkatigb/agentctl/internal/intelligence/refactor/hot"
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
-	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	refevidence "github.com/joshka0/foxctl/internal/intelligence/refactor/evidence"
+	refhot "github.com/joshka0/foxctl/internal/intelligence/refactor/hot"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	refsnapshot "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshot"
+	refsnapshotstore "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshotstore"
+	refstatus "github.com/joshka0/foxctl/internal/intelligence/refactor/status"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
 )
 
 const (

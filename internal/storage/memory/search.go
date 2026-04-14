@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
 // SearchableStore extends Store with advanced search capabilities

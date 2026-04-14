@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: codemap/check
@@ -38,10 +38,10 @@ signature:
     long: |
       Use codemap/check to see if codemap references have changed.
       Example commands:
-        agentctl run codemap/check --input '{"codemap_id":"01KXXXXXX","include_diff":true}'
-        agentctl skills run codemap/check --codemap_id 01KXXXXXX --include_diff
-        agentctl run codemap/check --input '{"codemap_id":"01KXXXXXX","regenerate":true}'
-        agentctl skills run codemap/check --codemap_id 01KXXXXXX --regenerate
+        foxctl run codemap/check --input '{"codemap_id":"01KXXXXXX","include_diff":true}'
+        foxctl skills run codemap/check --codemap_id 01KXXXXXX --include_diff
+        foxctl run codemap/check --input '{"codemap_id":"01KXXXXXX","regenerate":true}'
+        foxctl skills run codemap/check --codemap_id 01KXXXXXX --regenerate
     workflows:
       - id: check-stale
         description: "Check staleness with diffs."

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
 	"github.com/oklog/ulid/v2"
 )
 

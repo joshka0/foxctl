@@ -1,6 +1,6 @@
 ---
 name: tmux-bridge
-description: "Compatibility alias for the room presentation layer. Prefer `agentctl-room-view` for current tmux/zellij/gui viewer guidance."
+description: "Compatibility alias for the room presentation layer. Prefer `foxctl-room-view` for current tmux/zellij/gui viewer guidance."
 metadata:
   openclaw:
     emoji: "🌉"
@@ -10,33 +10,33 @@ metadata:
     requires:
       bins:
         - tmux
-        - agentctl
+        - foxctl
 ---
 
 # tmux-bridge
 
 `tmux-bridge` is now a compatibility name.
 
-Use [`agentctl-room-view`](../agentctl-room-view/SKILL.md) for current guidance.
+Use [`foxctl-room-view`](../foxctl-room-view/SKILL.md) for current guidance.
 
 The architecture split is:
 
-- `agentctl-room`: canonical room model and delivery
-- `agentctl-room-agent`: participant-agent protocol
-- `agentctl-room-operator`: coordinator/reviewer operating protocol
-- `agentctl-room-view`: tmux/zellij/gui presentation layer
+- `foxctl-room`: canonical room model and delivery
+- `foxctl-room-agent`: participant-agent protocol
+- `foxctl-room-operator`: coordinator/reviewer operating protocol
+- `foxctl-room-view`: tmux/zellij/gui presentation layer
 
-Keep using the existing `agentctl mux ...` commands and the `./scripts/tmux-bridge`
+Keep using the existing `foxctl mux ...` commands and the `./scripts/tmux-bridge`
 helper when you need them. The rename is about responsibility, not command
 removal.
 
-`agentctl mux send` is the default for agent-to-agent messaging:
+`foxctl mux send` is the default for agent-to-agent messaging:
 
 - it resolves the sender pane from the current tmux pane or `--sender`
 - it prepends the stable `[tmux-bridge from=...]` header
 - it presses Enter for you
 
-`agentctl room ...` now follows the same identity rule: derive the current pane
+`foxctl room ...` now follows the same identity rule: derive the current pane
 participant first, then fall back to canonical ids like `tmux:<session>:%7` or
 `zellij:<session>:terminal_3` when no human-friendly pane name is present.
 
@@ -46,7 +46,7 @@ Viewer metadata:
 - treat that metadata as operator-facing only; it does not replace room membership or participant transport state
 - when a room exists, prefer `room status` for health and `mux list` for viewer placement
 
-For spawned zellij panes, prefer `agentctl mux list --backend zellij --session <session-name>`.
+For spawned zellij panes, prefer `foxctl mux list --backend zellij --session <session-name>`.
 That view is driven by persisted `terminal_binding` metadata and is more
 reliable than trying to infer pane names from non-interactive layout dumps.
 
@@ -103,8 +103,8 @@ ACA is the durable continuity plane.
 Promote only derived facts:
 
 ```bash
-agentctl mux observe agent-b --lines 80
-agentctl mux observe agent-b \
+foxctl mux observe agent-b --lines 80
+foxctl mux observe agent-b \
   --statement "agent-b is reviewing mailbox ack semantics in internal/runtime/actor/supervisor.go"
 ```
 

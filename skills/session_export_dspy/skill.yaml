@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/export-dspy
@@ -48,13 +48,13 @@ signature:
     long: |
       Use session/export-dspy to export sessions for training data.
       Example commands:
-        agentctl run session/export-dspy --input '{"project":"agentctl","format":"jsonl","output_file":"/tmp/training.jsonl"}'
-        agentctl skills run session/export-dspy --project agentctl --format jsonl --output_file /tmp/training.jsonl
+        foxctl run session/export-dspy --input '{"project":"foxctl","format":"jsonl","output_file":"/tmp/training.jsonl"}'
+        foxctl skills run session/export-dspy --project foxctl --format jsonl --output_file /tmp/training.jsonl
     workflows:
       - id: export-project
         description: "Export sessions for a project."
         example_input:
-          project: "agentctl"
+          project: "foxctl"
           format: "jsonl"
           output_file: "/tmp/training.jsonl"
   returns:
@@ -85,10 +85,10 @@ capabilities:
 examples:
   - name: "Export project sessions"
     input:
-      project: "agentctl"
+      project: "foxctl"
       format: "jsonl"
       output_file: "/tmp/training.jsonl"
-    description: "Export all agentctl sessions as JSONL"
+    description: "Export all foxctl sessions as JSONL"
   - name: "Export specific sessions"
     input:
       session_ids: ["01HXYZ...", "01HABC..."]

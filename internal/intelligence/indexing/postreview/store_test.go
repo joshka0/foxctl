@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
 )
 
 func TestStore_Put_GeneratesID(t *testing.T) {

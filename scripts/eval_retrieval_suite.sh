@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VAULT_PATH="${AGENTCTL_VAULT_PATH:-$HOME/.agentctl/templates/obsidian-vault}"
+VAULT_PATH="${AGENTCTL_VAULT_PATH:-$HOME/.foxctl/templates/obsidian-vault}"
 WORKSPACE="${RETRIEVAL_WORKSPACE:-$ROOT}"
 SUITE="${RETRIEVAL_SUITE:-}"
 LIMIT="${RETRIEVAL_LIMIT:-}"
@@ -43,4 +43,4 @@ if [[ -n "${RETRIEVAL_MODES:-}" ]]; then
 fi
 
 cd "$ROOT"
-exec env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 go run -tags=libsqlite3 ./cmd/agentctl "${ARGS[@]}" "$@"
+exec env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 go run -tags=libsqlite3 ./cmd/foxctl "${ARGS[@]}" "$@"

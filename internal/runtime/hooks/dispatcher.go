@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/pathutil"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/pathutil"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // Dispatcher executes hooks for events and merges their outputs.
@@ -419,7 +419,7 @@ func (f FuncRunner) Run(ctx context.Context, hookDef HookDef, input Input) (Outp
 	return f(ctx, hookDef, input)
 }
 
-// Envelope wraps hook output in the standard agentctl envelope format.
+// Envelope wraps hook output in the standard foxctl envelope format.
 type Envelope struct {
 	Version int             `json:"version"`
 	Status  string          `json:"status"`

@@ -9,14 +9,14 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/runtime/execution/agentmanager"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
-	"github.com/jkatigb/agentctl/internal/storage/agents"
-	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	"github.com/joshka0/foxctl/internal/agent/types"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	errspkg "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/runtime/execution/agentmanager"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
+	"github.com/joshka0/foxctl/internal/storage/agents"
+	"github.com/joshka0/foxctl/internal/storage/mailbox"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -200,7 +200,7 @@ func maybeAttachSpawnedChildPane(ctx context.Context, agentStore agents.Store, a
 		label = "child"
 	}
 	label = label + "-" + strings.ToLower(strings.TrimSpace(agentID[:6]))
-	updated, paneMeta, err := agentpane.CreateWatchPane(ctx, binding, parentAgent.WorkspaceRoot, label, "agentctl agent watch "+strings.TrimSpace(agentID))
+	updated, paneMeta, err := agentpane.CreateWatchPane(ctx, binding, parentAgent.WorkspaceRoot, label, "foxctl agent watch "+strings.TrimSpace(agentID))
 	if err != nil {
 		return binding, nil, err
 	}

@@ -44,9 +44,9 @@ func defaultWorkflowPaths() []string {
 		paths = append(paths, filepath.SplitList(wfPath)...)
 	}
 
-	// 2. User workflows directory (~/.agentctl/workflows)
+	// 2. User workflows directory (~/.foxctl/workflows)
 	if homeDir, err := os.UserHomeDir(); err == nil {
-		userWorkflows := filepath.Join(homeDir, ".agentctl", "workflows")
+		userWorkflows := filepath.Join(homeDir, ".foxctl", "workflows")
 		paths = append(paths, userWorkflows)
 	}
 

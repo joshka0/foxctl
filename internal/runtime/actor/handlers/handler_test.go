@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/runtime/actor"
+	agentdomain "github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/runtime/actor"
 )
 
 func TestNewRegistry(t *testing.T) {

@@ -1,6 +1,6 @@
 # Reactive Actor System
 
-> Design document for event-driven actor architecture in agentctl
+> Design document for event-driven actor architecture in foxctl
 
 ## Contracts
 
@@ -35,7 +35,7 @@ These invariants MUST be maintained by any implementation:
 
 ## Overview
 
-This document describes the reactive actor system that transforms agentctl
+This document describes the reactive actor system that transforms foxctl
 agents from poll-based daemons into event-driven actors. Each agent becomes a
 true actor in the system, reacting to messages as they arrive rather than
 polling for work.
@@ -455,21 +455,21 @@ Actors participate in session lineage:
 
 ```bash
 # Start the actor supervisor (long-running daemon)
-agentctl actor supervisor start
-agentctl actor supervisor status
-agentctl actor supervisor stop
+foxctl actor supervisor start
+foxctl actor supervisor status
+foxctl actor supervisor stop
 
 # Spawn an actor (registers with supervisor)
-agentctl actor spawn --role coder --namespace coder-1 --llm gemini
+foxctl actor spawn --role coder --namespace coder-1 --llm gemini
 
 # Send message (reactive delivery)
-agentctl actor send coder-1 --type ask --payload '{"task": "implement feature"}'
+foxctl actor send coder-1 --type ask --payload '{"task": "implement feature"}'
 
 # Subscribe to events (for debugging/monitoring)
-agentctl actor events --filter "mail.*" --format ndjson
+foxctl actor events --filter "mail.*" --format ndjson
 
 # Actor status
-agentctl actor status
+foxctl actor status
 # Output:
 # NAMESPACE    ROLE      STATE       QUEUE  LAST_MSG
 # coder-1      coder     processing  3      2s ago
@@ -477,7 +477,7 @@ agentctl actor status
 # reviewer-1   reviewer  idle        0      1h ago
 
 # Actor logs
-agentctl actor logs coder-1 --follow
+foxctl actor logs coder-1 --follow
 ```
 
 ## Supervision Strategies
@@ -559,7 +559,7 @@ internal/runtime/actor/
     ├── planner.go     # Planner message handlers
     └── reviewer.go    # Reviewer message handlers
 
-cmd/agentctl/cmd/
+cmd/foxctl/cmd/
 ├── actor.go           # Actor CLI commands (extend existing)
 └── supervisor.go      # Supervisor commands
 ```

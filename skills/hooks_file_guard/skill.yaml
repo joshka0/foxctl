@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/file_guard
@@ -56,8 +56,8 @@ signature:
     long: |
       Use hooks/file_guard to prevent concurrent edits from multiple agents.
       Example commands:
-        agentctl run hooks/file_guard --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
-        agentctl skills run hooks/file_guard --event PreToolUse --workspace_root /workspace/project --tool_name Edit --tool_input '{"file_path":"main.go"}'
+        foxctl run hooks/file_guard --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
+        foxctl skills run hooks/file_guard --event PreToolUse --workspace_root /workspace/project --tool_name Edit --tool_input '{"file_path":"main.go"}'
     workflows:
       - id: guard-file-edit
         description: "Guard a file edit operation."

@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/spf13/viper"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
 const (
@@ -200,7 +200,7 @@ type OAuthSettings struct {
 	EncryptionKey string `mapstructure:"encryption_key" json:"encryption_key"`
 
 	// CallbackBaseURL is the public URL base for OAuth callbacks.
-	// Example: "https://agentctl.example.com"
+	// Example: "https://foxctl.example.com"
 	// The callback endpoint will be at {CallbackBaseURL}/api/oauth/callback
 	CallbackBaseURL string `mapstructure:"callback_base_url" json:"callback_base_url"`
 
@@ -237,7 +237,7 @@ func (o OAuthSettings) MarshalJSON() ([]byte, error) {
 	return json.Marshal(redacted)
 }
 
-// Paths include common on-disk locations rooted at the agentctl home directory.
+// Paths include common on-disk locations rooted at the foxctl home directory.
 type Paths struct {
 	CAS           string `mapstructure:"cas" json:"cas"`
 	Jobs          string `mapstructure:"jobs" json:"jobs"`
@@ -384,7 +384,7 @@ type VectorSettings struct {
 // OpenAPISettings hold configuration for the generic http/openapi skill.
 type OpenAPISettings struct {
 	// PluginPath is a colon-separated search path that locates plugin binaries.
-	// Each entry is resolved relative to the agentctl home directory when not
+	// Each entry is resolved relative to the foxctl home directory when not
 	// absolute. Environment variables may override this value via
 	// AGENTCTL_OPENAPI_PLUGIN_PATH.
 	PluginPath []string `mapstructure:"plugin_path" json:"plugin_path"`
@@ -663,7 +663,7 @@ func WithConfigFile(path string) Option {
 }
 
 // WithWorkspacePath instructs the loader to merge workspace-local config from
-// <workspace>/.agentctl/config.yaml after the global config file.
+// <workspace>/.foxctl/config.yaml after the global config file.
 func WithWorkspacePath(path string) Option {
 	return func(l *loader) {
 		l.workspacePath = strings.TrimSpace(path)
@@ -707,7 +707,7 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	}
 
 	v := newConfiguredViper()
-	defaultHome := filepath.Join(home, ".agentctl")
+	defaultHome := filepath.Join(home, ".foxctl")
 	applyDefaults(v, defaultHome)
 	configureConfigFile(v, l, defaultHome)
 	if err := readConfig(v, l.configFile); err != nil {
@@ -810,7 +810,7 @@ func applyWorkspaceOverrides(cfg *Config, workspacePath string) error {
 	if workspacePath == "" {
 		return nil
 	}
-	configPath := filepath.Join(workspacePath, ".agentctl", "config.yaml")
+	configPath := filepath.Join(workspacePath, ".foxctl", "config.yaml")
 	if _, err := os.Stat(configPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -1346,7 +1346,7 @@ func shouldRepairObsDir(obsEnv, userHome string) bool {
 	}
 
 	// Repair stale macOS home paths after a username change:
-	//   obsEnv:   /Users/olduser/.agentctl/observability
+	//   obsEnv:   /Users/olduser/.foxctl/observability
 	//   userHome: /Users/newuser
 	if strings.HasPrefix(obsEnv, "/Users/") && strings.HasPrefix(userHome, "/Users/") {
 		rest := strings.TrimPrefix(obsEnv, "/Users/")

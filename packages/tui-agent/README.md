@@ -1,6 +1,6 @@
 # tui-agent
 
-Terminal-first operator control plane for `agentctl`.
+Terminal-first operator control plane for `foxctl`.
 
 This package is the active replacement for the archived legacy TUI. It is intentionally starting small:
 
@@ -11,7 +11,7 @@ This package is the active replacement for the archived legacy TUI. It is intent
 Base:
 
 - `pi-mono` / `@mariozechner/pi-tui` for terminal UI primitives
-- `agentctl` for runtime, orchestration, rooms, and evidence contracts
+- `foxctl` for runtime, orchestration, rooms, and evidence contracts
 
 Implementation plan:
 

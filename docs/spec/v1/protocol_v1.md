@@ -3,7 +3,7 @@
 **Version:** 1.0.0 **Status:** Final Draft **Last Updated:** 2025-11-15
 
 > **Purpose:** This document defines the authoritative wire contract (envelope
-> shape, commands, errors, artifactization) for agentctl Protocol v1. This is
+> shape, commands, errors, artifactization) for foxctl Protocol v1. This is
 > the stable foundation that skills, plugins, jobs, agents, and all I/O must
 > conform to.
 
@@ -27,7 +27,7 @@
 
 ### 1.1 What is Protocol v1?
 
-Protocol v1 is the **canonical wire contract** for agentctl. It defines:
+Protocol v1 is the **canonical wire contract** for foxctl. It defines:
 
 - **Envelope shape**: One JSON structure for everything (skills, plugins, jobs,
   agents)
@@ -49,7 +49,7 @@ Protocol v1 is the **canonical wire contract** for agentctl. It defines:
 
 - **Skill developers**: To understand input/output contracts
 - **Plugin authors**: To implement auth/pagination extensions
-- **Agent builders**: To integrate with agentctl as an agent substrate
+- **Agent builders**: To integrate with foxctl as an agent substrate
 - **LLM prompt engineers**: To design efficient tool schemas
 
 ---
@@ -628,13 +628,13 @@ func ValidateEnvelope(env *Envelope) error {
 
 ```bash
 # Validate envelope against schema + invariants
-agentctl proto validate --input envelope.json
+foxctl proto validate --input envelope.json
 
 # Validate that command outputs conform
-agentctl run fs/ls --path . | agentctl proto validate
+foxctl run fs/ls --path . | foxctl proto validate
 
 # Check for common issues
-agentctl proto validate --input envelope.json --strict
+foxctl proto validate --input envelope.json --strict
 ```
 
 ### A.2 Golden Fixtures
@@ -663,7 +663,7 @@ If you have code using pre-v1 envelopes:
 
 ## Appendix C: References
 
-- **Core Profile v1**: Complete agentctl specification
+- **Core Profile v1**: Complete foxctl specification
 - **OpenAPI Skill**: Detailed OpenAPI skill contract
 - **Plugin Protocol**: Plugin development guide
 - **Agent Profile v1**: Multi-agent extensions
@@ -675,7 +675,7 @@ If you have code using pre-v1 envelopes:
 **Document Status**: Final Draft **Acceptance Criteria**:
 
 - [ ] Wire frozen: envelope + invariants documented
-- [ ] Schema validation implemented (`agentctl proto validate`)
+- [ ] Schema validation implemented (`foxctl proto validate`)
 - [ ] Golden fixtures created and passing
 - [ ] All skills emit conformant envelopes
 - [ ] Redaction helpers tested

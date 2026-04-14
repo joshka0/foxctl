@@ -576,13 +576,13 @@ function summarizeRuntimeNode(node?: AgentRuntimeTreeNode | null): {
     summary.profile = node.metadata.profile.trim();
   }
 
-  if (isRecord(state.agentctl)) {
-    const agentctl = state.agentctl;
-    if (typeof agentctl.status === "string" && agentctl.status.trim()) {
-      summary.agentctlStatus = agentctl.status.trim();
+  if (isRecord(state.foxctl)) {
+    const foxctl = state.foxctl;
+    if (typeof foxctl.status === "string" && foxctl.status.trim()) {
+      summary.agentctlStatus = foxctl.status.trim();
     }
-    if (typeof agentctl.last_error === "string" && agentctl.last_error.trim()) {
-      summary.lastError = agentctl.last_error.trim();
+    if (typeof foxctl.last_error === "string" && foxctl.last_error.trim()) {
+      summary.lastError = foxctl.last_error.trim();
     }
   }
 
@@ -1697,7 +1697,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                   <div className="mt-1 text-xs text-muted-foreground">
                     {sandboxBacked
                       ? "Provisioned repo clone owned by the sandbox-backed execution path."
-                      : "Uses the local agentctl runtime workspace and namespace."}
+                      : "Uses the local foxctl runtime workspace and namespace."}
                   </div>
                   <div className="mt-2 grid gap-1 text-[11px] text-muted-foreground">
                     <div>
@@ -2336,7 +2336,7 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                     <p className="text-sm">
                       {activeMemoryScope === "session"
                         ? "Send a message to start a detached workbench session for this agent. The reply path still uses the layered memory pipeline, but it stays scoped to this browser session."
-                        : "Send a message to anchor a long-lived companion thread for this agent. The reply path writes through the layered memory system used by agentctl."}
+                        : "Send a message to anchor a long-lived companion thread for this agent. The reply path writes through the layered memory system used by foxctl."}
                     </p>
                   </div>
                 </div>

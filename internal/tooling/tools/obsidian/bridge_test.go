@@ -25,7 +25,7 @@ func TestReconcileDocsBridge(t *testing.T) {
 	if err := os.MkdirAll(docsRoot, 0o755); err != nil {
 		t.Fatalf("mkdir docs root: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "agentctl"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "foxctl"), 0o755); err != nil {
 		t.Fatalf("mkdir vault notes: %v", err)
 	}
 
@@ -44,7 +44,7 @@ This doc explains the control plane and semantic indexing package wiring.
 	canonicalBody := `---
 title: Context Architecture
 type: map
-project: agentctl
+project: foxctl
 status: reviewed
 trust: canonical
 repo_docs:
@@ -55,14 +55,14 @@ repo_docs:
 
 This note ties together the control plane, semantic indexing, and runtime wiring.
 `
-	if err := os.WriteFile(filepath.Join(vaultRoot, "notes", "repo", "agentctl", "context-architecture.md"), []byte(canonicalBody), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(vaultRoot, "notes", "repo", "foxctl", "context-architecture.md"), []byte(canonicalBody), 0o644); err != nil {
 		t.Fatalf("write canonical note: %v", err)
 	}
 
 	semanticBody := `---
 title: Semantic And Memory
 type: map
-project: agentctl
+project: foxctl
 status: reviewed
 trust: canonical
 ---
@@ -71,7 +71,7 @@ trust: canonical
 
 This note covers semantic indexing package behavior and storage memory.
 `
-	if err := os.WriteFile(filepath.Join(vaultRoot, "notes", "repo", "agentctl", "semantic-and-memory.md"), []byte(semanticBody), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(vaultRoot, "notes", "repo", "foxctl", "semantic-and-memory.md"), []byte(semanticBody), 0o644); err != nil {
 		t.Fatalf("write semantic note: %v", err)
 	}
 
@@ -80,7 +80,7 @@ This note covers semantic indexing package behavior and storage memory.
 	writer.PostCreateDelay = 0
 
 	result, err := ReconcileDocsBridge(ctx, writer, DocsBridgeReconcileOptions{
-		Project:       "agentctl",
+		Project:       "foxctl",
 		WorkspaceRoot: workspaceRoot,
 		MaxMatches:    3,
 	})
@@ -112,7 +112,7 @@ This note covers semantic indexing package behavior and storage memory.
 	if !strings.Contains(text, "docs/architecture/context-architecture.md") {
 		t.Fatalf("expected repo doc path in draft note:\n%s", text)
 	}
-	if !strings.Contains(text, "notes/repo/agentctl/context-architecture.md") {
+	if !strings.Contains(text, "notes/repo/foxctl/context-architecture.md") {
 		t.Fatalf("expected canonical note suggestion in draft note:\n%s", text)
 	}
 
@@ -133,27 +133,27 @@ func TestSuggestVaultNotesPrefersTopicalNotesForArchitectureDocs(t *testing.T) {
 	}
 	notes := []bridgeVaultNote{
 		{
-			Path:  "notes/repo/agentctl/packages/cmd-agentctl-cmd.md",
-			Title: "cmd agentctl cmd",
+			Path:  "notes/repo/foxctl/packages/cmd-foxctl-cmd.md",
+			Title: "cmd foxctl cmd",
 			Body:  "Main command package.",
 		},
 		{
-			Path:  "notes/repo/agentctl/index.md",
-			Title: "agentctl Repo Graph",
+			Path:  "notes/repo/foxctl/index.md",
+			Title: "foxctl Repo Graph",
 			Body:  "Root repo map and architecture entrypoint.",
 		},
 		{
-			Path:  "notes/repo/agentctl/skills-runtime-wiring.md",
+			Path:  "notes/repo/foxctl/skills-runtime-wiring.md",
 			Title: "skills runtime wiring",
 			Body:  "Runtime wiring, hooks, orchestration, and control plane behavior.",
 		},
 	}
 
-	suggestions := suggestVaultNotes(context.Background(), doc, notes, 3, "agentctl", nil)
+	suggestions := suggestVaultNotes(context.Background(), doc, notes, 3, "foxctl", nil)
 	if len(suggestions) < 2 {
 		t.Fatalf("expected suggestions, got %#v", suggestions)
 	}
-	if suggestions[0].Path == "notes/repo/agentctl/packages/cmd-agentctl-cmd.md" {
+	if suggestions[0].Path == "notes/repo/foxctl/packages/cmd-foxctl-cmd.md" {
 		t.Fatalf("expected architecture doc to prefer topical or root note over package note: %#v", suggestions)
 	}
 }
@@ -166,27 +166,27 @@ func TestSuggestVaultNotesUsesSearchProviderBoosts(t *testing.T) {
 	}
 	notes := []bridgeVaultNote{
 		{
-			Path:  "notes/repo/agentctl/platform-and-web.md",
+			Path:  "notes/repo/foxctl/platform-and-web.md",
 			Title: "platform and web",
 			Body:  "Platform configuration and web api.",
 		},
 		{
-			Path:  "notes/repo/agentctl/semantic-and-memory.md",
+			Path:  "notes/repo/foxctl/semantic-and-memory.md",
 			Title: "semantic and memory",
 			Body:  "Semantic indexing and memory store.",
 		},
 	}
 	provider := fakeBridgeSearchProvider{
 		hits: []DocsBridgeSearchHit{
-			{Path: "notes/repo/agentctl/semantic-and-memory.md", Title: "semantic and memory", Score: 100},
+			{Path: "notes/repo/foxctl/semantic-and-memory.md", Title: "semantic and memory", Score: 100},
 		},
 	}
 
-	suggestions := suggestVaultNotes(context.Background(), doc, notes, 2, "agentctl", provider)
+	suggestions := suggestVaultNotes(context.Background(), doc, notes, 2, "foxctl", provider)
 	if len(suggestions) == 0 {
 		t.Fatalf("expected suggestions")
 	}
-	if suggestions[0].Path != "notes/repo/agentctl/semantic-and-memory.md" {
+	if suggestions[0].Path != "notes/repo/foxctl/semantic-and-memory.md" {
 		t.Fatalf("expected provider-backed semantic note to rank first: %#v", suggestions)
 	}
 }
@@ -199,10 +199,10 @@ func TestApplyDocsBridgeDraft(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(workspaceRoot, "docs", "general"), 0o755); err != nil {
 		t.Fatalf("mkdir repo docs: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "agentctl"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "foxctl"), 0o755); err != nil {
 		t.Fatalf("mkdir vault notes: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(vaultRoot, "inbox", "drafted-from-agentctl", "docs-bridge", "agentctl"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(vaultRoot, "inbox", "drafted-from-foxctl", "docs-bridge", "foxctl"), 0o755); err != nil {
 		t.Fatalf("mkdir draft folder: %v", err)
 	}
 
@@ -212,7 +212,7 @@ func TestApplyDocsBridgeDraft(t *testing.T) {
 		t.Fatalf("write repo doc: %v", err)
 	}
 
-	vaultNotePath := filepath.Join(vaultRoot, "notes", "repo", "agentctl", "semantic-and-memory.md")
+	vaultNotePath := filepath.Join(vaultRoot, "notes", "repo", "foxctl", "semantic-and-memory.md")
 	vaultNoteBody := `---
 title: semantic and memory
 type: map
@@ -226,18 +226,18 @@ trust: canonical
 		t.Fatalf("write vault note: %v", err)
 	}
 
-	draftPath := filepath.Join(vaultRoot, "inbox", "drafted-from-agentctl", "docs-bridge", "agentctl", "docsgeneralmemorymd.md")
+	draftPath := filepath.Join(vaultRoot, "inbox", "drafted-from-foxctl", "docs-bridge", "foxctl", "docsgeneralmemorymd.md")
 	draftBody := `---
 title: Memory Bridge
 type: map
-project: agentctl
+project: foxctl
 status: draft
 trust: raw
 repo_docs:
   - docs/general/memory.md
 vault_refs:
 suggested_vault_refs:
-  - notes/repo/agentctl/semantic-and-memory.md
+  - notes/repo/foxctl/semantic-and-memory.md
 updated: 2026-03-11
 ---
 
@@ -252,9 +252,9 @@ updated: 2026-03-11
 	writer.PostCreateDelay = 0
 
 	result, err := ApplyDocsBridgeDraft(ctx, writer, DocsBridgeApplyOptions{
-		Project:       "agentctl",
+		Project:       "foxctl",
 		WorkspaceRoot: workspaceRoot,
-		DraftPath:     "inbox/drafted-from-agentctl/docs-bridge/agentctl/docsgeneralmemorymd.md",
+		DraftPath:     "inbox/drafted-from-foxctl/docs-bridge/foxctl/docsgeneralmemorymd.md",
 	})
 	if err != nil {
 		t.Fatalf("ApplyDocsBridgeDraft: %v", err)
@@ -267,7 +267,7 @@ updated: 2026-03-11
 	if err != nil {
 		t.Fatalf("read updated repo doc: %v", err)
 	}
-	if !strings.Contains(string(updatedRepoDoc), "vault_refs:") || !strings.Contains(string(updatedRepoDoc), "notes/repo/agentctl/semantic-and-memory.md") {
+	if !strings.Contains(string(updatedRepoDoc), "vault_refs:") || !strings.Contains(string(updatedRepoDoc), "notes/repo/foxctl/semantic-and-memory.md") {
 		t.Fatalf("expected repo doc vault_refs patch:\n%s", string(updatedRepoDoc))
 	}
 
@@ -288,10 +288,10 @@ func TestApplyDocsBridgeDraftsReviewedOnly(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(workspaceRoot, "docs", "general"), 0o755); err != nil {
 		t.Fatalf("mkdir repo docs: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "agentctl"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "foxctl"), 0o755); err != nil {
 		t.Fatalf("mkdir vault notes: %v", err)
 	}
-	draftFolder := filepath.Join(vaultRoot, "inbox", "drafted-from-agentctl", "docs-bridge", "agentctl")
+	draftFolder := filepath.Join(vaultRoot, "inbox", "drafted-from-foxctl", "docs-bridge", "foxctl")
 	if err := os.MkdirAll(draftFolder, 0o755); err != nil {
 		t.Fatalf("mkdir draft folder: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestApplyDocsBridgeDraftsReviewedOnly(t *testing.T) {
 		if err := os.WriteFile(repoDocPath, []byte("# Doc\n"), 0o644); err != nil {
 			t.Fatalf("write repo doc %s: %v", docName, err)
 		}
-		vaultNotePath := filepath.Join(vaultRoot, "notes", "repo", "agentctl", noteName)
+		vaultNotePath := filepath.Join(vaultRoot, "notes", "repo", "foxctl", noteName)
 		vaultBody := `---
 title: note
 type: map
@@ -318,13 +318,13 @@ trust: canonical
 		draftBody := `---
 title: Bridge
 type: map
-project: agentctl
+project: foxctl
 status: ` + status + `
 trust: raw
 repo_docs:
   - docs/general/` + docName + `
 suggested_vault_refs:
-  - notes/repo/agentctl/` + noteName + `
+  - notes/repo/foxctl/` + noteName + `
 updated: 2026-03-11
 ---
 
@@ -343,7 +343,7 @@ updated: 2026-03-11
 	writer.PostCreateDelay = 0
 
 	result, err := ApplyDocsBridgeDrafts(ctx, writer, DocsBridgeBatchApplyOptions{
-		Project:       "agentctl",
+		Project:       "foxctl",
 		WorkspaceRoot: workspaceRoot,
 		RequireStatus: "reviewed",
 	})
@@ -366,11 +366,11 @@ func TestReportDocsBridgeDrafts(t *testing.T) {
 	root := t.TempDir()
 	workspaceRoot := filepath.Join(root, "repo")
 	vaultRoot := filepath.Join(root, "vault")
-	draftFolder := filepath.Join(vaultRoot, "inbox", "drafted-from-agentctl", "docs-bridge", "agentctl")
+	draftFolder := filepath.Join(vaultRoot, "inbox", "drafted-from-foxctl", "docs-bridge", "foxctl")
 	if err := os.MkdirAll(filepath.Join(workspaceRoot, "docs", "general"), 0o755); err != nil {
 		t.Fatalf("mkdir repo docs: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "agentctl"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "foxctl"), 0o755); err != nil {
 		t.Fatalf("mkdir vault notes: %v", err)
 	}
 	if err := os.MkdirAll(draftFolder, 0o755); err != nil {
@@ -408,7 +408,7 @@ func TestReportDocsBridgeDrafts(t *testing.T) {
 			}
 		}
 		body.WriteString("---\n\n# note\n")
-		if err := os.WriteFile(filepath.Join(vaultRoot, "notes", "repo", "agentctl", name), []byte(body.String()), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(vaultRoot, "notes", "repo", "foxctl", name), []byte(body.String()), 0o644); err != nil {
 			t.Fatalf("write vault note %s: %v", name, err)
 		}
 	}
@@ -418,7 +418,7 @@ func TestReportDocsBridgeDrafts(t *testing.T) {
 		body.WriteString("---\n")
 		body.WriteString("title: Bridge\n")
 		body.WriteString("type: map\n")
-		body.WriteString("project: agentctl\n")
+		body.WriteString("project: foxctl\n")
 		body.WriteString("status: " + status + "\n")
 		body.WriteString("trust: raw\n")
 		body.WriteString("repo_docs:\n")
@@ -437,23 +437,23 @@ func TestReportDocsBridgeDrafts(t *testing.T) {
 
 	writeDoc("draft.md", nil)
 	writeDoc("reviewed.md", nil)
-	writeDoc("partial.md", []string{"notes/repo/agentctl/partial.md"})
-	writeDoc("applied.md", []string{"notes/repo/agentctl/applied.md"})
+	writeDoc("partial.md", []string{"notes/repo/foxctl/partial.md"})
+	writeDoc("applied.md", []string{"notes/repo/foxctl/applied.md"})
 
 	writeVault("partial.md", nil)
 	writeVault("applied.md", []string{"docs/general/applied.md"})
 
-	writeDraft("draft.md", "draft", []string{"notes/repo/agentctl/partial.md"})
-	writeDraft("reviewed.md", "reviewed", []string{"notes/repo/agentctl/partial.md"})
-	writeDraft("partial.md", "reviewed", []string{"notes/repo/agentctl/partial.md"})
-	writeDraft("applied.md", "reviewed", []string{"notes/repo/agentctl/applied.md"})
+	writeDraft("draft.md", "draft", []string{"notes/repo/foxctl/partial.md"})
+	writeDraft("reviewed.md", "reviewed", []string{"notes/repo/foxctl/partial.md"})
+	writeDraft("partial.md", "reviewed", []string{"notes/repo/foxctl/partial.md"})
+	writeDraft("applied.md", "reviewed", []string{"notes/repo/foxctl/applied.md"})
 
 	writer := NewWriter("", "TestVault", DefaultPolicy())
 	writer.VaultPath = vaultRoot
 	writer.PostCreateDelay = 0
 
 	report, err := ReportDocsBridgeDrafts(ctx, writer, DocsBridgeReportOptions{
-		Project:       "agentctl",
+		Project:       "foxctl",
 		WorkspaceRoot: workspaceRoot,
 	})
 	if err != nil {
@@ -485,11 +485,11 @@ func TestTidyDocsBridgeDrafts(t *testing.T) {
 	root := t.TempDir()
 	workspaceRoot := filepath.Join(root, "repo")
 	vaultRoot := filepath.Join(root, "vault")
-	draftFolder := filepath.Join(vaultRoot, "inbox", "drafted-from-agentctl", "docs-bridge", "agentctl")
+	draftFolder := filepath.Join(vaultRoot, "inbox", "drafted-from-foxctl", "docs-bridge", "foxctl")
 	if err := os.MkdirAll(filepath.Join(workspaceRoot, "docs", "general"), 0o755); err != nil {
 		t.Fatalf("mkdir repo docs: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "agentctl"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(vaultRoot, "notes", "repo", "foxctl"), 0o755); err != nil {
 		t.Fatalf("mkdir vault notes: %v", err)
 	}
 	if err := os.MkdirAll(draftFolder, 0o755); err != nil {
@@ -499,7 +499,7 @@ func TestTidyDocsBridgeDrafts(t *testing.T) {
 	repoDocPath := filepath.Join(workspaceRoot, "docs", "general", "applied.md")
 	repoDocBody := `---
 vault_refs:
-  - notes/repo/agentctl/applied.md
+  - notes/repo/foxctl/applied.md
 ---
 
 # Applied
@@ -508,7 +508,7 @@ vault_refs:
 		t.Fatalf("write repo doc: %v", err)
 	}
 
-	vaultNotePath := filepath.Join(vaultRoot, "notes", "repo", "agentctl", "applied.md")
+	vaultNotePath := filepath.Join(vaultRoot, "notes", "repo", "foxctl", "applied.md")
 	vaultNoteBody := `---
 title: applied
 type: map
@@ -529,13 +529,13 @@ repo_docs:
 	draftBody := `---
 title: Applied Bridge
 type: map
-project: agentctl
+project: foxctl
 status: reviewed
 trust: reviewed
 repo_docs:
   - docs/general/applied.md
 suggested_vault_refs:
-  - notes/repo/agentctl/applied.md
+  - notes/repo/foxctl/applied.md
 updated: 2026-03-11
 ---
 
@@ -550,7 +550,7 @@ updated: 2026-03-11
 	writer.PostCreateDelay = 0
 
 	result, err := TidyDocsBridgeDrafts(ctx, writer, DocsBridgeTidyOptions{
-		Project:       "agentctl",
+		Project:       "foxctl",
 		WorkspaceRoot: workspaceRoot,
 	})
 	if err != nil {
@@ -559,7 +559,7 @@ updated: 2026-03-11
 	if len(result.Archived) != 1 {
 		t.Fatalf("expected one archived draft, got %#v", result)
 	}
-	archivePath := filepath.Join(vaultRoot, "ops", "docs-bridge-applied", "agentctl", draftName)
+	archivePath := filepath.Join(vaultRoot, "ops", "docs-bridge-applied", "foxctl", draftName)
 	body, err := os.ReadFile(archivePath)
 	if err != nil {
 		t.Fatalf("read archive note: %v", err)

@@ -12,7 +12,7 @@ conversation model.
 
 ## Decision
 
-Treat chatrooms as `agentctl` room-scoped streams, not as a new Jido runtime
+Treat chatrooms as `foxctl` room-scoped streams, not as a new Jido runtime
 primitive.
 
 Jido remains responsible for:
@@ -22,7 +22,7 @@ Jido remains responsible for:
 3. Parent/child orchestration
 4. Per-agent local thread state
 
-`agentctl` becomes responsible for:
+`foxctl` becomes responsible for:
 
 1. Durable room history
 2. Room metadata and membership
@@ -47,7 +47,7 @@ These are useful building blocks, but they do not add up to:
 3. Read state
 4. GUI-ready room projection
 
-### 2. `agentctl` already has a near-fit storage primitive
+### 2. `foxctl` already has a near-fit storage primitive
 
 Board messages already carry:
 
@@ -244,4 +244,4 @@ package test run may stay blocked until that in-flight work is resolved.
 5. `packages/gui-agent/src/components/v2/RuntimeSummaryPanel.tsx`
 6. `~/repos/githubs/jido/lib/jido/thread.ex`
 7. `~/repos/githubs/jido/lib/jido/thread/plugin.ex`
-8. `~/repos/githubs/jido/lib/jido/integrations/agentctl/plugin.ex`
+8. `~/repos/githubs/jido/lib/jido/integrations/foxctl/plugin.ex`

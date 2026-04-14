@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	"github.com/jkatigb/agentctl/internal/v2/core/kill"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	"github.com/joshka0/foxctl/internal/v2/core/kill"
 )
 
 // KillDependencies wires KillService collaborators.

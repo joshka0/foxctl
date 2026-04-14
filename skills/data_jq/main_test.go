@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerContext {

@@ -1,5 +1,5 @@
 // Package eino provides a config-gated adapter that bridges Eino's adk.Agent
-// interface to agentctl's engine.AgentEngine interface.
+// interface to foxctl's engine.AgentEngine interface.
 //
 // This adapter is a spike — it exists behind the AGENTCTL_ENGINE_BACKEND env
 // gate and must not affect the default mailbox-owned runtime path established

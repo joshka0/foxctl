@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 )
 
 // PreviewOpts configures preview output behavior.

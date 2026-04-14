@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/editutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/editutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 )
 
 // FileEditOptions configures how edits are applied to a file.

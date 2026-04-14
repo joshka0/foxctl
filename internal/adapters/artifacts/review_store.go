@@ -7,14 +7,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/storage/cas"
 )
 
 // ReviewArtifactMediaType is the content type used when storing review artifacts in CAS.
-const ReviewArtifactMediaType = "application/vnd.agentctl.review+json"
+const ReviewArtifactMediaType = "application/vnd.foxctl.review+json"
 
 // StoreReviewArtifact persists a ReviewArtifact via CAS and returns the updated
 // artifact with ID and optional CASDigest populated.

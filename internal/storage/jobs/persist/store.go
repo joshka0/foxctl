@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/jobs/types"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -48,7 +48,7 @@ func Open(ctx context.Context, root string) (Store, error) {
 		if isReadonlyError(err) {
 			// Print helpful warning for sandbox users
 			fmt.Fprintf(os.Stderr, "warning: readonly filesystem detected, using in-memory job store\n")
-			fmt.Fprintf(os.Stderr, "hint: if using Codex, add: --add-dir ~/.agentctl\n")
+			fmt.Fprintf(os.Stderr, "hint: if using Codex, add: --add-dir ~/.foxctl\n")
 			fmt.Fprintf(os.Stderr, "hint: if using Claude Code, this is expected in sandbox mode\n")
 
 			// Fall back to in-memory database for sandbox environments

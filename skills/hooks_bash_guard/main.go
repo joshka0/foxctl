@@ -2,7 +2,7 @@
 // This skill enforces agent profile restrictions on bash commands.
 //
 // For restricted profiles (explorer, reviewer, implementer):
-//   - Only "agentctl run <skill>" commands are allowed where <skill> is in the profile's allowlist
+//   - Only "foxctl run <skill>" commands are allowed where <skill> is in the profile's allowlist
 //   - All other bash commands are blocked
 //
 // Profile is determined from:
@@ -21,10 +21,10 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/runtime/agentpolicy"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/hookutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/runtime/agentpolicy"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
 )
 
 const command = "hooks/bash_guard"
@@ -327,7 +327,7 @@ func buildContextGrepCommand(info sedRange) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("agentctl run code/context_grep --input %s", shellQuote(string(payload))), nil
+	return fmt.Sprintf("foxctl run code/context_grep --input %s", shellQuote(string(payload))), nil
 }
 
 // buildUpdatedToolInput creates updated tool input for rewritten commands.
@@ -514,7 +514,7 @@ func emitBlock(rc *skillmain.RunContext, result agentpolicy.AuthorizationResult,
 	if result.ParsedSkill != "" {
 		fmt.Fprintf(&contextBuilder, "Skill `%s` is not in the allowlist for profile `%s`.\n\n", result.ParsedSkill, profile)
 	} else {
-		contextBuilder.WriteString("Only `agentctl run <skill>` commands are allowed for restricted profiles.\n\n")
+		contextBuilder.WriteString("Only `foxctl run <skill>` commands are allowed for restricted profiles.\n\n")
 	}
 
 	if len(allowedSkills) > 0 {
@@ -526,7 +526,7 @@ func emitBlock(rc *skillmain.RunContext, result agentpolicy.AuthorizationResult,
 
 		contextBuilder.WriteString("### Example Usage\n\n")
 		contextBuilder.WriteString("```bash\n")
-		fmt.Fprintf(&contextBuilder, "agentctl run %s --input '{\"query\":\"...\"}'\n", allowedSkills[0])
+		fmt.Fprintf(&contextBuilder, "foxctl run %s --input '{\"query\":\"...\"}'\n", allowedSkills[0])
 		contextBuilder.WriteString("```\n")
 	}
 

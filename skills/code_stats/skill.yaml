@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/stats
@@ -40,10 +40,10 @@ signature:
     long: |
       Use code/stats to get file counts and language breakdowns.
       Example commands:
-        agentctl run code/stats --input '{"path":"./src","breakdown_by":"language"}'
-        agentctl skills run code/stats --path ./src --breakdown_by language
-        agentctl run code/stats --input '{"path":".","breakdown_by":"directory","max_depth":2}'
-        agentctl skills run code/stats --path . --breakdown_by directory --max_depth 2
+        foxctl run code/stats --input '{"path":"./src","breakdown_by":"language"}'
+        foxctl skills run code/stats --path ./src --breakdown_by language
+        foxctl run code/stats --input '{"path":".","breakdown_by":"directory","max_depth":2}'
+        foxctl skills run code/stats --path . --breakdown_by directory --max_depth 2
     workflows:
       - id: by-language
         description: "Break down stats by language."

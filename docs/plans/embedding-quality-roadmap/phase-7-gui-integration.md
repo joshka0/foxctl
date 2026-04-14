@@ -72,8 +72,8 @@ type SearchResult struct {
 
 **Usage:**
 ```bash
-agentctl run repo_index/search --input '{"query": "authentication handler"}'
-agentctl run repo_index/search --input '{"query": "Store", "node_types": ["type"], "limit": 10}'
+foxctl run repo_index/search --input '{"query": "authentication handler"}'
+foxctl run repo_index/search --input '{"query": "Store", "node_types": ["type"], "limit": 10}'
 ```
 
 #### repo_index/expand
@@ -123,10 +123,10 @@ type TrailStep struct {
 **Usage:**
 ```bash
 # Expand from a specific node
-agentctl run repo_index/expand --input '{"seed": "func:internal/storage.Store.Put"}'
+foxctl run repo_index/expand --input '{"seed": "func:internal/storage.Store.Put"}'
 
 # Follow only call edges, 2 levels deep
-agentctl run repo_index/expand --input '{
+foxctl run repo_index/expand --input '{
   "seed": "func:internal/intelligence/retrieval.Search",
   "edge_types": ["CALLS"],
   "depth": 2,
@@ -134,7 +134,7 @@ agentctl run repo_index/expand --input '{
 }'
 
 # Include soft edges from Index: blocks
-agentctl run repo_index/expand --input '{
+foxctl run repo_index/expand --input '{
   "seed": "type:internal/intelligence/indexing/repoindex/store.Store",
   "edge_types": ["CALLS", "SOFT"]
 }'
@@ -193,7 +193,7 @@ type NodeStatistics struct {
 
 **Usage:**
 ```bash
-agentctl run repo_index/open --input '{"node_id": "func:internal/storage.Store.Put"}'
+foxctl run repo_index/open --input '{"node_id": "func:internal/storage.Store.Put"}'
 ```
 
 #### Shared Client
@@ -288,7 +288,7 @@ steps:
 - [ ] `repo_index/expand` includes "trail" explaining why each node included
 - [ ] `repo_index/open` returns full node details including code span
 - [ ] All skills handle missing workspace/graph gracefully
-- [ ] Skills work in agent context via `agentctl run`
+- [ ] Skills work in agent context via `foxctl run`
 - [ ] Response times under 100ms for typical queries
 - [ ] Skill manifests properly declare input schemas
 

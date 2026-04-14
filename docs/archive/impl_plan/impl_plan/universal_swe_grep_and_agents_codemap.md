@@ -118,7 +118,7 @@ You can refer to these as “CM3” etc. in comments, issues, or docs.
   touched files)\
   **Codemaps:** CM9, CM10, CM7, CM8
 
-- **Task:** Implement optional CLI (`agentctl semantic-index ...`)\
+- **Task:** Implement optional CLI (`foxctl semantic-index ...`)\
   **Codemaps:** CM3, CM10
 
 - **Task:** Add tests + golden outputs (no chunking, chunking, config changes,
@@ -196,7 +196,7 @@ the phases in:
 It stays at **phase / theme level**, not every micro-task, so it remains
 readable.
 
-### CM1 – agentctl Skill System: Build → Discovery → Execution → Runtime
+### CM1 – foxctl Skill System: Build → Discovery → Execution → Runtime
 
 - **Impl plan phases**
   - **Phase 0:** Pre-flight checks around hooks/skills readiness (hooks are just
@@ -208,11 +208,11 @@ readable.
     http/openapi, etc.).
 - **Test plan phases**
   - **Phase 0:** Basic smoke tests that skills can be built and invoked via
-    `agentctl run`.
+    `foxctl run`.
   - **Phases 5–6:** Skill-level integration / golden tests for SWE Grep and
     agent-facing tools.
 
-### CM2 – agentctl Skill System: Discovery, Validation, and Execution
+### CM2 – foxctl Skill System: Discovery, Validation, and Execution
 
 - **Impl plan phases**
   - **Phase 0:** Verifying that existing hooks/skills are discoverable under the
@@ -227,10 +227,10 @@ readable.
   - **Phases 5–6:** Tests that skills used by SWE Grep and agents can be
     resolved and executed correctly.
 
-### CM3 – agentctl Envelope Protocol & CLI Pipeline
+### CM3 – foxctl Envelope Protocol & CLI Pipeline
 
 - **Impl plan phases**
-  - **Phase 0:** Pre-flight verification that `agentctl` CLI and envelope I/O
+  - **Phase 0:** Pre-flight verification that `foxctl` CLI and envelope I/O
     are behaving correctly.
   - **Phase 2–3–5:** Any tasks that mention **golden envelopes** or CAS-wrapped
     outputs for post-review indexing and SWE Grep.
@@ -241,7 +241,7 @@ readable.
   - Cross-cutting **golden envelope** tests for jobs, skills, indexing, and SWE
     Grep outputs.
 
-### CM4 – agentctl Skill System: Installation, Execution, Jobs, CAS, and Plugin Architecture
+### CM4 – foxctl Skill System: Installation, Execution, Jobs, CAS, and Plugin Architecture
 
 - **Impl plan phases**
   - **Phase 0:** Verifying skill install footprint and that installed skills
@@ -254,7 +254,7 @@ readable.
   - **Phases 5–6:** Tests that installed skills participate correctly in jobs
     and CAS workflows.
 
-### CM5 – CAS Storage & Integrity Verification in agentctl
+### CM5 – CAS Storage & Integrity Verification in foxctl
 
 - **Impl plan phases**
   - **Phase 0:** Part of "Jobs + CAS integration" verification.
@@ -266,7 +266,7 @@ readable.
   - **Phase 1:** Tests that review artifacts are stored in CAS and validated.
   - **Phase 7:** Tests that trajectory data is CAS-wrapped when large.
 
-### CM6 – Dspy-Go Agent Runtime & Tools Integration in agentctl
+### CM6 – Dspy-Go Agent Runtime & Tools Integration in foxctl
 
 - **Impl plan phases**
   - **Phase 6:** dspy-go Tools & Agents (tool wiring, orchestration,
@@ -277,7 +277,7 @@ readable.
     job/memory semantics.
   - **Phase 8:** Team-aware agent tests (routing, ownership, coordination).
 
-### CM7 – agentctl Job System: Types, Storage, and WFQ Scheduler
+### CM7 – foxctl Job System: Types, Storage, and WFQ Scheduler
 
 - **Impl plan phases**
   - **Phase 0:** "Verify current state of Jobs" task.
@@ -291,7 +291,7 @@ readable.
     transitions).
   - **Phase 7:** Tests that long-running exports go through the job system.
 
-### CM8 – agentctl Job System: Submission, SQLite Storage, State Transitions, and WFQ Scheduler
+### CM8 – foxctl Job System: Submission, SQLite Storage, State Transitions, and WFQ Scheduler
 
 - **Impl plan phases**
   - Same as **CM7**, with emphasis on the concrete SQLite-backed state
@@ -313,7 +313,7 @@ readable.
     indexers).
   - **Phases 6–8:** Agent hierarchy and session management tests.
 
-### CM10 – agentctl Knowledge System & Factory Droids
+### CM10 – foxctl Knowledge System & Factory Droids
 
 - **Impl plan phases**
   - **Phase 3:** Semantic File Index v1 – knowledge over file embeddings.
@@ -327,7 +327,7 @@ readable.
     stable.
   - **Phase 6:** Agent tools using these indices for retrieval.
 
-### CM11 – agentctl Execution Runners: WASI & Exec with Network/FS Policy Enforcement
+### CM11 – foxctl Execution Runners: WASI & Exec with Network/FS Policy Enforcement
 
 - **Impl plan phases**
   - **Phase 0:** Verifying exec/WASI runners and path/network policies.
@@ -342,7 +342,7 @@ readable.
     - `network="none"` enforcement for WASI.
     - Environment injection (`AGENTCTL_WORKSPACE`).
 
-### CM12 – agentctl CAS: Put, Get, Integrity, Deduplication & Integration
+### CM12 – foxctl CAS: Put, Get, Integrity, Deduplication & Integration
 
 - **Impl plan phases**
   - Overlaps with **CM5**, focusing on how CAS is integrated into workflows in
@@ -351,7 +351,7 @@ readable.
   - Same CAS tests as **CM5**, plus any CAS integration tests for skills and
     indexing.
 
-### CM13 – agentctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow
+### CM13 – foxctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow
 
 - **Impl plan phases**
   - **Phase 0:** Canonical reference for overall pre-flight correctness.
@@ -363,7 +363,7 @@ readable.
   - Cross-cutting conformance/golden tests for envelopes, jobs, and CAS across
     all phases.
 
-### CM14 – agentctl Test Infrastructure: Test-Watch, Feedback Hooks, and CI Targets
+### CM14 – foxctl Test Infrastructure: Test-Watch, Feedback Hooks, and CI Targets
 
 - **Impl plan phases**
   - **Phase 0:** CI checks and test feedback integration.
@@ -372,7 +372,7 @@ readable.
 - **Test plan phases**
   - Front-matter principles (deterministic tests, fixtures, CI) and any sections
     referencing:
-    - `agentctl watch tests`.
+    - `foxctl watch tests`.
     - `hooks/test_feedback`.
 
 ### CM15 – OpenAPI Skill & Plugin Protocol: Request Flow and Plugin Integration
@@ -384,7 +384,7 @@ readable.
   - **Phase 6:** Agent + `http/openapi` integration tests, including dry-run
     request plans, auth failures, and pagination.
 
-### CM16 – agentctl Planning LLM Stack: Auto, Providers, and Integration Tests
+### CM16 – foxctl Planning LLM Stack: Auto, Providers, and Integration Tests
 
 - **Impl plan phases**
   - **Phase 6:** Any work where agents or `todo/manage` delegate planning to an

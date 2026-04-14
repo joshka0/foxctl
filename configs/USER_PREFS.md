@@ -13,13 +13,13 @@
 - 2026-04-04: Use first-class `room ack` command for acknowledgments, not free-form replies
 - 2026-04-04: Report if relay formatting feels noisy or ambiguous
 - 2026-04-04: Watch for recipient/ack/reply marker rendering
-- 2026-04-05: Prefer `agentctl shell` for supported command-shaped read-only repo inspection when compact structured output saves tokens; fall back to raw/native tools for exact-value or already-compact commands
+- 2026-04-05: Prefer `foxctl shell` for supported command-shaped read-only repo inspection when compact structured output saves tokens; fall back to raw/native tools for exact-value or already-compact commands
 - 2026-04-10: Claim tasks before starting work
 - 2026-04-10: Reply durably to coordinator with status updates
 - 2026-04-10: Keep findings/deferred items explicit in completion notes
-- 2026-04-10: Send room-wide updates using agentctl room send
+- 2026-04-10: Send room-wide updates using foxctl room send
 - 2026-04-10: Use durable room actions (claim, touch, block, complete, send, ack, resolve)
-- 2026-04-10: Prefer `agentctl room send` when replying from the pane
+- 2026-04-10: Prefer `foxctl room send` when replying from the pane
 - 2026-04-10: Read shared operator skills first on entry
-- 2026-04-10: Turn triggering must go through agentctl-owned participant transport even when no mux client is attached
+- 2026-04-10: Turn triggering must go through foxctl-owned participant transport even when no mux client is attached
 - 2026-04-10: Backend trigger-path decoupling with explicit participant state

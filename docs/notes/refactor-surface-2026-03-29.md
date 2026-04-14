@@ -3,8 +3,8 @@
 This note captures the current refactor surface exposed by the new wrapper-driven
 two-stage workflow:
 
-1. `agentctl refactor scout` for local deterministic hotspot retrieval
-2. `agentctl refactor advisor` for second-stage shortlist ranking via
+1. `foxctl refactor scout` for local deterministic hotspot retrieval
+2. `foxctl refactor advisor` for second-stage shortlist ranking via
    `openrouter:google/gemini-3.1-flash-lite-preview`
 
 This is a working note, not a canonical plan.
@@ -21,11 +21,11 @@ Framing:
 ## Commands Used
 
 ```bash
-agentctl refactor advisor --language go --path ./internal --max-findings 6 --shortlist-size 5
-agentctl refactor advisor --language go --path . --max-findings 8 --shortlist-size 5
-agentctl refactor advisor --language typescript --path ./packages --max-findings 8 --shortlist-size 5
-agentctl refactor advisor --language python --path ./scripts --max-findings 8 --shortlist-size 5
-agentctl refactor scout --language elixir --path . --max-results 8
+foxctl refactor advisor --language go --path ./internal --max-findings 6 --shortlist-size 5
+foxctl refactor advisor --language go --path . --max-findings 8 --shortlist-size 5
+foxctl refactor advisor --language typescript --path ./packages --max-findings 8 --shortlist-size 5
+foxctl refactor advisor --language python --path ./scripts --max-findings 8 --shortlist-size 5
+foxctl refactor scout --language elixir --path . --max-results 8
 ```
 
 ## Go — Internal Surface
@@ -60,11 +60,11 @@ Most useful reading of this surface:
 
 Top shortlist:
 
-1. `cmd/agentctl/cmd/agent.go` — `runAgentWatch`
-2. `cmd/agentctl/cmd/agent.go` — `runAgentAskWithRoute`
-3. `cmd/agentctl/cmd/optimize_dataset_claude.go` — `buildClaudeSessionFromMessages`
+1. `cmd/foxctl/cmd/agent.go` — `runAgentWatch`
+2. `cmd/foxctl/cmd/agent.go` — `runAgentAskWithRoute`
+3. `cmd/foxctl/cmd/optimize_dataset_claude.go` — `buildClaudeSessionFromMessages`
 4. `cmd/agentctl_viewer/tui.go` — `model.renderStatusBar`
-5. `cmd/agentctl/cmd/index.go` — file-level cluster
+5. `cmd/foxctl/cmd/index.go` — file-level cluster
 
 Interpretation:
 
@@ -179,7 +179,7 @@ What it is weaker at today:
 If the goal is to reduce complexity, simplify code paths, and remove repeated
 logic, the strongest current candidates are:
 
-1. `cmd/agentctl/cmd/agent.go`
+1. `cmd/foxctl/cmd/agent.go`
    - Extract shared orchestration from `runAgentWatch` and `runAgentAskWithRoute`
    - This is the clearest repeated-logic reduction target
 2. `internal/runtime/actor/agent_actor.go`
@@ -196,7 +196,7 @@ logic, the strongest current candidates are:
 
 If the team wants immediate value from this tool, use it like this:
 
-1. Run `agentctl refactor scout` or `agentctl refactor advisor` with an explicit
+1. Run `foxctl refactor scout` or `foxctl refactor advisor` with an explicit
    language and narrow path.
 2. Treat the top 2-3 Go function hotspots as likely real work.
 3. Treat the TS shortlist as “module split candidates,” not precise
@@ -209,7 +209,7 @@ If the team wants immediate value from this tool, use it like this:
 If the goal is to reduce complexity, simplify control flow, and remove repeated
 logic, the first refactor should be:
 
-1. `cmd/agentctl/cmd/agent.go`
+1. `cmd/foxctl/cmd/agent.go`
    - Extract shared orchestration from `runAgentWatch` and
      `runAgentAskWithRoute`
    - This is the best immediate simplification target because it combines

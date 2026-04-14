@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | Status | Draft for review |
-| Scope | explicit story execution lifecycle for `agentctl room` agile workflow |
+| Scope | explicit story execution lifecycle for `foxctl room` agile workflow |
 | Related | [room-epic-factory-mission-parity.md](./room-epic-factory-mission-parity.md) |
 
 ## Why this slice
@@ -99,7 +99,7 @@ appropriate.
 ### Add a story state command
 
 ```bash
-agentctl room story state <room-id> <story-id> <state> \
+foxctl room story state <room-id> <story-id> <state> \
   --reason "Implementation is underway" \
   --blocked-by "Needs clarification on validator expectations" \
   --reviewer human-a
@@ -108,18 +108,18 @@ agentctl room story state <room-id> <story-id> <state> \
 Examples:
 
 ```bash
-agentctl room story state <room-id> <story-id> in_progress \
+foxctl room story state <room-id> <story-id> in_progress \
   --reason "Started implementation"
 
-agentctl room story state <room-id> <story-id> in_review \
+foxctl room story state <room-id> <story-id> in_review \
   --reason "Ready for coordinator review" \
   --reviewer human-a
 
-agentctl room story state <room-id> <story-id> blocked \
+foxctl room story state <room-id> <story-id> blocked \
   --reason "Waiting on cross-story integration decision" \
   --blocked-by "milestone-summary"
 
-agentctl room story state <room-id> <story-id> deferred \
+foxctl room story state <room-id> <story-id> deferred \
   --reason "Move to next milestone after current tranche closes"
 ```
 
@@ -207,7 +207,7 @@ Arguments:
 
 ## Skill implications
 
-Update `agentctl-room-agile` to teach:
+Update `foxctl-room-agile` to teach:
 
 - story lifecycle is execution state, not proof
 - use `story state in_progress` when work starts

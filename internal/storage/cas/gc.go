@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 // GCOptions aliases the shared CAS GC options to preserve the public API.

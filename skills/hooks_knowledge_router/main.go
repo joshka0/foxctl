@@ -12,12 +12,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/pathutil"
-	"github.com/jkatigb/agentctl/internal/storage/knowledge"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/hookutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/context/sessionkit"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/pathutil"
+	"github.com/joshka0/foxctl/internal/storage/knowledge"
 )
 
 // RouterConfig holds configuration for the knowledge router.

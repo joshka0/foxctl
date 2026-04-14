@@ -131,8 +131,8 @@ Run the tests.
 			wantSections: 0,
 		},
 		{
-			name: "agentctl viewer enhancement plan format",
-			content: `# agentctl Viewer Enhancement Plan
+			name: "foxctl viewer enhancement plan format",
+			content: `# foxctl Viewer Enhancement Plan
 
 ## Overview
 
@@ -168,7 +168,7 @@ Replace hardcoded actor.
 
 Add cancel and re-run.
 `,
-			wantTitle:    "agentctl Viewer Enhancement Plan",
+			wantTitle:    "foxctl Viewer Enhancement Plan",
 			wantSections: 3,
 			checkSection: func(t *testing.T, plan *PlanInfo) {
 				// Check nested structure

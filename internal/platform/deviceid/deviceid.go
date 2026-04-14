@@ -33,7 +33,7 @@ func Path(rootDir string) string {
 // LoadOrCreate returns a stable per-machine device ID, creating it if missing.
 //
 // The ID is stored at "<rootDir>/device.json" and is intended to be stable across
-// agentctl restarts on the same machine. It must not contain secrets.
+// foxctl restarts on the same machine. It must not contain secrets.
 //
 // Index:
 // - Purpose: Provide a stable machine identifier for cross-device coordination (leader leases, debugging, provenance)

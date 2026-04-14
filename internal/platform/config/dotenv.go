@@ -8,8 +8,8 @@ import (
 )
 
 // LoadDotEnv loads .env files in priority order (later files override earlier ones):
-// 1. ~/.agentctl/.env (global defaults)
-// 2. $AGENTCTL_HOME/.env (if AGENTCTL_HOME is set and different from ~/.agentctl)
+// 1. ~/.foxctl/.env (global defaults)
+// 2. $AGENTCTL_HOME/.env (if AGENTCTL_HOME is set and different from ~/.foxctl)
 // 3. $PWD/.env (project-level overrides)
 //
 // This function should be called early in the application lifecycle,
@@ -18,9 +18,9 @@ import (
 func LoadDotEnv() {
 	var envFiles []string
 
-	// 1. Global: ~/.agentctl/.env
+	// 1. Global: ~/.foxctl/.env
 	if home, err := os.UserHomeDir(); err == nil {
-		globalEnv := filepath.Join(home, ".agentctl", ".env")
+		globalEnv := filepath.Join(home, ".foxctl", ".env")
 		envFiles = append(envFiles, globalEnv)
 	}
 
@@ -62,9 +62,9 @@ func LoadDotEnvFrom(path string) error {
 func LoadDotEnvOverride() {
 	var envFiles []string
 
-	// 1. Global: ~/.agentctl/.env
+	// 1. Global: ~/.foxctl/.env
 	if home, err := os.UserHomeDir(); err == nil {
-		globalEnv := filepath.Join(home, ".agentctl", ".env")
+		globalEnv := filepath.Join(home, ".foxctl", ".env")
 		envFiles = append(envFiles, globalEnv)
 	}
 

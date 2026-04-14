@@ -13,12 +13,12 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	actormemory "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	actormemory "github.com/joshka0/foxctl/internal/runtime/actor/memory"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 // ConversationMemory manages hybrid companion context for conversations.

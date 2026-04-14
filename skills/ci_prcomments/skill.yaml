@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: ci/prcomments
@@ -52,10 +52,10 @@ signature:
     long: |
       Use ci/prcomments to collect review feedback, merge conflicts, and CI failures.
       Example commands:
-        agentctl run ci/prcomments --input '{"pr":"123","format":"markdown"}'
-        agentctl skills run ci/prcomments --pr 123 --format markdown
-        agentctl run ci/prcomments --input '{"pr":"123","format":"json","errors_only":true}'
-        agentctl skills run ci/prcomments --pr 123 --format json --errors_only
+        foxctl run ci/prcomments --input '{"pr":"123","format":"markdown"}'
+        foxctl skills run ci/prcomments --pr 123 --format markdown
+        foxctl run ci/prcomments --input '{"pr":"123","format":"json","errors_only":true}'
+        foxctl skills run ci/prcomments --pr 123 --format json --errors_only
     workflows:
       - id: comments-markdown
         description: "Render comments as markdown."

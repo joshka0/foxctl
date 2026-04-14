@@ -6,7 +6,7 @@
 | Canonical architecture | [docs/architecture/package-topology.md](../../architecture/package-topology.md) |
 | Agile room | `internal-topology` |
 | Agile epic id | `01KP1YZYJBE8ACH9DEQFD7R1C6` |
-| Work-pack mirror | `~/.agentctl/epics/01KP1YZYJBE8ACH9DEQFD7R1C6/` |
+| Work-pack mirror | `~/.foxctl/epics/01KP1YZYJBE8ACH9DEQFD7R1C6/` |
 | Related runtime docs | [docs/architecture/system-architecture.md](../../architecture/system-architecture.md), [docs/general/runtime-orchestration.md](../../general/runtime-orchestration.md) |
 
 ## Goal
@@ -86,8 +86,8 @@ The repo already uses `internal/v2/*` in a focused way:
 
 | Surface | Current usage |
 |--------|----------------|
-| CLI ask flow | `cmd/agentctl/cmd/agent.go` builds `v2services.NewAskService(...)` |
-| orchestration/spawn/list/kill | `cmd/agentctl/cmd/orchestration.go`, `cmd/agentctl/cmd/overseer_v2_orchestration.go`, and `internal/interfaces/web/api/orchestration.go` construct v2 services |
+| CLI ask flow | `cmd/foxctl/cmd/agent.go` builds `v2services.NewAskService(...)` |
+| orchestration/spawn/list/kill | `cmd/foxctl/cmd/orchestration.go`, `cmd/foxctl/cmd/overseer_v2_orchestration.go`, and `internal/interfaces/web/api/orchestration.go` construct v2 services |
 | companion context assembly | `internal/context/companion/service.go` and `internal/context/companion/v2_context_adapter.go` wire `internal/v2/runtime/contextbuilder` |
 | optional runtime backend bridge | `internal/agent/runtime/runtime.go` gates Eino through `internal/v2/adapters/eino` |
 | newer retrieval lane | `internal/intelligence/retrieval/doc.go` already points new work to `internal/intelligence/retrieval/v2` |

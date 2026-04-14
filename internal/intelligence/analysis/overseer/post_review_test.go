@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/postreview"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/postreview"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 	"github.com/rs/zerolog"
 )
 

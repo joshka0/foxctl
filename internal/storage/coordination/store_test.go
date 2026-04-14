@@ -67,7 +67,7 @@ func TestStore_RoomLoopDeliveryRuntimeRoundTrip(t *testing.T) {
 		WorkspaceID:             "ws1",
 		RoomID:                  "alpha",
 		Enabled:                 true,
-		ManagedBy:               "agentctl.room.loop",
+		ManagedBy:               "foxctl.room.loop",
 		LastTickAt:              &lastTick,
 		DeliveryLeaseName:       "room-loop:ws1:alpha:delivery",
 		DeliveryOwnerID:         "owner-a",

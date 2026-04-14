@@ -4,7 +4,7 @@
 
 It hosts Better Auth at `/api/auth/*`, serves the built `packages/gui-agent/dist`
 bundle, and proxies authenticated `/api/*` and `/ws/*` traffic to the private
-`agentctl web serve` backend.
+`foxctl web serve` backend.
 
 ## Local smoke run
 

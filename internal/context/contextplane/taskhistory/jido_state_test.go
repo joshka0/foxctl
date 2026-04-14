@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 func TestRefreshJidoRuntimeStateAddsTaskContinuity(t *testing.T) {

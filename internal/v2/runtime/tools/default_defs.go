@@ -3,8 +3,8 @@ package tools
 import (
 	"encoding/json"
 
-	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	"github.com/joshka0/foxctl/internal/v2/runtime/profiles"
 )
 
 // DefaultDefs returns the portable default v2 tool definitions used by the

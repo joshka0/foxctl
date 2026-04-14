@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/domain/policy"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/domain/policy"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/storage/cas"
 	"github.com/rs/zerolog"
 )
 

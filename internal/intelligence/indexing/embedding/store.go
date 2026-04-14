@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/embeddingtext"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/queue"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/embeddingtext"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/queue"
 )
 
 const embeddingQueueTable = "embedding_queue_jobs"

@@ -5,7 +5,7 @@ package types
 import (
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/agent"
 )
 
 // AgentRole defines the type of agent (coder, planner, reviewer, etc.).

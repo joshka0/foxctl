@@ -5,7 +5,7 @@ Summarize GitHub check runs for a PR, with a compact JSON view suitable for rout
 CLI wrapper around the `ci/checks` skill:
 
 ```bash
-agentctl ci checks --pr <number-or-branch> [flags]
+foxctl ci checks --pr <number-or-branch> [flags]
 ```
 
 ## Requirements
@@ -39,10 +39,10 @@ Same as `ci/prcomments`:
 ### View failing checks only (detailed)
 
 ```bash
-agentctl ci checks \
+foxctl ci checks \
   --pr 66 \
-  --owner jkatigb \
-  --repo agentctl \
+  --owner joshka0 \
+  --repo foxctl \
   --mode detailed \
   --errors-only
 ```
@@ -63,10 +63,10 @@ Envelope `data` will include:
 ### Summary of all checks
 
 ```bash
-agentctl ci checks \
+foxctl ci checks \
   --pr 66 \
-  --owner jkatigb \
-  --repo agentctl
+  --owner joshka0 \
+  --repo foxctl
 ```
 
 - Includes both successful and failed checks.

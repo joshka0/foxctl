@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/overseer_inbox
@@ -56,8 +56,8 @@ signature:
     long: |
       Use hooks/overseer_inbox to fetch mailbox messages before tool use.
       Example commands:
-        agentctl run hooks/overseer_inbox --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Edit"}'
-        agentctl skills run hooks/overseer_inbox --event PreToolUse --workspace_root /workspace/project --tool_name Edit
+        foxctl run hooks/overseer_inbox --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Edit"}'
+        foxctl skills run hooks/overseer_inbox --event PreToolUse --workspace_root /workspace/project --tool_name Edit
     workflows:
       - id: check-inbox
         description: "Check for overseer messages."

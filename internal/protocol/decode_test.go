@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
 
 type decodeSample struct {

@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKSPACE="${JIDO_WORKSPACE:-${1:-}}"
 
 if [[ -z "${WORKSPACE}" ]]; then
-  echo "usage: JIDO_WORKSPACE=/path/to/jido $0 [extra agentctl flags]" >&2
+  echo "usage: JIDO_WORKSPACE=/path/to/jido $0 [extra foxctl flags]" >&2
   exit 1
 fi
 

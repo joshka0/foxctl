@@ -1,20 +1,20 @@
 # System Architecture (Canonical)
 
-This is the canonical current-state architecture map for `agentctl`.
+This is the canonical current-state architecture map for `foxctl`.
 
 ## Metadata
 
 | Field | Value |
 |------|-------|
 | Status | Current |
-| Canonical scope | Runtime/component architecture for `cmd/agentctl` + `internal/*` |
+| Canonical scope | Runtime/component architecture for `cmd/foxctl` + `internal/*` |
 | Last reviewed | 2026-03-06 |
 
 ## Runtime Topology
 
 ```mermaid
 flowchart TD
-    CLI[cmd/agentctl]
+    CLI[cmd/foxctl]
     Web[internal/interfaces/web + API handlers]
     Legacy[legacy agent runtime\ninternal/agent + internal/agent/daemon]
     V2[v2 services/runtime\ninternal/v2/services + internal/v2/runtime/*]

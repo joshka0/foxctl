@@ -9,8 +9,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/storage/contextvar"
 )
 
 type fakeSessionRecallProvider struct {
@@ -195,15 +195,15 @@ func TestBuildSystemPrompt_InjectsSessionRecall(t *testing.T) {
 			matches: []SessionRecallMatch{
 				{
 					SessionID:            "sess-123",
-					ProjectName:          "agentctl",
+					ProjectName:          "foxctl",
 					Summary:              "Implemented the Jido runtime bridge for companion orchestration.",
-					Decisions:            []string{"Use Jido for orchestration and keep agentctl as the semantic tool layer."},
+					Decisions:            []string{"Use Jido for orchestration and keep foxctl as the semantic tool layer."},
 					Gotchas:              []string{"Per-agent runtime config must be injected at start time."},
 					KeyFiles:             []string{"internal/v2/adapters/jido/child_spawner.go"},
 					Similarity:           0.92,
 					StartedAt:            time.Date(2026, time.March, 1, 10, 0, 0, 0, time.UTC),
 					TimelineSummaryLines: []string{"W3 [12-16]: Child spawns now reconcile into kanban state."},
-					TimelineDecisions:    []string{"Keep Jido for orchestration and agentctl for semantic tools."},
+					TimelineDecisions:    []string{"Keep Jido for orchestration and foxctl for semantic tools."},
 					TimelineLearnings:    []string{"Per-agent plugin config has to be injected at runtime start."},
 					TimelineTools:        []string{"runtime.spawn_child", "runtime.signal"},
 				},
@@ -213,7 +213,7 @@ func TestBuildSystemPrompt_InjectsSessionRecall(t *testing.T) {
 
 	prompt, meta, err := svc.buildSystemPrompt(ctx, ChatRequest{
 		ConversationID: "conv-session",
-		Message:        "How should we wire Jido orchestration into agentctl?",
+		Message:        "How should we wire Jido orchestration into foxctl?",
 	})
 	if err != nil {
 		t.Fatalf("build system prompt: %v", err)

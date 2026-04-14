@@ -3,7 +3,7 @@ package repoindex
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
 
 func TestIsExportedSymbolTreatsGoMethodsByMethodSegment(t *testing.T) {

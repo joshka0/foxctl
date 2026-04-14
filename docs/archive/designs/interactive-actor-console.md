@@ -4,7 +4,7 @@
 
 Enable interactive, per-actor consoles using `agentctl_viewer` as the UI,
 without introducing a new transport. All I/O goes through the existing mailbox
-(leased queue) and follows agentctl envelope/CAS rules. This is an additive
+(leased queue) and follows foxctl envelope/CAS rules. This is an additive
 design that layers on top of:
 
 - **Reactive Actor System** (`docs/designs/reactive-actor-system.md`): watcher +
@@ -38,7 +38,7 @@ shape; adding secret-bearing side channels.
   envelopes on stdout; per-tab state tracks pending correlations.
 - **Overseer integration:** when spawning an actor, optionally create a console
   session and auto-launch
-  `agentctl viewer --actor-console <actor_id> --console <console_id>` (in a new
+  `foxctl viewer --actor-console <actor_id> --console <console_id>` (in a new
   terminal/tab).
 - **Mailbox transport:** reuses existing mailbox rows and notify/trigger. No
   direct DB joins to read messages; consumption is via `Poll` to claim a lease.
@@ -118,11 +118,11 @@ Notes:
 
 ## CLI ergonomics
 
-- `agentctl actor console --actor <id> [--console <cid>] [--session <sid>]` to
+- `foxctl actor console --actor <id> [--console <cid>] [--session <sid>]` to
   attach or create.
 - Overseer option: `--auto-console` to spawn a new tab/terminal for each actor
   at creation.
-- `agentctl actor consoles list` to show attachable consoles (actor_id,
+- `foxctl actor consoles list` to show attachable consoles (actor_id,
   console_id, session_id, workspace).
 
 ## DB schema notes (minimal)
@@ -137,9 +137,9 @@ Notes:
 
 ## CLI flags (viewer/overseer)
 
-- `agentctl actor console --actor <id> [--console <cid>] [--session <sid>] [--workspace <path>]`
-- `agentctl actor consoles list [--workspace <path>]`
-- `agentctl actor consoles rm --console <cid>`
+- `foxctl actor console --actor <id> [--console <cid>] [--session <sid>] [--workspace <path>]`
+- `foxctl actor consoles list [--workspace <path>]`
+- `foxctl actor consoles rm --console <cid>`
 - Overseer spawn: `--auto-console` (bool), `--console-workspace <path>`
   (override), `--console-detach` (spawn without attaching UI).
 

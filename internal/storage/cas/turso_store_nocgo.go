@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 // TursoStore is a stub for non-cgo builds.

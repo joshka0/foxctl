@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: json/transform
@@ -48,9 +48,9 @@ signature:
       Use json/transform to extract, merge, validate, format, or list keys for
       JSON payloads. The input parameter is a JSON string.
       Example commands:
-        agentctl run json/transform --input '{"operation":"keys","input":"{\"foo\":1,\"bar\":2}"}'
-        agentctl run json/transform --input '{"operation":"extract","input":"{\"data\":{\"items\":[1,2]}}","path":".data.items"}'
-        agentctl run json/transform --input '{"operation":"format","input":"{\"foo\":1}","indent":4}'
+        foxctl run json/transform --input '{"operation":"keys","input":"{\"foo\":1,\"bar\":2}"}'
+        foxctl run json/transform --input '{"operation":"extract","input":"{\"data\":{\"items\":[1,2]}}","path":".data.items"}'
+        foxctl run json/transform --input '{"operation":"format","input":"{\"foo\":1}","indent":4}'
     workflows:
       - id: extract-items
         description: "Extract a JSON path."

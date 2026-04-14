@@ -8,12 +8,12 @@ import (
 	"time"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
+	tooling "github.com/joshka0/foxctl/internal/tooling"
 	"github.com/oklog/ulid/v2"
 
-	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	errspkg "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 // registerAgentTools registers agent lifecycle tools.

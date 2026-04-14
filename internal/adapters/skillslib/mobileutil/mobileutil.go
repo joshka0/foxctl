@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 )
 
 // ADBArgs builds adb arguments with an optional device serial.

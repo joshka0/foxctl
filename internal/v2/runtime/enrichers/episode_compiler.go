@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 var (

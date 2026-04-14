@@ -315,7 +315,7 @@ Errors should include a short human‑readable message and, where safe, a `data.
 
 ```jsonc
 {
-  "prompt": "Explain how agentctl handles CAS integrity failures.",
+  "prompt": "Explain how foxctl handles CAS integrity failures.",
   "scope": "code",
   "source": {
     "cas_digest": "sha256:...exa-result..."

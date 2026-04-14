@@ -37,7 +37,7 @@ func TestWorkspaceStoreSaveHandoffAndAppendRecords(t *testing.T) {
 		Statement:    "Workers perform better with compact handoffs.",
 		Confidence:   0.72,
 		Count:        2,
-		Project:      "agentctl",
+		Project:      "foxctl",
 		Area:         "runtime",
 		EvidenceRefs: []string{"handoff:T-1038"},
 	})
@@ -55,7 +55,7 @@ func TestWorkspaceStoreSaveHandoffAndAppendRecords(t *testing.T) {
 		Statement:    "Workers perform better with compact handoffs.",
 		Confidence:   0.80,
 		Count:        1,
-		Project:      "agentctl",
+		Project:      "foxctl",
 		Area:         "runtime",
 		EvidenceRefs: []string{"handoff:T-1041"},
 	})
@@ -125,7 +125,7 @@ func TestDraftPromotionFromObservation(t *testing.T) {
 		Statement:    "Workers perform better with compact handoffs.",
 		Confidence:   0.72,
 		Count:        2,
-		Project:      "agentctl",
+		Project:      "foxctl",
 		Area:         "runtime",
 		EvidenceRefs: []string{"handoff:T-1038"},
 	}); err != nil {
@@ -152,7 +152,7 @@ func TestMergePromotionDraft(t *testing.T) {
 		Statement:    "Workers perform better with compact handoffs.",
 		Confidence:   0.72,
 		Count:        2,
-		Project:      "agentctl",
+		Project:      "foxctl",
 		Area:         "runtime",
 		EvidenceRefs: []string{"handoff:T-1038"},
 	}); err != nil {
@@ -248,7 +248,7 @@ func TestBuildReportAndGenerateMaintenanceTasks(t *testing.T) {
 		Statement:    "Compact handoffs work better than swollen transcripts.",
 		Confidence:   0.72,
 		Count:        2,
-		Project:      "agentctl",
+		Project:      "foxctl",
 		Area:         "runtime",
 		EvidenceRefs: []string{"handoff:T-1038"},
 	}); err != nil {
@@ -331,7 +331,7 @@ func TestGenerateMaintenanceTasksIncludesPreparedLowRiskProposalMerge(t *testing
 		BlastRadius:    "medium",
 		Summary:        "Review imported evidence draft for merge consideration: ACA Vocabulary Review. Suggested target: notes/repo/aca-inspect/semantic-and-memory.md.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-vocabulary-review.md",
 			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},
@@ -353,7 +353,7 @@ func TestGenerateMaintenanceTasksIncludesPreparedLowRiskProposalMerge(t *testing
 		BlastRadius:    "high",
 		Summary:        "Review imported evidence for a methodology or doctrine update: ACA Doctrine Review.",
 		ProposedChange: map[string]any{
-			"draft_path":                 "inbox/drafted-from-agentctl/external-evidence/aca-inspect/aca-doctrine-review.md",
+			"draft_path":                 "inbox/drafted-from-foxctl/external-evidence/aca-inspect/aca-doctrine-review.md",
 			"suggested_target_note_path": "notes/repo/aca-inspect/semantic-and-memory.md",
 			"suggested_target_heading":   "Review",
 		},

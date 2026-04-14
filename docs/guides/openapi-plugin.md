@@ -17,16 +17,16 @@ Plugins communicate via JSON envelopes on stdin/stdout.
 
 Plugins are discovered from:
 1. `AGENTCTL_PLUGIN_PATH` environment variable (colon-separated paths)
-2. `~/.agentctl/plugins` (default)
+2. `~/.foxctl/plugins` (default)
 
-**Naming Convention:** `agentctl-plugin-<name>`
+**Naming Convention:** `foxctl-plugin-<name>`
 
 Example:
 ```
-~/.agentctl/plugins/
-├── agentctl-plugin-aws-sigv4
-├── agentctl-plugin-hmac-auth
-└── agentctl-plugin-custom-paging
+~/.foxctl/plugins/
+├── foxctl-plugin-aws-sigv4
+├── foxctl-plugin-hmac-auth
+└── foxctl-plugin-custom-paging
 ```
 
 ## Authentication Plugins
@@ -58,7 +58,7 @@ Example:
         "secret_key": "***"
       },
       "spec_hints": {
-        "x-agentctl": {
+        "x-foxctl": {
           "auth": "plugin:aws-sigv4",
           "auth_config": {
             "service": "s3",
@@ -106,7 +106,7 @@ Example:
 
 ### Example: HMAC Authentication Plugin
 
-**File:** `~/.agentctl/plugins/agentctl-plugin-hmac-auth`
+**File:** `~/.foxctl/plugins/foxctl-plugin-hmac-auth`
 
 ```python
 #!/usr/bin/env python3
@@ -190,14 +190,14 @@ if __name__ == "__main__":
 
 **Make executable:**
 ```bash
-chmod +x ~/.agentctl/plugins/agentctl-plugin-hmac-auth
+chmod +x ~/.foxctl/plugins/foxctl-plugin-hmac-auth
 ```
 
 ### Usage
 
 **OpenAPI Spec Hint:**
 ```yaml
-x-agentctl:
+x-foxctl:
   auth: plugin:hmac-auth
   auth_config:
     # Plugin-specific configuration
@@ -218,7 +218,7 @@ x-agentctl:
 
 **Environment Variables:**
 ```bash
-export AGENTCTL_PLUGIN_PATH=~/.agentctl/plugins
+export AGENTCTL_PLUGIN_PATH=~/.foxctl/plugins
 export AGENTCTL_API_KEY="key123"
 export AGENTCTL_SECRET_KEY="secret456"
 ```
@@ -278,7 +278,7 @@ export AGENTCTL_SECRET_KEY="secret456"
 
 ### Example: Custom Cursor Pagination
 
-**File:** `~/.agentctl/plugins/agentctl-plugin-custom-paging`
+**File:** `~/.foxctl/plugins/foxctl-plugin-custom-paging`
 
 ```python
 #!/usr/bin/env python3
@@ -407,17 +407,17 @@ echo '{
       "credentials": {"api_key": "test", "secret_key": "test123"}
     }
   }
-}' | ~/.agentctl/plugins/agentctl-plugin-hmac-auth | jq
+}' | ~/.foxctl/plugins/foxctl-plugin-hmac-auth | jq
 ```
 
 ### Integration Test
 
 ```bash
 # Import spec with plugin hint
-agentctl openapi import api-with-hmac.yaml --as hmac-api
+foxctl openapi import api-with-hmac.yaml --as hmac-api
 
 # Test with plugin
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec memory:hmac-api \
   --operationId getData \
   --auth.type plugin:hmac-auth \
@@ -432,7 +432,7 @@ agentctl run http/openapi \
 
 **Solution:**
 1. Check plugin is in search path: `ls $AGENTCTL_PLUGIN_PATH`
-2. Verify naming: Must be `agentctl-plugin-<name>`
+2. Verify naming: Must be `foxctl-plugin-<name>`
 3. Check executable permission: `chmod +x plugin-file`
 
 ### Plugin Timeout

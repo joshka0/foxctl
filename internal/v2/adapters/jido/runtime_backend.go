@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 var (
@@ -82,7 +82,7 @@ func workerRecordFromState(agentID string, resp StateResponse) coreworker.Record
 		return finalizeWorkerRecord(record)
 	}
 
-	target := mapAt(root, "agentctl")
+	target := mapAt(root, "foxctl")
 	if len(target) == 0 {
 		target = root
 	}

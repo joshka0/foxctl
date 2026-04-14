@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 func TestPipeline_NextTurnIndex_SeedsFromTimelineOncePerRun(t *testing.T) {

@@ -1,6 +1,6 @@
 # Message Passing Examples
 
-This document provides practical examples of using agentctl's message passing system.
+This document provides practical examples of using foxctl's message passing system.
 
 ## Example 1: Request/Response Between Agents
 
@@ -16,8 +16,8 @@ import (
     "fmt"
     "time"
 
-    "github.com/jkatigb/agentctl/internal/domain/agent"
-    "github.com/jkatigb/agentctl/internal/domain/envelope"
+    "github.com/joshka0/foxctl/internal/domain/agent"
+    "github.com/joshka0/foxctl/internal/domain/envelope"
     "github.com/oklog/ulid/v2"
 )
 
@@ -110,9 +110,9 @@ import (
     "context"
     "fmt"
 
-    "github.com/jkatigb/agentctl/internal/runtime/actor"
-    "github.com/jkatigb/agentctl/internal/domain/agent"
-    "github.com/jkatigb/agentctl/internal/domain/envelope"
+    "github.com/joshka0/foxctl/internal/runtime/actor"
+    "github.com/joshka0/foxctl/internal/domain/agent"
+    "github.com/joshka0/foxctl/internal/domain/envelope"
 )
 
 // CoderAgent handles implementation requests

@@ -3,7 +3,7 @@ package env
 import (
 	"encoding/json"
 
-	"github.com/jkatigb/agentctl/internal/rlm"
+	"github.com/joshka0/foxctl/internal/rlm"
 )
 
 // DefaultTools returns the initial read-only tool surface for the experimental RLM runtime.

@@ -1,6 +1,6 @@
 # Vector Search Integration
 
-This package provides optional vector search capabilities using [sqlite-vector](https://github.com/sqliteai/sqlite-vector) for semantic similarity search in agentctl.
+This package provides optional vector search capabilities using [sqlite-vector](https://github.com/sqliteai/sqlite-vector) for semantic similarity search in foxctl.
 
 ## Overview
 
@@ -31,7 +31,7 @@ make build
 ### Vector-Enabled Build
 ```bash
 # Build with vector support (requires CGO and GCC)
-CGO_ENABLED=1 go build -tags vector -o bin/agentctl ./cmd/agentctl
+CGO_ENABLED=1 go build -tags vector -o bin/foxctl ./cmd/foxctl
 ```
 
 ### Testing Vector Functionality
@@ -59,7 +59,7 @@ This approach ensures that:
 ```go
 import (
     "database/sql"
-    "github.com/jkatigb/agentctl/internal/storage/vector"
+    "github.com/joshka0/foxctl/internal/storage/vector"
     _ "github.com/mattn/go-sqlite3" // Required for vector support
 )
 

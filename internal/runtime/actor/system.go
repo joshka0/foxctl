@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/storage/mailbox"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/storage/mailbox"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 // System is the top-level container for the actor system.

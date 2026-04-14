@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/joshka0/foxctl/internal/domain/policy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

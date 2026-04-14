@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	skillfs "github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
+	skillfs "github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/langutil"
 )
 
 // Input defines the shared scope input for refactor commands.

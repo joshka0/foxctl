@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
 )
 
 func TestUnmarshalFiles_EmptyReturnsNonNilSlice(t *testing.T) {

@@ -286,9 +286,9 @@ Add a CLI command to backfill doc-enriched embeddings for symbols that were embe
 
 | File | Changes |
 |------|---------|
-| `cmd/agentctl/cmd/embedding_backfill.go` | **New file** - CLI command implementation |
-| `cmd/agentctl/cmd/embedding_backfill_test.go` | **New file** - command tests |
-| `cmd/agentctl/cmd/root.go` | Register backfill command |
+| `cmd/foxctl/cmd/embedding_backfill.go` | **New file** - CLI command implementation |
+| `cmd/foxctl/cmd/embedding_backfill_test.go` | **New file** - command tests |
+| `cmd/foxctl/cmd/root.go` | Register backfill command |
 | `internal/intelligence/indexing/symbol/backfill.go` | **New file** - backfill business logic |
 | `internal/intelligence/indexing/symbol/backfill_test.go` | **New file** - backfill logic tests |
 
@@ -297,7 +297,7 @@ Add a CLI command to backfill doc-enriched embeddings for symbols that were embe
 #### 1. CLI Command
 
 ```go
-// cmd/agentctl/cmd/embedding_backfill.go
+// cmd/foxctl/cmd/embedding_backfill.go
 
 var embeddingBackfillCmd = &cobra.Command{
     Use:   "embedding-backfill",
@@ -307,16 +307,16 @@ doc-enriched mode was enabled. Useful for upgrading existing indexes.
 
 Examples:
   # Dry run - see what would be backfilled
-  agentctl embedding-backfill --dry-run
+  foxctl embedding-backfill --dry-run
 
   # Backfill up to 1000 symbols
-  agentctl embedding-backfill --limit 1000
+  foxctl embedding-backfill --limit 1000
 
   # Backfill specific workspace
-  agentctl embedding-backfill --workspace /path/to/repo
+  foxctl embedding-backfill --workspace /path/to/repo
 
   # Force re-embed all (ignore existing digest)
-  agentctl embedding-backfill --force`,
+  foxctl embedding-backfill --force`,
     RunE: runEmbeddingBackfill,
 }
 
@@ -522,7 +522,7 @@ func (b *Backfiller) processBatch(ctx context.Context, batch []Symbol) (backfill
 
 ### Acceptance Criteria
 
-- [ ] `agentctl embedding-backfill` command implemented
+- [ ] `foxctl embedding-backfill` command implemented
 - [ ] `--dry-run` shows what would be backfilled
 - [ ] `--limit` bounds execution
 - [ ] `--batch-size` controls memory usage

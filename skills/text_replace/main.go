@@ -10,14 +10,14 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-	fsutil "github.com/jkatigb/agentctl/internal/adapters/skillslib/fs"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textmatch"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textreplace"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	fsutil "github.com/joshka0/foxctl/internal/adapters/skillslib/fs"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/textmatch"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/textreplace"
 )
 
 const command = "text/replace"

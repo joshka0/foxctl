@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/runtime/contextbuilder"
+	"github.com/joshka0/foxctl/internal/v2/runtime/contextbuilder"
 )
 
-const defaultCompanionSignalType = "agentctl.companion.context"
+const defaultCompanionSignalType = "foxctl.companion.context"
 
 // CompanionProviderConfig configures a Jido-backed companion context provider.
 type CompanionProviderConfig struct {
@@ -139,7 +139,7 @@ func decodeCompanionLayeredContext(raw json.RawMessage) (contextbuilder.Companio
 	if len(state) == 0 {
 		return contextbuilder.CompanionLayeredContext{}, fmt.Errorf("companion state is missing")
 	}
-	agentctlState := mapAt(state, "agentctl")
+	agentctlState := mapAt(state, "foxctl")
 	if len(agentctlState) == 0 {
 		agentctlState = state
 	}

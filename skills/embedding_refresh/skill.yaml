@@ -1,10 +1,10 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: embedding/refresh
   description: Refresh embeddings for memory, symbol, or session entries
   version: 0.1.0
-  author: agentctl
+  author: foxctl
   tags: [embedding, refresh, memory, semantic, phase4]
 distribution:
   type: exec

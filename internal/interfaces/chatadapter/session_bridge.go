@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	consolepkg "github.com/jkatigb/agentctl/internal/console"
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	"github.com/jkatigb/agentctl/internal/domain/identity"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	consolepkg "github.com/joshka0/foxctl/internal/console"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/domain/identity"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // Clock provides time operations for testability.

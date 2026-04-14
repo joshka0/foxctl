@@ -1,4 +1,4 @@
-# Start Here: Testing & CI Expectations for agentctl
+# Start Here: Testing & CI Expectations for foxctl
 
 This document expands on the brief testing notes in `AGENTS.md`. It explains how
 tests, coverage, and CI fit together so agents and humans can reason about
@@ -30,7 +30,7 @@ changes. See `Makefile` for the authoritative definitions.
 - `make test-cgo-short` – unit tests with CGO enabled and `-tags=libsqlite3`.
 - `make test-integration` – integration tests in `test/integration/...` (may
   require network/LLM APIs; gated with `//go:build integration`).
-- `make test-integration-cmd` – cmd integration tests in `cmd/agentctl/cmd/...`
+- `make test-integration-cmd` – cmd integration tests in `cmd/foxctl/cmd/...`
   (requires `make skills-build` first; gated with `//go:build integration`).
 - `make lint` – `golangci-lint` + `staticcheck` + `govet`.
 - `make fmt` – `gofumpt` formatting.
@@ -50,7 +50,7 @@ changes. See `Makefile` for the authoritative definitions.
 
 Some subsystems (notably libSQL/Turso drivers) require CGO.
 
-When CGO is enabled, agentctl's dependency graph can include both
+When CGO is enabled, foxctl's dependency graph can include both
 `github.com/tursodatabase/go-libsql` and `github.com/mattn/go-sqlite3`. Both can
 embed SQLite, which causes linker errors like `duplicate symbol '_sqlite3_*'`.
 
@@ -105,14 +105,14 @@ Integration tests live in two places, both gated with `//go:build integration`:
    external binaries. These test end-to-end workflows like agent spawning,
    symbol indexing, and the SWE Grep pipeline.
 
-2. **`cmd/agentctl/cmd/`** – Command integration tests that verify CLI behavior
+2. **`cmd/foxctl/cmd/`** – Command integration tests that verify CLI behavior
    with real skill binaries. Requires `make skills-build` before running.
 
 Run them via:
 
 ```bash
 make test-integration       # test/integration/... (may need API keys)
-make test-integration-cmd   # cmd/agentctl/cmd/... (needs skills-build)
+make test-integration-cmd   # cmd/foxctl/cmd/... (needs skills-build)
 ```
 
 ### CGO Inheritance Gotcha
@@ -120,7 +120,7 @@ make test-integration-cmd   # cmd/agentctl/cmd/... (needs skills-build)
 When running tests with `CGO_ENABLED=1` (e.g., `make test-cgo-short`), be aware
 that subprocess builds inherit the CGO setting. Skills are pure Go and don't
 require CGO, so test helpers that build skills should explicitly set
-`CGO_ENABLED=0` to avoid CGO toolchain errors. See `cmd/agentctl/cmd/run_test.go`
+`CGO_ENABLED=0` to avoid CGO toolchain errors. See `cmd/foxctl/cmd/run_test.go`
 for an example of the correct pattern.
 
 ---
@@ -162,9 +162,9 @@ Live integration tests (e.g. real OpenAPI calls, live LLM providers) should be
 The test infrastructure is designed to give fast, local feedback and surface it
 back to agents:
 
-- `agentctl watch tests` – daemon that watches the workspace and runs configured
-  test commands (see `cmd/agentctl/cmd/watch.go` and `internal/tooling/testwatch/`).
-- Status is persisted in SQLite (`~/.agentctl/storage/test_watch.db`) via the
+- `foxctl watch tests` – daemon that watches the workspace and runs configured
+  test commands (see `cmd/foxctl/cmd/watch.go` and `internal/tooling/testwatch/`).
+- Status is persisted in SQLite (`~/.foxctl/storage/test_watch.db`) via the
   `testwatch` store.
 - The `hooks/test_feedback` skill reads this store and returns a summary of
   failing watchers/tests back to Claude after edits (see
@@ -172,7 +172,7 @@ back to agents:
 
 When making code changes that affect tests, prefer to:
 
-- Update or add watcher configurations via `agentctl test-watch add`.
+- Update or add watcher configurations via `foxctl test-watch add`.
 - Let the watcher + feedback hook surface failures instead of hard-coding
   bespoke test commands into docs.
 

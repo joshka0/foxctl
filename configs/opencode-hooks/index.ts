@@ -1,5 +1,5 @@
 /**
- * agentctl OpenCode Plugin
+ * foxctl OpenCode Plugin
  *
  * Main plugin entry point for OpenCode integration.
  *
@@ -16,16 +16,16 @@ import type { Plugin } from "@opencode-ai/plugin";
 import { tool } from "@opencode-ai/plugin";
 
 const z = tool.schema;
-import { runSkill, getWorkspace } from "./lib/agentctl";
+import { runSkill, getWorkspace } from "./lib/foxctl";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
-const AGENTCTL_HOME = process.env.AGENTCTL_HOME || join(process.env.HOME || "/tmp", ".agentctl");
+const AGENTCTL_HOME = process.env.AGENTCTL_HOME || join(process.env.HOME || "/tmp", ".foxctl");
 
 /**
- * Session identity from agentctl identity file
- * Written by session-identity.sh hook or agentctl session-id command
+ * Session identity from foxctl identity file
+ * Written by session-identity.sh hook or foxctl session-id command
  */
 interface SessionIdentity {
   session_id: string;
@@ -83,7 +83,7 @@ async function getSessionIdentity(workspace: string): Promise<{ sessionID: strin
 /**
  * Context Buffer Integration
  *
- * Replaces the file-based pending context approach with agentctl's Context Buffer.
+ * Replaces the file-based pending context approach with foxctl's Context Buffer.
  * - writePendingContext -> hooks/context_enqueue skill
  * - readAndClearPendingContext -> hooks/context_drain skill
  *
@@ -125,7 +125,7 @@ async function writePendingContext(
     { workspace, ephemeral: true, timeout: 3000 }
   ).catch((err) => {
     // Non-critical - log but don't fail
-    console.error("[agentctl] Context enqueue error:", err);
+    console.error("[foxctl] Context enqueue error:", err);
   });
 }
 
@@ -152,7 +152,7 @@ async function readAndClearPendingContext(
     },
     { workspace, ephemeral: true, timeout: 3000 }
   ).catch((err) => {
-    console.error("[agentctl] Context drain error:", err);
+    console.error("[foxctl] Context drain error:", err);
     return { success: false, data: undefined };
   });
 
@@ -171,13 +171,13 @@ const ANCHOR_TRIGGER = /(^|\b)(anchor this|anchor it|anchor prompt|@anchor|\/anc
 const TODO_TRIGGER = /(^|\b)(\/todo)(\b|$)/i;
 const COUNSEL_TRIGGER = /(^|\s)\/counsel(\s|$)/i;
 const CONTEXT_TRIGGER = /(^|\s)\/context(\s|$)/i;
-const STRICT_TRIGGER = /^\s*@(strict|agentctl)\s*(on|off|enable|disable|status|1|0|true|false)?\s*$/i;
+const STRICT_TRIGGER = /^\s*@(strict|foxctl)\s*(on|off|enable|disable|status|1|0|true|false)?\s*$/i;
 
 // Agentctl mode state per workspace (in-memory, synced with SQLite via skill)
 const agentctlModeByWorkspace = new Map<string, boolean>();
 
 /**
- * Check if agentctl mode is enabled for workspace
+ * Check if foxctl mode is enabled for workspace
  */
 async function isAgentctlModeEnabled(workspace: string): Promise<boolean> {
   // Check in-memory first
@@ -198,7 +198,7 @@ async function isAgentctlModeEnabled(workspace: string): Promise<boolean> {
 }
 
 /**
- * Set agentctl mode for workspace
+ * Set foxctl mode for workspace
  */
 async function setAgentctlMode(workspace: string, enabled: boolean): Promise<boolean> {
   const result = await runSkill(
@@ -213,7 +213,7 @@ async function setAgentctlMode(workspace: string, enabled: boolean): Promise<boo
   return result.success;
 }
 
-// Skill advisor patterns - suggest relevant agentctl skills based on prompt
+// Skill advisor patterns - suggest relevant foxctl skills based on prompt
 const SKILL_PATTERNS: Array<{ pattern: RegExp; hint: string }> = [
   // CI/PR patterns
   {
@@ -600,11 +600,11 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
      */
     tool: {
       /**
-       * Query agentctl memories (gotchas, decisions, patterns)
+       * Query foxctl memories (gotchas, decisions, patterns)
        */
-      "agentctl-memory": tool({
+      "foxctl-memory": tool({
         description:
-          "Search agentctl memories for gotchas, decisions, and patterns relevant to a file or topic",
+          "Search foxctl memories for gotchas, decisions, and patterns relevant to a file or topic",
         args: {
           query: z.string().describe("Search query or file path"),
           types: z
@@ -634,7 +634,7 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
       /**
        * Semantic code search across the codebase
        */
-      "agentctl-search": tool({
+      "foxctl-search": tool({
         description:
           "Semantic vector search across the codebase. Use for finding related code, implementations, or patterns. Use format='tree' to see related files grouped by directory.",
         args: {
@@ -672,7 +672,7 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
       /**
        * Check overseer inbox for human messages
        */
-      "agentctl-inbox": tool({
+      "foxctl-inbox": tool({
         description:
           "Check the overseer inbox for messages from humans or other agents",
         args: {
@@ -720,7 +720,7 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
       /**
        * Get file structure and symbols
        */
-      "agentctl-symbols": tool({
+      "foxctl-symbols": tool({
         description:
           "Get symbols (functions, types, variables) from a file. Useful before reading to understand structure.",
         args: {
@@ -759,7 +759,7 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
       /**
        * Get active task and its context
        */
-      "agentctl-task": tool({
+      "foxctl-task": tool({
         description: "Get the currently active task and its context",
         args: {},
         async execute() {
@@ -773,7 +773,7 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
           }>("todo/manage", { operation: "get_active", workspace_id: workspace }, { workspace, ephemeral: true, timeout: 3000 });
 
           if (!result.success || !result.data?.task) {
-            return "No active task. Use `agentctl todo add` to create one.";
+            return "No active task. Use `foxctl todo add` to create one.";
           }
 
           const t = result.data.task;
@@ -784,7 +784,7 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
       /**
        * Multi-perspective code analysis (mirrors /counsel slash command)
        */
-      "agentctl-counsel": tool({
+      "foxctl-counsel": tool({
         description:
           "Run multi-perspective code analysis with LLM review. Use for security reviews, correctness checks, and code quality analysis. More thorough than search - actually analyzes the code.",
         args: {
@@ -858,7 +858,7 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
       /**
        * Quick code context gathering (mirrors /context slash command)
        */
-      "agentctl-context": tool({
+      "foxctl-context": tool({
         description:
           "Quickly gather relevant code snippets for a query. Faster than counsel - no LLM analysis, just retrieves matching code.",
         args: {
@@ -932,7 +932,7 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
       /**
        * Smart code retrieval with full function bodies
        */
-      "agentctl-ripgrep": tool({
+      "foxctl-ripgrep": tool({
         description:
           "Search code and return full function bodies containing matches. Better than grep for understanding context.",
         args: {
@@ -979,7 +979,7 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
     ): Promise<void> => {
       const text = partsToText(output.parts);
 
-      // Handle @strict/@agentctl commands first
+      // Handle @strict/@foxctl commands first
       const strictMatch = text.match(STRICT_TRIGGER);
       if (strictMatch) {
         const cmd = (strictMatch[2] || "status").toLowerCase();
@@ -1079,7 +1079,7 @@ Tool redirections:
             await writePendingContext(
               input.sessionID,
               "Recall",
-              `No matching memories found for "${query}". Try \`agentctl run session/recall\` for session history.`
+              `No matching memories found for "${query}". Try \`foxctl run session/recall\` for session history.`
             );
           }
         }
@@ -1173,7 +1173,7 @@ Tool redirections:
           await writePendingContext(
             input.sessionID,
             "Codemap Search",
-            `**Codemap for:** ${query}\n\n**Existing codemaps:**\n${maps}\n\n*Generate new: \`agentctl run codemap/generate --input '{"query": "..."}'\`*`
+            `**Codemap for:** ${query}\n\n**Existing codemaps:**\n${maps}\n\n*Generate new: \`foxctl run codemap/generate --input '{"query": "..."}'\`*`
           );
         }
       }
@@ -1497,12 +1497,12 @@ Tool redirections:
         }
       } catch (err) {
         // Silently fail - don't break the AI interaction
-        console.error("[agentctl] System transform error:", err);
+        console.error("[foxctl] System transform error:", err);
       }
 
       // Inject context into system prompt
       if (context.length > 0) {
-        output.system.push(`\n\n---\n## agentctl Context\n${context.join("\n\n")}`);
+        output.system.push(`\n\n---\n## foxctl Context\n${context.join("\n\n")}`);
       }
     },
 
@@ -1546,8 +1546,8 @@ Tool redirections:
             `**[Agentctl Mode] Use search/replace via fs/apply_edit**
 
 **Workflow:**
-1. **Get exact text**: \`agentctl run code/context_grep --input '{"mode": "line", "file_path": "${filePath}", "line_start": N, "line_end": M}'\`
-2. **Preview change**: \`agentctl run fs/apply_edit --input '{"path": "${filePath}", "edits": [{"search": "exact old text", "replace": "new text"}], "dry_run": true}'\`
+1. **Get exact text**: \`foxctl run code/context_grep --input '{"mode": "line", "file_path": "${filePath}", "line_start": N, "line_end": M}'\`
+2. **Preview change**: \`foxctl run fs/apply_edit --input '{"path": "${filePath}", "edits": [{"search": "exact old text", "replace": "new text"}], "dry_run": true}'\`
 3. **Apply**: Set \`dry_run: false\`
 
 **Tips:**
@@ -1563,7 +1563,7 @@ Tool redirections:
           throw new Error(
             `**[Agentctl Mode] Smart Search via code/smart_search**
 
-> Direct: \`agentctl run code/smart_search --input '{"question": "${pattern.replace(/'/g, "\\'")}"}'\`
+> Direct: \`foxctl run code/smart_search --input '{"question": "${pattern.replace(/'/g, "\\'")}"}'\`
 > Params: \`limits.max_candidates\`, \`limits.max_snippets\` to control output size.`
           );
         }
@@ -1574,7 +1574,7 @@ Tool redirections:
           throw new Error(
             `**[Agentctl Mode] Semantic Search via code/semantic_search**
 
-> Direct: \`agentctl run code/semantic_search --input '{"query": "${pattern.replace(/'/g, "\\'")}","scope": ["symbols"], "limit": 10}'\`
+> Direct: \`foxctl run code/semantic_search --input '{"query": "${pattern.replace(/'/g, "\\'")}","scope": ["symbols"], "limit": 10}'\`
 > Scopes: \`symbols\`, \`memory\`, \`codemaps\`. Uses vector embeddings.
 > Memory scope supports date-based search (e.g., "January gotchas", "2026 decisions").`
           );
@@ -1642,13 +1642,13 @@ Tool redirections:
 ${symbolsList}${gotchasSection}
 
 **To read specific lines:**
-  \`agentctl run code/context_grep --input '{"mode": "line", "file_path": "${filePath}", "line_start": N, "line_end": M}'\`
+  \`foxctl run code/context_grep --input '{"mode": "line", "file_path": "${filePath}", "line_start": N, "line_end": M}'\`
 
 **To search by concept:**
-  \`agentctl run code/semantic_search --input '{"query": "your concept here"}'\`
+  \`foxctl run code/semantic_search --input '{"query": "your concept here"}'\`
 
 **To read full file anyway (${lineCount} lines):**
-  \`agentctl run fs/read --input '{"path": "${filePath}"}'\``
+  \`foxctl run fs/read --input '{"path": "${filePath}"}'\``
               );
             }
           }
@@ -1772,7 +1772,7 @@ ${symbolsList}${gotchasSection}
 
         if (!taskResult.success || !taskResult.data?.task) {
           throw new Error(
-            "No active task. Create one with `agentctl todo add --title '...'` before editing files."
+            "No active task. Create one with `foxctl todo add --title '...'` before editing files."
           );
         }
       }
@@ -1866,11 +1866,11 @@ ${symbolsList}${gotchasSection}
         }
       }
 
-      // TodoWrite sync - sync todos with agentctl and prompt for memories on completion
+      // TodoWrite sync - sync todos with foxctl and prompt for memories on completion
       if (input.tool === "TodoWrite") {
         const todos = output.metadata?.todos as Array<{ content?: string; status?: string }> | undefined;
         if (todos?.length) {
-          // Sync todos with agentctl task system
+          // Sync todos with foxctl task system
           runSkill(
             "todo/sync_from_provider",
             {
@@ -1891,8 +1891,8 @@ ${symbolsList}${gotchasSection}
             if (completedTasks.length > 0) {
               const taskNames = completedTasks.map((t) => t.content).filter(Boolean).join(", ");
               const hint = completedTasks.length === 1
-                ? `**Memory prompt:** Task completed: "${taskNames}"\n\nIf you learned something useful or encountered a gotcha, save it:\n\`agentctl memory put --name "gotcha-<topic>" --type gotcha --summary "<learning>"\``
-                : `**Memory prompt:** Completed ${completedTasks.length} tasks.\n\nIf you learned something useful or encountered gotchas, save them:\n\`agentctl memory put --name "gotcha-<topic>" --type gotcha --summary "<learning>"\``;
+                ? `**Memory prompt:** Task completed: "${taskNames}"\n\nIf you learned something useful or encountered a gotcha, save it:\n\`foxctl memory put --name "gotcha-<topic>" --type gotcha --summary "<learning>"\``
+                : `**Memory prompt:** Completed ${completedTasks.length} tasks.\n\nIf you learned something useful or encountered gotchas, save them:\n\`foxctl memory put --name "gotcha-<topic>" --type gotcha --summary "<learning>"\``;
               await writePendingContext(input.sessionID, "Memory Prompt", hint);
             }
           }
@@ -1921,7 +1921,7 @@ ${symbolsList}${gotchasSection}
               await writePendingContext(
                 input.sessionID,
                 "Tip",
-                `You've read ${COUNSEL_SUGGESTION_THRESHOLD}+ code files. Consider using \`/counsel <question>\` for multi-perspective analysis, or the \`agentctl-counsel\` tool for in-depth code review.`,
+                `You've read ${COUNSEL_SUGGESTION_THRESHOLD}+ code files. Consider using \`/counsel <question>\` for multi-perspective analysis, or the \`foxctl-counsel\` tool for in-depth code review.`,
                 60_000
               );
             }
@@ -1962,7 +1962,7 @@ ${symbolsList}${gotchasSection}
                   );
                 }
               })
-              .catch((err) => console.error("[agentctl] session/restore error:", err));
+              .catch((err) => console.error("[foxctl] session/restore error:", err));
           }
           break;
         }
@@ -2013,7 +2013,7 @@ ${symbolsList}${gotchasSection}
               { session_id: sessionID, workspace_root: workspace, status: "idle" },
               { workspace, ephemeral: true, timeout: 15000 }
             );
-          }).catch((err) => console.error("[agentctl] Capture error:", err));
+          }).catch((err) => console.error("[foxctl] Capture error:", err));
 
           void runIdleAction(`${sessionID}:flush`, flushIntervalMs, async () => {
             await runSkill(
@@ -2021,7 +2021,7 @@ ${symbolsList}${gotchasSection}
               { batch_size: 50, max_duration: 60 },
               { workspace, ephemeral: true, timeout: 120000 }
             );
-          }).catch((err) => console.error("[agentctl] Flush error:", err));
+          }).catch((err) => console.error("[foxctl] Flush error:", err));
 
           void runIdleAction(`${sessionID}:plan_sync`, planSyncIntervalMs, async () => {
             await runSkill(
@@ -2029,7 +2029,7 @@ ${symbolsList}${gotchasSection}
               { session_id: sessionID, workspace_root: workspace },
               { workspace, ephemeral: true, timeout: 5000 }
             );
-          }).catch((err) => console.error("[agentctl] Plan sync error:", err));
+          }).catch((err) => console.error("[foxctl] Plan sync error:", err));
 
           // PageRank recalculation - keeps task scores up-to-date
           const pageRankIntervalMs = parseEnvInterval(
@@ -2042,7 +2042,7 @@ ${symbolsList}${gotchasSection}
               { workspace },
               { workspace, ephemeral: true, timeout: 30000 }
             );
-          }).catch((err) => console.error("[agentctl] PageRank error:", err));
+          }).catch((err) => console.error("[foxctl] PageRank error:", err));
 
           await runIdleAction(`${sessionID}:todo`, todoIntervalMs, async () => {
             try {
@@ -2099,7 +2099,7 @@ ${symbolsList}${gotchasSection}
                 );
               }
             } catch (err) {
-              console.error("[agentctl] Todo continuation error:", err);
+              console.error("[foxctl] Todo continuation error:", err);
             }
           });
 

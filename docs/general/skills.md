@@ -57,7 +57,7 @@ Source of truth: `internal/domain/skill/manifest.go`.
 2. Keep envelope output protocol-compliant.
 3. Declare accurate `capabilities` (`network`, `filesystem`, `pure`).
 4. Build/install with `make skills-install` (or explicit `go build .../bin`).
-5. Verify with `agentctl skills list` and `agentctl run <command> --input ...`.
+5. Verify with `foxctl skills list` and `foxctl run <command> --input ...`.
 
 ## Related Docs
 

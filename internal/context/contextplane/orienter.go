@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 // TaskProvider is the minimal task store contract required to compute orientation.

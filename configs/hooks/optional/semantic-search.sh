@@ -7,7 +7,7 @@
 # by adding vector search results when the query looks like a conceptual search.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_SEMANTIC_DISABLED - Set to 1 to disable
 #   AGENTCTL_SEMANTIC_MAX_RESULTS - Max results per scope (default: 3)
 #   AGENTCTL_SEMANTIC_RERANK - Set to 1 to enable Voyage rerank-2.5 (requires VOYAGE_API_KEY)
@@ -20,7 +20,7 @@ if [[ "${AGENTCTL_SEMANTIC_DISABLED:-}" == "1" ]]; then
   exit 0
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 MAX_RESULTS="${AGENTCTL_SEMANTIC_MAX_RESULTS:-3}"
 
 # Read hook input from stdin

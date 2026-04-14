@@ -3,7 +3,7 @@
   "status": "ok",
   "command": "fs/ls",
   "data": {
-    "path": "/workspace/agentctl",
+    "path": "/workspace/foxctl",
     "entry_count": 6,
     "files": 4,
     "directories": 2,
@@ -11,7 +11,7 @@
     "preview": [
       {
         "name": "README.md",
-        "path": "/workspace/agentctl/README.md",
+        "path": "/workspace/foxctl/README.md",
         "is_dir": false,
         "size_bytes": 32768,
         "mode": "-rw-r--r--",
@@ -19,7 +19,7 @@
       },
       {
         "name": "cmd",
-        "path": "/workspace/agentctl/cmd",
+        "path": "/workspace/foxctl/cmd",
         "is_dir": true,
         "size_bytes": 4096,
         "mode": "drwxr-xr-x",

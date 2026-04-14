@@ -161,7 +161,7 @@ export function SQLiteView() {
   if (!databases || databases.length === 0) {
     return (
       <box padding={1}>
-        <text fg="#888888">No SQLite databases found in ~/.agentctl</text>
+        <text fg="#888888">No SQLite databases found in ~/.foxctl</text>
       </box>
     );
   }

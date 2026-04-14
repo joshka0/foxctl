@@ -36,7 +36,7 @@
   "appliedUpdates": [
     {
       "target": "user-testing.md",
-      "description": "Added Flow Validator Guidance section for go test (cmd/agentctl/cmd - room-sandbox) with test-to-assertion mapping for all 21 VAL-RS assertions",
+      "description": "Added Flow Validator Guidance section for go test (cmd/foxctl/cmd - room-sandbox) with test-to-assertion mapping for all 21 VAL-RS assertions",
       "source": "setup"
     }
   ],

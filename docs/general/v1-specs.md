@@ -1,6 +1,6 @@
 # v1 Specifications Overview
 
-This document summarizes the foundational v1 specifications that define agentctl's architecture. For full details, see [docs/spec/v1/](../spec/v1/).
+This document summarizes the foundational v1 specifications that define foxctl's architecture. For full details, see [docs/spec/v1/](../spec/v1/).
 
 ---
 
@@ -8,7 +8,7 @@ This document summarizes the foundational v1 specifications that define agentctl
 
 **File:** [protocol_v1.md](../spec/v1/protocol_v1.md)
 
-The canonical wire contract for all agentctl I/O.
+The canonical wire contract for all foxctl I/O.
 
 ### Key Concepts
 
@@ -45,7 +45,7 @@ The canonical wire contract for all agentctl I/O.
 
 Single-agent runtime for structured LLM workflows.
 
-### What agentctl Core Provides
+### What foxctl Core Provides
 
 | Concept | Description |
 |---------|-------------|

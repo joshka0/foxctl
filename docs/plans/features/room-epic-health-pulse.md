@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | Status | Reviewed, implementing |
-| Scope | coordinator-facing epic health read model for `agentctl room` agile workflow |
+| Scope | coordinator-facing epic health read model for `foxctl room` agile workflow |
 | Related | [room-epic-factory-mission-parity.md](./room-epic-factory-mission-parity.md) |
 
 ## Why this slice
@@ -55,7 +55,7 @@ They are not yet the same thing as:
 Add:
 
 ```bash
-agentctl room epic health <room-id> <epic-id>
+foxctl room epic health <room-id> <epic-id>
 ```
 
 Optional:

@@ -237,7 +237,7 @@ No new top-level command is required in the first slice.
 Continue using:
 
 ```bash
-agentctl room story validate <room-id> <story-id> <validator_type> <status> "<summary>"
+foxctl room story validate <room-id> <story-id> <validator_type> <status> "<summary>"
 ```
 
 The change is in:

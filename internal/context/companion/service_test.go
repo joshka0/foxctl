@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 // TestStripThinkTags verifies <think> blocks are removed from model output.

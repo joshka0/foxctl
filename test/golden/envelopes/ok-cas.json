@@ -1,7 +1,7 @@
 {
   "version": 1,
   "status": "ok",
-  "command": "agentctl.example.cas",
+  "command": "foxctl.example.cas",
   "data": {
     "summary": {
       "status_code": 200,

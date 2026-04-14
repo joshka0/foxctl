@@ -53,7 +53,7 @@ Include the command string and output keys for discoverability.
 //
 // # Command
 //
-//	agentctl run code/smart_write --input '{"path":"...", "symbol":"...", "content":"..."}'
+//	foxctl run code/smart_write --input '{"path":"...", "symbol":"...", "content":"..."}'
 //
 // # Input
 //
@@ -274,16 +274,16 @@ Short with "why" and related commands for navigation.
 **Example: newSemanticIndexCommand**
 
 ```go
-// newSemanticIndexCommand creates the "agentctl index semantic" command.
+// newSemanticIndexCommand creates the "foxctl index semantic" command.
 //
 // This command builds vector embeddings for code symbols, enabling
-// semantic search via "agentctl run code/semantic_search".
+// semantic search via "foxctl run code/semantic_search".
 //
 // # Related Commands
 //
-//	agentctl index status     - check index freshness
-//	agentctl index init       - initialize all index types
-//	agentctl index repo build - build call graph (different from semantic)
+//	foxctl index status     - check index freshness
+//	foxctl index init       - initialize all index types
+//	foxctl index repo build - build call graph (different from semantic)
 //
 // Index: CLI command, semantic index, embedding build
 func newSemanticIndexCommand() *cobra.Command {
@@ -422,11 +422,11 @@ import (
     "strings"
     "time"
 
-    "github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
-    "github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-    "github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-    "github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-    errs "github.com/jkatigb/agentctl/internal/platform/errors"
+    "github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+    "github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+    "github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+    "github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+    errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 const skillName = "build/godot"

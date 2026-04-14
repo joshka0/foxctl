@@ -618,7 +618,7 @@ func TestWalletConfigPath(t *testing.T) {
 		home := os.Getenv("HOME")
 
 		path := walletConfigPath(nil)
-		expected := filepath.Join(home, ".agentctl", "x402_wallet.json")
+		expected := filepath.Join(home, ".foxctl", "x402_wallet.json")
 		if path != expected {
 			t.Errorf("walletConfigPath() = %s, want %s", path, expected)
 		}

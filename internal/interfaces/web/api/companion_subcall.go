@@ -10,9 +10,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
 )
 
 func makeCompanionJidoSubcallProvider(log zerolog.Logger) func(context.Context, companion.CompanionSubcallRequest) (companion.CompanionSubcallResult, error) {
@@ -89,7 +89,7 @@ func makeCompanionJidoSubcallProvider(log zerolog.Logger) func(context.Context, 
 			AgentID:   agentID,
 			Signal: v2jido.Signal{
 				ID:            req.ConversationID + ":subcall:signal",
-				Type:          "agentctl.subcall",
+				Type:          "foxctl.subcall",
 				Source:        v2jido.DefaultSignalSource,
 				CorrelationID: req.ConversationID + ":subcall:signal",
 				CausationID:   req.ConversationID + ":subcall",
@@ -150,7 +150,7 @@ func decodeCompanionSubcallResult(awaitResp v2jido.AwaitResponse, stateResp v2ji
 		return result
 	}
 
-	agentctlState := mapAt(root, "agentctl")
+	agentctlState := mapAt(root, "foxctl")
 	lastResult := mapAt(agentctlState, "last_result")
 	if len(lastResult) == 0 {
 		return result

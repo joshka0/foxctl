@@ -5,14 +5,14 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
-	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 )
 
 // OpenStoreDB opens a database for the given logical store name using the dbdriver config system.
 //
 // Callers should pass:
-// - storageRoot: the directory containing store databases (typically cfg.Storage.Root, e.g. "~/.agentctl/storage")
+// - storageRoot: the directory containing store databases (typically cfg.Storage.Root, e.g. "~/.foxctl/storage")
 // - storeName: the canonical store name used for env var prefixes (e.g. "SESSIONS", "TASKS", "MEMORY")
 // - defaultFile: the default DB filename for this store (e.g. "sessions.db")
 //

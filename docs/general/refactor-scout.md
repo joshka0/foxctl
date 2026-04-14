@@ -1,20 +1,20 @@
 # Refactor Scout
 
-`agentctl` now includes a local structural refactor workflow for deterministic
+`foxctl` now includes a local structural refactor workflow for deterministic
 hotspot discovery and shortlist planning.
 
 ## What It Is
 
 There are two entrypoints:
 
-- `agentctl refactor status`
-- `agentctl refactor snapshot`
-- `agentctl refactor deps`
-- `agentctl refactor changes`
-- `agentctl refactor hot`
-- `agentctl refactor evidence`
-- `agentctl refactor scout`
-- `agentctl refactor advisor`
+- `foxctl refactor status`
+- `foxctl refactor snapshot`
+- `foxctl refactor deps`
+- `foxctl refactor changes`
+- `foxctl refactor hot`
+- `foxctl refactor evidence`
+- `foxctl refactor scout`
+- `foxctl refactor advisor`
 
 `refactor status` reports whether a given refactor scope will run
 `index_backed` or fall back to `parser_only`, along with the concrete reason
@@ -83,27 +83,27 @@ The current refactor surface is:
 Run the scout directly:
 
 ```bash
-agentctl refactor status --path ./internal --language go
-agentctl refactor snapshot --path ./internal --language go
-agentctl refactor deps --path ./internal --language go --query "Builder.Build" --direction in
-agentctl refactor changes --path ./internal --language go --since HEAD~5
-agentctl refactor hot --path ./internal --language go --since HEAD~20
-agentctl refactor evidence --snapshot-id refsnap-1775053803740
-agentctl refactor evidence --artifact sha256:54cc680432b307307d524d7c857fcd179749a4f3fac30560f27c41f4d82e4ecf
-agentctl refactor scout --path . --language go
-agentctl refactor scout --path ./packages --language typescript
-agentctl refactor scout --path ./scripts --language python
-agentctl refactor scout --path ./crates/my-crate/src --language rust
-agentctl refactor scout --path apps/praze-api/lib --language elixir
-agentctl refactor scout --path ./internal --language go --focus slop
-agentctl refactor scout --path ./internal/runtime/actor --language go --focus dead
+foxctl refactor status --path ./internal --language go
+foxctl refactor snapshot --path ./internal --language go
+foxctl refactor deps --path ./internal --language go --query "Builder.Build" --direction in
+foxctl refactor changes --path ./internal --language go --since HEAD~5
+foxctl refactor hot --path ./internal --language go --since HEAD~20
+foxctl refactor evidence --snapshot-id refsnap-1775053803740
+foxctl refactor evidence --artifact sha256:54cc680432b307307d524d7c857fcd179749a4f3fac30560f27c41f4d82e4ecf
+foxctl refactor scout --path . --language go
+foxctl refactor scout --path ./packages --language typescript
+foxctl refactor scout --path ./scripts --language python
+foxctl refactor scout --path ./crates/my-crate/src --language rust
+foxctl refactor scout --path apps/praze-api/lib --language elixir
+foxctl refactor scout --path ./internal --language go --focus slop
+foxctl refactor scout --path ./internal/runtime/actor --language go --focus dead
 ```
 
 Run the two-stage advisor:
 
 ```bash
-agentctl refactor advisor --path ./internal --language go
-agentctl refactor advisor --path ./internal --language go --focus slop
+foxctl refactor advisor --path ./internal --language go
+foxctl refactor advisor --path ./internal --language go --focus slop
 ```
 
 Typical `refactor status` reads:
@@ -211,11 +211,11 @@ Current rule families include:
     like `useReducer(authPromptReducer, ...)` no longer rely on call-only edges
     to keep reducer-style helpers live
   - Python dead-code analysis is now repoindex-backed on scopes indexed with
-    `agentctl index repo build --python`; the first version uses module/file
+    `foxctl index repo build --python`; the first version uses module/file
     reachability plus same-file Python call edges, so it is useful for package
     helpers and script surfaces but still less framework-aware than Go
   - Rust dead-code analysis is now repoindex-backed on scopes indexed with
-    `agentctl index repo build --rust`; the first version uses tree-sitter-backed
+    `foxctl index repo build --rust`; the first version uses tree-sitter-backed
     Rust symbols when available plus same-file call edges, so crate-wide
     `use`/module reachability still lags Go
 - function hotspots:
@@ -342,7 +342,7 @@ Current confidence by language:
 The refactor workflow fits into ACA as follows:
 
 - `L0` active run:
-  use `agentctl refactor scout` to get the current hotspot surface
+  use `foxctl refactor scout` to get the current hotspot surface
 - `L1` top of mind:
   keep the current top 2-3 seams and function hotspots visible in the active
   frontier

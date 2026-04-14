@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/langutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	refstatus "github.com/joshka0/foxctl/internal/intelligence/refactor/status"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
 )
 
 // Searcher is the minimal repo query search surface used by refactor deps.

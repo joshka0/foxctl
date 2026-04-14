@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/complexity
@@ -58,10 +58,10 @@ signature:
       Use code/complexity to compute cyclomatic or cognitive complexity across
       files or functions and highlight hotspots.
       Example commands:
-        agentctl run code/complexity --input '{"path":"./src","analysis_mode":"hotspots","threshold":10}'
-        agentctl skills run code/complexity --path ./src --analysis_mode hotspots --threshold 10
-        agentctl run code/complexity --input '{"path":"./src","analysis_mode":"function","metric":"cognitive"}'
-        agentctl skills run code/complexity --path ./src --analysis_mode function --metric cognitive
+        foxctl run code/complexity --input '{"path":"./src","analysis_mode":"hotspots","threshold":10}'
+        foxctl skills run code/complexity --path ./src --analysis_mode hotspots --threshold 10
+        foxctl run code/complexity --input '{"path":"./src","analysis_mode":"function","metric":"cognitive"}'
+        foxctl skills run code/complexity --path ./src --analysis_mode function --metric cognitive
     workflows:
       - id: hotspots
         description: "Find high-complexity hotspots."

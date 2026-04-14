@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: fs/read
@@ -29,10 +29,10 @@ signature:
       Use fs/read to read files in the workspace. Large outputs are truncated and
       stored in CAS with a digest.
       Example commands:
-        agentctl run fs/read --input '{"path":"./README.md"}'
-        agentctl skills run fs/read --path ./README.md
-        agentctl run fs/read --input '{"path":"./large.json","max_bytes":4096}'
-        agentctl skills run fs/read --path ./large.json --max_bytes 4096
+        foxctl run fs/read --input '{"path":"./README.md"}'
+        foxctl skills run fs/read --path ./README.md
+        foxctl run fs/read --input '{"path":"./large.json","max_bytes":4096}'
+        foxctl skills run fs/read --path ./large.json --max_bytes 4096
     workflows:
       - id: read-basic
         description: "Read README.md from the workspace."

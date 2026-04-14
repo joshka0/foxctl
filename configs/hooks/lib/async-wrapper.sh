@@ -6,14 +6,14 @@
 #   run_async "$0.impl" "$@"
 #
 # Or wrap a command:
-#   run_async_cmd agentctl run graph/manage --input "$input"
+#   run_async_cmd foxctl run graph/manage --input "$input"
 #
 # The wrapper:
 #   1. Immediately returns {} to unblock Claude
 #   2. Spawns the actual work in background
-#   3. Logs to ~/.agentctl/logs/hooks/ for debugging
+#   3. Logs to ~/.foxctl/logs/hooks/ for debugging
 
-ASYNC_LOG_DIR="${HOME}/.agentctl/logs/hooks"
+ASYNC_LOG_DIR="${HOME}/.foxctl/logs/hooks"
 mkdir -p "$ASYNC_LOG_DIR" 2>/dev/null || true
 
 # Run a script file in background

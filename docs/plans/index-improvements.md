@@ -460,11 +460,11 @@ func symbolSummaryEntryName(workspace string, input symbol.SymbolSummaryInput) s
 
 Applied in both `GetOrCreateSummary()` and `storeSummary()`.
 
-### `cmd/agentctl/cmd/index.go` (modified)
+### `cmd/foxctl/cmd/index.go` (modified)
 
 `symbol-summaries` command (~line 2327): use `sym.Key` for entry name when available. Prefer `SymbolSummaryKeyEntryName` when symbol key exists.
 
-### `cmd/agentctl/cmd/index_repo.go` (modified)
+### `cmd/foxctl/cmd/index_repo.go` (modified)
 
 Symbol summary lookups (~line 683): use key-based entry name via the same key-aware selector.
 
@@ -536,7 +536,7 @@ Update `extractSymbolName()` to handle SymbolKey format from `key:` entry names.
 2. Bump embedding digest version to `v2` → all digests mismatch, full re-embed
 3. `FileMeta.IndexSchema` guard prevents stale file-level skip on unchanged files
 4. Dual-write (key + legacy entry names) is schema-gated per-file: stops automatically when a file is reindexed at current schema
-5. Run: `agentctl index repo build` → `agentctl index init --scope symbols` → `agentctl index symbol-summaries`
+5. Run: `foxctl index repo build` → `foxctl index init --scope symbols` → `foxctl index symbol-summaries`
 6. Old named memory entries with legacy format coexist until GC'd or prefix-deleted
 
 ---
@@ -573,13 +573,13 @@ go test ./internal/intelligence/indexing/embeddingtext/... -v
 go test ./internal/intelligence/retrieval/... -v
 
 # Integration: rebuild index and verify stable IDs
-agentctl index repo build --workspace . --go --typescript
-agentctl index repo search --workspace . --query "Builder" --limit 5
+foxctl index repo build --workspace . --go --typescript
+foxctl index repo search --workspace . --query "Builder" --limit 5
 # Verify node IDs no longer contain file paths
 
 # Integration: verify embeddings use new keys
-agentctl index init --workspace . --scope symbols
-agentctl run code/semantic_search --input '{"query": "symbol extraction", "limit": 5}'
+foxctl index init --workspace . --scope symbols
+foxctl run code/semantic_search --input '{"query": "symbol extraction", "limit": 5}'
 # Verify results still resolve to correct file paths
 
 # Integration: verify locator
@@ -604,7 +604,7 @@ agentctl run code/semantic_search --input '{"query": "symbol extraction", "limit
 | `internal/intelligence/indexing/embedding/store.go` | MODIFY | 6 |
 | `internal/intelligence/retrieval/semantic_search.go` | MODIFY | 7 |
 | `internal/intelligence/retrieval/file_summary.go` | MODIFY | 7 |
-| `cmd/agentctl/cmd/index.go` | MODIFY | 8 |
-| `cmd/agentctl/cmd/index_repo.go` | MODIFY | 8 |
+| `cmd/foxctl/cmd/index.go` | MODIFY | 8 |
+| `cmd/foxctl/cmd/index_repo.go` | MODIFY | 8 |
 | `skills/code_incremental_index/main.go` | MODIFY | 8 |
 | `skills/code_semantic_search/main.go` | MODIFY | 8 |

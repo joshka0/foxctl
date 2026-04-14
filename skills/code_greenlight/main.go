@@ -1,6 +1,6 @@
 // Package main implements the code/greenlight skill.
 //
-// This skill ports the greenlight codescan logic into an agentctl skill.
+// This skill ports the greenlight codescan logic into an foxctl skill.
 package main
 
 import (
@@ -13,11 +13,11 @@ import (
 	"sort"
 	"strings"
 
-	skillfs "github.com/jkatigb/agentctl/internal/adapters/skillslib/fs"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	skillfs "github.com/joshka0/foxctl/internal/adapters/skillslib/fs"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 const command = "code/greenlight"

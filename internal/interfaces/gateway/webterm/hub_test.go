@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	terminalruntime "github.com/jkatigb/agentctl/internal/runtime/terminal"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
+	terminalruntime "github.com/joshka0/foxctl/internal/runtime/terminal"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
 )
 
 func testHubLogger() zerolog.Logger {

@@ -7,7 +7,7 @@ to the canonical specs.
 
 ## OpenAPI Skill (`http/openapi`)
 
-The `http/openapi` skill is the **tier-1 generic HTTP client** for agentctl. It
+The `http/openapi` skill is the **tier-1 generic HTTP client** for foxctl. It
 can call any OpenAPI 3.x operation using a spec loaded from:
 
 - A file path
@@ -81,7 +81,7 @@ The skill auto-detects or accepts explicit pagination strategies (see
 Callers can override strategy and parameters, for example:
 
 ```bash
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:github \
   --operationId=listReposForUser \
   --params='{"path":{"username":"octocat"},"query":{"per_page":100}}' \
@@ -108,7 +108,7 @@ Canonical spec: `docs/spec/plugin_protocol.md`.
   - Output returns whether to continue and how to build the next request.
 
 Plugins are discovered via search paths (e.g. `AGENTCTL_OPENAPI_PLUGIN_PATH`) or
-installed under `~/.agentctl/plugins`.
+installed under `~/.foxctl/plugins`.
 
 ---
 

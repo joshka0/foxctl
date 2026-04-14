@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: heartwood/state
@@ -50,8 +50,8 @@ signature:
     long: |
       Use heartwood/state to fetch the current participant-facing Heartwood state for an identity.
       Example commands:
-        agentctl run heartwood/state --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token"}'
-        agentctl skills run heartwood/state --host ws://192.168.0.243:3001 --db_name heartwood --token_path /tmp/hw-agent-1.token
+        foxctl run heartwood/state --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token"}'
+        foxctl skills run heartwood/state --host ws://192.168.0.243:3001 --db_name heartwood --token_path /tmp/hw-agent-1.token
 returns:
   - name: ok
     type: boolean

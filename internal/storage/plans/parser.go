@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 // headingRegex matches markdown headings (# to ######).

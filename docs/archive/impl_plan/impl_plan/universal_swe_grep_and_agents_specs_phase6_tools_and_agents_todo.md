@@ -22,10 +22,10 @@ kernel-owned tools, without exposing raw DBs or skills directly to LLMs.
 >   - Overseer & hierarchy:
 >     `Agentctl Overseer & Agent Hierarchy: Spawn Protocol, Depth Limits, and Session Management`.
 >   - Planning stack:
->     `agentctl Planning LLM Stack: Auto, Providers, and Integration Tests`.
->   - Knowledge system: `agentctl Knowledge System & Factory Droids`.
+>     `foxctl Planning LLM Stack: Auto, Providers, and Integration Tests`.
+>   - Knowledge system: `foxctl Knowledge System & Factory Droids`.
 >   - Agent runtime & tools:
->     `Dspy-Go Agent Runtime & Tools Integration in agentctl`.
+>     `Dspy-Go Agent Runtime & Tools Integration in foxctl`.
 
 ---
 
@@ -67,7 +67,7 @@ Goal: define **dspy-go tool contracts** for `code.symbol_search` and
     - Optional `cas_artifact` reference when snippets are large.
 - [ ] Implement the tool as a **thin wrapper** around the `code/snippet_extract` exec
       skill:
-  - Use the existing CLI/runner path (`agentctl run code_swe_grep`-equivalent)
+  - Use the existing CLI/runner path (`foxctl run code_swe_grep`-equivalent)
     or direct skill invocation consistent with other skills.
   - Preserve Protocol v1 envelopes and CAS invariants (no custom transport).
   - Treat **recall and ranking** as upstream concerns (semantic file index +
@@ -157,7 +157,7 @@ retrieval tools, while maintaining depth limits and advisory-only knowledge.
   - Factory droids or docs for `code.symbol_search` / `code.swe_grep` usage.
   - Keywords to help the knowledge router surface these docs when coding tasks
     mention "search", "grep", or "symbol".
-- [ ] Ensure `agentctl knowledge sync` and the knowledge router hook continue to
+- [ ] Ensure `foxctl knowledge sync` and the knowledge router hook continue to
       operate without modification to their wire contracts:
   - Changes are limited to content and keywords, not schema.
 

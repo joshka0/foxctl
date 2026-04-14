@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 // Event represents an SSE event to be sent to clients.

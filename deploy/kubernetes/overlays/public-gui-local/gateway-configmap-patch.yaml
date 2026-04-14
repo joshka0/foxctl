@@ -4,7 +4,7 @@ metadata:
   name: gui-auth-gateway-config
 data:
   BETTER_AUTH_URL: "http://127.0.0.1:4010"
-  GUI_AUTH_UPSTREAM_URL: "http://agentctl:8080"
+  GUI_AUTH_UPSTREAM_URL: "http://foxctl:8080"
   GUI_AUTH_MAGIC_LINK_LOG_ONLY: "true"
   GUI_AUTH_ALLOWED_EMAILS: "test@example.com"
   GUI_AUTH_SQLITE_PATH: "/tmp/gui-auth-gateway.sqlite"

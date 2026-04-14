@@ -11,7 +11,7 @@ commands:
 
 services:
   gateway-dev:
-    start: bin/agentctl gateway --dev --port 8765
+    start: bin/foxctl gateway --dev --port 8765
     stop: lsof -ti :8765 | xargs kill 2>/dev/null || true
     healthcheck: curl -sf http://localhost:8765/healthz
     port: 8765

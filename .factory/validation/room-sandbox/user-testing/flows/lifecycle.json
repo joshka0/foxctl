@@ -2,8 +2,8 @@
   "groupId": "lifecycle",
   "testedAt": "2026-04-10T00:00:00Z",
   "isolation": {
-    "repoRoot": "/Users/joshka/repos/personal/agentctl",
-    "binary": "/Users/joshka/repos/personal/agentctl/bin/agentctl",
+    "repoRoot": "/Users/joshka/repos/personal/foxctl",
+    "binary": "/Users/joshka/repos/personal/foxctl/bin/foxctl",
     "gatewayDevMode": "localhost:8765",
     "testIsolation": "Each test creates its own temp git repo via t.TempDir() — no shared state",
     "buildEnv": "CGO_ENABLED=0, GOROOT/GOBIN/GOTOOLDIR unset"

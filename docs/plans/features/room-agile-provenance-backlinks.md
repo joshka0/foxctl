@@ -12,7 +12,7 @@ The room-agile backend now has three useful layers:
 
 1. `room`
    - canonical operational ledger
-2. `~/.agentctl/epics/...`
+2. `~/.foxctl/epics/...`
    - rich work-pack mirror
 3. ACA drafts / memory proposals
    - review-first semantic memory projection
@@ -139,9 +139,9 @@ sync that artifact.
 
 Add explicit provenance blocks to:
 
-- `~/.agentctl/epics/<epic-id>/meta.json`
-- `~/.agentctl/epics/<epic-id>/milestones/<milestone-id>/meta.json`
-- `~/.agentctl/epics/<epic-id>/milestones/<milestone-id>/stories/<story-id>/meta.json`
+- `~/.foxctl/epics/<epic-id>/meta.json`
+- `~/.foxctl/epics/<epic-id>/milestones/<milestone-id>/meta.json`
+- `~/.foxctl/epics/<epic-id>/milestones/<milestone-id>/stories/<story-id>/meta.json`
 - story validation `*.json`
 
 Suggested shape:
@@ -151,8 +151,8 @@ Suggested shape:
   "schema_version": 1,
   "generated_at": "2026-04-07T18:00:00Z",
   "provenance": {
-    "workspace": "/Users/joshka/repos/personal/agentctl",
-    "workspace_id": "/Users/joshka/repos/personal/agentctl",
+    "workspace": "/Users/joshka/repos/personal/foxctl",
+    "workspace_id": "/Users/joshka/repos/personal/foxctl",
     "room_id": "triad-20260404-202656",
     "source_kind": "story_validation",
     "source_id": "01ABC...",
@@ -161,9 +161,9 @@ Suggested shape:
     "story_id": "01STORY...",
     "validation_id": "01VAL...",
     "room_message_ids": ["01ABC..."],
-    "workpack_root": "/Users/.../.agentctl/epics/01EPIC...",
-    "workpack_path": "/Users/.../.agentctl/epics/01EPIC.../milestones/01MILE.../stories/01STORY.../validation/01VAL....md",
-    "meta_json_path": "/Users/.../.agentctl/epics/01EPIC.../milestones/01MILE.../stories/01STORY.../validation/01VAL....json"
+    "workpack_root": "/Users/.../.foxctl/epics/01EPIC...",
+    "workpack_path": "/Users/.../.foxctl/epics/01EPIC.../milestones/01MILE.../stories/01STORY.../validation/01VAL....md",
+    "meta_json_path": "/Users/.../.foxctl/epics/01EPIC.../milestones/01MILE.../stories/01STORY.../validation/01VAL....json"
   }
 }
 ```
@@ -206,7 +206,7 @@ That gives the CLI/UI enough information to deep-link without recomputing paths.
 
 Use lightweight human-visible references only where useful, for example:
 
-- `ACA draft candidates live under .agentctl/templates/obsidian-vault/inbox/drafted-from-agentctl/...`
+- `ACA draft candidates live under .foxctl/templates/obsidian-vault/inbox/drafted-from-foxctl/...`
 
 Do not try to hardcode final canonical vault destinations in work-pack markdown.
 
@@ -220,7 +220,7 @@ ACA drafts should keep:
 
 and may include short body links such as:
 
-- `Work-pack: /Users/.../.agentctl/epics/...`
+- `Work-pack: /Users/.../.foxctl/epics/...`
 
 ### Room -> artifact
 

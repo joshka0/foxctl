@@ -4,7 +4,7 @@ description = "Show project structure"
 prompt = """Show the directory structure:
 
 ```bash
-!{agentctl run fs/tree --input '{"path": "{{args}}", "max_depth": 3}'}
+!{foxctl run fs/tree --input '{"path": "{{args}}", "max_depth": 3}'}
 ```
 
 Analyze the structure:

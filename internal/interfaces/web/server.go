@@ -14,22 +14,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
-	consolepkg "github.com/jkatigb/agentctl/internal/console"
-	"github.com/jkatigb/agentctl/internal/console/app"
-	"github.com/jkatigb/agentctl/internal/context/companion"
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter"
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter/discord"
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter/teams"
-	"github.com/jkatigb/agentctl/internal/interfaces/chatadapter/telegram"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/api"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/consolews"
-	"github.com/jkatigb/agentctl/internal/interfaces/web/sse"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/storage/convref"
+	consolepkg "github.com/joshka0/foxctl/internal/console"
+	"github.com/joshka0/foxctl/internal/console/app"
+	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter/discord"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter/teams"
+	"github.com/joshka0/foxctl/internal/interfaces/chatadapter/telegram"
+	"github.com/joshka0/foxctl/internal/interfaces/web/api"
+	"github.com/joshka0/foxctl/internal/interfaces/web/consolews"
+	"github.com/joshka0/foxctl/internal/interfaces/web/sse"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage/convref"
 )
 
-// Server is the agentctl web server.
+// Server is the foxctl web server.
 type Server struct {
 	opts             Options
 	cfg              config.Config

@@ -5,10 +5,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/context/sessionkit/claudejsonl"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit/codexjsonl"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/context/sessionkit/claudejsonl"
+	"github.com/joshka0/foxctl/internal/context/sessionkit/codexjsonl"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
 )
 
 // ResolveAndParseTranscript resolves one source session path and parses it.

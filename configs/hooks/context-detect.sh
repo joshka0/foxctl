@@ -7,13 +7,13 @@
 # - Returns formatted evidence as context injection
 #
 # Environment:
-#   AGENTCTL_BIN - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_CONTEXT_MAX_FILES - Max files to process (default: 5)
 #   AGENTCTL_CONTEXT_MODE - Extraction mode: general, structure (default: general)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 MAX_FILES="${AGENTCTL_CONTEXT_MAX_FILES:-5}"
 MODE="${AGENTCTL_CONTEXT_MODE:-general}"
 

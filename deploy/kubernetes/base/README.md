@@ -31,7 +31,7 @@ kubectl apply -k deploy/kubernetes/overlays/postgres
 
 | File | Role |
 |------|------|
-| `deployment.yaml` | Main `agentctl` deployment |
+| `deployment.yaml` | Main `foxctl` deployment |
 | `configmap.yaml` | Base env vars, including some legacy defaults |
 | `workspace-deployment.yaml` | Optional workspace pod with git-sync sidecar |
 | `embedding-worker.yaml` | Background embedding worker deployment |
@@ -50,7 +50,7 @@ kubectl apply -k deploy/kubernetes/overlays/postgres
 
 ## Runtime notes
 
-- The deployed process is typically `agentctl web serve`.
+- The deployed process is typically `foxctl web serve`.
 - Live HTTP app routes are under `/api`.
 - Kubernetes probes should target `/healthz` and `/readyz`.
 - Optional chat adapters and optional Jido-backed orchestration require extra

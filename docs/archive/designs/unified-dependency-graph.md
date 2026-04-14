@@ -273,7 +273,7 @@ This enables:
 3. Update `in_degree`, `out_degree` counts
 4. Trigger options:
    - Periodic background job (hourly)
-   - On-demand via CLI: `agentctl graph pagerank --workspace .`
+   - On-demand via CLI: `foxctl graph pagerank --workspace .`
    - After significant edge changes (batch threshold)
 
 **Algorithm:**
@@ -306,7 +306,7 @@ This enables:
 3. **Path alias repair:** When `live-index` sees file move:
    - Update `graph_nodes.current_path` for affected symbol nodes
    - Edges remain on stable ID (no breakage)
-4. **Repair command:** `agentctl graph repair --workspace .`
+4. **Repair command:** `foxctl graph repair --workspace .`
    - Re-sync path aliases
    - Delete dead edges
    - Recalculate degree counts
@@ -315,12 +315,12 @@ This enables:
 **Goal:** Developer tooling and debugging
 
 1. CLI commands:
-   - `agentctl graph stats` - Edge counts by type, node counts by type
-   - `agentctl graph top --type symbol --limit 10` - Top nodes by PageRank
-   - `agentctl graph edges --node <id>` - List edges for a node
-   - `agentctl graph export --format dot` - Graphviz DOT export
+   - `foxctl graph stats` - Edge counts by type, node counts by type
+   - `foxctl graph top --type symbol --limit 10` - Top nodes by PageRank
+   - `foxctl graph edges --node <id>` - List edges for a node
+   - `foxctl graph export --format dot` - Graphviz DOT export
 
-2. Doctor checks (in `agentctl doctor`):
+2. Doctor checks (in `foxctl doctor`):
    - Coverage: % of symbols with incoming edges
    - Dangling: edges to missing nodes
    - Expired: edges pending TTL cleanup

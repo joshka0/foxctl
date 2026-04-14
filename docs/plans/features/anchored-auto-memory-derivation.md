@@ -1,7 +1,7 @@
 ---
 vault_refs:
-  - notes/repo/agentctl/semantic-and-memory.md
-  - notes/repo/agentctl/index.md
+  - notes/repo/foxctl/semantic-and-memory.md
+  - notes/repo/foxctl/index.md
 ---
 # Anchored Auto-Memory Derivation
 

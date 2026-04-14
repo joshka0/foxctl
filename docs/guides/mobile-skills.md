@@ -6,7 +6,7 @@ This document describes the mobile simulator automation skills for iOS and Andro
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                              agentctl                                │
+│                              foxctl                                │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐  ┌────────────────┐   │
 │  │  mobile  │  │   expo   │  │  mobile/ios  │  │ mobile/android │   │
 │  │ (unified)│  │ (unified)│  │              │  │                │   │
@@ -142,74 +142,74 @@ EAS CLI is required for build and update operations. Dev menu operations work wi
 
 ```bash
 # List all devices (both platforms)
-agentctl run mobile --input '{"operation": "list_devices"}'
+foxctl run mobile --input '{"operation": "list_devices"}'
 
 # Platform-specific operation
-agentctl run mobile --input '{"platform": "ios", "operation": "screenshot"}'
-agentctl run mobile --input '{"platform": "android", "operation": "tap", "x": 200, "y": 400}'
+foxctl run mobile --input '{"platform": "ios", "operation": "screenshot"}'
+foxctl run mobile --input '{"platform": "android", "operation": "tap", "x": 200, "y": 400}'
 ```
 
 ### iOS Skill
 
 ```bash
 # Device management
-agentctl run mobile/ios --input '{"operation": "list_devices"}'
-agentctl run mobile/ios --input '{"operation": "boot", "udid": "<device-udid>"}'
+foxctl run mobile/ios --input '{"operation": "list_devices"}'
+foxctl run mobile/ios --input '{"operation": "boot", "udid": "<device-udid>"}'
 
 # App lifecycle
-agentctl run mobile/ios --input '{"operation": "install", "app": "/path/to/app.app"}'
-agentctl run mobile/ios --input '{"operation": "launch", "app": "com.example.myapp"}'
+foxctl run mobile/ios --input '{"operation": "install", "app": "/path/to/app.app"}'
+foxctl run mobile/ios --input '{"operation": "launch", "app": "com.example.myapp"}'
 
 # UI interaction
-agentctl run mobile/ios --input '{"operation": "tap", "x": 200, "y": 400}'
-agentctl run mobile/ios --input '{"operation": "type_text", "text": "Hello"}'
+foxctl run mobile/ios --input '{"operation": "tap", "x": 200, "y": 400}'
+foxctl run mobile/ios --input '{"operation": "type_text", "text": "Hello"}'
 
 # Expo development
-agentctl run mobile/ios --input '{"operation": "shake"}'
-agentctl run mobile/ios --input '{"operation": "expo_deep_link", "expo_url": "exp://192.168.1.100:8081"}'
+foxctl run mobile/ios --input '{"operation": "shake"}'
+foxctl run mobile/ios --input '{"operation": "expo_deep_link", "expo_url": "exp://192.168.1.100:8081"}'
 ```
 
 ### Android Skill
 
 ```bash
 # Device management
-agentctl run mobile/android --input '{"operation": "list_devices"}'
-agentctl run mobile/android --input '{"operation": "device_info", "serial": "emulator-5554"}'
+foxctl run mobile/android --input '{"operation": "list_devices"}'
+foxctl run mobile/android --input '{"operation": "device_info", "serial": "emulator-5554"}'
 
 # App lifecycle
-agentctl run mobile/android --input '{"operation": "install", "app": "/path/to/app.apk"}'
-agentctl run mobile/android --input '{"operation": "launch", "app": "com.example.myapp"}'
+foxctl run mobile/android --input '{"operation": "install", "app": "/path/to/app.apk"}'
+foxctl run mobile/android --input '{"operation": "launch", "app": "com.example.myapp"}'
 
 # UI interaction
-agentctl run mobile/android --input '{"operation": "tap", "x": 540, "y": 960}'
-agentctl run mobile/android --input '{"operation": "press_key", "keycode": "BACK"}'
+foxctl run mobile/android --input '{"operation": "tap", "x": 540, "y": 960}'
+foxctl run mobile/android --input '{"operation": "press_key", "keycode": "BACK"}'
 
 # Debugging
-agentctl run mobile/android --input '{"operation": "logcat_filter", "tag": "MyApp", "level": "E"}'
-agentctl run mobile/android --input '{"operation": "dumpsys", "service": "activity"}'
+foxctl run mobile/android --input '{"operation": "logcat_filter", "tag": "MyApp", "level": "E"}'
+foxctl run mobile/android --input '{"operation": "dumpsys", "service": "activity"}'
 ```
 
 ### Expo Skill
 
 ```bash
 # Dev menu operations (works on both iOS and Android)
-agentctl run expo --input '{"operation": "shake"}'
-agentctl run expo --input '{"operation": "reload", "platform": "ios"}'
-agentctl run expo --input '{"operation": "deep_link", "url": "exp://192.168.1.100:8081"}'
+foxctl run expo --input '{"operation": "shake"}'
+foxctl run expo --input '{"operation": "reload", "platform": "ios"}'
+foxctl run expo --input '{"operation": "deep_link", "url": "exp://192.168.1.100:8081"}'
 
 # Toggle dev tools
-agentctl run expo --input '{"operation": "toggle_inspector"}'
-agentctl run expo --input '{"operation": "toggle_performance"}'
+foxctl run expo --input '{"operation": "toggle_inspector"}'
+foxctl run expo --input '{"operation": "toggle_performance"}'
 
 # EAS cloud builds
-agentctl run expo --input '{"operation": "build", "build_platform": "ios", "profile": "development"}'
-agentctl run expo --input '{"operation": "build_status"}'
+foxctl run expo --input '{"operation": "build", "build_platform": "ios", "profile": "development"}'
+foxctl run expo --input '{"operation": "build_status"}'
 
 # OTA updates
-agentctl run expo --input '{"operation": "update", "channel": "preview", "message": "Bug fixes"}'
+foxctl run expo --input '{"operation": "update", "channel": "preview", "message": "Bug fixes"}'
 
 # Metro logs
-agentctl run expo --input '{"operation": "logs", "filter": "error", "count": 50}'
+foxctl run expo --input '{"operation": "logs", "filter": "error", "count": 50}'
 ```
 
 ## Output Format
@@ -245,16 +245,16 @@ For large outputs (screenshots, UI trees, logs), the data is stored in CAS:
 }
 ```
 
-Retrieve with: `agentctl cas get sha256:abc123...`
+Retrieve with: `foxctl cas get sha256:abc123...`
 
 ## Claude Code Integration
 
 ### Available Skills
 
-- `/agentctl-mobile` - Unified mobile automation
-- `/agentctl-mobile-ios` - iOS Simulator automation
-- `/agentctl-mobile-android` - Android Emulator automation
-- Expo skill: `agentctl run expo --input '...'`
+- `/foxctl-mobile` - Unified mobile automation
+- `/foxctl-mobile-ios` - iOS Simulator automation
+- `/foxctl-mobile-android` - Android Emulator automation
+- Expo skill: `foxctl run expo --input '...'`
 
 ### Expo Development Workflow
 
@@ -290,7 +290,7 @@ Retrieve with: `agentctl cas get sha256:abc123...`
 ### Debug Mode
 
 ```bash
-AGENTCTL_DEBUG=1 agentctl run mobile/ios --input '{"operation": "list_devices"}'
+AGENTCTL_DEBUG=1 foxctl run mobile/ios --input '{"operation": "list_devices"}'
 ```
 
 ## Building from Source

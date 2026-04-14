@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: jira/issue
@@ -347,14 +347,14 @@ signature:
         JIRA_API_TOKEN
 
       Example commands:
-        agentctl run jira/issue --input '{"operation":"search","search":{"jql":"project = ENG AND statusCategory != Done","fields":["summary","status","assignee"]}}'
-        agentctl run jira/issue --input '{"operation":"projects","projects":{"query":"DEVOPS"}}'
-        agentctl run jira/issue --input '{"operation":"list_links","list_links":{"key":"ENG-123"}}'
-        agentctl run jira/issue --input '{"operation":"create","create":{"project_key":"ENG","issue_type":"Task","summary":"Wire Jira MCP tools","description":"Create native Jira skills."}}'
-        agentctl run jira/issue --input '{"operation":"comment","comment":{"key":"ENG-123","body":"Investigated and updated the implementation plan."}}'
-        agentctl run jira/issue --input '{"operation":"update_comment","update_comment":{"key":"ENG-123","comment_id":"10001","body":"Adjusted after review."}}'
-        agentctl run jira/issue --input '{"operation":"update","update":{"key":"ENG-123","add_labels":["Devops"],"clear_assignee":true}}'
-        agentctl run jira/issue --input '{"operation":"list_watchers","list_watchers":{"key":"ENG-123"}}'
+        foxctl run jira/issue --input '{"operation":"search","search":{"jql":"project = ENG AND statusCategory != Done","fields":["summary","status","assignee"]}}'
+        foxctl run jira/issue --input '{"operation":"projects","projects":{"query":"DEVOPS"}}'
+        foxctl run jira/issue --input '{"operation":"list_links","list_links":{"key":"ENG-123"}}'
+        foxctl run jira/issue --input '{"operation":"create","create":{"project_key":"ENG","issue_type":"Task","summary":"Wire Jira MCP tools","description":"Create native Jira skills."}}'
+        foxctl run jira/issue --input '{"operation":"comment","comment":{"key":"ENG-123","body":"Investigated and updated the implementation plan."}}'
+        foxctl run jira/issue --input '{"operation":"update_comment","update_comment":{"key":"ENG-123","comment_id":"10001","body":"Adjusted after review."}}'
+        foxctl run jira/issue --input '{"operation":"update","update":{"key":"ENG-123","add_labels":["Devops"],"clear_assignee":true}}'
+        foxctl run jira/issue --input '{"operation":"list_watchers","list_watchers":{"key":"ENG-123"}}'
     workflows:
       - id: search-issues
         description: "Search issues using JQL."

@@ -1,4 +1,4 @@
-# Public gui-agent overlay with Better Auth gateway in front of agentctl.
+# Public gui-agent overlay with Better Auth gateway in front of foxctl.
 # Usage: kubectl apply -k deploy/kubernetes/overlays/public-gui/
 
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -16,12 +16,12 @@ patches:
 - path: ingress-patch.yaml
   target:
     kind: Ingress
-    name: agentctl
-- path: agentctl-deployment-patch.yaml
+    name: foxctl
+- path: foxctl-deployment-patch.yaml
   target:
     kind: Deployment
-    name: agentctl
-- path: agentctl-hpa-patch.yaml
+    name: foxctl
+- path: foxctl-hpa-patch.yaml
   target:
     kind: HorizontalPodAutoscaler
-    name: agentctl
+    name: foxctl

@@ -1,0 +1,41 @@
+name: foxctl-cochange
+queries:
+  - id: workspace-embedding-overrides
+    query: "workspace embedding override config"
+    expected_any_of:
+      - docs/plans/features/workspace-embedding-overrides-research.md
+      - internal/platform/config/config.go
+    notes: "Should surface the co-change cluster around the workspace embedding override work."
+  - id: session-embedding-metadata
+    query: "session embedding metadata"
+    expected_any_of:
+      - internal/storage/sessions/store.go
+      - docs/plans/features/workspace-embedding-overrides-research.md
+    notes: "Should surface the sessions store or the embedding override research cluster."
+  - id: agent-runtime-llm-backend
+    query: "agent runtime llm backend"
+    expected_any_of:
+      - cmd/foxctl/cmd/agent.go
+      - internal/runtime/daemon/service.go
+    notes: "Should surface the new agent/backend propagation cluster."
+  - id: config-llm-auth-baseurl
+    query: "workspace config llm auth base url"
+    expected_any_of:
+      - internal/platform/config/config.go
+      - internal/platform/config/config_test.go
+      - docs/README.md
+    notes: "Should surface the config/auth backend cluster."
+  - id: repoquery-terraform
+    query: "terraform repoquery disambiguation"
+    expected_any_of:
+      - internal/intelligence/repoquery/repoquery.go
+      - internal/intelligence/repoquery/project.go
+      - internal/intelligence/indexing/repoindex/builder_infra.go
+    notes: "Should land in the co-change cluster around repoquery and infra indexing."
+  - id: v2-layered-context
+    query: "v2 layered context budget"
+    expected_any_of:
+      - internal/v2/runtime/contextbuilder/layered.go
+      - docs/plans/v2-implementation-todo.md
+      - docs/spec/v2_greenfield_bootstrap.md
+    notes: "Should surface the layered contextbuilder cluster or its tightly coupled docs."

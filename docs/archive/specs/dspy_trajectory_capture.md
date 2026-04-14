@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This spec defines how agentctl **captures user requests and agent runs as
+This spec defines how foxctl **captures user requests and agent runs as
 trajectories** that can be used for:
 
 - Training and evaluating dspy-go agents.
@@ -33,7 +33,7 @@ artifacts.
 - **Link to tasks and reviews**
   - Connect user requests to tasks, epics, reviews, and code changes.
 - **Trajectory-friendly schema**
-  - Define a conceptual schema for dspy-ready episodes derived from agentctl
+  - Define a conceptual schema for dspy-ready episodes derived from foxctl
     data.
 - **Reuse Protocol v1**
   - Never introduce a parallel logging format; trajectories are built from
@@ -91,7 +91,7 @@ Fields (conceptual):
 - `ts` (timestamp).
 - `text` (string) – raw user request or prompt.
 - `command_context` (object, optional):
-  - `cli_command` (string, optional) – e.g. `"agentctl agent spawn ..."`.
+  - `cli_command` (string, optional) – e.g. `"foxctl agent spawn ..."`.
   - `protocol_command` (string, optional) – e.g. `"agent/spawn"` or
     `"todo/manage"`.
   - `job_id` (string, optional).
@@ -147,7 +147,7 @@ related envelopes and index rows:
 | `task_run_id` / `run_id`  | string | optional | Unique id per execution attempt of a given task                                | Useful for distinguishing retries of the same task.                                                           |
 | `trace_parent`            | string | optional | Parent trace id                                                                | Set when a trajectory is spawned from another trajectory/trace.                                               |
 | `job_attempt` / `attempt` | int    | optional | Non-negative integer; monotonic per `job_id`                                   | Incremented on each retry of the same job.                                                                    |
-| `created_by`              | string | optional | Service or user identifier                                                     | E.g. `agentctl`, `actor:system:overseer`, `actor:human:<id>`.                                                 |
+| `created_by`              | string | optional | Service or user identifier                                                     | E.g. `foxctl`, `actor:system:overseer`, `actor:human:<id>`.                                                 |
 | `cas_digest`              | string | optional | `sha256:<hex>`; MUST match any referenced CAS artifact                         | MAY be set when `data_artifact` / `data.artifact` is present; MUST be omitted when no artifact is referenced. |
 
 Unless otherwise specified, optional fields are omitted when not applicable;
@@ -169,8 +169,8 @@ Events SHOULD be derived from:
 User requests SHOULD be captured at:
 
 - **CLI invocations** where the user expresses a goal:
-  - E.g. `agentctl agent spawn --role coder --goal "Refactor X" ...`.
-  - E.g. `agentctl todo add --title "..." --description "..."`.
+  - E.g. `foxctl agent spawn --role coder --goal "Refactor X" ...`.
+  - E.g. `foxctl todo add --title "..." --description "..."`.
 - **Mailbox messages** authored by humans/admins:
   - `kind = "instruction" | "request"` messages with natural language bodies.
 - **Viewer / API UIs** that collect freeform requests.
@@ -537,7 +537,7 @@ Conceptual config keys:
   redaction rules.
 - `trajectory_export.enabled` (bool, default `false`).
 
-Implementations MAY expose these via `~/.agentctl/config.yaml` or
+Implementations MAY expose these via `~/.foxctl/config.yaml` or
 workspace-local config.
 
 ---

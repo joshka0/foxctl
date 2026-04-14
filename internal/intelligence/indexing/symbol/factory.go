@@ -1,9 +1,9 @@
 package symbol
 
 import (
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/rs/zerolog"
 )
 

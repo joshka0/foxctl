@@ -8,7 +8,7 @@
 
 ## Summary
 
-Implemented Phase 5.1 of the agentctl spec, focusing on deterministic
+Implemented Phase 5.1 of the foxctl spec, focusing on deterministic
 memoization and proper error handling for the auto-cache system.
 
 ---

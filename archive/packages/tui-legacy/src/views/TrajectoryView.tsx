@@ -10,7 +10,7 @@ import {
   useScorerWeights,
 } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { Trajectory, TrajectoryEvent, ScorerWeights } from "@agentctl/data";
+import type { Trajectory, TrajectoryEvent, ScorerWeights } from "@foxctl/data";
 
 function statusColor(status: string): string {
   switch (status) {

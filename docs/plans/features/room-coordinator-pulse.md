@@ -53,7 +53,7 @@ This pulse is distinct from the existing room/task cleanup pulse concepts:
 
 Add:
 
-- `agentctl room pulse <room-id>`
+- `foxctl room pulse <room-id>`
 
 Optional inputs:
 
@@ -262,7 +262,7 @@ Do not introduce a second taxonomy in this slice.
 
 ## Definition of done
 
-1. `agentctl room pulse <room-id>` returns a stable room-wide epic summary.
+1. `foxctl room pulse <room-id>` returns a stable room-wide epic summary.
 2. the pulse is derived from existing epic helpers rather than a parallel model.
 3. room-wide counters and epic ordering are deterministic.
 4. `top_items` expose actionable room-wide coordinator work.

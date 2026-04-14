@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: optimize/feedback
@@ -40,8 +40,8 @@ signature:
     long: |
       Use optimize/feedback to analyze recorded feedback and recommend improvements.
       Example commands:
-        agentctl run optimize/feedback --input '{"workspace":"./","min_rating":3}'
-        agentctl skills run optimize/feedback --workspace ./ --min_rating 3
+        foxctl run optimize/feedback --input '{"workspace":"./","min_rating":3}'
+        foxctl skills run optimize/feedback --workspace ./ --min_rating 3
     workflows:
       - id: analyze-feedback
         description: "Analyze feedback in a workspace."

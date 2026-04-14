@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/jkatigb/agentctl/internal/interfaces/openapi/loader"
+	"github.com/joshka0/foxctl/internal/interfaces/openapi/loader"
 )
 
 func TestBuilder_Build(t *testing.T) {

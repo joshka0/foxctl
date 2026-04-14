@@ -1,6 +1,6 @@
-// Package main implements the todo/sync_to_provider skill for syncing tasks from agentctl to external providers.
+// Package main implements the todo/sync_to_provider skill for syncing tasks from foxctl to external providers.
 //
-// This skill syncs todos TO a provider (e.g., Claude Code) FROM agentctl's
+// This skill syncs todos TO a provider (e.g., Claude Code) FROM foxctl's
 // task management system. It is the outbound sync direction.
 //
 // SECURITY NOTE: This skill writes to ~/.claude/todos which is outside the
@@ -11,10 +11,10 @@ import (
 	"context"
 	"os"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/context/todosync"
-	"github.com/jkatigb/agentctl/internal/providers/claude/todos"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/context/todosync"
+	"github.com/joshka0/foxctl/internal/providers/claude/todos"
 )
 
 const command = "todo/sync_to_provider"
@@ -69,7 +69,7 @@ func main() {
 // run orchestrates outbound todo synchronization with permission checks, task projection, and provider file writing.
 //
 // Index:
-// - Purpose: Sync tasks from agentctl to external providers (Claude Code) with configurable formatting and ordering
+// - Purpose: Sync tasks from foxctl to external providers (Claude Code) with configurable formatting and ordering
 // - Flow: check permissions → open task store → resolve session → build projection config → sync tasks → write provider file → emit results
 // - SideEffects: writes to provider state files outside workspace; modifies external todo systems; handles file conflicts
 // - FailureModes: permission denied, task store errors, provider file write failures, sync conflicts, invalid configurations

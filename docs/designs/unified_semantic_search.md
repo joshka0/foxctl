@@ -496,7 +496,7 @@ Add to `.claude/hooks/task-embed.sh`:
 ```bash
 #!/bin/bash
 # Triggered on task completion to embed gotchas/notes
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 input=$(cat)
 
 operation=$(echo "$input" | jq -r '.tool_input.operation // empty')
@@ -530,7 +530,7 @@ Create `.claude/hooks/memory-embed.sh`:
 # Triggered when memories are updated
 # Refreshes embeddings for modified memories
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 input=$(cat)
 
 # Extract memory operation from hook input
@@ -620,7 +620,7 @@ vh.ExtractVector("col")            // vector_extract(col)
 
 #### 6.4 Platform config integration
 
-Database settings in `~/.agentctl/config.yaml`:
+Database settings in `~/.foxctl/config.yaml`:
 
 ```yaml
 database:
@@ -690,7 +690,7 @@ Tests gracefully skip when credentials are not set.
 ### Config file additions
 
 ```yaml
-# ~/.agentctl/config.yaml
+# ~/.foxctl/config.yaml
 embedding:
   enabled: true
   provider: gemini # default; can be overridden via EMBEDDING_PROVIDER
@@ -828,7 +828,7 @@ Environment overrides:
 ### Unified semantic search
 
 ```bash
-agentctl run code/semantic_search --input '{
+foxctl run code/semantic_search --input '{
   "query": "error handling in HTTP requests",
   "scope": ["symbols", "sessions"],
   "limit": 10,
@@ -839,7 +839,7 @@ agentctl run code/semantic_search --input '{
 ### Semantic search with LLM synthesis
 
 ```bash
-agentctl run code/semantic_search --input '{
+foxctl run code/semantic_search --input '{
   "query": "How do we handle rate limiting in API calls?",
   "scope": ["symbols", "sessions", "tasks"],
   "limit": 10,
@@ -912,7 +912,7 @@ Output:
 ### Task semantic search
 
 ```bash
-agentctl run code/semantic_search --input '{
+foxctl run code/semantic_search --input '{
   "query": "rate limiting gotchas",
   "scope": ["tasks"],
   "limit": 5
@@ -951,7 +951,7 @@ Output:
 ### Enhanced swe_grep
 
 ```bash
-agentctl run code/snippet_extract --input '{
+foxctl run code/snippet_extract --input '{
   "question": "How do we handle rate limiting?",
   "path": "internal/"
 }'
@@ -1011,7 +1011,7 @@ to prevent dimension mismatches and corrupted vector searches.
 ### Default Configuration
 
 ```yaml
-# ~/.agentctl/config.yaml
+# ~/.foxctl/config.yaml
 embedding:
   provider: gemini
   model: gemini-embedding-001  # 3072-dimensional model
@@ -1089,19 +1089,19 @@ When switching embedding models:
 
 ```bash
 # 1. Update config
-# ~/.agentctl/config.yaml
+# ~/.foxctl/config.yaml
 embedding:
   model: new-model-name
   dimensions: 768  # New model dimensions
 
 # 2. Clear existing embeddings
-rm ~/.agentctl/sessions.db  # Or truncate sessions table
+rm ~/.foxctl/sessions.db  # Or truncate sessions table
 
 # 3. Regenerate embeddings
-agentctl run session/summarize --input '{"reindex": true}'
+foxctl run session/summarize --input '{"reindex": true}'
 
 # 4. For memory vectors
-agentctl run embedding/worker --input '{"batch_size": 100}'
+foxctl run embedding/worker --input '{"batch_size": 100}'
 ```
 
 ### Testing Dimension Enforcement

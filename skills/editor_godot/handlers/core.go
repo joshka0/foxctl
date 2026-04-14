@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 )
 
 // CoreHandler handles core actions: ping, scene_tree, node_*, signal_connect, etc.

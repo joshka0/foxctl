@@ -1,6 +1,6 @@
 package jobs
 
-import "github.com/jkatigb/agentctl/internal/storage/jobs/types"
+import "github.com/joshka0/foxctl/internal/storage/jobs/types"
 
 // State re-exports the canonical job state enumeration for callers of package jobs.
 type State = types.State

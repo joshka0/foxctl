@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/maputil"
-	"github.com/jkatigb/agentctl/internal/storage/cache"
-	"github.com/jkatigb/agentctl/internal/storage/jobs"
-	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/maputil"
+	"github.com/joshka0/foxctl/internal/storage/cache"
+	"github.com/joshka0/foxctl/internal/storage/jobs"
+	memstore "github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 func TestExecutorTryServeCacheHit(t *testing.T) {
@@ -112,7 +112,7 @@ func TestExecutorHookTrajectoryCaptureCallAndResultAndCacheHit(t *testing.T) {
 		CacheMode:     cache.ModeOff,
 		Workspace:     "ws",
 		CorrelationID: "trace-1",
-		CLICommand:    "agentctl run hooks/file_guard",
+		CLICommand:    "foxctl run hooks/file_guard",
 		Input:         input,
 	})
 	defer executor1.Close()
@@ -179,7 +179,7 @@ func TestExecutorHookTrajectoryCaptureCallAndResultAndCacheHit(t *testing.T) {
 		CacheMode:     cache.ModeOff,
 		Workspace:     "ws",
 		CorrelationID: "trace-2",
-		CLICommand:    "agentctl run hooks/file_guard",
+		CLICommand:    "foxctl run hooks/file_guard",
 		Input:         input,
 	})
 	defer executor2.Close()

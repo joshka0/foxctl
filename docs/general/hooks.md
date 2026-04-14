@@ -14,8 +14,8 @@ Machine-friendly reference for hook configuration, event dispatch, and action me
 
 | Item | Value |
 |-----|-------|
-| Workspace config path | `<workspace>/.agentctl/hooks.yaml` |
-| Global config path | `~/.agentctl/hooks.yaml` |
+| Workspace config path | `<workspace>/.foxctl/hooks.yaml` |
+| Global config path | `~/.foxctl/hooks.yaml` |
 | Merge behavior | Later file overrides earlier definitions by hook `id` |
 | Execution ordering | Enabled hooks sorted by ascending `priority` per event |
 | Default run timeout | `2000ms` per run entry |
@@ -89,31 +89,31 @@ Core fields include event identity, principal/workspace/session metadata, provid
 
 - Skills are resolved via hook resolver/registry from installed skill paths.
 - Shell-based hooks are supported through shell runner.
-- Lifecycle wrappers can delegate to Go-native entrypoints under `agentctl hooks ...`
+- Lifecycle wrappers can delegate to Go-native entrypoints under `foxctl hooks ...`
   instead of keeping orchestration in bash.
 - Current first slice:
-  - `agentctl hooks session-start`
-  - `agentctl hooks session-end`
-  - `agentctl hooks subagent-stop`
-  - `agentctl hooks todo-sync`
-  - `agentctl hooks todo-continuation`
-  - `agentctl hooks task-file-link`
-  - `agentctl hooks context-updater-drain`
-  - `agentctl hooks session-restore-postcompact`
-  - `agentctl hooks overseer-inbox`
-  - `agentctl hooks overseer-inbox-post`
-  - `agentctl hooks anchor-detect`
-  - `agentctl hooks memory-detector`
-  - `agentctl hooks memory-recall`
-  - `agentctl hooks memory-lifecycle`
-  - `agentctl hooks code-analysis`
-  - `agentctl hooks live-index`
-  - `agentctl hooks lsp-diagnostics`
-  - `agentctl hooks embedding-flush`
-  - `agentctl hooks plan-sync`
-  - `agentctl hooks graph-maintenance`
+  - `foxctl hooks session-start`
+  - `foxctl hooks session-end`
+  - `foxctl hooks subagent-stop`
+  - `foxctl hooks todo-sync`
+  - `foxctl hooks todo-continuation`
+  - `foxctl hooks task-file-link`
+  - `foxctl hooks context-updater-drain`
+  - `foxctl hooks session-restore-postcompact`
+  - `foxctl hooks overseer-inbox`
+  - `foxctl hooks overseer-inbox-post`
+  - `foxctl hooks anchor-detect`
+  - `foxctl hooks memory-detector`
+  - `foxctl hooks memory-recall`
+  - `foxctl hooks memory-lifecycle`
+  - `foxctl hooks code-analysis`
+  - `foxctl hooks live-index`
+  - `foxctl hooks lsp-diagnostics`
+  - `foxctl hooks embedding-flush`
+  - `foxctl hooks plan-sync`
+  - `foxctl hooks graph-maintenance`
   - `configs/hooks/task-continuity-summary.sh` is the prompt-ready wrapper for
-    `agentctl context task-history-summary`
+    `foxctl context task-history-summary`
   - `configs/hooks/session-init.sh` is now a thin wrapper over that command.
   - `configs/hooks/session-end.sh` is now a thin wrapper over that command.
   - `configs/hooks/subagent-stop.sh` is now a thin wrapper over that command.
@@ -142,7 +142,7 @@ Core fields include event identity, principal/workspace/session metadata, provid
 
 Use the structured command for Codex, scripts, and agent runtimes:
 
-- `agentctl context task-history-summary`
+- `foxctl context task-history-summary`
 
 Use the shell wrapper only when a hook needs prompt-ready JSON:
 

@@ -1,13 +1,13 @@
-// Package chatadapter defines the ChatAdapter interface for connecting agentctl
+// Package chatadapter defines the ChatAdapter interface for connecting foxctl
 // to chat platforms (Discord, Slack, Teams). Each platform implements this
-// interface to receive slash commands and dispatch them to agentctl skills.
+// interface to receive slash commands and dispatch them to foxctl skills.
 package chatadapter
 
 import (
 	"context"
 	"sync/atomic"
 
-	"github.com/jkatigb/agentctl/internal/domain/identity"
+	"github.com/joshka0/foxctl/internal/domain/identity"
 )
 
 // ChatAdapter is the platform-agnostic interface for chat platform integrations.

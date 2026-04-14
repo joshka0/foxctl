@@ -1,7 +1,7 @@
-# dspy-go Agent Runtime for agentctl (Legacy)
+# dspy-go Agent Runtime for foxctl (Legacy)
 
 **Status:** Legacy (runtime removed; kept for historical reference)\
-**Scope:** Previous DSPy-based runtime design; agentctl now uses LLMChatEngine
+**Scope:** Previous DSPy-based runtime design; foxctl now uses LLMChatEngine
 as the primary runtime.\
 **Related specs:** `overseer_profile.md`, `overseer_planning.md`,
 `mailbox_blackboard.md`, `task_graph_insights.md`, `test_watch_feedback.md`,
@@ -13,16 +13,16 @@ as the primary runtime.\
 ## 1. Overview
 
 This spec defines how **dspy-go** agents become first-class citizens in the
-`agentctl` ecosystem:
+`foxctl` ecosystem:
 
 - Use dspy-go (ReAct-style agents) as the **primary agent runtime**.
-- Treat `agentctl` as the **kernel**: skills, jobs, CAS, tasks, mailbox, hooks.
-- Ensure all agent reads/writes go through `agentctl` skills so hooks, guards,
+- Treat `foxctl` as the **kernel**: skills, jobs, CAS, tasks, mailbox, hooks.
+- Ensure all agent reads/writes go through `foxctl` skills so hooks, guards,
   and telemetry continue to work.
 - Make agents observable and controllable via a future **Agent Viewer** TUI/GUI.
 
 The goal is that coding with a dspy-go agent feels like a native part of
-`agentctl`, not a bolt-on: agents understand tasks and plans, respect
+`foxctl`, not a bolt-on: agents understand tasks and plans, respect
 constraints from the overseer, and coordinate via the mailbox/blackboard.
 
 ---
@@ -33,12 +33,12 @@ constraints from the overseer, and coordinate via the mailbox/blackboard.
 
 - **First-class coding agents**
   - Implement dspy-go based agents that can: read/search/edit code, run tests,
-    and update tasks using existing `agentctl` skills.
+    and update tasks using existing `foxctl` skills.
 - **Task- and plan-aware execution**
   - Agents operate in the context of a workspace, epic, and task graph, taking
     constraints from the overseer via mailbox messages.
 - **Hook-compatible flows**
-  - All file edits and risky operations must go through `agentctl` runners so
+  - All file edits and risky operations must go through `foxctl` runners so
     `task_guard`, `file_guard`, and `test_watch_feedback` hooks still fire.
 - **Observable and debuggable**
   - Agent execution history (thoughts, tool calls, results) must be visible in
@@ -64,10 +64,10 @@ constraints from the overseer, and coordinate via the mailbox/blackboard.
 
 - **dspy-go Agent Runtime**
   - Implemented in Go, using `dspy-go`'s `ReActAgent` (or compatible) type.
-  - Runs as a long-lived process started by `agentctl` (CLI subcommand or future
+  - Runs as a long-lived process started by `foxctl` (CLI subcommand or future
     daemon).
 - **Agent Tools Layer**
-  - A set of `dspy-go` tools (`core.Tool` implementations) that wrap `agentctl`
+  - A set of `dspy-go` tools (`core.Tool` implementations) that wrap `foxctl`
     skills and local capabilities.
   - All filesystem, test, and task operations MUST go through these tools.
 - **Agentctl Kernel**
@@ -89,7 +89,7 @@ constraints from the overseer, and coordinate via the mailbox/blackboard.
 ### 3.2 Process Model
 
 - Agents run as one or more **long-lived processes**:
-  - `agentctl agent spawn` (proposed) starts a dspy-go agent with:
+  - `foxctl agent spawn` (proposed) starts a dspy-go agent with:
     - workspace_id, epic_id/task_id
     - actor_id (mailbox identity)
     - role (`coder`, `planner`, etc.)
@@ -98,7 +98,7 @@ constraints from the overseer, and coordinate via the mailbox/blackboard.
 - Agents must be **stateless across process restarts** except for:
   - Mailbox state (persistent).
   - Tasks DB and jobs storage.
-  - Optional agent-specific memory stored via `agentctl` memory or dspy-go's
+  - Optional agent-specific memory stored via `foxctl` memory or dspy-go's
     persistence, as long as it is anchored to the workspace.
 
 ---
@@ -199,11 +199,11 @@ Agent Viewers (TUI/GUI) SHOULD provide team-centric views:
 
 This section defines a **minimum tool set** that dspy-go coding agents SHOULD
 support. All tools are dspy-go `core.Tool` instances with schemas that map
-cleanly to `agentctl` skills.
+cleanly to `foxctl` skills.
 
 ### 5.1 Filesystem & Code Inspection
 
-These tools MUST route through `agentctl` skills or safe helpers so hooks and
+These tools MUST route through `foxctl` skills or safe helpers so hooks and
 policies apply.
 
 - **`fs.list_dir`**
@@ -222,7 +222,7 @@ policies apply.
 - **`code.search`**
   - Purpose: Search for patterns in code.
   - Inputs: `workspace_id`, `query`, `globs`, optional `max_results`.
-  - Backend: Search skill (e.g. ripgrep wrapper) that runs via `agentctl`.
+  - Backend: Search skill (e.g. ripgrep wrapper) that runs via `foxctl`.
   - Hooks: advisory only; results also recorded in telemetry.
 
 - **`code.outline`** (optional v1)
@@ -247,7 +247,7 @@ policies apply.
 
 ### 5.2 Editing & Refactoring
 
-All writing tools MUST go through `agentctl` skills so `task_guard` and
+All writing tools MUST go through `foxctl` skills so `task_guard` and
 `file_guard` can enforce reservations and scope rules.
 
 - **`edit.apply_patch`**
@@ -352,7 +352,7 @@ instead of relying solely on their own memory.
 ## 6. Agent Signatures
 
 dspy-go encourages explicit, typed signatures. This spec defines two canonical
-signatures for agents that operate in `agentctl` workspaces.
+signatures for agents that operate in `foxctl` workspaces.
 
 ### 6.1 Coding Agent Signature
 
@@ -492,10 +492,10 @@ performance, or other concerns.
 
 ### 7.1 Spawn
 
-A new dspy-go agent session is started by `agentctl` via a CLI or future
+A new dspy-go agent session is started by `foxctl` via a CLI or future
 programmatic API, for example:
 
-- `agentctl agent spawn <role> --workspace <id> --epic <epic-id> --task <task-id>`
+- `foxctl agent spawn <role> --workspace <id> --epic <epic-id> --task <task-id>`
 
 Spawn operation MUST:
 
@@ -564,7 +564,7 @@ On completion (normal or error), the agent MUST:
 
 ## 9. Agent Viewer Integration Points (Future)
 
-This spec does not define a full viewer UI, but agentctl MUST expose enough
+This spec does not define a full viewer UI, but foxctl MUST expose enough
 machine-readable information for a TUI/GUI to:
 
 - List active and recent agents with:
@@ -586,7 +586,7 @@ Concrete CLI and JSON schemas for these viewer endpoints are left to a follow-up
 
 Open questions to resolve during implementation:
 
-- Exact mapping between dspy-go memory and `agentctl` memory primitives
+- Exact mapping between dspy-go memory and `foxctl` memory primitives
   (auto-cache vs named memory vs agent-specific stores).
 - How much of the execution trace to persist vs summarize.
 - Whether agents may run multiple concurrent tasks, or one task/epic per
@@ -703,7 +703,7 @@ include which guard fired:
   "message": "edit blocked by task_guard",
   "details": {
     "guard": "task_guard",
-    "scope_paths": ["agentctl/internal/..."],
+    "scope_paths": ["foxctl/internal/..."],
     "reason": "outside_task_scope"
   }
 }
@@ -759,7 +759,7 @@ following conventions are recommended:
   "status": "ok",
   "command": "edit/apply_patch",
   "data": {
-    "path": "agentctl/internal/foo.go",
+    "path": "foxctl/internal/foo.go",
     "summary": {
       "loc_added": 12,
       "loc_deleted": 3
@@ -767,7 +767,7 @@ following conventions are recommended:
   },
   "meta": {
     "ts": "2025-11-15T12:34:56Z",
-    "workspace": "/Users/example/repos/agentctl",
+    "workspace": "/Users/example/repos/foxctl",
     "workspace_id": "ws-123", // conceptual field for telemetry/join
     "job_id": "01HF...",
     "correlation_id": "4f8a...",
@@ -792,7 +792,7 @@ following conventions are recommended:
   },
   "meta": {
     "ts": "2025-11-15T12:35:02Z",
-    "workspace": "/Users/example/repos/agentctl",
+    "workspace": "/Users/example/repos/foxctl",
     "workspace_id": "ws-123",
     "job_id": "01HF...",
     "correlation_id": "4f8a...",
@@ -803,8 +803,8 @@ following conventions are recommended:
     "message": "edit blocked by task_guard",
     "details": {
       "guard": "task_guard",
-      "scope_paths": ["agentctl/internal/storage"],
-      "path": "agentctl/testdata/manual_hack.go",
+      "scope_paths": ["foxctl/internal/storage"],
+      "path": "foxctl/testdata/manual_hack.go",
       "reason": "outside_task_scope"
     }
   }

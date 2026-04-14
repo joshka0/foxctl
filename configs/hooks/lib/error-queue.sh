@@ -24,7 +24,7 @@
 #     exit 0
 #   }
 
-HOOK_ERROR_FILE="${AGENTCTL_HOME:-$HOME/.agentctl}/hooks/error_queue.ndjson"
+HOOK_ERROR_FILE="${AGENTCTL_HOME:-$HOME/.foxctl}/hooks/error_queue.ndjson"
 
 # =============================================================================
 # BLOCKING ERROR (exit 2) - Preferred approach

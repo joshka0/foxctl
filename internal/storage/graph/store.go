@@ -12,8 +12,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
 )
 
 // Store defines the graph storage interface.

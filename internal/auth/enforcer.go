@@ -9,7 +9,7 @@ import (
 	"github.com/casbin/casbin/v2/model"
 	stringadapter "github.com/casbin/casbin/v2/persist/string-adapter"
 	"github.com/casbin/casbin/v2/util"
-	"github.com/jkatigb/agentctl/internal/domain/identity"
+	"github.com/joshka0/foxctl/internal/domain/identity"
 )
 
 //go:embed model.conf

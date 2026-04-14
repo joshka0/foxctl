@@ -9,7 +9,7 @@ import (
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
-	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+	symindex "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
 
 type elixirPreloadAfterGetChain struct {

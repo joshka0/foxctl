@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: build/unity
@@ -66,11 +66,11 @@ signature:
       Use build/unity to build, test, and export Unity game projects via the Unity Editor CLI (-batchmode).
       Auto-detects Unity Editor on macOS via Unity Hub or common install paths.
       Example commands:
-        agentctl run build/unity --input '{"action":"list_targets"}'
-        agentctl run build/unity --input '{"action":"build","build_target":"StandaloneOSX"}'
-        agentctl run build/unity --input '{"action":"test","test_platform":"EditMode"}'
-        agentctl run build/unity --input '{"action":"export","build_target":"StandaloneOSX","output_path":"builds/game.app"}'
-        agentctl run build/unity --input '{"action":"clean"}'
+        foxctl run build/unity --input '{"action":"list_targets"}'
+        foxctl run build/unity --input '{"action":"build","build_target":"StandaloneOSX"}'
+        foxctl run build/unity --input '{"action":"test","test_platform":"EditMode"}'
+        foxctl run build/unity --input '{"action":"export","build_target":"StandaloneOSX","output_path":"builds/game.app"}'
+        foxctl run build/unity --input '{"action":"clean"}'
   returns:
     - name: targets
       type: array

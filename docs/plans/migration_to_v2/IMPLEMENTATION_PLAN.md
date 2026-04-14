@@ -2,7 +2,7 @@
 
 > **Status**: Planning
 > **Last Updated**: 2026-01-08
-> **Scope**: Transform agentctl into an always-on, multi-actor, event-driven agent runtime
+> **Scope**: Transform foxctl into an always-on, multi-actor, event-driven agent runtime
 
 ---
 
@@ -400,7 +400,7 @@ internal/supervisor/
 ```sql
 -- Add columns to sessions table
 ALTER TABLE sessions ADD COLUMN workspace_id TEXT;
-ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'agentctl';
+ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'foxctl';
 ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok';
 ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;
 ALTER TABLE sessions ADD COLUMN started_at TEXT;
@@ -447,7 +447,7 @@ internal/sessions/
    - `AGENTCTL_SESSION_ID`
    - `AGENTCTL_AGENT_ID`
 4. Identity fallback file:
-   - `~/.agentctl/sessions/active/<workspace_hash>-<agent_id>.json`
+   - `~/.foxctl/sessions/active/<workspace_hash>-<agent_id>.json`
    - Contains session_id, agent_id, lineage for hook access
 5. One active session enforcement:
    - Check for existing `running` session per (workspace, agent_id)

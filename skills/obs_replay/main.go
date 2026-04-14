@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 const command = "obs/replay"
@@ -87,7 +87,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		obsDir = os.Getenv("AGENTCTL_OBS_DIR")
 	}
 	if obsDir == "" {
-		obsDir = filepath.Join(os.Getenv("HOME"), ".agentctl", "observability")
+		obsDir = filepath.Join(os.Getenv("HOME"), ".foxctl", "observability")
 	}
 	eventsFile := filepath.Join(obsDir, "events", "wide_events.ndjson")
 

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/refactor_scout
@@ -221,13 +221,13 @@ signature:
         only when the target scope is fully `index_backed`
 
       Example commands:
-        agentctl run code/refactor_scout --input '{"path":"./internal","rule_set":"default"}'
-        agentctl run code/refactor_scout --input '{"path":"./internal/intelligence/indexing","language":"go","min_score":60}'
-        agentctl run code/refactor_scout --input '{"path":"./crates/my-crate/src","language":"rust","focus":"dead"}'
-        agentctl run code/refactor_scout --input '{"path":"./internal","language":"go","focus":"slop"}'
-        agentctl run code/refactor_scout --input '{"path":"./internal/runtime/actor","language":"go","focus":"dead"}'
-        agentctl run code/refactor_scout --input '{"path":"./internal/runtime/actor","language":"go","focus":"slop","min_score":80,"max_results":8}'
-        agentctl skills run code/refactor_scout --path ./internal --rule_set aggressive
+        foxctl run code/refactor_scout --input '{"path":"./internal","rule_set":"default"}'
+        foxctl run code/refactor_scout --input '{"path":"./internal/intelligence/indexing","language":"go","min_score":60}'
+        foxctl run code/refactor_scout --input '{"path":"./crates/my-crate/src","language":"rust","focus":"dead"}'
+        foxctl run code/refactor_scout --input '{"path":"./internal","language":"go","focus":"slop"}'
+        foxctl run code/refactor_scout --input '{"path":"./internal/runtime/actor","language":"go","focus":"dead"}'
+        foxctl run code/refactor_scout --input '{"path":"./internal/runtime/actor","language":"go","focus":"slop","min_score":80,"max_results":8}'
+        foxctl skills run code/refactor_scout --path ./internal --rule_set aggressive
     workflows:
       - id: go-hotspots
         description: "Find likely Go refactor hotspots with AST-backed scoring"

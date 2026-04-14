@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
-	runtimeevents "github.com/jkatigb/agentctl/internal/v2/runtime/events"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/maintenance"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/snapshots"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	runtimeevents "github.com/joshka0/foxctl/internal/v2/runtime/events"
+	"github.com/joshka0/foxctl/internal/v2/runtime/maintenance"
+	"github.com/joshka0/foxctl/internal/v2/runtime/snapshots"
 )
 
 func TestMaintenanceComponent_PublishesSnapshot(t *testing.T) {

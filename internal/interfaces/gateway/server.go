@@ -1,5 +1,5 @@
 // Package gateway implements the tsnet-based HTTP/HTTPS gateway server for
-// agentctl room sandbox terminal access. It supports two modes:
+// foxctl room sandbox terminal access. It supports two modes:
 //   - Tailscale mode: HTTPS via tsnet.ListenTLS with auto-TLS
 //   - Dev mode: plain HTTP on localhost (for development without Tailscale)
 package gateway
@@ -22,9 +22,9 @@ import (
 	"github.com/rs/zerolog"
 	"tailscale.com/tsnet"
 
-	"github.com/jkatigb/agentctl/internal/interfaces/gateway/sshterm"
-	"github.com/jkatigb/agentctl/internal/interfaces/gateway/webterm"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
+	"github.com/joshka0/foxctl/internal/interfaces/gateway/sshterm"
+	"github.com/joshka0/foxctl/internal/interfaces/gateway/webterm"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
 )
 
 const (
@@ -32,13 +32,13 @@ const (
 	DefaultPort = 8765
 
 	// DefaultStateDir is the default directory for tsnet state persistence.
-	DefaultStateDir = "~/.agentctl/gateway"
+	DefaultStateDir = "~/.foxctl/gateway"
 
 	// ShutdownTimeout is the maximum time to wait for graceful shutdown.
 	ShutdownTimeout = 15 * time.Second
 
 	// HostnamePrefix is the tsnet hostname prefix.
-	HostnamePrefix = "agentctl-gateway"
+	HostnamePrefix = "foxctl-gateway"
 )
 
 // HealthStatus represents the health of a subsystem.
@@ -57,13 +57,13 @@ type Options struct {
 	Port int
 
 	// StateDir is the directory for tsnet state persistence.
-	// Defaults to ~/.agentctl/gateway.
+	// Defaults to ~/.foxctl/gateway.
 	StateDir string
 
 	// AuthKey is the Tailscale auth key. Can also be set via TS_AUTHKEY env var.
 	AuthKey string
 
-	// Hostname is the tsnet hostname. Defaults to "agentctl-gateway".
+	// Hostname is the tsnet hostname. Defaults to "foxctl-gateway".
 	Hostname string
 }
 
@@ -633,7 +633,7 @@ func (e *AuthKeyError) Envelope() map[string]any {
 		"data": map[string]string{
 			"hint":    "Set TS_AUTHKEY env var or pass --ts-authkey flag. Get a key from https://login.tailscale.com/admin/settings/keys",
 			"state":   e.StateDir,
-			"command": "agentctl gateway --ts-authkey tskey-auth-xxx",
+			"command": "foxctl gateway --ts-authkey tskey-auth-xxx",
 		},
 	}
 }

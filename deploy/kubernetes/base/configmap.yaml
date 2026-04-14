@@ -1,12 +1,12 @@
-# Configuration for agentctl deployment
+# Configuration for foxctl deployment
 
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: agentctl-config
-  namespace: agentctl
+  name: foxctl-config
+  namespace: foxctl
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: config
 data:
   # Database configuration
@@ -14,7 +14,7 @@ data:
 
   # CAS configuration
   AGENTCTL_CAS_BACKEND: "s3"
-  AGENTCTL_CAS_BUCKET: "agentctl-cas"
+  AGENTCTL_CAS_BUCKET: "foxctl-cas"
   AWS_REGION: "us-west-2"
 
   # Observability

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: fs/tree
@@ -55,10 +55,10 @@ signature:
       Use fs/tree to inspect a directory structure with optional depth and
       formatting options.
       Example commands:
-        agentctl run fs/tree --input '{"path":".","max_depth":2}'
-        agentctl skills run fs/tree --path . --max_depth 2
-        agentctl run fs/tree --input '{"path":"./src","format":"list","pattern":"*.go"}'
-        agentctl skills run fs/tree --path ./src --format list --pattern '*.go'
+        foxctl run fs/tree --input '{"path":".","max_depth":2}'
+        foxctl skills run fs/tree --path . --max_depth 2
+        foxctl run fs/tree --input '{"path":"./src","format":"list","pattern":"*.go"}'
+        foxctl skills run fs/tree --path ./src --format list --pattern '*.go'
     workflows:
       - id: tree-basic
         description: "Show a shallow tree for the current directory."

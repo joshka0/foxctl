@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -160,7 +160,7 @@ func TestBuildFeedbackPrompt_FeedbackCommand(t *testing.T) {
 
 	result := buildFeedbackPrompt(metrics)
 
-	assert.Contains(t, result, "agentctl run session/feedback")
+	assert.Contains(t, result, "foxctl run session/feedback")
 	assert.Contains(t, result, "sess-test-123")
 	assert.Contains(t, result, "rating")
 	assert.Contains(t, result, "outcome")
@@ -175,7 +175,7 @@ func TestBuildFeedbackPrompt_NoSessionID(t *testing.T) {
 	result := buildFeedbackPrompt(metrics)
 
 	assert.Contains(t, result, "Session Summary")
-	assert.NotContains(t, result, "agentctl run session/feedback")
+	assert.NotContains(t, result, "foxctl run session/feedback")
 }
 
 func TestBuildFeedbackPrompt_Formatting(t *testing.T) {

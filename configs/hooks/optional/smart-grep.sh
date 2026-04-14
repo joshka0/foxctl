@@ -9,13 +9,13 @@
 # For literal patterns (identifiers, symbols), uses context_ripgrep directly.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
 #   AGENTCTL_SMART_GREP_MAX_BLOCKS - Max blocks to show (default: 5)
 #   AGENTCTL_SMART_GREP_SEMANTIC - Enable semantic chaining (default: 1)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 MAX_BLOCKS="${AGENTCTL_SMART_GREP_MAX_BLOCKS:-5}"
 SEMANTIC_ENABLED="${AGENTCTL_SMART_GREP_SEMANTIC:-1}"
 

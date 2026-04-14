@@ -1,4 +1,4 @@
-# Progressive Memory System for agentctl
+# Progressive Memory System for foxctl
 
 ## Scope: Transitional + V2 Target
 
@@ -160,7 +160,7 @@ Capture high-signal conversation data and generate structured summaries.
 ### SQLite Schema
 
 ```sql
--- ~/.agentctl/storage/sessions.db
+-- ~/.foxctl/storage/sessions.db
 
 CREATE TABLE sessions (
     id TEXT PRIMARY KEY,              -- session_id from Claude Code
@@ -271,7 +271,7 @@ fi
 WORKSPACE=$(echo "$1" | jq -r '.workspace // ""')
 SESSION_ID=$(echo "$1" | jq -r '.session_id // ""')
 
-agentctl run session/capture --input "{
+foxctl run session/capture --input "{
   \"workspace\": \"$WORKSPACE\",
   \"session_id\": \"$SESSION_ID\",
   \"summarize\": true
@@ -282,16 +282,16 @@ agentctl run session/capture --input "{
 
 ```bash
 # List recent sessions
-agentctl sessions list [--workspace <path>] [--limit 20] [--tags auth,refactor]
+foxctl sessions list [--workspace <path>] [--limit 20] [--tags auth,refactor]
 
 # Show session details
-agentctl sessions show <session-id>
+foxctl sessions show <session-id>
 
 # Search sessions by text
-agentctl sessions search "authentication JWT"
+foxctl sessions search "authentication JWT"
 
 # Manual capture (for testing)
-agentctl sessions capture --workspace /path/to/project --session-id <uuid>
+foxctl sessions capture --workspace /path/to/project --session-id <uuid>
 ```
 
 ---
@@ -334,7 +334,7 @@ func BuildEmbeddingText(s Session) string {
 ### Embedding Model Configuration
 
 ```yaml
-# ~/.agentctl/config.yaml
+# ~/.foxctl/config.yaml
 sessions:
   embedding:
     provider: openai          # openai | voyage | local
@@ -359,7 +359,7 @@ sessions:
 ### Recall Skill
 
 ```bash
-agentctl run session/recall --input '{
+foxctl run session/recall --input '{
   "query": "authentication with JWT",
   "limit": 5,
   "threshold": 0.7,
@@ -387,8 +387,8 @@ Output:
 
 ```bash
 # Agent can invoke during conversation
-/agentctl-sessions recall "similar auth implementations"
-/agentctl-sessions show <session-id>
+/foxctl-sessions recall "similar auth implementations"
+/foxctl-sessions show <session-id>
 ```
 
 ---
@@ -436,7 +436,7 @@ CREATE INDEX idx_turns_tools ON session_turns(tools_used);
 ### DSPy Export
 
 ```bash
-agentctl run session/export-dspy --input '{
+foxctl run session/export-dspy --input '{
   "filter": {
     "has_tool_use": true,
     "min_turns": 5,
@@ -487,11 +487,11 @@ Phase 1.3: Stop hook ✅
     └── .claude/hooks/session-capture.sh
 
 Phase 1.4: CLI commands ✅
-    ├── agentctl sessions list
-    ├── agentctl sessions show
-    ├── agentctl sessions search
-    ├── agentctl sessions stats
-    └── agentctl sessions delete
+    ├── foxctl sessions list
+    ├── foxctl sessions show
+    ├── foxctl sessions search
+    ├── foxctl sessions stats
+    └── foxctl sessions delete
 
 ---
 
@@ -505,7 +505,7 @@ Phase 2.2: session/recall skill ✅
     ├── Natural language query → embedding → search
     └── Filters: workspace, project, min_similarity
 
-Phase 2.3: /agentctl-sessions Claude skill ✅
+Phase 2.3: /foxctl-sessions Claude skill ✅
     ├── Invoke session/recall from Claude Code
     ├── Display relevant past sessions inline
     └── Link to full conversation on demand
@@ -529,7 +529,7 @@ Phase 3.3: session/export-dspy skill ✅
 ---
 
 Phase 4: JSONL Archive & Deep Retrieval ✅
-    ├── Copy JSONL to ~/.agentctl/sessions/<session-id>.jsonl
+    ├── Copy JSONL to ~/.foxctl/sessions/<session-id>.jsonl
     ├── Compress with gzip for storage efficiency
     ├── session/deep-dive skill for full conversation access
     ├── Chunk-level embeddings for precise retrieval
@@ -540,7 +540,7 @@ Phase 4.1: Context Windows (Tier 1.5) ✅
     ├── session_context_windows table with token counts
     ├── session/archive skill extracts windows during parsing
     ├── Chunks tagged with context_window_index
-    ├── agentctl sessions windows <id> CLI command
+    ├── foxctl sessions windows <id> CLI command
     └── Enables sub-session granularity retrieval
 ```
 
@@ -562,7 +562,7 @@ Current system stores summaries and embeddings but loses access to:
 ### Architecture
 
 ```
-~/.agentctl/sessions/
+~/.foxctl/sessions/
 ├── index.db                    # Session metadata (existing sessions.db)
 └── archives/
     ├── <session-id>.jsonl.gz   # Compressed full conversation
@@ -647,23 +647,23 @@ Sessions without any compaction events are treated as a single window (index 0).
 
 ```bash
 # Archive a session (copies JSONL, indexes chunks, detects context windows)
-agentctl sessions archive <session-id>
+foxctl sessions archive <session-id>
 
 # Archive all unarchived sessions
-agentctl sessions archive --all
+foxctl sessions archive --all
 
 # List context windows for a session
-agentctl sessions windows <session-id>
-agentctl sessions windows <session-id> --show-chunks
+foxctl sessions windows <session-id>
+foxctl sessions windows <session-id> --show-chunks
 
 # Deep search across all sessions
-agentctl sessions deep-search "race condition mutex"
+foxctl sessions deep-search "race condition mutex"
 
 # Get specific chunk from session
-agentctl sessions chunk <session-id> --index 42
+foxctl sessions chunk <session-id> --index 42
 
 # Extract section around an error
-agentctl sessions extract <session-id> --error --context 5
+foxctl sessions extract <session-id> --error --context 5
 ```
 
 ### Retrieval Flow
@@ -729,7 +729,7 @@ turn completion remains non-blocking.
 ### Cleanup Policy
 
 ```yaml
-# ~/.agentctl/config.yaml
+# ~/.foxctl/config.yaml
 sessions:
   archive:
     enabled: true

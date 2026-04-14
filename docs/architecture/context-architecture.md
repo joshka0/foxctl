@@ -1,8 +1,8 @@
 ---
 vault_refs:
-  - notes/repo/agentctl/index.md
-  - notes/repo/agentctl/platform-and-web.md
-  - notes/repo/agentctl/semantic-and-memory.md
+  - notes/repo/foxctl/index.md
+  - notes/repo/foxctl/platform-and-web.md
+  - notes/repo/foxctl/semantic-and-memory.md
 ---
 # AgentCTL Context Architecture
 
@@ -25,59 +25,59 @@ The implemented slice now includes a real control-plane runtime, an Obsidian ada
 
 Command:
 
-- `agentctl orient`
-- `agentctl capture`
-- `agentctl observe`
-- `agentctl tension`
-- `agentctl context show`
-- `agentctl context report`
-- `agentctl context retrieve`
-- `agentctl context retrieve-inspect`
-- `agentctl context retrieve-inspect-suite`
-- `agentctl context contradictions`
-- `agentctl context rethink`
-- `agentctl context handoffs`
-- `agentctl context observations`
-- `agentctl context tensions`
-- `agentctl context proposals`
-- `agentctl context proposal`
-- `agentctl context proposal merge`
-- `agentctl context import-evidence`
-- `agentctl context infer`
-- `agentctl context promote`
-- `agentctl context merge-promotion`
-- `agentctl context task-history`
-- `agentctl context task-history-summary`
-- `agentctl context family-history-summary`
-- `agentctl context next-proposal-merge`
-- `agentctl context hooks install`
-- `agentctl obsidian read`
-- `agentctl obsidian search`
-- `agentctl obsidian related`
-- `agentctl obsidian create-note`
-- `agentctl obsidian append-under-heading`
-- `agentctl obsidian capture-session`
-- `agentctl obsidian promote-evergreen`
-- `agentctl obsidian merge-reviewed-draft`
-- `agentctl obsidian index build`
-- `agentctl obsidian index search`
-- `agentctl obsidian index related`
-- `agentctl obsidian index health`
-- `agentctl obsidian index stats`
-- `agentctl obsidian graph build`
-- `agentctl obsidian graph promote`
-- `agentctl obsidian bridge reconcile`
-- `agentctl obsidian bridge report`
-- `agentctl obsidian bridge apply`
-- `agentctl obsidian bridge apply-batch`
-- `agentctl obsidian bridge tidy`
+- `foxctl orient`
+- `foxctl capture`
+- `foxctl observe`
+- `foxctl tension`
+- `foxctl context show`
+- `foxctl context report`
+- `foxctl context retrieve`
+- `foxctl context retrieve-inspect`
+- `foxctl context retrieve-inspect-suite`
+- `foxctl context contradictions`
+- `foxctl context rethink`
+- `foxctl context handoffs`
+- `foxctl context observations`
+- `foxctl context tensions`
+- `foxctl context proposals`
+- `foxctl context proposal`
+- `foxctl context proposal merge`
+- `foxctl context import-evidence`
+- `foxctl context infer`
+- `foxctl context promote`
+- `foxctl context merge-promotion`
+- `foxctl context task-history`
+- `foxctl context task-history-summary`
+- `foxctl context family-history-summary`
+- `foxctl context next-proposal-merge`
+- `foxctl context hooks install`
+- `foxctl obsidian read`
+- `foxctl obsidian search`
+- `foxctl obsidian related`
+- `foxctl obsidian create-note`
+- `foxctl obsidian append-under-heading`
+- `foxctl obsidian capture-session`
+- `foxctl obsidian promote-evergreen`
+- `foxctl obsidian merge-reviewed-draft`
+- `foxctl obsidian index build`
+- `foxctl obsidian index search`
+- `foxctl obsidian index related`
+- `foxctl obsidian index health`
+- `foxctl obsidian index stats`
+- `foxctl obsidian graph build`
+- `foxctl obsidian graph promote`
+- `foxctl obsidian bridge reconcile`
+- `foxctl obsidian bridge report`
+- `foxctl obsidian bridge apply`
+- `foxctl obsidian bridge apply-batch`
+- `foxctl obsidian bridge tidy`
 
 Behavior:
 
 - detects the current workspace root
-- reads existing task and session state from the persistent stores under `~/.agentctl/`
+- reads existing task and session state from the persistent stores under `~/.foxctl/`
 - derives a bounded `top_of_mind` bundle
-- scaffolds workspace-local ACA files under `.agentctl/` if they do not exist
+- scaffolds workspace-local ACA files under `.foxctl/` if they do not exist
 - persists structured runtime artifacts for handoffs, observations, and tensions
 - reads persisted runtime artifacts back out through a stable CLI surface
 - builds a synthesized current-state report from top-of-mind, latest handoff, merged observations, and open tensions
@@ -108,41 +108,41 @@ Behavior:
   - `symbols`
 - uses repo index search results to strengthen retrieval ranking for notes whose `paths` or `symbols` match code-relevant files or symbols
 - can optionally add a git co-change prior, using files commonly committed together as a task/query-conditioned ranking boost for notes whose `paths` land in the same change neighborhood
-- can materialize `cochange_cluster` memory artifacts from recent git history through `agentctl context cochange build`, making those file-neighborhood summaries searchable through memory and semantic retrieval paths
-- supports direct semantic note search from stored note embeddings through `agentctl obsidian index search --semantic`
-- can generate an inbox-first repo graph draft bundle from the repo index through `agentctl obsidian graph build`
-- can review-merge a generated graph draft bundle into canonical repo notes through `agentctl obsidian graph promote`
-- can reconcile repo `docs/` against canonical vault notes through `agentctl obsidian bridge reconcile`
+- can materialize `cochange_cluster` memory artifacts from recent git history through `foxctl context cochange build`, making those file-neighborhood summaries searchable through memory and semantic retrieval paths
+- supports direct semantic note search from stored note embeddings through `foxctl obsidian index search --semantic`
+- can generate an inbox-first repo graph draft bundle from the repo index through `foxctl obsidian graph build`
+- can review-merge a generated graph draft bundle into canonical repo notes through `foxctl obsidian graph promote`
+- can reconcile repo `docs/` against canonical vault notes through `foxctl obsidian bridge reconcile`
   - scans repo markdown under `docs/`
   - defaults to current docs and excludes `docs/archive/` unless explicitly included
   - scans canonical vault notes for `repo_docs` backlinks
   - prefers vault-index lexical+semantic candidates when the local vault index and embedding provider are available
   - drafts bridge notes and backlink suggestions into the vault inbox instead of rewriting repo docs or canonical notes
-- can report bridge draft state through `agentctl obsidian bridge report`
+- can report bridge draft state through `foxctl obsidian bridge report`
   - classifies drafts as `draft`, `reviewed`, `partial`, or `applied`
   - compares suggested links against current repo-doc and vault-note frontmatter
-- can apply reviewed bridge frontmatter patches through `agentctl obsidian bridge apply`
+- can apply reviewed bridge frontmatter patches through `foxctl obsidian bridge apply`
   - patches repo doc `vault_refs`
   - patches canonical vault note `repo_docs`
   - only touches frontmatter list metadata, not prose
-- can apply reviewed bridge drafts in bulk through `agentctl obsidian bridge apply-batch`
+- can apply reviewed bridge drafts in bulk through `foxctl obsidian bridge apply-batch`
   - defaults to `status: reviewed`
   - supports optional trust and doc-path filters
   - skips non-reviewed drafts instead of applying them implicitly
-- can archive fully applied bridge drafts through `agentctl obsidian bridge tidy`
+- can archive fully applied bridge drafts through `foxctl obsidian bridge tidy`
   - moves `state=applied` drafts from the inbox into `ops/docs-bridge-applied/<project>/`
   - marks archived copies `status: applied`
   - leaves `draft`, `reviewed`, and `partial` bridge notes in place
 - writes:
-  - `.agentctl/runtime/top_of_mind.json`
-  - `.agentctl/exports/latest-orientation.md`
-  - default policy files under `.agentctl/policy/`
-  - starter Obsidian templates under `.agentctl/templates/obsidian-vault/`
-  - handoff JSON files under `.agentctl/runtime/handoffs/`
-  - observation records in `.agentctl/runtime/observations.ndjson`
-  - tension records in `.agentctl/runtime/tensions.ndjson`
-  - promotion job records in `.agentctl/runtime/promotion_jobs.ndjson`
-  - draft markdown notes in `.agentctl/templates/obsidian-vault/inbox/drafted-from-agentctl/`
+  - `.foxctl/runtime/top_of_mind.json`
+  - `.foxctl/exports/latest-orientation.md`
+  - default policy files under `.foxctl/policy/`
+  - starter Obsidian templates under `.foxctl/templates/obsidian-vault/`
+  - handoff JSON files under `.foxctl/runtime/handoffs/`
+  - observation records in `.foxctl/runtime/observations.ndjson`
+  - tension records in `.foxctl/runtime/tensions.ndjson`
+  - promotion job records in `.foxctl/runtime/promotion_jobs.ndjson`
+  - draft markdown notes in `.foxctl/templates/obsidian-vault/inbox/drafted-from-foxctl/`
 
 ## Hook Wiring
 
@@ -150,40 +150,40 @@ ACA lifecycle wiring is now available through the existing Claude shell-hook pat
 
 Bootstrap command:
 
-- `agentctl context hooks install`
+- `foxctl context hooks install`
   - merges ACA `SessionStart`, `Stop`, and `SubagentStop` hook entries into workspace `.claude/settings.json`
   - preserves existing `env`, `permissions`, and unrelated hook entries
 
 Current hook behavior:
 
 - `SessionStart` via `configs/hooks/session-init.sh`
-  - runs `agentctl orient`
-  - injects the latest orientation markdown from `.agentctl/exports/latest-orientation.md`
+  - runs `foxctl orient`
+  - injects the latest orientation markdown from `.foxctl/exports/latest-orientation.md`
 - `Stop` via `configs/hooks/session-end.sh`
   - keeps the existing session capture path
-  - writes an ACA handoff with `agentctl capture`
-  - can emit structured observations or tensions through `agentctl context infer --apply`
+  - writes an ACA handoff with `foxctl capture`
+  - can emit structured observations or tensions through `foxctl context infer --apply`
   - can draft a promotion automatically when `AGENTCTL_ACA_AUTO_PROMOTE=1`
 - `SubagentStop` via `configs/hooks/subagent-stop.sh`
   - writes a bounded ACA handoff for subagent completion
-  - can emit structured observations or tensions through `agentctl context infer --apply`
+  - can emit structured observations or tensions through `foxctl context infer --apply`
   - can draft a promotion automatically when `AGENTCTL_ACA_AUTO_PROMOTE=1`
 - task continuity hook wrapper via `configs/hooks/task-continuity-summary.sh`
-  - uses `agentctl context task-history-summary`
+  - uses `foxctl context task-history-summary`
   - emits prompt-ready continuity context plus `task_continuity_artifact`
 - proposal work-packet hook wrapper via `configs/hooks/proposal-work-packet.sh`
-  - uses `agentctl hooks proposal-packet`
+  - uses `foxctl hooks proposal-packet`
   - emits prompt-ready proposal context plus `proposal_work_packet`
 - next prepared proposal-merge hook wrapper via `configs/hooks/proposal-next-merge.sh`
-  - uses `agentctl hooks proposal-next-merge`
+  - uses `foxctl hooks proposal-next-merge`
   - emits prompt-ready next-merge context plus `proposal_work_packet`
   - claims the selected packet by default so it is not re-offered until merged or released
 
 Task continuity delivery split:
 
-- `agentctl context task-history-summary`
+- `foxctl context task-history-summary`
   - structured command for Codex, scripts, and agent runtimes
-- `agentctl context family-history-summary`
+- `foxctl context family-history-summary`
   - structured repo-family transcript summary over persisted transcript-history records
   - supports:
     - `--focus-query` to bias selection toward one transcript lane
@@ -222,8 +222,8 @@ The transcript-family surface is a repo-family continuity layer built on top of 
 Precondition:
 
 - transcript history must be persisted first, usually through:
-  - `agentctl sessions derive-memory --memory-lane insight --persist-history`
-  - `agentctl sessions derive-memory-group --memory-lane insight --persist-history`
+  - `foxctl sessions derive-memory --memory-lane insight --persist-history`
+  - `foxctl sessions derive-memory-group --memory-lane insight --persist-history`
 
 Selection model:
 
@@ -283,7 +283,7 @@ Implemented now:
 Default repo-graph layout:
 
 - draft bundle:
-  - `inbox/drafted-from-agentctl/repo-graph/<project>/`
+  - `inbox/drafted-from-foxctl/repo-graph/<project>/`
 - canonical bundle:
   - `notes/repo/<project>/`
 - basic vault health scans:
@@ -295,7 +295,7 @@ Default repo-graph layout:
 Default docs-bridge layout:
 
 - draft bundle:
-  - `inbox/drafted-from-agentctl/docs-bridge/<project>/`
+  - `inbox/drafted-from-foxctl/docs-bridge/<project>/`
 
 Bridge metadata contract:
 
@@ -341,7 +341,7 @@ Controls:
 - `AGENTCTL_OPENAI_COMPAT_API_KEY`
   - when an OpenAI-compatible embedding endpoint is configured, ACA retrieval now enables semantic search automatically and `context retrieve` effectively defaults to blended retrieval
 
-Recommended `agentctl` setup:
+Recommended `foxctl` setup:
 
 ```bash
 export AGENTCTL_OBSIDIAN_SEMANTIC_PROVIDER=openai_compat
@@ -356,10 +356,10 @@ With that configuration in place:
 
 ## Workspace Layout
 
-The current scaffold created by `agentctl orient` is:
+The current scaffold created by `foxctl orient` is:
 
 ```text
-.agentctl/
+.foxctl/
   runtime/
     top_of_mind.json
     current_run.json
@@ -391,12 +391,12 @@ The current scaffold created by `agentctl orient` is:
           project-index.md
 ```
 
-The workspace-local `.agentctl/runtime/` tree is the control-plane seed. The global storage root remains the source for historical task and session records used to compute orientation.
+The workspace-local `.foxctl/runtime/` tree is the control-plane seed. The global storage root remains the source for historical task and session records used to compute orientation.
 
 Persistence split:
 
 - `top_of_mind.json` and handoff JSON files remain file-backed for easy inspection
-- mutable ACA collections now use `.agentctl/runtime/contextplane.db`
+- mutable ACA collections now use `.foxctl/runtime/contextplane.db`
   - observations
   - tensions
   - promotion jobs
@@ -407,7 +407,7 @@ Persistence split:
 
 ## Retrieval Policy Note
 
-ACA retrieval policy lives in `.agentctl/policy/retrieval.yaml`.
+ACA retrieval policy lives in `.foxctl/policy/retrieval.yaml`.
 
 One useful opt-in setting is:
 
@@ -422,7 +422,7 @@ Enable this when:
 - package/runtime/controller queries are common
 - agents need deterministic ACA retrieval behavior rather than prompt-only note targeting
 
-This helped on `praze`-style package queries, where deterministic mapping from repo paths to canonical package-note paths improved ACA retrieval. It is less necessary on `agentctl`, where the default ACA vault lane is already strong.
+This helped on `praze`-style package queries, where deterministic mapping from repo paths to canonical package-note paths improved ACA retrieval. It is less necessary on `foxctl`, where the default ACA vault lane is already strong.
 
 A concrete example policy file is available at [docs/examples/aca-retrieval-policy-package-fallback.yaml](../examples/aca-retrieval-policy-package-fallback.yaml).
 
@@ -437,9 +437,9 @@ obsidian <command> vault="Vault Name" path="folder/note.md" ...
 Examples:
 
 ```bash
-obsidian create vault="Obsidian Vault" path="agentctl-lab/example.md" content="# Example"
-obsidian read vault="Obsidian Vault" path="agentctl-lab/example.md"
-obsidian append vault="Obsidian Vault" path="agentctl-lab/example.md" content="\n- appended"
+obsidian create vault="Obsidian Vault" path="foxctl-lab/example.md" content="# Example"
+obsidian read vault="Obsidian Vault" path="foxctl-lab/example.md"
+obsidian append vault="Obsidian Vault" path="foxctl-lab/example.md" content="\n- appended"
 ```
 
 Notes from local validation on the current installer:
@@ -491,7 +491,7 @@ This slice intentionally still stops short of:
 - semantic retrieval or embeddings as a requirement for vault recall
 - repo-graph-driven symbol backlinks from the code index into vault notes
 - a full reviewed merge queue with human review states beyond `drafted -> reviewed_merged`
-- automatic installation into external user-home hook layouts such as `~/.claude/hooks/agentctl/`
+- automatic installation into external user-home hook layouts such as `~/.claude/hooks/foxctl/`
 - the full external `contextd` service described in the longer proposal
 
 The goal of the current implementation is to make the dual-plane mechanics concrete and testable before expanding into richer automation.
@@ -501,7 +501,7 @@ The goal of the current implementation is to make the dual-plane mechanics concr
 Primary implementation paths:
 
 - `internal/context/contextplane/`
-- `cmd/agentctl/cmd/orient.go`
+- `cmd/foxctl/cmd/orient.go`
 
 Related existing sources used by the orienter:
 

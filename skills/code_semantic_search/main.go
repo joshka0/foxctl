@@ -29,32 +29,32 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mathutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/domain/policy"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/codefilter"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/filesummary"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/rerank"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
-	"github.com/jkatigb/agentctl/internal/intelligence/retrieval"
-	retrievalv2 "github.com/jkatigb/agentctl/internal/intelligence/retrieval/v2"
-	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
-	"github.com/jkatigb/agentctl/internal/storage/graph"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/mathutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/domain/policy"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/codefilter"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/filesummary"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/rerank"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
+	"github.com/joshka0/foxctl/internal/intelligence/retrieval"
+	retrievalv2 "github.com/joshka0/foxctl/internal/intelligence/retrieval/v2"
+	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/graph"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1657,7 +1657,7 @@ func scorePathFallbackCandidate(path string, tokens []string) int {
 
 func shouldSkipFallbackDir(name string) bool {
 	switch strings.TrimSpace(strings.ToLower(name)) {
-	case ".git", "node_modules", "vendor", ".agentctl", "dist", "build", "tmp", "deps", "_build":
+	case ".git", "node_modules", "vendor", ".foxctl", "dist", "build", "tmp", "deps", "_build":
 		return true
 	default:
 		return false
@@ -2531,7 +2531,7 @@ func searchContext(ctx context.Context, cfg config.Config, workspacePath, query,
 	retrieved, err := store.Retrieve(ctx, index, repoStore, semanticProvider, query, limit)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, "context scope unavailable; run `agentctl orient` first", nil
+			return nil, "context scope unavailable; run `foxctl orient` first", nil
 		}
 		return nil, "", err
 	}
@@ -2631,7 +2631,7 @@ func defaultSemanticSearchScopes(workspacePath, profile string) []string {
 	if workspacePath == "" {
 		return defaults
 	}
-	policyPath := filepath.Join(workspacePath, ".agentctl", "policy", "retrieval.yaml")
+	policyPath := filepath.Join(workspacePath, ".foxctl", "policy", "retrieval.yaml")
 	body, err := os.ReadFile(policyPath)
 	if err != nil {
 		return defaults
@@ -3080,8 +3080,8 @@ func callLLMProvider(ctx context.Context, provider LLMProvider, prompt string) (
 
 	// OpenRouter requires additional headers
 	if strings.HasPrefix(provider.Name, "openrouter:") {
-		req.Header.Set("HTTP-Referer", "https://github.com/jkatigb/agentctl")
-		req.Header.Set("X-Title", "agentctl")
+		req.Header.Set("HTTP-Referer", "https://github.com/joshka0/foxctl")
+		req.Header.Set("X-Title", "foxctl")
 	}
 
 	client := &http.Client{Timeout: 60 * time.Second}

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "status": "error",
-  "command": "agentctl.jobs.wait",
+  "command": "foxctl.jobs.wait",
   "data": {
     "hint": "Job canceled by user request",
     "job_id": "01HF456DEF7890ABC123"

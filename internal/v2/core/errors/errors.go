@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 // ErrorKind classifies v2 runtime failures.

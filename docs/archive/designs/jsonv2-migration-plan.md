@@ -6,7 +6,7 @@
 
 ## Overview
 
-Migrate agentctl from `encoding/json` to `encoding/json/v2` to leverage new
+Migrate foxctl from `encoding/json` to `encoding/json/v2` to leverage new
 features, reduce boilerplate, and improve JSON output quality.
 
 ## New Packages

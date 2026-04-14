@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# skill-advisor.sh - Suggest agentctl skills based on user prompt patterns
+# skill-advisor.sh - Suggest foxctl skills based on user prompt patterns
 #
 # UserPromptSubmit hook that detects intent and suggests relevant skills:
 #
@@ -53,79 +53,79 @@ hint=""
 if [[ "$prompt" =~ (pr\ comment|review\ comment|reviewer|what\ did.*say|feedback\ on\ pr|pr\ feedback) ]]; then
   hint="**Skill hint:** Check PR comments:
 \`\`\`bash
-agentctl run ci/prcomments --input '{\"pr\": <number>}'
+foxctl run ci/prcomments --input '{\"pr\": <number>}'
 \`\`\`"
 elif [[ "$prompt" =~ (ci\ status|build\ status|check.*fail|pipeline|workflow.*fail|github.*action) ]]; then
   hint="**Skill hint:** Check CI status:
 \`\`\`bash
-agentctl run ci/checks --input '{\"pr\": <number>}'
+foxctl run ci/checks --input '{\"pr\": <number>}'
 \`\`\`"
 elif [[ "$prompt" =~ (merge\ conflict|can.*merge|mergeable|ready\ to\ merge) ]]; then
   hint="**Skill hint:** Check merge status:
 \`\`\`bash
-agentctl run ci/prcomments --input '{\"pr\": <number>, \"include_merge_status\": true}'
+foxctl run ci/prcomments --input '{\"pr\": <number>, \"include_merge_status\": true}'
 \`\`\`"
 
 # Search/investigate patterns
 elif [[ "$prompt" =~ (semantic.*search|search.*semantic|vector.*search) ]]; then
   hint="**Skill hint:** Semantic code search:
 \`\`\`bash
-agentctl run code/semantic_search --input '{\"query\": \"<your query>\"}'
+foxctl run code/semantic_search --input '{\"query\": \"<your query>\"}'
 \`\`\`"
 elif [[ "$prompt" =~ (investigate|dig\ into|explore.*code|understand.*how|figure\ out) ]]; then
   hint="**Skill hint:** Code investigation:
 \`\`\`bash
 # Smart grep with context
-agentctl run code/smart_search --input '{\"query\": \"<pattern>\", \"path\": \".\"}'
+foxctl run code/smart_search --input '{\"query\": \"<pattern>\", \"path\": \".\"}'
 # Or semantic search
-agentctl run code/semantic_search --input '{\"query\": \"<question>\"}'
+foxctl run code/semantic_search --input '{\"query\": \"<question>\"}'
 \`\`\`"
 elif [[ "$prompt" =~ (search\ for|find.*code|look\ for|where\ is|locate) ]] && [[ ! "$prompt" =~ (file|directory) ]]; then
   hint="**Skill hint:** Code search options:
 \`\`\`bash
 # Semantic (understands meaning)
-agentctl run code/semantic_search --input '{\"query\": \"...\"}'
+foxctl run code/semantic_search --input '{\"query\": \"...\"}'
 # Pattern-based (ripgrep)
-agentctl run text/ripgrep --input '{\"pattern\": \"...\", \"path\": \".\"}'
+foxctl run text/ripgrep --input '{\"pattern\": \"...\", \"path\": \".\"}'
 \`\`\`"
 
 # Code analysis patterns
 elif [[ "$prompt" =~ (complexity|cyclomatic|cognitive|how\ complex|nesting) ]]; then
   hint="**Skill hint:** Analyze code complexity:
 \`\`\`bash
-agentctl run code/complexity --input '{\"path\": \"<file_or_dir>\"}'
+foxctl run code/complexity --input '{\"path\": \"<file_or_dir>\"}'
 \`\`\`"
 elif [[ "$prompt" =~ (extract.*symbol|list.*function|what.*types|symbol.*index) ]]; then
   hint="**Skill hint:** Extract code symbols:
 \`\`\`bash
-agentctl run code/symbols --input '{\"path\": \"<file>\", \"language\": \"go\"}'
+foxctl run code/symbols --input '{\"path\": \"<file>\", \"language\": \"go\"}'
 \`\`\`"
 elif [[ "$prompt" =~ (import|dependenc|what.*uses|used\ by|cycle.*detect) ]]; then
   hint="**Skill hint:** Analyze imports/dependencies:
 \`\`\`bash
-agentctl run code/imports --input '{\"path\": \"<file>\", \"operation\": \"graph\"}'
+foxctl run code/imports --input '{\"path\": \"<file>\", \"operation\": \"graph\"}'
 \`\`\`"
 elif [[ "$prompt" =~ (security|vulnerab|secret|injection|xss|owasp) ]]; then
   hint="**Skill hint:** Security scan:
 \`\`\`bash
-agentctl run code/security --input '{\"path\": \"<file_or_dir>\"}'
+foxctl run code/security --input '{\"path\": \"<file_or_dir>\"}'
 \`\`\`"
 elif [[ "$prompt" =~ (diff|compare.*file|what.*changed.*between|side.*by.*side) ]]; then
   hint="**Skill hint:** Compare files/diffs:
 \`\`\`bash
-agentctl run code/diff --input '{\"file_a\": \"...\", \"file_b\": \"...\"}'
+foxctl run code/diff --input '{\"file_a\": \"...\", \"file_b\": \"...\"}'
 \`\`\`"
 
 # Git patterns
 elif [[ "$prompt" =~ (git\ status|uncommitted|staged|unstaged|working.*tree) ]]; then
   hint="**Skill hint:** Git status:
 \`\`\`bash
-agentctl run git/status --input '{}'
+foxctl run git/status --input '{}'
 \`\`\`"
 elif [[ "$prompt" =~ (recent.*commit|blame|who.*changed|hotspot|churn|co-change) ]]; then
   hint="**Skill hint:** Git analysis:
 \`\`\`bash
-agentctl run code/git --input '{\"path\": \".\", \"operation\": \"hotspots\"}'
+foxctl run code/git --input '{\"path\": \".\", \"operation\": \"hotspots\"}'
 # or: blame, recent_changes, co_changed
 \`\`\`"
 
@@ -133,38 +133,38 @@ agentctl run code/git --input '{\"path\": \".\", \"operation\": \"hotspots\"}'
 elif [[ "$prompt" =~ (run.*test|test.*coverage|failing.*test|test.*fail) ]]; then
   hint="**Skill hint:** Run tests:
 \`\`\`bash
-agentctl run test/run --input '{\"path\": \"./...\", \"coverage\": true}'
+foxctl run test/run --input '{\"path\": \"./...\", \"coverage\": true}'
 \`\`\`"
 
 # LSP patterns
 elif [[ "$prompt" =~ (go\ to\ definition|find.*reference|call.*hierarch|implementation) ]]; then
   hint="**Skill hint:** LSP operations:
 \`\`\`bash
-agentctl run lsp/gopls --input '{\"operation\": \"references\", \"file\": \"...\", \"line\": N, \"column\": N}'
+foxctl run lsp/gopls --input '{\"operation\": \"references\", \"file\": \"...\", \"line\": N, \"column\": N}'
 \`\`\`"
 
 # Session patterns
 elif [[ "$prompt" =~ (past.*session|session.*history|what.*discuss|previous.*conversation) ]]; then
   hint="**Skill hint:** Search past sessions:
 \`\`\`bash
-agentctl run session/recall --input '{\"query\": \"<topic>\"}'
+foxctl run session/recall --input '{\"query\": \"<topic>\"}'
 \`\`\`"
 
 # Task patterns (beyond what todo-advisor handles)
 elif [[ "$prompt" =~ (task.*graph|pagerank|critical.*path|task.*priorit) ]]; then
   hint="**Skill hint:** Task graph analysis:
 \`\`\`bash
-agentctl todo insights                    # Graph insights
-agentctl todo recommend                   # AI-prioritized tasks
-agentctl todo list --ranked -f table      # PageRank sorted
+foxctl todo insights                    # Graph insights
+foxctl todo recommend                   # AI-prioritized tasks
+foxctl todo list --ranked -f table      # PageRank sorted
 \`\`\`"
 
 # Codemap patterns
 elif [[ "$prompt" =~ (codemap|code.*map|trace.*code|map.*relationship) ]]; then
   hint="**Skill hint:** Generate codemap:
 \`\`\`bash
-agentctl run codemap/generate --input '{\"entry_point\": \"<file:function>\"}'
-agentctl run codemap/check --input '{\"codemap_id\": \"...\"}'  # Check staleness
+foxctl run codemap/generate --input '{\"entry_point\": \"<file:function>\"}'
+foxctl run codemap/check --input '{\"codemap_id\": \"...\"}'  # Check staleness
 \`\`\`"
 
 fi

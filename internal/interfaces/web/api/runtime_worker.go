@@ -9,11 +9,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/context/contextplane/taskhistory"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
-	libsqlworkers "github.com/jkatigb/agentctl/internal/v2/adapters/libsql/workers"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	"github.com/joshka0/foxctl/internal/context/contextplane/taskhistory"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
+	libsqlworkers "github.com/joshka0/foxctl/internal/v2/adapters/libsql/workers"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 func newJidoStateReader(client v2jido.Client) (coreworker.StateReader, error) {
@@ -108,8 +108,8 @@ func runtimeRecentLogs(raw json.RawMessage) []map[string]any {
 	if err := json.Unmarshal(raw, &state); err != nil {
 		return nil
 	}
-	agentctl, _ := state["agentctl"].(map[string]any)
-	entries, _ := agentctl["recent_logs"].([]any)
+	foxctl, _ := state["foxctl"].(map[string]any)
+	entries, _ := foxctl["recent_logs"].([]any)
 	if len(entries) == 0 {
 		return nil
 	}

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/domain/skill"
 )
 
 // Validator provides policy validation for skill execution.

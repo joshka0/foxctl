@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 const (
@@ -311,37 +311,37 @@ func mergeSyntheticState(raw json.RawMessage, record coreworker.Record, evt core
 	if len(raw) > 0 && string(raw) != "null" {
 		_ = json.Unmarshal(raw, &root)
 	}
-	agentctl, _ := root["agentctl"].(map[string]any)
-	if agentctl == nil {
-		agentctl = map[string]any{}
+	foxctl, _ := root["foxctl"].(map[string]any)
+	if foxctl == nil {
+		foxctl = map[string]any{}
 	}
-	agentctl["status"] = string(record.Status)
+	foxctl["status"] = string(record.Status)
 	if record.AgentID != "" {
-		agentctl["agent"] = record.AgentID
+		foxctl["agent"] = record.AgentID
 	}
 	if record.RunID != "" {
-		agentctl["run_id"] = record.RunID
+		foxctl["run_id"] = record.RunID
 	}
 	if record.WorkspaceID != "" {
-		agentctl["workspace_id"] = record.WorkspaceID
+		foxctl["workspace_id"] = record.WorkspaceID
 	}
 	if record.PID != "" {
-		agentctl["pid"] = record.PID
+		foxctl["pid"] = record.PID
 	}
 	if record.StopReason != "" {
-		agentctl["stop_reason"] = record.StopReason
+		foxctl["stop_reason"] = record.StopReason
 	}
 	if record.ExitCode != 0 {
-		agentctl["exit_code"] = record.ExitCode
+		foxctl["exit_code"] = record.ExitCode
 	}
 	if record.Role != "" {
-		agentctl["role"] = record.Role
+		foxctl["role"] = record.Role
 	}
 	if evt.EventKind == coreworker.EventWorkerLogChunk {
 		stream := strings.TrimSpace(fmt.Sprint(evt.Metadata["stream"]))
 		chunk := strings.TrimSpace(fmt.Sprint(evt.Metadata["chunk"]))
 		if chunk != "" {
-			recentLogs, _ := agentctl["recent_logs"].([]any)
+			recentLogs, _ := foxctl["recent_logs"].([]any)
 			entry := map[string]any{
 				"stream": stream,
 				"text":   chunk,
@@ -353,10 +353,10 @@ func mergeSyntheticState(raw json.RawMessage, record coreworker.Record, evt core
 			if len(recentLogs) > 50 {
 				recentLogs = recentLogs[len(recentLogs)-50:]
 			}
-			agentctl["recent_logs"] = recentLogs
+			foxctl["recent_logs"] = recentLogs
 		}
 	}
-	root["agentctl"] = agentctl
+	root["foxctl"] = foxctl
 	encoded, err := json.Marshal(root)
 	if err != nil {
 		return raw

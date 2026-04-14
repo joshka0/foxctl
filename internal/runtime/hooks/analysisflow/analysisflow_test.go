@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
 )
 
 func TestAnalyzeEditedFileSkipsNonCode(t *testing.T) {

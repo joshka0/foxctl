@@ -15,12 +15,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/textutil"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 // Input defines the input parameters for fs/read operations.
@@ -123,7 +123,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		data["preview_numbered"] = numbered
 	}
 	if !isText {
-		data["hint"] = "content stored in CAS; fetch via agentctl cas get <digest>"
+		data["hint"] = "content stored in CAS; fetch via foxctl cas get <digest>"
 	}
 	data["summary"] = fmt.Sprintf("Read %d bytes from %s", obj.Size, filepath.Base(validPath))
 

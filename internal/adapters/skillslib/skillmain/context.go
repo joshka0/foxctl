@@ -9,16 +9,16 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/jkatigb/agentctl/internal/domain/policy"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runtime/execution/circuitbreaker"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/domain/policy"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/execution/circuitbreaker"
+	"github.com/joshka0/foxctl/internal/storage/cas"
 	"github.com/rs/zerolog"
 )
 
 // RunContext bundles dependencies for skill execution.
 type RunContext struct {
-	// Config is the loaded agentctl configuration.
+	// Config is the loaded foxctl configuration.
 	Config config.Config
 
 	// CASStore is the content-addressable storage for large outputs.
@@ -39,7 +39,7 @@ type RunContext struct {
 	// SessionID is the AI coding tool session ID (tool-agnostic).
 	SessionID string
 
-	// AgentID is the agent identifier (default: agentctl).
+	// AgentID is the agent identifier (default: foxctl).
 	AgentID string
 
 	// Logger is a structured logger for the skill.

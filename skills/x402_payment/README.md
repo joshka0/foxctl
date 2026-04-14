@@ -19,19 +19,19 @@ This skill implements the [x402 protocol](https://x402.org) for handling HTTP 40
 
 ```bash
 # Initialize a CDP wallet (recommended)
-agentctl run x402/payment --input '{
+foxctl run x402/payment --input '{
   "operation": "wallet/init",
   "wallet_type": "cdp",
   "network": "base-sepolia"
 }'
 
 # Check wallet status
-agentctl run x402/payment --input '{
+foxctl run x402/payment --input '{
   "operation": "wallet/status"
 }'
 
 # Fetch a 402-protected resource (auto-pay)
-agentctl run x402/payment --input '{
+foxctl run x402/payment --input '{
   "operation": "fetch",
   "url": "https://api.example.com/premium/data",
   "max_payment": "0.10",
@@ -39,7 +39,7 @@ agentctl run x402/payment --input '{
 }'
 
 # Direct payment
-agentctl run x402/payment --input '{
+foxctl run x402/payment --input '{
   "operation": "pay",
   "to": "0x...",
   "amount": "0.05",

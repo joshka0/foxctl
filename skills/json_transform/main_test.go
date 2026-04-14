@@ -7,9 +7,9 @@ import (
 	"reflect"
 	"testing"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	runner "github.com/joshka0/foxctl/internal/adapters/skillslib/runner"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerContext {

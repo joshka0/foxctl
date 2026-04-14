@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/enrichers"
-	runtimeevents "github.com/jkatigb/agentctl/internal/v2/runtime/events"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/runner"
-	"github.com/jkatigb/agentctl/internal/v2/testkit/fakes"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/runtime/enrichers"
+	runtimeevents "github.com/joshka0/foxctl/internal/v2/runtime/events"
+	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
+	"github.com/joshka0/foxctl/internal/v2/testkit/fakes"
 )
 
 func TestPipeline_EventBusPublishFailure_DoesNotFailTurn(t *testing.T) {

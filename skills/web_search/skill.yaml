@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: web/search
@@ -59,9 +59,9 @@ signature:
         AGENTCTL_SEARCH_PROVIDER - Default provider (exa or tavily)
 
       Example commands:
-        agentctl run web/search --input '{"query": "React hooks best practices"}'
-        agentctl run web/search --input '{"query": "OpenAI API", "extract": true, "extract_limit": 3}'
-        agentctl run web/search --input '{"query": "latest news", "topic": "news", "max_results": 5}'
+        foxctl run web/search --input '{"query": "React hooks best practices"}'
+        foxctl run web/search --input '{"query": "OpenAI API", "extract": true, "extract_limit": 3}'
+        foxctl run web/search --input '{"query": "latest news", "topic": "news", "max_results": 5}'
     workflows:
       - id: basic-search
         description: "Simple web search"

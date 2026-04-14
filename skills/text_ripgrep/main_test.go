@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/rgutil"
-	"github.com/jkatigb/agentctl/internal/tooling/tools/ripgrep"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/rgutil"
+	"github.com/joshka0/foxctl/internal/tooling/tools/ripgrep"
 )
 
 func TestBuildSearchOpts(t *testing.T) {

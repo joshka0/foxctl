@@ -6,7 +6,7 @@ Last Updated: 2026-03-22
 
 ## Goal
 
-Add a memory-focused scout ensemble to `agentctl` with two properties:
+Add a memory-focused scout ensemble to `foxctl` with two properties:
 
 1. each scout is a first-class, individually callable bounded agent role
 2. the ensemble is exposed as its own retrieval call, layered above those scouts
@@ -114,7 +114,7 @@ Available read surfaces already exist for:
 
 Relevant existing paths:
 
-- `cmd/agentctl/cmd/agent_memory.go`
+- `cmd/foxctl/cmd/agent_memory.go`
 - `internal/context/companion/service.go`
 - `internal/agent/runtime/runtime.go`
 - `internal/rlm/env/*`
@@ -414,7 +414,7 @@ Add read-only runtime tools:
 Files:
 
 - `internal/agent/runtime/runtime.go`
-- `cmd/agentctl/cmd/agent_memory.go`
+- `cmd/foxctl/cmd/agent_memory.go`
 - `internal/agent/toolnames/registry.go`
 - `internal/agent/runtime/runtime_test.go`
 
@@ -470,7 +470,7 @@ Key work:
 
 Files:
 
-- `cmd/agentctl/cmd/eval.go`
+- `cmd/foxctl/cmd/eval.go`
 - `internal/tooling/evals/retrievaleval/eval.go`
 - `internal/rlm/llm_runner.go`
 - optional observability wiring in `internal/runtime/observability/*`
@@ -576,7 +576,7 @@ Implement:
 - structured merge
 - conflict synthesis
 
-### `cmd/agentctl/cmd/eval.go` (modified)
+### `cmd/foxctl/cmd/eval.go` (modified)
 
 Add retrieval eval mode(s) for the ensemble.
 

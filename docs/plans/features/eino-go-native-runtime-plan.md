@@ -117,7 +117,7 @@ Deliverables:
 Files likely touched:
 
 - new `internal/v2/adapters/goruntime/` or similar
-- `cmd/agentctl/cmd/overseer_v2_orchestration.go`
+- `cmd/foxctl/cmd/overseer_v2_orchestration.go`
 - runtime wiring for worker launch and shutdown
 
 Exit criteria:

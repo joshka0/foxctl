@@ -18,7 +18,7 @@ type PlanInfo struct {
 	ModTime time.Time `json:"mod_time"`
 	// Sections are the parsed ## and ### sections from the plan.
 	Sections []Section `json:"sections,omitempty"`
-	// LinkedTaskIDs are agentctl task IDs associated with this plan.
+	// LinkedTaskIDs are foxctl task IDs associated with this plan.
 	LinkedTaskIDs []string `json:"linked_task_ids,omitempty"`
 	// Status indicates the plan state: "active", "completed", "archived".
 	Status string `json:"status,omitempty"`
@@ -32,7 +32,7 @@ type Section struct {
 	Title string `json:"title"`
 	// Content is the text content under this section (before next heading).
 	Content string `json:"content,omitempty"`
-	// TaskID is the linked agentctl task ID, if any.
+	// TaskID is the linked foxctl task ID, if any.
 	TaskID string `json:"task_id,omitempty"`
 	// LineNumber is the line number where this section starts (1-indexed).
 	LineNumber int `json:"line_number,omitempty"`

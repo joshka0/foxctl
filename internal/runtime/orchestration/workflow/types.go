@@ -1,4 +1,4 @@
-// Package workflow provides a DAG-based workflow engine for chaining agentctl skills.
+// Package workflow provides a DAG-based workflow engine for chaining foxctl skills.
 package workflow
 
 import (
@@ -6,7 +6,7 @@ import (
 )
 
 // APIVersion is the current workflow API version.
-const APIVersion = "agentctl/v1"
+const APIVersion = "foxctl/v1"
 
 // Kind identifies workflow manifests.
 const Kind = "Workflow"

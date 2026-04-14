@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 )
 
 // repairWorkspaceIDs best-effort backfills stable workspace IDs for legacy rows.
 //
-// Older agentctl versions stored only an absolute workspace path. When that path changes
+// Older foxctl versions stored only an absolute workspace path. When that path changes
 // (e.g., username change on macOS or cloning the repo elsewhere), workspace-scoped queries
 // won't match historical sessions.
 //

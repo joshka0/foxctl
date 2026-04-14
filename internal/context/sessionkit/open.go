@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 // OpenSessions opens the sessions store using paths from config.
@@ -65,11 +65,11 @@ func OpenMemoryInCache(ctx context.Context, cfg config.Config) (*memory.Store, f
 
 // StorePaths holds resolved paths for session skill operations.
 type StorePaths struct {
-	AgentctlHome string // ~/.agentctl or AGENTCTL_HOME
-	StorageRoot  string // ~/.agentctl/storage
-	CachePath    string // ~/.agentctl/cache
-	CASPath      string // ~/.agentctl/cas
-	ArchivesDir  string // ~/.agentctl/archives
+	AgentctlHome string // ~/.foxctl or AGENTCTL_HOME
+	StorageRoot  string // ~/.foxctl/storage
+	CachePath    string // ~/.foxctl/cache
+	CASPath      string // ~/.foxctl/cas
+	ArchivesDir  string // ~/.foxctl/archives
 	PlansDir     string // ~/.claude/plans
 	ClaudeHome   string // ~/.claude
 }

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Enable agentctl to use libsql as the primary database with optional remote sync, while maintaining SQLite as a fallback for non-CGO builds.
+Enable foxctl to use libsql as the primary database with optional remote sync, while maintaining SQLite as a fallback for non-CGO builds.
 
 ## Current State
 
@@ -182,11 +182,11 @@ AGENTCTL_LIBSQL_SYNC_URL=http://localhost:8080
 AGENTCTL_LIBSQL_AUTH_TOKEN=your-token
 
 # Or use config file
-# ~/.agentctl/config.yaml
+# ~/.foxctl/config.yaml
 storage:
   driver: libsql
   libsql:
-    path: ~/.agentctl/storage/memory.db
+    path: ~/.foxctl/storage/memory.db
     enable_vector_search: true
     sync_url: http://localhost:8080
     auth_token: ${AGENTCTL_LIBSQL_AUTH_TOKEN}
@@ -215,7 +215,7 @@ Turso's embedded replicas use WAL-based sync, not CRDTs. Behavior:
 - **Writes**: Applied locally first, then synced
 - **Conflicts**: Last-write-wins at row level (by primary key)
 
-For agentctl's use case (single-user, single-device primary):
+For foxctl's use case (single-user, single-device primary):
 - Memories: `UNIQUE(name, workspace)` - conflict unlikely
 - Sessions: UUID primary key - no conflicts
 
@@ -240,14 +240,14 @@ For agentctl's use case (single-user, single-device primary):
 
 ```bash
 # Start local sqld
-sqld --db-path ~/.agentctl/sync/primary.db
+sqld --db-path ~/.foxctl/sync/primary.db
 
-# Configure agentctl
+# Configure foxctl
 export AGENTCTL_LIBSQL_SYNC_URL=http://localhost:8080
 
 # Test sync
-agentctl memory put --name "test" --summary "testing sync"
-agentctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080", "dry_run": true}'
+foxctl memory put --name "test" --summary "testing sync"
+foxctl run libsql/migrate --input '{"libsql_url": "http://localhost:8080", "dry_run": true}'
 ```
 
 ## Future Enhancements

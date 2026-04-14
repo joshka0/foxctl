@@ -18,7 +18,7 @@ relevant knowledge packs based on context.
 - `internal/storage/knowledge/sync.go` - Sync logic to index knowledge from
   filesystem
 - `internal/storage/knowledge/store_test.go` - Unit tests for store and sync
-- `cmd/agentctl/cmd/knowledge.go` - CLI commands: `sync`, `list`, `search`
+- `cmd/foxctl/cmd/knowledge.go` - CLI commands: `sync`, `list`, `search`
 - `skills/hooks_knowledge_router/main.go` - Hook skill implementation
 - `skills/hooks_knowledge_router/skill.yaml` - Skill manifest
 - `.claude/hooks/knowledge-router.sh` - Hook wrapper script
@@ -31,20 +31,20 @@ relevant knowledge packs based on context.
 
 ```bash
 # Index knowledge packs from filesystem into SQLite
-agentctl knowledge sync
+foxctl knowledge sync
 
 # List all knowledge items or filter by kind
-agentctl knowledge list
-agentctl knowledge list --kind pack
+foxctl knowledge list
+foxctl knowledge list --kind pack
 
 # Search by keyword or file path
-agentctl knowledge search --query "react hooks"
-agentctl knowledge search --path "src/components/Button.tsx"
+foxctl knowledge search --query "react hooks"
+foxctl knowledge search --path "src/components/Button.tsx"
 ```
 
 ## Storage Schema
 
-Knowledge items are stored in `~/.agentctl/storage/knowledge.db`:
+Knowledge items are stored in `~/.foxctl/storage/knowledge.db`:
 
 - **knowledge_items** - Packs, agents, commands with name, kind, description,
   source_path, priority

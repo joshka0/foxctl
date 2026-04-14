@@ -8,13 +8,13 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/codeblocks"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/rgutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textmatch"
-	"github.com/jkatigb/agentctl/internal/tooling/tools/ripgrep"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/codeblocks"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/rgutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/textmatch"
+	"github.com/joshka0/foxctl/internal/tooling/tools/ripgrep"
 )
 
 // input defines the parameters for context-aware ripgrep searches with code block expansion.

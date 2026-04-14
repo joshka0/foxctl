@@ -1,15 +1,15 @@
 name: CI (local)
 
 # Local-only workflow for agent-ci. Uses the local registry mirror
-# localhost:5000/agentctl-ci:go1.26.1 instead of ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.26.1.
+# localhost:5000/foxctl-ci:go1.26.1 instead of ghcr.io/${{ github.repository_owner }}/foxctl-ci:go1.26.1.
 #
 # Usage:
 #   npx agent-ci run --workflow .github/workflows/ci-local.yml
 #
 # Build the CI image first:
-#   docker build -t agentctl-ci:go1.26.1 -f Dockerfile.ci .
-#   docker tag agentctl-ci:go1.26.1 localhost:5000/agentctl-ci:go1.26.1
-#   docker push localhost:5000/agentctl-ci:go1.26.1
+#   docker build -t foxctl-ci:go1.26.1 -f Dockerfile.ci .
+#   docker tag foxctl-ci:go1.26.1 localhost:5000/foxctl-ci:go1.26.1
+#   docker push localhost:5000/foxctl-ci:go1.26.1
 
 on:
   pull_request:
@@ -34,7 +34,7 @@ jobs:
   static-analysis:
     runs-on: ubuntu-latest
     container:
-      image: localhost:5000/agentctl-ci:go1.26.1
+      image: localhost:5000/foxctl-ci:go1.26.1
       options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
@@ -68,7 +68,7 @@ jobs:
     needs: [static-analysis]
     runs-on: ubuntu-latest
     container:
-      image: localhost:5000/agentctl-ci:go1.26.1
+      image: localhost:5000/foxctl-ci:go1.26.1
       options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +96,7 @@ jobs:
     needs: [cgo-build-and-tests]
     runs-on: ubuntu-latest
     container:
-      image: localhost:5000/agentctl-ci:go1.26.1
+      image: localhost:5000/foxctl-ci:go1.26.1
       options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
@@ -124,7 +124,7 @@ jobs:
     needs: [unit-tests]
     runs-on: ubuntu-latest
     container:
-      image: localhost:5000/agentctl-ci:go1.26.1
+      image: localhost:5000/foxctl-ci:go1.26.1
       options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
@@ -158,7 +158,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     container:
-      image: localhost:5000/agentctl-ci:go1.26.1
+      image: localhost:5000/foxctl-ci:go1.26.1
       options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4
@@ -194,7 +194,7 @@ jobs:
     needs: [race-tests]
     runs-on: ubuntu-latest
     container:
-      image: localhost:5000/agentctl-ci:go1.26.1
+      image: localhost:5000/foxctl-ci:go1.26.1
       options: --memory=6g --memory-swap=6g --cpus=4
     steps:
       - uses: actions/checkout@v4

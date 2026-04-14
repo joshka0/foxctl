@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: optimize/feedback
@@ -44,10 +44,10 @@ signature:
     long: |
       Use optimize/feedback to add feedback or view stats.
       Example commands:
-        agentctl run optimize/feedback --input '{"action":"add","trajectory_id":"01HXYZ","rating":5,"comment":"Great"}'
-        agentctl skills run optimize/feedback --action add --trajectory_id 01HXYZ --rating 5 --comment "Great"
-        agentctl run optimize/feedback --input '{"action":"stats","role":"coder"}'
-        agentctl skills run optimize/feedback --action stats --role coder
+        foxctl run optimize/feedback --input '{"action":"add","trajectory_id":"01HXYZ","rating":5,"comment":"Great"}'
+        foxctl skills run optimize/feedback --action add --trajectory_id 01HXYZ --rating 5 --comment "Great"
+        foxctl run optimize/feedback --input '{"action":"stats","role":"coder"}'
+        foxctl skills run optimize/feedback --action stats --role coder
     workflows:
       - id: add-feedback
         description: "Add feedback for a trajectory."

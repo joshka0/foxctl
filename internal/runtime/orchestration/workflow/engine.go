@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"time"
 
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
 )
 
 // Engine is the main workflow execution engine.
@@ -22,7 +22,7 @@ type Engine struct {
 // EngineOption configures an Engine.
 type EngineOption func(*Engine)
 
-// WithAgentctlBin sets the path to the agentctl binary.
+// WithAgentctlBin sets the path to the foxctl binary.
 func WithAgentctlBin(path string) EngineOption {
 	return func(e *Engine) {
 		e.agentctlBin = path
@@ -51,7 +51,7 @@ func NewEngine(opts ...EngineOption) *Engine {
 		loader:      NewLoader(),
 		template:    NewTemplateEngine(),
 		maxWorkers:  10,
-		agentctlBin: "agentctl",
+		agentctlBin: "foxctl",
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -171,7 +171,7 @@ func (e *Engine) extractOutputs(outputs []Output, ctx *ExecutionContext) (map[st
 	return result, nil
 }
 
-// skillExecutor executes agentctl skills.
+// skillExecutor executes foxctl skills.
 type skillExecutor struct {
 	agentctlBin string
 }
@@ -238,7 +238,7 @@ func (e *skillExecutor) Execute(ctx context.Context, step *Step, input map[strin
 	return result, nil
 }
 
-// parseEnvelopeData extracts data from an agentctl envelope.
+// parseEnvelopeData extracts data from an foxctl envelope.
 func parseEnvelopeData(output []byte) (any, error) {
 	var env struct {
 		Status string `json:"status"`

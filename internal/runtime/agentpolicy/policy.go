@@ -1,7 +1,7 @@
 package agentpolicy
 
 // Profile represents an agent capability profile.
-// Profiles restrict which agentctl skills a subagent can run via bash.
+// Profiles restrict which foxctl skills a subagent can run via bash.
 type Profile string
 
 const (
@@ -62,8 +62,8 @@ type AuthorizationResult struct {
 	// Reason explains why the decision was made.
 	Reason string `json:"reason"`
 
-	// ParsedSkill is the skill name extracted from an agentctl run command.
-	// Empty if the command is not an agentctl run command.
+	// ParsedSkill is the skill name extracted from an foxctl run command.
+	// Empty if the command is not an foxctl run command.
 	ParsedSkill string `json:"parsed_skill,omitempty"`
 
 	// Profile is the profile that was used for authorization.
@@ -72,7 +72,7 @@ type AuthorizationResult struct {
 
 // ParsedCommand represents a parsed bash command.
 type ParsedCommand struct {
-	// IsAgentctlRun is true if this is an "agentctl run <skill>" command.
+	// IsAgentctlRun is true if this is an "foxctl run <skill>" command.
 	IsAgentctlRun bool
 
 	// Skill is the skill name (e.g., "code/symbols") if IsAgentctlRun is true.

@@ -94,9 +94,9 @@ func modeDir() string {
 		home, err := userHomeDir()
 		switch {
 		case err == nil && strings.TrimSpace(home) != "":
-			agentctlHome = filepath.Join(home, ".agentctl")
+			agentctlHome = filepath.Join(home, ".foxctl")
 		default:
-			agentctlHome = filepath.Join(os.TempDir(), "agentctl")
+			agentctlHome = filepath.Join(os.TempDir(), "foxctl")
 		}
 	}
 	return filepath.Join(agentctlHome, "cache", "session-modes")

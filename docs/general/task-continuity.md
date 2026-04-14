@@ -24,7 +24,7 @@ The output is designed to be deterministic first and model-assisted second.
 Use this for Codex, scripts, agents, and other programmatic callers:
 
 ```bash
-agentctl context task-history-summary --workspace .
+foxctl context task-history-summary --workspace .
 ```
 
 This returns a structured envelope with:
@@ -38,7 +38,7 @@ This returns a structured envelope with:
 Use the full pack command when a caller needs the entire collected bundle:
 
 ```bash
-agentctl context task-history --workspace .
+foxctl context task-history --workspace .
 ```
 
 That returns:
@@ -53,16 +53,16 @@ Use this when you want a repo-family or lane-specific transcript-history view
 rather than one active task:
 
 ```bash
-agentctl context family-history-summary --workspace .
+foxctl context family-history-summary --workspace .
 ```
 
 Useful filters:
 
 ```bash
-agentctl context family-history-summary --workspace . \
+foxctl context family-history-summary --workspace . \
   --focus-query "recursive memory second-pass consolidation"
 
-agentctl context family-history-summary --workspace . \
+foxctl context family-history-summary --workspace . \
   --date-from 2026-03-25 \
   --date-to 2026-03-25
 ```
@@ -81,8 +81,8 @@ This surface:
 Precondition:
 
 - transcript history must have been persisted first through:
-  - `agentctl sessions derive-memory --memory-lane insight --persist-history`
-  - or `agentctl sessions derive-memory-group --memory-lane insight --persist-history`
+  - `foxctl sessions derive-memory --memory-lane insight --persist-history`
+  - or `foxctl sessions derive-memory-group --memory-lane insight --persist-history`
 
 ## Hook Wrapper
 

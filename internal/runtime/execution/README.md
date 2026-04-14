@@ -124,8 +124,8 @@ exec := executor.New(root, persist, executor.WithRunner(customRunnerFunc))
 ```go
 // jobs/executor directly imports runner and skill
 import (
-    "github.com/jkatigb/agentctl/internal/runtime/execution/runner"
-    "github.com/jkatigb/agentctl/internal/domain/skill"
+    "github.com/joshka0/foxctl/internal/runtime/execution/runner"
+    "github.com/joshka0/foxctl/internal/domain/skill"
 )
 
 func (e *Executor) executeSkill(...) {
@@ -145,7 +145,7 @@ func (e *Executor) executeSkill(...) {
 ```go
 // jobs/executor uses the interface
 import (
-    "github.com/jkatigb/agentctl/internal/runtime/execution"
+    "github.com/joshka0/foxctl/internal/runtime/execution"
 )
 
 type Executor struct {

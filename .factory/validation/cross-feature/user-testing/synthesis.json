@@ -51,12 +51,12 @@
       "sourceFeature": "VAL-CROSS-009"
     },
     {
-      "target": "cmd/agentctl/cmd/room_sandbox_integration_test.go",
+      "target": "cmd/foxctl/cmd/room_sandbox_integration_test.go",
       "description": "Added path traversal subtests to TestRoomSandboxTasks_ScopePathResolvedToWorktree (VAL-CROSS-006 guard)",
       "sourceFeature": "VAL-CROSS-006"
     },
     {
-      "target": "cmd/agentctl/cmd/room.go",
+      "target": "cmd/foxctl/cmd/room.go",
       "description": "Added path traversal guard to resolveSandboxScopePath; changed provisionSandbox and provisionWorktreeSandbox to use newRoomTmuxClient() factory; added TODO(gateway-integration) comments to terminal URL construction; added relay gap documentation comment to relayRoomMessage()",
       "sourceFeature": "VAL-CROSS-006, VAL-CROSS-007, VAL-CROSS-003"
     }

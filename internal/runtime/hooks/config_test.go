@@ -480,7 +480,7 @@ func TestDefaultConfigPaths(t *testing.T) {
 	}
 
 	// First should be workspace config
-	if paths[0] != "/workspace/root/.agentctl/hooks.yaml" {
+	if paths[0] != "/workspace/root/.foxctl/hooks.yaml" {
 		t.Errorf("expected workspace path first, got %s", paths[0])
 	}
 }

@@ -424,11 +424,11 @@ func SocketPath() string {
 
 	// Use XDG_RUNTIME_DIR if available (Linux)
 	if runtimeDir := os.Getenv("XDG_RUNTIME_DIR"); runtimeDir != "" {
-		return filepath.Join(runtimeDir, "agentctl.sock")
+		return filepath.Join(runtimeDir, "foxctl.sock")
 	}
 
 	// Fall back to /tmp with UID for security
-	return fmt.Sprintf("/tmp/agentctl-%d.sock", os.Getuid())
+	return fmt.Sprintf("/tmp/foxctl-%d.sock", os.Getuid())
 }
 
 // PIDPath returns the daemon PID file path.
@@ -436,9 +436,9 @@ func PIDPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		// Fall back to /tmp if home directory is unavailable
-		return filepath.Join("/tmp", fmt.Sprintf("agentctl-%d.pid", os.Getuid()))
+		return filepath.Join("/tmp", fmt.Sprintf("foxctl-%d.pid", os.Getuid()))
 	}
-	return filepath.Join(home, ".agentctl", "daemon.pid")
+	return filepath.Join(home, ".foxctl", "daemon.pid")
 }
 
 // ErrDaemonNotRunning is returned when the daemon is not running.

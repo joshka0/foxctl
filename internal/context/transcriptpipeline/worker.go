@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	actormemory "github.com/jkatigb/agentctl/internal/runtime/actor/memory"
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	actormemory "github.com/joshka0/foxctl/internal/runtime/actor/memory"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 // Stage identifies the transcript pipeline stage being executed.

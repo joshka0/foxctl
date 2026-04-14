@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	classictools "github.com/jkatigb/agentctl/internal/agent/tools"
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
-	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
+	classictools "github.com/joshka0/foxctl/internal/agent/tools"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	sysconfig "github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
 )
 
 func TestDelegateContextShow(t *testing.T) {
@@ -51,11 +51,11 @@ func TestDelegateObsidianReadAndIndexSearch(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	storageRoot := t.TempDir()
 	vaultRoot := filepath.Join(t.TempDir(), "vault")
-	notePath := filepath.Join(vaultRoot, "notes", "repo", "agentctl", "index.md")
+	notePath := filepath.Join(vaultRoot, "notes", "repo", "foxctl", "index.md")
 	if err := os.MkdirAll(filepath.Dir(notePath), 0o755); err != nil {
 		t.Fatalf("mkdir vault: %v", err)
 	}
-	content := "---\ntitle: agentctl Repo Graph\ntype: map\nproject: agentctl\nstatus: reviewed\ntrust: canonical\n---\n\n# agentctl Repo Graph\n\nACA bridge.\n"
+	content := "---\ntitle: foxctl Repo Graph\ntype: map\nproject: foxctl\nstatus: reviewed\ntrust: canonical\n---\n\n# foxctl Repo Graph\n\nACA bridge.\n"
 	if err := os.WriteFile(notePath, []byte(content), 0o644); err != nil {
 		t.Fatalf("write note: %v", err)
 	}
@@ -73,14 +73,14 @@ func TestDelegateObsidianReadAndIndexSearch(t *testing.T) {
 	}
 
 	readArgs, _ := json.Marshal(map[string]any{
-		"path":       "notes/repo/agentctl/index.md",
+		"path":       "notes/repo/foxctl/index.md",
 		"vault_path": vaultRoot,
 	})
 	readResult, err := delegate.Execute(context.Background(), "obsidian/read", readArgs)
 	if err != nil {
 		t.Fatalf("obsidian/read Execute: %v", err)
 	}
-	if !strings.Contains(readResult.Output, "agentctl Repo Graph") {
+	if !strings.Contains(readResult.Output, "foxctl Repo Graph") {
 		t.Fatalf("unexpected read output: %s", readResult.Output)
 	}
 
@@ -102,7 +102,7 @@ func TestDelegateObsidianReadAndIndexSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("obsidian/index_search Execute: %v", err)
 	}
-	if !strings.Contains(searchResult.Output, "notes/repo/agentctl/index.md") {
+	if !strings.Contains(searchResult.Output, "notes/repo/foxctl/index.md") {
 		t.Fatalf("unexpected search output: %s", searchResult.Output)
 	}
 }

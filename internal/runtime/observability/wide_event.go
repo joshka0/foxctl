@@ -20,7 +20,7 @@ type WideEvent struct {
 	ParentID string    `json:"parent_id,omitempty"` // Parent span for nested operations
 
 	// Service metadata
-	Service   string `json:"service"`   // "agentctl"
+	Service   string `json:"service"`   // "foxctl"
 	Version   string `json:"version"`   // Build version
 	Component string `json:"component"` // "cli", "web", "hook", "skill"
 

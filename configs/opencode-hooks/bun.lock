@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "agentctl-opencode-hooks",
+      "name": "foxctl-opencode-hooks",
       "dependencies": {
         "@opencode-ai/plugin": "latest",
         "zod": "^4.0.0",

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	plugin "github.com/jkatigb/agentctl/internal/interfaces/openapi/plugin"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	plugin "github.com/joshka0/foxctl/internal/interfaces/openapi/plugin"
 )
 
 func main() {

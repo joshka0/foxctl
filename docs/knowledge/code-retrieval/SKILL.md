@@ -8,7 +8,7 @@ description: Code retrieval funnel for intelligent code search, context extracti
 ## Purpose
 
 This skill describes the retrieval funnel for finding and editing code in
-agentctl. The funnel provides a structured approach to code discovery that
+foxctl. The funnel provides a structured approach to code discovery that
 balances breadth (semantic search) with precision (symbol-aware extraction).
 
 ## When to Use This Skill

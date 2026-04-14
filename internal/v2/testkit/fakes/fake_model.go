@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/jkatigb/agentctl/internal/v2/runtime/runner"
+	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
 )
 
 // FakeModel is a deterministic model fake for runner tests.

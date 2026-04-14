@@ -93,7 +93,7 @@ hooks:
 - Hooks are registered programmatically or via shell scripts in `.claude/settings.json`
 
 **Gap**: Need config loader that:
-1. Loads from `<workspace>/.agentctl/hooks.yaml` then `~/.agentctl/hooks.yaml`
+1. Loads from `<workspace>/.foxctl/hooks.yaml` then `~/.foxctl/hooks.yaml`
 2. Supports `match.tool_name` (regex), `match.tool_kind`, `match.tool_canonical`
 3. Supports `run[]` with ordered skills
 4. Supports `timeout_ms`, `fail_mode` per hook
@@ -125,16 +125,16 @@ type HookMatch struct {
 ### 3. Unified CC Adapter Script
 
 **New Docs Say** (`hooks-interface.md`):
-- One script `agentctl-hook.sh` handles all CC events
+- One script `foxctl-hook.sh` handles all CC events
 - Normalizes CC payload → `hook.Input`
-- Calls `agentctl run hooks/dispatch`
+- Calls `foxctl run hooks/dispatch`
 - Translates `hook.Output` → CC response
 
 **Current State**:
 - Multiple shell scripts per hook type
 - Each script has its own payload parsing
 
-**Gap**: Create single adapter at `configs/hooks/claude/agentctl-hook.sh`
+**Gap**: Create single adapter at `configs/hooks/claude/foxctl-hook.sh`
 
 **Impact**: Simplifies Claude Code settings to one entry per event type
 
@@ -195,14 +195,14 @@ func IsWriteOperation(toolName, toolCanonical, toolKind string) bool {
    - Returns `data.hook_output`
 
 3. **A3**: Create unified CC adapter script
-   - Single `agentctl-hook.sh` for all events
+   - Single `foxctl-hook.sh` for all events
    - Payload normalization
    - Calls `hooks/dispatch`
    - Response translation
 
 ### Phase B: Skills Compatibility (P1)
 
-**Goal**: Hook skills work across CC/OC/agentctl runtime
+**Goal**: Hook skills work across CC/OC/foxctl runtime
 
 4. **B1**: Add path extraction utility
    - `internal/runtime/hooks/pathutil/` package
@@ -270,7 +270,7 @@ internal/runtime/hooks/toolutil/
 └── kind.go           # Tool kind constants (NEW)
 
 configs/hooks/claude/
-└── agentctl-hook.sh  # Unified adapter (NEW)
+└── foxctl-hook.sh  # Unified adapter (NEW)
 ```
 
 ### Existing Files to Modify

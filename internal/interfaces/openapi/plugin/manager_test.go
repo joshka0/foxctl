@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/protocol"
 )
 
 const testHandshakeTimeout = 10 * time.Second
@@ -39,7 +39,7 @@ func TestManagerInvokeAuthSuccess(t *testing.T) {
 			Method: "GET",
 			URL:    "https://api.example.com/data",
 			Headers: map[string]string{
-				"User-Agent": "agentctl-test",
+				"User-Agent": "foxctl-test",
 			},
 		},
 		Context: AuthContext{
@@ -236,7 +236,7 @@ func projectRoot(t *testing.T) string {
 }
 
 func pluginBinaryName(name string) string {
-	base := "agentctl-plugin-" + name
+	base := "foxctl-plugin-" + name
 	if runtime.GOOS == "windows" {
 		return base + ".exe"
 	}

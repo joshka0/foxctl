@@ -11,7 +11,7 @@ import {
   useTrajectoryEvents,
 } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { Agent, TrajectoryEvent } from "@agentctl/data";
+import type { Agent, TrajectoryEvent } from "@foxctl/data";
 
 function stateColor(state: string): string {
   switch (state) {

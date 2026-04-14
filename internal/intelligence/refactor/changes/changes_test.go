@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	refsnapshot "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshot"
+	refsnapshotstore "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshotstore"
+	"github.com/joshka0/foxctl/internal/storage/cas"
 )
 
 func TestDiffSnapshotsDetectsAddedModifiedDeletedFilesAndSymbols(t *testing.T) {

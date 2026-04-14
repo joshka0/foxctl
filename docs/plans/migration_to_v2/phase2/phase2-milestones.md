@@ -55,7 +55,7 @@ No option A/B; each PR is a concrete decision.
 
 ### Done when
 
-* `agentctl actor console --actor <id>` creates/attaches a `console_sessions` row.
+* `foxctl actor console --actor <id>` creates/attaches a `console_sessions` row.
 * A console “ask” message can be delivered to the actor and a “reply” comes back through mailbox.
 
 ---
@@ -122,7 +122,7 @@ No option A/B; each PR is a concrete decision.
 
 ### Done when
 
-* `agentctl trajectory tail --actor <id>` shows console interactions.
+* `foxctl trajectory tail --actor <id>` shows console interactions.
 
 ---
 
@@ -308,7 +308,7 @@ This is where your “shared brain” becomes *structured*: **tasks/sessions/sym
 
 ### Done when
 
-* `agentctl graph top --type task --limit 20` is stable and reproducible.
+* `foxctl graph top --type task --limit 20` is stable and reproducible.
 
 ---
 
@@ -590,7 +590,7 @@ This is the self-improving layer that stays compatible with your architecture.
 
 ### Implement
 
-* Command: `agentctl eval replay --from trajectory.db`
+* Command: `foxctl eval replay --from trajectory.db`
 * Replays tool traces + prompt builds (no live edits)
 * Metrics:
 

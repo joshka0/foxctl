@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	refsnapshot "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshot"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
-	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	refsnapshot "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshot"
+	refsnapshotstore "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshotstore"
+	refstatus "github.com/joshka0/foxctl/internal/intelligence/refactor/status"
+	"github.com/joshka0/foxctl/internal/storage/cas"
 )
 
 func TestLoadSnapshotBySnapshotID(t *testing.T) {

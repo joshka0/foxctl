@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: fs/ls
@@ -42,10 +42,10 @@ signature:
     long: |
       Use fs/ls to list workspace directories with optional glob filters.
       Example commands:
-        agentctl run fs/ls --input '{"path":"./src"}'
-        agentctl skills run fs/ls --path ./src
-        agentctl run fs/ls --input '{"path":".","include":["*.go"],"show_hidden":false}'
-        agentctl skills run fs/ls --path . --include '*.go' --show_hidden=false
+        foxctl run fs/ls --input '{"path":"./src"}'
+        foxctl skills run fs/ls --path ./src
+        foxctl run fs/ls --input '{"path":".","include":["*.go"],"show_hidden":false}'
+        foxctl skills run fs/ls --path . --include '*.go' --show_hidden=false
     workflows:
       - id: list-basic
         description: "List entries in the src directory."

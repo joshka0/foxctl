@@ -3,7 +3,7 @@ kind: Service
 metadata:
   name: gui-auth-gateway
   labels:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: gui-auth-gateway
 spec:
   type: ClusterIP
@@ -13,5 +13,5 @@ spec:
     targetPort: http
     protocol: TCP
   selector:
-    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/name: foxctl
     app.kubernetes.io/component: gui-auth-gateway

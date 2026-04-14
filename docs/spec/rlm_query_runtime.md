@@ -4,7 +4,7 @@ Status: proposed
 
 ## Purpose
 
-Define a bounded RLM *(Recursive Language Models)* runtime for `agentctl`.
+Define a bounded RLM *(Recursive Language Models)* runtime for `foxctl`.
 
 This runtime is:
 
@@ -17,7 +17,7 @@ It is not a replacement for ACA, companion memory, or embeddings.
 
 ## Core Position
 
-`agentctl` uses three different layers:
+`foxctl` uses three different layers:
 
 - memory and ACA for durable structured state
 - embeddings and indexes for candidate generation
@@ -127,7 +127,7 @@ Recommended tools:
 - `read_note`
 - `subcall`
 
-These should be typed wrappers over existing `agentctl` stores and indexes, not
+These should be typed wrappers over existing `foxctl` stores and indexes, not
 raw database access.
 
 ## Safety Rules
@@ -234,10 +234,10 @@ First version is not:
 4. experimental CLI entrypoint
 
 ```text
-agentctl rlm run
+foxctl rlm run
 ```
 
 ## Related
 
-- [agentctl-rlm-integration-outline.md](../plans/features/agentctl-rlm-integration-outline.md)
+- [foxctl-rlm-integration-outline.md](../plans/features/foxctl-rlm-integration-outline.md)
 - [v2_greenfield_bootstrap.md](v2_greenfield_bootstrap.md)

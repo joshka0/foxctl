@@ -1,10 +1,10 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: code/llm_search
   description: Multi-provider LLM search for ranking code candidates
   version: 0.1.0
-  author: agentctl
+  author: foxctl
   tags: [code, search, llm, ranking, retrieval]
 distribution:
   type: exec

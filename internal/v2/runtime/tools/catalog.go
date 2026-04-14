@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sort"
 
-	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"
-	runtimetoolnames "github.com/jkatigb/agentctl/internal/v2/runtime/toolnames"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	"github.com/joshka0/foxctl/internal/v2/runtime/profiles"
+	runtimetoolnames "github.com/joshka0/foxctl/internal/v2/runtime/toolnames"
 )
 
 // Catalog is the unified profile-aware v2 tool catalog.

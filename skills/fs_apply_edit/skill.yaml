@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: fs/apply_edit
@@ -90,7 +90,7 @@ signature:
 
       ```yaml
       # workflow: fuzzy-multi-file.yaml
-      apiVersion: agentctl/v1
+      apiVersion: foxctl/v1
       kind: Workflow
       metadata:
         name: fuzzy-multi-file
@@ -111,10 +111,10 @@ signature:
       handles fuzzy single-file edits with full undo capability.
 
       Example commands:
-        agentctl run fs/apply_edit --input '{"path":"main.go","edits":[{"search":"func oldName(","replace":"func newName("}]}'
-        agentctl skills run fs/apply_edit --path main.go --edits '[{"search":"func oldName(","replace":"func newName("}]'
-        agentctl run fs/apply_edit --input '{"path":"handler.go","dry_run":true,"edits":[{"search":"return nil","replace":"return fmt.Errorf(\"not implemented\")","match_mode":"fuzzy","line_hint":45}]}'
-        agentctl skills run fs/apply_edit --path handler.go --dry_run --edits '[{"search":"return nil","replace":"return fmt.Errorf(\"not implemented\")","match_mode":"fuzzy","line_hint":45}]'
+        foxctl run fs/apply_edit --input '{"path":"main.go","edits":[{"search":"func oldName(","replace":"func newName("}]}'
+        foxctl skills run fs/apply_edit --path main.go --edits '[{"search":"func oldName(","replace":"func newName("}]'
+        foxctl run fs/apply_edit --input '{"path":"handler.go","dry_run":true,"edits":[{"search":"return nil","replace":"return fmt.Errorf(\"not implemented\")","match_mode":"fuzzy","line_hint":45}]}'
+        foxctl skills run fs/apply_edit --path handler.go --dry_run --edits '[{"search":"return nil","replace":"return fmt.Errorf(\"not implemented\")","match_mode":"fuzzy","line_hint":45}]'
     workflows:
       - id: simple-replace
         description: "Simple function rename"

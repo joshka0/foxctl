@@ -9,7 +9,7 @@
 #   "PreCompact": [
 #     {
 #       "matcher": "auto|manual",
-#       "hooks": ["$HOME/.claude/hooks/agentctl/session-compact.sh"]
+#       "hooks": ["$HOME/.claude/hooks/foxctl/session-compact.sh"]
 #     }
 #   ]
 #
@@ -17,17 +17,17 @@
 #   AGENTCTL_SUMMARIZE_DISABLED=1 - Skip LLM summarization
 #   AGENTCTL_SUMMARIZE_MODE - "windows" (default) or "summary"
 #   AGENTCTL_SUMMARIZE_BATCH_SIZE - Windows per batch (default: 5)
-#   AGENTCTL_BIN - Path to agentctl binary
+#   AGENTCTL_BIN - Path to foxctl binary
 
 set -euo pipefail
 
-# Find agentctl binary
+# Find foxctl binary
 AGENTCTL_BIN="${AGENTCTL_BIN:-}"
 if [[ -z "$AGENTCTL_BIN" ]]; then
-  if command -v agentctl &>/dev/null; then
-    AGENTCTL_BIN="agentctl"
-  elif [[ -x "${CLAUDE_PROJECT_DIR:-}/bin/agentctl" ]]; then
-    AGENTCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/agentctl"
+  if command -v foxctl &>/dev/null; then
+    AGENTCTL_BIN="foxctl"
+  elif [[ -x "${CLAUDE_PROJECT_DIR:-}/bin/foxctl" ]]; then
+    AGENTCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/foxctl"
   else
     echo '{}'
     exit 0
@@ -55,7 +55,7 @@ if [[ -z "$session_id" ]]; then
     ws_hash=""
   fi
   if [[ -n "$ws_hash" ]]; then
-    active_file="$HOME/.agentctl/sessions/active/${ws_hash}-claude.json"
+    active_file="$HOME/.foxctl/sessions/active/${ws_hash}-claude.json"
     if [[ -f "$active_file" ]]; then
       session_id=$(jq -r '.session_id // ""' "$active_file" 2>/dev/null || true)
     fi
@@ -68,7 +68,7 @@ context_parts=()
 # 0. CREATE PENDING-RESTORE MARKER (for post-compact hook)
 # =============================================================================
 
-marker_dir="$HOME/.agentctl/sessions/pending-restore"
+marker_dir="$HOME/.foxctl/sessions/pending-restore"
 mkdir -p "$marker_dir"
 
 # Reuse ws_hash if already computed, otherwise compute it

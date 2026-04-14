@@ -12,17 +12,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jkatigb/agentctl/internal/adapters/artifacts"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/cache"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
-	"github.com/jkatigb/agentctl/internal/storage/vector"
+	"github.com/joshka0/foxctl/internal/adapters/artifacts"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/cache"
+	"github.com/joshka0/foxctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	"github.com/joshka0/foxctl/internal/storage/vector"
 )
 
 // Ensure Store implements storage.MemoryStore.
@@ -1128,11 +1128,11 @@ func (s *Store) ensureEmbeddingMetadata(ctx context.Context, workspace, model st
 		})
 	}
 	if meta.Dimensions != dimensions {
-		return fmt.Errorf("memory: embedding dimension mismatch: workspace %q expects %d dimensions (model: %s), got %d; run `agentctl index init --workspace <workspace-path> --scope memory` to rebuild memory embeddings",
+		return fmt.Errorf("memory: embedding dimension mismatch: workspace %q expects %d dimensions (model: %s), got %d; run `foxctl index init --workspace <workspace-path> --scope memory` to rebuild memory embeddings",
 			workspace, meta.Dimensions, meta.Model, dimensions)
 	}
 	if meta.Model != "" && model != "" && meta.Model != model {
-		return fmt.Errorf("memory: embedding model mismatch: workspace %q expects model %q with %d dimensions, got %q; run `agentctl index init --workspace <workspace-path> --scope memory` to rebuild memory embeddings",
+		return fmt.Errorf("memory: embedding model mismatch: workspace %q expects model %q with %d dimensions, got %q; run `foxctl index init --workspace <workspace-path> --scope memory` to rebuild memory embeddings",
 			workspace, meta.Model, meta.Dimensions, model)
 	}
 	if meta.Model == "" && model != "" {
@@ -1154,7 +1154,7 @@ func (s *Store) ValidateEmbeddingDimensions(ctx context.Context, workspace strin
 		return nil // No metadata, allow any dimensions
 	}
 	if meta.Dimensions != dimensions {
-		return fmt.Errorf("memory: embedding dimension mismatch: workspace %q expects %d dimensions (model: %s), got %d; run `agentctl index init --workspace <workspace-path> --scope memory` to rebuild memory embeddings",
+		return fmt.Errorf("memory: embedding dimension mismatch: workspace %q expects %d dimensions (model: %s), got %d; run `foxctl index init --workspace <workspace-path> --scope memory` to rebuild memory embeddings",
 			workspace, meta.Dimensions, meta.Model, dimensions)
 	}
 	return nil

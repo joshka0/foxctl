@@ -39,7 +39,7 @@ func TestParsePaneList(t *testing.T) {
 }
 
 func TestParsePaneListIncludesViewerMetadata(t *testing.T) {
-	raw := "%7" + fieldSep + "work" + fieldSep + "1" + fieldSep + "0" + fieldSep + "main" + fieldSep + "1234" + fieldSep + "180" + fieldSep + "42" + fieldSep + "claude-a" + fieldSep + "/repo" + fieldSep + "agentctl" + fieldSep + "1" + fieldSep + "claude-a" + fieldSep + "claude" + fieldSep + "room-alpha" + fieldSep + "1\n"
+	raw := "%7" + fieldSep + "work" + fieldSep + "1" + fieldSep + "0" + fieldSep + "main" + fieldSep + "1234" + fieldSep + "180" + fieldSep + "42" + fieldSep + "claude-a" + fieldSep + "/repo" + fieldSep + "foxctl" + fieldSep + "1" + fieldSep + "claude-a" + fieldSep + "claude" + fieldSep + "room-alpha" + fieldSep + "1\n"
 	panes, err := parsePaneList(raw)
 	if err != nil {
 		t.Fatalf("parsePaneList() error = %v", err)
@@ -242,24 +242,24 @@ func TestBuildAgentPaneCommandResume(t *testing.T) {
 func TestPrepareSessionCreatesAndLabelsPanes(t *testing.T) {
 	runner := &sequenceRunner{
 		steps: []sequenceStep{
-			{key: "tmux new-session -d -s agentctl-collab -c /repo /bin/zsh"},
-			{key: "tmux list-panes -t agentctl-collab -F " + listFormat, stdout: "%0" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "agentctl-collab" + fieldSep + "100" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
-			{key: "tmux split-window -d -t agentctl-collab -c /repo /bin/zsh"},
-			{key: "tmux list-panes -t agentctl-collab -F " + listFormat, stdout: strings.Join([]string{
-				"%0" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "agentctl-collab" + fieldSep + "100" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
-				"%1" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "agentctl-collab" + fieldSep + "101" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
+			{key: "tmux new-session -d -s foxctl-collab -c /repo /bin/zsh"},
+			{key: "tmux list-panes -t foxctl-collab -F " + listFormat, stdout: "%0" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "foxctl-collab" + fieldSep + "100" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
+			{key: "tmux split-window -d -t foxctl-collab -c /repo /bin/zsh"},
+			{key: "tmux list-panes -t foxctl-collab -F " + listFormat, stdout: strings.Join([]string{
+				"%0" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "foxctl-collab" + fieldSep + "100" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
+				"%1" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "foxctl-collab" + fieldSep + "101" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
 			}, "\n") + "\n"},
-			{key: "tmux split-window -d -t agentctl-collab -c /repo /bin/zsh"},
-			{key: "tmux list-panes -t agentctl-collab -F " + listFormat, stdout: strings.Join([]string{
-				"%0" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "agentctl-collab" + fieldSep + "100" + fieldSep + "40" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
-				"%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "agentctl-collab" + fieldSep + "102" + fieldSep + "40" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
-				"%1" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "2" + fieldSep + "agentctl-collab" + fieldSep + "101" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
+			{key: "tmux split-window -d -t foxctl-collab -c /repo /bin/zsh"},
+			{key: "tmux list-panes -t foxctl-collab -F " + listFormat, stdout: strings.Join([]string{
+				"%0" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "foxctl-collab" + fieldSep + "100" + fieldSep + "40" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
+				"%2" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "foxctl-collab" + fieldSep + "102" + fieldSep + "40" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
+				"%1" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "2" + fieldSep + "foxctl-collab" + fieldSep + "101" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
 			}, "\n") + "\n"},
-			{key: "tmux select-layout -t agentctl-collab tiled"},
-			{key: "tmux list-panes -t agentctl-collab -F " + listFormat, stdout: strings.Join([]string{
-				"%0" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "agentctl-collab" + fieldSep + "100" + fieldSep + "39" + fieldSep + "11" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
-				"%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "agentctl-collab" + fieldSep + "102" + fieldSep + "40" + fieldSep + "11" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
-				"%1" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "2" + fieldSep + "agentctl-collab" + fieldSep + "101" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
+			{key: "tmux select-layout -t foxctl-collab tiled"},
+			{key: "tmux list-panes -t foxctl-collab -F " + listFormat, stdout: strings.Join([]string{
+				"%0" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "foxctl-collab" + fieldSep + "100" + fieldSep + "39" + fieldSep + "11" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
+				"%2" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "foxctl-collab" + fieldSep + "102" + fieldSep + "40" + fieldSep + "11" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
+				"%1" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "2" + fieldSep + "foxctl-collab" + fieldSep + "101" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0",
 			}, "\n") + "\n"},
 			{key: "tmux set-option -p -t %0 @name codex-a"},
 			{key: "tmux set-option -p -t %2 @name codex-b"},
@@ -269,7 +269,7 @@ func TestPrepareSessionCreatesAndLabelsPanes(t *testing.T) {
 	client := NewWithRunner(runner, map[string]string{})
 
 	got, err := client.PrepareSession(context.Background(), PrepareOptions{
-		Session:     "agentctl-collab",
+		Session:     "foxctl-collab",
 		Panes:       3,
 		PaneCommand: "/bin/zsh",
 		CWD:         "/repo",
@@ -281,7 +281,7 @@ func TestPrepareSessionCreatesAndLabelsPanes(t *testing.T) {
 	if !got.Created {
 		t.Fatal("expected Created = true")
 	}
-	if got.AttachCommand != "tmux attach-session -t agentctl-collab" {
+	if got.AttachCommand != "tmux attach-session -t foxctl-collab" {
 		t.Fatalf("AttachCommand = %q", got.AttachCommand)
 	}
 	labels := []string{got.Panes[0].Label, got.Panes[1].Label, got.Panes[2].Label}
@@ -297,36 +297,36 @@ func TestPrepareSessionRespawnsExistingShellPanesForAgent(t *testing.T) {
 		t.Fatalf("buildAgentPaneCommand() error = %v", err)
 	}
 	wrapped := paneCommandForIdentity(
-		wrapTmuxPaneCommand("/tmp/agentctl", "agentctl-agent-smoke", "agentctl-agent-smoke-codex-a", "", "", cmd, ""),
-		"agentctl-agent-smoke-codex-a",
+		wrapTmuxPaneCommand("/tmp/foxctl", "foxctl-agent-smoke", "foxctl-agent-smoke-codex-a", "", "", cmd, ""),
+		"foxctl-agent-smoke-codex-a",
 		"",
 		"",
 		"",
 		"",
 		"direct",
-		"agentctl-agent-smoke",
+		"foxctl-agent-smoke",
 		"%21",
 	)
 	runner := &sequenceRunner{
 		steps: []sequenceStep{
-			{key: "tmux new-session -d -s agentctl-agent-smoke " + defaultPaneCommand(), stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
-			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: "%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
-			{key: "tmux split-window -d -t agentctl-agent-smoke " + defaultPaneCommand()},
-			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
-				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
-				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
+			{key: "tmux new-session -d -s foxctl-agent-smoke " + defaultPaneCommand(), stderr: "duplicate session", err: fmt.Errorf("exit status 1")},
+			{key: "tmux list-panes -t foxctl-agent-smoke -F " + listFormat, stdout: "%21" + fieldSep + "foxctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n"},
+			{key: "tmux split-window -d -t foxctl-agent-smoke " + defaultPaneCommand()},
+			{key: "tmux list-panes -t foxctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
+				"%21" + fieldSep + "foxctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
+				"%22" + fieldSep + "foxctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
 			}, "\n") + "\n"},
-			{key: "tmux select-layout -t agentctl-agent-smoke tiled"},
-			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
-				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
-				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
+			{key: "tmux select-layout -t foxctl-agent-smoke tiled"},
+			{key: "tmux list-panes -t foxctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
+				"%21" + fieldSep + "foxctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1",
+				"%22" + fieldSep + "foxctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "12" + fieldSep + "" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
 			}, "\n") + "\n"},
-			{key: "tmux set-option -p -t %21 @name agentctl-agent-smoke-codex-a"},
-			{key: "tmux set-option -p -t %22 @name agentctl-agent-smoke-codex-b"},
+			{key: "tmux set-option -p -t %21 @name foxctl-agent-smoke-codex-a"},
+			{key: "tmux set-option -p -t %22 @name foxctl-agent-smoke-codex-b"},
 			{key: "tmux respawn-pane -k -t %21 " + wrapped},
-			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
-				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "39" + fieldSep + "11" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1",
-				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "40" + fieldSep + "11" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
+			{key: "tmux list-panes -t foxctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
+				"%21" + fieldSep + "foxctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "39" + fieldSep + "11" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1",
+				"%22" + fieldSep + "foxctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "40" + fieldSep + "11" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0",
 			}, "\n") + "\n"},
 			{key: "tmux set-option -p -t %21 @agentctl_participant codex-a"},
 			{key: "tmux set-option -p -t %21 @agentctl_provider codex"},
@@ -336,20 +336,20 @@ func TestPrepareSessionRespawnsExistingShellPanesForAgent(t *testing.T) {
 			{key: "tmux set-option -p -t %22 @agentctl_provider codex"},
 			{key: "tmux set-option -p -t %22 @agentctl_room_id"},
 			{key: "tmux set-option -p -t %22 @agentctl_wrapped 1"},
-			{key: "tmux list-panes -t agentctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
-				"%21" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "39" + fieldSep + "11" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1" + fieldSep + "codex-a" + fieldSep + "codex" + fieldSep + "" + fieldSep + "1",
-				"%22" + fieldSep + "agentctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "40" + fieldSep + "11" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0" + fieldSep + "codex-b" + fieldSep + "codex" + fieldSep + "" + fieldSep + "1",
+			{key: "tmux list-panes -t foxctl-agent-smoke -F " + listFormat, stdout: strings.Join([]string{
+				"%21" + fieldSep + "foxctl-agent-smoke" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "39" + fieldSep + "11" + fieldSep + "codex-a" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "1" + fieldSep + "codex-a" + fieldSep + "codex" + fieldSep + "" + fieldSep + "1",
+				"%22" + fieldSep + "foxctl-agent-smoke" + fieldSep + "0" + fieldSep + "1" + fieldSep + "main" + fieldSep + "222" + fieldSep + "40" + fieldSep + "11" + fieldSep + "codex-b" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0" + fieldSep + "codex-b" + fieldSep + "codex" + fieldSep + "" + fieldSep + "1",
 			}, "\n") + "\n"},
 		},
 	}
 	client := NewWithRunner(runner, map[string]string{})
 
 	got, err := client.PrepareSession(context.Background(), PrepareOptions{
-		Session:             "agentctl-agent-smoke",
+		Session:             "foxctl-agent-smoke",
 		Panes:               2,
 		Agent:               "codex",
 		AgentMode:           "auto",
-		PaneServeExecutable: "/tmp/agentctl",
+		PaneServeExecutable: "/tmp/foxctl",
 	})
 	if err != nil {
 		t.Fatalf("PrepareSession() error = %v", err)
@@ -368,7 +368,7 @@ func TestPrepareSessionInjectsHierarchyEnvForRespawnedPanes(t *testing.T) {
 		t.Fatalf("buildAgentPaneCommand() error = %v", err)
 	}
 	wrapped := paneCommandForIdentity(
-		wrapTmuxPaneCommand("/tmp/agentctl", "hierarchy-smoke", "hierarchy-smoke-codex-a", "", "", cmd, ""),
+		wrapTmuxPaneCommand("/tmp/foxctl", "hierarchy-smoke", "hierarchy-smoke-codex-a", "", "", cmd, ""),
 		"hierarchy-smoke-codex-a",
 		"parent-a",
 		"agent:parent-1",
@@ -403,7 +403,7 @@ func TestPrepareSessionInjectsHierarchyEnvForRespawnedPanes(t *testing.T) {
 		AgentMode:           "auto",
 		ParentParticipant:   "parent-a",
 		ParentAgentID:       "agent:parent-1",
-		PaneServeExecutable: "/tmp/agentctl",
+		PaneServeExecutable: "/tmp/foxctl",
 	})
 	if err != nil {
 		t.Fatalf("PrepareSession() error = %v", err)
@@ -417,7 +417,7 @@ func TestPrepareSessionInjectsDirectRoomEnvForTopLevelPanes(t *testing.T) {
 	}
 	onboarding := buildMuxCreateRoomOnboarding("room-alpha", "codex-a")
 	wrapped := paneCommandForIdentity(
-		wrapTmuxPaneCommand("/tmp/agentctl", "room-smoke", "room-alpha-codex-a", "room-alpha", "", cmd, ""),
+		wrapTmuxPaneCommand("/tmp/foxctl", "room-smoke", "room-alpha-codex-a", "room-alpha", "", cmd, ""),
 		"room-alpha-codex-a",
 		"",
 		"",
@@ -453,7 +453,7 @@ func TestPrepareSessionInjectsDirectRoomEnvForTopLevelPanes(t *testing.T) {
 		Agent:               "codex",
 		AgentMode:           "auto",
 		RoomID:              "room-alpha",
-		PaneServeExecutable: "/tmp/agentctl",
+		PaneServeExecutable: "/tmp/foxctl",
 	})
 	if err != nil {
 		t.Fatalf("PrepareSession() error = %v", err)
@@ -499,19 +499,19 @@ func TestCreatePaneAllocatesAndRespawnsExactPane(t *testing.T) {
 
 func TestCreatePaneSetsViewerMetadataForWrappedProviderPane(t *testing.T) {
 	shell := defaultPaneCommand()
-	command := "/tmp/agentctl pane serve --participant claude-a -- sh -lc 'claude --permission-mode bypassPermissions'"
+	command := "/tmp/foxctl pane serve --participant claude-a -- sh -lc 'claude --permission-mode bypassPermissions'"
 	runner := &sequenceRunner{
 		steps: []sequenceStep{
 			{key: "tmux new-session -d -P -F #{pane_id} -s pane-meta -c /repo " + shell, stdout: "%71\n"},
 			{key: "tmux set-option -p -t %71 @name claude-a"},
 			{key: "tmux select-layout -t pane-meta tiled"},
 			{key: "tmux respawn-pane -k -t %71 -c /repo env AGENTCTL_PARTICIPANT_ID=claude-a AGENTCTL_MUX_BACKEND=tmux AGENTCTL_MUX_SESSION=pane-meta AGENTCTL_MUX_PANE_ID=%71 AGENTCTL_ROOM_ID=room-alpha " + command},
-			{key: "tmux display-message -t %71 -p " + listFormat, stdout: "%71" + fieldSep + "pane-meta" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "claude-a" + fieldSep + "/repo" + fieldSep + "agentctl" + fieldSep + "1\n"},
+			{key: "tmux display-message -t %71 -p " + listFormat, stdout: "%71" + fieldSep + "pane-meta" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "claude-a" + fieldSep + "/repo" + fieldSep + "foxctl" + fieldSep + "1\n"},
 			{key: "tmux set-option -p -t %71 @agentctl_participant claude-a"},
 			{key: "tmux set-option -p -t %71 @agentctl_provider claude"},
 			{key: "tmux set-option -p -t %71 @agentctl_room_id room-alpha"},
 			{key: "tmux set-option -p -t %71 @agentctl_wrapped 1"},
-			{key: "tmux display-message -t %71 -p " + listFormat, stdout: "%71" + fieldSep + "pane-meta" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "claude-a" + fieldSep + "/repo" + fieldSep + "agentctl" + fieldSep + "1" + fieldSep + "claude-a" + fieldSep + "claude" + fieldSep + "room-alpha" + fieldSep + "1\n"},
+			{key: "tmux display-message -t %71 -p " + listFormat, stdout: "%71" + fieldSep + "pane-meta" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "claude-a" + fieldSep + "/repo" + fieldSep + "foxctl" + fieldSep + "1" + fieldSep + "claude-a" + fieldSep + "claude" + fieldSep + "room-alpha" + fieldSep + "1\n"},
 		},
 	}
 	client := NewWithRunner(runner, map[string]string{})
@@ -589,8 +589,8 @@ func TestNormalizePrepareOptionsDefaults(t *testing.T) {
 	if got.paneCommand == "" {
 		t.Fatal("paneCommand should default to a shell")
 	}
-	if got.paneServeExecutable != "agentctl" {
-		t.Fatalf("paneServeExecutable = %q, want agentctl", got.paneServeExecutable)
+	if got.paneServeExecutable != "foxctl" {
+		t.Fatalf("paneServeExecutable = %q, want foxctl", got.paneServeExecutable)
 	}
 }
 
@@ -788,11 +788,11 @@ func TestSendWithExplicitSenderLabel(t *testing.T) {
 			},
 			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
 			"tmux display-message -t %2 -p " + listFormat: {
-				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+				stdout: "%2" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
 			},
 			"tmux display-message -t %1 -p #{pane_id}": {stdout: "%1\n"},
 			"tmux display-message -t %1 -p " + listFormat: {
-				stdout: "%1" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "zsh" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "praze-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
+				stdout: "%1" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "zsh" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "praze-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
 			},
 			"tmux send-keys -t %2 -l -- [tmux-bridge from=praze-a pane=%1 reply_to=praze-a] review mailbox": {},
 			"tmux send-keys -t %2 C-Enter": {},
@@ -826,11 +826,11 @@ func TestSendUsesCtrlEnterForNodeNonGeminiPane(t *testing.T) {
 			},
 			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
 			"tmux display-message -t %2 -p " + listFormat: {
-				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "cursor-b" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
+				stdout: "%2" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "cursor-b" + fieldSep + "/repo" + fieldSep + "node" + fieldSep + "0\n",
 			},
 			"tmux display-message -t %1 -p #{pane_id}": {stdout: "%1\n"},
 			"tmux display-message -t %1 -p " + listFormat: {
-				stdout: "%1" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "zsh" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "praze-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
+				stdout: "%1" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "zsh" + fieldSep + "111" + fieldSep + "80" + fieldSep + "24" + fieldSep + "praze-a" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "1\n",
 			},
 			"tmux send-keys -t %2 -l -- [tmux-bridge from=praze-a pane=%1 reply_to=praze-a] ping": {},
 			"tmux send-keys -t %2 C-Enter": {},
@@ -855,7 +855,7 @@ func TestSendRequiresSenderOutsideTmux(t *testing.T) {
 			"tmux list-sessions":                       {stdout: "ok\n"},
 			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
 			"tmux display-message -t %2 -p " + listFormat: {
-				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+				stdout: "%2" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
 			},
 		},
 	}, map[string]string{})
@@ -876,7 +876,7 @@ func TestSubmitUsesEscapeThenEnter(t *testing.T) {
 			"tmux list-sessions":                       {stdout: "ok\n"},
 			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
 			"tmux display-message -t %2 -p " + listFormat: {
-				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "reviewer-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+				stdout: "%2" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "reviewer-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %2 Escape": {},
 			"tmux send-keys -t %2 Enter":  {},
@@ -971,7 +971,7 @@ func TestSubmitUsesCtrlEnterForAgentLabeledPaneWhenCurrentCommandIsWrapper(t *te
 			"tmux list-sessions":                        {stdout: "ok\n"},
 			"tmux display-message -t %22 -p #{pane_id}": {stdout: "%22\n"},
 			"tmux display-message -t %22 -p " + listFormat: {
-				stdout: "%22" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-a" + fieldSep + "/repo" + fieldSep + "agentctl" + fieldSep + "1\n",
+				stdout: "%22" + fieldSep + "collab" + fieldSep + "0" + fieldSep + "0" + fieldSep + "main" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-a" + fieldSep + "/repo" + fieldSep + "foxctl" + fieldSep + "1\n",
 			},
 			"tmux send-keys -t %22 C-Enter": {},
 		},
@@ -1045,7 +1045,7 @@ func TestSubmitEnterOnlySendsEnterWithoutEscape(t *testing.T) {
 			"tmux list-sessions":                       {stdout: "ok\n"},
 			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
 			"tmux display-message -t %2 -p " + listFormat: {
-				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+				stdout: "%2" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %2 Enter": {},
 		},
@@ -1067,7 +1067,7 @@ func TestInterruptSendsEscape(t *testing.T) {
 			"tmux list-sessions":                       {stdout: "ok\n"},
 			"tmux display-message -t %2 -p #{pane_id}": {stdout: "%2\n"},
 			"tmux display-message -t %2 -p " + listFormat: {
-				stdout: "%2" + fieldSep + "agentctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
+				stdout: "%2" + fieldSep + "foxctl-collab" + fieldSep + "0" + fieldSep + "1" + fieldSep + "zsh" + fieldSep + "222" + fieldSep + "80" + fieldSep + "24" + fieldSep + "agent-b" + fieldSep + "/repo" + fieldSep + "zsh" + fieldSep + "0\n",
 			},
 			"tmux send-keys -t %2 Escape": {},
 		},

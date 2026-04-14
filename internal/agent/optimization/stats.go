@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 // AgentStats aggregates statistics for an agent role.

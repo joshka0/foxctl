@@ -3,7 +3,7 @@
   "status": "ok",
   "command": "fs/read",
   "data": {
-    "path": "/workspace/agentctl/docs/spec/core_profile_v1.md",
+    "path": "/workspace/foxctl/docs/spec/core_profile_v1.md",
     "size_bytes": 2048,
     "mode": "-rw-r--r--",
     "mod_time": "2025-11-08T10:05:00Z",

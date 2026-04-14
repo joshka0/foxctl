@@ -230,13 +230,13 @@ var RoleAllowlists = map[string][]string{
 
 ```bash
 # Test session recall tool
-agentctl agent ask <researcher-id> --question "Use session.recall to find past work on authentication"
+foxctl agent ask <researcher-id> --question "Use session.recall to find past work on authentication"
 
 # Test memory query tool
-agentctl agent ask <researcher-id> --question "Use memory.query to find gotchas about SQLite"
+foxctl agent ask <researcher-id> --question "Use memory.query to find gotchas about SQLite"
 
 # Test codemap tools
-agentctl agent ask <researcher-id> --question "Use codemap.generate to trace the session lifecycle"
+foxctl agent ask <researcher-id> --question "Use codemap.generate to trace the session lifecycle"
 ```
 
 ---

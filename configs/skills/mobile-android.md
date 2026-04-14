@@ -19,14 +19,14 @@ brew install android-platform-tools
 ### List Emulators
 
 ```bash
-agentctl run mobile/android --input '{"operation": "list_devices"}'
+foxctl run mobile/android --input '{"operation": "list_devices"}'
 ```
 
 ### Get Device Info
 
 ```bash
-agentctl run mobile/android --input '{"operation": "device_info"}'
-agentctl run mobile/android --input '{"operation": "device_info", "serial": "emulator-5554"}'
+foxctl run mobile/android --input '{"operation": "device_info"}'
+foxctl run mobile/android --input '{"operation": "device_info", "serial": "emulator-5554"}'
 ```
 
 Returns device properties including model, Android version, SDK level, screen size, and CPU architecture.
@@ -36,17 +36,17 @@ Returns device properties including model, Android version, SDK level, screen si
 ### Install APK
 
 ```bash
-agentctl run mobile/android --input '{"operation": "install", "app": "/path/to/app.apk"}'
+foxctl run mobile/android --input '{"operation": "install", "app": "/path/to/app.apk"}'
 ```
 
 ### Launch App
 
 ```bash
 # Auto-detect main activity
-agentctl run mobile/android --input '{"operation": "launch", "app": "com.example.myapp"}'
+foxctl run mobile/android --input '{"operation": "launch", "app": "com.example.myapp"}'
 
 # Specify activity
-agentctl run mobile/android --input '{
+foxctl run mobile/android --input '{
   "operation": "launch",
   "app": "com.example.myapp",
   "activity": ".MainActivity"
@@ -56,7 +56,7 @@ agentctl run mobile/android --input '{
 ### Terminate App
 
 ```bash
-agentctl run mobile/android --input '{"operation": "terminate", "app": "com.example.myapp"}'
+foxctl run mobile/android --input '{"operation": "terminate", "app": "com.example.myapp"}'
 ```
 
 ## Screenshots & Recording
@@ -65,20 +65,20 @@ agentctl run mobile/android --input '{"operation": "terminate", "app": "com.exam
 
 ```bash
 # Screenshot stored in CAS
-agentctl run mobile/android --input '{"operation": "screenshot"}'
+foxctl run mobile/android --input '{"operation": "screenshot"}'
 
 # Save to specific path
-agentctl run mobile/android --input '{"operation": "screenshot", "output": "/tmp/screen.png"}'
+foxctl run mobile/android --input '{"operation": "screenshot", "output": "/tmp/screen.png"}'
 ```
 
 ### Video Recording
 
 ```bash
 # Start recording (max 180 seconds)
-agentctl run mobile/android --input '{"operation": "record_screen", "output": "/tmp/recording.mp4"}'
+foxctl run mobile/android --input '{"operation": "record_screen", "output": "/tmp/recording.mp4"}'
 
 # Stop recording
-agentctl run mobile/android --input '{"operation": "record_stop"}'
+foxctl run mobile/android --input '{"operation": "record_stop"}'
 ```
 
 ## UI Interaction
@@ -86,13 +86,13 @@ agentctl run mobile/android --input '{"operation": "record_stop"}'
 ### Tap
 
 ```bash
-agentctl run mobile/android --input '{"operation": "tap", "x": 540, "y": 960}'
+foxctl run mobile/android --input '{"operation": "tap", "x": 540, "y": 960}'
 ```
 
 ### Swipe
 
 ```bash
-agentctl run mobile/android --input '{
+foxctl run mobile/android --input '{
   "operation": "swipe",
   "x": 540, "y": 1500,
   "x2": 540, "y2": 500,
@@ -103,19 +103,19 @@ agentctl run mobile/android --input '{
 ### Type Text
 
 ```bash
-agentctl run mobile/android --input '{"operation": "type_text", "text": "Hello World"}'
+foxctl run mobile/android --input '{"operation": "type_text", "text": "Hello World"}'
 ```
 
 ### Press Key
 
 ```bash
 # Common keycodes
-agentctl run mobile/android --input '{"operation": "press_key", "keycode": "HOME"}'
-agentctl run mobile/android --input '{"operation": "press_key", "keycode": "BACK"}'
-agentctl run mobile/android --input '{"operation": "press_key", "keycode": "MENU"}'
-agentctl run mobile/android --input '{"operation": "press_key", "keycode": "ENTER"}'
-agentctl run mobile/android --input '{"operation": "press_key", "keycode": "VOLUME_UP"}'
-agentctl run mobile/android --input '{"operation": "press_key", "keycode": "VOLUME_DOWN"}'
+foxctl run mobile/android --input '{"operation": "press_key", "keycode": "HOME"}'
+foxctl run mobile/android --input '{"operation": "press_key", "keycode": "BACK"}'
+foxctl run mobile/android --input '{"operation": "press_key", "keycode": "MENU"}'
+foxctl run mobile/android --input '{"operation": "press_key", "keycode": "ENTER"}'
+foxctl run mobile/android --input '{"operation": "press_key", "keycode": "VOLUME_UP"}'
+foxctl run mobile/android --input '{"operation": "press_key", "keycode": "VOLUME_DOWN"}'
 ```
 
 ## UI Inspection
@@ -123,7 +123,7 @@ agentctl run mobile/android --input '{"operation": "press_key", "keycode": "VOLU
 ### Get UI Hierarchy
 
 ```bash
-agentctl run mobile/android --input '{"operation": "ui_tree"}'
+foxctl run mobile/android --input '{"operation": "ui_tree"}'
 ```
 
 Returns parsed UI elements with:
@@ -140,17 +140,17 @@ Returns parsed UI elements with:
 
 ```bash
 # Get recent logs (last 500 entries)
-agentctl run mobile/android --input '{"operation": "logs"}'
+foxctl run mobile/android --input '{"operation": "logs"}'
 ```
 
 ### Filter Logcat
 
 ```bash
 # Filter by tag
-agentctl run mobile/android --input '{"operation": "logcat_filter", "tag": "MyApp"}'
+foxctl run mobile/android --input '{"operation": "logcat_filter", "tag": "MyApp"}'
 
 # Filter by tag and level
-agentctl run mobile/android --input '{"operation": "logcat_filter", "tag": "MyApp", "level": "E"}'
+foxctl run mobile/android --input '{"operation": "logcat_filter", "tag": "MyApp", "level": "E"}'
 ```
 
 Levels: `V` (Verbose), `D` (Debug), `I` (Info), `W` (Warn), `E` (Error), `F` (Fatal)
@@ -161,22 +161,22 @@ Get system service information:
 
 ```bash
 # Activity manager
-agentctl run mobile/android --input '{"operation": "dumpsys", "service": "activity"}'
+foxctl run mobile/android --input '{"operation": "dumpsys", "service": "activity"}'
 
 # Window manager
-agentctl run mobile/android --input '{"operation": "dumpsys", "service": "window"}'
+foxctl run mobile/android --input '{"operation": "dumpsys", "service": "window"}'
 
 # Battery
-agentctl run mobile/android --input '{"operation": "dumpsys", "service": "battery"}'
+foxctl run mobile/android --input '{"operation": "dumpsys", "service": "battery"}'
 
 # Memory info
-agentctl run mobile/android --input '{"operation": "dumpsys", "service": "meminfo"}'
+foxctl run mobile/android --input '{"operation": "dumpsys", "service": "meminfo"}'
 
 # Package info
-agentctl run mobile/android --input '{"operation": "dumpsys", "service": "package"}'
+foxctl run mobile/android --input '{"operation": "dumpsys", "service": "package"}'
 
 # CPU info
-agentctl run mobile/android --input '{"operation": "dumpsys", "service": "cpuinfo"}'
+foxctl run mobile/android --input '{"operation": "dumpsys", "service": "cpuinfo"}'
 ```
 
 ## Permissions
@@ -184,14 +184,14 @@ agentctl run mobile/android --input '{"operation": "dumpsys", "service": "cpuinf
 ### Grant Runtime Permission
 
 ```bash
-agentctl run mobile/android --input '{
+foxctl run mobile/android --input '{
   "operation": "grant_permission",
   "app": "com.example.myapp",
   "permission": "android.permission.CAMERA"
 }'
 
 # Short form (android.permission. prefix added automatically)
-agentctl run mobile/android --input '{
+foxctl run mobile/android --input '{
   "operation": "grant_permission",
   "app": "com.example.myapp",
   "permission": "READ_EXTERNAL_STORAGE"
@@ -203,7 +203,7 @@ agentctl run mobile/android --input '{
 ### Pull File from Device
 
 ```bash
-agentctl run mobile/android --input '{
+foxctl run mobile/android --input '{
   "operation": "pull_file",
   "remote_path": "/sdcard/Download/file.txt",
   "local_path": "/tmp/file.txt"
@@ -213,7 +213,7 @@ agentctl run mobile/android --input '{
 ### Push File to Device
 
 ```bash
-agentctl run mobile/android --input '{
+foxctl run mobile/android --input '{
   "operation": "push_file",
   "local_path": "/tmp/test.json",
   "remote_path": "/sdcard/Download/test.json"
@@ -223,8 +223,8 @@ agentctl run mobile/android --input '{
 ## Open URL
 
 ```bash
-agentctl run mobile/android --input '{"operation": "open_url", "url": "https://example.com"}'
-agentctl run mobile/android --input '{"operation": "open_url", "url": "myapp://deeplink/path"}'
+foxctl run mobile/android --input '{"operation": "open_url", "url": "https://example.com"}'
+foxctl run mobile/android --input '{"operation": "open_url", "url": "myapp://deeplink/path"}'
 ```
 
 ## All Operations

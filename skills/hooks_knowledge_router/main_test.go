@@ -5,8 +5,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/storage/knowledge"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/storage/knowledge"
 	"github.com/stretchr/testify/assert"
 )
 

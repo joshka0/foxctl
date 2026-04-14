@@ -6,7 +6,7 @@ Use this prompt when you want to **continue researching and planning the later p
 
 ```text
 You are helping design and implement the remaining phases of the
-"Universal SWE Grep, Symbol Index, and Agents" plan for the agentctl
+"Universal SWE Grep, Symbol Index, and Agents" plan for the foxctl
 repo.
 
 Anchor yourself in these sources first (read them, then cross-check):

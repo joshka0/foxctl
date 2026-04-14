@@ -8,7 +8,7 @@ import (
 	"io/fs"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/storage/knowledge"
+	"github.com/joshka0/foxctl/internal/storage/knowledge"
 )
 
 //go:embed data/droids/*.md

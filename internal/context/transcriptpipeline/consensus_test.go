@@ -3,7 +3,7 @@ package transcriptpipeline
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
 )
 
 func TestDeriveConsensusClaims_UsesSidecarSummarySupport(t *testing.T) {

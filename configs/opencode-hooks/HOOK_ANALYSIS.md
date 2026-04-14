@@ -52,10 +52,10 @@ tool.execute.before → write to temp file → system.transform reads → inject
 }
 ```
 
-**File location:** `~/.agentctl/cache/pending-context/<sessionID>.json`
+**File location:** `~/.foxctl/cache/pending-context/<sessionID>.json`
 
-**Session ID source:** Read from identity file at `~/.agentctl/sessions/active/`
-(written by `session-identity.sh` hook or `agentctl session-id` command)
+**Session ID source:** Read from identity file at `~/.foxctl/sessions/active/`
+(written by `session-identity.sh` hook or `foxctl session-id` command)
 
 ### Alternative: Custom Tools (Recommended)
 
@@ -63,7 +63,7 @@ Since hooks can't inject context, create tools the AI explicitly calls:
 
 ```typescript
 tool: {
-  "agentctl-context": tool({
+  "foxctl-context": tool({
     description: "Get relevant context for the current task",
     args: { query: z.string() },
     async execute({ query }) {
@@ -116,7 +116,7 @@ tool: {
 |------|-----------------|----------------|-----------|
 | `overseer-inbox.sh` | Read/Bash/Grep/Glob/Task | **Port** | No native equivalent; critical for human-in-the-loop |
 | `session-identity.sh` | Edit/Write/Bash | **Port** | No native; sets session env vars for attribution |
-| `file-memory-recall.sh` | Edit/Write | **Port** | No native; queries agentctl memory |
+| `file-memory-recall.sh` | Edit/Write | **Port** | No native; queries foxctl memory |
 | `task-guard.sh` | Edit/Write | **Port** | No native; enforces task-first workflow |
 | `security-scanner.sh` | Edit/Write | **Port** | No native; scans for secrets |
 | `smart-read.sh` | Read | **Port** | Valuable! Shows file structure (symbols, functions, line numbers) before reading - helps target specific sections |
@@ -136,7 +136,7 @@ tool: {
 | `memory-prompt.sh` | TodoWrite | **Port** | Prompts for memory save; no native |
 | `lsp-diagnostics.sh` | Edit/Write | **Native** `lsp.client.diagnostics` | OpenCode has native LSP diagnostics |
 | `test-feedback.sh` | Edit/Write | **Port** | No native; runs tests on edit |
-| `complexity-warning.sh` | Edit/Write | **Port** | No native; uses agentctl skill |
+| `complexity-warning.sh` | Edit/Write | **Port** | No native; uses foxctl skill |
 | `impact-analysis.sh` | Edit/Write | **Port (async)** | Valuable! LSP-based dependency analysis. Run in background, surface on next interaction |
 | `live-index.sh` | Edit/Write | **Native** `file.edited` | Use file event for indexing |
 | `memory-capture.sh` | Edit/Write | **Native** `file.edited` | Trigger on file event |
@@ -153,7 +153,7 @@ tool: {
 
 | Hook | Current Trigger | Recommendation | Rationale |
 |------|-----------------|----------------|-----------|
-| `daemon-warmup.sh` | startup | **Port** | No native; warms up agentctl daemon |
+| `daemon-warmup.sh` | startup | **Port** | No native; warms up foxctl daemon |
 | `session-identity.sh` | startup | **Port** | No native; establishes session |
 | `session-restore.sh` | compact/resume | **Native** `session.created` | Use session event |
 
@@ -334,7 +334,7 @@ These are older experiments that overlap with current shell hooks:
 | `tool_call_logger.py` | Logging tool calls | Keep for debugging |
 | `get_context.py` | Context gathering | Superseded by semantic-search |
 
-**Recommendation**: Archive these Python hooks; functionality now in agentctl skills.
+**Recommendation**: Archive these Python hooks; functionality now in foxctl skills.
 
 ---
 
@@ -380,10 +380,10 @@ Create tools the AI calls explicitly:
 
 | Tool | Replaces Hook | Description |
 |------|---------------|-------------|
-| `agentctl-memory-recall` | file-memory-recall | Get file-specific memories |
-| `agentctl-search` | semantic-search | Vector search codebase |
-| `agentctl-inbox` | overseer-inbox | Check human messages |
-| `agentctl-context` | smart-read | Get file structure/symbols |
+| `foxctl-memory-recall` | file-memory-recall | Get file-specific memories |
+| `foxctl-search` | semantic-search | Vector search codebase |
+| `foxctl-inbox` | overseer-inbox | Check human messages |
+| `foxctl-context` | smart-read | Get file structure/symbols |
 
 **Pros**: AI decides when to call, efficient
 **Cons**: Relies on AI remembering to call tools
@@ -407,10 +407,10 @@ Create `context-injector.ts` using `experimental.chat.system.transform`:
 
 ### Phase 2: Custom Tools (P0)
 Create tools that AI calls explicitly:
-1. `agentctl-memory` - Query memories
-2. `agentctl-search` - Semantic search
-3. `agentctl-task` - Task management
-4. `agentctl-inbox` - Check messages
+1. `foxctl-memory` - Query memories
+2. `foxctl-search` - Semantic search
+3. `foxctl-task` - Task management
+4. `foxctl-inbox` - Check messages
 
 ### Phase 3: Tool Blocking (P1)
 Tool hooks that throw errors to block:

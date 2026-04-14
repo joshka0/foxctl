@@ -334,7 +334,7 @@ Changes:
 Acceptance criteria:
 
 - `code/smart_search` no longer loses multi-anchor files
-- `code/smart_search` no longer shells out to `agentctl run code/snippet_extract`
+- `code/smart_search` no longer shells out to `foxctl run code/snippet_extract`
 - `code/snippet_extract` remains envelope-compatible
 - tree mode shows the same ranked file set as non-tree mode
 

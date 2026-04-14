@@ -50,7 +50,7 @@ func NewEvent(operation string) *EventBuilder {
 		event: &WideEvent{
 			Ts:        time.Now().UTC(),
 			SpanID:    ulid.Make().String(),
-			Service:   "agentctl",
+			Service:   "foxctl",
 			Version:   version,
 			Operation: operation,
 			Data:      make(map[string]any),
@@ -178,7 +178,7 @@ func (b *EventBuilder) WithMailbox(mailboxMsgID string) *EventBuilder {
 // This pulls session, agent, and workspace IDs from standard env vars.
 func (b *EventBuilder) EnrichFromEnv() *EventBuilder {
 	if b.event.SessionID == "" {
-		// Check agentctl-specific first, then fallbacks
+		// Check foxctl-specific first, then fallbacks
 		if id := os.Getenv("AGENTCTL_SESSION_ID"); id != "" {
 			b.event.SessionID = id
 		} else if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {

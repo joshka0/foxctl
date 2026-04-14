@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/joshka0/foxctl/internal/platform/fsutil"
 )
 
 // ShouldSkipPath reports whether a path should be excluded from app-code indexing.

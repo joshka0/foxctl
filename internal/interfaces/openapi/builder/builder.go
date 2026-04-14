@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
-	"github.com/jkatigb/agentctl/internal/interfaces/openapi/loader"
+	"github.com/joshka0/foxctl/internal/interfaces/openapi/loader"
 )
 
 // Params organizes request parameters by OpenAPI location.
@@ -193,7 +193,7 @@ func (b *Builder) buildHeaders(headerParams map[string]any, _ openapi3.Parameter
 
 	// Set default User-Agent if not provided
 	if _, ok := headers["User-Agent"]; !ok {
-		headers["User-Agent"] = "agentctl/1.0.0"
+		headers["User-Agent"] = "foxctl/1.0.0"
 	}
 
 	return headers, nil

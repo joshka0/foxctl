@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/platform/config"
 )
 
 const command = "presence/voice"
@@ -197,7 +197,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			}
 			if apiKey == "" {
 				return skillerr.Auth("ELEVENLABS_API_KEY not set",
-					skillerr.WithHint("Set ELEVENLABS_API_KEY in environment or ~/.agentctl/.env"))
+					skillerr.WithHint("Set ELEVENLABS_API_KEY in environment or ~/.foxctl/.env"))
 			}
 
 			settings := getVoiceSettings(in.Emotion, in.Intensity)
@@ -483,8 +483,8 @@ func rewriteTextForTTS(ctx context.Context, rc *skillmain.RunContext, text, mode
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	if strings.Contains(rewriteBaseURL, "openrouter.ai") {
-		req.Header.Set("HTTP-Referer", "https://agentctl.local")
-		req.Header.Set("X-Title", "agentctl-presence-voice")
+		req.Header.Set("HTTP-Referer", "https://foxctl.local")
+		req.Header.Set("X-Title", "foxctl-presence-voice")
 	}
 
 	client := &http.Client{Timeout: 45 * time.Second}

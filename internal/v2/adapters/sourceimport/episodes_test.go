@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 func TestBuildEpisodes_BoundaryKeyIncludesTurnIDs(t *testing.T) {

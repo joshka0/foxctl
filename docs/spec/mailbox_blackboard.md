@@ -1,7 +1,7 @@
 # Mailbox + Blackboard
 
 **Status:** Draft\
-**Scope:** Canonical overview of mailbox/blackboard semantics for agentctl.
+**Scope:** Canonical overview of mailbox/blackboard semantics for foxctl.
 
 ---
 
@@ -48,8 +48,8 @@ Blackboard is a shared topic store with optional claims:
 
 ---
 
-## 4. Implementation Notes (agentctl)
+## 4. Implementation Notes (foxctl)
 
 - Current skills use `mailbox/manage.*` and `bb/manage.*` namespaces.
-- Agent Profile v1 uses `mailbox/*` and `bb/*` in envelopes; agentctl tools
+- Agent Profile v1 uses `mailbox/*` and `bb/*` in envelopes; foxctl tools
   map these to the skill namespaces for execution.

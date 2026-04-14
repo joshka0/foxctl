@@ -1,4 +1,4 @@
-// @agentctl/data - Shared data layer for agentctl UIs
+// @foxctl/data - Shared data layer for foxctl UIs
 
 // Re-export all types
 export * from "./types";

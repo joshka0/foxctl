@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
 
 func TestBuilderAddsTypeScriptCallEdges(t *testing.T) {

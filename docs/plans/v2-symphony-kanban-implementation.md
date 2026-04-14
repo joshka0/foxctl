@@ -18,7 +18,7 @@ Implement `docs/spec/v2_symphony_kanban_orchestration.md` as a v2-native executi
 1. No reintroduction of v1 fallback/shadow logic for supported v2 command surfaces.
 2. No scheduler-owned policy decisions.
 3. No direct DB mutation from UI.
-4. No replacement of existing YAML DAG workflow execution (`agentctl workflow run`).
+4. No replacement of existing YAML DAG workflow execution (`foxctl workflow run`).
 
 ## Locked Constraints
 
@@ -50,7 +50,7 @@ Acceptance:
 
 1. Parser accepts frontmatter + markdown body split.
 2. Invalid reload keeps last known good config.
-3. Existing `agentctl workflow run` YAML tests stay green.
+3. Existing `foxctl workflow run` YAML tests stay green.
 
 Tests:
 
@@ -248,7 +248,7 @@ Acceptance:
 Tests:
 
 1. `pnpm -C packages/gui-agent build`
-2. `go test ./cmd/agentctl/cmd ./internal/providers/llm ./internal/runtime/actor`
+2. `go test ./cmd/foxctl/cmd ./internal/providers/llm ./internal/runtime/actor`
 
 ## PR-50: Events Signal Quality + Session-Persisted Filters
 

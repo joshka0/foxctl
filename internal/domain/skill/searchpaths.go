@@ -17,7 +17,7 @@ func EnvSearchPaths() []string {
 // UserSearchPaths returns the default user skills directory.
 func UserSearchPaths() []string {
 	if homeDir, err := os.UserHomeDir(); err == nil {
-		return []string{filepath.Join(homeDir, ".agentctl", "skills")}
+		return []string{filepath.Join(homeDir, ".foxctl", "skills")}
 	}
 	return nil
 }
@@ -52,7 +52,7 @@ func DevSearchPaths() []string {
 // DefaultSearchPaths returns the default skill search paths.
 // Search order:
 // 1. AGENTCTL_SKILLS_PATH environment variable (can be multiple paths)
-// 2. User skills directory (~/.agentctl/skills)
+// 2. User skills directory (~/.foxctl/skills)
 // 3. Built-in skills (relative to executable)
 // 4. Development paths (./skills, ./dist/skills)
 func DefaultSearchPaths() []string {

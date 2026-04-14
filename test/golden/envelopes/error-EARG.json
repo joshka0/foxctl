@@ -1,7 +1,7 @@
 {
   "version": 1,
   "status": "error",
-  "command": "agentctl.example.run",
+  "command": "foxctl.example.run",
   "data": {
     "hint": "Provide --path when invoking the command",
     "invalid_fields": ["path"]

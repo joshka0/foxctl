@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	roomSmokeWorkspacePath          = "/tmp/agentctl-room-smoke-workspace"
-	orchestrationSmokeWorkspacePath = "/tmp/agentctl-orchestration-smoke-workspace"
+	roomSmokeWorkspacePath          = "/tmp/foxctl-room-smoke-workspace"
+	orchestrationSmokeWorkspacePath = "/tmp/foxctl-orchestration-smoke-workspace"
 )
 
 func TestRoomsHandlers_Smoke(t *testing.T) {

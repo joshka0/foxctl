@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: fs/find
@@ -71,10 +71,10 @@ signature:
     long: |
       Use fs/find to locate files with fuzzy matching, size filters, and sorting.
       Example commands:
-        agentctl run fs/find --input '{"query":"config","path":"."}'
-        agentctl skills run fs/find --query config --path .
-        agentctl run fs/find --input '{"pattern":"*.go","type":"file","sort_by":"modified","max_results":20}'
-        agentctl skills run fs/find --pattern '*.go' --type file --sort_by modified --max_results 20
+        foxctl run fs/find --input '{"query":"config","path":"."}'
+        foxctl skills run fs/find --query config --path .
+        foxctl run fs/find --input '{"pattern":"*.go","type":"file","sort_by":"modified","max_results":20}'
+        foxctl skills run fs/find --pattern '*.go' --type file --sort_by modified --max_results 20
     workflows:
       - id: find-config
         description: "Find config files by name."

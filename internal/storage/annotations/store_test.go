@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/vector"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/vector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

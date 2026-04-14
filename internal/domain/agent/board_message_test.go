@@ -415,7 +415,7 @@ func TestSandboxConfig_JSONRoundTrip(t *testing.T) {
 	sc := &SandboxConfig{
 		WorktreePath:   "/tmp/worktrees/sandbox/room-test-room",
 		WorktreeBranch: "sandbox/room-test-room",
-		TmuxSession:    "agentctl-sandbox-test-room",
+		TmuxSession:    "foxctl-sandbox-test-room",
 		TerminalURL:    "/terminal/test-room",
 		Runtime:        "worktree",
 		BaseRef:        "HEAD",
@@ -464,7 +464,7 @@ func TestRoom_JSONRoundTrip_WithSandbox(t *testing.T) {
 		SandboxConfig: &SandboxConfig{
 			WorktreePath:   "/tmp/worktrees/sandbox/room-test-room",
 			WorktreeBranch: "sandbox/room-test-room",
-			TmuxSession:    "agentctl-sandbox-test-room",
+			TmuxSession:    "foxctl-sandbox-test-room",
 			TerminalURL:    "/terminal/test-room",
 			Runtime:        "worktree",
 			BaseRef:        "HEAD",

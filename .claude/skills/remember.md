@@ -1,6 +1,6 @@
 # /remember - Save a key learning, decision, or gotcha
 
-Save important context to both agentctl memory AND CLAUDE.md for persistence.
+Save important context to both foxctl memory AND CLAUDE.md for persistence.
 
 ## Arguments
 
@@ -13,9 +13,9 @@ Save important context to both agentctl memory AND CLAUDE.md for persistence.
    - Determine the type: `gotcha`, `decision`, `pattern`, or `context`
    - Create a concise summary (1-2 sentences)
 
-2. **Save to agentctl memory**:
+2. **Save to foxctl memory**:
    ```bash
-   agentctl memory put \
+   foxctl memory put \
      --name "<descriptive-name>" \
      --type "<type>" \
      --summary "<concise summary>" \
@@ -35,7 +35,7 @@ User: "remember that CGO builds need -tags=libsqlite3 to avoid duplicate symbols
 Actions:
 1. Save to memory:
    ```bash
-   agentctl memory put \
+   foxctl memory put \
      --name "gotcha-cgo-sqlite-tags" \
      --type "gotcha" \
      --summary "CGO builds require -tags=libsqlite3 to avoid duplicate SQLite symbols" \

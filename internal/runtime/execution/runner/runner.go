@@ -6,11 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/env"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	execrunner "github.com/jkatigb/agentctl/internal/runtime/execution/exec"
-	wasirunner "github.com/jkatigb/agentctl/internal/runtime/execution/wasi"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/env"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	execrunner "github.com/joshka0/foxctl/internal/runtime/execution/exec"
+	wasirunner "github.com/joshka0/foxctl/internal/runtime/execution/wasi"
 )
 
 // sessionEnvVars lists environment variables that should be propagated to skills
@@ -18,7 +18,7 @@ import (
 // context regardless of which AI coding tool invoked them.
 var sessionEnvVars = []string{
 	"AGENTCTL_SESSION_ID", // Canonical session ID (highest priority)
-	"AGENTCTL_AGENT_ID",   // Agent identifier (agentctl, subagent:X, etc.)
+	"AGENTCTL_AGENT_ID",   // Agent identifier (foxctl, subagent:X, etc.)
 	"CLAUDE_SESSION_ID",   // Claude Code session ID
 	"OPENCODE_SESSION_ID", // OpenCode session ID
 	"CURSOR_SESSION_ID",   // Cursor session ID

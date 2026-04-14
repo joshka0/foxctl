@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/storage/transcriptcache"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 func TestPreprocessParsedSession_DeterministicCachesReferenceBlob(t *testing.T) {

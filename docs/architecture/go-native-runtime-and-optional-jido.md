@@ -1,12 +1,12 @@
 ---
 vault_refs:
-  - notes/repo/agentctl/skills-runtime-wiring.md
-  - notes/repo/agentctl/index.md
+  - notes/repo/foxctl/skills-runtime-wiring.md
+  - notes/repo/foxctl/index.md
   - 00-home/index.md
 ---
 # Go-native runtime first, optional Jido and pluggable backends
 
-This note describes the target runtime shape for `agentctl`:
+This note describes the target runtime shape for `foxctl`:
 Go owns lifecycle, orchestration state, runtime trees, and tool execution. Jido becomes
 an optional runtime substrate *(more precise than "LLM substrate": the process/runtime
 layer, not the semantic system of record)*. Once those seams are owned in Go, other

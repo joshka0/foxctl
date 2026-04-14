@@ -5,10 +5,10 @@ import (
 	"os"
 	"strings"
 
-	v2jido "github.com/jkatigb/agentctl/internal/v2/adapters/jido"
+	v2jido "github.com/joshka0/foxctl/internal/v2/adapters/jido"
 )
 
-const defaultJidoSocketPath = "/tmp/agentctl-jido.sock"
+const defaultJidoSocketPath = "/tmp/foxctl-jido.sock"
 
 // loadOptionalJidoClient returns a configured client when the bridge socket is
 // present. When the socket file is missing, it reports "not available" without

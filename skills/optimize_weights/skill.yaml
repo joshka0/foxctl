@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: optimize/weights
@@ -28,10 +28,10 @@ signature:
     long: |
       Use optimize/weights to inspect or learn scoring weights.
       Example commands:
-        agentctl run optimize/weights --input '{"action":"show"}'
-        agentctl skills run optimize/weights --action show
-        agentctl run optimize/weights --input '{"action":"learn","workspace":"./"}'
-        agentctl skills run optimize/weights --action learn --workspace ./
+        foxctl run optimize/weights --input '{"action":"show"}'
+        foxctl skills run optimize/weights --action show
+        foxctl run optimize/weights --input '{"action":"learn","workspace":"./"}'
+        foxctl skills run optimize/weights --action learn --workspace ./
     workflows:
       - id: show-weights
         description: "Show current weights."

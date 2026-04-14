@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/adapters/libsql/turns"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/enrichers"
+	"github.com/joshka0/foxctl/internal/v2/adapters/libsql/turns"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/runtime/enrichers"
 )
 
 func TestArtifactEnricher_RequiresArtifactWriter(t *testing.T) {

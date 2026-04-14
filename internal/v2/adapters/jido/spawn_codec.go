@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
 )
 
-const DefaultSpawnChildSignal = "agentctl.child.spawn"
+const DefaultSpawnChildSignal = "foxctl.child.spawn"
 
 type childSpawnSignalData struct {
 	RequestID    string         `json:"request_id,omitempty"`

@@ -15,10 +15,10 @@ Search for existing code related to this task:
 
 ```bash
 # Find files by name patterns
-agentctl run fs/find --input '{"path": ".", "pattern": "*relevant*"}'
+foxctl run fs/find --input '{"path": ".", "pattern": "*relevant*"}'
 
 # Search for related symbols/patterns
-agentctl run text/ripgrep --input '{"pattern": "related_term", "path": "."}'
+foxctl run text/ripgrep --input '{"pattern": "related_term", "path": "."}'
 ```
 
 **Output required:**
@@ -31,10 +31,10 @@ For each relevant file identified:
 
 ```bash
 # Extract symbols to understand structure
-agentctl run code/symbols --input '{"path": "path/to/file.go"}'
+foxctl run code/symbols --input '{"path": "path/to/file.go"}'
 
 # Check complexity
-agentctl run code/complexity --input '{"path": "path/to/file.go"}'
+foxctl run code/complexity --input '{"path": "path/to/file.go"}'
 ```
 
 **Output required:**
@@ -49,34 +49,34 @@ Use LSP for deeper understanding. Choose based on project type:
 **Go projects:**
 ```bash
 # Find all references to a function/type
-agentctl run lsp/gopls --input '{"operation": "references", "file": "path/to/file.go", "line": 20, "column": 6}'
+foxctl run lsp/gopls --input '{"operation": "references", "file": "path/to/file.go", "line": 20, "column": 6}'
 
 # Understand call hierarchy (who calls this? what does it call?)
-agentctl run lsp/gopls --input '{"operation": "call_hierarchy", "file": "path/to/file.go", "line": 20, "column": 6}'
+foxctl run lsp/gopls --input '{"operation": "call_hierarchy", "file": "path/to/file.go", "line": 20, "column": 6}'
 
 # Search for related types/functions across workspace
-agentctl run lsp/gopls --input '{"operation": "workspace_symbol", "query": "Handler"}'
+foxctl run lsp/gopls --input '{"operation": "workspace_symbol", "query": "Handler"}'
 ```
 
 **Python projects:**
 ```bash
 # Find all references
-agentctl run lsp/pylsp --input '{"operation": "references", "file": "src/main.py", "line": 10, "column": 5}'
+foxctl run lsp/pylsp --input '{"operation": "references", "file": "src/main.py", "line": 10, "column": 5}'
 
 # Get documentation for a symbol
-agentctl run lsp/pylsp --input '{"operation": "hover", "file": "src/main.py", "line": 10, "column": 5}'
+foxctl run lsp/pylsp --input '{"operation": "hover", "file": "src/main.py", "line": 10, "column": 5}'
 
 # Search workspace
-agentctl run lsp/pylsp --input '{"operation": "workspace_symbol", "query": "Handler"}'
+foxctl run lsp/pylsp --input '{"operation": "workspace_symbol", "query": "Handler"}'
 ```
 
 **TypeScript/JavaScript projects:**
 ```bash
 # Find all references
-agentctl run lsp/tsserver --input '{"operation": "references", "file": "src/index.ts", "line": 10, "column": 5}'
+foxctl run lsp/tsserver --input '{"operation": "references", "file": "src/index.ts", "line": 10, "column": 5}'
 
 # Search workspace
-agentctl run lsp/tsserver --input '{"operation": "workspace_symbol", "query": "Handler"}'
+foxctl run lsp/tsserver --input '{"operation": "workspace_symbol", "query": "Handler"}'
 ```
 
 **Output required:**

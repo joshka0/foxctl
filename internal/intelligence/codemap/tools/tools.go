@@ -10,12 +10,12 @@ import (
 	"strings"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
-	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/storage/graph"
-	tooling "github.com/jkatigb/agentctl/internal/tooling"
-	"github.com/jkatigb/agentctl/internal/tooling/skillrun"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/platform/buildinfo"
+	"github.com/joshka0/foxctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/storage/graph"
+	tooling "github.com/joshka0/foxctl/internal/tooling"
+	"github.com/joshka0/foxctl/internal/tooling/skillrun"
 )
 
 // Registry holds codemap tool configurations and dependencies.

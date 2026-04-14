@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/protocol"
 )
 
 const (
@@ -34,7 +34,7 @@ const (
 	maxAllowedInputBytes       = 1024 * 1024
 	envPluginPath              = "AGENTCTL_PLUGIN_PATH"
 	envOpenAPIPluginPath       = "AGENTCTL_OPENAPI_PLUGIN_PATH"
-	pluginBinaryPrefix         = "agentctl-plugin-"
+	pluginBinaryPrefix         = "foxctl-plugin-"
 )
 
 // Manager locates and executes auth/pagination plugins according to the Plugin Protocol v1 specification.

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/recall
@@ -72,8 +72,8 @@ signature:
     long: |
       Use session/recall to find past sessions matching a query.
       Example commands:
-        agentctl run session/recall --input '{"query":"authentication flow","limit":3}'
-        agentctl skills run session/recall --query "authentication flow" --limit 3
+        foxctl run session/recall --input '{"query":"authentication flow","limit":3}'
+        foxctl skills run session/recall --query "authentication flow" --limit 3
     workflows:
       - id: recall-query
         description: "Recall sessions for a query."
@@ -124,7 +124,7 @@ examples:
   - name: "Project-specific recall"
     input:
       query: "database migrations"
-      project: "agentctl"
+      project: "foxctl"
       limit: 5
     description: "Find database migration sessions for a specific project"
   - name: "Decision evolution"

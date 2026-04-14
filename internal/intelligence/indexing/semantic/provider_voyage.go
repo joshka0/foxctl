@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog/log"
 )
@@ -470,7 +470,7 @@ func (p *VoyageProvider) emitEvent(ctx context.Context, start time.Time, textsCo
 		Ts:         time.Now().UTC(),
 		TraceID:    observability.TraceIDFromContext(ctx),
 		SpanID:     ulid.Make().String(),
-		Service:    "agentctl",
+		Service:    "foxctl",
 		Component:  observability.ComponentSkill,
 		Operation:  "embedding.generate",
 		Command:    "voyage",

@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/queue"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/queue"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
 )
 
 // Worker processes summary queue jobs in the background.
@@ -392,8 +392,8 @@ func callLLM(ctx context.Context, provider llmproviders.Provider, prompt string)
 	req.Header.Set("Authorization", "Bearer "+provider.APIKey)
 
 	if strings.HasPrefix(provider.Name, "openrouter:") {
-		req.Header.Set("HTTP-Referer", "https://github.com/jkatigb/agentctl")
-		req.Header.Set("X-Title", "agentctl")
+		req.Header.Set("HTTP-Referer", "https://github.com/joshka0/foxctl")
+		req.Header.Set("X-Title", "foxctl")
 	}
 
 	client := &http.Client{Timeout: 60 * time.Second}

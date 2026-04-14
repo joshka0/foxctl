@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
-	"github.com/jkatigb/agentctl/internal/intelligence/retrieval"
-	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
+	"github.com/joshka0/foxctl/internal/intelligence/retrieval"
+	"github.com/joshka0/foxctl/internal/storage"
 )
 
 // SearchFileSummaries searches file_summary entries using vector search when available,

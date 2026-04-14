@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/jkatigb/agentctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 // LLMToolExecutor adapts the RLM tool surface to the engine.ToolExecutor contract.
@@ -213,7 +213,7 @@ func buildRLMSystemPrompt(env Environment, task Task) string {
 	b.WriteString("Prefer repo, scene, vault, and artifact handles already present in the environment.\n")
 	b.WriteString("If the prompt is about the current workspace, inspect with at least one tool before writing the final synthesis.\n")
 	b.WriteString("For repo questions, start with code_search_ensemble. Use semantic_search_code or smart_search_code only as follow-up discovery lanes when the ensemble leaves uncertainty. Use search_repo only as a shallow fallback, then load_file for exact verification, and ripgrep_code for literal patterns.\n")
-	b.WriteString("Cite exact relative repo file paths you inspected. Do not cite .agentctl or .claude runtime files as repository evidence.\n")
+	b.WriteString("Cite exact relative repo file paths you inspected. Do not cite .foxctl or .claude runtime files as repository evidence.\n")
 	b.WriteString("Return a concise synthesis with supporting evidence.\n")
 	if len(env.Tools) > 0 {
 		b.WriteString("\nAllowed read-only tools:\n")
@@ -612,7 +612,7 @@ func normalizeRetrievedPath(value, workspaceRoot string) string {
 	}
 	value = filepath.ToSlash(value)
 	switch {
-	case strings.HasPrefix(value, ".agentctl/"):
+	case strings.HasPrefix(value, ".foxctl/"):
 		return ""
 	case strings.HasPrefix(value, ".claude/"):
 		return ""

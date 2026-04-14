@@ -16,11 +16,11 @@ Defaults come from `internal/platform/config/config.go`.
 
 | Config key | Default |
 |-----------|---------|
-| `storage.root` | `~/.agentctl/storage` |
-| `paths.cas` | `~/.agentctl/cas` |
-| `paths.cache` | `~/.agentctl/cache` |
-| `paths.jobs` | `~/.agentctl/jobs` |
-| `paths.observability` | `~/.agentctl/observability` |
+| `storage.root` | `~/.foxctl/storage` |
+| `paths.cas` | `~/.foxctl/cas` |
+| `paths.cache` | `~/.foxctl/cache` |
+| `paths.jobs` | `~/.foxctl/jobs` |
+| `paths.observability` | `~/.foxctl/observability` |
 
 ## Canonical Store Registry
 
@@ -57,12 +57,12 @@ This section reflects current table names in code (not legacy aliases).
 ## Operational Commands
 
 ```bash
-agentctl cas put < artifact.json
-agentctl cas get sha256:...
-agentctl cas pin sha256:...
-agentctl cas gc --older-than=168h --dry-run
-agentctl backup create --name nightly
-agentctl backup list
+foxctl cas put < artifact.json
+foxctl cas get sha256:...
+foxctl cas pin sha256:...
+foxctl cas gc --older-than=168h --dry-run
+foxctl backup create --name nightly
+foxctl backup list
 ```
 
 ## Invariants

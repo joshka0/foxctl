@@ -8,7 +8,7 @@
 
 ## Why this slice
 
-The room-agile system already materializes a useful mirror under `~/.agentctl/epics/...`, but the current markdown files are still effectively produced by hand-written render functions.
+The room-agile system already materializes a useful mirror under `~/.foxctl/epics/...`, but the current markdown files are still effectively produced by hand-written render functions.
 
 That is workable, but it leaves a few gaps:
 

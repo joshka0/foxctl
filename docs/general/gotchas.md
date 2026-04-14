@@ -42,10 +42,10 @@ The Makefile uses `-tags=libsqlite3` to use system SQLite.
 
 ```bash
 # Correct
-go build -o ~/.agentctl/skills/my/skill/bin ./skills/my_skill
+go build -o ~/.foxctl/skills/my/skill/bin ./skills/my_skill
 
 # Wrong - loader won't find it
-go build -o ~/.agentctl/skills/my/skill/my_skill ./skills/my_skill
+go build -o ~/.foxctl/skills/my/skill/my_skill ./skills/my_skill
 ```
 
 ---
@@ -63,7 +63,7 @@ go build -o ~/.agentctl/skills/my/skill/my_skill ./skills/my_skill
 make skills-install
 
 # Option 2: Single skill
-CGO_ENABLED=0 go build -o ~/.agentctl/skills/code/symbols/bin ./skills/code_symbols
+CGO_ENABLED=0 go build -o ~/.foxctl/skills/code/symbols/bin ./skills/code_symbols
 ```
 
 ---
@@ -79,7 +79,7 @@ CGO_ENABLED=0 go build -o ~/.agentctl/skills/code/symbols/bin ./skills/code_symb
 **Solution:**
 
 ```go
-import "github.com/jkatigb/agentctl/internal/platform/config"
+import "github.com/joshka0/foxctl/internal/platform/config"
 
 func main() {
     config.LoadDotEnv() // BEFORE os.Getenv()
@@ -92,27 +92,27 @@ func main() {
 
 ### .env Must Be a Real File (Not a Symlink)
 
-**Problem:** agentctl fails in sandboxed or remote environments.
+**Problem:** foxctl fails in sandboxed or remote environments.
 
-**Cause:** `~/.agentctl/.env` is a symlink to the repo's `.env` file. When the repo path doesn't exist (sandbox, remote, different machine), the symlink is broken.
+**Cause:** `~/.foxctl/.env` is a symlink to the repo's `.env` file. When the repo path doesn't exist (sandbox, remote, different machine), the symlink is broken.
 
 **Solution:** Use a real file, not a symlink:
 
 ```bash
 # Manual sync
-make env-sync  # Copies repo .env → ~/.agentctl/.env
+make env-sync  # Copies repo .env → ~/.foxctl/.env
 
 # Or with auto-watch (requires: brew install fswatch)
 make env-watch       # Start watching
 make env-watch-stop  # Stop watching
 
 # Verify it's a real file
-ls -la ~/.agentctl/.env
+ls -la ~/.foxctl/.env
 # Should show: -rw------- (not lrwxr-xr-x)
 ```
 
 The `.env` loader checks these locations in order:
-1. `~/.agentctl/.env` (global defaults)
+1. `~/.foxctl/.env` (global defaults)
 2. `$AGENTCTL_HOME/.env` (if set)
 3. `$PWD/.env` (project overrides)
 
@@ -129,10 +129,10 @@ The `.env` loader checks these locations in order:
 ```bash
 # Run from project directory
 cd /path/to/project
-agentctl memory search "auth"
+foxctl memory search "auth"
 
 # Or specify workspace
-agentctl run memory/query --input '{"workspace": "/path/to/project"}'
+foxctl run memory/query --input '{"workspace": "/path/to/project"}'
 ```
 
 ---
@@ -227,7 +227,7 @@ if strings.HasSuffix(path, ".gz") {
 
 ```bash
 # Re-run summarization (handles all windows)
-agentctl run session/summarize --input '{"session_id": "..."}'
+foxctl run session/summarize --input '{"session_id": "..."}'
 ```
 
 ---
@@ -251,14 +251,14 @@ show it even though other panes in the same room do.
 
 ```bash
 # 1. Verify the live loop points at the intended workspace + room
-ps -Ao pid=,command= | rg 'agentctl room loop'
+ps -Ao pid=,command= | rg 'foxctl room loop'
 lsof -a -p <loop-pid> -d cwd
 
 # 2. Verify the room membership records include pane_id for tmux members
-agentctl room show <room-id> --workspace /path/to/workspace
+foxctl room show <room-id> --workspace /path/to/workspace
 
 # 3. Read the pane directly to distinguish relay failure from display/composer state
-agentctl mux read <pane-id> --lines 120
+foxctl mux read <pane-id> --lines 120
 ```
 
 For tmux-backed room relay, treat `pane_id` as the delivery target when it is
@@ -313,7 +313,7 @@ data, _ := os.ReadFile(path)  // File could change between validate and read
 **Solution:** Use platform workspace detection:
 
 ```go
-import "github.com/jkatigb/agentctl/internal/platform/workspace"
+import "github.com/joshka0/foxctl/internal/platform/workspace"
 
 ws := workspace.Detect("")  // Handles AGENTCTL_WORKSPACE, git root, etc.
 ```
@@ -330,10 +330,10 @@ ws := workspace.Detect("")  // Handles AGENTCTL_WORKSPACE, git root, etc.
 
 ```bash
 # Wrong
-AGENTCTL_OBS_DIR=~/.agentctl/observability
+AGENTCTL_OBS_DIR=~/.foxctl/observability
 
 # Correct
-AGENTCTL_OBS_DIR=$HOME/.agentctl/observability
+AGENTCTL_OBS_DIR=$HOME/.foxctl/observability
 ```
 
 ---

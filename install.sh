@@ -2,10 +2,10 @@
 
 set -euo pipefail
 
-readonly REPO_URL="https://gitlab.com/joshka0/agentctl.git"
+readonly REPO_URL="https://gitlab.com/joshka0/foxctl.git"
 readonly GO_VERSION_REQUIRED="1.26.1"
-readonly DEFAULT_REPO_DIR="${HOME}/.agentctl/src/agentctl"
-readonly AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.agentctl}"
+readonly DEFAULT_REPO_DIR="${HOME}/.foxctl/src/foxctl"
+readonly AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.foxctl}"
 readonly LOCAL_BIN="${HOME}/.local/bin"
 
 RED=$'\033[0;31m'
@@ -29,23 +29,23 @@ step() { printf "\n%s==> %s%s\n" "$CYAN" "$1" "$NC"; }
 
 show_help() {
     cat <<'EOF'
-agentctl installer
+foxctl installer
 
 Usage:
   ./install.sh
   ./install.sh --yes
-  curl -fsSL https://gitlab.com/joshka0/agentctl/-/raw/main/install.sh | bash
+  curl -fsSL https://gitlab.com/joshka0/foxctl/-/raw/main/install.sh | bash
 
 Options:
   --yes, -y               Run non-interactively with recommended defaults
-  --skip-cgo              Skip CGO/SQLite support and agentctl-cgo
+  --skip-cgo              Skip CGO/SQLite support and foxctl-cgo
   --skip-bun              Skip Bun installation and bun install
   --skip-provider-setup   Skip scripts/init.sh
   --repo-dir <path>       Repo checkout directory when not run from a clone
   --help, -h              Show this help
 
 Environment:
-  AGENTCTL_HOME           Defaults to ~/.agentctl
+  AGENTCTL_HOME           Defaults to ~/.foxctl
   AGENTCTL_REPO_DIR       Default checkout dir when cloning outside a repo
 EOF
 }
@@ -135,7 +135,7 @@ prompt_install_options() {
 
     printf "%s\n" "Recommended install profile:"
     printf "%s\n" "- build the pure-Go CLI and skills"
-    printf "%s\n" "- build agentctl-cgo with SQLite/libsqlite3 support"
+    printf "%s\n" "- build foxctl-cgo with SQLite/libsqlite3 support"
     printf "%s\n" "- install Bun for GUI/TUI/OpenCode workflows"
     printf "%s\n" "- run provider setup for Claude/Codex/OpenCode/Gemini"
     printf "\n"
@@ -399,7 +399,7 @@ ensure_local_layout() {
 }
 
 build_agentctl() {
-    step "Building agentctl"
+    step "Building foxctl"
     cd "$REPO_ROOT"
 
     make build
@@ -422,12 +422,12 @@ link_binaries() {
     step "Linking binaries into $LOCAL_BIN"
     cd "$REPO_ROOT"
 
-    ln -sf "$REPO_ROOT/bin/agentctl" "$LOCAL_BIN/agentctl"
-    if [[ -f "$REPO_ROOT/bin/agentctl-cgo" ]]; then
-        ln -sf "$REPO_ROOT/bin/agentctl-cgo" "$LOCAL_BIN/agentctl-cgo"
+    ln -sf "$REPO_ROOT/bin/foxctl" "$LOCAL_BIN/foxctl"
+    if [[ -f "$REPO_ROOT/bin/foxctl-cgo" ]]; then
+        ln -sf "$REPO_ROOT/bin/foxctl-cgo" "$LOCAL_BIN/foxctl-cgo"
     fi
-    if [[ -f "$REPO_ROOT/bin/agentctl-mail" ]]; then
-        ln -sf "$REPO_ROOT/bin/agentctl-mail" "$LOCAL_BIN/agentctl-mail"
+    if [[ -f "$REPO_ROOT/bin/foxctl-mail" ]]; then
+        ln -sf "$REPO_ROOT/bin/foxctl-mail" "$LOCAL_BIN/foxctl-mail"
     fi
 }
 
@@ -459,17 +459,17 @@ run_provider_setup() {
 
 print_summary() {
     printf "\n"
-    success "agentctl installation finished"
+    success "foxctl installation finished"
     printf "\n"
     printf "%s\n" "Repo:        $REPO_ROOT"
     printf "%s\n" "AGENTCTL_HOME: $AGENTCTL_HOME"
-    printf "%s\n" "PATH link:   $LOCAL_BIN/agentctl"
+    printf "%s\n" "PATH link:   $LOCAL_BIN/foxctl"
     printf "\n"
     printf "%s\n" "Next steps:"
     printf "%s\n" "  1. Ensure $LOCAL_BIN is in your PATH"
-    printf "%s\n" "  2. Run 'agentctl version'"
-    printf "%s\n" "  3. Run 'agentctl skills list'"
-    printf "%s\n" "  4. Add API keys to ~/.agentctl/.env as needed"
+    printf "%s\n" "  2. Run 'foxctl version'"
+    printf "%s\n" "  3. Run 'foxctl skills list'"
+    printf "%s\n" "  4. Add API keys to ~/.foxctl/.env as needed"
     if [[ "$SKIP_PROVIDER_SETUP" == false ]]; then
         printf "%s\n" "  5. Restart Claude/Codex/OpenCode/Gemini if you want them to pick up new config"
     fi
@@ -478,7 +478,7 @@ print_summary() {
 main() {
     printf "%s" "$CYAN"
     printf "╔═══════════════════════════════════════════════════════════════╗\n"
-    printf "║                    agentctl installer                        ║\n"
+    printf "║                    foxctl installer                        ║\n"
     printf "╚═══════════════════════════════════════════════════════════════╝\n"
     printf "%s" "$NC"
     printf "\n"

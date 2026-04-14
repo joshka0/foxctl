@@ -1,4 +1,4 @@
-You already have the right primitives in agentctl:
+You already have the right primitives in foxctl:
 
 - **Tasks:** `internal/storage/tasks` + `todo/manage` + `hooks/task_guard`
   (`task_id`, `workspace_id`, `scope_path`, `DependsOn`).
@@ -18,7 +18,7 @@ Beads + beads_viewer + mcp_agent_mail essentially give you:
 - A **lightweight adapter** that makes mail “advisory, non-blocking, and
   optional” (`beads/lib/beads_mail_adapter.py`).
 
-You can lift the ideas almost directly into agentctl.
+You can lift the ideas almost directly into foxctl.
 
 ---
 
@@ -29,7 +29,7 @@ You can lift the ideas almost directly into agentctl.
 You already store:
 
 - Nodes:
-  [tasks.Task](cci:2://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:41:0-55:1)
+  [tasks.Task](cci:2://file://~/repos/personal/claude-harness/foxctl/internal/storage/tasks/store.go:41:0-55:1)
   (`id`, `workspace_id`, `status`, `DependsOn`, `ParentID`, `Children`)
 - Implicit edges: `DependsOn` (and conceptually parent/child)
 
@@ -46,7 +46,7 @@ From beads + bv graph:
   - `CriticalPathScore` via topo sort + “height”
   - Cycles + density + topological order
 
-For agentctl, I’d:
+For foxctl, I’d:
 
 - Define an internal package, e.g. `internal/intelligence/analysis/tasksgraph`:
   - Load all tasks for a `workspace_id`.
@@ -89,7 +89,7 @@ This becomes your **“beads brain”** for tasks.
     }
     ```
 
-- CLI sugar: `agentctl todo list --sort pagerank` or `--sort impact` using the
+- CLI sugar: `foxctl todo list --sort pagerank` or `--sort impact` using the
   graph layer under the hood.
 
 This directly answers “PageRank-style algorithm over task_ids”.
@@ -114,9 +114,9 @@ To **“better leverage task_ids/memories”**:
     attaching metadata to a node.
   - When retrieving context, you:
     1. Identify the **active task** (via
-       [EnsureActive](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:36:1-37:99)
+       [EnsureActive](cci:1://file://~/repos/personal/claude-harness/foxctl/internal/storage/tasks/store.go:36:1-37:99)
        or
-       [GetActive](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:30:1-31:71)).
+       [GetActive](cci:1://file://~/repos/personal/claude-harness/foxctl/internal/storage/tasks/store.go:30:1-31:71)).
     2. Pull the **subgraph**: active task + its ancestors/descendants on the
        critical path.
     3. Rank associated memory entries by:
@@ -148,18 +148,18 @@ If you want to piggyback on existing tooling instead of re-implementing metrics:
 
 - For repos that _also_ use Beads:
 
-  - Add an opt-in config: `agentctl.todo.backend: beads`.
+  - Add an opt-in config: `foxctl.todo.backend: beads`.
   - Implement a shim that shells out to `bd --json` or `bv --robot-insights` and
     maps:
 
-    - Beads `issue.id` → agentctl `task_id` or a parallel “external_task_id”.
+    - Beads `issue.id` → foxctl `task_id` or a parallel “external_task_id”.
     - Graph metrics → the same internal
       [GraphStats](cci:2://file://~/repos/personal/claude-harness/beads_viewer/pkg/analysis/graph.go:15:0-27:1)
       structure.
 
-- For pure-agentctl repos, you keep the internal `tasksgraph` path.
+- For pure-foxctl repos, you keep the internal `tasksgraph` path.
 
-My bias: **copy the ideas**, not the storage, for agentctl’s core; then
+My bias: **copy the ideas**, not the storage, for foxctl’s core; then
 optionally offer a “bd-bridge” for folks already on Beads.
 
 ---
@@ -211,7 +211,7 @@ Instead of trying to “push” into Claude (which you don’t control), you can
     - Create a **memory entry** scoped to `(workspace_id, task_id)` if the mail
       carries `task_id` headers (as recommended in §8.1 of your spec).
     - Or, if no explicit `task_id`, bind to the active task found via
-      [EnsureActive](cci:1://file://~/repos/personal/claude-harness/agentctl/internal/storage/tasks/store.go:36:1-37:99).
+      [EnsureActive](cci:1://file://~/repos/personal/claude-harness/foxctl/internal/storage/tasks/store.go:36:1-37:99).
     - Summarize into a few bullets suitable for `hook.Output.Context`.
 
   - Emit `hook.Output` with:
@@ -281,7 +281,7 @@ same files can be connected via shared reservations.
   - Metrics (pagerank, impact depth, degrees, cycles).
   - New `todo/manage` op and JSON schema.
 - [ ] Impl: `internal/intelligence/analysis/tasksgraph` + `todo/manage` extension.
-- [ ] CLI: `agentctl todo list --sort impact` and/or `agentctl todo insights`.
+- [ ] CLI: `foxctl todo list --sort impact` and/or `foxctl todo insights`.
 
 ### Phase 2 – Memory ranking & context injection
 

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 func TestMigrateSchema_UpgradesLegacyArtifactConstraintForNarrative(t *testing.T) {

@@ -1,4 +1,4 @@
-# agentctl runner image for agent-ci
+# foxctl runner image for agent-ci
 # Based on official GitHub Actions runner with Go toolchain added
 FROM ghcr.io/actions/actions-runner:latest
 

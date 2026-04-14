@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: web/extract
@@ -46,9 +46,9 @@ signature:
       - Rate limiting and caching
 
       Example commands:
-        agentctl run web/extract --input '{"urls": ["https://example.com"]}'
-        agentctl run web/extract --input '{"urls": ["https://docs.example.com"], "query": "authentication"}'
-        agentctl run web/extract --input '{"urls": ["https://api.example.com/docs"], "query": "rate limits", "max_content_kb": 100}'
+        foxctl run web/extract --input '{"urls": ["https://example.com"]}'
+        foxctl run web/extract --input '{"urls": ["https://docs.example.com"], "query": "authentication"}'
+        foxctl run web/extract --input '{"urls": ["https://api.example.com/docs"], "query": "rate limits", "max_content_kb": 100}'
     workflows:
       - id: basic-extract
         description: "Extract content from a URL"

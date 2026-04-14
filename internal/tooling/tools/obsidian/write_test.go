@@ -51,7 +51,7 @@ esac
 
 	w := NewWriter(script, "TestVault", DefaultPolicy())
 	w.PostCreateDelay = 0
-	notePath := "inbox/drafted-from-agentctl/test.md"
+	notePath := "inbox/drafted-from-foxctl/test.md"
 	if err := w.CreateNote(context.Background(), notePath, "# Test\n", true); err != nil {
 		t.Fatalf("CreateNote: %v", err)
 	}
@@ -196,7 +196,7 @@ esac
 
 	w := NewWriter(script, "TestVault", DefaultPolicy())
 	w.PostCreateDelay = 0
-	draftPath := "inbox/drafted-from-agentctl/promotion.md"
+	draftPath := "inbox/drafted-from-foxctl/promotion.md"
 	draft := "---\ntitle: Compact Handoff Pattern\ntype: pattern\nstatus: draft\ntrust: reviewed\nprimary_anchor_path: internal/context/contextplane/store.go\nimpl_anchor_paths:\n  - internal/context/contextplane/store.go\nsupport_anchor_paths:\n  - internal/context/contextplane/retrieval.go\nprovenance_refs:\n  - observation:O-887\n---\n\n# Compact Handoff Pattern\n\nCompact handoffs work better.\n"
 	if err := w.CreateNote(context.Background(), draftPath, draft, true); err != nil {
 		t.Fatalf("CreateNote draft: %v", err)
@@ -270,7 +270,7 @@ esac
 	if _, err := w.run(context.Background(), "create", "vault=TestVault", "path=notes/patterns/compact-handoff-pattern.md", "content=---\ntitle: Compact Handoff Pattern\ntype: pattern\nstatus: reviewed\ntrust: canonical\n---\n\n# Compact Handoff Pattern\n\n## Review\n\nExisting review.\n", "overwrite"); err != nil {
 		t.Fatalf("seed canonical: %v", err)
 	}
-	draftPath := "inbox/drafted-from-agentctl/promotion.md"
+	draftPath := "inbox/drafted-from-foxctl/promotion.md"
 	draft := "---\ntitle: Compact Handoff Pattern\ntype: pattern\nstatus: draft\ntrust: reviewed\n---\n\n# Compact Handoff Pattern\n\nNew reviewed content.\n"
 	if err := w.CreateNote(context.Background(), draftPath, draft, true); err != nil {
 		t.Fatalf("CreateNote draft: %v", err)

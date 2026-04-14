@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 // Input defines the web search parameters with provider and extraction options.
@@ -332,7 +332,7 @@ func extractContent(ctx context.Context, url string, query string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; agentctl/1.0)")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; foxctl/1.0)")
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)

@@ -7,15 +7,15 @@ import (
 	"testing"
 	"time"
 
-	coretool "github.com/jkatigb/agentctl/internal/v2/core/tool"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/profiles"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	"github.com/joshka0/foxctl/internal/v2/runtime/profiles"
 )
 
 func TestBuildToolCommand_WithInputAndWorkspace(t *testing.T) {
 	t.Parallel()
 
 	cmd, err := BuildToolCommand(ToolCommandSpec{
-		BinaryPath: "bin/agentctl",
+		BinaryPath: "bin/foxctl",
 		Workspace:  "/repo",
 	}, ToolCommandRequest{
 		ToolName: "code/semantic_search",
@@ -26,8 +26,8 @@ func TestBuildToolCommand_WithInputAndWorkspace(t *testing.T) {
 		t.Fatalf("BuildToolCommand() error = %v", err)
 	}
 
-	if cmd.Path != "bin/agentctl" {
-		t.Fatalf("path=%q want bin/agentctl", cmd.Path)
+	if cmd.Path != "bin/foxctl" {
+		t.Fatalf("path=%q want bin/foxctl", cmd.Path)
 	}
 	wantArgs := []string{
 		"run",
@@ -95,7 +95,7 @@ func TestBuildToolCommand_AllowlistCanonicalizesAliases(t *testing.T) {
 func TestNewDefaultToolCommandSpec_CompanionIncludesACAAndObsidian(t *testing.T) {
 	t.Parallel()
 
-	spec, err := NewDefaultToolCommandSpec(coretool.ProfileCompanion, "/repo", "bin/agentctl", nil, false)
+	spec, err := NewDefaultToolCommandSpec(coretool.ProfileCompanion, "/repo", "bin/foxctl", nil, false)
 	if err != nil {
 		t.Fatalf("NewDefaultToolCommandSpec() error = %v", err)
 	}

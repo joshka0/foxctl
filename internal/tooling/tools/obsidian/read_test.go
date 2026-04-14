@@ -24,7 +24,7 @@ esac
 	result, err := Read(context.Background(), ReadOptions{
 		BinaryPath: bin,
 		VaultName:  "Obsidian Vault",
-		NotePath:   "agentctl-lab/example.md",
+		NotePath:   "foxctl-lab/example.md",
 	})
 	if err != nil {
 		t.Fatalf("Read: %v", err)
@@ -32,7 +32,7 @@ esac
 	if result.VaultName != "Obsidian Vault" {
 		t.Fatalf("vault=%q", result.VaultName)
 	}
-	if result.Content != "read:vault=Obsidian Vault|path=agentctl-lab/example.md" {
+	if result.Content != "read:vault=Obsidian Vault|path=foxctl-lab/example.md" {
 		t.Fatalf("content=%q", result.Content)
 	}
 }

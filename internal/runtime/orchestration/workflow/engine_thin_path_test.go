@@ -7,7 +7,7 @@ import (
 )
 
 // stubStepExecutor is an in-process stand-in for skillExecutor.
-// It lets the thin-path test run without invoking any agentctl binary.
+// It lets the thin-path test run without invoking any foxctl binary.
 type stubStepExecutor struct {
 	executeFn func(ctx context.Context, step *Step, input map[string]any) (*StepResult, error)
 }
@@ -22,7 +22,7 @@ func (s *stubStepExecutor) Execute(ctx context.Context, step *Step, input map[st
 //
 // Two steps are wired in sequence: "fetch" produces data, "process" templates
 // that data into its own input. The stub executor eliminates any dependency on
-// the agentctl binary, proving the workflow primitive boundaries in isolation.
+// the foxctl binary, proving the workflow primitive boundaries in isolation.
 //
 // This is the M4 thin-path proof for story 01KNQ6MHTHN6KZJ3WGGVHVTK1T.
 func TestScheduler_ThinPathProof(t *testing.T) {

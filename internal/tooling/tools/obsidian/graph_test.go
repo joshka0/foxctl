@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 )
 
 func TestBuildRepoGraphDrafts(t *testing.T) {
@@ -90,7 +90,7 @@ esac
 	writer.VaultPath = vaultRoot
 	writer.PostCreateDelay = 0
 	result, err := BuildRepoGraphDrafts(ctx, writer, repo, RepoGraphBuildOptions{
-		Project:       "agentctl",
+		Project:       "foxctl",
 		WorkspaceRoot: repoRoot,
 		MaxPackages:   4,
 	})
@@ -121,14 +121,14 @@ esac
 		t.Fatalf("expected related package link in package note:\n%s", text)
 	}
 
-	promoted, err := PromoteRepoGraphDrafts(ctx, writer, result.Folder, "notes/repo/agentctl")
+	promoted, err := PromoteRepoGraphDrafts(ctx, writer, result.Folder, "notes/repo/foxctl")
 	if err != nil {
 		t.Fatalf("PromoteRepoGraphDrafts: %v", err)
 	}
 	if len(promoted.Merged) == 0 {
 		t.Fatalf("expected promoted graph notes")
 	}
-	canonicalRoot := filepath.Join(vaultRoot, "notes", "repo", "agentctl", "index.md")
+	canonicalRoot := filepath.Join(vaultRoot, "notes", "repo", "foxctl", "index.md")
 	body, err := os.ReadFile(canonicalRoot)
 	if err != nil {
 		t.Fatalf("read canonical root note: %v", err)

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: verification/cove_verify
@@ -151,10 +151,10 @@ help:
         question: "Given the TODO, Definition of Done, and evidence, is the work truly done?"
         baseline: |
           TODO:
-          - Add `--dry-run` support to `agentctl cas gc`.
+          - Add `--dry-run` support to `foxctl cas gc`.
 
           Definition of Done (DoD):
-          - The CLI accepts `agentctl cas gc --older-than=<duration> --dry-run`.
+          - The CLI accepts `foxctl cas gc --older-than=<duration> --dry-run`.
           - In dry-run, no files are deleted (preview only).
           - Output is still a valid Core Profile v1 envelope (stdout only JSON).
           - Unit test covers dry-run behavior.
@@ -162,10 +162,10 @@ help:
           Evidence (condensed):
           - Code change summary: `cas gc` now has a DryRun flag wired to deletion path.
           - Tests: `go test ./...` passes locally.
-          - Manual check: ran `agentctl cas gc --older-than=168h --dry-run` and observed no deletions.
+          - Manual check: ran `foxctl cas gc --older-than=168h --dry-run` and observed no deletions.
 
           Claims to verify (Draft-style, atomic):
-          - `agentctl cas gc` accepts a `--dry-run` flag.
+          - `foxctl cas gc` accepts a `--dry-run` flag.
           - In dry-run mode, `cas gc` performs no deletions.
           - The command still emits only a JSON envelope to stdout.
           - There is a unit test that would fail if dry-run deletes anything.
@@ -180,10 +180,10 @@ help:
           Status (draft): DONE
 
           TODO:
-          - Add `--dry-run` support to `agentctl cas gc`.
+          - Add `--dry-run` support to `foxctl cas gc`.
 
           Definition of Done (DoD):
-          - CLI accepts `agentctl cas gc --older-than=<duration> --dry-run`.
+          - CLI accepts `foxctl cas gc --older-than=<duration> --dry-run`.
           - In dry-run, no files are deleted (preview only).
           - Output is a valid Core Profile v1 envelope (stdout only JSON).
           - Unit test covers dry-run behavior.
@@ -191,7 +191,7 @@ help:
           Evidence (condensed):
           - Code: Added a DryRun flag and used it to guard the deletion loop.
           - Tests: `go test ./...` passes.
-          - Observed: running `agentctl cas gc --older-than=168h --dry-run` shows a preview but deletes nothing.
+          - Observed: running `foxctl cas gc --older-than=168h --dry-run` shows a preview but deletes nothing.
 
           Claims to verify (atomic):
           - The command accepts a `--dry-run` flag.

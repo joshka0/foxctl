@@ -1,14 +1,14 @@
-# Kustomization for agentctl Kubernetes deployment
+# Kustomization for foxctl Kubernetes deployment
 # Usage: kubectl apply -k deploy/kubernetes/
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: agentctl
+namespace: foxctl
 
 # Common labels applied to all resources
 commonLabels:
-  app.kubernetes.io/part-of: agentctl
+  app.kubernetes.io/part-of: foxctl
   app.kubernetes.io/managed-by: kustomize
 
 resources:
@@ -41,8 +41,8 @@ resources:
 # Image configuration
 # Uncomment and set your container registry
 # images:
-# - name: agentctl
-#   newName: your-registry.io/agentctl
+# - name: foxctl
+#   newName: your-registry.io/foxctl
 #   newTag: v1.0.0
 
 # Patches for environment-specific configuration
@@ -50,4 +50,4 @@ resources:
 # - path: patches/production.yaml
 #   target:
 #     kind: Deployment
-#     name: agentctl
+#     name: foxctl

@@ -64,7 +64,7 @@ Extend milestone contract with:
 Example:
 
 ```bash
-agentctl room milestone contract <room-id> <milestone-id> \
+foxctl room milestone contract <room-id> <milestone-id> \
   --validator review \
   --validator integration \
   --required-lane review \

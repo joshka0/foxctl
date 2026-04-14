@@ -1,6 +1,6 @@
-# Contributing to agentctl
+# Contributing to foxctl
 
-Thank you for your interest in contributing to agentctl! This guide will help you get started with development and understand our contribution process.
+Thank you for your interest in contributing to foxctl! This guide will help you get started with development and understand our contribution process.
 
 ---
 
@@ -38,8 +38,8 @@ We are committed to providing a welcoming and inclusive environment. Please be r
 
 ```bash
 # Clone the repository
-git clone https://github.com/jkatigb/agentctl.git
-cd agentctl
+git clone https://github.com/joshka0/foxctl.git
+cd foxctl
 
 # Install dependencies
 go mod download
@@ -64,8 +64,8 @@ make check
 ### Project Structure
 
 ```
-agentctl/
-├── cmd/agentctl/           # CLI entry point (Cobra)
+foxctl/
+├── cmd/foxctl/           # CLI entry point (Cobra)
 ├── internal/               # Internal packages
 │   ├── domain/            # Pure business logic
 │   ├── storage/           # Persistence layer
@@ -83,7 +83,7 @@ agentctl/
 ### Key Make Targets
 
 ```bash
-make build              # Build CLI → ./agentctl
+make build              # Build CLI → ./foxctl
 make skills-build       # Build all skills → ./dist/skills/
 make test               # Run unit tests
 make test-race          # Run tests with race detection
@@ -96,11 +96,11 @@ make clean              # Clean build artifacts
 
 ### Environment Configuration
 
-agentctl uses the following directories:
-- **Config**: `~/.agentctl/config.yaml`
-- **Database**: `~/.agentctl/agentctl.db`
-- **CAS**: `~/.agentctl/cas/sha256/`
-- **Jobs**: `~/.agentctl/jobs/<ulid>/`
+foxctl uses the following directories:
+- **Config**: `~/.foxctl/config.yaml`
+- **Database**: `~/.foxctl/foxctl.db`
+- **CAS**: `~/.foxctl/cas/sha256/`
+- **Jobs**: `~/.foxctl/jobs/<ulid>/`
 
 You can override the config path with `--config` flag or `AGENTCTL_CONFIG` environment variable.
 
@@ -289,7 +289,7 @@ type Envelope struct {
 
 2. **Integration Tests** (E2E workflows)
    ```bash
-   go test ./cmd/agentctl/cmd/...
+   go test ./cmd/foxctl/cmd/...
    ```
 
 3. **Race Detection** (required before PR)
@@ -445,7 +445,7 @@ Contributors are recognized in:
 
 ## Specification-Driven Development
 
-agentctl uses **specification-driven development**:
+foxctl uses **specification-driven development**:
 
 1. **Specs First**: All major features start with a spec in `docs/refactoring/`
 2. **Step-by-Step**: Each spec includes detailed implementation steps
@@ -489,8 +489,8 @@ Contributors do **not** need to worry about releases.
 - Start a discussion for questions or ideas
 - Read existing documentation in [docs/](docs/)
 
-We appreciate your contributions and look forward to building agentctl together!
+We appreciate your contributions and look forward to building foxctl together!
 
 ---
 
-**Thank you for contributing to agentctl!** 🚀
+**Thank you for contributing to foxctl!** 🚀

@@ -10,15 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	ws "github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
-	"github.com/jkatigb/agentctl/internal/storage/vector"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	ws "github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	"github.com/joshka0/foxctl/internal/storage/vector"
 	"github.com/rs/zerolog"
 )
 
@@ -162,7 +162,7 @@ func (s *Store) Save(ctx context.Context, session Session) (Session, error) {
 
 	// Set defaults for lineage fields
 	if session.AgentID == "" {
-		session.AgentID = "agentctl"
+		session.AgentID = "foxctl"
 	}
 	if session.AgentType == "" {
 		session.AgentType = "claude"
@@ -675,7 +675,7 @@ func (s *Store) SetContentHash(ctx context.Context, id, contentHash string) erro
 // Uses status-based detection: only sessions with status = 'running' are considered active.
 func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Session, error) {
 	if agentID == "" {
-		agentID = "agentctl"
+		agentID = "foxctl"
 	}
 
 	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
@@ -874,7 +874,7 @@ func (s *Store) GetPendingRestore(ctx context.Context, workspace string) (*Sessi
 // If statuses is empty, matches any status.
 func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, statuses []string) (*Session, error) {
 	if agentID == "" {
-		agentID = "agentctl"
+		agentID = "foxctl"
 	}
 
 	workspaceID, workspacePath := resolveWorkspaceSelector(workspace)
@@ -2240,11 +2240,11 @@ func (s *Store) ensureEmbeddingMetadata(ctx context.Context, workspaceID, worksp
 		})
 	}
 	if meta.Dimensions != len(vectorData) {
-		return fmt.Errorf("sessions: embedding dimension mismatch: workspace %q stores %d dimensions, got %d; run `agentctl index init --workspace <workspace-path> --scope sessions` to rebuild session embeddings for that workspace",
+		return fmt.Errorf("sessions: embedding dimension mismatch: workspace %q stores %d dimensions, got %d; run `foxctl index init --workspace <workspace-path> --scope sessions` to rebuild session embeddings for that workspace",
 			workspaceID, meta.Dimensions, len(vectorData))
 	}
 	if meta.Model != "" && model != "" && meta.Model != model {
-		return fmt.Errorf("sessions: embedding model mismatch: workspace %q expects model %q with %d dimensions, got %q; run `agentctl index init --workspace <workspace-path> --scope sessions` to rebuild session embeddings for that workspace",
+		return fmt.Errorf("sessions: embedding model mismatch: workspace %q expects model %q with %d dimensions, got %q; run `foxctl index init --workspace <workspace-path> --scope sessions` to rebuild session embeddings for that workspace",
 			workspaceID, meta.Model, meta.Dimensions, model)
 	}
 	if (meta.Model == "" && model != "") || (meta.WorkspacePath == "" && workspacePath != "") {
@@ -2272,7 +2272,7 @@ func (s *Store) ValidateDimensions(ctx context.Context, workspace string, expect
 
 	if meta.Dimensions != expectedDims {
 		return fmt.Errorf("sessions: embedding dimension mismatch for workspace %q: stored %d, config expects %d; "+
-			"run `agentctl index init --workspace <workspace-path> --scope sessions` to rebuild session embeddings or update embedding.dimensions in config.yaml",
+			"run `foxctl index init --workspace <workspace-path> --scope sessions` to rebuild session embeddings or update embedding.dimensions in config.yaml",
 			meta.WorkspaceID, meta.Dimensions, expectedDims)
 	}
 	return nil
@@ -2592,7 +2592,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	updated_at TEXT NOT NULL,
 	-- Lineage fields
 	parent_session_id TEXT,
-	agent_id TEXT NOT NULL DEFAULT 'agentctl',
+	agent_id TEXT NOT NULL DEFAULT 'foxctl',
 	agent_type TEXT NOT NULL DEFAULT 'claude',
 	status TEXT NOT NULL DEFAULT 'ok',
 	-- Post-compact restore tracking
@@ -2716,7 +2716,7 @@ CREATE INDEX IF NOT EXISTS idx_session_edges_workspace ON session_edges(workspac
 	// Add lineage columns for existing databases
 	for _, col := range []struct{ name, colType, defaultVal string }{
 		{"parent_session_id", "TEXT", ""},
-		{"agent_id", "TEXT NOT NULL", "'agentctl'"},
+		{"agent_id", "TEXT NOT NULL", "'foxctl'"},
 		{"agent_type", "TEXT NOT NULL", "'claude'"},
 		{"status", "TEXT NOT NULL", "'ok'"},
 	} {
@@ -3121,7 +3121,7 @@ func scanSession(row scannable) (Session, error) {
 	if agentID.Valid {
 		session.AgentID = agentID.String
 	} else {
-		session.AgentID = "agentctl" // default
+		session.AgentID = "foxctl" // default
 	}
 	if agentType.Valid {
 		session.AgentType = agentType.String

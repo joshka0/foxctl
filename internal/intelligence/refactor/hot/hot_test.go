@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	refsnapshotstore "github.com/jkatigb/agentctl/internal/intelligence/refactor/snapshotstore"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	refsnapshotstore "github.com/joshka0/foxctl/internal/intelligence/refactor/snapshotstore"
 )
 
 func TestBuildRanksFrequentlyTouchedFilesHigher(t *testing.T) {

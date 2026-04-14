@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: unity/input
@@ -57,11 +57,11 @@ signature:
     long: |
       Use unity/input to manage Unity Input System .inputactions files.
       Example commands:
-        agentctl run unity/input --input '{"operation":"list_maps","input_file":"Assets/Input/PlayerControls.inputactions"}'
-        agentctl run unity/input --input '{"operation":"list_actions","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"Player"}'
-        agentctl run unity/input --input '{"operation":"add_map","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"UI"}'
-        agentctl run unity/input --input '{"operation":"add_action","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"Player","action_name":"Move","action_type":"Value"}'
-        agentctl run unity/input --input '{"operation":"add_binding","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"Player","action_name":"Move","binding_path":"<Keyboard>/w"}'
+        foxctl run unity/input --input '{"operation":"list_maps","input_file":"Assets/Input/PlayerControls.inputactions"}'
+        foxctl run unity/input --input '{"operation":"list_actions","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"Player"}'
+        foxctl run unity/input --input '{"operation":"add_map","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"UI"}'
+        foxctl run unity/input --input '{"operation":"add_action","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"Player","action_name":"Move","action_type":"Value"}'
+        foxctl run unity/input --input '{"operation":"add_binding","input_file":"Assets/Input/PlayerControls.inputactions","map_name":"Player","action_name":"Move","binding_path":"<Keyboard>/w"}'
   returns:
     - name: maps
       type: array

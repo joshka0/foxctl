@@ -323,7 +323,7 @@ func (c *Client) ProvisionShallowCloneWorkspace(ctx context.Context, req Provisi
 		Entrypoint:     []string{"/bin/sh", "-lc", "while true; do sleep 3600; done"},
 		TimeoutSeconds: &timeoutSeconds,
 		Metadata: map[string]string{
-			"name":     firstNonEmpty(req.Name, "agentctl-sandbox"),
+			"name":     firstNonEmpty(req.Name, "foxctl-sandbox"),
 			"repo_url": req.RepoURL,
 			"repo_ref": repoRef,
 		},
@@ -359,7 +359,7 @@ func (c *Client) ProvisionShallowCloneWorkspace(ctx context.Context, req Provisi
 	if strings.TrimSpace(req.ContextPackFile) != "" {
 		contextDest := strings.TrimSpace(req.ContextPackDest)
 		if contextDest == "" {
-			contextDest = path.Join(workspaceRoot, ".agentctl", "context-pack.md")
+			contextDest = path.Join(workspaceRoot, ".foxctl", "context-pack.md")
 		}
 		absSrc, err := filepath.Abs(req.ContextPackFile)
 		if err != nil {

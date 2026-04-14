@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/protocol"
 )
 
 // CmdResult holds the result of a command execution.
@@ -135,27 +135,27 @@ func ResolveRunnableTool(ctx context.Context, name string, probeArgs ...string) 
 	return "", err
 }
 
-// AgentctlBin returns the path to the agentctl binary for subprocess calls.
+// AgentctlBin returns the path to the foxctl binary for subprocess calls.
 func AgentctlBin() string {
 	if bin := os.Getenv("AGENTCTL_BIN"); bin != "" {
 		return bin
 	}
 	if projDir := os.Getenv("CLAUDE_PROJECT_DIR"); projDir != "" {
-		candidate := filepath.Join(projDir, "bin", "agentctl")
+		candidate := filepath.Join(projDir, "bin", "foxctl")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
 	}
 	if cwd, err := os.Getwd(); err == nil {
-		candidate := filepath.Join(cwd, "bin", "agentctl")
+		candidate := filepath.Join(cwd, "bin", "foxctl")
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}
 	}
-	if path, err := exec.LookPath("agentctl"); err == nil {
+	if path, err := exec.LookPath("foxctl"); err == nil {
 		return path
 	}
-	return "agentctl"
+	return "foxctl"
 }
 
 // AgentctlResult captures a decoded envelope with raw output.
@@ -165,7 +165,7 @@ type AgentctlResult struct {
 	Stderr   []byte
 }
 
-// DecodeError wraps errors from decoding agentctl envelope data.
+// DecodeError wraps errors from decoding foxctl envelope data.
 type DecodeError struct {
 	Err error
 }
@@ -178,17 +178,17 @@ func (e DecodeError) Unwrap() error {
 	return e.Err
 }
 
-// RunAgentctlSkill executes "agentctl run <skill>" with optional JSON input and decodes the envelope.
+// RunAgentctlSkill executes "foxctl run <skill>" with optional JSON input and decodes the envelope.
 func RunAgentctlSkill(ctx context.Context, workspace, skill string, input []byte) (AgentctlResult, error) {
 	return RunAgentctlSkillWithArgs(ctx, workspace, skill, input, nil)
 }
 
-// RunAgentctlSkillDecode executes "agentctl run <skill>" and decodes its data payload into dst.
+// RunAgentctlSkillDecode executes "foxctl run <skill>" and decodes its data payload into dst.
 func RunAgentctlSkillDecode(ctx context.Context, workspace, skill string, input []byte, dst any) (AgentctlResult, error) {
 	return RunAgentctlSkillDecodeWithArgs(ctx, workspace, skill, input, nil, dst)
 }
 
-// RunAgentctlSkillWithArgs executes "agentctl run <skill>" with extra CLI args (e.g., --workspace).
+// RunAgentctlSkillWithArgs executes "foxctl run <skill>" with extra CLI args (e.g., --workspace).
 func RunAgentctlSkillWithArgs(ctx context.Context, workspace, skill string, input []byte, extraArgs []string) (AgentctlResult, error) {
 	if strings.TrimSpace(skill) == "" {
 		return AgentctlResult{}, fmt.Errorf("skill is required")
@@ -212,7 +212,7 @@ func RunAgentctlSkillWithArgs(ctx context.Context, workspace, skill string, inpu
 	}
 
 	if result.Err != nil {
-		return out, fmt.Errorf("run agentctl %s: %w", skill, result.Err)
+		return out, fmt.Errorf("run foxctl %s: %w", skill, result.Err)
 	}
 
 	env, err := protocol.DecodeEnvelope(result.Stdout)
@@ -227,7 +227,7 @@ func RunAgentctlSkillWithArgs(ctx context.Context, workspace, skill string, inpu
 	return out, nil
 }
 
-// RunAgentctlSkillDecodeWithArgs executes "agentctl run <skill>" with extra CLI args and decodes its data payload into dst.
+// RunAgentctlSkillDecodeWithArgs executes "foxctl run <skill>" with extra CLI args and decodes its data payload into dst.
 func RunAgentctlSkillDecodeWithArgs(ctx context.Context, workspace, skill string, input []byte, extraArgs []string, dst any) (AgentctlResult, error) {
 	if dst == nil {
 		return AgentctlResult{}, fmt.Errorf("destination is required")

@@ -5,7 +5,7 @@
 **Last Updated:** 2025-11-12
 
 This is the complete specification for the `http/openapi` skill, a generic
-OpenAPI 3.x client built into agentctl Core Profile v1.
+OpenAPI 3.x client built into foxctl Core Profile v1.
 
 ---
 
@@ -79,7 +79,7 @@ examples and test fixtures.
 ### 2.1 Complete Manifest
 
 ```yaml
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: http/openapi
@@ -148,7 +148,7 @@ capabilities:
 
 ### 2.2 Version Compatibility
 
-- **Minimum agentctl version**: 1.0.0
+- **Minimum foxctl version**: 1.0.0
 - **OpenAPI versions supported**: 3.0.x, 3.1.x
 - **Swagger 2.0**: Not supported (convert to OpenAPI 3.x first)
 - **Skill version policy**: Semantic versioning (major.minor.patch)
@@ -225,7 +225,7 @@ defined in the spec.
 
 **Example**: `listReposForUser`, `createIssue`, `getUserByName`
 
-**Discovery**: Use `agentctl openapi describe memory:github` to list all
+**Discovery**: Use `foxctl openapi describe memory:github` to list all
 available operations.
 
 #### 3.2.3 `params` (optional, object)
@@ -480,7 +480,7 @@ For large responses (≥ 32KB), stored in content-addressable storage:
 **Retrieving the artifact**:
 
 ```bash
-agentctl cas get sha256:def456... > full_response.json
+foxctl cas get sha256:def456... > full_response.json
 ```
 
 ### 4.3 Error Response
@@ -528,7 +528,7 @@ agentctl cas get sha256:def456... > full_response.json
         "headers": {
           "Accept": "application/vnd.github.v3+json",
           "Authorization": "Bearer ***",
-          "User-Agent": "agentctl/1.0.0"
+          "User-Agent": "foxctl/1.0.0"
         },
         "body": null
       },
@@ -564,13 +564,13 @@ Store OpenAPI specifications as named memories for easy reference:
 
 ```bash
 # From local file
-agentctl openapi import ./github-api.yaml --as=github
+foxctl openapi import ./github-api.yaml --as=github
 
 # From URL
-agentctl openapi import https://api.github.com/openapi.json --as=github
+foxctl openapi import https://api.github.com/openapi.json --as=github
 
 # With strict validation
-agentctl openapi import ./spec.yaml --as=myapi --strict
+foxctl openapi import ./spec.yaml --as=myapi --strict
 ```
 
 **What happens**:
@@ -583,7 +583,7 @@ agentctl openapi import ./spec.yaml --as=myapi --strict
 ### 5.2 Listing Imported Specs
 
 ```bash
-agentctl memory list --type=openapi_spec
+foxctl memory list --type=openapi_spec
 ```
 
 Output:
@@ -599,10 +599,10 @@ internal  openapi_spec  /home/user/proj   89KB    3d ago
 
 ```bash
 # Basic validation
-agentctl openapi validate memory:github
+foxctl openapi validate memory:github
 
 # Strict validation (all refs resolved, no warnings)
-agentctl openapi validate memory:github --strict
+foxctl openapi validate memory:github --strict
 ```
 
 **Validation checks**:
@@ -618,7 +618,7 @@ agentctl openapi validate memory:github --strict
 List all operations available in a spec:
 
 ```bash
-agentctl openapi describe memory:github
+foxctl openapi describe memory:github
 ```
 
 Output:
@@ -645,7 +645,7 @@ createIssue               POST    /repos/{owner}/{repo}/issues   [issues]
 **Filtering by tag**:
 
 ```bash
-agentctl openapi describe memory:github --tag=issues
+foxctl openapi describe memory:github --tag=issues
 ```
 
 ### 5.5 Spec Caching
@@ -659,8 +659,8 @@ Specs are cached in memory for performance:
 **Manual cache clear**:
 
 ```bash
-agentctl cache clear --type=openapi_spec
-agentctl cache clear --type=openapi_spec --name=github
+foxctl cache clear --type=openapi_spec
+foxctl cache clear --type=openapi_spec --name=github
 ```
 
 ---
@@ -800,7 +800,7 @@ For non-standard auth (AWS SigV4, HMAC signatures, custom schemes):
 **OpenAPI spec hint**:
 
 ```yaml
-x-agentctl:
+x-foxctl:
   auth: plugin:aws-sigv4
   auth_config:
     service: s3
@@ -1164,7 +1164,7 @@ Preview and validate requests without making actual API calls.
         "headers": {
           "Accept": "application/vnd.github.v3+json",
           "Authorization": "Bearer ***",
-          "User-Agent": "agentctl/1.0.0"
+          "User-Agent": "foxctl/1.0.0"
         },
         "body": null
       },
@@ -1433,9 +1433,9 @@ Plugins found via:
 
 1. `AGENTCTL_PLUGIN_PATH` environment variable (colon-separated)
 2. `openapi.plugin_path` config setting
-3. Default: `~/.agentctl/plugins`
+3. Default: `~/.foxctl/plugins`
 
-**Naming**: `agentctl-plugin-<name>` (e.g., `agentctl-plugin-aws-sigv4`)
+**Naming**: `foxctl-plugin-<name>` (e.g., `foxctl-plugin-aws-sigv4`)
 
 ### 11.3 Auth Plugin Interface
 
@@ -1465,7 +1465,7 @@ Plugins found via:
         "secret_key": "***"
       },
       "spec_hints": {
-        "x-agentctl": {
+        "x-foxctl": {
           "auth": "plugin:aws-sigv4",
           "auth_config": { "service": "s3", "region": "us-east-1" }
         }
@@ -1567,7 +1567,7 @@ Plugins found via:
 
 ### 11.5 Example Plugin Implementation
 
-**File**: `~/.agentctl/plugins/agentctl-plugin-aws-sigv4`
+**File**: `~/.foxctl/plugins/foxctl-plugin-aws-sigv4`
 
 ```python
 #!/usr/bin/env python3
@@ -1626,7 +1626,7 @@ def main():
         context = input_data["data"]["context"]
         
         credentials = context["credentials"]
-        config = context.get("spec_hints", {}).get("x-agentctl", {}).get("auth_config", {})
+        config = context.get("spec_hints", {}).get("x-foxctl", {}).get("auth_config", {})
         
         signed_headers = sign_aws_request(
             request,
@@ -1668,15 +1668,15 @@ if __name__ == "__main__":
 **Make executable**:
 
 ```bash
-chmod +x ~/.agentctl/plugins/agentctl-plugin-aws-sigv4
+chmod +x ~/.foxctl/plugins/foxctl-plugin-aws-sigv4
 ```
 
 ### 11.6 Spec Hints
 
-Guide plugin usage via `x-agentctl` vendor extensions:
+Guide plugin usage via `x-foxctl` vendor extensions:
 
 ```yaml
-x-agentctl:
+x-foxctl:
   auth: plugin:aws-sigv4
   auth_config:
     service: s3
@@ -1732,7 +1732,7 @@ x-agentctl:
     "message": "OperationId 'listRepos' not found in spec"
   },
   "data": {
-    "hint": "Available operations: listReposForUser, createRepo, getRepo. Use 'agentctl openapi describe memory:github' to list all."
+    "hint": "Available operations: listReposForUser, createRepo, getRepo. Use 'foxctl openapi describe memory:github' to list all."
   }
 }
 ```
@@ -1848,19 +1848,19 @@ This section provides real-world usage examples.
 
 ```bash
 # Import spec (once)
-agentctl openapi import https://api.github.com/openapi.json --as=github
+foxctl openapi import https://api.github.com/openapi.json --as=github
 
 # Set auth
 export AGENTCTL_BEARER_TOKEN="ghp_..."
 
 # Basic request
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:github \
   --operationId=listReposForUser \
   --params='{"path":{"username":"octocat"}}'
 
 # With pagination
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:github \
   --operationId=listReposForUser \
   --params='{"path":{"username":"octocat"},"query":{"per_page":100}}' \
@@ -1889,13 +1889,13 @@ agentctl run http/openapi \
 ```bash
 # Import
 curl -o stripe.json https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json
-agentctl openapi import ./stripe.json --as=stripe
+foxctl openapi import ./stripe.json --as=stripe
 
 # Auth
 export AGENTCTL_BEARER_TOKEN="sk_test_..."
 
 # Request (cursor pagination auto-detected)
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:stripe \
   --operationId=CustomersList \
   --params='{"query":{"limit":100}}' \
@@ -1905,7 +1905,7 @@ agentctl run http/openapi \
 ### 13.3 POST Request - Create Issue
 
 ```bash
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:github \
   --operationId=createIssue \
   --params='{
@@ -1924,7 +1924,7 @@ agentctl run http/openapi \
 ### 13.4 Dry-Run - Preview Request
 
 ```bash
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:github \
   --operationId=deleteRepo \
   --params='{"path":{"owner":"user","repo":"old-repo"}}' \
@@ -1952,14 +1952,14 @@ agentctl run http/openapi \
 
 ```bash
 # Missing parameter
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:github \
   --operationId=listReposForUser
 # Error: EARG - missing username
 
 # Auth failure
 unset AGENTCTL_BEARER_TOKEN
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:github \
   --operationId=getAuthenticatedUser
 # Error: EAUTH - 401 Unauthorized
@@ -1969,7 +1969,7 @@ agentctl run http/openapi \
 
 ```bash
 # Non-standard API with nested cursor
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=memory:custom-api \
   --operationId=listItems \
   --paging='{
@@ -2097,10 +2097,10 @@ paths:
 ```bash
 # Test with fixture
 cat tests/fixtures/openapi/inputs/github-list-repos.json | \
-  agentctl run http/openapi --input-file=-
+  foxctl run http/openapi --input-file=-
 
 # Validate output
-agentctl run http/openapi --input-file=tests/fixtures/openapi/inputs/github-list-repos.json | \
+foxctl run http/openapi --input-file=tests/fixtures/openapi/inputs/github-list-repos.json | \
   jq -S . > actual.json
 diff tests/fixtures/openapi/outputs/success-inline.json actual.json
 ```
@@ -2111,12 +2111,12 @@ diff tests/fixtures/openapi/outputs/success-inline.json actual.json
 
 ### 15.1 Config File
 
-`~/.agentctl/config.yaml`:
+`~/.foxctl/config.yaml`:
 
 ```yaml
 openapi:
   strict_validate: false
-  plugin_path: ~/.agentctl/plugins:/usr/local/lib/agentctl/plugins
+  plugin_path: ~/.foxctl/plugins:/usr/local/lib/foxctl/plugins
   spec_cache_ttl: 24h
   default_retry:
     base_ms: 250
@@ -2132,7 +2132,7 @@ openapi:
 
 ```bash
 export AGENTCTL_OPENAPI_STRICT_VALIDATE=true
-export AGENTCTL_OPENAPI_PLUGIN_PATH=~/.agentctl/plugins
+export AGENTCTL_OPENAPI_PLUGIN_PATH=~/.foxctl/plugins
 export AGENTCTL_OPENAPI_SPEC_CACHE_TTL=12h
 
 # Auth
@@ -2145,7 +2145,7 @@ export AGENTCTL_OAUTH2_CLIENT_SECRET="..."
 
 ### 15.3 Workspace Config
 
-Project-specific defaults in `.agentctl/config.yaml`:
+Project-specific defaults in `.foxctl/config.yaml`:
 
 ```yaml
 openapi:
@@ -2165,10 +2165,10 @@ openapi:
 
 ```bash
 # Spec validation
-agentctl openapi validate tests/fixtures/openapi/specs/minimal.yaml
+foxctl openapi validate tests/fixtures/openapi/specs/minimal.yaml
 
 # Dry-run validation
-agentctl run http/openapi \
+foxctl run http/openapi \
   --spec=tests/fixtures/openapi/specs/minimal.yaml \
   --operationId=getUser \
   --params='{"path":{"id":123}}' \
@@ -2179,18 +2179,18 @@ agentctl run http/openapi \
 
 ```bash
 # Public API (no auth)
-agentctl openapi import https://jsonplaceholder.typicode.com/openapi.json --as=test
-agentctl run http/openapi --spec=memory:test --operationId=getPosts
+foxctl openapi import https://jsonplaceholder.typicode.com/openapi.json --as=test
+foxctl run http/openapi --spec=memory:test --operationId=getPosts
 
 # Authenticated API
 export AGENTCTL_BEARER_TOKEN="${TEST_TOKEN}"
-agentctl run http/openapi --spec=memory:github --operationId=getAuthenticatedUser
+foxctl run http/openapi --spec=memory:github --operationId=getAuthenticatedUser
 ```
 
 ### 16.3 Smoke Tests
 
 ```bash
-agentctl openapi test memory:github
+foxctl openapi test memory:github
 ```
 
 Output:
@@ -2220,8 +2220,8 @@ curl -H "Authorization: Bearer $TOKEN" \
 **After**:
 
 ```bash
-agentctl openapi import https://api.github.com/openapi.json --as=github
-agentctl run http/openapi \
+foxctl openapi import https://api.github.com/openapi.json --as=github
+foxctl run http/openapi \
   --spec=memory:github \
   --operationId=listReposForUser \
   --params='{"path":{"username":"octocat"},"query":{"per_page":100}}'
@@ -2239,8 +2239,8 @@ agentctl run http/openapi \
 **Optional wrapper generation**:
 
 ```bash
-agentctl openapi generate memory:github --install --group-by=tag
-agentctl run github/list-repos-for-user --username=octocat
+foxctl openapi generate memory:github --install --group-by=tag
+foxctl run github/list-repos-for-user --username=octocat
 ```
 
 ---
@@ -2251,7 +2251,7 @@ agentctl run github/list-repos-for-user --username=octocat
 - [OpenAPI 3.1 Specification](https://spec.openapis.org/oas/v3.1.0)
 - [RFC 5988: Web Linking](https://tools.ietf.org/html/rfc5988)
 - [RFC 6750: OAuth 2.0 Bearer Token](https://tools.ietf.org/html/rfc6750)
-- [agentctl Core Profile v1](./core_profile_v1.md)
+- [foxctl Core Profile v1](./core_profile_v1.md)
 
 ## Appendix B: Changelog
 

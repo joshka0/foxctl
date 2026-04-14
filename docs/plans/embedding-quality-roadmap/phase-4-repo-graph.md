@@ -418,8 +418,8 @@ Implement the query layer for searching and expanding the repo graph. Add CLI co
 | `internal/intelligence/indexing/repoindex/query/query.go` | Create | Core query functions |
 | `internal/intelligence/indexing/repoindex/query/expand.go` | Create | Graph expansion algorithm |
 | `internal/intelligence/indexing/repoindex/query/query_test.go` | Create | Query tests |
-| `cmd/agentctl/cmd/repoindex.go` | Create | CLI commands |
-| `cmd/agentctl/cmd/root.go` | Modify | Register repoindex command |
+| `cmd/foxctl/cmd/repoindex.go` | Create | CLI commands |
+| `cmd/foxctl/cmd/root.go` | Modify | Register repoindex command |
 
 ### Implementation Details
 
@@ -571,7 +571,7 @@ var repoindexExpandCmd = &cobra.Command{
    - Multiple seeds, depth=2
    - Budget limits respected
    - Direction filtering works
-3. **CLI tests** via `agentctl repoindex --help` and basic invocations
+3. **CLI tests** via `foxctl repoindex --help` and basic invocations
 
 ### Acceptance Criteria
 
@@ -762,7 +762,7 @@ func (s *Store) CleanupDanglingEdges(ctx context.Context) (int64, error) {
 
 The repo graph database lives at:
 ```
-~/.agentctl/storage/repoindex.db
+~/.foxctl/storage/repoindex.db
 ```
 
 Multiple workspaces are supported via `repo_key` partitioning (same pattern as memory.db).
@@ -779,16 +779,16 @@ Multiple workspaces are supported via `repo_key` partitioning (same pattern as m
 
 ```bash
 # Build index
-agentctl repoindex build --workspace . --go --typescript
+foxctl repoindex build --workspace . --go --typescript
 
 # Check status
-agentctl repoindex status --workspace .
+foxctl repoindex status --workspace .
 
 # Search by text
-agentctl repoindex search "authentication" --limit 10
+foxctl repoindex search "authentication" --limit 10
 
 # Expand from node
-agentctl repoindex expand "<repo_key>::pkg:github.com/user/repo/internal/auth" \
+foxctl repoindex expand "<repo_key>::pkg:github.com/user/repo/internal/auth" \
   --edge CONTAINS --edge IMPORTS --depth 2
 ```
 

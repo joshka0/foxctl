@@ -9,7 +9,7 @@ import (
 	sitter "github.com/tree-sitter/go-tree-sitter"
 	elixir "github.com/tree-sitter/tree-sitter-elixir/bindings/go"
 
-	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
+	symindex "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
 )
 
 func analyzeElixirDuplicateRecoveryBlocks(_ string, relPath, lang string, content []byte, symbols []symindex.Symbol) []finding {

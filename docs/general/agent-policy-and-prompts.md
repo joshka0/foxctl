@@ -13,7 +13,7 @@ Machine-friendly reference for capability profiles and role instructions.
 
 | Profile | Intent | Restriction model |
 |--------|--------|-------------------|
-| `explorer` | Read-only investigation | Only allowlisted `agentctl run <skill>` commands |
+| `explorer` | Read-only investigation | Only allowlisted `foxctl run <skill>` commands |
 | `reviewer` | Analysis/review | Explorer + review-oriented skills |
 | `implementer` | Targeted code changes | Reviewer + write/test skills |
 | `unrestricted` | Full capability | No skill-level command restriction |
@@ -23,9 +23,9 @@ Machine-friendly reference for capability profiles and role instructions.
 | Rule | Behavior |
 |------|----------|
 | Non-restricted profile | Command allowed |
-| Restricted profile + allowlisted `agentctl run <skill>` | Allowed |
+| Restricted profile + allowlisted `foxctl run <skill>` | Allowed |
 | Restricted profile + non-allowlisted skill | Blocked |
-| Restricted profile + non-`agentctl run` bash command | Blocked |
+| Restricted profile + non-`foxctl run` bash command | Blocked |
 
 ## Prompt Construction (`internal/runtime/agentprompt`)
 

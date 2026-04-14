@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useTasks } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { TaskSummary } from "@agentctl/data";
+import type { TaskSummary } from "@foxctl/data";
 
 interface TaskRowProps {
   task: TaskSummary;
@@ -148,7 +148,7 @@ export function TasksView() {
   if (tasks.length === 0) {
     return (
       <box padding={1}>
-        <text fg="#888888">No tasks found. Add tasks with 'agentctl todo add'!</text>
+        <text fg="#888888">No tasks found. Add tasks with 'foxctl todo add'!</text>
       </box>
     );
   }

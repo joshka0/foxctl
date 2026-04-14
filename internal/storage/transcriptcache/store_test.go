@@ -13,7 +13,7 @@ func TestSharedRoots_PrefersConfiguredStorageRoot(t *testing.T) {
 	if got[0] != "/tmp/storage" {
 		t.Fatalf("roots[0]=%q want %q", got[0], "/tmp/storage")
 	}
-	if got[1] != "/tmp/home/.codex/memories/agentctl-transcript-cache" {
+	if got[1] != "/tmp/home/.codex/memories/foxctl-transcript-cache" {
 		t.Fatalf("roots[1]=%q want fallback codex cache path", got[1])
 	}
 }

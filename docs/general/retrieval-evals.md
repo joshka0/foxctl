@@ -24,9 +24,9 @@ By default they evaluate:
 
 Use these commands for the common suites:
 
-- `make eval-retrieval-agentctl`
-- `make eval-retrieval-agentctl-mixed`
-- `make eval-retrieval-agentctl-cochange`
+- `make eval-retrieval-foxctl`
+- `make eval-retrieval-foxctl-mixed`
+- `make eval-retrieval-foxctl-cochange`
 - `JIDO_WORKSPACE=/path/to/jido make eval-retrieval-jido`
 - `PRAZE_WORKSPACE=/path/to/praze make eval-retrieval-praze`
 - `PRAZE_WORKSPACE=/path/to/praze make eval-retrieval-praze-mixed`
@@ -35,14 +35,14 @@ Use these commands for the common suites:
 The wrappers use:
 
 - `AGENTCTL_STORAGE_ROOT` if set
-- `AGENTCTL_VAULT_PATH` if set, otherwise `~/.agentctl/templates/obsidian-vault`
+- `AGENTCTL_VAULT_PATH` if set, otherwise `~/.foxctl/templates/obsidian-vault`
 - `--policy-file <checked-in policy>` internally
 
 ## Checked-In Suites
 
-- `testdata/evals/retrieval/agentctl.yaml`
-- `testdata/evals/retrieval/agentctl-mixed.yaml`
-- `testdata/evals/retrieval/agentctl-cochange.yaml`
+- `testdata/evals/retrieval/foxctl.yaml`
+- `testdata/evals/retrieval/foxctl-mixed.yaml`
+- `testdata/evals/retrieval/foxctl-cochange.yaml`
 - `testdata/evals/retrieval/jido.yaml`
 - `testdata/evals/retrieval/praze.yaml`
 - `testdata/evals/retrieval/praze-mixed.yaml`
@@ -50,16 +50,16 @@ The wrappers use:
 
 ## Checked-In Policies
 
-- `testdata/evals/retrieval/agentctl-policy.yaml`
-- `testdata/evals/retrieval/agentctl-mixed-policy.yaml`
-- `testdata/evals/retrieval/agentctl-cochange-policy.yaml`
+- `testdata/evals/retrieval/foxctl-policy.yaml`
+- `testdata/evals/retrieval/foxctl-mixed-policy.yaml`
+- `testdata/evals/retrieval/foxctl-cochange-policy.yaml`
 - `testdata/evals/retrieval/jido-policy.yaml`
 - `testdata/evals/retrieval/praze-policy.yaml`
 - `testdata/evals/retrieval/praze-mixed-policy.yaml`
 - `testdata/evals/retrieval/praze-k8s-mixed-policy.yaml`
 
 Some of these currently just pin suite defaults and modes.
-The `agentctl`, `jido`, and `praze` policies also carry mode-level minimum bands for:
+The `foxctl`, `jido`, and `praze` policies also carry mode-level minimum bands for:
 
 - `hit@5`
 - `hit@10`
@@ -69,9 +69,9 @@ The `agentctl`, `jido`, and `praze` policies also carry mode-level minimum bands
 
 These are the latest verified ACA retrieval outputs available locally.
 
-### agentctl
+### foxctl
 
-Source: `/tmp/retrieval-policy-check/agentctl-20260329T131551Z.json`
+Source: `/tmp/retrieval-policy-check/foxctl-20260329T131551Z.json`
 
 - `aca_default`
   - `hit@5 1.00`
@@ -84,7 +84,7 @@ Source: `/tmp/retrieval-policy-check/agentctl-20260329T131551Z.json`
 
 Interpretation:
 
-- currently clean on the checked-in `agentctl` ACA package suite
+- currently clean on the checked-in `foxctl` ACA package suite
 - route-aware note ranking, corrected workspace identity, and bounded package fallback are now enough to clear the suite under policy gating
 
 ### jido

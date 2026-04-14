@@ -3,14 +3,14 @@
 ## Summary
 
 This changelog documents improvements to test infrastructure, CI integration,
-and code quality fixes for the agentctl project.
+and code quality fixes for the foxctl project.
 
 ## Changes
 
 ### 1. Custom Duration Type for JSON Readability
 
 **Files**: `internal/agent/types/types.go`, `internal/agent/tools/tools.go`,
-`internal/agent/runtime/runtime.go`, `cmd/agentctl/cmd/dspy_agent.go`
+`internal/agent/runtime/runtime.go`, `cmd/foxctl/cmd/dspy_agent.go`
 
 - Added `types.Duration` type wrapping `time.Duration` with human-readable JSON
   marshaling
@@ -60,7 +60,7 @@ and code quality fixes for the agentctl project.
 **Files**: `Makefile`
 
 - Added documentation explaining `RACE_PKGS` exclusions:
-  - `cmd/agentctl/cmd`: CLI handlers with minimal concurrency
+  - `cmd/foxctl/cmd`: CLI handlers with minimal concurrency
   - `skills/`: standalone plugin binaries
   - `test/`: integration tests requiring special setup
 - Removed `-short` flag from `test-race` for comprehensive race testing

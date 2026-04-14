@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useMailbox } from "../hooks/useData";
-import type { MailboxMessage } from "@agentctl/data";
+import type { MailboxMessage } from "@foxctl/data";
 
 const ACTORS = ["admin", "overseer", "engineer", "tester"];
 

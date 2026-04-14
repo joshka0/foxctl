@@ -9,25 +9,25 @@
     "summary": "The implementation wires sandbox rooms with existing room features across 4 files (agent.go, room.go, room_tasks.go, and a new test file). The approach is clean: helper functions resolve sandbox worktree paths, and existing room flows are extended with sandbox-aware logic at the right injection points. 23 tests cover all 8 validation assertions (VAL-RS-012 through VAL-RS-019) plus helper unit tests. All tests pass, vet is clean, and the build succeeds. The code follows the project's functional-core/imperative-shell pattern with sandbox resolution helpers being pure-ish functions that delegate IO to the board store.",
     "issues": [
       {
-        "file": "cmd/agentctl/cmd/agent.go",
+        "file": "cmd/foxctl/cmd/agent.go",
         "line": 361,
         "severity": "non_blocking",
         "description": "resolveSpawnRoomSandboxCWD() creates its own context.Background() and opens a new config+boardStore on every call. This is called from currentSpawnWorkspaceRoot() which is itself a simple path resolver. The pattern works but is inconsistent with how other sandbox helpers (resolveSandboxScopePath, resolveRoomSandboxWorktree) receive ctx and boardStore as parameters. If this function were called in a hot loop, the repeated store opens would be wasteful. Currently acceptable since it's called once during agent spawn, but worth noting for consistency."
       },
       {
-        "file": "cmd/agentctl/cmd/room.go",
+        "file": "cmd/foxctl/cmd/room.go",
         "line": 2301,
         "severity": "non_blocking",
         "description": "resolveSandboxScopePath does not protect against path traversal via '..' in relative scopePath. A scopePath like '../../etc/passwd' would resolve to filepath.Join(wtPath, '../../etc/passwd') which escapes the worktree. The filepath.Join result would be cleaned by Go's filepath.Join (which calls path.Clean), so '../../etc/passwd' under '/tmp/worktrees/room' becomes '/etc/passwd' — outside the worktree. Since this is an internal CLI tool and scope paths come from trusted inputs (CLI flags or task creation), the risk is low. However, the HasPrefix guard on line 2302 only protects the absolute-path branch, not the relative-path branch. Consider adding a filepath.Rel check or a post-Join HasPrefix validation if scope paths ever come from untrusted sources."
       },
       {
-        "file": "cmd/agentctl/cmd/room.go",
+        "file": "cmd/foxctl/cmd/room.go",
         "line": 13053,
         "severity": "non_blocking",
         "description": "Sandbox relay delivery only happens in the 'auto'/'mixed' backend case, not in the explicit 'tmux' or 'zellij' cases. This means if a room relay backend is set to 'tmux' explicitly, sandbox delivery won't happen. This appears intentional (sandbox delivery is additive to auto-discovery), but could be surprising if someone explicitly sets backend='tmux' for a sandbox room. Worth documenting this behavior choice."
       },
       {
-        "file": "cmd/agentctl/cmd/room_sandbox_integration_test.go",
+        "file": "cmd/foxctl/cmd/room_sandbox_integration_test.go",
         "line": 1056,
         "severity": "non_blocking",
         "description": "TestBuildRoomSandboxInfo_SandboxConfigWithEmptyPath tests that buildRoomSandboxInfo returns nil for a SandboxConfig with an empty WorktreePath. This works because IsSandbox() checks WorktreePath != ''. However, the test comment says 'expected nil for sandbox config with empty worktree path' which could be misleading — the config IS a SandboxConfig struct, but IsSandbox() returns false because WorktreePath is empty. This is correct behavior but the test name/description could be clearer about this distinction."

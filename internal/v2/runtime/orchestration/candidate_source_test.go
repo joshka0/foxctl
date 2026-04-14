@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	coreorchestration "github.com/jkatigb/agentctl/internal/v2/core/orchestration"
+	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 )
 
 func TestBoardCandidateSource_ListCandidates_MapsTodoCards(t *testing.T) {

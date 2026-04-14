@@ -13,13 +13,13 @@ email; it is an in-repo coordination layer that:
 
 ## Coordination surfaces (important)
 
-`agentctl` has two distinct mailbox-style subsystems that should not be
+`foxctl` has two distinct mailbox-style subsystems that should not be
 conflated:
 
 1. **Daemon mailbox queue** (`internal/storage/mailbox`)
    - Addressed by **namespace** (`from_ns`, `to_ns`).
    - Message types: `agent.ask`, `agent.reply`, `agent.cmd`, `agent.event`.
-   - Used by: the agent daemon (`agentctl agent run`) and CLI ask/wait.
+   - Used by: the agent daemon (`foxctl agent run`) and CLI ask/wait.
 2. **Board mailbox + reservations** (`internal/storage/blackboard/board_store`)
    - Addressed by **workspace + actor_id**.
    - Message kinds: `instruction`, `info`, `alert`, `review_request`, etc.
@@ -128,7 +128,7 @@ Expired messages should be acked without processing.
   state.
 - Provide advisory file reservations that can be enforced via `task_guard` /
   `file_guard`-style hooks.
-- Keep storage and APIs local to `agentctl` (SQLite + JSON envelopes), with
+- Keep storage and APIs local to `foxctl` (SQLite + JSON envelopes), with
   optional bridges to external systems later.
 
 ## Non-Goals
@@ -136,7 +136,7 @@ Expired messages should be acked without processing.
 - Implement SMTP, IMAP, or any external email protocol.
 - Require Git, MCP servers, or remote services for core functionality.
 - Replace Beads or mcp_agent_mail; this spec borrows their concepts but keeps
-  `agentctl` storage independent.
+  `foxctl` storage independent.
 - Define final CLI UX in detail; this spec focuses on the underlying primitives
   and hook behaviors.
 

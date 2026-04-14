@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
 
 // DefaultCASHintLines is the default pagination size (lines per page) for CAS hints.
@@ -22,9 +22,9 @@ func DefaultCASHint(artifact skillmain.Artifact) envelope.CASHint {
 func FormatCASHint(label, digest string) string {
 	label = strings.TrimSpace(label)
 	if label == "" {
-		return fmt.Sprintf("Full output stored in CAS; fetch via: agentctl cas get %s", digest)
+		return fmt.Sprintf("Full output stored in CAS; fetch via: foxctl cas get %s", digest)
 	}
-	return fmt.Sprintf("Full %s stored in CAS; fetch via: agentctl cas get %s", label, digest)
+	return fmt.Sprintf("Full %s stored in CAS; fetch via: foxctl cas get %s", label, digest)
 }
 
 // PersistJSONWithHint stores JSON in CAS and returns a retrieval hint.

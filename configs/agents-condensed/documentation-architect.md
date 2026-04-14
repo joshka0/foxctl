@@ -26,4 +26,4 @@ Create high-quality developer documentation.
 - Follow existing patterns
 - Ensure discoverability
 
-Full docs: `~/repos/personal/agentctl/configs/agents/documentation-architect.md`
+Full docs: `~/repos/personal/foxctl/configs/agents/documentation-architect.md`

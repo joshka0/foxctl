@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/transcriptcache"
+	"github.com/joshka0/foxctl/internal/storage/transcriptcache"
 )
 
 type SavedArtifact struct {

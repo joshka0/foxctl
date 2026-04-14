@@ -14,9 +14,9 @@ Last Updated: 2026-03-05
 
 ## 1. Purpose
 
-Define how a Symphony-style issue-driven workflow fits into `agentctl` v2 without introducing a second orchestration runtime, and define the canonical Kanban read model for the UI.
+Define how a Symphony-style issue-driven workflow fits into `foxctl` v2 without introducing a second orchestration runtime, and define the canonical Kanban read model for the UI.
 
-This spec reframes Symphony as an ingress and scheduling layer over existing `agentctl` runtime boundaries.
+This spec reframes Symphony as an ingress and scheduling layer over existing `foxctl` runtime boundaries.
 
 ## 2. Core Decision
 
@@ -123,7 +123,7 @@ Use `spawn.Response` as authoritative for service outcome:
 
 ### 7.1 Coexistence Rules
 
-1. `agentctl workflow run` continues to support existing `apiVersion: agentctl/v1` workflow YAML unchanged.
+1. `foxctl workflow run` continues to support existing `apiVersion: foxctl/v1` workflow YAML unchanged.
 2. New orchestration config loader parses `WORKFLOW.md` front matter for scheduler settings.
 3. These are separate engines with separate concerns.
 

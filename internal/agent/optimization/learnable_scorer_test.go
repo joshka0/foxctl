@@ -5,8 +5,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/agent/optimization"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
 func TestDefaultScorerWeights(t *testing.T) {

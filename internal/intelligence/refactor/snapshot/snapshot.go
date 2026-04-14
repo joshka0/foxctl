@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	symindex "github.com/jkatigb/agentctl/internal/intelligence/indexing/symbol"
-	refscope "github.com/jkatigb/agentctl/internal/intelligence/refactor/scope"
-	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
-	platformsymbol "github.com/jkatigb/agentctl/internal/platform/symbolutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/fsutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/langutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
+	symindex "github.com/joshka0/foxctl/internal/intelligence/indexing/symbol"
+	refscope "github.com/joshka0/foxctl/internal/intelligence/refactor/scope"
+	refstatus "github.com/joshka0/foxctl/internal/intelligence/refactor/status"
+	platformsymbol "github.com/joshka0/foxctl/internal/platform/symbolutil"
 )
 
 // BuildError reports a user-correctable snapshot build failure.

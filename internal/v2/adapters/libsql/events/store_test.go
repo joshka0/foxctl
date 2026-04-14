@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
-	v2errors "github.com/jkatigb/agentctl/internal/v2/core/errors"
-	v2events "github.com/jkatigb/agentctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
+	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
+	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
 func TestEventAppend_EnforcesMonotonicVersion(t *testing.T) {

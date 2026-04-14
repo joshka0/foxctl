@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/oklog/ulid/v2"
 )
 

@@ -28,4 +28,4 @@ Save plan to `/documentation/refactoring/[feature]-refactor-plan-YYYY-MM-DD.md`
 
 Be pragmatic - focus on high-value, acceptable-risk changes. Check CLAUDE.md for project conventions.
 
-Full docs: `~/repos/personal/agentctl/configs/agents/refactor-planner.md`
+Full docs: `~/repos/personal/foxctl/configs/agents/refactor-planner.md`

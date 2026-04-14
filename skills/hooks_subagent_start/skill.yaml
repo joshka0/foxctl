@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/subagent_start
@@ -44,7 +44,7 @@ signature:
 
       The briefing includes:
       - Profile description and capabilities
-      - List of allowed agentctl skills with examples
+      - List of allowed foxctl skills with examples
       - Rules and guidelines for the agent
 
       Example hook config in .claude/settings.json:
@@ -52,7 +52,7 @@ signature:
           "matcher": "explorer|reviewer|implementer",
           "hooks": [{
             "type": "command",
-            "command": "agentctl run hooks/subagent_start --ephemeral"
+            "command": "foxctl run hooks/subagent_start --ephemeral"
           }]
         }]
 returns:

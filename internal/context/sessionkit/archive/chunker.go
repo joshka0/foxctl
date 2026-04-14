@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/sessionkit/claudejsonl"
-	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/context/sessionkit/claudejsonl"
+	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/oklog/ulid/v2"
 )
 

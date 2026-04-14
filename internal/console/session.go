@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	domainconsole "github.com/jkatigb/agentctl/internal/domain/console"
+	domainconsole "github.com/joshka0/foxctl/internal/domain/console"
 )
 
 // Message is a conversation message in a console session.

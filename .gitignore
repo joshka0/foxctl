@@ -44,8 +44,8 @@ web-ui/.vite/
 # Dev binaries in root directory
 # Created by running `go build ./cmd/X` or `go build ./skills/X` without -o flag
 # Use `make build` or `make skills-install` instead
-/agentctl
-/agentctl-cgo
+/foxctl
+/foxctl-cgo
 /cove_verify
 
 # Skill binaries accidentally built in root (match skill directory names)
@@ -127,7 +127,7 @@ pr*.txt
 # OpenCode
 .opencode/
 .fastembed_cache/
-.agentctl/
+.foxctl/
 
 # Compiled test binaries
 *_test

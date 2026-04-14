@@ -18,10 +18,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
-	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
-	"github.com/jkatigb/agentctl/internal/storage/vector"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	"github.com/joshka0/foxctl/internal/storage/vector"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 const (

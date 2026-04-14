@@ -9,12 +9,12 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/diffutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/htmledit"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/diffutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/htmledit"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/pathutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 )
 
 const command = "html/edit"

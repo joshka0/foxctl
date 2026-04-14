@@ -6,11 +6,11 @@ import (
 )
 
 func TestLoadSuite(t *testing.T) {
-	suite, err := LoadSuite(filepath.Join("..", "..", "..", "..", "testdata", "evals", "corrections", "agentctl-inspectors.yaml"))
+	suite, err := LoadSuite(filepath.Join("..", "..", "..", "..", "testdata", "evals", "corrections", "foxctl-inspectors.yaml"))
 	if err != nil {
 		t.Fatalf("LoadSuite: %v", err)
 	}
-	if suite.Name != "agentctl-inspectors" {
+	if suite.Name != "foxctl-inspectors" {
 		t.Fatalf("suite.Name=%q", suite.Name)
 	}
 	if len(suite.Cases) == 0 {

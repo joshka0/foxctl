@@ -1,12 +1,12 @@
 ---
 name: Remember
-description: Save a key learning, decision, or gotcha to agentctl memory
+description: Save a key learning, decision, or gotcha to foxctl memory
 argument-hint: "<what to remember>"
 ---
 
 # Remember
 
-Save insights to agentctl memory.
+Save insights to foxctl memory.
 
 ## Usage
 
@@ -23,7 +23,7 @@ Save insights to agentctl memory.
 
 ```bash
 echo '{"version":1,"status":"ok","command":"memory/remember","data":{"content":"<insight>"}}' | \
-  agentctl memory put --name "<name>" --type "<type>" --summary "<insight>" --file -
+  foxctl memory put --name "<name>" --type "<type>" --summary "<insight>" --file -
 ```
 
 ## Examples
@@ -31,4 +31,4 @@ echo '{"version":1,"status":"ok","command":"memory/remember","data":{"content":"
 - `/remember The auth middleware must be registered before route handlers`
 - `/remember gopls daemon needs exec.Command not exec.CommandContext to persist`
 
-Full docs: `~/.agentctl/share/configs/skills/remember/Skill.md`
+Full docs: `~/.foxctl/share/configs/skills/remember/Skill.md`

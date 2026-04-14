@@ -1,11 +1,11 @@
-# Message Passing in agentctl
+# Message Passing in foxctl
 
-This guide explains how agents communicate through message passing in agentctl.
+This guide explains how agents communicate through message passing in foxctl.
 
 ## Overview
 
-agentctl uses a durable, lease-based messaging system built on SQLite. Messages are:
-- **Persisted** to `~/.agentctl/mailbox.db`
+foxctl uses a durable, lease-based messaging system built on SQLite. Messages are:
+- **Persisted** to `~/.foxctl/mailbox.db`
 - **Leased** during processing to prevent duplicate delivery
 - **Routed** by namespace (actor mailbox)
 - **Tracked** with session lineage and workspace context
@@ -350,7 +350,7 @@ func (a *MyActor) queueStats() error {
 
 ```bash
 # Open mailbox database
-sqlite3 ~/.agentctl/mailbox.db
+sqlite3 ~/.foxctl/mailbox.db
 
 # Count pending messages
 SELECT to_ns, COUNT(*) FROM mailbox WHERE visible_at <= strftime('%s', 'now') GROUP BY to_ns;
@@ -385,5 +385,5 @@ SELECT to_ns, visible_at, attempt FROM mailbox ORDER BY visible_at ASC LIMIT 20;
 ## See Also
 
 - [Events System](./events.md) - Event bus for system-wide notifications
-- [Actors](https://github.com/jkatigb/agentctl/tree/main/internal/runtime/actor) - Actor implementation
-- [Mailbox Storage](https://github.com/jkatigb/agentctl/tree/main/internal/storage/mailbox) - Persistence layer
+- [Actors](https://github.com/joshka0/foxctl/tree/main/internal/runtime/actor) - Actor implementation
+- [Mailbox Storage](https://github.com/joshka0/foxctl/tree/main/internal/storage/mailbox) - Persistence layer

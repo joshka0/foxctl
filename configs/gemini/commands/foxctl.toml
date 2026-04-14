@@ -1,0 +1,13 @@
+# foxctl skill runner integration
+description = "Run an foxctl skill and analyze results"
+
+prompt = """Run the foxctl skill and analyze the output:
+
+```bash
+!{bin/foxctl run {{args}}}
+```
+
+Interpret the JSON envelope result:
+- Check the `success` field
+- Extract and explain the `data` content
+- Suggest next steps based on findings"""

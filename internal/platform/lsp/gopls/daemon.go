@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 )
 
 // debug enables verbose logging when AGENTCTL_GOPLS_DEBUG=1

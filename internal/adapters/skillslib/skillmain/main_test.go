@@ -237,7 +237,7 @@ func TestBootstrap_LoadsWorkspaceConfigOverride(t *testing.T) {
 		}
 	})
 
-	home := filepath.Join(tmp, ".agentctl")
+	home := filepath.Join(tmp, ".foxctl")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatalf("mkdir home: %v", err)
 	}
@@ -250,11 +250,11 @@ embedding:
 		t.Fatalf("write global config: %v", err)
 	}
 
-	workspaceDir := filepath.Join(tmp, "agentctl")
-	if err := os.MkdirAll(filepath.Join(workspaceDir, ".agentctl"), 0o755); err != nil {
+	workspaceDir := filepath.Join(tmp, "foxctl")
+	if err := os.MkdirAll(filepath.Join(workspaceDir, ".foxctl"), 0o755); err != nil {
 		t.Fatalf("mkdir workspace config dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspaceDir, ".agentctl", "config.yaml"), []byte(`
+	if err := os.WriteFile(filepath.Join(workspaceDir, ".foxctl", "config.yaml"), []byte(`
 embedding:
   provider: voyage
   model: voyage-3.5

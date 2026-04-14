@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agent/optimization"
+	"github.com/joshka0/foxctl/internal/agent/optimization"
 )
 
 func TestPatternStore_OpenAndClose(t *testing.T) {

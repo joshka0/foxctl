@@ -109,7 +109,7 @@ For each DB:
 ## 6. Session lineage tests
 
 ### 6.1 Create/resume/fork edges
-- Create session S1 (agent_id=agentctl)
+- Create session S1 (agent_id=foxctl)
 - Resume → creates S2 + edge continues(S2→S1)
 - Fork → creates S3 + edge forked_from(S3→S2)
 - Query chain depth and ensure deterministic ordering

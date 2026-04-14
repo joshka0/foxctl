@@ -16,8 +16,8 @@ func TestFixtureVault_BasicLayout(t *testing.T) {
 		filepath.Join(root, "atlas", "projects.md"),
 		filepath.Join(root, "notes", "adr", "adr-0001-context-architecture.md"),
 		filepath.Join(root, "notes", "patterns", "compact-handoff-pattern.md"),
-		filepath.Join(root, "notes", "moc", "agentctl-context.md"),
-		filepath.Join(root, "inbox", "drafted-from-agentctl", "handoff-draft.md"),
+		filepath.Join(root, "notes", "moc", "foxctl-context.md"),
+		filepath.Join(root, "inbox", "drafted-from-foxctl", "handoff-draft.md"),
 	}
 
 	for _, path := range requiredPaths {
@@ -28,7 +28,7 @@ func TestFixtureVault_BasicLayout(t *testing.T) {
 }
 
 func TestFixtureVault_LinkRichNote(t *testing.T) {
-	path := filepath.Join("testdata", "vaults", "basic", "notes", "moc", "agentctl-context.md")
+	path := filepath.Join("testdata", "vaults", "basic", "notes", "moc", "foxctl-context.md")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read fixture note: %v", err)

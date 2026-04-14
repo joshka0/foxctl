@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	jobtypes "github.com/jkatigb/agentctl/internal/storage/jobs/types"
+	jobtypes "github.com/joshka0/foxctl/internal/storage/jobs/types"
 )
 
 // Store is the minimal interface implemented by all storage providers.
@@ -256,7 +256,7 @@ type Session struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 	// Lineage fields for session tracking
 	ParentSessionID string `json:"parent_session_id,omitempty"`
-	AgentID         string `json:"agent_id,omitempty"`      // AI agent identifier (default: "agentctl")
+	AgentID         string `json:"agent_id,omitempty"`      // AI agent identifier (default: "foxctl")
 	AgentType       string `json:"agent_type,omitempty"`    // Source system (claude, codex, opencode)
 	Status          string `json:"status,omitempty"`        // ok, error, canceled
 	ErrorMessage    string `json:"error_message,omitempty"` // Error details when status=error

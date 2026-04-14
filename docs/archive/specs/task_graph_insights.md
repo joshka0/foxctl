@@ -3,7 +3,7 @@
 ## Overview
 
 Gonum-style directed task graph and metrics (PageRank-like importance, impact,
-critical path) for `agentctl` tasks. The graph is per-workspace and is used to:
+critical path) for `foxctl` tasks. The graph is per-workspace and is used to:
 
 - Prioritize which tasks agents and humans should focus on.
 - Power the overseer/coordinator and admin views.
@@ -203,17 +203,17 @@ CLI commands are thin wrappers over the `todo/manage` operation.
 
 Non-normative examples:
 
-- `agentctl todo insights` – Show top-K tasks by impact.
+- `foxctl todo insights` – Show top-K tasks by impact.
   - Internally calls `todo/manage.graph_insights`.
   - Displays a table with columns like `task_id`, `title`, `status`,
     `critical_path_score`, `in_degree`, `out_degree` and a short human-readable
     explanation.
 
-- `agentctl todo list --sort impact` – Sorts the existing task list by
+- `foxctl todo list --sort impact` – Sorts the existing task list by
   `critical_path_score` (and/or `pagerank`).
   - May reuse cached graph metrics if available.
 
-- `agentctl todo graph --json` – Emit raw graph insights JSON (for debugging or
+- `foxctl todo graph --json` – Emit raw graph insights JSON (for debugging or
   piping into other tools).
 
 Exact flag names and subcommand shapes are left to implementation, as long as

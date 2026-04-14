@@ -3,8 +3,8 @@ package adapters
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
-	"github.com/jkatigb/agentctl/internal/intelligence/searchindex"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext"
+	"github.com/joshka0/foxctl/internal/intelligence/searchindex"
 )
 
 func TestSearchHitToCandidate_MapsPathSymbolAndLine(t *testing.T) {

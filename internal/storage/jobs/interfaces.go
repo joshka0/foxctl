@@ -3,8 +3,8 @@ package jobs
 import (
 	"context"
 
-	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
+	"github.com/joshka0/foxctl/internal/domain/skill"
+	"github.com/joshka0/foxctl/internal/storage/jobs/types"
 )
 
 // Persistence abstracts the storage requirements Store relies on.

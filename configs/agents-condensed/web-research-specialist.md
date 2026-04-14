@@ -28,4 +28,4 @@ Research technical problems comprehensively.
 
 Include version numbers and timestamps. Distinguish official solutions from community workarounds.
 
-Full docs: `~/repos/personal/agentctl/configs/agents/web-research-specialist.md`
+Full docs: `~/repos/personal/foxctl/configs/agents/web-research-specialist.md`

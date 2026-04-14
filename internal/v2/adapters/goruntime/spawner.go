@@ -14,10 +14,10 @@ import (
 	"syscall"
 	"time"
 
-	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/storage/agents"
-	"github.com/jkatigb/agentctl/internal/v2/core/spawn"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	agentdomain "github.com/joshka0/foxctl/internal/domain/agent"
+	"github.com/joshka0/foxctl/internal/storage/agents"
+	"github.com/joshka0/foxctl/internal/v2/core/spawn"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 // EventPublisher accepts normalized worker lifecycle events.
@@ -521,7 +521,7 @@ type ManagedAgentSpawner struct {
 	childSpawner  *ChildSpawner
 }
 
-// NewManagedAgentSpawner builds a subprocess spawner that launches `agentctl agent run <id>`.
+// NewManagedAgentSpawner builds a subprocess spawner that launches `foxctl agent run <id>`.
 func NewManagedAgentSpawner(cfg ManagedAgentSpawnerConfig) (*ManagedAgentSpawner, error) {
 	if strings.TrimSpace(cfg.StorageRoot) == "" {
 		return nil, fmt.Errorf("goruntime managed spawner requires storage root")
@@ -543,7 +543,7 @@ func NewManagedAgentSpawner(cfg ManagedAgentSpawnerConfig) (*ManagedAgentSpawner
 		if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
 			binaryPath = exe
 		} else {
-			binaryPath = "agentctl"
+			binaryPath = "foxctl"
 		}
 	}
 	builder := cfg.BuildCommand

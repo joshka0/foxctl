@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/v2/adapters/libsql/turns"
-	"github.com/jkatigb/agentctl/internal/v2/adapters/sourceimport"
-	coreevents "github.com/jkatigb/agentctl/internal/v2/core/events"
-	"github.com/jkatigb/agentctl/internal/v2/core/run"
-	"github.com/jkatigb/agentctl/internal/v2/runtime/enrichers"
-	runtimeevents "github.com/jkatigb/agentctl/internal/v2/runtime/events"
+	"github.com/joshka0/foxctl/internal/v2/adapters/libsql/turns"
+	"github.com/joshka0/foxctl/internal/v2/adapters/sourceimport"
+	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	"github.com/joshka0/foxctl/internal/v2/core/run"
+	"github.com/joshka0/foxctl/internal/v2/runtime/enrichers"
+	runtimeevents "github.com/joshka0/foxctl/internal/v2/runtime/events"
 )
 
 func TestEpisodeCompilerComponent_TurnRecordedCompilesAndSavesEpisodes(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext"
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/guard"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext/guard"
 )
 
 // Finding represents a detected secret.

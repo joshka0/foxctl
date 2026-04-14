@@ -13,9 +13,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/agentpane"
-	"github.com/jkatigb/agentctl/internal/runtime/terminal/tmuxbridge"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/agentpane"
+	"github.com/joshka0/foxctl/internal/runtime/terminal/tmuxbridge"
 )
 
 func TestMuxPanesHandlerTMUXReturnsViewerMetadata(t *testing.T) {
@@ -44,7 +44,7 @@ func TestMuxPanesHandlerTMUXReturnsViewerMetadata(t *testing.T) {
 			responses: map[string]fakeMuxResponse{
 				"tmux list-sessions": {stdout: "ok\n"},
 				"tmux list-panes -a -F " + tmuxMuxListFormat: {
-					stdout: "%1" + tmuxMuxFieldSep + "work" + tmuxMuxFieldSep + "0" + tmuxMuxFieldSep + "0" + tmuxMuxFieldSep + "main" + tmuxMuxFieldSep + "111" + tmuxMuxFieldSep + "80" + tmuxMuxFieldSep + "24" + tmuxMuxFieldSep + "claude-a" + tmuxMuxFieldSep + "/repo" + tmuxMuxFieldSep + "agentctl" + tmuxMuxFieldSep + "1" + tmuxMuxFieldSep + "claude-a" + tmuxMuxFieldSep + "claude" + tmuxMuxFieldSep + "room-alpha" + tmuxMuxFieldSep + "1\n",
+					stdout: "%1" + tmuxMuxFieldSep + "work" + tmuxMuxFieldSep + "0" + tmuxMuxFieldSep + "0" + tmuxMuxFieldSep + "main" + tmuxMuxFieldSep + "111" + tmuxMuxFieldSep + "80" + tmuxMuxFieldSep + "24" + tmuxMuxFieldSep + "claude-a" + tmuxMuxFieldSep + "/repo" + tmuxMuxFieldSep + "foxctl" + tmuxMuxFieldSep + "1" + tmuxMuxFieldSep + "claude-a" + tmuxMuxFieldSep + "claude" + tmuxMuxFieldSep + "room-alpha" + tmuxMuxFieldSep + "1\n",
 				},
 			},
 		}, map[string]string{})
@@ -146,7 +146,7 @@ func TestMuxReadHandlerTMUXReturnsCapture(t *testing.T) {
 				"tmux list-sessions":                       {stdout: "ok\n"},
 				"tmux display-message -t %1 -p #{pane_id}": {stdout: "%1\n"},
 				"tmux display-message -t %1 -p " + tmuxMuxListFormat: {
-					stdout: "%1" + tmuxMuxFieldSep + "work" + tmuxMuxFieldSep + "0" + tmuxMuxFieldSep + "0" + tmuxMuxFieldSep + "main" + tmuxMuxFieldSep + "111" + tmuxMuxFieldSep + "80" + tmuxMuxFieldSep + "24" + tmuxMuxFieldSep + "claude-a" + tmuxMuxFieldSep + "/repo" + tmuxMuxFieldSep + "agentctl" + tmuxMuxFieldSep + "1" + tmuxMuxFieldSep + "claude-a" + tmuxMuxFieldSep + "claude" + tmuxMuxFieldSep + "room-alpha" + tmuxMuxFieldSep + "1\n",
+					stdout: "%1" + tmuxMuxFieldSep + "work" + tmuxMuxFieldSep + "0" + tmuxMuxFieldSep + "0" + tmuxMuxFieldSep + "main" + tmuxMuxFieldSep + "111" + tmuxMuxFieldSep + "80" + tmuxMuxFieldSep + "24" + tmuxMuxFieldSep + "claude-a" + tmuxMuxFieldSep + "/repo" + tmuxMuxFieldSep + "foxctl" + tmuxMuxFieldSep + "1" + tmuxMuxFieldSep + "claude-a" + tmuxMuxFieldSep + "claude" + tmuxMuxFieldSep + "room-alpha" + tmuxMuxFieldSep + "1\n",
 				},
 				"tmux capture-pane -t %1 -p -J -S -40": {stdout: "hello\nworld\n"},
 			},

@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: jira/board
@@ -160,11 +160,11 @@ signature:
         JIRA_API_TOKEN
 
       Example commands:
-        agentctl run jira/board --input '{"operation":"list"}'
-        agentctl run jira/board --input '{"operation":"issues","issues":{"board_id":12,"fields":["summary","status","assignee"]}}'
-        agentctl run jira/board --input '{"operation":"sprints","sprints":{"board_id":12,"state":"active,future"}}'
-        agentctl run jira/board --input '{"operation":"current","current":{"board_id":12,"fields":["summary","status"]}}'
-        agentctl run jira/board --input '{"operation":"move_to_backlog","move_to_backlog":{"issues":["ENG-123"]}}'
+        foxctl run jira/board --input '{"operation":"list"}'
+        foxctl run jira/board --input '{"operation":"issues","issues":{"board_id":12,"fields":["summary","status","assignee"]}}'
+        foxctl run jira/board --input '{"operation":"sprints","sprints":{"board_id":12,"state":"active,future"}}'
+        foxctl run jira/board --input '{"operation":"current","current":{"board_id":12,"fields":["summary","status"]}}'
+        foxctl run jira/board --input '{"operation":"move_to_backlog","move_to_backlog":{"issues":["ENG-123"]}}'
     workflows:
       - id: list-boards
         description: "List Jira boards."

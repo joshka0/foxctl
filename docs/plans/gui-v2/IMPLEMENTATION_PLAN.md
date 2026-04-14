@@ -34,7 +34,7 @@
 
 ## Executive Summary
 
-**Goal:** Create a native "agentctl Studio" experience that:
+**Goal:** Create a native "foxctl Studio" experience that:
 1. Replaces the Express server with a **Go HTTP+SSE/WS** backend
 2. Powers existing dashboard pages (jobs/tasks/agents/mailbox/etc.)
 3. Adds a native **Console** page for interactive chat with streaming tool calls
@@ -400,7 +400,7 @@ type StreamDelta struct {
 // On console session create
 sessions.Store.Create(Session{
     Status: Running,
-    AgentID: "agentctl",
+    AgentID: "foxctl",
     WorkspacePath: workspace,
 })
 
@@ -439,7 +439,7 @@ sessions.Store.SetStatus(id, ok/error/canceled)
 ### UI Layout
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ agentctl                                    [Dark] [Profile ▼] │
+│ foxctl                                    [Dark] [Profile ▼] │
 ├─────────────┬───────────────────────────────────────────────────┤
 │             │                                                   │
 │ Sessions    │  Transcript Timeline                              │
@@ -516,7 +516,7 @@ export default defineConfig({
 
 ### Deliverables
 - `packages/gui-svelte/` - Complete Svelte SPA
-- Reuses `@agentctl/data` for types + API calls
+- Reuses `@foxctl/data` for types + API calls
 - TanStack Query (Svelte) for caching + invalidation
 - SSE-based query invalidation
 

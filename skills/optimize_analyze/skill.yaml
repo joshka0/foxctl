@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: optimize/analyze
@@ -32,8 +32,8 @@ signature:
     long: |
       Use optimize/analyze to summarize trajectory data for a role.
       Example commands:
-        agentctl run optimize/analyze --input '{"role":"coder","days":30}'
-        agentctl skills run optimize/analyze --role coder --days 30
+        foxctl run optimize/analyze --input '{"role":"coder","days":30}'
+        foxctl skills run optimize/analyze --role coder --days 30
     workflows:
       - id: analyze-role
         description: "Analyze the last 30 days."

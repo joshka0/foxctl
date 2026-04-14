@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	taskstore "github.com/jkatigb/agentctl/internal/storage/tasks"
+	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
 // SelectNextTask chooses the highest-priority currently eligible task from the workspace task store.

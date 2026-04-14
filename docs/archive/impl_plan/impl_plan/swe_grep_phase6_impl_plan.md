@@ -38,7 +38,7 @@ doc.
       new tools.
     - Ensuring the planning LLM stack (AutoPlanner + providers) is unaffected.
   - Codemaps:
-    - **Dspy-Go Agent Runtime & Tools Integration in agentctl**
+    - **Dspy-Go Agent Runtime & Tools Integration in foxctl**
     - **Planning LLM Stack: Auto, Providers, and Integration Tests**
     - **Agentctl Overseer & Agent Hierarchy…** (for spawn/depth semantics)
 
@@ -80,7 +80,7 @@ put Go glue, how to phase PRs, and how to validate each slice.
       access).
   - Add `code.swe_grep` tool:
     - Wraps `code/snippet_extract` exec skill via the existing skills runner /
-      `agentctl run` path.
+      `foxctl run` path.
     - Maps Protocol v1 envelope → tool result payload (`snippets[]`, optional
       CAS ref).
 - **Constraints**
@@ -151,7 +151,7 @@ put Go glue, how to phase PRs, and how to validate each slice.
       diffs.
     - Usage patterns and guardrails for each tool (e.g., when to prefer symbol
       search over raw grep).
-  - Ensure `agentctl knowledge sync` & router hooks stay schema-invariant:
+  - Ensure `foxctl knowledge sync` & router hooks stay schema-invariant:
     - Only content/keywords change.
 - **Validation**
   - Manual / small automated checks:

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/expander"
-	"github.com/jkatigb/agentctl/internal/intelligence/codecontext/files"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext/expander"
+	"github.com/joshka0/foxctl/internal/intelligence/codecontext/files"
 )
 
 // HeuristicSelector selects code spans using keyword matching.

@@ -41,7 +41,7 @@ var now = func() time.Time {
 	return time.Now().UTC()
 }
 
-// Envelope is the canonical wire format for agentctl commands.
+// Envelope is the canonical wire format for foxctl commands.
 type Envelope struct {
 	Version int         `json:"version"`
 	Status  string      `json:"status"`

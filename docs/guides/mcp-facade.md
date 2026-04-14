@@ -1,10 +1,10 @@
-# agentctl MCP Facade
+# foxctl MCP Facade
 
-The MCP facade allows Claude Code to access web search, documentation lookup, browser automation, and other tools through a single agentctl MCP server, reducing token overhead significantly.
+The MCP facade allows Claude Code to access web search, documentation lookup, browser automation, and other tools through a single foxctl MCP server, reducing token overhead significantly.
 
 ## Token Savings
 
-| Metric | Before (multiple MCP servers) | After (agentctl facade) |
+| Metric | Before (multiple MCP servers) | After (foxctl facade) |
 |--------|------------------------------|-------------------------|
 | Tool schemas in context | ~3,500+ tokens | ~600 tokens |
 | Startup processes | 6+ | 1 |
@@ -80,8 +80,8 @@ Replace your `~/.cursor/mcp.json` or `~/.claude.json` with:
 ```json
 {
   "mcpServers": {
-    "agentctl": {
-      "command": "/path/to/agentctl",
+    "foxctl": {
+      "command": "/path/to/foxctl",
       "args": ["mcp", "serve"],
       "env": {
         "TAVILY_API_KEY": "your-tavily-key",
@@ -100,19 +100,19 @@ Or keep API keys in your shell and use:
 ```json
 {
   "mcpServers": {
-    "agentctl": {
-      "command": "/path/to/agentctl",
+    "foxctl": {
+      "command": "/path/to/foxctl",
       "args": ["mcp", "serve"]
     }
   }
 }
 ```
 
-### 3. Build agentctl
+### 3. Build foxctl
 
 ```bash
-cd /path/to/agentctl
-CGO_ENABLED=0 go build -o bin/agentctl ./cmd/agentctl
+cd /path/to/foxctl
+CGO_ENABLED=0 go build -o bin/foxctl ./cmd/foxctl
 ```
 
 ## Tool Usage Examples
@@ -200,7 +200,7 @@ CGO_ENABLED=0 go build -o bin/agentctl ./cmd/agentctl
 Claude Code
     |
     v
-agentctl mcp serve (stdio)
+foxctl mcp serve (stdio)
     |
     |-- tavily (npx stdio) --> web_search, web_extract, web_crawl, web_map
     |-- context7 (npx stdio) --> docs_lookup
@@ -241,7 +241,7 @@ The facade:
 - expo-mcp with EAS integration
 - playwright with full browser API
 
-### After (agentctl facade)
+### After (foxctl facade)
 - 16 tools with minimal schemas
 - Single process startup
 - Unified error handling

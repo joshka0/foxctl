@@ -2,9 +2,9 @@
   "groupId": "cross-feature",
   "testedAt": "2026-04-10T09:45:00Z",
   "isolation": {
-    "repoRoot": "/Users/joshka/repos/personal/agentctl",
-    "binary": "/Users/joshka/repos/personal/agentctl/bin/agentctl",
-    "testPackage": "./cmd/agentctl/cmd/ and ./internal/storage/blackboard/",
+    "repoRoot": "/Users/joshka/repos/personal/foxctl",
+    "binary": "/Users/joshka/repos/personal/foxctl/bin/foxctl",
+    "testPackage": "./cmd/foxctl/cmd/ and ./internal/storage/blackboard/",
     "env": "CGO_ENABLED=0",
     "isolationModel": "Each test creates its own temp directory — no shared state"
   },
@@ -26,8 +26,8 @@
         }
       ],
       "evidence": {
-        "testOutput": "cmd/agentctl/cmd TestRoomOpenSandboxCreate",
-        "codeRef": "cmd/agentctl/cmd/room.go provisionSandbox() calls worktree.NewManager().Create()",
+        "testOutput": "cmd/foxctl/cmd TestRoomOpenSandboxCreate",
+        "codeRef": "cmd/foxctl/cmd/room.go provisionSandbox() calls worktree.NewManager().Create()",
         "consoleErrors": "none"
       },
       "issues": null
@@ -45,8 +45,8 @@
         }
       ],
       "evidence": {
-        "testOutput": "cmd/agentctl/cmd TestRoomOpenSandboxDestroy",
-        "codeRef": "cmd/agentctl/cmd/room.go cleanupSandbox() calls mgr.Remove() for worktree",
+        "testOutput": "cmd/foxctl/cmd TestRoomOpenSandboxDestroy",
+        "codeRef": "cmd/foxctl/cmd/room.go cleanupSandbox() calls mgr.Remove() for worktree",
         "consoleErrors": "none"
       },
       "issues": null
@@ -64,7 +64,7 @@
         }
       ],
       "evidence": {
-        "codeRef": "cmd/agentctl/cmd/room.go lines with TODO(gateway-integration)",
+        "codeRef": "cmd/foxctl/cmd/room.go lines with TODO(gateway-integration)",
         "consoleErrors": "none"
       },
       "issues": [
@@ -87,8 +87,8 @@
         }
       ],
       "evidence": {
-        "testOutput": "cmd/agentctl/cmd TestRoomOpenSandboxFallback",
-        "codeRef": "cmd/agentctl/cmd/room.go provisionSandbox() fallback path calls provisionWorktreeSandbox()",
+        "testOutput": "cmd/foxctl/cmd TestRoomOpenSandboxFallback",
+        "codeRef": "cmd/foxctl/cmd/room.go provisionSandbox() fallback path calls provisionWorktreeSandbox()",
         "consoleErrors": "none"
       },
       "issues": null
@@ -106,8 +106,8 @@
         }
       ],
       "evidence": {
-        "testOutput": "cmd/agentctl/cmd TestRoomSandboxAgent_SpawnUsesWorktreeCWD",
-        "codeRef": "cmd/agentctl/cmd/agent.go resolveSpawnRoomSandboxCWD() reads SandboxConfig.WorktreePath",
+        "testOutput": "cmd/foxctl/cmd TestRoomSandboxAgent_SpawnUsesWorktreeCWD",
+        "codeRef": "cmd/foxctl/cmd/agent.go resolveSpawnRoomSandboxCWD() reads SandboxConfig.WorktreePath",
         "consoleErrors": "none"
       },
       "issues": null
@@ -125,8 +125,8 @@
         }
       ],
       "evidence": {
-        "testOutput": "cmd/agentctl/cmd TestRoomSandboxTasks_ScopePathResolvedToWorktree",
-        "codeRef": "cmd/agentctl/cmd/room.go resolveSandboxScopePath() with path traversal guard",
+        "testOutput": "cmd/foxctl/cmd TestRoomSandboxTasks_ScopePathResolvedToWorktree",
+        "codeRef": "cmd/foxctl/cmd/room.go resolveSandboxScopePath() with path traversal guard",
         "consoleErrors": "none"
       },
       "issues": null
@@ -149,8 +149,8 @@
         }
       ],
       "evidence": {
-        "testOutput": "cmd/agentctl/cmd TestRoomSandboxRelay_DeliversToSandboxSession, TestRoomSandboxLoop_RelayIncludesSandboxDelivery",
-        "codeRef": "cmd/agentctl/cmd/room.go relayRoomMessage() case 'auto','mixed' with sandbox delivery comment",
+        "testOutput": "cmd/foxctl/cmd TestRoomSandboxRelay_DeliversToSandboxSession, TestRoomSandboxLoop_RelayIncludesSandboxDelivery",
+        "codeRef": "cmd/foxctl/cmd/room.go relayRoomMessage() case 'auto','mixed' with sandbox delivery comment",
         "consoleErrors": "none"
       },
       "issues": null
@@ -168,8 +168,8 @@
         }
       ],
       "evidence": {
-        "testOutput": "cmd/agentctl/cmd TestBuildRoomSandboxInfoWithOpenSandbox",
-        "codeRef": "cmd/agentctl/cmd/room.go buildRoomSandboxInfo() includes ContainerID/ContainerEndpoint",
+        "testOutput": "cmd/foxctl/cmd TestBuildRoomSandboxInfoWithOpenSandbox",
+        "codeRef": "cmd/foxctl/cmd/room.go buildRoomSandboxInfo() includes ContainerID/ContainerEndpoint",
         "consoleErrors": "none"
       },
       "issues": null
@@ -206,7 +206,7 @@
         }
       ],
       "evidence": {
-        "codeRef": "cmd/agentctl/cmd/room.go cleanupSandbox() Step 4 comment",
+        "codeRef": "cmd/foxctl/cmd/room.go cleanupSandbox() Step 4 comment",
         "consoleErrors": "none"
       },
       "issues": [

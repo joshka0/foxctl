@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: session/deep-dive
@@ -40,8 +40,8 @@ signature:
     long: |
       Use session/deep-dive to fetch raw content from archived sessions.
       Example commands:
-        agentctl run session/deep-dive --input '{"session_id":"01HXYZ...","chunk_index":5}'
-        agentctl skills run session/deep-dive --session_id 01HXYZ... --chunk_index 5
+        foxctl run session/deep-dive --input '{"session_id":"01HXYZ...","chunk_index":5}'
+        foxctl skills run session/deep-dive --session_id 01HXYZ... --chunk_index 5
     workflows:
       - id: get-chunk
         description: "Retrieve a specific chunk."

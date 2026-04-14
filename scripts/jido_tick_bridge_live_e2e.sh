@@ -5,14 +5,14 @@ API_URL="${AGENTCTL_GUI_API_URL:-http://localhost:8090}"
 LMSTUDIO_URL="${LMSTUDIO_BASE_URL:-http://127.0.0.1:1234/v1}"
 WORKSPACE_PATH="${1:-$PWD}"
 JIDO_REPO="${JIDO_REPO:-$HOME/repos/githubs/jido}"
-JIDO_SOCKET="${AGENTCTL_JIDO_SOCKET:-/tmp/agentctl-jido.sock}"
+JIDO_SOCKET="${AGENTCTL_JIDO_SOCKET:-/tmp/foxctl-jido.sock}"
 ROOM_ID="${ROOM_ID:-jido-tick-room}"
 ROOM_TITLE="${ROOM_TITLE:-Jido Tick Bridge E2E}"
 ISSUE_ID="${ISSUE_ID:-jido-tick-issue-1}"
 ISSUE_IDENTIFIER="${ISSUE_IDENTIFIER:-JIDO-TICK-1}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-180}"
 TICK_INTERVAL_SECONDS="${TICK_INTERVAL_SECONDS:-3}"
-BRIDGE_LOG="${BRIDGE_LOG:-/tmp/jido-agentctl-bridge.log}"
+BRIDGE_LOG="${BRIDGE_LOG:-/tmp/jido-foxctl-bridge.log}"
 
 require() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -88,14 +88,14 @@ if [ ! -S "${JIDO_SOCKET}" ]; then
     echo "Jido repo not found: ${JIDO_REPO}" >&2
     exit 1
   fi
-  AGENTCTL_BIN="${AGENTCTL_BIN:-$(cd "$(dirname "$0")/.." && pwd)/bin/agentctl}"
+  AGENTCTL_BIN="${AGENTCTL_BIN:-$(cd "$(dirname "$0")/.." && pwd)/bin/foxctl}"
   echo "Starting Jido bridge via mix in ${JIDO_REPO}"
   (
     cd "${JIDO_REPO}"
     AGENTCTL_JIDO_SOCKET="${JIDO_SOCKET}" \
     AGENTCTL_WORKSPACE="${WORKSPACE_PATH}" \
     AGENTCTL_BIN="${AGENTCTL_BIN}" \
-    mix jido.agentctl.bridge --quiet
+    mix jido.foxctl.bridge --quiet
   ) >"${BRIDGE_LOG}" 2>&1 &
   bridge_pid=$!
   bridge_started=1
@@ -195,7 +195,7 @@ poll_until "jido tick bridge state" \
    test \"\$count\" -ge 1" \
   "${TIMEOUT_SECONDS}"
 
-poll_until "backing tick agent appears in agentctl" \
+poll_until "backing tick agent appears in foxctl" \
   "agent_json=\$(curl -sf \"${API_URL}/api/agents?limit=200\"); \
    backing=\$(printf '%s' \"\$agent_json\" | jq -r '.agents | map(select(.name == \"tick-agent\" and .llm_provider == \"lmstudio\" and .state == \"running\")) | first | .id // empty'); \
    test -n \"\$backing\"" \
@@ -203,7 +203,7 @@ poll_until "backing tick agent appears in agentctl" \
 
 BACKING_AGENT_ID="$(curl -sf "${API_URL}/api/agents?limit=200" | jq -r '.agents | map(select(.name == "tick-agent" and .llm_provider == "lmstudio" and .state == "running")) | first | .id // empty')"
 if [ -z "${BACKING_AGENT_ID}" ]; then
-  echo "backing agent id not found in agentctl" >&2
+  echo "backing agent id not found in foxctl" >&2
   exit 1
 fi
 
@@ -211,12 +211,12 @@ echo "Backing agent: ${BACKING_AGENT_ID}"
 
 poll_until "ROOM-BOARD-DONE reply from backing agent through Jido tick bridge" \
   "state=\$(rpc_call \"runtime.state\" '{\"agent_id\":\"${TICK_AGENT_ID}\"}' 2>/dev/null || true); \
-   reply=\$(printf '%s' \"\$state\" | jq -r '.result.state.agentctl.last_result.reply // \"\"' 2>/dev/null || true); \
+   reply=\$(printf '%s' \"\$state\" | jq -r '.result.state.foxctl.last_result.reply // \"\"' 2>/dev/null || true); \
    printf '%s' \"\$reply\" | grep -q '^ROOM-BOARD-DONE ${ISSUE_ID}:'" \
   "${TIMEOUT_SECONDS}"
 
 final_state_json="$(rpc_call "runtime.state" "{\"agent_id\":\"${TICK_AGENT_ID}\"}" 2>/dev/null || true)"
-final_reply="$(printf '%s' "${final_state_json}" | jq -r '.result.state.agentctl.last_result.reply // ""' 2>/dev/null || true)"
+final_reply="$(printf '%s' "${final_state_json}" | jq -r '.result.state.foxctl.last_result.reply // ""' 2>/dev/null || true)"
 tick_count="$(printf '%s' "${final_state_json}" | jq -r '.result.state.tick.count // 0' 2>/dev/null || true)"
 
 if [ -z "${final_reply}" ]; then

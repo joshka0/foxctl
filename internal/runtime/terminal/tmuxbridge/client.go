@@ -19,9 +19,9 @@ import (
 
 const (
 	defaultSocketSentinel         = "__default__"
-	defaultSessionName            = "agentctl-collab"
+	defaultSessionName            = "foxctl-collab"
 	defaultLabelPrefix            = "agent"
-	muxCreateRoomOnboardingHeader = "Started via agentctl mux create."
+	muxCreateRoomOnboardingHeader = "Started via foxctl mux create."
 	paneSubmitModeNewline         = "newline"
 	startupProfileDroidAutoHigh   = "droid_auto_high"
 	fieldSep                      = "\x1f"
@@ -95,7 +95,7 @@ type ReadResult struct {
 	Lines          []string `json:"lines"`
 }
 
-// DoctorReport summarizes tmux connectivity for agentctl.
+// DoctorReport summarizes tmux connectivity for foxctl.
 type DoctorReport struct {
 	TmuxPane         string   `json:"tmux_pane,omitempty"`
 	TmuxEnv          string   `json:"tmux_env,omitempty"`
@@ -1066,7 +1066,7 @@ func buildMuxCreateRoomOnboarding(roomID, participantID string) string {
 		participantID = "<you>"
 	}
 	return fmt.Sprintf(
-		"%s Read skills agentctl-room and agentctl-room-agent. Use agentctl-room-view only if you need pane/viewer operations. Room %s. Participant %s. Start with: agentctl room status %s ; agentctl room inbox %s --actor %s ; agentctl room task list %s. Room relay and room task commands deliver to panes with an implicit submit; after `room send`, the CLI also submits the current pane unless you pass --no-mux-submit.",
+		"%s Read skills foxctl-room and foxctl-room-agent. Use foxctl-room-view only if you need pane/viewer operations. Room %s. Participant %s. Start with: foxctl room status %s ; foxctl room inbox %s --actor %s ; foxctl room task list %s. Room relay and room task commands deliver to panes with an implicit submit; after `room send`, the CLI also submits the current pane unless you pass --no-mux-submit.",
 		muxCreateRoomOnboardingHeader,
 		roomID,
 		participantID,
@@ -1717,7 +1717,7 @@ func defaultPaneCommand() string {
 }
 
 func defaultPaneServeExecutable() string {
-	return "agentctl"
+	return "foxctl"
 }
 
 func sessionBootstrapCommand(plan preparePlan) string {
@@ -1951,8 +1951,8 @@ func tmuxPaneReadyPath(scopeID, participantID string) string {
 }
 
 func tmuxSocketBaseDir() string {
-	defaultRoot := filepath.Join(os.TempDir(), "agentctl-pane")
-	shortRoot := filepath.Join(string(filepath.Separator), "tmp", "agentctl-pane")
+	defaultRoot := filepath.Join(os.TempDir(), "foxctl-pane")
+	shortRoot := filepath.Join(string(filepath.Separator), "tmp", "foxctl-pane")
 	if len(shortRoot) < len(defaultRoot) {
 		return shortRoot
 	}

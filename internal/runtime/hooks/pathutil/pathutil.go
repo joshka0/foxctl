@@ -3,7 +3,7 @@ package pathutil
 import (
 	"encoding/json"
 
-	platformpath "github.com/jkatigb/agentctl/internal/platform/pathutil"
+	platformpath "github.com/joshka0/foxctl/internal/platform/pathutil"
 )
 
 // PathFields are the field names to check for file paths, in order of preference.

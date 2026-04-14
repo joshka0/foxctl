@@ -11,15 +11,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/context/sessionkit"
-	"github.com/jkatigb/agentctl/internal/platform/timeutil"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks"
-	"github.com/jkatigb/agentctl/internal/storage/graph"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/hookutil"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/context/sessionkit"
+	"github.com/joshka0/foxctl/internal/platform/timeutil"
+	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	"github.com/joshka0/foxctl/internal/storage/graph"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
+	"github.com/joshka0/foxctl/internal/storage/trajectory"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -201,7 +201,7 @@ func buildFeedbackPrompt(metrics SessionMetrics) string {
 		sb.WriteString("\n")
 		sb.WriteString("To provide feedback on this session, run:\n")
 		sb.WriteString("```bash\n")
-		sb.WriteString(fmt.Sprintf("agentctl run session/feedback --input '{\"session_id\": \"%s\", \"rating\": 4, \"outcome\": \"success\", \"what_worked\": [...], \"what_didnt_work\": [...]}'\n", metrics.SessionID))
+		sb.WriteString(fmt.Sprintf("foxctl run session/feedback --input '{\"session_id\": \"%s\", \"rating\": 4, \"outcome\": \"success\", \"what_worked\": [...], \"what_didnt_work\": [...]}'\n", metrics.SessionID))
 		sb.WriteString("```\n")
 	}
 

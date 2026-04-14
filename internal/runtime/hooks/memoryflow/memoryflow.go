@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/context/todosync"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/runtime/hooks/lifecycle"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/context/todosync"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 type Dependencies struct {
@@ -93,9 +93,9 @@ func DetectPrompt(req DetectorRequest) DetectorResponse {
 		`similar to (before|what we)`, `we (already|once) (did|had|tried)`, `do you remember`,
 	) {
 		response.Context = "**Recall hint:** Try these to find past context:\n" +
-			"- `agentctl memory get --query \"<keywords>\"` - search memories\n" +
-			"- `agentctl run code/semantic_search --input '{\"query\": \"<question>\"}'` - semantic code search\n" +
-			"- `agentctl run session/recall --input '{\"query\": \"<question>\"}'` - search past sessions"
+			"- `foxctl memory get --query \"<keywords>\"` - search memories\n" +
+			"- `foxctl run code/semantic_search --input '{\"query\": \"<question>\"}'` - semantic code search\n" +
+			"- `foxctl run session/recall --input '{\"query\": \"<question>\"}'` - search past sessions"
 		return response
 	}
 
@@ -106,7 +106,7 @@ func DetectPrompt(req DetectorRequest) DetectorResponse {
 		`follow up on`, `action item`, `next step`, `before we `,
 	) {
 		response.Context = "**Todo hint:** Capture this as a task:\n" +
-			"- `bin/agentctl todo add --title \"<task>\" --description \"<details>\"`\n" +
+			"- `bin/foxctl todo add --title \"<task>\" --description \"<details>\"`\n" +
 			"- Or use TodoWrite tool to track this"
 		return response
 	}
@@ -114,7 +114,7 @@ func DetectPrompt(req DetectorRequest) DetectorResponse {
 	memoryType := detectMemoryType(prompt)
 	if memoryType != "" {
 		response.Context = "**Memory hint:** User wants to save a " + memoryType + ". Use `/remember` skill to:\n" +
-			"1. Store to agentctl memory\n2. Append to CLAUDE.md under Gotchas section"
+			"1. Store to foxctl memory\n2. Append to CLAUDE.md under Gotchas section"
 	}
 	return response
 }
@@ -196,9 +196,9 @@ func HandleLifecycle(ctx context.Context, deps Dependencies, req LifecycleReques
 		if len(completed) == 1 {
 			response.Context = "**Memory prompt:** Task completed: \"" + completed[0] + "\"\n\n" +
 				"If you learned something useful or encountered a gotcha, save it:\n" +
-				"`agentctl memory put --name \"gotcha-<topic>\" --type gotcha --summary \"<learning>\"`"
+				"`foxctl memory put --name \"gotcha-<topic>\" --type gotcha --summary \"<learning>\"`"
 		} else {
-			response.Context = fmt.Sprintf("**Memory prompt:** Completed %d tasks.\n\nIf you learned something useful or encountered gotchas, save them:\n`agentctl memory put --name \"gotcha-<topic>\" --type gotcha --summary \"<learning>\"`", len(completed))
+			response.Context = fmt.Sprintf("**Memory prompt:** Completed %d tasks.\n\nIf you learned something useful or encountered gotchas, save them:\n`foxctl memory put --name \"gotcha-<topic>\" --type gotcha --summary \"<learning>\"`", len(completed))
 		}
 		return response, nil
 	case "Edit", "Write", "MultiEdit", "NotebookEdit":

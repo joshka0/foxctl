@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
 
 func TestOK(t *testing.T) {
@@ -496,14 +496,14 @@ func TestSummarizeForMemory(t *testing.T) {
 }
 
 func TestSummarizeForMemoryBytes(t *testing.T) {
-	env := OK("repo/index", nil, WithWorkspace("/repos/agentctl"))
+	env := OK("repo/index", nil, WithWorkspace("/repos/foxctl"))
 	data, err := json.Marshal(env)
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}
 
 	summary := SummarizeForMemoryBytes(data)
-	expected := "repo/index (agentctl)"
+	expected := "repo/index (foxctl)"
 	if summary != expected {
 		t.Fatalf("expected %q, got %q", expected, summary)
 	}

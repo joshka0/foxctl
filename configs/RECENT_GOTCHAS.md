@@ -23,18 +23,18 @@
   - Session ends with status=error and StopReasonContextBudget
   - Use to prevent runaway context accumulation and API costs
 - 2026-01-21 [feature]: --prompt flag for agent spawn
-  - `agentctl agent spawn --prompt "inline text"` now supported
+  - `foxctl agent spawn --prompt "inline text"` now supported
   - Mutually exclusive with --prompt-file
 - 2026-01-21 [feature]: Session continuation for agents
-  - `agentctl agent resume <session-id> --prompt "follow-up question"`
+  - `foxctl agent resume <session-id> --prompt "follow-up question"`
   - Turns now persisted to session_turns table during agent execution
   - New sessions linked via session_edges (edge_type: "continues")
   - Enables multi-phase research and follow-up conversations
 - 2026-01-21 [feature]: Overseer role for multi-agent coordination
-  - `agentctl agent spawn --role overseer --prompt "Coordinate task X"`
+  - `foxctl agent spawn --role overseer --prompt "Coordinate task X"`
   - Overseer agents get special tools: agent_spawn, agent_list, agent_kill, agent_hierarchy, agent_wait
   - Can spawn subagents subject to depth limits and policies
-  - `agentctl agent hierarchy` shows the agent tree
+  - `foxctl agent hierarchy` shows the agent tree
   - Also added RoleResearcher for information gathering agents
 - 2026-01-22 [feature]: Session persistence for agent prompts and turns
   - New session fields: prompt, prompt_hash, llm_provider, llm_model
@@ -52,7 +52,7 @@
   - Auto-detect priority: openrouter → cerebras → groq → openai (was cerebras first)
   - Default openrouter model: `openrouter/aurora-alpha` (free)
   - Context updater uses `qwen/qwen3-coder-next` (aurora-alpha returns non-JSON)
-  - Set `AGENTCTL_LLM_PROVIDER=openrouter` in ~/.agentctl/.env
+  - Set `AGENTCTL_LLM_PROVIDER=openrouter` in ~/.foxctl/.env
 - 2026-02-14 [gotcha]: Cerebras API 402 errors
   - Cerebras free tier quota exceeded → all agent calls fail silently with empty responses
   - Symptom: engine runs, 0 completion tokens, empty assistant text
@@ -150,8 +150,8 @@
 - 2026-04-04 [gotcha]: MEMORY.md content is 36 days old and approaching the 200-line limit
 - 2026-04-04 [gotcha]: Memory content is inlined instead of split into separate files with frontmatter as required
 - 2026-04-04 [gotcha]: Claude's initial replies were only going to local pane output, not appearing in the room log
-- 2026-04-04 [gotcha]: Solution: Directly call `agentctl room send` with explicit sender flag instead of relying on automatic hooks
-- 2026-04-04 [time]: Claude initially needed multiple bash attempts to discover the correct `agentctl room send` command usage
+- 2026-04-04 [gotcha]: Solution: Directly call `foxctl room send` with explicit sender flag instead of relying on automatic hooks
+- 2026-04-04 [time]: Claude initially needed multiple bash attempts to discover the correct `foxctl room send` command usage
 - 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command
 - 2026-04-04 [gotcha]: Need to explicitly use room commands rather than relying on implicit integration
 - 2026-04-04 [gotcha]: Initial replies only appeared locally in pane, not in room log - fixed by using proper room send command

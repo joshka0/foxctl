@@ -2,9 +2,9 @@
   "groupId": "integration",
   "testedAt": "2026-04-10T00:15:00Z",
   "isolation": {
-    "repoRoot": "/Users/joshka/repos/personal/agentctl",
-    "binary": "/Users/joshka/repos/personal/agentctl/bin/agentctl",
-    "testPackage": "./cmd/agentctl/cmd/",
+    "repoRoot": "/Users/joshka/repos/personal/foxctl",
+    "binary": "/Users/joshka/repos/personal/foxctl/bin/foxctl",
+    "testPackage": "./cmd/foxctl/cmd/",
     "env": "CGO_ENABLED=0, GOROOT/GOBIN/GOTOOLDIR unset",
     "isolationModel": "Each test creates its own temp directory and git repo via t.TempDir() — no shared state"
   },

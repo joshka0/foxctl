@@ -2,7 +2,7 @@
 
 ## Vision
 
-Transform agentctl from a single-process CLI tool into a multi-tenant conversation runtime deployable on Kubernetes, with proper authorization, background job processing, and horizontal scaling.
+Transform foxctl from a single-process CLI tool into a multi-tenant conversation runtime deployable on Kubernetes, with proper authorization, background job processing, and horizontal scaling.
 
 ## Current Status
 

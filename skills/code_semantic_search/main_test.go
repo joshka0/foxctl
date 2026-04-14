@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/context/contextplane"
-	"github.com/jkatigb/agentctl/internal/intelligence/retrieval"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
+	"github.com/joshka0/foxctl/internal/intelligence/retrieval"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
 func TestParseInlineMode(t *testing.T) {
@@ -436,7 +436,7 @@ func TestNoEmbeddingHint_OpenAICompat(t *testing.T) {
 
 func TestContextRetrievalToResults(t *testing.T) {
 	retrieved := contextplane.RetrievalResult{
-		WorkspaceID: "agentctl",
+		WorkspaceID: "foxctl",
 		TopOfMind: &contextplane.TopOfMind{
 			Objective:   "Bring v2 skills to parity",
 			Phase:       "implement",
@@ -450,7 +450,7 @@ func TestContextRetrievalToResults(t *testing.T) {
 			},
 		},
 		VaultHits: []contextplane.RetrievalHit{
-			{Path: "notes/repo/agentctl/skills-runtime-wiring.md", Title: "skills runtime wiring", Snippet: "Bridge delegate and executor wiring"},
+			{Path: "notes/repo/foxctl/skills-runtime-wiring.md", Title: "skills runtime wiring", Snippet: "Bridge delegate and executor wiring"},
 		},
 	}
 
@@ -464,7 +464,7 @@ func TestContextRetrievalToResults(t *testing.T) {
 	if results[0].Name != "Top of Mind" {
 		t.Fatalf("top result name=%q want Top of Mind", results[0].Name)
 	}
-	if results[2].Path != "notes/repo/agentctl/skills-runtime-wiring.md" {
+	if results[2].Path != "notes/repo/foxctl/skills-runtime-wiring.md" {
 		t.Fatalf("vault result path=%q", results[2].Path)
 	}
 }
@@ -480,7 +480,7 @@ func TestSearchPathFallback(t *testing.T) {
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}
-	mustWrite("cmd/agentctl/cmd/agent.go")
+	mustWrite("cmd/foxctl/cmd/agent.go")
 	mustWrite("internal/platform/config/config.go")
 	mustWrite("internal/adapters/skillslib/skillmain/main.go")
 	mustWrite("skills/code_semantic_search/skill.yaml")
@@ -528,7 +528,7 @@ func TestDefaultSemanticSearchScopes(t *testing.T) {
 		t.Fatalf("code profile scopes=%v want %v", got, want)
 	}
 
-	policyPath := filepath.Join(workspace, ".agentctl", "policy", "retrieval.yaml")
+	policyPath := filepath.Join(workspace, ".foxctl", "policy", "retrieval.yaml")
 	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
 		t.Fatalf("mkdir policy dir: %v", err)
 	}

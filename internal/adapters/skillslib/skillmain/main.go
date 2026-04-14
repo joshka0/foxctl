@@ -15,16 +15,16 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/policy"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/workspace"
-	"github.com/jkatigb/agentctl/internal/runtime/execution/circuitbreaker"
-	"github.com/jkatigb/agentctl/internal/runtime/observability"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/domain/policy"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
+	"github.com/joshka0/foxctl/internal/runtime/execution/circuitbreaker"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
+	"github.com/joshka0/foxctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
 	"github.com/rs/zerolog"
 )
 
@@ -258,10 +258,10 @@ func buildRunContext(cfg config.Config, stdout io.Writer) (*RunContext, error) {
 	}
 	// On macOS, /tmp symlinks to /private/tmp which differs from os.TempDir()
 	// ($TMPDIR, typically /var/folders/.../T). Claude Code sandboxes create
-	// dirs like /tmp/agentctl-* and /tmp/plan-build-*. Add only those specific
+	// dirs like /tmp/foxctl-* and /tmp/plan-build-*. Add only those specific
 	// sandbox dirs rather than all of /tmp. Ignore socket/files that happen to
 	// match the prefix.
-	for _, pattern := range []string{"/tmp/agentctl-*", "/tmp/plan-build-*"} {
+	for _, pattern := range []string{"/tmp/foxctl-*", "/tmp/plan-build-*"} {
 		if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
 			for _, match := range matches {
 				info, err := os.Stat(match)
@@ -282,7 +282,7 @@ func buildRunContext(cfg config.Config, stdout io.Writer) (*RunContext, error) {
 	// Resolve agent ID
 	agentID := os.Getenv("AGENTCTL_AGENT_ID")
 	if agentID == "" {
-		agentID = "agentctl"
+		agentID = "foxctl"
 	}
 
 	// Check for no-CAS mode
@@ -454,7 +454,7 @@ func appendUsageHint(command string, err *skillerr.Error) {
 	if command == "" {
 		return
 	}
-	usage := fmt.Sprintf("For examples, run: agentctl run %s --examples", command)
+	usage := fmt.Sprintf("For examples, run: foxctl run %s --examples", command)
 	if err.Hint == "" {
 		err.Hint = usage
 		return
@@ -509,7 +509,7 @@ func formatValidationHint(command string) string {
 	if command == "" {
 		return "Check the input fields and ensure all required values are provided"
 	}
-	return fmt.Sprintf("Check the input fields and ensure all required values are provided. For examples, run: agentctl run %s --examples", command)
+	return fmt.Sprintf("Check the input fields and ensure all required values are provided. For examples, run: foxctl run %s --examples", command)
 }
 
 func formatFieldPath(e validator.FieldError, input any) string {

@@ -129,7 +129,7 @@ type Trajectory struct {
 // CommandContext provides context about the command that triggered a user request.
 // Per dspy_trajectory_capture.md §3.2.
 type CommandContext struct {
-	// CLICommand is the full CLI command string (e.g., "agentctl agent spawn ...").
+	// CLICommand is the full CLI command string (e.g., "foxctl agent spawn ...").
 	CLICommand string `json:"cli_command,omitempty"`
 
 	// ProtocolCommand is the Protocol v1 command (e.g., "agent/spawn").

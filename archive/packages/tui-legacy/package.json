@@ -1,5 +1,5 @@
 {
-  "name": "@agentctl/tui",
+  "name": "@foxctl/tui",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentctl/data": "workspace:*",
+    "@foxctl/data": "workspace:*",
     "@opentui/core": "^0.1.0",
     "@opentui/react": "^0.1.0",
     "react": "^19.0.0"

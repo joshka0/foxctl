@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	refevidence "github.com/jkatigb/agentctl/internal/intelligence/refactor/evidence"
-	refhot "github.com/jkatigb/agentctl/internal/intelligence/refactor/hot"
-	refstatus "github.com/jkatigb/agentctl/internal/intelligence/refactor/status"
-	"github.com/jkatigb/agentctl/internal/intelligence/repoquery"
+	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	refevidence "github.com/joshka0/foxctl/internal/intelligence/refactor/evidence"
+	refhot "github.com/joshka0/foxctl/internal/intelligence/refactor/hot"
+	refstatus "github.com/joshka0/foxctl/internal/intelligence/refactor/status"
+	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
 )
 
 func TestFindingSeedQueriesNormalizesMethodNames(t *testing.T) {

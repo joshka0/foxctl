@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/agent/optimization"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/memory"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
 )
 
 func TestExportTranscriptDataset(t *testing.T) {
@@ -38,7 +38,7 @@ func TestExportTranscriptDataset(t *testing.T) {
 	savedSession, err := sessionStore.Save(ctx, storage.Session{
 		ID:            "sess-1",
 		WorkspacePath: "/tmp/ws",
-		ProjectName:   "agentctl",
+		ProjectName:   "foxctl",
 		AgentType:     "codex",
 		RawJSONLPath:  "/tmp/codex-session.jsonl",
 		Prompt:        "You are a coding assistant.",
@@ -267,7 +267,7 @@ func TestBuildTranscriptDatasetJSONLGolden(t *testing.T) {
 				SessionID:   "sess-golden",
 				AgentType:   "codex",
 				Category:    "coder_impl",
-				ProjectName: "agentctl",
+				ProjectName: "foxctl",
 				TurnIndex:   2,
 			},
 		},

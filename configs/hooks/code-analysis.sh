@@ -8,7 +8,7 @@ if [[ "${AGENTCTL_CODE_ANALYSIS_DISABLED:-}" == "1" ]]; then
   exit 0
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
 if ! command -v "$AGENTCTL_BIN" >/dev/null 2>&1; then
   echo '{}'
   exit 0

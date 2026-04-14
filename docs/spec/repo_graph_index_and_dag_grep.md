@@ -25,7 +25,7 @@ behavior described here, this document must be updated in the same change.
 
 ### 1.1 Goals
 
-- Define the canonical graph model used by `agentctl index repo ...`.
+- Define the canonical graph model used by `foxctl index repo ...`.
 - Define the explanation-query contract used by `code/dag_grep`.
 - Make structural edges, doc edges, and weights explicit.
 - Clarify which behavior is exact and which behavior is heuristic.

@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/v2/core/ask"
-	coreworker "github.com/jkatigb/agentctl/internal/v2/core/worker"
+	"github.com/joshka0/foxctl/internal/v2/core/ask"
+	coreworker "github.com/joshka0/foxctl/internal/v2/core/worker"
 )
 
 func TestRuntimeAdapter_SendMapsAskToSignal(t *testing.T) {
@@ -265,7 +265,7 @@ func TestRuntimeAdapter_WorkerMapsJidoStateToWorkerRecord(t *testing.T) {
 		stateResp: StateResponse{
 			Status: "running",
 			State: json.RawMessage(`{
-				"agentctl": {
+				"foxctl": {
 					"status": "completed",
 					"run_id": "run-123",
 					"session_id": "sess-123",

@@ -1,12 +1,12 @@
-Awesome—here’s a crisp, dependency-ordered implementation plan to ship **agentctl Core v1** with the **generic OpenAPI skill**, **plugin SPI**, and **Go-first** internals.
+Awesome—here’s a crisp, dependency-ordered implementation plan to ship **foxctl Core v1** with the **generic OpenAPI skill**, **plugin SPI**, and **Go-first** internals.
 
 ---
 
 # Progress Snapshot
 
 - ✅ Phases 0–2: bootstrap, envelope/config kernel, and CAS (with CLI + tests) are implemented.
-- ✅ Phase 3 foundation: SQLite-backed jobs subsystem, `agentctl run` wired to skills, async worker, CAS pin/unpin per job, and bash-style skills (`fs/ls`, `text/grep`, `http/openapi`) hooked into the CLI.
-- ✅ Phase 4 scaffolding: skill parser/installer, exec runner, wazero-based WASI runner, sample `wasi/echo` skill, and `agentctl skills install/list/run`.
+- ✅ Phase 3 foundation: SQLite-backed jobs subsystem, `foxctl run` wired to skills, async worker, CAS pin/unpin per job, and bash-style skills (`fs/ls`, `text/grep`, `http/openapi`) hooked into the CLI.
+- ✅ Phase 4 scaffolding: skill parser/installer, exec runner, wazero-based WASI runner, sample `wasi/echo` skill, and `foxctl skills install/list/run`.
 - 🚧 Upcoming focus: Phase 5 cache & memory, plus the full OpenAPI skill + plugin SPI.
 
 ---
@@ -19,7 +19,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
 * Initialize repo scaffolding
 
-  * `cmd/agentctl/` (Cobra skeleton), `internal/` packages, `docs/spec/`, `test/`
+  * `cmd/foxctl/` (Cobra skeleton), `internal/` packages, `docs/spec/`, `test/`
   * Add `AGENTS.md`, `docs/spec/core_profile_v1.md` (JSON envelope), `docs/spec/plugin_protocol.md`, `docs/spec/openapi_skill.md`
 * Tooling & CI
 
@@ -28,7 +28,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
   * Logging baseline (zerolog), config baseline (viper)
 
 **Depends on:** nothing
-**Deliverables:** builds pass, CLI `agentctl version` works
+**Deliverables:** builds pass, CLI `foxctl version` works
 **Acceptance checks:** `make lint && make test && make build` all succeed
 
 ---
@@ -45,11 +45,11 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 * `internal/config/`
 
   * Load/merge: defaults → file → env → flags
-  * Expose limits (`inline_output_kb`, `max_capture_kb`), paths (`~/.agentctl`)
+  * Expose limits (`inline_output_kb`, `max_capture_kb`), paths (`~/.foxctl`)
 
 **Depends on:** Phase 0
 **Deliverables:** unit & golden tests for envelopes
-**Acceptance checks:** `agentctl doctor` emits a valid envelope
+**Acceptance checks:** `foxctl doctor` emits a valid envelope
 
 ---
 
@@ -61,8 +61,8 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
   * `Put(ctx, r, kind, tags) -> digest, size`
   * `Head`, `Get` (recompute SHA-256; mismatch ⇒ `EIO`)
-  * On-disk layout `~/.agentctl/cas/sha256/<digest>`
-* CLI: `agentctl cas put|head|get|list|pin|unpin|rm`
+  * On-disk layout `~/.foxctl/cas/sha256/<digest>`
+* CLI: `foxctl cas put|head|get|list|pin|unpin|rm`
 
 **Depends on:** Phase 1
 **Deliverables:** CAS package + CLI + tests (concurrency, integrity)
@@ -78,8 +78,8 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
   * SQLite (modernc): tables + indexes (state, workspace, args_hash)
   * Lifecycle: submit/ls/status/tail/wait/result/cancel, `--dedupe`
-  * Filesystem layout: `~/.agentctl/jobs/<ulid>/` (result.json, stdout.log, progress.ndjson)
-* CLI: `agentctl jobs …`
+  * Filesystem layout: `~/.foxctl/jobs/<ulid>/` (result.json, stdout.log, progress.ndjson)
+* CLI: `foxctl jobs …`
 * Crash recovery: orphan `running` → `error (ERUNTIME_RESTART)`
 
 **Depends on:** Phase 1
@@ -102,7 +102,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 * `internal/runner/wasi/`
 
 * wazero (pure Go); **Core rule:** `distribution: wasi` ⇒ `network:"none"` validated at install
-* CLI: `agentctl skills list|describe|install`, `agentctl run <skill> …` (sync)
+* CLI: `foxctl skills list|describe|install`, `foxctl run <skill> …` (sync)
 
 **Depends on:** Phases 1–3
 **Deliverables:** run a trivial skill producing a small envelope
@@ -121,8 +121,8 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 * `internal/memory/`
 
   * Auto-cache table (24h TTL), named memories table; `UNIQUE(name, workspace)`
-  * Workspace autodetect (`.agentctl/`, `.git/`, project files)
-* CLI: `agentctl memory recent|cache|put|save|get|search|list|update|delete|relevant`
+  * Workspace autodetect (`.foxctl/`, `.git/`, project files)
+* CLI: `foxctl memory recent|cache|put|save|get|search|list|update|delete|relevant`
 
 **Depends on:** Phases 1–4
 **Deliverables:** cache hits return identical wrappers; named memory persists
@@ -152,9 +152,9 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
   * Errors: `EAUTH`, `EPAGINATION`, `EOPENAPI`, `ERATELIMIT` with `data.hint`
 * CLI:
 
-  * `agentctl openapi import <file|url> --as=<name> [--strict]` (stores spec in CAS + named memory)
-  * `agentctl openapi validate|test` (smoke)
-  * `agentctl run http/openapi --spec=memory:<name> --operationId=<id> --params='{}' [--dry_run]`
+  * `foxctl openapi import <file|url> --as=<name> [--strict]` (stores spec in CAS + named memory)
+  * `foxctl openapi validate|test` (smoke)
+  * `foxctl run http/openapi --spec=memory:<name> --operationId=<id> --params='{}' [--dry_run]`
 
 **Depends on:** Phases 1–5 (CAS, jobs optional for sync MVP)
 **Deliverables:** end-to-end call against a public API using dry-run + real run
@@ -175,7 +175,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
   * `auth-hmac/` (header signature)
   * `paging-custom/` (reads vendor field)
-* Spec vendor extensions respected: `x-agentctl.auth`, `x-agentctl.pagination.strategy`, etc.
+* Spec vendor extensions respected: `x-foxctl.auth`, `x-foxctl.pagination.strategy`, etc.
 
 **Depends on:** Phase 6
 **Deliverables:** working plugins + tests (WASI and exec)
@@ -203,7 +203,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
 **Goal:** Nice human CLI, logic stays in Tier-1 skill.
 
-* `agentctl openapi generate <memory:<name>> [--install]`
+* `foxctl openapi generate <memory:<name>> [--install]`
 
   * Emit wrappers (one skill per operation or per tag); wrappers call `http/openapi` internally
   * Autocomplete/help text; parameter typing surfaced in `skill.yaml`
@@ -211,7 +211,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
 **Depends on:** Phase 6
 **Deliverables:** generated skills installed & discoverable
-**Acceptance checks:** `agentctl skills list` shows per-operation skills; wrappers behave identically to generic
+**Acceptance checks:** `foxctl skills list` shows per-operation skills; wrappers behave identically to generic
 
 ---
 

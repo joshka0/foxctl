@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
+	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
 func TestTursoStoreIntegration(t *testing.T) {

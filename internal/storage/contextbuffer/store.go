@@ -13,8 +13,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/dbutil"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/storage/dbutil"
 )
 
 // Entry represents a context buffer entry.

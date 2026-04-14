@@ -9,11 +9,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/repoindex"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/rerank"
-	"github.com/jkatigb/agentctl/internal/intelligence/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/rerank"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/storage"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
 	"gopkg.in/yaml.v3"
 )
 
@@ -470,18 +470,18 @@ func workspaceProjectNoteBias(workspacePath, query string, hit obsidianindex.Sea
 	comparative := queryLooksComparative(query)
 	bias := 0
 	canonicalPrefix := "notes/repo/" + repoName + "/"
-	inboxPrefix := "inbox/drafted-from-agentctl/repo-graph/" + repoName + "/"
+	inboxPrefix := "inbox/drafted-from-foxctl/repo-graph/" + repoName + "/"
 	switch {
 	case strings.HasPrefix(pathValue, canonicalPrefix):
 		bias += 24
 	case strings.HasPrefix(pathValue, inboxPrefix):
 		bias += 6
 	}
-	if strings.Contains(pathValue, "notes/repo/") || strings.Contains(pathValue, "inbox/drafted-from-agentctl/repo-graph/") {
+	if strings.Contains(pathValue, "notes/repo/") || strings.Contains(pathValue, "inbox/drafted-from-foxctl/repo-graph/") {
 		if !comparative && !strings.Contains(pathValue, "/"+repoName+"/") {
 			bias -= 18
 		}
-		if strings.Contains(pathValue, "inbox/drafted-from-agentctl/") {
+		if strings.Contains(pathValue, "inbox/drafted-from-foxctl/") {
 			bias -= 14
 		}
 	}
@@ -544,8 +544,8 @@ func packageNoteSpecificityBias(workspacePath, query string, hit obsidianindex.S
 	bias := 0
 	canonicalRoot := "notes/repo/" + strings.ToLower(repoName) + "/index.md"
 	canonicalPackagePrefix := "notes/repo/" + strings.ToLower(repoName) + "/packages/"
-	inboxRoot := "inbox/drafted-from-agentctl/repo-graph/" + strings.ToLower(repoName) + "/index.md"
-	inboxPackagePrefix := "inbox/drafted-from-agentctl/repo-graph/" + strings.ToLower(repoName) + "/packages/"
+	inboxRoot := "inbox/drafted-from-foxctl/repo-graph/" + strings.ToLower(repoName) + "/index.md"
+	inboxPackagePrefix := "inbox/drafted-from-foxctl/repo-graph/" + strings.ToLower(repoName) + "/packages/"
 	if strings.Contains(lowerQuery, "repo graph") && lowerPath == canonicalRoot {
 		bias += 40
 	}
@@ -580,7 +580,7 @@ func conceptNoteSpecificityBias(workspacePath, query string, hit obsidianindex.S
 	}
 	lowerPath := strings.ToLower(pathValue)
 	canonicalConceptPrefix := "notes/repo/" + strings.ToLower(repoName) + "/concepts/"
-	inboxConceptPrefix := "inbox/drafted-from-agentctl/repo-graph/" + strings.ToLower(repoName) + "/concepts/"
+	inboxConceptPrefix := "inbox/drafted-from-foxctl/repo-graph/" + strings.ToLower(repoName) + "/concepts/"
 	if !strings.HasPrefix(lowerPath, canonicalConceptPrefix) && !strings.HasPrefix(lowerPath, inboxConceptPrefix) {
 		return 0
 	}
@@ -990,7 +990,7 @@ func packageNoteHintBoost(workspacePath string, hit obsidianindex.SearchHit, cod
 		return 0
 	}
 	canonicalPackagePrefix := "notes/repo/" + repoName + "/packages/"
-	inboxPackagePrefix := "inbox/drafted-from-agentctl/repo-graph/" + repoName + "/packages/"
+	inboxPackagePrefix := "inbox/drafted-from-foxctl/repo-graph/" + repoName + "/packages/"
 	if !strings.HasPrefix(pathValue, canonicalPackagePrefix) && !strings.HasPrefix(pathValue, inboxPackagePrefix) {
 		return 0
 	}

@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/runtime/execution"
+	"github.com/joshka0/foxctl/internal/runtime/execution"
 )
 
 // Registry manages hook runners and routes hooks to the appropriate execution strategy.

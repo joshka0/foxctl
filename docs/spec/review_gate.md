@@ -34,7 +34,7 @@ specs.
 
 - Define a full permission model for who may review or override.
 - Mandate specific linters, test commands, or quality bars.
-- Implement a full CI system inside agentctl; the pipeline may call out to
+- Implement a full CI system inside foxctl; the pipeline may call out to
   existing tools.
 - Replace human code review in Git; this spec focuses on **task-level** review
   within a workspace.
@@ -156,10 +156,10 @@ requested or when completion is attempted with the gate enabled.
 A review MAY be triggered by any of the following actions:
 
 - Explicit **review request**:
-  - User or agent runs `agentctl todo review <task-id>` or equivalent.
+  - User or agent runs `foxctl todo review <task-id>` or equivalent.
   - `todo/manage` operation `review_request` (see below).
 - Implicit on **completion attempt**:
-  - When `agentctl todo complete <task-id>` is invoked and the task is not
+  - When `foxctl todo complete <task-id>` is invoked and the task is not
     already in `ready_for_review` with a passing review, the pipeline MAY be run
     before transitioning to `completed`.
 
@@ -189,7 +189,7 @@ Conceptual execution steps:
 1. **Prepare plan**
    - Resolve `workspace_id` and `task_id`.
    - Determine which checks to run for this workspace (e.g. from
-     `~/.agentctl/config.yaml` or workspace-local config).
+     `~/.foxctl/config.yaml` or workspace-local config).
 
 2. **Submit jobs**
    - For each check, submit a job to the jobs subsystem, capturing:
@@ -239,7 +239,7 @@ to, freeform text.
     "summary": "High-level verdict, e.g. 'OK with nits' or 'Refactor recommended'",
     "findings": [
       {
-        "file": "agentctl/internal/agent/runtime/overseer.go",
+        "file": "foxctl/internal/agent/runtime/overseer.go",
         "range": { "start_line": 77, "end_line": 93 },
         "severity": "warn", // info | warn | error
         "category": "code_smell", // bug | smell | style | test | docs | perf | security
@@ -363,16 +363,16 @@ CLI commands are thin wrappers over `todo/manage`.
 
 Examples:
 
-- `agentctl todo review <task-id>`
+- `foxctl todo review <task-id>`
   - Calls `todo/manage.review_request`.
   - Streams or prints a short summary when review finishes.
 
-- `agentctl todo complete <task-id>`
+- `foxctl todo complete <task-id>`
   - Uses `todo/manage.complete` semantics.
   - When review is required and not yet passing, prints a clear message
     describing what is missing (e.g. checks that failed).
 
-- `agentctl todo status <task-id>`
+- `foxctl todo status <task-id>`
   - MAY include review-related fields (e.g. last review result and time).
 
 Exact flag names and output formatting are implementation details.

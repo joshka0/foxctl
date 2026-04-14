@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: mobile/expo
@@ -71,12 +71,12 @@ signature:
     long: |
       Use mobile/expo for Expo dev menu actions and EAS build/update flows.
       Example commands:
-        agentctl run mobile/expo --input '{"operation":"debug_status","platform":"ios"}'
-        agentctl run mobile/expo --input '{"operation":"debug_snapshot","platform":"ios","count":50}'
-        agentctl run mobile/expo --input '{"operation":"reload","platform":"ios"}'
-        agentctl skills run mobile/expo --operation reload --platform ios
-        agentctl run mobile/expo --input '{"operation":"build","build_platform":"android","profile":"preview"}'
-        agentctl skills run mobile/expo --operation build --build_platform android --profile preview
+        foxctl run mobile/expo --input '{"operation":"debug_status","platform":"ios"}'
+        foxctl run mobile/expo --input '{"operation":"debug_snapshot","platform":"ios","count":50}'
+        foxctl run mobile/expo --input '{"operation":"reload","platform":"ios"}'
+        foxctl skills run mobile/expo --operation reload --platform ios
+        foxctl run mobile/expo --input '{"operation":"build","build_platform":"android","profile":"preview"}'
+        foxctl skills run mobile/expo --operation build --build_platform android --profile preview
     workflows:
       - id: expo-reload
         description: "Reload the Expo app."

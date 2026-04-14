@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # bash-advisor.sh - Claude Code PreToolUse hook for tool advisory
-# Detects tool usage (Bash, Grep, Glob, Read) and suggests agentctl
+# Detects tool usage (Bash, Grep, Glob, Read) and suggests foxctl
 # skill alternatives that provide additional capabilities.
 #
 # This is advisory only - tools are always approved but with helpful
 # context suggesting more powerful alternatives.
 #
 # Supported tools:
-#   - Bash: Suggests Claude tools (Glob, Grep, Read) or agentctl skills
+#   - Bash: Suggests Claude tools (Glob, Grep, Read) or foxctl skills
 #   - Grep: Suggests code/semantic_search for "where is X" queries (vector search)
 #   - Glob: Suggests fs/find for metadata, code/semantic_search for concepts
 #   - Read: Suggests code/symbols for structure-first reading
@@ -73,7 +73,7 @@ case "$tool_name" in
         skill_name=$(echo "$command" | grep -oE 'skills/[^/\s]+' | head -1 | sed 's|skills/||')
         jq -n --arg skill "$skill_name" '{
           decision: "block",
-          reason: ("🚫 BLOCKED: `go build ./skills/` without -o creates binary at repo root!\n\n✅ Use instead:\n  make skill SKILL=" + $skill + "    # Builds & installs to ~/.agentctl/skills/\n  make skills-build       # Build all skills to dist/skills/")
+          reason: ("🚫 BLOCKED: `go build ./skills/` without -o creates binary at repo root!\n\n✅ Use instead:\n  make skill SKILL=" + $skill + "    # Builds & installs to ~/.foxctl/skills/\n  make skills-build       # Build all skills to dist/skills/")
         }'
         exit 0
       fi
@@ -99,7 +99,7 @@ case "$tool_name" in
 # Fast pattern match
 Glob pattern=\"**/*.go\" path=\".\"
 # Semantic search across code, sessions & memories
-agentctl run code/semantic_search --input '{\"query\": \"where is auth handler\", \"scope\": [\"symbols\", \"sessions\", \"memories\"]}'
+foxctl run code/semantic_search --input '{\"query\": \"where is auth handler\", \"scope\": [\"symbols\", \"sessions\", \"memories\"]}'
 \`\`\`"
         ;;
 
@@ -109,7 +109,7 @@ agentctl run code/semantic_search --input '{\"query\": \"where is auth handler\"
 # Pattern match
 Grep pattern=\"myFunction\" path=\".\" output_mode=\"content\"
 # Semantic search (uses vector search across symbols, sessions, memories)
-agentctl run code/semantic_search --input '{\"query\": \"how does auth work\", \"scope\": [\"symbols\", \"sessions\", \"memories\"]}'
+foxctl run code/semantic_search --input '{\"query\": \"how does auth work\", \"scope\": [\"symbols\", \"sessions\", \"memories\"]}'
 \`\`\`"
         ;;
 
@@ -171,7 +171,7 @@ Grep pattern=\"myFunction\" glob=\"*.go\" output_mode=\"content\"
 
     suggestion="For semantic \"where is X\" queries: \`code/semantic_search\` (vector search across code, sessions & memories)
 \`\`\`bash
-agentctl run code/semantic_search --input '{\"query\": \"${pattern}\", \"scope\": [\"symbols\", \"sessions\", \"memories\"]}'
+foxctl run code/semantic_search --input '{\"query\": \"${pattern}\", \"scope\": [\"symbols\", \"sessions\", \"memories\"]}'
 \`\`\`"
     detected="Grep: \`${pattern}\`"
     ;;
@@ -183,9 +183,9 @@ agentctl run code/semantic_search --input '{\"query\": \"${pattern}\", \"scope\"
     suggestion="For metadata: \`fs/find\`. For conceptual \"where is X\": \`code/semantic_search\`
 \`\`\`bash
 # File metadata (size, mtime)
-agentctl run fs/find --input '{\"pattern\": \"${pattern}\", \"path\": \".\", \"sort_by\": \"modified\"}'
+foxctl run fs/find --input '{\"pattern\": \"${pattern}\", \"path\": \".\", \"sort_by\": \"modified\"}'
 # Semantic search (vector search)
-agentctl run code/semantic_search --input '{\"query\": \"where is ${pattern}\", \"scope\": [\"symbols\", \"memories\"]}'
+foxctl run code/semantic_search --input '{\"query\": \"where is ${pattern}\", \"scope\": [\"symbols\", \"memories\"]}'
 \`\`\`"
     detected="Glob: \`${pattern}\`"
     ;;
@@ -199,7 +199,7 @@ agentctl run code/semantic_search --input '{\"query\": \"where is ${pattern}\", 
       *.go|*.py|*.js|*.ts|*.tsx|*.jsx|*.java|*.c|*.cpp|*.rs|*.rb)
         suggestion="For structure-first reading: \`code/symbols\` (get functions/types with line numbers)
 \`\`\`bash
-agentctl run code/symbols --input '{\"path\": \"${file_path}\"}'
+foxctl run code/symbols --input '{\"path\": \"${file_path}\"}'
 \`\`\`"
         detected="Read: \`$(basename "${file_path}")\`"
         ;;

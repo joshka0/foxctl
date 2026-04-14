@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/maputil"
-	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/joshka0/foxctl/internal/platform/config"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/platform/maputil"
+	"github.com/joshka0/foxctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/storage/cas"
 )
 
 // HandleResult processes the execution result, pinning artifacts, persisting to cache/memory, and emitting the output.
@@ -152,8 +152,8 @@ func buildOutputWrapperWithPolicy(original []byte, digest string, size, limitKB 
 		data["artifact"] = digest
 		data["hint"] = map[string]any{
 			"digest":       digest,
-			"read_command": fmt.Sprintf("agentctl cas read %s", digest),
-			"get_command":  fmt.Sprintf("agentctl cas get %s", digest),
+			"read_command": fmt.Sprintf("foxctl cas read %s", digest),
+			"get_command":  fmt.Sprintf("foxctl cas get %s", digest),
 		}
 		meta["cas_digest"] = digest
 	default:
@@ -193,7 +193,7 @@ func extractSummary(env map[string]any, limitKB, size int) string {
 		return preview
 	}
 
-	return fmt.Sprintf("Output exceeded %dKB inline limit (%d bytes); retrieve with: agentctl cas get <digest>", limitKB, size)
+	return fmt.Sprintf("Output exceeded %dKB inline limit (%d bytes); retrieve with: foxctl cas get <digest>", limitKB, size)
 }
 
 func mergeMeta(existing any, additions map[string]any) map[string]any {

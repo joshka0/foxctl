@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: hooks/mail_router
@@ -56,8 +56,8 @@ signature:
     long: |
       Use hooks/mail_router to fetch mailbox messages and inject them into context.
       Example commands:
-        agentctl run hooks/mail_router --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Read"}'
-        agentctl skills run hooks/mail_router --event PreToolUse --workspace_root /workspace/project --tool_name Read
+        foxctl run hooks/mail_router --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Read"}'
+        foxctl skills run hooks/mail_router --event PreToolUse --workspace_root /workspace/project --tool_name Read
     workflows:
       - id: check-mailbox
         description: "Check inbox for relevant messages."

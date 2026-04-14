@@ -5,19 +5,19 @@
   "validatorsRun": {
     "test": {
       "passed": true,
-      "command": "CGO_ENABLED=0 go test ./internal/gateway/... ./cmd/agentctl/cmd/ -count=1 -v",
+      "command": "CGO_ENABLED=0 go test ./internal/gateway/... ./cmd/foxctl/cmd/ -count=1 -v",
       "exitCode": 0,
-      "observation": "All gateway tests pass: internal/gateway/webterm (37 tests, 3.072s), internal/gateway/sshterm (38 tests, 11.808s), cmd/agentctl/cmd (all tests, 15.769s). Pre-existing CGO/SQLite duplicate symbol failures in unrelated packages (embedding_worker, optimize_*, session_recall, agent/optimization) are a known repo gotcha documented in AGENTS.md."
+      "observation": "All gateway tests pass: internal/gateway/webterm (37 tests, 3.072s), internal/gateway/sshterm (38 tests, 11.808s), cmd/foxctl/cmd (all tests, 15.769s). Pre-existing CGO/SQLite duplicate symbol failures in unrelated packages (embedding_worker, optimize_*, session_recall, agent/optimization) are a known repo gotcha documented in AGENTS.md."
     },
     "typecheck": {
       "passed": true,
-      "command": "CGO_ENABLED=0 go vet ./internal/gateway/... ./cmd/agentctl/cmd/",
+      "command": "CGO_ENABLED=0 go vet ./internal/gateway/... ./cmd/foxctl/cmd/",
       "exitCode": 0,
       "observation": "Clean vet, no issues. Also CGO_ENABLED=0 go build ./... passes cleanly."
     },
     "lint": {
       "passed": false,
-      "command": "golangci-lint run --timeout 10m ./internal/gateway/... ./cmd/agentctl/cmd/",
+      "command": "golangci-lint run --timeout 10m ./internal/gateway/... ./cmd/foxctl/cmd/",
       "exitCode": 3,
       "observation": "golangci-lint cannot run due to Go version mismatch: binary built with go1.25.4 but project targets go1.26.1. This is a pre-existing environment issue documented in .factory/library/environment.md. No code issues — the lint tool simply cannot load the config. The worker updated the golangci-lint binary via `go install` but the PATH still resolves to the old binary at /Users/joshka/.local/bin/golangci-lint. Non-blocking for this milestone."
     }
@@ -106,7 +106,7 @@
     },
     {
       "observation": "WebSocket pre-check pattern (check room before upgrade)",
-      "reason": "ambiguous: this is a standard WebSocket handler pattern, not agentctl-specific knowledge that needs recording"
+      "reason": "ambiguous: this is a standard WebSocket handler pattern, not foxctl-specific knowledge that needs recording"
     },
     {
       "observation": "tmux dependency for PTY operations",

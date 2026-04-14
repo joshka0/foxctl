@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: data/jq
@@ -52,13 +52,13 @@ signature:
     short: "Run jq queries against inline JSON or YAML."
     long: |
       Use data/jq to filter or transform JSON/YAML inputs.
-      Note: the skill parameter is named "input", so with agentctl skills run,
+      Note: the skill parameter is named "input", so with foxctl skills run,
       pass the full JSON input via --input and set --query as a flag.
       Example commands:
-        agentctl run data/jq --input '{"query":".items[] | .id","input":"{\"items\":[{\"id\":1},{\"id\":2}]}"}'
-        agentctl skills run data/jq --query '.items[] | .id' --input '{"input":"{\"items\":[{\"id\":1},{\"id\":2}]}" }'
-        agentctl run data/jq --input '{"query":".name","input":"name: example","yaml_input":true}'
-        agentctl skills run data/jq --query '.name' --input '{"input":"name: example","yaml_input":true}'
+        foxctl run data/jq --input '{"query":".items[] | .id","input":"{\"items\":[{\"id\":1},{\"id\":2}]}"}'
+        foxctl skills run data/jq --query '.items[] | .id' --input '{"input":"{\"items\":[{\"id\":1},{\"id\":2}]}" }'
+        foxctl run data/jq --input '{"query":".name","input":"name: example","yaml_input":true}'
+        foxctl skills run data/jq --query '.name' --input '{"input":"name: example","yaml_input":true}'
     workflows:
       - id: jq-basic
         description: "Extract IDs from a JSON list."

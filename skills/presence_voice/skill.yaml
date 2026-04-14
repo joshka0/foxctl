@@ -1,4 +1,4 @@
-apiVersion: agentctl/v1
+apiVersion: foxctl/v1
 kind: Skill
 metadata:
   name: presence/voice
@@ -100,7 +100,7 @@ signature:
       Generated audio is stored in CAS and cached by text hash.
 
       Example:
-        agentctl run presence/voice --input '{
+        foxctl run presence/voice --input '{
           "text": "*softly* I understand how you feel...",
           "emotion": "sadness",
           "intensity": 0.7
