@@ -186,10 +186,10 @@ These are the lowest-ambiguity cleanups:
 
 | Priority | Current packages | Better family framing |
 |------|-------------------|-----------------------|
-| 1 | `agentpane`, `tmuxbridge`, `zellijbridge`, terminal-facing parts of `gateway` | runtime/terminal with gateway terminal entrypoints kept under interfaces/gateway |
-| 2 | `companion`, `context`, `contextplane`, `sessionkit`, `transcriptpipeline`, `knowledge` | one explicit context family |
-| 3 | `indexing`, `retrieval`, `codecontext`, `codemap`, `repoquery`, `refactor`, `search*`, `analysis`, `verification` | one explicit intelligence family |
-| 4 | `tooling/*`, `adapters/skillslib/*`, `console/*`, `auth/*` | explicit tooling, console, and auth families |
+| 1 | `internal/runtime/terminal/agentpane`, `internal/runtime/terminal/tmuxbridge`, `internal/runtime/terminal/zellijbridge`, terminal-facing parts of `internal/interfaces/gateway` | runtime/terminal with gateway terminal entrypoints kept under interfaces/gateway |
+| 2 | `internal/context/companion`, `internal/context/contextplane`, `internal/context/sessionkit`, `internal/context/transcriptpipeline`, `internal/context/knowledge` | one explicit context family |
+| 3 | `internal/intelligence/indexing`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap`, `internal/intelligence/repoquery`, `internal/intelligence/refactor`, `internal/intelligence/search*`, `internal/intelligence/analysis`, `internal/intelligence/verification` | one explicit intelligence family |
+| 4 | `internal/tooling/*`, `internal/adapters/skillslib/*`, `internal/console/*`, `internal/auth/*` | explicit tooling, console, and auth families |
 
 ## Runtime-Terminal Inventory
 
