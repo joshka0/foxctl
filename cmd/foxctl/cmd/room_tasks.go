@@ -2790,10 +2790,6 @@ func detectRoomCoordinatorPulseMessages(room agent.RoomSummary, messages []agent
 		return nil
 	}
 	key := fmt.Sprintf("%s|%d|%d|%d|%d|%d|%d", coordinator, action.ParticipantsWithPending, action.PendingAcks, action.PendingReplies, action.AssignedUnclaimed, action.BlockedTasks, action.StaleTasks)
-	reminderFloor := cfg.Interval
-	if cfg.MinPulseFloor > reminderFloor {
-		reminderFloor = cfg.MinPulseFloor
-	}
 	if _, ok := reminded[key]; ok {
 		return nil
 	}

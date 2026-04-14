@@ -13911,26 +13911,6 @@ func defaultRoomRelayOptions() roomRelayOptions {
 	return roomRelayOptions{Backend: "auto"}
 }
 
-// relayPersistedRoomMessages fans out already-stored messages to mux panes (tmux/zellij auto),
-// using the same path as room loop / room relay. Delivery injects a trailing newline/Enter so the
-// agent surface accepts the relayed text without a separate submit step.
-func relayPersistedRoomMessages(ctx context.Context, boardStore blackboard.BoardStore, absWorkspace, roomID string, msgs []*agent.BoardMessage) []roomRelayResult {
-	summary, err := boardStore.GetRoom(ctx, absWorkspace, strings.TrimSpace(roomID), "")
-	if err != nil {
-		return []roomRelayResult{{Backend: "auto", Error: err.Error()}}
-	}
-	client := tmuxbridge.New()
-	relay := defaultRoomRelayOptions()
-	out := make([]roomRelayResult, 0, len(msgs))
-	for _, m := range msgs {
-		if m == nil {
-			continue
-		}
-		out = append(out, relayRoomMessage(ctx, client, summary, *m, relay))
-	}
-	return out
-}
-
 // roomTaskNoLiveRelay is true when `room task --no-live-relay` was set (skip mux fan-out because
 // a long-running room loop/relay already delivers new messages).
 func roomTaskNoLiveRelay(cmd *cobra.Command) bool {
@@ -14915,17 +14895,6 @@ func buildRoomActionSuppression(messages []agent.BoardMessage, tasks []taskstore
 		}
 	}
 	return suppression
-}
-
-func copyRoomStringSet(src map[string]struct{}) map[string]struct{} {
-	if len(src) == 0 {
-		return map[string]struct{}{}
-	}
-	out := make(map[string]struct{}, len(src))
-	for key := range src {
-		out[key] = struct{}{}
-	}
-	return out
 }
 
 func roomActionSuppressesMessage(msg agent.BoardMessage, suppression *roomActionSuppression) bool {

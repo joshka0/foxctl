@@ -1501,22 +1501,6 @@ type roomTaskResponse struct {
 	Gotchas         string     `json:"gotchas,omitempty"`
 }
 
-func defaultRoomLoopResponse() roomLoopResponse {
-	return roomLoopResponse{
-		Enabled:                      true,
-		ManagedBy:                    apiRoomLoopManager,
-		PulseInterval:                apiRoomPulseInterval.String(),
-		TaskFollowupInterval:         "0s",
-		ReplyStaleAfter:              apiRoomReplyStaleAfter.String(),
-		TaskStaleAfter:               apiRoomTaskStaleAfter.String(),
-		MinPulseFloor:                apiRoomMinimumPulseFloor.String(),
-		InterruptAttemptLimit:        apiRoomInterruptAttemptLimit,
-		ReminderBackoffCap:           apiRoomReminderBackoffCap,
-		CoordinatorPulseEnabled:      true,
-		CoordinatorEscalationEnabled: true,
-	}
-}
-
 func defaultRoomLoopState(workspaceID, roomID string) coordination.RoomLoop {
 	return coordination.RoomLoop{
 		WorkspaceID:                  strings.TrimSpace(workspaceID),

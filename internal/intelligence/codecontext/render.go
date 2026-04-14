@@ -40,16 +40,16 @@ func renderSnippets(evidence *Evidence, opts RenderOpts) string {
 		}
 
 		if snippet.StartLine == snippet.EndLine {
-			buf.WriteString(fmt.Sprintf("### %s:%d\n", snippet.File, snippet.StartLine))
+			fmt.Fprintf(&buf, "### %s:%d\n", snippet.File, snippet.StartLine)
 		} else {
-			buf.WriteString(fmt.Sprintf("### %s:%d-%d\n", snippet.File, snippet.StartLine, snippet.EndLine))
+			fmt.Fprintf(&buf, "### %s:%d-%d\n", snippet.File, snippet.StartLine, snippet.EndLine)
 		}
 
 		lang := snippet.Language
 		if lang == "" || lang == "text" {
 			lang = ""
 		}
-		buf.WriteString(fmt.Sprintf("```%s\n", lang))
+		fmt.Fprintf(&buf, "```%s\n", lang)
 		buf.WriteString(snippet.Text)
 		if !strings.HasSuffix(snippet.Text, "\n") {
 			buf.WriteString("\n")

@@ -131,10 +131,10 @@ func Summarize(results []QueryResult, modes []string) []Summary {
 func RenderMarkdown(result RunResult) string {
 	var b strings.Builder
 	b.WriteString("# Retrieval Eval\n\n")
-	b.WriteString(fmt.Sprintf("- Suite: `%s`\n", result.Suite))
-	b.WriteString(fmt.Sprintf("- Workspace: `%s`\n", result.Workspace))
-	b.WriteString(fmt.Sprintf("- Vault: `%s`\n", result.VaultPath))
-	b.WriteString(fmt.Sprintf("- Limit: `%d`\n\n", result.Limit))
+	fmt.Fprintf(&b, "- Suite: `%s`\n", result.Suite)
+	fmt.Fprintf(&b, "- Workspace: `%s`\n", result.Workspace)
+	fmt.Fprintf(&b, "- Vault: `%s`\n", result.VaultPath)
+	fmt.Fprintf(&b, "- Limit: `%d`\n\n", result.Limit)
 	b.WriteString("## Summary\n\n")
 	b.WriteString("| Mode | Available | hit@5 | hit@10 | MRR |\n")
 	b.WriteString("| --- | ---: | ---: | ---: | ---: |\n")

@@ -400,7 +400,7 @@ func turnToolResults(turn run.TurnRecord) []string {
 
 func buildEmbeddingText(turn run.TurnRecord, labels, learnings []string, todos TodoStats, provider Provider) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("provider=%s ", provider))
+	fmt.Fprintf(&sb, "provider=%s ", provider)
 	if prompt := strings.TrimSpace(turn.Prompt); prompt != "" {
 		sb.WriteString("prompt=")
 		sb.WriteString(prompt)
@@ -421,8 +421,8 @@ func buildEmbeddingText(turn run.TurnRecord, labels, learnings []string, todos T
 		sb.WriteString(strings.Join(learnings, " | "))
 		sb.WriteString(" ")
 	}
-	sb.WriteString(fmt.Sprintf("todos total=%d pending=%d active=%d completed=%d",
-		todos.Total, todos.Pending, todos.InProgress, todos.Completed))
+	fmt.Fprintf(&sb, "todos total=%d pending=%d active=%d completed=%d",
+		todos.Total, todos.Pending, todos.InProgress, todos.Completed)
 	return strings.TrimSpace(sb.String())
 }
 

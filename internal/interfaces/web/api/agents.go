@@ -1258,16 +1258,6 @@ type AgentAskResponse struct {
 	ConversationID string `json:"conversation_id"`
 }
 
-type sandboxAgentLLMConfig struct {
-	Provider   string
-	Model      string
-	BaseURL    string
-	APIKey     string
-	AuthMode   string
-	AuthHeader string
-	AuthPrefix string
-}
-
 // handleAgentAsk sends a message to an agent via companion chat.
 // handleAgentAsk handles POST requests to send a message to a running agent's companion chat and return the assistant's reply.
 // It validates the request, uses the agent's stored ConversationID (falling back to the agent ID), forwards the message to the companion service, and writes an AgentAskResponse containing the reply and the conversation ID; on failures it returns the appropriate HTTP error.
@@ -2005,117 +1995,6 @@ func isSandboxBackedAgent(agent agenttypes.Agent) bool {
 	return strings.TrimSpace(agent.WorkspaceSource) == "sandbox" &&
 		strings.TrimSpace(agent.SandboxProvider) == "opensandbox" &&
 		strings.TrimSpace(agent.SandboxID) != ""
-}
-
-func resolveSandboxAgentLLMConfig(cfg config.Config, agent agenttypes.Agent) (sandboxAgentLLMConfig, error) {
-	provider := strings.TrimSpace(agent.LLMProvider)
-	if provider == "" {
-		provider = cfg.LLM.Provider
-	}
-	if provider == "" {
-		provider = "openai_compat"
-	}
-	normalizedProvider := strings.ToLower(strings.TrimSpace(provider))
-	switch normalizedProvider {
-	case "openai", "openai_compat", "openai-compatible", "openrouter", "groq", "cerebras", "lmstudio":
-	default:
-		return sandboxAgentLLMConfig{}, fmt.Errorf("sandbox-backed asks currently support only OpenAI-compatible providers; got %q", provider)
-	}
-
-	model := strings.TrimSpace(agent.LLMModel)
-	if model == "" {
-		model = cfg.LLM.ResolveModel(provider)
-	}
-	baseURL := strings.TrimSpace(agent.LLMBaseURL)
-	if baseURL == "" {
-		baseURL = cfg.LLM.ResolveBaseURL(provider)
-	}
-	authMode := strings.TrimSpace(agent.LLMAuthMode)
-	if authMode == "" {
-		authMode = cfg.LLM.ResolveAuthMode(provider)
-	}
-	authHeader := strings.TrimSpace(agent.LLMAuthHeader)
-	if authHeader == "" {
-		authHeader = cfg.LLM.ResolveAuthHeader(provider)
-	}
-	authPrefix := agent.LLMAuthPrefix
-	if authPrefix == "" {
-		authPrefix = cfg.LLM.ResolveAuthPrefix(provider)
-	}
-
-	return sandboxAgentLLMConfig{
-		Provider:   normalizedProvider,
-		Model:      model,
-		BaseURL:    baseURL,
-		APIKey:     cfg.LLM.ResolveAPIKey(provider),
-		AuthMode:   authMode,
-		AuthHeader: authHeader,
-		AuthPrefix: authPrefix,
-	}, nil
-}
-
-func runSandboxBackedAgentAsk(ctx context.Context, cfg config.Config, agent agenttypes.Agent, message string) (string, error) {
-	if strings.TrimSpace(agent.SandboxProvider) != "" {
-		return "", fmt.Errorf("sandbox-backed agent execution is temporarily disabled")
-	}
-	llmCfg, err := resolveSandboxAgentLLMConfig(cfg, agent)
-	if err != nil {
-		return "", err
-	}
-	_ = llmCfg
-	_ = message
-	return "", fmt.Errorf("sandbox-backed agent execution is temporarily disabled")
-}
-
-func buildSandboxPromptCommand(agent agenttypes.Agent, llmCfg sandboxAgentLLMConfig, message string) (string, map[string]string) {
-	systemPrompt := strings.TrimSpace(agent.Prompt)
-	payload := map[string]any{
-		"model": llmCfg.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": message},
-		},
-		"temperature": 0,
-	}
-	payloadJSON, _ := json.Marshal(payload)
-	command := fmt.Sprintf(`python3 - <<'PY'
-import json, os, sys, urllib.request
-base_url = os.environ["AGENTCTL_SANDBOX_LLM_BASE_URL"].rstrip("/")
-payload = %s
-headers = {"Content-Type": "application/json"}
-auth_mode = os.environ.get("AGENTCTL_SANDBOX_LLM_AUTH_MODE", "")
-api_key = os.environ.get("AGENTCTL_SANDBOX_LLM_API_KEY", "")
-auth_header = os.environ.get("AGENTCTL_SANDBOX_LLM_AUTH_HEADER", "Authorization")
-auth_prefix = os.environ.get("AGENTCTL_SANDBOX_LLM_AUTH_PREFIX", "")
-if auth_mode in ("bearer", "header") and api_key:
-    headers[auth_header] = auth_prefix + api_key
-req = urllib.request.Request(base_url + "/chat/completions", data=json.dumps(payload).encode("utf-8"), headers=headers)
-with urllib.request.urlopen(req, timeout=180) as resp:
-    body = json.load(resp)
-choice = body.get("choices", [{}])[0]
-message = choice.get("message", {}) if isinstance(choice, dict) else {}
-content = message.get("content", "") if isinstance(message, dict) else ""
-if isinstance(content, list):
-    parts = []
-    for item in content:
-        if isinstance(item, dict):
-            text = item.get("text")
-            if text:
-                parts.append(text)
-    content = "".join(parts)
-if not content:
-    print(json.dumps(body), file=sys.stderr)
-    sys.exit(2)
-print(content)
-PY`, string(payloadJSON))
-	envs := map[string]string{
-		"AGENTCTL_SANDBOX_LLM_BASE_URL":    llmCfg.BaseURL,
-		"AGENTCTL_SANDBOX_LLM_API_KEY":     llmCfg.APIKey,
-		"AGENTCTL_SANDBOX_LLM_AUTH_MODE":   llmCfg.AuthMode,
-		"AGENTCTL_SANDBOX_LLM_AUTH_HEADER": llmCfg.AuthHeader,
-		"AGENTCTL_SANDBOX_LLM_AUTH_PREFIX": llmCfg.AuthPrefix,
-	}
-	return command, envs
 }
 
 func handleAgentMemoryCompress(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, agentID string) {

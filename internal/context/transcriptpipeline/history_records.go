@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	historypkg "github.com/joshka0/foxctl/internal/context/transcriptpipeline/history"
 )
@@ -46,36 +45,6 @@ func BuildHistoryRecords(profile *historypkg.HistoryProfile, ctx HistoryRecordCo
 		return out[i].RecordID < out[j].RecordID
 	})
 	return out
-}
-
-func historyRecordMemoryType(kind HistoryRecordKind) (string, bool) {
-	switch kind {
-	case HistoryRecordKindInsight:
-		return "history_insight", true
-	case HistoryRecordKindNotable:
-		return "history_notable", true
-	case HistoryRecordKindAnswer:
-		return "history_answer", true
-	default:
-		return "", false
-	}
-}
-
-func historyRecordMemoryTypes() []string {
-	return []string{"history_insight", "history_notable", "history_answer"}
-}
-
-func historyRecordTypeSuffix(kind HistoryRecordKind) string {
-	switch kind {
-	case HistoryRecordKindInsight:
-		return "insight"
-	case HistoryRecordKindNotable:
-		return "notable"
-	case HistoryRecordKindAnswer:
-		return "answer"
-	default:
-		return "record"
-	}
 }
 
 func historyRecordsFromInsights(ctx HistoryRecordContext, insights []DecisionInsight) []HistoryRecord {
@@ -167,13 +136,6 @@ func newHistoryRecord(ctx HistoryRecordContext, kind HistoryRecordKind, summary,
 		Summary:         summary,
 		RetrievalText:   retrieval,
 	}
-}
-
-func formatOptionalRecordTime(ts time.Time) string {
-	if ts.IsZero() {
-		return ""
-	}
-	return ts.UTC().Format(time.RFC3339)
 }
 
 func buildNotableRetrievalText(item NotableInsight) string {

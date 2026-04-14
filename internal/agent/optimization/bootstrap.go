@@ -337,11 +337,11 @@ func (b *BootstrapOptimizer) FormatExamplesForPrompt(examples []Example) string 
 	sb.WriteString("Here are examples of successful task completions:\n\n")
 
 	for i, example := range examples {
-		sb.WriteString(fmt.Sprintf("### Example %d\n", i+1))
-		sb.WriteString(fmt.Sprintf("**Input:** %s\n", truncate(example.Input, 200)))
-		sb.WriteString(fmt.Sprintf("**Output:** %s\n", truncate(example.Output, 500)))
+		fmt.Fprintf(&sb, "### Example %d\n", i+1)
+		fmt.Fprintf(&sb, "**Input:** %s\n", truncate(example.Input, 200))
+		fmt.Fprintf(&sb, "**Output:** %s\n", truncate(example.Output, 500))
 		if len(example.Tools) > 0 {
-			sb.WriteString(fmt.Sprintf("**Tools used:** %s\n", strings.Join(example.Tools, ", ")))
+			fmt.Fprintf(&sb, "**Tools used:** %s\n", strings.Join(example.Tools, ", "))
 		}
 		sb.WriteString("\n")
 	}

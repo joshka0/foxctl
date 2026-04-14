@@ -164,23 +164,6 @@ func installFSReadSkill(t *testing.T, cfg config.Config) {
 	installSkillBinary(t, binaryPath, "./skills/fs_read")
 }
 
-func installTodoSkill(t *testing.T) config.Config {
-	t.Helper()
-	cfg := newSkillTestConfig(t)
-	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("todo/manage"))
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		t.Fatalf("skill dir: %v", err)
-	}
-	copySkillFile(t, filepath.Join(repoRoot(t), "skills", "todo", "skill.yaml"), filepath.Join(dest, "skill.yaml"))
-
-	binaryPath := filepath.Join(dest, "bin")
-	if runtime.GOOS == "windows" {
-		binaryPath += ".exe"
-	}
-	installSkillBinary(t, binaryPath, "./skills/todo")
-	return cfg
-}
-
 func installTodoManifestOnly(t *testing.T) config.Config {
 	t.Helper()
 	cfg := newSkillTestConfig(t)

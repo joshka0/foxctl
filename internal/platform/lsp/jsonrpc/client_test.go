@@ -235,8 +235,8 @@ func TestClient_Call_SkipsNotifications(t *testing.T) {
 	respBytes, _ := json.Marshal(resp)
 
 	var buf bytes.Buffer
-	buf.WriteString(fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(notifBytes), notifBytes))
-	buf.WriteString(fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(respBytes), respBytes))
+	fmt.Fprintf(&buf, "Content-Length: %d\r\n\r\n%s", len(notifBytes), notifBytes)
+	fmt.Fprintf(&buf, "Content-Length: %d\r\n\r\n%s", len(respBytes), respBytes)
 
 	client := NewClient(stdin, &buf)
 
@@ -272,7 +272,7 @@ func TestClient_Call_SkipsDifferentID(t *testing.T) {
 	correctBytes, _ := json.Marshal(correctResp)
 
 	var buf bytes.Buffer
-	buf.WriteString(fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(wrongBytes), wrongBytes))
+	fmt.Fprintf(&buf, "Content-Length: %d\r\n\r\n%s", len(wrongBytes), wrongBytes)
 	buf.WriteString(fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(correctBytes), correctBytes))
 
 	client := NewClient(stdin, &buf)
