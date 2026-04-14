@@ -618,7 +618,7 @@ func TestHandleContextRetrieve(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)
 	}
-	vaultRoot := filepath.Clean(filepath.Join(repoRoot(t), "internal", "tools", "obsidian", "testdata", "vaults", "basic"))
+	vaultRoot := filepath.Clean(filepath.Join(repoRoot(t), "internal", "tooling", "tools", "obsidian", "testdata", "vaults", "basic"))
 	index, err := obsidianindex.Open(context.Background(), storageRoot, vaultRoot)
 	if err != nil {
 		t.Fatalf("Open index: %v", err)
@@ -670,7 +670,7 @@ func TestHandleContextContradictions(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendTension: %v", err)
 	}
-	vaultRoot := filepath.Clean(filepath.Join(repoRoot(t), "internal", "tools", "obsidian", "testdata", "vaults", "basic"))
+	vaultRoot := filepath.Clean(filepath.Join(repoRoot(t), "internal", "tooling", "tools", "obsidian", "testdata", "vaults", "basic"))
 	index, err := obsidianindex.Open(context.Background(), storageRoot, vaultRoot)
 	if err != nil {
 		t.Fatalf("Open index: %v", err)
