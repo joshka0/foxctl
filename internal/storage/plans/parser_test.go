@@ -268,6 +268,132 @@ Write tests.
 	}
 }
 
+func TestParser_ExtractSteps_OrderedListFallback(t *testing.T) {
+	content := `# Plan
+
+## Goal
+
+1. define target benchmark
+2. run baseline
+3. compare results
+
+## Notes
+
+- plain bullets should not become steps
+`
+
+	parser := NewParser(DefaultParseOptions())
+	plan, err := parser.Parse(content)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	steps := parser.ExtractSteps(plan)
+	if len(steps) != 3 {
+		t.Fatalf("ExtractSteps() = %d steps, want 3", len(steps))
+	}
+
+	wantTitles := []string{"define target benchmark", "run baseline", "compare results"}
+	for i, step := range steps {
+		if step.Title != wantTitles[i] {
+			t.Errorf("step[%d].Title = %q, want %q", i, step.Title, wantTitles[i])
+		}
+		if step.Order != i+1 {
+			t.Errorf("step[%d].Order = %d, want %d", i, step.Order, i+1)
+		}
+		if len(step.SectionPath) == 0 || step.SectionPath[0] != "Goal" {
+			t.Errorf("step[%d].SectionPath = %v, want first section Goal", i, step.SectionPath)
+		}
+	}
+}
+
+func TestParser_ExtractSteps_OrderedListFallbackPreservesMultilineQuestions(t *testing.T) {
+	content := `# Plan
+
+## Open questions
+
+1. Should active-run selection be single-run-per-workspace or multi-run with an
+   explicit --run selector on every command?
+2. Keep non-question items as stories
+`
+
+	parser := NewParser(DefaultParseOptions())
+	plan, err := parser.Parse(content)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	steps := parser.ExtractSteps(plan)
+	if len(steps) != 2 {
+		t.Fatalf("ExtractSteps() = %d steps, want 2", len(steps))
+	}
+
+	const wantQuestion = "Should active-run selection be single-run-per-workspace or multi-run with an explicit --run selector on every command?"
+	if got := steps[0].Title; got != wantQuestion {
+		t.Fatalf("steps[0].Title = %q, want %q", got, wantQuestion)
+	}
+	if !strings.HasSuffix(steps[0].Title, "?") {
+		t.Fatalf("steps[0].Title = %q, want suffix ?", steps[0].Title)
+	}
+	if got := steps[1].Title; got != "Keep non-question items as stories" {
+		t.Fatalf("steps[1].Title = %q, want %q", got, "Keep non-question items as stories")
+	}
+}
+
+func TestParser_ExtractSteps_ExplicitStepHeadingsTakePrecedence(t *testing.T) {
+	content := `# Plan
+
+## Goal
+
+1. this numbered item should be ignored because explicit step headings exist
+
+## Implementation
+
+### Step 1: Build parser
+Do the implementation.
+`
+
+	parser := NewParser(DefaultParseOptions())
+	plan, err := parser.Parse(content)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	steps := parser.ExtractSteps(plan)
+	if len(steps) != 1 {
+		t.Fatalf("ExtractSteps() = %d steps, want 1", len(steps))
+	}
+	if steps[0].Title != "Build parser" {
+		t.Fatalf("steps[0].Title = %q, want %q", steps[0].Title, "Build parser")
+	}
+}
+
+func TestParser_ExtractSteps_FoxctlEvolvePlanRegression(t *testing.T) {
+	planPath := filepath.Join("..", "..", "..", "docs", "plans", "features", "foxctl-evolve-plan.md")
+
+	parser := NewParser(DefaultParseOptions())
+	plan, err := parser.ParseFile(planPath)
+	if err != nil {
+		t.Fatalf("ParseFile() error = %v", err)
+	}
+
+	steps := parser.ExtractSteps(plan)
+	if len(steps) == 0 {
+		t.Fatal("ExtractSteps() returned 0 steps, want >0 for foxctl-evolve plan")
+	}
+
+	var foundGoalStep bool
+	for _, step := range steps {
+		if len(step.SectionPath) > 0 && step.SectionPath[0] == "Goal" && strings.TrimSpace(step.Title) != "" {
+			foundGoalStep = true
+			break
+		}
+	}
+	if !foundGoalStep {
+		t.Fatalf("expected at least one extracted step under Goal section, got %d total steps", len(steps))
+	}
+}
+
 func TestParser_ParseFile(t *testing.T) {
 	// Create temp file
 	dir := t.TempDir()

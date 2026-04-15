@@ -4188,6 +4188,7 @@ func runRoomEpicImportPlan(cmd *cobra.Command, workspace, sender, roomID, planFi
 	storyIDsByTitle := make(map[string][]string)
 	storyEntries := make([]roomPlanImportStoryEntry, 0, len(loaded.Steps))
 	storyCount := 0
+	questionRecipient := normalizeRoomRecipient(firstNonEmpty(strings.TrimSpace(parseRoomEpicBody(epicMsg.Body).Owner), strings.TrimSpace(epicMsg.Sender), agent.BroadcastRecipient))
 	for _, group := range groups {
 		milestoneTitle := firstNonEmpty(strings.TrimSpace(group.Title), "Imported Plan")
 		milestoneMsg := &agent.BoardMessage{
@@ -4207,6 +4208,24 @@ func runRoomEpicImportPlan(cmd *cobra.Command, workspace, sender, roomID, planFi
 
 		for _, step := range group.Steps {
 			storyTitle := strings.TrimSpace(step.Title)
+			if roomPlanImportIsInterrogativeTitle(storyTitle) {
+				questionKind := "product"
+				questionMsg := &agent.BoardMessage{
+					WorkspaceID:      absWorkspace,
+					RelatedMessageID: epicMsg.ID,
+					Stream:           agent.RoomStreamName(roomID),
+					Sender:           identity.Sender,
+					Recipient:        questionRecipient,
+					Kind:             agent.BoardMessageKindEpicQuestion,
+					Priority:         agent.DefaultPriority,
+					Subject:          "Epic Question (" + questionKind + "): " + deriveRoomSubject(storyTitle),
+					Body:             buildRoomEpicQuestionBody(questionKind, storyTitle),
+				}
+				if err := store.SendMessage(cmd.Context(), questionMsg); err != nil {
+					return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				}
+				continue
+			}
 			storyMsg := &agent.BoardMessage{
 				WorkspaceID:      absWorkspace,
 				RelatedMessageID: milestoneMsg.ID,
@@ -4440,6 +4459,11 @@ func groupRoomPlanImportSteps(steps []plans.Step) []roomPlanImportMilestoneGroup
 
 func roomPlanImportTitleKey(title string) string {
 	return strings.ToLower(strings.TrimSpace(title))
+}
+
+func roomPlanImportIsInterrogativeTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	return strings.HasSuffix(title, "?")
 }
 
 func runRoomEpicStart(cmd *cobra.Command, workspace, sender, roomID, title, goal, owner, outcome, horizon string, scope, success []string, extraFlags ...bool) error {

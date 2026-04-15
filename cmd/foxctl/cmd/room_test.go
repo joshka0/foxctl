@@ -7298,6 +7298,121 @@ Add CLI command.`)
 	}
 }
 
+func TestRunRoomEpicImportPlanRoutesQuestionStepsToEpicIntake(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	planPath := filepath.Join(workspace, "import-questions-plan.md")
+	mustWriteRoomTestFile(t, planPath, `# Import Plan
+
+## Open questions
+
+1. Should active-run selection be single-run-per-workspace or multi-run with an
+   explicit --run selector on every command?
+
+## Execution
+
+1. Implement command wiring`)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicImportPlan(cmd, workspace, "human-a", "alpha", planPath, "claude"); err != nil {
+		t.Fatalf("runRoomEpicImportPlan: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if got := data["story_count"]; got != float64(1) {
+		t.Fatalf("story_count=%v want 1", got)
+	}
+	epicID := data["epic_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicShow(cmd, workspace, "alpha", epicID, roomTaskScanLimit); err != nil {
+		t.Fatalf("runRoomEpicShow: %v", err)
+	}
+	epic := decodeRoomEnvelope(t, out)["epic"].(map[string]any)
+	if got := epic["question_count"]; got != float64(1) {
+		t.Fatalf("question_count=%v want 1", got)
+	}
+	if got := epic["open_questions"]; got != float64(1) {
+		t.Fatalf("open_questions=%v want 1", got)
+	}
+
+	const wantQuestion = "Should active-run selection be single-run-per-workspace or multi-run with an explicit --run selector on every command?"
+	questions := epic["questions"].([]any)
+	if len(questions) != 1 {
+		t.Fatalf("len(questions)=%d want 1", len(questions))
+	}
+	questionMeta := parseRoomEpicQuestionBody(stringField(questions[0], "body"))
+	if got := questionMeta.Question; got != wantQuestion {
+		t.Fatalf("question=%q want %q", got, wantQuestion)
+	}
+
+	storyTitles := map[string]struct{}{}
+	for _, milestoneRaw := range epic["milestones"].([]any) {
+		milestone := milestoneRaw.(map[string]any)
+		for _, storyRaw := range mapSlice(milestone["stories"]) {
+			storyTitles[stringField(storyRaw, "title")] = struct{}{}
+		}
+	}
+	if _, ok := storyTitles[wantQuestion]; ok {
+		t.Fatalf("question step imported as story: %q", wantQuestion)
+	}
+	if _, ok := storyTitles["Implement command wiring"]; !ok {
+		t.Fatalf("story %q missing from imported epic", "Implement command wiring")
+	}
+}
+
+func TestRunRoomEpicImportPlanEvolveFixtureExcludesOpenQuestionStoriesFromFrontier(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	planPath := filepath.Join("..", "..", "..", "docs", "plans", "features", "foxctl-evolve-plan.md")
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicImportPlan(cmd, workspace, "human-a", "alpha", planPath, "claude"); err != nil {
+		t.Fatalf("runRoomEpicImportPlan: %v", err)
+	}
+	epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicShow(cmd, workspace, "alpha", epicID, roomTaskScanLimit); err != nil {
+		t.Fatalf("runRoomEpicShow: %v", err)
+	}
+	epic := decodeRoomEnvelope(t, out)["epic"].(map[string]any)
+	if got := epic["question_count"]; got != float64(5) {
+		t.Fatalf("question_count=%v want 5", got)
+	}
+	if got := epic["open_questions"]; got != float64(5) {
+		t.Fatalf("open_questions=%v want 5", got)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicFrontier(cmd, workspace, "alpha", epicID, 200); err != nil {
+		t.Fatalf("runRoomEpicFrontier: %v", err)
+	}
+	frontier := decodeRoomEnvelope(t, out)
+	const forbiddenQuestion = "Should active-run selection be single-run-per-workspace or multi-run with an explicit --run selector on every command?"
+	for _, raw := range append(mapSlice(frontier["ready_frontier"]), mapSlice(frontier["blocked_frontier"])...) {
+		title := strings.TrimSpace(stringField(raw, "story_title"))
+		if strings.HasSuffix(title, "?") {
+			t.Fatalf("frontier includes question-style story title %q", title)
+		}
+		if title == forbiddenQuestion {
+			t.Fatalf("frontier includes Open questions item %q", forbiddenQuestion)
+		}
+	}
+}
+
 func TestRunRoomEpicImportPlanOpenCodeJSON(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
