@@ -645,6 +645,7 @@ func newRoomEpicCommand() *cobra.Command {
 		newRoomEpicResumeCommand(),
 		newRoomEpicHealthCommand(),
 		newRoomEpicStatusCommand(),
+		newRoomEpicFrontierCommand(),
 		newRoomEpicScoutCommand(),
 		newRoomEpicSnapshotCommand(),
 		newRoomEpicGradeCommand(),
@@ -791,6 +792,24 @@ func newRoomEpicStatusCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRoomEpicStatus(cmd, workspace, args[0], args[1], limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", roomTaskScanLimit, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomEpicFrontierCommand() *cobra.Command {
+	var (
+		workspace string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "frontier <room-id> <epic-id>",
+		Short: "Return a deterministic execution frontier for one epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicFrontier(cmd, workspace, args[0], args[1], limit)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -4703,6 +4722,45 @@ func runRoomEpicStatus(cmd *cobra.Command, workspace, roomID, epicID string, lim
 		"health": health,
 		"status": status,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicFrontier(cmd *cobra.Command, workspace, roomID, epicID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	if limit <= 0 {
+		limit = roomTaskScanLimit
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.frontier", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.frontier", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epic := roomEpicViewByID(buildRoomEpicViews(messages), epicID)
+	if epic == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.frontier", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+			"hint": "Run `foxctl room epic show <room-id>` to list available epics.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	health := buildRoomEpicHealth(summary, messages, epic, "")
+	status := buildRoomEpicStatus(epic, health)
+	frontier := buildRoomEpicFrontier(roomID, epic, status)
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.frontier", frontier, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
 func runRoomEpicScout(cmd *cobra.Command, workspace, roomID, epicID string, limit int) error {
@@ -8751,6 +8809,228 @@ func buildRoomEpicStatus(epic, health map[string]any) map[string]any {
 		"structural_gaps":         structuralGaps,
 		"next_pipeline_stage":     nextStage,
 	}
+}
+
+func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[string]any {
+	milestones := append([]map[string]any(nil), mapSlice(epic["milestones"])...)
+	sort.Slice(milestones, func(i, j int) bool {
+		leftID := stringField(milestones[i], "id")
+		rightID := stringField(milestones[j], "id")
+		if leftID != rightID {
+			return leftID < rightID
+		}
+		return stringField(milestones[i], "title") < stringField(milestones[j], "title")
+	})
+
+	milestoneByID := make(map[string]map[string]any, len(milestones))
+	for _, milestone := range milestones {
+		id := strings.TrimSpace(stringField(milestone, "id"))
+		if id == "" {
+			continue
+		}
+		milestoneByID[id] = milestone
+	}
+
+	readyFrontier := make([]map[string]any, 0)
+	blockedFrontier := make([]map[string]any, 0)
+	dependencyGaps := make([]map[string]any, 0)
+	gapSeen := make(map[string]struct{})
+	acceptedStoryCount := 0
+
+	for _, milestone := range milestones {
+		milestoneID := stringField(milestone, "id")
+		milestoneTitle := stringField(milestone, "title")
+		milestoneStatus := strings.TrimSpace(strings.ToLower(stringField(milestone, "status")))
+
+		unmetDependencies := make([]map[string]any, 0)
+		milestoneGaps := make([]map[string]any, 0)
+		for _, dependency := range roomMilestoneDependencyIDs(milestone) {
+			upstream := milestoneByID[dependency]
+			if upstream == nil {
+				gap := map[string]any{
+					"milestone_id":    milestoneID,
+					"milestone_title": milestoneTitle,
+					"dependency":      dependency,
+					"reason":          "unresolved_milestone_dependency",
+				}
+				milestoneGaps = append(milestoneGaps, gap)
+				if _, seen := gapSeen[milestoneID+"|"+dependency]; !seen {
+					dependencyGaps = append(dependencyGaps, gap)
+					gapSeen[milestoneID+"|"+dependency] = struct{}{}
+				}
+				continue
+			}
+			upstreamStatus := strings.TrimSpace(strings.ToLower(stringField(upstream, "status")))
+			if upstreamStatus != "passed" {
+				unmetDependencies = append(unmetDependencies, map[string]any{
+					"dependency":               dependency,
+					"upstream_milestone_id":    stringField(upstream, "id"),
+					"upstream_milestone_title": stringField(upstream, "title"),
+					"upstream_status":          upstreamStatus,
+				})
+			}
+		}
+		sort.Slice(unmetDependencies, func(i, j int) bool {
+			left := stringField(unmetDependencies[i], "upstream_milestone_id")
+			right := stringField(unmetDependencies[j], "upstream_milestone_id")
+			if left != right {
+				return left < right
+			}
+			return stringField(unmetDependencies[i], "dependency") < stringField(unmetDependencies[j], "dependency")
+		})
+		sort.Slice(milestoneGaps, func(i, j int) bool {
+			return stringField(milestoneGaps[i], "dependency") < stringField(milestoneGaps[j], "dependency")
+		})
+
+		stories := append([]map[string]any(nil), mapSlice(milestone["stories"])...)
+		sort.Slice(stories, func(i, j int) bool {
+			leftID := stringField(stories[i], "id")
+			rightID := stringField(stories[j], "id")
+			if leftID != rightID {
+				return leftID < rightID
+			}
+			return stringField(stories[i], "title") < stringField(stories[j], "title")
+		})
+		for _, story := range stories {
+			if strings.TrimSpace(strings.ToLower(stringField(story, "status"))) != "accepted" {
+				continue
+			}
+			acceptedStoryCount++
+
+			storyState := strings.TrimSpace(strings.ToLower(stringField(story, "state")))
+			reasonCodes := make([]string, 0, 4)
+			if storyState == "blocked" {
+				reasonCodes = append(reasonCodes, "story_state_blocked")
+			}
+			if milestoneStatus == "blocked" {
+				reasonCodes = append(reasonCodes, "milestone_blocked")
+			}
+			if len(unmetDependencies) > 0 {
+				reasonCodes = append(reasonCodes, "unmet_milestone_dependency")
+			}
+			if len(milestoneGaps) > 0 {
+				reasonCodes = append(reasonCodes, "dependency_gap")
+			}
+
+			item := map[string]any{
+				"story_id":         stringField(story, "id"),
+				"story_title":      stringField(story, "title"),
+				"story_state":      storyState,
+				"milestone_id":     milestoneID,
+				"milestone_title":  milestoneTitle,
+				"milestone_status": milestoneStatus,
+			}
+			if owner := stringField(anyMap(story["meta"]), "owner"); owner != "" {
+				item["owner"] = owner
+			}
+
+			if len(reasonCodes) == 0 {
+				readyFrontier = append(readyFrontier, item)
+				continue
+			}
+			item["reason_codes"] = reasonCodes
+			item["reason"] = buildRoomEpicFrontierBlockedReason(reasonCodes)
+			if len(unmetDependencies) > 0 {
+				item["unmet_dependencies"] = cloneRoomMapSlice(unmetDependencies)
+			}
+			if len(milestoneGaps) > 0 {
+				item["dependency_gaps"] = cloneRoomMapSlice(milestoneGaps)
+			}
+			blockedFrontier = append(blockedFrontier, item)
+		}
+	}
+
+	sortRoomEpicFrontierItems(readyFrontier)
+	sortRoomEpicFrontierItems(blockedFrontier)
+	sort.Slice(dependencyGaps, func(i, j int) bool {
+		leftMilestone := stringField(dependencyGaps[i], "milestone_id")
+		rightMilestone := stringField(dependencyGaps[j], "milestone_id")
+		if leftMilestone != rightMilestone {
+			return leftMilestone < rightMilestone
+		}
+		return stringField(dependencyGaps[i], "dependency") < stringField(dependencyGaps[j], "dependency")
+	})
+
+	storyCount := len(readyFrontier) + len(blockedFrontier)
+	summary := fmt.Sprintf(
+		"%d ready and %d blocked accepted stor%s across %d milestone%s.",
+		len(readyFrontier),
+		len(blockedFrontier),
+		pluralSuffix(storyCount, "y", "ies"),
+		len(milestones),
+		pluralS(len(milestones)),
+	)
+	if len(dependencyGaps) > 0 {
+		summary += fmt.Sprintf(" %d dependency gap%s need milestone-id fixes.", len(dependencyGaps), pluralS(len(dependencyGaps)))
+	}
+
+	return map[string]any{
+		"schema_version": "room.epic.frontier.v1",
+		"scope": map[string]any{
+			"room_id":              strings.TrimSpace(roomID),
+			"epic_id":              stringField(epic, "id"),
+			"epic_title":           stringField(epic, "title"),
+			"status_phase":         stringField(status, "phase"),
+			"milestone_count":      len(milestones),
+			"story_count":          intField(epic, "story_count"),
+			"accepted_story_count": acceptedStoryCount,
+		},
+		"ready_frontier":    readyFrontier,
+		"blocked_frontier":  blockedFrontier,
+		"dependency_gaps":   dependencyGaps,
+		"parallelism_width": len(readyFrontier),
+		"summary":           summary,
+		"notes": []string{
+			"Story-level dependencies are not modeled in room-agile v1; frontier uses milestone dependencies and current story/milestone state only.",
+		},
+	}
+}
+
+func roomMilestoneDependencyIDs(milestone map[string]any) []string {
+	meta := anyMap(milestone["meta"])
+	if meta == nil {
+		return nil
+	}
+	return normalizeRoomList(stringSliceField(meta, "dependencies"), true)
+}
+
+func sortRoomEpicFrontierItems(items []map[string]any) {
+	sort.Slice(items, func(i, j int) bool {
+		leftMilestone := stringField(items[i], "milestone_id")
+		rightMilestone := stringField(items[j], "milestone_id")
+		if leftMilestone != rightMilestone {
+			return leftMilestone < rightMilestone
+		}
+		leftStory := stringField(items[i], "story_id")
+		rightStory := stringField(items[j], "story_id")
+		if leftStory != rightStory {
+			return leftStory < rightStory
+		}
+		return stringField(items[i], "story_title") < stringField(items[j], "story_title")
+	})
+}
+
+func buildRoomEpicFrontierBlockedReason(reasonCodes []string) string {
+	if len(reasonCodes) == 0 {
+		return ""
+	}
+	reasons := make([]string, 0, len(reasonCodes))
+	for _, code := range reasonCodes {
+		switch code {
+		case "story_state_blocked":
+			reasons = append(reasons, "story state is blocked")
+		case "milestone_blocked":
+			reasons = append(reasons, "milestone is blocked")
+		case "unmet_milestone_dependency":
+			reasons = append(reasons, "milestone has unmet upstream dependency")
+		case "dependency_gap":
+			reasons = append(reasons, "milestone has unresolved dependency references")
+		}
+	}
+	if len(reasons) == 0 {
+		return "blocked"
+	}
+	return strings.Join(reasons, "; ")
 }
 
 var roomEpicScoutRuleFamilies = []string{
