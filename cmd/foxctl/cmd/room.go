@@ -9981,19 +9981,23 @@ func buildRoomEpicScoutFindings(epic, health map[string]any) []map[string]any {
 func buildRoomEpicDependencyTopologyFindings(epicID string, milestones []map[string]any) []map[string]any {
 	findings := make([]map[string]any, 0)
 	milestoneByID := make(map[string]struct{}, len(milestones))
+	milestoneGraph := make(map[string][]string, len(milestones))
 	storyByID := make(map[string]struct{})
+	storyGraph := make(map[string][]string)
 	for _, milestone := range milestones {
 		milestoneID := strings.TrimSpace(stringField(milestone, "id"))
 		if milestoneID == "" {
 			continue
 		}
 		milestoneByID[milestoneID] = struct{}{}
+		milestoneGraph[milestoneID] = nil
 		for _, story := range mapSlice(milestone["stories"]) {
 			storyID := strings.TrimSpace(stringField(story, "id"))
 			if storyID == "" {
 				continue
 			}
 			storyByID[storyID] = struct{}{}
+			storyGraph[storyID] = nil
 		}
 	}
 	for _, milestone := range milestones {
@@ -10022,6 +10026,7 @@ func buildRoomEpicDependencyTopologyFindings(epicID string, milestones []map[str
 				})
 			default:
 				if _, ok := milestoneByID[dependencyID]; ok {
+					milestoneGraph[milestoneID] = append(milestoneGraph[milestoneID], dependencyID)
 					continue
 				}
 				findings = append(findings, map[string]any{
@@ -10069,6 +10074,7 @@ func buildRoomEpicDependencyTopologyFindings(epicID string, milestones []map[str
 					})
 				default:
 					if _, ok := storyByID[dependencyID]; ok {
+						storyGraph[storyID] = append(storyGraph[storyID], dependencyID)
 						continue
 					}
 					findings = append(findings, map[string]any{
@@ -10092,7 +10098,132 @@ func buildRoomEpicDependencyTopologyFindings(epicID string, milestones []map[str
 			}
 		}
 	}
+	for _, cycleMembers := range detectRoomDependencyCycles(milestoneGraph) {
+		cycleKey := strings.Join(cycleMembers, "+")
+		findings = append(findings, map[string]any{
+			"id":                       fmt.Sprintf("dependency_topology:milestone:cycle:%s", cycleKey),
+			"rule_family":              "dependency_topology",
+			"severity":                 "blocking",
+			"entity_type":              "milestone",
+			"entity_id":                cycleMembers[0],
+			"title":                    "Milestone dependency cycle detected",
+			"summary":                  "Milestone dependency ids form a cycle and cannot be satisfied.",
+			"recommended_repair_lanes": []string{"milestone.contract"},
+			"evidence": map[string]any{
+				"epic_id":          epicID,
+				"cycle_member_ids": cycleMembers,
+				"cycle_size":       len(cycleMembers),
+				"reason":           "milestone_dependency_cycle",
+			},
+		})
+	}
+	for _, cycleMembers := range detectRoomDependencyCycles(storyGraph) {
+		cycleKey := strings.Join(cycleMembers, "+")
+		findings = append(findings, map[string]any{
+			"id":                       fmt.Sprintf("dependency_topology:story:cycle:%s", cycleKey),
+			"rule_family":              "dependency_topology",
+			"severity":                 "blocking",
+			"entity_type":              "story",
+			"entity_id":                cycleMembers[0],
+			"title":                    "Story dependency cycle detected",
+			"summary":                  "Story dependency ids form a cycle and cannot be satisfied.",
+			"recommended_repair_lanes": []string{"story.update"},
+			"evidence": map[string]any{
+				"epic_id":          epicID,
+				"cycle_member_ids": cycleMembers,
+				"cycle_size":       len(cycleMembers),
+				"reason":           "story_dependency_cycle",
+			},
+		})
+	}
 	return findings
+}
+
+func detectRoomDependencyCycles(graph map[string][]string) [][]string {
+	if len(graph) == 0 {
+		return nil
+	}
+	nodes := make([]string, 0, len(graph))
+	for node := range graph {
+		node = strings.TrimSpace(node)
+		if node == "" {
+			continue
+		}
+		nodes = append(nodes, node)
+	}
+	if len(nodes) == 0 {
+		return nil
+	}
+	sort.Strings(nodes)
+	adj := make(map[string][]string, len(nodes))
+	rev := make(map[string][]string, len(nodes))
+	for _, node := range nodes {
+		adj[node] = nil
+		rev[node] = nil
+	}
+	for _, node := range nodes {
+		for _, dep := range normalizeRoomList(graph[node], true) {
+			dep = strings.TrimSpace(dep)
+			if dep == "" || dep == node {
+				continue
+			}
+			if _, ok := adj[dep]; !ok {
+				continue
+			}
+			adj[node] = append(adj[node], dep)
+			rev[dep] = append(rev[dep], node)
+		}
+	}
+	for _, node := range nodes {
+		adj[node] = normalizeRoomList(adj[node], true)
+		rev[node] = normalizeRoomList(rev[node], true)
+	}
+	visited := make(map[string]bool, len(nodes))
+	order := make([]string, 0, len(nodes))
+	var forward func(string)
+	forward = func(node string) {
+		visited[node] = true
+		for _, next := range adj[node] {
+			if !visited[next] {
+				forward(next)
+			}
+		}
+		order = append(order, node)
+	}
+	for _, node := range nodes {
+		if !visited[node] {
+			forward(node)
+		}
+	}
+	visited = make(map[string]bool, len(nodes))
+	components := make([][]string, 0)
+	var backward func(string, *[]string)
+	backward = func(node string, component *[]string) {
+		visited[node] = true
+		*component = append(*component, node)
+		for _, next := range rev[node] {
+			if !visited[next] {
+				backward(next, component)
+			}
+		}
+	}
+	for idx := len(order) - 1; idx >= 0; idx-- {
+		node := order[idx]
+		if visited[node] {
+			continue
+		}
+		component := make([]string, 0, 1)
+		backward(node, &component)
+		if len(component) <= 1 {
+			continue
+		}
+		sort.Strings(component)
+		components = append(components, component)
+	}
+	sort.Slice(components, func(i, j int) bool {
+		return strings.Join(components[i], ",") < strings.Join(components[j], ",")
+	})
+	return components
 }
 
 func roomEpicScoutRuleFamilyRank(family string) int {
@@ -10503,8 +10634,8 @@ func buildRoomEpicGrade(epic, health, scout map[string]any, mission *factoryMiss
 		deduct(&milestoneScore, minInt(3, missingValidationContract), fmt.Sprintf("%d milestone(s) do not express validator or evidence expectations.", missingValidationContract), &milestoneReasons)
 		if dependencyTopologyMilestoneCount > 0 {
 			deduct(&milestoneScore, minInt(3, dependencyTopologyMilestoneCount), fmt.Sprintf("Scout reports %d milestone dependency-topology issue%s.", dependencyTopologyMilestoneCount, pluralS(dependencyTopologyMilestoneCount)), &milestoneReasons)
-			addUnique(&acc.blockers, "One or more milestones have unresolved or self-referential dependency ids.")
-			addUnique(&acc.actions, "Repair milestone dependency ids with `foxctl room milestone contract <room-id> <milestone-id> --dependency <milestone-id>` or clear stale edges with `--clear-dependencies`.")
+			addUnique(&acc.blockers, "One or more milestones have unresolved, self-referential, or cyclic dependency ids.")
+			addUnique(&acc.actions, "Repair milestone dependency ids with `foxctl room milestone contract <room-id> <milestone-id> --dependency <milestone-id>`, clear stale edges with `--clear-dependencies`, and break cyclic milestone chains.")
 		}
 		if missingContract > 0 {
 			addUnique(&acc.blockers, "One or more milestones are missing an explicit contract.")
@@ -10542,8 +10673,8 @@ func buildRoomEpicGrade(epic, health, scout map[string]any, mission *factoryMiss
 		deduct(&storyScore, minInt(4, missingOwner), fmt.Sprintf("%d stor%s lack an owner.", missingOwner, pluralSuffix(missingOwner, "y", "ies")), &storyReasons)
 		if dependencyTopologyStoryCount > 0 {
 			deduct(&storyScore, minInt(4, dependencyTopologyStoryCount*2), fmt.Sprintf("Scout reports %d story dependency-topology issue%s.", dependencyTopologyStoryCount, pluralS(dependencyTopologyStoryCount)), &storyReasons)
-			addUnique(&acc.blockers, "One or more stories have unresolved or self-referential dependency ids.")
-			addUnique(&acc.actions, "Repair story dependency ids with `foxctl room story update <room-id> <story-id> --dependency <story-id>` or clear stale edges with `--clear-dependencies`.")
+			addUnique(&acc.blockers, "One or more stories have unresolved, self-referential, or cyclic dependency ids.")
+			addUnique(&acc.actions, "Repair story dependency ids with `foxctl room story update <room-id> <story-id> --dependency <story-id>`, clear stale edges with `--clear-dependencies`, and break cyclic story chains.")
 		}
 		if mission != nil {
 			expectedStories := len(mission.Features)

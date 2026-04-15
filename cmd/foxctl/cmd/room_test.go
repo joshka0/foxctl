@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -4571,7 +4572,7 @@ func TestRunRoomEpicGradeDependencyTopologyPenalty(t *testing.T) {
 		t.Fatalf("Story Shape reasons=%v want dependency-topology reason", reasons)
 	}
 	blockers := stringSliceValue(grade["blockers"])
-	if !roomStringSliceContainsSubstring(blockers, "stories have unresolved or self-referential dependency ids") {
+	if !roomStringSliceContainsSubstring(blockers, "stories have unresolved, self-referential, or cyclic dependency ids") {
 		t.Fatalf("blockers=%v want dependency topology blocker", blockers)
 	}
 }
@@ -5726,6 +5727,240 @@ func TestRunRoomEpicScoutDependencyTopologyFindings(t *testing.T) {
 		if _, ok := gotIDs[id]; !ok {
 			t.Fatalf("missing dependency_topology finding %q (got=%v)", id, gotIDs)
 		}
+	}
+}
+
+func TestRunRoomEpicScoutDependencyTopologyMilestoneCycleFinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, milestoneA, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomMilestoneStart(cmd, workspace, "human-a", "alpha", epicID, "Cycle milestone", "", "", "human-a", nil, nil, nil, nil, nil, nil, ""); err != nil {
+		t.Fatalf("runRoomMilestoneStart: %v", err)
+	}
+	milestoneB := decodeRoomEnvelope(t, out)["milestone_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneA, "", nil, nil, []string{milestoneB}, nil, nil, nil, nil, nil); err != nil {
+		t.Fatalf("runRoomMilestoneContractWithPolicy milestoneA: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneB, "", nil, nil, []string{milestoneA}, nil, nil, nil, nil, nil); err != nil {
+		t.Fatalf("runRoomMilestoneContractWithPolicy milestoneB: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicScout(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicScout: %v", err)
+	}
+	scout := decodeRoomEnvelope(t, out)["scout"].(map[string]any)
+	cycleFindings := roomScoutFindingsByFamilyAndReason(scout, "dependency_topology", "milestone_dependency_cycle")
+	if len(cycleFindings) != 1 {
+		t.Fatalf("len(milestone cycle findings)=%d want 1 findings=%v", len(cycleFindings), cycleFindings)
+	}
+	wantMembers := []string{milestoneA, milestoneB}
+	sort.Strings(wantMembers)
+	wantID := fmt.Sprintf("dependency_topology:milestone:cycle:%s", strings.Join(wantMembers, "+"))
+	if got := stringField(cycleFindings[0], "id"); got != wantID {
+		t.Fatalf("cycle id=%q want %q", got, wantID)
+	}
+	evidence := anyMap(cycleFindings[0]["evidence"])
+	gotMembers := stringSliceValue(evidence["cycle_member_ids"])
+	if len(gotMembers) != len(wantMembers) || gotMembers[0] != wantMembers[0] || gotMembers[1] != wantMembers[1] {
+		t.Fatalf("cycle_member_ids=%v want %v", gotMembers, wantMembers)
+	}
+}
+
+func TestRunRoomEpicScoutDependencyTopologyStoryCycleFinding(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, milestoneID, storyA := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Cycle story", "Second story for cycle coverage.", "human-a"); err != nil {
+		t.Fatalf("runRoomStoryAdd: %v", err)
+	}
+	storyB := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", storyB); err != nil {
+		t.Fatalf("Set dependency storyB: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyA, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate storyA: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", storyA); err != nil {
+		t.Fatalf("Set dependency storyA: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyB, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate storyB: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicScout(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicScout: %v", err)
+	}
+	scout := decodeRoomEnvelope(t, out)["scout"].(map[string]any)
+	cycleFindings := roomScoutFindingsByFamilyAndReason(scout, "dependency_topology", "story_dependency_cycle")
+	if len(cycleFindings) != 1 {
+		t.Fatalf("len(story cycle findings)=%d want 1 findings=%v", len(cycleFindings), cycleFindings)
+	}
+	wantMembers := []string{storyA, storyB}
+	sort.Strings(wantMembers)
+	wantID := fmt.Sprintf("dependency_topology:story:cycle:%s", strings.Join(wantMembers, "+"))
+	if got := stringField(cycleFindings[0], "id"); got != wantID {
+		t.Fatalf("cycle id=%q want %q", got, wantID)
+	}
+	evidence := anyMap(cycleFindings[0]["evidence"])
+	gotMembers := stringSliceValue(evidence["cycle_member_ids"])
+	if len(gotMembers) != len(wantMembers) || gotMembers[0] != wantMembers[0] || gotMembers[1] != wantMembers[1] {
+		t.Fatalf("cycle_member_ids=%v want %v", gotMembers, wantMembers)
+	}
+}
+
+func TestRunRoomEpicScoutDependencyTopologyDeduplicatesSimpleStoryCycle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, milestoneID, storyA := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Cycle story B", "Cycle node B.", "human-a"); err != nil {
+		t.Fatalf("runRoomStoryAdd storyB: %v", err)
+	}
+	storyB := decodeRoomEnvelope(t, out)["story_id"].(string)
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Cycle story C", "Cycle node C.", "human-a"); err != nil {
+		t.Fatalf("runRoomStoryAdd storyC: %v", err)
+	}
+	storyC := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", storyB); err != nil {
+		t.Fatalf("Set storyA dependency: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyA, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate storyA: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", storyC); err != nil {
+		t.Fatalf("Set storyB dependency: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyB, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate storyB: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", storyA); err != nil {
+		t.Fatalf("Set storyC dependency: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyC, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate storyC: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicScout(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicScout: %v", err)
+	}
+	scout := decodeRoomEnvelope(t, out)["scout"].(map[string]any)
+	cycleFindings := roomScoutFindingsByFamilyAndReason(scout, "dependency_topology", "story_dependency_cycle")
+	if len(cycleFindings) != 1 {
+		t.Fatalf("len(story cycle findings)=%d want 1 findings=%v", len(cycleFindings), cycleFindings)
+	}
+	wantMembers := []string{storyA, storyB, storyC}
+	sort.Strings(wantMembers)
+	evidence := anyMap(cycleFindings[0]["evidence"])
+	gotMembers := stringSliceValue(evidence["cycle_member_ids"])
+	if len(gotMembers) != len(wantMembers) || gotMembers[0] != wantMembers[0] || gotMembers[1] != wantMembers[1] || gotMembers[2] != wantMembers[2] {
+		t.Fatalf("cycle_member_ids=%v want %v", gotMembers, wantMembers)
+	}
+}
+
+func TestRunRoomEpicGradeDependencyTopologyCyclePenaltyDeterministic(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, milestoneID, storyA := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Cycle story", "Second story for cycle grading.", "human-a"); err != nil {
+		t.Fatalf("runRoomStoryAdd: %v", err)
+	}
+	storyB := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicGrade(cmd, workspace, "alpha", epicID, 100, "", roomEpicGradePublishOptions{}); err != nil {
+		t.Fatalf("runRoomEpicGrade baseline: %v", err)
+	}
+	baseline := decodeRoomEnvelope(t, out)["grade"].(map[string]any)
+	baselineStoryScore := roomCategoryScoreByName(t, baseline["categories"].([]any), "Story Shape")
+
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", storyB); err != nil {
+		t.Fatalf("Set storyA dependency: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyA, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate storyA: %v", err)
+	}
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", storyA); err != nil {
+		t.Fatalf("Set storyB dependency: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyB, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate storyB: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicGrade(cmd, workspace, "alpha", epicID, 100, "", roomEpicGradePublishOptions{}); err != nil {
+		t.Fatalf("runRoomEpicGrade first: %v", err)
+	}
+	first := decodeRoomEnvelope(t, out)["grade"].(map[string]any)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicGrade(cmd, workspace, "alpha", epicID, 100, "", roomEpicGradePublishOptions{}); err != nil {
+		t.Fatalf("runRoomEpicGrade second: %v", err)
+	}
+	second := decodeRoomEnvelope(t, out)["grade"].(map[string]any)
+
+	firstStoryScore := roomCategoryScoreByName(t, first["categories"].([]any), "Story Shape")
+	secondStoryScore := roomCategoryScoreByName(t, second["categories"].([]any), "Story Shape")
+	if firstStoryScore != baselineStoryScore-2 {
+		t.Fatalf("first Story Shape score=%d want baseline-2 (%d)", firstStoryScore, baselineStoryScore-2)
+	}
+	if secondStoryScore != firstStoryScore {
+		t.Fatalf("second Story Shape score=%d want %d", secondStoryScore, firstStoryScore)
+	}
+
+	firstFamilyCounts := first["scout_signals"].(map[string]any)["family_counts"].(map[string]any)
+	secondFamilyCounts := second["scout_signals"].(map[string]any)["family_counts"].(map[string]any)
+	if got := firstFamilyCounts["dependency_topology"]; got != float64(1) {
+		t.Fatalf("first dependency_topology family count=%v want 1", got)
+	}
+	if got := secondFamilyCounts["dependency_topology"]; got != float64(1) {
+		t.Fatalf("second dependency_topology family count=%v want 1", got)
+	}
+
+	firstBlockers := stringSliceValue(first["blockers"])
+	secondBlockers := stringSliceValue(second["blockers"])
+	if !roomStringSliceContainsSubstring(firstBlockers, "stories have unresolved, self-referential, or cyclic dependency ids") {
+		t.Fatalf("first blockers=%v want cyclic dependency blocker", firstBlockers)
+	}
+	if strings.Join(firstBlockers, "\n") != strings.Join(secondBlockers, "\n") {
+		t.Fatalf("blockers are not deterministic: first=%v second=%v", firstBlockers, secondBlockers)
 	}
 }
 
@@ -11057,6 +11292,23 @@ func roomStringSliceContainsSubstring(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func roomScoutFindingsByFamilyAndReason(scout map[string]any, family, reason string) []map[string]any {
+	findings := make([]map[string]any, 0)
+	rawFindings, _ := scout["findings"].([]any)
+	for _, raw := range rawFindings {
+		finding, ok := raw.(map[string]any)
+		if !ok || stringField(finding, "rule_family") != family {
+			continue
+		}
+		evidence := anyMap(finding["evidence"])
+		if stringField(evidence, "reason") != reason {
+			continue
+		}
+		findings = append(findings, finding)
+	}
+	return findings
 }
 
 func TestBuildRoomEpicGradeDispatchArtifacts(t *testing.T) {
