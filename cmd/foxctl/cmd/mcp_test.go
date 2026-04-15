@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -111,6 +112,190 @@ func TestDecodeSkillExecutionEnvelope(t *testing.T) {
 	}
 	if env.Error.Message != "adb not found" {
 		t.Fatalf("message=%q want adb not found", env.Error.Message)
+	}
+}
+
+func TestApplyMCPPipeQuery_ProjectsJSON(t *testing.T) {
+	input := map[string]any{
+		"result": map[string]any{
+			"items": []any{
+				map[string]any{"id": 1, "name": "alpha"},
+				map[string]any{"id": 2, "name": "beta"},
+			},
+		},
+	}
+
+	projected, err := applyMCPPipeQuery(input, "result.items.1.name")
+	if err != nil {
+		t.Fatalf("applyMCPPipeQuery: %v", err)
+	}
+	if projected != "beta" {
+		t.Fatalf("projected=%v want beta", projected)
+	}
+}
+
+func TestHandleMCPPipe_ProjectsBeforeTruncation(t *testing.T) {
+	original := mcpPipeSourceRunner
+	mcpPipeSourceRunner = func(_ context.Context, toolName string, args map[string]any) (any, error) {
+		if toolName != "web_search" {
+			t.Fatalf("toolName=%q", toolName)
+		}
+		if args["query"] != "golang" {
+			t.Fatalf("query=%v", args["query"])
+		}
+		return map[string]any{
+			"huge":   strings.Repeat("x", maxInlineResponseBytes*3),
+			"result": map[string]any{"value": "small"},
+		}, nil
+	}
+	defer func() { mcpPipeSourceRunner = original }()
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"tool":  "web_search",
+		"args":  map[string]any{"query": "golang"},
+		"query": "result.value",
+	}
+
+	result, err := handleMCPPipe(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleMCPPipe: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", firstTextContent(result))
+	}
+	if got := strings.TrimSpace(firstTextContent(result)); got != `"small"` {
+		t.Fatalf("unexpected projected content: %q", got)
+	}
+	if result.StructuredContent != nil {
+		t.Fatalf("expected untruncated result, got structured truncation metadata: %#v", result.StructuredContent)
+	}
+}
+
+func TestHandleMCPPipe_RejectsUnsupportedTool(t *testing.T) {
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"tool":  "not_real",
+		"query": "result",
+	}
+
+	result, err := handleMCPPipe(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleMCPPipe: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	if text := firstTextContent(result); !strings.Contains(text, "unsupported tool") {
+		t.Fatalf("unexpected error text: %q", text)
+	}
+}
+
+func TestSummarizeMCPKeys_UsesWildcardArrayPaths(t *testing.T) {
+	input := map[string]any{
+		"result": map[string]any{
+			"values": []any{
+				map[string]any{"name": "Board A", "description": "Alpha"},
+				map[string]any{"name": "Board B", "description": "Beta"},
+			},
+		},
+	}
+
+	summary, err := summarizeMCPKeys(input, "result")
+	if err != nil {
+		t.Fatalf("summarizeMCPKeys: %v", err)
+	}
+
+	allKeys, ok := summary["all_keys"].([]string)
+	if !ok {
+		t.Fatalf("all_keys has unexpected type: %T", summary["all_keys"])
+	}
+	joined := strings.Join(allKeys, ",")
+	for _, want := range []string{"values", "values[]", "values[].description", "values[].name"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected %q in all_keys: %v", want, allKeys)
+		}
+	}
+}
+
+func TestHandleMCPKeys_ReturnsProjectedKeys(t *testing.T) {
+	original := mcpPipeSourceRunner
+	mcpPipeSourceRunner = func(_ context.Context, toolName string, args map[string]any) (any, error) {
+		if toolName != "foxctl_run" {
+			t.Fatalf("toolName=%q", toolName)
+		}
+		inputArg, _ := args["input"].(map[string]any)
+		if args["skill"] != "jira/board" {
+			t.Fatalf("skill=%v", args["skill"])
+		}
+		if inputArg["operation"] != "list" {
+			t.Fatalf("operation=%v", inputArg["operation"])
+		}
+		return map[string]any{
+			"result": map[string]any{
+				"values": []any{
+					map[string]any{"name": "Platform", "description": "Core board"},
+				},
+			},
+		}, nil
+	}
+	defer func() { mcpPipeSourceRunner = original }()
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{
+		"tool": "foxctl_run",
+		"args": map[string]any{
+			"skill": "jira/board",
+			"input": map[string]any{"operation": "list"},
+		},
+		"path": "result",
+	}
+
+	result, err := handleMCPKeys(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleMCPKeys: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", firstTextContent(result))
+	}
+	text := firstTextContent(result)
+	for _, want := range []string{`"values[].name"`, `"values[].description"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %s in result: %s", want, text)
+		}
+	}
+}
+
+func TestNormalizeBackendToolResult_PrefersParsedTextJSON(t *testing.T) {
+	upstream := &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.TextContent{Text: `{"items":[{"id":1},{"id":2}]}`},
+		},
+	}
+
+	normalized, err := normalizeBackendToolResult("web_search_exa", "backend:exa", upstream)
+	if err != nil {
+		t.Fatalf("normalizeBackendToolResult: %v", err)
+	}
+
+	resultJSON, err := json.Marshal(normalized["result"])
+	if err != nil {
+		t.Fatalf("marshal normalized result: %v", err)
+	}
+	if !strings.Contains(string(resultJSON), `"items"`) {
+		t.Fatalf("expected parsed JSON result, got %s", resultJSON)
+	}
+}
+
+func TestRegisterFoxctlTools_RegistersFoxctlTools(t *testing.T) {
+	srv := server.NewMCPServer("foxctl", "test")
+	registerFoxctlTools(srv)
+
+	tools := srv.ListTools()
+	for _, name := range []string{"foxctl_run", "foxctl_skills"} {
+		if _, ok := tools[name]; !ok {
+			t.Fatalf("expected tool %q to be registered", name)
+		}
 	}
 }
 

@@ -7,13 +7,13 @@
 # first and can target specific functions/types by line number.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_SMART_READ_INCLUDE_PRIVATE - Include private symbols (default: true)
+#   FOXCTL_BIN - Path to foxctl binary (default: foxctl)
+#   FOXCTL_SMART_READ_INCLUDE_PRIVATE - Include private symbols (default: true)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-INCLUDE_PRIVATE="${AGENTCTL_SMART_READ_INCLUDE_PRIVATE:-true}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+INCLUDE_PRIVATE="${FOXCTL_SMART_READ_INCLUDE_PRIVATE:-true}"
 
 # Read hook input from stdin
 INPUT=$(cat)
@@ -56,7 +56,7 @@ input_json=$(jq -nc --arg path "$file_path" --argjson include_private "$INCLUDE_
   include_private: $include_private,
   max_results: 50
 }')
-result=$("$AGENTCTL_BIN" run --daemon code/symbols --input "$input_json" 2>/dev/null) || {
+result=$("$FOXCTL_BIN" run --daemon code/symbols --input "$input_json" 2>/dev/null) || {
   # On error, fail open
   echo '{}'
   exit 0

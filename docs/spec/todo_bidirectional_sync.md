@@ -52,7 +52,7 @@ Format:
 
 Priority order:
 1. `CLAUDE_SESSION_ID` env var
-2. `AGENTCTL_SESSION_ID` env var
+2. `FOXCTL_SESSION_ID` env var
 3. Identity file scan in `~/.foxctl/sessions/active/`
 4. Newest file in `~/.claude/todos/` matching workspace
 
@@ -145,7 +145,7 @@ Computes projection from foxctl tasks and writes provider todo file.
 | `workspace_id` | string | Workspace path |
 | `session_id` | string | Session identifier |
 | `provider` | string | `"claude"` |
-| `order` | string | `"agentctl_rank"` (default), `"stable"`, or `"off"` |
+| `order` | string | `"foxctl_rank"` (default), `"stable"`, or `"off"` |
 | `max_items` | int | Optional limit |
 | `dry_run` | bool | Preview only |
 
@@ -233,8 +233,8 @@ Within groups:
 * sort by foxctl rank score (pagerank + critical path + recency + signals)
 
 **Config knobs:**
-* `AGENTCTL_TODO_PROJECTION_ORDER=agentctl_rank|stable|off`
-* `AGENTCTL_TODO_PROJECTION_REORDER_CADENCE=on_todowrite|session_start|manual|N_seconds`
+* `FOXCTL_TODO_PROJECTION_ORDER=foxctl_rank|stable|off`
+* `FOXCTL_TODO_PROJECTION_REORDER_CADENCE=on_todowrite|session_start|manual|N_seconds`
 
 ---
 
@@ -274,7 +274,7 @@ Writing `~/.claude/todos` is **outside workspace**, so it must be privileged.
 
 * The provider todo file IO MUST live in an internal integration layer (daemon / hooks service), not as a general "filesystem" skill callable by arbitrary agents.
 * If exposed as a skill, it MUST require an explicit capability gate (env flag set by hooks), e.g.:
-  * `AGENTCTL_ALLOW_PROVIDER_STATE=1`
+  * `FOXCTL_ALLOW_PROVIDER_STATE=1`
 
 ### 10.2 Path policy
 
@@ -338,7 +338,7 @@ internal/
 ### 12.2 Session file locator
 
 Use existing identity/session detection:
-1. env: `CLAUDE_SESSION_ID` or `AGENTCTL_SESSION_ID`
+1. env: `CLAUDE_SESSION_ID` or `FOXCTL_SESSION_ID`
 2. fallback: identity file (`sessions.NewIdentityManager`)
 3. then map to file:
    * preferred: `~/.claude/todos/<sid>-agent-<sid>.json`
@@ -379,11 +379,11 @@ Use existing identity/session detection:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENTCTL_TODO_BIDIRECTIONAL` | `1` | Enable bidirectional sync |
-| `AGENTCTL_TODO_PROJECTION_ORDER` | `agentctl_rank` | Ordering: `agentctl_rank`, `stable`, `off` |
-| `AGENTCTL_TODO_PROJECTION_GLYPHS` | `1` | Enable status/dep glyphs |
-| `AGENTCTL_TODO_PROJECTION_CADENCE` | `on_todowrite` | When to reorder |
-| `AGENTCTL_ALLOW_PROVIDER_STATE` | `0` | Allow provider file writes (hooks only) |
+| `FOXCTL_TODO_BIDIRECTIONAL` | `1` | Enable bidirectional sync |
+| `FOXCTL_TODO_PROJECTION_ORDER` | `foxctl_rank` | Ordering: `foxctl_rank`, `stable`, `off` |
+| `FOXCTL_TODO_PROJECTION_GLYPHS` | `1` | Enable status/dep glyphs |
+| `FOXCTL_TODO_PROJECTION_CADENCE` | `on_todowrite` | When to reorder |
+| `FOXCTL_ALLOW_PROVIDER_STATE` | `0` | Allow provider file writes (hooks only) |
 
 ---
 

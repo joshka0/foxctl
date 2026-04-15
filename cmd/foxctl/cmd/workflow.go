@@ -76,7 +76,7 @@ func newWorkflowRunCommand() *cobra.Command {
 		Long: `Execute a workflow by name or path.
 
 The workflow will be loaded from:
-1. AGENTCTL_WORKFLOW_PATH environment variable
+1. FOXCTL_WORKFLOW_PATH environment variable
 2. ~/.foxctl/workflows/
 3. ./workflows/
 

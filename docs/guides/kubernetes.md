@@ -25,8 +25,8 @@ Use the overlay that matches your control-plane strategy.
 - PostgreSQL is fully supported and wired through storage driver configuration (`docs/architecture/postgres-storage.md`), with dedicated k8s overlay configuration.
 - Teams webhooks use `/api/teams/messages` and `/healthz`, `/readyz` probe endpoints.
 - The live HTTP base path is `/api`; `/api/v1` is deprecated and returns an error response.
-- CAS env variable migration is underway: prefer `AGENTCTL_CAS_DRIVER`/`AGENTCTL_CAS_S3_*` over old `AGENTCTL_CAS_BACKEND`/`AGENTCTL_CAS_BUCKET`.
-- Jido-backed orchestration is optional and requires extra `AGENTCTL_JIDO_*` runtime configuration beyond the base manifests.
+- CAS env variable migration is underway: prefer `FOXCTL_CAS_DRIVER`/`FOXCTL_CAS_S3_*` over old `FOXCTL_CAS_BACKEND`/`FOXCTL_CAS_BUCKET`.
+- Jido-backed orchestration is optional and requires extra `FOXCTL_JIDO_*` runtime configuration beyond the base manifests.
 
 ## Runbook pointers
 

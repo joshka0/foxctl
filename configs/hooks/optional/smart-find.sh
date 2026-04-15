@@ -4,13 +4,13 @@
 # modification times, sizes, and provides smarter relevance ranking.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_SMART_FIND_MAX_RESULTS - Max results to show (default: 10)
+#   FOXCTL_BIN - Path to foxctl binary (default: foxctl)
+#   FOXCTL_SMART_FIND_MAX_RESULTS - Max results to show (default: 10)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-MAX_RESULTS="${AGENTCTL_SMART_FIND_MAX_RESULTS:-10}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+MAX_RESULTS="${FOXCTL_SMART_FIND_MAX_RESULTS:-10}"
 
 # Read hook input from stdin
 INPUT=$(cat)
@@ -42,7 +42,7 @@ esac
 pattern="${pattern#\*\*/}"
 
 # Run fs/find with the glob pattern
-result=$("$AGENTCTL_BIN" run --daemon fs/find --input "{\"pattern\":\"$pattern\",\"path\":\"$search_path\",\"max_results\":$MAX_RESULTS,\"sort_by\":\"modified\"}" 2>/dev/null) || {
+result=$("$FOXCTL_BIN" run --daemon fs/find --input "{\"pattern\":\"$pattern\",\"path\":\"$search_path\",\"max_results\":$MAX_RESULTS,\"sort_by\":\"modified\"}" 2>/dev/null) || {
   echo '{}'
   exit 0
 }

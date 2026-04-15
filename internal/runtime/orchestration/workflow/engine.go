@@ -13,19 +13,19 @@ import (
 
 // Engine is the main workflow execution engine.
 type Engine struct {
-	loader      *Loader
-	template    *TemplateEngine
-	maxWorkers  int
-	agentctlBin string
+	loader     *Loader
+	template   *TemplateEngine
+	maxWorkers int
+	foxctlBin  string
 }
 
 // EngineOption configures an Engine.
 type EngineOption func(*Engine)
 
-// WithAgentctlBin sets the path to the foxctl binary.
-func WithAgentctlBin(path string) EngineOption {
+// WithFoxctlBin sets the path to the foxctl binary.
+func WithFoxctlBin(path string) EngineOption {
 	return func(e *Engine) {
-		e.agentctlBin = path
+		e.foxctlBin = path
 	}
 }
 
@@ -48,10 +48,10 @@ func WithLoaderPaths(paths ...string) EngineOption {
 // NewEngine creates a new workflow engine.
 func NewEngine(opts ...EngineOption) *Engine {
 	e := &Engine{
-		loader:      NewLoader(),
-		template:    NewTemplateEngine(),
-		maxWorkers:  10,
-		agentctlBin: "foxctl",
+		loader:     NewLoader(),
+		template:   NewTemplateEngine(),
+		maxWorkers: 10,
+		foxctlBin:  "foxctl",
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -89,7 +89,7 @@ func (e *Engine) Execute(ctx context.Context, wf *Workflow, inputs map[string]an
 
 	// Create skill executor
 	executor := &skillExecutor{
-		agentctlBin: e.agentctlBin,
+		foxctlBin: e.foxctlBin,
 	}
 
 	// Create scheduler and run
@@ -173,7 +173,7 @@ func (e *Engine) extractOutputs(outputs []Output, ctx *ExecutionContext) (map[st
 
 // skillExecutor executes foxctl skills.
 type skillExecutor struct {
-	agentctlBin string
+	foxctlBin string
 }
 
 // Execute runs a skill and returns the result.
@@ -198,7 +198,7 @@ func (e *skillExecutor) Execute(ctx context.Context, step *Step, input map[strin
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, e.agentctlBin, args...)
+	cmd := exec.CommandContext(ctx, e.foxctlBin, args...)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

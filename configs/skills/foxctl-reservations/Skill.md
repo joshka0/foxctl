@@ -84,4 +84,4 @@ The `hooks/file_guard` hook automatically:
 2. Creates reservations for the editing agent
 3. Blocks or warns based on mode (strict vs advisory)
 
-Set mode: `export AGENTCTL_FILE_GUARD_MODE=strict`
+Set mode: `export FOXCTL_FILE_GUARD_MODE=strict`

@@ -59,14 +59,14 @@ func TestNewTmuxCommandHasSubmitAllAndInterruptAllSubcommands(t *testing.T) {
 }
 
 func TestResolveParentParticipantIDRequiresEnv(t *testing.T) {
-	t.Setenv("AGENTCTL_PARENT_PARTICIPANT_ID", "")
+	t.Setenv("FOXCTL_PARENT_PARTICIPANT_ID", "")
 	if _, err := resolveParentParticipantID(); err == nil {
-		t.Fatal("expected error when AGENTCTL_PARENT_PARTICIPANT_ID is missing")
+		t.Fatal("expected error when FOXCTL_PARENT_PARTICIPANT_ID is missing")
 	}
 }
 
 func TestResolveParentParticipantIDReturnsEnv(t *testing.T) {
-	t.Setenv("AGENTCTL_PARENT_PARTICIPANT_ID", "parent-a")
+	t.Setenv("FOXCTL_PARENT_PARTICIPANT_ID", "parent-a")
 	got, err := resolveParentParticipantID()
 	if err != nil {
 		t.Fatalf("resolveParentParticipantID() error = %v", err)
@@ -245,7 +245,7 @@ func TestMuxCreateInteractivePromptArgsForKnownAgents(t *testing.T) {
 }
 
 func TestResolveMuxRemindArgsUsesEnvRoomID(t *testing.T) {
-	t.Setenv("AGENTCTL_ROOM_ID", "room-alpha")
+	t.Setenv("FOXCTL_ROOM_ID", "room-alpha")
 	roomID, body, err := resolveMuxRemindArgs([]string{"check in"})
 	if err != nil {
 		t.Fatalf("resolveMuxRemindArgs() error = %v", err)
@@ -259,7 +259,7 @@ func TestResolveMuxRemindArgsUsesEnvRoomID(t *testing.T) {
 }
 
 func TestResolveMuxRemindArgsRequiresRoomIDOutsideRoomBoundPane(t *testing.T) {
-	t.Setenv("AGENTCTL_ROOM_ID", "")
+	t.Setenv("FOXCTL_ROOM_ID", "")
 	if _, _, err := resolveMuxRemindArgs([]string{"check in"}); err == nil {
 		t.Fatal("expected error when room id is missing outside room-bound pane")
 	}

@@ -4,7 +4,7 @@
 // task management system. It is the outbound sync direction.
 //
 // SECURITY NOTE: This skill writes to ~/.claude/todos which is outside the
-// workspace. It requires AGENTCTL_ALLOW_PROVIDER_STATE=1 to enable writes.
+// workspace. It requires FOXCTL_ALLOW_PROVIDER_STATE=1 to enable writes.
 package main
 
 import (
@@ -30,7 +30,7 @@ type input struct {
 	// SessionID is the session identifier (optional - will auto-detect if empty)
 	SessionID string `json:"session_id"`
 
-	// Order controls task ordering: "agentctl_rank", "stable", or "off"
+	// Order controls task ordering: "foxctl_rank", "stable", or "off"
 	Order string `json:"order"`
 
 	// MaxItems limits the number of tasks projected (0 = no limit)
@@ -78,7 +78,7 @@ func main() {
 // - Keywords: todo/sync_to_provider, outbound_sync, provider_integration, task_projection, claude_code_sync
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Check write permission
-	allowProviderState := in.AllowProviderState || os.Getenv("AGENTCTL_ALLOW_PROVIDER_STATE") == "1"
+	allowProviderState := in.AllowProviderState || os.Getenv("FOXCTL_ALLOW_PROVIDER_STATE") == "1"
 
 	// Open task store
 	taskStore, err := rc.Stores.Tasks(ctx)
@@ -104,7 +104,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Default order
 	order := in.Order
 	if order == "" {
-		order = "agentctl_rank"
+		order = "foxctl_rank"
 	}
 
 	// Create sync service and run outbound sync
@@ -154,7 +154,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			out.FileHash = newHash
 		}
 	} else if !in.DryRun && !allowProviderState {
-		out.Warnings = append(out.Warnings, "Write skipped: AGENTCTL_ALLOW_PROVIDER_STATE not set")
+		out.Warnings = append(out.Warnings, "Write skipped: FOXCTL_ALLOW_PROVIDER_STATE not set")
 	}
 
 	return skillout.Emit(rc, command, out)

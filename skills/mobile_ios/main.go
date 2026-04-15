@@ -691,7 +691,7 @@ func recordPIDFile(udid string) string {
 	if udid == "" {
 		udid = "default"
 	}
-	return fmt.Sprintf("/tmp/agentctl_ios_record_%s.pid", udid)
+	return fmt.Sprintf("/tmp/foxctl_ios_record_%s.pid", udid)
 }
 
 // recordStart starts video recording with background process, PID tracking, and process lifecycle management.

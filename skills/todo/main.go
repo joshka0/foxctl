@@ -64,7 +64,7 @@ var allowedOps = []string{
 // process. For v1 this is controlled by an environment variable and applies to
 // all workspaces.
 func isReviewGateEnabled() bool {
-	mode := strings.ToLower(env.GetString("AGENTCTL_TODO_REVIEW_GATE"))
+	mode := strings.ToLower(env.GetString("FOXCTL_TODO_REVIEW_GATE"))
 	switch mode {
 	case "1", "true", "on", "enabled":
 		return true
@@ -957,7 +957,7 @@ func handleReviewRequest(ctx context.Context, store tasks.Store, workspaceID str
 		Kind:        kind,
 		Status:      tasks.ReviewStatusPending,
 		Summary:     fmt.Sprintf("pending review for task %s: %s", task.ID, task.Title),
-		CreatedBy:   os.Getenv("AGENTCTL_AGENT_NAME"),
+		CreatedBy:   os.Getenv("FOXCTL_AGENT_NAME"),
 	}
 	review, err = artifacts.StoreReviewArtifact(ctx, cfg, review, nil)
 	if err != nil {

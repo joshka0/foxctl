@@ -25,8 +25,8 @@ import (
 )
 
 func TestOrchestrationCardActionCommand_ReleaseMovesCardBackToTodo(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := setupOrchestrationTestEnv(t)
 	ctx := context.Background()
@@ -83,8 +83,8 @@ func TestOrchestrationCardActionCommand_ReleaseMovesCardBackToTodo(t *testing.T)
 }
 
 func TestOrchestrationCardRuntimeCommand_ReturnsRuntimeTree(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	server, socketPath := startOrchestrationCLIJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcCLITestError) {
 		var req map[string]any
@@ -192,8 +192,8 @@ func TestOrchestrationCardRuntimeCommand_ReturnsRuntimeTree(t *testing.T) {
 }
 
 func TestOrchestrationDispatchIssueCommand_ProjectsRunningCard(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	server, socketPath := startOrchestrationCLIJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcCLITestError) {
 		switch method {
@@ -371,8 +371,8 @@ func startOrchestrationCLIJSONRPCServer(t *testing.T, handle jsonrpcCLITestHandl
 }
 
 func TestOrchestrationCardRuntimeCommand_ReturnsGoRuntimeTree(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 	t.Setenv(envCLIRuntimeBackend, cliRuntimeBackendGoruntime)
 
 	cfg := setupOrchestrationTestEnv(t)

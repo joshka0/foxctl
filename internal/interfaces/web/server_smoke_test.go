@@ -66,8 +66,8 @@ func activateServerRoomLoop(t *testing.T, cfg config.Config, workspaceID, roomID
 }
 
 func TestServerHandler_RoomsSmoke(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	server := newSmokeTestServer(t)
 	defer server.Close()
@@ -124,8 +124,8 @@ func TestServerHandler_RoomsSmoke(t *testing.T) {
 }
 
 func TestServerHandler_OrchestrationBoardSmoke(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	server := newSmokeTestServer(t)
 	defer server.Close()
@@ -164,8 +164,8 @@ func TestServerHandler_OrchestrationBoardSmoke(t *testing.T) {
 }
 
 func TestServerHandler_RoomBoardWorkflowSmoke(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	server := newSmokeTestServer(t)
 	defer server.Close()

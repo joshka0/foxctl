@@ -65,7 +65,7 @@ spec:
             secretKeyRef:
               name: foxctl-secrets
               key: voyage-key
-        - name: AGENTCTL_OAUTH_ENC_KEY
+        - name: FOXCTL_OAUTH_ENC_KEY
           valueFrom:
             secretKeyRef:
               name: foxctl-secrets
@@ -87,7 +87,7 @@ spec:
               fieldPath: status.podIP
 
         # Observability directory
-        - name: AGENTCTL_OBS_DIR
+        - name: FOXCTL_OBS_DIR
           value: "/var/log/foxctl"
 
         resources:

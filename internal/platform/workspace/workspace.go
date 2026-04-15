@@ -14,15 +14,15 @@ import (
 )
 
 // Detect returns the workspace path using the standard fallback chain:
-// 1. AGENTCTL_WORKSPACE env var (highest priority - set by foxctl for sandboxes)
+// 1. FOXCTL_WORKSPACE env var (highest priority - set by foxctl for sandboxes)
 // 2. CLAUDE_PROJECT_DIR env var (set by Claude Code)
 // 3. Walk up from start looking for .git or .foxctl markers
 // 4. Return start directory if no markers found
 //
 // Pass empty string for start to use current working directory.
 func Detect(start string) string {
-	// 1. AGENTCTL_WORKSPACE has highest priority (handles sandbox scenarios)
-	if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
+	// 1. FOXCTL_WORKSPACE has highest priority (handles sandbox scenarios)
+	if ws := os.Getenv("FOXCTL_WORKSPACE"); ws != "" {
 		return ws
 	}
 

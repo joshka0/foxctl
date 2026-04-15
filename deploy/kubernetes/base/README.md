@@ -41,9 +41,9 @@ kubectl apply -k deploy/kubernetes/overlays/postgres
 
 ## Important caveats
 
-- The base `ConfigMap` still defaults `AGENTCTL_DB_DRIVER` to `turso`.
-- The base also still uses older CAS key names like `AGENTCTL_CAS_BACKEND` and
-  `AGENTCTL_CAS_BUCKET`.
+- The base `ConfigMap` still defaults `FOXCTL_DB_DRIVER` to `turso`.
+- The base also still uses older CAS key names like `FOXCTL_CAS_BACKEND` and
+  `FOXCTL_CAS_BUCKET`.
 - Production-oriented PostgreSQL and newer CAS settings live in
   `deploy/kubernetes/overlays/postgres`.
 - Local development overrides live in `deploy/kubernetes/overlays/local`.

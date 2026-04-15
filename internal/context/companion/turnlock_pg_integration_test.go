@@ -13,9 +13,9 @@ import (
 )
 
 func TestPgTurnLock_LockUnlockCycle(t *testing.T) {
-	dsn := os.Getenv("AGENTCTL_TEST_POSTGRES_DSN")
+	dsn := os.Getenv("FOXCTL_TEST_POSTGRES_DSN")
 	if dsn == "" {
-		t.Skip("set AGENTCTL_TEST_POSTGRES_DSN to run integration tests")
+		t.Skip("set FOXCTL_TEST_POSTGRES_DSN to run integration tests")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -57,9 +57,9 @@ func TestPgTurnLock_LockUnlockCycle(t *testing.T) {
 }
 
 func TestPgTurnLock_Lock_RespectsContextCancellation(t *testing.T) {
-	dsn := os.Getenv("AGENTCTL_TEST_POSTGRES_DSN")
+	dsn := os.Getenv("FOXCTL_TEST_POSTGRES_DSN")
 	if dsn == "" {
-		t.Skip("set AGENTCTL_TEST_POSTGRES_DSN to run integration tests")
+		t.Skip("set FOXCTL_TEST_POSTGRES_DSN to run integration tests")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

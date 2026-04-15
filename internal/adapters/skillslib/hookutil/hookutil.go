@@ -50,10 +50,10 @@ func ResolveActorID(in hooks.Input) string {
 	if id := strings.TrimSpace(in.ActorID); id != "" {
 		return id
 	}
-	if id := strings.TrimSpace(os.Getenv("AGENTCTL_AGENT_ID")); id != "" {
+	if id := strings.TrimSpace(os.Getenv("FOXCTL_AGENT_ID")); id != "" {
 		return id
 	}
-	if id := strings.TrimSpace(os.Getenv("AGENTCTL_AGENT_NAME")); id != "" {
+	if id := strings.TrimSpace(os.Getenv("FOXCTL_AGENT_NAME")); id != "" {
 		return id
 	}
 	return fmt.Sprintf("actor:agent:%s", in.SessionID)

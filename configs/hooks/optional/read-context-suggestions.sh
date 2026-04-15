@@ -6,19 +6,19 @@
 # - Editing symbols via code/smart_write
 #
 # Environment:
-#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_READ_SUGGESTIONS_DISABLED - Set to 1 to disable
-#   AGENTCTL_READ_SUGGESTIONS_MAX_SYMBOLS - Max symbols to suggest (default: 5)
+#   FOXCTL_BIN - Path to foxctl binary (default: foxctl)
+#   FOXCTL_READ_SUGGESTIONS_DISABLED - Set to 1 to disable
+#   FOXCTL_READ_SUGGESTIONS_MAX_SYMBOLS - Max symbols to suggest (default: 5)
 
 set -euo pipefail
 
-if [[ "${AGENTCTL_READ_SUGGESTIONS_DISABLED:-}" == "1" ]]; then
+if [[ "${FOXCTL_READ_SUGGESTIONS_DISABLED:-}" == "1" ]]; then
   echo '{}'
   exit 0
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-MAX_SYMBOLS="${AGENTCTL_READ_SUGGESTIONS_MAX_SYMBOLS:-5}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+MAX_SYMBOLS="${FOXCTL_READ_SUGGESTIONS_MAX_SYMBOLS:-5}"
 
 INPUT=$(cat)
 file_path=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')
@@ -73,7 +73,7 @@ input_json=$(jq -nc --arg path "$abs_path" '{
   include_private: false,
   max_results: 20
 }')
-symbols_result=$("$AGENTCTL_BIN" run --daemon code/symbols --ephemeral --input "$input_json" 2>/dev/null) || symbols_result="{}"
+symbols_result=$("$FOXCTL_BIN" run --daemon code/symbols --ephemeral --input "$input_json" 2>/dev/null) || symbols_result="{}"
 
 # Extract key symbols (functions, types, structs)
 key_functions=$(echo "$symbols_result" | jq -r --argjson max "$MAX_SYMBOLS" '

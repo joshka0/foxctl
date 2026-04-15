@@ -17,8 +17,8 @@ import (
 // for session lineage tracking. These enable skills to identify the current session
 // context regardless of which AI coding tool invoked them.
 var sessionEnvVars = []string{
-	"AGENTCTL_SESSION_ID", // Canonical session ID (highest priority)
-	"AGENTCTL_AGENT_ID",   // Agent identifier (foxctl, subagent:X, etc.)
+	"FOXCTL_SESSION_ID",   // Canonical session ID (highest priority)
+	"FOXCTL_AGENT_ID",     // Agent identifier (foxctl, subagent:X, etc.)
 	"CLAUDE_SESSION_ID",   // Claude Code session ID
 	"OPENCODE_SESSION_ID", // OpenCode session ID
 	"CURSOR_SESSION_ID",   // Cursor session ID
@@ -34,7 +34,7 @@ func buildSkillEnv(baseEnv []string, workspace string, propagateSessionVars bool
 
 	// Add workspace if provided
 	if workspace != "" {
-		envVars = append(envVars, fmt.Sprintf("AGENTCTL_WORKSPACE=%s", workspace))
+		envVars = append(envVars, fmt.Sprintf("FOXCTL_WORKSPACE=%s", workspace))
 	}
 
 	// For WASI or other isolated runtimes, explicitly propagate session vars from parent
@@ -74,7 +74,7 @@ type RunOptions struct {
 func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error) {
 	ws, _ := workspace.FromContext(ctx)
 	if strings.TrimSpace(ws) == "" {
-		if envWS := env.GetString("AGENTCTL_WORKSPACE"); envWS != "" {
+		if envWS := env.GetString("FOXCTL_WORKSPACE"); envWS != "" {
 			ws = workspace.Normalize(envWS)
 		}
 		if ws == "" {

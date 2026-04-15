@@ -189,19 +189,19 @@ func TestNewEinoEngineAdapter_RejectsNilAgent(t *testing.T) {
 }
 
 // TestIsEinoEnabled_GateOffByDefault verifies the default-path regression:
-// when AGENTCTL_ENGINE_BACKEND is unset, IsEinoEnabled() must return false
+// when FOXCTL_ENGINE_BACKEND is unset, IsEinoEnabled() must return false
 // so the default LLMChatEngine path is never replaced.
 func TestIsEinoEnabled_GateOffByDefault(t *testing.T) {
 	t.Setenv(EnvEngineBackend, "")
 	if IsEinoEnabled() {
-		t.Fatal("IsEinoEnabled() must be false when AGENTCTL_ENGINE_BACKEND is unset")
+		t.Fatal("IsEinoEnabled() must be false when FOXCTL_ENGINE_BACKEND is unset")
 	}
 }
 
 func TestIsEinoEnabled_TrueWhenSet(t *testing.T) {
 	t.Setenv(EnvEngineBackend, "eino")
 	if !IsEinoEnabled() {
-		t.Fatal("IsEinoEnabled() must be true when AGENTCTL_ENGINE_BACKEND=eino")
+		t.Fatal("IsEinoEnabled() must be true when FOXCTL_ENGINE_BACKEND=eino")
 	}
 }
 

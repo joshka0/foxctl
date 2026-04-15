@@ -41,7 +41,7 @@ signature:
     - name: provider
       type: string
       required: false
-      description: "Search provider: exa, tavily (defaults to AGENTCTL_SEARCH_PROVIDER or exa)"
+      description: "Search provider: exa, tavily (defaults to FOXCTL_SEARCH_PROVIDER or exa)"
     - name: topic
       type: string
       required: false
@@ -56,7 +56,7 @@ signature:
       Environment variables:
         EXA_API_KEY - Required for Exa provider
         TAVILY_API_KEY - Required for Tavily provider
-        AGENTCTL_SEARCH_PROVIDER - Default provider (exa or tavily)
+        FOXCTL_SEARCH_PROVIDER - Default provider (exa or tavily)
 
       Example commands:
         foxctl run web/search --input '{"query": "React hooks best practices"}'

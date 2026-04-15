@@ -8,7 +8,7 @@
 
 foxctl already supports Kubernetes deployments backed by Turso/libSQL (see `docs/guides/kubernetes.md`). This plan is for environments that require a self-hosted/shared SQL control-plane (AWS RDS PostgreSQL) for enterprise multi-pod deployments.
 
-foxctl currently uses per-store SQLite/libSQL databases selected via the dbdriver env-var convention (e.g. `AGENTCTL_SESSIONS_DB_DRIVER`). This works well for single-node CLI usage but is not sufficient for enterprise K8s deployments where multiple pods (GUI server, chat adapters, background workers) need shared state.
+foxctl currently uses per-store SQLite/libSQL databases selected via the dbdriver env-var convention (e.g. `FOXCTL_SESSIONS_DB_DRIVER`). This works well for single-node CLI usage but is not sufficient for enterprise K8s deployments where multiple pods (GUI server, chat adapters, background workers) need shared state.
 
 **Goal:** Add PostgreSQL (AWS RDS + pgvector) as an alternative storage backend using the repository pattern (Option B). Local dev stays SQLite; enterprise deploys use PostgreSQL with native vector search.
 
@@ -19,10 +19,10 @@ foxctl currently uses per-store SQLite/libSQL databases selected via the dbdrive
 1. **Canonical SQL placeholders:** Use PostgreSQL-style `$1..$N` placeholders in queries that must run on Postgres. This also works with the repo's SQLite driver (modernc) and avoids a brittle runtime "rebind" layer, especially for `*sql.Tx` usage.
 2. **Store isolation:** Preserve the existing "one logical DB per store" model by mapping each store to its own PostgreSQL schema (preferred) or database. This avoids cross-store table collisions (notably `schema_migrations`) and keeps migrations independent.
 3. **Distributed migrations:** In K8s, multiple pods can start at once. PostgreSQL opens must guard migrations with a per-store advisory lock (schema-scoped) to avoid concurrent migration races.
-4. **Vector dimensions:** Do not hardcode `1024`. Use the configured dimensions (`AGENTCTL_VECTOR_DIMS` / `cfg.Database.Vector.Dimensions`) and keep metadata tables authoritative to detect mismatches (sessions/memory already track this).
+4. **Vector dimensions:** Do not hardcode `1024`. Use the configured dimensions (`FOXCTL_VECTOR_DIMS` / `cfg.Database.Vector.Dimensions`) and keep metadata tables authoritative to detect mismatches (sessions/memory already track this).
 5. **pgvector provisioning:** Long-term production-ready behavior:
    - Migrations attempt `CREATE EXTENSION IF NOT EXISTS vector;` for vector-enabled stores.
-   - If this fails due to permissions, either (a) fail fast when `AGENTCTL_POSTGRES_REQUIRE_VECTOR=true`, or (b) log + fall back to Go cosine distance (no HNSW).
+   - If this fails due to permissions, either (a) fail fast when `FOXCTL_POSTGRES_REQUIRE_VECTOR=true`, or (b) log + fall back to Go cosine distance (no HNSW).
 6. **JSON columns:** Store JSON as `jsonb` in PostgreSQL for long-term correctness/perf. Keep TEXT in SQLite. Ensure inserts remain parameterized JSON strings (must be valid JSON).
 7. **CAS in production:** Use S3/MinIO for blob payloads. Keep any DB-backed CAS as metadata-only (or for very small objects) to avoid Postgres bloat.
 
@@ -193,9 +193,9 @@ const DriverPostgres DriverType = "postgres"
 ### 2.3 Update `internal/storage/dbdriver/config_loader.go`
 
 Extend `LoadConfig()` to handle `driver = "postgres"`:
-- Read `AGENTCTL_POSTGRES_DSN` (or `DATABASE_URL` as fallback)
-- Read pool settings: `AGENTCTL_POSTGRES_MAX_CONNS`, etc.
-- Per-store DSN override: `AGENTCTL_{STORE}_POSTGRES_DSN`
+- Read `FOXCTL_POSTGRES_DSN` (or `DATABASE_URL` as fallback)
+- Read pool settings: `FOXCTL_POSTGRES_MAX_CONNS`, etc.
+- Per-store DSN override: `FOXCTL_{STORE}_POSTGRES_DSN`
 - Derive per-store schema name (default: lowercase store name)
 
 ### 2.4 Update `internal/storage/dbutil/open.go`
@@ -232,8 +232,8 @@ docker run -d --name foxctl-pg -p 5432:5432 \
   -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=foxctl \
   pgvector/pgvector:pg17-v0.8.0
 
-AGENTCTL_DB_DRIVER=postgres \
-AGENTCTL_POSTGRES_DSN="postgres://postgres:dev@localhost:5432/foxctl?sslmode=disable" \
+FOXCTL_DB_DRIVER=postgres \
+FOXCTL_POSTGRES_DSN="postgres://postgres:dev@localhost:5432/foxctl?sslmode=disable" \
   go test ./internal/storage/dbdriver/...
 ```
 
@@ -290,7 +290,7 @@ Known SQLite-specific query patterns to replace:
 ### 3.6 Checkpoint
 
 ```bash
-AGENTCTL_DB_DRIVER=postgres AGENTCTL_POSTGRES_DSN="..." \
+FOXCTL_DB_DRIVER=postgres FOXCTL_POSTGRES_DSN="..." \
   go test ./internal/storage/memory/... ./internal/storage/sessions/... ./internal/storage/tasks/...
 ```
 
@@ -316,7 +316,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 This requires elevated privileges. In locked-down RDS setups, the extension may need to be provisioned out-of-band.
 
 Behavior:
-- If extension creation fails and `AGENTCTL_POSTGRES_REQUIRE_VECTOR=true`, fail startup with an actionable error.
+- If extension creation fails and `FOXCTL_POSTGRES_REQUIRE_VECTOR=true`, fail startup with an actionable error.
 - Otherwise, log a warning and run without native vector search (fall back to Go cosine scan).
 
 ### 4.2 Update vector search in stores
@@ -331,7 +331,7 @@ Behavior:
 
 - **SQLite**: Keep BLOB (little-endian float32) via existing `serializeFloat32()`
 - **PostgreSQL**: Use `pgvector.NewVector([]float32{...})` — pgvector-go handles serialization
-- **Dimensions:** Use configured dimensions (`AGENTCTL_VECTOR_DIMS` / `cfg.Database.Vector.Dimensions`)
+- **Dimensions:** Use configured dimensions (`FOXCTL_VECTOR_DIMS` / `cfg.Database.Vector.Dimensions`)
 
 ### 4.4 HNSW indexes in PostgreSQL migrations
 
@@ -344,7 +344,7 @@ WITH (m = 16, ef_construction = 64);
 ### 4.5 Checkpoint
 
 ```bash
-AGENTCTL_DB_DRIVER=postgres AGENTCTL_POSTGRES_DSN="..." \
+FOXCTL_DB_DRIVER=postgres FOXCTL_POSTGRES_DSN="..." \
   go test ./internal/storage/memory/... -run TestVectorSearch
 ```
 
@@ -371,10 +371,10 @@ Update `internal/storage/cas/config.go`:
   - `SSE` config (optional KMS key)
 
 Env vars (K8s-friendly):
-- `AGENTCTL_CAS_DRIVER=s3`
-- `AGENTCTL_CAS_S3_BUCKET=...`
-- `AGENTCTL_CAS_S3_PREFIX=cas/` (optional)
-- `AWS_REGION=...` (or `AGENTCTL_CAS_S3_REGION`)
+- `FOXCTL_CAS_DRIVER=s3`
+- `FOXCTL_CAS_S3_BUCKET=...`
+- `FOXCTL_CAS_S3_PREFIX=cas/` (optional)
+- `AWS_REGION=...` (or `FOXCTL_CAS_S3_REGION`)
 
 Auth:
 - **EKS:** IRSA (recommended)
@@ -475,11 +475,11 @@ Add flags:
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `AGENTCTL_DB_DRIVER` | Global driver | `sqlite` |
-| `AGENTCTL_POSTGRES_DSN` | PostgreSQL DSN | (none) |
+| `FOXCTL_DB_DRIVER` | Global driver | `sqlite` |
+| `FOXCTL_POSTGRES_DSN` | PostgreSQL DSN | (none) |
 | `DATABASE_URL` | Standard fallback | (none) |
-| `AGENTCTL_POSTGRES_MAX_CONNS` | Max connections | `25` |
-| `AGENTCTL_POSTGRES_REQUIRE_VECTOR` | Fail fast if pgvector isn't available | `false` |
+| `FOXCTL_POSTGRES_MAX_CONNS` | Max connections | `25` |
+| `FOXCTL_POSTGRES_REQUIRE_VECTOR` | Fail fast if pgvector isn't available | `false` |
 
 ---
 
@@ -573,8 +573,8 @@ docker run -d --name foxctl-pg -p 5432:5432 \
   -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=foxctl \
   pgvector/pgvector:pg17-v0.8.0
 
-AGENTCTL_DB_DRIVER=postgres \
-AGENTCTL_POSTGRES_DSN="postgres://postgres:dev@localhost:5432/foxctl?sslmode=disable" \
+FOXCTL_DB_DRIVER=postgres \
+FOXCTL_POSTGRES_DSN="postgres://postgres:dev@localhost:5432/foxctl?sslmode=disable" \
   go test ./internal/storage/...
 ```
 
@@ -585,14 +585,14 @@ services:
     image: pgvector/pgvector:pg17-v0.8.0
     env:
       POSTGRES_PASSWORD: test
-      POSTGRES_DB: agentctl_test
+      POSTGRES_DB: foxctl_test
     ports:
       - 5432:5432
 ```
 
 ### Smoke Test
 ```bash
-AGENTCTL_DB_DRIVER=postgres AGENTCTL_POSTGRES_DSN="..." \
+FOXCTL_DB_DRIVER=postgres FOXCTL_POSTGRES_DSN="..." \
   foxctl web serve --chat teams
 # Verify: tables created, vector search works, sessions persist across restart
 ```

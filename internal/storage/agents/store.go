@@ -53,7 +53,7 @@ const agentSelectColumns = `
 		max_iterations, max_auto_turns, think_interval, conversation_id, memory_scope, memory_retention, sandbox_provider, sandbox_id, repo_url, repo_ref, terminal_binding`
 
 // Open opens the agents store rooted at the given storage root directory.
-// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_AGENTS_DB_DRIVER).
+// The database driver is selected via the dbdriver env var conventions (e.g., FOXCTL_AGENTS_DB_DRIVER).
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "agents.db")
 	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "AGENTS", filepath.Base(dbPath), migrate)

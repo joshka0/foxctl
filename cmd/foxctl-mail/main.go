@@ -9,7 +9,7 @@
 //	foxctl-mail --to claude "Question" "How should we handle auth?"
 //
 // The command automatically detects the workspace using:
-//  1. AGENTCTL_WORKSPACE env var
+//  1. FOXCTL_WORKSPACE env var
 //  2. CLAUDE_PROJECT_DIR env var
 //  3. Git root from current directory
 //  4. Current working directory

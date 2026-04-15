@@ -75,7 +75,7 @@ type sqlStore struct {
 }
 
 // Open initializes a trajectory Store backed by a database file at root/trajectory.db.
-// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_TRAJECTORY_DB_DRIVER).
+// The database driver is selected via the dbdriver env var conventions (e.g., FOXCTL_TRAJECTORY_DB_DRIVER).
 // It returns the Store or an error if the database cannot be opened or migrated.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "trajectory.db")

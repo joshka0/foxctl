@@ -654,7 +654,7 @@ func initLocalWallet(ctx context.Context, rc *skillmain.RunContext, network, key
 // Config persistence
 
 func walletConfigPath(rc *skillmain.RunContext) string {
-	home := os.Getenv("AGENTCTL_HOME")
+	home := os.Getenv("FOXCTL_HOME")
 	if home == "" {
 		home = filepath.Join(os.Getenv("HOME"), ".foxctl")
 	}

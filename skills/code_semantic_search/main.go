@@ -427,9 +427,9 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 
 	// Validate workspace path with PathValidator
 	// FC/IS: Use cfg.Home from boundary instead of os.Getenv
-	agentctlHome := cfg.Home
+	foxctlHome := cfg.Home
 
-	// Workspace is already resolved in parseInput (prefers AGENTCTL_WORKSPACE over cwd)
+	// Workspace is already resolved in parseInput (prefers FOXCTL_WORKSPACE over cwd)
 	workspacePath := in.Workspace
 	// Canonicalize the workspace path
 	if absPath, err := filepath.Abs(workspacePath); err == nil {
@@ -437,7 +437,7 @@ func search(ctx context.Context, rc *skillmain.RunContext, in *Input, voyageKey,
 	}
 
 	// Create PathValidator to ensure workspace is valid (for path validation, not workspace ID)
-	validator, err := policy.NewPathValidator(workspacePath, []string{agentctlHome})
+	validator, err := policy.NewPathValidator(workspacePath, []string{foxctlHome})
 	if err != nil {
 		return nil, skillerr.WrapArg("invalid workspace path", err)
 	}
@@ -1127,9 +1127,9 @@ func detectEmbeddingProviderName(cfg config.Config, voyageKey, geminiKey string)
 func noEmbeddingHint(cfg config.Config) string {
 	switch detectEmbeddingProviderName(cfg, os.Getenv("VOYAGE_API_KEY"), os.Getenv("GEMINI_API_KEY")) {
 	case "openai_compat":
-		return "set AGENTCTL_EMBEDDING_PROVIDER=openai_compat with AGENTCTL_EMBEDDING_MODEL and AGENTCTL_EMBEDDING_BASE_URL for vector search"
+		return "set FOXCTL_EMBEDDING_PROVIDER=openai_compat with FOXCTL_EMBEDDING_MODEL and FOXCTL_EMBEDDING_BASE_URL for vector search"
 	default:
-		return "set AGENTCTL_EMBEDDING_PROVIDER=openai_compat or VOYAGE_API_KEY / GEMINI_API_KEY for vector search"
+		return "set FOXCTL_EMBEDDING_PROVIDER=openai_compat or VOYAGE_API_KEY / GEMINI_API_KEY for vector search"
 	}
 }
 
@@ -2613,7 +2613,7 @@ func resolveSemanticSearchVaultPath(explicit string) string {
 	if trimmed := strings.TrimSpace(explicit); trimmed != "" {
 		return trimmed
 	}
-	for _, key := range []string{"AGENTCTL_ACA_VAULT_PATH", "AGENTCTL_OBSIDIAN_VAULT_PATH"} {
+	for _, key := range []string{"FOXCTL_ACA_VAULT_PATH", "FOXCTL_OBSIDIAN_VAULT_PATH"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			return value
 		}

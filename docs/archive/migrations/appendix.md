@@ -307,7 +307,7 @@ hooks:
         timeout_ms: 2000
         fail_open: true
         config:
-          mode: auto   # future: allow override vs env AGENTCTL_TASK_GUARD_MODE
+          mode: auto   # future: allow override vs env FOXCTL_TASK_GUARD_MODE
 
   - id: core-pretool-edit-file-guard
     event: PreToolUse
@@ -318,7 +318,7 @@ hooks:
         timeout_ms: 2000
         fail_open: true
         config:
-          mode: advisory  # future: strict/advisory (env AGENTCTL_FILE_GUARD_MODE)
+          mode: advisory  # future: strict/advisory (env FOXCTL_FILE_GUARD_MODE)
 
   # --- Post-edit analysis ---
   - id: core-posttool-impact-analysis

@@ -67,7 +67,7 @@ foxctl console rm <console-id>
 
 ---
 
-## PR 2.2 — agentctl_viewer: Tabs + Streaming + Cancel
+## PR 2.2 — foxctl_viewer: Tabs + Streaming + Cancel
 
 **Status:** ✅ Mostly Complete
 
@@ -75,9 +75,9 @@ foxctl console rm <console-id>
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| TUI main | `cmd/agentctl_viewer/tui.go` | ✅ Done (66k lines) |
-| Tabs by console | `cmd/agentctl_viewer/views.go` | ✅ Done |
-| Actions (send/cancel) | `cmd/agentctl_viewer/actions.go` | ✅ Done |
+| TUI main | `cmd/foxctl_viewer/tui.go` | ✅ Done (66k lines) |
+| Tabs by console | `cmd/foxctl_viewer/views.go` | ✅ Done |
+| Actions (send/cancel) | `cmd/foxctl_viewer/actions.go` | ✅ Done |
 
 ### Backpressure Rule
 

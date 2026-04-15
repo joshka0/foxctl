@@ -63,6 +63,6 @@ capabilities:
     - type: workdir
   pure: false
 env:
-  - name: AGENTCTL_SESSION_FEEDBACK_ENABLED
+  - name: FOXCTL_SESSION_FEEDBACK_ENABLED
     description: "Enable session feedback collection (default: true)"
     default: "true"

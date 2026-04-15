@@ -139,14 +139,14 @@ func decodeCompanionLayeredContext(raw json.RawMessage) (contextbuilder.Companio
 	if len(state) == 0 {
 		return contextbuilder.CompanionLayeredContext{}, fmt.Errorf("companion state is missing")
 	}
-	agentctlState := mapAt(state, "foxctl")
-	if len(agentctlState) == 0 {
-		agentctlState = state
+	foxctlState := mapAt(state, "foxctl")
+	if len(foxctlState) == 0 {
+		foxctlState = state
 	}
 
-	lastResult := mapAt(agentctlState, "last_result")
+	lastResult := mapAt(foxctlState, "last_result")
 	if len(lastResult) == 0 {
-		lastResult = agentctlState
+		lastResult = foxctlState
 	}
 
 	contextMap := mapAt(lastResult, "companion_context")

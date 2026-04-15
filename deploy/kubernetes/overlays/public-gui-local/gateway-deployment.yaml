@@ -47,7 +47,7 @@ spec:
               name: gui-auth-gateway-secrets
               key: smtp-pass
               optional: true
-        - name: AGENTCTL_POSTGRES_DSN
+        - name: FOXCTL_POSTGRES_DSN
           valueFrom:
             secretKeyRef:
               name: postgres-secrets

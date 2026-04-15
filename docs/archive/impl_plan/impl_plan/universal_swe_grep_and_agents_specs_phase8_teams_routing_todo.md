@@ -16,7 +16,7 @@ steps focused on **teams, routing, and team-aware agents/skills**.
 >   - `docs/spec/core_profile_v1.md`.
 > - Codemaps for this phase (from codemap index):
 >   - CM6 – Dspy-Go Agent Runtime & Tools Integration in foxctl.
->   - CM9 – Agentctl Overseer & Agent Hierarchy.
+>   - CM9 – Foxctl Overseer & Agent Hierarchy.
 >   - CM10 – Knowledge System & Factory Droids.
 >   - CM13 – Core Profile v1: End-to-End Envelope, Jobs & CAS Flow.
 

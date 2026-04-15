@@ -72,7 +72,7 @@ func (b *EventBuilder) WithPersistence(mode PersistenceMode) *EventBuilder {
 }
 
 // WithPersistenceFile sets a custom NDJSON filename for the event.
-// The file will be created at $AGENTCTL_OBS_DIR/events/<name>.ndjson.
+// The file will be created at $FOXCTL_OBS_DIR/events/<name>.ndjson.
 func (b *EventBuilder) WithPersistenceFile(name string) *EventBuilder {
 	if b.persist == nil {
 		b.persist = &persistConfig{}

@@ -151,9 +151,9 @@ func (b *Bootstrapper) loadRepoHandles(ctx context.Context, workspaceRoot, query
 func (b *Bootstrapper) loadVaultHandles(ctx context.Context, query string) ([]string, error) {
 	query = strings.TrimSpace(query)
 	vaultPath := firstNonEmpty(strings.TrimSpace(b.cfg.VaultPath),
-		strings.TrimSpace(os.Getenv("AGENTCTL_RLM_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	)
 	if vaultPath == "" || query == "" {
 		return nil, nil

@@ -258,8 +258,8 @@ func TestBashGuard_ProfileFromEnvVar(t *testing.T) {
 	defer cleanup()
 
 	// Set environment variable
-	os.Setenv("AGENTCTL_AGENT_PROFILE", "explorer")
-	defer os.Unsetenv("AGENTCTL_AGENT_PROFILE")
+	os.Setenv("FOXCTL_AGENT_PROFILE", "explorer")
+	defer os.Unsetenv("FOXCTL_AGENT_PROFILE")
 
 	in := bashInput("ls -la")
 
@@ -282,8 +282,8 @@ func TestBashGuard_EnvVarOverridesHookConfig(t *testing.T) {
 	defer cleanup()
 
 	// Set environment variable to unrestricted
-	os.Setenv("AGENTCTL_AGENT_PROFILE", "unrestricted")
-	defer os.Unsetenv("AGENTCTL_AGENT_PROFILE")
+	os.Setenv("FOXCTL_AGENT_PROFILE", "unrestricted")
+	defer os.Unsetenv("FOXCTL_AGENT_PROFILE")
 
 	// Hook config says explorer
 	in := bashInput("ls -la")
@@ -438,8 +438,8 @@ func TestBashGuard_MetaIncludesProfile(t *testing.T) {
 // Test resolveProfile helper
 
 func TestResolveProfile_EnvVarTakesPrecedence(t *testing.T) {
-	os.Setenv("AGENTCTL_AGENT_PROFILE", "reviewer")
-	defer os.Unsetenv("AGENTCTL_AGENT_PROFILE")
+	os.Setenv("FOXCTL_AGENT_PROFILE", "reviewer")
+	defer os.Unsetenv("FOXCTL_AGENT_PROFILE")
 
 	in := hooks.Input{
 		HookConfig: map[string]any{"profile": "explorer"},
@@ -451,7 +451,7 @@ func TestResolveProfile_EnvVarTakesPrecedence(t *testing.T) {
 
 func TestResolveProfile_HookConfigFallback(t *testing.T) {
 	// Ensure no env var
-	os.Unsetenv("AGENTCTL_AGENT_PROFILE")
+	os.Unsetenv("FOXCTL_AGENT_PROFILE")
 
 	in := hooks.Input{
 		HookConfig: map[string]any{"profile": "implementer"},
@@ -463,7 +463,7 @@ func TestResolveProfile_HookConfigFallback(t *testing.T) {
 
 func TestResolveProfile_DefaultUnrestricted(t *testing.T) {
 	// Ensure no env var
-	os.Unsetenv("AGENTCTL_AGENT_PROFILE")
+	os.Unsetenv("FOXCTL_AGENT_PROFILE")
 
 	in := hooks.Input{}
 

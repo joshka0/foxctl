@@ -211,7 +211,7 @@ export function getWorkspace(fallback?: string): string {
 export function getSessionId(): string | undefined {
   return (
     process.env.OPENCODE_SESSION_ID ||
-    process.env.AGENTCTL_SESSION_ID ||
+    process.env.FOXCTL_SESSION_ID ||
     process.env.CLAUDE_SESSION_ID
   );
 }

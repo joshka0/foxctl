@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "Agentctl_Filesystem_Skills_System_20260115_010318",
+  "id": "Foxctl_Filesystem_Skills_System_20260115_010318",
   "stableId": "255d2017-72be-483d-8555-4b168ae70a8a",
   "metadata": {
     "cascadeId": "30175160-1af6-4c5b-ae60-29c5f7602597",
@@ -9,7 +9,7 @@
     "mode": "FAST",
     "originalPrompt": "xplore: filesystem reads/writes and edit application. Start from: skills/fs_read/main.go, skills/fs_write/main.go, skills/fs_apply_edit/main.go"
   },
-  "title": "Agentctl Filesystem Skills System",
+  "title": "Foxctl Filesystem Skills System",
   "traces": [
     {
       "id": "1",
@@ -50,7 +50,7 @@
         }
       ],
       "traceTextDiagram": "Skill Execution Framework\n├── Main() generic entry point \u003c-- 1a\n│   ├── mainWithCode() orchestrates execution \u003c-- internal/adapters/skillslib/skillmain/main.go:98\n│   │   ├── Load configuration \u0026 context \u003c-- internal/adapters/skillslib/skillmain/main.go:118\n│   │   ├── Parse JSON input from stdin \u003c-- 1b\n│   │   ├── Validate input struct fields \u003c-- 1c\n│   │   ├── Execute skill function \u003c-- 1d\n│   │   └── Handle errors \u0026 emit envelopes \u003c-- internal/adapters/skillslib/skillmain/main.go:168\n│   └── Bootstrap() for custom entrypoints \u003c-- internal/adapters/skillslib/skillmain/main.go:87\n└── RunContext provides dependencies \u003c-- internal/adapters/skillslib/skillmain/context.go:21\n    ├── CAS storage \u003c-- internal/adapters/skillslib/skillmain/context.go:26\n    ├── Path validator \u003c-- internal/adapters/skillslib/skillmain/context.go:41\n    └── Output formatter \u003c-- internal/adapters/skillslib/skillmain/context.go:47",
-      "traceGuide": "## Motivation\n\nAgentctl needs a **standardized way to execute file operations** across different skills while maintaining security and consistency. Without this framework, each skill would need to implement its own input parsing, validation, error handling, and output formatting - leading to inconsistent behavior and potential security vulnerabilities. The skill execution framework solves this by providing a **unified pipeline** that all filesystem skills (read, write, edit) can inherit, ensuring proper validation, structured output, and integration with the content-addressable storage system.\n\n## Details\n\nThe skill framework follows a **generic execution pattern** starting from the `Main()` function [1a] which handles all skills uniformly. It first loads configuration and establishes a `RunContext` containing dependencies like CAS storage and path validation. Input is parsed as JSON from stdin [1b] and validated using struct tags [1c] to catch errors early. The actual skill logic is then executed [1d] with all necessary dependencies injected. If anything fails, the framework automatically formats and emits structured error envelopes. This design allows skills to focus purely on their core logic while the framework handles cross-cutting concerns like security validation, CAS integration, and consistent output formatting."
+      "traceGuide": "## Motivation\n\nFoxctl needs a **standardized way to execute file operations** across different skills while maintaining security and consistency. Without this framework, each skill would need to implement its own input parsing, validation, error handling, and output formatting - leading to inconsistent behavior and potential security vulnerabilities. The skill execution framework solves this by providing a **unified pipeline** that all filesystem skills (read, write, edit) can inherit, ensuring proper validation, structured output, and integration with the content-addressable storage system.\n\n## Details\n\nThe skill framework follows a **generic execution pattern** starting from the `Main()` function [1a] which handles all skills uniformly. It first loads configuration and establishes a `RunContext` containing dependencies like CAS storage and path validation. Input is parsed as JSON from stdin [1b] and validated using struct tags [1c] to catch errors early. The actual skill logic is then executed [1d] with all necessary dependencies injected. If anything fails, the framework automatically formats and emits structured error envelopes. This design allows skills to focus purely on their core logic while the framework handles cross-cutting concerns like security validation, CAS integration, and consistent output formatting."
     },
     {
       "id": "2",

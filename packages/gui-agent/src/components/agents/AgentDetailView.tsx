@@ -554,14 +554,14 @@ function runtimeNodeLabel(
 }
 
 function summarizeRuntimeNode(node?: AgentRuntimeTreeNode | null): {
-  agentctlStatus?: string;
+  foxctlStatus?: string;
   profile?: string;
   lastError?: string;
 } {
   if (!node || !isRecord(node.state)) return {};
   const state = node.state;
   const summary: {
-    agentctlStatus?: string;
+    foxctlStatus?: string;
     profile?: string;
     lastError?: string;
   } = {};
@@ -579,7 +579,7 @@ function summarizeRuntimeNode(node?: AgentRuntimeTreeNode | null): {
   if (isRecord(state.foxctl)) {
     const foxctl = state.foxctl;
     if (typeof foxctl.status === "string" && foxctl.status.trim()) {
-      summary.agentctlStatus = foxctl.status.trim();
+      summary.foxctlStatus = foxctl.status.trim();
     }
     if (typeof foxctl.last_error === "string" && foxctl.last_error.trim()) {
       summary.lastError = foxctl.last_error.trim();
@@ -639,9 +639,9 @@ function RuntimeTreeNodeCard({
               {node.status}
             </Badge>
           )}
-          {summary.agentctlStatus && (
+          {summary.foxctlStatus && (
             <Badge variant="outline" className="text-[10px]">
-              {summary.agentctlStatus}
+              {summary.foxctlStatus}
             </Badge>
           )}
           {linkedAgent && (
@@ -1789,8 +1789,8 @@ export function AgentDetailView({ agent, onBack }: AgentDetailViewProps) {
                     }
                   />
                   <MemoryStat
-                    label="Agentctl"
-                    value={runtimeSummary.agentctlStatus || "-"}
+                    label="Foxctl"
+                    value={runtimeSummary.foxctlStatus || "-"}
                   />
                   <MemoryStat
                     label="Children"

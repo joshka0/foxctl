@@ -32,15 +32,15 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Ensure AGENTCTL_HOME is set
-AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.foxctl}"
-AGENTCTL_BIN_DIR="$AGENTCTL_HOME/bin"
+# Ensure FOXCTL_HOME is set
+FOXCTL_HOME="${FOXCTL_HOME:-$HOME/.foxctl}"
+FOXCTL_BIN_DIR="$FOXCTL_HOME/bin"
 
 echo "Building foxctl-mail..."
 cd "$REPO_ROOT"
-CGO_ENABLED=0 go build -o "$AGENTCTL_BIN_DIR/foxctl-mail" ./cmd/foxctl-mail
+CGO_ENABLED=0 go build -o "$FOXCTL_BIN_DIR/foxctl-mail" ./cmd/foxctl-mail
 
-echo "Installed to: $AGENTCTL_BIN_DIR/foxctl-mail"
+echo "Installed to: $FOXCTL_BIN_DIR/foxctl-mail"
 
 # Create symlink directory if needed
 mkdir -p "$LINK_DIR"
@@ -55,8 +55,8 @@ if [[ -e "$SYMLINK_PATH" ]]; then
   fi
 fi
 
-ln -s "$AGENTCTL_BIN_DIR/foxctl-mail" "$SYMLINK_PATH" || { echo "Failed to create symlink: $SYMLINK_PATH"; exit 1; }
-echo "Symlinked: $SYMLINK_PATH -> $AGENTCTL_BIN_DIR/foxctl-mail"
+ln -s "$FOXCTL_BIN_DIR/foxctl-mail" "$SYMLINK_PATH" || { echo "Failed to create symlink: $SYMLINK_PATH"; exit 1; }
+echo "Symlinked: $SYMLINK_PATH -> $FOXCTL_BIN_DIR/foxctl-mail"
 
 # Verify it's in PATH
 if command -v foxctl-mail &>/dev/null; then

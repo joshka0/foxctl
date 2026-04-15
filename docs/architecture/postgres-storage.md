@@ -7,8 +7,8 @@ This document reflects the implemented storage topology as of commit `93bcbb3b` 
 The storage layer supports per-store database drivers through `internal/storage/dbdriver`.
 
 - Driver selection per store:
-  - `AGENTCTL_<STORE>_DB_DRIVER`
-  - fallback `AGENTCTL_DB_DRIVER`
+  - `FOXCTL_<STORE>_DB_DRIVER`
+  - fallback `FOXCTL_DB_DRIVER`
   - default: `sqlite`
 - Supported drivers in current implementation:
   - `sqlite` (default)
@@ -24,12 +24,12 @@ The storage layer supports per-store database drivers through `internal/storage/
 
 - `foxctl` runs most logical stores as separate PostgreSQL schemas.
 - Default schema name is lower-cased store name (for example: `sessions`, `tasks`, `memory`).
-- DB is opened via `AGENTCTL_<STORE>_POSTGRES_DSN`, then fallback to:
-  - `AGENTCTL_POSTGRES_DSN`
+- DB is opened via `FOXCTL_<STORE>_POSTGRES_DSN`, then fallback to:
+  - `FOXCTL_POSTGRES_DSN`
   - `DATABASE_URL`
 - Schema and pooling controls are global:
-  - `AGENTCTL_POSTGRES_MAX_CONNS`
-  - `AGENTCTL_POSTGRES_MAX_IDLE_CONNS`
+  - `FOXCTL_POSTGRES_MAX_CONNS`
+  - `FOXCTL_POSTGRES_MAX_IDLE_CONNS`
 
 ### What changes in connection behavior
 
@@ -41,7 +41,7 @@ The storage layer supports per-store database drivers through `internal/storage/
 - Runs migrations under advisory lock per schema to avoid concurrent migrations from multiple pods.
 - Detects `pgvector` availability:
   - best-effort enable by default (falls back when not required)
-  - hard-fail only when `AGENTCTL_POSTGRES_REQUIRE_VECTOR=true`
+  - hard-fail only when `FOXCTL_POSTGRES_REQUIRE_VECTOR=true`
 
 ### Storage migration notes
 
@@ -54,7 +54,7 @@ This keeps migration and lifecycle semantics consistent while allowing pooled/po
 
 ## CAS architecture
 
-`internal/storage/cas/config.go` defines CAS backends via `AGENTCTL_CAS_DRIVER`:
+`internal/storage/cas/config.go` defines CAS backends via `FOXCTL_CAS_DRIVER`:
 
 - `file` (filesystem)
 - `sqlite`
@@ -63,15 +63,15 @@ This keeps migration and lifecycle semantics consistent while allowing pooled/po
 
 Current PostgreSQL-oriented deployment overlays use:
 
-- `AGENTCTL_CAS_DRIVER=s3`
-- `AGENTCTL_CAS_S3_BUCKET`
-- `AGENTCTL_CAS_S3_REGION`
-- `AGENTCTL_CAS_S3_ENDPOINT` (optional, for MinIO)
-- `AGENTCTL_CAS_S3_PREFIX`
-- `AGENTCTL_CAS_S3_FORCE_PATH_STYLE`
-- `AGENTCTL_CAS_S3_DISABLE_SSL`
+- `FOXCTL_CAS_DRIVER=s3`
+- `FOXCTL_CAS_S3_BUCKET`
+- `FOXCTL_CAS_S3_REGION`
+- `FOXCTL_CAS_S3_ENDPOINT` (optional, for MinIO)
+- `FOXCTL_CAS_S3_PREFIX`
+- `FOXCTL_CAS_S3_FORCE_PATH_STYLE`
+- `FOXCTL_CAS_S3_DISABLE_SSL`
 
-Legacy base manifests may still show older env keys (`AGENTCTL_CAS_BACKEND`, `AGENTCTL_CAS_BUCKET`); these are documented as historical drift in `docs/guides/kubernetes.md`.
+Legacy base manifests may still show older env keys (`FOXCTL_CAS_BACKEND`, `FOXCTL_CAS_BUCKET`); these are documented as historical drift in `docs/guides/kubernetes.md`.
 
 ## Teams conversation references
 

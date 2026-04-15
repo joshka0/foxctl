@@ -24,12 +24,12 @@ var updateGolden = flag.Bool("update", false, "update golden files")
 func TestGoldenTrajectoryExportEpisodes(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
-	t.Setenv("AGENTCTL_HOME", filepath.Join(tmp, "foxctl"))
-	t.Setenv("AGENTCTL_PATHS_CAS", filepath.Join(tmp, "cas"))
-	t.Setenv("AGENTCTL_PATHS_JOBS", filepath.Join(tmp, "jobs"))
-	t.Setenv("AGENTCTL_PATHS_CACHE", filepath.Join(tmp, "cache"))
-	t.Setenv("AGENTCTL_PATHS_SKILLS", filepath.Join(tmp, "skills"))
-	t.Setenv("AGENTCTL_STORAGE_ROOT", filepath.Join(tmp, "storage"))
+	t.Setenv("FOXCTL_HOME", filepath.Join(tmp, "foxctl"))
+	t.Setenv("FOXCTL_PATHS_CAS", filepath.Join(tmp, "cas"))
+	t.Setenv("FOXCTL_PATHS_JOBS", filepath.Join(tmp, "jobs"))
+	t.Setenv("FOXCTL_PATHS_CACHE", filepath.Join(tmp, "cache"))
+	t.Setenv("FOXCTL_PATHS_SKILLS", filepath.Join(tmp, "skills"))
+	t.Setenv("FOXCTL_STORAGE_ROOT", filepath.Join(tmp, "storage"))
 
 	cfg, err := config.Load(ctx)
 	if err != nil {
@@ -157,7 +157,7 @@ func buildSkillBinary(t *testing.T, outPath string, repoRoot string, pkg string)
 func runSkill(t *testing.T, ctx context.Context, binPath string, workspace string, input []byte) (envelope.Envelope, string) {
 	t.Helper()
 	cmd := exec.CommandContext(ctx, binPath)
-	cmd.Env = append(os.Environ(), "AGENTCTL_WORKSPACE="+workspace)
+	cmd.Env = append(os.Environ(), "FOXCTL_WORKSPACE="+workspace)
 	cmd.Stdin = bytes.NewReader(input)
 
 	var stdout bytes.Buffer

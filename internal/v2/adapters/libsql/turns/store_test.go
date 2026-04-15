@@ -118,8 +118,8 @@ func TestTurnStore_SaveAndGetTurn_RoundTrip(t *testing.T) {
 }
 
 func TestDefaultV2TurnsVectorDimensions_Precedence(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_TURNS_VECTOR_DIMS", "")
-	t.Setenv("AGENTCTL_VECTOR_DIMS", "")
+	t.Setenv("FOXCTL_V2_TURNS_VECTOR_DIMS", "")
+	t.Setenv("FOXCTL_VECTOR_DIMS", "")
 	if hasVectorDimsOverride() {
 		t.Fatalf("hasVectorDimsOverride() = true, want false")
 	}
@@ -127,17 +127,17 @@ func TestDefaultV2TurnsVectorDimensions_Precedence(t *testing.T) {
 		t.Fatalf("defaultV2TurnsVectorDimensions() = %d, want %d", got, defaultV2TurnsVectorDims)
 	}
 
-	t.Setenv("AGENTCTL_VECTOR_DIMS", "1024")
+	t.Setenv("FOXCTL_VECTOR_DIMS", "1024")
 	if !hasVectorDimsOverride() {
 		t.Fatalf("hasVectorDimsOverride() = false, want true")
 	}
 	if got := defaultV2TurnsVectorDimensions(); got != 1024 {
-		t.Fatalf("defaultV2TurnsVectorDimensions() with AGENTCTL_VECTOR_DIMS = %d, want 1024", got)
+		t.Fatalf("defaultV2TurnsVectorDimensions() with FOXCTL_VECTOR_DIMS = %d, want 1024", got)
 	}
 
-	t.Setenv("AGENTCTL_V2_TURNS_VECTOR_DIMS", "1536")
+	t.Setenv("FOXCTL_V2_TURNS_VECTOR_DIMS", "1536")
 	if got := defaultV2TurnsVectorDimensions(); got != 1536 {
-		t.Fatalf("defaultV2TurnsVectorDimensions() with AGENTCTL_V2_TURNS_VECTOR_DIMS = %d, want 1536", got)
+		t.Fatalf("defaultV2TurnsVectorDimensions() with FOXCTL_V2_TURNS_VECTOR_DIMS = %d, want 1536", got)
 	}
 }
 

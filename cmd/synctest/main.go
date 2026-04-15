@@ -18,12 +18,12 @@ func main() {
 	ctx := context.Background()
 
 	// Configure libsql with sync
-	syncURL := os.Getenv("AGENTCTL_LIBSQL_SYNC_URL")
+	syncURL := os.Getenv("FOXCTL_LIBSQL_SYNC_URL")
 	if syncURL == "" {
 		syncURL = "http://127.0.0.1:8080"
 	}
 
-	replicaPath := os.Getenv("AGENTCTL_LIBSQL_PATH")
+	replicaPath := os.Getenv("FOXCTL_LIBSQL_PATH")
 	if replicaPath == "" {
 		replicaPath = os.ExpandEnv("$HOME/.foxctl/sync-test/replica.db")
 	}

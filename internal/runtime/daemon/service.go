@@ -817,12 +817,12 @@ func (s *Service) handleRun(ctx context.Context, params json.RawMessage) (*RunRe
 func (s *Service) buildSkillEnv(workspace string) []string {
 	var env []string
 	if workspace != "" {
-		env = append(env, "AGENTCTL_WORKSPACE="+workspace)
+		env = append(env, "FOXCTL_WORKSPACE="+workspace)
 	}
 	// Propagate session vars from parent environment
 	for _, key := range []string{
-		"AGENTCTL_SESSION_ID", "CLAUDE_SESSION_ID",
-		"AGENTCTL_AGENT_ID", "AGENTCTL_TRACE_ID",
+		"FOXCTL_SESSION_ID", "CLAUDE_SESSION_ID",
+		"FOXCTL_AGENT_ID", "FOXCTL_TRACE_ID",
 	} {
 		if v := os.Getenv(key); v != "" {
 			env = append(env, key+"="+v)
@@ -952,7 +952,7 @@ func (s *Service) getCacheStore(ctx context.Context) (*cache.Store, error) { //n
 // - Keywords: daemonize, background, socket, child_process
 func Daemonize() error {
 	// Check if we're already daemonized
-	if os.Getenv("AGENTCTL_DAEMON_CHILD") == "1" {
+	if os.Getenv("FOXCTL_DAEMON_CHILD") == "1" {
 		return nil
 	}
 
@@ -974,7 +974,7 @@ func Daemonize() error {
 	cmd := &exec{
 		Path: exe,
 		Args: append([]string{exe}, args...),
-		Env:  append(os.Environ(), "AGENTCTL_DAEMON_CHILD=1"),
+		Env:  append(os.Environ(), "FOXCTL_DAEMON_CHILD=1"),
 	}
 
 	// Detach from terminal
@@ -1264,7 +1264,7 @@ func (s *Service) stopACAMaintenanceLoop() {
 }
 
 func acaMaintenanceInterval() time.Duration {
-	raw := strings.TrimSpace(os.Getenv("AGENTCTL_ACA_MAINTENANCE_INTERVAL"))
+	raw := strings.TrimSpace(os.Getenv("FOXCTL_ACA_MAINTENANCE_INTERVAL"))
 	if raw == "" {
 		return acaMaintenanceTick
 	}
@@ -1276,10 +1276,10 @@ func acaMaintenanceInterval() time.Duration {
 }
 
 func acaMaintenanceVaultPath() string {
-	if value := strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH")); value != "" {
+	if value := strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")); value != "" {
 		return value
 	}
-	return strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH"))
+	return strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"))
 }
 
 // startFileSummaryWorker initializes and starts the background file summary worker.

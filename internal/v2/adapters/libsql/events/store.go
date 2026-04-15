@@ -71,7 +71,7 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 }
 
 func hasDriverOverride() bool {
-	return os.Getenv("AGENTCTL_V2_EVENTS_DB_DRIVER") != "" || os.Getenv("AGENTCTL_DB_DRIVER") != ""
+	return os.Getenv("FOXCTL_V2_EVENTS_DB_DRIVER") != "" || os.Getenv("FOXCTL_DB_DRIVER") != ""
 }
 
 // Close releases database resources.

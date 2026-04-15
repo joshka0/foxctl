@@ -49,8 +49,8 @@ func ApplyRepoEnv(owner, repo string) (string, string) {
 // DetectRepo attempts to derive owner/repo from git remote origin.
 func DetectRepo(ctx context.Context) (string, string, error) {
 	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
-	// Try running from AGENTCTL_WORKSPACE if set (fallback for MCP/daemon mode)
-	if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
+	// Try running from FOXCTL_WORKSPACE if set (fallback for MCP/daemon mode)
+	if ws := os.Getenv("FOXCTL_WORKSPACE"); ws != "" {
 		cmd.Dir = ws
 	}
 	out, err := cmd.Output()

@@ -81,7 +81,7 @@ without overcomplicating policy in v1.
 
 - [ ] Decide where the review gate is toggled for a workspace in v1:
   - Option 1: Environment flag (e.g.
-    `AGENTCTL_TODO_REVIEW_GATE=on` for now).
+    `FOXCTL_TODO_REVIEW_GATE=on` for now).
   - Option 2: Config field in `config.Config` / workspace settings.
 - [ ] Implement a tiny helper `isReviewGateEnabled(workspaceID, cfg)` inside
   `skills/todo/main.go` that encapsulates this rule and can evolve later

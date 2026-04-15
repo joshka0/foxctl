@@ -232,17 +232,17 @@ func TestWorkspaceProjectNoteBias_UsesAbsoluteRepoNameForDotWorkspace(t *testing
 	}
 	t.Chdir(root)
 
-	agentctlHit := obsidianindex.SearchHit{
+	foxctlHit := obsidianindex.SearchHit{
 		Path: "notes/repo/foxctl/packages/internal-web-api.md",
 	}
 	prazeHit := obsidianindex.SearchHit{
 		Path: "notes/repo/praze/packages/apps-praze-api-lib-prazeweb-api.md",
 	}
 
-	agentctlBias := workspaceProjectNoteBias(".", "web api handlers transport", agentctlHit)
+	foxctlBias := workspaceProjectNoteBias(".", "web api handlers transport", foxctlHit)
 	prazeBias := workspaceProjectNoteBias(".", "web api handlers transport", prazeHit)
-	if agentctlBias <= prazeBias {
-		t.Fatalf("expected local project bias > cross-project bias, got local=%d cross=%d", agentctlBias, prazeBias)
+	if foxctlBias <= prazeBias {
+		t.Fatalf("expected local project bias > cross-project bias, got local=%d cross=%d", foxctlBias, prazeBias)
 	}
 }
 

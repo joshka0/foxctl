@@ -5,7 +5,7 @@ set -euo pipefail
 readonly REPO_URL="https://gitlab.com/joshka0/foxctl.git"
 readonly GO_VERSION_REQUIRED="1.26.1"
 readonly DEFAULT_REPO_DIR="${HOME}/.foxctl/src/foxctl"
-readonly AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.foxctl}"
+readonly FOXCTL_HOME="${FOXCTL_HOME:-$HOME/.foxctl}"
 readonly LOCAL_BIN="${HOME}/.local/bin"
 
 RED=$'\033[0;31m'
@@ -19,7 +19,7 @@ ASSUME_YES=false
 SKIP_CGO=false
 SKIP_BUN=false
 SKIP_PROVIDER_SETUP=false
-REPO_DIR="${AGENTCTL_REPO_DIR:-}"
+REPO_DIR="${FOXCTL_REPO_DIR:-}"
 
 info() { printf "%s[INFO]%s %s\n" "$BLUE" "$NC" "$1"; }
 success() { printf "%s[OK]%s %s\n" "$GREEN" "$NC" "$1"; }
@@ -45,8 +45,8 @@ Options:
   --help, -h              Show this help
 
 Environment:
-  AGENTCTL_HOME           Defaults to ~/.foxctl
-  AGENTCTL_REPO_DIR       Default checkout dir when cloning outside a repo
+  FOXCTL_HOME           Defaults to ~/.foxctl
+  FOXCTL_REPO_DIR       Default checkout dir when cloning outside a repo
 EOF
 }
 
@@ -393,12 +393,12 @@ prepare_repo() {
 }
 
 ensure_local_layout() {
-    mkdir -p "$LOCAL_BIN" "$AGENTCTL_HOME"
-    mkdir -p "$AGENTCTL_HOME"/{storage,cache,cas,skills,jobs,observability/events,backups}
+    mkdir -p "$LOCAL_BIN" "$FOXCTL_HOME"
+    mkdir -p "$FOXCTL_HOME"/{storage,cache,cas,skills,jobs,observability/events,backups}
     export PATH="$LOCAL_BIN:$PATH"
 }
 
-build_agentctl() {
+build_foxctl() {
     step "Building foxctl"
     cd "$REPO_ROOT"
 
@@ -462,7 +462,7 @@ print_summary() {
     success "foxctl installation finished"
     printf "\n"
     printf "%s\n" "Repo:        $REPO_ROOT"
-    printf "%s\n" "AGENTCTL_HOME: $AGENTCTL_HOME"
+    printf "%s\n" "FOXCTL_HOME: $FOXCTL_HOME"
     printf "%s\n" "PATH link:   $LOCAL_BIN/foxctl"
     printf "\n"
     printf "%s\n" "Next steps:"
@@ -487,7 +487,7 @@ main() {
     ensure_dependencies
     prepare_repo
     ensure_local_layout
-    build_agentctl
+    build_foxctl
     install_skills
     link_binaries
     bootstrap_bun_workspace

@@ -9,15 +9,15 @@
 # For literal patterns (identifiers, symbols), uses context_ripgrep directly.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_SMART_GREP_MAX_BLOCKS - Max blocks to show (default: 5)
-#   AGENTCTL_SMART_GREP_SEMANTIC - Enable semantic chaining (default: 1)
+#   FOXCTL_BIN - Path to foxctl binary (default: foxctl)
+#   FOXCTL_SMART_GREP_MAX_BLOCKS - Max blocks to show (default: 5)
+#   FOXCTL_SMART_GREP_SEMANTIC - Enable semantic chaining (default: 1)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-MAX_BLOCKS="${AGENTCTL_SMART_GREP_MAX_BLOCKS:-5}"
-SEMANTIC_ENABLED="${AGENTCTL_SMART_GREP_SEMANTIC:-1}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+MAX_BLOCKS="${FOXCTL_SMART_GREP_MAX_BLOCKS:-5}"
+SEMANTIC_ENABLED="${FOXCTL_SMART_GREP_SEMANTIC:-1}"
 
 # Ensure MAX_BLOCKS is numeric to avoid jq --argjson failures under set -e
 if ! [[ "$MAX_BLOCKS" =~ ^[0-9]+$ ]]; then
@@ -81,7 +81,7 @@ if [[ "$is_conceptual" == "true" ]]; then
   search_method="semantic+snippet_extract"
 
   # Get candidates from semantic search
-  candidates=$("$AGENTCTL_BIN" run --daemon code/semantic_search --ephemeral --input "$(jq -nc --arg q "$pattern" '{
+  candidates=$("$FOXCTL_BIN" run --daemon code/semantic_search --ephemeral --input "$(jq -nc --arg q "$pattern" '{
     query: $q,
     scope: ["symbols"],
     limit: 10
@@ -89,7 +89,7 @@ if [[ "$is_conceptual" == "true" ]]; then
 
   # If we got candidates, use snippet_extract
   if [[ "$candidates" != "[]" && "$candidates" != "null" && -n "$candidates" ]]; then
-    result=$("$AGENTCTL_BIN" run --daemon code/snippet_extract --ephemeral --input "$(jq -nc --arg q "$pattern" --argjson cands "$candidates" '{
+    result=$("$FOXCTL_BIN" run --daemon code/snippet_extract --ephemeral --input "$(jq -nc --arg q "$pattern" --argjson cands "$candidates" '{
       question: $q,
       candidates: $cands,
       max_files: 8,
@@ -106,7 +106,7 @@ if [[ -z "$result" ]]; then
     path: $path,
     max_blocks: $max_blocks
   }')
-  result=$("$AGENTCTL_BIN" run --daemon code/context_ripgrep --ephemeral --input "$input_json" 2>/dev/null) || {
+  result=$("$FOXCTL_BIN" run --daemon code/context_ripgrep --ephemeral --input "$input_json" 2>/dev/null) || {
     echo '{}'
     exit 0
   }
@@ -131,7 +131,7 @@ if [[ "$search_method" == "semantic+snippet_extract" ]]; then
       path: $path,
       max_blocks: $max_blocks
     }')
-    result=$("$AGENTCTL_BIN" run --daemon code/context_ripgrep --ephemeral --input "$input_json" 2>/dev/null) || {
+    result=$("$FOXCTL_BIN" run --daemon code/context_ripgrep --ephemeral --input "$input_json" 2>/dev/null) || {
       echo '{}'
       exit 0
     }

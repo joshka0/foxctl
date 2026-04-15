@@ -496,7 +496,7 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (engine.
 	toolRunner := engine.NewToolRunner(executor, r.config.HookDispatcher, runnerCfg)
 	llmEngine.SetToolRunner(toolRunner)
 
-	// Config gate: opt in to the Eino-backed engine path via AGENTCTL_ENGINE_BACKEND=eino.
+	// Config gate: opt in to the Eino-backed engine path via FOXCTL_ENGINE_BACKEND=eino.
 	// When the gate is off (the default), llmEngine is returned unchanged, preserving the
 	// Milestone 1 mailbox-owned default path.
 	//
@@ -794,7 +794,7 @@ func (e *agentToolExecutor) executeShell(ctx context.Context, args map[string]an
 			cmdArgs = append(cmdArgs, "--token-model", tokenModel)
 		}
 	}
-	cmd := e.newAgentctlCommand(ctx, cmdArgs...)
+	cmd := e.newFoxctlCommand(ctx, cmdArgs...)
 	output, err := commandOutput(cmd, "shell")
 	if err != nil {
 		return "", err
@@ -1452,7 +1452,7 @@ func (e *agentToolExecutor) executeSemanticSearchScoped(ctx context.Context, lab
 		return "", fmt.Errorf("marshal %s input: %w", label, err)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "run", "code/semantic_search", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "code/semantic_search", "--input", string(inputBytes))
 	return commandOutput(cmd, label)
 }
 
@@ -1483,7 +1483,7 @@ func (e *agentToolExecutor) executeSmartSearch(ctx context.Context, args map[str
 		return "", fmt.Errorf("marshal smart_search input: %w", err)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "run", "code/smart_search", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "code/smart_search", "--input", string(inputBytes))
 
 	return commandOutput(cmd, "smart_search")
 }
@@ -1555,7 +1555,7 @@ func (e *agentToolExecutor) executeCodeSearchEnsemble(ctx context.Context, args 
 		argsList = append(argsList, "--max-snippets", strconv.Itoa(maxSnippets))
 	}
 
-	cmd := e.newAgentctlCommand(ctx, argsList...)
+	cmd := e.newFoxctlCommand(ctx, argsList...)
 	if _, err := commandOutput(cmd, "code_search_ensemble"); err != nil {
 		return "", err
 	}
@@ -1619,7 +1619,7 @@ func (e *agentToolExecutor) executeContextFilter(ctx context.Context, args map[s
 		return "", fmt.Errorf("marshal context_filter input: %w", err)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "run", "context/filter", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "context/filter", "--input", string(inputBytes))
 
 	return commandOutput(cmd, "context_filter")
 }
@@ -1637,7 +1637,7 @@ func (e *agentToolExecutor) executeContextGrep(ctx context.Context, args map[str
 	}
 
 	input := fmt.Sprintf(`{"pattern": %q, "path": %q}`, pattern, path)
-	cmd := e.newAgentctlCommand(ctx, "run", "code/context_grep", "--input", input)
+	cmd := e.newFoxctlCommand(ctx, "run", "code/context_grep", "--input", input)
 
 	return commandOutput(cmd, "context_grep")
 }
@@ -1657,7 +1657,7 @@ func (e *agentToolExecutor) executeCodeSymbols(ctx context.Context, args map[str
 	}
 
 	inputBytes, _ := json.Marshal(inputMap)
-	cmd := e.newAgentctlCommand(ctx, "run", "code/symbols", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "code/symbols", "--input", string(inputBytes))
 	return commandOutput(cmd, "code_symbols")
 }
 
@@ -1692,7 +1692,7 @@ func (e *agentToolExecutor) executeRefactorScout(ctx context.Context, args map[s
 		return "", fmt.Errorf("marshal refactor_scout input: %w", err)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "run", "code/refactor_scout", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "code/refactor_scout", "--input", string(inputBytes))
 	return commandOutput(cmd, "refactor_scout")
 }
 
@@ -1725,7 +1725,7 @@ func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map
 	if err != nil {
 		return "", fmt.Errorf("marshal repo_index_search input: %w", err)
 	}
-	cmd := e.newAgentctlCommand(ctx, "run", "repo/index_search", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "repo/index_search", "--input", string(inputBytes))
 	return commandOutput(cmd, "repo_index_search")
 }
 
@@ -1755,7 +1755,7 @@ func (e *agentToolExecutor) executeRepoIndexExpand(ctx context.Context, args map
 	if err != nil {
 		return "", fmt.Errorf("marshal repo_index_expand input: %w", err)
 	}
-	cmd := e.newAgentctlCommand(ctx, "run", "repo/index_expand", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "repo/index_expand", "--input", string(inputBytes))
 	return commandOutput(cmd, "repo_index_expand")
 }
 
@@ -1770,7 +1770,7 @@ func (e *agentToolExecutor) executeRepoIndexOpen(ctx context.Context, args map[s
 		workspace = "."
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "index", "repo", "open", "--workspace", workspace, "--id", id)
+	cmd := e.newFoxctlCommand(ctx, "index", "repo", "open", "--workspace", workspace, "--id", id)
 
 	return commandOutput(cmd, "repo_index_open")
 }
@@ -1786,7 +1786,7 @@ func (e *agentToolExecutor) executeRepoIndexDagGrep(ctx context.Context, args ma
 		return "", fmt.Errorf("marshal dag_grep args: %w", err)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "run", "code/dag_grep", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "code/dag_grep", "--input", string(inputBytes))
 
 	return commandOutput(cmd, "repo_index_dag_grep")
 }
@@ -1796,7 +1796,7 @@ func (e *agentToolExecutor) executeContextShow(ctx context.Context, _ map[string
 	if workspace == "" {
 		workspace = "."
 	}
-	cmd := e.newAgentctlCommand(ctx, "context", "show", "--workspace", workspace)
+	cmd := e.newFoxctlCommand(ctx, "context", "show", "--workspace", workspace)
 	return e.commandOutputData(cmd, "context_show")
 }
 
@@ -1807,10 +1807,10 @@ func (e *agentToolExecutor) executeContextRetrieve(ctx context.Context, args map
 	}
 	vaultPath := stringArg(args, "vault_path", "")
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH"))
+		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
 	}
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH"))
+		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"))
 	}
 	if strings.TrimSpace(vaultPath) == "" {
 		return "", fmt.Errorf("vault_path is required")
@@ -1820,7 +1820,7 @@ func (e *agentToolExecutor) executeContextRetrieve(ctx context.Context, args map
 	if workspace == "" {
 		workspace = "."
 	}
-	cmd := e.newAgentctlCommand(ctx, "context", "retrieve", "--workspace", workspace, "--vault-path", vaultPath, "--query", query, "--limit", strconv.Itoa(limit))
+	cmd := e.newFoxctlCommand(ctx, "context", "retrieve", "--workspace", workspace, "--vault-path", vaultPath, "--query", query, "--limit", strconv.Itoa(limit))
 	return e.commandOutputData(cmd, "context_retrieve")
 }
 
@@ -1831,10 +1831,10 @@ func (e *agentToolExecutor) executeObsidianIndexSearch(ctx context.Context, args
 	}
 	vaultPath := stringArg(args, "vault_path", "")
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH"))
+		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
 	}
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH"))
+		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"))
 	}
 	if strings.TrimSpace(vaultPath) == "" {
 		return "", fmt.Errorf("vault_path is required")
@@ -1844,7 +1844,7 @@ func (e *agentToolExecutor) executeObsidianIndexSearch(ctx context.Context, args
 	if boolArg(args, "semantic") {
 		argsList = append(argsList, "--semantic")
 	}
-	cmd := e.newAgentctlCommand(ctx, argsList...)
+	cmd := e.newFoxctlCommand(ctx, argsList...)
 	return e.commandOutputData(cmd, "obsidian_index_search")
 }
 
@@ -1855,15 +1855,15 @@ func (e *agentToolExecutor) executeObsidianRead(ctx context.Context, args map[st
 	}
 	vaultPath := stringArg(args, "vault_path", "")
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH"))
+		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
 	}
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH"))
+		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"))
 	}
 	if strings.TrimSpace(vaultPath) == "" {
 		return "", fmt.Errorf("vault_path is required")
 	}
-	cmd := e.newAgentctlCommand(ctx, "obsidian", "read", "--vault-path", vaultPath, "--path", path)
+	cmd := e.newFoxctlCommand(ctx, "obsidian", "read", "--vault-path", vaultPath, "--path", path)
 	return e.commandOutputData(cmd, "obsidian_read")
 }
 
@@ -1874,16 +1874,16 @@ func (e *agentToolExecutor) executeObsidianRelated(ctx context.Context, args map
 	}
 	vaultPath := stringArg(args, "vault_path", "")
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH"))
+		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH"))
 	}
 	if strings.TrimSpace(vaultPath) == "" {
-		vaultPath = strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH"))
+		vaultPath = strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH"))
 	}
 	if strings.TrimSpace(vaultPath) == "" {
 		return "", fmt.Errorf("vault_path is required")
 	}
 	limit := intArg(args, 10, "limit")
-	cmd := e.newAgentctlCommand(ctx, "obsidian", "related", "--vault-path", vaultPath, "--path", path, "--limit", strconv.Itoa(limit))
+	cmd := e.newFoxctlCommand(ctx, "obsidian", "related", "--vault-path", vaultPath, "--path", path, "--limit", strconv.Itoa(limit))
 	return e.commandOutputData(cmd, "obsidian_related")
 }
 
@@ -1893,7 +1893,7 @@ func (e *agentToolExecutor) executeHeartwoodState(ctx context.Context, args map[
 		return "", fmt.Errorf("marshal heartwood_state args: %w", err)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "run", "heartwood/state", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "heartwood/state", "--input", string(inputBytes))
 	return commandOutput(cmd, "heartwood_state")
 }
 
@@ -1903,7 +1903,7 @@ func (e *agentToolExecutor) executeHeartwoodAction(ctx context.Context, args map
 		return "", fmt.Errorf("marshal heartwood_action args: %w", err)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "run", "heartwood/action", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "heartwood/action", "--input", string(inputBytes))
 	return commandOutput(cmd, "heartwood_action")
 }
 
@@ -1921,7 +1921,7 @@ func (e *agentToolExecutor) executeSessionTimeline(ctx context.Context, args map
 
 	// Call semantic_search with sessions scope and timeline=true
 	input := fmt.Sprintf(`{"query": %q, "scope": ["sessions"], "timeline": true, "limit": %d}`, query, limit)
-	cmd := e.newAgentctlCommand(ctx, "run", "code/semantic_search", "--input", input)
+	cmd := e.newFoxctlCommand(ctx, "run", "code/semantic_search", "--input", input)
 
 	return commandOutput(cmd, "session_timeline")
 }
@@ -1948,7 +1948,7 @@ func (e *agentToolExecutor) executeMemoryQuery(ctx context.Context, args map[str
 		return "", fmt.Errorf("marshal memory_query input: %w", err)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "run", "memory/query", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "memory/query", "--input", string(inputBytes))
 	return commandOutput(cmd, "memory_query")
 }
 
@@ -1963,7 +1963,7 @@ func (e *agentToolExecutor) executeAgentMemoryContext(ctx context.Context, args 
 		argsList = append(argsList, "--conversation-id", conversationID)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, argsList...)
+	cmd := e.newFoxctlCommand(ctx, argsList...)
 	return e.commandOutputData(cmd, "agent_memory_context")
 }
 
@@ -1985,7 +1985,7 @@ func (e *agentToolExecutor) executeAgentMemorySearch(ctx context.Context, args m
 		argsList = append(argsList, "--limit", strconv.Itoa(limit))
 	}
 
-	cmd := e.newAgentctlCommand(ctx, argsList...)
+	cmd := e.newFoxctlCommand(ctx, argsList...)
 	return e.commandOutputData(cmd, "agent_memory_search")
 }
 
@@ -1998,7 +1998,7 @@ func (e *agentToolExecutor) executeSessionRecall(ctx context.Context, args map[s
 	limit := intArg(args, 5, "limit")
 
 	input := fmt.Sprintf(`{"query": %q, "scope": ["sessions"], "limit": %d}`, query, limit)
-	cmd := e.newAgentctlCommand(ctx, "run", "code/semantic_search", "--input", input)
+	cmd := e.newFoxctlCommand(ctx, "run", "code/semantic_search", "--input", input)
 	return commandOutput(cmd, "session_recall")
 }
 
@@ -2031,7 +2031,7 @@ func (e *agentToolExecutor) executeAnnotationRecall(ctx context.Context, args ma
 		return "", fmt.Errorf("marshal annotation_recall input: %w", err)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "run", "session/recall", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "session/recall", "--input", string(inputBytes))
 	return commandOutput(cmd, "annotation_recall")
 }
 
@@ -2050,43 +2050,43 @@ func (e *agentToolExecutor) executeAnnotationCategoryStats(ctx context.Context, 
 		return "", fmt.Errorf("marshal annotation_category_stats input: %w", err)
 	}
 
-	cmd := e.newAgentctlCommand(ctx, "run", "session/recall", "--input", string(inputBytes))
+	cmd := e.newFoxctlCommand(ctx, "run", "session/recall", "--input", string(inputBytes))
 	return commandOutput(cmd, "annotation_category_stats")
 }
 
 // executeAnnotationListSessions calls session/recall in list_sessions mode
 func (e *agentToolExecutor) executeAnnotationListSessions(ctx context.Context) (string, error) {
 	input := fmt.Sprintf(`{"list_sessions": true, "workspace": %q}`, e.workspaceRoot)
-	cmd := e.newAgentctlCommand(ctx, "run", "session/recall", "--input", input)
+	cmd := e.newFoxctlCommand(ctx, "run", "session/recall", "--input", input)
 	return commandOutput(cmd, "annotation_list_sessions")
 }
 
-func (e *agentToolExecutor) newAgentctlCommand(ctx context.Context, args ...string) *exec.Cmd {
+func (e *agentToolExecutor) newFoxctlCommand(ctx context.Context, args ...string) *exec.Cmd {
 	bin := "foxctl"
 	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
 		bin = exe
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = e.workspaceRoot
-	cmd.Env = filteredAgentctlEnv(os.Environ())
+	cmd.Env = filteredFoxctlEnv(os.Environ())
 	return cmd
 }
 
-func filteredAgentctlEnv(in []string) []string {
+func filteredFoxctlEnv(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, kv := range in {
 		switch {
-		case strings.HasPrefix(kv, "AGENTCTL_JIDO_"):
+		case strings.HasPrefix(kv, "FOXCTL_JIDO_"):
 			continue
-		case strings.HasPrefix(kv, "AGENTCTL_V2_ASK_DISPATCHER="):
+		case strings.HasPrefix(kv, "FOXCTL_V2_ASK_DISPATCHER="):
 			continue
-		case strings.HasPrefix(kv, "AGENTCTL_JIDO_SOCKET="):
+		case strings.HasPrefix(kv, "FOXCTL_JIDO_SOCKET="):
 			continue
-		case strings.HasPrefix(kv, "AGENTCTL_JIDO_RPC_PATH="):
+		case strings.HasPrefix(kv, "FOXCTL_JIDO_RPC_PATH="):
 			continue
-		case strings.HasPrefix(kv, "AGENTCTL_JIDO_RPC_TIMEOUT_MS="):
+		case strings.HasPrefix(kv, "FOXCTL_JIDO_RPC_TIMEOUT_MS="):
 			continue
-		case strings.HasPrefix(kv, "AGENTCTL_JIDO_SIGNAL_SOURCE="):
+		case strings.HasPrefix(kv, "FOXCTL_JIDO_SIGNAL_SOURCE="):
 			continue
 		default:
 			out = append(out, kv)
@@ -2295,9 +2295,9 @@ func (r *Runtime) buildRefactorScoutPreface(ctx context.Context, session *Sessio
 	if strings.TrimSpace(workspaceRoot) == "" {
 		workspaceRoot = "."
 	}
-	cmd := exec.CommandContext(ctx, agentctlExecutablePath(), "run", "code/refactor_scout", "--input", string(inputBytes))
+	cmd := exec.CommandContext(ctx, foxctlExecutablePath(), "run", "code/refactor_scout", "--input", string(inputBytes))
 	cmd.Dir = workspaceRoot
-	cmd.Env = filteredAgentctlEnv(os.Environ())
+	cmd.Env = filteredFoxctlEnv(os.Environ())
 	output, err := commandOutputDataForRole(cmd, "refactor_scout", string(session.Config.Role))
 	if err != nil {
 		return "", false
@@ -2331,7 +2331,7 @@ func mergeRefactorScoutTaskPrompt(taskPrompt, preface string) string {
 		preface + "\n\nOriginal task:\n" + taskPrompt
 }
 
-func agentctlExecutablePath() string {
+func foxctlExecutablePath() string {
 	bin := "foxctl"
 	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
 		bin = exe
@@ -2837,7 +2837,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Blend ACA control-plane state with vault retrieval for a focused question.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Question or topic to retrieve context for"},
-					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 5)"}
 				},"required":["query"]}`),
 			},
@@ -2846,7 +2846,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Search the local Obsidian vault index. Supports optional semantic note search.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Vault search query"},
-					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 10)"},
 					"semantic":{"type":"boolean","description":"Use semantic note search if enabled"}
 				},"required":["query"]}`),
@@ -2856,7 +2856,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Read a note from the Obsidian vault.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"path":{"type":"string","description":"Vault note path"},
-					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"}
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"}
 				},"required":["path"]}`),
 			},
 			engine.ToolDef{
@@ -2864,7 +2864,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "List related notes from the Obsidian vault using links, backlinks, aliases, or the local index.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"path":{"type":"string","description":"Vault note path"},
-					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 10)"}
 				},"required":["path"]}`),
 			},
@@ -3204,7 +3204,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Blend ACA control-plane state with vault retrieval for a focused question.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Question or topic to retrieve context for"},
-					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 5)"}
 				},"required":["query"]}`),
 			},
@@ -3213,7 +3213,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Search the local Obsidian vault index. Supports optional semantic note search.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"Vault search query"},
-					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 10)"},
 					"semantic":{"type":"boolean","description":"Use semantic note search if enabled"}
 				},"required":["query"]}`),
@@ -3223,7 +3223,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "Read a note from the Obsidian vault.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"path":{"type":"string","description":"Vault note path"},
-					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"}
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"}
 				},"required":["path"]}`),
 			},
 			engine.ToolDef{
@@ -3231,7 +3231,7 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 				Description: "List related notes from the Obsidian vault using links, backlinks, aliases, or the local index.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"path":{"type":"string","description":"Vault note path"},
-					"vault_path":{"type":"string","description":"Vault path (optional if AGENTCTL_ACA_VAULT_PATH or AGENTCTL_OBSIDIAN_VAULT_PATH is set)"},
+					"vault_path":{"type":"string","description":"Vault path (optional if FOXCTL_ACA_VAULT_PATH or FOXCTL_OBSIDIAN_VAULT_PATH is set)"},
 					"limit":{"type":"integer","description":"Maximum result count (default 10)"}
 				},"required":["path"]}`),
 			},

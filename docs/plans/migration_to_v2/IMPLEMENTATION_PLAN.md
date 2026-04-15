@@ -79,7 +79,7 @@ internal/runtime/hooks/
 - `TestMerge_ActionsAppended`
 - `TestMerge_StableOrdering`
 
-**Feature Flag:** `AGENTCTL_HOOKS_V1=0` (disabled by default)
+**Feature Flag:** `FOXCTL_HOOKS_V1=0` (disabled by default)
 
 **Acceptance Criteria:**
 - [ ] Hook types compile and are importable
@@ -127,7 +127,7 @@ internal/runtime/hooks/
 - `TestSkillAdapter_EnvelopeExtraction`
 - `TestRegistry_PrecedenceOrder`
 
-**Feature Flag:** Same as PR0 (`AGENTCTL_HOOKS_V1`)
+**Feature Flag:** Same as PR0 (`FOXCTL_HOOKS_V1`)
 
 **Acceptance Criteria:**
 - [ ] Existing shell hooks work with new dispatcher
@@ -194,7 +194,7 @@ internal/mailbox/
 - `TestWatcher_DoesNotClaimMessages`
 - `TestWatcher_PrunesOldNotifications`
 
-**Feature Flag:** `AGENTCTL_MAILBOX_WATCHER=0`
+**Feature Flag:** `FOXCTL_MAILBOX_WATCHER=0`
 
 **Acceptance Criteria:**
 - [ ] INSERT into mailbox creates notify row (trigger)
@@ -251,7 +251,7 @@ internal/supervisor/
 - `TestPreemption_CancelsInFlight`
 - `TestPreemption_NextTurnDelivery`
 
-**Feature Flag:** `AGENTCTL_ACTOR_SUPERVISOR=0`
+**Feature Flag:** `FOXCTL_ACTOR_SUPERVISOR=0`
 
 **Acceptance Criteria:**
 - [ ] Supervisor starts and manages multiple actors
@@ -316,7 +316,7 @@ type EngineOutput struct {
 - `TestToolRunner_MaxResultBytes`
 - `TestToolRunner_CASOffload`
 
-**Feature Flag:** Part of `AGENTCTL_ACTOR_SUPERVISOR`
+**Feature Flag:** Part of `FOXCTL_ACTOR_SUPERVISOR`
 
 **Acceptance Criteria:**
 - [ ] Engine interface is stable and documented
@@ -379,7 +379,7 @@ internal/supervisor/
 - `TestHook_PostAgentTurn_Rewrite`
 - `TestHook_ContextInjection_AppearsFirst`
 
-**Feature Flag:** `AGENTCTL_HOOKS_V1=1` (enable to use new dispatcher)
+**Feature Flag:** `FOXCTL_HOOKS_V1=1` (enable to use new dispatcher)
 
 **Acceptance Criteria:**
 - [ ] All 10 canonical events fire hooks correctly
@@ -443,9 +443,9 @@ internal/sessions/
    - `forked_from` - Fork creates edge from new → source
    - `relates_to` - Weak references (optional)
 3. Environment propagation:
-   - `AGENTCTL_WORKSPACE`
-   - `AGENTCTL_SESSION_ID`
-   - `AGENTCTL_AGENT_ID`
+   - `FOXCTL_WORKSPACE`
+   - `FOXCTL_SESSION_ID`
+   - `FOXCTL_AGENT_ID`
 4. Identity fallback file:
    - `~/.foxctl/sessions/active/<workspace_hash>-<agent_id>.json`
    - Contains session_id, agent_id, lineage for hook access
@@ -461,7 +461,7 @@ internal/sessions/
 - `TestIdentity_FallbackFile`
 - `TestOneActiveSession_Enforcement`
 
-**Feature Flag:** `AGENTCTL_SESSION_LINEAGE=0`
+**Feature Flag:** `FOXCTL_SESSION_LINEAGE=0`
 
 **Acceptance Criteria:**
 - [ ] Resume creates `continues` edge
@@ -574,7 +574,7 @@ internal/runtime/actor/memory/
 - `TestPromptBuilder_BudgetEnforcement`
 - `TestRedaction_AppliedToSummaries`
 
-**Feature Flag:** `AGENTCTL_PROGRESSIVE_MEMORY=0`
+**Feature Flag:** `FOXCTL_PROGRESSIVE_MEMORY=0`
 
 **Acceptance Criteria:**
 - [ ] Turns are durable before any summarization
@@ -595,11 +595,11 @@ internal/runtime/actor/memory/
 **Deliverables:**
 1. Feature flag configuration:
    ```bash
-   AGENTCTL_HOOKS_V1=1
-   AGENTCTL_ACTOR_SUPERVISOR=1
-   AGENTCTL_MAILBOX_WATCHER=1
-   AGENTCTL_SESSION_LINEAGE=1
-   AGENTCTL_PROGRESSIVE_MEMORY=1
+   FOXCTL_HOOKS_V1=1
+   FOXCTL_ACTOR_SUPERVISOR=1
+   FOXCTL_MAILBOX_WATCHER=1
+   FOXCTL_SESSION_LINEAGE=1
+   FOXCTL_PROGRESSIVE_MEMORY=1
    ```
 
 2. Run full cutover test plan:
@@ -672,11 +672,11 @@ If any phase causes issues in staging/production:
 ### Quick Rollback (< 5 min)
 ```bash
 # Disable all v2 features
-export AGENTCTL_HOOKS_V1=0
-export AGENTCTL_ACTOR_SUPERVISOR=0
-export AGENTCTL_MAILBOX_WATCHER=0
-export AGENTCTL_SESSION_LINEAGE=0
-export AGENTCTL_PROGRESSIVE_MEMORY=0
+export FOXCTL_HOOKS_V1=0
+export FOXCTL_ACTOR_SUPERVISOR=0
+export FOXCTL_MAILBOX_WATCHER=0
+export FOXCTL_SESSION_LINEAGE=0
+export FOXCTL_PROGRESSIVE_MEMORY=0
 
 # Restart affected processes
 ```

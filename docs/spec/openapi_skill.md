@@ -497,7 +497,7 @@ foxctl cas get sha256:def456... > full_response.json
         "www-authenticate": "Bearer realm=\"api\""
       }
     },
-    "hint": "Check auth credentials. Expected bearer token in Authorization header. Set AGENTCTL_BEARER_TOKEN or use --auth.credentials"
+    "hint": "Check auth credentials. Expected bearer token in Authorization header. Set FOXCTL_BEARER_TOKEN or use --auth.credentials"
   },
   "meta": {
     "ts": "2025-11-12T10:30:00Z",
@@ -672,7 +672,7 @@ foxctl cache clear --type=openapi_spec --name=github
 Built-in support for common authentication patterns. Credentials loaded from:
 
 1. **Secrets mount** (preferred): `/run/secrets/<name>`
-2. **Environment variables**: `AGENTCTL_*` prefixed
+2. **Environment variables**: `FOXCTL_*` prefixed
 3. **Direct credentials**: Passed in `auth.credentials` field (testing only)
 
 ### 6.2 Bearer Token (HTTP Bearer)
@@ -691,7 +691,7 @@ components:
 **Setup**:
 
 ```bash
-export AGENTCTL_BEARER_TOKEN="ghp_abc123..."
+export FOXCTL_BEARER_TOKEN="ghp_abc123..."
 ```
 
 **Usage** (auto-detected):
@@ -733,7 +733,7 @@ components:
 **Setup**:
 
 ```bash
-export AGENTCTL_API_KEY="sk_live_abc123..."
+export FOXCTL_API_KEY="sk_live_abc123..."
 ```
 
 **HTTP header**: `X-API-Key: sk_live_abc123...`\
@@ -754,10 +754,10 @@ components:
 **Setup**:
 
 ```bash
-export AGENTCTL_BASIC_AUTH="username:password"
+export FOXCTL_BASIC_AUTH="username:password"
 # Or separate:
-export AGENTCTL_BASIC_USERNAME="user"
-export AGENTCTL_BASIC_PASSWORD="pass"
+export FOXCTL_BASIC_USERNAME="user"
+export FOXCTL_BASIC_PASSWORD="pass"
 ```
 
 **HTTP header**: `Authorization: Basic dXNlcjpwYXNz` (base64 encoded)
@@ -782,8 +782,8 @@ components:
 **Setup**:
 
 ```bash
-export AGENTCTL_OAUTH2_CLIENT_ID="client_abc123"
-export AGENTCTL_OAUTH2_CLIENT_SECRET="secret_xyz789"
+export FOXCTL_OAUTH2_CLIENT_ID="client_abc123"
+export FOXCTL_OAUTH2_CLIENT_SECRET="secret_xyz789"
 ```
 
 **Flow**:
@@ -1431,7 +1431,7 @@ Extend the skill with custom auth and pagination via out-of-process plugins.
 
 Plugins found via:
 
-1. `AGENTCTL_PLUGIN_PATH` environment variable (colon-separated)
+1. `FOXCTL_PLUGIN_PATH` environment variable (colon-separated)
 2. `openapi.plugin_path` config setting
 3. Default: `~/.foxctl/plugins`
 
@@ -1768,7 +1768,7 @@ x-foxctl:
       "status_code": 401,
       "headers": { "www-authenticate": "Bearer" }
     },
-    "hint": "Set AGENTCTL_BEARER_TOKEN or use --auth.credentials"
+    "hint": "Set FOXCTL_BEARER_TOKEN or use --auth.credentials"
   }
 }
 ```
@@ -1851,7 +1851,7 @@ This section provides real-world usage examples.
 foxctl openapi import https://api.github.com/openapi.json --as=github
 
 # Set auth
-export AGENTCTL_BEARER_TOKEN="ghp_..."
+export FOXCTL_BEARER_TOKEN="ghp_..."
 
 # Basic request
 foxctl run http/openapi \
@@ -1892,7 +1892,7 @@ curl -o stripe.json https://raw.githubusercontent.com/stripe/openapi/master/open
 foxctl openapi import ./stripe.json --as=stripe
 
 # Auth
-export AGENTCTL_BEARER_TOKEN="sk_test_..."
+export FOXCTL_BEARER_TOKEN="sk_test_..."
 
 # Request (cursor pagination auto-detected)
 foxctl run http/openapi \
@@ -1958,7 +1958,7 @@ foxctl run http/openapi \
 # Error: EARG - missing username
 
 # Auth failure
-unset AGENTCTL_BEARER_TOKEN
+unset FOXCTL_BEARER_TOKEN
 foxctl run http/openapi \
   --spec=memory:github \
   --operationId=getAuthenticatedUser
@@ -2131,16 +2131,16 @@ openapi:
 ### 15.2 Environment Variables
 
 ```bash
-export AGENTCTL_OPENAPI_STRICT_VALIDATE=true
-export AGENTCTL_OPENAPI_PLUGIN_PATH=~/.foxctl/plugins
-export AGENTCTL_OPENAPI_SPEC_CACHE_TTL=12h
+export FOXCTL_OPENAPI_STRICT_VALIDATE=true
+export FOXCTL_OPENAPI_PLUGIN_PATH=~/.foxctl/plugins
+export FOXCTL_OPENAPI_SPEC_CACHE_TTL=12h
 
 # Auth
-export AGENTCTL_BEARER_TOKEN="..."
-export AGENTCTL_API_KEY="..."
-export AGENTCTL_BASIC_AUTH="user:pass"
-export AGENTCTL_OAUTH2_CLIENT_ID="..."
-export AGENTCTL_OAUTH2_CLIENT_SECRET="..."
+export FOXCTL_BEARER_TOKEN="..."
+export FOXCTL_API_KEY="..."
+export FOXCTL_BASIC_AUTH="user:pass"
+export FOXCTL_OAUTH2_CLIENT_ID="..."
+export FOXCTL_OAUTH2_CLIENT_SECRET="..."
 ```
 
 ### 15.3 Workspace Config
@@ -2183,7 +2183,7 @@ foxctl openapi import https://jsonplaceholder.typicode.com/openapi.json --as=tes
 foxctl run http/openapi --spec=memory:test --operationId=getPosts
 
 # Authenticated API
-export AGENTCTL_BEARER_TOKEN="${TEST_TOKEN}"
+export FOXCTL_BEARER_TOKEN="${TEST_TOKEN}"
 foxctl run http/openapi --spec=memory:github --operationId=getAuthenticatedUser
 ```
 

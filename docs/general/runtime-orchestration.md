@@ -136,13 +136,13 @@ default path no longer requires them for core orchestration/runtime behavior.
 
 | Setting | Purpose |
 |--------|---------|
-| `AGENTCTL_JIDO_SOCKET` | Unix socket path for the Jido JSON-RPC bridge |
-| `AGENTCTL_JIDO_RPC_PATH` | HTTP path used over the Jido socket |
-| `AGENTCTL_JIDO_RPC_TIMEOUT_MS` | Jido RPC timeout |
-| `AGENTCTL_JIDO_ORCHESTRATION_PARENT_AGENT_IDS` | Enables Jido orchestration runtime and defines parent agents to watch |
-| `AGENTCTL_JIDO_ORCHESTRATION_DISPATCH_PARENT_AGENT_ID` | Parent agent ID used for new orchestration dispatches |
-| `AGENTCTL_JIDO_SIGNAL_SOURCE` | Source tag for runtime signals |
-| `AGENTCTL_COMPANION_CONTEXT_PROVIDER=jido` | Enables Jido-backed companion layered context fetches |
+| `FOXCTL_JIDO_SOCKET` | Unix socket path for the Jido JSON-RPC bridge |
+| `FOXCTL_JIDO_RPC_PATH` | HTTP path used over the Jido socket |
+| `FOXCTL_JIDO_RPC_TIMEOUT_MS` | Jido RPC timeout |
+| `FOXCTL_JIDO_ORCHESTRATION_PARENT_AGENT_IDS` | Enables Jido orchestration runtime and defines parent agents to watch |
+| `FOXCTL_JIDO_ORCHESTRATION_DISPATCH_PARENT_AGENT_ID` | Parent agent ID used for new orchestration dispatches |
+| `FOXCTL_JIDO_SIGNAL_SOURCE` | Source tag for runtime signals |
+| `FOXCTL_COMPANION_CONTEXT_PROVIDER=jido` | Enables Jido-backed companion layered context fetches |
 
 ## Reading order
 

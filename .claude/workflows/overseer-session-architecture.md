@@ -259,9 +259,9 @@ while session_active:
 
 ```bash
 # 1. Set up environment
-export AGENTCTL_LLM_PROVIDER=openrouter
-export AGENTCTL_LLM_API_KEY=$(grep OPENROUTER_API_KEY ~/.claude/.env | cut -d= -f2)
-export AGENTCTL_LLM_MODEL=anthropic/claude-haiku-4-5
+export FOXCTL_LLM_PROVIDER=openrouter
+export FOXCTL_LLM_API_KEY=$(grep OPENROUTER_API_KEY ~/.claude/.env | cut -d= -f2)
+export FOXCTL_LLM_MODEL=anthropic/claude-haiku-4-5
 
 # 2. Spawn subagents
 foxctl agent spawn --role coder --prompt "You help with code tasks"

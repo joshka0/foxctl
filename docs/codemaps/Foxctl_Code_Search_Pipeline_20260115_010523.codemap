@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "Agentctl_Code_Search_Pipeline_20260115_010523",
+  "id": "Foxctl_Code_Search_Pipeline_20260115_010523",
   "stableId": "f261003b-4c37-4561-a27a-e0857171a8a2",
   "metadata": {
     "cascadeId": "88d205b7-66e3-4058-98c3-5e053b71fb68",
@@ -9,7 +9,7 @@
     "mode": "FAST",
     "originalPrompt": "Explore: code search pipeline from semantic retrieval to snippet extraction and ripgrep expansion. Start from: skills/code_semantic_search/main.go, skills/code_smart_search/main.go, skills/code_snippet_extract/main.go, skills/code_context_ripgrep/main.go"
   },
-  "title": "Agentctl Code Search Pipeline",
+  "title": "Foxctl Code Search Pipeline",
   "traces": [
     {
       "id": "1",

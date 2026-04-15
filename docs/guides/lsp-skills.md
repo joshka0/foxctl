@@ -264,8 +264,8 @@ This allows running the LSP as an MCP server, eliminating the need for CLI wrapp
 
 ### Debug Mode
 
-Set `AGENTCTL_DEBUG=1` to see raw LSP output:
+Set `FOXCTL_DEBUG=1` to see raw LSP output:
 
 ```bash
-AGENTCTL_DEBUG=1 foxctl run lsp/gopls --input '...'
+FOXCTL_DEBUG=1 foxctl run lsp/gopls --input '...'
 ```

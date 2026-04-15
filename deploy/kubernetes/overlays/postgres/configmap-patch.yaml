@@ -6,15 +6,15 @@ metadata:
   namespace: foxctl
 data:
   # Override database driver to PostgreSQL
-  AGENTCTL_DB_DRIVER: "postgres"
+  FOXCTL_DB_DRIVER: "postgres"
 
   # Connection pool settings
-  AGENTCTL_POSTGRES_MAX_CONNS: "5"
+  FOXCTL_POSTGRES_MAX_CONNS: "5"
 
   # Require pgvector extension (fail fast if missing)
-  AGENTCTL_POSTGRES_REQUIRE_VECTOR: "true"
+  FOXCTL_POSTGRES_REQUIRE_VECTOR: "true"
 
   # CAS configuration (S3)
-  AGENTCTL_CAS_DRIVER: "s3"
-  AGENTCTL_CAS_S3_BUCKET: "foxctl-cas"
+  FOXCTL_CAS_DRIVER: "s3"
+  FOXCTL_CAS_S3_BUCKET: "foxctl-cas"
   AWS_REGION: "us-west-2"

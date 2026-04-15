@@ -69,8 +69,8 @@ function getApiBase(): string {
     return meta.env.VITE_API_URL as string;
   }
   // Bun/Node environment
-  if (typeof process !== "undefined" && process.env?.AGENTCTL_API_URL) {
-    return process.env.AGENTCTL_API_URL;
+  if (typeof process !== "undefined" && process.env?.FOXCTL_API_URL) {
+    return process.env.FOXCTL_API_URL;
   }
   // Default: relative URLs (works with proxy or same-origin)
   return "";

@@ -237,7 +237,7 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 		return skillerr.WrapIO("failed to write bin wrapper", err)
 	}
 
-	// Map MCP Schema to Agentctl Signature
+	// Map MCP Schema to Foxctl Signature
 	signatureParameters := []map[string]any{}
 
 	// Collect property names and sort for deterministic output

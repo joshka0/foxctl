@@ -18,7 +18,7 @@ It uses "skills" (sandboxed tools) and structured JSON envelopes for communicati
 
 ### Running Skills
 Skills are located in `skills/` (source) or `dist/skills/` (built).
-The CLI finds skills in standard paths. You might need to set `AGENTCTL_SKILL_PATH` if running from dev directories, but usually `foxctl run <category>/<skill>` works if installed or if pointing to local sources.
+The CLI finds skills in standard paths. You might need to set `FOXCTL_SKILL_PATH` if running from dev directories, but usually `foxctl run <category>/<skill>` works if installed or if pointing to local sources.
 
 **Common Commands:**
 ```bash

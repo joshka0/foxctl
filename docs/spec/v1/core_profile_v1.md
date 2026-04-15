@@ -256,7 +256,7 @@ capabilities:
 ### 3.4 Auth mapping (built‑in)
 
 Built‑ins cover common schemes; each may read secrets from `/run/secrets/…` or
-`AGENTCTL_*` env overrides.
+`FOXCTL_*` env overrides.
 
 | Scheme                    | Mapping                                                            |
 | ------------------------- | ------------------------------------------------------------------ |
@@ -305,7 +305,7 @@ Caller overrides:
 To support “snowflake” APIs, `http/openapi` loads **out‑of‑process plugins**
 (exec or WASI) that communicate via **JSON envelopes** on stdin/stdout. Plugins
 are referenced by **name** or **path** and are discoverable via
-`AGENTCTL_PLUGIN_PATH`.
+`FOXCTL_PLUGIN_PATH`.
 
 **Plugin protocol (envelope):**
 
@@ -737,9 +737,9 @@ adapters:
   toon_enabled: false
 ```
 
-**Env overrides (examples):** `AGENTCTL_BASE_PATH`, `AGENTCTL_INLINE_OUTPUT_KB`,
-`AGENTCTL_MAX_CAPTURE_KB`, `AGENTCTL_CACHE_MODE`,
-`AGENTCTL_OPENAPI_PLUGIN_PATH`, `AGENTCTL_OPENAPI_STRICT_VALIDATE`.
+**Env overrides (examples):** `FOXCTL_BASE_PATH`, `FOXCTL_INLINE_OUTPUT_KB`,
+`FOXCTL_MAX_CAPTURE_KB`, `FOXCTL_CACHE_MODE`,
+`FOXCTL_OPENAPI_PLUGIN_PATH`, `FOXCTL_OPENAPI_STRICT_VALIDATE`.
 
 ---
 

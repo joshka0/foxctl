@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VAULT_PATH="${AGENTCTL_VAULT_PATH:-$HOME/.foxctl/templates/obsidian-vault}"
+VAULT_PATH="${FOXCTL_VAULT_PATH:-$HOME/.foxctl/templates/obsidian-vault}"
 WORKSPACE="${PRAZE_WORKSPACE:-${1:-}}"
 
 if [[ -z "${WORKSPACE}" ]]; then

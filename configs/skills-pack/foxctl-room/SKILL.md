@@ -446,7 +446,7 @@ foxctl room join alpha --current --role <room-role>
 
 - this captures the current zellij pane binding so direct and broadcast room
   relay can target that pane correctly
-- if `AGENTCTL_ROOM_ID` is missing in the pane environment, the pane was not
+- if `FOXCTL_ROOM_ID` is missing in the pane environment, the pane was not
   launched with room metadata and must be joined explicitly
 - session-only assumptions are unsafe for multi-pane zellij rooms; pane binding
   is the correct unit of room membership

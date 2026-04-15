@@ -24,11 +24,11 @@ const (
 )
 
 const (
-	envAskDispatcherMode = "AGENTCTL_V2_ASK_DISPATCHER"
-	envJidoSocketPath    = "AGENTCTL_JIDO_SOCKET"
-	envJidoRPCPath       = "AGENTCTL_JIDO_RPC_PATH"
-	envJidoRPCTimeoutMS  = "AGENTCTL_JIDO_RPC_TIMEOUT_MS"
-	envJidoSignalSource  = "AGENTCTL_JIDO_SIGNAL_SOURCE"
+	envAskDispatcherMode = "FOXCTL_V2_ASK_DISPATCHER"
+	envJidoSocketPath    = "FOXCTL_JIDO_SOCKET"
+	envJidoRPCPath       = "FOXCTL_JIDO_RPC_PATH"
+	envJidoRPCTimeoutMS  = "FOXCTL_JIDO_RPC_TIMEOUT_MS"
+	envJidoSignalSource  = "FOXCTL_JIDO_SIGNAL_SOURCE"
 )
 
 func resolvedAskDispatcherMode(override string) string {

@@ -30,7 +30,7 @@ signature:
     - name: order
       type: string
       required: false
-      description: "Task ordering: agentctl_rank, stable, off (default: agentctl_rank)"
+      description: "Task ordering: foxctl_rank, stable, off (default: foxctl_rank)"
     - name: max_items
       type: integer
       required: false
@@ -59,11 +59,11 @@ signature:
       - Sorts by foxctl rank (in_progress → pending → blocked → completed)
       - Uses atomic file writes for safety
 
-      SECURITY: Requires AGENTCTL_ALLOW_PROVIDER_STATE=1 to write files.
+      SECURITY: Requires FOXCTL_ALLOW_PROVIDER_STATE=1 to write files.
       This should only be enabled for privileged hooks/daemons.
 
       Example:
-        AGENTCTL_ALLOW_PROVIDER_STATE=1 foxctl run todo/sync_to_provider --input '{
+        FOXCTL_ALLOW_PROVIDER_STATE=1 foxctl run todo/sync_to_provider --input '{
           "provider": "claude",
           "workspace_id": "/path/to/project"
         }'

@@ -179,14 +179,14 @@ func (b *EventBuilder) WithMailbox(mailboxMsgID string) *EventBuilder {
 func (b *EventBuilder) EnrichFromEnv() *EventBuilder {
 	if b.event.SessionID == "" {
 		// Check foxctl-specific first, then fallbacks
-		if id := os.Getenv("AGENTCTL_SESSION_ID"); id != "" {
+		if id := os.Getenv("FOXCTL_SESSION_ID"); id != "" {
 			b.event.SessionID = id
 		} else if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
 			b.event.SessionID = id
 		}
 	}
 	if b.event.AgentID == "" {
-		b.event.AgentID = os.Getenv("AGENTCTL_AGENT_ID")
+		b.event.AgentID = os.Getenv("FOXCTL_AGENT_ID")
 	}
 	return b
 }

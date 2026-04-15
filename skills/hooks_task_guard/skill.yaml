@@ -77,6 +77,6 @@ capabilities:
     - type: workdir
   pure: false
 env:
-  - name: AGENTCTL_TASK_GUARD_MODE
+  - name: FOXCTL_TASK_GUARD_MODE
     description: "Mode: 'auto' (default) auto-creates tasks, 'strict' blocks without active task"
     default: "auto"

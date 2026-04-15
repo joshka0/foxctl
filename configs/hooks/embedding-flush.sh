@@ -3,15 +3,15 @@
 
 set -euo pipefail
 
-if [[ "${AGENTCTL_EMBED_QUEUE:-1}" == "0" ]]; then
+if [[ "${FOXCTL_EMBED_QUEUE:-1}" == "0" ]]; then
   exit 0
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-if ! command -v "$AGENTCTL_BIN" >/dev/null 2>&1; then
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+if ! command -v "$FOXCTL_BIN" >/dev/null 2>&1; then
   exit 0
 fi
 
-workspace="${AGENTCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
-"$AGENTCTL_BIN" hooks embedding-flush --workspace "$workspace" >/dev/null 2>&1 || true
+workspace="${FOXCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
+"$FOXCTL_BIN" hooks embedding-flush --workspace "$workspace" >/dev/null 2>&1 || true
 exit 0

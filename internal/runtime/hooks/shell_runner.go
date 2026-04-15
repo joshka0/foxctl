@@ -26,7 +26,7 @@ type ShellRunner struct {
 // - SideEffects: executes shell script; sets environment variables
 // - FailureModes: missing script path, command errors, output parse errors
 // - Related: parseShellOutput, buildHookEnv
-// - Keywords: shell_hook, hook_output, AGENTCTL_HOOK_EVENT, script_path, shell_runner
+// - Keywords: shell_hook, hook_output, FOXCTL_HOOK_EVENT, script_path, shell_runner
 func (r *ShellRunner) Run(ctx context.Context, hookDef HookDef, input Input) (Output, error) {
 	// Determine script path - either from runner config or from hook definition
 	scriptPath := r.ScriptPath
@@ -130,26 +130,26 @@ func buildHookEnv(input Input) []string {
 
 	// Add standard hook environment variables
 	env = append(env,
-		"AGENTCTL_HOOK_EVENT="+string(input.Event),
+		"FOXCTL_HOOK_EVENT="+string(input.Event),
 	)
 
 	if input.WorkspaceRoot != "" {
-		env = append(env, "AGENTCTL_WORKSPACE="+input.WorkspaceRoot)
+		env = append(env, "FOXCTL_WORKSPACE="+input.WorkspaceRoot)
 	}
 	if input.SessionID != "" {
-		env = append(env, "AGENTCTL_SESSION_ID="+input.SessionID)
+		env = append(env, "FOXCTL_SESSION_ID="+input.SessionID)
 	}
 	if input.ActorID != "" {
-		env = append(env, "AGENTCTL_AGENT_ID="+input.ActorID)
+		env = append(env, "FOXCTL_AGENT_ID="+input.ActorID)
 	}
 	if input.ToolName != "" {
-		env = append(env, "AGENTCTL_TOOL_NAME="+input.ToolName)
+		env = append(env, "FOXCTL_TOOL_NAME="+input.ToolName)
 	}
 	if input.TraceID != "" {
-		env = append(env, "AGENTCTL_TRACE_ID="+input.TraceID)
+		env = append(env, "FOXCTL_TRACE_ID="+input.TraceID)
 	}
 	if input.CorrelationID != "" {
-		env = append(env, "AGENTCTL_CORRELATION_ID="+input.CorrelationID)
+		env = append(env, "FOXCTL_CORRELATION_ID="+input.CorrelationID)
 	}
 
 	return env

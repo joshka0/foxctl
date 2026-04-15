@@ -66,7 +66,7 @@ func AnalyzeEditedFile(ctx context.Context, deps Dependencies, req Request) (Res
 		return response, nil
 	}
 	response.FilePath = filePath
-	if envEnabled("AGENTCTL_CODE_ANALYSIS_DISABLED") || !isCodeFile(filePath) || isTestFile(filePath) {
+	if envEnabled("FOXCTL_CODE_ANALYSIS_DISABLED") || !isCodeFile(filePath) || isTestFile(filePath) {
 		return response, nil
 	}
 	if deps.RunSkill == nil {
@@ -75,11 +75,11 @@ func AnalyzeEditedFile(ctx context.Context, deps Dependencies, req Request) (Res
 
 	parts := []string{}
 
-	if !envEnabled("AGENTCTL_COMPLEXITY_DISABLED") {
+	if !envEnabled("FOXCTL_COMPLEXITY_DISABLED") {
 		var env complexityEnvelope
 		if err := deps.RunSkill(ctx, "code/complexity", map[string]any{
 			"path":          filePath,
-			"threshold":     envInt("AGENTCTL_COMPLEXITY_THRESHOLD", 15),
+			"threshold":     envInt("FOXCTL_COMPLEXITY_THRESHOLD", 15),
 			"analysis_mode": "hotspots",
 			"max_results":   5,
 		}, target, &env); err == nil {
@@ -104,7 +104,7 @@ func AnalyzeEditedFile(ctx context.Context, deps Dependencies, req Request) (Res
 		}
 	}
 
-	if !envEnabled("AGENTCTL_IMPACT_DISABLED") {
+	if !envEnabled("FOXCTL_IMPACT_DISABLED") {
 		var env impactEnvelope
 		if err := deps.RunSkill(ctx, "hooks/impact_analysis", hooks.Input{
 			Event:         hooks.EventPostToolUse,

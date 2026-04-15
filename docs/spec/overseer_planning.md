@@ -1,7 +1,7 @@
 # Overseer Planning & Coordination Spec
 
 **Status:** Draft\
-**Scope:** Agentctl overseer behavior for task planning, coordination, and
+**Scope:** Foxctl overseer behavior for task planning, coordination, and
 runtime plan updates.\
 **Related specs:** `overseer_profile.md`, `mailbox_blackboard.md`,
 `task_graph_insights.md`,

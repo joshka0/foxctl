@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-DEBUG_LOG="${AGENTCTL_STRICT_DEBUG:+/tmp/strict-mode-debug.log}"
+DEBUG_LOG="${FOXCTL_STRICT_DEBUG:+/tmp/strict-mode-debug.log}"
 log() { [[ -n "${DEBUG_LOG:-}" ]] && echo "$(date +%H:%M:%S) $*" >> "$DEBUG_LOG" 2>/dev/null; true; }
 
 trap 'log "TRAP: error at line $LINENO, exit=$?"' ERR
@@ -34,7 +34,7 @@ if [[ -z "$WORKSPACE" || "$WORKSPACE" == "null" ]]; then
 fi
 
 # Database path for settings
-DB_PATH="${AGENTCTL_HOME:-$HOME/.foxctl}/storage/tasks.db"
+DB_PATH="${FOXCTL_HOME:-$HOME/.foxctl}/storage/tasks.db"
 
 # Escape single quotes for SQL safety
 WORKSPACE_SAFE="${WORKSPACE//\'/\'\'}"
@@ -59,18 +59,18 @@ log "strict mode ON, processing $TOOL"
 
 # Find foxctl binary
 log "finding foxctl binary..."
-if [[ -n "${AGENTCTL_BIN:-}" ]]; then
+if [[ -n "${FOXCTL_BIN:-}" ]]; then
   : # Use provided path
 elif command -v foxctl &>/dev/null; then
-  AGENTCTL_BIN="foxctl"
+  FOXCTL_BIN="foxctl"
 elif [[ -x "${CLAUDE_PROJECT_DIR:-}/bin/foxctl" ]]; then
-  AGENTCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/foxctl"
+  FOXCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/foxctl"
 else
   log "foxctl not found, approving"
   echo '{"decision":"approve"}'
   exit 0
 fi
-log "foxctl=$AGENTCTL_BIN"
+log "foxctl=$FOXCTL_BIN"
 
 # Extract tool input
 log "extracting tool_input..."
@@ -81,11 +81,11 @@ log "tool_input extracted, len=${#tool_input}"
 if [[ "$TOOL" =~ ^(Edit|Write|MultiEdit)$ ]]; then
   EDIT_PATH="$(printf '%s' "$tool_input" | jq -r '.file_path // ""')"
   if [[ "$EDIT_PATH" == *"/.claude/hooks/"* ]]; then
-    jq -nc '{"decision": "block", "reason": "**[Agentctl Mode] Cannot edit hook files while enabled.**\n\nUse `@strict off` first to modify hooks."}'
+    jq -nc '{"decision": "block", "reason": "**[Foxctl Mode] Cannot edit hook files while enabled.**\n\nUse `@strict off` first to modify hooks."}'
     exit 0
   fi
   if [[ "$EDIT_PATH" == *"/.claude/settings.json"* || "$EDIT_PATH" == *"/configs/claude-settings.json"* ]]; then
-    jq -nc '{"decision": "block", "reason": "**[Agentctl Mode] Cannot edit settings.json while enabled.**\n\nUse `@strict off` first to modify settings."}'
+    jq -nc '{"decision": "block", "reason": "**[Foxctl Mode] Cannot edit settings.json while enabled.**\n\nUse `@strict off` first to modify settings."}'
     exit 0
   fi
 fi
@@ -108,7 +108,7 @@ case "$TOOL" in
       --arg search "$OLD_STRING" \
       --arg replace "$NEW_STRING" \
       '{path: $path, edits: [{search: $search, replace: $replace}], dry_run: true}')
-    PREFIX="**[Agentctl Mode] Use search/replace via fs/apply_edit**
+    PREFIX="**[Foxctl Mode] Use search/replace via fs/apply_edit**
 
 **Workflow:**
 1. **Get exact text**: \`foxctl run code/context_grep --input '{\"mode\": \"line\", \"file_path\": \"$FILE_PATH\", \"line_start\": N, \"line_end\": M}'\`
@@ -134,7 +134,7 @@ case "$TOOL" in
       --arg question "$PATTERN" \
       --arg workspace "$WORKSPACE" \
       '{question: $question, workspace_id: $workspace, limits: {max_candidates: 20, max_snippets: 10}}')
-    PREFIX="**[Agentctl Mode] Smart Search via code/smart_search**
+    PREFIX="**[Foxctl Mode] Smart Search via code/smart_search**
 > Direct: \`foxctl run code/smart_search --input '{\"question\": \"your query\"}'\`
 > Params: \`limits.max_candidates\`, \`limits.max_snippets\` to control output size."
     ;;
@@ -152,7 +152,7 @@ case "$TOOL" in
       --arg query "$PATTERN" \
       --arg workspace "$WORKSPACE" \
       '{query: $query, scope: ["symbols"], workspace: $workspace, limit: 20}')
-    PREFIX="**[Agentctl Mode] Semantic Search via code/semantic_search**
+    PREFIX="**[Foxctl Mode] Semantic Search via code/semantic_search**
 > Direct: \`foxctl run code/semantic_search --input '{\"query\": \"concept\", \"scope\": [\"symbols\"], \"limit\": 10}'\`
 > Scopes: \`symbols\`, \`memories\`, \`codemaps\`. Uses vector embeddings."
     ;;
@@ -185,7 +185,7 @@ case "$TOOL" in
     file_basename=$(basename "$FILE_PATH")
     
     # Get symbols via pattern matching (works for most languages)
-    symbols_result=$($AGENTCTL_BIN run code/context_grep --input "$(jq -nc \
+    symbols_result=$($FOXCTL_BIN run code/context_grep --input "$(jq -nc \
       --arg path "$FILE_PATH" \
       '{mode: "ripgrep", path: $path, pattern: "^(func|type|const|var|class|def|function|async|export|interface|struct)\\s+\\w+", max_blocks: 30}')" 2>/dev/null || echo '{}')
     
@@ -199,7 +199,7 @@ case "$TOOL" in
     [[ -z "$symbols_formatted" ]] && symbols_formatted="  (no symbols found)"
 
     # Check for relevant gotchas
-    gotchas_result=$($AGENTCTL_BIN run code/semantic_search --input "$(jq -nc --arg q "$file_basename gotchas" '{query: $q, scope: ["memories"], limit: 3}')" 2>/dev/null || echo '{}')
+    gotchas_result=$($FOXCTL_BIN run code/semantic_search --input "$(jq -nc --arg q "$file_basename gotchas" '{query: $q, scope: ["memories"], limit: 3}')" 2>/dev/null || echo '{}')
     gotchas_formatted=$(echo "$gotchas_result" | jq -r '.data.results[:2] | map("- **" + .name + "**: " + (.snippet // .summary // ""  | split("\n")[0])) | join("\n")' 2>/dev/null || echo "")
     
     GOTCHAS_SECTION=""
@@ -209,7 +209,7 @@ case "$TOOL" in
 $gotchas_formatted"
 
     # Build block reason
-    REASON="**[Agentctl Mode] Large File: ${file_basename} (${LINE_COUNT} lines)**
+    REASON="**[Foxctl Mode] Large File: ${file_basename} (${LINE_COUNT} lines)**
 
 **Symbols:**
 ${symbols_formatted}${GOTCHAS_SECTION}
@@ -242,7 +242,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
       # WebFetch -> web/extract with optional prompt for snippet extraction
       jq -nc --arg url "$URL" --arg prompt "$PROMPT" '{
         "decision": "block",
-        "reason": ("**[Agentctl Mode] Use foxctl web extract instead of WebFetch**\n\n**Extract content:**\n```bash\nagentctl run web/extract --input '\''{ \"urls\": [\"" + $url + "\"]" + (if $prompt != "" then ", \"query\": \"" + $prompt + "\"" else "" end) + " }'\''\n```\n\n**Benefits:**\n- CAS storage for large responses\n- Query-based snippet extraction\n- Rate limiting and caching")
+        "reason": ("**[Foxctl Mode] Use foxctl web extract instead of WebFetch**\n\n**Extract content:**\n```bash\nagentctl run web/extract --input '\''{ \"urls\": [\"" + $url + "\"]" + (if $prompt != "" then ", \"query\": \"" + $prompt + "\"" else "" end) + " }'\''\n```\n\n**Benefits:**\n- CAS storage for large responses\n- Query-based snippet extraction\n- Rate limiting and caching")
       }'
       exit 0
     fi
@@ -250,7 +250,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
     # WebSearch -> web/search
     jq -nc --arg query "$QUERY" '{
       "decision": "block",
-      "reason": ("**[Agentctl Mode] Use foxctl web search instead of WebSearch**\n\n**Search:**\n```bash\nagentctl run web/search --input '\''{ \"query\": \"" + $query + "\" }'\''\n```\n\n**With extraction (recommended):**\n```bash\nagentctl run web/search --input '\''{ \"query\": \"" + $query + "\", \"extract\": true, \"max_results\": 5 }'\''\n```\n\n**Benefits:**\n- CAS storage for large results\n- Exa/Tavily backends for curated results\n- Optional snippet extraction from top results")
+      "reason": ("**[Foxctl Mode] Use foxctl web search instead of WebSearch**\n\n**Search:**\n```bash\nagentctl run web/search --input '\''{ \"query\": \"" + $query + "\" }'\''\n```\n\n**With extraction (recommended):**\n```bash\nagentctl run web/search --input '\''{ \"query\": \"" + $query + "\", \"extract\": true, \"max_results\": 5 }'\''\n```\n\n**Benefits:**\n- CAS storage for large results\n- Exa/Tavily backends for curated results\n- Optional snippet extraction from top results")
     }'
     exit 0
     ;;
@@ -271,7 +271,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
     if [[ "$COMMAND" =~ (workspace-modes) ]]; then
       jq -nc '{
         "decision": "block",
-        "reason": "**[Agentctl Mode] Cannot modify mode state via Bash.**\n\nUse `@strict off` to disable."
+        "reason": "**[Foxctl Mode] Cannot modify mode state via Bash.**\n\nUse `@strict off` to disable."
       }'
       exit 0
     fi
@@ -287,7 +287,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
        [[ "$COMMAND_LOWER" =~ (\||'<').*sqlite3.*tasks\.db ]]; then
       jq -nc '{
         "decision": "block",
-        "reason": "**[Agentctl Mode] Cannot modify mode settings via sqlite3.**\n\nUse `@strict off` to disable."
+        "reason": "**[Foxctl Mode] Cannot modify mode settings via sqlite3.**\n\nUse `@strict off` to disable."
       }'
       exit 0
     fi
@@ -297,7 +297,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
     if [[ "$COMMAND" =~ ^go[[:space:]]+test ]]; then
       jq -nc '{
         "decision": "block",
-        "reason": "**[Agentctl Mode] Use make test-* instead of go test**\n\n**Quick tests:** `make test-short`\n**CGO tests:** `make test-cgo-short`\n**Full tests:** `make test`\n**Race tests:** `make test-race`"
+        "reason": "**[Foxctl Mode] Use make test-* instead of go test**\n\n**Quick tests:** `make test-short`\n**CGO tests:** `make test-cgo-short`\n**Full tests:** `make test`\n**Race tests:** `make test-race`"
       }'
       exit 0
     fi
@@ -306,7 +306,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
     if [[ "$COMMAND" =~ ^gh[[:space:]]+(pr|api|checks) ]]; then
       jq -nc '{
         "decision": "block",
-        "reason": "**[Agentctl Mode] Use foxctl ci instead of gh pr/api/checks**\n\n**CI Checks:** `foxctl ci checks --pr <num>` (mirrors gh pr checks)\n**PR Comments:** `foxctl ci prcomments --pr <num>`\n\nOr via MCP: `foxctl run ci/checks --input '\''{ \"pr\": \"<num>\" }'\''`"
+        "reason": "**[Foxctl Mode] Use foxctl ci instead of gh pr/api/checks**\n\n**CI Checks:** `foxctl ci checks --pr <num>` (mirrors gh pr checks)\n**PR Comments:** `foxctl ci prcomments --pr <num>`\n\nOr via MCP: `foxctl run ci/checks --input '\''{ \"pr\": \"<num>\" }'\''`"
       }'
       exit 0
     fi
@@ -334,7 +334,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
           --arg question "$PATTERN" \
           --arg workspace "$WORKSPACE" \
           '{question: $question, workspace_id: $workspace, limits: {max_candidates: 15, max_snippets: 8}}')
-        PREFIX="**[Agentctl Mode] Bash grep → Smart Search:**"
+        PREFIX="**[Foxctl Mode] Bash grep → Smart Search:**"
         ;;
 
       find|fd)
@@ -361,7 +361,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
           --arg pattern "$FIND_PATTERN" \
           --arg path "$FIND_PATH" \
           '{pattern: $pattern, path: $path, limit: 50}')
-        PREFIX="**[Agentctl Mode] Bash find → fs/find:**"
+        PREFIX="**[Foxctl Mode] Bash find → fs/find:**"
         ;;
 
       cat|head|tail|less|more)
@@ -380,7 +380,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
         SKILL_INPUT=$(jq -nc \
           --arg path "$FILE_PATH" \
           '{mode: "ripgrep", path: $path, pattern: "^(func|def|class|function|async|export|type|interface|struct)", max_blocks: 15}')
-        PREFIX="**[Agentctl Mode] Bash $BASE_CMD → Context Grep:**"
+        PREFIX="**[Foxctl Mode] Bash $BASE_CMD → Context Grep:**"
         ;;
 
       sed)
@@ -388,7 +388,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
         # BLOCK sed - always use fs/apply_edit instead
         jq -nc '{
           "decision": "block",
-          "reason": "**[Agentctl Mode] sed is blocked — use fs/apply_edit**\n\n**Search/replace workflow:**\n1. Find text: `foxctl run code/smart_search --input '\''{ \"question\": \"what to change\" }'\''`\n2. Preview: `foxctl run fs/apply_edit --input '\''{ \"path\": \"file\", \"edits\": [{ \"search\": \"old\", \"replace\": \"new\" }], \"dry_run\": true }'\''`\n3. Apply: Set `dry_run: false` to commit\n\n**Tips:**\n- `search` must match exactly (not regex)\n- Multiple edits: `\"edits\": [{...}, {...}]`\n- Use `code/context_grep` to get exact text to search for"
+          "reason": "**[Foxctl Mode] sed is blocked — use fs/apply_edit**\n\n**Search/replace workflow:**\n1. Find text: `foxctl run code/smart_search --input '\''{ \"question\": \"what to change\" }'\''`\n2. Preview: `foxctl run fs/apply_edit --input '\''{ \"path\": \"file\", \"edits\": [{ \"search\": \"old\", \"replace\": \"new\" }], \"dry_run\": true }'\''`\n3. Apply: Set `dry_run: false` to commit\n\n**Tips:**\n- `search` must match exactly (not regex)\n- Multiple edits: `\"edits\": [{...}, {...}]`\n- Use `code/context_grep` to get exact text to search for"
         }'
         exit 0
         ;;
@@ -407,7 +407,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
           if [[ -n "$PR_NUM" && "$PR_NUM" =~ ^[0-9]+$ ]]; then
             SKILL="ci/prcomments"
             SKILL_INPUT=$(jq -nc --argjson pr "$PR_NUM" '{pr: $pr, include_merge_status: true}')
-            PREFIX="**[Agentctl Mode] Bash gh → PR Comments:**"
+            PREFIX="**[Foxctl Mode] Bash gh → PR Comments:**"
           else
             echo '{"decision":"approve"}'
             exit 0
@@ -420,7 +420,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
           fi
           SKILL="ci/checks"
           SKILL_INPUT=$(jq -nc --argjson pr "${PR_NUM:-0}" '{pr: $pr}')
-          PREFIX="**[Agentctl Mode] Bash gh → CI Status:**"
+          PREFIX="**[Foxctl Mode] Bash gh → CI Status:**"
         else
           echo '{"decision":"approve"}'
           exit 0
@@ -445,7 +445,7 @@ log "running skill=$SKILL input=$SKILL_INPUT"
 
 # Run the skill
 skill_stderr=$(mktemp)
-result=$(printf '%s' "$SKILL_INPUT" | "$AGENTCTL_BIN" run --daemon "$SKILL" --input-file - 2>"$skill_stderr") || {
+result=$(printf '%s' "$SKILL_INPUT" | "$FOXCTL_BIN" run --daemon "$SKILL" --input-file - 2>"$skill_stderr") || {
   error_detail=$(cat "$skill_stderr" 2>/dev/null || echo "unknown error")
   rm -f "$skill_stderr"
   log "SKILL FAILED: $error_detail"
@@ -455,7 +455,7 @@ result=$(printf '%s' "$SKILL_INPUT" | "$AGENTCTL_BIN" run --daemon "$SKILL" --in
     "decision": "approve",
     "hookSpecificOutput": {
       "hookEventName": "PreToolUse",
-      "additionalContext": ("**[Agentctl Mode] Skill failed:** " + $err + "\n\nFalling back to default tool behavior.")
+      "additionalContext": ("**[Foxctl Mode] Skill failed:** " + $err + "\n\nFalling back to default tool behavior.")
     }
   }'
   exit 0

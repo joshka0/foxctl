@@ -24,17 +24,17 @@ spec:
         env:
         - name: HOME
           value: "/var/cache/foxctl"
-        - name: AGENTCTL_HOME
+        - name: FOXCTL_HOME
           value: "/var/cache/foxctl"
-        - name: AGENTCTL_STORAGE_ROOT
+        - name: FOXCTL_STORAGE_ROOT
           value: "/var/cache/foxctl/storage"
-        - name: AGENTCTL_DB_DRIVER
+        - name: FOXCTL_DB_DRIVER
           value: "sqlite"
-        - name: AGENTCTL_V2_EVENTS_DB_DRIVER
+        - name: FOXCTL_V2_EVENTS_DB_DRIVER
           value: "sqlite"
-        - name: AGENTCTL_CAS_BACKEND
+        - name: FOXCTL_CAS_BACKEND
           value: "file"
-        - name: AGENTCTL_CAS_ROOT
+        - name: FOXCTL_CAS_ROOT
           value: "/var/cache/foxctl/cas"
         lifecycle:
           preStop:

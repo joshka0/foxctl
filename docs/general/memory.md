@@ -76,9 +76,9 @@ Defaults and overrides come from config + semantic provider logic.
 | Setting | Meaning |
 |--------|---------|
 | `VOYAGE_API_KEY` / `GEMINI_API_KEY` | Embedding provider keys |
-| `AGENTCTL_EMBEDDING_MODEL_<SCOPE>` | Per-scope override (for example `..._MEMORY`) |
-| `AGENTCTL_EMBEDDING_MODEL_TEXT` | Text-scope fallback override |
-| `AGENTCTL_EMBEDDING_RATE_LIMIT` | Provider-side request rate control |
+| `FOXCTL_EMBEDDING_MODEL_<SCOPE>` | Per-scope override (for example `..._MEMORY`) |
+| `FOXCTL_EMBEDDING_MODEL_TEXT` | Text-scope fallback override |
+| `FOXCTL_EMBEDDING_RATE_LIMIT` | Provider-side request rate control |
 
 ## Operational Examples
 

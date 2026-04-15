@@ -62,7 +62,7 @@ func main() {
     ctx := context.Background()
 
     // Automatically uses SQLite/libSQL/Turso based on env vars.
-    // Env var prefix is derived from storeName: e.g., AGENTCTL_MEMORY_DB_DRIVER, AGENTCTL_DB_DRIVER.
+    // Env var prefix is derived from storeName: e.g., FOXCTL_MEMORY_DB_DRIVER, FOXCTL_DB_DRIVER.
     db, closeFn, err := dbutil.OpenStoreDB(ctx, "~/.foxctl/storage", "MEMORY", "memory.db", nil)
     if err != nil {
         panic(err)
@@ -81,17 +81,17 @@ Configure the database backend using environment variables:
 
 ```bash
 # Use SQLite (default)
-export AGENTCTL_MEMORY_DB_DRIVER=sqlite
-export AGENTCTL_MEMORY_DB_PATH=~/.foxctl/memory.db
+export FOXCTL_MEMORY_DB_DRIVER=sqlite
+export FOXCTL_MEMORY_DB_PATH=~/.foxctl/memory.db
 
 # Use Turso
-export AGENTCTL_MEMORY_DB_DRIVER=turso
-export AGENTCTL_MEMORY_DB_URL=libsql://your-db.turso.io
-export AGENTCTL_MEMORY_DB_TOKEN=your_token_here
+export FOXCTL_MEMORY_DB_DRIVER=turso
+export FOXCTL_MEMORY_DB_URL=libsql://your-db.turso.io
+export FOXCTL_MEMORY_DB_TOKEN=your_token_here
 
 # Enable vector search (Turso only)
-export AGENTCTL_MEMORY_VECTOR_SEARCH=true
-export AGENTCTL_MEMORY_VECTOR_DIMS=384
+export FOXCTL_MEMORY_VECTOR_SEARCH=true
+export FOXCTL_MEMORY_VECTOR_DIMS=384
 ```
 
 ### Programmatic Configuration

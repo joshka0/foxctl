@@ -7,15 +7,15 @@
 # - Returns formatted evidence as context injection
 #
 # Environment:
-#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_CONTEXT_MAX_FILES - Max files to process (default: 5)
-#   AGENTCTL_CONTEXT_MODE - Extraction mode: general, structure (default: general)
+#   FOXCTL_BIN - Path to foxctl binary (default: foxctl)
+#   FOXCTL_CONTEXT_MAX_FILES - Max files to process (default: 5)
+#   FOXCTL_CONTEXT_MODE - Extraction mode: general, structure (default: general)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-MAX_FILES="${AGENTCTL_CONTEXT_MAX_FILES:-5}"
-MODE="${AGENTCTL_CONTEXT_MODE:-general}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+MAX_FILES="${FOXCTL_CONTEXT_MAX_FILES:-5}"
+MODE="${FOXCTL_CONTEXT_MODE:-general}"
 
 payload="$(cat)"
 workspace_root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
@@ -53,7 +53,7 @@ input_json=$(jq -nc \
   }')
 
 # Run code/smart_read skill
-result=$("$AGENTCTL_BIN" run --daemon code/smart_read --ephemeral --workspace "$workspace_root" --input "$input_json" 2>/dev/null) || {
+result=$("$FOXCTL_BIN" run --daemon code/smart_read --ephemeral --workspace "$workspace_root" --input "$input_json" 2>/dev/null) || {
   jq -nc '{decision:"approve", context:"**Context:** Failed to gather code context."}'
   exit 0
 }

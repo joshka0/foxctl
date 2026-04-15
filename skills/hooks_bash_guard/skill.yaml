@@ -42,7 +42,7 @@ signature:
       - All other bash commands are blocked
 
       Profile is determined from:
-      1. AGENTCTL_AGENT_PROFILE environment variable
+      1. FOXCTL_AGENT_PROFILE environment variable
       2. Hook config's "profile" field
       3. Default: unrestricted (all commands allowed)
 

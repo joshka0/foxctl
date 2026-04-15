@@ -29,13 +29,13 @@ import (
 )
 
 const (
-	EnvOrchestrationRuntimeBackend          = "AGENTCTL_V2_ORCHESTRATION_RUNTIME_BACKEND"
+	EnvOrchestrationRuntimeBackend          = "FOXCTL_V2_ORCHESTRATION_RUNTIME_BACKEND"
 	orchestrationRuntimeBackendJidoAPI      = "jido"
 	orchestrationRuntimeBackendGoruntimeAPI = "goruntime"
 
-	EnvOrchestrationDispatchParentAgentID = "AGENTCTL_ORCHESTRATION_DISPATCH_PARENT_AGENT_ID"
-	EnvOrchestrationParentAgentIDs        = "AGENTCTL_ORCHESTRATION_PARENT_AGENT_IDS"
-	EnvOrchestrationSuccessTrackerState   = "AGENTCTL_ORCHESTRATION_SUCCESS_TRACKER_STATE"
+	EnvOrchestrationDispatchParentAgentID = "FOXCTL_ORCHESTRATION_DISPATCH_PARENT_AGENT_ID"
+	EnvOrchestrationParentAgentIDs        = "FOXCTL_ORCHESTRATION_PARENT_AGENT_IDS"
+	EnvOrchestrationSuccessTrackerState   = "FOXCTL_ORCHESTRATION_SUCCESS_TRACKER_STATE"
 )
 
 // OrchestrationRuntimeHost is the long-lived runtime host used by web dispatch/refresh flows.
@@ -95,7 +95,7 @@ func NewOrchestrationRuntimeHost(ctx context.Context, cfg config.Config, log zer
 	spawner, err := v2goruntime.NewManagedAgentSpawner(v2goruntime.ManagedAgentSpawnerConfig{
 		StorageRoot:   cfg.Storage.Root,
 		WorkspaceRoot: workspaceRoot,
-		BinaryPath:    executil.AgentctlBin(),
+		BinaryPath:    executil.FoxctlBin(),
 		Publisher:     workerState,
 	})
 	if err != nil {

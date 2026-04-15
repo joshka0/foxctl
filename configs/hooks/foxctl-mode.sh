@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
 
 # Read hook payload from stdin
 payload="$(cat)"
@@ -49,7 +49,7 @@ if [[ "$prompt" =~ ^[[:space:]]*@(strict|foxctl) ]]; then
   fi
 
   # Database path (ensure directory exists under pipefail)
-  DB_PATH="${AGENTCTL_HOME:-$HOME/.foxctl}/storage/tasks.db"
+  DB_PATH="${FOXCTL_HOME:-$HOME/.foxctl}/storage/tasks.db"
   mkdir -p "$(dirname "$DB_PATH")" 2>/dev/null || true
 
   # Escape workspace for SQL safety (single quotes doubled for SQLite)
@@ -83,7 +83,7 @@ if [[ "$prompt" =~ ^[[:space:]]*@(strict|foxctl) ]]; then
         INSERT OR REPLACE INTO workspace_settings (workspace_id, key, value, updated_at)
         VALUES ('$WORKSPACE_SAFE', 'agentctl_mode', '{\"enabled\":true}', '$(now_ts)');
       " 2>/dev/null || true
-      response="**Agentctl Mode: ENABLED**
+      response="**Foxctl Mode: ENABLED**
 
 Tool redirections active:
 - Edit/Write/MultiEdit -> fs/apply_edit (dry-run preview)
@@ -101,7 +101,7 @@ Use \`@strict off\` to disable."
         INSERT OR REPLACE INTO workspace_settings (workspace_id, key, value, updated_at)
         VALUES ('$WORKSPACE_SAFE', 'agentctl_mode', '{\"enabled\":false}', '$(now_ts)');
       " 2>/dev/null || true
-      response="**Agentctl Mode: DISABLED**
+      response="**Foxctl Mode: DISABLED**
 
 Default tool behavior restored. Use \`@strict on\` to re-enable."
       ;;
@@ -118,7 +118,7 @@ Default tool behavior restored. Use \`@strict on\` to re-enable."
         enabled=$(echo "$value" | jq -r '.enabled // false' 2>/dev/null || echo "false")
 
         if [[ "$enabled" == "true" ]]; then
-          response="**Agentctl Mode: ENABLED** (since $updated)
+          response="**Foxctl Mode: ENABLED** (since $updated)
 
 Tool redirections:
 - Edit/Write/MultiEdit -> fs/apply_edit
@@ -127,10 +127,10 @@ Tool redirections:
 - Read (large files) -> symbols outline
 - Bash sed/grep/find -> foxctl equivalents"
         else
-          response="**Agentctl Mode: DISABLED** (since $updated)"
+          response="**Foxctl Mode: DISABLED** (since $updated)"
         fi
       else
-        response="**Agentctl Mode: DISABLED** (never enabled for this workspace)"
+        response="**Foxctl Mode: DISABLED** (never enabled for this workspace)"
       fi
       ;;
 
@@ -164,7 +164,7 @@ if [[ "$prompt_lower" =~ (how\ did\ (we|i)|where\ did\ (we|i)|what\ was\ the|whe
 
   if [[ -n "$query" ]]; then
     # Search memories
-    mem_result=$($AGENTCTL_BIN run memory/search --input "$(jq -nc --arg q "$query" '{query: $q, limit: 5}')" 2>/dev/null || echo '{}')
+    mem_result=$($FOXCTL_BIN run memory/search --input "$(jq -nc --arg q "$query" '{query: $q, limit: 5}')" 2>/dev/null || echo '{}')
 
     mem_formatted=$(echo "$mem_result" | jq -r '
       .data.results // [] | .[0:5] |
@@ -209,7 +209,7 @@ if [[ "$prompt_lower" =~ ^(remember|note|gotcha|learned|important|decision):? ]]
 
   if [[ -n "$content" && ${#content} -gt 10 ]]; then
     # Auto-save to memory
-    result=$($AGENTCTL_BIN run memory/put --input "$(jq -nc \
+    result=$($FOXCTL_BIN run memory/put --input "$(jq -nc \
       --arg summary "$content" \
       --arg type "$mem_type" \
       '{summary: $summary, type: $type}')" 2>/dev/null || echo '{}')
@@ -242,7 +242,7 @@ if [[ "$prompt_lower" =~ ^(search|find|query|where\ is|look\ for) ]] \
   query=$(echo "$prompt" | sed -E 's/^(search|find|query|where is|look for|search for|find the|locate)//i' | xargs)
 
   if [[ -n "$query" && ${#query} -gt 3 ]]; then
-    result=$($AGENTCTL_BIN run code/semantic_search --input "$(jq -nc \
+    result=$($FOXCTL_BIN run code/semantic_search --input "$(jq -nc \
       --arg q "$query" \
       '{query: $q, limit: 8}')" 2>/dev/null || echo '{}')
 
@@ -270,7 +270,7 @@ if [[ "$prompt_lower" =~ (trace|codemap|how\ does.*connect|flow\ of|architecture
 
   if [[ -n "$query" ]]; then
     # List relevant codemaps
-    result=$($AGENTCTL_BIN run codemap/list --input '{"limit": 5}' 2>/dev/null || echo '{}')
+    result=$($FOXCTL_BIN run codemap/list --input '{"limit": 5}' 2>/dev/null || echo '{}')
 
     maps=$(echo "$result" | jq -r '
       .data.codemaps // [] | .[0:5] |
@@ -296,7 +296,7 @@ if [[ "$prompt_lower" =~ ^(ask|exa|web|perplexity) ]] \
   query=$(echo "$prompt" | sed -E 's/^(ask|exa|web|perplexity|search the web|look up|google)//i' | xargs)
 
   if [[ -n "$query" && ${#query} -gt 5 ]]; then
-    result=$($AGENTCTL_BIN run ask --input "$(jq -nc --arg q "$query" '{question: $q}')" 2>/dev/null || echo '{}')
+    result=$($FOXCTL_BIN run ask --input "$(jq -nc --arg q "$query" '{question: $q}')" 2>/dev/null || echo '{}')
 
     answer=$(echo "$result" | jq -r '.data.answer // .data.summary // "No answer found"' 2>/dev/null | head -20)
 
@@ -315,16 +315,16 @@ fi
 if [[ "$prompt_lower" =~ (timeline|what\ happened|recent\ activity|what\ did\ we|session\ history|earlier\ in\ this\ session) ]]; then
 
   # Get current session ID from environment (check multiple sources for consistency with other hooks)
-  session_id="${AGENTCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-${OPENCODE_SESSION_ID:-}}}"
+  session_id="${FOXCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-${OPENCODE_SESSION_ID:-}}}"
   if [[ -z "$session_id" ]]; then
     # Try to get the most recent active session for this workspace
     # Guard against non-JSON output by providing empty JSON fallback (use {} grouping for pipefail safety)
-    session_id=$({ $AGENTCTL_BIN run session/list --input '{"limit": 1, "status": "running"}' 2>/dev/null || echo '{}'; } | jq -r '.data.sessions[0].id // empty')
+    session_id=$({ $FOXCTL_BIN run session/list --input '{"limit": 1, "status": "running"}' 2>/dev/null || echo '{}'; } | jq -r '.data.sessions[0].id // empty')
   fi
 
   if [[ -n "$session_id" ]]; then
     # Fetch timeline with max_windows=5 and since=2h for focused recent context
-    result=$($AGENTCTL_BIN run session/timeline --input "$(jq -nc --arg sid "$session_id" '{
+    result=$($FOXCTL_BIN run session/timeline --input "$(jq -nc --arg sid "$session_id" '{
       session_id: $sid,
       max_windows: 5,
       since: "2h",

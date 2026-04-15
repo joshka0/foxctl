@@ -223,7 +223,7 @@ capabilities:
 - Port 8090, CORS + cookie parsing
 - Read-only SQLite access (better-sqlite3)
 - 38 endpoints across jobs, tasks, stats, sessions, search, sqlite
-- Workspace isolation via cookies (`agentctl_workspace`)
+- Workspace isolation via cookies (`foxctl_workspace`)
 
 **Data Flow**:
 ```

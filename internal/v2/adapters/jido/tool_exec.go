@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	defaultAgentctlBinary    = "foxctl"
-	defaultToolCallTimeout   = 2 * time.Minute
-	agentctlRunInputFileFlag = "--input-file"
+	defaultFoxctlBinary    = "foxctl"
+	defaultToolCallTimeout = 2 * time.Minute
+	foxctlRunInputFileFlag = "--input-file"
 )
 
 // ToolCommandSpec configures how Jido agents invoke Go-backed foxctl tools.
@@ -55,7 +55,7 @@ func BuildToolCommand(spec ToolCommandSpec, req ToolCommandRequest) (ToolCommand
 
 	path := strings.TrimSpace(spec.BinaryPath)
 	if path == "" {
-		path = defaultAgentctlBinary
+		path = defaultFoxctlBinary
 	}
 
 	args := []string{"run", toolName}
@@ -71,7 +71,7 @@ func BuildToolCommand(spec ToolCommandSpec, req ToolCommandRequest) (ToolCommand
 
 	var stdin []byte
 	if len(req.Input) > 0 {
-		args = append(args, agentctlRunInputFileFlag, "-")
+		args = append(args, foxctlRunInputFileFlag, "-")
 		stdin = append([]byte(nil), req.Input...)
 	}
 

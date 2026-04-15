@@ -16,7 +16,7 @@ Plugins communicate via JSON envelopes on stdin/stdout.
 ## Plugin Discovery
 
 Plugins are discovered from:
-1. `AGENTCTL_PLUGIN_PATH` environment variable (colon-separated paths)
+1. `FOXCTL_PLUGIN_PATH` environment variable (colon-separated paths)
 2. `~/.foxctl/plugins` (default)
 
 **Naming Convention:** `foxctl-plugin-<name>`
@@ -218,9 +218,9 @@ x-foxctl:
 
 **Environment Variables:**
 ```bash
-export AGENTCTL_PLUGIN_PATH=~/.foxctl/plugins
-export AGENTCTL_API_KEY="key123"
-export AGENTCTL_SECRET_KEY="secret456"
+export FOXCTL_PLUGIN_PATH=~/.foxctl/plugins
+export FOXCTL_API_KEY="key123"
+export FOXCTL_SECRET_KEY="secret456"
 ```
 
 ## Pagination Plugins
@@ -378,9 +378,9 @@ Default limits:
 
 Configure via environment:
 ```bash
-export AGENTCTL_PLUGIN_TIMEOUT_WALL=60
-export AGENTCTL_PLUGIN_TIMEOUT_CPU=20
-export AGENTCTL_PLUGIN_MAX_OUTPUT=2097152
+export FOXCTL_PLUGIN_TIMEOUT_WALL=60
+export FOXCTL_PLUGIN_TIMEOUT_CPU=20
+export FOXCTL_PLUGIN_MAX_OUTPUT=2097152
 ```
 
 ### Credential Handling
@@ -431,7 +431,7 @@ foxctl run http/openapi \
 **Error:** `plugin not found: hmac-auth`
 
 **Solution:**
-1. Check plugin is in search path: `ls $AGENTCTL_PLUGIN_PATH`
+1. Check plugin is in search path: `ls $FOXCTL_PLUGIN_PATH`
 2. Verify naming: Must be `foxctl-plugin-<name>`
 3. Check executable permission: `chmod +x plugin-file`
 
@@ -441,7 +441,7 @@ foxctl run http/openapi \
 
 **Solution:**
 1. Optimize plugin performance
-2. Increase timeout: `export AGENTCTL_PLUGIN_TIMEOUT_WALL=60`
+2. Increase timeout: `export FOXCTL_PLUGIN_TIMEOUT_WALL=60`
 3. Check for infinite loops
 
 ### JSON Parse Error

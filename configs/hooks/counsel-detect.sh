@@ -6,15 +6,15 @@
 # - Returns formatted findings as context injection
 #
 # Environment:
-#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_COUNSEL_PERSPECTIVES - Comma-separated perspectives (default: security,correctness)
-#   AGENTCTL_COUNSEL_MAX_FILES - Max files to analyze (default: 8)
+#   FOXCTL_BIN - Path to foxctl binary (default: foxctl)
+#   FOXCTL_COUNSEL_PERSPECTIVES - Comma-separated perspectives (default: security,correctness)
+#   FOXCTL_COUNSEL_MAX_FILES - Max files to analyze (default: 8)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-PERSPECTIVES="${AGENTCTL_COUNSEL_PERSPECTIVES:-security,correctness}"
-MAX_FILES="${AGENTCTL_COUNSEL_MAX_FILES:-8}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+PERSPECTIVES="${FOXCTL_COUNSEL_PERSPECTIVES:-security,correctness}"
+MAX_FILES="${FOXCTL_COUNSEL_MAX_FILES:-8}"
 
 payload="$(cat)"
 workspace_root="${CLAUDE_PROJECT_DIR:-$(pwd)}"
@@ -56,7 +56,7 @@ input_json=$(jq -nc \
   }')
 
 # Run code/counsel skill (may take time due to LLM calls)
-result=$("$AGENTCTL_BIN" run --daemon code/counsel --ephemeral --workspace "$workspace_root" --input "$input_json" 2>/dev/null) || {
+result=$("$FOXCTL_BIN" run --daemon code/counsel --ephemeral --workspace "$workspace_root" --input "$input_json" 2>/dev/null) || {
   jq -nc '{decision:"approve", context:"**Counsel:** Analysis failed. Check API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, or CEREBRAS_API_KEY)."}'
   exit 0
 }

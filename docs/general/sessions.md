@@ -59,7 +59,7 @@ Behavior:
 Session id fallback chain (from `internal/context/sessionkit/identity.go`):
 
 1. Explicit id input
-2. `AGENTCTL_SESSION_ID`
+2. `FOXCTL_SESSION_ID`
 3. `CLAUDE_SESSION_ID`
 4. `OPENCODE_SESSION_ID`
 5. `CURSOR_SESSION_ID`

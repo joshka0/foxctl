@@ -12,7 +12,7 @@
     "binary": false,
     "artifact": "sha256:5b9d6c0985d6fa334c6760b0a2345678ef90abcd1234fedcba567890abcdef12",
     "truncated": false,
-    "preview": "# Core Profile v1\nagentctl emits deterministic JSON envelopes...",
+    "preview": "# Core Profile v1\nfoxctl emits deterministic JSON envelopes...",
     "preview_line_count": 2,
     "summary": "Read 2048 bytes from core_profile_v1.md"
   },

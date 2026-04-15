@@ -37,7 +37,7 @@ func NewProcessor() (*Processor, error) {
 		return nil, fmt.Errorf("OPENROUTER_API_KEY not set")
 	}
 
-	model := strings.TrimSpace(os.Getenv("AGENTCTL_ATOMIC_MODEL"))
+	model := strings.TrimSpace(os.Getenv("FOXCTL_ATOMIC_MODEL"))
 	if model == "" {
 		model = DefaultAtomicModel
 	}

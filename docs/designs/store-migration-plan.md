@@ -124,22 +124,22 @@ func OpenWithConfig(ctx context.Context, cfg config.Config) (storage.StoreInterf
 Per-store configuration follows the pattern:
 ```bash
 # Driver selection
-AGENTCTL_<STORE>_DB_DRIVER=libsql|sqlite|turso
+FOXCTL_<STORE>_DB_DRIVER=libsql|sqlite|turso
 
 # For libsql with sync
-AGENTCTL_<STORE>_SYNC_URL=http://localhost:8080
-AGENTCTL_<STORE>_SYNC_TOKEN=...
+FOXCTL_<STORE>_SYNC_URL=http://localhost:8080
+FOXCTL_<STORE>_SYNC_TOKEN=...
 
 # For Turso
-AGENTCTL_<STORE>_DB_URL=libsql://...
-AGENTCTL_<STORE>_DB_TOKEN=...
+FOXCTL_<STORE>_DB_URL=libsql://...
+FOXCTL_<STORE>_DB_TOKEN=...
 ```
 
 Global fallbacks:
 ```bash
-AGENTCTL_LIBSQL_SYNC_URL=http://localhost:8080
-AGENTCTL_TURSO_URL=libsql://...
-AGENTCTL_TURSO_TOKEN=...
+FOXCTL_LIBSQL_SYNC_URL=http://localhost:8080
+FOXCTL_TURSO_URL=libsql://...
+FOXCTL_TURSO_TOKEN=...
 ```
 
 ## Testing Strategy
@@ -151,7 +151,7 @@ AGENTCTL_TURSO_TOKEN=...
 ## Rollback Plan
 
 If issues arise:
-1. Set `AGENTCTL_<STORE>_DB_DRIVER=sqlite` to fall back
+1. Set `FOXCTL_<STORE>_DB_DRIVER=sqlite` to fall back
 2. Platform config: `database.driver: sqlite`
 3. Data in `.libsql` files is SQLite-compatible
 

@@ -40,7 +40,7 @@ Today, foxctl persists state across many SQLite databases under `~/.foxctl`. Thi
 - `dbdriver.ConfigLoader` has named loader methods for `CACHE`, `JOBS`, `MEMORY`, plus a generic `LoadConfig(storeName, defaultPath)` that can load config for arbitrary stores via env vars. It also has a generic `ConfigFromPlatformSettings()` that can handle arbitrary store names.
 - `sqliteutil.OpenDBWithAutoConfig` was intended to bridge stores to `dbdriver` for those 3 stores, but it had **zero callsites** in production code (dead code) and has been removed.
 - Stores now open databases through `dbutil.OpenStoreDB` (or store-specific factory patterns), enabling `dbdriver` configuration across the codebase. Direct `sqliteutil.OpenDBShared` usage is now isolated to `dbutil` internals and tests/tools.
-- `AGENTCTL_DB_DRIVER` (global fallback) is supported by `ConfigLoader` and now applies broadly because stores open via `dbutil` (unless a store opts into a dedicated factory).
+- `FOXCTL_DB_DRIVER` (global fallback) is supported by `ConfigLoader` and now applies broadly because stores open via `dbutil` (unless a store opts into a dedicated factory).
 - `dbutil` (`internal/storage/dbutil/`) is now the generic DB facade: opening DB handles via `dbdriver` + retaining SQLite shared-handle behavior, in addition to scan/timestamp helpers (`ScanTimestamps`, `IsNoRows`, etc.).
 - Workspace identity uses `workspace.CanonicalID` which prefers git-remote-based `RepoIdentity` (SHA256 of normalized remote URL, 32 hex chars). When no git remotes exist, it falls back to `PathIdentity` (`ws-` + 16 hex chars of SHA256(absolute path)), which is machine-dependent.
 - The sessions store uniquely has a dual-column scheme (`workspace_id` + `workspace_path`) with SQL-level fallback: `WHERE (workspace_id = ? OR (workspace_id = '' AND workspace_path = ?))`. Most other workspace-scoped stores use a single `workspace`/`workspace_id` column; a subset implement `workspace_repair.go` to backfill legacy rows.
@@ -67,23 +67,23 @@ Extend configuration so every store can be configured via the same env/key patte
 
 Implementation status:
 
-- `ConfigLoader` supports `AGENTCTL_DB_DRIVER` as a global fallback.
+- `ConfigLoader` supports `FOXCTL_DB_DRIVER` as a global fallback.
 - `ConfigLoader` supports `LoadConfig(storeName, defaultPath)` for arbitrary stores.
 - Most stores still bypass `ConfigLoader` by calling `sqliteutil.OpenDBShared` directly (Phase 1/2 migrates these callsites).
 
 Proposed env conventions:
 
-- `AGENTCTL_DB_DRIVER`: applies to all stores unless overridden (`sqlite`, `libsql`, `turso`). Implemented as a `ConfigLoader` fallback (callsites still need migration).
-- `AGENTCTL_<STORE>_DB_DRIVER`: per-store driver override (`sqlite`, `libsql`, `turso`).
-- `AGENTCTL_<STORE>_DB_PATH`: local replica file path (SQLite path, libSQL path, or Turso embedded replica path).
-- `AGENTCTL_<STORE>_SYNC_URL`: libSQL sync URL (enables embedded replica sync mode).
-- `AGENTCTL_<STORE>_SYNC_TOKEN`: libSQL sync auth token.
-- `AGENTCTL_LIBSQL_SYNC_URL`: fallback libSQL sync URL for all stores.
-- `AGENTCTL_LIBSQL_SYNC_TOKEN`: fallback libSQL sync token for all stores.
-- `AGENTCTL_<STORE>_DB_URL`: Turso database URL.
-- `AGENTCTL_<STORE>_DB_TOKEN`: Turso auth token.
-- `AGENTCTL_TURSO_URL`: fallback Turso URL for all stores.
-- `AGENTCTL_TURSO_TOKEN`: fallback Turso token for all stores.
+- `FOXCTL_DB_DRIVER`: applies to all stores unless overridden (`sqlite`, `libsql`, `turso`). Implemented as a `ConfigLoader` fallback (callsites still need migration).
+- `FOXCTL_<STORE>_DB_DRIVER`: per-store driver override (`sqlite`, `libsql`, `turso`).
+- `FOXCTL_<STORE>_DB_PATH`: local replica file path (SQLite path, libSQL path, or Turso embedded replica path).
+- `FOXCTL_<STORE>_SYNC_URL`: libSQL sync URL (enables embedded replica sync mode).
+- `FOXCTL_<STORE>_SYNC_TOKEN`: libSQL sync auth token.
+- `FOXCTL_LIBSQL_SYNC_URL`: fallback libSQL sync URL for all stores.
+- `FOXCTL_LIBSQL_SYNC_TOKEN`: fallback libSQL sync token for all stores.
+- `FOXCTL_<STORE>_DB_URL`: Turso database URL.
+- `FOXCTL_<STORE>_DB_TOKEN`: Turso auth token.
+- `FOXCTL_TURSO_URL`: fallback Turso URL for all stores.
+- `FOXCTL_TURSO_TOKEN`: fallback Turso token for all stores.
 
 Notes:
 
@@ -151,7 +151,7 @@ Every `.db` file managed by foxctl must appear in this list. Stores are classifi
 
 | Store Name | DB File | Package | Notes |
 |---|---|---|---|
-| `EVENTS` | `events.db` | `internal/runtime/observability/` | Stored under `$AGENTCTL_OBS_DIR`, not `~/.foxctl/storage/` |
+| `EVENTS` | `events.db` | `internal/runtime/observability/` | Stored under `$FOXCTL_OBS_DIR`, not `~/.foxctl/storage/` |
 
 **External** (read-only, not foxctl-owned):
 
@@ -159,7 +159,7 @@ Every `.db` file managed by foxctl must appear in this list. Stores are classifi
 |---|---|---|---|
 | — | `opencode.db` | `internal/storage/plans/` | OpenCode session/todo import |
 
-**Note on `REPOINDEX`:** This store creates databases with dynamic names (`repoindex/<workspace-hash>.db`), one per indexed workspace. The `AGENTCTL_<STORE>_DB_PATH` env var model does not apply. Implemented: directory-based config (`AGENTCTL_REPOINDEX_DB_DIR`) to relocate the repoindex directory.
+**Note on `REPOINDEX`:** This store creates databases with dynamic names (`repoindex/<workspace-hash>.db`), one per indexed workspace. The `FOXCTL_<STORE>_DB_PATH` env var model does not apply. Implemented: directory-based config (`FOXCTL_REPOINDEX_DB_DIR`) to relocate the repoindex directory.
 
 **Note on shared DB files:** Some `.db` files are used by multiple packages and may contain additional tables created by those packages. Examples:
 
@@ -232,7 +232,7 @@ Acceptance:
 
 ### Phase 1: Make Every Store Configurable (dbdriver)
 
-- (Done) `dbdriver.ConfigLoader` can load config for arbitrary `<STORE>` names via `LoadConfig(storeName, defaultPath)` and supports the `AGENTCTL_DB_DRIVER` global fallback. Remaining work: migrate callsites to use it via the `dbutil` facade.
+- (Done) `dbdriver.ConfigLoader` can load config for arbitrary `<STORE>` names via `LoadConfig(storeName, defaultPath)` and supports the `FOXCTL_DB_DRIVER` global fallback. Remaining work: migrate callsites to use it via the `dbutil` facade.
 - Extend the existing `dbutil` package (`internal/storage/dbutil/`) from its current scan-only role into the generic adapter layer. `dbutil` should own:
   - Opening DB handles using the `dbdriver` config system (env + platform config), and returning `(db, closeFn)` so callers reliably release driver resources.
   - Baseline DB setup and migrations (PRAGMAs/foreign_keys/WAL, schema migration invocation, and "run once" semantics where needed).

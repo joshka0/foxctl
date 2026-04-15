@@ -25,7 +25,7 @@ For the stable commands and full suite definitions, see:
 
 ### foxctl package route
 
-Source: `/tmp/agentctl_package_code_search_auto_current_v9.json`
+Source: `/tmp/foxctl_package_code_search_auto_current_v9.json`
 
 - pass rate: `1.00`
 - mean correctness: `1.00`
@@ -37,7 +37,7 @@ Source: `/tmp/agentctl_package_code_search_auto_current_v9.json`
 
 ### foxctl repo-grounded code route
 
-Source: `/tmp/agentctl_repo_grounded_wrapper_report_v1.json`
+Source: `/tmp/foxctl_repo_grounded_wrapper_report_v1.json`
 
 - pass rate: `1.00`
 - mean correctness: `1.00`

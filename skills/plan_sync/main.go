@@ -99,7 +99,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	memStore, err := rc.Stores.MemoryInCache(ctx)
 	if err != nil {
 		return skillerr.IO("open memory store", skillerr.WithCause(err),
-			skillerr.WithHint("Check AGENTCTL_HOME permissions and disk space"))
+			skillerr.WithHint("Check FOXCTL_HOME permissions and disk space"))
 	}
 
 	var taskStore tasks.Store
@@ -107,7 +107,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 		taskStore, err = rc.Stores.Tasks(ctx)
 		if err != nil {
 			return skillerr.IO("open task store", skillerr.WithCause(err),
-				skillerr.WithHint("Check AGENTCTL_HOME permissions and disk space"))
+				skillerr.WithHint("Check FOXCTL_HOME permissions and disk space"))
 		}
 	}
 

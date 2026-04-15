@@ -39,11 +39,11 @@ const (
 // Environment variable names for impact analysis configuration.
 // FC/IS: Constants ensure consistency between LoadConfig and ConfigFromMap.
 const (
-	EnvImpactDisabled   = "AGENTCTL_IMPACT_DISABLED"
-	EnvImpactMaxSymbols = "AGENTCTL_IMPACT_MAX_SYMBOLS"
-	EnvImpactMaxRefs    = "AGENTCTL_IMPACT_MAX_REFS"
-	EnvImpactTimeout    = "AGENTCTL_IMPACT_TIMEOUT"
-	EnvAgentctlBin      = "AGENTCTL_BIN"
+	EnvImpactDisabled   = "FOXCTL_IMPACT_DISABLED"
+	EnvImpactMaxSymbols = "FOXCTL_IMPACT_MAX_SYMBOLS"
+	EnvImpactMaxRefs    = "FOXCTL_IMPACT_MAX_REFS"
+	EnvImpactTimeout    = "FOXCTL_IMPACT_TIMEOUT"
+	EnvFoxctlBin        = "FOXCTL_BIN"
 )
 
 // Config holds impact analysis configuration.
@@ -195,7 +195,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 
 	// Check if disabled
 	if cfg.Disabled {
-		return emitNone(rc, "disabled via AGENTCTL_IMPACT_DISABLED")
+		return emitNone(rc, "disabled via FOXCTL_IMPACT_DISABLED")
 	}
 
 	// Extract file path from tool input using cross-platform path extraction
@@ -310,7 +310,7 @@ func getSymbols(ctx context.Context, filePath string, maxResults int, workspace 
 	var data struct {
 		Preview []Symbol `json:"preview"`
 	}
-	_, err = executil.RunAgentctlSkillDecodeWithArgs(ctx, workspace, "code/symbols", inputJSON, extraArgs, &data)
+	_, err = executil.RunFoxctlSkillDecodeWithArgs(ctx, workspace, "code/symbols", inputJSON, extraArgs, &data)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +446,7 @@ func getLSPReferences(ctx context.Context, skill, filePath string, line, col int
 	}
 
 	// For other languages, fall back to foxctl run
-	return getLSPReferencesViaAgentctl(ctx, skill, filePath, line, col, timeout, workspace)
+	return getLSPReferencesViaFoxctl(ctx, skill, filePath, line, col, timeout, workspace)
 }
 
 // getGoplsReferences uses the gopls daemon directly for ~100x faster response times.
@@ -468,8 +468,8 @@ func getGoplsReferences(ctx context.Context, filePath string, line, col int, wor
 	return refs
 }
 
-// getLSPReferencesViaAgentctl falls back to spawning foxctl run for non-Go languages.
-func getLSPReferencesViaAgentctl(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
+// getLSPReferencesViaFoxctl falls back to spawning foxctl run for non-Go languages.
+func getLSPReferencesViaFoxctl(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
 	// Pass timeout to skill (in seconds)
 	timeoutSec := int(timeout.Seconds())
 	if timeoutSec < 30 {
@@ -498,7 +498,7 @@ func getLSPReferencesViaAgentctl(ctx context.Context, skill, filePath string, li
 			} `json:"location"`
 		} `json:"references"`
 	}
-	_, err = executil.RunAgentctlSkillDecodeWithArgs(ctx, workspace, skill, inputJSON, extraArgs, &data)
+	_, err = executil.RunFoxctlSkillDecodeWithArgs(ctx, workspace, skill, inputJSON, extraArgs, &data)
 	if err != nil {
 		return []string{}
 	}
@@ -521,7 +521,7 @@ func getLSPImplementations(ctx context.Context, skill, filePath string, line, co
 	}
 
 	// For other languages, fall back to foxctl run
-	return getLSPImplementationsViaAgentctl(ctx, skill, filePath, line, col, timeout, workspace)
+	return getLSPImplementationsViaFoxctl(ctx, skill, filePath, line, col, timeout, workspace)
 }
 
 // getGoplsImplementations uses the gopls daemon directly for ~100x faster response times.
@@ -543,8 +543,8 @@ func getGoplsImplementations(ctx context.Context, filePath string, line, col int
 	return impls
 }
 
-// getLSPImplementationsViaAgentctl falls back to spawning foxctl run for non-Go languages.
-func getLSPImplementationsViaAgentctl(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
+// getLSPImplementationsViaFoxctl falls back to spawning foxctl run for non-Go languages.
+func getLSPImplementationsViaFoxctl(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
 	// Pass timeout to skill (in seconds)
 	timeoutSec := int(timeout.Seconds())
 	if timeoutSec < 30 {
@@ -573,7 +573,7 @@ func getLSPImplementationsViaAgentctl(ctx context.Context, skill, filePath strin
 			} `json:"location"`
 		} `json:"implementations"`
 	}
-	_, err = executil.RunAgentctlSkillDecodeWithArgs(ctx, workspace, skill, inputJSON, extraArgs, &data)
+	_, err = executil.RunFoxctlSkillDecodeWithArgs(ctx, workspace, skill, inputJSON, extraArgs, &data)
 	if err != nil {
 		return []string{}
 	}

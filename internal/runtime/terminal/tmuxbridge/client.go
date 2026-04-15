@@ -25,10 +25,10 @@ const (
 	paneSubmitModeNewline         = "newline"
 	startupProfileDroidAutoHigh   = "droid_auto_high"
 	fieldSep                      = "\x1f"
-	tmuxOptParticipant            = "@agentctl_participant"
-	tmuxOptProvider               = "@agentctl_provider"
-	tmuxOptRoomID                 = "@agentctl_room_id"
-	tmuxOptWrapped                = "@agentctl_wrapped"
+	tmuxOptParticipant            = "@foxctl_participant"
+	tmuxOptProvider               = "@foxctl_provider"
+	tmuxOptRoomID                 = "@foxctl_room_id"
+	tmuxOptWrapped                = "@foxctl_wrapped"
 	listFormat                    = "#{pane_id}" + fieldSep + "#{session_name}" + fieldSep + "#{window_index}" + fieldSep + "#{pane_index}" + fieldSep + "#{window_name}" + fieldSep + "#{pane_pid}" + fieldSep + "#{pane_width}" + fieldSep + "#{pane_height}" + fieldSep + "#{@name}" + fieldSep + "#{pane_current_path}" + fieldSep + "#{pane_current_command}" + fieldSep + "#{pane_active}" + fieldSep + "#{" + tmuxOptParticipant + "}" + fieldSep + "#{" + tmuxOptProvider + "}" + fieldSep + "#{" + tmuxOptRoomID + "}" + fieldSep + "#{" + tmuxOptWrapped + "}"
 	labelFormat                   = "#{pane_id}" + fieldSep + "#{@name}"
 )
@@ -829,7 +829,7 @@ func (c *Client) AttachOrSwitch(ctx context.Context, session string) error {
 }
 
 // CreatePane allocates one pane in a tmux session, labels it, and optionally
-// respawns it with injected AGENTCTL_* identity metadata.
+// respawns it with injected FOXCTL_* identity metadata.
 func (c *Client) CreatePane(ctx context.Context, opts CreatePaneOptions) (CreatePaneResult, error) {
 	session := strings.TrimSpace(opts.Session)
 	if session == "" {
@@ -1485,23 +1485,23 @@ func paneCommandForPane(plan preparePlan, pane Pane) string {
 
 func paneCommandForIdentity(command, participantID, parentParticipant, parentAgentID, roomID, roomRole, roomAccess, session, paneID string) string {
 	env := []string{
-		"AGENTCTL_PARTICIPANT_ID=" + shellQuote(strings.TrimSpace(participantID)),
-		"AGENTCTL_MUX_BACKEND=tmux",
-		"AGENTCTL_MUX_SESSION=" + shellQuote(strings.TrimSpace(session)),
-		"AGENTCTL_MUX_PANE_ID=" + shellQuote(strings.TrimSpace(paneID)),
+		"FOXCTL_PARTICIPANT_ID=" + shellQuote(strings.TrimSpace(participantID)),
+		"FOXCTL_MUX_BACKEND=tmux",
+		"FOXCTL_MUX_SESSION=" + shellQuote(strings.TrimSpace(session)),
+		"FOXCTL_MUX_PANE_ID=" + shellQuote(strings.TrimSpace(paneID)),
 	}
 	if value := strings.TrimSpace(parentParticipant); value != "" {
-		env = append(env, "AGENTCTL_PARENT_PARTICIPANT_ID="+shellQuote(value))
+		env = append(env, "FOXCTL_PARENT_PARTICIPANT_ID="+shellQuote(value))
 	}
 	if value := strings.TrimSpace(parentAgentID); value != "" {
-		env = append(env, "AGENTCTL_PARENT_AGENT_ID="+shellQuote(value))
+		env = append(env, "FOXCTL_PARENT_AGENT_ID="+shellQuote(value))
 	}
 	if strings.TrimSpace(roomAccess) == "direct" {
 		if value := strings.TrimSpace(roomID); value != "" {
-			env = append(env, "AGENTCTL_ROOM_ID="+shellQuote(value))
+			env = append(env, "FOXCTL_ROOM_ID="+shellQuote(value))
 		}
 		if value := strings.TrimSpace(roomRole); value != "" {
-			env = append(env, "AGENTCTL_ROOM_ROLE="+shellQuote(value))
+			env = append(env, "FOXCTL_ROOM_ROLE="+shellQuote(value))
 		}
 	}
 	if strings.TrimSpace(command) == "" {

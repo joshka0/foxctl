@@ -886,9 +886,9 @@ func grantPermission(ctx context.Context, rc *skillmain.RunContext, serial, pkg,
 }
 
 const (
-	androidRecordPIDFile    = "/tmp/agentctl_android_record.pid"
-	androidRecordPathFile   = "/tmp/agentctl_android_record_path.txt"
-	androidRecordSerialFile = "/tmp/agentctl_android_record_serial.txt"
+	androidRecordPIDFile    = "/tmp/foxctl_android_record.pid"
+	androidRecordPathFile   = "/tmp/foxctl_android_record_path.txt"
+	androidRecordSerialFile = "/tmp/foxctl_android_record_serial.txt"
 )
 
 // recordScreen starts screen recording.

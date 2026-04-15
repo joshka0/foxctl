@@ -135,7 +135,7 @@ func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 	}
 
 	// Use a stable actor ID so we can assert on the reservation holder.
-	t.Setenv("AGENTCTL_AGENT_NAME", "actor:test")
+	t.Setenv("FOXCTL_AGENT_NAME", "actor:test")
 
 	output := env.run(t, in)
 	if output.Decision != hooks.DecisionApprove {
@@ -213,8 +213,8 @@ func TestFileGuard_StrictMode_BlocksOnConflict(t *testing.T) {
 	}
 
 	// Now run file_guard in strict mode as a different actor on the same file.
-	t.Setenv("AGENTCTL_FILE_GUARD_MODE", "strict")
-	t.Setenv("AGENTCTL_AGENT_NAME", "actor:self")
+	t.Setenv("FOXCTL_FILE_GUARD_MODE", "strict")
+	t.Setenv("FOXCTL_AGENT_NAME", "actor:self")
 
 	filePath := filepath.Join(env.workspaceRoot, "main.go")
 	input := json.RawMessage([]byte("{\"file_path\": \"" + filePath + "\"}"))

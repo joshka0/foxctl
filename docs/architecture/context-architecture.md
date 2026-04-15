@@ -163,11 +163,11 @@ Current hook behavior:
   - keeps the existing session capture path
   - writes an ACA handoff with `foxctl capture`
   - can emit structured observations or tensions through `foxctl context infer --apply`
-  - can draft a promotion automatically when `AGENTCTL_ACA_AUTO_PROMOTE=1`
+  - can draft a promotion automatically when `FOXCTL_ACA_AUTO_PROMOTE=1`
 - `SubagentStop` via `configs/hooks/subagent-stop.sh`
   - writes a bounded ACA handoff for subagent completion
   - can emit structured observations or tensions through `foxctl context infer --apply`
-  - can draft a promotion automatically when `AGENTCTL_ACA_AUTO_PROMOTE=1`
+  - can draft a promotion automatically when `FOXCTL_ACA_AUTO_PROMOTE=1`
 - task continuity hook wrapper via `configs/hooks/task-continuity-summary.sh`
   - uses `foxctl context task-history-summary`
   - emits prompt-ready continuity context plus `task_continuity_artifact`
@@ -213,7 +213,7 @@ The MCP facade now exposes first-class ACA read tools:
 - `context_promote`
 - `context_merge_promotion`
 
-These provide direct ACA access without routing through generic `agentctl_run`.
+These provide direct ACA access without routing through generic `foxctl_run`.
 
 ## Transcript Family History
 
@@ -322,31 +322,31 @@ Current behavior:
 
 - refreshes top-of-mind from task and session state on a ticker
 - regenerates maintenance tasks from tensions
-- if `AGENTCTL_OBSIDIAN_VAULT_PATH` is set:
+- if `FOXCTL_OBSIDIAN_VAULT_PATH` is set:
   - rebuilds the local Obsidian index
   - recomputes vault health
   - folds health findings into ACA maintenance tasks
 
 Controls:
 
-- `AGENTCTL_ACA_MAINTENANCE_INTERVAL`
+- `FOXCTL_ACA_MAINTENANCE_INTERVAL`
   - optional duration override for the refresh ticker
-- `AGENTCTL_OBSIDIAN_VAULT_PATH`
+- `FOXCTL_OBSIDIAN_VAULT_PATH`
   - optional vault path for health-driven maintenance refresh
-- `AGENTCTL_OBSIDIAN_SEMANTIC_ENABLED`
+- `FOXCTL_OBSIDIAN_SEMANTIC_ENABLED`
   - explicit override for semantic note search in ACA retrieval
   - use `false` or `0` to force lexical-only behavior
-- `AGENTCTL_OPENAI_COMPAT_BASE_URL`
-- `AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL`
-- `AGENTCTL_OPENAI_COMPAT_API_KEY`
+- `FOXCTL_OPENAI_COMPAT_BASE_URL`
+- `FOXCTL_OPENAI_COMPAT_EMBEDDING_MODEL`
+- `FOXCTL_OPENAI_COMPAT_API_KEY`
   - when an OpenAI-compatible embedding endpoint is configured, ACA retrieval now enables semantic search automatically and `context retrieve` effectively defaults to blended retrieval
 
 Recommended `foxctl` setup:
 
 ```bash
-export AGENTCTL_OBSIDIAN_SEMANTIC_PROVIDER=openai_compat
-export AGENTCTL_OPENAI_COMPAT_BASE_URL=http://127.0.0.1:1234/v1
-export AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL=text-embedding-embeddinggemma-300m-qat
+export FOXCTL_OBSIDIAN_SEMANTIC_PROVIDER=openai_compat
+export FOXCTL_OPENAI_COMPAT_BASE_URL=http://127.0.0.1:1234/v1
+export FOXCTL_OPENAI_COMPAT_EMBEDDING_MODEL=text-embedding-embeddinggemma-300m-qat
 ```
 
 With that configuration in place:

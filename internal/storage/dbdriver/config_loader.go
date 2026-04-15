@@ -55,13 +55,13 @@ func (cl *ConfigLoader) LoadConfig(storeName, defaultPath string) Config {
 // defaultPath is the default SQLite database path
 func (cl *ConfigLoader) loadConfig(prefix, defaultPath string) Config {
 	// Check if driver is specified via environment variable
-	// Format: AGENTCTL_<PREFIX>_DB_DRIVER (e.g., AGENTCTL_CACHE_DB_DRIVER)
-	driverEnv := fmt.Sprintf("AGENTCTL_%s_DB_DRIVER", strings.ToUpper(prefix))
+	// Format: FOXCTL_<PREFIX>_DB_DRIVER (e.g., FOXCTL_CACHE_DB_DRIVER)
+	driverEnv := fmt.Sprintf("FOXCTL_%s_DB_DRIVER", strings.ToUpper(prefix))
 	driver := os.Getenv(driverEnv)
 
 	// Global fallback (applies to all stores) when per-store driver is not set.
 	if driver == "" {
-		driver = os.Getenv("AGENTCTL_DB_DRIVER")
+		driver = os.Getenv("FOXCTL_DB_DRIVER")
 	}
 
 	// Default to SQLite if not specified
@@ -88,8 +88,8 @@ func (cl *ConfigLoader) loadConfig(prefix, defaultPath string) Config {
 // loadSQLiteConfig loads SQLite configuration
 func (cl *ConfigLoader) loadSQLiteConfig(prefix, defaultPath string) Config {
 	// Check for custom path via environment variable
-	// Format: AGENTCTL_<PREFIX>_DB_PATH (e.g., AGENTCTL_CACHE_DB_PATH)
-	pathEnv := fmt.Sprintf("AGENTCTL_%s_DB_PATH", strings.ToUpper(prefix))
+	// Format: FOXCTL_<PREFIX>_DB_PATH (e.g., FOXCTL_CACHE_DB_PATH)
+	pathEnv := fmt.Sprintf("FOXCTL_%s_DB_PATH", strings.ToUpper(prefix))
 	dbPath := os.Getenv(pathEnv)
 
 	if dbPath == "" {
@@ -97,14 +97,14 @@ func (cl *ConfigLoader) loadSQLiteConfig(prefix, defaultPath string) Config {
 	}
 
 	// Check for WAL mode setting
-	walEnv := fmt.Sprintf("AGENTCTL_%s_DB_WAL", strings.ToUpper(prefix))
+	walEnv := fmt.Sprintf("FOXCTL_%s_DB_WAL", strings.ToUpper(prefix))
 	enableWAL := true
 	if walStr := os.Getenv(walEnv); walStr != "" {
 		enableWAL = strings.ToLower(walStr) != "false" && walStr != "0"
 	}
 
 	// Check for busy timeout setting
-	timeoutEnv := fmt.Sprintf("AGENTCTL_%s_DB_TIMEOUT", strings.ToUpper(prefix))
+	timeoutEnv := fmt.Sprintf("FOXCTL_%s_DB_TIMEOUT", strings.ToUpper(prefix))
 	busyTimeout := 5000
 	if timeoutStr := os.Getenv(timeoutEnv); timeoutStr != "" {
 		if timeout, err := strconv.Atoi(timeoutStr); err == nil {
@@ -125,8 +125,8 @@ func (cl *ConfigLoader) loadSQLiteConfig(prefix, defaultPath string) Config {
 // loadLibSQLConfig loads local libSQL configuration
 func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
 	// Check for custom path via environment variable
-	// Format: AGENTCTL_<PREFIX>_DB_PATH (e.g., AGENTCTL_MEMORY_DB_PATH)
-	pathEnv := fmt.Sprintf("AGENTCTL_%s_DB_PATH", strings.ToUpper(prefix))
+	// Format: FOXCTL_<PREFIX>_DB_PATH (e.g., FOXCTL_MEMORY_DB_PATH)
+	pathEnv := fmt.Sprintf("FOXCTL_%s_DB_PATH", strings.ToUpper(prefix))
 	dbPath := os.Getenv(pathEnv)
 
 	if dbPath == "" {
@@ -135,7 +135,7 @@ func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
 	}
 
 	// Check if vector search should be enabled (default: true for MEMORY, false for others)
-	vectorEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
+	vectorEnv := fmt.Sprintf("FOXCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
 	// Default to true for memory database since it benefits most from vector search
 	enableVector := strings.ToUpper(prefix) == "MEMORY"
 	if vectorStr := os.Getenv(vectorEnv); vectorStr != "" {
@@ -143,7 +143,7 @@ func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
 	}
 
 	// Get vector dimensions (check per-database env var, then global default)
-	dimsEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
+	dimsEnv := fmt.Sprintf("FOXCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
 	vectorDims := GetDefaultVectorDimensions()
 	if dimsStr := os.Getenv(dimsEnv); dimsStr != "" {
 		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
@@ -152,23 +152,23 @@ func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
 	}
 
 	// Check for remote sync URL (enables embedded replica mode)
-	// Format: AGENTCTL_<PREFIX>_SYNC_URL or AGENTCTL_LIBSQL_SYNC_URL (fallback)
-	syncURLEnv := fmt.Sprintf("AGENTCTL_%s_SYNC_URL", strings.ToUpper(prefix))
+	// Format: FOXCTL_<PREFIX>_SYNC_URL or FOXCTL_LIBSQL_SYNC_URL (fallback)
+	syncURLEnv := fmt.Sprintf("FOXCTL_%s_SYNC_URL", strings.ToUpper(prefix))
 	syncURL := os.Getenv(syncURLEnv)
 	if syncURL == "" {
-		syncURL = os.Getenv("AGENTCTL_LIBSQL_SYNC_URL")
+		syncURL = os.Getenv("FOXCTL_LIBSQL_SYNC_URL")
 	}
 
 	// Check for sync auth token
-	// Format: AGENTCTL_<PREFIX>_SYNC_TOKEN or AGENTCTL_LIBSQL_SYNC_TOKEN (fallback)
-	syncTokenEnv := fmt.Sprintf("AGENTCTL_%s_SYNC_TOKEN", strings.ToUpper(prefix))
+	// Format: FOXCTL_<PREFIX>_SYNC_TOKEN or FOXCTL_LIBSQL_SYNC_TOKEN (fallback)
+	syncTokenEnv := fmt.Sprintf("FOXCTL_%s_SYNC_TOKEN", strings.ToUpper(prefix))
 	syncToken := os.Getenv(syncTokenEnv)
 	if syncToken == "" {
-		syncToken = os.Getenv("AGENTCTL_LIBSQL_SYNC_TOKEN")
+		syncToken = os.Getenv("FOXCTL_LIBSQL_SYNC_TOKEN")
 	}
 
 	// Check for sync interval (seconds, 0 = sync on demand)
-	syncIntervalEnv := fmt.Sprintf("AGENTCTL_%s_SYNC_INTERVAL", strings.ToUpper(prefix))
+	syncIntervalEnv := fmt.Sprintf("FOXCTL_%s_SYNC_INTERVAL", strings.ToUpper(prefix))
 	syncInterval := 0
 	if intervalStr := os.Getenv(syncIntervalEnv); intervalStr != "" {
 		if interval, err := strconv.Atoi(intervalStr); err == nil && interval > 0 {
@@ -192,24 +192,24 @@ func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
 // loadTursoConfig loads Turso configuration.
 func (cl *ConfigLoader) loadTursoConfig(prefix, defaultPath, dbName string) Config {
 	// Get Turso URL
-	// Format: AGENTCTL_<PREFIX>_DB_URL or AGENTCTL_TURSO_URL (fallback)
-	urlEnv := fmt.Sprintf("AGENTCTL_%s_DB_URL", strings.ToUpper(prefix))
+	// Format: FOXCTL_<PREFIX>_DB_URL or FOXCTL_TURSO_URL (fallback)
+	urlEnv := fmt.Sprintf("FOXCTL_%s_DB_URL", strings.ToUpper(prefix))
 	url := os.Getenv(urlEnv)
 	if url == "" {
-		url = os.Getenv("AGENTCTL_TURSO_URL")
+		url = os.Getenv("FOXCTL_TURSO_URL")
 	}
 
 	// Get Turso auth token
-	// Format: AGENTCTL_<PREFIX>_DB_TOKEN or AGENTCTL_TURSO_TOKEN (fallback)
-	tokenEnv := fmt.Sprintf("AGENTCTL_%s_DB_TOKEN", strings.ToUpper(prefix))
+	// Format: FOXCTL_<PREFIX>_DB_TOKEN or FOXCTL_TURSO_TOKEN (fallback)
+	tokenEnv := fmt.Sprintf("FOXCTL_%s_DB_TOKEN", strings.ToUpper(prefix))
 	token := os.Getenv(tokenEnv)
 	if token == "" {
-		token = os.Getenv("AGENTCTL_TURSO_TOKEN")
+		token = os.Getenv("FOXCTL_TURSO_TOKEN")
 	}
 
 	// Replica path (persistent embedded replica file).
-	// Use AGENTCTL_<PREFIX>_DB_PATH when set, otherwise default under rootDir.
-	replicaPathEnv := fmt.Sprintf("AGENTCTL_%s_DB_PATH", strings.ToUpper(prefix))
+	// Use FOXCTL_<PREFIX>_DB_PATH when set, otherwise default under rootDir.
+	replicaPathEnv := fmt.Sprintf("FOXCTL_%s_DB_PATH", strings.ToUpper(prefix))
 	replicaPath := os.Getenv(replicaPathEnv)
 	if replicaPath == "" && defaultPath != "" {
 		// Match existing memory factory behavior (e.g., memory.turso.replica).
@@ -218,7 +218,7 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, defaultPath, dbName string) Conf
 	}
 
 	// Check if vector search should be enabled (default: true for MEMORY, false for others)
-	vectorEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
+	vectorEnv := fmt.Sprintf("FOXCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
 	// Default to true for memory database since it benefits most from vector search
 	enableVector := strings.ToUpper(prefix) == "MEMORY"
 	if vectorStr := os.Getenv(vectorEnv); vectorStr != "" {
@@ -226,7 +226,7 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, defaultPath, dbName string) Conf
 	}
 
 	// Get vector dimensions (check per-database env var, then global default)
-	dimsEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
+	dimsEnv := fmt.Sprintf("FOXCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
 	vectorDims := GetDefaultVectorDimensions()
 	if dimsStr := os.Getenv(dimsEnv); dimsStr != "" {
 		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
@@ -236,7 +236,7 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, defaultPath, dbName string) Conf
 
 	// Check for sync interval (seconds, 0 = sync on demand).
 	// We reuse the same per-store env var name as libSQL for consistency.
-	syncIntervalEnv := fmt.Sprintf("AGENTCTL_%s_SYNC_INTERVAL", strings.ToUpper(prefix))
+	syncIntervalEnv := fmt.Sprintf("FOXCTL_%s_SYNC_INTERVAL", strings.ToUpper(prefix))
 	syncInterval := 0
 	if intervalStr := os.Getenv(syncIntervalEnv); intervalStr != "" {
 		if interval, err := strconv.Atoi(intervalStr); err == nil && interval > 0 {
@@ -260,18 +260,18 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, defaultPath, dbName string) Conf
 
 // loadPostgresConfig loads PostgreSQL configuration from environment variables.
 func (cl *ConfigLoader) loadPostgresConfig(prefix string) Config {
-	// DSN: per-store override, then global AGENTCTL_POSTGRES_DSN, then DATABASE_URL
-	dsnEnv := fmt.Sprintf("AGENTCTL_%s_POSTGRES_DSN", strings.ToUpper(prefix))
+	// DSN: per-store override, then global FOXCTL_POSTGRES_DSN, then DATABASE_URL
+	dsnEnv := fmt.Sprintf("FOXCTL_%s_POSTGRES_DSN", strings.ToUpper(prefix))
 	dsn := os.Getenv(dsnEnv)
 	if dsn == "" {
-		dsn = os.Getenv("AGENTCTL_POSTGRES_DSN")
+		dsn = os.Getenv("FOXCTL_POSTGRES_DSN")
 	}
 	if dsn == "" {
 		dsn = os.Getenv("DATABASE_URL")
 	}
 
 	// Schema: default to lowercase store name for isolation
-	schemaEnv := fmt.Sprintf("AGENTCTL_%s_POSTGRES_SCHEMA", strings.ToUpper(prefix))
+	schemaEnv := fmt.Sprintf("FOXCTL_%s_POSTGRES_SCHEMA", strings.ToUpper(prefix))
 	schema := os.Getenv(schemaEnv)
 	if schema == "" {
 		schema = strings.ToLower(prefix)
@@ -279,26 +279,26 @@ func (cl *ConfigLoader) loadPostgresConfig(prefix string) Config {
 
 	// Connection pool settings
 	maxOpenConns := 5
-	if v := os.Getenv("AGENTCTL_POSTGRES_MAX_CONNS"); v != "" {
+	if v := os.Getenv("FOXCTL_POSTGRES_MAX_CONNS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxOpenConns = n
 		}
 	}
 	maxIdleConns := 2
-	if v := os.Getenv("AGENTCTL_POSTGRES_MAX_IDLE_CONNS"); v != "" {
+	if v := os.Getenv("FOXCTL_POSTGRES_MAX_IDLE_CONNS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxIdleConns = n
 		}
 	}
 
 	// Vector search settings (same pattern as libSQL/Turso)
-	vectorEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
+	vectorEnv := fmt.Sprintf("FOXCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
 	enableVector := strings.ToUpper(prefix) == "MEMORY"
 	if vectorStr := os.Getenv(vectorEnv); vectorStr != "" {
 		enableVector = strings.ToLower(vectorStr) == "true" || vectorStr == "1"
 	}
 
-	dimsEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
+	dimsEnv := fmt.Sprintf("FOXCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
 	vectorDims := GetDefaultVectorDimensions()
 	if dimsStr := os.Getenv(dimsEnv); dimsStr != "" {
 		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
@@ -307,7 +307,7 @@ func (cl *ConfigLoader) loadPostgresConfig(prefix string) Config {
 	}
 
 	requireVector := false
-	if v := os.Getenv("AGENTCTL_POSTGRES_REQUIRE_VECTOR"); v == "true" || v == "1" {
+	if v := os.Getenv("FOXCTL_POSTGRES_REQUIRE_VECTOR"); v == "true" || v == "1" {
 		requireVector = true
 	}
 
@@ -433,33 +433,33 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 // Environment variable documentation:
 //
 // For SQLite databases:
-//   AGENTCTL_<DB>_DB_DRIVER=sqlite       # Database driver (sqlite, libsql, or turso)
-//   AGENTCTL_<DB>_DB_PATH=/path/to/db    # Path to SQLite database file
-//   AGENTCTL_<DB>_DB_WAL=true            # Enable WAL mode (default: true)
-//   AGENTCTL_<DB>_DB_TIMEOUT=5000        # Busy timeout in milliseconds
+//   FOXCTL_<DB>_DB_DRIVER=sqlite       # Database driver (sqlite, libsql, or turso)
+//   FOXCTL_<DB>_DB_PATH=/path/to/db    # Path to SQLite database file
+//   FOXCTL_<DB>_DB_WAL=true            # Enable WAL mode (default: true)
+//   FOXCTL_<DB>_DB_TIMEOUT=5000        # Busy timeout in milliseconds
 //
 // For libSQL databases (local-first with optional sync):
-//   AGENTCTL_<DB>_DB_DRIVER=libsql       # Database driver
-//   AGENTCTL_<DB>_DB_PATH=/path/to/db    # Path to libSQL database file
-//   AGENTCTL_<DB>_SYNC_URL=http://...    # Remote sqld URL for sync (optional)
-//   AGENTCTL_<DB>_SYNC_TOKEN=...         # Auth token for sync (optional)
-//   AGENTCTL_<DB>_SYNC_INTERVAL=60       # Background sync interval in seconds (optional, 0=on-demand)
-//   AGENTCTL_LIBSQL_SYNC_URL=http://...  # Fallback sync URL for all libSQL databases
-//   AGENTCTL_LIBSQL_SYNC_TOKEN=...       # Fallback sync token for all libSQL databases
+//   FOXCTL_<DB>_DB_DRIVER=libsql       # Database driver
+//   FOXCTL_<DB>_DB_PATH=/path/to/db    # Path to libSQL database file
+//   FOXCTL_<DB>_SYNC_URL=http://...    # Remote sqld URL for sync (optional)
+//   FOXCTL_<DB>_SYNC_TOKEN=...         # Auth token for sync (optional)
+//   FOXCTL_<DB>_SYNC_INTERVAL=60       # Background sync interval in seconds (optional, 0=on-demand)
+//   FOXCTL_LIBSQL_SYNC_URL=http://...  # Fallback sync URL for all libSQL databases
+//   FOXCTL_LIBSQL_SYNC_TOKEN=...       # Fallback sync token for all libSQL databases
 //
 // For Turso databases (cloud-native):
-//   AGENTCTL_<DB>_DB_DRIVER=turso        # Database driver
-//   AGENTCTL_<DB>_DB_URL=libsql://...    # Turso database URL
-//   AGENTCTL_<DB>_DB_TOKEN=...           # Turso auth token
-//   AGENTCTL_TURSO_URL=libsql://...      # Fallback Turso URL for all databases
-//   AGENTCTL_TURSO_TOKEN=...             # Fallback Turso token for all databases
+//   FOXCTL_<DB>_DB_DRIVER=turso        # Database driver
+//   FOXCTL_<DB>_DB_URL=libsql://...    # Turso database URL
+//   FOXCTL_<DB>_DB_TOKEN=...           # Turso auth token
+//   FOXCTL_TURSO_URL=libsql://...      # Fallback Turso URL for all databases
+//   FOXCTL_TURSO_TOKEN=...             # Fallback Turso token for all databases
 //
 // For vector search (memory database only):
-//   AGENTCTL_MEMORY_VECTOR_SEARCH=true   # Enable vector search
-//   AGENTCTL_MEMORY_VECTOR_DIMS=1024     # Per-database dimensions override
-//   AGENTCTL_VECTOR_DIMS=1024            # Global default (1024 for Voyage, 3072 for Gemini)
+//   FOXCTL_MEMORY_VECTOR_SEARCH=true   # Enable vector search
+//   FOXCTL_MEMORY_VECTOR_DIMS=1024     # Per-database dimensions override
+//   FOXCTL_VECTOR_DIMS=1024            # Global default (1024 for Voyage, 3072 for Gemini)
 //
 // Where <DB> is one of: CACHE, JOBS, or MEMORY
 //
 // For store configuration beyond those core stores, foxctl uses the same
-// `AGENTCTL_<STORE>_...` environment variable pattern (e.g., `AGENTCTL_SESSIONS_DB_DRIVER`).
+// `FOXCTL_<STORE>_...` environment variable pattern (e.g., `FOXCTL_SESSIONS_DB_DRIVER`).

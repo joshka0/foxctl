@@ -113,7 +113,7 @@ ls -la ~/.foxctl/.env
 
 The `.env` loader checks these locations in order:
 1. `~/.foxctl/.env` (global defaults)
-2. `$AGENTCTL_HOME/.env` (if set)
+2. `$FOXCTL_HOME/.env` (if set)
 3. `$PWD/.env` (project overrides)
 
 ---
@@ -315,7 +315,7 @@ data, _ := os.ReadFile(path)  // File could change between validate and read
 ```go
 import "github.com/joshka0/foxctl/internal/platform/workspace"
 
-ws := workspace.Detect("")  // Handles AGENTCTL_WORKSPACE, git root, etc.
+ws := workspace.Detect("")  // Handles FOXCTL_WORKSPACE, git root, etc.
 ```
 
 ---
@@ -330,10 +330,10 @@ ws := workspace.Detect("")  // Handles AGENTCTL_WORKSPACE, git root, etc.
 
 ```bash
 # Wrong
-AGENTCTL_OBS_DIR=~/.foxctl/observability
+FOXCTL_OBS_DIR=~/.foxctl/observability
 
 # Correct
-AGENTCTL_OBS_DIR=$HOME/.foxctl/observability
+FOXCTL_OBS_DIR=$HOME/.foxctl/observability
 ```
 
 ---

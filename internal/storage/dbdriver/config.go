@@ -23,7 +23,7 @@ const (
 
 const (
 	// DefaultVectorDimensions is the fallback when no dimensions are configured.
-	// This can be overridden via AGENTCTL_VECTOR_DIMS environment variable.
+	// This can be overridden via FOXCTL_VECTOR_DIMS environment variable.
 	// Common sizes: 384 (MiniLM), 768 (BERT), 1024 (Voyage), 1536 (OpenAI), 3072 (Gemini)
 	DefaultVectorDimensions = 1024
 )
@@ -31,7 +31,7 @@ const (
 // GetDefaultVectorDimensions returns the default vector dimensions from environment
 // or the built-in default. This allows global configuration of embedding dimensions.
 func GetDefaultVectorDimensions() int {
-	if dimsStr := os.Getenv("AGENTCTL_VECTOR_DIMS"); dimsStr != "" {
+	if dimsStr := os.Getenv("FOXCTL_VECTOR_DIMS"); dimsStr != "" {
 		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
 			return dims
 		}
@@ -78,7 +78,7 @@ type LibSQLConfig struct {
 	EnableVectorSearch bool `json:"enable_vector_search" yaml:"enable_vector_search"`
 
 	// VectorDimensions specifies the dimension of vector embeddings.
-	// If 0, uses GetDefaultVectorDimensions() (configurable via AGENTCTL_VECTOR_DIMS).
+	// If 0, uses GetDefaultVectorDimensions() (configurable via FOXCTL_VECTOR_DIMS).
 	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
 
 	// SyncURL is the remote sqld URL for sync (optional).
@@ -119,7 +119,7 @@ type TursoConfig struct {
 	EnableVectorSearch bool `json:"enable_vector_search" yaml:"enable_vector_search"`
 
 	// VectorDimensions specifies the dimension of vector embeddings.
-	// If 0, uses GetDefaultVectorDimensions() (configurable via AGENTCTL_VECTOR_DIMS).
+	// If 0, uses GetDefaultVectorDimensions() (configurable via FOXCTL_VECTOR_DIMS).
 	// Common sizes: 384 (MiniLM), 768 (BERT), 1024 (Voyage), 1536 (OpenAI), 3072 (Gemini)
 	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
 }

@@ -16,8 +16,8 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
 )
 
-// debug enables verbose logging when AGENTCTL_GOPLS_DEBUG=1
-var debug = os.Getenv("AGENTCTL_GOPLS_DEBUG") == "1"
+// debug enables verbose logging when FOXCTL_GOPLS_DEBUG=1
+var debug = os.Getenv("FOXCTL_GOPLS_DEBUG") == "1"
 
 func debugLog(format string, args ...any) {
 	if debug {

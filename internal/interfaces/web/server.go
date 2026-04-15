@@ -691,7 +691,7 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			_, _ = w.Write([]byte("agentctl_web running. In dev, run Vite at :5173.\n"))
+			_, _ = w.Write([]byte("foxctl_web running. In dev, run Vite at :5173.\n"))
 		})
 	}
 

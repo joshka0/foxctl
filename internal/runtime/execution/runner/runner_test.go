@@ -23,7 +23,7 @@ func main() {
 }`)
 
 	ws := t.TempDir()
-	t.Setenv("AGENTCTL_WORKSPACE", ws)
+	t.Setenv("FOXCTL_WORKSPACE", ws)
 
 	stdout, stderr, err := RunWithOptions(context.Background(), RunOptions{
 		Manifest: skill.Manifest{
@@ -63,7 +63,7 @@ func main() {
 
 	envWS := t.TempDir()
 	ctxWS := t.TempDir()
-	t.Setenv("AGENTCTL_WORKSPACE", envWS)
+	t.Setenv("FOXCTL_WORKSPACE", envWS)
 
 	ctx := workspace.WithContext(context.Background(), ctxWS)
 

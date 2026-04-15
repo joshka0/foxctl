@@ -170,7 +170,7 @@ func TestMuxReadHandlerTMUXReturnsCapture(t *testing.T) {
 
 const (
 	tmuxMuxFieldSep   = "\x1f"
-	tmuxMuxListFormat = "#{pane_id}" + tmuxMuxFieldSep + "#{session_name}" + tmuxMuxFieldSep + "#{window_index}" + tmuxMuxFieldSep + "#{pane_index}" + tmuxMuxFieldSep + "#{window_name}" + tmuxMuxFieldSep + "#{pane_pid}" + tmuxMuxFieldSep + "#{pane_width}" + tmuxMuxFieldSep + "#{pane_height}" + tmuxMuxFieldSep + "#{@name}" + tmuxMuxFieldSep + "#{pane_current_path}" + tmuxMuxFieldSep + "#{pane_current_command}" + tmuxMuxFieldSep + "#{pane_active}" + tmuxMuxFieldSep + "#{@agentctl_participant}" + tmuxMuxFieldSep + "#{@agentctl_provider}" + tmuxMuxFieldSep + "#{@agentctl_room_id}" + tmuxMuxFieldSep + "#{@agentctl_wrapped}"
+	tmuxMuxListFormat = "#{pane_id}" + tmuxMuxFieldSep + "#{session_name}" + tmuxMuxFieldSep + "#{window_index}" + tmuxMuxFieldSep + "#{pane_index}" + tmuxMuxFieldSep + "#{window_name}" + tmuxMuxFieldSep + "#{pane_pid}" + tmuxMuxFieldSep + "#{pane_width}" + tmuxMuxFieldSep + "#{pane_height}" + tmuxMuxFieldSep + "#{@name}" + tmuxMuxFieldSep + "#{pane_current_path}" + tmuxMuxFieldSep + "#{pane_current_command}" + tmuxMuxFieldSep + "#{pane_active}" + tmuxMuxFieldSep + "#{@foxctl_participant}" + tmuxMuxFieldSep + "#{@foxctl_provider}" + tmuxMuxFieldSep + "#{@foxctl_room_id}" + tmuxMuxFieldSep + "#{@foxctl_wrapped}"
 )
 
 type fakeMuxRunner struct {

@@ -151,19 +151,19 @@ func buildSkillExtraEnv(input Input) []string {
 	var env []string
 
 	if input.SessionID != "" {
-		env = append(env, "AGENTCTL_SESSION_ID="+input.SessionID)
+		env = append(env, "FOXCTL_SESSION_ID="+input.SessionID)
 	}
 	if input.ActorID != "" {
-		env = append(env, "AGENTCTL_AGENT_ID="+input.ActorID)
+		env = append(env, "FOXCTL_AGENT_ID="+input.ActorID)
 	}
 	if input.TraceID != "" {
-		env = append(env, "AGENTCTL_TRACE_ID="+input.TraceID)
+		env = append(env, "FOXCTL_TRACE_ID="+input.TraceID)
 	}
 	if input.CorrelationID != "" {
-		env = append(env, "AGENTCTL_CORRELATION_ID="+input.CorrelationID)
+		env = append(env, "FOXCTL_CORRELATION_ID="+input.CorrelationID)
 	}
 	if input.Event != "" {
-		env = append(env, "AGENTCTL_HOOK_EVENT="+string(input.Event))
+		env = append(env, "FOXCTL_HOOK_EVENT="+string(input.Event))
 	}
 
 	return env

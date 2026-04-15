@@ -165,7 +165,7 @@ Dependencies: Phase 2 (and Phase 3 for shared patterns, but not strictly).
 
 - [x] Implement `code/snippet_extract` binary/skill:
   - Input / output contracts per §5.
-  - Live reads via `PathValidator` and `AGENTCTL_WORKSPACE`.
+  - Live reads via `PathValidator` and `FOXCTL_WORKSPACE`.
   - CAS artifact emission for large results.
 - [x] Start with a simple scoring heuristic or very small LM stub; keep the
       contract stable so we can later swap the model.

@@ -100,7 +100,7 @@ Goal: identify refactoring opportunities to consolidate skills into internal pac
 - [x] Duplicate language/brace parsing logic across packages; consolidate to single source of truth.
 - [x] skills/html_edit uses errors.New instead of skillerr; missing error codes/hints.
 - [x] Repeated inline map type assertions for envelopes/metadata; extract typed helpers.
-- [x] skills/setup_agentctl_mode bypasses skillmain/skillout (manual envelope + no validation); migrate to standard skill entrypoint.
+- [x] skills/setup_foxctl_mode bypasses skillmain/skillout (manual envelope + no validation); migrate to standard skill entrypoint.
 - [x] skills/todo + hooks/impact_analysis log via fmt.Fprintf(os.Stderr) instead of structured logger; standardize on rc.Logger for consistent telemetry.
 - [x] Remaining stderr logging in skills/context_filter, skills/code_semantic_search (rerank), skills/plan_sync, skills/mcp_bridge, skills/codemap_generate; migrate to rc.Logger.
 

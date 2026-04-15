@@ -16,7 +16,7 @@ import (
 )
 
 func TestAgentMemoryStatsCommand_ReturnsRetentionMetadata(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 
 	cfg := setupOrchestrationTestEnv(t)
 	ctx := context.Background()
@@ -58,7 +58,7 @@ func TestAgentMemoryStatsCommand_ReturnsRetentionMetadata(t *testing.T) {
 }
 
 func TestAgentRoomPolicyAndInfoCommands_RoundTripDispatchDefaults(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 
 	cfg := setupOrchestrationTestEnv(t)
 	ctx := context.Background()

@@ -17,7 +17,7 @@ const (
 // Payload is the JSON body inside mailbox messages for console I/O.
 //
 // This is the main envelope for all console communication between
-// the agentctl_viewer TUI and actor handlers.
+// the foxctl_viewer TUI and actor handlers.
 type Payload struct {
 	// Type is one of: ask, reply, event, cmd
 	Type PayloadType `json:"type"`

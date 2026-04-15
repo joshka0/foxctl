@@ -39,8 +39,8 @@ func TestTranscriptSummaryWorkerConfig_FallsBackToLMStudio(t *testing.T) {
 }
 
 func TestTranscriptSummaryWorkerConfig_UsesExplicitOverrides(t *testing.T) {
-	t.Setenv("AGENTCTL_TRANSCRIPT_SUMMARY_PROVIDER", "openrouter")
-	t.Setenv("AGENTCTL_TRANSCRIPT_SUMMARY_MODEL", "google/gemini-3.1-flash-lite-preview")
+	t.Setenv("FOXCTL_TRANSCRIPT_SUMMARY_PROVIDER", "openrouter")
+	t.Setenv("FOXCTL_TRANSCRIPT_SUMMARY_MODEL", "google/gemini-3.1-flash-lite-preview")
 
 	cfg := platformcfg.Config{}
 	cfg.LLM.OpenRouterAPIKey = "openrouter-key"
@@ -59,8 +59,8 @@ func TestTranscriptSummaryWorkerConfig_UsesExplicitOverrides(t *testing.T) {
 }
 
 func TestTranscriptSummaryWorkerConfig_ExplicitArgsOverrideEnv(t *testing.T) {
-	t.Setenv("AGENTCTL_TRANSCRIPT_SUMMARY_PROVIDER", "lmstudio")
-	t.Setenv("AGENTCTL_TRANSCRIPT_SUMMARY_MODEL", "zai-org/glm-4.7-flash")
+	t.Setenv("FOXCTL_TRANSCRIPT_SUMMARY_PROVIDER", "lmstudio")
+	t.Setenv("FOXCTL_TRANSCRIPT_SUMMARY_MODEL", "zai-org/glm-4.7-flash")
 
 	cfg := platformcfg.Config{}
 	cfg.LLM.OpenRouterAPIKey = "openrouter-key"

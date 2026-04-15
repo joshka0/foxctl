@@ -108,7 +108,7 @@ Wave 3 retrieval goals and PR-17+ scope live in:
 
 - [x] PR-20: v2-primary command routing defaults
   - [x] make `ParseV2CommandsFromEnv()` default to all supported commands when env is unset/empty
-  - [x] add explicit `none` value for `AGENTCTL_V2_COMMANDS` to force global v1 fallback
+  - [x] add explicit `none` value for `FOXCTL_V2_COMMANDS` to force global v1 fallback
   - [x] update CLI/API/daemon routing tests to use `none` where v1-primary behavior is required
   - [x] add default-env routing assertions proving v2-primary behavior in command/API/daemon paths
   - [x] retired in hard-cut cleanup (runtime command-level routing flags removed from active command surfaces)
@@ -213,7 +213,7 @@ Wave 4 scope and contracts live in:
 - [x] libsql embedding storage format and vector indexing policy for artifact tables
 - [x] context budget policy across L2/L1/L0 (resolved: global default split + per-command overrides via `LayerBudget`)
 - [x] whether and how to backfill selected v1 turns into v2 retrieval surfaces (resolved via `foxctl sessions resynthesize-v2` source-log import/resynthesis path)
-- [x] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (CI now runs strict native-vector gate with `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`)
+- [x] native libsql/Turso vector-path CI coverage for `SearchArtifactsByEmbedding` (CI now runs strict native-vector gate with `FOXCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`)
 - [x] episode boundary heuristics and landmark thresholds for M3 (resolved: deterministic rule set with `cosine_distance>=0.30`, todo-completion boundaries, decision-transition boundaries, landmark criteria)
 - [x] WorkingContext default strictness for M4 (resolved: fallback ladder `strict -> relax_labels -> relax_salience -> temporal_only` with explicit metadata)
 - [x] narrative refresh cadence and trigger policy for M5 (resolved: hybrid trigger `12 turns` or `30 minutes`, plus manual refresh)
@@ -400,7 +400,7 @@ Subagent Review
 - 2026-02-21: Completed PR-21 command-surface de-legacy dedup.
   - Removed no-op v2 passthrough wrappers and directly aliased v2 branch defaults to canonical handlers in CLI/API.
   - Simplified daemon method dispatch to call canonical handlers from both v1/v2 branches and removed redundant `handleAgent*V2` methods.
-  - Kept `AGENTCTL_V2_COMMANDS` command routing contract intact while reducing duplicate implementation paths.
+  - Kept `FOXCTL_V2_COMMANDS` command routing contract intact while reducing duplicate implementation paths.
   - Verification: `go test ./cmd/foxctl/cmd ./internal/interfaces/web/api ./internal/runtime/daemon ./internal/v2/...` (pass).
 - 2026-02-20:
   Subagent Review
@@ -409,8 +409,8 @@ Subagent Review
   - findings: `none`
   - decision: `approved`
 - 2026-02-20: Completed PR-20 v2-primary routing defaults.
-  - `ParseV2CommandsFromEnv()` now enables all supported commands by default when `AGENTCTL_V2_COMMANDS` is unset/empty.
-  - Added explicit global fallback token `AGENTCTL_V2_COMMANDS=none` to force v1 routing.
+  - `ParseV2CommandsFromEnv()` now enables all supported commands by default when `FOXCTL_V2_COMMANDS` is unset/empty.
+  - Added explicit global fallback token `FOXCTL_V2_COMMANDS=none` to force v1 routing.
   - Updated CLI/API/daemon routing tests so intentional v1-primary cases use `none`.
   - Added default-env routing assertions that verify v2-primary behavior in command, API, and daemon dispatch paths.
   - Updated v2 spec/plan docs to reflect default-on routing semantics and rollback guidance.
@@ -452,7 +452,7 @@ Subagent Review
   - Added explicit vector index policy constants and index-assisted vector candidate retrieval (`vector_top_k`) in turns adapter.
   - Added strict dimension policy for vector mode (`ErrInvalidEmbeddingDimensions`) on both artifact writes and semantic queries.
   - Added coverage for dimension-mismatch rejection and fallback-compatibility behavior.
-  - Aligned cgo vector test config with explicit vector dimensions (`AGENTCTL_V2_TURNS_VECTOR_DIMS=4` / `AGENTCTL_VECTOR_DIMS=4`) for deterministic strict-gate runs.
+  - Aligned cgo vector test config with explicit vector dimensions (`FOXCTL_V2_TURNS_VECTOR_DIMS=4` / `FOXCTL_VECTOR_DIMS=4`) for deterministic strict-gate runs.
 - 2026-02-19:
   Subagent Review
   - reviewer: `019c7812-a3d8-78f1-b3ff-300fb8c46c04`
@@ -460,7 +460,7 @@ Subagent Review
   - findings: `none`
   - decision: `approved`
 - 2026-02-19: Completed PR-18 native vector-path CI hard gate.
-  - Added strict-mode behavior to `TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL` via `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`:
+  - Added strict-mode behavior to `TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL` via `FOXCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`:
     - local/dev keeps skip behavior when vector SQL is unavailable
     - CI fails when native vector capability is expected but unavailable or downgraded
   - Added dedicated CI step in `.github/workflows/ci.yml` to run the strict native vector-path test.
@@ -639,9 +639,9 @@ Subagent Review
 - 2026-02-18: PR-11 partial implementation landed for daemon command surface.
   - Routed `agent.spawn`/`agent.list`/`agent.kill` through v2 daemon ports in `internal/runtime/daemon/service.go` (`dispatchAgent*` + flag/shadow router) while preserving existing behavior by delegating v2 handlers to current logic.
   - Disabled daemon shadow execution for these mutating RPC methods to avoid duplicate side effects during routing rollout.
-  - Added daemon routing tests in `internal/runtime/daemon/service_v2_routing_test.go` to assert v1/v2 decision switching via `AGENTCTL_V2_COMMANDS`.
+  - Added daemon routing tests in `internal/runtime/daemon/service_v2_routing_test.go` to assert v1/v2 decision switching via `FOXCTL_V2_COMMANDS`.
 - 2026-02-18: PR-11 completed for CLI/API/daemon command surfaces.
-  - Routed real CLI handlers (`agent spawn/run/list/kill`) through `internal/v2/ports/cli` in `cmd/foxctl/cmd/agent.go` with v1 fallback and v2 command opt-in via `AGENTCTL_V2_COMMANDS`.
+  - Routed real CLI handlers (`agent spawn/run/list/kill`) through `internal/v2/ports/cli` in `cmd/foxctl/cmd/agent.go` with v1 fallback and v2 command opt-in via `FOXCTL_V2_COMMANDS`.
   - Routed API agent spawn and daemon action handlers through `internal/v2/ports/api` in `internal/interfaces/web/api/agents.go` while preserving current behavior in v2 delegates.
   - Added handler-level routing tests:
     - `cmd/foxctl/cmd/agent_v2_routing_test.go`
@@ -689,7 +689,7 @@ Subagent Review
   - decision: `approved`
 - 2026-02-18: PR-16 partial decommission readiness implementation.
   - Added shared shadow sanitization + mutating opt-in:
-    - `AGENTCTL_V2_SHADOW_MUTATING` (default false)
+    - `FOXCTL_V2_SHADOW_MUTATING` (default false)
     - mutating shadow commands (`spawn`,`run`,`kill`) blocked unless explicitly enabled
   - Wired CLI/API/daemon command dispatchers to `NewRouterWithShadow(...)` with sanitized shadow flags.
   - Added parity routing tests for non-mutating shadow execution and mutating opt-in behavior:
@@ -698,7 +698,7 @@ Subagent Review
     - `internal/runtime/daemon/service_v2_routing_test.go`
   - Added explicit PR-16 parity-window and promotion thresholds in `docs/plans/v2-greenfield-bootstrap.md`.
 - 2026-02-18: Completed PR-16 v1 decommission readiness gates.
-  - Added v1-freeze command set parsing via `AGENTCTL_V2_FREEZE_V1_COMMANDS` in `internal/v2/ports/config/v2flags.go` (+ tests).
+  - Added v1-freeze command set parsing via `FOXCTL_V2_FREEZE_V1_COMMANDS` in `internal/v2/ports/config/v2flags.go` (+ tests).
   - Added freeze enforcement in `internal/v2/ports/router.go` so frozen commands fail fast with `ErrPolicyViolation` before either runner executes.
   - Wired CLI/API/daemon routers and dispatchers to pass freeze flags with shadow flags via `NewRouterWithShadowAndFreeze(...)`.
   - Added freeze-routing coverage in:
@@ -911,12 +911,12 @@ Subagent Review
   - findings: `none`
   - decision: `approved`
 - 2026-02-18: Completed PR-10 ask shadow validation plumbing.
-  - Added shadow command parsing via `AGENTCTL_V2_SHADOW_COMMANDS` in `internal/v2/ports/config/v2flags.go` (+ tests).
+  - Added shadow command parsing via `FOXCTL_V2_SHADOW_COMMANDS` in `internal/v2/ports/config/v2flags.go` (+ tests).
   - Added non-blocking-capable shadow execution contract in `internal/v2/ports/router.go` with `DispatchWithShadow`, `ShadowReport`, comparator support, and parity tests.
   - Wired CLI/API/daemon v2 routers to pass shadow configuration (`internal/v2/ports/{cli,api,daemon}/router.go`).
   - Added real CLI `agent ask` shadow validation hook in `cmd/foxctl/cmd/agent_ask_shadow.go` and called it from `runAgentAsk` after v1 ack/write.
   - Shadow run is side-effect safe (no second mailbox send) by using v2 ask service with an in-memory dispatcher and emits `agent.ask.shadow` observability events.
-  - Updated parity verification docs to include `AGENTCTL_V2_SHADOW_COMMANDS=ask` bootstrap.
+  - Updated parity verification docs to include `FOXCTL_V2_SHADOW_COMMANDS=ask` bootstrap.
   - Validated with `go test ./cmd/foxctl/cmd ./internal/v2/ports/... ./internal/v2/...`, `go test -tags=libsqlite3 ./...`, and `make check-doc-links`.
 - 2026-02-18:
   Subagent Review

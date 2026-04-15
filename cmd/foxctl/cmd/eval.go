@@ -950,7 +950,7 @@ func runSemanticSearchEvalMode(ctx context.Context, workspacePath, vaultPath, qu
 	if err != nil {
 		return nil, err
 	}
-	repoRoot, err := resolveAgentctlRepoRoot()
+	repoRoot, err := resolveFoxctlRepoRoot()
 	if err != nil {
 		return nil, err
 	}
@@ -1156,7 +1156,7 @@ func runRLMStagedEvalMode(ctx context.Context, cfg config.Config, workspacePath,
 	return paths, nil
 }
 
-func resolveAgentctlRepoRoot() (string, error) {
+func resolveFoxctlRepoRoot() (string, error) {
 	if _, file, _, ok := runtime.Caller(0); ok {
 		candidate := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
 		if _, err := os.Stat(filepath.Join(candidate, "skills", "code_semantic_search", "main.go")); err == nil {

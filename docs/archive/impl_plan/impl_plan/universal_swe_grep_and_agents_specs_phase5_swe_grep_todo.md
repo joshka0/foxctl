@@ -55,7 +55,7 @@ output contracts, manifest, and CLI surface.
 - [x] Ensure `foxctl run code/snippet_extract` works end-to-end:
   - Discovery via existing skill resolver (`skills_run.go` +
     `skill_helpers.go`).
-  - Execution via exec runner with `AGENTCTL_WORKSPACE` correctly set.
+  - Execution via exec runner with `FOXCTL_WORKSPACE` correctly set.
 - [x] Decide whether any dedicated CLI aliases (e.g. `foxctl code swe-grep`)
       are needed for developer UX; if added, they MUST be thin wrappers around
       the existing `run` path and reuse Protocol v1 envelopes.
@@ -84,7 +84,7 @@ reusing existing path validation and CAS rules.
 
 - [x] Use `skillslib.RunnerContext` + `policy.PathValidator` for all filesystem
       access:
-  - Derive workspace from `AGENTCTL_WORKSPACE` (runner environment).
+  - Derive workspace from `FOXCTL_WORKSPACE` (runner environment).
   - Validate each candidate `path` before opening files.
 - [ ] Map filesystem-related failures to the correct error codes:
   - Path escapes or blocked by `task_guard` / `file_guard` →

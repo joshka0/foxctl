@@ -142,11 +142,11 @@ func (s *Service) Create(ctx context.Context, opts backup.CreateOptions) (*backu
 
 	// Create manifest
 	manifest := &backup.Manifest{
-		Version:         BackupVersion,
-		CreatedAt:       time.Now().UTC(),
-		AgentctlVersion: buildinfo.Current().Version,
-		Components:      components,
-		Files:           files,
+		Version:       BackupVersion,
+		CreatedAt:     time.Now().UTC(),
+		FoxctlVersion: buildinfo.Current().Version,
+		Components:    components,
+		Files:         files,
 		Stats: backup.BackupStats{
 			TotalFiles:    len(files),
 			TotalSize:     totalSize,

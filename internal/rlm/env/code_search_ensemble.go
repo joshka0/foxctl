@@ -1019,9 +1019,9 @@ func (a *ReadOnlyAdapter) searchACAGuidance(ctx context.Context, query string, r
 		return nil, nil
 	}
 	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
-		strings.TrimSpace(os.Getenv("AGENTCTL_RLM_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	)
 	if vaultPath == "" {
 		return nil, nil

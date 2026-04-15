@@ -14,7 +14,7 @@ import (
 const relayTestFieldSep = "\x1f"
 
 // relayTestTmuxListFormat matches internal/runtime/terminal/tmuxbridge listFormat (describePane metadata line).
-var relayTestTmuxListFormat = "#{pane_id}" + relayTestFieldSep + "#{session_name}" + relayTestFieldSep + "#{window_index}" + relayTestFieldSep + "#{pane_index}" + relayTestFieldSep + "#{window_name}" + relayTestFieldSep + "#{pane_pid}" + relayTestFieldSep + "#{pane_width}" + relayTestFieldSep + "#{pane_height}" + relayTestFieldSep + "#{@name}" + relayTestFieldSep + "#{pane_current_path}" + relayTestFieldSep + "#{pane_current_command}" + relayTestFieldSep + "#{pane_active}" + relayTestFieldSep + "#{@agentctl_participant}" + relayTestFieldSep + "#{@agentctl_provider}" + relayTestFieldSep + "#{@agentctl_room_id}" + relayTestFieldSep + "#{@agentctl_wrapped}"
+var relayTestTmuxListFormat = "#{pane_id}" + relayTestFieldSep + "#{session_name}" + relayTestFieldSep + "#{window_index}" + relayTestFieldSep + "#{pane_index}" + relayTestFieldSep + "#{window_name}" + relayTestFieldSep + "#{pane_pid}" + relayTestFieldSep + "#{pane_width}" + relayTestFieldSep + "#{pane_height}" + relayTestFieldSep + "#{@name}" + relayTestFieldSep + "#{pane_current_path}" + relayTestFieldSep + "#{pane_current_command}" + relayTestFieldSep + "#{pane_active}" + relayTestFieldSep + "#{@foxctl_participant}" + relayTestFieldSep + "#{@foxctl_provider}" + relayTestFieldSep + "#{@foxctl_room_id}" + relayTestFieldSep + "#{@foxctl_wrapped}"
 
 // relayTmuxRecordingRunner implements tmuxbridge.Runner for tests: repeats list-sessions for
 // detectSocket, exact matches for pane probes and send-keys (asserting text + Enter delivery).

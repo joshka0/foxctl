@@ -32,8 +32,8 @@ const (
 	ArtifactTypeNarrative      = "narrative"
 
 	// defaultV2TurnsVectorDims is the local-testing default for v2 turns
-	// embeddings. Override with AGENTCTL_V2_TURNS_VECTOR_DIMS (preferred) or
-	// AGENTCTL_VECTOR_DIMS for provider-specific dimensions (e.g. Voyage).
+	// embeddings. Override with FOXCTL_V2_TURNS_VECTOR_DIMS (preferred) or
+	// FOXCTL_VECTOR_DIMS for provider-specific dimensions (e.g. Voyage).
 	defaultV2TurnsVectorDims = 768
 
 	defaultArtifactVersion        = "v1"
@@ -188,12 +188,12 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 }
 
 func hasDriverOverride() bool {
-	return os.Getenv("AGENTCTL_V2_TURNS_DB_DRIVER") != "" || os.Getenv("AGENTCTL_DB_DRIVER") != ""
+	return os.Getenv("FOXCTL_V2_TURNS_DB_DRIVER") != "" || os.Getenv("FOXCTL_DB_DRIVER") != ""
 }
 
 func hasVectorDimsOverride() bool {
-	return strings.TrimSpace(os.Getenv("AGENTCTL_V2_TURNS_VECTOR_DIMS")) != "" ||
-		strings.TrimSpace(os.Getenv("AGENTCTL_VECTOR_DIMS")) != ""
+	return strings.TrimSpace(os.Getenv("FOXCTL_V2_TURNS_VECTOR_DIMS")) != "" ||
+		strings.TrimSpace(os.Getenv("FOXCTL_VECTOR_DIMS")) != ""
 }
 
 // Close releases database resources.
@@ -2331,10 +2331,10 @@ func resolveVectorDimensions(cfg dbdriver.Config) int {
 }
 
 func defaultV2TurnsVectorDimensions() int {
-	if dims, ok := envPositiveInt("AGENTCTL_V2_TURNS_VECTOR_DIMS"); ok {
+	if dims, ok := envPositiveInt("FOXCTL_V2_TURNS_VECTOR_DIMS"); ok {
 		return dims
 	}
-	if dims, ok := envPositiveInt("AGENTCTL_VECTOR_DIMS"); ok {
+	if dims, ok := envPositiveInt("FOXCTL_VECTOR_DIMS"); ok {
 		return dims
 	}
 	return defaultV2TurnsVectorDims

@@ -5,12 +5,12 @@
 # FAST: Uses direct sqlite3 query instead of spawning foxctl process.
 #
 # Environment:
-#   AGENTCTL_TODO_ADVISOR_DISABLED - Set to "1" to disable
+#   FOXCTL_TODO_ADVISOR_DISABLED - Set to "1" to disable
 
 set -euo pipefail
 
 # Allow disabling
-if [[ "${AGENTCTL_TODO_ADVISOR_DISABLED:-}" == "1" ]]; then
+if [[ "${FOXCTL_TODO_ADVISOR_DISABLED:-}" == "1" ]]; then
   echo '{}'
   exit 0
 fi

@@ -65,13 +65,13 @@ func OpenMemoryInCache(ctx context.Context, cfg config.Config) (*memory.Store, f
 
 // StorePaths holds resolved paths for session skill operations.
 type StorePaths struct {
-	AgentctlHome string // ~/.foxctl or AGENTCTL_HOME
-	StorageRoot  string // ~/.foxctl/storage
-	CachePath    string // ~/.foxctl/cache
-	CASPath      string // ~/.foxctl/cas
-	ArchivesDir  string // ~/.foxctl/archives
-	PlansDir     string // ~/.claude/plans
-	ClaudeHome   string // ~/.claude
+	FoxctlHome  string // ~/.foxctl or FOXCTL_HOME
+	StorageRoot string // ~/.foxctl/storage
+	CachePath   string // ~/.foxctl/cache
+	CASPath     string // ~/.foxctl/cas
+	ArchivesDir string // ~/.foxctl/archives
+	PlansDir    string // ~/.claude/plans
+	ClaudeHome  string // ~/.claude
 }
 
 // ResolvePaths resolves all standard paths from config.
@@ -81,12 +81,12 @@ func ResolvePaths(cfg config.Config) StorePaths {
 	userHome, _ := os.UserHomeDir()
 	claudeHome := filepath.Join(userHome, ".claude")
 	return StorePaths{
-		AgentctlHome: home,
-		StorageRoot:  cfg.Storage.Root,
-		CachePath:    cfg.Paths.Cache,
-		CASPath:      cfg.Paths.CAS,
-		ArchivesDir:  filepath.Join(home, "archives"),
-		PlansDir:     filepath.Join(claudeHome, "plans"),
-		ClaudeHome:   claudeHome,
+		FoxctlHome:  home,
+		StorageRoot: cfg.Storage.Root,
+		CachePath:   cfg.Paths.Cache,
+		CASPath:     cfg.Paths.CAS,
+		ArchivesDir: filepath.Join(home, "archives"),
+		PlansDir:    filepath.Join(claudeHome, "plans"),
+		ClaudeHome:  claudeHome,
 	}
 }

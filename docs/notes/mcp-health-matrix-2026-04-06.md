@@ -1,23 +1,23 @@
 # MCP Health Matrix — 2026-04-06
 
-This note captures the current health of the focused `agentctl_*` MCP profiles after the retrieval, collaboration, and mobile debugging work.
+This note captures the current health of the focused `foxctl_*` MCP profiles after the retrieval, collaboration, and mobile debugging work.
 
 ## Summary
 
 | MCP profile | Status | Notes |
 |---|---|---|
-| `agentctl_retrieval` | healthy | Strongest surface. Optimized outputs, preview-first retrieval, structured shell, repo graph, semantic/context tools. |
-| `agentctl_context` | healthy | Context-plane and session tools are callable and useful. |
-| `agentctl_refactor` | healthy | Refactor scout and related code-intel tools are usable. |
-| `agentctl_room` | healthy | Durable room coordination works. |
-| `agentctl_mux` | healthy | tmux/zellij collaboration surface works. |
-| `agentctl_mobile` | healthy with environment limits | `mobile_ios` and `mobile_expo` are useful now; richer iOS UI paths still depend on `idb`. |
-| `agentctl_godot` | environment-bound | Requires a Godot project, export presets, and a running Godot bridge/editor where applicable. |
-| `agentctl_api` | environment-bound | Wrapper works; requires a real OpenAPI spec path or URL. |
+| `foxctl_retrieval` | healthy | Strongest surface. Optimized outputs, preview-first retrieval, structured shell, repo graph, semantic/context tools. |
+| `foxctl_context` | healthy | Context-plane and session tools are callable and useful. |
+| `foxctl_refactor` | healthy | Refactor scout and related code-intel tools are usable. |
+| `foxctl_room` | healthy | Durable room coordination works. |
+| `foxctl_mux` | healthy | tmux/zellij collaboration surface works. |
+| `foxctl_mobile` | healthy with environment limits | `mobile_ios` and `mobile_expo` are useful now; richer iOS UI paths still depend on `idb`. |
+| `foxctl_godot` | environment-bound | Requires a Godot project, export presets, and a running Godot bridge/editor where applicable. |
+| `foxctl_api` | environment-bound | Wrapper works; requires a real OpenAPI spec path or URL. |
 
 ## Healthy Profiles
 
-### `agentctl_retrieval`
+### `foxctl_retrieval`
 
 Current strengths:
 
@@ -41,7 +41,7 @@ Status:
 - Best overall MCP profile.
 - Good default for repo research and code retrieval.
 
-### `agentctl_context`
+### `foxctl_context`
 
 Current strengths:
 
@@ -52,7 +52,7 @@ Status:
 
 - Stable and practical.
 
-### `agentctl_refactor`
+### `foxctl_refactor`
 
 Current strengths:
 
@@ -66,7 +66,7 @@ Status:
 
 - Strong enough for guided refactor discovery and planning.
 
-### `agentctl_room`
+### `foxctl_room`
 
 Current strengths:
 
@@ -78,7 +78,7 @@ Status:
 
 - Healthy command-backed collaboration surface.
 
-### `agentctl_mux`
+### `foxctl_mux`
 
 Current strengths:
 
@@ -90,7 +90,7 @@ Status:
 
 ## Mobile Profile
 
-### `agentctl_mobile`
+### `foxctl_mobile`
 
 Current strengths:
 
@@ -118,7 +118,7 @@ Status:
 
 ## Environment-Bound Profiles
 
-### `agentctl_godot`
+### `foxctl_godot`
 
 Current limits:
 
@@ -130,7 +130,7 @@ Status:
 
 - Correctly wired, but only useful when the Godot environment is present.
 
-### `agentctl_api`
+### `foxctl_api`
 
 Current limits:
 
@@ -148,7 +148,7 @@ Status:
 
 ## Recommended Defaults
 
-- Use `agentctl_retrieval` as the default repo-research MCP.
-- Use `agentctl_mobile` for simulator/debug workflows.
-- Use `agentctl_room` and `agentctl_mux` for collaboration.
-- Treat `agentctl_godot` and `agentctl_api` as opt-in, environment-bound surfaces.
+- Use `foxctl_retrieval` as the default repo-research MCP.
+- Use `foxctl_mobile` for simulator/debug workflows.
+- Use `foxctl_room` and `foxctl_mux` for collaboration.
+- Treat `foxctl_godot` and `foxctl_api` as opt-in, environment-bound surfaces.

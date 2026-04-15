@@ -148,7 +148,7 @@ Risk:
 Avoid adding these to the default narrow MCP set:
 
 - broad web/browser tools
-- generic `agentctl_run`
+- generic `foxctl_run`
 - write/edit tools
 - task mutation tools
 - agent lifecycle tools

@@ -95,7 +95,7 @@ func OpenCollector(ctx context.Context, storageRoot, workspacePath, vaultPath st
 func TranscriptSummaryWorkerConfig(cfg platformcfg.Config, providerOverride, modelOverride string) *TranscriptSummaryWorker {
 	provider := strings.ToLower(strings.TrimSpace(providerOverride))
 	if provider == "" {
-		provider = strings.ToLower(strings.TrimSpace(os.Getenv("AGENTCTL_TRANSCRIPT_SUMMARY_PROVIDER")))
+		provider = strings.ToLower(strings.TrimSpace(os.Getenv("FOXCTL_TRANSCRIPT_SUMMARY_PROVIDER")))
 	}
 	if provider == "" {
 		provider = "lmstudio"
@@ -105,7 +105,7 @@ func TranscriptSummaryWorkerConfig(cfg platformcfg.Config, providerOverride, mod
 	}
 	model := strings.TrimSpace(modelOverride)
 	if model == "" {
-		model = strings.TrimSpace(os.Getenv("AGENTCTL_TRANSCRIPT_SUMMARY_MODEL"))
+		model = strings.TrimSpace(os.Getenv("FOXCTL_TRANSCRIPT_SUMMARY_MODEL"))
 	}
 	if model == "" {
 		model = strings.TrimSpace(cfg.LLM.ResolveModel(provider))
@@ -135,7 +135,7 @@ func resolveVaultPath(explicit string) string {
 	if value := strings.TrimSpace(explicit); value != "" {
 		return value
 	}
-	for _, key := range []string{"AGENTCTL_ACA_VAULT_PATH", "AGENTCTL_OBSIDIAN_VAULT_PATH", "AGENTCTL_RLM_VAULT_PATH"} {
+	for _, key := range []string{"FOXCTL_ACA_VAULT_PATH", "FOXCTL_OBSIDIAN_VAULT_PATH", "FOXCTL_RLM_VAULT_PATH"} {
 		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 			return value
 		}
@@ -144,7 +144,7 @@ func resolveVaultPath(explicit string) string {
 }
 
 func DefaultTranscriptHistoryScope() TranscriptHistoryScope {
-	if raw := strings.TrimSpace(os.Getenv("AGENTCTL_TRANSCRIPT_HISTORY_SCOPE")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("FOXCTL_TRANSCRIPT_HISTORY_SCOPE")); raw != "" {
 		if scope, err := ParseTranscriptHistoryScope(raw); err == nil {
 			return scope
 		}

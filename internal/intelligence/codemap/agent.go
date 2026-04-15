@@ -306,13 +306,13 @@ func buildCodemapSystemPrompt(toolInfos []ToolInfo) (string, error) {
 // applyEnvDefaults fills LLM config fields from environment defaults.
 func applyEnvDefaults(cfg engine.LLMChatConfig) engine.LLMChatConfig {
 	if strings.TrimSpace(cfg.Provider) == "" {
-		cfg.Provider = strings.TrimSpace(os.Getenv("AGENTCTL_LLM_PROVIDER"))
+		cfg.Provider = strings.TrimSpace(os.Getenv("FOXCTL_LLM_PROVIDER"))
 	}
 	if strings.TrimSpace(cfg.APIKey) == "" {
-		cfg.APIKey = strings.TrimSpace(os.Getenv("AGENTCTL_LLM_API_KEY"))
+		cfg.APIKey = strings.TrimSpace(os.Getenv("FOXCTL_LLM_API_KEY"))
 	}
 	if strings.TrimSpace(cfg.Model) == "" {
-		cfg.Model = strings.TrimSpace(os.Getenv("AGENTCTL_LLM_MODEL"))
+		cfg.Model = strings.TrimSpace(os.Getenv("FOXCTL_LLM_MODEL"))
 	}
 	return cfg
 }

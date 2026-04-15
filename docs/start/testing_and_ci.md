@@ -101,7 +101,7 @@ twice.
 Integration tests live in two places, both gated with `//go:build integration`:
 
 1. **`test/integration/`** – Full integration tests that may require network
-   access, LLM API keys (e.g., `AGENTCTL_LLM_API_KEY`, `GEMINI_API_KEY`), or
+   access, LLM API keys (e.g., `FOXCTL_LLM_API_KEY`, `GEMINI_API_KEY`), or
    external binaries. These test end-to-end workflows like agent spawning,
    symbol indexing, and the SWE Grep pipeline.
 

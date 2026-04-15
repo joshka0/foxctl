@@ -70,9 +70,9 @@ help:
         Note: this requires `skip_refine=false`.
 
     LLM configuration:
-      - AGENTCTL_LLM_PROVIDER (gemini|groq|openrouter|openai|anthropic)
-      - AGENTCTL_LLM_MODEL
-      - AGENTCTL_LLM_API_KEY
+      - FOXCTL_LLM_PROVIDER (gemini|groq|openrouter|openai|anthropic)
+      - FOXCTL_LLM_MODEL
+      - FOXCTL_LLM_API_KEY
     Provider-specific fallbacks:
       - GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY
 

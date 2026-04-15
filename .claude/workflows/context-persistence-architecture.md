@@ -142,7 +142,7 @@ Create `~/.foxctl/config.yaml`:
 llm:
   provider: openrouter  # or "gemini", "openai", "anthropic", "groq"
   model: anthropic/claude-haiku-4-5
-  # API key via environment variable: AGENTCTL_LLM_API_KEY
+  # API key via environment variable: FOXCTL_LLM_API_KEY
 
 storage:
   root: ~/.foxctl/storage
@@ -158,24 +158,24 @@ paths:
 # Add to ~/.zshrc or session
 
 # Option 1: OpenRouter (access to multiple models with one key)
-export AGENTCTL_LLM_PROVIDER=openrouter
-export AGENTCTL_LLM_MODEL=anthropic/claude-haiku-4-5
-export AGENTCTL_LLM_API_KEY=<your-openrouter-key>
+export FOXCTL_LLM_PROVIDER=openrouter
+export FOXCTL_LLM_MODEL=anthropic/claude-haiku-4-5
+export FOXCTL_LLM_API_KEY=<your-openrouter-key>
 
 # Option 2: Direct Anthropic API
-export AGENTCTL_LLM_PROVIDER=anthropic
-export AGENTCTL_LLM_MODEL=claude-haiku-4-5
-export AGENTCTL_LLM_API_KEY=<your-anthropic-key>
+export FOXCTL_LLM_PROVIDER=anthropic
+export FOXCTL_LLM_MODEL=claude-haiku-4-5
+export FOXCTL_LLM_API_KEY=<your-anthropic-key>
 
 # Option 3: Gemini
-export AGENTCTL_LLM_PROVIDER=gemini
-export AGENTCTL_LLM_MODEL=gemini-2.0-flash
-export AGENTCTL_LLM_API_KEY=<your-google-api-key>
+export FOXCTL_LLM_PROVIDER=gemini
+export FOXCTL_LLM_MODEL=gemini-2.0-flash
+export FOXCTL_LLM_API_KEY=<your-google-api-key>
 
 # Option 4: GROQ (fast inference)
-export AGENTCTL_LLM_PROVIDER=groq
-export AGENTCTL_LLM_MODEL=llama-3.1-70b-versatile
-export AGENTCTL_LLM_API_KEY=<your-groq-key>
+export FOXCTL_LLM_PROVIDER=groq
+export FOXCTL_LLM_MODEL=llama-3.1-70b-versatile
+export FOXCTL_LLM_API_KEY=<your-groq-key>
 ```
 
 ## Multi-Model Strategy

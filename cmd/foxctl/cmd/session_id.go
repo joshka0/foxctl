@@ -35,7 +35,7 @@ Supported providers:
   auto     - Try all providers in order (default)
 
 Agent ID is used to distinguish multiple agents in the same workspace.
-If not specified, defaults to AGENTCTL_AGENT_ID env var, or the detected provider name.
+If not specified, defaults to FOXCTL_AGENT_ID env var, or the detected provider name.
 
 Examples:
   foxctl session-id                           # Auto-detect from any provider
@@ -102,7 +102,7 @@ func resolveAgentID(flagValue, provider string) string {
 		return flagValue
 	}
 	// 2. Environment variable
-	if envID := os.Getenv("AGENTCTL_AGENT_ID"); envID != "" {
+	if envID := os.Getenv("FOXCTL_AGENT_ID"); envID != "" {
 		return envID
 	}
 	// 3. Default to provider name
@@ -115,7 +115,7 @@ func resolveAgentID(flagValue, provider string) string {
 // detectSessionAuto tries all providers in priority order
 func detectSessionAuto(workspace string) (sessionID, provider string, err error) {
 	// 1. Check env vars first (fastest)
-	if sid := os.Getenv("AGENTCTL_SESSION_ID"); sid != "" {
+	if sid := os.Getenv("FOXCTL_SESSION_ID"); sid != "" {
 		return sid, "foxctl", nil
 	}
 	if sid := os.Getenv("CLAUDE_SESSION_ID"); sid != "" {

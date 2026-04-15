@@ -68,7 +68,7 @@ type Store interface {
 }
 
 // Open opens or creates a context variable Store backed by a database at storageRoot/contextvar.db.
-// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_CONTEXTVAR_DB_DRIVER).
+// The database driver is selected via the dbdriver env var conventions (e.g., FOXCTL_CONTEXTVAR_DB_DRIVER).
 // It applies the necessary schema migrations and provides an sql-backed Store; the returned Store should be closed when no longer needed.
 func Open(ctx context.Context, storageRoot string) (Store, error) {
 	dbPath := filepath.Join(storageRoot, "contextvar.db")

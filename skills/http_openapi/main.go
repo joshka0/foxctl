@@ -460,7 +460,7 @@ func generateHint(code string, statusCode int) string {
 	switch code {
 	case "EAUTH":
 		if statusCode == 401 {
-			return "Authentication failed. Check your credentials (token, API key, or username/password). Set environment variables like AGENTCTL_BEARER_TOKEN or pass credentials in the auth parameter."
+			return "Authentication failed. Check your credentials (token, API key, or username/password). Set environment variables like FOXCTL_BEARER_TOKEN or pass credentials in the auth parameter."
 		}
 		if statusCode == 403 {
 			return "Authorization failed. You may not have permission to access this resource. Verify your API key has the required scopes."

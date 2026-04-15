@@ -4,8 +4,8 @@
 // Persistence Options:
 //
 // Events can be persisted in multiple ways:
-//   - NDJSON file (default): Fast append-only writes to $AGENTCTL_OBS_DIR/events/wide_events.ndjson
-//   - SQLite: Direct writes to $AGENTCTL_OBS_DIR/events.db for queryability
+//   - NDJSON file (default): Fast append-only writes to $FOXCTL_OBS_DIR/events/wide_events.ndjson
+//   - SQLite: Direct writes to $FOXCTL_OBS_DIR/events.db for queryability
 //   - Hybrid: NDJSON + background SQLite sync (recommended for high-value events)
 //
 // The hybrid approach provides the best of both worlds:

@@ -72,11 +72,11 @@ This plan is intentionally incremental and reversible.
 ## 3. Feature flags (for safe rollout)
 
 Environment flags:
-- `AGENTCTL_HOOKS_V1=0|1` (default 0 initially)
-- `AGENTCTL_ACTOR_SUPERVISOR=0|1` (default 0 initially)
-- `AGENTCTL_MAILBOX_WATCHER=0|1` (default 0 initially)
-- `AGENTCTL_SESSION_LINEAGE=0|1` (default 0 initially)
-- `AGENTCTL_PROGRESSIVE_MEMORY=0|1` (default 0 initially)
+- `FOXCTL_HOOKS_V1=0|1` (default 0 initially)
+- `FOXCTL_ACTOR_SUPERVISOR=0|1` (default 0 initially)
+- `FOXCTL_MAILBOX_WATCHER=0|1` (default 0 initially)
+- `FOXCTL_SESSION_LINEAGE=0|1` (default 0 initially)
+- `FOXCTL_PROGRESSIVE_MEMORY=0|1` (default 0 initially)
 
 ---
 
@@ -133,7 +133,7 @@ Each PR has:
 - Block overrides approve; last-wins updates behave
 
 **Rollback**
-- Keep `AGENTCTL_HOOKS_V1=0` default; dispatcher unused
+- Keep `FOXCTL_HOOKS_V1=0` default; dispatcher unused
 
 ---
 
@@ -190,7 +190,7 @@ Each PR has:
 - Per-actor concurrency = 1 enforced
 
 **Rollback**
-- Turn off `AGENTCTL_ACTOR_SUPERVISOR`
+- Turn off `FOXCTL_ACTOR_SUPERVISOR`
 
 ---
 
@@ -233,7 +233,7 @@ Each PR has:
 - StopRequested hook can block stopping and force another iteration (for engines that support iterative loop)
 
 **Rollback**
-- Keep dispatcher enabled but with empty config; or gate with `AGENTCTL_HOOKS_V1`
+- Keep dispatcher enabled but with empty config; or gate with `FOXCTL_HOOKS_V1`
 
 ---
 
@@ -241,7 +241,7 @@ Each PR has:
 **Scope**
 - sessions.db: add lineage columns + session_edges
 - mailbox: add session_id/agent_id/workspace_id columns; populate on send
-- runner: export `AGENTCTL_SESSION_ID/WORKSPACE/AGENT_ID` env vars to skills
+- runner: export `FOXCTL_SESSION_ID/WORKSPACE/AGENT_ID` env vars to skills
 - hooks: dispatcher always includes these in hook.Input
 
 **Files**
@@ -279,7 +279,7 @@ Each PR has:
 - Token estimator enforces budget threshold & triggers ContextBudgetExceeded hook
 
 **Rollback**
-- Keep `AGENTCTL_PROGRESSIVE_MEMORY=0` default; actor still works without it
+- Keep `FOXCTL_PROGRESSIVE_MEMORY=0` default; actor still works without it
 
 ---
 

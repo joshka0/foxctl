@@ -75,8 +75,8 @@ Source of truth: `internal/intelligence/indexing/semantic/provider.go`.
 
 Override order:
 
-1. `AGENTCTL_EMBEDDING_MODEL_<SCOPE>` (for example `AGENTCTL_EMBEDDING_MODEL_SYMBOLS`)
-2. `AGENTCTL_EMBEDDING_MODEL_CODE` (code scopes) / `AGENTCTL_EMBEDDING_MODEL_TEXT` (text scopes)
+1. `FOXCTL_EMBEDDING_MODEL_<SCOPE>` (for example `FOXCTL_EMBEDDING_MODEL_SYMBOLS`)
+2. `FOXCTL_EMBEDDING_MODEL_CODE` (code scopes) / `FOXCTL_EMBEDDING_MODEL_TEXT` (text scopes)
 3. Built-in defaults above
 
 ## Rerank Configuration
@@ -85,14 +85,14 @@ Source of truth: `internal/intelligence/indexing/rerank/config.go`.
 
 | Env var | Purpose |
 |--------|---------|
-| `AGENTCTL_RERANK_ENABLED` | Enable reranking |
-| `AGENTCTL_RERANK_TOP_K` | Candidates passed to reranker |
-| `AGENTCTL_RERANK_FINAL_K` | Final result count |
-| `AGENTCTL_RERANK_MODEL` | Reranker model (default `rerank-2.5`) |
-| `AGENTCTL_RERANK_SCORE_BLEND` | Blend original and rerank score |
-| `AGENTCTL_RERANK_TIMEOUT` | Request timeout |
-| `AGENTCTL_RERANK_RATE_LIMIT` | Requests/minute (`0` disables) |
-| `AGENTCTL_RERANK_RATE_LIMIT_WAIT` | Wait vs fail when throttled |
+| `FOXCTL_RERANK_ENABLED` | Enable reranking |
+| `FOXCTL_RERANK_TOP_K` | Candidates passed to reranker |
+| `FOXCTL_RERANK_FINAL_K` | Final result count |
+| `FOXCTL_RERANK_MODEL` | Reranker model (default `rerank-2.5`) |
+| `FOXCTL_RERANK_SCORE_BLEND` | Blend original and rerank score |
+| `FOXCTL_RERANK_TIMEOUT` | Request timeout |
+| `FOXCTL_RERANK_RATE_LIMIT` | Requests/minute (`0` disables) |
+| `FOXCTL_RERANK_RATE_LIMIT_WAIT` | Wait vs fail when throttled |
 
 ## Hybrid Scoring (BM25 + Vector)
 
@@ -121,7 +121,7 @@ foxctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge RE
 |--------|---------------|
 | Empty semantic matches for vector-only scopes | Missing embedding provider key (`VOYAGE_API_KEY` / `GEMINI_API_KEY`) |
 | Dimension mismatch | Model/store dimension drift; rebuild the affected scope using [docs/general/embedding-rebuilds.md](embedding-rebuilds.md) |
-| Rerank unavailable | Missing key or `AGENTCTL_RERANK_ENABLED` not enabled |
+| Rerank unavailable | Missing key or `FOXCTL_RERANK_ENABLED` not enabled |
 | Remote/global search unavailable | Missing Turso remote configuration |
 
 ## Related Docs

@@ -708,12 +708,12 @@ func TestSearchTranscriptHistoryAnswers_ScopeControlsWorkspaceVsFamily(t *testin
 }
 
 func TestDefaultTranscriptHistoryScope_FromEnv(t *testing.T) {
-	t.Setenv("AGENTCTL_TRANSCRIPT_HISTORY_SCOPE", "family")
+	t.Setenv("FOXCTL_TRANSCRIPT_HISTORY_SCOPE", "family")
 	if got := DefaultTranscriptHistoryScope(); got != TranscriptHistoryScopeFamily {
 		t.Fatalf("DefaultTranscriptHistoryScope() = %q want %q", got, TranscriptHistoryScopeFamily)
 	}
 
-	t.Setenv("AGENTCTL_TRANSCRIPT_HISTORY_SCOPE", "invalid")
+	t.Setenv("FOXCTL_TRANSCRIPT_HISTORY_SCOPE", "invalid")
 	if got := DefaultTranscriptHistoryScope(); got != TranscriptHistoryScopeAuto {
 		t.Fatalf("DefaultTranscriptHistoryScope() invalid = %q want %q", got, TranscriptHistoryScopeAuto)
 	}

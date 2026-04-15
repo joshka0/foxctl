@@ -214,7 +214,7 @@ type sqlStore struct {
 }
 
 // Open initializes and returns a Store backed by a database at root/tasks.db.
-// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_TASKS_DB_DRIVER).
+// The database driver is selected via the dbdriver env var conventions (e.g., FOXCTL_TASKS_DB_DRIVER).
 // It runs the package migrations, configures the connection pool for single-writer semantics
 // (primarily for SQLite), and returns a store whose Close will release the underlying resources.
 func Open(ctx context.Context, root string) (Store, error) {

@@ -32,8 +32,8 @@ const (
 	maxAllowedHandshakeTimeout = 15 * time.Second
 	maxAllowedOutputBytes      = 128 * 1024
 	maxAllowedInputBytes       = 1024 * 1024
-	envPluginPath              = "AGENTCTL_PLUGIN_PATH"
-	envOpenAPIPluginPath       = "AGENTCTL_OPENAPI_PLUGIN_PATH"
+	envPluginPath              = "FOXCTL_PLUGIN_PATH"
+	envOpenAPIPluginPath       = "FOXCTL_OPENAPI_PLUGIN_PATH"
 	pluginBinaryPrefix         = "foxctl-plugin-"
 )
 
@@ -486,17 +486,17 @@ func (m *Manager) buildEnv(info *pluginInfo, command string) []string {
 		pluginName = info.handshake.Name
 	}
 	if pluginName != "" {
-		env = append(env, fmt.Sprintf("AGENTCTL_PLUGIN_NAME=%s", pluginName))
+		env = append(env, fmt.Sprintf("FOXCTL_PLUGIN_NAME=%s", pluginName))
 	}
-	env = append(env, fmt.Sprintf("AGENTCTL_PLUGIN_COMMAND=%s", command))
+	env = append(env, fmt.Sprintf("FOXCTL_PLUGIN_COMMAND=%s", command))
 	if info.handshake != nil && info.handshake.Version != "" {
-		env = append(env, fmt.Sprintf("AGENTCTL_PLUGIN_VERSION=%s", info.handshake.Version))
+		env = append(env, fmt.Sprintf("FOXCTL_PLUGIN_VERSION=%s", info.handshake.Version))
 	}
 	if m.workspace != "" {
-		env = append(env, fmt.Sprintf("AGENTCTL_WORKSPACE=%s", m.workspace))
+		env = append(env, fmt.Sprintf("FOXCTL_WORKSPACE=%s", m.workspace))
 	}
 	if m.jobID != "" {
-		env = append(env, fmt.Sprintf("AGENTCTL_JOB_ID=%s", m.jobID))
+		env = append(env, fmt.Sprintf("FOXCTL_JOB_ID=%s", m.jobID))
 	}
 	return env
 }

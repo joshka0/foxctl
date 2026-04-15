@@ -135,9 +135,9 @@ func ResolveRunnableTool(ctx context.Context, name string, probeArgs ...string) 
 	return "", err
 }
 
-// AgentctlBin returns the path to the foxctl binary for subprocess calls.
-func AgentctlBin() string {
-	if bin := os.Getenv("AGENTCTL_BIN"); bin != "" {
+// FoxctlBin returns the path to the foxctl binary for subprocess calls.
+func FoxctlBin() string {
+	if bin := os.Getenv("FOXCTL_BIN"); bin != "" {
 		return bin
 	}
 	if projDir := os.Getenv("CLAUDE_PROJECT_DIR"); projDir != "" {
@@ -158,8 +158,8 @@ func AgentctlBin() string {
 	return "foxctl"
 }
 
-// AgentctlResult captures a decoded envelope with raw output.
-type AgentctlResult struct {
+// FoxctlResult captures a decoded envelope with raw output.
+type FoxctlResult struct {
 	Envelope envelope.Envelope
 	Stdout   []byte
 	Stderr   []byte
@@ -178,20 +178,20 @@ func (e DecodeError) Unwrap() error {
 	return e.Err
 }
 
-// RunAgentctlSkill executes "foxctl run <skill>" with optional JSON input and decodes the envelope.
-func RunAgentctlSkill(ctx context.Context, workspace, skill string, input []byte) (AgentctlResult, error) {
-	return RunAgentctlSkillWithArgs(ctx, workspace, skill, input, nil)
+// RunFoxctlSkill executes "foxctl run <skill>" with optional JSON input and decodes the envelope.
+func RunFoxctlSkill(ctx context.Context, workspace, skill string, input []byte) (FoxctlResult, error) {
+	return RunFoxctlSkillWithArgs(ctx, workspace, skill, input, nil)
 }
 
-// RunAgentctlSkillDecode executes "foxctl run <skill>" and decodes its data payload into dst.
-func RunAgentctlSkillDecode(ctx context.Context, workspace, skill string, input []byte, dst any) (AgentctlResult, error) {
-	return RunAgentctlSkillDecodeWithArgs(ctx, workspace, skill, input, nil, dst)
+// RunFoxctlSkillDecode executes "foxctl run <skill>" and decodes its data payload into dst.
+func RunFoxctlSkillDecode(ctx context.Context, workspace, skill string, input []byte, dst any) (FoxctlResult, error) {
+	return RunFoxctlSkillDecodeWithArgs(ctx, workspace, skill, input, nil, dst)
 }
 
-// RunAgentctlSkillWithArgs executes "foxctl run <skill>" with extra CLI args (e.g., --workspace).
-func RunAgentctlSkillWithArgs(ctx context.Context, workspace, skill string, input []byte, extraArgs []string) (AgentctlResult, error) {
+// RunFoxctlSkillWithArgs executes "foxctl run <skill>" with extra CLI args (e.g., --workspace).
+func RunFoxctlSkillWithArgs(ctx context.Context, workspace, skill string, input []byte, extraArgs []string) (FoxctlResult, error) {
 	if strings.TrimSpace(skill) == "" {
-		return AgentctlResult{}, fmt.Errorf("skill is required")
+		return FoxctlResult{}, fmt.Errorf("skill is required")
 	}
 
 	args := []string{"run", skill}
@@ -201,12 +201,12 @@ func RunAgentctlSkillWithArgs(ctx context.Context, workspace, skill string, inpu
 	var result CmdResult
 	if len(input) > 0 {
 		args = append(args, "--input-file", "-")
-		result = RunWithInput(ctx, workspace, AgentctlBin(), input, args...)
+		result = RunWithInput(ctx, workspace, FoxctlBin(), input, args...)
 	} else {
-		result = Run(ctx, workspace, AgentctlBin(), args...)
+		result = Run(ctx, workspace, FoxctlBin(), args...)
 	}
 
-	out := AgentctlResult{
+	out := FoxctlResult{
 		Stdout: result.Stdout,
 		Stderr: result.Stderr,
 	}
@@ -227,12 +227,12 @@ func RunAgentctlSkillWithArgs(ctx context.Context, workspace, skill string, inpu
 	return out, nil
 }
 
-// RunAgentctlSkillDecodeWithArgs executes "foxctl run <skill>" with extra CLI args and decodes its data payload into dst.
-func RunAgentctlSkillDecodeWithArgs(ctx context.Context, workspace, skill string, input []byte, extraArgs []string, dst any) (AgentctlResult, error) {
+// RunFoxctlSkillDecodeWithArgs executes "foxctl run <skill>" with extra CLI args and decodes its data payload into dst.
+func RunFoxctlSkillDecodeWithArgs(ctx context.Context, workspace, skill string, input []byte, extraArgs []string, dst any) (FoxctlResult, error) {
 	if dst == nil {
-		return AgentctlResult{}, fmt.Errorf("destination is required")
+		return FoxctlResult{}, fmt.Errorf("destination is required")
 	}
-	result, err := RunAgentctlSkillWithArgs(ctx, workspace, skill, input, extraArgs)
+	result, err := RunFoxctlSkillWithArgs(ctx, workspace, skill, input, extraArgs)
 	if err != nil {
 		return result, err
 	}

@@ -3,18 +3,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DEFAULT_AGENTCTL_BIN="${REPO_ROOT}/bin/foxctl-cgo"
+DEFAULT_FOXCTL_BIN="${REPO_ROOT}/bin/foxctl-cgo"
 DEFAULT_HEARTWOOD_ROOT="$(cd "${REPO_ROOT}/../heartwood" 2>/dev/null && pwd || true)"
 
-if [ -z "${AGENTCTL_BIN:-}" ]; then
-  if [ -x "${DEFAULT_AGENTCTL_BIN}" ]; then
-    AGENTCTL_BIN="${DEFAULT_AGENTCTL_BIN}"
+if [ -z "${FOXCTL_BIN:-}" ]; then
+  if [ -x "${DEFAULT_FOXCTL_BIN}" ]; then
+    FOXCTL_BIN="${DEFAULT_FOXCTL_BIN}"
   else
-    AGENTCTL_BIN="$(command -v foxctl || true)"
+    FOXCTL_BIN="$(command -v foxctl || true)"
   fi
 fi
-if [ -z "${AGENTCTL_BIN}" ]; then
-  echo "AGENTCTL_BIN is not set and no foxctl binary was found on PATH" >&2
+if [ -z "${FOXCTL_BIN}" ]; then
+  echo "FOXCTL_BIN is not set and no foxctl binary was found on PATH" >&2
   exit 1
 fi
 
@@ -42,7 +42,7 @@ echo "Heartwood host: ${HEARTWOOD_HOST}"
 echo "Heartwood db: ${HEARTWOOD_DB_NAME}"
 echo "Model: ${MODEL}"
 
-SPAWN="$("${AGENTCTL_BIN}" agent spawn \
+SPAWN="$("${FOXCTL_BIN}" agent spawn \
   --role coder \
   --name "${AGENT_NAME}" \
   --slug "${AGENT_SLUG}" \
@@ -55,7 +55,7 @@ echo "${SPAWN}"
 AGENT_ID="$(printf '%s' "${SPAWN}" | jq -r '.data.agent_id')"
 
 for _ in $(seq 1 15); do
-  if "${AGENTCTL_BIN}" agent info "${AGENT_ID}" >/dev/null 2>&1; then
+  if "${FOXCTL_BIN}" agent info "${AGENT_ID}" >/dev/null 2>&1; then
     break
   fi
   sleep 1
@@ -77,7 +77,7 @@ ALIAS=<alias> CITY=<city> INTENT=<intent>
 EOF
 )"
 
-ASK="$("${AGENTCTL_BIN}" agent ask "${AGENT_ID}" --question "${QUESTION}" --wait --timeout "${TIMEOUT}")"
+ASK="$("${FOXCTL_BIN}" agent ask "${AGENT_ID}" --question "${QUESTION}" --wait --timeout "${TIMEOUT}")"
 
 echo
 echo "${ASK}"

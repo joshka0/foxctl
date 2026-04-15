@@ -423,7 +423,7 @@ func regenerateCodemap(ctx context.Context, cfg config.Config, query, workspace 
 	}
 
 	var cm codemap.Codemap
-	result, err := executil.RunAgentctlSkillDecode(ctx, workspace, "codemap/generate", inputJSON, &cm)
+	result, err := executil.RunFoxctlSkillDecode(ctx, workspace, "codemap/generate", inputJSON, &cm)
 	if err != nil {
 		var decodeErr executil.DecodeError
 		if errors.As(err, &decodeErr) {

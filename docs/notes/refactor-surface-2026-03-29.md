@@ -63,7 +63,7 @@ Top shortlist:
 1. `cmd/foxctl/cmd/agent.go` — `runAgentWatch`
 2. `cmd/foxctl/cmd/agent.go` — `runAgentAskWithRoute`
 3. `cmd/foxctl/cmd/optimize_dataset_claude.go` — `buildClaudeSessionFromMessages`
-4. `cmd/agentctl_viewer/tui.go` — `model.renderStatusBar`
+4. `cmd/foxctl_viewer/tui.go` — `model.renderStatusBar`
 5. `cmd/foxctl/cmd/index.go` — file-level cluster
 
 Interpretation:

@@ -18,7 +18,7 @@ type IdentityFile struct {
 }
 
 // ResolveSessionID returns the session ID from environment variables or identity file.
-// Priority: explicit > AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
+// Priority: explicit > FOXCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
 // CURSOR_SESSION_ID > identity file > TERM_SESSION_ID.
 // Returns empty string if none found.
 func ResolveSessionID(ws, explicit string) string {
@@ -29,7 +29,7 @@ func ResolveSessionID(ws, explicit string) string {
 
 	// Environment variables in priority order
 	envVars := []string{
-		"AGENTCTL_SESSION_ID",
+		"FOXCTL_SESSION_ID",
 		"CLAUDE_SESSION_ID",
 		"OPENCODE_SESSION_ID",
 		"CURSOR_SESSION_ID",
@@ -58,7 +58,7 @@ func ResolveSessionIDFromIdentityFile(ws string) string {
 	}
 
 	// Resolve workspace using platform detection (handles sandbox scenarios)
-	// Uses AGENTCTL_WORKSPACE -> CLAUDE_PROJECT_DIR -> git root -> cwd
+	// Uses FOXCTL_WORKSPACE -> CLAUDE_PROJECT_DIR -> git root -> cwd
 	if ws == "" {
 		ws = workspace.Detect("")
 	}
@@ -96,7 +96,7 @@ func ResolveSessionIDFromIdentityFile(ws string) string {
 }
 
 // WorkspaceOrDefault returns the provided workspace or falls back to platform detection.
-// Uses AGENTCTL_WORKSPACE -> CLAUDE_PROJECT_DIR -> git root -> cwd -> defaultWorkspace
+// Uses FOXCTL_WORKSPACE -> CLAUDE_PROJECT_DIR -> git root -> cwd -> defaultWorkspace
 func WorkspaceOrDefault(ws, defaultWorkspace string) string {
 	if ws != "" {
 		return ws

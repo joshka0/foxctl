@@ -31,6 +31,6 @@ foxctl run mailbox --input '{"operation": "<op>", ...}'
 
 `hooks/file_guard` auto-checks conflicts before writes.
 
-Set mode: `AGENTCTL_FILE_GUARD_MODE=strict`
+Set mode: `FOXCTL_FILE_GUARD_MODE=strict`
 
 Full docs: `~/.foxctl/share/configs/skills/foxctl-reservations/Skill.md`

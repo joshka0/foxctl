@@ -27,23 +27,23 @@ request**.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENTCTL_OBS_DIR` | - | Root observability directory (required to enable) |
-| `AGENTCTL_OBS_SAMPLE_ERRORS` | `true` | Always sample error events |
-| `AGENTCTL_OBS_SLOW_THRESHOLD_MS` | `1000` | Slow request threshold (ms) |
-| `AGENTCTL_OBS_SAMPLE_RATE` | `0.05` | Random sample rate for healthy events (0.0-1.0) |
-| `AGENTCTL_OBS_ALWAYS_SAMPLE_SESSIONS` | - | Always sample specific session IDs (comma-separated) |
-| `AGENTCTL_OBS_ALWAYS_SAMPLE_WORKSPACES` | - | Always sample specific workspace IDs (comma-separated) |
-| `AGENTCTL_TRACE_ID` | auto | Propagate trace ID to child processes |
+| `FOXCTL_OBS_DIR` | - | Root observability directory (required to enable) |
+| `FOXCTL_OBS_SAMPLE_ERRORS` | `true` | Always sample error events |
+| `FOXCTL_OBS_SLOW_THRESHOLD_MS` | `1000` | Slow request threshold (ms) |
+| `FOXCTL_OBS_SAMPLE_RATE` | `0.05` | Random sample rate for healthy events (0.0-1.0) |
+| `FOXCTL_OBS_ALWAYS_SAMPLE_SESSIONS` | - | Always sample specific session IDs (comma-separated) |
+| `FOXCTL_OBS_ALWAYS_SAMPLE_WORKSPACES` | - | Always sample specific workspace IDs (comma-separated) |
+| `FOXCTL_TRACE_ID` | auto | Propagate trace ID to child processes |
 
 ### Enabling Wide Events
 
-Set `AGENTCTL_OBS_DIR` to enable observability:
+Set `FOXCTL_OBS_DIR` to enable observability:
 
 ```bash
-export AGENTCTL_OBS_DIR=~/.foxctl/observability
+export FOXCTL_OBS_DIR=~/.foxctl/observability
 ```
 
-Events are written to `$AGENTCTL_OBS_DIR/events/wide_events.ndjson`.
+Events are written to `$FOXCTL_OBS_DIR/events/wide_events.ndjson`.
 
 ## Event Schema
 
@@ -109,8 +109,8 @@ Each line in the NDJSON file is a `WideEvent`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `session_id` | string | From `AGENTCTL_SESSION_ID` |
-| `agent_id` | string | From `AGENTCTL_AGENT_ID` |
+| `session_id` | string | From `FOXCTL_SESSION_ID` |
+| `agent_id` | string | From `FOXCTL_AGENT_ID` |
 | `workspace_id` | string | Logical workspace |
 | `job_id` | string | Background job ID |
 
@@ -209,7 +209,7 @@ traceID := observability.TraceIDFromContext(ctx)
 
 // Propagate to child processes via env
 env := observability.PropagationEnv(ctx)
-// Returns: ["AGENTCTL_TRACE_ID=01JFXYZ..."]
+// Returns: ["FOXCTL_TRACE_ID=01JFXYZ..."]
 ```
 
 ### Custom Sampling
@@ -482,8 +482,8 @@ Example:
 The existing `SweGrepEvent` and other narrow events continue to work. Wide
 events provide additional comprehensive context. For skills that emit both:
 
-- Narrow events go to `$AGENTCTL_OBS_DIR/events/<skill_name>.ndjson`
-- Wide events go to `$AGENTCTL_OBS_DIR/events/wide_events.ndjson`
+- Narrow events go to `$FOXCTL_OBS_DIR/events/<skill_name>.ndjson`
+- Wide events go to `$FOXCTL_OBS_DIR/events/wide_events.ndjson`
 
 Eventually, narrow events may be deprecated in favor of the unified wide event
 format with domain-specific data in the `data` map.
@@ -502,7 +502,7 @@ Wide events are stored under the observability directory:
 ```
 
 The default observability path is `~/.foxctl/observability`. CLI/daemon loads
-`paths.observability` and sets `AGENTCTL_OBS_DIR` at startup unless it is already
+`paths.observability` and sets `FOXCTL_OBS_DIR` at startup unless it is already
 set in the environment.
 
 ### Backup Integration

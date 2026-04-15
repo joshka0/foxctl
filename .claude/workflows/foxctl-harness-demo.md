@@ -6,7 +6,7 @@ This document demonstrates how foxctl serves as a coordination harness for Claud
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     AGENTCTL HARNESS                         │
+│                     FOXCTL HARNESS                         │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ┌─────────────┐    Mailbox    ┌─────────────┐             │

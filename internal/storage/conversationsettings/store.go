@@ -93,7 +93,7 @@ type sqlStore struct {
 }
 
 // Open opens or creates the settings store at storageRoot/conversation_settings.db.
-// The database driver is selected via the dbdriver env var conventions (e.g. AGENTCTL_CONVERSATION_SETTINGS_DB_DRIVER).
+// The database driver is selected via the dbdriver env var conventions (e.g. FOXCTL_CONVERSATION_SETTINGS_DB_DRIVER).
 func Open(ctx context.Context, storageRoot string) (Store, error) {
 	dbPath := "conversation_settings.db"
 	db, closeFn, err := dbutil.OpenStoreDB(ctx, storageRoot, "CONVERSATION_SETTINGS", dbPath, migrate)

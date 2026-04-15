@@ -443,7 +443,7 @@ func ensureZellijRelayPlugin(ctx context.Context, explicit string) (string, erro
 		}
 		return path, nil
 	}
-	if envPath := strings.TrimSpace(os.Getenv("AGENTCTL_ZELLIJ_ROOM_PLUGIN")); envPath != "" {
+	if envPath := strings.TrimSpace(os.Getenv("FOXCTL_ZELLIJ_ROOM_PLUGIN")); envPath != "" {
 		path, err := filepath.Abs(envPath)
 		if err == nil {
 			if _, statErr := os.Stat(path); statErr == nil {

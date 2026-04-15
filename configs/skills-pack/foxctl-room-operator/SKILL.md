@@ -37,7 +37,7 @@ If the room is explicitly running the agile epic/milestone/story workflow, also 
 - use explicit, distinctive participant ids.
 - avoid generic actor ids like `coordinator`, `reviewer`, or `codex-coordinator` when multiple rooms or agent runtimes may coexist.
 - actor ids should include feature, branch, room, or workstream context, for example `feat-room-loop-codex`, `room-ci-reviewer-a`, or `runtime-owner-a`.
-- Room context and room membership are different things. `AGENTCTL_ROOM_ID`, a tmux/zellij session name, or a startup prompt only mean the pane knows about the room. They do **not** prove the participant is joined and routable.
+- Room context and room membership are different things. `FOXCTL_ROOM_ID`, a tmux/zellij session name, or a startup prompt only mean the pane knows about the room. They do **not** prove the participant is joined and routable.
 - Room durability and live execution are different things. A room can continue to hold epic/task/history state even when there are no panes or live participant runtimes.
 - When invoking **`room send`**, **prefer explicit `--to <participant>`** for anything meant for one person (so relay + inbox stay aligned), and **`--sender <you>`** whenever your pane context might not identify you (scripts, MCP, or outside tmux/zellij). Omit `--to` only for deliberate **broadcasts** to the rest of the room.
 - Start with `room status`, then `room inbox --actor <you>`.
@@ -84,7 +84,7 @@ Practical rule:
 - when the coordinator opens a milestone from one of those proposals, prefer `foxctl room milestone start <room-id> <epic-id> --proposal <proposal-id>` over retyping the proposal by hand
 
 If you are in an existing `zellij` pane and the environment is missing
-`AGENTCTL_ROOM_ID` / `AGENTCTL_PARTICIPANT`, you are not room-bound yet even if
+`FOXCTL_ROOM_ID` / `FOXCTL_PARTICIPANT`, you are not room-bound yet even if
 the pane lives in the same zellij session as other room participants. Bind the
 current pane explicitly before assuming relay or coordinator messages will land:
 

@@ -10,11 +10,11 @@ import (
 
 // Environment variable names for sampling configuration.
 const (
-	EnvSampleErrors           = "AGENTCTL_OBS_SAMPLE_ERRORS"            // Always sample errors (default: true)
-	EnvSlowThresholdMS        = "AGENTCTL_OBS_SLOW_THRESHOLD_MS"        // Slow request threshold (default: 1000)
-	EnvSampleRate             = "AGENTCTL_OBS_SAMPLE_RATE"              // Random sample rate 0.0-1.0 (default: 0.05)
-	EnvAlwaysSampleSessions   = "AGENTCTL_OBS_ALWAYS_SAMPLE_SESSIONS"   // Comma-separated session IDs
-	EnvAlwaysSampleWorkspaces = "AGENTCTL_OBS_ALWAYS_SAMPLE_WORKSPACES" // Comma-separated workspace IDs
+	EnvSampleErrors           = "FOXCTL_OBS_SAMPLE_ERRORS"            // Always sample errors (default: true)
+	EnvSlowThresholdMS        = "FOXCTL_OBS_SLOW_THRESHOLD_MS"        // Slow request threshold (default: 1000)
+	EnvSampleRate             = "FOXCTL_OBS_SAMPLE_RATE"              // Random sample rate 0.0-1.0 (default: 0.05)
+	EnvAlwaysSampleSessions   = "FOXCTL_OBS_ALWAYS_SAMPLE_SESSIONS"   // Comma-separated session IDs
+	EnvAlwaysSampleWorkspaces = "FOXCTL_OBS_ALWAYS_SAMPLE_WORKSPACES" // Comma-separated workspace IDs
 )
 
 // SampleDecision indicates whether an event should be sampled.

@@ -315,8 +315,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 			Reason:   fmt.Sprintf("Restored session snapshot from %s ago", snapshotAge),
 			Context:  contextStr,
 			Env: map[string]string{
-				"AGENTCTL_SESSION_RESTORED": "true",
-				"AGENTCTL_SNAPSHOT_ID":      snapshot.SnapshotID,
+				"FOXCTL_SESSION_RESTORED": "true",
+				"FOXCTL_SNAPSHOT_ID":      snapshot.SnapshotID,
 			},
 		},
 		SnapshotID:         snapshot.SnapshotID,
@@ -410,7 +410,7 @@ func runSemanticSearches(ctx context.Context, keyQuestions []string, workspace s
 				Snippet string `json:"snippet"`
 			} `json:"results"`
 		}
-		_, err = executil.RunAgentctlSkillDecode(searchCtx, workspace, "code/semantic_search", inputJSON, &data)
+		_, err = executil.RunFoxctlSkillDecode(searchCtx, workspace, "code/semantic_search", inputJSON, &data)
 		cancel()
 
 		if err != nil {
@@ -499,7 +499,7 @@ func searchRelevantMemories(ctx context.Context, query, workspace string, limit 
 					Type    string `json:"type"`
 				} `json:"results"`
 			}
-			_, err = executil.RunAgentctlSkillDecode(searchCtx, workspace, "code/semantic_search", inputJSON, &data)
+			_, err = executil.RunFoxctlSkillDecode(searchCtx, workspace, "code/semantic_search", inputJSON, &data)
 			cancel()
 			if err == nil {
 				for _, r := range data.Results {
@@ -1062,7 +1062,7 @@ func fetchAnchor(ctx context.Context, workspace, sessionID string) *AnchorInfo {
 		} `json:"anchor"`
 	}
 
-	_, err = executil.RunAgentctlSkillDecode(fetchCtx, workspace, "session/anchor", inputJSON, &data)
+	_, err = executil.RunFoxctlSkillDecode(fetchCtx, workspace, "session/anchor", inputJSON, &data)
 	if err != nil || !data.Found {
 		return nil
 	}

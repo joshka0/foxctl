@@ -14,20 +14,20 @@
 #   ]
 #
 # Environment:
-#   AGENTCTL_SUMMARIZE_DISABLED=1 - Skip LLM summarization
-#   AGENTCTL_SUMMARIZE_MODE - "windows" (default) or "summary"
-#   AGENTCTL_SUMMARIZE_BATCH_SIZE - Windows per batch (default: 5)
-#   AGENTCTL_BIN - Path to foxctl binary
+#   FOXCTL_SUMMARIZE_DISABLED=1 - Skip LLM summarization
+#   FOXCTL_SUMMARIZE_MODE - "windows" (default) or "summary"
+#   FOXCTL_SUMMARIZE_BATCH_SIZE - Windows per batch (default: 5)
+#   FOXCTL_BIN - Path to foxctl binary
 
 set -euo pipefail
 
 # Find foxctl binary
-AGENTCTL_BIN="${AGENTCTL_BIN:-}"
-if [[ -z "$AGENTCTL_BIN" ]]; then
+FOXCTL_BIN="${FOXCTL_BIN:-}"
+if [[ -z "$FOXCTL_BIN" ]]; then
   if command -v foxctl &>/dev/null; then
-    AGENTCTL_BIN="foxctl"
+    FOXCTL_BIN="foxctl"
   elif [[ -x "${CLAUDE_PROJECT_DIR:-}/bin/foxctl" ]]; then
-    AGENTCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/foxctl"
+    FOXCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/foxctl"
   else
     echo '{}'
     exit 0
@@ -103,26 +103,26 @@ save_input=$(jq -nc \
   --arg session_id "$session_id" \
   '{trigger: $trigger, workspace: $workspace, session_id: $session_id}')
 
-printf '%s' "$save_input" | "$AGENTCTL_BIN" run --daemon session/save --ephemeral --input-file - >/dev/null 2>&1 || true
+printf '%s' "$save_input" | "$FOXCTL_BIN" run --daemon session/save --ephemeral --input-file - >/dev/null 2>&1 || true
 
 # Bump anchor compaction count
 anchor_bump_input=$(jq -nc --arg ws "$workspace" '{operation: "bump_compaction", workspace: $ws, trigger: "pre_compact"}')
-printf '%s' "$anchor_bump_input" | "$AGENTCTL_BIN" run --daemon session/anchor --ephemeral --workspace "$workspace" --input-file - >/dev/null 2>/dev/null || true
+printf '%s' "$anchor_bump_input" | "$FOXCTL_BIN" run --daemon session/anchor --ephemeral --workspace "$workspace" --input-file - >/dev/null 2>/dev/null || true
 
 # Append custom instructions to anchor learnings
 if [[ -n "${custom_instructions:-}" && "${custom_instructions:-}" != "null" ]]; then
   clipped="${custom_instructions:0:500}"
   anchor_append_input=$(jq -nc --arg ws "$workspace" --arg sum "$clipped" '{operation: "append_learnings", workspace: $ws, trigger: "pre_compact", summary: $sum}')
-  printf '%s' "$anchor_append_input" | "$AGENTCTL_BIN" run --daemon session/anchor --ephemeral --workspace "$workspace" --input-file - >/dev/null 2>/dev/null || true
+  printf '%s' "$anchor_append_input" | "$FOXCTL_BIN" run --daemon session/anchor --ephemeral --workspace "$workspace" --input-file - >/dev/null 2>/dev/null || true
 fi
 
 # =============================================================================
 # 2. SUMMARIZE: Extract learnings via LLM (optional)
 # =============================================================================
 
-if [[ "${AGENTCTL_SUMMARIZE_DISABLED:-0}" != "1" && -n "$session_id" ]]; then
-  mode="${AGENTCTL_SUMMARIZE_MODE:-windows}"
-  batch_size="${AGENTCTL_SUMMARIZE_BATCH_SIZE:-5}"
+if [[ "${FOXCTL_SUMMARIZE_DISABLED:-0}" != "1" && -n "$session_id" ]]; then
+  mode="${FOXCTL_SUMMARIZE_MODE:-windows}"
+  batch_size="${FOXCTL_SUMMARIZE_BATCH_SIZE:-5}"
 
   summarize_input=$(jq -nc \
     --arg session_id "$session_id" \
@@ -130,7 +130,7 @@ if [[ "${AGENTCTL_SUMMARIZE_DISABLED:-0}" != "1" && -n "$session_id" ]]; then
     --argjson batch_size "$batch_size" \
     '{session_id: $session_id, mode: $mode, batch_size: $batch_size, force: false}')
 
-  result=$("$AGENTCTL_BIN" run --daemon session/summarize --ephemeral --input "$summarize_input" 2>/dev/null) || true
+  result=$("$FOXCTL_BIN" run --daemon session/summarize --ephemeral --input "$summarize_input" 2>/dev/null) || true
 
   if [[ -n "$result" ]]; then
     if [[ "$mode" == "windows" ]]; then

@@ -1,4 +1,4 @@
-// Command agentctl_web runs the foxctl web server.
+// Command foxctl_web runs the foxctl web server.
 //
 // This server provides:
 //   - REST API for jobs, CAS, skills, and other foxctl data
@@ -7,7 +7,7 @@
 //
 // Usage:
 //
-//	agentctl_web [flags]
+//	foxctl_web [flags]
 //
 // Flags:
 //
@@ -82,7 +82,7 @@ func main() {
 		Writer: writer,
 	}).With().
 		Timestamp().
-		Str("service", "agentctl_web").
+		Str("service", "foxctl_web").
 		Logger()
 
 	// Create server
@@ -114,7 +114,7 @@ func main() {
 			Str("addr", addr).
 			Bool("dev_cors", devCORS).
 			Str("ui_dir", uiDir).
-			Msg("agentctl_web listening")
+			Msg("foxctl_web listening")
 
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Fatal().Err(err).Msg("http server failed")

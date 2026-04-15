@@ -224,7 +224,7 @@ summaries and package/repo rollups.
 │   ├── foxctl-mail/
 │   │   └── main.go
 │   │         └─ Sends messages to agent inboxes for human-in-the-loop communication with Claude Code se...
-│   ├── agentctl_viewer/
+│   ├── foxctl_viewer/
 │   │   ├── actions.go
 │   │   │     └─ Defines foxctl viewer actions, handling CLI commands, event processing, and state man...
 │   │   ├── help.go
@@ -245,7 +245,7 @@ summaries and package/repo rollups.
 │   │   │     └─ Provides utility functions for foxctl viewer, including session management and data h...
 │   │   └── views.go
 │   │         └─ Manages semantic search indexing with vector embeddings, BM25 scoring, and hybrid retri...
-│   ├── agentctl_web/
+│   ├── foxctl_web/
 │   │   ├── api_handlers.go
 │   │   │     └─ Handles semantic search indexing with vector embeddings, BM25 scoring, and hybrid retri...
 │   │   ├── data.go
@@ -280,7 +280,7 @@ summaries and package/repo rollups.
 │   ├── opencode/
 │   │   └── plugin/
 │   │       └── foxctl.ts
-│   │             └─ Configures AgentctlPlugin for semantic search indexing, enabling query parsing, vector ...
+│   │             └─ Configures FoxctlPlugin for semantic search indexing, enabling query parsing, vector ...
 │   ├── opencode-hooks/
 │   │   ├── advisors/
 │   │   │   └── skill-advisor.ts
@@ -301,7 +301,7 @@ summaries and package/repo rollups.
 │   │   │     └─ Defines OpenCode plugin hooks (tool.execute.before/after), integrating TodoContinuation...
 │   │   └── lib/
 │   │       └── foxctl.ts
-│   │             └─ Wraps foxctl CLI for OpenCode plugins, exposing typed interfaces (AgentctlResult, Run...
+│   │             └─ Wraps foxctl CLI for OpenCode plugins, exposing typed interfaces (FoxctlResult, Run...
 │   ├── skills/
 │   │   ├── dev-docs/
 │   │   │   └── Skill.md
@@ -2601,7 +2601,7 @@ summaries and package/repo rollups.
 │   │   │     └─ Implements session/turns skill for querying turn patterns, using Input, Output, TurnRes...
 │   │   └── main_test.go
 │   │         └─ Tests session turn handling with TestCommand, TestInput/Output serialization, and field...
-│   ├── setup_agentctl_mode/
+│   ├── setup_foxctl_mode/
 │   │   ├── main.go
 │   │   │     └─ Configures foxctl mode handling, managing Input, Output, and ModeValue parameters.
 │   │   └── main_test.go

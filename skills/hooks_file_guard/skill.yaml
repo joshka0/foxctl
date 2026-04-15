@@ -77,6 +77,6 @@ capabilities:
     - type: workdir
   pure: false
 env:
-  - name: AGENTCTL_FILE_GUARD_MODE
+  - name: FOXCTL_FILE_GUARD_MODE
     description: "Mode: 'advisory' (default) warns, 'strict' blocks on conflicts"
     default: "advisory"

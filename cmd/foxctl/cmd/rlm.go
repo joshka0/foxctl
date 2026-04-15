@@ -140,10 +140,10 @@ func chooseRLMRunner(
 		return rlm.LLMRunner{
 			Tools: adapter,
 			Config: rlm.LLMConfig{
-				Provider:       firstNonEmpty(llmProvider, os.Getenv("AGENTCTL_RLM_LLM_PROVIDER"), "lmstudio"),
-				Model:          firstNonEmpty(llmModel, os.Getenv("AGENTCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
-				BaseURL:        firstNonEmpty(llmBaseURL, os.Getenv("AGENTCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
-				APIKey:         firstNonEmpty(llmAPIKey, os.Getenv("AGENTCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
+				Provider:       firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
+				Model:          firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
+				BaseURL:        firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
+				APIKey:         firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
 				Timeout:        llmTimeout,
 				MaxIterations:  task.MaxIterations,
 				RequireToolUse: requireToolUse,

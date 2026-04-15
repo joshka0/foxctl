@@ -34,8 +34,8 @@ Use these commands for the common suites:
 
 The wrappers use:
 
-- `AGENTCTL_STORAGE_ROOT` if set
-- `AGENTCTL_VAULT_PATH` if set, otherwise `~/.foxctl/templates/obsidian-vault`
+- `FOXCTL_STORAGE_ROOT` if set
+- `FOXCTL_VAULT_PATH` if set, otherwise `~/.foxctl/templates/obsidian-vault`
 - `--policy-file <checked-in policy>` internally
 
 ## Checked-In Suites
@@ -132,7 +132,7 @@ To refresh these numbers:
 
 Examples:
 
-- `AGENTCTL_STORAGE_ROOT=... AGENTCTL_VAULT_PATH=... bash ./scripts/eval_retrieval_agentctl.sh --save --save-dir /tmp/retrieval-docs`
+- `FOXCTL_STORAGE_ROOT=... FOXCTL_VAULT_PATH=... bash ./scripts/eval_retrieval_foxctl.sh --save --save-dir /tmp/retrieval-docs`
 - `JIDO_WORKSPACE=/path/to/jido bash ./scripts/eval_retrieval_jido.sh --save --save-dir /tmp/retrieval-docs`
 - `PRAZE_WORKSPACE=/path/to/praze bash ./scripts/eval_retrieval_praze.sh --save --save-dir /tmp/retrieval-docs`
 
@@ -140,7 +140,7 @@ Examples:
 
 To turn threshold misses into a non-zero exit:
 
-- `bash ./scripts/eval_retrieval_agentctl.sh --fail-on-alerts`
+- `bash ./scripts/eval_retrieval_foxctl.sh --fail-on-alerts`
 
 The command also supports:
 

@@ -122,7 +122,7 @@ type Trajectory struct {
 	UpdatedAt time.Time `json:"updated_at"`
 
 	// SessionID links to the AI coding tool session that created this trajectory.
-	// Supports Claude Code, OpenCode, Cursor, and other tools via AGENTCTL_SESSION_ID.
+	// Supports Claude Code, OpenCode, Cursor, and other tools via FOXCTL_SESSION_ID.
 	SessionID string `json:"session_id,omitempty"`
 }
 

@@ -242,7 +242,7 @@ foxctl watch tests \
   - When safe, execute `command` as a child process with:
     - Working directory = workspace root.
     - Inherited environment (plus any foxctl-specific vars, e.g.
-      `AGENTCTL_WORKSPACE`).
+      `FOXCTL_WORKSPACE`).
   - Capture:
     - Exit code.
     - Start and end timestamps.
@@ -524,7 +524,7 @@ To avoid saturating CPU from frequent test runs, implementations MUST:
 
 5. **Harness Integration**
    - Provide an example `.foxctl/test-watch.yaml` in the harness repo.
-   - Document the workflow in `AGENTCTL.md`.
+   - Document the workflow in `FOXCTL.md`.
 
 6. **Future Enhancements**
    - Optional history of runs (`test_runs` table).

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_URL="${AGENTCTL_GUI_API_URL:-http://localhost:8090}"
+API_URL="${FOXCTL_GUI_API_URL:-http://localhost:8090}"
 LMSTUDIO_URL="${LMSTUDIO_BASE_URL:-http://127.0.0.1:1234/v1}"
 WORKSPACE_PATH="${1:-$PWD}"
 JIDO_REPO="${JIDO_REPO:-$HOME/repos/githubs/jido}"
-JIDO_SOCKET="${AGENTCTL_JIDO_SOCKET:-/tmp/foxctl-jido.sock}"
+JIDO_SOCKET="${FOXCTL_JIDO_SOCKET:-/tmp/foxctl-jido.sock}"
 ROOM_ID="${ROOM_ID:-jido-tick-room}"
 ROOM_TITLE="${ROOM_TITLE:-Jido Tick Bridge E2E}"
 ISSUE_ID="${ISSUE_ID:-jido-tick-issue-1}"
@@ -88,13 +88,13 @@ if [ ! -S "${JIDO_SOCKET}" ]; then
     echo "Jido repo not found: ${JIDO_REPO}" >&2
     exit 1
   fi
-  AGENTCTL_BIN="${AGENTCTL_BIN:-$(cd "$(dirname "$0")/.." && pwd)/bin/foxctl}"
+  FOXCTL_BIN="${FOXCTL_BIN:-$(cd "$(dirname "$0")/.." && pwd)/bin/foxctl}"
   echo "Starting Jido bridge via mix in ${JIDO_REPO}"
   (
     cd "${JIDO_REPO}"
-    AGENTCTL_JIDO_SOCKET="${JIDO_SOCKET}" \
-    AGENTCTL_WORKSPACE="${WORKSPACE_PATH}" \
-    AGENTCTL_BIN="${AGENTCTL_BIN}" \
+    FOXCTL_JIDO_SOCKET="${JIDO_SOCKET}" \
+    FOXCTL_WORKSPACE="${WORKSPACE_PATH}" \
+    FOXCTL_BIN="${FOXCTL_BIN}" \
     mix jido.foxctl.bridge --quiet
   ) >"${BRIDGE_LOG}" 2>&1 &
   bridge_pid=$!

@@ -76,9 +76,9 @@
 ```bash
 # .claude/hooks/live-index.sh
 # Change from:
-embed_queue="${AGENTCTL_EMBED_QUEUE:-0}"
+embed_queue="${FOXCTL_EMBED_QUEUE:-0}"
 # To:
-embed_queue="${AGENTCTL_EMBED_QUEUE:-1}"
+embed_queue="${FOXCTL_EMBED_QUEUE:-1}"
 ```
 
 #### 1.2 Add background embedding worker
@@ -496,14 +496,14 @@ Add to `.claude/hooks/task-embed.sh`:
 ```bash
 #!/bin/bash
 # Triggered on task completion to embed gotchas/notes
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
 input=$(cat)
 
 operation=$(echo "$input" | jq -r '.tool_input.operation // empty')
 task_id=$(echo "$input" | jq -r '.tool_input.complete.id // .tool_input.update.id // empty')
 
 if [[ "$operation" == "complete" || "$operation" == "update" ]] && [[ -n "$task_id" ]]; then
-    "$AGENTCTL_BIN" run embedding/tasks --input "{\"scope\": \"task\", \"name\": \"$task_id\"}" &
+    "$FOXCTL_BIN" run embedding/tasks --input "{\"scope\": \"task\", \"name\": \"$task_id\"}" &
 fi
 
 echo '{"decision": "approve"}'
@@ -530,7 +530,7 @@ Create `.claude/hooks/memory-embed.sh`:
 # Triggered when memories are updated
 # Refreshes embeddings for modified memories
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
 input=$(cat)
 
 # Extract memory operation from hook input
@@ -539,7 +539,7 @@ operation=$(echo "$input" | jq -r '.tool_input.operation // empty')
 if [[ "$operation" == "set" || "$operation" == "append" ]]; then
     name=$(echo "$input" | jq -r '.tool_input.name // empty')
     if [[ -n "$name" ]]; then
-        "$AGENTCTL_BIN" run embedding/refresh --input "{\"scope\": \"memory\", \"name\": \"$name\"}" &
+        "$FOXCTL_BIN" run embedding/refresh --input "{\"scope\": \"memory\", \"name\": \"$name\"}" &
     fi
 fi
 
@@ -680,9 +680,9 @@ Tests gracefully skip when credentials are not set.
 
 | Variable                   | Default | Description                    |
 | -------------------------- | ------- | ------------------------------ |
-| `AGENTCTL_EMBED_QUEUE`     | `1`     | Enable embedding queue         |
-| `AGENTCTL_SEMANTIC_SEARCH` | `1`     | Enable unified semantic search |
-| `AGENTCTL_CONTEXT_HINTS`   | `1`     | Include session context hints  |
+| `FOXCTL_EMBED_QUEUE`     | `1`     | Enable embedding queue         |
+| `FOXCTL_SEMANTIC_SEARCH` | `1`     | Enable unified semantic search |
+| `FOXCTL_CONTEXT_HINTS`   | `1`     | Include session context hints  |
 | `GEMINI_API_KEY`           | -       | Required for embeddings        |
 | `TURSO_DATABASE_URL`       | -       | Turso database URL (overrides config) |
 | `TURSO_AUTH_TOKEN`         | -       | Turso authentication token     |

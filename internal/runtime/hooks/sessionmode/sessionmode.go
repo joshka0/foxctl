@@ -89,17 +89,17 @@ func anchorPath(sessionID string) string {
 }
 
 func modeDir() string {
-	agentctlHome := strings.TrimSpace(os.Getenv("AGENTCTL_HOME"))
-	if agentctlHome == "" {
+	foxctlHome := strings.TrimSpace(os.Getenv("FOXCTL_HOME"))
+	if foxctlHome == "" {
 		home, err := userHomeDir()
 		switch {
 		case err == nil && strings.TrimSpace(home) != "":
-			agentctlHome = filepath.Join(home, ".foxctl")
+			foxctlHome = filepath.Join(home, ".foxctl")
 		default:
-			agentctlHome = filepath.Join(os.TempDir(), "foxctl")
+			foxctlHome = filepath.Join(os.TempDir(), "foxctl")
 		}
 	}
-	return filepath.Join(agentctlHome, "cache", "session-modes")
+	return filepath.Join(foxctlHome, "cache", "session-modes")
 }
 
 func readModeTimestamp(path string) (int64, bool) {

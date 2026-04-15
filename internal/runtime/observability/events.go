@@ -17,7 +17,7 @@ import (
 )
 
 // EnvObsDir is the environment variable for the observability directory.
-const EnvObsDir = "AGENTCTL_OBS_DIR"
+const EnvObsDir = "FOXCTL_OBS_DIR"
 
 // obsDir caches the resolved observability directory.
 var (
@@ -59,8 +59,8 @@ func SetObsDirForTesting(dir string) {
 	obsDirSet = true
 }
 
-// WriteEvent appends an NDJSON-encoded event to $AGENTCTL_OBS_DIR/events/<name>.ndjson.
-// If AGENTCTL_OBS_DIR is unset or empty, this is a no-op.
+// WriteEvent appends an NDJSON-encoded event to $FOXCTL_OBS_DIR/events/<name>.ndjson.
+// If FOXCTL_OBS_DIR is unset or empty, this is a no-op.
 // Errors are logged and returned to the caller; callers may choose to ignore them
 // since observability is typically best-effort.
 // The function ignores context cancellation to avoid dropping terminal events.

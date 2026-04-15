@@ -31,7 +31,7 @@ func installFSLsSkill(t *testing.T, cfg config.Config) {
 	installSkillBinary(t, binaryPath, "./skills/fs_ls")
 }
 
-func buildAgentctlBinary(t *testing.T) string {
+func buildFoxctlBinary(t *testing.T) string {
 	t.Helper()
 	destDir := t.TempDir()
 	bin := filepath.Join(destDir, "foxctl")
@@ -64,7 +64,7 @@ func TestFsReadSkillChainsThroughBash(t *testing.T) {
 	installFSLsSkill(t, cfg)
 	installFSReadSkill(t, cfg)
 
-	agentctlBin := buildAgentctlBinary(t)
+	foxctlBin := buildFoxctlBinary(t)
 
 	workdir := t.TempDir()
 	sample := filepath.Join(workdir, "chain.txt")
@@ -76,9 +76,9 @@ func TestFsReadSkillChainsThroughBash(t *testing.T) {
 	script := `
 set -euo pipefail
 python3 -c 'import json,os; print(json.dumps({"path": os.environ["WORKDIR"]}))' \
-  | "$AGENTCTL_BIN" skills run fs/ls --workspace "$WORKDIR" --input-file - \
+  | "$FOXCTL_BIN" skills run fs/ls --workspace "$WORKDIR" --input-file - \
   | python3 -c 'import json,sys; data=json.load(sys.stdin); path=data["data"]["preview"][0]["path"]; print(json.dumps({"path": path, "max_bytes": 128}))' \
-  | "$AGENTCTL_BIN" skills run fs/read --workspace "$WORKDIR" --input-file -
+  | "$FOXCTL_BIN" skills run fs/read --workspace "$WORKDIR" --input-file -
 `
 	cmd := exec.Command("bash", "-lc", script)
 	cmd.Dir = repoRoot(t)
@@ -86,7 +86,7 @@ python3 -c 'import json,os; print(json.dumps({"path": os.environ["WORKDIR"]}))' 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	env := append(os.Environ(),
-		fmt.Sprintf("AGENTCTL_BIN=%s", agentctlBin),
+		fmt.Sprintf("FOXCTL_BIN=%s", foxctlBin),
 		fmt.Sprintf("WORKDIR=%s", workdir),
 	)
 	cmd.Env = env

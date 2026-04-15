@@ -356,20 +356,20 @@ func withTemporaryVaultEnv(vaultPath string, fn func()) {
 		fn()
 		return
 	}
-	prevACA, hasACA := os.LookupEnv("AGENTCTL_ACA_VAULT_PATH")
-	prevObs, hasObs := os.LookupEnv("AGENTCTL_OBSIDIAN_VAULT_PATH")
-	_ = os.Setenv("AGENTCTL_ACA_VAULT_PATH", vaultPath)
-	_ = os.Setenv("AGENTCTL_OBSIDIAN_VAULT_PATH", vaultPath)
+	prevACA, hasACA := os.LookupEnv("FOXCTL_ACA_VAULT_PATH")
+	prevObs, hasObs := os.LookupEnv("FOXCTL_OBSIDIAN_VAULT_PATH")
+	_ = os.Setenv("FOXCTL_ACA_VAULT_PATH", vaultPath)
+	_ = os.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", vaultPath)
 	defer func() {
 		if hasACA {
-			_ = os.Setenv("AGENTCTL_ACA_VAULT_PATH", prevACA)
+			_ = os.Setenv("FOXCTL_ACA_VAULT_PATH", prevACA)
 		} else {
-			_ = os.Unsetenv("AGENTCTL_ACA_VAULT_PATH")
+			_ = os.Unsetenv("FOXCTL_ACA_VAULT_PATH")
 		}
 		if hasObs {
-			_ = os.Setenv("AGENTCTL_OBSIDIAN_VAULT_PATH", prevObs)
+			_ = os.Setenv("FOXCTL_OBSIDIAN_VAULT_PATH", prevObs)
 		} else {
-			_ = os.Unsetenv("AGENTCTL_OBSIDIAN_VAULT_PATH")
+			_ = os.Unsetenv("FOXCTL_OBSIDIAN_VAULT_PATH")
 		}
 	}()
 	fn()

@@ -61,9 +61,9 @@ func indexEmbeddingProviderHint(cfg config.Config) string {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider))
 	switch provider {
 	case "openai_compat", "openai-compatible", "lmstudio":
-		return "set AGENTCTL_EMBEDDING_PROVIDER=openai_compat with AGENTCTL_EMBEDDING_MODEL and AGENTCTL_EMBEDDING_BASE_URL for embeddings"
+		return "set FOXCTL_EMBEDDING_PROVIDER=openai_compat with FOXCTL_EMBEDDING_MODEL and FOXCTL_EMBEDDING_BASE_URL for embeddings"
 	default:
-		return "set AGENTCTL_EMBEDDING_PROVIDER=openai_compat or VOYAGE_API_KEY / GEMINI_API_KEY for embeddings"
+		return "set FOXCTL_EMBEDDING_PROVIDER=openai_compat or VOYAGE_API_KEY / GEMINI_API_KEY for embeddings"
 	}
 }
 
@@ -220,7 +220,7 @@ Scopes (model selection via semantic.ScopeModelRecommendation):
   tasks     - Task descriptions (voyage-3.5)
   sessions  - Session context (voyage-3.5)
 
-Override with AGENTCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.
+Override with FOXCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.
 Provider selection follows the configured embedding provider and supports
 OpenAI-compatible endpoints as well as Voyage/Gemini.
 
@@ -264,7 +264,7 @@ recommended models for each scope (see semantic.ScopeModelRecommendation):
 
 Provider selection follows the configured embedding provider and supports
 OpenAI-compatible endpoints as well as Voyage/Gemini.
-Override with AGENTCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.`,
+Override with FOXCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.`,
 		Example: `  # Index everything (all scopes)
   foxctl index init
 

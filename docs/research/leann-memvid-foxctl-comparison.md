@@ -370,7 +370,7 @@ foxctl + LEANN:
 1. **LEANN for symbols** (highest impact)
    - Symbol indexing is the largest embedding consumer
    - Acceptable latency for code search (200-500ms)
-   - Start with optional flag: `AGENTCTL_SYMBOL_INDEX=leann`
+   - Start with optional flag: `FOXCTL_SYMBOL_INDEX=leann`
 
 2. **LEANN for session archives** (medium impact)
    - Archive sessions older than 30 days

@@ -386,8 +386,8 @@ func TestConfig_SaveCreatesDirectory(t *testing.T) {
 	}
 
 	// Verify .foxctl dir was created
-	agentctlDir := filepath.Join(workspaceRoot, ".foxctl")
-	if _, err := os.Stat(agentctlDir); err != nil {
+	foxctlDir := filepath.Join(workspaceRoot, ".foxctl")
+	if _, err := os.Stat(foxctlDir); err != nil {
 		t.Errorf("expected .foxctl dir to exist: %v", err)
 	}
 }

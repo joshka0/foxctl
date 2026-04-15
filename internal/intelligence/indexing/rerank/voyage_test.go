@@ -385,11 +385,11 @@ func TestNoOpProvider(t *testing.T) {
 }
 
 func TestConfig_FromEnv(t *testing.T) {
-	t.Setenv("AGENTCTL_RERANK_ENABLED", "true")
-	t.Setenv("AGENTCTL_RERANK_TOP_K", "100")
-	t.Setenv("AGENTCTL_RERANK_FINAL_K", "20")
-	t.Setenv("AGENTCTL_RERANK_SCORE_BLEND", "0.3")
-	t.Setenv("AGENTCTL_RERANK_MODEL", "rerank-2")
+	t.Setenv("FOXCTL_RERANK_ENABLED", "true")
+	t.Setenv("FOXCTL_RERANK_TOP_K", "100")
+	t.Setenv("FOXCTL_RERANK_FINAL_K", "20")
+	t.Setenv("FOXCTL_RERANK_SCORE_BLEND", "0.3")
+	t.Setenv("FOXCTL_RERANK_MODEL", "rerank-2")
 
 	cfg := FromEnv()
 

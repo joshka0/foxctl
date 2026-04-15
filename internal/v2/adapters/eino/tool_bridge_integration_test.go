@@ -65,12 +65,12 @@ func (m *twoTurnModel) Stream(_ context.Context, _ []*schema.Message, _ ...model
 // ToolExecutor, sends one user message, and verifies the executor is called with
 // the expected args before the agent returns grounded text.
 //
-// Gate: this test requires AGENTCTL_ENGINE_BACKEND=eino to be set, which keeps it
+// Gate: this test requires FOXCTL_ENGINE_BACKEND=eino to be set, which keeps it
 // out of the default CI path and off the gate-off regression surface.
 func TestEinoToolBridgeIntegration_OneRealToolRoundTrip(t *testing.T) {
 	t.Setenv(EnvEngineBackend, "eino")
 	if !IsEinoEnabled() {
-		t.Skip("AGENTCTL_ENGINE_BACKEND not set to eino — skipping gated integration proof")
+		t.Skip("FOXCTL_ENGINE_BACKEND not set to eino — skipping gated integration proof")
 	}
 
 	const toolName = "echo.tool"

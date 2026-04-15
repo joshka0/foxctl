@@ -102,7 +102,7 @@ type sqlStore struct {
 
 // Open initializes the knowledge store rooted at the provided path by opening a
 // database at root/knowledge.db and applying the package migrations. The database
-// driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_KNOWLEDGE_DB_DRIVER).
+// driver is selected via the dbdriver env var conventions (e.g., FOXCTL_KNOWLEDGE_DB_DRIVER).
 // The returned Store is backed by that database and should be closed when no
 // longer needed.
 func Open(ctx context.Context, root string) (Store, error) {

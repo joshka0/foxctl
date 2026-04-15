@@ -182,7 +182,7 @@ The `beads/lib/beads_mail_adapter.py` then wraps this with:
 - `reserve_issue`, `release_issue`, `notify`, `check_inbox`, `get_reservations`
 - **Graceful degradation**: no-ops when server is down.
 
-### 2.2 Agentctl “mail-aware” hook
+### 2.2 Foxctl “mail-aware” hook
 
 Instead of trying to “push” into Claude (which you don’t control), you can
 **pull mail at the next hook firing**:
@@ -193,7 +193,7 @@ Instead of trying to “push” into Claude (which you don’t control), you can
   - It determines:
 
     - `project_key` = `workspace_root` (or configurable mapping).
-    - `agent_name` from env/config (e.g. `AGENTCTL_AGENT_NAME`).
+    - `agent_name` from env/config (e.g. `FOXCTL_AGENT_NAME`).
 
   - It calls `mcp_agent_mail` via MCP:
 

@@ -11,7 +11,7 @@
 ## Table of Contents
 
 1. [Overview](#1-overview)
-2. [Why Agentctl for Agents](#2-why-foxctl-for-agents)
+2. [Why Foxctl for Agents](#2-why-foxctl-for-agents)
 3. [Agent Loop JSON Contract](#3-agent-loop-json-contract)
 4. [Go Implementation](#4-go-implementation)
 5. [Complete Walkthrough](#5-complete-walkthrough)
@@ -32,7 +32,7 @@ An **agent loop** is a system that:
 4. Feeds results back to an LLM for decision-making
 5. Repeats until the goal is achieved
 
-### 1.2 Why Use Agentctl as Agent Substrate?
+### 1.2 Why Use Foxctl as Agent Substrate?
 
 **Conventional approach** (problematic):
 ```
@@ -40,7 +40,7 @@ User → LLM → free-text tool description → LLM → free-text output → LLM
 ```
 Problems: huge token usage, inconsistent outputs, hard to debug
 
-**Agentctl approach** (efficient):
+**Foxctl approach** (efficient):
 ```
 User → LLM → tiny JSON → foxctl skill → structured envelope → LLM → ...
 ```
@@ -59,11 +59,11 @@ Benefits:
 
 ---
 
-## 2. Why Agentctl for Agents
+## 2. Why Foxctl for Agents
 
 ### 2.1 Comparison with Traditional Approaches
 
-| Aspect | Traditional ("Prompt RPC") | Agentctl Substrate |
+| Aspect | Traditional ("Prompt RPC") | Foxctl Substrate |
 |--------|---------------------------|-------------------|
 | **Tool schemas** | Full OpenAPI spec in every prompt (10KB+) | Tiny hints (< 1KB) |
 | **Tool outputs** | Plain text logs, HTML, giant JSON | Structured envelopes + CAS |
@@ -82,7 +82,7 @@ Example: Calling GitHub API to list repos
 - Output: ~50KB (JSON array of repos)
 - **Total**: ~55KB per call
 
-**Agentctl approach**:
+**Foxctl approach**:
 - Tool hint: ~200 bytes
 - Output summary: ~500 bytes (digest + preview)
 - **Total**: ~700 bytes per call
@@ -849,14 +849,14 @@ For a typical agent task with 10 tool calls:
 | Approach | Tokens |
 |----------|--------|
 | Traditional (full outputs, repeated schemas) | ~200,000 |
-| Agentctl substrate (envelopes + CAS) | ~8,000 |
+| Foxctl substrate (envelopes + CAS) | ~8,000 |
 | **Reduction** | **96%** |
 
 ### 6.3 Cost Impact
 
 At $0.01 per 1K tokens:
 - Traditional: $2.00 per task
-- Agentctl: $0.08 per task
+- Foxctl: $0.08 per task
 - **Savings**: $1.92 per task (25x cheaper)
 
 ---

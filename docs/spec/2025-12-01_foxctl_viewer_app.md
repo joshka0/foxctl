@@ -198,7 +198,7 @@ flowchart LR
 
 
 1. **Phase 1 – Skeleton viewer**
-   - New module cmd/agentctl_viewer/:
+   - New module cmd/foxctl_viewer/:
      - Loads foxctl config.
      - Calls foxctl jobs list and prints a simple text table (no Bubble Tea yet).
    - Smoke tests: ensures it runs against existing jobs.
@@ -230,7 +230,7 @@ flowchart LR
 
 
 - Viewer is a **separate binary**:
-  - To rollback: stop building/publishing agentctl_viewer (and/or mark as experimental).
+  - To rollback: stop building/publishing foxctl_viewer (and/or mark as experimental).
 - No on-disk changes; removing viewer leaves core state and contracts untouched.
 - If CLI-based data access is used, those commands remain useful for scripting even if the viewer is removed.
 
@@ -242,7 +242,7 @@ flowchart LR
 
 
 1. **Binary name & distribution**  
-   - foxctl-viewer vs agentctl_beads vs foxctl ui subcommand?
+   - foxctl-viewer vs foxctl_beads vs foxctl ui subcommand?
 2. **Coupling to Core**  
    - How tightly can we bind to internal APIs vs envelopes?
 3. **Security / policy**  

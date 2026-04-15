@@ -110,8 +110,8 @@ func TestRoomsHandlers_Smoke(t *testing.T) {
 }
 
 func TestOrchestrationBoardHandlers_Smoke(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	seedHandler := OrchestrationSeedCardsHandler(cfg, zerolog.Nop())

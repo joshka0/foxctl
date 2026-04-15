@@ -37,7 +37,7 @@ func OpenWithConfig(ctx context.Context, cfg config.Config) (storage.MemoryStore
 	driver := dbdriver.DriverType(cfg.Database.Driver)
 
 	// Check environment variable override
-	if envDriver := os.Getenv("AGENTCTL_MEMORY_DB_DRIVER"); envDriver != "" {
+	if envDriver := os.Getenv("FOXCTL_MEMORY_DB_DRIVER"); envDriver != "" {
 		driver = dbdriver.DriverType(envDriver)
 	}
 
@@ -55,7 +55,7 @@ func OpenWithConfig(ctx context.Context, cfg config.Config) (storage.MemoryStore
 // openTursoFromConfig opens a TursoStore from platform config.
 func openTursoFromConfig(ctx context.Context, cfg config.Config) (*TursoStore, error) {
 	if cfg.Database.Turso.URL == "" {
-		return nil, fmt.Errorf("memory: turso URL not configured (set database.turso.url or AGENTCTL_TURSO_URL)")
+		return nil, fmt.Errorf("memory: turso URL not configured (set database.turso.url or FOXCTL_TURSO_URL)")
 	}
 
 	tursoCfg := dbdriver.TursoConfig{

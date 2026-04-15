@@ -41,7 +41,7 @@
 4. Optionally migrates from React to Svelte SPA
 
 **Key Deliverables:**
-- Go web server at `cmd/agentctl_web`
+- Go web server at `cmd/foxctl_web`
 - Console WebSocket/SSE endpoints for real-time streaming
 - Skill tool registry with JSON Schema generation
 - Tool executor that routes to daemon or fallback execution
@@ -65,7 +65,7 @@
                       (WebSocket)           (SSE)
           │                │                     │
 ┌─────────┴────────────────┴─────────────────────┴───────────────┐
-│                    cmd/agentctl_web                            │
+│                    cmd/foxctl_web                            │
 │  ┌────────────────────────────────────────────────────────────┐│
 │  │                  internal/interfaces/web/                             ││
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────────────────────┐ ││
@@ -88,7 +88,7 @@
 **Estimated effort: 1-2 days**
 
 ### Deliverables
-- `cmd/agentctl_web/main.go` - Server entrypoint
+- `cmd/foxctl_web/main.go` - Server entrypoint
 - `internal/interfaces/web/server.go` - HTTP handler wiring
 - `internal/interfaces/web/options.go` - Configuration struct
 - `internal/interfaces/web/sse/hub.go` - Global SSE pub/sub for invalidation
@@ -485,7 +485,7 @@ sessions.Store.SetStatus(id, ok/error/canceled)
 ```json
 {
   "scripts": {
-    "dev:server": "go run ./cmd/agentctl_web",
+    "dev:server": "go run ./cmd/foxctl_web",
     "dev:gui": "vite",
     "dev:all": "concurrently \"bun run dev:server\" \"bun run dev:gui\""
   }
@@ -636,10 +636,10 @@ require (
 
 ```bash
 # Phase 1: Create skeleton
-mkdir -p cmd/agentctl_web internal/interfaces/web/{api,sse,consolews,tools}
+mkdir -p cmd/foxctl_web internal/interfaces/web/{api,sse,consolews,tools}
 
 # Run Go server
-go run ./cmd/agentctl_web --addr=:8090 --dev-cors
+go run ./cmd/foxctl_web --addr=:8090 --dev-cors
 
 # Run with existing GUI
 cd packages/gui && bun run dev

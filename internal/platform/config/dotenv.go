@@ -9,7 +9,7 @@ import (
 
 // LoadDotEnv loads .env files in priority order (later files override earlier ones):
 // 1. ~/.foxctl/.env (global defaults)
-// 2. $AGENTCTL_HOME/.env (if AGENTCTL_HOME is set and different from ~/.foxctl)
+// 2. $FOXCTL_HOME/.env (if FOXCTL_HOME is set and different from ~/.foxctl)
 // 3. $PWD/.env (project-level overrides)
 //
 // This function should be called early in the application lifecycle,
@@ -24,9 +24,9 @@ func LoadDotEnv() {
 		envFiles = append(envFiles, globalEnv)
 	}
 
-	// 2. Custom AGENTCTL_HOME if set and different from default
-	if agentctlHome := os.Getenv("AGENTCTL_HOME"); agentctlHome != "" {
-		customEnv := filepath.Join(agentctlHome, ".env")
+	// 2. Custom FOXCTL_HOME if set and different from default
+	if foxctlHome := os.Getenv("FOXCTL_HOME"); foxctlHome != "" {
+		customEnv := filepath.Join(foxctlHome, ".env")
 		// Avoid duplicates
 		if len(envFiles) == 0 || envFiles[0] != customEnv {
 			envFiles = append(envFiles, customEnv)
@@ -68,9 +68,9 @@ func LoadDotEnvOverride() {
 		envFiles = append(envFiles, globalEnv)
 	}
 
-	// 2. Custom AGENTCTL_HOME if set and different from default
-	if agentctlHome := os.Getenv("AGENTCTL_HOME"); agentctlHome != "" {
-		customEnv := filepath.Join(agentctlHome, ".env")
+	// 2. Custom FOXCTL_HOME if set and different from default
+	if foxctlHome := os.Getenv("FOXCTL_HOME"); foxctlHome != "" {
+		customEnv := filepath.Join(foxctlHome, ".env")
 		if len(envFiles) == 0 || envFiles[0] != customEnv {
 			envFiles = append(envFiles, customEnv)
 		}

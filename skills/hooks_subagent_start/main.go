@@ -144,7 +144,7 @@ func generateBriefing(ctx context.Context, profile agentpolicy.Profile) (string,
 	var data struct {
 		Briefing string `json:"briefing"`
 	}
-	result, err := executil.RunAgentctlSkillDecode(ctx, "", "agent/handbook", inputJSON, &data)
+	result, err := executil.RunFoxctlSkillDecode(ctx, "", "agent/handbook", inputJSON, &data)
 	if err != nil {
 		var decodeErr executil.DecodeError
 		if errors.As(err, &decodeErr) {

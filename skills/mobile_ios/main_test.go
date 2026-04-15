@@ -51,10 +51,10 @@ func TestAllowedOpsCount(t *testing.T) {
 
 func TestRecordPIDFile(t *testing.T) {
 	// Default device uses "default" suffix
-	assert.Equal(t, "/tmp/agentctl_ios_record_default.pid", recordPIDFile(""))
+	assert.Equal(t, "/tmp/foxctl_ios_record_default.pid", recordPIDFile(""))
 
 	// Specific device UDID is used as suffix
-	assert.Equal(t, "/tmp/agentctl_ios_record_12345-ABCDE.pid", recordPIDFile("12345-ABCDE"))
+	assert.Equal(t, "/tmp/foxctl_ios_record_12345-ABCDE.pid", recordPIDFile("12345-ABCDE"))
 }
 
 // Tests for input structure

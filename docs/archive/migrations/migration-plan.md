@@ -34,10 +34,10 @@ These keep you safe while reshaping the system:
   * event schema (persisted vs ephemeral)
 * Add feature flags:
 
-  * `AGENTCTL_ACTOR_SUPERVISOR=0/1`
-  * `AGENTCTL_HOOKS_V1=0/1`
-  * `AGENTCTL_SESSION_LINEAGE=0/1`
-  * `AGENTCTL_PROGRESSIVE_MEMORY=0/1`
+  * `FOXCTL_ACTOR_SUPERVISOR=0/1`
+  * `FOXCTL_HOOKS_V1=0/1`
+  * `FOXCTL_SESSION_LINEAGE=0/1`
+  * `FOXCTL_PROGRESSIVE_MEMORY=0/1`
 
 ### Phase 1 — Hooks v1: dispatcher + compatibility layer
 
@@ -132,7 +132,7 @@ These keep you safe while reshaping the system:
 
 4. **Cutover**
 
-   * Flip `AGENTCTL_HOOKS_V1=1` per workspace
+   * Flip `FOXCTL_HOOKS_V1=1` per workspace
    * Keep old hooks runnable through the adapter until removed
 
 **Deliverable checkpoints**
@@ -246,9 +246,9 @@ Apply `unified-session-lineage.md`:
 
 * Runner must export env:
 
-  * `AGENTCTL_SESSION_ID`
-  * `AGENTCTL_WORKSPACE`
-  * `AGENTCTL_AGENT_ID`
+  * `FOXCTL_SESSION_ID`
+  * `FOXCTL_WORKSPACE`
+  * `FOXCTL_AGENT_ID`
 * Every skill execution inherits these env vars.
 
 #### 4.3 Mailbox schema update
@@ -365,7 +365,7 @@ Once the runtime spine is stable, pull the rest into alignment.
 ### Step 4 — Session lineage propagation (schema + env)
 
 * [ ] sessions.db: add lineage columns + `session_edges`
-* [ ] runner: export `AGENTCTL_*` env vars to all skills
+* [ ] runner: export `FOXCTL_*` env vars to all skills
 * [ ] mailbox.db: add `session_id`, `agent_id`, `workspace_id` columns
 * [ ] hooks: dispatcher populates these into `hook.Input`
 
@@ -386,7 +386,7 @@ Once the runtime spine is stable, pull the rest into alignment.
 ### Step 7 — Expand to all roles + cut over
 
 * [ ] Migrate remaining agents to supervisor
-* [ ] Turn on `AGENTCTL_ACTOR_SUPERVISOR=1` by default
+* [ ] Turn on `FOXCTL_ACTOR_SUPERVISOR=1` by default
 * [ ] Deprecate old poll loops/daemons
 
 ### Step 8 — Align search + graph + summaries

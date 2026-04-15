@@ -68,7 +68,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 	}
 
 	// Check if feedback is enabled
-	if os.Getenv("AGENTCTL_SESSION_FEEDBACK_ENABLED") == "false" {
+	if os.Getenv("FOXCTL_SESSION_FEEDBACK_ENABLED") == "false" {
 		return hookutil.EmitOutput(rc, command, hooks.NewNone(), nil)
 	}
 

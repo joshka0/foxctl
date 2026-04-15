@@ -6,7 +6,7 @@
 //   - All other bash commands are blocked
 //
 // Profile is determined from:
-//  1. AGENTCTL_AGENT_PROFILE environment variable
+//  1. FOXCTL_AGENT_PROFILE environment variable
 //  2. Hook config's "profile" field
 //  3. Default: unrestricted (all commands allowed)
 package main
@@ -125,7 +125,7 @@ func extractCommand(toolInput json.RawMessage) (string, error) {
 // - Keywords: profile_resolution, environment_variable, hook_config
 func resolveProfile(in hooks.Input) agentpolicy.Profile {
 	// Check environment variable first
-	if envProfile := os.Getenv("AGENTCTL_AGENT_PROFILE"); envProfile != "" {
+	if envProfile := os.Getenv("FOXCTL_AGENT_PROFILE"); envProfile != "" {
 		profile := agentpolicy.Profile(envProfile)
 		if profile.IsValid() {
 			return profile

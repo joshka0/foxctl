@@ -14,7 +14,7 @@ type (
 )
 
 // EnvTraceID is the environment variable for propagating trace IDs.
-const EnvTraceID = "AGENTCTL_TRACE_ID"
+const EnvTraceID = "FOXCTL_TRACE_ID"
 
 // NewTraceID generates a new unique trace ID using ULID.
 func NewTraceID() string {
@@ -27,7 +27,7 @@ func WithTraceID(ctx context.Context, traceID string) context.Context {
 }
 
 // TraceIDFromContext retrieves the trace ID from context.
-// Falls back to AGENTCTL_TRACE_ID env var if not in context.
+// Falls back to FOXCTL_TRACE_ID env var if not in context.
 // Returns empty string if not found.
 func TraceIDFromContext(ctx context.Context) string {
 	if ctx == nil {

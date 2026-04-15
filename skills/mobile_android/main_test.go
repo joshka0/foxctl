@@ -47,15 +47,15 @@ func TestAllowedOpsCount(t *testing.T) {
 }
 
 func TestRecordPIDFile(t *testing.T) {
-	assert.Equal(t, "/tmp/agentctl_android_record.pid", androidRecordPIDFile)
+	assert.Equal(t, "/tmp/foxctl_android_record.pid", androidRecordPIDFile)
 }
 
 func TestRecordPathFile(t *testing.T) {
-	assert.Equal(t, "/tmp/agentctl_android_record_path.txt", androidRecordPathFile)
+	assert.Equal(t, "/tmp/foxctl_android_record_path.txt", androidRecordPathFile)
 }
 
 func TestRecordSerialFile(t *testing.T) {
-	assert.Equal(t, "/tmp/agentctl_android_record_serial.txt", androidRecordSerialFile)
+	assert.Equal(t, "/tmp/foxctl_android_record_serial.txt", androidRecordSerialFile)
 }
 
 // Tests for input structure

@@ -9,14 +9,14 @@ import (
 // Environment variable names for rerank configuration.
 // FC/IS: Constants ensure consistency between FromEnv and ConfigFromMap.
 const (
-	EnvRerankEnabled       = "AGENTCTL_RERANK_ENABLED"
-	EnvRerankTopK          = "AGENTCTL_RERANK_TOP_K"
-	EnvRerankFinalK        = "AGENTCTL_RERANK_FINAL_K"
-	EnvRerankScoreBlend    = "AGENTCTL_RERANK_SCORE_BLEND"
-	EnvRerankModel         = "AGENTCTL_RERANK_MODEL"
-	EnvRerankRateLimit     = "AGENTCTL_RERANK_RATE_LIMIT"
-	EnvRerankRateLimitWait = "AGENTCTL_RERANK_RATE_LIMIT_WAIT"
-	EnvRerankTimeout       = "AGENTCTL_RERANK_TIMEOUT"
+	EnvRerankEnabled       = "FOXCTL_RERANK_ENABLED"
+	EnvRerankTopK          = "FOXCTL_RERANK_TOP_K"
+	EnvRerankFinalK        = "FOXCTL_RERANK_FINAL_K"
+	EnvRerankScoreBlend    = "FOXCTL_RERANK_SCORE_BLEND"
+	EnvRerankModel         = "FOXCTL_RERANK_MODEL"
+	EnvRerankRateLimit     = "FOXCTL_RERANK_RATE_LIMIT"
+	EnvRerankRateLimitWait = "FOXCTL_RERANK_RATE_LIMIT_WAIT"
+	EnvRerankTimeout       = "FOXCTL_RERANK_TIMEOUT"
 )
 
 // Config holds configuration for reranking operations.
@@ -82,14 +82,14 @@ func DefaultConfig() Config {
 
 // FromEnv creates a Config from environment variables.
 // Environment variables:
-//   - AGENTCTL_RERANK_ENABLED: "true" or "1" to enable
-//   - AGENTCTL_RERANK_TOP_K: number of candidates to rerank
-//   - AGENTCTL_RERANK_FINAL_K: number of results to return
-//   - AGENTCTL_RERANK_SCORE_BLEND: blend factor (0.0-1.0)
-//   - AGENTCTL_RERANK_MODEL: model name
-//   - AGENTCTL_RERANK_RATE_LIMIT: requests per minute (0 to disable)
-//   - AGENTCTL_RERANK_RATE_LIMIT_WAIT: "true" to wait, "false" to error immediately
-//   - AGENTCTL_RERANK_TIMEOUT: timeout duration (e.g., "30s", "1m")
+//   - FOXCTL_RERANK_ENABLED: "true" or "1" to enable
+//   - FOXCTL_RERANK_TOP_K: number of candidates to rerank
+//   - FOXCTL_RERANK_FINAL_K: number of results to return
+//   - FOXCTL_RERANK_SCORE_BLEND: blend factor (0.0-1.0)
+//   - FOXCTL_RERANK_MODEL: model name
+//   - FOXCTL_RERANK_RATE_LIMIT: requests per minute (0 to disable)
+//   - FOXCTL_RERANK_RATE_LIMIT_WAIT: "true" to wait, "false" to error immediately
+//   - FOXCTL_RERANK_TIMEOUT: timeout duration (e.g., "30s", "1m")
 func FromEnv() Config {
 	// FC/IS: Collect env values at boundary, delegate parsing to pure function.
 	envMap := map[string]string{

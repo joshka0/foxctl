@@ -542,7 +542,7 @@ type releaseReq struct {
 
 | Operation | Description                                                                     |
 | --------- | ------------------------------------------------------------------------------- |
-| `send`    | Create a new message. Sender inferred from `AGENTCTL_AGENT_NAME` env or config. |
+| `send`    | Create a new message. Sender inferred from `FOXCTL_AGENT_NAME` env or config. |
 | `inbox`   | List messages for the current actor.                                            |
 | `ack`     | Acknowledge messages by ID.                                                     |
 | `reserve` | Request advisory locks on file paths.                                           |
@@ -586,8 +586,8 @@ operations:
 1. **Input:** `hook.Input` with `event`, `tool_name`, `input_preview`,
    `session_id`.
 2. **Resolve context:**
-   - `workspace_id` from `AGENTCTL_WORKSPACE` or config.
-   - `actor_id` from `AGENTCTL_AGENT_NAME` or default `"claude"`.
+   - `workspace_id` from `FOXCTL_WORKSPACE` or config.
+   - `actor_id` from `FOXCTL_AGENT_NAME` or default `"claude"`.
    - `task_id` from active task (call tasks store or use cached).
 3. **Fetch inbox:**
    - `mailbox/manage.inbox` with `only_unread=true`, `limit=10`.
@@ -635,7 +635,7 @@ type hookOutput struct {
    - Call `mailbox/manage.reserve` with `mode=exclusive`, `ttl=5m`.
    - If `conflicts` non-empty → reservation held by another actor.
 4. **Decision:**
-   - **Strict mode** (`AGENTCTL_FILE_GUARD_MODE=strict`):
+   - **Strict mode** (`FOXCTL_FILE_GUARD_MODE=strict`):
      - `decision: "block"`, `reason: "Path X is reserved by agent-2 until ..."`
    - **Advisory mode** (default):
      - `decision: "none"`,

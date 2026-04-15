@@ -181,7 +181,7 @@ func HandleLifecycle(ctx context.Context, deps Dependencies, req LifecycleReques
 	toolName := strings.TrimSpace(req.Payload.ToolName)
 	switch toolName {
 	case "TodoWrite":
-		if envEnabled("AGENTCTL_MEMORY_PROMPT_DISABLED") {
+		if envEnabled("FOXCTL_MEMORY_PROMPT_DISABLED") {
 			return response, nil
 		}
 		completed := make([]string, 0)
@@ -202,17 +202,17 @@ func HandleLifecycle(ctx context.Context, deps Dependencies, req LifecycleReques
 		}
 		return response, nil
 	case "Edit", "Write", "MultiEdit", "NotebookEdit":
-		if envEnabledInverse("AGENTCTL_MEMORY_CAPTURE", true) {
+		if envEnabledInverse("FOXCTL_MEMORY_CAPTURE", true) {
 			if err := captureEditMemory(ctx, deps, target, toolName, req.Payload); err != nil {
 				return response, err
 			}
 		}
-		if envEnabledInverse("AGENTCTL_MEMORY_EMBED", true) && (strings.TrimSpace(deps.Config.Embedding.APIKey) != "" || strings.TrimSpace(deps.Config.Embedding.VoyageAPIKey) != "" || strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != "" || strings.TrimSpace(deps.Config.Embedding.Provider) != "") {
+		if envEnabledInverse("FOXCTL_MEMORY_EMBED", true) && (strings.TrimSpace(deps.Config.Embedding.APIKey) != "" || strings.TrimSpace(deps.Config.Embedding.VoyageAPIKey) != "" || strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != "" || strings.TrimSpace(deps.Config.Embedding.Provider) != "") {
 			_ = refreshMemoryEmbedding(ctx, deps, target, req.Payload)
 		}
 		return response, nil
 	default:
-		if strings.Contains(strings.ToLower(toolName), "memory") && envEnabledInverse("AGENTCTL_MEMORY_EMBED", true) {
+		if strings.Contains(strings.ToLower(toolName), "memory") && envEnabledInverse("FOXCTL_MEMORY_EMBED", true) {
 			if op := strings.TrimSpace(req.Payload.ToolInput.Operation); op == "set" || op == "append" {
 				_ = refreshNamedMemory(ctx, deps, target, strings.TrimSpace(req.Payload.ToolInput.Name))
 			}

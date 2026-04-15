@@ -33,7 +33,7 @@ func DefaultModelForProvider(provider string) string {
 		}
 		return "gpt-4.1-mini"
 	case "openai_compat", "openai-compatible":
-		if model := os.Getenv("AGENTCTL_LLM_MODEL"); model != "" {
+		if model := os.Getenv("FOXCTL_LLM_MODEL"); model != "" {
 			return model
 		}
 		if model := os.Getenv("OPENAI_MODEL"); model != "" {

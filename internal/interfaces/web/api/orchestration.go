@@ -1024,11 +1024,11 @@ func orchestrationDBConfig(cfg config.Config) (dbdriver.Config, error) {
 }
 
 func hasV2EventsDriverOverride() bool {
-	return strings.TrimSpace(os.Getenv("AGENTCTL_V2_EVENTS_DB_DRIVER")) != ""
+	return strings.TrimSpace(os.Getenv("FOXCTL_V2_EVENTS_DB_DRIVER")) != ""
 }
 
 func v2EventsDBPath(defaultPath string) string {
-	if override := strings.TrimSpace(os.Getenv("AGENTCTL_V2_EVENTS_DB_PATH")); override != "" {
+	if override := strings.TrimSpace(os.Getenv("FOXCTL_V2_EVENTS_DB_PATH")); override != "" {
 		return override
 	}
 	return defaultPath

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_URL="${AGENTCTL_GUI_API_URL:-http://localhost:8090}"
+API_URL="${FOXCTL_GUI_API_URL:-http://localhost:8090}"
 WORKSPACE_PATH="${1:-$PWD}"
 ROOM_ID="${ROOM_ID:-gui-smoke}"
 ROOM_TITLE="${ROOM_TITLE:-GUI Smoke Room}"

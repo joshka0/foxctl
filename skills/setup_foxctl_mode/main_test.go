@@ -10,7 +10,7 @@ import (
 // Tests for constants
 
 func TestCommand(t *testing.T) {
-	assert.Equal(t, "setup/agentctl_mode", command)
+	assert.Equal(t, "setup/foxctl_mode", command)
 }
 
 // Tests for Input structure

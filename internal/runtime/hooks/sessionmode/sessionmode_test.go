@@ -59,7 +59,7 @@ func TestModeDirFallsBackWhenHomeUnavailable(t *testing.T) {
 		return "", os.ErrNotExist
 	}
 	t.Cleanup(func() { userHomeDir = orig })
-	t.Setenv("AGENTCTL_HOME", "")
+	t.Setenv("FOXCTL_HOME", "")
 
 	got := modeDir()
 	want := filepath.Join(os.TempDir(), "foxctl", "cache", "session-modes")

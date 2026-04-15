@@ -9,7 +9,7 @@ structure, how to run it, and the current state against the implementation plan.
 
 - Replace the React GUI (`packages/gui/`) with a Svelte SPA (`packages/gui-svelte/`).
 - Preserve the dashboard information architecture (jobs/tasks/sessions/etc).
-- Use the Go backend (`cmd/agentctl_web`) for REST + SSE + console streaming.
+- Use the Go backend (`cmd/foxctl_web`) for REST + SSE + console streaming.
 - Keep the UI lightweight and fast, with server-backed data only.
 
 ## Status (current)

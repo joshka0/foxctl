@@ -381,7 +381,7 @@ foxctl run code/dag_grep --input '{
 
 Notes:
 - TypeScript adds heuristic `CALLS` edges; Elixir adds heuristic `REFERS_TO` edges. These are best-effort (no type-checking) and conservative (ambiguous targets are skipped).
-- If you run skills in a restricted filesystem sandbox, set writable paths (CAS + storage + observability), e.g. `AGENTCTL_STORAGE_ROOT=/tmp/foxctl/storage AGENTCTL_PATHS_CAS=/tmp/foxctl/cas AGENTCTL_OBS_DIR=/tmp/foxctl/observability`.
+- If you run skills in a restricted filesystem sandbox, set writable paths (CAS + storage + observability), e.g. `FOXCTL_STORAGE_ROOT=/tmp/foxctl/storage FOXCTL_PATHS_CAS=/tmp/foxctl/cas FOXCTL_OBS_DIR=/tmp/foxctl/observability`.
 
 ---
 

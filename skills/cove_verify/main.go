@@ -258,7 +258,7 @@ func resolveLLM(cfg *llmConfig) (verification.LLMClient, string, string, error) 
 	}
 
 	if provider == "" {
-		provider = env.GetString("AGENTCTL_LLM_PROVIDER")
+		provider = env.GetString("FOXCTL_LLM_PROVIDER")
 	}
 	if provider == "" {
 		switch {
@@ -271,18 +271,18 @@ func resolveLLM(cfg *llmConfig) (verification.LLMClient, string, string, error) 
 		case env.GetString("OPENAI_API_KEY") != "":
 			provider = "openai"
 		default:
-			return nil, "", "", fmt.Errorf("no LLM provider configured (set AGENTCTL_LLM_PROVIDER+AGENTCTL_LLM_API_KEY or provider-specific *_API_KEY)")
+			return nil, "", "", fmt.Errorf("no LLM provider configured (set FOXCTL_LLM_PROVIDER+FOXCTL_LLM_API_KEY or provider-specific *_API_KEY)")
 		}
 	}
 
 	if model == "" {
-		model = env.GetString("AGENTCTL_LLM_MODEL")
+		model = env.GetString("FOXCTL_LLM_MODEL")
 	}
 	if model == "" {
 		model = llmproviders.DefaultModelForProvider(provider)
 	}
 
-	apiKey := env.GetString("AGENTCTL_LLM_API_KEY")
+	apiKey := env.GetString("FOXCTL_LLM_API_KEY")
 	if apiKey == "" {
 		switch provider {
 		case "cerebras":

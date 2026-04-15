@@ -223,7 +223,7 @@ func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error
 		return e, nil
 	}
 
-	return nil, fmt.Errorf("no embedding provider available: set AGENTCTL_EMBEDDING_PROVIDER/openai-compatible config, VOYAGE_API_KEY, or GEMINI_API_KEY")
+	return nil, fmt.Errorf("no embedding provider available: set FOXCTL_EMBEDDING_PROVIDER/openai-compatible config, VOYAGE_API_KEY, or GEMINI_API_KEY")
 }
 
 // NewEmbedderWithModel creates an Embedder while honoring a model override.

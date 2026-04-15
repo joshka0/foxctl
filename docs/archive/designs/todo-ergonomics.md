@@ -18,7 +18,7 @@ The current todo system creates friction for AI agents (Claude) in several ways:
    requires copy-pasting or looking up IDs.
 
 4. **Context Loss on Compaction**: TodoWrite state is lost when conversation compacts.
-   Agentctl todos persist but may drift from actual progress.
+   Foxctl todos persist but may drift from actual progress.
 
 ## Proposed Improvements
 

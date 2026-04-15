@@ -6,7 +6,7 @@ vault_refs:
   - notes/repo/foxctl/packages/internal-adapters-skillslib-skillerr.md
   - notes/repo/foxctl/packages/internal-adapters-skillslib-skillmain.md
 ---
-# Agentctl V2 Repo Rules and Core Skills
+# Foxctl V2 Repo Rules and Core Skills
 
 Status: In Progress  
 Owner: Solo maintainer  

@@ -412,7 +412,7 @@ func TestTodoReviewStatus_ReturnsFields(t *testing.T) {
 
 func TestTodoComplete_WithReviewGate_AllowsReviewedTask(t *testing.T) {
 	env := newTodoTestEnv(t)
-	t.Setenv("AGENTCTL_TODO_REVIEW_GATE", "on")
+	t.Setenv("FOXCTL_TODO_REVIEW_GATE", "on")
 
 	addData := env.addTask(t, addRequest{Title: "Gate ok"})
 	id := taskID(t, addData)
@@ -429,7 +429,7 @@ func TestTodoComplete_WithReviewGate_AllowsReviewedTask(t *testing.T) {
 
 func TestTodoComplete_WithReviewGate_RejectsWithoutOkReview(t *testing.T) {
 	env := newTodoTestEnv(t)
-	t.Setenv("AGENTCTL_TODO_REVIEW_GATE", "on")
+	t.Setenv("FOXCTL_TODO_REVIEW_GATE", "on")
 
 	addData := env.addTask(t, addRequest{Title: "No review"})
 	id := taskID(t, addData)
@@ -451,7 +451,7 @@ func TestTodoComplete_WithReviewGate_RejectsWithoutOkReview(t *testing.T) {
 
 func TestTodoComplete_WithReviewGate_RejectsWhenNotReadyForReview(t *testing.T) {
 	env := newTodoTestEnv(t)
-	t.Setenv("AGENTCTL_TODO_REVIEW_GATE", "on")
+	t.Setenv("FOXCTL_TODO_REVIEW_GATE", "on")
 
 	addData := env.addTask(t, addRequest{Title: "Wrong status"})
 	id := taskID(t, addData)

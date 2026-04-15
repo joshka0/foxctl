@@ -14,7 +14,7 @@ import (
 )
 
 // oaiModelBridge implements model.BaseChatModel against an OpenAI-compatible endpoint.
-// It is used only when AGENTCTL_ENGINE_BACKEND=eino to provision the Eino ChatModelAgent.
+// It is used only when FOXCTL_ENGINE_BACKEND=eino to provision the Eino ChatModelAgent.
 // Tool-call support is out of scope for the spike; only plain Generate is wired.
 type oaiModelBridge struct {
 	apiKey  string

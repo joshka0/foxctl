@@ -187,7 +187,7 @@ func TestParseInputInvalidJSON(t *testing.T) {
 
 func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
 	t.Helper()
-	t.Setenv("AGENTCTL_WORKSPACE", workspace)
+	t.Setenv("FOXCTL_WORKSPACE", workspace)
 	state := t.TempDir()
 	cfg := config.Config{
 		Home:           state,

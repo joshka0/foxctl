@@ -548,7 +548,7 @@ func buildRewriteSystemPrompt(maxChars int, rewritePrompt string) string {
 func resolveRewriteBaseURL(raw string) string {
 	base := strings.TrimSpace(raw)
 	if base == "" {
-		base = strings.TrimSpace(os.Getenv("AGENTCTL_REWRITE_BASE_URL"))
+		base = strings.TrimSpace(os.Getenv("FOXCTL_REWRITE_BASE_URL"))
 	}
 	if base == "" {
 		base = strings.TrimSpace(os.Getenv("LMSTUDIO_BASE_URL"))
@@ -568,7 +568,7 @@ func resolveRewriteAPIKey(rc *skillmain.RunContext, rewriteBaseURL string) strin
 		}
 		return key
 	}
-	if key := os.Getenv("AGENTCTL_REWRITE_API_KEY"); key != "" {
+	if key := os.Getenv("FOXCTL_REWRITE_API_KEY"); key != "" {
 		return key
 	}
 	// LM Studio and many local OpenAI-compatible servers do not require auth.

@@ -51,7 +51,7 @@ type VoyageProvider struct {
 	dimensions int
 	httpClient *http.Client
 
-	// Rate limiting (disabled by default; set via config or AGENTCTL_EMBEDDING_RATE_LIMIT)
+	// Rate limiting (disabled by default; set via config or FOXCTL_EMBEDDING_RATE_LIMIT)
 	rateLimitMu   sync.Mutex
 	requestTimes  []time.Time
 	rateLimit     int           // Max requests per window (0 = disabled)
@@ -124,9 +124,9 @@ func NewVoyageProvider(cfg VoyageConfig) (*VoyageProvider, error) {
 	}
 
 	// Rate limiting: check env var first, then config, then default to unlimited.
-	// AGENTCTL_EMBEDDING_RATE_LIMIT: 0 = disabled, >0 = requests per minute
+	// FOXCTL_EMBEDDING_RATE_LIMIT: 0 = disabled, >0 = requests per minute
 	var rateLimit int
-	if v := os.Getenv("AGENTCTL_EMBEDDING_RATE_LIMIT"); v != "" {
+	if v := os.Getenv("FOXCTL_EMBEDDING_RATE_LIMIT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			rateLimit = n // 0 means disabled, >0 means limit
 		}

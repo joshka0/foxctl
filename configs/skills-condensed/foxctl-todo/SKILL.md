@@ -36,6 +36,6 @@ foxctl todo update --id <id> --title "New title"
 
 `hooks/task_guard` ensures tasks exist for edits.
 
-Set mode: `AGENTCTL_TASK_GUARD_MODE=strict`
+Set mode: `FOXCTL_TASK_GUARD_MODE=strict`
 
 Full docs: `~/.foxctl/share/configs/skills/foxctl-todo/Skill.md`
