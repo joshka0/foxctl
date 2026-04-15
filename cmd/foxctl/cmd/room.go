@@ -8764,7 +8764,13 @@ var roomEpicScoutRuleFamilies = []string{
 
 func buildRoomEpicScout(roomID string, epic, status, health map[string]any) map[string]any {
 	findings := buildRoomEpicScoutFindings(epic, health)
-	outOfScope := buildRoomEpicScoutOutOfScope(status)
+	snapshotID := "snapshot-missing"
+	snapshotArtifact := ""
+	if latestSnapshotID, latestSnapshotArtifact := loadRoomEpicLatestSnapshotMetadata(stringField(epic, "id")); latestSnapshotID != "" && latestSnapshotArtifact != "" {
+		snapshotID = latestSnapshotID
+		snapshotArtifact = latestSnapshotArtifact
+	}
+	outOfScope := buildRoomEpicScoutOutOfScope(status, snapshotID == "snapshot-missing")
 	familyCounts := make(map[string]int, len(roomEpicScoutRuleFamilies))
 	for _, family := range roomEpicScoutRuleFamilies {
 		familyCounts[family] = 0
@@ -8790,8 +8796,8 @@ func buildRoomEpicScout(roomID string, epic, status, health map[string]any) map[
 			"intake_mode":  stringField(status, "intake_mode"),
 			"status_phase": stringField(status, "phase"),
 		},
-		"snapshot_id":       "snapshot-missing",
-		"snapshot_artifact": "",
+		"snapshot_id":       snapshotID,
+		"snapshot_artifact": snapshotArtifact,
 		"scout_artifact":    "",
 		"findings":          findings,
 		"signals": map[string]any{
@@ -8802,6 +8808,31 @@ func buildRoomEpicScout(roomID string, epic, status, health map[string]any) map[
 		},
 		"out_of_scope": outOfScope,
 	}
+}
+
+func loadRoomEpicLatestSnapshotMetadata(epicID string) (snapshotID, snapshotArtifact string) {
+	latestArtifact := strings.TrimSpace(roomAgileEpicSnapshotLatestJSONPath(epicID))
+	if latestArtifact == "" {
+		return "", ""
+	}
+	latestRaw, err := os.ReadFile(latestArtifact)
+	if err != nil {
+		return "", ""
+	}
+	var latestDoc map[string]any
+	if err := json.Unmarshal(latestRaw, &latestDoc); err != nil {
+		return "", ""
+	}
+	snapshotID = strings.TrimSpace(stringField(latestDoc, "snapshot_id"))
+	snapshotArtifact = strings.TrimSpace(stringField(latestDoc, "snapshot_artifact"))
+	if snapshotID == "" || snapshotArtifact == "" {
+		return "", ""
+	}
+	info, err := os.Stat(snapshotArtifact)
+	if err != nil || info.IsDir() {
+		return "", ""
+	}
+	return snapshotID, snapshotArtifact
 }
 
 func buildRoomEpicSnapshotV1(workspaceID, roomID string, epic, status, health, scout map[string]any, snapshotID, snapshotArtifact string, createdAt time.Time) map[string]any {
@@ -8894,8 +8925,11 @@ func buildRoomEpicSnapshotFindingRefs(findings []map[string]any) []map[string]an
 	return out
 }
 
-func buildRoomEpicScoutOutOfScope(status map[string]any) []string {
-	out := []string{"snapshot_unavailable"}
+func buildRoomEpicScoutOutOfScope(status map[string]any, snapshotUnavailable bool) []string {
+	out := make([]string, 0, 3)
+	if snapshotUnavailable {
+		out = append(out, "snapshot_unavailable")
+	}
 	if stringField(status, "phase") == "draft" {
 		out = append(out, "intake_not_finalized")
 	}

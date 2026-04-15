@@ -4735,6 +4735,82 @@ func TestRunRoomEpicScout(t *testing.T) {
 		}
 	})
 
+	t.Run("planning gap epic includes latest snapshot metadata when available", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, _, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicSnapshot(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicSnapshot: %v", err)
+		}
+		snapshot := decodeRoomEnvelope(t, out)
+		wantSnapshotID := strings.TrimSpace(fmt.Sprintf("%v", snapshot["snapshot_id"]))
+		wantSnapshotArtifact := strings.TrimSpace(fmt.Sprintf("%v", snapshot["snapshot_artifact"]))
+		if wantSnapshotID == "" {
+			t.Fatalf("snapshot_id empty")
+		}
+		if wantSnapshotArtifact == "" {
+			t.Fatalf("snapshot_artifact empty")
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicScout(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicScout: %v", err)
+		}
+		scout := decodeRoomEnvelope(t, out)["scout"].(map[string]any)
+		if got := scout["snapshot_id"]; got != wantSnapshotID {
+			t.Fatalf("snapshot_id=%v want %s", got, wantSnapshotID)
+		}
+		if got := scout["snapshot_artifact"]; got != wantSnapshotArtifact {
+			t.Fatalf("snapshot_artifact=%v want %s", got, wantSnapshotArtifact)
+		}
+		for _, item := range stringSliceValue(scout["out_of_scope"]) {
+			if item == "snapshot_unavailable" {
+				t.Fatalf("out_of_scope=%v unexpectedly contains snapshot_unavailable", scout["out_of_scope"])
+			}
+		}
+	})
+
+	t.Run("planning gap epic falls back when latest snapshot pointer is stale", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, _, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicSnapshot(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicSnapshot: %v", err)
+		}
+		snapshot := decodeRoomEnvelope(t, out)
+		snapshotArtifact := strings.TrimSpace(fmt.Sprintf("%v", snapshot["snapshot_artifact"]))
+		if snapshotArtifact == "" {
+			t.Fatalf("snapshot_artifact empty")
+		}
+		if err := os.Remove(snapshotArtifact); err != nil {
+			t.Fatalf("remove snapshot artifact: %v", err)
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicScout(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicScout: %v", err)
+		}
+		scout := decodeRoomEnvelope(t, out)["scout"].(map[string]any)
+		if got := scout["snapshot_id"]; got != "snapshot-missing" {
+			t.Fatalf("snapshot_id=%v want snapshot-missing", got)
+		}
+		if got := scout["snapshot_artifact"]; got != "" {
+			t.Fatalf("snapshot_artifact=%v want empty", got)
+		}
+		gotOutOfScope := stringSliceValue(scout["out_of_scope"])
+		if len(gotOutOfScope) == 0 || gotOutOfScope[0] != "snapshot_unavailable" {
+			t.Fatalf("out_of_scope=%v want snapshot_unavailable fallback", gotOutOfScope)
+		}
+	})
+
 	t.Run("finalized epic without milestones emits milestone structural findings", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		ctx := context.Background()
