@@ -1458,6 +1458,7 @@ func newRoomStoryAddCommand() *cobra.Command {
 		workspace string
 		sender    string
 		owner     string
+		deps      []string
 	)
 	cmd := &cobra.Command{
 		Use:   "add <room-id> <milestone-id> <title> <body>",
@@ -1470,6 +1471,7 @@ func newRoomStoryAddCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Sender actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&owner, "owner", "", "Story owner actor id")
+	cmd.Flags().StringSliceVar(&deps, "dependency", nil, "Story dependency id (repeatable)")
 	return cmd
 }
 
@@ -1500,6 +1502,7 @@ func newRoomStoryUpdateCommand() *cobra.Command {
 		workspace string
 		sender    string
 		owner     string
+		deps      []string
 	)
 	cmd := &cobra.Command{
 		Use:   "update <room-id> <story-id>",
@@ -1512,6 +1515,7 @@ func newRoomStoryUpdateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&owner, "owner", "", "Updated story owner")
+	cmd.Flags().StringSliceVar(&deps, "dependency", nil, "Story dependency id (repeatable)")
 	return cmd
 }
 
@@ -4019,8 +4023,9 @@ type roomMilestoneSummaryMeta struct {
 }
 
 type roomStoryMeta struct {
-	Owner       string `json:"owner"`
-	Description string `json:"description"`
+	Owner        string   `json:"owner"`
+	Description  string   `json:"description"`
+	Dependencies []string `json:"dependencies"`
 }
 
 const (
@@ -5724,6 +5729,12 @@ func runRoomStoryAdd(cmd *cobra.Command, workspace, sender, roomID, milestoneID,
 	if title == "" || body == "" {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.add", protocol.ErrorCodeEARG, "title and body are required", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	dependencies, err := roomStoryDependencyFlagValues(cmd)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.add", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass one or more explicit story ids with --dependency when this story depends on upstream stories.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	msg := &agent.BoardMessage{
 		WorkspaceID:      absWorkspace,
 		RelatedMessageID: milestoneMsg.ID,
@@ -5733,7 +5744,7 @@ func runRoomStoryAdd(cmd *cobra.Command, workspace, sender, roomID, milestoneID,
 		Kind:             agent.BoardMessageKindStory,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Story: " + title,
-		Body:             buildRoomStoryBody(owner, body),
+		Body:             buildRoomStoryBody(owner, body, dependencies),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.add", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -5840,9 +5851,15 @@ func runRoomStoryUpdate(cmd *cobra.Command, workspace, sender, roomID, storyID, 
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	owner = strings.TrimSpace(owner)
-	if owner == "" {
-		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeEARG, "owner is required", map[string]any{
-			"hint": "Pass --owner with the participant id that should own the story.",
+	dependencies, err := roomStoryDependencyFlagValues(cmd)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Pass one or more explicit story ids with --dependency when this story depends on upstream stories.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if owner == "" && len(dependencies) == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeEARG, "owner or dependency is required", map[string]any{
+			"hint": "Pass --owner to change ownership and/or --dependency to replace explicit story dependency ids.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, storyMsg.RelatedMessageID, agent.BoardMessageKindMilestone)
@@ -5862,7 +5879,7 @@ func runRoomStoryUpdate(cmd *cobra.Command, workspace, sender, roomID, storyID, 
 		Kind:             agent.BoardMessageKindStoryUpdate,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Story Update: " + strings.TrimPrefix(strings.TrimSpace(storyMsg.Subject), "Story: "),
-		Body:             buildRoomStoryUpdateBody(owner),
+		Body:             buildRoomStoryUpdateBody(owner, dependencies),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -5879,6 +5896,17 @@ func runRoomStoryUpdate(cmd *cobra.Command, workspace, sender, roomID, storyID, 
 		"story_id":  storyMsg.ID,
 		"message":   msg,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func roomStoryDependencyFlagValues(cmd *cobra.Command) ([]string, error) {
+	if cmd == nil || cmd.Flags() == nil || cmd.Flags().Lookup("dependency") == nil {
+		return nil, nil
+	}
+	values, err := cmd.Flags().GetStringSlice("dependency")
+	if err != nil {
+		return nil, fmt.Errorf("parse --dependency flags: %w", err)
+	}
+	return normalizeRoomList(values, true), nil
 }
 
 func runRoomStoryState(cmd *cobra.Command, workspace, sender, roomID, storyID, state, reason, blockedBy, reviewer string) error {
@@ -7711,31 +7739,55 @@ func parseRoomMilestoneProposalBody(body string) roomMilestoneProposalMeta {
 	return meta
 }
 
-func buildRoomStoryBody(owner, description string) string {
+func buildRoomStoryBody(owner, description string, dependencySets ...[]string) string {
 	var b strings.Builder
 	if strings.TrimSpace(owner) != "" {
 		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
 	}
 	fmt.Fprintf(&b, "Description: %s\n", strings.TrimSpace(description))
+	var dependencies []string
+	if len(dependencySets) > 0 {
+		dependencies = dependencySets[0]
+	}
+	appendRoomSection(&b, "Dependencies", normalizeRoomList(dependencies, true))
 	return strings.TrimSpace(b.String())
 }
 
-func buildRoomStoryUpdateBody(owner string) string {
+func buildRoomStoryUpdateBody(owner string, dependencySets ...[]string) string {
 	var b strings.Builder
 	if strings.TrimSpace(owner) != "" {
 		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
 	}
+	var dependencies []string
+	if len(dependencySets) > 0 {
+		dependencies = dependencySets[0]
+	}
+	appendRoomSection(&b, "Dependencies", normalizeRoomList(dependencies, true))
 	return strings.TrimSpace(b.String())
 }
 
 func parseRoomStoryBody(body string) roomStoryMeta {
 	meta := roomStoryMeta{}
 	lines := strings.Split(body, "\n")
+	section := ""
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
+		switch trimmed {
+		case "Dependencies:":
+			section = "dependencies"
+			continue
+		}
+		if section == "dependencies" && strings.HasPrefix(trimmed, "- ") {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			if value != "" {
+				meta.Dependencies = append(meta.Dependencies, value)
+			}
+			continue
+		}
+		section = ""
 		key, value, ok := strings.Cut(trimmed, ":")
 		if !ok {
 			continue
@@ -7748,6 +7800,7 @@ func parseRoomStoryBody(body string) roomStoryMeta {
 			meta.Description = value
 		}
 	}
+	meta.Dependencies = normalizeRoomList(meta.Dependencies, true)
 	return meta
 }
 
@@ -7785,6 +7838,9 @@ func mergeRoomStoryMeta(base, patch roomStoryMeta) roomStoryMeta {
 	}
 	if strings.TrimSpace(patch.Description) != "" {
 		base.Description = strings.TrimSpace(patch.Description)
+	}
+	if len(patch.Dependencies) > 0 {
+		base.Dependencies = normalizeRoomList(patch.Dependencies, true)
 	}
 	return base
 }
@@ -9032,12 +9088,20 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 	})
 
 	milestoneByID := make(map[string]map[string]any, len(milestones))
+	storyByID := make(map[string]map[string]any)
 	for _, milestone := range milestones {
 		id := strings.TrimSpace(stringField(milestone, "id"))
 		if id == "" {
 			continue
 		}
 		milestoneByID[id] = milestone
+		for _, story := range mapSlice(milestone["stories"]) {
+			storyID := strings.TrimSpace(stringField(story, "id"))
+			if storyID == "" {
+				continue
+			}
+			storyByID[storyID] = story
+		}
 	}
 
 	readyFrontier := make([]map[string]any, 0)
@@ -9057,6 +9121,7 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 			upstream := milestoneByID[dependency]
 			if upstream == nil {
 				gap := map[string]any{
+					"dependency_kind": "milestone",
 					"milestone_id":    milestoneID,
 					"milestone_title": milestoneTitle,
 					"dependency":      dependency,
@@ -9105,14 +9170,65 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 				continue
 			}
 			acceptedStoryCount++
+			storyID := stringField(story, "id")
+			storyTitle := stringField(story, "title")
+
+			unmetStoryDependencies := make([]map[string]any, 0)
+			storyDependencyGaps := make([]map[string]any, 0)
+			for _, dependency := range roomStoryDependencyIDs(story) {
+				upstream := storyByID[dependency]
+				if upstream == nil {
+					gap := map[string]any{
+						"dependency_kind": "story",
+						"milestone_id":    milestoneID,
+						"milestone_title": milestoneTitle,
+						"story_id":        storyID,
+						"story_title":     storyTitle,
+						"dependency":      dependency,
+						"reason":          "unresolved_story_dependency",
+					}
+					storyDependencyGaps = append(storyDependencyGaps, gap)
+					if _, seen := gapSeen["story|"+storyID+"|"+dependency]; !seen {
+						dependencyGaps = append(dependencyGaps, gap)
+						gapSeen["story|"+storyID+"|"+dependency] = struct{}{}
+					}
+					continue
+				}
+				upstreamState := strings.TrimSpace(strings.ToLower(stringField(upstream, "state")))
+				if !roomStoryDependencySatisfiedState(upstreamState) {
+					unmetStoryDependencies = append(unmetStoryDependencies, map[string]any{
+						"dependency":           dependency,
+						"upstream_story_id":    stringField(upstream, "id"),
+						"upstream_story_title": stringField(upstream, "title"),
+						"upstream_state":       upstreamState,
+					})
+				}
+			}
+			sort.Slice(unmetStoryDependencies, func(i, j int) bool {
+				left := stringField(unmetStoryDependencies[i], "upstream_story_id")
+				right := stringField(unmetStoryDependencies[j], "upstream_story_id")
+				if left != right {
+					return left < right
+				}
+				return stringField(unmetStoryDependencies[i], "dependency") < stringField(unmetStoryDependencies[j], "dependency")
+			})
+			sort.Slice(storyDependencyGaps, func(i, j int) bool {
+				return stringField(storyDependencyGaps[i], "dependency") < stringField(storyDependencyGaps[j], "dependency")
+			})
 
 			storyState := strings.TrimSpace(strings.ToLower(stringField(story, "state")))
-			reasonCodes := make([]string, 0, 4)
+			reasonCodes := make([]string, 0, 6)
 			if storyState == "blocked" {
 				reasonCodes = append(reasonCodes, "story_state_blocked")
 			}
 			if milestoneStatus == "blocked" {
 				reasonCodes = append(reasonCodes, "milestone_blocked")
+			}
+			if len(unmetStoryDependencies) > 0 {
+				reasonCodes = append(reasonCodes, "unmet_story_dependency")
+			}
+			if len(storyDependencyGaps) > 0 {
+				reasonCodes = append(reasonCodes, "story_dependency_gap")
 			}
 			if len(unmetDependencies) > 0 {
 				reasonCodes = append(reasonCodes, "unmet_milestone_dependency")
@@ -9122,8 +9238,8 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 			}
 
 			item := map[string]any{
-				"story_id":         stringField(story, "id"),
-				"story_title":      stringField(story, "title"),
+				"story_id":         storyID,
+				"story_title":      storyTitle,
 				"story_state":      storyState,
 				"milestone_id":     milestoneID,
 				"milestone_title":  milestoneTitle,
@@ -9139,11 +9255,43 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 			}
 			item["reason_codes"] = reasonCodes
 			item["reason"] = buildRoomEpicFrontierBlockedReason(reasonCodes)
+			if len(unmetStoryDependencies) > 0 {
+				item["unmet_story_dependencies"] = cloneRoomMapSlice(unmetStoryDependencies)
+			}
+			if len(storyDependencyGaps) > 0 {
+				item["story_dependency_gaps"] = cloneRoomMapSlice(storyDependencyGaps)
+			}
 			if len(unmetDependencies) > 0 {
 				item["unmet_dependencies"] = cloneRoomMapSlice(unmetDependencies)
 			}
+			combinedGaps := make([]map[string]any, 0, len(milestoneGaps)+len(storyDependencyGaps))
 			if len(milestoneGaps) > 0 {
-				item["dependency_gaps"] = cloneRoomMapSlice(milestoneGaps)
+				item["milestone_dependency_gaps"] = cloneRoomMapSlice(milestoneGaps)
+				combinedGaps = append(combinedGaps, milestoneGaps...)
+			}
+			if len(storyDependencyGaps) > 0 {
+				combinedGaps = append(combinedGaps, storyDependencyGaps...)
+			}
+			if len(combinedGaps) > 0 {
+				sort.Slice(combinedGaps, func(i, j int) bool {
+					leftKind := stringField(combinedGaps[i], "dependency_kind")
+					rightKind := stringField(combinedGaps[j], "dependency_kind")
+					if leftKind != rightKind {
+						return leftKind < rightKind
+					}
+					leftMilestone := stringField(combinedGaps[i], "milestone_id")
+					rightMilestone := stringField(combinedGaps[j], "milestone_id")
+					if leftMilestone != rightMilestone {
+						return leftMilestone < rightMilestone
+					}
+					leftStory := stringField(combinedGaps[i], "story_id")
+					rightStory := stringField(combinedGaps[j], "story_id")
+					if leftStory != rightStory {
+						return leftStory < rightStory
+					}
+					return stringField(combinedGaps[i], "dependency") < stringField(combinedGaps[j], "dependency")
+				})
+				item["dependency_gaps"] = cloneRoomMapSlice(combinedGaps)
 			}
 			blockedFrontier = append(blockedFrontier, item)
 		}
@@ -9152,10 +9300,20 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 	sortRoomEpicFrontierItems(readyFrontier)
 	sortRoomEpicFrontierItems(blockedFrontier)
 	sort.Slice(dependencyGaps, func(i, j int) bool {
+		leftKind := stringField(dependencyGaps[i], "dependency_kind")
+		rightKind := stringField(dependencyGaps[j], "dependency_kind")
+		if leftKind != rightKind {
+			return leftKind < rightKind
+		}
 		leftMilestone := stringField(dependencyGaps[i], "milestone_id")
 		rightMilestone := stringField(dependencyGaps[j], "milestone_id")
 		if leftMilestone != rightMilestone {
 			return leftMilestone < rightMilestone
+		}
+		leftStory := stringField(dependencyGaps[i], "story_id")
+		rightStory := stringField(dependencyGaps[j], "story_id")
+		if leftStory != rightStory {
+			return leftStory < rightStory
 		}
 		return stringField(dependencyGaps[i], "dependency") < stringField(dependencyGaps[j], "dependency")
 	})
@@ -9170,7 +9328,7 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 		pluralS(len(milestones)),
 	)
 	if len(dependencyGaps) > 0 {
-		summary += fmt.Sprintf(" %d dependency gap%s need milestone-id fixes.", len(dependencyGaps), pluralS(len(dependencyGaps)))
+		summary += fmt.Sprintf(" %d dependency gap%s need story/milestone dependency id fixes.", len(dependencyGaps), pluralS(len(dependencyGaps)))
 	}
 
 	return map[string]any{
@@ -9190,7 +9348,7 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 		"parallelism_width": len(readyFrontier),
 		"summary":           summary,
 		"notes": []string{
-			"Story-level dependencies are not modeled in room-agile v1; frontier uses milestone dependencies and current story/milestone state only.",
+			"Frontier checks explicit story dependencies first and keeps milestone dependency checks as fallback blockers.",
 		},
 	}
 }
@@ -9242,7 +9400,7 @@ func buildRoomEpicDispatchFrontier(roomID string, frontier map[string]any) map[s
 		notes = append(notes, fmt.Sprintf("%d accepted stor%s are blocked and excluded from dispatch_units.", blockedCount, pluralSuffix(blockedCount, "y", "ies")))
 	}
 	if dependencyGapCount > 0 {
-		notes = append(notes, fmt.Sprintf("%d dependency gap%s need milestone dependency fixes before dispatch.", dependencyGapCount, pluralS(dependencyGapCount)))
+		notes = append(notes, fmt.Sprintf("%d dependency gap%s need story/milestone dependency fixes before dispatch.", dependencyGapCount, pluralS(dependencyGapCount)))
 	}
 
 	summary := fmt.Sprintf(
@@ -9311,6 +9469,23 @@ func roomMilestoneDependencyIDs(milestone map[string]any) []string {
 	return normalizeRoomList(stringSliceField(meta, "dependencies"), true)
 }
 
+func roomStoryDependencyIDs(story map[string]any) []string {
+	meta := anyMap(story["meta"])
+	if meta == nil {
+		return nil
+	}
+	return normalizeRoomList(stringSliceField(meta, "dependencies"), true)
+}
+
+func roomStoryDependencySatisfiedState(state string) bool {
+	switch strings.TrimSpace(strings.ToLower(state)) {
+	case "validated", "done", "waived", "deferred":
+		return true
+	default:
+		return false
+	}
+}
+
 func sortRoomEpicFrontierItems(items []map[string]any) {
 	sort.Slice(items, func(i, j int) bool {
 		leftMilestone := stringField(items[i], "milestone_id")
@@ -9338,6 +9513,10 @@ func buildRoomEpicFrontierBlockedReason(reasonCodes []string) string {
 			reasons = append(reasons, "story state is blocked")
 		case "milestone_blocked":
 			reasons = append(reasons, "milestone is blocked")
+		case "unmet_story_dependency":
+			reasons = append(reasons, "story has unmet upstream story dependency")
+		case "story_dependency_gap":
+			reasons = append(reasons, "story has unresolved dependency story references")
 		case "unmet_milestone_dependency":
 			reasons = append(reasons, "milestone has unmet upstream dependency")
 		case "dependency_gap":
@@ -12235,6 +12414,8 @@ func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
 			"artifacts_dir":              roomAgileStoryArtifactsDir(epicID, milestoneID, msg.ID),
 			"root":                       msg,
 			"meta":                       meta,
+			"dependencies":               meta.Dependencies,
+			"dependency_count":           len(meta.Dependencies),
 			"update_count":               len(updates),
 			"validations":                validations,
 			"validation_count":           len(validations),
@@ -13354,6 +13535,7 @@ func renderRoomStoryMarkdown(story map[string]any) string {
 	fmt.Fprintf(&b, "- ID: `%s`\n", stringField(story, "id"))
 	fmt.Fprintf(&b, "- Milestone ID: `%s`\n", stringField(story, "milestone_id"))
 	fmt.Fprintf(&b, "- State: `%s`\n", stringField(story, "state"))
+	fmt.Fprintf(&b, "- Dependency count: `%d`\n", intField(story, "dependency_count"))
 	fmt.Fprintf(&b, "- Validation count: `%d`\n", intField(story, "validation_count"))
 	if latest := stringField(story, "latest_validation_status"); latest != "" {
 		fmt.Fprintf(&b, "- Latest validation status: `%s`\n", latest)
@@ -13371,6 +13553,7 @@ func renderRoomStoryMarkdown(story map[string]any) string {
 		if owner := stringField(meta, "owner"); owner != "" {
 			fmt.Fprintf(&b, "- Owner: %s\n", owner)
 		}
+		appendMarkdownList(&b, "Dependencies", stringSliceField(meta, "dependencies"))
 		if desc := stringField(meta, "description"); desc != "" {
 			fmt.Fprintf(&b, "\n## Description\n\n%s\n", desc)
 		} else {

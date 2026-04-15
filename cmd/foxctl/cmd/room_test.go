@@ -4803,6 +4803,165 @@ func TestRunRoomEpicFrontier(t *testing.T) {
 			t.Fatalf("reason_codes=%v want dependency_gap", reasonCodes)
 		}
 	})
+
+	t.Run("blocked frontier due to unresolved story dependency id", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		cmd.Flags().StringSlice("dependency", nil, "")
+		if err := cmd.Flags().Set("dependency", "story-missing"); err != nil {
+			t.Fatalf("Set dependency story-missing: %v", err)
+		}
+		if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Blocked by unresolved story id", "Depends on a missing story id.", "human-a"); err != nil {
+			t.Fatalf("runRoomStoryAdd unresolved dependency: %v", err)
+		}
+		dependentStoryID := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicFrontier: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+
+		var dependentStory map[string]any
+		for _, raw := range data["blocked_frontier"].([]any) {
+			item := raw.(map[string]any)
+			if item["story_id"] == dependentStoryID {
+				dependentStory = item
+				break
+			}
+		}
+		if dependentStory == nil {
+			t.Fatalf("blocked_frontier missing dependent story %s", dependentStoryID)
+		}
+		reasonCodes := stringSliceValue(dependentStory["reason_codes"])
+		if !stringSliceContains(reasonCodes, "story_dependency_gap") {
+			t.Fatalf("reason_codes=%v want story_dependency_gap", reasonCodes)
+		}
+		storyGaps := dependentStory["story_dependency_gaps"].([]any)
+		if len(storyGaps) != 1 {
+			t.Fatalf("len(story_dependency_gaps)=%d want 1", len(storyGaps))
+		}
+		storyGap := storyGaps[0].(map[string]any)
+		if got := storyGap["reason"]; got != "unresolved_story_dependency" {
+			t.Fatalf("story gap reason=%v want unresolved_story_dependency", got)
+		}
+		if got := storyGap["dependency"]; got != "story-missing" {
+			t.Fatalf("story gap dependency=%v want story-missing", got)
+		}
+	})
+
+	t.Run("blocked frontier when upstream story exists but is not done", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, milestoneID, upstreamStoryID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		cmd.Flags().StringSlice("dependency", nil, "")
+		if err := cmd.Flags().Set("dependency", upstreamStoryID); err != nil {
+			t.Fatalf("Set dependency upstream story: %v", err)
+		}
+		if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Blocked by unfinished upstream story", "Depends on the upstream story reaching a terminal state.", "human-a"); err != nil {
+			t.Fatalf("runRoomStoryAdd dependent: %v", err)
+		}
+		dependentStoryID := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicFrontier: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+
+		var dependentStory map[string]any
+		for _, raw := range data["blocked_frontier"].([]any) {
+			item := raw.(map[string]any)
+			if item["story_id"] == dependentStoryID {
+				dependentStory = item
+				break
+			}
+		}
+		if dependentStory == nil {
+			t.Fatalf("blocked_frontier missing dependent story %s", dependentStoryID)
+		}
+		reasonCodes := stringSliceValue(dependentStory["reason_codes"])
+		if !stringSliceContains(reasonCodes, "unmet_story_dependency") {
+			t.Fatalf("reason_codes=%v want unmet_story_dependency", reasonCodes)
+		}
+		unmet := dependentStory["unmet_story_dependencies"].([]any)
+		if len(unmet) != 1 {
+			t.Fatalf("len(unmet_story_dependencies)=%d want 1", len(unmet))
+		}
+		upstream := unmet[0].(map[string]any)
+		if got := upstream["upstream_story_id"]; got != upstreamStoryID {
+			t.Fatalf("upstream_story_id=%v want %s", got, upstreamStoryID)
+		}
+		if got := upstream["upstream_state"]; got != "accepted" {
+			t.Fatalf("upstream_state=%v want accepted", got)
+		}
+	})
+
+	t.Run("unblocks dependent story when upstream story reaches terminal state", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, milestoneID, upstreamStoryID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		cmd.Flags().StringSlice("dependency", nil, "")
+		if err := cmd.Flags().Set("dependency", upstreamStoryID); err != nil {
+			t.Fatalf("Set dependency upstream story: %v", err)
+		}
+		if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Waits for upstream validation", "Depends on upstream story completion.", "human-a"); err != nil {
+			t.Fatalf("runRoomStoryAdd dependent: %v", err)
+		}
+		dependentStoryID := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicFrontier before upstream done: %v", err)
+		}
+		before := decodeRoomEnvelope(t, out)
+		foundBlocked := false
+		for _, raw := range before["blocked_frontier"].([]any) {
+			item := raw.(map[string]any)
+			if item["story_id"] == dependentStoryID {
+				foundBlocked = true
+				break
+			}
+		}
+		if !foundBlocked {
+			t.Fatalf("blocked_frontier=%v want dependent story %s before upstream completion", before["blocked_frontier"], dependentStoryID)
+		}
+
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", upstreamStoryID, "review", "pass", "Upstream story validated.", "docs/reviews/upstream-pass.md", "", "", "", nil); err != nil {
+			t.Fatalf("runRoomStoryValidate upstream pass: %v", err)
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicFrontier after upstream done: %v", err)
+		}
+		after := decodeRoomEnvelope(t, out)
+		foundReady := false
+		for _, raw := range after["ready_frontier"].([]any) {
+			item := raw.(map[string]any)
+			if item["story_id"] == dependentStoryID {
+				foundReady = true
+				break
+			}
+		}
+		if !foundReady {
+			t.Fatalf("ready_frontier=%v want dependent story %s after upstream completion", after["ready_frontier"], dependentStoryID)
+		}
+	})
 }
 
 func TestRunRoomEpicDispatchFrontier(t *testing.T) {
@@ -4870,6 +5029,52 @@ func TestRunRoomEpicDispatchFrontier(t *testing.T) {
 		}
 		if got := strings.TrimSpace(stringField(data, "reason")); got == "" {
 			t.Fatalf("reason empty")
+		}
+	})
+
+	t.Run("dispatch frontier reflects story dependency blockers and gaps", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, milestoneID, upstreamStoryID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		cmd.Flags().StringSlice("dependency", nil, "")
+		if err := cmd.Flags().Set("dependency", "story-missing"); err != nil {
+			t.Fatalf("Set dependency story-missing: %v", err)
+		}
+		if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Blocked dependent story", "Blocked by missing story dependency.", "human-a"); err != nil {
+			t.Fatalf("runRoomStoryAdd dependent: %v", err)
+		}
+		dependentStoryID := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100, roomEpicDispatchFrontierOptions{}); err != nil {
+			t.Fatalf("runRoomEpicDispatchFrontier: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+		if got := data["dispatchable_count"]; got != float64(1) {
+			t.Fatalf("dispatchable_count=%v want 1", got)
+		}
+		if got := data["blocked_count"]; got != float64(1) {
+			t.Fatalf("blocked_count=%v want 1", got)
+		}
+		if got := data["dependency_gap_count"]; got != float64(1) {
+			t.Fatalf("dependency_gap_count=%v want 1", got)
+		}
+		units := data["dispatch_units"].([]any)
+		if len(units) != 1 {
+			t.Fatalf("len(dispatch_units)=%d want 1", len(units))
+		}
+		if got := units[0].(map[string]any)["story_id"]; got != upstreamStoryID {
+			t.Fatalf("ready dispatch story_id=%v want %s", got, upstreamStoryID)
+		}
+		if got := strings.TrimSpace(fmt.Sprintf("%v", data["summary"])); !strings.Contains(got, "dependency gap") {
+			t.Fatalf("summary=%q want dependency gap signal", got)
+		}
+		if got := strings.TrimSpace(fmt.Sprintf("%v", data["summary"])); strings.Contains(got, dependentStoryID) {
+			t.Fatalf("summary unexpectedly includes blocked story id %q: %q", dependentStoryID, got)
 		}
 	})
 
@@ -5454,6 +5659,73 @@ func TestRunRoomEpicAndStoryUpdate(t *testing.T) {
 	cmd, _ = newRoomTestCommand(ctx)
 	if err := runRoomStoryState(cmd, workspace, "gemini-a", "alpha", storyID, "in_progress", "Started planning-owned execution.", "", ""); err != nil {
 		t.Fatalf("runRoomStoryState after owner update: %v", err)
+	}
+}
+
+func TestRunRoomStoryDependencyMetadataAddUpdateAndView(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", "story-dep-b"); err != nil {
+		t.Fatalf("Set dependency story-dep-b: %v", err)
+	}
+	if err := cmd.Flags().Set("dependency", "story-dep-a"); err != nil {
+		t.Fatalf("Set dependency story-dep-a: %v", err)
+	}
+	if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Dependency-aware story", "Story with explicit dependencies.", "human-a"); err != nil {
+		t.Fatalf("runRoomStoryAdd with dependencies: %v", err)
+	}
+	storyID := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryShow(cmd, workspace, "alpha", storyID, 100); err != nil {
+		t.Fatalf("runRoomStoryShow after add: %v", err)
+	}
+	story := decodeRoomEnvelope(t, out)["story"].(map[string]any)
+	if got := stringSliceValue(story["dependencies"]); len(got) != 2 || got[0] != "story-dep-a" || got[1] != "story-dep-b" {
+		t.Fatalf("dependencies=%v want [story-dep-a story-dep-b]", got)
+	}
+	if got := story["dependency_count"]; got != float64(2) {
+		t.Fatalf("dependency_count=%v want 2", got)
+	}
+	if got := stringSliceValue(story["meta"].(map[string]any)["dependencies"]); len(got) != 2 || got[0] != "story-dep-a" || got[1] != "story-dep-b" {
+		t.Fatalf("meta.dependencies=%v want [story-dep-a story-dep-b]", got)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", "story-dep-c"); err != nil {
+		t.Fatalf("Set dependency story-dep-c: %v", err)
+	}
+	if err := cmd.Flags().Set("dependency", "story-dep-b"); err != nil {
+		t.Fatalf("Set dependency story-dep-b: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyID, "gemini-a"); err != nil {
+		t.Fatalf("runRoomStoryUpdate with dependencies: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryShow(cmd, workspace, "alpha", storyID, 100); err != nil {
+		t.Fatalf("runRoomStoryShow after update: %v", err)
+	}
+	story = decodeRoomEnvelope(t, out)["story"].(map[string]any)
+	if got := stringSliceValue(story["dependencies"]); len(got) != 2 || got[0] != "story-dep-b" || got[1] != "story-dep-c" {
+		t.Fatalf("dependencies=%v want [story-dep-b story-dep-c]", got)
+	}
+	if got := story["dependency_count"]; got != float64(2) {
+		t.Fatalf("dependency_count=%v want 2", got)
+	}
+	meta := story["meta"].(map[string]any)
+	if got := meta["owner"]; got != "gemini-a" {
+		t.Fatalf("owner=%v want gemini-a", got)
+	}
+	if got := stringSliceValue(meta["dependencies"]); len(got) != 2 || got[0] != "story-dep-b" || got[1] != "story-dep-c" {
+		t.Fatalf("meta.dependencies=%v want [story-dep-b story-dep-c]", got)
 	}
 }
 
