@@ -1252,6 +1252,7 @@ func newRoomMilestoneContractCommand() *cobra.Command {
 		risks         []string
 		excludes      []string
 		deps          []string
+		clearDeps     bool
 		validators    []string
 		requiredLanes []string
 		optionalLanes []string
@@ -1287,6 +1288,7 @@ func newRoomMilestoneContractCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&risks, "risk", nil, "Milestone risk (repeatable)")
 	cmd.Flags().StringSliceVar(&excludes, "exclude", nil, "Milestone exclusion (repeatable)")
 	cmd.Flags().StringSliceVar(&deps, "dependency", nil, "Milestone dependency (repeatable)")
+	cmd.Flags().BoolVar(&clearDeps, "clear-dependencies", false, "Clear existing milestone dependencies before applying this update")
 	cmd.Flags().StringSliceVar(&validators, "validator", nil, "Expected validator lane (repeatable)")
 	cmd.Flags().StringSliceVar(&requiredLanes, "required-lane", nil, "Required evidence lane for milestone exit (repeatable)")
 	cmd.Flags().StringSliceVar(&optionalLanes, "optional-lane", nil, "Optional evidence lane worth tracking but not required for exit (repeatable)")
@@ -1503,6 +1505,7 @@ func newRoomStoryUpdateCommand() *cobra.Command {
 		sender    string
 		owner     string
 		deps      []string
+		clearDeps bool
 	)
 	cmd := &cobra.Command{
 		Use:   "update <room-id> <story-id>",
@@ -1516,6 +1519,7 @@ func newRoomStoryUpdateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&owner, "owner", "", "Updated story owner")
 	cmd.Flags().StringSliceVar(&deps, "dependency", nil, "Story dependency id (repeatable)")
+	cmd.Flags().BoolVar(&clearDeps, "clear-dependencies", false, "Clear existing story dependencies before applying this update")
 	return cmd
 }
 
@@ -4002,6 +4006,7 @@ type roomMilestoneMeta struct {
 	Risks                 []string `json:"risks"`
 	Exclusions            []string `json:"exclusions"`
 	Dependencies          []string `json:"dependencies"`
+	DependenciesSet       bool     `json:"-"`
 	ValidatorsExpected    []string `json:"validators_expected"`
 	RequiredEvidenceLanes []string `json:"required_evidence_lanes"`
 	OptionalEvidenceLanes []string `json:"optional_evidence_lanes"`
@@ -4023,9 +4028,10 @@ type roomMilestoneSummaryMeta struct {
 }
 
 type roomStoryMeta struct {
-	Owner        string   `json:"owner"`
-	Description  string   `json:"description"`
-	Dependencies []string `json:"dependencies"`
+	Owner           string   `json:"owner"`
+	Description     string   `json:"description"`
+	Dependencies    []string `json:"dependencies"`
+	DependenciesSet bool     `json:"-"`
 }
 
 const (
@@ -5385,11 +5391,18 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 			"hint": "Use a milestone id returned by `foxctl room milestone start` or listed in `foxctl room milestone show`.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	dependencies, dependenciesSet, err := roomDependencyPatchFromFlags(cmd, dependencies)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.milestone.contract", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use either --dependency to replace dependency ids or --clear-dependencies to remove all dependency ids.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 	patch, err := normalizeRoomMilestoneContract(roomMilestoneMeta{
 		Objective:             objective,
 		Risks:                 risks,
 		Exclusions:            exclusions,
 		Dependencies:          dependencies,
+		DependenciesSet:       dependenciesSet,
 		ValidatorsExpected:    validatorsExpected,
 		RequiredEvidenceLanes: requiredEvidenceLanes,
 		OptionalEvidenceLanes: optionalEvidenceLanes,
@@ -5402,9 +5415,9 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 			"hint": "Use supported validator values: review, test, integration, user_test, manual_check, audit.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	if patch.Objective == "" && len(patch.Risks) == 0 && len(patch.Exclusions) == 0 && len(patch.Dependencies) == 0 && len(patch.ValidatorsExpected) == 0 && len(patch.RequiredEvidenceLanes) == 0 && len(patch.OptionalEvidenceLanes) == 0 && !patch.EnforceExitPolicySet && len(patch.ExitCriteria) == 0 {
+	if patch.Objective == "" && len(patch.Risks) == 0 && len(patch.Exclusions) == 0 && !patch.DependenciesSet && len(patch.ValidatorsExpected) == 0 && len(patch.RequiredEvidenceLanes) == 0 && len(patch.OptionalEvidenceLanes) == 0 && !patch.EnforceExitPolicySet && len(patch.ExitCriteria) == 0 {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.milestone.contract", protocol.ErrorCodeEARG, "at least one contract field is required", map[string]any{
-			"hint": "Pass --objective, --risk, --exclude, --dependency, --validator, --required-lane, --optional-lane, or --exit.",
+			"hint": "Pass --objective, --risk, --exclude, --dependency, --clear-dependencies, --validator, --required-lane, --optional-lane, or --exit.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
@@ -5417,7 +5430,7 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 		Kind:             agent.BoardMessageKindMilestoneContract,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Milestone Contract: " + strings.TrimPrefix(strings.TrimSpace(milestoneMsg.Subject), "Milestone: "),
-		Body:             buildRoomMilestoneBody("", "", "", patch.Objective, "", nil, patch.Risks, patch.Exclusions, patch.Dependencies, patch.ValidatorsExpected, patch.RequiredEvidenceLanes, patch.OptionalEvidenceLanes, roomMilestoneEnforcePolicyPtr(patch), patch.ExitCriteria, patch.LaneKind, patch.FollowupPolicy),
+		Body:             buildRoomMilestoneContractPatchBody(patch),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.milestone.contract", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -5851,15 +5864,15 @@ func runRoomStoryUpdate(cmd *cobra.Command, workspace, sender, roomID, storyID, 
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	owner = strings.TrimSpace(owner)
-	dependencies, err := roomStoryDependencyFlagValues(cmd)
+	dependencies, dependenciesSet, err := roomDependencyPatchFromFlags(cmd, nil)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeEARG, err.Error(), map[string]any{
-			"hint": "Pass one or more explicit story ids with --dependency when this story depends on upstream stories.",
+			"hint": "Use either --dependency to replace dependency ids or --clear-dependencies to remove all dependency ids.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	if owner == "" && len(dependencies) == 0 {
+	if owner == "" && !dependenciesSet {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeEARG, "owner or dependency is required", map[string]any{
-			"hint": "Pass --owner to change ownership and/or --dependency to replace explicit story dependency ids.",
+			"hint": "Pass --owner, --dependency, or --clear-dependencies.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, storyMsg.RelatedMessageID, agent.BoardMessageKindMilestone)
@@ -5879,7 +5892,7 @@ func runRoomStoryUpdate(cmd *cobra.Command, workspace, sender, roomID, storyID, 
 		Kind:             agent.BoardMessageKindStoryUpdate,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Story Update: " + strings.TrimPrefix(strings.TrimSpace(storyMsg.Subject), "Story: "),
-		Body:             buildRoomStoryUpdateBody(owner, dependencies),
+		Body:             buildRoomStoryUpdateBody(owner, dependencies, dependenciesSet),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -5907,6 +5920,42 @@ func roomStoryDependencyFlagValues(cmd *cobra.Command) ([]string, error) {
 		return nil, fmt.Errorf("parse --dependency flags: %w", err)
 	}
 	return normalizeRoomList(values, true), nil
+}
+
+func roomDependencyPatchFromFlags(cmd *cobra.Command, fallback []string) ([]string, bool, error) {
+	base := normalizeRoomList(fallback, true)
+	dependencies := append([]string(nil), base...)
+	dependenciesSet := len(base) > 0
+	if cmd == nil || cmd.Flags() == nil {
+		return dependencies, dependenciesSet, nil
+	}
+	flags := cmd.Flags()
+	dependencyChanged := false
+	if flags.Lookup("dependency") != nil {
+		dependencyChanged = flags.Changed("dependency")
+		if dependencyChanged {
+			values, err := flags.GetStringSlice("dependency")
+			if err != nil {
+				return nil, false, fmt.Errorf("parse --dependency flags: %w", err)
+			}
+			dependencies = normalizeRoomList(values, true)
+			dependenciesSet = true
+		}
+	}
+	if flags.Lookup("clear-dependencies") != nil {
+		clearDependencies, err := flags.GetBool("clear-dependencies")
+		if err != nil {
+			return nil, false, fmt.Errorf("parse --clear-dependencies flag: %w", err)
+		}
+		if clearDependencies {
+			if dependencyChanged || len(base) > 0 {
+				return nil, false, errors.New("--dependency and --clear-dependencies cannot be combined")
+			}
+			dependencies = nil
+			dependenciesSet = true
+		}
+	}
+	return dependencies, dependenciesSet, nil
 }
 
 func runRoomStoryState(cmd *cobra.Command, workspace, sender, roomID, storyID, state, reason, blockedBy, reviewer string) error {
@@ -7512,6 +7561,24 @@ func buildRoomMilestoneBody(epicID, title, goal, objective, owner string, scope,
 	return strings.TrimSpace(b.String())
 }
 
+func buildRoomMilestoneContractPatchBody(patch roomMilestoneMeta) string {
+	var b strings.Builder
+	if strings.TrimSpace(patch.Objective) != "" {
+		fmt.Fprintf(&b, "Objective: %s\n", strings.TrimSpace(patch.Objective))
+	}
+	appendRoomSection(&b, "Risks", patch.Risks)
+	appendRoomSection(&b, "Exclusions", patch.Exclusions)
+	appendRoomSectionWithOptions(&b, "Dependencies", patch.Dependencies, patch.DependenciesSet)
+	appendRoomSection(&b, "ValidatorsExpected", patch.ValidatorsExpected)
+	appendRoomSection(&b, "RequiredEvidenceLanes", patch.RequiredEvidenceLanes)
+	appendRoomSection(&b, "OptionalEvidenceLanes", patch.OptionalEvidenceLanes)
+	if patch.EnforceExitPolicySet {
+		fmt.Fprintf(&b, "EnforceExitPolicy: %t\n", patch.EnforceExitPolicy)
+	}
+	appendRoomSection(&b, "ExitCriteria", patch.ExitCriteria)
+	return strings.TrimSpace(b.String())
+}
+
 func parseRoomMilestoneBody(body string) roomMilestoneMeta {
 	meta := roomMilestoneMeta{}
 	lines := strings.Split(body, "\n")
@@ -7536,6 +7603,7 @@ func parseRoomMilestoneBody(body string) roomMilestoneMeta {
 			continue
 		case "Dependencies:":
 			section = "dependencies"
+			meta.DependenciesSet = true
 			continue
 		case "ValidatorsExpected:":
 			section = "validators"
@@ -7753,16 +7821,12 @@ func buildRoomStoryBody(owner, description string, dependencySets ...[]string) s
 	return strings.TrimSpace(b.String())
 }
 
-func buildRoomStoryUpdateBody(owner string, dependencySets ...[]string) string {
+func buildRoomStoryUpdateBody(owner string, dependencies []string, dependenciesSet bool) string {
 	var b strings.Builder
 	if strings.TrimSpace(owner) != "" {
 		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
 	}
-	var dependencies []string
-	if len(dependencySets) > 0 {
-		dependencies = dependencySets[0]
-	}
-	appendRoomSection(&b, "Dependencies", normalizeRoomList(dependencies, true))
+	appendRoomSectionWithOptions(&b, "Dependencies", normalizeRoomList(dependencies, true), dependenciesSet)
 	return strings.TrimSpace(b.String())
 }
 
@@ -7778,6 +7842,7 @@ func parseRoomStoryBody(body string) roomStoryMeta {
 		switch trimmed {
 		case "Dependencies:":
 			section = "dependencies"
+			meta.DependenciesSet = true
 			continue
 		}
 		if section == "dependencies" && strings.HasPrefix(trimmed, "- ") {
@@ -7839,7 +7904,9 @@ func mergeRoomStoryMeta(base, patch roomStoryMeta) roomStoryMeta {
 	if strings.TrimSpace(patch.Description) != "" {
 		base.Description = strings.TrimSpace(patch.Description)
 	}
-	if len(patch.Dependencies) > 0 {
+	if patch.DependenciesSet {
+		base.Dependencies = normalizeRoomList(patch.Dependencies, true)
+	} else if len(patch.Dependencies) > 0 {
 		base.Dependencies = normalizeRoomList(patch.Dependencies, true)
 	}
 	return base
@@ -8089,7 +8156,9 @@ func mergeRoomMilestoneMeta(base roomMilestoneMeta, patch roomMilestoneMeta) roo
 	if len(patch.Exclusions) > 0 {
 		base.Exclusions = mergeRoomList(base.Exclusions, patch.Exclusions, true)
 	}
-	if len(patch.Dependencies) > 0 {
+	if patch.DependenciesSet {
+		base.Dependencies = normalizeRoomList(patch.Dependencies, true)
+	} else if len(patch.Dependencies) > 0 {
 		base.Dependencies = mergeRoomList(base.Dependencies, patch.Dependencies, true)
 	}
 	if len(patch.ValidatorsExpected) > 0 {
@@ -8406,6 +8475,10 @@ func parseRoomGuidanceUpdateBody(body string) roomGuidanceUpdateMeta {
 }
 
 func appendRoomSection(b *strings.Builder, label string, items []string) {
+	appendRoomSectionWithOptions(b, label, items, false)
+}
+
+func appendRoomSectionWithOptions(b *strings.Builder, label string, items []string, includeEmpty bool) {
 	clean := make([]string, 0, len(items))
 	for _, item := range items {
 		item = strings.TrimSpace(item)
@@ -8413,7 +8486,7 @@ func appendRoomSection(b *strings.Builder, label string, items []string) {
 			clean = append(clean, item)
 		}
 	}
-	if len(clean) == 0 {
+	if len(clean) == 0 && !includeEmpty {
 		return
 	}
 	fmt.Fprintf(b, "%s:\n", label)
@@ -9532,6 +9605,7 @@ func buildRoomEpicFrontierBlockedReason(reasonCodes []string) string {
 var roomEpicScoutRuleFamilies = []string{
 	"brief_boundary",
 	"milestone_contract",
+	"dependency_topology",
 	"criteria_coverage",
 	"owner_dispatch",
 	"validation_lane",
@@ -9857,6 +9931,8 @@ func buildRoomEpicScoutFindings(epic, health map[string]any) []map[string]any {
 		}
 	}
 
+	findings = append(findings, buildRoomEpicDependencyTopologyFindings(epicID, milestones)...)
+
 	for _, missing := range mapSlice(health["stories_missing_validation"]) {
 		storyID := stringField(missing, "id")
 		findings = append(findings, map[string]any{
@@ -9899,6 +9975,123 @@ func buildRoomEpicScoutFindings(epic, health map[string]any) []map[string]any {
 		}
 		return stringField(findings[i], "id") < stringField(findings[j], "id")
 	})
+	return findings
+}
+
+func buildRoomEpicDependencyTopologyFindings(epicID string, milestones []map[string]any) []map[string]any {
+	findings := make([]map[string]any, 0)
+	milestoneByID := make(map[string]struct{}, len(milestones))
+	storyByID := make(map[string]struct{})
+	for _, milestone := range milestones {
+		milestoneID := strings.TrimSpace(stringField(milestone, "id"))
+		if milestoneID == "" {
+			continue
+		}
+		milestoneByID[milestoneID] = struct{}{}
+		for _, story := range mapSlice(milestone["stories"]) {
+			storyID := strings.TrimSpace(stringField(story, "id"))
+			if storyID == "" {
+				continue
+			}
+			storyByID[storyID] = struct{}{}
+		}
+	}
+	for _, milestone := range milestones {
+		milestoneID := strings.TrimSpace(stringField(milestone, "id"))
+		if milestoneID == "" {
+			continue
+		}
+		for _, dependencyID := range roomMilestoneDependencyIDs(milestone) {
+			switch {
+			case dependencyID == milestoneID:
+				findings = append(findings, map[string]any{
+					"id":                       fmt.Sprintf("dependency_topology:milestone:%s:self", milestoneID),
+					"rule_family":              "dependency_topology",
+					"severity":                 "blocking",
+					"entity_type":              "milestone",
+					"entity_id":                milestoneID,
+					"title":                    "Milestone depends on itself",
+					"summary":                  "Milestone dependency ids must reference upstream milestones, never the same milestone id.",
+					"recommended_repair_lanes": []string{"milestone.contract"},
+					"evidence": map[string]any{
+						"epic_id":       epicID,
+						"milestone_id":  milestoneID,
+						"dependency_id": dependencyID,
+						"reason":        "self_milestone_dependency",
+					},
+				})
+			default:
+				if _, ok := milestoneByID[dependencyID]; ok {
+					continue
+				}
+				findings = append(findings, map[string]any{
+					"id":                       fmt.Sprintf("dependency_topology:milestone:%s:unresolved:%s", milestoneID, dependencyID),
+					"rule_family":              "dependency_topology",
+					"severity":                 "blocking",
+					"entity_type":              "milestone",
+					"entity_id":                milestoneID,
+					"title":                    "Milestone dependency id is unresolved",
+					"summary":                  "Milestone dependency ids must resolve to existing milestone ids in this epic.",
+					"recommended_repair_lanes": []string{"milestone.contract"},
+					"evidence": map[string]any{
+						"epic_id":       epicID,
+						"milestone_id":  milestoneID,
+						"dependency_id": dependencyID,
+						"reason":        "unresolved_milestone_dependency",
+					},
+				})
+			}
+		}
+		for _, story := range mapSlice(milestone["stories"]) {
+			storyID := strings.TrimSpace(stringField(story, "id"))
+			if storyID == "" {
+				continue
+			}
+			for _, dependencyID := range roomStoryDependencyIDs(story) {
+				switch {
+				case dependencyID == storyID:
+					findings = append(findings, map[string]any{
+						"id":                       fmt.Sprintf("dependency_topology:story:%s:self", storyID),
+						"rule_family":              "dependency_topology",
+						"severity":                 "blocking",
+						"entity_type":              "story",
+						"entity_id":                storyID,
+						"title":                    "Story depends on itself",
+						"summary":                  "Story dependency ids must reference upstream stories, never the same story id.",
+						"recommended_repair_lanes": []string{"story.update"},
+						"evidence": map[string]any{
+							"epic_id":       epicID,
+							"milestone_id":  milestoneID,
+							"story_id":      storyID,
+							"dependency_id": dependencyID,
+							"reason":        "self_story_dependency",
+						},
+					})
+				default:
+					if _, ok := storyByID[dependencyID]; ok {
+						continue
+					}
+					findings = append(findings, map[string]any{
+						"id":                       fmt.Sprintf("dependency_topology:story:%s:unresolved:%s", storyID, dependencyID),
+						"rule_family":              "dependency_topology",
+						"severity":                 "blocking",
+						"entity_type":              "story",
+						"entity_id":                storyID,
+						"title":                    "Story dependency id is unresolved",
+						"summary":                  "Story dependency ids must resolve to existing stories in this epic.",
+						"recommended_repair_lanes": []string{"story.update"},
+						"evidence": map[string]any{
+							"epic_id":       epicID,
+							"milestone_id":  milestoneID,
+							"story_id":      storyID,
+							"dependency_id": dependencyID,
+							"reason":        "unresolved_story_dependency",
+						},
+					})
+				}
+			}
+		}
+	}
 	return findings
 }
 
@@ -10209,6 +10402,23 @@ func buildRoomEpicGrade(epic, health, scout map[string]any, mission *factoryMiss
 	}
 	meta := anyMap(epic["meta"])
 	scoutTotalFindings, scoutBlockingFindings, scoutFamilyCounts, scoutStatusPhase, scoutSchemaVersion := deriveRoomEpicGradeScoutSignals(scout)
+	dependencyTopologyMilestoneCount := 0
+	dependencyTopologyStoryCount := 0
+	for _, finding := range mapSlice(scout["findings"]) {
+		if stringField(finding, "rule_family") != "dependency_topology" {
+			continue
+		}
+		switch stringField(finding, "entity_type") {
+		case "milestone":
+			dependencyTopologyMilestoneCount++
+		case "story":
+			dependencyTopologyStoryCount++
+		}
+	}
+	dependencyTopologyCount := dependencyTopologyMilestoneCount + dependencyTopologyStoryCount
+	if scoutFamilyCounts["dependency_topology"] > dependencyTopologyCount {
+		dependencyTopologyCount = scoutFamilyCounts["dependency_topology"]
+	}
 	acc := roomEpicGradeAccumulator{
 		blockers: make([]string, 0),
 		actions:  make([]string, 0),
@@ -10291,6 +10501,11 @@ func buildRoomEpicGrade(epic, health, scout map[string]any, mission *factoryMiss
 		deduct(&milestoneScore, minInt(4, missingCriteria*2), fmt.Sprintf("%d milestone(s) have no acceptance criteria.", missingCriteria), &milestoneReasons)
 		deduct(&milestoneScore, minInt(2, missingObjective), fmt.Sprintf("%d milestone(s) are missing objectives.", missingObjective), &milestoneReasons)
 		deduct(&milestoneScore, minInt(3, missingValidationContract), fmt.Sprintf("%d milestone(s) do not express validator or evidence expectations.", missingValidationContract), &milestoneReasons)
+		if dependencyTopologyMilestoneCount > 0 {
+			deduct(&milestoneScore, minInt(3, dependencyTopologyMilestoneCount), fmt.Sprintf("Scout reports %d milestone dependency-topology issue%s.", dependencyTopologyMilestoneCount, pluralS(dependencyTopologyMilestoneCount)), &milestoneReasons)
+			addUnique(&acc.blockers, "One or more milestones have unresolved or self-referential dependency ids.")
+			addUnique(&acc.actions, "Repair milestone dependency ids with `foxctl room milestone contract <room-id> <milestone-id> --dependency <milestone-id>` or clear stale edges with `--clear-dependencies`.")
+		}
 		if missingContract > 0 {
 			addUnique(&acc.blockers, "One or more milestones are missing an explicit contract.")
 			addUnique(&acc.actions, "Add milestone contracts with objective, validators, evidence lanes, and exit policy.")
@@ -10325,6 +10540,11 @@ func buildRoomEpicGrade(epic, health, scout map[string]any, mission *factoryMiss
 		}
 		deduct(&storyScore, minInt(8, missingDescription*3), fmt.Sprintf("%d stor%s lack description detail.", missingDescription, pluralSuffix(missingDescription, "y", "ies")), &storyReasons)
 		deduct(&storyScore, minInt(4, missingOwner), fmt.Sprintf("%d stor%s lack an owner.", missingOwner, pluralSuffix(missingOwner, "y", "ies")), &storyReasons)
+		if dependencyTopologyStoryCount > 0 {
+			deduct(&storyScore, minInt(4, dependencyTopologyStoryCount*2), fmt.Sprintf("Scout reports %d story dependency-topology issue%s.", dependencyTopologyStoryCount, pluralS(dependencyTopologyStoryCount)), &storyReasons)
+			addUnique(&acc.blockers, "One or more stories have unresolved or self-referential dependency ids.")
+			addUnique(&acc.actions, "Repair story dependency ids with `foxctl room story update <room-id> <story-id> --dependency <story-id>` or clear stale edges with `--clear-dependencies`.")
+		}
 		if mission != nil {
 			expectedStories := len(mission.Features)
 			if expectedStories != len(stories) {
@@ -10527,6 +10747,9 @@ func buildRoomEpicGrade(epic, health, scout map[string]any, mission *factoryMiss
 	categories = append(categories, category("Implementation-Plan Readiness", 20, readinessScore, readinessReasons))
 	if scoutTotalFindings > 0 || scoutStatusPhase != "" {
 		addUnique(&acc.notes, fmt.Sprintf("Scout signals: phase=%s, findings=%d, blocking=%d.", firstNonEmpty(scoutStatusPhase, "unknown"), scoutTotalFindings, scoutBlockingFindings))
+	}
+	if dependencyTopologyCount > 0 {
+		addUnique(&acc.notes, fmt.Sprintf("Dependency topology findings: %d.", dependencyTopologyCount))
 	}
 
 	total := 0

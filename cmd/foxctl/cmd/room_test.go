@@ -3388,8 +3388,8 @@ func TestRunRoomMilestoneContractStartAndUpdate(t *testing.T) {
 	if got := milestone["risk_count"]; got != float64(2) {
 		t.Fatalf("risk_count=%v want 2", got)
 	}
-	if got := milestone["dependency_count"]; got != float64(2) {
-		t.Fatalf("dependency_count=%v want 2", got)
+	if got := milestone["dependency_count"]; got != float64(1) {
+		t.Fatalf("dependency_count=%v want 1", got)
 	}
 	if got := milestone["validator_count"]; got != float64(3) {
 		t.Fatalf("validator_count=%v want 3", got)
@@ -4526,6 +4526,56 @@ func TestRunRoomEpicGrade(t *testing.T) {
 	})
 }
 
+func TestRunRoomEpicGradeDependencyTopologyPenalty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, _, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicGrade(cmd, workspace, "alpha", epicID, 100, "", roomEpicGradePublishOptions{}); err != nil {
+		t.Fatalf("runRoomEpicGrade baseline: %v", err)
+	}
+	baselineGrade := decodeRoomEnvelope(t, out)["grade"].(map[string]any)
+	baselineStoryScore := roomCategoryScoreByName(t, baselineGrade["categories"].([]any), "Story Shape")
+	baselineFamilyCounts := baselineGrade["scout_signals"].(map[string]any)["family_counts"].(map[string]any)
+	if got := baselineFamilyCounts["dependency_topology"]; got != float64(0) {
+		t.Fatalf("baseline dependency_topology=%v want 0", got)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", "missing-story-id"); err != nil {
+		t.Fatalf("Set dependency: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyID, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicGrade(cmd, workspace, "alpha", epicID, 100, "", roomEpicGradePublishOptions{}); err != nil {
+		t.Fatalf("runRoomEpicGrade after topology issue: %v", err)
+	}
+	grade := decodeRoomEnvelope(t, out)["grade"].(map[string]any)
+	storyScore := roomCategoryScoreByName(t, grade["categories"].([]any), "Story Shape")
+	if storyScore != baselineStoryScore-2 {
+		t.Fatalf("Story Shape score=%d want baseline-2 (%d)", storyScore, baselineStoryScore-2)
+	}
+	familyCounts := grade["scout_signals"].(map[string]any)["family_counts"].(map[string]any)
+	if got := familyCounts["dependency_topology"]; got != float64(1) {
+		t.Fatalf("dependency_topology family count=%v want 1", got)
+	}
+	reasons := roomCategoryReasonsByName(t, grade["categories"].([]any), "Story Shape")
+	if !roomStringSliceContainsSubstring(reasons, "dependency-topology") {
+		t.Fatalf("Story Shape reasons=%v want dependency-topology reason", reasons)
+	}
+	blockers := stringSliceValue(grade["blockers"])
+	if !roomStringSliceContainsSubstring(blockers, "stories have unresolved or self-referential dependency ids") {
+		t.Fatalf("blockers=%v want dependency topology blocker", blockers)
+	}
+}
+
 func TestRunRoomEpicStatus(t *testing.T) {
 	t.Run("planning gap epic", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
@@ -5371,6 +5421,7 @@ func TestRunRoomEpicScout(t *testing.T) {
 		wantCounts := map[string]float64{
 			"brief_boundary":       1,
 			"milestone_contract":   1,
+			"dependency_topology":  0,
 			"criteria_coverage":    1,
 			"owner_dispatch":       0,
 			"validation_lane":      1,
@@ -5619,6 +5670,65 @@ func TestRunRoomEpicScout(t *testing.T) {
 	})
 }
 
+func TestRunRoomEpicScoutDependencyTopologyFindings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, []string{milestoneID, "missing-milestone-id"}, nil, nil, nil, nil, nil); err != nil {
+		t.Fatalf("runRoomMilestoneContractWithPolicy: %v", err)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", storyID); err != nil {
+		t.Fatalf("Set dependency self: %v", err)
+	}
+	if err := cmd.Flags().Set("dependency", "missing-story-id"); err != nil {
+		t.Fatalf("Set dependency missing: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyID, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicScout(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicScout: %v", err)
+	}
+	scout := decodeRoomEnvelope(t, out)["scout"].(map[string]any)
+	signals := scout["signals"].(map[string]any)
+	familyCounts := signals["family_counts"].(map[string]any)
+	if got := familyCounts["dependency_topology"]; got != float64(4) {
+		t.Fatalf("dependency_topology family count=%v want 4", got)
+	}
+
+	gotIDs := make(map[string]struct{})
+	for _, raw := range scout["findings"].([]any) {
+		finding := raw.(map[string]any)
+		if finding["rule_family"] != "dependency_topology" {
+			continue
+		}
+		gotIDs[finding["id"].(string)] = struct{}{}
+	}
+	wantIDs := []string{
+		fmt.Sprintf("dependency_topology:milestone:%s:self", milestoneID),
+		fmt.Sprintf("dependency_topology:milestone:%s:unresolved:missing-milestone-id", milestoneID),
+		fmt.Sprintf("dependency_topology:story:%s:self", storyID),
+		fmt.Sprintf("dependency_topology:story:%s:unresolved:missing-story-id", storyID),
+	}
+	if len(gotIDs) != len(wantIDs) {
+		t.Fatalf("dependency_topology findings=%v want %v", gotIDs, wantIDs)
+	}
+	for _, id := range wantIDs {
+		if _, ok := gotIDs[id]; !ok {
+			t.Fatalf("missing dependency_topology finding %q (got=%v)", id, gotIDs)
+		}
+	}
+}
+
 func TestRunRoomEpicAndStoryUpdate(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
@@ -5726,6 +5836,96 @@ func TestRunRoomStoryDependencyMetadataAddUpdateAndView(t *testing.T) {
 	}
 	if got := stringSliceValue(meta["dependencies"]); len(got) != 2 || got[0] != "story-dep-b" || got[1] != "story-dep-c" {
 		t.Fatalf("meta.dependencies=%v want [story-dep-b story-dep-c]", got)
+	}
+}
+
+func TestRunRoomStoryUpdateCanClearDependencies(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, _, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	cmd.Flags().StringSlice("dependency", nil, "")
+	if err := cmd.Flags().Set("dependency", "story-dep-a"); err != nil {
+		t.Fatalf("Set dependency story-dep-a: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyID, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate set dependency: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomStoryShow(cmd, workspace, "alpha", storyID, 100); err != nil {
+		t.Fatalf("runRoomStoryShow after set: %v", err)
+	}
+	story := decodeRoomEnvelope(t, out)["story"].(map[string]any)
+	if got := stringSliceValue(story["dependencies"]); len(got) != 1 || got[0] != "story-dep-a" {
+		t.Fatalf("dependencies=%v want [story-dep-a]", got)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().Bool("clear-dependencies", false, "")
+	if err := cmd.Flags().Set("clear-dependencies", "true"); err != nil {
+		t.Fatalf("Set clear-dependencies: %v", err)
+	}
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyID, ""); err != nil {
+		t.Fatalf("runRoomStoryUpdate clear dependencies: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryShow(cmd, workspace, "alpha", storyID, 100); err != nil {
+		t.Fatalf("runRoomStoryShow after clear: %v", err)
+	}
+	story = decodeRoomEnvelope(t, out)["story"].(map[string]any)
+	if got := stringSliceValue(story["dependencies"]); len(got) != 0 {
+		t.Fatalf("dependencies=%v want empty", got)
+	}
+	if got := story["dependency_count"]; got != float64(0) {
+		t.Fatalf("dependency_count=%v want 0", got)
+	}
+}
+
+func TestRunRoomMilestoneContractCanClearDependencies(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, []string{"milestone-dep-a"}, nil, nil, nil, nil, nil); err != nil {
+		t.Fatalf("runRoomMilestoneContractWithPolicy set dependency: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow after set: %v", err)
+	}
+	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := stringSliceValue(milestone["meta"].(map[string]any)["dependencies"]); len(got) != 1 || got[0] != "milestone-dep-a" {
+		t.Fatalf("meta.dependencies=%v want [milestone-dep-a]", got)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().Bool("clear-dependencies", false, "")
+	if err := cmd.Flags().Set("clear-dependencies", "true"); err != nil {
+		t.Fatalf("Set clear-dependencies: %v", err)
+	}
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
+		t.Fatalf("runRoomMilestoneContractWithPolicy clear dependencies: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow after clear: %v", err)
+	}
+	milestone = decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := stringSliceValue(milestone["meta"].(map[string]any)["dependencies"]); len(got) != 0 {
+		t.Fatalf("meta.dependencies=%v want empty", got)
+	}
+	if got := milestone["dependency_count"]; got != float64(0) {
+		t.Fatalf("dependency_count=%v want 0", got)
 	}
 }
 
