@@ -4814,7 +4814,9 @@ func TestRunRoomEpicDispatchFrontier(t *testing.T) {
 		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 		cmd, out := newRoomTestCommand(ctx)
-		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100, roomEpicDispatchFrontierOptions{
+			Dispatch: roomEpicGradeDispatchOptions{Spawn: false},
+		}); err != nil {
 			t.Fatalf("runRoomEpicDispatchFrontier: %v", err)
 		}
 		data := decodeRoomEnvelope(t, out)
@@ -4850,7 +4852,7 @@ func TestRunRoomEpicDispatchFrontier(t *testing.T) {
 		}
 
 		cmd, out := newRoomTestCommand(ctx)
-		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100, roomEpicDispatchFrontierOptions{}); err != nil {
 			t.Fatalf("runRoomEpicDispatchFrontier: %v", err)
 		}
 		data := decodeRoomEnvelope(t, out)
@@ -4891,7 +4893,7 @@ func TestRunRoomEpicDispatchFrontier(t *testing.T) {
 		}
 
 		cmd, out = newRoomTestCommand(ctx)
-		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100, roomEpicDispatchFrontierOptions{}); err != nil {
 			t.Fatalf("runRoomEpicDispatchFrontier first: %v", err)
 		}
 		firstUnits := decodeRoomEnvelope(t, out)["dispatch_units"].([]any)
@@ -4906,7 +4908,7 @@ func TestRunRoomEpicDispatchFrontier(t *testing.T) {
 		}
 
 		cmd, out = newRoomTestCommand(ctx)
-		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100, roomEpicDispatchFrontierOptions{}); err != nil {
 			t.Fatalf("runRoomEpicDispatchFrontier second: %v", err)
 		}
 		secondUnits := decodeRoomEnvelope(t, out)["dispatch_units"].([]any)
@@ -4918,6 +4920,151 @@ func TestRunRoomEpicDispatchFrontier(t *testing.T) {
 		}
 		if got := stringField(secondUnits[1].(map[string]any), "story_id"); got != secondExpected {
 			t.Fatalf("second run second story_id=%s want %s", got, secondExpected)
+		}
+	})
+
+	t.Run("spawn dry-run with one ready unit returns selected unit and spawn data", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, _, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100, roomEpicDispatchFrontierOptions{
+			Dispatch: roomEpicGradeDispatchOptions{
+				Spawn:         true,
+				SpawnDryRun:   true,
+				LLMProvider:   "lmstudio",
+				LLMModel:      "qwen2.5-coder-7b-instruct",
+				ExecMode:      "autonomous",
+				MaxAutoTurns:  2,
+				MaxIterations: 12,
+				RoomAccess:    "direct",
+			},
+		}); err != nil {
+			t.Fatalf("runRoomEpicDispatchFrontier spawn dry-run: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+		dispatch := data["dispatch"].(map[string]any)
+		if got := dispatch["story_id"]; got != storyID {
+			t.Fatalf("dispatch.story_id=%v want %s", got, storyID)
+		}
+		selected := dispatch["selected_unit"].(map[string]any)
+		if got := selected["story_id"]; got != storyID {
+			t.Fatalf("selected story_id=%v want %s", got, storyID)
+		}
+		spawn := dispatch["spawn"].(map[string]any)
+		if got := spawn["spawned"]; got != false {
+			t.Fatalf("spawn.spawned=%v want false", got)
+		}
+		if got := spawn["dry_run"]; got != true {
+			t.Fatalf("spawn.dry_run=%v want true", got)
+		}
+		if got := strings.TrimSpace(stringField(spawn, "role")); got != roomEpicDispatchFrontierDefaultAgentRole {
+			t.Fatalf("spawn.role=%q want %q", got, roomEpicDispatchFrontierDefaultAgentRole)
+		}
+		if got := spawn["planning_only"]; got != false {
+			t.Fatalf("spawn.planning_only=%v want false", got)
+		}
+		if got := spawn["execution_dispatch"]; got != true {
+			t.Fatalf("spawn.execution_dispatch=%v want true", got)
+		}
+		if got := strings.TrimSpace(stringField(spawn, "spawn_command")); got == "" {
+			t.Fatalf("spawn_command empty")
+		}
+		if got := stringField(spawn, "spawn_command"); !strings.Contains(got, "--role '"+roomEpicDispatchFrontierDefaultAgentRole+"'") {
+			t.Fatalf("spawn_command=%q want execution role %q", got, roomEpicDispatchFrontierDefaultAgentRole)
+		}
+		if got := spawn["dispatch_prompt"]; strings.TrimSpace(fmt.Sprint(got)) == "" {
+			t.Fatalf("dispatch_prompt missing")
+		}
+	})
+
+	t.Run("spawn with multiple ready units and no selector returns argument error", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Second ready story", "Another accepted story in the same milestone.", "human-a"); err != nil {
+			t.Fatalf("runRoomStoryAdd second: %v", err)
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100, roomEpicDispatchFrontierOptions{
+			Dispatch: roomEpicGradeDispatchOptions{
+				Spawn:         true,
+				SpawnDryRun:   true,
+				LLMProvider:   "lmstudio",
+				LLMModel:      "qwen2.5-coder-7b-instruct",
+				AgentRole:     "planner",
+				ExecMode:      "autonomous",
+				MaxAutoTurns:  2,
+				MaxIterations: 12,
+				RoomAccess:    "direct",
+			},
+		})
+		if err == nil {
+			t.Fatal("runRoomEpicDispatchFrontier expected argument error envelope")
+		}
+		var env envelope.Envelope
+		if decodeErr := json.Unmarshal(out.Bytes(), &env); decodeErr != nil {
+			t.Fatalf("decode envelope: %v\n%s", decodeErr, out.String())
+		}
+		if env.Status != envelope.StatusError {
+			t.Fatalf("status=%q want error payload=%s", env.Status, out.String())
+		}
+		if env.Error.Code != string(protocol.ErrorCodeEARG) {
+			t.Fatalf("error.code=%q want %q", env.Error.Code, protocol.ErrorCodeEARG)
+		}
+		if !strings.Contains(out.String(), "--story-id") {
+			t.Fatalf("payload=%s want --story-id hint", out.String())
+		}
+	})
+
+	t.Run("spawn with story selector outside ready frontier returns argument error", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, _, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "blocked", "Waiting for dependency.", "dependency", ""); err != nil {
+			t.Fatalf("runRoomStoryState blocked: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100, roomEpicDispatchFrontierOptions{
+			StoryID: storyID,
+			Dispatch: roomEpicGradeDispatchOptions{
+				Spawn:         true,
+				SpawnDryRun:   true,
+				LLMProvider:   "lmstudio",
+				LLMModel:      "qwen2.5-coder-7b-instruct",
+				AgentRole:     "planner",
+				ExecMode:      "autonomous",
+				MaxAutoTurns:  2,
+				MaxIterations: 12,
+				RoomAccess:    "direct",
+			},
+		})
+		if err == nil {
+			t.Fatal("runRoomEpicDispatchFrontier expected argument error envelope")
+		}
+		var env envelope.Envelope
+		if decodeErr := json.Unmarshal(out.Bytes(), &env); decodeErr != nil {
+			t.Fatalf("decode envelope: %v\n%s", decodeErr, out.String())
+		}
+		if env.Status != envelope.StatusError {
+			t.Fatalf("status=%q want error payload=%s", env.Status, out.String())
+		}
+		if env.Error.Code != string(protocol.ErrorCodeEARG) {
+			t.Fatalf("error.code=%q want %q", env.Error.Code, protocol.ErrorCodeEARG)
+		}
+		if !strings.Contains(out.String(), storyID) {
+			t.Fatalf("payload=%s want selected story id %q", out.String(), storyID)
 		}
 	})
 }
@@ -6353,6 +6500,28 @@ func TestNewRoomEpicCommandIncludesDispatchFrontierSubcommand(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("dispatch-frontier subcommand missing")
+	}
+}
+
+func TestNewRoomEpicDispatchFrontierCommandAgentRoleDefaultExecution(t *testing.T) {
+	cmd := newRoomEpicDispatchFrontierCommand()
+	flag := cmd.Flags().Lookup("agent-role")
+	if flag == nil {
+		t.Fatal("agent-role flag missing")
+	}
+	if got := flag.DefValue; got != roomEpicDispatchFrontierDefaultAgentRole {
+		t.Fatalf("--agent-role default=%q want %q", got, roomEpicDispatchFrontierDefaultAgentRole)
+	}
+}
+
+func TestNewRoomEpicGradeDispatchCommandAgentRoleDefaultPlanner(t *testing.T) {
+	cmd := newRoomEpicGradeDispatchCommand()
+	flag := cmd.Flags().Lookup("agent-role")
+	if flag == nil {
+		t.Fatal("agent-role flag missing")
+	}
+	if got := flag.DefValue; got != "planner" {
+		t.Fatalf("--agent-role default=%q want planner", got)
 	}
 }
 

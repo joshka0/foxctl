@@ -33,6 +33,7 @@ import (
 )
 
 const openSandboxDisabledMessage = "opensandbox integration temporarily disabled; use worktree sandboxing"
+const roomEpicDispatchFrontierDefaultAgentRole = "coder"
 
 func init() {
 	rootCmd.AddCommand(newRoomCommand())
@@ -820,19 +821,61 @@ func newRoomEpicFrontierCommand() *cobra.Command {
 
 func newRoomEpicDispatchFrontierCommand() *cobra.Command {
 	var (
-		workspace string
-		limit     int
+		workspace     string
+		limit         int
+		storyID       string
+		spawn         bool
+		spawnDryRun   bool
+		agentName     string
+		agentSlug     string
+		agentRole     string
+		llmProvider   string
+		llmModel      string
+		execMode      string
+		maxAutoTurns  int
+		maxIterations int
+		roomAccess    string
+		spawnInPane   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "dispatch-frontier <room-id> <epic-id>",
 		Short: "Return compact dispatch units for ready frontier stories",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRoomEpicDispatchFrontier(cmd, workspace, args[0], args[1], limit)
+			return runRoomEpicDispatchFrontier(cmd, workspace, args[0], args[1], limit, roomEpicDispatchFrontierOptions{
+				StoryID: storyID,
+				Dispatch: roomEpicGradeDispatchOptions{
+					Spawn:         spawn,
+					SpawnDryRun:   spawnDryRun,
+					AgentName:     agentName,
+					AgentSlug:     agentSlug,
+					AgentRole:     agentRole,
+					LLMProvider:   llmProvider,
+					LLMModel:      llmModel,
+					ExecMode:      execMode,
+					MaxAutoTurns:  maxAutoTurns,
+					MaxIterations: maxIterations,
+					RoomAccess:    roomAccess,
+					SpawnInPane:   spawnInPane,
+				},
+			})
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().IntVar(&limit, "limit", roomTaskScanLimit, "Maximum room messages to inspect")
+	cmd.Flags().StringVar(&storyID, "story-id", "", "Optional ready story id selector for targeted spawn")
+	cmd.Flags().BoolVar(&spawn, "spawn", false, "Spawn an execution-focused agent for one ready dispatch unit (CLI spawning is restricted to local lmstudio models)")
+	cmd.Flags().BoolVar(&spawnDryRun, "spawn-dry-run", false, "Preview the targeted agent spawn without creating the agent")
+	cmd.Flags().StringVar(&agentName, "agent-name", "", "Optional human name for the spawned agent")
+	cmd.Flags().StringVar(&agentSlug, "agent-slug", "", "Optional slug for the spawned agent")
+	cmd.Flags().StringVar(&agentRole, "agent-role", roomEpicDispatchFrontierDefaultAgentRole, "Role for the spawned execution agent")
+	cmd.Flags().StringVar(&llmProvider, "llm-provider", "", "LLM provider override for the spawned agent (must be lmstudio for CLI spawning)")
+	cmd.Flags().StringVar(&llmModel, "llm-model", "", "LLM model override for the spawned agent")
+	cmd.Flags().StringVar(&execMode, "exec-mode", "autonomous", "Execution mode for the spawned agent")
+	cmd.Flags().IntVar(&maxAutoTurns, "max-auto-turns", 2, "Max autonomous turns for the spawned agent")
+	cmd.Flags().IntVar(&maxIterations, "max-iterations", 12, "Max tool calls per turn for the spawned agent")
+	cmd.Flags().StringVar(&roomAccess, "room-access", "direct", "Room access policy for the spawned agent")
+	cmd.Flags().BoolVar(&spawnInPane, "spawn-in-pane", false, "Allocate a dedicated pane for the spawned agent")
 	return cmd
 }
 
@@ -4782,7 +4825,7 @@ func runRoomEpicFrontier(cmd *cobra.Command, workspace, roomID, epicID string, l
 	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.frontier", frontier, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
-func runRoomEpicDispatchFrontier(cmd *cobra.Command, workspace, roomID, epicID string, limit int) error {
+func runRoomEpicDispatchFrontier(cmd *cobra.Command, workspace, roomID, epicID string, limit int, options roomEpicDispatchFrontierOptions) error {
 	absWorkspace, err := resolveRoomWorkspace(workspace)
 	if err != nil {
 		return err
@@ -4818,8 +4861,110 @@ func runRoomEpicDispatchFrontier(cmd *cobra.Command, workspace, roomID, epicID s
 	status := buildRoomEpicStatus(epic, health)
 	frontier := buildRoomEpicFrontier(roomID, epic, status)
 	dispatchFrontier := buildRoomEpicDispatchFrontier(roomID, frontier)
+	if !options.Dispatch.Spawn {
+		return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", dispatchFrontier, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
 
-	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", dispatchFrontier, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	dispatch := options.Dispatch
+	if strings.TrimSpace(dispatch.AgentRole) == "" {
+		dispatch.AgentRole = roomEpicDispatchFrontierDefaultAgentRole
+	}
+
+	if err := validateRoomEpicGradeDispatchSpawn(dispatch); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use `--llm-provider lmstudio` for local CLI dispatch, or run with `--spawn=false` to inspect all ready dispatch units.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	selectedUnit, err := selectRoomEpicDispatchFrontierUnit(dispatchFrontier, options.StoryID)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use `--story-id <story-id>` to target one ready unit, or run with `--spawn=false` to inspect all ready dispatch units.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	clonedUnit := selectedUnit
+	if cloned := cloneRoomMapSlice([]map[string]any{selectedUnit}); len(cloned) == 1 {
+		clonedUnit = cloned[0]
+	}
+
+	agentBrief := strings.TrimSpace(stringField(clonedUnit, "agent_brief"))
+	if agentBrief == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", protocol.ErrorCodeERuntime, "selected dispatch unit is missing an agent brief", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	spawnCommand := buildRoomEpicGradeDispatchSpawnCommand(absWorkspace, roomID, dispatch, agentBrief)
+	spawnResult := map[string]any{
+		"spawn_requested":    true,
+		"spawned":            false,
+		"dry_run":            dispatch.SpawnDryRun,
+		"provider":           strings.TrimSpace(dispatch.LLMProvider),
+		"model":              strings.TrimSpace(dispatch.LLMModel),
+		"role":               strings.TrimSpace(firstNonEmpty(dispatch.AgentRole, roomEpicDispatchFrontierDefaultAgentRole)),
+		"exec_mode":          strings.TrimSpace(firstNonEmpty(dispatch.ExecMode, "autonomous")),
+		"room_id":            strings.TrimSpace(roomID),
+		"workspace":          strings.TrimSpace(absWorkspace),
+		"planning_only":      false,
+		"execution_dispatch": true,
+		"dispatch_prompt":    agentBrief,
+		"spawn_command":      spawnCommand,
+	}
+	if !dispatch.SpawnDryRun {
+		result, err := spawnRoomEpicGradeDispatchAgent(cmd, absWorkspace, roomID, dispatch, agentBrief)
+		if err != nil {
+			return err
+		}
+		spawnResult = result
+		spawnResult["spawn_requested"] = true
+		spawnResult["spawn_command"] = spawnCommand
+		spawnResult["planning_only"] = false
+		spawnResult["execution_dispatch"] = true
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", map[string]any{
+		"schema_version":       stringField(dispatchFrontier, "schema_version"),
+		"scope":                mapField(dispatchFrontier, "scope"),
+		"dispatchable_count":   intField(dispatchFrontier, "dispatchable_count"),
+		"blocked_count":        intField(dispatchFrontier, "blocked_count"),
+		"dependency_gap_count": intField(dispatchFrontier, "dependency_gap_count"),
+		"parallelism_width":    intField(dispatchFrontier, "parallelism_width"),
+		"summary":              stringField(dispatchFrontier, "summary"),
+		"notes":                stringSliceValue(dispatchFrontier["notes"]),
+		"dispatch": map[string]any{
+			"story_id":       stringField(clonedUnit, "story_id"),
+			"selected_unit":  clonedUnit,
+			"selection_mode": firstNonEmpty(roomDispatchSelectionMode(options.StoryID), "auto"),
+			"spawn":          spawnResult,
+		},
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func selectRoomEpicDispatchFrontierUnit(dispatchFrontier map[string]any, storyID string) (map[string]any, error) {
+	readyUnits := mapSlice(dispatchFrontier["dispatch_units"])
+	storyID = strings.TrimSpace(storyID)
+	if storyID != "" {
+		for _, unit := range readyUnits {
+			if stringField(unit, "story_id") == storyID {
+				return unit, nil
+			}
+		}
+		return nil, fmt.Errorf("story %q is not in the ready dispatch frontier", storyID)
+	}
+	switch len(readyUnits) {
+	case 0:
+		return nil, fmt.Errorf("no ready dispatch units available; run without --spawn to inspect frontier status")
+	case 1:
+		return readyUnits[0], nil
+	default:
+		return nil, fmt.Errorf("multiple ready dispatch units found (%d); pass --story-id to target one", len(readyUnits))
+	}
+}
+
+func roomDispatchSelectionMode(storyID string) string {
+	if strings.TrimSpace(storyID) != "" {
+		return "story_id"
+	}
+	return "auto"
 }
 
 func runRoomEpicScout(cmd *cobra.Command, workspace, roomID, epicID string, limit int) error {
@@ -4961,6 +5106,11 @@ type roomEpicGradeDispatchOptions struct {
 	MaxIterations int
 	RoomAccess    string
 	SpawnInPane   bool
+}
+
+type roomEpicDispatchFrontierOptions struct {
+	StoryID  string
+	Dispatch roomEpicGradeDispatchOptions
 }
 
 func runRoomEpicGrade(cmd *cobra.Command, workspace, roomID, epicID string, limit int, factoryMissionDir string, publish roomEpicGradePublishOptions) error {
