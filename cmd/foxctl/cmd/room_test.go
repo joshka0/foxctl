@@ -4596,6 +4596,275 @@ func TestRunRoomEpicStatus(t *testing.T) {
 	})
 }
 
+func TestRunRoomEpicScout(t *testing.T) {
+	t.Run("planning gap epic", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, _, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicScout(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicScout: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+
+		status := data["status"].(map[string]any)
+		if got := status["phase"]; got != "graded" {
+			t.Fatalf("phase=%v want graded", got)
+		}
+
+		scout := data["scout"].(map[string]any)
+		scope := scout["scope"].(map[string]any)
+		if got := scope["room_id"]; got != "alpha" {
+			t.Fatalf("scope.room_id=%v want alpha", got)
+		}
+		if got := scope["epic_id"]; got != epicID {
+			t.Fatalf("scope.epic_id=%v want %s", got, epicID)
+		}
+		if got := scope["intake_mode"]; got != "authored" {
+			t.Fatalf("scope.intake_mode=%v want authored", got)
+		}
+		if got := scope["status_phase"]; got != "graded" {
+			t.Fatalf("scope.status_phase=%v want graded", got)
+		}
+		if got := scout["snapshot_id"]; got != "snapshot-missing" {
+			t.Fatalf("snapshot_id=%v want snapshot-missing", got)
+		}
+		if got := scout["snapshot_artifact"]; got != "" {
+			t.Fatalf("snapshot_artifact=%v want empty", got)
+		}
+		if got := scout["scout_artifact"]; got != "" {
+			t.Fatalf("scout_artifact=%v want empty", got)
+		}
+
+		wantOutOfScope := []string{"snapshot_unavailable"}
+		gotOutOfScope := stringSliceValue(scout["out_of_scope"])
+		if len(gotOutOfScope) != len(wantOutOfScope) || gotOutOfScope[0] != wantOutOfScope[0] {
+			t.Fatalf("out_of_scope=%v want %v", gotOutOfScope, wantOutOfScope)
+		}
+
+		findings := scout["findings"].([]any)
+		wantFamilies := []string{
+			"brief_boundary",
+			"milestone_contract",
+			"criteria_coverage",
+			"validation_lane",
+			"evidence_expectation",
+		}
+		if len(findings) != len(wantFamilies) {
+			t.Fatalf("len(findings)=%d want %d findings=%v", len(findings), len(wantFamilies), findings)
+		}
+		for i, raw := range findings {
+			finding := raw.(map[string]any)
+			if got := finding["rule_family"]; got != wantFamilies[i] {
+				t.Fatalf("findings[%d].rule_family=%v want %s", i, got, wantFamilies[i])
+			}
+			if got := finding["severity"]; got != "blocking" {
+				t.Fatalf("findings[%d].severity=%v want blocking", i, got)
+			}
+			if id := strings.TrimSpace(fmt.Sprintf("%v", finding["id"])); id == "" {
+				t.Fatalf("findings[%d].id missing", i)
+			}
+			if entityType := strings.TrimSpace(fmt.Sprintf("%v", finding["entity_type"])); entityType == "" {
+				t.Fatalf("findings[%d].entity_type missing", i)
+			}
+			if entityID := strings.TrimSpace(fmt.Sprintf("%v", finding["entity_id"])); entityID == "" {
+				t.Fatalf("findings[%d].entity_id missing", i)
+			}
+			lanes := stringSliceValue(finding["recommended_repair_lanes"])
+			if len(lanes) == 0 {
+				t.Fatalf("findings[%d].recommended_repair_lanes empty", i)
+			}
+		}
+
+		signals := scout["signals"].(map[string]any)
+		if got := signals["schema_version"]; got != "room.epic.scout.v1" {
+			t.Fatalf("signals.schema_version=%v want room.epic.scout.v1", got)
+		}
+		if got := signals["total_findings"]; got != float64(len(wantFamilies)) {
+			t.Fatalf("signals.total_findings=%v want %d", got, len(wantFamilies))
+		}
+		if got := signals["blocking_findings"]; got != float64(len(wantFamilies)) {
+			t.Fatalf("signals.blocking_findings=%v want %d", got, len(wantFamilies))
+		}
+		familyCounts := signals["family_counts"].(map[string]any)
+		wantCounts := map[string]float64{
+			"brief_boundary":       1,
+			"milestone_contract":   1,
+			"criteria_coverage":    1,
+			"owner_dispatch":       0,
+			"validation_lane":      1,
+			"evidence_expectation": 1,
+		}
+		for family, want := range wantCounts {
+			if got := familyCounts[family]; got != want {
+				t.Fatalf("family_counts[%s]=%v want %v", family, got, want)
+			}
+		}
+	})
+
+	t.Run("finalized epic without milestones emits milestone structural findings", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+			t.Fatalf("runRoomCreate: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Milestone-free epic", "Define scout parity checks", "human-a", "Execution-ready brief.", "", nil, nil); err != nil {
+			t.Fatalf("runRoomEpicStart: %v", err)
+		}
+		epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Execution-ready brief."); err != nil {
+			t.Fatalf("runRoomEpicFinalize: %v", err)
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicScout(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicScout: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+		scout := data["scout"].(map[string]any)
+
+		findings := scout["findings"].([]any)
+		wantFamilies := []string{
+			"milestone_contract",
+			"criteria_coverage",
+			"validation_lane",
+		}
+		if len(findings) != len(wantFamilies) {
+			t.Fatalf("len(findings)=%d want %d findings=%v", len(findings), len(wantFamilies), findings)
+		}
+		for i, raw := range findings {
+			finding := raw.(map[string]any)
+			if got := finding["rule_family"]; got != wantFamilies[i] {
+				t.Fatalf("findings[%d].rule_family=%v want %s", i, got, wantFamilies[i])
+			}
+			if got := finding["entity_type"]; got != "epic" {
+				t.Fatalf("findings[%d].entity_type=%v want epic", i, got)
+			}
+			if got := finding["entity_id"]; got != epicID {
+				t.Fatalf("findings[%d].entity_id=%v want %s", i, got, epicID)
+			}
+		}
+
+		gotOutOfScope := stringSliceValue(scout["out_of_scope"])
+		if len(gotOutOfScope) != 1 || gotOutOfScope[0] != "snapshot_unavailable" {
+			t.Fatalf("out_of_scope=%v want [snapshot_unavailable]", gotOutOfScope)
+		}
+	})
+
+	t.Run("draft epic with open intake marks intake limitations in out of scope", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+			t.Fatalf("runRoomCreate: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Draft intake epic", "Clarify scope first", "human-a", "Initial brief.", "", nil, nil); err != nil {
+			t.Fatalf("runRoomEpicStart: %v", err)
+		}
+		epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomEpicAsk(cmd, workspace, "human-a", "alpha", epicID, "gemini-a", "constraint", "What is still unknown?"); err != nil {
+			t.Fatalf("runRoomEpicAsk: %v", err)
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicScout(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicScout: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+		status := data["status"].(map[string]any)
+		if got := status["phase"]; got != "draft" {
+			t.Fatalf("phase=%v want draft", got)
+		}
+		if got := status["open_intake_questions"]; got != float64(1) {
+			t.Fatalf("open_intake_questions=%v want 1", got)
+		}
+
+		scout := data["scout"].(map[string]any)
+		wantOutOfScope := []string{
+			"snapshot_unavailable",
+			"intake_not_finalized",
+			"intake_questions_open",
+		}
+		gotOutOfScope := stringSliceValue(scout["out_of_scope"])
+		if len(gotOutOfScope) != len(wantOutOfScope) {
+			t.Fatalf("len(out_of_scope)=%d want %d out_of_scope=%v", len(gotOutOfScope), len(wantOutOfScope), gotOutOfScope)
+		}
+		for i := range wantOutOfScope {
+			if gotOutOfScope[i] != wantOutOfScope[i] {
+				t.Fatalf("out_of_scope[%d]=%q want %q (all=%v)", i, gotOutOfScope[i], wantOutOfScope[i], gotOutOfScope)
+			}
+		}
+	})
+
+	t.Run("dispatchable ready epic", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomEpicUpdate(cmd, workspace, "human-a", "alpha", epicID, "", "Execution-ready epic plan."); err != nil {
+			t.Fatalf("runRoomEpicUpdate: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneContract(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"story validated"}); err != nil {
+			t.Fatalf("runRoomMilestoneContract: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneCriteria(cmd, workspace, "human-a", "alpha", milestoneID, "Accepted stories are validated"); err != nil {
+			t.Fatalf("runRoomMilestoneCriteria: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Validated.", "docs/reviews/pass.md", "", "", "", nil); err != nil {
+			t.Fatalf("runRoomStoryValidate: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicScout(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicScout: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+		scout := data["scout"].(map[string]any)
+		scope := scout["scope"].(map[string]any)
+		if got := scope["status_phase"]; got != "dispatchable" {
+			t.Fatalf("scope.status_phase=%v want dispatchable", got)
+		}
+
+		findings := scout["findings"].([]any)
+		if len(findings) != 0 {
+			t.Fatalf("findings=%v want empty", findings)
+		}
+		signals := scout["signals"].(map[string]any)
+		if got := signals["total_findings"]; got != float64(0) {
+			t.Fatalf("signals.total_findings=%v want 0", got)
+		}
+		if got := signals["blocking_findings"]; got != float64(0) {
+			t.Fatalf("signals.blocking_findings=%v want 0", got)
+		}
+		gotOutOfScope := stringSliceValue(scout["out_of_scope"])
+		if len(gotOutOfScope) != 1 || gotOutOfScope[0] != "snapshot_unavailable" {
+			t.Fatalf("out_of_scope=%v want [snapshot_unavailable]", gotOutOfScope)
+		}
+	})
+}
+
 func TestRunRoomEpicAndStoryUpdate(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()

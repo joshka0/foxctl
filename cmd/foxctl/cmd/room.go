@@ -645,6 +645,7 @@ func newRoomEpicCommand() *cobra.Command {
 		newRoomEpicResumeCommand(),
 		newRoomEpicHealthCommand(),
 		newRoomEpicStatusCommand(),
+		newRoomEpicScoutCommand(),
 		newRoomEpicGradeCommand(),
 		newRoomEpicGradeDispatchCommand(),
 		newRoomEpicUpdateCommand(),
@@ -789,6 +790,24 @@ func newRoomEpicStatusCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRoomEpicStatus(cmd, workspace, args[0], args[1], limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", roomTaskScanLimit, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomEpicScoutCommand() *cobra.Command {
+	var (
+		workspace string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "scout <room-id> <epic-id>",
+		Short: "Return deterministic planning findings for one epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicScout(cmd, workspace, args[0], args[1], limit)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -4664,6 +4683,50 @@ func runRoomEpicStatus(cmd *cobra.Command, workspace, roomID, epicID string, lim
 		"epic":   epic,
 		"health": health,
 		"status": status,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicScout(cmd *cobra.Command, workspace, roomID, epicID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	if limit <= 0 {
+		limit = roomTaskScanLimit
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.scout", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.scout", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epic := roomEpicViewByID(buildRoomEpicViews(messages), epicID)
+	if epic == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.scout", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+			"hint": "Run `foxctl room epic show <room-id>` to list available epics.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	health := buildRoomEpicHealth(summary, messages, epic, "")
+	status := buildRoomEpicStatus(epic, health)
+	scout := buildRoomEpicScout(roomID, epic, status, health)
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.scout", map[string]any{
+		"room":   summary,
+		"epic":   epic,
+		"status": status,
+		"scout":  scout,
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -8597,6 +8660,264 @@ func buildRoomEpicStatus(epic, health map[string]any) map[string]any {
 		"structural_gaps":         structuralGaps,
 		"next_pipeline_stage":     nextStage,
 	}
+}
+
+var roomEpicScoutRuleFamilies = []string{
+	"brief_boundary",
+	"milestone_contract",
+	"criteria_coverage",
+	"owner_dispatch",
+	"validation_lane",
+	"evidence_expectation",
+}
+
+func buildRoomEpicScout(roomID string, epic, status, health map[string]any) map[string]any {
+	findings := buildRoomEpicScoutFindings(epic, health)
+	outOfScope := buildRoomEpicScoutOutOfScope(status)
+	familyCounts := make(map[string]int, len(roomEpicScoutRuleFamilies))
+	for _, family := range roomEpicScoutRuleFamilies {
+		familyCounts[family] = 0
+	}
+	blockingFindings := 0
+	for _, finding := range findings {
+		family := stringField(finding, "rule_family")
+		if _, ok := familyCounts[family]; ok {
+			familyCounts[family]++
+		}
+		if stringField(finding, "severity") == "blocking" {
+			blockingFindings++
+		}
+	}
+	familyCountPayload := make(map[string]any, len(roomEpicScoutRuleFamilies))
+	for _, family := range roomEpicScoutRuleFamilies {
+		familyCountPayload[family] = familyCounts[family]
+	}
+	return map[string]any{
+		"scope": map[string]any{
+			"room_id":      strings.TrimSpace(roomID),
+			"epic_id":      stringField(epic, "id"),
+			"intake_mode":  stringField(status, "intake_mode"),
+			"status_phase": stringField(status, "phase"),
+		},
+		"snapshot_id":       "snapshot-missing",
+		"snapshot_artifact": "",
+		"scout_artifact":    "",
+		"findings":          findings,
+		"signals": map[string]any{
+			"total_findings":    len(findings),
+			"blocking_findings": blockingFindings,
+			"family_counts":     familyCountPayload,
+			"schema_version":    "room.epic.scout.v1",
+		},
+		"out_of_scope": outOfScope,
+	}
+}
+
+func buildRoomEpicScoutOutOfScope(status map[string]any) []string {
+	out := []string{"snapshot_unavailable"}
+	if stringField(status, "phase") == "draft" {
+		out = append(out, "intake_not_finalized")
+	}
+	if intField(status, "open_intake_questions") > 0 {
+		out = append(out, "intake_questions_open")
+	}
+	return out
+}
+
+func buildRoomEpicScoutFindings(epic, health map[string]any) []map[string]any {
+	findings := make([]map[string]any, 0)
+	epicID := stringField(epic, "id")
+	epicMeta := anyMap(epic["meta"])
+	if strings.TrimSpace(stringField(epicMeta, "outcome")) == "" {
+		findings = append(findings, map[string]any{
+			"id":                       fmt.Sprintf("brief_boundary:epic:%s", epicID),
+			"rule_family":              "brief_boundary",
+			"severity":                 "blocking",
+			"entity_type":              "epic",
+			"entity_id":                epicID,
+			"title":                    "Epic outcome is missing",
+			"summary":                  "Epic outcome metadata is required before planning dispatch.",
+			"recommended_repair_lanes": []string{"epic.update"},
+			"evidence": map[string]any{
+				"epic_id": epicID,
+			},
+		})
+	}
+
+	milestones := mapSlice(epic["milestones"])
+	if boolField(epic, "finalized") && len(milestones) == 0 {
+		findings = append(findings,
+			map[string]any{
+				"id":                       fmt.Sprintf("milestone_contract:epic:%s:missing_milestones", epicID),
+				"rule_family":              "milestone_contract",
+				"severity":                 "blocking",
+				"entity_type":              "epic",
+				"entity_id":                epicID,
+				"title":                    "Finalized epic has no milestones",
+				"summary":                  "Milestone contract checks are blocked until at least one milestone is defined.",
+				"recommended_repair_lanes": []string{"milestone.start"},
+				"evidence": map[string]any{
+					"epic_id":         epicID,
+					"milestone_count": 0,
+				},
+			},
+			map[string]any{
+				"id":                       fmt.Sprintf("criteria_coverage:epic:%s:missing_milestones", epicID),
+				"rule_family":              "criteria_coverage",
+				"severity":                 "blocking",
+				"entity_type":              "epic",
+				"entity_id":                epicID,
+				"title":                    "Finalized epic has no milestone criteria coverage",
+				"summary":                  "Criteria coverage cannot be established until the epic defines at least one milestone.",
+				"recommended_repair_lanes": []string{"milestone.criteria"},
+				"evidence": map[string]any{
+					"epic_id":         epicID,
+					"milestone_count": 0,
+				},
+			},
+			map[string]any{
+				"id":                       fmt.Sprintf("validation_lane:epic:%s:missing_milestones", epicID),
+				"rule_family":              "validation_lane",
+				"severity":                 "blocking",
+				"entity_type":              "epic",
+				"entity_id":                epicID,
+				"title":                    "Finalized epic has no validation lanes",
+				"summary":                  "Validation lane checks cannot run until the epic defines milestone-level validation contracts.",
+				"recommended_repair_lanes": []string{"milestone.contract"},
+				"evidence": map[string]any{
+					"epic_id":         epicID,
+					"milestone_count": 0,
+				},
+			},
+		)
+	}
+
+	for _, milestone := range milestones {
+		milestoneID := stringField(milestone, "id")
+		if roomMilestoneMissingContract(milestone) {
+			findings = append(findings, map[string]any{
+				"id":                       fmt.Sprintf("milestone_contract:milestone:%s", milestoneID),
+				"rule_family":              "milestone_contract",
+				"severity":                 "blocking",
+				"entity_type":              "milestone",
+				"entity_id":                milestoneID,
+				"title":                    "Milestone contract is missing",
+				"summary":                  "Milestone contract/objective fields are incomplete for planning dispatch.",
+				"recommended_repair_lanes": []string{"milestone.contract"},
+				"evidence": map[string]any{
+					"epic_id":      epicID,
+					"milestone_id": milestoneID,
+				},
+			})
+		}
+		if intField(milestone, "criteria_count") == 0 {
+			findings = append(findings, map[string]any{
+				"id":                       fmt.Sprintf("criteria_coverage:milestone:%s", milestoneID),
+				"rule_family":              "criteria_coverage",
+				"severity":                 "blocking",
+				"entity_type":              "milestone",
+				"entity_id":                milestoneID,
+				"title":                    "Milestone criteria are missing",
+				"summary":                  "Milestone has no acceptance criteria entries.",
+				"recommended_repair_lanes": []string{"milestone.criteria"},
+				"evidence": map[string]any{
+					"epic_id":      epicID,
+					"milestone_id": milestoneID,
+				},
+			})
+		}
+		if intField(milestone, "validator_count") == 0 &&
+			intField(milestone, "required_evidence_lane_count") == 0 &&
+			intField(milestone, "optional_evidence_lane_count") == 0 {
+			findings = append(findings, map[string]any{
+				"id":                       fmt.Sprintf("validation_lane:milestone:%s", milestoneID),
+				"rule_family":              "validation_lane",
+				"severity":                 "blocking",
+				"entity_type":              "milestone",
+				"entity_id":                milestoneID,
+				"title":                    "Validation lane contract is missing",
+				"summary":                  "Milestone has no explicit validator or evidence lane requirements.",
+				"recommended_repair_lanes": []string{"milestone.contract"},
+				"evidence": map[string]any{
+					"epic_id":      epicID,
+					"milestone_id": milestoneID,
+				},
+			})
+		}
+		for _, story := range mapSlice(milestone["stories"]) {
+			storyID := stringField(story, "id")
+			if strings.TrimSpace(stringField(anyMap(story["meta"]), "owner")) == "" {
+				findings = append(findings, map[string]any{
+					"id":                       fmt.Sprintf("owner_dispatch:story:%s", storyID),
+					"rule_family":              "owner_dispatch",
+					"severity":                 "blocking",
+					"entity_type":              "story",
+					"entity_id":                storyID,
+					"title":                    "Story owner is missing",
+					"summary":                  "Story requires an explicit owner for dispatch planning.",
+					"recommended_repair_lanes": []string{"story.update_owner"},
+					"evidence": map[string]any{
+						"epic_id":      epicID,
+						"milestone_id": stringField(story, "milestone_id"),
+						"story_id":     storyID,
+					},
+				})
+			}
+		}
+	}
+
+	for _, missing := range mapSlice(health["stories_missing_validation"]) {
+		storyID := stringField(missing, "id")
+		findings = append(findings, map[string]any{
+			"id":                       fmt.Sprintf("evidence_expectation:story:%s", storyID),
+			"rule_family":              "evidence_expectation",
+			"severity":                 "blocking",
+			"entity_type":              "story",
+			"entity_id":                storyID,
+			"title":                    "Story validation coverage is missing",
+			"summary":                  "Accepted story has no validation evidence coverage.",
+			"recommended_repair_lanes": []string{"story.validate"},
+			"evidence": map[string]any{
+				"epic_id":      epicID,
+				"milestone_id": stringField(missing, "milestone_id"),
+				"story_id":     storyID,
+			},
+		})
+	}
+
+	sort.Slice(findings, func(i, j int) bool {
+		leftFamily := stringField(findings[i], "rule_family")
+		rightFamily := stringField(findings[j], "rule_family")
+		leftRank := roomEpicScoutRuleFamilyRank(leftFamily)
+		rightRank := roomEpicScoutRuleFamilyRank(rightFamily)
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		if leftFamily != rightFamily {
+			return leftFamily < rightFamily
+		}
+		leftType := stringField(findings[i], "entity_type")
+		rightType := stringField(findings[j], "entity_type")
+		if leftType != rightType {
+			return leftType < rightType
+		}
+		leftEntityID := stringField(findings[i], "entity_id")
+		rightEntityID := stringField(findings[j], "entity_id")
+		if leftEntityID != rightEntityID {
+			return leftEntityID < rightEntityID
+		}
+		return stringField(findings[i], "id") < stringField(findings[j], "id")
+	})
+	return findings
+}
+
+func roomEpicScoutRuleFamilyRank(family string) int {
+	for idx, candidate := range roomEpicScoutRuleFamilies {
+		if family == candidate {
+			return idx
+		}
+	}
+	return len(roomEpicScoutRuleFamilies)
 }
 
 func deriveRoomEpicStatusIntakeMode(epic map[string]any) string {
