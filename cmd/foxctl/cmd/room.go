@@ -639,7 +639,6 @@ func newRoomEpicCommand() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newRoomEpicStartCommand(),
-		newRoomEpicImportFactoryCommand(),
 		newRoomEpicShowCommand(),
 		newRoomEpicCheckpointCommand(),
 		newRoomEpicResumeCommand(),
