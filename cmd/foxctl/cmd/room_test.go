@@ -4773,7 +4773,8 @@ func TestRunRoomEpicFrontier(t *testing.T) {
 		if err := runRoomEpicFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
 			t.Fatalf("runRoomEpicFrontier: %v", err)
 		}
-		blocked := decodeRoomEnvelope(t, out)["blocked_frontier"].([]any)
+		data := decodeRoomEnvelope(t, out)
+		blocked := data["blocked_frontier"].([]any)
 
 		var dependentStory map[string]any
 		for _, raw := range blocked {
@@ -4797,6 +4798,21 @@ func TestRunRoomEpicFrontier(t *testing.T) {
 		unmetDep := unmet[0].(map[string]any)
 		if got := unmetDep["upstream_milestone_id"]; got != upstreamMilestoneID {
 			t.Fatalf("upstream_milestone_id=%v want %s", got, upstreamMilestoneID)
+		}
+		milestoneCandidateCount := 0
+		for _, raw := range data["unblock_candidates"].([]any) {
+			candidate := raw.(map[string]any)
+			if stringField(candidate, "kind") != "milestone" || stringField(candidate, "id") != upstreamMilestoneID {
+				continue
+			}
+			milestoneCandidateCount++
+			reasons := stringSliceValue(candidate["source_reasons"])
+			if !stringSliceContains(reasons, "unmet_milestone_dependency") {
+				t.Fatalf("candidate source_reasons=%v want unmet_milestone_dependency", reasons)
+			}
+		}
+		if milestoneCandidateCount != 1 {
+			t.Fatalf("milestone unblock candidate count=%d want 1 for %s", milestoneCandidateCount, upstreamMilestoneID)
 		}
 	})
 
@@ -4835,6 +4851,17 @@ func TestRunRoomEpicFrontier(t *testing.T) {
 		}
 		if got := gap["dependency"]; got != "milestone-missing" {
 			t.Fatalf("gap dependency=%v want milestone-missing", got)
+		}
+		gapCandidateCount := 0
+		for _, raw := range data["unblock_candidates"].([]any) {
+			candidate := raw.(map[string]any)
+			if stringField(candidate, "kind") != "dependency_gap" || stringField(candidate, "dependency_kind") != "milestone" || stringField(candidate, "dependency") != "milestone-missing" {
+				continue
+			}
+			gapCandidateCount++
+		}
+		if gapCandidateCount != 1 {
+			t.Fatalf("dependency gap unblock candidate count=%d want 1", gapCandidateCount)
 		}
 
 		blocked := data["blocked_frontier"].([]any)
@@ -4954,6 +4981,21 @@ func TestRunRoomEpicFrontier(t *testing.T) {
 		}
 		if got := upstream["upstream_state"]; got != "accepted" {
 			t.Fatalf("upstream_state=%v want accepted", got)
+		}
+		upstreamCandidateCount := 0
+		for _, raw := range data["unblock_candidates"].([]any) {
+			candidate := raw.(map[string]any)
+			if stringField(candidate, "kind") != "story" || stringField(candidate, "id") != upstreamStoryID {
+				continue
+			}
+			upstreamCandidateCount++
+			reasons := stringSliceValue(candidate["source_reasons"])
+			if !stringSliceContains(reasons, "unmet_story_dependency") {
+				t.Fatalf("candidate source_reasons=%v want unmet_story_dependency", reasons)
+			}
+		}
+		if upstreamCandidateCount != 1 {
+			t.Fatalf("upstream story unblock candidate count=%d want 1 for %s", upstreamCandidateCount, upstreamStoryID)
 		}
 	})
 
@@ -5101,6 +5143,12 @@ func TestRunRoomEpicDispatchFrontier(t *testing.T) {
 		dependentStoryID := decodeRoomEnvelope(t, out)["story_id"].(string)
 
 		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicFrontier: %v", err)
+		}
+		frontierData := decodeRoomEnvelope(t, out)
+
+		cmd, out = newRoomTestCommand(ctx)
 		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100, roomEpicDispatchFrontierOptions{}); err != nil {
 			t.Fatalf("runRoomEpicDispatchFrontier: %v", err)
 		}
@@ -5126,6 +5174,20 @@ func TestRunRoomEpicDispatchFrontier(t *testing.T) {
 		}
 		if got := strings.TrimSpace(fmt.Sprintf("%v", data["summary"])); strings.Contains(got, dependentStoryID) {
 			t.Fatalf("summary unexpectedly includes blocked story id %q: %q", dependentStoryID, got)
+		}
+		frontierBlockedSummary := frontierData["blocked_summary"].(map[string]any)
+		dispatchBlockedSummary := data["blocked_summary"].(map[string]any)
+		for _, key := range []string{"blocked_story_count", "dependency_gap_count", "unblock_candidate_count"} {
+			if got, want := dispatchBlockedSummary[key], frontierBlockedSummary[key]; got != want {
+				t.Fatalf("dispatch blocked_summary[%q]=%v want %v", key, got, want)
+			}
+		}
+		frontierEntityCounts := frontierData["blocking_entity_counts"].(map[string]any)
+		dispatchEntityCounts := data["blocking_entity_counts"].(map[string]any)
+		for _, key := range []string{"story", "milestone", "dependency_gap"} {
+			if got, want := dispatchEntityCounts[key], frontierEntityCounts[key]; got != want {
+				t.Fatalf("dispatch blocking_entity_counts[%q]=%v want %v", key, got, want)
+			}
 		}
 	})
 

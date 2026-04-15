@@ -4933,14 +4933,17 @@ func runRoomEpicDispatchFrontier(cmd *cobra.Command, workspace, roomID, epicID s
 	}
 
 	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", map[string]any{
-		"schema_version":       stringField(dispatchFrontier, "schema_version"),
-		"scope":                mapField(dispatchFrontier, "scope"),
-		"dispatchable_count":   intField(dispatchFrontier, "dispatchable_count"),
-		"blocked_count":        intField(dispatchFrontier, "blocked_count"),
-		"dependency_gap_count": intField(dispatchFrontier, "dependency_gap_count"),
-		"parallelism_width":    intField(dispatchFrontier, "parallelism_width"),
-		"summary":              stringField(dispatchFrontier, "summary"),
-		"notes":                stringSliceValue(dispatchFrontier["notes"]),
+		"schema_version":         stringField(dispatchFrontier, "schema_version"),
+		"scope":                  mapField(dispatchFrontier, "scope"),
+		"dispatchable_count":     intField(dispatchFrontier, "dispatchable_count"),
+		"blocked_count":          intField(dispatchFrontier, "blocked_count"),
+		"dependency_gap_count":   intField(dispatchFrontier, "dependency_gap_count"),
+		"parallelism_width":      intField(dispatchFrontier, "parallelism_width"),
+		"unblock_candidates":     cloneRoomMapSlice(mapSlice(dispatchFrontier["unblock_candidates"])),
+		"blocked_summary":        cloneRoomMap(anyMap(dispatchFrontier["blocked_summary"])),
+		"blocking_entity_counts": cloneRoomMap(anyMap(dispatchFrontier["blocking_entity_counts"])),
+		"summary":                stringField(dispatchFrontier, "summary"),
+		"notes":                  stringSliceValue(dispatchFrontier["notes"]),
 		"dispatch": map[string]any{
 			"story_id":       stringField(clonedUnit, "story_id"),
 			"selected_unit":  clonedUnit,
@@ -9403,6 +9406,7 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 	if len(dependencyGaps) > 0 {
 		summary += fmt.Sprintf(" %d dependency gap%s need story/milestone dependency id fixes.", len(dependencyGaps), pluralS(len(dependencyGaps)))
 	}
+	unblockCandidates, blockedSummary, blockingEntityCounts := buildRoomEpicFrontierUnblockDiagnostics(blockedFrontier, dependencyGaps)
 
 	return map[string]any{
 		"schema_version": "room.epic.frontier.v1",
@@ -9415,15 +9419,157 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 			"story_count":          intField(epic, "story_count"),
 			"accepted_story_count": acceptedStoryCount,
 		},
-		"ready_frontier":    readyFrontier,
-		"blocked_frontier":  blockedFrontier,
-		"dependency_gaps":   dependencyGaps,
-		"parallelism_width": len(readyFrontier),
-		"summary":           summary,
+		"ready_frontier":         readyFrontier,
+		"blocked_frontier":       blockedFrontier,
+		"dependency_gaps":        dependencyGaps,
+		"unblock_candidates":     unblockCandidates,
+		"blocked_summary":        blockedSummary,
+		"blocking_entity_counts": blockingEntityCounts,
+		"parallelism_width":      len(readyFrontier),
+		"summary":                summary,
 		"notes": []string{
 			"Frontier checks explicit story dependencies first and keeps milestone dependency checks as fallback blockers.",
 		},
 	}
+}
+
+func buildRoomEpicFrontierUnblockDiagnostics(blockedFrontier, dependencyGaps []map[string]any) ([]map[string]any, map[string]any, map[string]any) {
+	candidatesByKey := make(map[string]map[string]any)
+	reasonsByKey := make(map[string]map[string]struct{})
+
+	addCandidate := func(kind, id, reason string, fields map[string]any) {
+		kind = strings.TrimSpace(kind)
+		id = strings.TrimSpace(id)
+		if kind == "" || id == "" {
+			return
+		}
+		key := kind + "|" + id
+
+		candidate, ok := candidatesByKey[key]
+		if !ok {
+			candidate = map[string]any{
+				"kind":         kind,
+				"id":           id,
+				"source_count": 0,
+			}
+			candidatesByKey[key] = candidate
+		}
+		candidate["source_count"] = intField(candidate, "source_count") + 1
+
+		for fieldKey, fieldValue := range fields {
+			switch typed := fieldValue.(type) {
+			case string:
+				trimmed := strings.TrimSpace(typed)
+				if trimmed == "" {
+					continue
+				}
+				candidate[fieldKey] = trimmed
+			default:
+				if fieldValue == nil {
+					continue
+				}
+				candidate[fieldKey] = fieldValue
+			}
+		}
+
+		reason = strings.TrimSpace(reason)
+		if reason == "" {
+			return
+		}
+		reasonSet := reasonsByKey[key]
+		if reasonSet == nil {
+			reasonSet = make(map[string]struct{})
+			reasonsByKey[key] = reasonSet
+		}
+		reasonSet[reason] = struct{}{}
+	}
+
+	for _, item := range blockedFrontier {
+		reasonCodes := stringSliceValue(item["reason_codes"])
+
+		if stringSliceContains(reasonCodes, "story_state_blocked") {
+			storyID := stringField(item, "story_id")
+			addCandidate("story", storyID, "story_state_blocked", map[string]any{
+				"story_id":    storyID,
+				"story_title": stringField(item, "story_title"),
+			})
+		}
+		if stringSliceContains(reasonCodes, "milestone_blocked") {
+			milestoneID := stringField(item, "milestone_id")
+			addCandidate("milestone", milestoneID, "milestone_blocked", map[string]any{
+				"milestone_id":    milestoneID,
+				"milestone_title": stringField(item, "milestone_title"),
+			})
+		}
+
+		for _, unmetStory := range mapSlice(item["unmet_story_dependencies"]) {
+			storyID := stringField(unmetStory, "upstream_story_id")
+			addCandidate("story", storyID, "unmet_story_dependency", map[string]any{
+				"story_id":    storyID,
+				"story_title": stringField(unmetStory, "upstream_story_title"),
+			})
+		}
+		for _, unmetMilestone := range mapSlice(item["unmet_dependencies"]) {
+			milestoneID := stringField(unmetMilestone, "upstream_milestone_id")
+			addCandidate("milestone", milestoneID, "unmet_milestone_dependency", map[string]any{
+				"milestone_id":    milestoneID,
+				"milestone_title": stringField(unmetMilestone, "upstream_milestone_title"),
+			})
+		}
+	}
+
+	for _, gap := range dependencyGaps {
+		dependencyKind := strings.TrimSpace(stringField(gap, "dependency_kind"))
+		dependencyID := strings.TrimSpace(stringField(gap, "dependency"))
+		if dependencyKind == "" || dependencyID == "" {
+			continue
+		}
+		reason := strings.TrimSpace(stringField(gap, "reason"))
+		if reason == "" {
+			reason = "dependency_gap"
+		}
+		addCandidate("dependency_gap", dependencyKind+":"+dependencyID, reason, map[string]any{
+			"dependency_kind": dependencyKind,
+			"dependency":      dependencyID,
+		})
+	}
+
+	keys := make([]string, 0, len(candidatesByKey))
+	for key := range candidatesByKey {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	unblockCandidates := make([]map[string]any, 0, len(keys))
+	blockingEntityCounts := map[string]any{
+		"story":          0,
+		"milestone":      0,
+		"dependency_gap": 0,
+	}
+	for _, key := range keys {
+		candidate := candidatesByKey[key]
+		if reasonSet := reasonsByKey[key]; len(reasonSet) > 0 {
+			reasons := make([]string, 0, len(reasonSet))
+			for reason := range reasonSet {
+				reasons = append(reasons, reason)
+			}
+			sort.Strings(reasons)
+			candidate["source_reasons"] = reasons
+		}
+		kind := stringField(candidate, "kind")
+		if count, ok := blockingEntityCounts[kind].(int); ok {
+			blockingEntityCounts[kind] = count + 1
+		}
+		unblockCandidates = append(unblockCandidates, candidate)
+	}
+
+	blockedSummary := map[string]any{
+		"blocked_story_count":     len(blockedFrontier),
+		"dependency_gap_count":    len(dependencyGaps),
+		"unblock_candidate_count": len(unblockCandidates),
+	}
+
+	return unblockCandidates, blockedSummary, blockingEntityCounts
 }
 
 func buildRoomEpicDispatchFrontier(roomID string, frontier map[string]any) map[string]any {
@@ -9475,6 +9621,9 @@ func buildRoomEpicDispatchFrontier(roomID string, frontier map[string]any) map[s
 	if dependencyGapCount > 0 {
 		notes = append(notes, fmt.Sprintf("%d dependency gap%s need story/milestone dependency fixes before dispatch.", dependencyGapCount, pluralS(dependencyGapCount)))
 	}
+	unblockCandidates := cloneRoomMapSlice(mapSlice(frontier["unblock_candidates"]))
+	blockedSummary := cloneRoomMap(anyMap(frontier["blocked_summary"]))
+	blockingEntityCounts := cloneRoomMap(anyMap(frontier["blocking_entity_counts"]))
 
 	summary := fmt.Sprintf(
 		"%d dispatch unit%s ready; %d blocked; %d dependency gap%s.",
@@ -9493,13 +9642,16 @@ func buildRoomEpicDispatchFrontier(roomID string, frontier map[string]any) map[s
 			"epic_title":   epicTitle,
 			"status_phase": stringField(scope, "status_phase"),
 		},
-		"dispatch_units":       dispatchUnits,
-		"dispatchable_count":   len(dispatchUnits),
-		"blocked_count":        blockedCount,
-		"dependency_gap_count": dependencyGapCount,
-		"parallelism_width":    parallelismWidth,
-		"summary":              summary,
-		"notes":                notes,
+		"dispatch_units":         dispatchUnits,
+		"dispatchable_count":     len(dispatchUnits),
+		"blocked_count":          blockedCount,
+		"dependency_gap_count":   dependencyGapCount,
+		"parallelism_width":      parallelismWidth,
+		"unblock_candidates":     unblockCandidates,
+		"blocked_summary":        blockedSummary,
+		"blocking_entity_counts": blockingEntityCounts,
+		"summary":                summary,
+		"notes":                  notes,
 	}
 	if len(dispatchUnits) == 0 {
 		out["reason"] = "No ready frontier items to dispatch."
@@ -14091,6 +14243,21 @@ func cloneRoomMapSlice(items []map[string]any) []map[string]any {
 	var decoded []map[string]any
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return append([]map[string]any(nil), items...)
+	}
+	return decoded
+}
+
+func cloneRoomMap(item map[string]any) map[string]any {
+	if len(item) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(item)
+	if err != nil {
+		return anyMap(item)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return anyMap(item)
 	}
 	return decoded
 }
