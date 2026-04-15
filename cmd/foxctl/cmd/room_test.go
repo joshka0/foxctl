@@ -4358,6 +4358,287 @@ func TestRunRoomMilestoneExitPolicyStates(t *testing.T) {
 	})
 }
 
+func TestRunRoomEpicGrade(t *testing.T) {
+	t.Run("not ready when planning gaps remain", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, _, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicGrade(cmd, workspace, "alpha", epicID, 100, "", roomEpicGradePublishOptions{}); err != nil {
+			t.Fatalf("runRoomEpicGrade: %v", err)
+		}
+		grade := decodeRoomEnvelope(t, out)["grade"].(map[string]any)
+		if got := grade["decision"]; got != "NOT READY" {
+			t.Fatalf("decision=%v want NOT READY", got)
+		}
+		if score := roomCategoryScoreByName(t, grade["categories"].([]any), "Milestone Architecture"); score >= 15 {
+			t.Fatalf("Milestone Architecture score=%d want < 15", score)
+		}
+		if score := roomCategoryScoreByName(t, grade["categories"].([]any), "Validation & Evidence"); score >= 20 {
+			t.Fatalf("Validation & Evidence score=%d want < 20", score)
+		}
+		if report := grade["report"].(string); !strings.Contains(report, "## Upgrade Actions") {
+			t.Fatalf("report=%q want upgrade actions section", report)
+		}
+	})
+
+	t.Run("ready when epic is fully shaped", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator", "gemini-a=reviewer"}); err != nil {
+			t.Fatalf("runRoomCreate: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicStart(cmd, workspace, "human-a", "alpha", "Planning-grade epic", "Ship work-packs", "human-a", "Validated room-agile implementation plan", "this week", []string{"room", "filesystem mirror"}, []string{"review lane is explicit", "implementation plan is execution-ready"}, false, false); err != nil {
+			t.Fatalf("runRoomEpicStart: %v", err)
+		}
+		epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomEpicFinalize(cmd, workspace, "human-a", "alpha", epicID, "Epic creation complete."); err != nil {
+			t.Fatalf("runRoomEpicFinalize: %v", err)
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		enforceFalse := false
+		if err := runRoomMilestoneStartWithPolicy(cmd, workspace, "human-a", "alpha", epicID, "Foundation", "Ship the first validation slice", "Define the first execution-ready milestone", "human-a", []string{"story validation", "work-pack sync"}, nil, nil, nil, []string{"review"}, []string{"review"}, []string{"integration"}, &enforceFalse, []string{"story validated", "review captured"}, ""); err != nil {
+			t.Fatalf("runRoomMilestoneStartWithPolicy: %v", err)
+		}
+		milestoneID := decodeRoomEnvelope(t, out)["milestone_id"].(string)
+
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneCriteria(cmd, workspace, "human-a", "alpha", milestoneID, "Accepted stories specify validation evidence and review expectations"); err != nil {
+			t.Fatalf("runRoomMilestoneCriteria: %v", err)
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Define review-ready story contract", "Add the execution-ready story contract with validators and evidence expectations.", "human-a"); err != nil {
+			t.Fatalf("runRoomStoryAdd: %v", err)
+		}
+		storyID := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Planning surface reviewed.", "docs/reviews/plan.md", "", "foxctl room epic show alpha "+epicID, "Captured the intended review lane.", nil); err != nil {
+			t.Fatalf("runRoomStoryValidate: %v", err)
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicGrade(cmd, workspace, "alpha", epicID, 100, "", roomEpicGradePublishOptions{}); err != nil {
+			t.Fatalf("runRoomEpicGrade: %v", err)
+		}
+		grade := decodeRoomEnvelope(t, out)["grade"].(map[string]any)
+		if got := grade["decision"]; got != "READY" {
+			t.Fatalf("decision=%v want READY", got)
+		}
+		if total := int(grade["total"].(float64)); total < 90 {
+			t.Fatalf("total=%d want >= 90", total)
+		}
+		if score := roomCategoryScoreByName(t, grade["categories"].([]any), "Validation & Evidence"); score < 16 {
+			t.Fatalf("Validation & Evidence score=%d want >= 16", score)
+		}
+		if report := grade["report"].(string); !strings.Contains(report, "Decision: READY") {
+			t.Fatalf("report=%q want READY decision", report)
+		}
+	})
+
+	t.Run("can publish grade report into room timeline", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, _, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicGrade(cmd, workspace, "alpha", epicID, 100, "", roomEpicGradePublishOptions{
+			Enabled:   true,
+			Sender:    "human-a",
+			Recipient: "gemini-a",
+			Subject:   "Please review epic grade",
+		}); err != nil {
+			t.Fatalf("runRoomEpicGrade publish: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+		published := data["published"].(map[string]any)
+		if got := published["enabled"]; got != true {
+			t.Fatalf("published.enabled=%v want true", got)
+		}
+		if got := published["delivery"]; got != "direct" {
+			t.Fatalf("published.delivery=%v want direct", got)
+		}
+		if data["agent_brief"] == "" {
+			t.Fatalf("agent_brief missing")
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomInbox(cmd, workspace, "alpha", "gemini-a", 20, "", false, false, false, false); err != nil {
+			t.Fatalf("runRoomInbox: %v", err)
+		}
+		inbox := decodeRoomEnvelope(t, out)
+		items := inbox["entries"].([]any)
+		found := false
+		for _, raw := range items {
+			msg := raw.(map[string]any)
+			if msg["subject"] == "Please review epic grade" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("inbox=%v want published grade message", items)
+		}
+	})
+}
+
+func TestRunRoomEpicStatus(t *testing.T) {
+	t.Run("planning gap epic", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, _, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicStatus(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicStatus: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+		if _, ok := data["health"].(map[string]any); !ok {
+			t.Fatalf("health payload type=%T", data["health"])
+		}
+		status := data["status"].(map[string]any)
+		if got := status["intake_mode"]; got != "authored" {
+			t.Fatalf("intake_mode=%v want authored", got)
+		}
+		if got := status["phase"]; got != "graded" {
+			t.Fatalf("phase=%v want graded", got)
+		}
+		if got := status["current_milestone_title"]; got != "Foundation" {
+			t.Fatalf("current_milestone_title=%v want Foundation", got)
+		}
+		if got := status["open_intake_questions"]; got != float64(0) {
+			t.Fatalf("open_intake_questions=%v want 0", got)
+		}
+		wantGaps := []string{
+			"missing_outcome",
+			"missing_milestone_contract",
+			"missing_milestone_criteria",
+			"missing_validation_lane",
+			"missing_story_validation",
+		}
+		gotGaps := stringSliceValue(status["structural_gaps"])
+		if len(gotGaps) != len(wantGaps) {
+			t.Fatalf("len(structural_gaps)=%d want %d gaps=%v", len(gotGaps), len(wantGaps), gotGaps)
+		}
+		for i := range wantGaps {
+			if gotGaps[i] != wantGaps[i] {
+				t.Fatalf("structural_gaps[%d]=%q want %q (all=%v)", i, gotGaps[i], wantGaps[i], gotGaps)
+			}
+		}
+		if got := status["next_pipeline_stage"]; got != "repair" {
+			t.Fatalf("next_pipeline_stage=%v want repair", got)
+		}
+	})
+
+	t.Run("dispatchable ready epic", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomEpicUpdate(cmd, workspace, "human-a", "alpha", epicID, "", "Execution-ready epic plan."); err != nil {
+			t.Fatalf("runRoomEpicUpdate: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneContract(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"story validated"}); err != nil {
+			t.Fatalf("runRoomMilestoneContract: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomMilestoneCriteria(cmd, workspace, "human-a", "alpha", milestoneID, "Accepted stories are validated"); err != nil {
+			t.Fatalf("runRoomMilestoneCriteria: %v", err)
+		}
+		cmd, _ = newRoomTestCommand(ctx)
+		if err := runRoomStoryValidate(cmd, workspace, "human-a", "alpha", storyID, "review", "pass", "Validated.", "docs/reviews/pass.md", "", "", "", nil); err != nil {
+			t.Fatalf("runRoomStoryValidate: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicStatus(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicStatus: %v", err)
+		}
+		status := decodeRoomEnvelope(t, out)["status"].(map[string]any)
+		if got := status["intake_mode"]; got != "authored" {
+			t.Fatalf("intake_mode=%v want authored", got)
+		}
+		if got := status["phase"]; got != "dispatchable" {
+			t.Fatalf("phase=%v want dispatchable", got)
+		}
+		if got := status["current_milestone_title"]; got != "Foundation" {
+			t.Fatalf("current_milestone_title=%v want Foundation", got)
+		}
+		if got := status["open_intake_questions"]; got != float64(0) {
+			t.Fatalf("open_intake_questions=%v want 0", got)
+		}
+		if gaps := stringSliceValue(status["structural_gaps"]); len(gaps) != 0 {
+			t.Fatalf("structural_gaps=%v want empty", gaps)
+		}
+		if got := status["next_pipeline_stage"]; got != "dispatch" {
+			t.Fatalf("next_pipeline_stage=%v want dispatch", got)
+		}
+	})
+}
+
+func TestRunRoomEpicAndStoryUpdate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, _, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomEpicUpdate(cmd, workspace, "human-a", "alpha", epicID, "", "Implementation plan for the Uniwind migration."); err != nil {
+		t.Fatalf("runRoomEpicUpdate: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicShow(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicShow: %v", err)
+	}
+	epic := decodeRoomEnvelope(t, out)["epic"].(map[string]any)
+	meta := epic["meta"].(map[string]any)
+	if got := meta["outcome"]; got != "Implementation plan for the Uniwind migration." {
+		t.Fatalf("epic outcome=%v want updated outcome", got)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyID, "gemini-a"); err != nil {
+		t.Fatalf("runRoomStoryUpdate: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomStoryShow(cmd, workspace, "alpha", storyID, 100); err != nil {
+		t.Fatalf("runRoomStoryShow: %v", err)
+	}
+	story := decodeRoomEnvelope(t, out)["story"].(map[string]any)
+	storyMeta := story["meta"].(map[string]any)
+	if got := storyMeta["owner"]; got != "gemini-a" {
+		t.Fatalf("story owner=%v want gemini-a", got)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	if err := runRoomStoryState(cmd, workspace, "gemini-a", "alpha", storyID, "in_progress", "Started planning-owned execution.", "", ""); err != nil {
+		t.Fatalf("runRoomStoryState after owner update: %v", err)
+	}
+}
+
 func TestRunRoomMilestoneExitEnforcement(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
@@ -9231,6 +9512,63 @@ func decodeRoomEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {
 		t.Fatalf("data type=%T", env.Data)
 	}
 	return data
+}
+
+func roomCategoryScoreByName(t *testing.T, categories []any, name string) int {
+	t.Helper()
+	for _, raw := range categories {
+		category, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if category["name"] != name {
+			continue
+		}
+		switch score := category["score"].(type) {
+		case float64:
+			return int(score)
+		case int:
+			return score
+		}
+	}
+	t.Fatalf("category %q not found in %v", name, categories)
+	return 0
+}
+
+func TestBuildRoomEpicGradeDispatchArtifacts(t *testing.T) {
+	epic := map[string]any{"title": "Sample Epic"}
+	grade := map[string]any{
+		"decision":        "NOT READY",
+		"total":           68,
+		"blockers":        []string{"Milestone criteria are missing."},
+		"upgrade_actions": []string{"Add milestone acceptance criteria."},
+	}
+	brief := buildRoomEpicGradeAgentBrief("alpha", "epic-1", epic, grade)
+	if !strings.Contains(brief, "Do not split or reshape stories unless a structural contradiction clearly blocks readiness") {
+		t.Fatalf("brief=%q missing story-boundary constraint", brief)
+	}
+	if !strings.Contains(brief, "Repair order: start with the earliest milestone in the room view") {
+		t.Fatalf("brief=%q missing repair order", brief)
+	}
+	cmd := buildRoomEpicGradeDispatchSpawnCommand("/tmp/work", "alpha", roomEpicGradeDispatchOptions{
+		AgentRole:     "planner",
+		LLMProvider:   "openai",
+		LLMModel:      "gpt-5.4",
+		ExecMode:      "autonomous",
+		MaxAutoTurns:  2,
+		MaxIterations: 12,
+		RoomAccess:    "direct",
+		SpawnDryRun:   true,
+	}, brief)
+	if !strings.Contains(cmd, "agent spawn") || !strings.Contains(cmd, "--llm-model 'gpt-5.4'") || !strings.Contains(cmd, "--dry-run") {
+		t.Fatalf("spawn command=%q missing expected flags", cmd)
+	}
+	if err := validateRoomEpicGradeDispatchSpawn(roomEpicGradeDispatchOptions{Spawn: true, LLMProvider: "openai"}); err == nil {
+		t.Fatalf("expected provider restriction error")
+	}
+	if err := validateRoomEpicGradeDispatchSpawn(roomEpicGradeDispatchOptions{Spawn: true, LLMProvider: "lmstudio"}); err != nil {
+		t.Fatalf("lmstudio provider should be allowed: %v", err)
+	}
 }
 
 func assertRoomErrorContains(t *testing.T, err error, want string) {
