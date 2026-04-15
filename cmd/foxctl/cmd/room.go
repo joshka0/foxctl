@@ -646,6 +646,7 @@ func newRoomEpicCommand() *cobra.Command {
 		newRoomEpicHealthCommand(),
 		newRoomEpicStatusCommand(),
 		newRoomEpicScoutCommand(),
+		newRoomEpicSnapshotCommand(),
 		newRoomEpicGradeCommand(),
 		newRoomEpicGradeDispatchCommand(),
 		newRoomEpicUpdateCommand(),
@@ -808,6 +809,24 @@ func newRoomEpicScoutCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRoomEpicScout(cmd, workspace, args[0], args[1], limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", roomTaskScanLimit, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomEpicSnapshotCommand() *cobra.Command {
+	var (
+		workspace string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "snapshot <room-id> <epic-id>",
+		Short: "Persist a compact planning snapshot for one epic",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicSnapshot(cmd, workspace, args[0], args[1], limit)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -4727,6 +4746,78 @@ func runRoomEpicScout(cmd *cobra.Command, workspace, roomID, epicID string, limi
 		"epic":   epic,
 		"status": status,
 		"scout":  scout,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicSnapshot(cmd *cobra.Command, workspace, roomID, epicID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	if limit <= 0 {
+		limit = roomTaskScanLimit
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.snapshot", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.snapshot", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epic := roomEpicViewByID(buildRoomEpicViews(messages), epicID)
+	if epic == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.snapshot", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+			"hint": "Run `foxctl room epic show <room-id>` to list available epics.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	health := buildRoomEpicHealth(summary, messages, epic, "")
+	status := buildRoomEpicStatus(epic, health)
+	scout := buildRoomEpicScout(roomID, epic, status, health)
+	canonicalEpicID := stringField(epic, "id")
+	createdAt := time.Now().UTC()
+	snapshotID := "snapshot-" + createdAt.Format("20060102T150405.000000000Z")
+	snapshotArtifact := roomAgileEpicSnapshotJSONPath(canonicalEpicID, snapshotID)
+	latestArtifact := roomAgileEpicSnapshotLatestJSONPath(canonicalEpicID)
+	if snapshotArtifact == "" || latestArtifact == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.snapshot", protocol.ErrorCodeERuntime, "resolve epic snapshot work-pack paths", nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	snapshotPayload := buildRoomEpicSnapshotV1(absWorkspace, roomID, epic, status, health, scout, snapshotID, snapshotArtifact, createdAt)
+	if err := writeRoomAgileJSON(snapshotArtifact, snapshotPayload); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.snapshot", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if err := writeRoomAgileJSON(latestArtifact, map[string]any{
+		"schema_version":      "room.epic.snapshot.latest.v1",
+		"updated_at":          createdAt.Format(time.RFC3339),
+		"snapshot_id":         snapshotID,
+		"snapshot_artifact":   snapshotArtifact,
+		"latest_for_epic_id":  canonicalEpicID,
+		"latest_for_room_id":  strings.TrimSpace(roomID),
+		"latest_for_phase":    stringField(mapField(snapshotPayload, "status"), "phase"),
+		"latest_for_pipeline": stringField(mapField(snapshotPayload, "status"), "next_pipeline_stage"),
+	}); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.snapshot", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.snapshot", map[string]any{
+		"room_id":                  strings.TrimSpace(roomID),
+		"epic_id":                  canonicalEpicID,
+		"snapshot_id":              snapshotID,
+		"created_at":               createdAt.Format(time.RFC3339),
+		"snapshot_artifact":        snapshotArtifact,
+		"latest_snapshot_artifact": latestArtifact,
+		"summary":                  mapField(snapshotPayload, "summary"),
+		"workpack_root":            roomAgileWorkpackRootPath(canonicalEpicID),
 	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
@@ -8713,6 +8804,96 @@ func buildRoomEpicScout(roomID string, epic, status, health map[string]any) map[
 	}
 }
 
+func buildRoomEpicSnapshotV1(workspaceID, roomID string, epic, status, health, scout map[string]any, snapshotID, snapshotArtifact string, createdAt time.Time) map[string]any {
+	scoutSignals := anyMap(scout["signals"])
+	structuralGaps := stringSliceValue(status["structural_gaps"])
+	outOfScope := filterRoomEpicSnapshotOutOfScope(stringSliceValue(scout["out_of_scope"]))
+	findings := buildRoomEpicSnapshotFindingRefs(mapSlice(scout["findings"]))
+	compactStatus := map[string]any{
+		"intake_mode":             stringField(status, "intake_mode"),
+		"phase":                   stringField(status, "phase"),
+		"next_pipeline_stage":     stringField(status, "next_pipeline_stage"),
+		"current_milestone_title": stringField(status, "current_milestone_title"),
+		"open_intake_questions":   intField(status, "open_intake_questions"),
+		"structural_gaps":         structuralGaps,
+	}
+	compactHealth := map[string]any{
+		"health":                            stringField(health, "health"),
+		"phase":                             stringField(health, "phase"),
+		"current_milestone_id":              stringField(health, "current_milestone_id"),
+		"current_milestone_title":           stringField(health, "current_milestone_title"),
+		"issue_count":                       intField(health, "issue_count"),
+		"open_interview_items":              intField(health, "open_interview_items"),
+		"open_intake_questions":             intField(health, "open_intake_questions"),
+		"stories_missing_validation_count":  intField(health, "stories_missing_validation_count"),
+		"blocked_story_count":               intField(health, "blocked_story_count"),
+		"stale_milestone_summary_count":     intField(health, "stale_milestone_summary_count"),
+		"milestones_missing_contract_count": intField(health, "milestones_missing_contract_count"),
+	}
+	compactScout := map[string]any{
+		"schema_version":    stringField(scoutSignals, "schema_version"),
+		"total_findings":    intField(scoutSignals, "total_findings"),
+		"blocking_findings": intField(scoutSignals, "blocking_findings"),
+		"family_counts":     mapField(scoutSignals, "family_counts"),
+		"snapshot_id":       strings.TrimSpace(snapshotID),
+		"snapshot_artifact": strings.TrimSpace(snapshotArtifact),
+		"out_of_scope":      outOfScope,
+		"findings":          findings,
+	}
+	compactSummary := map[string]any{
+		"phase":                stringField(compactStatus, "phase"),
+		"next_pipeline_stage":  stringField(compactStatus, "next_pipeline_stage"),
+		"health":               stringField(compactHealth, "health"),
+		"structural_gap_count": len(structuralGaps),
+		"issue_count":          intField(compactHealth, "issue_count"),
+		"blocking_findings":    intField(compactScout, "blocking_findings"),
+		"out_of_scope_count":   len(outOfScope),
+	}
+	return map[string]any{
+		"schema_version": "room.epic.snapshot.v1",
+		"snapshot_id":    strings.TrimSpace(snapshotID),
+		"created_at":     createdAt.UTC().Format(time.RFC3339),
+		"scope": map[string]any{
+			"workspace_id": strings.TrimSpace(workspaceID),
+			"room_id":      strings.TrimSpace(roomID),
+			"epic_id":      stringField(epic, "id"),
+		},
+		"status":  compactStatus,
+		"health":  compactHealth,
+		"scout":   compactScout,
+		"summary": compactSummary,
+	}
+}
+
+func filterRoomEpicSnapshotOutOfScope(outOfScope []string) []string {
+	if len(outOfScope) == 0 {
+		return nil
+	}
+	filtered := make([]string, 0, len(outOfScope))
+	for _, item := range outOfScope {
+		if strings.TrimSpace(item) == "snapshot_unavailable" {
+			continue
+		}
+		filtered = append(filtered, strings.TrimSpace(item))
+	}
+	return filtered
+}
+
+func buildRoomEpicSnapshotFindingRefs(findings []map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(findings))
+	for _, finding := range findings {
+		out = append(out, map[string]any{
+			"id":                       stringField(finding, "id"),
+			"rule_family":              stringField(finding, "rule_family"),
+			"severity":                 stringField(finding, "severity"),
+			"entity_type":              stringField(finding, "entity_type"),
+			"entity_id":                stringField(finding, "entity_id"),
+			"recommended_repair_lanes": stringSliceValue(finding["recommended_repair_lanes"]),
+		})
+	}
+	return out
+}
+
 func buildRoomEpicScoutOutOfScope(status map[string]any) []string {
 	out := []string{"snapshot_unavailable"}
 	if stringField(status, "phase") == "draft" {
@@ -11769,6 +11950,30 @@ func roomAgileEpicCheckpointDir(epicID string) string {
 	return filepath.Join(root, "checkpoints")
 }
 
+func roomAgileEpicSnapshotDir(epicID string) string {
+	root := roomAgileWorkpackRootPath(epicID)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "snapshots")
+}
+
+func roomAgileEpicSnapshotJSONPath(epicID, snapshotID string) string {
+	dir := roomAgileEpicSnapshotDir(epicID)
+	if dir == "" || strings.TrimSpace(snapshotID) == "" {
+		return ""
+	}
+	return filepath.Join(dir, strings.TrimSpace(snapshotID)+".json")
+}
+
+func roomAgileEpicSnapshotLatestJSONPath(epicID string) string {
+	dir := roomAgileEpicSnapshotDir(epicID)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "latest.json")
+}
+
 func roomAgileCheckpointMarkdownPath(epicID, checkpointID string) string {
 	dir := roomAgileEpicCheckpointDir(epicID)
 	if dir == "" || strings.TrimSpace(checkpointID) == "" {
@@ -11873,6 +12078,8 @@ func buildRoomAgileWorkpackInfo(epic map[string]any) map[string]any {
 		"epic_markdown":         roomAgileEpicMarkdownPath(epicID),
 		"meta_json":             roomAgileEpicMetaJSONPath(epicID),
 		"checkpoint_dir":        roomAgileEpicCheckpointDir(epicID),
+		"snapshot_dir":          roomAgileEpicSnapshotDir(epicID),
+		"latest_snapshot_json":  roomAgileEpicSnapshotLatestJSONPath(epicID),
 		"delivery_log_markdown": roomAgileDeliveryLogMarkdownPath(epicID),
 		"retro_markdown":        roomAgileRetroMarkdownPath(epicID),
 	}

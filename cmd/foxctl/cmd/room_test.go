@@ -5798,6 +5798,158 @@ func TestRunRoomEpicCheckpointEmptyNextItems(t *testing.T) {
 	}
 }
 
+func TestRunRoomEpicSnapshotPersistsAndUpdatesLatest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	epicID, _, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicSnapshot(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicSnapshot first: %v", err)
+	}
+	first := decodeRoomEnvelope(t, out)
+	if got := first["epic_id"]; got != epicID {
+		t.Fatalf("epic_id=%v want %s", got, epicID)
+	}
+	firstSummary := first["summary"].(map[string]any)
+	if got := firstSummary["phase"]; got != "graded" {
+		t.Fatalf("summary.phase=%v want graded", got)
+	}
+	if _, err := time.Parse(time.RFC3339, first["created_at"].(string)); err != nil {
+		t.Fatalf("created_at parse: %v", err)
+	}
+	firstSnapshotID := first["snapshot_id"].(string)
+	if firstSnapshotID == "" {
+		t.Fatalf("snapshot_id empty")
+	}
+	firstArtifact := first["snapshot_artifact"].(string)
+	firstLatest := first["latest_snapshot_artifact"].(string)
+	if _, err := os.Stat(firstArtifact); err != nil {
+		t.Fatalf("snapshot artifact stat: %v", err)
+	}
+	if _, err := os.Stat(firstLatest); err != nil {
+		t.Fatalf("latest artifact stat: %v", err)
+	}
+	var firstDoc map[string]any
+	firstRaw, err := os.ReadFile(firstArtifact)
+	if err != nil {
+		t.Fatalf("read snapshot artifact: %v", err)
+	}
+	if err := json.Unmarshal(firstRaw, &firstDoc); err != nil {
+		t.Fatalf("decode snapshot artifact: %v", err)
+	}
+	if got := firstDoc["schema_version"]; got != "room.epic.snapshot.v1" {
+		t.Fatalf("snapshot schema_version=%v want room.epic.snapshot.v1", got)
+	}
+	if got := firstDoc["snapshot_id"]; got != firstSnapshotID {
+		t.Fatalf("snapshot snapshot_id=%v want %s", got, firstSnapshotID)
+	}
+	scope := firstDoc["scope"].(map[string]any)
+	if got := scope["room_id"]; got != "alpha" {
+		t.Fatalf("scope.room_id=%v want alpha", got)
+	}
+	if got := scope["epic_id"]; got != epicID {
+		t.Fatalf("scope.epic_id=%v want %s", got, epicID)
+	}
+	status := firstDoc["status"].(map[string]any)
+	if got := status["phase"]; got != firstSummary["phase"] {
+		t.Fatalf("status.phase=%v want %v", got, firstSummary["phase"])
+	}
+	scout := firstDoc["scout"].(map[string]any)
+	if got := scout["schema_version"]; got != "room.epic.scout.v1" {
+		t.Fatalf("scout.schema_version=%v want room.epic.scout.v1", got)
+	}
+	if got := scout["snapshot_id"]; got != firstSnapshotID {
+		t.Fatalf("scout.snapshot_id=%v want %s", got, firstSnapshotID)
+	}
+	if got := scout["snapshot_artifact"]; got != firstArtifact {
+		t.Fatalf("scout.snapshot_artifact=%v want %s", got, firstArtifact)
+	}
+	if got := scout["blocking_findings"]; got != firstSummary["blocking_findings"] {
+		t.Fatalf("scout.blocking_findings=%v want %v", got, firstSummary["blocking_findings"])
+	}
+	outOfScope := stringSliceValue(scout["out_of_scope"])
+	for _, item := range outOfScope {
+		if item == "snapshot_unavailable" {
+			t.Fatalf("scout.out_of_scope=%v unexpectedly contains snapshot_unavailable", outOfScope)
+		}
+	}
+	if findings := scout["findings"].([]any); len(findings) == 0 {
+		t.Fatalf("scout.findings empty")
+	}
+	var firstLatestDoc map[string]any
+	firstLatestRaw, err := os.ReadFile(firstLatest)
+	if err != nil {
+		t.Fatalf("read latest artifact: %v", err)
+	}
+	if err := json.Unmarshal(firstLatestRaw, &firstLatestDoc); err != nil {
+		t.Fatalf("decode latest artifact: %v", err)
+	}
+	if got := firstLatestDoc["snapshot_id"]; got != firstSnapshotID {
+		t.Fatalf("latest snapshot_id=%v want %s", got, firstSnapshotID)
+	}
+	if got := firstLatestDoc["snapshot_artifact"]; got != firstArtifact {
+		t.Fatalf("latest snapshot_artifact=%v want %s", got, firstArtifact)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicSnapshot(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicSnapshot second: %v", err)
+	}
+	second := decodeRoomEnvelope(t, out)
+	secondSnapshotID := second["snapshot_id"].(string)
+	secondArtifact := second["snapshot_artifact"].(string)
+	secondLatest := second["latest_snapshot_artifact"].(string)
+	if secondLatest != firstLatest {
+		t.Fatalf("latest artifact path changed: %s vs %s", secondLatest, firstLatest)
+	}
+	var secondLatestDoc map[string]any
+	secondLatestRaw, err := os.ReadFile(secondLatest)
+	if err != nil {
+		t.Fatalf("read second latest artifact: %v", err)
+	}
+	if err := json.Unmarshal(secondLatestRaw, &secondLatestDoc); err != nil {
+		t.Fatalf("decode second latest artifact: %v", err)
+	}
+	if got := secondLatestDoc["snapshot_id"]; got != secondSnapshotID {
+		t.Fatalf("second latest snapshot_id=%v want %s", got, secondSnapshotID)
+	}
+	if got := secondLatestDoc["snapshot_artifact"]; got != secondArtifact {
+		t.Fatalf("second latest snapshot_artifact=%v want %s", got, secondArtifact)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomWorkpackShow(cmd, workspace, "alpha", epicID); err != nil {
+		t.Fatalf("runRoomWorkpackShow: %v", err)
+	}
+	workpack := decodeRoomEnvelope(t, out)["workpack"].(map[string]any)
+	if got := workpack["snapshot_dir"]; got != roomAgileEpicSnapshotDir(epicID) {
+		t.Fatalf("snapshot_dir=%v want %s", got, roomAgileEpicSnapshotDir(epicID))
+	}
+	if got := workpack["latest_snapshot_json"]; got != secondLatest {
+		t.Fatalf("latest_snapshot_json=%v want %s", got, secondLatest)
+	}
+}
+
+func TestNewRoomEpicCommandIncludesSnapshotSubcommand(t *testing.T) {
+	cmd := newRoomEpicCommand()
+	found := false
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "snapshot" {
+			found = true
+			if got := sub.Use; got != "snapshot <room-id> <epic-id>" {
+				t.Fatalf("snapshot use=%q want snapshot <room-id> <epic-id>", got)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("snapshot subcommand missing")
+	}
+}
+
 func TestRunRoomPulseDeterministicEmptyShape(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
