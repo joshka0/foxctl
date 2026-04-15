@@ -9092,6 +9092,8 @@ func evaluateRoomEpicGrade(cmd *cobra.Command, workspace, roomID, epicID string,
 	}
 
 	health := buildRoomEpicHealth(summary, messages, epic, "")
+	status := buildRoomEpicStatus(epic, health)
+	scout := buildRoomEpicScout(roomID, epic, status, health)
 	factoryMission, sourceInfo, err := loadRoomEpicGradeFactoryMission(epic, factoryMissionDir)
 	if err != nil {
 		store.Close() //nolint:errcheck
@@ -9099,7 +9101,7 @@ func evaluateRoomEpicGrade(cmd *cobra.Command, workspace, roomID, epicID string,
 			"hint": "Pass --factory-mission-dir pointing at one concrete directory under ~/.factory/missions, or omit it to grade without source comparison.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	grade := buildRoomEpicGrade(epic, health, factoryMission, sourceInfo)
+	grade := buildRoomEpicGrade(epic, health, scout, factoryMission, sourceInfo)
 	return absWorkspace, summary, store, epic, health, grade, sourceInfo, nil
 }
 
@@ -9123,7 +9125,50 @@ func inferRoomEpicFactoryMissionDir(epic map[string]any) string {
 	return candidate
 }
 
-func buildRoomEpicGrade(epic, health map[string]any, mission *factoryMissionImport, sourceInfo map[string]any) map[string]any {
+func deriveRoomEpicGradeScoutSignals(scout map[string]any) (totalFindings int, blockingFindings int, familyCounts map[string]int, statusPhase string, schemaVersion string) {
+	familyCounts = make(map[string]int, len(roomEpicScoutRuleFamilies))
+	for _, family := range roomEpicScoutRuleFamilies {
+		familyCounts[family] = 0
+	}
+	if scout == nil {
+		return 0, 0, familyCounts, "", ""
+	}
+	scope := anyMap(scout["scope"])
+	statusPhase = stringField(scope, "status_phase")
+	signals := anyMap(scout["signals"])
+	schemaVersion = stringField(signals, "schema_version")
+	totalFindings = intField(signals, "total_findings")
+	blockingFindings = intField(signals, "blocking_findings")
+	fallbackBlocking := 0
+	for _, finding := range mapSlice(scout["findings"]) {
+		family := stringField(finding, "rule_family")
+		if _, ok := familyCounts[family]; ok {
+			familyCounts[family]++
+		}
+		if stringField(finding, "severity") == "blocking" {
+			fallbackBlocking++
+		}
+	}
+	if payload := anyMap(signals["family_counts"]); payload != nil {
+		for _, family := range roomEpicScoutRuleFamilies {
+			count := intField(payload, family)
+			if count > familyCounts[family] {
+				familyCounts[family] = count
+			}
+		}
+	}
+	if totalFindings == 0 {
+		for _, family := range roomEpicScoutRuleFamilies {
+			totalFindings += familyCounts[family]
+		}
+	}
+	if blockingFindings == 0 {
+		blockingFindings = fallbackBlocking
+	}
+	return totalFindings, blockingFindings, familyCounts, statusPhase, schemaVersion
+}
+
+func buildRoomEpicGrade(epic, health, scout map[string]any, mission *factoryMissionImport, sourceInfo map[string]any) map[string]any {
 	type roomEpicGradeAccumulator struct {
 		blockers []string
 		actions  []string
@@ -9172,6 +9217,7 @@ func buildRoomEpicGrade(epic, health map[string]any, mission *factoryMissionImpo
 		stories = append(stories, mapSlice(milestone["stories"])...)
 	}
 	meta := anyMap(epic["meta"])
+	scoutTotalFindings, scoutBlockingFindings, scoutFamilyCounts, scoutStatusPhase, scoutSchemaVersion := deriveRoomEpicGradeScoutSignals(scout)
 	acc := roomEpicGradeAccumulator{
 		blockers: make([]string, 0),
 		actions:  make([]string, 0),
@@ -9207,6 +9253,10 @@ func buildRoomEpicGrade(epic, health map[string]any, mission *factoryMissionImpo
 		deduct(&briefScore, 2, "Success signals are missing.", &briefReasons)
 		addUnique(&acc.actions, "Add success signals that define what completion should prove.")
 	}
+	if scoutFamilyCounts["brief_boundary"] > 0 {
+		deduct(&briefScore, minInt(2, scoutFamilyCounts["brief_boundary"]), fmt.Sprintf("Scout reports %d brief boundary gap%s.", scoutFamilyCounts["brief_boundary"], pluralS(scoutFamilyCounts["brief_boundary"])), &briefReasons)
+		addUnique(&acc.actions, "Resolve scout brief-boundary findings so the epic intent is explicit before dispatch.")
+	}
 	categories = append(categories, category("Brief & Boundaries", 15, briefScore, briefReasons))
 
 	milestoneScore := 15
@@ -9236,6 +9286,15 @@ func buildRoomEpicGrade(epic, health map[string]any, mission *factoryMissionImpo
 				intField(milestone, "optional_evidence_lane_count") == 0 {
 				missingValidationContract++
 			}
+		}
+		if scoutFamilyCounts["milestone_contract"] > missingContract {
+			missingContract = scoutFamilyCounts["milestone_contract"]
+		}
+		if scoutFamilyCounts["criteria_coverage"] > missingCriteria {
+			missingCriteria = scoutFamilyCounts["criteria_coverage"]
+		}
+		if scoutFamilyCounts["validation_lane"] > missingValidationContract {
+			missingValidationContract = scoutFamilyCounts["validation_lane"]
 		}
 		deduct(&milestoneScore, minInt(6, missingContract*3), fmt.Sprintf("%d milestone(s) are missing an explicit contract.", missingContract), &milestoneReasons)
 		deduct(&milestoneScore, minInt(4, missingCriteria*2), fmt.Sprintf("%d milestone(s) have no acceptance criteria.", missingCriteria), &milestoneReasons)
@@ -9269,6 +9328,9 @@ func buildRoomEpicGrade(epic, health map[string]any, mission *factoryMissionImpo
 			if stringField(anyMap(story["meta"]), "owner") == "" {
 				missingOwner++
 			}
+		}
+		if scoutFamilyCounts["owner_dispatch"] > missingOwner {
+			missingOwner = scoutFamilyCounts["owner_dispatch"]
 		}
 		deduct(&storyScore, minInt(8, missingDescription*3), fmt.Sprintf("%d stor%s lack description detail.", missingDescription, pluralSuffix(missingDescription, "y", "ies")), &storyReasons)
 		deduct(&storyScore, minInt(4, missingOwner), fmt.Sprintf("%d stor%s lack an owner.", missingOwner, pluralSuffix(missingOwner, "y", "ies")), &storyReasons)
@@ -9329,9 +9391,17 @@ func buildRoomEpicGrade(epic, health map[string]any, mission *factoryMissionImpo
 		addUnique(&acc.blockers, "Validation lanes and evidence expectations are not expressed at the milestone level.")
 		addUnique(&acc.actions, "Add milestone validator lanes or required evidence lanes before implementation begins.")
 	}
+	if scoutFamilyCounts["validation_lane"] > 0 {
+		deduct(&validationScore, minInt(4, scoutFamilyCounts["validation_lane"]), fmt.Sprintf("Scout reports %d validation-lane structural gap%s.", scoutFamilyCounts["validation_lane"], pluralS(scoutFamilyCounts["validation_lane"])), &validationReasons)
+	}
 	if len(stories) > 0 && storiesWithValidation == 0 {
 		deduct(&validationScore, 4, "Stories do not carry any validation entries yet.", &validationReasons)
 		addUnique(&acc.actions, "Add validator stories or validation records that capture expected evidence lanes.")
+	}
+	if scoutFamilyCounts["evidence_expectation"] > 0 {
+		deduct(&validationScore, minInt(8, scoutFamilyCounts["evidence_expectation"]*2), fmt.Sprintf("Scout reports %d stor%s without validation evidence coverage.", scoutFamilyCounts["evidence_expectation"], pluralSuffix(scoutFamilyCounts["evidence_expectation"], "y", "ies")), &validationReasons)
+		addUnique(&acc.blockers, "Scout found stories without validation evidence coverage.")
+		addUnique(&acc.actions, "Add validation records for each story flagged by scout evidence-expectation findings.")
 	}
 	if mission != nil {
 		sourceTypedValidatorFeatures := 0
@@ -9452,6 +9522,11 @@ func buildRoomEpicGrade(epic, health map[string]any, mission *factoryMissionImpo
 	if milestonesWithValidationContract == 0 && len(milestones) > 0 {
 		deduct(&readinessScore, 4, "Validation policy is not yet expressed in the milestone contracts.", &readinessReasons)
 	}
+	if scoutBlockingFindings > 0 {
+		deduct(&readinessScore, minInt(6, scoutBlockingFindings*2), fmt.Sprintf("Epic scout reports %d blocking structural finding%s.", scoutBlockingFindings, pluralS(scoutBlockingFindings)), &readinessReasons)
+		addUnique(&acc.blockers, fmt.Sprintf("Epic scout still reports %d blocking structural finding%s.", scoutBlockingFindings, pluralS(scoutBlockingFindings)))
+		addUnique(&acc.actions, "Run `foxctl room epic scout <room-id> <epic-id>` and clear blocking finding families before dispatch.")
+	}
 	if openQuestions > 0 {
 		addUnique(&acc.blockers, "Intake is still open, so the epic is not yet a frozen implementation plan.")
 	}
@@ -9459,6 +9534,9 @@ func buildRoomEpicGrade(epic, health map[string]any, mission *factoryMissionImpo
 		addUnique(&acc.blockers, "Interview-driven planning gaps remain unresolved.")
 	}
 	categories = append(categories, category("Implementation-Plan Readiness", 20, readinessScore, readinessReasons))
+	if scoutTotalFindings > 0 || scoutStatusPhase != "" {
+		addUnique(&acc.notes, fmt.Sprintf("Scout signals: phase=%s, findings=%d, blocking=%d.", firstNonEmpty(scoutStatusPhase, "unknown"), scoutTotalFindings, scoutBlockingFindings))
+	}
 
 	total := 0
 	belowHalf := false
@@ -9473,6 +9551,19 @@ func buildRoomEpicGrade(epic, health map[string]any, mission *factoryMissionImpo
 		decision = "READY"
 	}
 	report := renderRoomEpicGradeReport(stringField(epic, "title"), decision, total, categories, acc.blockers, acc.actions, acc.notes)
+	scoutFamilyPayload := make(map[string]any, len(roomEpicScoutRuleFamilies))
+	for _, family := range roomEpicScoutRuleFamilies {
+		scoutFamilyPayload[family] = scoutFamilyCounts[family]
+	}
+	scoutSignals := map[string]any{
+		"status_phase":      scoutStatusPhase,
+		"total_findings":    scoutTotalFindings,
+		"blocking_findings": scoutBlockingFindings,
+		"family_counts":     scoutFamilyPayload,
+	}
+	if scoutSchemaVersion != "" {
+		scoutSignals["schema_version"] = scoutSchemaVersion
+	}
 
 	return map[string]any{
 		"decision":        decision,
@@ -9482,6 +9573,7 @@ func buildRoomEpicGrade(epic, health map[string]any, mission *factoryMissionImpo
 		"upgrade_actions": acc.actions,
 		"notes":           acc.notes,
 		"report":          report,
+		"scout_signals":   scoutSignals,
 		"source_compared": sourceInfo != nil && boolField(sourceInfo, "loaded"),
 	}
 }

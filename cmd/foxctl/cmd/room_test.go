@@ -4383,6 +4383,25 @@ func TestRunRoomEpicGrade(t *testing.T) {
 		if report := grade["report"].(string); !strings.Contains(report, "## Upgrade Actions") {
 			t.Fatalf("report=%q want upgrade actions section", report)
 		}
+		scoutSignals := grade["scout_signals"].(map[string]any)
+		if got := scoutSignals["schema_version"]; got != "room.epic.scout.v1" {
+			t.Fatalf("scout_signals.schema_version=%v want room.epic.scout.v1", got)
+		}
+		if got := scoutSignals["blocking_findings"]; got == float64(0) {
+			t.Fatalf("scout_signals.blocking_findings=%v want > 0", got)
+		}
+		familyCounts := scoutSignals["family_counts"].(map[string]any)
+		if got := familyCounts["evidence_expectation"]; got != float64(1) {
+			t.Fatalf("scout_signals.family_counts[evidence_expectation]=%v want 1", got)
+		}
+		readinessReasons := roomCategoryReasonsByName(t, grade["categories"].([]any), "Implementation-Plan Readiness")
+		if !roomStringSliceContainsSubstring(readinessReasons, "Epic scout reports") {
+			t.Fatalf("readiness reasons=%v want scout-driven readiness reason", readinessReasons)
+		}
+		blockers := stringSliceValue(grade["blockers"])
+		if !roomStringSliceContainsSubstring(blockers, "Epic scout still reports") {
+			t.Fatalf("blockers=%v want scout blocking summary", blockers)
+		}
 	})
 
 	t.Run("ready when epic is fully shaped", func(t *testing.T) {
@@ -4445,6 +4464,17 @@ func TestRunRoomEpicGrade(t *testing.T) {
 		}
 		if report := grade["report"].(string); !strings.Contains(report, "Decision: READY") {
 			t.Fatalf("report=%q want READY decision", report)
+		}
+		scoutSignals := grade["scout_signals"].(map[string]any)
+		if got := scoutSignals["total_findings"]; got != float64(0) {
+			t.Fatalf("scout_signals.total_findings=%v want 0", got)
+		}
+		if got := scoutSignals["blocking_findings"]; got != float64(0) {
+			t.Fatalf("scout_signals.blocking_findings=%v want 0", got)
+		}
+		blockers := stringSliceValue(grade["blockers"])
+		if roomStringSliceContainsSubstring(blockers, "Epic scout still reports") {
+			t.Fatalf("blockers=%v want no scout blockers", blockers)
 		}
 	})
 
@@ -9802,6 +9832,32 @@ func roomCategoryScoreByName(t *testing.T, categories []any, name string) int {
 	}
 	t.Fatalf("category %q not found in %v", name, categories)
 	return 0
+}
+
+func roomCategoryReasonsByName(t *testing.T, categories []any, name string) []string {
+	t.Helper()
+	for _, raw := range categories {
+		category, ok := raw.(map[string]any)
+		if !ok || category["name"] != name {
+			continue
+		}
+		return stringSliceValue(category["reasons"])
+	}
+	t.Fatalf("category %q not found in %v", name, categories)
+	return nil
+}
+
+func roomStringSliceContainsSubstring(values []string, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.Contains(value, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBuildRoomEpicGradeDispatchArtifacts(t *testing.T) {
