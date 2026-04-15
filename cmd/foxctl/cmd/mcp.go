@@ -1638,13 +1638,14 @@ func registerRoomTools(s *server.MCPServer) {
 
 	s.AddTool(
 		mcp.NewTool("room_agile",
-			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_import_factory, epic_ask, epic_answer, epic_finalize, epic_close, epic_shape, epic_checkpoint, epic_show, epic_resume, epic_health, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, aca_promote, workpack_show, workpack_sync."),
+			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_import_factory, epic_ask, epic_answer, epic_finalize, epic_close, epic_shape, epic_checkpoint, epic_show, epic_resume, epic_health, epic_grade, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, aca_promote, workpack_show, workpack_sync."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agile room action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
 			mcp.WithString("room_id", mcp.Description("Room id")),
 			mcp.WithString("sender", mcp.Description("Sender actor or participant id override")),
 			mcp.WithString("actor", mcp.Description("Actor id override for actor-specific read-model actions")),
 			mcp.WithString("mission_dir", mcp.Description("Factory mission directory for epic_import_factory")),
+			mcp.WithString("factory_mission_dir", mcp.Description("Optional Factory mission directory for epic_grade source comparison")),
 			mcp.WithBoolean("include_progress_history", mcp.Description("Include high-signal Factory progress history in the import")),
 			mcp.WithString("epic_id", mcp.Description("Epic id")),
 			mcp.WithString("milestone_id", mcp.Description("Milestone id")),
@@ -1672,10 +1673,15 @@ func registerRoomTools(s *server.MCPServer) {
 			mcp.WithString("horizon", mcp.Description("Delivery horizon for epic start")),
 			mcp.WithArray("scope", mcp.Description("Scope item (repeatable)"), mcp.WithStringItems()),
 			mcp.WithArray("success", mcp.Description("Epic success signal (repeatable)"), mcp.WithStringItems()),
-			mcp.WithString("to", mcp.Description("Directed respondent actor id for epic intake")),
+			mcp.WithString("to", mcp.Description("Directed respondent actor id for epic intake, or publish recipient for epic_grade")),
 			mcp.WithString("question_kind", mcp.Description("Epic intake question kind: product, technical, constraint, success")),
 			mcp.WithString("question", mcp.Description("Epic intake question text")),
 			mcp.WithString("answer", mcp.Description("Epic intake answer text")),
+			mcp.WithBoolean("publish", mcp.Description("Publish the epic grade report into the room timeline")),
+			mcp.WithString("subject", mcp.Description("Optional message subject for epic_grade publish")),
+			mcp.WithBoolean("ack_required", mcp.Description("Require explicit ack for epic_grade publish")),
+			mcp.WithBoolean("reply_expected", mcp.Description("Mark epic_grade publish as expecting a direct reply")),
+			mcp.WithBoolean("interrupt", mcp.Description("Interrupt target pane for direct epic_grade publish")),
 			mcp.WithString("close_reason", mcp.Description("Epic close reason: completed, wont_do, superseded, cancelled")),
 			mcp.WithString("label", mcp.Description("Checkpoint label")),
 			mcp.WithString("note", mcp.Description("Checkpoint coordinator note")),
@@ -4956,6 +4962,26 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		argv = appendStringFlagArgs(argv, "--workspace", workspace)
 		argv = appendStringFlagArgs(argv, "--actor", getStringArg(args, "actor", ""))
 		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+	case "epic_grade":
+		epicID := getStringArg(args, "epic_id", "")
+		if epicID == "" {
+			return mcp.NewToolResultError("epic_id is required for room_agile epic_grade"), nil
+		}
+		argv = []string{"epic", "grade", roomID, epicID}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--factory-mission-dir", getStringArg(args, "factory_mission_dir", ""))
+		argv = appendIntFlagArgs(argv, "--limit", getIntArg(args, "limit", 0))
+		argv = appendBoolFlagArgs(argv, "--publish", getBoolArg(args, "publish", false))
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--to", getStringArg(args, "to", ""))
+		argv = appendStringFlagArgs(argv, "--subject", getStringArg(args, "subject", ""))
+		argv = appendBoolFlagArgs(argv, "--ack-required", getBoolArg(args, "ack_required", false))
+		if _, ok := args["reply_expected"]; ok {
+			if getBoolArg(args, "reply_expected", false) {
+				argv = append(argv, "--reply-expected")
+			}
+		}
+		argv = appendBoolFlagArgs(argv, "--interrupt", getBoolArg(args, "interrupt", false))
 	case "epic_next":
 		epicID := getStringArg(args, "epic_id", "")
 		if epicID == "" {
