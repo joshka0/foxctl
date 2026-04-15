@@ -43,8 +43,8 @@ The skill injects a markdown context block containing:
     "reason": "Restored session snapshot from 5m ago",
     "context": "## Session Continuity Context\n...",
     "env": {
-      "AGENTCTL_SESSION_RESTORED": "true",
-      "AGENTCTL_SNAPSHOT_ID": "snap-1234567890"
+      "FOXCTL_SESSION_RESTORED": "true",
+      "FOXCTL_SNAPSHOT_ID": "snap-1234567890"
     }
   },
   "snapshot_id": "snap-1234567890",
@@ -75,7 +75,7 @@ The `session-restore.sh` hook runs on `SessionStart` events:
   `ended_at`, non-terminal clear it on reopen.
 - Identity fallback file: `~/.foxctl/sessions/active/<workspace_hash>.json`
   (stores `session_id`, `agent_id`, lineage) for hooks without env access.
-- Env to skills: `AGENTCTL_SESSION_ID`, `AGENTCTL_AGENT_ID` + fallbacks
+- Env to skills: `FOXCTL_SESSION_ID`, `FOXCTL_AGENT_ID` + fallbacks
   (`CLAUDE_SESSION_ID`, `OPENCODE_SESSION_ID`, `CURSOR_SESSION_ID`,
   `TERM_SESSION_ID`) are forwarded by exec/WASI runners so restored sessions
   attribute correctly.

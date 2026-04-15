@@ -84,7 +84,7 @@ func main() {
 // - FailureModes: permission errors, missing directories, hook installation failures, environment issues, binary access problems
 // - Observability: emits installation status, directory creation results, hook installation details, environment status, and comprehensive setup information
 // - Related: validate, install, checkHooks, installHooks, checkEnvironment
-// - Keywords: setup/install, agentctl_installation, provider_hooks, environment_setup, directory_management
+// - Keywords: setup/install, foxctl_installation, provider_hooks, environment_setup, directory_management
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	if in.Provider == "" {
 		in.Provider = "claude-code"
@@ -111,17 +111,17 @@ func validate(in input) output {
 		return out
 	}
 
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		agentctlHome = filepath.Join(homeDir, ".foxctl")
+	foxctlHome := os.Getenv("FOXCTL_HOME")
+	if foxctlHome == "" {
+		foxctlHome = filepath.Join(homeDir, ".foxctl")
 	}
 
 	dirs := []string{
-		agentctlHome,
-		filepath.Join(agentctlHome, "storage"),
-		filepath.Join(agentctlHome, "skills"),
-		filepath.Join(agentctlHome, "cache"),
-		filepath.Join(agentctlHome, "cas"),
+		foxctlHome,
+		filepath.Join(foxctlHome, "storage"),
+		filepath.Join(foxctlHome, "skills"),
+		filepath.Join(foxctlHome, "cache"),
+		filepath.Join(foxctlHome, "cas"),
 	}
 
 	for _, dir := range dirs {
@@ -179,17 +179,17 @@ func install(in input) output {
 		return out
 	}
 
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		agentctlHome = filepath.Join(homeDir, ".foxctl")
+	foxctlHome := os.Getenv("FOXCTL_HOME")
+	if foxctlHome == "" {
+		foxctlHome = filepath.Join(homeDir, ".foxctl")
 	}
 
 	dirs := []string{
-		agentctlHome,
-		filepath.Join(agentctlHome, "storage"),
-		filepath.Join(agentctlHome, "skills"),
-		filepath.Join(agentctlHome, "cache"),
-		filepath.Join(agentctlHome, "cas"),
+		foxctlHome,
+		filepath.Join(foxctlHome, "storage"),
+		filepath.Join(foxctlHome, "skills"),
+		filepath.Join(foxctlHome, "cache"),
+		filepath.Join(foxctlHome, "cas"),
 		filepath.Join(homeDir, ".local", "bin"),
 	}
 
@@ -554,8 +554,8 @@ func checkEnvironment() []envStatus {
 	}{
 		{"VOYAGE_API_KEY", true},
 		{"ANTHROPIC_API_KEY", false},
-		{"AGENTCTL_HOME", false},
-		{"AGENTCTL_SEMANTIC_RERANK", false},
+		{"FOXCTL_HOME", false},
+		{"FOXCTL_SEMANTIC_RERANK", false},
 	}
 
 	var statuses []envStatus

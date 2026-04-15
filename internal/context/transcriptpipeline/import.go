@@ -27,7 +27,7 @@ func ResolveAndParseTranscript(provider, sourceFile, sessionID, workspace, actor
 	resolvedSessionID := strings.TrimSpace(sessionID)
 	resolvedWorkspace := strings.TrimSpace(workspace)
 	if resolvedWorkspace == "" {
-		resolvedWorkspace = strings.TrimSpace(os.Getenv("AGENTCTL_WORKSPACE"))
+		resolvedWorkspace = strings.TrimSpace(os.Getenv("FOXCTL_WORKSPACE"))
 	}
 	if resolvedSourcePath != "" && resolvedProvider == sourceimport.ProviderAuto {
 		detected, err := sourceimport.DetectProviderFromFile(resolvedSourcePath)

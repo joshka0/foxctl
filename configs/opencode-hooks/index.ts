@@ -21,7 +21,7 @@ import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
-const AGENTCTL_HOME = process.env.AGENTCTL_HOME || join(process.env.HOME || "/tmp", ".foxctl");
+const FOXCTL_HOME = process.env.FOXCTL_HOME || join(process.env.HOME || "/tmp", ".foxctl");
 
 /**
  * Session identity from foxctl identity file
@@ -43,20 +43,20 @@ interface SessionIdentity {
  */
 async function getSessionIdentity(workspace: string): Promise<{ sessionID: string; agentID: string }> {
   // 1. Check env vars first
-  const envSessionID = process.env.AGENTCTL_SESSION_ID ||
+  const envSessionID = process.env.FOXCTL_SESSION_ID ||
     process.env.OPENCODE_SESSION_ID ||
     process.env.CLAUDE_SESSION_ID;
 
   if (envSessionID) {
     return {
       sessionID: envSessionID,
-      agentID: process.env.AGENTCTL_AGENT_ID || "opencode"
+      agentID: process.env.FOXCTL_AGENT_ID || "opencode"
     };
   }
 
   // 2. Try to read identity file
   const workspaceHash = createHash("sha256").update(workspace).digest("hex").slice(0, 16);
-  const identityDir = join(AGENTCTL_HOME, "sessions", "active");
+  const identityDir = join(FOXCTL_HOME, "sessions", "active");
 
   try {
     const files = await readdir(identityDir);
@@ -94,7 +94,7 @@ async function getSessionIdentity(workspace: string): Promise<{ sessionID: strin
  * - Multi-agent safety (scoped by workspace/session/agent)
  */
 
-const MODE_DIR = join(AGENTCTL_HOME, "cache", "session-modes");
+const MODE_DIR = join(FOXCTL_HOME, "cache", "session-modes");
 
 const DEFAULT_PENDING_CONTEXT_TTL_SECONDS = 60;
 
@@ -173,7 +173,7 @@ const COUNSEL_TRIGGER = /(^|\s)\/counsel(\s|$)/i;
 const CONTEXT_TRIGGER = /(^|\s)\/context(\s|$)/i;
 const STRICT_TRIGGER = /^\s*@(strict|foxctl)\s*(on|off|enable|disable|status|1|0|true|false)?\s*$/i;
 
-// Agentctl mode state per workspace (in-memory, synced with SQLite via skill)
+// Foxctl mode state per workspace (in-memory, synced with SQLite via skill)
 const agentctlModeByWorkspace = new Map<string, boolean>();
 
 /**
@@ -499,7 +499,7 @@ async function computeTodoContinuation(
   anchorGoal: string,
   anchorPending: string
 ): Promise<{ prompt: string; digest: string } | null> {
-  if (process.env.AGENTCTL_TODO_CONTINUATION_DISABLED === "1") {
+  if (process.env.FOXCTL_TODO_CONTINUATION_DISABLED === "1") {
     return null;
   }
 
@@ -509,8 +509,8 @@ async function computeTodoContinuation(
   }
   const cleanedPending = anchorPending.trim();
 
-  const minPending = parseEnvInt("AGENTCTL_TODO_CONTINUATION_MIN_PENDING", 1);
-  const topN = parseEnvInt("AGENTCTL_TODO_CONTINUATION_TOP_N", 5);
+  const minPending = parseEnvInt("FOXCTL_TODO_CONTINUATION_MIN_PENDING", 1);
+  const topN = parseEnvInt("FOXCTL_TODO_CONTINUATION_TOP_N", 5);
 
   const contResult = await runSkill<TodoContinuationSkillOutput>(
     "todo/continuation",
@@ -543,7 +543,7 @@ async function computeTodoLite(
   sessionID: string,
   workspace: string
 ): Promise<{ prompt: string; digest: string } | null> {
-  const topN = parseEnvInt("AGENTCTL_TODO_CONTINUATION_TOP_N", 5);
+  const topN = parseEnvInt("FOXCTL_TODO_CONTINUATION_TOP_N", 5);
   const listResult = await runSkill<TodoListSkillOutput>(
     "todo/manage",
     {
@@ -991,8 +991,8 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
           if (success) {
             await writePendingContext(
               input.sessionID,
-              "Agentctl Mode",
-              `**Agentctl Mode: ENABLED**
+              "Foxctl Mode",
+              `**Foxctl Mode: ENABLED**
 
 Tool redirections active:
 - Edit/Write/MultiEdit → fs/apply_edit (dry-run preview)
@@ -1008,8 +1008,8 @@ Use \`@strict off\` to disable.`
           if (success) {
             await writePendingContext(
               input.sessionID,
-              "Agentctl Mode",
-              `**Agentctl Mode: DISABLED**
+              "Foxctl Mode",
+              `**Foxctl Mode: DISABLED**
 
 Default tool behavior restored. Use \`@strict on\` to re-enable.`
             );
@@ -1019,16 +1019,16 @@ Default tool behavior restored. Use \`@strict on\` to re-enable.`
           const enabled = await isAgentctlModeEnabled(workspace);
           await writePendingContext(
             input.sessionID,
-            "Agentctl Mode",
+            "Foxctl Mode",
             enabled
-              ? `**Agentctl Mode: ENABLED**
+              ? `**Foxctl Mode: ENABLED**
 
 Tool redirections:
 - Edit/Write/MultiEdit → fs/apply_edit
 - Grep → code/smart_search
 - Glob → code/semantic_search
 - Read (large files) → symbols outline`
-              : `**Agentctl Mode: DISABLED** (use \`@strict on\` to enable)`
+              : `**Foxctl Mode: DISABLED** (use \`@strict on\` to enable)`
           );
         }
         return; // Don't process further
@@ -1040,7 +1040,7 @@ Tool redirections:
       const hasContext = CONTEXT_TRIGGER.test(text);
 
       // Skill advisor - check for patterns and suggest skills (runs even without slash commands)
-      if (process.env.AGENTCTL_SKILL_ADVISOR_DISABLED !== "1" && text.length >= 10) {
+      if (process.env.FOXCTL_SKILL_ADVISOR_DISABLED !== "1" && text.length >= 10) {
         for (const { pattern, hint } of SKILL_PATTERNS) {
           if (pattern.test(text)) {
             await writePendingContext(input.sessionID, "Skill Advisor", hint, 60_000);
@@ -1520,7 +1520,7 @@ Tool redirections:
       const args = output.args;
 
       // =========================================================================
-      // AGENTCTL MODE - Block/redirect tools when enabled
+      // FOXCTL MODE - Block/redirect tools when enabled
       // =========================================================================
       const agentctlModeEnabled = await isAgentctlModeEnabled(workspace);
       if (agentctlModeEnabled) {
@@ -1531,19 +1531,19 @@ Tool redirections:
           const editPath = (args.file_path || args.path || "") as string;
           if (editPath.includes("/.opencode/") || editPath.includes("/opencode-hooks/")) {
             throw new Error(
-              "**[Agentctl Mode] Cannot edit plugin files while enabled.**\n\nUse `@strict off` first to modify plugins."
+              "**[Foxctl Mode] Cannot edit plugin files while enabled.**\n\nUse `@strict off` first to modify plugins."
             );
           }
           if (editPath.includes("/settings.json") || editPath.includes("/config.json")) {
             throw new Error(
-              "**[Agentctl Mode] Cannot edit settings while enabled.**\n\nUse `@strict off` first to modify settings."
+              "**[Foxctl Mode] Cannot edit settings while enabled.**\n\nUse `@strict off` first to modify settings."
             );
           }
 
           // Block Edit/Write - redirect to fs/apply_edit
           const filePath = editPath;
           throw new Error(
-            `**[Agentctl Mode] Use search/replace via fs/apply_edit**
+            `**[Foxctl Mode] Use search/replace via fs/apply_edit**
 
 **Workflow:**
 1. **Get exact text**: \`foxctl run code/context_grep --input '{"mode": "line", "file_path": "${filePath}", "line_start": N, "line_end": M}'\`
@@ -1561,7 +1561,7 @@ Tool redirections:
         if (tool === "Grep") {
           const pattern = (args.pattern || "") as string;
           throw new Error(
-            `**[Agentctl Mode] Smart Search via code/smart_search**
+            `**[Foxctl Mode] Smart Search via code/smart_search**
 
 > Direct: \`foxctl run code/smart_search --input '{"question": "${pattern.replace(/'/g, "\\'")}"}'\`
 > Params: \`limits.max_candidates\`, \`limits.max_snippets\` to control output size.`
@@ -1572,7 +1572,7 @@ Tool redirections:
         if (tool === "Glob") {
           const pattern = (args.pattern || "") as string;
           throw new Error(
-            `**[Agentctl Mode] Semantic Search via code/semantic_search**
+            `**[Foxctl Mode] Semantic Search via code/semantic_search**
 
 > Direct: \`foxctl run code/semantic_search --input '{"query": "${pattern.replace(/'/g, "\\'")}","scope": ["symbols"], "limit": 10}'\`
 > Scopes: \`symbols\`, \`memory\`, \`codemaps\`. Uses vector embeddings.
@@ -1636,7 +1636,7 @@ Tool redirections:
               }
 
               throw new Error(
-                `**[Agentctl Mode] Large File: ${fileName} (${lineCount} lines)**
+                `**[Foxctl Mode] Large File: ${fileName} (${lineCount} lines)**
 
 **Symbols:**
 ${symbolsList}${gotchasSection}
@@ -1655,7 +1655,7 @@ ${symbolsList}${gotchasSection}
         }
       }
       // =========================================================================
-      // END AGENTCTL MODE
+      // END FOXCTL MODE
       // =========================================================================
 
       if (input.tool === "Edit" || input.tool === "Write") {
@@ -1761,7 +1761,7 @@ ${symbolsList}${gotchasSection}
 
       // Task guard - block edits without active task
       if (
-        process.env.AGENTCTL_TASK_GUARD_MODE === "strict" &&
+        process.env.FOXCTL_TASK_GUARD_MODE === "strict" &&
         (input.tool === "Edit" || input.tool === "Write")
       ) {
         const taskResult = await runSkill<{ task?: unknown }>(
@@ -1819,7 +1819,7 @@ ${symbolsList}${gotchasSection}
           ).catch(() => {});
 
           // LSP Diagnostics - run language-specific linting after edits
-          if (process.env.AGENTCTL_LSP_DIAG_DISABLED !== "1") {
+          if (process.env.FOXCTL_LSP_DIAG_DISABLED !== "1") {
             const lspResult = await runSkill<{
               diagnostics?: Array<{ line: number; col?: number; message: string; severity?: string }>;
               error_count?: number;
@@ -1843,7 +1843,7 @@ ${symbolsList}${gotchasSection}
           }
 
           // Code complexity warning after edits
-          if (process.env.AGENTCTL_COMPLEXITY_DISABLED !== "1") {
+          if (process.env.FOXCTL_COMPLEXITY_DISABLED !== "1") {
             const complexityResult = await runSkill<{
               hotspots?: Array<{ name: string; complexity: number; line: number }>;
             }>(
@@ -1886,7 +1886,7 @@ ${symbolsList}${gotchasSection}
           ).catch(() => {});
 
           // Memory prompt on task completion
-          if (process.env.AGENTCTL_MEMORY_PROMPT_DISABLED !== "1") {
+          if (process.env.FOXCTL_MEMORY_PROMPT_DISABLED !== "1") {
             const completedTasks = todos.filter((t) => t.status === "completed");
             if (completedTasks.length > 0) {
               const taskNames = completedTasks.map((t) => t.content).filter(Boolean).join(", ");
@@ -1991,19 +1991,19 @@ ${symbolsList}${gotchasSection}
           }
 
           const captureIntervalMs = parseEnvInterval(
-            "AGENTCTL_OPENCODE_IDLE_CAPTURE_MS",
+            "FOXCTL_OPENCODE_IDLE_CAPTURE_MS",
             DEFAULT_IDLE_CAPTURE_INTERVAL_MS
           );
           const flushIntervalMs = parseEnvInterval(
-            "AGENTCTL_OPENCODE_IDLE_FLUSH_MS",
+            "FOXCTL_OPENCODE_IDLE_FLUSH_MS",
             DEFAULT_IDLE_FLUSH_INTERVAL_MS
           );
           const planSyncIntervalMs = parseEnvInterval(
-            "AGENTCTL_OPENCODE_IDLE_PLAN_SYNC_MS",
+            "FOXCTL_OPENCODE_IDLE_PLAN_SYNC_MS",
             DEFAULT_IDLE_PLAN_SYNC_INTERVAL_MS
           );
           const todoIntervalMs = parseEnvInterval(
-            "AGENTCTL_OPENCODE_IDLE_TODO_MS",
+            "FOXCTL_OPENCODE_IDLE_TODO_MS",
             DEFAULT_IDLE_TODO_INTERVAL_MS
           );
 
@@ -2033,7 +2033,7 @@ ${symbolsList}${gotchasSection}
 
           // PageRank recalculation - keeps task scores up-to-date
           const pageRankIntervalMs = parseEnvInterval(
-            "AGENTCTL_OPENCODE_IDLE_PAGERANK_MS",
+            "FOXCTL_OPENCODE_IDLE_PAGERANK_MS",
             DEFAULT_IDLE_PLAN_SYNC_INTERVAL_MS // Same interval as plan sync
           );
           void runIdleAction(`${sessionID}:pagerank`, pageRankIntervalMs, async () => {

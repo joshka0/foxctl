@@ -73,7 +73,7 @@ func ResolveEmbedderConfig(cfg EmbedderConfig) (ResolvedEmbedderConfig, error) {
 		}
 	case EmbeddingProviderLMStudio, EmbeddingProviderOpenAICompat:
 		if out.Model == "" {
-			out.Model = strings.TrimSpace(env("AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL"))
+			out.Model = strings.TrimSpace(env("FOXCTL_OPENAI_COMPAT_EMBEDDING_MODEL"))
 		}
 		if out.Model == "" {
 			out.Model = strings.TrimSpace(env("LMSTUDIO_EMBEDDING_MODEL"))
@@ -82,13 +82,13 @@ func ResolveEmbedderConfig(cfg EmbedderConfig) (ResolvedEmbedderConfig, error) {
 			out.Model = "text-embedding-nomic-embed-text-v1.5"
 		}
 		if out.BaseURL == "" {
-			out.BaseURL = strings.TrimSpace(env("AGENTCTL_OPENAI_COMPAT_BASE_URL"))
+			out.BaseURL = strings.TrimSpace(env("FOXCTL_OPENAI_COMPAT_BASE_URL"))
 		}
 		if out.BaseURL == "" {
 			out.BaseURL = strings.TrimSpace(env("LMSTUDIO_BASE_URL"))
 		}
 		if out.APIKey == "" {
-			out.APIKey = strings.TrimSpace(env("AGENTCTL_OPENAI_COMPAT_API_KEY"))
+			out.APIKey = strings.TrimSpace(env("FOXCTL_OPENAI_COMPAT_API_KEY"))
 		}
 		if out.APIKey == "" {
 			out.APIKey = strings.TrimSpace(env("LMSTUDIO_API_KEY"))
@@ -99,7 +99,7 @@ func ResolveEmbedderConfig(cfg EmbedderConfig) (ResolvedEmbedderConfig, error) {
 			out.Model = strings.TrimSpace(env("VOYAGE_EMBEDDING_MODEL"))
 		}
 		if out.Model == "" {
-			out.Model = strings.TrimSpace(env("AGENTCTL_EMBEDDING_MODEL_TEXT"))
+			out.Model = strings.TrimSpace(env("FOXCTL_EMBEDDING_MODEL_TEXT"))
 		}
 		if out.Model == "" {
 			out.Model = "voyage-4"

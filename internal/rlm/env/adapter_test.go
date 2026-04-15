@@ -313,7 +313,7 @@ func TestReadOnlyAdapterMemoryEnsembleRetrieveStructuredFindings(t *testing.T) {
 }
 
 func TestReadOnlyAdapterResolvePreferredSkillArtifactPrefersWorkspaceLocalSkill(t *testing.T) {
-	t.Setenv("AGENTCTL_SKILLS_PATH", "")
+	t.Setenv("FOXCTL_SKILLS_PATH", "")
 	workspace := t.TempDir()
 	skillDir := writeFakeExecSkill(t, workspace, "code/semantic_search", "#!/bin/sh\nprintf '{}'\n")
 
@@ -331,7 +331,7 @@ func TestReadOnlyAdapterResolvePreferredSkillArtifactPrefersWorkspaceLocalSkill(
 }
 
 func TestReadOnlyAdapterSemanticSearchCodeDecodesCandidateBundlesFromWorkspaceSkill(t *testing.T) {
-	t.Setenv("AGENTCTL_SKILLS_PATH", "")
+	t.Setenv("FOXCTL_SKILLS_PATH", "")
 	workspace := t.TempDir()
 	writeFakeExecSkill(t, workspace, "code/semantic_search", `#!/bin/sh
 cat <<'EOF'
@@ -377,7 +377,7 @@ EOF
 }
 
 func TestReadOnlyAdapterResolvePreferredSkillArtifactPrefersWorkspaceOverConfiguredSkillsRoot(t *testing.T) {
-	t.Setenv("AGENTCTL_SKILLS_PATH", "")
+	t.Setenv("FOXCTL_SKILLS_PATH", "")
 	workspace := t.TempDir()
 	configuredSkills := t.TempDir()
 

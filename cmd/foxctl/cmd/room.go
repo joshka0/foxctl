@@ -639,6 +639,7 @@ func newRoomEpicCommand() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newRoomEpicStartCommand(),
+		newRoomEpicImportFactoryCommand(),
 		newRoomEpicShowCommand(),
 		newRoomEpicCheckpointCommand(),
 		newRoomEpicResumeCommand(),
@@ -2251,7 +2252,7 @@ func provisionWorktreeSandbox(ctx context.Context, workspace string, room *agent
 		BaseRef:        provision.SandboxBaseRef,
 	}
 
-	// Register room with gateway (best-effort; no-op when AGENTCTL_GATEWAY_URL unset).
+	// Register room with gateway (best-effort; no-op when FOXCTL_GATEWAY_URL unset).
 	gatewayRegistered := gatewayRegisterRoom(ctx, room.ID, tmuxSessionName)
 
 	result := map[string]any{
@@ -2428,13 +2429,13 @@ func resolveRoomSandboxWorktree(ctx context.Context, boardStore blackboard.Board
 }
 
 // buildTerminalURL returns the web terminal URL for a sandbox room.
-// When AGENTCTL_GATEWAY_URL is set it returns a full URL (e.g.
+// When FOXCTL_GATEWAY_URL is set it returns a full URL (e.g.
 // "http://localhost:8765/terminal/<roomID>"). Otherwise it returns the
 // path-only placeholder ("/terminal/<roomID>") so existing behaviour is
 // preserved for callers that don't run a gateway.
 func buildTerminalURL(roomID string) string {
 	path := "/terminal/" + strings.TrimSpace(roomID)
-	if base := strings.TrimRight(strings.TrimSpace(os.Getenv("AGENTCTL_GATEWAY_URL")), "/"); base != "" {
+	if base := strings.TrimRight(strings.TrimSpace(os.Getenv("FOXCTL_GATEWAY_URL")), "/"); base != "" {
 		return base + path
 	}
 	return path
@@ -2465,9 +2466,9 @@ func gatewayDo(req *http.Request) (*http.Response, error) {
 }
 
 // gatewayRegisterRoom registers a sandbox room with the gateway via HTTP POST
-// /api/rooms. Best-effort: silently skips when AGENTCTL_GATEWAY_URL is unset.
+// /api/rooms. Best-effort: silently skips when FOXCTL_GATEWAY_URL is unset.
 func gatewayRegisterRoom(ctx context.Context, roomID, tmuxSession string) bool {
-	base := strings.TrimRight(strings.TrimSpace(os.Getenv("AGENTCTL_GATEWAY_URL")), "/")
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("FOXCTL_GATEWAY_URL")), "/")
 	if base == "" {
 		return false
 	}
@@ -2490,9 +2491,9 @@ func gatewayRegisterRoom(ctx context.Context, roomID, tmuxSession string) bool {
 
 // gatewayDeregisterRoom unregisters a sandbox room from the gateway via HTTP
 // DELETE /api/rooms/{room-id}. Best-effort: silently skips when
-// AGENTCTL_GATEWAY_URL is unset or the gateway is unavailable.
+// FOXCTL_GATEWAY_URL is unset or the gateway is unavailable.
 func gatewayDeregisterRoom(ctx context.Context, roomID string) bool {
-	base := strings.TrimRight(strings.TrimSpace(os.Getenv("AGENTCTL_GATEWAY_URL")), "/")
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("FOXCTL_GATEWAY_URL")), "/")
 	if base == "" {
 		return false
 	}
@@ -2621,7 +2622,7 @@ func cleanupSandbox(ctx context.Context, workspace, roomID string, sc *agent.San
 	}
 
 	// Step 3: Deregister from gateway (best-effort — gateway may not be running).
-	// Uses AGENTCTL_GATEWAY_URL when set; skips silently if unset.
+	// Uses FOXCTL_GATEWAY_URL when set; skips silently if unset.
 	result["gateway_dereg"] = gatewayDeregisterRoom(ctx, roomID)
 
 	result["status"] = "cleaned"
@@ -13294,7 +13295,7 @@ func runRoomRedgreenInit(cmd *cobra.Command, workspace, roomID, slug, title, des
 			Kind:        agent.BoardMessageKindInstruction,
 			Priority:    agent.DefaultPriority,
 			Subject:     "Red ownership: hidden tests",
-			Body:        fmt.Sprintf("Your private red worktree is:\n%s\n\nWrite hidden tests there and register any hidden files or directories with:\nagentctl room redgreen hide %s <relative-path> --workspace %s --sender %s\n\nDo not reveal hidden test contents in the room. Only share failure summaries.", redWorktree, room.ID, absWorkspace, redActor),
+			Body:        fmt.Sprintf("Your private red worktree is:\n%s\n\nWrite hidden tests there and register any hidden files or directories with:\nfoxctl room redgreen hide %s <relative-path> --workspace %s --sender %s\n\nDo not reveal hidden test contents in the room. Only share failure summaries.", redWorktree, room.ID, absWorkspace, redActor),
 		},
 		{
 			WorkspaceID: absWorkspace,
@@ -13304,7 +13305,7 @@ func runRoomRedgreenInit(cmd *cobra.Command, workspace, roomID, slug, title, des
 			Kind:        agent.BoardMessageKindInstruction,
 			Priority:    agent.DefaultPriority,
 			Subject:     "Green ownership: implementation only",
-			Body:        fmt.Sprintf("Your green worktree is:\n%s\n\nImplement there without reading hidden tests. Ask the broker to run the hidden suite with:\nagentctl room redgreen check %s --workspace %s --sender %s\n\nOnly the summarized result will be posted back into the room.", greenWorktree, room.ID, absWorkspace, greenActor),
+			Body:        fmt.Sprintf("Your green worktree is:\n%s\n\nImplement there without reading hidden tests. Ask the broker to run the hidden suite with:\nfoxctl room redgreen check %s --workspace %s --sender %s\n\nOnly the summarized result will be posted back into the room.", greenWorktree, room.ID, absWorkspace, greenActor),
 		},
 	}
 	for _, msg := range initMessages {

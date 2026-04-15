@@ -370,9 +370,9 @@ func (a *ReadOnlyAdapter) semanticSearchCode(ctx context.Context, args json.RawM
 		payload["scope"] = input.Scope
 	}
 	if vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
-		strings.TrimSpace(os.Getenv("AGENTCTL_RLM_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	); vaultPath != "" {
 		payload["vault_path"] = vaultPath
 	}
@@ -576,9 +576,9 @@ func (a *ReadOnlyAdapter) loadFile(args json.RawMessage) (map[string]any, error)
 
 func (a *ReadOnlyAdapter) searchVault(ctx context.Context, args json.RawMessage) (map[string]any, error) {
 	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
-		strings.TrimSpace(os.Getenv("AGENTCTL_RLM_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	)
 	if vaultPath == "" {
 		return map[string]any{"results": []any{}}, nil
@@ -624,9 +624,9 @@ func (a *ReadOnlyAdapter) readNote(args json.RawMessage) (map[string]any, error)
 		return nil, err
 	}
 	vaultPath := firstNonEmpty(strings.TrimSpace(a.vaultPath),
-		strings.TrimSpace(os.Getenv("AGENTCTL_RLM_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("AGENTCTL_ACA_VAULT_PATH")),
-		strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_RLM_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_ACA_VAULT_PATH")),
+		strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_VAULT_PATH")),
 	)
 	if vaultPath == "" {
 		return nil, fmt.Errorf("vault path not configured")
@@ -899,7 +899,7 @@ func (a *ReadOnlyAdapter) runCurrentSkillDecode(ctx context.Context, skill strin
 	start := time.Now()
 	result := a.runSkillDirect(runCtx, skill, body)
 	if result.Err != nil {
-		repoRoot, repoErr := resolveAgentctlRepoRoot()
+		repoRoot, repoErr := resolveFoxctlRepoRoot()
 		if repoErr != nil {
 			a.telemetry.record(skill, time.Since(start), nil)
 			return fmt.Errorf("run %s: %w%s", skill, result.Err, formatCmdFailureStderr(result))
@@ -911,7 +911,7 @@ func (a *ReadOnlyAdapter) runCurrentSkillDecode(ctx context.Context, skill strin
 		searchPaths := resolveSkillSearchPaths(a.cfg, a.workspaceRoot)
 		env := []string{}
 		if len(searchPaths) > 0 {
-			env = append(env, "AGENTCTL_SKILLS_PATH="+strings.Join(searchPaths, string(os.PathListSeparator)))
+			env = append(env, "FOXCTL_SKILLS_PATH="+strings.Join(searchPaths, string(os.PathListSeparator)))
 		}
 		result = executil.RunWithInputEnv(runCtx, repoRoot, executable, env, body, "run", skill, "--input-file", "-")
 		if result.Err != nil {
@@ -1106,7 +1106,7 @@ func floatValue(v any) float64 {
 	}
 }
 
-func resolveAgentctlRepoRoot() (string, error) {
+func resolveFoxctlRepoRoot() (string, error) {
 	if _, file, _, ok := runtime.Caller(0); ok {
 		candidate := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
 		if _, err := os.Stat(filepath.Join(candidate, "skills", "code_semantic_search", "main.go")); err == nil {

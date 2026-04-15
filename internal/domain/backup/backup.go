@@ -40,8 +40,8 @@ type Manifest struct {
 	Version string `json:"version"`
 	// CreatedAt is when the backup was created.
 	CreatedAt time.Time `json:"created_at"`
-	// AgentctlVersion is the foxctl version that created the backup.
-	AgentctlVersion string `json:"agentctl_version"`
+	// FoxctlVersion is the foxctl version that created the backup.
+	FoxctlVersion string `json:"foxctl_version"`
 	// Components lists which components are included.
 	Components []Component `json:"components"`
 	// Files lists all files included in the backup with their metadata.

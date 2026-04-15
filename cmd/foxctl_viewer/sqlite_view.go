@@ -25,14 +25,14 @@ func discoverDatabases() ([]sqliteDBInfo, error) {
 		return nil, fmt.Errorf("cannot get home directory: %w", err)
 	}
 
-	agentctlDir := filepath.Join(home, ".foxctl")
+	foxctlDir := filepath.Join(home, ".foxctl")
 	var databases []sqliteDBInfo
 
 	// Search in common locations
 	searchDirs := []string{
-		filepath.Join(agentctlDir, "storage"),
-		filepath.Join(agentctlDir, "cache"),
-		agentctlDir, // root level
+		filepath.Join(foxctlDir, "storage"),
+		filepath.Join(foxctlDir, "cache"),
+		foxctlDir, // root level
 	}
 
 	seen := make(map[string]bool)
@@ -87,7 +87,7 @@ func validateDBPath(dbPath string) error {
 		return fmt.Errorf("cannot get home directory: %w", err)
 	}
 
-	agentctlDir := filepath.Join(home, ".foxctl")
+	foxctlDir := filepath.Join(home, ".foxctl")
 
 	// Resolve both paths to their canonical absolute forms
 	canonicalPath, err := filepath.Abs(dbPath)
@@ -99,14 +99,14 @@ func validateDBPath(dbPath string) error {
 		return fmt.Errorf("cannot resolve database path: %w", err)
 	}
 
-	canonicalRoot, err := filepath.Abs(agentctlDir)
+	canonicalRoot, err := filepath.Abs(foxctlDir)
 	if err != nil {
 		return fmt.Errorf("cannot resolve foxctl directory: %w", err)
 	}
 	canonicalRoot, err = filepath.EvalSymlinks(canonicalRoot)
 	if err != nil {
 		// If the foxctl dir doesn't exist or can't be resolved, use cleaned path
-		canonicalRoot = filepath.Clean(agentctlDir)
+		canonicalRoot = filepath.Clean(foxctlDir)
 	}
 
 	// Use filepath.Rel for proper containment checking (symlink-safe)

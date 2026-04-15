@@ -14,7 +14,7 @@ const (
 )
 
 // StoreName is the canonical, env-var-friendly name for a store/database.
-// These names are intended to match `AGENTCTL_<STORE>_...` environment variable prefixes.
+// These names are intended to match `FOXCTL_<STORE>_...` environment variable prefixes.
 type StoreName string
 
 const (
@@ -92,7 +92,7 @@ var canonicalStores = []StoreSpec{
 	{Name: StoreObsidianIndex, DefaultFile: "obsidianindex-<key>.db", Class: StoreClassLocalOnly, Notes: "Per-vault Obsidian note index (dynamic name)"},
 	{Name: StoreCAS, DefaultFile: "cas.db", Class: StoreClassLocalOnly, Notes: "CAS metadata"},
 
-	{Name: StoreEvents, DefaultFile: "events.db", Class: StoreClassObservability, Notes: "Stored under AGENTCTL_OBS_DIR"},
+	{Name: StoreEvents, DefaultFile: "events.db", Class: StoreClassObservability, Notes: "Stored under FOXCTL_OBS_DIR"},
 	{Name: StoreOpenCode, DefaultFile: "opencode.db", Class: StoreClassExternal, Notes: "External import (~/.opencode or workspace .opencode)"},
 }
 

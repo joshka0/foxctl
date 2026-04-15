@@ -25,6 +25,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
+	"github.com/tidwall/gjson"
 
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/skill"
@@ -48,6 +49,8 @@ const (
 	// shutdownTimeout is the maximum time to wait for graceful shutdown
 	shutdownTimeout = 10 * time.Second
 )
+
+var mcpPipeSourceRunner = executeMCPPipeSource
 
 // daemonState tracks the running daemon state
 type daemonState struct {
@@ -154,7 +157,7 @@ func storeToCAS(ctx context.Context, content []byte, contentType string) (string
 	digest := "sha256:" + hex.EncodeToString(h[:])
 
 	// Get CAS root from config or default
-	home := os.Getenv("AGENTCTL_HOME")
+	home := os.Getenv("FOXCTL_HOME")
 	if home == "" {
 		userHome, err := os.UserHomeDir()
 		if err != nil {
@@ -336,7 +339,7 @@ func newMCPServeCommand() *cobra.Command {
 By default, uses stdio transport for Claude Code integration.
 Use --http to run as an HTTP daemon with SSE transport (foreground).
 Use --daemon to run as an HTTP daemon in background mode.
-Use --skills to expose all foxctl skills via generic agentctl_run/agentctl_skills tools.
+Use --skills to expose all foxctl skills via generic foxctl_run/foxctl_skills tools.
 Use --groups to expose specific skill groups as first-class MCP tools.
 Use --group-only to expose only the specified groups (no default curated MCP tools).
 
@@ -449,7 +452,7 @@ Example usage with HTTP/SSE daemon (foreground):
 
 	cmd.Flags().StringVar(&configFile, "config", "", "Path to backend MCP servers config file")
 	cmd.Flags().StringVar(&httpAddr, "http", "", "HTTP address for SSE daemon mode (e.g., :8091)")
-	cmd.Flags().BoolVar(&enableSkills, "skills", false, "Expose all foxctl skills via agentctl_run/agentctl_skills tools")
+	cmd.Flags().BoolVar(&enableSkills, "skills", false, "Expose all foxctl skills via foxctl_run/foxctl_skills tools")
 	cmd.Flags().BoolVar(&daemonMode, "daemon", false, "Run as background daemon (implies --http :8091)")
 	cmd.Flags().StringSliceVar(&skillGroupsF, "groups", nil, "Skill groups to expose as first-class tools (code-intel,optimized-retrieval,mobile,godot,api,refactor,context,room,mux,collab,code-write,project,foxctl-ci)")
 	cmd.Flags().BoolVar(&groupOnly, "group-only", false, "Expose only the specified skill groups (skip the default curated MCP tools)")
@@ -737,7 +740,7 @@ func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
 	// Register generic foxctl tools (run + discovery) instead of individual skill tools
 	// This reduces token overhead from ~83k to ~1k
 	if opts.enableSkills {
-		registerAgentctlTools(s)
+		registerFoxctlTools(s)
 	}
 
 	// Cleanup on exit
@@ -1013,7 +1016,49 @@ func loadBackendConfig(path string) error {
 	return nil
 }
 
+func registerMCPPipeTool(s *server.MCPServer) {
+	if _, exists := s.ListTools()["mcp_pipe"]; exists {
+		if _, ok := s.ListTools()["mcp_keys"]; ok {
+			return
+		}
+	}
+
+	if _, exists := s.ListTools()["mcp_pipe"]; !exists {
+		s.AddTool(
+			mcp.NewTool("mcp_pipe",
+				mcp.WithDescription("Run a supported foxctl MCP tool, project the pre-truncation result with a GJSON path, and only then apply output truncation."),
+				mcp.WithString("tool", mcp.Required(), mcp.Description("Upstream foxctl MCP tool name to execute.")),
+				mcp.WithObject("args", mcp.Description("Arguments to pass to the upstream tool as a JSON object.")),
+				mcp.WithString("query", mcp.Required(), mcp.Description("GJSON path evaluated against a normalized wrapper. Common fields: result, structured, parsed_text, text, mcp, data, envelope.")),
+			),
+			handleMCPPipe,
+		)
+	}
+
+	if _, exists := s.ListTools()["mcp_keys"]; !exists {
+		s.AddTool(
+			mcp.NewTool("mcp_keys",
+				mcp.WithDescription("Run a supported foxctl MCP tool and return wildcard key paths from the pre-truncation result to help build follow-up projections."),
+				mcp.WithString("tool", mcp.Required(), mcp.Description("Upstream foxctl MCP tool name to inspect.")),
+				mcp.WithObject("args", mcp.Description("Arguments to pass to the upstream tool as a JSON object.")),
+				mcp.WithString("path", mcp.Description("Optional GJSON path selecting the sub-object or array to inspect. Defaults to result.")),
+			),
+			handleMCPKeys,
+		)
+	}
+}
+
+func registerMCPToolAlias(s *server.MCPServer, name, description string, handler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error), opts ...mcp.ToolOption) {
+	if _, exists := s.ListTools()[name]; exists {
+		return
+	}
+	toolOpts := append([]mcp.ToolOption{mcp.WithDescription(description)}, opts...)
+	s.AddTool(mcp.NewTool(name, toolOpts...), handler)
+}
+
 func registerTools(s *server.MCPServer) {
+	registerMCPPipeTool(s)
+
 	// web_search - Unified search across providers (exa, tavily, perplexity)
 	s.AddTool(
 		mcp.NewTool("web_search",
@@ -1021,7 +1066,7 @@ func registerTools(s *server.MCPServer) {
 			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 			mcp.WithNumber("max_results", mcp.Description("Max results to return (default: 10, max: 20)")),
 			mcp.WithString("topic", mcp.Description("Topic: 'general' or 'news'")),
-			mcp.WithString("provider", mcp.Description("Search provider: 'exa' (default), 'tavily', or 'perplexity'. Override with AGENTCTL_SEARCH_PROVIDER env var.")),
+			mcp.WithString("provider", mcp.Description("Search provider: 'exa' (default), 'tavily', or 'perplexity'. Override with FOXCTL_SEARCH_PROVIDER env var.")),
 		),
 		handleWebSearch,
 	)
@@ -1347,6 +1392,8 @@ func registerTools(s *server.MCPServer) {
 }
 
 func registerOptimizedRetrievalTools(s *server.MCPServer) {
+	registerMCPPipeTool(s)
+
 	s.AddTool(
 		mcp.NewTool("repo_index_build",
 			mcp.WithDescription("Build or refresh the repo graph index."),
@@ -1591,12 +1638,14 @@ func registerRoomTools(s *server.MCPServer) {
 
 	s.AddTool(
 		mcp.NewTool("room_agile",
-			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_ask, epic_answer, epic_finalize, epic_close, epic_shape, epic_checkpoint, epic_show, epic_resume, epic_health, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, aca_promote, workpack_show, workpack_sync."),
+			mcp.WithDescription("Command-backed agile room protocol. Actions: epic_start, epic_import_factory, epic_ask, epic_answer, epic_finalize, epic_close, epic_shape, epic_checkpoint, epic_show, epic_resume, epic_health, epic_next, milestone_start, milestone_contract, milestone_criteria, milestone_review, milestone_summary, milestone_show, story_propose, story_accept, story_add, story_state, story_validate, story_show, log_append, log_show, retro_add, retro_show, aca_promote, workpack_show, workpack_sync."),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Agile room action to run")),
 			mcp.WithString("workspace", mcp.Description("Workspace root override (default: .)")),
 			mcp.WithString("room_id", mcp.Description("Room id")),
 			mcp.WithString("sender", mcp.Description("Sender actor or participant id override")),
 			mcp.WithString("actor", mcp.Description("Actor id override for actor-specific read-model actions")),
+			mcp.WithString("mission_dir", mcp.Description("Factory mission directory for epic_import_factory")),
+			mcp.WithBoolean("include_progress_history", mcp.Description("Include high-signal Factory progress history in the import")),
 			mcp.WithString("epic_id", mcp.Description("Epic id")),
 			mcp.WithString("milestone_id", mcp.Description("Milestone id")),
 			mcp.WithString("proposal_id", mcp.Description("Milestone proposal id")),
@@ -1726,6 +1775,77 @@ func getArgs(req mcp.CallToolRequest) map[string]any {
 		return args
 	}
 	return make(map[string]any)
+}
+
+func getObjectArg(args map[string]any, key string) map[string]any {
+	if value, ok := args[key].(map[string]any); ok {
+		return value
+	}
+	return make(map[string]any)
+}
+
+func handleMCPPipe(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	toolName := getStringArg(args, "tool", "")
+	if toolName == "" {
+		return mcp.NewToolResultError("tool is required"), nil
+	}
+	if toolName == "mcp_pipe" {
+		return mcp.NewToolResultError("mcp_pipe cannot pipe itself"), nil
+	}
+
+	query := getStringArg(args, "query", "")
+	if query == "" {
+		return mcp.NewToolResultError("query is required"), nil
+	}
+
+	projectedInput, err := mcpPipeSourceRunner(ctx, toolName, getObjectArg(args, "args"))
+	if err != nil {
+		return mcp.NewToolResultError("execute source tool: " + err.Error()), nil
+	}
+
+	projected, err := applyMCPPipeQuery(projectedInput, query)
+	if err != nil {
+		return mcp.NewToolResultError("apply query: " + err.Error()), nil
+	}
+
+	rendered, err := json.MarshalIndent(projected, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError("marshal projected result: " + err.Error()), nil
+	}
+
+	return truncateSkillOutput(ctx, string(rendered), "mcp_pipe")
+}
+
+func handleMCPKeys(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	toolName := getStringArg(args, "tool", "")
+	if toolName == "" {
+		return mcp.NewToolResultError("tool is required"), nil
+	}
+	if toolName == "mcp_pipe" || toolName == "mcp_keys" {
+		return mcp.NewToolResultError("mcp_keys cannot inspect helper tools recursively"), nil
+	}
+
+	normalized, err := mcpPipeSourceRunner(ctx, toolName, getObjectArg(args, "args"))
+	if err != nil {
+		return mcp.NewToolResultError("execute source tool: " + err.Error()), nil
+	}
+
+	path := getStringArg(args, "path", "result")
+	summary, err := summarizeMCPKeys(normalized, path)
+	if err != nil {
+		return mcp.NewToolResultError("inspect keys: " + err.Error()), nil
+	}
+	summary["tool"] = toolName
+	summary["inspect_path"] = path
+
+	rendered, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultError("marshal key summary: " + err.Error()), nil
+	}
+
+	return truncateSkillOutput(ctx, string(rendered), "mcp_keys")
 }
 
 func getStringArg(args map[string]any, key, fallback string) string {
@@ -1945,7 +2065,7 @@ func handleWebSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToo
 	}
 
 	// Check for provider override (env var or arg)
-	provider := os.Getenv("AGENTCTL_SEARCH_PROVIDER")
+	provider := os.Getenv("FOXCTL_SEARCH_PROVIDER")
 	if p, ok := args["provider"].(string); ok && p != "" {
 		provider = p
 	}
@@ -2267,30 +2387,27 @@ func handleBrowserContent(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 }
 
 // ============================================================================
-// Generic Agentctl Tools (run + discovery)
+// Generic Foxctl Tools (run + discovery)
 // ============================================================================
 
-// registerAgentctlTools adds the generic agentctl_run and agentctl_skills tools.
+// registerFoxctlTools adds the generic foxctl_run and foxctl_skills tools.
 // This replaces individual skill registration, reducing token overhead from ~83k to ~1k.
-func registerAgentctlTools(s *server.MCPServer) {
-	// agentctl_run - Generic skill execution
-	s.AddTool(
-		mcp.NewTool("agentctl_run",
-			mcp.WithDescription("Run an foxctl skill. Use agentctl_skills to discover available skills."),
-			mcp.WithString("skill", mcp.Required(), mcp.Description("Skill name (e.g., 'code/complexity', 'todo/manage', 'test/run')")),
-			mcp.WithObject("input", mcp.Description("Input arguments for the skill as a JSON object. Check skill signature with agentctl_skills for required parameters.")),
-		),
-		handleAgentctlRun,
+func registerFoxctlTools(s *server.MCPServer) {
+	registerMCPToolAlias(
+		s,
+		"foxctl_run",
+		"Run a foxctl skill. Use foxctl_skills to discover available skills.",
+		handleFoxctlRun,
+		mcp.WithString("skill", mcp.Required(), mcp.Description("Skill name (e.g., 'code/complexity', 'todo/manage', 'test/run')")),
+		mcp.WithObject("input", mcp.Description("Input arguments for the skill as a JSON object. Check skill signature with foxctl_skills for required parameters.")),
 	)
-
-	// agentctl_skills - Skill discovery
-	s.AddTool(
-		mcp.NewTool("agentctl_skills",
-			mcp.WithDescription("List available foxctl skills with their descriptions and parameters."),
-			mcp.WithString("filter", mcp.Description("Filter skills by category prefix (e.g., 'code/', 'test/', 'session/')")),
-			mcp.WithBoolean("verbose", mcp.Description("Include full parameter signatures (default: false)")),
-		),
-		handleAgentctlSkills,
+	registerMCPToolAlias(
+		s,
+		"foxctl_skills",
+		"List available foxctl skills with their descriptions and parameters.",
+		handleFoxctlSkills,
+		mcp.WithString("filter", mcp.Description("Filter skills by category prefix (e.g., 'code/', 'test/', 'session/')")),
+		mcp.WithBoolean("verbose", mcp.Description("Include full parameter signatures (default: false)")),
 	)
 
 	s.AddTool(
@@ -2542,7 +2659,7 @@ func registerAgentctlTools(s *server.MCPServer) {
 }
 
 // registerSkillGroups registers skills from specified groups as first-class MCP tools.
-// This provides better UX than agentctl_run by exposing proper parameter schemas.
+// This provides better UX than foxctl_run by exposing proper parameter schemas.
 func registerSkillGroups(ctx context.Context, s *server.MCPServer, groups []string) error {
 	cfg, err := loadConfig(ctx)
 	if err != nil {
@@ -2721,7 +2838,7 @@ func makeSkillHandler(manifest skill.Manifest, artifactPath string) func(ctx con
 	}
 }
 
-func handleAgentctlRun(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func handleFoxctlRun(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := getArgs(req)
 	skillName, _ := args["skill"].(string)
 	if skillName == "" {
@@ -2841,7 +2958,575 @@ func decodeSkillExecutionEnvelope(stdout []byte) (skillExecutionEnvelope, bool) 
 	return envelope, true
 }
 
-func handleAgentctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func applyMCPPipeQuery(input any, query string) (any, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal input: %w", err)
+	}
+	if !gjson.ValidBytes(payload) {
+		return nil, fmt.Errorf("normalized input is not valid JSON")
+	}
+
+	result := gjson.GetBytes(payload, query)
+	if !result.Exists() && result.Type == gjson.Null && result.Raw == "" {
+		return nil, fmt.Errorf("query %q matched nothing", query)
+	}
+
+	if raw := strings.TrimSpace(result.Raw); raw != "" {
+		var decoded any
+		if err := json.Unmarshal([]byte(raw), &decoded); err == nil {
+			return decoded, nil
+		}
+	}
+
+	return result.Value(), nil
+}
+
+func summarizeMCPKeys(input any, path string) (map[string]any, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = "result"
+	}
+
+	target, err := applyMCPPipeQuery(input, path)
+	if err != nil {
+		return nil, err
+	}
+
+	summary := map[string]any{
+		"operation": "keys",
+		"type":      mcpJSONType(target),
+	}
+
+	switch v := target.(type) {
+	case map[string]any:
+		keys := sortedMapKeys(v)
+		paths := collectWildcardKeys(target, "")
+		summary["keys"] = keys
+		summary["count"] = len(keys)
+		summary["all_keys"] = paths
+		summary["total_key_count"] = len(paths)
+	case []any:
+		summary["array_length"] = len(v)
+		if len(v) > 0 {
+			summary["element_type"] = mcpJSONType(v[0])
+		}
+		paths := collectWildcardKeys(target, "")
+		summary["all_keys"] = paths
+		summary["total_key_count"] = len(paths)
+	default:
+		summary["value"] = target
+	}
+
+	return summary, nil
+}
+
+func sortedMapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func collectWildcardKeys(data any, prefix string) []string {
+	seen := make(map[string]struct{})
+	var visit func(current any, currentPrefix string)
+	visit = func(current any, currentPrefix string) {
+		switch v := current.(type) {
+		case map[string]any:
+			keys := sortedMapKeys(v)
+			for _, key := range keys {
+				fullKey := key
+				if currentPrefix != "" {
+					fullKey = currentPrefix + "." + key
+				}
+				seen[fullKey] = struct{}{}
+				visit(v[key], fullKey)
+			}
+		case []any:
+			arrayPrefix := currentPrefix + "[]"
+			if currentPrefix == "" {
+				arrayPrefix = "[]"
+			}
+			seen[arrayPrefix] = struct{}{}
+			for _, item := range v {
+				visit(item, arrayPrefix)
+			}
+		}
+	}
+
+	visit(data, prefix)
+
+	keys := make([]string, 0, len(seen))
+	for key := range seen {
+		if key == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func mcpJSONType(data any) string {
+	if data == nil {
+		return "null"
+	}
+	switch data.(type) {
+	case map[string]any:
+		return "object"
+	case []any:
+		return "array"
+	case string:
+		return "string"
+	case bool:
+		return "boolean"
+	case float64, float32, int, int64, int32, uint, uint64, uint32:
+		return "number"
+	default:
+		return fmt.Sprintf("%T", data)
+	}
+}
+
+func executeMCPPipeSource(ctx context.Context, toolName string, args map[string]any) (any, error) {
+	switch toolName {
+	case "web_search":
+		return executeWebSearchForPipe(ctx, args)
+	case "web_extract":
+		return executeBackendToolForPipe(ctx, "tavily", "tavily-extract", map[string]any{
+			"urls": getStringSliceArg(args, "urls"),
+		})
+	case "docs_lookup":
+		return executeDocsLookupForPipe(ctx, args)
+	case "code_search":
+		return executeBackendToolForPipe(ctx, "exa", "get_code_context_exa", map[string]any{
+			"query": getStringArg(args, "query", ""),
+		})
+	case "ask":
+		question := getStringArg(args, "question", "")
+		return executeBackendToolForPipe(ctx, "perplexity", "perplexity_ask", map[string]any{
+			"messages": []map[string]string{{"role": "user", "content": question}},
+		})
+	case "web_crawl":
+		return executeBackendToolForPipe(ctx, "tavily", "tavily-crawl", map[string]any{
+			"url":       getStringArg(args, "url", ""),
+			"max_depth": getIntArg(args, "max_depth", 2),
+			"limit":     getIntArg(args, "limit", 10),
+		})
+	case "web_map":
+		return executeBackendToolForPipe(ctx, "tavily", "tavily-map", map[string]any{
+			"url":   getStringArg(args, "url", ""),
+			"limit": getIntArg(args, "limit", 50),
+		})
+	case "web_search_general":
+		return executeBackendToolForPipe(ctx, "exa", "web_search_exa", map[string]any{
+			"query":      getStringArg(args, "query", ""),
+			"numResults": getIntArg(args, "num_results", 8),
+		})
+	case "expo_build":
+		buildArgs := map[string]any{"platform": getStringArg(args, "platform", "")}
+		if profile := getStringArg(args, "profile", ""); profile != "" {
+			buildArgs["profile"] = profile
+		}
+		return executeBackendToolForPipe(ctx, "expo", "eas_build", buildArgs)
+	case "expo_update":
+		updateArgs := map[string]any{"channel": getStringArg(args, "channel", "")}
+		if message := getStringArg(args, "message", ""); message != "" {
+			updateArgs["message"] = message
+		}
+		return executeBackendToolForPipe(ctx, "expo", "eas_update", updateArgs)
+	case "expo_screenshot":
+		return executeBackendToolForPipe(ctx, "expo", "take_screenshot", map[string]any{
+			"platform": getStringArg(args, "platform", "ios"),
+		})
+	case "supabase_query":
+		return executeBackendToolForPipe(ctx, "supabase", "execute_sql", map[string]any{
+			"query": getStringArg(args, "sql", ""),
+		})
+	case "supabase_tables":
+		return executeBackendToolForPipe(ctx, "supabase", "list_tables", map[string]any{})
+	case "supabase_logs":
+		logArgs := map[string]any{}
+		if service := getStringArg(args, "service", ""); service != "" {
+			logArgs["service"] = service
+		}
+		if limit := getIntArg(args, "limit", 0); limit > 0 {
+			logArgs["limit"] = limit
+		}
+		return executeBackendToolForPipe(ctx, "supabase", "get_logs", logArgs)
+	case "browser_navigate":
+		return executeBackendToolForPipe(ctx, "playwright", "browser_navigate", map[string]any{
+			"url": getStringArg(args, "url", ""),
+		})
+	case "browser_screenshot":
+		screenshotArgs := map[string]any{}
+		if name := getStringArg(args, "name", ""); name != "" {
+			screenshotArgs["name"] = name
+		}
+		if fullPage, ok := args["full_page"].(bool); ok {
+			screenshotArgs["fullPage"] = fullPage
+		}
+		return executeBackendToolForPipe(ctx, "playwright", "browser_screenshot", screenshotArgs)
+	case "browser_click":
+		return executeBackendToolForPipe(ctx, "playwright", "browser_click", map[string]any{
+			"selector": getStringArg(args, "selector", ""),
+		})
+	case "browser_fill":
+		return executeBackendToolForPipe(ctx, "playwright", "browser_fill", map[string]any{
+			"selector": getStringArg(args, "selector", ""),
+			"value":    getStringArg(args, "value", ""),
+		})
+	case "browser_content":
+		contentArgs := map[string]any{}
+		if selector := getStringArg(args, "selector", ""); selector != "" {
+			contentArgs["selector"] = selector
+		}
+		return executeBackendToolForPipe(ctx, "playwright", "browser_get_content", contentArgs)
+	case "structured_shell":
+		return runEnvelopeCommandForPipe(ctx, "structured_shell", func(cmd *cobra.Command) error {
+			return runShellCommand(
+				cmd,
+				getStringArg(args, "workspace", "."),
+				getStringArg(args, "command", ""),
+				getBoolArg(args, "measure_raw", false),
+				getStringArg(args, "token_model", "cl100k_base"),
+				getStringSliceArg(args, "argv"),
+			)
+		})
+	case "repo_index_build":
+		workspace := getStringArg(args, "workspace", ".")
+		patterns := getStringSliceArg(args, "go_pattern")
+		if len(patterns) == 0 {
+			patterns = []string{"./..."}
+		}
+		return runEnvelopeCommandForPipe(ctx, "repo_index_build", func(cmd *cobra.Command) error {
+			return runIndexRepoBuild(
+				cmd,
+				workspace,
+				patterns,
+				getBoolArg(args, "include_go", true),
+				getBoolArg(args, "include_python", false),
+				getBoolArg(args, "include_rust", false),
+				getBoolArg(args, "include_typescript", true),
+				getBoolArg(args, "include_elixir", false),
+				getBoolArg(args, "include_terraform", false),
+				getBoolArg(args, "include_kubernetes", false),
+				getBoolArg(args, "include_shell", false),
+				getBoolArg(args, "include_tests", false),
+				getBoolArg(args, "dry_run", false),
+			)
+		})
+	case "repo_index_status":
+		return runEnvelopeCommandForPipe(ctx, "repo_index_status", func(cmd *cobra.Command) error {
+			return runIndexRepoStatus(cmd, getStringArg(args, "workspace", "."))
+		})
+	case "repo_index_search":
+		input := map[string]any{
+			"workspace": getStringArg(args, "workspace", "."),
+			"query":     getStringArg(args, "query", ""),
+			"limit":     getIntArg(args, "limit", 20),
+		}
+		if inlineMode := getStringArg(args, "inline_mode", ""); inlineMode != "" {
+			input["inline_mode"] = inlineMode
+		}
+		return runSkillForPipe(ctx, "repo/index_search", input)
+	case "repo_index_expand":
+		input := map[string]any{
+			"workspace":    getStringArg(args, "workspace", "."),
+			"seeds":        getStringSliceArg(args, "seed"),
+			"edge_types":   getStringSliceArg(args, "edge"),
+			"depth":        getIntArg(args, "depth", 1),
+			"budget":       getIntArg(args, "budget", 50),
+			"per_node_cap": getIntArg(args, "per_node", 50),
+			"direction":    getStringArg(args, "direction", "out"),
+		}
+		if inlineMode := getStringArg(args, "inline_mode", ""); inlineMode != "" {
+			input["inline_mode"] = inlineMode
+		}
+		return runSkillForPipe(ctx, "repo/index_expand", input)
+	case "repo_index_dag_grep":
+		input := map[string]any{
+			"workspace": getStringArg(args, "workspace", "."),
+			"query":     getStringArg(args, "query", ""),
+		}
+		for _, key := range []string{"mode", "direction", "render", "inline_mode"} {
+			if value := getStringArg(args, key, ""); value != "" {
+				input[key] = value
+			}
+		}
+		for _, key := range []string{"k", "depth", "budget", "per_node_cap"} {
+			if value := getIntArg(args, key, 0); value > 0 {
+				input[key] = value
+			}
+		}
+		if values := getStringSliceArg(args, "node_kinds"); len(values) > 0 {
+			input["node_kinds"] = values
+		}
+		if values := getStringSliceArg(args, "edge_sets"); len(values) > 0 {
+			input["edge_sets"] = values
+		}
+		if values := getStringSliceArg(args, "edge_types"); len(values) > 0 {
+			input["edge_types"] = values
+		}
+		if includeAnchors, ok := args["include_anchors"].(bool); ok {
+			input["include_anchors"] = includeAnchors
+		}
+		return runSkillForPipe(ctx, "code/dag_grep", input)
+	case "foxctl_run":
+		return runSkillForPipe(ctx, getStringArg(args, "skill", ""), getObjectArg(args, "input"))
+	default:
+		return nil, fmt.Errorf("unsupported tool %q for mcp_pipe", toolName)
+	}
+}
+
+func executeWebSearchForPipe(ctx context.Context, args map[string]any) (any, error) {
+	query := getStringArg(args, "query", "")
+	if query == "" {
+		return nil, fmt.Errorf("query is required")
+	}
+
+	maxResults := getIntArg(args, "max_results", 10)
+	topic := getStringArg(args, "topic", "general")
+	provider := getStringArg(args, "provider", os.Getenv("FOXCTL_SEARCH_PROVIDER"))
+	if provider == "" {
+		provider = "exa"
+	}
+
+	switch provider {
+	case "tavily":
+		return executeBackendToolForPipe(ctx, "tavily", "tavily-search", map[string]any{
+			"query":       query,
+			"max_results": maxResults,
+			"topic":       topic,
+		})
+	case "perplexity":
+		return executeBackendToolForPipe(ctx, "perplexity", "perplexity_ask", map[string]any{
+			"messages": []map[string]string{{"role": "user", "content": query}},
+		})
+	default:
+		return executeBackendToolForPipe(ctx, "exa", "web_search_exa", map[string]any{
+			"query":      query,
+			"numResults": maxResults,
+		})
+	}
+}
+
+func executeDocsLookupForPipe(ctx context.Context, args map[string]any) (any, error) {
+	library := getStringArg(args, "library", "")
+	if library == "" {
+		return nil, fmt.Errorf("library is required")
+	}
+
+	resolveResult, err := callBackendRaw(ctx, "context7", "resolve-library-id", map[string]any{
+		"libraryName": library,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resolveResult.IsError {
+		return normalizeBackendToolResult("context7.resolve-library-id", "backend:context7", resolveResult)
+	}
+
+	libraryID := extractLibraryID(resolveResult)
+	if libraryID == "" {
+		return nil, fmt.Errorf("could not resolve library ID for: %s", library)
+	}
+
+	docsArgs := map[string]any{
+		"context7CompatibleLibraryID": libraryID,
+	}
+	if topic := getStringArg(args, "topic", ""); topic != "" {
+		docsArgs["topic"] = topic
+	}
+
+	return executeBackendToolForPipe(ctx, "context7", "get-library-docs", docsArgs)
+}
+
+func executeBackendToolForPipe(ctx context.Context, backendName, toolName string, args map[string]any) (any, error) {
+	result, err := callBackendRaw(ctx, backendName, toolName, args)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeBackendToolResult(toolName, "backend:"+backendName, result)
+}
+
+func normalizeBackendToolResult(toolName, source string, result *mcp.CallToolResult) (map[string]any, error) {
+	if result == nil {
+		return nil, fmt.Errorf("nil tool result")
+	}
+
+	payload := map[string]any{
+		"tool":     toolName,
+		"source":   source,
+		"is_error": result.IsError,
+	}
+
+	if result.StructuredContent != nil {
+		payload["structured"] = result.StructuredContent
+		payload["result"] = result.StructuredContent
+	}
+
+	marshaled, err := json.Marshal(result)
+	if err == nil {
+		var decoded map[string]any
+		if err := json.Unmarshal(marshaled, &decoded); err == nil {
+			payload["mcp"] = decoded
+		}
+	}
+
+	var textParts []string
+	for _, content := range result.Content {
+		if tc, ok := content.(mcp.TextContent); ok {
+			textParts = append(textParts, tc.Text)
+		}
+	}
+	if len(textParts) > 0 {
+		text := strings.Join(textParts, "\n")
+		payload["text"] = text
+		if _, hasResult := payload["result"]; !hasResult {
+			payload["result"] = text
+		}
+		var parsed any
+		if err := json.Unmarshal([]byte(text), &parsed); err == nil {
+			payload["parsed_text"] = parsed
+			payload["result"] = parsed
+		}
+	}
+
+	return payload, nil
+}
+
+func runEnvelopeCommandForPipe(ctx context.Context, toolLabel string, run func(cmd *cobra.Command) error) (map[string]any, error) {
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	runCtx := ctx
+	if _, ok := config.FromContext(runCtx); !ok {
+		if cfg, err := loadConfig(ctx); err == nil {
+			runCtx = config.WithContext(runCtx, cfg)
+		}
+	}
+	cmd.SetContext(runCtx)
+
+	if err := run(cmd); err != nil {
+		return nil, err
+	}
+
+	raw := strings.TrimSpace(out.String())
+	result := map[string]any{
+		"tool":   toolLabel,
+		"source": "foxctl_command",
+		"text":   raw,
+		"raw":    raw,
+	}
+
+	var envelope struct {
+		Status string         `json:"status"`
+		Data   map[string]any `json:"data"`
+		Error  struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err == nil {
+		result["status"] = envelope.Status
+		result["data"] = envelope.Data
+		result["result"] = envelope.Data
+		result["envelope"] = map[string]any{
+			"status": envelope.Status,
+			"data":   envelope.Data,
+			"error": map[string]any{
+				"message": envelope.Error.Message,
+			},
+		}
+		if envelope.Status == "error" {
+			result["is_error"] = true
+			result["error"] = envelope.Error.Message
+		}
+		return result, nil
+	}
+
+	return result, nil
+}
+
+func runSkillForPipe(ctx context.Context, skillName string, input map[string]any) (map[string]any, error) {
+	if strings.TrimSpace(skillName) == "" {
+		return nil, fmt.Errorf("skill name is required")
+	}
+	if input == nil {
+		input = make(map[string]any)
+	}
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	handle, err := findSkill(cfg, skillName)
+	if err != nil {
+		return nil, fmt.Errorf("skill not found: %s - %w", skillName, err)
+	}
+
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal input: %w", err)
+	}
+
+	runCtx := resolveWorkspaceContext(ctx, "")
+	stdout, stderr, execErr := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
+	return renderSkillExecutionResultForPipe(skillName, stdout, stderr, execErr)
+}
+
+func renderSkillExecutionResultForPipe(skillName string, stdout, stderr []byte, execErr error) (map[string]any, error) {
+	raw := strings.TrimSpace(string(stdout))
+	result := map[string]any{
+		"tool":   skillName,
+		"source": "foxctl_skill",
+		"text":   raw,
+		"raw":    raw,
+	}
+
+	if envelope, ok := decodeSkillExecutionEnvelope(stdout); ok {
+		result["status"] = envelope.Status
+		result["command"] = envelope.Command
+		result["data"] = envelope.Data
+		result["result"] = envelope.Data
+		result["envelope"] = map[string]any{
+			"status":  envelope.Status,
+			"command": envelope.Command,
+			"data":    envelope.Data,
+			"error": map[string]any{
+				"code":    envelope.Error.Code,
+				"message": envelope.Error.Message,
+			},
+		}
+		if envelope.Status == "error" {
+			result["is_error"] = true
+			result["error"] = envelope.Error.Message
+		}
+		return result, nil
+	}
+
+	if execErr != nil {
+		errMsg := execErr.Error()
+		if len(stderr) > 0 {
+			errMsg += "\nstderr: " + string(stderr)
+		}
+		return nil, fmt.Errorf("execute skill: %s", errMsg)
+	}
+
+	return result, nil
+}
+
+func handleFoxctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := getArgs(req)
 	filter, _ := args["filter"].(string)
 	verbose, _ := args["verbose"].(bool)
@@ -4172,6 +4857,22 @@ func handleRoomAgileTool(ctx context.Context, req mcp.CallToolRequest) (*mcp.Cal
 		argv = appendStringFlagArgs(argv, "--horizon", getStringArg(args, "horizon", ""))
 		argv = appendStringSliceFlagArgs(argv, "--scope", getStringSliceArg(args, "scope"))
 		argv = appendStringSliceFlagArgs(argv, "--success", getStringSliceArg(args, "success"))
+	case "epic_import_factory":
+		missionDir := getStringArg(args, "mission_dir", "")
+		if missionDir == "" {
+			return mcp.NewToolResultError("mission_dir is required for room_agile epic_import_factory"), nil
+		}
+		argv = []string{"epic", "import-factory", roomID}
+		argv = appendStringFlagArgs(argv, "--workspace", workspace)
+		argv = appendStringFlagArgs(argv, "--sender", getStringArg(args, "sender", ""))
+		argv = appendStringFlagArgs(argv, "--mission-dir", missionDir)
+		if _, ok := args["include_progress_history"]; ok {
+			if getBoolArg(args, "include_progress_history", true) {
+				argv = append(argv, "--include-progress-history")
+			} else {
+				argv = append(argv, "--include-progress-history=false")
+			}
+		}
 	case "epic_ask":
 		epicID := getStringArg(args, "epic_id", "")
 		question := getStringArg(args, "question", "")
@@ -4830,6 +5531,14 @@ func callLocalSkill(ctx context.Context, skillName string, input map[string]any)
 // Backend communication
 
 func callBackend(ctx context.Context, backendName, toolName string, args map[string]any) (*mcp.CallToolResult, error) {
+	return callBackendWithOptions(ctx, backendName, toolName, args, true)
+}
+
+func callBackendRaw(ctx context.Context, backendName, toolName string, args map[string]any) (*mcp.CallToolResult, error) {
+	return callBackendWithOptions(ctx, backendName, toolName, args, false)
+}
+
+func callBackendWithOptions(ctx context.Context, backendName, toolName string, args map[string]any, truncate bool) (*mcp.CallToolResult, error) {
 	c, err := backends.getOrCreate(ctx, backendName)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("connect to "+backendName, err), nil
@@ -4845,8 +5554,10 @@ func callBackend(ctx context.Context, backendName, toolName string, args map[str
 		return mcp.NewToolResultErrorFromErr("call "+toolName, err), nil
 	}
 
-	// Apply truncation for large web/search responses
-	result = truncateLargeResponse(ctx, result, toolName)
+	if truncate {
+		// Apply truncation for large web/search responses
+		result = truncateLargeResponse(ctx, result, toolName)
+	}
 
 	return result, nil
 }
@@ -4950,7 +5661,7 @@ func extractLibraryID(result *mcp.CallToolResult) string {
 }
 
 // ============================================================================
-// Skill Discovery (used by agentctl_skills tool)
+// Skill Discovery (used by foxctl_skills)
 // ============================================================================
 
 // discoverSkills finds all skill manifests in the configured paths.
@@ -4958,9 +5669,9 @@ func discoverSkills(cfg config.Config) ([]skill.Manifest, error) {
 	var manifests []skill.Manifest
 	seen := make(map[string]bool)
 
-	// Search paths: AGENTCTL_SKILLS_PATH, ~/.foxctl/skills, ./skills
+	// Search paths: FOXCTL_SKILLS_PATH, ~/.foxctl/skills, ./skills
 	searchPaths := []string{cfg.Paths.Skills}
-	if env := os.Getenv("AGENTCTL_SKILLS_PATH"); env != "" {
+	if env := os.Getenv("FOXCTL_SKILLS_PATH"); env != "" {
 		searchPaths = append(filepath.SplitList(env), searchPaths...)
 	}
 	if pwd, err := os.Getwd(); err == nil {

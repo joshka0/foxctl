@@ -100,20 +100,20 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
-	t.Setenv("AGENTCTL_INLINE_OUTPUT_KB", "512")
-	t.Setenv("AGENTCTL_EMBEDDING_PROVIDER", "openai_compat")
-	t.Setenv("AGENTCTL_EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m-qat")
-	t.Setenv("AGENTCTL_EMBEDDING_BASE_URL", "http://127.0.0.1:1234/v1")
-	t.Setenv("AGENTCTL_EMBEDDING_API_KEY", "embed-key")
-	t.Setenv("AGENTCTL_LLM_BASE_URL", "https://demo.example.com/v1")
-	t.Setenv("AGENTCTL_LLM_AUTH_MODE", "header")
-	t.Setenv("AGENTCTL_LLM_AUTH_HEADER", "X-Demo-Key")
-	t.Setenv("AGENTCTL_LLM_AUTH_PREFIX", "Token ")
-	t.Setenv("AGENTCTL_PATHS_CAS", "~/custom/cas")
-	t.Setenv("AGENTCTL_LOGGING_LEVEL", "DEBUG")
-	t.Setenv("AGENTCTL_LOGGING_FORMAT", "JSON")
-	t.Setenv("AGENTCTL_LOGGING_OUTPUT", "/tmp/env-foxctl.log")
-	t.Setenv("AGENTCTL_OPENAPI_PLUGIN_PATH", "~/plugins:/usr/local/foxctl/plugins")
+	t.Setenv("FOXCTL_INLINE_OUTPUT_KB", "512")
+	t.Setenv("FOXCTL_EMBEDDING_PROVIDER", "openai_compat")
+	t.Setenv("FOXCTL_EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m-qat")
+	t.Setenv("FOXCTL_EMBEDDING_BASE_URL", "http://127.0.0.1:1234/v1")
+	t.Setenv("FOXCTL_EMBEDDING_API_KEY", "embed-key")
+	t.Setenv("FOXCTL_LLM_BASE_URL", "https://demo.example.com/v1")
+	t.Setenv("FOXCTL_LLM_AUTH_MODE", "header")
+	t.Setenv("FOXCTL_LLM_AUTH_HEADER", "X-Demo-Key")
+	t.Setenv("FOXCTL_LLM_AUTH_PREFIX", "Token ")
+	t.Setenv("FOXCTL_PATHS_CAS", "~/custom/cas")
+	t.Setenv("FOXCTL_LOGGING_LEVEL", "DEBUG")
+	t.Setenv("FOXCTL_LOGGING_FORMAT", "JSON")
+	t.Setenv("FOXCTL_LOGGING_OUTPUT", "/tmp/env-foxctl.log")
+	t.Setenv("FOXCTL_OPENAPI_PLUGIN_PATH", "~/plugins:/usr/local/foxctl/plugins")
 
 	cfg, err := Load(context.Background())
 	if err != nil {
@@ -208,7 +208,7 @@ func TestInvalidInlineOutputFallsBackToDefault(t *testing.T) {
 func TestLoadWithWorkspaceConfigOverridesLLMAndEmbedding(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	t.Setenv("AGENTCTL_LLM_PROVIDER", "lmstudio")
+	t.Setenv("FOXCTL_LLM_PROVIDER", "lmstudio")
 
 	home := filepath.Join(tmp, ".foxctl")
 	if err := os.MkdirAll(home, 0o755); err != nil {

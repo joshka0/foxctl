@@ -220,7 +220,7 @@ func IndexEditedFile(ctx context.Context, deps Dependencies, req LiveIndexReques
 		"embed":       false,
 		"embed_queue": liveIndexEmbedQueueEnabled(),
 	}, target, &env); err != nil {
-		if envEnabled("AGENTCTL_LIVE_INDEX_DEBUG") {
+		if envEnabled("FOXCTL_LIVE_INDEX_DEBUG") {
 			response.Warnings = append(response.Warnings, fmt.Sprintf("index failed for %s: %v", filePath, err))
 		}
 		return response, nil
@@ -301,12 +301,12 @@ func MaintainGraphSync(ctx context.Context, deps Dependencies, req GraphMaintena
 		Workspace: target,
 		Mode:      "sync",
 	}
-	if envEnabled("AGENTCTL_GRAPH_MAINTENANCE_DISABLED") || deps.RunSkill == nil {
+	if envEnabled("FOXCTL_GRAPH_MAINTENANCE_DISABLED") || deps.RunSkill == nil {
 		return response, nil
 	}
 
-	doCleanup := !envEnabled("AGENTCTL_GRAPH_CLEANUP_DISABLED")
-	doPagerank := !envEnabled("AGENTCTL_GRAPH_PAGERANK_DISABLED")
+	doCleanup := !envEnabled("FOXCTL_GRAPH_CLEANUP_DISABLED")
+	doPagerank := !envEnabled("FOXCTL_GRAPH_PAGERANK_DISABLED")
 	if !doCleanup && !doPagerank {
 		return response, nil
 	}
@@ -422,7 +422,7 @@ func SyncPlans(ctx context.Context, deps Dependencies, req PlanSyncRequest) (Pla
 		Workspace: target,
 		Mode:      "sync",
 	}
-	if envEnabled("AGENTCTL_PLAN_SYNC_DISABLED") || deps.RunSkill == nil {
+	if envEnabled("FOXCTL_PLAN_SYNC_DISABLED") || deps.RunSkill == nil {
 		return response, nil
 	}
 
@@ -443,16 +443,16 @@ func SyncPlans(ctx context.Context, deps Dependencies, req PlanSyncRequest) (Pla
 }
 
 func GraphMaintenanceSyncEnabled() bool {
-	return envEnabled("AGENTCTL_GRAPH_MAINTENANCE_SYNC")
+	return envEnabled("FOXCTL_GRAPH_MAINTENANCE_SYNC")
 }
 
 func PlanSyncSyncEnabled() bool {
-	return envEnabled("AGENTCTL_PLAN_SYNC_SYNC")
+	return envEnabled("FOXCTL_PLAN_SYNC_SYNC")
 }
 
 func liveIndexEmbedQueueEnabled() bool {
 	value := strings.ToLower(strings.TrimSpace(firstNonEmpty(
-		getenv("AGENTCTL_EMBED_QUEUE"),
+		getenv("FOXCTL_EMBED_QUEUE"),
 		"1",
 	)))
 	return value != "0" && value != "false" && value != "no" && value != "off"

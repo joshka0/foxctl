@@ -288,13 +288,13 @@ Start with Option A (no changes). Evaluate Option B when:
 
 ```bash
 # Enable feedback collection (default: true in terminal)
-AGENTCTL_SESSION_FEEDBACK=true
+FOXCTL_SESSION_FEEDBACK=true
 
 # Minimum rating threshold for optimization (default: 4)
-AGENTCTL_OPTIMIZATION_MIN_RATING=4
+FOXCTL_OPTIMIZATION_MIN_RATING=4
 
 # Days to look back for optimization (default: 7)
-AGENTCTL_OPTIMIZATION_WINDOW_DAYS=7
+FOXCTL_OPTIMIZATION_WINDOW_DAYS=7
 ```
 
 ---

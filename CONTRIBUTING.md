@@ -102,7 +102,7 @@ foxctl uses the following directories:
 - **CAS**: `~/.foxctl/cas/sha256/`
 - **Jobs**: `~/.foxctl/jobs/<ulid>/`
 
-You can override the config path with `--config` flag or `AGENTCTL_CONFIG` environment variable.
+You can override the config path with `--config` flag or `FOXCTL_CONFIG` environment variable.
 
 ---
 

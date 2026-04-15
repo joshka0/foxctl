@@ -6,8 +6,8 @@ import (
 )
 
 func TestResolveRoomSenderUsesParticipantEnvFallback(t *testing.T) {
-	t.Setenv("AGENTCTL_PARTICIPANT_ID", "")
-	t.Setenv("AGENTCTL_PARTICIPANT", "codex-a")
+	t.Setenv("FOXCTL_PARTICIPANT_ID", "")
+	t.Setenv("FOXCTL_PARTICIPANT", "codex-a")
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_PANE", "")
 	t.Setenv("ZELLIJ", "")

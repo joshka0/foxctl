@@ -56,7 +56,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 
 	// Determine mode from environment
 	mode := ModeAuto
-	if m := os.Getenv("AGENTCTL_TASK_GUARD_MODE"); m == "strict" {
+	if m := os.Getenv("FOXCTL_TASK_GUARD_MODE"); m == "strict" {
 		mode = ModeStrict
 	}
 

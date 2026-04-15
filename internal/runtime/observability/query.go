@@ -62,7 +62,7 @@ type timedEventRecord struct {
 
 // ResolveObsDir returns the configured observability directory or the default path.
 func ResolveObsDir() string {
-	if dir := strings.TrimSpace(os.Getenv("AGENTCTL_OBS_DIR")); dir != "" {
+	if dir := strings.TrimSpace(os.Getenv("FOXCTL_OBS_DIR")); dir != "" {
 		return dir
 	}
 	homeDir, err := os.UserHomeDir()

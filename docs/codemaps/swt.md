@@ -42,7 +42,7 @@ Binary Startup to Command Execution
 - **1b:** Load .env files in reverse priority order\
   **Path:**
   `internal/platform/config/dotenv.go:48`\
-  **Description:** Loads ~/.foxctl/.env, $AGENTCTL_HOME/.env, then $PWD/.env
+  **Description:** Loads ~/.foxctl/.env, $FOXCTL_HOME/.env, then $PWD/.env
   (later files override)
 
 - **1c:** Execute Cobra root command\
@@ -84,16 +84,16 @@ Cobra Initialization Hooks: Viper + .env Loading
 
 ### Location Details
 
-- **2a:** Configure viper for AGENTCTL_* env vars\
+- **2a:** Configure viper for FOXCTL_* env vars\
   **Path:**
   `cmd/foxctl/cmd/root.go:63`\
-  **Description:** Sets up automatic environment variable binding with AGENTCTL
+  **Description:** Sets up automatic environment variable binding with FOXCTL
   prefix
 
 - **2b:** Enable automatic env var reading\
   **Path:**
   `cmd/foxctl/cmd/root.go:64`\
-  **Description:** Allows viper to read AGENTCTL_* environment variables
+  **Description:** Allows viper to read FOXCTL_* environment variables
   automatically
 
 - **2c:** Load global .env file\
@@ -125,7 +125,7 @@ config.Load() - Configuration Materialization <-- config.go:249
 ├── userHomeDir() - get user home directory <-- config.go:252
 ├── newConfiguredViper() <-- 3a
 │   ├── viper.New() <-- config.go:282
-│   ├── SetEnvPrefix("AGENTCTL") <-- config.go:284
+│   ├── SetEnvPrefix("FOXCTL") <-- config.go:284
 │   └── AutomaticEnv() <-- config.go:286
 ├── applyDefaults(v, defaultHome) <-- 3b
 │   ├── SetDefault("home", defaultHome) <-- 3c
@@ -151,7 +151,7 @@ config.Load() - Configuration Materialization <-- config.go:249
 - **3a:** Create viper instance with env bindings\
   **Path:**
   `internal/platform/config/config.go:257`\
-  **Description:** Sets up viper with AGENTCTL prefix and dot-to-underscore
+  **Description:** Sets up viper with FOXCTL prefix and dot-to-underscore
   replacement
 
 - **3b:** Apply hardcoded defaults\
@@ -334,7 +334,7 @@ Database Storage Layer
 │
 └── Driver Abstraction Path
     ├── ConfigLoader.loadConfig() <-- config_loader.go:42
-    │   ├── Read AGENTCTL_*_DB_DRIVER env <-- 6d
+    │   ├── Read FOXCTL_*_DB_DRIVER env <-- 6d
     │   └── Returns Config with driver type
     │
     └── dbdriver.OpenDB() <-- driver.go:91
@@ -364,7 +364,7 @@ Database Storage Layer
 - **6d:** Check for driver override env var\
   **Path:**
   `internal/storage/dbdriver/config_loader.go:46`\
-  **Description:** Reads AGENTCTL_<DB>_DB_DRIVER to select sqlite/libsql/turso
+  **Description:** Reads FOXCTL_<DB>_DB_DRIVER to select sqlite/libsql/turso
 
 - **6e:** Route to driver-specific opener\
   **Path:**
@@ -706,8 +706,8 @@ func Open(ctx context.Context, root string) (Store, error) {
 
 ```go
 // Lines: 44-48
-	// Format: AGENTCTL_<PREFIX>_DB_DRIVER (e.g., AGENTCTL_CACHE_DB_DRIVER)
-	driverEnv := fmt.Sprintf("AGENTCTL_%s_DB_DRIVER", strings.ToUpper(prefix))
+	// Format: FOXCTL_<PREFIX>_DB_DRIVER (e.g., FOXCTL_CACHE_DB_DRIVER)
+	driverEnv := fmt.Sprintf("FOXCTL_%s_DB_DRIVER", strings.ToUpper(prefix))
 	driver := os.Getenv(driverEnv)
 
 	// Default to SQLite if not specified

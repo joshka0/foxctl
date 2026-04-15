@@ -37,8 +37,8 @@ func TestMemoryQuery_Integration(t *testing.T) {
 		t.Skip("VOYAGE_API_KEY not set")
 	}
 
-	// Use AGENTCTL_TEST_WORKSPACE or current working directory
-	workspace := os.Getenv("AGENTCTL_TEST_WORKSPACE")
+	// Use FOXCTL_TEST_WORKSPACE or current working directory
+	workspace := os.Getenv("FOXCTL_TEST_WORKSPACE")
 	if workspace == "" {
 		var err error
 		workspace, err = os.Getwd()

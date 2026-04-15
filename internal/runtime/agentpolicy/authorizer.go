@@ -28,7 +28,7 @@ func AuthorizeBash(profile Profile, command string) AuthorizationResult {
 	parsed := ParseCommand(command)
 
 	// If it's an foxctl run command, check if the skill is allowed
-	if parsed.IsAgentctlRun {
+	if parsed.IsFoxctlRun {
 		if IsSkillAllowed(profile, parsed.Skill) {
 			return AuthorizationResult{
 				Decision:    DecisionAllow,
@@ -58,7 +58,7 @@ func AuthorizeBash(profile Profile, command string) AuthorizationResult {
 //
 // Handles:
 //   - Simple: "foxctl run code/symbols --input '{}'"
-//   - With env vars: "AGENTCTL_WORKSPACE=/foo foxctl run code/symbols"
+//   - With env vars: "FOXCTL_WORKSPACE=/foo foxctl run code/symbols"
 //   - With path: "/usr/local/bin/foxctl run code/symbols"
 //   - Quoted args: foxctl run 'code/symbols' --input '{}'
 func ParseCommand(command string) ParsedCommand {
@@ -92,7 +92,7 @@ func ParseCommand(command string) ParsedCommand {
 
 	// Check if it's foxctl (possibly with path)
 	cmd := remaining[0]
-	if !isAgentctlCommand(cmd) {
+	if !isFoxctlCommand(cmd) {
 		return result
 	}
 
@@ -117,7 +117,7 @@ func ParseCommand(command string) ParsedCommand {
 		return result
 	}
 
-	result.IsAgentctlRun = true
+	result.IsFoxctlRun = true
 	result.Skill = skill
 	return result
 }
@@ -206,8 +206,8 @@ func parseEnvAssignment(token string) (string, string) {
 	return token[:idx], token[idx+1:]
 }
 
-// isAgentctlCommand checks if a token is the foxctl command.
-func isAgentctlCommand(token string) bool {
+// isFoxctlCommand checks if a token is the foxctl command.
+func isFoxctlCommand(token string) bool {
 	// Direct match
 	if token == "foxctl" {
 		return true

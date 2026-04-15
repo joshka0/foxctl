@@ -7,7 +7,7 @@
     "generationSource": "generationWithTraces",
     "generationTimestamp": "2026-01-15T01:04:00+02:00",
     "mode": "SMART",
-    "originalPrompt": "Explore: GUI app entry + web server integration. Start from: packages/gui/src/main.tsx, packages/gui/src/App.tsx, cmd/agentctl_web/main.go"
+    "originalPrompt": "Explore: GUI app entry + web server integration. Start from: packages/gui/src/main.tsx, packages/gui/src/App.tsx, cmd/foxctl_web/main.go"
   },
   "title": "GUI App Entry + Web Server Integration",
   "traces": [
@@ -254,7 +254,7 @@
       "locations": [
         {
           "id": "5a",
-          "path": "cmd/agentctl_web/main.go",
+          "path": "cmd/foxctl_web/main.go",
           "lineNumber": 69,
           "lineContent": "srv, err := web.NewServer(web.Options{",
           "title": "Server Creation",
@@ -270,7 +270,7 @@
         },
         {
           "id": "5c",
-          "path": "cmd/agentctl_web/main.go",
+          "path": "cmd/foxctl_web/main.go",
           "lineNumber": 79,
           "lineContent": "go srv.Run(ctx)",
           "title": "Hub Event Loop",
@@ -286,7 +286,7 @@
         },
         {
           "id": "5e",
-          "path": "cmd/agentctl_web/main.go",
+          "path": "cmd/foxctl_web/main.go",
           "lineNumber": 84,
           "lineContent": "Handler:           srv.Handler(),",
           "title": "Handler Assignment",
@@ -294,15 +294,15 @@
         },
         {
           "id": "5f",
-          "path": "cmd/agentctl_web/main.go",
+          "path": "cmd/foxctl_web/main.go",
           "lineNumber": 99,
           "lineContent": "if err := httpSrv.ListenAndServe(); err != nil \u0026\u0026 err != http.ErrServerClosed {",
           "title": "Server Listen",
           "description": "HTTP server begins listening on configured address (default :8090) for requests"
         }
       ],
-      "traceTextDiagram": "Web Server Startup Flow\n├── cmd/agentctl_web/main.go\n│   ├── main() entry point \u003c-- cmd/agentctl_web/main.go:38\n│   │   ├── config.LoadCached() \u003c-- cmd/agentctl_web/main.go:55\n│   │   ├── web.NewServer() call \u003c-- 5a\n│   │   ├── go srv.Run(ctx) \u003c-- 5c\n│   │   ├── http.Server creation \u003c-- cmd/agentctl_web/main.go:82\n│   │   │   └── Handler: srv.Handler() \u003c-- 5e\n│   │   └── httpSrv.ListenAndServe() \u003c-- 5f\n│   └── signal handling \u0026 shutdown \u003c-- cmd/agentctl_web/main.go:105\n│\n└── internal/interfaces/web/server.go\n    ├── NewServer() initialization \u003c-- internal/interfaces/web/server.go:26\n    │   ├── sse.NewHub() creation \u003c-- 5b\n    │   ├── consolews.NewHub() creation \u003c-- internal/interfaces/web/server.go:28\n    │   └── return Server instance \u003c-- internal/interfaces/web/server.go:42\n    │\n    └── Handler() route registration \u003c-- internal/interfaces/web/server.go:61\n        ├── http.NewServeMux() \u003c-- 5d\n        ├── register /api/jobs endpoint \u003c-- internal/interfaces/web/server.go:71\n        ├── register /api/events (SSE) \u003c-- internal/interfaces/web/server.go:68\n        ├── register /ws/console/* \u003c-- internal/interfaces/web/server.go:91\n        ├── register all other API routes\n        └── apply CORS + logging \u003c-- internal/interfaces/web/server.go:152",
-      "traceGuide": "## Motivation\n\nThe foxctl web server needs to **start up reliably** and **expose multiple communication channels** to the frontend GUI. The system must support traditional REST APIs for data queries, Server-Sent Events (SSE) for real-time push notifications, and WebSocket connections for bidirectional console sessions. The startup sequence must initialize these subsystems in the correct order, register all HTTP routes, and begin listening for connections—all while handling graceful shutdown.\n\n## Details\n\n### Entry Point and Configuration\n\nThe server starts in `cmd/agentctl_web/main.go` [5a], which loads the foxctl configuration including paths to jobs, CAS storage, and database settings. This configuration is passed to all handlers that need to access persistent data.\n\n### Server Initialization\n\n`web.NewServer()` creates the core server instance with three key components:\n\n1. **SSE Hub** [5b] - A goroutine-based event broadcaster that maintains connected clients and distributes invalidation events when data changes\n2. **Console Hub** - Manages WebSocket sessions for interactive console communication\n3. **HTTP Handler** - A multiplexer that routes requests to appropriate handlers\n\nThe SSE hub is immediately started in a background goroutine [5c] so it can begin accepting client registrations before the HTTP server starts listening.\n\n### Route Registration\n\nThe `Handler()` method [5d] creates an `http.ServeMux` and registers all endpoints:\n\n- **REST APIs** like `/api/jobs` for querying job data\n- **SSE endpoint** at `/api/events` for real-time updates\n- **WebSocket endpoint** at `/ws/console/*` for console sessions\n- **Static file serving** (optional) for production deployments\n\nRoutes are registered with handler functions that receive the config and logger, enabling them to access storage and emit structured logs.\n\n### HTTP Server Start\n\nThe HTTP server is configured [5e] with the handler and appropriate timeouts (note: `WriteTimeout` is 0 to support long-lived SSE connections). The server begins listening on port 8090 by default [5f], blocking until shutdown is requested.\n\n### Graceful Shutdown\n\nSignal handlers catch SIGTERM/SIGINT, cancel the context (stopping the SSE hub), and call `httpSrv.Shutdown()` with a 5-second timeout to drain in-flight requests."
+      "traceTextDiagram": "Web Server Startup Flow\n├── cmd/foxctl_web/main.go\n│   ├── main() entry point \u003c-- cmd/foxctl_web/main.go:38\n│   │   ├── config.LoadCached() \u003c-- cmd/foxctl_web/main.go:55\n│   │   ├── web.NewServer() call \u003c-- 5a\n│   │   ├── go srv.Run(ctx) \u003c-- 5c\n│   │   ├── http.Server creation \u003c-- cmd/foxctl_web/main.go:82\n│   │   │   └── Handler: srv.Handler() \u003c-- 5e\n│   │   └── httpSrv.ListenAndServe() \u003c-- 5f\n│   └── signal handling \u0026 shutdown \u003c-- cmd/foxctl_web/main.go:105\n│\n└── internal/interfaces/web/server.go\n    ├── NewServer() initialization \u003c-- internal/interfaces/web/server.go:26\n    │   ├── sse.NewHub() creation \u003c-- 5b\n    │   ├── consolews.NewHub() creation \u003c-- internal/interfaces/web/server.go:28\n    │   └── return Server instance \u003c-- internal/interfaces/web/server.go:42\n    │\n    └── Handler() route registration \u003c-- internal/interfaces/web/server.go:61\n        ├── http.NewServeMux() \u003c-- 5d\n        ├── register /api/jobs endpoint \u003c-- internal/interfaces/web/server.go:71\n        ├── register /api/events (SSE) \u003c-- internal/interfaces/web/server.go:68\n        ├── register /ws/console/* \u003c-- internal/interfaces/web/server.go:91\n        ├── register all other API routes\n        └── apply CORS + logging \u003c-- internal/interfaces/web/server.go:152",
+      "traceGuide": "## Motivation\n\nThe foxctl web server needs to **start up reliably** and **expose multiple communication channels** to the frontend GUI. The system must support traditional REST APIs for data queries, Server-Sent Events (SSE) for real-time push notifications, and WebSocket connections for bidirectional console sessions. The startup sequence must initialize these subsystems in the correct order, register all HTTP routes, and begin listening for connections—all while handling graceful shutdown.\n\n## Details\n\n### Entry Point and Configuration\n\nThe server starts in `cmd/foxctl_web/main.go` [5a], which loads the foxctl configuration including paths to jobs, CAS storage, and database settings. This configuration is passed to all handlers that need to access persistent data.\n\n### Server Initialization\n\n`web.NewServer()` creates the core server instance with three key components:\n\n1. **SSE Hub** [5b] - A goroutine-based event broadcaster that maintains connected clients and distributes invalidation events when data changes\n2. **Console Hub** - Manages WebSocket sessions for interactive console communication\n3. **HTTP Handler** - A multiplexer that routes requests to appropriate handlers\n\nThe SSE hub is immediately started in a background goroutine [5c] so it can begin accepting client registrations before the HTTP server starts listening.\n\n### Route Registration\n\nThe `Handler()` method [5d] creates an `http.ServeMux` and registers all endpoints:\n\n- **REST APIs** like `/api/jobs` for querying job data\n- **SSE endpoint** at `/api/events` for real-time updates\n- **WebSocket endpoint** at `/ws/console/*` for console sessions\n- **Static file serving** (optional) for production deployments\n\nRoutes are registered with handler functions that receive the config and logger, enabling them to access storage and emit structured logs.\n\n### HTTP Server Start\n\nThe HTTP server is configured [5e] with the handler and appropriate timeouts (note: `WriteTimeout` is 0 to support long-lived SSE connections). The server begins listening on port 8090 by default [5f], blocking until shutdown is requested.\n\n### Graceful Shutdown\n\nSignal handlers catch SIGTERM/SIGINT, cancel the context (stopping the SSE hub), and call `httpSrv.Shutdown()` with a 5-second timeout to drain in-flight requests."
     },
     {
       "id": "6",

@@ -39,8 +39,8 @@ func NewLoader(opts ...LoaderOption) *Loader {
 func defaultWorkflowPaths() []string {
 	var paths []string
 
-	// 1. AGENTCTL_WORKFLOW_PATH environment variable
-	if wfPath := os.Getenv("AGENTCTL_WORKFLOW_PATH"); wfPath != "" {
+	// 1. FOXCTL_WORKFLOW_PATH environment variable
+	if wfPath := os.Getenv("FOXCTL_WORKFLOW_PATH"); wfPath != "" {
 		paths = append(paths, filepath.SplitList(wfPath)...)
 	}
 

@@ -26,7 +26,7 @@ func TestSWEGrep_CandidatesToSnippets(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	// Skip if foxctl binary not available
-	binPath := findAgentctlBinary(t)
+	binPath := findFoxctlBinary(t)
 	if binPath == "" {
 		t.Skip("foxctl binary not found; run 'make skills-build' first")
 	}
@@ -257,7 +257,7 @@ func LoginLarge() string {
 			},
 		}
 
-		envelope := runSWEGrep(t, binPath, runRoot, workspaceDir, input, "AGENTCTL_INLINE_OUTPUT_KB=1")
+		envelope := runSWEGrep(t, binPath, runRoot, workspaceDir, input, "FOXCTL_INLINE_OUTPUT_KB=1")
 		assertEnvelopeOK(t, envelope)
 
 		data := getMap(t, envelope, "data")
@@ -289,7 +289,7 @@ func LoginLarge() string {
 			},
 		}
 
-		envelope := runSWEGrep(t, binPath, runRoot, workspaceDir, input, "AGENTCTL_INLINE_OUTPUT_KB=128")
+		envelope := runSWEGrep(t, binPath, runRoot, workspaceDir, input, "FOXCTL_INLINE_OUTPUT_KB=128")
 		assertEnvelopeOK(t, envelope)
 
 		data := getMap(t, envelope, "data")
@@ -460,15 +460,15 @@ func getString(t *testing.T, parent map[string]any, key string) string {
 	return v
 }
 
-// findAgentctlBinary locates the foxctl binary.
-func findAgentctlBinary(t *testing.T) string {
+// findFoxctlBinary locates the foxctl binary.
+func findFoxctlBinary(t *testing.T) string {
 	t.Helper()
 
 	// Try common locations
 	candidates := []string{
 		"./bin/foxctl",
 		"../../bin/foxctl",
-		os.Getenv("AGENTCTL_BIN"),
+		os.Getenv("FOXCTL_BIN"),
 	}
 
 	for _, path := range candidates {

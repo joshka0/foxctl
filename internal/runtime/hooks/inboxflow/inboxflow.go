@@ -154,7 +154,7 @@ func resolveInboxSessionID(workspacePath string, payload InboxPayload, detector 
 }
 
 func defaultRecipient() string {
-	recipient := strings.TrimSpace(os.Getenv("AGENTCTL_OVERSEER_RECIPIENT"))
+	recipient := strings.TrimSpace(os.Getenv("FOXCTL_OVERSEER_RECIPIENT"))
 	if recipient == "" {
 		return "overseer"
 	}

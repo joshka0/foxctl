@@ -30,30 +30,30 @@ func newCompanionContextBuilder(memory *ConversationMemory) *contextbuilder.Buil
 }
 
 func newJidoCompanionProviderFromEnv() (contextbuilder.CompanionProvider, error) {
-	if !strings.EqualFold(strings.TrimSpace(os.Getenv("AGENTCTL_COMPANION_CONTEXT_PROVIDER")), "jido") {
+	if !strings.EqualFold(strings.TrimSpace(os.Getenv("FOXCTL_COMPANION_CONTEXT_PROVIDER")), "jido") {
 		return nil, nil
 	}
 
 	client, err := v2jido.NewJSONRPCClient(v2jido.JSONRPCClientConfig{
-		SocketPath: strings.TrimSpace(os.Getenv("AGENTCTL_JIDO_SOCKET")),
-		RPCPath:    strings.TrimSpace(os.Getenv("AGENTCTL_JIDO_RPC_PATH")),
-		Timeout:    parseMillisEnv("AGENTCTL_JIDO_RPC_TIMEOUT_MS", 10*time.Second),
+		SocketPath: strings.TrimSpace(os.Getenv("FOXCTL_JIDO_SOCKET")),
+		RPCPath:    strings.TrimSpace(os.Getenv("FOXCTL_JIDO_RPC_PATH")),
+		Timeout:    parseMillisEnv("FOXCTL_JIDO_RPC_TIMEOUT_MS", 10*time.Second),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure jido json-rpc client for companion provider: %w", err)
 	}
 
-	agentID := strings.TrimSpace(os.Getenv("AGENTCTL_JIDO_COMPANION_AGENT_ID"))
+	agentID := strings.TrimSpace(os.Getenv("FOXCTL_JIDO_COMPANION_AGENT_ID"))
 	if agentID == "" {
 		agentID = "companion:bridge"
 	}
-	strict := strings.EqualFold(strings.TrimSpace(os.Getenv("AGENTCTL_JIDO_COMPANION_STRICT")), "true")
+	strict := strings.EqualFold(strings.TrimSpace(os.Getenv("FOXCTL_JIDO_COMPANION_STRICT")), "true")
 
 	return v2jido.NewCompanionProvider(v2jido.CompanionProviderConfig{
 		Client:       client,
 		AgentID:      agentID,
-		SignalSource: strings.TrimSpace(os.Getenv("AGENTCTL_JIDO_SIGNAL_SOURCE")),
-		Timeout:      parseMillisEnv("AGENTCTL_JIDO_COMPANION_TIMEOUT_MS", 10*time.Second),
+		SignalSource: strings.TrimSpace(os.Getenv("FOXCTL_JIDO_SIGNAL_SOURCE")),
+		Timeout:      parseMillisEnv("FOXCTL_JIDO_COMPANION_TIMEOUT_MS", 10*time.Second),
 		Strict:       strict,
 	})
 }

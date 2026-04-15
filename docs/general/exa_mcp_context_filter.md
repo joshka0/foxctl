@@ -58,7 +58,7 @@ The Exa MCP server is hosted at `https://mcp.exa.ai/mcp`.
 3. Point `foxctl` at the generated skills:
 
    ```bash
-   export AGENTCTL_SKILL_PATH="$(pwd)/exa_skills"
+   export FOXCTL_SKILL_PATH="$(pwd)/exa_skills"
    ```
 
 4. Inspect what was generated:
@@ -79,7 +79,7 @@ name you see under `exa_skills/`).
 Example call:
 
 ```bash
-AGENTCTL_SKILL_PATH="$(pwd)/exa_skills" \
+FOXCTL_SKILL_PATH="$(pwd)/exa_skills" \
   ./foxctl run search --input '{
     "query": "foxctl CAS integrity failures",
     "num_results": 10

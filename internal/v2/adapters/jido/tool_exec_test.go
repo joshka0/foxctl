@@ -71,8 +71,8 @@ func TestBuildToolCommand_Defaults(t *testing.T) {
 		t.Fatalf("BuildToolCommand() error = %v", err)
 	}
 
-	if cmd.Path != defaultAgentctlBinary {
-		t.Fatalf("path=%q want %q", cmd.Path, defaultAgentctlBinary)
+	if cmd.Path != defaultFoxctlBinary {
+		t.Fatalf("path=%q want %q", cmd.Path, defaultFoxctlBinary)
 	}
 	if cmd.Timeout != defaultToolCallTimeout {
 		t.Fatalf("timeout=%v want %v", cmd.Timeout, defaultToolCallTimeout)

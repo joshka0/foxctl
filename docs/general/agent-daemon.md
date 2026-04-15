@@ -129,7 +129,7 @@ and idling forever.
 - `agent ask` can use a Jido-backed dispatcher.
 - Overseer orchestration uses a Jido runtime bridge plus v2 projections.
 - Companion context can optionally fetch layered context from Jido when
-  `AGENTCTL_COMPANION_CONTEXT_PROVIDER=jido`.
+  `FOXCTL_COMPANION_CONTEXT_PROVIDER=jido`.
 - Jido-backed agents now receive deterministic `task_continuity` at spawn and
   ask time, and runtime-state inspection can refresh that continuity when the
   Jido state includes `workspace_root`.

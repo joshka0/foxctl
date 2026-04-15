@@ -79,6 +79,6 @@ capabilities:
     - type: workdir
   pure: false
 env:
-  - name: AGENTCTL_TEST_FEEDBACK_MAX_FAILURES
+  - name: FOXCTL_TEST_FEEDBACK_MAX_FAILURES
     description: "Maximum number of failures to show per watcher"
     default: "3"

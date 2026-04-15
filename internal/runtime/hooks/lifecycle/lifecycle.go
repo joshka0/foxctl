@@ -232,8 +232,8 @@ func resolveSkillHandle(cfg config.Config, requested string) (runservice.SkillHa
 }
 
 func DetectIdentity(workspacePath string) (sessionID, provider, agentID string) {
-	if sid := strings.TrimSpace(os.Getenv("AGENTCTL_SESSION_ID")); sid != "" {
-		return sid, nonEmptyOr("foxctl", os.Getenv("AGENTCTL_PROVIDER")), defaultAgentID("foxctl")
+	if sid := strings.TrimSpace(os.Getenv("FOXCTL_SESSION_ID")); sid != "" {
+		return sid, nonEmptyOr("foxctl", os.Getenv("FOXCTL_PROVIDER")), defaultAgentID("foxctl")
 	}
 	if sid := strings.TrimSpace(os.Getenv("CLAUDE_SESSION_ID")); sid != "" {
 		return sid, "claude", defaultAgentID("claude")
@@ -293,7 +293,7 @@ func detectClaudeSession(workspacePath string) (string, error) {
 }
 
 func defaultAgentID(provider string) string {
-	if env := strings.TrimSpace(os.Getenv("AGENTCTL_AGENT_ID")); env != "" {
+	if env := strings.TrimSpace(os.Getenv("FOXCTL_AGENT_ID")); env != "" {
 		return env
 	}
 	return provider
@@ -466,11 +466,11 @@ func Start(ctx context.Context, deps Dependencies, req StartRequest) (StartRespo
 		return StartResponse{}, err
 	}
 	daemonReady := false
-	if deps.EnsureDaemon != nil && !envEnabled("AGENTCTL_DAEMON_DISABLED") {
+	if deps.EnsureDaemon != nil && !envEnabled("FOXCTL_DAEMON_DISABLED") {
 		daemonReady = deps.EnsureDaemon(ctx, target)
 	}
 	response.DaemonReady = daemonReady
-	if deps.WarmWorkspace != nil && !envEnabled("AGENTCTL_WARMUP_DISABLED") && daemonReady {
+	if deps.WarmWorkspace != nil && !envEnabled("FOXCTL_WARMUP_DISABLED") && daemonReady {
 		deps.WarmWorkspace(ctx, target)
 	}
 	if deps.DetectIdentity != nil {
@@ -493,7 +493,7 @@ func End(ctx context.Context, deps Dependencies, req EndRequest) (EndResponse, e
 		return EndResponse{}, fmt.Errorf("detect workspace")
 	}
 	response := EndResponse{Workspace: target}
-	if envEnabled("AGENTCTL_SESSION_CAPTURE_DISABLED") || deps.RunSkill == nil {
+	if envEnabled("FOXCTL_SESSION_CAPTURE_DISABLED") || deps.RunSkill == nil {
 		return response, nil
 	}
 	sessionID := sessionkit.ResolveSessionID(target, "")
@@ -511,7 +511,7 @@ func End(ctx context.Context, deps Dependencies, req EndRequest) (EndResponse, e
 	if response.CaptureStatus == "" || (response.CaptureStatus != "captured" && response.CaptureStatus != "exists" && response.CaptureStatus != "scanned") {
 		return response, nil
 	}
-	if envEnabled("AGENTCTL_ACA_DISABLED") {
+	if envEnabled("FOXCTL_ACA_DISABLED") {
 		return response, nil
 	}
 
@@ -525,7 +525,7 @@ func End(ctx context.Context, deps Dependencies, req EndRequest) (EndResponse, e
 	if err == nil {
 		response.HandoffPath = handoffPath
 		recordInsights(store, target, summary, []string{"session:" + firstNonEmpty(response.CapturedSessionID, sessionID, "unknown")})
-		if envEnabled("AGENTCTL_ACA_AUTO_PROMOTE") {
+		if envEnabled("FOXCTL_ACA_AUTO_PROMOTE") {
 			response.PromotionDraft = autoPromote(store, handoffPath)
 		}
 	}
@@ -546,12 +546,12 @@ func SubagentStop(_ context.Context, deps Dependencies, req SubagentStopRequest)
 		return SubagentStopResponse{}, fmt.Errorf("detect workspace")
 	}
 	response := SubagentStopResponse{Workspace: target}
-	if envEnabled("AGENTCTL_ACA_DISABLED") {
+	if envEnabled("FOXCTL_ACA_DISABLED") {
 		return response, nil
 	}
 	store := contextplane.NewWorkspaceStore(target)
-	sessionID := firstNonEmpty(os.Getenv("CLAUDE_SESSION_ID"), os.Getenv("AGENTCTL_SESSION_ID"))
-	agentID := firstNonEmpty(os.Getenv("CLAUDE_AGENT_ID"), os.Getenv("AGENTCTL_AGENT_ID"), "subagent")
+	sessionID := firstNonEmpty(os.Getenv("CLAUDE_SESSION_ID"), os.Getenv("FOXCTL_SESSION_ID"))
+	agentID := firstNonEmpty(os.Getenv("CLAUDE_AGENT_ID"), os.Getenv("FOXCTL_AGENT_ID"), "subagent")
 	taskID, objective := acaContext(store, agentID)
 	summary := firstSummaryLine(req.Payload.AssistantText)
 	if summary == "" {
@@ -562,7 +562,7 @@ func SubagentStop(_ context.Context, deps Dependencies, req SubagentStopRequest)
 	if err == nil {
 		response.HandoffPath = handoffPath
 		recordInsights(store, target, summary, []string{"agent:" + agentID})
-		if envEnabled("AGENTCTL_ACA_AUTO_PROMOTE") {
+		if envEnabled("FOXCTL_ACA_AUTO_PROMOTE") {
 			response.PromotionDraft = autoPromote(store, handoffPath)
 		}
 	}

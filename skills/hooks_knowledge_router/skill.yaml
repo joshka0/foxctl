@@ -84,6 +84,6 @@ capabilities:
     - type: workdir
   pure: false
 env:
-  - name: AGENTCTL_KNOWLEDGE_THRESHOLD
+  - name: FOXCTL_KNOWLEDGE_THRESHOLD
     description: "Minimum score threshold for recommendations (0.0-1.0)"
     default: "0.5"

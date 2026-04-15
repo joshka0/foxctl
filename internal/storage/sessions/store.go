@@ -97,7 +97,7 @@ const (
 )
 
 // Open opens or creates the sessions database at root and returns a configured Store.
-// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_SESSIONS_DB_DRIVER).
+// The database driver is selected via the dbdriver env var conventions (e.g., FOXCTL_SESSIONS_DB_DRIVER).
 //
 // The returned Store is configured with connection pool defaults and retains an internal
 // cleanup function that Close will invoke. Open also performs a non-blocking validation

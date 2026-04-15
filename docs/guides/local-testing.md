@@ -4,7 +4,7 @@ This guide explains how to test foxctl with full vector search support locally, 
 
 ## Overview
 
-Agentctl now supports **local libSQL** - a file-based database with native vector search capabilities. This is perfect for:
+Foxctl now supports **local libSQL** - a file-based database with native vector search capabilities. This is perfect for:
 
 - ✅ Integration tests
 - ✅ Unit tests
@@ -20,9 +20,9 @@ Agentctl now supports **local libSQL** - a file-based database with native vecto
 
 ```bash
 # Use local libSQL with vector search
-export AGENTCTL_MEMORY_DB_DRIVER=libsql
-export AGENTCTL_MEMORY_VECTOR_SEARCH=true
-export AGENTCTL_MEMORY_VECTOR_DIMS=384
+export FOXCTL_MEMORY_DB_DRIVER=libsql
+export FOXCTL_MEMORY_VECTOR_SEARCH=true
+export FOXCTL_MEMORY_VECTOR_DIMS=384
 
 # Run your tests
 go test ./...
@@ -61,16 +61,16 @@ go test -v ./...
 
 ```bash
 # Driver selection
-export AGENTCTL_MEMORY_DB_DRIVER=libsql
+export FOXCTL_MEMORY_DB_DRIVER=libsql
 
 # Database path (optional, defaults to ~/.foxctl/memory.libsql)
-export AGENTCTL_MEMORY_DB_PATH=/tmp/test-memory.libsql
+export FOXCTL_MEMORY_DB_PATH=/tmp/test-memory.libsql
 
 # Enable vector search
-export AGENTCTL_MEMORY_VECTOR_SEARCH=true
+export FOXCTL_MEMORY_VECTOR_SEARCH=true
 
 # Vector dimensions (match your embedding model)
-export AGENTCTL_MEMORY_VECTOR_DIMS=384
+export FOXCTL_MEMORY_VECTOR_DIMS=384
 ```
 
 ### Programmatic Configuration
@@ -136,8 +136,8 @@ Use libSQL for all tests for consistency:
 ```go
 func TestMain(m *testing.M) {
     // Set up libSQL for all tests
-    os.Setenv("AGENTCTL_MEMORY_DB_DRIVER", "libsql")
-    os.Setenv("AGENTCTL_MEMORY_VECTOR_SEARCH", "true")
+    os.Setenv("FOXCTL_MEMORY_DB_DRIVER", "libsql")
+    os.Setenv("FOXCTL_MEMORY_VECTOR_SEARCH", "true")
 
     code := m.Run()
 
@@ -220,9 +220,9 @@ jobs:
 
       - name: Run tests with libSQL
         env:
-          AGENTCTL_MEMORY_DB_DRIVER: libsql
-          AGENTCTL_MEMORY_VECTOR_SEARCH: true
-          AGENTCTL_MEMORY_VECTOR_DIMS: 384
+          FOXCTL_MEMORY_DB_DRIVER: libsql
+          FOXCTL_MEMORY_VECTOR_SEARCH: true
+          FOXCTL_MEMORY_VECTOR_DIMS: 384
         run: |
           go test -v -race -coverprofile=coverage.out ./...
 
@@ -238,9 +238,9 @@ jobs:
 test:
   image: golang:1.22
   variables:
-    AGENTCTL_MEMORY_DB_DRIVER: "libsql"
-    AGENTCTL_MEMORY_VECTOR_SEARCH: "true"
-    AGENTCTL_MEMORY_VECTOR_DIMS: "384"
+    FOXCTL_MEMORY_DB_DRIVER: "libsql"
+    FOXCTL_MEMORY_VECTOR_SEARCH: "true"
+    FOXCTL_MEMORY_VECTOR_DIMS: "384"
   script:
     - go test -v -race ./...
   artifacts:
@@ -258,9 +258,9 @@ jobs:
     docker:
       - image: cimg/go:1.22
     environment:
-      AGENTCTL_MEMORY_DB_DRIVER: libsql
-      AGENTCTL_MEMORY_VECTOR_SEARCH: true
-      AGENTCTL_MEMORY_VECTOR_DIMS: 384
+      FOXCTL_MEMORY_DB_DRIVER: libsql
+      FOXCTL_MEMORY_VECTOR_SEARCH: true
+      FOXCTL_MEMORY_VECTOR_DIMS: 384
     steps:
       - checkout
       - run:
@@ -378,7 +378,7 @@ func TestMemorySearchWithLibSQL(t *testing.T) {
 Make sure vector search is enabled:
 
 ```bash
-export AGENTCTL_MEMORY_VECTOR_SEARCH=true
+export FOXCTL_MEMORY_VECTOR_SEARCH=true
 ```
 
 Or in code:
@@ -394,7 +394,7 @@ Ensure the directory exists and is writable:
 ```bash
 mkdir -p /tmp/test-dbs
 chmod 755 /tmp/test-dbs
-export AGENTCTL_MEMORY_DB_PATH=/tmp/test-dbs/memory.libsql
+export FOXCTL_MEMORY_DB_PATH=/tmp/test-dbs/memory.libsql
 ```
 
 ### Test databases persist between runs

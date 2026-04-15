@@ -690,26 +690,26 @@ func defaultAgentRunCommandBuilder(binaryPath, workspaceRoot string) AgentComman
 			Path: binaryPath,
 			Args: []string{"agent", "run", record.ID},
 			Dir:  dir,
-			Env:  filteredAgentctlEnv(os.Environ()),
+			Env:  filteredFoxctlEnv(os.Environ()),
 		}, nil
 	}
 }
 
-func filteredAgentctlEnv(in []string) []string {
+func filteredFoxctlEnv(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, kv := range in {
 		switch {
-		case strings.HasPrefix(kv, "AGENTCTL_JIDO_"):
+		case strings.HasPrefix(kv, "FOXCTL_JIDO_"):
 			continue
-		case strings.HasPrefix(kv, "AGENTCTL_V2_ASK_DISPATCHER="):
+		case strings.HasPrefix(kv, "FOXCTL_V2_ASK_DISPATCHER="):
 			continue
-		case strings.HasPrefix(kv, "AGENTCTL_JIDO_SOCKET="):
+		case strings.HasPrefix(kv, "FOXCTL_JIDO_SOCKET="):
 			continue
-		case strings.HasPrefix(kv, "AGENTCTL_JIDO_RPC_PATH="):
+		case strings.HasPrefix(kv, "FOXCTL_JIDO_RPC_PATH="):
 			continue
-		case strings.HasPrefix(kv, "AGENTCTL_JIDO_RPC_TIMEOUT_MS="):
+		case strings.HasPrefix(kv, "FOXCTL_JIDO_RPC_TIMEOUT_MS="):
 			continue
-		case strings.HasPrefix(kv, "AGENTCTL_JIDO_SIGNAL_SOURCE="):
+		case strings.HasPrefix(kv, "FOXCTL_JIDO_SIGNAL_SOURCE="):
 			continue
 		default:
 			out = append(out, kv)

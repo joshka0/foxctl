@@ -145,23 +145,23 @@ func summarizeEvidenceWithFallback(ctx context.Context, content string) (Evidenc
 }
 
 func newLocalEvidenceLLMClient() (verification.LLMClient, bool) {
-	baseURL := strings.TrimSpace(os.Getenv("AGENTCTL_ACA_L6_BASE_URL"))
+	baseURL := strings.TrimSpace(os.Getenv("FOXCTL_ACA_L6_BASE_URL"))
 	if baseURL == "" {
-		baseURL = strings.TrimSpace(os.Getenv("AGENTCTL_OPENAI_COMPAT_BASE_URL"))
+		baseURL = strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_BASE_URL"))
 	}
 	if baseURL == "" {
 		return nil, false
 	}
-	model := strings.TrimSpace(os.Getenv("AGENTCTL_ACA_L6_MODEL"))
+	model := strings.TrimSpace(os.Getenv("FOXCTL_ACA_L6_MODEL"))
 	if model == "" {
-		model = strings.TrimSpace(os.Getenv("AGENTCTL_OPENAI_COMPAT_MODEL"))
+		model = strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_MODEL"))
 	}
 	if model == "" {
 		model = llmproviders.DefaultModelForProvider("lmstudio")
 	}
-	apiKey := strings.TrimSpace(os.Getenv("AGENTCTL_ACA_L6_API_KEY"))
+	apiKey := strings.TrimSpace(os.Getenv("FOXCTL_ACA_L6_API_KEY"))
 	if apiKey == "" {
-		apiKey = strings.TrimSpace(os.Getenv("AGENTCTL_OPENAI_COMPAT_API_KEY"))
+		apiKey = strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_API_KEY"))
 	}
 	if apiKey == "" && (strings.Contains(baseURL, "localhost") || strings.Contains(baseURL, "127.0.0.1")) {
 		apiKey = "lm-studio"
@@ -336,10 +336,10 @@ func suggestedEvidenceTitle(sourceKind, sourceRef, content string) string {
 }
 
 func inferLocalProcessorModel() string {
-	if model := strings.TrimSpace(os.Getenv("AGENTCTL_ACA_L6_MODEL")); model != "" {
+	if model := strings.TrimSpace(os.Getenv("FOXCTL_ACA_L6_MODEL")); model != "" {
 		return model
 	}
-	if model := strings.TrimSpace(os.Getenv("AGENTCTL_OPENAI_COMPAT_MODEL")); model != "" {
+	if model := strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_MODEL")); model != "" {
 		return model
 	}
 	if model := strings.TrimSpace(os.Getenv("LMSTUDIO_MODEL")); model != "" {

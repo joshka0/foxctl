@@ -81,7 +81,7 @@ func newTmuxRemindCommand() *cobra.Command {
 			roomID, body, err := resolveMuxRemindArgs(args)
 			if err != nil {
 				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.remind", protocol.ErrorCodeEARG, err.Error(), map[string]any{
-					"hint": "Pass foxctl mux remind <room-id> \"...\", or run inside a room-bound pane so AGENTCTL_ROOM_ID is available.",
+					"hint": "Pass foxctl mux remind <room-id> \"...\", or run inside a room-bound pane so FOXCTL_ROOM_ID is available.",
 				}, protocol.WithSource("cli"))
 			}
 			resolvedRecipient := strings.TrimSpace(recipient)
@@ -114,7 +114,7 @@ func newTmuxRemindCommand() *cobra.Command {
 func resolveMuxRemindArgs(args []string) (string, string, error) {
 	switch len(args) {
 	case 1:
-		roomID := strings.TrimSpace(os.Getenv("AGENTCTL_ROOM_ID"))
+		roomID := strings.TrimSpace(os.Getenv("FOXCTL_ROOM_ID"))
 		if roomID == "" {
 			return "", "", fmt.Errorf("room id is required outside a room-bound pane")
 		}
@@ -642,12 +642,12 @@ func joinShellCommand(parts []string) string {
 }
 
 func wrapZellijPaneCommand(session, participantID, roomID, childCommand, startupProfile string) string {
-	agentctlPath, err := os.Executable()
-	if err != nil || strings.TrimSpace(agentctlPath) == "" {
-		agentctlPath = "foxctl"
+	foxctlPath, err := os.Executable()
+	if err != nil || strings.TrimSpace(foxctlPath) == "" {
+		foxctlPath = "foxctl"
 	}
 	args := []string{
-		agentctlPath,
+		foxctlPath,
 		"pane",
 		"serve",
 		"--participant", strings.TrimSpace(participantID),
@@ -1077,7 +1077,7 @@ func newTmuxSubmitCommand() *cobra.Command {
 	cmd.Flags().StringVar(&session, "session", "", "Zellij session name when --backend zellij (defaults to ZELLIJ_SESSION_NAME); ignored for tmux")
 	cmd.Flags().StringVar(&modeFlag, "mode", "escape-enter", "Submit key sequence (escape-enter|enter-only)")
 	cmd.Flags().StringVar(&paneID, "pane-id", "", "Zellij terminal pane id (e.g. terminal_2 or 2); defaults to ZELLIJ_PANE_ID when set")
-	cmd.Flags().StringVar(&roomID, "room", "", "Agentctl room id: resolve session/pane from stored membership for participant [target]")
+	cmd.Flags().StringVar(&roomID, "room", "", "Foxctl room id: resolve session/pane from stored membership for participant [target]")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root for --room lookup")
 	return cmd
 }
@@ -1092,7 +1092,7 @@ func newTmuxSendParentCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			parent, err := resolveParentParticipantID()
 			if err != nil {
-				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.send-parent", protocol.ErrorCodeEARG, "AGENTCTL_PARENT_PARTICIPANT_ID is not set", map[string]any{
+				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.tmux.send-parent", protocol.ErrorCodeEARG, "FOXCTL_PARENT_PARTICIPANT_ID is not set", map[string]any{
 					"hint": "Launch the pane with --parent-participant or pass the parent explicitly with foxctl mux send --sender ... <target>.",
 				}, protocol.WithSource("cli"))
 			}
@@ -1132,7 +1132,7 @@ func newTmuxSubmitAllCommand() *cobra.Command {
 			return runMuxGroupControl(cmd, workspace, roomID, "submit")
 		},
 	}
-	cmd.Flags().StringVar(&roomID, "room", "", "Agentctl room id to resolve canonical participant panes")
+	cmd.Flags().StringVar(&roomID, "room", "", "Foxctl room id to resolve canonical participant panes")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root for --room lookup")
 	return cmd
 }
@@ -1154,15 +1154,15 @@ func newTmuxInterruptAllCommand() *cobra.Command {
 			return runMuxGroupControl(cmd, workspace, roomID, "interrupt")
 		},
 	}
-	cmd.Flags().StringVar(&roomID, "room", "", "Agentctl room id to resolve canonical participant panes")
+	cmd.Flags().StringVar(&roomID, "room", "", "Foxctl room id to resolve canonical participant panes")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root for --room lookup")
 	return cmd
 }
 
 func resolveParentParticipantID() (string, error) {
-	parent := strings.TrimSpace(os.Getenv("AGENTCTL_PARENT_PARTICIPANT_ID"))
+	parent := strings.TrimSpace(os.Getenv("FOXCTL_PARENT_PARTICIPANT_ID"))
 	if parent == "" {
-		return "", fmt.Errorf("AGENTCTL_PARENT_PARTICIPANT_ID is not set")
+		return "", fmt.Errorf("FOXCTL_PARENT_PARTICIPANT_ID is not set")
 	}
 	return parent, nil
 }

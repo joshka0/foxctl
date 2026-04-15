@@ -32,8 +32,8 @@ import (
 )
 
 func TestOrchestrationBoardGetHandler_ReturnsEnvelope(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	seedOrchestrationCards(t, cfg, 2, 12)
@@ -69,8 +69,8 @@ func TestOrchestrationBoardGetHandler_ReturnsEnvelope(t *testing.T) {
 }
 
 func TestOrchestrationBoardGetHandler_EmitsSSEOrchestrationMetadata(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	seedOrchestrationCards(t, cfg, 2, 16)
@@ -115,8 +115,8 @@ func TestOrchestrationBoardGetHandler_EmitsSSEOrchestrationMetadata(t *testing.T
 }
 
 func TestOrchestrationBoardCardGetHandler_ReturnsCard(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	seedOrchestrationCards(t, cfg, 1, 16)
@@ -141,8 +141,8 @@ func TestOrchestrationBoardCardGetHandler_ReturnsCard(t *testing.T) {
 }
 
 func TestOrchestrationBoardCardGetHandler_IncludeRuntimeReturnsLiveState(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	server, socketPath := startOrchestrationJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcTestError) {
 		switch method {
@@ -233,8 +233,8 @@ func TestOrchestrationBoardCardGetHandler_IncludeRuntimeReturnsLiveState(t *test
 }
 
 func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	server, socketPath := startOrchestrationJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcTestError) {
 		var parsed map[string]any
@@ -354,8 +354,8 @@ func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T
 }
 
 func TestOrchestrationBoardCardGetHandler_ReturnsGoRuntimeSummary(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
 
 	cfg := orchestrationTestConfig(t.TempDir())
@@ -445,8 +445,8 @@ func TestOrchestrationBoardCardGetHandler_ReturnsGoRuntimeSummary(t *testing.T) 
 }
 
 func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
 
 	cfg := orchestrationTestConfig(t.TempDir())
@@ -540,8 +540,8 @@ func TestOrchestrationBoardCardRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing
 }
 
 func TestOrchestrationBoardCardGetHandler_EmitsSSEOrchestrationMetadata(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
@@ -623,8 +623,8 @@ func TestOrchestrationBoardCardGetHandler_EmitsSSEOrchestrationMetadata(t *testi
 }
 
 func TestOrchestrationDispatchIssueHandler_SpawnsJidoChildAndProjectsRunningCard(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	server, socketPath := startOrchestrationJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcTestError) {
 		switch method {
@@ -702,8 +702,8 @@ func TestOrchestrationDispatchIssueHandler_SpawnsJidoChildAndProjectsRunningCard
 }
 
 func TestOrchestrationCardActionHandler_ReleaseMovesDoneCardBackToTodo(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
@@ -770,8 +770,8 @@ func TestOrchestrationCardActionHandler_ReleaseMovesDoneCardBackToTodo(t *testin
 }
 
 func TestOrchestrationCardActionHandler_RetryNowMovesBlockedCardToRetryQueue(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
@@ -838,8 +838,8 @@ func TestOrchestrationCardActionHandler_RetryNowMovesBlockedCardToRetryQueue(t *
 }
 
 func TestOrchestrationRefreshHandler_RequiresRequestID(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	h := OrchestrationRefreshHandler(cfg, zerolog.Nop())
@@ -862,8 +862,8 @@ func TestOrchestrationRefreshHandler_RequiresRequestID(t *testing.T) {
 }
 
 func TestOrchestrationRefreshHandler_IdempotentDuplicate(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	h := OrchestrationRefreshHandler(cfg, zerolog.Nop())
@@ -900,8 +900,8 @@ func TestOrchestrationRefreshHandler_IdempotentDuplicate(t *testing.T) {
 }
 
 func TestOrchestrationRefreshHandler_EmitsSSEOrchestrationMetadata(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	pub := &captureSSEPublisher{}
@@ -1011,8 +1011,8 @@ func TestOrchestrationRefreshHandlerWithRuntime_UsesInjectedHost(t *testing.T) {
 }
 
 func TestOrchestrationSeedCardsHandler_RequiresRequestID(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	h := OrchestrationSeedCardsHandler(cfg, zerolog.Nop())
@@ -1031,8 +1031,8 @@ func TestOrchestrationSeedCardsHandler_RequiresRequestID(t *testing.T) {
 }
 
 func TestOrchestrationSeedCardsHandler_CreatesProjectedCards(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	seedHandler := OrchestrationSeedCardsHandler(cfg, zerolog.Nop())
@@ -1074,8 +1074,8 @@ func TestOrchestrationSeedCardsHandler_CreatesProjectedCards(t *testing.T) {
 }
 
 func TestOrchestrationCleanupCardsHandler_RemovesCardsAndReplayHistory(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	seedHandler := OrchestrationSeedCardsHandler(cfg, zerolog.Nop())
@@ -1145,8 +1145,8 @@ func TestOrchestrationCleanupCardsHandler_RemovesCardsAndReplayHistory(t *testin
 }
 
 func TestOrchestrationArchiveCardsHandler_ArchivesAndRestoresCards(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	seedHandler := OrchestrationSeedCardsHandler(cfg, zerolog.Nop())
@@ -1238,8 +1238,8 @@ func TestOrchestrationArchiveCardsHandler_ArchivesAndRestoresCards(t *testing.T)
 }
 
 func TestOrchestrationBoardGetHandler_ArtifactizesLargePayload(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	seedOrchestrationCards(t, cfg, 200, 1200)
@@ -1265,8 +1265,8 @@ func TestOrchestrationBoardGetHandler_ArtifactizesLargePayload(t *testing.T) {
 }
 
 func TestOrchestrationRefreshHandler_ReplaysEventsIntoBoardProjection(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
@@ -1339,8 +1339,8 @@ func TestOrchestrationRefreshHandler_ReplaysEventsIntoBoardProjection(t *testing
 }
 
 func TestOrchestrationRefreshHandler_EndToEndReplayProjectionLaneTransitions(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
@@ -1428,8 +1428,8 @@ func TestOrchestrationRefreshHandler_EndToEndReplayProjectionLaneTransitions(t *
 }
 
 func TestOrchestrationRefreshHandler_ReconcilesJidoCompletedChildIntoReviewLane(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	ctx := context.Background()
@@ -1557,8 +1557,8 @@ func TestOrchestrationRefreshHandler_ReconcilesJidoCompletedChildIntoReviewLane(
 }
 
 func TestOrchestrationDBConfig_OverrideRejectsPostgres(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "postgres")
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "postgres")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 	cfg := orchestrationTestConfig(t.TempDir())
 
 	_, err := orchestrationDBConfig(cfg)
@@ -1571,8 +1571,8 @@ func TestOrchestrationDBConfig_OverrideRejectsPostgres(t *testing.T) {
 }
 
 func TestOrchestrationDBConfig_GlobalPostgresFallsBackToSQLite(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_DB_DRIVER", "postgres")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "postgres")
 
 	root := t.TempDir()
 	cfg := orchestrationTestConfig(root)
@@ -1591,12 +1591,12 @@ func TestOrchestrationDBConfig_GlobalPostgresFallsBackToSQLite(t *testing.T) {
 }
 
 func TestOrchestrationDBConfig_GlobalPostgresHonorsV2EventsPathOverride(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_DB_DRIVER", "postgres")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "postgres")
 
 	root := t.TempDir()
 	overridePath := filepath.Join(root, "custom", "v2_events.libsql")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_PATH", overridePath)
+	t.Setenv("FOXCTL_V2_EVENTS_DB_PATH", overridePath)
 
 	cfg := orchestrationTestConfig(root)
 	cfg.Database.Driver = "postgres"
@@ -1614,8 +1614,8 @@ func TestOrchestrationDBConfig_GlobalPostgresHonorsV2EventsPathOverride(t *testi
 }
 
 func TestOrchestrationBoardGetHandler_GlobalPostgresStillWorks(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_DB_DRIVER", "postgres")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "postgres")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	cfg.Database.Driver = "postgres"
@@ -1636,8 +1636,8 @@ func TestOrchestrationBoardGetHandler_GlobalPostgresStillWorks(t *testing.T) {
 }
 
 func TestOrchestrationRefreshHandler_GlobalPostgresStillWorks(t *testing.T) {
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_DB_DRIVER", "postgres")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "postgres")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	cfg.Database.Driver = "postgres"
@@ -1656,8 +1656,8 @@ func TestOrchestrationRefreshHandler_GlobalPostgresStillWorks(t *testing.T) {
 }
 
 func TestOrchestrationBoardGetHandler_DefaultLibSQLWithoutCGOFallsBackToSQLite(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
-	t.Setenv("AGENTCTL_V2_EVENTS_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	cfg.Database.Driver = ""

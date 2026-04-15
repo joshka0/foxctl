@@ -70,8 +70,8 @@ func LoadPricing() map[string]ModelPricing {
 			"configs/openrouter_pricing.json", // relative to cwd
 		}
 
-		// Add AGENTCTL_HOME path
-		if home := os.Getenv("AGENTCTL_HOME"); home != "" {
+		// Add FOXCTL_HOME path
+		if home := os.Getenv("FOXCTL_HOME"); home != "" {
 			paths = append(paths, home+"/configs/openrouter_pricing.json")
 		}
 

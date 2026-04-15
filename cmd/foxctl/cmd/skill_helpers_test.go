@@ -12,7 +12,7 @@ import (
 )
 
 func TestCreateSkillResolver_EnvPrecedence(t *testing.T) {
-	t.Setenv("AGENTCTL_HOME", t.TempDir())
+	t.Setenv("FOXCTL_HOME", t.TempDir())
 
 	cwd := t.TempDir()
 	// Resolve symlinks to match os.Getwd() behavior (macOS /var -> /private/var)
@@ -28,7 +28,7 @@ func TestCreateSkillResolver_EnvPrecedence(t *testing.T) {
 		},
 	}
 
-	t.Setenv("AGENTCTL_SKILLS_PATH", strings.Join([]string{env1, env2}, string(os.PathListSeparator)))
+	t.Setenv("FOXCTL_SKILLS_PATH", strings.Join([]string{env1, env2}, string(os.PathListSeparator)))
 
 	origWD, err := os.Getwd()
 	require.NoError(t, err)

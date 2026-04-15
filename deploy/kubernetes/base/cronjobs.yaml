@@ -41,7 +41,7 @@ spec:
             - rerank
 
             env:
-            - name: AGENTCTL_DB_DRIVER
+            - name: FOXCTL_DB_DRIVER
               value: "turso"
             - name: TURSO_URL
               valueFrom:
@@ -119,7 +119,7 @@ spec:
             - --dry-run=false
 
             env:
-            - name: AGENTCTL_DB_DRIVER
+            - name: FOXCTL_DB_DRIVER
               value: "turso"
             - name: TURSO_URL
               valueFrom:
@@ -131,9 +131,9 @@ spec:
                 secretKeyRef:
                   name: foxctl-secrets
                   key: turso-token
-            - name: AGENTCTL_CAS_BACKEND
+            - name: FOXCTL_CAS_BACKEND
               value: "s3"
-            - name: AGENTCTL_CAS_BUCKET
+            - name: FOXCTL_CAS_BUCKET
               value: "foxctl-cas"
 
             resources:
@@ -201,7 +201,7 @@ spec:
             - --status=ok,error,canceled
 
             env:
-            - name: AGENTCTL_DB_DRIVER
+            - name: FOXCTL_DB_DRIVER
               value: "turso"
             - name: TURSO_URL
               valueFrom:

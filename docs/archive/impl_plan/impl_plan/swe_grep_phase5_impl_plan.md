@@ -3,7 +3,7 @@
 Phase 5 implements `code/snippet_extract` as a kernel‑owned **exec** skill that takes a
 `workspace_id`, natural‑language `question`, and a list of candidate
 files/symbols and returns high‑signal code snippets. It **always** reads live
-workspace files off disk under `PathValidator` + `AGENTCTL_WORKSPACE`, so
+workspace files off disk under `PathValidator` + `FOXCTL_WORKSPACE`, so
 snippets reflect the current tree even if semantic/symbol indices are slightly
 stale. Phase 3/4 are responsible for **recall and scoring**: SWE Grep simply
 consumes their ranked candidate set (plus optional `priority`) and does not do
@@ -129,7 +129,7 @@ we design Phase 5.
 - **Scope**
   - `skills/code_swe_grep/main.go`:
     - Instantiate `skillslib.RunnerContext` and use its `PathValidator`:
-      - Workspace derived from `AGENTCTL_WORKSPACE` injected by the exec runner.
+      - Workspace derived from `FOXCTL_WORKSPACE` injected by the exec runner.
     - Implement the candidate loop:
       - For each candidate `path`, call `PathValidator.ValidatePath(path)`; only
         then `os.Open`.
@@ -152,7 +152,7 @@ we design Phase 5.
       `status:"error"`, `error.code:"E_GUARD_VIOLATION"`.
     - Non‑existent path after validation → `error.code:"E_FILE_NOT_FOUND"`.
   - Optional small integration test that:
-    - Sets `AGENTCTL_WORKSPACE` to a fixture directory and runs the skill via
+    - Sets `FOXCTL_WORKSPACE` to a fixture directory and runs the skill via
       the runner helper to ensure env wiring is correct.
 
 ---
@@ -306,7 +306,7 @@ we design Phase 5.
 
 - **Path validation & workspace anchoring**
   - Use `skillslib.RunnerContext` everywhere in the skill.
-  - Always derive workspace from `AGENTCTL_WORKSPACE` (set by the exec runner)
+  - Always derive workspace from `FOXCTL_WORKSPACE` (set by the exec runner)
     and construct `PathValidator` with that workspace and allowed roots.
   - No direct `os.Open` on arbitrary paths; every file read flows through
     `PathValidator.ValidatePath`.

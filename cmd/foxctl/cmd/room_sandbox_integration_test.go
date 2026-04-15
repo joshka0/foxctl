@@ -1157,7 +1157,7 @@ func TestResolveRoomSandboxWorktree_NonSandboxRoom(t *testing.T) {
 }
 
 func TestBuildTerminalURL_NoGatewayURL(t *testing.T) {
-	t.Setenv("AGENTCTL_GATEWAY_URL", "")
+	t.Setenv("FOXCTL_GATEWAY_URL", "")
 	got := buildTerminalURL("my-room")
 	if got != "/terminal/my-room" {
 		t.Errorf("buildTerminalURL() = %q, want /terminal/my-room", got)
@@ -1165,7 +1165,7 @@ func TestBuildTerminalURL_NoGatewayURL(t *testing.T) {
 }
 
 func TestBuildTerminalURL_WithGatewayURL(t *testing.T) {
-	t.Setenv("AGENTCTL_GATEWAY_URL", "http://localhost:8765")
+	t.Setenv("FOXCTL_GATEWAY_URL", "http://localhost:8765")
 	got := buildTerminalURL("my-room")
 	if got != "http://localhost:8765/terminal/my-room" {
 		t.Errorf("buildTerminalURL() = %q, want http://localhost:8765/terminal/my-room", got)
@@ -1173,7 +1173,7 @@ func TestBuildTerminalURL_WithGatewayURL(t *testing.T) {
 }
 
 func TestBuildTerminalURL_WithGatewayURL_TrailingSlash(t *testing.T) {
-	t.Setenv("AGENTCTL_GATEWAY_URL", "http://localhost:8765/")
+	t.Setenv("FOXCTL_GATEWAY_URL", "http://localhost:8765/")
 	got := buildTerminalURL("my-room")
 	if got != "http://localhost:8765/terminal/my-room" {
 		t.Errorf("buildTerminalURL() = %q, want http://localhost:8765/terminal/my-room", got)
@@ -1181,11 +1181,11 @@ func TestBuildTerminalURL_WithGatewayURL_TrailingSlash(t *testing.T) {
 }
 
 func TestGatewayDeregisterRoom_NoGatewayURL(t *testing.T) {
-	t.Setenv("AGENTCTL_GATEWAY_URL", "")
+	t.Setenv("FOXCTL_GATEWAY_URL", "")
 	// When no gateway URL is set, returns false without error.
 	got := gatewayDeregisterRoom(context.Background(), "room-id")
 	if got {
-		t.Error("gatewayDeregisterRoom() = true, want false when AGENTCTL_GATEWAY_URL unset")
+		t.Error("gatewayDeregisterRoom() = true, want false when FOXCTL_GATEWAY_URL unset")
 	}
 }
 
@@ -1203,7 +1203,7 @@ func TestGatewayDeregisterRoom_GatewayResponds(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	t.Setenv("AGENTCTL_GATEWAY_URL", ts.URL)
+	t.Setenv("FOXCTL_GATEWAY_URL", ts.URL)
 	got := gatewayDeregisterRoom(context.Background(), "some-room")
 	if !got {
 		t.Error("gatewayDeregisterRoom() = false, want true when gateway responds 200")
@@ -1225,7 +1225,7 @@ func TestGatewayRegisterRoom_GatewayResponds(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	t.Setenv("AGENTCTL_GATEWAY_URL", ts.URL)
+	t.Setenv("FOXCTL_GATEWAY_URL", ts.URL)
 	ok := gatewayRegisterRoom(context.Background(), "my-room", "foxctl-sandbox-my-room")
 	if !ok {
 		t.Error("gatewayRegisterRoom() = false, want true when gateway responds 201")

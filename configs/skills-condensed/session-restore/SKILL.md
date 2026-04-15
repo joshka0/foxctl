@@ -23,6 +23,6 @@ foxctl run session/restore --input '{"trigger": "compact"}'
 
 ## Output
 
-Sets `AGENTCTL_SESSION_RESTORED=true` and injects markdown context.
+Sets `FOXCTL_SESSION_RESTORED=true` and injects markdown context.
 
 Full docs: `~/.foxctl/share/configs/skills/session-restore/Skill.md`

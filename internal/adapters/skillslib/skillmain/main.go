@@ -280,13 +280,13 @@ func buildRunContext(cfg config.Config, stdout io.Writer) (*RunContext, error) {
 	}
 
 	// Resolve agent ID
-	agentID := os.Getenv("AGENTCTL_AGENT_ID")
+	agentID := os.Getenv("FOXCTL_AGENT_ID")
 	if agentID == "" {
 		agentID = "foxctl"
 	}
 
 	// Check for no-CAS mode
-	noCAS := os.Getenv("AGENTCTL_NO_CAS") == "1"
+	noCAS := os.Getenv("FOXCTL_NO_CAS") == "1"
 
 	// Initialize validator
 	v := validator.New(validator.WithRequiredStructEnabled())
@@ -327,13 +327,13 @@ func resolveWorkspaceForConfig() (string, error) {
 }
 
 // resolveSessionIDWithFallback obtains the session ID by checking known environment variables and falling back to the workspace identity manager.
-// It checks environment variables in this priority: AGENTCTL_SESSION_ID, CLAUDE_SESSION_ID, OPENCODE_SESSION_ID, CURSOR_SESSION_ID, TERM_SESSION_ID.
-// If none are set and both workspace and agentctlHome are provided, it queries the identity manager for the active session and returns its SessionID.
+// It checks environment variables in this priority: FOXCTL_SESSION_ID, CLAUDE_SESSION_ID, OPENCODE_SESSION_ID, CURSOR_SESSION_ID, TERM_SESSION_ID.
+// If none are set and both workspace and foxctlHome are provided, it queries the identity manager for the active session and returns its SessionID.
 // Returns an empty string if no session ID can be determined.
-func resolveSessionIDWithFallback(workspace, agentctlHome string) string {
+func resolveSessionIDWithFallback(workspace, foxctlHome string) string {
 	// Try environment variables first
 	for _, key := range []string{
-		"AGENTCTL_SESSION_ID",
+		"FOXCTL_SESSION_ID",
 		"CLAUDE_SESSION_ID",
 		"OPENCODE_SESSION_ID",
 		"CURSOR_SESSION_ID",
@@ -345,8 +345,8 @@ func resolveSessionIDWithFallback(workspace, agentctlHome string) string {
 	}
 
 	// Fall back to identity file
-	if workspace != "" && agentctlHome != "" {
-		im := sessions.NewIdentityManager(agentctlHome)
+	if workspace != "" && foxctlHome != "" {
+		im := sessions.NewIdentityManager(foxctlHome)
 		if active, err := im.GetActive(workspace); err == nil && active != nil {
 			return active.SessionID
 		}

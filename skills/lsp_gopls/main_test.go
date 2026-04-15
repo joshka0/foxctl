@@ -27,7 +27,7 @@ func skipIfNoGopls(t *testing.T) {
 
 func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
-	t.Setenv("AGENTCTL_WORKSPACE", workspace)
+	t.Setenv("FOXCTL_WORKSPACE", workspace)
 	state := t.TempDir()
 	casPath := filepath.Join(state, "cas")
 	casStore, err := cas.NewStore(casPath)

@@ -52,7 +52,7 @@
   - Auto-detect priority: openrouter → cerebras → groq → openai (was cerebras first)
   - Default openrouter model: `openrouter/aurora-alpha` (free)
   - Context updater uses `qwen/qwen3-coder-next` (aurora-alpha returns non-JSON)
-  - Set `AGENTCTL_LLM_PROVIDER=openrouter` in ~/.foxctl/.env
+  - Set `FOXCTL_LLM_PROVIDER=openrouter` in ~/.foxctl/.env
 - 2026-02-14 [gotcha]: Cerebras API 402 errors
   - Cerebras free tier quota exceeded → all agent calls fail silently with empty responses
   - Symptom: engine runs, 0 completion tokens, empty assistant text

@@ -30,19 +30,19 @@ func openObsidianSemanticProvider(cfg config.Config) semantic.EmbeddingProvider 
 }
 
 func obsidianSemanticEnabled(cfg config.Config) bool {
-	if value, ok := lookupEnvBool("AGENTCTL_OBSIDIAN_SEMANTIC_ENABLED"); ok {
+	if value, ok := lookupEnvBool("FOXCTL_OBSIDIAN_SEMANTIC_ENABLED"); ok {
 		return value
 	}
-	if strings.TrimSpace(os.Getenv("AGENTCTL_EMBEDDING_BASE_URL")) != "" {
+	if strings.TrimSpace(os.Getenv("FOXCTL_EMBEDDING_BASE_URL")) != "" {
 		return true
 	}
-	if strings.TrimSpace(os.Getenv("AGENTCTL_EMBEDDING_MODEL")) != "" {
+	if strings.TrimSpace(os.Getenv("FOXCTL_EMBEDDING_MODEL")) != "" {
 		return true
 	}
-	if strings.TrimSpace(os.Getenv("AGENTCTL_OPENAI_COMPAT_BASE_URL")) != "" {
+	if strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_BASE_URL")) != "" {
 		return true
 	}
-	if strings.TrimSpace(os.Getenv("AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL")) != "" {
+	if strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_EMBEDDING_MODEL")) != "" {
 		return true
 	}
 	provider := strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider))
@@ -65,7 +65,7 @@ func lookupEnvBool(name string) (bool, bool) {
 
 func openOpenAICompatSemanticProvider(cfg config.Config) semantic.EmbeddingProvider {
 	providerName := strings.ToLower(strings.TrimSpace(cfg.Embedding.Provider))
-	override := strings.ToLower(strings.TrimSpace(os.Getenv("AGENTCTL_OBSIDIAN_SEMANTIC_PROVIDER")))
+	override := strings.ToLower(strings.TrimSpace(os.Getenv("FOXCTL_OBSIDIAN_SEMANTIC_PROVIDER")))
 	if override != "" {
 		providerName = override
 	}
@@ -75,18 +75,18 @@ func openOpenAICompatSemanticProvider(cfg config.Config) semantic.EmbeddingProvi
 	embedder, resolved, err := sourceimport.NewEmbedderFromConfig(sourceimport.EmbedderConfig{
 		Provider: providerNameToSourceImport(providerName),
 		Model: firstNonEmptySemantic(
-			strings.TrimSpace(os.Getenv("AGENTCTL_EMBEDDING_MODEL")),
-			strings.TrimSpace(os.Getenv("AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL")),
+			strings.TrimSpace(os.Getenv("FOXCTL_EMBEDDING_MODEL")),
+			strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_EMBEDDING_MODEL")),
 			cfg.Embedding.Model,
 		),
 		BaseURL: firstNonEmptySemantic(
-			strings.TrimSpace(os.Getenv("AGENTCTL_EMBEDDING_BASE_URL")),
-			strings.TrimSpace(os.Getenv("AGENTCTL_OPENAI_COMPAT_BASE_URL")),
+			strings.TrimSpace(os.Getenv("FOXCTL_EMBEDDING_BASE_URL")),
+			strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_BASE_URL")),
 			cfg.Embedding.BaseURL,
 		),
 		APIKey: firstNonEmptySemantic(
-			strings.TrimSpace(os.Getenv("AGENTCTL_EMBEDDING_API_KEY")),
-			strings.TrimSpace(os.Getenv("AGENTCTL_OPENAI_COMPAT_API_KEY")),
+			strings.TrimSpace(os.Getenv("FOXCTL_EMBEDDING_API_KEY")),
+			strings.TrimSpace(os.Getenv("FOXCTL_OPENAI_COMPAT_API_KEY")),
 			cfg.Embedding.APIKey,
 		),
 	})

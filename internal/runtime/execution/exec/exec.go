@@ -148,17 +148,17 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 		env = ensureEnvVar(env, "HOME", home)
 	}
 
-	// Ensure AGENTCTL_HOME is available when not explicitly set.
+	// Ensure FOXCTL_HOME is available when not explicitly set.
 	// Read from env slice for consistency.
-	if getEnvVar(env, "AGENTCTL_HOME") == "" && home != "" {
-		env = ensureEnvVar(env, "AGENTCTL_HOME", filepath.Join(home, ".foxctl"))
+	if getEnvVar(env, "FOXCTL_HOME") == "" && home != "" {
+		env = ensureEnvVar(env, "FOXCTL_HOME", filepath.Join(home, ".foxctl"))
 	}
 
-	// Ensure AGENTCTL_BIN is available so skills can invoke foxctl.
+	// Ensure FOXCTL_BIN is available so skills can invoke foxctl.
 	// If not already set, use the current executable path.
-	if getEnvVar(env, "AGENTCTL_BIN") == "" {
+	if getEnvVar(env, "FOXCTL_BIN") == "" {
 		if exe, err := os.Executable(); err == nil {
-			env = ensureEnvVar(env, "AGENTCTL_BIN", exe)
+			env = ensureEnvVar(env, "FOXCTL_BIN", exe)
 		}
 	}
 
@@ -167,7 +167,7 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 
 	// Disable CAS auto-migration for nested skill calls to reduce overhead.
 	// Migration only needs to run once at the top-level, not for every nested call.
-	env = ensureEnvVar(env, "AGENTCTL_CAS_AUTO_MIGRATE", "0")
+	env = ensureEnvVar(env, "FOXCTL_CAS_AUTO_MIGRATE", "0")
 
 	cmd.Env = env
 

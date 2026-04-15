@@ -151,14 +151,14 @@ func TestAutoPlanner_NoAPIKey(t *testing.T) {
 
 // TestOpenAIPlanner_Integration is an integration test that requires a live
 // remote provider. The local LM Studio fallback is not sufficient in CI.
-// Set AGENTCTL_ENABLE_LIVE_LLM_TESTS=1 and one of CEREBRAS_API_KEY,
+// Set FOXCTL_ENABLE_LIVE_LLM_TESTS=1 and one of CEREBRAS_API_KEY,
 // OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY to run this test.
 func TestOpenAIPlanner_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping LLM integration test in -short mode")
 	}
-	if os.Getenv("AGENTCTL_ENABLE_LIVE_LLM_TESTS") != "1" {
-		t.Skip("Skipping LLM integration test: set AGENTCTL_ENABLE_LIVE_LLM_TESTS=1 to enable")
+	if os.Getenv("FOXCTL_ENABLE_LIVE_LLM_TESTS") != "1" {
+		t.Skip("Skipping LLM integration test: set FOXCTL_ENABLE_LIVE_LLM_TESTS=1 to enable")
 	}
 
 	cfg := configFromEnv()

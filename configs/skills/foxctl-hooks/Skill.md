@@ -67,8 +67,8 @@ Hooks intercept Claude Code tool operations for coordination and automation.
 - Purpose: Restores context after compaction
 - Output:
   - Injects markdown context with plan, tasks, gotchas
-  - Sets `AGENTCTL_SESSION_RESTORED=true` env var
-  - Sets `AGENTCTL_SNAPSHOT_ID` env var
+  - Sets `FOXCTL_SESSION_RESTORED=true` env var
+  - Sets `FOXCTL_SNAPSHOT_ID` env var
 
 ### Stop Hooks
 
@@ -121,9 +121,9 @@ Hooks intercept Claude Code tool operations for coordination and automation.
 
 | Variable                   | Description        | Default  |
 | -------------------------- | ------------------ | -------- |
-| `AGENTCTL_TASK_GUARD_MODE` | auto or strict     | auto     |
-| `AGENTCTL_FILE_GUARD_MODE` | advisory or strict | advisory |
-| `AGENTCTL_BIN`             | Path to foxctl   | foxctl |
+| `FOXCTL_TASK_GUARD_MODE` | auto or strict     | auto     |
+| `FOXCTL_FILE_GUARD_MODE` | advisory or strict | advisory |
+| `FOXCTL_BIN`             | Path to foxctl   | foxctl |
 
 ## Running Hooks Manually
 

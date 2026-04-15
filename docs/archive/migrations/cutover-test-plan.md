@@ -119,9 +119,9 @@ For each DB:
 
 ### 6.3 Env propagation to skills/hooks
 - Spawn a skill execution and assert env includes:
-  - AGENTCTL_SESSION_ID
-  - AGENTCTL_WORKSPACE
-  - AGENTCTL_AGENT_ID
+  - FOXCTL_SESSION_ID
+  - FOXCTL_WORKSPACE
+  - FOXCTL_AGENT_ID
 
 ---
 
@@ -175,9 +175,9 @@ If any of these fail in staging:
 
 Rollback steps:
 1. Set flags to 0:
-   - AGENTCTL_ACTOR_SUPERVISOR=0
-   - AGENTCTL_HOOKS_V1=0
-   - AGENTCTL_MAILBOX_WATCHER=0
+   - FOXCTL_ACTOR_SUPERVISOR=0
+   - FOXCTL_HOOKS_V1=0
+   - FOXCTL_MAILBOX_WATCHER=0
 2. Restart to old daemon mode
 3. Confirm mailbox processing continues
 4. Leave migrations in place (additive); no schema rollback required

@@ -106,7 +106,7 @@ export function loadGatewayConfig(): GatewayConfig {
     logoutPath: env("GUI_AUTH_LOGOUT_PATH") ?? "/logout",
     allowedEmails: envList("GUI_AUTH_ALLOWED_EMAILS").map((value) => value.toLowerCase()),
     authSecret: requireEnv("BETTER_AUTH_SECRET"),
-    databaseURL: env("GUI_AUTH_DATABASE_URL") ?? env("AGENTCTL_POSTGRES_DSN"),
+    databaseURL: env("GUI_AUTH_DATABASE_URL") ?? env("FOXCTL_POSTGRES_DSN"),
     smtp,
     magicLink: logOnlyMagicLinks ? { logOnly: true } : { logOnly: false },
   };

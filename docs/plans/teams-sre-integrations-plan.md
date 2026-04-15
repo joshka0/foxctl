@@ -1571,12 +1571,12 @@ Existing areas likely to change:
 
 Recommended flags:
 
-- `AGENTCTL_OPS_TEAMS_BINDINGS=1`
-- `AGENTCTL_OPS_INVESTIGATIONS=1`
-- `AGENTCTL_OPS_READONLY_TOOLS=1`
-- `AGENTCTL_K8S_CONNECTOR=1`
-- `AGENTCTL_OPS_APPROVALS=1`
-- `AGENTCTL_OPS_WRITE_ACTIONS=1`
+- `FOXCTL_OPS_TEAMS_BINDINGS=1`
+- `FOXCTL_OPS_INVESTIGATIONS=1`
+- `FOXCTL_OPS_READONLY_TOOLS=1`
+- `FOXCTL_K8S_CONNECTOR=1`
+- `FOXCTL_OPS_APPROVALS=1`
+- `FOXCTL_OPS_WRITE_ACTIONS=1`
 
 Safety rules:
 
@@ -1637,7 +1637,7 @@ Mitigation:
 Mitigation:
 
 - ship read-only tools first
-- block all write tools behind `AGENTCTL_OPS_APPROVALS`
+- block all write tools behind `FOXCTL_OPS_APPROVALS`
 
 ### Risk: Creating a shadow config-service inside foxctl
 

@@ -429,7 +429,7 @@ func TestNoEmbeddingHint_OpenAICompat(t *testing.T) {
 		},
 	}
 	hint := noEmbeddingHint(cfg)
-	if !strings.Contains(hint, "AGENTCTL_EMBEDDING_PROVIDER=openai_compat") {
+	if !strings.Contains(hint, "FOXCTL_EMBEDDING_PROVIDER=openai_compat") {
 		t.Fatalf("hint=%q", hint)
 	}
 }

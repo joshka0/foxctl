@@ -43,7 +43,7 @@ foxctl run fs/ls --path . 2>debug.log
 
 ```bash
 # Set log level to debug
-export AGENTCTL_LOG_LEVEL=debug
+export FOXCTL_LOG_LEVEL=debug
 foxctl run <skill> 2>debug.log
 
 # Or use config file
@@ -206,7 +206,7 @@ foxctl run <skill> 2>error.log
 cat error.log
 
 # Try with debug logging
-export AGENTCTL_LOG_LEVEL=debug
+export FOXCTL_LOG_LEVEL=debug
 foxctl run <skill>
 
 # Check skill manifest for requirements
@@ -529,7 +529,7 @@ foxctl jobs submit text/grep --pattern "error" --path ./logs/
 # → First run may be slow; subsequent runs use cache
 
 # Profile with debug logging
-export AGENTCTL_LOG_LEVEL=debug
+export FOXCTL_LOG_LEVEL=debug
 time foxctl run <skill>
 ```
 
@@ -718,7 +718,7 @@ cat error.log
 
 1. **Check this troubleshooting guide**
 2. **Search existing issues**: [GitHub Issues](https://github.com/joshka0/foxctl/issues)
-3. **Enable debug logging**: `export AGENTCTL_LOG_LEVEL=debug`
+3. **Enable debug logging**: `export FOXCTL_LOG_LEVEL=debug`
 4. **Try a minimal reproduction**: Simplify to smallest failing case
 5. **Check recent changes**: Did it work before? What changed?
 
@@ -729,7 +729,7 @@ cat error.log
 ### Enable Debug Logging
 
 ```bash
-export AGENTCTL_LOG_LEVEL=debug
+export FOXCTL_LOG_LEVEL=debug
 foxctl run <skill> 2>debug.log
 cat debug.log
 ```

@@ -113,11 +113,11 @@ func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags,
 }
 
 // resolveSessionID returns the session ID from environment variables.
-// Priority: AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
+// Priority: FOXCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
 // CURSOR_SESSION_ID > TERM_SESSION_ID. Returns empty string if none set.
 func resolveSessionID() string {
 	for _, key := range []string{
-		"AGENTCTL_SESSION_ID",
+		"FOXCTL_SESSION_ID",
 		"CLAUDE_SESSION_ID",
 		"OPENCODE_SESSION_ID",
 		"CURSOR_SESSION_ID",

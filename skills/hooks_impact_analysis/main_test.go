@@ -29,11 +29,11 @@ func TestDebounceCooldown(t *testing.T) {
 // Tests for environment variable constants
 
 func TestEnvConstants(t *testing.T) {
-	assert.Equal(t, "AGENTCTL_IMPACT_DISABLED", EnvImpactDisabled)
-	assert.Equal(t, "AGENTCTL_IMPACT_MAX_SYMBOLS", EnvImpactMaxSymbols)
-	assert.Equal(t, "AGENTCTL_IMPACT_MAX_REFS", EnvImpactMaxRefs)
-	assert.Equal(t, "AGENTCTL_IMPACT_TIMEOUT", EnvImpactTimeout)
-	assert.Equal(t, "AGENTCTL_BIN", EnvAgentctlBin)
+	assert.Equal(t, "FOXCTL_IMPACT_DISABLED", EnvImpactDisabled)
+	assert.Equal(t, "FOXCTL_IMPACT_MAX_SYMBOLS", EnvImpactMaxSymbols)
+	assert.Equal(t, "FOXCTL_IMPACT_MAX_REFS", EnvImpactMaxRefs)
+	assert.Equal(t, "FOXCTL_IMPACT_TIMEOUT", EnvImpactTimeout)
+	assert.Equal(t, "FOXCTL_BIN", EnvFoxctlBin)
 }
 
 // Tests for Config structure

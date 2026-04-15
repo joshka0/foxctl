@@ -40,14 +40,14 @@ Add provider selection with a clear precedence chain.
 
 1. `AgentConfig.LLMProvider` (agent-level)
 2. `RuntimeConfig.LLMProvider` (runtime-level)
-3. `AGENTCTL_LLM_PROVIDER` env var
+3. `FOXCTL_LLM_PROVIDER` env var
 4. Default: `"gemini"`
 
 **Model:**
 
 1. `AgentConfig.LLMModel` (agent-level)
 2. `RuntimeConfig.LLMModel` (runtime-level)
-3. `AGENTCTL_LLM_MODEL` env var
+3. `FOXCTL_LLM_MODEL` env var
 4. Provider-specific default (see below)
 
 #### Supported Providers & Defaults
@@ -83,7 +83,7 @@ if provider == "" {
     provider = r.config.LLMProvider
 }
 if provider == "" {
-    provider = os.Getenv("AGENTCTL_LLM_PROVIDER")
+    provider = os.Getenv("FOXCTL_LLM_PROVIDER")
 }
 if provider == "" {
     provider = "gemini"
@@ -95,7 +95,7 @@ if model == "" {
     model = r.config.LLMModel
 }
 if model == "" {
-    model = os.Getenv("AGENTCTL_LLM_MODEL")
+    model = os.Getenv("FOXCTL_LLM_MODEL")
 }
 if model == "" {
     model = defaultModelForProvider(provider)
@@ -131,7 +131,7 @@ func defaultModelForProvider(provider string) string {
 #### Error Semantics
 
 - **Missing API key:**
-  `"LLM API key not configured for provider %s (set AGENTCTL_LLM_API_KEY)"`
+  `"LLM API key not configured for provider %s (set FOXCTL_LLM_API_KEY)"`
 - **Unsupported provider:**
   `"unsupported LLM provider: %s (supported: gemini, openai)"`
 - **LLM creation failure:** `"create %s LLM: %w"`
@@ -299,6 +299,6 @@ func TestResolvePath_NullByte(t *testing.T)         // null byte rejection
 
 | Variable                | Description                       | Default           |
 | ----------------------- | --------------------------------- | ----------------- |
-| `AGENTCTL_LLM_PROVIDER` | LLM provider (`gemini`, `openai`) | `gemini`          |
-| `AGENTCTL_LLM_MODEL`    | Model name                        | Provider-specific |
-| `AGENTCTL_LLM_API_KEY`  | API key for the selected provider | (required)        |
+| `FOXCTL_LLM_PROVIDER` | LLM provider (`gemini`, `openai`) | `gemini`          |
+| `FOXCTL_LLM_MODEL`    | Model name                        | Provider-specific |
+| `FOXCTL_LLM_API_KEY`  | API key for the selected provider | (required)        |

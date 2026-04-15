@@ -23,7 +23,7 @@ func TestInput_AllFields(t *testing.T) {
 		Provider:        "claude",
 		WorkspaceID:     "/home/user/project",
 		SessionID:       "session-123",
-		Order:           "agentctl_rank",
+		Order:           "foxctl_rank",
 		MaxItems:        50,
 		IncludeGlyphs:   &includeGlyphs,
 		IncludeDepHints: &includeDepHints,
@@ -33,7 +33,7 @@ func TestInput_AllFields(t *testing.T) {
 	assert.Equal(t, "claude", in.Provider)
 	assert.Equal(t, "/home/user/project", in.WorkspaceID)
 	assert.Equal(t, "session-123", in.SessionID)
-	assert.Equal(t, "agentctl_rank", in.Order)
+	assert.Equal(t, "foxctl_rank", in.Order)
 	assert.Equal(t, 50, in.MaxItems)
 	assert.NotNil(t, in.IncludeGlyphs)
 	assert.True(t, *in.IncludeGlyphs)
@@ -109,7 +109,7 @@ func TestInput_JSONFieldNames(t *testing.T) {
 }
 
 func TestInput_OrderValues(t *testing.T) {
-	orders := []string{"agentctl_rank", "stable", "off"}
+	orders := []string{"foxctl_rank", "stable", "off"}
 
 	for _, order := range orders {
 		in := input{Order: order}
@@ -286,7 +286,7 @@ func TestInput_FullJSONRoundTrip(t *testing.T) {
 		Provider:        "claude",
 		WorkspaceID:     "/full/workspace/path",
 		SessionID:       "full-session-id",
-		Order:           "agentctl_rank",
+		Order:           "foxctl_rank",
 		MaxItems:        100,
 		IncludeGlyphs:   &includeGlyphs,
 		IncludeDepHints: &includeDepHints,
@@ -355,7 +355,7 @@ func TestInput_NoSessionID(t *testing.T) {
 }
 
 func TestInput_DefaultOrder(t *testing.T) {
-	// Default is "agentctl_rank" in run(), but struct has empty
+	// Default is "foxctl_rank" in run(), but struct has empty
 	in := input{
 		Provider:    "claude",
 		WorkspaceID: "/workspace",
@@ -392,9 +392,9 @@ func TestOutput_DryRunWithTodos(t *testing.T) {
 func TestOutput_NoWritePermission(t *testing.T) {
 	out := output{
 		Written:  0,
-		Warnings: []string{"Write skipped: AGENTCTL_ALLOW_PROVIDER_STATE not set"},
+		Warnings: []string{"Write skipped: FOXCTL_ALLOW_PROVIDER_STATE not set"},
 	}
 
 	assert.Zero(t, out.Written)
-	assert.Contains(t, out.Warnings[0], "AGENTCTL_ALLOW_PROVIDER_STATE")
+	assert.Contains(t, out.Warnings[0], "FOXCTL_ALLOW_PROVIDER_STATE")
 }

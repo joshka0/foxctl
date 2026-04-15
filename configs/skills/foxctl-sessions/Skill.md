@@ -133,7 +133,7 @@ The session system integrates with:
     statuses set `ended_at`, non-terminal clear it.
   - Identity fallback file: `~/.foxctl/sessions/active/<workspace_hash>.json`
     (stores `session_id`, `agent_id`, lineage).
-  - Env to skills: `AGENTCTL_SESSION_ID`, `AGENTCTL_AGENT_ID` plus fallbacks
+  - Env to skills: `FOXCTL_SESSION_ID`, `FOXCTL_AGENT_ID` plus fallbacks
     (`CLAUDE_SESSION_ID`, `OPENCODE_SESSION_ID`, `CURSOR_SESSION_ID`,
     `TERM_SESSION_ID`) are forwarded by exec/WASI runners.
   - View lineage with `foxctl sessions chain --session <id>`; trajectories

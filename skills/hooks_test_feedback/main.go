@@ -59,7 +59,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	feedbackCfg := DefaultConfig()
 
 	// Load custom config from environment if available
-	if maxFail := os.Getenv("AGENTCTL_TEST_FEEDBACK_MAX_FAILURES"); maxFail != "" {
+	if maxFail := os.Getenv("FOXCTL_TEST_FEEDBACK_MAX_FAILURES"); maxFail != "" {
 		var m int
 		if _, err := fmt.Sscanf(maxFail, "%d", &m); err == nil && m > 0 {
 			feedbackCfg.MaxFailures = m

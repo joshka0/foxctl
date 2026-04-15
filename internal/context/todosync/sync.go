@@ -38,7 +38,7 @@ type InboundSyncResult struct {
 type OutboundSyncInput struct {
 	WorkspaceID string           `json:"workspace_id" validate:"required"`
 	SessionID   string           `json:"session_id"`
-	Order       string           `json:"order"` // "agentctl_rank", "stable", "off"
+	Order       string           `json:"order"` // "foxctl_rank", "stable", "off"
 	MaxItems    int              `json:"max_items"`
 	Config      ProjectionConfig `json:"config"`
 	DryRun      bool             `json:"dry_run"`
@@ -129,13 +129,13 @@ func (s *Service) syncInboundTodo(
 	todo ClaudeTodo,
 	index int,
 ) (tasks.Task, bool) {
-	taskID, title, agentctlStatus := parseInboundTodo(todo)
+	taskID, title, foxctlStatus := parseInboundTodo(todo)
 	task, isNew := resolveInboundTask(taskID, title, state, result)
 	if isNew {
 		dependsOn, depsAdded := inferInboundDependencies(in.Todos, index, state.createdTasks)
 		result.DepsAdded += depsAdded
 
-		task = buildInboundTask(in, title, agentctlStatus, dependsOn)
+		task = buildInboundTask(in, title, foxctlStatus, dependsOn)
 		if !in.DryRun {
 			created, err := s.taskStore.Add(ctx, task)
 			if err != nil {
@@ -151,8 +151,8 @@ func (s *Service) syncInboundTodo(
 		return task, true
 	}
 
-	if task.Status != agentctlStatus {
-		if !s.applyInboundStatusUpdate(ctx, in, result, &task, agentctlStatus) {
+	if task.Status != foxctlStatus {
+		if !s.applyInboundStatusUpdate(ctx, in, result, &task, foxctlStatus) {
 			return tasks.Task{}, false
 		}
 	}
@@ -164,8 +164,8 @@ func parseInboundTodo(todo ClaudeTodo) (string, string, string) {
 	taskID := ParseTaskID(todo.Content)
 	title := StripTaskID(todo.Content)
 	title = ParseProjectedContent(title) // Remove glyphs too
-	agentctlStatus := MapClaudeStatus(todo.Status)
-	return taskID, title, agentctlStatus
+	foxctlStatus := MapClaudeStatus(todo.Status)
+	return taskID, title, foxctlStatus
 }
 
 func resolveInboundTask(
@@ -242,14 +242,14 @@ func (s *Service) applyInboundStatusUpdate(
 	in InboundSyncInput,
 	result *InboundSyncResult,
 	task *tasks.Task,
-	agentctlStatus string,
+	foxctlStatus string,
 ) bool {
-	switch agentctlStatus {
+	switch foxctlStatus {
 	case StatusCompleted:
 		if !in.DryRun {
 			now := time.Now()
 			task.CompletedAt = &now
-			task.Status = agentctlStatus
+			task.Status = foxctlStatus
 			_, err := s.taskStore.Update(ctx, *task)
 			if err != nil {
 				result.Warnings = append(result.Warnings, "Failed to complete task: "+err.Error())
@@ -364,7 +364,7 @@ func (s *Service) SyncToProvider(ctx context.Context, in OutboundSyncInput) (*Ou
 	// Build projected todos
 	for _, task := range sortedTasks {
 		content := FormatContent(task.Title, task.Status, task.ID, depMap[task.ID], cfg)
-		claudeStatus := MapAgentctlStatus(task.Status)
+		claudeStatus := MapFoxctlStatus(task.Status)
 		activeForm := GenerateActiveForm(task.Title)
 
 		todo := ClaudeTodo{
@@ -394,7 +394,7 @@ func sortForProjection(taskList []tasks.Task, order string) []tasks.Task {
 	case "stable", "off":
 		// Keep original order
 		return sorted
-	case "agentctl_rank":
+	case "foxctl_rank":
 		// Sort by: in_progress first, then pending (ready before blocked), then completed
 		// Within groups, maintain original order (could add PageRank later)
 		var inProgress, pending, blocked, completed []tasks.Task

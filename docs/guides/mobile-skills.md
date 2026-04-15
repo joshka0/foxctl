@@ -290,7 +290,7 @@ Retrieve with: `foxctl cas get sha256:abc123...`
 ### Debug Mode
 
 ```bash
-AGENTCTL_DEBUG=1 foxctl run mobile/ios --input '{"operation": "list_devices"}'
+FOXCTL_DEBUG=1 foxctl run mobile/ios --input '{"operation": "list_devices"}'
 ```
 
 ## Building from Source

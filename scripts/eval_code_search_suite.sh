@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VAULT_PATH="${AGENTCTL_VAULT_PATH:-$HOME/.foxctl/templates/obsidian-vault}"
+VAULT_PATH="${FOXCTL_VAULT_PATH:-$HOME/.foxctl/templates/obsidian-vault}"
 WORKSPACE="${CODE_SEARCH_WORKSPACE:-$ROOT}"
 DATASET="${CODE_SEARCH_DATASET:-}"
 POLICY="${CODE_SEARCH_POLICY:-}"

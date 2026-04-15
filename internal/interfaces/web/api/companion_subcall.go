@@ -23,8 +23,8 @@ func makeCompanionJidoSubcallProvider(log zerolog.Logger) func(context.Context, 
 		}
 
 		client, err := v2jido.NewJSONRPCClient(v2jido.JSONRPCClientConfig{
-			SocketPath: strings.TrimSpace(os.Getenv("AGENTCTL_JIDO_SOCKET")),
-			RPCPath:    strings.TrimSpace(os.Getenv("AGENTCTL_JIDO_RPC_PATH")),
+			SocketPath: strings.TrimSpace(os.Getenv("FOXCTL_JIDO_SOCKET")),
+			RPCPath:    strings.TrimSpace(os.Getenv("FOXCTL_JIDO_RPC_PATH")),
 			Timeout:    20 * time.Second,
 		})
 		if err != nil {
@@ -150,8 +150,8 @@ func decodeCompanionSubcallResult(awaitResp v2jido.AwaitResponse, stateResp v2ji
 		return result
 	}
 
-	agentctlState := mapAt(root, "foxctl")
-	lastResult := mapAt(agentctlState, "last_result")
+	foxctlState := mapAt(root, "foxctl")
+	lastResult := mapAt(foxctlState, "last_result")
 	if len(lastResult) == 0 {
 		return result
 	}

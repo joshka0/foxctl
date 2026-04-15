@@ -24,7 +24,7 @@ func resolveRoomSender(ctx context.Context, explicit string) (roomIdentity, erro
 	if sender := strings.TrimSpace(explicit); sender != "" {
 		return classifyExplicitRoomSender(sender), nil
 	}
-	if sender := firstNonEmpty(os.Getenv("AGENTCTL_PARTICIPANT_ID"), os.Getenv("AGENTCTL_PARTICIPANT")); strings.TrimSpace(sender) != "" {
+	if sender := firstNonEmpty(os.Getenv("FOXCTL_PARTICIPANT_ID"), os.Getenv("FOXCTL_PARTICIPANT")); strings.TrimSpace(sender) != "" {
 		return classifyExplicitRoomSender(sender), nil
 	}
 	if strings.TrimSpace(os.Getenv("TMUX")) != "" || strings.TrimSpace(os.Getenv("TMUX_PANE")) != "" {
@@ -56,7 +56,7 @@ func resolveCurrentZellijRoomSender() (roomIdentity, error) {
 		return roomIdentity{}, fmt.Errorf("cannot derive zellij sender without ZELLIJ_SESSION_NAME; pass --sender")
 	}
 	paneID := strings.TrimSpace(os.Getenv("ZELLIJ_PANE_ID"))
-	if participant := strings.TrimSpace(os.Getenv("AGENTCTL_ZELLIJ_PARTICIPANT")); participant != "" {
+	if participant := strings.TrimSpace(os.Getenv("FOXCTL_ZELLIJ_PARTICIPANT")); participant != "" {
 		return roomIdentity{
 			Sender:  participant,
 			Backend: "zellij",
@@ -65,7 +65,7 @@ func resolveCurrentZellijRoomSender() (roomIdentity, error) {
 		}, nil
 	}
 	if paneID == "" {
-		return roomIdentity{}, fmt.Errorf("cannot derive zellij sender without ZELLIJ_PANE_ID; pass --sender or set AGENTCTL_ZELLIJ_PARTICIPANT")
+		return roomIdentity{}, fmt.Errorf("cannot derive zellij sender without ZELLIJ_PANE_ID; pass --sender or set FOXCTL_ZELLIJ_PARTICIPANT")
 	}
 	return roomIdentity{
 		Sender:  formatZellijParticipantID(session, paneID),

@@ -5,18 +5,18 @@
 # After 3+ code files read, suggests running /counsel for analysis.
 #
 # Environment:
-#   AGENTCTL_COUNSEL_SUGGEST_DISABLED - Set to 1 to disable
-#   AGENTCTL_COUNSEL_SUGGEST_THRESHOLD - Number of reads before suggesting (default: 3)
+#   FOXCTL_COUNSEL_SUGGEST_DISABLED - Set to 1 to disable
+#   FOXCTL_COUNSEL_SUGGEST_THRESHOLD - Number of reads before suggesting (default: 3)
 
 set -euo pipefail
 
-if [[ "${AGENTCTL_COUNSEL_SUGGEST_DISABLED:-}" == "1" ]]; then
+if [[ "${FOXCTL_COUNSEL_SUGGEST_DISABLED:-}" == "1" ]]; then
   echo '{}'
   exit 0
 fi
 
-THRESHOLD="${AGENTCTL_COUNSEL_SUGGEST_THRESHOLD:-3}"
-COUNTER_DIR="${AGENTCTL_HOME:-$HOME/.foxctl}/cache/counsel-counter"
+THRESHOLD="${FOXCTL_COUNSEL_SUGGEST_THRESHOLD:-3}"
+COUNTER_DIR="${FOXCTL_HOME:-$HOME/.foxctl}/cache/counsel-counter"
 
 INPUT=$(cat)
 file_path=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')
@@ -38,7 +38,7 @@ case "$file_path" in
 esac
 
 # Get session ID for scoping counter
-session_id="${AGENTCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
+session_id="${FOXCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
 if [[ -z "$session_id" || "$session_id" == "null" ]]; then
   session_id="default"
 fi

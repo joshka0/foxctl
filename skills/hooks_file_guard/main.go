@@ -66,7 +66,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 
 	// Determine mode from environment
 	mode := ModeAdvisory
-	if m := os.Getenv("AGENTCTL_FILE_GUARD_MODE"); m == "strict" {
+	if m := os.Getenv("FOXCTL_FILE_GUARD_MODE"); m == "strict" {
 		mode = ModeStrict
 	}
 

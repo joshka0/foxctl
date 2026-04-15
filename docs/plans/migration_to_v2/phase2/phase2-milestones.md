@@ -60,13 +60,13 @@ No option A/B; each PR is a concrete decision.
 
 ---
 
-## PR2.2 — agentctl_viewer: tabs + streaming renderer + cancel
+## PR2.2 — foxctl_viewer: tabs + streaming renderer + cancel
 
 **Goal:** You can interact with multiple actors live, and cancel mid-turn.
 
 ### Implement
 
-1. `cmd/agentctl_viewer/`:
+1. `cmd/foxctl_viewer/`:
 
 * Tabs by `console_id`
 * Render `event` chunks streaming

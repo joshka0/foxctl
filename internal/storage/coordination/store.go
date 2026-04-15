@@ -115,7 +115,7 @@ type RoomReminder struct {
 }
 
 // Open opens the coordination store rooted at storageRoot/coordination.db.
-// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_COORDINATION_DB_DRIVER).
+// The database driver is selected via the dbdriver env var conventions (e.g., FOXCTL_COORDINATION_DB_DRIVER).
 //
 // Index:
 // - Purpose: Provide a stable coordination store for single-leader daemon leases

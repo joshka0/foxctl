@@ -109,8 +109,8 @@ There are two Unix sockets in the clean production shape:
 
 | Socket | Purpose |
 |------|---------|
-| `AGENTCTL_JIDO_SOCKET` | JSON-RPC socket exposed by the Jido bridge |
-| `AGENTCTL_DAEMON_SOCKET` | `foxctl` daemon socket used by bridge-side `daemon_rpc` tool execution |
+| `FOXCTL_JIDO_SOCKET` | JSON-RPC socket exposed by the Jido bridge |
+| `FOXCTL_DAEMON_SOCKET` | `foxctl` daemon socket used by bridge-side `daemon_rpc` tool execution |
 
 This separation matters:
 
@@ -271,4 +271,4 @@ In other words:
 - [docs/general/runtime-orchestration.md](../general/runtime-orchestration.md)
 - [docs/general/companion-memory.md](../general/companion-memory.md)
 - [docs/spec/agent_hierarchy.md](../spec/agent_hierarchy.md)
-- [Jido guide: Agentctl Bridge](https://github.com/agentjido/jido/blob/main/guides/foxctl-bridge.md)
+- [Jido guide: Foxctl Bridge](https://github.com/agentjido/jido/blob/main/guides/foxctl-bridge.md)

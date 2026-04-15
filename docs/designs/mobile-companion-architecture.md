@@ -145,7 +145,7 @@ two endpoints below can also be combined into a hybrid flow.
 
 | Model | Description | Pros | Tradeoffs |
 |-------|-------------|------|-----------|
-| **On-device daemon** | Agentctl runs locally on the phone; API server is local or minimal. | Lowest latency; stronger privacy boundary; works offline for some features. | OS background limits; battery use; model/runtime size constraints. |
+| **On-device daemon** | Foxctl runs locally on the phone; API server is local or minimal. | Lowest latency; stronger privacy boundary; works offline for some features. | OS background limits; battery use; model/runtime size constraints. |
 | **Server-hosted daemon** | Mobile app is a thin client; foxctl runs on a server. | Reliable background execution; easier scaling/monitoring; shared compute. | Higher privacy risk; dependency on connectivity; must secure PII. |
 | **Hybrid** | Context capture + UI on device; planning/execution on server. | Balances privacy + uptime; can shift work based on consent and cost. | More complex state sync; requires clear data ownership. |
 

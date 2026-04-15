@@ -7,21 +7,21 @@
 # by adding vector search results when the query looks like a conceptual search.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_SEMANTIC_DISABLED - Set to 1 to disable
-#   AGENTCTL_SEMANTIC_MAX_RESULTS - Max results per scope (default: 3)
-#   AGENTCTL_SEMANTIC_RERANK - Set to 1 to enable Voyage rerank-2.5 (requires VOYAGE_API_KEY)
+#   FOXCTL_BIN - Path to foxctl binary (default: foxctl)
+#   FOXCTL_SEMANTIC_DISABLED - Set to 1 to disable
+#   FOXCTL_SEMANTIC_MAX_RESULTS - Max results per scope (default: 3)
+#   FOXCTL_SEMANTIC_RERANK - Set to 1 to enable Voyage rerank-2.5 (requires VOYAGE_API_KEY)
 
 set -euo pipefail
 
 # Allow disabling
-if [[ "${AGENTCTL_SEMANTIC_DISABLED:-}" == "1" ]]; then
+if [[ "${FOXCTL_SEMANTIC_DISABLED:-}" == "1" ]]; then
   echo '{}'
   exit 0
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-MAX_RESULTS="${AGENTCTL_SEMANTIC_MAX_RESULTS:-3}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+MAX_RESULTS="${FOXCTL_SEMANTIC_MAX_RESULTS:-3}"
 
 # Read hook input from stdin
 INPUT=$(cat)
@@ -68,7 +68,7 @@ case "$pattern" in
 esac
 
 # Check if reranking is enabled
-RERANK_ENABLED="${AGENTCTL_SEMANTIC_RERANK:-0}"
+RERANK_ENABLED="${FOXCTL_SEMANTIC_RERANK:-0}"
 if [[ "$RERANK_ENABLED" == "1" ]]; then
   rerank_flag="true"
 else
@@ -88,7 +88,7 @@ input_json=$(jq -nc \
     rerank_enabled: $rerank
   }')
 
-result=$("$AGENTCTL_BIN" run --daemon code/semantic_search --ephemeral --input "$input_json" 2>/dev/null) || {
+result=$("$FOXCTL_BIN" run --daemon code/semantic_search --ephemeral --input "$input_json" 2>/dev/null) || {
   echo '{}'
   exit 0
 }

@@ -70,7 +70,7 @@ constraints from the overseer, and coordinate via the mailbox/blackboard.
   - A set of `dspy-go` tools (`core.Tool` implementations) that wrap `foxctl`
     skills and local capabilities.
   - All filesystem, test, and task operations MUST go through these tools.
-- **Agentctl Kernel**
+- **Foxctl Kernel**
   - Existing skills (`todo/manage`, `mailbox/manage`, filesystem helpers,
     search, etc.).
   - Jobs, CAS, and memory stores.
@@ -210,7 +210,7 @@ policies apply.
   - Purpose: List contents of a directory.
   - Inputs: `workspace_id`, `path` (relative to workspace), optional `depth`.
   - Backend: Filesystem helper skill or internal helper that respects
-    `policy.PathValidator` and `AGENTCTL_WORKSPACE`.
+    `policy.PathValidator` and `FOXCTL_WORKSPACE`.
   - Notes: Writes telemetry entry of kind `read`.
 
 - **`fs.read_file`**

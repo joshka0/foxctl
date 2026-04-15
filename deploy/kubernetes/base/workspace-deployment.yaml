@@ -56,11 +56,11 @@ spec:
 
         env:
         # Workspace path (git-sync creates 'current' symlink)
-        - name: AGENTCTL_WORKSPACE
+        - name: FOXCTL_WORKSPACE
           value: "/workspace/current"
 
         # Database configuration
-        - name: AGENTCTL_DB_DRIVER
+        - name: FOXCTL_DB_DRIVER
           value: "turso"
         - name: TURSO_URL
           valueFrom:
@@ -91,7 +91,7 @@ spec:
               fieldPath: metadata.namespace
 
         # Observability
-        - name: AGENTCTL_OBS_DIR
+        - name: FOXCTL_OBS_DIR
           value: "/var/log/foxctl"
 
         resources:

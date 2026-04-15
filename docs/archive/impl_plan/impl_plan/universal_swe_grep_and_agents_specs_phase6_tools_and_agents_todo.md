@@ -20,7 +20,7 @@ kernel-owned tools, without exposing raw DBs or skills directly to LLMs.
 >   - `docs/spec/core_profile_v1.md`
 > - Codemaps:
 >   - Overseer & hierarchy:
->     `Agentctl Overseer & Agent Hierarchy: Spawn Protocol, Depth Limits, and Session Management`.
+>     `Foxctl Overseer & Agent Hierarchy: Spawn Protocol, Depth Limits, and Session Management`.
 >   - Planning stack:
 >     `foxctl Planning LLM Stack: Auto, Providers, and Integration Tests`.
 >   - Knowledge system: `foxctl Knowledge System & Factory Droids`.

@@ -298,7 +298,7 @@ River requires its own tables. Run via `river migrate-up`:
 
 ```bash
 # In server startup or as a migration step
-river migrate-up --database-url "$AGENTCTL_POSTGRES_DSN"
+river migrate-up --database-url "$FOXCTL_POSTGRES_DSN"
 ```
 
 Or programmatically:

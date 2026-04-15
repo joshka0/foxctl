@@ -349,7 +349,7 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		authMode := firstNonEmpty(agentRecord.LLMAuthMode, opts.LLMAuthMode)
 		if apiKey == "" && !strings.EqualFold(authMode, "none") {
-			return fmt.Errorf("LLM API key required for companion service (set AGENTCTL_LLM_API_KEY or provider-specific key)")
+			return fmt.Errorf("LLM API key required for companion service (set FOXCTL_LLM_API_KEY or provider-specific key)")
 		}
 
 		log.Info().

@@ -84,7 +84,7 @@ The PreToolUse `task-guard` hook automatically:
 - Creates tasks for edit operations (auto mode)
 - Blocks edits without tasks (strict mode)
 
-Set mode: `export AGENTCTL_TASK_GUARD_MODE=strict`
+Set mode: `export FOXCTL_TASK_GUARD_MODE=strict`
 
 ## Plan Integration
 

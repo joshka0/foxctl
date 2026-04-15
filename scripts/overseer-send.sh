@@ -35,9 +35,9 @@ find_mail_binary() {
     return
   fi
 
-  # Check AGENTCTL_HOME
-  if [[ -n "${AGENTCTL_HOME:-}" && -x "$AGENTCTL_HOME/bin/foxctl-mail" ]]; then
-    echo "$AGENTCTL_HOME/bin/foxctl-mail"
+  # Check FOXCTL_HOME
+  if [[ -n "${FOXCTL_HOME:-}" && -x "$FOXCTL_HOME/bin/foxctl-mail" ]]; then
+    echo "$FOXCTL_HOME/bin/foxctl-mail"
     return
   fi
 
@@ -70,12 +70,12 @@ if [[ -n "${MAIL_BIN:-}" ]]; then
   exec "$MAIL_BIN" "${args[@]}"
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-if ! command -v "$AGENTCTL_BIN" &>/dev/null; then
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+if ! command -v "$FOXCTL_BIN" &>/dev/null; then
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   repo_bin="$script_dir/../bin/foxctl"
   if [[ -x "$repo_bin" ]]; then
-    AGENTCTL_BIN="$repo_bin"
+    FOXCTL_BIN="$repo_bin"
   else
     echo "Error: foxctl not found" >&2
     exit 1
@@ -144,4 +144,4 @@ payload=$(jq -nc \
   }'
 )
 
-exec "$AGENTCTL_BIN" run mailbox/manage --input "$payload"
+exec "$FOXCTL_BIN" run mailbox/manage --input "$payload"

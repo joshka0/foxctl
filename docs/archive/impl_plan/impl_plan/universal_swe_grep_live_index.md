@@ -282,15 +282,15 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 # for faster code search and universal SWE grep.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_LIVE_INDEX_DISABLED - Set to "1" to disable
+#   FOXCTL_BIN - Path to foxctl binary (default: foxctl)
+#   FOXCTL_LIVE_INDEX_DISABLED - Set to "1" to disable
 
 set -euo pipefail
 
 # Check if disabled
-[[ "${AGENTCTL_LIVE_INDEX_DISABLED:-}" == "1" ]] && echo '{}' && exit 0
+[[ "${FOXCTL_LIVE_INDEX_DISABLED:-}" == "1" ]] && echo '{}' && exit 0
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
 
 # Read hook input
 INPUT=$(cat)
@@ -323,7 +323,7 @@ case "$file_path" in
 esac
 
 # Run incremental index (symbols only - fast)
-result=$("$AGENTCTL_BIN" run code/incremental_index \
+result=$("$FOXCTL_BIN" run code/incremental_index \
   --input "{\"file\":\"$file_path\",\"symbols\":true,\"embed\":false}" \
   2>/dev/null) || {
   # Don't block on indexing failures

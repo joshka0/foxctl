@@ -363,7 +363,7 @@ ActiveTask *TaskInfo    `json:"active_task,omitempty"`
 | File | Struct | Field | Line |
 |------|--------|-------|------|
 | `internal/domain/envelope/envelope.go` | `Envelope` | `Error ErrorFields` | 52 |
-| `cmd/agentctl_viewer/types.go` | `Envelope` | `Error *EnvelopeError` | 13 |
+| `cmd/foxctl_viewer/types.go` | `Envelope` | `Error *EnvelopeError` | 13 |
 | `skills/editor_godot/main.go` | `PluginResponse` | `Error *PluginError` | 34 |
 
 ### A.7 Files Using Custom Duration Type

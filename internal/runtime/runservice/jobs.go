@@ -188,8 +188,8 @@ func (e *Executor) ExecuteSync(job jobs.Job) error {
 	//
 	// TODO: Refactor executor chain to support ExtraEnv for full race-freedom.
 	if e.options.NoCAS {
-		os.Setenv("AGENTCTL_NO_CAS", "1")
-		defer os.Unsetenv("AGENTCTL_NO_CAS")
+		os.Setenv("FOXCTL_NO_CAS", "1")
+		defer os.Unsetenv("FOXCTL_NO_CAS")
 	}
 
 	result, runErr := e.jobStore.ExecutePreparedSkill(e.ctx, job.ID, e.handle.ManifestPath, e.handle.ArtifactPath)

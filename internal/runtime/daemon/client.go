@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const EnvDaemonSocketPath = "AGENTCTL_DAEMON_SOCKET"
+const EnvDaemonSocketPath = "FOXCTL_DAEMON_SOCKET"
 
 // Client connects to the daemon over Unix socket.
 type Client struct {

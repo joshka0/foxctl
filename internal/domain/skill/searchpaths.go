@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// EnvSearchPaths returns skill search paths from AGENTCTL_SKILLS_PATH.
+// EnvSearchPaths returns skill search paths from FOXCTL_SKILLS_PATH.
 func EnvSearchPaths() []string {
-	if skillsPath := os.Getenv("AGENTCTL_SKILLS_PATH"); skillsPath != "" {
+	if skillsPath := os.Getenv("FOXCTL_SKILLS_PATH"); skillsPath != "" {
 		return filepath.SplitList(skillsPath)
 	}
 	return nil
@@ -51,7 +51,7 @@ func DevSearchPaths() []string {
 
 // DefaultSearchPaths returns the default skill search paths.
 // Search order:
-// 1. AGENTCTL_SKILLS_PATH environment variable (can be multiple paths)
+// 1. FOXCTL_SKILLS_PATH environment variable (can be multiple paths)
 // 2. User skills directory (~/.foxctl/skills)
 // 3. Built-in skills (relative to executable)
 // 4. Development paths (./skills, ./dist/skills)

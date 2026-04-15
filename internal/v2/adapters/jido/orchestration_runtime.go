@@ -9,14 +9,14 @@ import (
 )
 
 const (
-	EnvJidoSocketPath                         = "AGENTCTL_JIDO_SOCKET"
-	EnvJidoRPCPath                            = "AGENTCTL_JIDO_RPC_PATH"
-	EnvJidoRPCTimeoutMS                       = "AGENTCTL_JIDO_RPC_TIMEOUT_MS"
-	EnvJidoSignalSource                       = "AGENTCTL_JIDO_SIGNAL_SOURCE"
-	EnvJidoOrchestrationParentAgentIDs        = "AGENTCTL_JIDO_ORCHESTRATION_PARENT_AGENT_IDS"
-	EnvJidoOrchestrationDispatchParentAgentID = "AGENTCTL_JIDO_ORCHESTRATION_DISPATCH_PARENT_AGENT_ID"
-	EnvJidoOrchestrationSuccessTrackerState   = "AGENTCTL_JIDO_ORCHESTRATION_SUCCESS_TRACKER_STATE"
-	EnvJidoRetryPolicy                        = "AGENTCTL_JIDO_RETRY_POLICY"
+	EnvJidoSocketPath                         = "FOXCTL_JIDO_SOCKET"
+	EnvJidoRPCPath                            = "FOXCTL_JIDO_RPC_PATH"
+	EnvJidoRPCTimeoutMS                       = "FOXCTL_JIDO_RPC_TIMEOUT_MS"
+	EnvJidoSignalSource                       = "FOXCTL_JIDO_SIGNAL_SOURCE"
+	EnvJidoOrchestrationParentAgentIDs        = "FOXCTL_JIDO_ORCHESTRATION_PARENT_AGENT_IDS"
+	EnvJidoOrchestrationDispatchParentAgentID = "FOXCTL_JIDO_ORCHESTRATION_DISPATCH_PARENT_AGENT_ID"
+	EnvJidoOrchestrationSuccessTrackerState   = "FOXCTL_JIDO_ORCHESTRATION_SUCCESS_TRACKER_STATE"
+	EnvJidoRetryPolicy                        = "FOXCTL_JIDO_RETRY_POLICY"
 )
 
 // OrchestrationRuntimeConfig wires a reusable Jido orchestration bridge.

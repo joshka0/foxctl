@@ -4,14 +4,14 @@
 # It is advisory only (never blocks) and injects context hints when matches exceed threshold.
 #
 # Environment:
-#   AGENTCTL_BIN           - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_KNOWLEDGE_THRESHOLD - Minimum score threshold (default: 0.5)
+#   FOXCTL_BIN           - Path to foxctl binary (default: foxctl)
+#   FOXCTL_KNOWLEDGE_THRESHOLD - Minimum score threshold (default: 0.5)
 #   CLAUDE_PROJECT_DIR     - Workspace root (set by Claude Code)
 
 set -euo pipefail
 
 # Resolve foxctl binary
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
 
 # Read hook input from stdin
 INPUT=$(cat)
@@ -19,7 +19,7 @@ INPUT=$(cat)
 # Run the knowledge_router skill and extract hook_output from envelope
 # Use --ephemeral for faster execution (skip job persistence)
 # Redirect stderr to /dev/null to suppress status messages
-result="$(echo "$INPUT" | "$AGENTCTL_BIN" run --daemon hooks/knowledge_router --ephemeral --input-file - 2>/dev/null)" || {
+result="$(echo "$INPUT" | "$FOXCTL_BIN" run --daemon hooks/knowledge_router --ephemeral --input-file - 2>/dev/null)" || {
   # On error, return empty (fail-open)
   echo '{}'
   exit 0

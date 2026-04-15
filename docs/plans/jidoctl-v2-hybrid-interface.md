@@ -200,13 +200,13 @@ Flow:
 
 ### Elixir (`jidoctl` runtime package)
 
-1. `Agentctl.Jido.RuntimeServer` (bridge endpoint)
-2. `Agentctl.Jido.AgentRegistry`
-3. `Agentctl.Jido.SignalRouter`
-4. `Agentctl.Jido.PolicyHooks` (optional pre-flight callbacks)
-5. `Agentctl.Jido.EventPublisher` (back to Go)
+1. `Foxctl.Jido.RuntimeServer` (bridge endpoint)
+2. `Foxctl.Jido.AgentRegistry`
+3. `Foxctl.Jido.SignalRouter`
+4. `Foxctl.Jido.PolicyHooks` (optional pre-flight callbacks)
+5. `Foxctl.Jido.EventPublisher` (back to Go)
 
-## Capability Mapping for v2 Agentctl Features
+## Capability Mapping for v2 Foxctl Features
 
 ### Native Keep (Go-first)
 
@@ -241,12 +241,12 @@ Notes:
 Dispatcher runtime selection (current CLI cut):
 
 1. `foxctl agent ask --dispatcher mailbox|jido`
-2. `AGENTCTL_V2_ASK_DISPATCHER=mailbox|jido`
+2. `FOXCTL_V2_ASK_DISPATCHER=mailbox|jido`
 3. Jido bridge socket settings:
-   - `AGENTCTL_JIDO_SOCKET`
-   - `AGENTCTL_JIDO_RPC_PATH`
-   - `AGENTCTL_JIDO_RPC_TIMEOUT_MS`
-   - `AGENTCTL_JIDO_SIGNAL_SOURCE`
+   - `FOXCTL_JIDO_SOCKET`
+   - `FOXCTL_JIDO_RPC_PATH`
+   - `FOXCTL_JIDO_RPC_TIMEOUT_MS`
+   - `FOXCTL_JIDO_SIGNAL_SOURCE`
 
 Callback/reconcile path:
 

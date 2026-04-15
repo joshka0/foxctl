@@ -22,12 +22,12 @@ import (
 //
 // Run manually:
 //
-//	AGENTCTL_INTEGRATION_TMUX=1 go test -tags=integration ./cmd/foxctl/cmd/ -run IntegrationRelayRoomMessageTmuxRealTmux -v
+//	FOXCTL_INTEGRATION_TMUX=1 go test -tags=integration ./cmd/foxctl/cmd/ -run IntegrationRelayRoomMessageTmuxRealTmux -v
 //
 // Requires `tmux` on PATH and permission to create sessions.
 func TestIntegrationRelayRoomMessageTmuxRealTmux(t *testing.T) {
-	if os.Getenv("AGENTCTL_INTEGRATION_TMUX") != "1" {
-		t.Skip("set AGENTCTL_INTEGRATION_TMUX=1 to run real tmux relay integration")
+	if os.Getenv("FOXCTL_INTEGRATION_TMUX") != "1" {
+		t.Skip("set FOXCTL_INTEGRATION_TMUX=1 to run real tmux relay integration")
 	}
 	if testing.Short() {
 		t.Skip("skipping integration in -short mode")
@@ -101,7 +101,7 @@ func TestIntegrationRelayRoomMessageTmuxRealTmux(t *testing.T) {
 //
 // Run manually:
 //
-//	AGENTCTL_INTEGRATION_TMUX=1 go test -tags=integration ./cmd/foxctl/cmd/ -run IntegrationRelayRoomMessageTmuxConsumesInputRealTmux -v
+//	FOXCTL_INTEGRATION_TMUX=1 go test -tags=integration ./cmd/foxctl/cmd/ -run IntegrationRelayRoomMessageTmuxConsumesInputRealTmux -v
 func TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -112,8 +112,8 @@ func TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux(t *testing.T) {
 		{name: "composer_ctrl_enter_submit", targetID: "droid-a", targetLbl: "droid-a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if os.Getenv("AGENTCTL_INTEGRATION_TMUX") != "1" {
-				t.Skip("set AGENTCTL_INTEGRATION_TMUX=1 to run real tmux relay integration")
+			if os.Getenv("FOXCTL_INTEGRATION_TMUX") != "1" {
+				t.Skip("set FOXCTL_INTEGRATION_TMUX=1 to run real tmux relay integration")
 			}
 			if testing.Short() {
 				t.Skip("skipping integration in -short mode")
@@ -208,10 +208,10 @@ func TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux(t *testing.T) {
 //
 // Run manually:
 //
-//	AGENTCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' ./cmd/foxctl/cmd/ -run IntegrationRelayRoomMessageTmuxDispatchesQueuedDraftRealTmux -v
+//	FOXCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' ./cmd/foxctl/cmd/ -run IntegrationRelayRoomMessageTmuxDispatchesQueuedDraftRealTmux -v
 func TestIntegrationRelayRoomMessageTmuxDispatchesQueuedDraftRealTmux(t *testing.T) {
-	if os.Getenv("AGENTCTL_INTEGRATION_TMUX") != "1" {
-		t.Skip("set AGENTCTL_INTEGRATION_TMUX=1 to run real tmux relay integration")
+	if os.Getenv("FOXCTL_INTEGRATION_TMUX") != "1" {
+		t.Skip("set FOXCTL_INTEGRATION_TMUX=1 to run real tmux relay integration")
 	}
 	if testing.Short() {
 		t.Skip("skipping integration in -short mode")

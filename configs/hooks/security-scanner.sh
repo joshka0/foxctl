@@ -4,13 +4,13 @@
 # Non-blocking (advisory only) - always approves but may inject context.
 #
 # Environment:
-#   AGENTCTL_BIN - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_SECURITY_THRESHOLD - Minimum severity: low, medium, high, critical (default: medium)
+#   FOXCTL_BIN - Path to foxctl binary (default: foxctl)
+#   FOXCTL_SECURITY_THRESHOLD - Minimum severity: low, medium, high, critical (default: medium)
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-SEVERITY_THRESHOLD="${AGENTCTL_SECURITY_THRESHOLD:-medium}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+SEVERITY_THRESHOLD="${FOXCTL_SECURITY_THRESHOLD:-medium}"
 
 # Read hook input from stdin
 INPUT=$(cat)
@@ -33,7 +33,7 @@ case "$file_path" in
 esac
 
 # Run security scan on the specific file
-result=$("$AGENTCTL_BIN" run --daemon code/security --input "{\"path\":\"$file_path\",\"severity_threshold\":\"$SEVERITY_THRESHOLD\",\"max_results\":5}" 2>/dev/null) || {
+result=$("$FOXCTL_BIN" run --daemon code/security --input "{\"path\":\"$file_path\",\"severity_threshold\":\"$SEVERITY_THRESHOLD\",\"max_results\":5}" 2>/dev/null) || {
   # On error, fail open
   echo '{}'
   exit 0

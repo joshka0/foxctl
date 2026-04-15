@@ -5,14 +5,14 @@
 # PostToolUse and surfaces any queued errors so they can be addressed.
 #
 # Environment:
-#   AGENTCTL_HOOK_ERROR_DRAIN_DISABLED - Set to "1" to disable
+#   FOXCTL_HOOK_ERROR_DRAIN_DISABLED - Set to "1" to disable
 #
 # Hook type: PostToolUse (runs after any tool completes)
 
 set -euo pipefail
 
 # Check if disabled
-if [[ "${AGENTCTL_HOOK_ERROR_DRAIN_DISABLED:-}" == "1" ]]; then
+if [[ "${FOXCTL_HOOK_ERROR_DRAIN_DISABLED:-}" == "1" ]]; then
   echo '{"decision":"approve"}'
   exit 0
 fi

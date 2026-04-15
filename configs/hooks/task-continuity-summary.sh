@@ -4,24 +4,24 @@
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-if ! command -v "$AGENTCTL_BIN" >/dev/null 2>&1; then
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+if ! command -v "$FOXCTL_BIN" >/dev/null 2>&1; then
   echo '{}'
   exit 0
 fi
 
-workspace="${AGENTCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
-vault_path="${AGENTCTL_ACA_VAULT_PATH:-${AGENTCTL_OBSIDIAN_VAULT_PATH:-}}"
+workspace="${FOXCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
+vault_path="${FOXCTL_ACA_VAULT_PATH:-${FOXCTL_OBSIDIAN_VAULT_PATH:-}}"
 
 args=(context task-history-summary --workspace "$workspace")
 if [[ -n "${vault_path}" ]]; then
   args+=(--vault-path "$vault_path")
 fi
-if [[ -n "${AGENTCTL_TRANSCRIPT_HISTORY_SCOPE:-}" ]]; then
-  args+=(--transcript-history-scope "$AGENTCTL_TRANSCRIPT_HISTORY_SCOPE")
+if [[ -n "${FOXCTL_TRANSCRIPT_HISTORY_SCOPE:-}" ]]; then
+  args+=(--transcript-history-scope "$FOXCTL_TRANSCRIPT_HISTORY_SCOPE")
 fi
 
-if ! output="$("$AGENTCTL_BIN" "${args[@]}" 2>/dev/null)"; then
+if ! output="$("$FOXCTL_BIN" "${args[@]}" 2>/dev/null)"; then
   echo '{}'
   exit 0
 fi

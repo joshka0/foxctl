@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestSignalAckToCallback_CompletedFromAgentctlState(t *testing.T) {
+func TestSignalAckToCallback_CompletedFromFoxctlState(t *testing.T) {
 	t.Parallel()
 
 	req := SignalRequest{

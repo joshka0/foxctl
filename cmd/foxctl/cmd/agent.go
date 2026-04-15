@@ -279,7 +279,7 @@ func init() {
 	agentSpawnCmd.Flags().StringVar(&spawnTimeout, "timeout", "", "Session timeout (e.g. 10m, 30m). Default: 30m")
 	agentSpawnCmd.Flags().BoolVar(&spawnDryRun, "dry-run", false, "Preview what would be spawned without creating the agent")
 	agentSpawnCmd.Flags().BoolVar(&spawnChat, "chat", false, "Convenience flag for chat/roleplay companions (sets role=companion, exec-mode=reactive, max-iterations=3)")
-	agentSpawnCmd.Flags().StringVar(&spawnDispatcher, "dispatcher", "", "Execution layer for spawned agents: mailbox|jido (default from AGENTCTL_V2_ASK_DISPATCHER)")
+	agentSpawnCmd.Flags().StringVar(&spawnDispatcher, "dispatcher", "", "Execution layer for spawned agents: mailbox|jido (default from FOXCTL_V2_ASK_DISPATCHER)")
 	agentSpawnCmd.Flags().StringVar(&spawnMuxBackend, "mux-backend", "", "Mux backend for terminal binding metadata (for example: tmux or zellij)")
 	agentSpawnCmd.Flags().StringVar(&spawnMuxSession, "mux-session", "", "Mux session name for terminal binding metadata")
 	agentSpawnCmd.Flags().StringVar(&spawnMuxPaneID, "mux-pane-id", "", "Mux pane id for terminal binding metadata")
@@ -314,7 +314,7 @@ func init() {
 	agentAskCmd.Flags().Bool("wait", false, "Wait for reply before returning")
 	agentAskCmd.Flags().Duration("timeout", 5*time.Minute, "Timeout for --wait")
 	agentAskCmd.Flags().BoolVar(&askDryRun, "dry-run", false, "Preview what would be sent without sending the message")
-	agentAskCmd.Flags().StringVar(&askDispatcherMode, "dispatcher", "", "Ask dispatcher backend: mailbox|jido (default from AGENTCTL_V2_ASK_DISPATCHER)")
+	agentAskCmd.Flags().StringVar(&askDispatcherMode, "dispatcher", "", "Ask dispatcher backend: mailbox|jido (default from FOXCTL_V2_ASK_DISPATCHER)")
 	_ = agentAskCmd.MarkFlagRequired("question") //nolint:errcheck
 
 	// Cmd flags

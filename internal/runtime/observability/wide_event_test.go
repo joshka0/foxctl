@@ -239,8 +239,8 @@ func TestPropagationEnv(t *testing.T) {
 	if len(env) != 1 {
 		t.Fatalf("PropagationEnv should have 1 entry, got %d", len(env))
 	}
-	if env[0] != "AGENTCTL_TRACE_ID=test-trace-id" {
-		t.Errorf("env[0] = %q, want AGENTCTL_TRACE_ID=test-trace-id", env[0])
+	if env[0] != "FOXCTL_TRACE_ID=test-trace-id" {
+		t.Errorf("env[0] = %q, want FOXCTL_TRACE_ID=test-trace-id", env[0])
 	}
 }
 

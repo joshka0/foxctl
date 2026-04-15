@@ -227,7 +227,7 @@ func IsWriteOperation(toolName, toolCanonical, toolKind string) bool {
    - Create `session_edges` table
 
 8. **C2**: Environment propagation
-   - `AGENTCTL_SESSION_ID`, `AGENTCTL_WORKSPACE`, `AGENTCTL_AGENT_ID`
+   - `FOXCTL_SESSION_ID`, `FOXCTL_WORKSPACE`, `FOXCTL_AGENT_ID`
    - Identity fallback file
 
 ### Phase D: Progressive Memory (P2)
@@ -314,14 +314,14 @@ skills/hooks_impact_analysis/main.go # Use pathutil, workspace
    - A1: hooks.yaml loader
    - A2: hooks/dispatch skill
    - A3: CC adapter script
-   - Feature flag: `AGENTCTL_DISPATCH_V2=0`
+   - Feature flag: `FOXCTL_DISPATCH_V2=0`
 
 2. **Week 2**: Phase B (skills compat)
    - B1-B3: Path/tool utilities + skill updates
    - Test with existing hooks
 
 3. **Week 3**: Cutover
-   - Enable `AGENTCTL_DISPATCH_V2=1`
+   - Enable `FOXCTL_DISPATCH_V2=1`
    - Update `.claude/settings.json` to use unified adapter
    - Deprecate old shell hooks
 

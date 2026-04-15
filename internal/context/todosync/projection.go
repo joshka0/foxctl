@@ -125,9 +125,9 @@ func MapClaudeStatus(claudeStatus string) string {
 	}
 }
 
-// MapAgentctlStatus maps foxctl task status to Claude Code status
-func MapAgentctlStatus(agentctlStatus string) string {
-	switch agentctlStatus {
+// MapFoxctlStatus maps foxctl task status to Claude Code status
+func MapFoxctlStatus(foxctlStatus string) string {
+	switch foxctlStatus {
 	case StatusInProgress:
 		return "in_progress"
 	case StatusCompleted:

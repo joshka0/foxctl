@@ -169,7 +169,7 @@ func parseSizeQuery(r *http.Request) (uint16, uint16) {
 
 // getAllowedOrigins returns the list of allowed WebSocket origins.
 func getAllowedOrigins() []string {
-	if origins := os.Getenv("AGENTCTL_GATEWAY_WS_ALLOWED_ORIGINS"); origins != "" {
+	if origins := os.Getenv("FOXCTL_GATEWAY_WS_ALLOWED_ORIGINS"); origins != "" {
 		return strings.Split(origins, ",")
 	}
 	return []string{

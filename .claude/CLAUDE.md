@@ -332,7 +332,7 @@ foxctl agent kill <id>
 
 Environment variables are loaded from `~/.foxctl/.env` (global). The loader checks:
 1. `~/.foxctl/.env` (global defaults)
-2. `$AGENTCTL_HOME/.env` (if set)
+2. `$FOXCTL_HOME/.env` (if set)
 3. `$PWD/.env` (project overrides)
 
 **Important:** The `.env` file must be a **real file**, not a symlink. Symlinks break in sandboxed/remote environments.
@@ -347,14 +347,14 @@ Environment variables are loaded from `~/.foxctl/.env` (global). The loader chec
 
 | Variable                   | Default       | Purpose                              |
 | -------------------------- | ------------- | ------------------------------------ |
-| `AGENTCTL_HOME`            | `~/.foxctl` | Storage root                         |
+| `FOXCTL_HOME`            | `~/.foxctl` | Storage root                         |
 | `ANTHROPIC_API_KEY`        | -             | Codemap generation                   |
 | `OPENROUTER_API_KEY`       | -             | Atomic fact processing (SimpleMem)   |
 | `TAVILY_API_KEY`           | -             | Web search (Tavily provider)         |
 | `EXA_API_KEY`              | -             | Web search (Exa provider)            |
 | `PERPLEXITY_API_KEY`       | -             | Web search (Perplexity provider)     |
-| `AGENTCTL_SEMANTIC_RERANK` | `0`           | Enable reranking                     |
-| `AGENTCTL_OBS_DIR`         | -             | Observability (use `$HOME`, not `~`) |
+| `FOXCTL_SEMANTIC_RERANK` | `0`           | Enable reranking                     |
+| `FOXCTL_OBS_DIR`         | -             | Observability (use `$HOME`, not `~`) |
 
 ### Embedding Models (Voyage AI)
 

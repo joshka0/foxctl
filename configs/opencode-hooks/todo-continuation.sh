@@ -2,13 +2,13 @@
 
 set -euo pipefail
 
-if [[ "${AGENTCTL_TODO_CONTINUATION_DISABLED:-}" == "1" ]]; then
+if [[ "${FOXCTL_TODO_CONTINUATION_DISABLED:-}" == "1" ]]; then
   exit 0
 fi
 
-AGENTCTL="${AGENTCTL_BIN:-foxctl}"
-MIN_PENDING="${AGENTCTL_TODO_CONTINUATION_MIN_PENDING:-1}"
-TOP_N="${AGENTCTL_TODO_CONTINUATION_TOP_N:-5}"
+FOXCTL="${FOXCTL_BIN:-foxctl}"
+MIN_PENDING="${FOXCTL_TODO_CONTINUATION_MIN_PENDING:-1}"
+TOP_N="${FOXCTL_TODO_CONTINUATION_TOP_N:-5}"
 
 INPUT=$(cat)
 
@@ -17,12 +17,12 @@ if [[ -z "$WORKSPACE" ]]; then
   WORKSPACE="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 fi
 
-SESSION_ID="${AGENTCTL_SESSION_ID:-${OPENCODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}}"
+SESSION_ID="${FOXCTL_SESSION_ID:-${OPENCODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}}"
 if [[ -z "$SESSION_ID" || "$SESSION_ID" == "null" ]]; then
   SESSION_ID="$(echo "$INPUT" | jq -r '.sessionID // .session_id // ""' 2>/dev/null || true)"
 fi
 if [[ -z "$SESSION_ID" || "$SESSION_ID" == "null" ]]; then
-  agentctl_home="${AGENTCTL_HOME:-$HOME/.foxctl}"
+  agentctl_home="${FOXCTL_HOME:-$HOME/.foxctl}"
   workspace_hash="$(printf '%s' "$WORKSPACE" | shasum -a 256 | cut -c1-16)"
   identity_dir="$agentctl_home/sessions/active"
   for f in "$identity_dir/${workspace_hash}-"*.json; do
@@ -41,7 +41,7 @@ fi
 
 TODO_MODE="false"
 TODO_MODE_TTL_MS=$((6 * 60 * 60 * 1000))
-mode_dir="${AGENTCTL_HOME:-$HOME/.foxctl}/cache/session-modes"
+mode_dir="${FOXCTL_HOME:-$HOME/.foxctl}/cache/session-modes"
 mode_hash="$(printf '%s' "todo:${SESSION_ID}" | shasum -a 256 | cut -c1-16)"
 mode_file="${mode_dir}/todo-${mode_hash}.json"
 if [[ -f "$mode_file" ]]; then
@@ -57,7 +57,7 @@ if [[ -f "$mode_file" ]]; then
 fi
 
 ANCHOR_INPUT=$(jq -n --arg ws "$WORKSPACE" --arg sid "$SESSION_ID" '{operation: "get", workspace: $ws, session_id: $sid}')
-ANCHOR_RESULT=$("$AGENTCTL" run session/anchor --input "$ANCHOR_INPUT" 2>/dev/null || echo '')
+ANCHOR_RESULT=$("$FOXCTL" run session/anchor --input "$ANCHOR_INPUT" 2>/dev/null || echo '')
 ANCHOR_MAIN=$(echo "$ANCHOR_RESULT" | jq -r '.data.anchor.main_prompt // ""' 2>/dev/null || echo '')
 ANCHOR_Q=$(echo "$ANCHOR_RESULT" | jq -r '.data.anchor.pending_question // ""' 2>/dev/null || echo '')
 
@@ -68,7 +68,7 @@ if [[ -z "$ANCHOR_MAIN" || "$ANCHOR_MAIN" == "null" ]]; then
   fi
 
   LIST_INPUT=$(jq -n --arg ws "$WORKSPACE" --arg sid "$SESSION_ID" '{operation:"list", workspace_id:$ws, list:{session_id:$sid}}')
-  LIST_RESULT=$("$AGENTCTL" run todo/manage --input "$LIST_INPUT" 2>/dev/null) || {
+  LIST_RESULT=$("$FOXCTL" run todo/manage --input "$LIST_INPUT" 2>/dev/null) || {
     echo '{"decision": "approve"}'
     exit 0
   }
@@ -128,7 +128,7 @@ CONT_INPUT=$(jq -n \
   }'
 )
 
-CONT_RESULT=$("$AGENTCTL" run todo/continuation --input "$CONT_INPUT" 2>/dev/null) || {
+CONT_RESULT=$("$FOXCTL" run todo/continuation --input "$CONT_INPUT" 2>/dev/null) || {
   echo '{}'
   exit 0
 }
@@ -153,9 +153,9 @@ emit_approve() {
 }
 
 if [[ "$SHOULD_CONTINUE" != "true" ]]; then
-  # CoVe verification is OFF by default (opt-in via AGENTCTL_TODO_CONTINUATION_VERIFY=1)
+  # CoVe verification is OFF by default (opt-in via FOXCTL_TODO_CONTINUATION_VERIFY=1)
   # When disabled, we approve if incomplete_count==0 and no pending question
-  VERIFY="${AGENTCTL_TODO_CONTINUATION_VERIFY:-0}"
+  VERIFY="${FOXCTL_TODO_CONTINUATION_VERIFY:-0}"
   if [[ "$VERIFY" != "1" ]]; then
     emit_approve
     exit 0
@@ -186,7 +186,7 @@ EOF
     '{question: $q, baseline: $baseline, mode: "gate", context: {anchor_goal: $goal, incomplete_task_count: 0, pending_question: ""}}'
   )
 
-  COVE_RESULT=$("$AGENTCTL" run verification/cove_verify --input "$COVE_INPUT" 2>/dev/null) || {
+  COVE_RESULT=$("$FOXCTL" run verification/cove_verify --input "$COVE_INPUT" 2>/dev/null) || {
     # Graceful degradation: if verification fails, approve (tasks=0, no pending question)
     jq -n --arg warning "CoVe verification failed (API key missing?). Approving based on task count." '{decision: "approve", warning: $warning}'
     exit 0

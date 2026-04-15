@@ -72,10 +72,10 @@ type AuthorizationResult struct {
 
 // ParsedCommand represents a parsed bash command.
 type ParsedCommand struct {
-	// IsAgentctlRun is true if this is an "foxctl run <skill>" command.
-	IsAgentctlRun bool
+	// IsFoxctlRun is true if this is an "foxctl run <skill>" command.
+	IsFoxctlRun bool
 
-	// Skill is the skill name (e.g., "code/symbols") if IsAgentctlRun is true.
+	// Skill is the skill name (e.g., "code/symbols") if IsFoxctlRun is true.
 	Skill string
 
 	// RawCommand is the original command string.

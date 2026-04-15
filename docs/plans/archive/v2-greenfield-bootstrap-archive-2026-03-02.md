@@ -244,7 +244,7 @@ Exit checks:
 **Key types**:
 - `run.StageFailure` — required element of `TurnOutput` for degraded turns
 - `policy/constraints.go` — pure validators for max depth, max iterations, tool-invocation cap, timeout bounds, profile capability checks
-- `v2flags.go` — parses `AGENTCTL_V2_COMMANDS` with command set normalization
+- `v2flags.go` — parses `FOXCTL_V2_COMMANDS` with command set normalization
 - `Component` (`Run(ctx)`) and snapshot interfaces — foundation for non-blocking control-plane services
 - turn hierarchy structs with trace lineage fields (`Turn`/`Iteration`/`ToolCall`)
 
@@ -437,7 +437,7 @@ routing/bridge files that were removed during hard-cut cleanup.
 | `internal/agent/runtime/runtime.go` | modified |
 
 **Key implementation points**:
-- Historical transition: parse `AGENTCTL_V2_COMMANDS` and apply command-gated routing during migration phase (retired after hard-cut)
+- Historical transition: parse `FOXCTL_V2_COMMANDS` and apply command-gated routing during migration phase (retired after hard-cut)
 - Keep v1 execution logic untouched during migration-window routing/wiring changes
 - Inject observability fields on every dispatch (`command`, `decision=v1|v2`, `correlation`)
 - Maintain API payload compatibility unless v2 adds extras
@@ -553,8 +553,8 @@ can be validated under real command flow while keeping v1 as the primary path.
 | `cmd/foxctl/cmd/agent_ask_shadow_test.go` | new |
 
 **Key implementation points**:
-- Shadow runs are opt-in per command via `AGENTCTL_V2_SHADOW_COMMANDS`.
-- `ask` participates in v2-primary routing by default; v1-primary shadow validation remains available by setting `AGENTCTL_V2_COMMANDS=none` during parity runs.
+- Shadow runs are opt-in per command via `FOXCTL_V2_SHADOW_COMMANDS`.
+- `ask` participates in v2-primary routing by default; v1-primary shadow validation remains available by setting `FOXCTL_V2_COMMANDS=none` during parity runs.
 - Parity observations emit deterministic fields: `command`,
   `correlation_id`, `match`, `reason`, and `shadow_error`.
 - Shadow execution is bounded by timeout and never blocks primary response.
@@ -592,14 +592,14 @@ without changing primary routing behavior.
 ## Migration Notes (Historical Transition Strategy)
 
 ### A) Rollback Procedure
-1. Set `AGENTCTL_V2_COMMANDS=none` (full rollback) or use a scoped command list to roll back selected commands
+1. Set `FOXCTL_V2_COMMANDS=none` (full rollback) or use a scoped command list to roll back selected commands
 2. Restart service boundaries (CLI wrapper, web API, daemon)
 3. Verify v2 event producers/consumers are quiescent for that command
 4. v2 writes are isolated — v1 path resumes without schema rollback
 
 ### B) Parity Verification
 1. Start with `ask` as the first shadow-validation command before expanding to `spawn`, `run`, `list`, and `kill`
-2. Enable shadow mode with `AGENTCTL_V2_SHADOW_COMMANDS=ask` while keeping primary routing unchanged
+2. Enable shadow mode with `FOXCTL_V2_SHADOW_COMMANDS=ask` while keeping primary routing unchanged
 3. Run mirrored command fixtures through both paths in shadow mode
 4. Compare: envelope contract (`version`, `status`, `meta.ts`, `error.code`, `error.message`), return text ordering, tool-call count/IDs/results, error class and HTTP status, correlation_id, and timing metadata. Enforce error mapping parity: malformed input must map to `ErrValidation`/400; policy denies must map to `ErrPolicyViolation`/403.
 5. Alert on divergence in fatal/terminal outcomes; allow drift only in v2-only extensions
@@ -704,9 +704,9 @@ reduces dependence on a single large prompt window.
 ### PR-16 Readiness Gates (Operational Policy)
 
 1. **Shadow parity coverage**
-   - `AGENTCTL_V2_SHADOW_COMMANDS` supports `spawn,run,list,kill` in addition to `ask`.
+   - `FOXCTL_V2_SHADOW_COMMANDS` supports `spawn,run,list,kill` in addition to `ask`.
    - Mutating command shadows (`spawn`,`run`,`kill`) are blocked by default and require
-     explicit opt-in with `AGENTCTL_V2_SHADOW_MUTATING=true`.
+     explicit opt-in with `FOXCTL_V2_SHADOW_MUTATING=true`.
    - Non-mutating shadows (`ask`,`list`) can run by default.
 2. **Sustained parity window**
    - Require a rolling 7-day window per command before promoting to v2-primary.
@@ -789,7 +789,7 @@ Reference: `docs/spec/v2_greenfield_bootstrap.md` ("Artifact Semantic Retrieval 
 
 - CI now enforces an end-to-end native libsql vector-query execution path via
   `TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL` in strict mode:
-  `AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`.
+  `FOXCTL_V2_REQUIRE_NATIVE_VECTOR_SQL=1`.
 - The test still skips in local/dev environments without vector SQL support,
   but hard-fails in CI when native vector capability is missing or downgraded.
 

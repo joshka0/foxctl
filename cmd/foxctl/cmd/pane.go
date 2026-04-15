@@ -46,16 +46,16 @@ func newPaneServeCommand() *cobra.Command {
 			if len(args) == 0 {
 				return fmt.Errorf("child command is required after --")
 			}
-			participantID = strings.TrimSpace(firstNonEmpty(participantID, os.Getenv("AGENTCTL_PARTICIPANT")))
+			participantID = strings.TrimSpace(firstNonEmpty(participantID, os.Getenv("FOXCTL_PARTICIPANT")))
 			if participantID == "" {
 				return fmt.Errorf("participant id is required")
 			}
-			roomID = strings.TrimSpace(firstNonEmpty(roomID, os.Getenv("AGENTCTL_ROOM_ID")))
+			roomID = strings.TrimSpace(firstNonEmpty(roomID, os.Getenv("FOXCTL_ROOM_ID")))
 			if strings.TrimSpace(socketPath) == "" {
-				socketPath = agentpane.DefaultSocketPath(firstNonEmpty(os.Getenv("AGENTCTL_MUX_SESSION"), roomID), participantID)
+				socketPath = agentpane.DefaultSocketPath(firstNonEmpty(os.Getenv("FOXCTL_MUX_SESSION"), roomID), participantID)
 			}
 			if strings.TrimSpace(readyPath) == "" {
-				readyPath = agentpane.DefaultReadyPath(firstNonEmpty(os.Getenv("AGENTCTL_MUX_SESSION"), roomID), participantID)
+				readyPath = agentpane.DefaultReadyPath(firstNonEmpty(os.Getenv("FOXCTL_MUX_SESSION"), roomID), participantID)
 			}
 			if strings.TrimSpace(cwd) == "" {
 				if wd, err := os.Getwd(); err == nil {
@@ -105,11 +105,11 @@ func newPaneServeCommand() *cobra.Command {
 
 func paneChildEnv(participantID, roomID string) []string {
 	env := []string{
-		"AGENTCTL_PARTICIPANT_ID=" + strings.TrimSpace(participantID),
-		"AGENTCTL_PARTICIPANT=" + strings.TrimSpace(participantID),
+		"FOXCTL_PARTICIPANT_ID=" + strings.TrimSpace(participantID),
+		"FOXCTL_PARTICIPANT=" + strings.TrimSpace(participantID),
 	}
 	if strings.TrimSpace(roomID) != "" {
-		env = append(env, "AGENTCTL_ROOM_ID="+strings.TrimSpace(roomID))
+		env = append(env, "FOXCTL_ROOM_ID="+strings.TrimSpace(roomID))
 	}
 	return env
 }

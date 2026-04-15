@@ -44,8 +44,8 @@ const (
 // Returns (model, isCodeModel) where isCodeModel indicates if voyage-code-3 should be used.
 //
 // Environment variable overrides (checked in order):
-//  1. Per-scope vars: AGENTCTL_EMBEDDING_MODEL_SYMBOLS, _MEMORY, _TASKS, _SESSIONS, _CODEMAPS
-//  2. Category vars: AGENTCTL_EMBEDDING_MODEL_CODE (symbols), AGENTCTL_EMBEDDING_MODEL_TEXT (others)
+//  1. Per-scope vars: FOXCTL_EMBEDDING_MODEL_SYMBOLS, _MEMORY, _TASKS, _SESSIONS, _CODEMAPS
+//  2. Category vars: FOXCTL_EMBEDDING_MODEL_CODE (symbols), FOXCTL_EMBEDDING_MODEL_TEXT (others)
 //  3. Defaults: voyage-code-3 (symbols), voyage-3.5 (memory, tasks, sessions, codemaps)
 //
 // Model strategy (Feb 2025):
@@ -55,34 +55,34 @@ const (
 // All models use 1024 dimensions by default, ensuring storage compatibility.
 func ScopeModelRecommendation(scope EmbeddingScope) (model string, isCodeModel bool) {
 	// Check per-scope env var first
-	scopeEnvVar := "AGENTCTL_EMBEDDING_MODEL_" + strings.ToUpper(string(scope))
+	scopeEnvVar := "FOXCTL_EMBEDDING_MODEL_" + strings.ToUpper(string(scope))
 	if env := os.Getenv(scopeEnvVar); env != "" {
 		return env, scope == ScopeSymbols
 	}
 
 	switch scope {
 	case ScopeSymbols:
-		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_CODE"); env != "" {
+		if env := os.Getenv("FOXCTL_EMBEDDING_MODEL_CODE"); env != "" {
 			return env, true
 		}
 		return "voyage-code-3", true
 	case ScopeFileSummaries:
-		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_CODE"); env != "" {
+		if env := os.Getenv("FOXCTL_EMBEDDING_MODEL_CODE"); env != "" {
 			return env, true
 		}
 		return "voyage-code-3", true
 	case ScopeMemory:
-		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_TEXT"); env != "" {
+		if env := os.Getenv("FOXCTL_EMBEDDING_MODEL_TEXT"); env != "" {
 			return env, false
 		}
 		return "voyage-3.5", false
 	case ScopeCodemaps, ScopeTasks, ScopeSessions:
-		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_TEXT"); env != "" {
+		if env := os.Getenv("FOXCTL_EMBEDDING_MODEL_TEXT"); env != "" {
 			return env, false
 		}
 		return "voyage-3.5", false
 	default:
-		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_TEXT"); env != "" {
+		if env := os.Getenv("FOXCTL_EMBEDDING_MODEL_TEXT"); env != "" {
 			return env, false
 		}
 		return "voyage-3.5", false

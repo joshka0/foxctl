@@ -275,7 +275,7 @@ type EmbeddingSettings struct {
 	Provider string `mapstructure:"provider" json:"provider"`
 	Model    string `mapstructure:"model" json:"model"`
 	BaseURL  string `mapstructure:"base_url" json:"base_url"`
-	// APIKey is a generic embedding provider API key (from AGENTCTL_EMBEDDING_API_KEY).
+	// APIKey is a generic embedding provider API key (from FOXCTL_EMBEDDING_API_KEY).
 	// Use this for provider-agnostic or OpenAI-compatible embedding endpoints.
 	APIKey     string            `mapstructure:"api_key" json:"api_key"`
 	Dimensions int               `mapstructure:"dimensions" json:"dimensions"`
@@ -349,7 +349,7 @@ func (t TursoSettings) MarshalJSON() ([]byte, error) {
 type PostgresSettings struct {
 	// DSN is the PostgreSQL connection string.
 	// Example: postgres://user:pass@host:5432/dbname?sslmode=require
-	// Can also be set via AGENTCTL_POSTGRES_DSN or DATABASE_URL.
+	// Can also be set via FOXCTL_POSTGRES_DSN or DATABASE_URL.
 	DSN string `mapstructure:"dsn" json:"dsn"`
 
 	// MaxOpenConns is the maximum number of open connections per store.
@@ -377,7 +377,7 @@ type VectorSettings struct {
 	Enabled bool `mapstructure:"enabled" json:"enabled"`
 
 	// Dimensions specifies the embedding vector dimensions.
-	// Default: 1024 (Voyage). Override via AGENTCTL_VECTOR_DIMS or config file.
+	// Default: 1024 (Voyage). Override via FOXCTL_VECTOR_DIMS or config file.
 	Dimensions int `mapstructure:"dimensions" json:"dimensions"`
 }
 
@@ -386,7 +386,7 @@ type OpenAPISettings struct {
 	// PluginPath is a colon-separated search path that locates plugin binaries.
 	// Each entry is resolved relative to the foxctl home directory when not
 	// absolute. Environment variables may override this value via
-	// AGENTCTL_OPENAPI_PLUGIN_PATH.
+	// FOXCTL_OPENAPI_PLUGIN_PATH.
 	PluginPath []string `mapstructure:"plugin_path" json:"plugin_path"`
 }
 
@@ -423,7 +423,7 @@ type LLMSettings struct {
 	// BaseURL is the API base URL for OpenAI-compatible or self-hosted backends.
 	BaseURL string `mapstructure:"base_url" json:"base_url"`
 
-	// APIKey is the API key for the selected provider (from AGENTCTL_LLM_API_KEY or provider-specific vars)
+	// APIKey is the API key for the selected provider (from FOXCTL_LLM_API_KEY or provider-specific vars)
 	APIKey string `mapstructure:"api_key" json:"api_key"`
 
 	// AuthMode controls how chat requests are authenticated.
@@ -462,15 +462,15 @@ type LLMSettings struct {
 	// CerebrasModel is the model for Cerebras (from CEREBRAS_MODEL)
 	CerebrasModel string `mapstructure:"cerebras_model" json:"cerebras_model"`
 
-	// AtomicAPIKey is the API key for atomic fact processing (from AGENTCTL_ATOMIC_API_KEY).
+	// AtomicAPIKey is the API key for atomic fact processing (from FOXCTL_ATOMIC_API_KEY).
 	// Used for fast/cheap LLM operations. Supports any OpenAI-compatible endpoint.
 	AtomicAPIKey string `mapstructure:"atomic_api_key" json:"atomic_api_key"`
 
-	// AtomicEndpoint is the endpoint URL for atomic processing (from AGENTCTL_ATOMIC_ENDPOINT).
+	// AtomicEndpoint is the endpoint URL for atomic processing (from FOXCTL_ATOMIC_ENDPOINT).
 	// Defaults to OpenRouter if not set.
 	AtomicEndpoint string `mapstructure:"atomic_endpoint" json:"atomic_endpoint"`
 
-	// AtomicModel is the model for atomic processing (from AGENTCTL_ATOMIC_MODEL).
+	// AtomicModel is the model for atomic processing (from FOXCTL_ATOMIC_MODEL).
 	// Defaults to zhipu-ai/glm-4-flash-250414 if not set.
 	AtomicModel string `mapstructure:"atomic_model" json:"atomic_model"`
 
@@ -735,7 +735,7 @@ func parseOptions(opts []Option) *loader {
 func newConfiguredViper() *viper.Viper {
 	v := viper.New()
 	v.SetConfigType("yaml")
-	v.SetEnvPrefix("AGENTCTL")
+	v.SetEnvPrefix("FOXCTL")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 	return v
@@ -980,18 +980,18 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 
 	// PostgreSQL env var overrides
-	if dsn := os.Getenv("AGENTCTL_POSTGRES_DSN"); dsn != "" && cfg.Database.Postgres.DSN == "" {
+	if dsn := os.Getenv("FOXCTL_POSTGRES_DSN"); dsn != "" && cfg.Database.Postgres.DSN == "" {
 		cfg.Database.Postgres.DSN = dsn
 	}
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" && cfg.Database.Postgres.DSN == "" {
 		cfg.Database.Postgres.DSN = dsn
 	}
-	if v := os.Getenv("AGENTCTL_POSTGRES_MAX_CONNS"); v != "" {
+	if v := os.Getenv("FOXCTL_POSTGRES_MAX_CONNS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.Database.Postgres.MaxOpenConns = n
 		}
 	}
-	if strings.EqualFold(os.Getenv("AGENTCTL_POSTGRES_REQUIRE_VECTOR"), "true") {
+	if strings.EqualFold(os.Getenv("FOXCTL_POSTGRES_REQUIRE_VECTOR"), "true") {
 		cfg.Database.Postgres.RequireVector = true
 	}
 
@@ -1003,7 +1003,7 @@ func finalizeConfig(cfg Config, home string) Config {
 		cfg.Database.Driver = "postgres"
 	}
 	// Explicit driver override via env var takes precedence over auto-detection
-	if driver := os.Getenv("AGENTCTL_DB_DRIVER"); driver != "" {
+	if driver := os.Getenv("FOXCTL_DB_DRIVER"); driver != "" {
 		cfg.Database.Driver = driver
 	}
 	// Default vector dimensions from embedding config if not set
@@ -1011,26 +1011,26 @@ func finalizeConfig(cfg Config, home string) Config {
 		cfg.Database.Vector.Dimensions = cfg.Embedding.Dimensions
 	}
 
-	// Default-enable observability: if AGENTCTL_OBS_DIR is not set but
+	// Default-enable observability: if FOXCTL_OBS_DIR is not set but
 	// cfg.Paths.Observability is configured, set the env var so all
 	// downstream code (skills, CLI, daemon) inherits the path.
 	if cfg.Paths.Observability != "" {
-		obsEnv := os.Getenv("AGENTCTL_OBS_DIR")
+		obsEnv := os.Getenv("FOXCTL_OBS_DIR")
 		// NOTE: We normally respect explicit env overrides. However, it is common to
 		// end up with a stale absolute home directory after a username change (e.g.
-		// AGENTCTL_OBS_DIR="/Users/olduser/..."). When that home no longer exists,
+		// FOXCTL_OBS_DIR="/Users/olduser/..."). When that home no longer exists,
 		// observability becomes noisy (permission errors) and effectively broken.
 		if obsEnv == "" || shouldRepairObsDir(obsEnv, home) {
 			// Best-effort: ignore errors since observability is non-critical
-			_ = os.Setenv("AGENTCTL_OBS_DIR", cfg.Paths.Observability)
+			_ = os.Setenv("FOXCTL_OBS_DIR", cfg.Paths.Observability)
 		}
 	}
 
 	// CAS policy env var overrides
-	if storeEnv := os.Getenv("AGENTCTL_CAS_STORE"); storeEnv != "" {
+	if storeEnv := os.Getenv("FOXCTL_CAS_STORE"); storeEnv != "" {
 		cfg.CAS.Store = storeEnv == "1" || strings.EqualFold(storeEnv, "true")
 	}
-	if exposeEnv := os.Getenv("AGENTCTL_CAS_EXPOSE"); exposeEnv != "" {
+	if exposeEnv := os.Getenv("FOXCTL_CAS_EXPOSE"); exposeEnv != "" {
 		switch strings.ToLower(exposeEnv) {
 		case "off", "0", "false":
 			cfg.CAS.Expose = ExposePolicyOff
@@ -1042,7 +1042,7 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 
 	// LLM API key env var overrides (load once at config time - FC/IS compliant)
-	if key := os.Getenv("AGENTCTL_LLM_API_KEY"); key != "" && cfg.LLM.APIKey == "" {
+	if key := os.Getenv("FOXCTL_LLM_API_KEY"); key != "" && cfg.LLM.APIKey == "" {
 		cfg.LLM.APIKey = key
 	}
 	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" && cfg.LLM.CerebrasAPIKey == "" {
@@ -1072,22 +1072,22 @@ func finalizeConfig(cfg Config, home string) Config {
 	if model := os.Getenv("CEREBRAS_MODEL"); model != "" && cfg.LLM.CerebrasModel == "" {
 		cfg.LLM.CerebrasModel = model
 	}
-	if provider := os.Getenv("AGENTCTL_LLM_PROVIDER"); provider != "" && cfg.LLM.Provider == "" {
+	if provider := os.Getenv("FOXCTL_LLM_PROVIDER"); provider != "" && cfg.LLM.Provider == "" {
 		cfg.LLM.Provider = provider
 	}
-	if model := os.Getenv("AGENTCTL_LLM_MODEL"); model != "" && cfg.LLM.Model == "" {
+	if model := os.Getenv("FOXCTL_LLM_MODEL"); model != "" && cfg.LLM.Model == "" {
 		cfg.LLM.Model = model
 	}
-	if baseURL := os.Getenv("AGENTCTL_LLM_BASE_URL"); baseURL != "" && cfg.LLM.BaseURL == "" {
+	if baseURL := os.Getenv("FOXCTL_LLM_BASE_URL"); baseURL != "" && cfg.LLM.BaseURL == "" {
 		cfg.LLM.BaseURL = strings.TrimSpace(baseURL)
 	}
-	if mode := os.Getenv("AGENTCTL_LLM_AUTH_MODE"); mode != "" && cfg.LLM.AuthMode == "" {
+	if mode := os.Getenv("FOXCTL_LLM_AUTH_MODE"); mode != "" && cfg.LLM.AuthMode == "" {
 		cfg.LLM.AuthMode = strings.TrimSpace(mode)
 	}
-	if header := os.Getenv("AGENTCTL_LLM_AUTH_HEADER"); header != "" && cfg.LLM.AuthHeader == "" {
+	if header := os.Getenv("FOXCTL_LLM_AUTH_HEADER"); header != "" && cfg.LLM.AuthHeader == "" {
 		cfg.LLM.AuthHeader = strings.TrimSpace(header)
 	}
-	if prefix := os.Getenv("AGENTCTL_LLM_AUTH_PREFIX"); prefix != "" && cfg.LLM.AuthPrefix == "" {
+	if prefix := os.Getenv("FOXCTL_LLM_AUTH_PREFIX"); prefix != "" && cfg.LLM.AuthPrefix == "" {
 		cfg.LLM.AuthPrefix = prefix
 	}
 	if region := os.Getenv("BEDROCK_REGION"); region != "" && cfg.LLM.BedrockRegion == "" {
@@ -1100,44 +1100,44 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 
 	// Atomic processing config (for SimpleMem-style fact decomposition)
-	if key := os.Getenv("AGENTCTL_ATOMIC_API_KEY"); key != "" && cfg.LLM.AtomicAPIKey == "" {
+	if key := os.Getenv("FOXCTL_ATOMIC_API_KEY"); key != "" && cfg.LLM.AtomicAPIKey == "" {
 		cfg.LLM.AtomicAPIKey = key
 	}
 	// Fallback: use OpenRouter key if atomic key not set
 	if cfg.LLM.AtomicAPIKey == "" && cfg.LLM.OpenRouterAPIKey != "" {
 		cfg.LLM.AtomicAPIKey = cfg.LLM.OpenRouterAPIKey
 	}
-	if endpoint := os.Getenv("AGENTCTL_ATOMIC_ENDPOINT"); endpoint != "" && cfg.LLM.AtomicEndpoint == "" {
+	if endpoint := os.Getenv("FOXCTL_ATOMIC_ENDPOINT"); endpoint != "" && cfg.LLM.AtomicEndpoint == "" {
 		cfg.LLM.AtomicEndpoint = endpoint
 	}
-	if model := os.Getenv("AGENTCTL_ATOMIC_MODEL"); model != "" && cfg.LLM.AtomicModel == "" {
+	if model := os.Getenv("FOXCTL_ATOMIC_MODEL"); model != "" && cfg.LLM.AtomicModel == "" {
 		cfg.LLM.AtomicModel = model
 	}
 
 	// Embedding API key env var overrides (FC/IS compliant)
-	if provider := os.Getenv("AGENTCTL_EMBEDDING_PROVIDER"); provider != "" {
+	if provider := os.Getenv("FOXCTL_EMBEDDING_PROVIDER"); provider != "" {
 		cfg.Embedding.Provider = strings.TrimSpace(provider)
 	}
-	if model := os.Getenv("AGENTCTL_EMBEDDING_MODEL"); model != "" {
+	if model := os.Getenv("FOXCTL_EMBEDDING_MODEL"); model != "" {
 		cfg.Embedding.Model = strings.TrimSpace(model)
 	}
-	if baseURL := os.Getenv("AGENTCTL_EMBEDDING_BASE_URL"); baseURL != "" {
+	if baseURL := os.Getenv("FOXCTL_EMBEDDING_BASE_URL"); baseURL != "" {
 		cfg.Embedding.BaseURL = strings.TrimSpace(baseURL)
 	}
-	if key := os.Getenv("AGENTCTL_EMBEDDING_API_KEY"); key != "" {
+	if key := os.Getenv("FOXCTL_EMBEDDING_API_KEY"); key != "" {
 		cfg.Embedding.APIKey = key
 	}
 	// Backward-compatible aliases for OpenAI-compatible embedding endpoints.
-	if model := os.Getenv("AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL"); model != "" && cfg.Embedding.Model == "" {
+	if model := os.Getenv("FOXCTL_OPENAI_COMPAT_EMBEDDING_MODEL"); model != "" && cfg.Embedding.Model == "" {
 		cfg.Embedding.Model = strings.TrimSpace(model)
 	}
-	if baseURL := os.Getenv("AGENTCTL_OPENAI_COMPAT_BASE_URL"); baseURL != "" && cfg.Embedding.BaseURL == "" {
+	if baseURL := os.Getenv("FOXCTL_OPENAI_COMPAT_BASE_URL"); baseURL != "" && cfg.Embedding.BaseURL == "" {
 		cfg.Embedding.BaseURL = strings.TrimSpace(baseURL)
 	}
-	if key := os.Getenv("AGENTCTL_OPENAI_COMPAT_API_KEY"); key != "" && cfg.Embedding.APIKey == "" {
+	if key := os.Getenv("FOXCTL_OPENAI_COMPAT_API_KEY"); key != "" && cfg.Embedding.APIKey == "" {
 		cfg.Embedding.APIKey = strings.TrimSpace(key)
 	}
-	if cfg.Embedding.Provider == "" && (cfg.Embedding.BaseURL != "" || strings.EqualFold(os.Getenv("AGENTCTL_OBSIDIAN_SEMANTIC_PROVIDER"), "openai_compat") || strings.EqualFold(os.Getenv("AGENTCTL_OBSIDIAN_SEMANTIC_PROVIDER"), "openai-compatible")) {
+	if cfg.Embedding.Provider == "" && (cfg.Embedding.BaseURL != "" || strings.EqualFold(os.Getenv("FOXCTL_OBSIDIAN_SEMANTIC_PROVIDER"), "openai_compat") || strings.EqualFold(os.Getenv("FOXCTL_OBSIDIAN_SEMANTIC_PROVIDER"), "openai-compatible")) {
 		cfg.Embedding.Provider = "openai_compat"
 	}
 	if key := os.Getenv("VOYAGE_API_KEY"); key != "" && cfg.Embedding.VoyageAPIKey == "" {
@@ -1298,10 +1298,10 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 
 	// OAuth AuthBroker
-	if v := os.Getenv("AGENTCTL_OAUTH_ENC_KEY"); v != "" && cfg.OAuth.EncryptionKey == "" {
+	if v := os.Getenv("FOXCTL_OAUTH_ENC_KEY"); v != "" && cfg.OAuth.EncryptionKey == "" {
 		cfg.OAuth.EncryptionKey = v
 	}
-	if v := os.Getenv("AGENTCTL_OAUTH_CALLBACK_URL"); v != "" && cfg.OAuth.CallbackBaseURL == "" {
+	if v := os.Getenv("FOXCTL_OAUTH_CALLBACK_URL"); v != "" && cfg.OAuth.CallbackBaseURL == "" {
 		cfg.OAuth.CallbackBaseURL = v
 	}
 	// Microsoft Graph

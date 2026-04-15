@@ -40,7 +40,7 @@ type sqlStore struct {
 }
 
 // Open opens the mailbox store rooted at the given storage root directory.
-// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_MAILBOX_DB_DRIVER).
+// The database driver is selected via the dbdriver env var conventions (e.g., FOXCTL_MAILBOX_DB_DRIVER).
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "mailbox.db")
 	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "MAILBOX", filepath.Base(dbPath), migrate)

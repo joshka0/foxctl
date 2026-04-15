@@ -174,13 +174,13 @@ room.
 
 Exported environment includes:
 
-- `AGENTCTL_PARTICIPANT_ID`
-- `AGENTCTL_PARENT_PARTICIPANT_ID`
-- `AGENTCTL_PARENT_AGENT_ID`
-- `AGENTCTL_MUX_BACKEND`
-- `AGENTCTL_MUX_SESSION`
-- `AGENTCTL_MUX_PANE_ID`
-- `AGENTCTL_ROOM_ID` when room access is direct
+- `FOXCTL_PARTICIPANT_ID`
+- `FOXCTL_PARENT_PARTICIPANT_ID`
+- `FOXCTL_PARENT_AGENT_ID`
+- `FOXCTL_MUX_BACKEND`
+- `FOXCTL_MUX_SESSION`
+- `FOXCTL_MUX_PANE_ID`
+- `FOXCTL_ROOM_ID` when room access is direct
 
 The other commands return structured envelopes with pane metadata and bounded scrollback captures.
 
@@ -211,7 +211,7 @@ sender or target:
 foxctl tmux send-parent "Blocked on the mailbox retry path."
 ```
 
-`send-parent` resolves the target from `AGENTCTL_PARENT_PARTICIPANT_ID`.
+`send-parent` resolves the target from `FOXCTL_PARENT_PARTICIPANT_ID`.
 
 ### Agent spawn into a tmux pane
 
@@ -438,7 +438,7 @@ Operationally:
 - treat `last_delivery_trace` as the first place to inspect when someone asks “why did this message route here” or “did fallback happen”
 - the older top-level member fields (`backend`, `session`, `pane_id`, `transport_endpoint`, `transport_kind`) are compatibility mirrors and should not be the source of truth for new client work
 - use `bash tests/regression/run.sh` as the default room-runtime verification bundle before reaching for ad hoc command mixes
-- if the symptom is "the message is visible in the pane but looks unsent," run `AGENTCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' ./cmd/foxctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` to verify the relay path is consumed by the target terminal process rather than left as drafted pane input
+- if the symptom is "the message is visible in the pane but looks unsent," run `FOXCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' ./cmd/foxctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` to verify the relay path is consumed by the target terminal process rather than left as drafted pane input
 
 ### Join vs Subscribe
 
@@ -460,7 +460,7 @@ pane has no label, `foxctl` falls back to a canonical id like
 `tmux:<session>:%7`.
 
 Inside zellij, room commands derive the sender from
-`AGENTCTL_ZELLIJ_PARTICIPANT` when present, otherwise they fall back to a
+`FOXCTL_ZELLIJ_PARTICIPANT` when present, otherwise they fall back to a
 canonical id like `zellij:<session>:terminal_3` using
 `ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID`.
 
@@ -492,7 +492,7 @@ permission grant for:
 By default the Go relay looks for the plugin in:
 
 - `--plugin-path`
-- `AGENTCTL_ZELLIJ_ROOM_PLUGIN`
+- `FOXCTL_ZELLIJ_ROOM_PLUGIN`
 - `~/.foxctl/plugins/zellij_room_relay.wasm`
 - a repo-local build at `plugins/zellij-room-relay/...`
 

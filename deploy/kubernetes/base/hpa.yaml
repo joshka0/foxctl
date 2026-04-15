@@ -38,7 +38,7 @@ spec:
   # - type: External
   #   external:
   #     metric:
-  #       name: agentctl_mailbox_depth
+  #       name: foxctl_mailbox_depth
   #     target:
   #       type: AverageValue
   #       averageValue: 100

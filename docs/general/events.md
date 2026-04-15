@@ -28,18 +28,18 @@ Nothing in this document changes the Protocol v1 envelope contract.
 ### 2.1 Enabling on-disk events
 
 An environment variable controls the root observability directory.
-For CLI/daemon runs, `paths.observability` is applied by setting `AGENTCTL_OBS_DIR`
+For CLI/daemon runs, `paths.observability` is applied by setting `FOXCTL_OBS_DIR`
 at startup:
 
-- `AGENTCTL_OBS_DIR=/path/to/observability`
+- `FOXCTL_OBS_DIR=/path/to/observability`
 
-If `AGENTCTL_OBS_DIR` is **unset or empty**, on-disk events MUST be disabled and
+If `FOXCTL_OBS_DIR` is **unset or empty**, on-disk events MUST be disabled and
 all writers MUST be no-ops.
 
-If `AGENTCTL_OBS_DIR` is set, event writers may create the following layout:
+If `FOXCTL_OBS_DIR` is set, event writers may create the following layout:
 
 ```text
-$AGENTCTL_OBS_DIR/
+$FOXCTL_OBS_DIR/
   events/
     core.ndjson             # future: CLI / core events
     code_swe_grep.ndjson    # SWE Grep events (this spec)
@@ -57,7 +57,7 @@ portability issues.
 - Rotation, retention, and shipping are handled by external tools (logrotate,
   OTEL Collector, etc.).
 - Writers SHOULD tolerate missing directories by calling `mkdir -p` on
-  `$AGENTCTL_OBS_DIR/events` before first write.
+  `$FOXCTL_OBS_DIR/events` before first write.
 
 ## 3. SWE Grep Events (`code_swe_grep.ndjson`)
 
@@ -65,7 +65,7 @@ This section defines the event schema for the `code/snippet_extract` skill. Each
 successful run MAY emit exactly one event into:
 
 ```text
-$AGENTCTL_OBS_DIR/events/code_swe_grep.ndjson
+$FOXCTL_OBS_DIR/events/code_swe_grep.ndjson
 ```
 
 ### 3.1 Event schema
@@ -131,7 +131,7 @@ skills do not reimplement append/dir logic.
 
 ```go
 // writeEvent appends an NDJSON-encoded event to
-// $AGENTCTL_OBS_DIR/events/<name>.ndjson if configured.
+// $FOXCTL_OBS_DIR/events/<name>.ndjson if configured.
 func writeEvent(ctx context.Context, name string, v any) error
 ```
 
@@ -141,7 +141,7 @@ Given `name` (e.g. `"code_swe_grep"`) and an event value `v`:
 
 1. **Configuration check**
    - Resolve observability directory from configuration, e.g.:
-     - `AGENTCTL_OBS_DIR` env var.
+     - `FOXCTL_OBS_DIR` env var.
      - CLI/daemon may populate it from `paths.observability` at startup.
    - If the directory is unset or empty, the helper MUST return `nil` without
      performing any I/O.
@@ -150,7 +150,7 @@ Given `name` (e.g. `"code_swe_grep"`) and an event value `v`:
    - Compute:
 
      ```text
-     eventsDir = $AGENTCTL_OBS_DIR/events
+     eventsDir = $FOXCTL_OBS_DIR/events
      filePath  = eventsDir + "/" + name + ".ndjson"
      ```
 
@@ -191,7 +191,7 @@ The NDJSON event stream is designed to be consumed by external tools.
 
 ### 5.1 OTEL Collector
 
-- Use a `filelog` receiver pointing at `$AGENTCTL_OBS_DIR/events/*.ndjson`.
+- Use a `filelog` receiver pointing at `$FOXCTL_OBS_DIR/events/*.ndjson`.
 - Each line is a log record with attributes matching the JSON fields.
 - Standard OTEL processors can derive metrics such as:
   - `swe_grep_requests_total`

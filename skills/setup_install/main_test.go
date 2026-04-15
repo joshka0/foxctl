@@ -410,8 +410,8 @@ func TestEnvStatus_RequiredEnvVars(t *testing.T) {
 
 	optionalVars := []envStatus{
 		{Name: "ANTHROPIC_API_KEY", Required: false},
-		{Name: "AGENTCTL_HOME", Required: false},
-		{Name: "AGENTCTL_SEMANTIC_RERANK", Required: false},
+		{Name: "FOXCTL_HOME", Required: false},
+		{Name: "FOXCTL_SEMANTIC_RERANK", Required: false},
 	}
 
 	for _, v := range requiredVars {
@@ -530,8 +530,8 @@ func TestOutput_MultipleEnvironmentVars(t *testing.T) {
 	envs := []envStatus{
 		{Name: "VOYAGE_API_KEY", Set: true, Required: true},
 		{Name: "ANTHROPIC_API_KEY", Set: false, Required: false},
-		{Name: "AGENTCTL_HOME", Set: true, Required: false},
-		{Name: "AGENTCTL_SEMANTIC_RERANK", Set: false, Required: false},
+		{Name: "FOXCTL_HOME", Set: true, Required: false},
+		{Name: "FOXCTL_SEMANTIC_RERANK", Set: false, Required: false},
 	}
 
 	out := output{

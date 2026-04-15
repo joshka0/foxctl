@@ -100,7 +100,7 @@ signature:
       - job_status: Check status of a specific job
       - cleanup: Remove old completed jobs
 
-      Enable with AGENTCTL_EMBED_QUEUE=1 during live indexing.
+      Enable with FOXCTL_EMBED_QUEUE=1 during live indexing.
     workflows:
       - id: enqueue-symbols
         description: "Enqueue symbols for embedding"

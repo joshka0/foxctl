@@ -14,7 +14,7 @@ import (
 
 // EinoEngineAdapter bridges Eino's adk.Agent to foxctl's engine.AgentEngine.
 //
-// This is an integration adapter — it is instantiated when AGENTCTL_ENGINE_BACKEND=eino
+// This is an integration adapter — it is instantiated when FOXCTL_ENGINE_BACKEND=eino
 // is set. The default LLMChatEngine path is unaffected when the gate is off.
 //
 // Scope: the adapter converts engine.EngineInput messages to adk.AgentInput,

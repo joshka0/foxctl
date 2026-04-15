@@ -84,7 +84,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Find the events file
 	obsDir := rc.Config.Paths.Observability
 	if obsDir == "" {
-		obsDir = os.Getenv("AGENTCTL_OBS_DIR")
+		obsDir = os.Getenv("FOXCTL_OBS_DIR")
 	}
 	if obsDir == "" {
 		obsDir = filepath.Join(os.Getenv("HOME"), ".foxctl", "observability")

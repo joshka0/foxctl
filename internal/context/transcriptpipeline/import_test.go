@@ -28,7 +28,7 @@ func TestResolveAndParseTranscript_RequiresResolvableSource(t *testing.T) {
 }
 
 func TestResolveAndParseTranscript_BackfillsCodexWorkspaceFromSessionMeta(t *testing.T) {
-	t.Setenv("AGENTCTL_WORKSPACE", "")
+	t.Setenv("FOXCTL_WORKSPACE", "")
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rollout-2026-03-29T00-00-00-00000000-0000-0000-0000-000000000000.jsonl")

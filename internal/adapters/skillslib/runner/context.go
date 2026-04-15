@@ -22,11 +22,11 @@ type RunnerContext = skillmain.RunContext
 type Artifact = skillmain.Artifact
 
 // ResolveSessionID returns the session ID from environment variables.
-// Priority: AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
+// Priority: FOXCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
 // CURSOR_SESSION_ID > TERM_SESSION_ID. Returns empty string if none set.
 func ResolveSessionID() string {
 	// Tool-agnostic session ID (highest priority)
-	if sid := os.Getenv("AGENTCTL_SESSION_ID"); sid != "" {
+	if sid := os.Getenv("FOXCTL_SESSION_ID"); sid != "" {
 		return sid
 	}
 	// Claude Code session ID
@@ -51,15 +51,15 @@ func ResolveSessionID() string {
 // ResolveSessionIDWithFallback returns the session ID, falling back to identity file.
 // Priority: env vars (via ResolveSessionID) > identity file for workspace.
 // This is useful when env vars aren't available (e.g., hooks, shell edge-cases).
-func ResolveSessionIDWithFallback(workspace, agentctlHome string) string {
+func ResolveSessionIDWithFallback(workspace, foxctlHome string) string {
 	// First try environment variables
 	if sid := ResolveSessionID(); sid != "" {
 		return sid
 	}
 
 	// Fall back to identity file for this workspace
-	if workspace != "" && agentctlHome != "" {
-		im := sessions.NewIdentityManager(agentctlHome)
+	if workspace != "" && foxctlHome != "" {
+		im := sessions.NewIdentityManager(foxctlHome)
 		if active, err := im.GetActive(workspace); err == nil && active != nil {
 			return active.SessionID
 		}

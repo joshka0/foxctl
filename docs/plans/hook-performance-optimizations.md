@@ -269,7 +269,7 @@ The impact_analysis hook currently has a 10s timeout which is too short for cold
 
 ```bash
 # Cold start - should skip quickly
-AGENTCTL_GOPLS_DEBUG=1 foxctl run hooks/impact_analysis --input '{"file_path":"main.go"}'
+FOXCTL_GOPLS_DEBUG=1 foxctl run hooks/impact_analysis --input '{"file_path":"main.go"}'
 
 # Warm up gopls
 foxctl run lsp/gopls --input '{"operation":"references","path":"main.go","line":10,"col":5}'
@@ -285,7 +285,7 @@ foxctl run hooks/impact_analysis --input '{"file_path":"main.go"}'
 If issues arise:
 
 1. **Revert IsDaemonReady check**: Remove the conditional in impact_analysis
-2. **Environment override**: Add `AGENTCTL_IMPACT_FORCE=1` to bypass the check
+2. **Environment override**: Add `FOXCTL_IMPACT_FORCE=1` to bypass the check
 
 ---
 

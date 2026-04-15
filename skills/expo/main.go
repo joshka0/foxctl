@@ -341,7 +341,7 @@ func debugStatus(ctx context.Context, rc *skillmain.RunContext, platform, device
 			"engine":    "Hermes",
 			"open_hint": "For Expo apps, press 'j' in the terminal where Expo was started.",
 		},
-		"agentctl_paths": map[string]any{
+		"foxctl_paths": map[string]any{
 			"expo_actions": []string{
 				"debug_status",
 				"logs",

@@ -96,13 +96,13 @@ func TestNewEinoToolBridges(t *testing.T) {
 }
 
 // Gate-off regression: the existing gate-off path must be completely unaffected
-// when AGENTCTL_ENGINE_BACKEND is not set. This test is the canonical gate-off
+// when FOXCTL_ENGINE_BACKEND is not set. This test is the canonical gate-off
 // regression anchor for M1 — any change that accidentally activates the eino path
 // when the gate is off will break this test.
 func TestGateOff_UnaffectedByToolBridgeChanges(t *testing.T) {
 	t.Setenv(EnvEngineBackend, "")
 	if IsEinoEnabled() {
-		t.Fatal("gate-off: IsEinoEnabled() must return false when AGENTCTL_ENGINE_BACKEND is unset")
+		t.Fatal("gate-off: IsEinoEnabled() must return false when FOXCTL_ENGINE_BACKEND is unset")
 	}
 }
 
@@ -111,7 +111,7 @@ func TestGateOff_UnaffectedByToolBridgeChanges(t *testing.T) {
 func TestGateOff_ProvisionNotCalledWhenDisabled(t *testing.T) {
 	t.Setenv(EnvEngineBackend, "")
 	if IsEinoEnabled() {
-		t.Fatal("gate must be off when AGENTCTL_ENGINE_BACKEND is empty")
+		t.Fatal("gate must be off when FOXCTL_ENGINE_BACKEND is empty")
 	}
 	// Gate is off — the default path will use LLMChatEngine; provisioner unreachable.
 }

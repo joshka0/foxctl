@@ -3,15 +3,15 @@
 
 set -euo pipefail
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-if ! command -v "$AGENTCTL_BIN" >/dev/null 2>&1; then
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+if ! command -v "$FOXCTL_BIN" >/dev/null 2>&1; then
   echo '{}'
   exit 0
 fi
 
-workspace="${AGENTCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
+workspace="${FOXCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
 
-if ! output="$("$AGENTCTL_BIN" hooks session-restore-postcompact --workspace "$workspace" 2>/dev/null)"; then
+if ! output="$("$FOXCTL_BIN" hooks session-restore-postcompact --workspace "$workspace" 2>/dev/null)"; then
   echo '{}'
   exit 0
 fi

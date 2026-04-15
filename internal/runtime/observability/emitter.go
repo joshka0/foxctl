@@ -35,7 +35,7 @@ func getSampler() Sampler {
 }
 
 // Emit writes a WideEvent to the observability stream if:
-// 1. AGENTCTL_OBS_DIR is configured
+// 1. FOXCTL_OBS_DIR is configured
 // 2. The sampler decides to sample the event
 //
 // This function is safe to call from any goroutine.
@@ -63,7 +63,7 @@ func EmitWithConfig(ctx context.Context, event *WideEvent, config *persistConfig
 	RedactEvent(event)
 
 	// Always try to publish to SSE (even if file persistence is disabled)
-	// This allows real-time activity streaming without requiring AGENTCTL_OBS_DIR
+	// This allows real-time activity streaming without requiring FOXCTL_OBS_DIR
 	publishToSSE(event)
 
 	// Check if file observability is enabled

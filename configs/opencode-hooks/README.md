@@ -121,7 +121,7 @@ Automatically injected every turn:
 ### Tool Blocking
 
 The plugin blocks:
-- **Task Guard**: Edits without active task (when `AGENTCTL_TASK_GUARD_MODE=strict`)
+- **Task Guard**: Edits without active task (when `FOXCTL_TASK_GUARD_MODE=strict`)
 - **Secret Scanner**: Writes containing AWS keys, private keys, PATs, API keys
 
 ### Session Events
@@ -141,12 +141,12 @@ Note: todo continuation runs only when an anchor goal is set (via `/anchor`) or 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENTCTL_TASK_GUARD_MODE` | `auto` | Set to `strict` to require tasks |
-| `AGENTCTL_HOME` | `~/.foxctl` | Storage root |
-| `AGENTCTL_OPENCODE_IDLE_CAPTURE_MS` | `60000` | Min interval between idle captures (0 disables) |
-| `AGENTCTL_OPENCODE_IDLE_FLUSH_MS` | `300000` | Min interval between embedding flushes (0 disables) |
-| `AGENTCTL_OPENCODE_IDLE_PLAN_SYNC_MS` | `60000` | Min interval between plan sync runs (0 disables) |
-| `AGENTCTL_OPENCODE_IDLE_TODO_MS` | `60000` | Min interval between todo continuation checks (0 disables) |
+| `FOXCTL_TASK_GUARD_MODE` | `auto` | Set to `strict` to require tasks |
+| `FOXCTL_HOME` | `~/.foxctl` | Storage root |
+| `FOXCTL_OPENCODE_IDLE_CAPTURE_MS` | `60000` | Min interval between idle captures (0 disables) |
+| `FOXCTL_OPENCODE_IDLE_FLUSH_MS` | `300000` | Min interval between embedding flushes (0 disables) |
+| `FOXCTL_OPENCODE_IDLE_PLAN_SYNC_MS` | `60000` | Min interval between plan sync runs (0 disables) |
+| `FOXCTL_OPENCODE_IDLE_TODO_MS` | `60000` | Min interval between todo continuation checks (0 disables) |
 
 ## Development
 

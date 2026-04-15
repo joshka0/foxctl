@@ -18,12 +18,12 @@
 #   - memories: Named memories with embeddings (Turso vector search)
 #
 # Environment:
-#   AGENTCTL_TOOL_ADVISOR_DISABLED - Set to 1 to disable this hook
+#   FOXCTL_TOOL_ADVISOR_DISABLED - Set to 1 to disable this hook
 
 set -euo pipefail
 
 # Allow disabling via environment
-if [[ "${AGENTCTL_TOOL_ADVISOR_DISABLED:-}" == "1" ]]; then
+if [[ "${FOXCTL_TOOL_ADVISOR_DISABLED:-}" == "1" ]]; then
   echo '{}'
   exit 0
 fi

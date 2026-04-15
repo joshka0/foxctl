@@ -98,7 +98,7 @@ CREATE INDEX idx_session_edges_type
 │     ├─► "forked_from" if branching/subagent                     │
 │     └─► NULL if fresh start                                     │
 │  7. INSERT session + session_edge                               │
-│  8. Export AGENTCTL_SESSION_ID, AGENTCTL_WORKSPACE to env       │
+│  8. Export FOXCTL_SESSION_ID, FOXCTL_WORKSPACE to env       │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -264,9 +264,9 @@ func GetSessionContext(sessionID string, depth int) (*Context, error) {
 func (r *Runner) Execute(skill string, input []byte) (*Result, error) {
     env := os.Environ()
     env = append(env,
-        "AGENTCTL_SESSION_ID="+r.sessionID,
-        "AGENTCTL_WORKSPACE="+r.workspace,
-        "AGENTCTL_AGENT_ID="+r.agentID,
+        "FOXCTL_SESSION_ID="+r.sessionID,
+        "FOXCTL_WORKSPACE="+r.workspace,
+        "FOXCTL_AGENT_ID="+r.agentID,
     )
 
     // Pass through exec/wasi
@@ -280,9 +280,9 @@ func (r *Runner) Execute(skill string, input []byte) (*Result, error) {
 #!/usr/bin/env bash
 # Hooks receive session context via environment
 
-session_id="$AGENTCTL_SESSION_ID"
-workspace="$AGENTCTL_WORKSPACE"
-agent_id="$AGENTCTL_AGENT_ID"
+session_id="$FOXCTL_SESSION_ID"
+workspace="$FOXCTL_WORKSPACE"
+agent_id="$FOXCTL_AGENT_ID"
 
 # Use in skill calls
 foxctl run session/capture --input "{
@@ -414,7 +414,7 @@ ORDER BY depth ASC;
   - Windsurf: `agent_id=windsurf`.
   - Subagents: `agent_id=subagent:<name>` when spawned by overseer.
 - Hooks export or recover session identity:
-  - Prefer env (AGENTCTL_SESSION_ID, AGENTCTL_WORKSPACE, AGENTCTL_AGENT_ID).
+  - Prefer env (FOXCTL_SESSION_ID, FOXCTL_WORKSPACE, FOXCTL_AGENT_ID).
   - If missing, read `~/.foxctl/sessions/active/<workspace_hash>.json`; if
     absent, start a new session and write the file.
 - Start/resume:
@@ -453,11 +453,11 @@ ORDER BY depth ASC;
 
 - Reserved: `foxctl`, `opencode`, `claude`, `windsurf`
 - Subagents: `subagent:<name>` (spawned children)
-- Allow explicit override via `AGENTCTL_AGENT_ID`
+- Allow explicit override via `FOXCTL_AGENT_ID`
 
 ### Phase 2: Runner/Environment
 
-1. Export `AGENTCTL_SESSION_ID`, `AGENTCTL_WORKSPACE`, `AGENTCTL_AGENT_ID` in
+1. Export `FOXCTL_SESSION_ID`, `FOXCTL_WORKSPACE`, `FOXCTL_AGENT_ID` in
    runner
 2. Pass through exec/wasi contexts
 3. Update skill library to read from env
@@ -514,7 +514,7 @@ ORDER BY depth ASC;
   agent_id=subagent:<name>.
 - Concurrency: two concurrent starts for same (workspace, agent_id) — second
   should fail without --new-session/--force.
-- Env propagation: verify AGENTCTL_SESSION_ID/WORKSPACE/AGENT_ID reach hooks and
+- Env propagation: verify FOXCTL_SESSION_ID/WORKSPACE/AGENT_ID reach hooks and
   skills (exec/wasi).
 - Mailbox routing: writes tagged with session_id/agent_id/workspace; reads
   filtered by lineage + workspace.

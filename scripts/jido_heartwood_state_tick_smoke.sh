@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEFAULT_HEARTWOOD_ROOT="$(cd "${REPO_ROOT}/../heartwood" 2>/dev/null && pwd || true)"
 
-JIDO_SOCKET="${AGENTCTL_JIDO_SOCKET:-/tmp/foxctl-jido.sock}"
+JIDO_SOCKET="${FOXCTL_JIDO_SOCKET:-/tmp/foxctl-jido.sock}"
 HEARTWOOD_ROOT="${HEARTWOOD_ROOT:-${DEFAULT_HEARTWOOD_ROOT}}"
 if [ -z "${HEARTWOOD_ROOT}" ] || [ ! -d "${HEARTWOOD_ROOT}" ]; then
   echo "HEARTWOOD_ROOT is not set and no sibling heartwood repo was found" >&2

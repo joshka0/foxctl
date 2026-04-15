@@ -180,7 +180,7 @@ The `semantic-search` hook automatically runs on Grep/Glob operations to surface
 Enable reranking for improved precision:
 
 ```bash
-export AGENTCTL_SEMANTIC_RERANK=1
+export FOXCTL_SEMANTIC_RERANK=1
 foxctl run code/semantic_search --input '{"query": "...", "rerank": true}'
 ```
 

@@ -29,9 +29,9 @@ type IdentityManager struct {
 }
 
 // NewIdentityManager creates a new identity manager.
-func NewIdentityManager(agentctlHome string) *IdentityManager {
+func NewIdentityManager(foxctlHome string) *IdentityManager {
 	return &IdentityManager{
-		baseDir: filepath.Join(agentctlHome, "sessions", "active"),
+		baseDir: filepath.Join(foxctlHome, "sessions", "active"),
 	}
 }
 
@@ -109,7 +109,7 @@ func (m *IdentityManager) GetActive(workspace string) (*ActiveSession, error) {
 	base := workspaceHash(workspace)
 
 	candidates := make([]string, 0, 3)
-	if agentID := env.GetString("AGENTCTL_AGENT_ID"); agentID != "" {
+	if agentID := env.GetString("FOXCTL_AGENT_ID"); agentID != "" {
 		candidates = append(candidates, m.identityPath(workspace, agentID))
 	}
 

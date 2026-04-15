@@ -169,7 +169,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **fox
 * `internal/interfaces/openapi/plugin/`
 
   * Protocol: stdin/stdout **JSON envelopes** (`plugin/auth`, `plugin/pagination`)
-  * Discovery: `AGENTCTL_OPENAPI_PLUGIN_PATH`, explicit `plugin:<name>` in hints/flags
+  * Discovery: `FOXCTL_OPENAPI_PLUGIN_PATH`, explicit `plugin:<name>` in hints/flags
   * Timeout/cancellation wired to context; result validation
 * Example plugins (Go) in `plugins/`
 

@@ -114,9 +114,9 @@ func NewGeminiProvider(cfg GeminiConfig) (*GeminiProvider, error) {
 	}
 
 	// Rate limiting: check env var first, then config, then default to unlimited.
-	// AGENTCTL_EMBEDDING_RATE_LIMIT: 0 = disabled, >0 = requests per minute
+	// FOXCTL_EMBEDDING_RATE_LIMIT: 0 = disabled, >0 = requests per minute
 	var rateLimit int
-	if v := os.Getenv("AGENTCTL_EMBEDDING_RATE_LIMIT"); v != "" {
+	if v := os.Getenv("FOXCTL_EMBEDDING_RATE_LIMIT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			rateLimit = n // 0 means disabled, >0 means limit
 		}

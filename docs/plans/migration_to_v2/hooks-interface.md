@@ -150,12 +150,12 @@ if [[ -z "${EVENT}" ]]; then
   exit 0
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
 WORKSPACE_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 PAYLOAD="$(cat)"
 
 # Session ID resolution (prefer env, then payload)
-SESSION_ID="${AGENTCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
+SESSION_ID="${FOXCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
 if [[ -z "${SESSION_ID}" || "${SESSION_ID}" == "null" ]]; then
   SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // .sessionID // ""' 2>/dev/null || true)"
 fi
@@ -200,7 +200,7 @@ dispatch_once () {
   local resp
   resp="$(
     printf '%s' "$hook_input" | \
-      "$AGENTCTL_BIN" run hooks/dispatch --workspace "$WORKSPACE_ROOT" --ephemeral --input-file - 2>/dev/null || true
+      "$FOXCTL_BIN" run hooks/dispatch --workspace "$WORKSPACE_ROOT" --ephemeral --input-file - 2>/dev/null || true
   )"
 
   if [[ -z "$resp" ]]; then

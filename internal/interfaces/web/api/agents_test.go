@@ -42,7 +42,7 @@ func resetAgentStreamRegistry() {
 }
 
 func TestAgentRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 
 	server, socketPath := startOrchestrationJSONRPCServer(t, func(method string, params json.RawMessage) (any, *jsonrpcTestError) {
 		var parsed map[string]any
@@ -165,7 +165,7 @@ func TestAgentRuntimeGetHandler_ReturnsRuntimeTree(t *testing.T) {
 }
 
 func TestAgentRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
 
 	cfg := orchestrationTestConfig(t.TempDir())
@@ -250,7 +250,7 @@ func TestAgentRuntimeGetHandler_ReturnsGoRuntimeTree(t *testing.T) {
 }
 
 func TestAgentDaemonKillWithRuntime_UsesInjectedHostForGoRuntime(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
 
 	cfg := orchestrationTestConfig(t.TempDir())
@@ -319,7 +319,7 @@ func TestAgentDaemonKillWithRuntime_UsesInjectedHostForGoRuntime(t *testing.T) {
 }
 
 func TestAgentRuntimeLogsGetHandler_ReturnsGoRuntimeRecentLogs(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
 
 	cfg := orchestrationTestConfig(t.TempDir())
@@ -396,7 +396,7 @@ func TestAgentRuntimeLogsGetHandler_ReturnsGoRuntimeRecentLogs(t *testing.T) {
 }
 
 func TestAgentRuntimeLogsStreamHandler_StreamsGoRuntimeLogUpdates(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv(EnvOrchestrationRuntimeBackend, orchestrationRuntimeBackendGoruntimeAPI)
 
 	cfg := orchestrationTestConfig(t.TempDir())
@@ -601,7 +601,7 @@ func TestAttachSpawnedAgentToRoom_SendsOnboardingMessage(t *testing.T) {
 }
 
 func TestAgentRuntimeGetHandler_ReturnsSandboxRuntimeSummary(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 
 	cfg := orchestrationTestConfig(t.TempDir())
 	store, err := agents.Open(context.Background(), cfg.Storage.Root)
@@ -658,14 +658,14 @@ func TestAgentRuntimeGetHandler_ReturnsSandboxRuntimeSummary(t *testing.T) {
 	if got := strings.TrimSpace(fmt.Sprint(state["profile"])); got != "sandbox" {
 		t.Fatalf("state.profile=%q want sandbox", got)
 	}
-	agentctlState, _ := state["foxctl"].(map[string]any)
-	if got := strings.TrimSpace(fmt.Sprint(agentctlState["status"])); got != "running" {
+	foxctlState, _ := state["foxctl"].(map[string]any)
+	if got := strings.TrimSpace(fmt.Sprint(foxctlState["status"])); got != "running" {
 		t.Fatalf("state.foxctl.status=%q want running", got)
 	}
 }
 
 func TestAgentPatchHandler_UpdatesMemoryScope(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 	resetAgentStreamRegistry()
 
 	cfg := orchestrationTestConfig(t.TempDir())
@@ -720,7 +720,7 @@ func TestAgentPatchHandler_UpdatesMemoryScope(t *testing.T) {
 }
 
 func TestAgentPatchHandler_UpdatesMemoryRetention(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 	resetAgentStreamRegistry()
 
 	cfg := orchestrationTestConfig(t.TempDir())
@@ -808,7 +808,7 @@ func TestPrepareSandboxBackedSpawn_RequiresRepoURL(t *testing.T) {
 }
 
 func TestAgentAskStreamHandler_AcceptsAndPublishesStartedEvent(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 	resetAgentStreamRegistry()
 
 	cfg := orchestrationTestConfig(t.TempDir())
@@ -880,7 +880,7 @@ func TestAgentAskStreamHandler_AcceptsAndPublishesStartedEvent(t *testing.T) {
 }
 
 func TestAgentAskStreamHandler_SandboxBackedReturnsDisabledWhenIntegrationOff(t *testing.T) {
-	t.Setenv("AGENTCTL_DB_DRIVER", "")
+	t.Setenv("FOXCTL_DB_DRIVER", "")
 	resetAgentStreamRegistry()
 
 	cfg := orchestrationTestConfig(t.TempDir())

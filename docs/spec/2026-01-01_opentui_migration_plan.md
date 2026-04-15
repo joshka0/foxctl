@@ -15,7 +15,7 @@ providing a more maintainable unified codebase.
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     foxctl-viewer (Go)                        │
-│  cmd/agentctl_viewer/ (~5K lines)                               │
+│  cmd/foxctl_viewer/ (~5K lines)                               │
 │  ├── Bubble Tea framework                                       │
 │  ├── Lipgloss styling                                           │
 │  └── 9 views: Jobs, Tasks, Insights, Mailbox, Reservations,    │
@@ -136,12 +136,12 @@ import { readdir, readFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 
-const AGENTCTL_HOME = process.env.AGENTCTL_HOME || join(homedir(), '.foxctl')
+const FOXCTL_HOME = process.env.FOXCTL_HOME || join(homedir(), '.foxctl')
 
 export const native = {
   jobs: {
     async list(opts: { limit?: number; state?: string }) {
-      const jobsDir = join(AGENTCTL_HOME, 'jobs')
+      const jobsDir = join(FOXCTL_HOME, 'jobs')
       const entries = await readdir(jobsDir)
       const jobs = []
 
@@ -165,9 +165,9 @@ export const native = {
 
   sqlite: {
     query(dbName: string, sql: string) {
-      const dbPath = join(AGENTCTL_HOME, 'storage', `${dbName}.db`)
-      // Validate path is under AGENTCTL_HOME
-      if (!dbPath.startsWith(AGENTCTL_HOME)) {
+      const dbPath = join(FOXCTL_HOME, 'storage', `${dbName}.db`)
+      // Validate path is under FOXCTL_HOME
+      if (!dbPath.startsWith(FOXCTL_HOME)) {
         throw new Error('Invalid database path')
       }
       const db = new Database(dbPath, { readonly: true })
@@ -190,7 +190,7 @@ Use HTTP API by default, with optional Bun-native fallback for local-only mode.
 import { api } from './client'
 import { native } from './native'
 
-export const data = process.env.AGENTCTL_LOCAL_MODE === '1' ? native : api
+export const data = process.env.FOXCTL_LOCAL_MODE === '1' ? native : api
 ```
 
 ---

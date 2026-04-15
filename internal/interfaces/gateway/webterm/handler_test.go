@@ -246,14 +246,14 @@ func TestHandler_StaticAssets(t *testing.T) {
 
 func TestGetAllowedOrigins(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
-		t.Setenv("AGENTCTL_GATEWAY_WS_ALLOWED_ORIGINS", "")
+		t.Setenv("FOXCTL_GATEWAY_WS_ALLOWED_ORIGINS", "")
 		origins := getAllowedOrigins()
 		assert.Contains(t, origins, "http://localhost:*")
 		assert.Contains(t, origins, "*.ts.net")
 	})
 
 	t.Run("override", func(t *testing.T) {
-		t.Setenv("AGENTCTL_GATEWAY_WS_ALLOWED_ORIGINS", "example.com,*.example.org")
+		t.Setenv("FOXCTL_GATEWAY_WS_ALLOWED_ORIGINS", "example.com,*.example.org")
 		origins := getAllowedOrigins()
 		assert.Equal(t, []string{"example.com", "*.example.org"}, origins)
 	})

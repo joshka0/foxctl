@@ -5,7 +5,7 @@
 - op: add
   path: /spec/template/spec/containers/0/env/0
   value:
-    name: AGENTCTL_POSTGRES_DSN
+    name: FOXCTL_POSTGRES_DSN
     valueFrom:
       secretKeyRef:
         name: postgres-secrets

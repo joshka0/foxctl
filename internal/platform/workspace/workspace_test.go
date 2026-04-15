@@ -58,11 +58,11 @@ func TestDetectWithGitWorktreeFile(t *testing.T) {
 	}
 }
 
-func TestDetectWithAgentctlDirectory(t *testing.T) {
+func TestDetectWithFoxctlDirectory(t *testing.T) {
 	// Create temp dir with .foxctl directory
 	root := t.TempDir()
-	agentctlDir := filepath.Join(root, ".foxctl")
-	if err := os.Mkdir(agentctlDir, 0o755); err != nil {
+	foxctlDir := filepath.Join(root, ".foxctl")
+	if err := os.Mkdir(foxctlDir, 0o755); err != nil {
 		t.Fatalf("failed to create .foxctl directory: %v", err)
 	}
 
@@ -121,12 +121,12 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
-func TestHasMarkerAgentctlMustBeDirectory(t *testing.T) {
+func TestHasMarkerFoxctlMustBeDirectory(t *testing.T) {
 	root := t.TempDir()
 
 	// .foxctl as file should NOT be detected
-	agentctlFile := filepath.Join(root, ".foxctl")
-	if err := os.WriteFile(agentctlFile, []byte("not a dir"), 0o644); err != nil {
+	foxctlFile := filepath.Join(root, ".foxctl")
+	if err := os.WriteFile(foxctlFile, []byte("not a dir"), 0o644); err != nil {
 		t.Fatalf("failed to create .foxctl file: %v", err)
 	}
 
@@ -135,8 +135,8 @@ func TestHasMarkerAgentctlMustBeDirectory(t *testing.T) {
 	}
 
 	// Clean up and create as directory
-	os.Remove(agentctlFile)
-	if err := os.Mkdir(agentctlFile, 0o755); err != nil {
+	os.Remove(foxctlFile)
+	if err := os.Mkdir(foxctlFile, 0o755); err != nil {
 		t.Fatalf("failed to create .foxctl directory: %v", err)
 	}
 

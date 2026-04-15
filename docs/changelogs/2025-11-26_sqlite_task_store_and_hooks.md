@@ -116,7 +116,7 @@ Add to `.claude/settings.json`:
 
 ### Environment Variables
 
-- `AGENTCTL_TASK_GUARD_MODE`: `auto` (default) or `strict`
+- `FOXCTL_TASK_GUARD_MODE`: `auto` (default) or `strict`
 
 ## Testing
 

@@ -84,7 +84,7 @@ func newObsidianIndexSearchCommand() *cobra.Command {
 			if semanticSearch {
 				provider := openObsidianSemanticProvider(cfg)
 				if provider == nil {
-					return fmt.Errorf("semantic note search requires AGENTCTL_OBSIDIAN_SEMANTIC_ENABLED and a configured embedding provider")
+					return fmt.Errorf("semantic note search requires FOXCTL_OBSIDIAN_SEMANTIC_ENABLED and a configured embedding provider")
 				}
 				hits, err = store.SearchNotesSemantic(ctx, query, provider, limit)
 			} else {

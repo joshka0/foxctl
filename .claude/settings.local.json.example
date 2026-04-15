@@ -12,6 +12,6 @@
     "defaultMode": "acceptEdits"
   },
   "env": {
-    "AGENTCTL_TASK_GUARD_MODE": "auto"
+    "FOXCTL_TASK_GUARD_MODE": "auto"
   }
 }

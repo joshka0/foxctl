@@ -32,7 +32,7 @@ Intercept Claude Code operations for coordination.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENTCTL_TASK_GUARD_MODE` | `auto` | `auto` or `strict` |
-| `AGENTCTL_FILE_GUARD_MODE` | `advisory` | `advisory` or `strict` |
+| `FOXCTL_TASK_GUARD_MODE` | `auto` | `auto` or `strict` |
+| `FOXCTL_FILE_GUARD_MODE` | `advisory` | `advisory` or `strict` |
 
 Full docs: `~/.foxctl/share/configs/skills/foxctl-hooks/Skill.md`

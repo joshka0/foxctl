@@ -1,12 +1,12 @@
 ```md
 ---
-title: Agentctl Actor Architecture Spec v1
+title: Foxctl Actor Architecture Spec v1
 status: draft
 owners: []
 last_updated: 2026-01-08
 ---
 
-# Agentctl Actor Architecture Spec v1
+# Foxctl Actor Architecture Spec v1
 
 This document is the **canonical** top-level spec for `foxctl`’s always-on, multi-actor, event-driven agent runtime. It defines what the system **is**, what it **guarantees**, and the **non-negotiable contracts** that all implementations and refactors must preserve.
 
@@ -319,9 +319,9 @@ All runtime actions MUST be scoped by:
 
 Runners and sub-process tool invocations MUST propagate:
 
-* `AGENTCTL_WORKSPACE`
-* `AGENTCTL_SESSION_ID`
-* `AGENTCTL_AGENT_ID`
+* `FOXCTL_WORKSPACE`
+* `FOXCTL_SESSION_ID`
+* `FOXCTL_AGENT_ID`
 
 ### Lineage edges
 

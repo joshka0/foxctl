@@ -144,7 +144,7 @@ func buildSQLiteDSN(path string, busyTimeoutMs int) (string, error) {
 		if _, err := rand.Read(randBytes[:]); err != nil {
 			return "", fmt.Errorf("failed to generate random bytes for in-memory db: %w", err)
 		}
-		uniqueName := "agentctl_mem_" + hex.EncodeToString(randBytes[:])
+		uniqueName := "foxctl_mem_" + hex.EncodeToString(randBytes[:])
 		u = &url.URL{Scheme: "file", Path: uniqueName}
 		q := u.Query()
 		q.Set("mode", "memory")

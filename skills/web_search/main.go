@@ -94,7 +94,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Determine provider
 	provider := in.Provider
 	if provider == "" {
-		provider = os.Getenv("AGENTCTL_SEARCH_PROVIDER")
+		provider = os.Getenv("FOXCTL_SEARCH_PROVIDER")
 	}
 	if provider == "" {
 		// Check which API keys are available from config

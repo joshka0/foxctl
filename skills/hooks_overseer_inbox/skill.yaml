@@ -75,9 +75,9 @@ capabilities:
     - type: workdir
   pure: false
 env:
-  - name: AGENTCTL_OVERSEER_RECIPIENT
+  - name: FOXCTL_OVERSEER_RECIPIENT
     description: "Recipient to monitor for messages (default: 'overseer', use '*' for broadcast)"
     default: "overseer"
-  - name: AGENTCTL_OVERSEER_AUTOACK
+  - name: FOXCTL_OVERSEER_AUTOACK
     description: "Set to '0' to disable auto-ack of displayed messages (default: '1')"
     default: "1"

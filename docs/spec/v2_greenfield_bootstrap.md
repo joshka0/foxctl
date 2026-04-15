@@ -1,4 +1,4 @@
-# Agentctl V2 Greenfield Bootstrap Design Spec
+# Foxctl V2 Greenfield Bootstrap Design Spec
 
 Status: Draft target-state design  
 Owner: Solo maintainer  
@@ -277,7 +277,7 @@ Embedding storage and index policy:
    - `embedding` (`F32_BLOB(N)`) for native libsql vector SQL
    - `embedding_json` (`TEXT`) for deterministic fallback cosine ranking and portability
 2. Vector dimension policy:
-   - canonical dimension `N` is configured by `AGENTCTL_VECTOR_DIMS` (and per-store
+   - canonical dimension `N` is configured by `FOXCTL_VECTOR_DIMS` (and per-store
      overrides where available)
    - when vector mode is active, writes/queries with mismatched embedding dimensions
      fail fast with typed errors

@@ -333,7 +333,7 @@ func newACAInspectHarness(t *testing.T) acaInspectHarness {
 	t.Helper()
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	t.Setenv("AGENTCTL_OBSIDIAN_SEMANTIC_ENABLED", "0")
+	t.Setenv("FOXCTL_OBSIDIAN_SEMANTIC_ENABLED", "0")
 	cfg, err := config.Load(context.Background())
 	if err != nil {
 		t.Fatalf("config load: %v", err)

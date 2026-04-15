@@ -216,7 +216,7 @@ func SyncTodoWrite(ctx context.Context, deps Dependencies, req TodoSyncRequest) 
 		contextParts = append(contextParts, "**Warnings:** "+strings.Join(response.Warnings, "; "))
 	}
 
-	if os.Getenv("AGENTCTL_TODO_BIDIRECTIONAL") == "1" && sessionID != "" {
+	if os.Getenv("FOXCTL_TODO_BIDIRECTIONAL") == "1" && sessionID != "" {
 		var outbound todoSyncToProviderEnvelope
 		if err := deps.RunSkill(ctx, "todo/sync_to_provider", map[string]any{
 			"provider":             "claude",
@@ -240,7 +240,7 @@ func ContinueTodoSession(ctx context.Context, deps Dependencies, req TodoContinu
 	if target == "" {
 		return TodoContinuationResponse{}, fmt.Errorf("detect workspace")
 	}
-	if envEnabled("AGENTCTL_TODO_CONTINUATION_DISABLED") {
+	if envEnabled("FOXCTL_TODO_CONTINUATION_DISABLED") {
 		return TodoContinuationResponse{Decision: "approve"}, nil
 	}
 	sessionID := firstNonEmpty(strings.TrimSpace(req.Payload.SessionID), strings.TrimSpace(req.Payload.AltSessionID))
@@ -272,8 +272,8 @@ func ContinueTodoSession(ctx context.Context, deps Dependencies, req TodoContinu
 		}
 	}
 
-	topN := envInt("AGENTCTL_TODO_CONTINUATION_TOP_N", 5)
-	minPending := envInt("AGENTCTL_TODO_CONTINUATION_MIN_PENDING", 1)
+	topN := envInt("FOXCTL_TODO_CONTINUATION_TOP_N", 5)
+	minPending := envInt("FOXCTL_TODO_CONTINUATION_MIN_PENDING", 1)
 	var continuation todoContinuationEnvelope
 	if deps.RunSkill == nil {
 		return TodoContinuationResponse{Decision: "approve", SessionID: sessionID}, nil
@@ -304,7 +304,7 @@ func LinkTaskFile(ctx context.Context, deps Dependencies, req TaskFileLinkReques
 	if target == "" {
 		return TaskFileLinkResponse{}, fmt.Errorf("detect workspace")
 	}
-	if envEnabled("AGENTCTL_TASK_FILE_LINK_DISABLED") {
+	if envEnabled("FOXCTL_TASK_FILE_LINK_DISABLED") {
 		return TaskFileLinkResponse{Decision: "approve"}, nil
 	}
 	filePath := strings.TrimSpace(req.Payload.ToolInput.FilePath)
@@ -371,7 +371,7 @@ func LinkTaskFile(ctx context.Context, deps Dependencies, req TaskFileLinkReques
 		CreatedAt: now,
 	})
 
-	if envEnabled("AGENTCTL_TASK_FILE_LINK_SYNC") {
+	if envEnabled("FOXCTL_TASK_FILE_LINK_SYNC") {
 		return TaskFileLinkResponse{
 			Decision: "approve",
 			Context:  fmt.Sprintf("**Graph:** Linked `%s` → task \"%s\"", relPath, task.Title),

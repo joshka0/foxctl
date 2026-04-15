@@ -13,28 +13,28 @@ You can copy/paste this into a separate doc if you want to keep it nearby.
 
 ## 1) Codemap Index (IDs → Names)
 
-- **CM1** – _agentctl Skill System: Build → Discovery → Execution → Runtime_
-- **CM2** – _agentctl Skill System: Discovery, Validation, and Execution_
-- **CM3** – _agentctl Envelope Protocol & CLI Pipeline_
-- **CM4** – _agentctl Skill System: Installation, Execution, Jobs, CAS, and
+- **CM1** – _foxctl Skill System: Build → Discovery → Execution → Runtime_
+- **CM2** – _foxctl Skill System: Discovery, Validation, and Execution_
+- **CM3** – _foxctl Envelope Protocol & CLI Pipeline_
+- **CM4** – _foxctl Skill System: Installation, Execution, Jobs, CAS, and
   Plugin Architecture_
-- **CM5** – _CAS Storage & Integrity Verification in agentctl_
-- **CM6** – _Dspy-Go Agent Runtime & Tools Integration in agentctl_
-- **CM7** – _agentctl Job System: Types, Storage, and WFQ Scheduler_
-- **CM8** – _agentctl Job System: Submission, SQLite Storage, State Transitions,
+- **CM5** – _CAS Storage & Integrity Verification in foxctl_
+- **CM6** – _Dspy-Go Agent Runtime & Tools Integration in foxctl_
+- **CM7** – _foxctl Job System: Types, Storage, and WFQ Scheduler_
+- **CM8** – _foxctl Job System: Submission, SQLite Storage, State Transitions,
   and WFQ Scheduler_
-- **CM9** – _Agentctl Overseer & Agent Hierarchy: Spawn Protocol, Depth Limits,
+- **CM9** – _Foxctl Overseer & Agent Hierarchy: Spawn Protocol, Depth Limits,
   and Session Management_
-- **CM10** – _agentctl Knowledge System & Factory Droids_
-- **CM11** – _agentctl Execution Runners: WASI & Exec with Network/FS Policy
+- **CM10** – _foxctl Knowledge System & Factory Droids_
+- **CM11** – _foxctl Execution Runners: WASI & Exec with Network/FS Policy
   Enforcement_
-- **CM12** – _agentctl CAS: Put, Get, Integrity, Deduplication & Integration_
-- **CM13** – _agentctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow_
-- **CM14** – _agentctl Test Infrastructure: Test-Watch, Feedback Hooks, and CI
+- **CM12** – _foxctl CAS: Put, Get, Integrity, Deduplication & Integration_
+- **CM13** – _foxctl Core Profile v1: End-to-End Envelope, Jobs & CAS Flow_
+- **CM14** – _foxctl Test Infrastructure: Test-Watch, Feedback Hooks, and CI
   Targets_
 - **CM15** – _OpenAPI Skill & Plugin Protocol: Request Flow and Plugin
   Integration_
-- **CM16** – _agentctl Planning LLM Stack: Auto, Providers, and Integration
+- **CM16** – _foxctl Planning LLM Stack: Auto, Providers, and Integration
   Tests_
 - **CM17** – _Test Infrastructure & CI Pipeline: Test Watcher, Makefile Targets,
   and Coverage Thresholds_
@@ -299,7 +299,7 @@ readable.
 - **Test plan phases**
   - Same as **CM7**, focusing on submission APIs and state transitions.
 
-### CM9 – Agentctl Overseer & Agent Hierarchy: Spawn Protocol, Depth Limits, and Session Management
+### CM9 – Foxctl Overseer & Agent Hierarchy: Spawn Protocol, Depth Limits, and Session Management
 
 - **Impl plan phases**
   - **Phase 2:** Overseer-style coordination in the post-review handler (the
@@ -340,7 +340,7 @@ readable.
   - Cross-cutting tests around:
     - Path validation & workspace anchoring.
     - `network="none"` enforcement for WASI.
-    - Environment injection (`AGENTCTL_WORKSPACE`).
+    - Environment injection (`FOXCTL_WORKSPACE`).
 
 ### CM12 – foxctl CAS: Put, Get, Integrity, Deduplication & Integration
 

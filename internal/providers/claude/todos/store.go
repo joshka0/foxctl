@@ -4,7 +4,7 @@
 // as a JSON array of {content, status, activeForm} objects.
 //
 // SECURITY NOTE: Writing to ~/.claude/todos is outside the workspace and must
-// be restricted to privileged hooks/daemons. Use AGENTCTL_ALLOW_PROVIDER_STATE=1
+// be restricted to privileged hooks/daemons. Use FOXCTL_ALLOW_PROVIDER_STATE=1
 // to enable writes.
 package todos
 
@@ -154,7 +154,7 @@ type WriteOptions struct {
 // Returns the new file hash for conflict detection.
 func (s *Store) Write(sessionID string, todos []todosync.ClaudeTodo, opts WriteOptions) (string, error) {
 	if !opts.AllowProviderState {
-		return "", fmt.Errorf("write denied: AGENTCTL_ALLOW_PROVIDER_STATE not set")
+		return "", fmt.Errorf("write denied: FOXCTL_ALLOW_PROVIDER_STATE not set")
 	}
 
 	filePath := s.FilePathForSession(sessionID)
@@ -165,7 +165,7 @@ func (s *Store) Write(sessionID string, todos []todosync.ClaudeTodo, opts WriteO
 // Returns the new file hash for conflict detection.
 func (s *Store) WriteFile(filePath string, todos []todosync.ClaudeTodo, opts WriteOptions) (string, error) {
 	if !opts.AllowProviderState {
-		return "", fmt.Errorf("write denied: AGENTCTL_ALLOW_PROVIDER_STATE not set")
+		return "", fmt.Errorf("write denied: FOXCTL_ALLOW_PROVIDER_STATE not set")
 	}
 
 	// Conflict detection

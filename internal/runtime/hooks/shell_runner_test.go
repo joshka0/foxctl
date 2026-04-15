@@ -264,7 +264,7 @@ func TestShellRunner_EnvironmentVariables(t *testing.T) {
 
 	script := `#!/bin/sh
 cat <<EOF
-{"decision":"approve","context":"event=$AGENTCTL_HOOK_EVENT tool=$AGENTCTL_TOOL_NAME"}
+{"decision":"approve","context":"event=$FOXCTL_HOOK_EVENT tool=$FOXCTL_TOOL_NAME"}
 EOF
 `
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {

@@ -253,9 +253,9 @@ WHERE json_extract(data, '$.iteration') > 10;
 
 | File | Location | Purpose |
 |------|----------|---------|
-| NDJSON events | `$AGENTCTL_OBS_DIR/events/wide_events.ndjson` | Default event stream |
-| SQLite database | `$AGENTCTL_OBS_DIR/events.db` | Queryable events |
-| Custom NDJSON | `$AGENTCTL_OBS_DIR/events/<name>.ndjson` | Skill-specific files |
+| NDJSON events | `$FOXCTL_OBS_DIR/events/wide_events.ndjson` | Default event stream |
+| SQLite database | `$FOXCTL_OBS_DIR/events.db` | Queryable events |
+| Custom NDJSON | `$FOXCTL_OBS_DIR/events/<name>.ndjson` | Skill-specific files |
 
 ## Best Practices
 
@@ -280,7 +280,7 @@ Existing NDJSON events can be imported to SQLite:
 
 ```bash
 # Manual import via jq + sqlite3
-cat $AGENTCTL_OBS_DIR/events/wide_events.ndjson | \
+cat $FOXCTL_OBS_DIR/events/wide_events.ndjson | \
   jq -c '.' | \
   while read line; do
     # Parse and insert each event

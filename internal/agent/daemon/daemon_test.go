@@ -772,11 +772,11 @@ func TestDaemon_CompanionMemory(t *testing.T) {
 		t.Skip("skipping daemon test in short mode")
 	}
 	// This test requires companion.Service which needs a real LLM API key
-	if os.Getenv("AGENTCTL_LLM_API_KEY") == "" &&
+	if os.Getenv("FOXCTL_LLM_API_KEY") == "" &&
 		os.Getenv("CEREBRAS_API_KEY") == "" &&
 		os.Getenv("GROQ_API_KEY") == "" &&
 		os.Getenv("OPENROUTER_API_KEY") == "" {
-		t.Skip("skipping companion memory test: requires LLM API key (set AGENTCTL_LLM_API_KEY or provider-specific *_API_KEY)")
+		t.Skip("skipping companion memory test: requires LLM API key (set FOXCTL_LLM_API_KEY or provider-specific *_API_KEY)")
 	}
 	root := t.TempDir()
 	ctx := context.Background()
@@ -799,8 +799,8 @@ func TestDaemon_CompanionMemory(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, as.Close())
 
-	provider := os.Getenv("AGENTCTL_LLM_PROVIDER")
-	apiKey := os.Getenv("AGENTCTL_LLM_API_KEY")
+	provider := os.Getenv("FOXCTL_LLM_PROVIDER")
+	apiKey := os.Getenv("FOXCTL_LLM_API_KEY")
 	if provider == "" || apiKey == "" {
 		switch {
 		case os.Getenv("CEREBRAS_API_KEY") != "":

@@ -83,7 +83,7 @@ Examples:
 
 - a runtime dispatch chain vs a registration chain
 - a skill implementation note vs its manifest note
-- `RunAgentctlSkillDecode(..., "<skill>", ...)` style bridges
+- `RunFoxctlSkillDecode(..., "<skill>", ...)` style bridges
 - implementation files vs exposure files vs structural support files
 
 These are exactly the kinds of patterns ACA should remember and expose.
@@ -142,7 +142,7 @@ Examples:
 
 - runtime tool exposure vs direct dispatch
 - adapter dispatch
-- `RunAgentctlSkillDecode(...)`
+- `RunFoxctlSkillDecode(...)`
 
 Suggested frontmatter:
 

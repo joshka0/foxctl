@@ -60,7 +60,7 @@ Common schemes:
 Secrets generally come from:
 
 - Files under `/run/secrets/<name>`
-- Env vars (`AGENTCTL_*`, or scheme-specific names)
+- Env vars (`FOXCTL_*`, or scheme-specific names)
 
 **Rules:**
 
@@ -107,7 +107,7 @@ Canonical spec: `docs/spec/plugin_protocol.md`.
   - Input includes the last HTTP response and pagination limits.
   - Output returns whether to continue and how to build the next request.
 
-Plugins are discovered via search paths (e.g. `AGENTCTL_OPENAPI_PLUGIN_PATH`) or
+Plugins are discovered via search paths (e.g. `FOXCTL_OPENAPI_PLUGIN_PATH`) or
 installed under `~/.foxctl/plugins`.
 
 ---

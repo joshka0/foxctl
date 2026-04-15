@@ -30,8 +30,8 @@ type WideEvent struct {
 	Subtype   string `json:"subtype,omitempty"` // Additional classification
 
 	// Business context
-	SessionID   string `json:"session_id,omitempty"`   // AGENTCTL_SESSION_ID
-	AgentID     string `json:"agent_id,omitempty"`     // AGENTCTL_AGENT_ID
+	SessionID   string `json:"session_id,omitempty"`   // FOXCTL_SESSION_ID
+	AgentID     string `json:"agent_id,omitempty"`     // FOXCTL_AGENT_ID
 	WorkspaceID string `json:"workspace_id,omitempty"` // Logical workspace
 	JobID       string `json:"job_id,omitempty"`       // Background job ID
 

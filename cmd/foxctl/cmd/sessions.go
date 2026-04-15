@@ -655,7 +655,7 @@ does not require running the legacy v1 runtime path.`,
 								embedDims,
 								storeDims,
 							),
-							"Set AGENTCTL_V2_TURNS_VECTOR_DIMS to match the embedding model dimensions, then use a matching v2 turns DB path.",
+							"Set FOXCTL_V2_TURNS_VECTOR_DIMS to match the embedding model dimensions, then use a matching v2 turns DB path.",
 						)
 					}
 				}

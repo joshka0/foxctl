@@ -59,9 +59,9 @@ func TestResolveEmbedderConfig_OpenAICompatFromEnv(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
-		"AGENTCTL_OPENAI_COMPAT_EMBEDDING_MODEL": "text-embedding-3-small",
-		"AGENTCTL_OPENAI_COMPAT_BASE_URL":        "http://127.0.0.1:1234/v1",
-		"AGENTCTL_OPENAI_COMPAT_API_KEY":         "compat-key",
+		"FOXCTL_OPENAI_COMPAT_EMBEDDING_MODEL": "text-embedding-3-small",
+		"FOXCTL_OPENAI_COMPAT_BASE_URL":        "http://127.0.0.1:1234/v1",
+		"FOXCTL_OPENAI_COMPAT_API_KEY":         "compat-key",
 	}
 	got, err := ResolveEmbedderConfig(EmbedderConfig{
 		Provider: EmbeddingProviderOpenAICompat,
@@ -90,7 +90,7 @@ func TestResolveEmbedderConfig_VoyageFallbackChain(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
-		"AGENTCTL_EMBEDDING_MODEL_TEXT": "voyage-text-fallback",
+		"FOXCTL_EMBEDDING_MODEL_TEXT": "voyage-text-fallback",
 	}
 	got, err := ResolveEmbedderConfig(EmbedderConfig{
 		Provider: "voyage",

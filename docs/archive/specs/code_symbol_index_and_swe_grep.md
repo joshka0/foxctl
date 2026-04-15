@@ -372,7 +372,7 @@ Conceptual `data` fields:
 The skill MUST:
 
 - Validate paths using the same path validation rules as other filesystem
-  helpers (see policy/PathValidator and `AGENTCTL_WORKSPACE`).
+  helpers (see policy/PathValidator and `FOXCTL_WORKSPACE`).
 - Read file contents from disk (not from the symbol DB) to ensure freshness.
 
 ### 5.3 Output Shape (`data`)

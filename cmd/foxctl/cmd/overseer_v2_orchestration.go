@@ -25,14 +25,14 @@ import (
 )
 
 const (
-	envJidoOrchestrationPollIntervalMS      = "AGENTCTL_JIDO_ORCHESTRATION_POLL_INTERVAL_MS"
-	envOverseerOrchestrationRuntimeBackend  = "AGENTCTL_V2_ORCHESTRATION_RUNTIME_BACKEND"
+	envJidoOrchestrationPollIntervalMS      = "FOXCTL_JIDO_ORCHESTRATION_POLL_INTERVAL_MS"
+	envOverseerOrchestrationRuntimeBackend  = "FOXCTL_V2_ORCHESTRATION_RUNTIME_BACKEND"
 	orchestrationRuntimeBackendJido         = "jido"
 	orchestrationRuntimeBackendGoSubprocess = "goruntime"
 
-	envCLIDispatchParentAgentID = "AGENTCTL_ORCHESTRATION_DISPATCH_PARENT_AGENT_ID"
-	envCLIParentAgentIDs        = "AGENTCTL_ORCHESTRATION_PARENT_AGENT_IDS"
-	envCLISuccessTrackerState   = "AGENTCTL_ORCHESTRATION_SUCCESS_TRACKER_STATE"
+	envCLIDispatchParentAgentID = "FOXCTL_ORCHESTRATION_DISPATCH_PARENT_AGENT_ID"
+	envCLIParentAgentIDs        = "FOXCTL_ORCHESTRATION_PARENT_AGENT_IDS"
+	envCLISuccessTrackerState   = "FOXCTL_ORCHESTRATION_SUCCESS_TRACKER_STATE"
 )
 
 func orchestrationComponentEnabled() bool {
@@ -356,7 +356,7 @@ func overseerOrchestrationDBConfig(cfg config.Config) (dbdriver.Config, error) {
 		return dbdriver.Config{}, fmt.Errorf("orchestration db config: storage root is required")
 	}
 
-	if strings.TrimSpace(os.Getenv("AGENTCTL_V2_EVENTS_DB_DRIVER")) != "" {
+	if strings.TrimSpace(os.Getenv("FOXCTL_V2_EVENTS_DB_DRIVER")) != "" {
 		loader := dbdriver.NewConfigLoader(storageRoot)
 		dbCfg := loader.LoadConfig("V2_EVENTS", "v2_events.db")
 		switch dbCfg.Driver {
@@ -372,7 +372,7 @@ func overseerOrchestrationDBConfig(cfg config.Config) (dbdriver.Config, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.Database.Driver)) {
 	case "", "libsql", "sqlite", "postgres":
 		dbPath := filepath.Join(storageRoot, "v2_events.db")
-		if override := strings.TrimSpace(os.Getenv("AGENTCTL_V2_EVENTS_DB_PATH")); override != "" {
+		if override := strings.TrimSpace(os.Getenv("FOXCTL_V2_EVENTS_DB_PATH")); override != "" {
 			dbPath = override
 		}
 		return dbdriver.DefaultSQLiteConfig(dbPath), nil
@@ -387,7 +387,7 @@ func overseerOrchestrationDBConfig(cfg config.Config) (dbdriver.Config, error) {
 			dims = dbdriver.GetDefaultVectorDimensions()
 		}
 		replicaPath := filepath.Join(storageRoot, "v2_events.turso.replica")
-		if override := strings.TrimSpace(os.Getenv("AGENTCTL_V2_EVENTS_DB_PATH")); override != "" {
+		if override := strings.TrimSpace(os.Getenv("FOXCTL_V2_EVENTS_DB_PATH")); override != "" {
 			replicaPath = override
 		}
 		return dbdriver.Config{

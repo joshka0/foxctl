@@ -2289,12 +2289,12 @@ func TestRunRoomRemindCancelFallsBackToReminderSender(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_PANE", "")
-	t.Setenv("AGENTCTL_PARTICIPANT", "")
-	t.Setenv("AGENTCTL_PARTICIPANT_ID", "")
+	t.Setenv("FOXCTL_PARTICIPANT", "")
+	t.Setenv("FOXCTL_PARTICIPANT_ID", "")
 	t.Setenv("ZELLIJ", "")
 	t.Setenv("ZELLIJ_SESSION_NAME", "")
 	t.Setenv("ZELLIJ_PANE_ID", "")
-	t.Setenv("AGENTCTL_ZELLIJ_PARTICIPANT", "")
+	t.Setenv("FOXCTL_ZELLIJ_PARTICIPANT", "")
 	ctx := context.Background()
 	workspace := t.TempDir()
 
@@ -8879,7 +8879,7 @@ func TestRunRoomJoinCurrentPersistsZellijPaneBinding(t *testing.T) {
 	t.Setenv("ZELLIJ", "1")
 	t.Setenv("ZELLIJ_SESSION_NAME", "sparkling-apricot")
 	t.Setenv("ZELLIJ_PANE_ID", "7")
-	t.Setenv("AGENTCTL_ZELLIJ_PARTICIPANT", "cursor-a")
+	t.Setenv("FOXCTL_ZELLIJ_PARTICIPANT", "cursor-a")
 	ctx := context.Background()
 	workspace := t.TempDir()
 
@@ -9342,10 +9342,10 @@ func roomListFormat() string {
 		"#{pane_current_path}" + roomFieldSep() +
 		"#{pane_current_command}" + roomFieldSep() +
 		"#{pane_active}" + roomFieldSep() +
-		"#{@agentctl_participant}" + roomFieldSep() +
-		"#{@agentctl_provider}" + roomFieldSep() +
-		"#{@agentctl_room_id}" + roomFieldSep() +
-		"#{@agentctl_wrapped}"
+		"#{@foxctl_participant}" + roomFieldSep() +
+		"#{@foxctl_provider}" + roomFieldSep() +
+		"#{@foxctl_room_id}" + roomFieldSep() +
+		"#{@foxctl_wrapped}"
 }
 
 func mustWriteRoomTestFile(t *testing.T, path, contents string) {

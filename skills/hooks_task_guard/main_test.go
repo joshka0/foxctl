@@ -101,7 +101,7 @@ func TestTaskGuard_StrictMode_BlocksWithoutTask(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Set strict mode
-	t.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
+	t.Setenv("FOXCTL_TASK_GUARD_MODE", "strict")
 
 	// Write operation with no active task should block
 	in := hooks.Input{
@@ -124,7 +124,7 @@ func TestTaskGuard_StrictMode_ApprovesWithTask(t *testing.T) {
 	workspaceID := workspace.ID(env.workspaceRoot)
 
 	// Set strict mode
-	t.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
+	t.Setenv("FOXCTL_TASK_GUARD_MODE", "strict")
 
 	// Create an active task first
 	ctx := context.Background()
@@ -228,7 +228,7 @@ func TestTaskGuard_StrictMode_DirtiesCompletedTask(t *testing.T) {
 	workspaceID := workspace.ID(env.workspaceRoot)
 
 	// Set strict mode
-	t.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
+	t.Setenv("FOXCTL_TASK_GUARD_MODE", "strict")
 
 	// Create a completed task with passing review
 	ctx := context.Background()

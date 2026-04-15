@@ -17,10 +17,10 @@ import (
 )
 
 // getAllowedOrigins returns the list of allowed WebSocket origins.
-// Reads from AGENTCTL_WS_ALLOWED_ORIGINS env var (comma-separated).
+// Reads from FOXCTL_WS_ALLOWED_ORIGINS env var (comma-separated).
 // Defaults to localhost patterns for development.
 func getAllowedOrigins() []string {
-	if origins := os.Getenv("AGENTCTL_WS_ALLOWED_ORIGINS"); origins != "" {
+	if origins := os.Getenv("FOXCTL_WS_ALLOWED_ORIGINS"); origins != "" {
 		return strings.Split(origins, ",")
 	}
 	// Default to localhost patterns for development

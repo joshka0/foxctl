@@ -4,8 +4,8 @@
 # It is advisory only (never blocks) and provides test failure context via PostToolUse.
 #
 # Environment:
-#   AGENTCTL_BIN                          - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_TEST_FEEDBACK_MAX_FAILURES   - Max failures to show per watcher (default: 3)
+#   FOXCTL_BIN                          - Path to foxctl binary (default: foxctl)
+#   FOXCTL_TEST_FEEDBACK_MAX_FAILURES   - Max failures to show per watcher (default: 3)
 #   CLAUDE_PROJECT_DIR                    - Workspace root (set by Claude Code)
 
 set -euo pipefail
@@ -14,7 +14,7 @@ set -euo pipefail
 trap 'kill $(jobs -p) 2>/dev/null || true' SIGTERM SIGINT EXIT
 
 # Resolve foxctl binary
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
 
 # Read hook input from stdin
 INPUT=$(cat)
@@ -22,7 +22,7 @@ INPUT=$(cat)
 # Run the test_feedback skill and extract hook_output from envelope
 # Use --ephemeral for faster execution (skip job persistence)
 # Redirect stderr to /dev/null to suppress status messages
-result="$(echo "$INPUT" | "$AGENTCTL_BIN" run --daemon hooks/test_feedback --ephemeral --input-file - 2>/dev/null)" || {
+result="$(echo "$INPUT" | "$FOXCTL_BIN" run --daemon hooks/test_feedback --ephemeral --input-file - 2>/dev/null)" || {
   # On error, return empty (fail-open)
   echo '{}'
   exit 0

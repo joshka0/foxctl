@@ -14,14 +14,14 @@ import (
 )
 
 // TestHierarchySpawn tests the full overseer -> agent spawning flow.
-// This test requires GEMINI_API_KEY or AGENTCTL_LLM_API_KEY to be set.
+// This test requires GEMINI_API_KEY or FOXCTL_LLM_API_KEY to be set.
 func TestHierarchySpawn(t *testing.T) {
-	apiKey := os.Getenv("AGENTCTL_LLM_API_KEY")
+	apiKey := os.Getenv("FOXCTL_LLM_API_KEY")
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
 	if apiKey == "" {
-		t.Skip("Skipping: GEMINI_API_KEY or AGENTCTL_LLM_API_KEY not set")
+		t.Skip("Skipping: GEMINI_API_KEY or FOXCTL_LLM_API_KEY not set")
 	}
 
 	tmpDir := t.TempDir()
@@ -158,12 +158,12 @@ func TestHierarchySpawn(t *testing.T) {
 
 // TestOverseerConcurrencyLimit tests the concurrent agent limit.
 func TestOverseerConcurrencyLimit(t *testing.T) {
-	apiKey := os.Getenv("AGENTCTL_LLM_API_KEY")
+	apiKey := os.Getenv("FOXCTL_LLM_API_KEY")
 	if apiKey == "" {
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
 	if apiKey == "" {
-		t.Skip("Skipping: GEMINI_API_KEY or AGENTCTL_LLM_API_KEY not set")
+		t.Skip("Skipping: GEMINI_API_KEY or FOXCTL_LLM_API_KEY not set")
 	}
 
 	tmpDir := t.TempDir()

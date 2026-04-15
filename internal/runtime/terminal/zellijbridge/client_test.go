@@ -50,11 +50,11 @@ func TestCreatePaneBuildsNamedZellijNewPaneCommand(t *testing.T) {
 		"--session collab action new-pane",
 		"--cwd /repo",
 		"--name researcher-a1b2",
-		"AGENTCTL_PARTICIPANT_ID=researcher-a1b2",
-		"AGENTCTL_ZELLIJ_PARTICIPANT=researcher-a1b2",
-		"AGENTCTL_MUX_BACKEND=zellij",
-		"AGENTCTL_PARENT_PARTICIPANT_ID=lead-a",
-		"AGENTCTL_PARENT_AGENT_ID=agent:parent-1",
+		"FOXCTL_PARTICIPANT_ID=researcher-a1b2",
+		"FOXCTL_ZELLIJ_PARTICIPANT=researcher-a1b2",
+		"FOXCTL_MUX_BACKEND=zellij",
+		"FOXCTL_PARENT_PARTICIPANT_ID=lead-a",
+		"FOXCTL_PARENT_AGENT_ID=agent:parent-1",
 		"sh -lc if [ -n",
 		"exec foxctl agent watch agent-123",
 	} {
@@ -62,8 +62,8 @@ func TestCreatePaneBuildsNamedZellijNewPaneCommand(t *testing.T) {
 			t.Fatalf("command %q missing %q", cmd, want)
 		}
 	}
-	if strings.Contains(cmd, "AGENTCTL_ROOM_ID=") {
-		t.Fatalf("command %q unexpectedly contains AGENTCTL_ROOM_ID", cmd)
+	if strings.Contains(cmd, "FOXCTL_ROOM_ID=") {
+		t.Fatalf("command %q unexpectedly contains FOXCTL_ROOM_ID", cmd)
 	}
 }
 
@@ -129,7 +129,7 @@ func TestCreatePaneDirectRoomAddsRoomID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePane() error = %v", err)
 	}
-	if !strings.Contains(strings.Join(runner.lastArgs, " "), "AGENTCTL_ROOM_ID=room-alpha") {
+	if !strings.Contains(strings.Join(runner.lastArgs, " "), "FOXCTL_ROOM_ID=room-alpha") {
 		t.Fatalf("expected room id in command, got %q", strings.Join(runner.lastArgs, " "))
 	}
 }

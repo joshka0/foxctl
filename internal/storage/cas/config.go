@@ -175,7 +175,7 @@ func DefaultFileConfig(rootDir string) Config {
 
 // LoadConfig loads CAS configuration from environment variables.
 func LoadConfig(rootDir string) Config {
-	driver := os.Getenv("AGENTCTL_CAS_DRIVER")
+	driver := os.Getenv("FOXCTL_CAS_DRIVER")
 	if driver == "" {
 		driver = string(DriverSQLite)
 	}
@@ -197,7 +197,7 @@ func LoadConfig(rootDir string) Config {
 }
 
 func loadFileConfig(rootDir string) Config {
-	path := os.Getenv("AGENTCTL_CAS_PATH")
+	path := os.Getenv("FOXCTL_CAS_PATH")
 	if path == "" {
 		path = filepath.Join(rootDir, "cas")
 	}
@@ -211,14 +211,14 @@ func loadFileConfig(rootDir string) Config {
 }
 
 func loadSQLiteConfig(rootDir string) Config {
-	dbPath := os.Getenv("AGENTCTL_CAS_DB_PATH")
+	dbPath := os.Getenv("FOXCTL_CAS_DB_PATH")
 	if dbPath == "" {
 		dbPath = filepath.Join(rootDir, "storage", "cas.db")
 	}
 
 	// Parse blob threshold (default 1MB)
 	threshold := int64(1 << 20)
-	if thresholdStr := os.Getenv("AGENTCTL_CAS_BLOB_THRESHOLD"); thresholdStr != "" {
+	if thresholdStr := os.Getenv("FOXCTL_CAS_BLOB_THRESHOLD"); thresholdStr != "" {
 		if parsed, err := strconv.ParseInt(thresholdStr, 10, 64); err == nil && parsed > 0 {
 			threshold = parsed
 		}
@@ -226,13 +226,13 @@ func loadSQLiteConfig(rootDir string) Config {
 
 	// Parse WAL mode (default true)
 	enableWAL := true
-	if walStr := os.Getenv("AGENTCTL_CAS_DB_WAL"); walStr != "" {
+	if walStr := os.Getenv("FOXCTL_CAS_DB_WAL"); walStr != "" {
 		enableWAL = strings.ToLower(walStr) != "false" && walStr != "0"
 	}
 
 	// Parse busy timeout (default 5000ms)
 	busyTimeout := 5000
-	if timeoutStr := os.Getenv("AGENTCTL_CAS_DB_TIMEOUT"); timeoutStr != "" {
+	if timeoutStr := os.Getenv("FOXCTL_CAS_DB_TIMEOUT"); timeoutStr != "" {
 		if parsed, err := strconv.Atoi(timeoutStr); err == nil {
 			busyTimeout = parsed
 		}
@@ -240,11 +240,11 @@ func loadSQLiteConfig(rootDir string) Config {
 
 	// Parse auto-migrate (default true)
 	autoMigrate := true
-	if migrateStr := os.Getenv("AGENTCTL_CAS_AUTO_MIGRATE"); migrateStr != "" {
+	if migrateStr := os.Getenv("FOXCTL_CAS_AUTO_MIGRATE"); migrateStr != "" {
 		autoMigrate = strings.ToLower(migrateStr) != "false" && migrateStr != "0"
 	}
 
-	sourcePath := os.Getenv("AGENTCTL_CAS_PATH")
+	sourcePath := os.Getenv("FOXCTL_CAS_PATH")
 	if sourcePath == "" {
 		sourcePath = filepath.Join(rootDir, "cas")
 	}
@@ -265,21 +265,21 @@ func loadSQLiteConfig(rootDir string) Config {
 }
 
 func loadS3Config() Config {
-	bucket := os.Getenv("AGENTCTL_CAS_S3_BUCKET")
-	region := os.Getenv("AGENTCTL_CAS_S3_REGION")
+	bucket := os.Getenv("FOXCTL_CAS_S3_BUCKET")
+	region := os.Getenv("FOXCTL_CAS_S3_REGION")
 	if region == "" {
 		region = os.Getenv("AWS_REGION")
 	}
 	if region == "" {
 		region = "us-east-1"
 	}
-	endpoint := os.Getenv("AGENTCTL_CAS_S3_ENDPOINT")
-	prefix := os.Getenv("AGENTCTL_CAS_S3_PREFIX")
+	endpoint := os.Getenv("FOXCTL_CAS_S3_ENDPOINT")
+	prefix := os.Getenv("FOXCTL_CAS_S3_PREFIX")
 	if prefix == "" {
 		prefix = "cas/"
 	}
-	forcePathStyle, _ := strconv.ParseBool(os.Getenv("AGENTCTL_CAS_S3_FORCE_PATH_STYLE"))
-	disableSSL, _ := strconv.ParseBool(os.Getenv("AGENTCTL_CAS_S3_DISABLE_SSL"))
+	forcePathStyle, _ := strconv.ParseBool(os.Getenv("FOXCTL_CAS_S3_FORCE_PATH_STYLE"))
+	disableSSL, _ := strconv.ParseBool(os.Getenv("FOXCTL_CAS_S3_DISABLE_SSL"))
 
 	return Config{
 		Driver: DriverS3,
@@ -299,35 +299,35 @@ func loadS3Config() Config {
 
 func loadTursoConfig(rootDir string) Config {
 	// Get URL (prefer CAS-specific, fallback to global)
-	url := os.Getenv("AGENTCTL_CAS_DB_URL")
+	url := os.Getenv("FOXCTL_CAS_DB_URL")
 	if url == "" {
-		url = os.Getenv("AGENTCTL_TURSO_URL")
+		url = os.Getenv("FOXCTL_TURSO_URL")
 	}
 
 	// Get auth token (prefer CAS-specific, fallback to global)
-	token := os.Getenv("AGENTCTL_CAS_DB_TOKEN")
+	token := os.Getenv("FOXCTL_CAS_DB_TOKEN")
 	if token == "" {
-		token = os.Getenv("AGENTCTL_TURSO_TOKEN")
+		token = os.Getenv("FOXCTL_TURSO_TOKEN")
 	}
 
 	// Parse blob threshold (default 10MB for Turso)
 	threshold := int64(10 << 20)
-	if thresholdStr := os.Getenv("AGENTCTL_CAS_BLOB_THRESHOLD"); thresholdStr != "" {
+	if thresholdStr := os.Getenv("FOXCTL_CAS_BLOB_THRESHOLD"); thresholdStr != "" {
 		if parsed, err := strconv.ParseInt(thresholdStr, 10, 64); err == nil && parsed > 0 {
 			threshold = parsed
 		}
 	}
 
 	// Replica path for local caching
-	replicaPath := os.Getenv("AGENTCTL_CAS_REPLICA_PATH")
+	replicaPath := os.Getenv("FOXCTL_CAS_REPLICA_PATH")
 
 	// Parse auto-migrate
 	autoMigrate := true
-	if migrateStr := os.Getenv("AGENTCTL_CAS_AUTO_MIGRATE"); migrateStr != "" {
+	if migrateStr := os.Getenv("FOXCTL_CAS_AUTO_MIGRATE"); migrateStr != "" {
 		autoMigrate = strings.ToLower(migrateStr) != "false" && migrateStr != "0"
 	}
 
-	sourcePath := os.Getenv("AGENTCTL_CAS_PATH")
+	sourcePath := os.Getenv("FOXCTL_CAS_PATH")
 	if sourcePath == "" {
 		sourcePath = filepath.Join(rootDir, "cas")
 	}

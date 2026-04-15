@@ -386,7 +386,7 @@
           "id": "7c",
           "path": "skills/code_smart_search/main.go",
           "lineNumber": 266,
-          "lineContent": "cmd := exec.CommandContext(ctx, agentctlBin, \"run\", \"code/snippet_extract\", \"--input-file\", \"-\")",
+          "lineContent": "cmd := exec.CommandContext(ctx, foxctlBin, \"run\", \"code/snippet_extract\", \"--input-file\", \"-\")",
           "title": "Execute Subprocess",
           "description": "Spawns foxctl subprocess to run snippet_extract skill with JSON input via stdin"
         },

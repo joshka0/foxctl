@@ -603,9 +603,9 @@ func TestCreatePaymentPayload(t *testing.T) {
 // =============================================================================
 
 func TestWalletConfigPath(t *testing.T) {
-	t.Run("with AGENTCTL_HOME", func(t *testing.T) {
-		os.Setenv("AGENTCTL_HOME", "/custom/path")
-		defer os.Unsetenv("AGENTCTL_HOME")
+	t.Run("with FOXCTL_HOME", func(t *testing.T) {
+		os.Setenv("FOXCTL_HOME", "/custom/path")
+		defer os.Unsetenv("FOXCTL_HOME")
 
 		path := walletConfigPath(nil)
 		if path != "/custom/path/x402_wallet.json" {
@@ -613,8 +613,8 @@ func TestWalletConfigPath(t *testing.T) {
 		}
 	})
 
-	t.Run("without AGENTCTL_HOME", func(t *testing.T) {
-		os.Unsetenv("AGENTCTL_HOME")
+	t.Run("without FOXCTL_HOME", func(t *testing.T) {
+		os.Unsetenv("FOXCTL_HOME")
 		home := os.Getenv("HOME")
 
 		path := walletConfigPath(nil)
@@ -633,8 +633,8 @@ func TestSaveAndLoadWalletConfig(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	os.Setenv("AGENTCTL_HOME", tmpDir)
-	defer os.Unsetenv("AGENTCTL_HOME")
+	os.Setenv("FOXCTL_HOME", tmpDir)
+	defer os.Unsetenv("FOXCTL_HOME")
 
 	wallet := &WalletInfo{
 		Address: "0x1234567890123456789012345678901234567890",
@@ -681,8 +681,8 @@ func TestLoadWalletConfigFromEnv(t *testing.T) {
 	// Clear file-based config
 	tmpDir, _ := os.MkdirTemp("", "x402-test-*")
 	defer os.RemoveAll(tmpDir)
-	os.Setenv("AGENTCTL_HOME", tmpDir)
-	defer os.Unsetenv("AGENTCTL_HOME")
+	os.Setenv("FOXCTL_HOME", tmpDir)
+	defer os.Unsetenv("FOXCTL_HOME")
 
 	t.Run("with env vars", func(t *testing.T) {
 		os.Setenv("X402_WALLET_ADDRESS", "0xenvaddress")
@@ -1338,8 +1338,8 @@ func TestHandleWalletStatusValidation(t *testing.T) {
 	// Set up empty config directory
 	tmpDir, _ := os.MkdirTemp("", "x402-test-*")
 	defer os.RemoveAll(tmpDir)
-	os.Setenv("AGENTCTL_HOME", tmpDir)
-	defer os.Unsetenv("AGENTCTL_HOME")
+	os.Setenv("FOXCTL_HOME", tmpDir)
+	defer os.Unsetenv("FOXCTL_HOME")
 	os.Unsetenv("X402_WALLET_ADDRESS")
 
 	t.Run("no wallet configured", func(t *testing.T) {

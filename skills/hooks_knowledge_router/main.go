@@ -64,7 +64,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	routerCfg := DefaultConfig()
 
 	// Load custom config from environment if available
-	if threshold := os.Getenv("AGENTCTL_KNOWLEDGE_THRESHOLD"); threshold != "" {
+	if threshold := os.Getenv("FOXCTL_KNOWLEDGE_THRESHOLD"); threshold != "" {
 		var t float64
 		if _, err := fmt.Sscanf(threshold, "%f", &t); err == nil && t > 0 && t <= 1 {
 			routerCfg.Threshold = t

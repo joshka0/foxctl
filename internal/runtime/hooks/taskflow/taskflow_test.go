@@ -38,7 +38,7 @@ func TestSyncTodoWriteBuildsContext(t *testing.T) {
 			return "sid-123", "claude", "claude"
 		},
 	}
-	t.Setenv("AGENTCTL_TODO_BIDIRECTIONAL", "1")
+	t.Setenv("FOXCTL_TODO_BIDIRECTIONAL", "1")
 
 	response, err := SyncTodoWrite(context.Background(), deps, TodoSyncRequest{
 		Workspace: t.TempDir(),
@@ -124,7 +124,7 @@ func TestContinueTodoSessionBlocksWhenSkillRequiresContinuation(t *testing.T) {
 }
 
 func TestLinkTaskFileSyncModeAddsContext(t *testing.T) {
-	t.Setenv("AGENTCTL_TASK_FILE_LINK_SYNC", "1")
+	t.Setenv("FOXCTL_TASK_FILE_LINK_SYNC", "1")
 	storageRoot := t.TempDir()
 	workspaceRoot := filepath.Join(t.TempDir(), "workspace")
 	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {

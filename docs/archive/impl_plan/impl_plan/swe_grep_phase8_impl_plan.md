@@ -26,7 +26,7 @@ optional new skills that follow existing Protocol v1 envelope patterns.
   - **Codemaps most relevant**:
     - **CM13** – Core Profile v1: End-to-End Envelope, Jobs & CAS Flow (storage
       patterns + migrations).
-    - **CM9** – Agentctl Overseer & Agent Hierarchy (team-aware
+    - **CM9** – Foxctl Overseer & Agent Hierarchy (team-aware
       routing/assignments).
 
 - **Section B – Skills & APIs (`teams/manage.*`)**

@@ -277,7 +277,7 @@ func (e *LLMChatEngine) IsStatelessMode() bool {
 // - Related: callLLM, dispatchPreToolUse, dispatchPostToolUse, ToolRunner.Execute
 // - Keywords: agent_run, tool_calls, hook_dispatch, iterations, stop_reason
 func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutput, error) {
-	if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+	if os.Getenv("FOXCTL_DEBUG_CONTEXT_QUERY") == "1" {
 		fmt.Fprintf(os.Stderr, "[CTX-POLICY] stateless=%t require_context_query=%t max_iterations=%d provider=%s model=%s\n",
 			e.config.StatelessMode, e.config.RequireContextQuery, e.config.MaxIterations, e.config.Provider, e.config.Model)
 	}
@@ -554,7 +554,7 @@ func (e *LLMChatEngine) shouldEnterSynthesisPhase(iteration int) bool {
 }
 
 func (e *LLMChatEngine) enforceRequiredContextQuery(choiceMessage oaiMessage, messages *[]oaiMessage, output *EngineOutput) bool {
-	if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+	if os.Getenv("FOXCTL_DEBUG_CONTEXT_QUERY") == "1" {
 		qc := -1
 		if e.rlmExecutor != nil {
 			qc = e.rlmExecutor.QueryCount()
@@ -565,12 +565,12 @@ func (e *LLMChatEngine) enforceRequiredContextQuery(choiceMessage oaiMessage, me
 		return false
 	}
 	if e.rlmExecutor != nil && e.rlmExecutor.QueryCount() > 0 {
-		if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+		if os.Getenv("FOXCTL_DEBUG_CONTEXT_QUERY") == "1" {
 			fmt.Fprintf(os.Stderr, "[CTX-POLICY] satisfied context query count=%d\n", e.rlmExecutor.QueryCount())
 		}
 		return false
 	}
-	if os.Getenv("AGENTCTL_DEBUG_CONTEXT_QUERY") == "1" {
+	if os.Getenv("FOXCTL_DEBUG_CONTEXT_QUERY") == "1" {
 		fmt.Fprintf(os.Stderr, "[CTX-POLICY] unsatisfied context query: nudging model and continuing\n")
 	}
 	assistantText := resolveAssistantContent(choiceMessage)
@@ -780,7 +780,7 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 		return nil, fmt.Errorf("API error: %s", oaiResp.Error.Message)
 	}
 
-	if os.Getenv("AGENTCTL_DEBUG_LLM_EMPTY") == "1" && len(oaiResp.Choices) == 0 {
+	if os.Getenv("FOXCTL_DEBUG_LLM_EMPTY") == "1" && len(oaiResp.Choices) == 0 {
 		raw := string(body)
 		if len(raw) > 800 {
 			raw = raw[:800] + "...(truncated)"
@@ -788,7 +788,7 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 		fmt.Fprintf(os.Stderr, "[LLM-NO-CHOICES] provider=%s model=%s raw=%s\n", e.config.Provider, e.config.Model, raw)
 	}
 
-	if os.Getenv("AGENTCTL_DEBUG_LLM_EMPTY") == "1" &&
+	if os.Getenv("FOXCTL_DEBUG_LLM_EMPTY") == "1" &&
 		len(oaiResp.Choices) > 0 &&
 		resolveAssistantContent(oaiResp.Choices[0].Message) == "" &&
 		len(oaiResp.Choices[0].Message.ToolCalls) == 0 {

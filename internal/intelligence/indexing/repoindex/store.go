@@ -128,7 +128,7 @@ func resolveStorePaths(storageRoot, repoRoot string) (absoluteRoot, dbPath, lega
 	absoluteRoot = filepath.Clean(absoluteRoot)
 
 	key = repoKey(absoluteRoot)
-	dir := strings.TrimSpace(os.Getenv("AGENTCTL_REPOINDEX_DB_DIR"))
+	dir := strings.TrimSpace(os.Getenv("FOXCTL_REPOINDEX_DB_DIR"))
 	if dir == "" {
 		dir = filepath.Join(storageRoot, "repoindex")
 	}

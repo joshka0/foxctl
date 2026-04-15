@@ -244,7 +244,7 @@ jobs:
 
       - name: Native libsql vector path test (required)
         env:
-          AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL: "1"
+          FOXCTL_V2_REQUIRE_NATIVE_VECTOR_SQL: "1"
         run: |
           CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/v2/adapters/libsql/turns \
             -run TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL \

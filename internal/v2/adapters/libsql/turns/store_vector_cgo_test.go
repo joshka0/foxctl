@@ -12,7 +12,7 @@ import (
 )
 
 func requireNativeVectorSQL() bool {
-	switch os.Getenv("AGENTCTL_V2_REQUIRE_NATIVE_VECTOR_SQL") {
+	switch os.Getenv("FOXCTL_V2_REQUIRE_NATIVE_VECTOR_SQL") {
 	case "1", "true", "TRUE", "yes", "YES":
 		return true
 	default:
@@ -26,11 +26,11 @@ func TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL(t *testing.T) {
 	requireNative := requireNativeVectorSQL()
 
 	// Force libsql driver so this test validates the native vector SQL path.
-	t.Setenv("AGENTCTL_V2_TURNS_DB_DRIVER", "libsql")
-	t.Setenv("AGENTCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turns_vector.libsql"))
-	t.Setenv("AGENTCTL_V2_TURNS_VECTOR_SEARCH", "1")
-	t.Setenv("AGENTCTL_V2_TURNS_VECTOR_DIMS", "4")
-	t.Setenv("AGENTCTL_VECTOR_DIMS", "4")
+	t.Setenv("FOXCTL_V2_TURNS_DB_DRIVER", "libsql")
+	t.Setenv("FOXCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turns_vector.libsql"))
+	t.Setenv("FOXCTL_V2_TURNS_VECTOR_SEARCH", "1")
+	t.Setenv("FOXCTL_V2_TURNS_VECTOR_DIMS", "4")
+	t.Setenv("FOXCTL_VECTOR_DIMS", "4")
 
 	store, err := Open(ctx, storageRoot)
 	if err != nil {
@@ -106,11 +106,11 @@ func TestTurnStore_Open_DefaultVectorDimensionsLocal(t *testing.T) {
 	ctx := context.Background()
 	storageRoot := t.TempDir()
 
-	t.Setenv("AGENTCTL_V2_TURNS_DB_DRIVER", "libsql")
-	t.Setenv("AGENTCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turns_default_dims.libsql"))
-	t.Setenv("AGENTCTL_V2_TURNS_VECTOR_SEARCH", "1")
-	t.Setenv("AGENTCTL_V2_TURNS_VECTOR_DIMS", "")
-	t.Setenv("AGENTCTL_VECTOR_DIMS", "")
+	t.Setenv("FOXCTL_V2_TURNS_DB_DRIVER", "libsql")
+	t.Setenv("FOXCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turns_default_dims.libsql"))
+	t.Setenv("FOXCTL_V2_TURNS_VECTOR_SEARCH", "1")
+	t.Setenv("FOXCTL_V2_TURNS_VECTOR_DIMS", "")
+	t.Setenv("FOXCTL_VECTOR_DIMS", "")
 
 	store, err := Open(ctx, storageRoot)
 	if err != nil {

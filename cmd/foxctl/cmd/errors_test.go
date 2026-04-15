@@ -58,7 +58,7 @@ func TestErrorsCommandUsesObservabilityEvents(t *testing.T) {
 	}
 	writeErrorsTestEvents(t, obsDir, observabilityEvents)
 
-	t.Setenv("AGENTCTL_OBS_DIR", obsDir)
+	t.Setenv("FOXCTL_OBS_DIR", obsDir)
 
 	cmd := newErrorsCommand()
 	var stdout bytes.Buffer

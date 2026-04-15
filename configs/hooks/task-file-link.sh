@@ -3,21 +3,21 @@
 
 set -euo pipefail
 
-if [[ "${AGENTCTL_TASK_FILE_LINK_DISABLED:-}" == "1" ]]; then
+if [[ "${FOXCTL_TASK_FILE_LINK_DISABLED:-}" == "1" ]]; then
   echo '{}'
   exit 0
 fi
 
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
-if ! command -v "$AGENTCTL_BIN" >/dev/null 2>&1; then
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
+if ! command -v "$FOXCTL_BIN" >/dev/null 2>&1; then
   echo '{}'
   exit 0
 fi
 
-workspace="${AGENTCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
+workspace="${FOXCTL_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
 payload="$(cat)"
 
-if ! output="$(printf '%s' "$payload" | "$AGENTCTL_BIN" hooks task-file-link --workspace "$workspace" 2>/dev/null)"; then
+if ! output="$(printf '%s' "$payload" | "$FOXCTL_BIN" hooks task-file-link --workspace "$workspace" 2>/dev/null)"; then
   echo '{}'
   exit 0
 fi

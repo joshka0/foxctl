@@ -1,8 +1,8 @@
-# Interactive Actor Console (agentctl_viewer integration)
+# Interactive Actor Console (foxctl_viewer integration)
 
 ## Purpose & scope
 
-Enable interactive, per-actor consoles using `agentctl_viewer` as the UI,
+Enable interactive, per-actor consoles using `foxctl_viewer` as the UI,
 without introducing a new transport. All I/O goes through the existing mailbox
 (leased queue) and follows foxctl envelope/CAS rules. This is an additive
 design that layers on top of:
@@ -34,7 +34,7 @@ shape; adding secret-bearing side channels.
 
 - **Console session registry:** `(actor_id, console_id, session_id, workspace)`
   recorded so users can reattach. `console_id` and `correlation_id` are ULIDs.
-- **agentctl_viewer console client:** TUI front-end; renders to stderr, emits
+- **foxctl_viewer console client:** TUI front-end; renders to stderr, emits
   envelopes on stdout; per-tab state tracks pending correlations.
 - **Overseer integration:** when spawning an actor, optionally create a console
   session and auto-launch
@@ -87,7 +87,7 @@ Notes:
    console-directed messages for this actor while a correlation is active if
    concurrency=1.
 
-## UI/UX (agentctl_viewer)
+## UI/UX (foxctl_viewer)
 
 - Tabs per actor console; unread badge on unfocused tabs.
 - Input pane for active tab; Enter sends `ask`; Ctrl+C issues `cancel` for

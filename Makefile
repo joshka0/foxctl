@@ -404,7 +404,7 @@ room-board-live-e2e:
 	@./scripts/room_board_live_e2e.sh
 	@sleep 1
 	@echo "Starting web server on :$(GUI_API_PORT)..."
-	@AGENTCTL_DB_DRIVER=$${AGENTCTL_DB_DRIVER:-$(GUI_DB_DRIVER)} AGENTCTL_V2_EVENTS_DB_DRIVER=$${AGENTCTL_V2_EVENTS_DB_DRIVER:-$(GUI_V2_EVENTS_DB_DRIVER)} ./bin/foxctl web serve --dev-cors --port $(GUI_API_PORT) --ui-dir packages/gui-agent/dist > $(GUI_WEB_LOG) 2>&1 &
+	@FOXCTL_DB_DRIVER=$${FOXCTL_DB_DRIVER:-$(GUI_DB_DRIVER)} FOXCTL_V2_EVENTS_DB_DRIVER=$${FOXCTL_V2_EVENTS_DB_DRIVER:-$(GUI_V2_EVENTS_DB_DRIVER)} ./bin/foxctl web serve --dev-cors --port $(GUI_API_PORT) --ui-dir packages/gui-agent/dist > $(GUI_WEB_LOG) 2>&1 &
 	@sleep 2
 	@echo "Web server running at http://localhost:$(GUI_API_PORT) (logs: $(GUI_WEB_LOG))"
 	@curl -sf http://localhost:$(GUI_API_PORT)/api/health > /dev/null || (echo "Health check failed; tailing $(GUI_WEB_LOG)"; tail -n 80 $(GUI_WEB_LOG); exit 1)
@@ -423,7 +423,7 @@ gui-agent: build ts-install
 	@lsof -ti :$(GUI_VITE_PORT) | xargs kill 2>/dev/null || true
 	@sleep 1
 	@echo "Starting API server on :$(GUI_API_PORT)..."
-	@AGENTCTL_DB_DRIVER=$${AGENTCTL_DB_DRIVER:-$(GUI_DB_DRIVER)} AGENTCTL_V2_EVENTS_DB_DRIVER=$${AGENTCTL_V2_EVENTS_DB_DRIVER:-$(GUI_V2_EVENTS_DB_DRIVER)} ./bin/foxctl web serve --dev-cors --port $(GUI_API_PORT) > $(GUI_WEB_LOG) 2>&1 &
+	@FOXCTL_DB_DRIVER=$${FOXCTL_DB_DRIVER:-$(GUI_DB_DRIVER)} FOXCTL_V2_EVENTS_DB_DRIVER=$${FOXCTL_V2_EVENTS_DB_DRIVER:-$(GUI_V2_EVENTS_DB_DRIVER)} ./bin/foxctl web serve --dev-cors --port $(GUI_API_PORT) > $(GUI_WEB_LOG) 2>&1 &
 	@sleep 2
 	@curl -sf http://localhost:$(GUI_API_PORT)/api/health > /dev/null || (echo "Health check failed; tailing $(GUI_WEB_LOG)"; tail -n 80 $(GUI_WEB_LOG); exit 1)
 	@curl -sf "http://localhost:$(GUI_API_PORT)/api/orchestration/board-get?request_id=make-gui-preflight" > /dev/null || (echo "Orchestration preflight failed; tailing $(GUI_WEB_LOG)"; tail -n 120 $(GUI_WEB_LOG); exit 1)
@@ -446,7 +446,7 @@ ts-tui: ts-build-tui build
 	SERVER_PID=$$!; \
 	trap "kill $$SERVER_PID 2>/dev/null || true" EXIT; \
 	sleep 1; \
-	AGENTCTL_API_URL=http://localhost:8090 ./bin/foxctl-tui
+	FOXCTL_API_URL=http://localhost:8090 ./bin/foxctl-tui
 
 ts-build: ts-install
 	@bun run build

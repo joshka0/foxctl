@@ -51,7 +51,7 @@ type sqlStore struct {
 }
 
 // Open opens or creates the teams database in the provided root directory and returns a Store backed by it.
-// The database driver is selected via the dbdriver env var conventions (e.g., AGENTCTL_TEAMS_DB_DRIVER).
+// The database driver is selected via the dbdriver env var conventions (e.g., FOXCTL_TEAMS_DB_DRIVER).
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "teams.db")
 	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "TEAMS", filepath.Base(dbPath), migrate)

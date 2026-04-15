@@ -34,9 +34,9 @@ Check first:
 
 ```bash
 printf 'ROOM=%s ACTOR=%s ROLE=%s SESSION=%s PANE=%s\n' \
-  "$AGENTCTL_ROOM_ID" \
-  "$AGENTCTL_PARTICIPANT" \
-  "$AGENTCTL_ROOM_ROLE" \
+  "$FOXCTL_ROOM_ID" \
+  "$FOXCTL_PARTICIPANT" \
+  "$FOXCTL_ROOM_ROLE" \
   "$ZELLIJ_SESSION_NAME" \
   "$ZELLIJ_PANE_ID"
 ```

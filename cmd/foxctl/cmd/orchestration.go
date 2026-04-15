@@ -40,7 +40,7 @@ const (
 
 	cliRuntimeBackendJido      = "jido"
 	cliRuntimeBackendGoruntime = "goruntime"
-	envCLIRuntimeBackend       = "AGENTCTL_V2_ORCHESTRATION_RUNTIME_BACKEND"
+	envCLIRuntimeBackend       = "FOXCTL_V2_ORCHESTRATION_RUNTIME_BACKEND"
 )
 
 type orchestrationCardActionResponseCLI struct {
@@ -398,7 +398,7 @@ func runOrchestrationDispatchIssueCLI(
 	cfg config.Config,
 	req coreorchestration.DispatchRequest,
 ) (coreorchestration.DispatchResponse, error) {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("AGENTCTL_V2_ORCHESTRATION_RUNTIME_BACKEND")), "goruntime") {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("FOXCTL_V2_ORCHESTRATION_RUNTIME_BACKEND")), "goruntime") {
 		return coreorchestration.DispatchResponse{}, &v2errors.V2Error{
 			Kind:    v2errors.ErrDependency,
 			Message: "goruntime orchestration dispatch requires a persistent host (use overseer or web server), not the one-shot CLI command",

@@ -41,7 +41,7 @@ Built-in auth and pagination cover ~90% of APIs (Bearer, API Key, Basic, OAuth2 
 - **Envelope-based**: All I/O uses Protocol v1 JSON envelopes
 - **Language-agnostic**: Any language that can read/write JSON on stdin/stdout
 - **Sandboxed**: Parent enforces strict timeouts, memory, and IO limits
-- **Discoverable**: Convention-based discovery via `AGENTCTL_PLUGIN_PATH`
+- **Discoverable**: Convention-based discovery via `FOXCTL_PLUGIN_PATH`
 
 ### 1.4 Plugin Types
 
@@ -85,11 +85,11 @@ Plugins MUST NOT:
 ### 2.3 Environment Variables
 
 The parent MAY set:
-- `AGENTCTL_PLUGIN_NAME`: Plugin name being invoked
-- `AGENTCTL_PLUGIN_VERSION`: Plugin version (from manifest)
-- `AGENTCTL_PLUGIN_COMMAND`: Command being invoked (`plugin/auth` or `plugin/pagination`)
-- `AGENTCTL_WORKSPACE`: Current workspace path
-- `AGENTCTL_JOB_ID`: Job ID if executing in job context
+- `FOXCTL_PLUGIN_NAME`: Plugin name being invoked
+- `FOXCTL_PLUGIN_VERSION`: Plugin version (from manifest)
+- `FOXCTL_PLUGIN_COMMAND`: Command being invoked (`plugin/auth` or `plugin/pagination`)
+- `FOXCTL_WORKSPACE`: Current workspace path
+- `FOXCTL_JOB_ID`: Job ID if executing in job context
 
 Plugins SHOULD NOT rely on environment variables for secrets. Secrets are passed via the request envelope `context.credentials` field.
 
@@ -443,7 +443,7 @@ Pagination stops when:
 ### 7.1 Plugin Discovery
 
 Plugins are discovered via:
-1. **Environment variable**: `AGENTCTL_PLUGIN_PATH` (colon-separated paths)
+1. **Environment variable**: `FOXCTL_PLUGIN_PATH` (colon-separated paths)
 2. **Default path**: `~/.foxctl/plugins`
 3. **Explicit path**: `--auth.scheme=plugin:/absolute/path/to/plugin`
 

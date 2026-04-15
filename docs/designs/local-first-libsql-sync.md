@@ -178,8 +178,8 @@ Environment variables:
 
 ```bash
 # Enable remote sync
-AGENTCTL_LIBSQL_SYNC_URL=http://localhost:8080
-AGENTCTL_LIBSQL_AUTH_TOKEN=your-token
+FOXCTL_LIBSQL_SYNC_URL=http://localhost:8080
+FOXCTL_LIBSQL_AUTH_TOKEN=your-token
 
 # Or use config file
 # ~/.foxctl/config.yaml
@@ -189,7 +189,7 @@ storage:
     path: ~/.foxctl/storage/memory.db
     enable_vector_search: true
     sync_url: http://localhost:8080
-    auth_token: ${AGENTCTL_LIBSQL_AUTH_TOKEN}
+    auth_token: ${FOXCTL_LIBSQL_AUTH_TOKEN}
 ```
 
 ## Sync Behavior
@@ -243,7 +243,7 @@ For foxctl's use case (single-user, single-device primary):
 sqld --db-path ~/.foxctl/sync/primary.db
 
 # Configure foxctl
-export AGENTCTL_LIBSQL_SYNC_URL=http://localhost:8080
+export FOXCTL_LIBSQL_SYNC_URL=http://localhost:8080
 
 # Test sync
 foxctl memory put --name "test" --summary "testing sync"

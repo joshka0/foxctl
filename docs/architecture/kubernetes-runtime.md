@@ -32,7 +32,7 @@ flowchart LR
 `deploy/kubernetes/base/` is the base set used as the foundation:
 
 - `deployment.yaml`: `foxctl` pod with web service and readiness/liveness probes using `foxctl health` exec checks.
-- `configmap.yaml`: defaulting to `AGENTCTL_DB_DRIVER=turso` and old CAS key names (`AGENTCTL_CAS_BACKEND`/`AGENTCTL_CAS_BUCKET`).
+- `configmap.yaml`: defaulting to `FOXCTL_DB_DRIVER=turso` and old CAS key names (`FOXCTL_CAS_BACKEND`/`FOXCTL_CAS_BUCKET`).
 - `workspace-deployment.yaml`: optional dedicated workspace pod with git-sync sidecar for mounted source.
 - `cronjobs.yaml`: scheduled companion workloads (rerank, sqlite maintenance), still wired for the same env style as base.
 - `embedding-worker.yaml`: separate worker deployment for background embedding pipeline.
@@ -45,11 +45,11 @@ contains mixed configuration generations.
 `deploy/kubernetes/overlays/postgres/` updates the base to the storage and runtime model currently reflected in code:
 
 - `configmap-patch.yaml`
-  - `AGENTCTL_DB_DRIVER: "postgres"`
-  - `AGENTCTL_POSTGRES_MAX_CONNS`, `AGENTCTL_POSTGRES_REQUIRE_VECTOR`
-  - `AGENTCTL_CAS_DRIVER: "s3"` and `AGENTCTL_CAS_S3_BUCKET`/region settings
+  - `FOXCTL_DB_DRIVER: "postgres"`
+  - `FOXCTL_POSTGRES_MAX_CONNS`, `FOXCTL_POSTGRES_REQUIRE_VECTOR`
+  - `FOXCTL_CAS_DRIVER: "s3"` and `FOXCTL_CAS_S3_BUCKET`/region settings
 - `deployment-patch.yaml`
-  - Sets `AGENTCTL_POSTGRES_DSN` from Kubernetes secret
+  - Sets `FOXCTL_POSTGRES_DSN` from Kubernetes secret
   - Replaces probe model to HTTP:
     - `GET /healthz` (liveness)
     - `GET /readyz` (readiness)
@@ -77,7 +77,7 @@ This overlay matches current server behavior where:
 - The runtime behind that pod is hybrid:
   - legacy mailbox-driven agent runtime still exists
   - v2 projections/orchestration/context surfaces also exist
-- Jido-backed orchestration requires additional `AGENTCTL_JIDO_*` configuration;
+- Jido-backed orchestration requires additional `FOXCTL_JIDO_*` configuration;
   those variables are not broadly documented in the base manifests yet.
 
 ## Chat adapters in Kubernetes
@@ -104,19 +104,19 @@ reachable in whichever ingress/network policies are in use.
 
 Prefer:
 
-- `AGENTCTL_DB_DRIVER`
-- `AGENTCTL_POSTGRES_DSN` / `DATABASE_URL`
-- `AGENTCTL_POSTGRES_MAX_CONNS`
-- `AGENTCTL_POSTGRES_REQUIRE_VECTOR`
-- `AGENTCTL_CAS_DRIVER`
-- `AGENTCTL_CAS_S3_*`
-- `AGENTCTL_WORKSPACE`, `AGENTCTL_STORAGE_ROOT`
-- `AGENTCTL_JIDO_*` when enabling Jido-backed orchestration or companion bridges
+- `FOXCTL_DB_DRIVER`
+- `FOXCTL_POSTGRES_DSN` / `DATABASE_URL`
+- `FOXCTL_POSTGRES_MAX_CONNS`
+- `FOXCTL_POSTGRES_REQUIRE_VECTOR`
+- `FOXCTL_CAS_DRIVER`
+- `FOXCTL_CAS_S3_*`
+- `FOXCTL_WORKSPACE`, `FOXCTL_STORAGE_ROOT`
+- `FOXCTL_JIDO_*` when enabling Jido-backed orchestration or companion bridges
 
 Legacy keys still seen in base artifacts:
 
-- `AGENTCTL_CAS_BACKEND`
-- `AGENTCTL_CAS_BUCKET`
+- `FOXCTL_CAS_BACKEND`
+- `FOXCTL_CAS_BUCKET`
 
 ## Related docs
 

@@ -3,8 +3,8 @@
 // enabling human-in-the-loop communication during agent runs.
 //
 // Environment variables:
-//   - AGENTCTL_OVERSEER_RECIPIENT: Recipient to monitor (default: "overseer", use "*" for broadcast)
-//   - AGENTCTL_OVERSEER_AUTOACK: Set to "0" to disable auto-marking displayed messages as "surfaced" (default: "1")
+//   - FOXCTL_OVERSEER_RECIPIENT: Recipient to monitor (default: "overseer", use "*" for broadcast)
+//   - FOXCTL_OVERSEER_AUTOACK: Set to "0" to disable auto-marking displayed messages as "surfaced" (default: "1")
 package main
 
 import (
@@ -52,13 +52,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	workspaceID := hookutil.ResolveWorkspaceID(in, workspaceRoot)
 
 	// Get recipient to monitor from env, default to "overseer"
-	recipient := os.Getenv("AGENTCTL_OVERSEER_RECIPIENT")
+	recipient := os.Getenv("FOXCTL_OVERSEER_RECIPIENT")
 	if recipient == "" {
 		recipient = DefaultRecipient
 	}
 
 	// Check if auto-ack is enabled (default: true)
-	autoAck := os.Getenv("AGENTCTL_OVERSEER_AUTOACK") != "0"
+	autoAck := os.Getenv("FOXCTL_OVERSEER_AUTOACK") != "0"
 
 	// Open board store
 	boardStore, err := blackboard.OpenBoardStore(ctx, paths.StorageRoot)

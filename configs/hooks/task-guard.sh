@@ -17,8 +17,8 @@
 #   }
 #
 # Environment variables:
-#   AGENTCTL_BIN           - Path to foxctl binary (default: foxctl)
-#   AGENTCTL_TASK_GUARD_MODE - Mode: 'auto' (default) or 'strict'
+#   FOXCTL_BIN           - Path to foxctl binary (default: foxctl)
+#   FOXCTL_TASK_GUARD_MODE - Mode: 'auto' (default) or 'strict'
 
 set -euo pipefail
 
@@ -26,7 +26,7 @@ set -euo pipefail
 trap 'kill $(jobs -p) 2>/dev/null || true' SIGTERM SIGINT EXIT
 
 # Configuration
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
 
 # Read hook input from stdin
 payload="$(cat)"
@@ -45,7 +45,7 @@ hook_input=$(printf '%s' "$payload" | jq -c --arg ws "$workspace_root" '{
 }')
 
 # Call foxctl skill with --ephemeral for faster execution (skip job persistence)
-result="$(printf '%s' "$hook_input" | "$AGENTCTL_BIN" run --daemon hooks/task_guard --ephemeral --input-file - 2>/dev/null)" || {
+result="$(printf '%s' "$hook_input" | "$FOXCTL_BIN" run --daemon hooks/task_guard --ephemeral --input-file - 2>/dev/null)" || {
   # On error, allow the operation to proceed (fail-open)
   echo '{}' 
   exit 0

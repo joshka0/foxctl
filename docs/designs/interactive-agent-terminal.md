@@ -24,7 +24,7 @@ Transform the web-ui into a mission control center for multi-agent orchestration
                           └────────┬────────┘
                                    │
 ┌──────────────────────────────────▼──────────────────────────────────────┐
-│                      Go Backend (agentctl_web)                          │
+│                      Go Backend (foxctl_web)                          │
 ├─────────────┬─────────────┬─────────────┬─────────────┬────────────────┤
 │  Agent      │  Overseer   │  Mailbox    │  Session    │  Skill         │
 │  Manager    │  Controller │  Gateway    │  Tracker    │  Runner        │

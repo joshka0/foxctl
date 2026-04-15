@@ -29,7 +29,7 @@ const defaultTimeout = 60 * time.Second
 
 // useDaemon controls whether to use the persistent daemon or CLI mode.
 // Daemon mode is faster but may have issues with some operations.
-var useDaemon = os.Getenv("AGENTCTL_GOPLS_CLI") != "1"
+var useDaemon = os.Getenv("FOXCTL_GOPLS_CLI") != "1"
 
 // Input defines the input parameters for lsp/gopls with LSP-style nested parameters support and comprehensive operation options.
 type Input struct {

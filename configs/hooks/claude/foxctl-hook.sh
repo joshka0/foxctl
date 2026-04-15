@@ -16,11 +16,11 @@
 # Emits Claude-compatible hook output JSON on stdout.
 #
 # Environment:
-#   AGENTCTL_BIN           - Path to foxctl binary (fallback chain: PATH, project/bin,
+#   FOXCTL_BIN           - Path to foxctl binary (fallback chain: PATH, project/bin,
 #                            ~/.foxctl/bin, ~/.local/bin, ~/go/bin)
 #   CLAUDE_PROJECT_DIR     - Workspace root (set by CC)
 #   CLAUDE_SESSION_ID      - Session ID (set by CC)
-#   AGENTCTL_SESSION_ID    - Alternate session ID
+#   FOXCTL_SESSION_ID    - Alternate session ID
 
 set -euo pipefail
 
@@ -55,18 +55,18 @@ WORKSPACE_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 PAYLOAD="$(cat)"
 
 # Find foxctl binary with fallback chain
-if [[ -n "${AGENTCTL_BIN:-}" ]]; then
+if [[ -n "${FOXCTL_BIN:-}" ]]; then
   : # Use provided path
 elif command -v foxctl &>/dev/null; then
-  AGENTCTL_BIN="foxctl"
+  FOXCTL_BIN="foxctl"
 elif [[ -x "${CLAUDE_PROJECT_DIR:-}/bin/foxctl" ]]; then
-  AGENTCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/foxctl"
+  FOXCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/foxctl"
 elif [[ -x "$HOME/.foxctl/bin/foxctl" ]]; then
-  AGENTCTL_BIN="$HOME/.foxctl/bin/foxctl"
+  FOXCTL_BIN="$HOME/.foxctl/bin/foxctl"
 elif [[ -x "$HOME/.local/bin/foxctl" ]]; then
-  AGENTCTL_BIN="$HOME/.local/bin/foxctl"
+  FOXCTL_BIN="$HOME/.local/bin/foxctl"
 elif [[ -x "$HOME/go/bin/foxctl" ]]; then
-  AGENTCTL_BIN="$HOME/go/bin/foxctl"
+  FOXCTL_BIN="$HOME/go/bin/foxctl"
 else
   # Can't find foxctl - fail silently
   echo '{}'
@@ -74,7 +74,7 @@ else
 fi
 
 # Session ID resolution (prefer env, then payload)
-SESSION_ID="${AGENTCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
+SESSION_ID="${FOXCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
 if [[ -z "$SESSION_ID" || "$SESSION_ID" == "null" ]]; then
   SESSION_ID="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // .sessionID // ""' 2>/dev/null || true)"
 fi
@@ -145,7 +145,7 @@ dispatch_once() {
 
   resp="$(
     printf '%s' "$hook_input" | \
-      "$AGENTCTL_BIN" run --daemon hooks/dispatch --workspace "$WORKSPACE_ROOT" --ephemeral --input-file - 2>"$stderr_file"
+      "$FOXCTL_BIN" run --daemon hooks/dispatch --workspace "$WORKSPACE_ROOT" --ephemeral --input-file - 2>"$stderr_file"
   )" && exit_code=0 || exit_code=$?
 
   local stderr_content

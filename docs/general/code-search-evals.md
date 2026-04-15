@@ -8,8 +8,8 @@ Stable entrypoints for the direct `code_search_ensemble` suites live in three pl
 
 The wrappers use:
 
-- `AGENTCTL_STORAGE_ROOT` if set
-- `AGENTCTL_VAULT_PATH` if set, otherwise `~/.foxctl/templates/obsidian-vault`
+- `FOXCTL_STORAGE_ROOT` if set
+- `FOXCTL_VAULT_PATH` if set, otherwise `~/.foxctl/templates/obsidian-vault`
 
 ## Common Runs
 

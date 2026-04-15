@@ -144,7 +144,7 @@ Files likely touched:
 
 Exit criteria:
 
-- orchestration refresh does not require `AGENTCTL_JIDO_*`
+- orchestration refresh does not require `FOXCTL_JIDO_*`
 - web/API runtime trees work from Go state
 
 ### Phase 4. Make Jido truly optional

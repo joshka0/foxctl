@@ -230,25 +230,25 @@ func buildEnvCommand(session, paneName, command, participantID, parentParticipan
 	ttyFile := TTYRegistryFile(session, participantID)
 	args := []string{
 		"env",
-		"AGENTCTL_PARTICIPANT_ID=" + strings.TrimSpace(participantID),
-		"AGENTCTL_ZELLIJ_PARTICIPANT=" + strings.TrimSpace(participantID),
-		"AGENTCTL_MUX_BACKEND=zellij",
-		"AGENTCTL_MUX_SESSION=" + strings.TrimSpace(session),
-		"AGENTCTL_MUX_PANE_ID=" + strings.TrimSpace(paneName),
-		"AGENTCTL_MUX_TTY_FILE=" + ttyFile,
+		"FOXCTL_PARTICIPANT_ID=" + strings.TrimSpace(participantID),
+		"FOXCTL_ZELLIJ_PARTICIPANT=" + strings.TrimSpace(participantID),
+		"FOXCTL_MUX_BACKEND=zellij",
+		"FOXCTL_MUX_SESSION=" + strings.TrimSpace(session),
+		"FOXCTL_MUX_PANE_ID=" + strings.TrimSpace(paneName),
+		"FOXCTL_MUX_TTY_FILE=" + ttyFile,
 	}
 	if value := strings.TrimSpace(parentParticipant); value != "" {
-		args = append(args, "AGENTCTL_PARENT_PARTICIPANT_ID="+value)
+		args = append(args, "FOXCTL_PARENT_PARTICIPANT_ID="+value)
 	}
 	if value := strings.TrimSpace(parentAgentID); value != "" {
-		args = append(args, "AGENTCTL_PARENT_AGENT_ID="+value)
+		args = append(args, "FOXCTL_PARENT_AGENT_ID="+value)
 	}
 	if strings.TrimSpace(roomAccess) == "direct" {
 		if value := strings.TrimSpace(roomID); value != "" {
-			args = append(args, "AGENTCTL_ROOM_ID="+value)
+			args = append(args, "FOXCTL_ROOM_ID="+value)
 		}
 		if value := strings.TrimSpace(roomRole); value != "" {
-			args = append(args, "AGENTCTL_ROOM_ROLE="+value)
+			args = append(args, "FOXCTL_ROOM_ROLE="+value)
 		}
 	}
 	args = append(args, "sh", "-lc", buildPaneBootstrapCommand(command))
@@ -256,7 +256,7 @@ func buildEnvCommand(session, paneName, command, participantID, parentParticipan
 }
 
 func buildPaneBootstrapCommand(command string) string {
-	ttyFileVar := "${AGENTCTL_MUX_TTY_FILE:-}"
+	ttyFileVar := "${FOXCTL_MUX_TTY_FILE:-}"
 	return "if [ -n \"" + ttyFileVar + "\" ]; then mkdir -p \"$(dirname \"" + ttyFileVar + "\")\" && tty > \"" + ttyFileVar + "\"; fi; exec " + command
 }
 

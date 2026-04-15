@@ -117,7 +117,7 @@ Extension system for custom auth and pagination.
 
 - **Protocol**: JSON envelopes over stdin/stdout
 - **Lifecycle**: Spawn → write request → read response → exit
-- **Discovery**: `AGENTCTL_PLUGIN_PATH` convention
+- **Discovery**: `FOXCTL_PLUGIN_PATH` convention
 
 ### Execution Constraints
 

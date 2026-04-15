@@ -199,7 +199,7 @@ The MCP server needs workspace context for:
 
 Options:
 1. **CLI argument**: `--workspace /path/to/project`
-2. **Environment variable**: `AGENTCTL_WORKSPACE`
+2. **Environment variable**: `FOXCTL_WORKSPACE`
 3. **Auto-detect**: Use cwd or git root
 
 ```go
@@ -209,7 +209,7 @@ func detectWorkspace(args []string) string {
         return ws
     }
     // 2. Check env
-    if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
+    if ws := os.Getenv("FOXCTL_WORKSPACE"); ws != "" {
         return ws
     }
     // 3. Auto-detect git root

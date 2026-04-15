@@ -26,14 +26,14 @@ func TestNewPaneCommandHasServeSubcommand(t *testing.T) {
 func TestPaneChildEnvIncludesParticipantAndRoom(t *testing.T) {
 	got := paneChildEnv("gemini-a", "room-1")
 	joined := strings.Join(got, "\n")
-	if !strings.Contains(joined, "AGENTCTL_PARTICIPANT_ID=gemini-a") {
-		t.Fatalf("paneChildEnv missing AGENTCTL_PARTICIPANT_ID: %v", got)
+	if !strings.Contains(joined, "FOXCTL_PARTICIPANT_ID=gemini-a") {
+		t.Fatalf("paneChildEnv missing FOXCTL_PARTICIPANT_ID: %v", got)
 	}
-	if !strings.Contains(joined, "AGENTCTL_PARTICIPANT=gemini-a") {
-		t.Fatalf("paneChildEnv missing AGENTCTL_PARTICIPANT: %v", got)
+	if !strings.Contains(joined, "FOXCTL_PARTICIPANT=gemini-a") {
+		t.Fatalf("paneChildEnv missing FOXCTL_PARTICIPANT: %v", got)
 	}
-	if !strings.Contains(joined, "AGENTCTL_ROOM_ID=room-1") {
-		t.Fatalf("paneChildEnv missing AGENTCTL_ROOM_ID: %v", got)
+	if !strings.Contains(joined, "FOXCTL_ROOM_ID=room-1") {
+		t.Fatalf("paneChildEnv missing FOXCTL_ROOM_ID: %v", got)
 	}
 }
 

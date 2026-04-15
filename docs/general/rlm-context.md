@@ -291,7 +291,7 @@ systemPrompt, _ := ep.BuildSystemPrompt(ctx, basePrompt)
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `AGENTCTL_HOME` | `~/.foxctl` | Storage root |
+| `FOXCTL_HOME` | `~/.foxctl` | Storage root |
 | `VOYAGE_API_KEY` | - | Semantic embeddings |
 
 ## Related

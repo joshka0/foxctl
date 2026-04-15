@@ -166,9 +166,9 @@ If you rename a skill:
 
 ### 4.2 Workspace/session identity propagation
 Ensure these are always available to skills:
-- `AGENTCTL_WORKSPACE`
-- `AGENTCTL_SESSION_ID`
-- `AGENTCTL_AGENT_ID`
+- `FOXCTL_WORKSPACE`
+- `FOXCTL_SESSION_ID`
+- `FOXCTL_AGENT_ID`
 
 Both CC adapters and OpenCode plugin should:
 - set these env vars when calling `foxctl run ...`
@@ -242,9 +242,9 @@ But remove any “old daemon overseer loop” if supervisor covers it.
 ### 6.5 Remove unused env vars / configs
 After cutover:
 - deprecate legacy vars (example):
-  - `AGENTCTL_LLM_PROVIDER` variants used only by dspy initialization paths
+  - `FOXCTL_LLM_PROVIDER` variants used only by dspy initialization paths
 - keep:
-  - `AGENTCTL_SESSION_*`, `AGENTCTL_WORKSPACE`, `AGENTCTL_AGENT_ID`
+  - `FOXCTL_SESSION_*`, `FOXCTL_WORKSPACE`, `FOXCTL_AGENT_ID`
   - embedding/search flags
   - hook flags
 

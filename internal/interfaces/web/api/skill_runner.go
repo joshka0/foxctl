@@ -136,9 +136,9 @@ func (r *SkillRunner) Run(ctx context.Context, skillName string, input map[strin
 		Input:        inputJSON,
 		WorkDir:      filepath.Dir(handle.ManifestPath),
 		ExtraEnv: []string{
-			"AGENTCTL_HOME=" + r.cfg.Home,
-			"AGENTCTL_STORAGE_ROOT=" + r.cfg.Storage.Root,
-			"AGENTCTL_CACHE_ROOT=" + r.cfg.Paths.Cache,
+			"FOXCTL_HOME=" + r.cfg.Home,
+			"FOXCTL_STORAGE_ROOT=" + r.cfg.Storage.Root,
+			"FOXCTL_CACHE_ROOT=" + r.cfg.Paths.Cache,
 		},
 	})
 

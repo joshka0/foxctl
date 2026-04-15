@@ -194,6 +194,67 @@ CGO_ENABLED=0 go build -o bin/foxctl ./cmd/foxctl
 {"selector": ".main-content"}
 ```
 
+### Output Discovery and Projection
+
+Use `mcp_keys` to inspect the pre-truncation JSON shape of a tool result, then
+use `mcp_pipe` with one of the returned paths.
+
+Example: inspect the output of `jira/board` list mode through the generic
+`foxctl_run` tool, then project board names and descriptions.
+
+```json
+// mcp_keys - discover wildcard paths from jira/board list output
+{
+  "tool": "foxctl_run",
+  "args": {
+    "skill": "jira/board",
+    "input": {
+      "operation": "list"
+    }
+  },
+  "path": "result"
+}
+```
+
+Typical returned paths include:
+
+```json
+{
+  "all_keys": [
+    "isLast",
+    "maxResults",
+    "operation",
+    "startAt",
+    "total",
+    "values",
+    "values[]",
+    "values[].description",
+    "values[].id",
+    "values[].name",
+    "values[].self",
+    "values[].type"
+  ]
+}
+```
+
+```json
+// mcp_pipe - project just the fields you want
+{
+  "tool": "foxctl_run",
+  "args": {
+    "skill": "jira/board",
+    "input": {
+      "operation": "list"
+    }
+  },
+  "query": "result.values"
+}
+```
+
+For Jira board list results, the board label field is `name` rather than
+`title`, so the useful follow-up paths are `values[].name` and
+`values[].description`.
+
 ## Architecture
 
 ```

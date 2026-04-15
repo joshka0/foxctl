@@ -42,7 +42,7 @@ func (e *Executor) ExecuteEphemeral(input []byte) error {
 	skillExecutor := execution.NewRunnerExecutor()
 	start := time.Now()
 
-	// Ensure trace exists for propagation (skill binary reads AGENTCTL_TRACE_ID from env).
+	// Ensure trace exists for propagation (skill binary reads FOXCTL_TRACE_ID from env).
 	// If correlation_id is set, use it as trace_id for cross-layer correlation.
 	ctx := e.ctx
 	if e.options.CorrelationID != "" {
@@ -62,7 +62,7 @@ func (e *Executor) ExecuteEphemeral(input []byte) error {
 	extraEnv = append(extraEnv, observability.PropagationEnv(ctx)...)
 
 	if e.options.NoCAS {
-		extraEnv = append(extraEnv, "AGENTCTL_NO_CAS=1")
+		extraEnv = append(extraEnv, "FOXCTL_NO_CAS=1")
 	}
 
 	result, err := skillExecutor.Execute(ctx, execution.ExecuteOptions{

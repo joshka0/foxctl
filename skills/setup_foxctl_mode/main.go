@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const command = "setup/agentctl_mode"
+const command = "setup/foxctl_mode"
 
 // Input defines the skill input parameters for foxctl mode management with get/set operations.
 type Input struct {
@@ -36,7 +36,7 @@ type ModeValue struct {
 	Enabled bool `json:"enabled"`
 }
 
-// main is the skill entry point for setup/agentctl_mode.
+// main is the skill entry point for setup/foxctl_mode.
 func main() {
 	skillmain.Main(command, skillmain.Chain(run,
 		skillmain.WithTimeout[Input](5*time.Second),
@@ -53,7 +53,7 @@ func main() {
 // - FailureModes: invalid operations, database access failures, JSON marshaling errors, workspace resolution failures
 // - Observability: emits current mode status, workspace ID, and operation results
 // - Related: ensureSchema, getMode, setMode, workspaceutil.ResolveID
-// - Keywords: setup/agentctl_mode, workspace_settings, mode_management, database_storage
+// - Keywords: setup/foxctl_mode, workspace_settings, mode_management, database_storage
 func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	if input.Operation == "" {
 		return skillerr.Arg("operation is required", skillerr.WithHint("Use 'get' or 'set'."))
@@ -63,12 +63,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	workspace := workspaceutil.ResolveID(input.WorkspaceID, rc.Workspace)
 
 	// Get DB path
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
+	foxctlHome := os.Getenv("FOXCTL_HOME")
+	if foxctlHome == "" {
 		home, _ := os.UserHomeDir()
-		agentctlHome = filepath.Join(home, ".foxctl")
+		foxctlHome = filepath.Join(home, ".foxctl")
 	}
-	dbPath := filepath.Join(agentctlHome, "storage", "tasks.db")
+	dbPath := filepath.Join(foxctlHome, "storage", "tasks.db")
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -126,7 +126,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 func getMode(ctx context.Context, db *sql.DB, workspace string) (bool, error) {
 	var valueStr string
 	err := db.QueryRowContext(ctx,
-		`SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = 'agentctl_mode'`,
+		`SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = 'foxctl_mode'`,
 		workspace,
 	).Scan(&valueStr)
 
@@ -155,7 +155,7 @@ func setMode(ctx context.Context, db *sql.DB, workspace string, enabled bool) er
 
 	_, err = db.ExecContext(ctx, `
 		INSERT OR REPLACE INTO workspace_settings (workspace_id, key, value, updated_at)
-		VALUES (?, 'agentctl_mode', ?, ?)
+		VALUES (?, 'foxctl_mode', ?, ?)
 	`, workspace, string(valueJSON), now)
 	return err
 }

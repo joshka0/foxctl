@@ -42,8 +42,8 @@ If CAS expose policy is `"off"`, the LLM may not see digests/hints for big outpu
 
 ✅ For the console process, set:
 
-* `AGENTCTL_CAS_EXPOSE=hint` (env override already supported in `config.finalizeConfig`)
-* Hook wrappers can set `AGENTCTL_CAS_EXPOSE=off` to keep hook output quiet.
+* `FOXCTL_CAS_EXPOSE=hint` (env override already supported in `config.finalizeConfig`)
+* Hook wrappers can set `FOXCTL_CAS_EXPOSE=off` to keep hook output quiet.
 
 ## 4) Skill execution should be daemon-fast, but safe
 
@@ -395,10 +395,10 @@ func (e *SkillToolExecutor) Execute(ctx context.Context, toolName string, args j
 	exec := execution.NewRunnerExecutor()
 	// Ensure CAS expose in console mode if desired
 	extraEnv := []string{
-		"AGENTCTL_WORKSPACE=" + e.Workspace,
+		"FOXCTL_WORKSPACE=" + e.Workspace,
 	}
-	if os.Getenv("AGENTCTL_CAS_EXPOSE") != "" {
-		extraEnv = append(extraEnv, "AGENTCTL_CAS_EXPOSE="+os.Getenv("AGENTCTL_CAS_EXPOSE"))
+	if os.Getenv("FOXCTL_CAS_EXPOSE") != "" {
+		extraEnv = append(extraEnv, "FOXCTL_CAS_EXPOSE="+os.Getenv("FOXCTL_CAS_EXPOSE"))
 	}
 
 	r, err := exec.Execute(ctx, execution.ExecuteOptions{
@@ -738,7 +738,7 @@ Replace the Bun/Express server with a **Go API + SSE** backend that:
 Create a new command:
 
 ```
-cmd/agentctl_web/
+cmd/foxctl_web/
   main.go
 ```
 
@@ -864,7 +864,7 @@ Your current `useSSE()` can simply invalidate the matching React Query keys.
 
 **Deliverables**
 
-* `cmd/agentctl_web/main.go` starts server
+* `cmd/foxctl_web/main.go` starts server
 * `internal/interfaces/web/router.go` mounts:
 
   * `/api/health`
@@ -951,7 +951,7 @@ Use `blackboard.OpenBoardStore(ctx, cfg.Storage.Root)` (note: board uses `root/b
 * Delete or stop using `packages/gui/server/*`
 * Update `packages/gui/package.json` scripts:
 
-  * `dev:all` → `concurrently "go run ./cmd/agentctl_web" "vite"`
+  * `dev:all` → `concurrently "go run ./cmd/foxctl_web" "vite"`
 * Update GUI to use `@foxctl/data` client everywhere:
 
   * remove `packages/gui/src/api/client.ts` + `packages/gui/src/types/*` duplication (or keep temporarily but migrate)
@@ -1048,7 +1048,7 @@ You can keep coding PR1–PR5 with what you gave me. For PR6 (console/chat), I�
 So if/when you’re ready for PR6, send:
 
 * `internal/storage/sessions/*`
-* any existing “web server” code if present (`cmd/agentctl_web/*` or similar)
+* any existing “web server” code if present (`cmd/foxctl_web/*` or similar)
 * any helpers around skills registry / manifest parsing (maybe in `internal/domain/skill` or `internal/adapters/skillslib`)
 
 ---
@@ -1112,12 +1112,12 @@ We already see `Put`, `Pin`, `Unpin` used — we need the “read” side.
 
 ### C) Existing web API expectations (optional but helpful)
 
-Your GUI types mention `cmd/agentctl_web/templates/types.go` (or older web server code). If you want the new Go server to be drop-in compatible, share:
+Your GUI types mention `cmd/foxctl_web/templates/types.go` (or older web server code). If you want the new Go server to be drop-in compatible, share:
 
 * any existing API handler code for jobs/cas:
 
-  * `cmd/agentctl_viewer/**` (if it serves `/api/...`)
-  * or any older `cmd/agentctl_web/**` if it exists in-repo
+  * `cmd/foxctl_viewer/**` (if it serves `/api/...`)
+  * or any older `cmd/foxctl_web/**` if it exists in-repo
 * any TS API client methods that already expect job/cas shapes (looks like `packages/data/src/client.ts` already has jobs endpoints; if CAS exists there, include those parts)
 
 If you don’t share these, we’ll still match **the TS interfaces** you showed (`JobSummary`, `JobDetail`) and keep the endpoint shapes consistent.
@@ -1212,7 +1212,7 @@ If you paste **just these**, it’s enough to generate precise code:
 Below is a **concrete scaffolding + implementation plan** you can hand to Codex/Claude. It’s designed to:
 
 * Keep your existing **foxctl internal architecture** (runservice/daemon/engine/protocol/console payloads)
-* Add a new **Go HTTP+WS server** (`cmd/agentctl_web`)
+* Add a new **Go HTTP+WS server** (`cmd/foxctl_web`)
 * Extend your existing **React GUI** (`packages/gui`) with a **Console** page that streams events over WebSocket
 * Start minimal (skills run + basic console), then iterate into full “alternative to Claude Code/OpenCode”
 
@@ -1251,7 +1251,7 @@ Below is a **concrete scaffolding + implementation plan** you can hand to Codex/
 Create a new command + internal web module:
 
 ```
-cmd/agentctl_web/
+cmd/foxctl_web/
   main.go
 
 internal/interfaces/web/
@@ -1291,7 +1291,7 @@ packages/gui/vite.config.ts       (proxy /ws)
 
 # 3) Go Server Scaffolding (copy/paste)
 
-## 3.1 `cmd/agentctl_web/main.go`
+## 3.1 `cmd/foxctl_web/main.go`
 
 ```go
 package main
@@ -1352,7 +1352,7 @@ func main() {
 	}
 
 	go func() {
-		logger.Info().Str("addr", addr).Msg("agentctl_web listening")
+		logger.Info().Str("addr", addr).Msg("foxctl_web listening")
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error().Err(err).Msg("http server failed")
 		}
@@ -1460,7 +1460,7 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			_, _ = w.Write([]byte("agentctl_web running. In dev, run Vite at :5173.\n"))
+			_, _ = w.Write([]byte("foxctl_web running. In dev, run Vite at :5173.\n"))
 		})
 	}
 
@@ -1642,11 +1642,11 @@ func RunSkillHandler(cfg config.Config, log zerolog.Logger, resolver *daemon.Ski
 		var stderr bytes.Buffer
 
 		corr := ulid.Make().String()
-		w.Header().Set("X-Agentctl-Correlation-Id", corr)
+		w.Header().Set("X-Foxctl-Correlation-Id", corr)
 
 		opts := runservice.RunOptions{
 			SkillName:     req.Skill,
-			CLICommand:    "agentctl_web",
+			CLICommand:    "foxctl_web",
 			CorrelationID: corr,
 			Input:         req.Input,
 			Workspace:     ws,
@@ -2338,7 +2338,7 @@ func (e *SkillToolExecutor) Execute(ctx context.Context, toolName string, args j
 	corr := ulid.Make().String()
 	opts := runservice.RunOptions{
 		SkillName:     skillName,
-		CLICommand:    "agentctl_web_tool",
+		CLICommand:    "foxctl_web_tool",
 		CorrelationID: corr,
 		Input:         args,
 		Workspace:     e.workspace,
@@ -2639,11 +2639,11 @@ import { ConsolePage } from "@/pages";
 
 ## Phase 0 — Bootstrap server (0.5 day)
 
-**Goal:** `go run ./cmd/agentctl_web` starts, `/api/status` works.
+**Goal:** `go run ./cmd/foxctl_web` starts, `/api/status` works.
 
 Tasks:
 
-* Add `cmd/agentctl_web/main.go`
+* Add `cmd/foxctl_web/main.go`
 * Add `internal/interfaces/web/{options.go,server.go}`
 * Add `/api/status` handler
 
@@ -2762,7 +2762,7 @@ Tasks:
 
 Acceptance:
 
-* events appear in `$AGENTCTL_OBS_DIR/events/wide_events.ndjson`
+* events appear in `$FOXCTL_OBS_DIR/events/wide_events.ndjson`
 * correlation_id matches WS correlation_id + job_id meta when applicable
 
 ---
@@ -2772,9 +2772,9 @@ Acceptance:
 Paste this as the instruction to Codex/Claude:
 
 ```text
-Implement agentctl_web scaffolding:
+Implement foxctl_web scaffolding:
 
-- Add cmd/agentctl_web with Go HTTP server at 127.0.0.1:8090.
+- Add cmd/foxctl_web with Go HTTP server at 127.0.0.1:8090.
 - Add internal/interfaces/web server with routes:
   - GET /api/status
   - POST /api/skills/run (ephemeral/job) using internal/runtime/runservice (CAS limiting + artifacts)
@@ -2833,7 +2833,7 @@ React should be a thin client: render state, call APIs, subscribe to streams.
 
 ### Option A (recommended): **One Go process that exposes HTTP + WS**
 
-* `cmd/agentctl_web` (or similar) runs:
+* `cmd/foxctl_web` (or similar) runs:
 
   * HTTP API (REST-ish)
   * WebSocket for console streaming
@@ -3134,7 +3134,7 @@ That gets you a useful UI quickly without needing deep refactors.
 
 ## If you want, I can turn this into concrete scaffolding
 
-If you tell me where you want the web server to live (new `cmd/agentctl_web` vs extending an existing one like `packages/gui/server`), I can outline:
+If you tell me where you want the web server to live (new `cmd/foxctl_web` vs extending an existing one like `packages/gui/server`), I can outline:
 
 * Go router + handler skeletons
 * WS handler using `console.Payload`

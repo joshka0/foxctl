@@ -33,7 +33,7 @@ bun run --cwd packages/gui-auth-gateway dist/server.js
 ## Common environment
 
 - `GUI_AUTH_UPSTREAM_URL`
-- `GUI_AUTH_DATABASE_URL` or `AGENTCTL_POSTGRES_DSN`
+- `GUI_AUTH_DATABASE_URL` or `FOXCTL_POSTGRES_DSN`
 - `GUI_AUTH_SQLITE_PATH`
 - `GUI_AUTH_ALLOWED_EMAILS`
 - `GUI_AUTH_MAGIC_LINK_LOG_ONLY`

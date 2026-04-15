@@ -762,7 +762,7 @@ sessions:
 | System | Purpose | Integration |
 |--------|---------|-------------|
 | `memory.db` | Named memories, cache | Sessions can be saved as named memories |
-| `trajectory.db` | Agentctl skill execution tracking | Different lifecycle than Claude sessions |
+| `trajectory.db` | Foxctl skill execution tracking | Different lifecycle than Claude sessions |
 | `tasks.db` | Task management | Sessions can reference active task |
 | `plan/sync` | Claude plans | Sessions can reference active plan |
 

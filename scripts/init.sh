@@ -23,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 BIN_DIR="$REPO_ROOT/bin"
 LOCAL_BIN="${HOME}/.local/bin"
-AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.foxctl}"
+FOXCTL_HOME="${FOXCTL_HOME:-$HOME/.foxctl}"
 CLAUDE_DIR="$HOME/.claude"
 CODEX_DIR="$HOME/.codex"
 GEMINI_DIR="$HOME/.gemini"
@@ -119,21 +119,21 @@ echo -e "${BLUE}2. Creating directories...${NC}"
 mkdir -p "$LOCAL_BIN"
 success "Created $LOCAL_BIN"
 
-mkdir -p "$AGENTCTL_HOME"/{storage,cache,cas,skills,jobs,observability/events,backups}
-success "Created $AGENTCTL_HOME structure"
+mkdir -p "$FOXCTL_HOME"/{storage,cache,cas,skills,jobs,observability/events,backups}
+success "Created $FOXCTL_HOME structure"
 
 info "Ensuring foxctl share configs link"
-AGENTCTL_SHARE="$AGENTCTL_HOME/share"
-mkdir -p "$AGENTCTL_SHARE"
+FOXCTL_SHARE="$FOXCTL_HOME/share"
+mkdir -p "$FOXCTL_SHARE"
 
-if [[ -L "$AGENTCTL_SHARE/configs" ]]; then
-    rm "$AGENTCTL_SHARE/configs"
-elif [[ -e "$AGENTCTL_SHARE/configs" ]]; then
-    warn "foxctl share path exists (skipping): $AGENTCTL_SHARE/configs"
+if [[ -L "$FOXCTL_SHARE/configs" ]]; then
+    rm "$FOXCTL_SHARE/configs"
+elif [[ -e "$FOXCTL_SHARE/configs" ]]; then
+    warn "foxctl share path exists (skipping): $FOXCTL_SHARE/configs"
 else
     REPO_CONFIGS_ABS="$(cd "$REPO_ROOT/configs" && pwd)"
-    ln -s "$REPO_CONFIGS_ABS" "$AGENTCTL_SHARE/configs"
-    success "Symlinked foxctl configs -> $AGENTCTL_SHARE/configs"
+    ln -s "$REPO_CONFIGS_ABS" "$FOXCTL_SHARE/configs"
+    success "Symlinked foxctl configs -> $FOXCTL_SHARE/configs"
 fi
 
 mkdir -p "$CLAUDE_DIR"
@@ -687,10 +687,10 @@ echo ""
 # 6. Validate .env
 echo -e "${BLUE}6. Checking environment configuration...${NC}"
 
-ENV_FILE="$AGENTCTL_HOME/.env"
+ENV_FILE="$FOXCTL_HOME/.env"
 REPO_ENV="$REPO_ROOT/.env"
 
-# Copy .env if it exists in repo but not in AGENTCTL_HOME
+# Copy .env if it exists in repo but not in FOXCTL_HOME
 if [[ -f "$REPO_ENV" && ! -f "$ENV_FILE" ]]; then
     cp "$REPO_ENV" "$ENV_FILE"
     success "Copied .env to $ENV_FILE"
@@ -737,7 +737,7 @@ check_var "TURSO_AUTH_TOKEN" "optional" "Turso authentication token"
 
 echo ""
 echo "Observability (optional):"
-check_var "AGENTCTL_OBS_DIR" "optional" "Directory for wide events logging"
+check_var "FOXCTL_OBS_DIR" "optional" "Directory for wide events logging"
 echo ""
 
 # 7. Summary

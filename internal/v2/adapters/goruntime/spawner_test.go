@@ -358,7 +358,7 @@ func TestManagedAgentSpawner_CreatesAgentRecordAndLaunchesProcess(t *testing.T) 
 	}
 }
 
-func TestDefaultAgentRunCommandBuilder_UsesAgentctlRun(t *testing.T) {
+func TestDefaultAgentRunCommandBuilder_UsesFoxctlRun(t *testing.T) {
 	t.Parallel()
 
 	builder := defaultAgentRunCommandBuilder("/tmp/foxctl-bin", "/tmp/workspace")
@@ -380,22 +380,22 @@ func TestDefaultAgentRunCommandBuilder_UsesAgentctlRun(t *testing.T) {
 	}
 }
 
-func TestFilteredAgentctlEnv_RemovesJidoVars(t *testing.T) {
+func TestFilteredFoxctlEnv_RemovesJidoVars(t *testing.T) {
 	t.Parallel()
 
 	env := []string{
 		"PATH=/usr/bin",
-		"AGENTCTL_JIDO_SOCKET=/tmp/jido.sock",
-		"AGENTCTL_JIDO_RPC_PATH=/rpc",
-		"AGENTCTL_V2_ASK_DISPATCHER=jido",
+		"FOXCTL_JIDO_SOCKET=/tmp/jido.sock",
+		"FOXCTL_JIDO_RPC_PATH=/rpc",
+		"FOXCTL_V2_ASK_DISPATCHER=jido",
 		"HOME=/tmp/home",
 	}
-	filtered := filteredAgentctlEnv(env)
+	filtered := filteredFoxctlEnv(env)
 	got := map[string]bool{}
 	for _, kv := range filtered {
 		got[kv] = true
 	}
-	if got["AGENTCTL_JIDO_SOCKET=/tmp/jido.sock"] || got["AGENTCTL_JIDO_RPC_PATH=/rpc"] || got["AGENTCTL_V2_ASK_DISPATCHER=jido"] {
+	if got["FOXCTL_JIDO_SOCKET=/tmp/jido.sock"] || got["FOXCTL_JIDO_RPC_PATH=/rpc"] || got["FOXCTL_V2_ASK_DISPATCHER=jido"] {
 		t.Fatalf("filtered env still contains jido vars: %v", filtered)
 	}
 	if !got["PATH=/usr/bin"] || !got["HOME=/tmp/home"] {
@@ -476,8 +476,8 @@ func waitForRecentLogs(t *testing.T, state *runtimeworkers.StateComponent, worke
 		if ok && len(record.RawState) > 0 {
 			var raw map[string]any
 			if err := json.Unmarshal(record.RawState, &raw); err == nil {
-				agentctlState, _ := raw["foxctl"].(map[string]any)
-				recentLogs, _ := agentctlState["recent_logs"].([]any)
+				foxctlState, _ := raw["foxctl"].(map[string]any)
+				recentLogs, _ := foxctlState["recent_logs"].([]any)
 				if len(recentLogs) >= minCount {
 					return recentLogs
 				}

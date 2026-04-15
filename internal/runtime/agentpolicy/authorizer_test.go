@@ -6,85 +6,85 @@ import (
 
 func TestParseCommand(t *testing.T) {
 	tests := []struct {
-		name         string
-		command      string
-		wantAgentctl bool
-		wantSkill    string
-		wantEnvVars  map[string]string
+		name        string
+		command     string
+		wantFoxctl  bool
+		wantSkill   string
+		wantEnvVars map[string]string
 	}{
 		{
-			name:         "simple foxctl run",
-			command:      "foxctl run code/symbols --input '{}'",
-			wantAgentctl: true,
-			wantSkill:    "code/symbols",
+			name:       "simple foxctl run",
+			command:    "foxctl run code/symbols --input '{}'",
+			wantFoxctl: true,
+			wantSkill:  "code/symbols",
 		},
 		{
-			name:         "foxctl with absolute path",
-			command:      "/usr/local/bin/foxctl run code/semantic_search",
-			wantAgentctl: true,
-			wantSkill:    "code/semantic_search",
+			name:       "foxctl with absolute path",
+			command:    "/usr/local/bin/foxctl run code/semantic_search",
+			wantFoxctl: true,
+			wantSkill:  "code/semantic_search",
 		},
 		{
-			name:         "foxctl with env vars",
-			command:      "AGENTCTL_WORKSPACE=/foo foxctl run code/snippet_extract",
-			wantAgentctl: true,
-			wantSkill:    "code/snippet_extract",
-			wantEnvVars:  map[string]string{"AGENTCTL_WORKSPACE": "/foo"},
+			name:        "foxctl with env vars",
+			command:     "FOXCTL_WORKSPACE=/foo foxctl run code/snippet_extract",
+			wantFoxctl:  true,
+			wantSkill:   "code/snippet_extract",
+			wantEnvVars: map[string]string{"FOXCTL_WORKSPACE": "/foo"},
 		},
 		{
-			name:         "foxctl with multiple env vars",
-			command:      "FOO=bar BAZ=qux foxctl run test/run",
-			wantAgentctl: true,
-			wantSkill:    "test/run",
-			wantEnvVars:  map[string]string{"FOO": "bar", "BAZ": "qux"},
+			name:        "foxctl with multiple env vars",
+			command:     "FOO=bar BAZ=qux foxctl run test/run",
+			wantFoxctl:  true,
+			wantSkill:   "test/run",
+			wantEnvVars: map[string]string{"FOO": "bar", "BAZ": "qux"},
 		},
 		{
-			name:         "skill with single quotes",
-			command:      `foxctl run 'code/symbols' --input '{}'`,
-			wantAgentctl: true,
-			wantSkill:    "code/symbols",
+			name:       "skill with single quotes",
+			command:    `foxctl run 'code/symbols' --input '{}'`,
+			wantFoxctl: true,
+			wantSkill:  "code/symbols",
 		},
 		{
-			name:         "skill with double quotes",
-			command:      `foxctl run "code/symbols" --input '{}'`,
-			wantAgentctl: true,
-			wantSkill:    "code/symbols",
+			name:       "skill with double quotes",
+			command:    `foxctl run "code/symbols" --input '{}'`,
+			wantFoxctl: true,
+			wantSkill:  "code/symbols",
 		},
 		{
-			name:         "not foxctl command",
-			command:      "rm -rf /",
-			wantAgentctl: false,
-			wantSkill:    "",
+			name:       "not foxctl command",
+			command:    "rm -rf /",
+			wantFoxctl: false,
+			wantSkill:  "",
 		},
 		{
-			name:         "foxctl but not run",
-			command:      "foxctl skills list",
-			wantAgentctl: false,
-			wantSkill:    "",
+			name:       "foxctl but not run",
+			command:    "foxctl skills list",
+			wantFoxctl: false,
+			wantSkill:  "",
 		},
 		{
-			name:         "foxctl run without skill",
-			command:      "foxctl run",
-			wantAgentctl: false,
-			wantSkill:    "",
+			name:       "foxctl run without skill",
+			command:    "foxctl run",
+			wantFoxctl: false,
+			wantSkill:  "",
 		},
 		{
-			name:         "foxctl run with flag instead of skill",
-			command:      "foxctl run --help",
-			wantAgentctl: false,
-			wantSkill:    "",
+			name:       "foxctl run with flag instead of skill",
+			command:    "foxctl run --help",
+			wantFoxctl: false,
+			wantSkill:  "",
 		},
 		{
-			name:         "empty command",
-			command:      "",
-			wantAgentctl: false,
-			wantSkill:    "",
+			name:       "empty command",
+			command:    "",
+			wantFoxctl: false,
+			wantSkill:  "",
 		},
 		{
-			name:         "foxctl with complex input",
-			command:      `foxctl run code/snippet_extract --input '{"question":"Where is auth?"}'`,
-			wantAgentctl: true,
-			wantSkill:    "code/snippet_extract",
+			name:       "foxctl with complex input",
+			command:    `foxctl run code/snippet_extract --input '{"question":"Where is auth?"}'`,
+			wantFoxctl: true,
+			wantSkill:  "code/snippet_extract",
 		},
 	}
 
@@ -92,8 +92,8 @@ func TestParseCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ParseCommand(tt.command)
 
-			if result.IsAgentctlRun != tt.wantAgentctl {
-				t.Errorf("IsAgentctlRun = %v, want %v", result.IsAgentctlRun, tt.wantAgentctl)
+			if result.IsFoxctlRun != tt.wantFoxctl {
+				t.Errorf("IsFoxctlRun = %v, want %v", result.IsFoxctlRun, tt.wantFoxctl)
 			}
 
 			if result.Skill != tt.wantSkill {
@@ -247,7 +247,7 @@ func TestAuthorizeBash(t *testing.T) {
 		{
 			name:         "with env var prefix",
 			profile:      ProfileExplorer,
-			command:      "AGENTCTL_WORKSPACE=/foo foxctl run code/symbols",
+			command:      "FOXCTL_WORKSPACE=/foo foxctl run code/symbols",
 			wantDecision: DecisionAllow,
 			wantSkill:    "code/symbols",
 		},

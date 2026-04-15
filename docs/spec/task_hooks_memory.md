@@ -159,11 +159,11 @@ Example (conceptual):
 set -euo pipefail
 
 HOOK_EVENT="${1:-PostToolUse}"
-AGENTCTL_BIN="${AGENTCTL_BIN:-foxctl}"
+FOXCTL_BIN="${FOXCTL_BIN:-foxctl}"
 
 payload="$(cat)"
 
-result="$(printf '%s' "$payload" | "$AGENTCTL_BIN" run hooks/task_guard --input-file -)"
+result="$(printf '%s' "$payload" | "$FOXCTL_BIN" run hooks/task_guard --input-file -)"
 
 hook_json="$(printf '%s' "$result" | jq -c '.data.hook_output // {}')"
 
@@ -210,7 +210,7 @@ UX path for auto-creating tasks.
 
 - `hook.Input` (from wrapper), including `WorkspaceRoot` and `ToolName`.
 - Config (env or config file) for behavior:
-  - `AGENTCTL_TASK_GUARD_MODE`:
+  - `FOXCTL_TASK_GUARD_MODE`:
     - `auto` (default): auto-create tasks when none exist.
     - `strict`: block and require explicit task creation.
 
@@ -268,9 +268,9 @@ that simply logs to CAS while we refine the UX.
   - This allows offline + single-machine workflows to remain fully functional.
 
 - **Global (optional):**
-  - When `AGENTCTL_MEMORY_DB_DRIVER=turso`, the memory store may use
+  - When `FOXCTL_MEMORY_DB_DRIVER=turso`, the memory store may use
     Turso/libSQL, including vector search when
-    `AGENTCTL_MEMORY_VECTOR_SEARCH=true`.
+    `FOXCTL_MEMORY_VECTOR_SEARCH=true`.
   - Cross-machine collaboration is enabled by pointing multiple foxctl
     instances at the same MEMORY DB.
 

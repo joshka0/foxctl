@@ -40,7 +40,7 @@ doc.
   - Codemaps:
     - **Dspy-Go Agent Runtime & Tools Integration in foxctl**
     - **Planning LLM Stack: Auto, Providers, and Integration Tests**
-    - **Agentctl Overseer & Agent Hierarchy…** (for spawn/depth semantics)
+    - **Foxctl Overseer & Agent Hierarchy…** (for spawn/depth semantics)
 
 - **Section C – Overseer, knowledge, orchestration**
   - C1 keeps overseer spawn/depth unchanged; Phase 6 does _not_ add new agent
@@ -48,8 +48,8 @@ doc.
   - C2 updates knowledge/factory-droids to describe the retrieval funnel and new
     tools, but keeps knowledge contracts stable.
   - Codemaps:
-    - **Agentctl Overseer & Agent Hierarchy…**
-    - **Agentctl Knowledge System & Factory Droids**
+    - **Foxctl Overseer & Agent Hierarchy…**
+    - **Foxctl Knowledge System & Factory Droids**
     - **Core Profile v1: End-to-End Envelope, Jobs & CAS Flow**
 
 - **Section D – Tests, goldens, observability**

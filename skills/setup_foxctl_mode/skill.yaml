@@ -1,7 +1,7 @@
 apiVersion: foxctl/v1
 kind: Skill
 metadata:
-  name: setup/agentctl_mode
+  name: setup/foxctl_mode
   version: 0.1.0
   description: "Get/set foxctl mode state for a workspace"
   tags: ["setup", "mode", "workspace"]
@@ -13,7 +13,7 @@ io:
   format: JSON
   inline_output_kb: 4
 signature:
-  command: setup/agentctl_mode
+  command: setup/foxctl_mode
   parameters:
     - name: operation
       type: string
@@ -40,8 +40,8 @@ signature:
       Manages foxctl mode state per workspace.
 
       Examples:
-        foxctl run setup/agentctl_mode --input '{"operation": "get"}'
-        foxctl run setup/agentctl_mode --input '{"operation": "set", "enabled": true}'
+        foxctl run setup/foxctl_mode --input '{"operation": "get"}'
+        foxctl run setup/foxctl_mode --input '{"operation": "set", "enabled": true}'
 capabilities:
   network: "none"
   filesystem:
