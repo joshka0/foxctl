@@ -28,6 +28,7 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/agents"
 	"github.com/joshka0/foxctl/internal/storage/blackboard"
 	"github.com/joshka0/foxctl/internal/storage/coordination"
+	"github.com/joshka0/foxctl/internal/storage/plans"
 	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 	"github.com/spf13/cobra"
 )
@@ -641,6 +642,7 @@ func newRoomEpicCommand() *cobra.Command {
 	cmd.AddCommand(
 		newRoomEpicStartCommand(),
 		newRoomEpicImportFactoryCommand(),
+		newRoomEpicImportPlanCommand(),
 		newRoomEpicShowCommand(),
 		newRoomEpicCheckpointCommand(),
 		newRoomEpicResumeCommand(),
@@ -698,6 +700,29 @@ func newRoomEpicStartCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&success, "success", nil, "Success signal or success measure (repeatable)")
 	cmd.Flags().BoolVar(&maintenance, "maintenance", false, "Use the built-in catch-all maintenance/small-stories epic template")
 	cmd.Flags().BoolVar(&defaultSmallWork, "default-small-work", false, "Mark this maintenance epic as the room's default catch-all for small work")
+	return cmd
+}
+
+func newRoomEpicImportPlanCommand() *cobra.Command {
+	var (
+		workspace string
+		sender    string
+		planFile  string
+		provider  string
+	)
+	cmd := &cobra.Command{
+		Use:   "import-plan <room-id>",
+		Short: "Import one parsed plan file as a canonical room-agile epic graph",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicImportPlan(cmd, workspace, sender, args[0], planFile, provider)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
+	cmd.Flags().StringVar(&planFile, "plan-file", "", "Path to one plan file (Claude markdown or OpenCode todo JSON)")
+	cmd.Flags().StringVar(&provider, "provider", "auto", "Plan parser provider (auto|claude|opencode)")
+	_ = cmd.MarkFlagRequired("plan-file")
 	return cmd
 }
 
@@ -4095,6 +4120,326 @@ type roomMilestoneProposalMeta struct {
 	Goal      string   `json:"goal"`
 	Scope     []string `json:"scope"`
 	Rationale string   `json:"rationale"`
+}
+
+type roomPlanImportLoaded struct {
+	Plan       *plans.PlanInfo
+	Steps      []plans.Step
+	Provider   plans.Provider
+	SourcePath string
+	Title      string
+}
+
+type roomPlanImportMilestoneGroup struct {
+	Title string
+	Steps []plans.Step
+}
+
+type roomPlanImportStoryEntry struct {
+	StoryID    string
+	StoryTitle string
+	DependsOn  []string
+}
+
+func runRoomEpicImportPlan(cmd *cobra.Command, workspace, sender, roomID, planFile, provider string) error {
+	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "foxctl.room.epic.import_plan", workspace, sender, roomID)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if !roomMemberHasRole(summary.Members, identity.Sender, "coordinator") {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", protocol.ErrorCodeEARG, "plan import requires coordinator role", map[string]any{
+			"hint": "Run the command as the room coordinator, or join the room with role=coordinator first.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	loaded, err := loadRoomPlanImportFile(planFile, provider)
+	if err != nil {
+		code := protocol.ErrorCodeEARG
+		if os.IsNotExist(err) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", code, err.Error(), map[string]any{
+			"hint": "Pass --plan-file pointing to one Claude markdown plan or OpenCode todo JSON file.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if len(loaded.Steps) == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", protocol.ErrorCodeEARG, "plan import produced no actionable steps", map[string]any{
+			"hint": "Add numbered/step sections (Claude) or pending/in_progress todos (OpenCode), then rerun import.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epicTitle := firstNonEmpty(strings.TrimSpace(loaded.Title), filepath.Base(loaded.SourcePath))
+	epicMsg := &agent.BoardMessage{
+		WorkspaceID: absWorkspace,
+		Stream:      agent.RoomStreamName(roomID),
+		Sender:      identity.Sender,
+		Recipient:   agent.BroadcastRecipient,
+		Kind:        agent.BoardMessageKindEpic,
+		Priority:    agent.DefaultPriority,
+		Subject:     "Epic: " + epicTitle,
+		Body:        buildRoomEpicBody(epicTitle, "Imported from: "+loaded.SourcePath, identity.Sender, "", "", nil, nil, "plan_import", false),
+	}
+	if err := store.SendMessage(cmd.Context(), epicMsg); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	groups := groupRoomPlanImportSteps(loaded.Steps)
+	storyIDsByTitle := make(map[string][]string)
+	storyEntries := make([]roomPlanImportStoryEntry, 0, len(loaded.Steps))
+	storyCount := 0
+	for _, group := range groups {
+		milestoneTitle := firstNonEmpty(strings.TrimSpace(group.Title), "Imported Plan")
+		milestoneMsg := &agent.BoardMessage{
+			WorkspaceID:      absWorkspace,
+			RelatedMessageID: epicMsg.ID,
+			Stream:           agent.RoomStreamName(roomID),
+			Sender:           identity.Sender,
+			Recipient:        agent.BroadcastRecipient,
+			Kind:             agent.BoardMessageKindMilestone,
+			Priority:         agent.DefaultPriority,
+			Subject:          "Milestone: " + milestoneTitle,
+			Body:             buildRoomMilestoneBody(epicMsg.ID, milestoneTitle, "", "", identity.Sender, nil, nil, nil, nil, nil, nil, nil, nil, nil, "", ""),
+		}
+		if err := store.SendMessage(cmd.Context(), milestoneMsg); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+
+		for _, step := range group.Steps {
+			storyTitle := strings.TrimSpace(step.Title)
+			storyMsg := &agent.BoardMessage{
+				WorkspaceID:      absWorkspace,
+				RelatedMessageID: milestoneMsg.ID,
+				Stream:           agent.RoomStreamName(roomID),
+				Sender:           identity.Sender,
+				Recipient:        agent.BroadcastRecipient,
+				Kind:             agent.BoardMessageKindStory,
+				Priority:         agent.DefaultPriority,
+				Subject:          "Story: " + storyTitle,
+				Body:             buildRoomStoryBody("", strings.TrimSpace(step.Description)),
+			}
+			if err := store.SendMessage(cmd.Context(), storyMsg); err != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			storyCount++
+			titleKey := roomPlanImportTitleKey(storyTitle)
+			storyIDsByTitle[titleKey] = append(storyIDsByTitle[titleKey], storyMsg.ID)
+			storyEntries = append(storyEntries, roomPlanImportStoryEntry{
+				StoryID:    storyMsg.ID,
+				StoryTitle: storyTitle,
+				DependsOn:  append([]string(nil), step.DependsOn...),
+			})
+		}
+	}
+
+	unresolvedDependencyCount := 0
+	for _, story := range storyEntries {
+		resolvedDeps := make([]string, 0, len(story.DependsOn))
+		for _, dependsOnTitle := range normalizeRoomList(story.DependsOn, false) {
+			depIDs := storyIDsByTitle[roomPlanImportTitleKey(dependsOnTitle)]
+			if len(depIDs) != 1 {
+				unresolvedDependencyCount++
+				continue
+			}
+			if depIDs[0] == story.StoryID {
+				continue
+			}
+			resolvedDeps = append(resolvedDeps, depIDs[0])
+		}
+		resolvedDeps = normalizeRoomList(resolvedDeps, true)
+		if len(resolvedDeps) == 0 {
+			continue
+		}
+		updateMsg := &agent.BoardMessage{
+			WorkspaceID:      absWorkspace,
+			RelatedMessageID: story.StoryID,
+			Stream:           agent.RoomStreamName(roomID),
+			Sender:           identity.Sender,
+			Recipient:        agent.BroadcastRecipient,
+			Kind:             agent.BoardMessageKindStoryUpdate,
+			Priority:         agent.DefaultPriority,
+			Subject:          "Story Update: " + story.StoryTitle,
+			Body:             buildRoomStoryUpdateBody("", resolvedDeps, true),
+		}
+		if err := store.SendMessage(cmd.Context(), updateMsg); err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+	}
+
+	if err := syncRoomAgileWorkpack(cmd.Context(), store, absWorkspace, roomID, epicMsg.ID); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", map[string]any{
+		"room_id":                     roomID,
+		"epic_id":                     epicMsg.ID,
+		"milestone_count":             len(groups),
+		"story_count":                 storyCount,
+		"unresolved_dependency_count": unresolvedDependencyCount,
+		"provider":                    string(loaded.Provider),
+		"source_path":                 loaded.SourcePath,
+		"title":                       epicTitle,
+	}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func loadRoomPlanImportFile(planFile, provider string) (roomPlanImportLoaded, error) {
+	planFile = strings.TrimSpace(expandHomePath(planFile))
+	if planFile == "" {
+		return roomPlanImportLoaded{}, fmt.Errorf("plan-file is required")
+	}
+	absPlanPath, err := filepath.Abs(planFile)
+	if err != nil {
+		return roomPlanImportLoaded{}, fmt.Errorf("resolve plan-file %q: %w", planFile, err)
+	}
+	info, err := os.Stat(absPlanPath)
+	if err != nil {
+		return roomPlanImportLoaded{}, err
+	}
+	if info.IsDir() {
+		return roomPlanImportLoaded{}, fmt.Errorf("plan-file %q is a directory", absPlanPath)
+	}
+	selectedProvider, err := resolveRoomPlanImportProvider(provider, absPlanPath)
+	if err != nil {
+		return roomPlanImportLoaded{}, err
+	}
+
+	switch selectedProvider {
+	case plans.ProviderOpenCode:
+		parser := plans.NewOpenCodeParser("")
+		todoFile, err := parser.ParseFile(absPlanPath)
+		if err != nil {
+			return roomPlanImportLoaded{}, err
+		}
+		planInfo := todoFile.ToPlanInfo()
+		steps := normalizeRoomPlanImportSteps(todoFile.ToSteps())
+		return roomPlanImportLoaded{
+			Plan:       planInfo,
+			Steps:      steps,
+			Provider:   selectedProvider,
+			SourcePath: absPlanPath,
+			Title:      firstNonEmpty(strings.TrimSpace(planInfo.Title), filepath.Base(absPlanPath)),
+		}, nil
+	case plans.ProviderClaude:
+		fallthrough
+	default:
+		parser := plans.NewParser(plans.DefaultParseOptions())
+		planInfo, err := parser.ParseFile(absPlanPath)
+		if err != nil {
+			return roomPlanImportLoaded{}, err
+		}
+		steps := normalizeRoomPlanImportSteps(parser.ExtractSteps(planInfo))
+		return roomPlanImportLoaded{
+			Plan:       planInfo,
+			Steps:      steps,
+			Provider:   selectedProvider,
+			SourcePath: absPlanPath,
+			Title:      firstNonEmpty(strings.TrimSpace(planInfo.Title), filepath.Base(absPlanPath)),
+		}, nil
+	}
+}
+
+func resolveRoomPlanImportProvider(provider, planPath string) (plans.Provider, error) {
+	raw := strings.TrimSpace(strings.ToLower(provider))
+	switch raw {
+	case "", "auto":
+		path := strings.ToLower(strings.TrimSpace(planPath))
+		if strings.HasSuffix(path, ".json") || strings.Contains(path, "/.opencode/") || strings.Contains(path, `\.opencode\`) {
+			return plans.ProviderOpenCode, nil
+		}
+		return plans.ProviderClaude, nil
+	case string(plans.ProviderClaude):
+		return plans.ProviderClaude, nil
+	case string(plans.ProviderOpenCode):
+		return plans.ProviderOpenCode, nil
+	default:
+		return "", fmt.Errorf("unsupported provider %q", provider)
+	}
+}
+
+func normalizeRoomPlanImportSteps(steps []plans.Step) []plans.Step {
+	type stepWithIndex struct {
+		Step  plans.Step
+		Index int
+	}
+	indexed := make([]stepWithIndex, 0, len(steps))
+	for i, step := range steps {
+		title := strings.TrimSpace(step.Title)
+		if title == "" {
+			if step.Order > 0 {
+				title = fmt.Sprintf("Step %d", step.Order)
+			} else {
+				title = fmt.Sprintf("Step %d", i+1)
+			}
+		}
+		sectionPath := make([]string, 0, len(step.SectionPath))
+		for _, section := range step.SectionPath {
+			section = strings.TrimSpace(section)
+			if section == "" {
+				continue
+			}
+			sectionPath = append(sectionPath, section)
+		}
+		indexed = append(indexed, stepWithIndex{
+			Step: plans.Step{
+				Title:       title,
+				Description: strings.TrimSpace(step.Description),
+				SectionPath: sectionPath,
+				Order:       step.Order,
+				DependsOn:   normalizeRoomList(step.DependsOn, false),
+			},
+			Index: i,
+		})
+	}
+	sort.SliceStable(indexed, func(i, j int) bool {
+		leftOrder := indexed[i].Step.Order
+		rightOrder := indexed[j].Step.Order
+		if leftOrder <= 0 {
+			leftOrder = indexed[i].Index + 1
+		}
+		if rightOrder <= 0 {
+			rightOrder = indexed[j].Index + 1
+		}
+		if leftOrder != rightOrder {
+			return leftOrder < rightOrder
+		}
+		return indexed[i].Index < indexed[j].Index
+	})
+	out := make([]plans.Step, 0, len(indexed))
+	for _, item := range indexed {
+		out = append(out, item.Step)
+	}
+	return out
+}
+
+func groupRoomPlanImportSteps(steps []plans.Step) []roomPlanImportMilestoneGroup {
+	const fallback = "Imported Plan"
+	groups := make(map[string][]plans.Step)
+	groupTitles := make(map[string]string)
+	groupOrder := make([]string, 0)
+	for _, step := range steps {
+		title := fallback
+		if len(step.SectionPath) > 0 {
+			title = firstNonEmpty(strings.TrimSpace(step.SectionPath[0]), fallback)
+		}
+		key := roomPlanImportTitleKey(title)
+		if _, ok := groups[key]; !ok {
+			groupOrder = append(groupOrder, key)
+			groupTitles[key] = title
+		}
+		groups[key] = append(groups[key], step)
+	}
+	out := make([]roomPlanImportMilestoneGroup, 0, len(groupOrder))
+	for _, key := range groupOrder {
+		out = append(out, roomPlanImportMilestoneGroup{
+			Title: groupTitles[key],
+			Steps: groups[key],
+		})
+	}
+	return out
+}
+
+func roomPlanImportTitleKey(title string) string {
+	return strings.ToLower(strings.TrimSpace(title))
 }
 
 func runRoomEpicStart(cmd *cobra.Command, workspace, sender, roomID, title, goal, owner, outcome, horizon string, scope, success []string, extraFlags ...bool) error {

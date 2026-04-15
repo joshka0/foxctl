@@ -7221,6 +7221,202 @@ func TestRunRoomEpicSnapshotPersistsAndUpdatesLatest(t *testing.T) {
 	}
 }
 
+func TestRunRoomEpicImportPlanMarkdownCreatesGroupedMilestonesAndStories(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	planPath := filepath.Join(workspace, "import-plan.md")
+	mustWriteRoomTestFile(t, planPath, `# Import Plan
+
+## Discovery
+### Step 1: Capture requirements
+Collect current behavior.
+### Step 2: Define mapping contract
+Map parsed steps to room stories.
+
+## Delivery
+### Step 3: Implement command wiring
+Add CLI command.`)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicImportPlan(cmd, workspace, "human-a", "alpha", planPath, "claude"); err != nil {
+		t.Fatalf("runRoomEpicImportPlan: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if got := data["provider"]; got != "claude" {
+		t.Fatalf("provider=%v want claude", got)
+	}
+	if got := data["milestone_count"]; got != float64(2) {
+		t.Fatalf("milestone_count=%v want 2", got)
+	}
+	if got := data["story_count"]; got != float64(3) {
+		t.Fatalf("story_count=%v want 3", got)
+	}
+	epicID := data["epic_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicShow(cmd, workspace, "alpha", epicID, roomTaskScanLimit); err != nil {
+		t.Fatalf("runRoomEpicShow: %v", err)
+	}
+	epic := decodeRoomEnvelope(t, out)["epic"].(map[string]any)
+	meta := epic["meta"].(map[string]any)
+	if got := meta["template"]; got != "plan_import" {
+		t.Fatalf("template=%v want plan_import", got)
+	}
+	milestones := epic["milestones"].([]any)
+	if len(milestones) != 2 {
+		t.Fatalf("len(milestones)=%d want 2", len(milestones))
+	}
+	milestoneStoryCounts := map[string]int{}
+	storyTitles := map[string]struct{}{}
+	for _, raw := range milestones {
+		milestone := raw.(map[string]any)
+		title := milestone["title"].(string)
+		stories := milestone["stories"].([]any)
+		milestoneStoryCounts[title] = len(stories)
+		for _, storyRaw := range stories {
+			story := storyRaw.(map[string]any)
+			storyTitles[story["title"].(string)] = struct{}{}
+		}
+	}
+	if got := milestoneStoryCounts["Discovery"]; got != 2 {
+		t.Fatalf("Discovery stories=%d want 2", got)
+	}
+	if got := milestoneStoryCounts["Delivery"]; got != 1 {
+		t.Fatalf("Delivery stories=%d want 1", got)
+	}
+	for _, want := range []string{"Capture requirements", "Define mapping contract", "Implement command wiring"} {
+		if _, ok := storyTitles[want]; !ok {
+			t.Fatalf("story %q missing from imported epic", want)
+		}
+	}
+}
+
+func TestRunRoomEpicImportPlanOpenCodeJSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	planPath := filepath.Join(workspace, "session-123.json")
+	mustWriteRoomTestFile(t, planPath, `[
+  {"content":"Prepare schema", "status":"pending"},
+  {"content":"Apply migration", "status":"in_progress"},
+  {"content":"Archive old table", "status":"completed"}
+]`)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicImportPlan(cmd, workspace, "human-a", "alpha", planPath, "opencode"); err != nil {
+		t.Fatalf("runRoomEpicImportPlan: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if got := data["provider"]; got != "opencode" {
+		t.Fatalf("provider=%v want opencode", got)
+	}
+	if got := data["milestone_count"]; got != float64(1) {
+		t.Fatalf("milestone_count=%v want 1", got)
+	}
+	if got := data["story_count"]; got != float64(2) {
+		t.Fatalf("story_count=%v want 2 (completed todo should be skipped)", got)
+	}
+	epicID := data["epic_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicShow(cmd, workspace, "alpha", epicID, roomTaskScanLimit); err != nil {
+		t.Fatalf("runRoomEpicShow: %v", err)
+	}
+	epic := decodeRoomEnvelope(t, out)["epic"].(map[string]any)
+	milestones := epic["milestones"].([]any)
+	if len(milestones) != 1 {
+		t.Fatalf("len(milestones)=%d want 1", len(milestones))
+	}
+	milestone := milestones[0].(map[string]any)
+	if got := milestone["title"]; got != "session-123" {
+		t.Fatalf("milestone title=%v want session-123", got)
+	}
+	stories := milestone["stories"].([]any)
+	if len(stories) != 2 {
+		t.Fatalf("len(stories)=%d want 2", len(stories))
+	}
+	gotTitles := map[string]struct{}{}
+	for _, raw := range stories {
+		story := raw.(map[string]any)
+		gotTitles[story["title"].(string)] = struct{}{}
+	}
+	for _, want := range []string{"Prepare schema", "Apply migration"} {
+		if _, ok := gotTitles[want]; !ok {
+			t.Fatalf("story %q missing from imported OpenCode plan", want)
+		}
+	}
+}
+
+func TestRunRoomEpicImportPlanMapsStepDependenciesToStoryDependencies(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+		t.Fatalf("runRoomCreate: %v", err)
+	}
+
+	planPath := filepath.Join(workspace, "dependency-plan.md")
+	mustWriteRoomTestFile(t, planPath, `# Dependency Plan
+
+## Phase One
+### Step 1: First task
+Do the first task.
+### Step 2: Second task
+Do the second task.
+### Step 3: Third task
+Do the third task.`)
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomEpicImportPlan(cmd, workspace, "human-a", "alpha", planPath, "claude"); err != nil {
+		t.Fatalf("runRoomEpicImportPlan: %v", err)
+	}
+	data := decodeRoomEnvelope(t, out)
+	if got := data["unresolved_dependency_count"]; got != float64(0) {
+		t.Fatalf("unresolved_dependency_count=%v want 0", got)
+	}
+	epicID := data["epic_id"].(string)
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicShow(cmd, workspace, "alpha", epicID, roomTaskScanLimit); err != nil {
+		t.Fatalf("runRoomEpicShow: %v", err)
+	}
+	epic := decodeRoomEnvelope(t, out)["epic"].(map[string]any)
+	titleToID := map[string]string{}
+	titleToDeps := map[string][]string{}
+	for _, milestoneRaw := range epic["milestones"].([]any) {
+		milestone := milestoneRaw.(map[string]any)
+		for _, storyRaw := range milestone["stories"].([]any) {
+			story := storyRaw.(map[string]any)
+			title := story["title"].(string)
+			titleToID[title] = story["id"].(string)
+			titleToDeps[title] = stringSliceValue(story["dependencies"])
+		}
+	}
+	secondDeps := titleToDeps["Second task"]
+	if len(secondDeps) != 1 || secondDeps[0] != titleToID["First task"] {
+		t.Fatalf("Second task deps=%v want [%s]", secondDeps, titleToID["First task"])
+	}
+	thirdDeps := titleToDeps["Third task"]
+	if len(thirdDeps) != 1 || thirdDeps[0] != titleToID["Second task"] {
+		t.Fatalf("Third task deps=%v want [%s]", thirdDeps, titleToID["Second task"])
+	}
+}
+
 func TestNewRoomEpicCommandIncludesSnapshotSubcommand(t *testing.T) {
 	cmd := newRoomEpicCommand()
 	found := false
@@ -7269,6 +7465,23 @@ func TestNewRoomEpicCommandIncludesDispatchFrontierSubcommand(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("dispatch-frontier subcommand missing")
+	}
+}
+
+func TestNewRoomEpicCommandIncludesImportPlanSubcommand(t *testing.T) {
+	cmd := newRoomEpicCommand()
+	found := false
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "import-plan" {
+			found = true
+			if got := sub.Use; got != "import-plan <room-id>" {
+				t.Fatalf("import-plan use=%q want import-plan <room-id>", got)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("import-plan subcommand missing")
 	}
 }
 
