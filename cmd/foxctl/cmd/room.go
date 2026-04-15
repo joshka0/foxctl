@@ -646,6 +646,7 @@ func newRoomEpicCommand() *cobra.Command {
 		newRoomEpicHealthCommand(),
 		newRoomEpicStatusCommand(),
 		newRoomEpicFrontierCommand(),
+		newRoomEpicDispatchFrontierCommand(),
 		newRoomEpicScoutCommand(),
 		newRoomEpicSnapshotCommand(),
 		newRoomEpicGradeCommand(),
@@ -810,6 +811,24 @@ func newRoomEpicFrontierCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRoomEpicFrontier(cmd, workspace, args[0], args[1], limit)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
+	cmd.Flags().IntVar(&limit, "limit", roomTaskScanLimit, "Maximum room messages to inspect")
+	return cmd
+}
+
+func newRoomEpicDispatchFrontierCommand() *cobra.Command {
+	var (
+		workspace string
+		limit     int
+	)
+	cmd := &cobra.Command{
+		Use:   "dispatch-frontier <room-id> <epic-id>",
+		Short: "Return compact dispatch units for ready frontier stories",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoomEpicDispatchFrontier(cmd, workspace, args[0], args[1], limit)
 		},
 	}
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
@@ -4761,6 +4780,46 @@ func runRoomEpicFrontier(cmd *cobra.Command, workspace, roomID, epicID string, l
 	frontier := buildRoomEpicFrontier(roomID, epic, status)
 
 	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.frontier", frontier, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+}
+
+func runRoomEpicDispatchFrontier(cmd *cobra.Command, workspace, roomID, epicID string, limit int) error {
+	absWorkspace, err := resolveRoomWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	if limit <= 0 {
+		limit = roomTaskScanLimit
+	}
+	store, err := openRoomBoardStore(cmd.Context())
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	defer store.Close()
+
+	summary, messages, err := loadRoomState(cmd.Context(), store, absWorkspace, roomID, "", limit)
+	if err != nil {
+		code := protocol.ErrorCodeERuntime
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			code = protocol.ErrorCodeENotFound
+		}
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", code, err.Error(), map[string]any{
+			"hint": "Create the room first or check the room id.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	epic := roomEpicViewByID(buildRoomEpicViews(messages), epicID)
+	if epic == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", protocol.ErrorCodeENotFound, fmt.Sprintf("epic %q not found", epicID), map[string]any{
+			"hint": "Run `foxctl room epic show <room-id>` to list available epics.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+
+	health := buildRoomEpicHealth(summary, messages, epic, "")
+	status := buildRoomEpicStatus(epic, health)
+	frontier := buildRoomEpicFrontier(roomID, epic, status)
+	dispatchFrontier := buildRoomEpicDispatchFrontier(roomID, frontier)
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.room.epic.dispatch_frontier", dispatchFrontier, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 }
 
 func runRoomEpicScout(cmd *cobra.Command, workspace, roomID, epicID string, limit int) error {
@@ -8984,6 +9043,114 @@ func buildRoomEpicFrontier(roomID string, epic, status map[string]any) map[strin
 			"Story-level dependencies are not modeled in room-agile v1; frontier uses milestone dependencies and current story/milestone state only.",
 		},
 	}
+}
+
+func buildRoomEpicDispatchFrontier(roomID string, frontier map[string]any) map[string]any {
+	scope := anyMap(frontier["scope"])
+	epicID := stringField(scope, "epic_id")
+	epicTitle := stringField(scope, "epic_title")
+
+	ready := append([]map[string]any(nil), mapSlice(frontier["ready_frontier"])...)
+	sortRoomEpicFrontierItems(ready)
+
+	dispatchUnits := make([]map[string]any, 0, len(ready))
+	for _, item := range ready {
+		storyID := stringField(item, "story_id")
+		milestoneID := stringField(item, "milestone_id")
+		unit := map[string]any{
+			"story_id":        storyID,
+			"story_title":     stringField(item, "story_title"),
+			"milestone_id":    milestoneID,
+			"milestone_title": stringField(item, "milestone_title"),
+			"agent_brief": buildRoomEpicDispatchUnitBrief(
+				strings.TrimSpace(roomID),
+				epicID,
+				epicTitle,
+				item,
+			),
+			"command_hints": map[string]any{
+				"story_show":           fmt.Sprintf("foxctl room story show %s %s", strings.TrimSpace(roomID), storyID),
+				"story_state_progress": fmt.Sprintf("foxctl room story state %s %s in_progress \"<status update>\"", strings.TrimSpace(roomID), storyID),
+				"story_validate":       fmt.Sprintf("foxctl room story validate %s %s review pass \"<validation summary>\"", strings.TrimSpace(roomID), storyID),
+			},
+		}
+		if owner := stringField(item, "owner"); owner != "" {
+			unit["owner"] = owner
+		}
+		dispatchUnits = append(dispatchUnits, unit)
+	}
+
+	blockedCount := len(mapSlice(frontier["blocked_frontier"]))
+	dependencyGapCount := len(mapSlice(frontier["dependency_gaps"]))
+	parallelismWidth := intField(frontier, "parallelism_width")
+	if parallelismWidth <= 0 {
+		parallelismWidth = len(dispatchUnits)
+	}
+
+	notes := make([]string, 0, 2)
+	if blockedCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d accepted stor%s are blocked and excluded from dispatch_units.", blockedCount, pluralSuffix(blockedCount, "y", "ies")))
+	}
+	if dependencyGapCount > 0 {
+		notes = append(notes, fmt.Sprintf("%d dependency gap%s need milestone dependency fixes before dispatch.", dependencyGapCount, pluralS(dependencyGapCount)))
+	}
+
+	summary := fmt.Sprintf(
+		"%d dispatch unit%s ready; %d blocked; %d dependency gap%s.",
+		len(dispatchUnits),
+		pluralS(len(dispatchUnits)),
+		blockedCount,
+		dependencyGapCount,
+		pluralS(dependencyGapCount),
+	)
+
+	out := map[string]any{
+		"schema_version": "room.epic.dispatch_frontier.v1",
+		"scope": map[string]any{
+			"room_id":      strings.TrimSpace(roomID),
+			"epic_id":      epicID,
+			"epic_title":   epicTitle,
+			"status_phase": stringField(scope, "status_phase"),
+		},
+		"dispatch_units":       dispatchUnits,
+		"dispatchable_count":   len(dispatchUnits),
+		"blocked_count":        blockedCount,
+		"dependency_gap_count": dependencyGapCount,
+		"parallelism_width":    parallelismWidth,
+		"summary":              summary,
+		"notes":                notes,
+	}
+	if len(dispatchUnits) == 0 {
+		out["reason"] = "No ready frontier items to dispatch."
+	}
+	return out
+}
+
+func buildRoomEpicDispatchUnitBrief(roomID, epicID, epicTitle string, item map[string]any) string {
+	storyID := stringField(item, "story_id")
+	storyTitle := firstNonEmpty(stringField(item, "story_title"), storyID)
+	milestoneID := stringField(item, "milestone_id")
+	milestoneTitle := firstNonEmpty(stringField(item, "milestone_title"), milestoneID)
+
+	epicRef := epicID
+	if epicTitle != "" {
+		epicRef = fmt.Sprintf("%s (%s)", epicTitle, epicID)
+	}
+	brief := fmt.Sprintf(
+		"Execute story %q (%s) under milestone %q (%s) for epic %s in room %s. Start with `foxctl room story show %s %s`, then move state to in_progress and record a validation before completion.",
+		storyTitle,
+		storyID,
+		milestoneTitle,
+		milestoneID,
+		epicRef,
+		roomID,
+		roomID,
+		storyID,
+	)
+	if owner := stringField(item, "owner"); owner != "" {
+		brief += fmt.Sprintf(" Coordinate handoff with owner %s.", owner)
+	}
+	return brief
 }
 
 func roomMilestoneDependencyIDs(milestone map[string]any) []string {

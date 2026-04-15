@@ -4805,6 +4805,123 @@ func TestRunRoomEpicFrontier(t *testing.T) {
 	})
 }
 
+func TestRunRoomEpicDispatchFrontier(t *testing.T) {
+	t.Run("one ready story emits one dispatch unit", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicDispatchFrontier: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+		if got := data["dispatchable_count"]; got != float64(1) {
+			t.Fatalf("dispatchable_count=%v want 1", got)
+		}
+		units := data["dispatch_units"].([]any)
+		if len(units) != 1 {
+			t.Fatalf("len(dispatch_units)=%d want 1", len(units))
+		}
+		unit := units[0].(map[string]any)
+		if got := unit["story_id"]; got != storyID {
+			t.Fatalf("story_id=%v want %s", got, storyID)
+		}
+		if got := unit["milestone_id"]; got != milestoneID {
+			t.Fatalf("milestone_id=%v want %s", got, milestoneID)
+		}
+		if got := strings.TrimSpace(stringField(unit, "agent_brief")); got == "" {
+			t.Fatalf("agent_brief empty")
+		}
+	})
+
+	t.Run("no ready items returns empty dispatch units with counts", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, _, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomStoryState(cmd, workspace, "human-a", "alpha", storyID, "blocked", "Waiting for upstream dependency.", "upstream", ""); err != nil {
+			t.Fatalf("runRoomStoryState blocked: %v", err)
+		}
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicDispatchFrontier: %v", err)
+		}
+		data := decodeRoomEnvelope(t, out)
+		if got := len(data["dispatch_units"].([]any)); got != 0 {
+			t.Fatalf("len(dispatch_units)=%d want 0", got)
+		}
+		if got := data["dispatchable_count"]; got != float64(0) {
+			t.Fatalf("dispatchable_count=%v want 0", got)
+		}
+		if got := data["blocked_count"]; got != float64(1) {
+			t.Fatalf("blocked_count=%v want 1", got)
+		}
+		if got := data["dependency_gap_count"]; got != float64(0) {
+			t.Fatalf("dependency_gap_count=%v want 0", got)
+		}
+		if got := strings.TrimSpace(stringField(data, "reason")); got == "" {
+			t.Fatalf("reason empty")
+		}
+	})
+
+	t.Run("multiple ready stories are deterministically ordered", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Second ready story", "Another accepted story in the same milestone.", "human-a"); err != nil {
+			t.Fatalf("runRoomStoryAdd second: %v", err)
+		}
+		secondStoryID := decodeRoomEnvelope(t, out)["story_id"].(string)
+
+		firstExpected := storyID
+		secondExpected := secondStoryID
+		if firstExpected > secondExpected {
+			firstExpected, secondExpected = secondExpected, firstExpected
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicDispatchFrontier first: %v", err)
+		}
+		firstUnits := decodeRoomEnvelope(t, out)["dispatch_units"].([]any)
+		if len(firstUnits) != 2 {
+			t.Fatalf("len(first dispatch_units)=%d want 2", len(firstUnits))
+		}
+		if got := stringField(firstUnits[0].(map[string]any), "story_id"); got != firstExpected {
+			t.Fatalf("first order story_id=%s want %s", got, firstExpected)
+		}
+		if got := stringField(firstUnits[1].(map[string]any), "story_id"); got != secondExpected {
+			t.Fatalf("second order story_id=%s want %s", got, secondExpected)
+		}
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100); err != nil {
+			t.Fatalf("runRoomEpicDispatchFrontier second: %v", err)
+		}
+		secondUnits := decodeRoomEnvelope(t, out)["dispatch_units"].([]any)
+		if len(secondUnits) != 2 {
+			t.Fatalf("len(second dispatch_units)=%d want 2", len(secondUnits))
+		}
+		if got := stringField(secondUnits[0].(map[string]any), "story_id"); got != firstExpected {
+			t.Fatalf("second run first story_id=%s want %s", got, firstExpected)
+		}
+		if got := stringField(secondUnits[1].(map[string]any), "story_id"); got != secondExpected {
+			t.Fatalf("second run second story_id=%s want %s", got, secondExpected)
+		}
+	})
+}
+
 func TestRunRoomEpicScout(t *testing.T) {
 	t.Run("planning gap epic", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
@@ -6219,6 +6336,23 @@ func TestNewRoomEpicCommandIncludesFrontierSubcommand(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("frontier subcommand missing")
+	}
+}
+
+func TestNewRoomEpicCommandIncludesDispatchFrontierSubcommand(t *testing.T) {
+	cmd := newRoomEpicCommand()
+	found := false
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "dispatch-frontier" {
+			found = true
+			if got := sub.Use; got != "dispatch-frontier <room-id> <epic-id>" {
+				t.Fatalf("dispatch-frontier use=%q want dispatch-frontier <room-id> <epic-id>", got)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("dispatch-frontier subcommand missing")
 	}
 }
 
