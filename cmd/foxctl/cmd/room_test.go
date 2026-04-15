@@ -4479,6 +4479,43 @@ func TestRunRoomEpicGrade(t *testing.T) {
 		}
 	})
 
+	t.Run("plan imports with explicit source metadata keep provenance score", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		ctx := context.Background()
+		workspace := t.TempDir()
+
+		cmd, _ := newRoomTestCommand(ctx)
+		if err := runRoomCreate(cmd, workspace, "alpha", "Alpha", "", []string{"human-a=coordinator"}); err != nil {
+			t.Fatalf("runRoomCreate: %v", err)
+		}
+
+		planPath := filepath.Join(workspace, "grade-import-plan.md")
+		mustWriteRoomTestFile(t, planPath, `# Grade Import Plan
+
+## Delivery
+### Step 1: Wire plan provenance
+Capture source metadata in epic intake.`)
+
+		cmd, out := newRoomTestCommand(ctx)
+		if err := runRoomEpicImportPlan(cmd, workspace, "human-a", "alpha", planPath, "claude"); err != nil {
+			t.Fatalf("runRoomEpicImportPlan: %v", err)
+		}
+		epicID := decodeRoomEnvelope(t, out)["epic_id"].(string)
+
+		cmd, out = newRoomTestCommand(ctx)
+		if err := runRoomEpicGrade(cmd, workspace, "alpha", epicID, 100, "", roomEpicGradePublishOptions{}); err != nil {
+			t.Fatalf("runRoomEpicGrade: %v", err)
+		}
+		grade := decodeRoomEnvelope(t, out)["grade"].(map[string]any)
+		if score := roomCategoryScoreByName(t, grade["categories"].([]any), "Provenance & Import Fidelity"); score != 10 {
+			t.Fatalf("Provenance & Import Fidelity score=%d want 10", score)
+		}
+		reasons := roomCategoryReasonsByName(t, grade["categories"].([]any), "Provenance & Import Fidelity")
+		if roomStringSliceContainsSubstring(reasons, "missing") {
+			t.Fatalf("provenance reasons=%v want no missing-metadata reason", reasons)
+		}
+	})
+
 	t.Run("can publish grade report into room timeline", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		ctx := context.Background()
@@ -7268,6 +7305,21 @@ Add CLI command.`)
 	meta := epic["meta"].(map[string]any)
 	if got := meta["template"]; got != "plan_import" {
 		t.Fatalf("template=%v want plan_import", got)
+	}
+	if got := meta["source_kind"]; got != "plan_import" {
+		t.Fatalf("source_kind=%v want plan_import", got)
+	}
+	if got := meta["source_provider"]; got != "claude" {
+		t.Fatalf("source_provider=%v want claude", got)
+	}
+	if got := meta["source_path"]; got != data["source_path"] {
+		t.Fatalf("source_path=%v want %v", got, data["source_path"])
+	}
+	if got := meta["source_title"]; got != "Import Plan" {
+		t.Fatalf("source_title=%v want Import Plan", got)
+	}
+	if got := strings.TrimSpace(anyString(meta["source_content_hash"])); !strings.HasPrefix(got, "sha256:") {
+		t.Fatalf("source_content_hash=%q want sha256:*", got)
 	}
 	milestones := epic["milestones"].([]any)
 	if len(milestones) != 2 {

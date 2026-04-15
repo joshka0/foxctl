@@ -3988,14 +3988,19 @@ func runRoomClear(cmd *cobra.Command, workspace, roomID, actorID, mode, preset s
 }
 
 type roomEpicMeta struct {
-	Goal             string   `json:"goal"`
-	Owner            string   `json:"owner"`
-	Outcome          string   `json:"outcome"`
-	Horizon          string   `json:"horizon"`
-	Scope            []string `json:"scope"`
-	Success          []string `json:"success"`
-	Template         string   `json:"template"`
-	DefaultSmallWork bool     `json:"default_small_work"`
+	Goal              string   `json:"goal"`
+	Owner             string   `json:"owner"`
+	Outcome           string   `json:"outcome"`
+	Horizon           string   `json:"horizon"`
+	Scope             []string `json:"scope"`
+	Success           []string `json:"success"`
+	Template          string   `json:"template"`
+	SourceKind        string   `json:"source_kind"`
+	SourceProvider    string   `json:"source_provider"`
+	SourcePath        string   `json:"source_path"`
+	SourceTitle       string   `json:"source_title"`
+	SourceContentHash string   `json:"source_content_hash"`
+	DefaultSmallWork  bool     `json:"default_small_work"`
 }
 
 type roomEpicQuestionMeta struct {
@@ -4141,6 +4146,26 @@ type roomPlanImportStoryEntry struct {
 	DependsOn  []string
 }
 
+type roomEpicBodyOptions struct {
+	SourceKind        string
+	SourceProvider    string
+	SourcePath        string
+	SourceTitle       string
+	SourceContentHash string
+}
+
+type roomEpicBodyOption func(*roomEpicBodyOptions)
+
+func withRoomEpicBodySource(kind, provider, path, title, contentHash string) roomEpicBodyOption {
+	return func(opts *roomEpicBodyOptions) {
+		opts.SourceKind = strings.TrimSpace(kind)
+		opts.SourceProvider = strings.TrimSpace(provider)
+		opts.SourcePath = strings.TrimSpace(path)
+		opts.SourceTitle = strings.TrimSpace(title)
+		opts.SourceContentHash = strings.TrimSpace(contentHash)
+	}
+}
+
 func runRoomEpicImportPlan(cmd *cobra.Command, workspace, sender, roomID, planFile, provider string) error {
 	absWorkspace, identity, store, roomID, summary, err := prepareRoomAgileCommand(cmd, "foxctl.room.epic.import_plan", workspace, sender, roomID)
 	if err != nil {
@@ -4170,6 +4195,11 @@ func runRoomEpicImportPlan(cmd *cobra.Command, workspace, sender, roomID, planFi
 	}
 
 	epicTitle := firstNonEmpty(strings.TrimSpace(loaded.Title), filepath.Base(loaded.SourcePath))
+	sourceContentHash := ""
+	if loaded.Plan != nil {
+		sourceContentHash = strings.TrimSpace(loaded.Plan.ContentHash)
+	}
+	sourceTitle := firstNonEmpty(strings.TrimSpace(loaded.Title), epicTitle)
 	epicMsg := &agent.BoardMessage{
 		WorkspaceID: absWorkspace,
 		Stream:      agent.RoomStreamName(roomID),
@@ -4178,7 +4208,18 @@ func runRoomEpicImportPlan(cmd *cobra.Command, workspace, sender, roomID, planFi
 		Kind:        agent.BoardMessageKindEpic,
 		Priority:    agent.DefaultPriority,
 		Subject:     "Epic: " + epicTitle,
-		Body:        buildRoomEpicBody(epicTitle, "Imported from: "+loaded.SourcePath, identity.Sender, "", "", nil, nil, "plan_import", false),
+		Body: buildRoomEpicBody(
+			epicTitle,
+			"Imported from: "+loaded.SourcePath,
+			identity.Sender,
+			"",
+			"",
+			nil,
+			nil,
+			"plan_import",
+			false,
+			withRoomEpicBodySource("plan_import", string(loaded.Provider), loaded.SourcePath, sourceTitle, sourceContentHash),
+		),
 	}
 	if err := store.SendMessage(cmd.Context(), epicMsg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -7620,7 +7661,15 @@ func applyRoomEpicStartTemplate(title, goal, outcome, horizon string, scope, suc
 	return title, goal, outcome, horizon, scope, success, "maintenance"
 }
 
-func buildRoomEpicBody(title, goal, owner, outcome, horizon string, scope, success []string, template string, defaultSmallWork bool) string {
+func buildRoomEpicBody(title, goal, owner, outcome, horizon string, scope, success []string, template string, defaultSmallWork bool, options ...roomEpicBodyOption) string {
+	bodyOptions := roomEpicBodyOptions{}
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		option(&bodyOptions)
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "Title: %s\n", strings.TrimSpace(title))
 	if strings.TrimSpace(goal) != "" {
@@ -7637,6 +7686,21 @@ func buildRoomEpicBody(title, goal, owner, outcome, horizon string, scope, succe
 	}
 	if strings.TrimSpace(template) != "" {
 		fmt.Fprintf(&b, "Template: %s\n", strings.TrimSpace(template))
+	}
+	if bodyOptions.SourceKind != "" {
+		fmt.Fprintf(&b, "SourceKind: %s\n", bodyOptions.SourceKind)
+	}
+	if bodyOptions.SourceProvider != "" {
+		fmt.Fprintf(&b, "SourceProvider: %s\n", bodyOptions.SourceProvider)
+	}
+	if bodyOptions.SourcePath != "" {
+		fmt.Fprintf(&b, "SourcePath: %s\n", bodyOptions.SourcePath)
+	}
+	if bodyOptions.SourceTitle != "" {
+		fmt.Fprintf(&b, "SourceTitle: %s\n", bodyOptions.SourceTitle)
+	}
+	if bodyOptions.SourceContentHash != "" {
+		fmt.Fprintf(&b, "SourceContentHash: %s\n", bodyOptions.SourceContentHash)
 	}
 	if defaultSmallWork {
 		fmt.Fprintf(&b, "DefaultSmallWork: true\n")
@@ -7715,6 +7779,16 @@ func parseRoomEpicBody(body string) roomEpicMeta {
 			meta.Horizon = value
 		case "Template":
 			meta.Template = value
+		case "SourceKind":
+			meta.SourceKind = value
+		case "SourceProvider":
+			meta.SourceProvider = value
+		case "SourcePath":
+			meta.SourcePath = value
+		case "SourceTitle":
+			meta.SourceTitle = value
+		case "SourceContentHash":
+			meta.SourceContentHash = value
 		case "DefaultSmallWork":
 			meta.DefaultSmallWork = strings.EqualFold(value, "true")
 		}
@@ -8262,6 +8336,21 @@ func mergeRoomEpicMeta(base, patch roomEpicMeta) roomEpicMeta {
 	}
 	if strings.TrimSpace(patch.Template) != "" {
 		base.Template = strings.TrimSpace(patch.Template)
+	}
+	if strings.TrimSpace(patch.SourceKind) != "" {
+		base.SourceKind = strings.TrimSpace(patch.SourceKind)
+	}
+	if strings.TrimSpace(patch.SourceProvider) != "" {
+		base.SourceProvider = strings.TrimSpace(patch.SourceProvider)
+	}
+	if strings.TrimSpace(patch.SourcePath) != "" {
+		base.SourcePath = strings.TrimSpace(patch.SourcePath)
+	}
+	if strings.TrimSpace(patch.SourceTitle) != "" {
+		base.SourceTitle = strings.TrimSpace(patch.SourceTitle)
+	}
+	if strings.TrimSpace(patch.SourceContentHash) != "" {
+		base.SourceContentHash = strings.TrimSpace(patch.SourceContentHash)
 	}
 	if patch.DefaultSmallWork {
 		base.DefaultSmallWork = true
@@ -10856,6 +10945,32 @@ func deriveRoomEpicStatusNextPipelineStage(epic, health map[string]any, phase st
 	return "grade"
 }
 
+func roomEpicIsPlanImport(meta map[string]any) bool {
+	template := strings.TrimSpace(strings.ToLower(stringField(meta, "template")))
+	sourceKind := strings.TrimSpace(strings.ToLower(stringField(meta, "source_kind")))
+	return template == "plan_import" || sourceKind == "plan_import"
+}
+
+func roomEpicMissingPlanImportProvenance(meta map[string]any) []string {
+	fields := []struct {
+		Name  string
+		Value string
+	}{
+		{Name: "source_kind", Value: stringField(meta, "source_kind")},
+		{Name: "source_provider", Value: stringField(meta, "source_provider")},
+		{Name: "source_path", Value: stringField(meta, "source_path")},
+		{Name: "source_title", Value: stringField(meta, "source_title")},
+		{Name: "source_content_hash", Value: stringField(meta, "source_content_hash")},
+	}
+	missing := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if strings.TrimSpace(field.Value) == "" {
+			missing = append(missing, field.Name)
+		}
+	}
+	return missing
+}
+
 func loadRoomEpicGradeFactoryMission(epic map[string]any, requestedMissionDir string) (*factoryMissionImport, map[string]any, error) {
 	info := map[string]any{
 		"requested": false,
@@ -11346,6 +11461,20 @@ func buildRoomEpicGrade(epic, health, scout map[string]any, mission *factoryMiss
 		}
 		addUnique(&acc.notes, fmt.Sprintf("Compared against Factory mission %q at %s.", mission.Title, mission.DirPath))
 	} else {
+		if roomEpicIsPlanImport(meta) {
+			missingFields := roomEpicMissingPlanImportProvenance(meta)
+			if len(missingFields) > 0 {
+				deduct(
+					&provenanceScore,
+					minInt(5, len(missingFields)),
+					fmt.Sprintf("Plan import provenance is missing %d required field%s: %s.", len(missingFields), pluralS(len(missingFields)), strings.Join(missingFields, ", ")),
+					&provenanceReasons,
+				)
+				addUnique(&acc.actions, "Re-import the plan with `foxctl room epic import-plan` so source metadata records kind/provider/path/title/content hash.")
+			} else {
+				addUnique(&acc.notes, fmt.Sprintf("Plan import provenance captured from %s source %q.", stringField(meta, "source_provider"), stringField(meta, "source_path")))
+			}
+		}
 		if stringField(epic, "id") == "" || stringField(epic, "workpack_root") == "" {
 			deduct(&provenanceScore, 2, "Epic provenance pointers are incomplete.", &provenanceReasons)
 		}
