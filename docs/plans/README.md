@@ -25,6 +25,7 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/refactor-deterministic-detection-backlog.md`
 - `features/agent-mux-room-hierarchy.md`
 - `features/opensandbox-sandbox-workspace-integration.md`
+- `features/foxctl-evolve-plan.md` — plan for a foxctl-native repo-evolution tool built on DB-backed experiment state, CAS artifacts, and existing worktree primitives.
 - `features/aca-self-evolving-memory-layer.md`
 - `jidoctl-v2-hybrid-interface.md`
 - `chat-platform-adapter.md`
