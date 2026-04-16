@@ -14,9 +14,15 @@ type Shell struct {
 	railFocus       *tui.State[bool]
 	workersFocus    *tui.State[bool]
 	focus           *tui.FocusGroup
+	streamUpdates   <-chan ConsoleStreamUpdate
+	transcriptLimit int
 }
 
 func NewShell(initial ShellState) *Shell {
+	return NewShellWithStream(initial, nil, defaultTranscriptLimit)
+}
+
+func NewShellWithStream(initial ShellState, streamUpdates <-chan ConsoleStreamUpdate, transcriptLimit int) *Shell {
 	transcriptFocus := tui.NewState(true)
 	composerFocus := tui.NewState(false)
 	railFocus := tui.NewState(false)
@@ -29,7 +35,52 @@ func NewShell(initial ShellState) *Shell {
 		railFocus:       railFocus,
 		workersFocus:    workersFocus,
 		focus:           tui.MustNewFocusGroup(transcriptFocus, composerFocus, railFocus, workersFocus),
+		streamUpdates:   streamUpdates,
+		transcriptLimit: transcriptLimit,
 	}
+}
+
+func (s *Shell) Watchers() []tui.Watcher {
+	if s.streamUpdates == nil {
+		return nil
+	}
+	return []tui.Watcher{
+		tui.Watch(s.streamUpdates, s.handleConsoleStreamUpdate),
+	}
+}
+
+func (s *Shell) handleConsoleStreamUpdate(update ConsoleStreamUpdate) {
+	switch update.Type {
+	case ConsoleStreamUpdateEvent:
+		s.state.Update(func(state ShellState) ShellState {
+			return state.ApplyConsoleStreamEvent(update.Event, s.transcriptLimit)
+		})
+	case ConsoleStreamUpdateError:
+		msg := "console stream error"
+		if update.Err != nil {
+			msg = "console stream error: " + update.Err.Error()
+		}
+		s.appendTranscriptEntry(TranscriptEntry{
+			Speaker: "system",
+			Kind:    "error",
+			Text:    msg,
+		})
+	case ConsoleStreamUpdateDone:
+		s.appendTranscriptEntry(TranscriptEntry{
+			Speaker: "system",
+			Kind:    "status",
+			Text:    "console stream closed",
+		})
+	}
+}
+
+func (s *Shell) appendTranscriptEntry(entry TranscriptEntry) {
+	s.state.Update(func(state ShellState) ShellState {
+		transcript := append([]TranscriptEntry(nil), state.Transcript...)
+		transcript = append(transcript, entry)
+		state.Transcript = capTranscriptEntries(transcript, s.transcriptLimit)
+		return state
+	})
 }
 
 func (s *Shell) KeyMap() tui.KeyMap {

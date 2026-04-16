@@ -17,6 +17,8 @@ func main() {
 	flag.StringVar(&opts.APIBaseURL, "api-base-url", "", "foxctl API base URL for optional read-only agent enrichment")
 	flag.IntVar(&opts.AgentLimit, "agent-limit", 25, "max agents to fetch when --api-base-url is set")
 	flag.StringVar(&opts.ConsoleSessionID, "console-session-id", "", "existing console session ID to attach read-only transcript when --api-base-url is set")
+	flag.IntVar(&opts.ConsoleStreamBuffer, "console-stream-buffer", 16, "buffer size for console stream updates")
+	flag.IntVar(&opts.TranscriptLimit, "transcript-limit", 200, "max transcript rows retained for stream updates")
 	flag.Parse()
 
 	if err := tuiapp.Run(context.Background(), opts); err != nil {
