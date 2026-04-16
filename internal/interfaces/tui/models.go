@@ -2,11 +2,12 @@ package tui
 
 // Options configures the standalone foxctl_tui shell.
 type Options struct {
-	Workspace  string
-	EpicID     string
-	EpicsDir   string
-	APIBaseURL string
-	AgentLimit int
+	Workspace        string
+	EpicID           string
+	EpicsDir         string
+	APIBaseURL       string
+	AgentLimit       int
+	ConsoleSessionID string
 }
 
 // FocusPane identifies the major interactive regions in the shell.

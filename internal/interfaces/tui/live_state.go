@@ -9,7 +9,7 @@ import (
 
 const defaultAgentLimit = 25
 
-// LoadInitialShellState loads the base shell snapshot and optionally enriches it with live agents.
+// LoadInitialShellState loads the base shell snapshot and optionally enriches it with live API data.
 func LoadInitialShellState(ctx context.Context, opts Options) (ShellState, error) {
 	state, err := LoadShellState(opts)
 	if err != nil {
@@ -17,7 +17,14 @@ func LoadInitialShellState(ctx context.Context, opts Options) (ShellState, error
 	}
 
 	baseURL := strings.TrimSpace(opts.APIBaseURL)
+	consoleSessionID := strings.TrimSpace(opts.ConsoleSessionID)
 	if baseURL == "" {
+		if consoleSessionID != "" {
+			return ShellState{}, fmt.Errorf(
+				"--console-session-id %q requires --api-base-url; set --api-base-url to your foxctl API host",
+				consoleSessionID,
+			)
+		}
 		return state, nil
 	}
 
@@ -29,12 +36,12 @@ func LoadInitialShellState(ctx context.Context, opts Options) (ShellState, error
 	if err != nil {
 		return ShellState{}, fmt.Errorf("configure --api-base-url %q: %w", baseURL, err)
 	}
-	adapter, err := NewAgentAdapter(client)
+	agentAdapter, err := NewAgentAdapter(client)
 	if err != nil {
 		return ShellState{}, fmt.Errorf("configure agent adapter: %w", err)
 	}
 
-	agents, err := adapter.ListAgents(ctx, normalizeAgentLimit(opts.AgentLimit))
+	agents, err := agentAdapter.ListAgents(ctx, normalizeAgentLimit(opts.AgentLimit))
 	if err != nil {
 		return ShellState{}, fmt.Errorf(
 			"load agents from --api-base-url %q: %w; verify foxctl API is reachable and /api/agents is available",
@@ -44,6 +51,25 @@ func LoadInitialShellState(ctx context.Context, opts Options) (ShellState, error
 	}
 
 	state.Workers = mapAgentsToWorkers(agents.Agents)
+
+	if consoleSessionID != "" {
+		consoleAdapter, err := NewConsoleAdapter(client)
+		if err != nil {
+			return ShellState{}, fmt.Errorf("configure console adapter: %w", err)
+		}
+
+		session, err := consoleAdapter.GetSession(ctx, consoleSessionID)
+		if err != nil {
+			return ShellState{}, fmt.Errorf(
+				"load console session %q from --api-base-url %q: %w; verify the session exists via GET /api/console/sessions",
+				consoleSessionID,
+				client.BaseURL(),
+				err,
+			)
+		}
+		state.Transcript = mapConsoleTranscript(session, consoleSessionID)
+	}
+
 	return state, nil
 }
 
@@ -136,4 +162,59 @@ func workerTask(agent AgentRecord) string {
 		return "no runtime metadata"
 	}
 	return strings.Join(parts, " | ")
+}
+
+func mapConsoleTranscript(session GetConsoleSessionResponse, requestedSessionID string) []TranscriptEntry {
+	entries := make([]TranscriptEntry, 0, len(session.Messages)+1)
+	for _, message := range session.Messages {
+		text := consoleMessageText(message)
+		if text == "" {
+			continue
+		}
+
+		entries = append(entries, TranscriptEntry{
+			Speaker: firstNonEmpty(message.Role, "session"),
+			Kind:    consoleMessageKind(message),
+			Text:    text,
+		})
+	}
+
+	inflight := strings.TrimSpace(session.InFlight.CorrelationID)
+	if inflight != "" {
+		entries = append(entries, TranscriptEntry{
+			Speaker: "system",
+			Kind:    "inflight",
+			Text:    "in-flight correlation: " + inflight,
+		})
+	}
+
+	if len(entries) == 0 {
+		entries = append(entries, TranscriptEntry{
+			Speaker: "system",
+			Kind:    "console",
+			Text:    "attached to console session " + firstNonEmpty(session.Session.ID, requestedSessionID) + " with no messages",
+		})
+	}
+
+	return entries
+}
+
+func consoleMessageKind(message ConsoleMessage) string {
+	if message.ToolCallID != "" || len(message.ToolCalls) > 0 {
+		return "tool"
+	}
+	return "console"
+}
+
+func consoleMessageText(message ConsoleMessage) string {
+	if text := strings.TrimSpace(message.Content); text != "" {
+		return text
+	}
+	if toolCallID := strings.TrimSpace(message.ToolCallID); toolCallID != "" {
+		return "tool call: " + toolCallID
+	}
+	if count := len(message.ToolCalls); count > 0 {
+		return fmt.Sprintf("%d tool call(s)", count)
+	}
+	return ""
 }

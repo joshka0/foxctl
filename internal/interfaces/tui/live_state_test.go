@@ -185,3 +185,136 @@ func TestLoadInitialShellStateUsesDefaultLimitForNonPositiveValues(t *testing.T)
 		t.Fatalf("LoadInitialShellState error: %v", err)
 	}
 }
+
+func TestLoadInitialShellStateErrorsWhenConsoleSessionIDWithoutAPIBaseURL(t *testing.T) {
+	t.Parallel()
+
+	_, err := LoadInitialShellState(context.Background(), Options{
+		ConsoleSessionID: "sess-7",
+	})
+	if err == nil {
+		t.Fatal("LoadInitialShellState error = nil, want validation error")
+	}
+	if !strings.Contains(err.Error(), "--api-base-url") {
+		t.Fatalf("error = %q, want actionable --api-base-url hint", err)
+	}
+}
+
+func TestLoadInitialShellStateDoesNotCallConsoleSessionByDefault(t *testing.T) {
+	t.Parallel()
+
+	var consoleCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agents":
+			_ = json.NewEncoder(w).Encode(ListAgentsResponse{
+				Agents: []AgentRecord{
+					{
+						ID:    "a1",
+						Name:  "Agent One",
+						State: "running",
+					},
+				},
+				Total: 1,
+			})
+		case strings.HasPrefix(r.URL.Path, "/api/console/sessions/"):
+			consoleCalls.Add(1)
+			http.Error(w, "unexpected console request", http.StatusInternalServerError)
+		default:
+			t.Fatalf("unexpected route: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	state, err := LoadInitialShellState(context.Background(), Options{
+		APIBaseURL: srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("LoadInitialShellState error: %v", err)
+	}
+	if got := consoleCalls.Load(); got != 0 {
+		t.Fatalf("console session calls = %d, want 0", got)
+	}
+	if got := len(state.Workers); got != 1 {
+		t.Fatalf("len(Workers) = %d, want 1", got)
+	}
+}
+
+func TestLoadInitialShellStateMapsConsoleSessionTranscriptWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	var sessionCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agents":
+			_ = json.NewEncoder(w).Encode(ListAgentsResponse{})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/console/sessions/sess-99":
+			sessionCalls.Add(1)
+			_, _ = w.Write([]byte(`{
+				"session": {"id":"sess-99","workspace":".","profile":"explorer"},
+				"messages": [
+					{"role":"user","content":"hello"},
+					{"role":"assistant","content":"world"},
+					{"role":"assistant","content":"","tool_call_id":"call-1"}
+				],
+				"inflight":"corr-live"
+			}`))
+		default:
+			t.Fatalf("unexpected route: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	state, err := LoadInitialShellState(context.Background(), Options{
+		APIBaseURL:       srv.URL,
+		ConsoleSessionID: "sess-99",
+	})
+	if err != nil {
+		t.Fatalf("LoadInitialShellState error: %v", err)
+	}
+	if got := sessionCalls.Load(); got != 1 {
+		t.Fatalf("console session calls = %d, want 1", got)
+	}
+
+	expected := []TranscriptEntry{
+		{Speaker: "user", Kind: "console", Text: "hello"},
+		{Speaker: "assistant", Kind: "console", Text: "world"},
+		{Speaker: "assistant", Kind: "tool", Text: "tool call: call-1"},
+		{Speaker: "system", Kind: "inflight", Text: "in-flight correlation: corr-live"},
+	}
+	if got := len(state.Transcript); got != len(expected) {
+		t.Fatalf("len(Transcript) = %d, want %d", got, len(expected))
+	}
+	for i := range expected {
+		if state.Transcript[i] != expected[i] {
+			t.Fatalf("Transcript[%d] = %#v, want %#v", i, state.Transcript[i], expected[i])
+		}
+	}
+}
+
+func TestLoadInitialShellStateReturnsActionableErrorWhenConsoleLookupFails(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/agents":
+			_ = json.NewEncoder(w).Encode(ListAgentsResponse{})
+		case "/api/console/sessions/missing":
+			http.Error(w, "session not found", http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected route: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	_, err := LoadInitialShellState(context.Background(), Options{
+		APIBaseURL:       srv.URL,
+		ConsoleSessionID: "missing",
+	})
+	if err == nil {
+		t.Fatal("LoadInitialShellState error = nil, want failure")
+	}
+	if !strings.Contains(err.Error(), "GET /api/console/sessions") {
+		t.Fatalf("error = %q, want actionable session lookup hint", err)
+	}
+}

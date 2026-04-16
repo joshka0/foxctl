@@ -158,3 +158,103 @@ func TestConsoleAdapterRejectsEmptySessionID(t *testing.T) {
 		t.Fatal("CancelSession error = nil, want validation error")
 	}
 }
+
+func TestConsoleAdapterListSessionsIncludesWorkspaceQuery(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/console/sessions" {
+			t.Fatalf("path = %s, want /api/console/sessions", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("workspace"); got != "/tmp/ws" {
+			t.Fatalf("workspace query = %q, want %q", got, "/tmp/ws")
+		}
+
+		_ = json.NewEncoder(w).Encode(ListConsoleSessionsResponse{
+			Sessions: []ConsoleSession{
+				{
+					ID:        "sess-1",
+					Workspace: "/tmp/ws",
+					Profile:   "explorer",
+				},
+			},
+			Count: 1,
+		})
+	}))
+	defer srv.Close()
+
+	client, err := NewAPIClient(srv.URL, srv.Client())
+	if err != nil {
+		t.Fatalf("NewAPIClient error: %v", err)
+	}
+	adapter, err := NewConsoleAdapter(client)
+	if err != nil {
+		t.Fatalf("NewConsoleAdapter error: %v", err)
+	}
+
+	resp, err := adapter.ListSessions(context.Background(), "/tmp/ws")
+	if err != nil {
+		t.Fatalf("ListSessions error: %v", err)
+	}
+	if resp.Count != 1 {
+		t.Fatalf("Count = %d, want 1", resp.Count)
+	}
+	if len(resp.Sessions) != 1 {
+		t.Fatalf("len(Sessions) = %d, want 1", len(resp.Sessions))
+	}
+	if resp.Sessions[0].ID != "sess-1" {
+		t.Fatalf("Sessions[0].ID = %q, want %q", resp.Sessions[0].ID, "sess-1")
+	}
+}
+
+func TestConsoleAdapterGetSessionIncludesMessagesAndInflight(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/console/sessions/sess-abc" {
+			t.Fatalf("path = %s, want /api/console/sessions/sess-abc", r.URL.Path)
+		}
+
+		_, _ = w.Write([]byte(`{
+			"session": {"id":"sess-abc","workspace":"/tmp/ws","profile":"explorer","message_count":2},
+			"messages": [
+				{"role":"user","content":"hello","timestamp":1712000000},
+				{"role":"assistant","content":"hi","timestamp":1712000001}
+			],
+			"inflight": "corr-123"
+		}`))
+	}))
+	defer srv.Close()
+
+	client, err := NewAPIClient(srv.URL, srv.Client())
+	if err != nil {
+		t.Fatalf("NewAPIClient error: %v", err)
+	}
+	adapter, err := NewConsoleAdapter(client)
+	if err != nil {
+		t.Fatalf("NewConsoleAdapter error: %v", err)
+	}
+
+	resp, err := adapter.GetSession(context.Background(), "sess-abc")
+	if err != nil {
+		t.Fatalf("GetSession error: %v", err)
+	}
+	if resp.Session.ID != "sess-abc" {
+		t.Fatalf("Session.ID = %q, want %q", resp.Session.ID, "sess-abc")
+	}
+	if got := len(resp.Messages); got != 2 {
+		t.Fatalf("len(Messages) = %d, want 2", got)
+	}
+	if resp.Messages[0].Content != "hello" {
+		t.Fatalf("Messages[0].Content = %q, want %q", resp.Messages[0].Content, "hello")
+	}
+	if resp.InFlight.CorrelationID != "corr-123" {
+		t.Fatalf("InFlight.CorrelationID = %q, want %q", resp.InFlight.CorrelationID, "corr-123")
+	}
+}
