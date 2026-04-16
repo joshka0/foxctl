@@ -31,6 +31,10 @@ func newEvolveCommand() *cobra.Command {
 		newEvolveInitCommand(),
 		newEvolveNewCommand(),
 		newEvolveRunCommand(),
+		newEvolveFrontierCommand(),
+		newEvolveGetCommand(),
+		newEvolvePathCommand(),
+		newEvolveDiffCommand(),
 		newEvolveStatusCommand(),
 		newEvolveTreeCommand(),
 	)
