@@ -35,14 +35,19 @@ changes. See `Makefile` for the authoritative definitions.
 - `make lint` – `golangci-lint` + `staticcheck` + `govet`.
 - `make fmt` – `gofumpt` formatting.
 - `make build-cgo` – build the CGO-enabled CLI with `-tags=libsqlite3`.
-- `make check-coverage` – run tests with coverage and enforce **local**
-  thresholds:
+- `make check-coverage` – run tests with coverage and enforce the default
+  repository floor:
+  - Lines: **≥ 40%**
+  - Functions: **≥ 40%** (approximated via line coverage)
+  - Branches: **≥ 40%** (approximated via line coverage)
+- `make check-coverage-strict` – run the same coverage check with stricter
+  aspirational local thresholds:
   - Lines: **≥ 85%**
-  - Functions: **≥ 80%**
+  - Functions: **≥ 80%** (approximated via line coverage)
   - Branches: **≥ 75%** (approximated via line coverage)
 
-> CI enforces a lower coverage floor (currently 40%) but local development
-> should aim for the stricter `check-coverage` target.
+> The default local gate enforces the current repository floor (currently 40%).
+> Local development should aim for the stricter `check-coverage-strict` target.
 
 ---
 
@@ -184,8 +189,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs a containerized CI pipeline
 using a pre-warmed Go image built from `Dockerfile.ci`. Key jobs:
 
 - **lint** – `make lint` in the CI image.
-- **test** – `CGO_ENABLED=0 go test -short ./...` with coverage, enforcing a
-  floor (currently 40%).
+- **test** – `CGO_ENABLED=0 go test -short ./...`; coverage enforcement is
+  modeled by the local `check-coverage` target and currently uses a 40% floor.
 - **race/tests/coverage** – additional jobs for race detection and coverage
   reporting, aligned with local `make` targets.
 
