@@ -141,6 +141,12 @@ func (runtime *ConsoleAskRuntime) Enqueue(ctx context.Context, req AskConsoleSes
 	select {
 	case <-runtime.ctx.Done():
 		return runtime.ctx.Err()
+	default:
+	}
+
+	select {
+	case <-runtime.ctx.Done():
+		return runtime.ctx.Err()
 	case <-ctx.Done():
 		return ctx.Err()
 	case runtime.requests <- sanitized:

@@ -60,13 +60,22 @@ func NewApp(ctx context.Context, opts Options) (*gotui.App, func(), error) {
 }
 
 type shellRuntime struct {
-	shell *Shell
-	close func()
+	shell             *Shell
+	consoleStreamPump *ConsoleStreamPump
+	consoleAskRuntime *ConsoleAskRuntime
+	close             func()
 }
 
 func newShellRuntime(ctx context.Context, opts Options, initialState ShellState) (*shellRuntime, error) {
 	runtime := &shellRuntime{
-		shell: NewShellWithStream(initialState, nil, opts.TranscriptLimit),
+		shell: NewShellWithRuntime(
+			initialState,
+			nil,
+			nil,
+			nil,
+			opts.TranscriptLimit,
+			defaultComposerAskEnqueueTimeout,
+		),
 		close: func() {},
 	}
 
@@ -75,6 +84,11 @@ func newShellRuntime(ctx context.Context, opts Options, initialState ShellState)
 	}
 
 	client, err := NewAPIClient(opts.APIBaseURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	adapter, err := NewConsoleAdapter(client)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +103,30 @@ func newShellRuntime(ctx context.Context, opts Options, initialState ShellState)
 		return nil, err
 	}
 
-	runtime.shell = NewShellWithStream(initialState, pump.Updates(), opts.TranscriptLimit)
-	runtime.close = pump.Close
+	submitter, err := NewHTTPConsoleAskSubmitter(adapter, opts.ConsoleSessionID)
+	if err != nil {
+		pump.Close()
+		return nil, err
+	}
+	askRuntime, err := NewConsoleAskRuntime(ctx, submitter, 0, 0)
+	if err != nil {
+		pump.Close()
+		return nil, err
+	}
+
+	runtime.consoleStreamPump = pump
+	runtime.consoleAskRuntime = askRuntime
+	runtime.shell = NewShellWithRuntime(
+		initialState,
+		pump.Updates(),
+		askRuntime.Updates(),
+		askRuntime.Enqueue,
+		opts.TranscriptLimit,
+		defaultComposerAskEnqueueTimeout,
+	)
+	runtime.close = func() {
+		askRuntime.Close()
+		pump.Close()
+	}
 	return runtime, nil
 }

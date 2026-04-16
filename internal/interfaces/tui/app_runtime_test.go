@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -27,14 +28,14 @@ func TestNewShellRuntimeWithoutStreamConfig(t *testing.T) {
 func TestNewShellRuntimeWithConsoleStreamConfig(t *testing.T) {
 	sessionID := "sess-runtime"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wantPath := fmt.Sprintf("/api/console/sessions/%s/events", sessionID)
-		if r.URL.Path != wantPath {
+		switch r.URL.Path {
+		case fmt.Sprintf("/api/console/sessions/%s/events", sessionID):
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("event: connected\n"))
+			_, _ = w.Write([]byte(`data: {"type":"connected","data":{"session_id":"sess-runtime"}}` + "\n\n"))
+		default:
 			http.Error(w, "bad path", http.StatusNotFound)
-			return
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("event: connected\n"))
-		_, _ = w.Write([]byte(`data: {"type":"connected","data":{"session_id":"sess-runtime"}}` + "\n\n"))
 	}))
 	defer server.Close()
 
@@ -57,7 +58,19 @@ func TestNewShellRuntimeWithConsoleStreamConfig(t *testing.T) {
 	if runtime.shell == nil {
 		t.Fatal("runtime.shell is nil")
 	}
-	if got := len(runtime.shell.Watchers()); got != 1 {
-		t.Fatalf("len(runtime.shell.Watchers()) = %d, want 1", got)
+	if got := len(runtime.shell.Watchers()); got != 2 {
+		t.Fatalf("len(runtime.shell.Watchers()) = %d, want 2", got)
+	}
+	if runtime.consoleAskRuntime == nil {
+		t.Fatal("runtime.consoleAskRuntime is nil")
+	}
+	if runtime.consoleStreamPump == nil {
+		t.Fatal("runtime.consoleStreamPump is nil")
+	}
+
+	runtime.close()
+	err = runtime.consoleAskRuntime.Enqueue(context.Background(), AskConsoleSessionRequest{Content: "hello"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("consoleAskRuntime.Enqueue after runtime.close() error = %v, want context.Canceled", err)
 	}
 }

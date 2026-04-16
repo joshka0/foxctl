@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"time"
 )
 
 const defaultConsoleStreamPumpBufferSize = 16
@@ -50,9 +49,8 @@ type ConsoleStreamUpdate struct {
 
 // ConsoleStreamPump owns one stream-reading goroutine and emits bounded updates.
 type ConsoleStreamPump struct {
-	source        ConsoleStreamSource
-	eventCapacity int
-	updates       chan ConsoleStreamUpdate
+	source  ConsoleStreamSource
+	updates chan ConsoleStreamUpdate
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -84,11 +82,10 @@ func NewConsoleStreamPump(
 
 	ctx, cancel := context.WithCancel(parent)
 	pump := &ConsoleStreamPump{
-		source:        source,
-		eventCapacity: bufferSize,
-		updates:       make(chan ConsoleStreamUpdate, bufferSize+1),
-		ctx:           ctx,
-		cancel:        cancel,
+		source:  source,
+		updates: make(chan ConsoleStreamUpdate, bufferSize),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 	pump.waitGroup.Add(1)
 	go pump.run()
@@ -140,22 +137,11 @@ func (pump *ConsoleStreamPump) run() {
 }
 
 func (pump *ConsoleStreamPump) sendEventUpdate(update ConsoleStreamUpdate) error {
-	for {
-		if len(pump.updates) < pump.eventCapacity {
-			select {
-			case <-pump.ctx.Done():
-				return pump.ctx.Err()
-			case pump.updates <- update:
-				return nil
-			default:
-			}
-		}
-
-		select {
-		case <-pump.ctx.Done():
-			return pump.ctx.Err()
-		case <-time.After(10 * time.Millisecond):
-		}
+	select {
+	case <-pump.ctx.Done():
+		return pump.ctx.Err()
+	case pump.updates <- update:
+		return nil
 	}
 }
 

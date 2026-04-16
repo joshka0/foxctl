@@ -152,6 +152,65 @@ func TestShellWatchersZeroTranscriptLimitIsUncapped(t *testing.T) {
 	}
 }
 
+func TestShellWatchersApplyConsoleAskUpdates(t *testing.T) {
+	initial := ShellState{
+		Transcript: []TranscriptEntry{
+			{Speaker: "seed", Kind: "seed", Text: "seed"},
+		},
+	}
+	updates := make(chan ConsoleAskUpdate, 2)
+	shell := NewShellWithRuntime(initial, nil, updates, nil, 0, defaultComposerAskEnqueueTimeout)
+
+	watchers := shell.Watchers()
+	if got := len(watchers); got != 1 {
+		t.Fatalf("len(shell.Watchers()) = %d, want 1", got)
+	}
+
+	eventQueue := make(chan func(), 2)
+	stopCh := make(chan struct{})
+	watchers[0].Start(eventQueue, stopCh)
+	defer close(stopCh)
+
+	updates <- ConsoleAskUpdate{
+		Type: ConsoleAskUpdateAccepted,
+		Accepted: &ConsoleAskAccepted{
+			CorrelationID: "corr-123",
+		},
+	}
+	updates <- ConsoleAskUpdate{
+		Type: ConsoleAskUpdateError,
+		Failed: &ConsoleAskFailed{
+			Err: errors.New("boom"),
+		},
+	}
+
+	runWatcherHandler(t, eventQueue)
+	runWatcherHandler(t, eventQueue)
+
+	got := shell.state.Get().Transcript
+	if len(got) != 3 {
+		t.Fatalf("len(transcript) = %d, want 3", len(got))
+	}
+	if got[1].Speaker != "system" || got[1].Kind != "status" || got[1].Text != "ask queued: corr-123" {
+		t.Fatalf("transcript[1] = %#v, want deterministic accepted row", got[1])
+	}
+	if got[2].Speaker != "system" || got[2].Kind != "error" || got[2].Text != "ask failed: boom" {
+		t.Fatalf("transcript[2] = %#v, want deterministic failed row", got[2])
+	}
+}
+
+func TestShellWatchersApplyStreamAndAskUpdates(t *testing.T) {
+	initial := ShellState{}
+	streamUpdates := make(chan ConsoleStreamUpdate, 1)
+	askUpdates := make(chan ConsoleAskUpdate, 1)
+	shell := NewShellWithRuntime(initial, streamUpdates, askUpdates, nil, 0, defaultComposerAskEnqueueTimeout)
+
+	watchers := shell.Watchers()
+	if got := len(watchers); got != 2 {
+		t.Fatalf("len(shell.Watchers()) = %d, want 2", got)
+	}
+}
+
 func runWatcherHandler(t *testing.T, q <-chan func()) {
 	t.Helper()
 	select {

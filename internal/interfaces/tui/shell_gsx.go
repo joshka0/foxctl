@@ -4,11 +4,15 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tui "github.com/grindlemire/go-tui"
 )
+
+const defaultComposerAskEnqueueTimeout = 250 * time.Millisecond
 
 type Shell struct {
 	state           *tui.State[ShellState]
@@ -18,14 +22,39 @@ type Shell struct {
 	workersFocus    *tui.State[bool]
 	focus           *tui.FocusGroup
 	streamUpdates   <-chan ConsoleStreamUpdate
+	askUpdates      <-chan ConsoleAskUpdate
+	enqueueAsk      func(context.Context, AskConsoleSessionRequest) error
+	askTimeout      time.Duration
 	transcriptLimit int
 }
 
 func NewShell(initial ShellState) *Shell {
-	return NewShellWithStream(initial, nil, defaultTranscriptLimit)
+	return NewShellWithRuntime(initial, nil, nil, nil, defaultTranscriptLimit, defaultComposerAskEnqueueTimeout)
 }
 
 func NewShellWithStream(initial ShellState, streamUpdates <-chan ConsoleStreamUpdate, transcriptLimit int) *Shell {
+	return NewShellWithRuntime(
+		initial,
+		streamUpdates,
+		nil,
+		nil,
+		transcriptLimit,
+		defaultComposerAskEnqueueTimeout,
+	)
+}
+
+func NewShellWithRuntime(
+	initial ShellState,
+	streamUpdates <-chan ConsoleStreamUpdate,
+	askUpdates <-chan ConsoleAskUpdate,
+	enqueueAsk func(context.Context, AskConsoleSessionRequest) error,
+	transcriptLimit int,
+	askTimeout time.Duration,
+) *Shell {
+	if askTimeout <= 0 {
+		askTimeout = defaultComposerAskEnqueueTimeout
+	}
+
 	transcriptFocus := tui.NewState(true)
 	composerFocus := tui.NewState(false)
 	railFocus := tui.NewState(false)
@@ -39,17 +68,25 @@ func NewShellWithStream(initial ShellState, streamUpdates <-chan ConsoleStreamUp
 		workersFocus:    workersFocus,
 		focus:           tui.MustNewFocusGroup(transcriptFocus, composerFocus, railFocus, workersFocus),
 		streamUpdates:   streamUpdates,
+		askUpdates:      askUpdates,
+		enqueueAsk:      enqueueAsk,
+		askTimeout:      askTimeout,
 		transcriptLimit: transcriptLimit,
 	}
 }
 
 func (s *Shell) Watchers() []tui.Watcher {
-	if s.streamUpdates == nil {
+	watchers := make([]tui.Watcher, 0, 2)
+	if s.streamUpdates != nil {
+		watchers = append(watchers, tui.Watch(s.streamUpdates, s.handleConsoleStreamUpdate))
+	}
+	if s.askUpdates != nil {
+		watchers = append(watchers, tui.Watch(s.askUpdates, s.handleConsoleAskUpdate))
+	}
+	if len(watchers) == 0 {
 		return nil
 	}
-	return []tui.Watcher{
-		tui.Watch(s.streamUpdates, s.handleConsoleStreamUpdate),
-	}
+	return watchers
 }
 
 func (s *Shell) handleConsoleStreamUpdate(update ConsoleStreamUpdate) {
@@ -73,6 +110,31 @@ func (s *Shell) handleConsoleStreamUpdate(update ConsoleStreamUpdate) {
 			Speaker: "system",
 			Kind:    "status",
 			Text:    "console stream closed",
+		})
+	}
+}
+
+func (s *Shell) handleConsoleAskUpdate(update ConsoleAskUpdate) {
+	switch update.Type {
+	case ConsoleAskUpdateAccepted:
+		text := "ask queued"
+		if update.Accepted != nil && strings.TrimSpace(update.Accepted.CorrelationID) != "" {
+			text = "ask queued: " + strings.TrimSpace(update.Accepted.CorrelationID)
+		}
+		s.appendTranscriptEntry(TranscriptEntry{
+			Speaker: "system",
+			Kind:    "status",
+			Text:    text,
+		})
+	case ConsoleAskUpdateError:
+		text := "ask failed"
+		if update.Failed != nil && update.Failed.Err != nil {
+			text = "ask failed: " + update.Failed.Err.Error()
+		}
+		s.appendTranscriptEntry(TranscriptEntry{
+			Speaker: "system",
+			Kind:    "error",
+			Text:    text,
 		})
 	}
 }
@@ -159,19 +221,53 @@ func (s *Shell) backspaceComposer() {
 }
 
 func (s *Shell) submitComposer() {
-	s.state.Update(func(state ShellState) ShellState {
-		text := strings.TrimSpace(state.Composer)
-		if text == "" {
+	if s.enqueueAsk == nil {
+		s.state.Update(func(state ShellState) ShellState {
+			text := strings.TrimSpace(state.Composer)
+			if text == "" {
+				return state
+			}
+			state.Transcript = append(state.Transcript, TranscriptEntry{
+				Speaker: "you",
+				Kind:    "draft",
+				Text:    text,
+			})
+			state.Composer = ""
 			return state
-		}
-		state.Transcript = append(state.Transcript, TranscriptEntry{
-			Speaker: "you",
-			Kind:    "draft",
-			Text:    text,
 		})
+		return
+	}
+
+	current := s.state.Get()
+	content := strings.TrimSpace(current.Composer)
+	if content == "" {
+		return
+	}
+
+	s.state.Update(func(state ShellState) ShellState {
 		state.Composer = ""
+		transcript := append([]TranscriptEntry(nil), state.Transcript...)
+		transcript = append(transcript, TranscriptEntry{
+			Speaker: "you",
+			Kind:    "pending",
+			Text:    content,
+		})
+		state.Transcript = capTranscriptEntries(
+			transcript,
+			s.transcriptLimit,
+		)
 		return state
 	})
+
+	enqueueCtx, cancel := context.WithTimeout(context.Background(), s.askTimeout)
+	defer cancel()
+	if err := s.enqueueAsk(enqueueCtx, AskConsoleSessionRequest{Content: content}); err != nil {
+		s.appendTranscriptEntry(TranscriptEntry{
+			Speaker: "system",
+			Kind:    "error",
+			Text:    "ask enqueue failed: " + err.Error(),
+		})
+	}
 }
 
 func focusClass(active bool) string {
@@ -1224,6 +1320,7 @@ func (s *Shell) UpdateProps(fresh tui.Component) {
 		return
 	}
 	s.focus = f.focus
+	s.askTimeout = f.askTimeout
 	s.transcriptLimit = f.transcriptLimit
 }
 
