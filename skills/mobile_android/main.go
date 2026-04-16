@@ -71,6 +71,7 @@ type input struct {
 	LocalPath  string `json:"local_path,omitempty"`
 	Output     string `json:"output,omitempty"`
 	Duration   int    `json:"duration,omitempty"`
+	Full       bool   `json:"full,omitempty"`
 	// Enhanced logcat parameters
 	Count   int    `json:"count,omitempty"`   // Number of log lines to fetch
 	Pattern string `json:"pattern,omitempty"` // Grep pattern to filter logs
@@ -159,7 +160,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "press_key":
 		return pressKey(ctx, rc, in.Serial, in.Keycode)
 	case "ui_tree":
-		return uiTree(ctx, rc, in.Serial)
+		return uiTree(ctx, rc, in.Serial, in.Full)
 	case "logs":
 		return logs(ctx, rc, in.Serial, in.Count, in.Pattern)
 	case "logcat_filter":
@@ -421,7 +422,7 @@ func pressKey(ctx context.Context, rc *skillmain.RunContext, serial, keycode str
 }
 
 // uiTree gets the UI hierarchy.
-func uiTree(ctx context.Context, rc *skillmain.RunContext, serial string) error {
+func uiTree(ctx context.Context, rc *skillmain.RunContext, serial string, full bool) error {
 	// Dump UI hierarchy to device
 	remotePath := "/sdcard/window_dump.xml"
 	cmdResult := mobileutil.RunADB(ctx, serial, "shell", "uiautomator", "dump", remotePath)
@@ -456,6 +457,11 @@ func uiTree(ctx context.Context, rc *skillmain.RunContext, serial string) error 
 		"elements":  preview,
 		"count":     len(elements),
 		"truncated": truncated,
+	}
+	if full {
+		payload["elements"] = elements
+		payload["truncated"] = false
+		return emit(rc, payload)
 	}
 
 	// Store full tree in CAS if truncated

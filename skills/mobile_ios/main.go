@@ -90,6 +90,7 @@ type input struct {
 	Output      string   `json:"output,omitempty"`
 	ExpoURL     string   `json:"expo_url,omitempty"`
 	MediaPath   string   `json:"media_path,omitempty"`
+	Full        bool     `json:"full,omitempty"`
 }
 
 // main is the skill entry point for mobile/ios with IDB companion integration.
@@ -159,7 +160,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "button":
 		return button(ctx, rc, in.UDID, in.Button)
 	case "ui_tree":
-		return uiTree(ctx, rc, in.UDID)
+		return uiTree(ctx, rc, in.UDID, in.Full)
 	case "describe_point":
 		return describePoint(ctx, rc, in.UDID, in.X, in.Y)
 	case "logs":
@@ -504,7 +505,7 @@ func button(ctx context.Context, rc *skillmain.RunContext, udid, buttonName stri
 }
 
 // uiTree gets the UI accessibility tree with JSON parsing, line-by-line fallback, and CAS storage for large trees.
-func uiTree(ctx context.Context, rc *skillmain.RunContext, udid string) error {
+func uiTree(ctx context.Context, rc *skillmain.RunContext, udid string, full bool) error {
 	cmdResult := mobileutil.RunIDB(ctx, udid, "ui", "describe-all", "--json")
 	if cmdResult.Err != nil {
 		return skillerr.WrapRuntime("idb ui describe-all", cmdResult.Err)
@@ -540,6 +541,11 @@ func uiTree(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 		"elements":  preview,
 		"count":     len(elements),
 		"truncated": truncated,
+	}
+	if full {
+		payload["elements"] = elements
+		payload["truncated"] = false
+		return emit(rc, payload)
 	}
 
 	// Store full tree in CAS if truncated

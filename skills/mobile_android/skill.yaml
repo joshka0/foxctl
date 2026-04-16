@@ -110,6 +110,10 @@ signature:
       type: integer
       required: false
       description: Duration in milliseconds for swipe
+    - name: full
+      type: boolean
+      required: false
+      description: Return the full UI tree instead of a preview for ui_tree
   help:
     short: "Automate Android emulators via ADB."
     long: |
