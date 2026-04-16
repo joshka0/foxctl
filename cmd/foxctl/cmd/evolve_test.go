@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -101,6 +103,234 @@ func TestEvolveStatusReportsNoActiveRun(t *testing.T) {
 	data := mustMap(t, env["data"])
 	if active, ok := data["active_run"].(bool); !ok || active {
 		t.Fatalf("active_run = %#v, want false", data["active_run"])
+	}
+}
+
+func TestEvolveNewCreatesChildNodeAndWorktree(t *testing.T) {
+	cfg := testEvolveConfig(t)
+	ctx := config.WithContext(context.Background(), cfg)
+	workspacePath := initEvolveTestRepo(t)
+
+	initCmd := newEvolveInitCommand()
+	initCmd.SetContext(ctx)
+	initOut := &bytes.Buffer{}
+	initCmd.SetOut(initOut)
+	initCmd.SetErr(&bytes.Buffer{})
+	initCmd.SetArgs([]string{
+		"--workspace", workspacePath,
+		"--target", ".",
+		"--benchmark", "go test ./...",
+		"--metric", "max",
+	})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatalf("evolve init: %v", err)
+	}
+	initData := mustMap(t, mustMap(t, decodeEnvelope(t, initOut.Bytes())["data"]))
+	runID := mustString(t, initData["run_id"])
+	rootID := mustString(t, initData["root_node_id"])
+
+	newCmd := newEvolveNewCommand()
+	newCmd.SetContext(ctx)
+	newCmd.SilenceUsage = true
+	newOut := &bytes.Buffer{}
+	newCmd.SetOut(newOut)
+	newCmd.SetErr(&bytes.Buffer{})
+	newCmd.SetArgs([]string{
+		"--workspace", workspacePath,
+		"--parent", rootID,
+		"--hypothesis", "test child branch",
+	})
+	if err := newCmd.Execute(); err != nil {
+		t.Fatalf("evolve new: %v", err)
+	}
+	newData := mustMap(t, mustMap(t, decodeEnvelope(t, newOut.Bytes())["data"]))
+	nodeID := mustString(t, newData["node_id"])
+	branch := mustString(t, newData["branch"])
+	worktreePath := mustString(t, newData["worktree_path"])
+
+	if got := mustString(t, newData["run_id"]); got != runID {
+		t.Fatalf("run_id = %s, want %s", got, runID)
+	}
+	if got := mustString(t, newData["parent_node_id"]); got != rootID {
+		t.Fatalf("parent_node_id = %s, want %s", got, rootID)
+	}
+	if !strings.HasPrefix(branch, "foxctl/evolve/") {
+		t.Fatalf("branch = %q, want foxctl/evolve/*", branch)
+	}
+	if got := mustString(t, newData["status"]); got != string(model.NodeStatusPending) {
+		t.Fatalf("status = %s, want %s", got, model.NodeStatusPending)
+	}
+
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Fatalf("worktree path %q does not exist: %v", worktreePath, err)
+	}
+
+	st, err := store.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	node, err := st.Node(ctx, nodeID)
+	if err != nil {
+		t.Fatalf("load child node: %v", err)
+	}
+	if node.RunID != runID {
+		t.Fatalf("node run id = %s, want %s", node.RunID, runID)
+	}
+	if node.ParentID != rootID {
+		t.Fatalf("node parent id = %s, want %s", node.ParentID, rootID)
+	}
+	if node.Branch != branch {
+		t.Fatalf("node branch = %s, want %s", node.Branch, branch)
+	}
+	if node.WorktreePath != worktreePath {
+		t.Fatalf("node worktree path = %s, want %s", node.WorktreePath, worktreePath)
+	}
+	if strings.TrimSpace(node.CommitSHA) == "" {
+		t.Fatalf("node commit_sha is empty")
+	}
+}
+
+func TestEvolveNewUsesParentCommitAsBaseRef(t *testing.T) {
+	cfg := testEvolveConfig(t)
+	ctx := config.WithContext(context.Background(), cfg)
+	workspacePath := initEvolveTestRepo(t)
+	initialHead := gitHEAD(t, workspacePath)
+
+	initCmd := newEvolveInitCommand()
+	initCmd.SetContext(ctx)
+	initOut := &bytes.Buffer{}
+	initCmd.SetOut(initOut)
+	initCmd.SetErr(&bytes.Buffer{})
+	initCmd.SetArgs([]string{
+		"--workspace", workspacePath,
+		"--target", ".",
+		"--benchmark", "go test ./...",
+		"--metric", "max",
+	})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatalf("evolve init: %v", err)
+	}
+	initData := mustMap(t, mustMap(t, decodeEnvelope(t, initOut.Bytes())["data"]))
+	rootID := mustString(t, initData["root_node_id"])
+
+	st, err := store.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	root, err := st.Node(ctx, rootID)
+	if err != nil {
+		t.Fatalf("load root: %v", err)
+	}
+	root.CommitSHA = initialHead
+	root.UpdatedAt = time.Now().UTC()
+	if err := st.SaveNode(ctx, root); err != nil {
+		t.Fatalf("save root with commit_sha: %v", err)
+	}
+
+	newFile := filepath.Join(workspacePath, "second.txt")
+	if err := os.WriteFile(newFile, []byte("second\n"), 0o644); err != nil {
+		t.Fatalf("write second file: %v", err)
+	}
+	runGit(t, workspacePath, "add", "second.txt")
+	runGit(t, workspacePath, "commit", "-m", "second commit")
+	if head := gitHEAD(t, workspacePath); head == initialHead {
+		t.Fatalf("expected new HEAD to differ from initial HEAD")
+	}
+
+	newCmd := newEvolveNewCommand()
+	newCmd.SetContext(ctx)
+	newCmd.SilenceUsage = true
+	newOut := &bytes.Buffer{}
+	newCmd.SetOut(newOut)
+	newCmd.SetErr(&bytes.Buffer{})
+	newCmd.SetArgs([]string{
+		"--workspace", workspacePath,
+		"--parent", rootID,
+	})
+	if err := newCmd.Execute(); err != nil {
+		t.Fatalf("evolve new: %v", err)
+	}
+	newData := mustMap(t, mustMap(t, decodeEnvelope(t, newOut.Bytes())["data"]))
+	if got := mustString(t, newData["base_ref"]); got != initialHead {
+		t.Fatalf("base_ref = %s, want %s", got, initialHead)
+	}
+	if got := mustString(t, newData["commit_sha"]); got != initialHead {
+		t.Fatalf("commit_sha = %s, want %s", got, initialHead)
+	}
+}
+
+func TestEvolveNewRejectsParentFromDifferentRun(t *testing.T) {
+	cfg := testEvolveConfig(t)
+	ctx := config.WithContext(context.Background(), cfg)
+	workspacePath := initEvolveTestRepo(t)
+
+	run1Root := runEvolveInitForTest(t, ctx, workspacePath)
+	run2Root := runEvolveInitForTest(t, ctx, workspacePath)
+	if run1Root == run2Root {
+		t.Fatalf("expected different root ids for separate runs")
+	}
+
+	newCmd := newEvolveNewCommand()
+	newCmd.SetContext(ctx)
+	newOut := &bytes.Buffer{}
+	newCmd.SetOut(newOut)
+	newCmd.SetErr(&bytes.Buffer{})
+	newCmd.SetArgs([]string{
+		"--workspace", workspacePath,
+		"--parent", run1Root,
+	})
+	err := newCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected evolve new to fail for parent from different run")
+	}
+	if !strings.Contains(err.Error(), "does not belong to run") {
+		t.Fatalf("error = %v, want run mismatch", err)
+	}
+	raw := newOut.Bytes()
+	firstLine := bytes.SplitN(raw, []byte("\n"), 2)[0]
+	env := decodeEnvelope(t, firstLine)
+	if status := mustString(t, env["status"]); status != "error" {
+		t.Fatalf("status = %s, want error", status)
+	}
+	errMap := mustMap(t, env["error"])
+	if code := mustString(t, errMap["code"]); code != "EARG" {
+		t.Fatalf("error.code = %s, want EARG", code)
+	}
+}
+
+func TestEvolveNewMissingExplicitRunReturnsNotFound(t *testing.T) {
+	cfg := testEvolveConfig(t)
+	ctx := config.WithContext(context.Background(), cfg)
+	workspacePath := initEvolveTestRepo(t)
+	rootID := runEvolveInitForTest(t, ctx, workspacePath)
+
+	newCmd := newEvolveNewCommand()
+	newCmd.SetContext(ctx)
+	newOut := &bytes.Buffer{}
+	newCmd.SetOut(newOut)
+	newCmd.SetErr(&bytes.Buffer{})
+	newCmd.SetArgs([]string{
+		"--workspace", workspacePath,
+		"--run", "run-missing",
+		"--parent", rootID,
+	})
+	err := newCmd.Execute()
+	if err == nil {
+		t.Fatalf("expected evolve new to fail for missing explicit run")
+	}
+	raw := newOut.Bytes()
+	firstLine := bytes.SplitN(raw, []byte("\n"), 2)[0]
+	env := decodeEnvelope(t, firstLine)
+	if status := mustString(t, env["status"]); status != "error" {
+		t.Fatalf("status = %s, want error", status)
+	}
+	errMap := mustMap(t, env["error"])
+	if code := mustString(t, errMap["code"]); code != "ENOTFOUND" {
+		t.Fatalf("error.code = %s, want ENOTFOUND", code)
 	}
 }
 
@@ -334,4 +564,64 @@ func mustFloat64(t *testing.T, v any) float64 {
 		t.Fatalf("expected float64, got %T", v)
 	}
 	return out
+}
+
+func runEvolveInitForTest(t *testing.T, ctx context.Context, workspacePath string) string {
+	t.Helper()
+	cmd := newEvolveInitCommand()
+	cmd.SetContext(ctx)
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{
+		"--workspace", workspacePath,
+		"--target", ".",
+		"--benchmark", "go test ./...",
+		"--metric", "max",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("evolve init: %v", err)
+	}
+	data := mustMap(t, mustMap(t, decodeEnvelope(t, out.Bytes())["data"]))
+	return mustString(t, data["root_node_id"])
+}
+
+func initEvolveTestRepo(t *testing.T) string {
+	t.Helper()
+	repoPath := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGit(t, repoPath, "init", "-b", "main")
+	runGit(t, repoPath, "config", "user.email", "test@foxctl.dev")
+	runGit(t, repoPath, "config", "user.name", "Foxctl Test")
+	if err := os.WriteFile(filepath.Join(repoPath, "README.md"), []byte("# Evolve Test\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runGit(t, repoPath, "add", ".")
+	runGit(t, repoPath, "commit", "-m", "initial commit")
+	return repoPath
+}
+
+func gitHEAD(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, fmt.Sprintf("%s", out))
+	}
 }
