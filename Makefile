@@ -24,7 +24,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui go-tui-smoke ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -360,6 +360,15 @@ GO_TUI_WEB_LOG ?= /tmp/foxctl-go-tui-web.log
 GO_TUI_WORKSPACE ?= $(CURDIR)
 GO_TUI_PROFILE ?= explorer
 GO_TUI_SESSION_ID ?=
+GO_TUI_LLM_PROVIDER ?= lmstudio
+GO_TUI_LLM_MODEL ?=
+GO_TUI_LMSTUDIO_BASE_URL ?= http://localhost:1234/v1
+GO_TUI_SYSTEM_PROMPT ?= You are a local foxctl agent running through the Go TUI. Be concise, inspect the repo before making claims, and use available foxctl tools when useful.
+GO_TUI_SPAWN_AGENT ?= 0
+GO_TUI_AGENT_ROLE ?= coder
+GO_TUI_AGENT_NAME ?= Local Fox
+GO_TUI_AGENT_EXEC_MODE ?= reactive
+GO_TUI_AGENT_PROMPT ?= You are a local foxctl coding agent backed by LMStudio. Help implement and review the current workspace.
 GO_TUI_SMOKE_ASK ?= ping from make go-tui-smoke
 GO_TUI_SMOKE_TIMEOUT ?= 3s
 
@@ -373,7 +382,7 @@ go-tui-spawn: build go-tui-build
 	echo "Ensuring foxctl web API at $(GO_TUI_API_URL)..."; \
 	if ! curl -sf "$(GO_TUI_API_URL)/api/health" >/dev/null 2>&1; then \
 		echo "Starting web API on :$(GO_TUI_API_PORT) (logs: $(GO_TUI_WEB_LOG))"; \
-		FOXCTL_DB_DRIVER=$${FOXCTL_DB_DRIVER:-sqlite} FOXCTL_V2_EVENTS_DB_DRIVER=$${FOXCTL_V2_EVENTS_DB_DRIVER:-sqlite} ./bin/foxctl web serve --dev-cors --port $(GO_TUI_API_PORT) > "$(GO_TUI_WEB_LOG)" 2>&1 & \
+		LMSTUDIO_BASE_URL=$${LMSTUDIO_BASE_URL:-$(GO_TUI_LMSTUDIO_BASE_URL)} FOXCTL_DB_DRIVER=$${FOXCTL_DB_DRIVER:-sqlite} FOXCTL_V2_EVENTS_DB_DRIVER=$${FOXCTL_V2_EVENTS_DB_DRIVER:-sqlite} ./bin/foxctl web serve --dev-cors --port $(GO_TUI_API_PORT) > "$(GO_TUI_WEB_LOG)" 2>&1 & \
 		server_pid=$$!; \
 		trap 'kill '"$$server_pid"' 2>/dev/null || true' EXIT; \
 		for _ in $$(seq 1 40); do \
@@ -385,14 +394,24 @@ go-tui-spawn: build go-tui-build
 		server_pid=""; \
 		trap ':' EXIT; \
 	fi; \
+	if [ "$(GO_TUI_SPAWN_AGENT)" = "1" ]; then \
+		echo "Spawning foxctl agent with provider=$(GO_TUI_LLM_PROVIDER) model=$(GO_TUI_LLM_MODEL)..."; \
+		agent_json="$$(python3 -c 'import json,sys; d={"role":sys.argv[1],"name":sys.argv[2],"prompt":sys.argv[3],"workspace_root":sys.argv[4],"exec_mode":sys.argv[5]}; provider=sys.argv[6].strip(); model=sys.argv[7].strip(); base=sys.argv[8].strip(); d.update({"llm_provider":provider} if provider else {}); d.update({"llm_model":model} if model else {}); d.update({"llm_base_url":base} if base else {}); print(json.dumps(d))' "$(GO_TUI_AGENT_ROLE)" "$(GO_TUI_AGENT_NAME)" "$(GO_TUI_AGENT_PROMPT)" "$(GO_TUI_WORKSPACE)" "$(GO_TUI_AGENT_EXEC_MODE)" "$(GO_TUI_LLM_PROVIDER)" "$(GO_TUI_LLM_MODEL)" "$(GO_TUI_LMSTUDIO_BASE_URL)")"; \
+		agent_id="$$(curl -sf -X POST "$(GO_TUI_API_URL)/api/agents/spawn" -H 'Content-Type: application/json' -d "$$agent_json" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("actor_id") or data.get("agent_id") or "")')"; \
+		echo "Spawned foxctl agent $$agent_id"; \
+	fi; \
 	session_id="$(GO_TUI_SESSION_ID)"; \
 	if [ -z "$$session_id" ]; then \
-		echo "Creating console session for $(GO_TUI_WORKSPACE)..."; \
-		session_json="$$(python3 -c 'import json,sys; print(json.dumps({"workspace": sys.argv[1], "profile": sys.argv[2]}))' "$(GO_TUI_WORKSPACE)" "$(GO_TUI_PROFILE)")"; \
+		echo "Creating console session for $(GO_TUI_WORKSPACE) with provider=$(GO_TUI_LLM_PROVIDER) model=$(GO_TUI_LLM_MODEL)..."; \
+		session_json="$$(python3 -c 'import json,sys; d={"workspace":sys.argv[1],"profile":sys.argv[2]}; provider=sys.argv[3].strip(); model=sys.argv[4].strip(); prompt=sys.argv[5].strip(); d.update({"llm_provider":provider} if provider else {}); d.update({"llm_model":model} if model else {}); d.update({"system_prompt":prompt} if prompt else {}); print(json.dumps(d))' "$(GO_TUI_WORKSPACE)" "$(GO_TUI_PROFILE)" "$(GO_TUI_LLM_PROVIDER)" "$(GO_TUI_LLM_MODEL)" "$(GO_TUI_SYSTEM_PROMPT)")"; \
 		session_id="$$(curl -sf -X POST "$(GO_TUI_API_URL)/api/console/sessions" -H 'Content-Type: application/json' -d "$$session_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["id"])')"; \
 	fi; \
 	echo "Launching Go TUI attached to console session $$session_id"; \
 	./bin/foxctl-tui --api-base-url "$(GO_TUI_API_URL)" --console-session-id "$$session_id" --workspace "$(GO_TUI_WORKSPACE)"
+
+go-tui-agent: GO_TUI_SPAWN_AGENT=1
+go-tui-agent: GO_TUI_PROFILE=foxctl-agent
+go-tui-agent: go-tui-spawn
 
 go-tui: go-tui-spawn
 
