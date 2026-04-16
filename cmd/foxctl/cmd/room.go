@@ -10791,8 +10791,8 @@ func buildRoomEpicDependencyTopologyFindings(epicID string, milestones []map[str
 			continue
 		}
 		for _, dependencyID := range roomMilestoneDependencyIDs(milestone) {
-			switch {
-			case dependencyID == milestoneID:
+			switch dependencyID {
+			case milestoneID:
 				findings = append(findings, map[string]any{
 					"id":                       fmt.Sprintf("dependency_topology:milestone:%s:self", milestoneID),
 					"rule_family":              "dependency_topology",
@@ -10838,8 +10838,8 @@ func buildRoomEpicDependencyTopologyFindings(epicID string, milestones []map[str
 				continue
 			}
 			for _, dependencyID := range roomStoryDependencyIDs(story) {
-				switch {
-				case dependencyID == storyID:
+				switch dependencyID {
+				case storyID:
 					findings = append(findings, map[string]any{
 						"id":                       fmt.Sprintf("dependency_topology:story:%s:self", storyID),
 						"rule_family":              "dependency_topology",

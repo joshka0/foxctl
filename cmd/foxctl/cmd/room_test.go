@@ -5342,12 +5342,12 @@ func TestRunRoomEpicDispatchFrontier(t *testing.T) {
 		workspace := t.TempDir()
 
 		epicID, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
-		cmd, out := newRoomTestCommand(ctx)
+		cmd, _ := newRoomTestCommand(ctx)
 		if err := runRoomStoryAdd(cmd, workspace, "human-a", "alpha", milestoneID, "Second ready story", "Another accepted story in the same milestone.", "human-a"); err != nil {
 			t.Fatalf("runRoomStoryAdd second: %v", err)
 		}
 
-		cmd, out = newRoomTestCommand(ctx)
+		cmd, out := newRoomTestCommand(ctx)
 		err := runRoomEpicDispatchFrontier(cmd, workspace, "alpha", epicID, 100, roomEpicDispatchFrontierOptions{
 			Dispatch: roomEpicGradeDispatchOptions{
 				Spawn:         true,
