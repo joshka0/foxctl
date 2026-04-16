@@ -27,6 +27,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golangci/golangci-lint v1.64.8
 	github.com/google/uuid v1.6.0
+	github.com/grindlemire/go-tui v0.11.0
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.18.2
