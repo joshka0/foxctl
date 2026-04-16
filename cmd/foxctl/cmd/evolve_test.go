@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -622,6 +621,6 @@ func runGit(t *testing.T, dir string, args ...string) {
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, fmt.Sprintf("%s", out))
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, string(out))
 	}
 }
