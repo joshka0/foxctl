@@ -35,6 +35,9 @@ func newEvolveCommand() *cobra.Command {
 		newEvolveGetCommand(),
 		newEvolvePathCommand(),
 		newEvolveDiffCommand(),
+		newEvolveDiscardCommand(),
+		newEvolvePruneCommand(),
+		newEvolveResetCommand(),
 		newEvolveStatusCommand(),
 		newEvolveTreeCommand(),
 	)
