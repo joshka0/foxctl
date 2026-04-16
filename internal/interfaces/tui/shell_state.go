@@ -96,6 +96,9 @@ func (state ShellState) ApplyConsoleStreamEvents(events []ConsoleStreamEvent, tr
 		if !ok {
 			continue
 		}
+		if shouldSuppressAskEcho(transcript, entry) {
+			continue
+		}
 		transcript = append(transcript, entry)
 		appended = true
 	}
@@ -106,6 +109,80 @@ func (state ShellState) ApplyConsoleStreamEvents(events []ConsoleStreamEvent, tr
 	next := state
 	next.Transcript = capTranscriptEntries(transcript, transcriptLimit)
 	return next
+}
+
+// AttachAskCorrelation updates the oldest pending ask row without a correlation id.
+// It prefers an exact content match when acceptedContent is provided.
+func (state ShellState) AttachAskCorrelation(acceptedContent string, correlationID string) (ShellState, bool) {
+	correlationID = strings.TrimSpace(correlationID)
+	if correlationID == "" {
+		return state, false
+	}
+
+	transcript := append([]TranscriptEntry(nil), state.Transcript...)
+	target := findPendingTranscriptIndex(transcript, acceptedContent)
+	if target < 0 {
+		return state, false
+	}
+
+	transcript[target].CorrelationID = correlationID
+	next := state
+	next.Transcript = transcript
+	return next, true
+}
+
+func shouldSuppressAskEcho(transcript []TranscriptEntry, entry TranscriptEntry) bool {
+	if normalizeTranscriptKind(entry.Kind) != "ask" {
+		return false
+	}
+
+	correlationID := strings.TrimSpace(entry.CorrelationID)
+	if correlationID == "" {
+		return false
+	}
+
+	for i := range transcript {
+		existing := transcript[i]
+		if strings.TrimSpace(existing.CorrelationID) != correlationID {
+			continue
+		}
+		switch normalizeTranscriptKind(existing.Kind) {
+		case "pending", "ask":
+			return true
+		}
+	}
+	return false
+}
+
+func findPendingTranscriptIndex(transcript []TranscriptEntry, acceptedContent string) int {
+	acceptedContent = strings.TrimSpace(acceptedContent)
+	if acceptedContent != "" {
+		for i := range transcript {
+			entry := transcript[i]
+			if normalizeTranscriptKind(entry.Kind) != "pending" || strings.TrimSpace(entry.CorrelationID) != "" {
+				continue
+			}
+			if strings.TrimSpace(entry.Text) == acceptedContent {
+				return i
+			}
+		}
+	}
+
+	for i := range transcript {
+		entry := transcript[i]
+		if normalizeTranscriptKind(entry.Kind) != "pending" {
+			continue
+		}
+		if strings.TrimSpace(entry.CorrelationID) == "" {
+			return i
+		}
+	}
+
+	return -1
+}
+
+func normalizeTranscriptKind(kind string) string {
+	return strings.ToLower(strings.TrimSpace(kind))
 }
 
 func capTranscriptEntries(entries []TranscriptEntry, limit int) []TranscriptEntry {

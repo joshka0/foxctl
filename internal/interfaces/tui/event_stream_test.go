@@ -180,10 +180,10 @@ func TestMapConsoleStreamEventsToTranscriptPreservesKindsAndCorrelation(t *testi
 
 	got := MapConsoleStreamEventsToTranscript(events)
 	want := []TranscriptEntry{
-		{Speaker: "you", Kind: "ask", Text: "[corr-ask] start"},
-		{Speaker: "assistant", Kind: "reply", Text: "[corr-ask] done"},
-		{Speaker: "worker", Kind: "event", Text: "[corr-ask] working"},
-		{Speaker: "system", Kind: "cmd", Text: "[corr-cmd] command"},
+		{Speaker: "you", Kind: "ask", Text: "[corr-ask] start", CorrelationID: "corr-ask"},
+		{Speaker: "assistant", Kind: "reply", Text: "[corr-ask] done", CorrelationID: "corr-ask"},
+		{Speaker: "worker", Kind: "event", Text: "[corr-ask] working", CorrelationID: "corr-ask"},
+		{Speaker: "system", Kind: "cmd", Text: "[corr-cmd] command", CorrelationID: "corr-cmd"},
 	}
 
 	if len(got) != len(want) {

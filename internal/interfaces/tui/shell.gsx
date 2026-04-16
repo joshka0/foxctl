@@ -158,30 +158,48 @@ func (s *Shell) handleConsoleAskUpdate(update ConsoleAskUpdate) {
 	switch update.Type {
 	case ConsoleAskUpdateAccepted:
 		correlationID := ""
+		content := ""
 		if update.Accepted != nil {
 			correlationID = strings.TrimSpace(update.Accepted.CorrelationID)
+			content = strings.TrimSpace(update.Accepted.Content)
 		}
 		if correlationID != "" {
 			s.inFlight.Set(correlationID)
+
+			updatedPending := false
+			s.state.Update(func(state ShellState) ShellState {
+				next, ok := state.AttachAskCorrelation(content, correlationID)
+				updatedPending = ok
+				return next
+			})
+			if updatedPending {
+				return
+			}
 		}
 		text := "ask queued"
 		if correlationID != "" {
 			text = "ask queued: " + correlationID
 		}
 		s.appendTranscriptEntry(TranscriptEntry{
-			Speaker: "system",
-			Kind:    "status",
-			Text:    text,
+			Speaker:       "system",
+			Kind:          "status",
+			Text:          text,
+			CorrelationID: correlationID,
 		})
 	case ConsoleAskUpdateError:
 		text := "ask failed"
+		correlationID := ""
+		if update.Failed != nil {
+			correlationID = strings.TrimSpace(update.Failed.CorrelationID)
+		}
 		if update.Failed != nil && update.Failed.Err != nil {
 			text = "ask failed: " + update.Failed.Err.Error()
 		}
 		s.appendTranscriptEntry(TranscriptEntry{
-			Speaker: "system",
-			Kind:    "error",
-			Text:    text,
+			Speaker:       "system",
+			Kind:          "error",
+			Text:          text,
+			CorrelationID: correlationID,
 		})
 	}
 }
@@ -199,9 +217,10 @@ func (s *Shell) handleConsoleCancelUpdate(update ConsoleCancelUpdate) {
 			text = "cancel queued: " + correlationID
 		}
 		s.appendTranscriptEntry(TranscriptEntry{
-			Speaker: "system",
-			Kind:    "status",
-			Text:    text,
+			Speaker:       "system",
+			Kind:          "status",
+			Text:          text,
+			CorrelationID: correlationID,
 		})
 	case ConsoleCancelUpdateError:
 		text := "cancel failed"
@@ -220,9 +239,10 @@ func (s *Shell) handleConsoleCancelUpdate(update ConsoleCancelUpdate) {
 			}
 		}
 		s.appendTranscriptEntry(TranscriptEntry{
-			Speaker: "system",
-			Kind:    "error",
-			Text:    text,
+			Speaker:       "system",
+			Kind:          "error",
+			Text:          text,
+			CorrelationID: correlationID,
 		})
 	}
 }
@@ -376,9 +396,10 @@ func (s *Shell) submitCancel() {
 		status = "cancel requested: " + correlationID
 	}
 	s.appendTranscriptEntry(TranscriptEntry{
-		Speaker: "system",
-		Kind:    "status",
-		Text:    status,
+		Speaker:       "system",
+		Kind:          "status",
+		Text:          status,
+		CorrelationID: correlationID,
 	})
 
 	enqueueCtx, cancel := context.WithTimeout(context.Background(), s.cancelTimeout)

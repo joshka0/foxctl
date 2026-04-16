@@ -172,6 +172,42 @@ func TestShellComposerSubmitUsesBoundedEnqueueTimeout(t *testing.T) {
 	}
 }
 
+func TestShellAskAcceptedAttachesCorrelationToPendingRow(t *testing.T) {
+	shell := NewShellWithRuntime(
+		ShellState{
+			Transcript: []TranscriptEntry{
+				{Speaker: "system", Kind: "seed", Text: "seed"},
+				{Speaker: "you", Kind: "pending", Text: "first"},
+				{Speaker: "you", Kind: "pending", Text: "second"},
+			},
+		},
+		nil,
+		nil,
+		nil,
+		0,
+		defaultComposerAskEnqueueTimeout,
+	)
+
+	shell.handleConsoleAskUpdate(ConsoleAskUpdate{
+		Type: ConsoleAskUpdateAccepted,
+		Accepted: &ConsoleAskAccepted{
+			Content:       "second",
+			CorrelationID: "corr-accept-1",
+		},
+	})
+
+	state := shell.state.Get()
+	if len(state.Transcript) != 3 {
+		t.Fatalf("len(transcript) = %d, want 3", len(state.Transcript))
+	}
+	if state.Transcript[1].CorrelationID != "" {
+		t.Fatalf("first pending correlation = %q, want empty", state.Transcript[1].CorrelationID)
+	}
+	if state.Transcript[2].CorrelationID != "corr-accept-1" {
+		t.Fatalf("second pending correlation = %q, want %q", state.Transcript[2].CorrelationID, "corr-accept-1")
+	}
+}
+
 func TestShellCancelWithoutRuntimeIsNoOp(t *testing.T) {
 	shell := NewShell(DefaultShellState(Options{}))
 	before := shell.state.Get()

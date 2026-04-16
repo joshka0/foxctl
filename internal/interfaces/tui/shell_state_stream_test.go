@@ -221,6 +221,122 @@ func TestShellStateApplyConsoleStreamEventsTranscriptLimit(t *testing.T) {
 	}
 }
 
+func TestShellStateApplyConsoleStreamEventsSuppressesAskEchoWithSameCorrelation(t *testing.T) {
+	t.Parallel()
+
+	initial := ShellState{
+		Transcript: []TranscriptEntry{
+			{Speaker: "you", Kind: "pending", Text: "ship this", CorrelationID: "corr-1"},
+		},
+	}
+
+	events := []ConsoleStreamEvent{
+		{
+			Type: "ask",
+			Payload: &ConsoleEventPayload{
+				Type:          "ask",
+				CorrelationID: "corr-1",
+				Content:       "ship this",
+			},
+		},
+	}
+
+	got := initial.ApplyConsoleStreamEvents(events, 0)
+	if !reflect.DeepEqual(got.Transcript, initial.Transcript) {
+		t.Fatalf("got.Transcript = %#v, want %#v", got.Transcript, initial.Transcript)
+	}
+}
+
+func TestShellStateApplyConsoleStreamEventsReplyWithSameCorrelationStillAppends(t *testing.T) {
+	t.Parallel()
+
+	initial := ShellState{
+		Transcript: []TranscriptEntry{
+			{Speaker: "you", Kind: "pending", Text: "ship this", CorrelationID: "corr-1"},
+		},
+	}
+
+	events := []ConsoleStreamEvent{
+		{
+			Type: "reply",
+			Payload: &ConsoleEventPayload{
+				Type:          "reply",
+				CorrelationID: "corr-1",
+				Content:       "done",
+			},
+		},
+	}
+
+	got := initial.ApplyConsoleStreamEvents(events, 0)
+	if len(got.Transcript) != 2 {
+		t.Fatalf("len(got.Transcript) = %d, want 2", len(got.Transcript))
+	}
+	last := got.Transcript[1]
+	if last.Kind != "reply" || last.CorrelationID != "corr-1" {
+		t.Fatalf("last = %#v, want appended reply with same correlation", last)
+	}
+}
+
+func TestShellStateApplyConsoleStreamEventsNoCorrelationAskStillAppends(t *testing.T) {
+	t.Parallel()
+
+	initial := ShellState{
+		Transcript: []TranscriptEntry{
+			{Speaker: "you", Kind: "pending", Text: "ship this", CorrelationID: "corr-1"},
+		},
+	}
+
+	events := []ConsoleStreamEvent{
+		{
+			Type: "ask",
+			Payload: &ConsoleEventPayload{
+				Type:    "ask",
+				Content: "ship this",
+			},
+		},
+	}
+
+	got := initial.ApplyConsoleStreamEvents(events, 0)
+	if len(got.Transcript) != 2 {
+		t.Fatalf("len(got.Transcript) = %d, want 2", len(got.Transcript))
+	}
+	last := got.Transcript[1]
+	if last.Kind != "ask" || last.CorrelationID != "" {
+		t.Fatalf("last = %#v, want appended ask with empty correlation", last)
+	}
+}
+
+func TestShellStateApplyConsoleStreamEventsStillCapsAfterAppend(t *testing.T) {
+	t.Parallel()
+
+	initial := ShellState{
+		Transcript: []TranscriptEntry{
+			{Speaker: "system", Kind: "seed", Text: "one"},
+			{Speaker: "system", Kind: "seed", Text: "two"},
+		},
+	}
+
+	events := []ConsoleStreamEvent{
+		{
+			Type: "reply",
+			Payload: &ConsoleEventPayload{
+				Type:          "reply",
+				CorrelationID: "corr-cap",
+				Content:       "three",
+			},
+		},
+	}
+
+	got := initial.ApplyConsoleStreamEvents(events, 2)
+	want := []TranscriptEntry{
+		{Speaker: "system", Kind: "seed", Text: "two"},
+		{Speaker: "assistant", Kind: "reply", Text: "[corr-cap] three", CorrelationID: "corr-cap"},
+	}
+	if !reflect.DeepEqual(got.Transcript, want) {
+		t.Fatalf("got.Transcript = %#v, want %#v", got.Transcript, want)
+	}
+}
+
 func transcriptTexts(entries []TranscriptEntry) []string {
 	texts := make([]string, 0, len(entries))
 	for _, entry := range entries {

@@ -149,9 +149,10 @@ func MapConsoleStreamEventToTranscriptEntry(event ConsoleStreamEvent) (Transcrip
 		}
 
 		return TranscriptEntry{
-			Speaker: payloadSpeaker(kind),
-			Kind:    kind,
-			Text:    text,
+			Speaker:       payloadSpeaker(kind),
+			Kind:          kind,
+			Text:          text,
+			CorrelationID: strings.TrimSpace(event.Payload.CorrelationID),
 		}, true
 	}
 

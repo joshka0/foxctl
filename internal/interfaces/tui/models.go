@@ -59,9 +59,10 @@ type AssistantSummary struct {
 }
 
 type TranscriptEntry struct {
-	Speaker string
-	Kind    string
-	Text    string
+	Speaker       string
+	Kind          string
+	Text          string
+	CorrelationID string
 }
 
 type WorkerSummary struct {
