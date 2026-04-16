@@ -476,6 +476,41 @@ func paneNames(cancelEnabled bool) string {
 	return text + " | q/Esc/Ctrl+C: quit"
 }
 
+const (
+	footerTargetMaxRunes    = 20
+	footerTargetPrefixRunes = 8
+	footerTargetSuffixRunes = 6
+)
+
+func compactFooterTarget(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+
+	runes := []rune(target)
+	if len(runes) <= footerTargetMaxRunes {
+		return target
+	}
+	if len(runes) <= footerTargetPrefixRunes+footerTargetSuffixRunes {
+		return target
+	}
+
+	return string(runes[:footerTargetPrefixRunes]) + "..." + string(runes[len(runes)-footerTargetSuffixRunes:])
+}
+
+func footerTargetText(cancelEnabled bool, inFlight string) string {
+	if !cancelEnabled {
+		return ""
+	}
+
+	target := compactFooterTarget(inFlight)
+	if target == "" {
+		return "cancel target: broad"
+	}
+	return "cancel target: " + target
+}
+
 templ TopBar(state ShellState) {
 	<div class="flex justify-between border-single p-1 shrink-0">
 		<div class="flex gap-1">
@@ -596,14 +631,19 @@ templ RightRail(state ShellState, railActive bool, workersActive bool) {
 	</div>
 }
 
-templ Footer(cancelEnabled bool) {
+templ Footer(cancelEnabled bool, inFlight string) {
 	<div class="border-single p-1 shrink-0">
-		<span class="font-dim">{paneNames(cancelEnabled)}</span>
+		<div class="flex justify-between gap-1">
+			<span class="font-dim">{paneNames(cancelEnabled)}</span>
+			if cancelEnabled {
+				<span class="font-dim">{footerTargetText(cancelEnabled, inFlight)}</span>
+			}
+		</div>
 	</div>
 }
 
 templ (s *Shell) Render() {
-	<div class="flex-col h-full w-full" deps={s.state, s.transcriptFocus, s.composerFocus, s.railFocus, s.workersFocus}>
+	<div class="flex-col h-full w-full" deps={s.state, s.transcriptFocus, s.composerFocus, s.railFocus, s.workersFocus, s.inFlight}>
 		@TopBar(s.state.Get())
 		<div class="flex gap-1 grow p-1">
 			<div class="flex-col gap-1 grow">
@@ -612,6 +652,6 @@ templ (s *Shell) Render() {
 			</div>
 			@RightRail(s.state.Get(), s.isFocused(FocusRail), s.isFocused(FocusWorkers))
 		</div>
-		@Footer(s.enqueueCancel != nil)
+		@Footer(s.enqueueCancel != nil, s.inFlight.Get())
 	</div>
 }

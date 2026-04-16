@@ -34,6 +34,12 @@ type Shell struct {
 	inFlight        *tui.State[string]
 }
 
+const (
+	footerTargetMaxRunes    = 20
+	footerTargetPrefixRunes = 8
+	footerTargetSuffixRunes = 6
+)
+
 func NewShell(initial ShellState) *Shell {
 	return NewShellWithRuntime(initial, nil, nil, nil, defaultTranscriptLimit, defaultComposerAskEnqueueTimeout)
 }
@@ -478,6 +484,35 @@ func paneNames(cancelEnabled bool) string {
 		text += " | Ctrl+X: cancel"
 	}
 	return text + " | q/Esc/Ctrl+C: quit"
+}
+
+func compactFooterTarget(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+
+	runes := []rune(target)
+	if len(runes) <= footerTargetMaxRunes {
+		return target
+	}
+	if len(runes) <= footerTargetPrefixRunes+footerTargetSuffixRunes {
+		return target
+	}
+
+	return string(runes[:footerTargetPrefixRunes]) + "..." + string(runes[len(runes)-footerTargetSuffixRunes:])
+}
+
+func footerTargetText(cancelEnabled bool, inFlight string) string {
+	if !cancelEnabled {
+		return ""
+	}
+
+	target := compactFooterTarget(inFlight)
+	if target == "" {
+		return "cancel target: broad"
+	}
+	return "cancel target: " + target
 }
 
 type TopBarView struct {
@@ -1429,7 +1464,7 @@ var _ tui.AppUnbinder = (*FooterView)(nil)
 
 var _ tui.PropsUpdater = (*FooterView)(nil)
 
-func Footer(cancelEnabled bool) *FooterView {
+func Footer(cancelEnabled bool, inFlight string) *FooterView {
 	var view FooterView
 	var watchers []tui.Watcher
 
@@ -1439,9 +1474,22 @@ func Footer(cancelEnabled bool) *FooterView {
 		tui.WithFlexShrink(0),
 	)
 	__tui_1 := tui.New(
+		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
+		tui.WithJustify(tui.JustifySpaceBetween),
+		tui.WithGap(1),
+	)
+	__tui_2 := tui.New(
 		tui.WithText(paneNames(cancelEnabled)),
 		tui.WithTextStyle(tui.NewStyle().Dim()),
 	)
+	__tui_1.AddChild(__tui_2)
+	if cancelEnabled {
+		__tui_3 := tui.New(
+			tui.WithText(footerTargetText(cancelEnabled, inFlight)),
+			tui.WithTextStyle(tui.NewStyle().Dim()),
+		)
+		__tui_1.AddChild(__tui_3)
+	}
 	__tui_0.AddChild(__tui_1)
 
 	__bindApp := func(app *tui.App) {
@@ -1486,7 +1534,7 @@ func (s *Shell) Render(app *tui.App) *tui.Element {
 	__tui_6 := RightRail(s.state.Get(), s.isFocused(FocusRail), s.isFocused(FocusWorkers))
 	__tui_2.AddChild(__tui_6.Root)
 	__tui_0.AddChild(__tui_2)
-	__tui_7 := Footer(s.enqueueCancel != nil)
+	__tui_7 := Footer(s.enqueueCancel != nil, s.inFlight.Get())
 	__tui_0.AddChild(__tui_7.Root)
 
 	return __tui_0
