@@ -30,6 +30,7 @@ func newEvolveCommand() *cobra.Command {
 	cmd.AddCommand(
 		newEvolveInitCommand(),
 		newEvolveNewCommand(),
+		newEvolveRunCommand(),
 		newEvolveStatusCommand(),
 		newEvolveTreeCommand(),
 	)
