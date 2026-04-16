@@ -6071,6 +6071,21 @@ func TestRunRoomEpicAndStoryUpdate(t *testing.T) {
 	epicID, _, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
 	cmd, _ := newRoomTestCommand(ctx)
+	cmd.Flags().String("horizon", "", "")
+	cmd.Flags().StringSlice("scope", nil, "")
+	cmd.Flags().StringSlice("success", nil, "")
+	if err := cmd.Flags().Set("horizon", "Q3"); err != nil {
+		t.Fatalf("Set horizon: %v", err)
+	}
+	if err := cmd.Flags().Set("scope", "runtime hardening"); err != nil {
+		t.Fatalf("Set scope runtime hardening: %v", err)
+	}
+	if err := cmd.Flags().Set("scope", "pipeline edits"); err != nil {
+		t.Fatalf("Set scope pipeline edits: %v", err)
+	}
+	if err := cmd.Flags().Set("success", "epic reaches ready phase"); err != nil {
+		t.Fatalf("Set success epic reaches ready phase: %v", err)
+	}
 	if err := runRoomEpicUpdate(cmd, workspace, "human-a", "alpha", epicID, "", "Implementation plan for the Uniwind migration."); err != nil {
 		t.Fatalf("runRoomEpicUpdate: %v", err)
 	}
@@ -6084,8 +6099,47 @@ func TestRunRoomEpicAndStoryUpdate(t *testing.T) {
 	if got := meta["outcome"]; got != "Implementation plan for the Uniwind migration." {
 		t.Fatalf("epic outcome=%v want updated outcome", got)
 	}
+	if got := meta["horizon"]; got != "Q3" {
+		t.Fatalf("epic horizon=%v want Q3", got)
+	}
+	if got := stringSliceValue(meta["scope"]); len(got) != 2 || got[0] != "runtime hardening" || got[1] != "pipeline edits" {
+		t.Fatalf("epic scope=%v want [runtime hardening pipeline edits]", got)
+	}
+	if got := stringSliceValue(meta["success"]); len(got) != 1 || got[0] != "epic reaches ready phase" {
+		t.Fatalf("epic success=%v want [epic reaches ready phase]", got)
+	}
 
 	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().Bool("clear-scope", false, "")
+	cmd.Flags().Bool("clear-success", false, "")
+	if err := cmd.Flags().Set("clear-scope", "true"); err != nil {
+		t.Fatalf("Set clear-scope: %v", err)
+	}
+	if err := cmd.Flags().Set("clear-success", "true"); err != nil {
+		t.Fatalf("Set clear-success: %v", err)
+	}
+	if err := runRoomEpicUpdate(cmd, workspace, "human-a", "alpha", epicID, "", ""); err != nil {
+		t.Fatalf("runRoomEpicUpdate clear lists: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomEpicShow(cmd, workspace, "alpha", epicID, 100); err != nil {
+		t.Fatalf("runRoomEpicShow after clear: %v", err)
+	}
+	epic = decodeRoomEnvelope(t, out)["epic"].(map[string]any)
+	meta = epic["meta"].(map[string]any)
+	if got := stringSliceValue(meta["scope"]); len(got) != 0 {
+		t.Fatalf("epic scope=%v want empty after clear", got)
+	}
+	if got := stringSliceValue(meta["success"]); len(got) != 0 {
+		t.Fatalf("epic success=%v want empty after clear", got)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().String("description", "", "")
+	if err := cmd.Flags().Set("description", "Execution plan now includes validation lanes and owner handoff."); err != nil {
+		t.Fatalf("Set story description: %v", err)
+	}
 	if err := runRoomStoryUpdate(cmd, workspace, "human-a", "alpha", storyID, "gemini-a"); err != nil {
 		t.Fatalf("runRoomStoryUpdate: %v", err)
 	}
@@ -6098,6 +6152,9 @@ func TestRunRoomEpicAndStoryUpdate(t *testing.T) {
 	storyMeta := story["meta"].(map[string]any)
 	if got := storyMeta["owner"]; got != "gemini-a" {
 		t.Fatalf("story owner=%v want gemini-a", got)
+	}
+	if got := storyMeta["description"]; got != "Execution plan now includes validation lanes and owner handoff." {
+		t.Fatalf("story description=%v want updated description", got)
 	}
 
 	cmd, _ = newRoomTestCommand(ctx)
@@ -6260,6 +6317,76 @@ func TestRunRoomMilestoneContractCanClearDependencies(t *testing.T) {
 	}
 	if got := milestone["dependency_count"]; got != float64(0) {
 		t.Fatalf("dependency_count=%v want 0", got)
+	}
+}
+
+func TestRunRoomMilestoneContractCanClearValidationLanes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ctx := context.Background()
+	workspace := t.TempDir()
+
+	_, milestoneID, _ := setupRoomAgileWorkpackFixture(t, ctx, workspace)
+
+	cmd, _ := newRoomTestCommand(ctx)
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, []string{"review", "test"}, []string{"integration"}, []string{"manual_check"}, nil, nil); err != nil {
+		t.Fatalf("runRoomMilestoneContractWithPolicy set lanes: %v", err)
+	}
+
+	cmd, out := newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow after lane set: %v", err)
+	}
+	milestone := decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	if got := milestone["validator_count"]; got != float64(2) {
+		t.Fatalf("validator_count=%v want 2", got)
+	}
+	if got := milestone["required_evidence_lane_count"]; got != float64(1) {
+		t.Fatalf("required_evidence_lane_count=%v want 1", got)
+	}
+	if got := milestone["optional_evidence_lane_count"]; got != float64(1) {
+		t.Fatalf("optional_evidence_lane_count=%v want 1", got)
+	}
+
+	cmd, _ = newRoomTestCommand(ctx)
+	cmd.Flags().Bool("clear-validators", false, "")
+	cmd.Flags().Bool("clear-required-lanes", false, "")
+	cmd.Flags().Bool("clear-optional-lanes", false, "")
+	if err := cmd.Flags().Set("clear-validators", "true"); err != nil {
+		t.Fatalf("Set clear-validators: %v", err)
+	}
+	if err := cmd.Flags().Set("clear-required-lanes", "true"); err != nil {
+		t.Fatalf("Set clear-required-lanes: %v", err)
+	}
+	if err := cmd.Flags().Set("clear-optional-lanes", "true"); err != nil {
+		t.Fatalf("Set clear-optional-lanes: %v", err)
+	}
+	if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "", nil, nil, nil, nil, nil, nil, nil, nil); err != nil {
+		t.Fatalf("runRoomMilestoneContractWithPolicy clear lanes: %v", err)
+	}
+
+	cmd, out = newRoomTestCommand(ctx)
+	if err := runRoomMilestoneShow(cmd, workspace, "alpha", milestoneID, 100); err != nil {
+		t.Fatalf("runRoomMilestoneShow after lane clear: %v", err)
+	}
+	milestone = decodeRoomEnvelope(t, out)["milestone"].(map[string]any)
+	contract := milestone["contract"].(map[string]any)
+	if got := stringSliceValue(contract["validators_expected"]); len(got) != 0 {
+		t.Fatalf("validators_expected=%v want empty", got)
+	}
+	if got := stringSliceValue(contract["required_evidence_lanes"]); len(got) != 0 {
+		t.Fatalf("required_evidence_lanes=%v want empty", got)
+	}
+	if got := stringSliceValue(contract["optional_evidence_lanes"]); len(got) != 0 {
+		t.Fatalf("optional_evidence_lanes=%v want empty", got)
+	}
+	if got := milestone["validator_count"]; got != float64(0) {
+		t.Fatalf("validator_count=%v want 0", got)
+	}
+	if got := milestone["required_evidence_lane_count"]; got != float64(0) {
+		t.Fatalf("required_evidence_lane_count=%v want 0", got)
+	}
+	if got := milestone["optional_evidence_lane_count"]; got != float64(0) {
+		t.Fatalf("optional_evidence_lane_count=%v want 0", got)
 	}
 }
 

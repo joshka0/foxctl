@@ -1177,10 +1177,15 @@ func newRoomEpicShapeCommand() *cobra.Command {
 
 func newRoomEpicUpdateCommand() *cobra.Command {
 	var (
-		workspace string
-		sender    string
-		outcome   string
-		owner     string
+		workspace    string
+		sender       string
+		outcome      string
+		owner        string
+		horizon      string
+		scope        []string
+		success      []string
+		clearScope   bool
+		clearSuccess bool
 	)
 	cmd := &cobra.Command{
 		Use:   "update <room-id> <epic-id>",
@@ -1194,6 +1199,11 @@ func newRoomEpicUpdateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&owner, "owner", "", "Updated epic owner")
 	cmd.Flags().StringVar(&outcome, "outcome", "", "Updated expected outcome")
+	cmd.Flags().StringVar(&horizon, "horizon", "", "Updated delivery horizon")
+	cmd.Flags().StringSliceVar(&scope, "scope", nil, "Updated epic scope item (repeatable)")
+	cmd.Flags().StringSliceVar(&success, "success", nil, "Updated epic success signal (repeatable)")
+	cmd.Flags().BoolVar(&clearScope, "clear-scope", false, "Clear existing epic scope before applying this update")
+	cmd.Flags().BoolVar(&clearSuccess, "clear-success", false, "Clear existing epic success signals before applying this update")
 	return cmd
 }
 
@@ -1271,19 +1281,22 @@ func newRoomMilestoneStartCommand() *cobra.Command {
 
 func newRoomMilestoneContractCommand() *cobra.Command {
 	var (
-		workspace     string
-		sender        string
-		objective     string
-		risks         []string
-		excludes      []string
-		deps          []string
-		clearDeps     bool
-		validators    []string
-		requiredLanes []string
-		optionalLanes []string
-		enforceExit   bool
-		disableExit   bool
-		exits         []string
+		workspace          string
+		sender             string
+		objective          string
+		risks              []string
+		excludes           []string
+		deps               []string
+		clearDeps          bool
+		validators         []string
+		clearValidators    bool
+		requiredLanes      []string
+		clearRequiredLanes bool
+		optionalLanes      []string
+		clearOptionalLanes bool
+		enforceExit        bool
+		disableExit        bool
+		exits              []string
 	)
 	cmd := &cobra.Command{
 		Use:   "contract <room-id> <milestone-id>",
@@ -1315,8 +1328,11 @@ func newRoomMilestoneContractCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&deps, "dependency", nil, "Milestone dependency (repeatable)")
 	cmd.Flags().BoolVar(&clearDeps, "clear-dependencies", false, "Clear existing milestone dependencies before applying this update")
 	cmd.Flags().StringSliceVar(&validators, "validator", nil, "Expected validator lane (repeatable)")
+	cmd.Flags().BoolVar(&clearValidators, "clear-validators", false, "Clear existing milestone validators before applying this update")
 	cmd.Flags().StringSliceVar(&requiredLanes, "required-lane", nil, "Required evidence lane for milestone exit (repeatable)")
+	cmd.Flags().BoolVar(&clearRequiredLanes, "clear-required-lanes", false, "Clear existing required evidence lanes before applying this update")
 	cmd.Flags().StringSliceVar(&optionalLanes, "optional-lane", nil, "Optional evidence lane worth tracking but not required for exit (repeatable)")
+	cmd.Flags().BoolVar(&clearOptionalLanes, "clear-optional-lanes", false, "Clear existing optional evidence lanes before applying this update")
 	cmd.Flags().BoolVar(&enforceExit, "enforce-exit-policy", false, "Require milestone pass review to satisfy the derived exit policy")
 	cmd.Flags().BoolVar(&disableExit, "no-enforce-exit-policy", false, "Explicitly disable milestone exit-policy enforcement")
 	cmd.Flags().StringSliceVar(&exits, "exit", nil, "Milestone exit criterion (repeatable)")
@@ -1526,11 +1542,12 @@ func newRoomStoryShowCommand() *cobra.Command {
 
 func newRoomStoryUpdateCommand() *cobra.Command {
 	var (
-		workspace string
-		sender    string
-		owner     string
-		deps      []string
-		clearDeps bool
+		workspace   string
+		sender      string
+		owner       string
+		description string
+		deps        []string
+		clearDeps   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "update <room-id> <story-id>",
@@ -1543,6 +1560,7 @@ func newRoomStoryUpdateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root override")
 	cmd.Flags().StringVar(&sender, "sender", "", "Coordinator actor or participant id (defaults to current tmux/zellij pane)")
 	cmd.Flags().StringVar(&owner, "owner", "", "Updated story owner")
+	cmd.Flags().StringVar(&description, "description", "", "Updated story description")
 	cmd.Flags().StringSliceVar(&deps, "dependency", nil, "Story dependency id (repeatable)")
 	cmd.Flags().BoolVar(&clearDeps, "clear-dependencies", false, "Clear existing story dependencies before applying this update")
 	return cmd
@@ -3994,6 +4012,8 @@ type roomEpicMeta struct {
 	Horizon           string   `json:"horizon"`
 	Scope             []string `json:"scope"`
 	Success           []string `json:"success"`
+	ClearScope        bool     `json:"-"`
+	ClearSuccess      bool     `json:"-"`
 	Template          string   `json:"template"`
 	SourceKind        string   `json:"source_kind"`
 	SourceProvider    string   `json:"source_provider"`
@@ -4038,8 +4058,11 @@ type roomMilestoneMeta struct {
 	Dependencies          []string `json:"dependencies"`
 	DependenciesSet       bool     `json:"-"`
 	ValidatorsExpected    []string `json:"validators_expected"`
+	ClearValidators       bool     `json:"-"`
 	RequiredEvidenceLanes []string `json:"required_evidence_lanes"`
+	ClearRequiredLanes    bool     `json:"-"`
 	OptionalEvidenceLanes []string `json:"optional_evidence_lanes"`
+	ClearOptionalLanes    bool     `json:"-"`
 	EnforceExitPolicy     bool     `json:"enforce_exit_policy"`
 	EnforceExitPolicySet  bool     `json:"-"`
 	ExitCriteria          []string `json:"exit_criteria"`
@@ -4319,7 +4342,7 @@ func runRoomEpicImportPlan(cmd *cobra.Command, workspace, sender, roomID, planFi
 			Kind:             agent.BoardMessageKindStoryUpdate,
 			Priority:         agent.DefaultPriority,
 			Subject:          "Story Update: " + story.StoryTitle,
-			Body:             buildRoomStoryUpdateBody("", resolvedDeps, true),
+			Body:             buildRoomStoryUpdateBody("", "", resolvedDeps, true),
 		}
 		if err := store.SendMessage(cmd.Context(), updateMsg); err != nil {
 			return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.import_plan", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -4800,9 +4823,37 @@ func runRoomEpicUpdate(cmd *cobra.Command, workspace, sender, roomID, epicID, ow
 	}
 	owner = strings.TrimSpace(owner)
 	outcome = strings.TrimSpace(outcome)
-	if owner == "" && outcome == "" {
+	horizon := ""
+	if cmd != nil && cmd.Flags() != nil && cmd.Flags().Lookup("horizon") != nil {
+		value, flagErr := cmd.Flags().GetString("horizon")
+		if flagErr != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.update", protocol.ErrorCodeEARG, flagErr.Error(), map[string]any{
+				"hint": "Pass a single --horizon value.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		horizon = strings.TrimSpace(value)
+	}
+	scope, scopeSet, clearScope, err := roomStringSlicePatchFromFlags(cmd, "scope", "clear-scope", false)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.update", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use --scope to replace epic scope items or --clear-scope to clear them.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	success, successSet, clearSuccess, err := roomStringSlicePatchFromFlags(cmd, "success", "clear-success", false)
+	if err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.update", protocol.ErrorCodeEARG, err.Error(), map[string]any{
+			"hint": "Use --success to replace epic success signals or --clear-success to clear them.",
+		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	}
+	if scopeSet && !clearScope && len(scope) == 0 {
+		scopeSet = false
+	}
+	if successSet && !clearSuccess && len(success) == 0 {
+		successSet = false
+	}
+	if owner == "" && outcome == "" && horizon == "" && !scopeSet && !successSet {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.update", protocol.ErrorCodeEARG, "at least one planning field is required", map[string]any{
-			"hint": "Pass --owner and/or --outcome.",
+			"hint": "Pass --owner, --outcome, --horizon, --scope/--clear-scope, or --success/--clear-success.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
@@ -4815,7 +4866,7 @@ func runRoomEpicUpdate(cmd *cobra.Command, workspace, sender, roomID, epicID, ow
 		Kind:             agent.BoardMessageKindEpicUpdate,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Epic Update: " + strings.TrimPrefix(strings.TrimSpace(epicMsg.Subject), "Epic: "),
-		Body:             buildRoomEpicUpdateBody(owner, outcome),
+		Body:             buildRoomEpicUpdateBody(owner, outcome, horizon, scope, scopeSet, clearScope, success, successSet, clearSuccess),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.epic.update", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -5810,6 +5861,38 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 			"hint": "Use either --dependency to replace dependency ids or --clear-dependencies to remove all dependency ids.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
+	clearValidators := false
+	clearRequiredLanes := false
+	clearOptionalLanes := false
+	if cmd != nil && cmd.Flags() != nil {
+		if cmd.Flags().Lookup("clear-validators") != nil {
+			value, flagErr := cmd.Flags().GetBool("clear-validators")
+			if flagErr != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.milestone.contract", protocol.ErrorCodeEARG, flagErr.Error(), map[string]any{
+					"hint": "Pass --clear-validators without an extra value.",
+				}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			clearValidators = value
+		}
+		if cmd.Flags().Lookup("clear-required-lanes") != nil {
+			value, flagErr := cmd.Flags().GetBool("clear-required-lanes")
+			if flagErr != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.milestone.contract", protocol.ErrorCodeEARG, flagErr.Error(), map[string]any{
+					"hint": "Pass --clear-required-lanes without an extra value.",
+				}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			clearRequiredLanes = value
+		}
+		if cmd.Flags().Lookup("clear-optional-lanes") != nil {
+			value, flagErr := cmd.Flags().GetBool("clear-optional-lanes")
+			if flagErr != nil {
+				return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.milestone.contract", protocol.ErrorCodeEARG, flagErr.Error(), map[string]any{
+					"hint": "Pass --clear-optional-lanes without an extra value.",
+				}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+			}
+			clearOptionalLanes = value
+		}
+	}
 	patch, err := normalizeRoomMilestoneContract(roomMilestoneMeta{
 		Objective:             objective,
 		Risks:                 risks,
@@ -5817,8 +5900,11 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 		Dependencies:          dependencies,
 		DependenciesSet:       dependenciesSet,
 		ValidatorsExpected:    validatorsExpected,
+		ClearValidators:       clearValidators,
 		RequiredEvidenceLanes: requiredEvidenceLanes,
+		ClearRequiredLanes:    clearRequiredLanes,
 		OptionalEvidenceLanes: optionalEvidenceLanes,
+		ClearOptionalLanes:    clearOptionalLanes,
 		EnforceExitPolicy:     enforceExitPolicy != nil && *enforceExitPolicy,
 		EnforceExitPolicySet:  enforceExitPolicy != nil,
 		ExitCriteria:          exitCriteria,
@@ -5828,9 +5914,9 @@ func runRoomMilestoneContractWithPolicy(cmd *cobra.Command, workspace, sender, r
 			"hint": "Use supported validator values: review, test, integration, user_test, manual_check, audit.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	if patch.Objective == "" && len(patch.Risks) == 0 && len(patch.Exclusions) == 0 && !patch.DependenciesSet && len(patch.ValidatorsExpected) == 0 && len(patch.RequiredEvidenceLanes) == 0 && len(patch.OptionalEvidenceLanes) == 0 && !patch.EnforceExitPolicySet && len(patch.ExitCriteria) == 0 {
+	if patch.Objective == "" && len(patch.Risks) == 0 && len(patch.Exclusions) == 0 && !patch.DependenciesSet && len(patch.ValidatorsExpected) == 0 && !patch.ClearValidators && len(patch.RequiredEvidenceLanes) == 0 && !patch.ClearRequiredLanes && len(patch.OptionalEvidenceLanes) == 0 && !patch.ClearOptionalLanes && !patch.EnforceExitPolicySet && len(patch.ExitCriteria) == 0 {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.milestone.contract", protocol.ErrorCodeEARG, "at least one contract field is required", map[string]any{
-			"hint": "Pass --objective, --risk, --exclude, --dependency, --clear-dependencies, --validator, --required-lane, --optional-lane, or --exit.",
+			"hint": "Pass --objective, --risk, --exclude, --dependency, --clear-dependencies, --validator/--clear-validators, --required-lane/--clear-required-lanes, --optional-lane/--clear-optional-lanes, or --exit.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 
@@ -6277,15 +6363,25 @@ func runRoomStoryUpdate(cmd *cobra.Command, workspace, sender, roomID, storyID, 
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	owner = strings.TrimSpace(owner)
+	description := ""
+	if cmd != nil && cmd.Flags() != nil && cmd.Flags().Lookup("description") != nil {
+		value, flagErr := cmd.Flags().GetString("description")
+		if flagErr != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeEARG, flagErr.Error(), map[string]any{
+				"hint": "Pass a single --description value.",
+			}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		}
+		description = strings.TrimSpace(value)
+	}
 	dependencies, dependenciesSet, err := roomDependencyPatchFromFlags(cmd, nil)
 	if err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeEARG, err.Error(), map[string]any{
 			"hint": "Use either --dependency to replace dependency ids or --clear-dependencies to remove all dependency ids.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
-	if owner == "" && !dependenciesSet {
-		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeEARG, "owner or dependency is required", map[string]any{
-			"hint": "Pass --owner, --dependency, or --clear-dependencies.",
+	if owner == "" && description == "" && !dependenciesSet {
+		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeEARG, "owner, description, or dependency is required", map[string]any{
+			"hint": "Pass --owner, --description, --dependency, or --clear-dependencies.",
 		}, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	}
 	milestoneMsg, err := loadRoomAgileRoot(cmd.Context(), store, absWorkspace, roomID, storyMsg.RelatedMessageID, agent.BoardMessageKindMilestone)
@@ -6305,7 +6401,7 @@ func runRoomStoryUpdate(cmd *cobra.Command, workspace, sender, roomID, storyID, 
 		Kind:             agent.BoardMessageKindStoryUpdate,
 		Priority:         agent.DefaultPriority,
 		Subject:          "Story Update: " + strings.TrimPrefix(strings.TrimSpace(storyMsg.Subject), "Story: "),
-		Body:             buildRoomStoryUpdateBody(owner, dependencies, dependenciesSet),
+		Body:             buildRoomStoryUpdateBody(owner, description, dependencies, dependenciesSet),
 	}
 	if err := store.SendMessage(cmd.Context(), msg); err != nil {
 		return protocol.WriteError(cmd.OutOrStdout(), "foxctl.room.story.update", protocol.ErrorCodeERuntime, err.Error(), nil, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -6333,6 +6429,35 @@ func roomStoryDependencyFlagValues(cmd *cobra.Command) ([]string, error) {
 		return nil, fmt.Errorf("parse --dependency flags: %w", err)
 	}
 	return normalizeRoomList(values, true), nil
+}
+
+func roomStringSlicePatchFromFlags(cmd *cobra.Command, fieldFlag, clearFlag string, sortItems bool) ([]string, bool, bool, error) {
+	if cmd == nil || cmd.Flags() == nil {
+		return nil, false, false, nil
+	}
+	flags := cmd.Flags()
+
+	clear := false
+	if strings.TrimSpace(clearFlag) != "" && flags.Lookup(clearFlag) != nil {
+		value, err := flags.GetBool(clearFlag)
+		if err != nil {
+			return nil, false, false, fmt.Errorf("parse --%s flag: %w", clearFlag, err)
+		}
+		clear = value
+	}
+
+	changed := false
+	values := []string(nil)
+	if strings.TrimSpace(fieldFlag) != "" && flags.Lookup(fieldFlag) != nil && flags.Changed(fieldFlag) {
+		raw, err := flags.GetStringSlice(fieldFlag)
+		if err != nil {
+			return nil, false, false, fmt.Errorf("parse --%s flags: %w", fieldFlag, err)
+		}
+		values = normalizeRoomList(raw, sortItems)
+		changed = true
+	}
+
+	return values, changed || clear, clear, nil
 }
 
 func roomDependencyPatchFromFlags(cmd *cobra.Command, fallback []string) ([]string, bool, error) {
@@ -7711,7 +7836,7 @@ func buildRoomEpicBody(title, goal, owner, outcome, horizon string, scope, succe
 	return strings.TrimSpace(b.String())
 }
 
-func buildRoomEpicUpdateBody(owner, outcome string) string {
+func buildRoomEpicUpdateBody(owner, outcome, horizon string, scope []string, scopeSet, clearScope bool, success []string, successSet, clearSuccess bool) string {
 	var b strings.Builder
 	if strings.TrimSpace(owner) != "" {
 		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
@@ -7719,6 +7844,17 @@ func buildRoomEpicUpdateBody(owner, outcome string) string {
 	if strings.TrimSpace(outcome) != "" {
 		fmt.Fprintf(&b, "Outcome: %s\n", strings.TrimSpace(outcome))
 	}
+	if strings.TrimSpace(horizon) != "" {
+		fmt.Fprintf(&b, "Horizon: %s\n", strings.TrimSpace(horizon))
+	}
+	if clearScope {
+		fmt.Fprintf(&b, "ClearScope: true\n")
+	}
+	appendRoomSectionWithOptions(&b, "Scope", scope, scopeSet)
+	if clearSuccess {
+		fmt.Fprintf(&b, "ClearSuccess: true\n")
+	}
+	appendRoomSectionWithOptions(&b, "Success", success, successSet)
 	return strings.TrimSpace(b.String())
 }
 
@@ -7791,6 +7927,10 @@ func parseRoomEpicBody(body string) roomEpicMeta {
 			meta.SourceContentHash = value
 		case "DefaultSmallWork":
 			meta.DefaultSmallWork = strings.EqualFold(value, "true")
+		case "ClearScope":
+			meta.ClearScope = strings.EqualFold(value, "true")
+		case "ClearSuccess":
+			meta.ClearSuccess = strings.EqualFold(value, "true")
 		}
 	}
 	return meta
@@ -8015,9 +8155,18 @@ func buildRoomMilestoneContractPatchBody(patch roomMilestoneMeta) string {
 	appendRoomSection(&b, "Risks", patch.Risks)
 	appendRoomSection(&b, "Exclusions", patch.Exclusions)
 	appendRoomSectionWithOptions(&b, "Dependencies", patch.Dependencies, patch.DependenciesSet)
-	appendRoomSection(&b, "ValidatorsExpected", patch.ValidatorsExpected)
-	appendRoomSection(&b, "RequiredEvidenceLanes", patch.RequiredEvidenceLanes)
-	appendRoomSection(&b, "OptionalEvidenceLanes", patch.OptionalEvidenceLanes)
+	if patch.ClearValidators {
+		fmt.Fprintf(&b, "ClearValidatorsExpected: true\n")
+	}
+	appendRoomSectionWithOptions(&b, "ValidatorsExpected", patch.ValidatorsExpected, patch.ClearValidators)
+	if patch.ClearRequiredLanes {
+		fmt.Fprintf(&b, "ClearRequiredEvidenceLanes: true\n")
+	}
+	appendRoomSectionWithOptions(&b, "RequiredEvidenceLanes", patch.RequiredEvidenceLanes, patch.ClearRequiredLanes)
+	if patch.ClearOptionalLanes {
+		fmt.Fprintf(&b, "ClearOptionalEvidenceLanes: true\n")
+	}
+	appendRoomSectionWithOptions(&b, "OptionalEvidenceLanes", patch.OptionalEvidenceLanes, patch.ClearOptionalLanes)
 	if patch.EnforceExitPolicySet {
 		fmt.Fprintf(&b, "EnforceExitPolicy: %t\n", patch.EnforceExitPolicy)
 	}
@@ -8108,6 +8257,12 @@ func parseRoomMilestoneBody(body string) roomMilestoneMeta {
 		case "EnforceExitPolicy":
 			meta.EnforceExitPolicy = strings.EqualFold(value, "true")
 			meta.EnforceExitPolicySet = true
+		case "ClearValidatorsExpected":
+			meta.ClearValidators = strings.EqualFold(value, "true")
+		case "ClearRequiredEvidenceLanes":
+			meta.ClearRequiredLanes = strings.EqualFold(value, "true")
+		case "ClearOptionalEvidenceLanes":
+			meta.ClearOptionalLanes = strings.EqualFold(value, "true")
 		}
 	}
 	return meta
@@ -8267,10 +8422,13 @@ func buildRoomStoryBody(owner, description string, dependencySets ...[]string) s
 	return strings.TrimSpace(b.String())
 }
 
-func buildRoomStoryUpdateBody(owner string, dependencies []string, dependenciesSet bool) string {
+func buildRoomStoryUpdateBody(owner, description string, dependencies []string, dependenciesSet bool) string {
 	var b strings.Builder
 	if strings.TrimSpace(owner) != "" {
 		fmt.Fprintf(&b, "Owner: %s\n", strings.TrimSpace(owner))
+	}
+	if strings.TrimSpace(description) != "" {
+		fmt.Fprintf(&b, "Description: %s\n", strings.TrimSpace(description))
 	}
 	appendRoomSectionWithOptions(&b, "Dependencies", normalizeRoomList(dependencies, true), dependenciesSet)
 	return strings.TrimSpace(b.String())
@@ -8328,8 +8486,14 @@ func mergeRoomEpicMeta(base, patch roomEpicMeta) roomEpicMeta {
 	if strings.TrimSpace(patch.Horizon) != "" {
 		base.Horizon = strings.TrimSpace(patch.Horizon)
 	}
+	if patch.ClearScope {
+		base.Scope = nil
+	}
 	if len(patch.Scope) > 0 {
 		base.Scope = append([]string(nil), patch.Scope...)
+	}
+	if patch.ClearSuccess {
+		base.Success = nil
 	}
 	if len(patch.Success) > 0 {
 		base.Success = append([]string(nil), patch.Success...)
@@ -8622,11 +8786,20 @@ func mergeRoomMilestoneMeta(base roomMilestoneMeta, patch roomMilestoneMeta) roo
 	} else if len(patch.Dependencies) > 0 {
 		base.Dependencies = mergeRoomList(base.Dependencies, patch.Dependencies, true)
 	}
+	if patch.ClearValidators {
+		base.ValidatorsExpected = nil
+	}
 	if len(patch.ValidatorsExpected) > 0 {
 		base.ValidatorsExpected = mergeRoomList(base.ValidatorsExpected, patch.ValidatorsExpected, true)
 	}
+	if patch.ClearRequiredLanes {
+		base.RequiredEvidenceLanes = nil
+	}
 	if len(patch.RequiredEvidenceLanes) > 0 {
 		base.RequiredEvidenceLanes = mergeRoomList(base.RequiredEvidenceLanes, patch.RequiredEvidenceLanes, true)
+	}
+	if patch.ClearOptionalLanes {
+		base.OptionalEvidenceLanes = nil
 	}
 	if len(patch.OptionalEvidenceLanes) > 0 {
 		base.OptionalEvidenceLanes = mergeRoomList(base.OptionalEvidenceLanes, patch.OptionalEvidenceLanes, true)
