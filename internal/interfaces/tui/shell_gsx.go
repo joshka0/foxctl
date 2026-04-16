@@ -14,6 +14,8 @@ import (
 
 const defaultComposerAskEnqueueTimeout = 250 * time.Millisecond
 
+const defaultConsoleCancelEnqueueTimeout = 250 * time.Millisecond
+
 type Shell struct {
 	state           *tui.State[ShellState]
 	transcriptFocus *tui.State[bool]
@@ -23,9 +25,13 @@ type Shell struct {
 	focus           *tui.FocusGroup
 	streamUpdates   <-chan ConsoleStreamUpdate
 	askUpdates      <-chan ConsoleAskUpdate
+	cancelUpdates   <-chan ConsoleCancelUpdate
 	enqueueAsk      func(context.Context, AskConsoleSessionRequest) error
+	enqueueCancel   func(context.Context, CancelConsoleSessionRequest) error
 	askTimeout      time.Duration
+	cancelTimeout   time.Duration
 	transcriptLimit int
+	inFlight        *tui.State[string]
 }
 
 func NewShell(initial ShellState) *Shell {
@@ -51,14 +57,42 @@ func NewShellWithRuntime(
 	transcriptLimit int,
 	askTimeout time.Duration,
 ) *Shell {
+	return NewShellWithRuntimes(
+		initial,
+		streamUpdates,
+		askUpdates,
+		enqueueAsk,
+		nil,
+		nil,
+		transcriptLimit,
+		askTimeout,
+		defaultConsoleCancelEnqueueTimeout,
+	)
+}
+
+func NewShellWithRuntimes(
+	initial ShellState,
+	streamUpdates <-chan ConsoleStreamUpdate,
+	askUpdates <-chan ConsoleAskUpdate,
+	enqueueAsk func(context.Context, AskConsoleSessionRequest) error,
+	cancelUpdates <-chan ConsoleCancelUpdate,
+	enqueueCancel func(context.Context, CancelConsoleSessionRequest) error,
+	transcriptLimit int,
+	askTimeout time.Duration,
+	cancelTimeout time.Duration,
+) *Shell {
 	if askTimeout <= 0 {
 		askTimeout = defaultComposerAskEnqueueTimeout
+	}
+	if cancelTimeout <= 0 {
+		cancelTimeout = defaultConsoleCancelEnqueueTimeout
 	}
 
 	transcriptFocus := tui.NewState(true)
 	composerFocus := tui.NewState(false)
 	railFocus := tui.NewState(false)
 	workersFocus := tui.NewState(false)
+	inFlight := tui.NewState("")
 
 	return &Shell{
 		state:           tui.NewState(initial),
@@ -69,19 +103,26 @@ func NewShellWithRuntime(
 		focus:           tui.MustNewFocusGroup(transcriptFocus, composerFocus, railFocus, workersFocus),
 		streamUpdates:   streamUpdates,
 		askUpdates:      askUpdates,
+		cancelUpdates:   cancelUpdates,
 		enqueueAsk:      enqueueAsk,
+		enqueueCancel:   enqueueCancel,
 		askTimeout:      askTimeout,
+		cancelTimeout:   cancelTimeout,
 		transcriptLimit: transcriptLimit,
+		inFlight:        inFlight,
 	}
 }
 
 func (s *Shell) Watchers() []tui.Watcher {
-	watchers := make([]tui.Watcher, 0, 2)
+	watchers := make([]tui.Watcher, 0, 3)
 	if s.streamUpdates != nil {
 		watchers = append(watchers, tui.Watch(s.streamUpdates, s.handleConsoleStreamUpdate))
 	}
 	if s.askUpdates != nil {
 		watchers = append(watchers, tui.Watch(s.askUpdates, s.handleConsoleAskUpdate))
+	}
+	if s.cancelUpdates != nil {
+		watchers = append(watchers, tui.Watch(s.cancelUpdates, s.handleConsoleCancelUpdate))
 	}
 	if len(watchers) == 0 {
 		return nil
@@ -92,10 +133,12 @@ func (s *Shell) Watchers() []tui.Watcher {
 func (s *Shell) handleConsoleStreamUpdate(update ConsoleStreamUpdate) {
 	switch update.Type {
 	case ConsoleStreamUpdateEvent:
+		s.updateInFlightFromStreamEvent(update.Event)
 		s.state.Update(func(state ShellState) ShellState {
 			return state.ApplyConsoleStreamEvent(update.Event, s.transcriptLimit)
 		})
 	case ConsoleStreamUpdateError:
+		s.inFlight.Set("")
 		msg := "console stream error"
 		if update.Err != nil {
 			msg = "console stream error: " + update.Err.Error()
@@ -106,6 +149,7 @@ func (s *Shell) handleConsoleStreamUpdate(update ConsoleStreamUpdate) {
 			Text:    msg,
 		})
 	case ConsoleStreamUpdateDone:
+		s.inFlight.Set("")
 		s.appendTranscriptEntry(TranscriptEntry{
 			Speaker: "system",
 			Kind:    "status",
@@ -117,9 +161,16 @@ func (s *Shell) handleConsoleStreamUpdate(update ConsoleStreamUpdate) {
 func (s *Shell) handleConsoleAskUpdate(update ConsoleAskUpdate) {
 	switch update.Type {
 	case ConsoleAskUpdateAccepted:
+		correlationID := ""
+		if update.Accepted != nil {
+			correlationID = strings.TrimSpace(update.Accepted.CorrelationID)
+		}
+		if correlationID != "" {
+			s.inFlight.Set(correlationID)
+		}
 		text := "ask queued"
-		if update.Accepted != nil && strings.TrimSpace(update.Accepted.CorrelationID) != "" {
-			text = "ask queued: " + strings.TrimSpace(update.Accepted.CorrelationID)
+		if correlationID != "" {
+			text = "ask queued: " + correlationID
 		}
 		s.appendTranscriptEntry(TranscriptEntry{
 			Speaker: "system",
@@ -130,6 +181,47 @@ func (s *Shell) handleConsoleAskUpdate(update ConsoleAskUpdate) {
 		text := "ask failed"
 		if update.Failed != nil && update.Failed.Err != nil {
 			text = "ask failed: " + update.Failed.Err.Error()
+		}
+		s.appendTranscriptEntry(TranscriptEntry{
+			Speaker: "system",
+			Kind:    "error",
+			Text:    text,
+		})
+	}
+}
+
+func (s *Shell) handleConsoleCancelUpdate(update ConsoleCancelUpdate) {
+	switch update.Type {
+	case ConsoleCancelUpdateAccepted:
+		s.inFlight.Set("")
+		correlationID := ""
+		if update.Accepted != nil {
+			correlationID = strings.TrimSpace(update.Accepted.CorrelationID)
+		}
+		text := "cancel queued"
+		if correlationID != "" {
+			text = "cancel queued: " + correlationID
+		}
+		s.appendTranscriptEntry(TranscriptEntry{
+			Speaker: "system",
+			Kind:    "status",
+			Text:    text,
+		})
+	case ConsoleCancelUpdateError:
+		text := "cancel failed"
+		correlationID := ""
+		if update.Failed != nil {
+			correlationID = strings.TrimSpace(update.Failed.CorrelationID)
+		}
+		if correlationID != "" {
+			text = "cancel failed: " + correlationID
+		}
+		if update.Failed != nil && update.Failed.Err != nil {
+			if correlationID != "" {
+				text = text + ": " + update.Failed.Err.Error()
+			} else {
+				text = "cancel failed: " + update.Failed.Err.Error()
+			}
 		}
 		s.appendTranscriptEntry(TranscriptEntry{
 			Speaker: "system",
@@ -177,6 +269,11 @@ func (s *Shell) KeyMap() tui.KeyMap {
 			s.submitComposer()
 		}),
 	)
+	if s.enqueueCancel != nil {
+		keyMap = append(keyMap, tui.On(tui.Rune('x').Ctrl(), func(ke tui.KeyEvent) {
+			s.submitCancel()
+		}))
+	}
 	return keyMap
 }
 
@@ -270,6 +367,62 @@ func (s *Shell) submitComposer() {
 	}
 }
 
+func (s *Shell) submitCancel() {
+	if s.enqueueCancel == nil {
+		return
+	}
+
+	correlationID := strings.TrimSpace(s.inFlight.Get())
+	request := CancelConsoleSessionRequest{CorrelationID: correlationID}
+
+	status := "cancel requested: broad"
+	if correlationID != "" {
+		status = "cancel requested: " + correlationID
+	}
+	s.appendTranscriptEntry(TranscriptEntry{
+		Speaker: "system",
+		Kind:    "status",
+		Text:    status,
+	})
+
+	enqueueCtx, cancel := context.WithTimeout(context.Background(), s.cancelTimeout)
+	defer cancel()
+	if err := s.enqueueCancel(enqueueCtx, request); err != nil {
+		s.appendTranscriptEntry(TranscriptEntry{
+			Speaker: "system",
+			Kind:    "error",
+			Text:    "cancel enqueue failed: " + err.Error(),
+		})
+	}
+}
+
+func streamEventCorrelationID(event ConsoleStreamEvent) string {
+	if event.Payload == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Payload.CorrelationID)
+}
+
+func (s *Shell) updateInFlightFromStreamEvent(event ConsoleStreamEvent) {
+	if event.Payload == nil {
+		return
+	}
+
+	correlationID := streamEventCorrelationID(event)
+	if correlationID == "" {
+		return
+	}
+
+	switch normalizeStreamType(event.Payload.Type) {
+	case "reply":
+		if s.inFlight.Get() == correlationID {
+			s.inFlight.Set("")
+		}
+	case "ask", "event", "cmd":
+		s.inFlight.Set(correlationID)
+	}
+}
+
 func focusClass(active bool) string {
 	if active {
 		return "border-cyan"
@@ -298,8 +451,12 @@ func composerText(text string) string {
 	return text
 }
 
-func paneNames() string {
-	return "Tab: focus | Shift+Tab: reverse | Ctrl+M/Y/W/B: rails | q/Esc/Ctrl+C: quit"
+func paneNames(cancelEnabled bool) string {
+	text := "Tab: focus | Shift+Tab: reverse | Ctrl+M/Y/W/B: rails"
+	if cancelEnabled {
+		text += " | Ctrl+X: cancel"
+	}
+	return text + " | q/Esc/Ctrl+C: quit"
 }
 
 type TopBarView struct {
@@ -1251,7 +1408,7 @@ var _ tui.AppUnbinder = (*FooterView)(nil)
 
 var _ tui.PropsUpdater = (*FooterView)(nil)
 
-func Footer() *FooterView {
+func Footer(cancelEnabled bool) *FooterView {
 	var view FooterView
 	var watchers []tui.Watcher
 
@@ -1261,7 +1418,7 @@ func Footer() *FooterView {
 		tui.WithFlexShrink(0),
 	)
 	__tui_1 := tui.New(
-		tui.WithText(paneNames()),
+		tui.WithText(paneNames(cancelEnabled)),
 		tui.WithTextStyle(tui.NewStyle().Dim()),
 	)
 	__tui_0.AddChild(__tui_1)
@@ -1308,7 +1465,7 @@ func (s *Shell) Render(app *tui.App) *tui.Element {
 	__tui_6 := RightRail(s.state.Get(), s.isFocused(FocusRail), s.isFocused(FocusWorkers))
 	__tui_2.AddChild(__tui_6.Root)
 	__tui_0.AddChild(__tui_2)
-	__tui_7 := Footer()
+	__tui_7 := Footer(s.enqueueCancel != nil)
 	__tui_0.AddChild(__tui_7.Root)
 
 	return __tui_0
@@ -1321,6 +1478,7 @@ func (s *Shell) UpdateProps(fresh tui.Component) {
 	}
 	s.focus = f.focus
 	s.askTimeout = f.askTimeout
+	s.cancelTimeout = f.cancelTimeout
 	s.transcriptLimit = f.transcriptLimit
 }
 
@@ -1341,6 +1499,9 @@ func (s *Shell) BindApp(app *tui.App) {
 	}
 	if s.workersFocus != nil {
 		s.workersFocus.BindApp(app)
+	}
+	if s.inFlight != nil {
+		s.inFlight.BindApp(app)
 	}
 }
 

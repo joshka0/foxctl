@@ -36,7 +36,7 @@ func Run(ctx context.Context, opts Options) error {
 }
 
 // NewApp builds the shell app without starting the terminal event loop.
-// The returned cleanup must be called to release stream pump resources.
+// The returned cleanup must be called to release optional stream/ask/cancel runtimes.
 func NewApp(ctx context.Context, opts Options) (*gotui.App, func(), error) {
 	initialState, err := LoadInitialShellState(ctx, opts)
 	if err != nil {
@@ -60,21 +60,25 @@ func NewApp(ctx context.Context, opts Options) (*gotui.App, func(), error) {
 }
 
 type shellRuntime struct {
-	shell             *Shell
-	consoleStreamPump *ConsoleStreamPump
-	consoleAskRuntime *ConsoleAskRuntime
-	close             func()
+	shell                *Shell
+	consoleStreamPump    *ConsoleStreamPump
+	consoleAskRuntime    *ConsoleAskRuntime
+	consoleCancelRuntime *ConsoleCancelRuntime
+	close                func()
 }
 
 func newShellRuntime(ctx context.Context, opts Options, initialState ShellState) (*shellRuntime, error) {
 	runtime := &shellRuntime{
-		shell: NewShellWithRuntime(
+		shell: NewShellWithRuntimes(
 			initialState,
+			nil,
+			nil,
 			nil,
 			nil,
 			nil,
 			opts.TranscriptLimit,
 			defaultComposerAskEnqueueTimeout,
+			defaultConsoleCancelEnqueueTimeout,
 		),
 		close: func() {},
 	}
@@ -114,17 +118,35 @@ func newShellRuntime(ctx context.Context, opts Options, initialState ShellState)
 		return nil, err
 	}
 
+	canceler, err := NewHTTPConsoleCanceler(adapter, opts.ConsoleSessionID)
+	if err != nil {
+		askRuntime.Close()
+		pump.Close()
+		return nil, err
+	}
+	cancelRuntime, err := NewConsoleCancelRuntime(ctx, canceler, 0, 0)
+	if err != nil {
+		askRuntime.Close()
+		pump.Close()
+		return nil, err
+	}
+
 	runtime.consoleStreamPump = pump
 	runtime.consoleAskRuntime = askRuntime
-	runtime.shell = NewShellWithRuntime(
+	runtime.consoleCancelRuntime = cancelRuntime
+	runtime.shell = NewShellWithRuntimes(
 		initialState,
 		pump.Updates(),
 		askRuntime.Updates(),
 		askRuntime.Enqueue,
+		cancelRuntime.Updates(),
+		cancelRuntime.Enqueue,
 		opts.TranscriptLimit,
 		defaultComposerAskEnqueueTimeout,
+		defaultConsoleCancelEnqueueTimeout,
 	)
 	runtime.close = func() {
+		cancelRuntime.Close()
 		askRuntime.Close()
 		pump.Close()
 	}

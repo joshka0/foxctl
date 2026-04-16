@@ -58,11 +58,14 @@ func TestNewShellRuntimeWithConsoleStreamConfig(t *testing.T) {
 	if runtime.shell == nil {
 		t.Fatal("runtime.shell is nil")
 	}
-	if got := len(runtime.shell.Watchers()); got != 2 {
-		t.Fatalf("len(runtime.shell.Watchers()) = %d, want 2", got)
+	if got := len(runtime.shell.Watchers()); got != 3 {
+		t.Fatalf("len(runtime.shell.Watchers()) = %d, want 3", got)
 	}
 	if runtime.consoleAskRuntime == nil {
 		t.Fatal("runtime.consoleAskRuntime is nil")
+	}
+	if runtime.consoleCancelRuntime == nil {
+		t.Fatal("runtime.consoleCancelRuntime is nil")
 	}
 	if runtime.consoleStreamPump == nil {
 		t.Fatal("runtime.consoleStreamPump is nil")
@@ -72,5 +75,9 @@ func TestNewShellRuntimeWithConsoleStreamConfig(t *testing.T) {
 	err = runtime.consoleAskRuntime.Enqueue(context.Background(), AskConsoleSessionRequest{Content: "hello"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("consoleAskRuntime.Enqueue after runtime.close() error = %v, want context.Canceled", err)
+	}
+	err = runtime.consoleCancelRuntime.Enqueue(context.Background(), CancelConsoleSessionRequest{CorrelationID: "corr-1"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("consoleCancelRuntime.Enqueue after runtime.close() error = %v, want context.Canceled", err)
 	}
 }

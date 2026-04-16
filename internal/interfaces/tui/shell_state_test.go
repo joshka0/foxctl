@@ -171,3 +171,272 @@ func TestShellComposerSubmitUsesBoundedEnqueueTimeout(t *testing.T) {
 		t.Fatalf("failure text = %q, want timeout message", failed.Text)
 	}
 }
+
+func TestShellCancelWithoutRuntimeIsNoOp(t *testing.T) {
+	shell := NewShell(DefaultShellState(Options{}))
+	before := shell.state.Get()
+
+	shell.submitCancel()
+
+	after := shell.state.Get()
+	if len(after.Transcript) != len(before.Transcript) {
+		t.Fatalf("len(transcript) = %d, want %d", len(after.Transcript), len(before.Transcript))
+	}
+}
+
+func TestShellCancelEnqueuesCurrentCorrelationFromAcceptedAsk(t *testing.T) {
+	queued := make(chan CancelConsoleSessionRequest, 1)
+	shell := NewShellWithRuntimes(
+		DefaultShellState(Options{}),
+		nil,
+		nil,
+		nil,
+		nil,
+		func(_ context.Context, req CancelConsoleSessionRequest) error {
+			queued <- req
+			return nil
+		},
+		0,
+		defaultComposerAskEnqueueTimeout,
+		50*time.Millisecond,
+	)
+
+	shell.handleConsoleAskUpdate(ConsoleAskUpdate{
+		Type: ConsoleAskUpdateAccepted,
+		Accepted: &ConsoleAskAccepted{
+			CorrelationID: "corr-ask-1",
+		},
+	})
+	shell.submitCancel()
+
+	select {
+	case req := <-queued:
+		if req.CorrelationID != "corr-ask-1" {
+			t.Fatalf("queued correlation_id = %q, want %q", req.CorrelationID, "corr-ask-1")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for queued cancel request")
+	}
+}
+
+func TestShellCancelBroadWhenNoCorrelation(t *testing.T) {
+	queued := make(chan CancelConsoleSessionRequest, 1)
+	shell := NewShellWithRuntimes(
+		DefaultShellState(Options{}),
+		nil,
+		nil,
+		nil,
+		nil,
+		func(_ context.Context, req CancelConsoleSessionRequest) error {
+			queued <- req
+			return nil
+		},
+		0,
+		defaultComposerAskEnqueueTimeout,
+		50*time.Millisecond,
+	)
+	before := len(shell.state.Get().Transcript)
+
+	shell.submitCancel()
+
+	select {
+	case req := <-queued:
+		if req.CorrelationID != "" {
+			t.Fatalf("queued correlation_id = %q, want empty for broad cancel", req.CorrelationID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for queued cancel request")
+	}
+
+	state := shell.state.Get()
+	if len(state.Transcript) != before+1 {
+		t.Fatalf("len(transcript) = %d, want %d", len(state.Transcript), before+1)
+	}
+	last := state.Transcript[len(state.Transcript)-1]
+	if last.Speaker != "system" || last.Kind != "status" || last.Text != "cancel requested: broad" {
+		t.Fatalf("last row = %#v, want deterministic broad cancel status row", last)
+	}
+}
+
+func TestShellCancelEnqueuesCorrelationFromStreamEvent(t *testing.T) {
+	queued := make(chan CancelConsoleSessionRequest, 1)
+	shell := NewShellWithRuntimes(
+		DefaultShellState(Options{}),
+		nil,
+		nil,
+		nil,
+		nil,
+		func(_ context.Context, req CancelConsoleSessionRequest) error {
+			queued <- req
+			return nil
+		},
+		0,
+		defaultComposerAskEnqueueTimeout,
+		50*time.Millisecond,
+	)
+
+	shell.handleConsoleStreamUpdate(ConsoleStreamUpdate{
+		Type: ConsoleStreamUpdateEvent,
+		Event: ConsoleStreamEvent{
+			Type: "event",
+			Payload: &ConsoleEventPayload{
+				Type:          "event",
+				CorrelationID: "corr-stream-1",
+				Content:       "working",
+			},
+		},
+	})
+	shell.submitCancel()
+
+	select {
+	case req := <-queued:
+		if req.CorrelationID != "corr-stream-1" {
+			t.Fatalf("queued correlation_id = %q, want %q", req.CorrelationID, "corr-stream-1")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for queued cancel request")
+	}
+}
+
+func TestShellCancelFallsBackToBroadAfterStreamDoneClearsInFlight(t *testing.T) {
+	queued := make(chan CancelConsoleSessionRequest, 1)
+	shell := NewShellWithRuntimes(
+		DefaultShellState(Options{}),
+		nil,
+		nil,
+		nil,
+		nil,
+		func(_ context.Context, req CancelConsoleSessionRequest) error {
+			queued <- req
+			return nil
+		},
+		0,
+		defaultComposerAskEnqueueTimeout,
+		50*time.Millisecond,
+	)
+
+	shell.handleConsoleStreamUpdate(ConsoleStreamUpdate{
+		Type: ConsoleStreamUpdateEvent,
+		Event: ConsoleStreamEvent{
+			Type: "event",
+			Payload: &ConsoleEventPayload{
+				Type:          "event",
+				CorrelationID: "corr-stream-2",
+				Content:       "working",
+			},
+		},
+	})
+	shell.handleConsoleStreamUpdate(ConsoleStreamUpdate{Type: ConsoleStreamUpdateDone})
+	shell.submitCancel()
+
+	select {
+	case req := <-queued:
+		if req.CorrelationID != "" {
+			t.Fatalf("queued correlation_id = %q, want empty after stream done", req.CorrelationID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for queued cancel request")
+	}
+}
+
+func TestShellCancelFallsBackToBroadAfterReplyClearsMatchingInFlight(t *testing.T) {
+	queued := make(chan CancelConsoleSessionRequest, 1)
+	shell := NewShellWithRuntimes(
+		DefaultShellState(Options{}),
+		nil,
+		nil,
+		nil,
+		nil,
+		func(_ context.Context, req CancelConsoleSessionRequest) error {
+			queued <- req
+			return nil
+		},
+		0,
+		defaultComposerAskEnqueueTimeout,
+		50*time.Millisecond,
+	)
+
+	shell.handleConsoleStreamUpdate(ConsoleStreamUpdate{
+		Type: ConsoleStreamUpdateEvent,
+		Event: ConsoleStreamEvent{
+			Type: "event",
+			Payload: &ConsoleEventPayload{
+				Type:          "event",
+				CorrelationID: "corr-stream-3",
+				Content:       "working",
+			},
+		},
+	})
+	shell.handleConsoleStreamUpdate(ConsoleStreamUpdate{
+		Type: ConsoleStreamUpdateEvent,
+		Event: ConsoleStreamEvent{
+			Type: "reply",
+			Payload: &ConsoleEventPayload{
+				Type:          "reply",
+				CorrelationID: "corr-stream-3",
+				Content:       "done",
+			},
+		},
+	})
+	shell.submitCancel()
+
+	select {
+	case req := <-queued:
+		if req.CorrelationID != "" {
+			t.Fatalf("queued correlation_id = %q, want empty after matching reply", req.CorrelationID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for queued cancel request")
+	}
+}
+
+func TestShellCancelKeepsInFlightAfterUnrelatedReply(t *testing.T) {
+	queued := make(chan CancelConsoleSessionRequest, 1)
+	shell := NewShellWithRuntimes(
+		DefaultShellState(Options{}),
+		nil,
+		nil,
+		nil,
+		nil,
+		func(_ context.Context, req CancelConsoleSessionRequest) error {
+			queued <- req
+			return nil
+		},
+		0,
+		defaultComposerAskEnqueueTimeout,
+		50*time.Millisecond,
+	)
+
+	shell.handleConsoleStreamUpdate(ConsoleStreamUpdate{
+		Type: ConsoleStreamUpdateEvent,
+		Event: ConsoleStreamEvent{
+			Type: "event",
+			Payload: &ConsoleEventPayload{
+				Type:          "event",
+				CorrelationID: "corr-stream-4",
+				Content:       "working",
+			},
+		},
+	})
+	shell.handleConsoleStreamUpdate(ConsoleStreamUpdate{
+		Type: ConsoleStreamUpdateEvent,
+		Event: ConsoleStreamEvent{
+			Type: "reply",
+			Payload: &ConsoleEventPayload{
+				Type:          "reply",
+				CorrelationID: "different-corr",
+				Content:       "done",
+			},
+		},
+	})
+	shell.submitCancel()
+
+	select {
+	case req := <-queued:
+		if req.CorrelationID != "corr-stream-4" {
+			t.Fatalf("queued correlation_id = %q, want %q", req.CorrelationID, "corr-stream-4")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for queued cancel request")
+	}
+}

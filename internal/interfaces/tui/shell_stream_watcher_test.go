@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -199,15 +200,84 @@ func TestShellWatchersApplyConsoleAskUpdates(t *testing.T) {
 	}
 }
 
+func TestShellWatchersApplyConsoleCancelUpdates(t *testing.T) {
+	initial := ShellState{
+		Transcript: []TranscriptEntry{
+			{Speaker: "seed", Kind: "seed", Text: "seed"},
+		},
+	}
+	updates := make(chan ConsoleCancelUpdate, 2)
+	shell := NewShellWithRuntimes(
+		initial,
+		nil,
+		nil,
+		nil,
+		updates,
+		func(_ context.Context, _ CancelConsoleSessionRequest) error { return nil },
+		0,
+		defaultComposerAskEnqueueTimeout,
+		defaultConsoleCancelEnqueueTimeout,
+	)
+
+	watchers := shell.Watchers()
+	if got := len(watchers); got != 1 {
+		t.Fatalf("len(shell.Watchers()) = %d, want 1", got)
+	}
+
+	eventQueue := make(chan func(), 2)
+	stopCh := make(chan struct{})
+	watchers[0].Start(eventQueue, stopCh)
+	defer close(stopCh)
+
+	updates <- ConsoleCancelUpdate{
+		Type: ConsoleCancelUpdateAccepted,
+		Accepted: &ConsoleCancelAccepted{
+			CorrelationID: "corr-42",
+		},
+	}
+	updates <- ConsoleCancelUpdate{
+		Type: ConsoleCancelUpdateError,
+		Failed: &ConsoleCancelFailed{
+			CorrelationID: "corr-77",
+			Err:           errors.New("boom"),
+		},
+	}
+
+	runWatcherHandler(t, eventQueue)
+	runWatcherHandler(t, eventQueue)
+
+	got := shell.state.Get().Transcript
+	if len(got) != 3 {
+		t.Fatalf("len(transcript) = %d, want 3", len(got))
+	}
+	if got[1].Speaker != "system" || got[1].Kind != "status" || got[1].Text != "cancel queued: corr-42" {
+		t.Fatalf("transcript[1] = %#v, want deterministic accepted cancel row", got[1])
+	}
+	if got[2].Speaker != "system" || got[2].Kind != "error" || got[2].Text != "cancel failed: corr-77: boom" {
+		t.Fatalf("transcript[2] = %#v, want deterministic failed cancel row", got[2])
+	}
+}
+
 func TestShellWatchersApplyStreamAndAskUpdates(t *testing.T) {
 	initial := ShellState{}
 	streamUpdates := make(chan ConsoleStreamUpdate, 1)
 	askUpdates := make(chan ConsoleAskUpdate, 1)
-	shell := NewShellWithRuntime(initial, streamUpdates, askUpdates, nil, 0, defaultComposerAskEnqueueTimeout)
+	cancelUpdates := make(chan ConsoleCancelUpdate, 1)
+	shell := NewShellWithRuntimes(
+		initial,
+		streamUpdates,
+		askUpdates,
+		nil,
+		cancelUpdates,
+		func(_ context.Context, _ CancelConsoleSessionRequest) error { return nil },
+		0,
+		defaultComposerAskEnqueueTimeout,
+		defaultConsoleCancelEnqueueTimeout,
+	)
 
 	watchers := shell.Watchers()
-	if got := len(watchers); got != 2 {
-		t.Fatalf("len(shell.Watchers()) = %d, want 2", got)
+	if got := len(watchers); got != 3 {
+		t.Fatalf("len(shell.Watchers()) = %d, want 3", got)
 	}
 }
 
