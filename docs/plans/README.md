@@ -14,6 +14,7 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/internal-package-topology-migration.md` — incremental `internal/*` family cleanup plan; makes the legacy runtime vs `v2` boundary explicit and sequences package-family consolidation.
 - `features/eino-go-native-runtime-plan.md` — Eino `AgentEngine` integration + Go-native `RuntimeSpawner`/reconciler; Jido optional path.
 - `tui-agent-control-plane.md`
+- `go-tui-agent-shell.md` — Go-native interactive coding shell plan with memory, continuity, and worker rails.
 - `v2-implementation-todo.md`
 - `v2-greenfield-bootstrap.md`
 - `v2-symphony-kanban-implementation.md`
