@@ -24,7 +24,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui go-tui-smoke ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -352,6 +352,57 @@ viewer:
 
 install-mail:
 	@./scripts/install-mail.sh
+
+# Go TUI targets
+GO_TUI_API_PORT ?= 8090
+GO_TUI_API_URL ?= http://127.0.0.1:$(GO_TUI_API_PORT)
+GO_TUI_WEB_LOG ?= /tmp/foxctl-go-tui-web.log
+GO_TUI_WORKSPACE ?= $(CURDIR)
+GO_TUI_PROFILE ?= explorer
+GO_TUI_SESSION_ID ?=
+GO_TUI_SMOKE_ASK ?= ping from make go-tui-smoke
+GO_TUI_SMOKE_TIMEOUT ?= 3s
+
+go-tui-build:
+	@mkdir -p bin
+	@$(GO_CMD) build -trimpath -o bin/foxctl-tui ./cmd/foxctl_tui
+	@echo "Built bin/foxctl-tui"
+
+go-tui-spawn: build go-tui-build
+	@set -euo pipefail; \
+	echo "Ensuring foxctl web API at $(GO_TUI_API_URL)..."; \
+	if ! curl -sf "$(GO_TUI_API_URL)/api/health" >/dev/null 2>&1; then \
+		echo "Starting web API on :$(GO_TUI_API_PORT) (logs: $(GO_TUI_WEB_LOG))"; \
+		FOXCTL_DB_DRIVER=$${FOXCTL_DB_DRIVER:-sqlite} FOXCTL_V2_EVENTS_DB_DRIVER=$${FOXCTL_V2_EVENTS_DB_DRIVER:-sqlite} ./bin/foxctl web serve --dev-cors --port $(GO_TUI_API_PORT) > "$(GO_TUI_WEB_LOG)" 2>&1 & \
+		server_pid=$$!; \
+		trap 'kill '"$$server_pid"' 2>/dev/null || true' EXIT; \
+		for _ in $$(seq 1 40); do \
+			curl -sf "$(GO_TUI_API_URL)/api/health" >/dev/null 2>&1 && break; \
+			sleep 0.25; \
+		done; \
+		curl -sf "$(GO_TUI_API_URL)/api/health" >/dev/null || (echo "API health check failed; tailing $(GO_TUI_WEB_LOG)"; tail -n 120 "$(GO_TUI_WEB_LOG)"; exit 1); \
+	else \
+		server_pid=""; \
+		trap ':' EXIT; \
+	fi; \
+	session_id="$(GO_TUI_SESSION_ID)"; \
+	if [ -z "$$session_id" ]; then \
+		echo "Creating console session for $(GO_TUI_WORKSPACE)..."; \
+		session_json="$$(python3 -c 'import json,sys; print(json.dumps({"workspace": sys.argv[1], "profile": sys.argv[2]}))' "$(GO_TUI_WORKSPACE)" "$(GO_TUI_PROFILE)")"; \
+		session_id="$$(curl -sf -X POST "$(GO_TUI_API_URL)/api/console/sessions" -H 'Content-Type: application/json' -d "$$session_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["id"])')"; \
+	fi; \
+	echo "Launching Go TUI attached to console session $$session_id"; \
+	./bin/foxctl-tui --api-base-url "$(GO_TUI_API_URL)" --console-session-id "$$session_id" --workspace "$(GO_TUI_WORKSPACE)"
+
+go-tui: go-tui-spawn
+
+go-tui-smoke: build go-tui-build
+	@set -euo pipefail; \
+	if [ -z "$(GO_TUI_SESSION_ID)" ]; then \
+		echo "GO_TUI_SESSION_ID is required for go-tui-smoke. Use make go-tui-spawn to create and attach a session."; \
+		exit 2; \
+	fi; \
+	./bin/foxctl-tui --smoke-console --api-base-url "$(GO_TUI_API_URL)" --console-session-id "$(GO_TUI_SESSION_ID)" --smoke-ask "$(GO_TUI_SMOKE_ASK)" --smoke-cancel --smoke-timeout "$(GO_TUI_SMOKE_TIMEOUT)"
 
 # Web UI targets
 web-templ:
