@@ -81,3 +81,40 @@ func DefaultShellState(opts Options) ShellState {
 		},
 	}
 }
+
+// ApplyConsoleStreamEvent maps one console stream event into transcript state.
+func (state ShellState) ApplyConsoleStreamEvent(event ConsoleStreamEvent, transcriptLimit int) ShellState {
+	return state.ApplyConsoleStreamEvents([]ConsoleStreamEvent{event}, transcriptLimit)
+}
+
+// ApplyConsoleStreamEvents maps a batch of console stream events into transcript state.
+func (state ShellState) ApplyConsoleStreamEvents(events []ConsoleStreamEvent, transcriptLimit int) ShellState {
+	transcript := append([]TranscriptEntry(nil), state.Transcript...)
+	appended := false
+	for _, event := range events {
+		entry, ok := MapConsoleStreamEventToTranscriptEntry(event)
+		if !ok {
+			continue
+		}
+		transcript = append(transcript, entry)
+		appended = true
+	}
+	if !appended {
+		return state
+	}
+
+	next := state
+	next.Transcript = capTranscriptEntries(transcript, transcriptLimit)
+	return next
+}
+
+func capTranscriptEntries(entries []TranscriptEntry, limit int) []TranscriptEntry {
+	if limit <= 0 || len(entries) <= limit {
+		return entries
+	}
+
+	start := len(entries) - limit
+	capped := make([]TranscriptEntry, len(entries[start:]))
+	copy(capped, entries[start:])
+	return capped
+}
