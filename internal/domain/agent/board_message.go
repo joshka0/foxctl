@@ -55,6 +55,8 @@ const (
 	BoardMessageKindEpicAnswer BoardMessageKind = "epic_answer"
 	// BoardMessageKindEpicFinalize represents the clarified epic brief after intake is complete.
 	BoardMessageKindEpicFinalize BoardMessageKind = "epic_finalize"
+	// BoardMessageKindEpicUpdate represents an append-only metadata update for an epic.
+	BoardMessageKindEpicUpdate BoardMessageKind = "epic_update"
 	// BoardMessageKindEpicClose represents an explicit closure decision for an epic.
 	BoardMessageKindEpicClose BoardMessageKind = "epic_close"
 	// BoardMessageKindEpicCheckpoint represents a durable resumability snapshot for an epic.
@@ -77,6 +79,8 @@ const (
 	BoardMessageKindStoryProposal BoardMessageKind = "story_proposal"
 	// BoardMessageKindStoryState represents an append-only lifecycle update for an accepted story.
 	BoardMessageKindStoryState BoardMessageKind = "story_state"
+	// BoardMessageKindStoryUpdate represents an append-only metadata update for an accepted story.
+	BoardMessageKindStoryUpdate BoardMessageKind = "story_update"
 	// BoardMessageKindStoryValidation represents story-owned validation evidence.
 	BoardMessageKindStoryValidation BoardMessageKind = "story_validation"
 	// BoardMessageKindDeliveryLog represents a durable delivery-log entry for an epic.

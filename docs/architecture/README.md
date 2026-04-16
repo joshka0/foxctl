@@ -17,6 +17,11 @@ its doc stays under `docs/plans/*`.
 Operational subsystem references (skills, storage, hooks, runtime details) live under
 `docs/general/*` and should point back here for canonical architecture.
 
+Planned repo-evolution tooling is tracked in
+[`docs/plans/features/foxctl-evolve-plan.md`](../plans/features/foxctl-evolve-plan.md).
+Until it ships, treat that document as rollout/design guidance rather than
+current as-built architecture.
+
 Current implementation-reference docs to prefer:
 
 - [docs/architecture/system-architecture.md](./system-architecture.md)
