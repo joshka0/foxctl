@@ -265,6 +265,132 @@ func TestSkillsUpgradeCommandUpdatesManifest(t *testing.T) {
 	}
 }
 
+func TestSkillsSyncCommandCopiesFoxctlPacksAndLeavesAgentctlEntries(t *testing.T) {
+	cfg := newTestConfig(t)
+	source := filepath.Join(t.TempDir(), "skills-pack")
+	writeTestSkillPack(t, source, "foxctl-core", "core")
+	writeTestSkillPack(t, source, "foxctl-epic-pipeline", "pipeline")
+
+	legacy := filepath.Join(os.Getenv("HOME"), ".codex", "skills", "agentctl-core")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatalf("legacy skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "SKILL.md"), []byte("legacy"), 0o644); err != nil {
+		t.Fatalf("legacy skill file: %v", err)
+	}
+
+	cmd := newSkillsSyncCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"--source", source, "--targets", "codex,gemini"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("skills sync: %v (stderr=%s)", err, stderr.String())
+	}
+
+	for _, target := range []string{".codex", ".gemini"} {
+		for _, skill := range []string{"foxctl-core", "foxctl-epic-pipeline"} {
+			path := filepath.Join(os.Getenv("HOME"), target, "skills", skill, "SKILL.md")
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("expected synced skill %s: %v", path, err)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(legacy, "SKILL.md")); err != nil {
+		t.Fatalf("expected legacy agentctl entry to be left alone: %v", err)
+	}
+
+	data := decodeEnvelopeData(t, stdout.Bytes())
+	changes, ok := data["changes"].([]any)
+	if !ok {
+		t.Fatalf("expected changes array, got %T", data["changes"])
+	}
+	if got, want := len(changes), 4; got != want {
+		t.Fatalf("expected %d changes, got %d", want, got)
+	}
+	for _, raw := range changes {
+		change := raw.(map[string]any)
+		if change["applied"] != true {
+			t.Fatalf("expected applied change, got %#v", change)
+		}
+	}
+}
+
+func TestSkillsSyncCommandDryRunDoesNotWrite(t *testing.T) {
+	cfg := newTestConfig(t)
+	source := filepath.Join(t.TempDir(), "skills-pack")
+	writeTestSkillPack(t, source, "foxctl-core", "core")
+
+	cmd := newSkillsSyncCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"--source", source, "--targets", "codex", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("skills sync dry-run: %v (stderr=%s)", err, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".codex", "skills", "foxctl-core")); !os.IsNotExist(err) {
+		t.Fatalf("expected dry-run to leave target missing, err=%v", err)
+	}
+
+	data := decodeEnvelopeData(t, stdout.Bytes())
+	if data["dry_run"] != true {
+		t.Fatalf("expected dry_run true, got %v", data["dry_run"])
+	}
+	changes := data["changes"].([]any)
+	if len(changes) != 1 {
+		t.Fatalf("expected one dry-run change, got %d", len(changes))
+	}
+	change := changes[0].(map[string]any)
+	if change["applied"] != false {
+		t.Fatalf("expected unapplied dry-run change, got %#v", change)
+	}
+}
+
+func TestSkillsSyncCommandCanSymlink(t *testing.T) {
+	cfg := newTestConfig(t)
+	source := filepath.Join(t.TempDir(), "skills-pack")
+	writeTestSkillPack(t, source, "foxctl-core", "core")
+
+	cmd := newSkillsSyncCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"--source", source, "--targets", "foxctl", "--mode", "symlink"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("skills sync symlink: %v (stderr=%s)", err, stderr.String())
+	}
+	target := filepath.Join(cfg.Home, "skills", "foxctl-core")
+	link, err := os.Readlink(target)
+	if err != nil {
+		t.Fatalf("expected symlink target: %v", err)
+	}
+	if link != filepath.Join(source, "foxctl-core") {
+		t.Fatalf("unexpected symlink target: %s", link)
+	}
+}
+
+func writeTestSkillPack(t *testing.T, root, name, body string) {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create skill pack: %v", err)
+	}
+	content := []byte("---\nname: " + name + "\ndescription: test\n---\n\n" + body + "\n")
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), content, 0o644); err != nil {
+		t.Fatalf("write skill pack: %v", err)
+	}
+}
+
 func newTestConfig(t *testing.T) config.Config {
 	t.Helper()
 	tmp := t.TempDir()

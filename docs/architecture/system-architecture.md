@@ -59,6 +59,10 @@ flowchart TD
    entrypoint; targeted integration tests such as
    `TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux` are follow-on
    checks for symptoms that involve real pane submission behavior.
+7. Planned repo-evolution tooling (`foxctl evolve`) is not current runtime
+   architecture yet; the design and rollout are tracked in
+   `docs/plans/features/foxctl-evolve-plan.md`, with intended package placement
+   under `internal/tooling/*` rather than `internal/v2/*`.
 
 ## Core Package Groups
 

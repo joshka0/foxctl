@@ -22,6 +22,12 @@ var headingRegex = regexp.MustCompile(`^(#{1,6})\s+(.+)$`)
 // stepPrefixRegex matches common step patterns like "Step 1:", "1.", "1)", "1.1 " etc.
 var stepPrefixRegex = regexp.MustCompile(`^(?:Step\s+)?(\d+(?:\.\d+)?)(?:[.:)]|\s)\s*(.+)`)
 
+// orderedListItemRegex matches ordered markdown list items like "1. item" or "2) item".
+var orderedListItemRegex = regexp.MustCompile(`^\s{0,3}\d+[.)]\s+(.+)$`)
+
+// unorderedListItemRegex matches unordered markdown list items like "- item".
+var unorderedListItemRegex = regexp.MustCompile(`^\s{0,3}[-*+]\s+`)
+
 // Parser handles parsing of Claude Code plan files.
 type Parser struct {
 	opts ParseOptions
@@ -197,6 +203,11 @@ func (p *Parser) ExtractSteps(plan *PlanInfo) []Step {
 	}
 
 	walkSections(plan.Sections, nil)
+	if len(steps) == 0 {
+		// Conservative fallback: only derive steps from ordered list items when
+		// heading-based extraction finds nothing.
+		order = p.extractOrderedListSteps(plan.Sections, nil, order, &steps)
+	}
 
 	// Try to infer dependencies from ordering
 	// Simple heuristic: steps in the same phase depend on previous steps
@@ -210,6 +221,102 @@ func (p *Parser) ExtractSteps(plan *PlanInfo) []Step {
 	}
 
 	return steps
+}
+
+func (p *Parser) extractOrderedListSteps(sections []Section, path []string, order int, out *[]Step) int {
+	for _, sec := range sections {
+		// Create a new slice to avoid aliasing issues with append
+		newPath := append([]string(nil), path...)
+		newPath = append(newPath, sec.Title)
+
+		for _, item := range parseOrderedListItems(sec.Content) {
+			order++
+			*out = append(*out, Step{
+				Title:       item,
+				Description: "",
+				SectionPath: newPath,
+				Order:       order,
+			})
+		}
+
+		order = p.extractOrderedListSteps(sec.Children, newPath, order, out)
+	}
+	return order
+}
+
+func parseOrderedListItems(content string) []string {
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	items := make([]string, 0)
+	inCodeFence := false
+	current := ""
+	flushCurrent := func() {
+		if strings.TrimSpace(current) == "" {
+			current = ""
+			return
+		}
+		items = append(items, strings.TrimSpace(current))
+		current = ""
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeFence = !inCodeFence
+			continue
+		}
+		if inCodeFence {
+			continue
+		}
+
+		matches := orderedListItemRegex.FindStringSubmatch(line)
+		if len(matches) == 2 {
+			flushCurrent()
+			item := strings.TrimSpace(matches[1])
+			if item == "" {
+				continue
+			}
+			current = item
+			continue
+		}
+
+		if strings.TrimSpace(current) == "" {
+			continue
+		}
+		if trimmed == "" {
+			flushCurrent()
+			continue
+		}
+		if !isOrderedListContinuationLine(line) {
+			flushCurrent()
+			continue
+		}
+		current = strings.TrimSpace(current + " " + trimmed)
+	}
+	flushCurrent()
+
+	return items
+}
+
+func isOrderedListContinuationLine(line string) bool {
+	if strings.TrimSpace(line) == "" {
+		return false
+	}
+	if orderedListItemRegex.MatchString(line) || unorderedListItemRegex.MatchString(line) {
+		return false
+	}
+	trimmedLeft := strings.TrimLeft(line, " \t")
+	if trimmedLeft == line {
+		return false
+	}
+	if strings.HasPrefix(trimmedLeft, "#") {
+		return false
+	}
+	return true
 }
 
 // isStepSection checks if a section title looks like an actionable step.
