@@ -33,8 +33,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const openSandboxDisabledMessage = "opensandbox integration temporarily disabled; use worktree sandboxing"
-const roomEpicDispatchFrontierDefaultAgentRole = "coder"
+const (
+	openSandboxDisabledMessage               = "opensandbox integration temporarily disabled; use worktree sandboxing"
+	roomEpicDispatchFrontierDefaultAgentRole = "coder"
+)
 
 func init() {
 	rootCmd.AddCommand(newRoomCommand())
@@ -11848,7 +11850,7 @@ func buildRoomEpicGradeDispatchSpawnCommand(workspace, roomID string, dispatch r
 }
 
 func spawnRoomEpicGradeDispatchAgent(cmd *cobra.Command, workspace, roomID string, dispatch roomEpicGradeDispatchOptions, prompt string) (map[string]any, error) {
-	var previous = struct {
+	previous := struct {
 		name, slug, role, prompt, promptFile, llmProvider, llmModel, workspace, execMode, roomID, roomAccess string
 		maxIterations, maxContextTokens, maxAutoTurns, thinkInterval                                         int
 		dryRun, chat, spawnInPane                                                                            bool

@@ -68,6 +68,7 @@ List: `foxctl skills list`
 | `configs/skills-pack/foxctl-room-agent/SKILL.md` | Participant-agent startup and day-to-day room behavior: membership checks, inbox, tasks, durable replies, reminders |
 | `configs/skills-pack/foxctl-room-operator/SKILL.md` | How to operate inside an active room: status, inbox, task claim/touch/block/complete, coordinator escalation, review notes |
 | `configs/skills-pack/foxctl-room-view/SKILL.md` | Viewer/presentation layer for room participants: tmux/zellij/gui PTY setup, pane reads, manual pokes |
+| `configs/skills-pack/foxctl-epic-pipeline/SKILL.md` | Import Factory missions or plan files into canonical room epics, shape them through status/scout/grade/frontier, and stop before implementation |
 
 ### Context Architecture & History
 For the bundled ACA/context-history workflow pack, see:
