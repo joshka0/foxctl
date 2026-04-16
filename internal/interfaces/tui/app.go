@@ -8,7 +8,7 @@ import (
 
 // Run starts the Go-native foxctl terminal shell.
 func Run(ctx context.Context, opts Options) error {
-	app, err := NewApp(opts)
+	app, err := NewApp(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -34,8 +34,8 @@ func Run(ctx context.Context, opts Options) error {
 }
 
 // NewApp builds the shell app without starting the terminal event loop.
-func NewApp(opts Options) (*gotui.App, error) {
-	initialState, err := LoadShellState(opts)
+func NewApp(ctx context.Context, opts Options) (*gotui.App, error) {
+	initialState, err := LoadInitialShellState(ctx, opts)
 	if err != nil {
 		return nil, err
 	}

@@ -16,15 +16,18 @@ type AgentAdapter struct {
 }
 
 type AgentRecord struct {
-	ID          string `json:"id"`
-	Name        string `json:"name,omitempty"`
-	Role        string `json:"role,omitempty"`
-	State       string `json:"state,omitempty"`
-	ParentID    string `json:"parent_id,omitempty"`
-	Namespace   string `json:"ns,omitempty"`
-	ExecMode    string `json:"exec_mode,omitempty"`
-	LLMProvider string `json:"llm_provider,omitempty"`
-	LLMModel    string `json:"llm_model,omitempty"`
+	ID              string `json:"id"`
+	Name            string `json:"name,omitempty"`
+	Slug            string `json:"slug,omitempty"`
+	Role            string `json:"role,omitempty"`
+	State           string `json:"state,omitempty"`
+	ParentID        string `json:"parent_id,omitempty"`
+	Namespace       string `json:"ns,omitempty"`
+	ExecMode        string `json:"exec_mode,omitempty"`
+	LLMProvider     string `json:"llm_provider,omitempty"`
+	LLMModel        string `json:"llm_model,omitempty"`
+	WorkspaceRoot   string `json:"workspace_root,omitempty"`
+	WorkspaceSource string `json:"workspace_source,omitempty"`
 }
 
 type ListAgentsResponse struct {
