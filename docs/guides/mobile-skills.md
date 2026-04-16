@@ -138,6 +138,61 @@ EAS CLI is required for build and update operations. Dev menu operations work wi
 
 ## Usage Examples
 
+### Mobile CLI Wrappers
+
+The `foxctl mobile` command provides a human-friendly wrapper around the JSON
+skills. It still returns the same JSON envelopes as the underlying skills.
+
+```bash
+# List all iOS simulators and Android emulators
+foxctl mobile list-simulators
+
+# Platform-specific lists
+foxctl mobile ios list-simulators
+foxctl mobile android list-simulators
+
+# Coordinate interactions
+foxctl mobile ios launch com.prazeapp.praze --udid "$UDID"
+foxctl mobile ios tap -x 100 -y 200 --udid "$UDID"
+foxctl mobile android tap -x 100 -y 200 --serial emulator-5554
+foxctl mobile ios swipe --start-x 100 --start-y 300 --end-x 300 --end-y 100 --udid "$UDID"
+
+# Accessibility selector taps
+foxctl mobile ios tap --label Safari --udid "$UDID"
+foxctl mobile android tap --id com.example:id/search --serial emulator-5554
+
+# Timing controls
+foxctl mobile ios tap -x 100 -y 200 --pre-delay 1 --post-delay 0.5 --udid "$UDID"
+foxctl mobile ios gesture scroll-down --pre-delay 0.5 --post-delay 1 --udid "$UDID"
+
+# Gesture presets
+foxctl mobile ios gesture scroll-up --udid "$UDID"
+foxctl mobile ios gesture swipe-from-left-edge --screen-width 430 --screen-height 932 --udid "$UDID"
+
+# Text input
+foxctl mobile ios type 'Hello World!' --udid "$UDID"
+printf 'Complex text' | foxctl mobile ios type --stdin --udid "$UDID"
+foxctl mobile ios type --file input.txt --udid "$UDID"
+
+# Screenshot and UI inspection
+foxctl mobile ios screenshot --udid "$UDID"
+foxctl mobile ios screenshot --output /tmp/screen.png --udid "$UDID"
+foxctl mobile ios screenshot --output /tmp/ --udid "$UDID"
+foxctl mobile ios describe-ui --udid "$UDID"
+foxctl mobile ios describe-ui --point 100,200 --udid "$UDID"
+
+# Batch chaining
+foxctl mobile ios batch --udid "$UDID" \
+  --step "tap --label Search" \
+  --step "type 'hello world'" \
+  --step "button home"
+```
+
+Batch accepts exactly one step source: repeated `--step`, `--file`, or
+`--stdin`. It stops on the first failure unless `--continue-on-error` is set.
+Selector taps use exact accessibility field matches and cache one UI tree per
+batch by default (`--ax-cache perBatch`).
+
 ### Unified Skill
 
 ```bash

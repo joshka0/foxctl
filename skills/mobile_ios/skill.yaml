@@ -90,6 +90,10 @@ signature:
       type: string
       required: false
       description: Path to media file for add_media operation
+    - name: full
+      type: boolean
+      required: false
+      description: Return the full UI tree instead of a preview for ui_tree
   help:
     short: "Automate iOS simulators via IDB."
     long: |
