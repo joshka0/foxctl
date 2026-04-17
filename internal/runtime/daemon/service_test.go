@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"syscall"
 	"testing"
 	"time"
@@ -267,6 +268,32 @@ func TestSocketPath_EnvOverride(t *testing.T) {
 	path := SocketPath()
 	if path != expected {
 		t.Fatalf("expected %s, got %s", expected, path)
+	}
+}
+
+func TestDaemonizeArgsDropsNonDaemonCallerFlags(t *testing.T) {
+	t.Parallel()
+
+	got := daemonizeArgs([]string{"foxctl", "web", "serve", "--dev-cors", "--port", "8090"})
+	want := []string{"daemon", "start"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("daemonizeArgs(web serve) = %#v, want %#v", got, want)
+	}
+}
+
+func TestDaemonizeArgsPreservesWorkspaceFlag(t *testing.T) {
+	t.Parallel()
+
+	got := daemonizeArgs([]string{"foxctl", "daemon", "start", "--background", "--workspace", "/repo"})
+	want := []string{"daemon", "start", "--workspace", "/repo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("daemonizeArgs(workspace) = %#v, want %#v", got, want)
+	}
+
+	got = daemonizeArgs([]string{"foxctl", "daemon", "start", "-w=/repo"})
+	want = []string{"daemon", "start", "-w=/repo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("daemonizeArgs(short workspace) = %#v, want %#v", got, want)
 	}
 }
 

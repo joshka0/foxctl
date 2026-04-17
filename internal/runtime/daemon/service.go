@@ -962,13 +962,10 @@ func Daemonize() error {
 		return fmt.Errorf("get executable: %w", err)
 	}
 
-	// Build args (replace --background with child marker)
-	args := []string{"daemon", "start"}
-	for _, arg := range os.Args[2:] {
-		if arg != "-b" && arg != "--background" {
-			args = append(args, arg)
-		}
-	}
+	// Build a clean daemon invocation. Daemonize can be called from non-daemon
+	// commands such as `web serve`; forwarding the caller's flags would make the
+	// child daemon parse unrelated flags and fail before binding its socket.
+	args := daemonizeArgs(os.Args)
 
 	// Start child process
 	cmd := &exec{
@@ -2428,6 +2425,23 @@ func (e *exec) Start() error {
 
 	_, err := os.StartProcess(e.Path, e.Args, attr)
 	return err
+}
+
+func daemonizeArgs(argv []string) []string {
+	args := []string{"daemon", "start"}
+	for i := 1; i < len(argv); i++ {
+		arg := argv[i]
+		switch {
+		case arg == "--workspace" || arg == "-w":
+			if i+1 < len(argv) {
+				args = append(args, arg, argv[i+1])
+				i++
+			}
+		case strings.HasPrefix(arg, "--workspace=") || strings.HasPrefix(arg, "-w="):
+			args = append(args, arg)
+		}
+	}
+	return args
 }
 
 // resolveLLMConfig returns the LLM provider, API key, and model from centralized config.
