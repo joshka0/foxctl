@@ -159,9 +159,11 @@ func (s *Shell) handleConsoleAskUpdate(update ConsoleAskUpdate) {
 	case ConsoleAskUpdateAccepted:
 		correlationID := ""
 		content := ""
+		message := ""
 		if update.Accepted != nil {
 			correlationID = strings.TrimSpace(update.Accepted.CorrelationID)
 			content = strings.TrimSpace(update.Accepted.Content)
+			message = strings.TrimSpace(update.Accepted.Message)
 		}
 		if correlationID != "" {
 			s.inFlight.Set(correlationID)
@@ -175,6 +177,14 @@ func (s *Shell) handleConsoleAskUpdate(update ConsoleAskUpdate) {
 			if updatedPending {
 				return
 			}
+		}
+		if message != "" && correlationID == "" {
+			s.appendTranscriptEntry(TranscriptEntry{
+				Speaker: "assistant",
+				Kind:    "reply",
+				Text:    message,
+			})
+			return
 		}
 		text := "ask queued"
 		if correlationID != "" {

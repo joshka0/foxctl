@@ -17,8 +17,18 @@ func LoadInitialShellState(ctx context.Context, opts Options) (ShellState, error
 	}
 
 	baseURL := strings.TrimSpace(opts.APIBaseURL)
+	agentID := strings.TrimSpace(opts.AgentID)
 	consoleSessionID := strings.TrimSpace(opts.ConsoleSessionID)
+	if agentID != "" && consoleSessionID != "" {
+		return ShellState{}, fmt.Errorf("--agent-id and --console-session-id are mutually exclusive companion targets")
+	}
 	if baseURL == "" {
+		if agentID != "" {
+			return ShellState{}, fmt.Errorf(
+				"--agent-id %q requires --api-base-url; set --api-base-url to your foxctl API host",
+				agentID,
+			)
+		}
 		if consoleSessionID != "" {
 			return ShellState{}, fmt.Errorf(
 				"--console-session-id %q requires --api-base-url; set --api-base-url to your foxctl API host",
@@ -52,6 +62,25 @@ func LoadInitialShellState(ctx context.Context, opts Options) (ShellState, error
 
 	state.Workers = mapAgentsToWorkers(agents.Agents)
 
+	if agentID != "" {
+		agent, err := agentAdapter.GetAgent(ctx, agentID)
+		if err != nil {
+			return ShellState{}, fmt.Errorf(
+				"load agent %q from --api-base-url %q: %w; verify the agent exists via GET /api/agents/%s",
+				agentID,
+				client.BaseURL(),
+				err,
+				agentID,
+			)
+		}
+		state.Assistant = mapAgentAssistant(agent.Agent)
+		state.Transcript = []TranscriptEntry{{
+			Speaker: "system",
+			Kind:    "agent",
+			Text:    "attached to foxctl companion agent " + firstNonEmpty(agent.Agent.Name, agent.Agent.Slug, agent.Agent.ID),
+		}}
+	}
+
 	if consoleSessionID != "" {
 		consoleAdapter, err := NewConsoleAdapter(client)
 		if err != nil {
@@ -71,6 +100,15 @@ func LoadInitialShellState(ctx context.Context, opts Options) (ShellState, error
 	}
 
 	return state, nil
+}
+
+func mapAgentAssistant(agent AgentRecord) AssistantSummary {
+	return AssistantSummary{
+		Name:     firstNonEmpty(agent.Name, agent.Slug, agent.ID, "foxctl agent"),
+		Role:     firstNonEmpty(agent.Role, "companion"),
+		Provider: firstNonEmpty(agent.LLMProvider, "foxctl"),
+		Model:    strings.TrimSpace(agent.LLMModel),
+	}
 }
 
 func normalizeAgentLimit(limit int) int {

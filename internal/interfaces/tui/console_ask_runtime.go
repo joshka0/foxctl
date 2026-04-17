@@ -43,6 +43,28 @@ func NewHTTPConsoleAskSubmitter(adapter *ConsoleAdapter, sessionID string) (Cons
 	}), nil
 }
 
+// NewHTTPAgentAskSubmitter wraps AgentAdapter.AskAgent for one companion agent.
+func NewHTTPAgentAskSubmitter(adapter *AgentAdapter, agentID string) (ConsoleAskSubmitter, error) {
+	if adapter == nil {
+		return nil, errors.New("agent adapter is required")
+	}
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return nil, errors.New("agent id is required")
+	}
+
+	return ConsoleAskSubmitterFunc(func(ctx context.Context, req AskConsoleSessionRequest) (AskConsoleSessionResponse, error) {
+		response, err := adapter.AskAgent(ctx, agentID, AskAgentRequest{Message: req.Content})
+		if err != nil {
+			return AskConsoleSessionResponse{}, err
+		}
+		return AskConsoleSessionResponse{
+			OK:      true,
+			Message: strings.TrimSpace(response.Reply),
+		}, nil
+	}), nil
+}
+
 // ConsoleAskUpdateType identifies the outcome of a queued ask request.
 type ConsoleAskUpdateType string
 

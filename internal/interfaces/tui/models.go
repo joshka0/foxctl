@@ -7,6 +7,7 @@ type Options struct {
 	EpicsDir            string
 	APIBaseURL          string
 	AgentLimit          int
+	AgentID             string
 	ConsoleSessionID    string
 	ConsoleStreamBuffer int
 	TranscriptLimit     int

@@ -398,6 +398,60 @@ func TestHTTPConsoleAskSubmitterPostsExpectedAskRequest(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentAskSubmitterPostsExpectedAskRequest(t *testing.T) {
+	t.Parallel()
+
+	var body AskAgentRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/agents/agent-http/ask" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/api/agents/agent-http/ask")
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Fatalf("content-type = %q, want %q", ct, "application/json")
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(AskAgentResponse{
+			Reply:          "agent reply",
+			ConversationID: "agent-http",
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewAPIClient(server.URL, server.Client())
+	if err != nil {
+		t.Fatalf("NewAPIClient error: %v", err)
+	}
+	adapter, err := NewAgentAdapter(client)
+	if err != nil {
+		t.Fatalf("NewAgentAdapter error: %v", err)
+	}
+	submitter, err := NewHTTPAgentAskSubmitter(adapter, "agent-http")
+	if err != nil {
+		t.Fatalf("NewHTTPAgentAskSubmitter error: %v", err)
+	}
+
+	response, err := submitter.SubmitAsk(context.Background(), AskConsoleSessionRequest{
+		Content: "hello from composer",
+	})
+	if err != nil {
+		t.Fatalf("SubmitAsk error: %v", err)
+	}
+	if body.Message != "hello from composer" {
+		t.Fatalf("body.Message = %q, want %q", body.Message, "hello from composer")
+	}
+	if !response.OK {
+		t.Fatalf("response.OK = false, want true")
+	}
+	if response.Message != "agent reply" {
+		t.Fatalf("response.Message = %q, want %q", response.Message, "agent reply")
+	}
+}
+
 func readAskUpdate(t *testing.T, updates <-chan ConsoleAskUpdate) ConsoleAskUpdate {
 	t.Helper()
 

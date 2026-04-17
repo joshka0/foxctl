@@ -39,6 +39,15 @@ type GetAgentResponse struct {
 	Agent AgentRecord `json:"agent"`
 }
 
+type AskAgentRequest struct {
+	Message string `json:"message"`
+}
+
+type AskAgentResponse struct {
+	Reply          string `json:"reply"`
+	ConversationID string `json:"conversation_id"`
+}
+
 func NewAgentAdapter(client *APIClient) (*AgentAdapter, error) {
 	if client == nil {
 		return nil, errors.New("api client is required")
@@ -61,6 +70,29 @@ func (a *AgentAdapter) ListAgents(ctx context.Context, limit int) (ListAgentsRes
 	var response ListAgentsResponse
 	if err := a.client.RequestJSON(ctx, http.MethodGet, path, nil, &response); err != nil {
 		return ListAgentsResponse{}, fmt.Errorf("list agents: %w", err)
+	}
+	return response, nil
+}
+
+func (a *AgentAdapter) AskAgent(ctx context.Context, agentID string, req AskAgentRequest) (AskAgentResponse, error) {
+	if a == nil || a.client == nil {
+		return AskAgentResponse{}, errors.New("agent adapter is not configured")
+	}
+
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return AskAgentResponse{}, errors.New("agent id is required")
+	}
+
+	req.Message = strings.TrimSpace(req.Message)
+	if req.Message == "" {
+		return AskAgentResponse{}, errors.New("message is required")
+	}
+
+	var response AskAgentResponse
+	path := "/api/agents/" + url.PathEscape(agentID) + "/ask"
+	if err := a.client.RequestJSON(ctx, http.MethodPost, path, req, &response); err != nil {
+		return AskAgentResponse{}, fmt.Errorf("ask agent %q: %w", agentID, err)
 	}
 	return response, nil
 }

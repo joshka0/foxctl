@@ -84,6 +84,39 @@ func newShellRuntime(ctx context.Context, opts Options, initialState ShellState)
 	}
 
 	if !shouldAttachConsoleStream(opts) {
+		if shouldAttachAgentCompanion(opts) {
+			client, err := NewAPIClient(opts.APIBaseURL, nil)
+			if err != nil {
+				return nil, err
+			}
+			agentAdapter, err := NewAgentAdapter(client)
+			if err != nil {
+				return nil, err
+			}
+			submitter, err := NewHTTPAgentAskSubmitter(agentAdapter, opts.AgentID)
+			if err != nil {
+				return nil, err
+			}
+			askRuntime, err := NewConsoleAskRuntime(ctx, submitter, 0, 0)
+			if err != nil {
+				return nil, err
+			}
+			runtime.consoleAskRuntime = askRuntime
+			runtime.shell = NewShellWithRuntimes(
+				initialState,
+				nil,
+				askRuntime.Updates(),
+				askRuntime.Enqueue,
+				nil,
+				nil,
+				opts.TranscriptLimit,
+				defaultComposerAskEnqueueTimeout,
+				defaultConsoleCancelEnqueueTimeout,
+			)
+			runtime.close = func() {
+				askRuntime.Close()
+			}
+		}
 		return runtime, nil
 	}
 

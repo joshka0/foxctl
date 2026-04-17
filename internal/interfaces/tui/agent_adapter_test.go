@@ -115,6 +115,51 @@ func TestAgentAdapterReturnsNon2xxError(t *testing.T) {
 	}
 }
 
+func TestAgentAdapterAskAgent(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/agents/agent-1/ask" {
+			t.Fatalf("path = %s, want /api/agents/agent-1/ask", r.URL.Path)
+		}
+		var req AskAgentRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Message != "hello companion" {
+			t.Fatalf("Message = %q, want %q", req.Message, "hello companion")
+		}
+		_ = json.NewEncoder(w).Encode(AskAgentResponse{
+			Reply:          "hello from agent",
+			ConversationID: "agent-1",
+		})
+	}))
+	defer srv.Close()
+
+	client, err := NewAPIClient(srv.URL, srv.Client())
+	if err != nil {
+		t.Fatalf("NewAPIClient error: %v", err)
+	}
+	adapter, err := NewAgentAdapter(client)
+	if err != nil {
+		t.Fatalf("NewAgentAdapter error: %v", err)
+	}
+
+	resp, err := adapter.AskAgent(context.Background(), "agent-1", AskAgentRequest{Message: " hello companion "})
+	if err != nil {
+		t.Fatalf("AskAgent error: %v", err)
+	}
+	if resp.Reply != "hello from agent" {
+		t.Fatalf("Reply = %q, want %q", resp.Reply, "hello from agent")
+	}
+	if resp.ConversationID != "agent-1" {
+		t.Fatalf("ConversationID = %q, want %q", resp.ConversationID, "agent-1")
+	}
+}
+
 func TestAgentAdapterRejectsEmptyAgentID(t *testing.T) {
 	t.Parallel()
 
@@ -122,5 +167,15 @@ func TestAgentAdapterRejectsEmptyAgentID(t *testing.T) {
 	_, err := adapter.GetAgent(context.Background(), " ")
 	if err == nil {
 		t.Fatal("GetAgent error = nil, want validation error")
+	}
+}
+
+func TestAgentAdapterRejectsEmptyAskMessage(t *testing.T) {
+	t.Parallel()
+
+	adapter := &AgentAdapter{client: &APIClient{}}
+	_, err := adapter.AskAgent(context.Background(), "agent-1", AskAgentRequest{Message: " "})
+	if err == nil {
+		t.Fatal("AskAgent error = nil, want validation error")
 	}
 }

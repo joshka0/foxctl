@@ -292,6 +292,60 @@ func TestLoadInitialShellStateMapsConsoleSessionTranscriptWhenRequested(t *testi
 	}
 }
 
+func TestLoadInitialShellStateMapsAgentCompanionWhenRequested(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agents":
+			_ = json.NewEncoder(w).Encode(ListAgentsResponse{
+				Agents: []AgentRecord{{
+					ID:          "agent-1",
+					Name:        "Local Fox",
+					Role:        "coder",
+					State:       "running",
+					LLMProvider: "lmstudio",
+					LLMModel:    "local-model",
+				}},
+				Total: 1,
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/agents/agent-1":
+			_ = json.NewEncoder(w).Encode(GetAgentResponse{
+				Agent: AgentRecord{
+					ID:          "agent-1",
+					Name:        "Local Fox",
+					Role:        "coder",
+					LLMProvider: "lmstudio",
+					LLMModel:    "local-model",
+				},
+			})
+		default:
+			t.Fatalf("unexpected route: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	state, err := LoadInitialShellState(context.Background(), Options{
+		APIBaseURL: srv.URL,
+		AgentID:    "agent-1",
+	})
+	if err != nil {
+		t.Fatalf("LoadInitialShellState error: %v", err)
+	}
+	if state.Assistant.Name != "Local Fox" {
+		t.Fatalf("Assistant.Name = %q, want Local Fox", state.Assistant.Name)
+	}
+	if state.Assistant.Provider != "lmstudio" {
+		t.Fatalf("Assistant.Provider = %q, want lmstudio", state.Assistant.Provider)
+	}
+	if got := len(state.Transcript); got != 1 {
+		t.Fatalf("len(Transcript) = %d, want 1", got)
+	}
+	if !strings.Contains(state.Transcript[0].Text, "attached to foxctl companion agent Local Fox") {
+		t.Fatalf("Transcript[0].Text = %q, want agent attachment message", state.Transcript[0].Text)
+	}
+}
+
 func TestLoadInitialShellStateReturnsActionableErrorWhenConsoleLookupFails(t *testing.T) {
 	t.Parallel()
 

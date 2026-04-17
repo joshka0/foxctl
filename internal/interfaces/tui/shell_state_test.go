@@ -208,6 +208,38 @@ func TestShellAskAcceptedAttachesCorrelationToPendingRow(t *testing.T) {
 	}
 }
 
+func TestShellAskAcceptedWithReplyAppendsAssistantResponse(t *testing.T) {
+	shell := NewShellWithRuntime(
+		ShellState{
+			Transcript: []TranscriptEntry{
+				{Speaker: "you", Kind: "pending", Text: "hello"},
+			},
+		},
+		nil,
+		nil,
+		nil,
+		0,
+		defaultComposerAskEnqueueTimeout,
+	)
+
+	shell.handleConsoleAskUpdate(ConsoleAskUpdate{
+		Type: ConsoleAskUpdateAccepted,
+		Accepted: &ConsoleAskAccepted{
+			Content: "hello",
+			Message: "hello from the foxctl agent",
+		},
+	})
+
+	state := shell.state.Get()
+	if len(state.Transcript) != 2 {
+		t.Fatalf("len(transcript) = %d, want 2", len(state.Transcript))
+	}
+	last := state.Transcript[len(state.Transcript)-1]
+	if last.Speaker != "assistant" || last.Kind != "reply" || last.Text != "hello from the foxctl agent" {
+		t.Fatalf("last row = %#v, want assistant reply", last)
+	}
+}
+
 func TestShellCancelWithoutRuntimeIsNoOp(t *testing.T) {
 	shell := NewShell(DefaultShellState(Options{}))
 	before := shell.state.Get()

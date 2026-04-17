@@ -394,6 +394,7 @@ go-tui-spawn: build go-tui-build
 		server_pid=""; \
 		trap ':' EXIT; \
 	fi; \
+	agent_id=""; \
 	if [ "$(GO_TUI_SPAWN_AGENT)" = "1" ]; then \
 		echo "Spawning foxctl agent with provider=$(GO_TUI_LLM_PROVIDER) model=$(GO_TUI_LLM_MODEL)..."; \
 		agent_json="$$(python3 -c 'import json,sys; d={"role":sys.argv[1],"name":sys.argv[2],"prompt":sys.argv[3],"workspace_root":sys.argv[4],"exec_mode":sys.argv[5]}; provider=sys.argv[6].strip(); model=sys.argv[7].strip(); base=sys.argv[8].strip(); d.update({"llm_provider":provider} if provider else {}); d.update({"llm_model":model} if model else {}); d.update({"llm_base_url":base} if base else {}); print(json.dumps(d))' "$(GO_TUI_AGENT_ROLE)" "$(GO_TUI_AGENT_NAME)" "$(GO_TUI_AGENT_PROMPT)" "$(GO_TUI_WORKSPACE)" "$(GO_TUI_AGENT_EXEC_MODE)" "$(GO_TUI_LLM_PROVIDER)" "$(GO_TUI_LLM_MODEL)" "$(GO_TUI_LMSTUDIO_BASE_URL)")"; \
@@ -401,13 +402,18 @@ go-tui-spawn: build go-tui-build
 		echo "Spawned foxctl agent $$agent_id"; \
 	fi; \
 	session_id="$(GO_TUI_SESSION_ID)"; \
-	if [ -z "$$session_id" ]; then \
+	if [ -z "$$agent_id" ] && [ -z "$$session_id" ]; then \
 		echo "Creating console session for $(GO_TUI_WORKSPACE) with provider=$(GO_TUI_LLM_PROVIDER) model=$(GO_TUI_LLM_MODEL)..."; \
 		session_json="$$(python3 -c 'import json,sys; d={"workspace":sys.argv[1],"profile":sys.argv[2]}; provider=sys.argv[3].strip(); model=sys.argv[4].strip(); prompt=sys.argv[5].strip(); d.update({"llm_provider":provider} if provider else {}); d.update({"llm_model":model} if model else {}); d.update({"system_prompt":prompt} if prompt else {}); print(json.dumps(d))' "$(GO_TUI_WORKSPACE)" "$(GO_TUI_PROFILE)" "$(GO_TUI_LLM_PROVIDER)" "$(GO_TUI_LLM_MODEL)" "$(GO_TUI_SYSTEM_PROMPT)")"; \
 		session_id="$$(curl -sf -X POST "$(GO_TUI_API_URL)/api/console/sessions" -H 'Content-Type: application/json' -d "$$session_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["id"])')"; \
 	fi; \
-	echo "Launching Go TUI attached to console session $$session_id"; \
-	./bin/foxctl-tui --api-base-url "$(GO_TUI_API_URL)" --console-session-id "$$session_id" --workspace "$(GO_TUI_WORKSPACE)"
+	if [ -n "$$agent_id" ]; then \
+		echo "Launching Go TUI attached to foxctl agent $$agent_id"; \
+		./bin/foxctl-tui --api-base-url "$(GO_TUI_API_URL)" --agent-id "$$agent_id" --workspace "$(GO_TUI_WORKSPACE)"; \
+	else \
+		echo "Launching Go TUI attached to console session $$session_id"; \
+		./bin/foxctl-tui --api-base-url "$(GO_TUI_API_URL)" --console-session-id "$$session_id" --workspace "$(GO_TUI_WORKSPACE)"; \
+	fi
 
 go-tui-agent: GO_TUI_SPAWN_AGENT=1
 go-tui-agent: GO_TUI_PROFILE=foxctl-agent
