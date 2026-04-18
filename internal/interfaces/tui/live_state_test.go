@@ -315,6 +315,7 @@ func TestLoadInitialShellStateMapsAgentCompanionWhenRequested(t *testing.T) {
 					ID:          "agent-1",
 					Name:        "Local Fox",
 					Role:        "coder",
+					State:       "running",
 					LLMProvider: "lmstudio",
 					LLMModel:    "local-model",
 				},
@@ -341,8 +342,17 @@ func TestLoadInitialShellStateMapsAgentCompanionWhenRequested(t *testing.T) {
 	if got := len(state.Transcript); got != 1 {
 		t.Fatalf("len(Transcript) = %d, want 1", got)
 	}
-	if !strings.Contains(state.Transcript[0].Text, "attached to foxctl companion agent Local Fox") {
+	if !strings.Contains(state.Transcript[0].Text, "Live foxctl companion attached: Local Fox") {
 		t.Fatalf("Transcript[0].Text = %q, want agent attachment message", state.Transcript[0].Text)
+	}
+	if got := len(state.Memory); got != 3 {
+		t.Fatalf("len(Memory) = %d, want 3 live usage cards", got)
+	}
+	if !strings.Contains(state.Memory[0].Summary, "Codex or Claude Code") {
+		t.Fatalf("Memory[0].Summary = %q, want Codex/Claude usage guidance", state.Memory[0].Summary)
+	}
+	if state.Workers[0].Name != "Local Fox" || state.Workers[0].Status != "running" {
+		t.Fatalf("Workers[0] = %#v, want attached Local Fox worker", state.Workers[0])
 	}
 }
 

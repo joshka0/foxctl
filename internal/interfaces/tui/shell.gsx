@@ -480,7 +480,7 @@ func composerPrompt(state ShellState, askEnabled bool) string {
 		if target == "" {
 			target = "attached agent"
 		}
-		return "Ask " + target + " - Enter sends, Ctrl+C quits"
+		return "Type a coding task for " + target + " - Enter sends, Tab switches panes"
 	}
 	return "Read-only plan preview - run make go-tui-agent to chat with a foxctl agent"
 }

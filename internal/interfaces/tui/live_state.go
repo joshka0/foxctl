@@ -77,8 +77,11 @@ func LoadInitialShellState(ctx context.Context, opts Options) (ShellState, error
 		state.Transcript = []TranscriptEntry{{
 			Speaker: "system",
 			Kind:    "agent",
-			Text:    "attached to foxctl companion agent " + firstNonEmpty(agent.Agent.Name, agent.Agent.Slug, agent.Agent.ID),
+			Text:    "Live foxctl companion attached: " + firstNonEmpty(agent.Agent.Name, agent.Agent.Slug, agent.Agent.ID) + ". Give it coding tasks the way you would in Codex or Claude Code.",
 		}}
+		state.Memory = liveAgentMemoryRail(agent.Agent)
+		state.Continuity = liveAgentContinuity(agent.Agent)
+		state.Workers = liveAgentWorkers(agent.Agent)
 	}
 
 	if consoleSessionID != "" {
@@ -100,6 +103,48 @@ func LoadInitialShellState(ctx context.Context, opts Options) (ShellState, error
 	}
 
 	return state, nil
+}
+
+func liveAgentMemoryRail(agent AgentRecord) []MemorySummary {
+	name := firstNonEmpty(agent.Name, agent.Slug, agent.ID, "the agent")
+	return []MemorySummary{
+		{
+			Title:   "How to use",
+			Summary: "Use this like Codex or Claude Code: ask " + name + " to inspect files, make edits, run checks, explain failures, or review a diff.",
+		},
+		{
+			Title:   "Good prompts",
+			Summary: "Examples: 'review git diff', 'implement the next TUI slice', 'run the focused tests', 'find why this command failed'.",
+		},
+		{
+			Title:   "Workflow",
+			Summary: "Type in Composer, press Enter, read the reply in Transcript, then iterate. Review file changes before committing.",
+		},
+	}
+}
+
+func liveAgentContinuity(agent AgentRecord) ContinuitySummary {
+	return ContinuitySummary{
+		EpicID:   "go-tui-agent-shell",
+		Status:   firstNonEmpty(agent.State, "attached"),
+		Boundary: "Live companion mode routes Composer text to /api/agents/{id}/ask and stores replies in the agent conversation.",
+		Next:     "Ask for a concrete coding action. Include files, commands, or acceptance criteria when you know them.",
+	}
+}
+
+func liveAgentWorkers(agent AgentRecord) []WorkerSummary {
+	return []WorkerSummary{
+		{
+			Name:   firstNonEmpty(agent.Name, agent.Slug, agent.ID, "companion"),
+			Status: firstNonEmpty(agent.State, "attached"),
+			Task:   workerTask(agent),
+		},
+		{
+			Name:   "you",
+			Status: "operator",
+			Task:   "drive the work with specific prompts, then review generated diffs and test output",
+		},
+	}
 }
 
 func mapAgentAssistant(agent AgentRecord) AssistantSummary {
