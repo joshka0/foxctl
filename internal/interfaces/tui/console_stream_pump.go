@@ -48,6 +48,12 @@ type ConsoleStreamUpdate struct {
 }
 
 // ConsoleStreamPump owns one stream-reading goroutine and emits bounded updates.
+//
+// Note: ConsoleStreamPump is a source-driven runtime (no Enqueue — it reads
+// from an SSE connection). It shares the same lifecycle pattern as
+// runtime.Bounded (context.WithCancel, sync.Once stop, sync.WaitGroup) but
+// manages its own goroutine because the source-driven model is fundamentally
+// different from the request-driven model that Bounded serves.
 type ConsoleStreamPump struct {
 	source  ConsoleStreamSource
 	updates chan ConsoleStreamUpdate

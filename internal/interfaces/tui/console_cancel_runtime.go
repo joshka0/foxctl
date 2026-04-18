@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
+
+	"github.com/joshka0/foxctl/internal/interfaces/tui/runtime"
 )
 
 const (
@@ -69,16 +70,9 @@ type ConsoleCancelUpdate struct {
 }
 
 // ConsoleCancelRuntime owns one goroutine that submits queued cancel requests.
+// It delegates goroutine lifecycle to runtime.Bounded.
 type ConsoleCancelRuntime struct {
-	canceler ConsoleCanceler
-	requests chan CancelConsoleSessionRequest
-	updates  chan ConsoleCancelUpdate
-
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	stopOnce  sync.Once
-	waitGroup sync.WaitGroup
+	bounded *runtime.Bounded[CancelConsoleSessionRequest, ConsoleCancelUpdate]
 }
 
 // NewConsoleCancelRuntime creates and starts a bounded cancel runtime.
@@ -109,22 +103,51 @@ func NewConsoleCancelRuntime(
 		updateBufferSize = defaultConsoleCancelUpdateBufferSize
 	}
 
-	ctx, cancel := context.WithCancel(parent)
-	runtime := &ConsoleCancelRuntime{
-		canceler: canceler,
-		requests: make(chan CancelConsoleSessionRequest, requestBufferSize),
-		updates:  make(chan ConsoleCancelUpdate, updateBufferSize),
-		ctx:      ctx,
-		cancel:   cancel,
+	handler := func(ctx context.Context, req CancelConsoleSessionRequest) ConsoleCancelUpdate {
+		response, err := canceler.SubmitCancel(ctx, req)
+		if err != nil {
+			return ConsoleCancelUpdate{
+				Type: ConsoleCancelUpdateError,
+				Failed: &ConsoleCancelFailed{
+					CorrelationID: req.CorrelationID,
+					Err:           err,
+				},
+			}
+		}
+
+		if !response.OK {
+			message := strings.TrimSpace(response.Message)
+			if message == "" {
+				message = "cancel request was not accepted"
+			}
+			return ConsoleCancelUpdate{
+				Type: ConsoleCancelUpdateError,
+				Failed: &ConsoleCancelFailed{
+					CorrelationID: req.CorrelationID,
+					Err:           errors.New(message),
+				},
+			}
+		}
+
+		return ConsoleCancelUpdate{
+			Type: ConsoleCancelUpdateAccepted,
+			Accepted: &ConsoleCancelAccepted{
+				CorrelationID: req.CorrelationID,
+				Message:       response.Message,
+			},
+		}
 	}
-	runtime.waitGroup.Add(1)
-	go runtime.run()
-	return runtime, nil
+
+	b, err := runtime.NewBounded(parent, requestBufferSize, updateBufferSize, handler)
+	if err != nil {
+		return nil, err
+	}
+	return &ConsoleCancelRuntime{bounded: b}, nil
 }
 
 // Enqueue trims and adds one cancel request to the bounded runtime queue.
-func (runtime *ConsoleCancelRuntime) Enqueue(ctx context.Context, req CancelConsoleSessionRequest) error {
-	if runtime == nil {
+func (rt *ConsoleCancelRuntime) Enqueue(ctx context.Context, req CancelConsoleSessionRequest) error {
+	if rt == nil {
 		return errors.New("console cancel runtime is required")
 	}
 	if ctx == nil {
@@ -133,103 +156,33 @@ func (runtime *ConsoleCancelRuntime) Enqueue(ctx context.Context, req CancelCons
 
 	sanitized := sanitizeCancelConsoleSessionRequest(req)
 
-	select {
-	case <-runtime.ctx.Done():
-		return runtime.ctx.Err()
-	default:
+	err := rt.bounded.Enqueue(ctx, sanitized)
+	if err != nil {
+		// Map ErrStopped to context.Canceled to preserve existing behavior.
+		if errors.Is(err, runtime.ErrStopped) {
+			return rt.bounded.Context().Err()
+		}
+		return err
 	}
-
-	select {
-	case <-runtime.ctx.Done():
-		return runtime.ctx.Err()
-	case <-ctx.Done():
-		return ctx.Err()
-	case runtime.requests <- sanitized:
-		return nil
-	}
+	return nil
 }
 
 // Updates returns the bounded receive-only update channel.
-func (runtime *ConsoleCancelRuntime) Updates() <-chan ConsoleCancelUpdate {
-	return runtime.updates
+func (rt *ConsoleCancelRuntime) Updates() <-chan ConsoleCancelUpdate {
+	return rt.bounded.Updates()
 }
 
 // Stop cancels processing and waits for the worker goroutine to exit.
-func (runtime *ConsoleCancelRuntime) Stop() {
-	if runtime == nil {
+func (rt *ConsoleCancelRuntime) Stop() {
+	if rt == nil {
 		return
 	}
-	runtime.stopOnce.Do(func() {
-		runtime.cancel()
-		runtime.waitGroup.Wait()
-	})
+	rt.bounded.Stop()
 }
 
 // Close is an alias for Stop.
-func (runtime *ConsoleCancelRuntime) Close() {
-	runtime.Stop()
-}
-
-func (runtime *ConsoleCancelRuntime) run() {
-	defer runtime.waitGroup.Done()
-	defer close(runtime.updates)
-
-	for {
-		select {
-		case <-runtime.ctx.Done():
-			return
-		case req := <-runtime.requests:
-			response, err := runtime.canceler.SubmitCancel(runtime.ctx, req)
-			if err != nil {
-				if sendErr := runtime.sendUpdate(ConsoleCancelUpdate{
-					Type: ConsoleCancelUpdateError,
-					Failed: &ConsoleCancelFailed{
-						CorrelationID: req.CorrelationID,
-						Err:           err,
-					},
-				}); sendErr != nil {
-					return
-				}
-				continue
-			}
-
-			if !response.OK {
-				message := strings.TrimSpace(response.Message)
-				if message == "" {
-					message = "cancel request was not accepted"
-				}
-				if sendErr := runtime.sendUpdate(ConsoleCancelUpdate{
-					Type: ConsoleCancelUpdateError,
-					Failed: &ConsoleCancelFailed{
-						CorrelationID: req.CorrelationID,
-						Err:           errors.New(message),
-					},
-				}); sendErr != nil {
-					return
-				}
-				continue
-			}
-
-			if sendErr := runtime.sendUpdate(ConsoleCancelUpdate{
-				Type: ConsoleCancelUpdateAccepted,
-				Accepted: &ConsoleCancelAccepted{
-					CorrelationID: req.CorrelationID,
-					Message:       response.Message,
-				},
-			}); sendErr != nil {
-				return
-			}
-		}
-	}
-}
-
-func (runtime *ConsoleCancelRuntime) sendUpdate(update ConsoleCancelUpdate) error {
-	select {
-	case <-runtime.ctx.Done():
-		return runtime.ctx.Err()
-	case runtime.updates <- update:
-		return nil
-	}
+func (rt *ConsoleCancelRuntime) Close() {
+	rt.Stop()
 }
 
 func sanitizeCancelConsoleSessionRequest(req CancelConsoleSessionRequest) CancelConsoleSessionRequest {

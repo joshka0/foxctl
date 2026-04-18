@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
+
+	"github.com/joshka0/foxctl/internal/interfaces/tui/runtime"
 )
 
 const (
@@ -93,16 +94,9 @@ type ConsoleAskUpdate struct {
 }
 
 // ConsoleAskRuntime owns one goroutine that submits queued asks.
+// It delegates goroutine lifecycle to runtime.Bounded.
 type ConsoleAskRuntime struct {
-	submitter ConsoleAskSubmitter
-	requests  chan AskConsoleSessionRequest
-	updates   chan ConsoleAskUpdate
-
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	stopOnce  sync.Once
-	waitGroup sync.WaitGroup
+	bounded *runtime.Bounded[AskConsoleSessionRequest, ConsoleAskUpdate]
 }
 
 // NewConsoleAskRuntime creates and starts a bounded ask runtime.
@@ -133,22 +127,52 @@ func NewConsoleAskRuntime(
 		updateBufferSize = defaultConsoleAskUpdateBufferSize
 	}
 
-	ctx, cancel := context.WithCancel(parent)
-	runtime := &ConsoleAskRuntime{
-		submitter: submitter,
-		requests:  make(chan AskConsoleSessionRequest, requestBufferSize),
-		updates:   make(chan ConsoleAskUpdate, updateBufferSize),
-		ctx:       ctx,
-		cancel:    cancel,
+	handler := func(ctx context.Context, req AskConsoleSessionRequest) ConsoleAskUpdate {
+		response, err := submitter.SubmitAsk(ctx, req)
+		if err != nil {
+			return ConsoleAskUpdate{
+				Type: ConsoleAskUpdateError,
+				Failed: &ConsoleAskFailed{
+					Content:       req.Content,
+					CorrelationID: req.CorrelationID,
+					Err:           err,
+				},
+			}
+		}
+		if !response.OK {
+			message := strings.TrimSpace(response.Message)
+			if message == "" {
+				message = "ask request was not accepted"
+			}
+			return ConsoleAskUpdate{
+				Type: ConsoleAskUpdateError,
+				Failed: &ConsoleAskFailed{
+					Content:       req.Content,
+					CorrelationID: firstNonEmpty(response.CorrelationID, req.CorrelationID),
+					Err:           errors.New(message),
+				},
+			}
+		}
+		return ConsoleAskUpdate{
+			Type: ConsoleAskUpdateAccepted,
+			Accepted: &ConsoleAskAccepted{
+				Content:       req.Content,
+				CorrelationID: firstNonEmpty(response.CorrelationID, req.CorrelationID),
+				Message:       response.Message,
+			},
+		}
 	}
-	runtime.waitGroup.Add(1)
-	go runtime.run()
-	return runtime, nil
+
+	b, err := runtime.NewBounded(parent, requestBufferSize, updateBufferSize, handler)
+	if err != nil {
+		return nil, err
+	}
+	return &ConsoleAskRuntime{bounded: b}, nil
 }
 
 // Enqueue validates and adds one ask request to the bounded runtime queue.
-func (runtime *ConsoleAskRuntime) Enqueue(ctx context.Context, req AskConsoleSessionRequest) error {
-	if runtime == nil {
+func (rt *ConsoleAskRuntime) Enqueue(ctx context.Context, req AskConsoleSessionRequest) error {
+	if rt == nil {
 		return errors.New("console ask runtime is required")
 	}
 	if ctx == nil {
@@ -160,105 +184,33 @@ func (runtime *ConsoleAskRuntime) Enqueue(ctx context.Context, req AskConsoleSes
 		return err
 	}
 
-	select {
-	case <-runtime.ctx.Done():
-		return runtime.ctx.Err()
-	default:
+	err = rt.bounded.Enqueue(ctx, sanitized)
+	if err != nil {
+		// Map ErrStopped to context.Canceled to preserve existing behavior.
+		if errors.Is(err, runtime.ErrStopped) {
+			return rt.bounded.Context().Err()
+		}
+		return err
 	}
-
-	select {
-	case <-runtime.ctx.Done():
-		return runtime.ctx.Err()
-	case <-ctx.Done():
-		return ctx.Err()
-	case runtime.requests <- sanitized:
-		return nil
-	}
+	return nil
 }
 
 // Updates returns the bounded receive-only update channel.
-func (runtime *ConsoleAskRuntime) Updates() <-chan ConsoleAskUpdate {
-	return runtime.updates
+func (rt *ConsoleAskRuntime) Updates() <-chan ConsoleAskUpdate {
+	return rt.bounded.Updates()
 }
 
 // Stop cancels processing and waits for the worker goroutine to exit.
-func (runtime *ConsoleAskRuntime) Stop() {
-	if runtime == nil {
+func (rt *ConsoleAskRuntime) Stop() {
+	if rt == nil {
 		return
 	}
-	runtime.stopOnce.Do(func() {
-		runtime.cancel()
-		runtime.waitGroup.Wait()
-	})
+	rt.bounded.Stop()
 }
 
 // Close is an alias for Stop.
-func (runtime *ConsoleAskRuntime) Close() {
-	runtime.Stop()
-}
-
-func (runtime *ConsoleAskRuntime) run() {
-	defer runtime.waitGroup.Done()
-	defer close(runtime.updates)
-
-	for {
-		select {
-		case <-runtime.ctx.Done():
-			return
-		case req := <-runtime.requests:
-			response, err := runtime.submitter.SubmitAsk(runtime.ctx, req)
-			if err != nil {
-				if sendErr := runtime.sendUpdate(ConsoleAskUpdate{
-					Type: ConsoleAskUpdateError,
-					Failed: &ConsoleAskFailed{
-						Content:       req.Content,
-						CorrelationID: req.CorrelationID,
-						Err:           err,
-					},
-				}); sendErr != nil {
-					return
-				}
-				continue
-			}
-			if !response.OK {
-				message := strings.TrimSpace(response.Message)
-				if message == "" {
-					message = "ask request was not accepted"
-				}
-				if sendErr := runtime.sendUpdate(ConsoleAskUpdate{
-					Type: ConsoleAskUpdateError,
-					Failed: &ConsoleAskFailed{
-						Content:       req.Content,
-						CorrelationID: firstNonEmpty(response.CorrelationID, req.CorrelationID),
-						Err:           errors.New(message),
-					},
-				}); sendErr != nil {
-					return
-				}
-				continue
-			}
-
-			if sendErr := runtime.sendUpdate(ConsoleAskUpdate{
-				Type: ConsoleAskUpdateAccepted,
-				Accepted: &ConsoleAskAccepted{
-					Content:       req.Content,
-					CorrelationID: firstNonEmpty(response.CorrelationID, req.CorrelationID),
-					Message:       response.Message,
-				},
-			}); sendErr != nil {
-				return
-			}
-		}
-	}
-}
-
-func (runtime *ConsoleAskRuntime) sendUpdate(update ConsoleAskUpdate) error {
-	select {
-	case <-runtime.ctx.Done():
-		return runtime.ctx.Err()
-	case runtime.updates <- update:
-		return nil
-	}
+func (rt *ConsoleAskRuntime) Close() {
+	rt.Stop()
 }
 
 func sanitizeAskConsoleSessionRequest(req AskConsoleSessionRequest) (AskConsoleSessionRequest, error) {
