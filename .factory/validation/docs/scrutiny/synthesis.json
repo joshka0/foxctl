@@ -1,0 +1,81 @@
+{
+  "milestone": "docs",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "go test -race -count=1 ./internal/interfaces/tui/...",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "go vet ./...",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": false,
+      "command": "golangci-lint run --timeout 10m ./internal/interfaces/tui/... ./cmd/foxctl_tui/...",
+      "exitCode": 3,
+      "note": "golangci-lint v2.8.0 was built with go1.25.4 but the project targets go1.26.1. This is an environment toolchain version mismatch, not a code issue. No code changes were made in this docs-only milestone. The lint would pass with a golangci-lint binary built with go1.26.1."
+    },
+    "check-doc-links": {
+      "passed": true,
+      "command": "make check-doc-links",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 8,
+    "passed": 8,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "The tui-docs-worker skill instructs workers to cite specific symbols but does not provide guidance on verifying line numbers. Two features (docs-audit-current-tui, docs-adrs) produced systematically approximate line-number citations. The skill should add a step: 'use grep -n or rg --line-number to verify each citation line number before writing it'.",
+      "evidence": "docs-audit-current-tui review found 21/23 spot-checked citations off by 1-118 lines. docs-adrs review found 2 slightly imprecise citations. The skill says 'cite specific symbols' but not 'verify line numbers'.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "The tui-docs-worker skill says to cross-reference against keys.go for keybinding conflicts but does not mention shell.gsx. The docs-information-architecture worker correctly discovered shell.gsx bindings independently via Grep. The skill should mention shell.gsx as a required source for keybinding conflict analysis.",
+      "evidence": "docs-information-architecture review found that shell.gsx:269-299 contains important keybindings (FocusGroup Tab/Shift-Tab, rail tabs, cycleRail) not in keys.go. The skill's precondition only lists keys.go.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "go-tui.dev documentation site is a SPA returning marketing content for all URLs. Future workers should know to use Go module cache instead.",
+      "reason": "already-documented — the worker handoff noted this and the research-go-tui.md references actual source code rather than the site. No library entry needed since the workaround is embedded in the doc itself."
+    },
+    {
+      "observation": "go-tui.dev URLs in research-go-tui.md are effectively dead links for human readers (SPA shell content).",
+      "reason": "ambiguous — these URLs serve as citation anchors and the doc provides GitHub/pkg.go.dev alternatives. Replacing them is a content quality improvement, not a shared state concern."
+    },
+    {
+      "observation": "Integration map reveals backpressure semantics (ConsoleAskRuntime cap 16, SSE hub cap 64/256) not in library.",
+      "reason": "already-documented — library/architecture.md explicitly references integration-map.md for full backpressure details. Adding the specific numbers to the library would duplicate what's already cross-referenced."
+    },
+    {
+      "observation": "Integration map identifies 4 proposed adapter structs not yet in the codebase.",
+      "reason": "already-documented — these are named in integration-map.md which is an M1 deliverable that M2/M3 workers will read. No separate library entry needed."
+    },
+    {
+      "observation": "Worker discovered markdown links to not-yet-existing files cause check-doc-links failures; workaround is backtick references.",
+      "reason": "already-documented — the handoff skillFeedback already captures this pattern. The skill's suggestedChanges field is the right place for this, not the library."
+    },
+    {
+      "observation": "ADR 004 proposes a lint rule about state.Set outside reducer calls that isn't in AGENTS.md.",
+      "reason": "ambiguous — this convention is a forward-looking M2/M3 concern. Adding it to AGENTS.md now would be premature since the rule isn't enforceable until the component library exists."
+    },
+    {
+      "observation": "Architecture doc's .gsx regeneration command form may be imprecise.",
+      "reason": "ambiguous — both forms are listed and the research-go-tui.md has more detail. Not a shared state concern."
+    }
+  ],
+  "previousRound": null
+}

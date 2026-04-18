@@ -1,0 +1,39 @@
+{
+  "featureId": "docs-information-architecture",
+  "reviewedAt": "2026-04-19T00:15:00Z",
+  "commitId": "cdc78fa2",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The information-architecture.md document (583 lines) thoroughly covers all eight required sections (a)–(h), the Progressive Reveal section (4-row mapping), and the Three-Plane Memory Model with distinct subsections for Companion Memory, Named Durable Memory, and ACA/Continuity. The keybinding table (22 entries) was cross-checked against keys.go (lines 38–40: ESC, q, Ctrl+C as hard-quit bindings) and shell.gsx (lines 269–299: FocusGroup Tab/Shift-Tab, rail tabs Ctrl+M/Y/W/B, Enter for composer submit, Ctrl+X for cancel, arrow keys for cycleRail). All 8 conflicts are correctly identified and acknowledged with appropriate resolution notes. The document passes `make check-doc-links` and existing Go tests. The worker followed the tui-docs-worker skill procedure correctly.",
+    "issues": [
+      {
+        "file": "docs/plans/tui-redesign/information-architecture.md",
+        "line": 418,
+        "severity": "non_blocking",
+        "description": "Progressive Reveal row (ii) Tool Activity mentions pressing `→` (right arrow) to expand inline, but this binding is not listed in the keybinding table (section f). The right arrow key IS bound in shell.gsx:277 as `cycleRail(1)`, so there is a potential conflict if both actions coexist. The doc should either add `→` to the keybinding table with its conflict note, or remove the `→` expand-inline action to avoid ambiguity."
+      },
+      {
+        "file": "docs/plans/tui-redesign/information-architecture.md",
+        "line": null,
+        "severity": "non_blocking",
+        "description": "The keybinding table does not mention the existing `←`/`→` (KeyLeft/KeyRight) bindings from shell.gsx:277-278 which currently map to `cycleRail(±1)`. Since the new design removes the rail concept, these bindings are effectively orphaned. The table should explicitly note that left/right arrow keys are freed by the removal of the rail, or document their new purpose (if any)."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The tui-docs-worker skill says to cross-reference against keys.go for keybinding conflicts but does not mention shell.gsx. The worker correctly discovered shell.gsx bindings independently via Grep. The skill's work procedure (step 3) should mention shell.gsx as a required source for keybinding conflict analysis alongside keys.go.",
+      "evidence": "Feature preconditions list only 'internal/interfaces/tui/keys.go exists (used for conflict check)' — shell.gsx is not listed. Worker transcript shows grep of shell.gsx at lines 269-302 to find FocusGroup bindings and rail tab bindings. Handoff correctly references 'keys.go:38-40 and shell.gsx:270-299'."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The worker discovered that markdown links to not-yet-existing files (like architecture.md from a different feature) cause `make check-doc-links` to fail. The worker worked around this by converting links to backtick references. This is a useful pattern for future docs workers who need to reference forthcoming deliverables.",
+      "evidence": "Transcript shows worker testing link checker, finding architecture.md doesn't exist, and editing the doc to convert `[](architecture.md)` to backtick references. The handoff.skillFeedback.suggestedChanges mentions this: 'architecture.md may not exist yet when writing information-architecture.md, so links to it should use plain backtick references rather than markdown links.'"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS with minor non-blocking observations. The information-architecture.md document is comprehensive, well-structured, and satisfies all three validation assertions (VAL-DOCS-004, VAL-DOCS-011, VAL-DOCS-013). All 8 keybinding conflicts with keys.go/shell.gsx are correctly identified and acknowledged. The three memory planes are distinct subsections with honest-surfaces labeling. Two non-blocking issues: (1) the `→` expand-inline action in Progressive Reveal is not in the keybinding table and conflicts with the existing cycleRail binding; (2) the left/right arrow key bindings (currently cycleRail) are not addressed in the table. The worker followed the skill procedure correctly and all verification commands pass."
+}
