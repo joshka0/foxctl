@@ -1,0 +1,10 @@
+  agent-abc12345 researcher
+  agent-def67890 coder
+│ agent-ghi11111 planner
+  agent-jkl22222 reviewer
+  agent-mno33333 overseer
+
+
+
+
+
