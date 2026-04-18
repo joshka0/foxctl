@@ -471,11 +471,50 @@ func railTabClass(active bool) string {
 	return "font-dim"
 }
 
-func composerText(text string) string {
-	if text == "" {
-		return "Type a draft instruction, Enter records it locally"
+func composerPrompt(state ShellState, askEnabled bool) string {
+	if strings.TrimSpace(state.Composer) != "" {
+		return state.Composer
 	}
-	return text
+	if askEnabled {
+		target := strings.TrimSpace(state.Assistant.Name)
+		if target == "" {
+			target = "attached agent"
+		}
+		return "Ask " + target + " - Enter sends, Ctrl+C quits"
+	}
+	return "Read-only plan preview - run make go-tui-agent to chat with a foxctl agent"
+}
+
+func topBarMode(state ShellState) string {
+	if strings.EqualFold(strings.TrimSpace(state.Assistant.Provider), "native") {
+		return "PLAN"
+	}
+	return "LIVE AGENT"
+}
+
+func assistantLabel(state ShellState) string {
+	parts := []string{
+		strings.TrimSpace(state.Assistant.Role),
+		strings.TrimSpace(state.Assistant.Name),
+	}
+	provider := strings.TrimSpace(state.Assistant.Provider)
+	model := strings.TrimSpace(state.Assistant.Model)
+	switch {
+	case provider != "" && model != "":
+		parts = append(parts, provider+"/"+model)
+	case provider != "":
+		parts = append(parts, provider)
+	case model != "":
+		parts = append(parts, model)
+	}
+
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 func paneNames(cancelEnabled bool) string {
@@ -529,11 +568,10 @@ templ TopBar(state ShellState) {
 			<span class="font-dim">{"|"}</span>
 			<span>{state.EpicTitle}</span>
 			<span class="text-green font-bold">{state.EpicStatus}</span>
+			<span class="text-cyan font-bold">{topBarMode(state)}</span>
 		</div>
 		<div class="flex gap-1">
-			<span class="font-dim">{state.Assistant.Role}</span>
-			<span>{state.Assistant.Name}</span>
-			<span class="font-dim">{fmt.Sprintf("%s/%s", state.Assistant.Provider, state.Assistant.Model)}</span>
+			<span class="font-dim">{assistantLabel(state)}</span>
 		</div>
 	</div>
 }
@@ -556,13 +594,13 @@ templ TranscriptPane(state ShellState, active bool) {
 	</div>
 }
 
-templ ComposerPane(state ShellState, active bool) {
+templ ComposerPane(state ShellState, active bool, askEnabled bool) {
 	<div class={"flex-col border-rounded p-1 gap-1 shrink-0 " + focusClass(active)} height={5}>
 		<div class="flex justify-between">
 			<span class="font-bold text-cyan">Composer</span>
 			<span class="font-dim">{focusLabel(active)}</span>
 		</div>
-		<span>{composerText(state.Composer)}</span>
+		<span>{composerPrompt(state, askEnabled)}</span>
 	</div>
 }
 
@@ -614,10 +652,10 @@ templ WorkersRail(workers []WorkerSummary, active bool) {
 templ TaskRail() {
 	<div class="flex-col gap-1 grow">
 		<span class="font-bold">Current task</span>
-		<span>{"Build Phase 0 shell and prove go-tui generation/build path."}</span>
+		<span>{"Use the composer to ask the attached companion, or attach one with make go-tui-agent."}</span>
 		<hr />
-		<span class="font-bold">Definition of done</span>
-		<span>{"binary builds, generated .gsx committed, focus works, mocked panes visible"}</span>
+		<span class="font-bold">Expected flow</span>
+		<span>{"Tab to Composer, type a request, press Enter, read assistant replies in Transcript."}</span>
 	</div>
 }
 
@@ -658,7 +696,7 @@ templ (s *Shell) Render() {
 		<div class="flex gap-1 grow p-1">
 			<div class="flex-col gap-1 grow">
 				@TranscriptPane(s.state.Get(), s.isFocused(FocusTranscript))
-				@ComposerPane(s.state.Get(), s.isFocused(FocusComposer))
+				@ComposerPane(s.state.Get(), s.isFocused(FocusComposer), s.enqueueAsk != nil)
 			</div>
 			@RightRail(s.state.Get(), s.isFocused(FocusRail), s.isFocused(FocusWorkers))
 		</div>

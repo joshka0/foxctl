@@ -481,11 +481,50 @@ func railTabClass(active bool) string {
 	return "font-dim"
 }
 
-func composerText(text string) string {
-	if text == "" {
-		return "Type a draft instruction, Enter records it locally"
+func composerPrompt(state ShellState, askEnabled bool) string {
+	if strings.TrimSpace(state.Composer) != "" {
+		return state.Composer
 	}
-	return text
+	if askEnabled {
+		target := strings.TrimSpace(state.Assistant.Name)
+		if target == "" {
+			target = "attached agent"
+		}
+		return "Ask " + target + " - Enter sends, Ctrl+C quits"
+	}
+	return "Read-only plan preview - run make go-tui-agent to chat with a foxctl agent"
+}
+
+func topBarMode(state ShellState) string {
+	if strings.EqualFold(strings.TrimSpace(state.Assistant.Provider), "native") {
+		return "PLAN"
+	}
+	return "LIVE AGENT"
+}
+
+func assistantLabel(state ShellState) string {
+	parts := []string{
+		strings.TrimSpace(state.Assistant.Role),
+		strings.TrimSpace(state.Assistant.Name),
+	}
+	provider := strings.TrimSpace(state.Assistant.Provider)
+	model := strings.TrimSpace(state.Assistant.Model)
+	switch {
+	case provider != "" && model != "":
+		parts = append(parts, provider+"/"+model)
+	case provider != "":
+		parts = append(parts, provider)
+	case model != "":
+		parts = append(parts, model)
+	}
+
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 func paneNames(cancelEnabled bool) string {
@@ -605,26 +644,22 @@ func TopBar(state ShellState) *TopBarView {
 		tui.WithTextStyle(tui.NewStyle().Foreground(tui.Green).Bold()),
 	)
 	__tui_1.AddChild(__tui_6)
-	__tui_0.AddChild(__tui_1)
 	__tui_7 := tui.New(
+		tui.WithText(topBarMode(state)),
+		tui.WithTextStyle(tui.NewStyle().Foreground(tui.Cyan).Bold()),
+	)
+	__tui_1.AddChild(__tui_7)
+	__tui_0.AddChild(__tui_1)
+	__tui_8 := tui.New(
 		tui.WithDisplay(tui.DisplayFlex), tui.WithDirection(tui.Row),
 		tui.WithGap(1),
 	)
-	__tui_8 := tui.New(
-		tui.WithText(state.Assistant.Role),
-		tui.WithTextStyle(tui.NewStyle().Dim()),
-	)
-	__tui_7.AddChild(__tui_8)
 	__tui_9 := tui.New(
-		tui.WithText(state.Assistant.Name),
-	)
-	__tui_7.AddChild(__tui_9)
-	__tui_10 := tui.New(
-		tui.WithText(fmt.Sprintf("%s/%s", state.Assistant.Provider, state.Assistant.Model)),
+		tui.WithText(assistantLabel(state)),
 		tui.WithTextStyle(tui.NewStyle().Dim()),
 	)
-	__tui_7.AddChild(__tui_10)
-	__tui_0.AddChild(__tui_7)
+	__tui_8.AddChild(__tui_9)
+	__tui_0.AddChild(__tui_8)
 
 	__bindApp := func(app *tui.App) {
 	}
@@ -790,7 +825,7 @@ var _ tui.AppUnbinder = (*ComposerPaneView)(nil)
 
 var _ tui.PropsUpdater = (*ComposerPaneView)(nil)
 
-func ComposerPane(state ShellState, active bool) *ComposerPaneView {
+func ComposerPane(state ShellState, active bool, askEnabled bool) *ComposerPaneView {
 	var view ComposerPaneView
 	var watchers []tui.Watcher
 
@@ -813,7 +848,7 @@ func ComposerPane(state ShellState, active bool) *ComposerPaneView {
 	__tui_1.AddChild(__tui_3)
 	__tui_0.AddChild(__tui_1)
 	__tui_4 := tui.New(
-		tui.WithText(composerText(state.Composer)),
+		tui.WithText(composerPrompt(state, askEnabled)),
 	)
 	__tui_0.AddChild(__tui_4)
 
@@ -1237,7 +1272,7 @@ func TaskRail() *TaskRailView {
 	)
 	__tui_0.AddChild(__tui_1)
 	__tui_2 := tui.New(
-		tui.WithText("Build Phase 0 shell and prove go-tui generation/build path."),
+		tui.WithText("Use the composer to ask the attached companion, or attach one with make go-tui-agent."),
 	)
 	__tui_0.AddChild(__tui_2)
 	__tui_3 := tui.New(
@@ -1245,12 +1280,12 @@ func TaskRail() *TaskRailView {
 	)
 	__tui_0.AddChild(__tui_3)
 	__tui_4 := tui.New(
-		tui.WithText("Definition of done"),
+		tui.WithText("Expected flow"),
 		tui.WithTextStyle(tui.NewStyle().Bold()),
 	)
 	__tui_0.AddChild(__tui_4)
 	__tui_5 := tui.New(
-		tui.WithText("binary builds, generated .gsx committed, focus works, mocked panes visible"),
+		tui.WithText("Tab to Composer, type a request, press Enter, read assistant replies in Transcript."),
 	)
 	__tui_0.AddChild(__tui_5)
 
@@ -1538,7 +1573,7 @@ func (s *Shell) Render(app *tui.App) *tui.Element {
 	)
 	__tui_4 := TranscriptPane(s.state.Get(), s.isFocused(FocusTranscript))
 	__tui_3.AddChild(__tui_4.Root)
-	__tui_5 := ComposerPane(s.state.Get(), s.isFocused(FocusComposer))
+	__tui_5 := ComposerPane(s.state.Get(), s.isFocused(FocusComposer), s.enqueueAsk != nil)
 	__tui_3.AddChild(__tui_5.Root)
 	__tui_2.AddChild(__tui_3)
 	__tui_6 := RightRail(s.state.Get(), s.isFocused(FocusRail), s.isFocused(FocusWorkers))

@@ -31,7 +31,7 @@ func DefaultShellState(opts Options) ShellState {
 		EpicStatus: "READY",
 		Assistant: AssistantSummary{
 			Name:     "Codex",
-			Role:     "foreground assistant",
+			Role:     "plan preview",
 			Provider: "native",
 			Model:    "gpt-5.4",
 		},
@@ -39,45 +39,45 @@ func DefaultShellState(opts Options) ShellState {
 			{
 				Speaker: "system",
 				Kind:    "epic",
-				Text:    "READY epic loaded as an implementation plan. Epic creation is complete; this shell is the implementation surface.",
+				Text:    "Plan preview loaded. No companion agent is attached yet; start with make go-tui-agent to chat with a foxctl agent.",
 			},
 			{
 				Speaker: "assistant",
 				Kind:    "plan",
-				Text:    "Phase 0 creates the standalone go-tui shell, mocked panes, focus cycling, and generated .gsx path.",
+				Text:    "This screen is the TUI shell: transcript on the left, composer below, operational context on the right.",
 			},
 			{
-				Speaker: "worker",
-				Kind:    "frontier",
-				Text:    "Next dispatchable frontier: foreground transcript, composer, context rail, and worker/task visibility.",
+				Speaker: "system",
+				Kind:    "next",
+				Text:    "Attach an agent with --agent-id or run make go-tui-agent; then Enter sends composer text to the companion.",
 			},
 		},
 		Composer:   "",
 		ActiveRail: RailMemory,
 		Memory: []MemorySummary{
 			{
-				Title:   "Boundary",
-				Summary: "TUI implementation is separate from epic creation and does not mutate room-agile state in Phase 0.",
+				Title:   "Mode",
+				Summary: "Offline plan preview. Composer text is local unless an agent or console session is attached.",
 			},
 			{
-				Title:   "Reference",
-				Summary: "go-tui reference repo is local under ~/repos/githubs/go-tui and drives .gsx generation.",
+				Title:   "Run",
+				Summary: "Use make go-tui-agent to spawn a foxctl companion and open this shell in live chat mode.",
 			},
 			{
-				Title:   "Placement",
-				Summary: "Terminal interface code belongs under internal/interfaces, not internal/v2.",
+				Title:   "Layout",
+				Summary: "Transcript is conversation history; context rail is orientation; footer lists navigation keys.",
 			},
 		},
 		Continuity: ContinuitySummary{
 			EpicID:   "go-tui-agent-shell",
 			Status:   "READY",
-			Boundary: "Implementation plan only; live agent/API integration comes after shell skeleton.",
-			Next:     "Replace mock adapters with typed foxctl API and event stream clients.",
+			Boundary: "Epic creation is done; this shell is for implementation and companion interaction.",
+			Next:     "Run make go-tui-agent or pass --agent-id to continue with a live foxctl companion.",
 		},
 		Workers: []WorkerSummary{
-			{Name: "foreground", Status: "active", Task: "own the transcript and composer loop"},
-			{Name: "reviewer", Status: "idle", Task: "review generated UI shell slices"},
-			{Name: "builder", Status: "blocked", Task: "waiting on live adapter contracts"},
+			{Name: "companion", Status: "not attached", Task: "run make go-tui-agent to spawn a local LMStudio-backed foxctl agent"},
+			{Name: "composer", Status: "draft-only", Task: "without an attached agent, Enter records local notes only"},
+			{Name: "runtime", Status: "ready", Task: "binary is built; API/agent attachment is optional per launch"},
 		},
 	}
 }
