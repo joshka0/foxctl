@@ -1,0 +1,2 @@
+Agents                Rooms                Events
+━━━━━━
