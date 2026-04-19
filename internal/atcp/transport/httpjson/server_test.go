@@ -15,7 +15,10 @@ import (
 
 func newTestServer(t *testing.T) (*httptest.Server, *broker.Broker) {
 	t.Helper()
-	b := broker.New(broker.Options{})
+	// Tests exercise terminal endpoints without orchestrating a lease every
+	// time; AllowUnleasedInputForTests: true matches the production invariant
+	// for the happy paths. Lease-specific tests still hit the real policy.
+	b := broker.New(broker.Options{AllowUnleasedInputForTests: true})
 	s := NewServer(b)
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(func() {
@@ -161,6 +164,23 @@ func TestTerminalSubmit_WritesToPTY(t *testing.T) {
 	liveSess.Close()
 	<-liveSess.Done()
 	t.Fatal("submitted text never appeared in output")
+}
+
+// TestCreateSession_RejectsTrailingJSON verifies decodeJSON consumes exactly
+// one top-level JSON value, so `{..}{..}` fails with 400 rather than silently
+// accepting the first object and discarding the rest.
+func TestCreateSession_RejectsTrailingJSON(t *testing.T) {
+	ts, _ := newTestServer(t)
+	body := strings.NewReader(`{"cmd":["sleep","30"]}{"cmd":["cat"]}`)
+	resp, err := http.Post(ts.URL+"/v1/sessions", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d (want 400), body = %s", resp.StatusCode, raw)
+	}
 }
 
 func TestTerminalSubmit_BadSession(t *testing.T) {

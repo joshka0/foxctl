@@ -102,6 +102,28 @@ func TestTracker_OSCIgnored(t *testing.T) {
 	}
 }
 
+// TestTracker_OSCPayloadNotMisparsed guards the bug where OSC state reverted
+// to ground immediately, so bytes inside the OSC title that *looked like*
+// CSI (e.g. "\x1b[?2004h") were incorrectly treated as mode toggles.
+func TestTracker_OSCPayloadNotMisparsed(t *testing.T) {
+	tr := New()
+	// Window title payload deliberately contains a CSI-looking fragment.
+	tr.Feed([]byte("\x1b]0;\x1b[?2004h malicious title\x07"))
+	if tr.Snapshot().BracketedPaste {
+		t.Error("CSI-like bytes inside an OSC payload must not toggle modes")
+	}
+}
+
+// TestTracker_OSCWithStTerminator covers the ESC-\ String Terminator path.
+func TestTracker_OSCWithStTerminator(t *testing.T) {
+	tr := New()
+	// OSC terminated by ST (ESC \) rather than BEL, followed by a real CSI.
+	tr.Feed([]byte("\x1b]0;title\x1b\\\x1b[?2004h"))
+	if !tr.Snapshot().BracketedPaste {
+		t.Error("OSC ended by ST should let subsequent CSI apply")
+	}
+}
+
 func TestTracker_MalformedCSIAborts(t *testing.T) {
 	tr := New()
 	// Bad byte in parameters should abort without leaking state.

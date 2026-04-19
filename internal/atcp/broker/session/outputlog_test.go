@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -110,20 +111,18 @@ func TestOutputLog_AppendAfterCloseIsError(t *testing.T) {
 	}
 }
 
-func TestOutputLog_SubscribeReplaysThenDelivers(t *testing.T) {
+func TestOutputLog_SubscribeFromReplaysThenDelivers(t *testing.T) {
 	l := NewOutputLog(OutputLogOptions{MaxChunks: 10, MaxBytes: 1024})
 	_, _ = l.Append([]byte("one"))
 	_, _ = l.Append([]byte("two"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ch, _, unsub := l.Subscribe(ctx, 0)
+	replay, ch, _, unsub := l.SubscribeFrom(ctx, 0)
 	defer unsub()
 
-	// Replay should deliver both chunks.
-	collected := collect(t, ch, 2, 500*time.Millisecond)
-	if string(collected[0].Bytes) != "one" || string(collected[1].Bytes) != "two" {
-		t.Fatalf("replay mismatch: %q %q", collected[0].Bytes, collected[1].Bytes)
+	if len(replay) != 2 || string(replay[0].Bytes) != "one" || string(replay[1].Bytes) != "two" {
+		t.Fatalf("replay mismatch: %+v", replay)
 	}
 
 	_, _ = l.Append([]byte("three"))
@@ -133,26 +132,25 @@ func TestOutputLog_SubscribeReplaysThenDelivers(t *testing.T) {
 	}
 }
 
-func TestOutputLog_SubscribeReplayFromFilters(t *testing.T) {
+func TestOutputLog_SubscribeFromFilters(t *testing.T) {
 	l := NewOutputLog(OutputLogOptions{MaxChunks: 10, MaxBytes: 1024})
 	_, _ = l.Append([]byte("one"))
 	_, _ = l.Append([]byte("two"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ch, _, unsub := l.Subscribe(ctx, 1)
+	replay, _, _, unsub := l.SubscribeFrom(ctx, 1)
 	defer unsub()
 
-	got := collect(t, ch, 1, 500*time.Millisecond)
-	if string(got[0].Bytes) != "two" {
-		t.Fatalf("replayFrom=1 should skip seq 1, got %q", got[0].Bytes)
+	if len(replay) != 1 || string(replay[0].Bytes) != "two" {
+		t.Fatalf("replayFrom=1 should skip seq 1, got %+v", replay)
 	}
 }
 
 func TestOutputLog_SubscribeCancelsWithContext(t *testing.T) {
 	l := NewOutputLog(OutputLogOptions{})
 	ctx, cancel := context.WithCancel(context.Background())
-	ch, _, _ := l.Subscribe(ctx, 0)
+	ch, _, _ := l.Subscribe(ctx)
 	cancel()
 	// channel must eventually close.
 	select {
@@ -173,7 +171,7 @@ func TestOutputLog_SubscribeCancelsWithContext(t *testing.T) {
 func TestOutputLog_CloseReleasesSubscribers(t *testing.T) {
 	l := NewOutputLog(OutputLogOptions{})
 	ctx := context.Background()
-	ch, _, _ := l.Subscribe(ctx, 0)
+	ch, _, _ := l.Subscribe(ctx)
 	l.Close()
 	select {
 	case _, ok := <-ch:
@@ -189,7 +187,7 @@ func TestOutputLog_SubscriberDropsWhenBackpressured(t *testing.T) {
 	l := NewOutputLog(OutputLogOptions{MaxChunks: 10000, MaxBytes: 1 << 20})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, sub, unsub := l.Subscribe(ctx, 0)
+	_, sub, unsub := l.Subscribe(ctx)
 	defer unsub()
 
 	// Never read from ch; all writes past capacity (256) must drop.
@@ -200,6 +198,122 @@ func TestOutputLog_SubscriberDropsWhenBackpressured(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if sub.Dropped() == 0 {
 		t.Error("expected Dropped > 0 when subscriber is backpressured")
+	}
+}
+
+// TestOutputLog_SubscriberCloseRaceDoesNotPanic exercises the previous
+// "send on closed channel" panic: a client cancels its subscription while
+// the Append path is notifying subscribers. This test would panic before the
+// per-subscriber mutex fix.
+func TestOutputLog_SubscriberCloseRaceDoesNotPanic(t *testing.T) {
+	l := NewOutputLog(OutputLogOptions{MaxChunks: 10000, MaxBytes: 1 << 20})
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				_, _, _, cancel := l.SubscribeFrom(ctx, 0)
+				// Immediate cancel races with any pending notify.
+				cancel()
+			}
+		}()
+	}
+
+	wg.Add(1)
+	stop := make(chan struct{})
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _ = l.Append([]byte("x"))
+			}
+		}
+	}()
+
+	// Let the race run briefly.
+	time.Sleep(200 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+}
+
+// TestOutputLog_ReplayAndLiveAreInOrder ensures no live chunk slips ahead of
+// a replay chunk even under concurrent append. Before the SubscribeFrom
+// redesign, Subscribe's replay-after-unlock path could emit seq(replay_n)
+// after seq(live_1).
+func TestOutputLog_ReplayAndLiveAreInOrder(t *testing.T) {
+	l := NewOutputLog(OutputLogOptions{MaxChunks: 10000, MaxBytes: 1 << 20})
+	// Seed retained history.
+	for i := 0; i < 50; i++ {
+		_, _ = l.Append([]byte{byte(i)})
+	}
+
+	// Append concurrently with subscribing to try to force interleaving.
+	stop := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_, _ = l.Append([]byte{0xFF})
+			}
+		}
+	}()
+	defer close(stop)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	replay, ch, _, unsub := l.SubscribeFrom(ctx, 0)
+	defer unsub()
+
+	// Last replay seq must be strictly less than first live seq.
+	var lastReplaySeq uint64
+	for _, c := range replay {
+		if c.Seq <= lastReplaySeq {
+			t.Fatalf("replay seq out of order: %d after %d", c.Seq, lastReplaySeq)
+		}
+		lastReplaySeq = c.Seq
+	}
+	// Drain a few live chunks and verify they're strictly after lastReplaySeq.
+	deadline := time.After(500 * time.Millisecond)
+	for seen := 0; seen < 20; {
+		select {
+		case c, ok := <-ch:
+			if !ok {
+				return
+			}
+			if c.Seq <= lastReplaySeq {
+				t.Fatalf("live seq %d <= last replay seq %d", c.Seq, lastReplaySeq)
+			}
+			seen++
+		case <-deadline:
+			return
+		}
+	}
+}
+
+// TestOutputLog_SubscriberReceivesImmutableCopies verifies that mutating a
+// chunk's bytes after delivery does not corrupt the log's retained state.
+func TestOutputLog_SubscriberReceivesImmutableCopies(t *testing.T) {
+	l := NewOutputLog(OutputLogOptions{MaxChunks: 10, MaxBytes: 1024})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, ch, _, unsub := l.SubscribeFrom(ctx, ^uint64(0)) // live-only
+	defer unsub()
+
+	_, _ = l.Append([]byte("hello"))
+	c := <-ch
+	c.Bytes[0] = 'Z'
+
+	retained := l.Since(0, 0)
+	if len(retained) != 1 || string(retained[0].Bytes) != "hello" {
+		t.Fatalf("subscriber mutation leaked into log: %q", retained[0].Bytes)
 	}
 }
 

@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/joshka0/foxctl/internal/atcp/envelope"
+	"github.com/joshka0/foxctl/internal/atcp/kinds"
 )
 
 // TestEventsSSE_StreamsSessionOutput creates a session, submits text, then
@@ -101,9 +103,9 @@ func TestEventsSSE_UnknownSession(t *testing.T) {
 	}
 }
 
-// readSSEDataUntil scans an SSE stream for a `data:` payload whose decoded
-// `bytes_b64` field contains the substring want. It returns the decoded string
-// so the caller can make further assertions.
+// readSSEDataUntil scans an SSE stream for an ATCP envelope whose decoded
+// body.bytes_b64 contains the substring want. It also validates the envelope
+// on the wire so a regression to ad-hoc frames fails this test.
 func readSSEDataUntil(t *testing.T, r io.Reader, want string, timeout time.Duration) (string, bool) {
 	t.Helper()
 	done := make(chan result, 1)
@@ -116,10 +118,16 @@ func readSSEDataUntil(t *testing.T, r io.Reader, want string, timeout time.Durat
 				continue
 			}
 			payload := strings.TrimPrefix(line, "data: ")
-			var body struct {
-				BytesB64 string `json:"bytes_b64"`
+			env, err := envelope.DecodeStrict([]byte(payload))
+			if err != nil {
+				t.Errorf("expected canonical ATCP envelope on SSE, got invalid frame: %v (payload=%s)", err, payload)
+				continue
 			}
-			if err := json.Unmarshal([]byte(payload), &body); err != nil {
+			if env.Kind != string(kinds.TerminalOutput) {
+				continue
+			}
+			var body TerminalOutputBody
+			if err := env.DecodeBody(&body); err != nil {
 				continue
 			}
 			raw, err := base64.StdEncoding.DecodeString(body.BytesB64)

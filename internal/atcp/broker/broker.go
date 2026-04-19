@@ -45,6 +45,15 @@ type Options struct {
 	// AdapterFactory picks an Adapter for each created session. Nil means
 	// DefaultAdapterFactory.
 	AdapterFactory AdapterFactory
+	// AllowUnleasedInputForTests loosens terminal-input lease enforcement so
+	// intents without a lease_id are accepted whenever no lease is currently
+	// held. The broker's production invariant is that every terminal
+	// mutation must acquire a lease first; this flag exists only so tests
+	// can exercise paths that don't care about lease serialisation.
+	//
+	// Do not set this from a production code path. Keep it opt-in and
+	// explicit so accidental callers are easy to spot in review.
+	AllowUnleasedInputForTests bool
 }
 
 // Broker is the single entrypoint for ATCP intents originating from transport
@@ -53,9 +62,10 @@ type Broker struct {
 	sessions *session.Manager
 	leases   *lease.Manager
 
-	adaptersMu sync.RWMutex
-	adapters   map[string]Adapter
-	factory    AdapterFactory
+	adaptersMu    sync.RWMutex
+	adapters      map[string]Adapter
+	factory       AdapterFactory
+	allowUnleased bool
 }
 
 // New constructs a Broker. The caller must call Stop when shutting down.
@@ -65,10 +75,11 @@ func New(opts Options) *Broker {
 		factory = DefaultAdapterFactory
 	}
 	return &Broker{
-		sessions: session.NewManager(opts.Sessions),
-		leases:   lease.NewManager(),
-		adapters: make(map[string]Adapter),
-		factory:  factory,
+		sessions:      session.NewManager(opts.Sessions),
+		leases:        lease.NewManager(),
+		adapters:      make(map[string]Adapter),
+		factory:       factory,
+		allowUnleased: opts.AllowUnleasedInputForTests,
 	}
 }
 
@@ -241,18 +252,24 @@ func (b *Broker) runTerminal(sessionID, leaseID string, compile func(Adapter) ([
 }
 
 // checkLease enforces that the supplied leaseID matches the current holder on
-// the (sessionID, terminal.input) scope. A missing holder is permitted — the
-// broker accepts unlease-gated intents for now; this will be tightened in a
-// later milestone behind a policy flag.
+// the (sessionID, terminal.input) scope.
+//
+// The production invariant (plan §6) is that every terminal mutation must
+// hold a lease. In tests the AllowUnleasedInputForTests broker option relaxes
+// this so callers without a lease succeed when no lease is currently held;
+// a lease held by someone else always rejects unleased intents.
 func (b *Broker) checkLease(sessionID, leaseID string) error {
 	held, ok := b.leases.Held(sessionID, lease.ScopeTerminalInput)
 	if !ok {
 		if leaseID == "" {
-			return nil
+			if b.allowUnleased {
+				return nil
+			}
+			return ErrLeaseRequired
 		}
-		// Client supplied a lease id but no lease is held: the lease expired or
-		// was preempted between acquire and submit. Fail fast rather than
-		// silently accept.
+		// Client supplied a lease id but no lease is held: the lease either
+		// expired or was already released. Fail fast rather than silently
+		// accept.
 		return ErrLeaseMismatch
 	}
 	if leaseID == "" {

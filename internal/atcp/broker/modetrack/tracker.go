@@ -67,6 +67,11 @@ const (
 	stateGround parserState = iota
 	stateEscape
 	stateCSI
+	// stateOSC consumes everything until BEL (0x07) or ST (ESC \).
+	stateOSC
+	// stateOSCEsc is the intermediate "seen ESC while in OSC" state used to
+	// detect a two-byte String Terminator (ESC \).
+	stateOSCEsc
 )
 
 // maxBuf is the largest parameter+intermediate run we will buffer before
@@ -157,11 +162,32 @@ func (t *Tracker) step(c byte) {
 			t.bufLen = 0
 			t.private = false
 		case ']':
-			// OSC: skip until ST or BEL. We don't care about OSC contents.
-			t.state = stateGround
+			// OSC payload follows. Stay in stateOSC until BEL or ST so bytes
+			// inside an OSC title cannot be misparsed as ground-state output.
+			t.state = stateOSC
 		default:
 			// Two-byte escape (ESC x). Not relevant to mode tracking.
 			t.state = stateGround
+		}
+	case stateOSC:
+		switch c {
+		case 0x07: // BEL
+			t.state = stateGround
+		case 0x1B: // ESC, look for trailing '\'
+			t.state = stateOSCEsc
+		default:
+			// Still inside OSC payload; ignore.
+		}
+	case stateOSCEsc:
+		if c == '\\' {
+			// ST: end of OSC.
+			t.state = stateGround
+		} else if c == 0x1B {
+			// Another ESC — stay in stateOSCEsc waiting for '\'.
+		} else {
+			// Lone ESC inside OSC: treat as continuation, drop to OSC so we
+			// keep consuming until a real terminator.
+			t.state = stateOSC
 		}
 	case stateCSI:
 		// CSI parameters: 0x30-0x3F (digits, ';', '?', etc.), intermediates

@@ -67,6 +67,28 @@ func TestValidate_MissingTimestamp(t *testing.T) {
 	}
 }
 
+func TestValidate_NonUTCTimestampRejected(t *testing.T) {
+	env := newValidEnvelope(t)
+	// Paris is UTC+1/+2; explicitly non-zero offset.
+	loc, err := time.LoadLocation("Europe/Paris")
+	if err != nil {
+		t.Skip("tz data not available")
+	}
+	env.Timestamp = time.Date(2026, 1, 1, 12, 0, 0, 0, loc)
+	if err := env.Validate(); !errors.Is(err, ErrNonUTCTS) {
+		t.Fatalf("want ErrNonUTCTS, got %v", err)
+	}
+}
+
+func TestValidate_UTCOffsetZeroAccepted(t *testing.T) {
+	env := newValidEnvelope(t)
+	// +00:00 parses to offset 0, same as "Z". Must be accepted.
+	env.Timestamp = time.Date(2026, 1, 1, 12, 0, 0, 0, time.FixedZone("UTC+0", 0))
+	if err := env.Validate(); err != nil {
+		t.Fatalf("offset-0 zone should be valid, got %v", err)
+	}
+}
+
 func TestValidate_MissingBody(t *testing.T) {
 	env := newValidEnvelope(t)
 	env.Body = nil

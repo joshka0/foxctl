@@ -44,6 +44,7 @@ var (
 	ErrInvalidID       = errors.New("atcp envelope: id must be a ULID")
 	ErrMissingKind     = errors.New("atcp envelope: kind is required")
 	ErrMissingTS       = errors.New("atcp envelope: ts is required")
+	ErrNonUTCTS        = errors.New("atcp envelope: ts must be UTC (offset 0)")
 	ErrBodyRequired    = errors.New("atcp envelope: body is required")
 	ErrInvalidBody     = errors.New("atcp envelope: body is not valid JSON")
 )
@@ -65,6 +66,11 @@ func (e Envelope) Validate() error {
 	}
 	if e.Timestamp.IsZero() {
 		return ErrMissingTS
+	}
+	// ATCP canonical ts is UTC. RFC3339 "Z" and "+00:00" both parse into a
+	// zero-offset time.Time, so offset-based validation accepts either.
+	if _, offset := e.Timestamp.Zone(); offset != 0 {
+		return ErrNonUTCTS
 	}
 	if len(e.Body) == 0 {
 		return ErrBodyRequired

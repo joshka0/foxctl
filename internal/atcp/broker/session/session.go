@@ -365,11 +365,18 @@ func (s *Session) kill() error {
 
 // defaultSpawn starts spec.Cmd under a PTY using creack/pty. Callers who need
 // to inject a test double should set spawnOverride instead of replacing this.
+//
+// Termination policy: we deliberately do NOT pass ctx to exec.CommandContext,
+// because that binds cancellation to os.Process.Kill() and would bypass the
+// graceful SIGTERM path in Session.run. Instead, the Session goroutine owns
+// termination and sends SIGTERM on ctx.Done, escalating to SIGKILL only after
+// a grace window.
 func defaultSpawn(ctx context.Context, spec Spec) (*os.File, *exec.Cmd, func(), error) {
 	if len(spec.Cmd) == 0 {
 		return nil, nil, nil, ErrNoCommand
 	}
-	cmd := exec.CommandContext(ctx, spec.Cmd[0], spec.Cmd[1:]...)
+	_ = ctx // termination handled by Session.run, not CommandContext
+	cmd := exec.Command(spec.Cmd[0], spec.Cmd[1:]...)
 	if spec.Cwd != "" {
 		cmd.Dir = spec.Cwd
 	}

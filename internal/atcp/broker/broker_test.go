@@ -11,9 +11,13 @@ import (
 	"github.com/joshka0/foxctl/internal/atcp/intents"
 )
 
+// newBrokerT builds a Broker that allows unleased terminal intents so the
+// common tests can call Submit directly without orchestrating a lease. Tests
+// that specifically validate lease enforcement should construct their own
+// broker with AllowUnleasedInputForTests: false.
 func newBrokerT(t *testing.T) *Broker {
 	t.Helper()
-	b := New(Options{})
+	b := New(Options{AllowUnleasedInputForTests: true})
 	t.Cleanup(func() { b.Stop() })
 	return b
 }
@@ -139,6 +143,32 @@ func TestBroker_AcquireLeaseUnknownSession(t *testing.T) {
 	})
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("want ErrSessionNotFound, got %v", err)
+	}
+}
+
+// TestBroker_UnleasedSubmitRejectedByDefault locks in the production
+// invariant that every terminal mutation must carry a lease_id once the
+// flag is off.
+func TestBroker_UnleasedSubmitRejectedByDefault(t *testing.T) {
+	b := New(Options{}) // no AllowUnleasedInputForTests
+	t.Cleanup(func() { b.Stop() })
+	snap, err := b.CreateSession(session.Spec{Cmd: []string{"cat"}}, session.OutputLogOptions{})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	t.Cleanup(func() { _ = b.DeleteSession(snap.ID) })
+	if _, err := b.Submit(snap.ID, intents.TerminalSubmit{Text: "x"}); !errors.Is(err, ErrLeaseRequired) {
+		t.Fatalf("unleased submit should be rejected, got %v", err)
+	}
+	// Acquiring a lease and submitting with its id must succeed.
+	l, err := b.AcquireLease(lease.AcquireRequest{
+		SessionID: snap.ID, Scope: lease.ScopeTerminalInput, Owner: "test", TTL: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	if _, err := b.Submit(snap.ID, intents.TerminalSubmit{Text: "x", LeaseID: l.ID}); err != nil {
+		t.Fatalf("leased submit: %v", err)
 	}
 }
 

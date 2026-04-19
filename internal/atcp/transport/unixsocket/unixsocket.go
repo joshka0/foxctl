@@ -36,8 +36,17 @@ type Server struct {
 	http   *http.Server
 }
 
+// ErrBrokerAlreadyRunning is returned when Listen detects a live peer bound
+// to the requested socket path.
+var ErrBrokerAlreadyRunning = errors.New("atcp unixsocket: broker already running at path")
+
 // Listen creates the socket file at path (creating parent dirs as needed),
 // ensures it is chmod 0600, and returns a Server ready for Serve.
+//
+// If the path already exists as a socket, Listen dials it briefly to test
+// whether a live broker owns it. A successful dial returns ErrBrokerAlreadyRunning
+// — we refuse to remove a live socket and steal its binding. A connection
+// refused (the classical stale-socket indicator) lets Listen proceed.
 func Listen(path string, handler http.Handler) (*Server, error) {
 	if path == "" {
 		return nil, errors.New("atcp unixsocket: path is required")
@@ -48,9 +57,9 @@ func Listen(path string, handler http.Handler) (*Server, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("atcp unixsocket: mkdir: %w", err)
 	}
-	// Remove stale socket file from a previous process. This is safe because
-	// a Listen would fail with EADDRINUSE otherwise; no other process should
-	// be using this path when a fresh broker starts.
+	if err := assertSocketIsStale(path); err != nil {
+		return nil, err
+	}
 	if err := removeIfSocket(path); err != nil {
 		return nil, fmt.Errorf("atcp unixsocket: cleanup stale: %w", err)
 	}
@@ -95,6 +104,30 @@ func (s *Server) Close() error {
 	closeErr := s.http.Close()
 	_ = os.Remove(s.path)
 	return closeErr
+}
+
+// assertSocketIsStale rejects Listen when another process is currently bound
+// to path. The probe is a short-timeout dial. Any error *other* than a
+// successful connect is treated as "safe to proceed"; removeIfSocket runs
+// next and will still refuse to delete non-socket files.
+func assertSocketIsStale(path string) error {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		// Stat failure will be surfaced by the real listener; don't pre-empt it.
+		return nil
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return nil
+	}
+	conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
+	if err == nil {
+		_ = conn.Close()
+		return fmt.Errorf("%w: %s", ErrBrokerAlreadyRunning, path)
+	}
+	return nil
 }
 
 // removeIfSocket unlinks path iff it is a socket. Any other file type is left

@@ -2,6 +2,7 @@ package unixsocket
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -105,6 +106,30 @@ func TestServe_RoutesHTTPRequests(t *testing.T) {
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("socket file still present after Shutdown: %v", err)
+	}
+}
+
+// TestListen_RefusesToStealLiveSocket ensures a second broker cannot unlink
+// the path while the first is still serving. Before this guard, the second
+// Listen would delete the socket and steal the path, leaving the first broker
+// alive but unreachable.
+func TestListen_RefusesToStealLiveSocket(t *testing.T) {
+	path := shortSocketPath(t)
+	first, err := Listen(path, http.NotFoundHandler())
+	if err != nil {
+		t.Fatalf("first Listen: %v", err)
+	}
+	defer func() { _ = first.Close() }()
+	go func() { _ = first.Serve() }()
+	// Tiny sleep so the listener is accepting connections before we probe.
+	time.Sleep(20 * time.Millisecond)
+
+	_, err = Listen(path, http.NotFoundHandler())
+	if err == nil {
+		t.Fatal("expected second Listen to be rejected")
+	}
+	if !errors.Is(err, ErrBrokerAlreadyRunning) {
+		t.Errorf("want ErrBrokerAlreadyRunning, got %v", err)
 	}
 }
 

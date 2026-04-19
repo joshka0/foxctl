@@ -9,6 +9,8 @@ import (
 
 	"github.com/joshka0/foxctl/internal/atcp/broker"
 	"github.com/joshka0/foxctl/internal/atcp/broker/session"
+	"github.com/joshka0/foxctl/internal/atcp/envelope"
+	"github.com/joshka0/foxctl/internal/atcp/kinds"
 )
 
 // eventMaxBytes caps the size of any single SSE payload so a single huge
@@ -52,10 +54,18 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	since := parseSinceParam(r)
-	ch, sub, cancel := sess.Log().Subscribe(ctx, since)
+	replay, ch, sub, cancel := sess.Log().SubscribeFrom(ctx, since)
 	defer cancel()
 
 	enc := newSSEEncoder(w, flusher)
+	// Drain replay first to guarantee client sees history in order before any
+	// live chunks. SubscribeFrom captured both under the log lock so no gap
+	// exists between the last replay seq and the first live seq.
+	for _, chunk := range replay {
+		if err := enc.writeChunk(sessionID, chunk, sub.Dropped()); err != nil {
+			return
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -83,26 +93,36 @@ func newSSEEncoder(w http.ResponseWriter, f http.Flusher) *sseEncoder {
 	return &sseEncoder{w: w, f: f}
 }
 
-// writeChunk emits a "terminal.output"-shaped frame keyed by the chunk seq.
+// TerminalOutputBody is the canonical body for a `terminal.output` ATCP event
+// carried over SSE. Exported so clients in Go can decode it from the
+// envelope's raw body without redefining the shape.
+type TerminalOutputBody struct {
+	SessionID string `json:"session_id"`
+	BytesB64  string `json:"bytes_b64"`
+	Dropped   uint64 `json:"dropped,omitempty"`
+}
+
+// writeChunk emits a canonical ATCP envelope framed as an SSE "terminal.output"
+// event. The envelope target is `session:<id>`, seq is the session's output
+// log seq, and body is TerminalOutputBody. Non-printable PTY bytes survive
+// transit via base64 in the body.
 func (e *sseEncoder) writeChunk(sessionID string, c session.Chunk, dropped uint64) error {
-	body := struct {
-		SessionID string `json:"session_id"`
-		Seq       uint64 `json:"seq"`
-		Timestamp string `json:"ts"`
-		BytesB64  string `json:"bytes_b64"`
-		Dropped   uint64 `json:"dropped,omitempty"`
-	}{
+	body := TerminalOutputBody{
 		SessionID: sessionID,
-		Seq:       c.Seq,
-		Timestamp: c.Timestamp.UTC().Format("2006-01-02T15:04:05.000000Z"),
 		BytesB64:  base64.StdEncoding.EncodeToString(limitBytes(c.Bytes, eventMaxBytes)),
 		Dropped:   dropped,
 	}
-	raw, err := json.Marshal(body)
+	env, err := envelope.New(string(kinds.TerminalOutput), "session:"+sessionID, body)
 	if err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(e.w, "id: %d\nevent: terminal.output\ndata: %s\n\n", c.Seq, raw); err != nil {
+	env.Timestamp = c.Timestamp.UTC()
+	env.Seq = c.Seq
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(e.w, "id: %d\nevent: %s\ndata: %s\n\n", c.Seq, kinds.TerminalOutput, raw); err != nil {
 		return err
 	}
 	e.f.Flush()

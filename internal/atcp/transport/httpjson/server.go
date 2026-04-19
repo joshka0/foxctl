@@ -310,11 +310,19 @@ func (s *Server) leaseList(w http.ResponseWriter, r *http.Request) {
 
 // --- helpers ---
 
+// decodeJSON decodes a single top-level JSON value from r.Body into dst. It
+// rejects unknown fields (DisallowUnknownFields) and trailing tokens after
+// the top-level value — bodies like `{...} {...}` or `{...}garbage` fail
+// with 400 instead of silently dropping the extra data.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
+		return false
+	}
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid json: unexpected trailing data")
 		return false
 	}
 	return true

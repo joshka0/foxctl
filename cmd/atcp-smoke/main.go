@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/atcp/broker"
+	"github.com/joshka0/foxctl/internal/atcp/broker/lease"
 	"github.com/joshka0/foxctl/internal/atcp/broker/safeprompt"
 	"github.com/joshka0/foxctl/internal/atcp/broker/session"
 	"github.com/joshka0/foxctl/internal/atcp/intents"
@@ -58,6 +59,7 @@ func main() {
 		idleWindow   = flag.Duration("idle-window", 600*time.Millisecond, "how long the PTY must be quiet before ready")
 		promptRegex  = flag.String("prompt-regex", "", "override the prompt regex (empty = built-in default)")
 		logFile      = flag.String("log-file", "", "also write all raw PTY output to this file (useful for debugging prompt regexes)")
+		unsafeSubmit = flag.Bool("unsafe-submit-anyway", false, "when --wait-ready fails, still inject the prompt (debug only)")
 	)
 	flag.Parse()
 
@@ -118,7 +120,11 @@ func main() {
 		d, reason, err := safeprompt.Wait(readyCtx, sess, safeOpts, 75*time.Millisecond)
 		cancelReady()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "atcp-smoke: WARN not ready (%s: %s); injecting anyway\n", d, reason)
+			if *unsafeSubmit {
+				fmt.Fprintf(os.Stderr, "atcp-smoke: WARN not ready (%s: %s); --unsafe-submit-anyway is set, injecting anyway\n", d, reason)
+			} else {
+				fatalf("not ready (%s: %s); rerun with --unsafe-submit-anyway to force", d, reason)
+			}
 		} else {
 			fmt.Fprintf(os.Stderr, "atcp-smoke: ready (%s)\n", reason)
 		}
@@ -135,8 +141,21 @@ func main() {
 
 	startSeq := sess.Log().NextSeq() - 1
 
-	fmt.Fprintf(os.Stderr, "atcp-smoke: submitting prompt: %q\n", *prompt)
-	if _, err := b.Submit(snap.ID, intents.TerminalSubmit{Text: *prompt}); err != nil {
+	// Acquire a terminal.input lease before submit so the smoke tool
+	// exercises the production-invariant path instead of the test bypass.
+	leaseRec, err := b.AcquireLease(lease.AcquireRequest{
+		SessionID: snap.ID,
+		Scope:     lease.ScopeTerminalInput,
+		Owner:     "atcp-smoke",
+		TTL:       30 * time.Second,
+	})
+	if err != nil {
+		fatalf("AcquireLease: %v", err)
+	}
+	defer b.ReleaseLease(leaseRec.ID)
+
+	fmt.Fprintf(os.Stderr, "atcp-smoke: submitting prompt: %q (lease=%s)\n", *prompt, leaseRec.ID)
+	if _, err := b.Submit(snap.ID, intents.TerminalSubmit{Text: *prompt, LeaseID: leaseRec.ID}); err != nil {
 		fatalf("submit: %v", err)
 	}
 
@@ -182,8 +201,11 @@ func profileNames() []string {
 // stream copies live output from the session log to stdout for the given
 // duration or until ctx is cancelled or the session exits.
 func stream(ctx context.Context, sess *session.Session, fromSeq uint64, d time.Duration) {
-	ch, _, cancel := sess.Log().Subscribe(ctx, fromSeq)
+	replay, ch, _, cancel := sess.Log().SubscribeFrom(ctx, fromSeq)
 	defer cancel()
+	for _, c := range replay {
+		_, _ = os.Stdout.Write(c.Bytes)
+	}
 
 	deadline := time.After(d)
 	for {

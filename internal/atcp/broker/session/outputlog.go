@@ -173,14 +173,32 @@ func (l *OutputLog) Close() {
 	}
 }
 
-// Subscribe returns a channel that receives future chunks as they are appended.
-// If replayFrom > 0, the subscription first emits all currently-retained chunks
-// with Seq > replayFrom (a value of 0 replays everything retained).
+// Subscribe returns a live channel for new chunks appended after the call.
 //
 // The returned cancel function unsubscribes and closes the channel. The
 // subscription is bounded: if the reader falls behind, chunks are dropped and
 // the subscription's Dropped counter advances.
-func (l *OutputLog) Subscribe(ctx context.Context, replayFrom uint64) (<-chan Chunk, *Subscription, func()) {
+//
+// Replay is *not* part of Subscribe. Callers that need retained history plus a
+// gap-free live stream must use SubscribeFrom instead — Subscribe atomically
+// registered the subscriber only for future appends, so concurrent Append
+// calls between a prior Since() and Subscribe() would otherwise be lost.
+func (l *OutputLog) Subscribe(ctx context.Context) (<-chan Chunk, *Subscription, func()) {
+	replay, ch, s, cancel := l.SubscribeFrom(ctx, ^uint64(0))
+	_ = replay // Subscribe discards history by construction
+	return ch, s, cancel
+}
+
+// SubscribeFrom atomically captures retained chunks with Seq > from and a
+// live subscription, under the same lock, so callers are guaranteed that the
+// first chunk arriving on the channel has Seq strictly greater than the last
+// replay entry.
+//
+// The returned replay slice contains defensive copies of bytes and is owned
+// by the caller. Callers should drain it synchronously before reading the
+// channel to preserve ordering. The channel is bounded; slow readers will
+// experience drops tracked on the Subscription.
+func (l *OutputLog) SubscribeFrom(ctx context.Context, from uint64) ([]Chunk, <-chan Chunk, *Subscription, func()) {
 	sub := &subscriber{
 		ch:   make(chan Chunk, 256),
 		done: make(chan struct{}),
@@ -191,20 +209,22 @@ func (l *OutputLog) Subscribe(ctx context.Context, replayFrom uint64) (<-chan Ch
 	if l.closed {
 		l.mu.Unlock()
 		close(sub.ch)
-		return sub.ch, s, func() {}
+		close(sub.done)
+		return nil, sub.ch, s, func() {}
 	}
-	l.subs[sub] = struct{}{}
 	var replay []Chunk
-	for _, c := range l.chunks {
-		if c.Seq > replayFrom {
-			replay = append(replay, cloneChunk(c))
+	if from != ^uint64(0) {
+		for _, c := range l.chunks {
+			if c.Seq > from {
+				replay = append(replay, cloneChunk(c))
+			}
 		}
 	}
+	// Registering the subscriber here — before releasing the lock — is what
+	// makes this API gap-free: no Append can interleave between the replay
+	// snapshot and the first live notify.
+	l.subs[sub] = struct{}{}
 	l.mu.Unlock()
-
-	for _, c := range replay {
-		sub.notify(c)
-	}
 
 	cancel := func() {
 		l.mu.Lock()
@@ -222,7 +242,7 @@ func (l *OutputLog) Subscribe(ctx context.Context, replayFrom uint64) (<-chan Ch
 		}
 	}()
 
-	return sub.ch, s, cancel
+	return replay, sub.ch, s, cancel
 }
 
 // Subscription exposes drop statistics for an active Subscribe call.
