@@ -19,7 +19,7 @@ import (
 // broker with AllowUnleasedInputForTests: false.
 func newBrokerT(t *testing.T) *Broker {
 	t.Helper()
-	b := New(Options{AllowUnleasedInputForTests: true})
+	b := MustNew(Options{AllowUnleasedInputForTests: true})
 	t.Cleanup(func() { b.Stop() })
 	return b
 }
@@ -152,7 +152,7 @@ func TestBroker_AcquireLeaseUnknownSession(t *testing.T) {
 // invariant that every terminal mutation must carry a lease_id once the
 // flag is off.
 func TestBroker_UnleasedSubmitRejectedByDefault(t *testing.T) {
-	b := New(Options{}) // no AllowUnleasedInputForTests
+	b := MustNew(Options{}) // no AllowUnleasedInputForTests
 	t.Cleanup(func() { b.Stop() })
 	snap, err := b.CreateSession(session.Spec{Cmd: []string{"cat"}}, session.OutputLogOptions{})
 	if err != nil {
@@ -219,7 +219,7 @@ func TestBroker_DeleteSessionRemovesAdapter(t *testing.T) {
 func TestBroker_RoomFanOut(t *testing.T) {
 	// Use the real broker (no AllowUnleasedInputForTests) so we exercise the
 	// production lease path via the router.
-	b := New(Options{})
+	b := MustNew(Options{})
 	t.Cleanup(func() { b.Stop() })
 
 	snap1, err := b.CreateSession(session.Spec{Cmd: []string{"cat"}}, session.OutputLogOptions{})
@@ -280,7 +280,7 @@ func TestBroker_RoomFanOut(t *testing.T) {
 // TestBroker_JoinRoomUnknownSession maps the nested room-manager error to
 // the canonical broker sentinel.
 func TestBroker_JoinRoomUnknownSession(t *testing.T) {
-	b := New(Options{})
+	b := MustNew(Options{})
 	t.Cleanup(func() { b.Stop() })
 	r, err := b.CreateRoom(room.CreateRoomRequest{Workspace: "ws"})
 	if err != nil {

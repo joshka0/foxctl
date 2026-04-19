@@ -7,15 +7,18 @@
 package broker
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/atcp/adapter/generictty"
 	"github.com/joshka0/foxctl/internal/atcp/broker/lease"
 	"github.com/joshka0/foxctl/internal/atcp/broker/room"
 	"github.com/joshka0/foxctl/internal/atcp/broker/router"
 	"github.com/joshka0/foxctl/internal/atcp/broker/session"
+	"github.com/joshka0/foxctl/internal/atcp/broker/storage"
 	"github.com/joshka0/foxctl/internal/atcp/intents"
 )
 
@@ -56,6 +59,20 @@ type Options struct {
 	// Do not set this from a production code path. Keep it opt-in and
 	// explicit so accidental callers are easy to spot in review.
 	AllowUnleasedInputForTests bool
+
+	// Storage is the persistence backend. nil means storage.NewNoop(): the
+	// broker runs fully in memory. When set, every room/member/message
+	// mutation is write-through and the broker hydrates on construction.
+	//
+	// The broker does NOT own the Store's lifecycle — callers must Close
+	// it themselves after Broker.Stop. That keeps the daemon (which owns
+	// the DB handle) in charge of teardown ordering.
+	Storage storage.Store
+
+	// HydrateContext bounds the initial LoadRooms/LoadMembers calls that
+	// happen inside New. Zero means context.Background(). Useful for
+	// daemons that want a startup deadline.
+	HydrateContext context.Context
 }
 
 // Broker is the single entrypoint for ATCP intents originating from transport
@@ -65,6 +82,7 @@ type Broker struct {
 	leases    *lease.Manager
 	roomMgr   *room.Manager
 	msgRouter *router.Router
+	store     storage.Store
 
 	adaptersMu    sync.RWMutex
 	adapters      map[string]Adapter
@@ -73,15 +91,36 @@ type Broker struct {
 }
 
 // New constructs a Broker. The caller must call Stop when shutting down.
-func New(opts Options) *Broker {
+//
+// When opts.Storage is non-nil, New performs two startup steps before
+// returning:
+//
+//  1. Hydrate: rooms and members are loaded from the Store. This restores
+//     long-lived coordination state (room IDs, member history) across
+//     process restarts.
+//  2. Detach: every still-active member is stamped with LeftAt=now and
+//     written back through the Store. This reflects that PTY sessions do
+//     not survive a restart, so any previously-active binding is now
+//     dangling. New joins post-restart start fresh.
+//
+// Hydrate errors are returned immediately; detach errors are logged via the
+// Store's AppendMessage is NOT used here (detach is a member-level event).
+// We return the joined error so callers can decide whether to continue with
+// an in-memory-only mode or abort.
+func New(opts Options) (*Broker, error) {
 	factory := opts.AdapterFactory
 	if factory == nil {
 		factory = DefaultAdapterFactory
+	}
+	store := opts.Storage
+	if store == nil {
+		store = storage.NewNoop()
 	}
 	b := &Broker{
 		sessions:      session.NewManager(opts.Sessions),
 		leases:        lease.NewManager(),
 		roomMgr:       room.NewManager(),
+		store:         store,
 		adapters:      make(map[string]Adapter),
 		factory:       factory,
 		allowUnleased: opts.AllowUnleasedInputForTests,
@@ -91,7 +130,52 @@ func New(opts Options) *Broker {
 	// Submit satisfy router.Dispatcher; room.Manager satisfies
 	// router.MemberResolver.
 	b.msgRouter = router.New(b, b.roomMgr, router.Options{})
+
+	ctx := opts.HydrateContext
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := b.hydrate(ctx); err != nil {
+		return nil, fmt.Errorf("atcp broker: hydrate: %w", err)
+	}
+	return b, nil
+}
+
+// MustNew is a convenience for callers (especially tests) that never pass a
+// Store and therefore cannot experience a hydrate error. Panics on any
+// error from New.
+func MustNew(opts Options) *Broker {
+	b, err := New(opts)
+	if err != nil {
+		panic(err)
+	}
 	return b
+}
+
+// hydrate loads persisted rooms + members and detaches stale active members.
+func (b *Broker) hydrate(ctx context.Context) error {
+	rooms, err := b.store.LoadRooms(ctx)
+	if err != nil {
+		return err
+	}
+	if len(rooms) == 0 {
+		return nil
+	}
+	members := make(map[string][]room.Member, len(rooms))
+	for _, r := range rooms {
+		ms, err := b.store.LoadMembers(ctx, r.ID)
+		if err != nil {
+			return err
+		}
+		members[r.ID] = ms
+	}
+	b.roomMgr.Hydrate(rooms, members)
+	// Any member whose LeftAt is still zero pointed at a PTY that no
+	// longer exists. Stamp LeftAt=now and persist so the active set starts
+	// clean.
+	return b.roomMgr.StampActiveMembersLeft(time.Now(), func(m room.Member) error {
+		return b.store.SaveMember(ctx, m)
+	})
 }
 
 // Sessions exposes the session manager for transports that need read-only
@@ -111,31 +195,70 @@ func (b *Broker) Rooms() *room.Manager { return b.roomMgr }
 // reaching into unexported fields.
 func (b *Broker) Router() *router.Router { return b.msgRouter }
 
-// CreateRoom is a thin passthrough so handlers work against *Broker uniformly.
+// CreateRoom is a thin passthrough that writes through to storage on success.
+// Persistence failures after the in-memory insert are reported but not
+// rolled back — the room exists to live consumers; operators see the error
+// and decide whether to retry.
 func (b *Broker) CreateRoom(req room.CreateRoomRequest) (room.Room, error) {
-	return b.roomMgr.CreateRoom(req)
+	r, err := b.roomMgr.CreateRoom(req)
+	if err != nil {
+		return room.Room{}, err
+	}
+	if perr := b.store.SaveRoom(context.Background(), r); perr != nil {
+		return r, fmt.Errorf("atcp broker: persist room: %w", perr)
+	}
+	return r, nil
 }
 
-// JoinRoom verifies the session exists before delegating, so callers see
-// ErrSessionNotFound rather than a deep room-manager error when they target
-// an unknown session.
+// JoinRoom verifies the session exists before delegating, writes the member
+// through storage on success, and maps unknown sessions to the broker-level
+// sentinel.
 func (b *Broker) JoinRoom(req room.JoinRequest) (room.Member, error) {
 	if _, err := b.sessions.Get(req.SessionID); err != nil {
 		return room.Member{}, ErrSessionNotFound
 	}
-	return b.roomMgr.JoinRoom(req)
+	mem, err := b.roomMgr.JoinRoom(req)
+	if err != nil {
+		return room.Member{}, err
+	}
+	if perr := b.store.SaveMember(context.Background(), mem); perr != nil {
+		return mem, fmt.Errorf("atcp broker: persist member: %w", perr)
+	}
+	return mem, nil
 }
 
-// LeaveRoom is a thin passthrough. The underlying session stays alive —
-// "persist on leave" per plan §5a.2.
+// LeaveRoom stamps LeftAt in memory and writes the updated row through. The
+// underlying session stays alive — "persist on leave" per plan §5a.2.
 func (b *Broker) LeaveRoom(roomID, agentID string) (room.Member, error) {
-	return b.roomMgr.LeaveRoom(roomID, agentID)
+	mem, err := b.roomMgr.LeaveRoom(roomID, agentID)
+	if err != nil {
+		return room.Member{}, err
+	}
+	if perr := b.store.SaveMember(context.Background(), mem); perr != nil {
+		return mem, fmt.Errorf("atcp broker: persist member leave: %w", perr)
+	}
+	return mem, nil
 }
 
-// SendMessage fans out through the router. Lease orchestration, per-member
-// failure isolation, and the message_id are all owned by the router itself.
+// SendMessage fans out through the router and persists the fan-out outcome
+// for audit. Storage errors never change the delivery result — the members
+// already got (or didn't get) the message; persistence is a downstream
+// concern.
 func (b *Broker) SendMessage(msg router.Message) (router.Result, error) {
-	return b.msgRouter.Send(msg)
+	sentAt := time.Now()
+	res, err := b.msgRouter.Send(msg)
+	if err != nil {
+		return res, err
+	}
+	// The router returns a generated message_id even on partial failure, so
+	// the audit record is always well-formed. An empty MessageID would
+	// mean the router rejected the input before fan-out, which also
+	// returns err != nil above.
+	rec := storage.NewMessageRecordFromResult(msg, res, sentAt)
+	if perr := b.store.AppendMessage(context.Background(), rec); perr != nil {
+		return res, fmt.Errorf("atcp broker: persist message: %w", perr)
+	}
+	return res, nil
 }
 
 // Stop closes every session and lease. Idempotent.

@@ -18,7 +18,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *broker.Broker) {
 	// Tests exercise terminal endpoints without orchestrating a lease every
 	// time; AllowUnleasedInputForTests: true matches the production invariant
 	// for the happy paths. Lease-specific tests still hit the real policy.
-	b := broker.New(broker.Options{AllowUnleasedInputForTests: true})
+	b := broker.MustNew(broker.Options{AllowUnleasedInputForTests: true})
 	s := NewServer(b)
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(func() {

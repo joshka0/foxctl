@@ -22,6 +22,7 @@ import (
 func main() {
 	var (
 		socket          = flag.String("socket", "", "unix socket path (default: $FOXCTL_ATCP_SOCK or platform default)")
+		dataDir         = flag.String("data-dir", "", "directory for atcp.db (default: in-memory only)")
 		shutdownTimeout = flag.Duration("shutdown-timeout", 5*time.Second, "max time to wait for inflight requests on shutdown")
 	)
 	flag.Parse()
@@ -30,6 +31,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	d := daemon.New(daemon.Options{
+		DataDir:         *dataDir,
 		SocketPath:      *socket,
 		ShutdownTimeout: *shutdownTimeout,
 		Logger:          logger,

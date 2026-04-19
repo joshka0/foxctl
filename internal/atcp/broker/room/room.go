@@ -79,14 +79,14 @@ func (m Member) Active() bool { return m.LeftAt.IsZero() }
 // Sentinel errors returned by Manager. Kept stable so HTTP/CLI can map them
 // to canonical status codes.
 var (
-	ErrRoomNotFound           = errors.New("atcp room: not found")
-	ErrRoomArchived           = errors.New("atcp room: archived")
-	ErrMemberNotFound         = errors.New("atcp room: member not found")
-	ErrSessionAlreadyBound    = errors.New("atcp room: session already bound to an active member")
-	ErrAgentAlreadyInRoom     = errors.New("atcp room: agent already has an active member in this room")
-	ErrWorkspaceRequired      = errors.New("atcp room: workspace is required")
-	ErrSessionRequired        = errors.New("atcp room: session_id is required")
-	ErrAgentRequired          = errors.New("atcp room: agent_id is required")
+	ErrRoomNotFound        = errors.New("atcp room: not found")
+	ErrRoomArchived        = errors.New("atcp room: archived")
+	ErrMemberNotFound      = errors.New("atcp room: member not found")
+	ErrSessionAlreadyBound = errors.New("atcp room: session already bound to an active member")
+	ErrAgentAlreadyInRoom  = errors.New("atcp room: agent already has an active member in this room")
+	ErrWorkspaceRequired   = errors.New("atcp room: workspace is required")
+	ErrSessionRequired     = errors.New("atcp room: session_id is required")
+	ErrAgentRequired       = errors.New("atcp room: agent_id is required")
 )
 
 // Manager holds rooms and their members in memory. It is safe for concurrent
@@ -123,6 +123,75 @@ func NewManager(opts ...Option) *Manager {
 		opt(m)
 	}
 	return m
+}
+
+// Hydrate loads a pre-existing set of rooms + members into the manager.
+// Intended for startup from a persistence layer; callers must invoke it
+// before any concurrent API usage. Unlike CreateRoom/JoinRoom, this path:
+//
+//   - Accepts caller-supplied IDs and timestamps (no generation, no clock).
+//   - Does NOT enforce the "active session unique" partial index. The
+//     caller is trusted to have stamped LeftAt on any member whose session
+//     no longer exists — a broker typically does this immediately after
+//     Hydrate to reflect that PTYs did not survive the restart.
+//   - Silently ignores members that reference unknown room IDs; that state
+//     is recoverable and logging it lives above this layer.
+//
+// Hydrate is idempotent only in the degenerate sense: calling it twice on a
+// non-empty manager will add duplicate rooms. Do not call it after API use.
+func (m *Manager) Hydrate(rooms []Room, members map[string][]Member) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range rooms {
+		rc := r
+		m.rooms[rc.ID] = &rc
+		if _, ok := m.members[rc.ID]; !ok {
+			m.members[rc.ID] = nil
+		}
+	}
+	for roomID, list := range members {
+		if _, ok := m.rooms[roomID]; !ok {
+			continue
+		}
+		for _, mem := range list {
+			mc := mem
+			m.members[roomID] = append(m.members[roomID], &mc)
+			if mc.Active() {
+				m.sessionToRoom[mc.SessionID] = roomID
+			}
+		}
+	}
+}
+
+// StampActiveMembersLeft marks every still-active member as having left at
+// the given time, writing through via onChange. Used on broker startup to
+// detach members from sessions that did not survive the restart. onChange
+// is invoked after each mutation so the caller can persist the new state;
+// errors from onChange are collected and returned as a single joined error
+// rather than aborting mid-walk.
+func (m *Manager) StampActiveMembersLeft(at time.Time, onChange func(Member) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var errs []error
+	for roomID, list := range m.members {
+		_ = roomID
+		for _, mem := range list {
+			if !mem.Active() {
+				continue
+			}
+			mem.LeftAt = at
+			delete(m.sessionToRoom, mem.SessionID)
+			if onChange != nil {
+				if err := onChange(*mem); err != nil {
+					errs = append(errs, err)
+				}
+			}
+		}
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return errors.Join(errs...)
 }
 
 // CreateRoomRequest is the input to CreateRoom.

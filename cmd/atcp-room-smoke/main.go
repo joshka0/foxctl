@@ -39,7 +39,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	b := broker.New(broker.Options{})
+	b := broker.MustNew(broker.Options{})
 	defer b.Stop()
 
 	// Spawn sessions.
