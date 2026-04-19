@@ -13,7 +13,13 @@ Environment variables, toolchain, and external dependencies.
 - **CGO** off by default; `make build` and `go test` should work with
   `CGO_ENABLED=0`.
 - **golangci-lint** + **gofumpt** available on PATH (used by `make lint` /
-  `make check`).
+  `make check`). Note: the system-installed golangci-lint binary may be built
+  with an older Go version than the project targets (observed: go1.25-built
+  binary vs go1.26.1 target). If lint fails with exit code 3 and a version
+  mismatch message, use `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`
+  and invoke the binary from `$GOBIN` directly.
+- **go.uber.org/goleak** is available as a test dependency for goroutine leak
+  detection (used in `internal/interfaces/tui/runtime/bounded_test.go`).
 - **tuistory** Factory skill (invoked by workers and validators via the Skill
   tool).
 

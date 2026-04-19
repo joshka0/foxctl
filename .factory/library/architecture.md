@@ -184,6 +184,20 @@ easy to extend:
 
 ---
 
+## Unicode Width
+
+The go-tui framework provides `tui.RuneWidth(r rune) int` as the canonical way
+to compute terminal display width. All widget truncation, padding, and centering
+must use display width (not rune count or byte count). CJK characters are
+2 cells wide; combining marks and ZWJ sequences are 0 cells.
+
+The M2 component library uses three key utility functions in the `components`
+package that all rely on `tui.RuneWidth`: `truncate()`, `center()`, and
+`padOrTruncateWidth()`. Future widget authors should use these or follow the
+same pattern.
+
+---
+
 ## Mission Boundaries
 
 See `missionDir/AGENTS.md` for the full list. Highlights:
