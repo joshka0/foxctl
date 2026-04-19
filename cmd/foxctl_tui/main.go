@@ -17,6 +17,7 @@ func main() {
 	var smokeAsk string
 	var smokeCancel bool
 	var smokeTimeout time.Duration
+	var screen string
 
 	flag.StringVar(&opts.Workspace, "workspace", "", "workspace path shown in the shell")
 	flag.StringVar(&opts.EpicID, "epic-id", "", "epic ID to mirror from the foxctl epics store")
@@ -32,6 +33,7 @@ func main() {
 	flag.StringVar(&smokeAsk, "smoke-ask", "", "optional ask content to submit during --smoke-console")
 	flag.BoolVar(&smokeCancel, "smoke-cancel", false, "optionally queue one cancel request during --smoke-console")
 	flag.DurationVar(&smokeTimeout, "smoke-timeout", 3*time.Second, "timeout for --smoke-console")
+	flag.StringVar(&screen, "screen", "", "start a specific TUI screen: agents (operator cockpit with agent inventory)")
 	flag.Parse()
 
 	if smokeConsole {
@@ -59,6 +61,24 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Fprintln(os.Stdout, summary.String())
+		return
+	}
+
+	if screen != "" {
+		switch screen {
+		case "agents":
+			apiURL := opts.APIBaseURL
+			if apiURL == "" {
+				apiURL = "http://localhost:8090"
+			}
+			if err := tuiapp.RunCockpit(apiURL); err != nil {
+				fmt.Fprintf(os.Stderr, "foxctl_tui: %v\n", err)
+				os.Exit(1)
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "foxctl_tui: unknown screen %q; available screens: agents\n", screen)
+			os.Exit(1)
+		}
 		return
 	}
 
