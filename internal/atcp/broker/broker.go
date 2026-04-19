@@ -13,6 +13,8 @@ import (
 
 	"github.com/joshka0/foxctl/internal/atcp/adapter/generictty"
 	"github.com/joshka0/foxctl/internal/atcp/broker/lease"
+	"github.com/joshka0/foxctl/internal/atcp/broker/room"
+	"github.com/joshka0/foxctl/internal/atcp/broker/router"
 	"github.com/joshka0/foxctl/internal/atcp/broker/session"
 	"github.com/joshka0/foxctl/internal/atcp/intents"
 )
@@ -59,8 +61,10 @@ type Options struct {
 // Broker is the single entrypoint for ATCP intents originating from transport
 // handlers. It is safe for concurrent use.
 type Broker struct {
-	sessions *session.Manager
-	leases   *lease.Manager
+	sessions  *session.Manager
+	leases    *lease.Manager
+	roomMgr   *room.Manager
+	msgRouter *router.Router
 
 	adaptersMu    sync.RWMutex
 	adapters      map[string]Adapter
@@ -74,13 +78,20 @@ func New(opts Options) *Broker {
 	if factory == nil {
 		factory = DefaultAdapterFactory
 	}
-	return &Broker{
+	b := &Broker{
 		sessions:      session.NewManager(opts.Sessions),
 		leases:        lease.NewManager(),
+		roomMgr:       room.NewManager(),
 		adapters:      make(map[string]Adapter),
 		factory:       factory,
 		allowUnleased: opts.AllowUnleasedInputForTests,
 	}
+	// The router depends on the broker's session/lease surface, so wire it
+	// here once all sub-managers exist. Broker.AcquireLease/ReleaseLease/
+	// Submit satisfy router.Dispatcher; room.Manager satisfies
+	// router.MemberResolver.
+	b.msgRouter = router.New(b, b.roomMgr, router.Options{})
+	return b
 }
 
 // Sessions exposes the session manager for transports that need read-only
@@ -89,6 +100,43 @@ func (b *Broker) Sessions() *session.Manager { return b.sessions }
 
 // Leases exposes the lease manager for transports that serve /leases endpoints.
 func (b *Broker) Leases() *lease.Manager { return b.leases }
+
+// Rooms exposes the in-memory room manager. The underlying storage is
+// deliberately volatile in this slice; persistence (atcp_rooms /
+// atcp_room_members) lands with the daemon wiring.
+func (b *Broker) Rooms() *room.Manager { return b.roomMgr }
+
+// Router exposes the fan-out router for transports that expose
+// `message.send`. Kept as a getter so tests can swap policies without
+// reaching into unexported fields.
+func (b *Broker) Router() *router.Router { return b.msgRouter }
+
+// CreateRoom is a thin passthrough so handlers work against *Broker uniformly.
+func (b *Broker) CreateRoom(req room.CreateRoomRequest) (room.Room, error) {
+	return b.roomMgr.CreateRoom(req)
+}
+
+// JoinRoom verifies the session exists before delegating, so callers see
+// ErrSessionNotFound rather than a deep room-manager error when they target
+// an unknown session.
+func (b *Broker) JoinRoom(req room.JoinRequest) (room.Member, error) {
+	if _, err := b.sessions.Get(req.SessionID); err != nil {
+		return room.Member{}, ErrSessionNotFound
+	}
+	return b.roomMgr.JoinRoom(req)
+}
+
+// LeaveRoom is a thin passthrough. The underlying session stays alive —
+// "persist on leave" per plan §5a.2.
+func (b *Broker) LeaveRoom(roomID, agentID string) (room.Member, error) {
+	return b.roomMgr.LeaveRoom(roomID, agentID)
+}
+
+// SendMessage fans out through the router. Lease orchestration, per-member
+// failure isolation, and the message_id are all owned by the router itself.
+func (b *Broker) SendMessage(msg router.Message) (router.Result, error) {
+	return b.msgRouter.Send(msg)
+}
 
 // Stop closes every session and lease. Idempotent.
 func (b *Broker) Stop() {

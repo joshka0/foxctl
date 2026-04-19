@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/atcp/broker/lease"
+	"github.com/joshka0/foxctl/internal/atcp/broker/room"
+	"github.com/joshka0/foxctl/internal/atcp/broker/router"
 	"github.com/joshka0/foxctl/internal/atcp/broker/session"
 	"github.com/joshka0/foxctl/internal/atcp/intents"
 )
@@ -208,6 +210,86 @@ func TestBroker_DeleteSessionRemovesAdapter(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("adapter was not cleaned up after session delete")
+}
+
+// TestBroker_RoomFanOut proves the full room vertical: create two sessions,
+// join them to one room, SendMessage, both PTYs receive the text. This is
+// the smallest demonstration that rooms + router + leases + sessions compose
+// end-to-end through the Broker facade.
+func TestBroker_RoomFanOut(t *testing.T) {
+	// Use the real broker (no AllowUnleasedInputForTests) so we exercise the
+	// production lease path via the router.
+	b := New(Options{})
+	t.Cleanup(func() { b.Stop() })
+
+	snap1, err := b.CreateSession(session.Spec{Cmd: []string{"cat"}}, session.OutputLogOptions{})
+	if err != nil {
+		t.Fatalf("CreateSession 1: %v", err)
+	}
+	snap2, err := b.CreateSession(session.Spec{Cmd: []string{"cat"}}, session.OutputLogOptions{})
+	if err != nil {
+		t.Fatalf("CreateSession 2: %v", err)
+	}
+	sess1, err := b.Sessions().Get(snap1.ID)
+	if err != nil {
+		t.Fatalf("Get s1: %v", err)
+	}
+	sess2, err := b.Sessions().Get(snap2.ID)
+	if err != nil {
+		t.Fatalf("Get s2: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = b.DeleteSession(snap1.ID)
+		_ = b.DeleteSession(snap2.ID)
+		<-sess1.Done()
+		<-sess2.Done()
+	})
+
+	r, err := b.CreateRoom(room.CreateRoomRequest{Workspace: "ws", Title: "fanout"})
+	if err != nil {
+		t.Fatalf("CreateRoom: %v", err)
+	}
+	if _, err := b.JoinRoom(room.JoinRequest{
+		RoomID: r.ID, AgentID: "alice", SessionID: snap1.ID, CanMutate: true,
+	}); err != nil {
+		t.Fatalf("JoinRoom alice: %v", err)
+	}
+	if _, err := b.JoinRoom(room.JoinRequest{
+		RoomID: r.ID, AgentID: "bob", SessionID: snap2.ID, CanMutate: true,
+	}); err != nil {
+		t.Fatalf("JoinRoom bob: %v", err)
+	}
+
+	res, err := b.SendMessage(router.Message{
+		RoomID: r.ID,
+		Source: "test",
+		Text:   "ROOM_HELLO",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if res.Delivered != 2 || res.Failed != 0 {
+		t.Fatalf("delivered=%d failed=%d want 2/0", res.Delivered, res.Failed)
+	}
+
+	// `cat` echoes input back; both sessions should now show the message.
+	assertOutputContains(t, sess1, "ROOM_HELLO", 2*time.Second)
+	assertOutputContains(t, sess2, "ROOM_HELLO", 2*time.Second)
+}
+
+// TestBroker_JoinRoomUnknownSession maps the nested room-manager error to
+// the canonical broker sentinel.
+func TestBroker_JoinRoomUnknownSession(t *testing.T) {
+	b := New(Options{})
+	t.Cleanup(func() { b.Stop() })
+	r, err := b.CreateRoom(room.CreateRoomRequest{Workspace: "ws"})
+	if err != nil {
+		t.Fatalf("CreateRoom: %v", err)
+	}
+	_, err = b.JoinRoom(room.JoinRequest{RoomID: r.ID, AgentID: "a", SessionID: "missing"})
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("want ErrSessionNotFound, got %v", err)
+	}
 }
 
 // --- helpers ---
