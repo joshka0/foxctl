@@ -132,9 +132,155 @@ SQLite (reuse existing daemon DB pool):
 - `atcp_leases(lease_id, session_id, scope, owner, acquired_at, ttl_ms, released_at)`
 - `atcp_messages(message_id, source, target, topic, priority, content_json, delivery_json, created_at, acknowledged_at)`
 - `atcp_reminders(reminder_id, source, target, fire_at, content_json, delivery_json, idempotency_key, fired_at, status)`
-- `atcp_room_bindings(room_id, session_id, inbox_id, actor_id, transport, endpoint)`
+- `atcp_rooms` + `atcp_room_members` — see §5a for full schema.
 
 All writes are append-only or idempotent-by-key; `idempotency_key` enforced with a UNIQUE index on reminders and messages.
+
+## 5a. Room Mechanics
+
+### 5a.1 Core design anchor
+
+Agents (Claude Code, Codex, Gemini CLI, droid, etc.) **do not poll inboxes**. They only act when their TTY receives input. The broker's primary job is to keep each joined agent's pane loop running by injecting the right prompts at safe moments. Therefore:
+
+- **Terminal injection is the default delivery path**, not a fallback.
+- **Inboxes are persistence + replay**, not a delivery mechanism for most agents.
+- **Per-member headless PTY** is the ownership model: broker owns each member's PTY directly, so delivery does not depend on any mux/viewer being attached.
+- **Safe-prompt policy + leases** are what make injection reliable rather than destructive.
+
+A "room" is a coordination scope that guarantees every active member has a living PTY the broker can push into. Viewers (tmux pane, TUI, web) are presentation-only and optional.
+
+### 5a.2 Room object model
+
+Room is a durable coordination scope that owns:
+
+- `room_id`, `workspace`, `title`, `description`
+- `members[]` — one per joined agent; each references a broker-owned `session_id`
+- `policies` — delivery policy, safe-prompt regex, preemption policy, TTL, session lifecycle
+
+Sessions are first-class; rooms reference them. A session belongs to at most one room at a time. Session lifecycle policy is **persist on leave**.
+
+A member row is the tuple `(room, agent, session, inbox, role, viewer?)`.
+
+### 5a.3 Lifecycle intents
+
+| Intent | Effect |
+|---|---|
+| `room.create` | Create room row, no sessions spawned |
+| `room.join` | Spawn headless PTY (default) or bind existing session; insert member row, subscribe prompt detector |
+| `room.leave` | Set `left_at`, unsubscribe detector, release held lease. Session stays alive |
+| `room.rebind` | Swap member's `session_id` for a fresh one |
+| `room.archive` | Stop routing, keep members and sessions intact |
+| `room.destroy` | Archive + `session.delete` on every member session |
+
+Join variants:
+
+- **Auto-spawn (default)**: `body.session.cmd` provided; broker owns the PTY
+- **Bind-existing**: `body.session.session_id` provided; must not be room-bound already
+- **Inbox-only**: rare, explicit opt-in for native-aware agents
+
+### 5a.4 Autonomy loop
+
+Reminders and messages both drive agents by fanning out `message.send` through the Router over active room members:
+
+```
+scheduler/controller → message.send target=room:<id>
+  → Router fan-out over active members
+  → per-member: resolve session → mode-tracker safe prompt?
+      → acquire terminal.input lease
+      → compile content → terminal.submit (safe-prompt-only)
+      → adapter writes bytes → wait for observed output
+      → release lease → persist inbox row for audit
+```
+
+Key properties: no mux dependency, no agent cooperation, queue-on-busy, observable, lease-serialized.
+
+### 5a.5 Viewer attachment
+
+Viewers are orthogonal to routing. Broker-owned PTY is source of truth; viewers attach to observe:
+
+- `foxctl session stream <session_id>` — SSE output/events (TUI/web native path)
+- **tmux-compat** — forward PTY output into an existing tmux pane; forward pane keystrokes back (lease-gated)
+- **zellij-compat** — same for zellij
+
+Today's `room restore`/`rebind`/mux pane plumbing collapses into "viewer attach". ViewerManager uses bounded channels with **drop-oldest-with-metric** on fill (revisit once usage data available).
+
+### 5a.6 Simplified participant state
+
+| Dimension | Before | After |
+|---|---|---|
+| Membership | active/unbound/none | joined/left |
+| Transport | available/unavailable/none/unknown | always available while session alive |
+| Runtime | live/stopped/none/unknown | live by construction (session exited ends it) |
+| Presentation | attached/detached/none | viewer:attached / viewer:none (cosmetic) |
+
+### 5a.7 Storage schema
+
+```sql
+CREATE TABLE atcp_rooms (
+  room_id        TEXT PRIMARY KEY,
+  workspace      TEXT NOT NULL,
+  title          TEXT,
+  description    TEXT,
+  policies_json  TEXT NOT NULL,
+  created_by     TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  archived_at    TEXT
+);
+
+CREATE TABLE atcp_room_members (
+  room_id            TEXT NOT NULL REFERENCES atcp_rooms(room_id),
+  agent_id           TEXT NOT NULL,
+  session_id         TEXT NOT NULL REFERENCES atcp_sessions(session_id),
+  inbox_id           TEXT NOT NULL,
+  role               TEXT,             -- canonical enum value, or NULL
+  role_custom        TEXT,             -- freeform override when role is non-canonical
+  safe_prompt_regex  TEXT,             -- per-member override; null falls through
+  viewer_json        TEXT,             -- optional attached viewer descriptor
+  import_hint        TEXT,             -- migration flag: 'mux_import', etc.
+  joined_at          TEXT NOT NULL,
+  left_at            TEXT,
+  PRIMARY KEY (room_id, agent_id)
+);
+
+CREATE UNIQUE INDEX idx_atcp_room_members_session_active
+  ON atcp_room_members(session_id) WHERE left_at IS NULL;
+CREATE INDEX idx_atcp_room_members_active
+  ON atcp_room_members(room_id) WHERE left_at IS NULL;
+CREATE INDEX idx_atcp_room_members_agent_active
+  ON atcp_room_members(agent_id) WHERE left_at IS NULL;
+```
+
+Constraints:
+
+- A `session_id` appears in at most one active member row (partial unique index).
+- An `agent_id` MAY appear in multiple active rooms; multi-room is allowed but discouraged. CLI warns on such joins.
+- `role` holds canonical enum values: `coordinator`, `coder`, `reviewer`, `tester`, `planner`, `observer`. Anything else moves to `role_custom`.
+
+### 5a.8 Resolved design decisions
+
+1. **Session import on migration — viewer-only until re-join.** Migrated members whose current transport points at a mux pane land with `left_at = now()` and an `import_hint`. No retroactive PTY seizure. Operator/agent re-runs `foxctl room join` post-migration to spawn a real broker-owned PTY.
+2. **Multi-room membership allowed but discouraged.** Unique index is on `session_id`, not `agent_id`. CLI warns on second active join.
+3. **Role: closed enum with freeform fallback.** Canonical enum feeds richer defaults (e.g., `observer` joins inbox-only). Freeform values stored in `role_custom`. Validation at CLI/API edge.
+4. **Safe-prompt regex: three-layer resolution.** `member.safe_prompt_regex` → `adapter.safe_prompt_regex` → `room.policies.safe_prompt_regex` → built-in default (`(?m)(?:\$|>|❯)\s*$`).
+5. **Viewer backpressure — drop-oldest + metric.** Bounded channel per viewer; on fill, drop oldest frame and emit `viewer.dropped_frames` counter. Flagged for tuning once real usage measured.
+
+### 5a.9 RoomManager + ViewerManager
+
+Added to the broker composition in §6:
+
+```
+atcp.Broker
+ ├─ ...existing subsystems...
+ ├─ RoomManager          (NEW)
+ │    ├─ CreateRoom / ArchiveRoom / DestroyRoom
+ │    ├─ JoinRoom  / LeaveRoom / RebindRoom
+ │    └─ MemberResolver (room → []members)
+ └─ ViewerManager        (NEW)
+      ├─ AttachViewer / DetachViewer
+      └─ Forwarder (PTY output → viewer; viewer keys → PTY via lease)
+```
+
+Router queries RoomManager for fan-out targets. ViewerManager is separate so routing is never gated on viewer health.
 
 ## 6. Broker Subsystem (inside foxctl daemon)
 
@@ -209,6 +355,22 @@ Tests:
 - Unit: lease acquire/release concurrency
 - Integration: spawn a Node readline REPL, submit text, observe output
 - Golden: envelope encode/decode round-trip
+
+### Phase 1b — Room foundation
+
+Deliverables:
+
+- `atcp_rooms` + `atcp_room_members` tables (see §5a.7)
+- `internal/atcp/broker/room` RoomManager with CreateRoom / JoinRoom / LeaveRoom / RebindRoom / ArchiveRoom / DestroyRoom
+- Member resolver consumed by Router for fan-out
+- CLI: `foxctl room create|join|leave|rebind|archive|destroy|list|show|members`
+
+Exit criteria:
+
+- `foxctl room create` + `foxctl room join --agent claude` spawns a headless broker-owned PTY and inserts a member row
+- `foxctl room leave` sets `left_at` without killing the session
+- Second `room join` for the same `session_id` rejected by unique index
+- Multi-room join for the same `agent_id` allowed with a warning
 
 ### Phase 2 — Terminal mode tracking
 
