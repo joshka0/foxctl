@@ -15,6 +15,14 @@ const (
 	MinTermHeight = 15
 )
 
+// StubAgent is a lightweight agent record used by the walking skeleton to
+// display inventory rows before the live API is connected.
+type StubAgent struct {
+	ID     string
+	Role   string
+	Status string
+}
+
 // CockpitScreen is the root component for the M3 walking-skeleton operator
 // cockpit. It renders a three-lane layout (Main / Detail / Evidence) per
 // architecture.md and information-architecture.md.
@@ -23,12 +31,14 @@ const (
 // single-line "terminal too small" guard message instead. ESC exits with code
 // 0 from either state.
 type CockpitScreen struct {
-	mu       sync.Mutex
-	apiURL   string
-	width    int
-	height   int
-	tooSmall bool
-	phase    CockpitPhase
+	mu            sync.Mutex
+	apiURL        string
+	width         int
+	height        int
+	tooSmall      bool
+	phase         CockpitPhase
+	stubAgents    []StubAgent
+	selectedIndex int
 }
 
 // CockpitPhase represents the current display phase of the cockpit.
@@ -50,8 +60,85 @@ const (
 // loading/error states.
 func NewCockpitScreen(apiURL string) *CockpitScreen {
 	return &CockpitScreen{
-		apiURL: apiURL,
-		phase:  CockpitPhaseLoading,
+		apiURL:        apiURL,
+		phase:         CockpitPhaseLoading,
+		selectedIndex: -1,
+	}
+}
+
+// SetStubAgents sets the stub agent list for the walking-skeleton inventory.
+func (c *CockpitScreen) SetStubAgents(agents []StubAgent) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stubAgents = agents
+	c.clampSelectionLocked()
+}
+
+// SelectedIndex returns the index of the currently selected agent (-1 if none).
+func (c *CockpitScreen) SelectedIndex() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.selectedIndex
+}
+
+// SetSelectedIndex sets the selected agent index. The value is clamped to
+// [0, len(stubAgents)-1].
+func (c *CockpitScreen) SetSelectedIndex(idx int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.selectedIndex = idx
+	c.clampSelectionLocked()
+}
+
+// ClampSelection clamps the current selectedIndex to a valid range.
+func (c *CockpitScreen) ClampSelection() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clampSelectionLocked()
+}
+
+// clampSelectionLocked clamps selectedIndex. Caller must hold c.mu.
+func (c *CockpitScreen) clampSelectionLocked() {
+	n := len(c.stubAgents)
+	if n == 0 {
+		c.selectedIndex = -1
+		return
+	}
+	if c.selectedIndex < 0 {
+		c.selectedIndex = 0
+	}
+	if c.selectedIndex >= n {
+		c.selectedIndex = n - 1
+	}
+}
+
+// NavigateDown moves the selection to the next agent (wraps around).
+func (c *CockpitScreen) NavigateDown() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := len(c.stubAgents)
+	if n == 0 {
+		return
+	}
+	if c.selectedIndex < 0 {
+		c.selectedIndex = 0
+		return
+	}
+	c.selectedIndex = (c.selectedIndex + 1) % n
+}
+
+// NavigateUp moves the selection to the previous agent (wraps around).
+func (c *CockpitScreen) NavigateUp() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := len(c.stubAgents)
+	if n == 0 {
+		return
+	}
+	if c.selectedIndex <= 0 {
+		c.selectedIndex = n - 1
+	} else {
+		c.selectedIndex--
 	}
 }
 
@@ -273,18 +360,42 @@ func (c *CockpitScreen) renderError(width, height int, apiURL string) *gotui.Ele
 	return root
 }
 
-// renderReady renders the three-lane layout (Main / Detail / Evidence).
-// In the walking skeleton, this shows lane headers and an empty/loading state.
+// renderReady renders the three-lane layout (Main / Detail / Evidence) with
+// vertical box-drawing separators between lanes. The layout adapts to terminal
+// width. At very narrow widths the Evidence lane may collapse to 0 width.
 func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
+	c.mu.Lock()
+	agents := c.stubAgents
+	selIdx := c.selectedIndex
+	c.mu.Unlock()
+
 	bgStyle := gotui.NewStyle().Background(theme.Colors.Background)
 	headerStyle := gotui.NewStyle().Foreground(theme.Colors.TextPrimary).Background(theme.Colors.Background)
 	mutedStyle := gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)
+	sepStyle := gotui.NewStyle().Foreground(theme.Colors.Divider).Background(theme.Colors.Background)
+	selStyle := gotui.NewStyle().Foreground(theme.Colors.TextPrimary).Background(theme.Colors.SelectionBg)
 
-	// Layout: Main (~40%) | Detail (~35%) | Evidence (~25%)
-	mainW := width * 40 / 100
-	detailW := width * 35 / 100
-	evidenceW := width - mainW - detailW
-	if evidenceW < 0 {
+	// Compute lane widths. Reserve 2 columns for separators between the 3 lanes.
+	// Layout: Main (~40%) | sep | Detail (~35%) | sep | Evidence (~25%)
+	var mainW, detailW, evidenceW, sepCount int
+	if width >= 80 {
+		sepCount = 2 // two separator columns between 3 lanes
+		availW := width - sepCount
+		mainW = availW * 40 / 100
+		detailW = availW * 35 / 100
+		evidenceW = availW - mainW - detailW
+	} else if width >= 60 {
+		// At minimum width: 2 separators, narrower lanes.
+		sepCount = 2
+		availW := width - sepCount
+		mainW = availW * 45 / 100
+		detailW = availW * 35 / 100
+		evidenceW = availW - mainW - detailW
+	} else {
+		// Below minimum — only show Main lane.
+		sepCount = 0
+		mainW = width
+		detailW = 0
 		evidenceW = 0
 	}
 
@@ -293,15 +404,70 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 		contentHeight = 1
 	}
 
-	// Lane headers
-	mainHeader := padString("Agents", mainW)
-	detailHeader := padString("Detail", detailW)
-	evidenceHeader := padString("Evidence", evidenceW)
+	// Build the header row with lane names and separators.
+	headerText := buildLanedRow(
+		padString("Agents", mainW),
+		padString("Detail", detailW),
+		padString("Evidence", evidenceW),
+		"┬", sepCount, width,
+	)
 
-	// Empty state messages
-	mainBody := padString("No agents loaded.", mainW)
-	detailBody := padString("Select an agent.", detailW)
-	evidenceBody := padString("", evidenceW)
+	// Build body rows.
+	bodyLines := make([]string, 0, contentHeight-1)
+	if contentHeight > 1 {
+		if len(agents) == 0 {
+			// Empty state: show guidance in Main lane.
+			for row := 0; row < contentHeight-1; row++ {
+				var mainBody, detailBody, evidenceBody string
+				if row == (contentHeight-1)/2 {
+					mainBody = centerInWidth("No agents. foxctl agent spawn --role ...", mainW)
+					detailBody = centerInWidth("Select an agent.", detailW)
+				} else {
+					mainBody = padString("", mainW)
+					detailBody = padString("", detailW)
+				}
+				evidenceBody = padString("", evidenceW)
+				bodyLines = append(bodyLines, buildLanedRow(
+					mainBody, detailBody, evidenceBody,
+					"│", sepCount, width,
+				))
+			}
+		} else {
+			// Render agent rows.
+			for row := 0; row < contentHeight-1; row++ {
+				var mainBody, detailBody, evidenceBody string
+				if row < len(agents) {
+					a := agents[row]
+					label := shortID(a.ID) + " " + a.Role
+					if row == selIdx {
+						label = "▸ " + label
+						mainBody = padString(label, mainW)
+						// Detail shows selected agent info.
+						detailBody = padString("Role: "+a.Role+"  Status: "+a.Status, detailW)
+					} else {
+						mainBody = padString("  "+label, mainW)
+						detailBody = padString("", detailW)
+					}
+				} else {
+					mainBody = padString("", mainW)
+					detailBody = padString("", detailW)
+				}
+				evidenceBody = padString("", evidenceW)
+				bodyLines = append(bodyLines, buildLanedRow(
+					mainBody, detailBody, evidenceBody,
+					"│", sepCount, width,
+				))
+			}
+		}
+	}
+
+	// Build footer row with bottom T-junctions.
+	footerText := buildLanedRow(
+		padString("", mainW),
+		padString("", detailW),
+		padString("", evidenceW),
+		"┴", sepCount, width,
+	)
 
 	root := gotui.New(
 		gotui.WithWidth(width),
@@ -314,51 +480,125 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 		gotui.WithHeight(contentHeight),
 		gotui.WithBackground(bgStyle),
 	)
-	// Header row
-	contentArea.AddChild(
-		gotui.New(
+
+	// Header row.
+	contentArea.AddChild(gotui.New(
+		gotui.WithWidth(width),
+		gotui.WithHeight(1),
+		gotui.WithBackground(bgStyle),
+		gotui.WithText(headerText),
+		gotui.WithTextStyle(headerStyle),
+	))
+
+	// Body rows.
+	for i, line := range bodyLines {
+		lineStyle := mutedStyle
+		// If this is the selected agent row, apply selection style to the main
+		// lane portion of the text.
+		if len(agents) > 0 && i == selIdx {
+			lineStyle = selStyle
+		}
+		contentArea.AddChild(gotui.New(
 			gotui.WithWidth(width),
 			gotui.WithHeight(1),
 			gotui.WithBackground(bgStyle),
-			gotui.WithText(mainHeader+detailHeader+evidenceHeader),
-			gotui.WithTextStyle(headerStyle),
-		),
-	)
-	// Body row
-	if contentHeight > 1 {
-		contentArea.AddChild(
-			gotui.New(
-				gotui.WithWidth(width),
-				gotui.WithHeight(contentHeight-1),
-				gotui.WithBackground(bgStyle),
-				gotui.WithText(mainBody+detailBody+evidenceBody),
-				gotui.WithTextStyle(mutedStyle),
-			),
-		)
+			gotui.WithText(line),
+			gotui.WithTextStyle(lineStyle),
+		))
 	}
+
+	// Bottom separator / footer junction row.
+	if contentHeight > 1 {
+		contentArea.AddChild(gotui.New(
+			gotui.WithWidth(width),
+			gotui.WithHeight(1),
+			gotui.WithBackground(bgStyle),
+			gotui.WithText(footerText),
+			gotui.WithTextStyle(sepStyle),
+		))
+	}
+
 	root.AddChild(contentArea)
 
-	// Footer
-	root.AddChild(
-		gotui.New(
-			gotui.WithWidth(width),
-			gotui.WithHeight(1),
-			gotui.WithBackground(bgStyle),
-			gotui.WithText("● connected  ESC:quit  ↑↓:nav  Enter:submit  e:evidence"),
-			gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
-		),
-	)
+	// Status footer.
+	footerHint := "● connected  ESC:quit  ↑↓:nav  Enter:submit  e:evidence"
+	root.AddChild(gotui.New(
+		gotui.WithWidth(width),
+		gotui.WithHeight(1),
+		gotui.WithBackground(bgStyle),
+		gotui.WithText(footerHint),
+		gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
+	))
 	return root
+}
+
+// buildLanedRow concatenates Main + Detail + Evidence lane content with
+// separator characters between them. The sepRune is used for the separator
+// (│ for body, ┬ for header, ┴ for footer). The result is padded to exactly
+// width characters.
+func buildLanedRow(main, detail, evidence, sepRune string, sepCount, width int) string {
+	if sepCount == 0 {
+		return padString(main, width)
+	}
+
+	// Extract first rune correctly for multi-byte UTF-8 separators like │, ┬, ┴.
+	runes := []rune(sepRune)
+	sep := "│"
+	if len(runes) > 0 {
+		sep = string(runes[0])
+	}
+
+	if evidence == "" && sepCount >= 2 {
+		// Two lanes only: Main | Detail
+		result := main + sep + detail
+		return padString(result, width)
+	}
+
+	result := main + sep + detail + sep + evidence
+	return padString(result, width)
+}
+
+// shortID returns a shortened agent ID for display.
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+// centerInWidth centers text within a given width.
+func centerInWidth(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if len(s) >= w {
+		return s[:w]
+	}
+	pad := (w - len(s)) / 2
+	return strings.Repeat(" ", pad) + s + strings.Repeat(" ", w-pad-len(s))
 }
 
 func padString(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	if len(s) > width {
-		return s[:width]
+	// Use display width (not byte count) for correct truncation of Unicode.
+	sw := 0
+	for _, r := range s {
+		sw += int(gotui.RuneWidth(r))
 	}
-	return s + strings.Repeat(" ", width-len(s))
+	if sw > width {
+		// Truncate by display width.
+		w := 0
+		for i, r := range s {
+			w += int(gotui.RuneWidth(r))
+			if w > width {
+				return string([]rune(s[:i]))
+			}
+		}
+		return s
+	}
+	return s + strings.Repeat(" ", width-sw)
 }
 
 // tooSmallMessage is the guard message shown when the terminal is below
