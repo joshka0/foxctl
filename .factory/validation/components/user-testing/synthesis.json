@@ -1,0 +1,63 @@
+{
+  "milestone": "components",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 14,
+    "passed": 14,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-CMP-001",
+    "VAL-CMP-002",
+    "VAL-CMP-003",
+    "VAL-CMP-004",
+    "VAL-CMP-005",
+    "VAL-CMP-006",
+    "VAL-CMP-007",
+    "VAL-CMP-008",
+    "VAL-CMP-009",
+    "VAL-CMP-010",
+    "VAL-CMP-011",
+    "VAL-CMP-012",
+    "VAL-CROSS-003",
+    "VAL-CROSS-006"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added Flow Validator Guidance: M2 Components section documenting isolation rules, concurrency limits, tools used, and off-limits paths for M2 component validators",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null,
+  "validatorGroups": [
+    {
+      "groupId": "group-a-runtime-entities",
+      "assertions": ["VAL-CMP-001", "VAL-CMP-002", "VAL-CMP-003"],
+      "result": "pass",
+      "summary": "Bounded[Req,Upd] runtime has 15 test cases covering all 7 required behaviors. No regressions: existing runtime tests are new additions (not modifications). All 5 entity types exist with 18 EntryKind constants and tested legacy mapper."
+    },
+    {
+      "groupId": "group-b-widgets-1",
+      "assertions": ["VAL-CMP-004", "VAL-CMP-005", "VAL-CMP-006", "VAL-CMP-007"],
+      "result": "pass",
+      "summary": "EntityList (22+ tests), DetailPane (24 tests), Tabs (31 tests), Drawer (25 tests) all pass with -race. Focus indicators use color (not font-weight). Navigation, wrap-around, focus traps, and empty states all verified. Multiple tuistory snapshots per widget."
+    },
+    {
+      "groupId": "group-c-widgets-2",
+      "assertions": ["VAL-CMP-008", "VAL-CMP-009", "VAL-CMP-012"],
+      "result": "pass",
+      "summary": "StreamViewer (17 tests) covers follow-tail, scroll-anchor, burst-of-1000. Small primitives (23 tests) cover 4 distinct StatusBadge variants (green/amber/red/purple). Unicode tests (29 subtests) cover CJK, combining marks, ZWJ emoji, and RTL across all 4 specified widgets."
+    },
+    {
+      "groupId": "group-d-theme-docs",
+      "assertions": ["VAL-CMP-010", "VAL-CMP-011", "VAL-CROSS-003", "VAL-CROSS-006"],
+      "result": "pass",
+      "summary": "Zero raw color literals in widget code (70+ theme.Colors.* references). README has all 5 sections. Authoring walkthroughs present for FooBadge and Rooms with all cited commands/paths verified. Zero time.Now/rand/os.Getenv in production widget code."
+    }
+  ]
+}

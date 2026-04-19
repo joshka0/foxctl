@@ -140,6 +140,35 @@ The user-testing validator must, before spawning flow validators, ensure:
 
 ---
 
+## Flow Validator Guidance: M2 Components (go-test + tuistory + code-inspection + manual-read)
+
+**Surface:** Pure Go component library under `internal/interfaces/tui/`. No daemon, no network.
+
+**Tools used:**
+- `go test -race -count=1 ./internal/interfaces/tui/...` — MockTerminal unit tests
+- `tuistory` skill — widget demo snapshots (standalone binaries, no daemon)
+- `code-inspection` (grep, Read) — structural checks on source code
+- `manual-read` — README and doc checks
+
+**Isolation rules:**
+- Validators are fully independent. No shared mutable state.
+- `go test` runs may be parallelized freely (Go's test framework handles this).
+- Tuistory widget demos each run in their own PTY — no conflicts.
+- Code inspection is read-only — no conflicts.
+
+**Concurrency:** Up to 5 validators concurrently (well within budget since there is no daemon).
+
+**Shared resources (read-only):**
+- Source tree under `internal/interfaces/tui/`
+- Doc tree under `docs/plans/tui-redesign/`
+
+**Off-limits:**
+- Do not modify any source files.
+- Do not start any daemon processes.
+- Do not touch `archive/`, `packages/gui-agent/`, or `internal/interfaces/web/`.
+
+---
+
 ## Resource Updates (runtime findings)
 
 > The user-testing validator appends runtime findings here during execution
