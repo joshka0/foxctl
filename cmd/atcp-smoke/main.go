@@ -21,11 +21,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/atcp/broker"
+	"github.com/joshka0/foxctl/internal/atcp/broker/safeprompt"
 	"github.com/joshka0/foxctl/internal/atcp/broker/session"
 	"github.com/joshka0/foxctl/internal/atcp/intents"
 )
@@ -44,13 +46,18 @@ var agentProfiles = map[string][]string{
 
 func main() {
 	var (
-		agent    = flag.String("agent", "", "agent profile: droid|codex|gemini|claude|bash|sh")
-		rawCmd   = flag.String("cmd", "", "override command (e.g. \"bash -i\")")
-		prompt   = flag.String("prompt", "", "text to submit to the agent")
-		wait     = flag.Duration("wait", 8*time.Second, "how long to wait for output after submitting")
-		spawn    = flag.Duration("spawn-delay", 1500*time.Millisecond, "time to allow the agent to reach its prompt before injecting")
-		rows     = flag.Uint("rows", 40, "PTY rows")
-		cols     = flag.Uint("cols", 140, "PTY cols")
+		agent        = flag.String("agent", "", "agent profile: droid|codex|gemini|claude|bash|sh")
+		rawCmd       = flag.String("cmd", "", "override command (e.g. \"bash -i\")")
+		prompt       = flag.String("prompt", "", "text to submit to the agent")
+		wait         = flag.Duration("wait", 8*time.Second, "how long to wait for output after submitting")
+		spawn        = flag.Duration("spawn-delay", 1500*time.Millisecond, "fallback boot delay when --wait-ready is off")
+		rows         = flag.Uint("rows", 40, "PTY rows")
+		cols         = flag.Uint("cols", 140, "PTY cols")
+		waitReady    = flag.Bool("wait-ready", true, "wait for the safe-prompt gate (idle + regex) before submitting")
+		readyTimeout = flag.Duration("ready-timeout", 30*time.Second, "max time to wait for safe-prompt ready")
+		idleWindow   = flag.Duration("idle-window", 600*time.Millisecond, "how long the PTY must be quiet before ready")
+		promptRegex  = flag.String("prompt-regex", "", "override the prompt regex (empty = built-in default)")
+		logFile      = flag.String("log-file", "", "also write all raw PTY output to this file (useful for debugging prompt regexes)")
 	)
 	flag.Parse()
 
@@ -71,6 +78,16 @@ func main() {
 	b := broker.New(broker.Options{})
 	defer b.Stop()
 
+	var logSink *os.File
+	if *logFile != "" {
+		f, err := os.Create(*logFile)
+		if err != nil {
+			fatalf("create --log-file: %v", err)
+		}
+		defer f.Close()
+		logSink = f
+	}
+
 	fmt.Fprintf(os.Stderr, "atcp-smoke: spawning %v\n", cmd)
 	snap, err := b.CreateSession(session.Spec{
 		Cmd:  cmd,
@@ -86,14 +103,34 @@ func main() {
 		fatalf("Get session: %v", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "atcp-smoke: session %s pid=%d; letting it boot for %v\n", snap.ID, snap.PID, *spawn)
-	select {
-	case <-time.After(*spawn):
-	case <-ctx.Done():
-		return
-	case <-sess.Done():
-		drain(sess)
-		fatalf("session exited before submit; output above")
+	fmt.Fprintf(os.Stderr, "atcp-smoke: session %s pid=%d\n", snap.ID, snap.PID)
+	if *waitReady {
+		safeOpts := safeprompt.Options{IdleWindow: *idleWindow}
+		if *promptRegex != "" {
+			re, err := regexp.Compile(*promptRegex)
+			if err != nil {
+				fatalf("bad --prompt-regex: %v", err)
+			}
+			safeOpts.Regex = re
+		}
+		readyCtx, cancelReady := context.WithTimeout(ctx, *readyTimeout)
+		fmt.Fprintf(os.Stderr, "atcp-smoke: waiting for safe prompt (idle=%v, timeout=%v)\n", *idleWindow, *readyTimeout)
+		d, reason, err := safeprompt.Wait(readyCtx, sess, safeOpts, 75*time.Millisecond)
+		cancelReady()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atcp-smoke: WARN not ready (%s: %s); injecting anyway\n", d, reason)
+		} else {
+			fmt.Fprintf(os.Stderr, "atcp-smoke: ready (%s)\n", reason)
+		}
+	} else {
+		select {
+		case <-time.After(*spawn):
+		case <-ctx.Done():
+			return
+		case <-sess.Done():
+			drain(sess)
+			fatalf("session exited before submit; output above")
+		}
 	}
 
 	startSeq := sess.Log().NextSeq() - 1
@@ -107,6 +144,11 @@ func main() {
 	stream(ctx, sess, startSeq, *wait)
 
 	fmt.Fprintf(os.Stderr, "\natcp-smoke: stopping session\n")
+	if logSink != nil {
+		for _, c := range sess.Log().Since(0, 0) {
+			_, _ = logSink.Write(c.Bytes)
+		}
+	}
 	b.DeleteSession(snap.ID)
 	<-sess.Done()
 }

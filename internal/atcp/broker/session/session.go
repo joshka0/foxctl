@@ -25,6 +25,8 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/joshka0/foxctl/internal/atcp/broker/modetrack"
 )
 
 // Spec describes how to spawn a Session's child process.
@@ -96,7 +98,8 @@ type Session struct {
 	spec      Spec
 	createdAt time.Time
 
-	log *OutputLog
+	log     *OutputLog
+	tracker *modetrack.Tracker
 
 	// mu guards all mutable fields below. Only the Run goroutine writes;
 	// readers use Snapshot() which takes the same lock and returns copies.
@@ -141,6 +144,7 @@ func New(spec Spec, logOpts OutputLogOptions) (*Session, error) {
 		spec:      spec,
 		createdAt: time.Now().UTC(),
 		log:       NewOutputLog(logOpts),
+		tracker:   modetrack.New(),
 		status:    StatusPending,
 		done:      make(chan struct{}),
 	}
@@ -152,6 +156,11 @@ func (s *Session) ID() string { return s.id }
 
 // Log returns the session's output log for subscription and replay.
 func (s *Session) Log() *OutputLog { return s.log }
+
+// Tracker returns the session's terminal-mode tracker. Callers can query
+// Snapshot() for bracketed-paste / alt-screen / cursor-keys state or subscribe
+// to live mode transitions.
+func (s *Session) Tracker() *modetrack.Tracker { return s.tracker }
 
 // Done returns a channel that is closed after the session has exited and its
 // Run goroutine has returned. Callers use this to synchronize lifecycle.
@@ -274,6 +283,7 @@ func (s *Session) run(ctx context.Context, cleanup func()) {
 		for {
 			n, err := s.ptyFd.Read(buf)
 			if n > 0 {
+				s.tracker.Feed(buf[:n])
 				if _, appendErr := s.log.Append(buf[:n]); appendErr != nil {
 					return
 				}

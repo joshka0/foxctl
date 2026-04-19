@@ -112,9 +112,21 @@ func (b *Broker) CreateSession(spec session.Spec, logOpts session.OutputLogOptio
 	b.adapters[sess.ID()] = adapter
 	b.adaptersMu.Unlock()
 
-	// When the session exits, drop its adapter entry.
+	// Mirror terminal-mode state onto the adapter so that bracketed-paste
+	// wrapping follows whatever the child has enabled.
+	adapter.SetBracketedPasteEnabled(sess.Tracker().Snapshot().BracketedPaste)
+	modes, cancelModes := sess.Tracker().Subscribe()
+	go func() {
+		for c := range modes {
+			adapter.SetBracketedPasteEnabled(c.Mode.BracketedPaste)
+		}
+	}()
+
+	// When the session exits, drop its adapter entry and tear down the mode
+	// subscription so the mirror goroutine above exits.
 	go func(id string) {
 		<-sess.Done()
+		cancelModes()
 		b.adaptersMu.Lock()
 		delete(b.adapters, id)
 		b.adaptersMu.Unlock()
