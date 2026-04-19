@@ -117,10 +117,18 @@ type Result struct {
 
 // Sentinel errors returned by Send.
 var (
-	ErrRoomIDRequired       = errors.New("atcp router: room_id is required")
-	ErrEmptyMessage         = errors.New("atcp router: message text is empty")
-	ErrUnsupportedDelivery  = errors.New("atcp router: delivery policy not supported in this slice")
-	ErrNoActiveMembers      = errors.New("atcp router: no active members in room")
+	ErrRoomIDRequired      = errors.New("atcp router: room_id is required")
+	ErrEmptyMessage        = errors.New("atcp router: message text is empty")
+	ErrUnsupportedDelivery = errors.New("atcp router: delivery policy not supported in this slice")
+	// ErrNoActiveMembers is returned when the resolver reports zero active
+	// members in the room (nobody is joined, or everyone left).
+	ErrNoActiveMembers = errors.New("atcp router: no active members in room")
+	// ErrNoMutableMembers is returned when active members exist but none of
+	// them are flagged CanMutate=true. Observers, inbox-only, and
+	// explicitly read-only joins sit in this bucket. Keeping this distinct
+	// from ErrNoActiveMembers lets operators distinguish "room is empty"
+	// from "room is populated but no one may be typed into".
+	ErrNoMutableMembers = errors.New("atcp router: no mutable members in room")
 )
 
 // Send fans the message out to every active member of the room. The method
@@ -150,19 +158,46 @@ func (r *Router) Send(msg Message) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if len(members) == 0 {
+		return Result{MessageID: msg.ID}, ErrNoActiveMembers
+	}
 	// Filter out skipped agents and members explicitly flagged non-mutable.
+	// The CanMutate check is the authority boundary around terminal
+	// injection: observers, inbox-only bindings, and any member that joined
+	// with --can-mutate=false must NOT receive PTY writes here. Leases
+	// serialise producers but do not gate them on role; that check must
+	// happen at the router.
 	skip := make(map[string]struct{}, len(msg.SkipAgents))
 	for _, a := range msg.SkipAgents {
 		skip[a] = struct{}{}
 	}
+	// hasAnyMutable tracks mutability BEFORE the skip filter so the error
+	// below can distinguish "room is populated but nobody is typeable" from
+	// "room is populated but the sender excluded the only mutable targets".
+	hasAnyMutable := false
 	targets := members[:0]
 	for _, m := range members {
+		if m.CanMutate {
+			hasAnyMutable = true
+		}
 		if _, ok := skip[m.AgentID]; ok {
+			continue
+		}
+		if !m.CanMutate {
 			continue
 		}
 		targets = append(targets, m)
 	}
 	if len(targets) == 0 {
+		if !hasAnyMutable {
+			// Room has members but none of them are mutable — this is a
+			// role/config problem, not a skip-list problem.
+			return Result{MessageID: msg.ID}, ErrNoMutableMembers
+		}
+		// Mutable members exist but they were all filtered out by
+		// SkipAgents. From the sender's perspective that's "nobody
+		// eligible to receive", which is closer to ErrNoActiveMembers
+		// semantically than a role error.
 		return Result{MessageID: msg.ID}, ErrNoActiveMembers
 	}
 

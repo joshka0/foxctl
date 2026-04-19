@@ -219,6 +219,108 @@ func TestRouter_UnsupportedDeliveryRejected(t *testing.T) {
 	}
 }
 
+// TestRouter_NonMutableMembersSkipped locks in the P0 authority boundary:
+// active members with CanMutate=false MUST NOT receive PTY writes even
+// though they appear in ActiveMembers. The dispatcher should see exactly
+// the mutable member's session ID and no lease for the observer.
+func TestRouter_NonMutableMembersSkipped(t *testing.T) {
+	m := room.NewManager()
+	rm, _ := m.CreateRoom(room.CreateRoomRequest{Workspace: "ws"})
+	writer, err := m.JoinRoom(room.JoinRequest{
+		RoomID: rm.ID, AgentID: "writer", SessionID: "sw", CanMutate: true,
+	})
+	if err != nil {
+		t.Fatalf("JoinRoom writer: %v", err)
+	}
+	observer, err := m.JoinRoom(room.JoinRequest{
+		RoomID: rm.ID, AgentID: "observer", SessionID: "so", CanMutate: false,
+	})
+	if err != nil {
+		t.Fatalf("JoinRoom observer: %v", err)
+	}
+	d := newFakeDispatcher()
+	r := New(d, m, Options{})
+
+	res, err := r.Send(Message{RoomID: rm.ID, Text: "hello"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if res.Delivered != 1 || res.Failed != 0 {
+		t.Fatalf("delivered=%d failed=%d, want 1/0 (observer not counted)", res.Delivered, res.Failed)
+	}
+	acquired, _, submitted := d.snapshot()
+	if len(acquired) != 1 || acquired[0].SessionID != writer.SessionID {
+		t.Errorf("leases = %+v; want single acquire on writer session %s", acquired, writer.SessionID)
+	}
+	for _, s := range submitted {
+		if s.sessionID == observer.SessionID {
+			t.Fatalf("observer session %s must NOT receive Submit", observer.SessionID)
+		}
+	}
+	// Result.Members reflects the dispatched targets only; observers are
+	// excluded from fan-out accounting so clients don't see a phantom
+	// "undelivered" for something that was never a candidate.
+	for _, mr := range res.Members {
+		if mr.AgentID == observer.AgentID {
+			t.Error("observer should not appear in Result.Members")
+		}
+	}
+}
+
+// TestRouter_AllObserversReturnsErrNoMutableMembers proves the distinct
+// error shape — a populated but purely read-only room is a config problem
+// and should surface differently from "empty room".
+func TestRouter_AllObserversReturnsErrNoMutableMembers(t *testing.T) {
+	m := room.NewManager()
+	rm, _ := m.CreateRoom(room.CreateRoomRequest{Workspace: "ws"})
+	if _, err := m.JoinRoom(room.JoinRequest{
+		RoomID: rm.ID, AgentID: "o1", SessionID: "s1", CanMutate: false,
+	}); err != nil {
+		t.Fatalf("JoinRoom o1: %v", err)
+	}
+	if _, err := m.JoinRoom(room.JoinRequest{
+		RoomID: rm.ID, AgentID: "o2", SessionID: "s2", CanMutate: false,
+	}); err != nil {
+		t.Fatalf("JoinRoom o2: %v", err)
+	}
+	d := newFakeDispatcher()
+	r := New(d, m, Options{})
+	_, err := r.Send(Message{RoomID: rm.ID, Text: "x"})
+	if !errors.Is(err, ErrNoMutableMembers) {
+		t.Fatalf("want ErrNoMutableMembers, got %v", err)
+	}
+	// Never acquired a lease for an observer.
+	acquired, _, submitted := d.snapshot()
+	if len(acquired) != 0 || len(submitted) != 0 {
+		t.Errorf("no leases/submits should have happened: acquired=%d submitted=%d", len(acquired), len(submitted))
+	}
+}
+
+// TestRouter_SkipFiltersMutableMembersYieldsActive confirms that when the
+// sender skips the one mutable member, the fallback error is
+// ErrNoActiveMembers (not ErrNoMutableMembers): the config is fine, the
+// caller just excluded the only eligible recipient.
+func TestRouter_SkipFiltersMutableMembersYieldsActive(t *testing.T) {
+	m := room.NewManager()
+	rm, _ := m.CreateRoom(room.CreateRoomRequest{Workspace: "ws"})
+	mem, err := m.JoinRoom(room.JoinRequest{
+		RoomID: rm.ID, AgentID: "writer", SessionID: "sw", CanMutate: true,
+	})
+	if err != nil {
+		t.Fatalf("JoinRoom: %v", err)
+	}
+	d := newFakeDispatcher()
+	r := New(d, m, Options{})
+	_, err = r.Send(Message{
+		RoomID:     rm.ID,
+		Text:       "self",
+		SkipAgents: []string{mem.AgentID},
+	})
+	if !errors.Is(err, ErrNoActiveMembers) {
+		t.Fatalf("want ErrNoActiveMembers, got %v", err)
+	}
+}
+
 func TestRouter_RequiredFields(t *testing.T) {
 	m, roomID, _ := roomWith(t, 1)
 	d := newFakeDispatcher()

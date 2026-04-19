@@ -312,6 +312,42 @@ func (m *Manager) LeaveRoom(roomID, agentID string) (Member, error) {
 	return Member{}, ErrMemberNotFound
 }
 
+// DetachSession stamps LeftAt on every active member bound to the given
+// session, regardless of room. Returned members are the rows that were
+// actually modified — callers can iterate them to persist through storage
+// or emit notifications.
+//
+// This is the hook used by the broker when a session exits (naturally or
+// via DeleteSession): without it the Router would keep trying to deliver to
+// a dead PTY and ListMembers would show a false "active" binding.
+//
+// Safe to call when the session is not bound to any room; in that case an
+// empty slice is returned.
+func (m *Manager) DetachSession(sessionID string, at time.Time) []Member {
+	if sessionID == "" {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	roomID, ok := m.sessionToRoom[sessionID]
+	if !ok {
+		return nil
+	}
+	// The index says "this session is active in exactly one room"; walk
+	// that room and stamp every matching still-active row. In practice
+	// there is at most one, but the loop tolerates historical drift.
+	var changed []Member
+	for _, mem := range m.members[roomID] {
+		if !mem.Active() || mem.SessionID != sessionID {
+			continue
+		}
+		mem.LeftAt = at
+		changed = append(changed, *mem)
+	}
+	delete(m.sessionToRoom, sessionID)
+	return changed
+}
+
 // ArchiveRoom stops routing for a room but keeps its rows around. Subsequent
 // JoinRoom calls fail; active members stay active until LeaveRoom.
 func (m *Manager) ArchiveRoom(roomID string) (Room, error) {
