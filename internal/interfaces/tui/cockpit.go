@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"strings"
 	"sync"
 
@@ -15,8 +16,20 @@ const (
 	MinTermHeight = 15
 )
 
+// AgentInventoryItem is a row in the Main lane agent inventory. It contains
+// the six required display fields per information-architecture.md.
+type AgentInventoryItem struct {
+	ID         string
+	Role       string
+	Status     string
+	Workspace  string
+	ParentID   string // "—" if root (no parent)
+	LastActive string // formatted timestamp or "—" if never
+}
+
 // StubAgent is a lightweight agent record used by the walking skeleton to
 // display inventory rows before the live API is connected.
+// Deprecated: use AgentInventoryItem for new code.
 type StubAgent struct {
 	ID     string
 	Role   string
@@ -37,7 +50,7 @@ type CockpitScreen struct {
 	height        int
 	tooSmall      bool
 	phase         CockpitPhase
-	stubAgents    []StubAgent
+	agents        []AgentInventoryItem
 	selectedIndex int
 	bootManager   *BootManager // nil until SetBootManager is called
 	phaseChanges  chan CockpitPhase
@@ -71,11 +84,38 @@ func NewCockpitScreen(apiURL string) *CockpitScreen {
 }
 
 // SetStubAgents sets the stub agent list for the walking-skeleton inventory.
+// Deprecated: use SetAgents for new code.
 func (c *CockpitScreen) SetStubAgents(agents []StubAgent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.stubAgents = agents
+	items := make([]AgentInventoryItem, len(agents))
+	for i, a := range agents {
+		items[i] = AgentInventoryItem{
+			ID:     a.ID,
+			Role:   a.Role,
+			Status: a.Status,
+		}
+	}
+	c.agents = items
 	c.clampSelectionLocked()
+}
+
+// SetAgents sets the live agent inventory items. The items are sorted
+// deterministically (by Role ascending, then ID ascending) before storage.
+func (c *CockpitScreen) SetAgents(agents []AgentInventoryItem) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.agents = sortAgents(agents)
+	c.clampSelectionLocked()
+}
+
+// Agents returns a copy of the current agent inventory items.
+func (c *CockpitScreen) Agents() []AgentInventoryItem {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	result := make([]AgentInventoryItem, len(c.agents))
+	copy(result, c.agents)
+	return result
 }
 
 // SelectedIndex returns the index of the currently selected agent (-1 if none).
@@ -103,7 +143,7 @@ func (c *CockpitScreen) ClampSelection() {
 
 // clampSelectionLocked clamps selectedIndex. Caller must hold c.mu.
 func (c *CockpitScreen) clampSelectionLocked() {
-	n := len(c.stubAgents)
+	n := len(c.agents)
 	if n == 0 {
 		c.selectedIndex = -1
 		return
@@ -120,7 +160,7 @@ func (c *CockpitScreen) clampSelectionLocked() {
 func (c *CockpitScreen) NavigateDown() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	n := len(c.stubAgents)
+	n := len(c.agents)
 	if n == 0 {
 		return
 	}
@@ -135,7 +175,7 @@ func (c *CockpitScreen) NavigateDown() {
 func (c *CockpitScreen) NavigateUp() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	n := len(c.stubAgents)
+	n := len(c.agents)
 	if n == 0 {
 		return
 	}
@@ -449,7 +489,7 @@ func (c *CockpitScreen) renderError(width, height int, apiURL string) *gotui.Ele
 // width. At very narrow widths the Evidence lane may collapse to 0 width.
 func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 	c.mu.Lock()
-	agents := c.stubAgents
+	agents := c.agents
 	selIdx := c.selectedIndex
 	c.mu.Unlock()
 
@@ -501,11 +541,17 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 	if contentHeight > 1 {
 		if len(agents) == 0 {
 			// Empty state: show guidance in Main lane.
+			emptyMsg := "No agents running."
+			ctaMsg := "Spawn: foxctl agent spawn --role ..."
 			for row := 0; row < contentHeight-1; row++ {
 				var mainBody, detailBody, evidenceBody string
-				if row == (contentHeight-1)/2 {
-					mainBody = centerInWidth("No agents. foxctl agent spawn --role ...", mainW)
+				mid := (contentHeight - 1) / 2
+				if row == mid {
+					mainBody = centerInWidth(emptyMsg, mainW)
 					detailBody = centerInWidth("Select an agent.", detailW)
+				} else if row == mid+1 {
+					mainBody = centerInWidth(ctaMsg, mainW)
+					detailBody = padString("", detailW)
 				} else {
 					mainBody = padString("", mainW)
 					detailBody = padString("", detailW)
@@ -517,12 +563,13 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 				))
 			}
 		} else {
-			// Render agent rows.
+			// Render agent rows with six required fields:
+			// short ID, role, status, workspace label, parent link, last-activity time.
 			for row := 0; row < contentHeight-1; row++ {
 				var mainBody, detailBody, evidenceBody string
 				if row < len(agents) {
 					a := agents[row]
-					label := shortID(a.ID) + " " + a.Role
+					label := buildAgentInventoryLabel(a, mainW)
 					if row == selIdx {
 						label = "▸ " + label
 						mainBody = padString(label, mainW)
@@ -616,6 +663,104 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 	return root
 }
 
+// buildAgentInventoryLabel builds a compact inventory row label from an
+// AgentInventoryItem, fitting as many of the six required fields as possible
+// into the given width: short ID, role, status, workspace, parent, last active.
+func buildAgentInventoryLabel(a AgentInventoryItem, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	parent := a.ParentID
+	if parent == "" {
+		parent = "—"
+	}
+	last := a.LastActive
+	if last == "" {
+		last = "—"
+	}
+	ws := a.Workspace
+	if ws == "" {
+		ws = "—"
+	}
+
+	// Try the full format first.
+	full := shortID(a.ID) + " " + a.Role + " " + a.Status + " " + ws + " " + parent + " " + last
+	if runeWidth(full) <= width {
+		return full
+	}
+
+	// Fallback: drop last-active.
+	medium := shortID(a.ID) + " " + a.Role + " " + a.Status + " " + ws + " " + parent
+	if runeWidth(medium) <= width {
+		return medium
+	}
+
+	// Fallback: drop parent too.
+	short := shortID(a.ID) + " " + a.Role + " " + a.Status + " " + ws
+	if runeWidth(short) <= width {
+		return short
+	}
+
+	// Fallback: just ID + role + status.
+	minimal := shortID(a.ID) + " " + a.Role + " " + a.Status
+	if runeWidth(minimal) <= width {
+		return minimal
+	}
+
+	// Ultimate fallback: truncate.
+	return truncateLabel(minimal, width)
+}
+
+// truncateLabel truncates s to fit within maxCells display width.
+func truncateLabel(s string, maxCells int) string {
+	if maxCells <= 0 {
+		return ""
+	}
+	totalWidth := 0
+	for i, r := range s {
+		rw := int(gotui.RuneWidth(r))
+		if totalWidth+rw > maxCells {
+			if maxCells >= 1 {
+				avail := maxCells - 1
+				w := 0
+				for j, rr := range s {
+					rrw := int(gotui.RuneWidth(rr))
+					if w+rrw > avail {
+						return string([]rune(s[:j])) + "…"
+					}
+					w += rrw
+				}
+			}
+			return string([]rune(s[:i])) + "…"
+		}
+		totalWidth += rw
+	}
+	return s
+}
+
+// runeWidth returns the number of terminal cells occupied by s.
+func runeWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w += int(gotui.RuneWidth(r))
+	}
+	return w
+}
+
+// sortAgents returns a deterministically sorted copy of agents:
+// by Role ascending, then ID ascending.
+func sortAgents(agents []AgentInventoryItem) []AgentInventoryItem {
+	result := make([]AgentInventoryItem, len(agents))
+	copy(result, agents)
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Role != result[j].Role {
+			return result[i].Role < result[j].Role
+		}
+		return result[i].ID < result[j].ID
+	})
+	return result
+}
+
 // buildLanedRow concatenates Main + Detail + Evidence lane content with
 // separator characters between them. The sepRune is used for the separator
 // (│ for body, ┬ for header, ┴ for footer). The result is padded to exactly
@@ -701,9 +846,21 @@ const tooSmallMessage = "terminal too small — resize to ≥60x15"
 func RunCockpit(apiURL string) error {
 	cockpit := NewCockpitScreen(apiURL)
 
+	// Build an API client and agent adapter so the boot manager can fetch
+	// the live agent inventory after the health check succeeds.
+	apiClient, err := NewAPIClient(apiURL, nil)
+	if err != nil {
+		return err
+	}
+	agentAdapter, err := NewAgentAdapter(apiClient)
+	if err != nil {
+		return err
+	}
+
 	bm := NewBootManager(BootConfig{
-		APIURL: apiURL,
-		Screen: cockpit,
+		APIURL:       apiURL,
+		Screen:       cockpit,
+		AgentAdapter: agentAdapter,
 	})
 	cockpit.SetBootManager(bm)
 

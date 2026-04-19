@@ -372,10 +372,10 @@ func discoverListeningPort(ctx context.Context, pid int, timeout time.Duration) 
 }
 
 // lsofPort runs lsof to find the TCP listening port for a given PID.
-// The -a flag ANDs the selectors so only network connections for the target
-// PID are returned.
+// On macOS the -a flag does not AND selectors as expected, so we run
+// lsof -p <pid> and grep for LISTEN lines manually.
 func lsofPort(pid int) (int, error) {
-	cmd := exec.Command("lsof", "-a", "-i", "-P", "-n", "-p", strconv.Itoa(pid))
+	cmd := exec.Command("lsof", "-p", strconv.Itoa(pid), "-P", "-n")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("lsof: %w", err)
