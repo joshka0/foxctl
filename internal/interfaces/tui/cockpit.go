@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	gotui "github.com/grindlemire/go-tui"
+	"github.com/joshka0/foxctl/internal/interfaces/tui/components"
 	"github.com/joshka0/foxctl/internal/interfaces/tui/theme"
 )
 
@@ -52,6 +53,7 @@ type CockpitScreen struct {
 	phase         CockpitPhase
 	agents        []AgentInventoryItem
 	selectedIndex int
+	focusedLane   int // 0=Main, 1=Detail, 2=Evidence
 	bootManager   *BootManager // nil until SetBootManager is called
 	phaseChanges  chan CockpitPhase
 	app           *gotui.App // reference for triggering re-renders
@@ -79,6 +81,7 @@ func NewCockpitScreen(apiURL string) *CockpitScreen {
 		apiURL:        apiURL,
 		phase:         CockpitPhaseLoading,
 		selectedIndex: -1,
+		focusedLane:   0, // Main lane is focused by default
 		phaseChanges:  make(chan CockpitPhase, 8),
 	}
 }
@@ -126,12 +129,19 @@ func (c *CockpitScreen) SelectedIndex() int {
 }
 
 // SetSelectedIndex sets the selected agent index. The value is clamped to
-// [0, len(stubAgents)-1].
+// [0, len(agents)-1]. Use ClearSelection to set selectedIndex to -1.
 func (c *CockpitScreen) SetSelectedIndex(idx int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.selectedIndex = idx
 	c.clampSelectionLocked()
+}
+
+// ClearSelection sets selectedIndex to -1 (no selection) without clamping.
+func (c *CockpitScreen) ClearSelection() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.selectedIndex = -1
 }
 
 // ClampSelection clamps the current selectedIndex to a valid range.
@@ -184,6 +194,31 @@ func (c *CockpitScreen) NavigateUp() {
 	} else {
 		c.selectedIndex--
 	}
+}
+
+// FocusedLane returns the currently focused lane index:
+// 0 = Main, 1 = Detail, 2 = Evidence.
+func (c *CockpitScreen) FocusedLane() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.focusedLane
+}
+
+// SetFocusedLane sets the focused lane index. Values are wrapped to [0,2].
+func (c *CockpitScreen) SetFocusedLane(lane int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.focusedLane = ((lane % 3) + 3) % 3
+}
+
+// CycleFocusForward moves focus to the next lane (Main → Detail → Evidence → Main).
+func (c *CockpitScreen) CycleFocusForward() {
+	c.SetFocusedLane(c.FocusedLane() + 1)
+}
+
+// CycleFocusBackward moves focus to the previous lane (Main ← Detail ← Evidence ← Main).
+func (c *CockpitScreen) CycleFocusBackward() {
+	c.SetFocusedLane(c.FocusedLane() - 1)
 }
 
 // UpdateSize updates the terminal dimensions and returns whether the "too
@@ -330,6 +365,13 @@ func (c *CockpitScreen) KeyMap() gotui.KeyMap {
 		}),
 		gotui.On(gotui.Rune('k'), func(ke gotui.KeyEvent) {
 			c.NavigateUp()
+		}),
+		gotui.On(gotui.KeyTab, func(ke gotui.KeyEvent) {
+			if ke.Mod.Has(gotui.ModShift) {
+				c.CycleFocusBackward()
+			} else {
+				c.CycleFocusForward()
+			}
 		}),
 	}
 	return km
@@ -538,6 +580,7 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 
 	// Build body rows.
 	bodyLines := make([]string, 0, contentHeight-1)
+	var detailPaneRows []string // extracted from DetailPane render
 	if contentHeight > 1 {
 		if len(agents) == 0 {
 			// Empty state: show guidance in Main lane.
@@ -563,6 +606,11 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 				))
 			}
 		} else {
+			// Pre-render DetailPane for the selected agent.
+			if selIdx >= 0 && selIdx < len(agents) && detailW > 0 {
+				detailPaneRows = c.renderDetailPaneRows(agents[selIdx], detailW, contentHeight-1)
+			}
+
 			// Render agent rows with six required fields:
 			// short ID, role, status, workspace label, parent link, last-activity time.
 			for row := 0; row < contentHeight-1; row++ {
@@ -573,16 +621,29 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 					if row == selIdx {
 						label = "▸ " + label
 						mainBody = padString(label, mainW)
-						// Detail shows selected agent info.
-						detailBody = padString("Role: "+a.Role+"  Status: "+a.Status, detailW)
 					} else {
 						mainBody = padString("  "+label, mainW)
-						detailBody = padString("", detailW)
 					}
 				} else {
 					mainBody = padString("", mainW)
+				}
+
+				// Detail lane: use DetailPane rows when an agent is selected;
+				// otherwise show empty-state guidance.
+				if selIdx >= 0 && row < len(detailPaneRows) {
+					detailBody = detailPaneRows[row]
+				} else if selIdx < 0 {
+					// No selection: show empty-state guidance in the middle row.
+					mid := (contentHeight - 1) / 2
+					if row == mid {
+						detailBody = centerInWidth("Select an agent.", detailW)
+					} else {
+						detailBody = padString("", detailW)
+					}
+				} else {
 					detailBody = padString("", detailW)
 				}
+
 				evidenceBody = padString("", evidenceW)
 				bodyLines = append(bodyLines, buildLanedRow(
 					mainBody, detailBody, evidenceBody,
@@ -635,6 +696,7 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 			gotui.WithBackground(bgStyle),
 			gotui.WithText(line),
 			gotui.WithTextStyle(lineStyle),
+			gotui.WithWrap(false),
 		))
 	}
 
@@ -828,6 +890,91 @@ func padString(s string, width int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", width-sw)
+}
+
+// renderDetailPaneRows renders a DetailPane for the given agent and returns
+// the text content of each row, padded to the given width. The height
+// determines how many rows to extract.
+func (c *CockpitScreen) renderDetailPaneRows(a AgentInventoryItem, width, height int) []string {
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+
+	// Map status string to StatusVariant.
+	var status components.StatusVariant
+	switch a.Status {
+	case "running", "healthy", "ok":
+		status = components.StatusOK
+	case "idle", "degraded", "warn":
+		status = components.StatusWarn
+	case "error", "failed", "dead":
+		status = components.StatusError
+	case "loading", "starting", "pending":
+		status = components.StatusPending
+	default:
+		if a.Status != "" {
+			status = components.StatusOK
+		} else {
+			status = components.StatusNone
+		}
+	}
+
+	// Build sections: Runtime, Hierarchy, Recent Activity.
+	sections := []components.Section{
+		{
+			Title: "Runtime",
+			Lines: []string{
+				"Status: " + a.Status,
+				"Workspace: " + a.Workspace,
+				"Last Active: " + a.LastActive,
+			},
+		},
+		{
+			Title: "Hierarchy",
+			Lines: []string{
+				"Parent: " + a.ParentID,
+				"Children: —", // not yet available from inventory
+			},
+		},
+		{
+			Title: "Recent Activity",
+			Lines: []string{
+				"No recent activity.",
+			},
+		},
+	}
+
+	c.mu.Lock()
+	focused := c.focusedLane == 1 // Detail lane focused
+	c.mu.Unlock()
+
+	dp := components.NewDetailPane(
+		a.Role+" ("+shortID(a.ID)+")",
+		status,
+		sections,
+		width,
+		height,
+		components.WithDPFocused(focused),
+		components.WithHasEntity(true),
+	)
+
+	buf := gotui.NewBuffer(width, height)
+	dp.Render(buf)
+
+	rows := make([]string, height)
+	for y := 0; y < height; y++ {
+		var b strings.Builder
+		for x := 0; x < width; x++ {
+			cell := buf.Cell(x, y)
+			if cell.Rune != 0 {
+				b.WriteRune(cell.Rune)
+			} else {
+				b.WriteRune(' ')
+			}
+		}
+		rows[y] = b.String()
+	}
+	return rows
 }
 
 // tooSmallMessage is the guard message shown when the terminal is below

@@ -383,17 +383,24 @@ func TestCockpitScreen_DetailLaneShowsSelectedAgent(t *testing.T) {
 	_, mt := renderCockpitToMT(cs, 80, 24)
 
 	// After sorting by role, index 0 is "coder" (comes before "researcher").
-	// Find a row that contains detail info for the selected agent.
-	foundDetail := false
+	// The Detail lane should show the DetailPane with the selected agent's info.
+	// DetailPane header contains the role; body contains "Runtime" section.
+	foundRuntime := false
+	foundCoder := false
 	for y := 1; y < 23; y++ {
 		row := rowTextFromMT(mt, y, 80)
-		if containsSubstring(row, "Role:") && containsSubstring(row, "coder") {
-			foundDetail = true
-			break
+		if containsSubstring(row, "Runtime") {
+			foundRuntime = true
+		}
+		if containsSubstring(row, "coder") {
+			foundCoder = true
 		}
 	}
-	if !foundDetail {
-		t.Error("detail lane should show selected agent's role")
+	if !foundRuntime {
+		t.Error("detail lane should show 'Runtime' section")
+	}
+	if !foundCoder {
+		t.Error("detail lane should show selected agent's role 'coder'")
 	}
 }
 
