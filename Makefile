@@ -348,7 +348,9 @@ init: build-all skills-install-all
 	@./scripts/init.sh
 
 viewer:
-	@$(GO_CMD) build -trimpath -o bin/foxctl-viewer ./cmd/foxctl_viewer
+	@echo "foxctl-viewer is archived under archive/cmd/foxctl_viewer."
+	@echo "Use the canonical Go TUI instead: make go-tui-agent"
+	@exit 2
 
 install-mail:
 	@./scripts/install-mail.sh
@@ -447,14 +449,15 @@ ts-install:
 	@command -v bun >/dev/null 2>&1 || { echo "bun not installed. See: https://bun.sh"; exit 1; }
 	@bun install
 
-# Build the standalone TUI agent binary
-ts-build-tui: ts-install
-	@mkdir -p bin
-	@bun build --compile --minify packages/tui-agent/src/index.ts --outfile bin/foxctl-tui
-	@echo "Built bin/foxctl-tui"
+ts-build-tui:
+	@echo "The TypeScript TUI is archived under archive/packages/tui-agent."
+	@echo "Use the canonical Go TUI instead: make go-tui-build"
+	@exit 2
 
-ts-dev-tui: ts-install
-	@cd packages/tui-agent && bun run dev
+ts-dev-tui:
+	@echo "The TypeScript TUI is archived under archive/packages/tui-agent."
+	@echo "Use the canonical Go TUI instead: make go-tui-agent"
+	@exit 2
 
 # Starts API server + gui-agent (Vite) development workflow
 ts-dev-gui: gui-agent
@@ -515,14 +518,10 @@ gui-agent-vite: ts-install
 gui-smoke-seed:
 	@bash scripts/gui_smoke_seed.sh "$(CURDIR)"
 
-# Runs both API server and TUI binary together
-ts-tui: ts-build-tui build
-	@echo "Starting API server and TUI..."
-	@./bin/foxctl web serve --dev-cors > /dev/null 2>&1 & \
-	SERVER_PID=$$!; \
-	trap "kill $$SERVER_PID 2>/dev/null || true" EXIT; \
-	sleep 1; \
-	FOXCTL_API_URL=http://localhost:8090 ./bin/foxctl-tui
+ts-tui:
+	@echo "The TypeScript TUI is archived under archive/packages/tui-agent."
+	@echo "Use the canonical Go TUI instead: make go-tui-agent"
+	@exit 2
 
 ts-build: ts-install
 	@bun run build

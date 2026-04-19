@@ -31,6 +31,24 @@ func TestFilterToolsCodeIntel(t *testing.T) {
 	}
 }
 
+func TestFilterToolsLongCoTMinimalReturnsNoTools(t *testing.T) {
+	t.Parallel()
+
+	in := []rlm.Tool{
+		{Name: "get_top_of_mind"},
+		{Name: "semantic_search_code"},
+		{Name: "code_search_ensemble"},
+		{Name: "load_file"},
+		{Name: "search_vault"},
+		{Name: "subcall"},
+	}
+	for _, profile := range []string{ToolProfileLongCoTMinimal, ToolProfileLongCoTRLM} {
+		if got := FilterTools(in, profile); len(got) != 0 {
+			t.Fatalf("FilterTools(%q)=%v want no tools", profile, got)
+		}
+	}
+}
+
 func TestFilterToolsForScoutRoleMemoryFact(t *testing.T) {
 	t.Parallel()
 

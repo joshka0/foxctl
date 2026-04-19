@@ -13,7 +13,7 @@ This directory contains active planning documents and implementation roadmaps.
 
 - `features/internal-package-topology-migration.md` — incremental `internal/*` family cleanup plan; makes the legacy runtime vs `v2` boundary explicit and sequences package-family consolidation.
 - `features/eino-go-native-runtime-plan.md` — Eino `AgentEngine` integration + Go-native `RuntimeSpawner`/reconciler; Jido optional path.
-- `tui-agent-control-plane.md`
+- `tui-agent-control-plane.md` — archived TypeScript TUI plan; current terminal work is `go-tui-agent-shell.md`.
 - `go-tui-agent-shell.md` — Go-native interactive coding shell plan with memory, continuity, and worker rails.
 - `v2-implementation-todo.md`
 - `v2-greenfield-bootstrap.md`
@@ -27,6 +27,7 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/agent-mux-room-hierarchy.md`
 - `features/opensandbox-sandbox-workspace-integration.md`
 - `features/foxctl-evolve-plan.md` — plan for a foxctl-native repo-evolution tool built on DB-backed experiment state, CAS artifacts, and existing worktree primitives.
+- `features/longcot-rlm-evaluation-plan.md` — LongCoT × RLM internal paired eval plan for measuring RLM scaffold/staged-reasoning accuracy and token efficiency.
 - `features/aca-self-evolving-memory-layer.md`
 - `jidoctl-v2-hybrid-interface.md`
 - `chat-platform-adapter.md`

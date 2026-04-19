@@ -1,8 +1,12 @@
 ---
 title: foxctl Viewer Application (beads-style TUI)
-status: Draft
+status: Archived
 owners: [@joshka0]
 ---
+
+Archive note: `cmd/foxctl_viewer/` now lives under
+`archive/cmd/foxctl_viewer/`. Current terminal companion-agent work targets
+`cmd/foxctl_tui/` and `internal/interfaces/tui/`.
 
 
 ## 1. Overview

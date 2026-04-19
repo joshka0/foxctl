@@ -23,7 +23,7 @@ vault_refs:
 - provider bootstrap for Claude Code, Codex, OpenCode, and Gemini
 - durable room / agent / mailbox orchestration
 
-The repository is primarily Go, with Bun-based packages for the web GUI and TUI.
+The repository is primarily Go, with Bun-based packages for the web GUI.
 
 ## What’s Here
 
@@ -32,8 +32,10 @@ The repository is primarily Go, with Bun-based packages for the web GUI and TUI.
 - `configs/hooks/` - provider hook/runtime glue
 - `configs/skills-pack/` - provider-facing skill packs
 - `internal/` - runtime, storage, indexing, context, and web internals
+- `cmd/foxctl_tui/` - canonical Go terminal agent shell
 - `packages/gui-agent/` - web operator surface
-- `packages/tui-agent/` - TUI workbench
+- `archive/packages/tui-agent/` - archived TypeScript TUI workbench
+- `archive/cmd/foxctl_viewer/` - archived legacy Go viewer TUI
 - `docs/` - canonical architecture, guides, specs, and plans
 
 ### Internal Layout
@@ -77,7 +79,7 @@ That flow is intended to:
 
 - verify or install core local dependencies
 - optionally install CGO/SQLite headers for `foxctl-cgo`
-- optionally install Bun for GUI/TUI and OpenCode plugin workflows
+- optionally install Bun for GUI and OpenCode plugin workflows
 - build the CLI and skills
 - wire up provider integrations via `scripts/init.sh`
 
@@ -135,7 +137,7 @@ make skills-install
 - C compiler + SQLite development headers/libs
   - needed for `make build-cgo`, `make test-cgo-short`, and `foxctl-cgo`
 - Bun
-  - needed for `packages/gui-agent`, `packages/tui-agent`, and OpenCode plugin install flows
+  - needed for `packages/gui-agent` and OpenCode plugin install flows
 
 On macOS, the full path usually means Homebrew `go`, `jq`, `sqlite`, and `bun`.
 
@@ -251,7 +253,7 @@ Today that bootstrap targets:
 
 ## Web GUI And TUI
 
-Install Bun dependencies first:
+Install Bun dependencies for the web GUI:
 
 ```bash
 bun install
@@ -263,10 +265,16 @@ Run the web operator surface:
 make gui-agent
 ```
 
-Run the TUI package directly:
+Run the canonical Go TUI with a local foxctl agent:
 
 ```bash
-bun run dev:tui
+make go-tui-agent
+```
+
+Build the TUI binary without launching it:
+
+```bash
+make go-tui-build
 ```
 
 The API server entrypoint is:

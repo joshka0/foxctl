@@ -39,6 +39,9 @@ type CockpitScreen struct {
 	phase         CockpitPhase
 	stubAgents    []StubAgent
 	selectedIndex int
+	bootManager   *BootManager // nil until SetBootManager is called
+	phaseChanges  chan CockpitPhase
+	app           *gotui.App // reference for triggering re-renders
 }
 
 // CockpitPhase represents the current display phase of the cockpit.
@@ -63,6 +66,7 @@ func NewCockpitScreen(apiURL string) *CockpitScreen {
 		apiURL:        apiURL,
 		phase:         CockpitPhaseLoading,
 		selectedIndex: -1,
+		phaseChanges:  make(chan CockpitPhase, 8),
 	}
 }
 
@@ -171,20 +175,39 @@ func (c *CockpitScreen) Phase() CockpitPhase {
 }
 
 // SetPhase sets the cockpit phase. If the terminal is too small, the phase
-// is forced to CockpitPhaseTooSmall regardless.
+// is forced to CockpitPhaseTooSmall regardless. The phase change is broadcast
+// on the phaseChanges channel. The channel watcher in Watchers() will pick it
+// up on the main loop and toggle renderTrigger to force a re-render.
+//
+// This method is safe to call from any goroutine — it only sends on a buffered
+// channel and does not call State.Set() directly.
 func (c *CockpitScreen) SetPhase(phase CockpitPhase) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.tooSmall {
-		c.phase = CockpitPhaseTooSmall
+		c.mu.Unlock()
 		return
 	}
 	c.phase = phase
+	c.mu.Unlock()
+	// Non-blocking send to notify watchers. The watcher handler runs on the
+	// main loop and will toggle renderTrigger.
+	select {
+	case c.phaseChanges <- phase:
+	default:
+	}
 }
 
 // APIURL returns the configured API URL.
 func (c *CockpitScreen) APIURL() string {
 	return c.apiURL
+}
+
+// SetBootManager sets the boot manager for retry handling. When the screen is
+// in CockpitPhaseError, pressing 'r' will call bm.Retry().
+func (c *CockpitScreen) SetBootManager(bm *BootManager) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bootManager = bm
 }
 
 // Render implements gotui.Component.
@@ -208,25 +231,28 @@ func (c *CockpitScreen) Render(app *gotui.App) *gotui.Element {
 		height = 24
 	}
 
+	var el *gotui.Element
 	if tooSmall {
-		return c.renderTooSmall(width, height)
+		el = c.renderTooSmall(width, height)
+	} else {
+		switch phase {
+		case CockpitPhaseLoading:
+			el = c.renderLoading(width, height, apiURL)
+		case CockpitPhaseError:
+			el = c.renderError(width, height, apiURL)
+		case CockpitPhaseReady:
+			el = c.renderReady(width, height)
+		default:
+			el = c.renderLoading(width, height, apiURL)
+		}
 	}
 
-	switch phase {
-	case CockpitPhaseLoading:
-		return c.renderLoading(width, height, apiURL)
-	case CockpitPhaseError:
-		return c.renderError(width, height, apiURL)
-	case CockpitPhaseReady:
-		return c.renderReady(width, height)
-	default:
-		return c.renderLoading(width, height, apiURL)
-	}
+	return el
 }
 
 // KeyMap implements gotui.KeyListener.
 func (c *CockpitScreen) KeyMap() gotui.KeyMap {
-	return gotui.KeyMap{
+	km := gotui.KeyMap{
 		gotui.On(gotui.KeyEscape, func(ke gotui.KeyEvent) {
 			if ke.App() != nil {
 				ke.App().Stop()
@@ -242,7 +268,65 @@ func (c *CockpitScreen) KeyMap() gotui.KeyMap {
 				ke.App().Stop()
 			}
 		}),
+		gotui.On(gotui.Rune('r'), func(ke gotui.KeyEvent) {
+			c.mu.Lock()
+			bm := c.bootManager
+			phase := c.phase
+			c.mu.Unlock()
+
+			// Only retry in error phase.
+			if phase == CockpitPhaseError && bm != nil {
+				bm.Retry()
+			}
+		}),
+		gotui.On(gotui.KeyDown, func(ke gotui.KeyEvent) {
+			c.NavigateDown()
+		}),
+		gotui.On(gotui.Rune('j'), func(ke gotui.KeyEvent) {
+			c.NavigateDown()
+		}),
+		gotui.On(gotui.KeyUp, func(ke gotui.KeyEvent) {
+			c.NavigateUp()
+		}),
+		gotui.On(gotui.Rune('k'), func(ke gotui.KeyEvent) {
+			c.NavigateUp()
+		}),
 	}
+	return km
+}
+
+// Watchers implements the gotui WatcherProvider interface. Returns channel
+// watchers that bridge the BootManager's background goroutine into the main
+// render loop.
+func (c *CockpitScreen) Watchers() []gotui.Watcher {
+	return []gotui.Watcher{
+		// Channel watcher: receives phase changes from BootManager goroutine.
+		// The handler runs on the main loop and marks the app as dirty to
+		// trigger a re-render.
+		gotui.Watch(c.phaseChanges, func(_ CockpitPhase) {
+			c.mu.Lock()
+			a := c.app
+			c.mu.Unlock()
+			if a != nil {
+				a.MarkDirty()
+			}
+		}),
+	}
+}
+
+// BindApp stores the app reference for triggering re-renders. Implements
+// gotui.AppBinder.
+func (c *CockpitScreen) BindApp(app *gotui.App) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.app = app
+}
+
+// UnbindApp clears the app reference. Implements gotui.AppUnbinder.
+func (c *CockpitScreen) UnbindApp() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.app = nil
 }
 
 // renderTooSmall renders the minimum-terminal-size guard message.
@@ -353,7 +437,7 @@ func (c *CockpitScreen) renderError(width, height int, apiURL string) *gotui.Ele
 			gotui.WithWidth(width),
 			gotui.WithHeight(1),
 			gotui.WithBackground(bgStyle),
-			gotui.WithText("ESC:quit"),
+			gotui.WithText("ESC:quit  r:retry"),
 			gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
 		),
 	)
@@ -606,15 +690,34 @@ func padString(s string, width int) string {
 const tooSmallMessage = "terminal too small — resize to ≥60x15"
 
 // RunCockpit is the entry point for the M3 walking-skeleton cockpit screen.
-// It creates a go-tui App with the CockpitScreen as the root component and
-// runs the event loop. ESC or q exits cleanly with code 0.
+// It creates a go-tui App with the CockpitScreen as the root component,
+// starts the async BootManager, and runs the event loop. ESC or q exits
+// cleanly with code 0.
+//
+// The screen starts in CockpitPhaseLoading. The BootManager performs a
+// background health check against the API URL and transitions the screen to
+// CockpitPhaseReady or CockpitPhaseError based on the result. No synchronous
+// HTTP is performed on the UI thread.
 func RunCockpit(apiURL string) error {
 	cockpit := NewCockpitScreen(apiURL)
+
+	bm := NewBootManager(BootConfig{
+		APIURL: apiURL,
+		Screen: cockpit,
+	})
+	cockpit.SetBootManager(bm)
 
 	app, err := gotui.NewApp(gotui.WithRootComponent(cockpit))
 	if err != nil {
 		return err
 	}
+
+	// Start the async boot check after the app is created but before Run().
+	// This ensures the first frame renders in Loading state immediately.
+	bm.Start()
+
+	// Cleanup: stop the boot manager and close the app.
+	defer bm.Stop()
 	defer app.Close()
 
 	return app.Run()

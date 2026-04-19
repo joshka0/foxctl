@@ -1,19 +1,25 @@
 # foxctl Viewer Applications
 
-foxctl includes TypeScript viewer applications for monitoring agents, activity,
+foxctl includes viewer applications for monitoring agents, activity,
 mailbox/blackboard state, and companion conversations.
 
 ## Current Packages
 
 - `packages/gui-agent` — Web GUI (React + Vite, port `5174` in dev)
-- `packages/tui-agent` — Terminal-first operator control plane (`pi-tui`)
+- `cmd/foxctl_tui` — Canonical Go terminal agent shell
+- `internal/interfaces/tui` — Go TUI rendering and state model
 - `packages/data` — Shared TypeScript data/client types
+
+Archived surfaces:
+
+- `archive/packages/tui-agent` — archived TypeScript terminal control plane
+- `archive/cmd/foxctl_viewer` — archived legacy Go viewer TUI
 
 ## Runtime Topology
 
 ```
 GUI Agent (Vite :5174) ─┐
-TUI                     ├──> foxctl API server (:8090)
+Go TUI                  ├──> foxctl API server (:8090)
 CLI                     ┘
 ```
 
@@ -39,8 +45,11 @@ bun run dev:gui
 # API only
 bun run dev:server
 
-# TUI agent shell (requires API server)
-bun run dev:tui
+# Go TUI with a local foxctl agent
+make go-tui-agent
+
+# Build the Go TUI binary only
+make go-tui-build
 ```
 
 ## Make Targets
@@ -48,7 +57,8 @@ bun run dev:tui
 - `gui-agent` — build Go backend, start API server, start Vite GUI
 - `gui-agent-vite` — GUI only (Vite dev server)
 - `gui-agent-build` — frontend build only
-- `ts-dev-tui` — TUI agent dev mode
+- `go-tui-agent` — build/start API, spawn a foxctl agent, launch the Go TUI
+- `go-tui-build` — build `bin/foxctl-tui`
 
 ## Troubleshooting
 

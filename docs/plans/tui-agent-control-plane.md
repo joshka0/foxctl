@@ -1,8 +1,12 @@
 # TUI Agent Control Plane Plan
 
-Status: Draft  
+Status: Archived
 Owner: Solo maintainer  
-Last Updated: 2026-04-01
+Last Updated: 2026-04-18
+
+Archive note: the TypeScript TUI package described here now lives under
+`archive/packages/tui-agent/`. Current terminal work targets the Go TUI in
+`cmd/foxctl_tui/` and `internal/interfaces/tui/`.
 
 ## Goal
 

@@ -1,8 +1,12 @@
 # OpenTUI Migration Plan for foxctl-viewer
 
 **Date:** 2026-01-01
-**Status:** RFC
+**Status:** Archived
 **Author:** Claude Code
+
+Archive note: `cmd/foxctl_viewer/` now lives under
+`archive/cmd/foxctl_viewer/`. Current terminal companion-agent work targets
+`cmd/foxctl_tui/` and `internal/interfaces/tui/`.
 
 ## Executive Summary
 
