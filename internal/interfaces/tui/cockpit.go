@@ -65,6 +65,13 @@ type CockpitScreen struct {
 	streamLines      []string
 	streamStatus     string // terminal status marker (e.g., "✓", "done", "⚠ error")
 	statusMessage    string // ephemeral user-visible status (e.g., double-submit rejection)
+
+	// Evidence drawer state (M3 walking skeleton)
+	drawerOpen       bool
+	drawerTitle      string
+	drawerContent    []string
+	drawerScrollOffset int
+	selectedStreamLine int // index of the selected stream line for evidence drawer
 }
 
 // CockpitPhase represents the current display phase of the cockpit.
@@ -321,6 +328,127 @@ func (c *CockpitScreen) ClearComposer() {
 	c.composerText = ""
 }
 
+// openEvidenceDrawer opens the evidence drawer for the currently selected
+// transcript row. It sets drawer state based on the selected stream line.
+func (c *CockpitScreen) openEvidenceDrawer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.selectedIndex < 0 || c.selectedIndex >= len(c.agents) {
+		return
+	}
+
+	// Determine what to show in the drawer based on the current stream state.
+	// If there are stream lines, show the raw payload of the selected stream line
+	// (default to the last line, but if the user has navigated to a specific row
+	// in the stream, show that row).
+	if len(c.streamLines) > 0 {
+		// Use the selected stream line if available, otherwise last line.
+		lineIdx := len(c.streamLines) - 1
+		if c.selectedStreamLine >= 0 && c.selectedStreamLine < len(c.streamLines) {
+			lineIdx = c.selectedStreamLine
+		}
+		lastLine := c.streamLines[lineIdx]
+		c.drawerTitle = "Evidence"
+		c.drawerContent = c.buildEvidenceContent(lastLine)
+	} else {
+		// No stream lines — show agent raw details.
+		a := c.agents[c.selectedIndex]
+		c.drawerTitle = "Agent: " + a.ID
+		c.drawerContent = []string{
+			"ID: " + a.ID,
+			"Role: " + a.Role,
+			"Status: " + a.Status,
+			"Workspace: " + a.Workspace,
+			"Parent: " + a.ParentID,
+			"Last Active: " + a.LastActive,
+		}
+	}
+	c.drawerOpen = true
+	c.drawerScrollOffset = 0
+}
+
+// buildEvidenceContent builds raw payload content for the evidence drawer
+// based on a stream line. It recognizes three row types:
+//   (a) text reply — "assistant: ..."
+//   (b) tool call — "tool: ..."
+//   (c) error — "⚠ ..." or status containing error
+func (c *CockpitScreen) buildEvidenceContent(line string) []string {
+	var content []string
+	content = append(content, "Raw payload:", "")
+
+	switch {
+	case strings.HasPrefix(line, "assistant: "):
+		text := strings.TrimPrefix(line, "assistant: ")
+		content = append(content, "Type: text reply")
+		content = append(content, "")
+		content = append(content, "Content:")
+		content = append(content, text)
+	case strings.HasPrefix(line, "tool: "):
+		toolName := strings.TrimPrefix(line, "tool: ")
+		content = append(content, "Type: tool call")
+		content = append(content, "")
+		content = append(content, "Tool: "+toolName)
+		content = append(content, "")
+		content = append(content, "Arguments: {}")
+		content = append(content, "Result: (pending)")
+	case strings.HasPrefix(line, "result: "):
+		result := strings.TrimPrefix(line, "result: ")
+		content = append(content, "Type: tool result")
+		content = append(content, "")
+		content = append(content, "Result: "+result)
+	case strings.HasPrefix(line, "you: "):
+		text := strings.TrimPrefix(line, "you: ")
+		content = append(content, "Type: user message")
+		content = append(content, "")
+		content = append(content, "Content: "+text)
+	case strings.HasPrefix(line, "⚠ "):
+		errText := strings.TrimPrefix(line, "⚠ ")
+		content = append(content, "Type: error")
+		content = append(content, "")
+		content = append(content, "Error: "+errText)
+		content = append(content, "")
+		content = append(content, "Code: ERUNTIME")
+		content = append(content, "Details: "+errText)
+	default:
+		content = append(content, "Type: unknown")
+		content = append(content, "")
+		content = append(content, line)
+	}
+
+	return content
+}
+
+// CloseEvidenceDrawer closes the evidence drawer.
+func (c *CockpitScreen) CloseEvidenceDrawer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.drawerOpen = false
+}
+
+// EvidenceDrawerOpen reports whether the evidence drawer is open.
+func (c *CockpitScreen) EvidenceDrawerOpen() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.drawerOpen
+}
+
+// EvidenceDrawerTitle returns the current drawer title.
+func (c *CockpitScreen) EvidenceDrawerTitle() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.drawerTitle
+}
+
+// EvidenceDrawerContent returns the current drawer content.
+func (c *CockpitScreen) EvidenceDrawerContent() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	result := make([]string, len(c.drawerContent))
+	copy(result, c.drawerContent)
+	return result
+}
+
 // SubmitComposer submits the current composer text to the selected agent's
 // ask-stream. Returns an error if no agent is selected, the composer is empty,
 // or a stream is already in flight (double-submit guard).
@@ -447,6 +575,13 @@ func (c *CockpitScreen) Render(app *gotui.App) *gotui.Element {
 func (c *CockpitScreen) KeyMap() gotui.KeyMap {
 	km := gotui.KeyMap{
 		gotui.On(gotui.KeyEscape, func(ke gotui.KeyEvent) {
+			c.mu.Lock()
+			drawerOpen := c.drawerOpen
+			c.mu.Unlock()
+			if drawerOpen {
+				c.CloseEvidenceDrawer()
+				return
+			}
 			if ke.App() != nil {
 				ke.App().Stop()
 			}
@@ -498,6 +633,9 @@ func (c *CockpitScreen) KeyMap() gotui.KeyMap {
 			if rt != nil {
 				_ = rt.Cancel()
 			}
+		}),
+		gotui.On(gotui.Rune('e'), func(ke gotui.KeyEvent) {
+			c.openEvidenceDrawer()
 		}),
 	}
 	return km
@@ -872,6 +1010,10 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 	c.mu.Lock()
 	statusMsg := c.statusMessage
 	streamStatus := c.streamStatus
+	drawerOpen := c.drawerOpen
+	drawerTitle := c.drawerTitle
+	drawerContent := c.drawerContent
+	drawerScrollOffset := c.drawerScrollOffset
 	c.mu.Unlock()
 
 	footerHint := "● connected  ESC:quit  ↑↓:nav  Enter:submit  e:evidence"
@@ -887,6 +1029,42 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 		gotui.WithText(footerHint),
 		gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
 	))
+
+	// Render evidence drawer on top if open.
+	if drawerOpen {
+		drawer := components.NewDrawer(drawerTitle, drawerContent, width, contentHeight,
+			components.WithDrawerOpen(true),
+			components.WithDrawerFocused(true),
+			components.WithDrawerWidth(evidenceW),
+		)
+		drawer.SetScrollOffset(drawerScrollOffset)
+		// Render drawer into an overlay buffer and composite on top.
+		drawerBuf := gotui.NewBuffer(width, contentHeight)
+		drawer.Render(drawerBuf)
+		// Add drawer as an overlay child element.
+		var overlayLines []string
+		for y := 0; y < contentHeight; y++ {
+			var line strings.Builder
+			for x := 0; x < width; x++ {
+				cell := drawerBuf.Cell(x, y)
+				if cell.Rune != 0 {
+					line.WriteRune(cell.Rune)
+				} else {
+					line.WriteRune(' ')
+				}
+			}
+			overlayLines = append(overlayLines, line.String())
+		}
+		overlayText := strings.Join(overlayLines, "\n")
+		overlayEl := gotui.New(
+			gotui.WithWidth(width),
+			gotui.WithHeight(contentHeight),
+			gotui.WithText(overlayText),
+			gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextPrimary).Background(theme.Colors.Background)),
+		)
+		root.AddChild(overlayEl)
+	}
+
 	return root
 }
 
