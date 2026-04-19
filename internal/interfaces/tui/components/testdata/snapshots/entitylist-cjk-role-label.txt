@@ -1,0 +1,5 @@
+▌ agent-研究員 active
+│ agent-コーダー idle
+│ agent-計画者 busy
+
+
