@@ -293,10 +293,8 @@ func TestBurstIncrementalAppends(t *testing.T) {
 	const burstSize = 1000
 	sv := NewStreamViewer(nil, 40, 10, WithSVFocused(true))
 
-	allLines := make([]string, 0, burstSize)
 	for i := 0; i < burstSize; i++ {
 		line := fmt.Sprintf("incr-line-%04d", i)
-		allLines = append(allLines, line)
 		sv.SetLines(append(sv.Lines(), line))
 	}
 

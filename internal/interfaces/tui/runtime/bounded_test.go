@@ -209,14 +209,12 @@ func TestBounded_UpdatesClosedOnce(t *testing.T) {
 	b.Stop()
 
 	// Read remaining items, then confirm channel closes.
-	upds := drainUpdates(t, b.Updates())
+	_ = drainUpdates(t, b.Updates())
 
 	// We should get at least one update before the channel closes.
 	// (The handler may or may not have processed both before Stop.)
-	if len(upds) == 0 {
-		// This is fine if Stop was called before handler processed anything.
-		// The important thing is the channel is closed.
-	}
+	// len(upds) == 0 is fine if Stop was called before handler processed
+	// anything. The important thing is the channel is closed (verified below).
 
 	// Verify channel is closed by reading again.
 	_, ok := <-b.Updates()

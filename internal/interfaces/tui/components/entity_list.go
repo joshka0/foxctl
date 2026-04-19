@@ -46,7 +46,6 @@ type EntityList struct {
 	scrollOffset  int
 	focused       bool
 	loading       bool
-	empty         bool
 	emptyMessage  string
 	errorMessage  string
 	wrapAround    bool
