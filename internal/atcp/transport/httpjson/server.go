@@ -50,6 +50,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/leases", s.leaseList)
 	mux.HandleFunc("GET /v1/events", s.events)
 	mux.HandleFunc("GET /v1/health", s.health)
+	mux.HandleFunc("POST /v1/rooms", s.createRoom)
+	mux.HandleFunc("GET /v1/rooms", s.listRooms)
+	mux.HandleFunc("GET /v1/rooms/{id}", s.getRoom)
+	mux.HandleFunc("POST /v1/rooms/{id}/join", s.joinRoom)
+	mux.HandleFunc("POST /v1/rooms/{id}/leave", s.leaveRoom)
+	mux.HandleFunc("GET /v1/rooms/{id}/members", s.roomMembers)
+	mux.HandleFunc("POST /v1/messages", s.sendMessage)
 	return mux
 }
 
