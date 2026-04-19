@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -57,6 +58,13 @@ type CockpitScreen struct {
 	bootManager   *BootManager // nil until SetBootManager is called
 	phaseChanges  chan CockpitPhase
 	app           *gotui.App // reference for triggering re-renders
+
+	// Ask-stream state (M3 walking skeleton)
+	askStreamRuntime *AgentAskStreamRuntime
+	composerText     string
+	streamLines      []string
+	streamStatus     string // terminal status marker (e.g., "✓", "done", "⚠ error")
+	statusMessage    string // ephemeral user-visible status (e.g., double-submit rejection)
 }
 
 // CockpitPhase represents the current display phase of the cockpit.
@@ -285,6 +293,116 @@ func (c *CockpitScreen) SetBootManager(bm *BootManager) {
 	c.bootManager = bm
 }
 
+// SetAskStreamRuntime sets the ask-stream runtime used for streaming asks.
+func (c *CockpitScreen) SetAskStreamRuntime(rt *AgentAskStreamRuntime) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.askStreamRuntime = rt
+}
+
+// ComposerText returns the current composer input text.
+func (c *CockpitScreen) ComposerText() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.composerText
+}
+
+// SetComposerText sets the composer input text.
+func (c *CockpitScreen) SetComposerText(text string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.composerText = text
+}
+
+// ClearComposer clears the composer input text.
+func (c *CockpitScreen) ClearComposer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.composerText = ""
+}
+
+// SubmitComposer submits the current composer text to the selected agent's
+// ask-stream. Returns an error if no agent is selected, the composer is empty,
+// or a stream is already in flight (double-submit guard).
+func (c *CockpitScreen) SubmitComposer() error {
+	c.mu.Lock()
+	selectedIndex := c.selectedIndex
+	agents := c.agents
+	text := strings.TrimSpace(c.composerText)
+	rt := c.askStreamRuntime
+	c.mu.Unlock()
+
+	if selectedIndex < 0 || selectedIndex >= len(agents) {
+		return errors.New("select an agent first")
+	}
+	if text == "" {
+		return errors.New("composer text is empty")
+	}
+	if rt == nil {
+		return errors.New("ask-stream runtime is not configured")
+	}
+
+	agentID := agents[selectedIndex].ID
+	if err := rt.Submit(agentID, text); err != nil {
+		c.mu.Lock()
+		c.statusMessage = err.Error()
+		c.mu.Unlock()
+		return err
+	}
+
+	c.mu.Lock()
+	c.statusMessage = ""
+	c.streamLines = append(c.streamLines, "you: "+text)
+	c.composerText = ""
+	c.mu.Unlock()
+	return nil
+}
+
+// ApplyAskStreamUpdate applies one ask-stream update to the cockpit state.
+// Callers should drain the runtime's Updates() channel and feed each update
+// through this method.
+func (c *CockpitScreen) ApplyAskStreamUpdate(update AgentAskStreamUpdate) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	switch update.Type {
+	case AgentAskUpdateToken:
+		if update.Token != nil {
+			c.streamStatus = ""
+			if len(c.streamLines) == 0 {
+				c.streamLines = append(c.streamLines, "assistant: "+update.Token.Delta)
+			} else {
+				last := len(c.streamLines) - 1
+				if strings.HasPrefix(c.streamLines[last], "assistant: ") {
+					c.streamLines[last] += update.Token.Delta
+				} else {
+					c.streamLines = append(c.streamLines, "assistant: "+update.Token.Delta)
+				}
+			}
+		}
+	case AgentAskUpdateToolCall:
+		if update.ToolCall != nil {
+			c.streamLines = append(c.streamLines, "tool: "+update.ToolCall.ToolName)
+		}
+	case AgentAskUpdateToolResult:
+		if update.ToolResult != nil {
+			c.streamLines = append(c.streamLines, "result: "+update.ToolResult.Output)
+		}
+	case AgentAskUpdateDone:
+		c.streamStatus = "✓ done"
+	case AgentAskUpdateError:
+		if update.Error != nil {
+			c.streamStatus = "⚠ " + update.Error.Err.Error()
+		}
+	case AgentAskUpdateCancelled:
+		c.streamStatus = "⊘ cancelled"
+	case AgentAskUpdateRejected:
+		if update.Rejected != nil {
+			c.statusMessage = update.Rejected.Reason
+		}
+	}
+}
+
 // Render implements gotui.Component.
 func (c *CockpitScreen) Render(app *gotui.App) *gotui.Element {
 	if app != nil {
@@ -371,6 +489,14 @@ func (c *CockpitScreen) KeyMap() gotui.KeyMap {
 				c.CycleFocusBackward()
 			} else {
 				c.CycleFocusForward()
+			}
+		}),
+		gotui.On(gotui.Rune('x').Ctrl(), func(ke gotui.KeyEvent) {
+			c.mu.Lock()
+			rt := c.askStreamRuntime
+			c.mu.Unlock()
+			if rt != nil {
+				_ = rt.Cancel()
 			}
 		}),
 	}
@@ -606,9 +732,31 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 				))
 			}
 		} else {
+			// Determine DetailPane height: reserve bottom rows for stream content
+			// when stream lines exist.
+			c.mu.Lock()
+			hasStream := len(c.streamLines) > 0 || c.streamStatus != ""
+			c.mu.Unlock()
+
+			detailPaneH := contentHeight - 1
+			var streamRows []string
+			if hasStream && detailPaneH > 6 {
+				// Reserve bottom 40% for stream content, min 3 rows.
+				streamH := (detailPaneH * 40 / 100)
+				if streamH < 3 {
+					streamH = 3
+				}
+				detailPaneH = detailPaneH - streamH
+				if detailPaneH < 3 {
+					detailPaneH = 3
+					streamH = contentHeight - 1 - detailPaneH
+				}
+				streamRows = c.buildStreamRows(detailW, streamH)
+			}
+
 			// Pre-render DetailPane for the selected agent.
 			if selIdx >= 0 && selIdx < len(agents) && detailW > 0 {
-				detailPaneRows = c.renderDetailPaneRows(agents[selIdx], detailW, contentHeight-1)
+				detailPaneRows = c.renderDetailPaneRows(agents[selIdx], detailW, detailPaneH)
 			}
 
 			// Render agent rows with six required fields:
@@ -632,6 +780,13 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 				// otherwise show empty-state guidance.
 				if selIdx >= 0 && row < len(detailPaneRows) {
 					detailBody = detailPaneRows[row]
+				} else if selIdx >= 0 && row >= len(detailPaneRows) {
+					streamRow := row - len(detailPaneRows)
+					if streamRow < len(streamRows) {
+						detailBody = streamRows[streamRow]
+					} else {
+						detailBody = padString("", detailW)
+					}
 				} else if selIdx < 0 {
 					// No selection: show empty-state guidance in the middle row.
 					mid := (contentHeight - 1) / 2
@@ -714,7 +869,17 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 	root.AddChild(contentArea)
 
 	// Status footer.
+	c.mu.Lock()
+	statusMsg := c.statusMessage
+	streamStatus := c.streamStatus
+	c.mu.Unlock()
+
 	footerHint := "● connected  ESC:quit  ↑↓:nav  Enter:submit  e:evidence"
+	if statusMsg != "" {
+		footerHint = "● " + statusMsg + "  ESC:quit  ↑↓:nav  Enter:submit  e:evidence"
+	} else if streamStatus != "" {
+		footerHint = "● " + streamStatus + "  ESC:quit  ↑↓:nav  Enter:submit  e:evidence"
+	}
 	root.AddChild(gotui.New(
 		gotui.WithWidth(width),
 		gotui.WithHeight(1),
@@ -723,6 +888,38 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 		gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
 	))
 	return root
+}
+
+// buildStreamRows builds the stream transcript rows for the Detail lane.
+// It returns at most maxRows lines, including the terminal status marker.
+func (c *CockpitScreen) buildStreamRows(width, maxRows int) []string {
+	if maxRows <= 0 || width <= 0 {
+		return nil
+	}
+
+	c.mu.Lock()
+	lines := make([]string, len(c.streamLines))
+	copy(lines, c.streamLines)
+	status := c.streamStatus
+	c.mu.Unlock()
+
+	if len(lines) == 0 && status == "" {
+		return nil
+	}
+
+	var rows []string
+	for _, line := range lines {
+		truncated := truncateLabel(line, width)
+		rows = append(rows, padString(truncated, width))
+		if len(rows) >= maxRows {
+			return rows
+		}
+	}
+	if status != "" && len(rows) < maxRows {
+		statusLine := truncateLabel(status, width)
+		rows = append(rows, padString(statusLine, width))
+	}
+	return rows
 }
 
 // buildAgentInventoryLabel builds a compact inventory row label from an
