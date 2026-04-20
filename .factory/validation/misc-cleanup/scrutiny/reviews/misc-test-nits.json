@@ -1,0 +1,21 @@
+{
+  "featureId": "misc-test-nits",
+  "reviewedAt": "2026-04-21T08:40:00Z",
+  "commitId": "1049d53e18bf8f040b36b0dc1d12f8c2ebc5142e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "All three test fixes are correctly implemented. The verification steps (50-race run) confirm determinism.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker encountered a non-obvious issue in Fix 2 (StopIsIdempotent) where using a blocking handler (with a channel the test closes after the call) caused Stop() to hang because it waits for the handler goroutine to exit. The worker had to iterate to find the right approach (channel sync via handler sending notification, not blocking). This detail — that Stop() waits for handler goroutine to finish — is not documented in the bounded_test.go file or the skill. The skill procedure for stop-related tests should note this goroutine-join semantics so future workers don't waste iterations on the same issue.",
+      "evidence": "Transcript shows worker tried blocking handler, then had to revise to non-blocking approach with channel notification. Second attempt succeeded: handler sends on handlerStarted channel (non-blocking), test reads the channel to confirm runtime is alive, then calls Stop concurrently."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "All three test fixes pass scrutiny review. Fix 1 (TestNoWrapAround): WithFocused(true) correctly added to both EntityList constructors; test now exercises clamping rather than unfocused guard. Fix 2 (TestBounded_StopIsIdempotent): time.Sleep replaced with channel-based synchronization (handler signals via close(handlerStarted)), deterministic across 50 race runs. Fix 3 (Tabs moveFirst/moveLast): early-return guards added in both functions; new test TestTabsNoOnChangeWhenAlreadyAtBoundary covers 4 sub-cases (moveFirst at first = no fire, moveLast at last = no fire, moveFirst from middle = fires, moveLast from middle = fires). All fixes have dedicated test coverage; existing tests pass."
+}
