@@ -19,7 +19,6 @@ import (
 // with interleaved malformed events.
 type malformedDemoApp struct {
 	cs *tui.CockpitScreen
-	rt *tui.AgentAskStreamRuntime
 }
 
 // Render implements tui.Component.

@@ -533,9 +533,9 @@ func TestEventsSubscriber_ReconnectsOnDrop(t *testing.T) {
 	}
 
 	sub := NewEventsSubscriber(EventsSubscriberConfig{
-		APIClient:    client,
-		AgentAdapter: adapter,
-		Debounce:     50 * time.Millisecond,
+		APIClient:      client,
+		AgentAdapter:   adapter,
+		Debounce:       50 * time.Millisecond,
 		ReconnectDelay: 50 * time.Millisecond,
 	})
 

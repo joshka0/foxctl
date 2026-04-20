@@ -283,16 +283,16 @@ type AgentAskStreamRuntime struct {
 	canceler AgentAskCanceler
 	updates  chan AgentAskStreamUpdate
 
-	parentCtx context.Context
+	parentCtx    context.Context
 	parentCancel context.CancelFunc
 
 	stopOnce  sync.Once
 	waitGroup sync.WaitGroup
 
-	mu        sync.Mutex
-	inFlight  bool
-	agentID   string
-	message   string
+	mu           sync.Mutex
+	inFlight     bool
+	agentID      string
+	message      string
 	streamCancel context.CancelFunc // cancel func for the current stream
 }
 
@@ -505,14 +505,14 @@ func (rt *AgentAskStreamRuntime) mapEventToUpdate(event AgentAskStreamEvent) *Ag
 		}
 	case "malformed":
 		return &AgentAskStreamUpdate{
-			Type:     AgentAskUpdateMalformed,
+			Type:      AgentAskUpdateMalformed,
 			Malformed: &AgentAskMalformed{RawPhase: event.Phase, RawData: event.Content},
 		}
 	default:
 		// Unknown phase → emit as malformed so the UI surfaces a visible
 		// indicator instead of silently dropping the frame.
 		return &AgentAskStreamUpdate{
-			Type:     AgentAskUpdateMalformed,
+			Type:      AgentAskUpdateMalformed,
 			Malformed: &AgentAskMalformed{RawPhase: event.Phase, RawData: event.Content},
 		}
 	}

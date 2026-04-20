@@ -54,7 +54,7 @@ type CockpitScreen struct {
 	phase         CockpitPhase
 	agents        []AgentInventoryItem
 	selectedIndex int
-	focusedLane   int // 0=Main, 1=Detail, 2=Evidence
+	focusedLane   int          // 0=Main, 1=Detail, 2=Evidence
 	bootManager   *BootManager // nil until SetBootManager is called
 	phaseChanges  chan CockpitPhase
 	app           *gotui.App // reference for triggering re-renders
@@ -67,9 +67,9 @@ type CockpitScreen struct {
 	statusMessage    string // ephemeral user-visible status (e.g., double-submit rejection)
 
 	// Evidence drawer state (M3 walking skeleton)
-	drawerOpen       bool
-	drawerTitle      string
-	drawerContent    []string
+	drawerOpen         bool
+	drawerTitle        string
+	drawerContent      []string
 	drawerScrollOffset int
 	selectedStreamLine int // index of the selected stream line for evidence drawer
 }
@@ -370,9 +370,10 @@ func (c *CockpitScreen) openEvidenceDrawer() {
 
 // buildEvidenceContent builds raw payload content for the evidence drawer
 // based on a stream line. It recognizes three row types:
-//   (a) text reply — "assistant: ..."
-//   (b) tool call — "tool: ..."
-//   (c) error — "⚠ ..." or status containing error
+//
+//	(a) text reply — "assistant: ..."
+//	(b) tool call — "tool: ..."
+//	(c) error — "⚠ ..." or status containing error
 func (c *CockpitScreen) buildEvidenceContent(line string) []string {
 	var content []string
 	content = append(content, "Raw payload:", "")
@@ -844,16 +845,17 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 			// Empty state: show guidance in Main lane.
 			emptyMsg := "No agents running."
 			ctaMsg := "Spawn: foxctl agent spawn --role ..."
+			mid := (contentHeight - 1) / 2
 			for row := 0; row < contentHeight-1; row++ {
 				var mainBody, detailBody, evidenceBody string
-				mid := (contentHeight - 1) / 2
-				if row == mid {
+				switch row {
+				case mid:
 					mainBody = centerInWidth(emptyMsg, mainW)
 					detailBody = centerInWidth("Select an agent.", detailW)
-				} else if row == mid+1 {
+				case mid + 1:
 					mainBody = centerInWidth(ctaMsg, mainW)
 					detailBody = padString("", detailW)
-				} else {
+				default:
 					mainBody = padString("", mainW)
 					detailBody = padString("", detailW)
 				}

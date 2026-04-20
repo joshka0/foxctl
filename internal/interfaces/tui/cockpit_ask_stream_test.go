@@ -585,5 +585,3 @@ func TestCockpitScreen_MalformedSSEViaFakeServerRecovery(t *testing.T) {
 		t.Errorf("detail lane should contain 'first' and 'second' tokens, got: %q", text)
 	}
 }
-
-

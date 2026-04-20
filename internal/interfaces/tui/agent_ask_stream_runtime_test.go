@@ -305,9 +305,9 @@ func TestAgentAskStreamRuntime_CancelCallsCancelEndpointAndCancelsContext(t *tes
 	t.Parallel()
 
 	var (
-		mu             sync.Mutex
-		cancelCalled   bool
-		ctxErr         error
+		mu              sync.Mutex
+		cancelCalled    bool
+		ctxErr          error
 		capturedAgentID string
 	)
 

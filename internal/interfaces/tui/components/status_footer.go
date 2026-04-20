@@ -37,9 +37,10 @@ type StatusFooterConfig struct {
 
 // StatusFooter is a single-row status bar visible on every M3 screen.
 // It contains three required elements per VAL-SKEL-012:
-//   (i)   connection status indicator (ok / degraded / error)
-//   (ii)  active entity label
-//   (iii) compact keybinding hint strip naming ≥3 current bindings
+//
+//	(i)   connection status indicator (ok / degraded / error)
+//	(ii)  active entity label
+//	(iii) compact keybinding hint strip naming ≥3 current bindings
 //
 // StatusFooter is stateless. It renders entirely from props with no internal
 // state.
