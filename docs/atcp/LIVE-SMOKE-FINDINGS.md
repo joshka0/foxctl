@@ -54,6 +54,36 @@ PTY master just sits there. Codex may be blocking pending a reply
 before it finishes initializing the input dispatcher. (Droid did not
 send these queries and was fine.)
 
+**Ruled out.** `codex --dangerously-bypass-approvals-and-sandbox`
+produces the exact same behaviour (stuck at MCP 12/13 spinner, zero
+output bytes after `msg send`). The block is not approval / sandbox
+gating; it's genuinely the unanswered terminal capability query.
+
+**Status — shipped in `internal/atcp/broker/termcaps`.** A stateful
+ECMA-48 parser now sits on the PTY read path in `session.run`; on every
+chunk it inspects output bytes for the known query sequences and writes
+canonical responses back to the PTY master. Wired queries are OSC
+10/11/12 (foreground / background / cursor color), DSR 5 (status), DSR
+6 (cursor position), DA1, DA2, and the kitty keyboard query. 16 unit
+tests in `internal/atcp/broker/termcaps/responder_test.go` lock the
+exact response bytes and the parser's resumability across partial reads.
+
+Re-run evidence (same codex binary, same MCP set):
+
+- Before: codex emitted ~155 KB in 20 s, spinner re-drawing MCP init
+  forever, zero new bytes after `msg send`.
+- After: codex emits ~3 KB, goes quiet after MCP init, all queries
+  codex actually sends (verified with `/tmp/scan_codex_escapes.py`)
+  are ones the responder handles.
+
+What is *still* broken is a separate issue: even though codex is no
+longer burning CPU in an init busy-loop, its input loop is still
+silent — a single-byte write via `/v1/terminal/text` produces no echo.
+That's not a terminal-capability gap; it's codex-specific init
+plumbing (most likely MCP readiness gating or a fallback into
+non-interactive mode because of some other missing env signal). It
+wants its own investigation, not more termcap surface.
+
 **Fix direction.** The broker needs a minimal "terminal responder" sitting
 on the PTY master side that answers a conservative set of queries with
 sane defaults:
