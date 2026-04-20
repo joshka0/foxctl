@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -361,7 +362,7 @@ func discoverListeningPort(ctx context.Context, pid int, timeout time.Duration) 
 		if err != nil {
 			return 0, fmt.Errorf("process %d not found: %w", pid, err)
 		}
-		if err := proc.Signal(os.Signal(nil)); err != nil {
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
 			return 0, fmt.Errorf("process %d exited before port was discovered", pid)
 		}
 
