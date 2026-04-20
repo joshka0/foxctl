@@ -719,15 +719,7 @@ func (c *CockpitScreen) renderLoading(width, height int, apiURL string) *gotui.E
 			gotui.WithTextStyle(textStyle),
 		),
 	)
-	root.AddChild(
-		gotui.New(
-			gotui.WithWidth(width),
-			gotui.WithHeight(1),
-			gotui.WithBackground(bgStyle),
-			gotui.WithText("ESC:quit"),
-			gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
-		),
-	)
+	root.AddChild(c.renderStatusFooterElement(width, CockpitPhaseLoading))
 	return root
 }
 
@@ -778,15 +770,7 @@ func (c *CockpitScreen) renderError(width, height int, apiURL string) *gotui.Ele
 		),
 	)
 	root.AddChild(content)
-	root.AddChild(
-		gotui.New(
-			gotui.WithWidth(width),
-			gotui.WithHeight(1),
-			gotui.WithBackground(bgStyle),
-			gotui.WithText("ESC:quit  r:retry"),
-			gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
-		),
-	)
+	root.AddChild(c.renderStatusFooterElement(width, CockpitPhaseError))
 	return root
 }
 
@@ -1008,27 +992,13 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 
 	// Status footer.
 	c.mu.Lock()
-	statusMsg := c.statusMessage
-	streamStatus := c.streamStatus
 	drawerOpen := c.drawerOpen
 	drawerTitle := c.drawerTitle
 	drawerContent := c.drawerContent
 	drawerScrollOffset := c.drawerScrollOffset
 	c.mu.Unlock()
 
-	footerHint := "● connected  ESC:quit  ↑↓:nav  Enter:submit  e:evidence"
-	if statusMsg != "" {
-		footerHint = "● " + statusMsg + "  ESC:quit  ↑↓:nav  Enter:submit  e:evidence"
-	} else if streamStatus != "" {
-		footerHint = "● " + streamStatus + "  ESC:quit  ↑↓:nav  Enter:submit  e:evidence"
-	}
-	root.AddChild(gotui.New(
-		gotui.WithWidth(width),
-		gotui.WithHeight(1),
-		gotui.WithBackground(bgStyle),
-		gotui.WithText(footerHint),
-		gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
-	))
+	root.AddChild(c.renderStatusFooterElement(width, CockpitPhaseReady))
 
 	// Render evidence drawer on top if open.
 	if drawerOpen {
@@ -1066,6 +1036,109 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 	}
 
 	return root
+}
+
+// renderStatusFooterElement builds a StatusFooter for the given phase and
+// returns it as a go-tui Element. It reads the current selection and stream
+// state from the CockpitScreen to determine the active entity label and
+// connection status.
+func (c *CockpitScreen) renderStatusFooterElement(width int, phase CockpitPhase) *gotui.Element {
+	c.mu.Lock()
+	agents := c.agents
+	selectedIndex := c.selectedIndex
+	statusMsg := c.statusMessage
+	streamStatus := c.streamStatus
+	c.mu.Unlock()
+
+	var connStatus components.StatusVariant
+	var connLabel string
+	switch phase {
+	case CockpitPhaseLoading:
+		connStatus = components.StatusPending
+		connLabel = "connecting…"
+	case CockpitPhaseError:
+		connStatus = components.StatusError
+		connLabel = "error"
+	case CockpitPhaseReady:
+		connStatus = components.StatusOK
+		connLabel = "connected"
+	default:
+		connStatus = components.StatusPending
+		connLabel = "connecting…"
+	}
+
+	// Override label with ephemeral status messages.
+	if statusMsg != "" {
+		connLabel = statusMsg
+	} else if streamStatus != "" {
+		connLabel = streamStatus
+	}
+
+	// Build active entity label.
+	var activeEntity string
+	if selectedIndex >= 0 && selectedIndex < len(agents) {
+		a := agents[selectedIndex]
+		activeEntity = "agent: " + shortID(a.ID) + " (" + a.Role + ")"
+	}
+
+	// Build keybinding hints based on phase.
+	var keybinds []components.KeybindHintConfig
+	switch phase {
+	case CockpitPhaseLoading:
+		keybinds = []components.KeybindHintConfig{
+			{Key: "ESC", Desc: "quit"},
+			{Key: "q", Desc: "quit"},
+			{Key: "↑↓", Desc: "nav"},
+		}
+	case CockpitPhaseError:
+		keybinds = []components.KeybindHintConfig{
+			{Key: "ESC", Desc: "quit"},
+			{Key: "r", Desc: "retry"},
+			{Key: "↑↓", Desc: "nav"},
+		}
+	case CockpitPhaseReady:
+		keybinds = []components.KeybindHintConfig{
+			{Key: "ESC", Desc: "quit"},
+			{Key: "↑↓", Desc: "nav"},
+			{Key: "Enter", Desc: "submit"},
+			{Key: "e", Desc: "evidence"},
+			{Key: "Ctrl+X", Desc: "cancel"},
+		}
+	default:
+		keybinds = []components.KeybindHintConfig{
+			{Key: "ESC", Desc: "quit"},
+		}
+	}
+
+	sf := components.NewStatusFooter(components.StatusFooterConfig{
+		ConnectionStatus: connStatus,
+		ConnectionLabel:  connLabel,
+		ActiveEntity:     activeEntity,
+		Keybinds:         keybinds,
+		Width:            width,
+	})
+
+	buf := gotui.NewBuffer(width, 1)
+	sf.Render(buf)
+
+	// Convert buffer to text for go-tui Element.
+	var line strings.Builder
+	for x := 0; x < width; x++ {
+		cell := buf.Cell(x, 0)
+		if cell.Rune != 0 {
+			line.WriteRune(cell.Rune)
+		} else {
+			line.WriteRune(' ')
+		}
+	}
+
+	return gotui.New(
+		gotui.WithWidth(width),
+		gotui.WithHeight(1),
+		gotui.WithBackground(gotui.NewStyle().Background(theme.Colors.Background)),
+		gotui.WithText(line.String()),
+		gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
+	)
 }
 
 // buildStreamRows builds the stream transcript rows for the Detail lane.
