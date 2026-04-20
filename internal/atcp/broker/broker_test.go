@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -213,6 +214,37 @@ func TestBroker_DeleteSessionRemovesAdapter(t *testing.T) {
 	t.Fatal("adapter was not cleaned up after session delete")
 }
 
+func TestDefaultReadinessProfileKnownAgents(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+	}{
+		{name: "codex", line: "›   Type your message"},
+		{name: "droid", line: "│ > "},
+		{name: "gemini", line: " >   Type your message or @path/to/file"},
+		{name: "claude", line: "❯\u00a0"},
+		{name: "claude-code", line: "❯\u00a0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DefaultReadinessProfile(tt.name)
+			if got.ScreenRegex == "" {
+				t.Fatalf("DefaultReadinessProfile(%q) missing screen regex", tt.name)
+			}
+			if got.ThresholdBPS <= 0 {
+				t.Fatalf("DefaultReadinessProfile(%q) threshold = %f", tt.name, got.ThresholdBPS)
+			}
+			if got.Debounce <= 0 {
+				t.Fatalf("DefaultReadinessProfile(%q) debounce = %v", tt.name, got.Debounce)
+			}
+			if matched, err := regexp.MatchString(got.ScreenRegex, tt.line); err != nil || !matched {
+				t.Fatalf("DefaultReadinessProfile(%q) regex %q did not match %q (err=%v)",
+					tt.name, got.ScreenRegex, tt.line, err)
+			}
+		})
+	}
+}
+
 // TestBroker_RoomFanOut proves the full room vertical: create two sessions,
 // join them to one room, SendMessage, both PTYs receive the text. This is
 // the smallest demonstration that rooms + router + leases + sessions compose
@@ -272,6 +304,13 @@ func TestBroker_RoomFanOut(t *testing.T) {
 	}
 	if res.Delivered != 2 || res.Failed != 0 {
 		t.Fatalf("delivered=%d failed=%d want 2/0", res.Delivered, res.Failed)
+	}
+	msgs, err := b.ListMessages(r.ID, 10)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].ID != res.MessageID || msgs[0].Text != "ROOM_HELLO" || len(msgs[0].Members) != 2 {
+		t.Fatalf("ListMessages = %+v, want sent message", msgs)
 	}
 
 	// `cat` echoes input back; both sessions should now show the message.

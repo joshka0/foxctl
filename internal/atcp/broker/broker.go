@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/atcp/adapter/generictty"
+	"github.com/joshka0/foxctl/internal/atcp/adapter/profiles"
 	"github.com/joshka0/foxctl/internal/atcp/broker/lease"
 	"github.com/joshka0/foxctl/internal/atcp/broker/room"
 	"github.com/joshka0/foxctl/internal/atcp/broker/router"
@@ -32,6 +33,9 @@ type Adapter interface {
 	CompilePaste(intents.TerminalPaste) ([]byte, error)
 	CompileWriteBytes(intents.TerminalWriteBytes) ([]byte, error)
 	SetBracketedPasteEnabled(bool)
+	SetKittyKeyboardActive(bool)
+	SetAllowWriteBytes(bool)
+	SetDefaultSubmitKey(string)
 }
 
 // AdapterFactory returns a fresh Adapter for a newly-created session. Profile
@@ -41,6 +45,26 @@ type AdapterFactory func(profile string) Adapter
 // DefaultAdapterFactory returns a generic-tty adapter for any profile name. A
 // nil factory on Broker.Options falls back to this.
 func DefaultAdapterFactory(_ string) Adapter { return generictty.New() }
+
+func DefaultReadinessProfile(profile string) session.ReadinessProfile {
+	return profiles.DefaultReadiness(profile)
+}
+
+func mergeReadinessProfile(base, override session.ReadinessProfile) session.ReadinessProfile {
+	if override.ScreenRegex != "" {
+		base.ScreenRegex = override.ScreenRegex
+	}
+	if override.ThresholdBPS > 0 {
+		base.ThresholdBPS = override.ThresholdBPS
+	}
+	if override.Debounce > 0 {
+		base.Debounce = override.Debounce
+	}
+	if override.RequireNotAltScreen {
+		base.RequireNotAltScreen = true
+	}
+	return base
+}
 
 // Options configures Broker construction.
 type Options struct {
@@ -78,16 +102,19 @@ type Options struct {
 // Broker is the single entrypoint for ATCP intents originating from transport
 // handlers. It is safe for concurrent use.
 type Broker struct {
-	sessions  *session.Manager
-	leases    *lease.Manager
-	roomMgr   *room.Manager
-	msgRouter *router.Router
-	store     storage.Store
+	sessions   *session.Manager
+	leases     *lease.Manager
+	roomMgr    *room.Manager
+	msgRouter  *router.Router
+	store      storage.Store
+	messagesMu sync.RWMutex
+	messages   map[string][]storage.MessageRecord
 
 	adaptersMu    sync.RWMutex
 	adapters      map[string]Adapter
 	factory       AdapterFactory
 	allowUnleased bool
+	detachMu      sync.Mutex
 }
 
 // New constructs a Broker. The caller must call Stop when shutting down.
@@ -121,6 +148,7 @@ func New(opts Options) (*Broker, error) {
 		leases:        lease.NewManager(),
 		roomMgr:       room.NewManager(),
 		store:         store,
+		messages:      make(map[string][]storage.MessageRecord),
 		adapters:      make(map[string]Adapter),
 		factory:       factory,
 		allowUnleased: opts.AllowUnleasedInputForTests,
@@ -175,6 +203,13 @@ func (b *Broker) hydrate(ctx context.Context) error {
 			return err
 		}
 		members[r.ID] = ms
+		msgs, err := b.store.LoadMessages(ctx, r.ID, 0)
+		if err != nil {
+			return err
+		}
+		if len(msgs) > 0 {
+			b.messages[r.ID] = append([]storage.MessageRecord(nil), msgs...)
+		}
 	}
 	b.roomMgr.Hydrate(rooms, members)
 	// Any member whose LeftAt is still zero pointed at a PTY that no
@@ -266,10 +301,45 @@ func (b *Broker) SendMessage(ctx context.Context, msg router.Message) (router.Re
 	// mean the router rejected the input before fan-out, which also
 	// returns err != nil above.
 	rec := storage.NewMessageRecordFromResult(msg, res, sentAt)
+	b.appendMessageRecord(rec)
 	if perr := b.store.AppendMessage(ctx, rec); perr != nil {
 		return res, fmt.Errorf("atcp broker: persist message: %w", perr)
 	}
 	return res, nil
+}
+
+// ListMessages returns the in-process message audit log for a room. When the
+// broker was hydrated from storage, this includes persisted records loaded at
+// startup; new sends are appended in memory regardless of storage mode.
+func (b *Broker) ListMessages(roomID string, limit int) ([]storage.MessageRecord, error) {
+	if _, err := b.roomMgr.GetRoom(roomID); err != nil {
+		return nil, err
+	}
+	b.messagesMu.RLock()
+	defer b.messagesMu.RUnlock()
+	msgs := b.messages[roomID]
+	if limit > 0 && len(msgs) > limit {
+		msgs = msgs[len(msgs)-limit:]
+	}
+	out := make([]storage.MessageRecord, len(msgs))
+	for i, msg := range msgs {
+		out[i] = cloneMessageRecord(msg)
+	}
+	return out, nil
+}
+
+func (b *Broker) appendMessageRecord(rec storage.MessageRecord) {
+	b.messagesMu.Lock()
+	defer b.messagesMu.Unlock()
+	b.messages[rec.RoomID] = append(b.messages[rec.RoomID], cloneMessageRecord(rec))
+}
+
+func cloneMessageRecord(rec storage.MessageRecord) storage.MessageRecord {
+	out := rec
+	if rec.Members != nil {
+		out.Members = append([]storage.MessageDeliveryRecord(nil), rec.Members...)
+	}
+	return out
 }
 
 // Stop closes every session and lease. Idempotent.
@@ -292,6 +362,7 @@ var (
 // CreateSession starts a new PTY and registers an adapter for it. Returns a
 // Snapshot so callers can echo state (pid, id, status) back to the client.
 func (b *Broker) CreateSession(spec session.Spec, logOpts session.OutputLogOptions) (session.Snapshot, error) {
+	spec.Readiness = mergeReadinessProfile(DefaultReadinessProfile(spec.Adapter), spec.Readiness)
 	sess, err := b.sessions.Create(spec, logOpts)
 	if err != nil {
 		return session.Snapshot{}, err
@@ -306,12 +377,20 @@ func (b *Broker) CreateSession(spec session.Spec, logOpts session.OutputLogOptio
 	b.adaptersMu.Unlock()
 
 	// Mirror terminal-mode state onto the adapter so that bracketed-paste
-	// wrapping follows whatever the child has enabled.
-	adapter.SetBracketedPasteEnabled(sess.Tracker().Snapshot().BracketedPaste)
+	// wrapping and kitty-enter submission follow whatever the child has
+	// enabled.
+	if spec.SubmitKey != "" {
+		adapter.SetDefaultSubmitKey(spec.SubmitKey)
+	}
+	adapter.SetAllowWriteBytes(spec.EnableRawBytes)
+	initialMode := sess.Tracker().Snapshot()
+	adapter.SetBracketedPasteEnabled(initialMode.BracketedPaste)
+	adapter.SetKittyKeyboardActive(initialMode.KittyKeyboard)
 	modes, cancelModes := sess.Tracker().Subscribe()
 	go func() {
 		for c := range modes {
 			adapter.SetBracketedPasteEnabled(c.Mode.BracketedPaste)
+			adapter.SetKittyKeyboardActive(c.Mode.KittyKeyboard)
 		}
 	}()
 
@@ -343,6 +422,8 @@ func (b *Broker) CreateSession(spec session.Spec, logOpts session.OutputLogOptio
 // room-manager mutation is authoritative regardless of persistence
 // outcome, so a Store failure does NOT re-attach the member in memory.
 func (b *Broker) detachSessionFromRooms(sessionID string) {
+	b.detachMu.Lock()
+	defer b.detachMu.Unlock()
 	changed := b.roomMgr.DetachSession(sessionID, time.Now())
 	if len(changed) == 0 {
 		return
@@ -367,7 +448,14 @@ func (b *Broker) DeleteSession(id string) error {
 	if errors.Is(err, session.ErrSessionNotFound) {
 		return ErrSessionNotFound
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	// The session-exit watcher also detaches room memberships, but it runs in
+	// its own goroutine. Do it synchronously here so callers that immediately
+	// close the Store after DeleteSession do not race the persistence write.
+	b.detachSessionFromRooms(id)
+	return nil
 }
 
 // GetSession returns a Snapshot for id.
@@ -382,6 +470,27 @@ func (b *Broker) GetSession(id string) (session.Snapshot, error) {
 // ListSessions returns snapshots for every registered session.
 func (b *Broker) ListSessions() []session.Snapshot {
 	return b.sessions.List()
+}
+
+// SessionReady reports whether a session has returned to its configured
+// readiness profile. It is used by terminal delivery policies before mutating
+// a PTY.
+func (b *Broker) SessionReady(sessionID string) (bool, string, error) {
+	sess, err := b.sessions.Get(sessionID)
+	if err != nil {
+		return false, "session not found", ErrSessionNotFound
+	}
+	ready := sess.ProfileReadiness()
+	switch {
+	case ready.Idle:
+		return true, "ready", nil
+	case !ready.Readiness.Idle:
+		return false, "output_busy", nil
+	case ready.ScreenRegex != "" && !ready.ScreenMatch:
+		return false, "screen_regex_no_match", nil
+	default:
+		return false, "not_ready", nil
+	}
 }
 
 // Adapter returns the adapter bound to a session, or ErrSessionNotFound.
@@ -411,9 +520,40 @@ func (b *Broker) SubmitKey(sessionID string, intent intents.TerminalKey) (int, e
 
 // Submit compiles and writes a TerminalSubmit intent.
 func (b *Broker) Submit(sessionID string, intent intents.TerminalSubmit) (int, error) {
-	return b.runTerminal(sessionID, intent.LeaseID, func(a Adapter) ([]byte, error) {
-		return a.CompileSubmit(intent)
-	})
+	if intent.Text == "" {
+		return b.runTerminal(sessionID, intent.LeaseID, func(a Adapter) ([]byte, error) {
+			return a.CompileSubmit(intent)
+		})
+	}
+	sess, err := b.sessions.Get(sessionID)
+	if err != nil {
+		return 0, ErrSessionNotFound
+	}
+	if err := b.checkLease(sessionID, intent.LeaseID); err != nil {
+		return 0, err
+	}
+	adapter, err := b.Adapter(sessionID)
+	if err != nil {
+		return 0, err
+	}
+	textBytes, err := adapter.CompileText(intents.TerminalText{Text: intent.Text})
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrIntentInvalid, err)
+	}
+	keyBytes, err := adapter.CompileSubmit(intents.TerminalSubmit{SubmitKey: intent.SubmitKey})
+	if err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrIntentInvalid, err)
+	}
+	n, err := sess.Write(textBytes)
+	if err != nil {
+		return n, err
+	}
+	// Real users type text and then press Enter as separate terminal events.
+	// Some raw-mode TUIs, including codex, display text but ignore an
+	// immediately-concatenated kitty Enter in the same PTY write.
+	time.Sleep(100 * time.Millisecond)
+	m, err := sess.Write(keyBytes)
+	return n + m, err
 }
 
 // Paste compiles and writes a TerminalPaste intent.

@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/atcp/broker"
+	"github.com/joshka0/foxctl/internal/atcp/broker/session"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *broker.Broker) {
@@ -64,7 +66,12 @@ func TestHealth(t *testing.T) {
 
 func TestCreateSession_201(t *testing.T) {
 	ts, _ := newTestServer(t)
-	resp := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{Cmd: []string{"sleep", "30"}})
+	resp := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{
+		Cmd:            []string{"sleep", "30"},
+		SubmitKey:      "LineFeed",
+		EnableRawBytes: true,
+		Readiness:      &ReadinessProfileDTO{ScreenRegex: "PROMPT>$", ThresholdBPS: 12, DebounceMS: 34},
+	})
 	if resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, body = %s", resp.StatusCode, string(body))
@@ -75,6 +82,15 @@ func TestCreateSession_201(t *testing.T) {
 	}
 	if got.Status != "running" {
 		t.Errorf("Status = %q, want running", got.Status)
+	}
+	if got.SubmitKey != "LineFeed" {
+		t.Errorf("SubmitKey = %q, want LineFeed", got.SubmitKey)
+	}
+	if !got.EnableRawBytes {
+		t.Error("EnableRawBytes = false, want true")
+	}
+	if got.Readiness.ScreenRegex != "PROMPT>$" || got.Readiness.ThresholdBPS != 12 || got.Readiness.DebounceMS != 34 {
+		t.Errorf("Readiness = %+v", got.Readiness)
 	}
 }
 
@@ -95,6 +111,170 @@ func TestGetSession_404(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
+}
+
+func TestGetSessionReadiness(t *testing.T) {
+	ts, _ := newTestServer(t)
+	create := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{Cmd: []string{"sleep", "30"}})
+	sess := decodeResponse[SessionResponse](t, create)
+
+	resp, err := http.Get(ts.URL + "/v1/sessions/" + sess.ID + "/readiness?debounce_ms=0")
+	if err != nil {
+		t.Fatalf("get readiness: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, raw)
+	}
+	got := decodeResponse[ReadinessResponse](t, resp)
+	if got.SessionID != sess.ID {
+		t.Fatalf("SessionID = %q, want %q", got.SessionID, sess.ID)
+	}
+	if !got.Idle {
+		t.Fatalf("Idle = false, want true: %+v", got)
+	}
+	if got.OutputRateBPS < 0 {
+		t.Fatalf("OutputRateBPS = %f, want non-negative", got.OutputRateBPS)
+	}
+}
+
+func TestGetSessionActivityReportsCursorDelta(t *testing.T) {
+	ts, b := newTestServer(t)
+	sessionID := createCatSession(t, ts, b)
+
+	resp, err := http.Get(ts.URL + "/v1/sessions/" + sessionID + "/activity")
+	if err != nil {
+		t.Fatalf("get activity: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, raw)
+	}
+	base := decodeResponse[ActivityResponse](t, resp)
+	if base.Working || base.OutputChanged {
+		t.Fatalf("baseline activity = %+v, want no change", base)
+	}
+
+	_ = postJSON(t, ts, "/v1/terminal/submit", map[string]any{
+		"session_id": sessionID,
+		"text":       "activity_ping",
+	})
+	sess, _ := b.Sessions().Get(sessionID)
+	assertSessionSeesText(t, sess, "activity_ping", 2*time.Second)
+
+	resp, err = http.Get(ts.URL + "/v1/sessions/" + sessionID + "/activity?since_seq=" +
+		strconv.FormatUint(base.CurrentSeq, 10) + "&since_output_bytes_total=" +
+		strconv.FormatInt(base.OutputBytesTotal, 10))
+	if err != nil {
+		t.Fatalf("get activity delta: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, raw)
+	}
+	got := decodeResponse[ActivityResponse](t, resp)
+	if !got.Working || !got.OutputChanged || got.OutputBytesDelta <= 0 || got.SeqDelta == 0 {
+		t.Fatalf("activity delta = %+v, want output change", got)
+	}
+}
+
+func TestGetSessionReadiness_WithScreenRegex(t *testing.T) {
+	ts, b := newTestServer(t)
+	create := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{Cmd: []string{"sh", "-c", "printf 'PROMPT>'; sleep 30"}})
+	sess := decodeResponse[SessionResponse](t, create)
+	liveSess, err := b.Sessions().Get(sess.ID)
+	if err != nil {
+		t.Fatalf("session lookup: %v", err)
+	}
+	assertHTTPOutputContains(t, liveSess, "PROMPT>", 2*time.Second)
+
+	resp, err := http.Get(ts.URL + "/v1/sessions/" + sess.ID + "/readiness?debounce_ms=0&screen_regex=PROMPT%3E")
+	if err != nil {
+		t.Fatalf("get readiness: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, raw)
+	}
+	got := decodeResponse[ReadinessResponse](t, resp)
+	if !got.Idle || !got.ScreenMatch || got.ScreenRegex != "PROMPT>" || !strings.Contains(got.ScreenLine, "PROMPT>") {
+		t.Fatalf("readiness = %+v, want idle screen match", got)
+	}
+
+	resp, err = http.Get(ts.URL + "/v1/sessions/" + sess.ID + "/readiness?debounce_ms=0&screen_regex=NOPE")
+	if err != nil {
+		t.Fatalf("get readiness no-match: %v", err)
+	}
+	got = decodeResponse[ReadinessResponse](t, resp)
+	if got.Idle || got.ScreenMatch {
+		t.Fatalf("readiness no-match = %+v, want not idle/no screen match", got)
+	}
+}
+
+func TestGetSessionReadiness_UsesProfileRegex(t *testing.T) {
+	ts, b := newTestServer(t)
+	create := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{
+		Cmd:       []string{"sh", "-c", "printf 'PROFILE>'; sleep 30"},
+		Readiness: &ReadinessProfileDTO{ScreenRegex: "PROFILE>", DebounceMS: 1},
+	})
+	sess := decodeResponse[SessionResponse](t, create)
+	liveSess, err := b.Sessions().Get(sess.ID)
+	if err != nil {
+		t.Fatalf("session lookup: %v", err)
+	}
+	assertHTTPOutputContains(t, liveSess, "PROFILE>", 2*time.Second)
+
+	resp, err := http.Get(ts.URL + "/v1/sessions/" + sess.ID + "/readiness?debounce_ms=0")
+	if err != nil {
+		t.Fatalf("get readiness: %v", err)
+	}
+	got := decodeResponse[ReadinessResponse](t, resp)
+	if !got.Idle || !got.ScreenMatch || got.ScreenRegex != "PROFILE>" {
+		t.Fatalf("readiness = %+v, want profile screen match", got)
+	}
+}
+
+func TestGetSessionReadiness_RejectsInvalidQuery(t *testing.T) {
+	ts, _ := newTestServer(t)
+	create := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{Cmd: []string{"sleep", "30"}})
+	sess := decodeResponse[SessionResponse](t, create)
+
+	resp, err := http.Get(ts.URL + "/v1/sessions/" + sess.ID + "/readiness?threshold_bps=-1")
+	if err != nil {
+		t.Fatalf("get readiness: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestGetSessionScreen(t *testing.T) {
+	ts, b := newTestServer(t)
+	create := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{Cmd: []string{"sh", "-c", "printf screen; sleep 30"}})
+	sess := decodeResponse[SessionResponse](t, create)
+	t.Cleanup(func() { _ = b.DeleteSession(sess.ID) })
+
+	liveSess, _ := b.Sessions().Get(sess.ID)
+	assertHTTPOutputContains(t, liveSess, "screen", 2*time.Second)
+
+	resp, err := http.Get(ts.URL + "/v1/sessions/" + sess.ID + "/screen")
+	if err != nil {
+		t.Fatalf("get screen: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d body = %s", resp.StatusCode, raw)
+	}
+	got := decodeResponse[struct {
+		Lines []string `json:"lines"`
+	}](t, resp)
+	for _, line := range got.Lines {
+		if strings.Contains(line, "screen") {
+			return
+		}
+	}
+	t.Fatalf("screen snapshot did not contain typed text: %+v", got.Lines)
 }
 
 func TestListSessions(t *testing.T) {
@@ -132,6 +312,7 @@ func TestTerminalSubmit_WritesToPTY(t *testing.T) {
 	ts, b := newTestServer(t)
 	create := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{Cmd: []string{"cat"}})
 	sess := decodeResponse[SessionResponse](t, create)
+	t.Cleanup(func() { _ = b.DeleteSession(sess.ID) })
 
 	submitBody := map[string]any{
 		"session_id": sess.ID,
@@ -200,6 +381,49 @@ func TestTerminalText_EmptyReturns400(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
+}
+
+func TestTerminalWriteBytes_RequiresOptIn(t *testing.T) {
+	ts, _ := newTestServer(t)
+	create := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{Cmd: []string{"sleep", "30"}})
+	sess := decodeResponse[SessionResponse](t, create)
+
+	resp := postJSON(t, ts, "/v1/terminal/write_bytes", map[string]any{
+		"session_id": sess.ID,
+		"bytes":      []byte("raw\n"),
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestTerminalWriteBytes_OptInWritesToPTY(t *testing.T) {
+	ts, b := newTestServer(t)
+	create := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{
+		Cmd:            []string{"cat"},
+		EnableRawBytes: true,
+	})
+	sess := decodeResponse[SessionResponse](t, create)
+	t.Cleanup(func() { _ = b.DeleteSession(sess.ID) })
+
+	resp := postJSON(t, ts, "/v1/terminal/write_bytes", map[string]any{
+		"session_id": sess.ID,
+		"bytes":      []byte("raw\n"),
+	})
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, raw)
+	}
+	got := decodeResponse[TerminalResponse](t, resp)
+	if got.Written == 0 {
+		t.Fatal("Written = 0")
+	}
+
+	liveSess, _ := b.Sessions().Get(sess.ID)
+	assertHTTPOutputContains(t, liveSess, "raw", 2*time.Second)
+	_, _ = liveSess.Write([]byte{0x04})
+	<-liveSess.Done()
 }
 
 func TestLeaseAcquireAndRelease(t *testing.T) {
@@ -290,4 +514,20 @@ func TestTerminalSubmit_RejectsOversizedBody(t *testing.T) {
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413", resp.StatusCode)
 	}
+}
+
+func assertHTTPOutputContains(t *testing.T, s *session.Session, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var buf bytes.Buffer
+		for _, c := range s.Log().Since(0, 0) {
+			buf.Write(c.Bytes)
+		}
+		if strings.Contains(buf.String(), want) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("session output did not contain %q", want)
 }

@@ -62,8 +62,11 @@ CREATE TABLE IF NOT EXISTS atcp_messages (
 	id         TEXT PRIMARY KEY,
 	room_id    TEXT NOT NULL,
 	source     TEXT NOT NULL DEFAULT '',
+	correlation_id TEXT NOT NULL DEFAULT '',
+	reply_to_message_id TEXT NOT NULL DEFAULT '',
 	text       TEXT NOT NULL,
 	delivery   TEXT NOT NULL DEFAULT '',
+	receipt_visible INTEGER NOT NULL DEFAULT 1,
 	sent_at    TEXT NOT NULL,
 	delivered  INTEGER NOT NULL DEFAULT 0,
 	failed     INTEGER NOT NULL DEFAULT 0,
@@ -113,7 +116,63 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("atcp sqlite: schema: %w", err)
 	}
+	if err := ensureMessageColumns(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &Store{db: db}, nil
+}
+
+func ensureMessageColumns(ctx context.Context, db *sql.DB) error {
+	columns := []struct {
+		name string
+		ddl  string
+	}{
+		{name: "correlation_id", ddl: "correlation_id TEXT NOT NULL DEFAULT ''"},
+		{name: "reply_to_message_id", ddl: "reply_to_message_id TEXT NOT NULL DEFAULT ''"},
+		{name: "receipt_visible", ddl: "receipt_visible INTEGER NOT NULL DEFAULT 1"},
+	}
+	for _, col := range columns {
+		exists, err := columnExists(ctx, db, "atcp_messages", col.name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE atcp_messages ADD COLUMN %s", col.ddl)); err != nil {
+			return fmt.Errorf("atcp sqlite: add atcp_messages.%s: %w", col.name, err)
+		}
+	}
+	return nil
+}
+
+func columnExists(ctx context.Context, db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return false, fmt.Errorf("atcp sqlite: table info %s: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			typ     string
+			notNull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return false, fmt.Errorf("atcp sqlite: scan table info %s: %w", table, err)
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("atcp sqlite: table info %s rows: %w", table, err)
+	}
+	return false, nil
 }
 
 // applyDefaultPragmas ensures the DSN has sensible defaults for a
@@ -236,9 +295,13 @@ func (s *Store) AppendMessage(ctx context.Context, rec storage.MessageRecord) er
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO atcp_messages (id, room_id, source, text, delivery, sent_at, delivered, failed)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, rec.ID, rec.RoomID, rec.Source, rec.Text, rec.Delivery, timeToText(rec.SentAt), rec.Delivered, rec.Failed); err != nil {
+		INSERT INTO atcp_messages (
+			id, room_id, source, correlation_id, reply_to_message_id, text,
+			delivery, receipt_visible, sent_at, delivered, failed
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, rec.ID, rec.RoomID, rec.Source, rec.CorrelationID, rec.ReplyToMessageID, rec.Text,
+		rec.Delivery, boolToInt(rec.ReceiptVisible), timeToText(rec.SentAt), rec.Delivered, rec.Failed); err != nil {
 		return fmt.Errorf("atcp sqlite: AppendMessage insert: %w", err)
 	}
 	for _, d := range rec.Members {
@@ -253,6 +316,91 @@ func (s *Store) AppendMessage(ctx context.Context, rec storage.MessageRecord) er
 		return fmt.Errorf("atcp sqlite: AppendMessage commit: %w", err)
 	}
 	return nil
+}
+
+// LoadMessages implements storage.Store.
+func (s *Store) LoadMessages(ctx context.Context, roomID string, limit int) ([]storage.MessageRecord, error) {
+	query := `
+		SELECT id, room_id, source, correlation_id, reply_to_message_id, text,
+			delivery, receipt_visible, sent_at, delivered, failed
+		FROM atcp_messages
+		WHERE room_id = ?
+		ORDER BY sent_at ASC, id ASC
+	`
+	args := []any{roomID}
+	if limit > 0 {
+		query = `
+			SELECT id, room_id, source, correlation_id, reply_to_message_id, text,
+				delivery, receipt_visible, sent_at, delivered, failed
+			FROM (
+				SELECT id, room_id, source, correlation_id, reply_to_message_id, text,
+					delivery, receipt_visible, sent_at, delivered, failed
+				FROM atcp_messages
+				WHERE room_id = ?
+				ORDER BY sent_at DESC, id DESC
+				LIMIT ?
+			)
+			ORDER BY sent_at ASC, id ASC
+		`
+		args = append(args, limit)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("atcp sqlite: LoadMessages: %w", err)
+	}
+	var out []storage.MessageRecord
+	for rows.Next() {
+		var rec storage.MessageRecord
+		var sentText string
+		var receiptVisible int
+		if err := rows.Scan(&rec.ID, &rec.RoomID, &rec.Source, &rec.CorrelationID, &rec.ReplyToMessageID, &rec.Text,
+			&rec.Delivery, &receiptVisible, &sentText, &rec.Delivered, &rec.Failed); err != nil {
+			return nil, fmt.Errorf("atcp sqlite: LoadMessages scan: %w", err)
+		}
+		rec.ReceiptVisible = receiptVisible != 0
+		rec.SentAt = textToTime(sentText)
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("atcp sqlite: LoadMessages rows: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("atcp sqlite: LoadMessages close rows: %w", err)
+	}
+	for i := range out {
+		out[i].Members, err = s.loadMessageDeliveries(ctx, out[i].ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) loadMessageDeliveries(ctx context.Context, messageID string) ([]storage.MessageDeliveryRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT agent_id, session_id, delivered, error
+		FROM atcp_message_deliveries
+		WHERE message_id = ?
+		ORDER BY agent_id ASC
+	`, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("atcp sqlite: LoadMessages deliveries: %w", err)
+	}
+	defer rows.Close()
+	var out []storage.MessageDeliveryRecord
+	for rows.Next() {
+		var rec storage.MessageDeliveryRecord
+		var delivered int
+		if err := rows.Scan(&rec.AgentID, &rec.SessionID, &delivered, &rec.ErrText); err != nil {
+			return nil, fmt.Errorf("atcp sqlite: LoadMessages deliveries scan: %w", err)
+		}
+		rec.Delivered = delivered != 0
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("atcp sqlite: LoadMessages deliveries rows: %w", err)
+	}
+	return out, nil
 }
 
 // LoadRooms implements storage.Store, returning rooms in deterministic

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
@@ -28,7 +29,10 @@ import (
 
 	"github.com/joshka0/foxctl/internal/atcp/broker/modetrack"
 	"github.com/joshka0/foxctl/internal/atcp/broker/termcaps"
+	"github.com/joshka0/foxctl/internal/atcp/broker/vtscreen"
 )
+
+var readinessRegexCache sync.Map
 
 // Spec describes how to spawn a Session's child process.
 type Spec struct {
@@ -46,6 +50,22 @@ type Spec struct {
 	// (e.g. "generic-tty", "posix-shell", "claude"). Not interpreted here;
 	// stored on the Session for observability.
 	Adapter string
+	// SubmitKey is an optional session-level default for TerminalSubmit when
+	// the intent omits submit_key.
+	SubmitKey string
+	// EnableRawBytes allows trusted callers to use terminal.write_bytes.
+	EnableRawBytes bool
+	// Readiness configures broker-owned prompt readiness for this session.
+	Readiness ReadinessProfile
+}
+
+// ReadinessProfile configures broker-owned prompt readiness. It is intentionally
+// data-only so adapters, HTTP handlers, and future config files can share it.
+type ReadinessProfile struct {
+	ScreenRegex         string
+	ThresholdBPS        float64
+	Debounce            time.Duration
+	RequireNotAltScreen bool
 }
 
 // Status reports session lifecycle state.
@@ -89,6 +109,38 @@ type Snapshot struct {
 	ExitCode  int
 	ExitError string
 	LastSeq   uint64
+
+	OutputBytesTotal int64
+	OutputRateBPS    float64
+	LastOutputAt     time.Time
+	ReadinessProfile ReadinessProfile
+}
+
+// OutputStats describes recent PTY output volume for a Session.
+type OutputStats struct {
+	BytesTotal   int64
+	RateBPS      float64
+	LastOutputAt time.Time
+}
+
+// PromptReadiness extends the byte-idle readiness heuristic with an optional
+// rendered-screen prompt match from a ReadinessProfile.
+type PromptReadiness struct {
+	Readiness
+	ScreenMatch bool
+	ScreenRegex string
+	ScreenLine  string
+}
+
+// Readiness is the cheap readiness heuristic used before the screen-renderer
+// path exists: a session is idle when output has stayed below a byte-rate
+// threshold for the full debounce window.
+type Readiness struct {
+	Idle         bool
+	IdleFor      time.Duration
+	OutputStats  OutputStats
+	ThresholdBPS float64
+	Debounce     time.Duration
 }
 
 // Session is one broker-owned PTY.
@@ -102,25 +154,39 @@ type Session struct {
 	log       *OutputLog
 	tracker   *modetrack.Tracker
 	responder *termcaps.Responder
+	screen    *vtscreen.Screen
 
-	// mu guards all mutable fields below. Only the Run goroutine writes;
-	// readers use Snapshot() which takes the same lock and returns copies.
-	mu        sync.RWMutex
-	status    Status
-	pid       int
-	exitedAt  time.Time
-	exitCode  int
-	exitError string
+	// mu guards all mutable fields below. The Run goroutine writes lifecycle
+	// and output counters; readers use Snapshot() and may prune expired
+	// output-rate samples while holding the same lock.
+	mu                sync.RWMutex
+	status            Status
+	pid               int
+	exitedAt          time.Time
+	exitCode          int
+	exitError         string
+	outputBytesTotal  int64
+	lastOutputAt      time.Time
+	outputSamples     []outputSample
+	outputSampleBytes int64
 
 	cmd    *exec.Cmd
 	ptyFd  *os.File
 	cancel context.CancelFunc
 	done   chan struct{}
+	now    func() time.Time
 
 	// Non-reentrant test hooks. The fields are nil in production use.
 	// spawnOverride replaces the pty.Start call with an injected pipe/process pair.
 	spawnOverride spawnFunc
 }
+
+type outputSample struct {
+	at    time.Time
+	bytes int
+}
+
+const outputRateWindow = time.Second
 
 // spawnFunc is the hook used by tests to inject a PTY without a real child
 // process. It must return an os.File pair (ptyMaster, optional slave) plus a
@@ -148,8 +214,10 @@ func New(spec Spec, logOpts OutputLogOptions) (*Session, error) {
 		log:       NewOutputLog(logOpts),
 		tracker:   modetrack.New(),
 		responder: termcaps.New(),
+		screen:    vtscreen.New(spec.Rows, spec.Cols),
 		status:    StatusPending,
 		done:      make(chan struct{}),
+		now:       time.Now,
 	}
 	return s, nil
 }
@@ -165,25 +233,121 @@ func (s *Session) Log() *OutputLog { return s.log }
 // to live mode transitions.
 func (s *Session) Tracker() *modetrack.Tracker { return s.tracker }
 
+// Screen returns the session's virtual terminal screen.
+func (s *Session) Screen() *vtscreen.Screen { return s.screen }
+
 // Done returns a channel that is closed after the session has exited and its
 // Run goroutine has returned. Callers use this to synchronize lifecycle.
 func (s *Session) Done() <-chan struct{} { return s.done }
 
 // Snapshot returns an immutable view of the session's public state.
 func (s *Session) Snapshot() Snapshot {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	now := s.nowUTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stats := s.outputStatsLocked(now)
 	return Snapshot{
-		ID:        s.id,
-		Spec:      cloneSpec(s.spec),
-		Status:    s.status,
-		PID:       s.pid,
-		CreatedAt: s.createdAt,
-		ExitedAt:  s.exitedAt,
-		ExitCode:  s.exitCode,
-		ExitError: s.exitError,
-		LastSeq:   s.log.NextSeq() - 1,
+		ID:               s.id,
+		Spec:             cloneSpec(s.spec),
+		Status:           s.status,
+		PID:              s.pid,
+		CreatedAt:        s.createdAt,
+		ExitedAt:         s.exitedAt,
+		ExitCode:         s.exitCode,
+		ExitError:        s.exitError,
+		LastSeq:          s.log.NextSeq() - 1,
+		OutputBytesTotal: stats.BytesTotal,
+		OutputRateBPS:    stats.RateBPS,
+		LastOutputAt:     stats.LastOutputAt,
+		ReadinessProfile: cloneReadinessProfile(s.spec.Readiness),
 	}
+}
+
+// OutputRate returns the current rolling one-second PTY output rate in bytes
+// per second. It naturally decays to zero when no new output arrives.
+func (s *Session) OutputRate() float64 {
+	return s.OutputStats().RateBPS
+}
+
+// OutputStats returns cumulative and recent PTY output counters.
+func (s *Session) OutputStats() OutputStats {
+	return s.outputStatsAt(s.nowUTC())
+}
+
+// Readiness returns the current output-idle readiness heuristic for the
+// supplied threshold and debounce window.
+func (s *Session) Readiness(thresholdBPS float64, debounce time.Duration) Readiness {
+	return s.ReadinessAt(thresholdBPS, debounce, s.nowUTC())
+}
+
+// ReadinessAt is exported for deterministic tests and callers that already
+// sampled a clock.
+func (s *Session) ReadinessAt(thresholdBPS float64, debounce time.Duration, now time.Time) Readiness {
+	if thresholdBPS < 0 {
+		thresholdBPS = 0
+	}
+	if debounce < 0 {
+		debounce = 0
+	}
+	now = now.UTC()
+
+	s.mu.Lock()
+	stats := s.outputStatsLocked(now)
+	createdAt := s.createdAt
+	s.mu.Unlock()
+
+	reference := stats.LastOutputAt
+	if reference.IsZero() {
+		reference = createdAt
+	}
+	idleFor := now.Sub(reference)
+	if idleFor < 0 {
+		idleFor = 0
+	}
+	idle := stats.RateBPS < thresholdBPS && idleFor >= debounce
+	return Readiness{
+		Idle:         idle,
+		IdleFor:      idleFor,
+		OutputStats:  stats,
+		ThresholdBPS: thresholdBPS,
+		Debounce:     debounce,
+	}
+}
+
+// ProfileReadiness evaluates the session's configured ReadinessProfile.
+func (s *Session) ProfileReadiness() PromptReadiness {
+	return s.ReadinessForProfile(s.spec.Readiness, s.nowUTC())
+}
+
+// ReadinessForProfile evaluates byte-idle readiness plus optional rendered
+// screen matching for profile.
+func (s *Session) ReadinessForProfile(profile ReadinessProfile, now time.Time) PromptReadiness {
+	threshold := profile.ThresholdBPS
+	if threshold <= 0 {
+		threshold = 32
+	}
+	debounce := profile.Debounce
+	if debounce <= 0 {
+		debounce = 500 * time.Millisecond
+	}
+	base := s.ReadinessAt(threshold, debounce, now)
+	out := PromptReadiness{
+		Readiness:   base,
+		ScreenRegex: profile.ScreenRegex,
+	}
+	if profile.ScreenRegex == "" {
+		return out
+	}
+	snap := s.Screen().Snapshot()
+	for _, line := range snap.Lines {
+		if matchScreenLine(profile.ScreenRegex, line) {
+			out.ScreenMatch = true
+			out.ScreenLine = line
+			break
+		}
+	}
+	out.Idle = base.Idle && out.ScreenMatch
+	return out
 }
 
 // Start spawns the child process and begins the Run goroutine.
@@ -264,7 +428,11 @@ func (s *Session) Resize(rows, cols uint16) error {
 	if !running || fd == nil {
 		return ErrNotRunning
 	}
-	return pty.Setsize(fd, &pty.Winsize{Rows: rows, Cols: cols})
+	if err := pty.Setsize(fd, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+		return err
+	}
+	s.screen.Resize(rows, cols)
+	return nil
 }
 
 func (s *Session) run(ctx context.Context, cleanup func()) {
@@ -286,7 +454,9 @@ func (s *Session) run(ctx context.Context, cleanup func()) {
 		for {
 			n, err := s.ptyFd.Read(buf)
 			if n > 0 {
+				s.recordOutputAt(n, s.nowUTC())
 				s.tracker.Feed(buf[:n])
+				s.screen.Feed(buf[:n])
 				// Auto-answer terminal capability queries the
 				// child emits during init (OSC 10/11/12 color
 				// queries, DSR 5/6, DA1/DA2, kitty kbd ?u).
@@ -424,14 +594,94 @@ func defaultSpawn(ctx context.Context, spec Spec) (*os.File, *exec.Cmd, func(), 
 
 func cloneSpec(s Spec) Spec {
 	out := Spec{
-		Cmd:     append([]string(nil), s.Cmd...),
-		Cwd:     s.Cwd,
-		Rows:    s.Rows,
-		Cols:    s.Cols,
-		Adapter: s.Adapter,
+		Cmd:            append([]string(nil), s.Cmd...),
+		Cwd:            s.Cwd,
+		Rows:           s.Rows,
+		Cols:           s.Cols,
+		Adapter:        s.Adapter,
+		SubmitKey:      s.SubmitKey,
+		EnableRawBytes: s.EnableRawBytes,
+		Readiness:      cloneReadinessProfile(s.Readiness),
 	}
 	if s.Env != nil {
 		out.Env = append([]string(nil), s.Env...)
 	}
 	return out
+}
+
+func cloneReadinessProfile(p ReadinessProfile) ReadinessProfile {
+	return p
+}
+
+func matchScreenLine(pattern, line string) bool {
+	compiled, ok := readinessRegexCache.Load(pattern)
+	var re *regexp.Regexp
+	if ok {
+		re = compiled.(*regexp.Regexp)
+	} else {
+		var err error
+		re, err = regexp.Compile(pattern)
+		if err != nil {
+			return false
+		}
+		actual, _ := readinessRegexCache.LoadOrStore(pattern, re)
+		re = actual.(*regexp.Regexp)
+	}
+	return re.MatchString(line)
+}
+
+func (s *Session) nowUTC() time.Time {
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	return now().UTC()
+}
+
+func (s *Session) recordOutputAt(n int, at time.Time) {
+	if n <= 0 {
+		return
+	}
+	at = at.UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.outputBytesTotal += int64(n)
+	s.lastOutputAt = at
+	s.outputSamples = append(s.outputSamples, outputSample{at: at, bytes: n})
+	s.outputSampleBytes += int64(n)
+	s.pruneOutputSamplesLocked(at)
+}
+
+func (s *Session) outputStatsAt(at time.Time) OutputStats {
+	at = at.UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.outputStatsLocked(at)
+}
+
+func (s *Session) outputStatsLocked(at time.Time) OutputStats {
+	s.pruneOutputSamplesLocked(at)
+	return OutputStats{
+		BytesTotal:   s.outputBytesTotal,
+		RateBPS:      float64(s.outputSampleBytes) / outputRateWindow.Seconds(),
+		LastOutputAt: s.lastOutputAt,
+	}
+}
+
+func (s *Session) pruneOutputSamplesLocked(now time.Time) {
+	cutoff := now.Add(-outputRateWindow)
+	drop := 0
+	for drop < len(s.outputSamples) && s.outputSamples[drop].at.Before(cutoff) {
+		s.outputSampleBytes -= int64(s.outputSamples[drop].bytes)
+		drop++
+	}
+	if drop == 0 {
+		return
+	}
+	copy(s.outputSamples, s.outputSamples[drop:])
+	clear(s.outputSamples[len(s.outputSamples)-drop:])
+	s.outputSamples = s.outputSamples[:len(s.outputSamples)-drop]
+	if s.outputSampleBytes < 0 {
+		s.outputSampleBytes = 0
+	}
 }

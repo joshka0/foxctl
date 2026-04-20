@@ -31,9 +31,9 @@ var (
 //
 // Concurrency: SetBracketedPasteEnabled is called from the broker's mode
 // tracker goroutine while Compile* methods run under request goroutines,
-// so bracketedPaste uses atomic.Bool rather than a plain bool. The other
-// configuration fields (AllowWriteBytes, DefaultSubmitKey) are set at
-// construction time and treated as read-only thereafter; writing to them
+// so mode flags use atomic.Bool rather than plain bool. The other
+// configuration fields (AllowWriteBytes, DefaultSubmitKey) are set during
+// session creation and treated as read-only thereafter; writing to them
 // after the adapter is handed to the broker is a programming error.
 type Adapter struct {
 	// bracketedPaste tracks whether the child has enabled bracketed paste
@@ -41,6 +41,11 @@ type Adapter struct {
 	// BracketedPasteEnabled so tests and the broker never touch the
 	// underlying atomic directly.
 	bracketedPaste atomic.Bool
+
+	// kittyKeyboard tracks whether the child has pushed the kitty keyboard
+	// protocol with CSI > n u. When active, empty TerminalSubmit keys compile
+	// as KittyEnter so raw-mode TUIs see a logical Enter rather than CR.
+	kittyKeyboard atomic.Bool
 
 	// AllowWriteBytes enables the TerminalWriteBytes escape hatch.
 	// Default false — most sessions should reject raw writes because they
@@ -52,8 +57,11 @@ type Adapter struct {
 	DefaultSubmitKey string
 }
 
-// DefaultSubmitKey is the fallback submit key name when an intent omits it.
-const DefaultSubmitKey = "Enter"
+// DefaultSubmitKey is the fallback submit key name when an intent omits it
+// and kitty keyboard mode is not active. CRLF is deliberately conservative:
+// readline-like shells accept CR, while line-buffered TUIs that ignore CR can
+// still observe LF.
+const DefaultSubmitKey = "EnterLineFeed"
 
 // New constructs an Adapter with sensible defaults: bracketed paste disabled
 // (will be toggled by the mode tracker), write_bytes denied, Enter as default
@@ -73,6 +81,26 @@ func (a *Adapter) SetBracketedPasteEnabled(enabled bool) {
 // mode 2004. Safe to call concurrently with SetBracketedPasteEnabled.
 func (a *Adapter) BracketedPasteEnabled() bool {
 	return a.bracketedPaste.Load()
+}
+
+// SetKittyKeyboardActive updates the adapter's view of kitty keyboard mode.
+func (a *Adapter) SetKittyKeyboardActive(enabled bool) {
+	a.kittyKeyboard.Store(enabled)
+}
+
+// KittyKeyboardActive reports whether kitty keyboard mode is active.
+func (a *Adapter) KittyKeyboardActive() bool {
+	return a.kittyKeyboard.Load()
+}
+
+// SetAllowWriteBytes configures the raw-byte escape hatch at session creation.
+func (a *Adapter) SetAllowWriteBytes(enabled bool) {
+	a.AllowWriteBytes = enabled
+}
+
+// SetDefaultSubmitKey configures the session-level default submit key.
+func (a *Adapter) SetDefaultSubmitKey(key string) {
+	a.DefaultSubmitKey = strings.TrimSpace(key)
 }
 
 // CompileText turns a TerminalText intent into bytes.
@@ -188,6 +216,9 @@ func (a *Adapter) CompileWriteBytes(intent intents.TerminalWriteBytes) ([]byte, 
 }
 
 func (a *Adapter) defaultSubmitKey() string {
+	if a.KittyKeyboardActive() {
+		return "KittyEnter"
+	}
 	if a.DefaultSubmitKey == "" {
 		return DefaultSubmitKey
 	}

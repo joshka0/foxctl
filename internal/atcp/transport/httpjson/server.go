@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/sessions", s.createSession)
 	mux.HandleFunc("GET /v1/sessions", s.listSessions)
+	mux.HandleFunc("GET /v1/sessions/{id}/readiness", s.getSessionReadiness)
+	mux.HandleFunc("GET /v1/sessions/{id}/activity", s.getSessionActivity)
+	mux.HandleFunc("GET /v1/sessions/{id}/screen", s.getSessionScreen)
 	mux.HandleFunc("GET /v1/sessions/{id}", s.getSession)
 	mux.HandleFunc("DELETE /v1/sessions/{id}", s.deleteSession)
 	mux.HandleFunc("POST /v1/terminal/text", s.terminalText)
@@ -53,6 +57,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/health", s.health)
 	mux.HandleFunc("POST /v1/rooms", s.createRoom)
 	mux.HandleFunc("GET /v1/rooms", s.listRooms)
+	mux.HandleFunc("GET /v1/rooms/{id}/messages", s.roomMessages)
 	mux.HandleFunc("GET /v1/rooms/{id}", s.getRoom)
 	mux.HandleFunc("POST /v1/rooms/{id}/join", s.joinRoom)
 	mux.HandleFunc("POST /v1/rooms/{id}/leave", s.leaveRoom)
@@ -66,13 +71,16 @@ func (s *Server) Handler() http.Handler {
 // CreateSessionRequest mirrors session.Spec on the wire, with an optional
 // log-options override.
 type CreateSessionRequest struct {
-	Cmd     []string `json:"cmd"`
-	Cwd     string   `json:"cwd,omitempty"`
-	Env     []string `json:"env,omitempty"`
-	Rows    uint16   `json:"rows,omitempty"`
-	Cols    uint16   `json:"cols,omitempty"`
-	Adapter string   `json:"adapter,omitempty"`
-	Log     *LogOpts `json:"log,omitempty"`
+	Cmd            []string             `json:"cmd"`
+	Cwd            string               `json:"cwd,omitempty"`
+	Env            []string             `json:"env,omitempty"`
+	Rows           uint16               `json:"rows,omitempty"`
+	Cols           uint16               `json:"cols,omitempty"`
+	Adapter        string               `json:"adapter,omitempty"`
+	SubmitKey      string               `json:"submit_key,omitempty"`
+	EnableRawBytes bool                 `json:"enable_raw_bytes,omitempty"`
+	Readiness      *ReadinessProfileDTO `json:"readiness,omitempty"`
+	Log            *LogOpts             `json:"log,omitempty"`
 }
 
 // LogOpts is the JSON form of session.OutputLogOptions.
@@ -83,17 +91,62 @@ type LogOpts struct {
 
 // SessionResponse mirrors session.Snapshot.
 type SessionResponse struct {
-	ID        string    `json:"id"`
-	Status    string    `json:"status"`
-	PID       int       `json:"pid"`
-	CreatedAt time.Time `json:"created_at"`
-	ExitedAt  time.Time `json:"exited_at,omitempty"`
-	ExitCode  int       `json:"exit_code,omitempty"`
-	ExitError string    `json:"exit_error,omitempty"`
-	LastSeq   uint64    `json:"last_seq"`
-	Cmd       []string  `json:"cmd"`
-	Cwd       string    `json:"cwd,omitempty"`
-	Adapter   string    `json:"adapter,omitempty"`
+	ID               string              `json:"id"`
+	Status           string              `json:"status"`
+	PID              int                 `json:"pid"`
+	CreatedAt        time.Time           `json:"created_at"`
+	ExitedAt         time.Time           `json:"exited_at,omitempty"`
+	ExitCode         int                 `json:"exit_code,omitempty"`
+	ExitError        string              `json:"exit_error,omitempty"`
+	LastSeq          uint64              `json:"last_seq"`
+	Cmd              []string            `json:"cmd"`
+	Cwd              string              `json:"cwd,omitempty"`
+	Adapter          string              `json:"adapter,omitempty"`
+	SubmitKey        string              `json:"submit_key,omitempty"`
+	EnableRawBytes   bool                `json:"enable_raw_bytes,omitempty"`
+	Readiness        ReadinessProfileDTO `json:"readiness,omitempty"`
+	OutputBytesTotal int64               `json:"output_bytes_total"`
+	OutputRateBPS    float64             `json:"output_rate_bps"`
+	LastOutputAt     time.Time           `json:"last_output_at,omitempty"`
+}
+
+type ReadinessProfileDTO struct {
+	ScreenRegex         string  `json:"screen_regex,omitempty"`
+	ThresholdBPS        float64 `json:"threshold_bps,omitempty"`
+	DebounceMS          int64   `json:"debounce_ms,omitempty"`
+	RequireNotAltScreen bool    `json:"require_not_alt_screen,omitempty"`
+}
+
+// ReadinessResponse reports whether a session's PTY output is currently idle.
+type ReadinessResponse struct {
+	SessionID        string    `json:"session_id"`
+	Idle             bool      `json:"idle"`
+	IdleForMS        int64     `json:"idle_for_ms"`
+	ThresholdBPS     float64   `json:"threshold_bps"`
+	DebounceMS       int64     `json:"debounce_ms"`
+	ScreenMatch      bool      `json:"screen_match,omitempty"`
+	ScreenRegex      string    `json:"screen_regex,omitempty"`
+	ScreenLine       string    `json:"screen_line,omitempty"`
+	OutputBytesTotal int64     `json:"output_bytes_total"`
+	OutputRateBPS    float64   `json:"output_rate_bps"`
+	LastOutputAt     time.Time `json:"last_output_at,omitempty"`
+}
+
+// ActivityResponse reports whether a session produced output since a caller's
+// previous heartbeat cursor.
+type ActivityResponse struct {
+	SessionID             string    `json:"session_id"`
+	Working               bool      `json:"working"`
+	OutputChanged         bool      `json:"output_changed"`
+	SinceSeq              uint64    `json:"since_seq"`
+	CurrentSeq            uint64    `json:"current_seq"`
+	SeqDelta              uint64    `json:"seq_delta"`
+	SinceOutputBytesTotal int64     `json:"since_output_bytes_total"`
+	OutputBytesTotal      int64     `json:"output_bytes_total"`
+	OutputBytesDelta      int64     `json:"output_bytes_delta"`
+	OutputRateBPS         float64   `json:"output_rate_bps"`
+	IdleForMS             int64     `json:"idle_for_ms"`
+	LastOutputAt          time.Time `json:"last_output_at,omitempty"`
 }
 
 // TerminalResponse is the common reply for terminal.* endpoints.
@@ -150,12 +203,17 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := session.Spec{
-		Cmd:     req.Cmd,
-		Cwd:     req.Cwd,
-		Env:     req.Env,
-		Rows:    req.Rows,
-		Cols:    req.Cols,
-		Adapter: req.Adapter,
+		Cmd:            req.Cmd,
+		Cwd:            req.Cwd,
+		Env:            req.Env,
+		Rows:           req.Rows,
+		Cols:           req.Cols,
+		Adapter:        req.Adapter,
+		SubmitKey:      req.SubmitKey,
+		EnableRawBytes: req.EnableRawBytes,
+	}
+	if req.Readiness != nil {
+		spec.Readiness = readinessProfileFromDTO(*req.Readiness)
 	}
 	var logOpts session.OutputLogOptions
 	if req.Log != nil {
@@ -186,6 +244,118 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toSessionResponse(snap))
+}
+
+func (s *Server) getSessionReadiness(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sess, err := s.broker.Sessions().Get(id)
+	if err != nil {
+		notFoundOrInternal(w, broker.ErrSessionNotFound)
+		return
+	}
+	thresholdBPS, ok := parseFloatQuery(w, r, "threshold_bps", 32)
+	if !ok {
+		return
+	}
+	debounceMS, ok := parseIntQuery(w, r, "debounce_ms", 500)
+	if !ok {
+		return
+	}
+	if thresholdBPS < 0 {
+		writeError(w, http.StatusBadRequest, "threshold_bps must be >= 0")
+		return
+	}
+	if debounceMS < 0 {
+		writeError(w, http.StatusBadRequest, "debounce_ms must be >= 0")
+		return
+	}
+	screenRegex := strings.TrimSpace(r.URL.Query().Get("screen_regex"))
+	var (
+		screenMatch bool
+		screenLine  string
+	)
+	if screenRegex != "" {
+		re, err := regexp.Compile(screenRegex)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "screen_regex is invalid: "+err.Error())
+			return
+		}
+		snap := sess.Screen().Snapshot()
+		for _, line := range snap.Lines {
+			if re.MatchString(line) {
+				screenMatch = true
+				screenLine = line
+				break
+			}
+		}
+	}
+	var ready session.PromptReadiness
+	if screenRegex == "" {
+		profile := sess.Snapshot().ReadinessProfile
+		if profile.ScreenRegex != "" {
+			ready = sess.ProfileReadiness()
+			screenRegex = ready.ScreenRegex
+			screenMatch = ready.ScreenMatch
+			screenLine = ready.ScreenLine
+		} else {
+			base := sess.Readiness(thresholdBPS, time.Duration(debounceMS)*time.Millisecond)
+			ready = session.PromptReadiness{Readiness: base}
+		}
+	} else {
+		base := sess.Readiness(thresholdBPS, time.Duration(debounceMS)*time.Millisecond)
+		ready = session.PromptReadiness{
+			Readiness:   base,
+			ScreenRegex: screenRegex,
+			ScreenMatch: screenMatch,
+			ScreenLine:  screenLine,
+		}
+		ready.Idle = base.Idle && screenMatch
+	}
+	writeJSON(w, http.StatusOK, ReadinessResponse{
+		SessionID:        id,
+		Idle:             ready.Idle,
+		IdleForMS:        int64(ready.IdleFor / time.Millisecond),
+		ThresholdBPS:     ready.ThresholdBPS,
+		DebounceMS:       int64(ready.Debounce / time.Millisecond),
+		ScreenMatch:      screenMatch,
+		ScreenRegex:      screenRegex,
+		ScreenLine:       screenLine,
+		OutputBytesTotal: ready.OutputStats.BytesTotal,
+		OutputRateBPS:    ready.OutputStats.RateBPS,
+		LastOutputAt:     ready.OutputStats.LastOutputAt,
+	})
+}
+
+func (s *Server) getSessionActivity(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sess, err := s.broker.Sessions().Get(id)
+	if err != nil {
+		notFoundOrInternal(w, broker.ErrSessionNotFound)
+		return
+	}
+	sinceSeq, ok := parseUintQuery(w, r, "since_seq", 0)
+	if !ok {
+		return
+	}
+	sinceBytes, ok := parseInt64Query(w, r, "since_output_bytes_total", 0)
+	if !ok {
+		return
+	}
+	if sinceBytes < 0 {
+		writeError(w, http.StatusBadRequest, "since_output_bytes_total must be >= 0")
+		return
+	}
+	writeJSON(w, http.StatusOK, activityResponseFromSnapshot(id, sess.Snapshot(), sinceSeq, sinceBytes, time.Now().UTC()))
+}
+
+func (s *Server) getSessionScreen(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sess, err := s.broker.Sessions().Get(id)
+	if err != nil {
+		notFoundOrInternal(w, broker.ErrSessionNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, sess.Screen().Snapshot())
 }
 
 func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
@@ -415,17 +585,77 @@ func leaseErrorStatus(w http.ResponseWriter, err error) {
 
 func toSessionResponse(snap session.Snapshot) SessionResponse {
 	return SessionResponse{
-		ID:        snap.ID,
-		Status:    snap.Status.String(),
-		PID:       snap.PID,
-		CreatedAt: snap.CreatedAt,
-		ExitedAt:  snap.ExitedAt,
-		ExitCode:  snap.ExitCode,
-		ExitError: snap.ExitError,
-		LastSeq:   snap.LastSeq,
-		Cmd:       snap.Spec.Cmd,
-		Cwd:       snap.Spec.Cwd,
-		Adapter:   snap.Spec.Adapter,
+		ID:               snap.ID,
+		Status:           snap.Status.String(),
+		PID:              snap.PID,
+		CreatedAt:        snap.CreatedAt,
+		ExitedAt:         snap.ExitedAt,
+		ExitCode:         snap.ExitCode,
+		ExitError:        snap.ExitError,
+		LastSeq:          snap.LastSeq,
+		Cmd:              snap.Spec.Cmd,
+		Cwd:              snap.Spec.Cwd,
+		Adapter:          snap.Spec.Adapter,
+		SubmitKey:        snap.Spec.SubmitKey,
+		EnableRawBytes:   snap.Spec.EnableRawBytes,
+		Readiness:        readinessProfileToDTO(snap.ReadinessProfile),
+		OutputBytesTotal: snap.OutputBytesTotal,
+		OutputRateBPS:    snap.OutputRateBPS,
+		LastOutputAt:     snap.LastOutputAt,
+	}
+}
+
+func readinessProfileFromDTO(dto ReadinessProfileDTO) session.ReadinessProfile {
+	return session.ReadinessProfile{
+		ScreenRegex:         dto.ScreenRegex,
+		ThresholdBPS:        dto.ThresholdBPS,
+		Debounce:            time.Duration(dto.DebounceMS) * time.Millisecond,
+		RequireNotAltScreen: dto.RequireNotAltScreen,
+	}
+}
+
+func readinessProfileToDTO(profile session.ReadinessProfile) ReadinessProfileDTO {
+	return ReadinessProfileDTO{
+		ScreenRegex:         profile.ScreenRegex,
+		ThresholdBPS:        profile.ThresholdBPS,
+		DebounceMS:          int64(profile.Debounce / time.Millisecond),
+		RequireNotAltScreen: profile.RequireNotAltScreen,
+	}
+}
+
+func activityResponseFromSnapshot(sessionID string, snap session.Snapshot, sinceSeq uint64, sinceBytes int64, now time.Time) ActivityResponse {
+	if sinceBytes < 0 {
+		sinceBytes = 0
+	}
+	seqDelta := uint64(0)
+	if snap.LastSeq > sinceSeq {
+		seqDelta = snap.LastSeq - sinceSeq
+	}
+	bytesDelta := snap.OutputBytesTotal - sinceBytes
+	if bytesDelta < 0 {
+		bytesDelta = 0
+	}
+	idleFor := time.Duration(0)
+	if !snap.LastOutputAt.IsZero() {
+		idleFor = now.Sub(snap.LastOutputAt)
+		if idleFor < 0 {
+			idleFor = 0
+		}
+	}
+	changed := seqDelta > 0 || bytesDelta > 0
+	return ActivityResponse{
+		SessionID:             sessionID,
+		Working:               changed,
+		OutputChanged:         changed,
+		SinceSeq:              sinceSeq,
+		CurrentSeq:            snap.LastSeq,
+		SeqDelta:              seqDelta,
+		SinceOutputBytesTotal: sinceBytes,
+		OutputBytesTotal:      snap.OutputBytesTotal,
+		OutputBytesDelta:      bytesDelta,
+		OutputRateBPS:         snap.OutputRateBPS,
+		IdleForMS:             int64(idleFor / time.Millisecond),
+		LastOutputAt:          snap.LastOutputAt,
 	}
 }
 
@@ -456,4 +686,56 @@ func parseSinceParam(r *http.Request) uint64 {
 		return 0
 	}
 	return v
+}
+
+func parseFloatQuery(w http.ResponseWriter, r *http.Request, key string, def float64) (float64, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return def, true
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, key+" must be a number")
+		return 0, false
+	}
+	return v, true
+}
+
+func parseIntQuery(w http.ResponseWriter, r *http.Request, key string, def int) (int, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return def, true
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, key+" must be an integer")
+		return 0, false
+	}
+	return v, true
+}
+
+func parseInt64Query(w http.ResponseWriter, r *http.Request, key string, def int64) (int64, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return def, true
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, key+" must be an integer")
+		return 0, false
+	}
+	return v, true
+}
+
+func parseUintQuery(w http.ResponseWriter, r *http.Request, key string, def uint64) (uint64, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return def, true
+	}
+	v, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, key+" must be an unsigned integer")
+		return 0, false
+	}
+	return v, true
 }

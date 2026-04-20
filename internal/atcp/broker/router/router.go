@@ -10,8 +10,11 @@
 package router
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,7 +29,10 @@ import (
 type Dispatcher interface {
 	AcquireLease(req lease.AcquireRequest) (*lease.Lease, error)
 	ReleaseLease(id string) error
+	SessionReady(sessionID string) (bool, string, error)
+	SubmitKey(sessionID string, intent intents.TerminalKey) (int, error)
 	Submit(sessionID string, intent intents.TerminalSubmit) (int, error)
+	Paste(sessionID string, intent intents.TerminalPaste) (int, error)
 }
 
 // MemberResolver returns the currently-active members of a room. The router
@@ -44,6 +50,9 @@ type Options struct {
 	LeaseTTL time.Duration
 	// Clock is for tests; defaults to time.Now.
 	Clock func() time.Time
+	// LargePasteThreshold routes large room messages through terminal.paste
+	// instead of terminal.submit. Zero defaults to 1 MiB.
+	LargePasteThreshold int
 }
 
 // Router is safe for concurrent use.
@@ -61,6 +70,9 @@ func New(d Dispatcher, resolver MemberResolver, opts Options) *Router {
 	}
 	if opts.Clock == nil {
 		opts.Clock = time.Now
+	}
+	if opts.LargePasteThreshold <= 0 {
+		opts.LargePasteThreshold = 1 << 20
 	}
 	return &Router{d: d, resolver: resolver, opts: opts}
 }
@@ -84,14 +96,65 @@ type Message struct {
 	// Source is a free-form identifier for who sent it (agent id, scheduler,
 	// etc.). Used as the lease owner string for operator-visible traceability.
 	Source string
+	// CorrelationID links this message to a higher-level request/trace.
+	CorrelationID string
+	// ReplyToMessageID points at the logical message this one answers, when
+	// known.
+	ReplyToMessageID string
 	// Text is the content that will land on every member's terminal.
 	Text string
+	// SubmitKey optionally overrides the recipient session's default submit
+	// key for this message.
+	SubmitKey string
 	// Delivery selects the member-level delivery path. Must be DeliveryTerminal
 	// in this slice. Empty defaults to terminal.
 	Delivery DeliveryPolicy
 	// SkipAgents is an optional suppression list; typically the sender
 	// themselves so they don't see their own message echo back.
 	SkipAgents []string
+	// ReceiptVisibility controls whether terminal recipients see an ATCP
+	// receipt preamble before Text. Empty defaults to visible.
+	ReceiptVisibility ReceiptVisibility
+	// TerminalPolicy controls when terminal delivery may mutate a PTY.
+	// Empty/immediate preserves the current write-now behavior. queue waits
+	// for readiness, safe-prompt-only/reject require readiness immediately,
+	// and interrupt sends InterruptKey before delivery.
+	TerminalPolicy string
+	// PolicyTimeout bounds queue waits. Zero defaults to 30s.
+	PolicyTimeout time.Duration
+	// InterruptKey is the typed key sent for TerminalPolicy=interrupt. Empty
+	// defaults to Escape because it closes most TUI transient states without
+	// submitting partial text.
+	InterruptKey string
+}
+
+// ReceiptVisibility controls terminal-visible receipt rendering.
+type ReceiptVisibility string
+
+const (
+	ReceiptVisible ReceiptVisibility = "visible"
+	ReceiptHidden  ReceiptVisibility = "hidden"
+)
+
+// MessageReceipt is the structured reply context for a routed message.
+// Native clients can consume it directly; terminal clients receive the same
+// information as a short visible preamble when receipts are visible.
+type MessageReceipt struct {
+	MessageID        string `json:"message_id"`
+	RoomID           string `json:"room_id"`
+	Source           string `json:"source,omitempty"`
+	CorrelationID    string `json:"correlation_id,omitempty"`
+	ReplyToMessageID string `json:"reply_to_message_id,omitempty"`
+	ReplyPrefix      string `json:"reply_prefix"`
+}
+
+type terminalMessageReceipt struct {
+	MessageID        string `json:"message_id"`
+	RoomID           string `json:"room_id"`
+	Source           string `json:"source,omitempty"`
+	CorrelationID    string `json:"correlation_id,omitempty"`
+	ReplyToMessageID string `json:"reply_to_message_id,omitempty"`
+	ReplyPrefixHint  string `json:"reply_prefix_hint"`
 }
 
 // MemberResult is the per-member outcome of Send.
@@ -110,6 +173,7 @@ type MemberResult struct {
 // step away from iterating the per-member slice.
 type Result struct {
 	MessageID string
+	Receipt   MessageReceipt
 	Delivered int
 	Failed    int
 	Members   []MemberResult
@@ -120,6 +184,7 @@ var (
 	ErrRoomIDRequired      = errors.New("atcp router: room_id is required")
 	ErrEmptyMessage        = errors.New("atcp router: message text is empty")
 	ErrUnsupportedDelivery = errors.New("atcp router: delivery policy not supported in this slice")
+	ErrUnsafePrompt        = errors.New("atcp router: terminal is not at a safe prompt")
 	// ErrNoActiveMembers is returned when the resolver reports zero active
 	// members in the room (nobody is joined, or everyone left).
 	ErrNoActiveMembers = errors.New("atcp router: no active members in room")
@@ -150,6 +215,7 @@ func (r *Router) Send(msg Message) (Result, error) {
 	if msg.ID == "" {
 		msg.ID = ulid.Make().String()
 	}
+	receipt := NewMessageReceipt(msg)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -159,7 +225,7 @@ func (r *Router) Send(msg Message) (Result, error) {
 		return Result{}, err
 	}
 	if len(members) == 0 {
-		return Result{MessageID: msg.ID}, ErrNoActiveMembers
+		return Result{MessageID: msg.ID, Receipt: receipt}, ErrNoActiveMembers
 	}
 	// Filter out skipped agents and members explicitly flagged non-mutable.
 	// The CanMutate check is the authority boundary around terminal
@@ -192,13 +258,13 @@ func (r *Router) Send(msg Message) (Result, error) {
 		if !hasAnyMutable {
 			// Room has members but none of them are mutable — this is a
 			// role/config problem, not a skip-list problem.
-			return Result{MessageID: msg.ID}, ErrNoMutableMembers
+			return Result{MessageID: msg.ID, Receipt: receipt}, ErrNoMutableMembers
 		}
 		// Mutable members exist but they were all filtered out by
 		// SkipAgents. From the sender's perspective that's "nobody
 		// eligible to receive", which is closer to ErrNoActiveMembers
 		// semantically than a role error.
-		return Result{MessageID: msg.ID}, ErrNoActiveMembers
+		return Result{MessageID: msg.ID, Receipt: receipt}, ErrNoActiveMembers
 	}
 
 	owner := msg.Source
@@ -206,7 +272,7 @@ func (r *Router) Send(msg Message) (Result, error) {
 		owner = "router"
 	}
 
-	res := Result{MessageID: msg.ID, Members: make([]MemberResult, 0, len(targets))}
+	res := Result{MessageID: msg.ID, Receipt: receipt, Members: make([]MemberResult, 0, len(targets))}
 	for _, m := range targets {
 		mr := r.deliverOne(m, msg, owner)
 		if mr.Delivered {
@@ -240,13 +306,137 @@ func (r *Router) deliverOne(m room.Member, msg Message, owner string) MemberResu
 		// "used" but releasing it promptly lets another sender proceed.
 		_ = r.d.ReleaseLease(l.ID)
 	}()
-	if _, err := r.d.Submit(m.SessionID, intents.TerminalSubmit{
-		Text:    msg.Text,
-		LeaseID: l.ID,
-	}); err != nil {
-		mr.Err = fmt.Errorf("submit: %w", err)
+	if err := r.applyTerminalPolicy(m.SessionID, msg, l.ID); err != nil {
+		mr.Err = err
+		return mr
+	}
+	if err := r.deliverInput(m.SessionID, msg, l.ID); err != nil {
+		mr.Err = fmt.Errorf("deliver input: %w", err)
 		return mr
 	}
 	mr.Delivered = true
 	return mr
+}
+
+func (r *Router) applyTerminalPolicy(sessionID string, msg Message, leaseID string) error {
+	policy := strings.TrimSpace(strings.ToLower(msg.TerminalPolicy))
+	switch policy {
+	case "", "immediate":
+		return nil
+	case "safe-prompt-only", "reject":
+		ready, reason, err := r.d.SessionReady(sessionID)
+		if err != nil {
+			return fmt.Errorf("safe prompt: %w", err)
+		}
+		if !ready {
+			return fmt.Errorf("%w: %s", ErrUnsafePrompt, reason)
+		}
+		return nil
+	case "queue":
+		timeout := msg.PolicyTimeout
+		if timeout <= 0 {
+			timeout = 30 * time.Second
+		}
+		deadline := r.opts.Clock().Add(timeout)
+		for {
+			ready, reason, err := r.d.SessionReady(sessionID)
+			if err != nil {
+				return fmt.Errorf("safe prompt: %w", err)
+			}
+			if ready {
+				return nil
+			}
+			if !r.opts.Clock().Before(deadline) {
+				return fmt.Errorf("%w: timed out waiting for ready: %s", ErrUnsafePrompt, reason)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	case "interrupt":
+		key := strings.TrimSpace(msg.InterruptKey)
+		if key == "" {
+			key = "Escape"
+		}
+		if _, err := r.d.SubmitKey(sessionID, intents.TerminalKey{Key: key, LeaseID: leaseID}); err != nil {
+			return fmt.Errorf("interrupt: %w", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+		return nil
+	default:
+		return fmt.Errorf("unsupported terminal_policy: %s", msg.TerminalPolicy)
+	}
+}
+
+func (r *Router) deliverInput(sessionID string, msg Message, leaseID string) error {
+	text := TerminalText(msg)
+	if len(text) >= r.opts.LargePasteThreshold {
+		_, err := r.d.Paste(sessionID, intents.TerminalPaste{
+			Text:        text,
+			SubmitAfter: true,
+			Bracketed:   "auto",
+			LeaseID:     leaseID,
+		})
+		return err
+	}
+	_, err := r.d.Submit(sessionID, intents.TerminalSubmit{
+		Text:      text,
+		SubmitKey: msg.SubmitKey,
+		LeaseID:   leaseID,
+	})
+	return err
+}
+
+// NewMessageReceipt builds the structured reply context for msg. msg.ID must
+// be populated before calling this helper.
+func NewMessageReceipt(msg Message) MessageReceipt {
+	return MessageReceipt{
+		MessageID:        msg.ID,
+		RoomID:           msg.RoomID,
+		Source:           msg.Source,
+		CorrelationID:    msg.CorrelationID,
+		ReplyToMessageID: msg.ReplyToMessageID,
+		ReplyPrefix:      fmt.Sprintf("@room:%s ", msg.RoomID),
+	}
+}
+
+// TerminalText returns the exact text injected into PTY-backed members.
+// Visible receipts are default-on so prompt-only agents know which room and
+// message they are replying to without a native side channel.
+func TerminalText(msg Message) string {
+	if msg.ReceiptVisibility == ReceiptHidden {
+		return msg.Text
+	}
+	receipt := NewMessageReceipt(msg)
+	encoded, err := marshalTerminalReceipt(terminalReceipt(receipt))
+	if err != nil {
+		// Receipt fields are strings, so this should be unreachable. Preserve
+		// delivery if receipt rendering ever fails.
+		return msg.Text
+	}
+	return strings.Join([]string{
+		"[ATCP receipt] " + encoded,
+		"[ATCP reply] print reply_prefix_hint with <AT> replaced by the at-sign character, then append your message.",
+		"",
+		msg.Text,
+	}, "\n")
+}
+
+func terminalReceipt(receipt MessageReceipt) terminalMessageReceipt {
+	return terminalMessageReceipt{
+		MessageID:        receipt.MessageID,
+		RoomID:           receipt.RoomID,
+		Source:           receipt.Source,
+		CorrelationID:    receipt.CorrelationID,
+		ReplyToMessageID: receipt.ReplyToMessageID,
+		ReplyPrefixHint:  strings.ReplaceAll(receipt.ReplyPrefix, "@", "<AT>"),
+	}
+}
+
+func marshalTerminalReceipt(receipt terminalMessageReceipt) (string, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(receipt); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(buf.String()), nil
 }

@@ -151,6 +151,91 @@ func TestSession_WriteForwardsToPTY(t *testing.T) {
 	}
 }
 
+func TestSession_OutputRateTracksRecentBytesAndDecays(t *testing.T) {
+	s, err := New(Spec{Cmd: []string{"sleep", "30"}}, OutputLogOptions{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	base := time.Date(2026, 4, 20, 10, 0, 0, 0, time.UTC)
+
+	for i := 0; i < 10; i++ {
+		s.recordOutputAt(100, base.Add(time.Duration(i)*100*time.Millisecond))
+	}
+
+	stats := s.outputStatsAt(base.Add(900 * time.Millisecond))
+	if stats.BytesTotal != 1000 {
+		t.Fatalf("BytesTotal = %d, want 1000", stats.BytesTotal)
+	}
+	if stats.RateBPS != 1000 {
+		t.Fatalf("RateBPS = %.1f, want 1000", stats.RateBPS)
+	}
+	if !stats.LastOutputAt.Equal(base.Add(900 * time.Millisecond)) {
+		t.Fatalf("LastOutputAt = %v, want %v", stats.LastOutputAt, base.Add(900*time.Millisecond))
+	}
+
+	stats = s.outputStatsAt(base.Add(1500 * time.Millisecond))
+	if stats.RateBPS != 500 {
+		t.Fatalf("RateBPS after partial decay = %.1f, want 500", stats.RateBPS)
+	}
+
+	stats = s.outputStatsAt(base.Add(3 * time.Second))
+	if stats.RateBPS != 0 {
+		t.Fatalf("RateBPS after quiet period = %.1f, want 0", stats.RateBPS)
+	}
+}
+
+func TestSession_ReadinessRequiresDebouncedIdlePeriod(t *testing.T) {
+	s, err := New(Spec{Cmd: []string{"sleep", "30"}}, OutputLogOptions{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	base := time.Date(2026, 4, 20, 10, 0, 0, 0, time.UTC)
+	s.createdAt = base
+	s.recordOutputAt(100, base)
+
+	if got := s.ReadinessAt(32, 500*time.Millisecond, base.Add(400*time.Millisecond)); got.Idle {
+		t.Fatalf("Idle at 400ms = true, want false (readiness=%+v)", got)
+	}
+	if got := s.ReadinessAt(32, 500*time.Millisecond, base.Add(1100*time.Millisecond)); !got.Idle {
+		t.Fatalf("Idle after decay/debounce = false, want true (readiness=%+v)", got)
+	}
+
+	s.recordOutputAt(1, base.Add(1200*time.Millisecond))
+	if got := s.ReadinessAt(32, 500*time.Millisecond, base.Add(1300*time.Millisecond)); got.Idle {
+		t.Fatalf("Idle shortly after low-volume output = true, want false (readiness=%+v)", got)
+	}
+}
+
+func TestSession_ReadinessForProfileRequiresScreenMatch(t *testing.T) {
+	s, err := New(Spec{
+		Cmd: []string{"sleep", "30"},
+		Readiness: ReadinessProfile{
+			ScreenRegex:  `PROMPT>$`,
+			ThresholdBPS: 32,
+			Debounce:     500 * time.Millisecond,
+		},
+	}, OutputLogOptions{MaxChunks: 32, MaxBytes: 1024})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	base := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
+	s.createdAt = base
+	s.now = func() time.Time { return base.Add(time.Second) }
+	s.recordOutputAt(len("PROMPT>"), base)
+	s.Screen().Feed([]byte("PROMPT>"))
+
+	ready := s.ProfileReadiness()
+	if !ready.Idle || !ready.ScreenMatch || ready.ScreenLine != "PROMPT>" {
+		t.Fatalf("ready = %+v, want idle screen match", ready)
+	}
+
+	s.spec.Readiness.ScreenRegex = `NOPE`
+	ready = s.ProfileReadiness()
+	if ready.Idle || ready.ScreenMatch {
+		t.Fatalf("ready no-match = %+v, want not idle/no screen match", ready)
+	}
+}
+
 func TestSession_SpawnErrorYieldsStatusError(t *testing.T) {
 	s, err := New(Spec{Cmd: []string{"/definitely/not/a/real/binary"}}, OutputLogOptions{})
 	if err != nil {

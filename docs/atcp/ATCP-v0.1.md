@@ -480,9 +480,11 @@ Structured message delivery should be the preferred path for agent-aware partici
 {
   "kind": "message.send",
   "source": "agent:planner",
-  "target": "room:dev",
+  "target": "room:01HX0000000000000000000000",
   "body": {
     "message_id": "msg_01HX...",
+    "correlation_id": "corr_01HX...",
+    "reply_to_message_id": "msg_01HW...",
     "topic": "review",
     "priority": "normal",
     "content": [
@@ -495,6 +497,14 @@ Structured message delivery should be the preferred path for agent-aware partici
       "prefer": ["inbox", "native", "terminal"],
       "terminal_policy": "safe-prompt-only",
       "requires_ack": true
+    },
+    "receipt": {
+      "message_id": "msg_01HX...",
+      "room_id": "01HX0000000000000000000000",
+      "source": "agent:planner",
+      "correlation_id": "corr_01HX...",
+      "reply_to_message_id": "msg_01HW...",
+      "reply_prefix": "@room:01HX0000000000000000000000 "
     }
   }
 }
@@ -510,16 +520,33 @@ Delivery modes:
 Terminal fallback should be adapter-templated. Example:
 
 ```text
-<<agentctl:message id=msg_01HX topic=review from=agent:planner>>
+[ATCP receipt] {"message_id":"msg_01HX...","room_id":"01HX0000000000000000000000","source":"agent:planner","correlation_id":"corr_01HX...","reply_to_message_id":"msg_01HW...","reply_prefix_hint":"<AT>room:01HX0000000000000000000000 "}
+[ATCP reply] print reply_prefix_hint with <AT> replaced by the at-sign character, then append your message.
+
 Please review the failing test output.
-<<agentctl:end>>
 ```
+
+Terminal fallback uses `reply_prefix_hint` instead of a literal `@room:...`
+prefix so TUIs with `@` file-mention shortcuts do not open completion popups
+while the preamble is being typed. Structured/native delivery still carries
+the exact `reply_prefix`.
 
 For CLIs that support slash commands, adapter config may compile messages into commands:
 
 ```text
 /message --from planner --topic review Please review the failing test output.
 ```
+
+Room message history is replayable:
+
+```text
+GET /v1/rooms/{id}/messages?limit=100
+```
+
+The response returns chronological audit records with message metadata,
+payload text, aggregate delivery counts, and per-member delivery outcomes.
+The running broker keeps an in-memory audit log; SQLite-backed daemons hydrate
+that log on startup and persist new sends append-only.
 
 ## 13. Reminders
 
@@ -596,21 +623,105 @@ Generic prompt detection is best-effort. ATCP supports multiple readiness strate
 
 A safe terminal delivery policy should wait for a known safe prompt before mutating input.
 
+Current HTTP readiness supports byte-idle checks plus optional rendered-screen
+matching:
+
+```text
+GET /v1/sessions/{id}/readiness?threshold_bps=32&debounce_ms=500&screen_regex=...
+```
+
+When `screen_regex` is present, readiness requires both byte-idle output and a
+rendered screen line matching the regex. The response includes `screen_match`,
+`screen_regex`, and `screen_line` for diagnostics.
+
+When no query regex is supplied, the endpoint evaluates the session's readiness
+profile. Session creation can set a profile directly, and adapter defaults can
+provide one for known CLIs.
+
+Readiness is also observable as an event:
+
+```text
+GET /v1/events?target=session:{id}&ready=true
+```
+
+The stream emits `terminal.ready` on readiness transitions and sends the
+current state when the subscription starts.
+
+Activity is observable separately from readiness. Use it when an operator or
+coordinator wants to know whether a PTY-backed agent is still doing work
+between heartbeats:
+
+```text
+GET /v1/sessions/{id}/activity?since_seq=123&since_output_bytes_total=4567
+GET /v1/events?target=session:{id}&activity=true&activity_interval_ms=1000
+GET /v1/events?target=room:{id}
+```
+
+The activity response and `terminal.activity` event report the current output
+cursor, output-byte delta, sequence delta, rolling output rate, and
+`output_changed:true` / `working:true` when the session produced output since
+the supplied cursor or previous heartbeat.
+
+Room event streams fan in `terminal.output` from the active members present
+when the stream opens. Each room-level `terminal.output` body carries
+`room_id`, `agent_id`, and `session_id`.
+
+Message sends can optionally wait for this activity signal:
+
+```json
+{
+  "room_id": "01HX...",
+  "text": "please respond with pong",
+  "await_activity_ms": 10000,
+  "await_ready_ms": 30000
+}
+```
+
+When requested, each delivered member in the `POST /v1/messages` response
+includes `activity.first_output_ms` once output changes after delivery and
+`activity.completed_ms` when that recipient returns to its configured
+readiness state. `completed` is a PTY-level approximation: "the agent produced
+output and the terminal became ready again", not a semantic guarantee that the
+LLM answered correctly.
+
 ## 16. Preemption policies
 
 When a reminder or message arrives while a CLI is busy, ATCP must not blindly type over work in progress.
 
 Policies:
 
+- `immediate`: write now; this is the default for backwards compatibility.
 - `queue`: wait until safe prompt.
 - `overlay`: show out-of-band only.
 - `clear-line`: send `CtrlU` before injecting; risky, opt-in only.
-- `interrupt`: send `CtrlC` before injecting; highly disruptive, privileged only.
-- `reject`: fail immediately if not safe.
+- `interrupt`: send a configured interrupt key before injecting. Current
+  terminal message delivery defaults this to `Escape`; callers can set another
+  key such as `CtrlC` explicitly when they want a more disruptive interrupt.
+- `safe-prompt-only` / `reject`: fail immediately if not safe.
 
 Default for reminders: `queue` or `overlay`, not `interrupt`.
 
+HTTP message delivery exposes the terminal subset directly:
+
+```json
+{
+  "room_id": "01HX...",
+  "text": "please respond with pong",
+  "terminal_policy": "queue",
+  "policy_timeout_ms": 30000,
+  "interrupt_key": "Escape"
+}
+```
+
+The policy result is reported per member. A policy failure is a delivery
+failure for that recipient; other recipients are still attempted.
+
 ## 17. Adapter profiles
+
+Built-in PTY adapter profile defaults are data, not broker policy. The current
+registry is embedded from `internal/atcp/adapter/profiles/profiles.json`; the
+broker looks up a profile by `session.adapter`, then merges any explicit
+session-level readiness override.
 
 ### generic-tty
 
@@ -636,6 +747,13 @@ Default for reminders: `queue` or `overlay`, not `interrupt`.
 - terminal injection avoided
 - messages delivered to side-channel inbox
 - terminal only used for human display or fallback
+
+### current built-ins
+
+- `codex`
+- `droid`
+- `gemini`
+- `claude` / `claude-code`
 
 ## 18. Capability negotiation
 

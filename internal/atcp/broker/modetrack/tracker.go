@@ -8,6 +8,8 @@
 //     TUI) — in which case free-form text injection is likely unsafe?
 //  3. What is the child's application/cursor-keys mode — used to format
 //     arrow-key sequences correctly.
+//  4. Has the child pushed kitty keyboard mode — used to format logical
+//     Enter for modern raw-mode TUIs.
 //
 // The parser is a deliberately small, allocation-free CSI recogniser. It
 // ignores everything it doesn't understand; unrecognised bytes pass through
@@ -33,6 +35,8 @@ type Mode struct {
 	// ApplicationCursorKeys is DEC private mode 1 — when true, arrow keys emit
 	// ESC O A/B/C/D rather than ESC [ A/B/C/D.
 	ApplicationCursorKeys bool
+	// KittyKeyboard is true after CSI > n u and false after CSI < u.
+	KittyKeyboard bool
 }
 
 // Change describes a single mode transition. Consumers subscribe via the
@@ -219,16 +223,25 @@ func (t *Tracker) bufferCSI(c byte) {
 	t.bufLen++
 }
 
-// finishCSI interprets a completed CSI sequence. We only honour DEC private
-// SET (`h`) and RESET (`l`) with the `?` prefix, because every mode we track
-// is a DEC private mode.
+// finishCSI interprets a completed CSI sequence. DEC private SET/RESET (`h` /
+// `l`) update xterm modes, and kitty keyboard push/pop (`CSI > n u` /
+// `CSI < u`) update KittyKeyboard.
 func (t *Tracker) finishCSI(final byte) {
 	defer func() { t.bufLen = 0 }()
+	params := string(t.buf[:t.bufLen])
+	if final == 'u' {
+		switch {
+		case strings.HasPrefix(params, ">"):
+			t.mode.KittyKeyboard = true
+		case params == "<":
+			t.mode.KittyKeyboard = false
+		}
+		return
+	}
 	if !t.private || (final != 'h' && final != 'l') {
 		return
 	}
 	enable := final == 'h'
-	params := string(t.buf[:t.bufLen])
 	for _, p := range strings.Split(params, ";") {
 		switch p {
 		case "1":

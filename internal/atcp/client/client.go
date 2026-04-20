@@ -21,8 +21,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/atcp/broker/vtscreen"
 	"github.com/joshka0/foxctl/internal/atcp/transport/httpjson"
 )
 
@@ -56,14 +58,14 @@ func ForSocket(path string) *Client {
 	}
 	return &Client{
 		base: "http://atcp",
-		http: &http.Client{Transport: tr, Timeout: 30 * time.Second},
+		http: &http.Client{Transport: tr, Timeout: 120 * time.Second},
 	}
 }
 
 // ForURL builds a Client that talks plain HTTP to base. Intended for tests
 // that drive an httptest.Server.
 func ForURL(base string) *Client {
-	return &Client{base: base, http: &http.Client{Timeout: 30 * time.Second}}
+	return &Client{base: base, http: &http.Client{Timeout: 120 * time.Second}}
 }
 
 // Health checks liveness. Useful for CLI "wait for daemon".
@@ -92,6 +94,67 @@ func (c *Client) ListSessions(ctx context.Context) ([]httpjson.SessionResponse, 
 	}
 	err := c.do(ctx, http.MethodGet, "/v1/sessions", nil, &env)
 	return env.Sessions, err
+}
+
+// SessionReadinessOptions controls the cheap output-idle readiness heuristic.
+// Zero values use the daemon defaults.
+type SessionReadinessOptions struct {
+	ThresholdBPS float64
+	DebounceMS   int
+	ScreenRegex  string
+}
+
+// SessionReadiness mirrors GET /v1/sessions/{id}/readiness.
+func (c *Client) SessionReadiness(ctx context.Context, id string, opts SessionReadinessOptions) (httpjson.ReadinessResponse, error) {
+	q := url.Values{}
+	if opts.ThresholdBPS > 0 {
+		q.Set("threshold_bps", strconv.FormatFloat(opts.ThresholdBPS, 'f', -1, 64))
+	}
+	if opts.DebounceMS > 0 {
+		q.Set("debounce_ms", strconv.Itoa(opts.DebounceMS))
+	}
+	if opts.ScreenRegex != "" {
+		q.Set("screen_regex", opts.ScreenRegex)
+	}
+	path := "/v1/sessions/" + url.PathEscape(id) + "/readiness"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var out httpjson.ReadinessResponse
+	err := c.do(ctx, http.MethodGet, path, nil, &out)
+	return out, err
+}
+
+// SessionActivityOptions controls GET /v1/sessions/{id}/activity cursors.
+// Zero values compare against the start of the session.
+type SessionActivityOptions struct {
+	SinceSeq              uint64
+	SinceOutputBytesTotal int64
+}
+
+// SessionActivity mirrors GET /v1/sessions/{id}/activity.
+func (c *Client) SessionActivity(ctx context.Context, id string, opts SessionActivityOptions) (httpjson.ActivityResponse, error) {
+	q := url.Values{}
+	if opts.SinceSeq > 0 {
+		q.Set("since_seq", strconv.FormatUint(opts.SinceSeq, 10))
+	}
+	if opts.SinceOutputBytesTotal > 0 {
+		q.Set("since_output_bytes_total", strconv.FormatInt(opts.SinceOutputBytesTotal, 10))
+	}
+	path := "/v1/sessions/" + url.PathEscape(id) + "/activity"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var out httpjson.ActivityResponse
+	err := c.do(ctx, http.MethodGet, path, nil, &out)
+	return out, err
+}
+
+// SessionScreen mirrors GET /v1/sessions/{id}/screen.
+func (c *Client) SessionScreen(ctx context.Context, id string) (vtscreen.Snapshot, error) {
+	var out vtscreen.Snapshot
+	err := c.do(ctx, http.MethodGet, "/v1/sessions/"+url.PathEscape(id)+"/screen", nil, &out)
+	return out, err
 }
 
 // --- rooms ---
@@ -133,6 +196,21 @@ func (c *Client) RoomMembers(ctx context.Context, roomID string) ([]httpjson.Mem
 	}
 	err := c.do(ctx, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID)+"/members", nil, &env)
 	return env.Members, err
+}
+
+// RoomMessages mirrors GET /v1/rooms/{id}/messages.
+func (c *Client) RoomMessages(ctx context.Context, roomID string, limit int) ([]httpjson.MessageRecordResponse, error) {
+	path := "/v1/rooms/" + url.PathEscape(roomID) + "/messages"
+	if limit > 0 {
+		q := url.Values{}
+		q.Set("limit", strconv.Itoa(limit))
+		path += "?" + q.Encode()
+	}
+	var env struct {
+		Messages []httpjson.MessageRecordResponse `json:"messages"`
+	}
+	err := c.do(ctx, http.MethodGet, path, nil, &env)
+	return env.Messages, err
 }
 
 // --- messages ---

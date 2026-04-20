@@ -47,6 +47,29 @@ func TestTracker_ApplicationCursorKeys(t *testing.T) {
 	}
 }
 
+func TestTracker_KittyKeyboardPushAndPop(t *testing.T) {
+	tr := New()
+	if tr.Snapshot().KittyKeyboard {
+		t.Fatal("default KittyKeyboard should be false")
+	}
+	tr.Feed([]byte("\x1b[>9u"))
+	if !tr.Snapshot().KittyKeyboard {
+		t.Error("KittyKeyboard did not enable on CSI > 9 u")
+	}
+	tr.Feed([]byte("\x1b[<u"))
+	if tr.Snapshot().KittyKeyboard {
+		t.Error("KittyKeyboard did not disable on CSI < u")
+	}
+}
+
+func TestTracker_KittyKeyboardQueryDoesNotEnable(t *testing.T) {
+	tr := New()
+	tr.Feed([]byte("\x1b[?u"))
+	if tr.Snapshot().KittyKeyboard {
+		t.Error("kitty keyboard query must not enable mode")
+	}
+}
+
 func TestTracker_CombinedSetCSI(t *testing.T) {
 	// xterm commonly writes CSI ? 1049 ; 2004 h to enter an alt-screen TUI.
 	tr := New()

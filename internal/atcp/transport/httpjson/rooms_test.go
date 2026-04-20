@@ -62,15 +62,41 @@ func TestRooms_HappyPath(t *testing.T) {
 	// Fan out.
 	var sent SendMessageResponse
 	postAndDecode(t, ts, "/v1/messages", SendMessageRequest{
-		RoomID: room.ID, Source: "wire-test", Text: "WIRE_HELLO",
+		RoomID: room.ID, Source: "wire-test", CorrelationID: "corr-wire", Text: "WIRE_HELLO",
 	}, http.StatusOK, &sent)
 	if sent.Delivered != 2 || sent.Failed != 0 {
 		t.Fatalf("delivered=%d failed=%d want 2/0", sent.Delivered, sent.Failed)
+	}
+	if sent.Receipt.RoomID != room.ID || sent.Receipt.MessageID != sent.MessageID ||
+		sent.Receipt.Source != "wire-test" || sent.Receipt.CorrelationID != "corr-wire" ||
+		sent.Receipt.ReplyPrefix != "@room:"+room.ID+" " {
+		t.Fatalf("receipt = %+v, message_id=%s", sent.Receipt, sent.MessageID)
+	}
+	resp, err = http.Get(ts.URL + "/v1/rooms/" + room.ID + "/messages")
+	if err != nil {
+		t.Fatalf("GET messages: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("messages status = %d body = %s", resp.StatusCode, raw)
+	}
+	var history struct {
+		Messages []MessageRecordResponse `json:"messages"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&history); err != nil {
+		t.Fatalf("decode messages: %v", err)
+	}
+	if len(history.Messages) != 1 || history.Messages[0].ID != sent.MessageID ||
+		history.Messages[0].Text != "WIRE_HELLO" || len(history.Messages[0].Members) != 2 {
+		t.Fatalf("messages = %+v, want sent message", history.Messages)
 	}
 
 	// Assert both cat sessions echoed the text.
 	sess1, _ := b.Sessions().Get(s1)
 	sess2, _ := b.Sessions().Get(s2)
+	assertSessionSeesText(t, sess1, "[ATCP receipt]", 2*time.Second)
+	assertSessionSeesText(t, sess1, "<AT>room:"+room.ID+" ", 2*time.Second)
 	assertSessionSeesText(t, sess1, "WIRE_HELLO", 2*time.Second)
 	assertSessionSeesText(t, sess2, "WIRE_HELLO", 2*time.Second)
 
@@ -132,6 +158,45 @@ func TestMessages_EmptyRoomReturns409(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	}
+}
+
+func TestMessages_AwaitsPerMemberActivityAndReady(t *testing.T) {
+	ts, _ := newTestServer(t)
+	create := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{
+		Cmd:       []string{"cat"},
+		Readiness: &ReadinessProfileDTO{ThresholdBPS: 1_000_000, DebounceMS: 1},
+	})
+	sess := decodeResponse[SessionResponse](t, create)
+
+	var room RoomResponse
+	postAndDecode(t, ts, "/v1/rooms", CreateRoomRequest{Workspace: "ws"}, http.StatusCreated, &room)
+	postAndDecode(t, ts, "/v1/rooms/"+room.ID+"/join", JoinRoomRequest{
+		AgentID: "worker", SessionID: sess.ID, CanMutate: true,
+	}, http.StatusCreated, nil)
+
+	visible := false
+	var sent SendMessageResponse
+	postAndDecode(t, ts, "/v1/messages", SendMessageRequest{
+		RoomID:          room.ID,
+		Source:          "wire-test",
+		Text:            "AWAIT_ACTIVITY",
+		ReceiptVisible:  &visible,
+		AwaitActivityMS: 1000,
+		AwaitReadyMS:    1000,
+	}, http.StatusOK, &sent)
+	if len(sent.Members) != 1 {
+		t.Fatalf("members = %d, want 1", len(sent.Members))
+	}
+	activity := sent.Members[0].Activity
+	if activity == nil {
+		t.Fatal("activity missing")
+	}
+	if !activity.OutputChanged || activity.OutputBytesDelta <= 0 || activity.SeqDelta == 0 {
+		t.Fatalf("activity = %+v, want output change", activity)
+	}
+	if !activity.Completed || !activity.Ready || activity.AwaitReadyTimedOut {
+		t.Fatalf("activity = %+v, want completed ready", activity)
 	}
 }
 

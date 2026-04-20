@@ -77,6 +77,8 @@ const (
 	TerminalOutput         Kind = "terminal.output"
 	TerminalModeChanged    Kind = "terminal.mode.changed"
 	TerminalScreenSnapshot Kind = "terminal.screen.snapshot"
+	TerminalReady          Kind = "terminal.ready"
+	TerminalActivity       Kind = "terminal.activity"
 
 	// Leases.
 	LeaseAcquire Kind = "lease.acquire"
@@ -95,9 +97,9 @@ const (
 	ReminderFired    Kind = "reminder.fired"
 
 	// Transactions.
-	TransactionRun            Kind = "transaction.run"
-	TransactionStepCompleted  Kind = "transaction.step.completed"
-	TransactionCompleted      Kind = "transaction.completed"
+	TransactionRun           Kind = "transaction.run"
+	TransactionStepCompleted Kind = "transaction.step.completed"
+	TransactionCompleted     Kind = "transaction.completed"
 
 	// Rooms.
 	RoomCreate  Kind = "room.create"
@@ -150,6 +152,8 @@ func init() {
 		{TerminalOutput, CategoryEvent, []addressing.Scheme{addressing.SchemeSession}, "PTY output frame."},
 		{TerminalModeChanged, CategoryEvent, []addressing.Scheme{addressing.SchemeSession}, "Terminal mode toggled (bracketed paste, alt screen, ...)."},
 		{TerminalScreenSnapshot, CategoryEvent, []addressing.Scheme{addressing.SchemeSession}, "Snapshot of the current screen model."},
+		{TerminalReady, CategoryEvent, []addressing.Scheme{addressing.SchemeSession}, "Terminal readiness state changed."},
+		{TerminalActivity, CategoryEvent, []addressing.Scheme{addressing.SchemeSession}, "Terminal output heartbeat and delta."},
 
 		// Leases (target = session).
 		{LeaseAcquire, CategoryIntent, []addressing.Scheme{addressing.SchemeSession}, "Acquire an input lease for a session scope."},

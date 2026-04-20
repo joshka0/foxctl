@@ -57,6 +57,11 @@ type Store interface {
 	// LoadMembers returns every member row for a room, active + past.
 	LoadMembers(ctx context.Context, roomID string) ([]room.Member, error)
 
+	// LoadMessages returns persisted message audit records for a room in
+	// chronological order. limit <= 0 means no limit; positive limits return
+	// the newest N records, still ordered oldest-to-newest within that window.
+	LoadMessages(ctx context.Context, roomID string, limit int) ([]MessageRecord, error)
+
 	// Close releases any underlying resources. Idempotent.
 	Close() error
 }
@@ -65,15 +70,18 @@ type Store interface {
 // of router.Result so the wire package and the storage package are not
 // cross-coupled.
 type MessageRecord struct {
-	ID        string
-	RoomID    string
-	Source    string
-	Text      string
-	Delivery  string
-	SentAt    time.Time
-	Delivered int
-	Failed    int
-	Members   []MessageDeliveryRecord
+	ID               string
+	RoomID           string
+	Source           string
+	CorrelationID    string
+	ReplyToMessageID string
+	Text             string
+	Delivery         string
+	ReceiptVisible   bool
+	SentAt           time.Time
+	Delivered        int
+	Failed           int
+	Members          []MessageDeliveryRecord
 }
 
 // MessageDeliveryRecord captures one member's outcome for a message.
@@ -89,14 +97,17 @@ type MessageDeliveryRecord struct {
 // every writer shapes the same record.
 func NewMessageRecordFromResult(msg router.Message, res router.Result, sentAt time.Time) MessageRecord {
 	rec := MessageRecord{
-		ID:        res.MessageID,
-		RoomID:    msg.RoomID,
-		Source:    msg.Source,
-		Text:      msg.Text,
-		Delivery:  string(msg.Delivery),
-		SentAt:    sentAt.UTC(),
-		Delivered: res.Delivered,
-		Failed:    res.Failed,
+		ID:               res.MessageID,
+		RoomID:           msg.RoomID,
+		Source:           msg.Source,
+		CorrelationID:    msg.CorrelationID,
+		ReplyToMessageID: msg.ReplyToMessageID,
+		Text:             msg.Text,
+		Delivery:         string(msg.Delivery),
+		ReceiptVisible:   msg.ReceiptVisibility != router.ReceiptHidden,
+		SentAt:           sentAt.UTC(),
+		Delivered:        res.Delivered,
+		Failed:           res.Failed,
 	}
 	rec.Members = make([]MessageDeliveryRecord, 0, len(res.Members))
 	for _, mr := range res.Members {
@@ -136,6 +147,9 @@ func (Noop) LoadRooms(context.Context) ([]room.Room, error) { return nil, nil }
 
 // LoadMembers implements Store.
 func (Noop) LoadMembers(context.Context, string) ([]room.Member, error) { return nil, nil }
+
+// LoadMessages implements Store.
+func (Noop) LoadMessages(context.Context, string, int) ([]MessageRecord, error) { return nil, nil }
 
 // Close implements Store.
 func (Noop) Close() error { return nil }

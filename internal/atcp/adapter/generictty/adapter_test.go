@@ -208,13 +208,13 @@ func TestCompileKey_PrintableFallback(t *testing.T) {
 	}
 }
 
-func TestCompileSubmit_DefaultEnter(t *testing.T) {
+func TestCompileSubmit_DefaultEnterLineFeed(t *testing.T) {
 	a := New()
 	got, err := a.CompileSubmit(intents.TerminalSubmit{Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, []byte{'h', 'e', 'l', 'l', 'o', 0x0D}) {
+	if !bytes.Equal(got, []byte{'h', 'e', 'l', 'l', 'o', 0x0D, 0x0A}) {
 		t.Errorf("submit = %v", got)
 	}
 }
@@ -230,14 +230,50 @@ func TestCompileSubmit_CustomSubmitKey(t *testing.T) {
 	}
 }
 
+func TestCompileSubmit_DefaultSubmitKeyOverride(t *testing.T) {
+	a := New()
+	a.SetDefaultSubmitKey("LineFeed")
+	got, err := a.CompileSubmit(intents.TerminalSubmit{Text: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, []byte{'x', 0x0A}) {
+		t.Errorf("submit with default LineFeed = %v", got)
+	}
+}
+
+func TestCompileSubmit_KittyKeyboardUsesKittyEnter(t *testing.T) {
+	a := New()
+	a.SetKittyKeyboardActive(true)
+	got, err := a.CompileSubmit(intents.TerminalSubmit{Text: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, []byte{'x', 0x1B, '[', '1', '3', 'u'}) {
+		t.Errorf("kitty submit = %v", got)
+	}
+}
+
+func TestCompileSubmit_ExplicitKeyOverridesKittyKeyboard(t *testing.T) {
+	a := New()
+	a.SetKittyKeyboardActive(true)
+	got, err := a.CompileSubmit(intents.TerminalSubmit{Text: "x", SubmitKey: "LineFeed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, []byte{'x', 0x0A}) {
+		t.Errorf("explicit submit key = %v", got)
+	}
+}
+
 func TestCompileSubmit_EmptyTextOK(t *testing.T) {
 	a := New()
 	got, err := a.CompileSubmit(intents.TerminalSubmit{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, []byte{0x0D}) {
-		t.Errorf("empty submit = %v, want CR only", got)
+	if !bytes.Equal(got, []byte{0x0D, 0x0A}) {
+		t.Errorf("empty submit = %v, want CRLF only", got)
 	}
 }
 
@@ -298,8 +334,8 @@ func TestCompilePaste_SubmitAfterAppendsEnter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got[len(got)-1] != 0x0D {
-		t.Errorf("submit_after should end with CR, got final byte 0x%02x", got[len(got)-1])
+	if !bytes.HasSuffix(got, []byte{0x0D, 0x0A}) {
+		t.Errorf("submit_after should end with CRLF, got %v", got)
 	}
 }
 
@@ -320,7 +356,7 @@ func TestCompileWriteBytes_DisabledByDefault(t *testing.T) {
 
 func TestCompileWriteBytes_EnabledPassesThrough(t *testing.T) {
 	a := New()
-	a.AllowWriteBytes = true
+	a.SetAllowWriteBytes(true)
 	got, err := a.CompileWriteBytes(intents.TerminalWriteBytes{Bytes: []byte{0x01, 0x02, 0x03}})
 	if err != nil {
 		t.Fatal(err)
@@ -332,7 +368,7 @@ func TestCompileWriteBytes_EnabledPassesThrough(t *testing.T) {
 
 func TestCompileWriteBytes_DoesNotRetainInput(t *testing.T) {
 	a := New()
-	a.AllowWriteBytes = true
+	a.SetAllowWriteBytes(true)
 	src := []byte{0x01, 0x02}
 	got, _ := a.CompileWriteBytes(intents.TerminalWriteBytes{Bytes: src})
 	src[0] = 0xFF
@@ -355,11 +391,11 @@ func TestParseModifiers_Synonyms(t *testing.T) {
 
 func TestParseBracketed(t *testing.T) {
 	cases := map[string]intents.BracketedPolicy{
-		"":       intents.BracketedAuto,
-		"auto":   intents.BracketedAuto,
-		"force":  intents.BracketedForce,
-		"off":    intents.BracketedOff,
-		"weird":  intents.BracketedAuto,
+		"":      intents.BracketedAuto,
+		"auto":  intents.BracketedAuto,
+		"force": intents.BracketedForce,
+		"off":   intents.BracketedOff,
+		"weird": intents.BracketedAuto,
 	}
 	for in, want := range cases {
 		if got := intents.ParseBracketed(in); got != want {

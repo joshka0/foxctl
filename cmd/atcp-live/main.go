@@ -49,11 +49,13 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/joshka0/foxctl/internal/atcp/client"
 	"github.com/joshka0/foxctl/internal/atcp/envelope"
 	"github.com/joshka0/foxctl/internal/atcp/transport/httpjson"
 	"github.com/joshka0/foxctl/internal/atcp/transport/unixsocket"
+	"github.com/oklog/ulid/v2"
 )
 
 // agentSpec captures a --agent NAME=CMD flag. Multiple are allowed; Go's
@@ -66,6 +68,21 @@ type agentSpec struct {
 
 type agentFlags struct {
 	specs *[]agentSpec
+}
+
+type talkbackRule struct {
+	Name   string
+	Prefix string
+}
+
+type talkbackFlags struct {
+	rules *[]talkbackRule
+}
+
+type liveAgent struct {
+	Name      string
+	SessionID string
+	Adapter   string
 }
 
 func (a agentFlags) String() string {
@@ -99,20 +116,60 @@ func (a agentFlags) Set(v string) error {
 	return nil
 }
 
+func (t talkbackFlags) String() string {
+	if t.rules == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(*t.rules))
+	for _, r := range *t.rules {
+		parts = append(parts, r.Name+"="+r.Prefix)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (t talkbackFlags) Set(v string) error {
+	eq := strings.IndexByte(v, '=')
+	if eq <= 0 {
+		return fmt.Errorf("want NAME=PREFIX, got %q", v)
+	}
+	name := strings.TrimSpace(v[:eq])
+	prefix := v[eq+1:]
+	if name == "" || prefix == "" {
+		return fmt.Errorf("both NAME and PREFIX must be non-empty in %q", v)
+	}
+	*t.rules = append(*t.rules, talkbackRule{Name: name, Prefix: prefix})
+	return nil
+}
+
+func talkbackMap(rules []talkbackRule) map[string]string {
+	out := make(map[string]string, len(rules))
+	for _, r := range rules {
+		out[r.Name] = r.Prefix
+	}
+	return out
+}
+
 func main() {
 	var (
-		socket     = flag.String("socket", "", "atcpd unix socket path (default: $FOXCTL_ATCP_SOCK or platform default)")
-		workspace  = flag.String("workspace", "live", "room workspace label")
-		roomTitle  = flag.String("room-title", "atcp-live", "room title")
-		roomID     = flag.String("room-id", "", "join this existing room instead of creating one")
-		source     = flag.String("source", "human", "source id used when forwarding stdin lines as messages")
-		noInput    = flag.Bool("no-input", false, "do not forward stdin lines; behave as an observer")
-		sinceSeq   = flag.Uint64("since-seq", 0, "replay each agent's output log from this seq (0 = from the beginning)")
-		joinOnly   = flag.Bool("join-only", false, "join an existing room (requires --session per agent instead of --cmd); skips session create")
-		agents     []agentSpec
-		existingID = flag.String("session", "", "(repeatable when used with --join-only) existing session id to tail")
+		socket        = flag.String("socket", "", "atcpd unix socket path (default: $FOXCTL_ATCP_SOCK or platform default)")
+		workspace     = flag.String("workspace", "live", "room workspace label")
+		roomTitle     = flag.String("room-title", "atcp-live", "room title")
+		roomID        = flag.String("room-id", "", "join this existing room instead of creating one")
+		source        = flag.String("source", "human", "source id used when forwarding stdin lines as messages")
+		noInput       = flag.Bool("no-input", false, "do not forward stdin lines; behave as an observer")
+		render        = flag.Bool("render", false, "render virtual screen snapshots instead of raw PTY byte lines")
+		sinceSeq      = flag.Uint64("since-seq", 0, "replay each agent's output log from this seq (0 = from the beginning)")
+		readyWait     = flag.Duration("readiness-timeout", 30*time.Second, "how long to wait for each session to go output-idle after startup (0 disables)")
+		readyRate     = flag.Float64("idle-threshold-bps", 32, "readiness output-rate threshold in bytes/sec")
+		readyDebounce = flag.Duration("idle-debounce", 500*time.Millisecond, "readiness debounce window")
+		warmupTimeout = flag.Duration("warmup-timeout", 0, "warn if a session is output-idle for this long during warmup (0 disables)")
+		joinOnly      = flag.Bool("join-only", false, "join an existing room (requires --session per agent instead of --cmd); skips session create")
+		agents        []agentSpec
+		talkbacks     []talkbackRule
+		existingID    = flag.String("session", "", "(repeatable when used with --join-only) existing session id to tail")
 	)
 	flag.Var(agentFlags{specs: &agents}, "agent", "agent definition NAME=CMD; repeatable")
+	flag.Var(talkbackFlags{rules: &talkbacks}, "talkback", "agent output bridge NAME=PREFIX; repeatable")
 	flag.Parse()
 	_ = existingID // reserved for a future --session flag iteration; see joinOnly note below.
 
@@ -165,16 +222,20 @@ func main() {
 	// reverse registration order (LIFO) — that minimises the window where
 	// a session's PTY exits but its room member hasn't yet been marked
 	// LeftAt on the wire.
-	type liveAgent struct {
-		Name      string
-		SessionID string
-	}
 	var (
 		live []liveAgent
 		mu   sync.Mutex
 		wg   sync.WaitGroup
 	)
+	liveSnapshot := func() []liveAgent {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]liveAgent, len(live))
+		copy(out, live)
+		return out
+	}
 	sseClient := sseHTTPClient(*socket)
+	talkbackPrefixes := talkbackMap(talkbacks)
 
 	defer func() {
 		// Teardown runs unconditionally so partial setups don't leak
@@ -197,7 +258,7 @@ func main() {
 	}()
 
 	for _, spec := range agents {
-		snap, err := c.CreateSession(ctx, httpjson.CreateSessionRequest{Cmd: spec.Cmd})
+		snap, err := c.CreateSession(ctx, httpjson.CreateSessionRequest{Cmd: spec.Cmd, Adapter: spec.Name})
 		if err != nil {
 			fatalf("CreateSession %s: %v", spec.Name, err)
 		}
@@ -209,7 +270,7 @@ func main() {
 			fatalf("JoinRoom %s: %v", spec.Name, err)
 		}
 		mu.Lock()
-		live = append(live, liveAgent{Name: spec.Name, SessionID: snap.ID})
+		live = append(live, liveAgent{Name: spec.Name, SessionID: snap.ID, Adapter: snap.Adapter})
 		mu.Unlock()
 		fmt.Fprintf(os.Stderr, "atcp-live: spawned %s session=%s pid=%d cmd=%q\n",
 			spec.Name, snap.ID, snap.PID, strings.Join(spec.Cmd, " "))
@@ -217,7 +278,13 @@ func main() {
 		wg.Add(1)
 		go func(name, sessionID string) {
 			defer wg.Done()
-			if err := tailSession(ctx, sseClient, *socket, sessionID, name, *sinceSeq); err != nil {
+			var err error
+			if *render {
+				err = renderSession(ctx, c, room.ID, sessionID, name, talkbackPrefixes[name], 200*time.Millisecond)
+			} else {
+				err = tailSession(ctx, sseClient, c, *socket, room.ID, sessionID, name, talkbackPrefixes[name], *sinceSeq)
+			}
+			if err != nil {
 				// Context cancellation on shutdown is expected; only
 				// surface genuine errors so SIGINT doesn't spam.
 				if !errors.Is(err, context.Canceled) {
@@ -225,7 +292,18 @@ func main() {
 				}
 			}
 		}(spec.Name, snap.ID)
+		if *warmupTimeout > 0 {
+			go warnIfWarmupIdle(ctx, c, liveAgent{Name: spec.Name, SessionID: snap.ID, Adapter: snap.Adapter}, *warmupTimeout)
+		}
 	}
+
+	readiness := readinessConfig{
+		Timeout:      *readyWait,
+		ThresholdBPS: *readyRate,
+		Debounce:     *readyDebounce,
+		ScreenRegex:  *render,
+	}
+	waitForAgentsReady(ctx, c, liveSnapshot(), readiness)
 
 	if *noInput {
 		fmt.Fprintln(os.Stderr, "atcp-live: observer mode (--no-input); waiting for SIGINT")
@@ -234,20 +312,126 @@ func main() {
 	}
 
 	fmt.Fprintln(os.Stderr, "atcp-live: type a line and press Enter to broadcast to the room (Ctrl+D or Ctrl+C to exit)")
-	if err := forwardStdin(ctx, c, room.ID, *source); err != nil && !errors.Is(err, context.Canceled) {
+	if err := forwardStdin(ctx, c, room.ID, *source, liveSnapshot, readiness); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(os.Stderr, "atcp-live: stdin loop: %v\n", err)
 	}
+}
+
+type readinessConfig struct {
+	Timeout      time.Duration
+	ThresholdBPS float64
+	Debounce     time.Duration
+	ScreenRegex  bool
+}
+
+func renderSession(ctx context.Context, c *client.Client, roomID, sessionID, name, talkbackPrefix string, interval time.Duration) error {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	var last []string
+	for {
+		snap, err := c.SessionScreen(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		prefix := "[" + name + "] "
+		rows := snap.DirtyRows
+		if len(rows) == 0 && last == nil {
+			rows = make([]int, len(snap.Lines))
+			for i := range rows {
+				rows[i] = i
+			}
+		}
+		for _, row := range rows {
+			if row < 0 || row >= len(snap.Lines) {
+				continue
+			}
+			line := snap.Lines[row]
+			if line == "" {
+				continue
+			}
+			if row < len(last) && last[row] == line {
+				continue
+			}
+			maybeTalkback(ctx, c, roomID, name, talkbackPrefix, line)
+			writeLine(prefix, []byte(line))
+		}
+		last = append(last[:0], snap.Lines...)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func maybeTalkback(ctx context.Context, c *client.Client, roomID, source, prefix, line string) {
+	targetRoomID, text, ok := talkbackMessage(roomID, prefix, line)
+	if !ok {
+		return
+	}
+	if _, err := c.SendMessage(ctx, httpjson.SendMessageRequest{
+		RoomID:     targetRoomID,
+		Source:     source,
+		Text:       text,
+		SkipAgents: []string{source},
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "atcp-live: talkback %s: %v\n", source, err)
+	}
+}
+
+func talkbackText(prefix, line string) (string, bool) {
+	_, text, ok := talkbackMessage("", prefix, line)
+	return text, ok
+}
+
+func talkbackMessage(defaultRoomID, prefix, line string) (string, string, bool) {
+	if prefix == "" {
+		return "", "", false
+	}
+	idx := strings.Index(line, prefix)
+	if idx < 0 || !talkbackLeaderOnly(line[:idx]) {
+		return "", "", false
+	}
+	payload := strings.TrimSpace(line[idx+len(prefix):])
+	if payload == "" {
+		return "", "", false
+	}
+	targetRoomID := defaultRoomID
+	if candidate, rest, ok := strings.Cut(payload, " "); ok && isRoomID(candidate) {
+		targetRoomID = candidate
+		payload = strings.TrimSpace(rest)
+	}
+	if payload == "" {
+		return "", "", false
+	}
+	return targetRoomID, payload, true
+}
+
+func isRoomID(s string) bool {
+	_, err := ulid.Parse(s)
+	return err == nil
+}
+
+func talkbackLeaderOnly(s string) bool {
+	for _, r := range strings.TrimSpace(s) {
+		if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // forwardStdin reads a line at a time from os.Stdin and relays each one as
 // a room message. EOF on stdin terminates cleanly, letting deferred
 // teardown run.
-func forwardStdin(ctx context.Context, c *client.Client, roomID, source string) error {
+func forwardStdin(ctx context.Context, c *client.Client, roomID, source string, liveSnapshot func() []liveAgent, readiness readinessConfig) error {
 	scanner := bufio.NewScanner(os.Stdin)
 	// Default bufio scanner tops out at 64 KiB per line. Bump it so pasted
 	// blobs (common when a human dumps a traceback into the room) don't
 	// truncate.
-	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -258,6 +442,7 @@ func forwardStdin(ctx context.Context, c *client.Client, roomID, source string) 
 			return ctx.Err()
 		default:
 		}
+		waitForAgentsReady(ctx, c, liveSnapshot(), readiness)
 		res, err := c.SendMessage(ctx, httpjson.SendMessageRequest{
 			RoomID: roomID, Source: source, Text: line,
 		})
@@ -266,8 +451,99 @@ func forwardStdin(ctx context.Context, c *client.Client, roomID, source string) 
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "atcp-live: msg %s delivered=%d failed=%d\n", res.MessageID, res.Delivered, res.Failed)
+		waitForAgentsReady(ctx, c, liveSnapshot(), readiness)
 	}
 	return scanner.Err()
+}
+
+func waitForAgentsReady(ctx context.Context, c *client.Client, agents []liveAgent, cfg readinessConfig) {
+	if cfg.Timeout <= 0 || len(agents) == 0 {
+		return
+	}
+	var (
+		wg      sync.WaitGroup
+		writeMu sync.Mutex
+	)
+	for _, agent := range agents {
+		agent := agent
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ready, err := waitSessionReady(ctx, c, agent, cfg)
+			writeMu.Lock()
+			defer writeMu.Unlock()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "atcp-live: [%s] readiness: %v\n", agent.Name, err)
+				return
+			}
+			fmt.Fprintf(os.Stdout, "[%s] ready (idle_for=%dms rate=%.1fB/s)\n",
+				agent.Name, ready.IdleForMS, ready.OutputRateBPS)
+		}()
+	}
+	wg.Wait()
+}
+
+func waitSessionReady(ctx context.Context, c *client.Client, agent liveAgent, cfg readinessConfig) (httpjson.ReadinessResponse, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+
+	opts := client.SessionReadinessOptions{
+		ThresholdBPS: cfg.ThresholdBPS,
+		DebounceMS:   int(cfg.Debounce / time.Millisecond),
+	}
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	var last httpjson.ReadinessResponse
+	var lastErr error
+	for {
+		ready, err := c.SessionReadiness(waitCtx, agent.SessionID, opts)
+		if err == nil {
+			last = ready
+			if ready.Idle {
+				return ready, nil
+			}
+		} else {
+			lastErr = err
+		}
+
+		select {
+		case <-waitCtx.Done():
+			if lastErr != nil {
+				return last, fmt.Errorf("not ready within %v: %w", cfg.Timeout, lastErr)
+			}
+			return last, fmt.Errorf("not ready within %v (idle_for=%dms rate=%.1fB/s)",
+				cfg.Timeout, last.IdleForMS, last.OutputRateBPS)
+		case <-ticker.C:
+		}
+	}
+}
+
+func warnIfWarmupIdle(ctx context.Context, c *client.Client, agent liveAgent, timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-timer.C:
+	}
+
+	ready, err := c.SessionReadiness(ctx, agent.SessionID, client.SessionReadinessOptions{
+		ThresholdBPS: 1,
+		DebounceMS:   int(timeout / time.Millisecond),
+	})
+	if err != nil || !shouldWarnWarmup(ready, timeout) {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s\n", formatWarmupWarning(agent.Name, timeout))
+}
+
+func shouldWarnWarmup(ready httpjson.ReadinessResponse, timeout time.Duration) bool {
+	return ready.Idle && time.Duration(ready.IdleForMS)*time.Millisecond >= timeout
+}
+
+func formatWarmupWarning(name string, timeout time.Duration) string {
+	return fmt.Sprintf("[%s] no new output for %s - likely stuck in init", name, timeout)
 }
 
 // --- SSE tailing ------------------------------------------------------------
@@ -293,7 +569,7 @@ func sseHTTPClient(socket string) *http.Client {
 // each decoded PTY chunk to stdout with an "[name] " prefix on line
 // boundaries. "Line boundaries" here is best-effort — we buffer partial
 // lines per agent so a lone "[codex] " prefix never lands mid-word.
-func tailSession(ctx context.Context, httpc *http.Client, socket, sessionID, name string, since uint64) error {
+func tailSession(ctx context.Context, httpc *http.Client, c *client.Client, socket, roomID, sessionID, name, talkbackPrefix string, since uint64) error {
 	q := url.Values{}
 	q.Set("target", "session:"+sessionID)
 	if since > 0 {
@@ -360,6 +636,7 @@ func tailSession(ctx context.Context, httpc *http.Client, socket, sessionID, nam
 			}
 			line := partial[:idx]
 			partial = partial[idx+1:]
+			maybeTalkback(ctx, c, roomID, name, talkbackPrefix, string(line))
 			writeLine(prefix, line)
 		}
 	}

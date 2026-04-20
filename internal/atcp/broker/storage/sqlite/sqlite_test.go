@@ -168,6 +168,20 @@ func TestStore_MessageRoundTrip(t *testing.T) {
 	if err := s.AppendMessage(ctx, rec); err != nil {
 		t.Fatalf("AppendMessage: %v", err)
 	}
+	got, err := s.LoadMessages(ctx, "r1", 0)
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("LoadMessages len = %d, want 1", len(got))
+	}
+	if got[0].ID != "m1" || got[0].Source != "tester" || got[0].Text != "hi" ||
+		got[0].Delivered != 2 || got[0].Failed != 1 || len(got[0].Members) != 3 {
+		t.Fatalf("LoadMessages record = %+v", got[0])
+	}
+	if got[0].Members[2].AgentID != "carol" || got[0].Members[2].ErrText == "" {
+		t.Fatalf("LoadMessages deliveries = %+v", got[0].Members)
+	}
 	// Duplicate ID must fail (INSERT, not upsert, for audit immutability).
 	if err := s.AppendMessage(ctx, rec); err == nil {
 		t.Error("expected duplicate message_id to fail")

@@ -3,6 +3,7 @@ package router
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,8 +20,11 @@ type fakeDispatcher struct {
 	acquired   []lease.AcquireRequest
 	released   []string
 	submitted  []submitCall
+	keyed      []keyCall
+	pasted     []pasteCall
 	submitErr  map[string]error // sessionID -> error
 	acquireErr map[string]error // sessionID -> error
+	ready      map[string]bool
 	nextLease  int
 }
 
@@ -29,8 +33,18 @@ type submitCall struct {
 	intent    intents.TerminalSubmit
 }
 
+type pasteCall struct {
+	sessionID string
+	intent    intents.TerminalPaste
+}
+
+type keyCall struct {
+	sessionID string
+	intent    intents.TerminalKey
+}
+
 func newFakeDispatcher() *fakeDispatcher {
-	return &fakeDispatcher{submitErr: map[string]error{}, acquireErr: map[string]error{}}
+	return &fakeDispatcher{submitErr: map[string]error{}, acquireErr: map[string]error{}, ready: map[string]bool{}}
 }
 
 func (f *fakeDispatcher) AcquireLease(req lease.AcquireRequest) (*lease.Lease, error) {
@@ -51,6 +65,26 @@ func (f *fakeDispatcher) ReleaseLease(id string) error {
 	return nil
 }
 
+func (f *fakeDispatcher) SessionReady(sessionID string) (bool, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ready, ok := f.ready[sessionID]
+	if !ok {
+		return true, "ready", nil
+	}
+	if ready {
+		return true, "ready", nil
+	}
+	return false, "output_busy", nil
+}
+
+func (f *fakeDispatcher) SubmitKey(sessionID string, intent intents.TerminalKey) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keyed = append(f.keyed, keyCall{sessionID: sessionID, intent: intent})
+	return 1, nil
+}
+
 func (f *fakeDispatcher) Submit(sessionID string, intent intents.TerminalSubmit) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -61,12 +95,31 @@ func (f *fakeDispatcher) Submit(sessionID string, intent intents.TerminalSubmit)
 	return len(intent.Text), nil
 }
 
+func (f *fakeDispatcher) Paste(sessionID string, intent intents.TerminalPaste) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pasted = append(f.pasted, pasteCall{sessionID: sessionID, intent: intent})
+	return len(intent.Text), nil
+}
+
 func (f *fakeDispatcher) snapshot() ([]lease.AcquireRequest, []string, []submitCall) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]lease.AcquireRequest(nil), f.acquired...),
 		append([]string(nil), f.released...),
 		append([]submitCall(nil), f.submitted...)
+}
+
+func (f *fakeDispatcher) pastedSnapshot() []pasteCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pasteCall(nil), f.pasted...)
+}
+
+func (f *fakeDispatcher) keyedSnapshot() []keyCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]keyCall(nil), f.keyed...)
 }
 
 func roomWith(t *testing.T, members int) (*room.Manager, string, []room.Member) {
@@ -114,11 +167,118 @@ func TestRouter_SendFansOutToEveryMember(t *testing.T) {
 		if s.intent.LeaseID == "" {
 			t.Errorf("submit[%d] missing lease_id", i)
 		}
-		if s.intent.Text != "hello" {
-			t.Errorf("submit[%d] text = %q, want hello", i, s.intent.Text)
+		for _, want := range []string{"[ATCP receipt]", `"room_id":"` + roomID + `"`, `"reply_prefix_hint":"<AT>room:` + roomID + ` "`, "\n\nhello"} {
+			if !strings.Contains(s.intent.Text, want) {
+				t.Errorf("submit[%d] text missing %q: %q", i, want, s.intent.Text)
+			}
+		}
+		if strings.Contains(s.intent.Text, "@room:") {
+			t.Errorf("submit[%d] terminal receipt contains literal @room trigger: %q", i, s.intent.Text)
 		}
 	}
+	if res.Receipt.RoomID != roomID || res.Receipt.MessageID != res.MessageID || res.Receipt.ReplyPrefix != "@room:"+roomID+" " {
+		t.Fatalf("receipt = %+v, message_id=%s", res.Receipt, res.MessageID)
+	}
 	_ = members
+}
+
+func TestRouter_ReceiptCanBeHiddenForTerminalDelivery(t *testing.T) {
+	m, roomID, _ := roomWith(t, 1)
+	d := newFakeDispatcher()
+	r := New(d, m, Options{LeaseTTL: 500 * time.Millisecond})
+
+	if _, err := r.Send(Message{RoomID: roomID, Text: "hello", ReceiptVisibility: ReceiptHidden}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	_, _, submitted := d.snapshot()
+	if len(submitted) != 1 {
+		t.Fatalf("submitted = %d, want 1", len(submitted))
+	}
+	if submitted[0].intent.Text != "hello" {
+		t.Fatalf("hidden receipt text = %q, want hello", submitted[0].intent.Text)
+	}
+}
+
+func TestRouter_SendPropagatesSubmitKeyOverride(t *testing.T) {
+	m, roomID, _ := roomWith(t, 1)
+	d := newFakeDispatcher()
+	r := New(d, m, Options{LeaseTTL: 500 * time.Millisecond})
+
+	if _, err := r.Send(Message{RoomID: roomID, Text: "hello", SubmitKey: "KittyEnter"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	_, _, submitted := d.snapshot()
+	if len(submitted) != 1 {
+		t.Fatalf("submitted = %d, want 1", len(submitted))
+	}
+	if submitted[0].intent.SubmitKey != "KittyEnter" {
+		t.Fatalf("SubmitKey = %q, want KittyEnter", submitted[0].intent.SubmitKey)
+	}
+}
+
+func TestRouter_LargeMessageUsesPaste(t *testing.T) {
+	m, roomID, _ := roomWith(t, 1)
+	d := newFakeDispatcher()
+	r := New(d, m, Options{LeaseTTL: 500 * time.Millisecond, LargePasteThreshold: 4})
+
+	if _, err := r.Send(Message{RoomID: roomID, Text: "large"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	_, _, submitted := d.snapshot()
+	if len(submitted) != 0 {
+		t.Fatalf("submitted = %d, want 0 for large paste", len(submitted))
+	}
+	pasted := d.pastedSnapshot()
+	if len(pasted) != 1 {
+		t.Fatalf("pasted = %d, want 1", len(pasted))
+	}
+	if !pasted[0].intent.SubmitAfter || pasted[0].intent.Bracketed != "auto" || pasted[0].intent.LeaseID == "" {
+		t.Fatalf("paste intent = %+v", pasted[0].intent)
+	}
+}
+
+func TestRouter_SafePromptOnlyRejectsBusySession(t *testing.T) {
+	m, roomID, _ := roomWith(t, 1)
+	d := newFakeDispatcher()
+	d.ready["s0"] = false
+	r := New(d, m, Options{})
+
+	res, err := r.Send(Message{RoomID: roomID, Text: "hello", TerminalPolicy: "safe-prompt-only"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if res.Delivered != 0 || res.Failed != 1 {
+		t.Fatalf("delivered=%d failed=%d, want 0/1", res.Delivered, res.Failed)
+	}
+	if !errors.Is(res.Members[0].Err, ErrUnsafePrompt) {
+		t.Fatalf("member err = %v, want ErrUnsafePrompt", res.Members[0].Err)
+	}
+	_, _, submitted := d.snapshot()
+	if len(submitted) != 0 {
+		t.Fatalf("submitted = %+v, want none", submitted)
+	}
+}
+
+func TestRouter_InterruptSendsEscapeBeforeDelivery(t *testing.T) {
+	m, roomID, _ := roomWith(t, 1)
+	d := newFakeDispatcher()
+	r := New(d, m, Options{})
+
+	res, err := r.Send(Message{RoomID: roomID, Text: "hello", TerminalPolicy: "interrupt"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if res.Delivered != 1 || res.Failed != 0 {
+		t.Fatalf("delivered=%d failed=%d, want 1/0", res.Delivered, res.Failed)
+	}
+	keys := d.keyedSnapshot()
+	if len(keys) != 1 || keys[0].intent.Key != "Escape" {
+		t.Fatalf("keys = %+v, want Escape", keys)
+	}
+	_, _, submitted := d.snapshot()
+	if len(submitted) != 1 {
+		t.Fatalf("submitted = %+v, want message submit", submitted)
+	}
 }
 
 func TestRouter_PartialFailureDoesNotAbortFanOut(t *testing.T) {

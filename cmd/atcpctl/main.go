@@ -12,12 +12,14 @@
 //	  health
 //	  session create --cmd "bash -i"
 //	  session list
+//	  session activity SESSION_ID [--since-seq N] [--since-output-bytes-total N]
 //	  session delete SESSION_ID
 //	  room create --workspace ws [--title T]
 //	  room list
 //	  room join ROOM_ID --agent A --session S [--can-mutate]
 //	  room leave ROOM_ID --agent A
 //	  room members ROOM_ID
+//	  room messages ROOM_ID [--limit N]
 //	  msg send --room R --text "..."
 package main
 
@@ -29,6 +31,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/atcp/client"
 	"github.com/joshka0/foxctl/internal/atcp/daemon"
@@ -85,18 +88,41 @@ func runSession(ctx context.Context, c *client.Client, args []string) {
 	case "create":
 		fs := flag.NewFlagSet("session create", flag.ExitOnError)
 		cmd := fs.String("cmd", "", "command to run (split on whitespace)")
+		submitKey := fs.String("submit-key", "", "default submit key for terminal.submit")
+		enableRawBytes := fs.Bool("enable-raw-bytes", false, "allow terminal.write_bytes for this trusted session")
 		_ = fs.Parse(args[1:])
 		if *cmd == "" {
 			fatal(errors.New("--cmd is required"))
 		}
 		parts := strings.Fields(*cmd)
-		out, err := c.CreateSession(ctx, httpjson.CreateSessionRequest{Cmd: parts})
+		out, err := c.CreateSession(ctx, httpjson.CreateSessionRequest{
+			Cmd:            parts,
+			SubmitKey:      *submitKey,
+			EnableRawBytes: *enableRawBytes,
+		})
 		if err != nil {
 			fatal(err)
 		}
 		emit(out)
 	case "list":
 		out, err := c.ListSessions(ctx)
+		if err != nil {
+			fatal(err)
+		}
+		emit(out)
+	case "activity":
+		if len(args) < 2 {
+			fatal(errors.New("session activity SESSION_ID [flags]"))
+		}
+		sessionID := args[1]
+		fs := flag.NewFlagSet("session activity", flag.ExitOnError)
+		sinceSeq := fs.Uint64("since-seq", 0, "previous heartbeat last_seq cursor")
+		sinceBytes := fs.Int64("since-output-bytes-total", 0, "previous heartbeat output_bytes_total cursor")
+		_ = fs.Parse(args[2:])
+		out, err := c.SessionActivity(ctx, sessionID, client.SessionActivityOptions{
+			SinceSeq:              *sinceSeq,
+			SinceOutputBytesTotal: *sinceBytes,
+		})
 		if err != nil {
 			fatal(err)
 		}
@@ -185,6 +211,22 @@ func runRoom(ctx context.Context, c *client.Client, args []string) {
 			fatal(err)
 		}
 		emit(out)
+	case "messages":
+		if len(args) < 2 {
+			fatal(errors.New("room messages ROOM_ID [flags]"))
+		}
+		roomID := args[1]
+		fs := flag.NewFlagSet("room messages", flag.ExitOnError)
+		limit := fs.Int("limit", 100, "maximum messages to return; 0 means all")
+		_ = fs.Parse(args[2:])
+		if *limit < 0 {
+			fatal(errors.New("--limit must be >= 0"))
+		}
+		out, err := c.RoomMessages(ctx, roomID, *limit)
+		if err != nil {
+			fatal(err)
+		}
+		emit(out)
 	default:
 		usage()
 		os.Exit(2)
@@ -202,6 +244,15 @@ func runMsg(ctx context.Context, c *client.Client, args []string) {
 		room := fs.String("room", "", "room id (required)")
 		text := fs.String("text", "", "message text (required)")
 		source := fs.String("source", "", "sender id (default \"atcpctl\")")
+		correlationID := fs.String("correlation-id", "", "correlation id for this message")
+		replyToMessageID := fs.String("reply-to-message", "", "message id this message replies to")
+		submitKey := fs.String("submit-key", "", "override submit key for this message")
+		noReceiptPreamble := fs.Bool("no-receipt-preamble", false, "do not prepend the ATCP receipt preamble to terminal delivery")
+		awaitActivity := fs.Duration("await-activity", 0, "wait up to this duration for first recipient output after delivery")
+		awaitReady := fs.Duration("await-ready", 0, "wait up to this duration for recipient readiness after first output")
+		terminalPolicy := fs.String("terminal-policy", "", "terminal delivery policy: immediate, queue, safe-prompt-only, reject, interrupt")
+		policyTimeout := fs.Duration("policy-timeout", 0, "max wait for terminal-policy=queue")
+		interruptKey := fs.String("interrupt-key", "", "key sent before terminal-policy=interrupt delivery (default Escape)")
 		_ = fs.Parse(args[1:])
 		if *room == "" || *text == "" {
 			fatal(errors.New("--room and --text are required"))
@@ -209,9 +260,24 @@ func runMsg(ctx context.Context, c *client.Client, args []string) {
 		if *source == "" {
 			*source = "atcpctl"
 		}
-		out, err := c.SendMessage(ctx, httpjson.SendMessageRequest{
-			RoomID: *room, Text: *text, Source: *source,
-		})
+		req := httpjson.SendMessageRequest{
+			RoomID:           *room,
+			Text:             *text,
+			Source:           *source,
+			CorrelationID:    *correlationID,
+			ReplyToMessageID: *replyToMessageID,
+			SubmitKey:        *submitKey,
+			AwaitActivityMS:  int64((*awaitActivity) / time.Millisecond),
+			AwaitReadyMS:     int64((*awaitReady) / time.Millisecond),
+			TerminalPolicy:   *terminalPolicy,
+			PolicyTimeoutMS:  int64((*policyTimeout) / time.Millisecond),
+			InterruptKey:     *interruptKey,
+		}
+		if *noReceiptPreamble {
+			visible := false
+			req.ReceiptVisible = &visible
+		}
+		out, err := c.SendMessage(ctx, req)
 		if err != nil {
 			fatal(err)
 		}
@@ -239,13 +305,15 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage: atcpctl [--socket PATH] <command> [args]
 commands:
   health
-  session create --cmd "bash -i"
+  session create --cmd "bash -i" [--submit-key KEY] [--enable-raw-bytes]
   session list
+  session activity SESSION_ID [--since-seq N] [--since-output-bytes-total N]
   session delete SESSION_ID
   room create --workspace ws [--title T]
   room list
   room join ROOM_ID --agent A --session S [--can-mutate]
   room leave ROOM_ID --agent A
   room members ROOM_ID
-  msg send --room R --text "..." [--source S]`)
+  room messages ROOM_ID [--limit N]
+  msg send --room R --text "..." [--source S] [--submit-key KEY] [--terminal-policy P] [--await-activity D] [--await-ready D]`)
 }

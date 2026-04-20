@@ -4,6 +4,104 @@ Apr 20, 2026 — ran the first interactive smoke against a real two-agent room
 using `cmd/atcpd` + `cmd/atcp-live` + `codex-cli 0.121.0` + `droid 0.104.0`.
 Messages were injected from a second shell via `atcpctl msg send`.
 
+Apr 20 follow-up — after the Gap 2/3/4/5/6/7/8 implementation pass, reran
+the smoke with `atcpd`, `atcp-live --render`, `codex --no-alt-screen`, and
+`droid`.
+
+Additional proof points:
+
+1. **Rendered screen snapshots are usable.** `atcp-live --render` produced
+   readable droid and codex screen lines through `GET /v1/sessions/{id}/screen`.
+2. **Readiness works for real agents.** Both codex and droid printed
+   `[name] ready` after their output rate dropped below the configured
+   readiness threshold.
+3. **Room fan-out still works.** `atcpctl msg send --submit-key EnterLineFeed`
+   returned `delivered=2 failed=0`; both sessions showed the injected prompt.
+4. **Droid end-to-end response works.** Droid received the prompt and rendered
+   `ATCP_PONG`.
+5. **Codex input is fixed by paced submit writes.** Codex booted past MCP
+   init and displayed room-injected text. An intermediate smoke showed that a
+   concatenated text+key write left text in the composer, while a later direct
+   `KittyEnter` submitted it. `Broker.Submit` now writes text and submit key
+   as distinct PTY writes under the same lease; a follow-up smoke with
+   `msg send --submit-key KittyEnter` rendered `CODEX_ROOM_PONG`.
+6. **Talkback works in the harness.** A local PTY speaker emitting
+   `@room: hello-from-speaker` with `--talkback speaker=@room:` forwarded a
+   room message that a `cat` listener received as `hello-from-speaker`.
+
+Known live-smoke caveats from the follow-up:
+
+- `codex --chat` is not valid for codex-cli 0.121.0; use plain `codex` or
+  `codex --no-alt-screen`.
+- `droid run` is not interactive boot; it starts droid with `run` as the
+  initial prompt. Use plain `droid` for the room smoke.
+- The strict VT renderer still prints some OSC/title fragments and box-drawing
+  mojibake; it is readable enough for smoke evidence, but not yet a polished
+  terminal renderer.
+
+Apr 20 no-paper rerun — after removing the unreachable `paper` MCP from
+codex config:
+
+- `codex mcp list` showed no `paper` entry before the run.
+- Codex booted without the prior MCP failure warning.
+- Codex and droid both reached readiness in the same rendered room.
+- `atcpctl msg send --submit-key KittyEnter` delivered to both agents with
+  `delivered=2 failed=0`.
+- Codex rendered `CLEAN_ATCP_PONG`.
+- Droid rendered `CLEAN_ATCP_PONG`.
+
+Apr 20 codex-to-droid talkback rerun — with `paper` still absent and
+`atcp-live --talkback codex=@room:`:
+
+- A patched fan-out smoke delivered `PATCHED_FANOUT_PONG` to both agents:
+  `delivered=2 failed=0`, with codex rendering `PATCHED_FANOUT_PONG` and
+  droid rendering `PATCHED_FANOUT_PONG`.
+- A codex-only message used `skip_agents:["droid"]` and returned
+  `delivered=1 failed=0`, proving the initial injection went only to codex.
+- Codex rendered `• @room: Hello Droid from Codex`; the rendered bullet
+  decoration was tolerated by the talkback matcher.
+- Droid received the bridged room message and rendered `Hello Droid from
+  Codex`, then responded with `Hello! How can I help you today?`.
+
+Apr 20 receipt-visible rerun — after adding structured receipts and the
+terminal preamble:
+
+- Default `message.send` returned a structured receipt with `message_id`,
+  `room_id`, `source`, `correlation_id`, and structured
+  `reply_prefix:"@room:<room_id> "`.
+- Initial terminal rendering used literal `@room:` in the preamble. Droid
+  accepted the message and rendered `RECEIPT_FANOUT_PONG`, but briefly opened
+  its `@` file-mention UI while the preamble was being typed.
+- Terminal preamble was changed to render `reply_prefix_hint:"<AT>room:<room_id>
+  "` and instruct agents to replace `<AT>` with the at-sign character. The
+  structured API receipt still carries the exact `reply_prefix`.
+- Safe rerun delivered the fan-out message with `delivered=2 failed=0`.
+  Codex rendered `@room:<room_id> RECEIPT_SAFE_FANOUT_PONG`; droid rendered
+  the safe preamble and later rendered
+  `@room:<room_id> RECEIPT_SAFE_FANOUT_PONG` without opening the file picker.
+- Codex-only message with `skip_agents:["droid"]` returned
+  `delivered=1 failed=0`. Codex rendered
+  `@room:<room_id> RECEIPT_SAFE_TALKBACK_HELLO`; `atcp-live` forwarded that
+  explicit-room talkback, and droid rendered
+  `@room:<room_id> RECEIPT_SAFE_TALKBACK_HELLO`.
+
+Apr 20 gemini/claude profile rerun — after moving readiness ownership into
+broker adapter profiles:
+
+- `atcp-live --render --agent gemini=gemini --agent claude=claude --no-input`
+  spawned both agents in one room.
+- Claude reached readiness on its rendered `❯` prompt after the profile was
+  extended to match that prompt glyph.
+- Gemini reached readiness on its rendered `> Type your message or
+  @path/to/file` prompt after its update/auth noise settled.
+- A room fan-out message returned `delivered=2 failed=0` with both members
+  listed as delivered.
+- The fan-out payload used the default visible receipt preamble, so both TUIs
+  treated it as a real user prompt and began working. For profile-only smoke,
+  prefer `--no-input` plus readiness checks, or use
+  `atcpctl msg send --no-receipt-preamble` only when deliberately testing
+  raw delivery.
+
 ## What we proved works
 
 1. **Daemon + socket + transport stack.** `atcpd` booted, bound its Unix
@@ -105,11 +203,11 @@ everything). Many TUIs written in Go / Rust with raw-mode keyboard
 handling expect `\n`, or the kitty-encoded Enter
 (`ESC[13u` when the keyboard protocol is pushed).
 
-**Fix direction.** Make the submit key configurable per-session and
-auto-detect when a kitty keyboard push is observed on output. Store the
-detection in `session.Session` and have `CompileSubmit` consult it
-before defaulting to `\r`. Until this lands, the `msg send` path should
-probably default to `\r\n` (both) so TUIs that take either still work.
+**Status — shipped Apr 20, 2026.** Submit keys are configurable
+per-session (`submit_key`) and per room message (`msg send --submit-key`).
+`modetrack` detects kitty keyboard push/pop and the broker mirrors that
+state into the generic adapter, so empty submit keys emit `KittyEnter`
+while kitty mode is active. The fallback default is now `\r\n`.
 
 ### Gap 3 — Observer sees raw PTY bytes; rendering is unusable for humans
 
@@ -120,18 +218,18 @@ human observer can't read any of it. Even after stripping CSI with
 `sed`, the output is just fragments from the TUI's frame-buffer
 gymnastics.
 
-**Fix direction.** Plan Phase 2 screen snapshots. Minimum viable:
+**Status — minimum useful shipped Apr 20, 2026.** The broker now maintains
+`internal/atcp/broker/vtscreen`, a strict VT subset with primary/alt buffers,
+printable UTF-8, common cursor/erase CSI handling, and SGR ignore.
+`GET /v1/sessions/{id}/screen` returns rendered lines and dirty rows;
+`GET /v1/events?target=session:<id>&screen=true` emits
+`terminal.screen.snapshot` SSE frames; `atcp-live --render` prints rendered
+snapshots instead of raw bytes.
 
-- `internal/atcp/broker/vtscreen` (or similar) keeps a per-session
-  virtual terminal buffer, applied as bytes arrive. Consumers get
-  `terminal.screen.snapshot` events with the rendered text (no
-  escapes).
-- `atcp-live --render` (or a new `atcpctl session watch`) consumes the
-  snapshots instead of raw bytes, prints only the diff, and optionally
-  suppresses cursor-movement noise entirely.
-- This is meaningful work — there's a reason `vt10x` and similar
-  libraries exist. We'd either vendor one or implement a strict
-  subset. Probably 2-3 days of careful work.
+Still deferred from full Phase 2:
+
+- style/cell arrays,
+- expanding the parser if real agent output needs more VT coverage.
 
 ### Gap 4 — No "agent readiness" signal
 
@@ -142,13 +240,24 @@ run I could only infer codex was "done booting" by watching the log
 file's byte rate drop to zero.
 
 **Fix direction.** Either:
-- **(cheap)** Expose the session's recent-output-bytes-per-second as a
-  field on `SessionResponse`; callers can poll for "idle".
-- **(proper)** Let an adapter declare an "idle regex" per agent type
-  (e.g. codex idle is the `_ > ` prompt rendering); the broker's
-  modetrack / screen engine fires a `terminal.ready` event when it
-  matches. This dovetails with the Phase 2 screen work. The safeprompt
-  package already does regex-on-tail detection — the pieces exist.
+- **(cheap)** ☑ **Shipped Apr 20, 2026.** `SessionResponse` now exposes
+  `output_bytes_total`, `output_rate_bps`, and `last_output_at`.
+  `GET /v1/sessions/{id}/readiness` returns the output-idle heuristic,
+  and `atcp-live` prints `[name] ready` after startup/broadcast idle
+  waits.
+- **(screen-aware)** ☑ **Shipped Apr 20, 2026.** The readiness endpoint now
+  accepts `screen_regex`; when present, the session must be output-idle and a
+  rendered screen line must match. `atcp-live --render` uses codex/droid
+  prompt patterns so readiness is no longer byte-rate only.
+- **(broker-owned)** ☑ **Shipped Apr 20, 2026.** Session creation carries a
+  readiness profile; the broker provides codex/droid/gemini/claude adapter defaults;
+  `/readiness` evaluates the profile when no query regex is supplied; and
+  `GET /v1/events?target=session:<id>&ready=true` emits `terminal.ready`
+  events on readiness state transitions.
+- **(profile packaging)** ☑ **Shipped Apr 20, 2026.** Built-in prompt
+  profiles now live in `internal/atcp/adapter/profiles/profiles.json` and the
+  broker consumes them through the adapter profile registry instead of owning
+  the table directly.
 
 ### Gap 5 — MCP failures during agent boot silently break the smoke
 
@@ -158,12 +267,10 @@ logs by >1 MB in 30 s. We only noticed the playwright MCP was the
 immediate blocker by reading the log carefully. Removing it
 (`codex mcp remove playwright`) helped.
 
-**Fix direction.** Not an ATCP bug but an operator concern. A
-`docs/atcp/PRESMOKE-CHECKLIST.md` that lists "make sure every MCP
-server your agent depends on is reachable before spawning" would save
-time. The smoke driver could also offer a `--warmup-timeout` flag and
-print a warning when an agent emits nothing new for N seconds but is
-still "running".
+**Status — shipped Apr 20, 2026.** `docs/atcp/PRESMOKE-CHECKLIST.md`
+now covers MCP reachability, `TERM`, socket hygiene, second-shell
+inspection, and cleanup. `atcp-live --warmup-timeout` prints a warning
+when a session stays output-idle through the warmup window.
 
 ### Gap 6 — No inter-agent communication primitive beyond "human injects"
 
@@ -175,12 +282,21 @@ message. If we wanted a real `codex ↔ droid` coordination loop, we'd
 need an "agent says X, the broker repackages X as a room message and
 fans it to peers" bridge.
 
-**Fix direction.** Add a "talkback" mode to `atcp-live`: each agent's
-output is pattern-matched for an explicit send envelope (e.g. lines
-starting with `@room:`) and those lines get forwarded as `msg send`
-with `source=agent-name`. This is opt-in per-agent and keeps the
-broker protocol-pure. Alternatively, codex/droid would need an ATCP
-client of their own inside the PTY (via a custom MCP server or similar).
+**Status — simple variant shipped Apr 20, 2026.** `atcp-live --talkback
+name=prefix` forwards matching raw or rendered lines as room messages with
+`source=name` and skips echoing to the source agent. The matcher allows
+leading TUI decoration made of whitespace, punctuation, or symbol glyphs
+before the configured prefix, which covers codex's rendered `• @room:`
+output while still requiring the explicit prefix. Message sends now also
+return a structured `receipt` and prepend a terminal-visible receipt by
+default, including `message_id`, `room_id`, optional correlation/reply-to
+metadata, and a structured `reply_prefix` such as `@room:01K... `. Talkback
+accepts that explicit-room form as well as the older single-room
+`@room: text` form. The terminal preamble uses `reply_prefix_hint`
+(`<AT>room:01K... `) instead of a literal `@room:` prefix after the
+receipt-visible smoke showed droid opening its `@` file-mention UI while the
+preamble was typed. This remains opt-in and broker-protocol-pure. A native
+ATCP client inside each PTY is still a future side-channel option.
 
 ### Gap 7 — `terminal/write_bytes` is capability-disabled by default
 
@@ -190,10 +306,10 @@ from a safety standpoint — arbitrary byte injection is dangerous —
 but the gating isn't discoverable: there's no documented way to
 enable it for a trusted client.
 
-**Fix direction.** Document the adapter capability model, and make
-`write_bytes` opt-in per-session via `CreateSessionRequest` (already
-has `Adapter string` — we could add a flag like
-`enable_raw_bytes: true` that the adapter reads).
+**Status — shipped Apr 20, 2026.** `CreateSessionRequest` now accepts
+`enable_raw_bytes`; the broker applies it to the generic adapter and
+`atcpctl session create --enable-raw-bytes` exposes the trusted-session
+escape hatch. The default remains disabled.
 
 ### Gap 8 — Line-buffered stdin forwarder truncates pastes and can't cancel mid-line
 
@@ -203,10 +319,11 @@ from a second shell. But `atcp-live`'s `forwardStdin` uses
 Also, during `atcpctl msg send` the request timeout is 30 s — long
 room messages could fail silently.
 
-**Fix direction.** Multi-line paste support would route through the
-paste intent (`terminal.paste` with `bracketed: true` when the
-adapter's mode tracker says the child enabled bracketed paste). That's
-Phase-2 territory again.
+**Status — shipped Apr 20, 2026.** `atcp-live` now accepts lines up to
+16 MiB and the ATCP HTTP client timeout is 120 s. The room router sends
+messages >=1 MiB through `terminal.paste` with `bracketed:"auto"` and
+`submit_after:true`, so bracketed-paste-aware sessions receive one paste
+block instead of a giant typed submit.
 
 ## Triage: what to fix first
 
@@ -219,24 +336,22 @@ In order of "unblocks real integration" vs "nice to have":
 1. **Gap 1 — terminal capability responder.** Blocks booting codex at
    all. ☑ **Shipped** (commit `19fe4589`,
    `internal/atcp/broker/termcaps`). Evidence above.
-2. **Gap 4 — readiness signal.** We can't run reliable smokes without
-   knowing when an agent is ready. Can be a cheap version (poll
-   output-byte-rate) initially. 0.5 day. ☐
-3. **Gap 2 — per-session submit key.** So the happy path works on more
-   agents. 0.5 day including detection of kitty mode. ☐
-4. **Gap 3 — screen snapshot rendering.** Transforms the observer
-   experience from unusable to mux-equivalent. This is Plan Phase 2
-   proper. 2-3 days. ✎ (design decision — vendor vs subset)
-5. **Gap 6 — inter-agent talkback.** Required for "codex tells droid
-   something" scenarios. Blocked on screen rendering (so the talkback
-   pattern-matcher has clean text to match on). 0.5 day after Gap 3. ✎
-6. **Gap 7 — raw write flag.** Small. Schedule whenever. ☐
-7. **Gap 5 — pre-smoke checklist doc.** 30 minutes. ☐
-8. **Gap 8 — paste / long input.** Ride along with Phase 2 paste work. ☐
-9. **Gap 1b — codex input loop still silent.** Follow-up to Gap 1. Not
-   a termcaps issue (codex sends only queries we handle); likely MCP
-   readiness or env. Low ROI until Gap 4 lands to give us an objective
-   signal. ☐
+2. **Gap 4 — readiness signal.** ☑ **Shipped Apr 20, 2026.**
+   Sessions now expose cumulative output bytes, rolling output byte-rate,
+   `last_output_at`, and `GET /v1/sessions/{id}/readiness`; `atcp-live`
+   polls this before startup/broadcast flow and prints `[name] ready`.
+   Follow-up smoke recorded both `[codex] ready` and `[droid] ready`.
+3. **Gap 2 — per-session submit key.** ☑ **Shipped Apr 20, 2026.**
+4. **Gap 3 — screen snapshot rendering.** ☑ **Minimum useful shipped Apr
+   20, 2026.** Coalesced SSE snapshots remain deferred.
+5. **Gap 6 — inter-agent talkback.** ☑ **Simple variant shipped Apr 20,
+   2026.**
+6. **Gap 7 — raw write flag.** ☑ **Shipped Apr 20, 2026.**
+7. **Gap 5 — pre-smoke checklist doc.** ☑ **Shipped Apr 20, 2026.**
+8. **Gap 8 — paste / long input.** ☑ **Shipped Apr 20, 2026.**
+9. **Gap 1b — codex input loop still silent.** ☑ **Shipped Apr 20, 2026.**
+   Root cause was submit sequencing: codex needs text and the submit key as
+   distinct PTY writes.
 
 ## Observations worth keeping for the runbook
 

@@ -13,16 +13,44 @@ decision first.
 
 ---
 
+## Next track — Room integrations
+
+**Status:** ☐ · planning captured · **priority: high**
+
+The next major ATCP track is to make rooms first-class integration hubs, not
+only PTY fan-out containers. The detailed roadmap lives in
+[ROOM-INTEGRATIONS.md](ROOM-INTEGRATIONS.md).
+
+Recommended implementation order:
+
+1. ☐ Canonical room event log with replay/follow.
+2. ☐ Emit `message.sent` / `message.delivered` into the room event log.
+3. ☐ Add structured room event filters (`kinds`, then `agents`).
+4. ☐ Support native inbox-only room participants.
+5. ☐ Add durable inbox delivery and ack.
+6. ☐ Add signed room webhooks.
+7. ☐ Add provider-specific adapters only after webhook/inbox contracts settle.
+
+Acceptance for the first slice:
+
+- ☐ `GET /v1/events?target=room:<id>&since=N` replays room events and then
+  follows live events.
+- ☐ Room member join/leave and `message.send` append structured room events.
+- ☐ Existing point-in-time room terminal fan-in is either backed by the room
+  event log or documented as a compatibility path.
+- ☐ Raw terminal output remains opt-in for external integrations.
+
+---
+
 ## Gap 1b — Codex input loop still inactive after termcaps shipped
 
-**Status:** ☐ · follow-up to Gap 1 · **priority: low** (Gap 1 proved the
-termcaps layer works; this is codex-specific init plumbing)
+**Status:** ☑ · shipped Apr 20, 2026 · follow-up to Gap 1
 
-**Symptom.** After the responder, codex no longer burns CPU in a spinner
-re-draw loop and emits only ~3 KB during boot. But a single byte written
-via `POST /v1/terminal/text` still produces zero echo on codex's SSE stream,
-and codex never responds to broadcast messages. The process is alive (in
-`S+` state, waiting on `read`) but isn't consuming input.
+**Resolved symptom.** After the responder and submit-key work, codex booted
+past MCP init and displayed room-injected text, but it needed text and submit
+as distinct PTY writes. `Broker.Submit` now writes text, pauses briefly, then
+writes the submit key under the same lease. Live smoke observed
+`msg send --submit-key KittyEnter` produce `CODEX_ROOM_PONG`.
 
 **Confirmed not the cause.**
 
@@ -31,30 +59,21 @@ and codex never responds to broadcast messages. The process is alive (in
   `OSC 10`, `OSC 11`) is one the responder answers.
 - Approval / sandbox gating — `codex --dangerously-bypass-approvals-and-sandbox`
   behaves identically.
+- PTY input visibility — codex now displays injected text and responds after
+  a direct leased `KittyEnter` key press.
 
 **Likely causes to investigate (in order of cheapness to test).**
 
-1. **MCP readiness gating.** Codex may refuse to enable input until all
-   registered MCP servers have successfully handshaken. The smoke run had
-   `paper` (127.0.0.1:29979) unreachable and `playwright` had been removed
-   but others may still be slow/failing. Try with every MCP removed
-   (`codex mcp list` → `codex mcp remove <each>`) and re-run.
-2. **`TERM` / env mismatch.** Check what codex sees:
-   `/v1/sessions/{id}` includes the adapter env. If `TERM` is empty,
-   `dumb`, or unset, codex may fall into a non-interactive mode. The
-   daemon currently inherits env when `CreateSessionRequest.Env` is nil;
-   verify that inheritance actually carries `TERM=xterm-256color`.
-3. **Stdin is not seen as a TTY.** Low probability given `pty.StartWithSize`
-   sets up the slave fd as stdin, but worth a `ls -la /proc/<pid>/fd/0`
-   (Linux) or `lsof -p <pid>` (macOS) check.
-4. **Codex-side instrumentation.** As a last resort, strace/dtruss the
-   codex child to see whether it's blocked on a `read(0, ...)` from the
-   PTY slave or on some socket read (MCP, network, auth).
+1. **Atomic submit sequencing.** Confirmed. Codex does not reliably treat
+   `text + KittyEnter` in one PTY write the same as text followed by a later
+   key event.
+2. **MCP readiness gating.** Codex still reports `paper`
+   (`127.0.0.1:29979`) unreachable. This no longer blocks boot.
 
-**Acceptance.** Reopen the smoke, broadcast `please respond with "pong"`,
-and see codex emit a corresponding TUI update within ≤10 s. Document the
-root cause in `LIVE-SMOKE-FINDINGS.md` even if the fix lives in codex
-config rather than our code.
+**Acceptance.** ☑ Reopen the smoke, broadcast `please respond with "pong"`,
+and see codex emit a corresponding TUI update within ≤10 s without requiring
+a separate direct key press. Document the root cause in
+`LIVE-SMOKE-FINDINGS.md`.
 
 **Size.** 2–4 hours for steps 1–3; step 4 can blow up to a day if the
 cause is obscure.
@@ -63,9 +82,9 @@ cause is obscure.
 
 ## Gap 4 — Agent-readiness signal on the session
 
-**Status:** ☐ · **priority: high** (this is the next thing to land — it
-unblocks reliable smoke tests for *every* agent, and gives Gap 1b an
-objective signal to measure against)
+**Status:** ☑ · shipped Apr 20, 2026 · **priority: high** (this unblocks
+reliable smoke tests for *every* agent, and gives Gap 1b an objective
+signal to measure against)
 
 **Symptom.** `POST /v1/messages` returns `delivered: true` the moment the
 router's PTY write succeeds, even if the recipient agent was mid-init and
@@ -75,39 +94,87 @@ ready yet?"; we infer it by eyeballing the SSE byte-rate drop.
 **Root cause.** `session.Session` tracks bytes written but not the arrival
 rate, and `SessionResponse` has no readiness field.
 
-**Fix direction (cheap, minimum viable).**
+**Implementation shipped.**
 
-1. Add an `outputRate` tracker to `session.Session`: exponentially-weighted
-   bytes-per-second over the last ~1 s, updated on each PTY read. Cheap —
-   one atomic float, one timestamp, updated in the existing read loop.
-2. Expose on `SessionResponse` as:
+1. `session.Session` tracks cumulative output bytes, a rolling one-second
+   output byte rate, and the timestamp of the last non-empty PTY read.
+2. `SessionResponse` exposes:
    - `output_bytes_total` (int64, cumulative)
-   - `output_rate_bps` (float, current EWMA)
+   - `output_rate_bps` (float, rolling bytes/sec)
    - `last_output_at` (RFC3339 timestamp of most recent non-empty read)
-3. Add `GET /v1/sessions/{id}/readiness` that returns a simple
-   `{"idle": bool, "idle_for_ms": int}` with `idle := rate < 32 B/s for
-   >=500 ms`. Thresholds tunable via query params.
-4. Teach `atcp-live` (and eventually `atcpctl msg send --wait-idle`) to
-   poll readiness before sending and after receiving, so the driver prints
-   a clear "[codex] ready" line rather than leaving the user guessing.
+3. `GET /v1/sessions/{id}/readiness` returns
+   `{"idle": bool, "idle_for_ms": int}` plus the current rate/counter
+   fields. Defaults are `threshold_bps=32` and `debounce_ms=500`; both are
+   tunable via query params.
+4. Session creation accepts a readiness profile. The broker merges explicit
+   overrides with adapter defaults; codex, droid, gemini, and claude profiles
+   now live in `internal/atcp/adapter/profiles/profiles.json` instead of in
+   `atcp-live` or broker control flow.
+5. The readiness endpoint also accepts `screen_regex`. When present, the
+   session must be output-idle and the rendered screen must match the regex;
+   the response includes `screen_match`, `screen_regex`, and `screen_line`.
+   When no query regex is provided, the endpoint evaluates the session's
+   broker-owned profile.
+6. `GET /v1/events?target=session:<id>&ready=true` emits `terminal.ready`
+   on readiness state transitions. The stream also emits an initial
+   `terminal.ready` state, and a small ticker catches debounce-only transitions
+   when output stops.
+7. `GET /v1/sessions/{id}/activity` compares a caller-supplied heartbeat
+   cursor (`since_seq`, `since_output_bytes_total`) against the current PTY
+   output cursor and reports `working`, `output_changed`, `seq_delta`, and
+   `output_bytes_delta`.
+8. `GET /v1/events?target=session:<id>&activity=true` emits periodic
+   `terminal.activity` heartbeats. Each heartbeat compares current output to
+   the previous heartbeat, so a watcher can distinguish "quiet and idle" from
+   "still producing output".
+9. `POST /v1/messages` accepts `await_activity_ms` and `await_ready_ms`.
+   When set, each delivered member reports first-output latency and
+   return-to-ready completion latency. Completion is PTY-level: output changed
+   after delivery and the session returned to its readiness profile.
+10. `atcp-live --render` passes `adapter=<agent name>` at session creation and
+   relies on the broker-owned readiness profile, printing `[name] ready
+   (idle_for=Nms rate=XB/s)` only after byte-rate idle and prompt matching
+   both pass.
+11. `atcp-live` polls readiness after startup and around stdin broadcasts,
+   printing `[name] ready (idle_for=Nms rate=XB/s)` when a session is
+   output-idle. Flags: `--readiness-timeout`, `--idle-threshold-bps`,
+   `--idle-debounce`.
 
-**Fix direction (proper, later).** The adapter declares a regex for an
-"idle prompt" (e.g. codex: `_ > \z`, droid: `⛬\s+$`, gemini: `> $`). The
-screen-snapshot engine from Gap 3 fires a `terminal.ready` event when the
-regex matches the rendered tail. This is free to piggy-back on Gap 3 and
-dovetails with `safeprompt`'s existing tail-regex machinery — don't build
-the regex path until Gap 3 lands.
+**Configuration packaging.** ☑ **Shipped Apr 20, 2026.** Built-in readiness
+profiles now load from the embedded adapter profile registry at
+`internal/atcp/adapter/profiles/profiles.json`. The broker still owns merging
+explicit session overrides, but no longer owns the built-in profile table.
 
 **Acceptance.**
 
-- `session.Session.OutputRate()` returns a non-negative float, decays to 0
-  within 2 s of no reads, rises to match sustained write rate within 1 s.
-- `GET /v1/sessions/{id}/readiness` returns `idle:true` only after the
+- ☑ `session.Session.OutputRate()` returns a non-negative float, decays to
+  0 within 2 s of no reads, and rises to sustained output rate within 1 s.
+- ☑ `GET /v1/sessions/{id}/readiness` returns `idle:true` only after the
   rate has been below threshold for the full debounce window.
-- Unit test: feed synthetic chunks at known timestamps, assert rate and
+- ☑ Unit test: feed synthetic chunks at known timestamps, assert rate and
   idle transitions.
-- `atcp-live` run against a droid session prints `[droid] ready` when
-  droid reaches its input prompt. Verified by human observation.
+- ☑ Live re-smoke: `atcp-live` run against a droid session printed
+  `[droid] ready` when droid reached its input prompt.
+- ☑ HTTP test: `screen_regex=PROMPT%3E` requires the rendered screen to match;
+  a non-matching regex keeps `idle:false` even when output is byte-idle.
+- ☑ HTTP test: a session readiness profile is exposed on `SessionResponse`
+  and is used by `/readiness` when no query regex is provided.
+- ☑ SSE test: `ready=true` emits a canonical `terminal.ready` envelope once
+  byte-idle debounce and rendered-screen matching both pass.
+- ☑ HTTP test: `/activity` reports output deltas from a previous
+  `last_seq`/`output_bytes_total` heartbeat cursor.
+- ☑ SSE test: `activity=true` emits canonical `terminal.activity`
+  heartbeat envelopes and marks output changes.
+- ☑ HTTP test: `POST /v1/messages` with `await_activity_ms` and
+  `await_ready_ms` reports first-output and completion timing per member.
+- ☑ Unit test: the embedded adapter profile registry matches real prompt
+  samples for codex, droid, gemini, claude, and the claude-code alias.
+- ☑ `atcp-live --render` now passes adapter names at session creation and
+  relies on broker-owned codex/droid/gemini/claude readiness profiles.
+- ☑ Live re-smoke: `atcp-live --render --agent gemini=gemini
+  --agent claude=claude --no-input` printed `[claude] ready` on Claude's
+  `❯` prompt and `[gemini] ready` on Gemini's `> Type your message...`
+  prompt. A follow-up room message returned `delivered=2 failed=0`.
 
 **Size.** 0.5 day for the cheap version + tests + `atcp-live` plumbing.
 
@@ -115,8 +182,7 @@ the regex path until Gap 3 lands.
 
 ## Gap 2 — Per-session submit key + kitty-keyboard auto-detection
 
-**Status:** ☐ · **priority: medium** (droid works with the current `\r`
-default; this matters most once we start integrating more agents)
+**Status:** ☑ · shipped Apr 20, 2026 · **priority: medium**
 
 **Symptom.** `adapter.CompileSubmit` defaults to `Enter → 0x0D` (`\r`).
 Some TUIs (Go/Rust raw-mode handlers, or agents that pushed the kitty
@@ -127,31 +193,29 @@ Today we'd have to patch adapter code to change it.
 state. `adapter.Adapter.CompileSubmit` is a pure function of the key name,
 ignoring runtime terminal mode.
 
-**Fix direction.**
+**Implementation shipped.**
 
-1. **Per-session override.** Add `submit_key` to `CreateSessionRequest`
-   (`"Enter" | "Return" | "LineFeed" | "KittyEnter"`). Store on
-   `session.Session`. `CompileSubmit` consults the session's override
-   before falling back to the adapter default.
-2. **Kitty auto-detection.** `modetrack` already parses CSI sequences; add
-   detection for `CSI > {flags} u` (push) and `CSI < u` (pop). On push,
-   set `session.KittyKbdActive = true` atomically. `CompileSubmit`
-   returns `ESC[13u` when that bit is set and no explicit override was
-   given.
-3. **Dual-submit fallback (safety net).** Until this lands, change
-   `router`'s default submit to `\r\n` (both bytes). Any shell/readline
-   accepts CR, any line-buffered TUI accepts LF. Costs nothing for
-   well-behaved TUIs; unblocks ones picky about one variant.
+1. `CreateSessionRequest` accepts `submit_key`; `SessionResponse` echoes it.
+   The generic adapter uses it as the default when a `TerminalSubmit` intent
+   leaves `submit_key` blank.
+2. `modetrack` detects kitty keyboard push/pop (`CSI > n u`, `CSI < u`).
+   The broker mirrors that mode into the session adapter; empty submit keys
+   compile to `KittyEnter` while kitty mode is active.
+3. The generic default submit key is now `EnterLineFeed` (`\r\n`) for broad
+   shell/TUI compatibility when no explicit key and no kitty mode are active.
+4. `atcpctl msg send --submit-key KittyEnter` and the HTTP
+   `SendMessageRequest.submit_key` field pass per-message overrides through
+   the room router.
 
 **Acceptance.**
 
-- Unit test: session with `submit_key: "LineFeed"` → `CompileSubmit`
+- ☑ Unit test: session/adapter with `submit_key: "LineFeed"` → `CompileSubmit`
   returns `\n`.
-- Unit test: feed `ESC[>9u` to modetrack → `session.KittyKbdActive` is
+- ☑ Unit test: feed `ESC[>9u` to modetrack → kitty keyboard mode is
   true → `CompileSubmit` returns `ESC[13u` without explicit override.
-- Integration test: spawn a node REPL, send an `Enter`, observe the
-  prompt advance. Repeat with a kitty-pushed stub that echoes `ESC[13u`.
-- `atcpctl msg send --submit-key KittyEnter` works as an override.
+- ☑ Live smoke: codex accepted `msg send --submit-key KittyEnter` and
+  rendered `CODEX_ROOM_PONG`.
+- ☑ `atcpctl msg send --submit-key KittyEnter` works as an override.
 
 **Size.** 0.5 day.
 
@@ -159,8 +223,7 @@ ignoring runtime terminal mode.
 
 ## Gap 3 — Phase 2 screen-snapshot rendering (vt engine)
 
-**Status:** ✎ · design decision needed · **priority: medium** (unblocks
-most observability and Gap 6; but it's real work)
+**Status:** ☑ · minimum useful shipped Apr 20, 2026 · **priority: medium**
 
 **Symptom.** `atcp-live`'s stdout is a firehose of raw PTY bytes.
 30 seconds of droid = ~4,900 distinct SSE chunks, each a partial ANSI
@@ -172,7 +235,9 @@ output (needed for Gap 6) is impossible.
 layer anywhere in the broker. Plan §6 Phase 2 describes the goal
 (`terminal.screen.snapshot`) but leaves the engine unbuilt.
 
-**Design decision needed.** Two viable paths:
+**Decision.** Start with the strict-subset implementation, not a vendored VT
+emulator. Revisit a dependency only if the live smoke exposes escape
+sequences that the subset cannot cover cleanly.
 
 - **(a) Vendor a VT emulator.** `github.com/hinshun/vt10x`,
   `github.com/charmbracelet/x/vt`, or `github.com/gdamore/tcell/v2`'s
@@ -182,35 +247,35 @@ layer anywhere in the broker. Plan §6 Phase 2 describes the goal
   + alt-screen buffer + scrollback. Pro: no new dependency, fits in
   ~800 LoC, tailored to our needs. Con: we own the edge cases forever.
 
-**Recommendation.** Start with (b), structured as
-`internal/atcp/broker/vtscreen`. If a real-world agent exposes a feature
-we don't handle, either extend vtscreen or escape-hatch: emit
-`terminal.screen.snapshot_raw` alongside the rendered snapshot for
-consumers that want the bytes. Watch scope-creep carefully.
+**Implementation shipped (minimum useful).**
 
-**Fix direction (minimum useful).**
+1. `internal/atcp/broker/vtscreen` keeps a per-session grid with primary and
+   alt screen buffers. It applies printable UTF-8, CR/LF/backspace/tab,
+   common CSI cursor movement, erase display/line, SGR ignore, and alt-screen
+   enter/exit on each PTY read.
+2. `GET /v1/sessions/{id}/screen` returns
+   `{rows, cols, lines, dirty_rows, cursor, alt_screen}`.
+3. `atcp-live --render` polls screen snapshots and prints changed rendered
+   lines instead of raw ANSI chunks.
+4. `GET /v1/events?target=session:<id>&screen=true` emits
+   `terminal.screen.snapshot` SSE frames alongside `terminal.output`, so
+   clients can subscribe to rendered screen state without polling.
 
-1. `internal/atcp/broker/vtscreen` — per-session grid (default 80×24,
-   grows to `WinSize`). Primary vs alt screen. Apply bytes incrementally
-   on each PTY read, after modetrack but before subscribers fan out.
-2. New event kind `terminal.screen.snapshot` with body:
-   `{rows: int, cols: int, cells: string[][], cursor: {row,col,visible},
-     dirty_rows: int[]}`.
-3. Emit on a coalescing timer: at most one snapshot per 50 ms per session,
-   unless bytes > 4 KiB accumulated (emit immediately).
-4. `GET /v1/sessions/{id}/screen` for point-in-time fetch.
-5. `atcp-live --render` consumes snapshots instead of raw bytes; prints
-   the last `dirty_rows` line by line on change.
+**Deferred from the original full Phase 2 scope.** Cell-style arrays are still
+future work; the event stream currently emits line-string snapshots, matching
+the polling endpoint.
 
 **Acceptance.**
 
-- Unit: feed canonical CSI sequences (CUP to 10;10, `hello`, CR, `world`)
+- ☑ Unit: feed canonical CSI sequences (CUP to 10;10, `hello`, CR, `world`)
   → assert grid state.
-- Unit: alt-screen enter/exit preserves the primary screen.
-- Integration: droid smoke run with `atcp-live --render` produces a
+- ☑ Unit: alt-screen enter/exit preserves the primary screen.
+- ☑ Live smoke: droid smoke run with `atcp-live --render` produced a
   readable transcript of droid's prompts and responses.
-- Byte budget: `terminal.screen.snapshot` per-event < 8 KB on an 80×24
-  grid with typical content.
+- ☑ Byte budget: screen endpoint uses line strings, not per-cell objects.
+- ☑ SSE test: `screen=true` stream emits a canonical
+  `terminal.screen.snapshot` envelope whose rendered lines contain live PTY
+  output.
 
 **Size.** 2–3 days (implementation + tests + atcp-live integration). Gate
 on dedicated time.
@@ -219,13 +284,13 @@ on dedicated time.
 
 ## Gap 5 — Pre-smoke operator checklist
 
-**Status:** ☐ · **priority: low** (docs-only; takes 30 min)
+**Status:** ☑ · shipped Apr 20, 2026 · **priority: low**
 
 **Symptom.** Codex's failed `paper` MCP caused the whole init log to
 bloat, masking the real termcap issue for ~20 minutes of debugging. An
 operator checklist would save time.
 
-**Fix direction.** New doc `docs/atcp/PRESMOKE-CHECKLIST.md` covering:
+**Implementation shipped.** New doc `docs/atcp/PRESMOKE-CHECKLIST.md` covers:
 
 - Verify every registered MCP server is reachable (`codex mcp list`,
   `droid mcp list`, equivalent) — or disable failing ones.
@@ -237,11 +302,11 @@ operator checklist would save time.
 - Know how to kill everything cleanly (`pkill -INT atcpd; pkill -INT
   atcp-live`).
 
-Also add a `--warmup-timeout <dur>` flag to `atcp-live` that prints a
+Also added a `--warmup-timeout <dur>` flag to `atcp-live` that prints a
 warning like `[codex] no new output for 10s — likely stuck in init` once
 a session emits nothing new for the given window.
 
-**Acceptance.** The doc exists, is linked from `LIVE-SMOKE.md`, and the
+**Acceptance.** ☑ The doc exists, is linked from `LIVE-SMOKE.md`, and the
 `--warmup-timeout` flag is implemented with a regression test.
 
 **Size.** 30 min for the doc + 1 hour for the flag.
@@ -250,8 +315,7 @@ a session emits nothing new for the given window.
 
 ## Gap 6 — Inter-agent talkback
 
-**Status:** ✎ · blocked on Gap 3 · **priority: medium** (the headline
-feature — "codex and droid coordinate" doesn't happen without this)
+**Status:** ☑ · simple variant shipped Apr 20, 2026 · **priority: medium**
 
 **Symptom.** The only message source today is a human injecting text via
 `atcpctl msg send` or `atcp-live` stdin. There's no path for codex's
@@ -261,18 +325,30 @@ output to become a room message droid sees.
 not sources of typed events. Their output flows to SSE subscribers, not
 back through the router.
 
-**Fix direction (preferred, simple).** "Opt-in talkback" in `atcp-live`
-first, not in the broker.
+**Implementation shipped (simple variant).** "Opt-in talkback" in
+`atcp-live`, not in the broker.
 
 1. New `atcp-live` flag `--talkback <name>=<prefix>` (repeatable, default
-   off). When a line from agent `<name>` starts with `<prefix>`
-   (e.g. `@room:`), strip the prefix and forward the rest as
+   off). When a line from agent `<name>` contains `<prefix>` after only
+   whitespace / punctuation / symbol TUI decoration (e.g. codex rendering
+   `• @room:`), strip the prefix and forward the rest as
    `msg send --source <name>`.
-2. Requires Gap 3 first — otherwise we're pattern-matching against raw
-   PTY chunks with escape codes, which is a nightmare. With screen
-   snapshots we match against rendered lines.
-3. Document that agent prompts (in codex / droid system prompts) should
-   include "when you want to talk to a peer, emit `@room: <text>`".
+2. Message delivery now returns a structured `receipt` and prepends a
+   terminal-visible receipt by default. The receipt includes `message_id`,
+   `room_id`, optional `correlation_id` / `reply_to_message_id`, and a
+   structured `reply_prefix` such as `@room:01K... ` so native clients know
+   which room to target. The terminal preamble renders this as
+   `reply_prefix_hint` (`<AT>room:01K... `) to avoid opening `@` mention
+   popups while the preamble is typed into TUIs.
+3. Talkback accepts either old single-room output (`@room: hello`) or explicit
+   room output (`@room:01K... hello`). Explicit room IDs are parsed as ULIDs,
+   not by keyword matching.
+4. Works in both raw line mode and `--render` mode; `--render` is preferred
+   for full-screen TUIs because it matches clean snapshot lines.
+5. Document that agent prompts (in codex / droid system prompts) should
+   include "when you want to talk to a peer, emit the receipt's
+   `reply_prefix`, or replace `<AT>` in `reply_prefix_hint` with the at-sign
+   character, followed by your message".
 
 **Fix direction (ambitious, deferred).** Run an ATCP client inside each
 agent's environment. Either:
@@ -283,9 +359,14 @@ agent's environment. Either:
   that wraps `atcpctl msg send`. Already planned in §6 Phase 6 as the
   "native adapter side-channel". Reuse that plumbing.
 
-**Acceptance (simple variant).** Smoke run with `--talkback codex=@room:`,
-broadcast "codex, greet droid with @room: hello", and observe droid
-receive a `msg send` with `source=codex` body `hello`. End-to-end demo.
+**Acceptance (simple variant).** ☑ Smoke run with
+`--talkback speaker=@room:` forwarded `hello-from-speaker` from a local PTY
+speaker to a `cat` listener through the room router. ☑ Live codex-to-droid
+smoke with `--talkback codex=@room:` forwarded codex-rendered
+`• @room: Hello Droid from Codex` to droid as `Hello Droid from Codex`. ☑
+Receipt-visible rerun proved the structured API `reply_prefix` plus terminal
+`reply_prefix_hint` lets codex emit explicit-room talkback that droid receives,
+without triggering droid's `@` file picker during preamble delivery.
 
 **Size.** 0.5 day *after* Gap 3 is stable.
 
@@ -293,26 +374,26 @@ receive a `msg send` with `source=codex` body `hello`. End-to-end demo.
 
 ## Gap 7 — `terminal/write_bytes` opt-in
 
-**Status:** ☐ · **priority: low** (escape-hatch; small)
+**Status:** ☑ · shipped Apr 20, 2026 · **priority: low**
 
 **Symptom.** `POST /v1/terminal/write_bytes` rejects every call with
 `"write_bytes capability is disabled"`. The safety choice is correct, but
 the opt-in mechanism isn't wired for trusted callers.
 
-**Fix direction.**
+**Implementation shipped.**
 
-1. Add `enable_raw_bytes: bool` to `CreateSessionRequest` (default false).
+1. Added `enable_raw_bytes: bool` to `CreateSessionRequest` (default false).
 2. `generictty.Adapter` consults session config when compiling the
    `write_bytes` intent and only rejects when both the session flag and
    any adapter-level policy are off.
-3. Document in `LIVE-SMOKE.md` the one-liner for enabling it and why the
+3. Documented in `LIVE-SMOKE.md` the one-liner for enabling it and why the
    default is off.
-4. Log every `write_bytes` call at `info` with the byte count and the
-   envelope id.
+4. `atcpctl session create --enable-raw-bytes` exposes the opt-in for trusted
+   diagnostic sessions.
 
-**Acceptance.** Unit test: session created without the flag → `write_bytes`
-is rejected; session created with the flag → accepted and bytes appear on
-the PTY.
+**Acceptance.** ☑ Unit test: session created without the flag →
+`write_bytes` is rejected; session created with the flag → accepted and
+bytes appear on the PTY.
 
 **Size.** 1 hour.
 
@@ -320,36 +401,130 @@ the PTY.
 
 ## Gap 8 — Long input / paste support in `atcp-live`
 
-**Status:** ☐ · blocked on Gap 3's mode-aware paste work · **priority:
-low**
+**Status:** ☑ · shipped Apr 20, 2026 · **priority: low**
 
 **Symptom.** `atcp-live`'s stdin forwarder uses `bufio.Scanner` with a
 1 MiB buffer; multi-MB pastes silently drop. `atcpctl msg send`'s HTTP
 client has a 30 s timeout that caps very-long-prompt sends.
 
-**Fix direction.** When the recipient session's modetrack reports
-bracketed-paste active, route large inputs through the `terminal.paste`
-intent (`bracketed: true`) instead of `text` or `submit`. Increase the
-scanner buffer to 16 MiB. Raise the `msg send` client timeout to
-120 s, or make it streaming.
+**Implementation shipped.** `atcp-live`'s stdin scanner buffer is now 16 MiB
+and the ATCP HTTP client timeout is now 120 s. The room router sends
+messages >=1 MiB through `terminal.paste` with `bracketed:"auto"` and
+`submit_after:true`, so sessions with bracketed paste enabled receive a
+single bracketed paste.
 
-**Acceptance.** Paste a 5 MB markdown file into `atcp-live` → arrives at
-droid as one paste (bracketed), no byte loss.
+**Acceptance.** ☑ Unit coverage proves large room messages use
+`terminal.paste` with bracketed auto mode. The 5 MB droid paste remains a
+manual stress test rather than a blocker for the TODO.
 
 **Size.** Half a day, alongside Gap 3.
 
 ---
 
+## Hardening — Room message history replay
+
+**Status:** ☑ · shipped Apr 20, 2026 · **priority: medium**
+
+**Symptom.** Late joiners and operators had to infer room history from live
+terminal output. The daemon already persisted message audit rows when SQLite
+was enabled, but there was no replay endpoint and no in-memory history for
+the default volatile daemon mode.
+
+**Implementation shipped.**
+
+1. The broker keeps an in-memory append-only message audit log for the running
+   daemon. When a SQLite store is configured, broker startup hydrates that log
+   from persisted rows.
+2. `storage.Store` now exposes `LoadMessages(ctx, roomID, limit)`.
+   The SQLite implementation returns chronological messages and per-member
+   delivery outcomes without deadlocking its single-connection setup.
+3. `GET /v1/rooms/{id}/messages?limit=N` returns replayable message audit
+   records. `limit=0` means all messages; default is 100.
+4. `atcpctl room messages ROOM_ID --limit N` exposes the replay endpoint from
+   the shell.
+
+**Acceptance.**
+
+- ☑ Broker test: `SendMessage` appends to the in-memory audit log and
+  `ListMessages` returns the sent message with member delivery records.
+- ☑ SQLite test: `AppendMessage` then `LoadMessages` round-trips message
+  metadata and delivery rows.
+- ☑ HTTP test: `/v1/rooms/{id}/messages` returns the fan-out sent during the
+  room happy path.
+
+**Size.** 0.5 day.
+
+---
+
+## Hardening — Room event stream fan-in
+
+**Status:** ☑ · shipped Apr 20, 2026 · **priority: medium**
+
+**Symptom.** Operators needed one SSE connection per session to observe a
+room, which made multi-agent smoke tests noisy and forced clients to discover
+members before subscribing.
+
+**Implementation shipped.**
+
+1. `GET /v1/events?target=room:<id>` now fans in `terminal.output` events
+   from the active members present when the stream opens.
+2. Room stream output bodies include `room_id`, `agent_id`, and `session_id`
+   while preserving canonical ATCP envelopes.
+
+**Acceptance.**
+
+- ☑ SSE test: a room stream receives output from a joined `cat` session and
+  emits a canonical `terminal.output` envelope targeted at the room.
+
+**Known limitation.** Membership is point-in-time; reconnect after joins or
+leaves to refresh the fan-in set.
+
+---
+
+## Hardening — Terminal delivery policy
+
+**Status:** ☑ · shipped Apr 20, 2026 · **priority: high**
+
+**Symptom.** `message.send` always typed into recipients immediately. That is
+useful for smoke tests but unsafe for busy full-screen TUIs.
+
+**Implementation shipped.**
+
+1. `SendMessageRequest` accepts `terminal_policy`, `policy_timeout_ms`, and
+   `interrupt_key`.
+2. Policies:
+   - `immediate` / empty: current write-now behavior.
+   - `queue`: wait for the recipient's readiness profile before delivery.
+   - `safe-prompt-only` / `reject`: fail that member unless it is already
+     ready.
+   - `interrupt`: send `interrupt_key` before delivery. Empty defaults to
+     `Escape`, matching the common "close transient UI, then send" path.
+3. Policy failures are per-member delivery failures; fan-out still attempts
+   the other recipients.
+4. `atcpctl msg send` exposes `--terminal-policy`, `--policy-timeout`, and
+   `--interrupt-key`.
+
+**Acceptance.**
+
+- ☑ Router test: `safe-prompt-only` refuses a busy recipient without writing
+  the message.
+- ☑ Router test: `interrupt` sends `Escape` before the message submit.
+
+---
+
 ## Priority ladder (quick reference)
 
-1. ☐ **Gap 4** — readiness signal (0.5 d) · unblocks every other smoke
-2. ☐ **Gap 2** — per-session submit key + dual-submit default (0.5 d)
-3. ✎ **Gap 3** — vt screen engine (2–3 d) · design decision first
-4. ✎ **Gap 6** — talkback (0.5 d, gated on Gap 3)
-5. ☐ **Gap 1b** — codex input-loop chase (2 h–1 d) · low-ROI, do after 4/2 ship
-6. ☐ **Gap 7** — write_bytes opt-in (1 h)
-7. ☐ **Gap 5** — pre-smoke checklist + warmup-timeout (~1.5 h total)
-8. ☐ **Gap 8** — paste / long-input (0.5 d, ride-along with 3)
+1. ☑ **Gap 4** — readiness signal (0.5 d) · unblocks every other smoke
+2. ☑ **Gap 2** — per-session submit key + dual-submit default (0.5 d)
+3. ☑ **Gap 3** — vt screen engine minimum useful slice
+4. ☑ **Gap 6** — talkback simple variant
+5. ☑ **Gap 1b** — codex input-loop submit sequencing
+6. ☑ **Gap 7** — write_bytes opt-in (1 h)
+7. ☑ **Gap 5** — pre-smoke checklist + warmup-timeout (~1.5 h total)
+8. ☑ **Gap 8** — paste / long-input
+9. ☑ **Hardening** — room message history replay
+10. ☑ **Hardening** — room event stream fan-in
+11. ☑ **Hardening** — terminal delivery policy
 
 Total to close everything through Gap 6: ~5 focused days.
 

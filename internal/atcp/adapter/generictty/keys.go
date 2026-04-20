@@ -39,13 +39,15 @@ type keyEntry struct {
 // resolved via keyAliases before lookup so callers may use either "Enter" or
 // "RETURN".
 var keyTable = map[string]keyEntry{
-	"enter":     {bytes: []byte{0x0D}},
-	"linefeed":  {bytes: []byte{0x0A}},
-	"tab":       {bytes: []byte{0x09}, shiftBytes: []byte{0x1B, '[', 'Z'}},
-	"backtab":   {bytes: []byte{0x1B, '[', 'Z'}},
-	"backspace": {bytes: []byte{0x7F}},
-	"space":     {bytes: []byte{0x20}},
-	"escape":    {bytes: []byte{0x1B}},
+	"enter":         {bytes: []byte{0x0D}},
+	"enterlinefeed": {bytes: []byte{0x0D, 0x0A}},
+	"linefeed":      {bytes: []byte{0x0A}},
+	"kittyenter":    {bytes: []byte{0x1B, '[', '1', '3', 'u'}},
+	"tab":           {bytes: []byte{0x09}, shiftBytes: []byte{0x1B, '[', 'Z'}},
+	"backtab":       {bytes: []byte{0x1B, '[', 'Z'}},
+	"backspace":     {bytes: []byte{0x7F}},
+	"space":         {bytes: []byte{0x20}},
+	"escape":        {bytes: []byte{0x1B}},
 
 	"up":    {bytes: []byte{0x1B, '[', 'A'}},
 	"down":  {bytes: []byte{0x1B, '[', 'B'}},
@@ -76,20 +78,23 @@ var keyTable = map[string]keyEntry{
 // keyAliases lets users spell keys the way they think of them. Keys are
 // normalised to lower-case before lookup in this table.
 var keyAliases = map[string]string{
-	"return":     "enter",
-	"cr":         "enter",
-	"newline":    "linefeed",
-	"lf":         "linefeed",
-	"esc":        "escape",
-	"del":        "delete",
-	"ins":        "insert",
-	"pgup":       "pageup",
-	"pgdn":       "pagedown",
-	"arrowup":    "up",
-	"arrowdown":  "down",
-	"arrowleft":  "left",
-	"arrowright": "right",
-	"bs":         "backspace",
+	"return":      "enter",
+	"cr":          "enter",
+	"crlf":        "enterlinefeed",
+	"enterlf":     "enterlinefeed",
+	"kitty_enter": "kittyenter",
+	"newline":     "linefeed",
+	"lf":          "linefeed",
+	"esc":         "escape",
+	"del":         "delete",
+	"ins":         "insert",
+	"pgup":        "pageup",
+	"pgdn":        "pagedown",
+	"arrowup":     "up",
+	"arrowdown":   "down",
+	"arrowleft":   "left",
+	"arrowright":  "right",
+	"bs":          "backspace",
 	// NOTE: "backtab" is intentionally NOT an alias for "tab". BackTab is
 	// conventionally Shift+Tab (ESC [ Z), so it has its own keyTable entry
 	// above.
