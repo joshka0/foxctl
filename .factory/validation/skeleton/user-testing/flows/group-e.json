@@ -1,0 +1,143 @@
+{
+  "groupId": "group-e",
+  "testedAt": "2026-04-21T00:08:00Z",
+  "isolation": {
+    "workingDirectory": "/Users/joshka/repos/personal/foxctl",
+    "mode": "tuistry + go-test",
+    "daemonMode": "demo-binaries (cockpit_sigwinch_demo, malformed_sse_demo)",
+    "noSourceModification": true
+  },
+  "toolsUsed": ["tuistry", "go-test", "Grep"],
+  "assertions": [
+    {
+      "id": "VAL-SKEL-012",
+      "title": "Terminal minimum-size guard fires at 50x10, TUI launches at 60x15",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "tuistry launch 'bin/foxctl_tui --screen agents --api-base-url http://127.0.0.1:1' --cols 50 --rows 10 -s skel012",
+          "expected": "Terminal too small message with 'resize to ≥60x15'",
+          "observed": "tuistry snapshot at 50x10 shows: 'terminal too small — resize to ≥60x15' message."
+        },
+        {
+          "action": "tuistry launch 'bin/foxctl_tui --screen agents --api-base-url http://127.0.0.1:1' --cols 60 --rows 15 -s skel012",
+          "expected": "TUI launches successfully at minimum size",
+          "observed": "Error state renders correctly with footer '○ error ESC:quit r:retry ↑↓:nav' at 60x15."
+        },
+        {
+          "action": "tuistry launch 'bin/foxctl_tui --screen agents --api-base-url http://127.0.0.1:1' --cols 80 --rows 24 -s skel012",
+          "expected": "TUI renders correctly at 80x24",
+          "observed": "Error state renders with proper three-lane layout at 80x24."
+        }
+      ],
+      "evidence": {
+        "screenshots": [
+          "/tmp/val-skel-b/val-skel-012-80x24.png"
+        ],
+        "consoleErrors": "none (expected daemon connection failure)",
+        "network": "n/a (mock API endpoint)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SKEL-015",
+      "title": "SIGWINCH mid-stream resilience (no token drops/duplicates/focus loss)",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "tuistry launch 'bin/cockpit_sigwinch_demo' --cols 120 --rows 40 -s skel015",
+          "expected": "Three-lane layout renders at large size (120x40)",
+          "observed": "tuistry snapshot at 120x40 shows three-lane layout rendered correctly."
+        },
+        {
+          "action": "Send SIGWINCH signal to resize from 120x40 to 80x24 mid-stream",
+          "expected": "Layout adapts without corruption, token drops, or focus loss",
+          "observed": "tuistry snapshot after resize shows: layout adapts correctly without corruption, three-lane headers preserved, stream content reflows. Screenshot: val-skel-015-sigwinch-80x24.png."
+        },
+        {
+          "action": "Verify Tab navigation still works after resize",
+          "expected": "Focus cycles correctly after mid-stream resize",
+          "observed": "Tab navigation verified post-resize. Screenshot: val-skel-015-sigwinch-tab-80x24.png."
+        },
+        {
+          "action": "go test -race -count=1 -v -run 'SigwinchMidStream' ./internal/interfaces/tui/...",
+          "expected": "All SIGWINCH mid-stream tests pass",
+          "observed": "cockpit_sigwinch_test.go: 6 tests pass. TestSigwinchMidStream_TokensNotDropped, TestSigwinchMidStream_NoDuplicateRows, TestSigwinchMidStream_FocusPreserved, TestSigwinchMidStream_CancelKeyBindingWorks, TestSigwinchMidStream_RenderNoCorruption, TestSigwinchMidStream_NoGoroutineLeak all pass."
+        }
+      ],
+      "evidence": {
+        "screenshots": [
+          "/tmp/val-skel-b/val-skel-015-sigwinch-80x24.png",
+          "/tmp/val-skel-b/val-skel-015-sigwinch-tab-80x24.png"
+        ],
+        "consoleErrors": "none (demo binary)",
+        "network": "n/a (demo binary)",
+        "testOutput": "All SIGWINCH tests pass with -race flag"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SKEL-016",
+      "title": "Malformed SSE detection and visible 💔 indicator",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "tuistry launch 'bin/malformed_sse_demo' --cols 80 --rows 24 -s skel016",
+          "expected": "Three-lane layout renders; malformed SSE shows 💔 indicator",
+          "observed": "tuistry snapshot at 80x24 shows three-lane layout (Agents ┬ Detail ┬ Evidence), malformed SSE indicator (💔) visible before malformed events, graceful handling without UI freeze. Screenshot: val-skel-016-malformed-sse-80x24.png."
+        },
+        {
+          "action": "Verify multiple malformed events handled gracefully",
+          "expected": "No UI freeze; malformed events logged but don't break stream",
+          "observed": "Multiple malformed events handled gracefully. Detail pane shows Runtime/Hierarchy/Recent Activity sections. UI remains responsive."
+        },
+        {
+          "action": "go test -race -count=1 -v -run 'MalformedSSE' ./internal/interfaces/tui/...",
+          "expected": "All malformed SSE tests pass",
+          "observed": "cockpit_ask_stream_test.go: 3 tests pass (TestCockpitScreen_MalformedSSEShowsIndicator, TestCockpitScreen_MalformedSSEDoesNotFreezeUI, TestCockpitScreen_MalformedSSEViaFakeServerRecovery). events_subscriber_test.go: TestEventsSubscriber_MalformedSSE passes. agent_ask_stream_runtime_test.go: 4 malformed SSE tests pass (TestAgentAskStreamRuntime_MalformedUnknownEventType, TestAgentAskStreamRuntime_MalformedInvalidJSONPayload, TestAgentAskStreamRuntime_MalformedDoesNotPanic, TestAgentAskStreamRuntime_MalformedViaFakeSSEServer)."
+        }
+      ],
+      "evidence": {
+        "screenshots": [
+          "/tmp/val-skel-b/val-skel-016-malformed-sse-80x24.png"
+        ],
+        "consoleErrors": "none (demo binary)",
+        "network": "n/a (demo binary)",
+        "testOutput": "All malformed SSE tests pass with -race flag"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SKEL-018",
+      "title": "Minimum terminal size rendering (three-lane at 60x20)",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "go test -race -count=1 -v -run 'TestThreeLanes_HeadersRender_60x20' ./internal/interfaces/tui/...",
+          "expected": "Three-lane headers render at minimum supported size (60x20)",
+          "observed": "TestThreeLanes_HeadersRender_60x20 passes in cockpit_resize_test.go. No overlapping cells or orphaned box-drawing characters."
+        },
+        {
+          "action": "Verify VAL-SKEL-001 already validated terminal guard",
+          "expected": "Terminal minimum size guard fires at 50x10, launches at 60x15",
+          "observed": "VAL-SKEL-001 already passed: terminal guard fires at 50x10 with 'resize to ≥60x15' message; TUI launches successfully at 60x15 minimum."
+        },
+        {
+          "action": "Verify three-lane layout at minimum size",
+          "expected": "Three-lane layout renders correctly at 60x20",
+          "observed": "TestThreeLanes_HeadersRender_60x20 passes. Layout renders correctly with proper lane proportions at minimum size."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "n/a",
+        "testOutput": "All minimum-size tests pass with -race flag"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 4 assertions: all 4 passed. VAL-SKEL-012: Terminal guard fires at 50x10 with 'resize to ≥60x15' message; TUI launches at 60x15 minimum. VAL-SKEL-015: SIGWINCH mid-stream resize (120x40→80x24) preserves layout without corruption, token drops, or focus loss; Tab navigation works post-resize. VAL-SKEL-016: Malformed SSE shows 💔 indicator; multiple malformed events handled gracefully without UI freeze. VAL-SKEL-018: Three-lane layout renders correctly at minimum supported size (60x20). All go tests pass with -race flag."
+}

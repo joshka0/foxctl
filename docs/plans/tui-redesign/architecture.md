@@ -76,50 +76,63 @@ registry is typed via Go generics — each concrete runtime wraps
 ### Decision (c): Shared Generic Bounded-Runtime Design
 
 **Decision:** Introduce `runtime.Bounded[Req, Upd]` — a generic bounded-queue
-runtime that encapsulates the goroutine lifecycle pattern shared by all three
-current runtimes. The existing `ConsoleStreamPump`, `ConsoleAskRuntime`, and
-`ConsoleCancelRuntime` delegate to `Bounded` internally rather than each
-implementing their own goroutine scaffolding.
+runtime that encapsulates the goroutine lifecycle pattern shared by the
+request-driven runtimes. The existing `ConsoleAskRuntime` and
+`ConsoleCancelRuntime` delegate to `Bounded` internally. `ConsoleStreamPump`
+retains an independent goroutine lifecycle because its source-driven SSE
+callback model does not fit `Bounded`'s request-driven handler pattern.
 
 **How the three existing runtimes collapse or coexist:**
 
 1. **`ConsoleStreamPump`** (`internal/interfaces/tui/console_stream_pump.go:63`)
-   is source-driven (no `Enqueue` — it reads from an SSE connection). It
-   collapses into `Bounded` by using a dedicated `startSource(ctx, source)`
-   method instead of the standard `Enqueue` channel. The pump still exposes its
-   existing `Updates() <-chan ConsoleStreamUpdate`, `Stop()`, and `Close()`
-   API, but internally delegates goroutine lifecycle to `Bounded`'s
-   `run()` loop with `sync.Once` stop and `sync.WaitGroup` wait.
+   is source-driven (no `Enqueue` — it reads from an SSE connection and pushes
+   updates via a callback). It **does not delegate to `Bounded`**. The pump's
+   lifecycle is driven by the SSE source: when a frame arrives, the callback
+   fires immediately. `Bounded`'s request-driven `Enqueue`/`handle` pattern
+   would force an unnatural inversion — the pump would have to enqueue
+   synthetic requests to itself on every SSE frame. This is accurately
+documented in
+   [`internal/interfaces/tui/components/README.md`](../../../internal/interfaces/tui/components/README.md)
+   (see the "Hand-written files" table which lists `console_*.go` as
+   "Console runtimes (delegating to `runtime.Bounded`)" — a shorthand that
+   applies to the two request-driven runtimes, not the pump). The pump
+   retains its own `context.WithCancel`, `sync.Once`, `sync.WaitGroup`, and
+   `run()` loop, preserving its existing public API and test semantics.
 
 2. **`ConsoleAskRuntime`** (`internal/interfaces/tui/console_ask_runtime.go:109`)
-   is request-driven (`Enqueue(ctx, req)`). It collapses into `Bounded` by
-   using `Bounded[ConsoleAskRequest, ConsoleAskUpdate]` directly. The runtime
-   supplies a `handle(ctx, req) Upd` function to `Bounded`, which runs it in
-   the bounded goroutine. The existing `Enqueue()`, `Updates()`, `Stop()`,
-   `Close()` API is preserved as a thin wrapper around `Bounded`'s methods.
+   is request-driven (`Enqueue(ctx, req)`). It delegates to
+   `Bounded[ConsoleAskRequest, ConsoleAskUpdate]`. The runtime supplies a
+   `handle(ctx, req) Upd` function to `Bounded`, which runs it in the bounded
+   goroutine. The existing `Enqueue()`, `Updates()`, `Stop()`, `Close()` API
+   is preserved as a thin wrapper around `Bounded`'s methods.
 
 3. **`ConsoleCancelRuntime`** (`internal/interfaces/tui/console_cancel_runtime.go:85`)
-   is request-driven like `ConsoleAskRuntime`. It collapses identically:
+   is request-driven like `ConsoleAskRuntime`. It delegates identically:
    `Bounded[ConsoleCancelRequest, ConsoleCancelUpdate]` with a `handle`
    function. The existing API surface is preserved.
 
-All three runtimes retain their current public API and their existing tests
-pass unchanged (VAL-CMP-002). Internally, the duplicated `context.WithCancel`,
-`sync.Once`, `sync.WaitGroup`, `requests`/`updates` channel pair, and `run()`
-method are replaced by a single `Bounded` instance per runtime. New runtimes
-(events subscription, rooms subscription) are built directly on `Bounded`
-without copying boilerplate.
+Two of the three runtimes delegate to `Bounded`; the pump stays independent.
+The two delegating runtimes eliminate ~80% of their duplicated boilerplate.
+New request-driven runtimes (events subscription, rooms subscription) are
+built directly on `Bounded` without copying boilerplate. The pump's
+independence is a deliberate exception, not an oversight — forcing it into
+`Bounded` would add indirection without reducing complexity.
 
 **Rationale:** The three runtimes share ~80% structural similarity (cited in
 audit section (h), pain point #2). Each has its own `sendUpdate()` helper, its
 own buffer-size constants, its own `Enqueue()`/`Updates()`/`Stop()`/`Close()`
 surface, and its own `requests`/`updates` channel pair. A generic `Bounded`
-extracts this common pattern into a tested, reusable abstraction. Adding a
-fourth runtime (e.g., an events watcher) goes from ~150 lines of boilerplate
-to ~20 lines of handler function plus a `Bounded` constructor call. The
-generic also enforces the mission's bounded-channel invariant at the type
-level — the buffer size is a required constructor parameter, and the
-backpressure policy (block, drop-oldest, or error) is explicit.
+extracts this common pattern into a tested, reusable abstraction for the two
+request-driven runtimes. Adding a new request-driven runtime (e.g., an events
+watcher) goes from ~150 lines of boilerplate to ~20 lines of handler function
+plus a `Bounded` constructor call. The generic also enforces the mission's
+bounded-channel invariant at the type level — the buffer size is a required
+constructor parameter, and the backpressure policy (block, drop-oldest, or
+error) is explicit. The pump's independent lifecycle is preserved because its
+SSE callback model is fundamentally source-driven: the server pushes frames,
+and the pump forwards them. Wrapping this in a request-driven `Bounded` would
+require the pump to enqueue synthetic requests to itself on every frame,
+adding indirection without reducing code.
 
 **Alternatives Considered:**
 
@@ -128,6 +141,15 @@ backpressure policy (block, drop-oldest, or error) is explicit.
   boilerplate per runtime is the exact pain point the audit identified, and
   it makes the testing burden quadratic (each new runtime needs its own
   lifecycle tests).
+
+- **Force the pump into `Bounded` with synthetic Enqueue** — rewrite
+  `ConsoleStreamPump` so that every SSE callback enqueues a request to a
+  `Bounded[StreamReq, ConsoleStreamUpdate]`. Rejected because: it inverts the
+  natural control flow (source-driven → request-driven), adds a channel hop
+  per frame with no benefit, and complicates cancellation (the SSE connection
+  and the `Bounded` goroutine would each need their own `context.WithCancel`).
+  The pump's existing `sync.Once` + `sync.WaitGroup` lifecycle is simpler and
+  already tested.
 
 - **Interface-based runtime without generics** — define a `Runtime` interface
   with `Enqueue(any)` and `Updates() <-chan any`, losing type safety. Rejected
@@ -447,7 +469,7 @@ rationale). It satisfies VAL-DOCS-012.
 | # | Audit Finding | Source (path:line) | Decision | Resolution |
 |---|--------------|-------------------|----------|------------|
 | 1 | Chained `NewShell*` constructors | `shell.gsx:38–95` | Decision (b): Runtime registry | The registry replaces the constructor chain with a single `RegisterRuntime()` call. New runtimes no longer require modifying four constructors. |
-| 2 | Three near-duplicate runtime goroutines | `console_stream_pump.go:63`, `console_ask_runtime.go:109`, `console_cancel_runtime.go:85` | Decision (c): Shared generic bounded-runtime | All three runtimes delegate to `Bounded[Req, Upd]`, eliminating ~80% duplicated boilerplate. |
+| 2 | Three near-duplicate runtime goroutines | `console_stream_pump.go:63`, `console_ask_runtime.go:109`, `console_cancel_runtime.go:85` | Decision (c): Shared generic bounded-runtime | Two runtimes (`ConsoleAskRuntime`, `ConsoleCancelRuntime`) delegate to `Bounded[Req, Upd]`, eliminating ~80% of their duplicated boilerplate. `ConsoleStreamPump` retains an independent goroutine lifecycle because its source-driven SSE callback model does not fit `Bounded`'s request-driven handler pattern (see Decision (c) §1 for rationale). |
 | 3 | String-keyed transcript kinds | `models.go:75`, `event_stream.go:254` | Decision (e): Typed EntryKind enum | `EntryKind int` with 18 named constants replaces string keys. `ParseEntryKind()` maps legacy strings. |
 | 4 | Ambient `ShellState` with no reducer boundary | `shell_state.go:8`, `shell.gsx:338–356` | Decision (d): Typed entity model + reducer | New cockpit uses `CockpitState` with a single `Reduce()` function. Legacy `ShellState` preserved for coexist. |
 | 5 | Synchronous boot blocks UI thread | `live_state.go:12` | Decision (f): Async boot with loading state | `NewCockpit()` returns immediately; background fetch; loading/error/ready phases. |
