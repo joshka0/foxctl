@@ -25,7 +25,7 @@ import (
 
 // DefaultPromptRegex is the built-in fallback when adapters or rooms do not
 // supply a more specific regex. It matches a trailing shell-style prompt.
-var DefaultPromptRegex = regexp.MustCompile(`(?m)(?:\$|>|❯)[[:space:]]*$`)
+var DefaultPromptRegex = regexp.MustCompile(`(?m)(?:\$|#|>|❯)[[:space:]]*$`)
 
 // DefaultIdleWindow is the default "has stopped writing for N" threshold.
 const DefaultIdleWindow = 400 * time.Millisecond
