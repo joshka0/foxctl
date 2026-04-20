@@ -410,6 +410,10 @@ func (c *CockpitScreen) buildEvidenceContent(line string) []string {
 		content = append(content, "")
 		content = append(content, "Code: ERUNTIME")
 		content = append(content, "Details: "+errText)
+	case strings.HasPrefix(line, "� malformed"):
+		content = append(content, "Type: malformed event")
+		content = append(content, "")
+		content = append(content, "Raw: "+strings.TrimPrefix(line, "� malformed event: "))
 	default:
 		content = append(content, "Type: unknown")
 		content = append(content, "")
@@ -527,6 +531,12 @@ func (c *CockpitScreen) ApplyAskStreamUpdate(update AgentAskStreamUpdate) {
 	case AgentAskUpdateRejected:
 		if update.Rejected != nil {
 			c.statusMessage = update.Rejected.Reason
+		}
+	case AgentAskUpdateMalformed:
+		if update.Malformed != nil {
+			c.streamLines = append(c.streamLines, "� malformed event: "+update.Malformed.RawData)
+		} else {
+			c.streamLines = append(c.streamLines, "� malformed event")
 		}
 	}
 }

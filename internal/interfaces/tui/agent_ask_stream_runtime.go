@@ -123,26 +123,35 @@ func NewHTTPAgentAskStreamSource(client *APIClient, agentID string) AgentAskStre
 }
 
 // parseAgentAskEventStream reads an SSE stream and emits normalized agent ask events.
+// Unrecognised or unparseable events are emitted as malformed events rather than
+// silently dropped, so the UI can surface a visible indicator.
 func parseAgentAskEventStream(r io.Reader, onEvent func(AgentAskStreamEvent) error) error {
 	return ParseConsoleEventStream(r, func(event ConsoleStreamEvent) error {
-		askEvent, ok := mapConsoleStreamEventToAgentAsk(event)
-		if !ok {
-			return nil
-		}
+		askEvent := mapConsoleStreamEventToAgentAsk(event)
 		return onEvent(askEvent)
 	})
 }
 
 // mapConsoleStreamEventToAgentAsk converts a ConsoleStreamEvent (from SSE) to an
-// AgentAskStreamEvent. Returns false if the event should be skipped.
-func mapConsoleStreamEventToAgentAsk(event ConsoleStreamEvent) (AgentAskStreamEvent, bool) {
+// AgentAskStreamEvent.  Unrecognised event types and unparseable payloads are
+// returned with Phase == "malformed" so the runtime can emit a visible indicator
+// instead of silently dropping the frame.
+func mapConsoleStreamEventToAgentAsk(event ConsoleStreamEvent) AgentAskStreamEvent {
 	if event.Payload != nil {
 		payload := event.Payload
+		phase := normalizeStreamType(payload.Type)
+		if phase != "" && isKnownAskPhase(phase) {
+			return AgentAskStreamEvent{
+				Phase:         phase,
+				CorrelationID: payload.CorrelationID,
+				Content:       payload.Content,
+			}
+		}
+		// Payload present but phase is unknown → malformed.
 		return AgentAskStreamEvent{
-			Phase:         normalizeStreamType(payload.Type),
-			CorrelationID: payload.CorrelationID,
-			Content:       payload.Content,
-		}, true
+			Phase:   "malformed",
+			Content: payload.Type,
+		}
 	}
 
 	// Try to decode from raw Data if Payload is missing.
@@ -150,11 +159,35 @@ func mapConsoleStreamEventToAgentAsk(event ConsoleStreamEvent) (AgentAskStreamEv
 		var ask AgentAskStreamEvent
 		if err := json.Unmarshal(event.Data, &ask); err == nil {
 			ask.Phase = normalizeStreamType(ask.Phase)
-			return ask, true
+			if ask.Phase == "" || isKnownAskPhase(ask.Phase) {
+				return ask
+			}
+			// Parsed OK but phase is unknown → malformed.
+			return AgentAskStreamEvent{
+				Phase:   "malformed",
+				Content: ask.Phase,
+			}
+		}
+		// Invalid JSON → malformed.
+		return AgentAskStreamEvent{
+			Phase:   "malformed",
+			Content: string(event.Data),
 		}
 	}
 
-	return AgentAskStreamEvent{}, false
+	// Empty event → malformed (should be rare, but safe).
+	return AgentAskStreamEvent{
+		Phase: "malformed",
+	}
+}
+
+// isKnownAskPhase reports whether phase is a recognised ask-stream phase.
+func isKnownAskPhase(phase string) bool {
+	switch phase {
+	case "started", "delta", "tool_call", "tool_result", "completed", "error", "cancelled":
+		return true
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +206,7 @@ const (
 	AgentAskUpdateError      AgentAskUpdateType = "error"
 	AgentAskUpdateCancelled  AgentAskUpdateType = "cancelled"
 	AgentAskUpdateRejected   AgentAskUpdateType = "rejected"
+	AgentAskUpdateMalformed  AgentAskUpdateType = "malformed"
 )
 
 // AgentAskStreamUpdate is a typed notification for ask-stream consumers.
@@ -186,6 +220,7 @@ type AgentAskStreamUpdate struct {
 	Error      *AgentAskError
 	Cancelled  *AgentAskCancelled
 	Rejected   *AgentAskRejected
+	Malformed  *AgentAskMalformed
 }
 
 // AgentAskStarted signals the stream has begun.
@@ -229,6 +264,12 @@ type AgentAskRejected struct {
 
 // AgentAskCancelled signals the stream was cancelled by the user.
 type AgentAskCancelled struct{}
+
+// AgentAskMalformed signals an unrecognised or malformed SSE event.
+type AgentAskMalformed struct {
+	RawPhase string
+	RawData  string
+}
 
 // ---------------------------------------------------------------------------
 // AgentAskStreamRuntime — source-driven runtime for agent ask-streams.
@@ -462,8 +503,18 @@ func (rt *AgentAskStreamRuntime) mapEventToUpdate(event AgentAskStreamEvent) *Ag
 			Type:      AgentAskUpdateCancelled,
 			Cancelled: &AgentAskCancelled{},
 		}
+	case "malformed":
+		return &AgentAskStreamUpdate{
+			Type:     AgentAskUpdateMalformed,
+			Malformed: &AgentAskMalformed{RawPhase: event.Phase, RawData: event.Content},
+		}
 	default:
-		return nil
+		// Unknown phase → emit as malformed so the UI surfaces a visible
+		// indicator instead of silently dropping the frame.
+		return &AgentAskStreamUpdate{
+			Type:     AgentAskUpdateMalformed,
+			Malformed: &AgentAskMalformed{RawPhase: event.Phase, RawData: event.Content},
+		}
 	}
 }
 

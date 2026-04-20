@@ -2,11 +2,15 @@ package tui
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	gotui "github.com/grindlemire/go-tui"
 )
 
 // ---------------------------------------------------------------------------
@@ -394,6 +398,191 @@ func TestCockpitScreen_ComposerTextRoundTrip(t *testing.T) {
 	cs.ClearComposer()
 	if cs.ComposerText() != "" {
 		t.Fatalf("ComposerText after Clear = %q, want empty", cs.ComposerText())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// VAL-SKEL-016: Malformed SSE — cockpit-level assertions
+// ---------------------------------------------------------------------------
+
+func TestCockpitScreen_MalformedSSEShowsIndicator(t *testing.T) {
+	t.Parallel()
+
+	source := AgentAskStreamSourceFunc(func(_ context.Context, onEvent func(AgentAskStreamEvent) error) error {
+		_ = onEvent(AgentAskStreamEvent{Phase: "delta", ContentDelta: "before"})
+		_ = onEvent(AgentAskStreamEvent{Phase: "totally_unknown", Content: "???"})
+		_ = onEvent(AgentAskStreamEvent{Phase: "delta", ContentDelta: "after"})
+		return nil
+	})
+
+	cs := NewCockpitScreen("http://localhost:8090")
+	cs.SetAgents([]AgentInventoryItem{
+		{ID: "agent-abc", Role: "researcher", Status: "running"},
+	})
+	cs.SetSelectedIndex(0)
+	cs.UpdateSize(80, 24)
+	cs.SetPhase(CockpitPhaseReady)
+
+	rt, err := NewAgentAskStreamRuntime(context.Background(), source, 16)
+	if err != nil {
+		t.Fatalf("NewAgentAskStreamRuntime error: %v", err)
+	}
+	defer rt.Close()
+	cs.SetAskStreamRuntime(rt)
+
+	cs.SetComposerText("hello")
+	if err := cs.SubmitComposer(); err != nil {
+		t.Fatalf("SubmitComposer error: %v", err)
+	}
+
+	updates := collectAgentAskUpdates(t, rt.Updates())
+	for _, u := range updates {
+		cs.ApplyAskStreamUpdate(u)
+	}
+
+	_, mt := renderCockpitToMT(cs, 80, 24)
+	var detailText strings.Builder
+	for y := 1; y < 23; y++ {
+		detailText.WriteString(extractDetailLane(mt, y, 80))
+	}
+	text := detailText.String()
+
+	// Must contain the malformed-event indicator.
+	if !strings.Contains(text, "malformed") && !strings.Contains(text, "�") {
+		t.Errorf("detail lane should contain malformed-event indicator, got: %q", text)
+	}
+	// Subsequent well-formed token should still render.
+	if !strings.Contains(text, "before") || !strings.Contains(text, "after") {
+		t.Errorf("detail lane should contain 'before' and 'after' tokens, got: %q", text)
+	}
+}
+
+func TestCockpitScreen_MalformedSSEDoesNotFreezeUI(t *testing.T) {
+	t.Parallel()
+
+	source := AgentAskStreamSourceFunc(func(_ context.Context, onEvent func(AgentAskStreamEvent) error) error {
+		_ = onEvent(AgentAskStreamEvent{Phase: "nonsense", Content: "bad"})
+		_ = onEvent(AgentAskStreamEvent{Phase: "delta", ContentDelta: "ok"})
+		return nil
+	})
+
+	cs := NewCockpitScreen("http://localhost:8090")
+	cs.SetAgents([]AgentInventoryItem{
+		{ID: "agent-abc", Role: "researcher", Status: "running"},
+	})
+	cs.SetSelectedIndex(0)
+	cs.UpdateSize(80, 24)
+	cs.SetPhase(CockpitPhaseReady)
+
+	rt, err := NewAgentAskStreamRuntime(context.Background(), source, 16)
+	if err != nil {
+		t.Fatalf("NewAgentAskStreamRuntime error: %v", err)
+	}
+	defer rt.Close()
+	cs.SetAskStreamRuntime(rt)
+
+	cs.SetComposerText("hello")
+	if err := cs.SubmitComposer(); err != nil {
+		t.Fatalf("SubmitComposer error: %v", err)
+	}
+
+	updates := collectAgentAskUpdates(t, rt.Updates())
+	for _, u := range updates {
+		cs.ApplyAskStreamUpdate(u)
+	}
+
+	// ESC key should still work after malformed frame — verify KeyMap doesn't panic.
+	km := cs.KeyMap()
+	for _, kb := range km {
+		if kb.Pattern.Key == gotui.KeyEscape {
+			// Simulate ESC — should not panic even after malformed events.
+			kb.Handler(gotui.KeyEvent{Key: gotui.KeyEscape})
+			break
+		}
+	}
+
+	// Drawer should also still work.
+	cs.openEvidenceDrawer()
+	if !cs.EvidenceDrawerOpen() {
+		t.Error("expected drawer to open after malformed events")
+	}
+}
+
+func TestCockpitScreen_MalformedSSEViaFakeServerRecovery(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer does not implement http.Flusher")
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		// Well-formed.
+		_, _ = w.Write([]byte("event: delta\ndata: {\"phase\":\"delta\",\"content_delta\":\"first\"}\n\n"))
+		flusher.Flush()
+
+		// Unknown event type.
+		_, _ = w.Write([]byte("event: weird\ndata: {\"phase\":\"weird\",\"content\":\"???\"}\n\n"))
+		flusher.Flush()
+
+		// Invalid JSON.
+		_, _ = w.Write([]byte("event: delta\ndata: {broken\n\n"))
+		flusher.Flush()
+
+		// Well-formed after malformed.
+		_, _ = w.Write([]byte("event: delta\ndata: {\"phase\":\"delta\",\"content_delta\":\"second\"}\n\n"))
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	client, err := NewAPIClient(srv.URL, srv.Client())
+	if err != nil {
+		t.Fatalf("NewAPIClient error: %v", err)
+	}
+
+	cs := NewCockpitScreen(srv.URL)
+	cs.SetAgents([]AgentInventoryItem{
+		{ID: "agent-abc", Role: "researcher", Status: "running"},
+	})
+	cs.SetSelectedIndex(0)
+	cs.UpdateSize(80, 24)
+	cs.SetPhase(CockpitPhaseReady)
+
+	source := NewHTTPAgentAskStreamSource(client, "agent-abc")
+	rt, err := NewAgentAskStreamRuntime(context.Background(), source, 16)
+	if err != nil {
+		t.Fatalf("NewAgentAskStreamRuntime error: %v", err)
+	}
+	defer rt.Close()
+	cs.SetAskStreamRuntime(rt)
+
+	cs.SetComposerText("hello")
+	if err := cs.SubmitComposer(); err != nil {
+		t.Fatalf("SubmitComposer error: %v", err)
+	}
+
+	updates := collectAgentAskUpdates(t, rt.Updates())
+	for _, u := range updates {
+		cs.ApplyAskStreamUpdate(u)
+	}
+
+	_, mt := renderCockpitToMT(cs, 80, 24)
+	var detailText strings.Builder
+	for y := 1; y < 23; y++ {
+		detailText.WriteString(extractDetailLane(mt, y, 80))
+	}
+	text := detailText.String()
+
+	// Malformed indicator visible.
+	if !strings.Contains(text, "malformed") && !strings.Contains(text, "�") {
+		t.Errorf("detail lane should contain malformed indicator, got: %q", text)
+	}
+	// Both well-formed tokens visible.
+	if !strings.Contains(text, "first") || !strings.Contains(text, "second") {
+		t.Errorf("detail lane should contain 'first' and 'second' tokens, got: %q", text)
 	}
 }
 

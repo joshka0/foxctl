@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"strings"
 	"sync"
@@ -468,5 +470,223 @@ func collectAgentAskUpdates(t *testing.T, updates <-chan AgentAskStreamUpdate) [
 		case <-time.After(2 * time.Second):
 			t.Fatal("timed out waiting for agent ask stream updates")
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// VAL-SKEL-016: Malformed SSE — no panic, visible indicator, recovery
+// ---------------------------------------------------------------------------
+
+func TestAgentAskStreamRuntime_MalformedUnknownEventType(t *testing.T) {
+	t.Parallel()
+
+	source := AgentAskStreamSourceFunc(func(_ context.Context, onEvent func(AgentAskStreamEvent) error) error {
+		_ = onEvent(AgentAskStreamEvent{Phase: "delta", ContentDelta: "before"})
+		_ = onEvent(AgentAskStreamEvent{Phase: "unknown_weird_type", Content: "garbage"})
+		_ = onEvent(AgentAskStreamEvent{Phase: "delta", ContentDelta: "after"})
+		return nil
+	})
+
+	rt, err := NewAgentAskStreamRuntime(context.Background(), source, 16)
+	if err != nil {
+		t.Fatalf("NewAgentAskStreamRuntime error: %v", err)
+	}
+	defer rt.Close()
+
+	if err := rt.Submit("agent-1", "hello"); err != nil {
+		t.Fatalf("Submit error: %v", err)
+	}
+
+	updates := collectAgentAskUpdates(t, rt.Updates())
+
+	// Should have: token("before"), malformed, token("after"), done.
+	var types []AgentAskUpdateType
+	for _, u := range updates {
+		types = append(types, u.Type)
+	}
+
+	if len(types) < 3 {
+		t.Fatalf("expected >=3 updates, got %d: %+v", len(types), types)
+	}
+
+	// Find the malformed update between the two tokens.
+	foundMalformed := false
+	for _, u := range updates {
+		if u.Type == AgentAskUpdateMalformed {
+			foundMalformed = true
+			if u.Malformed == nil || u.Malformed.RawPhase != "unknown_weird_type" {
+				t.Fatalf("malformed update should carry raw phase, got %+v", u.Malformed)
+			}
+		}
+	}
+	if !foundMalformed {
+		t.Fatalf("expected malformed update in updates, got %+v", types)
+	}
+
+	// Verify the last update is done.
+	last := updates[len(updates)-1]
+	if last.Type != AgentAskUpdateDone {
+		t.Fatalf("last update should be done, got %q", last.Type)
+	}
+}
+
+func TestAgentAskStreamRuntime_MalformedInvalidJSONPayload(t *testing.T) {
+	t.Parallel()
+
+	source := AgentAskStreamSourceFunc(func(_ context.Context, onEvent func(AgentAskStreamEvent) error) error {
+		_ = onEvent(AgentAskStreamEvent{Phase: "delta", ContentDelta: "before"})
+		// Simulate an event where the payload is invalid JSON.
+		_ = onEvent(AgentAskStreamEvent{Phase: "", ContentDelta: "{not json"})
+		_ = onEvent(AgentAskStreamEvent{Phase: "delta", ContentDelta: "after"})
+		return nil
+	})
+
+	rt, err := NewAgentAskStreamRuntime(context.Background(), source, 16)
+	if err != nil {
+		t.Fatalf("NewAgentAskStreamRuntime error: %v", err)
+	}
+	defer rt.Close()
+
+	if err := rt.Submit("agent-1", "hello"); err != nil {
+		t.Fatalf("Submit error: %v", err)
+	}
+
+	updates := collectAgentAskUpdates(t, rt.Updates())
+
+	// Should have: token("before"), malformed, token("after"), done.
+	var foundMalformed bool
+	for _, u := range updates {
+		if u.Type == AgentAskUpdateMalformed {
+			foundMalformed = true
+		}
+	}
+	if !foundMalformed {
+		t.Fatalf("expected malformed update for invalid JSON payload")
+	}
+
+	// Verify tokens before and after are present.
+	var tokens []string
+	for _, u := range updates {
+		if u.Type == AgentAskUpdateToken && u.Token != nil {
+			tokens = append(tokens, u.Token.Delta)
+		}
+	}
+	joined := strings.Join(tokens, "")
+	if !strings.Contains(joined, "before") || !strings.Contains(joined, "after") {
+		t.Fatalf("expected 'before' and 'after' tokens, got %q", joined)
+	}
+}
+
+func TestAgentAskStreamRuntime_MalformedDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	// Rapid-fire malformed events interleaved with valid ones.
+	source := AgentAskStreamSourceFunc(func(_ context.Context, onEvent func(AgentAskStreamEvent) error) error {
+		phases := []string{"delta", "bogus", "", "weird", "delta", "", "completed"}
+		for _, p := range phases {
+			_ = onEvent(AgentAskStreamEvent{Phase: p, ContentDelta: "x"})
+		}
+		return nil
+	})
+
+	rt, err := NewAgentAskStreamRuntime(context.Background(), source, 16)
+	if err != nil {
+		t.Fatalf("NewAgentAskStreamRuntime error: %v", err)
+	}
+	defer rt.Close()
+
+	if err := rt.Submit("agent-1", "hello"); err != nil {
+		t.Fatalf("Submit error: %v", err)
+	}
+
+	// This should not panic regardless of malformed events.
+	updates := collectAgentAskUpdates(t, rt.Updates())
+
+	// We should get some malformed updates and some tokens.
+	var malformedCount, tokenCount int
+	for _, u := range updates {
+		switch u.Type {
+		case AgentAskUpdateMalformed:
+			malformedCount++
+		case AgentAskUpdateToken:
+			tokenCount++
+		}
+	}
+	if malformedCount == 0 {
+		t.Fatal("expected at least one malformed update")
+	}
+	if tokenCount == 0 {
+		t.Fatal("expected at least one token update")
+	}
+}
+
+func TestAgentAskStreamRuntime_MalformedViaFakeSSEServer(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("response writer does not implement http.Flusher")
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		// Well-formed token.
+		_, _ = w.Write([]byte("event: delta\ndata: {\"phase\":\"delta\",\"content_delta\":\"Hello\"}\n\n"))
+		flusher.Flush()
+
+		// Unknown event type.
+		_, _ = w.Write([]byte("event: gibberish\ndata: {\"phase\":\"gibberish\",\"content\":\"???\"}\n\n"))
+		flusher.Flush()
+
+		// Invalid JSON payload.
+		_, _ = w.Write([]byte("event: delta\ndata: {not valid json\n\n"))
+		flusher.Flush()
+
+		// Well-formed token after malformed.
+		_, _ = w.Write([]byte("event: delta\ndata: {\"phase\":\"delta\",\"content_delta\":\" world\"}\n\n"))
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	client, err := NewAPIClient(srv.URL, srv.Client())
+	if err != nil {
+		t.Fatalf("NewAPIClient error: %v", err)
+	}
+
+	source := NewHTTPAgentAskStreamSource(client, "agent-1")
+
+	rt, err := NewAgentAskStreamRuntime(context.Background(), source, 16)
+	if err != nil {
+		t.Fatalf("NewAgentAskStreamRuntime error: %v", err)
+	}
+	defer rt.Close()
+
+	if err := rt.Submit("agent-1", "hello"); err != nil {
+		t.Fatalf("Submit error: %v", err)
+	}
+
+	updates := collectAgentAskUpdates(t, rt.Updates())
+
+	var tokens []string
+	var malformedCount int
+	for _, u := range updates {
+		switch u.Type {
+		case AgentAskUpdateToken:
+			if u.Token != nil {
+				tokens = append(tokens, u.Token.Delta)
+			}
+		case AgentAskUpdateMalformed:
+			malformedCount++
+		}
+	}
+
+	if malformedCount == 0 {
+		t.Fatal("expected at least one malformed update from fake SSE server")
+	}
+	joined := strings.Join(tokens, "")
+	if !strings.Contains(joined, "Hello") || !strings.Contains(joined, "world") {
+		t.Fatalf("expected 'Hello' and 'world' tokens, got %q", joined)
 	}
 }
