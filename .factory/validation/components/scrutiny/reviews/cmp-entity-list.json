@@ -1,0 +1,22 @@
+{
+  "featureId": "cmp-entity-list",
+  "reviewedAt": "2026-04-19T02:30:00Z",
+  "commitId": "4b5d96fa",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Solid, well-structured implementation of the EntityList widget. The code is clean, uses theme tokens exclusively (no raw color literals), has no non-deterministic calls in render/reducer code, and covers all required behaviors (navigation, wrap-around, focus indicator, empty/loading/error states). One test bug found (TestNoWrapAround missing WithFocused(true)), but the underlying no-wrap logic is correct — it's just undertested via unit tests. All 26 EntityList tests pass under -race.",
+    "issues": [
+      {
+        "file": "internal/interfaces/tui/components/entity_list_test.go",
+        "line": 111,
+        "severity": "non_blocking",
+        "description": "TestNoWrapAround does not set WithFocused(true), so HandleKey returns false immediately at the early focus guard (entity_list.go:196). The test passes for the wrong reason — it's verifying that unfocused lists ignore keys, not that no-wrap-around navigation clamps at boundaries. The underlying moveDown()/moveUp() no-wrap logic (lines 230, 246) appears correct but is untested by unit tests. The no-wrap behavior does get exercised indirectly in TestSingleItemNavigation (which uses WithWrapAround(false) AND WithFocused(true)), but that test only covers the single-item edge case, not the boundary clamp case (last item → down stays, first item → up stays)."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "EntityList widget is well-implemented with comprehensive test coverage. Implementation matches the component spec (docs/plans/tui-redesign/component-spec.md) closely: all documented props are present, keyboard behavior matches the spec table, focus indicator uses colored left border (▌) via theme.Colors.BorderFocus (not font-weight only), and empty/loading/error state overlays are integrated. 22 MockTerminal unit tests + 4 snapshot tests + 3 tuistory PNGs. All tests pass under -race. One non-blocking issue: TestNoWrapAround is missing WithFocused(true), making it a redundant unfocused-key-guard test rather than a true no-wrap-around boundary test."
+}

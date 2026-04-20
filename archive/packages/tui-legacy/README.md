@@ -6,8 +6,12 @@ This package contains the pre-control-plane terminal UI that previously lived at
 
 It is retained for historical reference only. New terminal control-plane work should target:
 
-- [`docs/plans/tui-agent-control-plane.md`](../../../docs/plans/tui-agent-control-plane.md)
-- `packages/tui-agent/`
+- `cmd/foxctl_tui/`
+- `internal/interfaces/tui/`
+- `make go-tui-agent`
+
+The intermediate TypeScript control-plane TUI is also archived at
+`archive/packages/tui-agent/`.
 
 Reason for archive:
 

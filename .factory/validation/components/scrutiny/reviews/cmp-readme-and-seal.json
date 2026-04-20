@@ -1,0 +1,50 @@
+{
+  "featureId": "cmp-readme-and-seal",
+  "reviewedAt": "2026-04-19T01:30:00Z",
+  "commitId": "eab5d183",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The M2 component package README (internal/interfaces/tui/components/README.md, 625 lines, 2679 words) thoroughly covers all five required sections (a)–(e) with substantial, accurate content. Both authoring walkthroughs (FooBadge: 463 words, Rooms: 368 words) exceed the 300-word minimum and reference only real, existing paths, functions, and commands. VAL-CROSS-006 grep verification confirms zero violations of time.Now(), rand.*, os.Getenv across all M2 widget implementation files. All widget implementations use theme.Colors.* tokens exclusively — no raw color literals found. The README accurately documents the actual codebase structure, test patterns, and conventions.",
+    "issues": [
+      {
+        "file": "internal/interfaces/tui/components/README.md",
+        "line": 150,
+        "severity": "non_blocking",
+        "description": "Section (c) Step 2 says 'The writeSnapshot helper is defined in the existing snapshot test files and writes to testdata/snapshots/<name>.txt.' — technically writeSnapshot is only defined once in detail_pane_snapshot_test.go:150. Other snapshot files call it but don't define it. This works because they're in the same Go package, but the wording could be slightly more precise ('defined in the existing snapshot test files' is close enough since they share the package)."
+      },
+      {
+        "file": "internal/interfaces/tui/components/README.md",
+        "line": 207,
+        "severity": "non_blocking",
+        "description": "The 'Render(buf *tui.Buffer)' method in the example code doesn't return anything, but the 'Key handler' section says 'returns updated state'. In the actual codebase, HandleKey methods mutate internal state directly without returning (e.g., entity_list.go HandleKey just modifies selectedIdx). The README's description is a slight simplification but doesn't mislead since the code example is correct."
+      },
+      {
+        "file": "internal/interfaces/tui/components/README.md",
+        "line": 307,
+        "severity": "non_blocking",
+        "description": "Section (d) rule 9 says 'Do not add new dependencies. The framework is pinned to github.com/grindlemire/go-tui v0.11.0.' — this is mission-specific guidance (VAL-CROSS-005) which is appropriate for the README, but could confuse contributors working outside the mission context. Minor issue."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The README documents the .gsx regeneration command as both 'go generate github.com/grindlemire/go-tui/cmd/tui@v0.11.0 ./internal/interfaces/tui/...' and 'tui generate ./internal/interfaces/tui/...'. This toolchain information is valuable but only exists in the README, not in .factory/library/architecture.md. If the README is ever moved or reorganized, this knowledge could be lost.",
+      "evidence": "README.md lines ~108-115 document the .gsx regeneration commands. .factory/library/architecture.md focuses on high-level architecture, not toolchain commands."
+    },
+    {
+      "area": "conventions",
+      "observation": "The three-file widget pattern (implementation, test, snapshot test) is documented in the README but not in .factory/library/architecture.md. This is a package-level convention that's now well-documented in the README itself, which is the canonical location for LLM authors.",
+      "evidence": "README.md section (a) 'Widget file layout' clearly documents the pattern. This is the right place for it."
+    },
+    {
+      "area": "skills",
+      "observation": "The worker followed the tui-engineer-worker skill procedure faithfully. The skill says TDD is mandatory, but this is a documentation-only feature so no code tests were needed. The worker correctly focused on verification (running existing tests, grep checks) rather than trying to force a TDD workflow on a README.",
+      "evidence": "Transcript skeleton shows: read mission files → explored codebase → checked VAL-CROSS-006 → created README → verified headings/word counts → ran tests → ran doc-links → committed. skillFeedback.followedProcedure = true."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The M2 component package README is comprehensive, accurate, and well-structured. All five required sections (a)–(e) are present with substantial content (8 ## headings, 2679 words total). Both authoring walkthroughs exceed 300 words (FooBadge: 463, Rooms: 368) and reference only real, existing paths, functions, and commands. VAL-CROSS-006 is verified — zero violations of time.Now(), rand.*, os.Getenv across widget implementation files. All widget code uses theme.Colors.* tokens exclusively. Three non-blocking issues noted: (1) writeSnapshot helper description is slightly imprecise about where it's defined, (2) HandleKey 'returns updated state' wording is a simplification, (3) mission-specific no-new-deps rule could confuse outside contributors. None affect the README's usability for LLM authors."
+}

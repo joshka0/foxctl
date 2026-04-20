@@ -1,0 +1,51 @@
+{
+  "featureId": "cmp-detail-pane",
+  "reviewedAt": "2026-04-19T08:30:00Z",
+  "commitId": "2f4aa3840c95528ee411c41bf306896652ce4f96",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "DetailPane implementation fully satisfies VAL-CMP-005. All 8 spec test expectations from component-spec.md §6 are covered by 19 MockTerminal unit tests plus 5 snapshot tests. The implementation correctly handles header rendering (title + status badge), section separators (───), scrollable body with scrollbar (│ track / ┃ thumb), title truncation with ellipsis (…), empty state with guidance copy, focus indicator (colored left border ▌), and scroll key guards. Theme tokens are used exclusively — zero raw color literals. The code follows the project's functional-core pattern with state managed through the DetailPane struct and rendering via Render(buf *tui.Buffer).",
+    "issues": [
+      {
+        "file": "internal/interfaces/tui/components/detail_pane.go",
+        "line": 374,
+        "severity": "non_blocking",
+        "description": "Separator identification uses `line.text == \"\" && lineIdx > 0` which could collide with a Section that has an empty Title string. If a section with Title=\"\" appears at lineIdx > 0, it would be rendered as a separator rule instead of an empty-titled section. This is unlikely in practice but is a latent ambiguity. A fix would be to use a dedicated `isSeparator bool` field on contentLine, or a sentinel text value."
+      },
+      {
+        "file": "internal/interfaces/tui/components/detail_pane.go",
+        "line": 199,
+        "severity": "non_blocking",
+        "description": "The `e` key for 'Open evidence drawer' listed in component-spec.md §4 keyboard behavior table is not implemented. HandleKey only handles scroll-related keys. This is acceptable since the evidence drawer is a separate feature and the spec key says it applies when 'HasEntity=true' — the DetailPane widget itself doesn't own a drawer. However, the spec should clarify whether `e` should be consumed (return true) or passed through."
+      },
+      {
+        "file": "internal/interfaces/tui/components/detail_pane.go",
+        "line": 276,
+        "severity": "non_blocking",
+        "description": "Empty-state copy uses generic \"Select an item to view details.\" per the spec's generic guidance. The spec §8 also defines context-specific copy for agent detail (\"Select an agent from the inventory or spawn one.\") and room detail (\"Select a room to view details.\"). The current implementation only supports generic copy. This may need to be parameterized later when the DetailPane is integrated into specific views."
+      },
+      {
+        "file": "internal/interfaces/tui/components/detail_pane.go",
+        "line": 0,
+        "severity": "non_blocking",
+        "description": "Loading state (spec §9) and error state (spec §10) are not implemented. The spec defines copy guidance like \"Loading agent details…\" with a spinner and error behavior with \"Press r to retry.\". These are deferred states that may be needed when the DetailPane is connected to live data. Not blocking for M2 component milestone since the component spec marks these as guidance rather than M2 requirements."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The `truncate`, `runeWidth`, and `center` utility functions are defined in entity_list.go and reused by detail_pane.go within the same package. These are general-purpose TUI utilities that could benefit from being extracted to a shared utility file (e.g., `util.go`) to make their availability more discoverable and avoid implicit coupling between widget files.",
+      "evidence": "entity_list.go:511 defines truncate(), entity_list.go:545 defines runeWidth(), entity_list.go:555 defines center(). detail_pane.go uses all three without importing — works because same package, but the source location is non-obvious."
+    },
+    {
+      "area": "conventions",
+      "observation": "The separator line approach (using an empty-text contentLine as a sentinel) is repeated from EntityList's pattern but isn't documented as a convention. Future widget authors may not know this pattern.",
+      "evidence": "detail_pane.go:336-341 creates separator with text=\"\"; detail_pane.go:374 identifies separators by text==\"\" && lineIdx > 0"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "DetailPane (VAL-CMP-005) passes review. The implementation is thorough and well-tested: 19 MockTerminal unit tests cover all 8 spec test expectations, plus 5 snapshot tests produce the 4 required tuistory variants (populated, empty, scrolled, truncated-title) plus a focused-vs-unfocused comparison. The code is clean, uses theme tokens exclusively, follows the project's patterns (constructor options, Render(buf) pattern, MockTerminal testing), and passes `go test -race`. Non-blocking issues: (1) separator line identification could collide with empty-titled sections — use a dedicated field instead of sentinel text, (2) spec `e` key for evidence drawer not implemented but may be out of scope, (3) context-specific empty-state copy and loading/error states deferred for integration. No blocking issues found."
+}

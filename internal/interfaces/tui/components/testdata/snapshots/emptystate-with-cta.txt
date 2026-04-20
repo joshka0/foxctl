@@ -1,0 +1,5 @@
+
+
+                     No agents running.
+      Spawn one: foxctl agent spawn --role researcher
+

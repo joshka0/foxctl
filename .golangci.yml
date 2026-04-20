@@ -107,7 +107,7 @@ linters:
       # TODO: Remove these exclusions as files are migrated
       - linters:
           - forbidigo
-        path: '(cmd/.*/main\.go|cmd/foxctl/cmd/.*|cmd/foxctl_viewer/.*|cmd/synctest/.*|internal/adapters/skillslib/.*|internal/runtime/actor/.*|internal/agent/.*|internal/context/companion/.*|internal/runtime/daemon/.*|internal/runtime/engine/.*|internal/interfaces/gateway/.*|internal/intelligence/analysis/.*|internal/intelligence/codemap/.*|internal/intelligence/indexing/.*|internal/platform/lsp/.*|internal/platform/.*|internal/intelligence/retrieval/.*|internal/storage/.*|internal/tooling/testwatch/.*|internal/interfaces/web/.*|plugins/.*|scripts/.*|skills/.*|.*_test\.go)'
+        path: '(cmd/.*/main\.go|cmd/foxctl/cmd/.*|cmd/foxctl_viewer/.*|cmd/synctest/.*|internal/adapters/skillslib/.*|internal/runtime/actor/.*|internal/agent/.*|internal/context/companion/.*|internal/runtime/daemon/.*|internal/runtime/engine/.*|internal/interfaces/gateway/.*|internal/interfaces/tui/components/cmd/.*|internal/intelligence/analysis/.*|internal/intelligence/codemap/.*|internal/intelligence/indexing/.*|internal/platform/lsp/.*|internal/platform/.*|internal/intelligence/retrieval/.*|internal/storage/.*|internal/tooling/testwatch/.*|internal/interfaces/web/.*|plugins/.*|scripts/.*|skills/.*|.*_test\.go)'
       # Keep complexity pressure on smaller units, but don't block branch work on the
       # known command aggregators and long integration tests.
       - linters:

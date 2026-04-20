@@ -7,8 +7,10 @@ import (
 )
 
 const (
-	ToolProfileDefault   = "default"
-	ToolProfileCodeIntel = "code-intel"
+	ToolProfileDefault        = "default"
+	ToolProfileCodeIntel      = "code-intel"
+	ToolProfileLongCoTMinimal = "longcot-minimal"
+	ToolProfileLongCoTRLM     = "longcot-rlm"
 )
 
 // FilterTools returns a constrained tool set for one experimental profile.
@@ -16,6 +18,11 @@ func FilterTools(tools []rlm.Tool, profile string) []rlm.Tool {
 	switch strings.ToLower(strings.TrimSpace(profile)) {
 	case "", ToolProfileDefault:
 		return append([]rlm.Tool(nil), tools...)
+	case ToolProfileLongCoTMinimal, ToolProfileLongCoTRLM:
+		// LongCoT primary conditions must not expose repo, vault, memory,
+		// artifact, file, or subcall tools. The RLM profile is intentionally
+		// empty until deterministic non-leaky tools exist.
+		return []rlm.Tool{}
 	case ToolProfileCodeIntel:
 		allowed := map[string]struct{}{
 			"semantic_search_code": {},

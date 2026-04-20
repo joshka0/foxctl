@@ -1,92 +1,210 @@
-# Architecture — Room Sandbox Mission
+# Architecture — foxctl TUI Operator Cockpit
 
-How the room sandbox system works at a high level.
+How the system works at a high level. Workers and validators read this before touching code.
 
-## What belongs here
-System-level architectural knowledge that workers need to understand how components relate. NOT implementation details — those belong in code comments.
+**What belongs here:** Components, how they relate, data flows, invariants, key abstractions. No implementation details.
+**What does NOT belong here:** Step-by-step commands (see `.factory/services.yaml`), env vars (see `environment.md`), testing surface (see `user-testing.md`).
 
 ---
 
-## Component Overview
+## System Overview
+
+The **foxctl TUI** is the Go-native terminal cockpit that operators use to
+inspect and steer the foxctl daemon. It is a separate surface from the React
+`packages/gui-agent/` (which is out of scope for this mission).
 
 ```
-foxctl CLI
-├── foxctl gateway (long-lived daemon)
-│   ├── tsnet listener (Tailscale networking, userspace WireGuard)
-│   ├── HTTP server
-│   │   ├── /healthz (subsystem status)
-│   │   ├── /terminal/{room-id} (xterm.js frontend, embedded)
-│   │   └── /ws/terminal/{room-id} (WebSocket→PTY bridge)
-│   └── SSH server
-│       └── room-<id>@<hostname> (SSH→PTY bridge)
-├── foxctl room create --sandbox
-│   ├── Git worktree (via internal/platform/worktree/)
-│   ├── tmux/zellij session
-│   └── Gateway registration
-└── foxctl room destroy
-    ├── Worktree cleanup
-    ├── tmux session kill
-    └── Gateway deregistration
+┌────────────────────────────┐        HTTP/SSE/JSON-RPC        ┌──────────────────────────┐
+│ cmd/foxctl_tui (Go binary) │ ──────────────────────────────▶ │ foxctl web serve daemon │
+│                            │                                 │   • agents                │
+│  internal/interfaces/tui/  │ ◀──────────────────────────────│   • rooms                 │
+│  (grindlemire/go-tui)      │   GET/POST + SSE + JSON-RPC     │   • events               │
+└────────────────────────────┘                                 └──────────────────────────┘
 ```
 
-## Data Flow
+The TUI is a pure **consumer** of the existing daemon API. No new endpoints
+are added in this mission. Any gaps identified during M1 are noted as
+follow-up work, not fixed here.
 
-### Room Create --sandbox
-1. CLI parses `--sandbox` flag and options (--worktree-root, --base-ref, --runtime)
-2. If runtime=opensandbox: provision container via OpenSandbox client
-3. If runtime=worktree (default): create git worktree via internal/platform/worktree/
-4. Create tmux session named after room
-5. Persist SandboxConfig in Room struct (board store)
-6. Register room with gateway (terminal route)
-7. Return envelope with sandbox metadata
+---
 
-### Web Terminal Access
-1. Browser loads /terminal/{room-id} (embedded xterm.js)
-2. xterm.js opens WebSocket to /ws/terminal/{room-id}
-3. Gateway resolves room-id → tmux session name (from Room.SandboxConfig)
-4. Gateway spawns `tmux attach -t <session>` in a new PTY (creack/pty)
-5. PTY stdin/stdout piped to WebSocket bidirectionally
-6. Resize events: browser → WebSocket message → pty.Setsize()
-7. On WebSocket close: PTY exits, tmux client detaches (session survives)
+## Three Planes
 
-### SSH Access
-1. User runs `ssh room-<id>@<gateway-hostname>`
-2. Gateway SSH server accepts connection on tsnet listener
-3. WhoIs lookup verifies Tailscale identity
-4. SSH username parsed for room ID
-5. Gateway spawns `tmux attach -t <session>` in PTY
-6. SSH channels connected to PTY
-7. On SSH disconnect: PTY exits, tmux detaches cleanly
+Conceptually the cockpit UI is organized into three interaction lanes
+(per DESIGN.md) and three memory planes (per docs/plans/go-tui-agent-shell.md):
 
-### Room Destroy
-1. Verify no active agents in room
-2. Kill tmux session (`tmux kill-session -t <name>`)
-3. Remove worktree (via internal/platform/worktree/)
-4. Or: delete OpenSandbox container
-5. Deregister from gateway
-6. Clear SandboxConfig from Room struct
+**Interaction lanes (UI layout):**
 
-## Key Invariants
+- **Main lane** — primary operational surface (agent inventory, rooms list).
+- **Detail lane** — selected entity (agent detail, hierarchy, runtime snapshot).
+- **Evidence lane** — raw payloads, tool calls, errors (drawer; progressive reveal).
 
-- **One gateway process** routes to all rooms (not one per room)
-- **tmux sessions survive** terminal disconnect (web/SSH detach, not kill)
-- **Worktrees are outside** the main repo directory (sibling pattern)
-- **Tailscale-only access** (no public ports) unless --dev mode
-- **SandboxConfig persisted** in board store alongside room metadata
-- **Idempotent operations**: re-creating sandbox on existing room returns existing state
-- **Rollback on failure**: if any step in create fails, previous steps are cleaned up
+**Memory planes (conceptual, surfaced honestly):**
 
-## Existing Code Integration Points
+- **Companion Memory** — per-agent conversation history.
+- **Named Durable Memory** — workspace-scoped durable memory.
+- **ACA / Continuity** — Obsidian knowledge layer.
 
-| Component | Location | Integration |
-|-----------|----------|-------------|
-| Room struct | internal/domain/agent/board_message.go | Add SandboxConfig field |
-| Board store | internal/storage/blackboard/board_store.go | Persist/restore SandboxConfig |
-| Room create | cmd/foxctl/cmd/room.go | Add --sandbox flag handling |
-| Room destroy | cmd/foxctl/cmd/room.go | Add sandbox cleanup |
-| tmux bridge | internal/tmuxbridge/client.go | Use for session creation |
-| zellij bridge | internal/zellijbridge/client.go | Use for zellij sessions |
-| WebSocket hub | internal/web/consolews/hub.go | Reference for WS patterns |
-| Web server | internal/web/server.go | Reference for HTTP patterns |
-| OpenSandbox | internal/runtime/sandbox/opensandbox/client.go | Extend, don't rewrite |
-| Cobra root | cmd/foxctl/cmd/root.go | Register gateway command |
+The information-architecture doc (M1 deliverable) specifies which cockpit
+surfaces expose which planes and how projection/heuristic data is labeled.
+
+---
+
+## Key Components (target design, delivered by the mission)
+
+### M1 — Docs (no code)
+
+All delivered under `docs/plans/tui-redesign/`:
+
+- `research-go-tui.md` — reference for LLM authors (core types, widgets, event loop, idioms, anti-patterns, testing).
+- `audit-current-tui.md` — file:line audit of `internal/interfaces/tui/` + DESIGN.md gap analysis.
+- `architecture.md` — explicit decisions (coexist vs refactor, runtime registry, typed entities, async boot, `.gsx` toolchain, surface ownership).
+- `information-architecture.md` — three-lane layout, primary flow, keybindings, progressive reveal, three-plane memory.
+- `component-spec.md` — per-widget contract for M2.
+- `integration-map.md` — table of every API/stream the cockpit consumes.
+- `adrs/` — 5+ ADRs with Context/Decision/Alternatives/Consequences/Status.
+
+### M2 — Component library seed (code)
+
+Placed under `internal/interfaces/tui/` at a sub-path chosen in M1 (e.g.,
+`internal/interfaces/tui/components/` and `internal/interfaces/tui/runtime/`).
+
+- **`runtime.Bounded[Req, Upd]`** — generic bounded-queue runtime replacing
+  duplicated scaffolding in `console_stream_pump.go`, `console_ask_runtime.go`,
+  `console_cancel_runtime.go`. Exposes `Enqueue(ctx, req) error`,
+  `Updates() <-chan Upd`, `Stop()`, `Close()`.
+- **Typed entities package** — `Agent`, `AgentNode`, `Room`, `RoomMessage`,
+  `EventRow`, plus `EntryKind` typed enum replacing the string-keyed
+  transcript/event kinds (18 current values covered; legacy-string mapper
+  provided for backward compat).
+- **Widget primitives** — `EntityList`, `DetailPane`, `Tabs`, `Drawer`,
+  `StreamViewer`, `EmptyState`, `LoadingState`, `StatusBadge`, `KeybindHint`.
+- **Theme tokens** — color + spacing constants in a dedicated package;
+  raw color literals forbidden in widget implementations.
+
+### M3 — Walking skeleton (code)
+
+End-to-end proof of the M2 patterns against the live daemon. Reachable via a
+documented invocation on `cmd/foxctl_tui` (flag or subcommand, per M1).
+
+- **Async boot** — loading state within 500ms; transitions to ready or error
+  without blocking the UI thread.
+- **Three-lane layout** — Main (live agent inventory), Detail (selected
+  agent's runtime + hierarchy + transcript preview), Evidence (drawer for
+  raw payloads).
+- **Ask/chat** — streams tokens via `POST /api/agents/{id}/ask-stream`; cancels
+  via `POST /api/agents/{id}/ask-stream/cancel`.
+- **Live refresh** — single subscription to `/api/events` (topic filter for
+  agent events); inventory updates within 5s of external spawn/delete.
+- **Status footer** — connection health, active entity, compact keybindings.
+
+---
+
+## Runtime & Concurrency Invariants
+
+These invariants apply to every new component introduced in M2 and consumed in
+M3. Violations are auto-rejected during scrutiny review.
+
+- **Single-writer state ownership.** Each piece of mutable state has one owner
+  goroutine. Cross-goroutine updates go through channels or message queues,
+  never shared mutable maps.
+- **Bounded queues.** All async queues are bounded; backpressure policy is
+  explicit (drop, block, or error). No unbounded channels.
+- **Context threading.** Every long-lived operation accepts
+  `context.Context`. No goroutine survives `Stop()` longer than 100ms.
+- **Leak-free.** `goleak.VerifyNone` or a `runtime.NumGoroutine()` delta check
+  is part of every runtime test.
+- **Snapshot reads.** Hot read paths (render) use immutable snapshots
+  (`atomic.Value`/`atomic.Pointer`) to avoid contention.
+- **Determinism.** No `time.Now()`, `rand.*`, or `os.Getenv` inside pure render
+  or state-reducer functions. Injected deps only.
+
+---
+
+## Integration Points
+
+The cockpit consumes these daemon endpoints. Full table with methods,
+cancellation, backpressure is documented in `integration-map.md` (M1
+deliverable).
+
+| Endpoint                                        | Transport | Purpose                         |
+| ----------------------------------------------- | --------- | ------------------------------- |
+| `GET /api/agents`                               | HTTP      | Agent inventory                 |
+| `GET /api/agents/{id}`                          | HTTP      | Agent detail / runtime snapshot |
+| `POST /api/agents/{id}/ask-stream`              | SSE       | Streaming ask                   |
+| `POST /api/agents/{id}/ask-stream/cancel`       | HTTP      | Cancel in-flight ask            |
+| Agent hierarchy                                 | JSON-RPC  | Tree of parent/child agents     |
+| `/api/events`                                   | SSE       | Live event hub (topic filtered) |
+| `GET /api/rooms`                                | HTTP      | Rooms directory                 |
+| `/api/rooms/{id}/events`                        | SSE       | Per-room event stream           |
+
+**Gaps identified** (not fixed this mission; captured as follow-ups in M1):
+agent hierarchy HTTP parity (currently JSON-RPC only), agent watch NDJSON
+endpoint alignment.
+
+---
+
+## Testing Strategy
+
+**Unit (M2):** MockTerminal-based go-tui tests for every widget and runtime.
+Table-driven. Tests written before implementation (TDD red → green).
+
+**Integration (M2):** Adapter tests against the existing `APIClient` using
+`httptest` servers (extend patterns in `api_client_test.go`,
+`agent_adapter_test.go`).
+
+**End-to-end (M3):** Tuistory-driven snapshot + interaction tests for the
+walking-skeleton flows. Each test uses the **per-test-daemon fixture** — a
+helper that boots `foxctl web serve -p 0` with a temp `FOXCTL_STORAGE_ROOT`,
+parses the chosen port, seeds N agents deterministically, and tears down on
+`t.Cleanup`.
+
+**Determinism:** all tests use injected clock/UUID where needed; golden
+outputs are sorted.
+
+---
+
+## Authoring Ergonomics (LLM-first)
+
+A primary motivation for this mission is that Codex/Claude struggle to extend
+the current TUI correctly. The new patterns are explicitly designed to be
+easy to extend:
+
+- **Explicit constructors.** No chained `NewShell*` setters; each constructor
+  takes all deps.
+- **Typed enums.** `EntryKind` typed constants replace string-keyed kinds;
+  adding a new kind is one const + exhaustive switch coverage.
+- **Generic runtimes.** `Bounded[Req, Upd]` replaces three near-duplicate
+  goroutine scaffolds; adding a new runtime is one type parameterization.
+- **Single-source renders.** Each widget has one render function; no
+  ambient state.
+- **Authoring README.** The M2 component package ships with a README
+  explaining "how to add a new widget" with exact commands, paths, and
+  required tests.
+
+---
+
+## Unicode Width
+
+The go-tui framework provides `tui.RuneWidth(r rune) int` as the canonical way
+to compute terminal display width. All widget truncation, padding, and centering
+must use display width (not rune count or byte count). CJK characters are
+2 cells wide; combining marks and ZWJ sequences are 0 cells.
+
+The M2 component library uses three key utility functions in the `components`
+package that all rely on `tui.RuneWidth`: `truncate()`, `center()`, and
+`padOrTruncateWidth()`. Future widget authors should use these or follow the
+same pattern.
+
+---
+
+## Mission Boundaries
+
+See `missionDir/AGENTS.md` for the full list. Highlights:
+
+- Framework stays on `github.com/grindlemire/go-tui v0.11.0` — no framework
+  swaps, no version upgrades unless M1 explicitly motivates one.
+- `packages/gui-agent/` (React console) is **not touched**.
+- `archive/` is read-only; no reviving archived TUIs.
+- No new daemon endpoints or API routes.
+- No pushes to remote; work stays on branch `feat/tui-go`.

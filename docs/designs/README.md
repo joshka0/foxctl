@@ -7,3 +7,9 @@ Design docs in this directory may be exploratory, partially implemented, or supe
 - Validate implementation status against `docs/architecture/` and code.
 - Move obsolete designs to `docs/archive/designs/` when clearly superseded.
 - Treat these as decision context, not guaranteed current behavior.
+
+## Active Proposals
+
+- [Room Triad Protocol](room-triad-protocol.md) - Implementer,
+  verifier/tester, and judge/coordinator workflow layered on room agile evidence
+  lanes.

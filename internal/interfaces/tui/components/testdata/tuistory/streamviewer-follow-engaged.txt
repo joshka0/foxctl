@@ -1,0 +1,9 @@
+
+│Stream line 7: some content here
+│Stream line 8: some content here
+│Stream line 9: some content here
+│Stream line 10: some content here
+│Stream line 11: some content here
+│Stream line 12: some content here
+│Stream line 13: some content here
+│Stream line 14: some content here ↓

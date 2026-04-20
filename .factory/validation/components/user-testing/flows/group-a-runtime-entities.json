@@ -1,0 +1,144 @@
+{
+  "groupId": "group-a-runtime-entities",
+  "testedAt": "2026-04-19T12:00:00Z",
+  "isolation": {
+    "workingDirectory": "/Users/joshka/repos/personal/foxctl",
+    "mode": "read-only",
+    "noDaemon": true,
+    "noSourceModification": true
+  },
+  "toolsUsed": ["go-test", "code-inspection", "grep", "Read"],
+  "assertions": [
+    {
+      "id": "VAL-CMP-001",
+      "title": "Generic runtime.Bounded[Req, Upd] — correctness + concurrency + leak-free",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Ran go test -race -count=50 -v -run 'TestBounded' ./internal/interfaces/tui/runtime/...",
+          "expected": "All tests pass with -race flag, 50 iterations, no failures or panics",
+          "observed": "All 15 test functions PASS across 50 iterations. Total time ~12s. Exit code 0."
+        },
+        {
+          "action": "Inspected bounded.go for required API surface",
+          "expected": "Bounded[Req, Upd] type exists with Enqueue, Updates, Stop, Close methods",
+          "observed": "Bounded[Req, Upd] struct found at internal/interfaces/tui/runtime/bounded.go with Enqueue(ctx, req) error, Updates() <-chan Upd, Stop(), Close() methods. Also has ErrStopped sentinel error."
+        },
+        {
+          "action": "Mapped test cases to behaviors (i)-(vii)",
+          "expected": "At least 7 test cases covering (i)-(vii)",
+          "observed": "15 total test cases found. Coverage mapping: (i) TestBounded_ConfigurableBufferSize + TestBounded_DefaultBufferSize, (ii) TestBounded_StopIsIdempotent, (iii) TestBounded_EnqueueOnStoppedReturnsErrStopped, (iv) TestBounded_UpdatesClosedOnce, (v) TestBounded_ContextCancelDuringEnqueue, (vi) TestBounded_NoGoroutineLeak, (vii) TestBounded_ConcurrentEnqueueWithStop. All 7 behaviors covered."
+        },
+        {
+          "action": "Verified -race flag and goleak usage",
+          "expected": "Tests use -race flag; goleak.VerifyTestMain used for leak detection",
+          "observed": "Tests ran with -race flag successfully. TestMain calls goleak.VerifyTestMain(m). TestBounded_NoGoroutineLeak uses runtime.NumGoroutine() delta check with 200ms settle time."
+        },
+        {
+          "action": "Verified determinism with -count=50",
+          "expected": "No flakes across 50 iterations",
+          "observed": "All 50 iterations passed consistently. No flakes detected."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A — pure Go unit tests, no network",
+        "testOutput": "15 tests PASS, 50 iterations, -race clean, exit 0",
+        "testCases": [
+          "TestBounded_ConfigurableBufferSize (behavior i)",
+          "TestBounded_DefaultBufferSize (behavior i)",
+          "TestBounded_StopIsIdempotent (behavior ii)",
+          "TestBounded_EnqueueOnStoppedReturnsErrStopped (behavior iii)",
+          "TestBounded_UpdatesClosedOnce (behavior iv)",
+          "TestBounded_ContextCancelDuringEnqueue (behavior v)",
+          "TestBounded_NoGoroutineLeak (behavior vi)",
+          "TestBounded_ConcurrentEnqueueWithStop (behavior vii)",
+          "TestBounded_EnqueueBlocksWhenFullUntilDrained",
+          "TestBounded_CloseAfterStopIsNoop",
+          "TestBounded_ProcessesAllEnqueuedBeforeStop",
+          "TestBounded_HandlerErrorPropagates",
+          "TestBounded_NilReceiverStopIsNoop",
+          "TestBounded_NilHandlerRejected",
+          "TestBounded_NegativeBufferSizeRejected"
+        ]
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CMP-002",
+      "title": "No regressions — existing runtime tests and smoke modes unchanged",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Ran go test -race -count=1 ./internal/interfaces/tui/...",
+          "expected": "All test packages pass with exit code 0",
+          "observed": "All packages pass: tui (2.172s), tui/components (1.265s), tui/entities (1.627s), tui/runtime (2.063s), tui/theme (1.408s). Exit code 0."
+        },
+        {
+          "action": "Ran git diff --stat main..HEAD on existing runtime test files",
+          "expected": "No semantic changes to expected outcomes in existing test files",
+          "observed": "git diff shows 3 files were ADDED (not modified): console_ask_runtime_test.go (468 lines), console_cancel_runtime_test.go (451 lines), console_stream_pump_test.go (321 lines). These are new additions, not modifications. No changes to existing test outcomes."
+        },
+        {
+          "action": "Verified files are new additions with git diff --diff-filter=A",
+          "expected": "All three test files show as Added (A) not Modified (M)",
+          "observed": "All three files confirmed as Added (A): console_ask_runtime_test.go, console_cancel_runtime_test.go, console_stream_pump_test.go"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A",
+        "testOutput": "go test -race ./internal/interfaces/tui/... exits 0, all packages pass",
+        "gitDiffOutput": "3 files added (1240 insertions), 0 modifications to existing tests"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CMP-003",
+      "title": "Typed entities package — types and typed kind enum",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Ran go test -race -count=1 -v -run 'EntryKind|Legacy|entities' ./internal/interfaces/tui/entities/...",
+          "expected": "All entity and EntryKind tests pass",
+          "observed": "7 tests PASS: TestEntryKindConstants_Exist, TestEntryKindConstants_Distinct, TestEntryKind_String, TestParseEntryKind_AllCurrentValues, TestParseEntryKind_CaseInsensitive, TestParseEntryKind_Unknown, TestParseEntryKind_RoundTrip. Exit code 0."
+        },
+        {
+          "action": "Ran grep for type declarations (Agent, AgentNode, Room, RoomMessage, EventRow)",
+          "expected": "All 5 types exist in entities package",
+          "observed": "Found all 5 types: Agent (entities.go:4), AgentNode with Parent *AgentNode and Children []*AgentNode (entities.go:21), Room (entities.go:28), RoomMessage (entities.go:36), EventRow (entities.go:47)"
+        },
+        {
+          "action": "Ran grep for all 18 EntryKind constants",
+          "expected": "All 18 EntryKind constants exist: Pending, Ask, Reply, Event, Cmd, Draft, Status, Error, Tool, Counts, Next, Brief, Epic, Inflight, Agent, Console, Connected, Heartbeat",
+          "observed": "All 18 constants confirmed in kind.go lines 20-37: EntryKindPending, EntryKindAsk, EntryKindReply, EntryKindEvent, EntryKindCmd, EntryKindDraft, EntryKindStatus, EntryKindError, EntryKindTool, EntryKindCounts, EntryKindNext, EntryKindBrief, EntryKindEpic, EntryKindInflight, EntryKindAgent, EntryKindConsole, EntryKindConnected, EntryKindHeartbeat"
+        },
+        {
+          "action": "Verified legacy string mapper (ParseEntryKind) exists and has tests",
+          "expected": "ParseEntryKind function exists with case-insensitive lookup; unit tests cover all 18 values",
+          "observed": "ParseEntryKind(s string) EntryKind exists in kind.go (line 85) with case-insensitive lookup via strings.ToLower. Tests cover: all 18 current values (TestParseEntryKind_AllCurrentValues), case-insensitive mapping (TestParseEntryKind_CaseInsensitive), unknown values return EntryKindUnknown (TestParseEntryKind_Unknown), round-trip ParseEntryKind→String (TestParseEntryKind_RoundTrip)"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "N/A",
+        "testOutput": "7 entity tests PASS with -race, exit 0",
+        "typesFound": ["Agent", "AgentNode", "Room", "RoomMessage", "EventRow"],
+        "entryKindConstants": [
+          "EntryKindPending", "EntryKindAsk", "EntryKindReply", "EntryKindEvent",
+          "EntryKindCmd", "EntryKindDraft", "EntryKindStatus", "EntryKindError",
+          "EntryKindTool", "EntryKindCounts", "EntryKindNext", "EntryKindBrief",
+          "EntryKindEpic", "EntryKindInflight", "EntryKindAgent", "EntryKindConsole",
+          "EntryKindConnected", "EntryKindHeartbeat"
+        ]
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 3 assertions: all 3 passed. VAL-CMP-001: Bounded[Req,Upd] runtime has 15 test cases covering all 7 required behaviors (configurable buffer, idempotent Stop, ErrStopped sentinel, Updates closed once, context cancellation, goroutine leak check, concurrent enqueue+stop). All pass with -race -count=50. VAL-CMP-002: Full tui test suite passes with -race; git diff confirms existing runtime test files were only added (not modified). VAL-CMP-003: All 5 entity types exist (Agent, AgentNode, Room, RoomMessage, EventRow), all 18 EntryKind constants present, ParseEntryKind legacy mapper tested with 7 unit tests covering all values, case-insensitivity, unknown handling, and round-trip."
+}

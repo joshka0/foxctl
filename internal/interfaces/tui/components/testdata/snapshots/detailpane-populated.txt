@@ -1,0 +1,15 @@
+▌ ● agent-abc12345
+  Runtime
+  state: running
+  provider: openrouter
+  model: aurora-alpha
+  uptime: 2h30m
+─────────────────────────────────────────────────
+  Hierarchy
+  parent: none
+  children: 2
+─────────────────────────────────────────────────
+  Recent Activity
+  ask: 'review git diff' → done
+  ask: 'fix lint errors' → running
+

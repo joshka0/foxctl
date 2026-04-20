@@ -1,0 +1,10 @@
+▌ ● agent-abc12345
+  detail content line                            │
+  detail content line                            │
+  detail content line                            │
+  detail content line                            ┃
+  detail content line                            ┃
+  detail content line                            │
+  detail content line                            │
+  detail content line                            │
+  detail content line                            │

@@ -1,0 +1,15 @@
+                              │Agent Detail    ESC to close
+                              │Agent ID: abc-123
+                              │Role: researcher
+                              │Status: running
+                              │Workspace: /home/user/project
+                              │Last activity: 2m ago
+                              │
+                              │Raw payload:
+                              │{"id":"abc-123","role":"rese…
+                              │
+                              │
+                              │
+                              │
+                              │
+                              │

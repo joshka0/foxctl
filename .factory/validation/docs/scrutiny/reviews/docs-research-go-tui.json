@@ -1,0 +1,50 @@
+{
+  "featureId": "docs-research-go-tui",
+  "reviewedAt": "2026-04-19T00:00:00Z",
+  "commitId": "d13c8640",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The research-go-tui.md document (681 lines) is a thorough and well-structured API reference for go-tui v0.11.0. All 9 required topics (a)–(i) are covered with dedicated section headings. It includes 13 URL citations (≥5 required), 28 explicit symbol references (≥3 required), and 3 idiomatic code examples of 23, 35, and 39 lines each (≥10 lines required), demonstrating distinct patterns (composition, state/events+channel watchers, manual event loop). The worker verified against the actual go-tui v0.11.0 source in the Go module cache, which gives high confidence in the API accuracy. I found one minor naming inaccuracy (KeyMap described as `[]keyBinding` but actual type is `[]KeyBinding`) and one API name gap in the gap analysis (uses `WithTrapFocus` but actual API is `WithModalTrapFocus`). Neither issue is blocking for an LLM authoring reference.",
+    "issues": [
+      {
+        "file": "docs/plans/tui-redesign/research-go-tui.md",
+        "line": 95,
+        "severity": "non_blocking",
+        "description": "Section (a) KeyMap description says `type KeyMap []keyBinding` but the actual go-tui v0.11.0 source defines `type KeyMap []KeyBinding` (exported type, not unexported). The correct type name is `KeyBinding`, not `keyBinding`. This is a minor inaccuracy that could confuse an LLM author trying to reference the type directly."
+      },
+      {
+        "file": "docs/plans/tui-redesign/research-go-tui.md",
+        "line": 660,
+        "severity": "non_blocking",
+        "description": "Gap analysis table row for 'Drawer / modal for evidence' mentions 'Modal with trapFocus' and 'WithTrapFocus(true)'. The actual go-tui v0.11.0 API uses `WithModalTrapFocus(v bool)` (in modal_options.go), not `WithTrapFocus`. The approach column should reference the correct function name."
+      },
+      {
+        "file": "docs/plans/tui-redesign/research-go-tui.md",
+        "line": 643,
+        "severity": "non_blocking",
+        "description": "Testing section (h) mentions `mock.String()` and `mock.StringTrimmed()` but the actual MockTerminal API has `String() string` returning the full buffer and `StringTrimmed() string` for trimmed output. The testing pattern example on line 629-635 renders to the app but then reads from the mock terminal — however the code doesn't show how the mock terminal is connected to the app for rendering. The `app.Render()` call renders to the app's internal terminal, not necessarily to the separately-created `mock` variable. This example may not compile/run as written, but it serves as a pattern illustration rather than a copy-paste test."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The go-tui.dev documentation site is a single-page application that returns the same marketing content regardless of URL path. All /docs/reference/* and /docs/guides/* paths resolve to the SPA shell. The worker discovered this during research and fell back to the Go module cache source files. This finding is not recorded in .factory/library/ but would save future workers from the same dead end.",
+      "evidence": "Worker transcript shows FetchUrl calls to go-tui.dev/docs/reference/state and go-tui.dev/docs/guides/13-testing that returned SPA content. Worker deviation note in handoff confirms: 'go-tui.dev reference docs return the marketing landing page SPA for all paths'."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The research document includes 7 URLs pointing to go-tui.dev paths (e.g., /docs/reference/events, /docs/reference/focus, /docs/guides/02-gsx-syntax) that are known to return SPA marketing content rather than specific documentation. While `make check-doc-links` passes (it skips external URLs), these URLs are effectively dead links for a human reader trying to navigate to specific API docs. Consider annotating them or replacing with GitHub blob links.",
+      "evidence": "Lines 112, 130, 146, 155, 217, 315, 350 in research-go-tui.md all contain go-tui.dev URLs. The pkg.go.dev links (lines 27, 76, 277) and github.com blob links (lines 50, 92, 643) are valid and more useful."
+    },
+    {
+      "area": "conventions",
+      "observation": "The document uses `Reference: <url>` format for citations rather than markdown `[text](url)` link syntax. This is fine for a reference doc but means `make check-doc-links` cannot validate any of the links (it checks markdown link syntax). This is acceptable for this doc type but worth noting as a pattern.",
+      "evidence": "All 13 URLs in the document use `Reference: <https://...>` format, not `[text](url)` format."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS with minor notes. The research-go-tui.md document thoroughly covers all 9 required topics (a)–(i) with accurate API descriptions, 13 URL citations, 28+ symbol references, and 3 well-crafted code examples (23/35/39 lines). The worker researched against actual go-tui v0.11.0 source code, producing highly reliable API documentation. Three non-blocking issues found: (1) `KeyMap` described as `[]keyBinding` but actual type is `[]KeyBinding` (exported); (2) gap analysis references `WithTrapFocus` but actual API is `WithModalTrapFocus`; (3) testing example may not connect mock terminal to app correctly. All validation criteria confirmed met: 9 headings, ≥5 URLs (13), ≥3 symbol refs (28), ≥3 code examples ≥10 lines (3 at 23/35/39), `make check-doc-links` passes."
+}

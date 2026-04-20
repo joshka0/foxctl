@@ -1,203 +1,176 @@
-# User Testing — Room Sandbox Mission
+# User Testing — TUI Mission
 
-Testing surface, required tools, and resource cost classification for validation.
+How the user-testing validator exercises the TUI and how flow validators are spawned. Read this before the user-testing validator's first run.
 
-**What belongs here:** Validation surface discoveries, testing tool requirements, resource constraints. Updated by user-testing validators with runtime findings.
+**What belongs here:** Validation surface per milestone, concurrency limits, isolation strategy, tool requirements, resource costs, how to spawn/seed the test daemon.
+**What does NOT belong here:** Generic project docs (see `AGENTS.md`), architecture (see `architecture.md`), env vars (see `environment.md`).
 
 ---
 
-## Validation Surface
+## Validation Surfaces
 
-### Surface 1: CLI (foxctl commands)
-- **Tools:** `tuistory`, shell assertions
-- **Entry points:** `foxctl room create --sandbox`, `foxctl room list`, `foxctl room show`, `foxctl room destroy`, `foxctl gateway`
-- **Setup:** Build foxctl binary, ensure git/tmux/zellij on PATH
+Three distinct testing surfaces across the mission's milestones:
 
-### Surface 2: Web Terminal (xterm.js)
-- **Tools:** `agent-browser`
-- **Entry points:** `http://localhost:8765/terminal/{room-id}` (dev mode) or `https://<hostname>/terminal/{room-id}` (Tailscale)
-- **Setup:** Start gateway in --dev mode, create sandbox room, open browser
+### M1 — Docs (manual-read + make)
 
-### Surface 3: SSH Terminal
-- **Tools:** Shell-based SSH commands
-- **Entry points:** `ssh room-<id>@<hostname>` (Tailscale) or local SSH to gateway
-- **Setup:** Gateway running, sandbox room with tmux session
+M1 is docs-only. Validation is structural (section presence, headings, word
+counts, citation counts, link integrity).
 
-### Surface 4: Gateway API
-- **Tools:** `curl`
-- **Entry points:** `GET /healthz`, `GET /terminal/{room-id}`, WebSocket upgrade
-- **Setup:** Gateway running in any mode
+- **Primary tool:** subagent with Grep/Read inspecting markdown files.
+- **Secondary tool:** `make check-doc-links` (hard gate for VAL-DOCS-008).
+- **No daemon or TUI required.**
+
+### M2 — Component Library (go-test + tuistory)
+
+M2 is pure Go components with unit tests and widget-level tuistory snapshots.
+
+- **Primary tool:** `go test -race ./internal/interfaces/tui/...` runs
+  MockTerminal-based unit tests for every widget and runtime.
+- **Secondary tool:** `tuistory` skill drives tiny demo programs to capture
+  snapshots of each widget in each state variant (focused/unfocused,
+  empty/loading/error, etc.).
+- **No daemon required** for M2; widget demos render standalone.
+
+### M3 — Walking Skeleton (tuistory + per-test daemon)
+
+M3 exercises the full cockpit against a live daemon. This is the highest-cost
+validation surface.
+
+- **Primary tool:** `tuistory` skill driving the compiled `cmd/foxctl_tui`
+  binary.
+- **Daemon setup:** each flow validator gets its **own isolated**
+  `foxctl web serve` daemon, on an **OS-chosen port** (use `-p 0`, parse the
+  actual port from stderr), rooted at a temp `FOXCTL_STORAGE_ROOT`.
+- **Seeding:** the per-test-daemon fixture seeds N agents (typically 3 with
+  roles researcher/coder/planner) deterministically before the TUI launches.
+- **Teardown:** the fixture registers `t.Cleanup` that stops the daemon and
+  removes the temp storage root. Leaks fail the test.
+
+---
+
+## Required Skills
+
+Validators and engineer workers must invoke these skills via the Skill tool:
+
+- **`tuistory`** (REQUIRED for M2 widget snapshots and all M3 flows) — Factory
+  skill for terminal UI automation. Drives the TUI binary via PTY, captures
+  frames, asserts on content.
+
+**Not required:**
+- `agent-browser` — this is a TUI mission, not a web UI mission.
+- Any playwright/headless-browser skills.
+
+---
 
 ## Validation Concurrency
 
-**Machine:** 64 GB RAM, 16 cores (Apple Silicon)
+**Hard cap: 5 concurrent flow validators at any time.**
 
-| Surface | Per-instance Cost | Max Concurrent | Rationale |
-|---------|------------------|----------------|-----------|
-| CLI (tuistory) | ~50 MB | 5 | Lightweight, process spawn only |
-| Web (agent-browser) | ~300 MB | 5 | Browser instance per validator |
-| SSH | ~10 MB | 5 | Just SSH processes |
-| Gateway API (curl) | ~5 MB | 5 | HTTP requests only |
+Derivation (from pre-mission dry run):
 
-**Gateway overhead:** ~100 MB (single process, shared across all validators)
+| Cost component                 | Per-validator |
+| ------------------------------ | ------------- |
+| TUI binary (`cmd/foxctl_tui`)  | ~30–50 MiB RSS |
+| Tuistory harness (PTY + frame) | ~150 MiB     |
+| Isolated daemon                | ~50–100 MiB  |
+| **Budget**                     | **~250 MiB** |
 
-**Total worst case:** 5 × 300 MB + 100 MB = 1.6 GB — well within 64 GB headroom.
+Machine headroom at mission start: 16 CPU / 64 GB RAM / ~5 GB free.
+5 × 250 MiB = 1.25 GB — well within 70% of free headroom (3.5 GB).
 
-## Notes
+Hard cap of 5 applies even if more parallelism would fit. This keeps
+validators deterministic under contention.
 
-- Gateway --dev mode (localhost:8765) should be used for CI/local validation
-- Tailscale integration (tsnet) requires TS_AUTHKEY for full validation
-- For validation without Tailscale: use --dev mode for web terminal tests
-- SSH validation in --dev mode: SSH server listens on localhost in dev mode
-- tmux must be available for all terminal tests; skip gracefully if missing
+---
 
-## Flow Validator Guidance: go test (cmd/foxctl/cmd - room-sandbox)
+## Isolation Strategy
 
-**Surface:** Go unit tests in `cmd/foxctl/cmd/` package for room sandbox features
-**Tool:** `env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 go test ./cmd/foxctl/cmd/ -run "<pattern>" -v -count=1`
-**Isolation:** Each test function creates its own temp directory and git repo via `t.TempDir()`. No shared state between tests. Tests use mock/fake implementations for gateway and worktree where needed.
-**Concurrency:** Safe to run multiple test subsets concurrently — they operate on independent temp directories.
-**Assertions covered:** VAL-RS-001 through VAL-RS-021
-**Max concurrent validators:** 3 (each runs go test subset, ~50 MB per process)
-**Constraints:**
-- Do NOT modify any test files. Only run tests and report results.
-- Some tests require `tmux` — those tests skip gracefully if missing.
-- Must use CGO_ENABLED=0 to avoid SQLite symbol duplication.
-- Tests run in ~3 seconds total for the full suite.
+Because each flow validator needs its own daemon and storage root, isolation
+is **per-validator**, not per-mission:
 
-### Test-to-Assertion Mapping (room-sandbox)
+1. Each validator invocation of the fixture gets a freshly chosen OS port.
+2. Each validator uses a unique temp directory for `FOXCTL_STORAGE_ROOT`
+   (Go's `t.TempDir()` is idiomatic; the fixture handles this).
+3. Each validator seeds only the agents it needs; no shared seed state.
+4. Cleanup is mandatory on every exit path (success, fail, skip, fatal).
 
-**Sandbox Provisioning (room-sandbox-create):**
-- VAL-RS-001 → TestProvisionSandbox_CreatesWorktreeAndTmuxSession
-- VAL-RS-002 → TestProvisionSandbox_CustomWorktreeRoot
-- VAL-RS-003 → TestProvisionSandbox_BaseRef
-- VAL-RS-004 → TestProvisionSandbox_RollbackOnTmuxFailure
-- VAL-RS-009 → TestProvisionSandbox_IdempotentOnExistingSandbox
-- VAL-RS-010 → TestProvisionSandbox_UpgradesNonSandboxRoom
-- VAL-RS-011 → TestBuildRoomSandboxInfo_SandboxRoom, TestRoomCreateWithSandboxFlag_Integration
+**Port rule:** Never hardcode a port. Never use port **8090** (default daemon
+port; may collide with a user-running instance). Always use `-p 0` and parse
+the assigned port.
 
-**Sandbox Lifecycle (room-sandbox-lifecycle):**
-- VAL-RS-005 → TestRoomListSandbox_IncludesSandboxStatus
-- VAL-RS-006 → TestRoomShowSandbox_IncludesSandboxMetadata
-- VAL-RS-007 → TestRoomDestroySandbox_CleansUpResources
-- VAL-RS-008 → TestRoomDestroySandbox_NonSandboxRoomIsNoop
-- VAL-RS-020 → TestRoomDestroySandbox_PartialCleanupOnMissingWorktree (active agent check)
-- VAL-RS-021 → TestRoomJoinSandbox_TerminalBinding, TestRoomLeaveSandbox_TerminalBinding
+---
 
-**Sandbox Integration (room-sandbox-integration):**
-- VAL-RS-012 → TestRoomSandboxAgent_SpawnUsesWorktreeCWD
-- VAL-RS-013 → TestRoomSandboxTasks_ScopePathResolvedToWorktree, TestRoomSandboxTasks_TaskAddUsesSandboxScopePath
-- VAL-RS-014 → TestRoomSandboxRelay_DeliversToSandboxSession
-- VAL-RS-015 → TestRoomSandboxLoop_RelayIncludesSandboxDelivery
-- VAL-RS-016 → TestRoomSandboxStatus_IncludesSandboxInfo
-- VAL-RS-017 → TestRoomSandboxInbox_IncludesSandboxInfo
-- VAL-RS-018 → TestRoomSandboxRedgreen_InitOnSandboxRoom
-- VAL-RS-019 → TestRoomSandboxAgile_EpicStartOnSandboxRoom, TestRoomSandboxAgile_MilestoneStartOnSandboxRoom, TestRoomSandboxAgile_StoryAddOnSandboxRoom
+## Test Environment Setup
 
-## Flow Validator Guidance: go test (internal/platform/worktree)
+The user-testing validator must, before spawning flow validators, ensure:
 
-**Surface:** Go unit tests in `internal/platform/worktree/` package
-**Tool:** `go test ./internal/platform/worktree/... -v -count=1`
-**Isolation:** Each test function creates its own temp git repo via `t.TempDir()`. No shared state between tests.
-**Concurrency:** Safe to run multiple test subets concurrently — they operate on independent temp directories.
-**Assertions covered:** VAL-WT-001 through VAL-WT-040
-**Test-to-assertion mapping:**
-- VAL-WT-001 → TestCreate_NewBranch
-- VAL-WT-002 → TestCreate_ExistingBranch
-- VAL-WT-003 → TestCreate_FromRef
-- VAL-WT-004 → TestSanitizeBranchName_UnsafeChars (spaces_and_tilde_replaced, consecutive_unsafe_chars_collapse)
-- VAL-WT-005 → TestSanitizeBranchName_EmptyResult (only_dots, only_unsafe_chars, empty_string)
-- VAL-WT-006 → TestSanitizeBranchName_SafePreserved (typical_feature_branch, etc.)
-- VAL-WT-007 → TestCreate_CustomBaseDir
-- VAL-WT-008 → TestCreate_DefaultBaseDir
-- VAL-WT-009 → TestCreate_NonRepoDirectory
-- VAL-WT-010 → TestCreate_DuplicateBranch
-- VAL-WT-011 → TestCreate_ContextCancellation
-- VAL-WT-012 → TestList_AllWorktrees
-- VAL-WT-013 → TestParsePorcelain_* (normal, bare, detached, locked, prunable, empty, mixed, trailing)
-- VAL-WT-014 → TestStatus_OK, TestStatus_Locked, TestStatus_Prunable
-- VAL-WT-015 → TestRemove_CleanWorktree
-- VAL-WT-016 → TestRemove_DirtyWithoutForce
-- VAL-WT-017 → TestRemove_DirtyWithForce
-- VAL-WT-018 → TestRemove_WithDeleteBranch
-- VAL-WT-019 → TestRemove_PreservesBranchByDefault
-- VAL-WT-020 → TestRemove_OrphanedAdminData
-- VAL-WT-021 → TestResolve_ByBranchName
-- VAL-WT-022 → TestResolve_ByPartialBranchName
-- VAL-WT-023 → TestResolve_SpecialOneReturnsMain
-- VAL-WT-024 → TestResolve_AmbiguousPartialReturnsError
-- VAL-WT-025 → TestCopyFiles_IncludePatterns
-- VAL-WT-026 → TestCopyFiles_ExcludePatterns
-- VAL-WT-027 → TestCopyFiles_CombinedIncludeExclude
-- VAL-WT-028 → TestCopyFiles_Dotfiles
-- VAL-WT-029 → TestCopyFiles_PreservesNestedDirectoryStructure
-- VAL-WT-030 → TestHooks_PostCreateEnvVars
-- VAL-WT-031 → TestHooks_PostCreateFailureDoesNotRollback
-- VAL-WT-032 → TestHooks_PostRemoveExecutesAfterRemoval
-- VAL-WT-033 → TestHooks_TimeoutEnforcement
-- VAL-WT-034 → TestStatus_OK
-- VAL-WT-035 → TestStatus_Locked
-- VAL-WT-036 → TestStatus_Prunable
-- VAL-WT-037 → TestPrune_RemovesStaleEntries
-- VAL-WT-038 → TestCreate_ConcurrentDifferentBranches (with -race flag)
-- VAL-WT-039 → TestRemove_RejectsMainCheckout
-- VAL-WT-040 → TestCreate_PathValidation
-**Max concurrent validators:** 3 (each runs go test subset, ~50 MB per process)
-**Constraints:** Do NOT modify any test files. Only run tests and report results.
+1. The repo builds:
+   ```
+   make build
+   ```
+   This produces `bin/foxctl` (the daemon CLI) and `bin/foxctl_tui` (the TUI
+   binary). If either is missing, the validator returns to the orchestrator
+   rather than trying to patch the build.
 
-## Flow Validator Guidance: go test (internal/gateway)
+2. `go test -race ./internal/interfaces/tui/...` passes.
 
-**Surface:** Go unit tests in `internal/gateway/` package and sub-packages
-**Tool:** `go test ./internal/gateway/... -v -count=1`
-**Isolation:** Each test function creates its own server instance on a random port via `findFreePort()`. No shared state between tests. tmux sessions are created with unique timestamps and cleaned up in deferred cleanup.
-**Concurrency:** Safe to run multiple test subsets concurrently — they operate on independent ports and tmux sessions.
-**Assertions covered:** VAL-GW-001 through VAL-GW-030
-**Max concurrent validators:** 3 (each runs go test subset, ~50 MB per process)
-**Constraints:**
-- Do NOT modify any test files. Only run tests and report results.
-- Some tests require `tmux` to be available — those tests skip gracefully if missing.
-- Tests with `os.Getenv("CI") != ""` skip in CI environments.
-- SSH tests start their own server instances on random ports — no port conflicts.
-- Tailscale-specific assertions (VAL-GW-022, VAL-GW-023, VAL-GW-024) require `TS_AUTHKEY` and actual tsnet connectivity — mark as **blocked** if not available.
+3. The per-test-daemon fixture is importable at the path declared by the
+   M3 `skel-fixture` feature (typically
+   `internal/interfaces/tui/.../testfixture`). This is the canonical
+   helper. Flow validators spawn daemons only via this fixture.
 
-### Test-to-Assertion Mapping (gateway-terminal)
+4. `tuistory` skill is available.
 
-**Gateway Core (server.go tests):**
-- VAL-GW-001 → TestStartDevMode (dev mode healthz returns 200)
-- VAL-GW-002 → TestStateDirResolution (state dir stored; AuthKeyError_NoStateNoKey for restarts)
-- VAL-GW-003 → TestStartDevMode_GracefulShutdown, TestShutdown_SetsStoppedHealth
-- VAL-GW-004 → TestAuthKeyError, TestRun_AuthKeyError, TestAuthKeyError_NoStateNoKey
-- VAL-GW-027 → TestStartDevMode (dev mode on localhost HTTP)
-- VAL-GW-028 → TestHandleHealthz_OK, TestHandleHealthz_Degraded, TestHandleHealthz_Starting, TestHandleHealthz_Disabled
+---
 
-**Web Terminal - Handler/Routing (webterm/handler_test.go):**
-- VAL-GW-005 → TestHandler_TerminalPage_ContainsHTML (HTML with xterm.js, /ws/terminal/ URL)
-- VAL-GW-025 → TestHandler_TerminalPage_RoomNotFound, TestHandler_ErrorJSON (ENOTFOUND with hint)
+## Known Gotchas
 
-**Web Terminal - PTY/Hub (webterm/pty_test.go, hub_test.go):**
-- VAL-GW-006 → TestStartTmuxAttach_CreatesSession (session created, PTY running)
-- VAL-GW-007 → TestPTY_WriteInput (echo hello-webterm visible)
-- VAL-GW-008 → TestPTY_Resize (132 columns verified via tmux list-panes)
-- VAL-GW-009 → TestPTY_OutputBroadcast (reconnect behavior tested via subscriber model)
-- VAL-GW-014 → TestPTY_OutputBroadcast (two subscribers both receive output)
-- VAL-GW-017 → TestHub_RemoveClient, TestPTY_Close (one client removed, hub still works)
-- VAL-GW-018 → TestHub_RoomIDs (multiple rooms registered independently)
-- VAL-GW-019 → Tests use separate tmux sessions per room (inherent isolation)
-- VAL-GW-020 → TestStartTmuxAttach_AttachExisting (pre-created session visible)
-- VAL-GW-021 → TestStartTmuxAttach_CreatesSession (creates new if none exists)
-- VAL-GW-026 → TestPTY_Close (abrupt close, no panic, idempotent)
-- VAL-GW-029 → TestHub_AddClient_ConnectionLimit (max connections enforced)
+- **TUI binary is large-ish (~9 MiB) but safe to build repeatedly.** Builds
+  are incremental via `go build`'s cache.
+- **Goroutine leaks** cause flaky flows. Every M2/M3 test that spawns a
+  runtime must check leaks (via `goleak.VerifyNone` or
+  `runtime.NumGoroutine()` delta).
+- **SIGWINCH** is explicitly in scope (VAL-SKEL-015). Tuistory's resize
+  API drives the mid-stream resize test.
+- **Malformed SSE** is explicitly in scope (VAL-SKEL-016). Use an
+  `httptest.Server` producing invalid frames rather than the real daemon.
+- **`-smoke-agent` / `-smoke-console`** modes on `cmd/foxctl_tui` exit
+  cleanly even without a reachable API; they are smoke-fixture entry points
+  and must remain schema-compatible (VAL-CROSS-002).
 
-**SSH Terminal (sshterm/server_test.go):**
-- VAL-GW-010 → TestServer_ServeAndConnect, TestServer_WhoIsIdentityLogged (WhoIs verified)
-- VAL-GW-011 → TestServer_PTYSession (routes by room-<id> username)
-- VAL-GW-012 → TestServer_WindowResize (resize propagates), signal tests via parseSignal
-- VAL-GW-013 → TestServer_DetachOnDisconnect (session survives disconnect)
-- VAL-GW-015 → TestServer_MultipleSessions (3 concurrent SSH sessions)
-- VAL-GW-016 → Covered by TestServer_MultipleSessions (shared tmux session)
-- VAL-GW-030 → TestServer_WhoIsIdentityLogged (identity captured and verified)
+---
 
-**Tailscale-only (requires tsnet):**
-- VAL-GW-022 → auto-TLS via ListenTLS — blocked without Tailscale
-- VAL-GW-023 → MagicDNS resolution — blocked without Tailscale
-- VAL-GW-024 → localhost access fails in tsnet mode — blocked without Tailscale
+## Flow Validator Guidance: M2 Components (go-test + tuistory + code-inspection + manual-read)
+
+**Surface:** Pure Go component library under `internal/interfaces/tui/`. No daemon, no network.
+
+**Tools used:**
+- `go test -race -count=1 ./internal/interfaces/tui/...` — MockTerminal unit tests
+- `tuistory` skill — widget demo snapshots (standalone binaries, no daemon)
+- `code-inspection` (grep, Read) — structural checks on source code
+- `manual-read` — README and doc checks
+
+**Isolation rules:**
+- Validators are fully independent. No shared mutable state.
+- `go test` runs may be parallelized freely (Go's test framework handles this).
+- Tuistory widget demos each run in their own PTY — no conflicts.
+- Code inspection is read-only — no conflicts.
+
+**Concurrency:** Up to 5 validators concurrently (well within budget since there is no daemon).
+
+**Shared resources (read-only):**
+- Source tree under `internal/interfaces/tui/`
+- Doc tree under `docs/plans/tui-redesign/`
+
+**Off-limits:**
+- Do not modify any source files.
+- Do not start any daemon processes.
+- Do not touch `archive/`, `packages/gui-agent/`, or `internal/interfaces/web/`.
+
+---
+
+## Resource Updates (runtime findings)
+
+> The user-testing validator appends runtime findings here during execution
+> (isolation approach used, new constraints from this milestone's
+> implementation, gotchas discovered).

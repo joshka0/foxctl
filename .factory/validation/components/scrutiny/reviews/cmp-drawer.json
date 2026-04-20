@@ -1,0 +1,45 @@
+{
+  "featureId": "cmp-drawer",
+  "reviewedAt": "2026-04-19T12:00:00Z",
+  "commitId": "cd45f3d0",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Well-implemented Drawer widget that fully satisfies VAL-CMP-007. The implementation follows the TDD approach correctly (tests written first, confirmed failing, then implementation). All 5 required behaviors are thoroughly covered by 21 unit tests plus 3 snapshot tests. The code uses theme tokens exclusively (no raw color literals), follows existing component patterns (options pattern, MockTerminal rendering, table-driven tests), and respects the component-spec.md contract. The implementation is clean, well-documented, and handles edge cases properly.",
+    "issues": [
+      {
+        "file": "internal/interfaces/tui/components/drawer.go",
+        "line": 138,
+        "severity": "non_blocking",
+        "description": "Close() fires onRestoreFocus even when previouslyFocused is empty string but onRestoreFocus callback is set. The guard `d.previouslyFocused != \"\"` prevents this in practice, but the separation between the onRestoreFocus nil-check and the empty-string check is subtle. If a consumer passes an empty-string ref, focus restore silently does nothing — this is probably fine but isn't documented in the godoc."
+      },
+      {
+        "file": "internal/interfaces/tui/components/drawer.go",
+        "line": 186,
+        "severity": "non_blocking",
+        "description": "HandleKey returns true (key consumed) for Down/j even when content doesn't overflow and scrollOffset doesn't change. This is intentional (documented as 'consumed even if at boundary') and matches the component-spec behavior (keys are consumed when drawer is open+focused), but it's worth noting that this differs from some other widgets that return false when the key has no effect."
+      },
+      {
+        "file": "internal/interfaces/tui/components/drawer_test.go",
+        "line": 515,
+        "severity": "non_blocking",
+        "description": "The custom containsSubstring/findSubstring helpers duplicate stdlib strings.Contains functionality. Not a bug, but a minor readability concern — using strings.Contains directly would be simpler and less error-prone. This appears to be a pattern copied from other test files in the package, so it's consistent."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The Drawer widget uses a custom containsSubstring helper in tests instead of stdlib strings.Contains. This pattern appears to be shared across multiple widget test files in the package (entity_list_test.go, detail_pane_test.go, etc.). While harmless, it adds unnecessary code. The convention could be noted in the component package's testing patterns.",
+      "evidence": "drawer_test.go:515-528 defines containsSubstring and findSubstring that replicate strings.Contains. Other test files in the same package likely have the same helpers."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The tuistory snapshot capture workflow follows a consistent pattern: build demo binary → launch with tuistory → wait-idle → snapshot --trim → screenshot --format png → save to testdata/tuistory/. This workflow is consistent with other widget features but isn't explicitly documented in .factory/library/ as a reusable procedure.",
+      "evidence": "Transcript shows the worker executing: go build, tuistory launch, tuistory wait-idle, tuistory snapshot --trim, tuistory screenshot --format png. Same pattern used by cmp-tabs, cmp-detail-pane, cmp-entity-list workers."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS. The Drawer implementation fully satisfies VAL-CMP-007 with clean, well-tested code. All 5 required behaviors (open, ESC-close, focus trap, focus restore, double-close safety) are covered by dedicated tests. The implementation correctly uses theme tokens (BorderFocus, Border, TextPrimary, SurfaceAlt, TextMuted, ScrollbarThumb), follows the options pattern from existing widgets, and includes tuistory snapshot evidence. The TDD workflow was properly followed (tests written first, confirmed red, then implementation). Three minor non-blocking observations noted (empty-string ref guard subtlety, key consumption at scroll boundaries, duplicated substring helper). No blocking issues found."
+}

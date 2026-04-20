@@ -1,0 +1,70 @@
+{
+  "groupId": "group-e",
+  "testedAt": "2026-04-19T00:30:00Z",
+  "isolation": {
+    "docsRoot": "/Users/joshka/repos/personal/foxctl/docs/plans/tui-redesign/",
+    "repoRoot": "/Users/joshka/repos/personal/foxctl",
+    "testingTool": "manual-read (Grep/Read)"
+  },
+  "toolsUsed": ["Read", "Grep", "LS"],
+  "assertions": [
+    {
+      "id": "VAL-DOCS-005",
+      "title": "Component spec doc — per-widget contract",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Check docs/plans/tui-redesign/component-spec.md exists",
+          "expected": "File exists",
+          "observed": "File exists at /Users/joshka/repos/personal/foxctl/docs/plans/tui-redesign/component-spec.md (1026 lines)"
+        },
+        {
+          "action": "Verify all 9 widgets have dedicated H2 sections",
+          "expected": "EntityList, DetailPane, Tabs, Drawer, StreamViewer, EmptyState, LoadingState, StatusBadge, KeybindHint as H2 headings",
+          "observed": "All 9 widgets found as H2 headings: EntityList (line 20), DetailPane (line 161), Tabs (line 290), Drawer (line 397), StreamViewer (line 510), EmptyState (line 628), LoadingState (line 717), StatusBadge (line 811), KeybindHint (line 902)"
+        },
+        {
+          "action": "Check each widget has all 10 required sub-sections",
+          "expected": "Each widget has (1) Props, (2) State, (3) Variants, (4) Keyboard Behavior, (5) Focus Behavior, (6) Testing Expectations, (7) Visible Focus Indicator, (8) Empty-State Copy, (9) Loading-State Copy, (10) Error-State Behavior",
+          "observed": "All 9 widgets × 10 sub-sections = 90/90 present. Every widget has ### (1) through ### (10) sub-sections. Grep confirmed 90 sub-section headings matching pattern '### (\\d+)' across all 9 widgets."
+        },
+        {
+          "action": "Verify keyboard behavior is presented as key tables, not prose",
+          "expected": "Each widget's §(4) uses a table with | Key | Action | When | format",
+          "observed": "All 9 widgets use explicit key tables. Grep for '^| Key | Action' found 9 matches at lines 65, 198, 323, 433, 550, 658, 750, 846, 932. Non-interactive widgets (EmptyState, LoadingState, StatusBadge, KeybindHint) correctly have single-row tables stating '(none)' with explanation."
+        },
+        {
+          "action": "Verify focus indicator guidance disallows font-weight-only",
+          "expected": "Focusable widgets explicitly state font-weight-only is not acceptable",
+          "observed": "All 5 focusable widgets (EntityList line 116, DetailPane line 246, Tabs line 365, Drawer line 485, StreamViewer line 598) explicitly state 'NOT font-weight only' or equivalent. Cross-cutting rule at line 996 states 'Font-weight only is forbidden as the sole focus indicator for any focusable widget.' Non-focusable widgets correctly state 'Not applicable'."
+        },
+        {
+          "action": "Verify MockTerminal + tuistory testing expectations",
+          "expected": "Each widget §(6) includes both MockTerminal table-driven tests and tuistory snapshots",
+          "observed": "All 9 widgets include MockTerminal test tables and tuistory snapshot specifications. EntityList has 12 test cases + 3 snapshots, DetailPane has 8 + 4, Tabs has 8 + 2, Drawer has 6 + 1, StreamViewer has 6 + 2, EmptyState has 4 + 1, LoadingState has 5 + 1, StatusBadge has 8 + 4, KeybindHint has 4 + 1."
+        },
+        {
+          "action": "Verify empty-state, loading-state, error-state guidance per widget",
+          "expected": "Each widget §(8-10) provides copy guidance or explicit N/A with rationale",
+          "observed": "All 9 widgets have all three sections. Interactive widgets (EntityList, DetailPane, Tabs, Drawer, StreamViewer) provide concrete per-context copy. Passive widgets (EmptyState, LoadingState, StatusBadge, KeybindHint) correctly state N/A with explanation of why (e.g., EmptyState IS the empty state, StatusBadge renders from props)."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "N/A (file inspection only)",
+        "network": "N/A (file inspection only)",
+        "filesInspected": [
+          "docs/plans/tui-redesign/component-spec.md (full file, 1026 lines)"
+        ],
+        "evidenceFiles": [
+          "docs/group-e/VAL-DOCS-005-widget-section-map.txt",
+          "docs/group-e/VAL-DOCS-005-per-widget-checklist.txt"
+        ]
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 1 assertion: VAL-DOCS-005 PASSED. File docs/plans/tui-redesign/component-spec.md exists with all 9 required widgets (EntityList, DetailPane, Tabs, Drawer, StreamViewer, EmptyState, LoadingState, StatusBadge, KeybindHint) as H2 sections. Each widget contains all 10 required sub-sections (90/90 present). All keyboard behaviors use explicit key tables (| Key | Action | When |), not prose. All 5 focusable widgets explicitly disallow font-weight-only focus indicators, reinforced by a cross-cutting rule. MockTerminal + tuistory testing expectations specified for every widget."
+}

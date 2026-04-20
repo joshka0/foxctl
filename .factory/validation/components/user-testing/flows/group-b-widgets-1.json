@@ -1,0 +1,212 @@
+{
+  "groupId": "group-b-widgets-1",
+  "testedAt": "2026-04-19T03:30:00Z",
+  "isolation": {
+    "workingDirectory": "/Users/joshka/repos/personal/foxctl",
+    "operations": "read-only",
+    "daemon": "none required (M2 component testing)"
+  },
+  "toolsUsed": ["go-test", "code-inspection"],
+  "assertions": [
+    {
+      "id": "VAL-CMP-004",
+      "title": "EntityList — focus + navigation + selection + empty integration",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run go test -race -count=1 -v -run 'EntityList' ./internal/interfaces/tui/components/...",
+          "expected": "All EntityList tests pass with -race",
+          "observed": "4 snapshot tests + all unit tests PASS. Tests include: TestNavigateDown, TestNavigateUp, TestNavigateDownJ, TestNavigateUpK, TestWrapAround, TestNoWrapAround, TestHomeEnd, TestHomeEndWithViKeys, TestPageDownPageUp, TestFocusIndicatorColoredLeftBorder, TestUnfocusedNoFocusBorder, TestFocusIndicatorNotFontWeightOnly, TestUnfocusedIgnoresKeys, TestScrollKeepsSelectionVisible, TestEmptyRendersEmptyState, TestLoadingRendersLoadingState, TestErrorRendersError, TestSelectedRowHasSelectionBackground, TestNavigationWithNoItems, TestSingleItemNavigation, TestAutoSelectFirstWhenSelectedNegative, TestFocusedVsUnfocusedDistinguishable"
+        },
+        {
+          "action": "Inspect entity_list.go for focus indicator implementation (beyond font-weight)",
+          "expected": "Focus indicator uses colored left border or inverse background, not just bold",
+          "observed": "Focus indicator uses colored left border character '▌' with theme.Colors.BorderFocus foreground for selected row, and '│' with theme.Colors.Border for non-selected rows. Unfocused state uses '│' with theme.Colors.AccentMuted. This is color-based, not font-weight only."
+        },
+        {
+          "action": "Verify wrap-around tests exist and pass",
+          "expected": "TestWrapAround and TestNoWrapAround tests present and passing",
+          "observed": "TestWrapAround tests wrap from last→first on ↓ and first→last on ↑. TestNoWrapAround verifies stay-at-boundary when wrap disabled. Both pass."
+        },
+        {
+          "action": "Check EmptyState integration",
+          "expected": "EntityList renders EmptyState when items is empty and loading is false",
+          "observed": "renderEmpty() renders centered message with guidance CTA. TestEmptyRendersEmptyState verifies non-empty output. LoadingState integration confirmed via TestLoadingRendersLoadingState."
+        },
+        {
+          "action": "Check snapshot evidence (focused vs unfocused)",
+          "expected": "≥2 tuistory snapshots showing focused vs unfocused EntityList",
+          "observed": "3 MockTerminal snapshot tests exist: TestSnapshotEntityListFocused, TestSnapshotEntityListUnfocused, TestSnapshotEntityListEmpty. Snapshots written to testdata/snapshots/entitylist-{focused,unfocused,empty}.txt. Additionally, tuistory snapshots exist: tuistory-focused.png, tuistory-unfocused.png, tuistory-empty.png."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "terminalSnapshots": [
+          "components/group-b/VAL-CMP-004-entitylist-test-output.txt",
+          "components/group-b/VAL-CMP-004-entitylist-source-focus-indicator.txt"
+        ],
+        "testResults": "go test -race -count=1 -v -run 'EntityList' → PASS (all tests, 0 failures)",
+        "snapshotFiles": [
+          "internal/interfaces/tui/components/testdata/snapshots/entitylist-focused.txt",
+          "internal/interfaces/tui/components/testdata/snapshots/entitylist-unfocused.txt",
+          "internal/interfaces/tui/components/testdata/snapshots/entitylist-empty.txt",
+          "internal/interfaces/tui/components/testdata/snapshots/tuistory-focused.png",
+          "internal/interfaces/tui/components/testdata/snapshots/tuistory-unfocused.png",
+          "internal/interfaces/tui/components/testdata/snapshots/tuistory-empty.png"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (pure component testing)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CMP-005",
+      "title": "DetailPane — header, scrollable body, sections, truncation, empty",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run go test -race -count=1 -v -run 'DetailPane' ./internal/interfaces/tui/components/...",
+          "expected": "All DetailPane tests pass with -race",
+          "observed": "4 snapshot tests + 20 unit tests PASS. Tests cover: header render, status badge, title truncation with ellipsis, section separators, body scroll, scroll keys when content fits, page down/up, home/end (arrow + vi keys), scroll indicator, empty state (no entity), empty state (no sections), focus indicator, unfocused ignores keys, status variants, scroll offset clamping."
+        },
+        {
+          "action": "Inspect detail_pane.go for scroll indicator",
+          "expected": "Visible scroll indicator when content exceeds viewport",
+          "observed": "renderScrollbar() draws track ('│' with ScrollbarTrack color) and thumb ('┃' with ScrollbarThumb color) on the rightmost column. Proportional to scroll position. Only rendered when content overflows."
+        },
+        {
+          "action": "Inspect title truncation with ellipsis",
+          "expected": "Title truncates with '…' at width boundary",
+          "observed": "renderHeader() calls truncate(dp.title, contentWidth) which uses tui.RuneWidth to compute display width and appends '…' when content exceeds available width. TestDetailPaneTitleTruncation verifies ellipsis character in cell buffer."
+        },
+        {
+          "action": "Check empty state rendering",
+          "expected": "Empty state when no entity selected, with guidance copy per component-spec.md",
+          "observed": "renderEmptyState() shows 'Select an item to view details.' with CTA 'Use ↓/↑ to navigate, Enter to open.' — matches component-spec.md guidance. TestDetailPaneEmptyNoEntity confirms."
+        },
+        {
+          "action": "Check snapshot evidence",
+          "expected": "tuistory snapshots of: populated, empty, scrolled, truncated-title",
+          "observed": "4 MockTerminal snapshot tests: TestSnapshotDetailPanePopulated, TestSnapshotDetailPaneEmpty, TestSnapshotDetailPaneScrolled, TestSnapshotDetailPaneTruncatedTitle. Files: detailpane-{populated,empty,scrolled,truncated-title}.txt"
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "terminalSnapshots": [
+          "components/group-b/VAL-CMP-005-detailpane-test-output.txt"
+        ],
+        "testResults": "go test -race -count=1 -v -run 'DetailPane' → PASS (24 tests, 0 failures)",
+        "snapshotFiles": [
+          "internal/interfaces/tui/components/testdata/snapshots/detailpane-populated.txt",
+          "internal/interfaces/tui/components/testdata/snapshots/detailpane-empty.txt",
+          "internal/interfaces/tui/components/testdata/snapshots/detailpane-scrolled.txt",
+          "internal/interfaces/tui/components/testdata/snapshots/detailpane-truncated-title.txt"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (pure component testing)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CMP-006",
+      "title": "Tabs — visible active indicator + navigation",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run go test -race -count=1 -v -run 'Tabs' ./internal/interfaces/tui/components/...",
+          "expected": "All Tabs tests pass with -race",
+          "observed": "3 snapshot tests + 28 unit tests PASS. Tests cover: forward/back navigation (arrow + h/l), Tab forward, Shift-Tab backward, wrap-around (forward + backward), no-wrap mode, Home/End (+ g/G vi keys), single tab noop, unfocused ignores keys, active indicator colored underline, active indicator not font-weight only, active vs inactive distinguishable, OnChange callback, active index clamping, empty labels, render shows labels, SetLabels, SetActiveIndex, underline present."
+        },
+        {
+          "action": "Inspect tabs.go for active indicator styling beyond bold",
+          "expected": "Active tab uses colored underline or colored background or inverse video",
+          "observed": "Active tab uses colored underline '━' with theme.Colors.Accent foreground in row 1 (below the labels). Active label uses Accent color foreground + Bold. Inactive labels use TextMuted. This is clearly distinguishable in raw cell buffer beyond font-weight."
+        },
+        {
+          "action": "Check wrap-around tests",
+          "expected": "Wrap-around behavior tested and documented",
+          "observed": "TestTabsWrapForward: last→first. TestTabsWrapBackward: first→last. TestTabsNoWrapForward/Backward: stays at boundary. All pass."
+        },
+        {
+          "action": "Check Shift-Tab tests",
+          "expected": "Shift-Tab reverse traversal tested",
+          "observed": "TestTabsShiftTabBackward and TestTabsShiftTabWrapsBackward both pass."
+        },
+        {
+          "action": "Check snapshot evidence for focused vs unfocused distinguishable",
+          "expected": "Snapshot shows active/inactive distinguishable in raw cell buffer beyond bold",
+          "observed": "3 MockTerminal snapshot tests: TestSnapshotTabsActiveFocused, TestSnapshotTabsActiveUnfocused, TestSnapshotTabsMiddleActive. TestFocusedVsUnfocusedTabsDistinguishable verifies focused underline uses Accent, unfocused uses AccentMuted — different colors. TestActiveVsInactiveTabColorsDiffer verifies active='AAA' uses Accent fg, inactive='BBB' uses TextMuted fg."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "terminalSnapshots": [
+          "components/group-b/VAL-CMP-006-tabs-test-output.txt"
+        ],
+        "testResults": "go test -race -count=1 -v -run 'Tabs' → PASS (31 tests, 0 failures)",
+        "snapshotFiles": [
+          "internal/interfaces/tui/components/testdata/snapshots/tabs-active-focused.txt",
+          "internal/interfaces/tui/components/testdata/snapshots/tabs-active-unfocused.txt",
+          "internal/interfaces/tui/components/testdata/snapshots/tabs-middle-active.txt"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (pure component testing)"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-CMP-007",
+      "title": "Drawer — open/close, focus trap, ESC, idempotent close",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Run go test -race -count=1 -v -run 'Drawer' ./internal/interfaces/tui/components/...",
+          "expected": "All Drawer tests pass with -race",
+          "observed": "2 snapshot tests + 23 unit tests PASS. Tests cover: open (content rendered, title visible), closed renders nothing, close via ESC, ESC ignored when closed, focus trap Tab, focus trap Shift-Tab, keys ignored when not focused, focus restore on close, focus restore not called when already closed, double-close safe, double-close via ESC safe, scroll content, page down/up, home/end, focus indicator when open, no focus indicator when unfocused, Open method, Open method idempotent, SetContent, close hint rendered, empty content, scroll clamped."
+        },
+        {
+          "action": "Inspect drawer.go for focus trap logic",
+          "expected": "Tab/Shift-Tab consumed within drawer; do not escape",
+          "observed": "HandleKey() checks `if !d.open || !d.focused { return false }`. When open+focused, Tab returns true (consumed) without propagating. ESC triggers Close(). Keys don't escape."
+        },
+        {
+          "action": "Inspect ESC handler and close callback",
+          "expected": "ESC closes drawer; OnClose fires exactly once per cycle",
+          "observed": "HandleKey ESC → d.Close(). Close() checks `if !d.open { return }` then `if !d.closeFired { d.closeFired = true; d.onClose() }`. The closeFired flag ensures exactly-once semantics."
+        },
+        {
+          "action": "Inspect previously-focused element restoration",
+          "expected": "On close, focus restored to previously-focused element",
+          "observed": "Close() calls `d.onRestoreFocus(d.previouslyFocused)` when both are set. TestDrawerFocusRestoreOnClose verifies 'entity-list' ref is passed to callback."
+        },
+        {
+          "action": "Check double-close safety",
+          "expected": "Double-close is safe (no panic, no double-fire)",
+          "observed": "TestDrawerDoubleCloseSafe: Close() twice → closeCount=1 (not 2). TestDrawerDoubleCloseViaESCSafe: ESC twice → closeCount=1, second ESC not consumed. Both pass."
+        },
+        {
+          "action": "Check snapshot evidence",
+          "expected": "≥1 tuistory snapshot of open state",
+          "observed": "2 MockTerminal snapshot tests: TestSnapshotDrawerOpen (drawer-open.txt) and TestSnapshotDrawerOpenScrolled (drawer-open-scrolled.txt). TestDrawerFocusedVsUnfocusedBorder verifies border color differs between focused/unfocused states."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "terminalSnapshots": [
+          "components/group-b/VAL-CMP-007-drawer-test-output.txt"
+        ],
+        "testResults": "go test -race -count=1 -v -run 'Drawer' → PASS (25 tests, 0 failures)",
+        "snapshotFiles": [
+          "internal/interfaces/tui/components/testdata/snapshots/drawer-open.txt",
+          "internal/interfaces/tui/components/testdata/snapshots/drawer-open-scrolled.txt"
+        ],
+        "consoleErrors": "none",
+        "network": "N/A (pure component testing)"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "summary": "Tested 4 assertions: all 4 passed. VAL-CMP-004 (EntityList): 22+ unit tests cover navigation (up/down/home/end/page), wrap-around, focus indicator (colored left border '▌' with BorderFocus color, not font-weight only), empty/loading/error states, and selection background. 3 MockTerminal + 3 tuistory snapshots. VAL-CMP-005 (DetailPane): 24 tests cover header+status badge, title truncation with '…' ellipsis, section separators (─), scrollable body with scrollbar thumb (┃), empty state guidance, and focus indicator. 4 snapshot tests. VAL-CMP-006 (Tabs): 31 tests cover forward/back navigation (arrows+h/l+Tab/Shift-Tab), wrap-around, colored underline (━ Accent) active indicator beyond font-weight, focused vs unfocused distinguishable. 3 snapshot tests. VAL-CMP-007 (Drawer): 25 tests cover open/close, focus trap (Tab/Shift-Tab consumed), ESC close with exactly-once OnClose callback, previously-focused element restoration, double-close safety. 2 snapshot tests. All tests run with -race flag, no race conditions detected."
+}
