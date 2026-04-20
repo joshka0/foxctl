@@ -107,3 +107,11 @@ room.
   state from a second shell while the driver is running.
 - Drop in `--since-seq 0` (the default) or a specific seq to replay log
   history when reattaching.
+
+## Related docs
+
+- [LIVE-SMOKE-FINDINGS.md](LIVE-SMOKE-FINDINGS.md) — narrative write-up
+  of the first real multi-agent smoke, with root-cause analysis per gap.
+- [TODO.md](TODO.md) — live tracker of remaining gaps with status, fix
+  direction, acceptance criteria, and size estimates. Start here when
+  picking up the next slice.

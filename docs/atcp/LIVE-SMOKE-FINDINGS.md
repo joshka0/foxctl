@@ -210,24 +210,33 @@ Phase-2 territory again.
 
 ## Triage: what to fix first
 
+> **Live tracker:** [TODO.md](TODO.md) carries the current status, fix
+> direction, acceptance criteria, and size estimate for each gap. Update
+> there; this section stays as the narrative "triage moment" snapshot.
+
 In order of "unblocks real integration" vs "nice to have":
 
 1. **Gap 1 — terminal capability responder.** Blocks booting codex at
-   all. Must fix first. 1-2 days.
+   all. ☑ **Shipped** (commit `19fe4589`,
+   `internal/atcp/broker/termcaps`). Evidence above.
 2. **Gap 4 — readiness signal.** We can't run reliable smokes without
    knowing when an agent is ready. Can be a cheap version (poll
-   output-byte-rate) initially. 0.5 day.
+   output-byte-rate) initially. 0.5 day. ☐
 3. **Gap 2 — per-session submit key.** So the happy path works on more
-   agents. 0.5 day including detection of kitty mode.
+   agents. 0.5 day including detection of kitty mode. ☐
 4. **Gap 3 — screen snapshot rendering.** Transforms the observer
    experience from unusable to mux-equivalent. This is Plan Phase 2
-   proper. 2-3 days.
+   proper. 2-3 days. ✎ (design decision — vendor vs subset)
 5. **Gap 6 — inter-agent talkback.** Required for "codex tells droid
    something" scenarios. Blocked on screen rendering (so the talkback
-   pattern-matcher has clean text to match on). 0.5 day after Gap 3.
-6. **Gap 7 — raw write flag.** Small. Schedule whenever.
-7. **Gap 5 — pre-smoke checklist doc.** 30 minutes.
-8. **Gap 8 — paste / long input.** Ride along with Phase 2 paste work.
+   pattern-matcher has clean text to match on). 0.5 day after Gap 3. ✎
+6. **Gap 7 — raw write flag.** Small. Schedule whenever. ☐
+7. **Gap 5 — pre-smoke checklist doc.** 30 minutes. ☐
+8. **Gap 8 — paste / long input.** Ride along with Phase 2 paste work. ☐
+9. **Gap 1b — codex input loop still silent.** Follow-up to Gap 1. Not
+   a termcaps issue (codex sends only queries we handle); likely MCP
+   readiness or env. Low ROI until Gap 4 lands to give us an objective
+   signal. ☐
 
 ## Observations worth keeping for the runbook
 
