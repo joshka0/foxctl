@@ -379,8 +379,14 @@ func TestCompileWriteBytes_DoesNotRetainInput(t *testing.T) {
 
 func TestParseModifiers_Synonyms(t *testing.T) {
 	cases := [][]string{
-		{"control"}, {"CTRL"}, {"option"}, {"ALT"},
-		{"CMD"}, {"command"}, {"meta"}, {"Shift"},
+		{"control"},
+		{"CTRL"},
+		{"option"},
+		{"ALT"},
+		{"CMD"},
+		{"command"},
+		{"meta"},
+		{"Shift"},
 	}
 	for _, mods := range cases {
 		if _, err := ParseModifiers(mods); err != nil {

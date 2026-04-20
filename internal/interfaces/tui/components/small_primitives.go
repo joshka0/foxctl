@@ -247,10 +247,10 @@ func (ls *LoadingState) Render(buf *tui.Buffer) {
 // KeybindHint is stateless. It renders entirely from props with no internal
 // state.
 type KeybindHint struct {
-	key        string
-	desc       string
-	separator  string
-	compact    bool
+	key       string
+	desc      string
+	separator string
+	compact   bool
 }
 
 // NewKeybindHint creates a new KeybindHint with the given key, description,

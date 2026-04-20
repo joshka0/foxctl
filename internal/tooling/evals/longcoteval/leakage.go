@@ -34,13 +34,15 @@ var forbiddenPrimaryTools = map[string]struct{}{
 	"structured_shell":         {},
 }
 
-var filesystemTools = exactSet("load_file")
-var repoTools = exactSet("semantic_search_code", "smart_search_code", "ripgrep_code", "search_repo", "expand_repo_graph", "code_search_ensemble")
-var memoryTools = exactSet("memory_ensemble_retrieve", "search_scenes", "get_scene", "get_top_of_mind", "get_latest_handoff")
-var vaultTools = exactSet("search_vault", "read_note")
-var artifactTools = exactSet("search_artifacts", "load_artifact")
-var shellTools = exactSet("shell", "structured_shell")
-var subcallTools = exactSet("subcall")
+var (
+	filesystemTools = exactSet("load_file")
+	repoTools       = exactSet("semantic_search_code", "smart_search_code", "ripgrep_code", "search_repo", "expand_repo_graph", "code_search_ensemble")
+	memoryTools     = exactSet("memory_ensemble_retrieve", "search_scenes", "get_scene", "get_top_of_mind", "get_latest_handoff")
+	vaultTools      = exactSet("search_vault", "read_note")
+	artifactTools   = exactSet("search_artifacts", "load_artifact")
+	shellTools      = exactSet("shell", "structured_shell")
+	subcallTools    = exactSet("subcall")
+)
 
 // AssessLeakage derives benchmark-contamination flags from exact tool names and
 // explicit runtime options. It intentionally avoids prompt/content heuristics.

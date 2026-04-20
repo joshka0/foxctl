@@ -50,21 +50,9 @@ func (s *Server) sessionEvents(w http.ResponseWriter, r *http.Request, sessionID
 		notFoundOrInternal(w, broker.ErrSessionNotFound)
 		return
 	}
-	since := parseSinceParam(r)
-	includeScreen := parseBoolParam(r, "screen")
-	includeReady := parseBoolParam(r, "ready")
-	includeActivity := parseBoolParam(r, "activity")
-	activityIntervalMS := 1000
-	if includeActivity {
-		var ok bool
-		activityIntervalMS, ok = parseIntQuery(w, r, "activity_interval_ms", 1000)
-		if !ok {
-			return
-		}
-		if activityIntervalMS <= 0 {
-			writeError(w, http.StatusBadRequest, "activity_interval_ms must be > 0")
-			return
-		}
+	opts, ok := parseSessionEventOptions(w, r)
+	if !ok {
+		return
 	}
 
 	flusher, ok := w.(http.Flusher)
@@ -80,54 +68,19 @@ func (s *Server) sessionEvents(w http.ResponseWriter, r *http.Request, sessionID
 	flusher.Flush()
 
 	ctx := r.Context()
-	replay, ch, sub, cancel := sess.Log().SubscribeFrom(ctx, since)
+	replay, ch, sub, cancel := sess.Log().SubscribeFrom(ctx, opts.since)
 	defer cancel()
 
 	enc := newSSEEncoder(w, flusher)
-	// Drain replay first to guarantee client sees history in order before any
-	// live chunks. SubscribeFrom captured both under the log lock so no gap
-	// exists between the last replay seq and the first live seq.
-	for _, chunk := range replay {
-		if err := enc.writeChunk(sessionID, chunk, sub.Dropped()); err != nil {
-			return
-		}
+	state := newSessionEventState(sessionID, sess, enc, opts)
+	if err := state.writeInitial(replay, sub.Dropped()); err != nil {
+		return
 	}
-	if includeScreen {
-		seq := sess.Snapshot().LastSeq
-		if err := enc.writeScreenSnapshot(sessionID, seq, sess.Screen().Snapshot(), sub.Dropped()); err != nil {
-			return
-		}
-	}
-	readyState := false
-	var readyTicker *time.Ticker
-	var readyTick <-chan time.Time
-	var activityTicker *time.Ticker
-	var activityTick <-chan time.Time
-	var activitySinceSeq uint64
-	var activitySinceBytes int64
-	if includeReady {
-		readyTicker = time.NewTicker(100 * time.Millisecond)
-		defer readyTicker.Stop()
-		readyTick = readyTicker.C
-		seq := sess.Snapshot().LastSeq
-		ready := sess.ProfileReadiness()
-		readyState = ready.Idle
-		if err := enc.writeTerminalReady(sessionID, seq, ready); err != nil {
-			return
-		}
-	}
-	if includeActivity {
-		activityTicker = time.NewTicker(time.Duration(activityIntervalMS) * time.Millisecond)
-		defer activityTicker.Stop()
-		activityTick = activityTicker.C
-		snap := sess.Snapshot()
-		activitySinceSeq = snap.LastSeq
-		activitySinceBytes = snap.OutputBytesTotal
-		body := activityResponseFromSnapshot(sessionID, snap, activitySinceSeq, activitySinceBytes, time.Now().UTC())
-		if err := enc.writeTerminalActivity(sessionID, snap.LastSeq, body); err != nil {
-			return
-		}
-	}
+	readyTick, stopReady := optionalTicker(opts.includeReady, 100*time.Millisecond)
+	defer stopReady()
+	activityTick, stopActivity := optionalTicker(opts.includeActivity, opts.activityInterval)
+	defer stopActivity()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -136,41 +89,147 @@ func (s *Server) sessionEvents(w http.ResponseWriter, r *http.Request, sessionID
 			if !open {
 				return
 			}
-			if err := enc.writeChunk(sessionID, chunk, sub.Dropped()); err != nil {
+			if err := state.writeChunk(chunk, sub.Dropped()); err != nil {
 				return
-			}
-			if includeScreen {
-				if err := enc.writeScreenSnapshot(sessionID, chunk.Seq, sess.Screen().Snapshot(), sub.Dropped()); err != nil {
-					return
-				}
-			}
-			if includeReady {
-				ready := sess.ProfileReadiness()
-				if ready.Idle != readyState {
-					readyState = ready.Idle
-					if err := enc.writeTerminalReady(sessionID, chunk.Seq, ready); err != nil {
-						return
-					}
-				}
 			}
 		case <-readyTick:
-			ready := sess.ProfileReadiness()
-			if ready.Idle != readyState {
-				readyState = ready.Idle
-				if err := enc.writeTerminalReady(sessionID, sess.Snapshot().LastSeq, ready); err != nil {
-					return
-				}
-			}
-		case <-activityTick:
-			snap := sess.Snapshot()
-			body := activityResponseFromSnapshot(sessionID, snap, activitySinceSeq, activitySinceBytes, time.Now().UTC())
-			if err := enc.writeTerminalActivity(sessionID, snap.LastSeq, body); err != nil {
+			if err := state.writeReadyIfChanged(sess.Snapshot().LastSeq); err != nil {
 				return
 			}
-			activitySinceSeq = snap.LastSeq
-			activitySinceBytes = snap.OutputBytesTotal
+		case <-activityTick:
+			if err := state.writeActivity(); err != nil {
+				return
+			}
 		}
 	}
+}
+
+type sessionEventOptions struct {
+	since            uint64
+	includeScreen    bool
+	includeReady     bool
+	includeActivity  bool
+	activityInterval time.Duration
+}
+
+func parseSessionEventOptions(w http.ResponseWriter, r *http.Request) (sessionEventOptions, bool) {
+	opts := sessionEventOptions{
+		since:            parseSinceParam(r),
+		includeScreen:    parseBoolParam(r, "screen"),
+		includeReady:     parseBoolParam(r, "ready"),
+		includeActivity:  parseBoolParam(r, "activity"),
+		activityInterval: time.Second,
+	}
+	if !opts.includeActivity {
+		return opts, true
+	}
+	intervalMS, ok := parseIntQuery(w, r, "activity_interval_ms", 1000)
+	if !ok {
+		return opts, false
+	}
+	if intervalMS <= 0 {
+		writeError(w, http.StatusBadRequest, "activity_interval_ms must be > 0")
+		return opts, false
+	}
+	opts.activityInterval = time.Duration(intervalMS) * time.Millisecond
+	return opts, true
+}
+
+type sessionEventState struct {
+	sessionID          string
+	sess               *session.Session
+	enc                *sseEncoder
+	opts               sessionEventOptions
+	readyState         bool
+	activitySinceSeq   uint64
+	activitySinceBytes int64
+}
+
+func newSessionEventState(sessionID string, sess *session.Session, enc *sseEncoder, opts sessionEventOptions) *sessionEventState {
+	return &sessionEventState{
+		sessionID: sessionID,
+		sess:      sess,
+		enc:       enc,
+		opts:      opts,
+	}
+}
+
+func (st *sessionEventState) writeInitial(replay []session.Chunk, dropped uint64) error {
+	// Drain replay first to guarantee client sees history in order before any
+	// live chunks. SubscribeFrom captured both under the log lock so no gap
+	// exists between the last replay seq and the first live seq.
+	for _, chunk := range replay {
+		if err := st.enc.writeChunk(st.sessionID, chunk, dropped); err != nil {
+			return err
+		}
+	}
+	if st.opts.includeScreen {
+		seq := st.sess.Snapshot().LastSeq
+		if err := st.enc.writeScreenSnapshot(st.sessionID, seq, st.sess.Screen().Snapshot(), dropped); err != nil {
+			return err
+		}
+	}
+	if st.opts.includeReady {
+		seq := st.sess.Snapshot().LastSeq
+		ready := st.sess.ProfileReadiness()
+		st.readyState = ready.Idle
+		if err := st.enc.writeTerminalReady(st.sessionID, seq, ready); err != nil {
+			return err
+		}
+	}
+	if st.opts.includeActivity {
+		snap := st.sess.Snapshot()
+		st.activitySinceSeq = snap.LastSeq
+		st.activitySinceBytes = snap.OutputBytesTotal
+		body := activityResponseFromSnapshot(st.sessionID, snap, st.activitySinceSeq, st.activitySinceBytes, time.Now().UTC())
+		if err := st.enc.writeTerminalActivity(st.sessionID, snap.LastSeq, body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (st *sessionEventState) writeChunk(chunk session.Chunk, dropped uint64) error {
+	if err := st.enc.writeChunk(st.sessionID, chunk, dropped); err != nil {
+		return err
+	}
+	if st.opts.includeScreen {
+		if err := st.enc.writeScreenSnapshot(st.sessionID, chunk.Seq, st.sess.Screen().Snapshot(), dropped); err != nil {
+			return err
+		}
+	}
+	if st.opts.includeReady {
+		return st.writeReadyIfChanged(chunk.Seq)
+	}
+	return nil
+}
+
+func (st *sessionEventState) writeReadyIfChanged(seq uint64) error {
+	ready := st.sess.ProfileReadiness()
+	if ready.Idle == st.readyState {
+		return nil
+	}
+	st.readyState = ready.Idle
+	return st.enc.writeTerminalReady(st.sessionID, seq, ready)
+}
+
+func (st *sessionEventState) writeActivity() error {
+	snap := st.sess.Snapshot()
+	body := activityResponseFromSnapshot(st.sessionID, snap, st.activitySinceSeq, st.activitySinceBytes, time.Now().UTC())
+	if err := st.enc.writeTerminalActivity(st.sessionID, snap.LastSeq, body); err != nil {
+		return err
+	}
+	st.activitySinceSeq = snap.LastSeq
+	st.activitySinceBytes = snap.OutputBytesTotal
+	return nil
+}
+
+func optionalTicker(enabled bool, interval time.Duration) (<-chan time.Time, func()) {
+	if !enabled {
+		return nil, func() {}
+	}
+	ticker := time.NewTicker(interval)
+	return ticker.C, ticker.Stop
 }
 
 type roomEventChunk struct {
@@ -426,7 +485,7 @@ func (e *sseEncoder) writeTerminalActivity(sessionID string, seq uint64, body Te
 }
 
 func terminalReadyReason(ready session.PromptReadiness) string {
-	if !ready.Readiness.Idle {
+	if !ready.Idle {
 		return "output_busy"
 	}
 	if ready.ScreenRegex != "" && !ready.ScreenMatch {

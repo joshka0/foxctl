@@ -183,12 +183,13 @@ func (t *Tracker) step(c byte) {
 			// Still inside OSC payload; ignore.
 		}
 	case stateOSCEsc:
-		if c == '\\' {
+		switch c {
+		case '\\':
 			// ST: end of OSC.
 			t.state = stateGround
-		} else if c == 0x1B {
+		case 0x1B:
 			// Another ESC — stay in stateOSCEsc waiting for '\'.
-		} else {
+		default:
 			// Lone ESC inside OSC: treat as continuation, drop to OSC so we
 			// keep consuming until a real terminator.
 			t.state = stateOSC

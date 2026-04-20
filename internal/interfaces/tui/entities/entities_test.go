@@ -11,24 +11,24 @@ import (
 func TestEntryKindConstants_Exist(t *testing.T) {
 	// Every one of the 18 current kinds must exist as a named EntryKind constant.
 	kinds := map[string]EntryKind{
-		"pending":    EntryKindPending,
-		"ask":        EntryKindAsk,
-		"reply":      EntryKindReply,
-		"event":      EntryKindEvent,
-		"cmd":        EntryKindCmd,
-		"draft":      EntryKindDraft,
-		"status":     EntryKindStatus,
-		"error":      EntryKindError,
-		"tool":       EntryKindTool,
-		"counts":     EntryKindCounts,
-		"next":       EntryKindNext,
-		"brief":      EntryKindBrief,
-		"epic":       EntryKindEpic,
-		"inflight":   EntryKindInflight,
-		"agent":      EntryKindAgent,
-		"console":    EntryKindConsole,
-		"connected":  EntryKindConnected,
-		"heartbeat":  EntryKindHeartbeat,
+		"pending":   EntryKindPending,
+		"ask":       EntryKindAsk,
+		"reply":     EntryKindReply,
+		"event":     EntryKindEvent,
+		"cmd":       EntryKindCmd,
+		"draft":     EntryKindDraft,
+		"status":    EntryKindStatus,
+		"error":     EntryKindError,
+		"tool":      EntryKindTool,
+		"counts":    EntryKindCounts,
+		"next":      EntryKindNext,
+		"brief":     EntryKindBrief,
+		"epic":      EntryKindEpic,
+		"inflight":  EntryKindInflight,
+		"agent":     EntryKindAgent,
+		"console":   EntryKindConsole,
+		"connected": EntryKindConnected,
+		"heartbeat": EntryKindHeartbeat,
 	}
 	for name, kind := range kinds {
 		if kind == EntryKindUnknown {
@@ -111,24 +111,24 @@ func TestEntryKind_String(t *testing.T) {
 func TestParseEntryKind_AllCurrentValues(t *testing.T) {
 	// Every current legacy string value must map to the correct EntryKind.
 	cases := map[string]EntryKind{
-		"pending":    EntryKindPending,
-		"ask":        EntryKindAsk,
-		"reply":      EntryKindReply,
-		"event":      EntryKindEvent,
-		"cmd":        EntryKindCmd,
-		"draft":      EntryKindDraft,
-		"status":     EntryKindStatus,
-		"error":      EntryKindError,
-		"tool":       EntryKindTool,
-		"counts":     EntryKindCounts,
-		"next":       EntryKindNext,
-		"brief":      EntryKindBrief,
-		"epic":       EntryKindEpic,
-		"inflight":   EntryKindInflight,
-		"agent":      EntryKindAgent,
-		"console":    EntryKindConsole,
-		"connected":  EntryKindConnected,
-		"heartbeat":  EntryKindHeartbeat,
+		"pending":   EntryKindPending,
+		"ask":       EntryKindAsk,
+		"reply":     EntryKindReply,
+		"event":     EntryKindEvent,
+		"cmd":       EntryKindCmd,
+		"draft":     EntryKindDraft,
+		"status":    EntryKindStatus,
+		"error":     EntryKindError,
+		"tool":      EntryKindTool,
+		"counts":    EntryKindCounts,
+		"next":      EntryKindNext,
+		"brief":     EntryKindBrief,
+		"epic":      EntryKindEpic,
+		"inflight":  EntryKindInflight,
+		"agent":     EntryKindAgent,
+		"console":   EntryKindConsole,
+		"connected": EntryKindConnected,
+		"heartbeat": EntryKindHeartbeat,
 	}
 	for input, want := range cases {
 		got := ParseEntryKind(input)
@@ -198,8 +198,8 @@ func TestAgentNode_ParentChildrenFields(t *testing.T) {
 		Agent: Agent{ID: "parent-1", Role: "overseer"},
 	}
 	child := &AgentNode{
-		Agent:   Agent{ID: "child-1", Role: "coder"},
-		Parent:  parent,
+		Agent:  Agent{ID: "child-1", Role: "coder"},
+		Parent: parent,
 		Children: []*AgentNode{
 			{Agent: Agent{ID: "grandchild-1", Role: "scout"}},
 		},
@@ -239,11 +239,11 @@ func TestRoom_BasicFields(t *testing.T) {
 
 func TestRoomMessage_BasicFields(t *testing.T) {
 	msg := RoomMessage{
-		ID:        "msg-1",
-		RoomID:    "room-1",
-		Sender:    "agent-1",
-		Kind:      EntryKindReply,
-		Text:      "hello",
+		ID:     "msg-1",
+		RoomID: "room-1",
+		Sender: "agent-1",
+		Kind:   EntryKindReply,
+		Text:   "hello",
 	}
 	if msg.Kind != EntryKindReply {
 		t.Errorf("RoomMessage.Kind = %d, want EntryKindReply (%d)", msg.Kind, EntryKindReply)

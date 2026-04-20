@@ -152,10 +152,10 @@ var (
 // per-lease goroutines (time.AfterFunc) that re-acquire the lock when they
 // run. The lock is never held across a callback into user code.
 type Manager struct {
-	mu       sync.Mutex
-	byKey    map[key]*Lease
-	byID     map[string]*Lease
-	stopped  bool
+	mu      sync.Mutex
+	byKey   map[key]*Lease
+	byID    map[string]*Lease
+	stopped bool
 }
 
 type key struct {

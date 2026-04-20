@@ -41,7 +41,7 @@ type ColorPalette struct {
 
 	// Border and BorderFocus are used for panel borders. BorderFocus is the
 	// accent color used when a panel has keyboard focus.
-	Border     tui.Color
+	Border      tui.Color
 	BorderFocus tui.Color
 
 	// TextPrimary, TextSecondary, TextMuted, and TextInverse cover the
@@ -92,7 +92,7 @@ var Colors = ColorPalette{
 	SurfaceAlt: tui.ANSIColor(238), // #444444 — alternative/elevated surface
 
 	// -- Borders --
-	Border:     tui.ANSIColor(240), // #585858 — default panel border
+	Border:      tui.ANSIColor(240),        // #585858 — default panel border
 	BorderFocus: tui.RGBColor(0, 150, 180), // teal accent for focused borders
 
 	// -- Text --

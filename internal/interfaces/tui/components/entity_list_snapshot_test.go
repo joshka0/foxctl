@@ -114,7 +114,7 @@ func TestFocusedVsUnfocusedDistinguishable(t *testing.T) {
 	)
 
 	// The raw cell buffer must differ between focused and unfocused.
-	focusedCell := mtFocused.CellAt(0, 1)  // focus indicator column, selected row
+	focusedCell := mtFocused.CellAt(0, 1)     // focus indicator column, selected row
 	unfocusedCell := mtUnfocused.CellAt(0, 1) // same position, unfocused
 
 	if focusedCell.Equal(unfocusedCell) {

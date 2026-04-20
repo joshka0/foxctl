@@ -16,19 +16,19 @@ import (
 // Double-close is safe: calling Close() on an already-closed drawer is a
 // no-op (no panic, no double-fire of OnClose).
 type Drawer struct {
-	title       string
-	content     []string
-	width       int
-	height      int
-	drawerWidth int // width of the drawer panel when open
-	open        bool
-	focused     bool
+	title        string
+	content      []string
+	width        int
+	height       int
+	drawerWidth  int // width of the drawer panel when open
+	open         bool
+	focused      bool
 	scrollOffset int
 
-	previouslyFocused string          // ref identifier of the element to restore focus to
-	onClose           func()          // fires exactly once per open→close cycle
+	previouslyFocused string           // ref identifier of the element to restore focus to
+	onClose           func()           // fires exactly once per open→close cycle
 	onRestoreFocus    func(ref string) // fires on close with the previously-focused ref
-	closeFired        bool            // tracks whether OnClose has fired for the current cycle
+	closeFired        bool             // tracks whether OnClose has fired for the current cycle
 }
 
 // DrawerOption configures a Drawer at construction time.
@@ -36,7 +36,12 @@ type DrawerOption func(*Drawer)
 
 // WithDrawerOpen sets the initial open state.
 func WithDrawerOpen(o bool) DrawerOption {
-	return func(d *Drawer) { d.open = o; if o { d.closeFired = false } }
+	return func(d *Drawer) {
+		d.open = o
+		if o {
+			d.closeFired = false
+		}
+	}
 }
 
 // WithDrawerFocused sets the initial focus state.

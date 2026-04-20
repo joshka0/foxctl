@@ -59,13 +59,13 @@ type Responder struct {
 // Stats counts recognised queries. Primarily exposed so tests + operators
 // can confirm the responder is seeing traffic the way they expect.
 type Stats struct {
-	OSCColor        uint64 // OSC 10/11/12 responses issued
-	DSRStatus       uint64 // CSI 5 n responses issued
-	DSRCursor       uint64 // CSI 6 n responses issued
-	DA1             uint64 // CSI c responses issued
-	DA2             uint64 // CSI > c responses issued
-	KittyKeyboard   uint64 // CSI ? u responses issued
-	UnknownIgnored  uint64 // completed sequences we did not answer
+	OSCColor       uint64 // OSC 10/11/12 responses issued
+	DSRStatus      uint64 // CSI 5 n responses issued
+	DSRCursor      uint64 // CSI 6 n responses issued
+	DA1            uint64 // CSI c responses issued
+	DA2            uint64 // CSI > c responses issued
+	KittyKeyboard  uint64 // CSI ? u responses issued
+	UnknownIgnored uint64 // completed sequences we did not answer
 }
 
 // parserState is the position in the ECMA-48 escape recogniser. Mirrors

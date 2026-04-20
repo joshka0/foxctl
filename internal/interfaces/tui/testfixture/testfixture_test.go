@@ -462,7 +462,7 @@ func TestBootDaemon_StorageRootContainsFoxctlData(t *testing.T) {
 	// The daemon should have created some data files in the storage root.
 	// Walk the directory and count files.
 	var fileCount int
-	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -470,7 +470,9 @@ func TestBootDaemon_StorageRootContainsFoxctlData(t *testing.T) {
 			fileCount++
 		}
 		return nil
-	})
+	}); err != nil {
+		t.Fatalf("walk storage root: %v", err)
+	}
 
 	if fileCount == 0 {
 		t.Fatal("storage root has no files — daemon may not have initialized")

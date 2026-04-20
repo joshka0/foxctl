@@ -448,7 +448,8 @@ func TestKeybindHintExpandedMultiLine(t *testing.T) {
 // MockTerminal for testing.
 func renderSmallWidget(widget interface {
 	Render(buf *tui.Buffer)
-}, width, height int) *tui.MockTerminal {
+}, width, height int,
+) *tui.MockTerminal {
 	mt := tui.NewMockTerminal(width, height)
 	buf := tui.NewBuffer(width, height)
 	widget.Render(buf)

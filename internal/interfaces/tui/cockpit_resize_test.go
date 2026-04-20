@@ -19,18 +19,6 @@ import (
 //   5. Selected agent remains selected across resizes
 // ---------------------------------------------------------------------------
 
-// matingRunes are the characters that should appear at the intersection of a
-// vertical separator with the header or footer row.
-var matingRunes = map[rune]bool{
-	'┬': true, // light down and horizontal (top T)
-	'┴': true, // light up and horizontal (bottom T)
-	'├': true, // light vertical and right
-	'┤': true, // light vertical and left
-	'┼': true, // light vertical and horizontal
-	'─': true, // light horizontal
-	'│': true, // vertical continues through
-}
-
 // renderCockpitReady is a test helper that creates a CockpitScreen in Ready
 // phase, renders at the given dimensions, and returns the MockTerminal.
 func renderCockpitReadyToMT(width, height int) (*CockpitScreen, *gotui.MockTerminal) {

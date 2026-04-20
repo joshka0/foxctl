@@ -152,7 +152,7 @@ func main() {
 	if err != nil {
 		fatalf("AcquireLease: %v", err)
 	}
-	defer b.ReleaseLease(leaseRec.ID)
+	defer func() { _ = b.ReleaseLease(leaseRec.ID) }()
 
 	fmt.Fprintf(os.Stderr, "atcp-smoke: submitting prompt: %q (lease=%s)\n", *prompt, leaseRec.ID)
 	if _, err := b.Submit(snap.ID, intents.TerminalSubmit{Text: *prompt, LeaseID: leaseRec.ID}); err != nil {
@@ -168,7 +168,9 @@ func main() {
 			_, _ = logSink.Write(c.Bytes)
 		}
 	}
-	b.DeleteSession(snap.ID)
+	if err := b.DeleteSession(snap.ID); err != nil {
+		fatalf("DeleteSession: %v", err)
+	}
 	<-sess.Done()
 }
 
