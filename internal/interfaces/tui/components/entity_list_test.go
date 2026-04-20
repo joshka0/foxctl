@@ -110,17 +110,17 @@ func TestWrapAround(t *testing.T) {
 func TestNoWrapAround(t *testing.T) {
 	t.Parallel()
 	items := makeItems(5)
-	el := NewEntityList(items, 40, 10, WithSelectedIndex(4), WithWrapAround(false))
+	el := NewEntityList(items, 40, 10, WithSelectedIndex(4), WithWrapAround(false), WithFocused(true))
 
-	// At last item, ↓ stays.
+	// At last item, ↓ stays clamped at end.
 	el.HandleKey(tui.KeyEvent{Key: tui.KeyDown})
 	if el.SelectedIndex() != 4 {
 		t.Errorf("no-wrap ↓ from last: want selectedIndex=4, got %d", el.SelectedIndex())
 	}
 
-	el2 := NewEntityList(items, 40, 10, WithSelectedIndex(0), WithWrapAround(false))
+	el2 := NewEntityList(items, 40, 10, WithSelectedIndex(0), WithWrapAround(false), WithFocused(true))
 
-	// At first item, ↑ stays.
+	// At first item, ↑ stays clamped at start.
 	el2.HandleKey(tui.KeyEvent{Key: tui.KeyUp})
 	if el2.SelectedIndex() != 0 {
 		t.Errorf("no-wrap ↑ from first: want selectedIndex=0, got %d", el2.SelectedIndex())
