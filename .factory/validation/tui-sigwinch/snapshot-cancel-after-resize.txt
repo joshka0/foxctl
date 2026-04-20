@@ -1,0 +1,25 @@
+
+Agents ┬Detail ┬Evidence
+▸ agent-de coder idle default —│▌ ◐ coder (agent-de)       │
+  agent-gh planner running     │  Runtime                  │
+  agent-ab researcher running  │  Status: idle             │
+                               │  Workspace: default       │
+                               │  Last Active: 5m ago      │
+                               │────────────────────────── │
+                               │  Hierarchy                │
+                               │  Parent: —                │
+                               │  Children: —              │
+                               │────────────────────────── │
+                               │  Recent Activity          │
+                               │  No recent activity.      │
+                               │                           │
+                               │                           │
+                               │you: tell me a story       │
+                               │assistant: The quick       │
+                               │                           │
+                               │                           │
+                               │                           │
+                               │                           │
+                               │                           │
+                               │                           │
+● connected agent: agent-de (coder) ESC:quit ↑↓:nav Enter:submit e:evidence
