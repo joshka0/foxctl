@@ -96,7 +96,7 @@ func (s *Server) createRoom(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	rm, err := s.broker.CreateRoom(room.CreateRoomRequest{
+	rm, err := s.broker.CreateRoom(r.Context(), room.CreateRoomRequest{
 		Workspace:   req.Workspace,
 		Title:       req.Title,
 		Description: req.Description,
@@ -137,7 +137,7 @@ func (s *Server) joinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	mem, err := s.broker.JoinRoom(room.JoinRequest{
+	mem, err := s.broker.JoinRoom(r.Context(), room.JoinRequest{
 		RoomID:     id,
 		AgentID:    req.AgentID,
 		SessionID:  req.SessionID,
@@ -159,7 +159,7 @@ func (s *Server) leaveRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	mem, err := s.broker.LeaveRoom(id, req.AgentID)
+	mem, err := s.broker.LeaveRoom(r.Context(), id, req.AgentID)
 	if err != nil {
 		writeRoomError(w, err)
 		return
@@ -186,7 +186,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	res, err := s.broker.SendMessage(router.Message{
+	res, err := s.broker.SendMessage(r.Context(), router.Message{
 		RoomID:     req.RoomID,
 		Source:     req.Source,
 		Text:       req.Text,

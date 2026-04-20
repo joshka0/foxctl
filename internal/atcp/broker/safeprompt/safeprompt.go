@@ -177,33 +177,9 @@ func Wait(ctx context.Context, s *session.Session, opts Options, pollInterval ti
 	}
 }
 
-// collectTail returns the last n bytes of the session's output log. The walk
-// is O(chunks-from-end) not O(total bytes) because chunks are small.
+// collectTail is a thin forwarder to OutputLog.TailBytes. Kept as a
+// package-level symbol because the safeprompt tests poke at it when asserting
+// that the regex sees what we think it sees.
 func collectTail(s *session.Session, n int) []byte {
-	if n <= 0 {
-		return nil
-	}
-	chunks := s.Log().Since(0, 0)
-	// Walk from the end accumulating up to n bytes.
-	total := 0
-	start := len(chunks)
-	for i := len(chunks) - 1; i >= 0; i-- {
-		total += len(chunks[i].Bytes)
-		start = i
-		if total >= n {
-			break
-		}
-	}
-	if start >= len(chunks) {
-		return nil
-	}
-	// Flatten the tail slice.
-	out := make([]byte, 0, total)
-	for _, c := range chunks[start:] {
-		out = append(out, c.Bytes...)
-	}
-	if len(out) > n {
-		out = out[len(out)-n:]
-	}
-	return out
+	return s.Log().TailBytes(n)
 }

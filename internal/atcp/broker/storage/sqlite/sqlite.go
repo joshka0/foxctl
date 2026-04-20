@@ -14,7 +14,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"net/url"
 	"time"
@@ -133,11 +132,9 @@ func applyDefaultPragmas(dsn string) (string, error) {
 			return "", fmt.Errorf("atcp sqlite: parse dsn: %w", err)
 		}
 		q := u.Query()
-		setIfAbsent(q, "_busy_timeout", "5000")
-		setIfAbsent(q, "_pragma", "foreign_keys(1)")
-		if !hasPragma(q, "journal_mode") {
-			q.Add("_pragma", "journal_mode(WAL)")
-		}
+		setSingleIfAbsent(q, "_busy_timeout", "5000")
+		addPragmaIfAbsent(q, "foreign_keys", "foreign_keys(1)")
+		addPragmaIfAbsent(q, "journal_mode", "journal_mode(WAL)")
 		u.RawQuery = q.Encode()
 		return u.String(), nil
 	}
@@ -151,16 +148,33 @@ func applyDefaultPragmas(dsn string) (string, error) {
 	return u.String(), nil
 }
 
-func setIfAbsent(q url.Values, key, value string) {
+// setSingleIfAbsent sets a single-valued query key only if the caller did
+// not already supply one. Used for _busy_timeout, which the driver treats
+// as scalar.
+func setSingleIfAbsent(q url.Values, key, value string) {
 	if q.Get(key) == "" {
 		q.Set(key, value)
 	}
 }
 
+// addPragmaIfAbsent appends a _pragma value if none of the caller-supplied
+// _pragma entries already target the same pragma name. _pragma is
+// deliberately multi-valued in the driver's DSN format, so a naive
+// q.Get("_pragma") only sees the first entry and would mis-skip our
+// defaults when the caller set an unrelated pragma like synchronous(NORMAL).
+func addPragmaIfAbsent(q url.Values, name, value string) {
+	if hasPragma(q, name) {
+		return
+	}
+	q.Add("_pragma", value)
+}
+
 func hasPragma(q url.Values, name string) bool {
 	for _, p := range q["_pragma"] {
-		// Prefix match: "foreign_keys(1)" matches name "foreign_keys".
-		if len(p) >= len(name) && p[:len(name)] == name {
+		// Prefix match on "<name>(" avoids matching a pragma whose name
+		// is a prefix of another (e.g. "foreign_keys" is a prefix of a
+		// hypothetical "foreign_keys_extra").
+		if len(p) > len(name) && p[:len(name)] == name && p[len(name)] == '(' {
 			return true
 		}
 	}
@@ -305,7 +319,7 @@ func (s *Store) LoadMembers(ctx context.Context, roomID string) ([]room.Member, 
 
 // timeToText serialises a time.Time as RFC3339Nano UTC, using an empty
 // string for zero values. Keeping the "zero = empty" convention in SQL
-// makes the `WHERE left_at = ''` partial index trivially correct and avoids
+// makes the `WHERE left_at = ”` partial index trivially correct and avoids
 // confusing "0001-01-01T00:00:00Z" strings appearing in real audit
 // queries.
 func timeToText(t time.Time) string {
@@ -338,7 +352,3 @@ func boolToInt(b bool) int {
 
 // Compile-time check that *Store implements storage.Store.
 var _ storage.Store = (*Store)(nil)
-
-// ensure the errors import is used; keeps the file future-proof when we
-// add richer constraint-violation mapping.
-var _ = errors.New

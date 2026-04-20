@@ -136,6 +136,13 @@ func New(opts Options) (*Broker, error) {
 		ctx = context.Background()
 	}
 	if err := b.hydrate(ctx); err != nil {
+		// Hydrate failed: the broker is only half-built but the session
+		// and lease managers are already running goroutines (reapers,
+		// timers). Tearing them down here keeps New's "success or no
+		// side effects" contract — callers that get an error back never
+		// have to remember to call Stop on a broker they never received.
+		b.sessions.Stop()
+		b.leases.Stop()
 		return nil, fmt.Errorf("atcp broker: hydrate: %w", err)
 	}
 	return b, nil
@@ -199,12 +206,16 @@ func (b *Broker) Router() *router.Router { return b.msgRouter }
 // Persistence failures after the in-memory insert are reported but not
 // rolled back — the room exists to live consumers; operators see the error
 // and decide whether to retry.
-func (b *Broker) CreateRoom(req room.CreateRoomRequest) (room.Room, error) {
+//
+// ctx bounds the storage write only; the in-memory mutation is synchronous
+// and unaffected by cancellation so callers can't observe a room that
+// exists in memory but not on disk via ctx timeout alone.
+func (b *Broker) CreateRoom(ctx context.Context, req room.CreateRoomRequest) (room.Room, error) {
 	r, err := b.roomMgr.CreateRoom(req)
 	if err != nil {
 		return room.Room{}, err
 	}
-	if perr := b.store.SaveRoom(context.Background(), r); perr != nil {
+	if perr := b.store.SaveRoom(ctx, r); perr != nil {
 		return r, fmt.Errorf("atcp broker: persist room: %w", perr)
 	}
 	return r, nil
@@ -213,7 +224,7 @@ func (b *Broker) CreateRoom(req room.CreateRoomRequest) (room.Room, error) {
 // JoinRoom verifies the session exists before delegating, writes the member
 // through storage on success, and maps unknown sessions to the broker-level
 // sentinel.
-func (b *Broker) JoinRoom(req room.JoinRequest) (room.Member, error) {
+func (b *Broker) JoinRoom(ctx context.Context, req room.JoinRequest) (room.Member, error) {
 	if _, err := b.sessions.Get(req.SessionID); err != nil {
 		return room.Member{}, ErrSessionNotFound
 	}
@@ -221,7 +232,7 @@ func (b *Broker) JoinRoom(req room.JoinRequest) (room.Member, error) {
 	if err != nil {
 		return room.Member{}, err
 	}
-	if perr := b.store.SaveMember(context.Background(), mem); perr != nil {
+	if perr := b.store.SaveMember(ctx, mem); perr != nil {
 		return mem, fmt.Errorf("atcp broker: persist member: %w", perr)
 	}
 	return mem, nil
@@ -229,12 +240,12 @@ func (b *Broker) JoinRoom(req room.JoinRequest) (room.Member, error) {
 
 // LeaveRoom stamps LeftAt in memory and writes the updated row through. The
 // underlying session stays alive — "persist on leave" per plan §5a.2.
-func (b *Broker) LeaveRoom(roomID, agentID string) (room.Member, error) {
+func (b *Broker) LeaveRoom(ctx context.Context, roomID, agentID string) (room.Member, error) {
 	mem, err := b.roomMgr.LeaveRoom(roomID, agentID)
 	if err != nil {
 		return room.Member{}, err
 	}
-	if perr := b.store.SaveMember(context.Background(), mem); perr != nil {
+	if perr := b.store.SaveMember(ctx, mem); perr != nil {
 		return mem, fmt.Errorf("atcp broker: persist member leave: %w", perr)
 	}
 	return mem, nil
@@ -244,7 +255,7 @@ func (b *Broker) LeaveRoom(roomID, agentID string) (room.Member, error) {
 // for audit. Storage errors never change the delivery result — the members
 // already got (or didn't get) the message; persistence is a downstream
 // concern.
-func (b *Broker) SendMessage(msg router.Message) (router.Result, error) {
+func (b *Broker) SendMessage(ctx context.Context, msg router.Message) (router.Result, error) {
 	sentAt := time.Now()
 	res, err := b.msgRouter.Send(msg)
 	if err != nil {
@@ -255,7 +266,7 @@ func (b *Broker) SendMessage(msg router.Message) (router.Result, error) {
 	// mean the router rejected the input before fan-out, which also
 	// returns err != nil above.
 	rec := storage.NewMessageRecordFromResult(msg, res, sentAt)
-	if perr := b.store.AppendMessage(context.Background(), rec); perr != nil {
+	if perr := b.store.AppendMessage(ctx, rec); perr != nil {
 		return res, fmt.Errorf("atcp broker: persist message: %w", perr)
 	}
 	return res, nil
@@ -304,20 +315,53 @@ func (b *Broker) CreateSession(spec session.Spec, logOpts session.OutputLogOptio
 		}
 	}()
 
-	// When the session exits, drop its adapter entry and tear down the mode
-	// subscription so the mirror goroutine above exits.
+	// When the session exits, drop its adapter entry, tear down the mode
+	// subscription so the mirror goroutine above exits, AND detach any
+	// active room memberships bound to this session. The third step is the
+	// critical one: without it, ListMembers would still show an active
+	// binding and the Router would keep trying to AcquireLease against a
+	// PTY that no longer exists. Detach runs on *every* exit path —
+	// natural child exit, DeleteSession, broker.Stop — because the
+	// watcher keys off sess.Done().
 	go func(id string) {
 		<-sess.Done()
 		cancelModes()
 		b.adaptersMu.Lock()
 		delete(b.adapters, id)
 		b.adaptersMu.Unlock()
+		b.detachSessionFromRooms(id)
 	}(sess.ID())
 
 	return sess.Snapshot(), nil
 }
 
-// DeleteSession tears down the named session.
+// detachSessionFromRooms stamps LeftAt on every active member that was
+// bound to sessionID and writes those rows through storage. Errors from
+// the Store are logged at a low severity through the broker's intended
+// surface — for now that means they are dropped because the broker has no
+// injected logger; operators will see them once observability lands. The
+// room-manager mutation is authoritative regardless of persistence
+// outcome, so a Store failure does NOT re-attach the member in memory.
+func (b *Broker) detachSessionFromRooms(sessionID string) {
+	changed := b.roomMgr.DetachSession(sessionID, time.Now())
+	if len(changed) == 0 {
+		return
+	}
+	// Persist each detach. We intentionally use context.Background here:
+	// the session-exit goroutine has no inbound request context, and
+	// refusing to write-through because of a zero-value context would
+	// leave the Store permanently diverged from memory. Callers that
+	// need a deadline can drain via broker.Stop.
+	ctx := context.Background()
+	for _, mem := range changed {
+		_ = b.store.SaveMember(ctx, mem)
+	}
+}
+
+// DeleteSession tears down the named session. The session goroutine owns
+// room detachment (see CreateSession's sess.Done watcher), so this method
+// only needs to drive session teardown — detachSessionFromRooms runs
+// automatically when sess.Done fires.
 func (b *Broker) DeleteSession(id string) error {
 	err := b.sessions.Delete(id)
 	if errors.Is(err, session.ErrSessionNotFound) {

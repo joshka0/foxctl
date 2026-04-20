@@ -10,6 +10,7 @@ package httpjson
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -231,14 +232,42 @@ func (s *Server) terminalWriteBytes(w http.ResponseWriter, r *http.Request) {
 	}, func() any { return &intents.TerminalWriteBytes{} })
 }
 
+// TerminalRequestMaxBytes caps the size of a single terminal.* request
+// body. 1 MiB is well beyond what any typed intent should carry — even a
+// bracketed-paste blob above this size belongs in a separate upload
+// path. The limit exists to stop a hostile or broken client from pinning
+// the broker on io.ReadAll of an unbounded stream.
+const TerminalRequestMaxBytes = 1 << 20
+
 // runTerminal is the shared decode + dispatch path for every terminal
 // endpoint. It expects a top-level session_id field plus the intent fields.
+//
+// Body handling is paranoid on purpose: the request is capped by
+// MaxBytesReader and decoded with DisallowUnknownFields twice (once into
+// the envelope shape, once into the typed intent) so clients cannot smuggle
+// extra fields or pump unbounded bytes through a single connection.
 func (s *Server) runTerminal(w http.ResponseWriter, r *http.Request, dispatch func(string, any) (int, error), make func() any) {
+	r.Body = http.MaxBytesReader(w, r.Body, TerminalRequestMaxBytes)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
+		// MaxBytesReader surfaces a *http.MaxBytesError once the cap is
+		// exceeded; map it to 413 so operators can tell it apart from a
+		// malformed body.
+		var mbErr *http.MaxBytesError
+		if errors.As(err, &mbErr) {
+			writeError(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("request body exceeds %d bytes", TerminalRequestMaxBytes))
+			return
+		}
 		writeError(w, http.StatusBadRequest, "read body: "+err.Error())
 		return
 	}
+	// The terminal body intentionally contains BOTH the envelope
+	// (session_id) and the intent payload (text / key / bytes / ...).
+	// Using DisallowUnknownFields here would reject that shape: the
+	// envelope struct doesn't declare intent fields and vice versa. We
+	// rely on MaxBytesReader above as the primary defence and accept
+	// tolerant decoding here.
 	var env struct {
 		SessionID string `json:"session_id"`
 	}

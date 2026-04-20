@@ -165,6 +165,10 @@ func TestListen_RefusesToClobberRegularFile(t *testing.T) {
 }
 
 func TestDefaultSocketPath_Fallbacks(t *testing.T) {
+	// Clear the explicit override first — otherwise a pre-set
+	// FOXCTL_ATCP_SOCK in the developer's shell would short-circuit the
+	// precedence checks below.
+	t.Setenv(SocketEnv, "")
 	t.Setenv("XDG_RUNTIME_DIR", "")
 	t.Setenv("HOME", "")
 	got := DefaultSocketPath()
@@ -180,5 +184,18 @@ func TestDefaultSocketPath_Fallbacks(t *testing.T) {
 	got = DefaultSocketPath()
 	if !strings.HasSuffix(got, "/foxctl/atcp.sock") {
 		t.Errorf("XDG default = %q", got)
+	}
+}
+
+// TestDefaultSocketPath_EnvOverrideWins proves the FOXCTL_ATCP_SOCK
+// override beats every other env var. Operators rely on this to point
+// multiple foxctl processes at a shared test socket in one place.
+func TestDefaultSocketPath_EnvOverrideWins(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	want := "/tmp/override-atcp.sock"
+	t.Setenv(SocketEnv, want)
+	if got := DefaultSocketPath(); got != want {
+		t.Errorf("DefaultSocketPath = %q, want override %q", got, want)
 	}
 }

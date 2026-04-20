@@ -63,7 +63,15 @@ func NewManager(opts ManagerOptions) *Manager {
 //
 // The optional logOpts overrides the Manager's default log options for this
 // session only. Pass the zero value to fall back to the manager default.
+//
+// Create and Stop are race-safe: if Stop interleaves between the initial
+// ctx-closed check and the final registration, the newly-started session
+// is torn down and ErrManagerClosed is returned instead of leaking a live
+// PTY past the manager's lifetime.
 func (m *Manager) Create(spec Spec, logOpts OutputLogOptions) (*Session, error) {
+	// Fast-path rejection: don't spawn anything if we already know the
+	// manager is stopped. This keeps Start off the hot path in the common
+	// "I called Stop long ago" case.
 	m.mu.Lock()
 	if m.ctx.Err() != nil {
 		m.mu.Unlock()
@@ -82,7 +90,20 @@ func (m *Manager) Create(spec Spec, logOpts OutputLogOptions) (*Session, error) 
 		return nil, err
 	}
 
+	// Second check — the one that closes the race. Between the fast-path
+	// check above and here a concurrent Stop could have: (a) cancelled
+	// m.ctx, and (b) walked m.sessions while our key was absent. If we
+	// simply inserted now, Stop would never see this session and it would
+	// outlive the manager. Instead, re-check under the lock; if Stop won
+	// the race we close the session and return the same sentinel the
+	// caller would have seen on the fast path.
 	m.mu.Lock()
+	if m.ctx.Err() != nil {
+		m.mu.Unlock()
+		sess.Close()
+		<-sess.Done()
+		return nil, ErrManagerClosed
+	}
 	m.sessions[sess.ID()] = sess
 	m.mu.Unlock()
 

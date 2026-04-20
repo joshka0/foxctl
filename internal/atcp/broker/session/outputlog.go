@@ -132,6 +132,56 @@ func (l *OutputLog) Since(since uint64, limit int) []Chunk {
 	return out
 }
 
+// TailBytes returns up to n bytes from the end of the log as a single
+// contiguous slice. It walks from the most recent chunk backwards under
+// the log lock and only copies the bytes it actually needs, so a
+// megabyte-scale log does not allocate a megabyte-sized buffer just to
+// inspect the last few KB (which is what safeprompt wants to do on every
+// poll).
+//
+// Ordering: the returned slice is in append order — the byte that was
+// most recently Appended is the last byte of the slice. n <= 0 returns
+// nil.
+func (l *OutputLog) TailBytes(n int) []byte {
+	if n <= 0 {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.chunks) == 0 {
+		return nil
+	}
+	// Walk backwards until we've seen >= n bytes OR run out of chunks.
+	total := 0
+	start := len(l.chunks)
+	for i := len(l.chunks) - 1; i >= 0; i-- {
+		total += len(l.chunks[i].Bytes)
+		start = i
+		if total >= n {
+			break
+		}
+	}
+	// start..len(l.chunks) spans at most `total` bytes. Flatten into a
+	// contiguous buffer sized to min(total, n) so we never over-allocate.
+	want := total
+	if want > n {
+		want = n
+	}
+	out := make([]byte, 0, want)
+	// If the first chunk is over-sized (e.g. we hit the cap mid-chunk),
+	// slice only the suffix we need.
+	first := l.chunks[start].Bytes
+	if total > n {
+		skip := total - n
+		first = first[skip:]
+	}
+	out = append(out, first...)
+	for i := start + 1; i < len(l.chunks); i++ {
+		out = append(out, l.chunks[i].Bytes...)
+	}
+	return out
+}
+
 // Len returns the number of chunks currently retained.
 func (l *OutputLog) Len() int {
 	l.mu.Lock()

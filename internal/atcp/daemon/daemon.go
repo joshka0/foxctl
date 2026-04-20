@@ -82,18 +82,10 @@ func New(opts Options) *Daemon {
 	return &Daemon{opts: opts, logger: logger, serveErr: make(chan error, 1)}
 }
 
-// DefaultSocketPath returns the canonical socket location for a foxctl ATCP
-// daemon. Uses $XDG_RUNTIME_DIR on Linux when set, falling back to $TMPDIR
-// on macOS and elsewhere.
-func DefaultSocketPath() string {
-	if p := os.Getenv("FOXCTL_ATCP_SOCK"); p != "" {
-		return p
-	}
-	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
-		return filepath.Join(xdg, "foxctl-atcp.sock")
-	}
-	return filepath.Join(os.TempDir(), "foxctl-atcp.sock")
-}
+// DefaultSocketPath is re-exported from unixsocket so daemon callers don't
+// need to import the transport package just to format a default path. It
+// is the single source of truth for every ATCP tool (daemon, client, CLI).
+func DefaultSocketPath() string { return unixsocket.DefaultSocketPath() }
 
 // Start binds the socket and begins serving. Returns once the listener is
 // accepting connections; Serve errors are reported via Wait.

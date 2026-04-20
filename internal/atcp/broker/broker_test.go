@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -245,22 +246,23 @@ func TestBroker_RoomFanOut(t *testing.T) {
 		<-sess2.Done()
 	})
 
-	r, err := b.CreateRoom(room.CreateRoomRequest{Workspace: "ws", Title: "fanout"})
+	ctx := context.Background()
+	r, err := b.CreateRoom(ctx, room.CreateRoomRequest{Workspace: "ws", Title: "fanout"})
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)
 	}
-	if _, err := b.JoinRoom(room.JoinRequest{
+	if _, err := b.JoinRoom(ctx, room.JoinRequest{
 		RoomID: r.ID, AgentID: "alice", SessionID: snap1.ID, CanMutate: true,
 	}); err != nil {
 		t.Fatalf("JoinRoom alice: %v", err)
 	}
-	if _, err := b.JoinRoom(room.JoinRequest{
+	if _, err := b.JoinRoom(ctx, room.JoinRequest{
 		RoomID: r.ID, AgentID: "bob", SessionID: snap2.ID, CanMutate: true,
 	}); err != nil {
 		t.Fatalf("JoinRoom bob: %v", err)
 	}
 
-	res, err := b.SendMessage(router.Message{
+	res, err := b.SendMessage(ctx, router.Message{
 		RoomID: r.ID,
 		Source: "test",
 		Text:   "ROOM_HELLO",
@@ -277,16 +279,110 @@ func TestBroker_RoomFanOut(t *testing.T) {
 	assertOutputContains(t, sess2, "ROOM_HELLO", 2*time.Second)
 }
 
+// TestBroker_DeleteSessionDetachesRoomMember locks the P1 invariant: when a
+// session exits (or is deleted) any room membership still bound to it must
+// be stamped LeftAt. Without this, the Router's next fan-out would try to
+// AcquireLease on a dead PTY.
+func TestBroker_DeleteSessionDetachesRoomMember(t *testing.T) {
+	b := MustNew(Options{})
+	t.Cleanup(func() { b.Stop() })
+
+	snap, err := b.CreateSession(session.Spec{Cmd: []string{"cat"}}, session.OutputLogOptions{})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	ctx := context.Background()
+	r, err := b.CreateRoom(ctx, room.CreateRoomRequest{Workspace: "ws"})
+	if err != nil {
+		t.Fatalf("CreateRoom: %v", err)
+	}
+	if _, err := b.JoinRoom(ctx, room.JoinRequest{
+		RoomID: r.ID, AgentID: "alice", SessionID: snap.ID, CanMutate: true,
+	}); err != nil {
+		t.Fatalf("JoinRoom: %v", err)
+	}
+	// Before delete: alice is active.
+	active, _ := b.Rooms().ActiveMembers(r.ID)
+	if len(active) != 1 {
+		t.Fatalf("pre-delete active = %d, want 1", len(active))
+	}
+
+	if err := b.DeleteSession(snap.ID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	// The detach runs on the session-exit goroutine, so poll briefly.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		active, _ = b.Rooms().ActiveMembers(r.ID)
+		if len(active) == 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(active) != 0 {
+		t.Fatalf("post-delete active = %d, want 0", len(active))
+	}
+	members, _ := b.Rooms().Members(r.ID)
+	if len(members) != 1 || members[0].Active() || members[0].LeftAt.IsZero() {
+		t.Errorf("member row not correctly stamped left: %+v", members)
+	}
+	// Post-detach, a send to the same room surfaces ErrNoActiveMembers
+	// rather than attempting to write to the dead PTY.
+	_, err = b.SendMessage(ctx, router.Message{RoomID: r.ID, Source: "s", Text: "ghost"})
+	if !errors.Is(err, router.ErrNoActiveMembers) {
+		t.Errorf("send after detach: want ErrNoActiveMembers, got %v", err)
+	}
+}
+
+// TestBroker_NaturalExitDetachesRoomMember is the second half of the P1
+// invariant: a session that exits on its own (child returns) must also
+// release its room binding. Uses a short-lived `true` command that exits
+// immediately.
+func TestBroker_NaturalExitDetachesRoomMember(t *testing.T) {
+	b := MustNew(Options{})
+	t.Cleanup(func() { b.Stop() })
+
+	// Start a session that will exit on its own when we send EOF.
+	snap, err := b.CreateSession(session.Spec{Cmd: []string{"cat"}}, session.OutputLogOptions{})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	ctx := context.Background()
+	r, _ := b.CreateRoom(ctx, room.CreateRoomRequest{Workspace: "ws"})
+	if _, err := b.JoinRoom(ctx, room.JoinRequest{
+		RoomID: r.ID, AgentID: "alice", SessionID: snap.ID, CanMutate: true,
+	}); err != nil {
+		t.Fatalf("JoinRoom: %v", err)
+	}
+	// Nudge cat to exit naturally via EOF (0x04). Bypasses lease policy —
+	// we're simulating a child that terminates itself, not testing input.
+	if _, err := b.WriteBytesRaw(snap.ID, []byte{0x04}); err != nil {
+		t.Fatalf("WriteBytesRaw EOF: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		active, _ := b.Rooms().ActiveMembers(r.ID)
+		if len(active) == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("natural session exit did not detach active member within 3s")
+}
+
 // TestBroker_JoinRoomUnknownSession maps the nested room-manager error to
 // the canonical broker sentinel.
 func TestBroker_JoinRoomUnknownSession(t *testing.T) {
 	b := MustNew(Options{})
 	t.Cleanup(func() { b.Stop() })
-	r, err := b.CreateRoom(room.CreateRoomRequest{Workspace: "ws"})
+	ctx := context.Background()
+	r, err := b.CreateRoom(ctx, room.CreateRoomRequest{Workspace: "ws"})
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)
 	}
-	_, err = b.JoinRoom(room.JoinRequest{RoomID: r.ID, AgentID: "a", SessionID: "missing"})
+	_, err = b.JoinRoom(ctx, room.JoinRequest{RoomID: r.ID, AgentID: "a", SessionID: "missing"})
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("want ErrSessionNotFound, got %v", err)
 	}

@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -102,6 +103,60 @@ func TestManager_StopClosesAllSessions(t *testing.T) {
 	}
 	if _, err := m.Create(Spec{Cmd: []string{"sh"}}, OutputLogOptions{}); !errors.Is(err, ErrManagerClosed) {
 		t.Errorf("Create after Stop: want ErrManagerClosed, got %v", err)
+	}
+}
+
+// TestManager_CreateStopRaceClosesInflightSession exercises the race between
+// Create and Stop: concurrent goroutines call Create while the main test
+// issues Stop. Any Create that wins the race must either return a live
+// session (which Stop will then close) OR return ErrManagerClosed with the
+// PTY already torn down. Neither path may leave a PTY running after Stop
+// returns.
+//
+// Before the fix, a Create that observed ctx.Err() == nil in its fast-path
+// check could race with Stop's walk of m.sessions: the session was spawned,
+// then inserted into the map *after* Stop had already snapshotted it,
+// leaking a child process past the manager's lifetime.
+func TestManager_CreateStopRaceClosesInflightSession(t *testing.T) {
+	for attempt := 0; attempt < 10; attempt++ {
+		m := NewManager(ManagerOptions{})
+		var (
+			wg       sync.WaitGroup
+			leakedMu sync.Mutex
+			leaked   []*Session
+		)
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s, err := m.Create(Spec{Cmd: []string{"sleep", "30"}}, OutputLogOptions{})
+				if err != nil {
+					return
+				}
+				// A session we created that Stop might not know about —
+				// collect it so we can verify it's torn down post-Stop.
+				leakedMu.Lock()
+				leaked = append(leaked, s)
+				leakedMu.Unlock()
+			}()
+		}
+		// Sleep briefly to let some Creates land, then stop. We want the
+		// interleaving — Stop during Create's second phase — to be
+		// reachable on most iterations.
+		time.Sleep(time.Duration(attempt) * time.Millisecond)
+		m.Stop()
+		wg.Wait()
+
+		// Every session we saw returned from Create must be done — either
+		// Stop finished it, or Create noticed the race and finished it
+		// itself.
+		for _, s := range leaked {
+			select {
+			case <-s.Done():
+			case <-time.After(2 * time.Second):
+				t.Fatalf("attempt %d: session %s leaked past manager.Stop", attempt, s.ID())
+			}
+		}
 	}
 }
 

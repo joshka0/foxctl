@@ -155,9 +155,14 @@ func compileKey(name string, mods Modifier) ([]byte, error) {
 
 	entry, ok := keyTable[lower]
 	if !ok {
-		// Single printable character fallback (e.g. "a"). Ctrl was handled above.
+		// Single printable character fallback (e.g. "a"). We read from
+		// `lower`, not the raw `name`, because ParseModifiers-style
+		// callers routinely pass keys with surrounding whitespace
+		// (e.g. "\ta\n"); using name[0] would emit the leading
+		// whitespace byte instead of the printable character the
+		// caller actually asked for. Ctrl was handled above.
 		if len(lower) == 1 {
-			r := rune(name[0])
+			r := rune(lower[0])
 			if r >= 0x20 && r < 0x7F {
 				return withAlt([]byte{byte(r)}, mods), nil
 			}

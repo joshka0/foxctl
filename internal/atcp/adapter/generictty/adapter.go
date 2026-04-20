@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/joshka0/foxctl/internal/atcp/intents"
@@ -17,20 +18,29 @@ import (
 
 // Errors returned by the adapter's Compile* methods.
 var (
-	ErrEmptyText             = errors.New("atcp adapter: text is empty")
-	ErrUnsupportedEncoding   = errors.New("atcp adapter: unsupported encoding")
-	ErrWriteBytesNotAllowed  = errors.New("atcp adapter: write_bytes capability is disabled")
-	ErrRepeatOutOfRange      = errors.New("atcp adapter: repeat must be >= 0")
+	ErrEmptyText            = errors.New("atcp adapter: text is empty")
+	ErrUnsupportedEncoding  = errors.New("atcp adapter: unsupported encoding")
+	ErrWriteBytesNotAllowed = errors.New("atcp adapter: write_bytes capability is disabled")
+	ErrRepeatOutOfRange     = errors.New("atcp adapter: repeat must be >= 0")
 )
 
 // Adapter is a stateful compiler. All state is local to the adapter value —
 // it holds no references to sessions — so each session typically owns one
 // adapter instance and feeds observed terminal mode changes back in via
 // SetBracketedPasteEnabled.
+//
+// Concurrency: SetBracketedPasteEnabled is called from the broker's mode
+// tracker goroutine while Compile* methods run under request goroutines,
+// so bracketedPaste uses atomic.Bool rather than a plain bool. The other
+// configuration fields (AllowWriteBytes, DefaultSubmitKey) are set at
+// construction time and treated as read-only thereafter; writing to them
+// after the adapter is handed to the broker is a programming error.
 type Adapter struct {
-	// BracketedPasteEnabled tracks whether the child has enabled bracketed
-	// paste via DECSET 2004. Updated from the ModeTracker in a later phase.
-	BracketedPasteEnabled bool
+	// bracketedPaste tracks whether the child has enabled bracketed paste
+	// via DECSET 2004. Exposed through SetBracketedPasteEnabled /
+	// BracketedPasteEnabled so tests and the broker never touch the
+	// underlying atomic directly.
+	bracketedPaste atomic.Bool
 
 	// AllowWriteBytes enables the TerminalWriteBytes escape hatch.
 	// Default false — most sessions should reject raw writes because they
@@ -56,7 +66,13 @@ func New() *Adapter {
 // on the owning session. The broker's mode tracker is expected to call this on
 // every transition.
 func (a *Adapter) SetBracketedPasteEnabled(enabled bool) {
-	a.BracketedPasteEnabled = enabled
+	a.bracketedPaste.Store(enabled)
+}
+
+// BracketedPasteEnabled reports the adapter's current view of DEC private
+// mode 2004. Safe to call concurrently with SetBracketedPasteEnabled.
+func (a *Adapter) BracketedPasteEnabled() bool {
+	return a.bracketedPaste.Load()
 }
 
 // CompileText turns a TerminalText intent into bytes.
@@ -144,7 +160,7 @@ func (a *Adapter) CompilePaste(intent intents.TerminalPaste) ([]byte, error) {
 		return nil, fmt.Errorf("%w: text is not valid UTF-8", ErrUnsupportedEncoding)
 	}
 
-	wrap := shouldBracket(intents.ParseBracketed(intent.Bracketed), a.BracketedPasteEnabled)
+	wrap := shouldBracket(intents.ParseBracketed(intent.Bracketed), a.BracketedPasteEnabled())
 	out := make([]byte, 0, len(intent.Text)+len(BracketedPasteStart)+len(BracketedPasteEnd)+1)
 	if wrap {
 		out = append(out, BracketedPasteStart...)

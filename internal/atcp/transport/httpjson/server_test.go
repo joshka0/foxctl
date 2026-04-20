@@ -269,3 +269,25 @@ func TestTerminalSubmit_LeaseMismatchReturns409(t *testing.T) {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
 	}
 }
+
+// TestTerminalSubmit_RejectsOversizedBody locks in the MaxBytesReader cap
+// so a future refactor that removes it reappears as a loud test failure
+// instead of a silent DOS window. The cap is TerminalRequestMaxBytes; we
+// send cap+1 bytes of padding inside the text field.
+func TestTerminalSubmit_RejectsOversizedBody(t *testing.T) {
+	ts, _ := newTestServer(t)
+	create := postJSON(t, ts, "/v1/sessions", CreateSessionRequest{Cmd: []string{"sleep", "30"}})
+	sess := decodeResponse[SessionResponse](t, create)
+
+	// Build a body that exceeds the cap. The text field dominates, so
+	// total body size = overhead + cap+1. MaxBytesReader triggers before
+	// the JSON decoder touches anything.
+	padding := strings.Repeat("A", TerminalRequestMaxBytes+1)
+	resp := postJSON(t, ts, "/v1/terminal/submit", map[string]any{
+		"session_id": sess.ID, "text": padding,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+}

@@ -17,9 +17,28 @@ import (
 	"time"
 )
 
-// DefaultSocketPath returns the default ATCP socket path. Unix tradition uses
-// $XDG_RUNTIME_DIR when set, otherwise a dotfile under $HOME.
+// SocketEnv is the environment variable that overrides DefaultSocketPath.
+// Clients and daemons both read it so CLI users can point every tool at the
+// same non-default socket in one place.
+const SocketEnv = "FOXCTL_ATCP_SOCK"
+
+// DefaultSocketPath returns the canonical ATCP socket location. The
+// precedence list is:
+//
+//  1. $FOXCTL_ATCP_SOCK  — explicit override, wins over everything so
+//     test fixtures and CI scripts can isolate without touching the repo.
+//  2. $XDG_RUNTIME_DIR/foxctl/atcp.sock — the spec-canonical path (plan
+//     §6.1). Present on Linux when the session runs under systemd/user@.
+//  3. $HOME/.foxctl/atcp.sock — fallback for systems without XDG runtime
+//     dirs (notably macOS user sessions).
+//  4. $TMPDIR/foxctl-atcp.sock — last-resort fallback when HOME is also
+//     unset (e.g. static binaries in minimal containers).
+//
+// Kept as the single source of truth so daemon and client do not drift.
 func DefaultSocketPath() string {
+	if p := os.Getenv(SocketEnv); p != "" {
+		return p
+	}
 	if rt := os.Getenv("XDG_RUNTIME_DIR"); rt != "" {
 		return filepath.Join(rt, "foxctl", "atcp.sock")
 	}

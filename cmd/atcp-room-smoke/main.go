@@ -61,13 +61,13 @@ func main() {
 	}
 
 	// Create a room and bind every session.
-	r, err := b.CreateRoom(room.CreateRoomRequest{Workspace: "smoke", Title: "atcp-room-smoke"})
+	r, err := b.CreateRoom(ctx, room.CreateRoomRequest{Workspace: "smoke", Title: "atcp-room-smoke"})
 	if err != nil {
 		fatalf("CreateRoom: %v", err)
 	}
 	fmt.Fprintf(os.Stderr, "room %s created\n", r.ID)
 	for _, p := range pairs {
-		if _, err := b.JoinRoom(room.JoinRequest{
+		if _, err := b.JoinRoom(ctx, room.JoinRequest{
 			RoomID:    r.ID,
 			AgentID:   p.agentID,
 			SessionID: p.sessionID,
@@ -85,7 +85,7 @@ func main() {
 	}
 
 	// Fan out.
-	res, err := b.SendMessage(router.Message{
+	res, err := b.SendMessage(ctx, router.Message{
 		RoomID: r.ID,
 		Source: "atcp-room-smoke",
 		Text:   *text,
