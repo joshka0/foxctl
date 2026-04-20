@@ -1386,6 +1386,15 @@ func RunCockpit(apiURL string) error {
 	})
 	cockpit.SetBootManager(bm)
 
+	// Live refresh: single SSE subscription to /api/events that triggers
+	// debounced re-fetches of the agent inventory when external changes
+	// occur (e.g., foxctl agent spawn / kill).
+	eventsSub := NewEventsSubscriber(EventsSubscriberConfig{
+		APIClient:    apiClient,
+		AgentAdapter: agentAdapter,
+		Screen:       cockpit,
+	})
+
 	app, err := gotui.NewApp(gotui.WithRootComponent(cockpit))
 	if err != nil {
 		return err
@@ -1395,7 +1404,12 @@ func RunCockpit(apiURL string) error {
 	// This ensures the first frame renders in Loading state immediately.
 	bm.Start()
 
-	// Cleanup: stop the boot manager and close the app.
+	// Start the live-refresh subscriber. It will reconnect automatically
+	// and debounce re-fetches to avoid hammering the API.
+	eventsSub.Start()
+
+	// Cleanup: stop the subscriber, boot manager, and close the app.
+	defer eventsSub.Stop()
 	defer bm.Stop()
 	defer app.Close()
 
