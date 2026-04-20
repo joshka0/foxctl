@@ -502,7 +502,9 @@ make check       # All of the above
 ```
 
 - New features need unit + golden tests
-- Coverage target: 85%
+- Coverage floor: `make check-coverage` enforces the current repository floor
+  (40% by default); `make check-coverage-strict` enforces the aspirational 85%
+  line-coverage target.
 - Golden files in `testdata/*.json`
 - **Determinism:** Golden tests must be reproducible
   - Sort keys/arrays in output

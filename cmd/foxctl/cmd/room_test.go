@@ -4251,6 +4251,7 @@ func TestRunRoomMilestoneExitPolicyStates(t *testing.T) {
 		workspace := t.TempDir()
 		epicID, milestoneID, storyID := setupRoomAgileWorkpackFixture(t, ctx, workspace)
 
+		var out *bytes.Buffer
 		cmd, _ := newRoomTestCommand(ctx)
 		enforceFalse := false
 		if err := runRoomMilestoneContractWithPolicy(cmd, workspace, "human-a", "alpha", milestoneID, "Foundation objective.", nil, nil, nil, []string{"review"}, []string{"review"}, nil, &enforceFalse, []string{"story validated"}); err != nil {
@@ -4307,7 +4308,7 @@ func TestRunRoomMilestoneExitPolicyStates(t *testing.T) {
 		}
 		assertExitPolicy("ready_to_exit")
 
-		cmd, out := newRoomTestCommand(ctx)
+		cmd, out = newRoomTestCommand(ctx)
 		if err := runRoomEpicHealth(cmd, workspace, "alpha", epicID, "", 100); err != nil {
 			t.Fatalf("runRoomEpicHealth: %v", err)
 		}
