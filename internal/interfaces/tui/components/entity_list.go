@@ -16,8 +16,6 @@
 package components
 
 import (
-	"strings"
-
 	"github.com/grindlemire/go-tui"
 	"github.com/joshka0/foxctl/internal/interfaces/tui/theme"
 )
@@ -502,90 +500,4 @@ func (el *EntityList) renderError(buf *tui.Buffer) {
 		buf.SetString(0, startY+1, center("Press r to retry", el.width),
 			tui.NewStyle().Foreground(theme.Colors.TextMuted))
 	}
-}
-
-// --- utility functions ---
-
-// truncate truncates s so that its display width does not exceed maxCells
-// terminal cells. If truncation is needed, an ellipsis "…" is appended.
-func truncate(s string, maxCells int) string {
-	if maxCells <= 0 {
-		return ""
-	}
-	totalWidth := 0
-	for i, r := range s {
-		rw := int(tui.RuneWidth(r))
-		if totalWidth+rw > maxCells {
-			// Need to truncate. Try to fit an ellipsis.
-			if maxCells >= 1 {
-				// Back up to make room for "…" (1 cell).
-				ellipsisWidth := int(tui.RuneWidth('…')) // always 1
-				availForContent := maxCells - ellipsisWidth
-				if availForContent <= 0 {
-					return "…"
-				}
-				// Re-truncate to fit content + ellipsis.
-				w := 0
-				for j, rr := range s {
-					rrw := int(tui.RuneWidth(rr))
-					if w+rrw > availForContent {
-						return string([]rune(s[:j])) + "…"
-					}
-					w += rrw
-				}
-			}
-			return string([]rune(s[:i])) + "…"
-		}
-		totalWidth += rw
-	}
-	return s
-}
-
-// runeWidth returns the number of terminal cells occupied by s.
-func runeWidth(s string) int {
-	w := 0
-	for _, r := range s {
-		w += int(tui.RuneWidth(r))
-	}
-	return w
-}
-
-// center pads s to width cells with spaces on both sides, respecting display
-// width rather than rune count.
-func center(s string, width int) string {
-	if width <= 0 {
-		return s
-	}
-	sw := runeWidth(s)
-	if sw >= width {
-		// String already fills or exceeds width; truncate to fit.
-		return truncate(s, width)
-	}
-	pad := (width - sw) / 2
-	// Build result: pad spaces + s + remaining spaces.
-	result := make([]rune, width)
-	for i := range result {
-		result[i] = ' '
-	}
-	// Write the string starting at column 'pad'.
-	x := pad
-	for _, r := range s {
-		rw := int(tui.RuneWidth(r))
-		if x+rw > width {
-			break
-		}
-		for j := 0; j < rw; j++ {
-			result[x+j] = r
-		}
-		// For wide chars, we only write the rune once (in the first cell).
-		// Continuation cells already have the rune from the loop above.
-		// Actually we should only set the primary position.
-		// Let's simplify: just set positions.
-		x += rw
-	}
-	// Convert to string - but this doesn't handle wide chars properly in the rune array.
-	// Instead, build using string concatenation for correctness.
-	leftPad := strings.Repeat(" ", pad)
-	rightPad := strings.Repeat(" ", width-sw-pad)
-	return leftPad + s + rightPad
 }
