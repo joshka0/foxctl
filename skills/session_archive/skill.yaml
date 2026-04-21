@@ -41,7 +41,7 @@ signature:
       Use session/archive to compress and chunk a session JSONL file.
       Example commands:
         foxctl run session/archive --input '{"session_id":"01HXYZ...","dry_run":true}'
-        foxctl skills run session/archive --session_id 01HXYZ... --dry_run
+        foxctl skills run session/archive --session-id 01HXYZ... --dry-run
     workflows:
       - id: archive-session
         description: "Archive a session."

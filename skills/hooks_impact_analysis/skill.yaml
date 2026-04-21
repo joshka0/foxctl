@@ -49,7 +49,7 @@ signature:
       Use hooks/impact_analysis to emit impact context from tool usage.
       Example commands:
         foxctl run hooks/impact_analysis --input '{"tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
-        foxctl skills run hooks/impact_analysis --tool_name Edit --tool_input '{"file_path":"main.go"}'
+        foxctl skills run hooks/impact_analysis --tool-name Edit --tool-input '{"file_path":"main.go"}'
     workflows:
       - id: impact-edit
         description: "Analyze an edit to main.go."

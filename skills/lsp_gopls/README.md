@@ -22,6 +22,10 @@ go install golang.org/x/tools/gopls@latest
 
 ## Usage
 
+Examples assume the skill is installed. JSON goes through `--input`; use
+`--input-file -` when piping raw JSON, or `foxctl skills run` for direct
+parameter flags.
+
 ```bash
 # List symbols in a file
 foxctl run lsp/gopls --input '{"operation": "symbols", "file": "main.go"}'

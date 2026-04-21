@@ -53,7 +53,7 @@ signature:
       Use mcp/install to discover MCP tools and generate skill manifests.
       Example commands:
         foxctl run mcp/install --input '{"server_url":"http://localhost:8080/sse","output_dir":"./skills"}'
-        foxctl skills run mcp/install --server_url http://localhost:8080/sse --output_dir ./skills
+        foxctl skills run mcp/install --server-url http://localhost:8080/sse --output-dir ./skills
     workflows:
       - id: install-from-url
         description: "Install MCP tools from a server URL."

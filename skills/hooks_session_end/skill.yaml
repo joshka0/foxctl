@@ -45,7 +45,7 @@ signature:
       Use hooks/session_end to collect session metrics on SessionEnd events.
       Example commands:
         foxctl run hooks/session_end --input '{"event":"SessionEnd","workspace_root":"/workspace/project","session_id":"abc123"}'
-        foxctl skills run hooks/session_end --event SessionEnd --workspace_root /workspace/project --session_id abc123
+        foxctl skills run hooks/session_end --event SessionEnd --workspace-root /workspace/project --session-id abc123
     workflows:
       - id: session-stop
         description: "Capture metrics on Stop."

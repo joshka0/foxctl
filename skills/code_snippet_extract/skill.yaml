@@ -115,7 +115,7 @@ signature:
 
       Example commands:
         foxctl run code/snippet_extract --input '{"workspace_id":"my-workspace","question":"How does user authentication work?","candidates":[{"path":"internal/auth/login.go","symbol_id":"internal/auth/login.go:Login","priority":0.95},{"path":"internal/auth/session.go"}],"limits":{"max_files":10,"max_snippets":20}}'
-        foxctl skills run code/snippet_extract --workspace_id my-workspace --question "How does user authentication work?" --candidates '[{"path":"internal/auth/login.go","symbol_id":"internal/auth/login.go:Login","priority":0.95},{"path":"internal/auth/session.go"}]' --limits '{"max_files":10,"max_snippets":20}'
+        foxctl skills run code/snippet_extract --workspace-id my-workspace --question "How does user authentication work?" --candidates '[{"path":"internal/auth/login.go","symbol_id":"internal/auth/login.go:Login","priority":0.95},{"path":"internal/auth/session.go"}]' --limits '{"max_files":10,"max_snippets":20}'
     workflows:
       - id: extract-snippets-for-question
         description: "Extract code snippets relevant to a question from candidates."

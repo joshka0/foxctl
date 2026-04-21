@@ -74,7 +74,7 @@ signature:
         foxctl run fs/find --input '{"query":"config","path":"."}'
         foxctl skills run fs/find --query config --path .
         foxctl run fs/find --input '{"pattern":"*.go","type":"file","sort_by":"modified","max_results":20}'
-        foxctl skills run fs/find --pattern '*.go' --type file --sort_by modified --max_results 20
+        foxctl skills run fs/find --pattern '*.go' --type file --sort-by modified --max-results 20
     workflows:
       - id: find-config
         description: "Find config files by name."

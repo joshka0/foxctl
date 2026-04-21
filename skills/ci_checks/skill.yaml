@@ -46,7 +46,7 @@ signature:
         foxctl run ci/checks --input '{"pr":"123","mode":"summary"}'
         foxctl skills run ci/checks --pr 123 --mode summary
         foxctl run ci/checks --input '{"pr":"123","mode":"detailed","errors_only":true}'
-        foxctl skills run ci/checks --pr 123 --mode detailed --errors_only
+        foxctl skills run ci/checks --pr 123 --mode detailed --errors-only
     workflows:
       - id: checks-summary
         description: "Fetch a summary of check runs."

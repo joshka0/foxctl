@@ -64,7 +64,8 @@ signature:
     long: |
       Use code/greenlight to run rule-based scans for App Store policy risks.
       Example:
-        foxctl run code/greenlight --path . --scan_mode scan --severity_threshold medium
+        foxctl run code/greenlight --input '{"path":".","scan_mode":"scan","severity_threshold":"medium"}'
+        foxctl skills run code/greenlight --path . --scan-mode scan --severity-threshold medium
   returns:
     - name: findings
       type: array

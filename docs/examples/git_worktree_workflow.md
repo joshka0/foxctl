@@ -136,18 +136,18 @@ Combine with other foxctl skills:
 
 ```bash
 # 1. List worktrees
-foxctl run git/worktree --operation list --remember worktrees
+foxctl run git/worktree --input '{"operation":"list"}' --remember worktrees
 
 # 2. For each worktree, check for TODOs
 foxctl memory get worktrees | jq -r '.worktrees[].path' | while read path; do
   echo "Checking $path for TODOs..."
-  foxctl run text/grep --pattern "TODO" --path "$path"
+  foxctl run text/grep --input "{\"pattern\":\"TODO\",\"path\":\"$path\"}"
 done
 
 # 3. List files in each worktree
 foxctl memory get worktrees | jq -r '.worktrees[].path' | while read path; do
   echo "Files in $path:"
-  foxctl run fs/ls --path "$path"
+  foxctl run fs/ls --input "{\"path\":\"$path\"}"
 done
 ```
 

@@ -216,7 +216,7 @@ signature:
         foxctl run code/semantic_search --input '{"query":"repo index dag grep","scope":["symbols"],"repo_index_mode":"search"}'
         foxctl skills run code/semantic_search --query "authentication middleware" --scope symbols --limit 10
         foxctl run code/semantic_search --input '{"query":"database migration issues","scope":["sessions"],"include_context":true}'
-        foxctl skills run code/semantic_search --query "database migration issues" --scope sessions --include_context
+        foxctl skills run code/semantic_search --query "database migration issues" --scope sessions --include-context
     workflows:
       - id: search-all
         description: "Search all sources for a question"

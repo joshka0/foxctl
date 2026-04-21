@@ -41,7 +41,7 @@ signature:
       Use session/deep-dive to fetch raw content from archived sessions.
       Example commands:
         foxctl run session/deep-dive --input '{"session_id":"01HXYZ...","chunk_index":5}'
-        foxctl skills run session/deep-dive --session_id 01HXYZ... --chunk_index 5
+        foxctl skills run session/deep-dive --session-id 01HXYZ... --chunk-index 5
     workflows:
       - id: get-chunk
         description: "Retrieve a specific chunk."
