@@ -4,6 +4,8 @@
 import type {
   JobSummary,
   JobDetail,
+  JobActionResult,
+  JobProgressResult,
   TaskSummary,
   TaskStats,
   JobStats,
@@ -188,6 +190,41 @@ export async function getJobs(params?: {
 
 export async function getJobDetail(id: string): Promise<JobDetail> {
   return request(`/api/jobs/${encodeURIComponent(id)}`);
+}
+
+export async function getJobProgress(
+  id: string,
+  params?: { limit?: number },
+): Promise<JobProgressResult> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return request(
+    `/api/jobs/${encodeURIComponent(id)}/progress${query ? `?${query}` : ""}`,
+  );
+}
+
+export async function cancelJob(id: string): Promise<JobActionResult> {
+  return request(`/api/jobs/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+  });
+}
+
+export async function waitForJob(
+  id: string,
+  params?: { timeoutMs?: number; pollMs?: number },
+): Promise<JobActionResult> {
+  const searchParams = new URLSearchParams();
+  if (typeof params?.timeoutMs === "number") {
+    searchParams.set("timeout_ms", String(params.timeoutMs));
+  }
+  if (typeof params?.pollMs === "number") {
+    searchParams.set("poll_ms", String(params.pollMs));
+  }
+  const query = searchParams.toString();
+  return request(`/api/jobs/${encodeURIComponent(id)}/wait${query ? `?${query}` : ""}`, {
+    method: "POST",
+  });
 }
 
 // Tasks
@@ -580,11 +617,27 @@ export async function readCASObject(params: {
 }): Promise<CASReadResult> {
   const searchParams = new URLSearchParams();
   if (params.page) searchParams.set("page", String(params.page));
-  if (params.pageSize) searchParams.set("pageSize", String(params.pageSize));
+  if (params.pageSize) searchParams.set("page_size", String(params.pageSize));
 
   const queryString = searchParams.toString();
-  const url = `/api/cas/${encodeURIComponent(params.digest)}${queryString ? `?${queryString}` : ""}`;
+  const url = `/api/cas/${encodeURIComponent(params.digest)}/read${queryString ? `?${queryString}` : ""}`;
   return request(url);
+}
+
+export async function pinCASObject(
+  digest: string,
+): Promise<{ ok: boolean; digest: string; pinned: boolean }> {
+  return request(`/api/cas/${encodeURIComponent(digest)}/pin`, {
+    method: "POST",
+  });
+}
+
+export async function unpinCASObject(
+  digest: string,
+): Promise<{ ok: boolean; digest: string; pinned: boolean }> {
+  return request(`/api/cas/${encodeURIComponent(digest)}/unpin`, {
+    method: "POST",
+  });
 }
 
 // ============================================================================

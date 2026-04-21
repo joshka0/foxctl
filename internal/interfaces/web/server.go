@@ -387,6 +387,9 @@ func (s *Server) Handler() http.Handler {
 	// --- SSE Events ---
 	apiMux.HandleFunc("/api/events", sse.Handler(s.sseHub))
 	apiMux.HandleFunc("/api/logs/cleanup", api.LogCleanupHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/v2/events", api.V2EventsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/v2/runs", api.V2RunsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/v2/runs/", api.V2RunDetailHandler(s.cfg, s.log, s.orchRuntime))
 
 	// --- OAuth AuthBroker Callback ---
 	apiMux.HandleFunc("/api/oauth/callback", api.OAuthCallbackHandler(s.cfg, s.log))
@@ -406,6 +409,7 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/jobs/", api.JobDetailHandler(s.cfg, s.log))
 
 	// --- CAS (Phase 2) ---
+	apiMux.HandleFunc("/api/cas", api.CASHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/cas/", api.CASHandler(s.cfg, s.log))
 
 	// --- Workspaces ---
@@ -419,6 +423,7 @@ func (s *Server) Handler() http.Handler {
 
 	// --- Skills (Phase 4) ---
 	apiMux.HandleFunc("/api/skills", api.SkillsListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/skills/manifest/", api.SkillDetailHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/skills/schema", api.SkillsSchemaHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/skills/run", api.SkillsRunHandler(s.cfg, s.log))
 	// Skill CRUD routes - supports all HTTP methods:
@@ -428,6 +433,10 @@ func (s *Server) Handler() http.Handler {
 	//   PUT    /api/skills/todo/manage/{id}   → update
 	//   DELETE /api/skills/todo/manage/{id}   → delete
 	apiMux.HandleFunc("/api/skills/", api.SkillsCRUDHandler(s.cfg, s.log))
+
+	// --- MCP Facade (read-only) ---
+	apiMux.HandleFunc("/api/mcp/status", api.MCPStatusHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/mcp/tools", api.MCPToolsHandler(s.cfg, s.log))
 
 	// --- Console (Phase 6-8) ---
 	apiMux.HandleFunc("/api/console/sessions", api.ConsoleSessionsHandler(s.consoleSessions, s.cfg, s.log))

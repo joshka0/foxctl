@@ -13,6 +13,7 @@ import (
 	"github.com/joshka0/foxctl/internal/v2/runtime/profiles"
 	runner "github.com/joshka0/foxctl/internal/v2/runtime/runner"
 	"github.com/joshka0/foxctl/internal/v2/runtime/supervisor"
+	runtimetools "github.com/joshka0/foxctl/internal/v2/runtime/tools"
 )
 
 // DefaultRuntimeDependencies assembles the canonical production v2 runner with
@@ -52,7 +53,7 @@ func NewDefaultTurnRunner(deps DefaultRuntimeDependencies) (*runner.Pipeline, er
 	if profile == "" {
 		profile = coretool.ProfileWorker
 	}
-	toolExec, err := toolbridge.NewDefaultExecutor(profile, deps.ToolSpecs, toolbridge.Config{
+	catalog, delegate, err := toolbridge.NewDefaultCatalogAndDelegate(deps.ToolSpecs, toolbridge.Config{
 		AppConfig:         deps.AppConfig,
 		WorkspaceRoot:     deps.WorkspaceRoot,
 		WorkspaceID:       deps.WorkspaceID,
@@ -63,10 +64,12 @@ func NewDefaultTurnRunner(deps DefaultRuntimeDependencies) (*runner.Pipeline, er
 	if err != nil {
 		return nil, fmt.Errorf("build default v2 tool executor: %w", err)
 	}
+	toolExec := runtimetools.NewExecutor(catalog, profile, delegate)
 	return runner.New(runner.Config{
 		EventStore:   deps.EventStore,
 		EventBus:     deps.EventBus,
 		Model:        deps.Model,
+		Tools:        catalog.ForProfile(profile),
 		ToolExecutor: toolExec,
 		TurnRecorder: deps.TurnRecorder,
 		Hooks:        deps.Hooks,

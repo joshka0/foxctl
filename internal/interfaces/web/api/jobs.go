@@ -1,14 +1,17 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -101,14 +104,9 @@ func JobsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	}
 }
 
-// JobDetailHandler returns a handler for GET /api/jobs/{id}.
+// JobDetailHandler returns a handler for /api/jobs/{id} and subroutes.
 func JobDetailHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-
 		// Extract job ID from path: /api/jobs/{id}
 		jobID := strings.TrimPrefix(r.URL.Path, "/api/jobs/")
 		if jobID == "" {
@@ -126,7 +124,28 @@ func JobDetailHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 				handleJobResult(w, r, cfg, log, jobID)
 				return
 			}
+			if subRoute == "progress" {
+				handleJobProgress(w, r, cfg, log, jobID)
+				return
+			}
+			if subRoute == "events" {
+				handleJobEvents(w, r, cfg, log, jobID)
+				return
+			}
+			if subRoute == "cancel" {
+				handleJobCancel(w, r, cfg, log, jobID)
+				return
+			}
+			if subRoute == "wait" {
+				handleJobWait(w, r, cfg, log, jobID)
+				return
+			}
 			httpError(w, http.StatusNotFound, "not found")
+			return
+		}
+
+		if r.Method != http.MethodGet {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
 
@@ -210,6 +229,298 @@ func handleJobResult(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(result)
+}
+
+// handleJobProgress handles GET /api/jobs/{id}/progress.
+func handleJobProgress(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, jobID string) {
+	if r.Method != http.MethodGet {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	store, err := jobs.Open(r.Context(), cfg.Paths.Jobs)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open jobs store")
+		httpError(w, http.StatusInternalServerError, "failed to open jobs store")
+		return
+	}
+	defer store.Close()
+
+	job, err := store.Get(r.Context(), jobID)
+	if err != nil {
+		if errors.Is(err, jobs.ErrNotFound) {
+			httpError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		log.Error().Err(err).Str("job_id", jobID).Msg("failed to get job")
+		httpError(w, http.StatusInternalServerError, "failed to get job")
+		return
+	}
+
+	limit := 200
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if n, parseErr := strconv.Atoi(limitStr); parseErr == nil {
+			switch {
+			case n <= 0:
+				limit = 1
+			case n > 2000:
+				limit = 2000
+			default:
+				limit = n
+			}
+		}
+	}
+
+	events, err := loadJobProgressEvents(cfg.Paths.Jobs, jobID, limit)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"job_id": jobID,
+				"state":  string(job.State),
+				"events": []jobs.ProgressEvent{},
+				"count":  0,
+			})
+			return
+		}
+		log.Error().Err(err).Str("job_id", jobID).Msg("failed to scan job progress")
+		httpError(w, http.StatusInternalServerError, "failed to read job progress")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_id": jobID,
+		"state":  string(job.State),
+		"events": events,
+		"count":  len(events),
+	})
+}
+
+func handleJobEvents(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, jobID string) {
+	if r.Method != http.MethodGet {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	store, err := jobs.Open(r.Context(), cfg.Paths.Jobs)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open jobs store")
+		httpError(w, http.StatusInternalServerError, "failed to open jobs store")
+		return
+	}
+	defer store.Close()
+
+	job, err := store.Get(r.Context(), jobID)
+	if err != nil {
+		if errors.Is(err, jobs.ErrNotFound) {
+			httpError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		log.Error().Err(err).Str("job_id", jobID).Msg("failed to get job")
+		httpError(w, http.StatusInternalServerError, "failed to get job")
+		return
+	}
+
+	limit := 200
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if n, parseErr := strconv.Atoi(limitStr); parseErr == nil {
+			switch {
+			case n <= 0:
+				limit = 1
+			case n > 2000:
+				limit = 2000
+			default:
+				limit = n
+			}
+		}
+	}
+	events, err := loadJobProgressEvents(cfg.Paths.Jobs, jobID, limit)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Error().Err(err).Str("job_id", jobID).Msg("failed to scan job progress events")
+		httpError(w, http.StatusInternalServerError, "failed to read job progress")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, _ := w.(http.Flusher)
+	writeSSEJSON(w, "job.snapshot", map[string]any{
+		"job_id": jobID,
+		"state":  string(job.State),
+	})
+	for _, event := range events {
+		writeSSEJSON(w, "job.progress", event)
+	}
+	writeSSEJSON(w, "job.state", map[string]any{
+		"job_id": jobID,
+		"state":  string(job.State),
+	})
+	if flusher != nil {
+		flusher.Flush()
+	}
+}
+
+func handleJobCancel(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, jobID string) {
+	if r.Method != http.MethodPost {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	store, err := jobs.Open(r.Context(), cfg.Paths.Jobs)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open jobs store")
+		httpError(w, http.StatusInternalServerError, "failed to open jobs store")
+		return
+	}
+	defer store.Close()
+
+	if err := store.Cancel(r.Context(), jobID); err != nil {
+		switch {
+		case errors.Is(err, jobs.ErrNotFound):
+			httpError(w, http.StatusNotFound, "job not found")
+		case errors.Is(err, jobs.ErrInvalidState):
+			httpError(w, http.StatusConflict, err.Error())
+		default:
+			log.Error().Err(err).Str("job_id", jobID).Msg("failed to cancel job")
+			httpError(w, http.StatusInternalServerError, "failed to cancel job")
+		}
+		return
+	}
+	job, err := store.Get(r.Context(), jobID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"job_id": jobID,
+			"status": "canceled",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job":    convertJobResponse(job),
+		"job_id": jobID,
+		"status": "canceled",
+	})
+}
+
+func handleJobWait(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, jobID string) {
+	if r.Method != http.MethodPost {
+		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	timeout := 30 * time.Second
+	if raw := strings.TrimSpace(r.URL.Query().Get("timeout_ms")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			httpError(w, http.StatusBadRequest, "timeout_ms must be a non-negative integer")
+			return
+		}
+		timeout = time.Duration(n) * time.Millisecond
+	}
+	if timeout > 5*time.Minute {
+		timeout = 5 * time.Minute
+	}
+	poll := 500 * time.Millisecond
+	if raw := strings.TrimSpace(r.URL.Query().Get("poll_ms")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			httpError(w, http.StatusBadRequest, "poll_ms must be a positive integer")
+			return
+		}
+		poll = time.Duration(n) * time.Millisecond
+	}
+
+	store, err := jobs.Open(r.Context(), cfg.Paths.Jobs)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open jobs store")
+		httpError(w, http.StatusInternalServerError, "failed to open jobs store")
+		return
+	}
+	defer store.Close()
+
+	ctx := r.Context()
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+	}
+	job, err := store.WaitForCompletion(ctx, jobID, poll)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			httpError(w, http.StatusGatewayTimeout, "job wait timed out")
+			return
+		}
+		if errors.Is(err, jobs.ErrNotFound) {
+			httpError(w, http.StatusNotFound, "job not found")
+			return
+		}
+		log.Error().Err(err).Str("job_id", jobID).Msg("failed while waiting for job")
+		httpError(w, http.StatusInternalServerError, "failed to wait for job")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job":    convertJobResponse(job),
+		"job_id": jobID,
+		"state":  string(job.State),
+	})
+}
+
+func loadJobProgressEvents(jobsRoot, jobID string, limit int) ([]jobs.ProgressEvent, error) {
+	path := validateJobPath(jobsRoot, jobID, "progress.ndjson")
+	if path == "" {
+		return nil, errors.New("invalid job id")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	events := make([]jobs.ProgressEvent, 0, limit)
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var event jobs.ProgressEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+		events = append(events, event)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if limit > 0 && len(events) > limit {
+		events = events[len(events)-limit:]
+	}
+	return events, nil
+}
+
+func writeSSEJSON(w http.ResponseWriter, event string, data any) {
+	body, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "event: %s\n", event)
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", body)
+}
+
+func convertJobResponse(j jobs.Job) JobResponse {
+	jobType, category, skill := parseJobCommand(j.Command)
+	return JobResponse{
+		ID:         j.ID,
+		Command:    j.Command,
+		Type:       jobType,
+		Category:   category,
+		Skill:      skill,
+		State:      string(j.State),
+		Error:      j.Error,
+		ResultPath: j.ResultPath,
+		CreatedAt:  j.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		UpdatedAt:  j.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
 }
 
 func parseJobCommand(command string) (jobType, category, skill string) {

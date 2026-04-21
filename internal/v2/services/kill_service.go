@@ -41,15 +41,24 @@ func (s *KillService) Kill(ctx context.Context, req kill.Request) (kill.Response
 		})
 	}
 
-	// Validate against projection read model when available.
+	// Validate against projection read model when available. Terminal run states
+	// are idempotent: there is no live runtime to terminate.
 	if s.deps.Projections != nil {
-		if _, err := s.deps.Projections.GetRunState(ctx, requestedID); err != nil {
+		state, err := s.deps.Projections.GetRunState(ctx, requestedID)
+		if err != nil {
 			if !isNotFound(err) {
 				return kill.Response{}, asDependencyError("read run projection", err)
 			}
 			return kill.Response{}, asNotFoundError("run not found", map[string]any{
 				"run_id": requestedID,
 			})
+		}
+		switch strings.TrimSpace(state.Status) {
+		case "completed", "failed", "killed":
+			return kill.Response{
+				RunID:  requestedID,
+				Status: state.Status,
+			}, nil
 		}
 	}
 

@@ -17,6 +17,27 @@ export interface JobDetail extends JobSummary {
   artifacts?: string[];
 }
 
+export interface JobProgressEvent {
+  ts: string;
+  message?: string;
+  percent?: number;
+  meta?: Record<string, unknown>;
+}
+
+export interface JobProgressResult {
+  job_id: string;
+  state: string;
+  events: JobProgressEvent[];
+  count: number;
+}
+
+export interface JobActionResult {
+  job_id: string;
+  state?: string;
+  status?: string;
+  job?: JobSummary;
+}
+
 export interface TaskSummary {
   id: string;
   title: string;
@@ -409,6 +430,7 @@ export interface CASObject {
   kind?: string;
   created_at?: string;
   tags?: string[];
+  pinned?: boolean;
 }
 
 export interface CASReadResult {

@@ -27,9 +27,10 @@ import (
 )
 
 type testRoomEventPublisher struct {
-	mu     sync.Mutex
-	types  []string
-	events []roomMessageEvent
+	mu            sync.Mutex
+	types         []string
+	events        []roomMessageEvent
+	invalidations []roomInvalidationEvent
 }
 
 func activateAPIRoomLoop(t *testing.T, cfg config.Config, workspaceID, roomID string) {
@@ -81,6 +82,9 @@ func (p *testRoomEventPublisher) Publish(eventType string, data any) {
 	p.types = append(p.types, eventType)
 	if evt, ok := data.(roomMessageEvent); ok {
 		p.events = append(p.events, evt)
+	}
+	if evt, ok := data.(roomInvalidationEvent); ok {
+		p.invalidations = append(p.invalidations, evt)
 	}
 }
 
@@ -1936,6 +1940,134 @@ func TestRoomDetailHandler_PatchLoopPersistsPolicy(t *testing.T) {
 	}
 }
 
+func TestRoomDetailHandler_PatchLoopPublishesRoomLoopUpdatedEvent(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	pub := &testRoomEventPublisher{}
+	roomHandler := RoomDetailHandler(cfg, zerolog.Nop(), pub)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha",
+		"members":[
+			{"actor_id":"human-a","role":"coordinator"},
+			{"actor_id":"gemini-a","role":"reviewer"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/rooms/alpha/loop", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"actor_id":"human-a",
+		"pulse_interval":"15m"
+	}`))
+	patchRR := httptest.NewRecorder()
+	roomHandler.ServeHTTP(patchRR, patchReq)
+	if patchRR.Code != http.StatusOK {
+		t.Fatalf("patch status=%d body=%s", patchRR.Code, patchRR.Body.String())
+	}
+
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	found := false
+	for _, typ := range pub.types {
+		if typ != "room.loop.updated" {
+			continue
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("published types=%v want room.loop.updated", pub.types)
+	}
+	if len(pub.invalidations) == 0 {
+		t.Fatal("expected at least one invalidation payload")
+	}
+	last := pub.invalidations[len(pub.invalidations)-1]
+	if got := strings.TrimSpace(last.Mutation); got != "loop" {
+		t.Fatalf("mutation=%q want loop", got)
+	}
+	if got := strings.TrimSpace(last.Action); got != "patch" {
+		t.Fatalf("action=%q want patch", got)
+	}
+}
+
+func TestRoomDetailHandler_TaskActionPublishesRoomTaskUpdatedEvent(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	pub := &testRoomEventPublisher{}
+	roomHandler := RoomDetailHandler(cfg, zerolog.Nop(), pub)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha",
+		"members":[
+			{"actor_id":"human-a","role":"coordinator"},
+			{"actor_id":"gemini-a","role":"reviewer"}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	taskStore, err := taskstore.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open task store: %v", err)
+	}
+	defer taskStore.Close()
+	task, err := taskStore.Add(context.Background(), taskstore.Task{
+		WorkspaceID: ws.CanonicalID("ws1"),
+		Title:       "Backend task",
+		Status:      taskstore.StatusPending,
+	})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+
+	claimReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/tasks/"+task.ID+"/claim", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"actor_id":"gemini-a"
+	}`))
+	claimRR := httptest.NewRecorder()
+	roomHandler.ServeHTTP(claimRR, claimReq)
+	if claimRR.Code != http.StatusOK {
+		t.Fatalf("claim status=%d body=%s", claimRR.Code, claimRR.Body.String())
+	}
+
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	found := false
+	for _, typ := range pub.types {
+		if typ == "room.task.updated" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("published types=%v want room.task.updated", pub.types)
+	}
+	if len(pub.invalidations) == 0 {
+		t.Fatal("expected invalidation payloads")
+	}
+	last := pub.invalidations[len(pub.invalidations)-1]
+	if got := strings.TrimSpace(last.Mutation); got != "task" {
+		t.Fatalf("mutation=%q want task", got)
+	}
+	if got := strings.TrimSpace(last.TaskID); got != task.ID {
+		t.Fatalf("task_id=%q want %q", got, task.ID)
+	}
+	if got := strings.TrimSpace(last.Action); got != "claim" {
+		t.Fatalf("action=%q want claim", got)
+	}
+}
+
 func TestRoomDetailHandler_MessageAckUpdatesStatus(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	listHandler := RoomsListHandler(cfg, zerolog.Nop())
@@ -1993,6 +2125,138 @@ func TestRoomDetailHandler_MessageAckUpdatesStatus(t *testing.T) {
 	msg := messages[0].(map[string]any)
 	if got := strings.TrimSpace(msg["status"].(string)); got != "acked" {
 		t.Fatalf("message status=%q want acked", got)
+	}
+}
+
+func TestRoomDetailHandler_GetControlSnapshotIncludesLoopHealthAndLinkedCards(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	listHandler := RoomsListHandler(cfg, zerolog.Nop())
+	roomHandler := RoomDetailHandler(cfg, zerolog.Nop(), nil)
+	seedHandler := OrchestrationSeedCardsHandler(cfg, zerolog.Nop())
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{
+		"workspace_id":"ws1",
+		"id":"alpha",
+		"title":"Alpha",
+		"members":[
+			{"actor_id":"human-a","role":"coordinator"},
+			{
+				"actor_id":"gemini-a",
+				"role":"reviewer",
+				"backend":"tmux",
+				"session":"146",
+				"pane_id":"%159",
+				"transport_endpoint":"/tmp/gemini-a.sock",
+				"transport_kind":"pane_socket",
+				"delivery_binding":{
+					"mux_backend":"tmux",
+					"mux_session":"146",
+					"mux_pane_id":"%159",
+					"transport_endpoint":"/tmp/gemini-a.sock",
+					"transport_kind":"pane_socket",
+					"submit_mode":"composer_ctrl_enter",
+					"health":"ready"
+				}
+			}
+		]
+	}`))
+	createRR := httptest.NewRecorder()
+	listHandler.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+	activateAPIRoomLoop(t, cfg, "ws1", "alpha")
+
+	taskStore, err := taskstore.Open(context.Background(), cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open task store: %v", err)
+	}
+	defer taskStore.Close()
+	task, err := taskStore.Add(context.Background(), taskstore.Task{
+		WorkspaceID: ws.CanonicalID("ws1"),
+		Title:       "Linked task",
+		Status:      taskstore.StatusPending,
+	})
+	if err != nil {
+		t.Fatalf("add task: %v", err)
+	}
+
+	seedReq := httptest.NewRequest(http.MethodPost, "/api/orchestration/seed-cards", strings.NewReader(fmt.Sprintf(`{
+		"request_id":"req-room-snapshot-seed-001",
+		"workspace_id":"ws1",
+		"cards":[{"issue_id":"%s","issue_identifier":"ROOM-LINK-1","title":"Linked room card"}]
+	}`, task.ID)))
+	seedRR := httptest.NewRecorder()
+	seedHandler.ServeHTTP(seedRR, seedReq)
+	if seedRR.Code != http.StatusOK {
+		t.Fatalf("seed status=%d body=%s", seedRR.Code, seedRR.Body.String())
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/rooms/alpha/messages", strings.NewReader(fmt.Sprintf(`{
+		"workspace_id":"ws1",
+		"sender":"human-a",
+		"recipient":"gemini-a",
+		"task_id":"%s",
+		"body":"Please review this",
+		"reply_expected":true
+	}`, task.ID)))
+	postRR := httptest.NewRecorder()
+	roomHandler.ServeHTTP(postRR, postReq)
+	if postRR.Code != http.StatusCreated {
+		t.Fatalf("post status=%d body=%s", postRR.Code, postRR.Body.String())
+	}
+
+	snapshotReq := httptest.NewRequest(http.MethodGet, "/api/rooms/alpha/control-snapshot?workspace_id=ws1&actor_id=gemini-a", nil)
+	snapshotRR := httptest.NewRecorder()
+	roomHandler.ServeHTTP(snapshotRR, snapshotReq)
+	if snapshotRR.Code != http.StatusOK {
+		t.Fatalf("snapshot status=%d body=%s", snapshotRR.Code, snapshotRR.Body.String())
+	}
+	body := decodeResponseBody(t, snapshotRR)
+
+	loopHealth, ok := body["loop_health"].(map[string]any)
+	if !ok {
+		t.Fatalf("loop_health type=%T want map[string]any", body["loop_health"])
+	}
+	if got := strings.TrimSpace(fmt.Sprint(loopHealth["status"])); got != "active" {
+		t.Fatalf("loop_health.status=%q want active", got)
+	}
+
+	participants, ok := body["participants"].([]any)
+	if !ok {
+		t.Fatalf("participants type=%T want []any", body["participants"])
+	}
+	var member map[string]any
+	for _, raw := range participants {
+		participant, _ := raw.(map[string]any)
+		if strings.TrimSpace(fmt.Sprint(participant["actor_id"])) == "gemini-a" {
+			member = participant
+			break
+		}
+	}
+	if member == nil {
+		t.Fatalf("participants=%v want gemini-a", participants)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(member["transport_status"])); got != "ready" {
+		t.Fatalf("transport_status=%q want ready", got)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(member["runtime_binding_status"])); got != "ready" {
+		t.Fatalf("runtime_binding_status=%q want ready", got)
+	}
+
+	if got := strings.TrimSpace(fmt.Sprint(body["task_card_link"])); got != "issue_id_equals_task_id" {
+		t.Fatalf("task_card_link=%q want issue_id_equals_task_id", got)
+	}
+	rawCards, ok := body["linked_orchestration_cards"].([]any)
+	if !ok || len(rawCards) == 0 {
+		t.Fatalf("linked_orchestration_cards=%T %#v want at least one card", body["linked_orchestration_cards"], body["linked_orchestration_cards"])
+	}
+	card, _ := rawCards[0].(map[string]any)
+	if got := strings.TrimSpace(fmt.Sprint(card["issue_id"])); got != task.ID {
+		t.Fatalf("issue_id=%q want %q", got, task.ID)
+	}
+	if got := strings.TrimSpace(fmt.Sprint(card["linked_task_id"])); got != task.ID {
+		t.Fatalf("linked_task_id=%q want %q", got, task.ID)
 	}
 }
 

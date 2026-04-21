@@ -84,6 +84,11 @@ type LLMChatConfig struct {
 	// are present, for example `"auto"` or `"required"`.
 	ToolChoice json.RawMessage
 
+	// PassthroughToolCalls returns model-requested tool calls without executing
+	// them inside this engine. This lets an outer runtime own tool policy,
+	// execution, and event recording.
+	PassthroughToolCalls bool
+
 	// HookDispatcher for pre/post tool use hooks (optional).
 	HookDispatcher hooks.Dispatcher
 
@@ -329,6 +334,18 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 		})
 
 		if len(choice.Message.ToolCalls) > 0 {
+			if e.config.PassthroughToolCalls {
+				for _, tc := range choice.Message.ToolCalls {
+					output.ToolCalls = append(output.ToolCalls, ToolCall{
+						ID:        tc.ID,
+						Name:      tc.Function.Name,
+						Arguments: json.RawMessage(tc.Function.Arguments),
+					})
+				}
+				output.AssistantText = strings.TrimSpace(resolveAssistantContent(choice.Message))
+				output.StopReason = StopReasonEndTurn
+				return output, nil
+			}
 			var stop bool
 			messages, tools, stop = e.handleToolCallIteration(ctx, choice.Message, choice.Message.ToolCalls, messages, tools, iteration, &output)
 			if stop {

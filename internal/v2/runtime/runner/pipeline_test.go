@@ -12,6 +12,7 @@ import (
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	"github.com/joshka0/foxctl/internal/v2/core/events"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
 	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
 	"github.com/joshka0/foxctl/internal/v2/testkit/fakes"
 	"github.com/joshka0/foxctl/internal/v2/testkit/golden"
@@ -92,6 +93,69 @@ func TestPipeline_HappyPath_OrderedExecution(t *testing.T) {
 		events.EventRunCompleted,
 	)
 	assertSequenceAndVersion(t, eventsList)
+}
+
+func TestPipeline_ModelInputCarriesToolsAndToolResultHistory(t *testing.T) {
+	t.Parallel()
+
+	store := fakes.NewFakeEventStore()
+	clock := fakes.NewFakeClock(time.Date(2026, time.February, 18, 13, 5, 0, 0, time.UTC), time.Second)
+	ids := fakes.NewFakeUUID("evt")
+	model := fakes.NewFakeModel(
+		runner.ModelResponse{
+			ToolCalls: []run.ToolCall{{ID: "model-call-1", Name: "context_show"}},
+			Done:      false,
+		},
+		runner.ModelResponse{
+			Message: "used context",
+			Done:    true,
+		},
+	)
+	tools := fakes.NewFakeToolExecutor()
+
+	p := runner.New(runner.Config{
+		EventStore: store,
+		Model:      model,
+		Tools: []coretool.ToolDef{{
+			Name:        "context_show",
+			Description: "Read context",
+		}},
+		ToolExecutor: tools,
+		Now:          clock.Now,
+		NewID:        ids.New,
+	})
+
+	out, err := p.RunTurn(context.Background(), run.TurnInput{
+		RunID:         "run-model-input",
+		TurnID:        "turn-model-input",
+		Prompt:        "use a tool",
+		CorrelationID: "corr-model-input",
+		CausationID:   "cause-model-input",
+		RequestID:     "req-model-input",
+		MaxIterations: 2,
+	})
+	if err != nil {
+		t.Fatalf("RunTurn returned error: %v", err)
+	}
+	if out.ToolCalls != 1 {
+		t.Fatalf("ToolCalls=%d want 1", out.ToolCalls)
+	}
+	inputs := model.Inputs()
+	if len(inputs) != 2 {
+		t.Fatalf("model inputs=%d want 2", len(inputs))
+	}
+	if len(inputs[0].Tools) != 1 || inputs[0].Tools[0].Name != "context_show" {
+		t.Fatalf("first input tools=%+v", inputs[0].Tools)
+	}
+	if len(inputs[1].Messages) != 3 {
+		t.Fatalf("second input messages=%d want 3", len(inputs[1].Messages))
+	}
+	if inputs[1].Messages[1].ToolCalls[0].ID != "model-call-1" {
+		t.Fatalf("assistant tool call=%+v", inputs[1].Messages[1].ToolCalls[0])
+	}
+	if inputs[1].Messages[2].ToolCallID != "model-call-1" {
+		t.Fatalf("tool result message=%+v", inputs[1].Messages[2])
+	}
 }
 
 func TestPipeline_MaxIterations_StopsAndMarksDegraded(t *testing.T) {
