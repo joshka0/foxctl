@@ -217,11 +217,11 @@ func TestInventory_SixFieldsPerRow(t *testing.T) {
 	missingField := func(name string, val string) bool { return val == "" }
 	for i, a := range agents {
 		fields := map[string]string{
-			"ID":        a.ID,
-			"Role":      a.Role,
-			"Status":    a.Status,
-			"Workspace": a.Workspace,
-			"ParentID":  a.ParentID,
+			"ID":         a.ID,
+			"Role":       a.Role,
+			"Status":     a.Status,
+			"Workspace":  a.Workspace,
+			"ParentID":   a.ParentID,
 			"LastActive": a.LastActive,
 		}
 		var missing []string
@@ -470,8 +470,8 @@ func TestErrorState_UnreachableAPITransitionsToError(t *testing.T) {
 	cs.UpdateSize(80, 24)
 
 	bm := tui.NewBootManager(tui.BootConfig{
-		APIURL: apiURL,
-		Screen: cs,
+		APIURL:  apiURL,
+		Screen:  cs,
 		Timeout: 500 * time.Millisecond,
 		Client: &http.Client{
 			Timeout: 100 * time.Millisecond,

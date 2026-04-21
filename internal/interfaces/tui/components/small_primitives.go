@@ -283,5 +283,3 @@ func (kh *KeybindHint) Render(buf *tui.Buffer) {
 		}
 	}
 }
-
-

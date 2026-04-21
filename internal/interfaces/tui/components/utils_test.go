@@ -333,7 +333,7 @@ func containsRunes(s, substr string) bool {
 	idx := 0
 	for _, r := range substr {
 		found := false
-		for ; idx < len(s); {
+		for idx < len(s) {
 			sr, size := utf8.DecodeRuneInString(s[idx:])
 			if sr == r {
 				idx += size
