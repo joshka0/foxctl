@@ -53,9 +53,9 @@ signature:
       Use plan/sync to ingest Claude Code or OpenCode plans and optionally create tasks.
       Example commands:
         foxctl run plan/sync --input '{"workspace":"./","dry_run":true}'
-        foxctl run plan/sync --workspace ./ --dry_run
+        foxctl skills run plan/sync --workspace ./ --dry-run
         foxctl run plan/sync --input '{"workspace":"./","import_tasks":true}'
-        foxctl run plan/sync --workspace ./ --import_tasks
+        foxctl skills run plan/sync --workspace ./ --import-tasks
     workflows:
       - id: sync-preview
         description: "Preview plan sync."

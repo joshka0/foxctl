@@ -57,7 +57,7 @@ signature:
       Use hooks/mail_router to fetch mailbox messages and inject them into context.
       Example commands:
         foxctl run hooks/mail_router --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Read"}'
-        foxctl skills run hooks/mail_router --event PreToolUse --workspace_root /workspace/project --tool_name Read
+        foxctl skills run hooks/mail_router --event PreToolUse --workspace-root /workspace/project --tool-name Read
     workflows:
       - id: check-mailbox
         description: "Check inbox for relevant messages."

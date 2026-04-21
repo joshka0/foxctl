@@ -13,6 +13,11 @@ Execute any foxctl skill with JSON I/O.
 foxctl run <skill-name> --input '<json>'
 ```
 
+Use `foxctl run` for job-tracked installed skills, `foxctl run --ephemeral` when
+job storage is not writable, and `foxctl skills run` for direct parameter flags.
+Use `--input-file -` for piped raw JSON and `--input stdin` to chain envelope
+`data` between skills.
+
 ## Skills
 
 | Category | Skills |

@@ -113,9 +113,9 @@ signature:
       Use graph/manage to add nodes, connect edges, or query relationships.
       Example commands:
         foxctl run graph/manage --input '{"operation":"add_node","node_id":"task:123","node_type":"task","title":"Implement feature"}'
-        foxctl skills run graph/manage --operation add_node --node_id task:123 --node_type task --title "Implement feature"
+        foxctl skills run graph/manage --operation add_node --node-id task:123 --node-type task --title "Implement feature"
         foxctl run graph/manage --input '{"operation":"add_edge","from_id":"task:123","from_type":"task","to_id":"file:main.go","to_type":"file","edge_type":"modifies"}'
-        foxctl skills run graph/manage --operation add_edge --from_id task:123 --from_type task --to_id file:main.go --to_type file --edge_type modifies
+        foxctl skills run graph/manage --operation add_edge --from-id task:123 --from-type task --to-id file:main.go --to-type file --edge-type modifies
     workflows:
       - id: add-node
         description: "Add a task node."

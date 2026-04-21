@@ -29,6 +29,26 @@ func newRunCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run <skill-name>",
 		Short: "Run a skill and record the result as a job",
+		Long: `Run a skill with JSON input and, by default, persist the invocation as a job.
+
+Use this command when you want job history, dedupe, async execution, result
+artifacts, or trajectory capture. In restricted sandboxes, either make the
+foxctl storage paths writable or add --ephemeral to skip the job store.
+
+Input can be supplied as inline JSON, a JSON file, stdin, or a CAS digest:
+  --input '{"path":"."}'       pass raw JSON to the skill
+  --input-file input.json      read raw JSON from a file
+  --input-file -               read raw JSON from stdin
+  --input stdin                read an envelope from stdin and pass its data field
+  --input sha256:<hex>         read raw JSON from CAS
+
+For direct skill execution with manifest-derived parameter flags, use
+foxctl skills run <skill-name> --params-help.`,
+		Example: `  foxctl run fs/ls --input '{"path":"."}'
+  foxctl run code/semantic_search --ephemeral --input '{"format":"tree"}'
+  cat input.json | foxctl run text/grep --input-file -
+  producer | foxctl run code/snippet_extract --input stdin
+  foxctl skills run fs/ls --params-help`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			showExamples, err := cmd.Flags().GetBool("examples")
 			if err != nil {
@@ -168,7 +188,8 @@ func writeRunValidationError(cmd *cobra.Command, skill string, cause error) erro
 	data := protocol.ValidationErrorData{
 		Reason: msg,
 		Hint: fmt.Sprintf(
-			"Check your run flags and skill parameters. For full input schema and workflows, run: foxctl skills help %s --json",
+			"Check your run flags and skill parameters. For full input schema and workflows, run: foxctl skills help %s --json. For direct parameter flags, run: foxctl skills run %s --params-help",
+			skill,
 			skill,
 		),
 		Context: map[string]any{

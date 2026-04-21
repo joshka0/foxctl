@@ -33,7 +33,7 @@ signature:
       Use session/expand to retrieve conversation turns for a session.
       Example commands:
         foxctl run session/expand --input '{"session_id":"01HXYZ...","limit":20}'
-        foxctl skills run session/expand --session_id 01HXYZ... --limit 20
+        foxctl skills run session/expand --session-id 01HXYZ... --limit 20
     workflows:
       - id: expand-session
         description: "Expand a session with a limit."

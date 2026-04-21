@@ -137,7 +137,7 @@ echo '{"skill_name":"data/jq","view":"examples"}' | skill_inspect
       "name": "basic",
       "description": "Basic usage with required parameters",
       "input": "{\n  \"query\": \"example\",\n  \"input\": \"example\"\n}",
-      "command": "echo '{...}' | foxctl run data/jq"
+      "command": "echo '{...}' | foxctl skills run data/jq --input-file -"
     },
     {
       "name": "full",

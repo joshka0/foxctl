@@ -51,7 +51,7 @@ signature:
       Use heartwood/state to fetch the current participant-facing Heartwood state for an identity.
       Example commands:
         foxctl run heartwood/state --input '{"host":"ws://192.168.0.243:3001","db_name":"heartwood","token_path":"/tmp/hw-agent-1.token"}'
-        foxctl skills run heartwood/state --host ws://192.168.0.243:3001 --db_name heartwood --token_path /tmp/hw-agent-1.token
+        foxctl skills run heartwood/state --host ws://192.168.0.243:3001 --db-name heartwood --token-path /tmp/hw-agent-1.token
 returns:
   - name: ok
     type: boolean

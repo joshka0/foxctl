@@ -45,7 +45,7 @@ signature:
       Use session/turns to search for error patterns or tool usage.
       Example commands:
         foxctl run session/turns --input '{"errors_only":true,"limit":20}'
-        foxctl skills run session/turns --errors_only --limit 20
+        foxctl skills run session/turns --errors-only --limit 20
     workflows:
       - id: find-errors
         description: "Find error turns."

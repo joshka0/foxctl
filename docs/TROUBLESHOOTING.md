@@ -36,7 +36,7 @@ go version
 foxctl config show
 
 # Check logs (stderr output)
-foxctl run fs/ls --path . 2>debug.log
+foxctl run fs/ls --input '{"path":"."}' 2>debug.log
 ```
 
 ### Enable Verbose Logging
@@ -187,12 +187,12 @@ make skills-build
 foxctl config show | grep workspace
 
 # Use relative paths within workspace
-foxctl run fs/read --path ./src/main.go  # Good
-# Not: foxctl run fs/read --path /etc/passwd  # Bad
+foxctl run fs/read --input '{"path":"./src/main.go"}'  # Good
+# Not: foxctl run fs/read --input '{"path":"/etc/passwd"}'  # Bad
 
 # Or move to repository root
 cd /path/to/project
-foxctl run fs/read --path ./README.md
+foxctl run fs/read --input '{"path":"./README.md"}'
 ```
 
 ### Issue: `ERUNTIME: skill execution failed`
@@ -647,10 +647,10 @@ make build
 **Solution**:
 ```bash
 # Use forward slashes in foxctl (even on Windows)
-foxctl run fs/read --path ./src/main.go
+foxctl run fs/read --input '{"path":"./src/main.go"}'
 
 # Or use PowerShell escaping
-foxctl run fs/read --path .\src\main.go
+foxctl run fs/read --input '{"path":".\\src\\main.go"}'
 ```
 
 **Issue**: `CGO_ENABLED=0` not recognized
@@ -738,18 +738,18 @@ cat debug.log
 
 ```bash
 # Pretty-print JSON envelope
-foxctl run fs/ls --path . | jq .
+foxctl run fs/ls --input '{"path":"."}' | jq .
 
 # Check envelope fields
-foxctl run fs/ls --path . | jq '.meta'
+foxctl run fs/ls --input '{"path":"."}' | jq '.meta'
 ```
 
 ### Test with Simple Skills
 
 ```bash
 # Test basic functionality
-foxctl run fs/ls --path .
-foxctl run wasi/echo --message "hello"
+foxctl run fs/ls --input '{"path":"."}'
+foxctl run wasi/echo --input '{"message":"hello"}'
 
 # If these fail, issue is in core, not skills
 ```

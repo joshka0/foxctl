@@ -140,6 +140,101 @@ The user-testing validator must, before spawning flow validators, ensure:
 
 ---
 
+## Flow Validator Guidance: M3 Skeleton (tuistory + per-test daemon + code-inspection + git-inspect)
+
+**Surface:** Full TUI cockpit (`cmd/foxctl_tui`) driven by tuistory against a live per-test daemon.
+
+### Fixture API
+
+The per-test-daemon fixture lives at `internal/interfaces/tui/testfixture/testfixture.go` and is the **only** way flow validators should start a daemon:
+
+```go
+import "github.com/joshkatz/foxctl/v2/internal/interfaces/tui/testfixture"
+
+func TestFoo(t *testing.T) {
+    fx := testfixture.BootDaemon(t, testfixture.SeedOpts{
+        Roles:       []string{"researcher", "coder", "planner"},
+        WorkspaceID: "test-workspace",
+    })
+    defer fx.Close()
+
+    // fx.Port()      — the OS-assigned port (never hardcode)
+    // fx.BaseURL()  — "http://localhost:" + port
+    // fx.AgentIDs() — []string of seeded agent IDs
+    // fx.APIClient() — *http.Client pointed at the daemon
+    // fx.StorageRoot() — temp storage dir path
+}
+```
+
+**Key behaviors:**
+- Port is **always** OS-chosen (parse from `fx.Port()`). Never hardcode 8090.
+- Temp `FOXCTL_STORAGE_ROOT` is created via `t.TempDir()` and removed on `t.Cleanup`.
+- On `t.Fatal`, teardown still runs via `sync.Once`.
+- Fixture seeds agents deterministically by role. IDs are returned in `fx.AgentIDs()`.
+- The TUI binary path: `bin/foxctl_tui` (built by `make build`).
+
+### Tools Used
+
+| Tool | Purpose |
+|------|---------|
+| `tuistory` skill | Drives `bin/foxctl_tui` via PTY; captures frames; asserts on content |
+| `go-test` (`go test -race -count=1 ./internal/interfaces/tui/...`) | Runs existing M3 integration tests (VAL-SKEL-013, VAL-SKEL-016) |
+| `code-inspection` (grep, Read) | Checks source code for patterns, no regressions |
+| `git-inspect` | Verifies `git status --porcelain` clean and `go.mod` unchanged |
+| `cli` | Runs `foxctl agent spawn` externally for VAL-SKEL-009 |
+
+### Isolation Rules
+
+Each flow validator operates **fully independently**:
+
+1. **One isolated daemon per validator.** No shared daemon, no shared port, no shared storage root.
+2. **Temp storage root per validator.** The fixture handles this. Validators MUST use `testfixture.BootDaemon`, not `foxctl web serve` directly.
+3. **No port collision.** Use `fx.Port()` from the fixture. Never hardcode any port — especially not 8090 (default daemon port).
+4. **Mandatory teardown.** On every exit path (success, fail, skip, fatal), the daemon must be stopped and temp storage removed. The fixture's `t.Cleanup` handles this. Validators MUST NOT leave a daemon process running.
+5. **No shared seed state.** Each validator seeds only the agents it needs. No inter-validator coordination on agent state.
+
+### Concurrency
+
+**Hard cap: 5 concurrent flow validators.** This is the validated budget ceiling from the pre-mission dry run. Even if fewer would suffice, do not exceed 5.
+
+### Groups
+
+Organize the 25 pending assertions into groups for parallel spawning:
+
+- **Group A** (tuistory + fixture, 3 agents): VAL-SKEL-001, VAL-SKEL-002, VAL-SKEL-004, VAL-SKEL-010, VAL-SKEL-011, VAL-SKEL-012 — entry/boot/inventory/empty/error/footer
+- **Group B** (tuistory + fixture, 3 agents): VAL-SKEL-003, VAL-SKEL-005, VAL-SKEL-018 — resize/selection/min-size
+- **Group C** (tuistory + fixture, 3 agents): VAL-SKEL-006, VAL-SKEL-007, VAL-SKEL-017 — ask/chat streaming, cancel, double-submit
+- **Group D** (tuistory + fixture + external CLI, 3 agents): VAL-SKEL-008, VAL-SKEL-009 — evidence drawer, live refresh
+- **Group E** (tuistory + fixture + httptest, 3 agents): VAL-SKEL-015, VAL-SKEL-016 — SIGWINCH mid-stream, malformed SSE
+- **Group F** (code-inspection + go-test + git-inspect, no daemon): VAL-SKEL-013, VAL-SKEL-014, VAL-CROSS-001, VAL-CROSS-002, VAL-CROSS-004, VAL-CROSS-005, VAL-CROSS-007, VAL-CROSS-008
+
+Spawn Groups A–E (tuistory) first. Spawn Group F (no daemon) synchronously in the main session since it requires no isolation.
+
+### Known Gotchas
+
+- **TUI binary is large (~9 MiB) but builds are incremental.** `make build` from the main session has already produced `bin/foxctl_tui` — do not rebuild unless the binary is missing.
+- **SIGWINCH mid-stream (VAL-SKEL-015).** Tuistory's resize API drives the mid-stream resize test. Verify cancel still works immediately after resize.
+- **Malformed SSE (VAL-SKEL-016).** Use `httptest.Server` producing invalid SSE frames, not the real daemon.
+- **`-smoke-agent` / `-smoke-console` modes (VAL-CROSS-002).** These smoke modes exit cleanly without a reachable API. Must remain schema-compatible.
+- **`make check` coverage timeout.** `make check` times out at ~300s due to the coverage step being killed by the OS, not actual test failures. Individual `go test -race -count=1 ./internal/interfaces/tui/...` passes. VAL-CROSS-007 uses `make test` as proxy evidence.
+
+### Shared Resources (read-only)
+
+- Repo tree under `internal/interfaces/tui/`
+- Doc tree under `docs/plans/tui-redesign/`
+- `bin/foxctl_tui` binary (pre-built)
+- `go.mod` (read-only; check line count unchanged for VAL-CROSS-005)
+
+### Off-Limits
+
+- Do not modify any source files.
+- Do not start daemon processes outside the test fixture.
+- Do not hardcode port 8090.
+- Do not touch `archive/`, `packages/gui-agent/`, or `internal/interfaces/web/`.
+- Do not run `make check` (times out). Use `make test` instead.
+
+---
+
 ## Flow Validator Guidance: M2 Components (go-test + tuistory + code-inspection + manual-read)
 
 **Surface:** Pure Go component library under `internal/interfaces/tui/`. No daemon, no network.

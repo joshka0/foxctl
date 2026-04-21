@@ -43,11 +43,25 @@ func writeRunCommandExamples(cmd *cobra.Command) error {
 			Description: "Pipe JSON input from a file or stdin.",
 			Command:     "cat input.json | foxctl run text/grep --input-file -",
 		},
+		{
+			Description: "Run without job persistence for sandboxed or hook-style execution.",
+			Command:     `foxctl run code/semantic_search --ephemeral --input '{"format":"tree"}'`,
+			Input: map[string]any{
+				"format": "tree",
+			},
+		},
+		{
+			Description: "Run a skill directly with manifest-derived parameter flags.",
+			Command:     "foxctl skills run fs/ls --path ./src",
+			Input: map[string]any{
+				"path": "./src",
+			},
+		},
 	}
 
 	payload := runExamplesPayload{
 		Examples: examples,
-		Hint:     "Pass a skill name to see examples for that skill (e.g., foxctl run todo/manage --examples).",
+		Hint:     "Use foxctl run for job-tracked execution, foxctl run --ephemeral when job storage is unavailable, and foxctl skills run for direct parameter-flag execution. Pass a skill name to see examples for that skill (e.g., foxctl run todo/manage --examples).",
 	}
 	return protocol.WriteOK(cmd.OutOrStdout(), "foxctl.run.examples", payload, protocol.WithSource("cli"))
 }

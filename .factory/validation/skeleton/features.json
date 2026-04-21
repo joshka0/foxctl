@@ -1,0 +1,102 @@
+{
+  "features": [
+    {
+      "featureId": "skel-entry-screen",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-001", "VAL-SKEL-013"],
+      "summary": "Entry point and minimum-terminal-size guard"
+    },
+    {
+      "featureId": "skel-async-boot",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-002", "VAL-SKEL-011", "VAL-SKEL-014"],
+      "summary": "Async boot with health-check polling and timeout"
+    },
+    {
+      "featureId": "skel-three-lane-resize",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-003", "VAL-SKEL-005", "VAL-SKEL-018"],
+      "summary": "Three-lane layout at 80x24, 120x40, 60x20"
+    },
+    {
+      "featureId": "skel-inventory",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-004", "VAL-SKEL-010"],
+      "summary": "Agent inventory rows with 6 fields and deterministic sort"
+    },
+    {
+      "featureId": "skel-detail",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-005"],
+      "summary": "Detail lane with Tab/Shift+Tab cycling and DetailPane integration"
+    },
+    {
+      "featureId": "skel-ask-stream",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-006"],
+      "summary": "Ask/stream with progressive token rendering and goroutine cleanup"
+    },
+    {
+      "featureId": "skel-cancel",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-007"],
+      "summary": "Cancel via Ctrl+X with per-stream context and '⊘ cancelled' state"
+    },
+    {
+      "featureId": "skel-evidence-drawer",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-008"],
+      "summary": "Evidence drawer with 'e' key, ESC close, ≤200ms latency"
+    },
+    {
+      "featureId": "skel-live-refresh",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-009"],
+      "summary": "Live refresh with single SSE subscription and debounced re-fetch"
+    },
+    {
+      "featureId": "skel-status-footer",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-012"],
+      "summary": "Status footer with keybinds and phase-correct content"
+    },
+    {
+      "featureId": "skel-sigwinch-mid-stream",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-015"],
+      "summary": "SIGWINCH mid-stream resilience (no token drops/duplicates/focus loss)"
+    },
+    {
+      "featureId": "skel-malformed-sse",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-016"],
+      "summary": "Malformed SSE detection and visible 💔 indicator"
+    },
+    {
+      "featureId": "skel-fixture",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-013"],
+      "summary": "Exported BootDaemon with temp storage, port discovery, agent seeding"
+    },
+    {
+      "featureId": "skel-retrospective-and-seal",
+      "status": "completed",
+      "milestone": "skeleton",
+      "fulfills": ["VAL-SKEL-014", "VAL-SKEL-017"],
+      "summary": "Retrospective with ≥5 findings"
+    }
+  ]
+}

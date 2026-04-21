@@ -61,7 +61,7 @@ signature:
       Use hooks/knowledge_router to surface relevant knowledge packs.
       Example commands:
         foxctl run hooks/knowledge_router --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
-        foxctl skills run hooks/knowledge_router --event PreToolUse --workspace_root /workspace/project --tool_name Edit --tool_input '{"file_path":"main.go"}'
+        foxctl skills run hooks/knowledge_router --event PreToolUse --workspace-root /workspace/project --tool-name Edit --tool-input '{"file_path":"main.go"}'
     workflows:
       - id: route-knowledge
         description: "Recommend knowledge for a tool action."

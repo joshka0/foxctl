@@ -53,7 +53,7 @@ signature:
       Use mcp/bridge to invoke a tool on a running MCP server.
       Example commands:
         foxctl run mcp/bridge --input '{"server_url":"http://localhost:8080/sse","tool_name":"search","tool_args":{"query":"example"}}'
-        foxctl skills run mcp/bridge --server_url http://localhost:8080/sse --tool_name search --tool_args '{"query":"example"}'
+        foxctl skills run mcp/bridge --server-url http://localhost:8080/sse --tool-name search --tool-args '{"query":"example"}'
     workflows:
       - id: bridge-tool
         description: "Call a tool on an MCP server."

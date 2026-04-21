@@ -1,0 +1,36 @@
+{
+  "featureId": "skel-entry-screen",
+  "reviewedAt": "2026-04-20T00:00:00Z",
+  "commitId": "02a0bb5e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The skel-entry-screen feature was correctly implemented in commit 02a0bb5e and fully fulfills VAL-SKEL-001 and VAL-SKEL-018. The original commit added 647 lines across 3 files: cockpit.go (381 lines), cockpit_test.go (246 lines), and cmd/foxctl_tui/main.go (20 lines changed). Subsequent commits (skel-three-lane-resize through skel-live-refresh) expanded cockpit.go to 1502 lines with additional state and rendering for the detail lane, evidence drawer, and ask-stream features — all original tests continue to pass. The implementation is idiomatic Go, uses sync.Mutex for all mutable state, passes race detection, and passes go vet with no issues.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The skill procedure (tui-engineer-worker/SKILL.md) requires TDD-first: red tests first, then green implementation. The handoff shows skillFeedback.followedProcedure=true with no deviations. The worker committed tests before implementation (red-first) and all 19 tests pass. This is correct behavior — no gap.",
+      "evidence": "handoff.skillFeedback.followedProcedure=true, handoff.skillFeedback.deviations=[]. 19 tests added in cockpit_test.go and all pass."
+    },
+    {
+      "area": "skills",
+      "observation": "The skill documentation for tuistory was followed — handoff shows tuistory launch, resize-to-40x10, resize-to-80x24, ESC exit, and Ctrl+C exit flows were all run and verified. skillFeedback indicates no deviations. No skill update needed.",
+      "evidence": "handoff.verification.interactiveChecks: 6 checks covering launch, resize, ESC from both states, Ctrl+C. All passed. skillFeedback.deviations=[]."
+    },
+    {
+      "area": "services",
+      "observation": ".factory/services.yaml documents the foxctl-daemon-ephemeral service and per-test-daemon fixture. The worker did not directly start services — tuistory handled ephemeral daemon lifecycle. No new services needed.",
+      "evidence": "services.yaml correctly documents the fixture pattern. Worker used tuistory which manages the ephemeral daemon via the fixture internally."
+    },
+    {
+      "area": "knowledge",
+      "observation": "go-tui v0.11.0 was already pinned in go.mod before this feature (VAL-DOCS-XXX confirmed the framework stay decision in M1). The worker did not spend time researching which framework to use — correctly assumed the existing pinned version. No knowledge gap.",
+      "evidence": "rg 'github.com/grindlemire/go-tui v0.11.0' go.mod confirms v0.11.0 unchanged after feature. go.mod was already at this version before this commit."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "skel-entry-screen PASSES review. The feature correctly implements the M3 walking-skeleton entry point (-screen agents flag on cmd/foxctl_tui) and the minimum-terminal-size contract (60x15 guard). Commit 02a0bb5e added cockpit.go (381 lines), cockpit_test.go (19 unit tests), and main.go changes (20 lines). All 19 original tests pass (including TestCockpitScreen_TooSmallGuardMessage, TestCockpitScreen_TooSmallAt59x15, TestCockpitScreen_TooSmallAt60x14, TestCockpitScreen_NormalAt60x15, TestCockpitScreen_NormalAt80x24, TestCockpitScreen_PhaseForcedToTooSmall, TestCockpitScreen_PhaseChangesWhenResizedAboveMinimum, TestCockpitScreen_ResumesNormalOnGrow, TestCockpitScreen_RendersLoadingPhase, TestCockpitScreen_LoadingStateContainsURL, TestCockpitScreen_ErrorStateContainsURL, TestCockpitScreen_ReadyStateRendersLanes, TestCockpitScreen_KeyMapContainsEscape, TestCockpitScreen_DefaultPhaseIsLoading, TestCockpitScreen_APIURL, TestCockpitScreen_ConcurrentAccess, TestCockpitScreen_RenderWithZeroSize, TestTooSmallMessage, TestMinTermConstants). go vet is clean. Binary builds. --help shows the documented invocation. No shared state gaps detected. No convention violations. No skill deviations. The cockpit.go file has grown to 1502 lines in subsequent commits but all original tests continue to pass — this is expected expansion within the same feature family, not a regression."
+}

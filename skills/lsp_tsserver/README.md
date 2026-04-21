@@ -19,6 +19,10 @@ npm install -g typescript typescript-language-server
 
 ## Usage
 
+Examples assume the skill is installed. JSON goes through `--input`; use
+`--input-file -` when piping raw JSON, or `foxctl skills run` for direct
+parameter flags.
+
 ```bash
 # List symbols in a file
 foxctl run lsp/tsserver --input '{"operation": "symbols", "file": "src/index.ts"}'

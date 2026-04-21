@@ -174,24 +174,27 @@ echo '{"operation":"prune","repo_path":"."}' | ./dist/skills/git_worktree/bin
 
 ### Using with foxctl (when integrated)
 
+Use `foxctl skills run` for direct parameter flags. Use `foxctl run` with
+`--input` when you want job-tracked execution.
+
 ```bash
 # List worktrees
-foxctl run git/worktree --operation list --repo_path .
+foxctl skills run git/worktree --operation list --repo-path .
 
 # Add a worktree
-foxctl run git/worktree \
+foxctl skills run git/worktree \
   --operation add \
   --path /tmp/my-feature \
   --branch my-feature \
-  --new_branch true
+  --new-branch true
 
 # Remove a worktree
-foxctl run git/worktree \
+foxctl skills run git/worktree \
   --operation remove \
   --path /tmp/my-feature
 
 # Prune worktrees
-foxctl run git/worktree --operation prune
+foxctl skills run git/worktree --operation prune
 ```
 
 ## Security

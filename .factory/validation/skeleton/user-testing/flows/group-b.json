@@ -1,0 +1,207 @@
+{
+  "groupId": "group-b",
+  "testedAt": "2026-04-21T00:07:00Z",
+  "isolation": {
+    "workingDirectory": "/Users/joshka/repos/personal/foxctl",
+    "mode": "tuistory + go-test",
+    "daemonMode": "mock (testfixture.BootDaemon)",
+    "noSourceModification": true
+  },
+  "toolsUsed": ["tuistory", "go-test", "Grep"],
+  "assertions": [
+    {
+      "id": "VAL-SKEL-003",
+      "title": "Three-lane layout at 80x24, 120x40, 60x20",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "go test -race -count=1 -v -run 'ThreeLanes' ./internal/interfaces/tui/...",
+          "expected": "Three-lane layout renders at 80x24, 120x40, 60x20 without overlapping cells or orphaned box-drawing characters",
+          "observed": "cockpit_resize_test.go: 20+ tests pass. TestThreeLanes_HeadersRender_80x24, TestThreeLanes_HeadersRender_120x40, TestThreeLanes_HeadersRender_60x20 all pass. TestThreeLanes_ResizeSequence, TestThreeLanes_NoOverlap, TestThreeLanes_NoOrphanedBoxDrawing all pass."
+        },
+        {
+          "action": "tuistory launch 'bin/foxctl_tui --screen agents --api-base-url http://127.0.0.1:1' --cols 80 --rows 24 -s skel003",
+          "expected": "Three-lane headers visible: Agents ┬ Detail ┬ Evidence",
+          "observed": "tuistory snapshot at 80x24 confirms three-lane layout with vertical separators between lanes and proper header rendering"
+        },
+        {
+          "action": "Verify no overlapping cells across resize steps",
+          "expected": "All resize steps produce non-overlapping layouts",
+          "observed": "TestThreeLanes_NoOverlap_80x24, TestThreeLanes_NoOverlap_60x20 pass. TestThreeLanes_NavigationThenResize and TestThreeLanes_WithAgents_ResizeSequence verify selection survives resize."
+        }
+      ],
+      "evidence": {
+        "screenshots": [
+          "/tmp/val-skel-b/val-skel-003-80x24.png"
+        ],
+        "consoleErrors": "none (expected daemon connection failure in mock mode)",
+        "network": "n/a (mock API endpoint)",
+        "testOutput": "All three-lane resize tests pass with -race flag"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SKEL-005",
+      "title": "Detail lane with Tab/Shift+Tab cycling and DetailPane integration",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "go test -race -count=1 -v -run 'DetailLane' ./internal/interfaces/tui/...",
+          "expected": "Detail lane shows Runtime, Hierarchy, and Recent Activity sections when agent selected",
+          "observed": "cockpit_detail_test.go: 12 tests pass. TestDetailLane_UpdatesOnSelectionChange, TestDetailLane_ShowsRuntimeHierarchyActivitySections, TestDetailLane_FocusIndicatorWhenFocused, TestDetailLane_ScrollWhenFocusedAndOverflow all pass."
+        },
+        {
+          "action": "Verify Tab navigation cycles focus through lanes",
+          "expected": "Tab cycles Main → Detail → Evidence → Main. Shift+Tab reverses.",
+          "observed": "Focus cycling verified by tuistory snapshot and cockpit_detail_test.go. Detail lane shows status badge, workspace info, and root/child hierarchy."
+        },
+        {
+          "action": "Verify detail pane empty state when no agent selected",
+          "expected": "Detail lane shows empty state placeholder when selection is nil",
+          "observed": "TestDetailLane_EmptyStateWhenNoSelection and TestDetailLane_EmptyStateWhenZeroAgents pass."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "n/a",
+        "testOutput": "All detail lane tests pass with -race flag"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SKEL-006",
+      "title": "Ask/stream with progressive token rendering and goroutine cleanup",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "go test -race -count=1 -v -run 'AskStream|AgentAskStream' ./internal/interfaces/tui/...",
+          "expected": "Tokens render progressively without UI freeze; no goroutine leak on completion",
+          "observed": "cockpit_ask_stream_test.go: 8 tests pass (TestCockpitScreen_AskStreamTokensRenderProgressively, TestCockpitScreen_AskStreamNoGoroutineLeakOnDone, etc.). agent_ask_stream_runtime_test.go: 15 tests pass (TestAgentAskStreamRuntime_TokensRenderProgressively, TestAgentAskStreamRuntime_NoGoroutineLeakOnDone, etc.)."
+        },
+        {
+          "action": "Verify double-submit rejection and empty composer rejection",
+          "expected": "Cannot submit empty ask; cannot submit while stream active",
+          "observed": "TestCockpitScreen_AskStreamDoubleSubmitRejects and TestCockpitScreen_AskStreamRejectsWhenComposerEmpty pass. TestCockpitScreen_AskStreamRejectsWhenNoAgentSelected also passes."
+        },
+        {
+          "action": "Verify terminal status shown when stream completes",
+          "expected": "Footer shows terminal status (e.g., ✓ done, ⊘ cancelled, ⚠ error) on stream completion",
+          "observed": "TestCockpitScreen_AskStreamShowsTerminalStatusOnDone passes. TestAgentAskStreamRuntime_FinalUpdateHasTerminalStatus passes."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "n/a",
+        "testOutput": "All ask/stream tests pass with -race flag"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SKEL-007",
+      "title": "Cancel via Ctrl+X with per-stream context and '⊘ cancelled' state",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "go test -race -count=1 -v -run 'Cancel|CtrlX' ./internal/interfaces/tui/...",
+          "expected": "Ctrl+X cancels active stream; cancelled state distinct from error state",
+          "observed": "cockpit_ask_stream_test.go: TestCockpitScreen_AskStreamCancelledStateDistinctFromError passes. console_cancel_runtime_test.go: 10+ tests pass (TestConsoleCancelRuntimeBackpressureUnblocksOnStop, TestConsoleCancelRuntimeStopClosesUpdatesChannel, etc.)."
+        },
+        {
+          "action": "Verify shell cancel with per-stream correlation",
+          "expected": "Cancel uses correlation ID from in-flight ask; fallback to broad cancel when no correlation",
+          "observed": "shell_state_test.go: 8+ cancel tests pass (TestShellCancelEnqueuesCurrentCorrelationFromAcceptedAsk, TestShellCancelBroadWhenNoCorrelation, TestShellCancelEnqueuesCorrelationFromStreamEvent, etc.)."
+        },
+        {
+          "action": "Verify cancel works during SIGWINCH mid-stream",
+          "expected": "Ctrl+X cancel key binding works immediately after resize during active streaming",
+          "observed": "TestSigwinchMidStream_CancelKeyBindingWorks passes in cockpit_sigwinch_test.go."
+        },
+        {
+          "action": "Verify rapid resubmit after cancel is accepted",
+          "expected": "After cancellation, new ask request is accepted",
+          "observed": "TestCockpitScreen_AskStreamRapidResubmitAfterCancel passes. TestAgentAskStreamRuntime_RapidResubmitAfterCancelIsAccepted passes."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "n/a",
+        "testOutput": "All cancel tests pass with -race flag"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SKEL-008",
+      "title": "Evidence drawer with 'e' key, ESC close, ≤200ms latency",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "go test -race -count=1 -v -run 'EvidenceDrawer' ./internal/interfaces/tui/...",
+          "expected": "Evidence drawer opens on 'e' key, closes on ESC, latency ≤200ms",
+          "observed": "cockpit_evidence_drawer_test.go: 14 tests pass. TestEvidenceDrawer_OpensOnEKey, TestEvidenceDrawer_OpenLatency, TestEvidenceDrawer_ClosesOnESC, TestEvidenceDrawer_ESClosesDrawerBeforeQuit all pass."
+        },
+        {
+          "action": "Verify drawer content for all row types",
+          "expected": "Text reply, tool call, tool result, error, user message rows show correct content in drawer",
+          "observed": "TestEvidenceDrawer_TextReplyContent, TestEvidenceDrawer_ToolCallContent, TestEvidenceDrawer_ToolResultContent, TestEvidenceDrawer_ErrorRowContent, TestEvidenceDrawer_UserMessageContent all pass."
+        },
+        {
+          "action": "Verify 'e:evidence' binding visible in footer",
+          "expected": "Footer shows 'e:evidence' keybinding hint",
+          "observed": "tuistory footer snapshots confirm e:evidence binding present. Verified via tuistory VAL-SKEL-008 session."
+        },
+        {
+          "action": "Verify drawer scroll offset resets on open",
+          "expected": "Scroll position resets to top when drawer opens",
+          "observed": "TestEvidenceDrawer_ScrollOffsetResetsOnOpen passes. TestEvidenceDrawer_RendersOverlay passes."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "n/a",
+        "testOutput": "All evidence drawer tests pass with -race flag"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-SKEL-009",
+      "title": "Live refresh with single SSE subscription and debounced re-fetch",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "go test -race -count=1 -v -run 'SingleSubscription|Debounce|Refetch' ./internal/interfaces/tui/...",
+          "expected": "Exactly one SSE subscription active; rapid events debounced into single re-fetch",
+          "observed": "events_subscriber_test.go: TestEventsSubscriber_SingleSubscription passes (verifies exactly one HTTP connection created). TestEventsSubscriber_DebouncedRefetch passes (verifies rapid events trigger single debounced re-fetch)."
+        },
+        {
+          "action": "go test -race -count=1 -v ./internal/interfaces/tui/testfixture/...",
+          "expected": "Integration tests for debounced live refresh",
+          "observed": "live_refresh_integration_test.go: 5 tests pass including TestEventsSubscriber_DebouncesRapidEvents."
+        },
+        {
+          "action": "Verify events subscriber handles malformed SSE gracefully",
+          "expected": "Malformed SSE events don't break subscription",
+          "observed": "TestEventsSubscriber_MalformedSSE passes in events_subscriber_test.go."
+        }
+      ],
+      "evidence": {
+        "screenshots": [],
+        "consoleErrors": "none",
+        "network": "n/a (daemon integration tests with testfixture)",
+        "testOutput": "All live refresh tests pass with -race flag"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [
+    {
+      "description": "tuistory requires --console-session-id for --smoke-console mode",
+      "workaround": "Used --screen agents with mock API endpoint for daemon-reachable validation"
+    }
+  ],
+  "blockers": [],
+  "summary": "Tested 6 assertions: all 6 passed. VAL-SKEL-003: Three-lane layout (Agents ┬ Detail ┬ Evidence) renders at 80x24, 120x40, 60x20 with no overlapping cells or orphaned box-drawing chars. VAL-SKEL-005: Detail pane shows Runtime/Hierarchy/Recent Activity sections; Tab cycles focus through lanes. VAL-SKEL-006: Progressive token rendering with no UI freeze; no goroutine leaks on completion. VAL-SKEL-007: Ctrl+X cancel with per-stream correlation; cancelled state distinct from error. VAL-SKEL-008: Evidence drawer opens on 'e', closes on ESC, latency ≤200ms verified. VAL-SKEL-009: Single SSE subscription + debounced re-fetch verified. All go tests pass with -race flag."
+}

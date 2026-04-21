@@ -62,6 +62,7 @@ contributors
 ## TL;DR
 
 1. **Start with a tree** — `foxctl run code/semantic_search --input '{"query": "your task", "format": "tree"}'`
+   *(from this repo, prefer `./bin/foxctl run ...` if `foxctl` on PATH is a bundled wrapper)*
 2. **Build the repo graph** — `foxctl index repo build --workspace . --go --typescript --elixir` *(use `--go=false` for non-Go repos)* for call/ref navigation
 3. **Envelope contract is sacred** — never change `meta.*` fields without spec
    updates (downstream tooling relies on stable envelope shape; breaking it breaks hooks, GUIs, and golden tests)
@@ -80,6 +81,32 @@ contributors
 15. **Task continuity split** — use `foxctl context task-history-summary` for Codex/agents/scripts *(structured summary + artifact pointer)* and `configs/hooks/task-continuity-summary.sh` for hook injection *(prompt-ready wrapper output)*
 16. **Never use keyword heuristics** — do not route, classify, promote, or suppress behavior using ad hoc substring/keyword matching; these heuristics are brittle. Prefer explicit schemas, typed signals, scored features, tests, or learned policies.
 17. **`internal/*` placement rule** — before adding a new `internal/*` package or extending `internal/v2/*`, read [docs/architecture/package-topology.md](docs/architecture/package-topology.md) and place the work by family model, not by local preference
+
+## Run Command Choice
+
+Use the right execution path before debugging a skill:
+
+- `foxctl run <skill> --input '<json>'` is the job-tracked path for installed
+  skills. It opens the jobs store, can write CAS/trajectory metadata, and is
+  the right default when you need job history or async/dedupe behavior.
+- `foxctl run <skill> --ephemeral --input '<json>'` skips job persistence. Use
+  this for sandboxed agents, hooks, smoke tests, or one-off retrieval when
+  `~/.foxctl` is not writable.
+- `foxctl skills run <skill> --param value` executes the skill directly with
+  manifest-derived parameter flags. Use this when validating skill parameters or
+  when a simple flag form is clearer than raw JSON.
+- `./bin/foxctl ...` is the repo-native binary after `make build`. If `foxctl`
+  on PATH says `Command 'run' not available in bundled mode`, you are using a
+  wrapper from another install; run `./bin/foxctl ...` from this checkout or
+  rebuild/reinstall the CLI.
+
+Input modes:
+
+- `--input '{"key":"value"}'` passes raw JSON.
+- `--input-file input.json` or `--input-file -` reads raw JSON from a file or
+  stdin.
+- `--input stdin` reads an envelope from stdin and passes only its `data` field.
+- `--input sha256:<hex>` loads raw JSON from CAS.
 
 ## Internal Package Placement
 

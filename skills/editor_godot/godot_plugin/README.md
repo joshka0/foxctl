@@ -25,6 +25,10 @@ with the Godot Editor.
 
 Once the plugin is running, you can use foxctl to interact with the editor:
 
+Examples assume the skill is installed. JSON goes through `--input`; use
+`--input-file -` when piping raw JSON, or `foxctl skills run` for direct
+parameter flags.
+
 ```bash
 # Check connection
 foxctl run editor/godot --input '{"action": "ping"}'

@@ -57,7 +57,24 @@ Source of truth: `internal/domain/skill/manifest.go`.
 2. Keep envelope output protocol-compliant.
 3. Declare accurate `capabilities` (`network`, `filesystem`, `pure`).
 4. Build/install with `make skills-install` (or explicit `go build .../bin`).
-5. Verify with `foxctl skills list` and `foxctl run <command> --input ...`.
+5. Verify with `foxctl skills list` and either `foxctl run <command> --input ...`
+   for job-tracked installed execution or `foxctl skills run <command> ...` for
+   direct manifest-derived parameter flags.
+
+## Running Skills
+
+| Need | Command |
+|------|---------|
+| Job history, dedupe, async, or trajectory capture | `foxctl run <skill> --input '<json>'` |
+| Sandbox-safe or hook-style execution without job persistence | `foxctl run <skill> --ephemeral --input '<json>'` |
+| Direct parameter flags generated from `skill.yaml` | `foxctl skills run <skill> --param value` |
+| Raw JSON from a file or pipeline | `foxctl run <skill> --input-file input.json` or `--input-file -` |
+| Envelope chaining | `foxctl run <skill> --input stdin` |
+
+Direct skill binaries read JSON on stdin through `skillmain.Main`; they do not
+parse CLI flags or files themselves. The `foxctl run` and `foxctl skills run`
+wrappers are responsible for loading files, extracting envelope data, and
+merging parameter flags into JSON.
 
 ## Related Docs
 

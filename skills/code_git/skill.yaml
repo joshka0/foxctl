@@ -50,9 +50,9 @@ signature:
       or authorship.
       Example commands:
         foxctl run code/git --input '{"query_type":"recent","since":"7d"}'
-        foxctl skills run code/git --query_type recent --since 7d
+        foxctl skills run code/git --query-type recent --since 7d
         foxctl run code/git --input '{"query_type":"blame","path":"./main.go"}'
-        foxctl skills run code/git --query_type blame --path ./main.go
+        foxctl skills run code/git --query-type blame --path ./main.go
     workflows:
       - id: recent-changes
         description: "List recent changes."

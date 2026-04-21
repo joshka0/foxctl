@@ -76,7 +76,7 @@ signature:
         foxctl run mobile/expo --input '{"operation":"reload","platform":"ios"}'
         foxctl skills run mobile/expo --operation reload --platform ios
         foxctl run mobile/expo --input '{"operation":"build","build_platform":"android","profile":"preview"}'
-        foxctl skills run mobile/expo --operation build --build_platform android --profile preview
+        foxctl skills run mobile/expo --operation build --build-platform android --profile preview
     workflows:
       - id: expo-reload
         description: "Reload the Expo app."

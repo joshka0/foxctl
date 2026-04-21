@@ -25,6 +25,10 @@ func newSkillsRunCommand() *cobra.Command {
 		Short: "Run a skill with JSON input or parameter flags",
 		Long: `Run a skill binary with input provided as JSON or individual parameter flags.
 
+This is the direct skill execution path. It is useful when you want
+manifest-derived parameter flags, when validating a skill from source, or when
+top-level foxctl run is unavailable in a bundled wrapper.
+
 Arguments can be passed in three ways (in order of precedence):
   1. Individual parameter flags (e.g., --path ., --analysis-mode hotspots)
   2. Inline JSON via --input flag

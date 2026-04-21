@@ -57,7 +57,7 @@ signature:
       Use hooks/task_guard to enforce task gating for write operations.
       Example commands:
         foxctl run hooks/task_guard --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
-        foxctl skills run hooks/task_guard --event PreToolUse --workspace_root /workspace/project --tool_name Edit --tool_input '{"file_path":"main.go"}'
+        foxctl skills run hooks/task_guard --event PreToolUse --workspace-root /workspace/project --tool-name Edit --tool-input '{"file_path":"main.go"}'
     workflows:
       - id: guard-edit
         description: "Guard an edit operation."

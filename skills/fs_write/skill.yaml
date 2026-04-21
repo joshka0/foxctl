@@ -51,7 +51,7 @@ signature:
         foxctl run fs/write --input '{"path":"./notes.txt","content":"Hello","mode":"overwrite"}'
         foxctl skills run fs/write --path ./notes.txt --content "Hello" --mode overwrite
         foxctl run fs/write --input '{"path":"./logs/output.txt","content":"Line","mode":"append","create_dirs":true}'
-        foxctl skills run fs/write --path ./logs/output.txt --content "Line" --mode append --create_dirs
+        foxctl skills run fs/write --path ./logs/output.txt --content "Line" --mode append --create-dirs
     workflows:
       - id: write-overwrite
         description: "Overwrite a file with new content."

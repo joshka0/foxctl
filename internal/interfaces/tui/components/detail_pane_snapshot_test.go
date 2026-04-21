@@ -31,7 +31,7 @@ func TestSnapshotDetailPanePopulated(t *testing.T) {
 			"children: 2",
 		}},
 		{Title: "Recent Activity", Lines: []string{
-			"ask: 'review git diff' → done",
+			"ask: 'check test status' → done",
 			"ask: 'fix lint errors' → running",
 		}},
 	}

@@ -61,7 +61,7 @@ signature:
       Use hooks/test_feedback to surface failing tests for recent edits.
       Example commands:
         foxctl run hooks/test_feedback --input '{"event":"PostToolUse","workspace_root":"/workspace/project","tool_name":"Edit"}'
-        foxctl skills run hooks/test_feedback --event PostToolUse --workspace_root /workspace/project --tool_name Edit
+        foxctl skills run hooks/test_feedback --event PostToolUse --workspace-root /workspace/project --tool-name Edit
     workflows:
       - id: post-edit-feedback
         description: "Report failures after an edit."

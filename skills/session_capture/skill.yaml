@@ -59,7 +59,7 @@ signature:
         foxctl run session/capture --input '{"workspace":"./","summarize":true}'
         foxctl skills run session/capture --workspace ./ --summarize
         foxctl run session/capture --input '{"session_id":"abc123","force":true}'
-        foxctl skills run session/capture --session_id abc123 --force
+        foxctl skills run session/capture --session-id abc123 --force
     workflows:
       - id: capture-latest
         description: "Capture the most recent session."

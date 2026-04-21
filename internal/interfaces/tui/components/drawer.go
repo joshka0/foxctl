@@ -106,6 +106,12 @@ func (d *Drawer) ScrollOffset() int {
 	return d.scrollOffset
 }
 
+// SetScrollOffset sets the scroll offset for the body content.
+func (d *Drawer) SetScrollOffset(offset int) {
+	d.scrollOffset = offset
+	d.clampScroll()
+}
+
 // Open opens the drawer programmatically. Resets the close-fired flag so the
 // next Close() will fire OnClose exactly once.
 func (d *Drawer) Open() {
