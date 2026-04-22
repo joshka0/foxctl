@@ -8,7 +8,7 @@
     "dev:foxterm": "bun run --cwd packages/foxterm dev",
     "dev:gui": "bun run --cwd packages/gui-agent dev",
     "dev:gui-auth-gateway": "bun run --cwd packages/gui-auth-gateway dev",
-    "dev:server": "go run ./cmd/foxctl web serve --dev-cors",
+    "dev:server": "go run ./cmd/foxctl web serve --dev-cors --atcp",
     "dev:atcpd": "go run ./cmd/atcpd --data-dir $HOME/.foxctl/atcp",
     "dev:all": "make gui-agent",
     "build": "bun run --filter '*' build",

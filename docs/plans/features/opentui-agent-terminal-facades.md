@@ -84,6 +84,9 @@ The first backend facade tranche is partially implemented:
   `DELETE /api/atcp/foxctl-rooms/{room_id}/sessions/{session_id}` after a
   confirmation overlay; the facade verifies the session is attached to the
   selected room before deleting it.
+- `foxctl web serve --atcp` can host an embedded ATCP daemon in the same
+  process as the web API, while the standalone `cmd/atcpd` binary remains
+  available for split-process deployments.
 
 Remaining hard blockers:
 

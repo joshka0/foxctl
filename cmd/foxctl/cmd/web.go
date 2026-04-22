@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +15,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	atcpdaemon "github.com/joshka0/foxctl/internal/atcp/daemon"
+	"github.com/joshka0/foxctl/internal/atcp/transport/unixsocket"
 	"github.com/joshka0/foxctl/internal/interfaces/web"
 	"github.com/joshka0/foxctl/internal/platform/logging"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
@@ -40,6 +45,9 @@ Examples:
   # Start server with CORS enabled for development
   foxctl web serve --dev-cors
 
+  # Start server with embedded ATCP broker for foxterm CLI sessions
+  foxctl web serve --atcp
+
   # Start server with static UI files
   foxctl web serve --ui-dir ./packages/gui-agent/dist`,
 	RunE: runWebServe,
@@ -52,6 +60,9 @@ var (
 	webChat     string
 	webDBDriver string
 	webDBDSN    string
+	webATCP     bool
+	webATCPDir  string
+	webATCPSock string
 )
 
 func init() {
@@ -64,6 +75,9 @@ func init() {
 	webServeCmd.Flags().StringVar(&webChat, "chat", "", "Chat adapter to enable (discord|telegram|teams)")
 	webServeCmd.Flags().StringVar(&webDBDriver, "db-driver", "", "Database driver (sqlite|libsql|turso|postgres)")
 	webServeCmd.Flags().StringVar(&webDBDSN, "db-dsn", "", "PostgreSQL DSN (overrides FOXCTL_POSTGRES_DSN)")
+	webServeCmd.Flags().BoolVar(&webATCP, "atcp", false, "Start an embedded ATCP daemon for terminal-backed agents")
+	webServeCmd.Flags().StringVar(&webATCPDir, "atcp-data-dir", defaultWebATCPDataDir(), "Directory for embedded ATCP state (empty = in-memory)")
+	webServeCmd.Flags().StringVar(&webATCPSock, "atcp-socket", "", "Unix socket path for embedded ATCP daemon")
 }
 
 func runWebServe(cmd *cobra.Command, _ []string) error {
@@ -110,6 +124,24 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		Timestamp().
 		Str("component", "web").
 		Logger()
+
+	var atcpd *atcpdaemon.Daemon
+	var atcpOwned bool
+	var atcpErrCh <-chan error
+	if webATCP {
+		started, waitCh, err := startWebATCPDaemon(logWriter)
+		if err != nil {
+			return err
+		}
+		atcpd = started
+		atcpOwned = started != nil
+		atcpErrCh = waitCh
+		if atcpOwned {
+			log.Info().Str("socket", atcpd.SocketPath()).Msg("Embedded ATCP daemon started")
+		} else {
+			log.Info().Str("socket", webATCPSocketPath()).Msg("ATCP daemon already running; reusing socket")
+		}
+	}
 
 	// Create web server
 	addr := fmt.Sprintf(":%d", webPort)
@@ -164,6 +196,11 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		log.Info().Str("signal", sig.String()).Msg("Received signal, shutting down gracefully")
 	case err := <-errCh:
 		return fmt.Errorf("server error: %w", err)
+	case err := <-atcpErrCh:
+		if err != nil {
+			return fmt.Errorf("atcp daemon error: %w", err)
+		}
+		return fmt.Errorf("atcp daemon stopped")
 	case <-ctx.Done():
 		log.Info().Msg("Context cancelled, shutting down")
 	}
@@ -181,6 +218,15 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	// Stop chat adapter if running (use shutdown context for bounded disconnect)
 	server.StopChatAdapter(shutdownCtx)
 
+	if atcpOwned {
+		if err := atcpd.Shutdown(shutdownCtx); err != nil {
+			observability.Emit(context.Background(), observability.NewEvent("web.atcp_shutdown_error").
+				WithComponent(observability.ComponentCLI).
+				Error(err, 0))
+			return err
+		}
+	}
+
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		observability.Emit(context.Background(), observability.NewEvent("web.shutdown_error").
 			WithComponent(observability.ComponentCLI).
@@ -190,4 +236,42 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 
 	log.Info().Msg("Server stopped")
 	return nil
+}
+
+func startWebATCPDaemon(logWriter io.Writer) (*atcpdaemon.Daemon, <-chan error, error) {
+	atcpLogger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	d := atcpdaemon.New(atcpdaemon.Options{
+		DataDir:    webATCPDir,
+		SocketPath: webATCPSock,
+		Logger:     atcpLogger,
+	})
+	if err := d.Start(); err != nil {
+		if errors.Is(err, unixsocket.ErrBrokerAlreadyRunning) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("failed to start embedded ATCP daemon: %w", err)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- d.Wait(context.Background())
+	}()
+	return d, errCh, nil
+}
+
+func defaultWebATCPDataDir() string {
+	if dir := os.Getenv("FOXCTL_ATCP_DATA_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".foxctl", "atcp")
+}
+
+func webATCPSocketPath() string {
+	if webATCPSock != "" {
+		return webATCPSock
+	}
+	return atcpdaemon.DefaultSocketPath()
 }

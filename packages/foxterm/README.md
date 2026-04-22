@@ -27,9 +27,13 @@ Run locally after installing workspace dependencies:
 
 ```bash
 bun run dev:server
-bun run dev:atcpd
 bun run --cwd packages/foxterm dev
 ```
+
+The root `dev:server` script starts `foxctl web serve --atcp`, so foxterm's
+ATCP-backed CLI sessions are served by the same foxctl process as the web API.
+`bun run dev:atcpd` remains available when you intentionally want a standalone
+ATCP daemon.
 
 By default foxterm connects to `http://127.0.0.1:8090`, which matches
 `foxctl web serve` and the root `dev:server` script. Set `FOXCTL_API_URL` when

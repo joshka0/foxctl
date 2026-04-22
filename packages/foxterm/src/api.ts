@@ -29,7 +29,7 @@ export const WORKSPACE_ROOT =
   process.env.FOXCTL_WORKSPACE_ROOT ??
   process.env.PWD ??
   "";
-export const ATCP_DAEMON_HINT = "start ATCP: bun run dev:atcpd";
+export const ATCP_DAEMON_HINT = "restart API with ATCP: bun run dev:server";
 
 export interface ApiEnvelope<T> {
   version: number;
