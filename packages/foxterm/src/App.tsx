@@ -611,6 +611,22 @@ export function App({ onExit }: AppProps) {
       setFocus("worklist");
       return;
     }
+    if (name === "1" || name === "2" || name === "3") {
+      const nextIndex = Number(name) - 1;
+      if (navItems[nextIndex]) {
+        setNavIndex(nextIndex);
+        setFocus("worklist");
+      }
+      return;
+    }
+    if (name === "[" || name === "]") {
+      const delta = name === "]" ? 1 : -1;
+      setNavIndex((current) =>
+        (current + delta + navItems.length) % navItems.length,
+      );
+      setFocus("worklist");
+      return;
+    }
     if (name === "n" && activeView === "runs") {
       openComposer({ kind: "new" });
       return;

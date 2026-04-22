@@ -28,6 +28,8 @@ export function HelpOverlay({
     >
       <text fg={theme.focus}>Help</text>
       <text fg={theme.text}>Tab / Shift+Tab   Move focus between regions</text>
+      <text fg={theme.text}>1 / 2 / 3         Runs / Rooms / Cards</text>
+      <text fg={theme.text}>[ / ]             Cycle scopes</text>
       <text fg={theme.text}>Up/Down or j/k    Move selection</text>
       <text fg={theme.text}>Enter             Open selected run detail</text>
       <text fg={theme.text}>n                 Compose a new v2 run</text>
