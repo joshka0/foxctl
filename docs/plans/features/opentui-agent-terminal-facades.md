@@ -69,6 +69,9 @@ The first backend facade tranche is partially implemented:
   room.
 - foxterm reads the linked ATCP room sessions and readiness state so CLI-backed
   agents appear in the room detail panel after spawn.
+- foxterm ATCP CLI spawn now uses an OpenTUI-style preset picker with editable
+  agent, adapter, and command fields, while preserving raw
+  `agent@adapter: command args` custom input.
 
 Remaining hard blockers:
 

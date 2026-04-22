@@ -73,7 +73,9 @@ room detail panel.
 CLI-backed agents such as Codex, Claude, Droid, and other terminal tools should
 use the separate ATCP-aware facade. The `s` action is for foxctl daemon agents;
 `Shift+s` creates an ATCP session and joins it to the room-linked ATCP room.
-The CLI composer accepts `agent@adapter: command args`, for example
+The CLI flow opens a preset picker for Codex, Claude, Droid, Gemini, Shell, or
+Custom. Selecting a preset fills editable `agent`, `adapter`, and `command`
+fields; Custom keeps the raw `agent@adapter: command args` form, for example
 `codex-a@codex: codex --no-alt-screen`.
 The room detail panel shows attached ATCP sessions, command, adapter, and
 readiness so CLI-backed agents are visible after they start.

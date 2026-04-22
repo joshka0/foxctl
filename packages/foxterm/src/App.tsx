@@ -98,10 +98,70 @@ interface CLISpawnDraft {
   cmd: string[];
 }
 
+interface CLIPreset {
+  id: string;
+  label: string;
+  agentId: string;
+  adapter: string;
+  cmd: string[];
+}
+
+interface CLISpawnForm {
+  agentId: string;
+  adapter: string;
+  command: string;
+  raw: string;
+}
+
 type ComposerTarget =
   | { kind: "new" }
   | { kind: "continue"; runId: string }
   | { kind: "context"; source: string };
+
+const cliPresets: CLIPreset[] = [
+  {
+    id: "codex",
+    label: "Codex",
+    agentId: "codex-a",
+    adapter: "codex",
+    cmd: ["codex", "--no-alt-screen"],
+  },
+  {
+    id: "claude",
+    label: "Claude",
+    agentId: "claude-a",
+    adapter: "claude",
+    cmd: ["claude"],
+  },
+  {
+    id: "droid",
+    label: "Droid",
+    agentId: "droid-a",
+    adapter: "droid",
+    cmd: ["droid"],
+  },
+  {
+    id: "gemini",
+    label: "Gemini",
+    agentId: "gemini-a",
+    adapter: "gemini",
+    cmd: ["gemini"],
+  },
+  {
+    id: "shell",
+    label: "Shell",
+    agentId: "shell-a",
+    adapter: "shell",
+    cmd: ["bash"],
+  },
+  {
+    id: "custom",
+    label: "Custom",
+    agentId: "custom-a",
+    adapter: "custom",
+    cmd: ["bash"],
+  },
+];
 
 export function App({ onExit }: AppProps) {
   const { width, height } = useTerminalDimensions();
@@ -129,8 +189,14 @@ export function App({ onExit }: AppProps) {
   const [agentSpawnText, setAgentSpawnText] = useState("researcher");
   const [agentSpawnBusy, setAgentSpawnBusy] = useState(false);
   const [agentSpawnRoomId, setAgentSpawnRoomId] = useState<string | null>(null);
-  const [cliSpawnText, setCLISpawnText] = useState(
-    "codex-a@codex: codex --no-alt-screen",
+  const [cliSpawnStep, setCLISpawnStep] = useState<"preset" | "fields">(
+    "preset",
+  );
+  const [cliPresetIndex, setCLIPresetIndex] = useState(0);
+  const [cliSpawnField, setCLISpawnField] =
+    useState<keyof CLISpawnForm>("agentId");
+  const [cliSpawnForm, setCLISpawnForm] = useState<CLISpawnForm>(
+    formFromCLIPreset(cliPresets[0]),
   );
   const [cliSpawnBusy, setCLISpawnBusy] = useState(false);
   const [cliSpawnRoomId, setCLISpawnRoomId] = useState<string | null>(null);
@@ -422,11 +488,19 @@ export function App({ onExit }: AppProps) {
       return;
     }
     setCLISpawnRoomId(room.id);
-    setCLISpawnText(
-      (current) => current || "codex-a@codex: codex --no-alt-screen",
-    );
+    setCLISpawnStep("preset");
+    setCLIPresetIndex(0);
+    setCLISpawnField("agentId");
+    setCLISpawnForm(formFromCLIPreset(cliPresets[0]));
     setMode("spawnCLI");
     setFocus("composer");
+  };
+
+  const resetCLISpawnState = () => {
+    setCLISpawnStep("preset");
+    setCLIPresetIndex(0);
+    setCLISpawnField("agentId");
+    setCLISpawnForm(formFromCLIPreset(cliPresets[0]));
   };
 
   const submitAgentSpawn = async () => {
@@ -474,7 +548,10 @@ export function App({ onExit }: AppProps) {
     if (!roomId || cliSpawnBusy) return;
     let draft: CLISpawnDraft;
     try {
-      draft = parseCLISpawnDraft(cliSpawnText);
+      draft =
+        cliSpawnStep === "preset"
+          ? draftFromCLIPreset(cliPresets[cliPresetIndex])
+          : draftFromCLIForm(cliSpawnForm);
     } catch (error) {
       setStatus({
         tone: "danger",
@@ -496,7 +573,7 @@ export function App({ onExit }: AppProps) {
         role: draft.adapter,
         canMutate: true,
       });
-      setCLISpawnText("codex-a@codex: codex --no-alt-screen");
+      resetCLISpawnState();
       setCLISpawnRoomId(null);
       setMode("normal");
       setFocus("detail");
@@ -839,7 +916,7 @@ export function App({ onExit }: AppProps) {
       setMode("normal");
     }
     if (activeView !== "rooms" && mode === "spawnCLI") {
-      setCLISpawnText("codex-a@codex: codex --no-alt-screen");
+      resetCLISpawnState();
       setCLISpawnRoomId(null);
       setMode("normal");
     }
@@ -986,7 +1063,7 @@ export function App({ onExit }: AppProps) {
         setFocus("worklist");
       }
       if (mode === "spawnCLI") {
-        setCLISpawnText("codex-a@codex: codex --no-alt-screen");
+        resetCLISpawnState();
         setCLISpawnRoomId(null);
         setFocus("worklist");
       }
@@ -1069,17 +1146,43 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (mode === "spawnCLI") {
+      if (cliSpawnStep === "preset") {
+        if (name === "up" || name === "k") {
+          movePresetSelection(-1, setCLIPresetIndex);
+          return;
+        }
+        if (name === "down" || name === "j") {
+          movePresetSelection(1, setCLIPresetIndex);
+          return;
+        }
+        if (isSubmitKey(key)) {
+          const preset = cliPresets[cliPresetIndex] ?? cliPresets[0];
+          setCLISpawnForm(formFromCLIPreset(preset));
+          setCLISpawnField(preset.id === "custom" ? "raw" : "agentId");
+          setCLISpawnStep("fields");
+          return;
+        }
+        return;
+      }
       if (isSubmitKey(key)) {
         void submitCLISpawn();
         return;
       }
+      if (name === "tab") {
+        setCLISpawnField((current) => nextCLISpawnField(current, key.shift));
+        return;
+      }
       if (name === "backspace" || name === "delete") {
-        setCLISpawnText((current) => current.slice(0, -1));
+        updateCLISpawnField(setCLISpawnForm, cliSpawnField, (current) =>
+          current.slice(0, -1),
+        );
         return;
       }
       const char = keyChar(name);
       if (char) {
-        setCLISpawnText((current) => current + char);
+        updateCLISpawnField(setCLISpawnForm, cliSpawnField, (current) =>
+          current + char,
+        );
       }
       return;
     }
@@ -1411,7 +1514,11 @@ export function App({ onExit }: AppProps) {
               }
               value={
                 mode === "spawnCLI"
-                  ? cliSpawnText
+                  ? cliSpawnComposerValue(
+                      cliSpawnStep,
+                      cliSpawnForm,
+                      cliSpawnField,
+                    )
                   : mode === "spawnAgent"
                   ? agentSpawnText
                   : mode === "roomMessage"
@@ -1444,6 +1551,13 @@ export function App({ onExit }: AppProps) {
                 selectedRoom?.id ??
                 null
               }
+            />
+          )}
+          {mode === "spawnCLI" && cliSpawnStep === "preset" && (
+            <CLIPresetOverlay
+              compact={compact}
+              width={width}
+              selectedIndex={cliPresetIndex}
             />
           )}
         </>
@@ -1495,6 +1609,58 @@ function KillConfirmOverlay({
       <text fg={theme.text}>{truncate(runId, overlayWidth - 6)}</text>
       <text fg={theme.muted}>This requests cancellation through v2 runtime.</text>
       <text fg={theme.warning}>Enter confirms, Esc cancels.</text>
+    </box>
+  );
+}
+
+function CLIPresetOverlay({
+  compact,
+  width,
+  selectedIndex,
+}: {
+  compact: boolean;
+  width: number;
+  selectedIndex: number;
+}) {
+  const overlayWidth = compact ? Math.max(48, Math.min(width - 4, 68)) : 68;
+  const left = compact ? 2 : 10;
+  return (
+    <box
+      style={{
+        position: "absolute",
+        top: 5,
+        left,
+        width: overlayWidth,
+        height: 14,
+        border: true,
+        borderStyle: "rounded",
+        borderColor: theme.focus,
+        backgroundColor: theme.panel,
+        flexDirection: "column",
+        padding: 1,
+        gap: 1,
+      }}
+    >
+      <text fg={theme.focus}>Spawn CLI</text>
+      {cliPresets.map((preset, index) => (
+        <box
+          key={preset.id}
+          style={{
+            flexDirection: "column",
+            backgroundColor: index === selectedIndex ? theme.panelAlt : theme.panel,
+          }}
+        >
+          <text fg={index === selectedIndex ? theme.focus : theme.text}>
+            {index === selectedIndex ? "> " : "  "}
+            {preset.label}
+          </text>
+          <text fg={theme.muted}>
+            {"  "}
+            {truncate(cliPresetDescription(preset), overlayWidth - 6)}
+          </text>
+        </box>
+      ))}
+      <text fg={theme.muted}>Enter edits fields, Esc cancels.</text>
     </box>
   );
 }
@@ -2818,6 +2984,100 @@ function parseAgentSpawnDraft(raw: string): { role: string; prompt?: string } {
   const role = trimmed.slice(0, separator).trim() || "researcher";
   const prompt = trimmed.slice(separator + 1).trim();
   return prompt ? { role, prompt } : { role };
+}
+
+function cliPresetDescription(preset: CLIPreset): string {
+  if (preset.id === "custom") return "agent@adapter: command args";
+  return `${preset.agentId}@${preset.adapter}: ${preset.cmd.join(" ")}`;
+}
+
+function cliSpawnComposerValue(
+  step: "preset" | "fields",
+  form: CLISpawnForm,
+  field: keyof CLISpawnForm,
+): string {
+  if (step === "preset") return "choose a CLI preset";
+  const label =
+    field === "agentId"
+      ? "agent"
+      : field === "adapter"
+        ? "adapter"
+        : field === "command"
+          ? "command"
+          : "raw";
+  return `${label} ${form[field]}`;
+}
+
+function nextCLISpawnField(
+  current: keyof CLISpawnForm,
+  reverse?: boolean,
+): keyof CLISpawnForm {
+  const order: Array<keyof CLISpawnForm> = [
+    "agentId",
+    "adapter",
+    "command",
+    "raw",
+  ];
+  const index = order.indexOf(current);
+  const safeIndex = index < 0 ? 0 : index;
+  const delta = reverse ? -1 : 1;
+  return order[(safeIndex + delta + order.length) % order.length] ?? "agentId";
+}
+
+function movePresetSelection(
+  delta: number,
+  setSelected: (updater: (current: number) => number) => void,
+): void {
+  setSelected(
+    (current) => (current + delta + cliPresets.length) % cliPresets.length,
+  );
+}
+
+function updateCLISpawnField(
+  setForm: (updater: (current: CLISpawnForm) => CLISpawnForm) => void,
+  field: keyof CLISpawnForm,
+  update: (current: string) => string,
+): void {
+  setForm((current) => {
+    const nextValue = update(current[field]);
+    if (field === "raw") {
+      return { ...current, raw: nextValue };
+    }
+    return { ...current, [field]: nextValue, raw: "" };
+  });
+}
+
+function formFromCLIPreset(preset: CLIPreset | undefined): CLISpawnForm {
+  const safe = preset ?? cliPresets[0];
+  const command = safe.cmd.join(" ");
+  return {
+    agentId: safe.agentId,
+    adapter: safe.adapter,
+    command,
+    raw:
+      safe.id === "custom" ? `${safe.agentId}@${safe.adapter}: ${command}` : "",
+  };
+}
+
+function draftFromCLIPreset(preset: CLIPreset | undefined): CLISpawnDraft {
+  const form = formFromCLIPreset(preset);
+  return draftFromCLIForm(form);
+}
+
+function draftFromCLIForm(form: CLISpawnForm): CLISpawnDraft {
+  if (form.raw.trim() !== "") {
+    return parseCLISpawnDraft(form.raw);
+  }
+  const agentId = form.agentId.trim();
+  const adapter = form.adapter.trim();
+  if (agentId === "" || adapter === "") {
+    throw new Error("agent and adapter are required");
+  }
+  const cmd = parseCommandLine(form.command.trim());
+  if (cmd.length === 0) {
+    throw new Error("command is required");
+  }
+  return { agentId, adapter, cmd };
 }
 
 function parseCLISpawnDraft(raw: string): CLISpawnDraft {
