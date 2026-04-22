@@ -80,8 +80,9 @@ type ComposerTarget =
 
 export function App({ onExit }: AppProps) {
   const { width, height } = useTerminalDimensions();
-  const compact = width < 92 || height < 24;
-  const tooSmall = width < 60 || height < 20;
+  const short = height < 28;
+  const compact = width < 120 || short;
+  const tooSmall = width < 60 || height < 18;
   const [mode, setMode] = useState<Mode>("normal");
   const [focus, setFocus] = useState<FocusRegion>("worklist");
   const [filterText, setFilterText] = useState("");
@@ -690,6 +691,7 @@ export function App({ onExit }: AppProps) {
               <>
                 <RoomTaskListPanel
                   compact={compact}
+                  short={short}
                   focused={focus === "worklist"}
                   sections={roomTaskSections}
                   selectedId={selectedRoomTaskId}
@@ -713,6 +715,7 @@ export function App({ onExit }: AppProps) {
               <>
                 <CardListPanel
                   compact={compact}
+                  short={short}
                   focused={focus === "worklist"}
                   sections={cardSections}
                   selectedId={selectedCardId}
@@ -736,6 +739,7 @@ export function App({ onExit }: AppProps) {
               <>
                 <RunListPanel
                   compact={compact}
+                  short={short}
                   focused={focus === "worklist"}
                   sections={runSections}
                   selectedId={selectedRunId}
@@ -909,6 +913,7 @@ function RunComposer({
 
 function RunListPanel({
   compact,
+  short,
   focused,
   sections,
   selectedId,
@@ -919,6 +924,7 @@ function RunListPanel({
   filterText,
 }: {
   compact: boolean;
+  short: boolean;
   focused: boolean;
   sections: WorklistSection<RunWorklistItem>[];
   selectedId: string | null;
@@ -940,7 +946,7 @@ function RunListPanel({
       focused={focused}
       width={compact ? "100%" : 42}
       minWidth={30}
-      height={compact ? 12 : "100%"}
+      height={compact ? (short ? 8 : 12) : "100%"}
       footer={
         <text fg={stale ? theme.warning : theme.muted}>
           {runFooter(loadState, lastLoadedAt, stale)}
@@ -1040,6 +1046,7 @@ function RunRow({ run, selected }: { run: RunListItem; selected: boolean }) {
 
 function RoomTaskListPanel({
   compact,
+  short,
   focused,
   sections,
   selectedId,
@@ -1051,6 +1058,7 @@ function RoomTaskListPanel({
   filterText,
 }: {
   compact: boolean;
+  short: boolean;
   focused: boolean;
   sections: WorklistSection<RoomTaskWorkItem>[];
   selectedId: string | null;
@@ -1074,7 +1082,7 @@ function RoomTaskListPanel({
       focused={focused}
       width={compact ? "100%" : 42}
       minWidth={30}
-      height={compact ? 12 : "100%"}
+      height={compact ? (short ? 8 : 12) : "100%"}
       footer={
         <text fg={stale ? theme.warning : theme.muted}>
           {runFooter(loadState, lastLoadedAt, stale)}
@@ -1211,7 +1219,7 @@ function RoomTaskDetailPanel({
       subtitle={selectedItem?.task ? selectedItem.task.status : "room"}
       focused={focused}
       flexGrow={1}
-      height={compact ? 16 : "100%"}
+      height={compact ? undefined : "100%"}
     >
       {selectedItem?.task ? (
         <box style={{ flexDirection: "column", gap: 1, marginTop: 1 }}>
@@ -1307,6 +1315,7 @@ function RoomSummaryDetail({
 
 function CardListPanel({
   compact,
+  short,
   focused,
   sections,
   selectedId,
@@ -1318,6 +1327,7 @@ function CardListPanel({
   filterText,
 }: {
   compact: boolean;
+  short: boolean;
   focused: boolean;
   sections: WorklistSection<OrchestrationCardWorkItem>[];
   selectedId: string | null;
@@ -1340,7 +1350,7 @@ function CardListPanel({
       focused={focused}
       width={compact ? "100%" : 42}
       minWidth={30}
-      height={compact ? 12 : "100%"}
+      height={compact ? (short ? 8 : 12) : "100%"}
       footer={
         <text fg={stale || artifact ? theme.warning : theme.muted}>
           {artifact
@@ -1479,7 +1489,7 @@ function CardDetailPanel({
       subtitle={selectedItem ? selectedItem.laneTitle : undefined}
       focused={focused}
       flexGrow={1}
-      height={compact ? 16 : "100%"}
+      height={compact ? undefined : "100%"}
     >
       {selectedItem ? (
         <box style={{ flexDirection: "column", gap: 1, marginTop: 1 }}>
@@ -1579,22 +1589,26 @@ function RunDetailPanel({
       subtitle={selectedRun ? selectedRun.status : undefined}
       focused={focused}
       flexGrow={1}
-      height={compact ? 16 : "100%"}
+      height={compact ? undefined : "100%"}
     >
       {selectedRun ? (
         <box style={{ flexDirection: "column", gap: 1, marginTop: 1 }}>
           <text fg={theme.text}>run_id     {selectedRun.run_id}</text>
           <text fg={theme.text}>status     {selectedRun.status}</text>
-          <text fg={theme.muted}>
-            request   {selectedRun.request_id ?? "-"}
-          </text>
-          <text fg={theme.muted}>actor     {selectedRun.actor_id ?? "-"}</text>
-          <text fg={theme.muted}>
-            actions   n new / c continue /{" "}
-            <span fg={canKillRunStatus(selectedRun.status) ? theme.warning : theme.subtle}>
-              x kill
-            </span>
-          </text>
+          {!compact && (
+            <>
+              <text fg={theme.muted}>
+                request   {selectedRun.request_id ?? "-"}
+              </text>
+              <text fg={theme.muted}>actor     {selectedRun.actor_id ?? "-"}</text>
+              <text fg={theme.muted}>
+                actions   n new / c continue /{" "}
+                <span fg={canKillRunStatus(selectedRun.status) ? theme.warning : theme.subtle}>
+                  x kill
+                </span>
+              </text>
+            </>
+          )}
           <text fg={theme.focus}>transcript</text>
           <scrollbox style={{ flexGrow: 1 }}>
             {transcriptItems.length > 0 ? (
