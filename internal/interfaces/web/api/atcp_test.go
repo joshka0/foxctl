@@ -24,3 +24,20 @@ func TestATCPHandler_SpawnCLIRequiresCommand(t *testing.T) {
 		t.Fatalf("body=%q want cmd validation", rec.Body.String())
 	}
 }
+
+func TestATCPHandler_SendMessageRequiresText(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/atcp/foxctl-rooms/alpha/messages", strings.NewReader(`{
+		"workspace_id": "ws1",
+		"source": "actor:web"
+	}`))
+	rec := httptest.NewRecorder()
+
+	ATCPHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "text is required") {
+		t.Fatalf("body=%q want text validation", rec.Body.String())
+	}
+}

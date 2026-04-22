@@ -153,6 +153,8 @@ function Footer({
               ? "spawn agent  role[:prompt]  Enter"
               : mode === "spawnCLI"
                 ? "spawn CLI  agent@adapter: cmd"
+                : mode === "atcpPrompt"
+                  ? "ATCP prompt  Enter send  Esc cancel"
         : mode === "confirmKill"
           ? "confirm kill  Enter confirm  Esc cancel"
       : `${mode === "help" ? "help" : focus}  activity ${activityScope}`;
@@ -170,8 +172,8 @@ function Footer({
       <text fg={theme.focus}>{truncate(left, compact ? 28 : 44)}</text>
       <text fg={theme.muted}>
         {compact
-          ? "1/2/3 scope  h/l pane  j/k Enter  n + m s S v c x / r ? q"
-          : "Tab focus  1/2/3 scope  j/k move  Enter open  n context run  + room  m message  s agent  S cli  v atcp  c continue  x kill  / filter  a scope  r refresh  ? help  q quit"}
+          ? "1/2/3 scope  h/l pane  j/k Enter  n + m s S v p c x / r ? q"
+          : "Tab focus  1/2/3 scope  j/k move  Enter open  n context run  + room  m message  s agent  S cli  v atcp  p prompt  c continue  x kill  / filter  a scope  r refresh  ? help  q quit"}
       </text>
     </box>
   );

@@ -19,6 +19,7 @@ built around the backend facades used by OpenTUI:
 - `GET /api/atcp/sessions`
 - `GET /api/atcp/foxctl-rooms/{room_id}/sessions`
 - `POST /api/atcp/foxctl-rooms/{room_id}/spawn-cli`
+- `POST /api/atcp/foxctl-rooms/{room_id}/messages`
 - job, room, CAS, skill, and MCP facade routes
 
 Run locally after installing workspace dependencies:
@@ -47,6 +48,7 @@ Runs view shortcuts:
 - `s` spawns a foxctl daemon agent into the selected room.
 - `Shift+s` spawns an ATCP-backed CLI session into the selected room.
 - `v` cycles the focused ATCP CLI session screen detail.
+- `p` prompts the focused ATCP CLI session.
 - `/` filters the active worklist.
 - `a` cycles activity scopes.
 - `r` refreshes the active worklist.
@@ -82,3 +84,5 @@ The room detail panel shows attached ATCP sessions, command, adapter, and
 readiness so CLI-backed agents are visible after they start. It also shows the
 latest non-empty rendered screen line when ATCP screen snapshots are available.
 Press `v` to cycle the focused ATCP session and show a larger screen excerpt.
+Press `p` to send the bottom-composer prompt to that focused CLI participant
+through the room-linked ATCP message facade.

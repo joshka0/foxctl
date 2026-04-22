@@ -27,6 +27,21 @@ type ATCPSpawnCLIRequest struct {
 	EnableRawBytes bool     `json:"enable_raw_bytes,omitempty"`
 }
 
+type ATCPSendMessageRequest struct {
+	WorkspaceID      string `json:"workspace_id,omitempty"`
+	Source           string `json:"source,omitempty"`
+	TargetAgentID    string `json:"target_agent_id,omitempty"`
+	Text             string `json:"text"`
+	SubmitKey        string `json:"submit_key,omitempty"`
+	AwaitActivityMS  int64  `json:"await_activity_ms,omitempty"`
+	AwaitReadyMS     int64  `json:"await_ready_ms,omitempty"`
+	TerminalPolicy   string `json:"terminal_policy,omitempty"`
+	PolicyTimeoutMS  int64  `json:"policy_timeout_ms,omitempty"`
+	ReceiptVisible   *bool  `json:"receipt_visible,omitempty"`
+	CorrelationID    string `json:"correlation_id,omitempty"`
+	ReplyToMessageID string `json:"reply_to_message_id,omitempty"`
+}
+
 type atcpRoomSessionSummary struct {
 	Room      *httpjson.RoomResponse                `json:"room,omitempty"`
 	Members   []httpjson.MemberResponse             `json:"members"`
@@ -102,6 +117,13 @@ func ATCPHandler() http.HandlerFunc {
 			}
 			roomID := strings.TrimSuffix(strings.TrimPrefix(path, "foxctl-rooms/"), "/sessions")
 			handleATCPFoxctlRoomSessions(w, r, client, roomID)
+		case strings.HasPrefix(path, "foxctl-rooms/") && strings.HasSuffix(path, "/messages"):
+			if r.Method != http.MethodPost {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			roomID := strings.TrimSuffix(strings.TrimPrefix(path, "foxctl-rooms/"), "/messages")
+			handleATCPFoxctlRoomSendMessage(w, r, client, roomID)
 		case strings.HasPrefix(path, "foxctl-rooms/") && strings.HasSuffix(path, "/spawn-cli"):
 			if r.Method != http.MethodPost {
 				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -113,6 +135,80 @@ func ATCPHandler() http.HandlerFunc {
 			httpError(w, http.StatusNotFound, "not found")
 		}
 	}
+}
+
+func handleATCPFoxctlRoomSendMessage(w http.ResponseWriter, r *http.Request, client *atcpclient.Client, roomID string) {
+	roomID = strings.TrimSpace(roomID)
+	if roomID == "" {
+		httpError(w, http.StatusBadRequest, "room_id is required")
+		return
+	}
+	var req ATCPSendMessageRequest
+	if err := readJSON(w, r, &req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	req.Text = strings.TrimSpace(req.Text)
+	if req.Text == "" {
+		httpError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	if workspaceID == "" {
+		workspaceID = "."
+	}
+	room, found, err := findATCPRoomForFoxctl(r.Context(), client, workspaceID, roomID)
+	if err != nil {
+		writeATCPError(w, err)
+		return
+	}
+	if !found {
+		httpError(w, http.StatusNotFound, "linked ATCP room not found")
+		return
+	}
+	skipAgents := []string{}
+	targetAgentID := strings.TrimSpace(req.TargetAgentID)
+	if targetAgentID != "" {
+		members, err := client.RoomMembers(r.Context(), room.ID)
+		if err != nil {
+			writeATCPError(w, err)
+			return
+		}
+		foundTarget := false
+		for _, member := range members {
+			if strings.TrimSpace(member.AgentID) == targetAgentID {
+				foundTarget = true
+				continue
+			}
+			skipAgents = append(skipAgents, member.AgentID)
+		}
+		if !foundTarget {
+			httpError(w, http.StatusNotFound, "target ATCP agent not found")
+			return
+		}
+	}
+	result, err := client.SendMessage(r.Context(), httpjson.SendMessageRequest{
+		RoomID:           room.ID,
+		Source:           strings.TrimSpace(req.Source),
+		CorrelationID:    strings.TrimSpace(req.CorrelationID),
+		ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID),
+		Text:             req.Text,
+		SubmitKey:        strings.TrimSpace(req.SubmitKey),
+		SkipAgents:       skipAgents,
+		ReceiptVisible:   req.ReceiptVisible,
+		AwaitActivityMS:  req.AwaitActivityMS,
+		AwaitReadyMS:     req.AwaitReadyMS,
+		TerminalPolicy:   strings.TrimSpace(req.TerminalPolicy),
+		PolicyTimeoutMS:  req.PolicyTimeoutMS,
+	})
+	if err != nil {
+		writeATCPError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"room":    room,
+		"message": result,
+	})
 }
 
 func handleATCPFoxctlRoomSessions(w http.ResponseWriter, r *http.Request, client *atcpclient.Client, roomID string) {

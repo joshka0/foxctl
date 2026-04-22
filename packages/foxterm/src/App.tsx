@@ -17,6 +17,7 @@ import {
   getV2ModelEndpoint,
   killRun,
   sendRoomMessage,
+  sendATCPMessageToRoom,
   spawnAgent,
   spawnATCPCLIForRoom,
   subscribeToV2Stream,
@@ -187,6 +188,9 @@ export function App({ onExit }: AppProps) {
   const [roomMessageRoomId, setRoomMessageRoomId] = useState<string | null>(
     null,
   );
+  const [atcpPromptText, setATCPPromptText] = useState("");
+  const [atcpPromptBusy, setATCPPromptBusy] = useState(false);
+  const [atcpPromptRoomId, setATCPPromptRoomId] = useState<string | null>(null);
   const [agentSpawnText, setAgentSpawnText] = useState("researcher");
   const [agentSpawnBusy, setAgentSpawnBusy] = useState(false);
   const [agentSpawnRoomId, setAgentSpawnRoomId] = useState<string | null>(null);
@@ -305,6 +309,14 @@ export function App({ onExit }: AppProps) {
   const [selectedATCPSessionId, setSelectedATCPSessionId] = useState<
     string | null
   >(null);
+  const selectedATCPSession =
+    atcpSessions.find((item) => item.id === selectedATCPSessionId) ??
+    atcpSessions[0];
+  const selectedATCPMember = selectedATCPSession
+    ? atcpMembers.find((item) => item.session_id === selectedATCPSession.id)
+    : undefined;
+  const selectedATCPAgentLabel =
+    selectedATCPMember?.agent_id ?? selectedATCPSession?.id ?? null;
   const filteredCardItems = useMemo(
     () => cardItems.filter((item) => matchesCardFilter(item, filterText)),
     [cardItems, filterText],
@@ -503,6 +515,21 @@ export function App({ onExit }: AppProps) {
     setFocus("composer");
   };
 
+  const openATCPPromptComposer = () => {
+    const room = selectedRoom ?? roomTaskItems[0]?.room;
+    if (!room) {
+      setStatus({ tone: "muted", text: "create or select a room first" });
+      return;
+    }
+    if (atcpSessions.length === 0) {
+      setStatus({ tone: "muted", text: "no ATCP sessions" });
+      return;
+    }
+    setATCPPromptRoomId(room.id);
+    setMode("atcpPrompt");
+    setFocus("composer");
+  };
+
   const resetCLISpawnState = () => {
     setCLISpawnStep("preset");
     setCLIPresetIndex(0);
@@ -599,6 +626,52 @@ export function App({ onExit }: AppProps) {
       });
     } finally {
       setCLISpawnBusy(false);
+    }
+  };
+
+  const submitATCPPrompt = async () => {
+    const roomId = atcpPromptRoomId ?? selectedRoom?.id;
+    const text = atcpPromptText.trim();
+    const session =
+      atcpSessions.find((item) => item.id === selectedATCPSessionId) ??
+      atcpSessions[0];
+    const member = session
+      ? atcpMembers.find((item) => item.session_id === session.id)
+      : undefined;
+    if (!roomId || !session || !member || text === "" || atcpPromptBusy) {
+      return;
+    }
+    setATCPPromptBusy(true);
+    setStatus({ tone: "focus", text: `sending to ${member.agent_id}` });
+    try {
+      const result = await sendATCPMessageToRoom({
+        roomId,
+        workspaceId: WORKSPACE_ID,
+        source: ACTOR_ID,
+        targetAgentId: member.agent_id,
+        text,
+        awaitActivityMs: 500,
+        awaitReadyMs: 500,
+      });
+      setATCPPromptText("");
+      setATCPPromptRoomId(null);
+      setMode("normal");
+      setFocus("detail");
+      await refreshATCPRoomSessions(roomId);
+      setStatus({
+        tone: result.message.failed > 0 ? "warning" : "success",
+        text: `ATCP delivered ${result.message.delivered}/${result.message.delivered + result.message.failed}`,
+      });
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text:
+          error instanceof Error
+            ? error.message
+            : "failed to send ATCP prompt",
+      });
+    } finally {
+      setATCPPromptBusy(false);
     }
   };
 
@@ -880,6 +953,7 @@ export function App({ onExit }: AppProps) {
       !composerBusy &&
       !roomCreateBusy &&
       !roomMessageBusy &&
+      !atcpPromptBusy &&
       !agentSpawnBusy &&
       !cliSpawnBusy
     ) {
@@ -894,6 +968,7 @@ export function App({ onExit }: AppProps) {
     composerBusy,
     roomCreateBusy,
     roomMessageBusy,
+    atcpPromptBusy,
     agentSpawnBusy,
     cliSpawnBusy,
   ]);
@@ -947,6 +1022,11 @@ export function App({ onExit }: AppProps) {
     if (activeView !== "rooms" && mode === "spawnCLI") {
       resetCLISpawnState();
       setCLISpawnRoomId(null);
+      setMode("normal");
+    }
+    if (activeView !== "rooms" && mode === "atcpPrompt") {
+      setATCPPromptText("");
+      setATCPPromptRoomId(null);
       setMode("normal");
     }
   }, [activeView, mode]);
@@ -1100,6 +1180,11 @@ export function App({ onExit }: AppProps) {
         setCLISpawnRoomId(null);
         setFocus("worklist");
       }
+      if (mode === "atcpPrompt") {
+        setATCPPromptText("");
+        setATCPPromptRoomId(null);
+        setFocus("worklist");
+      }
       if (mode === "confirmKill") {
         setPendingKillRunId(null);
       }
@@ -1219,6 +1304,21 @@ export function App({ onExit }: AppProps) {
       }
       return;
     }
+    if (mode === "atcpPrompt") {
+      if (isSubmitKey(key)) {
+        void submitATCPPrompt();
+        return;
+      }
+      if (name === "backspace" || name === "delete") {
+        setATCPPromptText((current) => current.slice(0, -1));
+        return;
+      }
+      const char = keyChar(name);
+      if (char) {
+        setATCPPromptText((current) => current + char);
+      }
+      return;
+    }
     if (mode === "filter") {
       if (isSubmitKey(key)) {
         setMode("normal");
@@ -1278,6 +1378,10 @@ export function App({ onExit }: AppProps) {
     }
     if (activeView === "rooms" && isCLISpawnKey(key)) {
       openCLISpawnComposer();
+      return;
+    }
+    if (name === "p" && activeView === "rooms") {
+      openATCPPromptComposer();
       return;
     }
     if (name === "n" && activeView === "runs") {
@@ -1549,7 +1653,8 @@ export function App({ onExit }: AppProps) {
                 mode === "createRoom" ||
                 mode === "roomMessage" ||
                 mode === "spawnAgent" ||
-                mode === "spawnCLI"
+                mode === "spawnCLI" ||
+                mode === "atcpPrompt"
               }
               value={
                 mode === "spawnCLI"
@@ -1560,6 +1665,8 @@ export function App({ onExit }: AppProps) {
                     )
                   : mode === "spawnAgent"
                   ? agentSpawnText
+                  : mode === "atcpPrompt"
+                  ? atcpPromptText
                   : mode === "roomMessage"
                     ? roomMessageText
                     : roomComposerText
@@ -1569,6 +1676,8 @@ export function App({ onExit }: AppProps) {
                   ? cliSpawnBusy
                   : mode === "spawnAgent"
                   ? agentSpawnBusy
+                  : mode === "atcpPrompt"
+                  ? atcpPromptBusy
                   : mode === "roomMessage"
                     ? roomMessageBusy
                     : roomCreateBusy
@@ -1579,6 +1688,8 @@ export function App({ onExit }: AppProps) {
                   ? "cli"
                   : mode === "spawnAgent"
                   ? "spawn"
+                  : mode === "atcpPrompt"
+                  ? "prompt"
                   : mode === "roomMessage"
                     ? "message"
                     : "create"
@@ -1586,10 +1697,12 @@ export function App({ onExit }: AppProps) {
               roomId={
                 cliSpawnRoomId ??
                 agentSpawnRoomId ??
+                atcpPromptRoomId ??
                 roomMessageRoomId ??
                 selectedRoom?.id ??
                 null
               }
+              targetLabel={selectedATCPAgentLabel}
             />
           )}
           {mode === "spawnCLI" && cliSpawnStep === "preset" && (
@@ -1811,28 +1924,40 @@ function RoomComposer({
   busyTick,
   purpose,
   roomId,
+  targetLabel,
 }: {
   compact: boolean;
   focused: boolean;
   value: string;
   busy: boolean;
   busyTick: number;
-  purpose: "create" | "message" | "spawn" | "cli";
+  purpose: "create" | "message" | "spawn" | "cli" | "prompt";
   roomId: string | null;
+  targetLabel?: string | null;
 }) {
   const spinner = busy ? spinnerFrame(busyTick) : "";
   const label =
     purpose === "cli"
       ? "cli"
-      : purpose === "spawn"
-        ? "agent"
-        : purpose === "message"
-          ? "message"
-          : "room";
+      : purpose === "prompt"
+        ? "prompt"
+        : purpose === "spawn"
+          ? "agent"
+          : purpose === "message"
+            ? "message"
+            : "room";
+  const target = targetLabel ?? roomId ?? "session";
+  const scopedPurpose =
+    purpose === "message" ||
+    purpose === "spawn" ||
+    purpose === "cli" ||
+    purpose === "prompt";
   const visibleValue =
     value.trim() === ""
       ? purpose === "cli"
         ? `S to spawn CLI into ${truncate(roomId ?? "room", compact ? 21 : 38)}`
+        : purpose === "prompt"
+        ? `p to prompt ${truncate(target, compact ? 24 : 42)}`
         : purpose === "spawn"
         ? `s to spawn into ${truncate(roomId ?? "room", compact ? 24 : 40)}`
         : purpose === "message"
@@ -1861,7 +1986,7 @@ function RoomComposer({
       </text>
       <text fg={theme.subtle}>
         {truncate(
-          purpose === "message" || purpose === "spawn" || purpose === "cli"
+          scopedPurpose
             ? roomId ?? WORKSPACE_ID
             : WORKSPACE_ID,
           compact ? 28 : 44,

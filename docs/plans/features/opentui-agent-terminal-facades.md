@@ -76,6 +76,10 @@ The first backend facade tranche is partially implemented:
   shows the latest non-empty screen line for each CLI-backed room participant.
 - foxterm can cycle the focused ATCP CLI session and render a larger screen
   excerpt in the room inspector.
+- foxterm can prompt the focused ATCP CLI session through
+  `POST /api/atcp/foxctl-rooms/{room_id}/messages`; the facade resolves the
+  room-linked ATCP room and targets the selected participant by structured
+  member identity.
 
 Remaining hard blockers:
 

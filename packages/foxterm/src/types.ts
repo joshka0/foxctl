@@ -8,6 +8,7 @@ export type Mode =
   | "roomMessage"
   | "spawnAgent"
   | "spawnCLI"
+  | "atcpPrompt"
   | "confirmKill";
 export type LoadState = "idle" | "loading" | "ready" | "error";
 export type ActivityScope = "focused" | "important" | "all" | "debug";

@@ -324,6 +324,25 @@ export interface SpawnATCPCLIResult {
   member: ATCPMember;
 }
 
+export interface SendATCPMessageInput {
+  roomId: string;
+  text: string;
+  workspaceId?: string;
+  source?: string;
+  targetAgentId?: string;
+  awaitActivityMs?: number;
+  awaitReadyMs?: number;
+}
+
+export interface SendATCPMessageResult {
+  room: ATCPRoom;
+  message: {
+    message_id: string;
+    delivered: number;
+    failed: number;
+  };
+}
+
 export interface ATCPRoomSessionsResult {
   room?: ATCPRoom;
   members: ATCPMember[];
@@ -621,6 +640,40 @@ export async function spawnATCPCLIForRoom(
   if (role) payload.role = role;
   return requestJSON<SpawnATCPCLIResult>(
     `/api/atcp/foxctl-rooms/${encodeURIComponent(roomId)}/spawn-cli`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function sendATCPMessageToRoom(
+  input: SendATCPMessageInput,
+): Promise<SendATCPMessageResult> {
+  const roomId = input.roomId.trim();
+  const text = input.text.trim();
+  if (roomId === "") {
+    throw new Error("room_id is required");
+  }
+  if (text === "") {
+    throw new Error("text is required");
+  }
+  const payload: Record<string, unknown> = {
+    workspace_id: input.workspaceId ?? WORKSPACE_ID,
+    source: input.source ?? ACTOR_ID,
+    text,
+  };
+  const targetAgentId = input.targetAgentId?.trim();
+  if (targetAgentId) payload.target_agent_id = targetAgentId;
+  if (typeof input.awaitActivityMs === "number") {
+    payload.await_activity_ms = input.awaitActivityMs;
+  }
+  if (typeof input.awaitReadyMs === "number") {
+    payload.await_ready_ms = input.awaitReadyMs;
+  }
+  return requestJSON<SendATCPMessageResult>(
+    `/api/atcp/foxctl-rooms/${encodeURIComponent(roomId)}/messages`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
