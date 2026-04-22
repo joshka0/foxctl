@@ -1627,6 +1627,7 @@ export function App({ onExit }: AppProps) {
                 {(!focusOnly || focus !== "worklist") && (
                   <RoomTaskDetailPanel
                     compact={compact}
+                    terminalWidth={width}
                     focused={focus === "detail"}
                     selectedItem={selectedRoomTaskItem}
                     selectedId={selectedRoomTaskId}
@@ -2416,6 +2417,7 @@ function RoomTaskRow({
 
 function RoomTaskDetailPanel({
   compact,
+  terminalWidth,
   focused,
   selectedItem,
   selectedId,
@@ -2435,6 +2437,7 @@ function RoomTaskDetailPanel({
   atcpLoadState,
 }: {
   compact: boolean;
+  terminalWidth: number;
   focused: boolean;
   selectedItem?: RoomTaskWorkItem;
   selectedId: string | null;
@@ -2504,6 +2507,7 @@ function RoomTaskDetailPanel({
           />
           <RoomAgentPanes
             compact={compact}
+            terminalWidth={terminalWidth}
             room={selectedItem.room}
             agents={agents}
             agentLoadState={agentLoadState}
@@ -2527,6 +2531,7 @@ function RoomTaskDetailPanel({
       ) : (
         <RoomSummaryDetail
           compact={compact}
+          terminalWidth={terminalWidth}
           selectedItem={selectedItem}
           roomCount={roomCount}
           messages={messages}
@@ -2549,6 +2554,7 @@ function RoomTaskDetailPanel({
 
 function RoomSummaryDetail({
   compact,
+  terminalWidth,
   selectedItem,
   roomCount,
   messages,
@@ -2565,6 +2571,7 @@ function RoomSummaryDetail({
   atcpLoadState,
 }: {
   compact: boolean;
+  terminalWidth: number;
   selectedItem?: RoomTaskWorkItem;
   roomCount: number;
   messages: RoomMessage[];
@@ -2626,6 +2633,7 @@ function RoomSummaryDetail({
       />
       <RoomAgentPanes
         compact={compact}
+        terminalWidth={terminalWidth}
         room={selectedItem.room}
         agents={agents}
         agentLoadState={agentLoadState}
@@ -2654,6 +2662,7 @@ interface RoomAgentPane {
 
 function RoomAgentPanes({
   compact,
+  terminalWidth,
   room,
   agents,
   agentLoadState,
@@ -2665,6 +2674,7 @@ function RoomAgentPanes({
   loadState,
 }: {
   compact: boolean;
+  terminalWidth: number;
   room: RoomTaskWorkItem["room"];
   agents: AgentSummary[];
   agentLoadState: LoadState;
@@ -2675,7 +2685,9 @@ function RoomAgentPanes({
   selectedSessionId: string | null;
   loadState: LoadState;
 }) {
-  const paneWidth = compact ? 54 : 58;
+  const availableWidth = detailPanelContentWidth(terminalWidth, compact);
+  const columnCount = compact ? 1 : availableWidth >= 132 ? 3 : 2;
+  const paneWidth = Math.floor((availableWidth - (columnCount - 1)) / columnCount);
   const screenLineLimit = compact ? 2 : 3;
   const daemonPanes = buildDaemonAgentPanes(room, agents, compact);
   const cliPanes = buildATCPAgentPanes({
@@ -2688,7 +2700,7 @@ function RoomAgentPanes({
     screenLineLimit,
   });
   const panes = [...daemonPanes, ...cliPanes];
-  const paneRows = chunkItems(panes, compact ? 1 : 2);
+  const paneRows = chunkItems(panes, columnCount);
   const title =
     agentLoadState === "loading" || loadState === "loading"
       ? "agent panes loading"
@@ -2727,6 +2739,9 @@ function RoomAgentPanes({
             style={{
               flexDirection: compact ? "column" : "row",
               gap: 1,
+              height: row.some((pane) => pane.selected && pane.screenLines?.length)
+                ? 8
+                : 6,
             }}
           >
             {row.map((pane) => (
@@ -2761,6 +2776,7 @@ function AgentPane({
       style={{
         width,
         minWidth: 32,
+        flexGrow: 1,
         height: pane.selected && pane.screenLines?.length ? 8 : 6,
         border: true,
         borderStyle: "single",
@@ -2860,7 +2876,7 @@ function buildATCPAgentPanes({
       meta: `cli ${session.adapter || "terminal"}`,
       detail: session.cmd?.join(" ") || "-",
       selected: selectedPane,
-      screenLines,
+      screenLines: selectedPane ? screenLines : undefined,
     };
   });
 }
@@ -2879,6 +2895,17 @@ function shortActorLabel(actorID: string): string {
     return actorID.slice(separator + 1);
   }
   return actorID;
+}
+
+function detailPanelContentWidth(terminalWidth: number, compact: boolean): number {
+  if (compact) {
+    return clampInt(terminalWidth - 8, 42, 80);
+  }
+  return clampInt(terminalWidth - 86, 80, 160);
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function RoomLoopPreview({
