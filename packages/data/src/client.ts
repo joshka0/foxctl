@@ -6,6 +6,9 @@ import type {
   JobDetail,
   JobActionResult,
   JobProgressResult,
+  V2EventStreamEvent,
+  V2RuntimeEvent,
+  V2StreamType,
   TaskSummary,
   TaskStats,
   JobStats,
@@ -40,6 +43,7 @@ import type {
   AgentMemoryStatsResult,
   AgentState,
   Room,
+  RoomTask,
   Trajectory,
   TrajectoryEvent,
   UserRequest,
@@ -225,6 +229,74 @@ export async function waitForJob(
   return request(`/api/jobs/${encodeURIComponent(id)}/wait${query ? `?${query}` : ""}`, {
     method: "POST",
   });
+}
+
+export function subscribeToV2Events(
+  params: {
+    streamId: string;
+    streamType?: V2StreamType;
+    afterVersion?: number;
+    limit?: number;
+    buffer?: number;
+    heartbeatMs?: number;
+  },
+  onEvent: (event: V2EventStreamEvent) => void,
+  onError?: (error: Event) => void,
+): () => void {
+  if (typeof EventSource === "undefined") {
+    console.warn("EventSource not available in this environment");
+    return () => {};
+  }
+
+  const searchParams = new URLSearchParams();
+  searchParams.set("stream_id", params.streamId);
+  if (params.streamType) searchParams.set("stream_type", params.streamType);
+  if (typeof params.afterVersion === "number") {
+    searchParams.set("after_version", String(params.afterVersion));
+  }
+  if (typeof params.limit === "number") {
+    searchParams.set("limit", String(params.limit));
+  }
+  if (typeof params.buffer === "number") {
+    searchParams.set("buffer", String(params.buffer));
+  }
+  if (typeof params.heartbeatMs === "number") {
+    searchParams.set("heartbeat_ms", String(params.heartbeatMs));
+  }
+
+  const eventSource = new EventSource(
+    `${API_BASE}/api/v2/events/stream?${searchParams.toString()}`,
+  );
+  const parse = (type: V2EventStreamEvent["type"]) => (event: MessageEvent) => {
+    try {
+      onEvent({ type, data: JSON.parse(event.data) as unknown });
+    } catch {
+      onEvent({ type, data: event.data });
+    }
+  };
+
+  eventSource.addEventListener("v2.connected", parse("v2.connected"));
+  eventSource.addEventListener("v2.event", (event: MessageEvent) => {
+    try {
+      onEvent({
+        type: "v2.event",
+        data: JSON.parse(event.data) as V2RuntimeEvent,
+      });
+    } catch {
+      onEvent({ type: "v2.event", data: event.data });
+    }
+  });
+  eventSource.addEventListener(
+    "v2.replay_complete",
+    parse("v2.replay_complete"),
+  );
+  eventSource.addEventListener("v2.error", parse("v2.error"));
+  eventSource.addEventListener("heartbeat", parse("heartbeat"));
+  eventSource.onerror = (error) => {
+    onError?.(error);
+  };
+
+  return () => eventSource.close();
 }
 
 // Tasks
@@ -813,6 +885,33 @@ export async function getRoom(
   if (params.actor_id) query.set("actor_id", params.actor_id);
   return request(
     `/api/rooms/${encodeURIComponent(roomId)}?${query.toString()}`,
+  );
+}
+
+export async function getRooms(params: {
+  workspace_id: string;
+  actor_id?: string;
+  limit?: number;
+  archived_only?: boolean;
+}): Promise<{ rooms: Room[]; count: number }> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  if (params.actor_id) query.set("actor_id", params.actor_id);
+  if (typeof params.limit === "number") query.set("limit", String(params.limit));
+  if (params.archived_only) query.set("archived_only", "true");
+  return request(`/api/rooms?${query.toString()}`);
+}
+
+export async function getRoomTasks(
+  roomId: string,
+  params: { workspace_id: string; status?: string; limit?: number },
+): Promise<{ room: Room; tasks: RoomTask[]; count: number }> {
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspace_id);
+  if (params.status) query.set("status", params.status);
+  if (typeof params.limit === "number") query.set("limit", String(params.limit));
+  return request(
+    `/api/rooms/${encodeURIComponent(roomId)}/tasks?${query.toString()}`,
   );
 }
 

@@ -18,7 +18,9 @@ The first backend facade tranche is partially implemented:
 - v2 run kill is wired through `POST /api/v2/runs/{run_id}/kill`; active
   local runs are cancelled and stale running projections receive a durable
   `run.failed` kill event.
-- top-level v2 event replay is available through `/api/v2/events`.
+- top-level v2 event replay is available through `/api/v2/events`, and
+  replay-then-subscribe live streaming is available through
+  `/api/v2/events/stream`.
 - v2 projection storage now supports request-id lookup and filtered run-state
   listing through a service adapter.
 - room control snapshots are available through
@@ -30,13 +32,13 @@ The first backend facade tranche is partially implemented:
   `/api/jobs/{id}/progress`, `/events`, `/cancel`, and `/wait`.
 - CAS list/read/pin/unpin web routes are available.
 - read-only MCP status and skill-backed tool inventory routes are available.
+- greenfield OpenTUI client scaffold is available under `packages/foxterm`
+  with a keyboard-first v2 runs cockpit and live run event stream panel.
 
 Remaining hard blockers:
 
 - room task/card linking is currently a narrow `issue_id == task_id` bridge;
   durable typed linking still needs schema-backed work.
-- v2 event replay is deterministic, but live replay-then-subscribe fanout over
-  the runtime event bus is not wired yet.
 - MCP tool inventory is skill-backed, not live daemon `ListTools` introspection.
 
 ## Goal
@@ -80,6 +82,123 @@ The Go backend remains the source of truth for:
 - room timeline, participants, loop state, tasks, reminders, and delivery
 - orchestration cards, runtime trees, and worker lifecycle
 - skills, jobs, CAS artifacts, provider config, and MCP tool inventory
+
+## High-Agent UX Model
+
+Foxterm is a work coordination terminal, not an agent process list.
+
+When many agents are running, the TUI must keep work contexts primary and make
+agents secondary metadata. A developer usually needs to know which room, task,
+card, run, or job needs attention; the owning agent matters once that work item
+is selected or becomes blocked, failed, or otherwise actionable.
+
+Primary hierarchy:
+
+```text
+Workspace
+  Room
+    Epic / task / card
+      Run
+        Agent / worker
+          events / tools / artifacts
+```
+
+Default screens should show the middle of this hierarchy: rooms, tasks/cards,
+runs, jobs, and important activity. Agents should appear as owner/status badges,
+participant summaries, and drill-in details rather than as a global flat list.
+
+### Default Control View
+
+The default view should aggregate active work, not enumerate every participant.
+
+```text
+Scope              Active Work                         Inspector
+Control            alpha / T-42     running   5 agents Room alpha
+Rooms              alpha / T-41     blocked   2 agents loop ok
+Runs               beta  / T-09     review    1 agent  agents 14 total
+Jobs               gamma / T-02     failed    3 agents running 5 idle 7 failed 2
+Tools
+
+Activity
+#182 alpha  T-42  tool.responded   context/show        @worker-a
+#183 alpha  T-41  blocked          missing provider    @worker-b
+#184 beta   T-09  run.completed    summary available   @reviewer
+```
+
+Agent summary counters should be visible without forcing a flat agent list:
+
+- total agents
+- running
+- blocked
+- failed
+- idle
+- stale heartbeat / missing transport, when known
+
+### Agent View
+
+An explicit Agents view can exist, but it should group by state and context.
+
+```text
+Agents
+Running 5
+> @worker-a     alpha / T-42      context/show       12s
+  @worker-c     alpha / T-43      code/search        31s
+  @reviewer     beta  / T-09      reviewing          1m
+
+Blocked 2
+  @worker-b     alpha / T-41      provider missing   8m
+
+Idle 7
+  @planner      alpha             waiting            3m
+```
+
+Even in the Agents view, the key columns are context, current work, current
+activity, status, and age. Agent identity alone is not enough.
+
+### Activity Scopes
+
+Live streams should default to focused, useful activity. A global firehose must
+be opt-in.
+
+Activity modes:
+
+- `focused`: selected room/task/card/run/job only
+- `important`: failures, blocked work, completions, handoffs, stale bindings
+- `all`: raw event stream, opt-in
+- `debug`: verbose logs and tool payloads, opt-in
+
+Default streams should suppress low-value noise:
+
+- heartbeats with no status change
+- repeated idle updates
+- unchanged status refreshes
+- verbose logs unless the selected pane is a debug/log view
+
+### Stable Selection Rules
+
+High-agent interfaces fail when live updates move the user's focus.
+
+Rules:
+
+- track selection by stable ID, not by row index
+- do not auto-select newly inserted rows
+- do not move the selected row just because timestamps changed
+- if sorting by recency, keep the selected identity pinned in view when possible
+- show `N new` or `N updates` instead of jumping the viewport
+- if the selected item completes or fails, update the inspector but preserve
+  focus and scroll position
+
+### Required UI Primitives
+
+Before adding more resource views, build these primitives:
+
+1. grouped worklist with stable ID selection
+2. filter mode for the active pane (`/`)
+3. activity scope control (`focused`, `important`, `all`, `debug`)
+4. status counters for rooms, runs, jobs, agents, and blocked/failed work
+5. event compaction from raw event payloads to semantic summaries
+6. contextual command palette with destructive-action confirmation
+7. payload/detail overlay for raw JSON, logs, CAS artifacts, and errors
 
 ## Required Facades
 
@@ -402,22 +521,85 @@ Acceptance:
 
 ## OpenTUI Client Sequencing
 
-Do not start the full OpenTUI app until these backend conditions are met:
+The app has started as `packages/foxterm`. Build it layer by layer so each
+slice remains usable and does not collapse under many concurrent agents.
 
-1. v2 run/list/replay facade exists
-2. room control snapshot exists
-3. room event coverage covers tasks, reminders, loop, and members
-4. job-backed skill execution has at least a narrow async path
+### Layer 0: Shell and Runtime Safety
 
-After that, build the first client slice:
+- alternate-screen renderer with guaranteed cleanup
+- fixed header/footer
+- responsive sidebar/worklist/inspector layout
+- visible focus state
+- `Tab`, `Shift+Tab`, `j/k`, arrows, `?`, `Esc`, `q`, `Ctrl+C`
+- contextual help overlay
 
-1. read-only cockpit: rooms, participants, agents, loop health, v2 runs,
-   orchestration board, and activity stream
-2. controlled writes: send room message, direct ask, claim/touch/block/complete
-   task, schedule/cancel reminder
-3. command palette: skill run, job follow/cancel, OpenAPI dry-run/execute,
-   MCP tool preview/call
-4. artifact and evidence panes: CAS preview, logs, job stderr, v2 event detail
+Status: initial scaffold exists.
+
+### Layer 1: Stable Worklist Foundation
+
+- extract reusable shell/panel/list/inspector components
+- track selection by stable item ID instead of row index
+- preserve selection across refreshes and live updates
+- add grouped worklist sections
+- add empty, loading, stale, and error states that preserve layout
+
+Primary target: v2 runs first, then room tasks/cards.
+
+Status: v2 runs, room tasks, and orchestration cards now use reusable
+panel/worklist primitives, stable ID selection, grouped sections, preserved
+selection across refreshes, and loading/error/stale states. Room tasks load
+from `/api/rooms` plus `/api/rooms/{id}/tasks`; cards load from
+`/api/orchestration/board-get`. Both use `FOXTERM_WORKSPACE_ID` or
+`FOXCTL_WORKSPACE_ID`, with `.` as the local default.
+
+### Layer 2: Filtering and Activity Scope
+
+- `/` filter mode for active pane
+- filter by status, room, actor, agent, command, and text
+- activity modes: `focused`, `important`, `all`, `debug`
+- event compaction and severity tagging
+- suppress repeated low-value updates by default
+
+Status: `/` filter mode is available for the active worklist across runs, room
+tasks, and orchestration cards. Filters match explicit visible fields such as
+status, room, actor, agent, command, ID, title, lane, and policy. `a` cycles the
+run detail activity scope through `focused`, `important`, `all`, and `debug`;
+`important` uses explicit v2 event types rather than substring matching. Run
+events render as compact severity-tagged activity rows, and repeated adjacent
+activity rows are folded with counts outside `debug` scope. Broader live-stream
+dedupe across room/card activity is still pending.
+
+### Layer 3: Control View
+
+- default cockpit over rooms, active work, active runs, jobs, and important
+  activity
+- room loop health counters
+- agent status counters, not flat agent rows
+- blocked/failed/stale summaries
+- inspector that explains why a selected work item needs attention
+
+### Layer 4: Contextual Inspectors
+
+- run inspector: stages, tool calls, stage failures, event payloads
+- room inspector: participants, transport bindings, loop state, tasks
+- job inspector: progress, stderr, result envelope, CAS artifacts
+- artifact inspector: CAS preview with pagination/copyable content
+
+### Layer 5: Command Palette and Safe Actions
+
+- `:` or `Ctrl+P` command palette
+- contextual commands by selected work item
+- confirmation overlay for destructive actions
+- first safe writes: refresh, kill run, cancel job
+- next writes: send room message, claim/block/complete task, ask participant
+
+### Layer 6: Integrations and Tooling
+
+- skill manifest and run forms
+- MCP status/tool inventory
+- provider/integration status
+- OpenAPI dry-run/execute workflow
+- command history and recent artifacts
 
 ## Worker Split
 

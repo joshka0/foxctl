@@ -1,0 +1,24 @@
+{
+  "name": "@foxctl/foxterm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "foxterm": "./src/index.tsx"
+  },
+  "scripts": {
+    "dev": "bun run src/index.tsx",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@foxctl/data": "workspace:*",
+    "@opentui/core": "^0.1.102",
+    "@opentui/react": "^0.1.102",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.22",
+    "typescript": "^5.9.3"
+  }
+}

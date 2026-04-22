@@ -38,6 +38,36 @@ export interface JobActionResult {
   job?: JobSummary;
 }
 
+export type V2StreamType = "run" | "agent" | "turn";
+
+export interface V2RuntimeEvent {
+  id: string;
+  stream_id: string;
+  stream_type: V2StreamType;
+  stream_version: number;
+  sequence: number;
+  event_type: string;
+  occurred_at: string;
+  correlation_id?: string;
+  causation_id?: string;
+  actor_id?: string;
+  request_id?: string;
+  command?: string;
+  payload?: unknown;
+}
+
+export type V2EventStreamEventType =
+  | "v2.connected"
+  | "v2.event"
+  | "v2.replay_complete"
+  | "v2.error"
+  | "heartbeat";
+
+export interface V2EventStreamEvent {
+  type: V2EventStreamEventType;
+  data: unknown;
+}
+
 export interface TaskSummary {
   id: string;
   title: string;
@@ -582,6 +612,31 @@ export interface Room {
   participants?: string[];
   task_ids?: string[];
   members?: RoomMember[];
+}
+
+export interface RoomTask {
+  id: string;
+  workspace_id: string;
+  epic_id?: string;
+  milestone_id?: string;
+  title: string;
+  description?: string;
+  scope_path?: string;
+  parent_id?: string;
+  children?: string[];
+  depends_on?: string[];
+  status: string;
+  created_at: string;
+  completed_at?: string;
+  assigned_actor_id?: string;
+  assigned_at?: string;
+  owner_actor_id?: string;
+  claimed_at?: string;
+  heartbeat_at?: string;
+  blocked_reason?: string;
+  blocked_at?: string;
+  notes?: string;
+  gotchas?: string;
 }
 
 // Trajectory types (from trajectory.db)

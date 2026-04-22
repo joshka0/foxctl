@@ -14,6 +14,7 @@ import (
 	libsqlevents "github.com/joshka0/foxctl/internal/v2/adapters/libsql/events"
 	libsqlprojections "github.com/joshka0/foxctl/internal/v2/adapters/libsql/projections"
 	coreevents "github.com/joshka0/foxctl/internal/v2/core/events"
+	runtimeevents "github.com/joshka0/foxctl/internal/v2/runtime/events"
 	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
 )
 
@@ -190,6 +191,80 @@ func TestV2EventsHandlerReplaysCanonicalStream(t *testing.T) {
 	event, _ := events[0].(map[string]any)
 	if version := int(event["stream_version"].(float64)); version != 2 {
 		t.Fatalf("stream_version=%d want 2", version)
+	}
+}
+
+func TestV2EventsStreamHandlerReplaysThenStreamsLiveEvents(t *testing.T) {
+	t.Setenv("FOXCTL_DB_DRIVER", "sqlite")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "sqlite")
+	t.Setenv("FOXCTL_V2_PROJECTIONS_DB_DRIVER", "sqlite")
+
+	oldBus := v2RuntimeEventBus
+	v2RuntimeEventBus = runtimeevents.NewBus(runtimeevents.Config{
+		SubscriberBuffer: 16,
+		OverflowPolicy:   runtimeevents.OverflowDropOldest,
+	})
+	t.Cleanup(func() {
+		v2RuntimeEventBus = oldBus
+	})
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	ctx := context.Background()
+	eventStore, err := libsqlevents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open event store: %v", err)
+	}
+	defer func() { _ = eventStore.Close() }()
+	if err := eventStore.Append(ctx, coreevents.Event{
+		ID:            "evt-stream-replay-1",
+		StreamID:      "run-stream-1",
+		StreamType:    coreevents.StreamTypeRun,
+		StreamVersion: 1,
+		Sequence:      1,
+		EventType:     coreevents.EventRunStarted,
+		OccurredAt:    time.Date(2026, time.April, 22, 10, 0, 0, 0, time.UTC),
+		Command:       "run",
+	}); err != nil {
+		t.Fatalf("append replay event: %v", err)
+	}
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v2/events/stream?stream_id=run-stream-1&stream_type=run&after_version=0&heartbeat_ms=60000",
+		nil,
+	).WithContext(reqCtx)
+	rr := newStreamingResponseRecorder()
+	done := make(chan struct{})
+	go func() {
+		V2EventsStreamHandler(cfg, zerolog.Nop()).ServeHTTP(rr, req)
+		close(done)
+	}()
+
+	waitForBodyContains(t, rr, "evt-stream-replay-1", 2*time.Second)
+	if got := rr.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/event-stream") {
+		t.Fatalf("content-type=%q want text/event-stream", got)
+	}
+
+	if err := v2RuntimeEventBus.Publish(context.Background(), coreevents.Event{
+		ID:            "evt-stream-live-2",
+		StreamID:      "run-stream-1",
+		StreamType:    coreevents.StreamTypeRun,
+		StreamVersion: 2,
+		Sequence:      2,
+		EventType:     coreevents.EventTurnRecorded,
+		OccurredAt:    time.Date(2026, time.April, 22, 10, 0, 1, 0, time.UTC),
+		Command:       "run",
+	}); err != nil {
+		t.Fatalf("publish live event: %v", err)
+	}
+	waitForBodyContains(t, rr, "evt-stream-live-2", 2*time.Second)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream handler did not exit after context cancellation")
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	corelist "github.com/joshka0/foxctl/internal/v2/core/list"
 	corerun "github.com/joshka0/foxctl/internal/v2/core/run"
 	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
+	runtimeevents "github.com/joshka0/foxctl/internal/v2/runtime/events"
 	"github.com/joshka0/foxctl/internal/v2/runtime/profiles"
 	"github.com/joshka0/foxctl/internal/v2/runtime/runner"
 	v2services "github.com/joshka0/foxctl/internal/v2/services"
@@ -36,6 +37,7 @@ const (
 	commandV2RunEvents  = "v2/runs/events"
 	commandV2RunKill    = "v2/runs/kill"
 	commandV2Events     = "v2/events"
+	commandV2EventsLive = "v2/events/stream"
 )
 
 var newV2RunModel = func(cfg config.Config, workspaceRoot string) (runner.Model, error) {
@@ -46,6 +48,10 @@ var newV2RunModel = func(cfg config.Config, workspaceRoot string) (runner.Model,
 }
 
 var activeV2Runs = newV2RunRegistry()
+var v2RuntimeEventBus = runtimeevents.NewBus(runtimeevents.Config{
+	SubscriberBuffer: 128,
+	OverflowPolicy:   runtimeevents.OverflowDropOldest,
+})
 
 type v2RunRegistry struct {
 	mu      sync.Mutex
@@ -162,6 +168,106 @@ func V2EventsHandler(cfg config.Config, _ zerolog.Logger) http.HandlerFunc {
 			"count":         len(events),
 			"events":        events,
 		})
+	}
+}
+
+// V2EventsStreamHandler handles GET /api/v2/events/stream.
+func V2EventsStreamHandler(cfg config.Config, _ zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeCommandError(w, http.StatusMethodNotAllowed, commandV2EventsLive, "EARG", "method not allowed", map[string]any{
+				"hint": httpErrorHint(http.StatusMethodNotAllowed),
+			})
+			return
+		}
+		query, ok := parseV2EventStreamQuery(w, r)
+		if !ok {
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeCommandError(w, http.StatusInternalServerError, commandV2EventsLive, "ERUNTIME", "streaming unsupported", map[string]any{
+				"hint": httpErrorHint(http.StatusInternalServerError),
+			})
+			return
+		}
+
+		eventStore, err := libsqlevents.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			writeCommandError(w, http.StatusServiceUnavailable, commandV2EventsLive, "ERUNTIME", "v2 event store is unavailable", map[string]any{
+				"hint": httpErrorHint(http.StatusServiceUnavailable),
+			})
+			return
+		}
+		defer func() { _ = eventStore.Close() }()
+
+		liveEvents, unsubscribe := v2RuntimeEventBus.Subscribe(query.buffer)
+		defer unsubscribe()
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		lastVersion := query.afterVersion
+		writeSSEJSON(w, "v2.connected", map[string]any{
+			"stream_id":     query.streamID,
+			"stream_type":   query.streamType,
+			"after_version": query.afterVersion,
+		})
+		flusher.Flush()
+
+		replayed, err := eventStore.ListStream(r.Context(), coreevents.StreamFilter{
+			StreamID:     query.streamID,
+			StreamType:   query.streamType,
+			AfterVersion: query.afterVersion,
+			Limit:        query.limit,
+		})
+		if err != nil {
+			writeSSEJSON(w, "v2.error", map[string]any{
+				"message": "list persisted stream events",
+				"error":   err.Error(),
+			})
+			flusher.Flush()
+			return
+		}
+		for _, evt := range replayed {
+			if evt.StreamVersion > lastVersion {
+				lastVersion = evt.StreamVersion
+			}
+			writeSSEJSON(w, "v2.event", evt)
+		}
+		writeSSEJSON(w, "v2.replay_complete", map[string]any{
+			"stream_id":           query.streamID,
+			"stream_type":         query.streamType,
+			"last_stream_version": lastVersion,
+			"replayed":            len(replayed),
+		})
+		flusher.Flush()
+
+		heartbeat := time.NewTicker(query.heartbeat)
+		defer heartbeat.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-heartbeat.C:
+				writeSSEJSON(w, "heartbeat", map[string]any{
+					"ts": time.Now().UTC().Format(time.RFC3339Nano),
+				})
+				flusher.Flush()
+			case evt, ok := <-liveEvents:
+				if !ok {
+					return
+				}
+				if !matchesV2EventStream(evt, query.streamID, query.streamType) || evt.StreamVersion <= lastVersion {
+					continue
+				}
+				lastVersion = evt.StreamVersion
+				writeSSEJSON(w, "v2.event", evt)
+				flusher.Flush()
+			}
+		}
 	}
 }
 
@@ -285,6 +391,7 @@ func handleV2RunsCreate(w http.ResponseWriter, r *http.Request, cfg config.Confi
 		EventStore: projectingV2EventStore{
 			eventStore:      eventStore,
 			projectionStore: projectionStore,
+			eventBus:        v2RuntimeEventBus,
 		},
 		Model: model,
 		NewID: func() string {
@@ -399,6 +506,7 @@ type projectingV2EventStore struct {
 	projectionStore interface {
 		Apply(context.Context, coreevents.Event) error
 	}
+	eventBus runner.EventPublisher
 }
 
 func (s projectingV2EventStore) Append(ctx context.Context, evt coreevents.Event) error {
@@ -414,6 +522,9 @@ func (s projectingV2EventStore) Append(ctx context.Context, evt coreevents.Event
 	}
 	if err := s.projectionStore.Apply(ctx, evt); err != nil {
 		return fmt.Errorf("apply v2 projection: %w", err)
+	}
+	if s.eventBus != nil {
+		_ = s.eventBus.Publish(ctx, evt.Clone())
 	}
 	return nil
 }
@@ -525,6 +636,82 @@ func normalizePrefixedULID(value, prefix string) string {
 	return prefix + "-" + ulid.Make().String()
 }
 
+type v2EventStreamQuery struct {
+	streamID     string
+	streamType   coreevents.StreamType
+	afterVersion int64
+	limit        int
+	buffer       int
+	heartbeat    time.Duration
+}
+
+func parseV2EventStreamQuery(w http.ResponseWriter, r *http.Request) (v2EventStreamQuery, bool) {
+	streamID := strings.TrimSpace(r.URL.Query().Get("stream_id"))
+	if streamID == "" {
+		writeCommandError(w, http.StatusBadRequest, commandV2EventsLive, "EARG", "stream_id is required", map[string]any{
+			"field": "stream_id",
+			"hint":  httpErrorHint(http.StatusBadRequest),
+		})
+		return v2EventStreamQuery{}, false
+	}
+	streamType := coreevents.StreamType(strings.TrimSpace(r.URL.Query().Get("stream_type")))
+	if streamType == "" {
+		streamType = coreevents.StreamTypeRun
+	}
+	if !isSupportedV2StreamType(streamType) {
+		writeCommandError(w, http.StatusBadRequest, commandV2EventsLive, "EARG", "unsupported stream_type", map[string]any{
+			"field": "stream_type",
+			"value": string(streamType),
+			"hint":  httpErrorHint(http.StatusBadRequest),
+		})
+		return v2EventStreamQuery{}, false
+	}
+	afterVersion, ok := parseNonNegativeInt64Query(w, commandV2EventsLive, r, "after_version")
+	if !ok {
+		return v2EventStreamQuery{}, false
+	}
+	limit, ok := parsePositiveIntQuery(w, commandV2EventsLive, r, "limit")
+	if !ok {
+		return v2EventStreamQuery{}, false
+	}
+	buffer, ok := parsePositiveIntQuery(w, commandV2EventsLive, r, "buffer")
+	if !ok {
+		return v2EventStreamQuery{}, false
+	}
+	if buffer <= 0 {
+		buffer = runtimeevents.DefaultSubscriberBuffer
+	}
+	heartbeatMS, ok := parsePositiveIntQuery(w, commandV2EventsLive, r, "heartbeat_ms")
+	if !ok {
+		return v2EventStreamQuery{}, false
+	}
+	heartbeat := 15 * time.Second
+	if heartbeatMS > 0 {
+		heartbeat = time.Duration(heartbeatMS) * time.Millisecond
+	}
+	return v2EventStreamQuery{
+		streamID:     streamID,
+		streamType:   streamType,
+		afterVersion: afterVersion,
+		limit:        limit,
+		buffer:       buffer,
+		heartbeat:    heartbeat,
+	}, true
+}
+
+func isSupportedV2StreamType(streamType coreevents.StreamType) bool {
+	switch streamType {
+	case coreevents.StreamTypeRun, coreevents.StreamTypeAgent, coreevents.StreamTypeTurn:
+		return true
+	default:
+		return false
+	}
+}
+
+func matchesV2EventStream(evt coreevents.Event, streamID string, streamType coreevents.StreamType) bool {
+	return strings.TrimSpace(evt.StreamID) == strings.TrimSpace(streamID) && evt.StreamType == streamType
+}
+
 func resolveV2RunProfile(w http.ResponseWriter, r *http.Request) (coretool.ProcessProfile, bool) {
 	raw := strings.TrimSpace(r.URL.Query().Get("profile"))
 	if raw == "" {
@@ -612,6 +799,7 @@ func handleV2RunKill(w http.ResponseWriter, r *http.Request, cfg config.Config, 
 	projectingStore := projectingV2EventStore{
 		eventStore:      eventStore,
 		projectionStore: projectionStore,
+		eventBus:        v2RuntimeEventBus,
 	}
 	svc := v2services.NewKillService(v2services.KillDependencies{
 		Killer: webV2RunKiller{
