@@ -14,6 +14,7 @@ built around the backend facades used by OpenTUI:
 - `POST /api/rooms`
 - `GET /api/rooms/{room_id}/messages`
 - `POST /api/rooms/{room_id}/messages`
+- `GET /api/rooms/{room_id}/loop`
 - job, room, CAS, skill, and MCP facade routes
 
 Run locally after installing workspace dependencies:
@@ -52,3 +53,7 @@ message, and `n` seeds a new run prompt with the selected room/task context.
 Foxterm identifies room operations as `FOXTERM_ACTOR_ID`/`FOXCTL_ACTOR_ID`, or
 `dev-local-user` by default. In Cards, `n` seeds a board/card context prompt,
 and `Enter` jumps to the card's linked run when one exists.
+
+Room messages require the room loop to be active. Foxterm shows loop heartbeat
+and delivery-owner status in the room detail panel, plus a `./bin/foxctl room
+loop ...` start command when the loop is not ready.

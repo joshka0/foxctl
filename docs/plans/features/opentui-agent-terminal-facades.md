@@ -54,6 +54,9 @@ The first backend facade tranche is partially implemented:
 - foxterm room creation now attaches the local actor as coordinator, and the
   Rooms scope can read recent room messages and send a room message through
   `/api/rooms/{id}/messages`.
+- foxterm reads `/api/rooms/{id}/loop` for room-loop heartbeat and delivery
+  owner status, and shows the `foxctl room loop` start command when message
+  delivery is not ready.
 
 Remaining hard blockers:
 

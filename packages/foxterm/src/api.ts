@@ -165,6 +165,38 @@ export interface SendRoomMessageResult {
   delivery_pending?: boolean;
 }
 
+export interface RoomLoop {
+  enabled: boolean;
+  managed_by?: string;
+  last_tick_at?: string;
+  delivery_lease_name?: string;
+  delivery_owner_id?: string;
+  delivery_cursor_message_id?: string;
+  delivery_cursor_at?: string;
+  pulse_interval?: string;
+  task_followup_interval?: string;
+  reply_stale_after?: string;
+  task_stale_after?: string;
+  min_pulse_floor?: string;
+  interrupt_attempt_limit?: number;
+  reminder_backoff_cap?: number;
+  coordinator_pulse_enabled?: boolean;
+  coordinator_escalation_enabled?: boolean;
+  last_delivery_trace?: {
+    message_id?: string;
+    recipient?: string;
+    outcome?: string;
+    delivered_count?: number;
+    failed_count?: number;
+    observed_at?: string;
+  };
+}
+
+export interface RoomLoopResult {
+  room_id: string;
+  loop: RoomLoop;
+}
+
 export interface OrchestrationCardWorkItem {
   id: string;
   laneId: string;
@@ -355,6 +387,23 @@ export async function sendRoomMessage(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     },
+  );
+}
+
+export async function getRoomLoop(params: {
+  roomId: string;
+  workspaceId?: string;
+  actorId?: string;
+}): Promise<RoomLoopResult> {
+  const roomId = params.roomId.trim();
+  if (roomId === "") {
+    throw new Error("room_id is required");
+  }
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspaceId ?? WORKSPACE_ID);
+  query.set("actor_id", params.actorId ?? ACTOR_ID);
+  return requestJSON<RoomLoopResult>(
+    `/api/rooms/${encodeURIComponent(roomId)}/loop?${query.toString()}`,
   );
 }
 

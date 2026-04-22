@@ -7,6 +7,7 @@ import {
   createRoom,
   createRun,
   getOrchestrationCardWork,
+  getRoomLoop,
   getRoomMessages,
   getRoomTaskWork,
   getRunTranscript,
@@ -17,6 +18,7 @@ import {
   subscribeToV2Stream,
   WORKSPACE_ID,
   type OrchestrationCardWorkItem,
+  type RoomLoop,
   type RoomMessage,
   type RoomTaskWorkItem,
   type RunListItem,
@@ -195,6 +197,9 @@ export function App({ onExit }: AppProps) {
     roomTaskItems.length > 0;
   const [roomMessages, setRoomMessages] = useState<RoomMessage[]>([]);
   const [roomMessagesLoadState, setRoomMessagesLoadState] =
+    useState<LoadState>("idle");
+  const [roomLoop, setRoomLoop] = useState<RoomLoop | null>(null);
+  const [roomLoopLoadState, setRoomLoopLoadState] =
     useState<LoadState>("idle");
   const filteredCardItems = useMemo(
     () => cardItems.filter((item) => matchesCardFilter(item, filterText)),
@@ -395,8 +400,7 @@ export function App({ onExit }: AppProps) {
     } catch (error) {
       setStatus({
         tone: "danger",
-        text:
-          error instanceof Error ? error.message : "failed to send room message",
+        text: roomMessageErrorText(error, roomId),
       });
     } finally {
       setRoomMessageBusy(false);
@@ -526,6 +530,28 @@ export function App({ onExit }: AppProps) {
     }
   };
 
+  const refreshRoomLoop = async (roomId: string) => {
+    const trimmed = roomId.trim();
+    if (trimmed === "") {
+      setRoomLoop(null);
+      setRoomLoopLoadState("idle");
+      return;
+    }
+    setRoomLoopLoadState("loading");
+    try {
+      const result = await getRoomLoop({
+        roomId: trimmed,
+        workspaceId: WORKSPACE_ID,
+        actorId: ACTOR_ID,
+      });
+      setRoomLoop(result.loop);
+      setRoomLoopLoadState("ready");
+    } catch {
+      setRoomLoop(null);
+      setRoomLoopLoadState("error");
+    }
+  };
+
   const refreshCards = async () => {
     const hadItems = cardItems.length > 0;
     setCardLoadState("loading");
@@ -616,14 +642,19 @@ export function App({ onExit }: AppProps) {
     if (activeView !== "rooms") {
       setRoomMessages([]);
       setRoomMessagesLoadState("idle");
+      setRoomLoop(null);
+      setRoomLoopLoadState("idle");
       return;
     }
     if (!selectedRoom?.id) {
       setRoomMessages([]);
       setRoomMessagesLoadState("idle");
+      setRoomLoop(null);
+      setRoomLoopLoadState("idle");
       return;
     }
     void refreshRoomMessages(selectedRoom.id);
+    void refreshRoomLoop(selectedRoom.id);
   }, [activeView, selectedRoom?.id]);
 
   useEffect(() => {
@@ -1011,6 +1042,8 @@ export function App({ onExit }: AppProps) {
                     roomCount={roomCount}
                     messages={roomMessages}
                     messagesLoadState={roomMessagesLoadState}
+                    loop={roomLoop}
+                    loopLoadState={roomLoopLoadState}
                   />
                 )}
               </>
@@ -1613,6 +1646,8 @@ function RoomTaskDetailPanel({
   roomCount,
   messages,
   messagesLoadState,
+  loop,
+  loopLoadState,
 }: {
   compact: boolean;
   focused: boolean;
@@ -1622,6 +1657,8 @@ function RoomTaskDetailPanel({
   roomCount: number;
   messages: RoomMessage[];
   messagesLoadState: LoadState;
+  loop: RoomLoop | null;
+  loopLoadState: LoadState;
 }) {
   return (
     <Panel
@@ -1667,6 +1704,11 @@ function RoomTaskDetailPanel({
             messages={messages}
             loadState={messagesLoadState}
           />
+          <RoomLoopPreview
+            roomId={selectedItem.room.id}
+            loop={loop}
+            loadState={loopLoadState}
+          />
         </box>
       ) : selectedMissing ? (
         <PanelState
@@ -1683,6 +1725,8 @@ function RoomTaskDetailPanel({
           roomCount={roomCount}
           messages={messages}
           messagesLoadState={messagesLoadState}
+          loop={loop}
+          loopLoadState={loopLoadState}
         />
       )}
     </Panel>
@@ -1694,11 +1738,15 @@ function RoomSummaryDetail({
   roomCount,
   messages,
   messagesLoadState,
+  loop,
+  loopLoadState,
 }: {
   selectedItem?: RoomTaskWorkItem;
   roomCount: number;
   messages: RoomMessage[];
   messagesLoadState: LoadState;
+  loop: RoomLoop | null;
+  loopLoadState: LoadState;
 }) {
   if (!selectedItem) {
     return (
@@ -1733,6 +1781,47 @@ function RoomSummaryDetail({
         </text>
       </scrollbox>
       <RoomMessagesPreview messages={messages} loadState={messagesLoadState} />
+      <RoomLoopPreview
+        roomId={selectedItem.room.id}
+        loop={loop}
+        loadState={loopLoadState}
+      />
+    </box>
+  );
+}
+
+function RoomLoopPreview({
+  roomId,
+  loop,
+  loadState,
+}: {
+  roomId: string;
+  loop: RoomLoop | null;
+  loadState: LoadState;
+}) {
+  const health = roomLoopHealth(loop, loadState);
+  const startCommand = roomLoopStartCommand(roomId);
+  return (
+    <box style={{ flexDirection: "column", gap: 1 }}>
+      <text fg={toneColor(health.tone)}>loop       {health.text}</text>
+      {loop?.delivery_owner_id && (
+        <text fg={theme.muted}>
+          owner      {truncate(loop.delivery_owner_id, 70)}
+        </text>
+      )}
+      {loop?.last_tick_at && (
+        <text fg={theme.muted}>
+          last tick  {truncate(loop.last_tick_at, 70)}
+        </text>
+      )}
+      {loop?.last_delivery_trace?.outcome && (
+        <text fg={theme.muted}>
+          delivery   {truncate(loop.last_delivery_trace.outcome, 70)}
+        </text>
+      )}
+      {health.tone !== "success" && (
+        <text fg={theme.warning}>{truncate(startCommand, 110)}</text>
+      )}
     </box>
   );
 }
@@ -2234,6 +2323,48 @@ function modelEndpointLabel(endpoint: V2ModelEndpoint | null): string {
   const model = endpoint.model || "default";
   const baseURL = endpoint.base_url || "backend default";
   return `${provider}/${model} @ ${baseURL}`;
+}
+
+function roomMessageErrorText(error: unknown, roomId: string): string {
+  const detail =
+    error instanceof Error ? error.message : "failed to send room message";
+  return `${detail} Start loop: ${roomLoopStartCommand(roomId)}`;
+}
+
+function roomLoopHealth(
+  loop: RoomLoop | null,
+  loadState: LoadState,
+): { tone: Tone; text: string } {
+  if (loadState === "loading" || loadState === "idle") {
+    return { tone: "focus", text: "loading" };
+  }
+  if (loadState === "error") {
+    return { tone: "warning", text: "status unavailable" };
+  }
+  if (!loop) {
+    return { tone: "warning", text: "not configured" };
+  }
+  if (!loop.enabled) {
+    return { tone: "warning", text: "disabled" };
+  }
+  if (!loop.last_tick_at) {
+    return { tone: "warning", text: "no heartbeat" };
+  }
+  if (!loop.delivery_owner_id || !loop.delivery_lease_name) {
+    return { tone: "warning", text: "no delivery owner" };
+  }
+  return { tone: "success", text: "active" };
+}
+
+function roomLoopStartCommand(roomId: string): string {
+  return `./bin/foxctl room loop ${shellQuote(roomId)} --workspace ${shellQuote(
+    WORKSPACE_ID,
+  )}`;
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:@=-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function nextFocus(
