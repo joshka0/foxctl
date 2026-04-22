@@ -63,3 +63,10 @@ loop ...` start command when the loop is not ready.
 Room agent spawning uses `POST /api/agents/spawn` with the selected room ID.
 The spawn composer accepts `role` or `role: prompt`; when the prompt is omitted
 the backend uses its default room-aware prompt for that role.
+Foxterm also reads `/api/agents` and shows room member agent state/model in the
+room detail panel.
+
+CLI-backed agents such as Codex, Claude, Droid, and other terminal tools should
+use a separate ATCP-aware facade. The current `s` action is for foxctl daemon
+agents; ATCP sessions need broker/session/adapter state in addition to room
+membership.

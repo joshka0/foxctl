@@ -60,6 +60,12 @@ The first backend facade tranche is partially implemented:
 - foxterm can spawn a foxctl daemon agent into the selected room through
   `/api/agents/spawn`, using the existing room-aware prompt/onboarding and room
   membership attachment path.
+- foxterm cross-references room members with `/api/agents` so the room detail
+  can show member agent state, role, model, and execution mode after spawn.
+- CLI-backed agents through ATCP are a distinct facade gap: current ATCP
+  surfaces are command/broker oriented (`atcpd`, `atcp-live`, `atcpctl`) and
+  should become a typed foxterm/API adapter rather than being folded into the
+  daemon-agent spawn route.
 
 Remaining hard blockers:
 

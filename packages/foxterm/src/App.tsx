@@ -6,6 +6,7 @@ import {
   ACTOR_ID,
   createRoom,
   createRun,
+  getAgents,
   getOrchestrationCardWork,
   getRoomLoop,
   getRoomMessages,
@@ -19,6 +20,7 @@ import {
   subscribeToV2Stream,
   WORKSPACE_ID,
   WORKSPACE_ROOT,
+  type AgentSummary,
   type OrchestrationCardWorkItem,
   type RoomLoop,
   type RoomMessage,
@@ -206,6 +208,8 @@ export function App({ onExit }: AppProps) {
   const [roomLoop, setRoomLoop] = useState<RoomLoop | null>(null);
   const [roomLoopLoadState, setRoomLoopLoadState] =
     useState<LoadState>("idle");
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [agentLoadState, setAgentLoadState] = useState<LoadState>("idle");
   const filteredCardItems = useMemo(
     () => cardItems.filter((item) => matchesCardFilter(item, filterText)),
     [cardItems, filterText],
@@ -414,6 +418,7 @@ export function App({ onExit }: AppProps) {
       await refreshRoomTasks(`room:${roomId}`);
       await refreshRoomMessages(roomId);
       await refreshRoomLoop(roomId);
+      await refreshAgents();
       setStatus({
         tone: "success",
         text: `agent ${result.actor_id} ${result.status}`,
@@ -608,6 +613,18 @@ export function App({ onExit }: AppProps) {
     }
   };
 
+  const refreshAgents = async () => {
+    setAgentLoadState("loading");
+    try {
+      const result = await getAgents({ limit: 100 });
+      setAgents(result.agents);
+      setAgentLoadState("ready");
+    } catch {
+      setAgents([]);
+      setAgentLoadState("error");
+    }
+  };
+
   const refreshCards = async () => {
     const hadItems = cardItems.length > 0;
     setCardLoadState("loading");
@@ -710,6 +727,7 @@ export function App({ onExit }: AppProps) {
       setRoomMessagesLoadState("idle");
       setRoomLoop(null);
       setRoomLoopLoadState("idle");
+      setAgentLoadState("idle");
       return;
     }
     if (!selectedRoom?.id) {
@@ -717,10 +735,12 @@ export function App({ onExit }: AppProps) {
       setRoomMessagesLoadState("idle");
       setRoomLoop(null);
       setRoomLoopLoadState("idle");
+      setAgentLoadState("idle");
       return;
     }
     void refreshRoomMessages(selectedRoom.id);
     void refreshRoomLoop(selectedRoom.id);
+    void refreshAgents();
   }, [activeView, selectedRoom?.id]);
 
   useEffect(() => {
@@ -1007,6 +1027,11 @@ export function App({ onExit }: AppProps) {
     if (name === "r") {
       if (activeView === "rooms") {
         void refreshRoomTasks();
+        void refreshAgents();
+        if (selectedRoom?.id) {
+          void refreshRoomMessages(selectedRoom.id);
+          void refreshRoomLoop(selectedRoom.id);
+        }
       } else if (activeView === "cards") {
         void refreshCards();
       } else {
@@ -1134,6 +1159,8 @@ export function App({ onExit }: AppProps) {
                     messagesLoadState={roomMessagesLoadState}
                     loop={roomLoop}
                     loopLoadState={roomLoopLoadState}
+                    agents={agents}
+                    agentLoadState={agentLoadState}
                   />
                 )}
               </>
@@ -1760,6 +1787,8 @@ function RoomTaskDetailPanel({
   messagesLoadState,
   loop,
   loopLoadState,
+  agents,
+  agentLoadState,
 }: {
   compact: boolean;
   focused: boolean;
@@ -1771,6 +1800,8 @@ function RoomTaskDetailPanel({
   messagesLoadState: LoadState;
   loop: RoomLoop | null;
   loopLoadState: LoadState;
+  agents: AgentSummary[];
+  agentLoadState: LoadState;
 }) {
   return (
     <Panel
@@ -1821,6 +1852,11 @@ function RoomTaskDetailPanel({
             loop={loop}
             loadState={loopLoadState}
           />
+          <RoomAgentsPreview
+            room={selectedItem.room}
+            agents={agents}
+            loadState={agentLoadState}
+          />
         </box>
       ) : selectedMissing ? (
         <PanelState
@@ -1839,6 +1875,8 @@ function RoomTaskDetailPanel({
           messagesLoadState={messagesLoadState}
           loop={loop}
           loopLoadState={loopLoadState}
+          agents={agents}
+          agentLoadState={agentLoadState}
         />
       )}
     </Panel>
@@ -1852,6 +1890,8 @@ function RoomSummaryDetail({
   messagesLoadState,
   loop,
   loopLoadState,
+  agents,
+  agentLoadState,
 }: {
   selectedItem?: RoomTaskWorkItem;
   roomCount: number;
@@ -1859,6 +1899,8 @@ function RoomSummaryDetail({
   messagesLoadState: LoadState;
   loop: RoomLoop | null;
   loopLoadState: LoadState;
+  agents: AgentSummary[];
+  agentLoadState: LoadState;
 }) {
   if (!selectedItem) {
     return (
@@ -1904,6 +1946,61 @@ function RoomSummaryDetail({
         loop={loop}
         loadState={loopLoadState}
       />
+      <RoomAgentsPreview
+        room={selectedItem.room}
+        agents={agents}
+        loadState={agentLoadState}
+      />
+    </box>
+  );
+}
+
+function RoomAgentsPreview({
+  room,
+  agents,
+  loadState,
+}: {
+  room: RoomTaskWorkItem["room"];
+  agents: AgentSummary[];
+  loadState: LoadState;
+}) {
+  const byID = new Map(agents.map((agent) => [agent.id, agent]));
+  const rows = (room.members ?? [])
+    .map((member) => ({
+      member,
+      agent: byID.get(member.actor_id),
+    }))
+    .filter((row) => row.agent || row.member.actor_id !== ACTOR_ID)
+    .slice(0, 5);
+  const title =
+    loadState === "loading"
+      ? "agents loading"
+      : loadState === "error"
+        ? "agents unavailable"
+        : rows.length === 0
+          ? "agents empty"
+          : "room agents";
+  return (
+    <box style={{ flexDirection: "column", gap: 1 }}>
+      <text fg={loadState === "error" ? theme.warning : theme.focus}>
+        {title}
+      </text>
+      {rows.length === 0 ? (
+        <text fg={theme.muted}>Press s to spawn a foxctl agent.</text>
+      ) : (
+        rows.map(({ member, agent }) => (
+          <box key={member.actor_id} style={{ flexDirection: "column" }}>
+            <text fg={agentStateTone(agent?.state)}>
+              {truncate(member.actor_id, 28)}{" "}
+              {truncate(agent?.state ?? "member", 14)}
+            </text>
+            <text fg={theme.muted}>
+              {truncate(member.role || agent?.role || "-", 16)}{" "}
+              {truncate(agentModelLabel(agent), 58)}
+            </text>
+          </box>
+        ))
+      )}
     </box>
   );
 }
@@ -2482,6 +2579,30 @@ function roomLoopHealth(
     return { tone: "warning", text: "no delivery owner" };
   }
   return { tone: "success", text: "active" };
+}
+
+function agentStateTone(state?: string): string {
+  switch ((state ?? "").trim().toLowerCase()) {
+    case "running":
+      return theme.success;
+    case "starting":
+      return theme.focus;
+    case "error":
+    case "failed":
+      return theme.danger;
+    case "stopped":
+      return theme.muted;
+    default:
+      return theme.text;
+  }
+}
+
+function agentModelLabel(agent?: AgentSummary): string {
+  if (!agent) return "not in agent store";
+  const provider = agent.llm_provider?.trim() || "default";
+  const model = agent.llm_model?.trim() || "default";
+  const mode = agent.exec_mode?.trim() || "reactive";
+  return `${provider}/${model} ${mode}`;
 }
 
 function roomLoopStartCommand(roomId: string): string {

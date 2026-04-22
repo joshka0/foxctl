@@ -228,6 +228,28 @@ export interface SpawnAgentResult {
   workspace_source?: string;
 }
 
+export interface AgentSummary {
+  id: string;
+  parent_id?: string;
+  namespace?: string;
+  workspace_root?: string;
+  workspace_source?: string;
+  name?: string;
+  slug?: string;
+  role?: string;
+  state?: string;
+  llm_provider?: string;
+  llm_model?: string;
+  exec_mode?: string;
+  heartbeat_at?: string;
+  room_id?: string;
+}
+
+export interface AgentListResult {
+  agents: AgentSummary[];
+  total: number;
+}
+
 export interface OrchestrationCardWorkItem {
   id: string;
   laneId: string;
@@ -473,6 +495,19 @@ export async function spawnAgent(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export async function getAgents(params?: { limit?: number }): Promise<AgentListResult> {
+  const query = new URLSearchParams();
+  query.set("limit", String(params?.limit ?? 100));
+  const result = await requestJSON<AgentListResult>(
+    `/api/agents?${query.toString()}`,
+  );
+  const agents = safeArray(result?.agents).filter(hasID);
+  return {
+    agents,
+    total: typeof result?.total === "number" ? result.total : agents.length,
+  };
 }
 
 export async function getRoomTaskWork(params?: {
