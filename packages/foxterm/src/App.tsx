@@ -4,6 +4,7 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type { V2RunTranscriptItem, V2RuntimeEvent } from "@foxctl/data/types";
 import {
   ACTOR_ID,
+  ATCP_DAEMON_HINT,
   createRoom,
   createRun,
   getAgents,
@@ -629,10 +630,7 @@ export function App({ onExit }: AppProps) {
     } catch (error) {
       setStatus({
         tone: "danger",
-        text:
-          error instanceof Error
-            ? error.message
-            : "failed to spawn ATCP CLI session",
+        text: atcpErrorText(error, "failed to spawn ATCP CLI session"),
       });
     } finally {
       setCLISpawnBusy(false);
@@ -675,10 +673,7 @@ export function App({ onExit }: AppProps) {
     } catch (error) {
       setStatus({
         tone: "danger",
-        text:
-          error instanceof Error
-            ? error.message
-            : "failed to send ATCP prompt",
+        text: atcpErrorText(error, "failed to send ATCP prompt"),
       });
     } finally {
       setATCPPromptBusy(false);
@@ -833,10 +828,7 @@ export function App({ onExit }: AppProps) {
     } catch (error) {
       setStatus({
         tone: "danger",
-        text:
-          error instanceof Error
-            ? error.message
-            : "failed to stop ATCP session",
+        text: atcpErrorText(error, "failed to stop ATCP session"),
       });
     } finally {
       setATCPStopBusy(false);
@@ -964,6 +956,7 @@ export function App({ onExit }: AppProps) {
       setATCPScreens({});
       setSelectedATCPSessionId(null);
       setATCPLoadState("error");
+      setStatus({ tone: "warning", text: ATCP_DAEMON_HINT });
     }
   };
 
@@ -2682,7 +2675,11 @@ function RoomATCPPreview({
         {title}
       </text>
       {sessions.length === 0 ? (
-        <text fg={theme.muted}>Shift+s starts a CLI-backed session.</text>
+        <text fg={loadState === "error" ? theme.warning : theme.muted}>
+          {loadState === "error"
+            ? ATCP_DAEMON_HINT
+            : "Shift+s starts a CLI-backed session."}
+        </text>
       ) : (
         sessions.slice(0, 4).map((session) => {
           const member = memberBySession.get(session.id);
@@ -3323,6 +3320,14 @@ function roomMessageErrorText(error: unknown, roomId: string): string {
   const detail =
     error instanceof Error ? error.message : "failed to send room message";
   return `${detail} Start loop: ${roomLoopStartCommand(roomId)}`;
+}
+
+function atcpErrorText(error: unknown, fallback: string): string {
+  const detail = error instanceof Error ? error.message : fallback;
+  if (detail.includes("atcp daemon unavailable") || detail.includes("/api/atcp")) {
+    return ATCP_DAEMON_HINT;
+  }
+  return detail;
 }
 
 function parseAgentSpawnDraft(raw: string): { role: string; prompt?: string } {

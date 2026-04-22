@@ -9,6 +9,7 @@
     "dev:gui": "bun run --cwd packages/gui-agent dev",
     "dev:gui-auth-gateway": "bun run --cwd packages/gui-auth-gateway dev",
     "dev:server": "go run ./cmd/foxctl web serve --dev-cors",
+    "dev:atcpd": "go run ./cmd/atcpd --data-dir $HOME/.foxctl/atcp",
     "dev:all": "make gui-agent",
     "build": "bun run --filter '*' build",
     "typecheck": "bun run --filter '*' typecheck",

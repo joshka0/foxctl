@@ -27,6 +27,7 @@ Run locally after installing workspace dependencies:
 
 ```bash
 bun run dev:server
+bun run dev:atcpd
 bun run --cwd packages/foxterm dev
 ```
 
