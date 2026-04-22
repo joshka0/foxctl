@@ -176,8 +176,8 @@ function Footer({
       <text fg={theme.focus}>{truncate(left, compact ? 28 : 44)}</text>
       <text fg={theme.muted}>
         {compact
-          ? "1/2/3 scope  h/l pane  j/k Enter  n + m s S v p c x / r ? q"
-          : "Tab focus  1/2/3 scope  j/k move  Enter open  n context run  + room  m message  s agent  S cli  v atcp  p prompt  c continue  x kill/stop  / filter  a scope  r refresh  ? help  q quit"}
+          ? "1/2/3 scope  h/l pane  j/k Enter  -/= size  n + m s S v p c x / r ? q"
+          : "Tab focus  1/2/3 scope  j/k move  Enter open  -/= pane size  n context run  + room  m message  s agent  S cli  v atcp  p prompt  c continue  x kill/stop  / filter  a scope  r refresh  ? help  q quit"}
       </text>
     </box>
   );

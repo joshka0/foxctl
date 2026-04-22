@@ -123,6 +123,8 @@ interface ATCPStopTarget {
   agentId?: string;
 }
 
+type AgentPaneSize = "small" | "medium" | "large";
+
 type ComposerTarget =
   | { kind: "new" }
   | { kind: "continue"; runId: string }
@@ -222,6 +224,8 @@ export function App({ onExit }: AppProps) {
   const [pendingATCPStop, setPendingATCPStop] =
     useState<ATCPStopTarget | null>(null);
   const [atcpStopBusy, setATCPStopBusy] = useState(false);
+  const [agentPaneSize, setAgentPaneSize] =
+    useState<AgentPaneSize>("medium");
   const [navIndex, setNavIndex] = useState(0);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunListItem[]>([]);
@@ -1021,6 +1025,15 @@ export function App({ onExit }: AppProps) {
     setFocus("detail");
   };
 
+  const adjustAgentPaneSize = (delta: number) => {
+    setAgentPaneSize((current) => {
+      const next = nextAgentPaneSize(current, delta);
+      setStatus({ tone: "focus", text: `agent panes ${next}` });
+      return next;
+    });
+    setFocus("detail");
+  };
+
   useEffect(() => {
     void refreshRuns();
     void refreshModelEndpoint();
@@ -1544,6 +1557,10 @@ export function App({ onExit }: AppProps) {
       cycleSelectedATCPSession();
       return;
     }
+    if ((name === "-" || name === "=") && activeView === "rooms" && focus === "detail") {
+      adjustAgentPaneSize(name === "-" ? -1 : 1);
+      return;
+    }
     if (name === "r") {
       if (activeView === "rooms") {
         void refreshRoomTasks();
@@ -1695,6 +1712,7 @@ export function App({ onExit }: AppProps) {
                     loopLoadState={roomLoopLoadState}
                     agents={agents}
                     agentLoadState={agentLoadState}
+                    agentPaneSize={agentPaneSize}
                     atcpSessions={atcpSessions}
                     atcpMembers={atcpMembers}
                     atcpReadiness={atcpReadiness}
@@ -2587,6 +2605,7 @@ function RoomTaskDetailPanel({
   loopLoadState,
   agents,
   agentLoadState,
+  agentPaneSize,
   atcpSessions,
   atcpMembers,
   atcpReadiness,
@@ -2607,6 +2626,7 @@ function RoomTaskDetailPanel({
   loopLoadState: LoadState;
   agents: AgentSummary[];
   agentLoadState: LoadState;
+  agentPaneSize: AgentPaneSize;
   atcpSessions: ATCPSession[];
   atcpMembers: ATCPMember[];
   atcpReadiness: Record<string, ATCPReadiness>;
@@ -2668,6 +2688,7 @@ function RoomTaskDetailPanel({
               room={selectedItem.room}
               agents={agents}
               agentLoadState={agentLoadState}
+              agentPaneSize={agentPaneSize}
               sessions={atcpSessions}
               members={atcpMembers}
               readiness={atcpReadiness}
@@ -2699,6 +2720,7 @@ function RoomTaskDetailPanel({
             loopLoadState={loopLoadState}
             agents={agents}
             agentLoadState={agentLoadState}
+            agentPaneSize={agentPaneSize}
             atcpSessions={atcpSessions}
             atcpMembers={atcpMembers}
             atcpReadiness={atcpReadiness}
@@ -2723,6 +2745,7 @@ function RoomSummaryDetail({
   loopLoadState,
   agents,
   agentLoadState,
+  agentPaneSize,
   atcpSessions,
   atcpMembers,
   atcpReadiness,
@@ -2740,6 +2763,7 @@ function RoomSummaryDetail({
   loopLoadState: LoadState;
   agents: AgentSummary[];
   agentLoadState: LoadState;
+  agentPaneSize: AgentPaneSize;
   atcpSessions: ATCPSession[];
   atcpMembers: ATCPMember[];
   atcpReadiness: Record<string, ATCPReadiness>;
@@ -2795,6 +2819,7 @@ function RoomSummaryDetail({
         room={selectedItem.room}
         agents={agents}
         agentLoadState={agentLoadState}
+        agentPaneSize={agentPaneSize}
         sessions={atcpSessions}
         members={atcpMembers}
         readiness={atcpReadiness}
@@ -2843,6 +2868,7 @@ function RoomAgentPanes({
   room,
   agents,
   agentLoadState,
+  agentPaneSize,
   sessions,
   members,
   readiness,
@@ -2855,6 +2881,7 @@ function RoomAgentPanes({
   room: RoomTaskWorkItem["room"];
   agents: AgentSummary[];
   agentLoadState: LoadState;
+  agentPaneSize: AgentPaneSize;
   sessions: ATCPSession[];
   members: ATCPMember[];
   readiness: Record<string, ATCPReadiness>;
@@ -2863,9 +2890,15 @@ function RoomAgentPanes({
   loadState: LoadState;
 }) {
   const availableWidth = detailPanelContentWidth(terminalWidth, compact);
-  const columnCount = compact ? 1 : availableWidth >= 132 ? 3 : 2;
+  const columnCount = agentPaneColumnCount(
+    availableWidth,
+    compact,
+    agentPaneSize,
+  );
   const paneWidth = Math.floor((availableWidth - (columnCount - 1)) / columnCount);
-  const screenLineLimit = compact ? 2 : 3;
+  const normalPaneHeight = agentPaneHeight(agentPaneSize, false);
+  const focusedPaneHeight = agentPaneHeight(agentPaneSize, true);
+  const screenLineLimit = agentPaneScreenLineLimit(agentPaneSize, compact);
   const daemonPanes = buildDaemonAgentPanes(room, agents, compact);
   const cliPanes = buildATCPAgentPanes({
     compact,
@@ -2917,8 +2950,8 @@ function RoomAgentPanes({
               flexDirection: compact ? "column" : "row",
               gap: 1,
               height: row.some((pane) => pane.selected && pane.screenLines?.length)
-                ? 8
-                : 6,
+                ? focusedPaneHeight
+                : normalPaneHeight,
             }}
           >
             {row.map((pane) => (
@@ -2926,13 +2959,20 @@ function RoomAgentPanes({
                 key={pane.id}
                 pane={pane}
                 width={paneWidth}
+                height={
+                  pane.selected && pane.screenLines?.length
+                    ? focusedPaneHeight
+                    : normalPaneHeight
+                }
               />
             ))}
           </box>
         ))
       )}
       {cliPanes.length > 0 && (
-        <text fg={theme.muted}>j/k or v focus pane, Enter screen, p prompt, x stop</text>
+        <text fg={theme.muted}>
+          {agentPaneSize} panes  - shrink  = grow  j/k focus  Enter screen
+        </text>
       )}
     </box>
   );
@@ -2941,9 +2981,11 @@ function RoomAgentPanes({
 function AgentPane({
   pane,
   width,
+  height,
 }: {
   pane: RoomAgentPane;
   width: number;
+  height: number;
 }) {
   const bodyLines = pane.screenLines?.length
     ? pane.screenLines
@@ -2954,7 +2996,7 @@ function AgentPane({
         width,
         minWidth: 32,
         flexGrow: 1,
-        height: pane.selected && pane.screenLines?.length ? 8 : 6,
+        height,
         border: true,
         borderStyle: "single",
         borderColor: pane.selected ? theme.focus : theme.borderMuted,
@@ -3072,6 +3114,39 @@ function shortActorLabel(actorID: string): string {
     return actorID.slice(separator + 1);
   }
   return actorID;
+}
+
+function nextAgentPaneSize(current: AgentPaneSize, delta: number): AgentPaneSize {
+  const order: AgentPaneSize[] = ["small", "medium", "large"];
+  const index = order.indexOf(current);
+  const safeIndex = index < 0 ? 1 : index;
+  return order[clampInt(safeIndex + delta, 0, order.length - 1)] ?? "medium";
+}
+
+function agentPaneColumnCount(
+  availableWidth: number,
+  compact: boolean,
+  size: AgentPaneSize,
+): number {
+  if (compact) return 1;
+  if (size === "large") return availableWidth >= 112 ? 2 : 1;
+  if (size === "small") return availableWidth >= 132 ? 3 : 2;
+  return availableWidth >= 132 ? 3 : 2;
+}
+
+function agentPaneHeight(size: AgentPaneSize, focused: boolean): number {
+  if (size === "large") return focused ? 11 : 8;
+  if (size === "small") return focused ? 6 : 5;
+  return focused ? 8 : 6;
+}
+
+function agentPaneScreenLineLimit(
+  size: AgentPaneSize,
+  compact: boolean,
+): number {
+  if (size === "large") return compact ? 4 : 6;
+  if (size === "small") return 1;
+  return compact ? 2 : 3;
 }
 
 function detailPanelContentWidth(terminalWidth: number, compact: boolean): number {
