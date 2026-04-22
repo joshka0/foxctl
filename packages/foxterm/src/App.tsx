@@ -658,11 +658,12 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (name === "n" && activeView === "rooms") {
+      const fallbackRoom = selectedRoomTaskItem ?? roomTaskItems[0];
       openComposer({
         kind: "context",
-        source: contextSourceForRoomTask(selectedRoomTaskItem),
+        source: contextSourceForRoomTask(fallbackRoom),
       });
-      setComposerText(contextPromptForRoomTask(selectedRoomTaskItem));
+      setComposerText(contextPromptForRoomTask(fallbackRoom));
       return;
     }
     if (name === "n" && activeView === "cards") {
@@ -1296,8 +1297,8 @@ function RoomTaskEmptyState({
   return (
     <PanelState
       tone="muted"
-      title="No room data found."
-      detail="Rooms loaded, but no visible room rows were returned."
+      title="No room tasks found."
+      detail="Press n to start a room-context run."
     />
   );
 }
@@ -1567,7 +1568,7 @@ function CardEmptyState({
     <PanelState
       tone="muted"
       title="No orchestration cards found."
-      detail={`workspace ${WORKSPACE_ID}`}
+      detail="Press n to start a board-context run."
     />
   );
 }
@@ -2248,7 +2249,14 @@ function contextSourceForCard(item?: OrchestrationCardWorkItem): string {
 }
 
 function contextPromptForRoomTask(item?: RoomTaskWorkItem): string {
-  if (!item) return "Inspect the selected room context and propose the next action.";
+  if (!item) {
+    return [
+      "Inspect the current foxctl room context.",
+      `Workspace: ${WORKSPACE_ID}`,
+      "There are no visible room tasks in foxterm right now.",
+      "Find the current state and propose the next concrete action.",
+    ].join("\n");
+  }
   if (item.task) {
     return [
       `Work on room task ${item.task.id}.`,
@@ -2277,7 +2285,14 @@ function contextPromptForRoomTask(item?: RoomTaskWorkItem): string {
 }
 
 function contextPromptForCard(item?: OrchestrationCardWorkItem): string {
-  if (!item) return "Inspect the selected orchestration card and propose the next action.";
+  if (!item) {
+    return [
+      "Inspect the current foxctl orchestration board.",
+      `Workspace: ${WORKSPACE_ID}`,
+      "There are no visible cards in foxterm right now.",
+      "Find the current state and propose the next concrete action.",
+    ].join("\n");
+  }
   const card = item.card;
   return [
     `Work on orchestration card ${card.issue_id}.`,
