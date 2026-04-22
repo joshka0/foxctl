@@ -16,7 +16,7 @@ export function HelpOverlay({
         top: 4,
         left,
         width: overlayWidth,
-        height: 22,
+        height: 23,
         border: true,
         borderStyle: "rounded",
         borderColor: theme.focus,
@@ -37,6 +37,7 @@ export function HelpOverlay({
       <text fg={theme.text}>m                 Message selected room</text>
       <text fg={theme.text}>s                 Spawn agent into room</text>
       <text fg={theme.text}>Shift+s           Spawn ATCP CLI into room</text>
+      <text fg={theme.text}>v                 Cycle ATCP screen detail</text>
       <text fg={theme.text}>c                 Continue selected run</text>
       <text fg={theme.text}>Cards Enter       Open linked run</text>
       <text fg={theme.text}>x                 Kill selected active run</text>

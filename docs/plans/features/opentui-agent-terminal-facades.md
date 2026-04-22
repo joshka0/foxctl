@@ -74,6 +74,8 @@ The first backend facade tranche is partially implemented:
   `agent@adapter: command args` custom input.
 - ATCP session summaries now include rendered screen snapshots, and foxterm
   shows the latest non-empty screen line for each CLI-backed room participant.
+- foxterm can cycle the focused ATCP CLI session and render a larger screen
+  excerpt in the room inspector.
 
 Remaining hard blockers:
 

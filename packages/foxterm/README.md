@@ -46,6 +46,7 @@ Runs view shortcuts:
 - `m` writes a message to the selected room.
 - `s` spawns a foxctl daemon agent into the selected room.
 - `Shift+s` spawns an ATCP-backed CLI session into the selected room.
+- `v` cycles the focused ATCP CLI session screen detail.
 - `/` filters the active worklist.
 - `a` cycles activity scopes.
 - `r` refreshes the active worklist.
@@ -80,3 +81,4 @@ fields; Custom keeps the raw `agent@adapter: command args` form, for example
 The room detail panel shows attached ATCP sessions, command, adapter, and
 readiness so CLI-backed agents are visible after they start. It also shows the
 latest non-empty rendered screen line when ATCP screen snapshots are available.
+Press `v` to cycle the focused ATCP session and show a larger screen excerpt.

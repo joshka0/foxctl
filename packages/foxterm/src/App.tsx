@@ -302,6 +302,9 @@ export function App({ onExit }: AppProps) {
     {},
   );
   const [atcpLoadState, setATCPLoadState] = useState<LoadState>("idle");
+  const [selectedATCPSessionId, setSelectedATCPSessionId] = useState<
+    string | null
+  >(null);
   const filteredCardItems = useMemo(
     () => cardItems.filter((item) => matchesCardFilter(item, filterText)),
     [cardItems, filterText],
@@ -798,6 +801,7 @@ export function App({ onExit }: AppProps) {
       setATCPMembers([]);
       setATCPReadiness({});
       setATCPScreens({});
+      setSelectedATCPSessionId(null);
       setATCPLoadState("idle");
       return;
     }
@@ -811,12 +815,18 @@ export function App({ onExit }: AppProps) {
       setATCPMembers(result.members);
       setATCPReadiness(result.readiness ?? {});
       setATCPScreens(result.screens ?? {});
+      setSelectedATCPSessionId((current) =>
+        current && result.sessions.some((session) => session.id === current)
+          ? current
+          : result.sessions[0]?.id ?? null,
+      );
       setATCPLoadState("ready");
     } catch {
       setATCPSessions([]);
       setATCPMembers([]);
       setATCPReadiness({});
       setATCPScreens({});
+      setSelectedATCPSessionId(null);
       setATCPLoadState("error");
     }
   };
@@ -846,6 +856,18 @@ export function App({ onExit }: AppProps) {
         text: error instanceof Error ? error.message : "failed to load cards",
       });
     }
+  };
+
+  const cycleSelectedATCPSession = () => {
+    if (atcpSessions.length === 0) {
+      setStatus({ tone: "muted", text: "no ATCP sessions" });
+      return;
+    }
+    setSelectedATCPSessionId((current) => {
+      const index = atcpSessions.findIndex((session) => session.id === current);
+      return atcpSessions[(index + 1 + atcpSessions.length) % atcpSessions.length]?.id ?? null;
+    });
+    setFocus("detail");
   };
 
   useEffect(() => {
@@ -940,6 +962,7 @@ export function App({ onExit }: AppProps) {
       setATCPMembers([]);
       setATCPReadiness({});
       setATCPScreens({});
+      setSelectedATCPSessionId(null);
       setATCPLoadState("idle");
       return;
     }
@@ -953,6 +976,7 @@ export function App({ onExit }: AppProps) {
       setATCPMembers([]);
       setATCPReadiness({});
       setATCPScreens({});
+      setSelectedATCPSessionId(null);
       setATCPLoadState("idle");
       return;
     }
@@ -1293,6 +1317,10 @@ export function App({ onExit }: AppProps) {
       setActivityScope((current) => nextActivityScope(current));
       return;
     }
+    if (name === "v" && activeView === "rooms") {
+      cycleSelectedATCPSession();
+      return;
+    }
     if (name === "r") {
       if (activeView === "rooms") {
         void refreshRoomTasks();
@@ -1435,6 +1463,7 @@ export function App({ onExit }: AppProps) {
                     atcpMembers={atcpMembers}
                     atcpReadiness={atcpReadiness}
                     atcpScreens={atcpScreens}
+                    selectedATCPSessionId={selectedATCPSessionId}
                     atcpLoadState={atcpLoadState}
                   />
                 )}
@@ -2150,6 +2179,7 @@ function RoomTaskDetailPanel({
   atcpMembers,
   atcpReadiness,
   atcpScreens,
+  selectedATCPSessionId,
   atcpLoadState,
 }: {
   compact: boolean;
@@ -2168,6 +2198,7 @@ function RoomTaskDetailPanel({
   atcpMembers: ATCPMember[];
   atcpReadiness: Record<string, ATCPReadiness>;
   atcpScreens: Record<string, ATCPScreen>;
+  selectedATCPSessionId: string | null;
   atcpLoadState: LoadState;
 }) {
   return (
@@ -2229,6 +2260,7 @@ function RoomTaskDetailPanel({
             members={atcpMembers}
             readiness={atcpReadiness}
             screens={atcpScreens}
+            selectedSessionId={selectedATCPSessionId}
             loadState={atcpLoadState}
           />
         </box>
@@ -2255,6 +2287,7 @@ function RoomTaskDetailPanel({
           atcpMembers={atcpMembers}
           atcpReadiness={atcpReadiness}
           atcpScreens={atcpScreens}
+          selectedATCPSessionId={selectedATCPSessionId}
           atcpLoadState={atcpLoadState}
         />
       )}
@@ -2275,6 +2308,7 @@ function RoomSummaryDetail({
   atcpMembers,
   atcpReadiness,
   atcpScreens,
+  selectedATCPSessionId,
   atcpLoadState,
 }: {
   selectedItem?: RoomTaskWorkItem;
@@ -2289,6 +2323,7 @@ function RoomSummaryDetail({
   atcpMembers: ATCPMember[];
   atcpReadiness: Record<string, ATCPReadiness>;
   atcpScreens: Record<string, ATCPScreen>;
+  selectedATCPSessionId: string | null;
   atcpLoadState: LoadState;
 }) {
   if (!selectedItem) {
@@ -2345,6 +2380,7 @@ function RoomSummaryDetail({
         members={atcpMembers}
         readiness={atcpReadiness}
         screens={atcpScreens}
+        selectedSessionId={selectedATCPSessionId}
         loadState={atcpLoadState}
       />
     </box>
@@ -2356,17 +2392,23 @@ function RoomATCPPreview({
   members,
   readiness,
   screens,
+  selectedSessionId,
   loadState,
 }: {
   sessions: ATCPSession[];
   members: ATCPMember[];
   readiness: Record<string, ATCPReadiness>;
   screens: Record<string, ATCPScreen>;
+  selectedSessionId: string | null;
   loadState: LoadState;
 }) {
   const memberBySession = new Map(
     members.map((member) => [member.session_id, member]),
   );
+  const selected =
+    sessions.find((session) => session.id === selectedSessionId) ?? sessions[0];
+  const selectedMember = selected ? memberBySession.get(selected.id) : undefined;
+  const selectedLines = atcpScreenLines(selected ? screens[selected.id] : undefined, 6);
   const title =
     loadState === "loading"
       ? "ATCP loading"
@@ -2387,9 +2429,17 @@ function RoomATCPPreview({
           const member = memberBySession.get(session.id);
           const ready = readiness[session.id];
           const screenLine = atcpScreenPreview(screens[session.id]);
+          const selectedRow = session.id === selected?.id;
           return (
-            <box key={session.id} style={{ flexDirection: "column" }}>
-              <text fg={atcpSessionTone(session, ready)}>
+            <box
+              key={session.id}
+              style={{
+                flexDirection: "column",
+                backgroundColor: selectedRow ? theme.panelAlt : theme.bg,
+              }}
+            >
+              <text fg={selectedRow ? theme.focus : atcpSessionTone(session, ready)}>
+                {selectedRow ? "> " : "  "}
                 {truncate(member?.agent_id ?? session.id, 24)}{" "}
                 {truncate(session.status, 12)} {ready?.idle ? "idle" : "busy"}
               </text>
@@ -2403,6 +2453,22 @@ function RoomATCPPreview({
             </box>
           );
         })
+      )}
+      {selected && (
+        <box style={{ flexDirection: "column", gap: 1 }}>
+          <text fg={theme.focus}>
+            screen     {truncate(selectedMember?.agent_id ?? selected.id, 44)}
+          </text>
+          {selectedLines.length === 0 ? (
+            <text fg={theme.muted}>No rendered screen snapshot yet.</text>
+          ) : (
+            selectedLines.map((line, index) => (
+              <text key={`${selected.id}:${index}`} fg={theme.text}>
+                {truncate(line, 100)}
+              </text>
+            ))
+          )}
+        </box>
       )}
     </box>
   );
@@ -3234,12 +3300,18 @@ function atcpSessionTone(
 }
 
 function atcpScreenPreview(screen?: ATCPScreen): string {
-  if (!screen || !Array.isArray(screen.lines)) return "";
+  return atcpScreenLines(screen, 1)[0] ?? "";
+}
+
+function atcpScreenLines(screen: ATCPScreen | undefined, max: number): string[] {
+  if (!screen || !Array.isArray(screen.lines)) return [];
+  const lines: string[] = [];
   for (let index = screen.lines.length - 1; index >= 0; index--) {
-    const line = screen.lines[index]?.trim();
-    if (line) return line;
+    const line = screen.lines[index]?.trimEnd();
+    if (line?.trim()) lines.unshift(line);
+    if (lines.length >= max) break;
   }
-  return "";
+  return lines;
 }
 
 function roomLoopStartCommand(roomId: string): string {
