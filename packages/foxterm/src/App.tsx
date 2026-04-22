@@ -1450,12 +1450,12 @@ export function App({ onExit }: AppProps) {
       openRoomMessageComposer();
       return;
     }
-    if (name === "s" && activeView === "rooms") {
-      openAgentSpawnComposer();
-      return;
-    }
     if (activeView === "rooms" && isCLISpawnKey(key)) {
       openCLISpawnComposer();
+      return;
+    }
+    if (name === "s" && activeView === "rooms") {
+      openAgentSpawnComposer();
       return;
     }
     if (name === "p" && activeView === "rooms") {
