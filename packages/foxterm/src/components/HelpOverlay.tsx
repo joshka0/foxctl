@@ -16,7 +16,7 @@ export function HelpOverlay({
         top: 4,
         left,
         width: overlayWidth,
-        height: 25,
+        height: 28,
         border: true,
         borderStyle: "rounded",
         borderColor: theme.focus,
@@ -30,6 +30,9 @@ export function HelpOverlay({
       <text fg={theme.text}>Tab / Shift+Tab   Move focus between regions</text>
       <text fg={theme.text}>1 / 2 / 3         Runs / Rooms / Cards</text>
       <text fg={theme.text}>[ / ]             Cycle scopes</text>
+      <text fg={theme.text}>b / w             Hide Scope / worklist</text>
+      <text fg={theme.text}>, / .             Resize focused side pane</text>
+      <text fg={theme.text}>- / =             Resize room agent panes</text>
       <text fg={theme.text}>Up/Down or j/k    Move selection</text>
       <text fg={theme.text}>Enter             Open selected run detail</text>
       <text fg={theme.text}>n                 Compose run for active context</text>

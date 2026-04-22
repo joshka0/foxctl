@@ -124,6 +124,8 @@ interface ATCPStopTarget {
 }
 
 type AgentPaneSize = "small" | "medium" | "large";
+type MainPaneSize = "small" | "medium" | "large";
+type PanelWidth = number | "100%";
 
 type ComposerTarget =
   | { kind: "new" }
@@ -186,6 +188,12 @@ export function App({ onExit }: AppProps) {
   const [filterText, setFilterText] = useState("");
   const [activityScope, setActivityScope] =
     useState<ActivityScope>("focused");
+  const [scopeCollapsed, setScopeCollapsed] = useState(false);
+  const [worklistCollapsed, setWorklistCollapsed] = useState(false);
+  const [scopePaneSize, setScopePaneSize] =
+    useState<MainPaneSize>("medium");
+  const [worklistPaneSize, setWorklistPaneSize] =
+    useState<MainPaneSize>("medium");
   const [composerText, setComposerText] = useState("");
   const [composerTarget, setComposerTarget] = useState<ComposerTarget>({
     kind: "new",
@@ -282,6 +290,12 @@ export function App({ onExit }: AppProps) {
     selectedRunId !== null && selectedRun === undefined && runs.length > 0;
   const activeNav = navItems[navIndex] ?? navItems[0];
   const activeView = activeNav.id;
+  const scopeVisible = !compact && !scopeCollapsed;
+  const worklistVisible = !worklistCollapsed;
+  const showWorklistRegion = worklistVisible && (!focusOnly || focus === "worklist");
+  const showDetailRegion = !focusOnly || focus !== "worklist" || !worklistVisible;
+  const scopeWidth = mainScopePaneWidth(scopePaneSize);
+  const worklistWidth = mainWorklistPaneWidth(compact, worklistPaneSize);
   const filteredRoomTaskItems = useMemo(
     () =>
       roomTaskItems.filter((item) => matchesRoomTaskFilter(item, filterText)),
@@ -1034,6 +1048,52 @@ export function App({ onExit }: AppProps) {
     setFocus("detail");
   };
 
+  const toggleScopePane = () => {
+    if (compact) {
+      setStatus({ tone: "muted", text: "scope is hidden in compact layout" });
+      return;
+    }
+    setScopeCollapsed((current) => {
+      const next = !current;
+      setStatus({ tone: "focus", text: next ? "scope hidden" : "scope shown" });
+      return next;
+    });
+    if (focus === "nav") {
+      setFocus(worklistCollapsed ? "detail" : "worklist");
+    }
+  };
+
+  const toggleWorklistPane = () => {
+    setWorklistCollapsed((current) => {
+      const next = !current;
+      setStatus({ tone: "focus", text: next ? "worklist hidden" : "worklist shown" });
+      return next;
+    });
+    if (focus === "worklist") {
+      setFocus("detail");
+    }
+  };
+
+  const resizeFocusedMainPane = (delta: number) => {
+    if (focus === "nav" && !compact && !scopeCollapsed) {
+      setScopePaneSize((current) => {
+        const next = nextMainPaneSize(current, delta);
+        setStatus({ tone: "focus", text: `scope ${next}` });
+        return next;
+      });
+      return;
+    }
+    if (focus === "worklist" && !worklistCollapsed) {
+      setWorklistPaneSize((current) => {
+        const next = nextMainPaneSize(current, delta);
+        setStatus({ tone: "focus", text: `${activeNav.label.toLowerCase()} list ${next}` });
+        return next;
+      });
+      return;
+    }
+    setStatus({ tone: "muted", text: "focus scope or worklist to resize it" });
+  };
+
   useEffect(() => {
     void refreshRuns();
     void refreshModelEndpoint();
@@ -1082,10 +1142,13 @@ export function App({ onExit }: AppProps) {
   }, [activeView, roomTaskLoadState, cardLoadState]);
 
   useEffect(() => {
-    if (compact && focus === "nav") {
-      setFocus("worklist");
+    if ((compact || scopeCollapsed) && focus === "nav") {
+      setFocus(worklistCollapsed ? "detail" : "worklist");
     }
-  }, [compact, focus]);
+    if (worklistCollapsed && focus === "worklist") {
+      setFocus("detail");
+    }
+  }, [compact, focus, scopeCollapsed, worklistCollapsed]);
 
   useEffect(() => {
     const composerVisible =
@@ -1557,6 +1620,18 @@ export function App({ onExit }: AppProps) {
       cycleSelectedATCPSession();
       return;
     }
+    if (name === "b") {
+      toggleScopePane();
+      return;
+    }
+    if (name === "w") {
+      toggleWorklistPane();
+      return;
+    }
+    if ((name === "," || name === ".") && mode === "normal") {
+      resizeFocusedMainPane(name === "," ? -1 : 1);
+      return;
+    }
     if ((name === "-" || name === "=") && activeView === "rooms" && focus === "detail") {
       adjustAgentPaneSize(name === "-" ? -1 : 1);
       return;
@@ -1581,7 +1656,8 @@ export function App({ onExit }: AppProps) {
       setFocus((current) =>
         nextFocus(current, {
           reverse: key.shift,
-          compact,
+          showNav: scopeVisible,
+          showWorklist: worklistVisible,
           hasComposer: activeView === "runs" || activeView === "rooms",
         }),
       );
@@ -1673,19 +1749,21 @@ export function App({ onExit }: AppProps) {
       ) : (
         <>
           <MainRegion compact={compact}>
-            {!focusOnly && (
+            {scopeVisible && (
               <Sidebar
                 compact={compact}
                 focused={focus === "nav"}
                 activeIndex={navIndex}
+                width={scopeWidth}
               />
             )}
             {activeView === "rooms" ? (
               <>
-                {(!focusOnly || focus === "worklist") && (
+                {showWorklistRegion && (
                   <RoomTaskListPanel
                     compact={compact}
                     short={short}
+                    panelWidth={worklistWidth}
                     focused={focus === "worklist"}
                     sections={roomTaskSections}
                     selectedId={selectedRoomTaskId}
@@ -1697,7 +1775,7 @@ export function App({ onExit }: AppProps) {
                     filterText={filterText}
                   />
                 )}
-                {(!focusOnly || focus !== "worklist") && (
+                {showDetailRegion && (
                   <RoomTaskDetailPanel
                     compact={compact}
                     terminalWidth={width}
@@ -1724,10 +1802,11 @@ export function App({ onExit }: AppProps) {
               </>
             ) : activeView === "cards" ? (
               <>
-                {(!focusOnly || focus === "worklist") && (
+                {showWorklistRegion && (
                   <CardListPanel
                     compact={compact}
                     short={short}
+                    panelWidth={worklistWidth}
                     focused={focus === "worklist"}
                     sections={cardSections}
                     selectedId={selectedCardId}
@@ -1739,7 +1818,7 @@ export function App({ onExit }: AppProps) {
                     filterText={filterText}
                   />
                 )}
-                {(!focusOnly || focus !== "worklist") && (
+                {showDetailRegion && (
                   <CardDetailPanel
                     compact={compact}
                     focused={focus === "detail"}
@@ -1752,10 +1831,11 @@ export function App({ onExit }: AppProps) {
               </>
             ) : (
               <>
-                {(!focusOnly || focus === "worklist") && (
+                {showWorklistRegion && (
                   <RunListPanel
                     compact={compact}
                     short={short}
+                    panelWidth={worklistWidth}
                     focused={focus === "worklist"}
                     sections={runSections}
                     selectedId={selectedRunId}
@@ -1766,7 +1846,7 @@ export function App({ onExit }: AppProps) {
                     filterText={filterText}
                   />
                 )}
-                {(!focusOnly || focus !== "worklist") && (
+                {showDetailRegion && (
                   <RunDetailPanel
                     compact={compact}
                     short={short}
@@ -2125,16 +2205,18 @@ function Sidebar({
   compact,
   focused,
   activeIndex,
+  width,
 }: {
   compact: boolean;
   focused: boolean;
   activeIndex: number;
+  width: number;
 }) {
   if (compact) return null;
   return (
     <box
       style={{
-        width: 24,
+        width,
         height: "100%",
         border: true,
         borderStyle: "single",
@@ -2307,6 +2389,7 @@ function RoomComposer({
 function RunListPanel({
   compact,
   short,
+  panelWidth,
   focused,
   sections,
   selectedId,
@@ -2318,6 +2401,7 @@ function RunListPanel({
 }: {
   compact: boolean;
   short: boolean;
+  panelWidth: PanelWidth;
   focused: boolean;
   sections: WorklistSection<RunWorklistItem>[];
   selectedId: string | null;
@@ -2337,7 +2421,7 @@ function RunListPanel({
       title="Runs"
       subtitle={runCount === 0 ? undefined : `${runCount} total`}
       focused={focused}
-      width={compact ? "100%" : 42}
+      width={panelWidth}
       minWidth={30}
       height={compact ? (short ? 8 : 12) : "100%"}
       footer={
@@ -2440,6 +2524,7 @@ function RunRow({ run, selected }: { run: RunListItem; selected: boolean }) {
 function RoomTaskListPanel({
   compact,
   short,
+  panelWidth,
   focused,
   sections,
   selectedId,
@@ -2452,6 +2537,7 @@ function RoomTaskListPanel({
 }: {
   compact: boolean;
   short: boolean;
+  panelWidth: PanelWidth;
   focused: boolean;
   sections: WorklistSection<RoomTaskWorkItem>[];
   selectedId: string | null;
@@ -2473,7 +2559,7 @@ function RoomTaskListPanel({
       title="Rooms"
       subtitle={`${roomCount} rooms / ${taskCount} tasks`}
       focused={focused}
-      width={compact ? "100%" : 42}
+      width={panelWidth}
       minWidth={30}
       height={compact ? (short ? 8 : 12) : "100%"}
       footer={
@@ -3123,6 +3209,38 @@ function nextAgentPaneSize(current: AgentPaneSize, delta: number): AgentPaneSize
   return order[clampInt(safeIndex + delta, 0, order.length - 1)] ?? "medium";
 }
 
+function nextMainPaneSize(current: MainPaneSize, delta: number): MainPaneSize {
+  const order: MainPaneSize[] = ["small", "medium", "large"];
+  const index = order.indexOf(current);
+  const safeIndex = index < 0 ? 1 : index;
+  return order[clampInt(safeIndex + delta, 0, order.length - 1)] ?? "medium";
+}
+
+function mainScopePaneWidth(size: MainPaneSize): number {
+  switch (size) {
+    case "small":
+      return 18;
+    case "large":
+      return 30;
+    case "medium":
+    default:
+      return 24;
+  }
+}
+
+function mainWorklistPaneWidth(compact: boolean, size: MainPaneSize): PanelWidth {
+  if (compact) return "100%";
+  switch (size) {
+    case "small":
+      return 32;
+    case "large":
+      return 54;
+    case "medium":
+    default:
+      return 42;
+  }
+}
+
 function agentPaneColumnCount(
   availableWidth: number,
   compact: boolean,
@@ -3237,6 +3355,7 @@ function RoomMessagesPreview({
 function CardListPanel({
   compact,
   short,
+  panelWidth,
   focused,
   sections,
   selectedId,
@@ -3249,6 +3368,7 @@ function CardListPanel({
 }: {
   compact: boolean;
   short: boolean;
+  panelWidth: PanelWidth;
   focused: boolean;
   sections: WorklistSection<OrchestrationCardWorkItem>[];
   selectedId: string | null;
@@ -3269,7 +3389,7 @@ function CardListPanel({
       title="Cards"
       subtitle={artifact ? "artifact" : `${cardCount} total`}
       focused={focused}
-      width={compact ? "100%" : 42}
+      width={panelWidth}
       minWidth={30}
       height={compact ? (short ? 8 : 12) : "100%"}
       footer={
@@ -3971,11 +4091,16 @@ function shellQuote(value: string): string {
 
 function nextFocus(
   current: FocusRegion,
-  options: { reverse?: boolean; compact: boolean; hasComposer: boolean },
+  options: {
+    reverse?: boolean;
+    showNav: boolean;
+    showWorklist: boolean;
+    hasComposer: boolean;
+  },
 ): FocusRegion {
   const order: FocusRegion[] = [
-    ...(options.compact ? [] : (["nav"] as FocusRegion[])),
-    "worklist",
+    ...(options.showNav ? (["nav"] as FocusRegion[]) : []),
+    ...(options.showWorklist ? (["worklist"] as FocusRegion[]) : []),
     "detail",
     ...(options.hasComposer ? (["composer"] as FocusRegion[]) : []),
   ];
