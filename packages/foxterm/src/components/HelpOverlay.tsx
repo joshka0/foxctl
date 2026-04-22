@@ -16,7 +16,7 @@ export function HelpOverlay({
         top: 4,
         left,
         width: overlayWidth,
-        height: 29,
+        height: 30,
         border: true,
         borderStyle: "rounded",
         borderColor: theme.focus,
@@ -45,6 +45,7 @@ export function HelpOverlay({
       <text fg={theme.text}>p                 Prompt focused ATCP session</text>
       <text fg={theme.text}>c                 Continue selected run</text>
       <text fg={theme.text}>Cards Enter       Open linked run</text>
+      <text fg={theme.text}>Cards d/u/t       Done / release / retry</text>
       <text fg={theme.text}>x                 Kill run or stop ATCP session</text>
       <text fg={theme.text}>/                 Filter active worklist</text>
       <text fg={theme.text}>a                 Cycle activity scope</text>

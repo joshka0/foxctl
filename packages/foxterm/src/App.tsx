@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 
-import type { V2RunTranscriptItem, V2RuntimeEvent } from "@foxctl/data/types";
+import type {
+  OrchestrationCard,
+  OrchestrationCardAction,
+  V2RunTranscriptItem,
+  V2RuntimeEvent,
+} from "@foxctl/data/types";
 import {
   ACTOR_ID,
   ATCP_DAEMON_HINT,
+  applyOrchestrationCardAction,
   createRoom,
   createRun,
   getAgents,
@@ -30,6 +36,7 @@ import {
   type ATCPReadiness,
   type ATCPScreen,
   type ATCPSession,
+  type ApplyOrchestrationCardActionInput,
   type OrchestrationCardWorkItem,
   type RoomLoop,
   type RoomMessage,
@@ -121,6 +128,12 @@ interface ATCPStopTarget {
   roomId: string;
   sessionId: string;
   agentId?: string;
+}
+
+interface PendingCardAction {
+  issueId: string;
+  title: string;
+  action: OrchestrationCardAction;
 }
 
 interface CommandPaletteAction {
@@ -273,6 +286,9 @@ export function App({ onExit }: AppProps) {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [cardLoadState, setCardLoadState] = useState<LoadState>("idle");
   const [lastCardLoadAt, setLastCardLoadAt] = useState<string | null>(null);
+  const [pendingCardAction, setPendingCardAction] =
+    useState<PendingCardAction | null>(null);
+  const [cardActionBusy, setCardActionBusy] = useState(false);
   const [events, setEvents] = useState<V2RuntimeEvent[]>([]);
   const [streamStatus, setStreamStatus] = useState<StatusMessage>({
     tone: "muted",
@@ -867,6 +883,71 @@ export function App({ onExit }: AppProps) {
     }
   };
 
+  const requestSelectedCardAction = (action: OrchestrationCardAction) => {
+    if (!selectedCardItem) {
+      setStatus({ tone: "muted", text: "select a card first" });
+      return;
+    }
+    const availability = cardActionAvailability(selectedCardItem.card, action);
+    if (!availability.available) {
+      setStatus({ tone: "muted", text: availability.reason });
+      return;
+    }
+    setPendingCardAction({
+      issueId: selectedCardItem.card.issue_id,
+      title:
+        selectedCardItem.card.title ||
+        selectedCardItem.card.issue_identifier ||
+        selectedCardItem.card.issue_id,
+      action,
+    });
+    setMode("confirmCardAction");
+    setFocus("detail");
+  };
+
+  const confirmCardAction = async () => {
+    const target = pendingCardAction;
+    if (!target || cardActionBusy) return;
+    setCardActionBusy(true);
+    setStatus({
+      tone: "focus",
+      text: `${cardActionLabel(target.action)} ${target.issueId}`,
+    });
+    try {
+      const input: ApplyOrchestrationCardActionInput = {
+        workspaceId: WORKSPACE_ID,
+        issueId: target.issueId,
+        action: target.action,
+      };
+      const result = await applyOrchestrationCardAction(input);
+      setPendingCardAction(null);
+      setMode("normal");
+      const updatedItem = cardWorkItemFromCard(result.card, selectedCardItem);
+      setCardItems((current) =>
+        current.some((item) => item.card.issue_id === result.card.issue_id)
+          ? current.map((item) =>
+              item.card.issue_id === result.card.issue_id ? updatedItem : item,
+            )
+          : [updatedItem, ...current],
+      );
+      setSelectedCardId(result.card.issue_id);
+      setStatus({
+        tone: "success",
+        text: `${result.card.issue_id} ${cardActionDoneLabel(result.action)}`,
+      });
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text:
+          error instanceof Error
+            ? error.message
+            : "failed to update card",
+      });
+    } finally {
+      setCardActionBusy(false);
+    }
+  };
+
   const refreshRoomTasks = async (preferredItemId?: string) => {
     const hadItems = roomTaskItems.length > 0;
     setRoomTaskLoadState("loading");
@@ -1371,6 +1452,45 @@ export function App({ onExit }: AppProps) {
       },
     },
     {
+      id: "card:mark-done",
+      title: "Mark Selected Card Done",
+      category: "Cards",
+      command: "d",
+      description: "Move the selected orchestration card to Done.",
+      destructive: false,
+      disabled: !selectedCardItem || !cardActionAvailability(selectedCardItem.card, "mark-done").available,
+      disabledReason: selectedCardItem
+        ? cardActionAvailability(selectedCardItem.card, "mark-done").reason
+        : "select an orchestration card first",
+      run: () => requestSelectedCardAction("mark-done"),
+    },
+    {
+      id: "card:release",
+      title: "Release Selected Card",
+      category: "Cards",
+      command: "u",
+      description: "Release a card back to eligible work.",
+      destructive: false,
+      disabled: !selectedCardItem || !cardActionAvailability(selectedCardItem.card, "release").available,
+      disabledReason: selectedCardItem
+        ? cardActionAvailability(selectedCardItem.card, "release").reason
+        : "select an orchestration card first",
+      run: () => requestSelectedCardAction("release"),
+    },
+    {
+      id: "card:retry-now",
+      title: "Retry Selected Card Now",
+      category: "Cards",
+      command: "t",
+      description: "Move a blocked or retry-queued card back to retry queue.",
+      destructive: false,
+      disabled: !selectedCardItem || !cardActionAvailability(selectedCardItem.card, "retry-now").available,
+      disabledReason: selectedCardItem
+        ? cardActionAvailability(selectedCardItem.card, "retry-now").reason
+        : "select an orchestration card first",
+      run: () => requestSelectedCardAction("retry-now"),
+    },
+    {
       id: "worklist:filter",
       title: "Filter Active Worklist",
       category: "Navigation",
@@ -1726,6 +1846,9 @@ export function App({ onExit }: AppProps) {
       if (mode === "confirmKill") {
         setPendingKillRunId(null);
       }
+      if (mode === "confirmCardAction") {
+        setPendingCardAction(null);
+      }
       if (mode === "confirmATCPStop") {
         setPendingATCPStop(null);
       }
@@ -1769,6 +1892,18 @@ export function App({ onExit }: AppProps) {
       }
       if (name === "n") {
         setPendingKillRunId(null);
+        setMode("normal");
+        return;
+      }
+      return;
+    }
+    if (mode === "confirmCardAction") {
+      if (isSubmitKey(key) || name === "y") {
+        void confirmCardAction();
+        return;
+      }
+      if (name === "n") {
+        setPendingCardAction(null);
         setMode("normal");
         return;
       }
@@ -2025,6 +2160,18 @@ export function App({ onExit }: AppProps) {
     }
     if (name === "x" && activeView === "rooms") {
       requestStopSelectedATCPSession();
+      return;
+    }
+    if (activeView === "cards" && name === "d") {
+      requestSelectedCardAction("mark-done");
+      return;
+    }
+    if (activeView === "cards" && name === "u") {
+      requestSelectedCardAction("release");
+      return;
+    }
+    if (activeView === "cards" && name === "t") {
+      requestSelectedCardAction("retry-now");
       return;
     }
     if (name === "a") {
@@ -2366,6 +2513,14 @@ export function App({ onExit }: AppProps) {
           busy={killBusy}
         />
       )}
+      {mode === "confirmCardAction" && pendingCardAction && (
+        <CardActionConfirmOverlay
+          compact={compact}
+          width={width}
+          target={pendingCardAction}
+          busy={cardActionBusy}
+        />
+      )}
       {mode === "confirmATCPStop" && pendingATCPStop && (
         <ATCPStopConfirmOverlay
           compact={compact}
@@ -2542,6 +2697,51 @@ function KillConfirmOverlay({
       <text fg={theme.warning}>{busy ? "Killing run" : "Kill selected run?"}</text>
       <text fg={theme.text}>{truncate(runId, overlayWidth - 6)}</text>
       <text fg={theme.muted}>This requests cancellation through v2 runtime.</text>
+      <text fg={theme.warning}>Enter confirms, Esc cancels.</text>
+    </box>
+  );
+}
+
+function CardActionConfirmOverlay({
+  compact,
+  width,
+  target,
+  busy,
+}: {
+  compact: boolean;
+  width: number;
+  target: PendingCardAction;
+  busy: boolean;
+}) {
+  const overlayWidth = compact ? Math.max(44, Math.min(width - 4, 66)) : 66;
+  const left = compact ? 2 : 10;
+  return (
+    <box
+      style={{
+        position: "absolute",
+        top: 5,
+        left,
+        width: overlayWidth,
+        height: 12,
+        border: true,
+        borderStyle: "rounded",
+        borderColor: theme.warning,
+        backgroundColor: theme.panel,
+        flexDirection: "column",
+        padding: 1,
+        gap: 1,
+      }}
+    >
+      <text fg={theme.warning}>
+        {busy
+          ? `${cardActionLabel(target.action)} card`
+          : `Confirm ${cardActionLabel(target.action)}?`}
+      </text>
+      <text fg={theme.text}>{truncate(target.title, overlayWidth - 6)}</text>
+      <text fg={theme.muted}>issue     {truncate(target.issueId, overlayWidth - 16)}</text>
+      <text fg={theme.muted}>
+        This appends an orchestration card event.
+      </text>
       <text fg={theme.warning}>Enter confirms, Esc cancels.</text>
     </box>
   );
@@ -4021,6 +4221,17 @@ function CardRow({
   selected: boolean;
 }) {
   const tone = cardToneForLane(item.laneId, item.card.state);
+  const label = item.card.issue_identifier || item.card.issue_id;
+  const policy = cardPolicySummary(item.card);
+  const runtime = [
+    item.card.run_id ? "run" : "",
+    item.card.agent_id ? "agent" : "",
+    typeof item.card.attempt === "number" && item.card.attempt > 0
+      ? `try ${item.card.attempt}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <box
       style={{
@@ -4031,11 +4242,15 @@ function CardRow({
     >
       <text fg={selected ? theme.focus : theme.text}>
         {selected ? "> " : ""}
-        {truncate(item.card.title || item.card.issue_identifier || item.id, 32)}
+        {truncate(item.card.title || label, 38)}
       </text>
       <text fg={toneColor(tone)}>
         {"  "}
-        {item.laneId.padEnd(12)} {truncate(item.card.issue_id, 16)}
+        {item.laneId.padEnd(12)} {truncate(label, 18)}
+      </text>
+      <text fg={cardPolicyTone(item.card)}>
+        {"  "}
+        {truncate([policy, runtime].filter(Boolean).join("  "), 42)}
       </text>
     </box>
   );
@@ -4056,6 +4271,9 @@ function CardDetailPanel({
   selectedMissing: boolean;
   artifact: string | null;
 }) {
+  const actionSummary = selectedItem
+    ? cardAvailableActionSummary(selectedItem.card)
+    : "";
   return (
     <Panel
       title="Card detail"
@@ -4065,42 +4283,66 @@ function CardDetailPanel({
       height={compact ? undefined : "100%"}
     >
       {selectedItem ? (
-        <box style={{ flexDirection: "column", gap: 1, marginTop: 1 }}>
-          <text fg={theme.text}>
-            title      {selectedItem.card.title ?? "-"}
-          </text>
-          <text fg={theme.muted}>issue      {selectedItem.card.issue_id}</text>
-          <text fg={theme.text}>lane       {selectedItem.laneTitle}</text>
-          <text fg={theme.text}>state      {selectedItem.card.state}</text>
-          <text fg={theme.muted}>
-            policy    {selectedItem.card.policy_status ?? "-"}
-          </text>
-          <text fg={theme.muted}>
-            run       {selectedItem.card.run_id ?? "-"}
-          </text>
-          {selectedItem.card.run_id && (
-            <text fg={theme.focus}>enter     open linked run</text>
-          )}
-          <text fg={theme.muted}>
-            agent     {selectedItem.card.agent_id ?? "-"}
-          </text>
-          <text fg={theme.muted}>
-            actor     {selectedItem.card.actor_id ?? "-"}
-          </text>
-          <text fg={theme.focus}>status</text>
-          <scrollbox style={{ flexGrow: 1 }}>
+        <scrollbox style={{ flexGrow: 1 }}>
+          <box style={{ flexDirection: "column", gap: 1, marginTop: 1 }}>
+            <text fg={theme.text}>
+              title      {truncate(selectedItem.card.title ?? "-", compact ? 54 : 110)}
+            </text>
+            <text fg={theme.muted}>
+              issue      {selectedItem.card.issue_identifier ?? selectedItem.card.issue_id}
+            </text>
+            <text fg={toneColor(cardToneForLane(selectedItem.laneId, selectedItem.card.state))}>
+              lane       {selectedItem.laneTitle} / {selectedItem.card.state}
+            </text>
+            <text fg={cardPolicyTone(selectedItem.card)}>
+              policy     {cardPolicySummary(selectedItem.card)}
+            </text>
+            <text fg={theme.muted}>
+              outcome    {selectedItem.card.last_outcome || "-"}
+            </text>
+            <text fg={theme.muted}>
+              event      {selectedItem.card.last_event_type || "-"}
+            </text>
+            <text fg={theme.muted}>
+              updated    {selectedItem.card.last_event_at || "-"}
+            </text>
+            <text fg={theme.muted}>
+              attempt    {typeof selectedItem.card.attempt === "number" ? selectedItem.card.attempt : "-"}
+            </text>
+            <text fg={theme.muted}>
+              retry_due  {selectedItem.card.retry_due_at || "-"}
+            </text>
+            <text fg={selectedItem.card.run_id ? theme.focus : theme.muted}>
+              run        {selectedItem.card.run_id || "-"}
+            </text>
+            <text fg={theme.muted}>
+              agent      {selectedItem.card.agent_id || "-"}
+            </text>
+            <text fg={theme.muted}>
+              actor      {selectedItem.card.actor_id || "-"}
+            </text>
+            <text fg={theme.focus}>actions</text>
             <text fg={theme.text}>
               {truncate(
-                selectedItem.card.denial_reason ||
-                  selectedItem.card.suggestion ||
-                  selectedItem.card.last_outcome ||
-                  selectedItem.card.last_event_type ||
-                  "No card status detail recorded.",
-                120,
+                [
+                  selectedItem.card.run_id ? "Enter linked run" : "",
+                  actionSummary,
+                  "n context run",
+                ]
+                  .filter(Boolean)
+                  .join("  "),
+                compact ? 68 : 120,
               )}
             </text>
-          </scrollbox>
-        </box>
+            <text fg={theme.focus}>status detail</text>
+            <text fg={theme.text}>
+              {truncate(cardStatusDetail(selectedItem.card), compact ? 68 : 120)}
+            </text>
+            <text fg={theme.subtle}>
+              {truncate(cardStatusDetail(selectedItem.card).slice(compact ? 68 : 120), compact ? 68 : 120)}
+            </text>
+          </box>
+        </scrollbox>
       ) : selectedMissing ? (
         <PanelState
           tone="warning"
@@ -4692,6 +4934,112 @@ function cardToneForLane(laneID: string, state: string): Tone {
       if (state === "completed" || state === "done") return "success";
       return "muted";
   }
+}
+
+function cardPolicyTone(card: OrchestrationCard): string {
+  if (card.denial_reason || card.policy_status === "denied") {
+    return theme.danger;
+  }
+  if (card.suggestion || card.policy_status === "blocked") {
+    return theme.warning;
+  }
+  if (card.policy_status === "ok" || card.eligibility === "eligible") {
+    return theme.success;
+  }
+  return theme.muted;
+}
+
+function cardPolicySummary(card: OrchestrationCard): string {
+  const policy = card.policy_status?.trim() || "policy unknown";
+  const eligibility = card.eligibility?.trim();
+  if (eligibility) return `${policy} / ${eligibility}`;
+  return policy;
+}
+
+function cardStatusDetail(card: OrchestrationCard): string {
+  return (
+    card.denial_reason ||
+    card.suggestion ||
+    card.last_outcome ||
+    card.last_event_type ||
+    "No card status detail recorded."
+  );
+}
+
+function cardActionAvailability(
+  card: OrchestrationCard,
+  action: OrchestrationCardAction,
+): { available: boolean; reason: string } {
+  const state = card.state.trim().toLowerCase();
+  if (state === "running" || state === "claimed") {
+    return {
+      available: false,
+      reason: `card is ${card.state}`,
+    };
+  }
+  if (
+    action === "retry-now" &&
+    card.lane !== "Blocked" &&
+    card.lane !== "RetryQueued"
+  ) {
+    return {
+      available: false,
+      reason: "retry only works for blocked or retry-queued cards",
+    };
+  }
+  return { available: true, reason: "" };
+}
+
+function cardAvailableActionSummary(card: OrchestrationCard): string {
+  const actions: string[] = [];
+  if (cardActionAvailability(card, "mark-done").available) actions.push("d done");
+  if (cardActionAvailability(card, "release").available) actions.push("u release");
+  if (cardActionAvailability(card, "retry-now").available) actions.push("t retry");
+  return actions.length > 0 ? actions.join("  ") : "no card actions available";
+}
+
+function cardActionLabel(action: OrchestrationCardAction): string {
+  switch (action) {
+    case "mark-done":
+      return "mark done";
+    case "release":
+      return "release";
+    case "retry-now":
+      return "retry now";
+  }
+}
+
+function cardActionDoneLabel(action: OrchestrationCardAction): string {
+  switch (action) {
+    case "mark-done":
+      return "marked done";
+    case "release":
+      return "released";
+    case "retry-now":
+      return "queued for retry";
+  }
+}
+
+function cardLaneTitle(laneID: string): string {
+  switch (laneID) {
+    case "RetryQueued":
+      return "Retry queued";
+    default:
+      return laneID || "Other";
+  }
+}
+
+function cardWorkItemFromCard(
+  card: OrchestrationCard,
+  previous?: OrchestrationCardWorkItem,
+): OrchestrationCardWorkItem {
+  const laneId = card.lane ?? previous?.laneId ?? "Other";
+  return {
+    id: card.issue_id,
+    laneId,
+    laneTitle: cardLaneTitle(laneId),
+    card,
+  };
 }
 
 function nextActivityScope(scope: ActivityScope): ActivityScope {

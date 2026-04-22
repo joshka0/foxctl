@@ -2,6 +2,8 @@ import type {
   OrchestrationBoard,
   OrchestrationBoardArtifactRef,
   OrchestrationCard,
+  OrchestrationCardAction,
+  OrchestrationCardActionResult,
   Room,
   RoomTask,
   V2RunTranscript,
@@ -377,6 +379,12 @@ export interface OrchestrationCardWorkResult {
   board: OrchestrationBoard | null;
   artifact: OrchestrationBoardArtifactRef | null;
   items: OrchestrationCardWorkItem[];
+}
+
+export interface ApplyOrchestrationCardActionInput {
+  workspaceId?: string;
+  issueId: string;
+  action: OrchestrationCardAction;
 }
 
 export async function getRuns(params?: {
@@ -807,6 +815,29 @@ export async function getOrchestrationCardWork(params?: {
       })),
     );
   return { ...result, items };
+}
+
+export async function applyOrchestrationCardAction(
+  input: ApplyOrchestrationCardActionInput,
+): Promise<OrchestrationCardActionResult> {
+  const issueId = input.issueId.trim();
+  if (issueId === "") {
+    throw new Error("issue_id is required");
+  }
+  const envelope = await requestEnvelope<OrchestrationCardActionResult>(
+    "/api/orchestration/card-action",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request_id: `req-foxterm-${newIDFragment()}`,
+        workspace_id: input.workspaceId ?? WORKSPACE_ID,
+        issue_id: issueId,
+        action: input.action,
+      }),
+    },
+  );
+  return unwrapEnvelope(envelope);
 }
 
 export function subscribeToV2Stream(params: {

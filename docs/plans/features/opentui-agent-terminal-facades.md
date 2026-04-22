@@ -87,6 +87,9 @@ The first backend facade tranche is partially implemented:
 - foxterm now has a local command palette on `:` / `Ctrl+p` that filters
   discoverable run, room, agent, ATCP, card, navigation, and layout actions,
   including disabled and destructive states.
+- foxterm Cards now render denser card status, policy, runtime-link, and retry
+  metadata and can apply guarded `mark-done`, `release`, and `retry-now`
+  actions through `/api/orchestration/card-action`.
 - `foxctl web serve --atcp` can host an embedded ATCP daemon in the same
   process as the web API, while the standalone `cmd/atcpd` binary remains
   available for split-process deployments.
@@ -666,7 +669,9 @@ dedupe across room/card activity is still pending.
 
 Status: first local palette is available through `:` / `Ctrl+p`. It dispatches
 existing guarded foxterm actions and keeps disabled/destructive state visible;
-the backend action-inventory facade remains a later integration layer.
+the backend action-inventory facade remains a later integration layer. Cards
+also expose first-class guarded board actions (`d`, `u`, `t`) backed by the
+orchestration card action facade.
 
 ## Worker Split
 

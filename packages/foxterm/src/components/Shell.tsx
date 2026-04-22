@@ -161,6 +161,8 @@ function Footer({
                     ? "ATCP screen  Tab/v cycle  p prompt  x stop  Esc close"
         : mode === "confirmKill"
           ? "confirm kill  Enter confirm  Esc cancel"
+          : mode === "confirmCardAction"
+            ? "confirm card action  Enter confirm  Esc cancel"
           : mode === "confirmATCPStop"
             ? "confirm ATCP stop  Enter confirm  Esc cancel"
       : `${mode === "help" ? "help" : focus}  activity ${activityScope}`;
@@ -178,8 +180,8 @@ function Footer({
       <text fg={theme.focus}>{truncate(left, compact ? 28 : 44)}</text>
       <text fg={theme.muted}>
         {compact
-          ? ": palette  1/2/3 scope  b/w hide  ,/. resize  -/= agent  j/k Enter  n + m s S v p c x / r ? q"
-          : "Tab focus  : palette  1/2/3 scope  b scope  w list  ,/. resize focused  -/= agent panes  j/k move  Enter open  n context run  + room  m message  s agent  S cli  v atcp  p prompt  c continue  x kill/stop  / filter  a scope  r refresh  ? help  q quit"}
+          ? ": palette  1/2/3 scope  b/w hide  d/u/t card  ,/. resize  -/= agent  j/k Enter  n + m s S v p c x / r ? q"
+          : "Tab focus  : palette  1/2/3 scope  b scope  w list  d/u/t card actions  ,/. resize focused  -/= agent panes  j/k move  Enter open  n context run  + room  m message  s agent  S cli  v atcp  p prompt  c continue  x kill/stop  / filter  a scope  r refresh  ? help  q quit"}
       </text>
     </box>
   );

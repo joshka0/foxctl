@@ -12,6 +12,7 @@ export type Mode =
   | "atcpPrompt"
   | "atcpScreen"
   | "confirmKill"
+  | "confirmCardAction"
   | "confirmATCPStop";
 export type LoadState = "idle" | "loading" | "ready" | "error";
 export type ActivityScope = "focused" | "important" | "all" | "debug";
