@@ -78,7 +78,8 @@ interface RunOutputSummary {
 
 type ComposerTarget =
   | { kind: "new" }
-  | { kind: "continue"; runId: string };
+  | { kind: "continue"; runId: string }
+  | { kind: "context"; source: string };
 
 export function App({ onExit }: AppProps) {
   const { width, height } = useTerminalDimensions();
@@ -269,6 +270,8 @@ export function App({ onExit }: AppProps) {
           text:
             target.kind === "continue"
               ? `follow-up sent to ${result.run_id}`
+              : target.kind === "context"
+                ? `context run ${result.run_id} started`
               : `run ${result.run_id} started`,
         });
         setTimeout(() => void refreshRuns(result.run_id), 500);
@@ -280,6 +283,8 @@ export function App({ onExit }: AppProps) {
         text:
           target.kind === "continue"
             ? `follow-up completed on ${result.run_id}`
+            : target.kind === "context"
+              ? `context run ${result.run_id} completed`
             : `run ${result.run_id} completed`,
       });
     } catch (error) {
@@ -300,6 +305,27 @@ export function App({ onExit }: AppProps) {
     setComposerTarget(target);
     setMode("compose");
     setFocus("composer");
+  };
+
+  const jumpToRun = (runId: string) => {
+    const trimmed = runId.trim();
+    if (trimmed === "") return;
+    setNavIndex(0);
+    setSelectedRunId(trimmed);
+    setFocus("detail");
+    setStatus({ tone: "focus", text: `selected run ${trimmed}` });
+    if (!runs.some((run) => run.run_id === trimmed)) {
+      setRuns((current) => [
+        {
+          run_id: trimmed,
+          status: "unknown",
+          command: "run",
+          updated_at: new Date().toISOString(),
+        },
+        ...current,
+      ]);
+      setTimeout(() => void refreshRuns(trimmed), 250);
+    }
   };
 
   const refreshRunTranscript = async (runId: string) => {
@@ -631,6 +657,22 @@ export function App({ onExit }: AppProps) {
       openComposer({ kind: "new" });
       return;
     }
+    if (name === "n" && activeView === "rooms") {
+      openComposer({
+        kind: "context",
+        source: contextSourceForRoomTask(selectedRoomTaskItem),
+      });
+      setComposerText(contextPromptForRoomTask(selectedRoomTaskItem));
+      return;
+    }
+    if (name === "n" && activeView === "cards") {
+      openComposer({
+        kind: "context",
+        source: contextSourceForCard(selectedCardItem),
+      });
+      setComposerText(contextPromptForCard(selectedCardItem));
+      return;
+    }
     if (name === "c" && activeView === "runs") {
       if (selectedRun?.run_id) {
         openComposer({ kind: "continue", runId: selectedRun.run_id });
@@ -669,6 +711,10 @@ export function App({ onExit }: AppProps) {
     }
     if (isSubmitKey(key) && activeView === "runs" && focus === "worklist") {
       setFocus("detail");
+      return;
+    }
+    if (isSubmitKey(key) && activeView === "cards" && selectedCardItem?.card.run_id) {
+      jumpToRun(selectedCardItem.card.run_id);
       return;
     }
     if (name === "left" || name === "h") {
@@ -952,13 +998,20 @@ function RunComposer({
   busyTick: number;
   modelEndpoint: V2ModelEndpoint | null;
 }) {
-  const label = target.kind === "continue" ? "follow-up" : "prompt";
+  const label =
+    target.kind === "continue"
+      ? "follow-up"
+      : target.kind === "context"
+        ? "context"
+        : "prompt";
   const spinner = busy ? spinnerFrame(busyTick) : "";
   const endpoint = modelEndpointLabel(modelEndpoint);
   const visibleValue =
     value.trim() === ""
       ? target.kind === "continue"
         ? `c to continue ${truncate(target.runId, compact ? 24 : 40)}`
+        : target.kind === "context"
+          ? `n to run from ${truncate(target.source, compact ? 26 : 44)}`
         : "n to compose a v2 worker run"
       : truncate(value, compact ? 58 : 120);
   return (
@@ -1584,6 +1637,9 @@ function CardDetailPanel({
           <text fg={theme.muted}>
             run       {selectedItem.card.run_id ?? "-"}
           </text>
+          {selectedItem.card.run_id && (
+            <text fg={theme.focus}>enter     open linked run</text>
+          )}
           <text fg={theme.muted}>
             agent     {selectedItem.card.agent_id ?? "-"}
           </text>
@@ -2178,6 +2234,66 @@ function matchesCardFilter(
     item.card.denial_reason,
     item.card.suggestion,
   ]);
+}
+
+function contextSourceForRoomTask(item?: RoomTaskWorkItem): string {
+  if (!item) return "room context";
+  if (item.task) return `room task ${item.task.id}`;
+  return `room ${item.room.id}`;
+}
+
+function contextSourceForCard(item?: OrchestrationCardWorkItem): string {
+  if (!item) return "card context";
+  return `card ${item.card.issue_identifier || item.card.issue_id}`;
+}
+
+function contextPromptForRoomTask(item?: RoomTaskWorkItem): string {
+  if (!item) return "Inspect the selected room context and propose the next action.";
+  if (item.task) {
+    return [
+      `Work on room task ${item.task.id}.`,
+      `Room: ${item.room.title} (${item.room.id})`,
+      `Task: ${item.task.title}`,
+      `Status: ${item.task.status}`,
+      item.task.scope_path ? `Scope: ${item.task.scope_path}` : "",
+      item.task.blocked_reason ? `Blocked: ${item.task.blocked_reason}` : "",
+      item.task.notes || item.task.description
+        ? `Notes: ${item.task.notes || item.task.description}`
+        : "",
+      "Inspect the relevant context and propose or take the next concrete step.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  return [
+    `Inspect room ${item.room.id}.`,
+    `Room: ${item.room.title}`,
+    item.room.latest_subject ? `Latest: ${item.room.latest_subject}` : "",
+    item.room.latest_preview ? `Preview: ${item.room.latest_preview}` : "",
+    "Summarize the current state and suggest the next concrete action.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function contextPromptForCard(item?: OrchestrationCardWorkItem): string {
+  if (!item) return "Inspect the selected orchestration card and propose the next action.";
+  const card = item.card;
+  return [
+    `Work on orchestration card ${card.issue_id}.`,
+    card.issue_identifier ? `Issue: ${card.issue_identifier}` : "",
+    card.title ? `Title: ${card.title}` : "",
+    `Lane: ${item.laneTitle}`,
+    `State: ${card.state}`,
+    card.policy_status ? `Policy: ${card.policy_status}` : "",
+    card.denial_reason ? `Denied: ${card.denial_reason}` : "",
+    card.suggestion ? `Suggestion: ${card.suggestion}` : "",
+    card.last_outcome ? `Last outcome: ${card.last_outcome}` : "",
+    card.run_id ? `Linked run: ${card.run_id}` : "",
+    "Inspect the relevant context and propose or take the next concrete step.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function matchesFilter(filterText: string, values: Array<unknown>): boolean {

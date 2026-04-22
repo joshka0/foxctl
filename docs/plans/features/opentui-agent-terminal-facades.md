@@ -47,6 +47,8 @@ The first backend facade tranche is partially implemented:
   and assistant output.
 - foxterm can submit follow-up turns against the selected run ID, keeping the
   conversation in one run stream and transcript.
+- foxterm can seed a new run from the selected room task or orchestration card,
+  and cards with `run_id` can jump directly to the linked run.
 
 Remaining hard blockers:
 

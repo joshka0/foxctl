@@ -32,7 +32,7 @@ Runs view shortcuts:
 
 - `n` opens the prompt composer.
 - `c` composes a follow-up turn on the selected run stream.
-- `Enter` submits the composed prompt or opens the selected run detail.
+- `Enter` submits the composed prompt, opens the selected run detail, or opens a card's linked run.
 - `x` opens a confirmation prompt for killing the selected active run.
 - `/` filters the active worklist.
 - `a` cycles activity scopes.
@@ -41,3 +41,6 @@ Runs view shortcuts:
 Foxterm starts runs asynchronously, renders the selected run transcript, and
 follows `/api/v2/events/stream` for live activity. The synchronous
 `POST /api/v2/runs` path remains available for non-interactive clients.
+
+In Rooms and Cards, `n` seeds a new run prompt with the selected task/card
+context. In Cards, `Enter` jumps to the card's linked run when one exists.
