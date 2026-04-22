@@ -82,6 +82,7 @@ export function App({ onExit }: AppProps) {
   const { width, height } = useTerminalDimensions();
   const short = height < 28;
   const compact = width < 120 || short;
+  const focusOnly = compact && short;
   const tooSmall = width < 60 || height < 18;
   const [mode, setMode] = useState<Mode>("normal");
   const [focus, setFocus] = useState<FocusRegion>("worklist");
@@ -628,6 +629,18 @@ export function App({ onExit }: AppProps) {
       setFocus("detail");
       return;
     }
+    if (name === "left" || name === "h") {
+      if (focus === "detail" || focus === "composer") {
+        setFocus("worklist");
+        return;
+      }
+    }
+    if (name === "right" || name === "l") {
+      if (focus === "worklist") {
+        setFocus("detail");
+        return;
+      }
+    }
     if (name === "up" || name === "k") {
       if (focus === "nav") setNavIndex((i) => Math.max(0, i - 1));
       if (focus === "worklist" && activeView === "runs") {
@@ -682,85 +695,100 @@ export function App({ onExit }: AppProps) {
       ) : (
         <>
           <MainRegion compact={compact}>
-            <Sidebar
-              compact={compact}
-              focused={focus === "nav"}
-              activeIndex={navIndex}
-            />
+            {!focusOnly && (
+              <Sidebar
+                compact={compact}
+                focused={focus === "nav"}
+                activeIndex={navIndex}
+              />
+            )}
             {activeView === "rooms" ? (
               <>
-                <RoomTaskListPanel
-                  compact={compact}
-                  short={short}
-                  focused={focus === "worklist"}
-                  sections={roomTaskSections}
-                  selectedId={selectedRoomTaskId}
-                  status={status}
-                  loadState={roomTaskLoadState}
-                  lastLoadedAt={lastRoomTaskLoadAt}
-                  roomCount={roomCount}
-                  sourceCount={roomTaskItems.length}
-                  filterText={filterText}
-                />
-                <RoomTaskDetailPanel
-                  compact={compact}
-                  focused={focus === "detail"}
-                  selectedItem={selectedRoomTaskItem}
-                  selectedId={selectedRoomTaskId}
-                  selectedMissing={selectedRoomTaskMissing}
-                  roomCount={roomCount}
-                />
+                {(!focusOnly || focus === "worklist") && (
+                  <RoomTaskListPanel
+                    compact={compact}
+                    short={short}
+                    focused={focus === "worklist"}
+                    sections={roomTaskSections}
+                    selectedId={selectedRoomTaskId}
+                    status={status}
+                    loadState={roomTaskLoadState}
+                    lastLoadedAt={lastRoomTaskLoadAt}
+                    roomCount={roomCount}
+                    sourceCount={roomTaskItems.length}
+                    filterText={filterText}
+                  />
+                )}
+                {(!focusOnly || focus !== "worklist") && (
+                  <RoomTaskDetailPanel
+                    compact={compact}
+                    focused={focus === "detail"}
+                    selectedItem={selectedRoomTaskItem}
+                    selectedId={selectedRoomTaskId}
+                    selectedMissing={selectedRoomTaskMissing}
+                    roomCount={roomCount}
+                  />
+                )}
               </>
             ) : activeView === "cards" ? (
               <>
-                <CardListPanel
-                  compact={compact}
-                  short={short}
-                  focused={focus === "worklist"}
-                  sections={cardSections}
-                  selectedId={selectedCardId}
-                  status={status}
-                  loadState={cardLoadState}
-                  lastLoadedAt={lastCardLoadAt}
-                  artifact={cardArtifact}
-                  sourceCount={cardItems.length}
-                  filterText={filterText}
-                />
-                <CardDetailPanel
-                  compact={compact}
-                  focused={focus === "detail"}
-                  selectedItem={selectedCardItem}
-                  selectedId={selectedCardId}
-                  selectedMissing={selectedCardMissing}
-                  artifact={cardArtifact}
-                />
+                {(!focusOnly || focus === "worklist") && (
+                  <CardListPanel
+                    compact={compact}
+                    short={short}
+                    focused={focus === "worklist"}
+                    sections={cardSections}
+                    selectedId={selectedCardId}
+                    status={status}
+                    loadState={cardLoadState}
+                    lastLoadedAt={lastCardLoadAt}
+                    artifact={cardArtifact}
+                    sourceCount={cardItems.length}
+                    filterText={filterText}
+                  />
+                )}
+                {(!focusOnly || focus !== "worklist") && (
+                  <CardDetailPanel
+                    compact={compact}
+                    focused={focus === "detail"}
+                    selectedItem={selectedCardItem}
+                    selectedId={selectedCardId}
+                    selectedMissing={selectedCardMissing}
+                    artifact={cardArtifact}
+                  />
+                )}
               </>
             ) : (
               <>
-                <RunListPanel
-                  compact={compact}
-                  short={short}
-                  focused={focus === "worklist"}
-                  sections={runSections}
-                  selectedId={selectedRunId}
-                  status={status}
-                  loadState={runLoadState}
-                  lastLoadedAt={lastRunLoadAt}
-                  sourceCount={runs.length}
-                  filterText={filterText}
-                />
-                <RunDetailPanel
-                  compact={compact}
-                  focused={focus === "detail"}
-                  selectedRun={selectedRun}
-                  selectedRunId={selectedRunId}
-                  selectedRunMissing={selectedRunMissing}
-                  events={events}
-                  transcriptItems={transcriptItems}
-                  transcriptLoadState={transcriptLoadState}
-                  activityScope={activityScope}
-                  activeSection={activeNav.label}
-                />
+                {(!focusOnly || focus === "worklist") && (
+                  <RunListPanel
+                    compact={compact}
+                    short={short}
+                    focused={focus === "worklist"}
+                    sections={runSections}
+                    selectedId={selectedRunId}
+                    status={status}
+                    loadState={runLoadState}
+                    lastLoadedAt={lastRunLoadAt}
+                    sourceCount={runs.length}
+                    filterText={filterText}
+                  />
+                )}
+                {(!focusOnly || focus !== "worklist") && (
+                  <RunDetailPanel
+                    compact={compact}
+                    short={short}
+                    focused={focus === "detail"}
+                    selectedRun={selectedRun}
+                    selectedRunId={selectedRunId}
+                    selectedRunMissing={selectedRunMissing}
+                    events={events}
+                    transcriptItems={transcriptItems}
+                    transcriptLoadState={transcriptLoadState}
+                    activityScope={activityScope}
+                    activeSection={activeNav.label}
+                  />
+                )}
               </>
             )}
           </MainRegion>
@@ -1552,6 +1580,7 @@ function CardDetailPanel({
 
 function RunDetailPanel({
   compact,
+  short,
   focused,
   selectedRun,
   selectedRunId,
@@ -1563,6 +1592,7 @@ function RunDetailPanel({
   activeSection,
 }: {
   compact: boolean;
+  short: boolean;
   focused: boolean;
   selectedRun?: RunListItem;
   selectedRunId: string | null;
@@ -1623,27 +1653,31 @@ function RunDetailPanel({
               </text>
             )}
           </scrollbox>
-          <text fg={theme.focus}>activity {activityScope}</text>
-          <box style={{ height: compact ? 5 : 8, flexDirection: "column" }}>
-            <scrollbox style={{ flexGrow: 1 }}>
-              {eventLines.length === 0 ? (
-                <text fg={theme.muted}>
-                  {events.length === 0
-                    ? "Waiting for replay or live events."
-                    : "No events in this activity scope."}
-                </text>
-              ) : (
-                eventLines.map((line, index) => (
-                  <text key={`${line.key}-${index}`} fg={toneColor(line.tone)}>
-                    {truncate(
-                      `${line.text}${line.repeat > 1 ? ` x${line.repeat}` : ""}`,
-                      92,
-                    )}
-                  </text>
-                ))
-              )}
-            </scrollbox>
-          </box>
+          {!short && (
+            <>
+              <text fg={theme.focus}>activity {activityScope}</text>
+              <box style={{ height: compact ? 5 : 8, flexDirection: "column" }}>
+                <scrollbox style={{ flexGrow: 1 }}>
+                  {eventLines.length === 0 ? (
+                    <text fg={theme.muted}>
+                      {events.length === 0
+                        ? "Waiting for replay or live events."
+                        : "No events in this activity scope."}
+                    </text>
+                  ) : (
+                    eventLines.map((line, index) => (
+                      <text key={`${line.key}-${index}`} fg={toneColor(line.tone)}>
+                        {truncate(
+                          `${line.text}${line.repeat > 1 ? ` x${line.repeat}` : ""}`,
+                          92,
+                        )}
+                      </text>
+                    ))
+                  )}
+                </scrollbox>
+              </box>
+            </>
+          )}
         </box>
       ) : selectedRunMissing ? (
         <PanelState
