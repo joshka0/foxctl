@@ -4,6 +4,7 @@ import type {
   OrchestrationCard,
   Room,
   RoomTask,
+  V2RunTranscript,
   V2RuntimeEvent,
   V2StreamType,
 } from "@foxctl/data/types";
@@ -121,6 +122,21 @@ export async function getRun(runId: string): Promise<RunDetail> {
     `/api/v2/runs/${encodeURIComponent(runId)}`,
   );
   return unwrapEnvelope(envelope);
+}
+
+export async function getRunTranscript(
+  runId: string,
+): Promise<V2RunTranscript> {
+  const envelope = await requestEnvelope<V2RunTranscript>(
+    `/api/v2/runs/${encodeURIComponent(runId)}/transcript`,
+  );
+  const data = unwrapEnvelope(envelope);
+  const items = safeArray(data?.items);
+  return {
+    run_id: safeString(data?.run_id, runId),
+    count: typeof data?.count === "number" ? data.count : items.length,
+    items,
+  };
 }
 
 export async function createRun(

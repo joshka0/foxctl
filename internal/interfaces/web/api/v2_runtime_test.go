@@ -333,6 +333,30 @@ func TestV2RunsCreateExecutesRunAndProjectsState(t *testing.T) {
 	if count := int(eventsData["count"].(float64)); count < 3 {
 		t.Fatalf("event count=%d want at least 3", count)
 	}
+
+	transcriptReq := httptest.NewRequest(http.MethodGet, "/api/v2/runs/run-new-1/transcript", nil)
+	transcriptRR := httptest.NewRecorder()
+	V2RunDetailHandler(cfg, zerolog.Nop(), nil).ServeHTTP(transcriptRR, transcriptReq)
+	if transcriptRR.Code != http.StatusOK {
+		t.Fatalf("transcript status=%d body=%s", transcriptRR.Code, transcriptRR.Body.String())
+	}
+	transcriptBody := decodeResponseBody(t, transcriptRR)
+	transcriptData, _ := transcriptBody["data"].(map[string]any)
+	items, _ := transcriptData["items"].([]any)
+	if len(items) < 3 {
+		t.Fatalf("transcript items=%d want at least 3", len(items))
+	}
+	first, _ := items[0].(map[string]any)
+	if got := strings.TrimSpace(first["role"].(string)); got != "user" {
+		t.Fatalf("first transcript role=%q want user", got)
+	}
+	if got := strings.TrimSpace(first["text"].(string)); got != "summarize this run" {
+		t.Fatalf("first transcript text=%q", got)
+	}
+	last, _ := items[len(items)-1].(map[string]any)
+	if got := strings.TrimSpace(last["role"].(string)); got != "assistant" {
+		t.Fatalf("last transcript role=%q want assistant", got)
+	}
 }
 
 func TestV2RunsCreateAsyncStartsRunAndReturnsBeforeCompletion(t *testing.T) {

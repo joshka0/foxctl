@@ -8,6 +8,7 @@ built around the backend facades used by OpenTUI:
 - `GET /api/v2/runs`
 - `POST /api/v2/runs?async=true`
 - `GET /api/v2/runs/{run_id}`
+- `GET /api/v2/runs/{run_id}/transcript`
 - `POST /api/v2/runs/{run_id}/kill`
 - `GET /api/v2/events/stream`
 - job, room, CAS, skill, and MCP facade routes
@@ -36,6 +37,6 @@ Runs view shortcuts:
 - `a` cycles activity scopes.
 - `r` refreshes the active worklist.
 
-Foxterm starts runs asynchronously and follows `/api/v2/events/stream` for the
-selected run. The synchronous `POST /api/v2/runs` path remains available for
-non-interactive clients.
+Foxterm starts runs asynchronously, renders the selected run transcript, and
+follows `/api/v2/events/stream` for live activity. The synchronous
+`POST /api/v2/runs` path remains available for non-interactive clients.

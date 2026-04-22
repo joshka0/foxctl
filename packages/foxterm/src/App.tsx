@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 
-import type { V2RuntimeEvent } from "@foxctl/data/types";
+import type { V2RunTranscriptItem, V2RuntimeEvent } from "@foxctl/data/types";
 import {
   createRun,
   getOrchestrationCardWork,
   getRoomTaskWork,
+  getRunTranscript,
   getRuns,
   killRun,
   subscribeToV2Stream,
@@ -91,6 +92,11 @@ export function App({ onExit }: AppProps) {
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [runLoadState, setRunLoadState] = useState<LoadState>("idle");
   const [lastRunLoadAt, setLastRunLoadAt] = useState<string | null>(null);
+  const [transcriptItems, setTranscriptItems] = useState<
+    V2RunTranscriptItem[]
+  >([]);
+  const [transcriptLoadState, setTranscriptLoadState] =
+    useState<LoadState>("idle");
   const [roomTaskItems, setRoomTaskItems] = useState<RoomTaskWorkItem[]>([]);
   const [roomCount, setRoomCount] = useState(0);
   const [selectedRoomTaskId, setSelectedRoomTaskId] = useState<string | null>(
@@ -253,6 +259,17 @@ export function App({ onExit }: AppProps) {
     }
   };
 
+  const refreshRunTranscript = async (runId: string) => {
+    setTranscriptLoadState("loading");
+    try {
+      const transcript = await getRunTranscript(runId);
+      setTranscriptItems(transcript.items);
+      setTranscriptLoadState("ready");
+    } catch {
+      setTranscriptLoadState("error");
+    }
+  };
+
   const requestKillSelectedRun = () => {
     if (!selectedRun) {
       setStatus({ tone: "muted", text: "select a run first" });
@@ -403,6 +420,8 @@ export function App({ onExit }: AppProps) {
 
   useEffect(() => {
     setEvents([]);
+    setTranscriptItems([]);
+    setTranscriptLoadState("idle");
     if (activeView !== "runs") {
       setStreamStatus({ tone: "muted", text: "run stream paused" });
       return;
@@ -415,6 +434,7 @@ export function App({ onExit }: AppProps) {
       setStreamStatus({ tone: "muted", text: "no run selected" });
       return;
     }
+    void refreshRunTranscript(selectedRun.run_id);
     setStreamStatus({ tone: "focus", text: "connecting" });
     return subscribeToV2Stream({
       streamId: selectedRun.run_id,
@@ -431,6 +451,13 @@ export function App({ onExit }: AppProps) {
       },
       onEvent: (event) => {
         setEvents((current) => [...current.slice(-199), event]);
+        if (
+          event.event_type === "run.completed" ||
+          event.event_type === "run.failed" ||
+          event.event_type === "turn.recorded"
+        ) {
+          setTimeout(() => void refreshRunTranscript(event.stream_id), 100);
+        }
       },
     });
   }, [activeView, selectedRun?.run_id, selectedRunMissing]);
@@ -673,6 +700,8 @@ export function App({ onExit }: AppProps) {
                   selectedRunId={selectedRunId}
                   selectedRunMissing={selectedRunMissing}
                   events={events}
+                  transcriptItems={transcriptItems}
+                  transcriptLoadState={transcriptLoadState}
                   activityScope={activityScope}
                   activeSection={activeNav.label}
                 />
@@ -1460,6 +1489,8 @@ function RunDetailPanel({
   selectedRunId,
   selectedRunMissing,
   events,
+  transcriptItems,
+  transcriptLoadState,
   activityScope,
   activeSection,
 }: {
@@ -1469,6 +1500,8 @@ function RunDetailPanel({
   selectedRunId: string | null;
   selectedRunMissing: boolean;
   events: V2RuntimeEvent[];
+  transcriptItems: V2RunTranscriptItem[];
+  transcriptLoadState: LoadState;
   activityScope: ActivityScope;
   activeSection: string;
 }) {
@@ -1504,13 +1537,17 @@ function RunDetailPanel({
               x kill
             </span>
           </text>
-          <text fg={theme.focus}>assistant output</text>
+          <text fg={theme.focus}>transcript</text>
           <scrollbox style={{ flexGrow: 1 }}>
-            {output ? (
+            {transcriptItems.length > 0 ? (
+              <RunTranscriptLines items={transcriptItems} compact={compact} />
+            ) : output ? (
               <RunOutputLines output={output} compact={compact} />
             ) : (
               <text fg={theme.muted}>
-                Waiting for a completed turn summary.
+                {transcriptLoadState === "loading"
+                  ? "Loading transcript."
+                  : "Waiting for transcript activity."}
               </text>
             )}
           </scrollbox>
@@ -1555,6 +1592,33 @@ function RunDetailPanel({
   );
 }
 
+function RunTranscriptLines({
+  items,
+  compact,
+}: {
+  items: V2RunTranscriptItem[];
+  compact: boolean;
+}) {
+  const maxLines = compact ? 10 : 18;
+  return (
+    <>
+      {items.slice(0, maxLines).map((item) => (
+        <box key={item.id} style={{ flexDirection: "column" }}>
+          <text fg={transcriptTone(item)}>
+            {transcriptPrefix(item)} {truncate(item.title || item.kind, 28)}
+          </text>
+          {item.text && (
+            <text fg={theme.text}>  {truncate(item.text, compact ? 72 : 110)}</text>
+          )}
+        </box>
+      ))}
+      {items.length > maxLines && (
+        <text fg={theme.muted}>transcript truncated in foxterm view</text>
+      )}
+    </>
+  );
+}
+
 function RunOutputLines({
   output,
   compact,
@@ -1586,6 +1650,34 @@ function RunOutputLines({
       )}
     </>
   );
+}
+
+function transcriptTone(item: V2RunTranscriptItem): string {
+  switch (item.role) {
+    case "user":
+      return theme.focus;
+    case "assistant":
+      return theme.success;
+    case "tool":
+      return theme.warning;
+    case "system":
+    default:
+      return item.kind === "error" ? theme.danger : theme.muted;
+  }
+}
+
+function transcriptPrefix(item: V2RunTranscriptItem): string {
+  switch (item.role) {
+    case "user":
+      return "you";
+    case "assistant":
+      return "agent";
+    case "tool":
+      return "tool";
+    case "system":
+    default:
+      return "sys";
+  }
 }
 
 function nextFocus(

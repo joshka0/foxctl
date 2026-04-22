@@ -42,6 +42,9 @@ The first backend facade tranche is partially implemented:
 - `POST /api/v2/runs?async=true` starts a run under a cancelable background
   context and returns immediately with stable run/turn/request IDs; foxterm
   uses this path so the event stream becomes the live run surface.
+- `GET /api/v2/runs/{run_id}/transcript` returns a typed transcript derived
+  from v2 events, including prompt, tool calls/results, turn records, errors,
+  and assistant output.
 
 Remaining hard blockers:
 

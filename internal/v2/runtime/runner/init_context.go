@@ -52,6 +52,7 @@ func (p *Pipeline) stageInitContext(ctx context.Context, st *executionState) *v2
 	}
 
 	return p.appendEvent(ctx, st, StageInitContext, events.EventRunStarted, events.RunStartedPayload{
-		Mode: st.in.Mode,
+		Mode:   st.in.Mode,
+		Prompt: st.in.Prompt,
 	})
 }

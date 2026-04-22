@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -35,6 +36,7 @@ const (
 	commandV2RunsCreate = "v2/runs/create"
 	commandV2RunGet     = "v2/runs/get"
 	commandV2RunEvents  = "v2/runs/events"
+	commandV2Transcript = "v2/runs/transcript"
 	commandV2RunKill    = "v2/runs/kill"
 	commandV2Events     = "v2/events"
 	commandV2EventsLive = "v2/events/stream"
@@ -289,6 +291,8 @@ func V2RunDetailHandler(cfg config.Config, _ zerolog.Logger, _ OrchestrationRunt
 			handleV2RunGet(w, r, cfg, runID)
 		case len(parts) == 2 && parts[1] == "events":
 			handleV2RunEvents(w, r, cfg, runID)
+		case len(parts) == 2 && parts[1] == "transcript":
+			handleV2RunTranscript(w, r, cfg, runID)
 		case len(parts) == 2 && parts[1] == "kill":
 			handleV2RunKill(w, r, cfg, runID)
 		default:
@@ -484,6 +488,159 @@ func handleV2RunEvents(w http.ResponseWriter, r *http.Request, cfg config.Config
 		"count":         len(events),
 		"events":        events,
 	})
+}
+
+type v2RunTranscriptItem struct {
+	ID         string         `json:"id"`
+	Role       string         `json:"role"`
+	Kind       string         `json:"kind"`
+	Title      string         `json:"title,omitempty"`
+	Text       string         `json:"text,omitempty"`
+	EventID    string         `json:"event_id"`
+	EventType  string         `json:"event_type"`
+	OccurredAt time.Time      `json:"occurred_at"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
+func handleV2RunTranscript(w http.ResponseWriter, r *http.Request, cfg config.Config, runID string) {
+	if r.Method != http.MethodGet {
+		writeCommandError(w, http.StatusMethodNotAllowed, commandV2Transcript, "EARG", "method not allowed", map[string]any{
+			"hint": httpErrorHint(http.StatusMethodNotAllowed),
+		})
+		return
+	}
+	events, err := listV2Events(r, cfg, runID, coreevents.StreamTypeRun, 0, 0)
+	if err != nil {
+		writeV2RuntimeServiceError(w, commandV2Transcript, err)
+		return
+	}
+	items := make([]v2RunTranscriptItem, 0, len(events))
+	for _, evt := range events {
+		items = append(items, transcriptItemsForEvent(evt)...)
+	}
+	writeCommandOK(w, http.StatusOK, commandV2Transcript, map[string]any{
+		"run_id": runID,
+		"count":  len(items),
+		"items":  items,
+	})
+}
+
+func transcriptItemsForEvent(evt coreevents.Event) []v2RunTranscriptItem {
+	payload := eventPayloadMap(evt.Payload)
+	base := v2RunTranscriptItem{
+		EventID:    evt.ID,
+		EventType:  string(evt.EventType),
+		OccurredAt: evt.OccurredAt,
+	}
+	withID := func(item v2RunTranscriptItem, suffix string) v2RunTranscriptItem {
+		item.ID = fmt.Sprintf("%s:%s", evt.ID, suffix)
+		item.EventID = base.EventID
+		item.EventType = base.EventType
+		item.OccurredAt = base.OccurredAt
+		return item
+	}
+
+	switch evt.EventType {
+	case coreevents.EventRunStarted:
+		prompt := stringPayloadField(payload, "prompt")
+		if prompt != "" {
+			return []v2RunTranscriptItem{withID(v2RunTranscriptItem{
+				Role:  "user",
+				Kind:  "prompt",
+				Title: "prompt",
+				Text:  prompt,
+				Metadata: map[string]any{
+					"mode": stringPayloadField(payload, "mode"),
+				},
+			}, "prompt")}
+		}
+		return []v2RunTranscriptItem{withID(v2RunTranscriptItem{
+			Role:  "system",
+			Kind:  "status",
+			Title: "run started",
+			Text:  stringPayloadField(payload, "mode"),
+		}, "started")}
+	case coreevents.EventToolInvoked:
+		return []v2RunTranscriptItem{withID(v2RunTranscriptItem{
+			Role:  "tool",
+			Kind:  "tool_call",
+			Title: stringPayloadField(payload, "name"),
+			Text:  "invoked",
+			Metadata: map[string]any{
+				"iteration_index": payload["iteration_index"],
+			},
+		}, "tool-call")}
+	case coreevents.EventToolResponded:
+		return []v2RunTranscriptItem{withID(v2RunTranscriptItem{
+			Role:  "tool",
+			Kind:  "tool_result",
+			Title: stringPayloadField(payload, "name"),
+			Text:  stringPayloadField(payload, "status"),
+		}, "tool-result")}
+	case coreevents.EventTurnRecorded:
+		return []v2RunTranscriptItem{withID(v2RunTranscriptItem{
+			Role:  "system",
+			Kind:  "turn",
+			Title: stringPayloadField(payload, "turn_id"),
+			Text:  "turn recorded",
+			Metadata: map[string]any{
+				"iterations": payload["iterations"],
+				"tool_calls": payload["tool_calls"],
+			},
+		}, "turn")}
+	case coreevents.EventRunCompleted:
+		return []v2RunTranscriptItem{withID(v2RunTranscriptItem{
+			Role:  "assistant",
+			Kind:  "message",
+			Title: "assistant",
+			Text:  stringPayloadField(payload, "summary"),
+		}, "assistant")}
+	case coreevents.EventRunFailed, coreevents.EventStageFailed, coreevents.EventArtifactFailed:
+		return []v2RunTranscriptItem{withID(v2RunTranscriptItem{
+			Role:  "system",
+			Kind:  "error",
+			Title: stringPayloadField(payload, "kind"),
+			Text:  stringPayloadField(payload, "message"),
+			Metadata: map[string]any{
+				"fatal":     payload["fatal"],
+				"retryable": payload["retryable"],
+				"stage":     nestedPayloadField(payload, "details", "stage"),
+			},
+		}, "error")}
+	default:
+		return nil
+	}
+}
+
+func eventPayloadMap(raw json.RawMessage) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return map[string]any{}
+	}
+	return payload
+}
+
+func stringPayloadField(payload map[string]any, field string) string {
+	value, ok := payload[field]
+	if !ok {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(text)
+}
+
+func nestedPayloadField(payload map[string]any, objectField string, field string) any {
+	value, ok := payload[objectField].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return value[field]
 }
 
 type projectingV2EventStore struct {

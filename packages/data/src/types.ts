@@ -56,6 +56,35 @@ export interface V2RuntimeEvent {
   payload?: unknown;
 }
 
+export type V2TranscriptRole = "user" | "assistant" | "tool" | "system";
+
+export type V2TranscriptKind =
+  | "prompt"
+  | "message"
+  | "tool_call"
+  | "tool_result"
+  | "turn"
+  | "status"
+  | "error";
+
+export interface V2RunTranscriptItem {
+  id: string;
+  role: V2TranscriptRole;
+  kind: V2TranscriptKind;
+  title?: string;
+  text?: string;
+  event_id: string;
+  event_type: string;
+  occurred_at: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface V2RunTranscript {
+  run_id: string;
+  count: number;
+  items: V2RunTranscriptItem[];
+}
+
 export type V2EventStreamEventType =
   | "v2.connected"
   | "v2.event"
