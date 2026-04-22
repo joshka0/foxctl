@@ -78,4 +78,5 @@ Custom. Selecting a preset fills editable `agent`, `adapter`, and `command`
 fields; Custom keeps the raw `agent@adapter: command args` form, for example
 `codex-a@codex: codex --no-alt-screen`.
 The room detail panel shows attached ATCP sessions, command, adapter, and
-readiness so CLI-backed agents are visible after they start.
+readiness so CLI-backed agents are visible after they start. It also shows the
+latest non-empty rendered screen line when ATCP screen snapshots are available.

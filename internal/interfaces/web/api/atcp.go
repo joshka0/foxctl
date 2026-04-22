@@ -32,6 +32,7 @@ type atcpRoomSessionSummary struct {
 	Members   []httpjson.MemberResponse             `json:"members"`
 	Sessions  []httpjson.SessionResponse            `json:"sessions"`
 	Readiness map[string]httpjson.ReadinessResponse `json:"readiness,omitempty"`
+	Screens   map[string]any                        `json:"screens,omitempty"`
 	Count     int                                   `json:"count"`
 }
 
@@ -153,6 +154,7 @@ func handleATCPFoxctlRoomSessions(w http.ResponseWriter, r *http.Request, client
 	}
 	sessions := make([]httpjson.SessionResponse, 0, len(members))
 	readiness := make(map[string]httpjson.ReadinessResponse, len(members))
+	screens := make(map[string]any, len(members))
 	for _, member := range members {
 		session, ok := sessionsByID[member.SessionID]
 		if !ok {
@@ -163,12 +165,17 @@ func handleATCPFoxctlRoomSessions(w http.ResponseWriter, r *http.Request, client
 		if err == nil {
 			readiness[member.SessionID] = ready
 		}
+		screen, err := client.SessionScreen(r.Context(), member.SessionID)
+		if err == nil {
+			screens[member.SessionID] = screen
+		}
 	}
 	writeJSON(w, http.StatusOK, atcpRoomSessionSummary{
 		Room:      &room,
 		Members:   members,
 		Sessions:  sessions,
 		Readiness: readiness,
+		Screens:   screens,
 		Count:     len(sessions),
 	})
 }

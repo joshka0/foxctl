@@ -25,6 +25,7 @@ import {
   type AgentSummary,
   type ATCPMember,
   type ATCPReadiness,
+  type ATCPScreen,
   type ATCPSession,
   type OrchestrationCardWorkItem,
   type RoomLoop,
@@ -297,6 +298,9 @@ export function App({ onExit }: AppProps) {
   const [atcpReadiness, setATCPReadiness] = useState<
     Record<string, ATCPReadiness>
   >({});
+  const [atcpScreens, setATCPScreens] = useState<Record<string, ATCPScreen>>(
+    {},
+  );
   const [atcpLoadState, setATCPLoadState] = useState<LoadState>("idle");
   const filteredCardItems = useMemo(
     () => cardItems.filter((item) => matchesCardFilter(item, filterText)),
@@ -793,6 +797,7 @@ export function App({ onExit }: AppProps) {
       setATCPSessions([]);
       setATCPMembers([]);
       setATCPReadiness({});
+      setATCPScreens({});
       setATCPLoadState("idle");
       return;
     }
@@ -805,11 +810,13 @@ export function App({ onExit }: AppProps) {
       setATCPSessions(result.sessions);
       setATCPMembers(result.members);
       setATCPReadiness(result.readiness ?? {});
+      setATCPScreens(result.screens ?? {});
       setATCPLoadState("ready");
     } catch {
       setATCPSessions([]);
       setATCPMembers([]);
       setATCPReadiness({});
+      setATCPScreens({});
       setATCPLoadState("error");
     }
   };
@@ -932,6 +939,7 @@ export function App({ onExit }: AppProps) {
       setATCPSessions([]);
       setATCPMembers([]);
       setATCPReadiness({});
+      setATCPScreens({});
       setATCPLoadState("idle");
       return;
     }
@@ -944,6 +952,7 @@ export function App({ onExit }: AppProps) {
       setATCPSessions([]);
       setATCPMembers([]);
       setATCPReadiness({});
+      setATCPScreens({});
       setATCPLoadState("idle");
       return;
     }
@@ -1425,6 +1434,7 @@ export function App({ onExit }: AppProps) {
                     atcpSessions={atcpSessions}
                     atcpMembers={atcpMembers}
                     atcpReadiness={atcpReadiness}
+                    atcpScreens={atcpScreens}
                     atcpLoadState={atcpLoadState}
                   />
                 )}
@@ -2139,6 +2149,7 @@ function RoomTaskDetailPanel({
   atcpSessions,
   atcpMembers,
   atcpReadiness,
+  atcpScreens,
   atcpLoadState,
 }: {
   compact: boolean;
@@ -2156,6 +2167,7 @@ function RoomTaskDetailPanel({
   atcpSessions: ATCPSession[];
   atcpMembers: ATCPMember[];
   atcpReadiness: Record<string, ATCPReadiness>;
+  atcpScreens: Record<string, ATCPScreen>;
   atcpLoadState: LoadState;
 }) {
   return (
@@ -2216,6 +2228,7 @@ function RoomTaskDetailPanel({
             sessions={atcpSessions}
             members={atcpMembers}
             readiness={atcpReadiness}
+            screens={atcpScreens}
             loadState={atcpLoadState}
           />
         </box>
@@ -2241,6 +2254,7 @@ function RoomTaskDetailPanel({
           atcpSessions={atcpSessions}
           atcpMembers={atcpMembers}
           atcpReadiness={atcpReadiness}
+          atcpScreens={atcpScreens}
           atcpLoadState={atcpLoadState}
         />
       )}
@@ -2260,6 +2274,7 @@ function RoomSummaryDetail({
   atcpSessions,
   atcpMembers,
   atcpReadiness,
+  atcpScreens,
   atcpLoadState,
 }: {
   selectedItem?: RoomTaskWorkItem;
@@ -2273,6 +2288,7 @@ function RoomSummaryDetail({
   atcpSessions: ATCPSession[];
   atcpMembers: ATCPMember[];
   atcpReadiness: Record<string, ATCPReadiness>;
+  atcpScreens: Record<string, ATCPScreen>;
   atcpLoadState: LoadState;
 }) {
   if (!selectedItem) {
@@ -2328,6 +2344,7 @@ function RoomSummaryDetail({
         sessions={atcpSessions}
         members={atcpMembers}
         readiness={atcpReadiness}
+        screens={atcpScreens}
         loadState={atcpLoadState}
       />
     </box>
@@ -2338,11 +2355,13 @@ function RoomATCPPreview({
   sessions,
   members,
   readiness,
+  screens,
   loadState,
 }: {
   sessions: ATCPSession[];
   members: ATCPMember[];
   readiness: Record<string, ATCPReadiness>;
+  screens: Record<string, ATCPScreen>;
   loadState: LoadState;
 }) {
   const memberBySession = new Map(
@@ -2367,6 +2386,7 @@ function RoomATCPPreview({
         sessions.slice(0, 4).map((session) => {
           const member = memberBySession.get(session.id);
           const ready = readiness[session.id];
+          const screenLine = atcpScreenPreview(screens[session.id]);
           return (
             <box key={session.id} style={{ flexDirection: "column" }}>
               <text fg={atcpSessionTone(session, ready)}>
@@ -2377,6 +2397,9 @@ function RoomATCPPreview({
                 {truncate(session.adapter || "cli", 12)}{" "}
                 {truncate(session.cmd?.join(" ") || "-", 62)}
               </text>
+              {screenLine && (
+                <text fg={theme.text}>{truncate(screenLine, 78)}</text>
+              )}
             </box>
           );
         })
@@ -3208,6 +3231,15 @@ function atcpSessionTone(
     default:
       return theme.text;
   }
+}
+
+function atcpScreenPreview(screen?: ATCPScreen): string {
+  if (!screen || !Array.isArray(screen.lines)) return "";
+  for (let index = screen.lines.length - 1; index >= 0; index--) {
+    const line = screen.lines[index]?.trim();
+    if (line) return line;
+  }
+  return "";
 }
 
 function roomLoopStartCommand(roomId: string): string {

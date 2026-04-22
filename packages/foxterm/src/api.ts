@@ -278,6 +278,18 @@ export interface ATCPReadiness {
   last_output_at?: string;
 }
 
+export interface ATCPScreen {
+  rows: number;
+  cols: number;
+  lines: string[];
+  dirty_rows?: number[];
+  cursor?: {
+    row: number;
+    col: number;
+  };
+  alt_screen?: boolean;
+}
+
 export interface ATCPRoom {
   id: string;
   workspace: string;
@@ -317,6 +329,7 @@ export interface ATCPRoomSessionsResult {
   members: ATCPMember[];
   sessions: ATCPSession[];
   readiness?: Record<string, ATCPReadiness>;
+  screens?: Record<string, ATCPScreen>;
   count: number;
 }
 
@@ -642,6 +655,7 @@ export async function getATCPRoomSessions(params: {
     members,
     sessions,
     readiness: result?.readiness ?? {},
+    screens: result?.screens ?? {},
     count: typeof result?.count === "number" ? result.count : sessions.length,
   };
 }

@@ -72,6 +72,8 @@ The first backend facade tranche is partially implemented:
 - foxterm ATCP CLI spawn now uses an OpenTUI-style preset picker with editable
   agent, adapter, and command fields, while preserving raw
   `agent@adapter: command args` custom input.
+- ATCP session summaries now include rendered screen snapshots, and foxterm
+  shows the latest non-empty screen line for each CLI-backed room participant.
 
 Remaining hard blockers:
 
