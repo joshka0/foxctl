@@ -145,6 +145,8 @@ function Footer({
       ? `filter /${filterText}`
       : mode === "compose"
         ? "compose  Enter submit  Esc cancel"
+        : mode === "createRoom"
+          ? "new room  Enter create  Esc cancel"
         : mode === "confirmKill"
           ? "confirm kill  Enter confirm  Esc cancel"
       : `${mode === "help" ? "help" : focus}  activity ${activityScope}`;
@@ -162,8 +164,8 @@ function Footer({
       <text fg={theme.focus}>{truncate(left, compact ? 28 : 44)}</text>
       <text fg={theme.muted}>
         {compact
-          ? "1/2/3 scope  h/l panes  j/k Enter  n context  c x / a r ? q"
-          : "Tab focus  1/2/3 scope  j/k move  Enter open  n context run  c continue  x kill  / filter  a scope  r refresh  ? help  q quit"}
+          ? "1/2/3 scope  h/l pane  j/k Enter  n + c x / r ? q"
+          : "Tab focus  1/2/3 scope  j/k move  Enter open  n context run  + room  c continue  x kill  / filter  a scope  r refresh  ? help  q quit"}
       </text>
     </box>
   );

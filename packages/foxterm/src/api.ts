@@ -93,6 +93,17 @@ export interface RoomTaskWorkResult {
   items: RoomTaskWorkItem[];
 }
 
+export interface CreateRoomInput {
+  title: string;
+  id?: string;
+  description?: string;
+  workspaceId?: string;
+}
+
+export interface CreateRoomResult {
+  room: Room;
+}
+
 export interface OrchestrationCardWorkItem {
   id: string;
   laneId: string;
@@ -197,6 +208,29 @@ export async function killRun(runId: string): Promise<KillRunResult> {
     },
   );
   return unwrapEnvelope(envelope);
+}
+
+export async function createRoom(
+  input: CreateRoomInput,
+): Promise<CreateRoomResult> {
+  const title = input.title.trim();
+  if (title === "") {
+    throw new Error("room title is required");
+  }
+  const workspaceId = input.workspaceId ?? WORKSPACE_ID;
+  const body: Record<string, unknown> = {
+    workspace_id: workspaceId,
+    title,
+  };
+  const id = input.id?.trim();
+  const description = input.description?.trim();
+  if (id) body.id = id;
+  if (description) body.description = description;
+  return requestJSON<CreateRoomResult>("/api/rooms", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export async function getRoomTaskWork(params?: {
@@ -374,12 +408,16 @@ async function requestEnvelope<T>(
   }
 }
 
-async function requestJSON<T>(path: string): Promise<T> {
+async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const url = apiURL(path);
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: { Accept: "application/json" },
+      ...init,
+      headers: {
+        Accept: "application/json",
+        ...(init?.headers ?? {}),
+      },
     });
   } catch (error) {
     throw new Error(connectionErrorMessage(error));

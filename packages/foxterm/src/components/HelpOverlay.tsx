@@ -16,7 +16,7 @@ export function HelpOverlay({
         top: 4,
         left,
         width: overlayWidth,
-        height: 18,
+        height: 19,
         border: true,
         borderStyle: "rounded",
         borderColor: theme.focus,
@@ -33,6 +33,7 @@ export function HelpOverlay({
       <text fg={theme.text}>Up/Down or j/k    Move selection</text>
       <text fg={theme.text}>Enter             Open selected run detail</text>
       <text fg={theme.text}>n                 Compose run for active context</text>
+      <text fg={theme.text}>+ / Shift+n       Create a room in Rooms</text>
       <text fg={theme.text}>c                 Continue selected run</text>
       <text fg={theme.text}>Cards Enter       Open linked run</text>
       <text fg={theme.text}>x                 Kill selected active run</text>

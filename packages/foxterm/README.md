@@ -11,6 +11,7 @@ built around the backend facades used by OpenTUI:
 - `GET /api/v2/runs/{run_id}/transcript`
 - `POST /api/v2/runs/{run_id}/kill`
 - `GET /api/v2/events/stream`
+- `POST /api/rooms`
 - job, room, CAS, skill, and MCP facade routes
 
 Run locally after installing workspace dependencies:
@@ -34,6 +35,7 @@ Runs view shortcuts:
 - `c` composes a follow-up turn on the selected run stream.
 - `Enter` submits the composed prompt, opens the selected run detail, or opens a card's linked run.
 - `x` opens a confirmation prompt for killing the selected active run.
+- `+` or `Shift+n` creates a room from the Rooms view.
 - `/` filters the active worklist.
 - `a` cycles activity scopes.
 - `r` refreshes the active worklist.
@@ -42,5 +44,6 @@ Foxterm starts runs asynchronously, renders the selected run transcript, and
 follows `/api/v2/events/stream` for live activity. The synchronous
 `POST /api/v2/runs` path remains available for non-interactive clients.
 
-In Rooms and Cards, `n` seeds a new run prompt with the selected task/card
-context. In Cards, `Enter` jumps to the card's linked run when one exists.
+In Rooms, `+` creates a room in the active workspace, and `n` seeds a new run
+prompt with the selected room/task context. In Cards, `n` seeds a board/card
+context prompt, and `Enter` jumps to the card's linked run when one exists.

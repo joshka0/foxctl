@@ -3,6 +3,7 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 
 import type { V2RunTranscriptItem, V2RuntimeEvent } from "@foxctl/data/types";
 import {
+  createRoom,
   createRun,
   getOrchestrationCardWork,
   getRoomTaskWork,
@@ -97,6 +98,8 @@ export function App({ onExit }: AppProps) {
     kind: "new",
   });
   const [composerBusy, setComposerBusy] = useState(false);
+  const [roomComposerText, setRoomComposerText] = useState("");
+  const [roomCreateBusy, setRoomCreateBusy] = useState(false);
   const [busyTick, setBusyTick] = useState(0);
   const [modelEndpoint, setModelEndpoint] = useState<V2ModelEndpoint | null>(
     null,
@@ -307,6 +310,39 @@ export function App({ onExit }: AppProps) {
     setFocus("composer");
   };
 
+  const openRoomComposer = () => {
+    setMode("createRoom");
+    setFocus("composer");
+  };
+
+  const submitRoomCreate = async () => {
+    const title = roomComposerText.trim();
+    if (title === "" || roomCreateBusy) return;
+    setRoomCreateBusy(true);
+    setStatus({ tone: "focus", text: "creating room" });
+    try {
+      const result = await createRoom({
+        title,
+        workspaceId: WORKSPACE_ID,
+      });
+      setRoomComposerText("");
+      setMode("normal");
+      setFocus("detail");
+      await refreshRoomTasks(`room:${result.room.id}`);
+      setStatus({
+        tone: "success",
+        text: `room ${result.room.id} created`,
+      });
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text: error instanceof Error ? error.message : "failed to create room",
+      });
+    } finally {
+      setRoomCreateBusy(false);
+    }
+  };
+
   const jumpToRun = (runId: string) => {
     const trimmed = runId.trim();
     if (trimmed === "") return;
@@ -377,7 +413,7 @@ export function App({ onExit }: AppProps) {
     }
   };
 
-  const refreshRoomTasks = async () => {
+  const refreshRoomTasks = async (preferredItemId?: string) => {
     const hadItems = roomTaskItems.length > 0;
     setRoomTaskLoadState("loading");
     setStatus({ tone: "focus", text: "refreshing room tasks" });
@@ -390,7 +426,7 @@ export function App({ onExit }: AppProps) {
       setRoomCount(result.rooms.length);
       setRoomTaskItems(result.items);
       setSelectedRoomTaskId(
-        (current) => current ?? result.items[0]?.id ?? null,
+        (current) => preferredItemId ?? current ?? result.items[0]?.id ?? null,
       );
       setRoomTaskLoadState("ready");
       setLastRoomTaskLoadAt(new Date().toLocaleTimeString());
@@ -441,7 +477,7 @@ export function App({ onExit }: AppProps) {
   }, []);
 
   useEffect(() => {
-    if (!composerBusy) {
+    if (!composerBusy && !roomCreateBusy) {
       setBusyTick(0);
       return;
     }
@@ -449,7 +485,7 @@ export function App({ onExit }: AppProps) {
       setBusyTick((current) => current + 1);
     }, 120);
     return () => clearInterval(timer);
-  }, [composerBusy]);
+  }, [composerBusy, roomCreateBusy]);
 
   const refreshModelEndpoint = async () => {
     try {
@@ -475,10 +511,19 @@ export function App({ onExit }: AppProps) {
   }, [compact, focus]);
 
   useEffect(() => {
-    if (activeView !== "runs" && focus === "composer") {
+    const composerVisible =
+      activeView === "runs" || activeView === "rooms" || mode === "compose";
+    if (!composerVisible && focus === "composer") {
       setFocus("worklist");
     }
-  }, [activeView, focus]);
+  }, [activeView, focus, mode]);
+
+  useEffect(() => {
+    if (activeView !== "rooms" && mode === "createRoom") {
+      setRoomComposerText("");
+      setMode("normal");
+    }
+  }, [activeView, mode]);
 
   useEffect(() => {
     if (activeView !== "runs") return;
@@ -575,6 +620,10 @@ export function App({ onExit }: AppProps) {
         setComposerText("");
         setFocus("worklist");
       }
+      if (mode === "createRoom") {
+        setRoomComposerText("");
+        setFocus("worklist");
+      }
       if (mode === "confirmKill") {
         setPendingKillRunId(null);
       }
@@ -605,6 +654,21 @@ export function App({ onExit }: AppProps) {
       const char = keyChar(name);
       if (char) {
         setComposerText((current) => current + char);
+      }
+      return;
+    }
+    if (mode === "createRoom") {
+      if (isSubmitKey(key)) {
+        void submitRoomCreate();
+        return;
+      }
+      if (name === "backspace" || name === "delete") {
+        setRoomComposerText((current) => current.slice(0, -1));
+        return;
+      }
+      const char = keyChar(name);
+      if (char) {
+        setRoomComposerText((current) => current + char);
       }
       return;
     }
@@ -651,6 +715,10 @@ export function App({ onExit }: AppProps) {
         (current + delta + navItems.length) % navItems.length,
       );
       setFocus("worklist");
+      return;
+    }
+    if (activeView === "rooms" && isRoomCreateKey(key)) {
+      openRoomComposer();
       return;
     }
     if (name === "n" && activeView === "runs") {
@@ -705,7 +773,7 @@ export function App({ onExit }: AppProps) {
         nextFocus(current, {
           reverse: key.shift,
           compact,
-          hasComposer: activeView === "runs",
+          hasComposer: activeView === "runs" || activeView === "rooms",
         }),
       );
       return;
@@ -881,7 +949,7 @@ export function App({ onExit }: AppProps) {
               </>
             )}
           </MainRegion>
-          {activeView === "runs" && (
+          {(activeView === "runs" || mode === "compose") && (
             <RunComposer
               compact={compact}
               focused={focus === "composer" || mode === "compose"}
@@ -890,6 +958,15 @@ export function App({ onExit }: AppProps) {
               busy={composerBusy}
               busyTick={busyTick}
               modelEndpoint={modelEndpoint}
+            />
+          )}
+          {activeView === "rooms" && mode !== "compose" && (
+            <RoomComposer
+              compact={compact}
+              focused={focus === "composer" || mode === "createRoom"}
+              value={roomComposerText}
+              busy={roomCreateBusy}
+              busyTick={busyTick}
             />
           )}
         </>
@@ -1036,6 +1113,53 @@ function RunComposer({
         {busy ? `${spinner} ${label}` : label}
       </text>
       <text fg={theme.subtle}>{truncate(endpoint, compact ? 34 : 42)}</text>
+      <text fg={value.trim() === "" ? theme.muted : theme.text}>
+        {visibleValue}
+        {focused && !busy ? "_" : ""}
+      </text>
+    </box>
+  );
+}
+
+function RoomComposer({
+  compact,
+  focused,
+  value,
+  busy,
+  busyTick,
+}: {
+  compact: boolean;
+  focused: boolean;
+  value: string;
+  busy: boolean;
+  busyTick: number;
+}) {
+  const spinner = busy ? spinnerFrame(busyTick) : "";
+  const visibleValue =
+    value.trim() === ""
+      ? "+ to create a room"
+      : truncate(value, compact ? 66 : 130);
+  return (
+    <box
+      style={{
+        height: 3,
+        marginLeft: 1,
+        marginRight: 1,
+        marginBottom: 1,
+        border: true,
+        borderStyle: "single",
+        borderColor: focused ? theme.focus : theme.border,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingLeft: 1,
+        paddingRight: 1,
+        gap: 1,
+      }}
+    >
+      <text fg={focused ? theme.focus : theme.muted}>
+        {busy ? `${spinner} room` : "room"}
+      </text>
+      <text fg={theme.subtle}>{truncate(WORKSPACE_ID, compact ? 28 : 44)}</text>
       <text fg={value.trim() === "" ? theme.muted : theme.text}>
         {visibleValue}
         {focused && !busy ? "_" : ""}
@@ -1281,7 +1405,7 @@ function RoomTaskEmptyState({
       <PanelState
         tone="muted"
         title="No rooms found."
-        detail={`workspace ${WORKSPACE_ID}`}
+        detail={`Press + to create one in ${WORKSPACE_ID}.`}
       />
     );
   }
@@ -1298,7 +1422,7 @@ function RoomTaskEmptyState({
     <PanelState
       tone="muted"
       title="No room tasks found."
-      detail="Press n to start a room-context run."
+      detail="Press n for a context run, or + to create a room."
     />
   );
 }
@@ -2349,6 +2473,24 @@ function isSubmitKey(key: {
     key.sequence === "\n" ||
     key.raw === "\r" ||
     key.raw === "\n"
+  );
+}
+
+function isRoomCreateKey(key: {
+  name?: string;
+  shift?: boolean;
+  sequence?: string;
+  raw?: string;
+}): boolean {
+  return (
+    key.name === "+" ||
+    key.sequence === "+" ||
+    key.raw === "+" ||
+    (key.shift === true && key.name === "=") ||
+    (key.shift === true && key.name === "n") ||
+    key.name === "N" ||
+    key.sequence === "N" ||
+    key.raw === "N"
   );
 }
 
