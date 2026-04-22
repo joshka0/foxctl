@@ -57,6 +57,9 @@ The first backend facade tranche is partially implemented:
 - foxterm reads `/api/rooms/{id}/loop` for room-loop heartbeat and delivery
   owner status, and shows the `foxctl room loop` start command when message
   delivery is not ready.
+- foxterm can spawn a foxctl daemon agent into the selected room through
+  `/api/agents/spawn`, using the existing room-aware prompt/onboarding and room
+  membership attachment path.
 
 Remaining hard blockers:
 

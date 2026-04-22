@@ -15,6 +15,7 @@ built around the backend facades used by OpenTUI:
 - `GET /api/rooms/{room_id}/messages`
 - `POST /api/rooms/{room_id}/messages`
 - `GET /api/rooms/{room_id}/loop`
+- `POST /api/agents/spawn`
 - job, room, CAS, skill, and MCP facade routes
 
 Run locally after installing workspace dependencies:
@@ -40,6 +41,7 @@ Runs view shortcuts:
 - `x` opens a confirmation prompt for killing the selected active run.
 - `+` or `Shift+n` creates a room from the Rooms view.
 - `m` writes a message to the selected room.
+- `s` spawns a foxctl daemon agent into the selected room.
 - `/` filters the active worklist.
 - `a` cycles activity scopes.
 - `r` refreshes the active worklist.
@@ -57,3 +59,7 @@ and `Enter` jumps to the card's linked run when one exists.
 Room messages require the room loop to be active. Foxterm shows loop heartbeat
 and delivery-owner status in the room detail panel, plus a `./bin/foxctl room
 loop ...` start command when the loop is not ready.
+
+Room agent spawning uses `POST /api/agents/spawn` with the selected room ID.
+The spawn composer accepts `role` or `role: prompt`; when the prompt is omitted
+the backend uses its default room-aware prompt for that role.

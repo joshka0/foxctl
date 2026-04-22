@@ -15,8 +15,10 @@ import {
   getV2ModelEndpoint,
   killRun,
   sendRoomMessage,
+  spawnAgent,
   subscribeToV2Stream,
   WORKSPACE_ID,
+  WORKSPACE_ROOT,
   type OrchestrationCardWorkItem,
   type RoomLoop,
   type RoomMessage,
@@ -111,6 +113,9 @@ export function App({ onExit }: AppProps) {
   const [roomMessageRoomId, setRoomMessageRoomId] = useState<string | null>(
     null,
   );
+  const [agentSpawnText, setAgentSpawnText] = useState("researcher");
+  const [agentSpawnBusy, setAgentSpawnBusy] = useState(false);
+  const [agentSpawnRoomId, setAgentSpawnRoomId] = useState<string | null>(null);
   const [busyTick, setBusyTick] = useState(0);
   const [modelEndpoint, setModelEndpoint] = useState<V2ModelEndpoint | null>(
     null,
@@ -372,6 +377,57 @@ export function App({ onExit }: AppProps) {
     setFocus("composer");
   };
 
+  const openAgentSpawnComposer = () => {
+    const room = selectedRoom ?? roomTaskItems[0]?.room;
+    if (!room) {
+      setStatus({ tone: "muted", text: "create or select a room first" });
+      return;
+    }
+    setAgentSpawnRoomId(room.id);
+    setAgentSpawnText((current) => current || "researcher");
+    setMode("spawnAgent");
+    setFocus("composer");
+  };
+
+  const submitAgentSpawn = async () => {
+    const roomId = agentSpawnRoomId ?? selectedRoom?.id;
+    const draft = parseAgentSpawnDraft(agentSpawnText);
+    if (!roomId || draft.role === "" || agentSpawnBusy) return;
+    setAgentSpawnBusy(true);
+    setStatus({ tone: "focus", text: `spawning ${draft.role}` });
+    try {
+      const result = await spawnAgent({
+        role: draft.role,
+        roomRole: draft.role,
+        prompt: draft.prompt,
+        roomId,
+        workspaceId: WORKSPACE_ID,
+        workspaceRoot: WORKSPACE_ROOT,
+        execMode: "reactive",
+        maxIterations: 10,
+        maxAutoTurns: 1,
+      });
+      setAgentSpawnText("researcher");
+      setAgentSpawnRoomId(null);
+      setMode("normal");
+      setFocus("detail");
+      await refreshRoomTasks(`room:${roomId}`);
+      await refreshRoomMessages(roomId);
+      await refreshRoomLoop(roomId);
+      setStatus({
+        tone: "success",
+        text: `agent ${result.actor_id} ${result.status}`,
+      });
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text: error instanceof Error ? error.message : "failed to spawn agent",
+      });
+    } finally {
+      setAgentSpawnBusy(false);
+    }
+  };
+
   const submitRoomMessage = async () => {
     const body = roomMessageText.trim();
     const roomId = roomMessageRoomId ?? selectedRoom?.id;
@@ -585,7 +641,12 @@ export function App({ onExit }: AppProps) {
   }, []);
 
   useEffect(() => {
-    if (!composerBusy && !roomCreateBusy && !roomMessageBusy) {
+    if (
+      !composerBusy &&
+      !roomCreateBusy &&
+      !roomMessageBusy &&
+      !agentSpawnBusy
+    ) {
       setBusyTick(0);
       return;
     }
@@ -593,7 +654,7 @@ export function App({ onExit }: AppProps) {
       setBusyTick((current) => current + 1);
     }, 120);
     return () => clearInterval(timer);
-  }, [composerBusy, roomCreateBusy, roomMessageBusy]);
+  }, [composerBusy, roomCreateBusy, roomMessageBusy, agentSpawnBusy]);
 
   const refreshModelEndpoint = async () => {
     try {
@@ -634,6 +695,11 @@ export function App({ onExit }: AppProps) {
     if (activeView !== "rooms" && mode === "roomMessage") {
       setRoomMessageText("");
       setRoomMessageRoomId(null);
+      setMode("normal");
+    }
+    if (activeView !== "rooms" && mode === "spawnAgent") {
+      setAgentSpawnText("researcher");
+      setAgentSpawnRoomId(null);
       setMode("normal");
     }
   }, [activeView, mode]);
@@ -761,6 +827,11 @@ export function App({ onExit }: AppProps) {
         setRoomMessageRoomId(null);
         setFocus("worklist");
       }
+      if (mode === "spawnAgent") {
+        setAgentSpawnText("researcher");
+        setAgentSpawnRoomId(null);
+        setFocus("worklist");
+      }
       if (mode === "confirmKill") {
         setPendingKillRunId(null);
       }
@@ -824,6 +895,21 @@ export function App({ onExit }: AppProps) {
       }
       return;
     }
+    if (mode === "spawnAgent") {
+      if (isSubmitKey(key)) {
+        void submitAgentSpawn();
+        return;
+      }
+      if (name === "backspace" || name === "delete") {
+        setAgentSpawnText((current) => current.slice(0, -1));
+        return;
+      }
+      const char = keyChar(name);
+      if (char) {
+        setAgentSpawnText((current) => current + char);
+      }
+      return;
+    }
     if (mode === "filter") {
       if (isSubmitKey(key)) {
         setMode("normal");
@@ -875,6 +961,10 @@ export function App({ onExit }: AppProps) {
     }
     if (name === "m" && activeView === "rooms") {
       openRoomMessageComposer();
+      return;
+    }
+    if (name === "s" && activeView === "rooms") {
+      openAgentSpawnComposer();
       return;
     }
     if (name === "n" && activeView === "runs") {
@@ -1126,17 +1216,34 @@ export function App({ onExit }: AppProps) {
               focused={
                 focus === "composer" ||
                 mode === "createRoom" ||
-                mode === "roomMessage"
+                mode === "roomMessage" ||
+                mode === "spawnAgent"
               }
               value={
-                mode === "roomMessage" ? roomMessageText : roomComposerText
+                mode === "spawnAgent"
+                  ? agentSpawnText
+                  : mode === "roomMessage"
+                    ? roomMessageText
+                    : roomComposerText
               }
               busy={
-                mode === "roomMessage" ? roomMessageBusy : roomCreateBusy
+                mode === "spawnAgent"
+                  ? agentSpawnBusy
+                  : mode === "roomMessage"
+                    ? roomMessageBusy
+                    : roomCreateBusy
               }
               busyTick={busyTick}
-              purpose={mode === "roomMessage" ? "message" : "create"}
-              roomId={roomMessageRoomId ?? selectedRoom?.id ?? null}
+              purpose={
+                mode === "spawnAgent"
+                  ? "spawn"
+                  : mode === "roomMessage"
+                    ? "message"
+                    : "create"
+              }
+              roomId={
+                agentSpawnRoomId ?? roomMessageRoomId ?? selectedRoom?.id ?? null
+              }
             />
           )}
         </>
@@ -1305,14 +1412,17 @@ function RoomComposer({
   value: string;
   busy: boolean;
   busyTick: number;
-  purpose: "create" | "message";
+  purpose: "create" | "message" | "spawn";
   roomId: string | null;
 }) {
   const spinner = busy ? spinnerFrame(busyTick) : "";
-  const label = purpose === "message" ? "message" : "room";
+  const label =
+    purpose === "spawn" ? "agent" : purpose === "message" ? "message" : "room";
   const visibleValue =
     value.trim() === ""
-      ? purpose === "message"
+      ? purpose === "spawn"
+        ? `s to spawn into ${truncate(roomId ?? "room", compact ? 24 : 40)}`
+        : purpose === "message"
         ? `m to message ${truncate(roomId ?? "room", compact ? 26 : 44)}`
         : "+ to create a room"
       : truncate(value, compact ? 66 : 130);
@@ -1338,7 +1448,9 @@ function RoomComposer({
       </text>
       <text fg={theme.subtle}>
         {truncate(
-          purpose === "message" ? roomId ?? WORKSPACE_ID : WORKSPACE_ID,
+          purpose === "message" || purpose === "spawn"
+            ? roomId ?? WORKSPACE_ID
+            : WORKSPACE_ID,
           compact ? 28 : 44,
         )}
       </text>
@@ -1761,6 +1873,12 @@ function RoomSummaryDetail({
     <box style={{ flexDirection: "column", gap: 1, marginTop: 1 }}>
       <text fg={theme.text}>room       {selectedItem.room.title}</text>
       <text fg={theme.muted}>room_id    {selectedItem.room.id}</text>
+      <text fg={theme.text}>
+        members   {selectedItem.room.members?.length ?? 0}
+      </text>
+      <text fg={theme.muted}>
+        agents    {truncate(roomMemberSummary(selectedItem.room), 88)}
+      </text>
       <text fg={theme.text}>messages   {selectedItem.room.message_count}</text>
       <text fg={theme.text}>unread     {selectedItem.room.unread_count}</text>
       <text fg={theme.muted}>
@@ -2331,6 +2449,16 @@ function roomMessageErrorText(error: unknown, roomId: string): string {
   return `${detail} Start loop: ${roomLoopStartCommand(roomId)}`;
 }
 
+function parseAgentSpawnDraft(raw: string): { role: string; prompt?: string } {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { role: "researcher" };
+  const separator = trimmed.indexOf(":");
+  if (separator < 0) return { role: trimmed };
+  const role = trimmed.slice(0, separator).trim() || "researcher";
+  const prompt = trimmed.slice(separator + 1).trim();
+  return prompt ? { role, prompt } : { role };
+}
+
 function roomLoopHealth(
   loop: RoomLoop | null,
   loadState: LoadState,
@@ -2701,6 +2829,19 @@ function contextSourceForRoomTask(item?: RoomTaskWorkItem): string {
   if (!item) return "room context";
   if (item.task) return `room task ${item.task.id}`;
   return `room ${item.room.id}`;
+}
+
+function roomMemberSummary(room: RoomTaskWorkItem["room"]): string {
+  const members = room.members ?? [];
+  if (members.length === 0) return "-";
+  return members
+    .slice(0, 4)
+    .map((member) =>
+      member.role
+        ? `${member.actor_id}:${member.role}`
+        : member.actor_id,
+    )
+    .join(", ");
 }
 
 function contextSourceForCard(item?: OrchestrationCardWorkItem): string {

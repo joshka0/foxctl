@@ -24,6 +24,11 @@ export const ACTOR_ID =
   process.env.FOXTERM_ACTOR_ID ??
   process.env.FOXCTL_ACTOR_ID ??
   DEFAULT_ACTOR_ID;
+export const WORKSPACE_ROOT =
+  process.env.FOXTERM_WORKSPACE_ROOT ??
+  process.env.FOXCTL_WORKSPACE_ROOT ??
+  process.env.PWD ??
+  "";
 
 export interface ApiEnvelope<T> {
   version: number;
@@ -195,6 +200,32 @@ export interface RoomLoop {
 export interface RoomLoopResult {
   room_id: string;
   loop: RoomLoop;
+}
+
+export interface SpawnAgentInput {
+  role: string;
+  prompt?: string;
+  workspaceId?: string;
+  workspaceRoot?: string;
+  roomId?: string;
+  roomRole?: string;
+  name?: string;
+  slug?: string;
+  execMode?: string;
+  maxIterations?: number;
+  maxAutoTurns?: number;
+  llmProvider?: string;
+  llmModel?: string;
+}
+
+export interface SpawnAgentResult {
+  session_id: string;
+  actor_id: string;
+  status: string;
+  name?: string;
+  workspace_id?: string;
+  workspace_root?: string;
+  workspace_source?: string;
 }
 
 export interface OrchestrationCardWorkItem {
@@ -405,6 +436,43 @@ export async function getRoomLoop(params: {
   return requestJSON<RoomLoopResult>(
     `/api/rooms/${encodeURIComponent(roomId)}/loop?${query.toString()}`,
   );
+}
+
+export async function spawnAgent(
+  input: SpawnAgentInput,
+): Promise<SpawnAgentResult> {
+  const role = input.role.trim();
+  if (role === "") {
+    throw new Error("agent role is required");
+  }
+  const payload: Record<string, unknown> = {
+    role,
+    workspace_id: input.workspaceId ?? WORKSPACE_ID,
+    exec_mode: input.execMode ?? "reactive",
+    max_iterations: input.maxIterations ?? 10,
+    max_auto_turns: input.maxAutoTurns ?? 1,
+  };
+  const workspaceRoot = input.workspaceRoot ?? WORKSPACE_ROOT;
+  if (workspaceRoot.trim() !== "") payload.workspace_root = workspaceRoot;
+  const prompt = input.prompt?.trim();
+  const roomId = input.roomId?.trim();
+  const roomRole = input.roomRole?.trim();
+  const name = input.name?.trim();
+  const slug = input.slug?.trim();
+  const llmProvider = input.llmProvider?.trim();
+  const llmModel = input.llmModel?.trim();
+  if (prompt) payload.prompt = prompt;
+  if (roomId) payload.room_id = roomId;
+  if (roomRole) payload.room_role = roomRole;
+  if (name) payload.name = name;
+  if (slug) payload.slug = slug;
+  if (llmProvider) payload.llm_provider = llmProvider;
+  if (llmModel) payload.llm_model = llmModel;
+  return requestJSON<SpawnAgentResult>("/api/agents/spawn", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getRoomTaskWork(params?: {

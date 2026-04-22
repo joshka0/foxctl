@@ -6,6 +6,7 @@ export type Mode =
   | "compose"
   | "createRoom"
   | "roomMessage"
+  | "spawnAgent"
   | "confirmKill";
 export type LoadState = "idle" | "loading" | "ready" | "error";
 export type ActivityScope = "focused" | "important" | "all" | "debug";
