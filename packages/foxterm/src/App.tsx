@@ -2508,6 +2508,7 @@ function RoomTaskDetailPanel({
             loadState={agentLoadState}
           />
           <RoomATCPPreview
+            compact={compact}
             sessions={atcpSessions}
             members={atcpMembers}
             readiness={atcpReadiness}
@@ -2527,6 +2528,7 @@ function RoomTaskDetailPanel({
         />
       ) : (
         <RoomSummaryDetail
+          compact={compact}
           selectedItem={selectedItem}
           roomCount={roomCount}
           messages={messages}
@@ -2548,6 +2550,7 @@ function RoomTaskDetailPanel({
 }
 
 function RoomSummaryDetail({
+  compact,
   selectedItem,
   roomCount,
   messages,
@@ -2563,6 +2566,7 @@ function RoomSummaryDetail({
   selectedATCPSessionId,
   atcpLoadState,
 }: {
+  compact: boolean;
   selectedItem?: RoomTaskWorkItem;
   roomCount: number;
   messages: RoomMessage[];
@@ -2628,6 +2632,7 @@ function RoomSummaryDetail({
         loadState={agentLoadState}
       />
       <RoomATCPPreview
+        compact={compact}
         sessions={atcpSessions}
         members={atcpMembers}
         readiness={atcpReadiness}
@@ -2640,6 +2645,7 @@ function RoomSummaryDetail({
 }
 
 function RoomATCPPreview({
+  compact,
   sessions,
   members,
   readiness,
@@ -2647,6 +2653,7 @@ function RoomATCPPreview({
   selectedSessionId,
   loadState,
 }: {
+  compact: boolean;
   sessions: ATCPSession[];
   members: ATCPMember[];
   readiness: Record<string, ATCPReadiness>;
@@ -2660,7 +2667,12 @@ function RoomATCPPreview({
   const selected =
     sessions.find((session) => session.id === selectedSessionId) ?? sessions[0];
   const selectedMember = selected ? memberBySession.get(selected.id) : undefined;
-  const selectedLines = atcpScreenLines(selected ? screens[selected.id] : undefined, 6);
+  const rowLimit = compact ? 2 : 3;
+  const screenWidth = compact ? 72 : 108;
+  const selectedLines = atcpScreenLines(
+    selected ? screens[selected.id] : undefined,
+    compact ? 3 : 4,
+  );
   const title =
     loadState === "loading"
       ? "ATCP loading"
@@ -2681,11 +2693,19 @@ function RoomATCPPreview({
             : "Shift+s starts a CLI-backed session."}
         </text>
       ) : (
-        sessions.slice(0, 4).map((session) => {
+        sessions.slice(0, rowLimit).map((session) => {
           const member = memberBySession.get(session.id);
           const ready = readiness[session.id];
           const screenLine = atcpScreenPreview(screens[session.id]);
           const selectedRow = session.id === selected?.id;
+          const agent = truncate(member?.agent_id ?? session.id, compact ? 16 : 22);
+          const status = truncate(session.status, compact ? 9 : 11);
+          const adapter = truncate(session.adapter || "cli", compact ? 9 : 12);
+          const readyLabel = ready?.idle ? "idle" : "busy";
+          const command = truncate(
+            session.cmd?.join(" ") || "-",
+            compact ? 36 : 56,
+          );
           return (
             <box
               key={session.id}
@@ -2696,15 +2716,17 @@ function RoomATCPPreview({
             >
               <text fg={selectedRow ? theme.focus : atcpSessionTone(session, ready)}>
                 {selectedRow ? "> " : "  "}
-                {truncate(member?.agent_id ?? session.id, 24)}{" "}
-                {truncate(session.status, 12)} {ready?.idle ? "idle" : "busy"}
+                {agent} {status} {readyLabel}
               </text>
               <text fg={theme.muted}>
-                {truncate(session.adapter || "cli", 12)}{" "}
-                {truncate(session.cmd?.join(" ") || "-", 62)}
+                {"  "}
+                {adapter} {command}
               </text>
               {screenLine && (
-                <text fg={theme.text}>{truncate(screenLine, 78)}</text>
+                <text fg={theme.subtle}>
+                  {"  "}
+                  {truncate(screenLine, screenWidth)}
+                </text>
               )}
             </box>
           );
@@ -2713,16 +2735,25 @@ function RoomATCPPreview({
       {selected && (
         <box style={{ flexDirection: "column", gap: 1 }}>
           <text fg={theme.focus}>
-            screen     {truncate(selectedMember?.agent_id ?? selected.id, 44)}
+            screen     {truncate(selectedMember?.agent_id ?? selected.id, compact ? 28 : 44)}
           </text>
           {selectedLines.length === 0 ? (
             <text fg={theme.muted}>No rendered screen snapshot yet.</text>
           ) : (
-            selectedLines.map((line, index) => (
-              <text key={`${selected.id}:${index}`} fg={theme.text}>
-                {truncate(line, 100)}
-              </text>
-            ))
+            <box
+              style={{
+                flexDirection: "column",
+                backgroundColor: theme.panelAlt,
+                paddingLeft: 1,
+                paddingRight: 1,
+              }}
+            >
+              {selectedLines.map((line, index) => (
+                <text key={`${selected.id}:${index}`} fg={theme.text}>
+                  {truncate(`| ${line}`, screenWidth)}
+                </text>
+              ))}
+            </box>
           )}
           <text fg={theme.muted}>p prompt, x stop, v switch focused session</text>
         </box>
