@@ -6,7 +6,7 @@ This package intentionally does not depend on the archived TUI packages. It is
 built around the backend facades used by OpenTUI:
 
 - `GET /api/v2/runs`
-- `POST /api/v2/runs`
+- `POST /api/v2/runs?async=true`
 - `GET /api/v2/runs/{run_id}`
 - `POST /api/v2/runs/{run_id}/kill`
 - `GET /api/v2/events/stream`
@@ -35,3 +35,7 @@ Runs view shortcuts:
 - `/` filters the active worklist.
 - `a` cycles activity scopes.
 - `r` refreshes the active worklist.
+
+Foxterm starts runs asynchronously and follows `/api/v2/events/stream` for the
+selected run. The synchronous `POST /api/v2/runs` path remains available for
+non-interactive clients.

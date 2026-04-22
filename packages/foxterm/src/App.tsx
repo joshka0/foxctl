@@ -214,10 +214,30 @@ export function App({ onExit }: AppProps) {
         prompt,
         profile: "worker",
         maxIterations: 1,
+        async: true,
       });
       setComposerText("");
       setMode("normal");
       setFocus("detail");
+      if (!result.output) {
+        const optimisticRun: RunListItem = {
+          run_id: result.run_id,
+          status: result.status === "started" ? "running" : result.status ?? "running",
+          command: "run",
+          request_id: result.request_id,
+          actor_id: "actor:web",
+          updated_at: new Date().toISOString(),
+        };
+        setRuns((current) =>
+          current.some((run) => run.run_id === result.run_id)
+            ? current
+            : [optimisticRun, ...current],
+        );
+        setSelectedRunId(result.run_id);
+        setStatus({ tone: "success", text: `run ${result.run_id} started` });
+        setTimeout(() => void refreshRuns(result.run_id), 500);
+        return;
+      }
       await refreshRuns(result.run_id);
       setStatus({
         tone: result.output?.degraded ? "warning" : "success",

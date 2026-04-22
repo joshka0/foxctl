@@ -39,6 +39,9 @@ The first backend facade tranche is partially implemented:
   compact activity below the output.
 - selected active runs can be killed from foxterm through a guarded
   confirmation flow backed by `POST /api/v2/runs/{run_id}/kill`.
+- `POST /api/v2/runs?async=true` starts a run under a cancelable background
+  context and returns immediately with stable run/turn/request IDs; foxterm
+  uses this path so the event stream becomes the live run surface.
 
 Remaining hard blockers:
 

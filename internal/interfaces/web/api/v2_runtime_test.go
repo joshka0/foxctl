@@ -335,6 +335,72 @@ func TestV2RunsCreateExecutesRunAndProjectsState(t *testing.T) {
 	}
 }
 
+func TestV2RunsCreateAsyncStartsRunAndReturnsBeforeCompletion(t *testing.T) {
+	t.Setenv("FOXCTL_DB_DRIVER", "sqlite")
+	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "sqlite")
+	t.Setenv("FOXCTL_V2_PROJECTIONS_DB_DRIVER", "sqlite")
+
+	cfg := orchestrationTestConfig(t.TempDir())
+	started := make(chan struct{})
+	release := make(chan struct{})
+	released := false
+	oldNewModel := newV2RunModel
+	newV2RunModel = func(config.Config, string) (runner.Model, error) {
+		return blockingTestV2RunModel{started: started, release: release}, nil
+	}
+	t.Cleanup(func() {
+		newV2RunModel = oldNewModel
+		if !released {
+			close(release)
+		}
+	})
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v2/runs?profile=worker&async=true", strings.NewReader(`{
+		"run_id":"run-async-1",
+		"turn_id":"turn-async-1",
+		"request_id":"req-async-1",
+		"prompt":"async summarize this run",
+		"max_iterations":1
+	}`))
+	createRR := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		V2RunsHandler(cfg, zerolog.Nop()).ServeHTTP(createRR, createReq)
+	}()
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("async create did not return before model completion")
+	}
+	if createRR.Code != http.StatusAccepted {
+		t.Fatalf("create status=%d body=%s", createRR.Code, createRR.Body.String())
+	}
+	createBody := decodeResponseBody(t, createRR)
+	data, _ := createBody["data"].(map[string]any)
+	if got := strings.TrimSpace(data["run_id"].(string)); got != "run-async-1" {
+		t.Fatalf("run_id=%q want run-async-1", got)
+	}
+	if got := strings.TrimSpace(data["status"].(string)); got != "started" {
+		t.Fatalf("status=%q want started", got)
+	}
+	if got, _ := data["async"].(bool); !got {
+		t.Fatalf("async flag=%v want true", data["async"])
+	}
+	if _, ok := data["output"]; ok {
+		t.Fatalf("async create should not include output: %#v", data["output"])
+	}
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("async run did not reach model call")
+	}
+	close(release)
+	released = true
+	waitForV2RunStatus(t, cfg, "run-async-1", "completed", 2*time.Second)
+}
+
 func TestV2RunsCreateRequiresPrompt(t *testing.T) {
 	cfg := orchestrationTestConfig(t.TempDir())
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/runs", strings.NewReader(`{"run_id":"run-new-1"}`))
@@ -412,4 +478,41 @@ func (testV2RunModel) Complete(_ context.Context, in runner.ModelInput) (runner.
 		Message: "model response for " + strings.TrimSpace(in.Prompt),
 		Done:    true,
 	}, nil
+}
+
+type blockingTestV2RunModel struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (m blockingTestV2RunModel) Complete(ctx context.Context, in runner.ModelInput) (runner.ModelResponse, error) {
+	close(m.started)
+	select {
+	case <-m.release:
+	case <-ctx.Done():
+		return runner.ModelResponse{}, ctx.Err()
+	}
+	return runner.ModelResponse{
+		Message: "model response for " + strings.TrimSpace(in.Prompt),
+		Done:    true,
+	}, nil
+}
+
+func waitForV2RunStatus(t *testing.T, cfg config.Config, runID string, status string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		getReq := httptest.NewRequest(http.MethodGet, "/api/v2/runs/"+runID, nil)
+		getRR := httptest.NewRecorder()
+		V2RunDetailHandler(cfg, zerolog.Nop(), nil).ServeHTTP(getRR, getReq)
+		if getRR.Code == http.StatusOK {
+			getBody := decodeResponseBody(t, getRR)
+			state, _ := getBody["data"].(map[string]any)
+			if got := strings.TrimSpace(state["status"].(string)); got == status {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("run %s did not reach status %s within %s", runID, status, timeout)
 }

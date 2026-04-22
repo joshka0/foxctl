@@ -101,13 +101,13 @@ func (r *v2RunRegistry) Cancel(runID string) bool {
 }
 
 // V2RunsHandler handles GET/POST /api/v2/runs.
-func V2RunsHandler(cfg config.Config, _ zerolog.Logger) http.HandlerFunc {
+func V2RunsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			handleV2RunsList(w, r, cfg)
 		case http.MethodPost:
-			handleV2RunsCreate(w, r, cfg)
+			handleV2RunsCreate(w, r, cfg, log)
 		default:
 			writeCommandError(w, http.StatusMethodNotAllowed, commandV2RunsList, "EARG", "method not allowed", map[string]any{
 				"hint": httpErrorHint(http.StatusMethodNotAllowed),
@@ -328,7 +328,7 @@ func handleV2RunsList(w http.ResponseWriter, r *http.Request, cfg config.Config)
 	writeCommandOK(w, http.StatusOK, commandV2RunsList, resp)
 }
 
-func handleV2RunsCreate(w http.ResponseWriter, r *http.Request, cfg config.Config) {
+func handleV2RunsCreate(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger) {
 	if r.Method != http.MethodPost {
 		writeCommandError(w, http.StatusMethodNotAllowed, commandV2RunsCreate, "EARG", "method not allowed", map[string]any{
 			"hint": httpErrorHint(http.StatusMethodNotAllowed),
@@ -364,57 +364,42 @@ func handleV2RunsCreate(w http.ResponseWriter, r *http.Request, cfg config.Confi
 		return
 	}
 
-	eventStore, err := libsqlevents.Open(r.Context(), cfg.Storage.Root)
-	if err != nil {
-		writeCommandError(w, http.StatusServiceUnavailable, commandV2RunsCreate, "ERUNTIME", "v2 event store is unavailable", map[string]any{
-			"hint": httpErrorHint(http.StatusServiceUnavailable),
-		})
-		return
-	}
-	defer func() { _ = eventStore.Close() }()
-
-	projectionStore, closeProjection, err := libsqlprojections.Open(r.Context(), cfg.Storage.Root)
-	if err != nil {
-		writeCommandError(w, http.StatusServiceUnavailable, commandV2RunsCreate, "ERUNTIME", "v2 run projection store is unavailable", map[string]any{
-			"hint": httpErrorHint(http.StatusServiceUnavailable),
-		})
-		return
-	}
-	defer func() { _ = closeProjection() }()
-
 	req = normalizeV2RunCreateInput(req)
-	svc, err := v2services.NewDefaultRunService(v2services.DefaultRuntimeDependencies{
-		Profile:           profile,
-		AppConfig:         cfg,
-		WorkspaceRoot:     workspaceRoot,
-		IncludeExtensions: true,
-		EventStore: projectingV2EventStore{
-			eventStore:      eventStore,
-			projectionStore: projectionStore,
-			eventBus:        v2RuntimeEventBus,
-		},
-		Model: model,
-		NewID: func() string {
-			return "evt-" + ulid.Make().String()
-		},
-	})
+	exec, err := newWebV2RunExecution(r.Context(), cfg, profile, workspaceRoot, model)
 	if err != nil {
-		writeV2RuntimeServiceError(w, commandV2RunsCreate, &v2errors.V2Error{
-			Kind:      v2errors.ErrDependency,
-			Message:   "v2 run service is unavailable",
-			Cause:     err,
-			Fatal:     true,
-			Retryable: true,
-		})
+		writeV2RunExecutionSetupError(w, err)
 		return
 	}
 
+	if wantsAsyncV2Run(r) {
+		runCtx, cancel := context.WithCancel(context.Background())
+		unregister := activeV2Runs.Register(req.RunID, cancel)
+		go func() {
+			defer unregister()
+			defer cancel()
+			defer exec.Close()
+			if _, err := exec.svc.Run(runCtx, req); err != nil {
+				log.Warn().Err(err).Str("run_id", req.RunID).Msg("async v2 run failed")
+			}
+		}()
+		writeCommandOK(w, http.StatusAccepted, commandV2RunsCreate, map[string]any{
+			"run_id":         req.RunID,
+			"turn_id":        req.TurnID,
+			"request_id":     req.RequestID,
+			"correlation_id": req.CorrelationID,
+			"profile":        profile,
+			"status":         "started",
+			"async":          true,
+		})
+		return
+	}
+	defer exec.Close()
 	runCtx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	unregister := activeV2Runs.Register(req.RunID, cancel)
 	defer unregister()
 
-	out, err := svc.Run(runCtx, req)
+	out, err := exec.svc.Run(runCtx, req)
 	if err != nil {
 		writeV2RuntimeServiceError(w, commandV2RunsCreate, err)
 		return
@@ -627,6 +612,110 @@ func normalizeV2RunCreateInput(req corerun.TurnInput) corerun.TurnInput {
 		req.ActorID = "actor:web"
 	}
 	return req
+}
+
+type webV2RunExecution struct {
+	svc             *v2services.RunService
+	eventStore      *libsqlevents.Store
+	closeProjection func() error
+}
+
+func newWebV2RunExecution(ctx context.Context, cfg config.Config, profile coretool.ProcessProfile, workspaceRoot string, model runner.Model) (*webV2RunExecution, error) {
+	eventStore, err := libsqlevents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return nil, &v2errors.V2Error{
+			Kind:      v2errors.ErrDependency,
+			Message:   "v2 event store is unavailable",
+			Cause:     err,
+			Fatal:     true,
+			Retryable: true,
+		}
+	}
+
+	projectionStore, closeProjection, err := libsqlprojections.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		_ = eventStore.Close()
+		return nil, &v2errors.V2Error{
+			Kind:      v2errors.ErrDependency,
+			Message:   "v2 run projection store is unavailable",
+			Cause:     err,
+			Fatal:     true,
+			Retryable: true,
+		}
+	}
+
+	svc, err := v2services.NewDefaultRunService(v2services.DefaultRuntimeDependencies{
+		Profile:           profile,
+		AppConfig:         cfg,
+		WorkspaceRoot:     workspaceRoot,
+		IncludeExtensions: true,
+		EventStore: projectingV2EventStore{
+			eventStore:      eventStore,
+			projectionStore: projectionStore,
+			eventBus:        v2RuntimeEventBus,
+		},
+		Model: model,
+		NewID: func() string {
+			return "evt-" + ulid.Make().String()
+		},
+	})
+	if err != nil {
+		_ = closeProjection()
+		_ = eventStore.Close()
+		return nil, &v2errors.V2Error{
+			Kind:      v2errors.ErrDependency,
+			Message:   "v2 run service is unavailable",
+			Cause:     err,
+			Fatal:     true,
+			Retryable: true,
+		}
+	}
+
+	return &webV2RunExecution{
+		svc:             svc,
+		eventStore:      eventStore,
+		closeProjection: closeProjection,
+	}, nil
+}
+
+func (e *webV2RunExecution) Close() {
+	if e == nil {
+		return
+	}
+	if e.closeProjection != nil {
+		_ = e.closeProjection()
+	}
+	if e.eventStore != nil {
+		_ = e.eventStore.Close()
+	}
+}
+
+func writeV2RunExecutionSetupError(w http.ResponseWriter, err error) {
+	var verr *v2errors.V2Error
+	if errors.As(err, &verr) {
+		writeV2RuntimeServiceError(w, commandV2RunsCreate, verr)
+		return
+	}
+	writeV2RuntimeServiceError(w, commandV2RunsCreate, &v2errors.V2Error{
+		Kind:      v2errors.ErrDependency,
+		Message:   "v2 run service is unavailable",
+		Cause:     err,
+		Fatal:     true,
+		Retryable: true,
+	})
+}
+
+func wantsAsyncV2Run(r *http.Request) bool {
+	return truthyQueryValue(r.URL.Query().Get("async"))
+}
+
+func truthyQueryValue(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizePrefixedULID(value, prefix string) string {

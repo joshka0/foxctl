@@ -48,6 +48,7 @@ export interface CreateRunInput {
   prompt: string;
   profile?: string;
   maxIterations?: number;
+  async?: boolean;
 }
 
 export interface CreateRunResult {
@@ -56,6 +57,8 @@ export interface CreateRunResult {
   request_id: string;
   correlation_id?: string;
   profile: string;
+  status?: string;
+  async?: boolean;
   output?: {
     turn_id?: string;
     summary?: string;
@@ -130,6 +133,9 @@ export async function createRun(
   const ids = newRunIDs();
   const query = new URLSearchParams();
   query.set("profile", input.profile ?? "worker");
+  if (input.async ?? true) {
+    query.set("async", "true");
+  }
   const envelope = await requestEnvelope<CreateRunResult>(
     `/api/v2/runs?${query.toString()}`,
     {
