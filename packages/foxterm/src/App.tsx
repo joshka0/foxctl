@@ -7,6 +7,7 @@ import {
   createRoom,
   createRun,
   getAgents,
+  getATCPRoomSessions,
   getOrchestrationCardWork,
   getRoomLoop,
   getRoomMessages,
@@ -22,6 +23,9 @@ import {
   WORKSPACE_ID,
   WORKSPACE_ROOT,
   type AgentSummary,
+  type ATCPMember,
+  type ATCPReadiness,
+  type ATCPSession,
   type OrchestrationCardWorkItem,
   type RoomLoop,
   type RoomMessage,
@@ -222,6 +226,12 @@ export function App({ onExit }: AppProps) {
     useState<LoadState>("idle");
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [agentLoadState, setAgentLoadState] = useState<LoadState>("idle");
+  const [atcpSessions, setATCPSessions] = useState<ATCPSession[]>([]);
+  const [atcpMembers, setATCPMembers] = useState<ATCPMember[]>([]);
+  const [atcpReadiness, setATCPReadiness] = useState<
+    Record<string, ATCPReadiness>
+  >({});
+  const [atcpLoadState, setATCPLoadState] = useState<LoadState>("idle");
   const filteredCardItems = useMemo(
     () => cardItems.filter((item) => matchesCardFilter(item, filterText)),
     [cardItems, filterText],
@@ -490,6 +500,7 @@ export function App({ onExit }: AppProps) {
       setCLISpawnRoomId(null);
       setMode("normal");
       setFocus("detail");
+      await refreshATCPRoomSessions(roomId);
       setStatus({
         tone: "success",
         text: `ATCP ${result.member.agent_id} session ${result.session.status}`,
@@ -699,6 +710,33 @@ export function App({ onExit }: AppProps) {
     }
   };
 
+  const refreshATCPRoomSessions = async (roomId: string) => {
+    const trimmed = roomId.trim();
+    if (trimmed === "") {
+      setATCPSessions([]);
+      setATCPMembers([]);
+      setATCPReadiness({});
+      setATCPLoadState("idle");
+      return;
+    }
+    setATCPLoadState("loading");
+    try {
+      const result = await getATCPRoomSessions({
+        roomId: trimmed,
+        workspaceId: WORKSPACE_ID,
+      });
+      setATCPSessions(result.sessions);
+      setATCPMembers(result.members);
+      setATCPReadiness(result.readiness ?? {});
+      setATCPLoadState("ready");
+    } catch {
+      setATCPSessions([]);
+      setATCPMembers([]);
+      setATCPReadiness({});
+      setATCPLoadState("error");
+    }
+  };
+
   const refreshCards = async () => {
     const hadItems = cardItems.length > 0;
     setCardLoadState("loading");
@@ -814,6 +852,10 @@ export function App({ onExit }: AppProps) {
       setRoomLoop(null);
       setRoomLoopLoadState("idle");
       setAgentLoadState("idle");
+      setATCPSessions([]);
+      setATCPMembers([]);
+      setATCPReadiness({});
+      setATCPLoadState("idle");
       return;
     }
     if (!selectedRoom?.id) {
@@ -822,11 +864,16 @@ export function App({ onExit }: AppProps) {
       setRoomLoop(null);
       setRoomLoopLoadState("idle");
       setAgentLoadState("idle");
+      setATCPSessions([]);
+      setATCPMembers([]);
+      setATCPReadiness({});
+      setATCPLoadState("idle");
       return;
     }
     void refreshRoomMessages(selectedRoom.id);
     void refreshRoomLoop(selectedRoom.id);
     void refreshAgents();
+    void refreshATCPRoomSessions(selectedRoom.id);
   }, [activeView, selectedRoom?.id]);
 
   useEffect(() => {
@@ -1141,6 +1188,7 @@ export function App({ onExit }: AppProps) {
         if (selectedRoom?.id) {
           void refreshRoomMessages(selectedRoom.id);
           void refreshRoomLoop(selectedRoom.id);
+          void refreshATCPRoomSessions(selectedRoom.id);
         }
       } else if (activeView === "cards") {
         void refreshCards();
@@ -1271,6 +1319,10 @@ export function App({ onExit }: AppProps) {
                     loopLoadState={roomLoopLoadState}
                     agents={agents}
                     agentLoadState={agentLoadState}
+                    atcpSessions={atcpSessions}
+                    atcpMembers={atcpMembers}
+                    atcpReadiness={atcpReadiness}
+                    atcpLoadState={atcpLoadState}
                   />
                 )}
               </>
@@ -1918,6 +1970,10 @@ function RoomTaskDetailPanel({
   loopLoadState,
   agents,
   agentLoadState,
+  atcpSessions,
+  atcpMembers,
+  atcpReadiness,
+  atcpLoadState,
 }: {
   compact: boolean;
   focused: boolean;
@@ -1931,6 +1987,10 @@ function RoomTaskDetailPanel({
   loopLoadState: LoadState;
   agents: AgentSummary[];
   agentLoadState: LoadState;
+  atcpSessions: ATCPSession[];
+  atcpMembers: ATCPMember[];
+  atcpReadiness: Record<string, ATCPReadiness>;
+  atcpLoadState: LoadState;
 }) {
   return (
     <Panel
@@ -1986,6 +2046,12 @@ function RoomTaskDetailPanel({
             agents={agents}
             loadState={agentLoadState}
           />
+          <RoomATCPPreview
+            sessions={atcpSessions}
+            members={atcpMembers}
+            readiness={atcpReadiness}
+            loadState={atcpLoadState}
+          />
         </box>
       ) : selectedMissing ? (
         <PanelState
@@ -2006,6 +2072,10 @@ function RoomTaskDetailPanel({
           loopLoadState={loopLoadState}
           agents={agents}
           agentLoadState={agentLoadState}
+          atcpSessions={atcpSessions}
+          atcpMembers={atcpMembers}
+          atcpReadiness={atcpReadiness}
+          atcpLoadState={atcpLoadState}
         />
       )}
     </Panel>
@@ -2021,6 +2091,10 @@ function RoomSummaryDetail({
   loopLoadState,
   agents,
   agentLoadState,
+  atcpSessions,
+  atcpMembers,
+  atcpReadiness,
+  atcpLoadState,
 }: {
   selectedItem?: RoomTaskWorkItem;
   roomCount: number;
@@ -2030,6 +2104,10 @@ function RoomSummaryDetail({
   loopLoadState: LoadState;
   agents: AgentSummary[];
   agentLoadState: LoadState;
+  atcpSessions: ATCPSession[];
+  atcpMembers: ATCPMember[];
+  atcpReadiness: Record<string, ATCPReadiness>;
+  atcpLoadState: LoadState;
 }) {
   if (!selectedItem) {
     return (
@@ -2080,6 +2158,63 @@ function RoomSummaryDetail({
         agents={agents}
         loadState={agentLoadState}
       />
+      <RoomATCPPreview
+        sessions={atcpSessions}
+        members={atcpMembers}
+        readiness={atcpReadiness}
+        loadState={atcpLoadState}
+      />
+    </box>
+  );
+}
+
+function RoomATCPPreview({
+  sessions,
+  members,
+  readiness,
+  loadState,
+}: {
+  sessions: ATCPSession[];
+  members: ATCPMember[];
+  readiness: Record<string, ATCPReadiness>;
+  loadState: LoadState;
+}) {
+  const memberBySession = new Map(
+    members.map((member) => [member.session_id, member]),
+  );
+  const title =
+    loadState === "loading"
+      ? "ATCP loading"
+      : loadState === "error"
+        ? "ATCP unavailable"
+        : sessions.length === 0
+          ? "ATCP empty"
+          : "ATCP CLI sessions";
+  return (
+    <box style={{ flexDirection: "column", gap: 1 }}>
+      <text fg={loadState === "error" ? theme.warning : theme.focus}>
+        {title}
+      </text>
+      {sessions.length === 0 ? (
+        <text fg={theme.muted}>Shift+s starts a CLI-backed session.</text>
+      ) : (
+        sessions.slice(0, 4).map((session) => {
+          const member = memberBySession.get(session.id);
+          const ready = readiness[session.id];
+          return (
+            <box key={session.id} style={{ flexDirection: "column" }}>
+              <text fg={atcpSessionTone(session, ready)}>
+                {truncate(member?.agent_id ?? session.id, 24)}{" "}
+                {truncate(session.status, 12)} {ready?.idle ? "idle" : "busy"}
+              </text>
+              <text fg={theme.muted}>
+                {truncate(session.adapter || "cli", 12)}{" "}
+                {truncate(session.cmd?.join(" ") || "-", 62)}
+              </text>
+            </box>
+          );
+        })
+      )}
     </box>
   );
 }
@@ -2798,6 +2933,21 @@ function agentModelLabel(agent?: AgentSummary): string {
   const model = agent.llm_model?.trim() || "default";
   const mode = agent.exec_mode?.trim() || "reactive";
   return `${provider}/${model} ${mode}`;
+}
+
+function atcpSessionTone(
+  session: ATCPSession,
+  ready?: ATCPReadiness,
+): string {
+  switch ((session.status ?? "").trim().toLowerCase()) {
+    case "running":
+      return ready?.idle ? theme.success : theme.focus;
+    case "exited":
+    case "stopped":
+      return theme.muted;
+    default:
+      return theme.text;
+  }
 }
 
 function roomLoopStartCommand(roomId: string): string {

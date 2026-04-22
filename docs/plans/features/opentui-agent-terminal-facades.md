@@ -67,6 +67,8 @@ The first backend facade tranche is partially implemented:
   and foxctl-room-linked CLI spawn; foxterm can start a CLI session with
   `agent@adapter: command args` and join it to the selected room's linked ATCP
   room.
+- foxterm reads the linked ATCP room sessions and readiness state so CLI-backed
+  agents appear in the room detail panel after spawn.
 
 Remaining hard blockers:
 

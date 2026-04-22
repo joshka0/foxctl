@@ -27,6 +27,14 @@ type ATCPSpawnCLIRequest struct {
 	EnableRawBytes bool     `json:"enable_raw_bytes,omitempty"`
 }
 
+type atcpRoomSessionSummary struct {
+	Room      *httpjson.RoomResponse                `json:"room,omitempty"`
+	Members   []httpjson.MemberResponse             `json:"members"`
+	Sessions  []httpjson.SessionResponse            `json:"sessions"`
+	Readiness map[string]httpjson.ReadinessResponse `json:"readiness,omitempty"`
+	Count     int                                   `json:"count"`
+}
+
 // ATCPHandler exposes a thin HTTP facade over the local ATCP daemon.
 func ATCPHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +94,13 @@ func ATCPHandler() http.HandlerFunc {
 				return
 			}
 			writeJSON(w, http.StatusCreated, map[string]any{"room": room})
+		case strings.HasPrefix(path, "foxctl-rooms/") && strings.HasSuffix(path, "/sessions"):
+			if r.Method != http.MethodGet {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			roomID := strings.TrimSuffix(strings.TrimPrefix(path, "foxctl-rooms/"), "/sessions")
+			handleATCPFoxctlRoomSessions(w, r, client, roomID)
 		case strings.HasPrefix(path, "foxctl-rooms/") && strings.HasSuffix(path, "/spawn-cli"):
 			if r.Method != http.MethodPost {
 				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -97,6 +112,65 @@ func ATCPHandler() http.HandlerFunc {
 			httpError(w, http.StatusNotFound, "not found")
 		}
 	}
+}
+
+func handleATCPFoxctlRoomSessions(w http.ResponseWriter, r *http.Request, client *atcpclient.Client, roomID string) {
+	roomID = strings.TrimSpace(roomID)
+	if roomID == "" {
+		httpError(w, http.StatusBadRequest, "room_id is required")
+		return
+	}
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if workspaceID == "" {
+		workspaceID = "."
+	}
+	room, found, err := findATCPRoomForFoxctl(r.Context(), client, workspaceID, roomID)
+	if err != nil {
+		writeATCPError(w, err)
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusOK, atcpRoomSessionSummary{
+			Members:  []httpjson.MemberResponse{},
+			Sessions: []httpjson.SessionResponse{},
+			Count:    0,
+		})
+		return
+	}
+	members, err := client.RoomMembers(r.Context(), room.ID)
+	if err != nil {
+		writeATCPError(w, err)
+		return
+	}
+	allSessions, err := client.ListSessions(r.Context())
+	if err != nil {
+		writeATCPError(w, err)
+		return
+	}
+	sessionsByID := make(map[string]httpjson.SessionResponse, len(allSessions))
+	for _, session := range allSessions {
+		sessionsByID[session.ID] = session
+	}
+	sessions := make([]httpjson.SessionResponse, 0, len(members))
+	readiness := make(map[string]httpjson.ReadinessResponse, len(members))
+	for _, member := range members {
+		session, ok := sessionsByID[member.SessionID]
+		if !ok {
+			continue
+		}
+		sessions = append(sessions, session)
+		ready, err := client.SessionReadiness(r.Context(), member.SessionID, atcpclient.SessionReadinessOptions{})
+		if err == nil {
+			readiness[member.SessionID] = ready
+		}
+	}
+	writeJSON(w, http.StatusOK, atcpRoomSessionSummary{
+		Room:      &room,
+		Members:   members,
+		Sessions:  sessions,
+		Readiness: readiness,
+		Count:     len(sessions),
+	})
 }
 
 func handleATCPFoxctlRoomSpawnCLI(w http.ResponseWriter, r *http.Request, client *atcpclient.Client, roomID string) {
@@ -168,17 +242,28 @@ func handleATCPFoxctlRoomSpawnCLI(w http.ResponseWriter, r *http.Request, client
 	})
 }
 
-func findOrCreateATCPRoomForFoxctl(ctx context.Context, client *atcpclient.Client, workspaceID, roomID string) (httpjson.RoomResponse, error) {
+func findATCPRoomForFoxctl(ctx context.Context, client *atcpclient.Client, workspaceID, roomID string) (httpjson.RoomResponse, bool, error) {
 	rooms, err := client.ListRooms(ctx)
 	if err != nil {
-		return httpjson.RoomResponse{}, err
+		return httpjson.RoomResponse{}, false, err
 	}
 	for _, room := range rooms {
 		if strings.TrimSpace(room.Workspace) == workspaceID &&
 			strings.TrimSpace(room.Title) == roomID &&
 			room.ArchivedAt.IsZero() {
-			return room, nil
+			return room, true, nil
 		}
+	}
+	return httpjson.RoomResponse{}, false, nil
+}
+
+func findOrCreateATCPRoomForFoxctl(ctx context.Context, client *atcpclient.Client, workspaceID, roomID string) (httpjson.RoomResponse, error) {
+	room, found, err := findATCPRoomForFoxctl(ctx, client, workspaceID, roomID)
+	if err != nil {
+		return httpjson.RoomResponse{}, err
+	}
+	if found {
+		return room, nil
 	}
 	return client.CreateRoom(ctx, httpjson.CreateRoomRequest{
 		Workspace:   workspaceID,

@@ -17,6 +17,7 @@ built around the backend facades used by OpenTUI:
 - `GET /api/rooms/{room_id}/loop`
 - `POST /api/agents/spawn`
 - `GET /api/atcp/sessions`
+- `GET /api/atcp/foxctl-rooms/{room_id}/sessions`
 - `POST /api/atcp/foxctl-rooms/{room_id}/spawn-cli`
 - job, room, CAS, skill, and MCP facade routes
 
@@ -74,3 +75,5 @@ use the separate ATCP-aware facade. The `s` action is for foxctl daemon agents;
 `Shift+s` creates an ATCP session and joins it to the room-linked ATCP room.
 The CLI composer accepts `agent@adapter: command args`, for example
 `codex-a@codex: codex --no-alt-screen`.
+The room detail panel shows attached ATCP sessions, command, adapter, and
+readiness so CLI-backed agents are visible after they start.

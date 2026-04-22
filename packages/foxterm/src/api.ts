@@ -264,6 +264,20 @@ export interface ATCPSession {
   last_output_at?: string;
 }
 
+export interface ATCPReadiness {
+  session_id: string;
+  idle: boolean;
+  idle_for_ms: number;
+  threshold_bps: number;
+  debounce_ms: number;
+  screen_match?: boolean;
+  screen_regex?: string;
+  screen_line?: string;
+  output_bytes_total: number;
+  output_rate_bps: number;
+  last_output_at?: string;
+}
+
 export interface ATCPRoom {
   id: string;
   workspace: string;
@@ -296,6 +310,14 @@ export interface SpawnATCPCLIResult {
   room: ATCPRoom;
   session: ATCPSession;
   member: ATCPMember;
+}
+
+export interface ATCPRoomSessionsResult {
+  room?: ATCPRoom;
+  members: ATCPMember[];
+  sessions: ATCPSession[];
+  readiness?: Record<string, ATCPReadiness>;
+  count: number;
 }
 
 export interface OrchestrationCardWorkItem {
@@ -592,6 +614,36 @@ export async function spawnATCPCLIForRoom(
       body: JSON.stringify(payload),
     },
   );
+}
+
+export async function getATCPRoomSessions(params: {
+  roomId: string;
+  workspaceId?: string;
+}): Promise<ATCPRoomSessionsResult> {
+  const roomId = params.roomId.trim();
+  if (roomId === "") {
+    throw new Error("room_id is required");
+  }
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspaceId ?? WORKSPACE_ID);
+  const result = await requestJSON<ATCPRoomSessionsResult>(
+    `/api/atcp/foxctl-rooms/${encodeURIComponent(roomId)}/sessions?${query.toString()}`,
+  );
+  const sessions = safeArray(result?.sessions).filter(hasID);
+  const members = safeArray(result?.members).filter(
+    (member) =>
+      typeof member.agent_id === "string" &&
+      member.agent_id.trim() !== "" &&
+      typeof member.session_id === "string" &&
+      member.session_id.trim() !== "",
+  );
+  return {
+    room: result?.room,
+    members,
+    sessions,
+    readiness: result?.readiness ?? {},
+    count: typeof result?.count === "number" ? result.count : sessions.length,
+  };
 }
 
 export async function getRoomTaskWork(params?: {
