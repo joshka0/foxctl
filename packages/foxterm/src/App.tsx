@@ -501,7 +501,13 @@ export function App({ onExit }: AppProps) {
     });
   }, [activeView, selectedRun?.run_id, selectedRunMissing]);
 
-  useKeyboard((key: { name?: string; ctrl?: boolean; shift?: boolean }) => {
+  useKeyboard((key: {
+    name?: string;
+    ctrl?: boolean;
+    shift?: boolean;
+    sequence?: string;
+    raw?: string;
+  }) => {
     const name = key.name ?? "";
     if (key.ctrl && name.toLowerCase() === "c") {
       onExit();
@@ -522,7 +528,7 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (mode === "confirmKill") {
-      if (name === "enter" || name === "y") {
+      if (isSubmitKey(key) || name === "y") {
         void confirmKillRun();
         return;
       }
@@ -534,7 +540,7 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (mode === "compose") {
-      if (name === "enter") {
+      if (isSubmitKey(key)) {
         void submitComposedRun();
         return;
       }
@@ -549,7 +555,7 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (mode === "filter") {
-      if (name === "enter") {
+      if (isSubmitKey(key)) {
         setMode("normal");
         return;
       }
@@ -617,7 +623,7 @@ export function App({ onExit }: AppProps) {
       );
       return;
     }
-    if (name === "enter" && activeView === "runs" && focus === "worklist") {
+    if (isSubmitKey(key) && activeView === "runs" && focus === "worklist") {
       setFocus("detail");
       return;
     }
@@ -2085,6 +2091,22 @@ function keyChar(name: string): string {
   if (name.length === 1) return name;
   if (name === "space") return " ";
   return "";
+}
+
+function isSubmitKey(key: {
+  name?: string;
+  sequence?: string;
+  raw?: string;
+}): boolean {
+  const name = key.name ?? "";
+  return (
+    name === "enter" ||
+    name === "return" ||
+    key.sequence === "\r" ||
+    key.sequence === "\n" ||
+    key.raw === "\r" ||
+    key.raw === "\n"
+  );
 }
 
 function buildRunSections(
