@@ -31,6 +31,7 @@ FOXCTL_API_URL=http://127.0.0.1:3000 bun run --cwd packages/foxterm dev
 Runs view shortcuts:
 
 - `n` opens the prompt composer.
+- `c` composes a follow-up turn on the selected run stream.
 - `Enter` submits the composed prompt or opens the selected run detail.
 - `x` opens a confirmation prompt for killing the selected active run.
 - `/` filters the active worklist.

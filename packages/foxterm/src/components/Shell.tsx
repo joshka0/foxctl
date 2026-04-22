@@ -162,8 +162,8 @@ function Footer({
       <text fg={theme.focus}>{truncate(left, compact ? 28 : 44)}</text>
       <text fg={theme.muted}>
         {compact
-          ? "Tab focus  n new  x kill  / filter  q quit"
-          : "Tab focus  j/k move  Enter open  n new run  x kill  / filter  a scope  r refresh  ? help  q quit"}
+          ? "Tab focus  n new  c continue  x kill  / filter  q quit"
+          : "Tab focus  j/k move  Enter open  n new run  c continue  x kill  / filter  a scope  r refresh  ? help  q quit"}
       </text>
     </box>
   );

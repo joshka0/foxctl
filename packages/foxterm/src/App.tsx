@@ -74,6 +74,10 @@ interface RunOutputSummary {
   toolCalls?: number;
 }
 
+type ComposerTarget =
+  | { kind: "new" }
+  | { kind: "continue"; runId: string };
+
 export function App({ onExit }: AppProps) {
   const { width, height } = useTerminalDimensions();
   const compact = width < 92 || height < 24;
@@ -84,6 +88,9 @@ export function App({ onExit }: AppProps) {
   const [activityScope, setActivityScope] =
     useState<ActivityScope>("focused");
   const [composerText, setComposerText] = useState("");
+  const [composerTarget, setComposerTarget] = useState<ComposerTarget>({
+    kind: "new",
+  });
   const [composerBusy, setComposerBusy] = useState(false);
   const [pendingKillRunId, setPendingKillRunId] = useState<string | null>(null);
   const [killBusy, setKillBusy] = useState(false);
@@ -213,11 +220,16 @@ export function App({ onExit }: AppProps) {
   const submitComposedRun = async () => {
     const prompt = composerText.trim();
     if (prompt === "" || composerBusy) return;
+    const target = composerTarget;
     setComposerBusy(true);
-    setStatus({ tone: "focus", text: "running prompt" });
+    setStatus({
+      tone: "focus",
+      text: target.kind === "continue" ? "sending follow-up" : "running prompt",
+    });
     try {
       const result = await createRun({
         prompt,
+        runId: target.kind === "continue" ? target.runId : undefined,
         profile: "worker",
         maxIterations: 1,
         async: true,
@@ -236,18 +248,31 @@ export function App({ onExit }: AppProps) {
         };
         setRuns((current) =>
           current.some((run) => run.run_id === result.run_id)
-            ? current
+            ? current.map((run) =>
+                run.run_id === result.run_id
+                  ? { ...run, status: "running", updated_at: optimisticRun.updated_at }
+                  : run,
+              )
             : [optimisticRun, ...current],
         );
         setSelectedRunId(result.run_id);
-        setStatus({ tone: "success", text: `run ${result.run_id} started` });
+        setStatus({
+          tone: "success",
+          text:
+            target.kind === "continue"
+              ? `follow-up sent to ${result.run_id}`
+              : `run ${result.run_id} started`,
+        });
         setTimeout(() => void refreshRuns(result.run_id), 500);
         return;
       }
       await refreshRuns(result.run_id);
       setStatus({
         tone: result.output?.degraded ? "warning" : "success",
-        text: `run ${result.run_id} completed`,
+        text:
+          target.kind === "continue"
+            ? `follow-up completed on ${result.run_id}`
+            : `run ${result.run_id} completed`,
       });
     } catch (error) {
       setStatus({
@@ -257,6 +282,16 @@ export function App({ onExit }: AppProps) {
     } finally {
       setComposerBusy(false);
     }
+  };
+
+  const openComposer = (target: ComposerTarget) => {
+    if (target.kind === "continue" && !selectedRun) {
+      setStatus({ tone: "muted", text: "select a run first" });
+      return;
+    }
+    setComposerTarget(target);
+    setMode("compose");
+    setFocus("composer");
   };
 
   const refreshRunTranscript = async (runId: string) => {
@@ -452,8 +487,12 @@ export function App({ onExit }: AppProps) {
       onEvent: (event) => {
         setEvents((current) => [...current.slice(-199), event]);
         if (
+          event.event_type === "run.started" ||
+          event.event_type === "tool.invoked" ||
+          event.event_type === "tool.responded" ||
           event.event_type === "run.completed" ||
           event.event_type === "run.failed" ||
+          event.event_type === "stage.failed" ||
           event.event_type === "turn.recorded"
         ) {
           setTimeout(() => void refreshRunTranscript(event.stream_id), 100);
@@ -539,8 +578,15 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (name === "n" && activeView === "runs") {
-      setMode("compose");
-      setFocus("composer");
+      openComposer({ kind: "new" });
+      return;
+    }
+    if (name === "c" && activeView === "runs") {
+      if (selectedRun?.run_id) {
+        openComposer({ kind: "continue", runId: selectedRun.run_id });
+      } else {
+        setStatus({ tone: "muted", text: "select a run first" });
+      }
       return;
     }
     if (name === "x" && activeView === "runs") {
@@ -713,6 +759,7 @@ export function App({ onExit }: AppProps) {
               compact={compact}
               focused={focus === "composer" || mode === "compose"}
               value={composerText}
+              target={composerTarget}
               busy={composerBusy}
             />
           )}
@@ -810,16 +857,21 @@ function RunComposer({
   compact,
   focused,
   value,
+  target,
   busy,
 }: {
   compact: boolean;
   focused: boolean;
   value: string;
+  target: ComposerTarget;
   busy: boolean;
 }) {
+  const label = target.kind === "continue" ? "follow-up" : "prompt";
   const visibleValue =
     value.trim() === ""
-      ? "n to compose a v2 worker run"
+      ? target.kind === "continue"
+        ? `c to continue ${truncate(target.runId, compact ? 24 : 40)}`
+        : "n to compose a v2 worker run"
       : truncate(value, compact ? 58 : 120);
   return (
     <box
@@ -839,7 +891,7 @@ function RunComposer({
       }}
     >
       <text fg={focused ? theme.focus : theme.muted}>
-        {busy ? "running" : "prompt"}
+        {busy ? "running" : label}
       </text>
       <text fg={value.trim() === "" ? theme.muted : theme.text}>
         {visibleValue}
@@ -1532,7 +1584,7 @@ function RunDetailPanel({
           </text>
           <text fg={theme.muted}>actor     {selectedRun.actor_id ?? "-"}</text>
           <text fg={theme.muted}>
-            actions   n new run /{" "}
+            actions   n new / c continue /{" "}
             <span fg={canKillRunStatus(selectedRun.status) ? theme.warning : theme.subtle}>
               x kill
             </span>

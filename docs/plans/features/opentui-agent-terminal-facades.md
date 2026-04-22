@@ -45,6 +45,8 @@ The first backend facade tranche is partially implemented:
 - `GET /api/v2/runs/{run_id}/transcript` returns a typed transcript derived
   from v2 events, including prompt, tool calls/results, turn records, errors,
   and assistant output.
+- foxterm can submit follow-up turns against the selected run ID, keeping the
+  conversation in one run stream and transcript.
 
 Remaining hard blockers:
 

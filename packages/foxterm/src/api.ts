@@ -47,6 +47,7 @@ export interface RunDetail extends RunListItem {}
 
 export interface CreateRunInput {
   prompt: string;
+  runId?: string;
   profile?: string;
   maxIterations?: number;
   async?: boolean;
@@ -147,6 +148,7 @@ export async function createRun(
     throw new Error("prompt is required");
   }
   const ids = newRunIDs();
+  const runID = input.runId?.trim() || ids.runID;
   const query = new URLSearchParams();
   query.set("profile", input.profile ?? "worker");
   if (input.async ?? true) {
@@ -158,7 +160,7 @@ export async function createRun(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        run_id: ids.runID,
+        run_id: runID,
         turn_id: ids.turnID,
         request_id: ids.requestID,
         prompt,
