@@ -75,6 +75,13 @@ export interface KillRunResult {
   status: string;
 }
 
+export interface V2ModelEndpoint {
+  provider: string;
+  model: string;
+  base_url: string;
+  auth_mode?: string;
+}
+
 export interface RoomTaskWorkItem {
   id: string;
   room: Room;
@@ -138,6 +145,11 @@ export async function getRunTranscript(
     count: typeof data?.count === "number" ? data.count : items.length,
     items,
   };
+}
+
+export async function getV2ModelEndpoint(): Promise<V2ModelEndpoint> {
+  const envelope = await requestEnvelope<V2ModelEndpoint>("/api/v2/model");
+  return unwrapEnvelope(envelope);
 }
 
 export async function createRun(

@@ -40,6 +40,7 @@ const (
 	commandV2RunKill    = "v2/runs/kill"
 	commandV2Events     = "v2/events"
 	commandV2EventsLive = "v2/events/stream"
+	commandV2Model      = "v2/model"
 )
 
 var newV2RunModel = func(cfg config.Config, workspaceRoot string) (runner.Model, error) {
@@ -115,6 +116,37 @@ func V2RunsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 				"hint": httpErrorHint(http.StatusMethodNotAllowed),
 			})
 		}
+	}
+}
+
+// V2ModelHandler reports the model endpoint used by v2 run creation.
+func V2ModelHandler(cfg config.Config, _ zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeCommandError(w, http.StatusMethodNotAllowed, commandV2Model, "EARG", "method not allowed", map[string]any{
+				"hint": httpErrorHint(http.StatusMethodNotAllowed),
+			})
+			return
+		}
+		provider := strings.TrimSpace(r.URL.Query().Get("provider"))
+		if provider == "" {
+			provider = cfg.LLM.Provider
+		}
+		provider = strings.TrimSpace(provider)
+		model := strings.TrimSpace(cfg.LLM.Model)
+		baseURL := strings.TrimSpace(cfg.LLM.BaseURL)
+		authMode := strings.TrimSpace(cfg.LLM.AuthMode)
+		if provider != "" {
+			model = cfg.LLM.ResolveModel(provider)
+			baseURL = cfg.LLM.ResolveBaseURL(provider)
+			authMode = cfg.LLM.ResolveAuthMode(provider)
+		}
+		writeCommandOK(w, http.StatusOK, commandV2Model, map[string]any{
+			"provider":  provider,
+			"model":     model,
+			"base_url":  baseURL,
+			"auth_mode": authMode,
+		})
 	}
 }
 

@@ -8,12 +8,14 @@ import {
   getRoomTaskWork,
   getRunTranscript,
   getRuns,
+  getV2ModelEndpoint,
   killRun,
   subscribeToV2Stream,
   WORKSPACE_ID,
   type OrchestrationCardWorkItem,
   type RoomTaskWorkItem,
   type RunListItem,
+  type V2ModelEndpoint,
 } from "./api";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Panel, PanelState } from "./components/Panel";
@@ -94,6 +96,10 @@ export function App({ onExit }: AppProps) {
     kind: "new",
   });
   const [composerBusy, setComposerBusy] = useState(false);
+  const [busyTick, setBusyTick] = useState(0);
+  const [modelEndpoint, setModelEndpoint] = useState<V2ModelEndpoint | null>(
+    null,
+  );
   const [pendingKillRunId, setPendingKillRunId] = useState<string | null>(null);
   const [killBusy, setKillBusy] = useState(false);
   const [navIndex, setNavIndex] = useState(0);
@@ -405,7 +411,27 @@ export function App({ onExit }: AppProps) {
 
   useEffect(() => {
     void refreshRuns();
+    void refreshModelEndpoint();
   }, []);
+
+  useEffect(() => {
+    if (!composerBusy) {
+      setBusyTick(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setBusyTick((current) => current + 1);
+    }, 120);
+    return () => clearInterval(timer);
+  }, [composerBusy]);
+
+  const refreshModelEndpoint = async () => {
+    try {
+      setModelEndpoint(await getV2ModelEndpoint());
+    } catch {
+      setModelEndpoint(null);
+    }
+  };
 
   useEffect(() => {
     if (activeView === "rooms" && roomTaskLoadState === "idle") {
@@ -799,6 +825,8 @@ export function App({ onExit }: AppProps) {
               value={composerText}
               target={composerTarget}
               busy={composerBusy}
+              busyTick={busyTick}
+              modelEndpoint={modelEndpoint}
             />
           )}
         </>
@@ -897,14 +925,20 @@ function RunComposer({
   value,
   target,
   busy,
+  busyTick,
+  modelEndpoint,
 }: {
   compact: boolean;
   focused: boolean;
   value: string;
   target: ComposerTarget;
   busy: boolean;
+  busyTick: number;
+  modelEndpoint: V2ModelEndpoint | null;
 }) {
   const label = target.kind === "continue" ? "follow-up" : "prompt";
+  const spinner = busy ? spinnerFrame(busyTick) : "";
+  const endpoint = modelEndpointLabel(modelEndpoint);
   const visibleValue =
     value.trim() === ""
       ? target.kind === "continue"
@@ -929,8 +963,9 @@ function RunComposer({
       }}
     >
       <text fg={focused ? theme.focus : theme.muted}>
-        {busy ? "running" : label}
+        {busy ? `${spinner} ${label}` : label}
       </text>
+      <text fg={theme.subtle}>{truncate(endpoint, compact ? 34 : 42)}</text>
       <text fg={value.trim() === "" ? theme.muted : theme.text}>
         {visibleValue}
         {focused && !busy ? "_" : ""}
@@ -1784,6 +1819,19 @@ function transcriptPrefix(item: V2RunTranscriptItem): string {
     default:
       return "sys";
   }
+}
+
+function spinnerFrame(tick: number): string {
+  const frames = ["-", "\\", "|", "/"];
+  return frames[tick % frames.length] ?? "-";
+}
+
+function modelEndpointLabel(endpoint: V2ModelEndpoint | null): string {
+  if (!endpoint) return "model endpoint unknown";
+  const provider = endpoint.provider || "default";
+  const model = endpoint.model || "default";
+  const baseURL = endpoint.base_url || "backend default";
+  return `${provider}/${model} @ ${baseURL}`;
 }
 
 function nextFocus(

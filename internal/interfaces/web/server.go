@@ -389,6 +389,7 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/logs/cleanup", api.LogCleanupHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/v2/events/stream", api.V2EventsStreamHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/v2/events", api.V2EventsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/v2/model", api.V2ModelHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/v2/runs", api.V2RunsHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/v2/runs/", api.V2RunDetailHandler(s.cfg, s.log, s.orchRuntime))
 

@@ -85,6 +85,33 @@ func TestV2RunsListHandlerReturnsEnvelope(t *testing.T) {
 	}
 }
 
+func TestV2ModelHandlerReturnsResolvedEndpoint(t *testing.T) {
+	cfg := orchestrationTestConfig(t.TempDir())
+	cfg.LLM.Provider = "openrouter"
+	cfg.LLM.OpenRouterModel = "openrouter/test-model"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/model", nil)
+	rr := httptest.NewRecorder()
+	V2ModelHandler(cfg, zerolog.Nop()).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := decodeResponseBody(t, rr)
+	if got := strings.TrimSpace(body["command"].(string)); got != commandV2Model {
+		t.Fatalf("command=%q want %q", got, commandV2Model)
+	}
+	data, _ := body["data"].(map[string]any)
+	if got := strings.TrimSpace(data["provider"].(string)); got != "openrouter" {
+		t.Fatalf("provider=%q want openrouter", got)
+	}
+	if got := strings.TrimSpace(data["model"].(string)); got != "openrouter/test-model" {
+		t.Fatalf("model=%q want openrouter/test-model", got)
+	}
+	if got := strings.TrimSpace(data["base_url"].(string)); got != "https://openrouter.ai/api/v1" {
+		t.Fatalf("base_url=%q", got)
+	}
+}
+
 func TestV2RunDetailEventsHandlerAfterVersion(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "sqlite")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "sqlite")
