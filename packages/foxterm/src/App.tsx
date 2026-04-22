@@ -3,17 +3,21 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 
 import type { V2RunTranscriptItem, V2RuntimeEvent } from "@foxctl/data/types";
 import {
+  ACTOR_ID,
   createRoom,
   createRun,
   getOrchestrationCardWork,
+  getRoomMessages,
   getRoomTaskWork,
   getRunTranscript,
   getRuns,
   getV2ModelEndpoint,
   killRun,
+  sendRoomMessage,
   subscribeToV2Stream,
   WORKSPACE_ID,
   type OrchestrationCardWorkItem,
+  type RoomMessage,
   type RoomTaskWorkItem,
   type RunListItem,
   type V2ModelEndpoint,
@@ -100,6 +104,11 @@ export function App({ onExit }: AppProps) {
   const [composerBusy, setComposerBusy] = useState(false);
   const [roomComposerText, setRoomComposerText] = useState("");
   const [roomCreateBusy, setRoomCreateBusy] = useState(false);
+  const [roomMessageText, setRoomMessageText] = useState("");
+  const [roomMessageBusy, setRoomMessageBusy] = useState(false);
+  const [roomMessageRoomId, setRoomMessageRoomId] = useState<string | null>(
+    null,
+  );
   const [busyTick, setBusyTick] = useState(0);
   const [modelEndpoint, setModelEndpoint] = useState<V2ModelEndpoint | null>(
     null,
@@ -179,10 +188,14 @@ export function App({ onExit }: AppProps) {
     selectedRoomTaskId === null
       ? undefined
       : selectableRoomTasks.find((item) => item.id === selectedRoomTaskId);
+  const selectedRoom = selectedRoomTaskItem?.room;
   const selectedRoomTaskMissing =
     selectedRoomTaskId !== null &&
     selectedRoomTaskItem === undefined &&
     roomTaskItems.length > 0;
+  const [roomMessages, setRoomMessages] = useState<RoomMessage[]>([]);
+  const [roomMessagesLoadState, setRoomMessagesLoadState] =
+    useState<LoadState>("idle");
   const filteredCardItems = useMemo(
     () => cardItems.filter((item) => matchesCardFilter(item, filterText)),
     [cardItems, filterText],
@@ -343,6 +356,53 @@ export function App({ onExit }: AppProps) {
     }
   };
 
+  const openRoomMessageComposer = () => {
+    const room = selectedRoom ?? roomTaskItems[0]?.room;
+    if (!room) {
+      setStatus({ tone: "muted", text: "create or select a room first" });
+      return;
+    }
+    setRoomMessageRoomId(room.id);
+    setMode("roomMessage");
+    setFocus("composer");
+  };
+
+  const submitRoomMessage = async () => {
+    const body = roomMessageText.trim();
+    const roomId = roomMessageRoomId ?? selectedRoom?.id;
+    if (!roomId || body === "" || roomMessageBusy) return;
+    setRoomMessageBusy(true);
+    setStatus({ tone: "focus", text: "sending room message" });
+    try {
+      const result = await sendRoomMessage({
+        roomId,
+        body,
+        workspaceId: WORKSPACE_ID,
+        sender: ACTOR_ID,
+        subject: selectedRoom?.title || roomId,
+        taskId: selectedRoomTaskItem?.task?.id,
+      });
+      setRoomMessageText("");
+      setRoomMessageRoomId(null);
+      setMode("normal");
+      setFocus("detail");
+      await refreshRoomMessages(roomId);
+      await refreshRoomTasks(`room:${roomId}`);
+      setStatus({
+        tone: result.delivery_pending ? "focus" : "success",
+        text: `message ${result.status} in ${roomId}`,
+      });
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text:
+          error instanceof Error ? error.message : "failed to send room message",
+      });
+    } finally {
+      setRoomMessageBusy(false);
+    }
+  };
+
   const jumpToRun = (runId: string) => {
     const trimmed = runId.trim();
     if (trimmed === "") return;
@@ -444,6 +504,28 @@ export function App({ onExit }: AppProps) {
     }
   };
 
+  const refreshRoomMessages = async (roomId: string) => {
+    const trimmed = roomId.trim();
+    if (trimmed === "") {
+      setRoomMessages([]);
+      setRoomMessagesLoadState("idle");
+      return;
+    }
+    setRoomMessagesLoadState("loading");
+    try {
+      const result = await getRoomMessages({
+        roomId: trimmed,
+        workspaceId: WORKSPACE_ID,
+        limit: 8,
+      });
+      setRoomMessages(result.messages);
+      setRoomMessagesLoadState("ready");
+    } catch {
+      setRoomMessages([]);
+      setRoomMessagesLoadState("error");
+    }
+  };
+
   const refreshCards = async () => {
     const hadItems = cardItems.length > 0;
     setCardLoadState("loading");
@@ -477,7 +559,7 @@ export function App({ onExit }: AppProps) {
   }, []);
 
   useEffect(() => {
-    if (!composerBusy && !roomCreateBusy) {
+    if (!composerBusy && !roomCreateBusy && !roomMessageBusy) {
       setBusyTick(0);
       return;
     }
@@ -485,7 +567,7 @@ export function App({ onExit }: AppProps) {
       setBusyTick((current) => current + 1);
     }, 120);
     return () => clearInterval(timer);
-  }, [composerBusy, roomCreateBusy]);
+  }, [composerBusy, roomCreateBusy, roomMessageBusy]);
 
   const refreshModelEndpoint = async () => {
     try {
@@ -523,7 +605,26 @@ export function App({ onExit }: AppProps) {
       setRoomComposerText("");
       setMode("normal");
     }
+    if (activeView !== "rooms" && mode === "roomMessage") {
+      setRoomMessageText("");
+      setRoomMessageRoomId(null);
+      setMode("normal");
+    }
   }, [activeView, mode]);
+
+  useEffect(() => {
+    if (activeView !== "rooms") {
+      setRoomMessages([]);
+      setRoomMessagesLoadState("idle");
+      return;
+    }
+    if (!selectedRoom?.id) {
+      setRoomMessages([]);
+      setRoomMessagesLoadState("idle");
+      return;
+    }
+    void refreshRoomMessages(selectedRoom.id);
+  }, [activeView, selectedRoom?.id]);
 
   useEffect(() => {
     if (activeView !== "runs") return;
@@ -624,6 +725,11 @@ export function App({ onExit }: AppProps) {
         setRoomComposerText("");
         setFocus("worklist");
       }
+      if (mode === "roomMessage") {
+        setRoomMessageText("");
+        setRoomMessageRoomId(null);
+        setFocus("worklist");
+      }
       if (mode === "confirmKill") {
         setPendingKillRunId(null);
       }
@@ -669,6 +775,21 @@ export function App({ onExit }: AppProps) {
       const char = keyChar(name);
       if (char) {
         setRoomComposerText((current) => current + char);
+      }
+      return;
+    }
+    if (mode === "roomMessage") {
+      if (isSubmitKey(key)) {
+        void submitRoomMessage();
+        return;
+      }
+      if (name === "backspace" || name === "delete") {
+        setRoomMessageText((current) => current.slice(0, -1));
+        return;
+      }
+      const char = keyChar(name);
+      if (char) {
+        setRoomMessageText((current) => current + char);
       }
       return;
     }
@@ -719,6 +840,10 @@ export function App({ onExit }: AppProps) {
     }
     if (activeView === "rooms" && isRoomCreateKey(key)) {
       openRoomComposer();
+      return;
+    }
+    if (name === "m" && activeView === "rooms") {
+      openRoomMessageComposer();
       return;
     }
     if (name === "n" && activeView === "runs") {
@@ -884,6 +1009,8 @@ export function App({ onExit }: AppProps) {
                     selectedId={selectedRoomTaskId}
                     selectedMissing={selectedRoomTaskMissing}
                     roomCount={roomCount}
+                    messages={roomMessages}
+                    messagesLoadState={roomMessagesLoadState}
                   />
                 )}
               </>
@@ -963,10 +1090,20 @@ export function App({ onExit }: AppProps) {
           {activeView === "rooms" && mode !== "compose" && (
             <RoomComposer
               compact={compact}
-              focused={focus === "composer" || mode === "createRoom"}
-              value={roomComposerText}
-              busy={roomCreateBusy}
+              focused={
+                focus === "composer" ||
+                mode === "createRoom" ||
+                mode === "roomMessage"
+              }
+              value={
+                mode === "roomMessage" ? roomMessageText : roomComposerText
+              }
+              busy={
+                mode === "roomMessage" ? roomMessageBusy : roomCreateBusy
+              }
               busyTick={busyTick}
+              purpose={mode === "roomMessage" ? "message" : "create"}
+              roomId={roomMessageRoomId ?? selectedRoom?.id ?? null}
             />
           )}
         </>
@@ -1127,17 +1264,24 @@ function RoomComposer({
   value,
   busy,
   busyTick,
+  purpose,
+  roomId,
 }: {
   compact: boolean;
   focused: boolean;
   value: string;
   busy: boolean;
   busyTick: number;
+  purpose: "create" | "message";
+  roomId: string | null;
 }) {
   const spinner = busy ? spinnerFrame(busyTick) : "";
+  const label = purpose === "message" ? "message" : "room";
   const visibleValue =
     value.trim() === ""
-      ? "+ to create a room"
+      ? purpose === "message"
+        ? `m to message ${truncate(roomId ?? "room", compact ? 26 : 44)}`
+        : "+ to create a room"
       : truncate(value, compact ? 66 : 130);
   return (
     <box
@@ -1157,9 +1301,14 @@ function RoomComposer({
       }}
     >
       <text fg={focused ? theme.focus : theme.muted}>
-        {busy ? `${spinner} room` : "room"}
+        {busy ? `${spinner} ${label}` : label}
       </text>
-      <text fg={theme.subtle}>{truncate(WORKSPACE_ID, compact ? 28 : 44)}</text>
+      <text fg={theme.subtle}>
+        {truncate(
+          purpose === "message" ? roomId ?? WORKSPACE_ID : WORKSPACE_ID,
+          compact ? 28 : 44,
+        )}
+      </text>
       <text fg={value.trim() === "" ? theme.muted : theme.text}>
         {visibleValue}
         {focused && !busy ? "_" : ""}
@@ -1462,6 +1611,8 @@ function RoomTaskDetailPanel({
   selectedId,
   selectedMissing,
   roomCount,
+  messages,
+  messagesLoadState,
 }: {
   compact: boolean;
   focused: boolean;
@@ -1469,6 +1620,8 @@ function RoomTaskDetailPanel({
   selectedId: string | null;
   selectedMissing: boolean;
   roomCount: number;
+  messages: RoomMessage[];
+  messagesLoadState: LoadState;
 }) {
   return (
     <Panel
@@ -1510,6 +1663,10 @@ function RoomTaskDetailPanel({
               )}
             </text>
           </scrollbox>
+          <RoomMessagesPreview
+            messages={messages}
+            loadState={messagesLoadState}
+          />
         </box>
       ) : selectedMissing ? (
         <PanelState
@@ -1521,7 +1678,12 @@ function RoomTaskDetailPanel({
           detail="Move the selection or press r to refresh."
         />
       ) : (
-        <RoomSummaryDetail selectedItem={selectedItem} roomCount={roomCount} />
+        <RoomSummaryDetail
+          selectedItem={selectedItem}
+          roomCount={roomCount}
+          messages={messages}
+          messagesLoadState={messagesLoadState}
+        />
       )}
     </Panel>
   );
@@ -1530,9 +1692,13 @@ function RoomTaskDetailPanel({
 function RoomSummaryDetail({
   selectedItem,
   roomCount,
+  messages,
+  messagesLoadState,
 }: {
   selectedItem?: RoomTaskWorkItem;
   roomCount: number;
+  messages: RoomMessage[];
+  messagesLoadState: LoadState;
 }) {
   if (!selectedItem) {
     return (
@@ -1566,6 +1732,45 @@ function RoomSummaryDetail({
           )}
         </text>
       </scrollbox>
+      <RoomMessagesPreview messages={messages} loadState={messagesLoadState} />
+    </box>
+  );
+}
+
+function RoomMessagesPreview({
+  messages,
+  loadState,
+}: {
+  messages: RoomMessage[];
+  loadState: LoadState;
+}) {
+  const recent = messages.slice(0, 4);
+  const title =
+    loadState === "loading"
+      ? "messages loading"
+      : loadState === "error"
+        ? "messages unavailable"
+        : recent.length === 0
+          ? "messages empty"
+          : "recent messages";
+  return (
+    <box style={{ flexDirection: "column", gap: 1 }}>
+      <text fg={loadState === "error" ? theme.warning : theme.focus}>
+        {title}
+      </text>
+      {recent.length === 0 ? (
+        <text fg={theme.muted}>Press m to write into this room.</text>
+      ) : (
+        recent.map((message) => (
+          <box key={message.id} style={{ flexDirection: "column" }}>
+            <text fg={theme.muted}>
+              {truncate(message.sender, 18)} {"->"}{" "}
+              {truncate(message.recipient, 18)} {message.kind}
+            </text>
+            <text fg={theme.text}>{truncate(message.body, 110)}</text>
+          </box>
+        ))
+      )}
     </box>
   );
 }

@@ -12,6 +12,8 @@ built around the backend facades used by OpenTUI:
 - `POST /api/v2/runs/{run_id}/kill`
 - `GET /api/v2/events/stream`
 - `POST /api/rooms`
+- `GET /api/rooms/{room_id}/messages`
+- `POST /api/rooms/{room_id}/messages`
 - job, room, CAS, skill, and MCP facade routes
 
 Run locally after installing workspace dependencies:
@@ -36,6 +38,7 @@ Runs view shortcuts:
 - `Enter` submits the composed prompt, opens the selected run detail, or opens a card's linked run.
 - `x` opens a confirmation prompt for killing the selected active run.
 - `+` or `Shift+n` creates a room from the Rooms view.
+- `m` writes a message to the selected room.
 - `/` filters the active worklist.
 - `a` cycles activity scopes.
 - `r` refreshes the active worklist.
@@ -44,6 +47,8 @@ Foxterm starts runs asynchronously, renders the selected run transcript, and
 follows `/api/v2/events/stream` for live activity. The synchronous
 `POST /api/v2/runs` path remains available for non-interactive clients.
 
-In Rooms, `+` creates a room in the active workspace, and `n` seeds a new run
-prompt with the selected room/task context. In Cards, `n` seeds a board/card
-context prompt, and `Enter` jumps to the card's linked run when one exists.
+In Rooms, `+` creates a room in the active workspace, `m` writes a room
+message, and `n` seeds a new run prompt with the selected room/task context.
+Foxterm identifies room operations as `FOXTERM_ACTOR_ID`/`FOXCTL_ACTOR_ID`, or
+`dev-local-user` by default. In Cards, `n` seeds a board/card context prompt,
+and `Enter` jumps to the card's linked run when one exists.

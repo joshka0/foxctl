@@ -11,6 +11,7 @@ import type {
 
 const DEFAULT_API_BASE = "http://127.0.0.1:8090";
 const DEFAULT_WORKSPACE_ID = ".";
+const DEFAULT_ACTOR_ID = "dev-local-user";
 
 export const API_BASE = normalizeApiBase(
   process.env.FOXCTL_API_URL ?? DEFAULT_API_BASE,
@@ -19,6 +20,10 @@ export const WORKSPACE_ID =
   process.env.FOXTERM_WORKSPACE_ID ??
   process.env.FOXCTL_WORKSPACE_ID ??
   DEFAULT_WORKSPACE_ID;
+export const ACTOR_ID =
+  process.env.FOXTERM_ACTOR_ID ??
+  process.env.FOXCTL_ACTOR_ID ??
+  DEFAULT_ACTOR_ID;
 
 export interface ApiEnvelope<T> {
   version: number;
@@ -98,10 +103,66 @@ export interface CreateRoomInput {
   id?: string;
   description?: string;
   workspaceId?: string;
+  members?: RoomMemberInput[];
 }
 
 export interface CreateRoomResult {
   room: Room;
+}
+
+export interface RoomMemberInput {
+  actor_id: string;
+  role?: string;
+}
+
+export interface RoomMessage {
+  id: string;
+  related_message_id?: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  kind: string;
+  priority: number;
+  status: string;
+  ack_required?: boolean;
+  reply_expected?: boolean;
+  interrupt?: boolean;
+  created_at: string;
+  task_id?: string;
+  stream?: string;
+}
+
+export interface RoomMessagesResult {
+  room_id: string;
+  stream: string;
+  messages: RoomMessage[];
+  count: number;
+}
+
+export interface SendRoomMessageInput {
+  roomId: string;
+  body: string;
+  workspaceId?: string;
+  sender?: string;
+  subject?: string;
+  recipient?: string;
+  kind?: string;
+  taskId?: string;
+  dispatchAgents?: boolean;
+  dispatchAgentIds?: string[];
+}
+
+export interface SendRoomMessageResult {
+  id: string;
+  room_id: string;
+  stream: string;
+  status: string;
+  message?: string;
+  dispatched?: number;
+  skipped?: number;
+  delivery_owner?: string;
+  delivery_pending?: boolean;
 }
 
 export interface OrchestrationCardWorkItem {
@@ -221,6 +282,7 @@ export async function createRoom(
   const body: Record<string, unknown> = {
     workspace_id: workspaceId,
     title,
+    members: input.members ?? [{ actor_id: ACTOR_ID, role: "coordinator" }],
   };
   const id = input.id?.trim();
   const description = input.description?.trim();
@@ -231,6 +293,69 @@ export async function createRoom(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+export async function getRoomMessages(params: {
+  roomId: string;
+  workspaceId?: string;
+  limit?: number;
+}): Promise<RoomMessagesResult> {
+  const roomId = params.roomId.trim();
+  if (roomId === "") {
+    throw new Error("room_id is required");
+  }
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspaceId ?? WORKSPACE_ID);
+  query.set("limit", String(params.limit ?? 20));
+  const result = await requestJSON<RoomMessagesResult>(
+    `/api/rooms/${encodeURIComponent(roomId)}/messages?${query.toString()}`,
+  );
+  const messages = safeArray(result?.messages).filter(hasID);
+  return {
+    room_id: safeString(result?.room_id, roomId),
+    stream: safeString(result?.stream, `room:${roomId}`),
+    count: typeof result?.count === "number" ? result.count : messages.length,
+    messages,
+  };
+}
+
+export async function sendRoomMessage(
+  input: SendRoomMessageInput,
+): Promise<SendRoomMessageResult> {
+  const roomId = input.roomId.trim();
+  const body = input.body.trim();
+  if (roomId === "") {
+    throw new Error("room_id is required");
+  }
+  if (body === "") {
+    throw new Error("message body is required");
+  }
+  const payload: Record<string, unknown> = {
+    workspace_id: input.workspaceId ?? WORKSPACE_ID,
+    sender: input.sender ?? ACTOR_ID,
+    body,
+    kind: input.kind ?? "info",
+  };
+  const subject = input.subject?.trim();
+  const recipient = input.recipient?.trim();
+  const taskId = input.taskId?.trim();
+  if (subject) payload.subject = subject;
+  if (recipient) payload.recipient = recipient;
+  if (taskId) payload.task_id = taskId;
+  if (typeof input.dispatchAgents === "boolean") {
+    payload.dispatch_agents = input.dispatchAgents;
+  }
+  if (input.dispatchAgentIds && input.dispatchAgentIds.length > 0) {
+    payload.dispatch_agent_ids = input.dispatchAgentIds;
+  }
+  return requestJSON<SendRoomMessageResult>(
+    `/api/rooms/${encodeURIComponent(roomId)}/messages`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export async function getRoomTaskWork(params?: {

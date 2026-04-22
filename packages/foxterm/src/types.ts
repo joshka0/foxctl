@@ -5,6 +5,7 @@ export type Mode =
   | "filter"
   | "compose"
   | "createRoom"
+  | "roomMessage"
   | "confirmKill";
 export type LoadState = "idle" | "loading" | "ready" | "error";
 export type ActivityScope = "focused" | "important" | "all" | "debug";

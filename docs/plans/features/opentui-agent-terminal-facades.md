@@ -51,6 +51,9 @@ The first backend facade tranche is partially implemented:
   and cards with `run_id` can jump directly to the linked run.
 - foxterm can create a room from the Rooms scope through `POST /api/rooms`,
   then refresh and select the newly created room summary.
+- foxterm room creation now attaches the local actor as coordinator, and the
+  Rooms scope can read recent room messages and send a room message through
+  `/api/rooms/{id}/messages`.
 
 Remaining hard blockers:
 
