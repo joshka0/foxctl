@@ -9,6 +9,7 @@ export type Mode =
   | "spawnAgent"
   | "spawnCLI"
   | "atcpPrompt"
+  | "atcpScreen"
   | "confirmKill"
   | "confirmATCPStop";
 export type LoadState = "idle" | "loading" | "ready" | "error";

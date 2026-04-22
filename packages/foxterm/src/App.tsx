@@ -999,6 +999,28 @@ export function App({ onExit }: AppProps) {
     setFocus("detail");
   };
 
+  const cycleSelectedATCPSessionBy = (delta: number) => {
+    if (atcpSessions.length === 0) {
+      setStatus({ tone: "muted", text: "no ATCP sessions" });
+      return;
+    }
+    setSelectedATCPSessionId((current) => {
+      const index = atcpSessions.findIndex((session) => session.id === current);
+      const safeIndex = index < 0 ? 0 : index;
+      return atcpSessions[(safeIndex + delta + atcpSessions.length) % atcpSessions.length]?.id ?? null;
+    });
+    setFocus("detail");
+  };
+
+  const openATCPScreenView = () => {
+    if (atcpSessions.length === 0) {
+      setStatus({ tone: "muted", text: "no ATCP sessions" });
+      return;
+    }
+    setMode("atcpScreen");
+    setFocus("detail");
+  };
+
   useEffect(() => {
     void refreshRuns();
     void refreshModelEndpoint();
@@ -1241,6 +1263,9 @@ export function App({ onExit }: AppProps) {
         setATCPPromptRoomId(null);
         setFocus("worklist");
       }
+      if (mode === "atcpScreen") {
+        setFocus("detail");
+      }
       if (mode === "confirmKill") {
         setPendingKillRunId(null);
       }
@@ -1270,6 +1295,25 @@ export function App({ onExit }: AppProps) {
       if (name === "n") {
         setPendingATCPStop(null);
         setMode("normal");
+        return;
+      }
+      return;
+    }
+    if (mode === "atcpScreen") {
+      if (name === "tab" || name === "v" || name === "right" || name === "l") {
+        cycleSelectedATCPSessionBy(key.shift ? -1 : 1);
+        return;
+      }
+      if (name === "left" || name === "h") {
+        cycleSelectedATCPSessionBy(-1);
+        return;
+      }
+      if (name === "p") {
+        openATCPPromptComposer();
+        return;
+      }
+      if (name === "x") {
+        requestStopSelectedATCPSession();
         return;
       }
       return;
@@ -1528,6 +1572,10 @@ export function App({ onExit }: AppProps) {
     }
     if (isSubmitKey(key) && activeView === "runs" && focus === "worklist") {
       setFocus("detail");
+      return;
+    }
+    if (isSubmitKey(key) && activeView === "rooms" && focus === "detail") {
+      openATCPScreenView();
       return;
     }
     if (isSubmitKey(key) && activeView === "cards" && selectedCardItem?.card.run_id) {
@@ -1807,6 +1855,18 @@ export function App({ onExit }: AppProps) {
           busy={atcpStopBusy}
         />
       )}
+      {mode === "atcpScreen" && selectedATCPSession && (
+        <ATCPScreenOverlay
+          compact={compact}
+          width={width}
+          height={height}
+          session={selectedATCPSession}
+          member={selectedATCPMember}
+          readiness={atcpReadiness[selectedATCPSession.id]}
+          screen={atcpScreens[selectedATCPSession.id]}
+          sessions={atcpSessions}
+        />
+      )}
     </AppFrame>
   );
 }
@@ -1889,6 +1949,96 @@ function ATCPStopConfirmOverlay({
       </text>
       <text fg={theme.muted}>This terminates the attached CLI process.</text>
       <text fg={theme.warning}>Enter confirms, Esc cancels.</text>
+    </box>
+  );
+}
+
+function ATCPScreenOverlay({
+  compact,
+  width,
+  height,
+  session,
+  member,
+  readiness,
+  screen,
+  sessions,
+}: {
+  compact: boolean;
+  width: number;
+  height: number;
+  session: ATCPSession;
+  member?: ATCPMember;
+  readiness?: ATCPReadiness;
+  screen?: ATCPScreen;
+  sessions: ATCPSession[];
+}) {
+  const overlayWidth = compact
+    ? Math.max(54, width - 4)
+    : Math.max(84, Math.min(width - 12, 150));
+  const overlayHeight = Math.max(16, Math.min(height - 6, compact ? 24 : 34));
+  const left = compact ? 2 : Math.max(4, Math.floor((width - overlayWidth) / 2));
+  const top = compact ? 3 : 4;
+  const bodyWidth = overlayWidth - 6;
+  const lineCount = Math.max(4, overlayHeight - 9);
+  const lines = atcpScreenLines(screen, lineCount);
+  const title = member?.agent_id ?? session.id;
+  const status = `${session.status} ${readiness?.idle ? "idle" : "busy"}`;
+  return (
+    <box
+      style={{
+        position: "absolute",
+        top,
+        left,
+        width: overlayWidth,
+        height: overlayHeight,
+        border: true,
+        borderStyle: "single",
+        borderColor: theme.focus,
+        backgroundColor: theme.panel,
+        flexDirection: "column",
+        padding: 1,
+        gap: 1,
+      }}
+    >
+      <box
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          height: 1,
+        }}
+      >
+        <text fg={theme.focus}>ATCP screen</text>
+        <text fg={atcpSessionTone(session, readiness)}>{truncate(status, 22)}</text>
+      </box>
+      <text fg={theme.text}>{truncate(title, bodyWidth)}</text>
+      <text fg={theme.muted}>
+        {truncate(`${session.adapter || "cli"} ${session.cmd?.join(" ") || ""}`, bodyWidth)}
+      </text>
+      <text fg={theme.subtle}>
+        {truncate(
+          `${sessions.length} sessions  Tab cycle  p prompt  x stop  Esc close`,
+          bodyWidth,
+        )}
+      </text>
+      <box
+        style={{
+          flexDirection: "column",
+          flexGrow: 1,
+          backgroundColor: theme.bg,
+          paddingLeft: 1,
+          paddingRight: 1,
+        }}
+      >
+        {lines.length === 0 ? (
+          <text fg={theme.muted}>No rendered screen snapshot yet.</text>
+        ) : (
+          lines.map((line, index) => (
+            <text key={`${session.id}:screen:${index}`} fg={theme.text}>
+              {truncate(line, bodyWidth - 2)}
+            </text>
+          ))
+        )}
+      </box>
     </box>
   );
 }
@@ -2485,17 +2635,15 @@ function RoomTaskDetailPanel({
               blocked   {truncate(selectedItem.task.blocked_reason, 88)}
             </text>
           )}
-          <text fg={theme.focus}>notes</text>
-          <scrollbox style={{ flexGrow: 1 }}>
-            <text fg={theme.text}>
-              {truncate(
-                selectedItem.task.notes ||
-                  selectedItem.task.description ||
-                  "No notes recorded.",
-                120,
-              )}
-            </text>
-          </scrollbox>
+          <RoomTextPreview
+            title="notes"
+            value={
+              selectedItem.task.notes ||
+              selectedItem.task.description ||
+              "No notes recorded."
+            }
+            compact={compact}
+          />
           <RoomMessagesPreview
             messages={messages}
             loadState={messagesLoadState}
@@ -2614,17 +2762,15 @@ function RoomSummaryDetail({
       <text fg={theme.muted}>
         sender    {selectedItem.room.latest_sender ?? "-"}
       </text>
-      <text fg={theme.focus}>preview</text>
-      <scrollbox style={{ flexGrow: 1 }}>
-        <text fg={theme.text}>
-          {truncate(
-            selectedItem.room.latest_preview ||
-              selectedItem.room.description ||
-              "No linked tasks in this room yet.",
-            120,
-          )}
-        </text>
-      </scrollbox>
+      <RoomTextPreview
+        title="preview"
+        value={
+          selectedItem.room.latest_preview ||
+          selectedItem.room.description ||
+          "No linked tasks in this room yet."
+        }
+        compact={compact}
+      />
       <RoomMessagesPreview messages={messages} loadState={messagesLoadState} />
       <RoomLoopPreview
         roomId={selectedItem.room.id}
@@ -2644,6 +2790,25 @@ function RoomSummaryDetail({
         selectedSessionId={selectedATCPSessionId}
         loadState={atcpLoadState}
       />
+    </box>
+  );
+}
+
+function RoomTextPreview({
+  title,
+  value,
+  compact,
+}: {
+  title: string;
+  value: string;
+  compact: boolean;
+}) {
+  const width = compact ? 74 : 118;
+  return (
+    <box style={{ flexDirection: "column", height: 4 }}>
+      <text fg={theme.focus}>{title}</text>
+      <text fg={theme.text}>{truncate(value, width)}</text>
+      <text fg={theme.subtle}>{truncate(value.slice(width), width)}</text>
     </box>
   );
 }

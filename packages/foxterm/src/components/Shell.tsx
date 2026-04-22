@@ -155,6 +155,8 @@ function Footer({
                 ? "spawn CLI  agent@adapter: cmd"
                 : mode === "atcpPrompt"
                   ? "ATCP prompt  Enter send  Esc cancel"
+                  : mode === "atcpScreen"
+                    ? "ATCP screen  Tab/v cycle  p prompt  x stop  Esc close"
         : mode === "confirmKill"
           ? "confirm kill  Enter confirm  Esc cancel"
           : mode === "confirmATCPStop"
