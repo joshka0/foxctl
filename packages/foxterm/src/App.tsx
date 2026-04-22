@@ -1596,6 +1596,10 @@ export function App({ onExit }: AppProps) {
     }
     if (name === "up" || name === "k") {
       if (focus === "nav") setNavIndex((i) => Math.max(0, i - 1));
+      if (focus === "detail" && activeView === "rooms") {
+        cycleSelectedATCPSessionBy(-1);
+        return;
+      }
       if (focus === "worklist" && activeView === "runs") {
         moveSelection(-1, selectableRuns, selectedRunId, setSelectedRunId);
       }
@@ -1615,6 +1619,10 @@ export function App({ onExit }: AppProps) {
     if (name === "down" || name === "j") {
       if (focus === "nav") {
         setNavIndex((i) => Math.min(navItems.length - 1, i + 1));
+      }
+      if (focus === "detail" && activeView === "rooms") {
+        cycleSelectedATCPSessionBy(1);
+        return;
       }
       if (focus === "worklist" && activeView === "runs") {
         moveSelection(1, selectableRuns, selectedRunId, setSelectedRunId);
@@ -2615,58 +2623,60 @@ function RoomTaskDetailPanel({
       height={compact ? undefined : "100%"}
     >
       {selectedItem?.task ? (
-        <box style={{ flexDirection: "column", gap: 1, marginTop: 1 }}>
-          <text fg={theme.text}>room       {selectedItem.room.title}</text>
-          <text fg={theme.muted}>room_id    {selectedItem.room.id}</text>
-          <text fg={theme.text}>task       {selectedItem.task.title}</text>
-          <text fg={theme.muted}>task_id    {selectedItem.task.id}</text>
-          <text fg={theme.text}>status     {selectedItem.task.status}</text>
-          <text fg={theme.muted}>
-            owner      {selectedItem.task.owner_actor_id ?? "-"}
-          </text>
-          <text fg={theme.muted}>
-            assigned   {selectedItem.task.assigned_actor_id ?? "-"}
-          </text>
-          <text fg={theme.muted}>
-            scope      {selectedItem.task.scope_path ?? "-"}
-          </text>
-          {selectedItem.task.blocked_reason && (
-            <text fg={theme.warning}>
-              blocked   {truncate(selectedItem.task.blocked_reason, 88)}
+        <scrollbox style={{ flexGrow: 1, marginTop: 1 }}>
+          <box style={{ flexDirection: "column", gap: 1 }}>
+            <text fg={theme.text}>room       {selectedItem.room.title}</text>
+            <text fg={theme.muted}>room_id    {selectedItem.room.id}</text>
+            <text fg={theme.text}>task       {selectedItem.task.title}</text>
+            <text fg={theme.muted}>task_id    {selectedItem.task.id}</text>
+            <text fg={theme.text}>status     {selectedItem.task.status}</text>
+            <text fg={theme.muted}>
+              owner      {selectedItem.task.owner_actor_id ?? "-"}
             </text>
-          )}
-          <RoomTextPreview
-            title="notes"
-            value={
-              selectedItem.task.notes ||
-              selectedItem.task.description ||
-              "No notes recorded."
-            }
-            compact={compact}
-          />
-          <RoomMessagesPreview
-            messages={messages}
-            loadState={messagesLoadState}
-          />
-          <RoomLoopPreview
-            roomId={selectedItem.room.id}
-            loop={loop}
-            loadState={loopLoadState}
-          />
-          <RoomAgentPanes
-            compact={compact}
-            terminalWidth={terminalWidth}
-            room={selectedItem.room}
-            agents={agents}
-            agentLoadState={agentLoadState}
-            sessions={atcpSessions}
-            members={atcpMembers}
-            readiness={atcpReadiness}
-            screens={atcpScreens}
-            selectedSessionId={selectedATCPSessionId}
-            loadState={atcpLoadState}
-          />
-        </box>
+            <text fg={theme.muted}>
+              assigned   {selectedItem.task.assigned_actor_id ?? "-"}
+            </text>
+            <text fg={theme.muted}>
+              scope      {selectedItem.task.scope_path ?? "-"}
+            </text>
+            {selectedItem.task.blocked_reason && (
+              <text fg={theme.warning}>
+                blocked   {truncate(selectedItem.task.blocked_reason, 88)}
+              </text>
+            )}
+            <RoomTextPreview
+              title="notes"
+              value={
+                selectedItem.task.notes ||
+                selectedItem.task.description ||
+                "No notes recorded."
+              }
+              compact={compact}
+            />
+            <RoomMessagesPreview
+              messages={messages}
+              loadState={messagesLoadState}
+            />
+            <RoomLoopPreview
+              roomId={selectedItem.room.id}
+              loop={loop}
+              loadState={loopLoadState}
+            />
+            <RoomAgentPanes
+              compact={compact}
+              terminalWidth={terminalWidth}
+              room={selectedItem.room}
+              agents={agents}
+              agentLoadState={agentLoadState}
+              sessions={atcpSessions}
+              members={atcpMembers}
+              readiness={atcpReadiness}
+              screens={atcpScreens}
+              selectedSessionId={selectedATCPSessionId}
+              loadState={atcpLoadState}
+            />
+          </box>
+        </scrollbox>
       ) : selectedMissing ? (
         <PanelState
           tone="warning"
@@ -2677,24 +2687,26 @@ function RoomTaskDetailPanel({
           detail="Move the selection or press r to refresh."
         />
       ) : (
-        <RoomSummaryDetail
-          compact={compact}
-          terminalWidth={terminalWidth}
-          selectedItem={selectedItem}
-          roomCount={roomCount}
-          messages={messages}
-          messagesLoadState={messagesLoadState}
-          loop={loop}
-          loopLoadState={loopLoadState}
-          agents={agents}
-          agentLoadState={agentLoadState}
-          atcpSessions={atcpSessions}
-          atcpMembers={atcpMembers}
-          atcpReadiness={atcpReadiness}
-          atcpScreens={atcpScreens}
-          selectedATCPSessionId={selectedATCPSessionId}
-          atcpLoadState={atcpLoadState}
-        />
+        <scrollbox style={{ flexGrow: 1, marginTop: 1 }}>
+          <RoomSummaryDetail
+            compact={compact}
+            terminalWidth={terminalWidth}
+            selectedItem={selectedItem}
+            roomCount={roomCount}
+            messages={messages}
+            messagesLoadState={messagesLoadState}
+            loop={loop}
+            loopLoadState={loopLoadState}
+            agents={agents}
+            agentLoadState={agentLoadState}
+            atcpSessions={atcpSessions}
+            atcpMembers={atcpMembers}
+            atcpReadiness={atcpReadiness}
+            atcpScreens={atcpScreens}
+            selectedATCPSessionId={selectedATCPSessionId}
+            atcpLoadState={atcpLoadState}
+          />
+        </scrollbox>
       )}
     </Panel>
   );
@@ -2745,7 +2757,7 @@ function RoomSummaryDetail({
     );
   }
   return (
-    <box style={{ flexDirection: "column", gap: 1, marginTop: 1 }}>
+    <box style={{ flexDirection: "column", gap: 1 }}>
       <text fg={theme.text}>room       {selectedItem.room.title}</text>
       <text fg={theme.muted}>room_id    {selectedItem.room.id}</text>
       <text fg={theme.text}>
@@ -2920,7 +2932,7 @@ function RoomAgentPanes({
         ))
       )}
       {cliPanes.length > 0 && (
-        <text fg={theme.muted}>v focus pane, p prompt, x stop</text>
+        <text fg={theme.muted}>j/k or v focus pane, Enter screen, p prompt, x stop</text>
       )}
     </box>
   );
