@@ -44,6 +44,32 @@ export interface RunListResult {
 
 export interface RunDetail extends RunListItem {}
 
+export interface CreateRunInput {
+  prompt: string;
+  profile?: string;
+  maxIterations?: number;
+}
+
+export interface CreateRunResult {
+  run_id: string;
+  turn_id: string;
+  request_id: string;
+  correlation_id?: string;
+  profile: string;
+  output?: {
+    turn_id?: string;
+    summary?: string;
+    iterations?: number;
+    tool_calls?: number;
+    degraded?: boolean;
+  };
+}
+
+export interface KillRunResult {
+  run_id: string;
+  status: string;
+}
+
 export interface RoomTaskWorkItem {
   id: string;
   room: Room;
@@ -90,6 +116,49 @@ export async function getRuns(params?: {
 export async function getRun(runId: string): Promise<RunDetail> {
   const envelope = await requestEnvelope<RunDetail>(
     `/api/v2/runs/${encodeURIComponent(runId)}`,
+  );
+  return unwrapEnvelope(envelope);
+}
+
+export async function createRun(
+  input: CreateRunInput,
+): Promise<CreateRunResult> {
+  const prompt = input.prompt.trim();
+  if (prompt === "") {
+    throw new Error("prompt is required");
+  }
+  const ids = newRunIDs();
+  const query = new URLSearchParams();
+  query.set("profile", input.profile ?? "worker");
+  const envelope = await requestEnvelope<CreateRunResult>(
+    `/api/v2/runs?${query.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        run_id: ids.runID,
+        turn_id: ids.turnID,
+        request_id: ids.requestID,
+        prompt,
+        max_iterations: input.maxIterations ?? 1,
+      }),
+    },
+  );
+  return unwrapEnvelope(envelope);
+}
+
+export async function killRun(runId: string): Promise<KillRunResult> {
+  const trimmed = runId.trim();
+  if (trimmed === "") {
+    throw new Error("run_id is required");
+  }
+  const envelope = await requestEnvelope<KillRunResult>(
+    `/api/v2/runs/${encodeURIComponent(trimmed)}/kill`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_id: `req-foxterm-${newIDFragment()}` }),
+    },
   );
   return unwrapEnvelope(envelope);
 }
@@ -237,12 +306,19 @@ async function streamV2Events(
   }
 }
 
-async function requestEnvelope<T>(path: string): Promise<ApiEnvelope<T>> {
+async function requestEnvelope<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<ApiEnvelope<T>> {
   const url = apiURL(path);
   let response: Response;
   try {
     response = await fetch(url, {
-      headers: { Accept: "application/json" },
+      ...init,
+      headers: {
+        Accept: "application/json",
+        ...(init?.headers ?? {}),
+      },
     });
   } catch (error) {
     throw new Error(connectionErrorMessage(error));
@@ -326,6 +402,22 @@ function normalizeApiBase(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed === "") return DEFAULT_API_BASE;
   return trimmed.replace(/\/+$/, "");
+}
+
+function newRunIDs(): { runID: string; turnID: string; requestID: string } {
+  const suffix = newIDFragment();
+  return {
+    runID: `run-foxterm-${suffix}`,
+    turnID: `turn-foxterm-${suffix}`,
+    requestID: `req-foxterm-${suffix}`,
+  };
+}
+
+function newIDFragment(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID().slice(0, 12);
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function roomQuery(params: { workspaceId: string; limit: number }): string {

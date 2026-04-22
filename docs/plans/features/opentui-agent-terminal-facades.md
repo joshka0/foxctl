@@ -2,7 +2,7 @@
 
 Status: Draft implementation plan  
 Owner: Solo maintainer  
-Last Updated: 2026-04-21
+Last Updated: 2026-04-22
 
 ## Implementation Progress
 
@@ -34,6 +34,11 @@ The first backend facade tranche is partially implemented:
 - read-only MCP status and skill-backed tool inventory routes are available.
 - greenfield OpenTUI client scaffold is available under `packages/foxterm`
   with a keyboard-first v2 runs cockpit and live run event stream panel.
+- foxterm Runs now has a first terminal workflow layer: a keyboard prompt
+  composer, `POST /api/v2/runs` submission, selected-run assistant output, and
+  compact activity below the output.
+- selected active runs can be killed from foxterm through a guarded
+  confirmation flow backed by `POST /api/v2/runs/{run_id}/kill`.
 
 Remaining hard blockers:
 

@@ -3,9 +3,11 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 
 import type { V2RuntimeEvent } from "@foxctl/data/types";
 import {
+  createRun,
   getOrchestrationCardWork,
   getRoomTaskWork,
   getRuns,
+  killRun,
   subscribeToV2Stream,
   WORKSPACE_ID,
   type OrchestrationCardWorkItem,
@@ -39,6 +41,15 @@ const importantEventTypes = new Set([
   "orchestration.updated",
 ]);
 
+const nonKillableRunStatuses = new Set([
+  "completed",
+  "failed",
+  "killed",
+  "succeeded",
+  "cancelled",
+  "canceled",
+]);
+
 interface AppProps {
   onExit: () => void;
 }
@@ -55,6 +66,13 @@ interface CompactEventLine {
   repeat: number;
 }
 
+interface RunOutputSummary {
+  summary: string;
+  turnID?: string;
+  iterations?: number;
+  toolCalls?: number;
+}
+
 export function App({ onExit }: AppProps) {
   const { width, height } = useTerminalDimensions();
   const compact = width < 92 || height < 24;
@@ -64,6 +82,10 @@ export function App({ onExit }: AppProps) {
   const [filterText, setFilterText] = useState("");
   const [activityScope, setActivityScope] =
     useState<ActivityScope>("focused");
+  const [composerText, setComposerText] = useState("");
+  const [composerBusy, setComposerBusy] = useState(false);
+  const [pendingKillRunId, setPendingKillRunId] = useState<string | null>(null);
+  const [killBusy, setKillBusy] = useState(false);
   const [navIndex, setNavIndex] = useState(0);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunListItem[]>([]);
@@ -157,14 +179,16 @@ export function App({ onExit }: AppProps) {
     selectedCardItem === undefined &&
     cardItems.length > 0;
 
-  const refreshRuns = async () => {
+  const refreshRuns = async (preferredRunId?: string) => {
     const hadRuns = runs.length > 0;
     setRunLoadState("loading");
     setStatus({ tone: "focus", text: "refreshing runs" });
     try {
       const result = await getRuns({ limit: 50 });
       setRuns(result.items);
-      setSelectedRunId((current) => current ?? result.items[0]?.run_id ?? null);
+      setSelectedRunId(
+        (current) => preferredRunId ?? current ?? result.items[0]?.run_id ?? null,
+      );
       setRunLoadState("ready");
       setLastRunLoadAt(new Date().toLocaleTimeString());
       setStatus({
@@ -177,6 +201,73 @@ export function App({ onExit }: AppProps) {
         tone: hadRuns ? "warning" : "danger",
         text: error instanceof Error ? error.message : "failed to load runs",
       });
+    }
+  };
+
+  const submitComposedRun = async () => {
+    const prompt = composerText.trim();
+    if (prompt === "" || composerBusy) return;
+    setComposerBusy(true);
+    setStatus({ tone: "focus", text: "running prompt" });
+    try {
+      const result = await createRun({
+        prompt,
+        profile: "worker",
+        maxIterations: 1,
+      });
+      setComposerText("");
+      setMode("normal");
+      setFocus("detail");
+      await refreshRuns(result.run_id);
+      setStatus({
+        tone: result.output?.degraded ? "warning" : "success",
+        text: `run ${result.run_id} completed`,
+      });
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text: error instanceof Error ? error.message : "failed to create run",
+      });
+    } finally {
+      setComposerBusy(false);
+    }
+  };
+
+  const requestKillSelectedRun = () => {
+    if (!selectedRun) {
+      setStatus({ tone: "muted", text: "select a run first" });
+      return;
+    }
+    if (!canKillRunStatus(selectedRun.status)) {
+      setStatus({ tone: "muted", text: `run is ${selectedRun.status}` });
+      return;
+    }
+    setPendingKillRunId(selectedRun.run_id);
+    setMode("confirmKill");
+    setFocus("detail");
+  };
+
+  const confirmKillRun = async () => {
+    const runId = pendingKillRunId;
+    if (!runId || killBusy) return;
+    setKillBusy(true);
+    setStatus({ tone: "warning", text: `killing ${runId}` });
+    try {
+      const result = await killRun(runId);
+      setPendingKillRunId(null);
+      setMode("normal");
+      await refreshRuns(result.run_id);
+      setStatus({
+        tone: result.status === "killed" ? "warning" : "muted",
+        text: `${result.run_id} ${result.status}`,
+      });
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text: error instanceof Error ? error.message : "failed to kill run",
+      });
+    } finally {
+      setKillBusy(false);
     }
   };
 
@@ -258,6 +349,12 @@ export function App({ onExit }: AppProps) {
   }, [compact, focus]);
 
   useEffect(() => {
+    if (activeView !== "runs" && focus === "composer") {
+      setFocus("worklist");
+    }
+  }, [activeView, focus]);
+
+  useEffect(() => {
     if (activeView !== "runs") return;
     setSelectedRunId((current) =>
       current && selectableRuns.some((item) => item.id === current)
@@ -328,7 +425,41 @@ export function App({ onExit }: AppProps) {
       if (mode === "filter") {
         setFilterText("");
       }
+      if (mode === "compose") {
+        setComposerText("");
+        setFocus("worklist");
+      }
+      if (mode === "confirmKill") {
+        setPendingKillRunId(null);
+      }
       setMode("normal");
+      return;
+    }
+    if (mode === "confirmKill") {
+      if (name === "enter" || name === "y") {
+        void confirmKillRun();
+        return;
+      }
+      if (name === "n") {
+        setPendingKillRunId(null);
+        setMode("normal");
+        return;
+      }
+      return;
+    }
+    if (mode === "compose") {
+      if (name === "enter") {
+        void submitComposedRun();
+        return;
+      }
+      if (name === "backspace" || name === "delete") {
+        setComposerText((current) => current.slice(0, -1));
+        return;
+      }
+      const char = keyChar(name);
+      if (char) {
+        setComposerText((current) => current + char);
+      }
       return;
     }
     if (mode === "filter") {
@@ -360,6 +491,15 @@ export function App({ onExit }: AppProps) {
       setFocus("worklist");
       return;
     }
+    if (name === "n" && activeView === "runs") {
+      setMode("compose");
+      setFocus("composer");
+      return;
+    }
+    if (name === "x" && activeView === "runs") {
+      requestKillSelectedRun();
+      return;
+    }
     if (name === "a") {
       setActivityScope((current) => nextActivityScope(current));
       return;
@@ -375,7 +515,17 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (name === "tab") {
-      setFocus((current) => nextFocus(current, { reverse: key.shift, compact }));
+      setFocus((current) =>
+        nextFocus(current, {
+          reverse: key.shift,
+          compact,
+          hasComposer: activeView === "runs",
+        }),
+      );
+      return;
+    }
+    if (name === "enter" && activeView === "runs" && focus === "worklist") {
+      setFocus("detail");
       return;
     }
     if (name === "up" || name === "k") {
@@ -430,87 +580,143 @@ export function App({ onExit }: AppProps) {
       {tooSmall ? (
         <SmallTerminalNotice width={width} height={height} />
       ) : (
-        <MainRegion compact={compact}>
-          <Sidebar
-            compact={compact}
-            focused={focus === "nav"}
-            activeIndex={navIndex}
-          />
-          {activeView === "rooms" ? (
-            <>
-              <RoomTaskListPanel
-                compact={compact}
-                focused={focus === "worklist"}
-                sections={roomTaskSections}
-                selectedId={selectedRoomTaskId}
-                status={status}
-                loadState={roomTaskLoadState}
-                lastLoadedAt={lastRoomTaskLoadAt}
-                roomCount={roomCount}
-                sourceCount={roomTaskItems.length}
-                filterText={filterText}
-              />
-              <RoomTaskDetailPanel
-                compact={compact}
-                focused={focus === "detail"}
-                selectedItem={selectedRoomTaskItem}
-                selectedId={selectedRoomTaskId}
-                selectedMissing={selectedRoomTaskMissing}
-                roomCount={roomCount}
-              />
-            </>
-          ) : activeView === "cards" ? (
-            <>
-              <CardListPanel
-                compact={compact}
-                focused={focus === "worklist"}
-                sections={cardSections}
-                selectedId={selectedCardId}
-                status={status}
-                loadState={cardLoadState}
-                lastLoadedAt={lastCardLoadAt}
-                artifact={cardArtifact}
-                sourceCount={cardItems.length}
-                filterText={filterText}
-              />
-              <CardDetailPanel
-                compact={compact}
-                focused={focus === "detail"}
-                selectedItem={selectedCardItem}
-                selectedId={selectedCardId}
-                selectedMissing={selectedCardMissing}
-                artifact={cardArtifact}
-              />
-            </>
-          ) : (
-            <>
-              <RunListPanel
-                compact={compact}
-                focused={focus === "worklist"}
-                sections={runSections}
-                selectedId={selectedRunId}
-                status={status}
-                loadState={runLoadState}
-                lastLoadedAt={lastRunLoadAt}
-                sourceCount={runs.length}
-                filterText={filterText}
-              />
-              <RunDetailPanel
-                compact={compact}
-                focused={focus === "detail"}
-                selectedRun={selectedRun}
-                selectedRunId={selectedRunId}
-                selectedRunMissing={selectedRunMissing}
-                events={events}
-                activityScope={activityScope}
-                activeSection={activeNav.label}
-              />
-            </>
+        <>
+          <MainRegion compact={compact}>
+            <Sidebar
+              compact={compact}
+              focused={focus === "nav"}
+              activeIndex={navIndex}
+            />
+            {activeView === "rooms" ? (
+              <>
+                <RoomTaskListPanel
+                  compact={compact}
+                  focused={focus === "worklist"}
+                  sections={roomTaskSections}
+                  selectedId={selectedRoomTaskId}
+                  status={status}
+                  loadState={roomTaskLoadState}
+                  lastLoadedAt={lastRoomTaskLoadAt}
+                  roomCount={roomCount}
+                  sourceCount={roomTaskItems.length}
+                  filterText={filterText}
+                />
+                <RoomTaskDetailPanel
+                  compact={compact}
+                  focused={focus === "detail"}
+                  selectedItem={selectedRoomTaskItem}
+                  selectedId={selectedRoomTaskId}
+                  selectedMissing={selectedRoomTaskMissing}
+                  roomCount={roomCount}
+                />
+              </>
+            ) : activeView === "cards" ? (
+              <>
+                <CardListPanel
+                  compact={compact}
+                  focused={focus === "worklist"}
+                  sections={cardSections}
+                  selectedId={selectedCardId}
+                  status={status}
+                  loadState={cardLoadState}
+                  lastLoadedAt={lastCardLoadAt}
+                  artifact={cardArtifact}
+                  sourceCount={cardItems.length}
+                  filterText={filterText}
+                />
+                <CardDetailPanel
+                  compact={compact}
+                  focused={focus === "detail"}
+                  selectedItem={selectedCardItem}
+                  selectedId={selectedCardId}
+                  selectedMissing={selectedCardMissing}
+                  artifact={cardArtifact}
+                />
+              </>
+            ) : (
+              <>
+                <RunListPanel
+                  compact={compact}
+                  focused={focus === "worklist"}
+                  sections={runSections}
+                  selectedId={selectedRunId}
+                  status={status}
+                  loadState={runLoadState}
+                  lastLoadedAt={lastRunLoadAt}
+                  sourceCount={runs.length}
+                  filterText={filterText}
+                />
+                <RunDetailPanel
+                  compact={compact}
+                  focused={focus === "detail"}
+                  selectedRun={selectedRun}
+                  selectedRunId={selectedRunId}
+                  selectedRunMissing={selectedRunMissing}
+                  events={events}
+                  activityScope={activityScope}
+                  activeSection={activeNav.label}
+                />
+              </>
+            )}
+          </MainRegion>
+          {activeView === "runs" && (
+            <RunComposer
+              compact={compact}
+              focused={focus === "composer" || mode === "compose"}
+              value={composerText}
+              busy={composerBusy}
+            />
           )}
-        </MainRegion>
+        </>
       )}
       {mode === "help" && <HelpOverlay compact={compact} width={width} />}
+      {mode === "confirmKill" && pendingKillRunId && (
+        <KillConfirmOverlay
+          compact={compact}
+          width={width}
+          runId={pendingKillRunId}
+          busy={killBusy}
+        />
+      )}
     </AppFrame>
+  );
+}
+
+function KillConfirmOverlay({
+  compact,
+  width,
+  runId,
+  busy,
+}: {
+  compact: boolean;
+  width: number;
+  runId: string;
+  busy: boolean;
+}) {
+  const overlayWidth = compact ? Math.max(44, Math.min(width - 4, 62)) : 64;
+  const left = compact ? 2 : 10;
+  return (
+    <box
+      style={{
+        position: "absolute",
+        top: 5,
+        left,
+        width: overlayWidth,
+        height: 11,
+        border: true,
+        borderStyle: "rounded",
+        borderColor: theme.warning,
+        backgroundColor: theme.panel,
+        flexDirection: "column",
+        padding: 1,
+        gap: 1,
+      }}
+    >
+      <text fg={theme.warning}>{busy ? "Killing run" : "Kill selected run?"}</text>
+      <text fg={theme.text}>{truncate(runId, overlayWidth - 6)}</text>
+      <text fg={theme.muted}>This requests cancellation through v2 runtime.</text>
+      <text fg={theme.warning}>Enter confirms, Esc cancels.</text>
+    </box>
   );
 }
 
@@ -547,6 +753,49 @@ function Sidebar({
           <text fg={theme.muted}>  {item.hint}</text>
         </box>
       ))}
+    </box>
+  );
+}
+
+function RunComposer({
+  compact,
+  focused,
+  value,
+  busy,
+}: {
+  compact: boolean;
+  focused: boolean;
+  value: string;
+  busy: boolean;
+}) {
+  const visibleValue =
+    value.trim() === ""
+      ? "n to compose a v2 worker run"
+      : truncate(value, compact ? 58 : 120);
+  return (
+    <box
+      style={{
+        height: 3,
+        marginLeft: 1,
+        marginRight: 1,
+        marginBottom: 1,
+        border: true,
+        borderStyle: "single",
+        borderColor: focused ? theme.focus : theme.border,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingLeft: 1,
+        paddingRight: 1,
+        gap: 1,
+      }}
+    >
+      <text fg={focused ? theme.focus : theme.muted}>
+        {busy ? "running" : "prompt"}
+      </text>
+      <text fg={value.trim() === "" ? theme.muted : theme.text}>
+        {visibleValue}
+        {focused && !busy ? "_" : ""}
+      </text>
     </box>
   );
 }
@@ -1211,10 +1460,11 @@ function RunDetailPanel({
     () => compactEvents(scopedEvents, activityScope),
     [activityScope, scopedEvents],
   );
+  const output = useMemo(() => latestRunOutput(events), [events]);
 
   return (
     <Panel
-      title={`${activeSection} detail`}
+      title={`${activeSection} terminal`}
       subtitle={selectedRun ? selectedRun.status : undefined}
       focused={focused}
       flexGrow={1}
@@ -1228,25 +1478,43 @@ function RunDetailPanel({
             request   {selectedRun.request_id ?? "-"}
           </text>
           <text fg={theme.muted}>actor     {selectedRun.actor_id ?? "-"}</text>
-          <text fg={theme.focus}>events {activityScope}</text>
+          <text fg={theme.muted}>
+            actions   n new run /{" "}
+            <span fg={canKillRunStatus(selectedRun.status) ? theme.warning : theme.subtle}>
+              x kill
+            </span>
+          </text>
+          <text fg={theme.focus}>assistant output</text>
           <scrollbox style={{ flexGrow: 1 }}>
-            {eventLines.length === 0 ? (
-              <text fg={theme.muted}>
-                {events.length === 0
-                  ? "Waiting for replay or live events."
-                  : "No events in this activity scope."}
-              </text>
+            {output ? (
+              <RunOutputLines output={output} compact={compact} />
             ) : (
-              eventLines.map((line, index) => (
-                <text key={`${line.key}-${index}`} fg={toneColor(line.tone)}>
-                  {truncate(
-                    `${line.text}${line.repeat > 1 ? ` x${line.repeat}` : ""}`,
-                    92,
-                  )}
-                </text>
-              ))
+              <text fg={theme.muted}>
+                Waiting for a completed turn summary.
+              </text>
             )}
           </scrollbox>
+          <text fg={theme.focus}>activity {activityScope}</text>
+          <box style={{ height: compact ? 5 : 8, flexDirection: "column" }}>
+            <scrollbox style={{ flexGrow: 1 }}>
+              {eventLines.length === 0 ? (
+                <text fg={theme.muted}>
+                  {events.length === 0
+                    ? "Waiting for replay or live events."
+                    : "No events in this activity scope."}
+                </text>
+              ) : (
+                eventLines.map((line, index) => (
+                  <text key={`${line.key}-${index}`} fg={toneColor(line.tone)}>
+                    {truncate(
+                      `${line.text}${line.repeat > 1 ? ` x${line.repeat}` : ""}`,
+                      92,
+                    )}
+                  </text>
+                ))
+              )}
+            </scrollbox>
+          </box>
         </box>
       ) : selectedRunMissing ? (
         <PanelState
@@ -1267,13 +1535,49 @@ function RunDetailPanel({
   );
 }
 
+function RunOutputLines({
+  output,
+  compact,
+}: {
+  output: RunOutputSummary;
+  compact: boolean;
+}) {
+  const maxLines = compact ? 8 : 16;
+  const lines = output.summary
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() !== "")
+    .slice(0, maxLines);
+  return (
+    <>
+      {output.turnID && <text fg={theme.muted}>turn      {output.turnID}</text>}
+      {typeof output.iterations === "number" && (
+        <text fg={theme.muted}>
+          stats     {output.iterations} iterations / {output.toolCalls ?? 0} tools
+        </text>
+      )}
+      {lines.map((line, index) => (
+        <text key={`${output.turnID ?? "summary"}-${index}`} fg={theme.text}>
+          {truncate(line, compact ? 72 : 110)}
+        </text>
+      ))}
+      {lines.length === maxLines && (
+        <text fg={theme.muted}>output truncated in foxterm view</text>
+      )}
+    </>
+  );
+}
+
 function nextFocus(
   current: FocusRegion,
-  options: { reverse?: boolean; compact: boolean },
+  options: { reverse?: boolean; compact: boolean; hasComposer: boolean },
 ): FocusRegion {
-  const order: FocusRegion[] = options.compact
-    ? ["worklist", "detail"]
-    : ["nav", "worklist", "detail"];
+  const order: FocusRegion[] = [
+    ...(options.compact ? [] : (["nav"] as FocusRegion[])),
+    "worklist",
+    "detail",
+    ...(options.hasComposer ? (["composer"] as FocusRegion[]) : []),
+  ];
   const index = order.indexOf(current);
   const safeIndex = index < 0 ? 0 : index;
   const delta = options.reverse ? -1 : 1;
@@ -1291,6 +1595,11 @@ function statusToneForRun(status: string): Tone {
     default:
       return "muted";
   }
+}
+
+function canKillRunStatus(status: string): boolean {
+  const normalized = status.trim().toLowerCase();
+  return normalized !== "" && !nonKillableRunStatuses.has(normalized);
 }
 
 function taskToneForStatus(status: string): Tone {
@@ -1346,6 +1655,46 @@ function filterEventsForActivity(
 ): V2RuntimeEvent[] {
   if (scope !== "important") return events;
   return events.filter((event) => importantEventTypes.has(event.event_type));
+}
+
+function latestRunOutput(events: V2RuntimeEvent[]): RunOutputSummary | null {
+  const turnStats = latestTurnStats(events);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.event_type !== "run.completed") continue;
+    const payload = eventPayloadObject(event.payload);
+    const summary = payload.summary;
+    if (typeof summary !== "string" || summary.trim() === "") continue;
+    const turnID = payload.turn_id;
+    const iterations = payload.iterations;
+    const toolCalls = payload.tool_calls;
+    return {
+      summary,
+      turnID: typeof turnID === "string" ? turnID : undefined,
+      iterations:
+        typeof iterations === "number" ? iterations : turnStats.iterations,
+      toolCalls: typeof toolCalls === "number" ? toolCalls : turnStats.toolCalls,
+    };
+  }
+  return null;
+}
+
+function latestTurnStats(events: V2RuntimeEvent[]): {
+  iterations?: number;
+  toolCalls?: number;
+} {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.event_type !== "turn.recorded") continue;
+    const payload = eventPayloadObject(event.payload);
+    const iterations = payload.iterations;
+    const toolCalls = payload.tool_calls;
+    return {
+      iterations: typeof iterations === "number" ? iterations : undefined,
+      toolCalls: typeof toolCalls === "number" ? toolCalls : undefined,
+    };
+  }
+  return {};
 }
 
 function compactEvents(

@@ -6,7 +6,9 @@ This package intentionally does not depend on the archived TUI packages. It is
 built around the backend facades used by OpenTUI:
 
 - `GET /api/v2/runs`
+- `POST /api/v2/runs`
 - `GET /api/v2/runs/{run_id}`
+- `POST /api/v2/runs/{run_id}/kill`
 - `GET /api/v2/events/stream`
 - job, room, CAS, skill, and MCP facade routes
 
@@ -24,3 +26,12 @@ the web server uses another host or port:
 ```bash
 FOXCTL_API_URL=http://127.0.0.1:3000 bun run --cwd packages/foxterm dev
 ```
+
+Runs view shortcuts:
+
+- `n` opens the prompt composer.
+- `Enter` submits the composed prompt or opens the selected run detail.
+- `x` opens a confirmation prompt for killing the selected active run.
+- `/` filters the active worklist.
+- `a` cycles activity scopes.
+- `r` refreshes the active worklist.
