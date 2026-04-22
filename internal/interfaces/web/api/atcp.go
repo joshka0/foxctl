@@ -110,6 +110,13 @@ func ATCPHandler() http.HandlerFunc {
 				return
 			}
 			writeJSON(w, http.StatusCreated, map[string]any{"room": room})
+		case isATCPFoxctlRoomSessionPath(path):
+			if r.Method != http.MethodDelete {
+				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			roomID, sessionID := splitATCPFoxctlRoomSessionPath(path)
+			handleATCPFoxctlRoomDeleteSession(w, r, client, roomID, sessionID)
 		case strings.HasPrefix(path, "foxctl-rooms/") && strings.HasSuffix(path, "/sessions"):
 			if r.Method != http.MethodGet {
 				httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -135,6 +142,58 @@ func ATCPHandler() http.HandlerFunc {
 			httpError(w, http.StatusNotFound, "not found")
 		}
 	}
+}
+
+func handleATCPFoxctlRoomDeleteSession(w http.ResponseWriter, r *http.Request, client *atcpclient.Client, roomID, sessionID string) {
+	roomID = strings.TrimSpace(roomID)
+	sessionID = strings.TrimSpace(sessionID)
+	if roomID == "" {
+		httpError(w, http.StatusBadRequest, "room_id is required")
+		return
+	}
+	if sessionID == "" {
+		httpError(w, http.StatusBadRequest, "session_id is required")
+		return
+	}
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if workspaceID == "" {
+		workspaceID = "."
+	}
+	room, found, err := findATCPRoomForFoxctl(r.Context(), client, workspaceID, roomID)
+	if err != nil {
+		writeATCPError(w, err)
+		return
+	}
+	if !found {
+		httpError(w, http.StatusNotFound, "linked ATCP room not found")
+		return
+	}
+	members, err := client.RoomMembers(r.Context(), room.ID)
+	if err != nil {
+		writeATCPError(w, err)
+		return
+	}
+	agentID := ""
+	for _, member := range members {
+		if strings.TrimSpace(member.SessionID) == sessionID {
+			agentID = member.AgentID
+			break
+		}
+	}
+	if agentID == "" {
+		httpError(w, http.StatusNotFound, "ATCP session is not attached to room")
+		return
+	}
+	if err := client.DeleteSession(r.Context(), sessionID); err != nil {
+		writeATCPError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"room":       room,
+		"session_id": sessionID,
+		"agent_id":   agentID,
+		"status":     "stopped",
+	})
 }
 
 func handleATCPFoxctlRoomSendMessage(w http.ResponseWriter, r *http.Request, client *atcpclient.Client, roomID string) {
@@ -343,6 +402,30 @@ func handleATCPFoxctlRoomSpawnCLI(w http.ResponseWriter, r *http.Request, client
 		"session": session,
 		"member":  member,
 	})
+}
+
+func isATCPFoxctlRoomSessionPath(path string) bool {
+	roomID, sessionID := splitATCPFoxctlRoomSessionPath(path)
+	return roomID != "" && sessionID != ""
+}
+
+func splitATCPFoxctlRoomSessionPath(path string) (string, string) {
+	const prefix = "foxctl-rooms/"
+	const marker = "/sessions/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", ""
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	index := strings.Index(rest, marker)
+	if index < 0 {
+		return "", ""
+	}
+	roomID := rest[:index]
+	sessionID := rest[index+len(marker):]
+	if strings.Contains(sessionID, "/") {
+		return "", ""
+	}
+	return roomID, sessionID
 }
 
 func findATCPRoomForFoxctl(ctx context.Context, client *atcpclient.Client, workspaceID, roomID string) (httpjson.RoomResponse, bool, error) {

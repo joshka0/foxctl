@@ -343,6 +343,19 @@ export interface SendATCPMessageResult {
   };
 }
 
+export interface StopATCPSessionInput {
+  roomId: string;
+  sessionId: string;
+  workspaceId?: string;
+}
+
+export interface StopATCPSessionResult {
+  room: ATCPRoom;
+  session_id: string;
+  agent_id?: string;
+  status: string;
+}
+
 export interface ATCPRoomSessionsResult {
   room?: ATCPRoom;
   members: ATCPMember[];
@@ -678,6 +691,27 @@ export async function sendATCPMessageToRoom(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function stopATCPSessionForRoom(
+  input: StopATCPSessionInput,
+): Promise<StopATCPSessionResult> {
+  const roomId = input.roomId.trim();
+  const sessionId = input.sessionId.trim();
+  if (roomId === "") {
+    throw new Error("room_id is required");
+  }
+  if (sessionId === "") {
+    throw new Error("session_id is required");
+  }
+  const query = new URLSearchParams();
+  query.set("workspace_id", input.workspaceId ?? WORKSPACE_ID);
+  return requestJSON<StopATCPSessionResult>(
+    `/api/atcp/foxctl-rooms/${encodeURIComponent(roomId)}/sessions/${encodeURIComponent(sessionId)}?${query.toString()}`,
+    {
+      method: "DELETE",
     },
   );
 }

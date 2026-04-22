@@ -80,6 +80,10 @@ The first backend facade tranche is partially implemented:
   `POST /api/atcp/foxctl-rooms/{room_id}/messages`; the facade resolves the
   room-linked ATCP room and targets the selected participant by structured
   member identity.
+- foxterm can stop the focused ATCP CLI session through
+  `DELETE /api/atcp/foxctl-rooms/{room_id}/sessions/{session_id}` after a
+  confirmation overlay; the facade verifies the session is attached to the
+  selected room before deleting it.
 
 Remaining hard blockers:
 

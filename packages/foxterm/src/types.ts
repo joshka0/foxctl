@@ -9,7 +9,8 @@ export type Mode =
   | "spawnAgent"
   | "spawnCLI"
   | "atcpPrompt"
-  | "confirmKill";
+  | "confirmKill"
+  | "confirmATCPStop";
 export type LoadState = "idle" | "loading" | "ready" | "error";
 export type ActivityScope = "focused" | "important" | "all" | "debug";
 

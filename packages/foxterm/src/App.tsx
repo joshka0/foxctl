@@ -20,6 +20,7 @@ import {
   sendATCPMessageToRoom,
   spawnAgent,
   spawnATCPCLIForRoom,
+  stopATCPSessionForRoom,
   subscribeToV2Stream,
   WORKSPACE_ID,
   WORKSPACE_ROOT,
@@ -113,6 +114,12 @@ interface CLISpawnForm {
   adapter: string;
   command: string;
   raw: string;
+}
+
+interface ATCPStopTarget {
+  roomId: string;
+  sessionId: string;
+  agentId?: string;
 }
 
 type ComposerTarget =
@@ -211,6 +218,9 @@ export function App({ onExit }: AppProps) {
   );
   const [pendingKillRunId, setPendingKillRunId] = useState<string | null>(null);
   const [killBusy, setKillBusy] = useState(false);
+  const [pendingATCPStop, setPendingATCPStop] =
+    useState<ATCPStopTarget | null>(null);
+  const [atcpStopBusy, setATCPStopBusy] = useState(false);
   const [navIndex, setNavIndex] = useState(0);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunListItem[]>([]);
@@ -780,6 +790,59 @@ export function App({ onExit }: AppProps) {
     }
   };
 
+  const requestStopSelectedATCPSession = () => {
+    const room = selectedRoom ?? roomTaskItems[0]?.room;
+    if (!room) {
+      setStatus({ tone: "muted", text: "select a room first" });
+      return;
+    }
+    if (!selectedATCPSession) {
+      setStatus({ tone: "muted", text: "no ATCP sessions" });
+      return;
+    }
+    setPendingATCPStop({
+      roomId: room.id,
+      sessionId: selectedATCPSession.id,
+      agentId: selectedATCPMember?.agent_id,
+    });
+    setMode("confirmATCPStop");
+    setFocus("detail");
+  };
+
+  const confirmStopATCPSession = async () => {
+    const target = pendingATCPStop;
+    if (!target || atcpStopBusy) return;
+    setATCPStopBusy(true);
+    setStatus({
+      tone: "warning",
+      text: `stopping ${target.agentId ?? target.sessionId}`,
+    });
+    try {
+      const result = await stopATCPSessionForRoom({
+        roomId: target.roomId,
+        sessionId: target.sessionId,
+        workspaceId: WORKSPACE_ID,
+      });
+      setPendingATCPStop(null);
+      setMode("normal");
+      await refreshATCPRoomSessions(target.roomId);
+      setStatus({
+        tone: "warning",
+        text: `${result.agent_id ?? result.session_id} ${result.status}`,
+      });
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text:
+          error instanceof Error
+            ? error.message
+            : "failed to stop ATCP session",
+      });
+    } finally {
+      setATCPStopBusy(false);
+    }
+  };
+
   const refreshRoomTasks = async (preferredItemId?: string) => {
     const hadItems = roomTaskItems.length > 0;
     setRoomTaskLoadState("loading");
@@ -1188,6 +1251,9 @@ export function App({ onExit }: AppProps) {
       if (mode === "confirmKill") {
         setPendingKillRunId(null);
       }
+      if (mode === "confirmATCPStop") {
+        setPendingATCPStop(null);
+      }
       setMode("normal");
       return;
     }
@@ -1198,6 +1264,18 @@ export function App({ onExit }: AppProps) {
       }
       if (name === "n") {
         setPendingKillRunId(null);
+        setMode("normal");
+        return;
+      }
+      return;
+    }
+    if (mode === "confirmATCPStop") {
+      if (isSubmitKey(key) || name === "y") {
+        void confirmStopATCPSession();
+        return;
+      }
+      if (name === "n") {
+        setPendingATCPStop(null);
         setMode("normal");
         return;
       }
@@ -1415,6 +1493,10 @@ export function App({ onExit }: AppProps) {
     }
     if (name === "x" && activeView === "runs") {
       requestKillSelectedRun();
+      return;
+    }
+    if (name === "x" && activeView === "rooms") {
+      requestStopSelectedATCPSession();
       return;
     }
     if (name === "a") {
@@ -1723,6 +1805,14 @@ export function App({ onExit }: AppProps) {
           busy={killBusy}
         />
       )}
+      {mode === "confirmATCPStop" && pendingATCPStop && (
+        <ATCPStopConfirmOverlay
+          compact={compact}
+          width={width}
+          target={pendingATCPStop}
+          busy={atcpStopBusy}
+        />
+      )}
     </AppFrame>
   );
 }
@@ -1760,6 +1850,50 @@ function KillConfirmOverlay({
       <text fg={theme.warning}>{busy ? "Killing run" : "Kill selected run?"}</text>
       <text fg={theme.text}>{truncate(runId, overlayWidth - 6)}</text>
       <text fg={theme.muted}>This requests cancellation through v2 runtime.</text>
+      <text fg={theme.warning}>Enter confirms, Esc cancels.</text>
+    </box>
+  );
+}
+
+function ATCPStopConfirmOverlay({
+  compact,
+  width,
+  target,
+  busy,
+}: {
+  compact: boolean;
+  width: number;
+  target: ATCPStopTarget;
+  busy: boolean;
+}) {
+  const overlayWidth = compact ? Math.max(44, Math.min(width - 4, 66)) : 66;
+  const left = compact ? 2 : 10;
+  const label = target.agentId ?? target.sessionId;
+  return (
+    <box
+      style={{
+        position: "absolute",
+        top: 5,
+        left,
+        width: overlayWidth,
+        height: 12,
+        border: true,
+        borderStyle: "rounded",
+        borderColor: theme.warning,
+        backgroundColor: theme.panel,
+        flexDirection: "column",
+        padding: 1,
+        gap: 1,
+      }}
+    >
+      <text fg={theme.warning}>
+        {busy ? "Stopping ATCP session" : "Stop focused ATCP session?"}
+      </text>
+      <text fg={theme.text}>{truncate(label, overlayWidth - 6)}</text>
+      <text fg={theme.muted}>
+        session   {truncate(target.sessionId, overlayWidth - 16)}
+      </text>
+      <text fg={theme.muted}>This terminates the attached CLI process.</text>
       <text fg={theme.warning}>Enter confirms, Esc cancels.</text>
     </box>
   );
@@ -2593,6 +2727,7 @@ function RoomATCPPreview({
               </text>
             ))
           )}
+          <text fg={theme.muted}>p prompt, x stop, v switch focused session</text>
         </box>
       )}
     </box>

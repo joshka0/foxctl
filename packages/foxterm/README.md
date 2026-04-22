@@ -18,6 +18,7 @@ built around the backend facades used by OpenTUI:
 - `POST /api/agents/spawn`
 - `GET /api/atcp/sessions`
 - `GET /api/atcp/foxctl-rooms/{room_id}/sessions`
+- `DELETE /api/atcp/foxctl-rooms/{room_id}/sessions/{session_id}`
 - `POST /api/atcp/foxctl-rooms/{room_id}/spawn-cli`
 - `POST /api/atcp/foxctl-rooms/{room_id}/messages`
 - job, room, CAS, skill, and MCP facade routes
@@ -49,6 +50,7 @@ Runs view shortcuts:
 - `Shift+s` spawns an ATCP-backed CLI session into the selected room.
 - `v` cycles the focused ATCP CLI session screen detail.
 - `p` prompts the focused ATCP CLI session.
+- `x` stops the focused ATCP CLI session in Rooms or kills a selected run in Runs.
 - `/` filters the active worklist.
 - `a` cycles activity scopes.
 - `r` refreshes the active worklist.
@@ -86,3 +88,5 @@ latest non-empty rendered screen line when ATCP screen snapshots are available.
 Press `v` to cycle the focused ATCP session and show a larger screen excerpt.
 Press `p` to send the bottom-composer prompt to that focused CLI participant
 through the room-linked ATCP message facade.
+Press `x` in Rooms to confirm and stop the focused ATCP session; this calls the
+room-scoped delete facade so foxterm only stops a CLI attached to that room.

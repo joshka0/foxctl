@@ -41,3 +41,16 @@ func TestATCPHandler_SendMessageRequiresText(t *testing.T) {
 		t.Fatalf("body=%q want text validation", rec.Body.String())
 	}
 }
+
+func TestSplitATCPFoxctlRoomSessionPath(t *testing.T) {
+	roomID, sessionID := splitATCPFoxctlRoomSessionPath("foxctl-rooms/alpha/sessions/sess-1")
+	if roomID != "alpha" || sessionID != "sess-1" {
+		t.Fatalf("split room=%q session=%q", roomID, sessionID)
+	}
+	if isATCPFoxctlRoomSessionPath("foxctl-rooms/alpha/sessions") {
+		t.Fatal("sessions collection path should not parse as session member path")
+	}
+	if isATCPFoxctlRoomSessionPath("foxctl-rooms/alpha/sessions/sess-1/extra") {
+		t.Fatal("nested session path should not parse")
+	}
+}
