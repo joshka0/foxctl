@@ -16,7 +16,7 @@ export function HelpOverlay({
         top: 4,
         left,
         width: overlayWidth,
-        height: 28,
+        height: 29,
         border: true,
         borderStyle: "rounded",
         borderColor: theme.focus,
@@ -28,6 +28,7 @@ export function HelpOverlay({
     >
       <text fg={theme.focus}>Help</text>
       <text fg={theme.text}>Tab / Shift+Tab   Move focus between regions</text>
+      <text fg={theme.text}>: / Ctrl+p        Open command palette</text>
       <text fg={theme.text}>1 / 2 / 3         Runs / Rooms / Cards</text>
       <text fg={theme.text}>[ / ]             Cycle scopes</text>
       <text fg={theme.text}>b / w             Hide Scope / worklist</text>

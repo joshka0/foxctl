@@ -84,6 +84,9 @@ The first backend facade tranche is partially implemented:
   `DELETE /api/atcp/foxctl-rooms/{room_id}/sessions/{session_id}` after a
   confirmation overlay; the facade verifies the session is attached to the
   selected room before deleting it.
+- foxterm now has a local command palette on `:` / `Ctrl+p` that filters
+  discoverable run, room, agent, ATCP, card, navigation, and layout actions,
+  including disabled and destructive states.
 - `foxctl web serve --atcp` can host an embedded ATCP daemon in the same
   process as the web API, while the standalone `cmd/atcpd` binary remains
   available for split-process deployments.
@@ -653,6 +656,17 @@ dedupe across room/card activity is still pending.
 - provider/integration status
 - OpenAPI dry-run/execute workflow
 - command history and recent artifacts
+
+### Layer 7: Command Palette and Workbench Control
+
+- local command palette with filterable contextual actions
+- visible disabled/destructive state before execution
+- one route into run, room, card, ATCP, and layout commands
+- future replacement or augmentation from `/api/command-palette/actions`
+
+Status: first local palette is available through `:` / `Ctrl+p`. It dispatches
+existing guarded foxterm actions and keeps disabled/destructive state visible;
+the backend action-inventory facade remains a later integration layer.
 
 ## Worker Split
 

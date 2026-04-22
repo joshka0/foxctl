@@ -143,7 +143,9 @@ function Footer({
   const left =
     mode === "filter"
       ? `filter /${filterText}`
-      : mode === "compose"
+      : mode === "palette"
+        ? "palette  type filter  Enter run  Esc close"
+        : mode === "compose"
         ? "compose  Enter submit  Esc cancel"
         : mode === "createRoom"
           ? "new room  Enter create  Esc cancel"
@@ -176,8 +178,8 @@ function Footer({
       <text fg={theme.focus}>{truncate(left, compact ? 28 : 44)}</text>
       <text fg={theme.muted}>
         {compact
-          ? "1/2/3 scope  h/l pane  b/w hide  ,/. resize  -/= agent  j/k Enter  n + m s S v p c x / r ? q"
-          : "Tab focus  1/2/3 scope  b scope  w list  ,/. resize focused  -/= agent panes  j/k move  Enter open  n context run  + room  m message  s agent  S cli  v atcp  p prompt  c continue  x kill/stop  / filter  a scope  r refresh  ? help  q quit"}
+          ? ": palette  1/2/3 scope  b/w hide  ,/. resize  -/= agent  j/k Enter  n + m s S v p c x / r ? q"
+          : "Tab focus  : palette  1/2/3 scope  b scope  w list  ,/. resize focused  -/= agent panes  j/k move  Enter open  n context run  + room  m message  s agent  S cli  v atcp  p prompt  c continue  x kill/stop  / filter  a scope  r refresh  ? help  q quit"}
       </text>
     </box>
   );

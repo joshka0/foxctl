@@ -2,6 +2,7 @@ export type FocusRegion = "nav" | "worklist" | "detail" | "composer";
 export type Mode =
   | "normal"
   | "help"
+  | "palette"
   | "filter"
   | "compose"
   | "createRoom"

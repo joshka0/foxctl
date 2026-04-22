@@ -45,6 +45,7 @@ FOXCTL_API_URL=http://127.0.0.1:3000 bun run --cwd packages/foxterm dev
 
 Runs view shortcuts:
 
+- `:` or `Ctrl+p` opens the command palette for discoverable actions.
 - `n` opens the prompt composer.
 - `c` composes a follow-up turn on the selected run stream.
 - `Enter` submits the composed prompt, opens the selected run detail, or opens a card's linked run.
@@ -59,6 +60,9 @@ Runs view shortcuts:
 - `/` filters the active worklist.
 - `a` cycles activity scopes.
 - `r` refreshes the active worklist.
+- `b` hides or shows the Scope pane; `w` hides or shows the active worklist.
+- `,` / `.` resize the focused Scope or worklist pane.
+- `-` / `=` resize room agent panes.
 
 Foxterm starts runs asynchronously, renders the selected run transcript, and
 follows `/api/v2/events/stream` for live activity. The synchronous

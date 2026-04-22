@@ -123,6 +123,18 @@ interface ATCPStopTarget {
   agentId?: string;
 }
 
+interface CommandPaletteAction {
+  id: string;
+  title: string;
+  category: string;
+  command: string;
+  description: string;
+  destructive: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
+  run: () => void;
+}
+
 type AgentPaneSize = "small" | "medium" | "large";
 type MainPaneSize = "small" | "medium" | "large";
 type PanelWidth = number | "100%";
@@ -185,6 +197,8 @@ export function App({ onExit }: AppProps) {
   const tooSmall = width < 60 || height < 18;
   const [mode, setMode] = useState<Mode>("normal");
   const [focus, setFocus] = useState<FocusRegion>("worklist");
+  const [paletteText, setPaletteText] = useState("");
+  const [paletteIndex, setPaletteIndex] = useState(0);
   const [filterText, setFilterText] = useState("");
   const [activityScope, setActivityScope] =
     useState<ActivityScope>("focused");
@@ -1094,6 +1108,370 @@ export function App({ onExit }: AppProps) {
     setStatus({ tone: "muted", text: "focus scope or worklist to resize it" });
   };
 
+  const resetPalette = () => {
+    setPaletteText("");
+    setPaletteIndex(0);
+  };
+
+  const openCommandPalette = () => {
+    resetPalette();
+    setMode("palette");
+    setStatus({ tone: "focus", text: "command palette" });
+  };
+
+  const executePaletteAction = (action?: CommandPaletteAction) => {
+    if (!action) {
+      setStatus({ tone: "muted", text: "no matching command" });
+      return;
+    }
+    if (action.disabled) {
+      setStatus({
+        tone: "muted",
+        text: action.disabledReason ?? "command unavailable",
+      });
+      return;
+    }
+    resetPalette();
+    setMode("normal");
+    action.run();
+  };
+
+  const refreshActiveWorklist = () => {
+    if (activeView === "rooms") {
+      void refreshRoomTasks();
+      void refreshAgents();
+      if (selectedRoom?.id) {
+        void refreshRoomMessages(selectedRoom.id);
+        void refreshRoomLoop(selectedRoom.id);
+        void refreshATCPRoomSessions(selectedRoom.id);
+      }
+      return;
+    }
+    if (activeView === "cards") {
+      void refreshCards();
+      return;
+    }
+    void refreshRuns();
+  };
+
+  const commandPaletteActions: CommandPaletteAction[] = [
+    {
+      id: "scope:runs",
+      title: "Switch to Runs",
+      category: "Scope",
+      command: "1",
+      description: "Show v2 runtime runs and transcripts.",
+      destructive: false,
+      run: () => {
+        setNavIndex(0);
+        setFocus(worklistCollapsed ? "detail" : "worklist");
+      },
+    },
+    {
+      id: "scope:rooms",
+      title: "Switch to Rooms",
+      category: "Scope",
+      command: "2",
+      description: "Show rooms, room tasks, and attached agents.",
+      destructive: false,
+      run: () => {
+        setNavIndex(1);
+        setFocus(worklistCollapsed ? "detail" : "worklist");
+      },
+    },
+    {
+      id: "scope:cards",
+      title: "Switch to Cards",
+      category: "Scope",
+      command: "3",
+      description: "Show orchestration cards from the board projection.",
+      destructive: false,
+      run: () => {
+        setNavIndex(2);
+        setFocus(worklistCollapsed ? "detail" : "worklist");
+      },
+    },
+    {
+      id: "run:new",
+      title: "Compose New Run",
+      category: "Runs",
+      command: "n",
+      description: "Open the model prompt composer.",
+      destructive: false,
+      run: () => openComposer({ kind: "new" }),
+    },
+    {
+      id: "run:continue",
+      title: "Continue Selected Run",
+      category: "Runs",
+      command: "c",
+      description: "Send a follow-up turn to the selected run stream.",
+      destructive: false,
+      disabled: !selectedRun?.run_id,
+      disabledReason: "select a run first",
+      run: () => {
+        if (selectedRun?.run_id) {
+          openComposer({ kind: "continue", runId: selectedRun.run_id });
+        }
+      },
+    },
+    {
+      id: "run:kill",
+      title: "Kill Selected Run",
+      category: "Runs",
+      command: "x",
+      description: "Request cancellation through the v2 runtime.",
+      destructive: true,
+      disabled: !selectedRun || !canKillRunStatus(selectedRun.status),
+      disabledReason: selectedRun ? `run is ${selectedRun.status}` : "select a run first",
+      run: requestKillSelectedRun,
+    },
+    {
+      id: "room:create",
+      title: "Create Room",
+      category: "Rooms",
+      command: "+",
+      description: "Create a room in the active workspace.",
+      destructive: false,
+      run: () => {
+        setNavIndex(1);
+        openRoomComposer();
+      },
+    },
+    {
+      id: "room:message",
+      title: "Message Selected Room",
+      category: "Rooms",
+      command: "m",
+      description: "Write a room message as the local actor.",
+      destructive: false,
+      disabled: !selectedRoom && roomTaskItems.length === 0,
+      disabledReason: "create or select a room first",
+      run: () => {
+        setNavIndex(1);
+        openRoomMessageComposer();
+      },
+    },
+    {
+      id: "room:context-run",
+      title: "Run with Room Context",
+      category: "Rooms",
+      command: "n",
+      description: "Seed a new run from the selected room or task.",
+      destructive: false,
+      disabled: !selectedRoomTaskItem && roomTaskItems.length === 0,
+      disabledReason: "select a room or task first",
+      run: () => {
+        const fallbackRoom = selectedRoomTaskItem ?? roomTaskItems[0];
+        openComposer({
+          kind: "context",
+          source: contextSourceForRoomTask(fallbackRoom),
+        });
+        setComposerText(contextPromptForRoomTask(fallbackRoom));
+      },
+    },
+    {
+      id: "agent:spawn",
+      title: "Spawn foxctl Agent",
+      category: "Agents",
+      command: "s",
+      description: "Attach a room-aware daemon agent to the selected room.",
+      destructive: false,
+      disabled: !selectedRoom && roomTaskItems.length === 0,
+      disabledReason: "create or select a room first",
+      run: () => {
+        setNavIndex(1);
+        openAgentSpawnComposer();
+      },
+    },
+    {
+      id: "agent:spawn-cli",
+      title: "Spawn CLI Agent",
+      category: "Agents",
+      command: "S",
+      description: "Start Codex, Claude, Droid, Gemini, shell, or custom ATCP CLI.",
+      destructive: false,
+      disabled: !selectedRoom && roomTaskItems.length === 0,
+      disabledReason: "create or select a room first",
+      run: () => {
+        setNavIndex(1);
+        openCLISpawnComposer();
+      },
+    },
+    {
+      id: "atcp:screen",
+      title: "Open Focused CLI Screen",
+      category: "ATCP",
+      command: "Enter",
+      description: "Inspect the focused ATCP session in a larger overlay.",
+      destructive: false,
+      disabled: atcpSessions.length === 0,
+      disabledReason: "no ATCP sessions",
+      run: () => {
+        setNavIndex(1);
+        openATCPScreenView();
+      },
+    },
+    {
+      id: "atcp:prompt",
+      title: "Prompt Focused CLI",
+      category: "ATCP",
+      command: "p",
+      description: "Send the composer prompt to the focused CLI participant.",
+      destructive: false,
+      disabled: atcpSessions.length === 0,
+      disabledReason: "no ATCP sessions",
+      run: () => {
+        setNavIndex(1);
+        openATCPPromptComposer();
+      },
+    },
+    {
+      id: "atcp:stop",
+      title: "Stop Focused CLI",
+      category: "ATCP",
+      command: "x",
+      description: "Terminate the attached CLI process after confirmation.",
+      destructive: true,
+      disabled: atcpSessions.length === 0,
+      disabledReason: "no ATCP sessions",
+      run: () => {
+        setNavIndex(1);
+        requestStopSelectedATCPSession();
+      },
+    },
+    {
+      id: "card:context-run",
+      title: "Run with Card Context",
+      category: "Cards",
+      command: "n",
+      description: "Seed a new run from the selected orchestration card.",
+      destructive: false,
+      disabled: !selectedCardItem,
+      disabledReason: "select an orchestration card first",
+      run: () => {
+        openComposer({
+          kind: "context",
+          source: contextSourceForCard(selectedCardItem),
+        });
+        setComposerText(contextPromptForCard(selectedCardItem));
+      },
+    },
+    {
+      id: "card:linked-run",
+      title: "Open Card Linked Run",
+      category: "Cards",
+      command: "Enter",
+      description: "Jump to the run linked from the selected card.",
+      destructive: false,
+      disabled: !selectedCardItem?.card.run_id,
+      disabledReason: "selected card has no linked run",
+      run: () => {
+        if (selectedCardItem?.card.run_id) jumpToRun(selectedCardItem.card.run_id);
+      },
+    },
+    {
+      id: "worklist:filter",
+      title: "Filter Active Worklist",
+      category: "Navigation",
+      command: "/",
+      description: "Filter the visible worklist by explicit fields.",
+      destructive: false,
+      run: () => {
+        setMode("filter");
+        setFocus("worklist");
+      },
+    },
+    {
+      id: "worklist:refresh",
+      title: "Refresh Active Worklist",
+      category: "Navigation",
+      command: "r",
+      description: "Reload the active scope and related room details.",
+      destructive: false,
+      run: refreshActiveWorklist,
+    },
+    {
+      id: "layout:scope",
+      title: scopeCollapsed ? "Show Scope Pane" : "Hide Scope Pane",
+      category: "Layout",
+      command: "b",
+      description: "Toggle the left Scope pane.",
+      destructive: false,
+      disabled: compact,
+      disabledReason: "scope is hidden in compact layout",
+      run: toggleScopePane,
+    },
+    {
+      id: "layout:worklist",
+      title: worklistCollapsed ? "Show Worklist Pane" : "Hide Worklist Pane",
+      category: "Layout",
+      command: "w",
+      description: "Toggle the active Runs, Rooms, or Cards list pane.",
+      destructive: false,
+      run: toggleWorklistPane,
+    },
+    {
+      id: "layout:shrink-main",
+      title: "Shrink Focused Side Pane",
+      category: "Layout",
+      command: ",",
+      description: "Shrink Scope or the active worklist, depending on focus.",
+      destructive: false,
+      run: () => resizeFocusedMainPane(-1),
+    },
+    {
+      id: "layout:grow-main",
+      title: "Grow Focused Side Pane",
+      category: "Layout",
+      command: ".",
+      description: "Grow Scope or the active worklist, depending on focus.",
+      destructive: false,
+      run: () => resizeFocusedMainPane(1),
+    },
+    {
+      id: "layout:shrink-agents",
+      title: "Shrink Room Agent Panes",
+      category: "Layout",
+      command: "-",
+      description: "Reduce the room agent pane height.",
+      destructive: false,
+      disabled: activeView !== "rooms",
+      disabledReason: "switch to Rooms first",
+      run: () => adjustAgentPaneSize(-1),
+    },
+    {
+      id: "layout:grow-agents",
+      title: "Grow Room Agent Panes",
+      category: "Layout",
+      command: "=",
+      description: "Increase the room agent pane height.",
+      destructive: false,
+      disabled: activeView !== "rooms",
+      disabledReason: "switch to Rooms first",
+      run: () => adjustAgentPaneSize(1),
+    },
+    {
+      id: "help:open",
+      title: "Open Help",
+      category: "Help",
+      command: "?",
+      description: "Show keyboard shortcuts and escape paths.",
+      destructive: false,
+      run: () => setMode("help"),
+    },
+  ];
+  const filteredPaletteActions = filterCommandPaletteActions(
+    commandPaletteActions,
+    paletteText,
+  );
+  const selectedPaletteIndex = clampInt(
+    paletteIndex,
+    0,
+    Math.max(0, filteredPaletteActions.length - 1),
+  );
+  const selectedPaletteAction = filteredPaletteActions[selectedPaletteIndex];
+
   useEffect(() => {
     void refreshRuns();
     void refreshModelEndpoint();
@@ -1308,6 +1686,9 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (name === "escape") {
+      if (mode === "palette") {
+        resetPalette();
+      }
       if (mode === "filter") {
         setFilterText("");
       }
@@ -1349,6 +1730,36 @@ export function App({ onExit }: AppProps) {
         setPendingATCPStop(null);
       }
       setMode("normal");
+      return;
+    }
+    if (mode === "palette") {
+      if (isSubmitKey(key)) {
+        executePaletteAction(selectedPaletteAction);
+        return;
+      }
+      if (name === "up" || name === "k") {
+        setPaletteIndex((current) =>
+          clampInt(current - 1, 0, Math.max(0, filteredPaletteActions.length - 1)),
+        );
+        return;
+      }
+      if (name === "down" || name === "j" || name === "tab") {
+        const delta = name === "tab" && key.shift ? -1 : 1;
+        setPaletteIndex((current) =>
+          clampInt(current + delta, 0, Math.max(0, filteredPaletteActions.length - 1)),
+        );
+        return;
+      }
+      if (name === "backspace" || name === "delete") {
+        setPaletteText((current) => current.slice(0, -1));
+        setPaletteIndex(0);
+        return;
+      }
+      const char = keyChar(name);
+      if (char) {
+        setPaletteText((current) => current + char);
+        setPaletteIndex(0);
+      }
       return;
     }
     if (mode === "confirmKill") {
@@ -1534,6 +1945,10 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (mode === "help") return;
+    if (isCommandPaletteKey(key)) {
+      openCommandPalette();
+      return;
+    }
     if (name === "/") {
       setMode("filter");
       setFocus("worklist");
@@ -1637,19 +2052,7 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (name === "r") {
-      if (activeView === "rooms") {
-        void refreshRoomTasks();
-        void refreshAgents();
-        if (selectedRoom?.id) {
-          void refreshRoomMessages(selectedRoom.id);
-          void refreshRoomLoop(selectedRoom.id);
-          void refreshATCPRoomSessions(selectedRoom.id);
-        }
-      } else if (activeView === "cards") {
-        void refreshCards();
-      } else {
-        void refreshRuns();
-      }
+      refreshActiveWorklist();
       return;
     }
     if (name === "tab") {
@@ -1945,6 +2348,16 @@ export function App({ onExit }: AppProps) {
         </>
       )}
       {mode === "help" && <HelpOverlay compact={compact} width={width} />}
+      {mode === "palette" && (
+        <CommandPaletteOverlay
+          compact={compact}
+          width={width}
+          height={height}
+          query={paletteText}
+          actions={filteredPaletteActions}
+          selectedIndex={selectedPaletteIndex}
+        />
+      )}
       {mode === "confirmKill" && pendingKillRunId && (
         <KillConfirmOverlay
           compact={compact}
@@ -1974,6 +2387,125 @@ export function App({ onExit }: AppProps) {
         />
       )}
     </AppFrame>
+  );
+}
+
+function CommandPaletteOverlay({
+  compact,
+  width,
+  height,
+  query,
+  actions,
+  selectedIndex,
+}: {
+  compact: boolean;
+  width: number;
+  height: number;
+  query: string;
+  actions: CommandPaletteAction[];
+  selectedIndex: number;
+}) {
+  const overlayWidth = compact
+    ? Math.max(52, width - 4)
+    : Math.max(76, Math.min(width - 14, 110));
+  const overlayHeight = Math.max(14, Math.min(height - 6, compact ? 20 : 24));
+  const left = compact ? 2 : Math.max(4, Math.floor((width - overlayWidth) / 2));
+  const top = compact ? 3 : 4;
+  const bodyWidth = overlayWidth - 6;
+  const maxItems = Math.max(4, overlayHeight - 8);
+  const start = paletteWindowStart(selectedIndex, actions.length, maxItems);
+  const visibleActions = actions.slice(start, start + maxItems);
+  const selectedAction = actions[selectedIndex];
+  return (
+    <box
+      style={{
+        position: "absolute",
+        top,
+        left,
+        width: overlayWidth,
+        height: overlayHeight,
+        border: true,
+        borderStyle: "rounded",
+        borderColor: theme.focus,
+        backgroundColor: theme.panel,
+        flexDirection: "column",
+        padding: 1,
+        gap: 1,
+      }}
+    >
+      <box
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          height: 1,
+        }}
+      >
+        <text fg={theme.focus}>Command palette</text>
+        <text fg={theme.muted}>{actions.length} actions</text>
+      </box>
+      <text fg={query ? theme.text : theme.muted}>
+        {truncate(`:${query || "type to filter"}`, bodyWidth)}
+      </text>
+      <box style={{ flexDirection: "column", flexGrow: 1, gap: 0 }}>
+        {visibleActions.length === 0 ? (
+          <text fg={theme.muted}>No matching commands.</text>
+        ) : (
+          visibleActions.map((action, offset) => {
+            const index = start + offset;
+            const selected = index === selectedIndex;
+            const tone = action.disabled
+              ? theme.muted
+              : action.destructive
+                ? theme.warning
+                : selected
+                  ? theme.focus
+                  : theme.text;
+            return (
+              <box
+                key={action.id}
+                style={{
+                  flexDirection: "column",
+                  backgroundColor: selected ? theme.panelAlt : theme.panel,
+                }}
+              >
+                <box
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    height: 1,
+                  }}
+                >
+                  <text fg={tone}>
+                    {selected ? "> " : "  "}
+                    {truncate(action.title, Math.max(12, bodyWidth - 18))}
+                  </text>
+                  <text fg={theme.muted}>{truncate(action.command, 12)}</text>
+                </box>
+                <text fg={theme.muted}>
+                  {"  "}
+                  {truncate(
+                    `${action.category}  ${
+                      action.disabled
+                        ? action.disabledReason ?? "unavailable"
+                        : action.description
+                    }`,
+                    bodyWidth - 2,
+                  )}
+                </text>
+              </box>
+            );
+          })
+        )}
+      </box>
+      <text fg={selectedAction?.destructive ? theme.warning : theme.muted}>
+        {truncate(
+          selectedAction
+            ? "Enter runs command, Esc closes"
+            : "Esc closes",
+          bodyWidth,
+        )}
+      </text>
+    </box>
   );
 }
 
@@ -4522,6 +5054,33 @@ function matchesFilter(filterText: string, values: Array<unknown>): boolean {
   return terms.every((term) => haystack.includes(term));
 }
 
+function filterCommandPaletteActions(
+  actions: CommandPaletteAction[],
+  query: string,
+): CommandPaletteAction[] {
+  const terms = filterTerms(query);
+  if (terms.length === 0) return actions;
+  return actions.filter((action) =>
+    matchesFilter(terms.join(" "), [
+      action.title,
+      action.category,
+      action.command,
+      action.description,
+      action.disabledReason,
+    ]),
+  );
+}
+
+function paletteWindowStart(
+  selectedIndex: number,
+  actionCount: number,
+  maxItems: number,
+): number {
+  if (actionCount <= maxItems) return 0;
+  const centered = selectedIndex - Math.floor(maxItems / 2);
+  return clampInt(centered, 0, Math.max(0, actionCount - maxItems));
+}
+
 function filterTerms(filterText: string): string[] {
   return filterText
     .trim()
@@ -4549,6 +5108,21 @@ function isSubmitKey(key: {
     key.sequence === "\n" ||
     key.raw === "\r" ||
     key.raw === "\n"
+  );
+}
+
+function isCommandPaletteKey(key: {
+  name?: string;
+  ctrl?: boolean;
+  sequence?: string;
+  raw?: string;
+}): boolean {
+  const name = key.name ?? "";
+  return (
+    name === ":" ||
+    key.sequence === ":" ||
+    key.raw === ":" ||
+    (key.ctrl === true && name.toLowerCase() === "p")
   );
 }
 
