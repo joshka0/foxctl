@@ -2502,13 +2502,11 @@ function RoomTaskDetailPanel({
             loop={loop}
             loadState={loopLoadState}
           />
-          <RoomAgentsPreview
+          <RoomAgentPanes
+            compact={compact}
             room={selectedItem.room}
             agents={agents}
-            loadState={agentLoadState}
-          />
-          <RoomATCPPreview
-            compact={compact}
+            agentLoadState={agentLoadState}
             sessions={atcpSessions}
             members={atcpMembers}
             readiness={atcpReadiness}
@@ -2626,13 +2624,11 @@ function RoomSummaryDetail({
         loop={loop}
         loadState={loopLoadState}
       />
-      <RoomAgentsPreview
+      <RoomAgentPanes
+        compact={compact}
         room={selectedItem.room}
         agents={agents}
-        loadState={agentLoadState}
-      />
-      <RoomATCPPreview
-        compact={compact}
+        agentLoadState={agentLoadState}
         sessions={atcpSessions}
         members={atcpMembers}
         readiness={atcpReadiness}
@@ -2644,8 +2640,23 @@ function RoomSummaryDetail({
   );
 }
 
-function RoomATCPPreview({
+interface RoomAgentPane {
+  id: string;
+  title: string;
+  kind: "daemon" | "cli";
+  status: string;
+  tone: string;
+  meta: string;
+  detail: string;
+  selected?: boolean;
+  screenLines?: string[];
+}
+
+function RoomAgentPanes({
   compact,
+  room,
+  agents,
+  agentLoadState,
   sessions,
   members,
   readiness,
@@ -2654,6 +2665,9 @@ function RoomATCPPreview({
   loadState,
 }: {
   compact: boolean;
+  room: RoomTaskWorkItem["room"];
+  agents: AgentSummary[];
+  agentLoadState: LoadState;
   sessions: ATCPSession[];
   members: ATCPMember[];
   readiness: Record<string, ATCPReadiness>;
@@ -2661,155 +2675,210 @@ function RoomATCPPreview({
   selectedSessionId: string | null;
   loadState: LoadState;
 }) {
-  const memberBySession = new Map(
-    members.map((member) => [member.session_id, member]),
-  );
-  const selected =
-    sessions.find((session) => session.id === selectedSessionId) ?? sessions[0];
-  const selectedMember = selected ? memberBySession.get(selected.id) : undefined;
-  const rowLimit = compact ? 2 : 3;
-  const screenWidth = compact ? 72 : 108;
-  const selectedLines = atcpScreenLines(
-    selected ? screens[selected.id] : undefined,
-    compact ? 3 : 4,
-  );
+  const paneWidth = compact ? 54 : 58;
+  const screenLineLimit = compact ? 2 : 3;
+  const daemonPanes = buildDaemonAgentPanes(room, agents, compact);
+  const cliPanes = buildATCPAgentPanes({
+    compact,
+    sessions,
+    members,
+    readiness,
+    screens,
+    selectedSessionId,
+    screenLineLimit,
+  });
+  const panes = [...daemonPanes, ...cliPanes];
+  const paneRows = chunkItems(panes, compact ? 1 : 2);
   const title =
-    loadState === "loading"
-      ? "ATCP loading"
-      : loadState === "error"
-        ? "ATCP unavailable"
-        : sessions.length === 0
-          ? "ATCP empty"
-          : "ATCP CLI sessions";
+    agentLoadState === "loading" || loadState === "loading"
+      ? "agent panes loading"
+      : agentLoadState === "error" && loadState === "error"
+        ? "agent panes unavailable"
+        : panes.length === 0
+          ? "agent panes empty"
+          : "agent panes";
   return (
     <box style={{ flexDirection: "column", gap: 1 }}>
-      <text fg={loadState === "error" ? theme.warning : theme.focus}>
+      <text
+        fg={
+          agentLoadState === "error" || loadState === "error"
+            ? theme.warning
+            : theme.focus
+        }
+      >
         {title}
       </text>
-      {sessions.length === 0 ? (
-        <text fg={loadState === "error" ? theme.warning : theme.muted}>
+      {panes.length === 0 ? (
+        <text
+          fg={
+            agentLoadState === "error" || loadState === "error"
+              ? theme.warning
+              : theme.muted
+          }
+        >
           {loadState === "error"
             ? ATCP_DAEMON_HINT
-            : "Shift+s starts a CLI-backed session."}
+            : "s starts a daemon agent; Shift+s starts a CLI pane."}
         </text>
       ) : (
-        sessions.slice(0, rowLimit).map((session) => {
-          const member = memberBySession.get(session.id);
-          const ready = readiness[session.id];
-          const screenLine = atcpScreenPreview(screens[session.id]);
-          const selectedRow = session.id === selected?.id;
-          const agent = truncate(member?.agent_id ?? session.id, compact ? 16 : 22);
-          const status = truncate(session.status, compact ? 9 : 11);
-          const adapter = truncate(session.adapter || "cli", compact ? 9 : 12);
-          const readyLabel = ready?.idle ? "idle" : "busy";
-          const command = truncate(
-            session.cmd?.join(" ") || "-",
-            compact ? 36 : 56,
-          );
-          return (
-            <box
-              key={session.id}
-              style={{
-                flexDirection: "column",
-                backgroundColor: selectedRow ? theme.panelAlt : theme.bg,
-              }}
-            >
-              <text fg={selectedRow ? theme.focus : atcpSessionTone(session, ready)}>
-                {selectedRow ? "> " : "  "}
-                {agent} {status} {readyLabel}
-              </text>
-              <text fg={theme.muted}>
-                {"  "}
-                {adapter} {command}
-              </text>
-              {screenLine && (
-                <text fg={theme.subtle}>
-                  {"  "}
-                  {truncate(screenLine, screenWidth)}
-                </text>
-              )}
-            </box>
-          );
-        })
+        paneRows.map((row, rowIndex) => (
+          <box
+            key={`agent-pane-row-${rowIndex}`}
+            style={{
+              flexDirection: compact ? "column" : "row",
+              gap: 1,
+            }}
+          >
+            {row.map((pane) => (
+              <AgentPane
+                key={pane.id}
+                pane={pane}
+                width={paneWidth}
+              />
+            ))}
+          </box>
+        ))
       )}
-      {selected && (
-        <box style={{ flexDirection: "column", gap: 1 }}>
-          <text fg={theme.focus}>
-            screen     {truncate(selectedMember?.agent_id ?? selected.id, compact ? 28 : 44)}
-          </text>
-          {selectedLines.length === 0 ? (
-            <text fg={theme.muted}>No rendered screen snapshot yet.</text>
-          ) : (
-            <box
-              style={{
-                flexDirection: "column",
-                backgroundColor: theme.panelAlt,
-                paddingLeft: 1,
-                paddingRight: 1,
-              }}
-            >
-              {selectedLines.map((line, index) => (
-                <text key={`${selected.id}:${index}`} fg={theme.text}>
-                  {truncate(`| ${line}`, screenWidth)}
-                </text>
-              ))}
-            </box>
-          )}
-          <text fg={theme.muted}>p prompt, x stop, v switch focused session</text>
-        </box>
+      {cliPanes.length > 0 && (
+        <text fg={theme.muted}>v focus pane, p prompt, x stop</text>
       )}
     </box>
   );
 }
 
-function RoomAgentsPreview({
-  room,
-  agents,
-  loadState,
+function AgentPane({
+  pane,
+  width,
 }: {
-  room: RoomTaskWorkItem["room"];
-  agents: AgentSummary[];
-  loadState: LoadState;
+  pane: RoomAgentPane;
+  width: number;
 }) {
+  const bodyLines = pane.screenLines?.length
+    ? pane.screenLines
+    : [pane.detail].filter(Boolean);
+  return (
+    <box
+      style={{
+        width,
+        minWidth: 32,
+        height: pane.selected && pane.screenLines?.length ? 8 : 6,
+        border: true,
+        borderStyle: "single",
+        borderColor: pane.selected ? theme.focus : theme.borderMuted,
+        backgroundColor: pane.selected ? theme.panelAlt : theme.bg,
+        flexDirection: "column",
+        paddingLeft: 1,
+        paddingRight: 1,
+      }}
+    >
+      <box
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          height: 1,
+        }}
+      >
+        <text fg={pane.selected ? theme.focus : theme.text}>
+          {truncate(pane.title, width - 18)}
+        </text>
+        <text fg={pane.tone}>{truncate(pane.status, 14)}</text>
+      </box>
+      <text fg={theme.muted}>{truncate(pane.meta, width - 4)}</text>
+      {bodyLines.map((line, index) => (
+        <text
+          key={`${pane.id}:body:${index}`}
+          fg={pane.screenLines?.length ? theme.text : theme.subtle}
+        >
+          {truncate(line, width - 4)}
+        </text>
+      ))}
+    </box>
+  );
+}
+
+function buildDaemonAgentPanes(
+  room: RoomTaskWorkItem["room"],
+  agents: AgentSummary[],
+  compact: boolean,
+): RoomAgentPane[] {
   const byID = new Map(agents.map((agent) => [agent.id, agent]));
-  const rows = (room.members ?? [])
+  return (room.members ?? [])
     .map((member) => ({
       member,
       agent: byID.get(member.actor_id),
     }))
     .filter((row) => row.agent || row.member.actor_id !== ACTOR_ID)
-    .slice(0, 5);
-  const title =
-    loadState === "loading"
-      ? "agents loading"
-      : loadState === "error"
-        ? "agents unavailable"
-        : rows.length === 0
-          ? "agents empty"
-          : "room agents";
-  return (
-    <box style={{ flexDirection: "column", gap: 1 }}>
-      <text fg={loadState === "error" ? theme.warning : theme.focus}>
-        {title}
-      </text>
-      {rows.length === 0 ? (
-        <text fg={theme.muted}>Press s to spawn a foxctl agent.</text>
-      ) : (
-        rows.map(({ member, agent }) => (
-          <box key={member.actor_id} style={{ flexDirection: "column" }}>
-            <text fg={agentStateTone(agent?.state)}>
-              {truncate(member.actor_id, 28)}{" "}
-              {truncate(agent?.state ?? "member", 14)}
-            </text>
-            <text fg={theme.muted}>
-              {truncate(member.role || agent?.role || "-", 16)}{" "}
-              {truncate(agentModelLabel(agent), 58)}
-            </text>
-          </box>
-        ))
-      )}
-    </box>
+    .slice(0, compact ? 3 : 4)
+    .map(({ member, agent }) => ({
+      id: `daemon:${member.actor_id}`,
+      title: shortActorLabel(member.actor_id),
+      kind: "daemon" as const,
+      status: agent?.state ?? "member",
+      tone: agentStateTone(agent?.state),
+      meta: `daemon ${member.role || agent?.role || "-"}`,
+      detail: agentModelLabel(agent),
+    }));
+}
+
+function buildATCPAgentPanes({
+  compact,
+  sessions,
+  members,
+  readiness,
+  screens,
+  selectedSessionId,
+  screenLineLimit,
+}: {
+  compact: boolean;
+  sessions: ATCPSession[];
+  members: ATCPMember[];
+  readiness: Record<string, ATCPReadiness>;
+  screens: Record<string, ATCPScreen>;
+  selectedSessionId: string | null;
+  screenLineLimit: number;
+}): RoomAgentPane[] {
+  const memberBySession = new Map(
+    members.map((member) => [member.session_id, member]),
   );
+  const selected =
+    sessions.find((session) => session.id === selectedSessionId) ?? sessions[0];
+  return sessions.slice(0, compact ? 3 : 4).map((session) => {
+    const member = memberBySession.get(session.id);
+    const ready = readiness[session.id];
+    const selectedPane = session.id === selected?.id;
+    const screenLines = atcpScreenLines(
+      screens[session.id],
+      selectedPane ? screenLineLimit : 1,
+    ).map((line) => `| ${line}`);
+    const status = `${session.status} ${ready?.idle ? "idle" : "busy"}`;
+    return {
+      id: `cli:${session.id}`,
+      title: member?.agent_id ?? session.id,
+      kind: "cli",
+      status,
+      tone: atcpSessionTone(session, ready),
+      meta: `cli ${session.adapter || "terminal"}`,
+      detail: session.cmd?.join(" ") || "-",
+      selected: selectedPane,
+      screenLines,
+    };
+  });
+}
+
+function chunkItems<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    out.push(items.slice(index, index + size));
+  }
+  return out;
+}
+
+function shortActorLabel(actorID: string): string {
+  const separator = actorID.lastIndexOf(":");
+  if (separator >= 0 && separator < actorID.length - 1) {
+    return actorID.slice(separator + 1);
+  }
+  return actorID;
 }
 
 function RoomLoopPreview({
