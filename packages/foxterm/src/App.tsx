@@ -17,6 +17,7 @@ import {
   killRun,
   sendRoomMessage,
   spawnAgent,
+  spawnATCPCLIForRoom,
   subscribeToV2Stream,
   WORKSPACE_ID,
   WORKSPACE_ROOT,
@@ -87,6 +88,12 @@ interface RunOutputSummary {
   toolCalls?: number;
 }
 
+interface CLISpawnDraft {
+  agentId: string;
+  adapter: string;
+  cmd: string[];
+}
+
 type ComposerTarget =
   | { kind: "new" }
   | { kind: "continue"; runId: string }
@@ -118,6 +125,11 @@ export function App({ onExit }: AppProps) {
   const [agentSpawnText, setAgentSpawnText] = useState("researcher");
   const [agentSpawnBusy, setAgentSpawnBusy] = useState(false);
   const [agentSpawnRoomId, setAgentSpawnRoomId] = useState<string | null>(null);
+  const [cliSpawnText, setCLISpawnText] = useState(
+    "codex-a@codex: codex --no-alt-screen",
+  );
+  const [cliSpawnBusy, setCLISpawnBusy] = useState(false);
+  const [cliSpawnRoomId, setCLISpawnRoomId] = useState<string | null>(null);
   const [busyTick, setBusyTick] = useState(0);
   const [modelEndpoint, setModelEndpoint] = useState<V2ModelEndpoint | null>(
     null,
@@ -393,6 +405,20 @@ export function App({ onExit }: AppProps) {
     setFocus("composer");
   };
 
+  const openCLISpawnComposer = () => {
+    const room = selectedRoom ?? roomTaskItems[0]?.room;
+    if (!room) {
+      setStatus({ tone: "muted", text: "create or select a room first" });
+      return;
+    }
+    setCLISpawnRoomId(room.id);
+    setCLISpawnText(
+      (current) => current || "codex-a@codex: codex --no-alt-screen",
+    );
+    setMode("spawnCLI");
+    setFocus("composer");
+  };
+
   const submitAgentSpawn = async () => {
     const roomId = agentSpawnRoomId ?? selectedRoom?.id;
     const draft = parseAgentSpawnDraft(agentSpawnText);
@@ -430,6 +456,54 @@ export function App({ onExit }: AppProps) {
       });
     } finally {
       setAgentSpawnBusy(false);
+    }
+  };
+
+  const submitCLISpawn = async () => {
+    const roomId = cliSpawnRoomId ?? selectedRoom?.id;
+    if (!roomId || cliSpawnBusy) return;
+    let draft: CLISpawnDraft;
+    try {
+      draft = parseCLISpawnDraft(cliSpawnText);
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text:
+          error instanceof Error ? error.message : "invalid CLI spawn draft",
+      });
+      return;
+    }
+    setCLISpawnBusy(true);
+    setStatus({ tone: "focus", text: `starting ${draft.agentId}` });
+    try {
+      const result = await spawnATCPCLIForRoom({
+        roomId,
+        workspaceId: WORKSPACE_ID,
+        agentId: draft.agentId,
+        adapter: draft.adapter,
+        cmd: draft.cmd,
+        cwd: WORKSPACE_ROOT,
+        role: draft.adapter,
+        canMutate: true,
+      });
+      setCLISpawnText("codex-a@codex: codex --no-alt-screen");
+      setCLISpawnRoomId(null);
+      setMode("normal");
+      setFocus("detail");
+      setStatus({
+        tone: "success",
+        text: `ATCP ${result.member.agent_id} session ${result.session.status}`,
+      });
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text:
+          error instanceof Error
+            ? error.message
+            : "failed to spawn ATCP CLI session",
+      });
+    } finally {
+      setCLISpawnBusy(false);
     }
   };
 
@@ -662,7 +736,8 @@ export function App({ onExit }: AppProps) {
       !composerBusy &&
       !roomCreateBusy &&
       !roomMessageBusy &&
-      !agentSpawnBusy
+      !agentSpawnBusy &&
+      !cliSpawnBusy
     ) {
       setBusyTick(0);
       return;
@@ -671,7 +746,13 @@ export function App({ onExit }: AppProps) {
       setBusyTick((current) => current + 1);
     }, 120);
     return () => clearInterval(timer);
-  }, [composerBusy, roomCreateBusy, roomMessageBusy, agentSpawnBusy]);
+  }, [
+    composerBusy,
+    roomCreateBusy,
+    roomMessageBusy,
+    agentSpawnBusy,
+    cliSpawnBusy,
+  ]);
 
   const refreshModelEndpoint = async () => {
     try {
@@ -717,6 +798,11 @@ export function App({ onExit }: AppProps) {
     if (activeView !== "rooms" && mode === "spawnAgent") {
       setAgentSpawnText("researcher");
       setAgentSpawnRoomId(null);
+      setMode("normal");
+    }
+    if (activeView !== "rooms" && mode === "spawnCLI") {
+      setCLISpawnText("codex-a@codex: codex --no-alt-screen");
+      setCLISpawnRoomId(null);
       setMode("normal");
     }
   }, [activeView, mode]);
@@ -852,6 +938,11 @@ export function App({ onExit }: AppProps) {
         setAgentSpawnRoomId(null);
         setFocus("worklist");
       }
+      if (mode === "spawnCLI") {
+        setCLISpawnText("codex-a@codex: codex --no-alt-screen");
+        setCLISpawnRoomId(null);
+        setFocus("worklist");
+      }
       if (mode === "confirmKill") {
         setPendingKillRunId(null);
       }
@@ -930,6 +1021,21 @@ export function App({ onExit }: AppProps) {
       }
       return;
     }
+    if (mode === "spawnCLI") {
+      if (isSubmitKey(key)) {
+        void submitCLISpawn();
+        return;
+      }
+      if (name === "backspace" || name === "delete") {
+        setCLISpawnText((current) => current.slice(0, -1));
+        return;
+      }
+      const char = keyChar(name);
+      if (char) {
+        setCLISpawnText((current) => current + char);
+      }
+      return;
+    }
     if (mode === "filter") {
       if (isSubmitKey(key)) {
         setMode("normal");
@@ -985,6 +1091,10 @@ export function App({ onExit }: AppProps) {
     }
     if (name === "s" && activeView === "rooms") {
       openAgentSpawnComposer();
+      return;
+    }
+    if (activeView === "rooms" && isCLISpawnKey(key)) {
+      openCLISpawnComposer();
       return;
     }
     if (name === "n" && activeView === "runs") {
@@ -1244,17 +1354,22 @@ export function App({ onExit }: AppProps) {
                 focus === "composer" ||
                 mode === "createRoom" ||
                 mode === "roomMessage" ||
-                mode === "spawnAgent"
+                mode === "spawnAgent" ||
+                mode === "spawnCLI"
               }
               value={
-                mode === "spawnAgent"
+                mode === "spawnCLI"
+                  ? cliSpawnText
+                  : mode === "spawnAgent"
                   ? agentSpawnText
                   : mode === "roomMessage"
                     ? roomMessageText
                     : roomComposerText
               }
               busy={
-                mode === "spawnAgent"
+                mode === "spawnCLI"
+                  ? cliSpawnBusy
+                  : mode === "spawnAgent"
                   ? agentSpawnBusy
                   : mode === "roomMessage"
                     ? roomMessageBusy
@@ -1262,14 +1377,20 @@ export function App({ onExit }: AppProps) {
               }
               busyTick={busyTick}
               purpose={
-                mode === "spawnAgent"
+                mode === "spawnCLI"
+                  ? "cli"
+                  : mode === "spawnAgent"
                   ? "spawn"
                   : mode === "roomMessage"
                     ? "message"
                     : "create"
               }
               roomId={
-                agentSpawnRoomId ?? roomMessageRoomId ?? selectedRoom?.id ?? null
+                cliSpawnRoomId ??
+                agentSpawnRoomId ??
+                roomMessageRoomId ??
+                selectedRoom?.id ??
+                null
               }
             />
           )}
@@ -1439,15 +1560,23 @@ function RoomComposer({
   value: string;
   busy: boolean;
   busyTick: number;
-  purpose: "create" | "message" | "spawn";
+  purpose: "create" | "message" | "spawn" | "cli";
   roomId: string | null;
 }) {
   const spinner = busy ? spinnerFrame(busyTick) : "";
   const label =
-    purpose === "spawn" ? "agent" : purpose === "message" ? "message" : "room";
+    purpose === "cli"
+      ? "cli"
+      : purpose === "spawn"
+        ? "agent"
+        : purpose === "message"
+          ? "message"
+          : "room";
   const visibleValue =
     value.trim() === ""
-      ? purpose === "spawn"
+      ? purpose === "cli"
+        ? `S to spawn CLI into ${truncate(roomId ?? "room", compact ? 21 : 38)}`
+        : purpose === "spawn"
         ? `s to spawn into ${truncate(roomId ?? "room", compact ? 24 : 40)}`
         : purpose === "message"
         ? `m to message ${truncate(roomId ?? "room", compact ? 26 : 44)}`
@@ -1475,7 +1604,7 @@ function RoomComposer({
       </text>
       <text fg={theme.subtle}>
         {truncate(
-          purpose === "message" || purpose === "spawn"
+          purpose === "message" || purpose === "spawn" || purpose === "cli"
             ? roomId ?? WORKSPACE_ID
             : WORKSPACE_ID,
           compact ? 28 : 44,
@@ -2556,6 +2685,72 @@ function parseAgentSpawnDraft(raw: string): { role: string; prompt?: string } {
   return prompt ? { role, prompt } : { role };
 }
 
+function parseCLISpawnDraft(raw: string): CLISpawnDraft {
+  const trimmed = raw.trim();
+  const separator = trimmed.indexOf(":");
+  if (separator < 1) {
+    throw new Error("use agent@adapter: command args");
+  }
+  const left = trimmed.slice(0, separator).trim();
+  const command = trimmed.slice(separator + 1).trim();
+  if (left === "" || command === "") {
+    throw new Error("use agent@adapter: command args");
+  }
+  const at = left.indexOf("@");
+  const agentId = (at >= 0 ? left.slice(0, at) : left).trim();
+  const adapter = (at >= 0 ? left.slice(at + 1) : left).trim();
+  if (agentId === "" || adapter === "") {
+    throw new Error("agent and adapter are required");
+  }
+  const cmd = parseCommandLine(command);
+  if (cmd.length === 0) {
+    throw new Error("command is required");
+  }
+  return { agentId, adapter, cmd };
+}
+
+function parseCommandLine(input: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  for (const char of input) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current !== "") {
+        out.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (escaped) current += "\\";
+  if (quote) throw new Error("unterminated quote in command");
+  if (current !== "") out.push(current);
+  return out;
+}
+
 function roomLoopHealth(
   loop: RoomLoop | null,
   loadState: LoadState,
@@ -3089,6 +3284,20 @@ function isRoomCreateKey(key: {
     key.name === "N" ||
     key.sequence === "N" ||
     key.raw === "N"
+  );
+}
+
+function isCLISpawnKey(key: {
+  name?: string;
+  shift?: boolean;
+  sequence?: string;
+  raw?: string;
+}): boolean {
+  return (
+    (key.shift === true && key.name === "s") ||
+    key.name === "S" ||
+    key.sequence === "S" ||
+    key.raw === "S"
   );
 }
 

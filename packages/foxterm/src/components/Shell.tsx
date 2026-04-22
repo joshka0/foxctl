@@ -151,6 +151,8 @@ function Footer({
             ? "room message  Enter send  Esc cancel"
             : mode === "spawnAgent"
               ? "spawn agent  role[:prompt]  Enter"
+              : mode === "spawnCLI"
+                ? "spawn CLI  agent@adapter: cmd"
         : mode === "confirmKill"
           ? "confirm kill  Enter confirm  Esc cancel"
       : `${mode === "help" ? "help" : focus}  activity ${activityScope}`;
@@ -168,8 +170,8 @@ function Footer({
       <text fg={theme.focus}>{truncate(left, compact ? 28 : 44)}</text>
       <text fg={theme.muted}>
         {compact
-          ? "1/2/3 scope  h/l pane  j/k Enter  n + m s c x / r ? q"
-          : "Tab focus  1/2/3 scope  j/k move  Enter open  n context run  + room  m message  s agent  c continue  x kill  / filter  a scope  r refresh  ? help  q quit"}
+          ? "1/2/3 scope  h/l pane  j/k Enter  n + m s S c x / r ? q"
+          : "Tab focus  1/2/3 scope  j/k move  Enter open  n context run  + room  m message  s agent  S cli  c continue  x kill  / filter  a scope  r refresh  ? help  q quit"}
       </text>
     </box>
   );

@@ -455,6 +455,8 @@ func (s *Server) Handler() http.Handler {
 	// --- Agents (Phase 11) ---
 	apiMux.HandleFunc("/api/agents", api.AgentsListHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/agents/", api.AgentDetailHandlerWithRuntime(s.cfg, s.log, s.sseHub, s.orchRuntime))
+	apiMux.HandleFunc("/api/atcp", api.ATCPHandler())
+	apiMux.HandleFunc("/api/atcp/", api.ATCPHandler())
 
 	// --- Stats & Insights (Phase 11) ---
 	apiMux.HandleFunc("/api/stats", api.StatsHandler(s.cfg, s.log))

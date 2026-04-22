@@ -16,6 +16,8 @@ built around the backend facades used by OpenTUI:
 - `POST /api/rooms/{room_id}/messages`
 - `GET /api/rooms/{room_id}/loop`
 - `POST /api/agents/spawn`
+- `GET /api/atcp/sessions`
+- `POST /api/atcp/foxctl-rooms/{room_id}/spawn-cli`
 - job, room, CAS, skill, and MCP facade routes
 
 Run locally after installing workspace dependencies:
@@ -42,6 +44,7 @@ Runs view shortcuts:
 - `+` or `Shift+n` creates a room from the Rooms view.
 - `m` writes a message to the selected room.
 - `s` spawns a foxctl daemon agent into the selected room.
+- `Shift+s` spawns an ATCP-backed CLI session into the selected room.
 - `/` filters the active worklist.
 - `a` cycles activity scopes.
 - `r` refreshes the active worklist.
@@ -67,6 +70,7 @@ Foxterm also reads `/api/agents` and shows room member agent state/model in the
 room detail panel.
 
 CLI-backed agents such as Codex, Claude, Droid, and other terminal tools should
-use a separate ATCP-aware facade. The current `s` action is for foxctl daemon
-agents; ATCP sessions need broker/session/adapter state in addition to room
-membership.
+use the separate ATCP-aware facade. The `s` action is for foxctl daemon agents;
+`Shift+s` creates an ATCP session and joins it to the room-linked ATCP room.
+The CLI composer accepts `agent@adapter: command args`, for example
+`codex-a@codex: codex --no-alt-screen`.

@@ -250,6 +250,54 @@ export interface AgentListResult {
   total: number;
 }
 
+export interface ATCPSession {
+  id: string;
+  status: string;
+  pid: number;
+  created_at: string;
+  cmd: string[];
+  cwd?: string;
+  adapter?: string;
+  submit_key?: string;
+  output_bytes_total?: number;
+  output_rate_bps?: number;
+  last_output_at?: string;
+}
+
+export interface ATCPRoom {
+  id: string;
+  workspace: string;
+  title?: string;
+  description?: string;
+  created_at: string;
+}
+
+export interface ATCPMember {
+  room_id: string;
+  agent_id: string;
+  session_id: string;
+  role?: string;
+  can_mutate: boolean;
+  joined_at: string;
+}
+
+export interface SpawnATCPCLIInput {
+  roomId: string;
+  workspaceId?: string;
+  agentId: string;
+  adapter?: string;
+  cmd: string[];
+  cwd?: string;
+  role?: string;
+  canMutate?: boolean;
+}
+
+export interface SpawnATCPCLIResult {
+  room: ATCPRoom;
+  session: ATCPSession;
+  member: ATCPMember;
+}
+
 export interface OrchestrationCardWorkItem {
   id: string;
   laneId: string;
@@ -508,6 +556,42 @@ export async function getAgents(params?: { limit?: number }): Promise<AgentListR
     agents,
     total: typeof result?.total === "number" ? result.total : agents.length,
   };
+}
+
+export async function spawnATCPCLIForRoom(
+  input: SpawnATCPCLIInput,
+): Promise<SpawnATCPCLIResult> {
+  const roomId = input.roomId.trim();
+  const agentId = input.agentId.trim();
+  if (roomId === "") {
+    throw new Error("room_id is required");
+  }
+  if (agentId === "") {
+    throw new Error("agent_id is required");
+  }
+  if (input.cmd.length === 0 || input.cmd[0]?.trim() === "") {
+    throw new Error("cmd is required");
+  }
+  const payload: Record<string, unknown> = {
+    workspace_id: input.workspaceId ?? WORKSPACE_ID,
+    agent_id: agentId,
+    cmd: input.cmd,
+    can_mutate: input.canMutate ?? true,
+  };
+  const adapter = input.adapter?.trim();
+  const cwd = input.cwd?.trim();
+  const role = input.role?.trim();
+  if (adapter) payload.adapter = adapter;
+  if (cwd) payload.cwd = cwd;
+  if (role) payload.role = role;
+  return requestJSON<SpawnATCPCLIResult>(
+    `/api/atcp/foxctl-rooms/${encodeURIComponent(roomId)}/spawn-cli`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export async function getRoomTaskWork(params?: {

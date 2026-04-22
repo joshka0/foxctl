@@ -62,10 +62,11 @@ The first backend facade tranche is partially implemented:
   membership attachment path.
 - foxterm cross-references room members with `/api/agents` so the room detail
   can show member agent state, role, model, and execution mode after spawn.
-- CLI-backed agents through ATCP are a distinct facade gap: current ATCP
-  surfaces are command/broker oriented (`atcpd`, `atcp-live`, `atcpctl`) and
-  should become a typed foxterm/API adapter rather than being folded into the
-  daemon-agent spawn route.
+- CLI-backed agents through ATCP are a distinct runtime path from daemon
+  agents. A first ATCP web facade is available for health, sessions, rooms,
+  and foxctl-room-linked CLI spawn; foxterm can start a CLI session with
+  `agent@adapter: command args` and join it to the selected room's linked ATCP
+  room.
 
 Remaining hard blockers:
 
