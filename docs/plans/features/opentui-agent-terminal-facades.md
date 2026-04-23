@@ -683,7 +683,9 @@ orchestration card action facade, and `+` seeds a new card when the board is
 empty. The selected card runtime tree is available through `v`.
 Rooms now carry a first management pass: the composer states the active target
 (`room`, `daemon agent`, `ATCP CLI`, or focused ATCP participant), and room
-detail surfaces linked/active orchestration cards.
+detail surfaces linked/active orchestration cards. Room detail can also cycle
+the visible card selection with `v` and open the selected room card in Cards
+with `Enter`.
 
 ## Worker Split
 

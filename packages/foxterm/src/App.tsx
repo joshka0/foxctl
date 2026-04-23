@@ -303,6 +303,9 @@ export function App({ onExit }: AppProps) {
   const [cardRuntimeLoadState, setCardRuntimeLoadState] =
     useState<LoadState>("idle");
   const [cardRuntimeError, setCardRuntimeError] = useState<string | null>(null);
+  const [selectedRoomCardId, setSelectedRoomCardId] = useState<string | null>(
+    null,
+  );
   const [events, setEvents] = useState<V2RuntimeEvent[]>([]);
   const [streamStatus, setStreamStatus] = useState<StatusMessage>({
     tone: "muted",
@@ -1225,6 +1228,56 @@ export function App({ onExit }: AppProps) {
     }
   };
 
+  const roomVisibleCards = useMemo(
+    () =>
+      selectedRoom
+        ? roomOrchestrationCards(
+            cardItems,
+            selectedRoom,
+            selectedRoomTaskItem?.task?.id,
+            compact,
+          )
+        : [],
+    [cardItems, compact, selectedRoom, selectedRoomTaskItem?.task?.id],
+  );
+
+  const selectedRoomCard =
+    selectedRoomCardId === null
+      ? undefined
+      : roomVisibleCards.find((item) => item.id === selectedRoomCardId);
+
+  const cycleSelectedRoomCard = () => {
+    if (roomVisibleCards.length === 0) {
+      setStatus({ tone: "muted", text: "no room cards" });
+      return;
+    }
+    setSelectedRoomCardId((current) => {
+      const index = roomVisibleCards.findIndex((item) => item.id === current);
+      const next =
+        roomVisibleCards[(index + 1 + roomVisibleCards.length) % roomVisibleCards.length];
+      setStatus({
+        tone: "focus",
+        text: next ? `room card ${next.card.issue_id}` : "room card selected",
+      });
+      return next?.id ?? null;
+    });
+    setFocus("detail");
+  };
+
+  const openSelectedRoomCard = () => {
+    if (!selectedRoomCard) {
+      setStatus({ tone: "muted", text: "no room card selected" });
+      return;
+    }
+    setNavIndex(2);
+    setSelectedCardId(selectedRoomCard.card.issue_id);
+    setFocus("detail");
+    setStatus({
+      tone: "focus",
+      text: `selected card ${selectedRoomCard.card.issue_id}`,
+    });
+  };
+
   const adjustAgentPaneSize = (delta: number) => {
     setAgentPaneSize((current) => {
       const next = nextAgentPaneSize(current, delta);
@@ -1846,6 +1899,18 @@ export function App({ onExit }: AppProps) {
   }, [activeView, selectedRoom?.id]);
 
   useEffect(() => {
+    if (activeView !== "rooms") {
+      setSelectedRoomCardId(null);
+      return;
+    }
+    setSelectedRoomCardId((current) =>
+      current && roomVisibleCards.some((item) => item.id === current)
+        ? current
+        : roomVisibleCards[0]?.id ?? null,
+    );
+  }, [activeView, roomVisibleCards]);
+
+  useEffect(() => {
     if (activeView !== "runs") return;
     setSelectedRunId((current) =>
       current && selectableRuns.some((item) => item.id === current)
@@ -2338,6 +2403,10 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (name === "v" && activeView === "rooms") {
+      if (roomVisibleCards.length > 0) {
+        cycleSelectedRoomCard();
+        return;
+      }
       cycleSelectedATCPSession();
       return;
     }
@@ -2384,6 +2453,10 @@ export function App({ onExit }: AppProps) {
       return;
     }
     if (isSubmitKey(key) && activeView === "rooms" && focus === "detail") {
+      if (selectedRoomCard) {
+        openSelectedRoomCard();
+        return;
+      }
       openATCPScreenView();
       return;
     }
@@ -2406,6 +2479,10 @@ export function App({ onExit }: AppProps) {
     if (name === "up" || name === "k") {
       if (focus === "nav") setNavIndex((i) => Math.max(0, i - 1));
       if (focus === "detail" && activeView === "rooms") {
+        if (roomVisibleCards.length > 0) {
+          cycleSelectedRoomCard();
+          return;
+        }
         cycleSelectedATCPSessionBy(-1);
         return;
       }
@@ -2430,6 +2507,10 @@ export function App({ onExit }: AppProps) {
         setNavIndex((i) => Math.min(navItems.length - 1, i + 1));
       }
       if (focus === "detail" && activeView === "rooms") {
+        if (roomVisibleCards.length > 0) {
+          cycleSelectedRoomCard();
+          return;
+        }
         cycleSelectedATCPSessionBy(1);
         return;
       }
@@ -2515,6 +2596,7 @@ export function App({ onExit }: AppProps) {
                     atcpLoadState={atcpLoadState}
                     cards={cardItems}
                     cardLoadState={cardLoadState}
+                    selectedRoomCardId={selectedRoomCardId}
                   />
                 )}
               </>
@@ -3780,6 +3862,7 @@ function RoomTaskDetailPanel({
   atcpLoadState,
   cards,
   cardLoadState,
+  selectedRoomCardId,
 }: {
   compact: boolean;
   terminalWidth: number;
@@ -3803,6 +3886,7 @@ function RoomTaskDetailPanel({
   atcpLoadState: LoadState;
   cards: OrchestrationCardWorkItem[];
   cardLoadState: LoadState;
+  selectedRoomCardId: string | null;
 }) {
   return (
     <Panel
@@ -3858,6 +3942,7 @@ function RoomTaskDetailPanel({
               taskId={selectedItem.task.id}
               cards={cards}
               loadState={cardLoadState}
+              selectedId={selectedRoomCardId}
             />
             <RoomAgentPanes
               compact={compact}
@@ -3906,6 +3991,7 @@ function RoomTaskDetailPanel({
             atcpLoadState={atcpLoadState}
             cards={cards}
             cardLoadState={cardLoadState}
+            selectedRoomCardId={selectedRoomCardId}
           />
         </scrollbox>
       )}
@@ -3933,6 +4019,7 @@ function RoomSummaryDetail({
   atcpLoadState,
   cards,
   cardLoadState,
+  selectedRoomCardId,
 }: {
   compact: boolean;
   terminalWidth: number;
@@ -3953,6 +4040,7 @@ function RoomSummaryDetail({
   atcpLoadState: LoadState;
   cards: OrchestrationCardWorkItem[];
   cardLoadState: LoadState;
+  selectedRoomCardId: string | null;
 }) {
   if (!selectedItem) {
     return (
@@ -4001,6 +4089,7 @@ function RoomSummaryDetail({
         room={selectedItem.room}
         cards={cards}
         loadState={cardLoadState}
+        selectedId={selectedRoomCardId}
       />
       <RoomAgentPanes
         compact={compact}
@@ -4045,19 +4134,16 @@ function RoomOrchestrationStrip({
   taskId,
   cards,
   loadState,
+  selectedId,
 }: {
   compact: boolean;
   room: RoomTaskWorkItem["room"];
   taskId?: string;
   cards: OrchestrationCardWorkItem[];
   loadState: LoadState;
+  selectedId: string | null;
 }) {
-  const linkedCards = roomLinkedCards(cards, room, taskId);
-  const activeCards = cards
-    .filter((item) => isActiveCard(item.card))
-    .filter((item) => !linkedCards.some((linked) => linked.id === item.id))
-    .slice(0, compact ? 2 : 4);
-  const visibleCards = [...linkedCards, ...activeCards].slice(0, compact ? 3 : 6);
+  const visibleCards = roomOrchestrationCards(cards, room, taskId, compact);
   const summary = roomBoardSummary(cards);
   return (
     <box style={{ flexDirection: "column", gap: 1 }}>
@@ -4067,7 +4153,7 @@ function RoomOrchestrationStrip({
       <text fg={theme.muted}>
         {loadState === "loading"
           ? "loading board activity"
-          : summary || "no cards loaded"}
+          : `${summary || "no cards loaded"}  v select  Enter open card`}
       </text>
       {visibleCards.length === 0 ? (
         <text fg={theme.muted}>
@@ -4083,11 +4169,12 @@ function RoomOrchestrationStrip({
               flexDirection: "row",
               justifyContent: "space-between",
               height: 1,
+              backgroundColor: item.id === selectedId ? theme.panelAlt : theme.bg,
             }}
           >
             <text fg={toneColor(cardToneForLane(item.laneId, item.card.state))}>
               {truncate(
-                `${item.laneId} ${item.card.issue_identifier || item.card.issue_id}`,
+                `${item.id === selectedId ? "> " : "  "}${item.laneId} ${item.card.issue_identifier || item.card.issue_id}`,
                 compact ? 34 : 52,
               )}
             </text>
@@ -5492,6 +5579,20 @@ function roomLinkedCards(
   return cards
     .filter((item) => taskIDs.has(item.card.issue_id))
     .slice(0, 3);
+}
+
+function roomOrchestrationCards(
+  cards: OrchestrationCardWorkItem[],
+  room: RoomTaskWorkItem["room"],
+  taskId: string | undefined,
+  compact: boolean,
+): OrchestrationCardWorkItem[] {
+  const linkedCards = roomLinkedCards(cards, room, taskId);
+  const activeCards = cards
+    .filter((item) => isActiveCard(item.card))
+    .filter((item) => !linkedCards.some((linked) => linked.id === item.id))
+    .slice(0, compact ? 2 : 4);
+  return [...linkedCards, ...activeCards].slice(0, compact ? 3 : 6);
 }
 
 function isActiveCard(card: OrchestrationCard): boolean {

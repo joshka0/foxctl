@@ -85,7 +85,9 @@ and delivery-owner status in the room detail panel, plus a `./bin/foxctl room
 loop ...` start command when the loop is not ready.
 Room detail also shows a compact orchestration strip with linked task cards and
 active board cards so room work and coordinator-created board activity stay
-visible without switching scopes.
+visible without switching scopes. In Rooms detail focus, `v` cycles the
+visible room card selection and `Enter` opens that card in Cards; when no room
+card is selected, `Enter` opens the focused ATCP screen.
 
 Room agent spawning uses `POST /api/agents/spawn` with the selected room ID.
 The spawn composer accepts `role` or `role: prompt`; when the prompt is omitted
