@@ -4,6 +4,8 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type {
   OrchestrationCard,
   OrchestrationCardAction,
+  OrchestrationRuntimeTree,
+  OrchestrationRuntimeTreeNode,
   V2RunTranscriptItem,
   V2RuntimeEvent,
 } from "@foxctl/data/types";
@@ -15,6 +17,7 @@ import {
   createRun,
   getAgents,
   getATCPRoomSessions,
+  getOrchestrationCardRuntime,
   getOrchestrationCardWork,
   getRoomLoop,
   getRoomMessages,
@@ -38,6 +41,7 @@ import {
   type ATCPScreen,
   type ATCPSession,
   type ApplyOrchestrationCardActionInput,
+  type GetOrchestrationCardRuntimeInput,
   type OrchestrationCardWorkItem,
   type RoomLoop,
   type RoomMessage,
@@ -293,6 +297,12 @@ export function App({ onExit }: AppProps) {
   const [pendingCardAction, setPendingCardAction] =
     useState<PendingCardAction | null>(null);
   const [cardActionBusy, setCardActionBusy] = useState(false);
+  const [cardRuntime, setCardRuntime] = useState<OrchestrationRuntimeTree | null>(
+    null,
+  );
+  const [cardRuntimeLoadState, setCardRuntimeLoadState] =
+    useState<LoadState>("idle");
+  const [cardRuntimeError, setCardRuntimeError] = useState<string | null>(null);
   const [events, setEvents] = useState<V2RuntimeEvent[]>([]);
   const [streamStatus, setStreamStatus] = useState<StatusMessage>({
     tone: "muted",
@@ -1175,6 +1185,46 @@ export function App({ onExit }: AppProps) {
     setFocus("detail");
   };
 
+  const openCardRuntimeView = async () => {
+    if (!selectedCardItem) {
+      setStatus({ tone: "muted", text: "select a card first" });
+      return;
+    }
+    setMode("cardRuntime");
+    setFocus("detail");
+    setCardRuntime(null);
+    setCardRuntimeError(null);
+    setCardRuntimeLoadState("loading");
+    try {
+      const input: GetOrchestrationCardRuntimeInput = {
+        workspaceId: WORKSPACE_ID,
+        issueId: selectedCardItem.card.issue_id,
+        depth: 3,
+      };
+      const result = await getOrchestrationCardRuntime(input);
+      setCardRuntime(result.runtime ?? null);
+      setCardRuntimeLoadState("ready");
+      const updatedItem = cardWorkItemFromCard(result.card, selectedCardItem);
+      setCardItems((current) =>
+        current.map((item) =>
+          item.card.issue_id === result.card.issue_id ? updatedItem : item,
+        ),
+      );
+      setSelectedCardId(result.card.issue_id);
+      setStatus({
+        tone: result.runtime?.enabled ? "success" : "warning",
+        text: result.runtime?.enabled ? "runtime loaded" : "no runtime attached",
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "failed to load card runtime";
+      setCardRuntime(null);
+      setCardRuntimeError(message);
+      setCardRuntimeLoadState("error");
+      setStatus({ tone: "danger", text: message });
+    }
+  };
+
   const adjustAgentPaneSize = (delta: number) => {
     setAgentPaneSize((current) => {
       const next = nextAgentPaneSize(current, delta);
@@ -1502,6 +1552,19 @@ export function App({ onExit }: AppProps) {
       disabledReason: "selected card has no linked run",
       run: () => {
         if (selectedCardItem?.card.run_id) jumpToRun(selectedCardItem.card.run_id);
+      },
+    },
+    {
+      id: "card:runtime",
+      title: "Inspect Card Runtime",
+      category: "Cards",
+      command: "v",
+      description: "Open the selected card worker/runtime tree.",
+      destructive: false,
+      disabled: !selectedCardItem,
+      disabledReason: "select an orchestration card first",
+      run: () => {
+        void openCardRuntimeView();
       },
     },
     {
@@ -1908,6 +1971,9 @@ export function App({ onExit }: AppProps) {
       if (mode === "atcpScreen") {
         setFocus("detail");
       }
+      if (mode === "cardRuntime") {
+        setFocus("detail");
+      }
       if (mode === "confirmKill") {
         setPendingKillRunId(null);
       }
@@ -2002,6 +2068,12 @@ export function App({ onExit }: AppProps) {
       if (name === "x") {
         requestStopSelectedATCPSession();
         return;
+      }
+      return;
+    }
+    if (mode === "cardRuntime") {
+      if (name === "r") {
+        void openCardRuntimeView();
       }
       return;
     }
@@ -2264,6 +2336,10 @@ export function App({ onExit }: AppProps) {
     }
     if (name === "v" && activeView === "rooms") {
       cycleSelectedATCPSession();
+      return;
+    }
+    if (name === "v" && activeView === "cards") {
+      void openCardRuntimeView();
       return;
     }
     if (name === "b") {
@@ -2637,6 +2713,17 @@ export function App({ onExit }: AppProps) {
           sessions={atcpSessions}
         />
       )}
+      {mode === "cardRuntime" && selectedCardItem && (
+        <CardRuntimeOverlay
+          compact={compact}
+          width={width}
+          height={height}
+          item={selectedCardItem}
+          runtime={cardRuntime}
+          loadState={cardRuntimeLoadState}
+          error={cardRuntimeError}
+        />
+      )}
     </AppFrame>
   );
 }
@@ -2969,6 +3056,109 @@ function ATCPScreenOverlay({
           lines.map((line, index) => (
             <text key={`${session.id}:screen:${index}`} fg={theme.text}>
               {truncate(line, bodyWidth - 2)}
+            </text>
+          ))
+        )}
+      </box>
+    </box>
+  );
+}
+
+function CardRuntimeOverlay({
+  compact,
+  width,
+  height,
+  item,
+  runtime,
+  loadState,
+  error,
+}: {
+  compact: boolean;
+  width: number;
+  height: number;
+  item: OrchestrationCardWorkItem;
+  runtime: OrchestrationRuntimeTree | null;
+  loadState: LoadState;
+  error: string | null;
+}) {
+  const overlayWidth = compact
+    ? Math.max(54, width - 4)
+    : Math.max(84, Math.min(width - 12, 150));
+  const overlayHeight = Math.max(16, Math.min(height - 6, compact ? 24 : 34));
+  const left = compact ? 2 : Math.max(4, Math.floor((width - overlayWidth) / 2));
+  const top = compact ? 3 : 4;
+  const bodyWidth = overlayWidth - 6;
+  const lineCount = Math.max(4, overlayHeight - 10);
+  const lines = cardRuntimeLines(runtime, lineCount);
+  const title = item.card.title || item.card.issue_identifier || item.card.issue_id;
+  const status =
+    loadState === "loading"
+      ? "loading"
+      : error
+        ? "error"
+        : runtime?.enabled
+          ? "runtime"
+          : "no runtime";
+  return (
+    <box
+      style={{
+        position: "absolute",
+        top,
+        left,
+        width: overlayWidth,
+        height: overlayHeight,
+        border: true,
+        borderStyle: "single",
+        borderColor: error ? theme.warning : theme.focus,
+        backgroundColor: theme.panel,
+        flexDirection: "column",
+        padding: 1,
+        gap: 1,
+      }}
+    >
+      <box
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          height: 1,
+        }}
+      >
+        <text fg={theme.focus}>Card runtime</text>
+        <text fg={error ? theme.warning : runtime?.enabled ? theme.success : theme.muted}>
+          {status}
+        </text>
+      </box>
+      <text fg={theme.text}>{truncate(title, bodyWidth)}</text>
+      <text fg={theme.muted}>
+        {truncate(
+          `${item.card.issue_id}  ${item.laneTitle} / ${item.card.state}`,
+          bodyWidth,
+        )}
+      </text>
+      <text fg={theme.subtle}>
+        {truncate("r refresh  Esc close", bodyWidth)}
+      </text>
+      <box
+        style={{
+          flexDirection: "column",
+          flexGrow: 1,
+          backgroundColor: theme.bg,
+          paddingLeft: 1,
+          paddingRight: 1,
+        }}
+      >
+        {loadState === "loading" ? (
+          <text fg={theme.focus}>Loading card runtime...</text>
+        ) : error ? (
+          <text fg={theme.warning}>{truncate(error, bodyWidth - 2)}</text>
+        ) : runtime?.error ? (
+          <text fg={theme.warning}>{truncate(runtime.error, bodyWidth - 2)}</text>
+        ) : lines.length === 0 ? (
+          <text fg={theme.muted}>No runtime tree attached to this card.</text>
+        ) : (
+          lines.map((line, index) => (
+            <text key={`${item.card.issue_id}:runtime:${index}`} fg={line.tone}>
+              {truncate(line.text, bodyWidth - 2)}
             </text>
           ))
         )}
@@ -5183,6 +5373,55 @@ function cardWorkItemFromCard(
     laneTitle: cardLaneTitle(laneId),
     card,
   };
+}
+
+interface RuntimeLine {
+  text: string;
+  tone: string;
+}
+
+function cardRuntimeLines(
+  runtime: OrchestrationRuntimeTree | null,
+  max: number,
+): RuntimeLine[] {
+  if (!runtime?.root) return [];
+  const lines: RuntimeLine[] = [];
+  appendRuntimeNodeLines(lines, runtime.root, "", max);
+  return lines.slice(0, max);
+}
+
+function appendRuntimeNodeLines(
+  lines: RuntimeLine[],
+  node: OrchestrationRuntimeTreeNode,
+  prefix: string,
+  max: number,
+): void {
+  if (lines.length >= max) return;
+  const label = node.agent_id || node.tag || node.pid || "runtime";
+  const status = node.status || runtimeNodeStateSummary(node.state) || "";
+  const err = node.error ? ` error=${node.error}` : "";
+  lines.push({
+    text: `${prefix}${label}${status ? `  ${status}` : ""}${err}`,
+    tone: node.error ? theme.warning : status === "running" ? theme.success : theme.text,
+  });
+  const children = node.children ?? [];
+  for (let index = 0; index < children.length; index += 1) {
+    if (lines.length >= max) return;
+    const child = children[index];
+    if (!child) continue;
+    appendRuntimeNodeLines(lines, child, `${prefix}  `, max);
+  }
+}
+
+function runtimeNodeStateSummary(state: unknown): string {
+  if (typeof state === "string") return state;
+  if (!state || typeof state !== "object") return "";
+  const record = state as Record<string, unknown>;
+  for (const key of ["status", "state", "phase", "mode"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim() !== "") return value.trim();
+  }
+  return "state";
 }
 
 function nextActivityScope(scope: ActivityScope): ActivityScope {

@@ -93,6 +93,8 @@ The first backend facade tranche is partially implemented:
 - foxterm can seed the first orchestration card from Cards with `+` /
   `Shift+n` through `/api/orchestration/seed-cards`, so an empty board no
   longer blocks terminal-side card exploration.
+- foxterm can inspect the selected card runtime tree with `v` through
+  `/api/orchestration/board-card-runtime-get`.
 - `foxctl web serve --atcp` can host an embedded ATCP daemon in the same
   process as the web API, while the standalone `cmd/atcpd` binary remains
   available for split-process deployments.
@@ -675,7 +677,7 @@ existing guarded foxterm actions and keeps disabled/destructive state visible;
 the backend action-inventory facade remains a later integration layer. Cards
 also expose first-class guarded board actions (`d`, `u`, `t`) backed by the
 orchestration card action facade, and `+` seeds a new card when the board is
-empty.
+empty. The selected card runtime tree is available through `v`.
 
 ## Worker Split
 

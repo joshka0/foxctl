@@ -161,6 +161,8 @@ function Footer({
                   ? "ATCP prompt  Enter send  Esc cancel"
                   : mode === "atcpScreen"
                     ? "ATCP screen  Tab/v cycle  p prompt  x stop  Esc close"
+                    : mode === "cardRuntime"
+                      ? "card runtime  r refresh  Esc close"
         : mode === "confirmKill"
           ? "confirm kill  Enter confirm  Esc cancel"
           : mode === "confirmCardAction"
@@ -183,7 +185,7 @@ function Footer({
       <text fg={theme.muted}>
         {compact
           ? ": palette  1/2/3 scope  b/w hide  d/u/t card  ,/. resize  -/= agent  j/k Enter  n + m s S v p c x / r ? q"
-          : "Tab focus  : palette  1/2/3 scope  b scope  w list  d/u/t card actions  ,/. resize focused  -/= agent panes  j/k move  Enter open  n context run  + room/card  m message  s agent  S cli  v atcp  p prompt  c continue  x kill/stop  / filter  a scope  r refresh  ? help  q quit"}
+          : "Tab focus  : palette  1/2/3 scope  b scope  w list  v card runtime  d/u/t card actions  ,/. resize focused  -/= agent panes  j/k move  Enter open  n context run  + room/card  m message  s agent  S cli  v atcp  p prompt  c continue  x kill/stop  / filter  a scope  r refresh  ? help  q quit"}
       </text>
     </box>
   );

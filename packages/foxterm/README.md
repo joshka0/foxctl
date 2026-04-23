@@ -56,6 +56,7 @@ Runs view shortcuts:
 - `Shift+s` spawns an ATCP-backed CLI session into the selected room.
 - `v` cycles the focused ATCP CLI session screen detail.
 - `p` prompts the focused ATCP CLI session.
+- In Cards, `v` opens the selected card runtime tree.
 - In Cards, `d` marks the selected card done, `u` releases it, and `t` retries
   blocked or retry-queued cards after confirmation.
 - `x` stops the focused ATCP CLI session in Rooms or kills a selected run in Runs.

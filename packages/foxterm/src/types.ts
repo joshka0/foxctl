@@ -12,6 +12,7 @@ export type Mode =
   | "spawnCLI"
   | "atcpPrompt"
   | "atcpScreen"
+  | "cardRuntime"
   | "confirmKill"
   | "confirmCardAction"
   | "confirmATCPStop";

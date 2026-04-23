@@ -4,6 +4,7 @@ import type {
   OrchestrationCard,
   OrchestrationCardAction,
   OrchestrationCardActionResult,
+  OrchestrationBoardCardRuntimeResult,
   Room,
   RoomTask,
   V2RunTranscript,
@@ -399,6 +400,12 @@ export interface SeedOrchestrationCardResult {
   created: number;
   skipped?: number;
   ts: string;
+}
+
+export interface GetOrchestrationCardRuntimeInput {
+  workspaceId?: string;
+  issueId: string;
+  depth?: number;
 }
 
 export async function getRuns(params?: {
@@ -878,6 +885,25 @@ export async function seedOrchestrationCard(
         ],
       }),
     },
+  );
+  return unwrapEnvelope(envelope);
+}
+
+export async function getOrchestrationCardRuntime(
+  input: GetOrchestrationCardRuntimeInput,
+): Promise<OrchestrationBoardCardRuntimeResult> {
+  const issueId = input.issueId.trim();
+  if (issueId === "") {
+    throw new Error("issue_id is required");
+  }
+  const query = new URLSearchParams();
+  query.set("workspace_id", input.workspaceId ?? WORKSPACE_ID);
+  query.set("issue_id", issueId);
+  if (typeof input.depth === "number" && Number.isFinite(input.depth)) {
+    query.set("depth", String(input.depth));
+  }
+  const envelope = await requestEnvelope<OrchestrationBoardCardRuntimeResult>(
+    `/api/orchestration/board-card-runtime-get?${query.toString()}`,
   );
   return unwrapEnvelope(envelope);
 }
