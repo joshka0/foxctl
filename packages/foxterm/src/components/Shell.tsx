@@ -149,6 +149,8 @@ function Footer({
         ? "compose  Enter submit  Esc cancel"
         : mode === "createRoom"
           ? "new room  Enter create  Esc cancel"
+          : mode === "createCard"
+            ? "new card  Enter create  Esc cancel"
           : mode === "roomMessage"
             ? "room message  Enter send  Esc cancel"
             : mode === "spawnAgent"
@@ -181,7 +183,7 @@ function Footer({
       <text fg={theme.muted}>
         {compact
           ? ": palette  1/2/3 scope  b/w hide  d/u/t card  ,/. resize  -/= agent  j/k Enter  n + m s S v p c x / r ? q"
-          : "Tab focus  : palette  1/2/3 scope  b scope  w list  d/u/t card actions  ,/. resize focused  -/= agent panes  j/k move  Enter open  n context run  + room  m message  s agent  S cli  v atcp  p prompt  c continue  x kill/stop  / filter  a scope  r refresh  ? help  q quit"}
+          : "Tab focus  : palette  1/2/3 scope  b scope  w list  d/u/t card actions  ,/. resize focused  -/= agent panes  j/k move  Enter open  n context run  + room/card  m message  s agent  S cli  v atcp  p prompt  c continue  x kill/stop  / filter  a scope  r refresh  ? help  q quit"}
       </text>
     </box>
   );

@@ -387,6 +387,20 @@ export interface ApplyOrchestrationCardActionInput {
   action: OrchestrationCardAction;
 }
 
+export interface SeedOrchestrationCardInput {
+  workspaceId?: string;
+  title: string;
+  issueId?: string;
+  issueIdentifier?: string;
+}
+
+export interface SeedOrchestrationCardResult {
+  request_id: string;
+  created: number;
+  skipped?: number;
+  ts: string;
+}
+
 export async function getRuns(params?: {
   limit?: number;
   status?: string;
@@ -834,6 +848,34 @@ export async function applyOrchestrationCardAction(
         workspace_id: input.workspaceId ?? WORKSPACE_ID,
         issue_id: issueId,
         action: input.action,
+      }),
+    },
+  );
+  return unwrapEnvelope(envelope);
+}
+
+export async function seedOrchestrationCard(
+  input: SeedOrchestrationCardInput,
+): Promise<SeedOrchestrationCardResult> {
+  const title = input.title.trim();
+  if (title === "") {
+    throw new Error("title is required");
+  }
+  const envelope = await requestEnvelope<SeedOrchestrationCardResult>(
+    "/api/orchestration/seed-cards",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request_id: `req-foxterm-${newIDFragment()}`,
+        workspace_id: input.workspaceId ?? WORKSPACE_ID,
+        cards: [
+          {
+            issue_id: input.issueId?.trim() || undefined,
+            issue_identifier: input.issueIdentifier?.trim() || undefined,
+            title,
+          },
+        ],
       }),
     },
   );

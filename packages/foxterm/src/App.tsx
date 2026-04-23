@@ -25,6 +25,7 @@ import {
   killRun,
   sendRoomMessage,
   sendATCPMessageToRoom,
+  seedOrchestrationCard,
   spawnAgent,
   spawnATCPCLIForRoom,
   stopATCPSessionForRoom,
@@ -42,6 +43,7 @@ import {
   type RoomMessage,
   type RoomTaskWorkItem,
   type RunListItem,
+  type SeedOrchestrationCardInput,
   type V2ModelEndpoint,
 } from "./api";
 import { HelpOverlay } from "./components/HelpOverlay";
@@ -286,6 +288,8 @@ export function App({ onExit }: AppProps) {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [cardLoadState, setCardLoadState] = useState<LoadState>("idle");
   const [lastCardLoadAt, setLastCardLoadAt] = useState<string | null>(null);
+  const [cardComposerText, setCardComposerText] = useState("");
+  const [cardCreateBusy, setCardCreateBusy] = useState(false);
   const [pendingCardAction, setPendingCardAction] =
     useState<PendingCardAction | null>(null);
   const [cardActionBusy, setCardActionBusy] = useState(false);
@@ -508,6 +512,11 @@ export function App({ onExit }: AppProps) {
     setFocus("composer");
   };
 
+  const openCardComposer = () => {
+    setMode("createCard");
+    setFocus("composer");
+  };
+
   const submitRoomCreate = async () => {
     const title = roomComposerText.trim();
     if (title === "" || roomCreateBusy) return;
@@ -533,6 +542,38 @@ export function App({ onExit }: AppProps) {
       });
     } finally {
       setRoomCreateBusy(false);
+    }
+  };
+
+  const submitCardCreate = async () => {
+    const title = cardComposerText.trim();
+    if (title === "" || cardCreateBusy) return;
+    setCardCreateBusy(true);
+    setStatus({ tone: "focus", text: "creating card" });
+    try {
+      const input: SeedOrchestrationCardInput = {
+        workspaceId: WORKSPACE_ID,
+        title,
+      };
+      const result = await seedOrchestrationCard(input);
+      setCardComposerText("");
+      setMode("normal");
+      setFocus("worklist");
+      await refreshCards();
+      setStatus({
+        tone: result.created > 0 ? "success" : "warning",
+        text:
+          result.created > 0
+            ? `${result.created} card created`
+            : "card was skipped",
+      });
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text: error instanceof Error ? error.message : "failed to create card",
+      });
+    } finally {
+      setCardCreateBusy(false);
     }
   };
 
@@ -1422,6 +1463,18 @@ export function App({ onExit }: AppProps) {
       },
     },
     {
+      id: "card:create",
+      title: "Create Card",
+      category: "Cards",
+      command: "+",
+      description: "Seed a new orchestration card into the active workspace.",
+      destructive: false,
+      run: () => {
+        setNavIndex(2);
+        openCardComposer();
+      },
+    },
+    {
       id: "card:context-run",
       title: "Run with Card Context",
       category: "Cards",
@@ -1615,6 +1668,7 @@ export function App({ onExit }: AppProps) {
     return () => clearInterval(timer);
   }, [
     composerBusy,
+    cardCreateBusy,
     roomCreateBusy,
     roomMessageBusy,
     atcpPromptBusy,
@@ -1650,7 +1704,10 @@ export function App({ onExit }: AppProps) {
 
   useEffect(() => {
     const composerVisible =
-      activeView === "runs" || activeView === "rooms" || mode === "compose";
+      activeView === "runs" ||
+      activeView === "rooms" ||
+      activeView === "cards" ||
+      mode === "compose";
     if (!composerVisible && focus === "composer") {
       setFocus("worklist");
     }
@@ -1659,6 +1716,10 @@ export function App({ onExit }: AppProps) {
   useEffect(() => {
     if (activeView !== "rooms" && mode === "createRoom") {
       setRoomComposerText("");
+      setMode("normal");
+    }
+    if (activeView !== "cards" && mode === "createCard") {
+      setCardComposerText("");
       setMode("normal");
     }
     if (activeView !== "rooms" && mode === "roomMessage") {
@@ -1820,6 +1881,10 @@ export function App({ onExit }: AppProps) {
         setRoomComposerText("");
         setFocus("worklist");
       }
+      if (mode === "createCard") {
+        setCardComposerText("");
+        setFocus("worklist");
+      }
       if (mode === "roomMessage") {
         setRoomMessageText("");
         setRoomMessageRoomId(null);
@@ -1970,6 +2035,21 @@ export function App({ onExit }: AppProps) {
       }
       return;
     }
+    if (mode === "createCard") {
+      if (isSubmitKey(key)) {
+        void submitCardCreate();
+        return;
+      }
+      if (name === "backspace" || name === "delete") {
+        setCardComposerText((current) => current.slice(0, -1));
+        return;
+      }
+      const char = keyChar(name);
+      if (char) {
+        setCardComposerText((current) => current + char);
+      }
+      return;
+    }
     if (mode === "roomMessage") {
       if (isSubmitKey(key)) {
         void submitRoomMessage();
@@ -2109,6 +2189,10 @@ export function App({ onExit }: AppProps) {
       openRoomComposer();
       return;
     }
+    if (activeView === "cards" && isRoomCreateKey(key)) {
+      openCardComposer();
+      return;
+    }
     if (name === "m" && activeView === "rooms") {
       openRoomMessageComposer();
       return;
@@ -2208,7 +2292,10 @@ export function App({ onExit }: AppProps) {
           reverse: key.shift,
           showNav: scopeVisible,
           showWorklist: worklistVisible,
-          hasComposer: activeView === "runs" || activeView === "rooms",
+          hasComposer:
+            activeView === "runs" ||
+            activeView === "rooms" ||
+            activeView === "cards",
         }),
       );
       return;
@@ -2483,6 +2570,15 @@ export function App({ onExit }: AppProps) {
                 null
               }
               targetLabel={selectedATCPAgentLabel}
+            />
+          )}
+          {activeView === "cards" && mode !== "compose" && (
+            <CardComposer
+              compact={compact}
+              focused={focus === "composer" || mode === "createCard"}
+              value={cardComposerText}
+              busy={cardCreateBusy}
+              busyTick={busyTick}
             />
           )}
           {mode === "spawnCLI" && cliSpawnStep === "preset" && (
@@ -3110,6 +3206,53 @@ function RoomComposer({
           compact ? 28 : 44,
         )}
       </text>
+      <text fg={value.trim() === "" ? theme.muted : theme.text}>
+        {visibleValue}
+        {focused && !busy ? "_" : ""}
+      </text>
+    </box>
+  );
+}
+
+function CardComposer({
+  compact,
+  focused,
+  value,
+  busy,
+  busyTick,
+}: {
+  compact: boolean;
+  focused: boolean;
+  value: string;
+  busy: boolean;
+  busyTick: number;
+}) {
+  const spinner = busy ? spinnerFrame(busyTick) : "";
+  const visibleValue =
+    value.trim() === ""
+      ? "+ to create an orchestration card"
+      : truncate(value, compact ? 66 : 130);
+  return (
+    <box
+      style={{
+        height: 3,
+        marginLeft: 1,
+        marginRight: 1,
+        marginBottom: 1,
+        border: true,
+        borderStyle: "single",
+        borderColor: focused ? theme.focus : theme.border,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingLeft: 1,
+        paddingRight: 1,
+        gap: 1,
+      }}
+    >
+      <text fg={focused ? theme.focus : theme.muted}>
+        {busy ? `${spinner} card` : "card"}
+      </text>
+      <text fg={theme.subtle}>{truncate(WORKSPACE_ID, compact ? 28 : 44)}</text>
       <text fg={value.trim() === "" ? theme.muted : theme.text}>
         {visibleValue}
         {focused && !busy ? "_" : ""}
@@ -4208,7 +4351,7 @@ function CardEmptyState({
     <PanelState
       tone="muted"
       title="No orchestration cards found."
-      detail="Press n to start a board-context run."
+      detail="Press + to create a card, or n to start a board-context run."
     />
   );
 }

@@ -6,6 +6,7 @@ export type Mode =
   | "filter"
   | "compose"
   | "createRoom"
+  | "createCard"
   | "roomMessage"
   | "spawnAgent"
   | "spawnCLI"

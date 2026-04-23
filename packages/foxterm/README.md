@@ -50,7 +50,7 @@ Runs view shortcuts:
 - `c` composes a follow-up turn on the selected run stream.
 - `Enter` submits the composed prompt, opens the selected run detail, or opens a card's linked run.
 - `x` opens a confirmation prompt for killing the selected active run.
-- `+` or `Shift+n` creates a room from the Rooms view.
+- `+` or `Shift+n` creates a room from Rooms or an orchestration card from Cards.
 - `m` writes a message to the selected room.
 - `s` spawns a foxctl daemon agent into the selected room.
 - `Shift+s` spawns an ATCP-backed CLI session into the selected room.

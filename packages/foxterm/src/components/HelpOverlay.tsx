@@ -37,7 +37,7 @@ export function HelpOverlay({
       <text fg={theme.text}>Up/Down or j/k    Move selection</text>
       <text fg={theme.text}>Enter             Open selected run detail</text>
       <text fg={theme.text}>n                 Compose run for active context</text>
-      <text fg={theme.text}>+ / Shift+n       Create a room in Rooms</text>
+      <text fg={theme.text}>+ / Shift+n       Create room or card</text>
       <text fg={theme.text}>m                 Message selected room</text>
       <text fg={theme.text}>s                 Spawn agent into room</text>
       <text fg={theme.text}>Shift+s           Spawn ATCP CLI into room</text>

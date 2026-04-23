@@ -90,6 +90,9 @@ The first backend facade tranche is partially implemented:
 - foxterm Cards now render denser card status, policy, runtime-link, and retry
   metadata and can apply guarded `mark-done`, `release`, and `retry-now`
   actions through `/api/orchestration/card-action`.
+- foxterm can seed the first orchestration card from Cards with `+` /
+  `Shift+n` through `/api/orchestration/seed-cards`, so an empty board no
+  longer blocks terminal-side card exploration.
 - `foxctl web serve --atcp` can host an embedded ATCP daemon in the same
   process as the web API, while the standalone `cmd/atcpd` binary remains
   available for split-process deployments.
@@ -671,7 +674,8 @@ Status: first local palette is available through `:` / `Ctrl+p`. It dispatches
 existing guarded foxterm actions and keeps disabled/destructive state visible;
 the backend action-inventory facade remains a later integration layer. Cards
 also expose first-class guarded board actions (`d`, `u`, `t`) backed by the
-orchestration card action facade.
+orchestration card action facade, and `+` seeds a new card when the board is
+empty.
 
 ## Worker Split
 
