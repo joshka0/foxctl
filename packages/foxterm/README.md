@@ -76,10 +76,16 @@ message, and `n` seeds a new run prompt with the selected room/task context.
 Foxterm identifies room operations as `FOXTERM_ACTOR_ID`/`FOXCTL_ACTOR_ID`, or
 `dev-local-user` by default. In Cards, `n` seeds a board/card context prompt,
 and `Enter` jumps to the card's linked run when one exists.
+The Rooms composer shows the exact Enter target, such as the selected ATCP
+participant, room message destination, daemon-agent spawn target, or CLI spawn
+target, before sending.
 
 Room messages require the room loop to be active. Foxterm shows loop heartbeat
 and delivery-owner status in the room detail panel, plus a `./bin/foxctl room
 loop ...` start command when the loop is not ready.
+Room detail also shows a compact orchestration strip with linked task cards and
+active board cards so room work and coordinator-created board activity stay
+visible without switching scopes.
 
 Room agent spawning uses `POST /api/agents/spawn` with the selected room ID.
 The spawn composer accepts `role` or `role: prompt`; when the prompt is omitted

@@ -95,6 +95,9 @@ The first backend facade tranche is partially implemented:
   longer blocks terminal-side card exploration.
 - foxterm can inspect the selected card runtime tree with `v` through
   `/api/orchestration/board-card-runtime-get`.
+- foxterm Rooms now make the composer target explicit before Enter sends, and
+  the room detail includes a compact orchestration strip for linked task cards
+  and active board cards.
 - `foxctl web serve --atcp` can host an embedded ATCP daemon in the same
   process as the web API, while the standalone `cmd/atcpd` binary remains
   available for split-process deployments.
@@ -678,6 +681,9 @@ the backend action-inventory facade remains a later integration layer. Cards
 also expose first-class guarded board actions (`d`, `u`, `t`) backed by the
 orchestration card action facade, and `+` seeds a new card when the board is
 empty. The selected card runtime tree is available through `v`.
+Rooms now carry a first management pass: the composer states the active target
+(`room`, `daemon agent`, `ATCP CLI`, or focused ATCP participant), and room
+detail surfaces linked/active orchestration cards.
 
 ## Worker Split
 

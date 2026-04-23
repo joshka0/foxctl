@@ -1751,7 +1751,10 @@ export function App({ onExit }: AppProps) {
     if (activeView === "rooms" && roomTaskLoadState === "idle") {
       void refreshRoomTasks();
     }
-    if (activeView === "cards" && cardLoadState === "idle") {
+    if (
+      (activeView === "cards" || activeView === "rooms") &&
+      cardLoadState === "idle"
+    ) {
       void refreshCards();
     }
   }, [activeView, roomTaskLoadState, cardLoadState]);
@@ -2510,6 +2513,8 @@ export function App({ onExit }: AppProps) {
                     atcpScreens={atcpScreens}
                     selectedATCPSessionId={selectedATCPSessionId}
                     atcpLoadState={atcpLoadState}
+                    cards={cardItems}
+                    cardLoadState={cardLoadState}
                   />
                 )}
               </>
@@ -3351,6 +3356,16 @@ function RoomComposer({
             ? "message"
             : "room";
   const target = targetLabel ?? roomId ?? "session";
+  const targetDetail =
+    purpose === "prompt"
+      ? `Enter -> ATCP ${target}`
+      : purpose === "message"
+        ? `Enter -> room ${roomId ?? "selected room"}`
+        : purpose === "spawn"
+          ? `Enter -> daemon agent in ${roomId ?? "selected room"}`
+          : purpose === "cli"
+            ? `Enter -> ATCP CLI in ${roomId ?? "selected room"}`
+            : `Enter -> workspace ${WORKSPACE_ID}`;
   const scopedPurpose =
     purpose === "message" ||
     purpose === "spawn" ||
@@ -3371,35 +3386,35 @@ function RoomComposer({
   return (
     <box
       style={{
-        height: 3,
+        height: 4,
         marginLeft: 1,
         marginRight: 1,
         marginBottom: 1,
         border: true,
         borderStyle: "single",
         borderColor: focused ? theme.focus : theme.border,
-        flexDirection: "row",
-        alignItems: "center",
+        flexDirection: "column",
         paddingLeft: 1,
         paddingRight: 1,
-        gap: 1,
       }}
     >
-      <text fg={focused ? theme.focus : theme.muted}>
-        {busy ? `${spinner} ${label}` : label}
-      </text>
-      <text fg={theme.subtle}>
-        {truncate(
-          scopedPurpose
-            ? roomId ?? WORKSPACE_ID
-            : WORKSPACE_ID,
-          compact ? 28 : 44,
-        )}
-      </text>
-      <text fg={value.trim() === "" ? theme.muted : theme.text}>
-        {visibleValue}
-        {focused && !busy ? "_" : ""}
-      </text>
+      <box style={{ flexDirection: "row", justifyContent: "space-between", height: 1 }}>
+        <text fg={focused ? theme.focus : theme.muted}>
+          {busy ? `${spinner} ${label}` : label}
+        </text>
+        <text fg={theme.subtle}>
+          {truncate(targetDetail, compact ? 44 : 86)}
+        </text>
+      </box>
+      <box style={{ flexDirection: "row", height: 1, gap: 1 }}>
+        <text fg={theme.subtle}>
+          {truncate(scopedPurpose ? roomId ?? WORKSPACE_ID : WORKSPACE_ID, compact ? 22 : 36)}
+        </text>
+        <text fg={value.trim() === "" ? theme.muted : theme.text}>
+          {visibleValue}
+          {focused && !busy ? "_" : ""}
+        </text>
+      </box>
     </box>
   );
 }
@@ -3763,6 +3778,8 @@ function RoomTaskDetailPanel({
   atcpScreens,
   selectedATCPSessionId,
   atcpLoadState,
+  cards,
+  cardLoadState,
 }: {
   compact: boolean;
   terminalWidth: number;
@@ -3784,6 +3801,8 @@ function RoomTaskDetailPanel({
   atcpScreens: Record<string, ATCPScreen>;
   selectedATCPSessionId: string | null;
   atcpLoadState: LoadState;
+  cards: OrchestrationCardWorkItem[];
+  cardLoadState: LoadState;
 }) {
   return (
     <Panel
@@ -3833,6 +3852,13 @@ function RoomTaskDetailPanel({
               loop={loop}
               loadState={loopLoadState}
             />
+            <RoomOrchestrationStrip
+              compact={compact}
+              room={selectedItem.room}
+              taskId={selectedItem.task.id}
+              cards={cards}
+              loadState={cardLoadState}
+            />
             <RoomAgentPanes
               compact={compact}
               terminalWidth={terminalWidth}
@@ -3878,6 +3904,8 @@ function RoomTaskDetailPanel({
             atcpScreens={atcpScreens}
             selectedATCPSessionId={selectedATCPSessionId}
             atcpLoadState={atcpLoadState}
+            cards={cards}
+            cardLoadState={cardLoadState}
           />
         </scrollbox>
       )}
@@ -3903,6 +3931,8 @@ function RoomSummaryDetail({
   atcpScreens,
   selectedATCPSessionId,
   atcpLoadState,
+  cards,
+  cardLoadState,
 }: {
   compact: boolean;
   terminalWidth: number;
@@ -3921,6 +3951,8 @@ function RoomSummaryDetail({
   atcpScreens: Record<string, ATCPScreen>;
   selectedATCPSessionId: string | null;
   atcpLoadState: LoadState;
+  cards: OrchestrationCardWorkItem[];
+  cardLoadState: LoadState;
 }) {
   if (!selectedItem) {
     return (
@@ -3964,6 +3996,12 @@ function RoomSummaryDetail({
         loop={loop}
         loadState={loopLoadState}
       />
+      <RoomOrchestrationStrip
+        compact={compact}
+        room={selectedItem.room}
+        cards={cards}
+        loadState={cardLoadState}
+      />
       <RoomAgentPanes
         compact={compact}
         terminalWidth={terminalWidth}
@@ -3997,6 +4035,68 @@ function RoomTextPreview({
       <text fg={theme.focus}>{title}</text>
       <text fg={theme.text}>{truncate(value, width)}</text>
       <text fg={theme.subtle}>{truncate(value.slice(width), width)}</text>
+    </box>
+  );
+}
+
+function RoomOrchestrationStrip({
+  compact,
+  room,
+  taskId,
+  cards,
+  loadState,
+}: {
+  compact: boolean;
+  room: RoomTaskWorkItem["room"];
+  taskId?: string;
+  cards: OrchestrationCardWorkItem[];
+  loadState: LoadState;
+}) {
+  const linkedCards = roomLinkedCards(cards, room, taskId);
+  const activeCards = cards
+    .filter((item) => isActiveCard(item.card))
+    .filter((item) => !linkedCards.some((linked) => linked.id === item.id))
+    .slice(0, compact ? 2 : 4);
+  const visibleCards = [...linkedCards, ...activeCards].slice(0, compact ? 3 : 6);
+  const summary = roomBoardSummary(cards);
+  return (
+    <box style={{ flexDirection: "column", gap: 1 }}>
+      <text fg={loadState === "loading" ? theme.focus : theme.focus}>
+        room orchestration
+      </text>
+      <text fg={theme.muted}>
+        {loadState === "loading"
+          ? "loading board activity"
+          : summary || "no cards loaded"}
+      </text>
+      {visibleCards.length === 0 ? (
+        <text fg={theme.muted}>
+          {loadState === "error"
+            ? "card board unavailable"
+            : "+ in Cards creates board work; linked cards appear here."}
+        </text>
+      ) : (
+        visibleCards.map((item) => (
+          <box
+            key={`room-card:${item.id}`}
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              height: 1,
+            }}
+          >
+            <text fg={toneColor(cardToneForLane(item.laneId, item.card.state))}>
+              {truncate(
+                `${item.laneId} ${item.card.issue_identifier || item.card.issue_id}`,
+                compact ? 34 : 52,
+              )}
+            </text>
+            <text fg={cardPolicyTone(item.card)}>
+              {truncate(cardRoomCardMeta(item), compact ? 28 : 52)}
+            </text>
+          </box>
+        ))
+      )}
     </box>
   );
 }
@@ -5373,6 +5473,61 @@ function cardWorkItemFromCard(
     laneTitle: cardLaneTitle(laneId),
     card,
   };
+}
+
+function roomLinkedCards(
+  cards: OrchestrationCardWorkItem[],
+  room: RoomTaskWorkItem["room"],
+  taskId?: string,
+): OrchestrationCardWorkItem[] {
+  const taskIDs = new Set(
+    [
+      taskId,
+      ...(room.latest_subject ? [room.latest_subject] : []),
+    ]
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+  return cards
+    .filter((item) => taskIDs.has(item.card.issue_id))
+    .slice(0, 3);
+}
+
+function isActiveCard(card: OrchestrationCard): boolean {
+  return (
+    card.lane === "Running" ||
+    card.lane === "Claimed" ||
+    card.lane === "Blocked" ||
+    card.lane === "RetryQueued" ||
+    card.lane === "Review"
+  );
+}
+
+function roomBoardSummary(cards: OrchestrationCardWorkItem[]): string {
+  if (cards.length === 0) return "";
+  const counts = new Map<string, number>();
+  for (const item of cards) {
+    if (!isActiveCard(item.card)) continue;
+    counts.set(item.laneId, (counts.get(item.laneId) ?? 0) + 1);
+  }
+  const parts = ["Running", "Blocked", "Review", "RetryQueued", "Claimed"]
+    .map((lane) => {
+      const count = counts.get(lane) ?? 0;
+      return count > 0 ? `${lane.toLowerCase()} ${count}` : "";
+    })
+    .filter(Boolean);
+  return parts.length > 0 ? parts.join(" / ") : `${cards.length} board cards`;
+}
+
+function cardRoomCardMeta(item: OrchestrationCardWorkItem): string {
+  return [
+    item.card.agent_id ? shortActorLabel(item.card.agent_id) : "",
+    item.card.run_id ? "run" : "",
+    cardPolicySummary(item.card),
+  ]
+    .filter(Boolean)
+    .join("  ");
 }
 
 interface RuntimeLine {
