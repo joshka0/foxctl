@@ -50,3 +50,14 @@ func TestFilterToolsByNames(t *testing.T) {
 		t.Fatalf("filterToolsByNames()=%v", got)
 	}
 }
+
+func TestNormalizeRouteProfileNoLegacyAliases(t *testing.T) {
+	t.Parallel()
+
+	if got := NormalizeRouteProfile("code"); got != RouteProfileAuto {
+		t.Fatalf("NormalizeRouteProfile(code)=%s want %s", got, RouteProfileAuto)
+	}
+	if got := NormalizeRouteProfile("memory-recall"); got != RouteProfileAuto {
+		t.Fatalf("NormalizeRouteProfile(memory-recall)=%s want %s", got, RouteProfileAuto)
+	}
+}

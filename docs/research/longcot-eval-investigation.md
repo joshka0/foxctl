@@ -481,13 +481,13 @@ Current profiles are repo-oriented:
 That is not appropriate for LongCoT because it risks dataset/verifier leakage and measures repo retrieval rather than reasoning. Add:
 
 ```go
-const ToolProfileLongCoTMinimal = "longcot-minimal"
-const ToolProfileLongCoTRLM = "longcot-rlm"
+const ToolProfileLongCoTNoModelTools = "longcot-no-model-tools"
+const ToolProfileLongCoTNoModelTools = "longcot-no-model-tools"
 ```
 
-Initial `longcot-minimal` should probably expose **no external state tools**. If we want to test RLM structure first, use the RLM planner/system prompt and bounded iterations but no tool access.
+Initial `longcot-no-model-tools` should probably expose **no external state tools**. If we want to test RLM structure first, use the RLM planner/system prompt and bounded iterations but no tool access.
 
-A later `longcot-rlm` profile can include only deterministic, non-leaky tools, for example:
+A later `longcot-no-model-tools` profile can include only deterministic, non-leaky tools, for example:
 
 ```text
 scratchpad / think
@@ -581,8 +581,8 @@ Start with a small balanced subset, for example 10-25 questions per domain/diffi
 | `baseline_no_tools_official_prompt` | Official-style baseline | none |
 | `rlm_no_tools_single` | Measures RLM prompt/agent setup without tools | none |
 | `rlm_no_tools_staged` | Measures staged RLM structure without tools | none |
-| `rlm_minimal_tools_single` | Measures safe deterministic tools | `longcot-minimal` |
-| `rlm_minimal_tools_staged` | Measures staged RLM + safe tools | `longcot-minimal` |
+| `rlm_no_model_tools_single` | Measures safe deterministic tools | `longcot-no-model-tools` |
+| `rlm_no_model_tools_staged` | Measures staged RLM + safe tools | `longcot-no-model-tools` |
 | `rlm_full_repo_agent_contaminated` | Optional internal stress mode only | current `default` / `code-intel` |
 
 Primary comparisons:
@@ -590,7 +590,7 @@ Primary comparisons:
 ```text
 baseline_no_tools_official_prompt vs rlm_no_tools_single
 rlm_no_tools_single vs rlm_no_tools_staged
-rlm_no_tools_staged vs rlm_minimal_tools_staged
+rlm_no_tools_staged vs rlm_no_model_tools_staged
 ```
 
 This isolates:

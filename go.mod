@@ -47,6 +47,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tetratelabs/wazero v1.7.0
+	github.com/traefik/yaegi v0.16.1
 	github.com/tursodatabase/go-libsql v0.0.0-20251025125656-00da49cd4a6e
 	golang.org/x/crypto v0.48.0
 	golang.org/x/net v0.51.0

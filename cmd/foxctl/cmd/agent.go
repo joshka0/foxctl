@@ -191,7 +191,8 @@ var (
 
 // Flags for agent run
 var (
-	runCompanionMode string // "standard" or "roleplay"
+	runCompanionMode      string // "standard" or "roleplay"
+	runRepoIndexWorkspace string
 )
 
 // Flags for agent kill
@@ -292,6 +293,7 @@ func init() {
 
 	// Run flags
 	agentRunCmd.Flags().StringVar(&runCompanionMode, "companion-mode", "", "Memory mode for conversation memory: standard (40K tokens) or roleplay (50K tokens)")
+	agentRunCmd.Flags().StringVar(&runRepoIndexWorkspace, "repo-index-workspace", "", "Workspace root to use for repo-index lookup keys (defaults to current workspace)")
 
 	// Kill flags
 	agentKillCmd.Flags().BoolVar(&killGraceful, "graceful", true, "Graceful shutdown")
@@ -1644,21 +1646,22 @@ func runAgentRunWithRoute(cmd *cobra.Command, args []string) error {
 	}
 
 	opts := agentdaemon.Options{
-		AgentID:               agentRecord.ID, // Use resolved ID
-		StorageRoot:           cfg.Storage.Root,
-		WorkspaceRoot:         workspaceRoot,
-		PollInterval:          500 * time.Millisecond,
-		HeartbeatInterval:     10 * time.Second,
-		MaxPollMessages:       10,
-		LLMProvider:           provider,
-		LLMModel:              model,
-		LLMAPIKey:             cfg.LLM.ResolveAPIKey(provider),
-		LLMBaseURL:            firstNonEmpty(agentRecord.LLMBaseURL, cfg.LLM.ResolveBaseURL(provider)),
-		LLMAuthMode:           firstNonEmpty(agentRecord.LLMAuthMode, cfg.LLM.ResolveAuthMode(provider)),
-		LLMAuthHeader:         firstNonEmpty(agentRecord.LLMAuthHeader, cfg.LLM.ResolveAuthHeader(provider)),
-		LLMAuthPrefix:         firstNonEmpty(agentRecord.LLMAuthPrefix, cfg.LLM.ResolveAuthPrefix(provider)),
-		EnableCompanionMemory: enableCompanionMemory,
-		CompanionMode:         companionMode,
+		AgentID:                agentRecord.ID, // Use resolved ID
+		StorageRoot:            cfg.Storage.Root,
+		WorkspaceRoot:          workspaceRoot,
+		RepoIndexWorkspaceRoot: runRepoIndexWorkspace,
+		PollInterval:           500 * time.Millisecond,
+		HeartbeatInterval:      10 * time.Second,
+		MaxPollMessages:        10,
+		LLMProvider:            provider,
+		LLMModel:               model,
+		LLMAPIKey:              cfg.LLM.ResolveAPIKey(provider),
+		LLMBaseURL:             firstNonEmpty(agentRecord.LLMBaseURL, cfg.LLM.ResolveBaseURL(provider)),
+		LLMAuthMode:            firstNonEmpty(agentRecord.LLMAuthMode, cfg.LLM.ResolveAuthMode(provider)),
+		LLMAuthHeader:          firstNonEmpty(agentRecord.LLMAuthHeader, cfg.LLM.ResolveAuthHeader(provider)),
+		LLMAuthPrefix:          firstNonEmpty(agentRecord.LLMAuthPrefix, cfg.LLM.ResolveAuthPrefix(provider)),
+		EnableCompanionMemory:  enableCompanionMemory,
+		CompanionMode:          companionMode,
 	}
 
 	return agentdaemon.Run(ctx, opts)

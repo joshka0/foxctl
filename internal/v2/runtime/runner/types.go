@@ -66,16 +66,17 @@ type StageObserver func(stageName string)
 
 // Config wires runner dependencies.
 type Config struct {
-	EventStore   events.Appender
-	EventBus     EventPublisher
-	Model        Model
-	ToolExecutor ToolExecutor
-	TurnRecorder run.TurnRecorder
-	Hooks        HookRunner
-	Now          func() time.Time
-	NewID        func() string
-	ObserveStage StageObserver
-	OnEventError func(error)
+	EventStore     events.Appender
+	EventBus       EventPublisher
+	Model          Model
+	RLMREPLFactory RLMREPLRunnerFactory
+	ToolExecutor   ToolExecutor
+	TurnRecorder   run.TurnRecorder
+	Hooks          HookRunner
+	Now            func() time.Time
+	NewID          func() string
+	ObserveStage   StageObserver
+	OnEventError   func(error)
 }
 
 // EventPublisher fan-outs runtime events to background subscribers.

@@ -2,6 +2,7 @@ package env
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/joshka0/foxctl/internal/rlm"
@@ -42,10 +43,31 @@ func TestFilterToolsLongCoTMinimalReturnsNoTools(t *testing.T) {
 		{Name: "search_vault"},
 		{Name: "subcall"},
 	}
-	for _, profile := range []string{ToolProfileLongCoTMinimal, ToolProfileLongCoTRLM} {
+	for _, profile := range []string{ToolProfileLongCoTNoModelTools} {
 		if got := FilterTools(in, profile); len(got) != 0 {
 			t.Fatalf("FilterTools(%q)=%v want no tools", profile, got)
 		}
+	}
+}
+
+func TestResolveToolProfileUnknownFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	in := []rlm.Tool{
+		{Name: "search_repo"},
+		{Name: "load_file"},
+	}
+
+	if got := FilterTools(in, "longcot-repl"); len(got) != 0 {
+		t.Fatalf("FilterTools(unknown)=%v want no tools", got)
+	}
+
+	_, err := ResolveToolProfile(in, "longcot-repl")
+	if err == nil {
+		t.Fatal("ResolveToolProfile() error = nil, want unsupported profile error")
+	}
+	if !strings.Contains(err.Error(), "unsupported tool profile") {
+		t.Fatalf("ResolveToolProfile() error = %v", err)
 	}
 }
 

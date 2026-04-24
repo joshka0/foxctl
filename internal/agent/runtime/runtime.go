@@ -458,6 +458,7 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (engine.
 		AuthHeader:       firstNonEmpty(cfg.LLMAuthHeader, r.config.LLMAuthHeader),
 		AuthPrefix:       firstNonEmpty(cfg.LLMAuthPrefix, r.config.LLMAuthPrefix),
 		Model:            model,
+		MaxTokens:        cfg.MaxTokens,
 		MaxIterations:    cfg.MaxIterations,
 		MaxContextTokens: maxContextTokens,
 		Timeout:          cfg.Timeout,

@@ -43,6 +43,7 @@ func newEvalCommand() *cobra.Command {
 	cmd.AddCommand(newEvalTranscriptMemoryCommand())
 	cmd.AddCommand(newEvalAgentsCommand())
 	cmd.AddCommand(newEvalCodeSearchEnsembleCommand())
+	cmd.AddCommand(newEvalLongCoTCommand())
 	return cmd
 }
 
@@ -1094,7 +1095,7 @@ func runRLMEvalMode(ctx context.Context, cfg config.Config, workspacePath, vault
 		currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 		currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 		currentAdapter.SetSubcall(runRecursive)
-		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileAuto), string(rlm.PlanModeFree))
+		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileAuto), string(rlm.PlanModeFree), "", false, false)
 		return runner.Run(runCtx, currentTask, currentEnv)
 	}
 
@@ -1141,7 +1142,7 @@ func runRLMStagedEvalMode(ctx context.Context, cfg config.Config, workspacePath,
 		currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 		currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 		currentAdapter.SetSubcall(runRecursive)
-		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileCodeRetrieval), string(rlm.PlanModeStaged))
+		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileCodeRetrieval), string(rlm.PlanModeStaged), "", false, false)
 		return runner.Run(runCtx, currentTask, currentEnv)
 	}
 

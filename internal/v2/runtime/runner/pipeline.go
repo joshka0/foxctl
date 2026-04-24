@@ -49,6 +49,9 @@ func New(cfg Config) *Pipeline {
 	if cfg.Now == nil {
 		cfg.Now = func() time.Time { return time.Now().UTC() }
 	}
+	if cfg.RLMREPLFactory == nil {
+		cfg.RLMREPLFactory = defaultRLMREPLRunnerFactory{}
+	}
 	if cfg.NewID == nil {
 		cfg.NewID = func() string {
 			n := fallbackIDCounter.Add(1)

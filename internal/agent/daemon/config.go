@@ -32,12 +32,16 @@ type ChatService interface {
 type Options struct {
 	AgentID     string
 	StorageRoot string
-	// WorkspaceRoot is the absolute path used for repo index and tool workspace access.
-	WorkspaceRoot     string
-	PollInterval      time.Duration
-	HeartbeatInterval time.Duration
-	MaxPollMessages   int
-	UseMemoryDedupe   bool
+	// WorkspaceRoot is the absolute path used for filesystem-bound tool access.
+	WorkspaceRoot string
+	// RepoIndexWorkspaceRoot optionally overrides the workspace key used to open
+	// the repo index. This is useful when a sandbox mounts a repo at a different
+	// guest path than the host path used to build the index.
+	RepoIndexWorkspaceRoot string
+	PollInterval           time.Duration
+	HeartbeatInterval      time.Duration
+	MaxPollMessages        int
+	UseMemoryDedupe        bool
 
 	// EnableOptimization enables online pattern learning for tool selection hints.
 	// When enabled, the daemon records tool usage patterns and provides hints

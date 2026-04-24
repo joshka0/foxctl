@@ -38,15 +38,15 @@ Start with a small balanced subset, then expand.
 | `baseline_no_tools_official_prompt` | Official-style no-tool baseline | none | closest internal approximation |
 | `rlm_no_tools_single` | RLM system prompt / agent setup without tools | none | no |
 | `rlm_no_tools_staged` | RLM staged planning without tools | none | no |
-| `rlm_minimal_tools_single` | Later safe deterministic tools | `longcot-minimal` | no |
-| `rlm_minimal_tools_staged` | Later staged RLM + safe tools | `longcot-minimal` | no |
+| `rlm_no_model_tools_single` | Later safe deterministic tools | `longcot-no-model-tools` | no |
+| `rlm_no_model_tools_staged` | Later staged RLM + safe tools | `longcot-no-model-tools` | no |
 | `rlm_full_repo_agent_contaminated` | Optional internal stress mode only | current `default` / `code-intel` | no; excluded from primary summaries |
 
 Primary comparisons:
 
 1. `baseline_no_tools_official_prompt` vs `rlm_no_tools_single`
 2. `rlm_no_tools_single` vs `rlm_no_tools_staged`
-3. `rlm_no_tools_staged` vs `rlm_minimal_tools_staged`
+3. `rlm_no_tools_staged` vs `rlm_no_model_tools_staged`
 
 This isolates scaffold effect, staged-planning effect, and safe-tool effect.
 
@@ -69,8 +69,8 @@ make check-doc-links
 Add RLM profile constants:
 
 ```go
-ToolProfileLongCoTMinimal = "longcot-minimal"
-ToolProfileLongCoTRLM     = "longcot-rlm"
+ToolProfileLongCoTNoModelTools = "longcot-no-model-tools"
+ToolProfileLongCoTNoModelTools     = "longcot-no-model-tools"
 ```
 
 Initial behavior: both return an empty tool list.
@@ -196,7 +196,7 @@ Run `rlm.LLMRunner` with:
 
 - empty environment handles
 - empty tool list
-- `ToolProfileLongCoTMinimal`
+- `ToolProfileLongCoTNoModelTools`
 - `RequireToolUse=false`
 - `PlanModeFree`
 - one fresh runner/session per attempt
@@ -239,7 +239,7 @@ Only after no-tool RLM conditions are stable:
 
 - add deterministic non-leaky tools, e.g. calculator or bounded symbolic checker
 - add strict sandbox tests
-- expose them through `longcot-minimal`
+- expose them through `longcot-no-model-tools`
 - keep repo/vault/memory/artifact/file/subcall tools out of primary reports
 
 ## Leakage Policy
@@ -296,10 +296,10 @@ config.json
 - [x] LongCoT-safe RLM profiles exist and return no tools.
 - [x] Pure `longcoteval` schema/summary/leakage/markdown scaffolding exists.
 - [x] Unit tests cover profiles, paired summaries, leakage, markdown, and official-response conversion.
-- [ ] Dry-run CLI shell.
+- [x] Dry-run CLI shell.
 - [ ] Official bridge fixtures.
-- [ ] Baseline no-tool runner.
-- [ ] RLM no-tool runner.
+- [x] Baseline no-tool runner.
+- [x] RLM no-tool runner.
 - [ ] Staged LongCoT RLM route.
 
 ## Validation Commands

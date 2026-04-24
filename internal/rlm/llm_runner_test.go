@@ -145,12 +145,87 @@ func TestLLMRunnerReturnsErrorOnModelFailure(t *testing.T) {
 	_, err := runner.Run(context.Background(), Task{
 		Prompt:        "inspect auth flow",
 		WorkspaceRoot: "/tmp/workspace",
-		MaxIterations: 2,
+		MaxIterations: 1,
 	}, Environment{
 		Tools: []Tool{{Name: "search_repo", Description: "repo", ReadOnly: true}},
 	})
 	if err == nil {
 		t.Fatal("expected error on empty assistant response")
+	}
+}
+
+func TestLLMRunnerPreservesStopReasonBeforeAssistantResponse(t *testing.T) {
+	t.Parallel()
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": "chatcmpl-tool",
+				"choices": []map[string]any{
+					{
+						"index": 0,
+						"message": map[string]any{
+							"role": "assistant",
+							"tool_calls": []map[string]any{
+								{
+									"id":   "call-1",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "search_repo",
+										"arguments": `{}`,
+									},
+								},
+							},
+						},
+						"finish_reason": "tool_calls",
+					},
+				},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-empty-finalize",
+			"choices": []map[string]any{
+				{
+					"index": 0,
+					"message": map[string]any{
+						"role":    "assistant",
+						"content": "",
+					},
+					"finish_reason": "stop",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	runner := LLMRunner{
+		Tools: fakeLLMToolExecutor{},
+		Config: LLMConfig{
+			Provider:      "lmstudio",
+			APIKey:        "lm-studio",
+			BaseURL:       server.URL + "/v1",
+			Model:         "test-model",
+			Timeout:       5 * time.Second,
+			MaxIterations: 1,
+		},
+	}
+
+	_, err := runner.Run(context.Background(), Task{
+		Prompt:        "inspect auth flow",
+		WorkspaceRoot: "/tmp/workspace",
+		MaxIterations: 1,
+	}, Environment{
+		Tools: []Tool{{Name: "search_repo", Description: "repo", ReadOnly: true}},
+	})
+	if err == nil {
+		t.Fatal("expected max-iterations error")
+	}
+	want := "rlm llm runner: max_iterations before assistant response"
+	if err.Error() != want {
+		t.Fatalf("err=%v want %q", err, want)
 	}
 }
 
@@ -213,6 +288,26 @@ func TestLLMRunnerRequireToolUseRejectsZeroToolCallAnswer(t *testing.T) {
 	}
 	if got := captured["tool_choice"]; got != "required" {
 		t.Fatalf("tool_choice=%v want required", got)
+	}
+}
+
+func TestLLMRunnerRequireToolUseRejectsEmptyToolSurface(t *testing.T) {
+	t.Parallel()
+
+	runner := LLMRunner{
+		Tools: fakeLLMToolExecutor{},
+		Config: LLMConfig{
+			RequireToolUse: true,
+		},
+	}
+
+	_, err := runner.Run(context.Background(), Task{
+		Prompt:        "inspect auth flow",
+		WorkspaceRoot: "/tmp/workspace",
+		MaxIterations: 2,
+	}, Environment{})
+	if err == nil || err.Error() != "rlm llm runner: require-tool-use is enabled but no tools are available" {
+		t.Fatalf("err=%v", err)
 	}
 }
 

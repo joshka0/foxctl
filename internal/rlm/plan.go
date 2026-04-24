@@ -19,6 +19,7 @@ const (
 	PlanModeGuided PlanMode = "guided"
 	PlanModeStaged PlanMode = "staged"
 	PlanModeHard   PlanMode = "hard"
+	PlanModeLambda PlanMode = "lambda-retrieval"
 )
 
 type Plan struct {
@@ -40,13 +41,13 @@ func NormalizeRouteProfile(value string) RouteProfile {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", string(RouteProfileAuto):
 		return RouteProfileAuto
-	case string(RouteProfileCodeRetrieval), "code", "code-retrieval":
+	case string(RouteProfileCodeRetrieval):
 		return RouteProfileCodeRetrieval
-	case string(RouteProfileMemoryRecall), "memory", "memory-recall":
+	case string(RouteProfileMemoryRecall):
 		return RouteProfileMemoryRecall
 	case string(RouteProfileMixed):
 		return RouteProfileMixed
-	case string(RouteProfileEvidenceAudit), "evidence", "audit":
+	case string(RouteProfileEvidenceAudit):
 		return RouteProfileEvidenceAudit
 	default:
 		return RouteProfileAuto
@@ -63,6 +64,8 @@ func NormalizePlanMode(value string) PlanMode {
 		return PlanModeStaged
 	case string(PlanModeHard):
 		return PlanModeHard
+	case string(PlanModeLambda):
+		return PlanModeLambda
 	default:
 		return PlanModeFree
 	}
@@ -91,6 +94,10 @@ func ResolveRouteProfile(prompt string, requested RouteProfile) RouteProfile {
 func BuildPlan(prompt string, requestedRoute RouteProfile, requestedMode PlanMode) Plan {
 	mode := NormalizePlanMode(string(requestedMode))
 	route := ResolveRouteProfile(prompt, requestedRoute)
+	return buildPlan(route, mode)
+}
+
+func buildPlan(route RouteProfile, mode PlanMode) Plan {
 	plan := Plan{
 		RouteProfile: route,
 		Mode:         mode,

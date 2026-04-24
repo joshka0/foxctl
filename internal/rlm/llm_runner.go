@@ -67,12 +67,17 @@ type LLMConfig struct {
 	Provider       string
 	APIKey         string
 	BaseURL        string
+	AuthMode       string
+	AuthHeader     string
+	AuthPrefix     string
 	Model          string
 	Timeout        time.Duration
 	MaxTokens      int
 	Temperature    float64
 	MaxIterations  int
 	RequireToolUse bool
+	QwenNoThink    bool
+	ExtraBody      map[string]any
 	RouteProfile   RouteProfile
 	PlanMode       PlanMode
 }
@@ -93,16 +98,33 @@ func (r LLMRunner) Run(ctx context.Context, task Task, env Environment) (Result,
 	if r.Tools == nil {
 		return Result{}, fmt.Errorf("rlm llm runner requires tool adapter")
 	}
-	plan := BuildPlan(task.Prompt, r.Config.RouteProfile, r.Config.PlanMode)
-	if plan.Mode == PlanModeStaged && len(plan.Phases) > 0 {
-		return r.runStaged(ctx, task, env, plan)
+	spec, err := ResolveRunSpec(ResolveRunSpecInput{
+		Prompt:               task.Prompt,
+		RequestedRoute:       r.Config.RouteProfile,
+		RequestedPlanMode:    r.Config.PlanMode,
+		RequestedToolProfile: string(ToolProfileDefault),
+		AvailableTools:       env.Tools,
+	})
+	if err != nil {
+		return Result{}, err
 	}
-	return r.runSinglePass(ctx, task, env, runPassConfig{
+	effectiveEnv := env
+	effectiveEnv.Tools = append([]Tool(nil), spec.ToolPolicy.Tools...)
+	if spec.PlanMode == PlanModeStaged && len(spec.Plan.Phases) > 0 {
+		return r.runStaged(ctx, task, effectiveEnv, spec)
+	}
+	return r.runSinglePass(ctx, task, effectiveEnv, runPassConfig{
 		Prompt:         task.Prompt,
-		Tools:          env.Tools,
-		SystemPrompt:   buildRLMSystemPrompt(env, task),
+		Tools:          effectiveEnv.Tools,
+		SystemPrompt:   BuildLLMSystemPrompt(effectiveEnv, task),
 		RequireToolUse: r.Config.RequireToolUse,
 		MaxIterations:  task.MaxIterations,
+		Metadata: map[string]any{
+			"effective_route_profile": spec.RouteProfile,
+			"effective_plan_mode":     spec.PlanMode,
+			"tool_policy_profile":     spec.ToolPolicy.Profile,
+			"allowed_tools":           append([]string(nil), spec.ToolPolicy.AllowedTools...),
+		},
 	})
 }
 
@@ -112,9 +134,13 @@ type runPassConfig struct {
 	SystemPrompt   string
 	RequireToolUse bool
 	MaxIterations  int
+	Metadata       map[string]any
 }
 
 func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment, pass runPassConfig) (Result, error) {
+	if pass.RequireToolUse && len(pass.Tools) == 0 {
+		return Result{}, fmt.Errorf("rlm llm runner: require-tool-use is enabled but no tools are available")
+	}
 	llmCfg := engine.DefaultLLMChatConfig()
 	if strings.TrimSpace(r.Config.Provider) != "" {
 		llmCfg.Provider = strings.TrimSpace(r.Config.Provider)
@@ -124,6 +150,15 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	}
 	if strings.TrimSpace(r.Config.BaseURL) != "" {
 		llmCfg.BaseURL = strings.TrimSpace(r.Config.BaseURL)
+	}
+	if strings.TrimSpace(r.Config.AuthMode) != "" {
+		llmCfg.AuthMode = strings.TrimSpace(r.Config.AuthMode)
+	}
+	if strings.TrimSpace(r.Config.AuthHeader) != "" {
+		llmCfg.AuthHeader = strings.TrimSpace(r.Config.AuthHeader)
+	}
+	if r.Config.AuthPrefix != "" {
+		llmCfg.AuthPrefix = r.Config.AuthPrefix
 	}
 	if strings.TrimSpace(r.Config.Model) != "" {
 		llmCfg.Model = strings.TrimSpace(r.Config.Model)
@@ -137,6 +172,7 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	if r.Config.Temperature != 0 {
 		llmCfg.Temperature = r.Config.Temperature
 	}
+	llmCfg.ExtraBody = cloneStringAnyMap(r.Config.ExtraBody)
 	if pass.MaxIterations > 0 {
 		llmCfg.MaxIterations = pass.MaxIterations
 	} else if r.Config.MaxIterations > 0 {
@@ -177,36 +213,47 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	}
 	answer := strings.TrimSpace(output.AssistantText)
 	if answer == "" {
+		if output.StopReason != "" && output.StopReason != engine.StopReasonEndTurn {
+			detail := strings.TrimSpace(output.Error)
+			if detail != "" {
+				return Result{}, fmt.Errorf("rlm llm runner: %s before assistant response: %s", output.StopReason, detail)
+			}
+			return Result{}, fmt.Errorf("rlm llm runner: %s before assistant response", output.StopReason)
+		}
 		return Result{}, fmt.Errorf("rlm llm runner: empty assistant response")
 	}
 	evidence := collectEvidenceRefs(env)
 	retrievedPaths := collectRetrievedPaths(output.ToolResults, task.WorkspaceRoot, answer)
 	parentUsage := summarizeParentToolUsage(output.Iterations, "code_search_ensemble")
+	metadata := map[string]any{
+		"stop_reason":            output.StopReason,
+		"provider":               llmCfg.Provider,
+		"model":                  llmCfg.Model,
+		"tool_calls":             len(output.ToolCalls),
+		"tool_names":             toolCallNames(output.ToolCalls),
+		"llm_error":              output.Error,
+		"require_tool_use":       pass.RequireToolUse,
+		"retrieved_paths":        retrievedPaths,
+		"parent_input_tokens":    output.Tokens.InputTokens,
+		"parent_output_tokens":   output.Tokens.OutputTokens,
+		"parent_total_tokens":    output.Tokens.TotalTokens,
+		"parent_iteration_count": len(output.Iterations),
+		"parent_tool_usage":      parentUsage,
+	}
+	for key, value := range pass.Metadata {
+		metadata[key] = value
+	}
 	return Result{
 		Answer:         answer,
 		EvidenceRefs:   evidence,
 		RetrievedPaths: retrievedPaths,
 		Iterations:     1,
 		Subcalls:       len(output.ToolCalls),
-		Metadata: map[string]any{
-			"stop_reason":            output.StopReason,
-			"provider":               llmCfg.Provider,
-			"model":                  llmCfg.Model,
-			"tool_calls":             len(output.ToolCalls),
-			"tool_names":             toolCallNames(output.ToolCalls),
-			"llm_error":              output.Error,
-			"require_tool_use":       pass.RequireToolUse,
-			"retrieved_paths":        retrievedPaths,
-			"parent_input_tokens":    output.Tokens.InputTokens,
-			"parent_output_tokens":   output.Tokens.OutputTokens,
-			"parent_total_tokens":    output.Tokens.TotalTokens,
-			"parent_iteration_count": len(output.Iterations),
-			"parent_tool_usage":      parentUsage,
-		},
+		Metadata:       metadata,
 	}, nil
 }
 
-func buildRLMSystemPrompt(env Environment, task Task) string {
+func BuildLLMSystemPrompt(env Environment, task Task) string {
 	var b strings.Builder
 	b.WriteString("You are an experimental read-only recursive reasoning runtime.\n")
 	b.WriteString("Use tools to inspect external state before answering. Do not invent unavailable evidence.\n")
@@ -257,8 +304,9 @@ func buildRLMSystemPrompt(env Environment, task Task) string {
 	return b.String()
 }
 
-func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, plan Plan) (Result, error) {
-	baseStageEnv := routeStageEnvironment(env, plan.RouteProfile)
+func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, spec RunSpec) (Result, error) {
+	plan := spec.Plan
+	baseStageEnv := routeStageEnvironment(env, spec.RouteProfile)
 	allPaths := make([]string, 0, 16)
 	allEvidence := make([]string, 0, 16)
 	phaseNotes := make([]string, 0, len(plan.Phases))
@@ -269,14 +317,26 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 		rankedPaths := rerankCandidatePaths(task.Prompt, allPaths)
 		phaseEnv := stagedPhaseEnvironment(baseStageEnv, rankedPaths, phase.Name == "discovery")
 		phaseTools := filterToolsByNames(phaseEnv.Tools, phase.AllowedTools)
+		if len(phaseTools) == 0 && phase.RequireToolUse {
+			return Result{}, fmt.Errorf("rlm llm runner: %s phase requires tool use but no tools are available", phase.Name)
+		}
+		promptEnv := phaseEnv
+		promptEnv.Tools = append([]Tool(nil), phaseTools...)
 		phasePrompt := buildPhasePrompt(task.Prompt, phase, rankedPaths, phaseNotes)
-		phaseSystemPrompt := buildPhaseSystemPrompt(buildRLMSystemPrompt(phaseEnv, task), task.Prompt, phase, rankedPaths, phaseNotes)
+		phaseSystemPrompt := buildPhaseSystemPrompt(BuildLLMSystemPrompt(promptEnv, task), task.Prompt, phase, rankedPaths, phaseNotes)
 		phaseResult, err := r.runSinglePass(ctx, task, phaseEnv, runPassConfig{
 			Prompt:         phasePrompt,
 			Tools:          phaseTools,
 			SystemPrompt:   phaseSystemPrompt,
 			RequireToolUse: phase.RequireToolUse,
 			MaxIterations:  phase.MaxIterations,
+			Metadata: map[string]any{
+				"effective_route_profile": spec.RouteProfile,
+				"effective_plan_mode":     spec.PlanMode,
+				"tool_policy_profile":     spec.ToolPolicy.Profile,
+				"allowed_tools":           append([]string(nil), spec.ToolPolicy.AllowedTools...),
+				"phase_name":              phase.Name,
+			},
 		})
 		if err != nil {
 			return Result{}, fmt.Errorf("rlm llm runner: %s phase failed: %w", phase.Name, err)
@@ -293,6 +353,13 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 				SystemPrompt:   phaseSystemPrompt + "\nRequired tool retry: only the required tools are available in this retry.",
 				RequireToolUse: phase.RequireToolUse,
 				MaxIterations:  maxInt(1, phase.MaxIterations-1),
+				Metadata: map[string]any{
+					"effective_route_profile": spec.RouteProfile,
+					"effective_plan_mode":     spec.PlanMode,
+					"tool_policy_profile":     spec.ToolPolicy.Profile,
+					"allowed_tools":           append([]string(nil), spec.ToolPolicy.AllowedTools...),
+					"phase_name":              phase.Name,
+				},
 			})
 			if retryErr != nil {
 				return Result{}, fmt.Errorf("rlm llm runner: %s phase failed: %w", phase.Name, retryErr)
@@ -331,9 +398,15 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 	finalResult, err := r.runSinglePass(ctx, task, finalEnv, runPassConfig{
 		Prompt:         finalPrompt,
 		Tools:          nil,
-		SystemPrompt:   buildSynthesisSystemPrompt(buildRLMSystemPrompt(finalEnv, task), plan, allPaths, phaseNotes),
+		SystemPrompt:   buildSynthesisSystemPrompt(BuildLLMSystemPrompt(finalEnv, task), plan, allPaths, phaseNotes),
 		RequireToolUse: false,
 		MaxIterations:  1,
+		Metadata: map[string]any{
+			"effective_route_profile": spec.RouteProfile,
+			"effective_plan_mode":     spec.PlanMode,
+			"tool_policy_profile":     spec.ToolPolicy.Profile,
+			"allowed_tools":           append([]string(nil), spec.ToolPolicy.AllowedTools...),
+		},
 	})
 	if err != nil && len(phaseNotes) > 0 {
 		finalResult = Result{Answer: phaseNotes[len(phaseNotes)-1]}
@@ -347,8 +420,10 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 	if finalResult.Metadata == nil {
 		finalResult.Metadata = map[string]any{}
 	}
-	finalResult.Metadata["plan_mode"] = plan.Mode
-	finalResult.Metadata["route_profile"] = plan.RouteProfile
+	finalResult.Metadata["plan_mode"] = spec.PlanMode
+	finalResult.Metadata["route_profile"] = spec.RouteProfile
+	finalResult.Metadata["tool_policy_profile"] = spec.ToolPolicy.Profile
+	finalResult.Metadata["allowed_tools"] = append([]string(nil), spec.ToolPolicy.AllowedTools...)
 	finalResult.Metadata["phase_count"] = len(plan.Phases)
 	finalResult.Metadata["phases"] = phaseMeta
 	finalResult.Metadata["tool_calls"] = totalToolCalls
@@ -958,4 +1033,15 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func cloneStringAnyMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }

@@ -131,6 +131,31 @@ func (t *adapterTelemetry) snapshot() map[string]any {
 
 // Execute runs one read-only tool call and returns a typed JSON-like payload.
 func (a *ReadOnlyAdapter) Execute(ctx context.Context, name string, args json.RawMessage) (map[string]any, error) {
+	name = strings.TrimSpace(name)
+	if !a.isModelToolAllowed(name) {
+		return nil, fmt.Errorf("rlm env adapter: tool %q is not allowed by the current model-visible policy", name)
+	}
+	return a.executeInternal(ctx, name, args)
+}
+
+// ExecuteInternal bypasses model-visible allowlist checks for deterministic controller/eval paths.
+func (a *ReadOnlyAdapter) ExecuteInternal(ctx context.Context, name string, args json.RawMessage) (map[string]any, error) {
+	return a.executeInternal(ctx, strings.TrimSpace(name), args)
+}
+
+func (a *ReadOnlyAdapter) isModelToolAllowed(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, tool := range a.environment.Tools {
+		if strings.TrimSpace(tool.Name) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *ReadOnlyAdapter) executeInternal(ctx context.Context, name string, args json.RawMessage) (map[string]any, error) {
 	switch strings.TrimSpace(name) {
 	case "get_top_of_mind":
 		return a.getTopOfMind(), nil

@@ -97,7 +97,7 @@ func TestReadOnlyAdapterBasicTools(t *testing.T) {
 		},
 	})
 
-	top, err := adapter.Execute(ctx, "get_top_of_mind", nil)
+	top, err := adapter.ExecuteInternal(ctx, "get_top_of_mind", nil)
 	if err != nil {
 		t.Fatalf("get_top_of_mind: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestReadOnlyAdapterBasicTools(t *testing.T) {
 		t.Fatalf("top_of_mind=%v", top)
 	}
 
-	repoResult, err := adapter.Execute(ctx, "search_repo", mustJSON(map[string]any{
+	repoResult, err := adapter.ExecuteInternal(ctx, "search_repo", mustJSON(map[string]any{
 		"query": "terraform bucket",
 		"limit": 3,
 	}))
@@ -125,7 +125,7 @@ func TestReadOnlyAdapterBasicTools(t *testing.T) {
 		t.Fatalf("repo results=%v", results)
 	}
 
-	fileResult, err := adapter.Execute(ctx, "load_file", mustJSON(map[string]any{
+	fileResult, err := adapter.ExecuteInternal(ctx, "load_file", mustJSON(map[string]any{
 		"path": "main.tf",
 	}))
 	if err != nil {
@@ -133,6 +133,43 @@ func TestReadOnlyAdapterBasicTools(t *testing.T) {
 	}
 	if fileResult["content"] == "" {
 		t.Fatalf("file result=%v", fileResult)
+	}
+}
+
+func TestReadOnlyAdapterExecuteDeniesToolsOutsideAllowlist(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewReadOnlyAdapter(config.Config{}, t.TempDir(), "", nil, rlm.Environment{
+		Tools: []rlm.Tool{
+			{Name: "load_file", ReadOnly: true},
+		},
+	})
+
+	_, err := adapter.Execute(context.Background(), "get_top_of_mind", nil)
+	if err == nil {
+		t.Fatal("Execute() error = nil, want allowlist denial")
+	}
+	if !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+func TestReadOnlyAdapterExecuteInternalBypassesAllowlist(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewReadOnlyAdapter(config.Config{}, t.TempDir(), "", nil, rlm.Environment{
+		TopOfMind: map[string]any{"objective": "verify bypass"},
+		Tools: []rlm.Tool{
+			{Name: "load_file", ReadOnly: true},
+		},
+	})
+
+	out, err := adapter.ExecuteInternal(context.Background(), "get_top_of_mind", nil)
+	if err != nil {
+		t.Fatalf("ExecuteInternal() error = %v", err)
+	}
+	if out["top_of_mind"] == nil {
+		t.Fatalf("ExecuteInternal() output=%v", out)
 	}
 }
 
@@ -181,7 +218,7 @@ func TestReadOnlyAdapterLoadsTrajectoryAndCASArtifacts(t *testing.T) {
 		ArtifactHandles: []string{"trajectory:" + traj.ID, "artifact:" + obj.Digest},
 	})
 
-	search, err := adapter.Execute(ctx, "search_artifacts", mustJSON(map[string]any{
+	search, err := adapter.ExecuteInternal(ctx, "search_artifacts", mustJSON(map[string]any{
 		"query": "artifact",
 		"limit": 5,
 	}))
@@ -197,7 +234,7 @@ func TestReadOnlyAdapterLoadsTrajectoryAndCASArtifacts(t *testing.T) {
 		t.Fatalf("expected artifact handles")
 	}
 
-	loaded, err := adapter.Execute(ctx, "load_artifact", mustJSON(map[string]any{
+	loaded, err := adapter.ExecuteInternal(ctx, "load_artifact", mustJSON(map[string]any{
 		"handle": "artifact:" + obj.Digest,
 	}))
 	if err != nil {
@@ -219,7 +256,7 @@ func TestReadOnlyAdapterSubcallCarriesRole(t *testing.T) {
 		return rlm.Result{Answer: "ok"}, nil
 	})
 
-	_, err := adapter.Execute(context.Background(), "subcall", mustJSON(map[string]any{
+	_, err := adapter.ExecuteInternal(context.Background(), "subcall", mustJSON(map[string]any{
 		"prompt": "Find the latest codename update.",
 		"role":   ScoutRoleMemoryTimeline,
 	}))
@@ -245,7 +282,7 @@ func TestReadOnlyAdapterMemoryEnsembleRetrieve(t *testing.T) {
 		}, nil
 	})
 
-	out, err := adapter.Execute(context.Background(), "memory_ensemble_retrieve", mustJSON(map[string]any{
+	out, err := adapter.ExecuteInternal(context.Background(), "memory_ensemble_retrieve", mustJSON(map[string]any{
 		"query": "What changed about the codename over time?",
 		"lanes": []string{"timeline", "facts"},
 	}))
@@ -291,7 +328,7 @@ func TestReadOnlyAdapterMemoryEnsembleRetrieveStructuredFindings(t *testing.T) {
 		}
 	})
 
-	out, err := adapter.Execute(context.Background(), "memory_ensemble_retrieve", mustJSON(map[string]any{
+	out, err := adapter.ExecuteInternal(context.Background(), "memory_ensemble_retrieve", mustJSON(map[string]any{
 		"query":      "What is the current codename?",
 		"max_scouts": 3,
 	}))
@@ -487,7 +524,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleFileLocate(t *testing.T) {
 	cfg.Storage.Root = storageRoot
 	adapter := NewReadOnlyAdapter(cfg, workspace, "", nil, rlm.Environment{})
 
-	out, err := adapter.Execute(ctx, "code_search_ensemble", mustJSON(map[string]any{
+	out, err := adapter.ExecuteInternal(ctx, "code_search_ensemble", mustJSON(map[string]any{
 		"query":     "legacy scout role classic runtime",
 		"task_type": "file_locate",
 		"constraints": map[string]any{
@@ -586,7 +623,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleExecutionTrace(t *testing.T) {
 	cfg.Storage.Root = storageRoot
 	adapter := NewReadOnlyAdapter(cfg, workspace, "", nil, rlm.Environment{})
 
-	out, err := adapter.Execute(ctx, "code_search_ensemble", mustJSON(map[string]any{
+	out, err := adapter.ExecuteInternal(ctx, "code_search_ensemble", mustJSON(map[string]any{
 		"query":     "HandleAsk execution path",
 		"task_type": "execution_trace",
 		"budget": map[string]any{
@@ -651,7 +688,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleUsesExactCodeProbe(t *testing.T) {
 	cfg.Storage.Root = storageRoot
 	adapter := NewReadOnlyAdapter(cfg, workspace, "", nil, rlm.Environment{})
 
-	out, err := adapter.Execute(ctx, "code_search_ensemble", mustJSON(map[string]any{
+	out, err := adapter.ExecuteInternal(ctx, "code_search_ensemble", mustJSON(map[string]any{
 		"query":     "Where does memory_ensemble_retrieve live?",
 		"task_type": "file_locate",
 		"constraints": map[string]any{
@@ -718,7 +755,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleEmitsTelemetry(t *testing.T) {
 	cfg.Storage.Root = storageRoot
 	adapter := NewReadOnlyAdapter(cfg, workspace, "", nil, rlm.Environment{})
 
-	out, err := adapter.Execute(ctx, "code_search_ensemble", mustJSON(map[string]any{
+	out, err := adapter.ExecuteInternal(ctx, "code_search_ensemble", mustJSON(map[string]any{
 		"query":     "Where does memory_ensemble_retrieve live?",
 		"task_type": "file_locate",
 		"constraints": map[string]any{
@@ -796,7 +833,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleRegistrationTrace(t *testing.T) {
 	cfg.Storage.Root = storageRoot
 	adapter := NewReadOnlyAdapter(cfg, workspace, "", nil, rlm.Environment{})
 
-	out, err := adapter.Execute(ctx, "code_search_ensemble", mustJSON(map[string]any{
+	out, err := adapter.ExecuteInternal(ctx, "code_search_ensemble", mustJSON(map[string]any{
 		"query":     "Where does the eval command register code-search-ensemble?",
 		"task_type": "registration_trace",
 		"constraints": map[string]any{
@@ -886,7 +923,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleChangeImpact(t *testing.T) {
 	cfg.Storage.Root = storageRoot
 	adapter := NewReadOnlyAdapter(cfg, workspace, "", nil, rlm.Environment{})
 
-	out, err := adapter.Execute(ctx, "code_search_ensemble", mustJSON(map[string]any{
+	out, err := adapter.ExecuteInternal(ctx, "code_search_ensemble", mustJSON(map[string]any{
 		"query":     "If you change codeSearchEnsemble, which files are directly impacted?",
 		"task_type": "change_impact",
 		"constraints": map[string]any{
@@ -999,7 +1036,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleExecutionTracePromotesBridgeFile(t *te
 	cfg.Storage.Root = storageRoot
 	adapter := NewReadOnlyAdapter(cfg, workspace, "", nil, rlm.Environment{})
 
-	out, err := adapter.Execute(ctx, "code_search_ensemble", mustJSON(map[string]any{
+	out, err := adapter.ExecuteInternal(ctx, "code_search_ensemble", mustJSON(map[string]any{
 		"query":     "Which files connect runSingleCodeSearchEnsembleEval to code_search_ensemble execution?",
 		"task_type": "execution_trace",
 		"constraints": map[string]any{

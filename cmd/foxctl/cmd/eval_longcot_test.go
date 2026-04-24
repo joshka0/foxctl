@@ -1,0 +1,1871 @@
+package cmd
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/joshka0/foxctl/internal/domain/envelope"
+	configpkg "github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/rlm"
+	rlmenv "github.com/joshka0/foxctl/internal/rlm/env"
+	rlmruntime "github.com/joshka0/foxctl/internal/rlm/runtime"
+	"github.com/joshka0/foxctl/internal/tooling/evals/longcoteval"
+)
+
+func TestEvalCommandRegistersLongCoTOnce(t *testing.T) {
+	t.Parallel()
+
+	cmd := newEvalCommand()
+	count := 0
+	for _, child := range cmd.Commands() {
+		if child.Name() == "longcot" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("longcot subcommand count=%d want 1", count)
+	}
+}
+
+func TestLoadLongCoTQuestionsLoadsOfficialShape(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "..", "..", "testdata", "evals", "longcot", "fixture.jsonl")
+	questions, err := loadLongCoTQuestions(path, longCoTQuestionFilter{
+		Split:      "eval",
+		Domains:    []string{"math"},
+		Difficulty: "medium",
+	})
+	if err != nil {
+		t.Fatalf("loadLongCoTQuestions() error = %v", err)
+	}
+	if len(questions) != 1 {
+		t.Fatalf("len(questions)=%d want 1", len(questions))
+	}
+	if questions[0].ID != "Arithmetic_medium_1" {
+		t.Fatalf("question id=%q want Arithmetic_medium_1", questions[0].ID)
+	}
+	if questions[0].Template != "ArithmeticChain" {
+		t.Fatalf("template=%q", questions[0].Template)
+	}
+	if !strings.Contains(questions[0].PromptText, "solution = <value>") {
+		t.Fatalf("prompt did not preserve official answer format: %q", questions[0].PromptText)
+	}
+	if !strings.Contains(questions[0].Answer, `"solution":42`) {
+		t.Fatalf("answer=%q", questions[0].Answer)
+	}
+	if questions[0].Canary != "fixture-canary-math" {
+		t.Fatalf("canary=%q", questions[0].Canary)
+	}
+	if strings.TrimSpace(questions[0].QuestionHash) == "" {
+		t.Fatal("expected generated question hash")
+	}
+}
+
+func TestResolveLongCoTConditionsRequiresExactIDs(t *testing.T) {
+	t.Parallel()
+
+	conditions, err := resolveLongCoTConditions(nil, longCoTConditionRuntime{})
+	if err != nil {
+		t.Fatalf("resolveLongCoTConditions(default) error = %v", err)
+	}
+	if len(conditions) != 2 {
+		t.Fatalf("len(conditions)=%d want 2", len(conditions))
+	}
+	if conditions[0].ID != longcoteval.ConditionBaselineNoToolsOfficial || conditions[1].ID != longcoteval.ConditionRLMNoToolsSingle {
+		t.Fatalf("default conditions=%v", []longcoteval.ConditionID{conditions[0].ID, conditions[1].ID})
+	}
+
+	_, err = resolveLongCoTConditions([]string{"RLM_NO_TOOLS_SINGLE"}, longCoTConditionRuntime{})
+	if err == nil || !strings.Contains(err.Error(), "unknown --condition") {
+		t.Fatalf("expected exact-id validation error, got %v", err)
+	}
+}
+
+func TestResolveLongCoTLiveTargetOpenRouterUsesBearerWithGlobalAuthNone(t *testing.T) {
+	t.Parallel()
+
+	cfg := configpkg.Config{}
+	cfg.LLM.AuthMode = "none"
+	target, err := resolveLongCoTLiveTarget(cfg, "openrouter", "tencent/hy3-preview:free", "", "sk-test")
+	if err != nil {
+		t.Fatalf("resolveLongCoTLiveTarget() error = %v", err)
+	}
+	if target.AuthMode != "bearer" {
+		t.Fatalf("auth mode=%q want bearer", target.AuthMode)
+	}
+	if target.AuthHeader != "Authorization" {
+		t.Fatalf("auth header=%q", target.AuthHeader)
+	}
+	if target.AuthPrefix != "Bearer " {
+		t.Fatalf("auth prefix=%q", target.AuthPrefix)
+	}
+	if target.BaseURL != "https://openrouter.ai/api/v1" {
+		t.Fatalf("base url=%q", target.BaseURL)
+	}
+}
+
+func TestResolveLongCoTConditionsREPLRecursiveIncludesRecursiveTools(t *testing.T) {
+	t.Parallel()
+
+	conditions, err := resolveLongCoTConditions([]string{string(longcoteval.ConditionRLMReplRecursive)}, longCoTConditionRuntime{})
+	if err != nil {
+		t.Fatalf("resolveLongCoTConditions(recursive) error = %v", err)
+	}
+	if len(conditions) != 1 {
+		t.Fatalf("len(conditions)=%d want 1", len(conditions))
+	}
+	got := conditions[0]
+	if got.ID != longcoteval.ConditionRLMReplRecursive {
+		t.Fatalf("condition id=%q want %q", got.ID, longcoteval.ConditionRLMReplRecursive)
+	}
+	if got.MaxDepth <= 0 || got.MaxSubcalls <= 0 {
+		t.Fatalf("recursive condition must have depth/subcalls > 0, got depth=%d subcalls=%d", got.MaxDepth, got.MaxSubcalls)
+	}
+	wantTools := []string{"python_repl", "rlm_query", "rlm_wait", "rlm_result"}
+	if !stringSlicesEqual(got.AllowedTools, wantTools) {
+		t.Fatalf("allowed tools=%v want %v", got.AllowedTools, wantTools)
+	}
+}
+
+func TestResolveLongCoTConditionsNoToolsMeansRecursiveRLMWithoutEphemeralTools(t *testing.T) {
+	t.Parallel()
+
+	conditions, err := resolveLongCoTConditions([]string{string(longcoteval.ConditionRLMNoToolsSingle)}, longCoTConditionRuntime{})
+	if err != nil {
+		t.Fatalf("resolveLongCoTConditions(no tools) error = %v", err)
+	}
+	got := conditions[0]
+	if got.MaxDepth != 1 || got.MaxSubcalls <= 0 {
+		t.Fatalf("no-tools condition must allow root-breadth RLM only, got depth=%d subcalls=%d", got.MaxDepth, got.MaxSubcalls)
+	}
+	wantTools := []string{rlmruntime.PythonREPLToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName}
+	if !stringSlicesEqual(got.AllowedTools, wantTools) {
+		t.Fatalf("allowed tools=%v want %v", got.AllowedTools, wantTools)
+	}
+}
+
+func TestResolveLongCoTConditionsBraidSingle(t *testing.T) {
+	t.Parallel()
+
+	conditions, err := resolveLongCoTConditions([]string{string(longcoteval.ConditionRLMBraidSingle)}, longCoTConditionRuntime{})
+	if err != nil {
+		t.Fatalf("resolveLongCoTConditions(braid) error = %v", err)
+	}
+	if len(conditions) != 1 {
+		t.Fatalf("len(conditions)=%d want 1", len(conditions))
+	}
+	got := conditions[0]
+	if got.ID != longcoteval.ConditionRLMBraidSingle {
+		t.Fatalf("condition id=%q want %q", got.ID, longcoteval.ConditionRLMBraidSingle)
+	}
+	if got.RLMRouteProfile != "longcot_repl_braid" {
+		t.Fatalf("route profile=%q want longcot_repl_braid", got.RLMRouteProfile)
+	}
+	if got.RLMPlanMode != "repl_braid" {
+		t.Fatalf("plan mode=%q want repl_braid", got.RLMPlanMode)
+	}
+	if got.RLMToolProfile != "longcot-repl-recursive" {
+		t.Fatalf("tool profile=%q want longcot-repl-recursive", got.RLMToolProfile)
+	}
+	if got.MaxDepth != 1 || got.MaxIterations != 32 || got.MaxSubcalls != 12 {
+		t.Fatalf("limits depth=%d iterations=%d subcalls=%d want 1/32/12", got.MaxDepth, got.MaxIterations, got.MaxSubcalls)
+	}
+	wantTools := []string{rlmruntime.PythonREPLToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName}
+	if !stringSlicesEqual(got.AllowedTools, wantTools) {
+		t.Fatalf("allowed tools=%v want %v", got.AllowedTools, wantTools)
+	}
+}
+
+func TestResolveLongCoTConditionsNoModelToolsMeansREPLOnly(t *testing.T) {
+	t.Parallel()
+
+	conditions, err := resolveLongCoTConditions([]string{string(longcoteval.ConditionRLMNoModelToolsSingle)}, longCoTConditionRuntime{
+		EphemeralSkills: true,
+		GeneralHelper:   true,
+	})
+	if err != nil {
+		t.Fatalf("resolveLongCoTConditions(no model tools) error = %v", err)
+	}
+	got := conditions[0]
+	if got.MaxSubcalls != 0 {
+		t.Fatalf("no-model-tools MaxSubcalls=%d want 0", got.MaxSubcalls)
+	}
+	wantTools := []string{rlmruntime.PythonREPLToolName}
+	if !stringSlicesEqual(got.AllowedTools, wantTools) {
+		t.Fatalf("allowed tools=%v want %v", got.AllowedTools, wantTools)
+	}
+}
+
+func TestResolveLongCoTConditionsREPLRecursiveUsesGoToolForYaegi(t *testing.T) {
+	t.Parallel()
+
+	conditions, err := resolveLongCoTConditions([]string{string(longcoteval.ConditionRLMReplRecursive)}, longCoTConditionRuntime{
+		SandboxKind: rlmruntime.SandboxKindYaegi,
+	})
+	if err != nil {
+		t.Fatalf("resolveLongCoTConditions(recursive) error = %v", err)
+	}
+	got := conditions[0]
+	wantTools := []string{"go_repl", "rlm_query", "rlm_wait", "rlm_result"}
+	if !stringSlicesEqual(got.AllowedTools, wantTools) {
+		t.Fatalf("allowed tools=%v want %v", got.AllowedTools, wantTools)
+	}
+}
+
+func TestResolveLongCoTConditionsGeneralHelperReportsHelperOnlyTool(t *testing.T) {
+	t.Parallel()
+
+	conditions, err := resolveLongCoTConditions([]string{string(longcoteval.ConditionRLMReplNoSubcalls)}, longCoTConditionRuntime{
+		EphemeralSkills: true,
+		GeneralHelper:   true,
+	})
+	if err != nil {
+		t.Fatalf("resolveLongCoTConditions(general helper) error = %v", err)
+	}
+	got := conditions[0]
+	wantTools := []string{rlmruntime.EphemeralHelperSolveToolName}
+	if !stringSlicesEqual(got.AllowedTools, wantTools) {
+		t.Fatalf("allowed tools=%v want %v", got.AllowedTools, wantTools)
+	}
+}
+
+func TestEvalLongCoTDryRunWithoutDatasetUsesPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	env, err := runEvalLongCoTForTest(t, "--dry-run")
+	if err != nil {
+		t.Fatalf("runEvalLongCoTForTest() error = %v", err)
+	}
+	if env.Status != envelope.StatusOK {
+		t.Fatalf("status=%q want ok", env.Status)
+	}
+	if env.Command != evalLongCoTCommand {
+		t.Fatalf("command=%q want %q", env.Command, evalLongCoTCommand)
+	}
+
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data=%T want map[string]any", env.Data)
+	}
+	result := decodeLongCoTRunResult(t, data["result"])
+	if len(result.Questions) != 1 || result.Questions[0].ID != "fixture_math_easy_1" {
+		t.Fatalf("questions=%+v", result.Questions)
+	}
+	if len(result.Attempts) != 2 {
+		t.Fatalf("attempts=%d want 2", len(result.Attempts))
+	}
+
+	var sawBaseline, sawRLM bool
+	for _, attempt := range result.Attempts {
+		if attempt.Status != longcoteval.AttemptStatusUnverified {
+			t.Fatalf("attempt status=%q want %q", attempt.Status, longcoteval.AttemptStatusUnverified)
+		}
+		if attempt.LeakageFlags.Leaked() {
+			t.Fatalf("attempt leaked unexpectedly: %+v", attempt.LeakageFlags)
+		}
+		switch attempt.ConditionID {
+		case longcoteval.ConditionBaselineNoToolsOfficial:
+			sawBaseline = true
+			if attempt.ConditionKind != longcoteval.ConditionKindBaseline {
+				t.Fatalf("baseline kind=%q", attempt.ConditionKind)
+			}
+			if attempt.RLM != nil {
+				t.Fatalf("baseline should not have rlm metadata: %+v", attempt.RLM)
+			}
+		case longcoteval.ConditionRLMNoToolsSingle:
+			sawRLM = true
+			if attempt.ConditionKind != longcoteval.ConditionKindRLM {
+				t.Fatalf("rlm kind=%q", attempt.ConditionKind)
+			}
+			if attempt.RLM == nil || attempt.RLM.ToolProfile == "" {
+				t.Fatalf("expected RLM metadata, got %+v", attempt.RLM)
+			}
+			if attempt.RLM.Metadata == nil || attempt.RLM.Metadata["effective_contract"] == nil {
+				t.Fatalf("missing effective_contract metadata: %+v", attempt.RLM)
+			}
+		}
+	}
+	if !sawBaseline || !sawRLM {
+		t.Fatalf("missing default attempts: baseline=%v rlm=%v", sawBaseline, sawRLM)
+	}
+
+	config := decodeStringAnyMap(t, data["config"])
+	if got := config["dataset"]; got != "official-fixture://longcot-mini-dry-run" {
+		t.Fatalf("config.dataset=%v want official fixture label", got)
+	}
+	if got := config["dataset_source"]; got != "offline_fixture" {
+		t.Fatalf("config.dataset_source=%v want offline_fixture", got)
+	}
+}
+
+func TestEvalLongCoTDryRunSaveWritesArtifacts(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	dataset := filepath.Join("..", "..", "..", "testdata", "evals", "longcot", "fixture.jsonl")
+	env, err := runEvalLongCoTForTest(t,
+		"--dry-run",
+		"--dataset", dataset,
+		"--condition", string(longcoteval.ConditionBaselineNoToolsOfficial),
+		"--condition", string(longcoteval.ConditionRLMNoModelToolsSingle),
+		"--output-dir", outputDir,
+		"--save",
+	)
+	if err != nil {
+		t.Fatalf("runEvalLongCoTForTest() error = %v", err)
+	}
+	if env.Status != envelope.StatusOK {
+		t.Fatalf("status=%q want ok", env.Status)
+	}
+
+	data := decodeStringAnyMap(t, env.Data)
+	result := decodeLongCoTRunResult(t, data["result"])
+	if len(result.Artifacts) != 3 {
+		t.Fatalf("artifacts=%+v", result.Artifacts)
+	}
+	for _, artifact := range result.Artifacts {
+		if _, err := os.Stat(artifact.Path); err != nil {
+			t.Fatalf("artifact %q missing: %v", artifact.Path, err)
+		}
+	}
+
+	var jsonPath, markdownPath, responsesPath string
+	for _, artifact := range result.Artifacts {
+		switch artifact.Kind {
+		case "result_json":
+			jsonPath = artifact.Path
+		case "report_markdown":
+			markdownPath = artifact.Path
+		case "responses_official_jsonl":
+			responsesPath = artifact.Path
+		}
+	}
+	if jsonPath == "" || markdownPath == "" || responsesPath == "" {
+		t.Fatalf("unexpected artifacts=%+v", result.Artifacts)
+	}
+
+	body, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", jsonPath, err)
+	}
+	var saved longcoteval.RunResult
+	if err := json.Unmarshal(body, &saved); err != nil {
+		t.Fatalf("Unmarshal(result_json) error = %v", err)
+	}
+	if saved.RunID != result.RunID {
+		t.Fatalf("saved run id=%q want %q", saved.RunID, result.RunID)
+	}
+	if len(saved.Artifacts) != 3 {
+		t.Fatalf("saved artifacts=%+v want persisted artifact metadata", saved.Artifacts)
+	}
+	for _, attempt := range saved.Attempts {
+		if attempt.Status != longcoteval.AttemptStatusUnverified {
+			t.Fatalf("saved attempt status=%q want %q", attempt.Status, longcoteval.AttemptStatusUnverified)
+		}
+	}
+
+	report, err := os.ReadFile(markdownPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", markdownPath, err)
+	}
+	if !strings.Contains(string(report), "# LongCoT × RLM Eval") {
+		t.Fatalf("report missing heading: %s", string(report))
+	}
+
+	responses, err := os.ReadFile(responsesPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", responsesPath, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(responses)), "\n")
+	if len(lines) != len(result.Attempts) {
+		t.Fatalf("official responses lines=%d want attempts=%d", len(lines), len(result.Attempts))
+	}
+	var official longcoteval.OfficialResponse
+	if err := json.Unmarshal([]byte(lines[0]), &official); err != nil {
+		t.Fatalf("Unmarshal(official response) error = %v", err)
+	}
+	if official.QuestionID == "" || official.ResponseText != "" || official.Successful {
+		t.Fatalf("unexpected official response record: %+v", official)
+	}
+}
+
+func TestEvalLongCoTLiveRequiresDataset(t *testing.T) {
+	t.Parallel()
+
+	env, err := runEvalLongCoTForTest(t)
+	if err == nil {
+		t.Fatal("expected command error when live mode has no dataset")
+	}
+	if env.Status != envelope.StatusError {
+		t.Fatalf("status=%q want error", env.Status)
+	}
+	if !strings.Contains(err.Error(), "--dataset/--longcot-dataset or --longcot-repo is required when --dry-run=false") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestEvalLongCoTVerifyRequiresOfficialVerifier(t *testing.T) {
+	t.Setenv("FOXCTL_LONGCOT_REPO", "")
+	t.Setenv("LONGCOT_REPO", "")
+
+	dataset := filepath.Join("..", "..", "..", "testdata", "evals", "longcot", "fixture.jsonl")
+	env, err := runEvalLongCoTForTest(t, "--dry-run", "--dataset", dataset, "--verify")
+	if err == nil {
+		t.Fatal("expected verifier availability error")
+	}
+	if env.Status != envelope.StatusError {
+		t.Fatalf("status=%q want error", env.Status)
+	}
+	if !strings.Contains(err.Error(), "official LongCoT verification failed") ||
+		!strings.Contains(err.Error(), "LongCoT verifier unavailable") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestLongCoTRunnerSelection(t *testing.T) {
+	t.Parallel()
+
+	baseline := longCoTRunnerForCondition(longcoteval.Condition{
+		ID:   longcoteval.ConditionBaselineNoToolsOfficial,
+		Kind: longcoteval.ConditionKindBaseline,
+	})
+	if baseline != longCoTLiveRunnerAgent {
+		t.Fatalf("baseline runner=%q want %q", baseline, longCoTLiveRunnerAgent)
+	}
+
+	rlmRunner := longCoTRunnerForCondition(longcoteval.Condition{
+		ID:   longcoteval.ConditionRLMNoToolsSingle,
+		Kind: longcoteval.ConditionKindRLM,
+	})
+	if rlmRunner != longCoTLiveRunnerREPL {
+		t.Fatalf("rlm runner=%q want %q", rlmRunner, longCoTLiveRunnerREPL)
+	}
+
+	noModelToolsRunner := longCoTRunnerForCondition(longcoteval.Condition{
+		ID:   longcoteval.ConditionRLMNoModelToolsSingle,
+		Kind: longcoteval.ConditionKindRLM,
+	})
+	if noModelToolsRunner != longCoTLiveRunnerREPL {
+		t.Fatalf("no-model-tools runner=%q want %q", noModelToolsRunner, longCoTLiveRunnerREPL)
+	}
+
+	replRunner := longCoTRunnerForCondition(longcoteval.Condition{
+		ID:   longcoteval.ConditionRLMReplNoSubcalls,
+		Kind: longcoteval.ConditionKindRLM,
+	})
+	if replRunner != longCoTLiveRunnerREPL {
+		t.Fatalf("repl runner=%q want %q", replRunner, longCoTLiveRunnerREPL)
+	}
+
+	replRecursiveRunner := longCoTRunnerForCondition(longcoteval.Condition{
+		ID:   longcoteval.ConditionRLMReplRecursive,
+		Kind: longcoteval.ConditionKindRLM,
+	})
+	if replRecursiveRunner != longCoTLiveRunnerREPL {
+		t.Fatalf("recursive repl runner=%q want %q", replRecursiveRunner, longCoTLiveRunnerREPL)
+	}
+}
+
+func TestLongCoTEffectiveConditionDisablesOptionalSubcallsByDefault(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:            longcoteval.ConditionRLMReplRecursive,
+		Kind:          longcoteval.ConditionKindRLM,
+		MaxDepth:      2,
+		MaxIterations: 8,
+		MaxSubcalls:   2,
+		AllowedTools:  []string{rlmruntime.PythonREPLToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName},
+	}
+	effective := longCoTEffectiveConditionForQuestion(longcoteval.Question{}, condition)
+	if effective.MaxSubcalls != 0 {
+		t.Fatalf("effective MaxSubcalls=%d want 0", effective.MaxSubcalls)
+	}
+	if effective.MaxDepth != 1 {
+		t.Fatalf("effective MaxDepth=%d want 1", effective.MaxDepth)
+	}
+	if len(effective.AllowedTools) != 1 || effective.AllowedTools[0] != rlmruntime.PythonREPLToolName {
+		t.Fatalf("effective allowed tools=%v", effective.AllowedTools)
+	}
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{PromptText: "Move A onto B."},
+		effective,
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		false,
+		false,
+		false,
+		true,
+	)
+	if cfg.AsyncRecursion {
+		t.Fatal("expected no required/optional subcalls to disable async recursion")
+	}
+	if cfg.InitialState["official_prompt"] != "Move A onto B." {
+		t.Fatalf("official_prompt initial state = %#v", cfg.InitialState["official_prompt"])
+	}
+}
+
+func TestLongCoTREPLRunnerConfigRecursiveEnablesAsyncRecursionWhenQuestionAllowsSubcalls(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:            longcoteval.ConditionRLMReplRecursive,
+		Kind:          longcoteval.ConditionKindRLM,
+		MaxDepth:      2,
+		MaxIterations: 8,
+		MaxSubcalls:   2,
+	}
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{AllowOptionalSubcalls: true},
+		longCoTEffectiveConditionForQuestion(longcoteval.Question{AllowOptionalSubcalls: true}, condition),
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		false,
+		false,
+		false,
+		true,
+	)
+	if !cfg.AsyncRecursion {
+		t.Fatal("expected recursive condition to enable async recursion")
+	}
+	if cfg.RLMQueryFactory == nil {
+		t.Fatal("expected recursive query factory for async child backend")
+	}
+	if cfg.AsyncScheduler.MaxWorkers != 2 {
+		t.Fatalf("max workers=%d want 2", cfg.AsyncScheduler.MaxWorkers)
+	}
+	if cfg.RecursionPolicy != rlmruntime.RecursionPolicyRequired {
+		t.Fatalf("recursion policy=%q want required", cfg.RecursionPolicy)
+	}
+	if cfg.ChildSummaryMaxChars != 700 {
+		t.Fatalf("child summary max chars=%d want 700", cfg.ChildSummaryMaxChars)
+	}
+	if cfg.REPLToolResultMaxChars != 1600 {
+		t.Fatalf("repl tool result max chars=%d want 1600", cfg.REPLToolResultMaxChars)
+	}
+	if !cfg.ChildSummaryNormalizeBeforeSubmit {
+		t.Fatal("expected child summary pre-submit normalization")
+	}
+	if !cfg.ChildSummaryRewriteOverLimit {
+		t.Fatal("expected child summary rewrite over limit")
+	}
+	if cfg.ChildSummaryRewriteMaxIterations != 1 {
+		t.Fatalf("child summary rewrite iterations=%d want 1", cfg.ChildSummaryRewriteMaxIterations)
+	}
+	if got := phaseNames(cfg.Phases); fmt.Sprint(got) != "[context fanout-1 wait-1 integrate fanout-2 wait-2 final]" {
+		t.Fatalf("phases=%v", got)
+	}
+	for _, idx := range []int{0, 1, 2, 3, 4, 5} {
+		if !cfg.Phases[idx].AutoExecuteRequiredTool {
+			t.Fatalf("phase %q should auto-execute its required tool", cfg.Phases[idx].Name)
+		}
+	}
+	if len(cfg.Phases[1].AutoExecuteToolCalls) != 3 {
+		t.Fatalf("fanout-1 calls=%d want 3", len(cfg.Phases[1].AutoExecuteToolCalls))
+	}
+	if len(cfg.Phases[4].AutoExecuteToolCalls) != 1 {
+		t.Fatalf("fanout-2 calls=%d want 1", len(cfg.Phases[4].AutoExecuteToolCalls))
+	}
+	if cfg.DefaultREPLCode == "" {
+		t.Fatal("expected default context REPL code")
+	}
+	if !strings.Contains(cfg.DefaultRLMQueryPrompt, "bounded branch") {
+		t.Fatalf("default query prompt=%q", cfg.DefaultRLMQueryPrompt)
+	}
+}
+
+func TestLongCoTREPLRunnerConfigUsesQuestionRequiredSubcallRules(t *testing.T) {
+	t.Parallel()
+
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{
+			RequiredSubcallRules: []longcoteval.RequiredSubcallRule{
+				{Child: 1, RequiredSubcalls: 1},
+			},
+		},
+		longcoteval.Condition{
+			ID:            longcoteval.ConditionRLMReplRecursive,
+			Kind:          longcoteval.ConditionKindRLM,
+			MaxDepth:      2,
+			MaxIterations: 8,
+			MaxSubcalls:   2,
+		},
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		false,
+		false,
+		false,
+		true,
+	)
+	if len(cfg.RequiredSubcallRules) != 1 {
+		t.Fatalf("required rules = %+v, want one rule", cfg.RequiredSubcallRules)
+	}
+	if cfg.RequiredSubcallRules[0].Child != 1 || cfg.RequiredSubcallRules[0].RequiredSubcalls != 1 {
+		t.Fatalf("required rule = %+v", cfg.RequiredSubcallRules[0])
+	}
+}
+
+func TestLongCoTBraidSolvePhases(t *testing.T) {
+	t.Parallel()
+
+	phases := longCoTBraidSolvePhases(rlmruntime.SandboxKindPython)
+	if got := fmt.Sprint(phaseNames(phases)); got != "[context graph_plan graph_fanout final]" {
+		t.Fatalf("phases=%s", got)
+	}
+	planIdx := -1
+	fanoutIdx := -1
+	for i, phase := range phases {
+		switch phase.Name {
+		case "graph_plan":
+			planIdx = i
+		case "graph_fanout":
+			fanoutIdx = i
+		}
+	}
+	if planIdx < 0 || fanoutIdx < 0 {
+		t.Fatalf("missing graph phases in %v", phaseNames(phases))
+	}
+	if got := phases[planIdx].OutputKind; got != rlmruntime.REPLPhaseOutputKindBraidGraph {
+		t.Fatalf("graph_plan OutputKind=%q want %q", got, rlmruntime.REPLPhaseOutputKindBraidGraph)
+	}
+	if got := phases[planIdx].MaxGraphNodes; got != 7 {
+		t.Fatalf("graph_plan MaxGraphNodes=%d want 7", got)
+	}
+	if got := phases[planIdx].BraidGraphPolicy; got != rlmruntime.BraidGraphPolicyLongCoTController {
+		t.Fatalf("graph_plan BraidGraphPolicy=%q want %q", got, rlmruntime.BraidGraphPolicyLongCoTController)
+	}
+	for _, want := range []string{"one or more solve waves", "any earlier solve nodes whose values it needs", "Only put solve nodes in the same wave when they are mathematically independent"} {
+		if !strings.Contains(phases[planIdx].Prompt, want) {
+			t.Fatalf("graph_plan prompt missing %q:\n%s", want, phases[planIdx].Prompt)
+		}
+	}
+	if !phases[fanoutIdx].AutoExecuteGraphNodes {
+		t.Fatal("graph_fanout AutoExecuteGraphNodes=false want true")
+	}
+	if !stringSlicesEqual(phases[fanoutIdx].Tools, []string{rlmruntime.RLMQueryToolName}) {
+		t.Fatalf("graph_fanout tools=%v want [%s]", phases[fanoutIdx].Tools, rlmruntime.RLMQueryToolName)
+	}
+	if phases[fanoutIdx].BraidRepairAttempts != 1 {
+		t.Fatalf("graph_fanout BraidRepairAttempts=%d want 1", phases[fanoutIdx].BraidRepairAttempts)
+	}
+}
+
+func TestLongCoTBraidGeneralHelperDoesNotReplaceBraidPhases(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:             longcoteval.ConditionRLMBraidSingle,
+		Kind:           longcoteval.ConditionKindRLM,
+		RLMPlanMode:    "repl_braid",
+		RLMToolProfile: "longcot-repl-recursive",
+		MaxDepth:       1,
+		MaxIterations:  8,
+		MaxSubcalls:    4,
+	}
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{PromptText: "Solve a generic task."},
+		condition,
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}, Attempts: 2},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		false,
+		true,
+		false,
+		false,
+	)
+	if got := fmt.Sprint(phaseNames(cfg.Phases)); got != "[context graph_plan graph_fanout final]" {
+		t.Fatalf("phases=%s, want braid phases", got)
+	}
+	if cfg.HelperFactory == nil {
+		t.Fatal("HelperFactory nil with general helper enabled")
+	}
+}
+
+func TestLongCoTChildSolvePhasesAutoInspectContext(t *testing.T) {
+	t.Parallel()
+
+	phases := longCoTChildSolvePhases(rlmruntime.SandboxKindPython, false)
+	if got := fmt.Sprint(phaseNames(phases)); got != "[child_context child_scratch child_final]" {
+		t.Fatalf("phases=%s", got)
+	}
+	if !phases[0].AutoExecuteRequiredTool {
+		t.Fatal("child context phase should auto-execute required REPL tool")
+	}
+	if !stringSlicesEqual(phases[0].RequiredTools, []string{rlmruntime.PythonREPLToolName}) {
+		t.Fatalf("required tools=%v want [%s]", phases[0].RequiredTools, rlmruntime.PythonREPLToolName)
+	}
+	if !stringSlicesEqual(phases[1].Tools, []string{rlmruntime.PythonREPLToolName}) {
+		t.Fatalf("scratch tools=%v want [%s]", phases[1].Tools, rlmruntime.PythonREPLToolName)
+	}
+	if phases[1].OutputKind != rlmruntime.REPLPhaseOutputKindREPLCode {
+		t.Fatalf("scratch output kind=%q want repl_code", phases[1].OutputKind)
+	}
+	if phases[1].MaxTokens != 768 {
+		t.Fatalf("scratch max tokens=%d want 768", phases[1].MaxTokens)
+	}
+	if phases[1].MaxIterations != 1 {
+		t.Fatalf("scratch max iterations=%d want 1", phases[1].MaxIterations)
+	}
+	if !phases[1].RequireToolOutput || !phases[1].RequireToolResultOK {
+		t.Fatalf("scratch should require output and successful execution: output=%v ok=%v", phases[1].RequireToolOutput, phases[1].RequireToolResultOK)
+	}
+	if !phases[1].ContinueOnREPLCodeError {
+		t.Fatalf("scratch should continue to final summary after repl_code failure")
+	}
+	if !strings.Contains(phases[1].Prompt, "standard library") {
+		t.Fatalf("scratch prompt missing standard library constraint:\n%s", phases[1].Prompt)
+	}
+	if !phases[2].Final {
+		t.Fatal("child final phase should be final")
+	}
+	if phases[2].FinalOutputKind != "child_summary" {
+		t.Fatalf("child final output kind=%q want child_summary", phases[2].FinalOutputKind)
+	}
+}
+
+func TestLongCoTChildPhasesForReduceSkipsScratch(t *testing.T) {
+	t.Parallel()
+
+	phases := longCoTChildPhasesForTask(rlm.Task{
+		Prompt: "BRAID node n_reduce (reduce)\nDependency summaries:\n- n_verify: status: solved",
+	}, rlmruntime.SandboxKindPython, false)
+	if got := fmt.Sprint(phaseNames(phases)); got != "[child_reduce_final]" {
+		t.Fatalf("phases=%s", got)
+	}
+	if !phases[0].Final {
+		t.Fatal("reduce phase should be final")
+	}
+	if phases[0].FinalOutputKind != "child_summary" {
+		t.Fatalf("reduce final output kind=%q want child_summary", phases[0].FinalOutputKind)
+	}
+	if len(phases[0].Tools) != 0 || len(phases[0].RequiredTools) != 0 {
+		t.Fatalf("reduce phase should not expose scratch tools: tools=%v required=%v", phases[0].Tools, phases[0].RequiredTools)
+	}
+}
+
+func TestLongCoTChildPhasesForExtractSkipsScratch(t *testing.T) {
+	t.Parallel()
+
+	phases := longCoTChildPhasesForTask(rlm.Task{
+		Prompt: "BRAID node n_extract (extract)\nOfficial root task:\nProblem...",
+	}, rlmruntime.SandboxKindPython, false)
+	if got := fmt.Sprint(phaseNames(phases)); got != "[child_extract_final]" {
+		t.Fatalf("phases=%s", got)
+	}
+	if !phases[0].Final {
+		t.Fatal("extract phase should be final")
+	}
+	if phases[0].FinalOutputKind != "child_summary" {
+		t.Fatalf("extract final output kind=%q want child_summary", phases[0].FinalOutputKind)
+	}
+	if len(phases[0].Tools) != 0 || len(phases[0].RequiredTools) != 0 {
+		t.Fatalf("extract phase should not expose scratch tools: tools=%v required=%v", phases[0].Tools, phases[0].RequiredTools)
+	}
+	for _, want := range []string{"Facts-only extraction", "Do not solve or verify", "status: solved"} {
+		if !strings.Contains(phases[0].Prompt, want) {
+			t.Fatalf("extract prompt missing %q:\n%s", want, phases[0].Prompt)
+		}
+	}
+}
+
+func TestLongCoTChildPhasesForVerifyUsesComputationalScratch(t *testing.T) {
+	t.Parallel()
+
+	phases := longCoTChildPhasesForTask(rlm.Task{
+		Prompt: "BRAID node n_verify (verify)\nDependency summaries:\n- n_solve: status: solved",
+	}, rlmruntime.SandboxKindPython, false)
+	if got := fmt.Sprint(phaseNames(phases)); got != "[child_verify_scratch child_verify_final]" {
+		t.Fatalf("phases=%s", got)
+	}
+	if phases[0].OutputKind != rlmruntime.REPLPhaseOutputKindREPLCode {
+		t.Fatalf("verify scratch output kind=%q want repl_code", phases[0].OutputKind)
+	}
+	if phases[0].MaxTokens != 512 {
+		t.Fatalf("verify scratch max tokens=%d want 512", phases[0].MaxTokens)
+	}
+	if !phases[0].RequireToolOutput || !phases[0].RequireToolResultOK {
+		t.Fatalf("verify scratch should require output and successful execution: output=%v ok=%v", phases[0].RequireToolOutput, phases[0].RequireToolResultOK)
+	}
+	if !phases[0].ContinueOnREPLCodeError {
+		t.Fatalf("verify scratch should continue to final summary after repl_code failure")
+	}
+	if !stringSlicesEqual(phases[0].Tools, []string{rlmruntime.PythonREPLToolName}) {
+		t.Fatalf("verify scratch tools=%v want [%s]", phases[0].Tools, rlmruntime.PythonREPLToolName)
+	}
+	if !strings.Contains(phases[0].Prompt, "pass=false") {
+		t.Fatalf("verify scratch prompt missing pass=false contract:\n%s", phases[0].Prompt)
+	}
+	if !strings.Contains(phases[0].Prompt, "Do not import sympy") {
+		t.Fatalf("verify scratch prompt missing third-party import ban:\n%s", phases[0].Prompt)
+	}
+	if !phases[1].Final {
+		t.Fatal("verify phase should be final")
+	}
+	if phases[1].FinalOutputKind != "child_summary" {
+		t.Fatalf("verify final output kind=%q want child_summary", phases[1].FinalOutputKind)
+	}
+	if len(phases[1].Tools) != 0 || len(phases[1].RequiredTools) != 0 {
+		t.Fatalf("verify final phase should not expose scratch tools: tools=%v required=%v", phases[1].Tools, phases[1].RequiredTools)
+	}
+}
+
+func TestLongCoTChildSolvePhasesUseGeneralHelperWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	phases := longCoTChildSolvePhases(rlmruntime.SandboxKindPython, true)
+	if got := fmt.Sprint(phaseNames(phases)); got != "[child_context child_helper child_scratch child_final]" {
+		t.Fatalf("phases=%s", got)
+	}
+	helper := phases[1]
+	if !helper.AutoExecuteRequiredTool || helper.RequireToolResultOK || !helper.RequireToolOutput {
+		t.Fatalf("helper enforcement auto=%v ok=%v output=%v", helper.AutoExecuteRequiredTool, helper.RequireToolResultOK, helper.RequireToolOutput)
+	}
+	if !stringSlicesEqual(helper.RequiredTools, []string{rlmruntime.EphemeralHelperSolveToolName}) {
+		t.Fatalf("helper required tools=%v want [%s]", helper.RequiredTools, rlmruntime.EphemeralHelperSolveToolName)
+	}
+	if len(helper.AutoExecuteToolCalls) != 1 || helper.AutoExecuteToolCalls[0].Tool != rlmruntime.EphemeralHelperSolveToolName {
+		t.Fatalf("helper auto calls=%+v", helper.AutoExecuteToolCalls)
+	}
+	if !strings.Contains(string(helper.AutoExecuteToolCalls[0].Args), "fixed-point") {
+		t.Fatalf("helper args missing generic fixed-point guidance: %s", helper.AutoExecuteToolCalls[0].Args)
+	}
+	if !strings.Contains(string(helper.AutoExecuteToolCalls[0].Args), `"max_attempts":1`) {
+		t.Fatalf("helper args missing advisory attempt cap: %s", helper.AutoExecuteToolCalls[0].Args)
+	}
+}
+
+func TestLongCoTChildVerifyPhasesUseGeneralHelperWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	phases := longCoTChildPhasesForTask(rlm.Task{
+		Prompt: "BRAID node n_verify (verify)\nDependency summaries:\n- n_solve: status: solved",
+	}, rlmruntime.SandboxKindPython, true)
+	if got := fmt.Sprint(phaseNames(phases)); got != "[child_verify_helper child_verify_scratch child_verify_final]" {
+		t.Fatalf("phases=%s", got)
+	}
+	helper := phases[0]
+	if !helper.AutoExecuteRequiredTool || helper.RequireToolResultOK || !helper.RequireToolOutput {
+		t.Fatalf("verify helper enforcement auto=%v ok=%v output=%v", helper.AutoExecuteRequiredTool, helper.RequireToolResultOK, helper.RequireToolOutput)
+	}
+	if !strings.Contains(string(helper.AutoExecuteToolCalls[0].Args), "bounded searches") {
+		t.Fatalf("verify helper args missing generic verifier guidance: %s", helper.AutoExecuteToolCalls[0].Args)
+	}
+	if !strings.Contains(string(helper.AutoExecuteToolCalls[0].Args), `"max_attempts":1`) {
+		t.Fatalf("verify helper args missing advisory attempt cap: %s", helper.AutoExecuteToolCalls[0].Args)
+	}
+}
+
+func TestLongCoTREPLRunnerConfigNoSubcallsDisablesAsyncRecursion(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:            longcoteval.ConditionRLMReplNoSubcalls,
+		Kind:          longcoteval.ConditionKindRLM,
+		MaxIterations: 8,
+	}
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{},
+		condition,
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		false,
+		false,
+		false,
+		true,
+	)
+	if cfg.AsyncRecursion {
+		t.Fatal("expected no-subcalls condition to disable async recursion")
+	}
+}
+
+func TestLongCoTREPLRunnerConfigGeneralHelperUsesSingleHelperPhase(t *testing.T) {
+	t.Parallel()
+
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{PromptText: "Return solution = helper."},
+		longcoteval.Condition{
+			ID:            longcoteval.ConditionRLMReplNoSubcalls,
+			Kind:          longcoteval.ConditionKindRLM,
+			MaxIterations: 8,
+		},
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5-helper"}, Attempts: 2, Timeout: 5 * time.Second, MaxTokens: 777},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		true,
+		true,
+		true,
+		false,
+	)
+	if cfg.HelperFactory == nil {
+		t.Fatal("expected helper factory config")
+	}
+	if cfg.HelperFactory.LLM.Model != "gpt-5-helper" {
+		t.Fatalf("helper model=%q", cfg.HelperFactory.LLM.Model)
+	}
+	if cfg.HelperFactory.Attempts != 2 {
+		t.Fatalf("helper attempts=%d", cfg.HelperFactory.Attempts)
+	}
+	if cfg.HelperFactory.LLM.Timeout != 5*time.Second {
+		t.Fatalf("helper timeout=%s", cfg.HelperFactory.LLM.Timeout)
+	}
+	if cfg.HelperFactory.LLM.MaxTokens != 777 {
+		t.Fatalf("helper max tokens=%d", cfg.HelperFactory.LLM.MaxTokens)
+	}
+	if cfg.HelperFactory.PresetName != "" {
+		t.Fatalf("unexpected helper preset=%q", cfg.HelperFactory.PresetName)
+	}
+	if len(cfg.Phases) != 1 {
+		t.Fatalf("phases=%d want 1", len(cfg.Phases))
+	}
+	if cfg.Phases[0].Name != "helper-solve" {
+		t.Fatalf("phase0=%q", cfg.Phases[0].Name)
+	}
+	if got := cfg.Phases[0].RequiredTools; len(got) != 1 || got[0] != rlmruntime.EphemeralHelperSolveToolName {
+		t.Fatalf("required tools=%v", got)
+	}
+	if !cfg.Phases[0].AutoExecuteRequiredTool || !cfg.Phases[0].RequireToolResultOK {
+		t.Fatalf("helper phase enforcement = auto:%v ok:%v", cfg.Phases[0].AutoExecuteRequiredTool, cfg.Phases[0].RequireToolResultOK)
+	}
+}
+
+func TestLongCoTREPLRunnerConfigGeneralHelperDoesNotUseBlocksWorldPreset(t *testing.T) {
+	t.Parallel()
+
+	question := longcoteval.Question{
+		Template:   "BlocksWorld",
+		PromptText: "Initial state: [[1],[2],[]]\nGoal state: [[1,2],[],[]]",
+	}
+	cfg := longCoTREPLRunnerConfig(
+		question,
+		longcoteval.Condition{
+			ID:            longcoteval.ConditionRLMReplNoSubcalls,
+			Kind:          longcoteval.ConditionKindRLM,
+			MaxIterations: 8,
+		},
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5-helper"}, Attempts: 1},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		true,
+		true,
+		true,
+		false,
+	)
+	if cfg.HelperFactory == nil {
+		t.Fatal("expected helper factory config")
+	}
+	if cfg.HelperFactory.PresetName != "" || strings.TrimSpace(cfg.HelperFactory.PresetSource) != "" || len(cfg.HelperFactory.PresetInput) != 0 {
+		t.Fatalf("unexpected preset name=%q source=%q input=%#v", cfg.HelperFactory.PresetName, cfg.HelperFactory.PresetSource, cfg.HelperFactory.PresetInput)
+	}
+}
+
+func TestLongCoTREPLRunnerConfigGeneralHelperDoesNotUseDungeonPreset(t *testing.T) {
+	t.Parallel()
+
+	const prompt = `You are given a dungeon.
+Grid layout: [[-2,-3,3],[-5,-10,1],[10,30,-5]]
+Return solution = <integer> for the minimum initial health needed to move only right or down while health stays > 0.`
+
+	question := longcoteval.Question{
+		ID:         "logic_medium_1",
+		Template:   "Dungeon",
+		PromptText: prompt,
+	}
+	cfg := longCoTREPLRunnerConfig(
+		question,
+		longcoteval.Condition{
+			ID:            longcoteval.ConditionRLMReplNoSubcalls,
+			Kind:          longcoteval.ConditionKindRLM,
+			MaxIterations: 8,
+		},
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5-helper"}, Attempts: 1},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		true,
+		true,
+		true,
+		false,
+	)
+	if cfg.HelperFactory == nil {
+		t.Fatal("expected helper factory config")
+	}
+	if cfg.HelperFactory.PresetName != "" || strings.TrimSpace(cfg.HelperFactory.PresetSource) != "" || len(cfg.HelperFactory.PresetInput) != 0 {
+		t.Fatalf("unexpected preset name=%q source=%q input=%#v", cfg.HelperFactory.PresetName, cfg.HelperFactory.PresetSource, cfg.HelperFactory.PresetInput)
+	}
+}
+
+func TestLongCoTIsSummaryRewriteTask(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		task rlm.Task
+		want bool
+	}{
+		{name: "run id suffix", task: rlm.Task{RunID: "attempt-1-summary"}, want: true},
+		{name: "agent suffix", task: rlm.Task{AgentID: "eval/root-1/summary"}, want: true},
+		{name: "normal child", task: rlm.Task{RunID: "attempt-1", AgentID: "eval/root-1"}, want: false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := longCoTIsSummaryRewriteTask(tt.task); got != tt.want {
+				t.Fatalf("longCoTIsSummaryRewriteTask()=%v want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLongCoTQwenNoThinkConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := longCoTLLMConfigFromTarget(
+		longCoTLiveTarget{Provider: "openrouter", Model: "qwen/qwen3.6-plus"},
+		longcoteval.Condition{MaxTokens: 123, Temperature: 0.2},
+		10*time.Second,
+		3,
+	)
+	if !cfg.QwenNoThink {
+		t.Fatal("expected qwen no-think profile")
+	}
+	reasoning, ok := cfg.ExtraBody["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("reasoning missing/wrong type: %#v", cfg.ExtraBody["reasoning"])
+	}
+	if reasoning["effort"] != "none" || reasoning["exclude"] != true {
+		t.Fatalf("reasoning=%#v", reasoning)
+	}
+	if cfg.ExtraBody["parallel_tool_calls"] != false {
+		t.Fatalf("parallel_tool_calls=%#v want false", cfg.ExtraBody["parallel_tool_calls"])
+	}
+
+	local := longCoTLLMConfigFromTarget(
+		longCoTLiveTarget{Provider: "lmstudio", Model: "qwen3.6-27b"},
+		longcoteval.Condition{},
+		10*time.Second,
+		3,
+	)
+	if local.ExtraBody["enable_thinking"] != false {
+		t.Fatalf("enable_thinking=%#v want false", local.ExtraBody["enable_thinking"])
+	}
+	kwargs, ok := local.ExtraBody["chat_template_kwargs"].(map[string]any)
+	if !ok {
+		t.Fatalf("chat_template_kwargs missing/wrong type: %#v", local.ExtraBody["chat_template_kwargs"])
+	}
+	if kwargs["enable_thinking"] != false {
+		t.Fatalf("chat_template_kwargs.enable_thinking=%#v want false", kwargs["enable_thinking"])
+	}
+}
+
+func TestLongCoTChildMaxTokensCapsQwen(t *testing.T) {
+	t.Parallel()
+
+	if got := longCoTChildMaxTokens(rlm.LLMConfig{Model: "qwen/qwen3.6-plus", MaxTokens: 4096}); got != 1024 {
+		t.Fatalf("qwen child max tokens=%d want 1024", got)
+	}
+	if got := longCoTChildMaxTokens(rlm.LLMConfig{Model: "qwen/qwen3.6-plus", MaxTokens: 512}); got != 512 {
+		t.Fatalf("qwen child max tokens=%d want 512", got)
+	}
+	if got := longCoTChildMaxTokens(rlm.LLMConfig{Model: "anthropic/claude", MaxTokens: 4096}); got != 4096 {
+		t.Fatalf("non-qwen child max tokens=%d want 4096", got)
+	}
+}
+
+func TestBuildLongCoTOfficialBaselinePrompt(t *testing.T) {
+	t.Parallel()
+
+	official := "  You are being tested. Return the answer as solution = <value>.  "
+	prompt := buildLongCoTOfficialBaselinePrompt(official)
+	if prompt != strings.TrimSpace(official) {
+		t.Fatalf("baseline prompt=%q want official prompt preserved", prompt)
+	}
+}
+
+func TestShouldReviewLongCoTAttempt(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{Kind: longcoteval.ConditionKindRLM}
+	if !shouldReviewLongCoTAttempt(longcoteval.Question{Difficulty: "hard"}, condition, longcoteval.AttemptStatusOK, "auto") {
+		t.Fatal("expected auto review for hard RLM question")
+	}
+	if !shouldReviewLongCoTAttempt(longcoteval.Question{RLMReview: true}, condition, longcoteval.AttemptStatusOK, "auto") {
+		t.Fatal("expected auto review for marked RLM question")
+	}
+	if !shouldReviewLongCoTAttempt(longcoteval.Question{RLMReviewRecursive: true}, condition, longcoteval.AttemptStatusOK, "auto") {
+		t.Fatal("expected auto review for recursive-review question")
+	}
+	if shouldReviewLongCoTAttempt(longcoteval.Question{Difficulty: "easy"}, condition, longcoteval.AttemptStatusOK, "auto") {
+		t.Fatal("did not expect auto review for unmarked easy question")
+	}
+	if shouldReviewLongCoTAttempt(longcoteval.Question{Difficulty: "hard"}, condition, longcoteval.AttemptStatusError, "always") {
+		t.Fatal("did not expect review for failed attempt")
+	}
+	if shouldReviewLongCoTAttempt(longcoteval.Question{Difficulty: "hard"}, longcoteval.Condition{Kind: longcoteval.ConditionKindBaseline}, longcoteval.AttemptStatusOK, "always") {
+		t.Fatal("did not expect review for baseline attempt")
+	}
+}
+
+func phaseNames(phases []rlmruntime.REPLRunnerPhase) []string {
+	out := make([]string, 0, len(phases))
+	for _, phase := range phases {
+		out = append(out, phase.Name)
+	}
+	return out
+}
+
+func TestNormalizeLongCoTReviewMode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "default", raw: "", want: "off"},
+		{name: "off", raw: "never", want: "off"},
+		{name: "auto", raw: " AUTO ", want: "auto"},
+		{name: "always", raw: "on", want: "always"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := normalizeLongCoTReviewMode(tt.raw)
+			if err != nil {
+				t.Fatalf("normalize returned error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("mode=%q want %q", got, tt.want)
+			}
+		})
+	}
+
+	if _, err := normalizeLongCoTReviewMode("sometimes"); err == nil {
+		t.Fatal("expected invalid mode to fail")
+	}
+}
+
+func TestLongCoTReviewConfigForQuestion(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := newLongCoTReviewConfig("auto", 3, false, 2, 2, 2000, 900, true, 2)
+	if err != nil {
+		t.Fatalf("new review config: %v", err)
+	}
+	if cfg.Recursive {
+		t.Fatal("expected base config to be non-recursive")
+	}
+	got := longCoTReviewConfigForQuestion(longcoteval.Question{RLMReviewRecursive: true}, cfg)
+	if !got.Recursive || got.MaxDepth != 2 || got.MaxSubcalls != 2 {
+		t.Fatalf("question recursive config = %+v", got)
+	}
+	if _, err := newLongCoTReviewConfig("auto", 3, true, 1, 2, 2000, 900, true, 2); err == nil {
+		t.Fatal("expected recursive config with depth < 2 to fail")
+	}
+	if _, err := newLongCoTReviewConfig("auto", 3, true, 2, 0, 2000, 900, true, 2); err == nil {
+		t.Fatal("expected recursive config with subcalls < 1 to fail")
+	}
+	if _, err := newLongCoTReviewConfig("auto", 3, false, 2, 2, -1, 900, true, 2); err == nil {
+		t.Fatal("expected negative candidate cap to fail")
+	}
+	if _, err := newLongCoTReviewConfig("auto", 3, false, 2, 2, 2000, -1, true, 2); err == nil {
+		t.Fatal("expected negative child summary cap to fail")
+	}
+	if _, err := newLongCoTReviewConfig("auto", 3, false, 2, 2, 2000, 900, true, 0); err == nil {
+		t.Fatal("expected rewrite iterations < 1 to fail")
+	}
+}
+
+func TestBuildLongCoTReviewPrompt(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildLongCoTReviewPrompt("Return solution = 4.", "solution = <value>", rlmruntime.SandboxKindPython, longCoTReviewConfig{})
+	for _, want := range []string{
+		"LongCoT RLM review pass",
+		"official_prompt",
+		"candidate_answer",
+		"Do not use answer keys",
+		"output only a corrected final answer",
+		"Return solution = 4.",
+		"solution = <value>",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildLongCoTReviewPromptRecursive(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildLongCoTReviewPrompt(
+		"Return solution = 4.",
+		"solution = <value>",
+		rlmruntime.SandboxKindPython,
+		longCoTReviewConfig{Recursive: true, MaxDepth: 2, MaxSubcalls: 2},
+	)
+	for _, want := range []string{
+		"Recursive review contract",
+		"rlm_query",
+		"rlm_wait({})",
+		"max_depth=2",
+		"max_subcalls=2",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("recursive prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "or recursive child calls") {
+		t.Fatalf("recursive prompt still forbids child calls:\n%s", prompt)
+	}
+}
+
+func TestCleanLongCoTReviewResponse(t *testing.T) {
+	t.Parallel()
+
+	got := cleanLongCoTReviewResponse("Some review text.\n\nFinal answer: solution = move A to B")
+	if got != "solution = move A to B" {
+		t.Fatalf("cleaned=%q", got)
+	}
+	got = cleanLongCoTReviewResponse("Reasoning\nsolution = 42")
+	if got != "solution = 42" {
+		t.Fatalf("cleaned solution line=%q", got)
+	}
+}
+
+func TestSanitizeLongCoTResponseTextRemovesChannelArtifacts(t *testing.T) {
+	t.Parallel()
+
+	got, info := sanitizeLongCoTResponseText("<|channel>thought\n<channel|>solution = block A is on block B")
+	if got != "solution = block A is on block B" {
+		t.Fatalf("sanitized=%q", got)
+	}
+	if !info.Changed {
+		t.Fatal("expected sanitization to report changed output")
+	}
+	want := []string{"reasoning_channel_open_thought", "reasoning_channel_close"}
+	if fmt.Sprint(info.Artifacts) != fmt.Sprint(want) {
+		t.Fatalf("artifacts=%v want %v", info.Artifacts, want)
+	}
+
+	got, info = sanitizeLongCoTResponseText("<|channel>}\n<channel|>solution = move A to B")
+	if got != "solution = move A to B" {
+		t.Fatalf("malformed channel sanitized=%q", got)
+	}
+	if !info.Changed {
+		t.Fatal("expected malformed channel marker to be detected")
+	}
+
+	got, info = sanitizeLongCoTResponseText(`<|tool_call>call:python_repl:python_repl(code="x")<tool_call|>`)
+	if got != "" {
+		t.Fatalf("tool-call-only sanitized=%q want empty", got)
+	}
+	if !info.Changed || fmt.Sprint(info.Artifacts) != "[tool_call_markup_open tool_call_markup_close]" {
+		t.Fatalf("tool-call artifact info=%+v", info)
+	}
+}
+
+func TestEnforceLongCoTOutputSanitizationStoresMetadata(t *testing.T) {
+	t.Parallel()
+
+	attempt := longcoteval.Attempt{
+		ResponseText: "<|channel>thought\n<channel|>solution = block A is on block B",
+		RLM:          &longcoteval.RLMAttemptMeta{Metadata: map[string]any{}},
+	}
+	info := enforceLongCoTOutputSanitization(&attempt)
+	if !info.Changed {
+		t.Fatal("expected sanitization")
+	}
+	if attempt.ResponseText != "solution = block A is on block B" {
+		t.Fatalf("response=%q", attempt.ResponseText)
+	}
+	meta, ok := attempt.RLM.Metadata["output_sanitization"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing output_sanitization metadata: %#v", attempt.RLM.Metadata)
+	}
+	if meta["raw_text"] == "" {
+		t.Fatalf("raw_text not preserved: %#v", meta)
+	}
+}
+
+func TestApplyLongCoTReviewOutcomePreservesPreReviewSanitization(t *testing.T) {
+	t.Parallel()
+
+	attempt := longcoteval.Attempt{
+		ResponseText: "candidate",
+		RLM: &longcoteval.RLMAttemptMeta{Metadata: map[string]any{
+			"output_sanitization": map[string]any{"changed": true},
+		}},
+	}
+	applyLongCoTReviewOutcome(&attempt, longCoTLiveAttemptOutcome{
+		ResponseText: "reviewed",
+		RLM:          &longcoteval.RLMAttemptMeta{Metadata: map[string]any{"review_raw_response_text": "reviewed"}},
+	})
+	if attempt.ResponseText != "reviewed" {
+		t.Fatalf("response=%q", attempt.ResponseText)
+	}
+	if _, ok := attempt.RLM.Metadata["output_sanitization"]; ok {
+		t.Fatalf("stale output_sanitization remained: %#v", attempt.RLM.Metadata)
+	}
+	if _, ok := attempt.RLM.Metadata["pre_review_output_sanitization"]; !ok {
+		t.Fatalf("missing pre_review_output_sanitization: %#v", attempt.RLM.Metadata)
+	}
+}
+
+func TestCompactLongCoTReviewCandidatePreservesHeadAndTail(t *testing.T) {
+	t.Parallel()
+
+	raw := strings.Repeat("a", 80) + " solution = 42"
+	got, info := compactLongCoTReviewCandidate(raw, 64)
+	if !info.Changed {
+		t.Fatal("expected candidate compaction")
+	}
+	if info.RawChars != len([]rune(raw)) || info.CompactChars > 64 || info.MaxChars != 64 {
+		t.Fatalf("compaction info = %+v", info)
+	}
+	if !strings.Contains(got, "[candidate truncated]") {
+		t.Fatalf("missing truncation marker: %q", got)
+	}
+	if !strings.Contains(got, "solution = 42") {
+		t.Fatalf("tail final answer not preserved: %q", got)
+	}
+}
+
+func TestBuildLongCoTRLMTaskPrompt(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildLongCoTRLMTaskPrompt("What is 2 + 2?", longcoteval.Condition{ID: longcoteval.ConditionRLMNoToolsSingle})
+	for _, want := range []string{
+		"LongCoT internal eval condition: rlm_no_tools_single",
+		"No external tools are available in this condition.",
+		"Follow the prompt exactly, including its required answer format.",
+		"What is 2 + 2?",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildLongCoTREPLTaskPrompt(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildLongCoTREPLTaskPrompt("Return solution = 4.", longcoteval.Condition{ID: longcoteval.ConditionRLMReplNoSubcalls}, rlmruntime.SandboxKindPython)
+	for _, want := range []string{
+		"LongCoT internal eval condition: rlm_repl_no_subcalls",
+		"first call python_repl",
+		"official_prompt",
+		"persistent Python REPL",
+		"No recursive child-query tool is available",
+		"expected, not an environment failure",
+		"Never return the placeholder itself",
+		"Official task text begins:",
+		"Return solution = 4.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildLongCoTREPLTaskPromptRecursive(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildLongCoTREPLTaskPrompt("Return solution = 4.", longcoteval.Condition{
+		ID:          longcoteval.ConditionRLMReplRecursive,
+		MaxSubcalls: 2,
+	}, rlmruntime.SandboxKindPython)
+	for _, want := range []string{
+		"LongCoT internal eval condition: rlm_repl_recursive",
+		"first call python_repl",
+		"official_prompt",
+		"persistent Python REPL",
+		"rlm_query submits child solves",
+		"runtime enforces that shape",
+		"Runtime-enforced recursive solve order",
+		"Use rlm_wait({}) after submitted child work",
+		"Do not invent or pass child IDs",
+		"Official task text begins:",
+		"Return solution = 4.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildLongCoTREPLTaskPromptYaegi(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildLongCoTREPLTaskPrompt("Return solution = 4.", longcoteval.Condition{
+		ID:          longcoteval.ConditionRLMReplRecursive,
+		MaxSubcalls: 2,
+	}, rlmruntime.SandboxKindYaegi)
+	for _, want := range []string{
+		"first call go_repl",
+		"persistent Go REPL",
+		"Use rlm_wait({}) after submitted child work",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildLongCoTREPLTaskPromptBlocksWorldMentionsHelper(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildLongCoTREPLTaskPromptForQuestion(longcoteval.Question{
+		Template:   "BlocksWorld",
+		PromptText: "Return solution = <value>. Move block A onto block B.",
+	}, longcoteval.Condition{ID: longcoteval.ConditionRLMReplNoSubcalls}, rlmruntime.SandboxKindPython, false, false, false, true)
+	for _, want := range []string{
+		"blocksworld_solve",
+		"canonical action answer format",
+		"use its answer_format exactly",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildLongCoTREPLTaskPromptCanDisableBlocksWorldHelper(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildLongCoTREPLTaskPromptForQuestion(longcoteval.Question{
+		Template:   "BlocksWorld",
+		PromptText: "Return solution = <value>. Move block A onto block B.",
+	}, longcoteval.Condition{ID: longcoteval.ConditionRLMReplNoSubcalls}, rlmruntime.SandboxKindPython, true, false, false, false)
+	if strings.Contains(prompt, "blocksworld_solve") {
+		t.Fatalf("prompt unexpectedly mentions blocksworld helper:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, rlmruntime.EphemeralSkillDraftToolName) || !strings.Contains(prompt, rlmruntime.EphemeralSkillRunToolName) {
+		t.Fatalf("prompt missing ephemeral skill instructions:\n%s", prompt)
+	}
+}
+
+func TestBuildLongCoTREPLTaskPromptMentionsGeneralHelper(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildLongCoTREPLTaskPromptForQuestion(longcoteval.Question{
+		PromptText: "Return solution = <value>.",
+	}, longcoteval.Condition{ID: longcoteval.ConditionRLMReplNoSubcalls}, rlmruntime.SandboxKindPython, true, true, true, false)
+	for _, want := range []string{
+		rlmruntime.EphemeralHelperSolveToolName,
+		"runtime to synthesize, validate, retry, and run",
+		"first call ephemeral_helper_solve",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"first call python_repl",
+		"persistent Python REPL",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("prompt unexpectedly contains %q:\n%s", forbidden, prompt)
+		}
+	}
+}
+
+func TestLongCoTQuestionIsBlocksWorldOfficialShape(t *testing.T) {
+	t.Parallel()
+
+	if !longCoTQuestionIsBlocksWorld(longcoteval.Question{ID: "BlocksWorld_easy_1"}) {
+		t.Fatal("question id prefix should identify BlocksWorld")
+	}
+	if !longCoTQuestionIsBlocksWorld(longcoteval.Question{
+		PromptText: "Initial state: [[0], []]\nGoal state: [[], [0]]\nNumber of blocks: 1\nNumber of stacks: 2",
+	}) {
+		t.Fatal("official prompt shape should identify BlocksWorld")
+	}
+}
+
+func TestLongCoTBlocksWorldSolveTool(t *testing.T) {
+	t.Parallel()
+
+	executor := longCoTBlocksWorldToolExecutor{
+		Prompt: "/no_think\nReturn solution = <value>. Move block A onto block B.",
+	}
+	raw, err := executor.Execute(t.Context(), longCoTBlocksWorldSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if got["ok"] != true {
+		t.Fatalf("ok=%v want true; raw=%s", got["ok"], raw)
+	}
+	if got["solution"] != "move A to B" {
+		t.Fatalf("solution=%v want move A to B", got["solution"])
+	}
+	if got["answer_format"] != "solution = move A to B" {
+		t.Fatalf("answer_format=%v", got["answer_format"])
+	}
+}
+
+func TestLongCoTBlocksWorldSolveToolPlansStateGoalProblem(t *testing.T) {
+	t.Parallel()
+
+	executor := longCoTBlocksWorldToolExecutor{
+		Prompt: "Initial state: block A is on block B. block B is on the table. block C is on the table. Goal: block B is on block C.",
+	}
+	raw, err := executor.Execute(t.Context(), longCoTBlocksWorldSolveToolName, json.RawMessage(`{"max_depth":4}`))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	var got struct {
+		OK             bool              `json:"ok"`
+		Solution       string            `json:"solution"`
+		Plan           []string          `json:"plan"`
+		InitialState   map[string]string `json:"initial_state"`
+		GoalState      map[string]string `json:"goal_state"`
+		FinalState     map[string]string `json:"final_state"`
+		AnswerFormat   string            `json:"answer_format"`
+		ToolError      string            `json:"error"`
+		ToolConfidence string            `json:"confidence"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if !got.OK {
+		t.Fatalf("ok=false error=%q raw=%s", got.ToolError, raw)
+	}
+	want := "move A to table; move B to C"
+	if got.Solution != want {
+		t.Fatalf("solution=%q want %q; raw=%s", got.Solution, want, raw)
+	}
+	if got.AnswerFormat != "solution = "+want {
+		t.Fatalf("answer_format=%q", got.AnswerFormat)
+	}
+	if got.FinalState["B"] != "C" {
+		t.Fatalf("final_state=%v want B on C", got.FinalState)
+	}
+	if got.InitialState["A"] != "B" || got.GoalState["B"] != "C" {
+		t.Fatalf("parsed states unexpected: initial=%v goal=%v", got.InitialState, got.GoalState)
+	}
+}
+
+func TestLongCoTBlocksWorldSolveToolPlansStackProblem(t *testing.T) {
+	t.Parallel()
+
+	executor := longCoTBlocksWorldToolExecutor{
+		Prompt: `Initial state: [[0], [1, 2], []]
+Goal state: [[], [1], [2, 0]]
+Number of blocks: 3
+Number of stacks: 3`,
+	}
+	raw, err := executor.Execute(t.Context(), longCoTBlocksWorldSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	var got struct {
+		OK           bool    `json:"ok"`
+		Solution     string  `json:"solution"`
+		Moves        [][]int `json:"moves"`
+		AnswerFormat string  `json:"answer_format"`
+		ToolError    string  `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if !got.OK {
+		t.Fatalf("ok=false error=%q raw=%s", got.ToolError, raw)
+	}
+	wantMoves := [][]int{{2, 1, 2}, {0, 0, 2}}
+	if !equalIntStacks(got.Moves, wantMoves) {
+		t.Fatalf("moves=%v want %v; raw=%s", got.Moves, wantMoves, raw)
+	}
+	if got.Solution != "[[2,1,2],[0,0,2]]" {
+		t.Fatalf("solution=%q", got.Solution)
+	}
+	if got.AnswerFormat != "solution = [[2,1,2],[0,0,2]]" {
+		t.Fatalf("answer_format=%q", got.AnswerFormat)
+	}
+}
+
+func TestLongCoTBlocksWorldStackParserSkipsTemplateExample(t *testing.T) {
+	t.Parallel()
+
+	prompt := `You will be provided with a problem instance, given in the form:
+Initial state: [stack0, stack1, ..., stackk]
+Goal state: [stack0, stack1, ..., stackk]
+
+Example:
+Initial state: [[9], [], []]
+Goal state: [[], [9], []]
+
+Puzzle instance:
+
+Initial state: [[0], [1, 2], []]
+Goal state: [[], [1], [2, 0]]
+Number of blocks: 3
+Number of stacks: 3`
+	result := solveLongCoTBlocksWorldPrompt(prompt, 0)
+	if !result.OK {
+		t.Fatalf("solve failed: %#v", result)
+	}
+	if result.Solution != "[[2,1,2],[0,0,2]]" {
+		t.Fatalf("solution=%q", result.Solution)
+	}
+}
+
+func TestLongCoTBlocksWorldFinalResponse(t *testing.T) {
+	t.Parallel()
+
+	got, ok := longCoTBlocksWorldFinalResponse(longcoteval.Question{
+		Template: "BlocksWorld",
+		PromptText: `Initial state: [[0], [1, 2], []]
+Goal state: [[], [1], [2, 0]]`,
+	})
+	if !ok {
+		t.Fatal("final response unavailable")
+	}
+	if got != "solution = [[2,1,2],[0,0,2]]" {
+		t.Fatalf("response=%q", got)
+	}
+}
+
+func TestLongCoTBlocksWorldSolveUnsupported(t *testing.T) {
+	t.Parallel()
+
+	result := solveLongCoTBlocksWorldPrompt("Return solution = <value>. Describe the color of block A.", 0)
+	if result.OK {
+		t.Fatalf("OK=true want unsupported: %#v", result)
+	}
+	if !strings.Contains(result.Error, "unsupported") {
+		t.Fatalf("error=%q", result.Error)
+	}
+}
+
+func TestLongCoTRLMExecutionSettingsRejectsStagedUntilRouteExists(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:              longcoteval.ConditionRLMNoToolsStaged,
+		Kind:            longcoteval.ConditionKindRLM,
+		RLMRouteProfile: "longcot_no_tools_staged",
+		RLMPlanMode:     "staged",
+		RLMToolProfile:  rlmenv.ToolProfileLongCoTNoModelTools,
+		MaxIterations:   2,
+		MaxSubcalls:     0,
+	}
+	_, _, err := longCoTRLMExecutionSettings(condition)
+	if err == nil || !strings.Contains(err.Error(), "currently skipped in live mode") {
+		t.Fatalf("expected staged route error, got %v", err)
+	}
+}
+
+func TestRunLongCoTRLMAttemptTreatsStagedAsUnsupported(t *testing.T) {
+	t.Parallel()
+
+	outcome, err := runLongCoTRLMAttempt(
+		t.Context(),
+		configpkg.Config{},
+		t.TempDir(),
+		nil,
+		longcoteval.Question{PromptText: "Return solution = 4."},
+		longcoteval.Condition{
+			ID:              longcoteval.ConditionRLMNoToolsStaged,
+			Kind:            longcoteval.ConditionKindRLM,
+			RLMRouteProfile: "longcot_no_tools_staged",
+			RLMPlanMode:     "staged",
+			RLMToolProfile:  rlmenv.ToolProfileLongCoTNoModelTools,
+			MaxIterations:   2,
+			MaxSubcalls:     0,
+		},
+		longCoTLiveTarget{Provider: "lmstudio", Model: "test-model"},
+	)
+	if err != nil {
+		t.Fatalf("runLongCoTRLMAttempt() error = %v", err)
+	}
+	if outcome.Status != longCoTAttemptStatusUnsupported {
+		t.Fatalf("status=%q want %q", outcome.Status, longCoTAttemptStatusUnsupported)
+	}
+	if !strings.Contains(strings.ToLower(outcome.Error), "skipped") {
+		t.Fatalf("error=%q want skipped wording", outcome.Error)
+	}
+	if outcome.RLM == nil || outcome.RLM.Metadata == nil {
+		t.Fatalf("missing rlm metadata: %+v", outcome.RLM)
+	}
+	if got, ok := outcome.RLM.Metadata["unsupported_live_condition"].(bool); !ok || !got {
+		t.Fatalf("unsupported_live_condition=%v want true", outcome.RLM.Metadata["unsupported_live_condition"])
+	}
+}
+
+func TestLongCoTRLMExecutionSettingsAndMapping(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:              longcoteval.ConditionRLMNoToolsSingle,
+		Kind:            longcoteval.ConditionKindRLM,
+		RLMRouteProfile: "longcot_no_tools_single",
+		RLMPlanMode:     "single",
+		RLMToolProfile:  rlmenv.ToolProfileLongCoTNoModelTools,
+		MaxIterations:   1,
+		MaxSubcalls:     0,
+	}
+	route, plan, err := longCoTRLMExecutionSettings(condition)
+	if err != nil {
+		t.Fatalf("longCoTRLMExecutionSettings() error = %v", err)
+	}
+	if route != rlm.RouteProfileMixed {
+		t.Fatalf("route=%q want %q", route, rlm.RouteProfileMixed)
+	}
+	if plan != rlm.PlanModeFree {
+		t.Fatalf("plan=%q want %q", plan, rlm.PlanModeFree)
+	}
+
+	result := rlm.Result{
+		Iterations:     3,
+		Subcalls:       1,
+		EvidenceRefs:   []string{"artifact:abc"},
+		RetrievedPaths: []string{"internal/foo.go"},
+		Metadata: map[string]any{
+			"parent_input_tokens_total":  120,
+			"parent_output_tokens_total": 48,
+			"parent_total_tokens_total":  168,
+			"parent_iteration_count":     4,
+			"tool_names":                 []any{"search_repo", "load_file"},
+			"parent_tool_usage": map[string]any{
+				"target_tool_invocations": 2,
+			},
+			"phases": []any{
+				map[string]any{
+					"name":                 "discovery",
+					"tool_names":           []any{"search_repo"},
+					"parent_input_tokens":  10,
+					"parent_output_tokens": 4,
+					"parent_total_tokens":  14,
+					"answer":               "found candidate files",
+				},
+			},
+		},
+	}
+
+	usage := longCoTUsageFromRLMResult(result)
+	if usage.InputTokens != 120 || usage.OutputTokens != 48 || usage.TotalTokens != 168 {
+		t.Fatalf("usage=%+v", usage)
+	}
+
+	meta := longCoTRLMMetaFromResult(condition, result)
+	if meta == nil {
+		t.Fatal("expected RLM metadata")
+	}
+	if meta.ParentInputTokens != 120 || meta.ParentOutputTokens != 48 || meta.ParentTotalTokens != 168 {
+		t.Fatalf("meta parent tokens=%+v", meta)
+	}
+	if len(meta.Phases) != 1 || meta.Phases[0].Name != "discovery" {
+		t.Fatalf("meta phases=%+v", meta.Phases)
+	}
+}
+
+func TestLongCoTSafeRLMEnvironmentDoesNotExposeExternalHandles(t *testing.T) {
+	t.Parallel()
+
+	env := longCoTSafeRLMEnvironment(longcoteval.Condition{
+		ID:             longcoteval.ConditionRLMNoToolsSingle,
+		Kind:           longcoteval.ConditionKindRLM,
+		RLMToolProfile: rlmenv.ToolProfileLongCoTNoModelTools,
+	})
+	if len(env.Tools) != 0 {
+		t.Fatalf("tools=%+v want none", env.Tools)
+	}
+	if len(env.RepoHandles) != 0 || len(env.VaultHandles) != 0 || len(env.ArtifactHandles) != 0 || len(env.SceneHandles) != 0 || len(env.ActiveThreadIDs) != 0 {
+		t.Fatalf("environment exposes external handles: %+v", env)
+	}
+	if len(env.TopOfMind) != 0 || len(env.LatestHandoff) != 0 {
+		t.Fatalf("environment exposes memory maps: %+v", env)
+	}
+}
+
+func runEvalLongCoTForTest(t *testing.T, args ...string) (envelope.Envelope, error) {
+	t.Helper()
+	cmd := newEvalLongCoTCommand()
+	var out bytes.Buffer
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+
+	env, decodeErr := protocol.DecodeEnvelope(bytes.TrimSpace(out.Bytes()))
+	if decodeErr != nil {
+		t.Fatalf("DecodeEnvelope() error = %v; output=%q", decodeErr, out.String())
+	}
+	return env, err
+}
+
+func decodeStringAnyMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+	out, ok := value.(map[string]any)
+	if !ok {
+		t.Fatalf("value type=%T want map[string]any", value)
+	}
+	return out
+}
+
+func decodeLongCoTRunResult(t *testing.T, value any) longcoteval.RunResult {
+	t.Helper()
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("Marshal(value) error = %v", err)
+	}
+	var result longcoteval.RunResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatalf("Unmarshal(RunResult) error = %v", err)
+	}
+	return result
+}
+
+func stringSlicesEqual(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
