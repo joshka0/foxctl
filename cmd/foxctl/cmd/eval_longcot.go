@@ -2297,7 +2297,7 @@ func firstPositiveInt(values ...int) int {
 }
 
 func longCoTDefaultHelperMaxTokens(parentMaxTokens int) int {
-	const defaultHelperMaxTokens = 1024
+	const defaultHelperMaxTokens = 2048
 	if parentMaxTokens > 0 && parentMaxTokens < defaultHelperMaxTokens {
 		return parentMaxTokens
 	}
@@ -2305,11 +2305,11 @@ func longCoTDefaultHelperMaxTokens(parentMaxTokens int) int {
 }
 
 func longCoTHelperMaxSourceLines() int {
-	return 80
+	return 120
 }
 
 func longCoTHelperMaxSourceChars() int {
-	return 1800
+	return 3200
 }
 
 func longCoTEphemeralSkillPhases(question longcoteval.Question, sandbox rlmruntime.SandboxKind, generalHelper bool) []rlmruntime.REPLRunnerPhase {

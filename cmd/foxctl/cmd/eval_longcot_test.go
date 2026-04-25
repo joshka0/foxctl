@@ -1008,6 +1008,12 @@ func TestLongCoTREPLRunnerConfigGeneralHelperUsesSingleHelperPhase(t *testing.T)
 	if cfg.HelperFactory.PresetName != "" {
 		t.Fatalf("unexpected helper preset=%q", cfg.HelperFactory.PresetName)
 	}
+	if cfg.HelperFactory.MaxSourceLines != 120 {
+		t.Fatalf("helper max source lines=%d want 120", cfg.HelperFactory.MaxSourceLines)
+	}
+	if cfg.HelperFactory.MaxSourceChars != 3200 {
+		t.Fatalf("helper max source chars=%d want 3200", cfg.HelperFactory.MaxSourceChars)
+	}
 	if len(cfg.Phases) != 1 {
 		t.Fatalf("phases=%d want 1", len(cfg.Phases))
 	}

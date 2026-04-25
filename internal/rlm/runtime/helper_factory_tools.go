@@ -630,6 +630,11 @@ func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactory
 	b.WriteString(strings.TrimSpace(repair.Stage))
 	b.WriteString("\nError:\n")
 	b.WriteString(compactHelperFactoryLongText(repair.Error, 1600))
+	b.WriteString("\n\nRepair policy:\n")
+	b.WriteString("- Prefer a minimal patch to the previous source. Do not discard a mostly useful algorithm because one index, variable name, budget, or return-shape error failed.\n")
+	b.WriteString("- If the previous source exceeded the source budget, keep the algorithm and remove comments, unused helpers, and redundant checks before changing the approach.\n")
+	b.WriteString("- If the previous source raised a runtime exception, fix that concrete exception first and preserve the intended input shape.\n")
+	b.WriteString("- If the previous source returned ok:false, either produce a real checked answer or return no usable answer; do not hide failure behind an answer string.\n")
 	if strings.TrimSpace(repair.Source) != "" {
 		b.WriteString("\n\nInvalid source to repair:\n")
 		b.WriteString(compactHelperFactoryLongText(repair.Source, 5000))
@@ -646,7 +651,7 @@ func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactory
 		b.WriteString("\n\nPrevious output summary:\n")
 		b.WriteString(helperFactoryJSONSummary(repair.Output))
 	}
-	b.WriteString("\n\nReturn a complete replacement source_b64. Interpret malformed draft text generously: if source_b64 visibly contains raw source instead of base64, treat it as the source to repair. Preserve the algorithmic intent where visible, but fix JSON, syntax, indentation, imports, return shape, and runtime errors.")
+	b.WriteString("\n\nReturn a complete replacement source_b64. Interpret malformed draft text generously: if source_b64 visibly contains raw source instead of base64, treat it as the source to repair. Preserve the algorithmic intent where visible, but fix JSON, syntax, indentation, imports, return shape, source budget, and runtime errors.")
 	return b.String()
 }
 

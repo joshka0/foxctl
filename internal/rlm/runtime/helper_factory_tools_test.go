@@ -353,6 +353,11 @@ func TestHelperFactoryToolsRejectsOversizedSourceAndRepairs(t *testing.T) {
 	if !strings.Contains(prompts[1], "max chars") {
 		t.Fatalf("repair prompt missing budget failure: %s", prompts[1])
 	}
+	for _, want := range []string{"Repair policy", "minimal patch", "previous source exceeded the source budget"} {
+		if !strings.Contains(prompts[1], want) {
+			t.Fatalf("repair prompt missing %q:\n%s", want, prompts[1])
+		}
+	}
 }
 
 func TestHelperFactoryToolsPerCallMaxAttemptsOnlyReducesBudget(t *testing.T) {
