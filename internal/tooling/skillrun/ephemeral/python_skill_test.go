@@ -117,6 +117,29 @@ def solve(input):
 	}
 }
 
+func TestPythonSkillRunnerAllowsCommonSafeBuiltins(t *testing.T) {
+	t.Parallel()
+
+	runner, err := NewPythonSkillRunner(context.Background(), PythonSkillSpec{
+		Source: `
+def solve(input):
+    print("debug output is contained")
+    first_even = next(x for x in input["values"] if x % 2 == 0)
+    return {"ok": True, "answer": "solution = " + str(first_even)}
+`,
+	})
+	if err != nil {
+		t.Fatalf("NewPythonSkillRunner() error = %v", err)
+	}
+	result, err := runner.Run(context.Background(), map[string]any{"values": []any{1, 3, 4, 6}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output["answer"] != "solution = 4" {
+		t.Fatalf("answer=%v", result.Output["answer"])
+	}
+}
+
 func TestPythonSkillRunnerRunTimeoutKillsRunawayHelper(t *testing.T) {
 	t.Parallel()
 
