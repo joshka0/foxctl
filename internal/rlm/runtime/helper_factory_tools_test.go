@@ -565,6 +565,23 @@ func TestHelperFactoryAnswerAcceptsNestedSolutionObject(t *testing.T) {
 	}
 }
 
+func TestHelperFactoryAnswerAcceptsStructuredAnswerWhenSolutionLineRequired(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := helperFactoryAnswer(map[string]any{
+		"ok": true,
+		"answer": []any{
+			[]any{float64(1), float64(0), float64(2)},
+		},
+	}, true)
+	if !ok {
+		t.Fatalf("expected structured answer to be accepted")
+	}
+	if answer != "solution = [[1,0,2]]" {
+		t.Fatalf("answer=%q", answer)
+	}
+}
+
 func TestHelperFactoryToolsRedraftsIncompletePythonSourceWithTaskContext(t *testing.T) {
 	t.Parallel()
 

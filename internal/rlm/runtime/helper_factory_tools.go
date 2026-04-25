@@ -1350,7 +1350,7 @@ func helperFactoryAnswerValue(key string, value any, extractSolution bool) (stri
 		}
 		return "", false
 	case []any:
-		if !strings.EqualFold(key, "solution") {
+		if !strings.EqualFold(key, "solution") && !(extractSolution && strings.EqualFold(key, "answer")) {
 			return "", false
 		}
 		body, err := json.Marshal(typed)
@@ -1359,7 +1359,7 @@ func helperFactoryAnswerValue(key string, value any, extractSolution bool) (stri
 		}
 		return "solution = " + string(body), true
 	default:
-		if !strings.EqualFold(key, "solution") {
+		if !strings.EqualFold(key, "solution") && !(extractSolution && strings.EqualFold(key, "answer")) {
 			return "", false
 		}
 		body, err := json.Marshal(typed)
