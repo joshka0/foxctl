@@ -293,6 +293,11 @@ func runBraidNodeHelper(
 	if strings.TrimSpace(answer) == "" {
 		return "", false
 	}
+	if isBraidSolveKind(node.Kind) {
+		if ok, detail, applicable := verifyStackMoveCandidateFromInput(answer, argsMap["input"]); applicable && !ok {
+			return formatBraidHelperNodeSummary(node, "pass: false first_failure: "+detail), true
+		}
+	}
 	return formatBraidHelperNodeSummary(node, answer), true
 }
 
@@ -425,6 +430,128 @@ func helperAnswerFromToolResult(result string) string {
 		return ""
 	}
 	return strings.TrimSpace(result)
+}
+
+func verifyStackMoveCandidateFromInput(answer string, rawInput any) (bool, string, bool) {
+	input, ok := rawInput.(map[string]any)
+	if !ok || len(input) == 0 {
+		return false, "", false
+	}
+	initial, okInitial := stackStateFromAny(input["initial_state"])
+	goal, okGoal := stackStateFromAny(input["goal_state"])
+	if !okInitial || !okGoal {
+		return false, "", false
+	}
+	moves, okMoves := stackMovesFromAnswer(answer)
+	if !okMoves {
+		return false, "candidate does not contain a parseable solution move list", true
+	}
+	state := cloneIntStacks(initial)
+	for idx, move := range moves {
+		block, from, to := move[0], move[1], move[2]
+		if from < 0 || from >= len(state) {
+			return false, fmt.Sprintf("move %d source stack %d out of range", idx, from), true
+		}
+		if to < 0 || to >= len(state) {
+			return false, fmt.Sprintf("move %d destination stack %d out of range", idx, to), true
+		}
+		if from == to {
+			return false, fmt.Sprintf("move %d moves block %d from stack %d to the same stack", idx, block, from), true
+		}
+		if len(state[from]) == 0 {
+			return false, fmt.Sprintf("move %d source stack %d is empty", idx, from), true
+		}
+		top := state[from][len(state[from])-1]
+		if top != block {
+			return false, fmt.Sprintf("move %d tries to move block %d, but stack %d top is %d", idx, block, from, top), true
+		}
+		state[from] = state[from][:len(state[from])-1]
+		state[to] = append(state[to], block)
+	}
+	if !reflect.DeepEqual(state, goal) {
+		return false, fmt.Sprintf("final state %v does not match goal %v", state, goal), true
+	}
+	return true, "", true
+}
+
+func stackStateFromAny(value any) ([][]int, bool) {
+	rawStacks, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	stacks := make([][]int, len(rawStacks))
+	for i, rawStack := range rawStacks {
+		items, ok := rawStack.([]any)
+		if !ok {
+			return nil, false
+		}
+		stacks[i] = make([]int, len(items))
+		for j, item := range items {
+			n, ok := intFromJSONNumberLike(item)
+			if !ok {
+				return nil, false
+			}
+			stacks[i][j] = n
+		}
+	}
+	return stacks, true
+}
+
+func stackMovesFromAnswer(answer string) ([][3]int, bool) {
+	raw := strings.TrimSpace(answer)
+	if idx := strings.Index(raw, "="); idx >= 0 && strings.Contains(strings.ToLower(raw[:idx]), "solution") {
+		raw = strings.TrimSpace(raw[idx+1:])
+	}
+	start := strings.Index(raw, "[")
+	end := strings.LastIndex(raw, "]")
+	if start < 0 || end < start {
+		return nil, false
+	}
+	raw = raw[start : end+1]
+	var decoded []any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return nil, false
+	}
+	moves := make([][3]int, 0, len(decoded))
+	for _, item := range decoded {
+		rawMove, ok := item.([]any)
+		if !ok || len(rawMove) != 3 {
+			return nil, false
+		}
+		var move [3]int
+		for idx, value := range rawMove {
+			n, ok := intFromJSONNumberLike(value)
+			if !ok {
+				return nil, false
+			}
+			move[idx] = n
+		}
+		moves = append(moves, move)
+	}
+	return moves, true
+}
+
+func intFromJSONNumberLike(value any) (int, bool) {
+	switch typed := value.(type) {
+	case float64:
+		n := int(typed)
+		return n, typed == float64(n)
+	case int:
+		return typed, true
+	case json.Number:
+		n, err := typed.Int64()
+		return int(n), err == nil
+	default:
+		return 0, false
+	}
+}
+
+func cloneIntStacks(in [][]int) [][]int {
+	out := make([][]int, len(in))
+	for idx := range in {
+		out[idx] = append([]int(nil), in[idx]...)
+	}
+	return out
 }
 
 func prepareBraidRepair(

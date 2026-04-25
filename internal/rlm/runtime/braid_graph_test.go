@@ -447,6 +447,27 @@ func TestBuildBraidHelperRecoveryInstructionsRequireConcreteVerifierFailure(t *t
 	}
 }
 
+func TestVerifyStackMoveCandidateFromInput(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"initial_state": []any{[]any{float64(0)}, []any{float64(1), float64(2)}, []any{}},
+		"goal_state":    []any{[]any{}, []any{float64(1)}, []any{float64(2), float64(0)}},
+	}
+	ok, detail, applicable := verifyStackMoveCandidateFromInput("solution = [[2,1,2],[0,0,2]]", input)
+	if !applicable || !ok || detail != "" {
+		t.Fatalf("valid candidate ok=%v applicable=%v detail=%q", ok, applicable, detail)
+	}
+	ok, detail, applicable = verifyStackMoveCandidateFromInput("solution = [[0,0,0]]", input)
+	if !applicable || ok || !strings.Contains(detail, "same stack") {
+		t.Fatalf("same-stack candidate ok=%v applicable=%v detail=%q", ok, applicable, detail)
+	}
+	ok, detail, applicable = verifyStackMoveCandidateFromInput("solution = [[1,1,2]]", input)
+	if !applicable || ok || !strings.Contains(detail, "top is 2") {
+		t.Fatalf("non-top candidate ok=%v applicable=%v detail=%q", ok, applicable, detail)
+	}
+}
+
 func TestBraidNodeExecutionSummaryRejectsNestedBlockedStatus(t *testing.T) {
 	t.Parallel()
 
