@@ -371,8 +371,13 @@ func buildBraidHelperRecoveryInstructions(node BraidNode, failedSummary string) 
 	b.WriteString("The previous child blocked because the task needs executable search, simulation, parsing, or verification. Do not refuse for that reason.\n")
 	b.WriteString("Draft and run a short-lived helper that computes this node's answer directly. Prefer a deterministic state transformer or verifier when the task involves moves, stacks, transitions, paths, arithmetic search, or exact constraint checking.\n")
 	b.WriteString("Return the computed answer only, in the node's requested format. If this node can produce the final benchmark answer, return a line beginning with solution =.\n")
+	if isBraidSolveKind(node.Kind) {
+		b.WriteString("For a solve node, build a complete candidate and run an internal deterministic check before returning it. Do not emit a partial action list, copied prefix, or unchecked guess. If the check fails, return `status: blocked first_failure: ...` instead of `solution = ...`.\n")
+		b.WriteString("For state-transition tasks, model state explicitly, apply every candidate transition, and only return a candidate when final state and action legality both check out.\n")
+	}
 	if node.Kind == "verify" {
-		b.WriteString("For a verify node, simulate or substitute the candidate against the original constraints. Return `pass: true` only when every constraint is verified; otherwise return `pass: false` with the first concrete failure.\n")
+		b.WriteString("For a verify node, simulate or substitute the candidate against the original constraints. Return `pass: true` only when every constraint is verified.\n")
+		b.WriteString("If verification fails, return `pass: false first_failure: ...` with the earliest illegal transition, bad substitution, missing candidate, or observed-vs-expected mismatch. Include the failed step index when applicable.\n")
 	}
 	if strings.TrimSpace(node.ExpectedOutput) != "" {
 		b.WriteString("Expected node output: ")
@@ -394,6 +399,15 @@ func formatBraidHelperNodeSummary(node BraidNode, answer string) string {
 			return "status: pass summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints."
 		}
 		return "status: blocked summary: answer: pass: false checks: ephemeral_helper_solve simulated original constraints but did not produce a passing verification. detail: " + safeTelemetryExcerpt(answer, 600)
+	}
+	if isBraidSolveKind(node.Kind) && braidPassFalseRE.MatchString(answer) {
+		return "status: blocked summary: answer: " + answer + " checks: ephemeral_helper_solve self-verified candidate and found a concrete failure."
+	}
+	if isBraidSolveKind(node.Kind) {
+		statuses := braidSummaryStatuses(answer)
+		if braidStatusesContainAny(statuses, "blocked", "failed", "failure", "error") {
+			return "status: blocked summary: answer: " + safeTelemetryExcerpt(answer, 600) + " checks: ephemeral_helper_solve did not produce a verified candidate."
+		}
 	}
 	return "status: completed summary: status: solved answer: " + answer + " checks: ephemeral_helper_solve produced and ran an executable helper for this node."
 }

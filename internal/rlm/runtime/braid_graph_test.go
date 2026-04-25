@@ -415,6 +415,38 @@ func TestFormatBraidHelperVerifyMismatchBlocksRepair(t *testing.T) {
 	}
 }
 
+func TestFormatBraidHelperSolveSelfVerificationFailureBlocksRepair(t *testing.T) {
+	t.Parallel()
+
+	summary := formatBraidHelperNodeSummary(BraidNode{ID: "n_solve", Kind: "solve"}, "pass: false first_failure: move 3 is illegal")
+	if !strings.Contains(summary, "status: blocked") {
+		t.Fatalf("summary=%q, want blocked", summary)
+	}
+	if !strings.Contains(summary, "self-verified candidate") {
+		t.Fatalf("summary=%q, want self-verification marker", summary)
+	}
+	if err := validateBraidNodeExecutionSummary("graph_fanout", BraidNode{ID: "n_solve", Kind: "solve"}, summary, "n_reduce"); err == nil {
+		t.Fatal("validateBraidNodeExecutionSummary() succeeded for solve self-verification failure")
+	}
+}
+
+func TestBuildBraidHelperRecoveryInstructionsRequireConcreteVerifierFailure(t *testing.T) {
+	t.Parallel()
+
+	verify := buildBraidHelperRecoveryInstructions(BraidNode{ID: "n_verify", Kind: "verify"}, "failed")
+	for _, want := range []string{"pass: false first_failure", "failed step index"} {
+		if !strings.Contains(verify, want) {
+			t.Fatalf("verify instructions missing %q:\n%s", want, verify)
+		}
+	}
+	solve := buildBraidHelperRecoveryInstructions(BraidNode{ID: "n_solve", Kind: "solve"}, "failed")
+	for _, want := range []string{"internal deterministic check", "partial action list", "state explicitly"} {
+		if !strings.Contains(solve, want) {
+			t.Fatalf("solve instructions missing %q:\n%s", want, solve)
+		}
+	}
+}
+
 func TestBraidNodeExecutionSummaryRejectsNestedBlockedStatus(t *testing.T) {
 	t.Parallel()
 
