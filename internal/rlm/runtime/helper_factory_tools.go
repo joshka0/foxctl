@@ -60,6 +60,7 @@ type HelperVerifierDiagnostic struct {
 	FailureKind   string         `json:"failure_kind,omitempty"`
 	FailedAtStep  int            `json:"failed_at_step,omitempty"`
 	FailedAction  []int          `json:"failed_action,omitempty"`
+	ValidPrefix   [][]int        `json:"valid_prefix,omitempty"`
 	StateBefore   any            `json:"state_before,omitempty"`
 	ObservedFinal any            `json:"observed_final,omitempty"`
 	ExpectedFinal any            `json:"expected_final,omitempty"`
@@ -723,7 +724,7 @@ func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactory
 	}
 	if len(repair.Verifier) > 0 {
 		b.WriteString("\n\nVerifier counterexample:\n")
-		b.WriteString(helperFactoryJSONSummary(repair.Verifier))
+		b.WriteString(helperFactoryVerifierSummary(repair.Verifier))
 		b.WriteString("\nUse this counterexample as a failing test. The replacement helper must avoid this exact failure before returning an answer.\n")
 	}
 	b.WriteString("\n\nReturn a complete replacement source_b64. Interpret malformed draft text generously: if source_b64 visibly contains raw source instead of base64, treat it as the source to repair. Preserve the algorithmic intent where visible, but fix JSON, syntax, indentation, imports, return shape, source budget, and runtime errors.")
@@ -1037,7 +1038,7 @@ func helperFactoryRepairFeedbackWithVerifier(stage, errText, source, raw string,
 	}
 	if len(verifier) > 0 {
 		b.WriteString("\nverifier_counterexample: ")
-		b.WriteString(helperFactoryJSONSummary(verifier))
+		b.WriteString(helperFactoryVerifierSummary(verifier))
 	}
 	return b.String()
 }
@@ -1096,6 +1097,17 @@ func helperFactoryJSONSummary(value map[string]any) string {
 		return err.Error()
 	}
 	return string(body)
+}
+
+func helperFactoryVerifierSummary(value map[string]any) string {
+	if len(value) == 0 {
+		return "{}"
+	}
+	body, err := json.Marshal(value)
+	if err != nil {
+		return helperFactoryJSONSummary(value)
+	}
+	return compactHelperFactoryLongText(string(body), 12000)
 }
 
 func helperFactoryExactInputJSON(value map[string]any, maxChars int) string {

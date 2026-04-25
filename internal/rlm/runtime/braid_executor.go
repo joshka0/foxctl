@@ -505,7 +505,9 @@ func stackMoveAnswerVerifier(answer string, input map[string]any) (HelperVerifie
 	for idx, move := range moves {
 		block, from, to := move[0], move[1], move[2]
 		stateBefore := cloneIntStacks(state)
+		validPrefix := stackMovePrefixForDiagnostic(moves[:idx])
 		base.Score = stackMoveVerifierStepScore(idx, len(moves))
+		base.ValidPrefix = validPrefix
 		base.Progress = map[string]any{
 			"valid_prefix_moves": idx,
 			"candidate_moves":    len(moves),
@@ -562,6 +564,7 @@ func stackMoveAnswerVerifier(answer string, input map[string]any) (HelperVerifie
 	if !reflect.DeepEqual(state, goal) {
 		base.FailureKind = "goal_mismatch"
 		base.Score = stackMoveVerifierGoalMismatchScore(state, goal)
+		base.ValidPrefix = stackMovePrefixForDiagnostic(moves)
 		base.Progress = map[string]any{
 			"valid_prefix_moves": len(moves),
 			"candidate_moves":    len(moves),
@@ -574,6 +577,22 @@ func stackMoveAnswerVerifier(answer string, input map[string]any) (HelperVerifie
 		return base, true
 	}
 	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "stack_move", FailedAtStep: -1}, true
+}
+
+func stackMovePrefixForDiagnostic(moves [][3]int) [][]int {
+	if len(moves) == 0 {
+		return nil
+	}
+	const maxPrefix = 120
+	start := 0
+	if len(moves) > maxPrefix {
+		start = len(moves) - maxPrefix
+	}
+	out := make([][]int, 0, len(moves)-start)
+	for _, move := range moves[start:] {
+		out = append(out, []int{move[0], move[1], move[2]})
+	}
+	return out
 }
 
 func stackMoveVerifierStepScore(validPrefix, totalMoves int) float64 {

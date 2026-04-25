@@ -467,7 +467,7 @@ func TestVerifyStackMoveCandidateFromInput(t *testing.T) {
 		t.Fatalf("non-top candidate ok=%v applicable=%v detail=%q", ok, applicable, detail)
 	}
 	diag, applicable := stackMoveAnswerVerifier("solution = [[2,1,2],[2,1,0]]", input)
-	if !applicable || diag.Pass || diag.Score <= 0 || diag.Progress["valid_prefix_moves"] != 1 {
+	if !applicable || diag.Pass || diag.Score <= 0 || diag.Progress["valid_prefix_moves"] != 1 || len(diag.ValidPrefix) != 1 {
 		t.Fatalf("diagnostic=%#v applicable=%v", diag, applicable)
 	}
 	diag, applicable = stackMoveAnswerVerifier("solution = [[2,1,2]]", input)

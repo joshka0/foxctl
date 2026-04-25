@@ -571,6 +571,12 @@ func TestHelperFactoryVerifierFeedbackKeepsBestCandidate(t *testing.T) {
 	if feedback["search_policy"] == nil {
 		t.Fatalf("feedback missing search policy: %#v", feedback)
 	}
+	summary := helperFactoryVerifierSummary(feedback)
+	for _, want := range []string{"best_candidate", "solution = better", "search_policy"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary missing %q: %s", want, summary)
+		}
+	}
 }
 
 func TestHelperFactoryAnswerAcceptsNestedSolutionObject(t *testing.T) {
