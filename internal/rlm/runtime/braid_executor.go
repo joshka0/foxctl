@@ -262,13 +262,17 @@ func runBraidNodeHelper(
 		return "", false
 	}
 	prompt := RenderBraidNodeChildPromptWithFeedback(node, rootPrompt, dependencySummaries, repairFeedback)
+	input := braidHelperInput(rootPrompt, dependencySummaries)
 	instructions := buildBraidHelperRecoveryInstructions(node, triggerSummary)
+	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeTransitionSystem(input) {
+		instructions += "\n" + buildTransitionSystemHelperContract()
+	}
 	argsMap := map[string]any{
 		"prompt":       prompt,
 		"instructions": instructions,
 		"max_attempts": 5,
 	}
-	if input := braidHelperInput(rootPrompt, dependencySummaries); len(input) > 0 {
+	if len(input) > 0 {
 		argsMap["input"] = input
 	}
 	args, err := json.Marshal(argsMap)
@@ -431,6 +435,33 @@ func buildBraidHelperRecoveryInstructions(node BraidNode, failedSummary string) 
 	b.WriteString("Previous blocked summary:\n")
 	b.WriteString(safeTelemetryExcerpt(failedSummary, 900))
 	return b.String()
+}
+
+func braidHelperInputLooksLikeTransitionSystem(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	_, hasInitial := input["initial_state"]
+	_, hasGoal := input["goal_state"]
+	return hasInitial && hasGoal
+}
+
+func buildTransitionSystemHelperContract() string {
+	return strings.TrimSpace(`
+Generic transition-system helper contract:
+- Treat the problem as a transition system, not as prose generation.
+- Implement small internal functions with these exact responsibilities:
+  parse_state(input) -> initial state, goal state, and any typed constants.
+  legal_actions(state) -> candidate actions legal in the current state.
+  apply(state, action) -> a new state after one legal action.
+  is_goal(state, goal) -> true only when the goal is exactly reached.
+  verify_plan(initial, goal, plan) -> {ok, first_failure, final_state}.
+  search_or_construct(initial, goal) -> a complete candidate plan.
+- The returned answer must be a candidate plan only after verify_plan reports ok.
+- If verify_plan fails, repair the plan from the first_failure/state_before rather than restarting blindly.
+- Do not return a copied prefix, a partial plan, or an unchecked plan.
+- Use bounded constructive search when full state-space BFS/DFS would explode.
+`)
 }
 
 func formatBraidHelperNodeSummary(node BraidNode, answer string) string {

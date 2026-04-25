@@ -447,6 +447,26 @@ func TestBuildBraidHelperRecoveryInstructionsRequireConcreteVerifierFailure(t *t
 	}
 }
 
+func TestTransitionSystemHelperContract(t *testing.T) {
+	t.Parallel()
+
+	if !braidHelperInputLooksLikeTransitionSystem(map[string]any{
+		"initial_state": []any{},
+		"goal_state":    []any{},
+	}) {
+		t.Fatal("expected initial_state/goal_state input to look like a transition system")
+	}
+	if braidHelperInputLooksLikeTransitionSystem(map[string]any{"initial_state": []any{}}) {
+		t.Fatal("expected missing goal_state to not look like a transition system")
+	}
+	contract := buildTransitionSystemHelperContract()
+	for _, want := range []string{"parse_state", "legal_actions", "apply", "is_goal", "verify_plan", "search_or_construct"} {
+		if !strings.Contains(contract, want) {
+			t.Fatalf("contract missing %q:\n%s", want, contract)
+		}
+	}
+}
+
 func TestVerifyStackMoveCandidateFromInput(t *testing.T) {
 	t.Parallel()
 
