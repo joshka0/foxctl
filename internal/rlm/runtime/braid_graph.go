@@ -13,7 +13,7 @@ const (
 	maxBraidNodeIDChars       = 64
 	maxBraidNodeQuestionChars = 480
 	maxBraidNodeExpectedChars = 240
-	maxBraidNodeSummaryChars  = 1200
+	maxBraidNodeSummaryChars  = 12000
 	minCycleSolveSummaryChars = 900
 )
 

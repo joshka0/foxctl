@@ -283,8 +283,8 @@ func TestNormalizeBraidGraphForPolicyKeepsSingleSolveAndClampsSummary(t *testing
 	graph := BraidGraph{
 		Version: 1,
 		Nodes: []BraidNode{
-			{ID: "n_extract", Kind: "extract", Question: "Extract constraints.", MaxSummaryChars: 2000},
-			{ID: "n_solve", Kind: "solve", Question: "Solve candidate.", DependsOn: []string{"n_extract"}, MaxSummaryChars: 2000},
+			{ID: "n_extract", Kind: "extract", Question: "Extract constraints.", MaxSummaryChars: maxBraidNodeSummaryChars + 1},
+			{ID: "n_solve", Kind: "solve", Question: "Solve candidate.", DependsOn: []string{"n_extract"}, MaxSummaryChars: maxBraidNodeSummaryChars + 1},
 			{ID: "n_verify", Kind: "verify", Question: "Simulate candidate on initial state and check final state matches goal state.", DependsOn: []string{"n_solve"}},
 			{ID: "n_reduce", Kind: "reduce", Question: "Reduce final.", DependsOn: []string{"n_solve", "n_verify"}},
 		},
