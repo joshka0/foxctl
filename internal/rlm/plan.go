@@ -19,7 +19,6 @@ const (
 	PlanModeGuided PlanMode = "guided"
 	PlanModeStaged PlanMode = "staged"
 	PlanModeHard   PlanMode = "hard"
-	PlanModeLambda PlanMode = "lambda"
 )
 
 type Plan struct {
@@ -64,8 +63,6 @@ func NormalizePlanMode(value string) PlanMode {
 		return PlanModeStaged
 	case string(PlanModeHard):
 		return PlanModeHard
-	case string(PlanModeLambda):
-		return PlanModeLambda
 	default:
 		return PlanModeFree
 	}
