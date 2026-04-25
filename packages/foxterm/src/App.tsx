@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { spawn as spawnChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 
 import type {
@@ -19,6 +22,7 @@ import {
   getATCPRoomSessions,
   getOrchestrationCardRuntime,
   getOrchestrationCardWork,
+  getRoomControlSnapshot,
   getRoomLoop,
   getRoomMessages,
   getRoomTaskWork,
@@ -26,6 +30,7 @@ import {
   getRuns,
   getV2ModelEndpoint,
   killRun,
+  patchRoomLoop,
   sendRoomMessage,
   sendATCPMessageToRoom,
   seedOrchestrationCard,
@@ -43,8 +48,10 @@ import {
   type ApplyOrchestrationCardActionInput,
   type GetOrchestrationCardRuntimeInput,
   type OrchestrationCardWorkItem,
+  type RoomControlSnapshot,
   type RoomLoop,
   type RoomMessage,
+  type RoomStatusParticipant,
   type RoomTaskWorkItem,
   type RunListItem,
   type SeedOrchestrationCardInput,
@@ -371,6 +378,11 @@ export function App({ onExit }: AppProps) {
   const [roomLoop, setRoomLoop] = useState<RoomLoop | null>(null);
   const [roomLoopLoadState, setRoomLoopLoadState] =
     useState<LoadState>("idle");
+  const [roomLoopStartBusy, setRoomLoopStartBusy] = useState(false);
+  const [roomControlSnapshot, setRoomControlSnapshot] =
+    useState<RoomControlSnapshot | null>(null);
+  const [roomControlLoadState, setRoomControlLoadState] =
+    useState<LoadState>("idle");
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [agentLoadState, setAgentLoadState] = useState<LoadState>("idle");
   const [atcpSessions, setATCPSessions] = useState<ATCPSession[]>([]);
@@ -675,6 +687,7 @@ export function App({ onExit }: AppProps) {
       await refreshRoomTasks(`room:${roomId}`);
       await refreshRoomMessages(roomId);
       await refreshRoomLoop(roomId);
+      await refreshRoomControlSnapshot(roomId);
       await refreshAgents();
       setStatus({
         tone: "success",
@@ -725,6 +738,7 @@ export function App({ onExit }: AppProps) {
       setMode("normal");
       setFocus("detail");
       await refreshATCPRoomSessions(roomId);
+      await refreshRoomControlSnapshot(roomId);
       setStatus({
         tone: "success",
         text: `ATCP ${result.member.agent_id} session ${result.session.status}`,
@@ -768,6 +782,7 @@ export function App({ onExit }: AppProps) {
       setMode("normal");
       setFocus("detail");
       await refreshATCPRoomSessions(roomId);
+      await refreshRoomControlSnapshot(roomId);
       setStatus({
         tone: result.message.failed > 0 ? "warning" : "success",
         text: `ATCP delivered ${result.message.delivered}/${result.message.delivered + result.message.failed}`,
@@ -803,6 +818,7 @@ export function App({ onExit }: AppProps) {
       setFocus("detail");
       await refreshRoomMessages(roomId);
       await refreshRoomTasks(`room:${roomId}`);
+      await refreshRoomControlSnapshot(roomId);
       setStatus({
         tone: result.delivery_pending ? "focus" : "success",
         text: `message ${result.status} in ${roomId}`,
@@ -1074,6 +1090,69 @@ export function App({ onExit }: AppProps) {
     } catch {
       setRoomLoop(null);
       setRoomLoopLoadState("error");
+    }
+  };
+
+  const refreshRoomControlSnapshot = async (roomId: string) => {
+    const trimmed = roomId.trim();
+    if (trimmed === "") {
+      setRoomControlSnapshot(null);
+      setRoomControlLoadState("idle");
+      return;
+    }
+    setRoomControlLoadState("loading");
+    try {
+      const result = await getRoomControlSnapshot({
+        roomId: trimmed,
+        workspaceId: WORKSPACE_ID,
+        actorId: ACTOR_ID,
+      });
+      setRoomControlSnapshot(result);
+      setRoomControlLoadState("ready");
+    } catch {
+      setRoomControlSnapshot(null);
+      setRoomControlLoadState("error");
+    }
+  };
+
+  const startSelectedRoomLoop = async () => {
+    const room = selectedRoom ?? roomTaskItems[0]?.room;
+    if (!room) {
+      setStatus({ tone: "muted", text: "select a room first" });
+      return;
+    }
+    const health = roomLoopHealth(roomLoop, roomLoopLoadState);
+    if (health.tone === "success") {
+      setStatus({ tone: "success", text: `room loop active for ${room.id}` });
+      return;
+    }
+    if (roomLoopStartBusy) return;
+    setRoomLoopStartBusy(true);
+    setStatus({ tone: "focus", text: `starting room loop ${room.id}` });
+    try {
+      await patchRoomLoop({
+        roomId: room.id,
+        workspaceId: WORKSPACE_ID,
+        actorId: ACTOR_ID,
+        enabled: true,
+      });
+      const result = spawnRoomLoopProcess(room.id);
+      setStatus({
+        tone: "success",
+        text: `room loop spawned${result.pid ? ` pid ${result.pid}` : ""}`,
+      });
+      setTimeout(() => {
+        void refreshRoomLoop(room.id);
+        void refreshRoomControlSnapshot(room.id);
+      }, 500);
+    } catch (error) {
+      setStatus({
+        tone: "danger",
+        text:
+          error instanceof Error ? error.message : "failed to start room loop",
+      });
+    } finally {
+      setRoomLoopStartBusy(false);
     }
   };
 
@@ -1368,6 +1447,7 @@ export function App({ onExit }: AppProps) {
       if (selectedRoom?.id) {
         void refreshRoomMessages(selectedRoom.id);
         void refreshRoomLoop(selectedRoom.id);
+        void refreshRoomControlSnapshot(selectedRoom.id);
         void refreshATCPRoomSessions(selectedRoom.id);
       }
       return;
@@ -1475,6 +1555,20 @@ export function App({ onExit }: AppProps) {
       run: () => {
         setNavIndex(1);
         openRoomMessageComposer();
+      },
+    },
+    {
+      id: "room:loop",
+      title: "Start Room Loop",
+      category: "Rooms",
+      command: "o",
+      description: "Enable and spawn the selected room coordination loop.",
+      destructive: false,
+      disabled: !selectedRoom && roomTaskItems.length === 0,
+      disabledReason: "create or select a room first",
+      run: () => {
+        setNavIndex(1);
+        void startSelectedRoomLoop();
       },
     },
     {
@@ -1869,6 +1963,8 @@ export function App({ onExit }: AppProps) {
       setRoomMessagesLoadState("idle");
       setRoomLoop(null);
       setRoomLoopLoadState("idle");
+      setRoomControlSnapshot(null);
+      setRoomControlLoadState("idle");
       setAgentLoadState("idle");
       setATCPSessions([]);
       setATCPMembers([]);
@@ -1883,6 +1979,8 @@ export function App({ onExit }: AppProps) {
       setRoomMessagesLoadState("idle");
       setRoomLoop(null);
       setRoomLoopLoadState("idle");
+      setRoomControlSnapshot(null);
+      setRoomControlLoadState("idle");
       setAgentLoadState("idle");
       setATCPSessions([]);
       setATCPMembers([]);
@@ -1894,6 +1992,7 @@ export function App({ onExit }: AppProps) {
     }
     void refreshRoomMessages(selectedRoom.id);
     void refreshRoomLoop(selectedRoom.id);
+    void refreshRoomControlSnapshot(selectedRoom.id);
     void refreshAgents();
     void refreshATCPRoomSessions(selectedRoom.id);
   }, [activeView, selectedRoom?.id]);
@@ -2337,6 +2436,10 @@ export function App({ onExit }: AppProps) {
       openRoomMessageComposer();
       return;
     }
+    if (name === "o" && activeView === "rooms") {
+      void startSelectedRoomLoop();
+      return;
+    }
     if (activeView === "rooms" && isCLISpawnKey(key)) {
       openCLISpawnComposer();
       return;
@@ -2585,6 +2688,8 @@ export function App({ onExit }: AppProps) {
                     messagesLoadState={roomMessagesLoadState}
                     loop={roomLoop}
                     loopLoadState={roomLoopLoadState}
+                    controlSnapshot={roomControlSnapshot}
+                    controlLoadState={roomControlLoadState}
                     agents={agents}
                     agentLoadState={agentLoadState}
                     agentPaneSize={agentPaneSize}
@@ -3440,9 +3545,9 @@ function RoomComposer({
   const target = targetLabel ?? roomId ?? "session";
   const targetDetail =
     purpose === "prompt"
-      ? `Enter -> ATCP ${target}`
+      ? `Enter -> ATCP ${target} from ${ACTOR_ID}`
       : purpose === "message"
-        ? `Enter -> room ${roomId ?? "selected room"}`
+        ? `Enter -> room ${roomId ?? "selected room"} broadcast as ${ACTOR_ID}`
         : purpose === "spawn"
           ? `Enter -> daemon agent in ${roomId ?? "selected room"}`
           : purpose === "cli"
@@ -3851,6 +3956,8 @@ function RoomTaskDetailPanel({
   messagesLoadState,
   loop,
   loopLoadState,
+  controlSnapshot,
+  controlLoadState,
   agents,
   agentLoadState,
   agentPaneSize,
@@ -3875,6 +3982,8 @@ function RoomTaskDetailPanel({
   messagesLoadState: LoadState;
   loop: RoomLoop | null;
   loopLoadState: LoadState;
+  controlSnapshot: RoomControlSnapshot | null;
+  controlLoadState: LoadState;
   agents: AgentSummary[];
   agentLoadState: LoadState;
   agentPaneSize: AgentPaneSize;
@@ -3931,6 +4040,11 @@ function RoomTaskDetailPanel({
               messages={messages}
               loadState={messagesLoadState}
             />
+            <RoomOperatorPulse
+              compact={compact}
+              snapshot={controlSnapshot}
+              loadState={controlLoadState}
+            />
             <RoomLoopPreview
               roomId={selectedItem.room.id}
               loop={loop}
@@ -3943,6 +4057,7 @@ function RoomTaskDetailPanel({
               cards={cards}
               loadState={cardLoadState}
               selectedId={selectedRoomCardId}
+              snapshot={controlSnapshot}
             />
             <RoomAgentPanes
               compact={compact}
@@ -3980,6 +4095,8 @@ function RoomTaskDetailPanel({
             messagesLoadState={messagesLoadState}
             loop={loop}
             loopLoadState={loopLoadState}
+            controlSnapshot={controlSnapshot}
+            controlLoadState={controlLoadState}
             agents={agents}
             agentLoadState={agentLoadState}
             agentPaneSize={agentPaneSize}
@@ -4008,6 +4125,8 @@ function RoomSummaryDetail({
   messagesLoadState,
   loop,
   loopLoadState,
+  controlSnapshot,
+  controlLoadState,
   agents,
   agentLoadState,
   agentPaneSize,
@@ -4029,6 +4148,8 @@ function RoomSummaryDetail({
   messagesLoadState: LoadState;
   loop: RoomLoop | null;
   loopLoadState: LoadState;
+  controlSnapshot: RoomControlSnapshot | null;
+  controlLoadState: LoadState;
   agents: AgentSummary[];
   agentLoadState: LoadState;
   agentPaneSize: AgentPaneSize;
@@ -4078,6 +4199,11 @@ function RoomSummaryDetail({
         }
         compact={compact}
       />
+      <RoomOperatorPulse
+        compact={compact}
+        snapshot={controlSnapshot}
+        loadState={controlLoadState}
+      />
       <RoomMessagesPreview messages={messages} loadState={messagesLoadState} />
       <RoomLoopPreview
         roomId={selectedItem.room.id}
@@ -4090,6 +4216,7 @@ function RoomSummaryDetail({
         cards={cards}
         loadState={cardLoadState}
         selectedId={selectedRoomCardId}
+        snapshot={controlSnapshot}
       />
       <RoomAgentPanes
         compact={compact}
@@ -4105,6 +4232,135 @@ function RoomSummaryDetail({
         selectedSessionId={selectedATCPSessionId}
         loadState={atcpLoadState}
       />
+    </box>
+  );
+}
+
+function RoomOperatorPulse({
+  compact,
+  snapshot,
+  loadState,
+}: {
+  compact: boolean;
+  snapshot: RoomControlSnapshot | null;
+  loadState: LoadState;
+}) {
+  if (loadState === "loading") {
+    return (
+      <box style={{ flexDirection: "column", gap: 1 }}>
+        <text fg={theme.focus}>room ops loading</text>
+        <text fg={theme.muted}>reading control snapshot for {ACTOR_ID}</text>
+      </box>
+    );
+  }
+  if (!snapshot) {
+    return (
+      <box style={{ flexDirection: "column", gap: 1 }}>
+        <text fg={loadState === "error" ? theme.warning : theme.muted}>
+          room ops unavailable
+        </text>
+        <text fg={theme.muted}>
+          status, inbox, participants, and linked cards need control snapshot.
+        </text>
+      </box>
+    );
+  }
+  const inbox = snapshot.inbox;
+  const taskPulse = roomSnapshotTaskPulse(snapshot);
+  const participantRows = roomOperatorParticipantRows(
+    snapshot,
+    compact ? 2 : 4,
+  );
+  const latest = inbox.latest_actionable?.[0];
+  const loopTone = roomLoopHealthTone(snapshot.loop_health.status);
+  const loopLabel = [
+    snapshot.loop_health.status,
+    snapshot.loop_health.last_tick_age,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const activeReminderCount = snapshot.reminders.filter(
+    (item) => item.active,
+  ).length;
+  const actorWidth = compact ? 28 : 46;
+  const metaWidth = compact ? 42 : 78;
+  return (
+    <box style={{ flexDirection: "column", gap: 1 }}>
+      <box
+        style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          height: 1,
+        }}
+      >
+        <text fg={theme.focus}>room ops</text>
+        <text fg={toneColor(loopTone)}>
+          {truncate(loopLabel, compact ? 28 : 46)}
+        </text>
+      </box>
+      <text fg={inbox.count > 0 ? theme.warning : theme.success}>
+        {truncate(
+          `actor ${inbox.actor_id} inbox ${inbox.count} (${inbox.ack_required} ack / ${inbox.reply_expected} replies)`,
+          compact ? 74 : 126,
+        )}
+      </text>
+      {latest && (
+        <text fg={theme.warning}>
+          {truncate(
+            `next ${latest.category} from ${shortActorLabel(latest.sender)}: ${latest.preview || latest.subject || latest.id}`,
+            compact ? 74 : 126,
+          )}
+        </text>
+      )}
+      <text fg={theme.muted}>
+        {truncate(
+          `tasks ${snapshot.task_count} (${taskPulse})  reminders ${activeReminderCount}  cards ${snapshot.linked_orchestration_cards.length}`,
+          compact ? 74 : 126,
+        )}
+      </text>
+      <text fg={theme.muted}>
+        {truncate(roomSnapshotAgileSummary(snapshot), compact ? 74 : 126)}
+      </text>
+      {snapshot.loop_health.reason && (
+        <text fg={theme.warning}>
+          {truncate(snapshot.loop_health.reason, compact ? 74 : 126)}
+        </text>
+      )}
+      {snapshot.loop.last_delivery_trace?.outcome && (
+        <text fg={theme.muted}>
+          {truncate(
+            roomDeliveryTraceSummary(snapshot.loop),
+            compact ? 74 : 126,
+          )}
+        </text>
+      )}
+      {participantRows.length > 0 && (
+        <box style={{ flexDirection: "column", gap: 0 }}>
+          <text fg={theme.focus}>participants</text>
+          {participantRows.map((participant) => (
+            <box
+              key={`room-ops-participant:${participant.actor_id}`}
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                height: 1,
+              }}
+            >
+              <text fg={roomParticipantTone(participant)}>
+                {truncate(
+                  `${shortActorLabel(participant.actor_id)} ${
+                    participant.role || "member"
+                  }`,
+                  actorWidth,
+                )}
+              </text>
+              <text fg={theme.muted}>
+                {truncate(participantOpsSummary(participant), metaWidth)}
+              </text>
+            </box>
+          ))}
+        </box>
+      )}
     </box>
   );
 }
@@ -4135,6 +4391,7 @@ function RoomOrchestrationStrip({
   cards,
   loadState,
   selectedId,
+  snapshot,
 }: {
   compact: boolean;
   room: RoomTaskWorkItem["room"];
@@ -4142,9 +4399,14 @@ function RoomOrchestrationStrip({
   cards: OrchestrationCardWorkItem[];
   loadState: LoadState;
   selectedId: string | null;
+  snapshot?: RoomControlSnapshot | null;
 }) {
   const visibleCards = roomOrchestrationCards(cards, room, taskId, compact);
+  const snapshotCards = roomSnapshotCards(snapshot, taskId, compact);
   const summary = roomBoardSummary(cards);
+  const exactCount = snapshot?.linked_orchestration_cards.length ?? 0;
+  const boardBase = summary || "no cards loaded";
+  const boardLine = `${boardBase}  exact ${exactCount}  v select  Enter open card`;
   return (
     <box style={{ flexDirection: "column", gap: 1 }}>
       <text fg={loadState === "loading" ? theme.focus : theme.focus}>
@@ -4153,36 +4415,64 @@ function RoomOrchestrationStrip({
       <text fg={theme.muted}>
         {loadState === "loading"
           ? "loading board activity"
-          : `${summary || "no cards loaded"}  v select  Enter open card`}
+          : boardLine}
       </text>
-      {visibleCards.length === 0 ? (
+      {visibleCards.length === 0 && snapshotCards.length === 0 ? (
         <text fg={theme.muted}>
           {loadState === "error"
             ? "card board unavailable"
             : "+ in Cards creates board work; linked cards appear here."}
         </text>
       ) : (
-        visibleCards.map((item) => (
-          <box
-            key={`room-card:${item.id}`}
-            style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              height: 1,
-              backgroundColor: item.id === selectedId ? theme.panelAlt : theme.bg,
-            }}
-          >
-            <text fg={toneColor(cardToneForLane(item.laneId, item.card.state))}>
-              {truncate(
-                `${item.id === selectedId ? "> " : "  "}${item.laneId} ${item.card.issue_identifier || item.card.issue_id}`,
-                compact ? 34 : 52,
-              )}
-            </text>
-            <text fg={cardPolicyTone(item.card)}>
-              {truncate(cardRoomCardMeta(item), compact ? 28 : 52)}
-            </text>
-          </box>
-        ))
+        <>
+          {visibleCards.map((item) => (
+            <box
+              key={`room-card:${item.id}`}
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                height: 1,
+                backgroundColor:
+                  item.id === selectedId ? theme.panelAlt : theme.bg,
+              }}
+            >
+              <text
+                fg={toneColor(cardToneForLane(item.laneId, item.card.state))}
+              >
+                {truncate(
+                  `${item.id === selectedId ? "> " : "  "}${item.laneId} ${item.card.issue_identifier || item.card.issue_id}`,
+                  compact ? 34 : 52,
+                )}
+              </text>
+              <text fg={cardPolicyTone(item.card)}>
+                {truncate(cardRoomCardMeta(item), compact ? 28 : 52)}
+              </text>
+            </box>
+          ))}
+          {visibleCards.length === 0 &&
+            snapshotCards.map((card) => (
+              <box
+                key={`room-snapshot-card:${card.issue_id}`}
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  height: 1,
+                }}
+              >
+                <text
+                  fg={toneColor(cardToneForLane(card.lane ?? "", card.state))}
+                >
+                  {truncate(
+                    `  ${card.lane || card.state} ${card.issue_identifier || card.issue_id}`,
+                    compact ? 34 : 52,
+                  )}
+                </text>
+                <text fg={theme.muted}>
+                  {truncate(snapshotCardMeta(card), compact ? 28 : 52)}
+                </text>
+              </box>
+            ))}
+        </>
       )}
     </box>
   );
@@ -4561,6 +4851,9 @@ function RoomLoopPreview({
       )}
       {health.tone !== "success" && (
         <text fg={theme.warning}>{truncate(startCommand, 110)}</text>
+      )}
+      {health.tone !== "success" && (
+        <text fg={theme.muted}>press o to start or revive this loop</text>
       )}
     </box>
   );
@@ -5318,6 +5611,133 @@ function roomLoopHealth(
   return { tone: "success", text: "active" };
 }
 
+function roomLoopHealthTone(status: string): Tone {
+  switch (status.trim().toLowerCase()) {
+    case "active":
+      return "success";
+    case "missing_heartbeat":
+    case "missing_owner":
+    case "stale":
+      return "warning";
+    default:
+      return "muted";
+  }
+}
+
+function roomDeliveryTraceSummary(loop: RoomLoop): string {
+  const trace = loop.last_delivery_trace;
+  if (!trace) return "";
+  const actor = trace.chosen_actor_id || trace.recipient || "unknown";
+  const transport =
+    trace.chosen_transport_kind || trace.relay_backend || "transport";
+  const delivered = trace.delivered_count ?? 0;
+  const failed = trace.failed_count ?? 0;
+  const counts =
+    typeof trace.delivered_count === "number" ||
+    typeof trace.failed_count === "number"
+      ? `${delivered}/${delivered + failed}`
+      : "";
+  return [
+    "delivery",
+    trace.outcome || "unknown",
+    shortActorLabel(actor),
+    transport,
+    trace.fallback_attempted ? "fallback" : "",
+    counts,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function roomSnapshotTaskPulse(snapshot: RoomControlSnapshot): string {
+  const counts = new Map<string, number>();
+  let blocked = 0;
+  for (const task of snapshot.tasks) {
+    const status = task.status || "unknown";
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+    if (task.blocked_reason || status === "blocked") blocked++;
+  }
+  const parts = ["pending", "assigned", "in_progress", "blocked", "completed"]
+    .map((status) => {
+      const count = status === "blocked" ? blocked : counts.get(status) ?? 0;
+      return count > 0 ? `${status.replace("_", " ")} ${count}` : "";
+    })
+    .filter(Boolean);
+  return parts.length > 0 ? parts.join(" / ") : "no active tasks";
+}
+
+function roomSnapshotAgileSummary(snapshot: RoomControlSnapshot): string {
+  const epicIDs = uniqueNonEmpty(snapshot.tasks.map((task) => task.epic_id));
+  const milestoneIDs = uniqueNonEmpty(
+    snapshot.tasks.map((task) => task.milestone_id),
+  );
+  const linkedReminders = snapshot.reminders.filter(
+    (reminder) => reminder.story_id || reminder.milestone_id || reminder.task_id,
+  ).length;
+  if (epicIDs.length === 0 && milestoneIDs.length === 0) {
+    return linkedReminders > 0
+      ? `agile reminders ${linkedReminders}`
+      : "agile no active epic or milestone links";
+  }
+  return `agile epics ${epicIDs.length} milestones ${milestoneIDs.length} linked reminders ${linkedReminders}`;
+}
+
+function roomOperatorParticipantRows(
+  snapshot: RoomControlSnapshot,
+  limit: number,
+): RoomStatusParticipant[] {
+  return [...snapshot.participants]
+    .sort((left, right) => {
+      const leftScore = participantOpsPriority(left);
+      const rightScore = participantOpsPriority(right);
+      if (leftScore !== rightScore) return rightScore - leftScore;
+      return left.actor_id.localeCompare(right.actor_id);
+    })
+    .slice(0, limit);
+}
+
+function participantOpsPriority(participant: RoomStatusParticipant): number {
+  let score = participant.actionable_inbox_count * 10;
+  if (participant.status === "stale") score += 5;
+  if (participant.assigned_task_count > 0) score += 3;
+  if (participant.unbound) score += 2;
+  return score;
+}
+
+function roomParticipantTone(participant: RoomStatusParticipant): string {
+  if (participant.unbound) return theme.warning;
+  if (participant.status === "stale") return theme.warning;
+  if (participant.actionable_inbox_count > 0) return theme.warning;
+  if (participant.status === "active") return theme.success;
+  return theme.text;
+}
+
+function participantOpsSummary(participant: RoomStatusParticipant): string {
+  const membership = participant.unbound ? "unbound" : "member";
+  const transport =
+    participant.transport_status || participant.transport_kind || "no transport";
+  const runtime = participant.runtime_binding_status || "runtime unknown";
+  const view = participant.backend
+    ? `${participant.backend}${
+        participant.pane_id ? `:${participant.pane_id}` : ""
+      }`
+    : "no viewer";
+  return [
+    membership,
+    transport,
+    runtime,
+    view,
+    participant.assigned_task_count > 0
+      ? `tasks ${participant.assigned_task_count}`
+      : "",
+    participant.actionable_inbox_count > 0
+      ? `inbox ${participant.actionable_inbox_count}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("  ");
+}
+
 function agentStateTone(state?: string): string {
   switch ((state ?? "").trim().toLowerCase()) {
     case "running":
@@ -5357,10 +5777,6 @@ function atcpSessionTone(
   }
 }
 
-function atcpScreenPreview(screen?: ATCPScreen): string {
-  return atcpScreenLines(screen, 1)[0] ?? "";
-}
-
 function atcpScreenLines(screen: ATCPScreen | undefined, max: number): string[] {
   if (!screen || !Array.isArray(screen.lines)) return [];
   const lines: string[] = [];
@@ -5376,6 +5792,24 @@ function roomLoopStartCommand(roomId: string): string {
   return `./bin/foxctl room loop ${shellQuote(roomId)} --workspace ${shellQuote(
     WORKSPACE_ID,
   )}`;
+}
+
+function spawnRoomLoopProcess(roomId: string): { pid?: number } {
+  const cwd = WORKSPACE_ROOT.trim() || process.cwd();
+  const localBinary = join(cwd, "bin", "foxctl");
+  const binary = existsSync(localBinary) ? localBinary : "foxctl";
+  const child = spawnChildProcess(
+    binary,
+    ["room", "loop", roomId, "--workspace", WORKSPACE_ID || "."],
+    {
+      cwd,
+      detached: true,
+      stdio: "ignore",
+      env: process.env,
+    },
+  );
+  child.unref();
+  return { pid: child.pid };
 }
 
 function shellQuote(value: string): string {
@@ -5619,6 +6053,34 @@ function roomBoardSummary(cards: OrchestrationCardWorkItem[]): string {
     })
     .filter(Boolean);
   return parts.length > 0 ? parts.join(" / ") : `${cards.length} board cards`;
+}
+
+function roomSnapshotCards(
+  snapshot: RoomControlSnapshot | null | undefined,
+  taskId: string | undefined,
+  compact: boolean,
+): RoomControlSnapshot["linked_orchestration_cards"] {
+  if (!snapshot) return [];
+  const taskID = taskId?.trim();
+  const cards = taskID
+    ? snapshot.linked_orchestration_cards.filter(
+        (card) => card.linked_task_id === taskID || card.issue_id === taskID,
+      )
+    : snapshot.linked_orchestration_cards;
+  return cards.slice(0, compact ? 3 : 6);
+}
+
+function snapshotCardMeta(
+  card: RoomControlSnapshot["linked_orchestration_cards"][number],
+): string {
+  return [
+    card.agent_id ? shortActorLabel(card.agent_id) : "",
+    card.run_id ? "run" : "",
+    card.policy_status || "",
+    card.eligibility || "",
+  ]
+    .filter(Boolean)
+    .join("  ");
 }
 
 function cardRoomCardMeta(item: OrchestrationCardWorkItem): string {
@@ -6307,6 +6769,15 @@ function cardStatus(cardCount: number, artifact?: string): string {
   if (artifact) return "board stored as artifact";
   if (cardCount === 0) return "no cards";
   return `${cardCount} cards loaded`;
+}
+
+function uniqueNonEmpty(values: Array<string | undefined>): string[] {
+  const out = new Set<string>();
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) out.add(trimmed);
+  }
+  return [...out];
 }
 
 function truncate(value: string, max: number): string {

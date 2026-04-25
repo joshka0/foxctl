@@ -1,6 +1,6 @@
 ---
 name: foxctl-epic-grader
-description: "Grade a foxctl room-agile epic as an epic-creation artifact and output a scored report with clear boundaries, blockers, and upgrade actions. Use when an imported or drafted epic needs a 0-100 score, READY/NOT READY decision, and explicit guidance on what to improve before implementation begins."
+description: "Grade a foxctl room-agile epic as a planning artifact: score readiness, surface blockers, and prescribe upgrade actions."
 ---
 
 # foxctl-epic-grader

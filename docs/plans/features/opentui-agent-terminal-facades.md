@@ -399,6 +399,12 @@ Acceptance:
 - participant membership, runtime process, transport binding, and viewer/mux
   state are distinct fields
 
+Status: the backend exposes this facade and foxterm now consumes it in the
+Rooms detail view. The TUI uses the snapshot for a room-operator pulse: local
+actor inbox obligations, loop health, active reminders, task/card counts,
+latest delivery trace, agile task links, and participant membership/transport/
+runtime/viewer state.
+
 Likely files:
 
 - `internal/interfaces/web/api/rooms.go`
@@ -685,7 +691,13 @@ Rooms now carry a first management pass: the composer states the active target
 (`room`, `daemon agent`, `ATCP CLI`, or focused ATCP participant), and room
 detail surfaces linked/active orchestration cards. Room detail can also cycle
 the visible card selection with `v` and open the selected room card in Cards
-with `Enter`.
+with `Enter`. The detail pane also reads the room control snapshot so Codex or
+another human coordinator can see local inbox obligations, loop health,
+participant routing health, active reminders, linked agile/task state, and
+room-linked orchestration cards without reconstructing state from message
+scrollback or ATCP pane output. Rooms also expose `o` to enable the persisted
+loop policy and spawn `foxctl room loop <room-id>` locally when the loop is
+missing, disabled, stale, or missing a delivery owner.
 
 ## Worker Split
 

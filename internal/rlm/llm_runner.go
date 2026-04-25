@@ -177,6 +177,13 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	}
 	answer := strings.TrimSpace(output.AssistantText)
 	if answer == "" {
+		if output.StopReason != "" && output.StopReason != engine.StopReasonEndTurn {
+			detail := strings.TrimSpace(output.Error)
+			if detail != "" {
+				return Result{}, fmt.Errorf("rlm llm runner: %s before assistant response: %s", output.StopReason, detail)
+			}
+			return Result{}, fmt.Errorf("rlm llm runner: %s before assistant response", output.StopReason)
+		}
 		return Result{}, fmt.Errorf("rlm llm runner: empty assistant response")
 	}
 	evidence := collectEvidenceRefs(env)

@@ -107,7 +107,7 @@ func newRLMRunCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&requireToolUse, "require-tool-use", true, "Require the LLM executor to make at least one tool call before answering")
 	cmd.Flags().StringVar(&toolProfile, "tool-profile", rlmenv.ToolProfileDefault, "Experimental RLM tool profile: default or code-intel")
 	cmd.Flags().StringVar(&routeProfile, "route-profile", string(rlm.RouteProfileAuto), "Experimental RLM route profile: auto, code_retrieval, memory_recall, mixed, or evidence_audit")
-	cmd.Flags().StringVar(&planMode, "plan-mode", string(rlm.PlanModeFree), "Experimental planning mode: free, guided, staged, or hard")
+	cmd.Flags().StringVar(&planMode, "plan-mode", string(rlm.PlanModeFree), "Experimental planning mode: free, guided, staged, hard, or lambda")
 	cmd.Flags().IntVar(&maxDepth, "max-depth", 1, "Maximum recursion depth")
 	cmd.Flags().IntVar(&maxIterations, "max-iterations", 8, "Maximum root iterations")
 	cmd.Flags().IntVar(&maxSubcalls, "max-subcalls", 8, "Maximum subcalls")
@@ -137,6 +137,22 @@ func chooseRLMRunner(
 ) rlm.Runner {
 	switch strings.ToLower(strings.TrimSpace(executor)) {
 	case "llm", "lmstudio":
+		pm := rlm.NormalizePlanMode(planMode)
+		if pm == rlm.PlanModeLambda {
+			llmCfg := rlm.LLMConfig{
+				Provider:  firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
+				Model:     firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
+				BaseURL:   firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
+				APIKey:    firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
+				Timeout:   llmTimeout,
+			}
+			return rlm.LambdaRunner{
+				Tools: adapter,
+				Config: rlm.LambdaConfig{
+					LLM: llmCfg,
+				},
+			}
+		}
 		return rlm.LLMRunner{
 			Tools: adapter,
 			Config: rlm.LLMConfig{
@@ -148,7 +164,7 @@ func chooseRLMRunner(
 				MaxIterations:  task.MaxIterations,
 				RequireToolUse: requireToolUse,
 				RouteProfile:   rlm.NormalizeRouteProfile(routeProfile),
-				PlanMode:       rlm.NormalizePlanMode(planMode),
+				PlanMode:       pm,
 			},
 		}
 	default:

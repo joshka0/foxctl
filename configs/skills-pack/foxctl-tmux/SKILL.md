@@ -1,6 +1,6 @@
 ---
 name: foxctl-tmux
-description: "Compatibility alias for the room presentation layer. Prefer `foxctl-room-view` for current tmux/zellij/gui viewer guidance."
+description: "Compatibility alias for the room viewer layer. Prefer `foxctl-room-view` for current tmux, zellij, and GUI guidance."
 ---
 
 # Mux Collaboration

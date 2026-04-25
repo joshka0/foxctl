@@ -192,11 +192,30 @@ export interface RoomLoop {
   coordinator_pulse_enabled?: boolean;
   coordinator_escalation_enabled?: boolean;
   last_delivery_trace?: {
+    workspace_id?: string;
+    room_id?: string;
     message_id?: string;
+    task_id?: string;
     recipient?: string;
+    delivery_lease_name?: string;
+    delivery_owner_id?: string;
+    relay_backend?: string;
+    chosen_actor_id?: string;
+    chosen_mux_backend?: string;
+    chosen_mux_session?: string;
+    chosen_mux_pane_id?: string;
+    chosen_transport_endpoint?: string;
+    chosen_transport_kind?: string;
+    chosen_submit_mode?: string;
+    fallback_attempted?: boolean;
     outcome?: string;
     delivered_count?: number;
     failed_count?: number;
+    delivered_to?: string[];
+    failed_members?: string[];
+    cursor_before_message_id?: string;
+    cursor_after_message_id?: string;
+    cursor_advanced?: boolean;
     observed_at?: string;
   };
 }
@@ -204,6 +223,134 @@ export interface RoomLoop {
 export interface RoomLoopResult {
   room_id: string;
   loop: RoomLoop;
+}
+
+export interface PatchRoomLoopInput {
+  roomId: string;
+  workspaceId?: string;
+  actorId?: string;
+  enabled?: boolean;
+  coordinatorPulseEnabled?: boolean;
+  coordinatorEscalationEnabled?: boolean;
+}
+
+export interface RoomStatusEntry {
+  id: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  priority: number;
+  status: string;
+  created_at: string;
+  category: string;
+  flags?: string[];
+  preview?: string;
+}
+
+export interface RoomStatusParticipant {
+  actor_id: string;
+  role?: string;
+  backend?: string;
+  session?: string;
+  pane_id?: string;
+  unbound?: boolean;
+  transport_endpoint?: string;
+  transport_kind?: string;
+  delivery_binding?: unknown;
+  transport_status?: string;
+  runtime_binding_status?: string;
+  last_active_at?: string;
+  status: string;
+  assigned_task_count: number;
+  owned_task_count: number;
+  actionable_inbox_count: number;
+  latest_actionable?: RoomStatusEntry;
+}
+
+export interface RoomLoopHealth {
+  status: string;
+  reason?: string;
+  last_tick_age?: string;
+}
+
+export interface RoomControlInbox {
+  actor_id: string;
+  count: number;
+  ack_required: number;
+  reply_expected: number;
+  latest_actionable?: RoomStatusEntry[];
+}
+
+export interface RoomControlMessage {
+  id: string;
+  task_id?: string;
+  related_message_id?: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  kind: string;
+  status: string;
+  ack_required?: boolean;
+  reply_expected?: boolean;
+  priority: number;
+  created_at: string;
+  preview?: string;
+}
+
+export interface RoomControlReminder {
+  id: string;
+  workspace_id: string;
+  room_id: string;
+  root_message_id: string;
+  task_id?: string;
+  story_id?: string;
+  milestone_id?: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  body: string;
+  ack_required: boolean;
+  reply_expected: boolean;
+  interrupt: boolean;
+  passive: boolean;
+  interval: string;
+  max_iterations: number;
+  sent_count: number;
+  active: boolean;
+  last_sent_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface RoomLinkedOrchestrationCard {
+  issue_id: string;
+  issue_identifier?: string;
+  title?: string;
+  state: string;
+  lane?: string;
+  tracker_state?: string;
+  policy_status?: string;
+  last_outcome?: string;
+  eligibility?: string;
+  run_id?: string;
+  agent_id?: string;
+  linked_task_id?: string;
+}
+
+export interface RoomControlSnapshot {
+  room: Room;
+  participants: RoomStatusParticipant[];
+  loop: RoomLoop;
+  loop_health: RoomLoopHealth;
+  inbox: RoomControlInbox;
+  tasks: RoomTask[];
+  task_count: number;
+  reminders: RoomControlReminder[];
+  messages: RoomControlMessage[];
+  linked_orchestration_cards: RoomLinkedOrchestrationCard[];
+  task_card_link?: string;
+  task_filter?: string;
+  issue_filter?: string;
 }
 
 export interface SpawnAgentInput {
@@ -605,6 +752,83 @@ export async function getRoomLoop(params: {
   );
 }
 
+export async function patchRoomLoop(
+  input: PatchRoomLoopInput,
+): Promise<RoomLoopResult> {
+  const roomId = input.roomId.trim();
+  if (roomId === "") {
+    throw new Error("room_id is required");
+  }
+  const body: Record<string, unknown> = {
+    workspace_id: input.workspaceId ?? WORKSPACE_ID,
+    actor_id: input.actorId ?? ACTOR_ID,
+  };
+  if (typeof input.enabled === "boolean") {
+    body.enabled = input.enabled;
+  }
+  if (typeof input.coordinatorPulseEnabled === "boolean") {
+    body.coordinator_pulse_enabled = input.coordinatorPulseEnabled;
+  }
+  if (typeof input.coordinatorEscalationEnabled === "boolean") {
+    body.coordinator_escalation_enabled = input.coordinatorEscalationEnabled;
+  }
+  return requestJSON<RoomLoopResult>(
+    `/api/rooms/${encodeURIComponent(roomId)}/loop`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function getRoomControlSnapshot(params: {
+  roomId: string;
+  workspaceId?: string;
+  actorId?: string;
+  taskId?: string;
+  issueId?: string;
+}): Promise<RoomControlSnapshot> {
+  const roomId = params.roomId.trim();
+  if (roomId === "") {
+    throw new Error("room_id is required");
+  }
+  const query = new URLSearchParams();
+  query.set("workspace_id", params.workspaceId ?? WORKSPACE_ID);
+  query.set("actor_id", params.actorId ?? ACTOR_ID);
+  const taskId = params.taskId?.trim();
+  const issueId = params.issueId?.trim();
+  if (taskId) query.set("task_id", taskId);
+  if (issueId) query.set("issue_id", issueId);
+  const result = await requestJSON<RoomControlSnapshot>(
+    `/api/rooms/${encodeURIComponent(roomId)}/control-snapshot?${query.toString()}`,
+  );
+  return {
+    ...result,
+    room: result.room,
+    participants: safeArray(result?.participants),
+    loop: result?.loop ?? { enabled: false },
+    loop_health: result?.loop_health ?? { status: "unknown" },
+    inbox: result?.inbox ?? {
+      actor_id: params.actorId ?? ACTOR_ID,
+      count: 0,
+      ack_required: 0,
+      reply_expected: 0,
+      latest_actionable: [],
+    },
+    tasks: safeArray(result?.tasks).filter(hasID),
+    reminders: safeArray(result?.reminders).filter(hasID),
+    messages: safeArray(result?.messages).filter(hasID),
+    linked_orchestration_cards: safeArray(
+      result?.linked_orchestration_cards,
+    ).filter(hasIssueID),
+    task_count:
+      typeof result?.task_count === "number"
+        ? result.task_count
+        : safeArray(result?.tasks).length,
+  };
+}
+
 export async function spawnAgent(
   input: SpawnAgentInput,
 ): Promise<SpawnAgentResult> {
@@ -1001,7 +1225,7 @@ async function requestEnvelope<T>(
       ...init,
       headers: {
         Accept: "application/json",
-        ...(init?.headers ?? {}),
+        ...init?.headers,
       },
     });
   } catch (error) {
@@ -1030,7 +1254,7 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: {
         Accept: "application/json",
-        ...(init?.headers ?? {}),
+        ...init?.headers,
       },
     });
   } catch (error) {

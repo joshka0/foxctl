@@ -1,6 +1,6 @@
 ---
 name: foxctl-room-operator
-description: "Operate inside an existing foxctl room: orient from room status/inbox, claim and update room tasks correctly, escalate to @coordinator, and close work with durable completion or review notes."
+description: "Operate inside an existing foxctl room: orient from status or inbox, manage tasks correctly, escalate, and close with durable updates."
 ---
 
 # foxctl-room-operator

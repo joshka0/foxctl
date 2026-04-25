@@ -1,6 +1,6 @@
 ---
 name: foxctl-mobile
-description: "Mobile simulator automation for iOS + Android via foxctl (tap, launch, screenshots, inspect UI)."
+description: "Drive iOS Simulator and Android Emulator via foxctl for taps, launches, screenshots, UI inspection, and quick QA loops."
 ---
 
 ## What I do

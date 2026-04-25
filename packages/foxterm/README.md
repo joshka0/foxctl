@@ -15,6 +15,7 @@ built around the backend facades used by OpenTUI:
 - `GET /api/rooms/{room_id}/messages`
 - `POST /api/rooms/{room_id}/messages`
 - `GET /api/rooms/{room_id}/loop`
+- `GET /api/rooms/{room_id}/control-snapshot`
 - `POST /api/agents/spawn`
 - `GET /api/atcp/sessions`
 - `GET /api/atcp/foxctl-rooms/{room_id}/sessions`
@@ -52,6 +53,7 @@ Runs view shortcuts:
 - `x` opens a confirmation prompt for killing the selected active run.
 - `+` or `Shift+n` creates a room from Rooms or an orchestration card from Cards.
 - `m` writes a message to the selected room.
+- `o` enables and starts or revives the selected room loop.
 - `s` spawns a foxctl daemon agent into the selected room.
 - `Shift+s` spawns an ATCP-backed CLI session into the selected room.
 - `v` cycles the focused ATCP CLI session screen detail.
@@ -82,7 +84,13 @@ target, before sending.
 
 Room messages require the room loop to be active. Foxterm shows loop heartbeat
 and delivery-owner status in the room detail panel, plus a `./bin/foxctl room
-loop ...` start command when the loop is not ready.
+loop ...` start command when the loop is not ready. Press `o` in Rooms to
+enable the persisted loop policy and spawn `foxctl room loop <room-id>` as a
+local background process for the selected room.
+Room detail also reads the room control snapshot for the local actor. The
+operator pulse shows local inbox obligations, loop health, active reminders,
+task/card counts, latest delivery trace, and participant state as separate
+membership, transport, runtime, and viewer signals.
 Room detail also shows a compact orchestration strip with linked task cards and
 active board cards so room work and coordinator-created board activity stay
 visible without switching scopes. In Rooms detail focus, `v` cycles the
