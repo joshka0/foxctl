@@ -158,9 +158,12 @@ func TestLLMRunnerPreservesCancelledBeforeAssistantResponse(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
+		t.Fatal("server should not be called when context is already cancelled")
 	}))
 	defer server.Close()
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
 
 	runner := LLMRunner{
 		Tools: fakeLLMToolExecutor{},
@@ -169,12 +172,12 @@ func TestLLMRunnerPreservesCancelledBeforeAssistantResponse(t *testing.T) {
 			APIKey:        "lm-studio",
 			BaseURL:       server.URL + "/v1",
 			Model:         "test-model",
-			Timeout:       50 * time.Millisecond,
+			Timeout:       5 * time.Second,
 			MaxIterations: 2,
 		},
 	}
 
-	_, err := runner.Run(context.Background(), Task{
+	_, err := runner.Run(ctx, Task{
 		Prompt:        "inspect auth flow",
 		WorkspaceRoot: "/tmp/workspace",
 		MaxIterations: 2,
