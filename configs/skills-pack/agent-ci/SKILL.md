@@ -1,6 +1,6 @@
 ---
 name: agent-ci
-description: "Run GitHub Actions CI locally with agent-ci before pushing. Pause on failure, fix, retry."
+description: "Run GitHub Actions CI locally before push: execute workflows, stop on failures, fix issues, and rerun the broken step."
 ---
 
 ## What I do

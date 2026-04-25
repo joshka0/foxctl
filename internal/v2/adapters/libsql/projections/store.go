@@ -53,6 +53,19 @@ type AgentState struct {
 	UpdatedAt         time.Time
 }
 
+// RunStateFilter selects run projection rows.
+type RunStateFilter struct {
+	Limit   int
+	Status  string
+	Command string
+	ActorID string
+}
+
+const (
+	defaultRunStateListLimit = 20
+	maxRunStateListLimit     = 200
+)
+
 // LegacyResolver resolves v1 IDs to v2 IDs.
 type LegacyResolver interface {
 	ResolveV2ID(ctx context.Context, entityType, legacyID string) (string, error)
@@ -71,6 +84,14 @@ func NewStore(db *sql.DB) *Store {
 			return time.Now().UTC()
 		},
 	}
+}
+
+// SetNowForTest overrides the clock for deterministic tests.
+func (s *Store) SetNowForTest(now func() time.Time) {
+	if s == nil || now == nil {
+		return
+	}
+	s.now = now
 }
 
 // Apply materializes one event into projection tables.
@@ -204,16 +225,108 @@ func (s *Store) GetRunState(ctx context.Context, runID string) (RunState, error)
 	if s == nil || s.db == nil {
 		return RunState{}, fmt.Errorf("v2 projections get run: nil store")
 	}
-	var (
-		out       RunState
-		updatedAt string
-	)
-	err := s.db.QueryRowContext(ctx, `
+	row := s.db.QueryRowContext(ctx, `
 		SELECT run_id, status, last_event_id, last_stream_version, COALESCE(command, ''),
 		       COALESCE(request_id, ''), COALESCE(actor_id, ''), updated_at
 		FROM v2_run_state
 		WHERE run_id = $1
-	`, runID).Scan(
+	`, runID)
+	out, scanErr := scanRunState(row)
+	if scanErr != nil {
+		return RunState{}, scanErr
+	}
+	return out, nil
+}
+
+// GetRunStateByRequestID fetches a run projection by request_id for idempotency lookup.
+func (s *Store) GetRunStateByRequestID(ctx context.Context, requestID string) (RunState, error) {
+	if s == nil || s.db == nil {
+		return RunState{}, fmt.Errorf("v2 projections get run by request_id: nil store")
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return RunState{}, v2events.ErrNotFound
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT run_id, status, last_event_id, last_stream_version, COALESCE(command, ''),
+		       COALESCE(request_id, ''), COALESCE(actor_id, ''), updated_at
+		FROM v2_run_state
+		WHERE request_id = $1
+		ORDER BY updated_at DESC, run_id ASC
+		LIMIT 1
+	`, requestID)
+	out, scanErr := scanRunState(row)
+	if scanErr != nil {
+		return RunState{}, scanErr
+	}
+	return out, nil
+}
+
+// ListRunStates returns projected run rows sorted deterministically by updated_at.
+func (s *Store) ListRunStates(ctx context.Context, filter RunStateFilter) ([]RunState, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("v2 projections list runs: nil store")
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = defaultRunStateListLimit
+	}
+	if limit > maxRunStateListLimit {
+		limit = maxRunStateListLimit
+	}
+
+	query := strings.Builder{}
+	query.WriteString(`
+		SELECT run_id, status, last_event_id, last_stream_version, COALESCE(command, ''),
+		       COALESCE(request_id, ''), COALESCE(actor_id, ''), updated_at
+		FROM v2_run_state
+		WHERE 1=1
+	`)
+	args := make([]any, 0, 4)
+	if status := strings.TrimSpace(filter.Status); status != "" {
+		args = append(args, status)
+		fmt.Fprintf(&query, " AND status = $%d", len(args))
+	}
+	if command := strings.TrimSpace(filter.Command); command != "" {
+		args = append(args, command)
+		fmt.Fprintf(&query, " AND command = $%d", len(args))
+	}
+	if actorID := strings.TrimSpace(filter.ActorID); actorID != "" {
+		args = append(args, actorID)
+		fmt.Fprintf(&query, " AND actor_id = $%d", len(args))
+	}
+	args = append(args, limit)
+	fmt.Fprintf(&query, " ORDER BY updated_at DESC, run_id ASC LIMIT $%d", len(args))
+
+	rows, err := s.db.QueryContext(ctx, query.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("query run_state list: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make([]RunState, 0, limit)
+	for rows.Next() {
+		state, scanErr := scanRunState(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate run_state list: %w", err)
+	}
+	return out, nil
+}
+
+func scanRunState(row interface {
+	Scan(dest ...any) error
+},
+) (RunState, error) {
+	var (
+		out       RunState
+		updatedAt string
+	)
+	err := row.Scan(
 		&out.RunID,
 		&out.Status,
 		&out.LastEventID,

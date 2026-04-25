@@ -1,6 +1,6 @@
 ---
 name: foxctl-core
-description: "Core foxctl workflow: run skills, read/write files safely, and do fast repo search."
+description: "Core foxctl workflow for safe file work, fast repo search, and running skills with structured, low-friction commands."
 ---
 
 ## What I do

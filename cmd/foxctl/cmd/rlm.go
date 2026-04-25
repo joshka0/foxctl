@@ -137,6 +137,7 @@ func chooseRLMRunner(
 ) rlm.Runner {
 	switch strings.ToLower(strings.TrimSpace(executor)) {
 	case "llm", "lmstudio":
+		pm := rlm.NormalizePlanMode(planMode)
 		return rlm.LLMRunner{
 			Tools: adapter,
 			Config: rlm.LLMConfig{
@@ -148,7 +149,7 @@ func chooseRLMRunner(
 				MaxIterations:  task.MaxIterations,
 				RequireToolUse: requireToolUse,
 				RouteProfile:   rlm.NormalizeRouteProfile(routeProfile),
-				PlanMode:       rlm.NormalizePlanMode(planMode),
+				PlanMode:       pm,
 			},
 		}
 	default:

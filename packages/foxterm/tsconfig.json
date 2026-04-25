@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ESNext", "DOM"],
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/react",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.tsbuildinfo",
+    "types": ["bun-types"],
+    "baseUrl": ".",
+    "paths": {
+      "@foxctl/data": ["../data/src/index.ts"],
+      "@foxctl/data/client": ["../data/src/client.ts"],
+      "@foxctl/data/types": ["../data/src/types.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../data/src/**/*.ts"]
+}

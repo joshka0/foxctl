@@ -1,6 +1,6 @@
 ---
 name: foxctl-all
-description: "Single condensed entrypoint for all foxctl workflows (core, code, dev, orchestrate, room collaboration, integrations, mobile)."
+description: "Single entrypoint for foxctl workflows: core, code, dev, orchestration, room collaboration, integrations, and mobile."
 ---
 
 ## Quick Reference

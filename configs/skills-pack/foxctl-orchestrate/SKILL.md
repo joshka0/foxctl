@@ -1,6 +1,6 @@
 ---
 name: foxctl-orchestrate
-description: "Orchestration: tasks/todos, sessions, mailbox/inbox, agent spawn/ask/kill, and multi-agent coordination."
+description: "Coordinate work with tasks, sessions, inbox or mailbox, agent spawn/ask/kill flows, and multi-agent orchestration."
 ---
 
 ## What I do

@@ -4,19 +4,37 @@
     "claude": {
       "target_dir": "~/.claude/skills",
       "legacy_dir": "~/.claude/skills-legacy",
-      "sources": ["configs/skills-pack"],
+      "sources": ["/Users/joshka/repos/skills/providers/claude"],
       "prune_sources": ["configs/skills-condensed"]
     },
     "codex": {
       "target_dir": "~/.codex/skills",
       "legacy_dir": "~/.codex/skills-legacy",
-      "sources": ["configs/skills-pack"],
+      "sources": ["/Users/joshka/repos/skills/providers/codex"],
+      "prune_sources": ["configs/skills-condensed"]
+    },
+    "agents": {
+      "target_dir": "~/.agents/skills",
+      "legacy_dir": "~/.agents/skills-legacy",
+      "sources": ["/Users/joshka/repos/skills/providers/agents"],
+      "prune_sources": ["configs/skills-condensed"]
+    },
+    "factory": {
+      "target_dir": "~/.factory/skills",
+      "legacy_dir": "~/.factory/skills-legacy",
+      "sources": ["/Users/joshka/repos/skills/providers/factory"],
       "prune_sources": ["configs/skills-condensed"]
     },
     "gemini": {
       "target_dir": "~/.gemini/antigravity/skills",
       "legacy_dir": "~/.gemini/antigravity/skills-legacy",
-      "sources": ["configs/skills-pack"],
+      "sources": ["/Users/joshka/repos/skills/providers/gemini-antigravity"],
+      "prune_sources": ["configs/skills-condensed"]
+    },
+    "gemini-home": {
+      "target_dir": "~/.gemini/skills",
+      "legacy_dir": "~/.gemini/skills-legacy",
+      "sources": ["/Users/joshka/repos/skills/providers/gemini"],
       "prune_sources": ["configs/skills-condensed"]
     },
     "opencode": {

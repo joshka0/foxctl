@@ -1,6 +1,6 @@
 ---
 name: foxctl-dev
-description: "Dev workflow: status/diffs, run tests, check CI, and keep changes verifiable."
+description: "Developer loop for inspecting diffs, running the right tests, checking CI status, and keeping changes verifiable."
 ---
 
 ## What I do

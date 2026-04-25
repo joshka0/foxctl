@@ -285,15 +285,20 @@ func TestSkillsSyncCommandCopiesFoxctlPacksAndLeavesAgentctlEntries(t *testing.T
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"--source", source, "--targets", "codex,gemini"})
+	cmd.SetArgs([]string{"--source", source, "--targets", "codex,gemini,gemini-home"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("skills sync: %v (stderr=%s)", err, stderr.String())
 	}
 
-	for _, target := range []string{".codex", ".gemini"} {
+	targetDirs := []string{
+		filepath.Join(os.Getenv("HOME"), ".codex", "skills"),
+		filepath.Join(os.Getenv("HOME"), ".gemini", "antigravity", "skills"),
+		filepath.Join(os.Getenv("HOME"), ".gemini", "skills"),
+	}
+	for _, targetDir := range targetDirs {
 		for _, skill := range []string{"foxctl-core", "foxctl-epic-pipeline"} {
-			path := filepath.Join(os.Getenv("HOME"), target, "skills", skill, "SKILL.md")
+			path := filepath.Join(targetDir, skill, "SKILL.md")
 			if _, err := os.Stat(path); err != nil {
 				t.Fatalf("expected synced skill %s: %v", path, err)
 			}
@@ -308,7 +313,7 @@ func TestSkillsSyncCommandCopiesFoxctlPacksAndLeavesAgentctlEntries(t *testing.T
 	if !ok {
 		t.Fatalf("expected changes array, got %T", data["changes"])
 	}
-	if got, want := len(changes), 4; got != want {
+	if got, want := len(changes), 6; got != want {
 		t.Fatalf("expected %d changes, got %d", want, got)
 	}
 	for _, raw := range changes {

@@ -30,7 +30,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
 fmt:
 	@echo "Running gofumpt"
@@ -387,6 +387,12 @@ GO_TUI_AGENT_PROMPT ?= You are a local foxctl coding agent backed by LMStudio. H
 GO_TUI_SMOKE_ASK ?= ping from make go-tui-smoke
 GO_TUI_SMOKE_TIMEOUT ?= 3s
 
+# Simplified TUI variables (operator cockpit mode)
+TUI_API_PORT ?= 8090
+TUI_API_URL ?= http://127.0.0.1:$(TUI_API_PORT)
+TUI_WEB_LOG ?= /tmp/foxctl-tui-daemon.log
+TUI_SCREEN ?= agents
+
 go-tui-build:
 	@mkdir -p bin
 	@$(GO_CMD) build -trimpath -o bin/foxctl-tui ./cmd/foxctl_tui
@@ -443,6 +449,30 @@ go-tui-smoke: build go-tui-build
 		exit 2; \
 	fi; \
 	./bin/foxctl-tui --smoke-console --api-base-url "$(GO_TUI_API_URL)" --console-session-id "$(GO_TUI_SESSION_ID)" --smoke-ask "$(GO_TUI_SMOKE_ASK)" --smoke-cancel --smoke-timeout "$(GO_TUI_SMOKE_TIMEOUT)"
+
+# Simplified TUI: build + daemon + operator cockpit (no agents, no LLM required)
+tui: build go-tui-build
+	@set -euo pipefail; \
+	echo "Ensuring foxctl web API at $(TUI_API_URL)..."; \
+	if ! curl -sf "$(TUI_API_URL)/api/health" >/dev/null 2>&1; then \
+		echo "Starting web API on :$(TUI_API_PORT) (logs: $(TUI_WEB_LOG))"; \
+		FOXCTL_DB_DRIVER=$${FOXCTL_DB_DRIVER:-sqlite} FOXCTL_V2_EVENTS_DB_DRIVER=$${FOXCTL_V2_EVENTS_DB_DRIVER:-sqlite} ./bin/foxctl web serve --dev-cors --port $(TUI_API_PORT) > "$(TUI_WEB_LOG)" 2>&1 & \
+		server_pid=$$!; \
+		trap 'kill '"$$server_pid"' 2>/dev/null || true' EXIT; \
+		for _ in $$(seq 1 40); do \
+			curl -sf "$(TUI_API_URL)/api/health" >/dev/null 2>&1 && break; \
+			sleep 0.25; \
+		done; \
+		curl -sf "$(TUI_API_URL)/api/health" >/dev/null || (echo "API health check failed; tailing $(TUI_WEB_LOG)"; tail -n 120 "$(TUI_WEB_LOG)"; exit 1); \
+	else \
+		server_pid=""; \
+		trap ':' EXIT; \
+	fi; \
+	echo "Launching Go TUI ($(TUI_SCREEN) screen)..."; \
+	./bin/foxctl-tui --screen $(TUI_SCREEN) --api-base-url "$(TUI_API_URL)"; \
+	if [ -n "$$server_pid" ]; then \
+		kill $$server_pid 2>/dev/null || true; \
+	fi
 
 # Web UI targets
 web-templ:
