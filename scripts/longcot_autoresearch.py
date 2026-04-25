@@ -45,6 +45,16 @@ VARIANTS = {
         "max_iterations": 64,
         "timeout": "20m",
     },
+    "single_solve_braid_helper": {
+        "condition": "rlm_braid_single",
+        "sandbox": "python",
+        "general_helper": True,
+        "helper_language": "python",
+        "blocksworld_helper": False,
+        "max_tokens": 8192,
+        "max_iterations": 64,
+        "timeout": "20m",
+    },
     "baseline_braid_no_helper": {
         "condition": "rlm_braid_single",
         "sandbox": "python",
