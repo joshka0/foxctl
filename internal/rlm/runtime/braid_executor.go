@@ -268,7 +268,7 @@ func runBraidNodeHelper(
 		"instructions": instructions,
 		"max_attempts": 3,
 	}
-	if input, ok := helperFactoryExtractInstanceFields(rootPrompt); ok {
+	if input := braidHelperInput(rootPrompt, dependencySummaries); len(input) > 0 {
 		argsMap["input"] = input
 	}
 	args, err := json.Marshal(argsMap)
@@ -311,6 +311,30 @@ func runBraidNodeHelper(
 		}
 	}
 	return formatBraidHelperNodeSummary(node, answer), true
+}
+
+func braidHelperInput(rootPrompt string, dependencySummaries map[string]string) map[string]any {
+	input := map[string]any{}
+	if parsed, ok := helperFactoryExtractInstanceFields(rootPrompt); ok {
+		input = cloneMapAny(parsed)
+	}
+	if len(dependencySummaries) == 0 {
+		return input
+	}
+	deps := map[string]any{}
+	for key, value := range dependencySummaries {
+		trimmedKey := strings.TrimSpace(key)
+		trimmedValue := strings.TrimSpace(value)
+		if trimmedKey == "" || trimmedValue == "" {
+			continue
+		}
+		deps[trimmedKey] = trimmedValue
+		input[trimmedKey] = trimmedValue
+	}
+	if len(deps) > 0 {
+		input["dependency_summaries"] = deps
+	}
+	return input
 }
 
 func braidNodeEffectiveHelperPolicy(node BraidNode) string {
@@ -396,6 +420,7 @@ func buildBraidHelperRecoveryInstructions(node BraidNode, failedSummary string) 
 	if node.Kind == "verify" {
 		b.WriteString("For a verify node, simulate or substitute the candidate against the original constraints. Return `pass: true` only when every constraint is verified.\n")
 		b.WriteString("If verification fails, return `pass: false first_failure: ...` with the earliest illegal transition, bad substitution, missing candidate, or observed-vs-expected mismatch. Include the failed step index when applicable.\n")
+		b.WriteString("Dependency summaries are passed in the helper input under dependency_summaries and by dependency node id, for example input['n_solve'] when the graph has an n_solve dependency.\n")
 	}
 	if strings.TrimSpace(node.ExpectedOutput) != "" {
 		b.WriteString("Expected node output: ")

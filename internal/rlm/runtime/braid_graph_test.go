@@ -468,6 +468,25 @@ func TestVerifyStackMoveCandidateFromInput(t *testing.T) {
 	}
 }
 
+func TestBraidHelperInputIncludesDependencySummaries(t *testing.T) {
+	t.Parallel()
+
+	input := braidHelperInput(
+		"Puzzle instance:\n\nInitial state: [[0], [1, 2], []]\nGoal state: [[], [1], [2, 0]]\nNumber of blocks: 3\n",
+		map[string]string{"n_solve": "status: solved answer: solution = [[2,1,2],[0,0,2]]"},
+	)
+	if input["n_solve"] == "" {
+		t.Fatalf("input missing dependency key: %#v", input)
+	}
+	deps, ok := input["dependency_summaries"].(map[string]any)
+	if !ok || deps["n_solve"] == "" {
+		t.Fatalf("input missing dependency summaries: %#v", input)
+	}
+	if _, ok := input["initial_state"]; !ok {
+		t.Fatalf("input missing parsed official fields: %#v", input)
+	}
+}
+
 func TestBraidNodeExecutionSummaryRejectsNestedBlockedStatus(t *testing.T) {
 	t.Parallel()
 
