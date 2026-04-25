@@ -126,3 +126,16 @@ func TestBuildPromptModes(t *testing.T) {
 		})
 	}
 }
+
+func TestResultCacheKey(t *testing.T) {
+	t.Parallel()
+	a := resultCacheKey("pdf", "query", "  What   now? ", "prompt", "model", "native")
+	b := resultCacheKey("pdf", "query", "What now?", "prompt", "model", "native")
+	c := resultCacheKey("pdf", "implementation", "What now?", "prompt", "model", "native")
+	if a != b {
+		t.Fatalf("resultCacheKey should normalize query whitespace: %q != %q", a, b)
+	}
+	if a == c {
+		t.Fatal("resultCacheKey should include mode")
+	}
+}
