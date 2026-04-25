@@ -545,6 +545,26 @@ func TestHelperFactoryToolsRepairsVerifierCounterexample(t *testing.T) {
 	}
 }
 
+func TestHelperFactoryAnswerAcceptsNestedSolutionObject(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := helperFactoryAnswer(map[string]any{
+		"ok": true,
+		"answer": map[string]any{
+			"solution": []any{
+				[]any{float64(1), float64(0), float64(2)},
+				[]any{float64(3), float64(2), float64(1)},
+			},
+		},
+	}, true)
+	if !ok {
+		t.Fatalf("expected nested solution to be accepted")
+	}
+	if answer != "solution = [[1,0,2],[3,2,1]]" {
+		t.Fatalf("answer=%q", answer)
+	}
+}
+
 func TestHelperFactoryToolsRedraftsIncompletePythonSourceWithTaskContext(t *testing.T) {
 	t.Parallel()
 

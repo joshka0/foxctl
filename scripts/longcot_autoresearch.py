@@ -43,6 +43,7 @@ VARIANTS = {
         "blocksworld_helper": False,
         "max_tokens": 8192,
         "max_iterations": 64,
+        "helper_attempts": 5,
         "timeout": "20m",
     },
     "single_solve_braid_helper": {
@@ -53,6 +54,7 @@ VARIANTS = {
         "blocksworld_helper": False,
         "max_tokens": 8192,
         "max_iterations": 64,
+        "helper_attempts": 5,
         "timeout": "20m",
     },
     "baseline_braid_no_helper": {
@@ -63,6 +65,7 @@ VARIANTS = {
         "blocksworld_helper": False,
         "max_tokens": 8192,
         "max_iterations": 64,
+        "helper_attempts": 5,
         "timeout": "20m",
     },
 }
@@ -234,6 +237,8 @@ def main() -> int:
         str(variant["sandbox"]),
         "--helper-language",
         str(variant["helper_language"]),
+        "--helper-attempts",
+        str(variant["helper_attempts"]),
         "--save",
         "--output-dir",
         str(output_dir),

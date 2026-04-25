@@ -1305,21 +1305,69 @@ func helperFactoryAnswer(output map[string]any, extractSolution bool) (string, b
 		}
 	}
 	for _, key := range []string{"answer", "solution"} {
-		value, ok := output[key].(string)
+		value, ok := output[key]
 		if !ok {
 			continue
 		}
-		value = strings.TrimSpace(value)
-		if extractSolution {
-			if line, ok := rlm.ExtractSolutionLine(value); ok {
-				return line, true
-			}
-		}
-		if value != "" {
-			return value, true
+		if answer, ok := helperFactoryAnswerValue(key, value, extractSolution); ok {
+			return answer, true
 		}
 	}
 	return "", false
+}
+
+func helperFactoryAnswerValue(key string, value any, extractSolution bool) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		text := strings.TrimSpace(typed)
+		if text == "" {
+			return "", false
+		}
+		if extractSolution {
+			if line, ok := rlm.ExtractSolutionLine(text); ok {
+				return line, true
+			}
+			if strings.EqualFold(key, "solution") {
+				return "solution = " + text, true
+			}
+			return "", false
+		}
+		return text, true
+	case map[string]any:
+		if okValue, exists := typed["ok"]; exists {
+			if ok, isBool := okValue.(bool); isBool && !ok {
+				return "", false
+			}
+		}
+		for _, nestedKey := range []string{"answer", "solution"} {
+			nestedValue, ok := typed[nestedKey]
+			if !ok {
+				continue
+			}
+			if answer, ok := helperFactoryAnswerValue(nestedKey, nestedValue, extractSolution); ok {
+				return answer, true
+			}
+		}
+		return "", false
+	case []any:
+		if !strings.EqualFold(key, "solution") {
+			return "", false
+		}
+		body, err := json.Marshal(typed)
+		if err != nil || len(body) == 0 {
+			return "", false
+		}
+		return "solution = " + string(body), true
+	default:
+		if !strings.EqualFold(key, "solution") {
+			return "", false
+		}
+		body, err := json.Marshal(typed)
+		if err != nil || len(body) == 0 || string(body) == "null" {
+			return "", false
+		}
+		return "solution = " + string(body), true
+	}
 }
 
 func helperFactoryTraceFromToolResults(results []engine.ToolResult) (map[string]any, bool) {
