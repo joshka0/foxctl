@@ -51,6 +51,18 @@ func TestHelperFactoryToolsDraftsRunsAndReturnsAnswer(t *testing.T) {
 	}
 }
 
+func TestHelperFactoryAnswerRejectsExplicitOKFalse(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := helperFactoryAnswer(map[string]any{
+		"ok":     false,
+		"answer": "no solution",
+	}, false)
+	if ok || answer != "" {
+		t.Fatalf("helperFactoryAnswer() answer=%q ok=%v, want rejected", answer, ok)
+	}
+}
+
 func TestHelperFactoryToolsDraftsPythonRunsAndReturnsAnswer(t *testing.T) {
 	t.Parallel()
 

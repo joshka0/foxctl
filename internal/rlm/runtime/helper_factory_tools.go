@@ -591,6 +591,7 @@ func buildHelperFactoryDraftPrompt(taskPrompt, instructions, feedback, language 
 	}
 	b.WriteString("The Solve output should include an answer or solution field. Prefer the official answer format and use \"solution = ...\" when the task expects that shape.\n")
 	b.WriteString("Keep the helper deterministic and bounded; use parsing, simulation, search, or verification rather than prose.\n")
+	b.WriteString("For large state-transition tasks, do not use exhaustive BFS/DFS over complete states. Derive a constructive candidate from the state structure, then verify it deterministically before returning.\n")
 	if strings.TrimSpace(instructions) != "" {
 		b.WriteString("\nAdditional helper instructions:\n")
 		b.WriteString(strings.TrimSpace(instructions))
@@ -1185,6 +1186,11 @@ func helperFactoryJSONCandidates(text string) []string {
 }
 
 func helperFactoryAnswer(output map[string]any, extractSolution bool) (string, bool) {
+	if okValue, exists := output["ok"]; exists {
+		if ok, isBool := okValue.(bool); isBool && !ok {
+			return "", false
+		}
+	}
 	for _, key := range []string{"answer", "solution"} {
 		value, ok := output[key].(string)
 		if !ok {

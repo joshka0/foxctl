@@ -440,7 +440,7 @@ func TestBuildBraidHelperRecoveryInstructionsRequireConcreteVerifierFailure(t *t
 		}
 	}
 	solve := buildBraidHelperRecoveryInstructions(BraidNode{ID: "n_solve", Kind: "solve"}, "failed")
-	for _, want := range []string{"internal deterministic check", "partial action list", "state explicitly"} {
+	for _, want := range []string{"internal deterministic check", "partial action list", "state explicitly", "do not run exhaustive BFS/DFS"} {
 		if !strings.Contains(solve, want) {
 			t.Fatalf("solve instructions missing %q:\n%s", want, solve)
 		}

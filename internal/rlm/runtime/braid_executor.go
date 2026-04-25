@@ -379,6 +379,7 @@ func buildBraidHelperRecoveryInstructions(node BraidNode, failedSummary string) 
 	if isBraidSolveKind(node.Kind) {
 		b.WriteString("For a solve node, build a complete candidate and run an internal deterministic check before returning it. Do not emit a partial action list, copied prefix, or unchecked guess. If the check fails, return `status: blocked first_failure: ...` instead of `solution = ...`.\n")
 		b.WriteString("For state-transition tasks, model state explicitly, apply every candidate transition, and only return a candidate when final state and action legality both check out.\n")
+		b.WriteString("When the state has many items, do not run exhaustive BFS/DFS over full state permutations. Prefer a constructive algorithm using the task's transition structure, then verify the constructed candidate.\n")
 	}
 	if node.Kind == "verify" {
 		b.WriteString("For a verify node, simulate or substitute the candidate against the original constraints. Return `pass: true` only when every constraint is verified.\n")
