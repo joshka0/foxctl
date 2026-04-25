@@ -281,6 +281,7 @@ func runBraidNodeHelper(
 	if isBraidSolveKind(node.Kind) && helperExec != nil {
 		helperCfg := helperExec.Config
 		helperCfg.AnswerVerifier = stackMoveAnswerVerifier
+		helperCfg.Search.BeamWidth = firstPositiveInt(helperCfg.Search.BeamWidth, 3)
 		helperExec = &HelperFactoryTools{Config: helperCfg}
 	}
 	var result string
@@ -495,6 +496,7 @@ func stackMoveAnswerVerifier(answer string, input map[string]any) (HelperVerifie
 	moves, okMoves := stackMovesFromAnswer(answer)
 	if !okMoves {
 		base.FailureKind = "parse"
+		base.Score = 0
 		base.Message = "candidate does not contain a parseable solution move list"
 		base.RepairHint = "return answer exactly as solution = [[block, from_stack, to_stack], ...] with JSON-compatible integers"
 		return base, true
@@ -503,6 +505,11 @@ func stackMoveAnswerVerifier(answer string, input map[string]any) (HelperVerifie
 	for idx, move := range moves {
 		block, from, to := move[0], move[1], move[2]
 		stateBefore := cloneIntStacks(state)
+		base.Score = stackMoveVerifierStepScore(idx, len(moves))
+		base.Progress = map[string]any{
+			"valid_prefix_moves": idx,
+			"candidate_moves":    len(moves),
+		}
 		if from < 0 || from >= len(state) {
 			base.FailureKind = "source_out_of_range"
 			base.FailedAtStep = idx
@@ -554,13 +561,61 @@ func stackMoveAnswerVerifier(answer string, input map[string]any) (HelperVerifie
 	}
 	if !reflect.DeepEqual(state, goal) {
 		base.FailureKind = "goal_mismatch"
+		base.Score = stackMoveVerifierGoalMismatchScore(state, goal)
+		base.Progress = map[string]any{
+			"valid_prefix_moves": len(moves),
+			"candidate_moves":    len(moves),
+			"state_similarity":   stackStateSimilarity(state, goal),
+		}
 		base.ObservedFinal = state
 		base.ExpectedFinal = goal
 		base.Message = fmt.Sprintf("final state %v does not match goal %v", state, goal)
 		base.RepairHint = "continue constructing moves until every stack exactly matches the goal order"
 		return base, true
 	}
-	return HelperVerifierDiagnostic{Pass: true, FailureKind: "stack_move", FailedAtStep: -1}, true
+	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "stack_move", FailedAtStep: -1}, true
+}
+
+func stackMoveVerifierStepScore(validPrefix, totalMoves int) float64 {
+	if totalMoves <= 0 {
+		return 0
+	}
+	score := float64(validPrefix) / float64(totalMoves)
+	if score < 0 {
+		return 0
+	}
+	if score > 0.8 {
+		return 0.8
+	}
+	return score
+}
+
+func stackMoveVerifierGoalMismatchScore(observed, expected [][]int) float64 {
+	return 0.8 + 0.19*stackStateSimilarity(observed, expected)
+}
+
+func stackStateSimilarity(observed, expected [][]int) float64 {
+	total := 0
+	matched := 0
+	for i := 0; i < len(expected); i++ {
+		total += len(expected[i])
+		if i >= len(observed) {
+			continue
+		}
+		limit := len(expected[i])
+		if len(observed[i]) < limit {
+			limit = len(observed[i])
+		}
+		for j := 0; j < limit; j++ {
+			if observed[i][j] == expected[i][j] {
+				matched++
+			}
+		}
+	}
+	if total == 0 {
+		return 0
+	}
+	return float64(matched) / float64(total)
 }
 
 func stackStateFromAny(value any) ([][]int, bool) {

@@ -545,6 +545,34 @@ func TestHelperFactoryToolsRepairsVerifierCounterexample(t *testing.T) {
 	}
 }
 
+func TestHelperFactoryVerifierFeedbackKeepsBestCandidate(t *testing.T) {
+	t.Parallel()
+
+	current := map[string]any{
+		"attempt": float64(1),
+		"answer":  "solution = bad",
+		"diagnostic": map[string]any{
+			"score": float64(0.2),
+		},
+	}
+	next := map[string]any{
+		"attempt": float64(2),
+		"answer":  "solution = better",
+		"diagnostic": map[string]any{
+			"score": float64(0.7),
+		},
+	}
+	best := bestHelperFactoryVerifierCandidate(current, next)
+	feedback := helperFactoryVerifierFeedbackMap(map[string]any{"score": float64(0.7)}, best, 3)
+	candidate, ok := feedback["best_candidate"].(map[string]any)
+	if !ok || candidate["answer"] != "solution = better" {
+		t.Fatalf("feedback=%#v", feedback)
+	}
+	if feedback["search_policy"] == nil {
+		t.Fatalf("feedback missing search policy: %#v", feedback)
+	}
+}
+
 func TestHelperFactoryAnswerAcceptsNestedSolutionObject(t *testing.T) {
 	t.Parallel()
 

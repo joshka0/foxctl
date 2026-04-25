@@ -41,6 +41,11 @@ type HelperFactoryConfig struct {
 	MaxSourceLines      int
 	MaxSourceChars      int
 	AnswerVerifier      HelperAnswerVerifier
+	Search              HelperSearchConfig
+}
+
+type HelperSearchConfig struct {
+	BeamWidth int
 }
 
 type HelperFactoryTools struct {
@@ -51,6 +56,7 @@ type HelperAnswerVerifier func(answer string, input map[string]any) (HelperVerif
 
 type HelperVerifierDiagnostic struct {
 	Pass          bool           `json:"pass"`
+	Score         float64        `json:"score,omitempty"`
 	FailureKind   string         `json:"failure_kind,omitempty"`
 	FailedAtStep  int            `json:"failed_at_step,omitempty"`
 	FailedAction  []int          `json:"failed_action,omitempty"`
@@ -59,6 +65,7 @@ type HelperVerifierDiagnostic struct {
 	ExpectedFinal any            `json:"expected_final,omitempty"`
 	Message       string         `json:"message,omitempty"`
 	RepairHint    string         `json:"repair_hint,omitempty"`
+	Progress      map[string]any `json:"progress,omitempty"`
 	Extra         map[string]any `json:"extra,omitempty"`
 }
 
@@ -147,6 +154,7 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 	var repairState *helperFactoryRepairState
 	attempts := make([]map[string]any, 0, attemptLimit)
 	candidateBeam := make([]map[string]any, 0, attemptLimit)
+	var bestVerifierCandidate map[string]any
 	for attempt := 1; attempt <= attemptLimit; attempt++ {
 		draft, raw, err := h.draftForAttempt(ctx, attempt, taskCtx, instructions, lastFeedback, repairState)
 		if err != nil {
@@ -265,7 +273,8 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 					"answer":     compactHelperFactoryString(answer),
 					"diagnostic": diagMap,
 				})
-				lastFeedback = helperFactoryRepairFeedbackWithVerifier("verify", errText, draft.Source, raw, helperInput, result.Output, diagMap)
+				bestVerifierCandidate = bestHelperFactoryVerifierCandidate(bestVerifierCandidate, candidateBeam[len(candidateBeam)-1])
+				lastFeedback = helperFactoryRepairFeedbackWithVerifier("verify", errText, draft.Source, raw, helperInput, result.Output, helperFactoryVerifierFeedbackMap(diagMap, bestVerifierCandidate, h.Config.Search.BeamWidth))
 				repairState = &helperFactoryRepairState{
 					Stage:    "verify",
 					Error:    errText,
@@ -273,7 +282,7 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 					Raw:      raw,
 					Input:    cloneMapAny(helperInput),
 					Output:   cloneMapAny(result.Output),
-					Verifier: diagMap,
+					Verifier: helperFactoryVerifierFeedbackMap(diagMap, bestVerifierCandidate, h.Config.Search.BeamWidth),
 					Language: helperLanguage,
 				}
 				attempts = append(attempts, map[string]any{
@@ -1444,6 +1453,53 @@ func compactHelperFactoryCandidateBeam(candidates []map[string]any) []map[string
 			item["diagnostic_summary"] = compactHelperFactoryMap(diagnostic)
 		}
 		out = append(out, item)
+	}
+	return out
+}
+
+func bestHelperFactoryVerifierCandidate(current, next map[string]any) map[string]any {
+	if len(next) == 0 {
+		return current
+	}
+	if len(current) == 0 || helperFactoryCandidateScore(next) > helperFactoryCandidateScore(current) {
+		return cloneMapAny(next)
+	}
+	return current
+}
+
+func helperFactoryCandidateScore(candidate map[string]any) float64 {
+	diagnostic, _ := candidate["diagnostic"].(map[string]any)
+	if len(diagnostic) == 0 {
+		return 0
+	}
+	switch typed := diagnostic["score"].(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		score, _ := typed.Float64()
+		return score
+	default:
+		return 0
+	}
+}
+
+func helperFactoryVerifierFeedbackMap(current, best map[string]any, beamWidth int) map[string]any {
+	out := map[string]any{"current": current}
+	if len(best) > 0 {
+		out["best_candidate"] = compactHelperFactoryCandidateBeam([]map[string]any{best})[0]
+	}
+	if beamWidth > 1 {
+		out["search_policy"] = map[string]any{
+			"kind":        "verifier_guided_candidate_repair",
+			"beam_width":  beamWidth,
+			"instruction": "repair the highest-scoring failed candidate first; preserve useful valid prefixes and fix the verifier counterexample",
+		}
 	}
 	return out
 }
