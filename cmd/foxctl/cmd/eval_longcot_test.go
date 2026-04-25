@@ -657,7 +657,7 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	if got := phases[planIdx].BraidGraphPolicy; got != rlmruntime.BraidGraphPolicyLongCoTController {
 		t.Fatalf("graph_plan BraidGraphPolicy=%q want %q", got, rlmruntime.BraidGraphPolicyLongCoTController)
 	}
-	for _, want := range []string{"valid json object", "optionally one cycle_solve wave", "Allowed kind values are extract, solve, cycle_solve, verify, reduce", "cycle_solve is optional", "BlocksWorld-style stack puzzles", "Use solve nodes to build candidate actions", "Keep the runtime graph acyclic"} {
+	for _, want := range []string{"valid json object", "one primary solve wave", "Allowed kind values are extract, solve, cycle_solve, verify, reduce", "cycle_solve is optional", "BlocksWorld-style stack puzzles", "do not segment the plan by vague phases", "Use one primary solve node to build an executable candidate", "Keep the runtime graph acyclic"} {
 		if !strings.Contains(phases[planIdx].Prompt, want) {
 			t.Fatalf("graph_plan prompt missing %q:\n%s", want, phases[planIdx].Prompt)
 		}

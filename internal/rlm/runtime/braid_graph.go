@@ -191,58 +191,10 @@ func NormalizeBraidGraphForPolicy(g BraidGraph, policy string, maxNodes int) Bra
 }
 
 func normalizeLongCoTControllerBraidGraph(g BraidGraph, maxNodes int) BraidGraph {
-	if maxNodes <= 0 {
-		maxNodes = 64
-	}
-	if len(g.Nodes) >= maxNodes {
-		return g
-	}
-	solveIndexes := make([]int, 0, 2)
-	for idx, node := range g.Nodes {
-		if isBraidSolveKind(node.Kind) {
-			solveIndexes = append(solveIndexes, idx)
-		}
-	}
-	if len(solveIndexes) != 1 {
-		return g
-	}
-
-	sourceIdx := solveIndexes[0]
-	source := g.Nodes[sourceIdx]
-	refineID := uniqueBraidNodeID(g, source.ID+"_refine")
-	refine := BraidNode{
-		ID:              refineID,
-		Kind:            "solve",
-		Question:        "Refine or repair the candidate by checking it against the original task constraints.",
-		DependsOn:       []string{source.ID},
-		ExpectedOutput:  "Corrected candidate or confirmation.",
-		MaxSummaryChars: maxBraidNodeSummaryChars,
-		HelperPolicy:    BraidNodeHelperPolicyPreferred,
-	}
-
-	nodes := make([]BraidNode, 0, len(g.Nodes)+1)
-	nodes = append(nodes, g.Nodes[:sourceIdx+1]...)
-	nodes = append(nodes, refine)
-	nodes = append(nodes, g.Nodes[sourceIdx+1:]...)
-	g.Nodes = nodes
-
 	for idx := range g.Nodes {
 		if isBraidSolveKind(g.Nodes[idx].Kind) || g.Nodes[idx].Kind == "verify" {
 			if g.Nodes[idx].HelperPolicy == "" || g.Nodes[idx].HelperPolicy == BraidNodeHelperPolicyAuto {
 				g.Nodes[idx].HelperPolicy = BraidNodeHelperPolicyPreferred
-			}
-		}
-		if g.Nodes[idx].ID == refineID {
-			continue
-		}
-		switch g.Nodes[idx].Kind {
-		case "verify":
-			if dependsOnBraidNode(g.Nodes[idx], source.ID) && !dependsOnBraidNode(g.Nodes[idx], refineID) {
-				g.Nodes[idx].DependsOn = append(g.Nodes[idx].DependsOn, refineID)
-			}
-		case "reduce":
-			if dependsOnBraidNode(g.Nodes[idx], source.ID) && !dependsOnBraidNode(g.Nodes[idx], refineID) {
-				g.Nodes[idx].DependsOn = append(g.Nodes[idx].DependsOn, refineID)
 			}
 		}
 	}
@@ -264,8 +216,8 @@ func validateLongCoTControllerBraidGraph(g BraidGraph) error {
 			return fmt.Errorf("braid graph: longcot_controller requires a %s node", kind)
 		}
 	}
-	if countBraidSolveNodes(byKind) < 2 {
-		return fmt.Errorf("braid graph: longcot_controller requires at least two solve-like nodes")
+	if countBraidSolveNodes(byKind) < 1 {
+		return fmt.Errorf("braid graph: longcot_controller requires at least one solve-like node")
 	}
 	final, ok := byID[g.FinalNode]
 	if !ok || final.Kind != "reduce" {
@@ -289,32 +241,6 @@ func validateLongCoTControllerBraidGraph(g BraidGraph) error {
 		}
 	}
 	return nil
-}
-
-func uniqueBraidNodeID(g BraidGraph, base string) string {
-	base = strings.Trim(strings.TrimSpace(base), "_-.")
-	if base == "" {
-		base = "n_solve_refine"
-	}
-	if len(base) > maxBraidNodeIDChars-4 {
-		base = base[:maxBraidNodeIDChars-4]
-	}
-	used := make(map[string]struct{}, len(g.Nodes))
-	for _, node := range g.Nodes {
-		used[node.ID] = struct{}{}
-	}
-	if _, ok := used[base]; !ok && validBraidNodeID(base) {
-		return base
-	}
-	for idx := 2; ; idx++ {
-		candidate := fmt.Sprintf("%s_%d", base, idx)
-		if len(candidate) > maxBraidNodeIDChars {
-			candidate = fmt.Sprintf("%s_%d", base[:maxBraidNodeIDChars-4], idx)
-		}
-		if _, ok := used[candidate]; !ok && validBraidNodeID(candidate) {
-			return candidate
-		}
-	}
 }
 
 func dependsOnBraidNode(node BraidNode, id string) bool {

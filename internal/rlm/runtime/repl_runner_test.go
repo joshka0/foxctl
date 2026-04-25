@@ -1472,10 +1472,10 @@ func TestREPLRunnerStagedBraidGraphPhaseRepairsAndCarriesState(t *testing.T) {
 	if !strings.Contains(repairPrompt, "cycle_solve is optional") || !strings.Contains(repairPrompt, "question under 220 characters") {
 		t.Fatalf("repair prompt missing compact optional cycle_solve schema guidance:\n%s", repairPrompt)
 	}
-	if !strings.Contains(repairPrompt, "include extract, at least two solve-like nodes") || !strings.Contains(repairPrompt, "shorten invalid fields instead of deleting required node kinds") {
+	if !strings.Contains(repairPrompt, "include extract, at least one solve-like node") || !strings.Contains(repairPrompt, "shorten invalid fields instead of deleting required node kinds") {
 		t.Fatalf("repair prompt missing LongCoT controller policy guidance:\n%s", repairPrompt)
 	}
-	if !strings.Contains(repairPrompt, "BlocksWorld-style tasks") || !strings.Contains(repairPrompt, "prefer solve nodes plus an independent verify node") {
+	if !strings.Contains(repairPrompt, "BlocksWorld-style tasks") || !strings.Contains(repairPrompt, "Do not split state-transition") {
 		t.Fatalf("repair prompt missing state-transition guidance:\n%s", repairPrompt)
 	}
 	if !strings.Contains(repairPrompt, "checks original constraints by substituting candidate values") {

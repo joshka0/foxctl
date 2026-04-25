@@ -1205,8 +1205,9 @@ func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, p
 	b.WriteString("\nReturn JSON only. No markdown fences and no prose.\n")
 	b.WriteString("Use kind extract|solve|cycle_solve|verify|reduce. Keep each question under 220 characters and expected_output under 120 characters.\n")
 	if strings.TrimSpace(phase.BraidGraphPolicy) == BraidGraphPolicyLongCoTController {
-		b.WriteString("LongCoT controller policy is mandatory: include extract, at least two solve-like nodes, verify, and reduce; keep the graph acyclic and shorten invalid fields instead of deleting required node kinds.\n")
-		b.WriteString("cycle_solve is optional. Use it only for a true strongly connected/fixed-point constraint cluster. For state-transition, planning, simulation, or BlocksWorld-style tasks, prefer solve nodes plus an independent verify node.\n")
+		b.WriteString("LongCoT controller policy is mandatory: include extract, at least one solve-like node, verify, and reduce; keep the graph acyclic and shorten invalid fields instead of deleting required node kinds.\n")
+		b.WriteString("Use one primary solve node by default. Add another solve-like node only for a real alternate candidate, concrete repair, or true dependency cluster. Do not split state-transition, planning, simulation, or BlocksWorld-style tasks into vague prose segments.\n")
+		b.WriteString("cycle_solve is optional. Use it only for a true strongly connected/fixed-point constraint cluster.\n")
 		b.WriteString("The verify node question or expected_output must explicitly say it checks original constraints by substituting candidate values into the original problem placeholders.\n")
 	}
 	b.WriteString("Schema:\n")

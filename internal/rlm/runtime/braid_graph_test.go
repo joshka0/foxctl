@@ -259,7 +259,7 @@ func TestBraidValidateLongCoTControllerAllowsStateSimulationVerify(t *testing.T)
 	}
 }
 
-func TestBraidValidateLongCoTControllerRejectsSingleSolve(t *testing.T) {
+func TestBraidValidateLongCoTControllerAllowsSingleSolve(t *testing.T) {
 	t.Parallel()
 
 	graph := BraidGraph{
@@ -272,13 +272,12 @@ func TestBraidValidateLongCoTControllerRejectsSingleSolve(t *testing.T) {
 		},
 		FinalNode: "n_reduce",
 	}
-	err := ValidateBraidGraphPolicy(graph, BraidGraphPolicyLongCoTController)
-	if err == nil || !strings.Contains(err.Error(), "at least two solve-like nodes") {
-		t.Fatalf("ValidateBraidGraphPolicy() err=%v, want at least two solve-like nodes", err)
+	if err := ValidateBraidGraphPolicy(graph, BraidGraphPolicyLongCoTController); err != nil {
+		t.Fatalf("ValidateBraidGraphPolicy() error = %v", err)
 	}
 }
 
-func TestNormalizeBraidGraphForPolicySplitsSingleSolveAndClampsSummary(t *testing.T) {
+func TestNormalizeBraidGraphForPolicyKeepsSingleSolveAndClampsSummary(t *testing.T) {
 	t.Parallel()
 
 	graph := BraidGraph{
@@ -293,25 +292,16 @@ func TestNormalizeBraidGraphForPolicySplitsSingleSolveAndClampsSummary(t *testin
 	}
 
 	normalized := NormalizeBraidGraphForPolicy(graph, BraidGraphPolicyLongCoTController, 8)
-	if len(normalized.Nodes) != 5 {
-		t.Fatalf("normalized node count = %d, want 5", len(normalized.Nodes))
+	if len(normalized.Nodes) != 4 {
+		t.Fatalf("normalized node count = %d, want 4", len(normalized.Nodes))
 	}
 	if normalized.Nodes[0].MaxSummaryChars != maxBraidNodeSummaryChars {
 		t.Fatalf("summary cap was not clamped: %d", normalized.Nodes[0].MaxSummaryChars)
 	}
-	if normalized.Nodes[2].ID != "n_solve_refine" || normalized.Nodes[2].Kind != "solve" {
-		t.Fatalf("missing inserted refine solve node: %#v", normalized.Nodes[2])
-	}
-	for _, idx := range []int{1, 2, 3} {
+	for _, idx := range []int{1, 2} {
 		if normalized.Nodes[idx].HelperPolicy != BraidNodeHelperPolicyPreferred {
 			t.Fatalf("node %s helper_policy=%q want preferred", normalized.Nodes[idx].ID, normalized.Nodes[idx].HelperPolicy)
 		}
-	}
-	if !dependsOnBraidNode(normalized.Nodes[3], "n_solve_refine") {
-		t.Fatalf("verify deps were not updated: %#v", normalized.Nodes[3].DependsOn)
-	}
-	if !dependsOnBraidNode(normalized.Nodes[4], "n_solve_refine") {
-		t.Fatalf("reduce deps were not updated: %#v", normalized.Nodes[4].DependsOn)
 	}
 	if err := ValidateBraidGraph(normalized, 8); err != nil {
 		t.Fatalf("ValidateBraidGraph() error = %v", err)
