@@ -334,9 +334,10 @@ func TestHelperFactoryToolsRejectsOversizedSourceAndRepairs(t *testing.T) {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 	var got struct {
-		OK       bool             `json:"ok"`
-		Answer   string           `json:"answer"`
-		Attempts []map[string]any `json:"attempts"`
+		OK            bool             `json:"ok"`
+		Answer        string           `json:"answer"`
+		Attempts      []map[string]any `json:"attempts"`
+		CandidateBeam []map[string]any `json:"candidate_beam"`
 	}
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatalf("decode output: %v\n%s", err, raw)
@@ -522,9 +523,10 @@ func TestHelperFactoryToolsRepairsVerifierCounterexample(t *testing.T) {
 		t.Fatalf("Execute returned error: %v", err)
 	}
 	var got struct {
-		OK       bool             `json:"ok"`
-		Answer   string           `json:"answer"`
-		Attempts []map[string]any `json:"attempts"`
+		OK            bool             `json:"ok"`
+		Answer        string           `json:"answer"`
+		Attempts      []map[string]any `json:"attempts"`
+		CandidateBeam []map[string]any `json:"candidate_beam"`
 	}
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatalf("decode output: %v\n%s", err, raw)
@@ -534,6 +536,9 @@ func TestHelperFactoryToolsRepairsVerifierCounterexample(t *testing.T) {
 	}
 	if len(got.Attempts) != 2 || got.Attempts[0]["stage"] != "verify" {
 		t.Fatalf("attempts=%#v", got.Attempts)
+	}
+	if len(got.CandidateBeam) != 1 || got.CandidateBeam[0]["answer"] != "solution = bad" {
+		t.Fatalf("candidate beam=%#v", got.CandidateBeam)
 	}
 	if !strings.Contains(prompts[1], "Verifier counterexample") || !strings.Contains(prompts[1], "unit_counterexample") {
 		t.Fatalf("repair prompt missing verifier counterexample:\n%s", prompts[1])

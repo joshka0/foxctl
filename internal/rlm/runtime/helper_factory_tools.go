@@ -146,6 +146,7 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 	taskCtx := helperFactoryTaskContextForPrompt(prompt)
 	var repairState *helperFactoryRepairState
 	attempts := make([]map[string]any, 0, attemptLimit)
+	candidateBeam := make([]map[string]any, 0, attemptLimit)
 	for attempt := 1; attempt <= attemptLimit; attempt++ {
 		draft, raw, err := h.draftForAttempt(ctx, attempt, taskCtx, instructions, lastFeedback, repairState)
 		if err != nil {
@@ -259,6 +260,11 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			if applicable && !diag.Pass {
 				diagMap := helperVerifierDiagnosticMap(diag)
 				errText := helperVerifierDiagnosticError(diag)
+				candidateBeam = append(candidateBeam, map[string]any{
+					"attempt":    attempt,
+					"answer":     compactHelperFactoryString(answer),
+					"diagnostic": diagMap,
+				})
 				lastFeedback = helperFactoryRepairFeedbackWithVerifier("verify", errText, draft.Source, raw, helperInput, result.Output, diagMap)
 				repairState = &helperFactoryRepairState{
 					Stage:    "verify",
@@ -292,7 +298,7 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			"preset":   strings.TrimSpace(h.Config.PresetName),
 			"language": helperLanguage,
 		})
-		return marshalHelperFactoryOutput(map[string]any{
+		out := map[string]any{
 			"ok":             true,
 			"answer":         answer,
 			"output_summary": compactHelperFactoryMap(result.Output),
@@ -302,16 +308,24 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			"model":          strings.TrimSpace(h.Config.LLM.Model),
 			"preset":         strings.TrimSpace(h.Config.PresetName),
 			"attempts":       compactHelperFactoryAttempts(attempts),
-		})
+		}
+		if len(candidateBeam) > 0 {
+			out["candidate_beam"] = compactHelperFactoryCandidateBeam(candidateBeam)
+		}
+		return marshalHelperFactoryOutput(out)
 	}
-	return marshalHelperFactoryOutput(map[string]any{
+	out := map[string]any{
 		"ok":       false,
 		"error":    fmt.Sprintf("helper factory failed after %d attempts: %s", attemptLimit, helperFactoryFirstFeedbackLine(lastFeedback)),
 		"provider": strings.TrimSpace(h.Config.LLM.Provider),
 		"model":    strings.TrimSpace(h.Config.LLM.Model),
 		"preset":   strings.TrimSpace(h.Config.PresetName),
 		"attempts": compactHelperFactoryAttempts(attempts),
-	})
+	}
+	if len(candidateBeam) > 0 {
+		out["candidate_beam"] = compactHelperFactoryCandidateBeam(candidateBeam)
+	}
+	return marshalHelperFactoryOutput(out)
 }
 
 func (h *HelperFactoryTools) attemptLimit(maxAttempts int) int {
@@ -1359,6 +1373,27 @@ func compactHelperFactoryAttempts(attempts []map[string]any) []map[string]any {
 		}
 		if output, ok := attempt["output"].(map[string]any); ok {
 			item["output_summary"] = compactHelperFactoryMap(output)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func compactHelperFactoryCandidateBeam(candidates []map[string]any) []map[string]any {
+	if len(candidates) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(candidates))
+	for _, candidate := range candidates {
+		item := map[string]any{}
+		if value, ok := candidate["attempt"]; ok {
+			item["attempt"] = value
+		}
+		if answer, ok := candidate["answer"].(string); ok && strings.TrimSpace(answer) != "" {
+			item["answer"] = compactHelperFactoryString(answer)
+		}
+		if diagnostic, ok := candidate["diagnostic"].(map[string]any); ok {
+			item["diagnostic_summary"] = compactHelperFactoryMap(diagnostic)
 		}
 		out = append(out, item)
 	}

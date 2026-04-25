@@ -266,7 +266,7 @@ func runBraidNodeHelper(
 	argsMap := map[string]any{
 		"prompt":       prompt,
 		"instructions": instructions,
-		"max_attempts": 3,
+		"max_attempts": 5,
 	}
 	if input := braidHelperInput(rootPrompt, dependencySummaries); len(input) > 0 {
 		argsMap["input"] = input
