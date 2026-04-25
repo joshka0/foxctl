@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestResolvePDFURL(t *testing.T) {
 	t.Parallel()
@@ -82,5 +85,44 @@ func TestFilenameFromURL(t *testing.T) {
 	got := filenameFromURL("https://arxiv.org/pdf/2401.12345", "application/pdf")
 	if got != "2401.12345.pdf" {
 		t.Fatalf("filenameFromURL() = %q", got)
+	}
+}
+
+func TestBuildPromptModes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   input
+		want string
+	}{
+		{
+			name: "outline",
+			in:   input{Mode: "outline"},
+			want: "Create a full outline",
+		},
+		{
+			name: "implementation",
+			in:   input{Mode: "implementation"},
+			want: "implementing the method in code",
+		},
+		{
+			name: "query",
+			in:   input{Mode: "query", Query: "What data structures are needed?"},
+			want: "What data structures are needed?",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := buildPrompt(tt.in)
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("buildPrompt() = %q, want substring %q", got, tt.want)
+			}
+			if !strings.Contains(got, "Leave citations out") {
+				t.Fatalf("buildPrompt() should include citation exclusion")
+			}
+		})
 	}
 }
