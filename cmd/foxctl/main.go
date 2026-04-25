@@ -8,6 +8,10 @@ import (
 	"os"
 
 	cmd "github.com/joshka0/foxctl/cmd/foxctl/cmd"
+
+	// Wire Foxprox bridge — registers concrete daemon + client implementations.
+	_ "github.com/joshka0/foxctl/internal/interfaces/foxproxbridge/foxproxwire"
+
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/protocol"
 )
