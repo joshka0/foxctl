@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -46,8 +47,9 @@ type HelperFactoryTools struct {
 }
 
 type helperFactoryDraft struct {
-	Source string         `json:"source"`
-	Input  map[string]any `json:"input,omitempty"`
+	Source    string         `json:"source"`
+	SourceB64 string         `json:"source_b64,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
 }
 
 type helperFactoryTaskContext struct {
@@ -132,6 +134,15 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 		if err != nil {
 			lastFeedback = helperFactoryRepairFeedback("draft", err.Error(), "", raw, nil, nil)
 			repairState = nil
+			if strings.TrimSpace(raw) != "" {
+				repairState = &helperFactoryRepairState{
+					Stage:    "draft",
+					Error:    err.Error(),
+					Raw:      raw,
+					Input:    cloneMapAny(taskCtx.DefaultInput),
+					Language: h.helperLanguage(attempt),
+				}
+			}
 			attempts = append(attempts, map[string]any{
 				"attempt": attempt,
 				"ok":      false,
@@ -178,13 +189,7 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			})
 			continue
 		}
-		helperInput := explicitInput
-		if helperInput == nil {
-			helperInput = draft.Input
-		}
-		if helperInput == nil {
-			helperInput = map[string]any{"prompt": prompt}
-		}
+		helperInput := helperFactoryEffectiveInput(taskCtx.DefaultInput, draft.Input, explicitInput, prompt)
 		result, err := runner.Run(ctx, helperInput)
 		if err != nil {
 			lastFeedback = helperFactoryRepairFeedback("run", err.Error(), draft.Source, raw, helperInput, nil)
@@ -283,7 +288,7 @@ func (h *HelperFactoryTools) draftForAttempt(ctx context.Context, attempt int, t
 			Input:  cloneMapAny(h.Config.PresetInput),
 		}, "", nil
 	}
-	if repairState != nil && strings.TrimSpace(repairState.Source) != "" {
+	if repairState != nil {
 		return h.repair(ctx, taskCtx, repairState)
 	}
 	return h.draft(ctx, taskCtx, instructions, feedback)
@@ -319,7 +324,7 @@ func (h *HelperFactoryTools) draft(ctx context.Context, taskCtx helperFactoryTas
 	if err := h.validateSourceBudget(draft.Source); err != nil {
 		return helperFactoryDraft{}, raw, err
 	}
-	if draft.Input == nil && len(taskCtx.DefaultInput) > 0 {
+	if len(draft.Input) == 0 && len(taskCtx.DefaultInput) > 0 {
 		draft.Input = cloneMapAny(taskCtx.DefaultInput)
 	}
 	return draft, raw, nil
@@ -358,10 +363,10 @@ func (h *HelperFactoryTools) repair(ctx context.Context, taskCtx helperFactoryTa
 	if err := h.validateSourceBudget(draft.Source); err != nil {
 		return helperFactoryDraft{}, raw, err
 	}
-	if draft.Input == nil && len(repairState.Input) > 0 {
+	if len(draft.Input) == 0 && len(repairState.Input) > 0 {
 		draft.Input = cloneMapAny(repairState.Input)
 	}
-	if draft.Input == nil && len(taskCtx.DefaultInput) > 0 {
+	if len(draft.Input) == 0 && len(taskCtx.DefaultInput) > 0 {
 		draft.Input = cloneMapAny(taskCtx.DefaultInput)
 	}
 	return draft, raw, nil
@@ -436,7 +441,7 @@ func (h *HelperFactoryTools) newHelperRunner(ctx context.Context, language, sour
 }
 
 func helperFactoryDraftResponseFormat() json.RawMessage {
-	return json.RawMessage(`{"type":"json_schema","json_schema":{"name":"ephemeral_helper_draft","schema":{"type":"object","properties":{"source":{"type":"string"},"input":{"type":"object","additionalProperties":true}},"required":["source"],"additionalProperties":false},"strict":true}}`)
+	return json.RawMessage(`{"type":"json_schema","json_schema":{"name":"ephemeral_helper_draft","schema":{"type":"object","properties":{"source_b64":{"type":"string"},"source":{"type":"string"},"input":{"type":"object","additionalProperties":true}},"additionalProperties":false,"anyOf":[{"required":["source_b64"]},{"required":["source"]}]},"strict":true}}`)
 }
 
 func runHelperFactoryLLM(ctx context.Context, cfg engine.LLMChatConfig, prompt string) (engine.EngineOutput, error) {
@@ -555,7 +560,7 @@ func helperFactoryLLMChatConfig(cfg rlm.LLMConfig) engine.LLMChatConfig {
 }
 
 func helperFactorySystemPrompt() string {
-	return "You synthesize short-lived deterministic helper programs. Return only one JSON object. The source field must contain plain compilable/runnable source code, not prose, not placeholders, not escaped pseudo-code, not string-concatenation that describes code, and not another JSON object."
+	return "You synthesize short-lived deterministic helper programs. Return only one JSON object. Prefer source_b64 containing base64-encoded compilable/runnable source code. The decoded source must be code, not prose, not placeholders, not escaped pseudo-code, not string-concatenation that describes code, and not another JSON object."
 }
 
 func buildHelperFactoryDraftPrompt(taskPrompt, instructions, feedback, language string, budget helperFactorySourceBudget) string {
@@ -566,21 +571,23 @@ func buildHelperFactoryDraftPrompt(taskPrompt, instructions, feedback, language 
 	maxChars := firstPositiveInt(budget.MaxChars, helperFactoryDefaultMaxSourceChars)
 	if language == HelperLanguagePython {
 		b.WriteString("\n\nWrite a short-lived Python helper for this exact task.\n")
-		b.WriteString("Return only JSON with this shape: {\"source\":\"def solve(input):\\n    return {\\\"ok\\\": True, \\\"answer\\\": \\\"solution = 42\\\"}\", \"input\":{}}.\n")
+		b.WriteString("Return only JSON with this shape: {\"source_b64\":\"<base64 utf-8 Python source>\", \"input\":{}}.\n")
+		b.WriteString("Use source_b64 instead of source so newlines and quotes cannot break JSON. If you cannot base64 encode, source is accepted as a fallback.\n")
 		b.WriteString("The Python source must define solve(input) or Solve(input), where input is a dict.\n")
 		fmt.Fprintf(&b, "Keep source short and task-scoped: at most %d non-empty lines and %d characters, no full proof transcript, no unrelated subproblems, no long comments.\n", maxLines, maxChars)
-		b.WriteString("The source value must be actual Python source text. Do not include markdown fences, shell commands, JSON inside source, or placeholder code.\n")
+		b.WriteString("The decoded source must be actual Python source text. Do not include markdown fences, shell commands, JSON inside source, or placeholder code.\n")
 		b.WriteString("Use only standard algorithm imports if needed: bisect, collections, copy, functools, heapq, itertools, json, math, operator, statistics.\n")
 		b.WriteString("Do not use ellipses, placeholders, escaped braces, or backslashes before Python punctuation. Source must parse as Python after JSON decoding.\n")
-		b.WriteString("Valid source example: \"def solve(input):\\n    return {\\\"ok\\\": True, \\\"answer\\\": \\\"solution = 42\\\"}\".\n")
+		b.WriteString("Valid decoded source example: def solve(input):\\n    return {\"ok\": True, \"answer\": \"solution = 42\"}\n")
 	} else {
 		b.WriteString("\n\nWrite a short-lived Go helper for this exact task.\n")
-		b.WriteString("Return only JSON with this shape: {\"source\":\"func Solve(input map[string]any) map[string]any { return map[string]any{\\\"ok\\\": true, \\\"answer\\\": \\\"solution = 42\\\"} }\", \"input\":{}}.\n")
+		b.WriteString("Return only JSON with this shape: {\"source_b64\":\"<base64 utf-8 Go source>\", \"input\":{}}.\n")
+		b.WriteString("Use source_b64 instead of source so newlines and quotes cannot break JSON. If you cannot base64 encode, source is accepted as a fallback.\n")
 		b.WriteString("The Go source must define Solve(input map[string]any) map[string]any.\n")
 		fmt.Fprintf(&b, "Keep source short and task-scoped: at most %d non-empty lines and %d characters, no full proof transcript, no unrelated subproblems, no long comments.\n", maxLines, maxChars)
-		b.WriteString("The source value must be the actual Go source text. Do not wrap source in package main. Do not put imports inside strings. Do not build the source with + operators. Do not include markdown fences.\n")
+		b.WriteString("The decoded source must be the actual Go source text. Do not wrap source in package main. Do not put imports inside strings. Do not build the source with + operators. Do not include markdown fences.\n")
 		b.WriteString("Do not use ellipses, placeholders, escaped braces, or backslashes before Go punctuation. Source must parse as Go after JSON decoding.\n")
-		b.WriteString("Valid source example: \"func Solve(input map[string]any) map[string]any { return map[string]any{\\\"ok\\\": true, \\\"answer\\\": \\\"solution = 42\\\"} }\".\n")
+		b.WriteString("Valid decoded source example: func Solve(input map[string]any) map[string]any { return map[string]any{\"ok\": true, \"answer\": \"solution = 42\"} }\n")
 	}
 	b.WriteString("The Solve output should include an answer or solution field. Prefer the official answer format and use \"solution = ...\" when the task expects that shape.\n")
 	b.WriteString("Keep the helper deterministic and bounded; use parsing, simulation, search, or verification rather than prose.\n")
@@ -601,7 +608,7 @@ func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactory
 	var b strings.Builder
 	maxLines := firstPositiveInt(budget.MaxLines, helperFactoryDefaultMaxSourceLines)
 	maxChars := firstPositiveInt(budget.MaxChars, helperFactoryDefaultMaxSourceChars)
-	b.WriteString("Repair a failed helper source file. Do not solve the original task. Do not mention the task. Return only one JSON object with a complete replacement source field")
+	b.WriteString("Repair a failed helper source file. Do not solve the original task. Do not mention the task. Return only one JSON object with a complete replacement source_b64 field")
 	b.WriteString(" and optional input field.\n")
 	fmt.Fprintf(&b, "Replacement source must be at most %d non-empty lines and %d characters.\n", maxLines, maxChars)
 	b.WriteString("\nLanguage: ")
@@ -610,20 +617,26 @@ func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactory
 		b.WriteString("Contract: define solve(input) or Solve(input), return a dict containing ok and answer/solution.\n")
 		b.WriteString("Use clear multi-line Python. Do not compress compound for/if/while blocks after semicolons. Do not include JSON fragments, markdown, shell commands, prose, or placeholders in source.\n")
 		b.WriteString("Allowed imports: bisect, collections, copy, functools, heapq, itertools, json, math, operator, statistics.\n")
-		b.WriteString("Return shape example: {\"source\":\"def solve(input):\\n    return {\\\"ok\\\": True, \\\"answer\\\": \\\"solution = 42\\\"}\"}\n")
+		b.WriteString("Return shape example: {\"source_b64\":\"ZGVmIHNvbHZlKGlucHV0KTpcbiAgICByZXR1cm4ge1wib2tcIjogVHJ1ZSwgXCJhbnN3ZXJcIjogXCJzb2x1dGlvbiA9IDQyXCJ9\"}\n")
 	} else {
 		b.WriteString("go\n")
 		b.WriteString("Contract: define Solve(input map[string]any) map[string]any, return a map containing ok and answer/solution.\n")
 		b.WriteString("Use complete Go source without package main. Do not include JSON fragments, markdown, prose, or placeholders in source.\n")
 		b.WriteString("Allowed imports: encoding/json, fmt, math, sort, strconv, strings.\n")
-		b.WriteString("Return shape example: {\"source\":\"func Solve(input map[string]any) map[string]any { return map[string]any{\\\"ok\\\": true, \\\"answer\\\": \\\"solution = 42\\\"} }\"}\n")
+		b.WriteString("Return shape example: {\"source_b64\":\"ZnVuYyBTb2x2ZShpbnB1dCBtYXBbc3RyaW5nXWFueSkgbWFwW3N0cmluZ11hbnkgeyByZXR1cm4gbWFwW3N0cmluZ11hbnl7XCJva1wiOiB0cnVlLCBcImFuc3dlclwiOiBcInNvbHV0aW9uID0gNDJcIn0gfQ==\"}\n")
 	}
 	b.WriteString("\nFailed stage: ")
 	b.WriteString(strings.TrimSpace(repair.Stage))
 	b.WriteString("\nError:\n")
 	b.WriteString(compactHelperFactoryLongText(repair.Error, 1600))
-	b.WriteString("\n\nInvalid source to repair:\n")
-	b.WriteString(compactHelperFactoryLongText(repair.Source, 5000))
+	if strings.TrimSpace(repair.Source) != "" {
+		b.WriteString("\n\nInvalid source to repair:\n")
+		b.WriteString(compactHelperFactoryLongText(repair.Source, 5000))
+	}
+	if strings.TrimSpace(repair.Raw) != "" {
+		b.WriteString("\n\nMalformed draft/output to fix:\n")
+		b.WriteString(compactHelperFactoryLongText(repair.Raw, 5000))
+	}
 	if len(repair.Input) > 0 {
 		b.WriteString("\n\nInput summary, for type expectations only:\n")
 		b.WriteString(helperFactoryJSONSummary(repair.Input))
@@ -632,7 +645,7 @@ func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactory
 		b.WriteString("\n\nPrevious output summary:\n")
 		b.WriteString(helperFactoryJSONSummary(repair.Output))
 	}
-	b.WriteString("\n\nReturn a complete replacement source. Preserve the algorithmic intent where visible, but fix syntax, indentation, imports, return shape, and runtime errors.")
+	b.WriteString("\n\nReturn a complete replacement source_b64. Interpret malformed draft text generously: if source_b64 visibly contains raw source instead of base64, treat it as the source to repair. Preserve the algorithmic intent where visible, but fix JSON, syntax, indentation, imports, return shape, and runtime errors.")
 	return b.String()
 }
 
@@ -654,6 +667,11 @@ func helperFactoryTaskContextForPrompt(prompt string) helperFactoryTaskContext {
 	b.WriteString("The runtime will pass Solve a JSON-decoded map containing the fields below if your response omits input.\n")
 	b.WriteString("In Go, JSON arrays arrive as []any and JSON numbers arrive as float64; convert them before arithmetic.\n")
 	b.WriteString(helperFactoryInputSchemaSummary(instance))
+	if exact := helperFactoryExactInputJSON(instance, 6000); exact != "" {
+		b.WriteString("\nCanonical structured input JSON:\n")
+		b.WriteString(exact)
+		b.WriteString("\n")
+	}
 	if objective := helperFactoryObjectiveSummary(prompt); objective != "" {
 		b.WriteString("\nObjective and answer format:\n")
 		b.WriteString(objective)
@@ -664,6 +682,36 @@ func helperFactoryTaskContextForPrompt(prompt string) helperFactoryTaskContext {
 		DefaultInput: instance,
 		Compacted:    true,
 	}
+}
+
+func helperFactoryEffectiveInput(defaultInput, draftInput, explicitInput map[string]any, prompt string) map[string]any {
+	if len(explicitInput) > 0 {
+		return cloneMapAny(explicitInput)
+	}
+	if len(defaultInput) > 0 {
+		if len(draftInput) > 0 {
+			return mergeHelperFactoryInput(defaultInput, draftInput)
+		}
+		return cloneMapAny(defaultInput)
+	}
+	if len(draftInput) > 0 {
+		return cloneMapAny(draftInput)
+	}
+	return map[string]any{"prompt": prompt}
+}
+
+func mergeHelperFactoryInput(base, overlay map[string]any) map[string]any {
+	out := cloneMapAny(base)
+	if out == nil {
+		out = map[string]any{}
+	}
+	for key, value := range overlay {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		out[key] = cloneAny(value)
+	}
+	return out
 }
 
 func helperFactoryExtractInstanceFields(prompt string) (map[string]any, bool) {
@@ -927,6 +975,20 @@ func helperFactoryJSONSummary(value map[string]any) string {
 	return string(body)
 }
 
+func helperFactoryExactInputJSON(value map[string]any, maxChars int) string {
+	if len(value) == 0 {
+		return ""
+	}
+	body, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	if maxChars > 0 && len(body) > maxChars {
+		return ""
+	}
+	return string(body)
+}
+
 func decodeHelperFactoryDraft(text string, draft *helperFactoryDraft) error {
 	for _, candidate := range helperFactoryJSONCandidates(text) {
 		decoder := json.NewDecoder(strings.NewReader(candidate))
@@ -935,13 +997,160 @@ func decodeHelperFactoryDraft(text string, draft *helperFactoryDraft) error {
 		if err := decoder.Decode(&parsed); err != nil {
 			continue
 		}
+		if err := decodeHelperFactorySource(&parsed); err != nil {
+			continue
+		}
 		if strings.TrimSpace(parsed.Source) == "" {
 			continue
 		}
 		*draft = parsed
 		return nil
 	}
+	if parsed, ok := decodeMalformedHelperFactoryDraft(text); ok {
+		*draft = parsed
+		return nil
+	}
 	return fmt.Errorf("no valid draft JSON object found")
+}
+
+func decodeHelperFactorySource(draft *helperFactoryDraft) error {
+	if draft == nil {
+		return fmt.Errorf("nil draft")
+	}
+	if strings.TrimSpace(draft.SourceB64) == "" {
+		draft.Source = strings.TrimSpace(draft.Source)
+		return nil
+	}
+	body, err := decodeHelperFactorySourceB64(draft.SourceB64)
+	if err != nil {
+		if helperFactoryLooksLikeSource(draft.SourceB64) {
+			if strings.TrimSpace(draft.Source) == "" {
+				draft.Source = draft.SourceB64
+			}
+			draft.Source = strings.TrimSpace(draft.Source)
+			return nil
+		}
+		return fmt.Errorf("decode source_b64: %w", err)
+	}
+	if !helperFactoryLooksLikeSource(string(body)) && helperFactoryLooksLikeSource(draft.SourceB64) {
+		if strings.TrimSpace(draft.Source) == "" {
+			draft.Source = draft.SourceB64
+		}
+		draft.Source = strings.TrimSpace(draft.Source)
+		return nil
+	}
+	if strings.TrimSpace(draft.Source) == "" {
+		draft.Source = string(body)
+	}
+	draft.Source = strings.TrimSpace(draft.Source)
+	return nil
+}
+
+func decodeMalformedHelperFactoryDraft(text string) (helperFactoryDraft, bool) {
+	if rawB64, ok := extractMalformedHelperFactoryField(text, "source_b64"); ok {
+		body, err := decodeHelperFactorySourceB64(rawB64)
+		if err == nil && helperFactoryLooksLikeSource(string(body)) {
+			return helperFactoryDraft{Source: strings.TrimSpace(string(body))}, true
+		}
+	}
+	return helperFactoryDraft{}, false
+}
+
+func extractMalformedHelperFactoryField(text, field string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if text == "" || strings.TrimSpace(field) == "" {
+		return "", false
+	}
+	key := `"` + field + `"`
+	keyIdx := strings.Index(text, key)
+	if keyIdx < 0 {
+		return "", false
+	}
+	rest := text[keyIdx+len(key):]
+	colon := strings.IndexByte(rest, ':')
+	if colon < 0 {
+		return "", false
+	}
+	rest = strings.TrimLeft(rest[colon+1:], " \t\r\n")
+	if !strings.HasPrefix(rest, `"`) {
+		return "", false
+	}
+	var b strings.Builder
+	escaped := false
+	for _, ch := range rest[1:] {
+		if escaped {
+			switch ch {
+			case 'n':
+				b.WriteByte('\n')
+			case 'r':
+				b.WriteByte('\r')
+			case 't':
+				b.WriteByte('\t')
+			default:
+				b.WriteRune(ch)
+			}
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			break
+		}
+		b.WriteRune(ch)
+	}
+	value := strings.TrimSpace(b.String())
+	if value == "" {
+		return "", false
+	}
+	return value, true
+}
+
+func decodeHelperFactorySourceB64(value string) ([]byte, error) {
+	cleaned := helperFactoryCleanSourceB64(value)
+	if cleaned == "" {
+		return nil, fmt.Errorf("empty source_b64")
+	}
+	if remainder := len(cleaned) % 4; remainder != 0 {
+		cleaned += strings.Repeat("=", 4-remainder)
+	}
+	return base64.StdEncoding.DecodeString(cleaned)
+}
+
+func helperFactoryCleanSourceB64(value string) string {
+	var b strings.Builder
+	for _, ch := range strings.TrimSpace(value) {
+		switch {
+		case ch >= 'A' && ch <= 'Z':
+			b.WriteRune(ch)
+		case ch >= 'a' && ch <= 'z':
+			b.WriteRune(ch)
+		case ch >= '0' && ch <= '9':
+			b.WriteRune(ch)
+		case ch == '+' || ch == '/' || ch == '=':
+			b.WriteRune(ch)
+		case ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t':
+			continue
+		default:
+			return b.String()
+		}
+	}
+	return b.String()
+}
+
+func helperFactoryLooksLikeSource(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	lower := strings.ToLower(value)
+	return strings.Contains(lower, "def solve") ||
+		strings.Contains(lower, "def solve(") ||
+		strings.Contains(value, "func Solve") ||
+		strings.Contains(lower, "return ") ||
+		strings.Contains(lower, "import ")
 }
 
 func helperFactoryJSONCandidates(text string) []string {

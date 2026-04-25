@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -92,24 +93,33 @@ type REPLRunnerConfig struct {
 // let callers make protocol order deterministic while keeping one sandbox and
 // one recursive scheduler for the whole RLM attempt.
 type REPLRunnerPhase struct {
-	Name                    string
-	Prompt                  string
-	OutputKind              string
-	MaxGraphNodes           int
-	BraidGraphPolicy        string
-	BraidRepairAttempts     int
-	FinalOutputKind         string
-	MaxTokens               int
-	Tools                   []string
-	RequiredTools           []string
-	MaxIterations           int
-	Final                   bool
-	AutoExecuteRequiredTool bool
-	AutoExecuteGraphNodes   bool
-	AutoExecuteToolCalls    []REPLRunnerPhaseAutoToolCall
-	RequireToolResultOK     bool
-	RequireToolOutput       bool
-	ContinueOnREPLCodeError bool
+	Name                       string
+	Prompt                     string
+	OutputKind                 string
+	MaxGraphNodes              int
+	BraidGraphPolicy           string
+	BraidRepairAttempts        int
+	FinalOutputKind            string
+	ResponseFormat             json.RawMessage
+	MaxTokens                  int
+	Tools                      []string
+	RequiredTools              []string
+	MaxIterations              int
+	Final                      bool
+	AutoExecuteRequiredTool    bool
+	AutoExecuteGraphNodes      bool
+	AutoExecuteToolCalls       []REPLRunnerPhaseAutoToolCall
+	RequireToolResultOK        bool
+	RequireToolOutput          bool
+	ContinueOnREPLCodeError    bool
+	RequiredREPLCodeSubstrings []string
+	MaxREPLCodeLines           int
+	MaxREPLCodeCommentLines    int
+	IncludePriorAssistantText  bool
+	FilterOverlongREPLCode     bool
+	FilterREPLCodeMaxTokens    int
+	FilterOverlongOutput       bool
+	FilterOutputMaxTokens      int
 }
 
 type REPLRunnerPhaseAutoToolCall struct {
@@ -685,10 +695,13 @@ func (r *REPLRunner) runStagedREPLLoop(
 		phaseLLM := llm
 		forcedToolChoice := forcedToolChoiceForPhase(phase, phaseTools)
 		phaseMaxTokens := firstPositiveInt(phase.MaxTokens, llmCfg.MaxTokens)
-		if phase.MaxIterations > 0 || phase.MaxTokens > 0 || len(forcedToolChoice) > 0 {
+		if phase.MaxIterations > 0 || phase.MaxTokens > 0 || len(forcedToolChoice) > 0 || len(phase.ResponseFormat) > 0 {
 			phaseLLMCfg := llmCfg
 			phaseLLMCfg.MaxIterations = phase.MaxIterations
 			phaseLLMCfg.MaxTokens = phaseMaxTokens
+			if len(phase.ResponseFormat) > 0 {
+				phaseLLMCfg.ResponseFormat = phase.ResponseFormat
+			}
 			if phase.AutoExecuteRequiredTool {
 				phaseLLMCfg.ToolChoice = nil
 				phaseLLMCfg.ParseReasoningToolCalls = false
@@ -720,7 +733,25 @@ func (r *REPLRunner) runStagedREPLLoop(
 			MaxTokens:   phaseMaxTokens,
 			Temperature: llmCfg.Temperature,
 		})
+		if phase.FilterOverlongOutput && strings.TrimSpace(phase.OutputKind) == REPLPhaseOutputKindCyclePacket && attemptOutput.StopReason == engine.StopReasonMaxTokens && strings.TrimSpace(attemptOutput.AssistantText) != "" {
+			filterOutput, filterErr := runCyclePacketFilter(ctx, llmCfg, systemPrompt, task, phase, output, attemptOutput.AssistantText)
+			attemptOutput = mergeEngineOutputs(attemptOutput, filterOutput)
+			if filterErr != nil {
+				err = filterErr
+			} else {
+				attemptOutput.AssistantText = filterOutput.AssistantText
+				attemptOutput.StopReason = filterOutput.StopReason
+			}
+		}
 		validationErr := validateREPLAttemptOutputForPhase(phase, attemptOutput, err, phaseMaxTokens)
+		skipREPLCodeExecution := false
+		if validationErr != nil &&
+			strings.TrimSpace(phase.OutputKind) == REPLPhaseOutputKindREPLCode &&
+			phase.ContinueOnREPLCodeError {
+			appendREPLCodeFailureContext(phaseName, phase, &attemptOutput, validationErr)
+			validationErr = nil
+			skipREPLCodeExecution = true
+		}
 		if phase.Final {
 			repairOutput, repaired, repairErr := r.repairFinalSolutionLineIfNeeded(ctx, phaseLLM, llmCfg, systemPrompt, task, phase, output, attemptOutput, validationErr != nil)
 			if repaired {
@@ -751,8 +782,16 @@ func (r *REPLRunner) runStagedREPLLoop(
 			recordParentLLMIterations(recorder, llmCfg.Model, attemptOutput, len(output.Iterations)-len(attemptOutput.Iterations))
 			return output, 0, validationErr
 		}
-		if strings.TrimSpace(phase.OutputKind) == REPLPhaseOutputKindREPLCode {
+		if strings.TrimSpace(phase.OutputKind) == REPLPhaseOutputKindREPLCode && !skipREPLCodeExecution {
 			if err := r.executeAndRepairPhaseREPLCode(ctx, phaseLLM, llmCfg, systemPrompt, task, phaseName, phase, output, toolExec, &attemptOutput, phaseMaxTokens); err != nil {
+				recorder.RecordError(RuntimeErrorEvent{Code: "phase_" + phaseName, Message: err.Error()})
+				output = mergeEngineOutputs(output, attemptOutput)
+				recordParentLLMIterations(recorder, llmCfg.Model, attemptOutput, len(output.Iterations)-len(attemptOutput.Iterations))
+				return output, 0, err
+			}
+		}
+		if strings.TrimSpace(phase.OutputKind) == REPLPhaseOutputKindCycleWitness {
+			if err := autoCheckPhaseCycleWitness(phaseName, &attemptOutput); err != nil {
 				recorder.RecordError(RuntimeErrorEvent{Code: "phase_" + phaseName, Message: err.Error()})
 				output = mergeEngineOutputs(output, attemptOutput)
 				recordParentLLMIterations(recorder, llmCfg.Model, attemptOutput, len(output.Iterations)-len(attemptOutput.Iterations))
@@ -1008,6 +1047,41 @@ func (r *REPLRunner) executeAndRepairPhaseREPLCode(
 	if err == nil {
 		return nil
 	}
+	if phase.FilterOverlongREPLCode && output != nil && output.StopReason == engine.StopReasonMaxTokens && strings.TrimSpace(output.AssistantText) != "" {
+		filterMaxTokens := replCodeFilterMaxTokens(phase, maxTokens)
+		filterLLMCfg := llmCfg
+		filterLLMCfg.MaxTokens = filterMaxTokens
+		filterLLMCfg.MaxIterations = 1
+		filterLLMCfg.ToolChoice = nil
+		filterLLMCfg.ParseReasoningToolCalls = false
+		filterLLM, filterEngineErr := engine.NewLLMChatEngine(filterLLMCfg)
+		if filterEngineErr != nil {
+			return filterEngineErr
+		}
+		filterOutput, filterErr := filterLLM.Run(ctx, engine.EngineInput{
+			SystemPrompt: systemPrompt,
+			Messages: []engine.Message{engine.NewUserMessage(buildREPLCodeFilterPrompt(
+				task.Prompt,
+				phase,
+				prior,
+				output.AssistantText,
+			))},
+			Tools:       nil,
+			Workspace:   task.WorkspaceRoot,
+			MaxTokens:   filterMaxTokens,
+			Temperature: llmCfg.Temperature,
+		})
+		*output = mergeEngineOutputs(*output, filterOutput)
+		if validationErr := validateREPLAttemptOutputForPhase(phase, filterOutput, filterErr, filterMaxTokens); validationErr != nil {
+			err = fmt.Errorf("rlm repl runner phase %q filter overlong repl_code output: %w", phaseName, validationErr)
+		} else if execErr := autoExecutePhaseREPLCode(ctx, phaseName, phase, toolExec, &filterOutput); execErr != nil {
+			*output = mergeEngineOutputs(*output, filterOutput)
+			err = execErr
+		} else {
+			*output = mergeEngineOutputs(*output, filterOutput)
+			return nil
+		}
+	}
 	if r == nil || r.Config.ToolErrorRepairMaxAttempts <= 0 || output == nil {
 		if phase.ContinueOnREPLCodeError {
 			appendREPLCodeFailureContext(phaseName, phase, output, err)
@@ -1070,6 +1144,7 @@ func (r *REPLRunner) parseAndRepairBraidGraphPhaseOutput(
 ) (BraidGraph, engine.EngineOutput, error) {
 	graph, err := ParseBraidGraphText(phaseOutput.AssistantText)
 	if err == nil {
+		graph = NormalizeBraidGraphForPolicy(graph, phase.BraidGraphPolicy, maxNodes)
 		if validateErr := validateBraidGraphForPhase(phase, graph, maxNodes); validateErr == nil {
 			return graph, engine.EngineOutput{}, nil
 		} else {
@@ -1101,6 +1176,7 @@ func (r *REPLRunner) parseAndRepairBraidGraphPhaseOutput(
 	if parseErr != nil {
 		return BraidGraph{}, repairOutput, fmt.Errorf("rlm repl runner: braid_graph repair parse failed (initial error: %v): %w", initialErr, parseErr)
 	}
+	repaired = NormalizeBraidGraphForPolicy(repaired, phase.BraidGraphPolicy, maxNodes)
 	if validateErr := validateBraidGraphForPhase(phase, repaired, maxNodes); validateErr != nil {
 		return BraidGraph{}, repairOutput, fmt.Errorf("rlm repl runner: braid_graph repair validation failed (initial error: %v): %w", initialErr, validateErr)
 	}
@@ -1127,8 +1203,14 @@ func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, p
 		fmt.Fprintf(&b, "Node cap: %d\n", maxNodes)
 	}
 	b.WriteString("\nReturn JSON only. No markdown fences and no prose.\n")
+	b.WriteString("Use kind extract|solve|cycle_solve|verify|reduce. Keep each question under 220 characters and expected_output under 120 characters.\n")
+	if strings.TrimSpace(phase.BraidGraphPolicy) == BraidGraphPolicyLongCoTController {
+		b.WriteString("LongCoT controller policy is mandatory: include extract, at least two solve-like nodes, verify, and reduce; keep the graph acyclic and shorten invalid fields instead of deleting required node kinds.\n")
+		b.WriteString("cycle_solve is optional. Use it only for a true strongly connected/fixed-point constraint cluster. For state-transition, planning, simulation, or BlocksWorld-style tasks, prefer solve nodes plus an independent verify node.\n")
+		b.WriteString("The verify node question or expected_output must explicitly say it checks original constraints by substituting candidate values into the original problem placeholders.\n")
+	}
 	b.WriteString("Schema:\n")
-	b.WriteString(`{"version":1,"nodes":[{"id":"n1","kind":"extract|solve|verify|reduce","question":"...","depends_on":["n0"],"expected_output":"...","max_summary_chars":256}],"final_node":"n1"}`)
+	b.WriteString(`{"version":1,"nodes":[{"id":"n1","kind":"extract|solve|cycle_solve|verify|reduce","question":"...","depends_on":["n0"],"expected_output":"...","max_summary_chars":256,"helper_policy":"auto|preferred|required|never"}],"final_node":"n1"}`)
 	b.WriteString("\n\nPrevious invalid response:\n")
 	b.WriteString(safeTelemetryExcerpt(invalidOutput, 3000))
 	return b.String()
@@ -1264,6 +1346,9 @@ func autoExecutePhaseREPLCode(ctx context.Context, phaseName string, phase REPLR
 	if err != nil {
 		return fmt.Errorf("rlm repl runner phase %q invalid repl_code output: %w", phaseName, err)
 	}
+	if err := validateREPLCodePhaseContract(phase, code); err != nil {
+		return fmt.Errorf("rlm repl runner phase %q invalid repl_code output: %w", phaseName, err)
+	}
 	args, err := json.Marshal(map[string]any{"code": code})
 	if err != nil {
 		return err
@@ -1287,6 +1372,115 @@ func autoExecutePhaseREPLCode(ctx context.Context, phaseName string, phase REPLR
 		}
 	}
 	return nil
+}
+
+func autoCheckPhaseCycleWitness(phaseName string, output *engine.EngineOutput) error {
+	if output == nil {
+		return nil
+	}
+	result, err := CheckCycleWitnessText(output.AssistantText)
+	callID := fmt.Sprintf("auto_%s_cycle_witness_check", sanitizeToolCallIDPart(phaseName))
+	toolCall := engine.ToolCall{ID: callID, Name: "cycle_witness_check"}
+	toolResult := engine.ToolResult{ToolCallID: callID}
+	if err != nil {
+		toolResult.IsError = true
+		toolResult.Content = err.Error()
+		output.ToolCalls = append(output.ToolCalls, toolCall)
+		output.ToolResults = append(output.ToolResults, toolResult)
+		return fmt.Errorf("rlm repl runner phase %q invalid cycle_witness output: %w", phaseName, err)
+	}
+	line, err := CycleWitnessResultJSONLine(result)
+	if err != nil {
+		toolResult.IsError = true
+		toolResult.Content = err.Error()
+		output.ToolCalls = append(output.ToolCalls, toolCall)
+		output.ToolResults = append(output.ToolResults, toolResult)
+		return err
+	}
+	toolResult.Content = line
+	output.ToolCalls = append(output.ToolCalls, toolCall)
+	output.ToolResults = append(output.ToolResults, toolResult)
+	return nil
+}
+
+func validateREPLCodePhaseContract(phase REPLRunnerPhase, code string) error {
+	if disallowed := disallowedREPLCodeImport(code); disallowed != "" {
+		return fmt.Errorf("disallowed third-party import %q", disallowed)
+	}
+	if phase.MaxREPLCodeLines > 0 || phase.MaxREPLCodeCommentLines > 0 {
+		lines, comments := countREPLCodeLines(code)
+		if phase.MaxREPLCodeLines > 0 && lines > phase.MaxREPLCodeLines {
+			return fmt.Errorf("too many code lines: got %d, max %d", lines, phase.MaxREPLCodeLines)
+		}
+		if phase.MaxREPLCodeCommentLines > 0 && comments > phase.MaxREPLCodeCommentLines {
+			return fmt.Errorf("too many comment lines: got %d, max %d", comments, phase.MaxREPLCodeCommentLines)
+		}
+	}
+	for _, required := range phase.RequiredREPLCodeSubstrings {
+		required = strings.TrimSpace(required)
+		if required == "" {
+			continue
+		}
+		if !strings.Contains(code, required) {
+			return fmt.Errorf("missing required code substring %q", required)
+		}
+	}
+	return nil
+}
+
+func countREPLCodeLines(code string) (int, int) {
+	lines := 0
+	comments := 0
+	for _, rawLine := range strings.Split(code, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		lines++
+		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			comments++
+		}
+	}
+	return lines, comments
+}
+
+func disallowedREPLCodeImport(code string) string {
+	disallowed := map[string]struct{}{
+		"networkx": {},
+		"numpy":    {},
+		"pandas":   {},
+		"scipy":    {},
+		"sympy":    {},
+	}
+	for _, rawLine := range strings.Split(code, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "import ") {
+			for _, field := range strings.Split(strings.TrimSpace(strings.TrimPrefix(line, "import ")), ",") {
+				name := strings.TrimSpace(field)
+				if idx := strings.IndexAny(name, " \t."); idx >= 0 {
+					name = name[:idx]
+				}
+				if _, denied := disallowed[name]; denied {
+					return name
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "from ") {
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "from "))
+			name := rest
+			if idx := strings.IndexAny(name, " \t."); idx >= 0 {
+				name = name[:idx]
+			}
+			if _, denied := disallowed[name]; denied {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 func appendREPLCodeFailureContext(phaseName string, phase REPLRunnerPhase, output *engine.EngineOutput, err error) {
@@ -1320,6 +1514,26 @@ func shouldRepairStructuredFinalAfterAttemptError(phase REPLRunnerPhase, output 
 	return strings.TrimSpace(phase.FinalOutputKind) != "" &&
 		strings.TrimSpace(output.AssistantText) != "" &&
 		output.StopReason == engine.StopReasonMaxTokens
+}
+
+func replCodeFilterMaxTokens(phase REPLRunnerPhase, phaseMaxTokens int) int {
+	if phase.FilterREPLCodeMaxTokens > 0 {
+		return phase.FilterREPLCodeMaxTokens
+	}
+	if phaseMaxTokens > 0 && phaseMaxTokens < 768 {
+		return phaseMaxTokens
+	}
+	return 768
+}
+
+func phaseOutputFilterMaxTokens(phase REPLRunnerPhase, fallback int) int {
+	if phase.FilterOutputMaxTokens > 0 {
+		return phase.FilterOutputMaxTokens
+	}
+	if fallback > 0 && fallback < 768 {
+		return fallback
+	}
+	return 768
 }
 
 func replCodePhaseToolName(phase REPLRunnerPhase, toolExec *replToolExecutor) string {
@@ -1871,6 +2085,18 @@ func validateREPLAttemptOutput(output engine.EngineOutput, err error, maxTokens 
 }
 
 func validateREPLAttemptOutputForPhase(phase REPLRunnerPhase, output engine.EngineOutput, err error, maxTokens int) error {
+	if strings.TrimSpace(phase.OutputKind) == REPLPhaseOutputKindBraidGraph {
+		if err != nil {
+			return err
+		}
+		if output.StopReason == engine.StopReasonError {
+			return fmt.Errorf("rlm repl runner: %s", strings.TrimSpace(output.Error))
+		}
+		if output.StopReason == engine.StopReasonMaxTokens && strings.TrimSpace(output.AssistantText) != "" {
+			return nil
+		}
+		return validateREPLAttemptOutput(output, err, maxTokens)
+	}
 	if strings.TrimSpace(phase.OutputKind) != REPLPhaseOutputKindREPLCode {
 		return validateREPLAttemptOutput(output, err, maxTokens)
 	}
@@ -1946,6 +2172,16 @@ func safeTelemetryExcerpt(text string, limit int) string {
 }
 
 func validateREPLPhaseOutput(phase REPLRunnerPhase, output engine.EngineOutput) error {
+	switch strings.TrimSpace(phase.OutputKind) {
+	case REPLPhaseOutputKindCyclePacket:
+		if err := validateCyclePacketText(output.AssistantText); err != nil {
+			return fmt.Errorf("rlm repl runner phase %q invalid cycle_packet output: %w", strings.TrimSpace(phase.Name), err)
+		}
+	case REPLPhaseOutputKindCycleWitness:
+		if _, err := CheckCycleWitnessText(output.AssistantText); err != nil {
+			return fmt.Errorf("rlm repl runner phase %q invalid cycle_witness output: %w", strings.TrimSpace(phase.Name), err)
+		}
+	}
 	for _, required := range phase.RequiredTools {
 		required = strings.TrimSpace(required)
 		if required == "" {
@@ -1968,6 +2204,44 @@ func validateREPLPhaseOutput(phase REPLRunnerPhase, output engine.EngineOutput) 
 		if err := validateFinalOutputKind(phase, output.AssistantText); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateCyclePacketText(text string) error {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return fmt.Errorf("empty cycle packet")
+	}
+	if len(trimmed) > 2400 {
+		return fmt.Errorf("cycle packet length %d exceeds max 2400", len(trimmed))
+	}
+	if strings.HasPrefix(trimmed, "```") || strings.Contains(trimmed, "```") {
+		return fmt.Errorf("cycle packet must be raw JSON, not markdown")
+	}
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+	var packet map[string]any
+	if err := decoder.Decode(&packet); err != nil {
+		return fmt.Errorf("parse JSON: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("multiple JSON values")
+		}
+		return fmt.Errorf("parse JSON: %w", err)
+	}
+	if len(packet) == 0 {
+		return fmt.Errorf("cycle packet object is empty")
+	}
+	if _, ok := packet["unknowns"]; !ok {
+		return fmt.Errorf("cycle packet missing unknowns")
+	}
+	if _, ok := packet["constraints"]; !ok {
+		return fmt.Errorf("cycle packet missing constraints")
+	}
+	if _, ok := packet["candidate_bounds"]; !ok {
+		return fmt.Errorf("cycle packet missing candidate_bounds")
 	}
 	return nil
 }
@@ -2217,6 +2491,13 @@ func buildREPLPhasePrompt(originalPrompt string, phase REPLRunnerPhase, prior en
 		b.WriteString(summary)
 		b.WriteString("\n\n")
 	}
+	if phase.IncludePriorAssistantText {
+		if text := strings.TrimSpace(prior.AssistantText); text != "" {
+			b.WriteString("Prior phase assistant output:\n")
+			b.WriteString(safeTelemetryExcerpt(text, 2400))
+			b.WriteString("\n\n")
+		}
+	}
 	b.WriteString("Original task:\n")
 	b.WriteString(strings.TrimSpace(originalPrompt))
 	return b.String()
@@ -2282,8 +2563,87 @@ func buildREPLCodeRepairPrompt(originalPrompt string, phase REPLRunnerPhase, pri
 	b.WriteString(safeTelemetryExcerpt(invalidCode, 1600))
 	b.WriteString("\n\nReturn raw executable code only. Do not use markdown fences, prose, JSON, or tool-call syntax.\n")
 	b.WriteString("The first non-empty line must be executable code, not a comment.\n")
+	b.WriteString("Do not explain, derive, or narrate in comments. Use at most one short comment if absolutely necessary.\n")
 	b.WriteString("The code must print a non-empty compact result in its first five executable lines.\n")
+	if len(phase.RequiredREPLCodeSubstrings) > 0 {
+		b.WriteString("The code must include these exact substrings: ")
+		b.WriteString(strings.Join(phase.RequiredREPLCodeSubstrings, ", "))
+		b.WriteString(".\n")
+	}
+	b.WriteString("Use only built-in language features and standard library imports. Do not import sympy, numpy, scipy, pandas, networkx, or any third-party package.\n")
+	b.WriteString("If the full solution is unclear, print a compact pass=false/blocker witness instead of writing a long derivation.\n")
 	b.WriteString("Use the same REPL language selected for this phase.")
+	return b.String()
+}
+
+func buildREPLCodeFilterPrompt(originalPrompt string, phase REPLRunnerPhase, prior engine.EngineOutput, overlongCode string) string {
+	var b strings.Builder
+	b.WriteString(buildREPLPhasePrompt(originalPrompt, phase, prior, replRunnerRunState{}))
+	b.WriteString("\n\nREPL code filter required.\n")
+	b.WriteString("The previous response exceeded the scratch code budget. Treat it as exploration notes, not as final code.\n")
+	b.WriteString("Extract the smallest executable witness program that preserves the explored candidates, constraints, and checks.\n")
+	b.WriteString("Return raw executable code only. Do not add prose, markdown fences, JSON wrappers, or tool-call syntax.\n")
+	b.WriteString("The first non-empty line must be executable code, not a comment. Keep comments rare and short.\n")
+	if phase.MaxREPLCodeLines > 0 {
+		fmt.Fprintf(&b, "The filtered code must be at most %d non-empty lines.\n", phase.MaxREPLCodeLines)
+	}
+	if phase.MaxREPLCodeCommentLines > 0 {
+		fmt.Fprintf(&b, "The filtered code must contain at most %d comment lines.\n", phase.MaxREPLCodeCommentLines)
+	}
+	if len(phase.RequiredREPLCodeSubstrings) > 0 {
+		b.WriteString("The filtered code must include these exact substrings: ")
+		b.WriteString(strings.Join(phase.RequiredREPLCodeSubstrings, ", "))
+		b.WriteString(".\n")
+	}
+	b.WriteString("If the exploration did not find a satisfying candidate, preserve that result as executable code that prints a compact pass=false witness with observed and expected fields.\n")
+	b.WriteString("Overlong exploration response:\n")
+	b.WriteString(safeTelemetryExcerpt(overlongCode, 5000))
+	return b.String()
+}
+
+func runCyclePacketFilter(ctx context.Context, llmCfg engine.LLMChatConfig, systemPrompt string, task rlm.Task, phase REPLRunnerPhase, prior engine.EngineOutput, overlongOutput string) (engine.EngineOutput, error) {
+	filterMaxTokens := phaseOutputFilterMaxTokens(phase, phase.MaxTokens)
+	filterCfg := llmCfg
+	filterCfg.MaxTokens = filterMaxTokens
+	filterCfg.MaxIterations = 1
+	filterCfg.ToolChoice = nil
+	filterCfg.ParseReasoningToolCalls = false
+	filterLLM, err := engine.NewLLMChatEngine(filterCfg)
+	if err != nil {
+		return engine.EngineOutput{}, err
+	}
+	filterOutput, runErr := filterLLM.Run(ctx, engine.EngineInput{
+		SystemPrompt: systemPrompt,
+		Messages: []engine.Message{engine.NewUserMessage(buildCyclePacketFilterPrompt(
+			task.Prompt,
+			phase,
+			prior,
+			overlongOutput,
+		))},
+		Tools:       nil,
+		Workspace:   task.WorkspaceRoot,
+		MaxTokens:   filterMaxTokens,
+		Temperature: llmCfg.Temperature,
+	})
+	if validationErr := validateREPLAttemptOutput(filterOutput, runErr, filterMaxTokens); validationErr != nil {
+		return filterOutput, validationErr
+	}
+	if err := validateCyclePacketText(filterOutput.AssistantText); err != nil {
+		return filterOutput, err
+	}
+	return filterOutput, nil
+}
+
+func buildCyclePacketFilterPrompt(originalPrompt string, phase REPLRunnerPhase, prior engine.EngineOutput, overlongOutput string) string {
+	var b strings.Builder
+	b.WriteString(buildREPLPhasePrompt(originalPrompt, phase, prior, replRunnerRunState{}))
+	b.WriteString("\n\nCycle packet filter required.\n")
+	b.WriteString("The previous cycle_packet response exceeded the JSON budget. Treat it as exploration notes.\n")
+	b.WriteString("Return one compact raw JSON object only. Do not include markdown, prose, code, or explanations.\n")
+	b.WriteString("Required keys: unknowns, known_values, constraints, candidate_bounds, requested_outputs, blockers.\n")
+	b.WriteString("Preserve finite bounds and concrete constraints. If bounds are missing, put a short explanation string in candidate_bounds and blockers.\n")
+	b.WriteString("Overlong cycle_packet response:\n")
+	b.WriteString(safeTelemetryExcerpt(overlongOutput, 5000))
 	return b.String()
 }
 

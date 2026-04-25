@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPythonSkillRunnerRun(t *testing.T) {
@@ -113,6 +114,30 @@ def solve(input):
 	})
 	if err == nil || (!strings.Contains(err.Error(), "disallowed import os") && !strings.Contains(err.Error(), "disallowed selector os.getcwd")) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPythonSkillRunnerRunTimeoutKillsRunawayHelper(t *testing.T) {
+	t.Parallel()
+
+	runner, err := NewPythonSkillRunner(context.Background(), PythonSkillSpec{
+		Source: `
+def solve(input):
+    while True:
+        pass
+`,
+		RunTimeout: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewPythonSkillRunner() error = %v", err)
+	}
+	start := time.Now()
+	_, err = runner.Run(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("Run() err=%v, want timeout", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("Run() took %s, want fast timeout", elapsed)
 	}
 }
 

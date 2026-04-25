@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -87,8 +88,142 @@ func TestHelperFactoryToolsDraftsPythonRunsAndReturnsAnswer(t *testing.T) {
 	if !got.OK || got.Answer != "solution = 42" {
 		t.Fatalf("output ok=%v answer=%q raw=%s", got.OK, got.Answer, raw)
 	}
-	if len(prompts) != 1 || !strings.Contains(prompts[0], "short-lived Python helper") || !strings.Contains(prompts[0], "def solve(input)") {
+	if len(prompts) != 1 || !strings.Contains(prompts[0], "short-lived Python helper") || !strings.Contains(prompts[0], "source_b64") {
 		t.Fatalf("expected Python helper prompt, got %#v", prompts)
+	}
+}
+
+func TestHelperFactoryToolsAcceptsSourceB64Draft(t *testing.T) {
+	t.Parallel()
+
+	source := `def solve(input):
+    return {"ok": True, "answer": "solution = b64"}`
+	server := helperFactoryTestServer(t, []string{mustHelperFactoryDraftB64JSON(t, source, nil)}, nil)
+	defer server.Close()
+
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		LLM: rlm.LLMConfig{
+			Provider:  "openai_compat",
+			BaseURL:   server.URL,
+			AuthMode:  "none",
+			Model:     "test-model",
+			Timeout:   5 * time.Second,
+			MaxTokens: 512,
+		},
+		TaskPrompt:          "Return solution = b64.",
+		Attempts:            1,
+		ExtractSolutionLine: true,
+		Language:            HelperLanguagePython,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Answer != "solution = b64" {
+		t.Fatalf("output ok=%v answer=%q raw=%s", got.OK, got.Answer, raw)
+	}
+}
+
+func TestHelperFactoryToolsTreatsRawSourceB64AsSource(t *testing.T) {
+	t.Parallel()
+
+	source := `def solve(input):
+    return {"ok": True, "answer": "solution = raw-source-b64"}`
+	body, err := json.Marshal(map[string]any{
+		"source_b64": source,
+	})
+	if err != nil {
+		t.Fatalf("marshal draft: %v", err)
+	}
+	var draft helperFactoryDraft
+	if err := decodeHelperFactoryDraft(string(body), &draft); err != nil {
+		t.Fatalf("decode raw source_b64: %v", err)
+	}
+	if draft.Source != source {
+		t.Fatalf("source = %q, want %q", draft.Source, source)
+	}
+}
+
+func TestHelperFactoryToolsExtractsSourceB64FromMalformedDraft(t *testing.T) {
+	t.Parallel()
+
+	source := `def solve(input):
+    return {"ok": True, "answer": "solution = extracted"}`
+	malformed := `prefix {"source_b64":"` + base64.StdEncoding.EncodeToString([]byte(source))
+	var draft helperFactoryDraft
+	if err := decodeHelperFactoryDraft(malformed, &draft); err != nil {
+		t.Fatalf("decode malformed source_b64: %v", err)
+	}
+	if draft.Source != source {
+		t.Fatalf("source = %q, want %q", draft.Source, source)
+	}
+}
+
+func TestHelperFactoryToolsRepairsMalformedDraftOutput(t *testing.T) {
+	t.Parallel()
+
+	malformed := "{\"source_b64\":\"def solve(input):\n    return {\"ok\": True, \"answer\": \"solution = broken\"}\""
+	goodSource := `def solve(input):
+    return {"ok": True, "answer": "solution = fixed"}`
+	var prompts []string
+	server := helperFactoryTestServer(t, []string{
+		malformed,
+		mustHelperFactoryDraftB64JSON(t, goodSource, nil),
+	}, &prompts)
+	defer server.Close()
+
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		LLM: rlm.LLMConfig{
+			Provider:  "openai_compat",
+			BaseURL:   server.URL,
+			AuthMode:  "none",
+			Model:     "test-model",
+			Timeout:   5 * time.Second,
+			MaxTokens: 512,
+		},
+		TaskPrompt:          "SECRET_TASK_CONTEXT_SHOULD_NOT_APPEAR. Return solution = fixed.",
+		Attempts:            2,
+		ExtractSolutionLine: true,
+		Language:            HelperLanguagePython,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Answer != "solution = fixed" {
+		t.Fatalf("output ok=%v answer=%q raw=%s", got.OK, got.Answer, raw)
+	}
+	if len(prompts) != 2 {
+		t.Fatalf("prompts=%d", len(prompts))
+	}
+	repairPrompt := prompts[1]
+	for _, want := range []string{
+		"Repair a failed helper source file",
+		"Language: python",
+		"Malformed draft/output to fix",
+		"Interpret malformed draft text generously",
+		"def solve(input):",
+	} {
+		if !strings.Contains(repairPrompt, want) {
+			t.Fatalf("repair prompt missing %q:\n%s", want, repairPrompt)
+		}
+	}
+	if strings.Contains(repairPrompt, "SECRET_TASK_CONTEXT_SHOULD_NOT_APPEAR") || strings.Contains(repairPrompt, "Task:") {
+		t.Fatalf("repair prompt leaked task context:\n%s", repairPrompt)
 	}
 }
 
@@ -470,6 +605,55 @@ Return your solution in the format: stack_moves
 	}
 }
 
+func TestHelperFactoryToolsMergesEmptyDraftInputWithStructuredDefault(t *testing.T) {
+	t.Parallel()
+
+	source := `def solve(input):
+    return {"ok": True, "answer": "solution = " + str(len(input["initial_state"])) + "," + str(input["number_of_blocks"])}`
+	server := helperFactoryTestServer(t, []string{mustHelperFactoryDraftJSON(t, source, map[string]any{})}, nil)
+	defer server.Close()
+
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		LLM: rlm.LLMConfig{
+			Provider:  "openai_compat",
+			BaseURL:   server.URL,
+			AuthMode:  "none",
+			Model:     "test-model",
+			Timeout:   5 * time.Second,
+			MaxTokens: 512,
+		},
+		TaskPrompt: `
+Puzzle description:
+Move blocks between stacks.
+
+Puzzle instance:
+Initial state: [[1, 2], [3]]
+Goal state: [[1], [2, 3]]
+Number of blocks: 3
+Number of stacks: 2
+Format your solution as:
+solution = ...
+`,
+		Attempts:            1,
+		ExtractSolutionLine: true,
+		Language:            HelperLanguagePython,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Answer != "solution = 2,3" {
+		t.Fatalf("output ok=%v answer=%q raw=%s", got.OK, got.Answer, raw)
+	}
+}
+
 func TestHelperFactoryToolsUsesPresetSourceBeforeDrafting(t *testing.T) {
 	t.Parallel()
 
@@ -581,6 +765,8 @@ solution = <integer>
 		"Compacted visible task",
 		"packages: array len=3",
 		"suppliers: array len=2",
+		"Canonical structured input JSON:",
+		`"packages":[2,3,5]`,
 		"JSON arrays arrive as []any",
 		"minimum total wasted space",
 	} {
@@ -591,7 +777,6 @@ solution = <integer>
 	for _, forbidden := range []string{
 		"benchmark boilerplate should be removed",
 		"999, 999, 999",
-		"[2, 3, 5]",
 		"[[4, 8], [2, 8]]",
 	} {
 		if strings.Contains(prompt, forbidden) {
@@ -641,6 +826,18 @@ func mustHelperFactoryDraftJSON(t *testing.T, source string, input map[string]an
 	body, err := json.Marshal(map[string]any{
 		"source": source,
 		"input":  input,
+	})
+	if err != nil {
+		t.Fatalf("marshal draft: %v", err)
+	}
+	return string(body)
+}
+
+func mustHelperFactoryDraftB64JSON(t *testing.T, source string, input map[string]any) string {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"source_b64": base64.StdEncoding.EncodeToString([]byte(source)),
+		"input":      input,
 	})
 	if err != nil {
 		t.Fatalf("marshal draft: %v", err)

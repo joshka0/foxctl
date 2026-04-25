@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -56,13 +57,23 @@ graphLoop:
 			return fmt.Errorf("rlm repl runner phase %q: braid graph stalled before final_node %q", phaseName, graph.FinalNode)
 		}
 		wave++
-		if maxSubcalls > 0 && submitted+len(ready) > maxSubcalls {
-			return fmt.Errorf("rlm repl runner phase %q: braid graph needs %d subcalls, exceeds max %d", phaseName, submitted+len(ready), maxSubcalls)
-		}
 
 		if !toolExec.allowAsyncRLMTools() {
 			for _, node := range ready {
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "ready", "")
+				if summary, handled, err := runBraidNodeHelperFirst(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], toolExec, output, graph); handled {
+					if err != nil {
+						if prepareBraidRepair(phase, graph, node, summary, summaries, executed, repairFeedbackByNode, &repairAttempts) {
+							recordBraidNodeEvent(toolExec, phaseName, wave, node, "repairing", err.Error())
+							continue graphLoop
+						}
+						recordBraidNodeEvent(toolExec, phaseName, wave, node, "rejected", err.Error())
+						return err
+					}
+					summaries[node.ID] = summary
+					executed[node.ID] = struct{}{}
+					continue
+				}
 				if maxSubcalls > 0 && submitted+1 > maxSubcalls {
 					return fmt.Errorf("rlm repl runner phase %q: braid graph needs %d subcalls, exceeds max %d", phaseName, submitted+1, maxSubcalls)
 				}
@@ -73,8 +84,22 @@ graphLoop:
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "completed", summary)
 				summaries[node.ID] = summary
 				executed[node.ID] = struct{}{}
+				if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], summary, toolExec, output); ok {
+					recordBraidNodeEvent(toolExec, phaseName, wave, node, "helper_recovered", recovered)
+					summaries[node.ID] = recovered
+					summary = recovered
+				}
 				submitted++
-				if err := validateBraidNodeExecutionSummary(phaseName, node, summary, graph.FinalNode); err != nil {
+				if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+					if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], summary, toolExec, output); ok {
+						recordBraidNodeEvent(toolExec, phaseName, wave, node, "helper_recovered", recovered)
+						summaries[node.ID] = recovered
+						if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, node, recovered, graph.FinalNode, graph); recoveredErr == nil {
+							continue
+						} else {
+							err = recoveredErr
+						}
+					}
 					if prepareBraidRepair(phase, graph, node, summary, summaries, executed, repairFeedbackByNode, &repairAttempts) {
 						recordBraidNodeEvent(toolExec, phaseName, wave, node, "repairing", err.Error())
 						continue graphLoop
@@ -91,6 +116,22 @@ graphLoop:
 		for _, node := range ready {
 			recordBraidNodeEvent(toolExec, phaseName, wave, node, "ready", "")
 			deps := dependencySummarySubset(node, summaries)
+			if summary, handled, err := runBraidNodeHelperFirst(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], toolExec, output, graph); handled {
+				if err != nil {
+					if prepareBraidRepair(phase, graph, node, summary, summaries, executed, repairFeedbackByNode, &repairAttempts) {
+						recordBraidNodeEvent(toolExec, phaseName, wave, node, "repairing", err.Error())
+						continue graphLoop
+					}
+					recordBraidNodeEvent(toolExec, phaseName, wave, node, "rejected", err.Error())
+					return err
+				}
+				summaries[node.ID] = summary
+				executed[node.ID] = struct{}{}
+				continue
+			}
+			if maxSubcalls > 0 && submitted+1 > maxSubcalls {
+				return fmt.Errorf("rlm repl runner phase %q: braid graph needs %d subcalls, exceeds max %d", phaseName, submitted+1, maxSubcalls)
+			}
 			child, err := submitBraidNode(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], toolExec, output)
 			if err != nil {
 				return err
@@ -98,6 +139,9 @@ graphLoop:
 			waveChildren = append(waveChildren, child)
 			waveNodeIDs = append(waveNodeIDs, node.ID)
 			submitted++
+		}
+		if len(waveChildren) == 0 {
+			continue
 		}
 
 		waited, err := waitBraidNodeWave(ctx, phaseName, waveChildren, toolExec, output)
@@ -113,7 +157,21 @@ graphLoop:
 			recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "completed", summary)
 			summaries[nodeID] = summary
 			executed[nodeID] = struct{}{}
-			if err := validateBraidNodeExecutionSummary(phaseName, nodesByID[nodeID], summary, graph.FinalNode); err != nil {
+			if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, nodesByID[nodeID], rootPrompt, dependencySummarySubset(nodesByID[nodeID], summaries), repairFeedbackByNode[nodeID], summary, toolExec, output); ok {
+				recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "helper_recovered", recovered)
+				summaries[nodeID] = recovered
+				summary = recovered
+			}
+			if err := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], summary, graph.FinalNode, graph); err != nil {
+				if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, nodesByID[nodeID], rootPrompt, dependencySummarySubset(nodesByID[nodeID], summaries), repairFeedbackByNode[nodeID], summary, toolExec, output); ok {
+					recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "helper_recovered", recovered)
+					summaries[nodeID] = recovered
+					if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], recovered, graph.FinalNode, graph); recoveredErr == nil {
+						continue
+					} else {
+						err = recoveredErr
+					}
+				}
 				if prepareBraidRepair(phase, graph, nodesByID[nodeID], summary, summaries, executed, repairFeedbackByNode, &repairAttempts) {
 					recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "repairing", err.Error())
 					continue graphLoop
@@ -131,6 +189,230 @@ graphLoop:
 	return nil
 }
 
+func runBraidNodeHelperFirst(
+	ctx context.Context,
+	phaseName string,
+	node BraidNode,
+	rootPrompt string,
+	dependencySummaries map[string]string,
+	repairFeedback string,
+	toolExec *replToolExecutor,
+	output *engine.EngineOutput,
+	graph *BraidGraph,
+) (string, bool, error) {
+	policy := braidNodeEffectiveHelperPolicy(node)
+	if policy != BraidNodeHelperPolicyPreferred && policy != BraidNodeHelperPolicyRequired {
+		return "", false, nil
+	}
+	if !braidNodeHelperSupported(node) {
+		return "", false, nil
+	}
+	if graph == nil {
+		return "", false, nil
+	}
+	recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first", policy)
+	summary, ok := runBraidNodeHelper(ctx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, "helper_policy="+policy, toolExec, output)
+	if !ok {
+		if policy == BraidNodeHelperPolicyRequired {
+			return "", true, fmt.Errorf("rlm repl runner phase %q: braid node %q requires helper execution but helper did not produce an answer", phaseName, node.ID)
+		}
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_fallback", "helper did not produce an answer")
+		return "", false, nil
+	}
+	if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_rejected", err.Error())
+		return summary, true, err
+	}
+	recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_completed", summary)
+	return summary, true, nil
+}
+
+func recoverBraidNodeWithHelper(
+	ctx context.Context,
+	phaseName string,
+	node BraidNode,
+	rootPrompt string,
+	dependencySummaries map[string]string,
+	repairFeedback string,
+	failedSummary string,
+	toolExec *replToolExecutor,
+	output *engine.EngineOutput,
+) (string, bool) {
+	if !braidNodeShouldForceHelper(node, failedSummary) {
+		return "", false
+	}
+	return runBraidNodeHelper(ctx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, failedSummary, toolExec, output)
+}
+
+func runBraidNodeHelper(
+	ctx context.Context,
+	phaseName string,
+	node BraidNode,
+	rootPrompt string,
+	dependencySummaries map[string]string,
+	repairFeedback string,
+	triggerSummary string,
+	toolExec *replToolExecutor,
+	output *engine.EngineOutput,
+) (string, bool) {
+	if toolExec == nil || toolExec.helperFactory == nil || output == nil {
+		return "", false
+	}
+	if !braidNodeHelperSupported(node) {
+		return "", false
+	}
+	prompt := RenderBraidNodeChildPromptWithFeedback(node, rootPrompt, dependencySummaries, repairFeedback)
+	instructions := buildBraidHelperRecoveryInstructions(node, triggerSummary)
+	argsMap := map[string]any{
+		"prompt":       prompt,
+		"instructions": instructions,
+		"max_attempts": 3,
+	}
+	if input, ok := helperFactoryExtractInstanceFields(rootPrompt); ok {
+		argsMap["input"] = input
+	}
+	args, err := json.Marshal(argsMap)
+	if err != nil {
+		return "", false
+	}
+	callID := fmt.Sprintf("auto_%s_%s_%s", sanitizeToolCallIDPart(phaseName), sanitizeToolCallIDPart(node.ID), sanitizeToolCallIDPart(EphemeralHelperSolveToolName))
+	rawArgs := json.RawMessage(args)
+	result, execErr := toolExec.Execute(ctx, EphemeralHelperSolveToolName, rawArgs)
+	toolCall := engine.ToolCall{ID: callID, Name: EphemeralHelperSolveToolName, Arguments: rawArgs}
+	toolResult := engine.ToolResult{ToolCallID: callID, Content: result}
+	if execErr != nil {
+		toolResult.IsError = true
+		toolResult.Content = execErr.Error()
+	}
+	output.ToolCalls = append(output.ToolCalls, toolCall)
+	output.ToolResults = append(output.ToolResults, toolResult)
+	if execErr != nil {
+		return "", false
+	}
+	answer := helperAnswerFromToolResult(result)
+	if strings.TrimSpace(answer) == "" {
+		return "", false
+	}
+	return formatBraidHelperNodeSummary(node, answer), true
+}
+
+func braidNodeEffectiveHelperPolicy(node BraidNode) string {
+	policy := normalizeBraidNodeHelperPolicy(node.HelperPolicy)
+	if policy == "" {
+		return BraidNodeHelperPolicyAuto
+	}
+	return policy
+}
+
+func braidNodeHelperFirstAllowed(node BraidNode) bool {
+	policy := braidNodeEffectiveHelperPolicy(node)
+	return (policy == BraidNodeHelperPolicyPreferred || policy == BraidNodeHelperPolicyRequired) && braidNodeHelperSupported(node)
+}
+
+func braidNodeHelperSupported(node BraidNode) bool {
+	return isBraidSolveKind(node.Kind) || node.Kind == "verify"
+}
+
+func braidNodeShouldForceHelper(node BraidNode, summary string) bool {
+	if braidNodeEffectiveHelperPolicy(node) == BraidNodeHelperPolicyNever {
+		return false
+	}
+	if !isBraidSolveKind(node.Kind) && node.Kind != "verify" {
+		return false
+	}
+	if node.Kind == "verify" && !braidVerificationSummaryPassed(summary) {
+		return true
+	}
+	statuses := braidSummaryStatuses(summary)
+	if !braidStatusesContainAny(statuses, "blocked", "partial", "insufficient") {
+		return false
+	}
+	return braidSummaryRequestsComputation(summary)
+}
+
+func braidSummaryRequestsComputation(summary string) bool {
+	lower := strings.ToLower(summary)
+	for _, marker := range []string{
+		"state-space search",
+		"search",
+		"bfs",
+		"dfs",
+		"simulation",
+		"simulate",
+		"substitute",
+		"code",
+		"executable",
+		"program",
+		"solver",
+		"computational planning",
+		"planning assistance",
+		"requires executing",
+		"requires a search algorithm",
+		"cannot generate exact",
+		"exact move sequence",
+		"precise sequence",
+		"full sequence",
+		"no sufficient manual reasoning",
+		"missing-information",
+		"manual single-pass",
+		"combinatorial",
+		"dynamic stack",
+		"dynamic state",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildBraidHelperRecoveryInstructions(node BraidNode, failedSummary string) string {
+	var b strings.Builder
+	b.WriteString("The previous child blocked because the task needs executable search, simulation, parsing, or verification. Do not refuse for that reason.\n")
+	b.WriteString("Draft and run a short-lived helper that computes this node's answer directly. Prefer a deterministic state transformer or verifier when the task involves moves, stacks, transitions, paths, arithmetic search, or exact constraint checking.\n")
+	b.WriteString("Return the computed answer only, in the node's requested format. If this node can produce the final benchmark answer, return a line beginning with solution =.\n")
+	if node.Kind == "verify" {
+		b.WriteString("For a verify node, simulate or substitute the candidate against the original constraints. Return `pass: true` only when every constraint is verified; otherwise return `pass: false` with the first concrete failure.\n")
+	}
+	if strings.TrimSpace(node.ExpectedOutput) != "" {
+		b.WriteString("Expected node output: ")
+		b.WriteString(strings.TrimSpace(node.ExpectedOutput))
+		b.WriteString("\n")
+	}
+	b.WriteString("Previous blocked summary:\n")
+	b.WriteString(safeTelemetryExcerpt(failedSummary, 900))
+	return b.String()
+}
+
+func formatBraidHelperNodeSummary(node BraidNode, answer string) string {
+	answer = strings.TrimSpace(answer)
+	if node.Kind == "verify" {
+		if braidPassFalseRE.MatchString(answer) {
+			return "status: blocked summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints and found a concrete failure."
+		}
+		if braidPassTrueRE.MatchString(answer) || braidVerificationSummaryPassed(answer) {
+			return "status: pass summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints."
+		}
+		return "status: blocked summary: answer: pass: false checks: ephemeral_helper_solve simulated original constraints but did not produce a passing verification. detail: " + safeTelemetryExcerpt(answer, 600)
+	}
+	return "status: completed summary: status: solved answer: " + answer + " checks: ephemeral_helper_solve produced and ran an executable helper for this node."
+}
+
+func helperAnswerFromToolResult(result string) string {
+	var decoded struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(result), &decoded); err == nil {
+		if decoded.OK && strings.TrimSpace(decoded.Answer) != "" {
+			return strings.TrimSpace(decoded.Answer)
+		}
+		return ""
+	}
+	return strings.TrimSpace(result)
+}
+
 func prepareBraidRepair(
 	phase REPLRunnerPhase,
 	graph *BraidGraph,
@@ -144,7 +426,7 @@ func prepareBraidRepair(
 	if graph == nil || phase.BraidRepairAttempts <= 0 || repairAttempts == nil || *repairAttempts >= phase.BraidRepairAttempts {
 		return false
 	}
-	if failedNode.Kind != "solve" && failedNode.Kind != "verify" && failedNode.Kind != "reduce" {
+	if !isBraidSolveKind(failedNode.Kind) && failedNode.Kind != "verify" && failedNode.Kind != "reduce" {
 		return false
 	}
 	statuses := braidSummaryStatuses(failedSummary)
@@ -176,8 +458,8 @@ func prepareBraidRepair(
 func buildBraidRepairFeedback(failedNode BraidNode, failedSummary string) string {
 	var b strings.Builder
 	switch failedNode.Kind {
-	case "solve":
-		b.WriteString("Previous solve node returned blocked. Revise this solve node and produce candidate values or a concrete mathematical check before returning.\n")
+	case "solve", "cycle_solve":
+		b.WriteString("Previous solve-like node returned blocked. Revise this node and produce candidate values or a concrete mathematical check before returning.\n")
 		b.WriteString("Do not treat circular-looking or mutual LongCoT dependencies as runtime blockers. Treat them as simultaneous constraints, fixed-point equations, or a small candidate search.\n")
 	default:
 		fmt.Fprintf(&b, "Previous %s node found a concrete failed constraint. Revise this solve node's candidate values to address the failure before returning.\n", failedNode.Kind)
@@ -200,7 +482,7 @@ func braidRepairSolveNodeIDs(graph BraidGraph, failedNode BraidNode) []string {
 		if !ok {
 			return
 		}
-		if node.Kind == "solve" {
+		if isBraidSolveKind(node.Kind) {
 			if _, exists := seen[node.ID]; !exists {
 				seen[node.ID] = struct{}{}
 				out = append(out, node.ID)
@@ -237,8 +519,14 @@ func braidNodeClosureFrom(graph BraidGraph, startID string) map[string]struct{} 
 }
 
 var braidSummaryStatusRE = regexp.MustCompile(`(?i)(?:^|\s)status\s*:\s*([a-z][a-z0-9_-]*)`)
+var braidPassTrueRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*true(?:[^a-z0-9_]|$)`)
+var braidPassFalseRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*false(?:[^a-z0-9_]|$)`)
 
 func validateBraidNodeExecutionSummary(phaseName string, node BraidNode, summary string, finalNodeID string) error {
+	return validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, finalNodeID, nil)
+}
+
+func validateBraidNodeExecutionSummaryInGraph(phaseName string, node BraidNode, summary string, finalNodeID string, graph *BraidGraph) error {
 	statuses := braidSummaryStatuses(summary)
 	if len(statuses) == 0 {
 		return fmt.Errorf("rlm repl runner phase %q: braid node %q returned no status field", phaseName, node.ID)
@@ -246,15 +534,202 @@ func validateBraidNodeExecutionSummary(phaseName string, node BraidNode, summary
 	if braidStatusesContainAny(statuses, "failed", "failure", "blocked", "error") {
 		return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) did not complete: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
 	}
-	if node.ID == finalNodeID || node.Kind == "extract" || node.Kind == "verify" || node.Kind == "reduce" {
-		if braidStatusesContainAny(statuses, "partial") {
-			return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) returned partial status: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
+	if braidStatusesContainAny(statuses, "partial") {
+		if braidNodePartialCanFeedDownstream(node, finalNodeID, graph) {
+			return nil
 		}
+		return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) returned partial status: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
+	}
+	if node.Kind == "cycle_solve" {
+		if braidPassFalseRE.MatchString(summary) {
+			return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) reported pass=false with solved status: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
+		}
+		if braidStatusesContainAny(statuses, "solved", "ok", "completed", "pass", "passed") {
+			if err := validateCycleSolveSummaryJSON(summary); err != nil {
+				return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) invalid cycle_json: %w", phaseName, node.ID, node.Kind, err)
+			}
+		}
+	}
+	if node.ID == finalNodeID || node.Kind == "extract" || node.Kind == "verify" || node.Kind == "reduce" {
 		if !braidStatusesContainAny(statuses, "solved", "ok", "completed", "pass", "passed") {
 			return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) returned unsupported status %q", phaseName, node.ID, node.Kind, strings.Join(statuses, ","))
 		}
 	}
+	if node.Kind == "verify" && !braidVerificationSummaryPassed(summary) {
+		return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) did not report verification pass: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
+	}
 	return nil
+}
+
+func braidVerificationSummaryPassed(summary string) bool {
+	statuses := braidSummaryStatuses(summary)
+	if braidStatusesContainAny(statuses, "pass", "passed") {
+		return true
+	}
+	if braidPassTrueRE.MatchString(summary) {
+		return true
+	}
+	lower := strings.ToLower(summary)
+	for _, marker := range []string{
+		"verification: pass",
+		"verification pass",
+		"verified: pass",
+		"verdict: pass",
+		"all moves valid",
+		"final state matches",
+		"matches the goal state",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func braidNodePartialCanFeedDownstream(node BraidNode, finalNodeID string, graph *BraidGraph) bool {
+	if graph == nil || node.ID == finalNodeID || node.Kind != "solve" {
+		return false
+	}
+	for _, candidate := range graph.Nodes {
+		if candidate.ID == node.ID || candidate.Kind == "extract" {
+			continue
+		}
+		if braidNodeDependsOn(*graph, candidate.ID, node.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+func braidNodeDependsOn(graph BraidGraph, nodeID string, dependencyID string) bool {
+	seen := map[string]struct{}{}
+	var visit func(string) bool
+	visit = func(id string) bool {
+		if id == dependencyID {
+			return true
+		}
+		if _, ok := seen[id]; ok {
+			return false
+		}
+		seen[id] = struct{}{}
+		for _, node := range graph.Nodes {
+			if node.ID != id {
+				continue
+			}
+			for _, dep := range node.DependsOn {
+				if visit(dep) {
+					return true
+				}
+			}
+			return false
+		}
+		return false
+	}
+	return visit(nodeID)
+}
+
+func validateCycleSolveSummaryJSON(summary string) error {
+	raw, err := extractCycleSolveJSON(summary)
+	if err != nil {
+		return err
+	}
+	var payload struct {
+		Pass       *bool            `json:"pass"`
+		Candidates map[string]any   `json:"candidates"`
+		Checks     []map[string]any `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return fmt.Errorf("parse: %w", err)
+	}
+	if payload.Pass == nil {
+		return fmt.Errorf("pass is required")
+	}
+	if !*payload.Pass {
+		return fmt.Errorf("pass must be true for solved cycle_solve")
+	}
+	if len(payload.Candidates) == 0 {
+		return fmt.Errorf("candidates is required")
+	}
+	if len(payload.Checks) == 0 {
+		return fmt.Errorf("checks is required")
+	}
+	for idx, check := range payload.Checks {
+		if value, ok := check["ok"].(bool); !ok || !value {
+			return fmt.Errorf("checks[%d].ok must be true", idx)
+		}
+		observed, hasObserved := check["observed"]
+		expected, hasExpected := check["expected"]
+		if !hasObserved || !hasExpected {
+			return fmt.Errorf("checks[%d] must include observed and expected", idx)
+		}
+		if !cycleJSONValuesEqual(observed, expected) {
+			return fmt.Errorf("checks[%d] observed=%v does not match expected=%v", idx, observed, expected)
+		}
+	}
+	return nil
+}
+
+func extractCycleSolveJSON(summary string) (string, error) {
+	const marker = "cycle_json"
+	lower := strings.ToLower(summary)
+	markerIdx := strings.Index(lower, marker)
+	if markerIdx < 0 {
+		return "", fmt.Errorf("missing cycle_json object")
+	}
+	afterMarker := summary[markerIdx+len(marker):]
+	colonIdx := strings.Index(afterMarker, ":")
+	if colonIdx < 0 {
+		return "", fmt.Errorf("missing cycle_json object")
+	}
+	rest := afterMarker[colonIdx+1:]
+	startRel := strings.Index(rest, "{")
+	if startRel < 0 {
+		return "", fmt.Errorf("missing cycle_json object")
+	}
+	start := markerIdx + len(marker) + colonIdx + 1 + startRel
+	depth := 0
+	inString := false
+	escaped := false
+	for idx := start; idx < len(summary); idx++ {
+		ch := summary[idx]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return summary[start : idx+1], nil
+			}
+		}
+	}
+	return "", fmt.Errorf("unterminated cycle_json object")
+}
+
+func cycleJSONValuesEqual(observed any, expected any) bool {
+	if reflect.DeepEqual(observed, expected) {
+		return true
+	}
+	observedFloat, observedOK := observed.(float64)
+	expectedFloat, expectedOK := expected.(float64)
+	if observedOK && expectedOK {
+		return observedFloat == expectedFloat
+	}
+	return strings.TrimSpace(fmt.Sprint(observed)) == strings.TrimSpace(fmt.Sprint(expected))
 }
 
 func braidSummaryStatuses(summary string) []string {
@@ -350,8 +825,8 @@ func submitBraidNode(
 			"braid_depends_on": append([]string(nil), node.DependsOn...),
 		},
 	}
-	if node.MaxSummaryChars > 0 {
-		argsMap["max_summary_chars"] = node.MaxSummaryChars
+	if maxSummaryChars := EffectiveBraidNodeSummaryChars(node); maxSummaryChars > 0 {
+		argsMap["max_summary_chars"] = maxSummaryChars
 	}
 	args, err := json.Marshal(argsMap)
 	if err != nil {
@@ -401,8 +876,8 @@ func runDirectBraidNode(
 			"braid_depends_on": append([]string(nil), node.DependsOn...),
 		},
 	}
-	if node.MaxSummaryChars > 0 {
-		argsMap["max_summary_chars"] = node.MaxSummaryChars
+	if maxSummaryChars := EffectiveBraidNodeSummaryChars(node); maxSummaryChars > 0 {
+		argsMap["max_summary_chars"] = maxSummaryChars
 	}
 	args, err := json.Marshal(argsMap)
 	if err != nil {

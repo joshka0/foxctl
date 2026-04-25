@@ -648,13 +648,16 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	if got := phases[planIdx].OutputKind; got != rlmruntime.REPLPhaseOutputKindBraidGraph {
 		t.Fatalf("graph_plan OutputKind=%q want %q", got, rlmruntime.REPLPhaseOutputKindBraidGraph)
 	}
+	if got := strings.TrimSpace(string(phases[planIdx].ResponseFormat)); got != `{"type":"json_object"}` {
+		t.Fatalf("graph_plan ResponseFormat=%q want json_object", got)
+	}
 	if got := phases[planIdx].MaxGraphNodes; got != 7 {
 		t.Fatalf("graph_plan MaxGraphNodes=%d want 7", got)
 	}
 	if got := phases[planIdx].BraidGraphPolicy; got != rlmruntime.BraidGraphPolicyLongCoTController {
 		t.Fatalf("graph_plan BraidGraphPolicy=%q want %q", got, rlmruntime.BraidGraphPolicyLongCoTController)
 	}
-	for _, want := range []string{"one or more solve waves", "any earlier solve nodes whose values it needs", "Only put solve nodes in the same wave when they are mathematically independent"} {
+	for _, want := range []string{"valid json object", "optionally one cycle_solve wave", "Allowed kind values are extract, solve, cycle_solve, verify, reduce", "cycle_solve is optional", "BlocksWorld-style stack puzzles", "Use solve nodes to build candidate actions", "Keep the runtime graph acyclic"} {
 		if !strings.Contains(phases[planIdx].Prompt, want) {
 			t.Fatalf("graph_plan prompt missing %q:\n%s", want, phases[planIdx].Prompt)
 		}
@@ -723,8 +726,8 @@ func TestLongCoTChildSolvePhasesAutoInspectContext(t *testing.T) {
 	if phases[1].OutputKind != rlmruntime.REPLPhaseOutputKindREPLCode {
 		t.Fatalf("scratch output kind=%q want repl_code", phases[1].OutputKind)
 	}
-	if phases[1].MaxTokens != 768 {
-		t.Fatalf("scratch max tokens=%d want 768", phases[1].MaxTokens)
+	if phases[1].MaxTokens != 1280 {
+		t.Fatalf("scratch max tokens=%d want 1280", phases[1].MaxTokens)
 	}
 	if phases[1].MaxIterations != 1 {
 		t.Fatalf("scratch max iterations=%d want 1", phases[1].MaxIterations)
@@ -832,49 +835,110 @@ func TestLongCoTChildPhasesForVerifyUsesComputationalScratch(t *testing.T) {
 	}
 }
 
-func TestLongCoTChildSolvePhasesUseGeneralHelperWhenEnabled(t *testing.T) {
+func TestLongCoTChildPhasesForCycleSolveUsesWitnessContract(t *testing.T) {
 	t.Parallel()
 
-	phases := longCoTChildSolvePhases(rlmruntime.SandboxKindPython, true)
-	if got := fmt.Sprint(phaseNames(phases)); got != "[child_context child_helper child_scratch child_final]" {
+	phases := longCoTChildPhasesForTask(rlm.Task{
+		Prompt: "BRAID node n_cycle (cycle_solve)\nDependency summaries:\n- n_extract: status: solved",
+	}, rlmruntime.SandboxKindPython, true)
+	if got := fmt.Sprint(phaseNames(phases)); got != "[child_cycle_packet child_cycle_witness child_cycle_final]" {
 		t.Fatalf("phases=%s", got)
 	}
-	helper := phases[1]
-	if !helper.AutoExecuteRequiredTool || helper.RequireToolResultOK || !helper.RequireToolOutput {
-		t.Fatalf("helper enforcement auto=%v ok=%v output=%v", helper.AutoExecuteRequiredTool, helper.RequireToolResultOK, helper.RequireToolOutput)
+	if phases[0].AutoExecuteRequiredTool {
+		t.Fatal("cycle packet phase should be model-generated, not auto-executed")
 	}
-	if !stringSlicesEqual(helper.RequiredTools, []string{rlmruntime.EphemeralHelperSolveToolName}) {
-		t.Fatalf("helper required tools=%v want [%s]", helper.RequiredTools, rlmruntime.EphemeralHelperSolveToolName)
+	if phases[0].OutputKind != rlmruntime.REPLPhaseOutputKindCyclePacket {
+		t.Fatalf("cycle packet output kind=%q want %q", phases[0].OutputKind, rlmruntime.REPLPhaseOutputKindCyclePacket)
 	}
-	if len(helper.AutoExecuteToolCalls) != 1 || helper.AutoExecuteToolCalls[0].Tool != rlmruntime.EphemeralHelperSolveToolName {
-		t.Fatalf("helper auto calls=%+v", helper.AutoExecuteToolCalls)
+	if len(phases[0].Tools) != 0 || len(phases[0].RequiredTools) != 0 {
+		t.Fatalf("cycle packet should not expose tools: tools=%v required=%v", phases[0].Tools, phases[0].RequiredTools)
 	}
-	if !strings.Contains(string(helper.AutoExecuteToolCalls[0].Args), "fixed-point") {
-		t.Fatalf("helper args missing generic fixed-point guidance: %s", helper.AutoExecuteToolCalls[0].Args)
+	if !phases[0].FilterOverlongOutput {
+		t.Fatal("cycle packet should filter overlong JSON output")
 	}
-	if !strings.Contains(string(helper.AutoExecuteToolCalls[0].Args), `"max_attempts":1`) {
-		t.Fatalf("helper args missing advisory attempt cap: %s", helper.AutoExecuteToolCalls[0].Args)
+	if phases[0].FilterOutputMaxTokens != 512 {
+		t.Fatalf("cycle packet filter max tokens=%d want 512", phases[0].FilterOutputMaxTokens)
+	}
+	for _, want := range []string{"Cycle packet phase", "unknowns", "constraints", "candidate_bounds", "under 1400 characters"} {
+		if !strings.Contains(phases[0].Prompt, want) {
+			t.Fatalf("cycle packet prompt missing %q:\n%s", want, phases[0].Prompt)
+		}
+	}
+	for _, phase := range phases {
+		if len(phase.AutoExecuteToolCalls) > 0 && phase.AutoExecuteToolCalls[0].Tool == rlmruntime.EphemeralHelperSolveToolName {
+			t.Fatalf("cycle_solve should not auto-run helper phase: %+v", phase)
+		}
+	}
+	if phases[1].OutputKind != rlmruntime.REPLPhaseOutputKindCycleWitness {
+		t.Fatalf("cycle witness output kind=%q want cycle_witness", phases[1].OutputKind)
+	}
+	if phases[1].MaxTokens != 1024 {
+		t.Fatalf("cycle witness max tokens=%d want 1024", phases[1].MaxTokens)
+	}
+	if !phases[1].IncludePriorAssistantText {
+		t.Fatal("cycle witness should include prior cycle_packet output")
+	}
+	if len(phases[1].Tools) != 0 || len(phases[1].RequiredTools) != 0 {
+		t.Fatalf("cycle witness should not expose scratch tools: tools=%v required=%v", phases[1].Tools, phases[1].RequiredTools)
+	}
+	for _, want := range []string{"bounded_search", "variables", "known_values", "constraints", "claims", "sum_prime_factors", "The runtime will check this witness and emit cycle_json"} {
+		if !strings.Contains(phases[1].Prompt, want) {
+			t.Fatalf("cycle witness prompt missing %q:\n%s", want, phases[1].Prompt)
+		}
+	}
+	if !phases[2].Final {
+		t.Fatal("cycle final phase should be final")
+	}
+	if phases[2].FinalOutputKind != "child_summary" {
+		t.Fatalf("cycle final output kind=%q want child_summary", phases[2].FinalOutputKind)
+	}
+	if !strings.Contains(phases[2].Prompt, "finite candidate bounds were not derivable") {
+		t.Fatalf("cycle final prompt missing blocker contract:\n%s", phases[2].Prompt)
+	}
+	if !strings.Contains(phases[2].Prompt, "Copy the cycle_json object emitted by cycle_witness_check exactly") {
+		t.Fatalf("cycle final prompt missing witness check copy contract:\n%s", phases[2].Prompt)
+	}
+	if strings.Contains(phases[2].Prompt, "helper output") {
+		t.Fatalf("cycle final prompt should not reference helper output:\n%s", phases[2].Prompt)
+	}
+	if !strings.Contains(phases[2].Prompt, "under 600 characters") {
+		t.Fatalf("cycle final prompt missing compact output cap:\n%s", phases[2].Prompt)
+	}
+	if !strings.Contains(phases[2].Prompt, "pass=true|pass=false") {
+		t.Fatalf("cycle final prompt missing explicit pass label contract:\n%s", phases[2].Prompt)
+	}
+	if !strings.Contains(phases[2].Prompt, "cycle_json") {
+		t.Fatalf("cycle final prompt missing cycle_json contract:\n%s", phases[2].Prompt)
 	}
 }
 
-func TestLongCoTChildVerifyPhasesUseGeneralHelperWhenEnabled(t *testing.T) {
+func TestLongCoTChildSolvePhasesSkipGeneralHelperForOrdinarySolve(t *testing.T) {
+	t.Parallel()
+
+	phases := longCoTChildSolvePhases(rlmruntime.SandboxKindPython, true)
+	if got := fmt.Sprint(phaseNames(phases)); got != "[child_context child_scratch child_final]" {
+		t.Fatalf("phases=%s", got)
+	}
+	for _, phase := range phases {
+		if len(phase.AutoExecuteToolCalls) > 0 && phase.AutoExecuteToolCalls[0].Tool == rlmruntime.EphemeralHelperSolveToolName {
+			t.Fatalf("ordinary solve should not auto-run helper phase: %+v", phase)
+		}
+	}
+}
+
+func TestLongCoTChildVerifyPhasesSkipGeneralHelper(t *testing.T) {
 	t.Parallel()
 
 	phases := longCoTChildPhasesForTask(rlm.Task{
 		Prompt: "BRAID node n_verify (verify)\nDependency summaries:\n- n_solve: status: solved",
 	}, rlmruntime.SandboxKindPython, true)
-	if got := fmt.Sprint(phaseNames(phases)); got != "[child_verify_helper child_verify_scratch child_verify_final]" {
+	if got := fmt.Sprint(phaseNames(phases)); got != "[child_verify_scratch child_verify_final]" {
 		t.Fatalf("phases=%s", got)
 	}
-	helper := phases[0]
-	if !helper.AutoExecuteRequiredTool || helper.RequireToolResultOK || !helper.RequireToolOutput {
-		t.Fatalf("verify helper enforcement auto=%v ok=%v output=%v", helper.AutoExecuteRequiredTool, helper.RequireToolResultOK, helper.RequireToolOutput)
-	}
-	if !strings.Contains(string(helper.AutoExecuteToolCalls[0].Args), "bounded searches") {
-		t.Fatalf("verify helper args missing generic verifier guidance: %s", helper.AutoExecuteToolCalls[0].Args)
-	}
-	if !strings.Contains(string(helper.AutoExecuteToolCalls[0].Args), `"max_attempts":1`) {
-		t.Fatalf("verify helper args missing advisory attempt cap: %s", helper.AutoExecuteToolCalls[0].Args)
+	for _, phase := range phases {
+		if len(phase.AutoExecuteToolCalls) > 0 && phase.AutoExecuteToolCalls[0].Tool == rlmruntime.EphemeralHelperSolveToolName {
+			t.Fatalf("verify should not auto-run helper phase: %+v", phase)
+		}
 	}
 }
 
@@ -1093,11 +1157,29 @@ func TestLongCoTQwenNoThinkConfig(t *testing.T) {
 	}
 }
 
+func TestLongCoTDeepSeekDisablesThinking(t *testing.T) {
+	t.Parallel()
+
+	cfg := longCoTLLMConfigFromTarget(
+		longCoTLiveTarget{Provider: "openrouter", Model: "deepseek/deepseek-v4-flash"},
+		longcoteval.Condition{MaxTokens: 123, Temperature: 0.2},
+		10*time.Second,
+		3,
+	)
+	thinking, ok := cfg.ExtraBody["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking missing/wrong type: %#v", cfg.ExtraBody["thinking"])
+	}
+	if thinking["type"] != "disabled" {
+		t.Fatalf("thinking=%#v want disabled", thinking)
+	}
+}
+
 func TestLongCoTChildMaxTokensCapsQwen(t *testing.T) {
 	t.Parallel()
 
-	if got := longCoTChildMaxTokens(rlm.LLMConfig{Model: "qwen/qwen3.6-plus", MaxTokens: 4096}); got != 1024 {
-		t.Fatalf("qwen child max tokens=%d want 1024", got)
+	if got := longCoTChildMaxTokens(rlm.LLMConfig{Model: "qwen/qwen3.6-plus", MaxTokens: 4096}); got != 2048 {
+		t.Fatalf("qwen child max tokens=%d want 2048", got)
 	}
 	if got := longCoTChildMaxTokens(rlm.LLMConfig{Model: "qwen/qwen3.6-plus", MaxTokens: 512}); got != 512 {
 		t.Fatalf("qwen child max tokens=%d want 512", got)

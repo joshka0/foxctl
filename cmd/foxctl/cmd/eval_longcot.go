@@ -1832,24 +1832,30 @@ func longCoTBraidSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRu
 			Name: "graph_plan",
 			Prompt: strings.Join([]string{
 				"Return JSON only. Build a bounded reasoning graph with keys: version, nodes, final_node.",
+				"The word json is intentional: return one valid json object and nothing else.",
 				"Set version to 1.",
-				"Use 5 to 7 nodes in this controller shape: extract -> one or more solve waves -> verify -> reduce.",
-				"Each node must include id, kind, question, depends_on, expected_output, and max_summary_chars.",
-				"Allowed kind values are extract, solve, verify, reduce.",
-				"The extract node has depends_on []. Each solve node depends on extract and any earlier solve nodes whose values it needs. The verify node depends on all final solve nodes. The reduce node depends on all final solve nodes and verify and must be final_node.",
-				"Create at least two solve nodes. Split them by dependency clusters, intermediate variables, requested outputs, or verifier-relevant constraints.",
-				"Only put solve nodes in the same wave when they are mathematically independent. If one solve needs another solve's output, include that solve id in depends_on.",
+				"Use 5 to 7 nodes in this controller shape: extract -> one or more solve waves, optionally one cycle_solve wave when justified -> verify -> reduce.",
+				"Each node must include id, kind, question, depends_on, expected_output, max_summary_chars, and helper_policy.",
+				"Allowed kind values are extract, solve, cycle_solve, verify, reduce.",
+				"Allowed helper_policy values are auto, preferred, required, never. Use never for extract and reduce. Use preferred for solve-like and verify nodes that may need exact search, simulation, parsing, or constraint checking.",
+				"The extract node has depends_on []. Each solve-like node depends on extract and any earlier solve-like nodes whose values it needs. The verify node depends on all final solve-like nodes. The reduce node depends on all final solve-like nodes and verify and must be final_node.",
+				"Create at least two solve-like nodes. Split them by dependency clusters, intermediate variables, requested outputs, or verifier-relevant constraints.",
+				"Only put solve-like nodes in the same wave when they are mathematically independent. If one solve-like node needs another solve-like node's output, include that node id in depends_on.",
+				"cycle_solve is optional. Use it only when extracted facts contain a true mutually dependent numeric/logical cluster: circular references, fixed-point equations, recursive definitions, or flow constraints that can be checked by finite bounded search.",
+				"For state-transition, planning, simulation, path construction, program tracing, or BlocksWorld-style stack puzzles, do not use cycle_solve by default. Use solve nodes to build candidate actions or values, then a verify node to simulate/substitute against the original constraints.",
+				"If you do use cycle_solve, collapse that strongly connected constraint cluster into one cycle_solve node. Keep the runtime graph acyclic; do not encode mutual dependency as depends_on edges between separate nodes.",
 				"The extract node must only extract facts: placeholders, requested outputs, equations, and dependency constraints. It must not solve, verify, reduce, or declare blocked.",
 				"Each question must name one leaf-solvable subproblem, dependency cluster, or verification target; children receive the official task text automatically.",
 				"Leaf-solvable means the child can work directly from the official task plus dependency summaries; do not ask children to recurse, spawn agents, wait, or request more runtime depth.",
-				"If the official task has circular-looking references, treat them as mathematical constraints to solve, not as runtime dependency cycles.",
+				"A cycle_solve question must ask the child to model unknowns, constraints, candidate bounds, and a bounded search/fixed-point/propagation check. It must not ask the child to wait for another cyclic node.",
 				"The verify node must independently substitute the candidate answer into the original placeholders and constraints. It must not merely check consistency with a prior summary.",
 				"Node questions and expected_output must not mention rlm_query, rlm_wait, rlm_result, subagents, recursion budget, or runtime depth.",
 				"Do not include markdown, Mermaid, prose, code fences, or trailing text.",
-				"Example shape: {\"version\":1,\"nodes\":[{\"id\":\"n_extract\",\"kind\":\"extract\",\"question\":\"Extract placeholders, requested final nodes, equations, and dependency constraints as facts only\",\"depends_on\":[],\"expected_output\":\"facts-only constraints; no blocked verdict\",\"max_summary_chars\":300},{\"id\":\"n_solve_upstream\",\"kind\":\"solve\",\"question\":\"Solve upstream dependency values and fixed-point constraints needed by later nodes\",\"depends_on\":[\"n_extract\"],\"expected_output\":\"upstream candidate values plus checks\",\"max_summary_chars\":500},{\"id\":\"n_solve_targets\",\"kind\":\"solve\",\"question\":\"Solve requested final output values using extracted constraints and upstream candidates\",\"depends_on\":[\"n_extract\",\"n_solve_upstream\"],\"expected_output\":\"candidate final values plus checks\",\"max_summary_chars\":500},{\"id\":\"n_verify\",\"kind\":\"verify\",\"question\":\"Substitute all candidate values into the original placeholders and constraints; report failed constraints or pass\",\"depends_on\":[\"n_solve_targets\"],\"expected_output\":\"original-constraint verification\",\"max_summary_chars\":500},{\"id\":\"n_reduce\",\"kind\":\"reduce\",\"question\":\"Return the final answer only if verification passed; otherwise return failed constraints\",\"depends_on\":[\"n_solve_targets\",\"n_verify\"],\"expected_output\":\"solution line or concrete failed constraints\",\"max_summary_chars\":300}],\"final_node\":\"n_reduce\"}",
+				"Example state-transition shape: {\"version\":1,\"nodes\":[{\"id\":\"n_extract\",\"kind\":\"extract\",\"question\":\"Extract initial state, goal state, rules, requested output format, and verification constraints as facts only\",\"depends_on\":[],\"expected_output\":\"state and rule facts; no blocked verdict\",\"max_summary_chars\":300,\"helper_policy\":\"never\"},{\"id\":\"n_solve_plan\",\"kind\":\"solve\",\"question\":\"Construct a candidate action sequence or plan directly from the original state and goal\",\"depends_on\":[\"n_extract\"],\"expected_output\":\"candidate actions plus compact rationale\",\"max_summary_chars\":900,\"helper_policy\":\"preferred\"},{\"id\":\"n_solve_format\",\"kind\":\"solve\",\"question\":\"Convert the candidate actions into the requested final answer format\",\"depends_on\":[\"n_extract\",\"n_solve_plan\"],\"expected_output\":\"formatted candidate answer\",\"max_summary_chars\":700,\"helper_policy\":\"preferred\"},{\"id\":\"n_verify\",\"kind\":\"verify\",\"question\":\"Simulate or substitute the candidate against the original rules and goal; report failed constraints or pass\",\"depends_on\":[\"n_solve_plan\",\"n_solve_format\"],\"expected_output\":\"original-constraint verification\",\"max_summary_chars\":700,\"helper_policy\":\"preferred\"},{\"id\":\"n_reduce\",\"kind\":\"reduce\",\"question\":\"Return the final answer only if verification passed; otherwise return failed constraints\",\"depends_on\":[\"n_solve_format\",\"n_verify\"],\"expected_output\":\"solution line or concrete failed constraints\",\"max_summary_chars\":300,\"helper_policy\":\"never\"}],\"final_node\":\"n_reduce\"}",
 			}, "\n"),
 			MaxIterations:    1,
 			OutputKind:       rlmruntime.REPLPhaseOutputKindBraidGraph,
+			ResponseFormat:   json.RawMessage(`{"type":"json_object"}`),
 			MaxGraphNodes:    7,
 			BraidGraphPolicy: rlmruntime.BraidGraphPolicyLongCoTController,
 		},
@@ -2203,11 +2209,18 @@ func longCoTLLMConfigFromTarget(target longCoTLiveTarget, condition longcoteval.
 		cfg.QwenNoThink = true
 		cfg.ExtraBody = longCoTQwenNoThinkExtraBody(target.Provider)
 	}
+	if longCoTIsDeepSeekModel(target.Model) {
+		cfg.ExtraBody = mergeLongCoTExtraBody(cfg.ExtraBody, longCoTDeepSeekNoThinkExtraBody())
+	}
 	return cfg
 }
 
 func longCoTIsQwenModel(model string) bool {
 	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "qwen")
+}
+
+func longCoTIsDeepSeekModel(model string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(model)), "deepseek")
 }
 
 func longCoTQwenNoThinkExtraBody(provider string) map[string]any {
@@ -2229,6 +2242,28 @@ func longCoTQwenNoThinkExtraBody(provider string) map[string]any {
 			},
 		}
 	}
+}
+
+func longCoTDeepSeekNoThinkExtraBody() map[string]any {
+	return map[string]any{
+		"thinking": map[string]any{
+			"type": "disabled",
+		},
+	}
+}
+
+func mergeLongCoTExtraBody(base map[string]any, extra map[string]any) map[string]any {
+	if len(base) == 0 && len(extra) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(base)+len(extra))
+	for key, value := range base {
+		out[key] = value
+	}
+	for key, value := range extra {
+		out[key] = value
+	}
+	return out
 }
 
 func firstNonEmptyLongCoTLiveTarget(values ...longCoTLiveTarget) longCoTLiveTarget {
@@ -2273,7 +2308,7 @@ func longCoTHelperMaxSourceLines() int {
 }
 
 func longCoTHelperMaxSourceChars() int {
-	return 4000
+	return 1800
 }
 
 func longCoTEphemeralSkillPhases(question longcoteval.Question, sandbox rlmruntime.SandboxKind, generalHelper bool) []rlmruntime.REPLRunnerPhase {
@@ -2444,6 +2479,9 @@ func longCoTChildPhasesForTask(task rlm.Task, sandbox rlmruntime.SandboxKind, ge
 	if longCoTChildTaskIsBraidKind(task, "reduce") {
 		return longCoTChildReducePhases()
 	}
+	if longCoTChildTaskIsBraidKind(task, "cycle_solve") {
+		return longCoTChildCycleSolvePhases(sandbox, generalHelper)
+	}
 	return longCoTChildSolvePhases(sandbox, generalHelper)
 }
 
@@ -2473,21 +2511,14 @@ func longCoTChildExtractPhases() []rlmruntime.REPLRunnerPhase {
 }
 
 func longCoTChildVerifyPhases(generalHelper bool) []rlmruntime.REPLRunnerPhase {
+	_ = generalHelper
 	phases := make([]rlmruntime.REPLRunnerPhase, 0, 3)
-	if generalHelper {
-		phases = append(phases, longCoTChildHelperPhase("child_verify_helper", strings.Join([]string{
-			"Build and run a deterministic helper for this verify node.",
-			"Use it for parsing dependency summaries, recomputing substitutions, consistency checks, bounded searches, or invariant checks.",
-			"Do not invent new candidate values unless needed to show the reported candidate is inconsistent.",
-			"Return compact fields such as answer, checks, blockers, and any pass=false/pass=true labels.",
-		}, "\n")))
-	}
 	phases = append(phases,
 		rlmruntime.REPLRunnerPhase{
 			Name: "child_verify_scratch",
 			Prompt: strings.Join([]string{
 				"Computational verification phase.",
-				"Return raw Python code only, under 35 lines. The runtime will execute this text with the scratch REPL.",
+				"Return raw Python code only, under 80 lines. The runtime will execute this text with the scratch REPL.",
 				"Your first non-empty line must be executable code, not a comment.",
 				"Use only Python standard library imports. Do not import sympy, numpy, scipy, pandas, networkx, or other third-party packages.",
 				"Do not solve new candidate values. Verify the candidate values from dependency summaries against original constraints.",
@@ -2544,7 +2575,83 @@ func longCoTChildReducePhases() []rlmruntime.REPLRunnerPhase {
 	}}
 }
 
+func longCoTChildCycleSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper bool) []rlmruntime.REPLRunnerPhase {
+	_ = generalHelper
+	_ = sandbox
+
+	phases := []rlmruntime.REPLRunnerPhase{
+		{
+			Name: "child_cycle_packet",
+			Prompt: strings.Join([]string{
+				"Cycle packet phase. Return one compact JSON object only.",
+				"Do not solve the full problem. Do not output prose, markdown, code, or a final child summary.",
+				"Read only this cycle_solve node task plus dependency summaries. Convert them into a small packet for a later deterministic scratch program.",
+				"Required keys:",
+				"- unknowns: array of variable names to solve.",
+				"- known_values: object of already-known concrete values.",
+				"- constraints: array of compact equations/checks in plain text.",
+				"- candidate_bounds: object mapping variable names to finite bounds or an explanation string if missing.",
+				"- requested_outputs: array of outputs this cycle must provide.",
+				"- blockers: array, empty unless finite bounds are truly unavailable.",
+				"Keep the whole JSON under 1400 characters.",
+			}, "\n"),
+			OutputKind:            rlmruntime.REPLPhaseOutputKindCyclePacket,
+			ResponseFormat:        json.RawMessage(`{"type":"json_object"}`),
+			MaxTokens:             768,
+			MaxIterations:         1,
+			FilterOverlongOutput:  true,
+			FilterOutputMaxTokens: 512,
+		},
+	}
+	phases = append(phases,
+		rlmruntime.REPLRunnerPhase{
+			Name: "child_cycle_witness",
+			Prompt: strings.Join([]string{
+				"Cycle bounded-search witness phase. Return one raw JSON object only.",
+				"Use the cycle_packet JSON from Prior phase assistant output as the semantic input.",
+				"Do not write Python, Go, markdown, prose, or cycle_json. The runtime will check this witness and emit cycle_json.",
+				"Schema:",
+				`{"version":1,"checker_kind":"bounded_search","variables":[{"name":"x","type":"int","min":0,"max":20}],"known_values":{"target":6},"constraints":[{"name":"fixed_point","op":"eq","left":{"var":"x"},"right":{"known":"target"}}],"claims":{"answer":{"var":"x"}},"requested_outputs":["answer"]}`,
+				"variables are integer search variables with finite min/max bounds. Keep the product of all domain sizes below 100000.",
+				"constraints compare left and right expressions. Constraint op must be one of eq, ne, lt, lte, gt, gte.",
+				"Expression forms: {\"const\":6}, {\"var\":\"x\"}, {\"known\":\"target\"}, {\"op\":\"add|sub|mul|div|mod|min|max|neg\",\"args\":[...]}, {\"func\":\"sum_prime_factors|prime_factor_sum|gcd|abs\",\"args\":[...]}",
+				"Use claims for requested computed outputs that are not direct variables.",
+				"If finite bounds are missing, still return a valid witness with the smallest conservative finite bounds you can justify from the task and dependency summaries.",
+				"Keep the JSON under 1800 characters.",
+			}, "\n"),
+			OutputKind:                rlmruntime.REPLPhaseOutputKindCycleWitness,
+			ResponseFormat:            json.RawMessage(`{"type":"json_object"}`),
+			MaxTokens:                 1024,
+			MaxIterations:             1,
+			IncludePriorAssistantText: true,
+		},
+		rlmruntime.REPLRunnerPhase{
+			Name: "child_cycle_final",
+			Prompt: strings.Join([]string{
+				"Cycle-solve final phase.",
+				"Use the official task text, dependency summaries, and cycle_witness_check tool output.",
+				"Do not call tools. Do not output code, markdown, scratch prose, or runtime/tool discussion.",
+				"Do not use circular dependency, dependency cycle, single-pass logic, or external resolution as a blocker.",
+				"Copy the cycle_json object emitted by cycle_witness_check exactly into the answer line. Do not invent or edit the JSON in this final phase.",
+				"If cycle_witness_check emitted pass=false, return status: blocked and copy that pass=false cycle_json exactly.",
+				"If solved, the copied cycle_json must be one valid JSON object like {\"pass\":true,\"candidates\":{\"node_2\":123},\"checks\":[{\"name\":\"fixed_point\",\"ok\":true,\"observed\":6,\"expected\":6}]}",
+				"If blocked, block only because finite candidate bounds were not derivable or all tested candidates failed; include the attempted bounds/checks in the checks line.",
+				"Keep the complete response under 600 characters and exactly these three lines.",
+				"Return compact structured lines only:",
+				"status: solved|partial|blocked",
+				"answer: cycle_json: {\"pass\":true,\"candidates\":{...},\"checks\":[{\"name\":\"...\",\"ok\":true,\"observed\":6,\"expected\":6}]}",
+				"checks: pass=true|pass=false; <bounds searched plus fixed-point/constraint result>",
+			}, "\n"),
+			MaxIterations:   1,
+			Final:           true,
+			FinalOutputKind: "child_summary",
+		},
+	)
+	return phases
+}
+
 func longCoTChildSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper bool) []rlmruntime.REPLRunnerPhase {
+	_ = generalHelper
 	replToolName := rlmruntime.PythonREPLToolName
 	replCodeContract := []string{
 		"Return raw scratch code only, under 40 lines. The runtime will execute this text with the scratch REPL.",
@@ -2578,14 +2685,6 @@ func longCoTChildSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper bool)
 			AutoExecuteRequiredTool: true,
 		},
 	}
-	if generalHelper {
-		phases = append(phases, longCoTChildHelperPhase("child_helper", strings.Join([]string{
-			"Build and run a deterministic helper for this solve node.",
-			"Use it for parsing, simulation, arithmetic, graph/state search, fixed-point or cyclic-constraint checks, and compact verification.",
-			"If dependencies are circular-looking or mutually recursive, treat them as simultaneous constraints or a bounded candidate search instead of declaring a runtime blocker.",
-			"Return compact fields such as answer, values, checks, blockers, and confidence. Prefer the official solution format when this child can solve it.",
-		}, "\n")))
-	}
 	phases = append(phases,
 		rlmruntime.REPLRunnerPhase{
 			Name: "child_scratch",
@@ -2596,7 +2695,7 @@ func longCoTChildSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper bool)
 				"Do not produce the final child summary in this phase.",
 			)...), "\n"),
 			OutputKind:              rlmruntime.REPLPhaseOutputKindREPLCode,
-			MaxTokens:               768,
+			MaxTokens:               1280,
 			Tools:                   []string{replToolName},
 			MaxIterations:           1,
 			RequireToolResultOK:     true,
@@ -2634,7 +2733,6 @@ func longCoTChildHelperPhase(name string, instructions string) rlmruntime.REPLRu
 			Tool: rlmruntime.EphemeralHelperSolveToolName,
 			Args: mustLongCoTAutoToolArgs(map[string]any{
 				"instructions": strings.TrimSpace(instructions),
-				"max_attempts": 1,
 			}),
 		}},
 		MaxIterations:           1,
@@ -2649,7 +2747,7 @@ func longCoTChildMaxTokens(cfg rlm.LLMConfig) int {
 	if !longCoTIsQwenModel(cfg.Model) {
 		return maxTokens
 	}
-	const qwenChildMaxTokens = 1024
+	const qwenChildMaxTokens = 2048
 	if maxTokens <= 0 || maxTokens > qwenChildMaxTokens {
 		return qwenChildMaxTokens
 	}

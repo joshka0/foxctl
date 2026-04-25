@@ -8,19 +8,27 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 const defaultPythonSkillToolName = "ephemeral_python_skill"
 
+const (
+	defaultPythonSkillValidateTimeout = 3 * time.Second
+	defaultPythonSkillRunTimeout      = 10 * time.Second
+)
+
 // PythonSkillSpec describes one short-lived Python helper.
 type PythonSkillSpec struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Source      string          `json:"source"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
-	PythonPath  string          `json:"python_path,omitempty"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description,omitempty"`
+	Source          string          `json:"source"`
+	Parameters      json.RawMessage `json:"parameters,omitempty"`
+	PythonPath      string          `json:"python_path,omitempty"`
+	ValidateTimeout time.Duration   `json:"-"`
+	RunTimeout      time.Duration   `json:"-"`
 }
 
 // PythonSkillRunner validates and executes one synthesized Python solve helper.
@@ -44,7 +52,7 @@ func NewPythonSkillRunner(ctx context.Context, spec PythonSkillSpec) (*PythonSki
 	if strings.TrimSpace(spec.Source) == "" {
 		return nil, errors.New("ephemeral Python skill source is empty")
 	}
-	if _, err := runPythonSkillBridge(ctx, spec.PythonPath, spec.Source, nil, true); err != nil {
+	if _, err := runPythonSkillBridge(ctx, spec.PythonPath, spec.Source, nil, true, pythonSkillTimeout(spec.ValidateTimeout, defaultPythonSkillValidateTimeout)); err != nil {
 		return nil, err
 	}
 	return &PythonSkillRunner{spec: spec}, nil
@@ -66,7 +74,7 @@ func (r *PythonSkillRunner) Run(ctx context.Context, input map[string]any) (GoSk
 	if err != nil {
 		return GoSkillResult{}, fmt.Errorf("normalize input: %w", err)
 	}
-	output, err := runPythonSkillBridge(ctx, r.spec.PythonPath, r.spec.Source, normalizedInput, false)
+	output, err := runPythonSkillBridge(ctx, r.spec.PythonPath, r.spec.Source, normalizedInput, false, pythonSkillTimeout(r.spec.RunTimeout, defaultPythonSkillRunTimeout))
 	if err != nil {
 		return GoSkillResult{}, err
 	}
@@ -192,7 +200,7 @@ func extractPythonSolveSource(source string) (string, bool) {
 	return strings.TrimSpace(source), true
 }
 
-func runPythonSkillBridge(ctx context.Context, pythonPath, source string, input map[string]any, validateOnly bool) (map[string]any, error) {
+func runPythonSkillBridge(ctx context.Context, pythonPath, source string, input map[string]any, validateOnly bool, timeout time.Duration) (map[string]any, error) {
 	if strings.TrimSpace(pythonPath) == "" {
 		resolved, err := findPythonSkillBinary()
 		if err != nil {
@@ -209,12 +217,21 @@ func runPythonSkillBridge(ctx context.Context, pythonPath, source string, input 
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, pythonPath, "-I", "-S", "-c", pythonSkillBridgeScript) //nolint:gosec // pythonPath is explicit/discovered; argv is fixed.
+	runCtx := ctx
+	cancel := func() {}
+	if timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, pythonPath, "-I", "-S", "-c", pythonSkillBridgeScript) //nolint:gosec // pythonPath is explicit/discovered; argv is fixed.
 	cmd.Stdin = bytes.NewReader(body)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("run Python skill bridge: timed out after %s", timeout)
+		}
 		detail := strings.TrimSpace(stderr.String())
 		if detail == "" {
 			detail = strings.TrimSpace(stdout.String())
@@ -244,6 +261,13 @@ func runPythonSkillBridge(ctx context.Context, pythonPath, source string, input 
 		return nil, errors.New("Python skill returned no output")
 	}
 	return normalizeJSONMap(response.Output)
+}
+
+func pythonSkillTimeout(value time.Duration, fallback time.Duration) time.Duration {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 func findPythonSkillBinary() (string, error) {

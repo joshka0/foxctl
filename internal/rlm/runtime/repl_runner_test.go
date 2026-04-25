@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1334,11 +1335,25 @@ func TestREPLRunnerStagedBraidGraphPhaseRepairsAndCarriesState(t *testing.T) {
 
 	var calls int
 	var finalPrompt string
+	var sawGraphResponseFormat bool
+	var repairPrompt string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		var req map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
+		}
+		if calls == 1 {
+			if rf, ok := req["response_format"].(map[string]any); ok && rf["type"] == "json_object" {
+				sawGraphResponseFormat = true
+			}
+		}
+		if calls == 2 {
+			messages, _ := req["messages"].([]any)
+			if len(messages) > 0 {
+				last, _ := messages[len(messages)-1].(map[string]any)
+				repairPrompt, _ = last["content"].(string)
+			}
 		}
 		if calls == 3 {
 			messages, _ := req["messages"].([]any)
@@ -1363,7 +1378,7 @@ func TestREPLRunnerStagedBraidGraphPhaseRepairsAndCarriesState(t *testing.T) {
 			_, _ = w.Write([]byte(`{
 				"id":"chatcmpl-braid-repair",
 				"choices":[{
-					"message":{"role":"assistant","content":"{\"version\":1,\"nodes\":[{\"id\":\"n1\",\"kind\":\"extract\",\"question\":\"extract context\"},{\"id\":\"n2\",\"kind\":\"reduce\",\"depends_on\":[\"n1\"]}],\"final_node\":\"n2\"}"},
+					"message":{"role":"assistant","content":"{\"version\":1,\"nodes\":[{\"id\":\"n1\",\"kind\":\"extract\",\"question\":\"extract context\"},{\"id\":\"n2\",\"kind\":\"cycle_solve\",\"question\":\"solve fixed point\",\"depends_on\":[\"n1\"]},{\"id\":\"n3\",\"kind\":\"solve\",\"question\":\"solve requested values\",\"depends_on\":[\"n1\",\"n2\"]},{\"id\":\"n4\",\"kind\":\"verify\",\"question\":\"verify candidate\",\"depends_on\":[\"n2\",\"n3\"]},{\"id\":\"n5\",\"kind\":\"reduce\",\"depends_on\":[\"n3\",\"n4\"]}],\"final_node\":\"n5\"}"},
 					"finish_reason":"stop"
 				}],
 				"usage":{"prompt_tokens":10,"completion_tokens":12}
@@ -1395,13 +1410,15 @@ func TestREPLRunnerStagedBraidGraphPhaseRepairsAndCarriesState(t *testing.T) {
 			},
 			Budget: BudgetConfig{
 				MaxDepth:      1,
-				MaxSubcalls:   2,
+				MaxSubcalls:   5,
 				MaxIterations: 4,
 			},
 			Phases: []REPLRunnerPhase{
 				{
 					Name:                  "plan",
 					OutputKind:            REPLPhaseOutputKindBraidGraph,
+					BraidGraphPolicy:      BraidGraphPolicyLongCoTController,
+					ResponseFormat:        json.RawMessage(`{"type":"json_object"}`),
 					AutoExecuteGraphNodes: true,
 					MaxIterations:         1,
 				},
@@ -1410,7 +1427,12 @@ func TestREPLRunnerStagedBraidGraphPhaseRepairsAndCarriesState(t *testing.T) {
 			RLMQueryFactory: func(parentTask rlm.Task, env rlm.Environment) RLMQueryRunFunc {
 				return func(ctx context.Context, task rlm.Task, env rlm.Environment) (rlm.Result, error) {
 					childPrompts = append(childPrompts, task.Prompt)
-					return rlm.Result{Answer: "child ok"}, nil
+					switch {
+					case strings.Contains(task.Prompt, "(cycle_solve)"):
+						return rlm.Result{Answer: `status: solved answer: cycle_json: {"pass":true,"candidates":{"x":1},"checks":[{"name":"fixed_point","ok":true,"observed":1,"expected":1}]} checks: pass=true`}, nil
+					default:
+						return rlm.Result{Answer: "status: solved answer: child ok checks: pass=true"}, nil
+					}
 				}
 			},
 		},
@@ -1420,7 +1442,7 @@ func TestREPLRunnerStagedBraidGraphPhaseRepairsAndCarriesState(t *testing.T) {
 	result, err := runner.Run(context.Background(), rlm.Task{
 		Prompt:        "Use braid mode.",
 		MaxDepth:      1,
-		MaxSubcalls:   2,
+		MaxSubcalls:   5,
 		MaxIterations: 4,
 	}, rlm.Environment{})
 	if err != nil {
@@ -1429,8 +1451,8 @@ func TestREPLRunnerStagedBraidGraphPhaseRepairsAndCarriesState(t *testing.T) {
 	if result.Answer != "solution = repaired" {
 		t.Fatalf("answer=%q", result.Answer)
 	}
-	if len(childPrompts) != 2 {
-		t.Fatalf("child prompts=%d want 2", len(childPrompts))
+	if len(childPrompts) != 5 {
+		t.Fatalf("child prompts=%d want 5", len(childPrompts))
 	}
 	if !strings.Contains(childPrompts[0], "BRAID node n1 (extract)") {
 		t.Fatalf("unexpected child prompt: %q", childPrompts[0])
@@ -1438,11 +1460,26 @@ func TestREPLRunnerStagedBraidGraphPhaseRepairsAndCarriesState(t *testing.T) {
 	if !strings.Contains(childPrompts[0], "Official root task:") || !strings.Contains(childPrompts[0], "Use braid mode.") {
 		t.Fatalf("child prompt missing root task: %q", childPrompts[0])
 	}
-	if !strings.Contains(childPrompts[1], "BRAID node n2 (reduce)") || !strings.Contains(childPrompts[1], "Dependency summaries:") {
+	if !strings.Contains(childPrompts[1], "BRAID node n2 (cycle_solve)") || !strings.Contains(childPrompts[1], "Dependency summaries:") {
 		t.Fatalf("dependent child prompt missing dependency summaries: %q", childPrompts[1])
 	}
-	if !strings.Contains(finalPrompt, "Current braid graph:") || !strings.Contains(finalPrompt, "final_node: n2") {
+	if !strings.Contains(finalPrompt, "Current braid graph:") || !strings.Contains(finalPrompt, "final_node: n5") {
 		t.Fatalf("final phase prompt missing braid summary:\n%s", finalPrompt)
+	}
+	if !sawGraphResponseFormat {
+		t.Fatal("graph phase request did not include json_object response_format")
+	}
+	if !strings.Contains(repairPrompt, "cycle_solve is optional") || !strings.Contains(repairPrompt, "question under 220 characters") {
+		t.Fatalf("repair prompt missing compact optional cycle_solve schema guidance:\n%s", repairPrompt)
+	}
+	if !strings.Contains(repairPrompt, "include extract, at least two solve-like nodes") || !strings.Contains(repairPrompt, "shorten invalid fields instead of deleting required node kinds") {
+		t.Fatalf("repair prompt missing LongCoT controller policy guidance:\n%s", repairPrompt)
+	}
+	if !strings.Contains(repairPrompt, "BlocksWorld-style tasks") || !strings.Contains(repairPrompt, "prefer solve nodes plus an independent verify node") {
+		t.Fatalf("repair prompt missing state-transition guidance:\n%s", repairPrompt)
+	}
+	if !strings.Contains(repairPrompt, "checks original constraints by substituting candidate values") {
+		t.Fatalf("repair prompt missing verify-node original-constraints guidance:\n%s", repairPrompt)
 	}
 	if calls != 3 {
 		t.Fatalf("calls=%d want 3", calls)
@@ -1552,6 +1589,55 @@ func TestREPLRunnerStagedBraidAutoExecuteSchedulesInitialNodes(t *testing.T) {
 	}
 	if !strings.Contains(childPrompts[2], "BRAID node n3 (reduce)") || !strings.Contains(childPrompts[2], "Dependency summaries:") {
 		t.Fatalf("third child prompt missing dependency summaries=%q", childPrompts[2])
+	}
+}
+
+func TestExecutePhaseBraidGraphUsesPreferredHelperBeforeChild(t *testing.T) {
+	t.Parallel()
+
+	helper := &HelperFactoryTools{Config: HelperFactoryConfig{
+		Language: HelperLanguageGo,
+		PresetSource: `func Solve(input map[string]any) map[string]any {
+	return map[string]any{"ok": true, "answer": "solution = helper"}
+}`,
+	}}
+	toolExec := &replToolExecutor{
+		subcallsEnabled:   true,
+		helperFactory:     helper,
+		extraToolExecutor: helper,
+		rlmQuery: func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error) {
+			t.Fatal("rlm_query should not be called for helper-preferred node with valid helper")
+			return rlm.Result{}, nil
+		},
+	}
+	graph := &BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{
+				ID:           "n_solve",
+				Kind:         "solve",
+				Question:     "Compute the exact answer.",
+				HelperPolicy: BraidNodeHelperPolicyPreferred,
+			},
+		},
+		FinalNode: "n_solve",
+	}
+	var output engine.EngineOutput
+	err := executePhaseBraidGraph(
+		context.Background(),
+		"graph_fanout",
+		REPLRunnerPhase{AutoExecuteGraphNodes: true},
+		toolExec,
+		graph,
+		"Return solution = ...",
+		1,
+		&output,
+	)
+	if err != nil {
+		t.Fatalf("executePhaseBraidGraph() error = %v", err)
+	}
+	if len(output.ToolCalls) != 1 || output.ToolCalls[0].Name != EphemeralHelperSolveToolName {
+		t.Fatalf("tool calls=%#v, want one helper call", output.ToolCalls)
 	}
 }
 
@@ -2499,6 +2585,101 @@ func TestREPLRunnerCanContinueAfterREPLCodeRepairFailure(t *testing.T) {
 	}
 }
 
+func TestREPLRunnerCanContinueAfterEmptyREPLCodeOutput(t *testing.T) {
+	t.Parallel()
+
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch calls {
+		case 1:
+			_, _ = w.Write([]byte(`{
+				"id":"chatcmpl-code-empty",
+				"choices":[{
+					"message":{"role":"assistant","content":""},
+					"finish_reason":"stop"
+				}],
+				"usage":{"prompt_tokens":10,"completion_tokens":0}
+			}`))
+		case 2:
+			_, _ = w.Write([]byte(`{
+				"id":"chatcmpl-final",
+				"choices":[{
+					"message":{"role":"assistant","content":"status: blocked\nanswer:\nchecks: scratch computation unavailable"},
+					"finish_reason":"stop"
+				}],
+				"usage":{"prompt_tokens":12,"completion_tokens":8}
+			}`))
+		case 3:
+			_, _ = w.Write([]byte(`{
+				"id":"chatcmpl-final-repair",
+				"choices":[{
+					"message":{"role":"assistant","content":"status: blocked\nanswer:\nchecks: scratch computation unavailable"},
+					"finish_reason":"stop"
+				}],
+				"usage":{"prompt_tokens":12,"completion_tokens":8}
+			}`))
+		default:
+			t.Fatalf("unexpected model call %d", calls)
+		}
+	}))
+	defer server.Close()
+
+	sandbox := &fakeSandbox{}
+	runner := &REPLRunner{
+		Config: REPLRunnerConfig{
+			LLM: rlm.LLMConfig{
+				Provider:      "openai_compat",
+				BaseURL:       server.URL,
+				AuthMode:      "none",
+				Model:         "test-model",
+				MaxIterations: 2,
+				MaxTokens:     256,
+				Timeout:       5 * time.Second,
+			},
+			Budget: BudgetConfig{MaxREPLCalls: 1, MaxIterations: 3},
+			Phases: []REPLRunnerPhase{
+				{
+					Name:                    "scratch",
+					OutputKind:              REPLPhaseOutputKindREPLCode,
+					Tools:                   []string{PythonREPLToolName},
+					RequireToolOutput:       true,
+					ContinueOnREPLCodeError: true,
+					MaxIterations:           1,
+				},
+				{
+					Name:            "final",
+					Final:           true,
+					FinalOutputKind: "child_summary",
+					MaxIterations:   1,
+				},
+			},
+		},
+		SandboxFactory: func() rlm.Sandbox { return sandbox },
+	}
+
+	result, err := runner.Run(context.Background(), rlm.Task{
+		Prompt:        "Compute what you can.",
+		RunID:         "run-repl-code-empty",
+		AgentID:       "agent-repl-code-empty",
+		MaxIterations: 3,
+	}, rlm.Environment{})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("model calls=%d want 3", calls)
+	}
+	if !strings.Contains(result.Answer, "status: blocked") {
+		t.Fatalf("answer=%q", result.Answer)
+	}
+}
+
 func TestParseREPLCodePhaseTextExtractsSingleFence(t *testing.T) {
 	t.Parallel()
 
@@ -2573,6 +2754,201 @@ func TestValidateREPLAttemptOutputForREPLCodeAllowsLengthStop(t *testing.T) {
 	err := validateREPLAttemptOutputForPhase(REPLRunnerPhase{OutputKind: REPLPhaseOutputKindREPLCode}, engine.EngineOutput{
 		StopReason:    engine.StopReasonMaxTokens,
 		AssistantText: "print(42)",
+	}, nil, 8)
+	if err != nil {
+		t.Fatalf("validateREPLAttemptOutputForPhase() error = %v", err)
+	}
+}
+
+func TestAutoExecuteREPLCodePhaseRequiresConfiguredCodeSubstrings(t *testing.T) {
+	t.Parallel()
+
+	output := engine.EngineOutput{AssistantText: "x = 1"}
+	err := autoExecutePhaseREPLCode(context.Background(), "cycle", REPLRunnerPhase{
+		OutputKind:                 REPLPhaseOutputKindREPLCode,
+		Tools:                      []string{PythonREPLToolName},
+		RequiredREPLCodeSubstrings: []string{"cycle_json", "print("},
+	}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      &fakeSandbox{output: "unused"},
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err == nil || !strings.Contains(err.Error(), `missing required code substring "cycle_json"`) {
+		t.Fatalf("autoExecutePhaseREPLCode() err=%v, want missing cycle_json", err)
+	}
+
+	output = engine.EngineOutput{AssistantText: `print("cycle_json: {}")`}
+	err = autoExecutePhaseREPLCode(context.Background(), "cycle", REPLRunnerPhase{
+		OutputKind:                 REPLPhaseOutputKindREPLCode,
+		Tools:                      []string{PythonREPLToolName},
+		RequiredREPLCodeSubstrings: []string{"cycle_json", "print("},
+	}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      &fakeSandbox{output: "cycle_json: {}"},
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err != nil {
+		t.Fatalf("autoExecutePhaseREPLCode() err=%v", err)
+	}
+}
+
+func TestAutoExecuteREPLCodePhaseRejectsDisallowedImportsBeforeSandbox(t *testing.T) {
+	t.Parallel()
+
+	output := engine.EngineOutput{AssistantText: "import sympy\nprint(42)"}
+	err := autoExecutePhaseREPLCode(context.Background(), "scratch", REPLRunnerPhase{
+		OutputKind: REPLPhaseOutputKindREPLCode,
+		Tools:      []string{PythonREPLToolName},
+	}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      &fakeSandbox{output: "should not run"},
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err == nil || !strings.Contains(err.Error(), `disallowed third-party import "sympy"`) {
+		t.Fatalf("autoExecutePhaseREPLCode() err=%v, want disallowed sympy", err)
+	}
+	if len(output.ToolCalls) != 0 {
+		t.Fatalf("tool calls=%d want 0", len(output.ToolCalls))
+	}
+}
+
+func TestAutoExecuteREPLCodePhaseRejectsVerboseCodeBeforeSandbox(t *testing.T) {
+	t.Parallel()
+
+	output := engine.EngineOutput{AssistantText: strings.Join([]string{
+		"# derivation",
+		"# more derivation",
+		"x = 1",
+		"print(x)",
+	}, "\n")}
+	err := autoExecutePhaseREPLCode(context.Background(), "scratch", REPLRunnerPhase{
+		OutputKind:              REPLPhaseOutputKindREPLCode,
+		Tools:                   []string{PythonREPLToolName},
+		MaxREPLCodeLines:        3,
+		MaxREPLCodeCommentLines: 1,
+	}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      &fakeSandbox{output: "should not run"},
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err == nil || !strings.Contains(err.Error(), "too many code lines") {
+		t.Fatalf("autoExecutePhaseREPLCode() err=%v, want too many code lines", err)
+	}
+	if len(output.ToolCalls) != 0 {
+		t.Fatalf("tool calls=%d want 0", len(output.ToolCalls))
+	}
+}
+
+func TestValidateREPLPhaseOutputValidatesCyclePacket(t *testing.T) {
+	t.Parallel()
+
+	phase := REPLRunnerPhase{Name: "packet", OutputKind: REPLPhaseOutputKindCyclePacket}
+	valid := engine.EngineOutput{AssistantText: `{"unknowns":["x"],"known_values":{"a":1},"constraints":["x=a+1"],"candidate_bounds":{"x":[0,3]},"requested_outputs":["x"],"blockers":[]}`}
+	if err := validateREPLPhaseOutput(phase, valid); err != nil {
+		t.Fatalf("validateREPLPhaseOutput() error = %v", err)
+	}
+
+	invalid := engine.EngineOutput{AssistantText: `{"unknowns":["x"],"constraints":[]}`}
+	err := validateREPLPhaseOutput(phase, invalid)
+	if err == nil || !strings.Contains(err.Error(), "missing candidate_bounds") {
+		t.Fatalf("validateREPLPhaseOutput() err=%v, want missing candidate_bounds", err)
+	}
+}
+
+func TestValidateREPLPhaseOutputValidatesCycleWitness(t *testing.T) {
+	t.Parallel()
+
+	phase := REPLRunnerPhase{Name: "witness", OutputKind: REPLPhaseOutputKindCycleWitness}
+	valid := engine.EngineOutput{AssistantText: `{"version":1,"checker_kind":"bounded_search","variables":[{"name":"x","min":0,"max":3}],"constraints":[{"name":"target","op":"eq","left":{"var":"x"},"right":{"const":2}}]}`}
+	if err := validateREPLPhaseOutput(phase, valid); err != nil {
+		t.Fatalf("validateREPLPhaseOutput() error = %v", err)
+	}
+
+	invalid := engine.EngineOutput{AssistantText: `{"version":1,"checker_kind":"bounded_search","variables":[{"name":"x","min":0,"max":3}],"constraints":[{"name":"target","op":"eq","left":{"func":"eval","args":[{"var":"x"}]},"right":{"const":2}}]}`}
+	err := validateREPLPhaseOutput(phase, invalid)
+	if err == nil || !strings.Contains(err.Error(), `unsupported func "eval"`) {
+		t.Fatalf("validateREPLPhaseOutput() err=%v, want unsupported func", err)
+	}
+}
+
+func TestAutoCheckPhaseCycleWitnessAppendsCycleJSON(t *testing.T) {
+	t.Parallel()
+
+	output := engine.EngineOutput{AssistantText: `{"version":1,"checker_kind":"bounded_search","variables":[{"name":"x","min":0,"max":3}],"constraints":[{"name":"target","op":"eq","left":{"var":"x"},"right":{"const":2}}],"claims":{"answer":{"var":"x"}}}`}
+	if err := autoCheckPhaseCycleWitness("witness", &output); err != nil {
+		t.Fatalf("autoCheckPhaseCycleWitness() error = %v", err)
+	}
+	if len(output.ToolCalls) != 1 || output.ToolCalls[0].Name != "cycle_witness_check" {
+		t.Fatalf("tool calls=%+v want cycle_witness_check", output.ToolCalls)
+	}
+	if len(output.ToolResults) != 1 || !strings.Contains(output.ToolResults[0].Content, `cycle_json:`) || !strings.Contains(output.ToolResults[0].Content, `"pass":true`) {
+		t.Fatalf("tool results=%+v want pass=true cycle_json", output.ToolResults)
+	}
+}
+
+func TestBuildREPLPhasePromptCanCarryPriorAssistantText(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildREPLPhasePrompt("solve the node", REPLRunnerPhase{
+		Name:                      "scratch",
+		IncludePriorAssistantText: true,
+	}, engine.EngineOutput{AssistantText: `{"unknowns":["x"],"constraints":["x=1"],"candidate_bounds":{"x":[1,1]}}`}, replRunnerRunState{})
+	if !strings.Contains(prompt, "Prior phase assistant output:") || !strings.Contains(prompt, `"unknowns":["x"]`) {
+		t.Fatalf("phase prompt missing prior assistant text:\n%s", prompt)
+	}
+}
+
+func TestBuildREPLCodeFilterPromptPreservesExplorationContract(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildREPLCodeFilterPrompt("solve", REPLRunnerPhase{
+		Name:                       "cycle",
+		RequiredREPLCodeSubstrings: []string{"cycle_json", "print("},
+		MaxREPLCodeLines:           60,
+		MaxREPLCodeCommentLines:    8,
+		IncludePriorAssistantText:  true,
+	}, engine.EngineOutput{AssistantText: `{"unknowns":["x"],"candidate_bounds":{"x":[0,10]},"constraints":["x=6"]}`}, "long exploration with candidates")
+	for _, want := range []string{
+		"REPL code filter required",
+		"Treat it as exploration notes",
+		"smallest executable witness program",
+		"cycle_json, print(",
+		"at most 60 non-empty lines",
+		"long exploration with candidates",
+		`"candidate_bounds":{"x":[0,10]}`,
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("filter prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildCyclePacketFilterPromptPreservesPacketContract(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildCyclePacketFilterPrompt("solve", REPLRunnerPhase{Name: "packet"}, engine.EngineOutput{}, "verbose notes")
+	for _, want := range []string{
+		"Cycle packet filter required",
+		"Return one compact raw JSON object only",
+		"unknowns, known_values, constraints, candidate_bounds, requested_outputs, blockers",
+		"verbose notes",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("packet filter prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestValidateREPLAttemptOutputForBraidGraphAllowsLengthStopForRepair(t *testing.T) {
+	t.Parallel()
+
+	err := validateREPLAttemptOutputForPhase(REPLRunnerPhase{OutputKind: REPLPhaseOutputKindBraidGraph}, engine.EngineOutput{
+		StopReason:    engine.StopReasonMaxTokens,
+		AssistantText: `{"version":1,"nodes":[`,
 	}, nil, 8)
 	if err != nil {
 		t.Fatalf("validateREPLAttemptOutputForPhase() error = %v", err)
@@ -2770,6 +3146,7 @@ func TestREPLRunnerAsyncRecursionFanoutAndGrandchildSummary(t *testing.T) {
 
 	var childTasks []rlm.Task
 	var grandchildTasks []rlm.Task
+	var taskMu sync.Mutex
 	runner := &REPLRunner{
 		Config: REPLRunnerConfig{
 			LLM: rlm.LLMConfig{
@@ -2791,7 +3168,9 @@ func TestREPLRunnerAsyncRecursionFanoutAndGrandchildSummary(t *testing.T) {
 			AsyncScheduler: SchedulerConfig{MaxWorkers: 2},
 			RLMQueryFactory: func(parentTask rlm.Task, env rlm.Environment) RLMQueryRunFunc {
 				return func(ctx context.Context, task rlm.Task, env rlm.Environment) (rlm.Result, error) {
+					taskMu.Lock()
 					childTasks = append(childTasks, task)
+					taskMu.Unlock()
 					switch {
 					case strings.Contains(task.Prompt, "branch alpha"):
 						grandchild := rlm.Task{
@@ -2802,7 +3181,9 @@ func TestREPLRunnerAsyncRecursionFanoutAndGrandchildSummary(t *testing.T) {
 							MaxDepth:      1,
 							MaxIterations: 1,
 						}
+						taskMu.Lock()
 						grandchildTasks = append(grandchildTasks, grandchild)
+						taskMu.Unlock()
 						return rlm.Result{
 							Answer:     "alpha result with gamma result",
 							Iterations: 2,
@@ -2853,29 +3234,33 @@ func TestREPLRunnerAsyncRecursionFanoutAndGrandchildSummary(t *testing.T) {
 	if got := result.Metadata["child_total_tokens"]; got != 36 {
 		t.Fatalf("child_total_tokens = %#v, want 36", got)
 	}
-	if len(childTasks) != 2 {
-		t.Fatalf("child tasks = %d, want 2", len(childTasks))
+	taskMu.Lock()
+	childTasksSnapshot := append([]rlm.Task(nil), childTasks...)
+	grandchildTasksSnapshot := append([]rlm.Task(nil), grandchildTasks...)
+	taskMu.Unlock()
+	if len(childTasksSnapshot) != 2 {
+		t.Fatalf("child tasks = %d, want 2", len(childTasksSnapshot))
 	}
 	var alphaTask, betaTask *rlm.Task
-	for i := range childTasks {
+	for i := range childTasksSnapshot {
 		switch {
-		case strings.Contains(childTasks[i].Prompt, "branch alpha"):
-			alphaTask = &childTasks[i]
-		case strings.Contains(childTasks[i].Prompt, "branch beta"):
-			betaTask = &childTasks[i]
+		case strings.Contains(childTasksSnapshot[i].Prompt, "branch alpha"):
+			alphaTask = &childTasksSnapshot[i]
+		case strings.Contains(childTasksSnapshot[i].Prompt, "branch beta"):
+			betaTask = &childTasksSnapshot[i]
 		}
 	}
 	if alphaTask == nil || betaTask == nil {
-		t.Fatalf("child prompts = %q, %q", childTasks[0].Prompt, childTasks[1].Prompt)
+		t.Fatalf("child prompts = %q, %q", childTasksSnapshot[0].Prompt, childTasksSnapshot[1].Prompt)
 	}
-	if len(grandchildTasks) != 1 {
-		t.Fatalf("grandchild tasks = %d, want 1", len(grandchildTasks))
+	if len(grandchildTasksSnapshot) != 1 {
+		t.Fatalf("grandchild tasks = %d, want 1", len(grandchildTasksSnapshot))
 	}
-	if grandchildTasks[0].Prompt != "grandchild gamma" {
-		t.Fatalf("grandchild prompt = %q", grandchildTasks[0].Prompt)
+	if grandchildTasksSnapshot[0].Prompt != "grandchild gamma" {
+		t.Fatalf("grandchild prompt = %q", grandchildTasksSnapshot[0].Prompt)
 	}
-	if grandchildTasks[0].ParentAgentID != alphaTask.AgentID {
-		t.Fatalf("grandchild parent = %q, want %q", grandchildTasks[0].ParentAgentID, alphaTask.AgentID)
+	if grandchildTasksSnapshot[0].ParentAgentID != alphaTask.AgentID {
+		t.Fatalf("grandchild parent = %q, want %q", grandchildTasksSnapshot[0].ParentAgentID, alphaTask.AgentID)
 	}
 
 	var sawFirstHandle, sawSecondHandle, sawBothCompleted bool

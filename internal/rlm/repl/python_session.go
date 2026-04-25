@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -136,6 +137,7 @@ func (s *PythonSession) Init(ctx context.Context, state map[string]any) error {
 
 	cmd := exec.CommandContext(context.Background(), pythonPath, "-u", "-c", pythonBridgeScript)
 	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "FOXCTL_RLM_PARENT_PID="+strconv.Itoa(os.Getpid()))
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		_ = os.RemoveAll(workDir)
@@ -380,6 +382,15 @@ func (s *PythonSession) terminateLocked() {
 	if s.cmd != nil && s.cmd.Process != nil {
 		_ = s.cmd.Process.Kill()
 	}
+	if s.waitErrCh != nil {
+		select {
+		case err, ok := <-s.waitErrCh:
+			if ok {
+				s.waitErr = err
+			}
+		case <-time.After(2 * time.Second):
+		}
+	}
 	s.broken = true
 	s.resetProcessLocked()
 	if s.workDir != "" {
@@ -563,10 +574,32 @@ const pythonBridgeScript = `
 import contextlib
 import io
 import json
+import os
 import sys
+import threading
+import time
 import traceback
 
 globals_ns = {}
+
+parent_pid_raw = os.environ.get("FOXCTL_RLM_PARENT_PID", "").strip()
+try:
+    parent_pid = int(parent_pid_raw) if parent_pid_raw else 0
+except Exception:
+    parent_pid = 0
+
+def monitor_parent():
+    if parent_pid <= 0:
+        return
+    while True:
+        time.sleep(1.0)
+        try:
+            if os.getppid() != parent_pid:
+                os._exit(70)
+        except Exception:
+            os._exit(70)
+
+threading.Thread(target=monitor_parent, name="foxctl-parent-watchdog", daemon=True).start()
 
 class LimitedTextBuffer(io.TextIOBase):
     def __init__(self, max_bytes):

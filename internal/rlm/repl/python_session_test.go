@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -70,6 +71,7 @@ func TestPythonSession_StdoutAndExceptionCapture(t *testing.T) {
 
 func TestPythonSession_ExecuteTimeout(t *testing.T) {
 	s := newTestSession(t, nil)
+	pid := pythonSessionPID(t, s)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -86,6 +88,7 @@ func TestPythonSession_ExecuteTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected session to be unusable after timeout")
 	}
+	eventuallyProcessGone(t, pid, 3*time.Second)
 }
 
 func TestPythonSession_Close(t *testing.T) {
@@ -181,4 +184,34 @@ func metadataString(t *testing.T, metadata map[string]any, key string) string {
 		t.Fatalf("metadata key %q is not a string: %#v", key, value)
 	}
 	return text
+}
+
+func pythonSessionPID(t *testing.T, s *PythonSession) int {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cmd == nil || s.cmd.Process == nil {
+		t.Fatal("python session process is not initialized")
+	}
+	return s.cmd.Process.Pid
+}
+
+func eventuallyProcessGone(t *testing.T, pid int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !processExists(pid) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("process %d still exists after %s", pid, timeout)
+}
+
+func processExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
