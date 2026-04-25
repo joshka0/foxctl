@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +24,8 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillerr"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
+	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 )
 
 const (
@@ -36,6 +41,7 @@ type input struct {
 	Paper       string  `json:"paper" validate:"required"`
 	Mode        string  `json:"mode" validate:"omitempty,oneof=outline implementation query"`
 	Query       string  `json:"query"`
+	Force       bool    `json:"force"`
 	Model       string  `json:"model"`
 	Endpoint    string  `json:"endpoint"`
 	APIKey      string  `json:"api_key"`
@@ -51,6 +57,13 @@ type pdfDocument struct {
 	Data     []byte
 	Filename string
 	Source   string
+}
+
+type cacheRecord struct {
+	ArtifactDigest string
+	ArtifactBytes  int64
+	ResponseModel  string
+	Usage          map[string]any
 }
 
 type chatRequest struct {
@@ -130,6 +143,54 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if err != nil {
 		return err
 	}
+	pdfSHA := sha256Hex(doc.Data)
+	pdfArtifact, err := skillmain.PersistBuffer(ctx, rc, bytes.NewBuffer(doc.Data), "application/pdf", "arxiv_pdf")
+	if err != nil {
+		return skillerr.WrapRuntime("persist PDF", err)
+	}
+	cache, err := openCache(ctx, rc)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		errs.Ignore(cache.Close(), "close arxiv cache")
+	}()
+
+	promptHash := sha256Hex([]byte(in.Prompt))
+	cacheKey := resultCacheKey(pdfSHA, in.Mode, in.Query, promptHash, in.Model, in.Engine)
+	if !in.Force {
+		if record, ok, err := lookupCachedResult(ctx, cache, cacheKey); err != nil {
+			return err
+		} else if ok {
+			outline, err := readCachedArtifact(ctx, rc, record.ArtifactDigest)
+			if err != nil {
+				rc.Logger.Warn().Err(err).Str("digest", record.ArtifactDigest).Msg("cached arxiv result artifact unavailable")
+			} else {
+				if err := touchCachedResult(ctx, cache, cacheKey); err != nil {
+					return err
+				}
+				return skillout.Emit(rc, command, map[string]any{
+					"outline":         outline,
+					"result":          outline,
+					"cached":          true,
+					"cache_key":       cacheKey,
+					"artifact_digest": record.ArtifactDigest,
+					"artifact_bytes":  record.ArtifactBytes,
+					"pdf_sha256":      pdfSHA,
+					"pdf_digest":      pdfArtifact.Digest,
+					"mode":            in.Mode,
+					"query":           in.Query,
+					"source":          doc.Source,
+					"filename":        doc.Filename,
+					"pdf_bytes":       len(doc.Data),
+					"model":           in.Model,
+					"response_model":  record.ResponseModel,
+					"engine":          in.Engine,
+					"usage":           record.Usage,
+				})
+			}
+		}
+	}
 
 	callCtx, cancel := context.WithTimeout(ctx, time.Duration(in.TimeoutSec)*time.Second)
 	defer cancel()
@@ -142,19 +203,32 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if outline == "" {
 		return skillerr.Parse("OpenRouter response did not include text content")
 	}
+	resultArtifact, err := skillmain.PersistBuffer(ctx, rc, bytes.NewBufferString(outline), "text/markdown", "arxiv_summary")
+	if err != nil {
+		return skillerr.WrapRuntime("persist summary", err)
+	}
+	if err := upsertCache(ctx, cache, doc, pdfSHA, pdfArtifact, in, cacheKey, promptHash, response, resultArtifact); err != nil {
+		return err
+	}
 
 	return skillout.Emit(rc, command, map[string]any{
-		"outline":        outline,
-		"result":         outline,
-		"mode":           in.Mode,
-		"query":          in.Query,
-		"source":         doc.Source,
-		"filename":       doc.Filename,
-		"pdf_bytes":      len(doc.Data),
-		"model":          in.Model,
-		"response_model": response.Model,
-		"engine":         in.Engine,
-		"usage":          response.Usage,
+		"outline":         outline,
+		"result":          outline,
+		"cached":          false,
+		"cache_key":       cacheKey,
+		"artifact_digest": resultArtifact.Digest,
+		"artifact_bytes":  resultArtifact.Size,
+		"pdf_sha256":      pdfSHA,
+		"pdf_digest":      pdfArtifact.Digest,
+		"mode":            in.Mode,
+		"query":           in.Query,
+		"source":          doc.Source,
+		"filename":        doc.Filename,
+		"pdf_bytes":       len(doc.Data),
+		"model":           in.Model,
+		"response_model":  response.Model,
+		"engine":          in.Engine,
+		"usage":           response.Usage,
 	})
 }
 
@@ -517,6 +591,199 @@ Answer structure:
 3. Implementation implications, if any
 4. Caveats or uncertainty
 5. Follow-up questions worth asking`, query)
+}
+
+func openCache(ctx context.Context, rc *skillmain.RunContext) (*sql.DB, error) {
+	root := strings.TrimSpace(rc.Config.Storage.Root)
+	if root == "" {
+		root = strings.TrimSpace(rc.Config.Paths.Cache)
+	}
+	if root == "" {
+		return nil, skillerr.Runtime("storage root is not configured")
+	}
+	db, err := sqliteutil.OpenDB(ctx, filepath.Join(root, "arxiv_summarize.sqlite"), migrateCache)
+	if err != nil {
+		return nil, skillerr.WrapIO("open arxiv cache", err)
+	}
+	return db, nil
+}
+
+func migrateCache(ctx context.Context, db *sql.DB) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS arxiv_papers (
+			pdf_sha256 TEXT PRIMARY KEY,
+			paper_input TEXT NOT NULL,
+			source_url TEXT NOT NULL,
+			filename TEXT NOT NULL,
+			pdf_digest TEXT NOT NULL,
+			pdf_bytes INTEGER NOT NULL,
+			first_seen TEXT NOT NULL,
+			last_fetched TEXT NOT NULL,
+			last_summarized TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS arxiv_results (
+			cache_key TEXT PRIMARY KEY,
+			pdf_sha256 TEXT NOT NULL,
+			mode TEXT NOT NULL,
+			query TEXT NOT NULL,
+			query_hash TEXT NOT NULL,
+			prompt_hash TEXT NOT NULL,
+			model TEXT NOT NULL,
+			engine TEXT NOT NULL,
+			response_model TEXT NOT NULL,
+			artifact_digest TEXT NOT NULL,
+			artifact_bytes INTEGER NOT NULL,
+			usage_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			last_used TEXT NOT NULL,
+			hit_count INTEGER NOT NULL DEFAULT 0,
+			FOREIGN KEY (pdf_sha256) REFERENCES arxiv_papers(pdf_sha256)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_arxiv_results_pdf_sha256 ON arxiv_results(pdf_sha256)`,
+		`CREATE INDEX IF NOT EXISTS idx_arxiv_results_updated_at ON arxiv_results(updated_at)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("migrate arxiv cache: %w", err)
+		}
+	}
+	return nil
+}
+
+func lookupCachedResult(ctx context.Context, db *sql.DB, cacheKey string) (cacheRecord, bool, error) {
+	var record cacheRecord
+	var usageJSON string
+	err := db.QueryRowContext(ctx, `
+		SELECT artifact_digest, artifact_bytes, response_model, usage_json
+		FROM arxiv_results
+		WHERE cache_key = ?
+	`, cacheKey).Scan(&record.ArtifactDigest, &record.ArtifactBytes, &record.ResponseModel, &usageJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return cacheRecord{}, false, nil
+	}
+	if err != nil {
+		return cacheRecord{}, false, skillerr.WrapIO("lookup arxiv cache", err)
+	}
+	if strings.TrimSpace(usageJSON) != "" {
+		if err := json.Unmarshal([]byte(usageJSON), &record.Usage); err != nil {
+			return cacheRecord{}, false, skillerr.WrapParse("decode cached usage", err)
+		}
+	}
+	return record, true, nil
+}
+
+func readCachedArtifact(ctx context.Context, rc *skillmain.RunContext, digest string) (string, error) {
+	reader, _, err := rc.CASStore.Get(ctx, digest)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		errs.Ignore(reader.Close(), "close cached arxiv artifact")
+	}()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func touchCachedResult(ctx context.Context, db *sql.DB, cacheKey string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE arxiv_results
+		SET last_used = ?, hit_count = hit_count + 1
+		WHERE cache_key = ?
+	`, now, cacheKey); err != nil {
+		return skillerr.WrapIO("touch arxiv cache", err)
+	}
+	return nil
+}
+
+func upsertCache(
+	ctx context.Context,
+	db *sql.DB,
+	doc pdfDocument,
+	pdfSHA string,
+	pdfArtifact skillmain.Artifact,
+	in input,
+	cacheKey string,
+	promptHash string,
+	response chatResponse,
+	resultArtifact skillmain.Artifact,
+) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	usageJSON, err := json.Marshal(response.Usage)
+	if err != nil {
+		return skillerr.WrapRuntime("marshal usage", err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return skillerr.WrapIO("begin arxiv cache tx", err)
+	}
+	defer func() {
+		if err != nil {
+			errs.Ignore(tx.Rollback(), "rollback arxiv cache tx")
+		}
+	}()
+	if _, err = tx.ExecContext(ctx, `
+		INSERT INTO arxiv_papers (
+			pdf_sha256, paper_input, source_url, filename, pdf_digest, pdf_bytes,
+			first_seen, last_fetched, last_summarized
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(pdf_sha256) DO UPDATE SET
+			paper_input = excluded.paper_input,
+			source_url = excluded.source_url,
+			filename = excluded.filename,
+			pdf_digest = excluded.pdf_digest,
+			pdf_bytes = excluded.pdf_bytes,
+			last_fetched = excluded.last_fetched,
+			last_summarized = excluded.last_summarized
+	`, pdfSHA, in.Paper, doc.Source, doc.Filename, pdfArtifact.Digest, len(doc.Data), now, now, now); err != nil {
+		return skillerr.WrapIO("upsert arxiv paper", err)
+	}
+	if _, err = tx.ExecContext(ctx, `
+		INSERT INTO arxiv_results (
+			cache_key, pdf_sha256, mode, query, query_hash, prompt_hash, model, engine,
+			response_model, artifact_digest, artifact_bytes, usage_json,
+			created_at, updated_at, last_used, hit_count
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+		ON CONFLICT(cache_key) DO UPDATE SET
+			response_model = excluded.response_model,
+			artifact_digest = excluded.artifact_digest,
+			artifact_bytes = excluded.artifact_bytes,
+			usage_json = excluded.usage_json,
+			updated_at = excluded.updated_at,
+			last_used = excluded.last_used
+	`, cacheKey, pdfSHA, in.Mode, in.Query, sha256Hex([]byte(normalizeQuery(in.Query))), promptHash, in.Model, in.Engine,
+		response.Model, resultArtifact.Digest, resultArtifact.Size, string(usageJSON), now, now, now); err != nil {
+		return skillerr.WrapIO("upsert arxiv result", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return skillerr.WrapIO("commit arxiv cache tx", err)
+	}
+	return nil
+}
+
+func resultCacheKey(pdfSHA, mode, query, promptHash, model, engine string) string {
+	parts := []string{
+		pdfSHA,
+		strings.TrimSpace(mode),
+		normalizeQuery(query),
+		strings.TrimSpace(promptHash),
+		strings.TrimSpace(model),
+		strings.TrimSpace(engine),
+	}
+	return sha256Hex([]byte(strings.Join(parts, "\x00")))
+}
+
+func normalizeQuery(query string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(query)), " ")
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func min(a, b int) int {
