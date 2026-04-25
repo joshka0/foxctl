@@ -34,6 +34,8 @@ var arxivIDPattern = regexp.MustCompile(`^([a-z-]+(\.[A-Z]{2})?/\d{7}|\d{4}\.\d{
 
 type input struct {
 	Paper       string  `json:"paper" validate:"required"`
+	Mode        string  `json:"mode" validate:"omitempty,oneof=outline implementation query"`
+	Query       string  `json:"query"`
 	Model       string  `json:"model"`
 	Endpoint    string  `json:"endpoint"`
 	APIKey      string  `json:"api_key"`
@@ -143,6 +145,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	return skillout.Emit(rc, command, map[string]any{
 		"outline":        outline,
+		"result":         outline,
+		"mode":           in.Mode,
+		"query":          in.Query,
 		"source":         doc.Source,
 		"filename":       doc.Filename,
 		"pdf_bytes":      len(doc.Data),
@@ -167,8 +172,15 @@ func applyDefaults(rc *skillmain.RunContext, in *input) {
 	if strings.TrimSpace(in.Engine) == "" {
 		in.Engine = "native"
 	}
+	if strings.TrimSpace(in.Mode) == "" {
+		if strings.TrimSpace(in.Query) != "" {
+			in.Mode = "query"
+		} else {
+			in.Mode = "outline"
+		}
+	}
 	if strings.TrimSpace(in.Prompt) == "" {
-		in.Prompt = defaultPrompt()
+		in.Prompt = buildPrompt(*in)
 	}
 	if in.TimeoutSec <= 0 {
 		in.TimeoutSec = 180
@@ -411,7 +423,18 @@ func filenameFromURL(rawURL, contentType string) string {
 	return name
 }
 
-func defaultPrompt() string {
+func buildPrompt(in input) string {
+	switch in.Mode {
+	case "implementation":
+		return implementationPrompt()
+	case "query":
+		return queryPrompt(in.Query)
+	default:
+		return outlinePrompt()
+	}
+}
+
+func outlinePrompt() string {
 	return `Create a full outline of this arXiv paper.
 
 Interpret the entire PDF, including the abstract, main text, appendices, figures,
@@ -436,6 +459,64 @@ Use this structure:
 9. Practical implications
 10. Reproducibility notes
 11. Open questions`
+}
+
+func implementationPrompt() string {
+	return `Summarize this arXiv paper for the purpose of implementing the method in code.
+
+Interpret the entire PDF, including algorithms, equations, pseudocode, figures,
+tables, diagrams, plots, captions, appendices, and experiment setup details.
+
+Leave citations out:
+- Do not include a references or bibliography section.
+- Do not list cited works.
+- Remove inline citation markers such as [1], [12, 13], or author-year callouts
+  unless needed to identify this paper itself.
+
+Focus only on implementation-relevant details. Omit broad literature review,
+historical framing, and citation context unless it changes what must be built.
+
+Use this structure:
+1. Implementation goal
+2. Core abstractions and data structures
+3. Inputs, outputs, and expected formats
+4. Algorithmic steps
+5. Model calls, prompts, policies, or learned components
+6. Equations translated into implementation notes
+7. Visual artifacts interpreted for implementation
+8. Hyperparameters, constants, thresholds, and defaults
+9. Evaluation harness and metrics to reproduce
+10. Minimal viable implementation plan
+11. Edge cases and failure modes
+12. Tests or fixtures to write
+13. Open implementation questions`
+}
+
+func queryPrompt(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		query = "Answer the user's question about the paper with the most relevant details."
+	}
+	return fmt.Sprintf(`Answer this targeted question about the arXiv paper:
+
+%s
+
+Use the entire PDF as context, including figures, tables, diagrams, plots,
+algorithms, equations, captions, and appendices. If visual material is relevant
+to the answer, interpret it directly.
+
+Leave citations out:
+- Do not include a references or bibliography section.
+- Do not list cited works.
+- Remove inline citation markers such as [1], [12, 13], or author-year callouts
+  unless needed to identify this paper itself.
+
+Answer structure:
+1. Direct answer
+2. Paper evidence
+3. Implementation implications, if any
+4. Caveats or uncertainty
+5. Follow-up questions worth asking`, query)
 }
 
 func min(a, b int) int {
