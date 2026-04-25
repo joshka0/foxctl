@@ -307,14 +307,16 @@ func TestAgentAskStreamRuntime_CancelCallsCancelEndpointAndCancelsContext(t *tes
 	var (
 		mu              sync.Mutex
 		cancelCalled    bool
-		ctxErr          error
 		capturedAgentID string
 	)
+	sourceStarted := make(chan struct{})
+	ctxErrCh := make(chan error, 1)
 
 	source := AgentAskStreamSourceFunc(func(ctx context.Context, onEvent func(AgentAskStreamEvent) error) error {
 		// Block until context is cancelled, simulating an in-flight stream.
+		close(sourceStarted)
 		<-ctx.Done()
-		ctxErr = ctx.Err()
+		ctxErrCh <- ctx.Err()
 		return ctx.Err()
 	})
 
@@ -339,8 +341,11 @@ func TestAgentAskStreamRuntime_CancelCallsCancelEndpointAndCancelsContext(t *tes
 		t.Fatalf("Submit error: %v", err)
 	}
 
-	// Wait for the stream to be in flight.
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-sourceStarted:
+	case <-time.After(1 * time.Second):
+		t.Fatal("stream did not start")
+	}
 
 	if !rt.IsInFlight() {
 		t.Fatal("expected stream to be in flight before Cancel")
@@ -349,9 +354,6 @@ func TestAgentAskStreamRuntime_CancelCallsCancelEndpointAndCancelsContext(t *tes
 	if err := rt.Cancel(); err != nil {
 		t.Fatalf("Cancel error: %v", err)
 	}
-
-	// Wait for cancellation to propagate.
-	time.Sleep(100 * time.Millisecond)
 
 	mu.Lock()
 	if !cancelCalled {
@@ -362,6 +364,12 @@ func TestAgentAskStreamRuntime_CancelCallsCancelEndpointAndCancelsContext(t *tes
 	}
 	mu.Unlock()
 
+	var ctxErr error
+	select {
+	case ctxErr = <-ctxErrCh:
+	case <-time.After(1 * time.Second):
+		t.Fatal("source context cancellation did not propagate")
+	}
 	if !errors.Is(ctxErr, context.Canceled) {
 		t.Fatalf("source context error = %v, want context.Canceled", ctxErr)
 	}
