@@ -476,6 +476,70 @@ func TestHelperFactoryToolsRepairsPythonSourceWithoutTaskContext(t *testing.T) {
 	}
 }
 
+func TestHelperFactoryToolsRepairsVerifierCounterexample(t *testing.T) {
+	t.Parallel()
+
+	badSource := `func Solve(input map[string]any) map[string]any {
+	return map[string]any{"ok": true, "answer": "solution = bad"}
+}`
+	goodSource := `func Solve(input map[string]any) map[string]any {
+	return map[string]any{"ok": true, "answer": "solution = fixed"}
+}`
+	var prompts []string
+	server := helperFactoryTestServer(t, []string{
+		mustHelperFactoryDraftJSON(t, badSource, nil),
+		mustHelperFactoryDraftJSON(t, goodSource, nil),
+	}, &prompts)
+	defer server.Close()
+
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		LLM: rlm.LLMConfig{
+			Provider:  "openai_compat",
+			BaseURL:   server.URL,
+			AuthMode:  "none",
+			Model:     "test-model",
+			Timeout:   5 * time.Second,
+			MaxTokens: 512,
+		},
+		TaskPrompt:          "Return solution = fixed.",
+		Attempts:            2,
+		ExtractSolutionLine: true,
+		AnswerVerifier: func(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+			if answer == "solution = fixed" {
+				return HelperVerifierDiagnostic{Pass: true, FailedAtStep: -1}, true
+			}
+			return HelperVerifierDiagnostic{
+				Pass:         false,
+				FailedAtStep: 0,
+				FailureKind:  "unit_counterexample",
+				Message:      "bad answer",
+				RepairHint:   "return the fixed answer",
+			}, true
+		},
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK       bool             `json:"ok"`
+		Answer   string           `json:"answer"`
+		Attempts []map[string]any `json:"attempts"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Answer != "solution = fixed" {
+		t.Fatalf("output ok=%v answer=%q raw=%s", got.OK, got.Answer, raw)
+	}
+	if len(got.Attempts) != 2 || got.Attempts[0]["stage"] != "verify" {
+		t.Fatalf("attempts=%#v", got.Attempts)
+	}
+	if !strings.Contains(prompts[1], "Verifier counterexample") || !strings.Contains(prompts[1], "unit_counterexample") {
+		t.Fatalf("repair prompt missing verifier counterexample:\n%s", prompts[1])
+	}
+}
+
 func TestHelperFactoryToolsRedraftsIncompletePythonSourceWithTaskContext(t *testing.T) {
 	t.Parallel()
 

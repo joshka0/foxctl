@@ -277,7 +277,19 @@ func runBraidNodeHelper(
 	}
 	callID := fmt.Sprintf("auto_%s_%s_%s", sanitizeToolCallIDPart(phaseName), sanitizeToolCallIDPart(node.ID), sanitizeToolCallIDPart(EphemeralHelperSolveToolName))
 	rawArgs := json.RawMessage(args)
-	result, execErr := toolExec.Execute(ctx, EphemeralHelperSolveToolName, rawArgs)
+	helperExec := toolExec.helperFactory
+	if isBraidSolveKind(node.Kind) && helperExec != nil {
+		helperCfg := helperExec.Config
+		helperCfg.AnswerVerifier = stackMoveAnswerVerifier
+		helperExec = &HelperFactoryTools{Config: helperCfg}
+	}
+	var result string
+	var execErr error
+	if helperExec != nil {
+		result, execErr = helperExec.Execute(ctx, EphemeralHelperSolveToolName, rawArgs)
+	} else {
+		result, execErr = toolExec.Execute(ctx, EphemeralHelperSolveToolName, rawArgs)
+	}
 	toolCall := engine.ToolCall{ID: callID, Name: EphemeralHelperSolveToolName, Arguments: rawArgs}
 	toolResult := engine.ToolResult{ToolCallID: callID, Content: result}
 	if execErr != nil {
@@ -435,44 +447,95 @@ func helperAnswerFromToolResult(result string) string {
 
 func verifyStackMoveCandidateFromInput(answer string, rawInput any) (bool, string, bool) {
 	input, ok := rawInput.(map[string]any)
-	if !ok || len(input) == 0 {
+	if !ok {
 		return false, "", false
+	}
+	diag, applicable := stackMoveAnswerVerifier(answer, input)
+	if !applicable {
+		return false, "", false
+	}
+	return diag.Pass, diag.Message, true
+}
+
+func stackMoveAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	base := HelperVerifierDiagnostic{Pass: false, FailedAtStep: -1, FailureKind: "stack_move"}
+	if len(input) == 0 {
+		return HelperVerifierDiagnostic{}, false
 	}
 	initial, okInitial := stackStateFromAny(input["initial_state"])
 	goal, okGoal := stackStateFromAny(input["goal_state"])
 	if !okInitial || !okGoal {
-		return false, "", false
+		return HelperVerifierDiagnostic{}, false
 	}
 	moves, okMoves := stackMovesFromAnswer(answer)
 	if !okMoves {
-		return false, "candidate does not contain a parseable solution move list", true
+		base.FailureKind = "parse"
+		base.Message = "candidate does not contain a parseable solution move list"
+		base.RepairHint = "return answer exactly as solution = [[block, from_stack, to_stack], ...] with JSON-compatible integers"
+		return base, true
 	}
 	state := cloneIntStacks(initial)
 	for idx, move := range moves {
 		block, from, to := move[0], move[1], move[2]
+		stateBefore := cloneIntStacks(state)
 		if from < 0 || from >= len(state) {
-			return false, fmt.Sprintf("move %d source stack %d out of range", idx, from), true
+			base.FailureKind = "source_out_of_range"
+			base.FailedAtStep = idx
+			base.FailedAction = move[:]
+			base.StateBefore = stateBefore
+			base.Message = fmt.Sprintf("move %d source stack %d out of range", idx, from)
+			base.RepairHint = "choose a source stack index that exists"
+			return base, true
 		}
 		if to < 0 || to >= len(state) {
-			return false, fmt.Sprintf("move %d destination stack %d out of range", idx, to), true
+			base.FailureKind = "destination_out_of_range"
+			base.FailedAtStep = idx
+			base.FailedAction = move[:]
+			base.StateBefore = stateBefore
+			base.Message = fmt.Sprintf("move %d destination stack %d out of range", idx, to)
+			base.RepairHint = "choose a destination stack index that exists"
+			return base, true
 		}
 		if from == to {
-			return false, fmt.Sprintf("move %d moves block %d from stack %d to the same stack", idx, block, from), true
+			base.FailureKind = "same_stack"
+			base.FailedAtStep = idx
+			base.FailedAction = move[:]
+			base.StateBefore = stateBefore
+			base.Message = fmt.Sprintf("move %d moves block %d from stack %d to the same stack", idx, block, from)
+			base.RepairHint = "remove no-op same-stack moves and construct only state-changing moves"
+			return base, true
 		}
 		if len(state[from]) == 0 {
-			return false, fmt.Sprintf("move %d source stack %d is empty", idx, from), true
+			base.FailureKind = "empty_source"
+			base.FailedAtStep = idx
+			base.FailedAction = move[:]
+			base.StateBefore = stateBefore
+			base.Message = fmt.Sprintf("move %d source stack %d is empty", idx, from)
+			base.RepairHint = "only move from non-empty stacks"
+			return base, true
 		}
 		top := state[from][len(state[from])-1]
 		if top != block {
-			return false, fmt.Sprintf("move %d tries to move block %d, but stack %d top is %d", idx, block, from, top), true
+			base.FailureKind = "precondition_not_top"
+			base.FailedAtStep = idx
+			base.FailedAction = move[:]
+			base.StateBefore = stateBefore
+			base.Message = fmt.Sprintf("move %d tries to move block %d, but stack %d top is %d", idx, block, from, top)
+			base.RepairHint = "clear the requested block before moving it, or move the current top block first"
+			return base, true
 		}
 		state[from] = state[from][:len(state[from])-1]
 		state[to] = append(state[to], block)
 	}
 	if !reflect.DeepEqual(state, goal) {
-		return false, fmt.Sprintf("final state %v does not match goal %v", state, goal), true
+		base.FailureKind = "goal_mismatch"
+		base.ObservedFinal = state
+		base.ExpectedFinal = goal
+		base.Message = fmt.Sprintf("final state %v does not match goal %v", state, goal)
+		base.RepairHint = "continue constructing moves until every stack exactly matches the goal order"
+		return base, true
 	}
-	return true, "", true
+	return HelperVerifierDiagnostic{Pass: true, FailureKind: "stack_move", FailedAtStep: -1}, true
 }
 
 func stackStateFromAny(value any) ([][]int, bool) {

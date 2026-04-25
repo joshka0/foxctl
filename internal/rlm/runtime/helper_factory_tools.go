@@ -40,10 +40,26 @@ type HelperFactoryConfig struct {
 	Language            string
 	MaxSourceLines      int
 	MaxSourceChars      int
+	AnswerVerifier      HelperAnswerVerifier
 }
 
 type HelperFactoryTools struct {
 	Config HelperFactoryConfig
+}
+
+type HelperAnswerVerifier func(answer string, input map[string]any) (HelperVerifierDiagnostic, bool)
+
+type HelperVerifierDiagnostic struct {
+	Pass          bool           `json:"pass"`
+	FailureKind   string         `json:"failure_kind,omitempty"`
+	FailedAtStep  int            `json:"failed_at_step,omitempty"`
+	FailedAction  []int          `json:"failed_action,omitempty"`
+	StateBefore   any            `json:"state_before,omitempty"`
+	ObservedFinal any            `json:"observed_final,omitempty"`
+	ExpectedFinal any            `json:"expected_final,omitempty"`
+	Message       string         `json:"message,omitempty"`
+	RepairHint    string         `json:"repair_hint,omitempty"`
+	Extra         map[string]any `json:"extra,omitempty"`
 }
 
 type helperFactoryDraft struct {
@@ -65,6 +81,7 @@ type helperFactoryRepairState struct {
 	Raw      string
 	Input    map[string]any
 	Output   map[string]any
+	Verifier map[string]any
 	Language string
 }
 
@@ -236,6 +253,36 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 				"language": helperLanguage,
 			})
 			continue
+		}
+		if h.Config.AnswerVerifier != nil {
+			diag, applicable := h.Config.AnswerVerifier(answer, helperInput)
+			if applicable && !diag.Pass {
+				diagMap := helperVerifierDiagnosticMap(diag)
+				errText := helperVerifierDiagnosticError(diag)
+				lastFeedback = helperFactoryRepairFeedbackWithVerifier("verify", errText, draft.Source, raw, helperInput, result.Output, diagMap)
+				repairState = &helperFactoryRepairState{
+					Stage:    "verify",
+					Error:    errText,
+					Source:   draft.Source,
+					Raw:      raw,
+					Input:    cloneMapAny(helperInput),
+					Output:   cloneMapAny(result.Output),
+					Verifier: diagMap,
+					Language: helperLanguage,
+				}
+				attempts = append(attempts, map[string]any{
+					"attempt":             attempt,
+					"ok":                  false,
+					"stage":               "verify",
+					"error":               errText,
+					"source":              draft.Source,
+					"input":               helperInput,
+					"output":              result.Output,
+					"verifier_diagnostic": diagMap,
+					"language":            helperLanguage,
+				})
+				continue
+			}
 		}
 		attempts = append(attempts, map[string]any{
 			"attempt":  attempt,
@@ -651,6 +698,11 @@ func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactory
 		b.WriteString("\n\nPrevious output summary:\n")
 		b.WriteString(helperFactoryJSONSummary(repair.Output))
 	}
+	if len(repair.Verifier) > 0 {
+		b.WriteString("\n\nVerifier counterexample:\n")
+		b.WriteString(helperFactoryJSONSummary(repair.Verifier))
+		b.WriteString("\nUse this counterexample as a failing test. The replacement helper must avoid this exact failure before returning an answer.\n")
+	}
 	b.WriteString("\n\nReturn a complete replacement source_b64. Interpret malformed draft text generously: if source_b64 visibly contains raw source instead of base64, treat it as the source to repair. Preserve the algorithmic intent where visible, but fix JSON, syntax, indentation, imports, return shape, source budget, and runtime errors.")
 	return b.String()
 }
@@ -935,6 +987,10 @@ func compactHelperFactoryLongText(value string, limit int) string {
 }
 
 func helperFactoryRepairFeedback(stage, errText, source, raw string, input, output map[string]any) string {
+	return helperFactoryRepairFeedbackWithVerifier(stage, errText, source, raw, input, output, nil)
+}
+
+func helperFactoryRepairFeedbackWithVerifier(stage, errText, source, raw string, input, output, verifier map[string]any) string {
 	var b strings.Builder
 	b.WriteString("stage: ")
 	b.WriteString(strings.TrimSpace(stage))
@@ -956,6 +1012,10 @@ func helperFactoryRepairFeedback(stage, errText, source, raw string, input, outp
 		b.WriteString("\noutput_summary: ")
 		b.WriteString(helperFactoryJSONSummary(output))
 	}
+	if len(verifier) > 0 {
+		b.WriteString("\nverifier_counterexample: ")
+		b.WriteString(helperFactoryJSONSummary(verifier))
+	}
 	return b.String()
 }
 
@@ -971,6 +1031,40 @@ func helperFactoryFirstFeedbackLine(feedback string) string {
 		}
 	}
 	return compactHelperFactoryString(feedback)
+}
+
+func helperVerifierDiagnosticMap(diag HelperVerifierDiagnostic) map[string]any {
+	body, err := json.Marshal(diag)
+	if err != nil {
+		return map[string]any{"pass": diag.Pass, "message": diag.Message}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		return map[string]any{"pass": diag.Pass, "message": diag.Message}
+	}
+	for key, value := range out {
+		if value == nil || value == "" {
+			delete(out, key)
+		}
+	}
+	if diag.FailedAtStep < 0 {
+		delete(out, "failed_at_step")
+	}
+	return out
+}
+
+func helperVerifierDiagnosticError(diag HelperVerifierDiagnostic) string {
+	parts := []string{"helper answer failed verifier"}
+	if strings.TrimSpace(diag.FailureKind) != "" {
+		parts = append(parts, "kind="+strings.TrimSpace(diag.FailureKind))
+	}
+	if diag.FailedAtStep >= 0 {
+		parts = append(parts, fmt.Sprintf("step=%d", diag.FailedAtStep))
+	}
+	if strings.TrimSpace(diag.Message) != "" {
+		parts = append(parts, strings.TrimSpace(diag.Message))
+	}
+	return strings.Join(parts, ": ")
 }
 
 func helperFactoryJSONSummary(value map[string]any) string {
