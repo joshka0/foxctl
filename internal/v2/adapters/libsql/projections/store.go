@@ -320,7 +320,8 @@ func (s *Store) ListRunStates(ctx context.Context, filter RunStateFilter) ([]Run
 
 func scanRunState(row interface {
 	Scan(dest ...any) error
-}) (RunState, error) {
+},
+) (RunState, error) {
 	var (
 		out       RunState
 		updatedAt string

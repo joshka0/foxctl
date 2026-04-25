@@ -50,11 +50,13 @@ var newV2RunModel = func(cfg config.Config, workspaceRoot string) (runner.Model,
 	})
 }
 
-var activeV2Runs = newV2RunRegistry()
-var v2RuntimeEventBus = runtimeevents.NewBus(runtimeevents.Config{
-	SubscriberBuffer: 128,
-	OverflowPolicy:   runtimeevents.OverflowDropOldest,
-})
+var (
+	activeV2Runs      = newV2RunRegistry()
+	v2RuntimeEventBus = runtimeevents.NewBus(runtimeevents.Config{
+		SubscriberBuffer: 128,
+		OverflowPolicy:   runtimeevents.OverflowDropOldest,
+	})
+)
 
 type v2RunRegistry struct {
 	mu      sync.Mutex
