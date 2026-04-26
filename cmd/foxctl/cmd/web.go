@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,8 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	atcpdaemon "github.com/joshka0/foxctl/internal/atcp/daemon"
-	"github.com/joshka0/foxctl/internal/atcp/transport/unixsocket"
+	"github.com/joshka0/foxctl/internal/interfaces/foxproxbridge"
 	"github.com/joshka0/foxctl/internal/interfaces/web"
 	"github.com/joshka0/foxctl/internal/platform/logging"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
@@ -45,8 +43,8 @@ Examples:
   # Start server with CORS enabled for development
   foxctl web serve --dev-cors
 
-  # Start server with embedded ATCP broker for foxterm CLI sessions
-  foxctl web serve --atcp
+  # Start server with embedded Foxprox broker for foxterm CLI sessions
+  foxctl web serve --foxprox
 
   # Start server with static UI files
   foxctl web serve --ui-dir ./packages/gui-agent/dist`,
@@ -54,15 +52,15 @@ Examples:
 }
 
 var (
-	webPort     int
-	webDevCORS  bool
-	webUIDir    string
-	webChat     string
-	webDBDriver string
-	webDBDSN    string
-	webATCP     bool
-	webATCPDir  string
-	webATCPSock string
+	webPort        int
+	webDevCORS     bool
+	webUIDir       string
+	webChat        string
+	webDBDriver    string
+	webDBDSN       string
+	webFoxprox     bool
+	webFoxproxDir  string
+	webFoxproxSock string
 )
 
 func init() {
@@ -75,9 +73,9 @@ func init() {
 	webServeCmd.Flags().StringVar(&webChat, "chat", "", "Chat adapter to enable (discord|telegram|teams)")
 	webServeCmd.Flags().StringVar(&webDBDriver, "db-driver", "", "Database driver (sqlite|libsql|turso|postgres)")
 	webServeCmd.Flags().StringVar(&webDBDSN, "db-dsn", "", "PostgreSQL DSN (overrides FOXCTL_POSTGRES_DSN)")
-	webServeCmd.Flags().BoolVar(&webATCP, "atcp", false, "Start an embedded ATCP daemon for terminal-backed agents")
-	webServeCmd.Flags().StringVar(&webATCPDir, "atcp-data-dir", defaultWebATCPDataDir(), "Directory for embedded ATCP state (empty = in-memory)")
-	webServeCmd.Flags().StringVar(&webATCPSock, "atcp-socket", "", "Unix socket path for embedded ATCP daemon")
+	webServeCmd.Flags().BoolVar(&webFoxprox, "foxprox", false, "Start an embedded Foxprox daemon for terminal-backed agents")
+	webServeCmd.Flags().StringVar(&webFoxproxDir, "foxprox-data-dir", defaultWebFoxproxDataDir(), "Directory for embedded Foxprox state (empty = in-memory)")
+	webServeCmd.Flags().StringVar(&webFoxproxSock, "foxprox-socket", "", "Unix socket path for embedded Foxprox daemon")
 }
 
 func runWebServe(cmd *cobra.Command, _ []string) error {
@@ -125,21 +123,21 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		Str("component", "web").
 		Logger()
 
-	var atcpd *atcpdaemon.Daemon
-	var atcpOwned bool
-	var atcpErrCh <-chan error
-	if webATCP {
-		started, waitCh, err := startWebATCPDaemon(logWriter)
+	var foxproxd foxproxbridge.DaemonLifecycle
+	var foxproxOwned bool
+	var foxproxErrCh <-chan error
+	if webFoxprox {
+		started, waitCh, err := startWebFoxproxDaemon(logWriter)
 		if err != nil {
 			return err
 		}
-		atcpd = started
-		atcpOwned = started != nil
-		atcpErrCh = waitCh
-		if atcpOwned {
-			log.Info().Str("socket", atcpd.SocketPath()).Msg("Embedded ATCP daemon started")
+		foxproxd = started
+		foxproxOwned = started != nil
+		foxproxErrCh = waitCh
+		if foxproxOwned {
+			log.Info().Str("socket", foxproxd.SocketPath()).Msg("Embedded Foxprox daemon started")
 		} else {
-			log.Info().Str("socket", webATCPSocketPath()).Msg("ATCP daemon already running; reusing socket")
+			log.Info().Str("socket", webFoxproxSocketPath()).Msg("Foxprox daemon already running; reusing socket")
 		}
 	}
 
@@ -196,11 +194,11 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		log.Info().Str("signal", sig.String()).Msg("Received signal, shutting down gracefully")
 	case err := <-errCh:
 		return fmt.Errorf("server error: %w", err)
-	case err := <-atcpErrCh:
+	case err := <-foxproxErrCh:
 		if err != nil {
-			return fmt.Errorf("atcp daemon error: %w", err)
+			return fmt.Errorf("foxprox daemon error: %w", err)
 		}
-		return fmt.Errorf("atcp daemon stopped")
+		return fmt.Errorf("foxprox daemon stopped")
 	case <-ctx.Done():
 		log.Info().Msg("Context cancelled, shutting down")
 	}
@@ -218,9 +216,9 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	// Stop chat adapter if running (use shutdown context for bounded disconnect)
 	server.StopChatAdapter(shutdownCtx)
 
-	if atcpOwned {
-		if err := atcpd.Shutdown(shutdownCtx); err != nil {
-			observability.Emit(context.Background(), observability.NewEvent("web.atcp_shutdown_error").
+	if foxproxOwned {
+		if err := foxproxd.Shutdown(shutdownCtx); err != nil {
+			observability.Emit(context.Background(), observability.NewEvent("web.foxprox_shutdown_error").
 				WithComponent(observability.ComponentCLI).
 				Error(err, 0))
 			return err
@@ -238,18 +236,23 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func startWebATCPDaemon(logWriter io.Writer) (*atcpdaemon.Daemon, <-chan error, error) {
-	atcpLogger := slog.New(slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	d := atcpdaemon.New(atcpdaemon.Options{
-		DataDir:    webATCPDir,
-		SocketPath: webATCPSock,
-		Logger:     atcpLogger,
+func startWebFoxproxDaemon(logWriter io.Writer) (foxproxbridge.DaemonLifecycle, <-chan error, error) {
+	d, err := foxproxbridge.NewDaemon(foxproxbridge.DaemonOptions{
+		DataDir:    webFoxproxDir,
+		SocketPath: webFoxproxSock,
+		LogWriter:  logWriter,
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if d == nil {
+		return nil, nil, fmt.Errorf("foxprox: implementation not linked; import foxproxbridge/foxproxwire")
+	}
 	if err := d.Start(); err != nil {
-		if errors.Is(err, unixsocket.ErrBrokerAlreadyRunning) {
+		if errors.Is(err, foxproxbridge.ErrBrokerAlreadyRunning) {
 			return nil, nil, nil
 		}
-		return nil, nil, fmt.Errorf("failed to start embedded ATCP daemon: %w", err)
+		return nil, nil, fmt.Errorf("failed to start embedded Foxprox daemon: %w", err)
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -258,20 +261,20 @@ func startWebATCPDaemon(logWriter io.Writer) (*atcpdaemon.Daemon, <-chan error, 
 	return d, errCh, nil
 }
 
-func defaultWebATCPDataDir() string {
-	if dir := os.Getenv("FOXCTL_ATCP_DATA_DIR"); dir != "" {
+func defaultWebFoxproxDataDir() string {
+	if dir := os.Getenv("FOXCTL_Foxprox_DATA_DIR"); dir != "" {
 		return dir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".foxctl", "atcp")
+	return filepath.Join(home, ".foxctl", "foxprox")
 }
 
-func webATCPSocketPath() string {
-	if webATCPSock != "" {
-		return webATCPSock
+func webFoxproxSocketPath() string {
+	if webFoxproxSock != "" {
+		return webFoxproxSock
 	}
-	return atcpdaemon.DefaultSocketPath()
+	return foxproxbridge.DefaultSocketPath()
 }
