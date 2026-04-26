@@ -285,10 +285,6 @@ func chooseRLMRunner(
 	}
 }
 
-func buildRLMREPLCLISystemPrompt(kind rlmruntime.SandboxKind, helperEnabled bool) string {
-	return buildRLMREPLCLISystemPromptForPolicy(kind, helperEnabled, true)
-}
-
 func buildRLMREPLCLISystemPromptForPolicy(kind rlmruntime.SandboxKind, helperEnabled bool, recursionEnabled bool) string {
 	var b strings.Builder
 	b.WriteString(rlmruntime.BuildREPLSystemPrompt())

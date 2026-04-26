@@ -292,7 +292,7 @@ func PackRunAgentCommand(opts PackRunAgentOptions) (CommandPlan, error) {
 
 	var (
 		outputLayout *OutputLayoutPlan
-		obsDir       = defaultGuestObservability
+		obsDir       string
 	)
 	agentIDs := normalizeAgentIDs(opts.AgentIDs, role)
 	layout, err := PlanOutputLayout(defaultGuestOutDir, runID, agentIDs)

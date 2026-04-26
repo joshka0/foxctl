@@ -13491,35 +13491,34 @@ func buildRoomStoryViews(messages []agent.BoardMessage) []map[string]any {
 	statesByStory := make(map[string][]map[string]any)
 	updatesByStory := make(map[string][]agent.BoardMessage)
 	for _, msg := range messages {
-		if msg.Kind != agent.BoardMessageKindStoryValidation {
-			if msg.Kind == agent.BoardMessageKindStoryState {
-				meta := parseRoomStoryStateBody(msg.Body)
-				statesByStory[strings.TrimSpace(msg.RelatedMessageID)] = append(statesByStory[strings.TrimSpace(msg.RelatedMessageID)], map[string]any{
-					"id":         msg.ID,
-					"root":       msg,
-					"meta":       meta,
-					"state":      meta.State,
-					"created_at": msg.CreatedAt.Format(time.RFC3339),
-					"created_by": strings.TrimSpace(msg.Sender),
-				})
-			} else if msg.Kind == agent.BoardMessageKindStoryUpdate {
-				updatesByStory[strings.TrimSpace(msg.RelatedMessageID)] = append(updatesByStory[strings.TrimSpace(msg.RelatedMessageID)], msg)
-			}
-			continue
+		switch msg.Kind {
+		case agent.BoardMessageKindStoryState:
+			meta := parseRoomStoryStateBody(msg.Body)
+			statesByStory[strings.TrimSpace(msg.RelatedMessageID)] = append(statesByStory[strings.TrimSpace(msg.RelatedMessageID)], map[string]any{
+				"id":         msg.ID,
+				"root":       msg,
+				"meta":       meta,
+				"state":      meta.State,
+				"created_at": msg.CreatedAt.Format(time.RFC3339),
+				"created_by": strings.TrimSpace(msg.Sender),
+			})
+		case agent.BoardMessageKindStoryUpdate:
+			updatesByStory[strings.TrimSpace(msg.RelatedMessageID)] = append(updatesByStory[strings.TrimSpace(msg.RelatedMessageID)], msg)
+		case agent.BoardMessageKindStoryValidation:
+			meta := parseRoomStoryValidationBody(msg.Body)
+			validationsByStory[strings.TrimSpace(msg.RelatedMessageID)] = append(validationsByStory[strings.TrimSpace(msg.RelatedMessageID)], map[string]any{
+				"id":               msg.ID,
+				"validation_id":    msg.ID,
+				"source_kind":      "story_validation",
+				"source_id":        msg.ID,
+				"root":             msg,
+				"meta":             meta,
+				"status":           meta.Status,
+				"created_at":       msg.CreatedAt.Format(time.RFC3339),
+				"created_by":       strings.TrimSpace(msg.Sender),
+				"room_message_ids": []string{msg.ID},
+			})
 		}
-		meta := parseRoomStoryValidationBody(msg.Body)
-		validationsByStory[strings.TrimSpace(msg.RelatedMessageID)] = append(validationsByStory[strings.TrimSpace(msg.RelatedMessageID)], map[string]any{
-			"id":               msg.ID,
-			"validation_id":    msg.ID,
-			"source_kind":      "story_validation",
-			"source_id":        msg.ID,
-			"root":             msg,
-			"meta":             meta,
-			"status":           meta.Status,
-			"created_at":       msg.CreatedAt.Format(time.RFC3339),
-			"created_by":       strings.TrimSpace(msg.Sender),
-			"room_message_ids": []string{msg.ID},
-		})
 	}
 	out := make([]map[string]any, 0)
 	for _, msg := range messages {

@@ -293,23 +293,6 @@ func buildRLMTraceFeedback(metadata map[string]any) []rlmTraceFeedbackItem {
 	return uniqueRLMTraceFeedbackItems(out)
 }
 
-func rlmTraceToolNames(tools []rlm.Tool) []string {
-	out := make([]string, 0, len(tools))
-	seen := map[string]struct{}{}
-	for _, tool := range tools {
-		name := strings.TrimSpace(tool.Name)
-		if name == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-	}
-	return out
-}
-
 func rlmTraceToolDefinitions(tools []rlm.Tool) []optdata.PromptToolDefinition {
 	out := make([]optdata.PromptToolDefinition, 0, len(tools))
 	for _, tool := range tools {

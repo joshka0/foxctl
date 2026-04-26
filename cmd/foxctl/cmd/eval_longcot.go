@@ -1213,34 +1213,6 @@ func sanitizeLongCoTResponseText(response string) (string, longCoTOutputSanitiza
 	}
 }
 
-func detectLongCoTOutputArtifacts(response string) []string {
-	return rlm.DetectOutputArtifacts(response)
-}
-
-func stripLongCoTDelimitedBlocks(text, open, close string) string {
-	for {
-		start := strings.Index(text, open)
-		if start < 0 {
-			return text
-		}
-		end := strings.Index(text[start+len(open):], close)
-		if end < 0 {
-			return strings.TrimSpace(text[:start])
-		}
-		end = start + len(open) + end + len(close)
-		text = text[:start] + text[end:]
-	}
-}
-
-func longCoTArtifactsContain(artifacts []string, want string) bool {
-	for _, artifact := range artifacts {
-		if artifact == want {
-			return true
-		}
-	}
-	return false
-}
-
 func runLongCoTLiveAttempt(
 	ctx context.Context,
 	cfg config.Config,
@@ -2731,25 +2703,6 @@ func longCoTChildSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper bool)
 		},
 	)
 	return phases
-}
-
-func longCoTChildHelperPhase(name string, instructions string) rlmruntime.REPLRunnerPhase {
-	return rlmruntime.REPLRunnerPhase{
-		Name:          name,
-		Prompt:        "Runtime phase: run the generic short-lived helper factory for this child task. Do not produce a final answer in this phase.",
-		Tools:         []string{rlmruntime.EphemeralHelperSolveToolName},
-		RequiredTools: []string{rlmruntime.EphemeralHelperSolveToolName},
-		AutoExecuteToolCalls: []rlmruntime.REPLRunnerPhaseAutoToolCall{{
-			Tool: rlmruntime.EphemeralHelperSolveToolName,
-			Args: mustLongCoTAutoToolArgs(map[string]any{
-				"instructions": strings.TrimSpace(instructions),
-			}),
-		}},
-		MaxIterations:           1,
-		AutoExecuteRequiredTool: true,
-		RequireToolResultOK:     false,
-		RequireToolOutput:       true,
-	}
 }
 
 func longCoTChildMaxTokens(cfg rlm.LLMConfig) int {

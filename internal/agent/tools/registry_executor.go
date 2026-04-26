@@ -29,11 +29,10 @@ func (r *RegistryToolExecutor) Execute(ctx context.Context, name string, args js
 		return "", fmt.Errorf("tool registry not configured")
 	}
 
-	resolvedName, coreTool, err := r.resolveTool(name)
+	_, coreTool, err := r.resolveTool(name)
 	if err != nil {
 		return "", fmt.Errorf("tool %q not found: %w", name, err)
 	}
-	name = resolvedName
 
 	var argsMap map[string]any
 	if len(args) > 0 {

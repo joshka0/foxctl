@@ -93,13 +93,13 @@ func (r *GoSkillRunner) Run(ctx context.Context, input map[string]any) (GoSkillR
 	}
 	fn, ok := solve.Interface().(func(map[string]any) map[string]any)
 	if !ok {
-		return GoSkillResult{}, fmt.Errorf("Solve has incompatible signature")
+		return GoSkillResult{}, fmt.Errorf("solve has incompatible signature")
 	}
 	var raw map[string]any
 	func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				err = fmt.Errorf("Solve panic: %v", recovered)
+				err = fmt.Errorf("solve panic: %v", recovered)
 			}
 		}()
 		raw = fn(normalizedInput)
@@ -109,7 +109,7 @@ func (r *GoSkillRunner) Run(ctx context.Context, input map[string]any) (GoSkillR
 	}
 	output, err := normalizeJSONMap(raw)
 	if err != nil {
-		return GoSkillResult{}, fmt.Errorf("Solve returned non-JSON output: %w", err)
+		return GoSkillResult{}, fmt.Errorf("solve returned non-JSON output: %w", err)
 	}
 	return GoSkillResult{
 		OK:     boolField(output, "ok", true),
@@ -370,10 +370,10 @@ func addMissingAllowedImports(source string) string {
 
 func validateSolveSignature(fn *ast.FuncType) error {
 	if fn == nil || fn.Params == nil || len(fn.Params.List) != 1 || fn.Results == nil || len(fn.Results.List) != 1 {
-		return errors.New("Solve must have signature Solve(input map[string]any) map[string]any")
+		return errors.New("solve must have signature Solve(input map[string]any) map[string]any")
 	}
 	if !isMapStringAny(fn.Params.List[0].Type) || !isMapStringAny(fn.Results.List[0].Type) {
-		return errors.New("Solve must use map[string]any input and output")
+		return errors.New("solve must use map[string]any input and output")
 	}
 	return nil
 }

@@ -308,7 +308,7 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 		answer = composeUnion(partials)
 
 	case ComposeIntersection:
-		answer, paths = composeIntersection(partials, paths)
+		answer, _ = composeIntersection(partials, paths)
 
 	case ComposeChronological:
 		answer = composeChronological(partials)

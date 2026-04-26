@@ -2967,10 +2967,6 @@ func BuildREPLSystemPrompt() string {
 	return buildSandboxSystemPrompt(SandboxKindPython, false, false, false, RecursionPolicyOptional)
 }
 
-func buildREPLSystemPromptWithSubcalls() string {
-	return buildSandboxSystemPrompt(SandboxKindPython, true, false, false, RecursionPolicyOptional)
-}
-
 func buildSandboxSystemPrompt(kind SandboxKind, subcalls bool, asyncSubcalls bool, helperSolve bool, recursionPolicy RecursionPolicy) string {
 	toolName := sandboxToolName(kind)
 	language := sandboxLanguage(kind)

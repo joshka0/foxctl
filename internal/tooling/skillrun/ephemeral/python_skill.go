@@ -252,13 +252,13 @@ func runPythonSkillBridge(ctx context.Context, pythonPath, source string, input 
 		return nil, fmt.Errorf("decode Python skill bridge response: %w (stdout=%q stderr=%q)", err, strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()))
 	}
 	if !response.OK {
-		return nil, fmt.Errorf("Python skill validation/run failed: %s", strings.TrimSpace(response.Error))
+		return nil, fmt.Errorf("python skill validation/run failed: %s", strings.TrimSpace(response.Error))
 	}
 	if validateOnly {
 		return map[string]any{"ok": true}, nil
 	}
 	if response.Output == nil {
-		return nil, errors.New("Python skill returned no output")
+		return nil, errors.New("python skill returned no output")
 	}
 	return normalizeJSONMap(response.Output)
 }

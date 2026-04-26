@@ -450,11 +450,6 @@ func braidNodeEffectiveHelperPolicy(node BraidNode) string {
 	return policy
 }
 
-func braidNodeHelperFirstAllowed(node BraidNode) bool {
-	policy := braidNodeEffectiveHelperPolicy(node)
-	return (policy == BraidNodeHelperPolicyPreferred || policy == BraidNodeHelperPolicyRequired) && braidNodeHelperSupported(node)
-}
-
 func braidNodeHelperSupported(node BraidNode) bool {
 	return isBraidSolveKind(node.Kind) || node.Kind == "verify"
 }
@@ -2691,10 +2686,11 @@ func parseLeadingInt(raw string) (int, bool) {
 	}
 	sign := 1
 	pos := 0
-	if raw[0] == '-' {
+	switch raw[0] {
+	case '-':
 		sign = -1
 		pos = 1
-	} else if raw[0] == '+' {
+	case '+':
 		pos = 1
 	}
 	if pos >= len(raw) || raw[pos] < '0' || raw[pos] > '9' {
@@ -3091,9 +3087,11 @@ func braidNodeClosureFrom(graph BraidGraph, startID string) map[string]struct{} 
 	return out
 }
 
-var braidSummaryStatusRE = regexp.MustCompile(`(?i)(?:^|\s)status\s*:\s*([a-z][a-z0-9_-]*)`)
-var braidPassTrueRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*true(?:[^a-z0-9_]|$)`)
-var braidPassFalseRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*false(?:[^a-z0-9_]|$)`)
+var (
+	braidSummaryStatusRE = regexp.MustCompile(`(?i)(?:^|\s)status\s*:\s*([a-z][a-z0-9_-]*)`)
+	braidPassTrueRE      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*true(?:[^a-z0-9_]|$)`)
+	braidPassFalseRE     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*false(?:[^a-z0-9_]|$)`)
+)
 
 func validateBraidNodeExecutionSummary(phaseName string, node BraidNode, summary string, finalNodeID string) error {
 	return validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, finalNodeID, nil)

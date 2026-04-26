@@ -256,11 +256,3 @@ func TestRLMRunCommandTrajectoryOutAlias(t *testing.T) {
 		t.Fatalf("trajectory-out file missing: %v", err)
 	}
 }
-
-func asString(value any) string {
-	typed, ok := value.(string)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(typed)
-}
