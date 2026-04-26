@@ -190,20 +190,21 @@ func TestResolveBraidRuntimeScaffoldByHeuristicFallback(t *testing.T) {
 	if !ok {
 		t.Fatal("expected heuristic to match CS prompt")
 	}
-	if scaffold.Class != BraidScaffoldClassGeneralSolver {
-		t.Fatalf("expected general_solver class, got %q", scaffold.Class)
+	// Heuristic now returns domain-specific scaffold instead of general_solver
+	if scaffold.Class != BraidScaffoldClassTypeInference {
+		t.Fatalf("expected type_inference class for CS domain, got %q", scaffold.Class)
 	}
-	if scaffold.ID != BraidScaffoldIDGeneralSolverV1 {
-		t.Fatalf("expected general_solver_v1 id, got %q", scaffold.ID)
+	if scaffold.ID != BraidScaffoldIDHindleyMilnerV1 {
+		t.Fatalf("expected hindley_milner_v1 id, got %q", scaffold.ID)
 	}
 	if strings.TrimSpace(scaffold.PresetSource) == "" {
 		t.Fatal("expected non-empty preset source")
 	}
-	if scaffold.MaxSourceLines != 360 {
-		t.Fatalf("expected 360 max lines, got %d", scaffold.MaxSourceLines)
+	if scaffold.MaxSourceLines != 380 {
+		t.Fatalf("expected 380 max lines, got %d", scaffold.MaxSourceLines)
 	}
-	if scaffold.Verifier != nil {
-		t.Fatal("general_solver should not have a verifier; the LLM implements verification")
+	if scaffold.Verifier == nil {
+		t.Fatal("type_inference should have a verifier")
 	}
 }
 
@@ -248,8 +249,9 @@ func TestResolveBraidRuntimeScaffoldDefaultCaseFallsBackToHeuristic(t *testing.T
 	if !ok {
 		t.Fatal("expected default-case heuristic fallback to match CS prompt")
 	}
-	if scaffold.Class != BraidScaffoldClassGeneralSolver {
-		t.Fatalf("expected general_solver class, got %q", scaffold.Class)
+	// Heuristic now returns domain-specific scaffold instead of general_solver
+	if scaffold.Class != BraidScaffoldClassTypeInference {
+		t.Fatalf("expected type_inference class for CS domain, got %q", scaffold.Class)
 	}
 }
 

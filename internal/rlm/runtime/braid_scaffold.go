@@ -20,6 +20,10 @@ const (
 	BraidScaffoldIDHindleyMilnerV1          = "hindley_milner_v1"
 	BraidScaffoldClassChainedDAG            = "chained_dag"
 	BraidScaffoldIDBacktrackingV1           = "backtracking_dag_v1"
+	BraidScaffoldClassMolecularCompute      = "molecular_compute"
+	BraidScaffoldIDSMILESPropertyV1         = "smiles_property_v1"
+	BraidScaffoldClassBoardSimulation       = "board_simulation"
+	BraidScaffoldIDFENSearchV1              = "fen_search_v1"
 )
 
 type braidRuntimeScaffold struct {
@@ -350,16 +354,67 @@ func resolveBraidRuntimeScaffoldByHeuristic(node BraidNode, handoff BraidNodeHan
 	if detected == "" {
 		return braidRuntimeScaffold{}, false
 	}
-	return braidRuntimeScaffold{
-		Class:          BraidScaffoldClassGeneralSolver,
-		ID:             BraidScaffoldIDGeneralSolverV1,
-		PresetName:     BraidScaffoldClassGeneralSolver + "/" + BraidScaffoldIDGeneralSolverV1,
-		PresetSource:   generalSolverPresetSource(),
-		PresetInput:    cloneMapAny(input),
-		MaxSourceLines: 360,
-		MaxSourceChars: 18000,
-		Verifier:       nil,
-	}, true
+	// When a domain is detected but the typed handoff didn't match (no
+	// structured instance fields), return the domain-specific scaffold so the
+	// helper gets a real algorithm instead of the generic stub.
+	switch detected {
+	case "cs":
+		return braidRuntimeScaffold{
+			Class:          BraidScaffoldClassTypeInference,
+			ID:             BraidScaffoldIDHindleyMilnerV1,
+			PresetName:     BraidScaffoldClassTypeInference + "/" + BraidScaffoldIDHindleyMilnerV1,
+			PresetSource:   hindleyMilnerPresetSource(),
+			PresetInput:    cloneMapAny(input),
+			MaxSourceLines: 380,
+			MaxSourceChars: 18000,
+			Verifier:       typeInferenceAnswerVerifier,
+		}, true
+	case "math":
+		return braidRuntimeScaffold{
+			Class:          BraidScaffoldClassChainedDAG,
+			ID:             BraidScaffoldIDBacktrackingV1,
+			PresetName:     BraidScaffoldClassChainedDAG + "/" + BraidScaffoldIDBacktrackingV1,
+			PresetSource:   backtrackingDAGPresetSource(),
+			PresetInput:    cloneMapAny(input),
+			MaxSourceLines: 380,
+			MaxSourceChars: 18000,
+			Verifier:       chainedDAGAnswerVerifier,
+		}, true
+	case "chemistry":
+		return braidRuntimeScaffold{
+			Class:          BraidScaffoldClassMolecularCompute,
+			ID:             BraidScaffoldIDSMILESPropertyV1,
+			PresetName:     BraidScaffoldClassMolecularCompute + "/" + BraidScaffoldIDSMILESPropertyV1,
+			PresetSource:   smilesPropertyPresetSource(),
+			PresetInput:    cloneMapAny(input),
+			MaxSourceLines: 380,
+			MaxSourceChars: 18000,
+			Verifier:       molecularComputeAnswerVerifier,
+		}, true
+	case "chess":
+		return braidRuntimeScaffold{
+			Class:          BraidScaffoldClassBoardSimulation,
+			ID:             BraidScaffoldIDFENSearchV1,
+			PresetName:     BraidScaffoldClassBoardSimulation + "/" + BraidScaffoldIDFENSearchV1,
+			PresetSource:   fenSearchPresetSource(),
+			PresetInput:    cloneMapAny(input),
+			MaxSourceLines: 380,
+			MaxSourceChars: 18000,
+			Verifier:       boardSimulationAnswerVerifier,
+		}, true
+	default:
+		// logic and unknown domains fall back to the general solver
+		return braidRuntimeScaffold{
+			Class:          BraidScaffoldClassGeneralSolver,
+			ID:             BraidScaffoldIDGeneralSolverV1,
+			PresetName:     BraidScaffoldClassGeneralSolver + "/" + BraidScaffoldIDGeneralSolverV1,
+			PresetSource:   generalSolverPresetSource(),
+			PresetInput:    cloneMapAny(input),
+			MaxSourceLines: 360,
+			MaxSourceChars: 18000,
+			Verifier:       nil,
+		}, true
+	}
 }
 
 // classifyScaffoldDomain returns a domain label derived from prompt markers, or
