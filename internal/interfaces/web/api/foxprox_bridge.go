@@ -80,10 +80,6 @@ func FoxproxHandler() http.HandlerFunc {
 			}
 			roomID := strings.TrimSuffix(strings.TrimPrefix(path, "foxctl-rooms/"), "/spawn-cli")
 			client := foxproxbridge.NewClient(foxproxbridge.DefaultSocketPath())
-			if client == nil {
-				httpError(w, http.StatusServiceUnavailable, "foxprox not linked")
-				return
-			}
 			handleFoxproxFoxctlRoomSpawnCLI(w, r, client, roomID)
 			return
 		case strings.HasPrefix(path, "foxctl-rooms/") && strings.HasSuffix(path, "/messages"):
@@ -93,10 +89,6 @@ func FoxproxHandler() http.HandlerFunc {
 			}
 			roomID := strings.TrimSuffix(strings.TrimPrefix(path, "foxctl-rooms/"), "/messages")
 			client := foxproxbridge.NewClient(foxproxbridge.DefaultSocketPath())
-			if client == nil {
-				httpError(w, http.StatusServiceUnavailable, "foxprox not linked")
-				return
-			}
 			handleFoxproxFoxctlRoomSendMessage(w, r, client, roomID)
 			return
 		}
