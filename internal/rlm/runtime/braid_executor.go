@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
@@ -61,7 +64,14 @@ graphLoop:
 		if !toolExec.allowAsyncRLMTools() {
 			for _, node := range ready {
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "ready", "")
-				if summary, handled, err := runBraidNodeHelperFirst(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], toolExec, output, graph); handled {
+				deps := dependencySummarySubset(node, summaries)
+				if summary, ok := runBraidRuntimeNodeShortcut(node, deps); ok {
+					recordBraidNodeEvent(toolExec, phaseName, wave, node, "runtime_shortcut", summary)
+					summaries[node.ID] = summary
+					executed[node.ID] = struct{}{}
+					continue
+				}
+				if summary, handled, err := runBraidNodeHelperFirst(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], phase.DisableHelperFirstFallback, toolExec, output, graph); handled {
 					if err != nil {
 						if prepareBraidRepair(phase, graph, node, summary, summaries, executed, repairFeedbackByNode, &repairAttempts) {
 							recordBraidNodeEvent(toolExec, phaseName, wave, node, "repairing", err.Error())
@@ -77,7 +87,7 @@ graphLoop:
 				if maxSubcalls > 0 && submitted+1 > maxSubcalls {
 					return fmt.Errorf("rlm repl runner phase %q: braid graph needs %d subcalls, exceeds max %d", phaseName, submitted+1, maxSubcalls)
 				}
-				summary, err := runDirectBraidNode(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], toolExec, output)
+				summary, err := runDirectBraidNode(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], toolExec, output)
 				if err != nil {
 					return err
 				}
@@ -116,7 +126,13 @@ graphLoop:
 		for _, node := range ready {
 			recordBraidNodeEvent(toolExec, phaseName, wave, node, "ready", "")
 			deps := dependencySummarySubset(node, summaries)
-			if summary, handled, err := runBraidNodeHelperFirst(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], toolExec, output, graph); handled {
+			if summary, ok := runBraidRuntimeNodeShortcut(node, deps); ok {
+				recordBraidNodeEvent(toolExec, phaseName, wave, node, "runtime_shortcut", summary)
+				summaries[node.ID] = summary
+				executed[node.ID] = struct{}{}
+				continue
+			}
+			if summary, handled, err := runBraidNodeHelperFirst(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], phase.DisableHelperFirstFallback, toolExec, output, graph); handled {
 				if err != nil {
 					if prepareBraidRepair(phase, graph, node, summary, summaries, executed, repairFeedbackByNode, &repairAttempts) {
 						recordBraidNodeEvent(toolExec, phaseName, wave, node, "repairing", err.Error())
@@ -185,6 +201,7 @@ graphLoop:
 	if _, ok := summaries[graph.FinalNode]; !ok {
 		return fmt.Errorf("rlm repl runner phase %q: braid final_node %q did not complete", phaseName, graph.FinalNode)
 	}
+	appendBraidFinalHandoff(output, graph, summaries)
 	_ = nodesByID
 	return nil
 }
@@ -196,6 +213,7 @@ func runBraidNodeHelperFirst(
 	rootPrompt string,
 	dependencySummaries map[string]string,
 	repairFeedback string,
+	disableFallback bool,
 	toolExec *replToolExecutor,
 	output *engine.EngineOutput,
 	graph *BraidGraph,
@@ -211,20 +229,77 @@ func runBraidNodeHelperFirst(
 		return "", false, nil
 	}
 	recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first", policy)
+	start := time.Now()
 	summary, ok := runBraidNodeHelper(ctx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, "helper_policy="+policy, toolExec, output)
+	duration := time.Since(start)
 	if !ok {
-		if policy == BraidNodeHelperPolicyRequired {
-			return "", true, fmt.Errorf("rlm repl runner phase %q: braid node %q requires helper execution but helper did not produce an answer", phaseName, node.ID)
+		message := fmt.Sprintf("helper did not produce an answer after %dms", duration.Milliseconds())
+		if policy == BraidNodeHelperPolicyRequired || disableFallback {
+			recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_failed", message)
+			summary := "status: blocked\nanswer:\nchecks: " + message
+			return summary, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper-first failed: %s", phaseName, node.ID, message)
 		}
-		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_fallback", "helper did not produce an answer")
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_fallback", message)
 		return "", false, nil
 	}
 	if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_rejected", err.Error())
 		return summary, true, err
 	}
-	recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_completed", summary)
+	recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_completed", fmt.Sprintf("duration_ms=%d summary: %s", duration.Milliseconds(), summary))
 	return summary, true, nil
+}
+
+func runBraidRuntimeNodeShortcut(node BraidNode, dependencySummaries map[string]string) (string, bool) {
+	switch node.Kind {
+	case "verify":
+		for _, summary := range dependencySummaries {
+			if braidDependencyHasRuntimeVerifiedSolution(summary) {
+				return "status: pass summary: answer: pass: true checks: upstream solve dependency was already verified by the runtime scaffold verifier.", true
+			}
+		}
+	case "reduce":
+		if !braidDependencyVerificationPassed(dependencySummaries) {
+			return "", false
+		}
+		for _, summary := range dependencySummaries {
+			if answer, ok := braidSolutionAnswerFromSummary(summary); ok {
+				return "status: completed summary: status: solved answer: " + answer + " checks: reduce forwarded verified solve answer.", true
+			}
+		}
+	}
+	return "", false
+}
+
+func braidDependencyHasRuntimeVerifiedSolution(summary string) bool {
+	if _, ok := braidSolutionAnswerFromSummary(summary); !ok {
+		return false
+	}
+	return strings.Contains(summary, "checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier")
+}
+
+func braidDependencyVerificationPassed(dependencySummaries map[string]string) bool {
+	for _, summary := range dependencySummaries {
+		if braidVerificationSummaryPassed(summary) {
+			return true
+		}
+	}
+	return false
+}
+
+func braidSolutionAnswerFromSummary(summary string) (string, bool) {
+	idx := strings.Index(summary, "answer: solution =")
+	if idx < 0 {
+		return "", false
+	}
+	answer := strings.TrimSpace(strings.TrimPrefix(summary[idx:], "answer:"))
+	if end := strings.Index(answer, " checks:"); end >= 0 {
+		answer = strings.TrimSpace(answer[:end])
+	}
+	if !strings.HasPrefix(answer, "solution =") {
+		return "", false
+	}
+	return answer, true
 }
 
 func recoverBraidNodeWithHelper(
@@ -261,11 +336,30 @@ func runBraidNodeHelper(
 	if !braidNodeHelperSupported(node) {
 		return "", false
 	}
-	prompt := RenderBraidNodeChildPromptWithFeedback(node, rootPrompt, dependencySummaries, repairFeedback)
-	input := braidHelperInput(rootPrompt, dependencySummaries)
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, dependencySummaries, repairFeedback)
+	prompt := RenderBraidHelperHandoffPrompt(handoff)
+	input := braidHelperInput(rootPrompt, handoff.DependencySummaries)
+	if handoffInput := BraidHandoffHelperInput(handoff); len(handoffInput) > 0 {
+		input = mergeHelperFactoryInput(input, handoffInput)
+	}
 	instructions := buildBraidHelperRecoveryInstructions(node, triggerSummary)
 	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeTransitionSystem(input) {
 		instructions += "\n" + buildTransitionSystemHelperContract()
+	}
+	if isBraidSolveKind(node.Kind) && (braidHelperInputLooksLikeResourcePathMinInitial(input) || braidHelperInputLooksLikeExplicitShortestPath(input)) {
+		instructions += "\n" + buildGraphSearchHelperContract()
+	}
+	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeNumericDP(input) {
+		instructions += "\n" + buildNumericDPHelperContract()
+	}
+	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeSequenceSimulation(input) {
+		instructions += "\n" + buildSequenceSimulationHelperContract()
+	}
+	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeFiniteDomainConstraint(input) {
+		instructions += "\n" + buildConstraintSolverHelperContract()
+	}
+	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikePackageWasteOptimization(input) {
+		instructions += "\n" + buildPackageWasteOptimizationHelperContract()
 	}
 	argsMap := map[string]any{
 		"prompt":       prompt,
@@ -284,8 +378,12 @@ func runBraidNodeHelper(
 	helperExec := toolExec.helperFactory
 	if isBraidSolveKind(node.Kind) && helperExec != nil {
 		helperCfg := helperExec.Config
-		helperCfg.AnswerVerifier = stackMoveAnswerVerifier
 		helperCfg.Search.BeamWidth = firstPositiveInt(helperCfg.Search.BeamWidth, 3)
+		if scaffold, ok := resolveBraidRuntimeScaffold(node, handoff, input); ok && strings.TrimSpace(helperCfg.PresetSource) == "" {
+			helperCfg = applyBraidRuntimeScaffoldToHelperConfig(helperCfg, scaffold)
+		} else if helperCfg.AnswerVerifier == nil && braidHelperInputLooksLikePackageWasteOptimization(input) {
+			helperCfg.AnswerVerifier = packageWasteAnswerVerifier
+		}
 		helperExec = &HelperFactoryTools{Config: helperCfg}
 	}
 	var result string
@@ -306,16 +404,18 @@ func runBraidNodeHelper(
 	if execErr != nil {
 		return "", false
 	}
-	answer := helperAnswerFromToolResult(result)
+	answer, helperVerified := helperAnswerAndVerifiedFromToolResult(result)
 	if strings.TrimSpace(answer) == "" {
 		return "", false
 	}
 	if isBraidSolveKind(node.Kind) {
 		if ok, detail, applicable := verifyStackMoveCandidateFromInput(answer, argsMap["input"]); applicable && !ok {
 			return formatBraidHelperNodeSummary(node, "pass: false first_failure: "+detail), true
+		} else if applicable && ok {
+			helperVerified = true
 		}
 	}
-	return formatBraidHelperNodeSummary(node, answer), true
+	return formatBraidHelperNodeSummaryVerified(node, answer, helperVerified), true
 }
 
 func braidHelperInput(rootPrompt string, dependencySummaries map[string]string) map[string]any {
@@ -446,10 +546,369 @@ func braidHelperInputLooksLikeTransitionSystem(input map[string]any) bool {
 	return hasInitial && hasGoal
 }
 
+func stackTransitionPlannerPresetSource() string {
+	return strings.TrimSpace(`
+func Solve(input map[string]any) map[string]any {
+	state, ok1 := presetStacks(input["initial_state"])
+	goal, ok2 := presetStacks(input["goal_state"])
+	if !ok1 || !ok2 || len(state) != len(goal) || len(state) < 3 {
+		return map[string]any{"ok": false, "first_failure": "expected initial_state and goal_state with at least three stacks", "repair_hint": "fall back to a task-specific transition planner"}
+	}
+	if order, _ := input["stack_order"].(string); order == "strict_descending_bottom_to_top" {
+		return presetOrderedStackPlan(state, goal)
+	}
+	moves := [][]int{}
+	move := func(src, dst int) bool {
+		if src < 0 || src >= len(state) || dst < 0 || dst >= len(state) || src == dst || len(state[src]) == 0 {
+			return false
+		}
+		b := state[src][len(state[src])-1]
+		state[src] = state[src][:len(state[src])-1]
+		state[dst] = append(state[dst], b)
+		moves = append(moves, []int{b, src, dst})
+		return true
+	}
+	other := func(ex map[int]bool) int {
+		for i := range state {
+			if !ex[i] {
+				return i
+			}
+		}
+		return -1
+	}
+	clearAbove := func(s, idx, dst int, limit int) bool {
+		for len(state[s])-1 > idx {
+			if len(moves) > limit || !move(s, dst) {
+				return false
+			}
+		}
+		return true
+	}
+	clearTo := func(s, n, dst int, limit int) bool {
+		for len(state[s]) > n {
+			if len(moves) > limit || !move(s, dst) {
+				return false
+			}
+		}
+		return true
+	}
+	find := func(block int) (int, int) {
+		for s, stack := range state {
+			for i, b := range stack {
+				if b == block {
+					return s, i
+				}
+			}
+		}
+		return -1, -1
+	}
+	fixed := make([]int, len(goal))
+	total := 0
+	for s := range goal {
+		for fixed[s] < len(goal[s]) && fixed[s] < len(state[s]) && state[s][fixed[s]] == goal[s][fixed[s]] {
+			fixed[s]++
+			total++
+		}
+	}
+	goalCount := 0
+	for _, stack := range goal {
+		goalCount += len(stack)
+	}
+	limit := goalCount*goalCount*8 + 100
+	for total < goalCount {
+		progressed := false
+		for d := range goal {
+			if fixed[d] >= len(goal[d]) {
+				continue
+			}
+			block := goal[d][fixed[d]]
+			s, idx := find(block)
+			if s < 0 {
+				return map[string]any{"ok": false, "first_failure": "goal block not found in current state", "repair_hint": "check state parsing and block labels"}
+			}
+			if s == d && idx < fixed[d] {
+				return map[string]any{"ok": false, "first_failure": "goal block is below fixed prefix", "repair_hint": "planner invariant violated"}
+			}
+			if s == d && idx == fixed[d] {
+				buf := other(map[int]bool{d: true})
+				if buf < 0 || !clearAbove(d, idx, buf, limit) {
+					return map[string]any{"ok": false, "first_failure": "could not clear target block", "repair_hint": "choose a valid buffer stack"}
+				}
+			} else if s == d {
+				hold := other(map[int]bool{d: true})
+				buf := other(map[int]bool{d: true, hold: true})
+				if hold < 0 || buf < 0 || !clearAbove(d, idx, buf, limit) || !move(d, hold) || !clearTo(d, fixed[d], buf, limit) || !move(hold, d) {
+					return map[string]any{"ok": false, "first_failure": "could not reposition target block within destination stack", "repair_hint": "use two non-destination buffers"}
+				}
+			} else {
+				buf := other(map[int]bool{d: true, s: true})
+				if buf < 0 || !clearTo(d, fixed[d], buf, limit) {
+					return map[string]any{"ok": false, "first_failure": "could not clear destination prefix", "repair_hint": "use a buffer that does not bury the source block"}
+				}
+				s, idx = find(block)
+				if s < 0 || !clearAbove(s, idx, buf, limit) || !move(s, d) {
+					return map[string]any{"ok": false, "first_failure": "could not move target block to destination", "repair_hint": "clear above the target block before moving it"}
+				}
+			}
+			fixed[d]++
+			total++
+			progressed = true
+			break
+		}
+		if !progressed || len(moves) > limit {
+			return map[string]any{"ok": false, "first_failure": "planner made no bounded progress", "repair_hint": "try a different constructive transition strategy"}
+		}
+	}
+	if !presetSameStacks(state, goal) {
+		return map[string]any{"ok": false, "first_failure": "constructed plan did not reach goal", "repair_hint": "verify fixed-prefix invariant and final state"}
+	}
+	return map[string]any{"ok": true, "answer": presetAnswer(moves)}
+}
+
+func presetOrderedStackPlan(initial [][]int, goal [][]int) map[string]any {
+	n := presetMaxDisc(initial)
+	if n < 0 || n > 12 {
+		return map[string]any{"ok": false, "first_failure": "ordered stack planner supports up to 12 distinct items", "repair_hint": "use a task-specific constructive planner for larger ordered stack systems"}
+	}
+	startPos, ok1 := presetStackPositions(initial, n)
+	goalPos, ok2 := presetStackPositions(goal, n)
+	if !ok1 || !ok2 || !presetStrictDescending(initial) || !presetStrictDescending(goal) {
+		return map[string]any{"ok": false, "first_failure": "ordered stack input must contain each item exactly once and every stack must be strictly descending", "repair_hint": "parse the stack state exactly from the prompt"}
+	}
+	startKey := presetEncodePositions(startPos)
+	goalKey := presetEncodePositions(goalPos)
+	type edge struct {
+		prev string
+		move []int
+		pos []int
+	}
+	seen := map[string]edge{startKey: {pos: startPos}}
+	queue := [][]int{startPos}
+	head := 0
+	for head < len(queue) {
+		pos := queue[head]
+		head++
+		key := presetEncodePositions(pos)
+		if key == goalKey {
+			moves := [][]int{}
+			for key != startKey {
+				e := seen[key]
+				moves = append([][]int{e.move}, moves...)
+				key = e.prev
+			}
+			if !presetVerifyOrderedMoves(initial, goal, moves) {
+				return map[string]any{"ok": false, "first_failure": "internal ordered stack BFS produced an invalid plan", "repair_hint": "verify destination order and final state"}
+			}
+			return map[string]any{"ok": true, "answer": presetAnswer(moves)}
+		}
+		tops := presetTopDiscs(pos, len(initial), n)
+		for src := 0; src < len(initial); src++ {
+			disc := tops[src]
+			if disc < 0 {
+				continue
+			}
+			for dst := 0; dst < len(initial); dst++ {
+				if src == dst {
+					continue
+				}
+				dstTop := tops[dst]
+				if dstTop >= 0 && disc >= dstTop {
+					continue
+				}
+				next := append([]int(nil), pos...)
+				next[disc] = dst
+				nextKey := presetEncodePositions(next)
+				if _, ok := seen[nextKey]; ok {
+					continue
+				}
+				seen[nextKey] = edge{prev: key, move: []int{disc, src, dst}, pos: next}
+				queue = append(queue, next)
+			}
+		}
+	}
+	return map[string]any{"ok": false, "first_failure": "no ordered stack transition path found within finite state space", "repair_hint": "check parsed initial_state and goal_state"}
+}
+
+func presetMaxDisc(stacks [][]int) int {
+	max := -1
+	for _, stack := range stacks {
+		for _, disc := range stack {
+			if disc > max {
+				max = disc
+			}
+		}
+	}
+	return max
+}
+
+func presetStackPositions(stacks [][]int, maxDisc int) ([]int, bool) {
+	pos := make([]int, maxDisc+1)
+	seen := make([]bool, maxDisc+1)
+	for i := range pos {
+		pos[i] = -1
+	}
+	for s, stack := range stacks {
+		for _, disc := range stack {
+			if disc < 0 || disc > maxDisc || seen[disc] {
+				return nil, false
+			}
+			seen[disc] = true
+			pos[disc] = s
+		}
+	}
+	for _, ok := range seen {
+		if !ok {
+			return nil, false
+		}
+	}
+	return pos, true
+}
+
+func presetStrictDescending(stacks [][]int) bool {
+	for _, stack := range stacks {
+		for i := 1; i < len(stack); i++ {
+			if stack[i-1] <= stack[i] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func presetEncodePositions(pos []int) string {
+	out := ""
+	for i, p := range pos {
+		if i > 0 {
+			out += ","
+		}
+		out += presetItoa(p)
+	}
+	return out
+}
+
+func presetTopDiscs(pos []int, stackCount int, maxDisc int) []int {
+	tops := make([]int, stackCount)
+	for i := range tops {
+		tops[i] = -1
+	}
+	for disc := 0; disc <= maxDisc; disc++ {
+		stack := pos[disc]
+		if stack >= 0 && stack < stackCount && tops[stack] == -1 {
+			tops[stack] = disc
+		}
+	}
+	return tops
+}
+
+func presetVerifyOrderedMoves(initial [][]int, goal [][]int, moves [][]int) bool {
+	state := presetCloneStacks(initial)
+	for _, move := range moves {
+		if len(move) != 3 {
+			return false
+		}
+		disc, src, dst := move[0], move[1], move[2]
+		if src < 0 || src >= len(state) || dst < 0 || dst >= len(state) || src == dst || len(state[src]) == 0 {
+			return false
+		}
+		top := state[src][len(state[src])-1]
+		if top != disc {
+			return false
+		}
+		if len(state[dst]) > 0 && disc >= state[dst][len(state[dst])-1] {
+			return false
+		}
+		state[src] = state[src][:len(state[src])-1]
+		state[dst] = append(state[dst], disc)
+	}
+	return presetSameStacks(state, goal)
+}
+
+func presetCloneStacks(stacks [][]int) [][]int {
+	out := make([][]int, len(stacks))
+	for i, stack := range stacks {
+		out[i] = append([]int(nil), stack...)
+	}
+	return out
+}
+
+func presetStacks(v any) ([][]int, bool) {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := make([][]int, len(raw))
+	for i, stackAny := range raw {
+		stack, ok := stackAny.([]any)
+		if !ok {
+			return nil, false
+		}
+		out[i] = make([]int, len(stack))
+		for j, nAny := range stack {
+			n, ok := nAny.(float64)
+			if !ok || float64(int(n)) != n {
+				return nil, false
+			}
+			out[i][j] = int(n)
+		}
+	}
+	return out, true
+}
+
+func presetSameStacks(a, b [][]int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if len(a[i]) != len(b[i]) {
+			return false
+		}
+		for j := range a[i] {
+			if a[i][j] != b[i][j] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func presetAnswer(moves [][]int) string {
+	out := "solution = ["
+	for i, m := range moves {
+		if i > 0 {
+			out += ","
+		}
+		out += "[" + presetItoa(m[0]) + "," + presetItoa(m[1]) + "," + presetItoa(m[2]) + "]"
+	}
+	return out + "]"
+}
+
+func presetItoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	digits := []byte{}
+	for n > 0 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+		n /= 10
+	}
+	if neg {
+		digits = append([]byte{'-'}, digits...)
+	}
+	return string(digits)
+}
+`)
+}
+
 func buildTransitionSystemHelperContract() string {
 	return strings.TrimSpace(`
 Generic transition-system helper contract:
 - Treat the problem as a transition system, not as prose generation.
+- Write complete, syntactically valid Python only. Do not use placeholders, ellipses, pseudocode, or comments in place of executable logic.
 - Implement small internal functions with these exact responsibilities:
   parse_state(input) -> initial state, goal state, and any typed constants.
   legal_actions(state) -> candidate actions legal in the current state.
@@ -458,13 +917,918 @@ Generic transition-system helper contract:
   verify_plan(initial, goal, plan) -> {ok, first_failure, final_state}.
   search_or_construct(initial, goal) -> a complete candidate plan.
 - The returned answer must be a candidate plan only after verify_plan reports ok.
+- If the state is stack-shaped, implement move(src, dst) by reading the source stack top, rejecting src == dst, applying the move, and appending [block, src, dst] to the plan.
+- For stack-shaped outputs, return moves only as integer triples: [[block, from_stack, to_stack], ...]. Do not return move objects.
+- Never include no-op transitions. A transition with identical source and destination is invalid even if it leaves the state unchanged.
+- Return ok:true only when verify_plan confirms every transition is legal and final_state exactly equals goal.
+- When verify_plan fails, return ok:false with first_failure, failed_step, state_before, and repair_hint. Do not wrap a failed candidate as solution.
 - If verify_plan fails, repair the plan from the first_failure/state_before rather than restarting blindly.
 - Do not return a copied prefix, a partial plan, or an unchecked plan.
 - Use bounded constructive search when full state-space BFS/DFS would explode.
 `)
 }
 
+func gridResourcePathPresetSource() string {
+	return strings.TrimSpace(`
+func Solve(input map[string]any) map[string]any {
+	grid, ok := presetIntGrid(input["grid_layout"])
+	if !ok || len(grid) == 0 || len(grid[0]) == 0 {
+		return map[string]any{"ok": false, "first_failure": "expected rectangular integer grid_layout", "repair_hint": "provide grid_layout as a 2D integer array"}
+	}
+	m := len(grid)
+	n := len(grid[0])
+	for i := 0; i < m; i++ {
+		if len(grid[i]) != n {
+			return map[string]any{"ok": false, "first_failure": "grid_layout is not rectangular", "repair_hint": "normalize rows to equal length"}
+		}
+	}
+	dp := make([][]int, m)
+	for i := 0; i < m; i++ {
+		dp[i] = make([]int, n)
+	}
+	for i := m - 1; i >= 0; i-- {
+		for j := n - 1; j >= 0; j-- {
+			bestNext := 1 << 30
+			if i == m-1 && j == n-1 {
+				bestNext = 1
+			} else {
+				if i+1 < m && dp[i+1][j] < bestNext {
+					bestNext = dp[i+1][j]
+				}
+				if j+1 < n && dp[i][j+1] < bestNext {
+					bestNext = dp[i][j+1]
+				}
+			}
+			need := bestNext - grid[i][j]
+			if need < 1 {
+				need = 1
+			}
+			dp[i][j] = need
+		}
+	}
+	return map[string]any{"ok": true, "answer": "solution = " + presetItoa(dp[0][0])}
+}
+
+func presetIntGrid(v any) ([][]int, bool) {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := make([][]int, len(raw))
+	for i, rowAny := range raw {
+		row, ok := rowAny.([]any)
+		if !ok {
+			return nil, false
+		}
+		out[i] = make([]int, len(row))
+		for j, nAny := range row {
+			n, ok := presetInt(nAny)
+			if !ok {
+				return nil, false
+			}
+			out[i][j] = n
+		}
+	}
+	return out, true
+}
+
+func presetInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		if float64(int(n)) != n {
+			return 0, false
+		}
+		return int(n), true
+	case int:
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
+func presetItoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	digits := []byte{}
+	for n > 0 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+		n /= 10
+	}
+	if neg {
+		digits = append([]byte{'-'}, digits...)
+	}
+	return string(digits)
+}
+`)
+}
+
+func numericDPTablePresetSource() string {
+	return strings.TrimSpace(`
+func Solve(input map[string]any) map[string]any {
+	p, ok := presetNumericDPProblem(input)
+	if !ok {
+		return map[string]any{"ok": false, "first_failure": "expected typed numeric_dp recurrence table input", "repair_hint": "provide objective, dp_dimensions, target, base_cases, and transitions"}
+	}
+	answer, ok := presetEvaluateNumericDP(p)
+	if !ok {
+		return map[string]any{"ok": false, "first_failure": "recurrence table is not feasible for the generic preset", "repair_hint": "use acyclic predecessor offsets and reachable target state"}
+	}
+	return map[string]any{"ok": true, "answer": "solution = " + presetItoa(answer)}
+}
+
+type presetNumericDPTransition struct {
+	Offset     []int
+	Weight     int
+	Multiplier int
+}
+
+type presetNumericDPProblemT struct {
+	Objective   string
+	Dimensions  []int
+	Target      []int
+	BaseCases   map[string]int
+	Transitions []presetNumericDPTransition
+	Modulo      int
+}
+
+func presetNumericDPProblem(input map[string]any) (presetNumericDPProblemT, bool) {
+	objective, ok := input["objective"].(string)
+	if !ok || (objective != "min" && objective != "max" && objective != "count") {
+		return presetNumericDPProblemT{}, false
+	}
+	dimensions, ok := presetIntVector(input["dp_dimensions"])
+	if !ok || len(dimensions) == 0 {
+		return presetNumericDPProblemT{}, false
+	}
+	for _, n := range dimensions {
+		if n <= 0 {
+			return presetNumericDPProblemT{}, false
+		}
+	}
+	target, ok := presetIntVector(input["target"])
+	if !ok || len(target) != len(dimensions) || !presetIndexInBounds(target, dimensions) {
+		return presetNumericDPProblemT{}, false
+	}
+	baseCases, ok := presetBaseCases(input["base_cases"], dimensions)
+	if !ok || len(baseCases) == 0 {
+		return presetNumericDPProblemT{}, false
+	}
+	transitions, ok := presetTransitions(input["transitions"], len(dimensions))
+	if !ok || len(transitions) == 0 {
+		return presetNumericDPProblemT{}, false
+	}
+	modulo := 0
+	if rawModulo, exists := input["modulo"]; exists {
+		n, ok := presetInt(rawModulo)
+		if !ok || n <= 0 {
+			return presetNumericDPProblemT{}, false
+		}
+		modulo = n
+	}
+	return presetNumericDPProblemT{Objective: objective, Dimensions: dimensions, Target: target, BaseCases: baseCases, Transitions: transitions, Modulo: modulo}, true
+}
+
+func presetEvaluateNumericDP(p presetNumericDPProblemT) (int, bool) {
+	values := map[string]int{}
+	var walk func([]int, int) bool
+	walk = func(idx []int, axis int) bool {
+		if axis == len(p.Dimensions) {
+			key := presetIndexKey(idx)
+			if value, ok := p.BaseCases[key]; ok {
+				values[key] = presetApplyModulo(value, p.Modulo)
+				return true
+			}
+			have := false
+			best := 0
+			sum := 0
+			for _, tr := range p.Transitions {
+				pred := make([]int, len(idx))
+				for i := range idx {
+					pred[i] = idx[i] + tr.Offset[i]
+				}
+				if !presetIndexInBounds(pred, p.Dimensions) {
+					continue
+				}
+				if !presetIndexBefore(pred, idx) {
+					return false
+				}
+				prev, ok := values[presetIndexKey(pred)]
+				if !ok {
+					continue
+				}
+				switch p.Objective {
+				case "min":
+					candidate := prev + tr.Weight
+					if !have || candidate < best {
+						best = candidate
+					}
+				case "max":
+					candidate := prev + tr.Weight
+					if !have || candidate > best {
+						best = candidate
+					}
+				case "count":
+					sum += prev * tr.Multiplier
+					sum = presetApplyModulo(sum, p.Modulo)
+				}
+				have = true
+			}
+			if p.Objective == "count" {
+				values[key] = presetApplyModulo(sum, p.Modulo)
+				return true
+			}
+			if !have {
+				return false
+			}
+			values[key] = presetApplyModulo(best, p.Modulo)
+			return true
+		}
+		for i := 0; i < p.Dimensions[axis]; i++ {
+			idx[axis] = i
+			if !walk(idx, axis+1) {
+				return false
+			}
+		}
+		return true
+	}
+	if !walk(make([]int, len(p.Dimensions)), 0) {
+		return 0, false
+	}
+	answer, ok := values[presetIndexKey(p.Target)]
+	return answer, ok
+}
+
+func presetBaseCases(value any, dimensions []int) (map[string]int, bool) {
+	raw, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := map[string]int{}
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		idx, ok := presetIntVector(m["index"])
+		if !ok || len(idx) != len(dimensions) || !presetIndexInBounds(idx, dimensions) {
+			return nil, false
+		}
+		value, ok := presetInt(m["value"])
+		if !ok {
+			return nil, false
+		}
+		out[presetIndexKey(idx)] = value
+	}
+	return out, true
+}
+
+func presetTransitions(value any, rank int) ([]presetNumericDPTransition, bool) {
+	raw, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := []presetNumericDPTransition{}
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		offset, ok := presetIntVector(m["offset"])
+		if !ok || len(offset) != rank {
+			return nil, false
+		}
+		weight := 0
+		if rawWeight, exists := m["weight"]; exists {
+			n, ok := presetInt(rawWeight)
+			if !ok {
+				return nil, false
+			}
+			weight = n
+		}
+		multiplier := 1
+		if rawMultiplier, exists := m["multiplier"]; exists {
+			n, ok := presetInt(rawMultiplier)
+			if !ok {
+				return nil, false
+			}
+			multiplier = n
+		}
+		out = append(out, presetNumericDPTransition{Offset: offset, Weight: weight, Multiplier: multiplier})
+	}
+	return out, true
+}
+
+func presetIntVector(value any) ([]int, bool) {
+	raw, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := make([]int, len(raw))
+	for i, item := range raw {
+		n, ok := presetInt(item)
+		if !ok {
+			return nil, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
+
+func presetIndexInBounds(idx, dimensions []int) bool {
+	if len(idx) != len(dimensions) {
+		return false
+	}
+	for i := range idx {
+		if idx[i] < 0 || idx[i] >= dimensions[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func presetIndexBefore(a, b []int) bool {
+	for i := range a {
+		if a[i] < b[i] {
+			return true
+		}
+		if a[i] > b[i] {
+			return false
+		}
+	}
+	return false
+}
+
+func presetIndexKey(idx []int) string {
+	out := ""
+	for i, n := range idx {
+		if i > 0 {
+			out += ","
+		}
+		out += presetItoa(n)
+	}
+	return out
+}
+
+func presetApplyModulo(value, modulo int) int {
+	if modulo <= 0 {
+		return value
+	}
+	value = value % modulo
+	if value < 0 {
+		value += modulo
+	}
+	return value
+}
+
+func presetInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		if float64(int(n)) != n {
+			return 0, false
+		}
+		return int(n), true
+	case int:
+		return n, true
+	default:
+		return 0, false
+	}
+}
+
+func presetItoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	digits := []byte{}
+	for n > 0 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+		n /= 10
+	}
+	if neg {
+		digits = append([]byte{'-'}, digits...)
+	}
+	return string(digits)
+}
+`)
+}
+
+func explicitShortestPathPresetSource() string {
+	return strings.TrimSpace(`
+func Solve(input map[string]any) map[string]any {
+	nodes, nodeSet, ok := presetNodes(input["nodes"])
+	if !ok || len(nodes) == 0 {
+		return map[string]any{"ok": false, "first_failure": "expected non-empty nodes array", "repair_hint": "provide explicit nodes as strings or integer ids"}
+	}
+	start, okStart := presetNodeID(input["start_node"])
+	goal, okGoal := presetNodeID(input["goal_node"])
+	if !okStart || !okGoal || !nodeSet[start] || !nodeSet[goal] {
+		return map[string]any{"ok": false, "first_failure": "start_node or goal_node is missing from nodes", "repair_hint": "use only node ids declared in nodes"}
+	}
+	rawEdges, ok := input["edges"].([]any)
+	if !ok {
+		return map[string]any{"ok": false, "first_failure": "expected edges array", "repair_hint": "provide edges as [[from, to], ...]"}
+	}
+	directed := true
+	if rawDirected, ok := input["directed"].(bool); ok {
+		directed = rawDirected
+	}
+	adj := map[string][]string{}
+	for _, rawEdge := range rawEdges {
+		from, to, ok := presetEdge(rawEdge)
+		if !ok || !nodeSet[from] || !nodeSet[to] {
+			return map[string]any{"ok": false, "first_failure": "edge endpoint is not declared in nodes", "repair_hint": "validate every directed edge against nodes before searching"}
+		}
+		adj[from] = append(adj[from], to)
+		if !directed {
+			adj[to] = append(adj[to], from)
+		}
+	}
+	answer := -1
+	if start == goal {
+		answer = 0
+	} else {
+		dist := map[string]int{start: 0}
+		queue := []string{start}
+		for len(queue) > 0 {
+			node := queue[0]
+			queue = queue[1:]
+			for _, next := range adj[node] {
+				if _, seen := dist[next]; seen {
+					continue
+				}
+				dist[next] = dist[node] + 1
+				if next == goal {
+					answer = dist[next]
+					queue = nil
+					break
+				}
+				queue = append(queue, next)
+			}
+		}
+	}
+	return map[string]any{"ok": true, "answer": "solution = " + presetItoa(answer)}
+}
+
+func presetNodes(v any) ([]string, map[string]bool, bool) {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil, nil, false
+	}
+	nodes := []string{}
+	seen := map[string]bool{}
+	for _, rawNode := range raw {
+		node, ok := presetNodeID(rawNode)
+		if !ok {
+			return nil, nil, false
+		}
+		if seen[node] {
+			continue
+		}
+		seen[node] = true
+		nodes = append(nodes, node)
+	}
+	return nodes, seen, true
+}
+
+func presetEdge(v any) (string, string, bool) {
+	if raw, ok := v.([]any); ok {
+		if len(raw) < 2 {
+			return "", "", false
+		}
+		from, okFrom := presetNodeID(raw[0])
+		to, okTo := presetNodeID(raw[1])
+		return from, to, okFrom && okTo
+	}
+	raw, ok := v.(map[string]any)
+	if !ok {
+		return "", "", false
+	}
+	from, okFrom := presetNodeID(raw["from"])
+	to, okTo := presetNodeID(raw["to"])
+	return from, to, okFrom && okTo
+}
+
+func presetNodeID(v any) (string, bool) {
+	switch typed := v.(type) {
+	case string:
+		return typed, typed != ""
+	case float64:
+		n := int(typed)
+		if float64(n) != typed {
+			return "", false
+		}
+		return presetItoa(n), true
+	case int:
+		return presetItoa(typed), true
+	default:
+		return "", false
+	}
+}
+
+func presetItoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	digits := []byte{}
+	for n > 0 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+		n /= 10
+	}
+	if neg {
+		digits = append([]byte{'-'}, digits...)
+	}
+	return string(digits)
+}
+`)
+}
+
+func buildGraphSearchHelperContract() string {
+	return strings.TrimSpace(`
+Generic graph-search helper contract:
+- Treat the typed input as a graph problem, not prose generation.
+- Identify nodes, directed edges, start state, goal state, transition rules, and objective.
+- Use a deterministic graph algorithm or dynamic-programming recurrence when the graph is acyclic or monotone.
+- For grid DAG resource paths, let dp[node] be the minimum resource needed on entering node so some allowed suffix path reaches the goal while resource stays positive.
+- For explicit unweighted graphs, run BFS from start_node over edges and return the exact shortest path length, or -1 if unreachable.
+- Return ok:true only with a checked answer in the requested format.
+- If the typed graph objective is not represented by the provided fields, return ok:false with first_failure and repair_hint rather than guessing.
+`)
+}
+
+func buildNumericDPHelperContract() string {
+	return strings.TrimSpace(`
+Generic numeric-DP helper contract:
+- Treat the typed input as a finite recurrence/table dynamic program, not prose generation.
+- Use only explicit typed fields: objective, dp_dimensions, target, base_cases, transitions, and optional modulo.
+- Supported objectives are min, max, and count.
+- Table indexes are zero-based integer tuples. Base cases set exact table values.
+- Each transition is a predecessor offset relative to the current index. It must point to an earlier table cell under lexicographic table order.
+- For min/max, candidate = predecessor_value + weight and the objective selects min or max.
+- For count, contribution = predecessor_value * multiplier and contributions are summed, with optional modulo.
+- Return ok:true only with one checked answer in the requested format: solution = <integer>.
+- If the typed DP contract is not represented by the provided fields, return ok:false with first_failure and repair_hint rather than guessing from prose.
+`)
+}
+
+func finiteDomainConstraintPresetSource() string {
+	return strings.TrimSpace(`
+func Solve(input map[string]any) map[string]any {
+	vars, ok := presetFiniteDomainVars(input["variables"])
+	if !ok || len(vars) == 0 {
+		return map[string]any{"ok": false, "first_failure": "expected variables with finite integer min/max domains", "repair_hint": "provide variables as [{name,min,max}, ...]"}
+	}
+	constraints, ok := input["constraints"].([]any)
+	if !ok || len(constraints) == 0 {
+		return map[string]any{"ok": false, "first_failure": "expected non-empty typed constraints", "repair_hint": "provide constraints as expression objects"}
+	}
+	known := presetFiniteDomainKnown(input["known_values"])
+	assign := map[string]float64{}
+	var found map[string]float64
+	var search func(int) bool
+	search = func(idx int) bool {
+		if idx == len(vars) {
+			for _, raw := range constraints {
+				ok, valid := presetFiniteDomainConstraintOK(raw, assign, known)
+				if !valid || !ok {
+					return false
+				}
+			}
+			found = map[string]float64{}
+			for _, v := range vars {
+				found[v.Name] = assign[v.Name]
+			}
+			return true
+		}
+		v := vars[idx]
+		for n := v.Min; n <= v.Max; n++ {
+			assign[v.Name] = float64(n)
+			if search(idx + 1) {
+				return true
+			}
+		}
+		delete(assign, v.Name)
+		return false
+	}
+	if !search(0) {
+		return map[string]any{"ok": false, "first_failure": "no assignment satisfies the finite-domain constraints", "repair_hint": "check bounds and typed constraint expressions"}
+	}
+	return map[string]any{"ok": true, "answer": "solution = " + presetFiniteDomainAnswer(vars, found)}
+}
+
+type presetFiniteDomainVar struct {
+	Name string
+	Min int
+	Max int
+}
+
+func presetFiniteDomainVars(raw any) ([]presetFiniteDomainVar, bool) {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := []presetFiniteDomainVar{}
+	seen := map[string]bool{}
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		name, ok := m["name"].(string)
+		if !ok || name == "" || seen[name] {
+			return nil, false
+		}
+		min, okMin := presetFiniteDomainInt(m["min"])
+		max, okMax := presetFiniteDomainInt(m["max"])
+		if !okMin || !okMax || min > max {
+			return nil, false
+		}
+		seen[name] = true
+		out = append(out, presetFiniteDomainVar{Name: name, Min: min, Max: max})
+	}
+	return out, true
+}
+
+func presetFiniteDomainKnown(raw any) map[string]float64 {
+	out := map[string]float64{}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return out
+	}
+	for k, v := range m {
+		if n, ok := presetFiniteDomainNumber(v); ok {
+			out[k] = n
+		}
+	}
+	return out
+}
+
+func presetFiniteDomainConstraintOK(raw any, assign map[string]float64, known map[string]float64) (bool, bool) {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return false, false
+	}
+	op, ok := m["op"].(string)
+	if !ok {
+		return false, false
+	}
+	left, okLeft := presetFiniteDomainExpr(m["left"], assign, known)
+	right, okRight := presetFiniteDomainExpr(m["right"], assign, known)
+	if !okLeft || !okRight {
+		return false, false
+	}
+	switch op {
+	case "eq":
+		return left == right, true
+	case "ne":
+		return left != right, true
+	case "lt":
+		return left < right, true
+	case "lte":
+		return left <= right, true
+	case "gt":
+		return left > right, true
+	case "gte":
+		return left >= right, true
+	default:
+		return false, false
+	}
+}
+
+func presetFiniteDomainExpr(raw any, assign map[string]float64, known map[string]float64) (float64, bool) {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	if v, exists := m["const"]; exists {
+		return presetFiniteDomainNumber(v)
+	}
+	if name, ok := m["var"].(string); ok && name != "" {
+		v, exists := assign[name]
+		return v, exists
+	}
+	if name, ok := m["known"].(string); ok && name != "" {
+		v, exists := known[name]
+		return v, exists
+	}
+	if op, ok := m["op"].(string); ok && op != "" {
+		args, ok := m["args"].([]any)
+		if !ok || len(args) == 0 {
+			return 0, false
+		}
+		values := []float64{}
+		for _, arg := range args {
+			v, ok := presetFiniteDomainExpr(arg, assign, known)
+			if !ok {
+				return 0, false
+			}
+			values = append(values, v)
+		}
+		return presetFiniteDomainApplyOp(op, values)
+	}
+	if fn, ok := m["func"].(string); ok && fn != "" {
+		args, ok := m["args"].([]any)
+		if !ok || len(args) == 0 {
+			return 0, false
+		}
+		values := []float64{}
+		for _, arg := range args {
+			v, ok := presetFiniteDomainExpr(arg, assign, known)
+			if !ok {
+				return 0, false
+			}
+			values = append(values, v)
+		}
+		return presetFiniteDomainApplyFunc(fn, values)
+	}
+	return 0, false
+}
+
+func presetFiniteDomainApplyOp(op string, values []float64) (float64, bool) {
+	switch op {
+	case "add":
+		total := 0.0
+		for _, v := range values {
+			total += v
+		}
+		return total, true
+	case "sub":
+		total := values[0]
+		for _, v := range values[1:] {
+			total -= v
+		}
+		return total, true
+	case "mul":
+		total := 1.0
+		for _, v := range values {
+			total *= v
+		}
+		return total, true
+	case "div":
+		if len(values) != 2 || values[1] == 0 {
+			return 0, false
+		}
+		return values[0] / values[1], true
+	case "mod":
+		if len(values) != 2 || int(values[1]) == 0 {
+			return 0, false
+		}
+		return float64(int(values[0]) % int(values[1])), true
+	case "neg":
+		if len(values) != 1 {
+			return 0, false
+		}
+		return -values[0], true
+	case "min":
+		best := values[0]
+		for _, v := range values[1:] {
+			if v < best {
+				best = v
+			}
+		}
+		return best, true
+	case "max":
+		best := values[0]
+		for _, v := range values[1:] {
+			if v > best {
+				best = v
+			}
+		}
+		return best, true
+	default:
+		return 0, false
+	}
+}
+
+func presetFiniteDomainApplyFunc(fn string, values []float64) (float64, bool) {
+	switch fn {
+	case "abs":
+		if len(values) != 1 {
+			return 0, false
+		}
+		if values[0] < 0 {
+			return -values[0], true
+		}
+		return values[0], true
+	case "gcd":
+		if len(values) != 2 {
+			return 0, false
+		}
+		return float64(presetFiniteDomainGCD(int(values[0]), int(values[1]))), true
+	default:
+		return 0, false
+	}
+}
+
+func presetFiniteDomainAnswer(vars []presetFiniteDomainVar, assign map[string]float64) string {
+	out := "{"
+	for i, v := range vars {
+		if i > 0 {
+			out += ","
+		}
+		out += string(byte(34)) + v.Name + string(byte(34)) + ":" + presetItoa(int(assign[v.Name]))
+	}
+	return out + "}"
+}
+
+func presetFiniteDomainInt(v any) (int, bool) {
+	n, ok := presetFiniteDomainNumber(v)
+	if !ok || float64(int(n)) != n {
+		return 0, false
+	}
+	return int(n), true
+}
+
+func presetFiniteDomainNumber(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}
+
+func presetFiniteDomainGCD(a, b int) int {
+	if a < 0 {
+		a = -a
+	}
+	if b < 0 {
+		b = -b
+	}
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
+}
+
+func presetItoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	digits := []byte{}
+	for n > 0 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+		n /= 10
+	}
+	if neg {
+		digits = append([]byte{'-'}, digits...)
+	}
+	return string(digits)
+}
+`)
+}
+
+func buildConstraintSolverHelperContract() string {
+	return strings.TrimSpace(`
+Generic constraint-solver helper contract:
+- Treat the typed input as a finite-domain constraint problem, not prose generation.
+- Use only explicit fields: variables, known_values, constraints, claims, and requested_outputs.
+- Variables are finite integer domains with min and max bounds.
+- Supported constraint comparisons are eq, ne, lt, lte, gt, and gte over expression objects.
+- Search or propagate deterministically over the declared domains and verify every constraint before returning.
+- Return ok:true only with one checked answer in the requested format: solution = {"variable": integer, ...}.
+- If the typed constraint contract is not represented by the provided fields, return ok:false with first_failure and repair_hint rather than guessing from prose.
+`)
+}
+
+func buildPackageWasteOptimizationHelperContract() string {
+	return strings.TrimSpace(`
+Generic resource-allocation helper contract:
+- Treat packages and suppliers as an explicit finite optimization instance.
+- Each supplier's box sizes have infinite supply; the same box size may be reused for many packages.
+- For each supplier, assign every package to the smallest available box size >= package size.
+- A supplier is invalid only when its largest available box is smaller than at least one package.
+- Minimize total waste across valid suppliers, then return the minimum modulo 1000000007.
+- Return ok:true only with one checked answer in the requested format: solution = <integer>.
+`)
+}
+
 func formatBraidHelperNodeSummary(node BraidNode, answer string) string {
+	return formatBraidHelperNodeSummaryVerified(node, answer, false)
+}
+
+func formatBraidHelperNodeSummaryVerified(node BraidNode, answer string, verified bool) string {
 	answer = strings.TrimSpace(answer)
 	if node.Kind == "verify" {
 		if braidPassFalseRE.MatchString(answer) {
@@ -484,22 +1848,31 @@ func formatBraidHelperNodeSummary(node BraidNode, answer string) string {
 			return "status: blocked summary: answer: " + safeTelemetryExcerpt(answer, 600) + " checks: ephemeral_helper_solve did not produce a verified candidate."
 		}
 	}
+	if verified {
+		return "status: completed summary: status: solved answer: " + answer + " checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier."
+	}
 	return "status: completed summary: status: solved answer: " + answer + " checks: ephemeral_helper_solve produced and ran an executable helper for this node."
 }
 
 func helperAnswerFromToolResult(result string) string {
+	answer, _ := helperAnswerAndVerifiedFromToolResult(result)
+	return answer
+}
+
+func helperAnswerAndVerifiedFromToolResult(result string) (string, bool) {
 	var decoded struct {
-		OK     bool   `json:"ok"`
-		Answer string `json:"answer"`
-		Error  string `json:"error"`
+		OK       bool   `json:"ok"`
+		Answer   string `json:"answer"`
+		Error    string `json:"error"`
+		Verified bool   `json:"verified"`
 	}
 	if err := json.Unmarshal([]byte(result), &decoded); err == nil {
 		if decoded.OK && strings.TrimSpace(decoded.Answer) != "" {
-			return strings.TrimSpace(decoded.Answer)
+			return strings.TrimSpace(decoded.Answer), decoded.Verified
 		}
-		return ""
+		return "", false
 	}
-	return strings.TrimSpace(result)
+	return strings.TrimSpace(result), false
 }
 
 func verifyStackMoveCandidateFromInput(answer string, rawInput any) (bool, string, bool) {
@@ -512,6 +1885,827 @@ func verifyStackMoveCandidateFromInput(answer string, rawInput any) (bool, strin
 		return false, "", false
 	}
 	return diag.Pass, diag.Message, true
+}
+
+func gridResourcePathAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	base := HelperVerifierDiagnostic{Pass: false, FailedAtStep: -1, FailureKind: "graph_resource_path"}
+	grid, ok := intGridFromAny(input["grid_layout"])
+	if !ok || len(grid) == 0 || len(grid[0]) == 0 {
+		return HelperVerifierDiagnostic{}, false
+	}
+	want := minInitialResourceForGrid(grid)
+	got, ok := intSolutionFromAnswer(answer)
+	if !ok {
+		base.FailureKind = "parse"
+		base.Message = "candidate does not contain a parseable integer solution"
+		base.RepairHint = "return answer exactly as solution = <integer>"
+		return base, true
+	}
+	if got != want {
+		base.FailureKind = "objective_mismatch"
+		base.Message = fmt.Sprintf("candidate %d does not equal minimum initial resource %d", got, want)
+		base.ObservedFinal = got
+		base.ExpectedFinal = want
+		base.RepairHint = "compute the reverse dynamic-programming recurrence over the directed grid graph"
+		return base, true
+	}
+	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "graph_resource_path", FailedAtStep: -1}, true
+}
+
+func explicitShortestPathAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	base := HelperVerifierDiagnostic{Pass: false, FailedAtStep: -1, FailureKind: "explicit_shortest_path"}
+	graph, ok := explicitGraphFromInput(input)
+	if !ok {
+		return HelperVerifierDiagnostic{}, false
+	}
+	want := shortestPathLength(graph)
+	got, ok := intSolutionFromAnswer(answer)
+	if !ok {
+		base.FailureKind = "parse"
+		base.Message = "candidate does not contain a parseable integer solution"
+		base.RepairHint = "return answer exactly as solution = <integer>"
+		return base, true
+	}
+	if got != want {
+		base.FailureKind = "objective_mismatch"
+		base.Message = fmt.Sprintf("candidate %d does not equal shortest path length %d", got, want)
+		base.ObservedFinal = got
+		base.ExpectedFinal = want
+		base.RepairHint = "run BFS over the explicit directed graph using only typed edges"
+		base.Extra = map[string]any{
+			"start_node": graph.Start,
+			"goal_node":  graph.Goal,
+		}
+		return base, true
+	}
+	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "explicit_shortest_path", FailedAtStep: -1}, true
+}
+
+func numericDPAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	base := HelperVerifierDiagnostic{Pass: false, FailedAtStep: -1, FailureKind: "numeric_dp"}
+	problem, ok := numericDPProblemFromInput(input)
+	if !ok {
+		return HelperVerifierDiagnostic{}, false
+	}
+	want, ok := evaluateNumericDP(problem)
+	if !ok {
+		base.FailureKind = "unsupported_recurrence"
+		base.Message = "numeric DP input is outside the deterministic recurrence-table preset"
+		base.RepairHint = "use explicit acyclic predecessor offsets and reachable table states"
+		return base, true
+	}
+	got, ok := intSolutionFromAnswer(answer)
+	if !ok {
+		base.FailureKind = "parse"
+		base.Message = "candidate does not contain a parseable integer solution"
+		base.RepairHint = "return answer exactly as solution = <integer>"
+		return base, true
+	}
+	if got != want {
+		base.FailureKind = "objective_mismatch"
+		base.Message = fmt.Sprintf("candidate %d does not equal recurrence-table value %d", got, want)
+		base.ObservedFinal = got
+		base.ExpectedFinal = want
+		base.RepairHint = "fill the DP table from base cases using the declared objective and predecessor offsets"
+		return base, true
+	}
+	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "numeric_dp", FailedAtStep: -1}, true
+}
+
+type numericDPTransition struct {
+	Offset     []int
+	Weight     int
+	Multiplier int
+}
+
+type numericDPProblem struct {
+	Objective   string
+	Dimensions  []int
+	Target      []int
+	BaseCases   map[string]int
+	Transitions []numericDPTransition
+	Modulo      int
+}
+
+func numericDPProblemFromInput(input map[string]any) (numericDPProblem, bool) {
+	if len(input) == 0 {
+		return numericDPProblem{}, false
+	}
+	objective, ok := input["objective"].(string)
+	if !ok {
+		return numericDPProblem{}, false
+	}
+	objective = strings.TrimSpace(objective)
+	switch objective {
+	case "min", "max", "count":
+	default:
+		return numericDPProblem{}, false
+	}
+	dimensions, ok := intVectorFromAny(input["dp_dimensions"])
+	if !ok || len(dimensions) == 0 {
+		return numericDPProblem{}, false
+	}
+	for _, n := range dimensions {
+		if n <= 0 {
+			return numericDPProblem{}, false
+		}
+	}
+	target, ok := intVectorFromAny(input["target"])
+	if !ok || len(target) != len(dimensions) || !numericDPIndexInBounds(target, dimensions) {
+		return numericDPProblem{}, false
+	}
+	baseCases, ok := numericDPBaseCasesFromAny(input["base_cases"], dimensions)
+	if !ok || len(baseCases) == 0 {
+		return numericDPProblem{}, false
+	}
+	transitions, ok := numericDPTransitionsFromAny(input["transitions"], len(dimensions))
+	if !ok || len(transitions) == 0 {
+		return numericDPProblem{}, false
+	}
+	modulo := 0
+	if rawModulo, exists := input["modulo"]; exists {
+		n, ok := intFromJSONNumberLike(rawModulo)
+		if !ok || n <= 0 {
+			return numericDPProblem{}, false
+		}
+		modulo = n
+	}
+	return numericDPProblem{
+		Objective:   objective,
+		Dimensions:  dimensions,
+		Target:      target,
+		BaseCases:   baseCases,
+		Transitions: transitions,
+		Modulo:      modulo,
+	}, true
+}
+
+func evaluateNumericDP(problem numericDPProblem) (int, bool) {
+	values := map[string]int{}
+	var walk func(idx []int, axis int) bool
+	walk = func(idx []int, axis int) bool {
+		if axis == len(problem.Dimensions) {
+			key := numericDPIndexKey(idx)
+			if value, ok := problem.BaseCases[key]; ok {
+				values[key] = applyNumericDPModulo(value, problem.Modulo)
+				return true
+			}
+			haveCandidate := false
+			best := 0
+			sum := 0
+			for _, transition := range problem.Transitions {
+				predecessor := make([]int, len(idx))
+				for i := range idx {
+					predecessor[i] = idx[i] + transition.Offset[i]
+				}
+				if !numericDPIndexInBounds(predecessor, problem.Dimensions) {
+					continue
+				}
+				if !numericDPIndexBefore(predecessor, idx) {
+					return false
+				}
+				prev, ok := values[numericDPIndexKey(predecessor)]
+				if !ok {
+					continue
+				}
+				switch problem.Objective {
+				case "min":
+					candidate := prev + transition.Weight
+					if !haveCandidate || candidate < best {
+						best = candidate
+					}
+				case "max":
+					candidate := prev + transition.Weight
+					if !haveCandidate || candidate > best {
+						best = candidate
+					}
+				case "count":
+					sum += prev * transition.Multiplier
+					sum = applyNumericDPModulo(sum, problem.Modulo)
+				}
+				haveCandidate = true
+			}
+			if problem.Objective == "count" {
+				values[key] = applyNumericDPModulo(sum, problem.Modulo)
+				return true
+			}
+			if !haveCandidate {
+				return false
+			}
+			values[key] = applyNumericDPModulo(best, problem.Modulo)
+			return true
+		}
+		for i := 0; i < problem.Dimensions[axis]; i++ {
+			idx[axis] = i
+			if !walk(idx, axis+1) {
+				return false
+			}
+		}
+		return true
+	}
+	if !walk(make([]int, len(problem.Dimensions)), 0) {
+		return 0, false
+	}
+	answer, ok := values[numericDPIndexKey(problem.Target)]
+	return answer, ok
+}
+
+func numericDPBaseCasesFromAny(value any, dimensions []int) (map[string]int, bool) {
+	rawCases, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	baseCases := map[string]int{}
+	for _, rawCase := range rawCases {
+		item, ok := rawCase.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		index, ok := intVectorFromAny(item["index"])
+		if !ok || len(index) != len(dimensions) || !numericDPIndexInBounds(index, dimensions) {
+			return nil, false
+		}
+		n, ok := intFromJSONNumberLike(item["value"])
+		if !ok {
+			return nil, false
+		}
+		baseCases[numericDPIndexKey(index)] = n
+	}
+	return baseCases, true
+}
+
+func numericDPTransitionsFromAny(value any, rank int) ([]numericDPTransition, bool) {
+	rawTransitions, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	transitions := make([]numericDPTransition, 0, len(rawTransitions))
+	for _, rawTransition := range rawTransitions {
+		item, ok := rawTransition.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		offset, ok := intVectorFromAny(item["offset"])
+		if !ok || len(offset) != rank {
+			return nil, false
+		}
+		weight := 0
+		if rawWeight, exists := item["weight"]; exists {
+			n, ok := intFromJSONNumberLike(rawWeight)
+			if !ok {
+				return nil, false
+			}
+			weight = n
+		}
+		multiplier := 1
+		if rawMultiplier, exists := item["multiplier"]; exists {
+			n, ok := intFromJSONNumberLike(rawMultiplier)
+			if !ok {
+				return nil, false
+			}
+			multiplier = n
+		}
+		transitions = append(transitions, numericDPTransition{
+			Offset:     offset,
+			Weight:     weight,
+			Multiplier: multiplier,
+		})
+	}
+	return transitions, true
+}
+
+func intVectorFromAny(value any) ([]int, bool) {
+	rawItems, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := make([]int, len(rawItems))
+	for i, rawItem := range rawItems {
+		n, ok := intFromJSONNumberLike(rawItem)
+		if !ok {
+			return nil, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
+
+func numericDPIndexInBounds(index, dimensions []int) bool {
+	if len(index) != len(dimensions) {
+		return false
+	}
+	for i := range index {
+		if index[i] < 0 || index[i] >= dimensions[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func numericDPIndexBefore(a, b []int) bool {
+	for i := range a {
+		if a[i] < b[i] {
+			return true
+		}
+		if a[i] > b[i] {
+			return false
+		}
+	}
+	return false
+}
+
+func numericDPIndexKey(index []int) string {
+	parts := make([]string, len(index))
+	for i, n := range index {
+		parts[i] = strconv.Itoa(n)
+	}
+	return strings.Join(parts, ",")
+}
+
+func applyNumericDPModulo(value, modulo int) int {
+	if modulo <= 0 {
+		return value
+	}
+	value %= modulo
+	if value < 0 {
+		value += modulo
+	}
+	return value
+}
+
+func finiteDomainAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	base := HelperVerifierDiagnostic{Pass: false, FailedAtStep: -1, FailureKind: "finite_domain_constraint"}
+	witness, ok := finiteDomainWitnessFromInput(input)
+	if !ok {
+		return HelperVerifierDiagnostic{}, false
+	}
+	assignment, ok := finiteDomainAssignmentFromAnswer(answer, witness)
+	if !ok {
+		base.FailureKind = "parse"
+		base.Message = "candidate does not contain a parseable finite-domain assignment"
+		base.RepairHint = `return answer exactly as solution = {"variable": integer, ...}`
+		return base, true
+	}
+	for _, variable := range witness.Variables {
+		value, exists := assignment[variable.Name]
+		if !exists {
+			base.FailureKind = "missing_variable"
+			base.Message = fmt.Sprintf("candidate does not assign variable %q", variable.Name)
+			base.ExpectedFinal = variable.Name
+			base.RepairHint = "return every declared variable needed to evaluate the constraints"
+			return base, true
+		}
+		if value != float64(int(value)) || int(value) < variable.Min || int(value) > variable.Max {
+			base.FailureKind = "domain_violation"
+			base.Message = fmt.Sprintf("candidate assigns %s=%v outside [%d,%d]", variable.Name, value, variable.Min, variable.Max)
+			base.ObservedFinal = normalizeCycleNumber(value)
+			base.ExpectedFinal = []int{variable.Min, variable.Max}
+			base.RepairHint = "choose an integer value inside the declared finite domain"
+			return base, true
+		}
+	}
+	checks, pass := evaluateCycleConstraints(witness, assignment)
+	if !pass {
+		base.FailureKind = "constraint_mismatch"
+		base.Message = "candidate assignment does not satisfy all typed constraints"
+		base.RepairHint = "search the declared finite domains and evaluate every constraint before returning"
+		for idx, check := range checks {
+			if !check.OK {
+				base.FailedAtStep = idx
+				base.ObservedFinal = check.Observed
+				base.ExpectedFinal = check.Expected
+				if check.Error != "" {
+					base.Message = check.Error
+				} else if check.Name != "" {
+					base.Message = fmt.Sprintf("constraint %q failed", check.Name)
+				}
+				break
+			}
+		}
+		base.Extra = map[string]any{"checks": checks}
+		return base, true
+	}
+	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "finite_domain_constraint", FailedAtStep: -1}, true
+}
+
+func braidHelperInputLooksLikePackageWasteOptimization(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	_, ok := packageWasteProblemFromInput(input)
+	return ok
+}
+
+type packageWasteProblem struct {
+	Packages  []int
+	Suppliers [][]int
+}
+
+func packageWasteProblemFromInput(input map[string]any) (packageWasteProblem, bool) {
+	packages, ok := intVectorFromAny(input["packages"])
+	if !ok || len(packages) == 0 {
+		return packageWasteProblem{}, false
+	}
+	rawSuppliers, ok := input["suppliers"].([]any)
+	if !ok || len(rawSuppliers) == 0 {
+		return packageWasteProblem{}, false
+	}
+	suppliers := make([][]int, 0, len(rawSuppliers))
+	for _, rawSupplier := range rawSuppliers {
+		boxes, ok := intVectorFromAny(rawSupplier)
+		if !ok || len(boxes) == 0 {
+			return packageWasteProblem{}, false
+		}
+		suppliers = append(suppliers, boxes)
+	}
+	return packageWasteProblem{Packages: packages, Suppliers: suppliers}, true
+}
+
+func packageWasteAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	base := HelperVerifierDiagnostic{Pass: false, FailedAtStep: -1, FailureKind: "resource_allocation_min_waste"}
+	problem, ok := packageWasteProblemFromInput(input)
+	if !ok {
+		return HelperVerifierDiagnostic{}, false
+	}
+	observed, ok := integerSolutionFromAnswer(answer)
+	if !ok {
+		base.FirstFailure = "answer did not contain solution = <integer>"
+		base.RepairHint = "return answer exactly as solution = <integer>"
+		return base, true
+	}
+	expected := packageWasteMinimum(problem)
+	if observed != expected {
+		base.FirstFailure = "computed minimum waste does not match deterministic allocation check"
+		base.Observed = observed
+		base.Expected = expected
+		base.RepairHint = "supplier box sizes have infinite supply; reuse the chosen supplier's smallest fitting box size for every package"
+		return base, true
+	}
+	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "resource_allocation_min_waste", FailedAtStep: -1, Observed: observed, Expected: expected}, true
+}
+
+func packageWasteMinimum(problem packageWasteProblem) int {
+	const mod = 1000000007
+	packages := append([]int(nil), problem.Packages...)
+	sort.Ints(packages)
+	totalPackageSize := 0
+	for _, size := range packages {
+		totalPackageSize += size
+	}
+	best := -1
+	for _, supplier := range problem.Suppliers {
+		boxes := append([]int(nil), supplier...)
+		sort.Ints(boxes)
+		if len(boxes) == 0 || boxes[len(boxes)-1] < packages[len(packages)-1] {
+			continue
+		}
+		totalBoxSize := 0
+		for _, pkg := range packages {
+			idx := sort.SearchInts(boxes, pkg)
+			if idx >= len(boxes) {
+				totalBoxSize = -1
+				break
+			}
+			totalBoxSize += boxes[idx]
+		}
+		if totalBoxSize < 0 {
+			continue
+		}
+		waste := totalBoxSize - totalPackageSize
+		if best < 0 || waste < best {
+			best = waste
+		}
+	}
+	if best < 0 {
+		return -1
+	}
+	return best % mod
+}
+
+func integerSolutionFromAnswer(answer string) (int, bool) {
+	answer = strings.TrimSpace(answer)
+	idx := strings.Index(answer, "solution =")
+	if idx < 0 {
+		return 0, false
+	}
+	value := strings.TrimSpace(strings.TrimPrefix(answer[idx:], "solution ="))
+	if end := strings.IndexAny(value, "\n\r\t ,.;)]}"); end > 0 {
+		value = strings.TrimSpace(value[:end])
+	}
+	n, err := strconv.Atoi(value)
+	return n, err == nil
+}
+
+func finiteDomainWitnessFromInput(input map[string]any) (CycleWitness, bool) {
+	if len(input) == 0 {
+		return CycleWitness{}, false
+	}
+	normalized := cloneMapAny(input)
+	if _, ok := normalized["version"]; !ok {
+		normalized["version"] = float64(cycleWitnessVersionV1)
+	}
+	if _, ok := normalized["checker_kind"]; !ok {
+		normalized["checker_kind"] = cycleWitnessCheckerBounded
+	}
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return CycleWitness{}, false
+	}
+	var witness CycleWitness
+	if err := json.Unmarshal(raw, &witness); err != nil {
+		return CycleWitness{}, false
+	}
+	if err := ValidateCycleWitness(witness); err != nil {
+		return CycleWitness{}, false
+	}
+	return witness, true
+}
+
+func finiteDomainAssignmentFromAnswer(answer string, witness CycleWitness) (map[string]float64, bool) {
+	raw := strings.TrimSpace(answer)
+	if idx := strings.Index(raw, "="); idx >= 0 && strings.Contains(strings.ToLower(raw[:idx]), "solution") {
+		raw = strings.TrimSpace(raw[idx+1:])
+	}
+	raw = strings.Trim(raw, "` \t\r\n")
+	if raw == "" {
+		return nil, false
+	}
+	if strings.HasPrefix(raw, "{") {
+		var decoded map[string]any
+		decoder := json.NewDecoder(strings.NewReader(raw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&decoded); err != nil {
+			return nil, false
+		}
+		out := make(map[string]float64, len(decoded))
+		for key, value := range decoded {
+			n, ok := finiteDomainNumberFromAny(value)
+			if !ok {
+				return nil, false
+			}
+			out[key] = n
+		}
+		return out, true
+	}
+	if len(witness.Variables) == 1 {
+		n, ok := parseLeadingInt(raw)
+		if !ok {
+			return nil, false
+		}
+		return map[string]float64{witness.Variables[0].Name: float64(n)}, true
+	}
+	return nil, false
+}
+
+func finiteDomainNumberFromAny(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case int:
+		return float64(typed), true
+	case json.Number:
+		value, err := typed.Float64()
+		return value, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func minInitialResourceForGrid(grid [][]int) int {
+	m := len(grid)
+	n := len(grid[0])
+	dp := make([][]int, m)
+	for i := range dp {
+		dp[i] = make([]int, n)
+	}
+	for i := m - 1; i >= 0; i-- {
+		for j := n - 1; j >= 0; j-- {
+			bestNext := int(^uint(0) >> 2)
+			if i == m-1 && j == n-1 {
+				bestNext = 1
+			} else {
+				if i+1 < m && dp[i+1][j] < bestNext {
+					bestNext = dp[i+1][j]
+				}
+				if j+1 < n && dp[i][j+1] < bestNext {
+					bestNext = dp[i][j+1]
+				}
+			}
+			need := bestNext - grid[i][j]
+			if need < 1 {
+				need = 1
+			}
+			dp[i][j] = need
+		}
+	}
+	return dp[0][0]
+}
+
+func intGridFromAny(value any) ([][]int, bool) {
+	rawRows, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	grid := make([][]int, len(rawRows))
+	width := -1
+	for i, rawRow := range rawRows {
+		rawCells, ok := rawRow.([]any)
+		if !ok {
+			return nil, false
+		}
+		if width < 0 {
+			width = len(rawCells)
+		}
+		if len(rawCells) != width {
+			return nil, false
+		}
+		grid[i] = make([]int, len(rawCells))
+		for j, rawCell := range rawCells {
+			n, ok := intFromJSONNumberLike(rawCell)
+			if !ok {
+				return nil, false
+			}
+			grid[i][j] = n
+		}
+	}
+	return grid, true
+}
+
+type explicitGraphInput struct {
+	Nodes    []string
+	NodeSet  map[string]struct{}
+	Edges    [][2]string
+	Start    string
+	Goal     string
+	Directed bool
+}
+
+func explicitGraphFromInput(input map[string]any) (explicitGraphInput, bool) {
+	rawNodes, ok := input["nodes"].([]any)
+	if !ok || len(rawNodes) == 0 {
+		return explicitGraphInput{}, false
+	}
+	graph := explicitGraphInput{
+		Nodes:    make([]string, 0, len(rawNodes)),
+		NodeSet:  make(map[string]struct{}, len(rawNodes)),
+		Directed: true,
+	}
+	for _, rawNode := range rawNodes {
+		node, ok := explicitGraphNodeID(rawNode)
+		if !ok {
+			return explicitGraphInput{}, false
+		}
+		if _, exists := graph.NodeSet[node]; exists {
+			continue
+		}
+		graph.NodeSet[node] = struct{}{}
+		graph.Nodes = append(graph.Nodes, node)
+	}
+	start, okStart := explicitGraphNodeID(input["start_node"])
+	goal, okGoal := explicitGraphNodeID(input["goal_node"])
+	if !okStart || !okGoal {
+		return explicitGraphInput{}, false
+	}
+	if _, ok := graph.NodeSet[start]; !ok {
+		return explicitGraphInput{}, false
+	}
+	if _, ok := graph.NodeSet[goal]; !ok {
+		return explicitGraphInput{}, false
+	}
+	graph.Start = start
+	graph.Goal = goal
+	if directed, ok := input["directed"].(bool); ok {
+		graph.Directed = directed
+	}
+	rawEdges, ok := input["edges"].([]any)
+	if !ok {
+		return explicitGraphInput{}, false
+	}
+	graph.Edges = make([][2]string, 0, len(rawEdges))
+	for _, rawEdge := range rawEdges {
+		edge, ok := explicitGraphEdge(rawEdge)
+		if !ok {
+			return explicitGraphInput{}, false
+		}
+		if _, ok := graph.NodeSet[edge[0]]; !ok {
+			return explicitGraphInput{}, false
+		}
+		if _, ok := graph.NodeSet[edge[1]]; !ok {
+			return explicitGraphInput{}, false
+		}
+		graph.Edges = append(graph.Edges, edge)
+	}
+	return graph, true
+}
+
+func explicitGraphNodeID(value any) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		node := strings.TrimSpace(typed)
+		return node, node != ""
+	case json.Number:
+		node := strings.TrimSpace(typed.String())
+		return node, node != ""
+	case float64:
+		n := int(typed)
+		if typed != float64(n) {
+			return "", false
+		}
+		return fmt.Sprintf("%d", n), true
+	case int:
+		return fmt.Sprintf("%d", typed), true
+	case int64:
+		return fmt.Sprintf("%d", typed), true
+	default:
+		return "", false
+	}
+}
+
+func explicitGraphEdge(value any) ([2]string, bool) {
+	if rawEdge, ok := value.([]any); ok {
+		if len(rawEdge) < 2 {
+			return [2]string{}, false
+		}
+		from, okFrom := explicitGraphNodeID(rawEdge[0])
+		to, okTo := explicitGraphNodeID(rawEdge[1])
+		if !okFrom || !okTo {
+			return [2]string{}, false
+		}
+		return [2]string{from, to}, true
+	}
+	rawMap, ok := value.(map[string]any)
+	if !ok {
+		return [2]string{}, false
+	}
+	from, okFrom := explicitGraphNodeID(firstMapValue(rawMap, "from", "source"))
+	to, okTo := explicitGraphNodeID(firstMapValue(rawMap, "to", "target"))
+	if !okFrom || !okTo {
+		return [2]string{}, false
+	}
+	return [2]string{from, to}, true
+}
+
+func shortestPathLength(graph explicitGraphInput) int {
+	if graph.Start == graph.Goal {
+		return 0
+	}
+	adj := make(map[string][]string, len(graph.Nodes))
+	for _, edge := range graph.Edges {
+		adj[edge[0]] = append(adj[edge[0]], edge[1])
+		if !graph.Directed {
+			adj[edge[1]] = append(adj[edge[1]], edge[0])
+		}
+	}
+	dist := map[string]int{graph.Start: 0}
+	queue := []string{graph.Start}
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		for _, next := range adj[node] {
+			if _, seen := dist[next]; seen {
+				continue
+			}
+			dist[next] = dist[node] + 1
+			if next == graph.Goal {
+				return dist[next]
+			}
+			queue = append(queue, next)
+		}
+	}
+	return -1
+}
+
+func intSolutionFromAnswer(answer string) (int, bool) {
+	raw := strings.TrimSpace(answer)
+	if idx := strings.Index(raw, "="); idx >= 0 && strings.Contains(strings.ToLower(raw[:idx]), "solution") {
+		raw = strings.TrimSpace(raw[idx+1:])
+	}
+	raw = strings.Trim(raw, "` \t\r\n")
+	return parseLeadingInt(raw)
+}
+
+func parseLeadingInt(raw string) (int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	sign := 1
+	pos := 0
+	if raw[0] == '-' {
+		sign = -1
+		pos = 1
+	} else if raw[0] == '+' {
+		pos = 1
+	}
+	if pos >= len(raw) || raw[pos] < '0' || raw[pos] > '9' {
+		return 0, false
+	}
+	value := 0
+	for pos < len(raw) && raw[pos] >= '0' && raw[pos] <= '9' {
+		value = value*10 + int(raw[pos]-'0')
+		pos++
+	}
+	return sign * value, true
 }
 
 func stackMoveAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
@@ -589,6 +2783,15 @@ func stackMoveAnswerVerifier(answer string, input map[string]any) (HelperVerifie
 			base.RepairHint = "clear the requested block before moving it, or move the current top block first"
 			return base, true
 		}
+		if stackMoveRequiresStrictDescending(input) && len(state[to]) > 0 && block >= state[to][len(state[to])-1] {
+			base.FailureKind = "destination_order_violation"
+			base.FailedAtStep = idx
+			base.FailedAction = move[:]
+			base.StateBefore = stateBefore
+			base.Message = fmt.Sprintf("move %d tries to place item %d on destination top %d, violating strict descending stack order", idx, block, state[to][len(state[to])-1])
+			base.RepairHint = "only place an item on an empty stack or on a larger-index destination top"
+			return base, true
+		}
 		state[from] = state[from][:len(state[from])-1]
 		state[to] = append(state[to], block)
 	}
@@ -608,6 +2811,11 @@ func stackMoveAnswerVerifier(answer string, input map[string]any) (HelperVerifie
 		return base, true
 	}
 	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "stack_move", FailedAtStep: -1}, true
+}
+
+func stackMoveRequiresStrictDescending(input map[string]any) bool {
+	order, _ := input["stack_order"].(string)
+	return strings.TrimSpace(order) == "strict_descending_bottom_to_top"
 }
 
 func stackMovePrefixForDiagnostic(moves [][3]int) [][]int {
@@ -708,21 +2916,51 @@ func stackMovesFromAnswer(answer string) ([][3]int, bool) {
 	}
 	moves := make([][3]int, 0, len(decoded))
 	for _, item := range decoded {
-		rawMove, ok := item.([]any)
-		if !ok || len(rawMove) != 3 {
+		move, ok := stackMoveFromAny(item)
+		if !ok {
 			return nil, false
+		}
+		moves = append(moves, move)
+	}
+	return moves, true
+}
+
+func stackMoveFromAny(item any) ([3]int, bool) {
+	rawMove, ok := item.([]any)
+	if ok {
+		if len(rawMove) != 3 {
+			return [3]int{}, false
 		}
 		var move [3]int
 		for idx, value := range rawMove {
 			n, ok := intFromJSONNumberLike(value)
 			if !ok {
-				return nil, false
+				return [3]int{}, false
 			}
 			move[idx] = n
 		}
-		moves = append(moves, move)
+		return move, true
 	}
-	return moves, true
+	rawMap, ok := item.(map[string]any)
+	if !ok {
+		return [3]int{}, false
+	}
+	block, okBlock := intFromJSONNumberLike(firstMapValue(rawMap, "block", "move", "item", "value"))
+	from, okFrom := intFromJSONNumberLike(firstMapValue(rawMap, "from", "from_stack", "src", "source"))
+	to, okTo := intFromJSONNumberLike(firstMapValue(rawMap, "to", "to_stack", "dst", "destination"))
+	if !okBlock || !okFrom || !okTo {
+		return [3]int{}, false
+	}
+	return [3]int{block, from, to}, true
+}
+
+func firstMapValue(value map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if raw, ok := value[key]; ok {
+			return raw
+		}
+	}
+	return nil
 }
 
 func intFromJSONNumberLike(value any) (int, bool) {
@@ -1152,12 +3390,14 @@ func submitBraidNode(
 	toolExec *replToolExecutor,
 	output *engine.EngineOutput,
 ) (int, error) {
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, dependencySummaries, repairFeedback)
 	argsMap := map[string]any{
-		"prompt": RenderBraidNodeChildPromptWithFeedback(node, rootPrompt, dependencySummaries, repairFeedback),
+		"prompt": RenderBraidNodeHandoffPrompt(handoff),
 		"metadata": map[string]any{
 			"braid_node_id":    node.ID,
 			"braid_node_kind":  node.Kind,
 			"braid_depends_on": append([]string(nil), node.DependsOn...),
+			"handoff":          handoff,
 		},
 	}
 	if maxSummaryChars := EffectiveBraidNodeSummaryChars(node); maxSummaryChars > 0 {
@@ -1203,12 +3443,14 @@ func runDirectBraidNode(
 	toolExec *replToolExecutor,
 	output *engine.EngineOutput,
 ) (string, error) {
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, dependencySummaries, repairFeedback)
 	argsMap := map[string]any{
-		"prompt": RenderBraidNodeChildPromptWithFeedback(node, rootPrompt, dependencySummaries, repairFeedback),
+		"prompt": RenderBraidNodeHandoffPrompt(handoff),
 		"metadata": map[string]any{
 			"braid_node_id":    node.ID,
 			"braid_node_kind":  node.Kind,
 			"braid_depends_on": append([]string(nil), node.DependsOn...),
+			"handoff":          handoff,
 		},
 	}
 	if maxSummaryChars := EffectiveBraidNodeSummaryChars(node); maxSummaryChars > 0 {

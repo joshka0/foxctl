@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -527,6 +528,7 @@ func TestHelperFactoryToolsRepairsVerifierCounterexample(t *testing.T) {
 		Answer        string           `json:"answer"`
 		Attempts      []map[string]any `json:"attempts"`
 		CandidateBeam []map[string]any `json:"candidate_beam"`
+		RepairHarness map[string]any   `json:"repair_harness"`
 	}
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatalf("decode output: %v\n%s", err, raw)
@@ -540,8 +542,63 @@ func TestHelperFactoryToolsRepairsVerifierCounterexample(t *testing.T) {
 	if len(got.CandidateBeam) != 1 || got.CandidateBeam[0]["answer"] != "solution = bad" {
 		t.Fatalf("candidate beam=%#v", got.CandidateBeam)
 	}
+	if got.RepairHarness["kind"] != CounterexampleRepairKind || got.RepairHarness["candidate_count"] != float64(1) {
+		t.Fatalf("repair harness telemetry=%#v", got.RepairHarness)
+	}
 	if !strings.Contains(prompts[1], "Verifier counterexample") || !strings.Contains(prompts[1], "unit_counterexample") {
 		t.Fatalf("repair prompt missing verifier counterexample:\n%s", prompts[1])
+	}
+}
+
+func TestCounterexampleRepairHarnessRecordsStructuredDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	harness := NewCounterexampleRepairHarness(2)
+	feedback := harness.RecordVerifierFailure(3, "solution = candidate", map[string]any{
+		"failure_kind": "node_mismatch",
+		"failed_node":  "n7",
+		"observed":     "candidate value",
+		"expected":     "verified value",
+		"repair_hint":  "repair the failed node dependency",
+		"score":        float64(0.4),
+	})
+	counterexample, ok := feedback["counterexample"].(map[string]any)
+	if !ok || counterexample["failed_node"] != "n7" || counterexample["observed"] != "candidate value" || counterexample["expected"] != "verified value" {
+		t.Fatalf("feedback missing structured counterexample: %#v", feedback)
+	}
+	telemetry := harness.Telemetry()
+	if telemetry["kind"] != CounterexampleRepairKind || telemetry["candidate_count"] != 1 {
+		t.Fatalf("telemetry=%#v", telemetry)
+	}
+	latest, ok := telemetry["latest_counterexample"].(map[string]any)
+	if !ok || latest["failed_node"] != "n7" {
+		t.Fatalf("telemetry missing latest counterexample: %#v", telemetry)
+	}
+}
+
+func TestHelperVerifierDiagnosticMapPromotesKnownExtraCounterexampleFields(t *testing.T) {
+	t.Parallel()
+
+	diagMap := helperVerifierDiagnosticMap(HelperVerifierDiagnostic{
+		Pass:        false,
+		FailureKind: "graph_check",
+		Extra: map[string]any{
+			"failed_step":    0,
+			"failed_node":    "edge-2",
+			"observed":       []any{float64(1), float64(2)},
+			"expected":       []any{float64(1), float64(3)},
+			"benchmark_case": "must not become repair contract",
+		},
+	})
+	counterexample := helperFactoryCounterexamplePacket(diagMap)
+	if counterexample["failed_step"] != 0 || counterexample["failed_node"] != "edge-2" {
+		t.Fatalf("counterexample=%#v diag=%#v", counterexample, diagMap)
+	}
+	if _, exists := diagMap["benchmark_case"]; exists {
+		t.Fatalf("unknown diagnostic extra leaked into structured repair fields: %#v", diagMap)
+	}
+	if _, exists := diagMap["extra"]; exists {
+		t.Fatalf("nested extra leaked into diagnostic map: %#v", diagMap)
 	}
 }
 
@@ -559,23 +616,132 @@ func TestHelperFactoryVerifierFeedbackKeepsBestCandidate(t *testing.T) {
 		"attempt": float64(2),
 		"answer":  "solution = better",
 		"diagnostic": map[string]any{
-			"score": float64(0.7),
+			"score":          float64(0.7),
+			"failure_kind":   "goal_mismatch",
+			"failed_at_step": float64(4),
+			"repair_hint":    "repair from failed step",
 		},
 	}
 	best := bestHelperFactoryVerifierCandidate(current, next)
-	feedback := helperFactoryVerifierFeedbackMap(map[string]any{"score": float64(0.7)}, best, 3)
+	feedback := helperFactoryVerifierFeedbackMap(next["diagnostic"].(map[string]any), best, []map[string]any{current, next}, 3)
 	candidate, ok := feedback["best_candidate"].(map[string]any)
 	if !ok || candidate["answer"] != "solution = better" {
 		t.Fatalf("feedback=%#v", feedback)
+	}
+	counterexample, ok := feedback["counterexample"].(map[string]any)
+	if !ok || counterexample["failure_kind"] != "goal_mismatch" {
+		t.Fatalf("feedback missing counterexample: %#v", feedback)
+	}
+	frontier, ok := feedback["candidate_frontier"].([]map[string]any)
+	if !ok || len(frontier) != 2 || frontier[0]["answer"] != "solution = better" {
+		t.Fatalf("feedback frontier=%#v", feedback["candidate_frontier"])
 	}
 	if feedback["search_policy"] == nil {
 		t.Fatalf("feedback missing search policy: %#v", feedback)
 	}
 	summary := helperFactoryVerifierSummary(feedback)
-	for _, want := range []string{"best_candidate", "solution = better", "search_policy"} {
+	for _, want := range []string{"best_candidate", "solution = better", "search_policy", "counterexample", "candidate_frontier"} {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("summary missing %q: %s", want, summary)
 		}
+	}
+}
+
+func TestHelperFactoryFinalizeFeedbackConvertsFailureOutputToCounterexample(t *testing.T) {
+	t.Parallel()
+
+	feedback := helperFactoryFinalizeFeedbackMap(map[string]any{
+		"ok":            false,
+		"status":        "blocked",
+		"first_failure": "could not clear block 44",
+		"repair_hint":   "move blockers to a buffer first",
+	})
+	counterexample, ok := feedback["counterexample"].(map[string]any)
+	if !ok || counterexample["first_failure"] != "could not clear block 44" {
+		t.Fatalf("feedback missing counterexample: %#v", feedback)
+	}
+	policy, ok := feedback["search_policy"].(map[string]any)
+	if !ok || policy["kind"] != "self_reported_failure_repair" {
+		t.Fatalf("feedback missing search policy: %#v", feedback)
+	}
+	summary := helperFactoryVerifierSummary(feedback)
+	for _, want := range []string{"counterexample", "first_failure", "search_policy"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary missing %q: %s", want, summary)
+		}
+	}
+}
+
+func TestHelperFactoryFinalizeFeedbackSynthesizesCounterexampleForBareOKFalse(t *testing.T) {
+	t.Parallel()
+
+	feedback := helperFactoryFinalizeFeedbackMap(map[string]any{"ok": false, "answer": nil})
+	counterexample, ok := feedback["counterexample"].(map[string]any)
+	if !ok || counterexample["failure_kind"] != "unqualified_helper_failure" {
+		t.Fatalf("feedback missing synthesized counterexample: %#v", feedback)
+	}
+	if !strings.Contains(fmt.Sprint(counterexample["repair_hint"]), "first_failure") {
+		t.Fatalf("counterexample missing repair hint: %#v", counterexample)
+	}
+}
+
+func TestHelperFactoryVerifierSummaryCompactsLargeCandidates(t *testing.T) {
+	t.Parallel()
+
+	hugeAnswer := "solution = " + strings.Repeat("[1,2,0],", 5000)
+	feedback := helperFactoryVerifierFeedbackMap(map[string]any{
+		"answer": hugeAnswer,
+		"diagnostic": map[string]any{
+			"failure_kind":   "same_stack",
+			"failed_at_step": float64(1200),
+			"valid_prefix":   []any{[]any{float64(1), float64(0), float64(2)}},
+			"state_before":   []any{[]any{float64(1), float64(2)}, []any{}, []any{float64(3)}},
+			"message":        strings.Repeat("bad ", 1000),
+		},
+	}, map[string]any{
+		"answer": hugeAnswer,
+		"diagnostic": map[string]any{
+			"score": float64(0.7),
+		},
+	}, nil, 3)
+	summary := helperFactoryVerifierSummary(feedback)
+	if len(summary) > 4200 {
+		t.Fatalf("summary len=%d, want compact summary: %s", len(summary), summary)
+	}
+	for _, want := range []string{"same_stack", "failed_at_step", "json_hash", "best_candidate"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary missing %q: %s", want, summary)
+		}
+	}
+	if strings.Count(summary, "[1,2,0]") > 5 {
+		t.Fatalf("summary retained too much candidate body: %s", summary)
+	}
+}
+
+func TestCompactHelperFactoryMapSummarizesStructuredSolution(t *testing.T) {
+	t.Parallel()
+
+	solution := make([]any, 0, 1000)
+	for i := 0; i < 1000; i++ {
+		solution = append(solution, map[string]any{
+			"block": float64(i),
+			"from":  float64(0),
+			"to":    float64(1),
+		})
+	}
+	summary := compactHelperFactoryMap(map[string]any{
+		"ok":       true,
+		"solution": solution,
+	})
+	if _, exists := summary["solution"]; exists {
+		t.Fatalf("summary inlined structured solution: %#v", summary["solution"])
+	}
+	solutionSummary, ok := summary["solution_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing solution summary: %#v", summary)
+	}
+	if solutionSummary["count"] != 1000 {
+		t.Fatalf("solution count=%#v, want 1000", solutionSummary["count"])
 	}
 }
 
@@ -613,6 +779,396 @@ func TestHelperFactoryAnswerAcceptsStructuredAnswerWhenSolutionLineRequired(t *t
 	}
 	if answer != "solution = [[1,0,2]]" {
 		t.Fatalf("answer=%q", answer)
+	}
+}
+
+func TestHelperFactoryAnswerCanonicalizesObjectMoveSolution(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := helperFactoryAnswer(map[string]any{
+		"ok": true,
+		"solution": []any{
+			map[string]any{"block": float64(2), "from": float64(1), "to": float64(0)},
+			map[string]any{"move": float64(3), "from_stack": float64(0), "to_stack": float64(2)},
+		},
+	}, true)
+	if !ok {
+		t.Fatalf("expected object move solution to be accepted")
+	}
+	if answer != "solution = [[2,1,0],[3,0,2]]" {
+		t.Fatalf("answer=%q", answer)
+	}
+}
+
+func TestStackTransitionPlannerPresetSolvesAndVerifiesSample(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"initial_state": []any{[]any{float64(0)}, []any{float64(1), float64(2)}, []any{}},
+		"goal_state":    []any{[]any{}, []any{float64(1)}, []any{float64(2), float64(0)}},
+	}
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		Attempts:            1,
+		TaskPrompt:          "Solve the typed stack transition task.",
+		ExtractSolutionLine: true,
+		PresetName:          BraidScaffoldClassFiniteStateTransition + "/" + BraidScaffoldIDStackRelocationV1,
+		PresetSource:        stackTransitionPlannerPresetSource(),
+		PresetInput:         input,
+		MaxSourceLines:      380,
+		MaxSourceChars:      18000,
+		AnswerVerifier:      stackMoveAnswerVerifier,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+		Preset string `json:"preset"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Preset != BraidScaffoldClassFiniteStateTransition+"/"+BraidScaffoldIDStackRelocationV1 {
+		t.Fatalf("output ok=%v preset=%q raw=%s", got.OK, got.Preset, raw)
+	}
+	if ok, detail, applicable := verifyStackMoveCandidateFromInput(got.Answer, input); !applicable || !ok {
+		t.Fatalf("preset answer failed verifier applicable=%v detail=%q answer=%s", applicable, detail, got.Answer)
+	}
+}
+
+func TestGridResourcePathPresetSolvesAndVerifiesSample(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"task_type":      BraidScaffoldClassGraphSearch,
+		"scaffold_class": BraidScaffoldClassGraphSearch,
+		"scaffold_id":    BraidScaffoldIDResourcePathMinInitialV1,
+		"grid_layout": []any{
+			[]any{float64(0), float64(1), float64(-2)},
+			[]any{float64(-5), float64(-1), float64(0)},
+			[]any{float64(1), float64(-2), float64(-1)},
+		},
+	}
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		Attempts:            1,
+		TaskPrompt:          "Solve the typed graph search resource path task.",
+		ExtractSolutionLine: true,
+		PresetName:          BraidScaffoldClassGraphSearch + "/" + BraidScaffoldIDResourcePathMinInitialV1,
+		PresetSource:        gridResourcePathPresetSource(),
+		PresetInput:         input,
+		MaxSourceLines:      180,
+		MaxSourceChars:      9000,
+		AnswerVerifier:      gridResourcePathAnswerVerifier,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+		Preset string `json:"preset"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Preset != BraidScaffoldClassGraphSearch+"/"+BraidScaffoldIDResourcePathMinInitialV1 {
+		t.Fatalf("output ok=%v preset=%q raw=%s", got.OK, got.Preset, raw)
+	}
+	if got.Answer != "solution = 2" {
+		t.Fatalf("answer=%q", got.Answer)
+	}
+	if diag, applicable := gridResourcePathAnswerVerifier(got.Answer, input); !applicable || !diag.Pass {
+		t.Fatalf("preset answer failed verifier applicable=%v diag=%#v", applicable, diag)
+	}
+}
+
+func TestExplicitShortestPathPresetSolvesAndVerifiesSample(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"task_type":      BraidScaffoldClassGraphSearch,
+		"scaffold_class": BraidScaffoldClassGraphSearch,
+		"scaffold_id":    BraidScaffoldIDExplicitShortestPathV1,
+		"nodes":          []any{"A", "B", "C", "D", "E"},
+		"edges":          []any{[]any{"A", "B"}, []any{"B", "D"}, []any{"A", "C"}, []any{"C", "D"}},
+		"start_node":     "A",
+		"goal_node":      "D",
+		"objective":      "shortest_path_length",
+	}
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		Attempts:            1,
+		TaskPrompt:          "Solve the typed graph search shortest-path task.",
+		ExtractSolutionLine: true,
+		PresetName:          BraidScaffoldClassGraphSearch + "/" + BraidScaffoldIDExplicitShortestPathV1,
+		PresetSource:        explicitShortestPathPresetSource(),
+		PresetInput:         input,
+		MaxSourceLines:      220,
+		MaxSourceChars:      11000,
+		AnswerVerifier:      explicitShortestPathAnswerVerifier,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+		Preset string `json:"preset"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Preset != BraidScaffoldClassGraphSearch+"/"+BraidScaffoldIDExplicitShortestPathV1 {
+		t.Fatalf("output ok=%v preset=%q raw=%s", got.OK, got.Preset, raw)
+	}
+	if got.Answer != "solution = 2" {
+		t.Fatalf("answer=%q", got.Answer)
+	}
+	if diag, applicable := explicitShortestPathAnswerVerifier(got.Answer, input); !applicable || !diag.Pass {
+		t.Fatalf("preset answer failed verifier applicable=%v diag=%#v", applicable, diag)
+	}
+}
+
+func TestFiniteDomainConstraintPresetSolvesAndVerifiesSample(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"task_type":      BraidScaffoldClassConstraintSolver,
+		"scaffold_class": BraidScaffoldClassConstraintSolver,
+		"scaffold_id":    BraidScaffoldIDFiniteDomainV1,
+		"variables": []any{
+			map[string]any{"name": "x", "min": float64(0), "max": float64(5)},
+			map[string]any{"name": "y", "min": float64(0), "max": float64(5)},
+		},
+		"known_values": map[string]any{"target": float64(5)},
+		"constraints": []any{
+			map[string]any{
+				"name": "sum",
+				"op":   "eq",
+				"left": map[string]any{
+					"op": "add",
+					"args": []any{
+						map[string]any{"var": "x"},
+						map[string]any{"var": "y"},
+					},
+				},
+				"right": map[string]any{"known": "target"},
+			},
+			map[string]any{
+				"name":  "x_fixed",
+				"op":    "eq",
+				"left":  map[string]any{"var": "x"},
+				"right": map[string]any{"const": float64(2)},
+			},
+		},
+		"requested_outputs": []any{"x", "y"},
+	}
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		Attempts:            1,
+		TaskPrompt:          "Solve the typed finite-domain constraint task.",
+		ExtractSolutionLine: true,
+		PresetName:          BraidScaffoldClassConstraintSolver + "/" + BraidScaffoldIDFiniteDomainV1,
+		PresetSource:        finiteDomainConstraintPresetSource(),
+		PresetInput:         input,
+		MaxSourceLines:      340,
+		MaxSourceChars:      18000,
+		AnswerVerifier:      finiteDomainAnswerVerifier,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+		Preset string `json:"preset"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Preset != BraidScaffoldClassConstraintSolver+"/"+BraidScaffoldIDFiniteDomainV1 {
+		t.Fatalf("output ok=%v preset=%q raw=%s", got.OK, got.Preset, raw)
+	}
+	if got.Answer != `solution = {"x":2,"y":3}` {
+		t.Fatalf("answer=%q", got.Answer)
+	}
+	if diag, applicable := finiteDomainAnswerVerifier(got.Answer, input); !applicable || !diag.Pass {
+		t.Fatalf("preset answer failed verifier applicable=%v diag=%#v", applicable, diag)
+	}
+}
+
+func TestNumericDPPresetSolvesAndVerifiesMinRecurrenceSample(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"task_type":      BraidScaffoldClassNumericDP,
+		"scaffold_class": BraidScaffoldClassNumericDP,
+		"scaffold_id":    BraidScaffoldIDRecurrenceTableV1,
+		"objective":      "min",
+		"dp_dimensions":  []any{float64(5)},
+		"target":         []any{float64(4)},
+		"base_cases": []any{
+			map[string]any{"index": []any{float64(0)}, "value": float64(0)},
+		},
+		"transitions": []any{
+			map[string]any{"offset": []any{float64(-1)}, "weight": float64(2)},
+			map[string]any{"offset": []any{float64(-2)}, "weight": float64(3)},
+		},
+	}
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		Attempts:            1,
+		TaskPrompt:          "Solve the typed numeric dynamic-programming task.",
+		ExtractSolutionLine: true,
+		PresetName:          BraidScaffoldClassNumericDP + "/" + BraidScaffoldIDRecurrenceTableV1,
+		PresetSource:        numericDPTablePresetSource(),
+		PresetInput:         input,
+		MaxSourceLines:      300,
+		MaxSourceChars:      14000,
+		AnswerVerifier:      numericDPAnswerVerifier,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+		Preset string `json:"preset"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Preset != BraidScaffoldClassNumericDP+"/"+BraidScaffoldIDRecurrenceTableV1 {
+		t.Fatalf("output ok=%v preset=%q raw=%s", got.OK, got.Preset, raw)
+	}
+	if got.Answer != "solution = 6" {
+		t.Fatalf("answer=%q", got.Answer)
+	}
+	if diag, applicable := numericDPAnswerVerifier(got.Answer, input); !applicable || !diag.Pass {
+		t.Fatalf("preset answer failed verifier applicable=%v diag=%#v", applicable, diag)
+	}
+}
+
+func TestNumericDPVerifierRejectsObjectiveMismatch(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"task_type":      BraidScaffoldClassNumericDP,
+		"scaffold_class": BraidScaffoldClassNumericDP,
+		"scaffold_id":    BraidScaffoldIDRecurrenceTableV1,
+		"objective":      "count",
+		"dp_dimensions":  []any{float64(6)},
+		"target":         []any{float64(5)},
+		"base_cases": []any{
+			map[string]any{"index": []any{float64(0)}, "value": float64(1)},
+		},
+		"transitions": []any{
+			map[string]any{"offset": []any{float64(-1)}, "multiplier": float64(1)},
+			map[string]any{"offset": []any{float64(-2)}, "multiplier": float64(1)},
+		},
+	}
+	diag, applicable := numericDPAnswerVerifier("solution = 99", input)
+	if !applicable || diag.Pass || diag.FailureKind != "objective_mismatch" || diag.ExpectedFinal != 8 {
+		t.Fatalf("diagnostic=%#v applicable=%v", diag, applicable)
+	}
+	diag, applicable = numericDPAnswerVerifier("solution = 8", input)
+	if !applicable || !diag.Pass {
+		t.Fatalf("passing diagnostic=%#v applicable=%v", diag, applicable)
+	}
+}
+
+func TestSequenceSimulationPresetSolvesAndVerifiesSample(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"task_type":      BraidScaffoldClassSequenceSimulation,
+		"scaffold_class": BraidScaffoldClassSequenceSimulation,
+		"scaffold_id":    BraidScaffoldIDJSONPatchSequenceV1,
+		"sequence_model": BraidScaffoldIDJSONPatchSequenceV1,
+		"initial_state": map[string]any{
+			"count": float64(0),
+			"log":   []any{},
+		},
+		"events": []any{
+			map[string]any{"op": "inc", "path": []any{"count"}, "delta": float64(2)},
+			map[string]any{"op": "append", "path": []any{"log"}, "value": "tick"},
+		},
+		"invariants": []any{
+			map[string]any{"path": []any{"count"}, "min": float64(0)},
+		},
+		"goal_state": map[string]any{
+			"count": float64(2),
+			"log":   []any{"tick"},
+		},
+	}
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		Attempts:            1,
+		TaskPrompt:          "Solve the typed sequence simulation task.",
+		ExtractSolutionLine: true,
+		PresetName:          BraidScaffoldClassSequenceSimulation + "/" + BraidScaffoldIDJSONPatchSequenceV1,
+		PresetSource:        jsonPatchSequenceSimulationPresetSource(),
+		PresetInput:         input,
+		MaxSourceLines:      360,
+		MaxSourceChars:      18000,
+		AnswerVerifier:      sequenceSimulationAnswerVerifier,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+		Preset string `json:"preset"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Preset != BraidScaffoldClassSequenceSimulation+"/"+BraidScaffoldIDJSONPatchSequenceV1 {
+		t.Fatalf("output ok=%v preset=%q raw=%s", got.OK, got.Preset, raw)
+	}
+	if diag, applicable := sequenceSimulationAnswerVerifier(got.Answer, input); !applicable || !diag.Pass {
+		t.Fatalf("preset answer failed verifier applicable=%v diag=%#v answer=%s", applicable, diag, got.Answer)
+	}
+}
+
+func TestSequenceSimulationVerifierRejectsBadFinalState(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"scaffold_class": BraidScaffoldClassSequenceSimulation,
+		"scaffold_id":    BraidScaffoldIDJSONPatchSequenceV1,
+		"initial_state":  map[string]any{"count": float64(0)},
+		"events": []any{
+			map[string]any{"op": "inc", "path": []any{"count"}, "delta": float64(2)},
+		},
+	}
+	diag, applicable := sequenceSimulationAnswerVerifier(`solution = {"count":1}`, input)
+	if !applicable || diag.Pass || diag.FailureKind != "final_state_mismatch" {
+		t.Fatalf("diag applicable=%v diag=%#v", applicable, diag)
+	}
+}
+
+func TestSequenceSimulationVerifierRejectsInvariantFailure(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"scaffold_class": BraidScaffoldClassSequenceSimulation,
+		"scaffold_id":    BraidScaffoldIDJSONPatchSequenceV1,
+		"initial_state":  map[string]any{"count": float64(1)},
+		"events": []any{
+			map[string]any{"op": "inc", "path": []any{"count"}, "delta": float64(-2)},
+		},
+		"invariants": []any{
+			map[string]any{"path": []any{"count"}, "min": float64(0)},
+		},
+	}
+	diag, applicable := sequenceSimulationAnswerVerifier(`solution = {"count":-1}`, input)
+	if !applicable || diag.Pass || diag.FailureKind != "invariant" || diag.FailedAtStep != 0 {
+		t.Fatalf("diag applicable=%v diag=%#v", applicable, diag)
 	}
 }
 

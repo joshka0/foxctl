@@ -508,6 +508,7 @@ func TestLongCoTEffectiveConditionDisablesOptionalSubcallsByDefault(t *testing.T
 		false,
 		false,
 		true,
+		false,
 	)
 	if cfg.AsyncRecursion {
 		t.Fatal("expected no required/optional subcalls to disable async recursion")
@@ -540,6 +541,7 @@ func TestLongCoTREPLRunnerConfigRecursiveEnablesAsyncRecursionWhenQuestionAllows
 		false,
 		false,
 		true,
+		false,
 	)
 	if !cfg.AsyncRecursion {
 		t.Fatal("expected recursive condition to enable async recursion")
@@ -616,6 +618,7 @@ func TestLongCoTREPLRunnerConfigUsesQuestionRequiredSubcallRules(t *testing.T) {
 		false,
 		false,
 		true,
+		false,
 	)
 	if len(cfg.RequiredSubcallRules) != 1 {
 		t.Fatalf("required rules = %+v, want one rule", cfg.RequiredSubcallRules)
@@ -696,6 +699,7 @@ func TestLongCoTBraidGeneralHelperDoesNotReplaceBraidPhases(t *testing.T) {
 		rlmruntime.SandboxKindPython,
 		false,
 		true,
+		false,
 		false,
 		false,
 	)
@@ -963,6 +967,7 @@ func TestLongCoTREPLRunnerConfigNoSubcallsDisablesAsyncRecursion(t *testing.T) {
 		false,
 		false,
 		true,
+		false,
 	)
 	if cfg.AsyncRecursion {
 		t.Fatal("expected no-subcalls condition to disable async recursion")
@@ -988,6 +993,7 @@ func TestLongCoTREPLRunnerConfigGeneralHelperUsesSingleHelperPhase(t *testing.T)
 		true,
 		true,
 		true,
+		false,
 		false,
 	)
 	if cfg.HelperFactory == nil {
@@ -1052,6 +1058,7 @@ func TestLongCoTREPLRunnerConfigGeneralHelperDoesNotUseBlocksWorldPreset(t *test
 		true,
 		true,
 		false,
+		false,
 	)
 	if cfg.HelperFactory == nil {
 		t.Fatal("expected helper factory config")
@@ -1089,6 +1096,7 @@ Return solution = <integer> for the minimum initial health needed to move only r
 		true,
 		true,
 		true,
+		false,
 		false,
 	)
 	if cfg.HelperFactory == nil {

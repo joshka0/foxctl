@@ -212,6 +212,7 @@ func newEvalLongCoTCommand() *cobra.Command {
 		generalHelper                 bool
 		requireEphemeralSkills        bool
 		blocksworldHelper             bool
+		finalFromVerifiedHandoff      bool
 		noFallback                    bool
 	)
 
@@ -445,7 +446,7 @@ func newEvalLongCoTCommand() *cobra.Command {
 			if dryRun {
 				attempts = planLongCoTDryRunAttempts(runID, questions, conditions, activeProvider, activeModel)
 			} else {
-				attempts, err = runLongCoTLiveAttempts(ctx, cfg, workspaceRoot, runID, questions, conditions, target, helperRuntime, strings.TrimSpace(agentRole), sandbox, reviewCfg, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper)
+				attempts, err = runLongCoTLiveAttempts(ctx, cfg, workspaceRoot, runID, questions, conditions, target, helperRuntime, strings.TrimSpace(agentRole), sandbox, reviewCfg, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper, finalFromVerifiedHandoff)
 				if err != nil {
 					return writeOptimizeError(out, evalLongCoTCommand, fmt.Sprintf("run live attempts: %v", err))
 				}
@@ -511,16 +512,17 @@ func newEvalLongCoTCommand() *cobra.Command {
 				"rlm_review_child_summary_max_chars": reviewCfg.ChildSummaryMaxChars,
 				"rlm_review_child_summary_rewrite":   reviewCfg.ChildSummaryRewrite,
 				"rlm_review_child_summary_rewrite_iterations": reviewCfg.ChildSummaryRewriteIterations,
-				"no_think":                 noThink,
-				"sandbox":                  string(sandbox),
-				"longcot_repo":             strings.TrimSpace(longCoTRepo),
-				"longcot_python":           strings.TrimSpace(longCoTPython),
-				"ephemeral_skills":         ephemeralSkills,
-				"general_helper":           generalHelper,
-				"require_ephemeral_skills": requireEphemeralSkills,
-				"blocksworld_helper":       blocksworldHelper,
-				"verify_no_fallback":       noFallback,
-				"selected_question_ids":    extractLongCoTQuestionIDs(questions),
+				"no_think":                        noThink,
+				"sandbox":                         string(sandbox),
+				"longcot_repo":                    strings.TrimSpace(longCoTRepo),
+				"longcot_python":                  strings.TrimSpace(longCoTPython),
+				"ephemeral_skills":                ephemeralSkills,
+				"general_helper":                  generalHelper,
+				"require_ephemeral_skills":        requireEphemeralSkills,
+				"blocksworld_helper":              blocksworldHelper,
+				"rlm_final_from_verified_handoff": finalFromVerifiedHandoff,
+				"verify_no_fallback":              noFallback,
+				"selected_question_ids":           extractLongCoTQuestionIDs(questions),
 			}
 			if verifyResult != nil {
 				runConfig["verification"] = map[string]any{
@@ -605,6 +607,7 @@ func newEvalLongCoTCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&generalHelper, "general-helper", false, "Expose ephemeral_helper_solve, a runtime-managed short-lived Go helper factory for rlm_repl conditions")
 	cmd.Flags().BoolVar(&requireEphemeralSkills, "require-ephemeral-skills", false, "Require rlm_repl conditions to call ephemeral_skill_draft and ephemeral_skill_run before finalizing")
 	cmd.Flags().BoolVar(&blocksworldHelper, "blocksworld-helper", true, "Expose the deterministic blocksworld_solve helper for BlocksWorld LongCoT questions")
+	cmd.Flags().BoolVar(&finalFromVerifiedHandoff, "rlm-final-from-verified-handoff", false, "For braid RLM conditions, return a runtime-verified final handoff directly instead of asking the model to restate long final answers")
 	cmd.Flags().BoolVar(&noFallback, "verify-no-fallback", false, "Disable LongCoT verifier fallback judges (--no-fallback)")
 
 	return cmd
@@ -944,6 +947,7 @@ func runLongCoTLiveAttempts(
 	generalHelper bool,
 	requireEphemeralSkills bool,
 	blocksworldHelper bool,
+	finalFromVerifiedHandoff bool,
 ) ([]longcoteval.Attempt, error) {
 	companionDB, companionClose, _ := openRLMCompanionDB(ctx, cfg)
 	if companionClose != nil {
@@ -977,7 +981,7 @@ func runLongCoTLiveAttempts(
 			}
 
 			start := time.Now()
-			outcome, runErr := runLongCoTLiveAttempt(ctx, cfg, workspaceRoot, companionDB, question, effectiveCondition, target, helperRuntime, agentRole, sandbox, attempt.AttemptID, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper)
+			outcome, runErr := runLongCoTLiveAttempt(ctx, cfg, workspaceRoot, companionDB, question, effectiveCondition, target, helperRuntime, agentRole, sandbox, attempt.AttemptID, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper, finalFromVerifiedHandoff)
 			attempt.DurationMS = time.Since(start).Milliseconds()
 			if outcome.DurationMS > 0 {
 				attempt.DurationMS = outcome.DurationMS
@@ -1253,6 +1257,7 @@ func runLongCoTLiveAttempt(
 	generalHelper bool,
 	requireEphemeralSkills bool,
 	blocksworldHelper bool,
+	finalFromVerifiedHandoff bool,
 ) (longCoTLiveAttemptOutcome, error) {
 	switch longCoTRunnerForCondition(condition) {
 	case longCoTLiveRunnerAgent:
@@ -1260,7 +1265,7 @@ func runLongCoTLiveAttempt(
 	case longCoTLiveRunnerRLM:
 		return runLongCoTRLMAttempt(ctx, cfg, workspaceRoot, companionDB, question, condition, target)
 	case longCoTLiveRunnerREPL:
-		return runLongCoTREPLAttempt(ctx, workspaceRoot, question, condition, target, helperRuntime, sandbox, attemptID, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper)
+		return runLongCoTREPLAttempt(ctx, workspaceRoot, question, condition, target, helperRuntime, sandbox, attemptID, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper, finalFromVerifiedHandoff)
 	default:
 		return longCoTLiveAttemptOutcome{}, fmt.Errorf("unsupported condition runner for %s", condition.ID)
 	}
@@ -1473,6 +1478,7 @@ func runLongCoTREPLAttempt(
 	generalHelper bool,
 	requireEphemeralSkills bool,
 	blocksworldHelper bool,
+	finalFromVerifiedHandoff bool,
 ) (longCoTLiveAttemptOutcome, error) {
 	timeout := time.Duration(condition.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
@@ -1495,7 +1501,7 @@ func runLongCoTREPLAttempt(
 	defer cancel()
 
 	start := time.Now()
-	runnerCfg := longCoTREPLRunnerConfig(question, condition, target, helperRuntime, timeout, maxIterations, workspaceRoot, sandbox, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper)
+	runnerCfg := longCoTREPLRunnerConfig(question, condition, target, helperRuntime, timeout, maxIterations, workspaceRoot, sandbox, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper, finalFromVerifiedHandoff)
 	result, err := (&rlmruntime.REPLRunner{Config: runnerCfg}).Run(runCtx, task, rlm.Environment{})
 	if generalHelper {
 		markLongCoTGeneralHelperResult(&result)
@@ -1622,7 +1628,7 @@ func runLongCoTRLMReviewAttempt(
 	defer cancel()
 
 	start := time.Now()
-	runnerCfg := longCoTREPLRunnerConfig(question, reviewCondition, target, longCoTHelperRuntime{Target: target}, timeout, maxIterations, workspaceRoot, sandbox, false, false, false, false)
+	runnerCfg := longCoTREPLRunnerConfig(question, reviewCondition, target, longCoTHelperRuntime{Target: target}, timeout, maxIterations, workspaceRoot, sandbox, false, false, false, false, false)
 	runnerCfg.LLM.RequireToolUse = reviewCfg.Recursive
 	if reviewCfg.Recursive {
 		runnerCfg.Phases = longCoTRecursiveReviewPhases(sandbox)
@@ -1867,10 +1873,11 @@ func longCoTBraidSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRu
 				"Each child receives the official task text and dependency summaries from prior waves.",
 				"Do not answer directly in this phase.",
 			}, "\n"),
-			Tools:                 []string{rlmruntime.RLMQueryToolName},
-			MaxIterations:         1,
-			AutoExecuteGraphNodes: true,
-			BraidRepairAttempts:   1,
+			Tools:                      []string{rlmruntime.RLMQueryToolName},
+			MaxIterations:              1,
+			AutoExecuteGraphNodes:      true,
+			DisableHelperFirstFallback: true,
+			BraidRepairAttempts:        1,
 		},
 		{
 			Name: "final",
@@ -2086,6 +2093,7 @@ func longCoTREPLRunnerConfig(
 	generalHelper bool,
 	requireEphemeralSkills bool,
 	blocksworldHelper bool,
+	finalFromVerifiedHandoff bool,
 ) rlmruntime.REPLRunnerConfig {
 	cfg := rlmruntime.REPLRunnerConfig{
 		LLM: longCoTLLMConfigFromTarget(target, condition, timeout, maxIterations),
@@ -2110,11 +2118,12 @@ func longCoTREPLRunnerConfig(
 			WorkspaceID: workspaceRoot,
 			Command:     evalLongCoTCommand,
 		},
-		REPLToolResultMaxChars:       1600,
-		EphemeralSkills:              ephemeralSkills,
-		ExtractSolutionLine:          true,
-		FinalSolutionLineRequired:    true,
-		FinalAnswerRepairMaxAttempts: 1,
+		REPLToolResultMaxChars:         1600,
+		EphemeralSkills:                ephemeralSkills,
+		ExtractSolutionLine:            true,
+		FinalSolutionLineRequired:      true,
+		FinalAnswerFromVerifiedHandoff: finalFromVerifiedHandoff,
+		FinalAnswerRepairMaxAttempts:   1,
 	}
 	if generalHelper {
 		helperLLM := longCoTLLMConfigFromTarget(firstNonEmptyLongCoTLiveTarget(helperRuntime.Target, target), condition, firstPositiveDuration(helperRuntime.Timeout, timeout), maxIterations)

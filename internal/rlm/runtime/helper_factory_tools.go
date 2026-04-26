@@ -58,10 +58,14 @@ type HelperVerifierDiagnostic struct {
 	Pass          bool           `json:"pass"`
 	Score         float64        `json:"score,omitempty"`
 	FailureKind   string         `json:"failure_kind,omitempty"`
+	FirstFailure  string         `json:"first_failure,omitempty"`
+	FailedNode    string         `json:"failed_node,omitempty"`
 	FailedAtStep  int            `json:"failed_at_step,omitempty"`
 	FailedAction  []int          `json:"failed_action,omitempty"`
 	ValidPrefix   [][]int        `json:"valid_prefix,omitempty"`
 	StateBefore   any            `json:"state_before,omitempty"`
+	Observed      any            `json:"observed,omitempty"`
+	Expected      any            `json:"expected,omitempty"`
 	ObservedFinal any            `json:"observed_final,omitempty"`
 	ExpectedFinal any            `json:"expected_final,omitempty"`
 	Message       string         `json:"message,omitempty"`
@@ -153,9 +157,8 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 	var lastFeedback string
 	taskCtx := helperFactoryTaskContextForPrompt(prompt)
 	var repairState *helperFactoryRepairState
+	repairHarness := NewCounterexampleRepairHarness(h.Config.Search.BeamWidth)
 	attempts := make([]map[string]any, 0, attemptLimit)
-	candidateBeam := make([]map[string]any, 0, attemptLimit)
-	var bestVerifierCandidate map[string]any
 	for attempt := 1; attempt <= attemptLimit; attempt++ {
 		draft, raw, err := h.draftForAttempt(ctx, attempt, taskCtx, instructions, lastFeedback, repairState)
 		if err != nil {
@@ -242,7 +245,8 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 		answer, ok := helperFactoryAnswer(result.Output, h.Config.ExtractSolutionLine)
 		if !ok {
 			errText := "helper output did not include a usable answer"
-			lastFeedback = helperFactoryRepairFeedback("finalize", errText, draft.Source, raw, helperInput, result.Output)
+			finalizeFeedback := repairHarness.RecordSelfReportedFailure(result.Output)
+			lastFeedback = helperFactoryRepairFeedbackWithVerifier("finalize", errText, draft.Source, raw, helperInput, result.Output, finalizeFeedback)
 			repairState = &helperFactoryRepairState{
 				Stage:    "finalize",
 				Error:    errText,
@@ -250,9 +254,10 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 				Raw:      raw,
 				Input:    cloneMapAny(helperInput),
 				Output:   cloneMapAny(result.Output),
+				Verifier: finalizeFeedback,
 				Language: helperLanguage,
 			}
-			attempts = append(attempts, map[string]any{
+			attempt := map[string]any{
 				"attempt":  attempt,
 				"ok":       false,
 				"stage":    "finalize",
@@ -261,21 +266,21 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 				"input":    helperInput,
 				"output":   result.Output,
 				"language": helperLanguage,
-			})
+			}
+			if len(finalizeFeedback) > 0 {
+				attempt["finalize_feedback"] = finalizeFeedback
+			}
+			attempts = append(attempts, attempt)
 			continue
 		}
+		verified := false
 		if h.Config.AnswerVerifier != nil {
 			diag, applicable := h.Config.AnswerVerifier(answer, helperInput)
 			if applicable && !diag.Pass {
 				diagMap := helperVerifierDiagnosticMap(diag)
 				errText := helperVerifierDiagnosticError(diag)
-				candidateBeam = append(candidateBeam, map[string]any{
-					"attempt":    attempt,
-					"answer":     compactHelperFactoryString(answer),
-					"diagnostic": diagMap,
-				})
-				bestVerifierCandidate = bestHelperFactoryVerifierCandidate(bestVerifierCandidate, candidateBeam[len(candidateBeam)-1])
-				lastFeedback = helperFactoryRepairFeedbackWithVerifier("verify", errText, draft.Source, raw, helperInput, result.Output, helperFactoryVerifierFeedbackMap(diagMap, bestVerifierCandidate, h.Config.Search.BeamWidth))
+				verifierFeedback := repairHarness.RecordVerifierFailure(attempt, answer, diagMap)
+				lastFeedback = helperFactoryRepairFeedbackWithVerifier("verify", errText, draft.Source, raw, helperInput, result.Output, verifierFeedback)
 				repairState = &helperFactoryRepairState{
 					Stage:    "verify",
 					Error:    errText,
@@ -283,7 +288,7 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 					Raw:      raw,
 					Input:    cloneMapAny(helperInput),
 					Output:   cloneMapAny(result.Output),
-					Verifier: helperFactoryVerifierFeedbackMap(diagMap, bestVerifierCandidate, h.Config.Search.BeamWidth),
+					Verifier: verifierFeedback,
 					Language: helperLanguage,
 				}
 				attempts = append(attempts, map[string]any{
@@ -298,6 +303,11 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 					"language":            helperLanguage,
 				})
 				continue
+			}
+			if applicable && diag.Pass {
+				verified = true
+				result.Output["verified"] = true
+				result.Output["verifier_diagnostic"] = helperVerifierDiagnosticMap(diag)
 			}
 		}
 		attempts = append(attempts, map[string]any{
@@ -319,8 +329,14 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			"preset":         strings.TrimSpace(h.Config.PresetName),
 			"attempts":       compactHelperFactoryAttempts(attempts),
 		}
-		if len(candidateBeam) > 0 {
-			out["candidate_beam"] = compactHelperFactoryCandidateBeam(candidateBeam)
+		if verified {
+			out["verified"] = true
+		}
+		if repairHarness.HasCandidates() {
+			out["candidate_beam"] = compactHelperFactoryCandidateBeam(repairHarness.CandidateBeam())
+		}
+		if repairTelemetry := repairHarness.Telemetry(); len(repairTelemetry) > 0 {
+			out["repair_harness"] = repairTelemetry
 		}
 		return marshalHelperFactoryOutput(out)
 	}
@@ -332,8 +348,11 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 		"preset":   strings.TrimSpace(h.Config.PresetName),
 		"attempts": compactHelperFactoryAttempts(attempts),
 	}
-	if len(candidateBeam) > 0 {
-		out["candidate_beam"] = compactHelperFactoryCandidateBeam(candidateBeam)
+	if repairHarness.HasCandidates() {
+		out["candidate_beam"] = compactHelperFactoryCandidateBeam(repairHarness.CandidateBeam())
+	}
+	if repairTelemetry := repairHarness.Telemetry(); len(repairTelemetry) > 0 {
+		out["repair_harness"] = repairTelemetry
 	}
 	return marshalHelperFactoryOutput(out)
 }
@@ -1066,6 +1085,13 @@ func helperVerifierDiagnosticMap(diag HelperVerifierDiagnostic) map[string]any {
 	if err := json.Unmarshal(body, &out); err != nil {
 		return map[string]any{"pass": diag.Pass, "message": diag.Message}
 	}
+	for key, value := range diag.Extra {
+		if _, exists := out[key]; exists || !counterexampleRepairKnownField(key) {
+			continue
+		}
+		out[key] = value
+	}
+	delete(out, "extra")
 	for key, value := range out {
 		if value == nil || value == "" {
 			delete(out, key)
@@ -1103,11 +1129,11 @@ func helperFactoryVerifierSummary(value map[string]any) string {
 	if len(value) == 0 {
 		return "{}"
 	}
-	body, err := json.Marshal(value)
+	body, err := json.Marshal(compactHelperFactoryVerifierValue(value))
 	if err != nil {
 		return helperFactoryJSONSummary(value)
 	}
-	return compactHelperFactoryLongText(string(body), 12000)
+	return compactHelperFactoryLongText(string(body), 4000)
 }
 
 func helperFactoryExactInputJSON(value map[string]any, maxChars int) string {
@@ -1374,6 +1400,9 @@ func helperFactoryAnswerValue(key string, value any, extractSolution bool) (stri
 		if !strings.EqualFold(key, "solution") && !(extractSolution && strings.EqualFold(key, "answer")) {
 			return "", false
 		}
+		if normalized, ok := helperFactoryCanonicalMoveSolution(typed); ok {
+			return "solution = " + normalized, true
+		}
 		body, err := json.Marshal(typed)
 		if err != nil || len(body) == 0 {
 			return "", false
@@ -1389,6 +1418,25 @@ func helperFactoryAnswerValue(key string, value any, extractSolution bool) (stri
 		}
 		return "solution = " + string(body), true
 	}
+}
+
+func helperFactoryCanonicalMoveSolution(values []any) (string, bool) {
+	if len(values) == 0 {
+		return "", false
+	}
+	moves := make([][3]int, 0, len(values))
+	for _, value := range values {
+		move, ok := stackMoveFromAny(value)
+		if !ok {
+			return "", false
+		}
+		moves = append(moves, move)
+	}
+	body, err := json.Marshal(moves)
+	if err != nil || len(body) == 0 {
+		return "", false
+	}
+	return string(body), true
 }
 
 func helperFactoryTraceFromToolResults(results []engine.ToolResult) (map[string]any, bool) {
@@ -1459,7 +1507,11 @@ func compactHelperFactoryCandidateBeam(candidates []map[string]any) []map[string
 			item["attempt"] = value
 		}
 		if answer, ok := candidate["answer"].(string); ok && strings.TrimSpace(answer) != "" {
-			item["answer"] = compactHelperFactoryString(answer)
+			if len(strings.TrimSpace(answer)) > 500 {
+				item["answer_summary"] = compactHelperFactoryVerifierDataSummary(answer)
+			} else {
+				item["answer"] = compactHelperFactoryString(answer)
+			}
 		}
 		if diagnostic, ok := candidate["diagnostic"].(map[string]any); ok {
 			item["diagnostic_summary"] = compactHelperFactoryMap(diagnostic)
@@ -1501,17 +1553,242 @@ func helperFactoryCandidateScore(candidate map[string]any) float64 {
 	}
 }
 
-func helperFactoryVerifierFeedbackMap(current, best map[string]any, beamWidth int) map[string]any {
-	out := map[string]any{"current": current}
+func helperFactoryVerifierFeedbackMap(current, best map[string]any, beam []map[string]any, beamWidth int) map[string]any {
+	out := map[string]any{"current": compactHelperFactoryVerifierCandidate(current)}
+	if counterexample := helperFactoryCounterexamplePacket(current); len(counterexample) > 0 {
+		out["counterexample"] = counterexample
+	}
 	if len(best) > 0 {
 		out["best_candidate"] = compactHelperFactoryCandidateBeam([]map[string]any{best})[0]
 	}
+	if top := helperFactoryTopVerifierCandidates(beam, beamWidth); len(top) > 0 {
+		out["candidate_frontier"] = compactHelperFactoryCandidateBeam(top)
+	}
 	if beamWidth > 1 {
 		out["search_policy"] = map[string]any{
-			"kind":        "verifier_guided_candidate_repair",
-			"beam_width":  beamWidth,
-			"instruction": "repair the highest-scoring failed candidate first; preserve useful valid prefixes and fix the verifier counterexample",
+			"kind":       "counterexample_guided_beam_repair",
+			"beam_width": beamWidth,
+			"instructions": []string{
+				"treat the verifier diagnostic as a concrete counterexample, not generic feedback",
+				"expand or repair the highest-scoring candidate frontier first",
+				"preserve valid prefixes and modify the earliest failed transition or construction step",
+				"return ok:false with a new counterexample if no verified candidate can be produced",
+			},
 		}
+	}
+	return out
+}
+
+func helperFactoryFinalizeFeedbackMap(output map[string]any) map[string]any {
+	if len(output) == 0 {
+		return nil
+	}
+	counterexample := helperFactoryCounterexamplePacket(output)
+	if len(counterexample) == 0 {
+		if okValue, exists := output["ok"]; exists {
+			if okBool, isBool := okValue.(bool); isBool && !okBool {
+				counterexample = map[string]any{
+					"failure_kind": "unqualified_helper_failure",
+					"message":      "helper returned ok:false without a concrete failure packet",
+					"repair_hint":  "return a verified candidate with ok:true, or return ok:false with first_failure, failed_step, state_before, and repair_hint",
+				}
+			}
+		}
+	}
+	if len(counterexample) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"counterexample": counterexample,
+		"search_policy": map[string]any{
+			"kind": "self_reported_failure_repair",
+			"instructions": []string{
+				"the helper returned a failure packet instead of a candidate answer",
+				"use the failure packet as a concrete counterexample and repair the algorithm",
+				"do not repeat ok:false for the same failure unless a new blocker is proven",
+				"return ok:true only after constructing and verifying a complete candidate",
+			},
+		},
+	}
+}
+
+func helperFactoryCounterexamplePacket(current map[string]any) map[string]any {
+	if len(current) == 0 {
+		return nil
+	}
+	diag := current
+	if nested, ok := current["diagnostic"].(map[string]any); ok {
+		diag = nested
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"failure_kind",
+		"first_failure",
+		"failed_step",
+		"failed_at_step",
+		"failed_node",
+		"failed_action",
+		"state_before",
+		"valid_prefix",
+		"observed",
+		"expected",
+		"observed_final",
+		"expected_final",
+		"message",
+		"repair_hint",
+		"progress",
+		"status",
+	} {
+		if raw, ok := diag[key]; ok && raw != nil && raw != "" {
+			out[key] = compactHelperFactoryVerifierScalar(raw)
+		}
+	}
+	return out
+}
+
+func helperFactoryTopVerifierCandidates(candidates []map[string]any, beamWidth int) []map[string]any {
+	if len(candidates) == 0 || beamWidth <= 0 {
+		return nil
+	}
+	cloned := make([]map[string]any, 0, len(candidates))
+	for _, candidate := range candidates {
+		if len(candidate) > 0 {
+			cloned = append(cloned, cloneMapAny(candidate))
+		}
+	}
+	sort.SliceStable(cloned, func(i, j int) bool {
+		return helperFactoryCandidateScore(cloned[i]) > helperFactoryCandidateScore(cloned[j])
+	})
+	if len(cloned) > beamWidth {
+		cloned = cloned[:beamWidth]
+	}
+	return cloned
+}
+
+func compactHelperFactoryVerifierValue(value map[string]any) map[string]any {
+	if len(value) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(value))
+	for key, raw := range value {
+		switch key {
+		case "current", "best_candidate":
+			if typed, ok := raw.(map[string]any); ok {
+				out[key] = compactHelperFactoryVerifierCandidate(typed)
+				continue
+			}
+		case "diagnostic", "diagnostic_summary":
+			if typed, ok := raw.(map[string]any); ok {
+				out[key] = compactHelperFactoryVerifierDiagnostic(typed)
+				continue
+			}
+		}
+		out[key] = compactHelperFactoryVerifierScalar(raw)
+	}
+	return out
+}
+
+func compactHelperFactoryVerifierCandidate(candidate map[string]any) map[string]any {
+	if len(candidate) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{"attempt", "score", "ok", "stage"} {
+		if raw, ok := candidate[key]; ok {
+			out[key] = compactHelperFactoryVerifierScalar(raw)
+		}
+	}
+	if answer, ok := candidate["answer"].(string); ok && strings.TrimSpace(answer) != "" {
+		if len(strings.TrimSpace(answer)) > 500 {
+			out["answer_summary"] = compactHelperFactoryVerifierDataSummary(answer)
+		} else {
+			out["answer"] = compactHelperFactoryString(answer)
+		}
+	}
+	if diagnostic, ok := candidate["diagnostic"].(map[string]any); ok {
+		out["diagnostic"] = compactHelperFactoryVerifierDiagnostic(diagnostic)
+	}
+	if diagnostic, ok := candidate["diagnostic_summary"].(map[string]any); ok {
+		out["diagnostic_summary"] = compactHelperFactoryVerifierDiagnostic(diagnostic)
+	}
+	if len(out) == 0 {
+		return compactHelperFactoryMap(candidate)
+	}
+	return out
+}
+
+func compactHelperFactoryVerifierDiagnostic(diag map[string]any) map[string]any {
+	if len(diag) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, key := range []string{"pass", "failure_kind", "first_failure", "failed_step", "failed_at_step", "failed_node", "failed_action", "score", "progress", "message", "repair_hint", "status"} {
+		if raw, ok := diag[key]; ok {
+			out[key] = compactHelperFactoryVerifierScalar(raw)
+		}
+	}
+	for _, key := range []string{"state_before", "observed", "expected", "observed_final", "expected_final", "valid_prefix"} {
+		if raw, ok := diag[key]; ok {
+			out[key] = compactHelperFactoryVerifierDataSummary(raw)
+		}
+	}
+	return out
+}
+
+func counterexampleRepairKnownField(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "failure_kind",
+		"first_failure",
+		"failed_step",
+		"failed_at_step",
+		"failed_node",
+		"failed_action",
+		"state_before",
+		"valid_prefix",
+		"observed",
+		"expected",
+		"observed_final",
+		"expected_final",
+		"message",
+		"repair_hint",
+		"progress",
+		"status",
+		"score":
+		return true
+	default:
+		return false
+	}
+}
+
+func compactHelperFactoryVerifierScalar(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return compactHelperFactoryLongText(typed, 500)
+	case map[string]any:
+		return compactHelperFactoryMap(typed)
+	case []any:
+		return compactHelperFactoryVerifierDataSummary(typed)
+	default:
+		return typed
+	}
+}
+
+func compactHelperFactoryVerifierDataSummary(value any) map[string]any {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	out := map[string]any{
+		"json_hash":  hashHelperFactoryString(string(body)),
+		"json_chars": len(body),
+	}
+	if count := helperFactorySequenceLen(value); count >= 0 {
+		out["count"] = count
+	}
+	if len(body) <= 800 {
+		out["value"] = value
+	} else {
+		out["excerpt"] = compactHelperFactoryLongText(string(body), 240)
 	}
 	return out
 }
@@ -1537,7 +1814,7 @@ func compactHelperFactoryMap(value map[string]any) map[string]any {
 			case bool:
 				out[key] = typed
 			default:
-				out[key] = typed
+				out[key+"_summary"] = compactHelperFactoryVerifierDataSummary(typed)
 			}
 		}
 	}

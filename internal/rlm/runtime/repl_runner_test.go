@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,20 @@ import (
 	"github.com/joshka0/foxctl/internal/rlm"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
+
+func TestIsRetryableREPLLLMError(t *testing.T) {
+	t.Parallel()
+
+	if !isRetryableREPLLLMError(errors.New("read response: local error: tls: bad record MAC")) {
+		t.Fatal("tls bad record MAC should be retryable")
+	}
+	if isRetryableREPLLLMError(context.DeadlineExceeded) {
+		t.Fatal("context deadline exceeded should not be retried")
+	}
+	if isRetryableREPLLLMError(errors.New("invalid tool arguments")) {
+		t.Fatal("semantic/runtime errors should not be retried")
+	}
+}
 
 func TestREPLRunnerUsesPythonREPLTool(t *testing.T) {
 	var calls int
@@ -1638,6 +1653,90 @@ func TestExecutePhaseBraidGraphUsesPreferredHelperBeforeChild(t *testing.T) {
 	}
 	if len(output.ToolCalls) != 1 || output.ToolCalls[0].Name != EphemeralHelperSolveToolName {
 		t.Fatalf("tool calls=%#v, want one helper call", output.ToolCalls)
+	}
+	handoff := latestBraidFinalHandoff(output)
+	if !strings.Contains(handoff, `"verified_answer": "solution = helper"`) {
+		t.Fatalf("missing compact final handoff: %s", handoff)
+	}
+	prompt := buildREPLPhasePrompt("large original prompt should be omitted", REPLRunnerPhase{Name: "final", Final: true}, output, replRunnerRunState{braidGraph: graph})
+	if !strings.Contains(prompt, "Verified braid final handoff") || !strings.Contains(prompt, "solution = helper") {
+		t.Fatalf("final prompt missing handoff:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "large original prompt should be omitted") || strings.Contains(prompt, "Prior phase tool outputs") {
+		t.Fatalf("final prompt retained bulky prior context:\n%s", prompt)
+	}
+}
+
+func TestVerifiedAnswerFromBraidFinalHandoff(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := verifiedAnswerFromBraidFinalHandoff(`{
+  "final_node": "n_reduce",
+  "verified_answer": "solution = [[1,0,2]]",
+  "required_output": "return exactly this answer line"
+}`)
+	if !ok {
+		t.Fatal("verified answer not found")
+	}
+	if answer != "solution = [[1,0,2]]" {
+		t.Fatalf("answer=%q", answer)
+	}
+
+	if answer, ok := verifiedAnswerFromBraidFinalHandoff(`{"verified_answer":"not a solution line"}`); ok {
+		t.Fatalf("unexpected answer=%q", answer)
+	}
+}
+
+func TestExecutePhaseBraidGraphCanDisableHelperFirstFallback(t *testing.T) {
+	t.Parallel()
+
+	helper := &HelperFactoryTools{Config: HelperFactoryConfig{
+		Language: HelperLanguageGo,
+		PresetSource: `func Solve(input map[string]any) map[string]any {
+	return map[string]any{"ok": false}
+}`,
+	}}
+	toolExec := &replToolExecutor{
+		subcallsEnabled:   true,
+		helperFactory:     helper,
+		extraToolExecutor: helper,
+		rlmQuery: func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error) {
+			t.Fatal("rlm_query should not be called when helper-first fallback is disabled")
+			return rlm.Result{}, nil
+		},
+	}
+	graph := &BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{{
+			ID:           "n_solve",
+			Kind:         "solve",
+			Question:     "Compute the exact answer.",
+			HelperPolicy: BraidNodeHelperPolicyPreferred,
+		}},
+		FinalNode: "n_solve",
+	}
+	var output engine.EngineOutput
+	err := executePhaseBraidGraph(
+		context.Background(),
+		"graph_fanout",
+		REPLRunnerPhase{
+			AutoExecuteGraphNodes:      true,
+			DisableHelperFirstFallback: true,
+		},
+		toolExec,
+		graph,
+		"Return solution = ...",
+		1,
+		&output,
+	)
+	if err == nil {
+		t.Fatal("executePhaseBraidGraph() succeeded despite failed required helper-first")
+	}
+	if !strings.Contains(err.Error(), "helper-first failed") {
+		t.Fatalf("error=%v, want helper-first failure", err)
+	}
+	if len(output.ToolCalls) != 1 || output.ToolCalls[0].Name != EphemeralHelperSolveToolName {
+		t.Fatalf("tool calls=%#v, want one helper call and no fallback child", output.ToolCalls)
 	}
 }
 
@@ -4256,5 +4355,19 @@ func TestBuildREPLLLMConfigPreservesBearerPrefixSpace(t *testing.T) {
 	}, rlm.Task{})
 	if got.AuthPrefix != "Bearer " {
 		t.Fatalf("auth prefix=%q want trailing-space bearer prefix preserved", got.AuthPrefix)
+	}
+}
+
+func TestNormalizeREPLPhaseResponseFormatDowngradesJSONObjectForLMStudio(t *testing.T) {
+	t.Parallel()
+
+	got := strings.TrimSpace(string(normalizeREPLPhaseResponseFormat("lmstudio", json.RawMessage(`{"type":"json_object"}`))))
+	if got != `{"type":"text"}` {
+		t.Fatalf("lmstudio response_format=%q want text", got)
+	}
+
+	got = strings.TrimSpace(string(normalizeREPLPhaseResponseFormat("openrouter", json.RawMessage(`{"type":"json_object"}`))))
+	if got != `{"type":"json_object"}` {
+		t.Fatalf("openrouter response_format=%q want json_object preserved", got)
 	}
 }

@@ -84,6 +84,7 @@ type REPLRunnerConfig struct {
 	HelperFactory                     *HelperFactoryConfig
 	ExtractSolutionLine               bool
 	FinalSolutionLineRequired         bool
+	FinalAnswerFromVerifiedHandoff    bool
 	FinalAnswerRepairMaxAttempts      int
 	ToolErrorRepairMaxAttempts        int
 	Telemetry                         TelemetrySink
@@ -108,6 +109,7 @@ type REPLRunnerPhase struct {
 	Final                      bool
 	AutoExecuteRequiredTool    bool
 	AutoExecuteGraphNodes      bool
+	DisableHelperFirstFallback bool
 	AutoExecuteToolCalls       []REPLRunnerPhaseAutoToolCall
 	RequireToolResultOK        bool
 	RequireToolOutput          bool
@@ -130,6 +132,8 @@ type REPLRunnerPhaseAutoToolCall struct {
 type replRunnerRunState struct {
 	braidGraph *BraidGraph
 }
+
+const braidFinalHandoffSource = "rlm.braid.final_handoff"
 
 // REPLRunner exposes a prompt-bound persistent scratch REPL to a parent model.
 type REPLRunner struct {
@@ -655,6 +659,21 @@ func (r *REPLRunner) runStagedREPLLoop(
 		if phase.Final {
 			phaseTools = nil
 		}
+		if phase.Final && r.Config.FinalAnswerFromVerifiedHandoff {
+			if answer, ok := verifiedAnswerFromLatestBraidFinalHandoff(output); ok {
+				attemptOutput := engine.EngineOutput{
+					AssistantText: answer,
+					StopReason:    engine.StopReasonEndTurn,
+					InjectedContexts: []engine.InjectedContext{{
+						ToolCallID: "braid-final-forward",
+						Source:     "rlm.braid.final_answer_forwarded",
+						Content:    answer,
+					}},
+				}
+				output = mergeEngineOutputs(output, attemptOutput)
+				continue
+			}
+		}
 		if phase.AutoExecuteRequiredTool {
 			attemptOutput := engine.EngineOutput{}
 			if err := autoExecutePhaseRequiredTool(ctx, phaseName, phase, toolExec, &attemptOutput); err != nil {
@@ -700,7 +719,7 @@ func (r *REPLRunner) runStagedREPLLoop(
 			phaseLLMCfg.MaxIterations = phase.MaxIterations
 			phaseLLMCfg.MaxTokens = phaseMaxTokens
 			if len(phase.ResponseFormat) > 0 {
-				phaseLLMCfg.ResponseFormat = phase.ResponseFormat
+				phaseLLMCfg.ResponseFormat = normalizeREPLPhaseResponseFormat(phaseLLMCfg.Provider, phase.ResponseFormat)
 			}
 			if phase.AutoExecuteRequiredTool {
 				phaseLLMCfg.ToolChoice = nil
@@ -720,7 +739,7 @@ func (r *REPLRunner) runStagedREPLLoop(
 				WorkspaceID: task.WorkspaceID,
 			}))
 		}
-		attemptOutput, err := phaseLLM.Run(ctx, engine.EngineInput{
+		attemptOutput, err := runREPLLLMWithTransientRetry(ctx, phaseLLM, engine.EngineInput{
 			SystemPrompt: systemPrompt,
 			Messages: []engine.Message{engine.NewUserMessage(buildREPLPhasePrompt(
 				task.Prompt,
@@ -1153,7 +1172,7 @@ func (r *REPLRunner) parseAndRepairBraidGraphPhaseOutput(
 	}
 	initialErr := err
 
-	repairOutput, runErr := llm.Run(ctx, engine.EngineInput{
+	repairOutput, runErr := runREPLLLMWithTransientRetry(ctx, llm, engine.EngineInput{
 		SystemPrompt: systemPrompt,
 		Messages: []engine.Message{engine.NewUserMessage(buildBraidGraphRepairPrompt(
 			task.Prompt,
@@ -1188,6 +1207,61 @@ func validateBraidGraphForPhase(phase REPLRunnerPhase, graph BraidGraph, maxNode
 		return err
 	}
 	return ValidateBraidGraphPolicy(graph, phase.BraidGraphPolicy)
+}
+
+func runREPLLLMWithTransientRetry(ctx context.Context, llm *engine.LLMChatEngine, input engine.EngineInput) (engine.EngineOutput, error) {
+	output, err := llm.Run(ctx, input)
+	if !isRetryableREPLLLMError(err) {
+		return output, err
+	}
+	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return output, ctx.Err()
+	case <-timer.C:
+	}
+	retryOutput, retryErr := llm.Run(ctx, input)
+	return mergeEngineOutputs(output, retryOutput), retryErr
+}
+
+func normalizeREPLPhaseResponseFormat(provider string, rf json.RawMessage) json.RawMessage {
+	if len(rf) == 0 {
+		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(provider), "lmstudio") {
+		var body struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(rf, &body); err == nil && strings.EqualFold(body.Type, "json_object") {
+			return json.RawMessage(`{"type":"text"}`)
+		}
+	}
+	return rf
+}
+
+func isRetryableREPLLLMError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"tls: bad record mac",
+		"unexpected eof",
+		"connection reset",
+		"connection refused",
+		"server disconnected",
+		"http2: client connection lost",
+		"stream error",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, prior engine.EngineOutput, invalidOutput string, validationErr error, maxNodes int) string {
@@ -2482,6 +2556,23 @@ func buildREPLPhasePrompt(originalPrompt string, phase REPLRunnerPhase, prior en
 		b.WriteString(prompt)
 		b.WriteString("\n\n")
 	}
+	if phase.Final {
+		if handoff := latestBraidFinalHandoff(prior); handoff != "" {
+			if summary := summarizeBraidGraphForPrompt(state.braidGraph); summary != "" {
+				b.WriteString("Current braid graph:\n")
+				b.WriteString(summary)
+				b.WriteString("\n\n")
+			}
+			b.WriteString("Verified braid final handoff:\n")
+			b.WriteString(handoff)
+			b.WriteString("\n\n")
+			b.WriteString("Final synthesis contract:\n")
+			b.WriteString("- Use only the verified handoff above.\n")
+			b.WriteString("- Return the final answer only, in the requested format.\n")
+			b.WriteString("- Do not call tools, write code, restate the prompt, include scratch work, or mention runtime internals.\n")
+			return strings.TrimSpace(b.String())
+		}
+	}
 	if summary := summarizeBraidGraphForPrompt(state.braidGraph); summary != "" {
 		b.WriteString("Current braid graph:\n")
 		b.WriteString(summary)
@@ -2502,6 +2593,107 @@ func buildREPLPhasePrompt(originalPrompt string, phase REPLRunnerPhase, prior en
 	b.WriteString("Original task:\n")
 	b.WriteString(strings.TrimSpace(originalPrompt))
 	return b.String()
+}
+
+func appendBraidFinalHandoff(output *engine.EngineOutput, graph *BraidGraph, summaries map[string]string) {
+	if output == nil || graph == nil || strings.TrimSpace(graph.FinalNode) == "" {
+		return
+	}
+	finalSummary := strings.TrimSpace(summaries[graph.FinalNode])
+	if finalSummary == "" {
+		return
+	}
+	content := renderBraidFinalHandoff(*graph, finalSummary)
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+	output.InjectedContexts = append(output.InjectedContexts, engine.InjectedContext{
+		ToolCallID: "braid-final-" + strings.TrimSpace(graph.FinalNode),
+		Source:     braidFinalHandoffSource,
+		Content:    content,
+	})
+}
+
+func latestBraidFinalHandoff(output engine.EngineOutput) string {
+	for i := len(output.InjectedContexts) - 1; i >= 0; i-- {
+		ctx := output.InjectedContexts[i]
+		if strings.TrimSpace(ctx.Source) != braidFinalHandoffSource {
+			continue
+		}
+		if content := strings.TrimSpace(ctx.Content); content != "" {
+			return content
+		}
+	}
+	return ""
+}
+
+func verifiedAnswerFromLatestBraidFinalHandoff(output engine.EngineOutput) (string, bool) {
+	return verifiedAnswerFromBraidFinalHandoff(latestBraidFinalHandoff(output))
+}
+
+func verifiedAnswerFromBraidFinalHandoff(handoff string) (string, bool) {
+	handoff = strings.TrimSpace(handoff)
+	if handoff == "" {
+		return "", false
+	}
+	var payload struct {
+		VerifiedAnswer string `json:"verified_answer"`
+	}
+	if err := json.Unmarshal([]byte(handoff), &payload); err == nil {
+		answer := strings.TrimSpace(payload.VerifiedAnswer)
+		if strings.HasPrefix(answer, "solution =") {
+			return answer, true
+		}
+	}
+	const marker = `"verified_answer":`
+	idx := strings.Index(handoff, marker)
+	if idx < 0 {
+		return "", false
+	}
+	raw := strings.TrimSpace(handoff[idx+len(marker):])
+	if strings.HasPrefix(raw, `"`) {
+		var answer string
+		if err := json.Unmarshal([]byte(raw), &answer); err == nil {
+			answer = strings.TrimSpace(answer)
+			if strings.HasPrefix(answer, "solution =") {
+				return answer, true
+			}
+		}
+	}
+	return "", false
+}
+
+func renderBraidFinalHandoff(graph BraidGraph, finalSummary string) string {
+	finalSummary = compactBraidFinalHandoffText(finalSummary, 1200)
+	answer, hasAnswer := braidSolutionAnswerFromSummary(finalSummary)
+	payload := map[string]any{
+		"final_node":    strings.TrimSpace(graph.FinalNode),
+		"final_summary": finalSummary,
+	}
+	if hasAnswer {
+		payload["verified_answer"] = answer
+		payload["required_output"] = "return exactly this answer line"
+	}
+	body, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		if hasAnswer {
+			return "verified_answer: " + answer + "\nfinal_summary: " + finalSummary
+		}
+		return "final_summary: " + finalSummary
+	}
+	return string(body)
+}
+
+func compactBraidFinalHandoffText(value string, limit int) string {
+	compact := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if limit <= 0 || len([]rune(compact)) <= limit {
+		return compact
+	}
+	runes := []rune(compact)
+	if limit <= 16 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-15]) + " ...[truncated]"
 }
 
 func buildFinalSolutionLineRepairPrompt(originalPrompt string, phase REPLRunnerPhase, prior engine.EngineOutput, invalid string, attempt, maxAttempts int) string {

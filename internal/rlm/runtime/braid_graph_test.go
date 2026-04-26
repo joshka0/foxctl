@@ -311,6 +311,66 @@ func TestNormalizeBraidGraphForPolicyKeepsSingleSolveAndClampsSummary(t *testing
 	}
 }
 
+func TestNormalizeBraidGraphForPolicyRepairsWeakVerifyContract(t *testing.T) {
+	t.Parallel()
+
+	graph := BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{ID: "n_extract", Kind: "extract", Question: "Extract compact facts."},
+			{ID: "n_solve", Kind: "solve", Question: "Solve candidate.", DependsOn: []string{"n_extract"}},
+			{ID: "n_verify", Kind: "verify", Question: "Check n_solve summary.", ExpectedOutput: "pass or fail", DependsOn: []string{"n_solve"}},
+			{ID: "n_reduce", Kind: "reduce", Question: "Reduce final.", DependsOn: []string{"n_solve", "n_verify"}},
+		},
+		FinalNode: "n_reduce",
+	}
+
+	if err := ValidateBraidGraphPolicy(graph, BraidGraphPolicyLongCoTController); err == nil {
+		t.Fatal("ValidateBraidGraphPolicy() succeeded before normalization")
+	}
+	normalized := NormalizeBraidGraphForPolicy(graph, BraidGraphPolicyLongCoTController, 8)
+	if err := ValidateBraidGraph(normalized, 8); err != nil {
+		t.Fatalf("ValidateBraidGraph() error = %v", err)
+	}
+	if err := ValidateBraidGraphPolicy(normalized, BraidGraphPolicyLongCoTController); err != nil {
+		t.Fatalf("ValidateBraidGraphPolicy() error = %v", err)
+	}
+	verify := normalized.Nodes[2]
+	if !strings.Contains(strings.ToLower(verify.Question+" "+verify.ExpectedOutput), "original") {
+		t.Fatalf("verify node was not rewritten with original-constraint contract: %#v", verify)
+	}
+}
+
+func TestNormalizeBraidGraphForPolicyAddsSolveDependencyToFinalReduce(t *testing.T) {
+	t.Parallel()
+
+	graph := BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{ID: "n_extract", Kind: "extract", Question: "Extract state."},
+			{ID: "n_solve", Kind: "solve", Question: "Build candidate.", DependsOn: []string{"n_extract"}},
+			{ID: "n_verify", Kind: "verify", Question: "Simulate candidate against original constraints.", DependsOn: []string{"n_solve"}},
+			{ID: "n_reduce", Kind: "reduce", Question: "Format final answer.", DependsOn: []string{"n_verify"}},
+		},
+		FinalNode: "n_reduce",
+	}
+
+	normalized := NormalizeBraidGraphForPolicy(graph, BraidGraphPolicyLongCoTController, 8)
+	reduce := normalized.Nodes[3]
+	if !dependsOnBraidNode(reduce, "n_verify") {
+		t.Fatalf("reduce lost verify dependency: %#v", reduce.DependsOn)
+	}
+	if !dependsOnBraidNode(reduce, "n_solve") {
+		t.Fatalf("reduce did not inherit verified solve dependency: %#v", reduce.DependsOn)
+	}
+	if err := ValidateBraidGraph(normalized, 8); err != nil {
+		t.Fatalf("ValidateBraidGraph() error = %v", err)
+	}
+	if err := ValidateBraidGraphPolicy(normalized, BraidGraphPolicyLongCoTController); err != nil {
+		t.Fatalf("ValidateBraidGraphPolicy() error = %v", err)
+	}
+}
+
 func TestBraidValidateLongCoTControllerRejectsShallowRubberStamp(t *testing.T) {
 	t.Parallel()
 
@@ -460,7 +520,36 @@ func TestTransitionSystemHelperContract(t *testing.T) {
 		t.Fatal("expected missing goal_state to not look like a transition system")
 	}
 	contract := buildTransitionSystemHelperContract()
-	for _, want := range []string{"parse_state", "legal_actions", "apply", "is_goal", "verify_plan", "search_or_construct"} {
+	for _, want := range []string{"syntactically valid Python", "parse_state", "legal_actions", "apply", "is_goal", "verify_plan", "search_or_construct", "move(src, dst)", "src == dst", "ok:false with first_failure"} {
+		if !strings.Contains(contract, want) {
+			t.Fatalf("contract missing %q:\n%s", want, contract)
+		}
+	}
+}
+
+func TestGraphSearchHelperContractCoversExplicitShortestPath(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"nodes":      []any{"A", "B", "C", "D"},
+		"edges":      []any{[]any{"A", "B"}, []any{"B", "D"}, []any{"A", "C"}, []any{"C", "D"}},
+		"start_node": "A",
+		"goal_node":  "D",
+		"objective":  "shortest_path_length",
+	}
+	if !braidHelperInputLooksLikeExplicitShortestPath(input) {
+		t.Fatal("expected explicit nodes/edges/start/goal input to look like shortest-path graph search")
+	}
+	diag, applicable := explicitShortestPathAnswerVerifier("solution = 3", input)
+	if !applicable || diag.Pass || diag.ExpectedFinal != 2 {
+		t.Fatalf("wrong candidate diagnostic=%#v applicable=%v", diag, applicable)
+	}
+	diag, applicable = explicitShortestPathAnswerVerifier("solution = 2", input)
+	if !applicable || !diag.Pass {
+		t.Fatalf("valid candidate diagnostic=%#v applicable=%v", diag, applicable)
+	}
+	contract := buildGraphSearchHelperContract()
+	for _, want := range []string{"nodes", "directed edges", "BFS", "shortest path length", "-1 if unreachable"} {
 		if !strings.Contains(contract, want) {
 			t.Fatalf("contract missing %q:\n%s", want, contract)
 		}
@@ -1076,6 +1165,398 @@ func TestRenderBraidNodeChildPromptIncludesRootTaskForExtract(t *testing.T) {
 	}
 }
 
+func TestBraidNodeHandoffCapsDependencyAndRepairContext(t *testing.T) {
+	t.Parallel()
+
+	node := BraidNode{
+		ID:              "n_solve",
+		Kind:            "solve",
+		Question:        "Solve bounded branch.",
+		DependsOn:       []string{"n_extract"},
+		MaxSummaryChars: 400,
+	}
+	longDep := strings.Repeat("d", maxBraidHandoffDepChars+200)
+	longRepair := strings.Repeat("r", maxBraidHandoffRepairChars+200)
+	handoff := BuildBraidNodeHandoff(node, "root task", map[string]string{"n_extract": longDep}, longRepair)
+	if got := len(handoff.DependencySummaries["n_extract"]); got > maxBraidHandoffDepChars {
+		t.Fatalf("dependency summary len=%d exceeds cap %d", got, maxBraidHandoffDepChars)
+	}
+	if got := len(handoff.RepairFeedback); got > maxBraidHandoffRepairChars {
+		t.Fatalf("repair feedback len=%d exceeds cap %d", got, maxBraidHandoffRepairChars)
+	}
+	if handoff.Budget.MaxSummaryChars != 400 {
+		t.Fatalf("max summary chars=%d, want 400", handoff.Budget.MaxSummaryChars)
+	}
+	prompt := RenderBraidNodeHandoffPrompt(handoff)
+	if !strings.Contains(prompt, "BRAID node n_solve") || !strings.Contains(prompt, "Dependency summaries:") {
+		t.Fatalf("rendered prompt missing handoff sections:\n%s", prompt)
+	}
+}
+
+func TestBraidHelperInputMergesRootInstanceWithDependencies(t *testing.T) {
+	t.Parallel()
+
+	rootPrompt := strings.Join([]string{
+		"Puzzle description:",
+		"Choose one supplier and minimize total waste.",
+		"",
+		"Puzzle instance:",
+		"Number of packages: 3",
+		"Number of suppliers: 2",
+		"Packages: [2, 3, 5]",
+		"Suppliers: [[4, 8], [2, 8]]",
+		"",
+		"Find the minimum total wasted space (mod 1000000007).",
+	}, "\n")
+	deps := map[string]string{"n_extract": "requested_outputs: [minimum_total_waste_mod_1000000007]"}
+	input := braidHelperInput(rootPrompt, deps)
+
+	if _, ok := input["packages"]; !ok {
+		t.Fatalf("helper input missing root packages: %#v", input)
+	}
+	if _, ok := input["suppliers"]; !ok {
+		t.Fatalf("helper input missing root suppliers: %#v", input)
+	}
+	if input["n_extract"] == "" {
+		t.Fatalf("helper input missing dependency summary: %#v", input)
+	}
+}
+
+func TestPackageWasteAnswerVerifierUsesReusableBoxSizes(t *testing.T) {
+	t.Parallel()
+
+	input := map[string]any{
+		"packages":  []any{float64(2), float64(3), float64(5)},
+		"suppliers": []any{[]any{float64(4), float64(8)}, []any{float64(2), float64(8)}},
+	}
+	diag, applicable := packageWasteAnswerVerifier("solution = 6", input)
+	if !applicable || !diag.Pass {
+		t.Fatalf("expected verifier pass, applicable=%v diag=%#v", applicable, diag)
+	}
+	diag, applicable = packageWasteAnswerVerifier("solution = -1", input)
+	if !applicable || diag.Pass {
+		t.Fatalf("expected verifier failure, applicable=%v diag=%#v", applicable, diag)
+	}
+	if diag.Expected != 6 {
+		t.Fatalf("expected diagnostic expected=6, got %#v", diag.Expected)
+	}
+}
+
+func TestBraidNodeHandoffTransformsStateTransitionTask(t *testing.T) {
+	t.Parallel()
+
+	rootPrompt := strings.Join([]string{
+		"Puzzle instance:",
+		"Initial state: [[0], [1, 2], []]",
+		"Goal state: [[], [1], [2, 0]]",
+		"Number of blocks: 3",
+		"Number of stacks: 3",
+		"",
+		"Format your solution as:",
+		"solution = [move0, move1, ..., movek].",
+	}, "\n")
+	node := BraidNode{
+		ID:        "n_solve",
+		Kind:      "solve",
+		Question:  "Construct a complete candidate action sequence.",
+		DependsOn: []string{"n_extract"},
+	}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, map[string]string{"n_extract": "facts"}, "")
+	if handoff.TaskType != BraidScaffoldClassFiniteStateTransition {
+		t.Fatalf("task type=%q, want %s", handoff.TaskType, BraidScaffoldClassFiniteStateTransition)
+	}
+	if handoff.ScaffoldClass != BraidScaffoldClassFiniteStateTransition || handoff.ScaffoldID != BraidScaffoldIDStackRelocationV1 {
+		t.Fatalf("scaffold class/id=%q/%q", handoff.ScaffoldClass, handoff.ScaffoldID)
+	}
+	if handoff.OfficialRootTask != "" {
+		t.Fatalf("solve handoff retained root prompt: %q", handoff.OfficialRootTask)
+	}
+	if handoff.AnswerFormat != "solution = [[block, from_stack, to_stack], ...]" {
+		t.Fatalf("answer format=%q", handoff.AnswerFormat)
+	}
+	if _, ok := handoff.Facts["initial_state"]; !ok {
+		t.Fatalf("handoff facts missing initial_state: %#v", handoff.Facts)
+	}
+	if len(handoff.DependencySummaries) != 0 {
+		t.Fatalf("typed solve handoff should omit dependency summaries already represented as facts: %#v", handoff.DependencySummaries)
+	}
+	input := BraidHandoffHelperInput(handoff)
+	if input["task_type"] != BraidScaffoldClassFiniteStateTransition || input["scaffold_id"] != BraidScaffoldIDStackRelocationV1 || input["answer_format"] == "" {
+		t.Fatalf("helper input missing typed contract: %#v", input)
+	}
+	if _, ok := input["n_extract"]; ok {
+		t.Fatalf("typed solve helper input retained extract summary: %#v", input)
+	}
+	prompt := RenderBraidHelperHandoffPrompt(handoff)
+	if strings.Contains(prompt, "Puzzle instance:") {
+		t.Fatalf("helper prompt retained raw official prompt:\n%s", prompt)
+	}
+	for _, want := range []string{"Task type: finite_state_transition", "Facts available in Solve(input):", "Return answer exactly as", "State-transition output contract", "ok:false with first_failure"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("helper prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBraidNodeHandoffTransformsGridResourceGraphSearchTask(t *testing.T) {
+	t.Parallel()
+
+	rootPrompt := strings.Join([]string{
+		"Puzzle description:",
+		"Find the minimum initial resource needed to move through a weighted grid.",
+		"",
+		"Puzzle instance:",
+		"Grid size: 2x3",
+		"Grid layout: [[0, -2, -3], [-1, -5, 4]]",
+		"Starting position: (0, 0)",
+		"Goal position: (1, 2)",
+		"",
+		"Format your solution as:",
+		"solution = <integer>",
+	}, "\n")
+	node := BraidNode{ID: "n_solve", Kind: "solve", Question: "Compute the minimum initial resource.", DependsOn: []string{"n_extract"}}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, map[string]string{"n_extract": "facts"}, "")
+	if handoff.TaskType != BraidScaffoldClassGraphSearch {
+		t.Fatalf("task type=%q, want %s", handoff.TaskType, BraidScaffoldClassGraphSearch)
+	}
+	if handoff.ScaffoldClass != BraidScaffoldClassGraphSearch || handoff.ScaffoldID != BraidScaffoldIDResourcePathMinInitialV1 {
+		t.Fatalf("scaffold class/id=%q/%q", handoff.ScaffoldClass, handoff.ScaffoldID)
+	}
+	if _, ok := handoff.Facts["grid_layout"]; !ok {
+		t.Fatalf("handoff facts missing grid_layout: %#v", handoff.Facts)
+	}
+	if handoff.Facts["graph_model"] != "grid_dag" {
+		t.Fatalf("graph model=%#v", handoff.Facts["graph_model"])
+	}
+	input := BraidHandoffHelperInput(handoff)
+	if input["task_type"] != BraidScaffoldClassGraphSearch || input["scaffold_id"] != BraidScaffoldIDResourcePathMinInitialV1 {
+		t.Fatalf("helper input missing graph scaffold contract: %#v", input)
+	}
+	prompt := RenderBraidHelperHandoffPrompt(handoff)
+	for _, want := range []string{"Task type: graph_search", "Graph-search output contract", "solution = <integer>", "minimum initial resource"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("helper prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBraidNodeHandoffTransformsExplicitShortestPathGraphSearchTask(t *testing.T) {
+	t.Parallel()
+
+	rootPrompt := strings.Join([]string{
+		"Puzzle description:",
+		"Find the shortest directed path length in the provided graph.",
+		"",
+		"Puzzle instance:",
+		"Nodes: [\"A\", \"B\", \"C\", \"D\", \"E\"]",
+		"Edges: [[\"A\", \"B\"], [\"B\", \"D\"], [\"A\", \"C\"], [\"C\", \"D\"]]",
+		"Start node: \"A\"",
+		"Goal node: \"D\"",
+		"",
+		"Format your solution as:",
+		"solution = <integer>",
+	}, "\n")
+	node := BraidNode{ID: "n_solve", Kind: "solve", Question: "Compute the shortest path length.", DependsOn: []string{"n_extract"}}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, map[string]string{"n_extract": "graph facts"}, "")
+	if handoff.TaskType != BraidScaffoldClassGraphSearch {
+		t.Fatalf("task type=%q, want %s", handoff.TaskType, BraidScaffoldClassGraphSearch)
+	}
+	if handoff.ScaffoldClass != BraidScaffoldClassGraphSearch || handoff.ScaffoldID != BraidScaffoldIDExplicitShortestPathV1 {
+		t.Fatalf("scaffold class/id=%q/%q", handoff.ScaffoldClass, handoff.ScaffoldID)
+	}
+	if handoff.Facts["graph_model"] != "explicit_directed_graph" || handoff.Facts["objective"] != "shortest_path_length" {
+		t.Fatalf("graph facts=%#v", handoff.Facts)
+	}
+	input := BraidHandoffHelperInput(handoff)
+	if input["task_type"] != BraidScaffoldClassGraphSearch || input["scaffold_id"] != BraidScaffoldIDExplicitShortestPathV1 {
+		t.Fatalf("helper input missing explicit graph scaffold contract: %#v", input)
+	}
+	if _, ok := explicitGraphFromInput(input); !ok {
+		t.Fatalf("helper input did not parse as explicit graph: %#v", input)
+	}
+	prompt := RenderBraidHelperHandoffPrompt(handoff)
+	for _, want := range []string{"Task type: graph_search", "Graph-search output contract", "fewest directed edges", "BFS", "returning -1 if unreachable"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("helper prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBraidNodeHandoffTransformsFiniteDomainConstraintTask(t *testing.T) {
+	t.Parallel()
+
+	rootPrompt := strings.Join([]string{
+		"Puzzle description:",
+		"Solve a typed finite-domain constraint instance.",
+		"",
+		"Puzzle instance:",
+		`Variables: [{"name":"x","min":0,"max":5},{"name":"y","min":0,"max":5}]`,
+		`Known values: {"target":5}`,
+		`Constraints: [{"name":"sum","op":"eq","left":{"op":"add","args":[{"var":"x"},{"var":"y"}]},"right":{"known":"target"}},{"name":"x_fixed","op":"eq","left":{"var":"x"},"right":{"const":2}}]`,
+		`Requested outputs: ["x","y"]`,
+		"",
+		"Format your solution as:",
+		`solution = {"x": <integer>, "y": <integer>}`,
+	}, "\n")
+	node := BraidNode{ID: "n_solve", Kind: "solve", Question: "Find a satisfying assignment.", DependsOn: []string{"n_extract"}}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, map[string]string{"n_extract": "typed constraints"}, "")
+	if handoff.TaskType != BraidScaffoldClassConstraintSolver {
+		t.Fatalf("task type=%q, want %s", handoff.TaskType, BraidScaffoldClassConstraintSolver)
+	}
+	if handoff.ScaffoldClass != BraidScaffoldClassConstraintSolver || handoff.ScaffoldID != BraidScaffoldIDFiniteDomainV1 {
+		t.Fatalf("scaffold class/id=%q/%q", handoff.ScaffoldClass, handoff.ScaffoldID)
+	}
+	if _, ok := handoff.Facts["variables"]; !ok {
+		t.Fatalf("handoff facts missing variables: %#v", handoff.Facts)
+	}
+	input := BraidHandoffHelperInput(handoff)
+	if input["task_type"] != BraidScaffoldClassConstraintSolver || input["scaffold_id"] != BraidScaffoldIDFiniteDomainV1 {
+		t.Fatalf("helper input missing constraint scaffold contract: %#v", input)
+	}
+	prompt := RenderBraidHelperHandoffPrompt(handoff)
+	for _, want := range []string{"Task type: constraint_solver", "Constraint-solver output contract", "finite integer domains", `solution = {"variable": integer, ...}`} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("helper prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBraidNodeHandoffTransformsNumericDPTask(t *testing.T) {
+	t.Parallel()
+
+	rootPrompt := strings.Join([]string{
+		"Puzzle description:",
+		"Evaluate the typed integer recurrence table.",
+		"",
+		"Puzzle instance:",
+		"Scaffold class: numeric_dp",
+		"Scaffold id: recurrence_table_v1",
+		"Objective: min",
+		"DP dimensions: [5]",
+		"Target: [4]",
+		"Base cases: [{\"index\":[0],\"value\":0}]",
+		"Transitions: [{\"offset\":[-1],\"weight\":2},{\"offset\":[-2],\"weight\":3}]",
+		"",
+		"Format your solution as:",
+		"solution = <integer>",
+	}, "\n")
+	node := BraidNode{ID: "n_solve", Kind: "solve", Question: "Compute the target table value.", DependsOn: []string{"n_extract"}}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, map[string]string{"n_extract": "typed recurrence facts"}, "")
+	if handoff.TaskType != BraidScaffoldClassNumericDP {
+		t.Fatalf("task type=%q, want %s", handoff.TaskType, BraidScaffoldClassNumericDP)
+	}
+	if handoff.ScaffoldClass != BraidScaffoldClassNumericDP || handoff.ScaffoldID != BraidScaffoldIDRecurrenceTableV1 {
+		t.Fatalf("scaffold class/id=%q/%q", handoff.ScaffoldClass, handoff.ScaffoldID)
+	}
+	if _, ok := handoff.Facts["dp_dimensions"]; !ok {
+		t.Fatalf("handoff facts missing dp_dimensions: %#v", handoff.Facts)
+	}
+	if handoff.OfficialRootTask != "" {
+		t.Fatalf("solve handoff retained root prompt: %q", handoff.OfficialRootTask)
+	}
+	input := BraidHandoffHelperInput(handoff)
+	if input["task_type"] != BraidScaffoldClassNumericDP || input["scaffold_id"] != BraidScaffoldIDRecurrenceTableV1 {
+		t.Fatalf("helper input missing numeric DP scaffold contract: %#v", input)
+	}
+	if !braidHelperInputLooksLikeNumericDP(input) {
+		t.Fatalf("helper input did not satisfy numeric DP contract: %#v", input)
+	}
+	prompt := RenderBraidHelperHandoffPrompt(handoff)
+	for _, want := range []string{"Task type: numeric_dp", "Numeric-DP output contract", "recurrence table", "solution = <integer>"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("helper prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBraidNodeHandoffTransformsSequenceSimulationTask(t *testing.T) {
+	t.Parallel()
+
+	rootPrompt := strings.Join([]string{
+		"Puzzle description:",
+		"Simulate a typed JSON state trace.",
+		"",
+		"Puzzle instance:",
+		"Sequence model: json_patch_v1",
+		"Initial state: {\"count\":0,\"log\":[]}",
+		"Events: [{\"op\":\"inc\",\"path\":[\"count\"],\"delta\":2},{\"op\":\"append\",\"path\":[\"log\"],\"value\":\"tick\"}]",
+		"Invariants: [{\"path\":[\"count\"],\"min\":0}]",
+		"Goal state: {\"count\":2,\"log\":[\"tick\"]}",
+		"",
+		"Format your solution as:",
+		"solution = <JSON final_state>",
+	}, "\n")
+	node := BraidNode{ID: "n_solve", Kind: "solve", Question: "Simulate the sequence.", DependsOn: []string{"n_extract"}}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, map[string]string{"n_extract": "facts"}, "")
+	if handoff.TaskType != BraidScaffoldClassSequenceSimulation {
+		t.Fatalf("task type=%q, want %s", handoff.TaskType, BraidScaffoldClassSequenceSimulation)
+	}
+	if handoff.ScaffoldClass != BraidScaffoldClassSequenceSimulation || handoff.ScaffoldID != BraidScaffoldIDJSONPatchSequenceV1 {
+		t.Fatalf("scaffold class/id=%q/%q", handoff.ScaffoldClass, handoff.ScaffoldID)
+	}
+	input := BraidHandoffHelperInput(handoff)
+	if input["task_type"] != BraidScaffoldClassSequenceSimulation || input["scaffold_id"] != BraidScaffoldIDJSONPatchSequenceV1 {
+		t.Fatalf("helper input missing sequence scaffold contract: %#v", input)
+	}
+	if _, ok := sequenceSimulationSpecFromInput(input); !ok {
+		t.Fatalf("helper input did not parse as sequence simulation: %#v", input)
+	}
+	prompt := RenderBraidHelperHandoffPrompt(handoff)
+	for _, want := range []string{"Task type: sequence_simulation", "Sequence-simulation output contract", "json_patch_v1", "solution = <JSON final_state>"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("helper prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBraidNodeHandoffTransformsLargeGridResourceGraphSearchTask(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	b.WriteString("Puzzle description:\nFind the minimum initial health required in a large weighted grid.\n\n")
+	b.WriteString("Puzzle instance:\n\n")
+	b.WriteString("Grid size: 55×55\n")
+	b.WriteString("Grid layout: [")
+	for i := 0; i < 55; i++ {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString("[")
+		for j := 0; j < 55; j++ {
+			if j > 0 {
+				b.WriteString(", ")
+			}
+			switch {
+			case i == 0 && j == 0:
+				b.WriteString("0")
+			case (i+j)%7 == 0:
+				b.WriteString("4")
+			default:
+				b.WriteString("-6")
+			}
+		}
+		b.WriteString("]")
+	}
+	b.WriteString("]\n")
+	b.WriteString("Starting position: (0, 0)\n")
+	b.WriteString("Goal position: (54, 54)\n")
+	rootPrompt := b.String()
+
+	node := BraidNode{ID: "n_solve", Kind: "solve", Question: "Compute the minimum initial health.", DependsOn: []string{"n_extract"}}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, map[string]string{"n_extract": "grid facts"}, "")
+	input := BraidHandoffHelperInput(handoff)
+	if handoff.ScaffoldID != BraidScaffoldIDResourcePathMinInitialV1 {
+		t.Fatalf("scaffold id=%q, facts=%v input keys=%v", handoff.ScaffoldID, sortedHelperFactoryMapKeys(handoff.Facts), sortedHelperFactoryMapKeys(input))
+	}
+	grid, ok := intGridFromAny(input["grid_layout"])
+	if !ok {
+		t.Fatalf("helper input missing parseable grid_layout; keys=%v", sortedHelperFactoryMapKeys(input))
+	}
+	if len(grid) != 55 || len(grid[0]) != 55 {
+		t.Fatalf("grid dimensions=%dx%d, want 55x55", len(grid), len(grid[0]))
+	}
+}
+
 func TestRenderBraidNodeChildPromptIncludesRootTaskForSolve(t *testing.T) {
 	t.Parallel()
 
@@ -1205,5 +1686,53 @@ func TestReplBraidGraphValidationCapUsesPhaseCap(t *testing.T) {
 
 	if got := replBraidGraphValidationCap(REPLRunnerPhase{MaxGraphNodes: 4}, nil); got != 4 {
 		t.Fatalf("replBraidGraphValidationCap()=%d want 4", got)
+	}
+}
+
+func TestStackMovesFromAnswerAcceptsObjectMoves(t *testing.T) {
+	t.Parallel()
+
+	moves, ok := stackMovesFromAnswer(`solution = [{"block": 2, "from": 1, "to": 0}, {"move": 3, "from_stack": 0, "to_stack": 2}]`)
+	if !ok {
+		t.Fatal("stackMovesFromAnswer rejected object move form")
+	}
+	want := [][3]int{{2, 1, 0}, {3, 0, 2}}
+	if len(moves) != len(want) {
+		t.Fatalf("moves len=%d, want %d", len(moves), len(want))
+	}
+	for i := range want {
+		if moves[i] != want[i] {
+			t.Fatalf("moves[%d]=%v, want %v", i, moves[i], want[i])
+		}
+	}
+}
+
+func TestBraidRuntimeShortcutPassesVerifyForRuntimeVerifiedSolve(t *testing.T) {
+	t.Parallel()
+
+	solveSummary := "status: completed summary: status: solved answer: solution = [[2,1,2],[0,0,2]] checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier."
+	verifySummary, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_verify", Kind: "verify"}, map[string]string{"n_solve": solveSummary})
+	if !ok {
+		t.Fatal("expected runtime verify shortcut")
+	}
+	if !braidVerificationSummaryPassed(verifySummary) {
+		t.Fatalf("verify shortcut did not pass: %s", verifySummary)
+	}
+}
+
+func TestBraidRuntimeShortcutReduceForwardsVerifiedSolution(t *testing.T) {
+	t.Parallel()
+
+	solveSummary := "status: completed summary: status: solved answer: solution = [[2,1,2],[0,0,2]] checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier."
+	verifySummary := "status: pass summary: answer: pass: true checks: upstream solve dependency was already verified by the runtime scaffold verifier."
+	reduceSummary, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_reduce", Kind: "reduce"}, map[string]string{
+		"n_solve":  solveSummary,
+		"n_verify": verifySummary,
+	})
+	if !ok {
+		t.Fatal("expected runtime reduce shortcut")
+	}
+	if !strings.Contains(reduceSummary, "solution = [[2,1,2],[0,0,2]]") {
+		t.Fatalf("reduce shortcut lost solution: %s", reduceSummary)
 	}
 }
