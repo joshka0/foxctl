@@ -64,6 +64,7 @@ func main() {
 		foxprox        bool
 		foxproxDataDir string
 		foxproxSocket  string
+		requireAuth    bool
 	)
 	flag.StringVar(&addr, "addr", "127.0.0.1:8090", "HTTP listen address")
 	flag.StringVar(&uiDir, "ui-dir", "", "Path to built UI (e.g., ./packages/gui-agent/dist)")
@@ -74,6 +75,7 @@ func main() {
 	flag.BoolVar(&foxprox, "foxprox", false, "Start an embedded Foxprox daemon for terminal-backed agents")
 	flag.StringVar(&foxproxDataDir, "foxprox-data-dir", defaultFoxproxDataDir(), "Directory for embedded Foxprox state")
 	flag.StringVar(&foxproxSocket, "foxprox-socket", "", "Unix socket path for embedded Foxprox daemon")
+	flag.BoolVar(&requireAuth, "require-auth", false, "Require authenticated identity for API requests (Tailscale or Better Auth)")
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -153,6 +155,7 @@ func main() {
 		UIDir:       uiDir,
 		DevCORS:     devCORS,
 		ChatAdapter: chat,
+		RequireAuth: requireAuth,
 	}, cfg, logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to create server")

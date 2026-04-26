@@ -61,6 +61,7 @@ var (
 	webFoxprox     bool
 	webFoxproxDir  string
 	webFoxproxSock string
+	webRequireAuth bool
 )
 
 func init() {
@@ -76,6 +77,7 @@ func init() {
 	webServeCmd.Flags().BoolVar(&webFoxprox, "foxprox", false, "Start an embedded Foxprox daemon for terminal-backed agents")
 	webServeCmd.Flags().StringVar(&webFoxproxDir, "foxprox-data-dir", defaultWebFoxproxDataDir(), "Directory for embedded Foxprox state (empty = in-memory)")
 	webServeCmd.Flags().StringVar(&webFoxproxSock, "foxprox-socket", "", "Unix socket path for embedded Foxprox daemon")
+	webServeCmd.Flags().BoolVar(&webRequireAuth, "require-auth", false, "Require authenticated identity for API requests (Tailscale or Better Auth)")
 }
 
 func runWebServe(cmd *cobra.Command, _ []string) error {
@@ -148,6 +150,7 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		DevCORS:     webDevCORS,
 		UIDir:       webUIDir,
 		ChatAdapter: webChat,
+		RequireAuth: webRequireAuth,
 	}
 
 	server, err := web.NewServer(ctx, opts, cfg, log)

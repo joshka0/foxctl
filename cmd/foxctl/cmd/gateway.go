@@ -131,12 +131,35 @@ func runGateway(cmd *cobra.Command, _ []string) error {
 // the foxctl web server at the given address. This enables the gateway to
 // expose the full web API (agents, SSE, companion, etc.) over tailnet without
 // embedding the web server directly.
+//
+// The proxy forwards Tailscale identity headers when available, allowing the
+// web server to enforce identity-aware access control.
 func newWebProxyHandler(_ context.Context, addr string, _ zerolog.Logger) (http.Handler, error) {
 	target, err := url.Parse("http://" + addr)
 	if err != nil {
 		return nil, fmt.Errorf("parse web address: %w", err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
+
+	// Wrap the director to inject Tailscale identity headers from the gateway
+	// context. This allows the downstream web server to know who is calling.
+	originalDirector := proxy.Director
+	proxy.Director = func(r *http.Request) {
+		originalDirector(r)
+		if info := gateway.IdentityFromRequest(r); info != nil {
+			r.Header.Set("X-Tailscale-User", info.UserLogin)
+			if info.UserName != "" {
+				r.Header.Set("X-Tailscale-User-Name", info.UserName)
+			}
+			if info.NodeName != "" {
+				r.Header.Set("X-Tailscale-Node", info.NodeName)
+			}
+			if info.NodeID != "" {
+				r.Header.Set("X-Tailscale-Node-ID", info.NodeID)
+			}
+		}
+	}
+
 	return proxy, nil
 }
 
