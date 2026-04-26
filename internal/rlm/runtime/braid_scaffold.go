@@ -16,6 +16,10 @@ const (
 	BraidScaffoldIDJSONPatchSequenceV1      = "json_patch_v1"
 	BraidScaffoldIDFiniteDomainV1           = "finite_domain_v1"
 	BraidScaffoldIDGeneralSolverV1          = "general_solver_v1"
+	BraidScaffoldClassTypeInference         = "type_inference"
+	BraidScaffoldIDHindleyMilnerV1          = "hindley_milner_v1"
+	BraidScaffoldClassChainedDAG            = "chained_dag"
+	BraidScaffoldIDBacktrackingV1           = "backtracking_dag_v1"
 )
 
 type braidRuntimeScaffold struct {
@@ -138,6 +142,40 @@ func ResolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 			MaxSourceLines: 340,
 			MaxSourceChars: 18000,
 			Verifier:       finiteDomainAnswerVerifier,
+		}, true
+	case BraidScaffoldClassChainedDAG:
+		if handoff.ScaffoldID != BraidScaffoldIDBacktrackingV1 {
+			return braidRuntimeScaffold{}, false
+		}
+		if !braidHelperInputLooksLikeChainedDAG(input) {
+			return braidRuntimeScaffold{}, false
+		}
+		return braidRuntimeScaffold{
+			Class:          BraidScaffoldClassChainedDAG,
+			ID:             BraidScaffoldIDBacktrackingV1,
+			PresetName:     BraidScaffoldClassChainedDAG + "/" + BraidScaffoldIDBacktrackingV1,
+			PresetSource:   backtrackingDAGPresetSource(),
+			PresetInput:    cloneMapAny(input),
+			MaxSourceLines: 380,
+			MaxSourceChars: 18000,
+			Verifier:       chainedDAGAnswerVerifier,
+		}, true
+	case BraidScaffoldClassTypeInference:
+		if handoff.ScaffoldID != BraidScaffoldIDHindleyMilnerV1 {
+			return braidRuntimeScaffold{}, false
+		}
+		if !braidHelperInputLooksLikeTypeInference(input) {
+			return braidRuntimeScaffold{}, false
+		}
+		return braidRuntimeScaffold{
+			Class:          BraidScaffoldClassTypeInference,
+			ID:             BraidScaffoldIDHindleyMilnerV1,
+			PresetName:     BraidScaffoldClassTypeInference + "/" + BraidScaffoldIDHindleyMilnerV1,
+			PresetSource:   hindleyMilnerPresetSource(),
+			PresetInput:    cloneMapAny(input),
+			MaxSourceLines: 380,
+			MaxSourceChars: 18000,
+			Verifier:       typeInferenceAnswerVerifier,
 		}, true
 	default:
 		// Heuristic fallback: classify from the root prompt when no typed
@@ -267,6 +305,36 @@ func braidHelperInputLooksLikeFiniteDomainConstraint(input map[string]any) bool 
 	}
 	_, ok := finiteDomainWitnessFromInput(input)
 	return ok
+}
+
+func braidHelperInputLooksLikeTypeInference(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	_, hasExpr := input["expressions"]
+	_, hasBindings := input["let_bindings"]
+	_, hasEnv := input["type_environment"]
+	_, hasConstraints := input["unification_constraints"]
+	return (hasExpr || hasBindings) && (hasEnv || hasConstraints)
+}
+
+func braidHelperInputLooksLikeChainedDAG(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	_, hasNodes := input["node_ids"]
+	_, hasDeps := input["dependencies"]
+	_, hasSubproblems := input["subproblems"]
+	_, hasVars := input["variables"]
+	_, hasConstraints := input["constraints"]
+	_, hasAnswerSpec := input["answer_spec"]
+	count := 0
+	for _, ok := range []bool{hasNodes, hasDeps, hasSubproblems, hasVars, hasConstraints, hasAnswerSpec} {
+		if ok {
+			count++
+		}
+	}
+	return count >= 2
 }
 
 // resolveBraidRuntimeScaffoldByHeuristic attempts to classify the problem shape

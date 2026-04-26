@@ -451,6 +451,14 @@ func applyBraidTypedHandoff(handoff *BraidNodeHandoff, rootPrompt string) {
 		applyBraidConstraintSolverHandoff(handoff, instance)
 		return
 	}
+	if braidInstanceLooksLikeTypeInference(instance) {
+		applyBraidTypeInferenceHandoff(handoff, instance)
+		return
+	}
+	if braidInstanceLooksLikeChainedDAG(instance) {
+		applyBraidChainedDAGHandoff(handoff, instance)
+		return
+	}
 	if braidInstanceLooksLikeGraphSearch(instance) {
 		applyBraidGraphSearchHandoff(handoff, instance)
 		return
@@ -655,6 +663,65 @@ func applyBraidConstraintSolverHandoff(handoff *BraidNodeHandoff, instance map[s
 	}
 }
 
+func braidInstanceLooksLikeTypeInference(instance map[string]any) bool {
+	if len(instance) == 0 {
+		return false
+	}
+	_, hasExpr := instance["expressions"]
+	_, hasBindings := instance["let_bindings"]
+	_, hasEnv := instance["type_environment"]
+	_, hasConstraints := instance["unification_constraints"]
+	return (hasExpr || hasBindings) && (hasEnv || hasConstraints)
+}
+
+func applyBraidTypeInferenceHandoff(handoff *BraidNodeHandoff, instance map[string]any) {
+	handoff.TaskType = BraidScaffoldClassTypeInference
+	handoff.ScaffoldClass = BraidScaffoldClassTypeInference
+	handoff.ScaffoldID = BraidScaffoldIDHindleyMilnerV1
+	handoff.Facts = cloneMapAny(instance)
+	handoff.Rules = []string{
+		"Use Algorithm W (Hindley-Milner) with Robinson unification.",
+		"Let-bindings introduce polymorphic type schemes via generalization.",
+		"Lambda abstractions introduce fresh type variables.",
+		"Applications unify the function type with argument → result.",
+		"All type variables must be resolved before returning.",
+	}
+	handoff.AnswerFormat = "solution = [type_assignment_1, type_assignment_2, ...]"
+	handoff.Checks = []string{
+		"each expression has exactly one inferred type",
+		"all type variables are resolved (no free tyvars)",
+		"unification is consistent (no circular substitutions)",
+		"let-generalized types are properly instantiated at use sites",
+	}
+	if handoff.Node.Kind != "extract" {
+		handoff.OfficialRootTask = ""
+	}
+}
+
+func applyBraidChainedDAGHandoff(handoff *BraidNodeHandoff, instance map[string]any) {
+	handoff.TaskType = BraidScaffoldClassChainedDAG
+	handoff.ScaffoldClass = BraidScaffoldClassChainedDAG
+	handoff.ScaffoldID = BraidScaffoldIDBacktrackingV1
+	handoff.Facts = cloneMapAny(instance)
+	handoff.Rules = []string{
+		"Resolve subproblems in topological (dependency) order.",
+		"Substitute computed answers into dependent subproblems before solving.",
+		"Verify each intermediate answer against its local constraints.",
+		"If a subproblem fails, backtrack and retry with alternative approaches.",
+		"Use exact integer arithmetic; avoid floating point when possible.",
+	}
+	handoff.AnswerFormat = "solution = [answer_node_4, answer_node_2, answer_node_7]"
+	handoff.Checks = []string{
+		"each subproblem answer satisfies its local constraints",
+		"substituted values are consistent across dependent subproblems",
+		"final answers match the requested answer_spec format",
+		"intermediate values are exact (integer or rational), not approximate",
+	}
+	if handoff.Node.Kind != "extract" {
+		handoff.OfficialRootTask = ""
+	}
+}
+
 func braidNodeCanUseTypedHandoff(kind string) bool {
 	switch strings.TrimSpace(kind) {
 	case "solve", "verify", "reduce":
@@ -712,6 +779,25 @@ func braidInstanceLooksLikeSequenceSimulation(instance map[string]any) bool {
 func braidInstanceLooksLikeConstraintSolver(instance map[string]any) bool {
 	_, ok := finiteDomainWitnessFromInput(instance)
 	return ok
+}
+
+func braidInstanceLooksLikeChainedDAG(instance map[string]any) bool {
+	if len(instance) == 0 {
+		return false
+	}
+	_, hasNodes := instance["node_ids"]
+	_, hasDeps := instance["dependencies"]
+	_, hasSubproblems := instance["subproblems"]
+	_, hasVars := instance["variables"]
+	_, hasConstraints := instance["constraints"]
+	_, hasAnswerSpec := instance["answer_spec"]
+	count := 0
+	for _, ok := range []bool{hasNodes, hasDeps, hasSubproblems, hasVars, hasConstraints, hasAnswerSpec} {
+		if ok {
+			count++
+		}
+	}
+	return count >= 2
 }
 
 func RenderBraidNodeHandoffPrompt(handoff BraidNodeHandoff) string {
@@ -853,6 +939,15 @@ func RenderBraidHelperHandoffPrompt(handoff BraidNodeHandoff) string {
 		b.WriteString("- Search or propagate deterministically over the declared domains; do not route from prose keywords.\n")
 		b.WriteString("- Return `solution = {\"variable\": integer, ...}` only after evaluating every typed constraint.\n")
 		b.WriteString("- If verification fails, return ok:false with first_failure, failed_constraint, observed, expected, and repair_hint.\n")
+	}
+	if handoff.ScaffoldClass == BraidScaffoldClassChainedDAG {
+		b.WriteString("Chained-DAG output contract:\n")
+		b.WriteString("- Resolve subproblems in dependency order (topological sort).\n")
+		b.WriteString("- Substitute computed answers into dependent subproblems before solving them.\n")
+		b.WriteString("- Each subproblem: parse the mathematical question, compute exact answer, verify locally.\n")
+		b.WriteString("- Use integer arithmetic; avoid floating point unless the problem explicitly requires it.\n")
+		b.WriteString("- Return `solution = [answer_node_4, answer_node_2, answer_node_7]` only after all requested node answers are computed.\n")
+		b.WriteString("- If a subproblem fails, return ok:false with first_failure indicating which node and why.\n")
 	}
 	if len(handoff.Checks) > 0 {
 		b.WriteString("Verifier checks the helper must satisfy before returning an answer:\n")

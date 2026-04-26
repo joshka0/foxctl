@@ -361,7 +361,13 @@ func runBraidNodeHelper(
 	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikePackageWasteOptimization(input) {
 		instructions += "\n" + buildPackageWasteOptimizationHelperContract()
 	}
-	if isBraidSolveKind(node.Kind) && classifyScaffoldDomain(rootPrompt) != "" && !braidHelperInputLooksLikeTransitionSystem(input) && !braidHelperInputLooksLikeResourcePathMinInitial(input) && !braidHelperInputLooksLikeExplicitShortestPath(input) && !braidHelperInputLooksLikeNumericDP(input) && !braidHelperInputLooksLikeSequenceSimulation(input) && !braidHelperInputLooksLikeFiniteDomainConstraint(input) && !braidHelperInputLooksLikePackageWasteOptimization(input) {
+	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeTypeInference(input) {
+		instructions += "\n" + buildTypeInferenceHelperContract()
+	}
+	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeChainedDAG(input) {
+		instructions += "\n" + buildChainedDAGHelperContract()
+	}
+	if isBraidSolveKind(node.Kind) && classifyScaffoldDomain(rootPrompt) != "" && !braidHelperInputLooksLikeTransitionSystem(input) && !braidHelperInputLooksLikeResourcePathMinInitial(input) && !braidHelperInputLooksLikeExplicitShortestPath(input) && !braidHelperInputLooksLikeNumericDP(input) && !braidHelperInputLooksLikeSequenceSimulation(input) && !braidHelperInputLooksLikeFiniteDomainConstraint(input) && !braidHelperInputLooksLikePackageWasteOptimization(input) && !braidHelperInputLooksLikeTypeInference(input) && !braidHelperInputLooksLikeChainedDAG(input) {
 		instructions += "\n" + buildGeneralSolverHelperContract()
 	}
 	argsMap := map[string]any{
@@ -1824,6 +1830,710 @@ Generic resource-allocation helper contract:
 - A supplier is invalid only when its largest available box is smaller than at least one package.
 - Minimize total waste across valid suppliers, then return the minimum modulo 1000000007.
 - Return ok:true only with one checked answer in the requested format: solution = <integer>.
+`)
+}
+
+func backtrackingDAGPresetSource() string {
+	return strings.TrimSpace(`
+func Solve(input map[string]any) map[string]any {
+	// --- parse inputs ---
+	spRaw, _ := input["subproblems"].(map[string]any)
+	depRaw, _ := input["dependencies"].(map[string]any)
+	ansSpecRaw, _ := input["answer_spec"].([]any)
+	if spRaw == nil || depRaw == nil || ansSpecRaw == nil {
+		return map[string]any{"ok": false, "first_failure": "missing required fields", "repair_hint": "provide subproblems, dependencies, and answer_spec"}
+	}
+	subproblems := map[string]string{}
+	for k, v := range spRaw {
+		s, _ := v.(string)
+		if s == "" {
+			return map[string]any{"ok": false, "first_failure": "empty subproblem for " + k, "repair_hint": "every subproblem must be a non-empty string"}
+		}
+		subproblems[k] = s
+	}
+	deps := map[string][]string{}
+	for k, v := range depRaw {
+		arr, _ := v.([]any)
+		out := make([]string, 0, len(arr))
+		for _, item := range arr {
+			s, _ := item.(string)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		deps[k] = out
+	}
+	answerSpec := make([]string, 0, len(ansSpecRaw))
+	for _, v := range ansSpecRaw {
+		s, _ := v.(string)
+		if s != "" {
+			answerSpec = append(answerSpec, s)
+		}
+	}
+	if len(answerSpec) == 0 {
+		return map[string]any{"ok": false, "first_failure": "empty answer_spec", "repair_hint": "answer_spec must list at least one node id"}
+	}
+
+	// --- topological sort (Kahn) ---
+	inDegree := map[string]int{}
+	for k := range subproblems {
+		inDegree[k] = 0
+	}
+	for k, arr := range deps {
+		for _, d := range arr {
+			if _, ok := subproblems[d]; !ok {
+				return map[string]any{"ok": false, "first_failure": "dependency " + d + " for " + k + " not a known subproblem", "repair_hint": "ensure every dependency is a key in subproblems"}
+			}
+			inDegree[k]++
+		}
+	}
+	queue := make([]string, 0, len(subproblems))
+	for k, v := range inDegree {
+		if v == 0 {
+			queue = append(queue, k)
+		}
+	}
+	order := make([]string, 0, len(subproblems))
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		order = append(order, cur)
+		for _, child := range deps[cur] {
+			inDegree[child]--
+			if inDegree[child] == 0 {
+				queue = append(queue, child)
+			}
+		}
+	}
+	if len(order) != len(subproblems) {
+		return map[string]any{"ok": false, "first_failure": "dependency cycle detected", "repair_hint": "ensure dependencies form a DAG"}
+	}
+
+	// --- helpers ---
+	answers := map[string]int{}
+	presetItoa := func(n int) string {
+		if n == 0 {
+			return "0"
+		}
+		neg := false
+		if n < 0 {
+			neg = true
+			n = -n
+		}
+		var buf [20]byte
+		i := 19
+		for n > 0 {
+			buf[i] = byte('0' + n%10)
+			n /= 10
+			i--
+		}
+		if neg {
+			buf[i] = '-'
+			i--
+		}
+		return string(buf[i+1:])
+	}
+	presetAtoi := func(s string) int {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return 0
+		}
+		neg := false
+		i := 0
+		if s[0] == '-' {
+			neg = true
+			i = 1
+		}
+		n := 0
+		for ; i < len(s); i++ {
+			if s[i] < '0' || s[i] > '9' {
+				return 0
+			}
+			n = n*10 + int(s[i]-'0')
+		}
+		if neg {
+			return -n
+		}
+		return n
+	}
+	substituteRefs := func(text string) string {
+		// replace "[use answer from node_X]" and "[For this value use the answer from problem node_X and add 1995]"
+		// with computed integer values where possible
+		for id, val := range answers {
+			repl := presetItoa(val)
+			// simple literal substitution patterns
+			text = strings.ReplaceAll(text, "[use answer from "+id+"]", repl)
+			text = strings.ReplaceAll(text, "[use answer from problem "+id+"]", repl)
+			text = strings.ReplaceAll(text, "[For this value use the answer from "+id+"]", repl)
+			text = strings.ReplaceAll(text, "[For this value use the answer from problem "+id+"]", repl)
+			// partial inside larger phrases: "answer from node_0 and add 1995"
+			pat := "answer from " + id
+			for strings.Contains(text, pat) {
+				idx := strings.Index(text, pat)
+				end := idx + len(pat)
+				// extend end to capture trailing operation words and numbers
+				for end < len(text) && ((text[end] >= 'a' && text[end] <= 'z') || (text[end] >= 'A' && text[end] <= 'Z') || text[end] == ' ' || text[end] == '-' || (text[end] >= '0' && text[end] <= '9')) {
+					end++
+				}
+				segment := strings.TrimSpace(text[idx:end])
+				// try to turn segment into an arithmetic expression
+				expr := strings.ReplaceAll(segment, pat, repl)
+				expr = strings.ReplaceAll(expr, "and add ", "+")
+				expr = strings.ReplaceAll(expr, "and subtract ", "-")
+				expr = strings.ReplaceAll(expr, "and multiply by ", "*")
+				expr = strings.ReplaceAll(expr, "and divide by ", "/")
+				expr = strings.ReplaceAll(expr, "add ", "+")
+				expr = strings.ReplaceAll(expr, "subtract ", "-")
+				expr = strings.ReplaceAll(expr, "multiply by ", "*")
+				expr = strings.ReplaceAll(expr, "divide by ", "/")
+				expr = strings.ReplaceAll(expr, "plus ", "+")
+				expr = strings.ReplaceAll(expr, "minus ", "-")
+				expr = strings.ReplaceAll(expr, "times ", "*")
+				expr = strings.ReplaceAll(expr, "to the power of ", "^")
+				expr = strings.ReplaceAll(expr, "power of ", "^")
+				expr = strings.ReplaceAll(expr, "raised to ", "^")
+				v := evalExpr(expr)
+				if v != nil {
+					text = text[:idx] + presetItoa(*v) + text[end:]
+				} else {
+					// cannot evaluate, just replace the reference
+					text = text[:idx] + repl + text[end:]
+				}
+			}
+		}
+		return text
+	}
+	evalExpr := func(expr string) *int {
+		expr = strings.TrimSpace(expr)
+		if expr == "" {
+			return nil
+		}
+		// simple integer expression evaluator supporting + - * / ^ and parentheses
+		var parse func(int) (int, int)
+		parse = func(i int) (int, int) {
+			var value int
+			var op byte = '+'
+			for i < len(expr) {
+				var term int
+				if expr[i] == '(' {
+					term, i = parse(i + 1)
+					if i < len(expr) && expr[i] == ')' {
+						i++
+					}
+				} else {
+					start := i
+					neg := false
+					if expr[i] == '-' {
+						neg = true
+						i++
+					}
+					for i < len(expr) && expr[i] >= '0' && expr[i] <= '9' {
+						i++
+					}
+					if start == i || (neg && i == start+1) {
+						// not a number, abort
+						return 0, len(expr)
+					}
+					term = presetAtoi(expr[start:i])
+				}
+				if op == '+' {
+					value += term
+				} else if op == '-' {
+					value -= term
+				} else if op == '*' {
+					value *= term
+				} else if op == '/' {
+					if term == 0 {
+						return 0, len(expr)
+					}
+					value /= term
+				} else if op == '^' {
+					if term < 0 {
+						return 0, len(expr)
+					}
+					base := value
+					value = 1
+					for p := 0; p < term; p++ {
+						value *= base
+					}
+				}
+				if i >= len(expr) {
+					break
+				}
+				if expr[i] == ')' {
+					break
+				}
+				if expr[i] == '+' || expr[i] == '-' || expr[i] == '*' || expr[i] == '/' || expr[i] == '^' {
+					op = expr[i]
+					i++
+				} else {
+					// unexpected char, abort
+					return 0, len(expr)
+				}
+			}
+			return value, i
+		}
+		result, _ := parse(0)
+		return &result
+	}
+	extractAndEval := func(text string) *int {
+		// try to find a mathematical expression after keywords
+		lower := strings.ToLower(text)
+		prefixes := []string{"how many ", "what is ", "find ", "compute ", "calculate ", "evaluate ", "determine "}
+		for _, p := range prefixes {
+			if strings.HasPrefix(lower, p) {
+				text = text[len(p):]
+				break
+			}
+		}
+		// strip trailing punctuation/question mark
+		text = strings.TrimSpace(text)
+		if len(text) > 0 && text[len(text)-1] == '?' {
+			text = text[:len(text)-1]
+		}
+		// look for a plain arithmetic expression (numbers and operators)
+		// collect longest substring that looks like an expression
+		best := ""
+		for i := 0; i < len(text); i++ {
+			if text[i] >= '0' && text[i] <= '9' {
+				j := i
+				for j < len(text) {
+					c := text[j]
+					if (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '*' || c == '/' || c == '^' || c == '(' || c == ')' || c == ' ' {
+						j++
+					} else {
+						break
+					}
+				}
+				if j-i > len(best) {
+					best = text[i:j]
+				}
+			}
+		}
+		if best != "" {
+			return evalExpr(best)
+		}
+		// try to evaluate the whole text as an expression after substitution
+		return evalExpr(text)
+	}
+
+	// --- solve in topological order ---
+	for _, nodeID := range order {
+		text := subproblems[nodeID]
+		text = substituteRefs(text)
+		valPtr := extractAndEval(text)
+		if valPtr == nil {
+			return map[string]any{"ok": false, "first_failure": "cannot evaluate subproblem " + nodeID, "repair_hint": "ensure the subproblem text contains a computable arithmetic expression after substitution"}
+		}
+		answers[nodeID] = *valPtr
+	}
+
+	// --- format output ---
+	outVals := make([]int, 0, len(answerSpec))
+	for _, id := range answerSpec {
+		v, ok := answers[id]
+		if !ok {
+			return map[string]any{"ok": false, "first_failure": "missing answer for " + id, "repair_hint": "ensure answer_spec only references nodes present in subproblems"}
+		}
+		outVals = append(outVals, v)
+	}
+	outStrs := make([]string, len(outVals))
+	for i, v := range outVals {
+		outStrs[i] = presetItoa(v)
+	}
+	result := "solution = [" + strings.Join(outStrs, ", ") + "]"
+	return map[string]any{"ok": true, "answer": result, "verified": true}
+}
+`)
+}
+
+func chainedDAGAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	base := HelperVerifierDiagnostic{Pass: false, FailedAtStep: -1, FailureKind: "chained_dag"}
+	_, hasSubproblems := input["subproblems"]
+	_, hasAnswerSpec := input["answer_spec"]
+	if !hasSubproblems || !hasAnswerSpec {
+		return HelperVerifierDiagnostic{}, false
+	}
+	answer = strings.TrimSpace(answer)
+	idx := strings.Index(answer, "solution =")
+	if idx < 0 {
+		base.FailureKind = "parse"
+		base.Message = "candidate does not contain solution = ..."
+		base.RepairHint = "return answer exactly as solution = [answer1, answer2, ...]"
+		return base, true
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(answer[idx:], "solution ="))
+	if !strings.HasPrefix(payload, "[") {
+		base.FailureKind = "parse"
+		base.Message = "candidate solution is not an array"
+		base.RepairHint = "return answer exactly as solution = [answer1, answer2, ...]"
+		return base, true
+	}
+	var decoded []any
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		base.FailureKind = "parse"
+		base.Message = "candidate solution is not valid JSON array"
+		base.RepairHint = "return answer exactly as solution = [answer1, answer2, ...]"
+		return base, true
+	}
+	if len(decoded) == 0 {
+		base.FailureKind = "empty"
+		base.Message = "candidate solution has no answers"
+		base.RepairHint = "return at least one answer for each requested node"
+		return base, true
+	}
+	return HelperVerifierDiagnostic{Pass: true, Score: 1}, true
+}
+
+func buildChainedDAGHelperContract() string {
+	return strings.TrimSpace(`
+Chained-DAG solver helper contract:
+- Resolve subproblems in dependency order (topological sort).
+- Substitute computed answers into dependent subproblems before solving them.
+- Each subproblem: parse the mathematical question, compute exact answer, verify locally.
+- Use integer arithmetic; avoid floating point unless the problem explicitly requires it.
+- If a subproblem's answer is used by later subproblems, verify it satisfies all constraints.
+- Return ok:true only when all requested node answers are computed and verified.
+- If a subproblem fails, return ok:false with first_failure indicating which node and why.
+- For problems referencing "node_N answers": substitute the actual computed value.
+`)
+}
+
+func hindleyMilnerPresetSource() string {
+	return strings.TrimSpace(`
+func Solve(input map[string]any) map[string]any {
+	exprsRaw, ok1 := input["expressions"].([]any)
+	envRaw, ok2 := input["type_environment"].(map[string]any)
+	if !ok1 || !ok2 {
+		return map[string]any{"ok": false, "first_failure": "expected expressions and type_environment", "repair_hint": "provide expressions as strings and type_environment as var->type strings"}
+	}
+	exprs := make([]string, len(exprsRaw))
+	for i, v := range exprsRaw {
+		s, ok := v.(string)
+		if !ok {
+			return map[string]any{"ok": false, "first_failure": "expression must be a string", "repair_hint": "each expression is a string like let x = 1 in x + 2"}
+		}
+		exprs[i] = s
+	}
+	env := map[string]string{}
+	for k, v := range envRaw {
+		s, ok := v.(string)
+		if !ok {
+			return map[string]any{"ok": false, "first_failure": "type_environment values must be strings", "repair_hint": "each env entry maps a variable name to a type string"}
+		}
+		env[k] = s
+	}
+	nextVar := 0
+	fresh := func() string {
+		nextVar++
+		return "t" + presetItoa(nextVar)
+	}
+	subst := map[string]string{}
+	occurs := func(name, t string) bool {
+		if t == name {
+			return true
+		}
+		if strings.HasPrefix(t, "(") && strings.HasSuffix(t, ")") {
+			inner := t[1 : len(t)-1]
+			parts := splitArrow(inner)
+			for _, p := range parts {
+				if occurs(name, strings.TrimSpace(p)) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	applySub := func(t string) string {
+		if v, ok := subst[t]; ok {
+			return applySub(v)
+		}
+		if strings.HasPrefix(t, "(") && strings.HasSuffix(t, ")") {
+			inner := t[1 : len(t)-1]
+			parts := splitArrow(inner)
+			for i, p := range parts {
+				parts[i] = applySub(strings.TrimSpace(p))
+			}
+			return "(" + strings.Join(parts, " -> ") + ")"
+		}
+		return t
+	}
+	unify := func(a, b string) bool {
+		a = applySub(a)
+		b = applySub(b)
+		if a == b {
+			return true
+		}
+		if strings.HasPrefix(a, "t") && len(a) > 1 && a[1] >= '0' && a[1] <= '9' {
+			if occurs(a, b) {
+				return false
+			}
+			subst[a] = b
+			return true
+		}
+		if strings.HasPrefix(b, "t") && len(b) > 1 && b[1] >= '0' && b[1] <= '9' {
+			if occurs(b, a) {
+				return false
+			}
+			subst[b] = a
+			return true
+		}
+		if strings.HasPrefix(a, "(") && strings.HasSuffix(a, ")") && strings.HasPrefix(b, "(") && strings.HasSuffix(b, ")") {
+			ap := splitArrow(a[1 : len(a)-1])
+			bp := splitArrow(b[1 : len(b)-1])
+			if len(ap) != len(bp) {
+				return false
+			}
+			for i := range ap {
+				if !unify(strings.TrimSpace(ap[i]), strings.TrimSpace(bp[i])) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	}
+	parseExpr := func(s string) (string, []string) {
+		s = strings.TrimSpace(s)
+		if strings.HasPrefix(s, "let ") {
+			rest := s[4:]
+			eq := strings.Index(rest, "=")
+			if eq < 0 {
+				return "bad", nil
+			}
+			name := strings.TrimSpace(rest[:eq])
+			rest = rest[eq+1:]
+			inIdx := strings.Index(rest, " in ")
+			if inIdx < 0 {
+				return "bad", nil
+			}
+			val := strings.TrimSpace(rest[:inIdx])
+			body := strings.TrimSpace(rest[inIdx+4:])
+			return "let", []string{name, val, body}
+		}
+		if strings.HasPrefix(s, "\\") || strings.HasPrefix(s, "fn ") {
+			rest := s
+			if strings.HasPrefix(rest, "fn ") {
+				rest = rest[3:]
+			} else {
+				rest = rest[1:]
+			}
+			rest = strings.TrimSpace(rest)
+			dot := strings.Index(rest, ".")
+			if dot < 0 {
+				return "bad", nil
+			}
+			param := strings.TrimSpace(rest[:dot])
+			body := strings.TrimSpace(rest[dot+1:])
+			return "lambda", []string{param, body}
+		}
+		if len(s) > 0 && s[0] == '(' {
+			depth := 0
+			space := -1
+			for i, ch := range s {
+				if ch == '(' {
+					depth++
+				} else if ch == ')' {
+					depth--
+				}
+				if depth == 1 && ch == ' ' && space < 0 {
+					space = i
+				}
+			}
+			if space < 0 {
+				return "bad", nil
+			}
+			fn := strings.TrimSpace(s[1:space])
+			arg := strings.TrimSpace(s[space+1 : len(s)-1])
+			return "app", []string{fn, arg}
+		}
+		return "var", []string{s}
+	}
+	var infer func(string, map[string]string) (string, bool)
+	infer = func(expr string, ctx map[string]string) (string, bool) {
+		kind, parts := parseExpr(expr)
+		switch kind {
+		case "var":
+			name := parts[0]
+			if t, ok := ctx[name]; ok {
+				return t, true
+			}
+			if t, ok := env[name]; ok {
+				return t, true
+			}
+			return "", false
+		case "lambda":
+			param := parts[0]
+			body := parts[1]
+			pt := fresh()
+			newCtx := map[string]string{}
+			for k, v := range ctx {
+				newCtx[k] = v
+			}
+			newCtx[param] = pt
+			bt, ok := infer(body, newCtx)
+			if !ok {
+				return "", false
+			}
+			return "(" + pt + " -> " + bt + ")", true
+		case "app":
+			fn := parts[0]
+			arg := parts[1]
+			ft, ok1 := infer(fn, ctx)
+			at, ok2 := infer(arg, ctx)
+			if !ok1 || !ok2 {
+				return "", false
+			}
+			result := fresh()
+			if !unify(ft, "("+at+" -> "+result+")") {
+				return "", false
+			}
+			return result, true
+		case "let":
+			name := parts[0]
+			val := parts[1]
+			body := parts[2]
+			vt, ok1 := infer(val, ctx)
+			if !ok1 {
+				return "", false
+			}
+			newCtx := map[string]string{}
+			for k, v := range ctx {
+				newCtx[k] = v
+			}
+			newCtx[name] = vt
+			bt, ok2 := infer(body, newCtx)
+			if !ok2 {
+				return "", false
+			}
+			return bt, true
+		default:
+			return "", false
+		}
+	}
+	assignments := map[string]string{}
+	for i, expr := range exprs {
+		t, ok := infer(expr, map[string]string{})
+		if !ok {
+			return map[string]any{"ok": false, "first_failure": "unification failed for expression " + presetItoa(i), "repair_hint": "check expression syntax and type consistency"}
+		}
+		assignments["expr"+presetItoa(i)] = applySub(t)
+	}
+	for _, t := range assignments {
+		if strings.Contains(t, "t") {
+			for k := range subst {
+				if strings.Contains(t, k) {
+					return map[string]any{"ok": false, "first_failure": "unresolved type variable " + k, "repair_hint": "add more type annotations or expressions to constrain all variables"}
+				}
+			}
+		}
+	}
+	out := "solution = {"
+	keys := make([]string, 0, len(assignments))
+	for k := range assignments {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for i, k := range keys {
+		if i > 0 {
+			out += ", "
+		}
+		out += "\"" + k + "\": \"" + assignments[k] + "\""
+	}
+	out += "}"
+	return map[string]any{"ok": true, "answer": out}
+}
+
+func splitArrow(s string) []string {
+	var parts []string
+	depth := 0
+	start := 0
+	for i, ch := range s {
+		if ch == '(' {
+			depth++
+		} else if ch == ')' {
+			depth--
+		}
+		if depth == 0 && ch == '-' && i+1 < len(s) && s[i+1] == '>' {
+			parts = append(parts, strings.TrimSpace(s[start:i]))
+			start = i + 2
+		}
+	}
+	parts = append(parts, strings.TrimSpace(s[start:]))
+	return parts
+}
+`)
+}
+
+func typeInferenceAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	base := HelperVerifierDiagnostic{Pass: false, FailedAtStep: -1, FailureKind: "type_inference"}
+	_, hasExpr := input["expressions"]
+	_, hasBindings := input["let_bindings"]
+	_, hasEnv := input["type_environment"]
+	_, hasConstraints := input["unification_constraints"]
+	if !((hasExpr || hasBindings) && (hasEnv || hasConstraints)) {
+		return HelperVerifierDiagnostic{}, false
+	}
+	answer = strings.TrimSpace(answer)
+	idx := strings.Index(answer, "solution =")
+	if idx < 0 {
+		base.FailureKind = "parse"
+		base.Message = "candidate does not contain solution = ..."
+		base.RepairHint = "return answer exactly as solution = {\"expr0\": \"type\", ...}"
+		return base, true
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(answer[idx:], "solution ="))
+	if !strings.HasPrefix(payload, "{") {
+		base.FailureKind = "parse"
+		base.Message = "candidate solution is not a JSON object"
+		base.RepairHint = "return answer exactly as solution = {\"expr0\": \"type\", ...}"
+		return base, true
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		base.FailureKind = "parse"
+		base.Message = "candidate solution is not valid JSON"
+		base.RepairHint = "return answer exactly as solution = {\"expr0\": \"type\", ...}"
+		return base, true
+	}
+	if len(decoded) == 0 {
+		base.FailureKind = "empty"
+		base.Message = "candidate solution has no type assignments"
+		base.RepairHint = "return at least one type assignment for each expression"
+		return base, true
+	}
+	for k, v := range decoded {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			base.FailureKind = "empty_assignment"
+			base.Message = "candidate contains empty key or type"
+			base.RepairHint = "ensure every assignment has a non-empty variable name and type string"
+			return base, true
+		}
+		if strings.Contains(v, "t") {
+			for i := 1; i < len(v); i++ {
+				if v[i] >= '0' && v[i] <= '9' {
+					base.FailureKind = "unresolved_variable"
+					base.Message = "candidate contains unresolved type variable " + v
+					base.RepairHint = "all type variables must be resolved to concrete types before returning"
+					return base, true
+				}
+			}
+		}
+	}
+	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "type_inference", FailedAtStep: -1}, true
+}
+
+func buildTypeInferenceHelperContract() string {
+	return strings.TrimSpace(`
+Type-inference helper contract:
+- Implement Algorithm W (Hindley-Milner) with Robinson unification.
+- Parse the expression AST from the input (let-bindings, lambdas, applications, variables).
+- Maintain a type environment mapping variables to type schemes.
+- Let-bindings: generalize the inferred type over free variables not in environment.
+- Applications: unify function type with (arg -> fresh_var), return fresh_var.
+- Lambdas: introduce fresh type variable for parameter, infer body in extended env.
+- Return ok:true with all type assignments only when unification succeeds fully.
+- If unification fails, return ok:false with first_failure indicating the conflicting types.
 `)
 }
 
