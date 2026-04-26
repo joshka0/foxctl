@@ -1,0 +1,35 @@
+[
+  {
+    "name": "codex",
+    "readiness": {
+      "screen_regex": "(?:›|>)\\s+.*",
+      "threshold_bps": 32,
+      "debounce_ms": 500
+    }
+  },
+  {
+    "name": "droid",
+    "readiness": {
+      "screen_regex": "(?:│\\s*>\\s*|⛬\\s+.*)",
+      "threshold_bps": 32,
+      "debounce_ms": 500
+    }
+  },
+  {
+    "name": "gemini",
+    "readiness": {
+      "screen_regex": "(?:│\\s*>\\s*|>\\s*)",
+      "threshold_bps": 32,
+      "debounce_ms": 500
+    }
+  },
+  {
+    "name": "claude",
+    "aliases": ["claude-code"],
+    "readiness": {
+      "screen_regex": "^\\s*(?:❯|│\\s*>\\s*|>\\s*)",
+      "threshold_bps": 32,
+      "debounce_ms": 500
+    }
+  }
+]
