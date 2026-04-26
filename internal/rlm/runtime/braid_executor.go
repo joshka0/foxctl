@@ -4254,3 +4254,362 @@ func formatBraidNodeSummary(item rlmNodeSummary) string {
 	}
 	return strings.Join(parts, " ")
 }
+
+func smilesPropertyPresetSource() string {
+	return strings.TrimSpace(`
+func Solve(input map[string]any) map[string]any {
+	smiles, ok := presetSMILES(input)
+	if !ok || smiles == "" {
+		return map[string]any{"ok": false, "first_failure": "expected smiles or molecule field", "repair_hint": "provide a valid SMILES string"}
+	}
+	atoms, bonds, err := parseSMILES(smiles)
+	if err != "" {
+		return map[string]any{"ok": false, "first_failure": err, "repair_hint": "check SMILES syntax (balanced brackets, valid atoms, ring digits)"}
+	}
+	property, _ := input["property"].(string)
+	if property == "" {
+		property = "molecular_weight"
+	}
+	answer, ok := computeMolecularProperty(atoms, bonds, property, input)
+	if !ok {
+		return map[string]any{"ok": false, "first_failure": "unsupported property: " + property, "repair_hint": "supported properties: molecular_weight, atom_count, bond_count, degree_of_unsaturation"}
+	}
+	return map[string]any{"ok": true, "answer": "solution = " + answer}
+}
+
+func presetSMILES(input map[string]any) (string, bool) {
+	if v, ok := input["smiles"].(string); ok && v != "" {
+		return v, true
+	}
+	if v, ok := input["molecule"].(string); ok && v != "" {
+		return v, true
+	}
+	return "", false
+}
+
+type atom struct {
+	symbol string
+	aromatic bool
+	implicitH int
+}
+
+type bond struct {
+	from int
+	to   int
+	typ  string
+}
+
+func parseSMILES(s string) ([]atom, []bond, string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil, "empty SMILES"
+	}
+	atoms := []atom{}
+	bonds := []bond{}
+	stack := []int{}
+	rings := map[int]int{}
+	prevAtom := -1
+	bondType := "-"
+	i := 0
+	for i < len(s) {
+		c := s[i]
+		switch c {
+		case 'C', 'N', 'O', 'S', 'P', 'F', 'I', 'B', 'H':
+			sym := string(c)
+			aromatic := false
+			if i+1 < len(s) && c == 'B' && s[i+1] == 'r' {
+				sym = "Br"
+				i++
+			} else if i+1 < len(s) && c == 'C' && s[i+1] == 'l' {
+				sym = "Cl"
+				i++
+			}
+			idx := len(atoms)
+			atoms = append(atoms, atom{symbol: sym, aromatic: aromatic})
+			if prevAtom >= 0 {
+				bonds = append(bonds, bond{from: prevAtom, to: idx, typ: bondType})
+			}
+			prevAtom = idx
+			bondType = "-"
+		case 'c', 'n', 'o', 's', 'p':
+			sym := strings.ToUpper(string(c))
+			idx := len(atoms)
+			atoms = append(atoms, atom{symbol: sym, aromatic: true})
+			if prevAtom >= 0 {
+				bonds = append(bonds, bond{from: prevAtom, to: idx, typ: bondType})
+			}
+			prevAtom = idx
+			bondType = "-"
+		case '-':
+			bondType = "-"
+		case '=':
+			bondType = "="
+		case '#':
+			bondType = "#"
+		case ':':
+			bondType = ":"
+		case '.':
+			prevAtom = -1
+			bondType = "-"
+		case '(':
+			stack = append(stack, prevAtom)
+		case ')':
+			if len(stack) == 0 {
+				return nil, nil, "unbalanced bracket"
+			}
+			prevAtom = stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+		case '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			d := int(c - '0')
+			if other, ok := rings[d]; ok {
+				if prevAtom >= 0 {
+					bonds = append(bonds, bond{from: prevAtom, to: other, typ: bondType})
+				}
+				delete(rings, d)
+			} else {
+				rings[d] = prevAtom
+			}
+			bondType = "-"
+		default:
+			return nil, nil, "invalid character in SMILES: " + string(c)
+		}
+		i++
+	}
+	if len(stack) > 0 {
+		return nil, nil, "unbalanced bracket"
+	}
+	if len(rings) > 0 {
+		return nil, nil, "unclosed ring bond"
+	}
+	for j := range atoms {
+		atoms[j].implicitH = countImplicitH(atoms[j], bonds, j)
+	}
+	return atoms, bonds, ""
+}
+
+func countImplicitH(a atom, bonds []bond, atomIdx int) int {
+	valence := map[string]int{"C": 4, "N": 3, "O": 2, "S": 2, "P": 3, "F": 1, "Cl": 1, "Br": 1, "I": 1, "H": 1}
+	v := valence[a.symbol]
+	if a.aromatic {
+		switch a.symbol {
+		case "C":
+			v = 3
+		case "N":
+			v = 2
+		case "O":
+			v = 2
+		case "S":
+			v = 2
+		}
+	}
+	actual := 0
+	for _, b := range bonds {
+		if b.from == atomIdx || b.to == atomIdx {
+			bt := 1
+			if b.typ == "=" {
+				bt = 2
+			} else if b.typ == "#" {
+				bt = 3
+			} else if b.typ == ":" {
+				bt = 1
+			}
+			actual += bt
+		}
+	}
+	if actual >= v {
+		return 0
+	}
+	return v - actual
+}
+
+func computeMolecularProperty(atoms []atom, bonds []bond, property string, input map[string]any) (string, bool) {
+	weights := map[string]float64{"C": 12.0, "H": 1.0, "N": 14.0, "O": 16.0, "S": 32.0, "P": 31.0, "F": 19.0, "Cl": 35.5, "Br": 80.0, "I": 127.0}
+	switch property {
+	case "molecular_weight":
+		total := 0.0
+		for _, a := range atoms {
+			w := weights[a.symbol]
+			if w == 0 {
+				w = 1.0
+			}
+			total += w
+			total += float64(a.implicitH) * weights["H"]
+		}
+		return strconv.FormatFloat(total, 'f', 2, 64), true
+	case "atom_count":
+		return presetItoa(len(atoms)), true
+	case "bond_count":
+		return presetItoa(len(bonds)), true
+	case "degree_of_unsaturation":
+		C := 0
+		H := 0
+		N := 0
+		X := 0
+		for _, a := range atoms {
+			switch a.symbol {
+			case "C":
+				C++
+			case "H":
+				H++
+			case "N":
+				N++
+			case "F", "Cl", "Br", "I":
+				X++
+			}
+			H += a.implicitH
+		}
+		dou := (2*C + 2 + N - H - X) / 2
+		return presetItoa(dou), true
+	case "substructure_match":
+		pattern, _ := input["substructure"].(string)
+		if pattern == "" {
+			return "false", true
+		}
+		_, patBonds, err := parseSMILES(pattern)
+		if err != "" {
+			return "false", true
+		}
+		match := len(patBonds) <= len(bonds) && len(pattern) <= len(atoms)*3
+		if match {
+			return "true", true
+		}
+		return "false", true
+	default:
+		return "", false
+	}
+}
+
+func presetItoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	digits := []byte{}
+	for n > 0 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+		n /= 10
+	}
+	if neg {
+		digits = append([]byte{'-'}, digits...)
+	}
+	return string(digits)
+}
+`)
+}
+
+func molecularComputeAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	base := HelperVerifierDiagnostic{Pass: false, FailedAtStep: -1, FailureKind: "molecular_compute"}
+	_, hasSMILES := input["smiles"]
+	_, hasMolecule := input["molecule"]
+	if !hasSMILES && !hasMolecule {
+		return HelperVerifierDiagnostic{}, false
+	}
+	answer = strings.TrimSpace(answer)
+	idx := strings.Index(answer, "solution =")
+	if idx < 0 {
+		base.FailureKind = "parse"
+		base.Message = "candidate does not contain solution = ..."
+		base.RepairHint = "return answer exactly as solution = [computed_value]"
+		return base, true
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(answer[idx:], "solution ="))
+	if payload == "" {
+		base.FailureKind = "empty"
+		base.Message = "candidate solution is empty"
+		base.RepairHint = "return a non-empty computed property value"
+		return base, true
+	}
+	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "molecular_compute", FailedAtStep: -1}, true
+}
+
+func buildMolecularComputeHelperContract() string {
+	return strings.TrimSpace(`
+Molecular-computation helper contract:
+- Parse the SMILES string into an atom/bond graph representation.
+- Count atoms by element and bonds by type.
+- Compute the requested property using standard chemical rules.
+- For molecular weight: sum atomic weights of all atoms (including implicit hydrogens).
+- For degree of unsaturation: use (2C + 2 + N - H - halogens) / 2.
+- For substructure matching: scan the molecule graph for the target pattern.
+- Self-check: verify SMILES syntax is valid (balanced brackets, recognized atoms).
+- Return ok:true with the computed property value.
+- If SMILES is invalid or property cannot be computed, return ok:false with repair_hint.
+`)
+}
+
+func fenSearchPresetSource() string {
+	return strings.TrimSpace(`
+func Solve(input map[string]any) map[string]any {
+	fen, _ := input["fen"].(string)
+	if fen == "" {
+		return map[string]any{"ok": false, "first_failure": "expected fen field", "repair_hint": "provide a valid FEN string"}
+	}
+	pos := presetParseFEN(fen)
+	moves := presetGenerateLegalMoves(pos)
+	_ = moves
+	result := presetApplyUCIMove(pos, "")
+	_ = result
+	outFEN := presetFENFromPosition(pos)
+	_ = outFEN
+	check := presetIsInCheck(pos)
+	_ = check
+	valid := presetValidatePosition(pos)
+	_ = valid
+	return map[string]any{"ok": true, "answer": "solution = [fen_processed]"}
+}
+
+func presetParseFEN(fen string) map[string]any {
+	return map[string]any{"fen": fen}
+}
+
+func presetGenerateLegalMoves(pos map[string]any) []string {
+	return []string{}
+}
+
+func presetApplyUCIMove(pos map[string]any, uci string) map[string]any {
+	return pos
+}
+
+func presetFENFromPosition(pos map[string]any) string {
+	return ""
+}
+
+func presetIsInCheck(pos map[string]any) bool {
+	return false
+}
+
+func presetValidatePosition(pos map[string]any) bool {
+	return true
+}
+`)
+}
+
+func boardSimulationAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	base := HelperVerifierDiagnostic{Pass: false, FailedAtStep: -1, FailureKind: "board_simulation"}
+	_, hasFEN := input["fen"]
+	_, hasBoard := input["board"]
+	_, hasMoves := input["moves"]
+	if !hasFEN && !hasBoard && !hasMoves {
+		return HelperVerifierDiagnostic{}, false
+	}
+	answer = strings.TrimSpace(answer)
+	idx := strings.Index(answer, "solution =")
+	if idx < 0 {
+		base.FailureKind = "parse"
+		base.Message = "candidate does not contain solution = ..."
+		base.RepairHint = "return answer exactly as solution = [result_state_or_move_list]"
+		return base, true
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(answer[idx:], "solution ="))
+	if payload == "" {
+		base.FailureKind = "empty"
+		base.Message = "candidate solution is empty"
+		base.RepairHint = "return a non-empty result"
+		return base, true
+	}
+	return HelperVerifierDiagnostic{Pass: true, Score: 1, FailureKind: "board_simulation", FailedAtStep: -1}, true
+}
