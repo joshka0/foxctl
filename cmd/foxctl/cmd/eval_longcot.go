@@ -3673,3 +3673,111 @@ func writeLongCoTAtomic(path string, body []byte, perm os.FileMode) error {
 	}
 	return os.Rename(tmpPath, path)
 }
+
+func newEvalLongCoTProbeDatasetsCommand() *cobra.Command {
+	var (
+		longCoTRepo string
+		outputDir   string
+		difficulty  string
+		limit       int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "probe-datasets",
+		Short: "Create 1-question-per-domain probe JSONL datasets for LongCoT",
+		Long: "Create isolated probe datasets for each LongCoT domain (logic, cs, chemistry, chess, math). " +
+			"Each output JSONL contains the specified number of questions from one domain and difficulty. " +
+			"Use these for scaffold development: run one-question probes before full benchmarks.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			out := cmd.OutOrStdout()
+
+			longCoTRepo = strings.TrimSpace(longCoTRepo)
+			if longCoTRepo == "" {
+				return writeOptimizeError(out, evalLongCoTCommand, "--longcot-repo is required for probe-datasets")
+			}
+			outputDir = strings.TrimSpace(outputDir)
+			if outputDir == "" {
+				outputDir = os.TempDir()
+			}
+			if limit <= 0 {
+				limit = 1
+			}
+			difficultySet, err := resolveLongCoTDifficultySet(difficulty)
+			if err != nil {
+				return writeOptimizeError(out, evalLongCoTCommand, err.Error())
+			}
+			if len(difficultySet) == 0 {
+				difficultySet = map[string]struct{}{"easy": {}}
+			}
+
+			loader := longcotbridge.NewPythonQuestionLoader(longcotbridge.PythonLoaderConfig{
+				RepoPath: longCoTRepo,
+			})
+			questions, err := loader.LoadQuestions(ctx, longcoteval.LoadRequest{})
+			if err != nil {
+				return writeOptimizeError(out, evalLongCoTCommand, fmt.Sprintf("load official LongCoT questions: %v", err))
+			}
+
+			domains := []string{"logic", "cs", "chemistry", "chess", "math"}
+			created := 0
+			for _, domain := range domains {
+				filtered, err := applyLongCoTQuestionFilter(questions, longCoTQuestionFilter{
+					Domains:    []string{domain},
+					Difficulty: difficulty,
+					Limit:      limit,
+				})
+				if err != nil {
+					return err
+				}
+				if len(filtered) == 0 {
+					fmt.Fprintf(out, "no %s/%s questions found, skipping\n", domain, difficulty)
+					continue
+				}
+
+				var diffLabel string
+				for k := range difficultySet {
+					diffLabel = k
+					break
+				}
+				filename := fmt.Sprintf("foxctl-longcot-probe-%s-%s-%d.jsonl", domain, diffLabel, len(filtered))
+				path := filepath.Join(outputDir, filename)
+
+				f, err := os.Create(path)
+				if err != nil {
+					return fmt.Errorf("create probe dataset %s: %w", path, err)
+				}
+				enc := json.NewEncoder(f)
+				for _, q := range filtered {
+					row := longCoTQuestionRow{
+						QuestionID: q.ID,
+						Domain:     q.Domain,
+						Difficulty: q.Difficulty,
+						Template:   q.Template,
+						Prompt:     q.PromptText,
+						Answer:     json.RawMessage(q.Answer),
+						Canary:     q.Canary,
+					}
+					if err := enc.Encode(row); err != nil {
+						_ = f.Close()
+						return fmt.Errorf("write probe dataset %s: %w", path, err)
+					}
+				}
+				if err := f.Close(); err != nil {
+					return fmt.Errorf("close probe dataset %s: %w", path, err)
+				}
+				fmt.Fprintf(out, "%s: %d questions -> %s\n", domain, len(filtered), path)
+				created++
+			}
+			fmt.Fprintf(out, "created %d probe datasets in %s\n", created, outputDir)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&longCoTRepo, "longcot-repo", "", "Path to local LongCoT repository checkout")
+	cmd.Flags().StringVar(&outputDir, "output-dir", "", "Output directory for probe JSONL files (defaults to $TMPDIR)")
+	cmd.Flags().StringVar(&difficulty, "difficulty", "easy", "Difficulty to probe: easy, medium, or hard")
+	cmd.Flags().IntVar(&limit, "limit", 1, "Questions per domain (default 1)")
+
+	return cmd
+}

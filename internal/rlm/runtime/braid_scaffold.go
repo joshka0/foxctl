@@ -8,12 +8,14 @@ const (
 	BraidScaffoldClassNumericDP             = "numeric_dp"
 	BraidScaffoldClassSequenceSimulation    = "sequence_simulation"
 	BraidScaffoldClassConstraintSolver      = "constraint_solver"
+	BraidScaffoldClassGeneralSolver         = "general_solver"
 	BraidScaffoldIDStackRelocationV1        = "stack_relocation_v1"
 	BraidScaffoldIDResourcePathMinInitialV1 = "resource_path_min_initial_v1"
 	BraidScaffoldIDExplicitShortestPathV1   = "explicit_shortest_path_v1"
 	BraidScaffoldIDRecurrenceTableV1        = "recurrence_table_v1"
 	BraidScaffoldIDJSONPatchSequenceV1      = "json_patch_v1"
 	BraidScaffoldIDFiniteDomainV1           = "finite_domain_v1"
+	BraidScaffoldIDGeneralSolverV1          = "general_solver_v1"
 )
 
 type braidRuntimeScaffold struct {
@@ -27,7 +29,11 @@ type braidRuntimeScaffold struct {
 	Verifier       HelperAnswerVerifier
 }
 
-func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input map[string]any) (braidRuntimeScaffold, bool) {
+// ResolveBraidRuntimeScaffold attempts to find a runtime scaffold for the given
+// node. It first tries the typed handoff path (scaffold_class/scaffold_id),
+// then falls back to heuristic prompt classification via rootPrompt when the
+// handoff did not produce a match.
+func ResolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input map[string]any, rootPrompt string) (braidRuntimeScaffold, bool) {
 	if !isBraidSolveKind(node.Kind) || len(input) == 0 {
 		return braidRuntimeScaffold{}, false
 	}
@@ -134,8 +140,17 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 			Verifier:       finiteDomainAnswerVerifier,
 		}, true
 	default:
-		return braidRuntimeScaffold{}, false
+		// Heuristic fallback: classify from the root prompt when no typed
+		// handoff matched. The general_solver scaffold provides structure
+		// (parse, compute, verify, format) without domain-specific logic.
+		return resolveBraidRuntimeScaffoldByHeuristic(node, handoff, input, rootPrompt)
 	}
+}
+
+// resolveBraidRuntimeScaffold is the internal dispatch. Exported as
+// ResolveBraidRuntimeScaffold above.
+func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input map[string]any, rootPrompt string) (braidRuntimeScaffold, bool) {
+	return ResolveBraidRuntimeScaffold(node, handoff, input, rootPrompt)
 }
 
 func applyBraidRuntimeScaffoldToHelperConfig(cfg HelperFactoryConfig, scaffold braidRuntimeScaffold) HelperFactoryConfig {
@@ -252,4 +267,154 @@ func braidHelperInputLooksLikeFiniteDomainConstraint(input map[string]any) bool 
 	}
 	_, ok := finiteDomainWitnessFromInput(input)
 	return ok
+}
+
+// resolveBraidRuntimeScaffoldByHeuristic attempts to classify the problem shape
+// from the root prompt when the parent model did not emit a typed handoff with
+// a recognized scaffold_class. It returns a scaffold that provides structure
+// (parse, compute, verify, format) without domain-specific logic, letting the
+// LLM fill in the computation.
+func resolveBraidRuntimeScaffoldByHeuristic(node BraidNode, handoff BraidNodeHandoff, input map[string]any, rootPrompt string) (braidRuntimeScaffold, bool) {
+	if !isBraidSolveKind(node.Kind) {
+		return braidRuntimeScaffold{}, false
+	}
+	detected := classifyScaffoldDomain(rootPrompt)
+	if detected == "" {
+		return braidRuntimeScaffold{}, false
+	}
+	return braidRuntimeScaffold{
+		Class:          BraidScaffoldClassGeneralSolver,
+		ID:             BraidScaffoldIDGeneralSolverV1,
+		PresetName:     BraidScaffoldClassGeneralSolver + "/" + BraidScaffoldIDGeneralSolverV1,
+		PresetSource:   generalSolverPresetSource(),
+		PresetInput:    cloneMapAny(input),
+		MaxSourceLines: 360,
+		MaxSourceChars: 18000,
+		Verifier:       nil,
+	}, true
+}
+
+// classifyScaffoldDomain returns a domain label derived from prompt markers, or
+// empty string when no domain is recognized. This is a lightweight heuristic
+// used only when the typed handoff path did not produce a scaffold.
+func classifyScaffoldDomain(prompt string) string {
+	lower := strings.ToLower(prompt)
+	// CS / type inference / algorithm simulation
+	for _, marker := range []string{
+		"algorithm w", "hindley-milner", "type inference",
+		"turing machine", "flow network", "bitonic",
+		"matrix chain", "register allocation", "ir optimi",
+		"distributed memory", "scheduling algorithm",
+		"unification", "let-binding", "let binding",
+	} {
+		if strings.Contains(lower, marker) {
+			return "cs"
+		}
+	}
+	// Chemistry / molecular reasoning
+	for _, marker := range []string{
+		"smiles", "molecule", "morgan fingerprint",
+		"reaction", "substructure", "topological polar",
+		"molecular", "chirality", "stereochem",
+		"functional group", "bond order", "molar mass",
+	} {
+		if strings.Contains(lower, marker) {
+			return "chemistry"
+		}
+	}
+	// Chess / board simulation
+	for _, marker := range []string{
+		"knight", "bishop", "rook", "pawn",
+		"minimax", "chess board", "chessboard",
+		"captured via", "checkmate", "stalemate",
+		"board size", "fen ",
+	} {
+		if strings.Contains(lower, marker) {
+			return "chess"
+		}
+	}
+	// Math / chained olympiad problems
+	for _, marker := range []string{
+		"node_0", "node_1", "dag chained",
+		"subproblem", "olympiad", "mathemati",
+		"modular inverse", "number theory", "combinator",
+	} {
+		if strings.Contains(lower, marker) {
+			return "math"
+		}
+	}
+	// Logic / planning (already well-covered by typed scaffolds, but
+	// include for completeness when typed handoff fails)
+	for _, marker := range []string{
+		"sokoban", "blocksworld", "blocks world",
+		"tower of hanoi", "packaging", "initial state",
+		"goal state", "grid (", "dungeon",
+	} {
+		if strings.Contains(lower, marker) {
+			return "logic"
+		}
+	}
+	return ""
+}
+
+func generalSolverPresetSource() string {
+	return strings.TrimSpace(`
+func Solve(input map[string]any) map[string]any {
+	parsed, parseOk := parseProblem(input)
+	if !parseOk {
+		return map[string]any{"ok": false, "first_failure": "parse failed", "repair_hint": "fix input parsing"}
+	}
+	answer, computeOk := computeAnswer(parsed)
+	if !computeOk {
+		return map[string]any{"ok": false, "first_failure": "compute_answer returned no result", "repair_hint": "implement the core computation"}
+	}
+	if diag, ok := selfCheck(answer, parsed); !ok {
+		return map[string]any{"ok": false, "first_failure": diag, "repair_hint": "fix the computation"}
+	}
+	return map[string]any{"ok": true, "answer": formatAnswer(answer, parsed)}
+}
+
+func parseProblem(input map[string]any) (map[string]any, bool) {
+	// Extract structured data from the raw input.
+	// TODO: adapt for the specific domain.
+	return input, true
+}
+
+func computeAnswer(parsed map[string]any) (string, bool) {
+	// Run the core computation.
+	// TODO: implement domain logic.
+	// Return the answer string (e.g. "solution = ...").
+	return "", false
+}
+
+func selfCheck(answer string, parsed map[string]any) (string, bool) {
+	// Verify the answer against the problem constraints.
+	// TODO: implement checks.
+	if answer == "" {
+		return "answer is empty", false
+	}
+	return "", true
+}
+
+func formatAnswer(answer string, parsed map[string]any) string {
+	if len(answer) > 10 && answer[:10] == "solution =" {
+		return answer
+	}
+	return "solution = " + answer
+}
+`)
+}
+
+func buildGeneralSolverHelperContract() string {
+	return strings.TrimSpace(`
+General solver helper contract:
+- Parse the problem input into structured data (typed fields, not prose).
+- Implement the core computation as a deterministic algorithm.
+- Self-check the answer against the original problem constraints before returning.
+- Return ok:true only with a verified answer in the requested format.
+- If the computation fails or the self-check fails, return ok:false with first_failure and repair_hint.
+- Do not refuse to compute. The scaffold provides structure; fill in the domain logic.
+- Keep the implementation bounded. Do not enumerate all possible states when a constructive algorithm exists.
+- For problems with many interdependent steps, compute step-by-step and verify each intermediate result.
+`)
 }

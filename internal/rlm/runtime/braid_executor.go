@@ -361,6 +361,9 @@ func runBraidNodeHelper(
 	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikePackageWasteOptimization(input) {
 		instructions += "\n" + buildPackageWasteOptimizationHelperContract()
 	}
+	if isBraidSolveKind(node.Kind) && classifyScaffoldDomain(rootPrompt) != "" && !braidHelperInputLooksLikeTransitionSystem(input) && !braidHelperInputLooksLikeResourcePathMinInitial(input) && !braidHelperInputLooksLikeExplicitShortestPath(input) && !braidHelperInputLooksLikeNumericDP(input) && !braidHelperInputLooksLikeSequenceSimulation(input) && !braidHelperInputLooksLikeFiniteDomainConstraint(input) && !braidHelperInputLooksLikePackageWasteOptimization(input) {
+		instructions += "\n" + buildGeneralSolverHelperContract()
+	}
 	argsMap := map[string]any{
 		"prompt":       prompt,
 		"instructions": instructions,
@@ -379,7 +382,7 @@ func runBraidNodeHelper(
 	if isBraidSolveKind(node.Kind) && helperExec != nil {
 		helperCfg := helperExec.Config
 		helperCfg.Search.BeamWidth = firstPositiveInt(helperCfg.Search.BeamWidth, 3)
-		if scaffold, ok := resolveBraidRuntimeScaffold(node, handoff, input); ok && strings.TrimSpace(helperCfg.PresetSource) == "" {
+		if scaffold, ok := resolveBraidRuntimeScaffold(node, handoff, input, rootPrompt); ok && strings.TrimSpace(helperCfg.PresetSource) == "" {
 			helperCfg = applyBraidRuntimeScaffoldToHelperConfig(helperCfg, scaffold)
 		} else if helperCfg.AnswerVerifier == nil && braidHelperInputLooksLikePackageWasteOptimization(input) {
 			helperCfg.AnswerVerifier = packageWasteAnswerVerifier
