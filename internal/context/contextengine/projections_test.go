@@ -203,6 +203,58 @@ func TestWorkingSet_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestWorkingSet_AddRecentFailure(t *testing.T) {
+	t.Parallel()
+	ws := &WorkingSet{WorkspaceID: "ws-1", UpdatedAt: time.Now()}
+
+	ws.AddRecentFailure("lint", 3)
+	ws.AddRecentFailure("test", 3)
+	ws.AddRecentFailure("build", 3)
+
+	if len(ws.RecentFailures) != 3 {
+		t.Fatalf("expected 3 failures, got %d", len(ws.RecentFailures))
+	}
+
+	ws.AddRecentFailure("lint", 3)
+	if len(ws.RecentFailures) != 3 {
+		t.Error("expected deduplication to prevent duplicate")
+	}
+
+	ws.AddRecentFailure("fmt", 3)
+	if len(ws.RecentFailures) != 3 {
+		t.Errorf("expected bounded to 3, got %d", len(ws.RecentFailures))
+	}
+	if ws.RecentFailures[0] != "test" {
+		t.Errorf("expected oldest removed, got %q", ws.RecentFailures[0])
+	}
+}
+
+func TestWorkingSet_AddRecentSuccess(t *testing.T) {
+	t.Parallel()
+	ws := &WorkingSet{WorkspaceID: "ws-1", UpdatedAt: time.Now()}
+
+	ws.AddRecentSuccess("fmt", 3)
+	ws.AddRecentSuccess("vet", 3)
+	ws.AddRecentSuccess("docs", 3)
+
+	if len(ws.RecentSuccesses) != 3 {
+		t.Fatalf("expected 3 successes, got %d", len(ws.RecentSuccesses))
+	}
+
+	ws.AddRecentSuccess("fmt", 3)
+	if len(ws.RecentSuccesses) != 3 {
+		t.Error("expected deduplication to prevent duplicate")
+	}
+
+	ws.AddRecentSuccess("lint", 3)
+	if len(ws.RecentSuccesses) != 3 {
+		t.Errorf("expected bounded to 3, got %d", len(ws.RecentSuccesses))
+	}
+	if ws.RecentSuccesses[0] != "vet" {
+		t.Errorf("expected oldest removed, got %q", ws.RecentSuccesses[0])
+	}
+}
+
 func TestTaskContext_Validate(t *testing.T) {
 	t.Parallel()
 	validTC := TaskContext{

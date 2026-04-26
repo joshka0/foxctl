@@ -79,6 +79,32 @@ func (ws *WorkingSet) AddRecentCommand(cmd string, maxCommands int) {
 	}
 }
 
+// AddRecentFailure adds a failure entry, bounded to maxEntries.
+func (ws *WorkingSet) AddRecentFailure(failure string, maxEntries int) {
+	for _, existing := range ws.RecentFailures {
+		if existing == failure {
+			return
+		}
+	}
+	ws.RecentFailures = append(ws.RecentFailures, failure)
+	if len(ws.RecentFailures) > maxEntries {
+		ws.RecentFailures = ws.RecentFailures[len(ws.RecentFailures)-maxEntries:]
+	}
+}
+
+// AddRecentSuccess adds a success entry, bounded to maxEntries.
+func (ws *WorkingSet) AddRecentSuccess(success string, maxEntries int) {
+	for _, existing := range ws.RecentSuccesses {
+		if existing == success {
+			return
+		}
+	}
+	ws.RecentSuccesses = append(ws.RecentSuccesses, success)
+	if len(ws.RecentSuccesses) > maxEntries {
+		ws.RecentSuccesses = ws.RecentSuccesses[len(ws.RecentSuccesses)-maxEntries:]
+	}
+}
+
 // Validate checks that the working set has required fields.
 func (ws WorkingSet) Validate() error {
 	if ws.WorkspaceID == "" {
