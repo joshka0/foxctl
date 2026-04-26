@@ -1956,6 +1956,7 @@ func Solve(input map[string]any) map[string]any {
 		}
 		return n
 	}
+	var evalExpr func(string) *int
 	substituteRefs := func(text string) string {
 		// replace "[use answer from node_X]" and "[For this value use the answer from problem node_X and add 1995]"
 		// with computed integer values where possible
@@ -2003,7 +2004,7 @@ func Solve(input map[string]any) map[string]any {
 		}
 		return text
 	}
-	evalExpr := func(expr string) *int {
+	evalExpr = func(expr string) *int {
 		expr = strings.TrimSpace(expr)
 		if expr == "" {
 			return nil
@@ -2199,6 +2200,22 @@ Chained-DAG solver helper contract:
 `)
 }
 
+// DumpPresetSource exposes preset sources by short tag for offline syntax checks.
+// Intended for diagnostic tooling; not part of the runtime contract.
+func DumpPresetSource(tag string) string {
+	switch tag {
+	case "hm":
+		return hindleyMilnerPresetSource()
+	case "math":
+		return backtrackingDAGPresetSource()
+	case "smiles":
+		return smilesPropertyPresetSource()
+	case "fen":
+		return fenSearchPresetSource()
+	}
+	return ""
+}
+
 func hindleyMilnerPresetSource() string {
 	return strings.TrimSpace(`
 func Solve(input map[string]any) map[string]any {
@@ -2229,7 +2246,8 @@ func Solve(input map[string]any) map[string]any {
 		return "t" + presetItoa(nextVar)
 	}
 	subst := map[string]string{}
-	occurs := func(name, t string) bool {
+	var occurs func(name, t string) bool
+	occurs = func(name, t string) bool {
 		if t == name {
 			return true
 		}
@@ -2244,7 +2262,8 @@ func Solve(input map[string]any) map[string]any {
 		}
 		return false
 	}
-	applySub := func(t string) string {
+	var applySub func(t string) string
+	applySub = func(t string) string {
 		if v, ok := subst[t]; ok {
 			return applySub(v)
 		}
@@ -2258,7 +2277,8 @@ func Solve(input map[string]any) map[string]any {
 		}
 		return t
 	}
-	unify := func(a, b string) bool {
+	var unify func(a, b string) bool
+	unify = func(a, b string) bool {
 		a = applySub(a)
 		b = applySub(b)
 		if a == b {
@@ -2461,6 +2481,29 @@ func splitArrow(s string) []string {
 	}
 	parts = append(parts, strings.TrimSpace(s[start:]))
 	return parts
+}
+
+func presetItoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := false
+	if n < 0 {
+		neg = true
+		n = -n
+	}
+	var buf [20]byte
+	i := 19
+	for n > 0 {
+		buf[i] = byte('0' + n%10)
+		n /= 10
+		i--
+	}
+	if neg {
+		buf[i] = '-'
+		i--
+	}
+	return string(buf[i+1:])
 }
 `)
 }

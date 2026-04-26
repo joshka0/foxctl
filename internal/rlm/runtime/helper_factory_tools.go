@@ -5,14 +5,22 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/rlm"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 	"github.com/joshka0/foxctl/internal/tooling/skillrun/ephemeral"
 )
+
+// helperFactoryPresetRunBudget bounds the detached run budget for the
+// deterministic preset attempt so a parent ctx that has already expired
+// cannot cancel a cheap (≤ 2 ms) preset Solve before it executes. The
+// LLM-drafter attempts continue to use the parent ctx and remain cancellable.
+const helperFactoryPresetRunBudget = 2 * time.Second
 
 const EphemeralHelperSolveToolName = "ephemeral_helper_solve"
 
@@ -220,11 +228,28 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			continue
 		}
 		helperInput := helperFactoryEffectiveInput(taskCtx.DefaultInput, draft.Input, explicitInput, prompt)
-		result, err := runner.Run(ctx, helperInput)
+		// For the deterministic preset attempt (attempt 1 with a configured
+		// preset source) detach from the parent ctx so a cheap O(ms) Solve
+		// can still execute even if upstream LLM iterations exhausted the
+		// per-attempt deadline. LLM-drafter attempts (2..N) keep the parent
+		// ctx and remain cancellable.
+		runCtx := ctx
+		var runCancel context.CancelFunc
+		if attempt == 1 && strings.TrimSpace(h.Config.PresetSource) != "" {
+			runCtx, runCancel = context.WithTimeout(context.Background(), helperFactoryPresetRunBudget)
+		}
+		result, err := runner.Run(runCtx, helperInput)
+		if runCancel != nil {
+			runCancel()
+		}
 		if err != nil {
-			lastFeedback = helperFactoryRepairFeedback("run", err.Error(), draft.Source, raw, helperInput, nil)
+			runStage := "run"
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				runStage = "ctx_expired"
+			}
+			lastFeedback = helperFactoryRepairFeedback(runStage, err.Error(), draft.Source, raw, helperInput, nil)
 			repairState = &helperFactoryRepairState{
-				Stage:    "run",
+				Stage:    runStage,
 				Error:    err.Error(),
 				Source:   draft.Source,
 				Raw:      raw,
@@ -234,7 +259,7 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			attempts = append(attempts, map[string]any{
 				"attempt":  attempt,
 				"ok":       false,
-				"stage":    "run",
+				"stage":    runStage,
 				"error":    err.Error(),
 				"source":   draft.Source,
 				"input":    helperInput,

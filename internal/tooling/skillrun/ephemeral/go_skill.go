@@ -252,6 +252,13 @@ func normalizeEscapedGoSource(source string) string {
 	// still contains string-escaped code such as `\n` or `\"`. Decode the
 	// source-oriented escapes that are never valid Go punctuation outside
 	// string literals.
+	//
+	// Skip when the source already contains real newlines and tries to
+	// look like multi-line Go: those escape replacements would otherwise
+	// mangle valid Go string literals containing `\"` or `\\`.
+	if strings.Contains(source, "\n") && !strings.Contains(source, `\n`) {
+		return source
+	}
 	replacements := []struct {
 		old string
 		new string
