@@ -52,12 +52,12 @@ Examples:
 }
 
 var (
-	webPort     int
-	webDevCORS  bool
-	webUIDir    string
-	webChat     string
-	webDBDriver string
-	webDBDSN    string
+	webPort        int
+	webDevCORS     bool
+	webUIDir       string
+	webChat        string
+	webDBDriver    string
+	webDBDSN       string
 	webFoxprox     bool
 	webFoxproxDir  string
 	webFoxproxSock string

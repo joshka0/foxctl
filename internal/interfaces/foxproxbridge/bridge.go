@@ -135,9 +135,9 @@ type MemberInfo struct {
 
 // ReadinessInfo is a portable subset of the Foxprox readiness response.
 type ReadinessInfo struct {
-	Idle       bool    `json:"idle"`
-	IdleForMS  int64   `json:"idle_for_ms"`
-	ScreenMatch bool   `json:"screen_match,omitempty"`
+	Idle        bool  `json:"idle"`
+	IdleForMS   int64 `json:"idle_for_ms"`
+	ScreenMatch bool  `json:"screen_match,omitempty"`
 }
 
 // HTTPClient is the interface the web API handler uses to talk to an Foxprox

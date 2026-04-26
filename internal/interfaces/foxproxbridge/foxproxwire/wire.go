@@ -46,9 +46,9 @@ func newDaemon(opts foxproxbridge.DaemonOptions) (foxproxbridge.DaemonLifecycle,
 	return &daemonShim{d: d}, nil
 }
 
-func (s *daemonShim) SocketPath() string              { return s.d.SocketPath() }
-func (s *daemonShim) Start() error                     { return s.d.Start() }
-func (s *daemonShim) Wait(ctx context.Context) error   { return s.d.Wait(ctx) }
+func (s *daemonShim) SocketPath() string                 { return s.d.SocketPath() }
+func (s *daemonShim) Start() error                       { return s.d.Start() }
+func (s *daemonShim) Wait(ctx context.Context) error     { return s.d.Wait(ctx) }
 func (s *daemonShim) Shutdown(ctx context.Context) error { return s.d.Shutdown(ctx) }
 
 // clientShim adapts foxproxclient.Client to foxproxbridge.HTTPClient.

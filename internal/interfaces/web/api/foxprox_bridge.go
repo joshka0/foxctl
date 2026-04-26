@@ -45,8 +45,8 @@ type foxproxRoomSessionSummary struct {
 	Members   []foxproxbridge.MemberInfo             `json:"members"`
 	Sessions  []foxproxbridge.SessionInfo            `json:"sessions"`
 	Readiness map[string]foxproxbridge.ReadinessInfo `json:"readiness,omitempty"`
-	Screens   map[string]any                      `json:"screens,omitempty"`
-	Count     int                                 `json:"count"`
+	Screens   map[string]any                         `json:"screens,omitempty"`
+	Count     int                                    `json:"count"`
 }
 
 type spawnSessionDTO struct {
