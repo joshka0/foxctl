@@ -667,9 +667,9 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	// Route canonical API handlers.
-	mux := http.NewServeMux()
-	mux.Handle("/api/", apiMux)
-	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
+	apiHandler := http.NewServeMux()
+	apiHandler.Handle("/api/", apiMux)
+	apiHandler.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusGone)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -680,27 +680,35 @@ func (s *Server) Handler() http.Handler {
 			},
 		})
 	})
-	mux.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleTransport))
+	apiHandler.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleTransport))
 
-	// --- Kubernetes Probes (root path, not under /api/) ---
-	mux.HandleFunc("/healthz", api.LivenessHandler())
-	mux.HandleFunc("/readyz", api.ReadinessHandler(s.cfg))
+	// Apply auth middleware to API routes only.
+	// OptionalIdentity always runs so handlers can audit.
+	protected := api.OptionalIdentity(apiHandler)
+	if s.opts.RequireAuth {
+		protected = api.RequireIdentity(protected)
+	}
 
-	// --- Static UI (optional) ---
+	// Public mux for endpoints that bypass auth (probes, static UI).
+	public := http.NewServeMux()
+	public.HandleFunc("/healthz", api.LivenessHandler())
+	public.HandleFunc("/readyz", api.ReadinessHandler(s.cfg))
+
+	// Static UI (optional) — served publicly; the SPA handles its own auth.
 	if s.opts.UIDir != "" {
 		fs := http.FileServer(http.Dir(s.opts.UIDir))
-		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Don't serve static files for API routes
+		public.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// API routes go to the protected handler
 			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
-				http.NotFound(w, r)
+				protected.ServeHTTP(w, r)
 				return
 			}
 			fs.ServeHTTP(w, r)
 		}))
 	} else {
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		public.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
-				http.NotFound(w, r)
+				protected.ServeHTTP(w, r)
 				return
 			}
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -708,8 +716,8 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 
-	// Apply middleware
-	h := withCORS(s.opts.DevCORS, mux)
+	// Apply global middleware (CORS, logging) to the public mux.
+	h := withCORS(s.opts.DevCORS, public)
 	h = withRequestLogging(s.log, h)
 	return h
 }

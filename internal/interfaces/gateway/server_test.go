@@ -730,3 +730,148 @@ func TestHandleRoomByID_Unregister_MissingID(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+// --- webProxyMux routing tests ---
+
+func TestWebProxyMux_GatewayRoutes(t *testing.T) {
+	// Gateway routes should be served by the gateway mux
+	webCalled := false
+	webHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		webCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	srv := NewServer(DefaultOptions(), testLogger())
+	opts := DefaultOptions()
+	opts.WebHandler = webHandler
+	srv.opts = opts
+
+	handler := srv.Handler()
+
+	// /healthz should go to gateway
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.False(t, webCalled, "/healthz should not route to web handler")
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// POST /api/rooms should go to gateway
+	webCalled = false
+	req = httptest.NewRequest(http.MethodPost, "/api/rooms", strings.NewReader(`{"room_id":"r1","tmux_session":"t1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.False(t, webCalled, "POST /api/rooms should not route to web handler")
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	// DELETE /api/rooms/r1 should go to gateway
+	webCalled = false
+	req = httptest.NewRequest(http.MethodDelete, "/api/rooms/r1", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.False(t, webCalled, "DELETE /api/rooms/r1 should not route to web handler")
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestWebProxyMux_WebRoutes(t *testing.T) {
+	webCalled := false
+	webPath := ""
+	webHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		webCalled = true
+		webPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+
+	opts := DefaultOptions()
+	opts.WebHandler = webHandler
+	srv := NewServer(opts, testLogger())
+	handler := srv.Handler()
+
+	// /api/agents should go to web handler
+	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.True(t, webCalled, "/api/agents should route to web handler")
+	assert.Equal(t, "/api/agents", webPath)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// /api/agents/123 should go to web handler
+	webCalled = false
+	req = httptest.NewRequest(http.MethodGet, "/api/agents/123", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.True(t, webCalled, "/api/agents/123 should route to web handler")
+
+	// /api/rooms-extra should go to web handler (not a gateway route)
+	webCalled = false
+	req = httptest.NewRequest(http.MethodGet, "/api/rooms-extra", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.True(t, webCalled, "/api/rooms-extra should route to web handler")
+}
+
+func TestWebProxyMux_NonAPIRoutes(t *testing.T) {
+	webCalled := false
+	webHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		webCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	opts := DefaultOptions()
+	opts.WebHandler = webHandler
+	srv := NewServer(opts, testLogger())
+	handler := srv.Handler()
+
+	// Non-/api/ routes should go to gateway (not web handler)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.False(t, webCalled, "/ should route to gateway, not web handler")
+
+	// Web terminal routes should go to gateway
+	webCalled = false
+	req = httptest.NewRequest(http.MethodGet, "/ws/terminal", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.False(t, webCalled, "/ws/terminal should route to gateway, not web handler")
+}
+
+func TestWebProxyMux_NoWebHandler(t *testing.T) {
+	// When WebHandler is nil, Handler() should return the gateway mux directly
+	srv := NewServer(DefaultOptions(), testLogger())
+	handler := srv.Handler()
+
+	// Verify it's not a webProxyMux by checking gateway routes work
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestWebProxyMux_RoomsPrefixExact(t *testing.T) {
+	// Ensure /api/rooms/anything stays in gateway, /api/roomsanything goes to web
+	webCalled := false
+	webHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		webCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	opts := DefaultOptions()
+	opts.WebHandler = webHandler
+	srv := NewServer(opts, testLogger())
+	handler := srv.Handler()
+
+	// /api/rooms/ (trailing slash) is a gateway route prefix
+	req := httptest.NewRequest(http.MethodDelete, "/api/rooms/some-id", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.False(t, webCalled, "/api/rooms/some-id should route to gateway")
+
+	// /api/roomsxyz should go to web handler (not matching /api/rooms or /api/rooms/)
+	webCalled = false
+	req = httptest.NewRequest(http.MethodGet, "/api/roomsxyz", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.True(t, webCalled, "/api/roomsxyz should route to web handler")
+}

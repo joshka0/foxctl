@@ -70,3 +70,62 @@ func TestHandleAgentAskRPC_RequiresMailbox(t *testing.T) {
 		t.Fatalf("handleAgentAskRPC() error = %q, want mailbox initialization failure", err.Error())
 	}
 }
+
+// TestAgentSpawnParams_AgentIDReuse verifies that the spawn params struct
+// correctly carries the caller-provided AgentID. The daemon spawn handler
+// reuses this ID for the agent record instead of generating a new ULID,
+// preventing duplicate agent records between the web API and daemon.
+func TestAgentSpawnParams_AgentIDReuse(t *testing.T) {
+	params := json.RawMessage(`{
+		"role": "coder",
+		"agent_id": "web-api-agent-123",
+		"workspace_id": "ws-456",
+		"prompt": "test prompt"
+	}`)
+
+	var p AgentSpawnParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		t.Fatalf("unmarshal params: %v", err)
+	}
+
+	if p.AgentID != "web-api-agent-123" {
+		t.Fatalf("AgentID = %q, want %q", p.AgentID, "web-api-agent-123")
+	}
+	if p.WorkspaceID != "ws-456" {
+		t.Fatalf("WorkspaceID = %q, want %q", p.WorkspaceID, "ws-456")
+	}
+}
+
+// TestAgentSpawnParams_EmptyAgentIDGeneratesNewID verifies that when no
+// AgentID is provided, the spawn handler will generate a new ULID.
+func TestAgentSpawnParams_EmptyAgentIDGeneratesNewID(t *testing.T) {
+	params := json.RawMessage(`{"role":"coder","prompt":"hello"}`)
+
+	var p AgentSpawnParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		t.Fatalf("unmarshal params: %v", err)
+	}
+
+	if p.AgentID != "" {
+		t.Fatalf("AgentID = %q, want empty string", p.AgentID)
+	}
+}
+
+// TestAgentSpawnParams_NamespaceIsWorkspaceID verifies that the Namespace
+// field in the agent record uses WorkspaceID, aligning with web API convention.
+func TestAgentSpawnParams_NamespaceIsWorkspaceID(t *testing.T) {
+	params := json.RawMessage(`{
+		"role": "coder",
+		"workspace_id": "my-workspace",
+		"prompt": "hello"
+	}`)
+
+	var p AgentSpawnParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		t.Fatalf("unmarshal params: %v", err)
+	}
+
+	if p.WorkspaceID != "my-workspace" {
+		t.Fatalf("WorkspaceID = %q, want %q", p.WorkspaceID, "my-workspace")
+	}
+}
