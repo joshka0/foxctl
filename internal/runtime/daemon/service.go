@@ -1807,8 +1807,13 @@ func (s *Service) handleAgentSpawnWithRoute(ctx context.Context, params json.Raw
 		return nil, fmt.Errorf("spawn agent: %w", err)
 	}
 
-	// Persist agent record to agents.db
-	agentID := ulid.Make().String()
+	// Persist agent record to agents.db.
+	// Reuse the caller-provided AgentID when available so that the web API
+	// and daemon share the same record instead of creating duplicates.
+	agentID := strings.TrimSpace(p.AgentID)
+	if agentID == "" {
+		agentID = ulid.Make().String()
+	}
 	agentName := p.Name
 	if agentName == "" {
 		agentName = agent.GenerateAgentName(rand.New(rand.NewSource(time.Now().UnixNano())))
@@ -1821,7 +1826,7 @@ func (s *Service) handleAgentSpawnWithRoute(ctx context.Context, params json.Raw
 
 	agentRecord := agent.Agent{
 		ID:              agentID,
-		Namespace:       actorID,
+		Namespace:       p.WorkspaceID,
 		Name:            agentName,
 		Slug:            p.Slug,
 		Role:            p.Role,

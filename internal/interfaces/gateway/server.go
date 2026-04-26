@@ -65,6 +65,11 @@ type Options struct {
 
 	// Hostname is the tsnet hostname. Defaults to "foxctl-gateway".
 	Hostname string
+
+	// WebHandler is an optional HTTP handler to mount under /api/ in the
+	// gateway mux. When set, the gateway proxies all /api/ traffic to this
+	// handler, making the full foxctl web API available over tailnet.
+	WebHandler http.Handler
 }
 
 // DefaultOptions returns options with sensible defaults.
@@ -170,7 +175,45 @@ func (s *Server) Handler() http.Handler {
 	termHandler := webterm.NewHandler(s.termHub, s.log)
 	termHandler.RegisterRoutes(mux)
 
-	return mux
+	// Mount the web API handler if provided (Phase 3: --with-web proxy).
+	// This is mounted last so gateway-specific routes take priority.
+	var handler http.Handler = mux
+	if s.opts.WebHandler != nil {
+		// Wrap the gateway mux to proxy /api/ requests to the web handler
+		// when the gateway-specific routes don't match.
+		handler = &webProxyMux{
+			gateway:    mux,
+			webHandler: s.opts.WebHandler,
+		}
+	}
+
+	return handler
+}
+
+// webProxyMux routes /api/ requests to the web handler when the gateway mux
+// doesn't handle them. Non-/api/ requests always go to the gateway mux.
+type webProxyMux struct {
+	gateway    http.Handler
+	webHandler http.Handler
+}
+
+func (wp *webProxyMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Let the gateway mux try first for its own routes.
+	// Go's ServeMux returns 404 for unmatched routes, so we intercept that.
+	if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/healthz" {
+		wp.gateway.ServeHTTP(w, r)
+		return
+	}
+
+	// For /api/ routes, check if gateway handles them specifically.
+	// Gateway owns: /api/rooms, /api/rooms/
+	// Everything else under /api/ goes to the web handler.
+	switch {
+	case r.URL.Path == "/api/rooms" || strings.HasPrefix(r.URL.Path, "/api/rooms/"):
+		wp.gateway.ServeHTTP(w, r)
+	default:
+		wp.webHandler.ServeHTTP(w, r)
+	}
 }
 
 // TerminalHub returns the web terminal hub for direct access.
@@ -454,7 +497,7 @@ func (s *Server) startTsnet(ctx context.Context) error {
 	}
 
 	s.http = &http.Server{
-		Handler:           s.Handler(),
+		Handler:           WhoIsMiddleware(s.tsnet, s.Handler()),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		BaseContext:       func(_ net.Listener) context.Context { return ctx },

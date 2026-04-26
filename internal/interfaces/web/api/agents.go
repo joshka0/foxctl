@@ -647,8 +647,8 @@ func handleAgentDaemonStartWithRoute(w http.ResponseWriter, r *http.Request, cfg
 	}
 
 	// Connect to daemon, auto-start if not running
-	client := daemon.NewClient()
-	if err := client.EnsureRunning(); err != nil {
+	ctrl := agentControl()
+	if err := ctrl.EnsureRunning(); err != nil {
 		log.Error().Err(err).Msg("failed to start daemon")
 		httpError(w, http.StatusServiceUnavailable, "failed to start daemon: "+err.Error())
 		return
@@ -686,7 +686,7 @@ func handleAgentDaemonStartWithRoute(w http.ResponseWriter, r *http.Request, cfg
 		LLMAPIKey:       agent.LLMAPIKey,
 	}
 
-	result, err := client.AgentSpawn(params)
+	result, err := ctrl.Spawn(params)
 	if err != nil {
 		log.Error().Err(err).Str("agent_id", agentID).Msg("failed to spawn agent")
 		httpError(w, http.StatusInternalServerError, err.Error())
@@ -722,14 +722,14 @@ func handleAgentDaemonSessionsWithRoute(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Connect to daemon, auto-start if not running
-	client := daemon.NewClient()
-	if err := client.EnsureRunning(); err != nil {
+	ctrl := agentControl()
+	if err := ctrl.EnsureRunning(); err != nil {
 		log.Error().Err(err).Msg("failed to start daemon")
 		httpError(w, http.StatusServiceUnavailable, "failed to start daemon: "+err.Error())
 		return
 	}
 
-	result, err := client.AgentList()
+	result, err := ctrl.List()
 	if err != nil {
 		log.Error().Err(err).Msg("failed to list agent sessions")
 		httpError(w, http.StatusInternalServerError, err.Error())
@@ -803,8 +803,8 @@ func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg 
 	}
 
 	// Connect to daemon
-	client := daemon.NewClient()
-	if !client.IsRunning() {
+	ctrl := agentControl()
+	if !ctrl.IsRunning() {
 		// Daemon not running - just update agent state to stopped
 		if err := store.UpdateState(r.Context(), agentID, agenttypes.StateStopped); err != nil {
 			log.Error().Err(err).Str("agent_id", agentID).Msg("failed to update agent state")
@@ -822,7 +822,7 @@ func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg 
 	}
 
 	// First, find the session ID for this agent
-	listResult, err := client.AgentList()
+	listResult, err := ctrl.List()
 	if err != nil {
 		log.Error().Err(err).Msg("failed to list agent sessions")
 		httpError(w, http.StatusInternalServerError, err.Error())
@@ -864,7 +864,7 @@ func handleAgentDaemonKillWithRoute(w http.ResponseWriter, r *http.Request, cfg 
 	}
 
 	// Kill the session
-	result, err := client.AgentKill(sessionID)
+	result, err := ctrl.Kill(sessionID)
 	if err != nil {
 		log.Error().Err(err).Str("agent_id", agentID).Str("session_id", sessionID).Msg("failed to kill agent session")
 		httpError(w, http.StatusInternalServerError, err.Error())
@@ -929,8 +929,8 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 	workspaceSource := strings.TrimSpace(req.WorkspaceSource)
 
 	// Connect to daemon, auto-start if not running
-	client := daemon.NewClient()
-	if err := client.EnsureRunning(); err != nil {
+	ctrl := agentControl()
+	if err := ctrl.EnsureRunning(); err != nil {
 		log.Error().Err(err).Msg("failed to start daemon")
 		httpError(w, http.StatusServiceUnavailable, "failed to start daemon: "+err.Error())
 		return
@@ -1085,7 +1085,7 @@ func handleAgentSpawnWithRoute(w http.ResponseWriter, r *http.Request, cfg confi
 		LLMAuthPrefix:    req.LLMAuthPrefix,
 	}
 
-	result, err := client.AgentSpawn(params)
+	result, err := ctrl.Spawn(params)
 	if err != nil {
 		log.Error().Err(err).Str("agent_id", agentID).Msg("failed to spawn agent")
 		// Update agent state to error since spawn failed
