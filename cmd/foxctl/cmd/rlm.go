@@ -89,6 +89,9 @@ func newRLMRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer func() { _ = bootstrapper.Close() }()
+			ceStore := bootstrapper.ContextEngineStore()
+			taskStore := bootstrapper.TaskStore()
 			spec, err := rlm.ResolveRunSpec(rlm.ResolveRunSpecInput{
 				Prompt:               task.Prompt,
 				RequestedRoute:       rlm.RouteProfile(routeProfile),
@@ -106,6 +109,8 @@ func newRLMRunCommand() *cobra.Command {
 				currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 				currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 				currentAdapter.SetSubcall(runRecursive)
+				currentAdapter.SetContextEngineStore(ceStore)
+				currentAdapter.SetTaskStore(taskStore)
 				runner := chooseRLMRunner(executor, currentAdapter, currentTask, currentEnv, llmProvider, llmModel, llmBaseURL, llmAPIKey, llmTimeout, requireToolUse, routeProfile, planMode, sandboxKind, ephemeralSkills, extractSolution)
 				return runner.Run(ctx, currentTask, currentEnv)
 			}

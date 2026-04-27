@@ -69,7 +69,7 @@ ACA vocabulary, retrieval, and memory conventions live here.
 	if !strings.Contains(text, "## Summary") || !strings.Contains(text, "## Action Items") {
 		t.Fatalf("unexpected draft body:\n%s", text)
 	}
-	if !strings.Contains(text, "external:transcript:/tmp/retro.txt") {
+	if !strings.Contains(text, "transcript:/tmp/retro.txt") || !strings.Contains(text, "type: note") {
 		t.Fatalf("missing provenance ref:\n%s", text)
 	}
 

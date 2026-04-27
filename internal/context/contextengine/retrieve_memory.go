@@ -15,7 +15,7 @@ func RetrieveMemory(ctx context.Context, cfg LaneConfig, queryFn MemoryQueryFunc
 
 	start := cfg.Clock()
 
-	claims, err := queryFn(ctx, cfg.WorkspaceID)
+	claims, err := queryFn(ctx, cfg.WorkspaceID, query)
 	elapsed := cfg.Clock().Sub(start)
 
 	packID := cfg.IDGen()

@@ -25,6 +25,8 @@ import (
 	rlmenv "github.com/joshka0/foxctl/internal/rlm/env"
 	"github.com/joshka0/foxctl/internal/rlm/repl"
 	rlmruntime "github.com/joshka0/foxctl/internal/rlm/runtime"
+	ctxengstore "github.com/joshka0/foxctl/internal/storage/contextengine"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 	"github.com/joshka0/foxctl/internal/tooling/evals/longcotbridge"
 	"github.com/joshka0/foxctl/internal/tooling/evals/longcoteval"
 	"github.com/oklog/ulid/v2"
@@ -1398,6 +1400,16 @@ func runLongCoTRLMAttempt(
 	env := longCoTSafeRLMEnvironment(condition)
 
 	adapter := rlmenv.NewReadOnlyAdapter(cfg, workspaceRoot, "", companionDB, env)
+	if root := strings.TrimSpace(cfg.Storage.Root); root != "" {
+		if ceStore, err := ctxengstore.Open(ctx, root); err == nil {
+			adapter.SetContextEngineStore(ceStore)
+			defer func() { _ = ceStore.Close() }()
+		}
+		if taskStore, err := tasks.Open(ctx, root); err == nil {
+			adapter.SetTaskStore(taskStore)
+			defer func() { _ = taskStore.Close() }()
+		}
+	}
 	timeout := time.Duration(condition.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 90 * time.Second

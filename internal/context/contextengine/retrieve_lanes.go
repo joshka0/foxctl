@@ -51,7 +51,9 @@ type CodeSearchHit struct {
 }
 
 // MemoryQueryFunc queries memory store and returns claims for the memory lane.
-type MemoryQueryFunc func(ctx context.Context, workspaceID string) ([]MemoryClaim, error)
+// The query argument lets implementations filter claims by content (e.g.
+// substring match on summary/subject); an empty query returns all claims.
+type MemoryQueryFunc func(ctx context.Context, workspaceID, query string) ([]MemoryClaim, error)
 
 // ContextQueryFunc retrieves the current TopOfMind/ContextPacket for the context lane.
 type ContextQueryFunc func(ctx context.Context, workspaceID string) (*ContextPacket, error)

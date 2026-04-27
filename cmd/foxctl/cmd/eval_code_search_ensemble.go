@@ -398,9 +398,12 @@ func runSingleCodeSearchEnsembleEval(
 		result.Error = err.Error()
 		return result
 	}
+	defer func() { _ = bootstrapper.Close() }()
 	env.Tools = rlmenv.FilterTools(env.Tools, toolProfile)
 
 	adapter := rlmenv.NewReadOnlyAdapter(cfg, workspace, strings.TrimSpace(vaultPath), companionDB, env)
+	adapter.SetContextEngineStore(bootstrapper.ContextEngineStore())
+	adapter.SetTaskStore(bootstrapper.TaskStore())
 
 	start := time.Now()
 	payload := map[string]any{

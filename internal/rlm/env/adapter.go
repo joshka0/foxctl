@@ -26,7 +26,9 @@ import (
 	"github.com/joshka0/foxctl/internal/protocol"
 	"github.com/joshka0/foxctl/internal/rlm"
 	"github.com/joshka0/foxctl/internal/storage/cas"
+	ctxengstore "github.com/joshka0/foxctl/internal/storage/contextengine"
 	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
@@ -39,6 +41,8 @@ type ReadOnlyAdapter struct {
 	environment   rlm.Environment
 	subcall       func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)
 	telemetry     adapterTelemetry
+	ceStore       ctxengstore.Store
+	taskStore     tasks.Store
 }
 
 // NewReadOnlyAdapter creates a read-only adapter for one workspace/environment.
@@ -50,6 +54,20 @@ func NewReadOnlyAdapter(cfg config.Config, workspaceRoot, vaultPath string, comp
 		companionDB:   companionDB,
 		environment:   env,
 	}
+}
+
+// SetContextEngineStore wires the contextengine SQLite store used by the
+// composite retrieve_* tools to record retrieval episodes. Lifetime is owned
+// by the caller; the adapter never closes the store itself.
+func (a *ReadOnlyAdapter) SetContextEngineStore(store ctxengstore.Store) {
+	a.ceStore = store
+}
+
+// SetTaskStore wires the tasks SQLite store used by the task retrieval lane to
+// project task records into TaskContext evidence. Lifetime is owned by the
+// caller; the adapter never closes the store itself.
+func (a *ReadOnlyAdapter) SetTaskStore(store tasks.Store) {
+	a.taskStore = store
 }
 
 // SetSubcall configures the bounded recursive callback for the experimental subcall tool.
@@ -191,6 +209,18 @@ func (a *ReadOnlyAdapter) executeInternal(ctx context.Context, name string, args
 		return a.getScene(ctx, args)
 	case "subcall":
 		return a.subcallTool(ctx, args)
+	case "retrieve_code":
+		return a.retrieveCode(ctx, args)
+	case "retrieve_memory":
+		return a.retrieveMemory(ctx, args)
+	case "retrieve_context":
+		return a.retrieveContext(ctx, args)
+	case "retrieve_task":
+		return a.retrieveTask(ctx, args)
+	case "retrieve_mixed":
+		return a.retrieveMixed(ctx, args)
+	case "load_evidence_ref":
+		return a.loadEvidenceRef(ctx, args)
 	default:
 		return nil, fmt.Errorf("rlm env adapter: unknown tool %q", name)
 	}

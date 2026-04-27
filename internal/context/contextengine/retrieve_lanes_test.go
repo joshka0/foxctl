@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -131,7 +132,7 @@ func TestAllLanes_EmptyQuery(t *testing.T) {
 			}, "")
 		}},
 		{"memory", LaneMemory, func() (EvidencePack, error) {
-			return RetrieveMemory(context.Background(), cfg, func(_ context.Context, _ string) ([]MemoryClaim, error) {
+			return RetrieveMemory(context.Background(), cfg, func(_ context.Context, _, _ string) ([]MemoryClaim, error) {
 				return nil, nil
 			}, "")
 		}},
@@ -150,7 +151,7 @@ func TestAllLanes_EmptyQuery(t *testing.T) {
 		{"mixed", LaneMixed, func() (EvidencePack, error) {
 			return RetrieveMixed(context.Background(), cfg,
 				func(_ context.Context, _ string) ([]CodeSearchHit, error) { return nil, nil },
-				func(_ context.Context, _ string) ([]MemoryClaim, error) { return nil, nil },
+				func(_ context.Context, _, _ string) ([]MemoryClaim, error) { return nil, nil },
 				func(_ context.Context, _ string) (*ContextPacket, error) { return nil, nil },
 				func(_ context.Context, _, _ string) (*TaskContext, error) { return nil, nil },
 				func(_ context.Context, _ string) ([]string, error) { return nil, nil },
@@ -264,7 +265,7 @@ func TestRetrieveMemory_ReturnsEvidencePack(t *testing.T) {
 	resetTestIDCounter()
 	cfg := testLaneConfig()
 
-	queryFn := func(_ context.Context, workspaceID string) ([]MemoryClaim, error) {
+	queryFn := func(_ context.Context, workspaceID, _ string) ([]MemoryClaim, error) {
 		return []MemoryClaim{
 			{
 				ID:          "claim-1",
@@ -504,7 +505,7 @@ func TestRetrieveMixed_FansOutToAllLanes(t *testing.T) {
 		codeCalled = true
 		return []CodeSearchHit{{Path: "auth.go", Snippet: "code", Score: 0.9}}, nil
 	}
-	memoryFn := func(_ context.Context, _ string) ([]MemoryClaim, error) {
+	memoryFn := func(_ context.Context, _, _ string) ([]MemoryClaim, error) {
 		memoryCalled = true
 		return []MemoryClaim{{ID: "claim-1", WorkspaceID: "ws-test", ClaimType: "preference", Status: ClaimStatusCurrent, Summary: "prefers dark mode"}}, nil
 	}
@@ -564,7 +565,7 @@ func TestRetrieveMixed_FusesByRefIdentity(t *testing.T) {
 			{Path: "internal/auth/handler.go", Snippet: "func HandleAuth()", Score: 0.9, Language: "go"},
 		}, nil
 	}
-	memoryFn := func(_ context.Context, _ string) ([]MemoryClaim, error) {
+	memoryFn := func(_ context.Context, _, _ string) ([]MemoryClaim, error) {
 		return nil, nil
 	}
 	contextFn := func(_ context.Context, _ string) (*ContextPacket, error) {
@@ -620,7 +621,7 @@ func TestRetrieveMixed_PreservesProvenance(t *testing.T) {
 	codeFn := func(_ context.Context, _ string) ([]CodeSearchHit, error) {
 		return []CodeSearchHit{{Path: "foo.go", Snippet: "code", Score: 0.9}}, nil
 	}
-	memoryFn := func(_ context.Context, _ string) ([]MemoryClaim, error) {
+	memoryFn := func(_ context.Context, _, _ string) ([]MemoryClaim, error) {
 		return nil, nil
 	}
 	contextFn := func(_ context.Context, _ string) (*ContextPacket, error) {
@@ -722,7 +723,7 @@ func TestRetrieveMemory_RecordsEpisode(t *testing.T) {
 		WorkspaceID: "ws-test",
 	}
 
-	queryFn := func(_ context.Context, _ string) ([]MemoryClaim, error) {
+	queryFn := func(_ context.Context, _, _ string) ([]MemoryClaim, error) {
 		return []MemoryClaim{{ID: "c1", WorkspaceID: "ws-test", ClaimType: "pref", Status: ClaimStatusCurrent}}, nil
 	}
 
@@ -820,7 +821,7 @@ func TestRetrieveMixed_RecordsParentWithSubEpisodes(t *testing.T) {
 	codeFn := func(_ context.Context, _ string) ([]CodeSearchHit, error) {
 		return []CodeSearchHit{{Path: "a.go", Snippet: "x", Score: 0.9}}, nil
 	}
-	memoryFn := func(_ context.Context, _ string) ([]MemoryClaim, error) {
+	memoryFn := func(_ context.Context, _, _ string) ([]MemoryClaim, error) {
 		return []MemoryClaim{{ID: "c1", WorkspaceID: "ws-test", ClaimType: "t", Status: ClaimStatusCurrent}}, nil
 	}
 	contextFn := func(_ context.Context, _ string) (*ContextPacket, error) {
@@ -894,7 +895,7 @@ func TestRetrieveMixed_PartialFailureDegracesGracefully(t *testing.T) {
 	codeFn := func(_ context.Context, _ string) ([]CodeSearchHit, error) {
 		return []CodeSearchHit{{Path: "auth.go", Snippet: "code", Score: 0.9}}, nil
 	}
-	memoryFn := func(_ context.Context, _ string) ([]MemoryClaim, error) {
+	memoryFn := func(_ context.Context, _, _ string) ([]MemoryClaim, error) {
 		return nil, errors.New("memory store unavailable")
 	}
 	contextFn := func(_ context.Context, _ string) (*ContextPacket, error) {
@@ -937,6 +938,48 @@ func TestRetrieveMixed_PartialFailureDegracesGracefully(t *testing.T) {
 	}
 }
 
+// --- Memory lane forwards query string to MemoryQueryFunc ---
+
+func TestRetrieveMemory_PassesQueryToFunc(t *testing.T) {
+	resetTestIDCounter()
+	cfg := testLaneConfig()
+
+	all := []MemoryClaim{
+		{ID: "c-dark", WorkspaceID: "ws-test", ClaimType: "preference", Status: ClaimStatusCurrent, Summary: "User prefers DARK mode"},
+		{ID: "c-jwt", WorkspaceID: "ws-test", ClaimType: "decision", Status: ClaimStatusCurrent, Summary: "Use JWT for auth"},
+		{ID: "c-sqlite", WorkspaceID: "ws-test", ClaimType: "decision", Status: ClaimStatusCurrent, Summary: "Use SQLite for storage"},
+	}
+	var seenQuery string
+	queryFn := func(_ context.Context, _, query string) ([]MemoryClaim, error) {
+		seenQuery = query
+		q := strings.ToLower(query)
+		if q == "" {
+			return all, nil
+		}
+		out := make([]MemoryClaim, 0, len(all))
+		for _, c := range all {
+			if strings.Contains(strings.ToLower(c.Summary), q) {
+				out = append(out, c)
+			}
+		}
+		return out, nil
+	}
+
+	pack, err := RetrieveMemory(context.Background(), cfg, queryFn, "dark")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if seenQuery != "dark" {
+		t.Errorf("expected queryFn to receive query \"dark\", got %q", seenQuery)
+	}
+	if len(pack.Nodes) != 1 {
+		t.Fatalf("expected 1 filtered node, got %d", len(pack.Nodes))
+	}
+	if pack.Nodes[0].Ref.Ref != "c-dark" {
+		t.Errorf("expected c-dark to survive filter, got ref %q", pack.Nodes[0].Ref.Ref)
+	}
+}
+
 // --- VAL-RETR-012: Memory lane uses direct store queries ---
 
 func TestRetrieveMemory_DirectStoreQueries(t *testing.T) {
@@ -944,7 +987,7 @@ func TestRetrieveMemory_DirectStoreQueries(t *testing.T) {
 	cfg := testLaneConfig()
 
 	queryCalled := false
-	queryFn := func(_ context.Context, workspaceID string) ([]MemoryClaim, error) {
+	queryFn := func(_ context.Context, workspaceID, _ string) ([]MemoryClaim, error) {
 		queryCalled = true
 		if workspaceID != "ws-test" {
 			t.Errorf("expected workspace ws-test, got %q", workspaceID)

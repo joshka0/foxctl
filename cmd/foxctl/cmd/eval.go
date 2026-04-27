@@ -1089,6 +1089,9 @@ func runRLMEvalMode(ctx context.Context, cfg config.Config, workspacePath, vault
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = bootstrapper.Close() }()
+	ceStore := bootstrapper.ContextEngineStore()
+	taskStore := bootstrapper.TaskStore()
 	env.Tools = rlmenv.FilterTools(env.Tools, toolProfile)
 
 	var runRecursive func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)
@@ -1096,6 +1099,8 @@ func runRLMEvalMode(ctx context.Context, cfg config.Config, workspacePath, vault
 		currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 		currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 		currentAdapter.SetSubcall(runRecursive)
+		currentAdapter.SetContextEngineStore(ceStore)
+		currentAdapter.SetTaskStore(taskStore)
 		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileAuto), string(rlm.PlanModeFree), "", false, false)
 		return runner.Run(runCtx, currentTask, currentEnv)
 	}
@@ -1137,12 +1142,17 @@ func runRLMStagedEvalMode(ctx context.Context, cfg config.Config, workspacePath,
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = bootstrapper.Close() }()
+	ceStore := bootstrapper.ContextEngineStore()
+	taskStore := bootstrapper.TaskStore()
 
 	var runRecursive func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)
 	runRecursive = func(runCtx context.Context, currentTask rlm.Task, currentEnv rlm.Environment) (rlm.Result, error) {
 		currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 		currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 		currentAdapter.SetSubcall(runRecursive)
+		currentAdapter.SetContextEngineStore(ceStore)
+		currentAdapter.SetTaskStore(taskStore)
 		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileCodeRetrieval), string(rlm.PlanModeStaged), "", false, false)
 		return runner.Run(runCtx, currentTask, currentEnv)
 	}

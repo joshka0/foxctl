@@ -186,7 +186,7 @@ func TestIntegrationCrossArea_DirtyEditFlow(t *testing.T) {
 
 	// Step 7: Retrieval reflects dirty state — memory lane returns all claims
 	cfg := newIntegrationLaneConfig(store)
-	memoryFn := func(_ context.Context, wID string) ([]MemoryClaim, error) {
+	memoryFn := func(_ context.Context, wID, _ string) ([]MemoryClaim, error) {
 		return store.ListClaims(ctx, ClaimFilter{WorkspaceID: wID})
 	}
 	pack, err := RetrieveMemory(ctx, cfg, memoryFn, "handler auth")
@@ -614,7 +614,7 @@ func TestIntegrationCrossArea_MixedRetrievalFlow(t *testing.T) {
 	}
 
 	// Memory query function — returns claims
-	memoryFn := func(_ context.Context, wID string) ([]MemoryClaim, error) {
+	memoryFn := func(_ context.Context, wID, _ string) ([]MemoryClaim, error) {
 		return store.ListClaims(ctx, ClaimFilter{WorkspaceID: wID})
 	}
 
