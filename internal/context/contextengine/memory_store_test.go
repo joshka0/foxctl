@@ -350,6 +350,17 @@ func (s *MemoryStore) GetRetrievalFeedback(_ context.Context, id string) (Retrie
 	return f, nil
 }
 
+// ListRetrievalEpisodes returns all stored retrieval episodes (for testing).
+func (s *MemoryStore) ListRetrievalEpisodes(_ context.Context) ([]RetrievalEpisode, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]RetrievalEpisode, 0, len(s.episodes))
+	for _, ep := range s.episodes {
+		result = append(result, ep)
+	}
+	return result, nil
+}
+
 func (s *MemoryStore) ExplainQueryPlan(_ context.Context, _ string, _ ...any) (string, error) {
 	return "", nil
 }
