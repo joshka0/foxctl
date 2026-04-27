@@ -346,9 +346,9 @@ func (a *ReadOnlyAdapter) loadEvidenceRef(ctx context.Context, args json.RawMess
 	ref, err := contextengine.ParseEvidenceRef(refStr)
 	if err != nil {
 		return map[string]any{
-			"ref":     refStr,
-			"error":   err.Error(),
-			"loaded":  false,
+			"ref":    refStr,
+			"error":  err.Error(),
+			"loaded": false,
 		}, nil
 	}
 	switch ref.Type {
@@ -385,15 +385,15 @@ func packToMap(pack contextengine.EvidencePack) map[string]any {
 	nodes := make([]map[string]any, 0, len(pack.Nodes))
 	for _, node := range pack.Nodes {
 		nodes = append(nodes, map[string]any{
-			"id":          node.ID,
-			"node_type":   string(node.NodeType),
-			"ref":         contextengine.FormatEvidenceRef(node.Ref),
-			"ref_type":    string(node.Ref.Type),
-			"ref_value":   node.Ref.Ref,
-			"statement":   node.Statement,
-			"confidence":  node.Confidence,
-			"grounding":   string(node.Grounding),
-			"metadata":    node.Metadata,
+			"id":         node.ID,
+			"node_type":  string(node.NodeType),
+			"ref":        contextengine.FormatEvidenceRef(node.Ref),
+			"ref_type":   string(node.Ref.Type),
+			"ref_value":  node.Ref.Ref,
+			"statement":  node.Statement,
+			"confidence": node.Confidence,
+			"grounding":  string(node.Grounding),
+			"metadata":   node.Metadata,
 		})
 	}
 	return map[string]any{
