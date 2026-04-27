@@ -8,9 +8,10 @@ import (
 type ToolProfile string
 
 const (
-	ToolProfileDefault               ToolProfile = "default"
-	ToolProfileCodeIntel             ToolProfile = "code-intel"
-	ToolProfileLongCoTNoModelTools   ToolProfile = "longcot-no-model-tools"
+	ToolProfileDefault             ToolProfile = "default"
+	ToolProfileCodeIntel           ToolProfile = "code-intel"
+	ToolProfileMemoryRecall        ToolProfile = "memory-recall"
+	ToolProfileLongCoTNoModelTools ToolProfile = "longcot-no-model-tools"
 )
 
 // ToolPolicy captures the effective model-visible tool policy for one run.
@@ -51,7 +52,9 @@ func ResolveRunSpec(input ResolveRunSpecInput) (RunSpec, error) {
 	if err != nil {
 		return RunSpec{}, err
 	}
-	plan := buildPlan(route, mode)
+	queryPlan := ClassifyQuery(input.Prompt)
+	queryPlan.Route = profileToQueryRoute(route)
+	plan := buildPlanWithQueryPlan(route, mode, queryPlan)
 	return RunSpec{
 		RouteProfile: route,
 		PlanMode:     mode,
@@ -69,22 +72,39 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 
 	switch resolvedProfile {
 	case ToolProfileDefault:
-		tools := append([]Tool(nil), available...)
+		// Default profile: all 6 composite tools.
+		allow := map[string]struct{}{
+			"retrieve_code":     {},
+			"retrieve_memory":   {},
+			"retrieve_context":  {},
+			"retrieve_task":     {},
+			"retrieve_mixed":    {},
+			"load_evidence_ref": {},
+		}
+		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
 			Profile:      resolvedProfile,
 			AllowedTools: collectToolNames(tools),
 			Tools:        tools,
 		}, nil
 	case ToolProfileCodeIntel:
+		// Code intel: retrieve_code + load_evidence_ref.
 		allow := map[string]struct{}{
-			"semantic_search_code": {},
-			"smart_search_code":    {},
-			"ripgrep_code":         {},
-			"code_search_ensemble": {},
-			"load_file":            {},
-			"search_vault":         {},
-			"read_note":            {},
-			"subcall":              {},
+			"retrieve_code":     {},
+			"load_evidence_ref": {},
+		}
+		tools := filterToolsBySet(available, allow)
+		return ToolPolicy{
+			Profile:      resolvedProfile,
+			AllowedTools: collectToolNames(tools),
+			Tools:        tools,
+		}, nil
+	case ToolProfileMemoryRecall:
+		// Memory recall: retrieve_memory + retrieve_context + load_evidence_ref.
+		allow := map[string]struct{}{
+			"retrieve_memory":   {},
+			"retrieve_context":  {},
+			"load_evidence_ref": {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -110,6 +130,8 @@ func NormalizeToolProfile(value string) (ToolProfile, error) {
 		return ToolProfileDefault, nil
 	case string(ToolProfileCodeIntel):
 		return ToolProfileCodeIntel, nil
+	case string(ToolProfileMemoryRecall):
+		return ToolProfileMemoryRecall, nil
 	case string(ToolProfileLongCoTNoModelTools):
 		return ToolProfileLongCoTNoModelTools, nil
 	default:
@@ -120,7 +142,7 @@ func NormalizeToolProfile(value string) (ToolProfile, error) {
 func resolveRunRouteProfile(prompt string, requested RouteProfile) (RouteProfile, error) {
 	switch strings.ToLower(strings.TrimSpace(string(requested))) {
 	case "", string(RouteProfileAuto):
-		return ClassifyRouteProfile(prompt), nil
+		return ResolveRouteProfile(prompt, RouteProfileAuto), nil
 	case string(RouteProfileCodeRetrieval):
 		return RouteProfileCodeRetrieval, nil
 	case string(RouteProfileMemoryRecall):

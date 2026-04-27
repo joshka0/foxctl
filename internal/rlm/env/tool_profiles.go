@@ -7,6 +7,7 @@ import (
 const (
 	ToolProfileDefault             = string(rlm.ToolProfileDefault)
 	ToolProfileCodeIntel           = string(rlm.ToolProfileCodeIntel)
+	ToolProfileMemoryRecall        = string(rlm.ToolProfileMemoryRecall)
 	ToolProfileLongCoTNoModelTools = string(rlm.ToolProfileLongCoTNoModelTools)
 )
 

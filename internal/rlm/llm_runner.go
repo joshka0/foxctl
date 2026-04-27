@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
@@ -455,14 +454,6 @@ func buildPhaseSystemPrompt(base, query string, phase Phase, candidatePaths, pha
 		b.WriteString("\nPhase guidance: ")
 		b.WriteString(guidance)
 	}
-	if hints := queryGuidanceHints(query, phase.Name, candidatePaths); len(hints) > 0 {
-		b.WriteString("\nGeneral heuristics:\n")
-		for _, hint := range hints {
-			b.WriteString("- ")
-			b.WriteString(hint)
-			b.WriteString("\n")
-		}
-	}
 	if len(candidatePaths) > 0 {
 		b.WriteString("\nCandidate paths from prior phases: ")
 		b.WriteString(strings.Join(shortenRefs(candidatePaths, 8), ", "))
@@ -495,14 +486,6 @@ func buildPhasePrompt(query string, phase Phase, candidatePaths, phaseNotes []st
 	if len(candidatePaths) > 0 {
 		b.WriteString("\nFocus on these candidate paths if they seem relevant: ")
 		b.WriteString(strings.Join(shortenRefs(candidatePaths, 8), ", "))
-	}
-	if hints := queryGuidanceHints(query, phase.Name, candidatePaths); len(hints) > 0 {
-		b.WriteString("\nQuery guidance:\n")
-		for _, hint := range hints {
-			b.WriteString("- ")
-			b.WriteString(hint)
-			b.WriteString("\n")
-		}
 	}
 	if len(phaseNotes) > 0 {
 		b.WriteString("\nUse prior findings, but verify them with this phase's tools.")
@@ -842,164 +825,31 @@ func phaseGuidance(phaseName string) string {
 		return "Do not do another broad search if candidate paths already exist. Open the 1-2 strongest candidates directly."
 	case "verification":
 		return "Re-open or literal-check the single strongest inspected path and confirm it really matches the query."
+	case "recall":
+		return "Retrieve the most relevant memory and context entries first. Use load_evidence_ref to verify specific entries."
+	case "audit":
+		return "Cross-check evidence from multiple lanes. Look for consistency across sources."
 	default:
 		return ""
 	}
 }
 
-func queryGuidanceHints(query, phaseName string, candidatePaths []string) []string {
-	q := strings.ToLower(strings.TrimSpace(query))
-	hints := make([]string, 0, 4)
-	if strings.Contains(q, "package") {
-		hints = append(hints, "Prefer directory or package matches over basename-only coincidences.")
-	}
-	if strings.Contains(q, "semantic") && strings.Contains(q, "index") {
-		hints = append(hints, "Prefer paths under internal/intelligence/indexing/semantic or closely related indexing directories.")
-		hints = append(hints, "Avoid generic repository or events files unless they explicitly mention semantic indexing.")
-	}
-	if containsAny(q, "web", "api", "handler", "transport") {
-		hints = append(hints, "Prefer handler, server, transport, bridge, http, or api paths over unrelated tool clients.")
-		hints = append(hints, "Avoid obsidian/tooling paths unless the query explicitly mentions them.")
-	}
-	if phaseName == "inspection" && len(candidatePaths) > 0 {
-		hints = append(hints, "Choose the candidate whose directory and filename most directly match the query terms.")
-	}
-	return hints
-}
-
-func rerankCandidatePaths(query string, paths []string) []string {
-	type scoredPath struct {
-		Path  string
-		Score int
-	}
+// rerankCandidatePaths deduplicates and sorts paths by depth.
+// Keyword-based scoring has been removed; paths are ordered by directory depth
+// (deeper paths first) as a proxy for specificity.
+func rerankCandidatePaths(_ string, paths []string) []string {
 	normalized := dedupePathsCaseInsensitive(paths)
 	if len(normalized) <= 1 {
 		return normalized
 	}
-	scored := make([]scoredPath, 0, len(normalized))
-	for _, path := range normalized {
-		scored = append(scored, scoredPath{
-			Path:  path,
-			Score: scoreCandidatePath(query, path),
-		})
-	}
-	sort.SliceStable(scored, func(i, j int) bool {
-		if scored[i].Score == scored[j].Score {
-			if pathDepth(scored[i].Path) == pathDepth(scored[j].Path) {
-				return scored[i].Path < scored[j].Path
-			}
-			return pathDepth(scored[i].Path) > pathDepth(scored[j].Path)
+	sort.SliceStable(normalized, func(i, j int) bool {
+		di, dj := pathDepth(normalized[i]), pathDepth(normalized[j])
+		if di == dj {
+			return normalized[i] < normalized[j]
 		}
-		return scored[i].Score > scored[j].Score
+		return di > dj
 	})
-	out := make([]string, 0, len(scored))
-	for _, item := range scored {
-		out = append(out, item.Path)
-	}
-	return out
-}
-
-func scoreCandidatePath(query, path string) int {
-	q := strings.ToLower(strings.TrimSpace(query))
-	p := strings.ToLower(strings.TrimSpace(filepath.ToSlash(path)))
-	if p == "" {
-		return -1000
-	}
-	score := 0
-	tokens := tokenizeQueryTerms(q)
-	for _, token := range tokens {
-		if token == "" {
-			continue
-		}
-		switch {
-		case strings.Contains("/"+p+"/", "/"+token+"/"):
-			score += 8
-		case strings.Contains(p, token):
-			score += 4
-		}
-	}
-	if strings.Contains(q, "package") {
-		if strings.Count(p, "/") >= 2 {
-			score += 2
-		}
-		if !strings.Contains(p, "/") {
-			score -= 4
-		}
-	}
-	if containsAny(q, "semantic", "index") {
-		if strings.Contains(p, "indexing/semantic") {
-			score += 12
-		}
-		if strings.Contains(p, "repository") || strings.Contains(p, "events/") || strings.Contains(p, "builder") {
-			score -= 6
-		}
-	}
-	if containsAny(q, "web", "api", "handler", "transport") {
-		if containsAny(p, "web/", "/web", "api", "handler", "http", "transport", "server", "bridge") {
-			score += 8
-		}
-		if containsAny(p, "obsidian", "godot", "gui-agent") {
-			score -= 8
-		}
-	}
-	if containsAny(q, "storage", "memory") {
-		if containsAny(p, "storage/memory", "/memory/", "memoryflow", "stores.go", "store.go") {
-			score += 10
-		}
-	}
-	if containsAny(q, "skill", "output", "envelope", "cas") {
-		if containsAny(p, "skillout", "cas", "envelope", "skillmain") {
-			score += 8
-		}
-	}
-	if containsAny(q, "platform", "config") {
-		if containsAny(p, "config", "platform") {
-			score += 8
-		}
-	}
-	if containsAny(q, "cmd", "runtime") {
-		if containsAny(p, "cmd/", "/cmd", "runtime") {
-			score += 8
-		}
-	}
-	score += minInt(pathDepth(p), 6)
-	return score
-}
-
-func tokenizeQueryTerms(query string) []string {
-	parts := strings.FieldsFunc(query, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
-	})
-	out := make([]string, 0, len(parts)+8)
-	for _, part := range parts {
-		part = strings.TrimSpace(strings.ToLower(part))
-		if len(part) < 3 {
-			continue
-		}
-		switch part {
-		case "handlers":
-			part = "handler"
-		case "settings":
-			part = "config"
-		}
-		out = append(out, part)
-	}
-	if containsAny(query, "web", "api", "handler", "transport") {
-		out = append(out, "web", "api", "handler", "transport", "http", "server")
-	}
-	if containsAny(query, "semantic", "index") {
-		out = append(out, "semantic", "index", "indexing", "provider", "indexer")
-	}
-	if containsAny(query, "storage", "memory") {
-		out = append(out, "storage", "memory", "store")
-	}
-	if containsAny(query, "skill", "output", "envelope", "cas") {
-		out = append(out, "skill", "output", "envelope", "cas")
-	}
-	if containsAny(query, "platform", "config") {
-		out = append(out, "platform", "config")
-	}
-	return uniqueStringsRLM(out)
+	return normalized
 }
 
 func dedupePathsCaseInsensitive(paths []string) []string {

@@ -68,8 +68,8 @@ func TestLLMRunnerUsesOpenAICompatibleChatPath(t *testing.T) {
 		MaxIterations: 2,
 	}, Environment{
 		Tools: []Tool{{
-			Name:        "search_repo",
-			Description: "repo",
+			Name:        "retrieve_code",
+			Description: "code retrieval",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`),
 			ReadOnly:    true,
 		}},
@@ -147,7 +147,7 @@ func TestLLMRunnerReturnsErrorOnModelFailure(t *testing.T) {
 		WorkspaceRoot: "/tmp/workspace",
 		MaxIterations: 1,
 	}, Environment{
-		Tools: []Tool{{Name: "search_repo", Description: "repo", ReadOnly: true}},
+		Tools: []Tool{{Name: "retrieve_code", Description: "code retrieval", ReadOnly: true}},
 	})
 	if err == nil {
 		t.Fatal("expected error on empty assistant response")
@@ -173,7 +173,7 @@ func TestLLMRunnerPreservesStopReasonBeforeAssistantResponse(t *testing.T) {
 									"id":   "call-1",
 									"type": "function",
 									"function": map[string]any{
-										"name":      "search_repo",
+										"name":      "retrieve_code",
 										"arguments": `{}`,
 									},
 								},
@@ -218,7 +218,7 @@ func TestLLMRunnerPreservesStopReasonBeforeAssistantResponse(t *testing.T) {
 		WorkspaceRoot: "/tmp/workspace",
 		MaxIterations: 1,
 	}, Environment{
-		Tools: []Tool{{Name: "search_repo", Description: "repo", ReadOnly: true}},
+		Tools: []Tool{{Name: "retrieve_code", Description: "code retrieval", ReadOnly: true}},
 	})
 	if err == nil {
 		t.Fatal("expected max-iterations error")
@@ -277,8 +277,8 @@ func TestLLMRunnerRequireToolUseRejectsZeroToolCallAnswer(t *testing.T) {
 		MaxIterations: 2,
 	}, Environment{
 		Tools: []Tool{{
-			Name:        "search_repo",
-			Description: "repo",
+			Name:        "retrieve_code",
+			Description: "code retrieval",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`),
 			ReadOnly:    true,
 		}},
@@ -366,24 +366,17 @@ func TestSummarizeParentToolUsage(t *testing.T) {
 func TestRerankCandidatePaths(t *testing.T) {
 	t.Parallel()
 
-	semanticPaths := rerankCandidatePaths("semantic indexing package", []string{
-		"internal/v2/core/events/repository.go",
-		"internal/intelligence/indexing/semantic/indexer.go",
+	// After hard-cut: reranking uses path depth ordering, not keyword scoring.
+	paths := rerankCandidatePaths("semantic indexing package", []string{
 		"builder.go",
+		"internal/intelligence/indexing/semantic/indexer.go",
+		"internal/v2/core/events/repository.go",
 	})
-	if len(semanticPaths) == 0 || semanticPaths[0] != "internal/intelligence/indexing/semantic/indexer.go" {
-		t.Fatalf("semantic rerank=%v", semanticPaths)
+	if len(paths) == 0 {
+		t.Fatal("rerank produced no paths")
 	}
-
-	webPaths := rerankCandidatePaths("web api handlers transport", []string{
-		"internal/tooling/tools/obsidian/client.go",
-		"internal/interfaces/web/transport.go",
-		"internal/http/handler.go",
-	})
-	if len(webPaths) == 0 {
-		t.Fatal("web rerank produced no paths")
-	}
-	if webPaths[0] == "internal/tooling/tools/obsidian/client.go" {
-		t.Fatalf("web rerank=%v should prefer web/http paths over obsidian", webPaths)
+	// Deeper paths should come first (depth-based ordering).
+	if pathDepth(paths[0]) < pathDepth(paths[len(paths)-1]) {
+		t.Fatalf("rerank=%v should order deeper paths first", paths)
 	}
 }
