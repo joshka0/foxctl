@@ -74,20 +74,22 @@ func TestSmokeContextEngineWiring(t *testing.T) {
 		t.Fatalf("retrieve_mixed: %v", err)
 	}
 
+	// retrieve_mixed fans out to 4 sub-lanes + records its own pack/episode.
+	// Each lane must record both an episode and a pack on every exit path
+	// (success, empty, error) — the eval harness needs uniform records.
+	const wantDelta = 5
 	afterEpisodes := countRows(t, dbPath, "retrieval_episodes")
-	if afterEpisodes <= beforeEpisodes {
-		t.Errorf("retrieve_mixed did not record any retrieval_episodes (before=%d, after=%d) — LaneConfig.Store likely nil or wsID mismatch",
-			beforeEpisodes, afterEpisodes)
+	if got := afterEpisodes - beforeEpisodes; got != wantDelta {
+		t.Errorf("retrieval_episodes delta=%d, want=%d (1 mixed + 4 sub-lanes); a sub-lane is short-circuiting recordEpisode", got, wantDelta)
 	} else {
-		t.Logf("retrieve_mixed recorded %d retrieval_episodes (was %d)", afterEpisodes-beforeEpisodes, beforeEpisodes)
+		t.Logf("retrieve_mixed recorded %d retrieval_episodes (was %d)", got, beforeEpisodes)
 	}
 
 	afterPacks := countRows(t, dbPath, "evidence_packs")
-	if afterPacks <= beforePacks {
-		t.Errorf("retrieve_mixed did not persist any evidence_packs (before=%d, after=%d) — recordPack likely not wired into lanes",
-			beforePacks, afterPacks)
+	if got := afterPacks - beforePacks; got != wantDelta {
+		t.Errorf("evidence_packs delta=%d, want=%d (1 mixed + 4 sub-lanes); a sub-lane is short-circuiting recordPack", got, wantDelta)
 	} else {
-		t.Logf("retrieve_mixed persisted %d evidence_packs (was %d)", afterPacks-beforePacks, beforePacks)
+		t.Logf("retrieve_mixed persisted %d evidence_packs (was %d)", got, beforePacks)
 	}
 
 	// --- Phase 3: memoryflow Edit lifecycle → context_events + staleness_markers ---

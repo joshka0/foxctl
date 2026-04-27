@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
@@ -97,6 +98,12 @@ type sqliteStore struct {
 	close func() error
 	clock Clock
 	cas   CASBackend
+	// writeMu serializes write paths in-process. SQLite WAL mode allows
+	// concurrent readers but only one writer; concurrent writers from lane
+	// goroutines (e.g. retrieve_mixed) hit SQLITE_BUSY before busy_timeout
+	// helps. Holding this mutex around every write keeps writers serialized
+	// in-process so the SQLite lock is never contended.
+	writeMu sync.Mutex
 }
 
 // CASBackend stores and retrieves large payloads outside the database.
@@ -165,6 +172,8 @@ func (s *sqliteStore) now() time.Time {
 // --- Events (append-only) ---
 
 func (s *sqliteStore) AppendEvent(ctx context.Context, event contextengine.ContextEvent) (contextengine.ContextEvent, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = s.now()
 	}
@@ -260,6 +269,8 @@ func (s *sqliteStore) ListEvents(ctx context.Context, filter EventFilter) ([]con
 const casThreshold = 64 * 1024 // 64KB
 
 func (s *sqliteStore) PutEvidencePack(ctx context.Context, pack contextengine.EvidencePack) (contextengine.EvidencePack, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if err := pack.Validate(); err != nil {
 		return contextengine.EvidencePack{}, fmt.Errorf("contextengine: put pack: %w", err)
 	}
@@ -347,6 +358,8 @@ func (s *sqliteStore) GetEvidencePack(ctx context.Context, id string) (contexten
 // --- Evidence Nodes ---
 
 func (s *sqliteStore) PutEvidenceNode(ctx context.Context, node contextengine.EvidenceNode) (contextengine.EvidenceNode, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if err := node.Validate(); err != nil {
 		return contextengine.EvidenceNode{}, fmt.Errorf("contextengine: put node: %w", err)
 	}
@@ -484,6 +497,8 @@ func (s *sqliteStore) scanNode(row *sql.Row) (contextengine.EvidenceNode, error)
 // --- Memory Claims ---
 
 func (s *sqliteStore) UpsertClaim(ctx context.Context, claim contextengine.MemoryClaim) (contextengine.MemoryClaim, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if claim.CreatedAt.IsZero() {
 		claim.CreatedAt = s.now()
 	}
@@ -623,6 +638,8 @@ func (s *sqliteStore) scanClaim(row *sql.Row) (contextengine.MemoryClaim, error)
 // --- Impact Edges ---
 
 func (s *sqliteStore) PutImpactEdge(ctx context.Context, edge contextengine.ImpactEdge) (contextengine.ImpactEdge, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if edge.CreatedAt.IsZero() {
 		edge.CreatedAt = s.now()
 	}
@@ -722,6 +739,8 @@ func (s *sqliteStore) scanEdges(rows *sql.Rows) ([]contextengine.ImpactEdge, err
 // --- Staleness Markers ---
 
 func (s *sqliteStore) UpsertStaleness(ctx context.Context, marker contextengine.StalenessMarker) (contextengine.StalenessMarker, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if marker.CreatedAt.IsZero() {
 		marker.CreatedAt = s.now()
 	}
@@ -846,6 +865,8 @@ func (s *sqliteStore) scanStaleness(row *sql.Row) (contextengine.StalenessMarker
 // --- Projections ---
 
 func (s *sqliteStore) PutProjection(ctx context.Context, id, workspaceID, projectionType string, version int, taskID string, generatedFromEvents []string, payload any, generatedAt, expiresAt time.Time) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	eventsJSON, err := json.Marshal(generatedFromEvents)
 	if err != nil {
 		return fmt.Errorf("contextengine: marshal generated_from_events: %w", err)
@@ -976,6 +997,8 @@ func (s *sqliteStore) ListProjections(ctx context.Context, filter ProjectionFilt
 // --- Retrieval Episodes (append-only) ---
 
 func (s *sqliteStore) RecordRetrievalEpisode(ctx context.Context, episode contextengine.RetrievalEpisode) (contextengine.RetrievalEpisode, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if episode.CreatedAt.IsZero() {
 		episode.CreatedAt = s.now()
 	}
@@ -1029,6 +1052,8 @@ func (s *sqliteStore) GetRetrievalEpisode(ctx context.Context, id string) (conte
 // --- Retrieval Feedback (append-only) ---
 
 func (s *sqliteStore) RecordRetrievalFeedback(ctx context.Context, feedback contextengine.RetrievalFeedback) (contextengine.RetrievalFeedback, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if feedback.CreatedAt.IsZero() {
 		feedback.CreatedAt = s.now()
 	}

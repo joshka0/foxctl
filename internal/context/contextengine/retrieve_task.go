@@ -36,6 +36,7 @@ func RetrieveTask(ctx context.Context, cfg LaneConfig, taskQueryFn TaskQueryFunc
 					"error": err.Error(),
 				},
 			}
+			_ = recordPack(ctx, cfg, pack)
 			episodeID, _ := recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), 0, nil)
 			pack.Metadata["episode_id"] = episodeID
 			return pack, LaneError{Lane: LaneTask, Err: err}
@@ -80,6 +81,7 @@ func RetrieveTask(ctx context.Context, cfg LaneConfig, taskQueryFn TaskQueryFunc
 				"error": err.Error(),
 			},
 		}
+		_ = recordPack(ctx, cfg, pack)
 		episodeID, _ := recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), 0, nil)
 		pack.Metadata["episode_id"] = episodeID
 		return pack, LaneError{Lane: LaneTask, Err: err}

@@ -33,6 +33,7 @@ func RetrieveCode(ctx context.Context, cfg LaneConfig, searchFn CodeSearchFunc, 
 				"error": err.Error(),
 			},
 		}
+		_ = recordPack(ctx, cfg, pack)
 		episodeID, _ := recordEpisode(ctx, cfg, query, LaneCode, packID, elapsed.Milliseconds(), 0, nil)
 		pack.Metadata["episode_id"] = episodeID
 		return pack, LaneError{Lane: LaneCode, Err: err}

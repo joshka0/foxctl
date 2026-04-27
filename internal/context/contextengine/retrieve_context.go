@@ -33,6 +33,7 @@ func RetrieveContext(ctx context.Context, cfg LaneConfig, queryFn ContextQueryFu
 				"error": err.Error(),
 			},
 		}
+		_ = recordPack(ctx, cfg, pack)
 		episodeID, _ := recordEpisode(ctx, cfg, query, LaneContext, packID, elapsed.Milliseconds(), 0, nil)
 		pack.Metadata["episode_id"] = episodeID
 		return pack, LaneError{Lane: LaneContext, Err: err}
