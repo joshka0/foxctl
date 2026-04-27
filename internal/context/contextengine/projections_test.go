@@ -59,12 +59,12 @@ func TestProjectionMeta_RoundTrip(t *testing.T) {
 	t.Parallel()
 	orig := ProjectionMeta{
 		ProjectionID:        "proj-1",
-		ProjectionType:     "task_context",
-		ProjectionVersion:  3,
-		WorkspaceID:        "ws-1",
+		ProjectionType:      "task_context",
+		ProjectionVersion:   3,
+		WorkspaceID:         "ws-1",
 		GeneratedFromEvents: []string{"evt-1", "evt-2"},
-		GeneratedAt:        time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
-		ExpiresAt:          time.Date(2025, 1, 16, 10, 30, 0, 0, time.UTC),
+		GeneratedAt:         time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
+		ExpiresAt:           time.Date(2025, 1, 16, 10, 30, 0, 0, time.UTC),
 	}
 
 	data, err := json.Marshal(orig)
@@ -145,7 +145,7 @@ func TestWorkingSet_Validate(t *testing.T) {
 	t.Parallel()
 	validWS := WorkingSet{
 		WorkspaceID: "ws-1",
-		UpdatedAt:  time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 
 	t.Run("valid", func(t *testing.T) {
@@ -388,12 +388,12 @@ func TestContextPacket_RoundTrip(t *testing.T) {
 	t.Parallel()
 	orig := ContextPacket{
 		WorkspaceID:     "ws-1",
-		TaskID:         "task-1",
-		SessionID:      "session-1",
-		Objective:      "Complete the implementation",
-		Phase:          "implementation",
+		TaskID:          "task-1",
+		SessionID:       "session-1",
+		Objective:       "Complete the implementation",
+		Phase:           "implementation",
 		HardConstraints: []string{"must use Go 1.21+", "no external deps"},
-		Blockers:       []string{"waiting on API spec"},
+		Blockers:        []string{"waiting on API spec"},
 		RecentDecisions: []RecentDecision{
 			{ID: "dec-1", Text: "Use SQLite for storage", Ref: "docs/decisions/001.md"},
 		},

@@ -36,7 +36,7 @@ func TestEvidenceNodeType_IsValid(t *testing.T) {
 func TestGrounding_IsValid(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		g    Grounding
+		g     Grounding
 		valid bool
 	}{
 		{GroundingLoaded, true},
@@ -191,7 +191,7 @@ func TestEvidenceLane_IsValid(t *testing.T) {
 func TestEvidenceTelemetry_RoundTrip(t *testing.T) {
 	t.Parallel()
 	orig := EvidenceTelemetry{
-		DurationMs:  150,
+		DurationMs: 150,
 		TokensUsed: 500,
 		LanesFused: 3,
 	}
@@ -311,7 +311,7 @@ func TestEvidencePack_RoundTrip(t *testing.T) {
 			},
 		},
 		Telemetry: EvidenceTelemetry{
-			DurationMs:  200,
+			DurationMs: 200,
 			TokensUsed: 800,
 			LanesFused: 2,
 		},

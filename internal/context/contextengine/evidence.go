@@ -37,9 +37,9 @@ type Grounding string
 const (
 	GroundingLoaded    Grounding = "loaded"
 	GroundingIndexed   Grounding = "indexed"
-	GroundingSemantic   Grounding = "semantic"
+	GroundingSemantic  Grounding = "semantic"
 	GroundingInferred  Grounding = "inferred"
-	GroundingValidated  Grounding = "validated"
+	GroundingValidated Grounding = "validated"
 )
 
 // IsValid reports whether g is a known Grounding value.
@@ -102,11 +102,11 @@ func (n EvidenceNode) Validate() error {
 type EvidenceLane string
 
 const (
-	LaneCode     EvidenceLane = "code"
-	LaneMemory   EvidenceLane = "memory"
-	LaneContext  EvidenceLane = "context"
-	LaneTask     EvidenceLane = "task"
-	LaneMixed    EvidenceLane = "mixed"
+	LaneCode    EvidenceLane = "code"
+	LaneMemory  EvidenceLane = "memory"
+	LaneContext EvidenceLane = "context"
+	LaneTask    EvidenceLane = "task"
+	LaneMixed   EvidenceLane = "mixed"
 )
 
 // IsValid reports whether l is a known EvidenceLane.

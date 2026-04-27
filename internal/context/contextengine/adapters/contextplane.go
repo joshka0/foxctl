@@ -42,18 +42,18 @@ func ConvertHandoff(src contextplane.Handoff) contextengine.ContextPacket {
 	allRefs = append(allRefs, src.FileRefs...)
 
 	return contextengine.ContextPacket{
-		WorkspaceID: src.TaskID,
-		TaskID:      src.TaskID,
-		Objective:   src.Summary,
-		Phase:       src.Phase,
-		NextActions: src.NextActions,
+		WorkspaceID:  src.TaskID,
+		TaskID:       src.TaskID,
+		Objective:    src.Summary,
+		Phase:        src.Phase,
+		NextActions:  src.NextActions,
 		RelevantRefs: allRefs,
 		Metadata: map[string]any{
-			"outcome":             src.Outcome,
-			"observations":        src.Observations,
-			"tensions":            src.Tensions,
+			"outcome":              src.Outcome,
+			"observations":         src.Observations,
+			"tensions":             src.Tensions,
 			"promotion_candidates": src.PromotionCandidates,
-			"created_at":          src.CreatedAt,
+			"created_at":           src.CreatedAt,
 		},
 	}
 }

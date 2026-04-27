@@ -3,8 +3,8 @@ package adapters
 import (
 	"testing"
 
-	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 )
 
 func ptrInt64(v int64) *int64 { return &v }
@@ -52,14 +52,14 @@ func TestConvertConversationEvent(t *testing.T) {
 
 func TestConvertEvidenceSnippet(t *testing.T) {
 	src := companion.EvidenceSnippet{
-		ID:            10,
+		ID:             10,
 		ConversationID: "conv1",
-		SourceEventID: 42,
-		EventType:     "tool_result",
-		FactText:      "File uses typed enums",
-		ContentHash:   "hash1",
-		Confidence:    0.9,
-		Bucket:        "code_style",
+		SourceEventID:  42,
+		EventType:      "tool_result",
+		FactText:       "File uses typed enums",
+		ContentHash:    "hash1",
+		Confidence:     0.9,
+		Bucket:         "code_style",
 	}
 
 	got := ConvertEvidenceSnippet("ws1", src)
@@ -240,13 +240,13 @@ func TestConvertAssumption_Promoted(t *testing.T) {
 func TestConvertAssumption_Retracted(t *testing.T) {
 	reason := "user corrected"
 	src := companion.Assumption{
-		ID:                3,
-		ConversationID:    "conv1",
-		Assumption:        "Wrong assumption",
-		Status:            companion.AssumptionStatusRetracted,
-		SourceEventID:     30,
-		Confidence:        0.3,
-		RetractionReason:  &reason,
+		ID:                 3,
+		ConversationID:     "conv1",
+		Assumption:         "Wrong assumption",
+		Status:             companion.AssumptionStatusRetracted,
+		SourceEventID:      30,
+		Confidence:         0.3,
+		RetractionReason:   &reason,
 		RetractedByEventID: ptrInt64(40),
 	}
 	got, err := ConvertAssumption("ws1", src)

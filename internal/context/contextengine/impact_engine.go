@@ -98,13 +98,13 @@ func computeDirtyEditImpact(event ContextEvent, graph ImpactGraph, now time.Time
 		// Create dirty staleness marker for the ref itself
 		markerID := fmt.Sprintf("staleness-%s-%s", event.ID, FormatEvidenceRef(ref))
 		markers = append(markers, StalenessMarker{
-			ID:            markerID,
-			WorkspaceID:   event.WorkspaceID,
-			TargetRef:     ref,
-			Status:        StalenessStatusDirty,
+			ID:             markerID,
+			WorkspaceID:    event.WorkspaceID,
+			TargetRef:      ref,
+			Status:         StalenessStatusDirty,
 			CausedByEvents: []string{event.ID},
-			CreatedAt:     now,
-			UpdatedAt:     now,
+			CreatedAt:      now,
+			UpdatedAt:      now,
 		})
 
 		// Traverse forward edges to find affected claims
@@ -183,13 +183,13 @@ func computeCorrectionImpact(event ContextEvent, graph ImpactGraph, now time.Tim
 				// Create needs_revalidation marker
 				markerID := fmt.Sprintf("staleness-%s-claim-%s", event.ID, claim.ID)
 				markers = append(markers, StalenessMarker{
-					ID:          markerID,
-					WorkspaceID: event.WorkspaceID,
-					TargetRef:   EvidenceRef{Type: RefTypeMemoryClaim, Ref: claim.ID},
-					Status:      StalenessStatusNeedsRevalidation,
+					ID:             markerID,
+					WorkspaceID:    event.WorkspaceID,
+					TargetRef:      EvidenceRef{Type: RefTypeMemoryClaim, Ref: claim.ID},
+					Status:         StalenessStatusNeedsRevalidation,
 					CausedByEvents: []string{event.ID},
-					CreatedAt:   now,
-					UpdatedAt:   now,
+					CreatedAt:      now,
+					UpdatedAt:      now,
 				})
 			}
 		}
@@ -237,14 +237,14 @@ func computePromotionImpact(event ContextEvent, graph ImpactGraph, now time.Time
 
 								markerID := fmt.Sprintf("staleness-%s-superseded-%s", event.ID, old.ID)
 								markers = append(markers, StalenessMarker{
-									ID:            markerID,
-									WorkspaceID:   event.WorkspaceID,
-									TargetRef:     EvidenceRef{Type: RefTypeMemoryClaim, Ref: old.ID},
-									Status:        StalenessStatusSuperseded,
-									CausedByEvents: []string{event.ID},
+									ID:              markerID,
+									WorkspaceID:     event.WorkspaceID,
+									TargetRef:       EvidenceRef{Type: RefTypeMemoryClaim, Ref: old.ID},
+									Status:          StalenessStatusSuperseded,
+									CausedByEvents:  []string{event.ID},
 									ResolvedByEvent: event.ID,
-									CreatedAt:     now,
-									UpdatedAt:     now,
+									CreatedAt:       now,
+									UpdatedAt:       now,
 								})
 							}
 						}

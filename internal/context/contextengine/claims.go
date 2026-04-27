@@ -90,14 +90,14 @@ func (c MemoryClaim) Validate() error {
 var claimTransitionValid = map[ClaimStatus]map[ClaimStatus]bool{
 	ClaimStatusCandidate: {
 		ClaimStatusCurrent:           true,
-		ClaimStatusRejected:         true,
+		ClaimStatusRejected:          true,
 		ClaimStatusNeedsRevalidation: true,
 	},
 	ClaimStatusCurrent: {
 		ClaimStatusNeedsRevalidation: true,
-		ClaimStatusSuperseded:       true,
-		ClaimStatusRejected:         true,
-		ClaimStatusStale:            true,
+		ClaimStatusSuperseded:        true,
+		ClaimStatusRejected:          true,
+		ClaimStatusStale:             true,
 	},
 	ClaimStatusNeedsRevalidation: {
 		ClaimStatusCurrent:    true,

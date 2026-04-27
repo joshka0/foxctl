@@ -11,18 +11,18 @@ import (
 type RefType string
 
 const (
-	RefTypePath         RefType = "path"
-	RefTypeSymbol       RefType = "symbol"
-	RefTypeTask         RefType = "task"
-	RefTypeSession      RefType = "session"
-	RefTypeMemoryClaim  RefType = "memory_claim"
-	RefTypeNote         RefType = "note"
-	RefTypeArtifact     RefType = "artifact"
-	RefTypeTrajectory   RefType = "trajectory"
-	RefTypeCommit       RefType = "commit"
-	RefTypeEvent        RefType = "event"
-	RefTypeRun          RefType = "run"
-	RefTypeToolCall     RefType = "tool_call"
+	RefTypePath        RefType = "path"
+	RefTypeSymbol      RefType = "symbol"
+	RefTypeTask        RefType = "task"
+	RefTypeSession     RefType = "session"
+	RefTypeMemoryClaim RefType = "memory_claim"
+	RefTypeNote        RefType = "note"
+	RefTypeArtifact    RefType = "artifact"
+	RefTypeTrajectory  RefType = "trajectory"
+	RefTypeCommit      RefType = "commit"
+	RefTypeEvent       RefType = "event"
+	RefTypeRun         RefType = "run"
+	RefTypeToolCall    RefType = "tool_call"
 )
 
 // IsValid reports whether r is a known RefType.

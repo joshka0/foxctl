@@ -8,8 +8,8 @@ import (
 func TestStalenessStatus_IsValid(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		status  StalenessStatus
-		want    bool
+		status StalenessStatus
+		want   bool
 	}{
 		{StalenessStatusFresh, true},
 		{StalenessStatusDirty, true},
@@ -61,39 +61,39 @@ func TestStalenessMarker_Validate(t *testing.T) {
 		{
 			name: "valid fresh marker",
 			marker: StalenessMarker{
-				ID:          "marker-1",
-				WorkspaceID: "ws-1",
-				TargetRef:   EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
-				Status:      StalenessStatusFresh,
+				ID:              "marker-1",
+				WorkspaceID:     "ws-1",
+				TargetRef:       EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
+				Status:          StalenessStatusFresh,
 				ResolvedByEvent: "evt-1",
-				CreatedAt:   now,
-				UpdatedAt:   now,
+				CreatedAt:       now,
+				UpdatedAt:       now,
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid dirty marker",
 			marker: StalenessMarker{
-				ID:          "marker-2",
-				WorkspaceID: "ws-1",
-				TargetRef:   EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
-				Status:      StalenessStatusDirty,
+				ID:             "marker-2",
+				WorkspaceID:    "ws-1",
+				TargetRef:      EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
+				Status:         StalenessStatusDirty,
 				CausedByEvents: []string{"evt-1"},
-				CreatedAt:   now,
-				UpdatedAt:   now,
+				CreatedAt:      now,
+				UpdatedAt:      now,
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid superseded marker",
 			marker: StalenessMarker{
-				ID:          "marker-3",
-				WorkspaceID: "ws-1",
-				TargetRef:   EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
-				Status:      StalenessStatusSuperseded,
+				ID:              "marker-3",
+				WorkspaceID:     "ws-1",
+				TargetRef:       EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
+				Status:          StalenessStatusSuperseded,
 				ResolvedByEvent: "evt-2",
-				CreatedAt:   now,
-				UpdatedAt:   now,
+				CreatedAt:       now,
+				UpdatedAt:       now,
 			},
 			wantErr: false,
 		},
@@ -186,14 +186,14 @@ func TestStalenessMarker_RoundTrip(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	marker := StalenessMarker{
-		ID:            "marker-123",
-		WorkspaceID:   "ws-abc",
-		TargetRef:     EvidenceRef{Type: RefTypePath, Ref: "main.go:42", WorkspaceID: "ws-abc"},
-		Status:        StalenessStatusFresh,
-		CausedByEvents: []string{"evt-1", "evt-2"},
+		ID:              "marker-123",
+		WorkspaceID:     "ws-abc",
+		TargetRef:       EvidenceRef{Type: RefTypePath, Ref: "main.go:42", WorkspaceID: "ws-abc"},
+		Status:          StalenessStatusFresh,
+		CausedByEvents:  []string{"evt-1", "evt-2"},
 		ResolvedByEvent: "evt-3",
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	if err := roundTripJSON(t, marker); err != nil {
 		t.Errorf("StalenessMarker round-trip failed: %v", err)
@@ -218,23 +218,23 @@ func TestStalenessMarker_ValidateWithAllStatuses(t *testing.T) {
 		switch status {
 		case StalenessStatusDirty:
 			marker = StalenessMarker{
-				ID:          "marker-test",
-				WorkspaceID: "ws-test",
-				TargetRef:   EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
-				Status:      status,
+				ID:             "marker-test",
+				WorkspaceID:    "ws-test",
+				TargetRef:      EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
+				Status:         status,
 				CausedByEvents: []string{"evt-1"},
-				CreatedAt:   now,
-				UpdatedAt:   now,
+				CreatedAt:      now,
+				UpdatedAt:      now,
 			}
 		case StalenessStatusFresh, StalenessStatusSuperseded:
 			marker = StalenessMarker{
-				ID:          "marker-test",
-				WorkspaceID: "ws-test",
-				TargetRef:   EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
-				Status:      status,
+				ID:              "marker-test",
+				WorkspaceID:     "ws-test",
+				TargetRef:       EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
+				Status:          status,
 				ResolvedByEvent: "evt-1",
-				CreatedAt:   now,
-				UpdatedAt:   now,
+				CreatedAt:       now,
+				UpdatedAt:       now,
 			}
 		default:
 			marker = StalenessMarker{
@@ -444,13 +444,13 @@ func TestApplyStalenessTransition_SameStatus(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	marker := StalenessMarker{
-		ID:          "marker-1",
-		WorkspaceID: "ws-1",
-		TargetRef:   EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
-		Status:      StalenessStatusFresh,
+		ID:              "marker-1",
+		WorkspaceID:     "ws-1",
+		TargetRef:       EvidenceRef{Type: RefTypePath, Ref: "main.go:42"},
+		Status:          StalenessStatusFresh,
 		ResolvedByEvent: "evt-1",
-		CreatedAt:   now.Add(-time.Hour),
-		UpdatedAt:   now.Add(-time.Hour),
+		CreatedAt:       now.Add(-time.Hour),
+		UpdatedAt:       now.Add(-time.Hour),
 	}
 
 	// Applying same status should be a no-op
@@ -559,5 +559,3 @@ func TestStalenessTransitionMatrix_Coverage(t *testing.T) {
 		}
 	}
 }
-
-

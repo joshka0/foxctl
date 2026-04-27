@@ -125,5 +125,3 @@ func refTitle(ref EvidenceRef) string {
 	}
 	return FormatEvidenceRef(ref)
 }
-
-

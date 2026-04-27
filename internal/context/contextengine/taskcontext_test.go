@@ -41,9 +41,9 @@ func TestTaskContext_StoredAsProjection(t *testing.T) {
 		ValidationEvidence: []EvidenceRef{
 			{Type: RefTypeEvent, Ref: "evt-review-1"},
 		},
-		OpenGaps:     []string{"need tests"},
+		OpenGaps:      []string{"need tests"},
 		StaleWarnings: []string{"src/main.go is dirty"},
-		NextActions:  []string{"write unit tests"},
+		NextActions:   []string{"write unit tests"},
 		ProjectionMeta: ProjectionMeta{
 			ProjectionID:      "proj-tc-1",
 			ProjectionType:    "task_context",
@@ -261,9 +261,9 @@ func TestTaskContext_RoundTripJSON(t *testing.T) {
 			Path: "internal/context/",
 			Refs: []EvidenceRef{{Type: RefTypePath, Ref: "internal/context/"}},
 		},
-		OpenGaps:     []string{"need tests"},
+		OpenGaps:      []string{"need tests"},
 		StaleWarnings: []string{"file dirty"},
-		NextActions:  []string{"write tests"},
+		NextActions:   []string{"write tests"},
 		RelatedCodeRefs: []EvidenceRef{
 			{Type: RefTypePath, Ref: "src/main.go"},
 		},

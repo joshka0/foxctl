@@ -25,13 +25,13 @@ func TestTopOfMindJSONRoundTripWithEvidenceRef(t *testing.T) {
 			{Type: contextengine.RefTypeTask, Ref: "T-1"},
 		},
 		ProjectionMeta: &contextengine.ProjectionMeta{
-			ProjectionID:      "proj-1",
-			ProjectionType:    "top_of_mind",
-			ProjectionVersion: 3,
-			WorkspaceID:       "ws-test",
+			ProjectionID:        "proj-1",
+			ProjectionType:      "top_of_mind",
+			ProjectionVersion:   3,
+			WorkspaceID:         "ws-test",
 			GeneratedFromEvents: []string{"evt-1", "evt-2"},
-			GeneratedAt:       time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC),
-			ExpiresAt:         time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC),
+			GeneratedAt:         time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC),
+			ExpiresAt:           time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC),
 		},
 		StaleWarnings:       []string{"path:internal/foo.go is dirty"},
 		KnownGaps:           []string{"Missing auth test"},
@@ -322,12 +322,12 @@ func TestRetrievalResultToEvidencePack(t *testing.T) {
 		Query:       "test query",
 		Observations: []Observation{
 			{
-				ID:          "O-1",
-				Statement:   "Fast iteration works",
-				Confidence:  0.85,
-				Count:       3,
-				FirstSeen:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-				LastSeen:    time.Date(2026, 4, 27, 0, 0, 0, 0, time.UTC),
+				ID:         "O-1",
+				Statement:  "Fast iteration works",
+				Confidence: 0.85,
+				Count:      3,
+				FirstSeen:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+				LastSeen:   time.Date(2026, 4, 27, 0, 0, 0, 0, time.UTC),
 			},
 		},
 		Tensions: []Tension{
@@ -393,14 +393,14 @@ func TestSaveLoadTopOfMindWithNewFields(t *testing.T) {
 	// VAL-CPLANE-011: SaveTopOfMind and LoadTopOfMind with new fields
 	store := NewWorkspaceStore(t.TempDir())
 	top := TopOfMind{
-		WorkspaceID:     "ws-test",
-		Objective:       "Test objective",
-		Phase:           "execute",
-		RelevantRefs:    []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "foo.go"}},
-		ProjectionMeta:  &contextengine.ProjectionMeta{ProjectionID: "p1", ProjectionType: "top_of_mind", ProjectionVersion: 1, WorkspaceID: "ws-test"},
-		StaleWarnings:   []string{"dirty file"},
-		KnownGaps:       []string{"missing test"},
-		UpdatedAt:       time.Date(2026, 4, 27, 0, 0, 0, 0, time.UTC),
+		WorkspaceID:    "ws-test",
+		Objective:      "Test objective",
+		Phase:          "execute",
+		RelevantRefs:   []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "foo.go"}},
+		ProjectionMeta: &contextengine.ProjectionMeta{ProjectionID: "p1", ProjectionType: "top_of_mind", ProjectionVersion: 1, WorkspaceID: "ws-test"},
+		StaleWarnings:  []string{"dirty file"},
+		KnownGaps:      []string{"missing test"},
+		UpdatedAt:      time.Date(2026, 4, 27, 0, 0, 0, 0, time.UTC),
 	}
 	if _, err := store.SaveTopOfMind(top); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)

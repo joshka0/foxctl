@@ -213,6 +213,7 @@ var stopWords = map[string]struct{}{
 	"in": {}, "on": {}, "at": {}, "to": {}, "for": {}, "of": {}, "with": {},
 	"by": {}, "from": {}, "up": {}, "about": {}, "into": {}, "through": {},
 	"and": {}, "or": {}, "but": {}, "not": {}, "no": {},
+	"return": {}, "key": {}, "files": {}, "concise": {}, "grounded": {}, "summary": {},
 }
 
 func filterStopWords(query string) string {

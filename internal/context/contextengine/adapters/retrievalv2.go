@@ -13,29 +13,29 @@ import (
 
 // SearchResponse represents a retrieval search result from the v2 search system.
 type SearchResponse struct {
-	Query   string      `json:"query"`
-	Plan    string      `json:"plan,omitempty"`
-	Hits    []FusedHit  `json:"hits,omitempty"`
-	Groups  []string    `json:"groups,omitempty"`
-	Stats   SearchStats `json:"stats,omitempty"`
+	Query  string      `json:"query"`
+	Plan   string      `json:"plan,omitempty"`
+	Hits   []FusedHit  `json:"hits,omitempty"`
+	Groups []string    `json:"groups,omitempty"`
+	Stats  SearchStats `json:"stats,omitempty"`
 }
 
 // SearchStats holds search result statistics.
 type SearchStats struct {
-	TotalHits    int   `json:"total_hits"`
-	DurationMS   int64 `json:"duration_ms"`
-	TokensUsed   int   `json:"tokens_used,omitempty"`
+	TotalHits  int   `json:"total_hits"`
+	DurationMS int64 `json:"duration_ms"`
+	TokensUsed int   `json:"tokens_used,omitempty"`
 }
 
 // FusedHit is a ranked search result with multiple source contributions.
 type FusedHit struct {
-	Document       string             `json:"document"`
-	Score          float64            `json:"score"`
-	Sources        []string           `json:"sources,omitempty"`
-	SourceScores   map[string]float64 `json:"source_scores,omitempty"`
-	Contributions  []HitContribution  `json:"contributions,omitempty"`
-	Title          string             `json:"title,omitempty"`
-	Snippet        string             `json:"snippet,omitempty"`
+	Document      string             `json:"document"`
+	Score         float64            `json:"score"`
+	Sources       []string           `json:"sources,omitempty"`
+	SourceScores  map[string]float64 `json:"source_scores,omitempty"`
+	Contributions []HitContribution  `json:"contributions,omitempty"`
+	Title         string             `json:"title,omitempty"`
+	Snippet       string             `json:"snippet,omitempty"`
 }
 
 // HitContribution describes one source's contribution to a fused hit.

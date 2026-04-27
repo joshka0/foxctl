@@ -90,8 +90,8 @@ func testPack(id, ws, query string, lane contextengine.EvidenceLane) contextengi
 func testNode(id, ws string, ref contextengine.EvidenceRef) contextengine.EvidenceNode {
 	return contextengine.EvidenceNode{
 		ID: id, WorkspaceID: ws,
-		NodeType: contextengine.EvidenceNodeTypeCode,
-		Ref:      ref,
+		NodeType:  contextengine.EvidenceNodeTypeCode,
+		Ref:       ref,
 		Statement: "test statement",
 	}
 }
@@ -100,7 +100,7 @@ func testClaim(id, ws string, status contextengine.ClaimStatus) contextengine.Me
 	return contextengine.MemoryClaim{
 		ID: id, WorkspaceID: ws,
 		ClaimType: "decision", Status: status,
-		Summary: "test claim",
+		Summary:   "test claim",
 		CreatedAt: now(), UpdatedAt: now(),
 	}
 }
@@ -616,8 +616,8 @@ func TestStore_LargePayload_RoutesToCAS(t *testing.T) {
 	pack.Nodes = []contextengine.EvidenceNode{
 		{
 			ID: "node-1", WorkspaceID: "ws-1",
-			NodeType: contextengine.EvidenceNodeTypeCode,
-			Ref:      contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "big.go"},
+			NodeType:  contextengine.EvidenceNodeTypeCode,
+			Ref:       contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "big.go"},
 			Statement: string(largeText),
 		},
 	}
@@ -654,8 +654,8 @@ func TestStore_SmallPayload_StaysInline(t *testing.T) {
 	pack.Nodes = []contextengine.EvidenceNode{
 		{
 			ID: "node-1", WorkspaceID: "ws-1",
-			NodeType: contextengine.EvidenceNodeTypeCode,
-			Ref:      contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "small.go"},
+			NodeType:  contextengine.EvidenceNodeTypeCode,
+			Ref:       contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "small.go"},
 			Statement: "tiny statement",
 		},
 	}
@@ -1223,7 +1223,9 @@ func TestStore_ProjectionCRUD(t *testing.T) {
 	}
 
 	var result map[string]string
-	if err := json.Unmarshal(rawPayload, &result); err != nil { t.Fatalf("unmarshal payload: %v", err) }
+	if err := json.Unmarshal(rawPayload, &result); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
 	if result["key"] != "value" {
 		t.Errorf("expected payload key=value, got %v", result)
 	}
@@ -1266,8 +1268,8 @@ func TestStore_EvidenceNodeLargeStatementCAS(t *testing.T) {
 	ref := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: "big.go"}
 	node := contextengine.EvidenceNode{
 		ID: "node-big", WorkspaceID: "ws-1",
-		NodeType: contextengine.EvidenceNodeTypeCode,
-		Ref:      ref,
+		NodeType:  contextengine.EvidenceNodeTypeCode,
+		Ref:       ref,
 		Statement: string(largeText),
 	}
 
@@ -1791,7 +1793,7 @@ func TestStore_ImpactEdge_Validation(t *testing.T) {
 
 	edge := contextengine.ImpactEdge{
 		ID: "e1", WorkspaceID: "ws-1",
-		Kind: contextengine.ImpactEdgeKind("unknown"),
+		Kind:      contextengine.ImpactEdgeKind("unknown"),
 		CreatedAt: now(),
 	}
 	_, err := s.PutImpactEdge(ctx, edge)
@@ -1806,7 +1808,7 @@ func TestStore_RecordEpisode_Validation(t *testing.T) {
 
 	ep := contextengine.RetrievalEpisode{
 		ID: "ep-1", WorkspaceID: "ws-1",
-		Lane: contextengine.EvidenceLane("unknown"),
+		Lane:      contextengine.EvidenceLane("unknown"),
 		CreatedAt: now(),
 	}
 	_, err := s.RecordRetrievalEpisode(ctx, ep)
@@ -1821,7 +1823,7 @@ func TestStore_RecordFeedback_Validation(t *testing.T) {
 
 	fb := contextengine.RetrievalFeedback{
 		ID: "fb-1", WorkspaceID: "ws-1",
-		Kind: contextengine.RetrievalFeedbackKind("unknown"),
+		Kind:      contextengine.RetrievalFeedbackKind("unknown"),
 		CreatedAt: now(),
 	}
 	_, err := s.RecordRetrievalFeedback(ctx, fb)
@@ -1836,7 +1838,7 @@ func TestStore_UpsertStaleness_Validation(t *testing.T) {
 
 	marker := contextengine.StalenessMarker{
 		ID: "m1", WorkspaceID: "ws-1",
-		Status: contextengine.StalenessStatus("unknown"),
+		Status:    contextengine.StalenessStatus("unknown"),
 		CreatedAt: now(), UpdatedAt: now(),
 	}
 	_, err := s.UpsertStaleness(ctx, marker)

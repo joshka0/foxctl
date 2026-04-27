@@ -12,12 +12,12 @@ func TestConvertSearchResponse(t *testing.T) {
 		Plan:  "semantic_search",
 		Hits: []FusedHit{
 			{
-				Document:      "docs/arch.md",
-				Score:         0.92,
-				Title:         "Architecture",
-				Snippet:       "The system uses events",
-				Sources:       []string{"vault", "code"},
-				SourceScores:  map[string]float64{"vault": 0.8, "code": 0.12},
+				Document:     "docs/arch.md",
+				Score:        0.92,
+				Title:        "Architecture",
+				Snippet:      "The system uses events",
+				Sources:      []string{"vault", "code"},
+				SourceScores: map[string]float64{"vault": 0.8, "code": 0.12},
 			},
 		},
 		Groups: []string{"architecture"},

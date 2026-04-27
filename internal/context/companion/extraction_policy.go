@@ -354,7 +354,7 @@ func containsRetractionPattern(text string) bool {
 // This replaces isRetractionSignal and isUserRedirectSignal.
 type TypedSignalExtractor struct {
 	retractionIndicators []string
-	redirectIndicators  []string
+	redirectIndicators   []string
 }
 
 // NewDefaultTypedSignalExtractor creates the default signal extractor with

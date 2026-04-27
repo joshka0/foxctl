@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
@@ -1246,15 +1247,15 @@ func extractACAResultPaths(result contextplane.RetrievalResult, limit int, opts 
 	if opts.IncludeControlPlaneRefs {
 		if result.TopOfMind != nil {
 			for _, ref := range result.TopOfMind.RelevantRefs {
-				appendRef(ref)
+				appendRef(contextengine.FormatEvidenceRef(ref))
 			}
 		}
 		if result.LatestHandoff != nil {
-			for _, path := range result.LatestHandoff.Handoff.FilesTouched {
+			for _, path := range result.LatestHandoff.Handoff.FilesTouched() {
 				appendPath(path)
 			}
 			for _, ref := range result.LatestHandoff.Handoff.EvidenceRefs {
-				appendRef(ref)
+				appendRef(contextengine.FormatEvidenceRef(ref))
 			}
 		}
 	}

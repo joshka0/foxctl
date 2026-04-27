@@ -123,15 +123,15 @@ func (s *WorkspaceStore) DraftMarkdownProposal(ctx context.Context, in MarkdownP
 
 	now := time.Now().UTC()
 	proposal := MemoryProposal{
-		DedupeKey:        dedupeKey,
-		Kind:             PolicyKind(firstNonEmpty(strings.TrimSpace(in.Kind), "room_agile_draft")),
-		Classification:   firstNonEmpty(strings.TrimSpace(in.Classification), noteType),
-		Status:           "open",
-		ReviewRequired:   true,
-		Confidence:       firstNonZeroFloat64(in.Confidence, 0.82),
-		BlastRadius:      firstNonEmpty(strings.TrimSpace(in.BlastRadius), "medium"),
-		Summary:          firstNonEmpty(strings.TrimSpace(in.Summary), fmt.Sprintf("Review ACA draft for %s %s.", sourceKind, sourceID)),
-		SourceRefs:       uniqueEvidenceRefs(append([]contextengine.EvidenceRef{
+		DedupeKey:      dedupeKey,
+		Kind:           PolicyKind(firstNonEmpty(strings.TrimSpace(in.Kind), "room_agile_draft")),
+		Classification: firstNonEmpty(strings.TrimSpace(in.Classification), noteType),
+		Status:         "open",
+		ReviewRequired: true,
+		Confidence:     firstNonZeroFloat64(in.Confidence, 0.82),
+		BlastRadius:    firstNonEmpty(strings.TrimSpace(in.BlastRadius), "medium"),
+		Summary:        firstNonEmpty(strings.TrimSpace(in.Summary), fmt.Sprintf("Review ACA draft for %s %s.", sourceKind, sourceID)),
+		SourceRefs: uniqueEvidenceRefs(append([]contextengine.EvidenceRef{
 			{Type: contextengine.RefTypePath, Ref: "draft:" + draftRel},
 			{Type: contextengine.RefTypePath, Ref: sourceKind + ":" + sourceID},
 		}, stringsToEvidenceRefs(in.SourceRefs)...)),

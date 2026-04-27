@@ -9,20 +9,20 @@ import (
 type ContextEventKind string
 
 const (
-	EventKindCodeChangedDirty    ContextEventKind = "code.changed_dirty"
-	EventKindCodeIndexedWorktree ContextEventKind = "code.indexed_worktree"
-	EventKindCodeValidated      ContextEventKind = "code.validated"
-	EventKindCodeCommitted      ContextEventKind = "code.committed"
-	EventKindTaskChanged        ContextEventKind = "task.changed"
-	EventKindSessionTurnCaptured ContextEventKind = "session.turn_captured"
-	EventKindToolEvidenceProduced ContextEventKind = "tool.evidence_produced"
-	EventKindRetrievalExecuted  ContextEventKind = "retrieval.executed"
-	EventKindRetrievalMissed    ContextEventKind = "retrieval.missed"
-	EventKindAnswerCorrected    ContextEventKind = "answer.corrected"
-	EventKindMemoryClaimProposed ContextEventKind = "memory.claim_proposed"
-	EventKindMemoryClaimPromoted ContextEventKind = "memory.claim_promoted"
+	EventKindCodeChangedDirty       ContextEventKind = "code.changed_dirty"
+	EventKindCodeIndexedWorktree    ContextEventKind = "code.indexed_worktree"
+	EventKindCodeValidated          ContextEventKind = "code.validated"
+	EventKindCodeCommitted          ContextEventKind = "code.committed"
+	EventKindTaskChanged            ContextEventKind = "task.changed"
+	EventKindSessionTurnCaptured    ContextEventKind = "session.turn_captured"
+	EventKindToolEvidenceProduced   ContextEventKind = "tool.evidence_produced"
+	EventKindRetrievalExecuted      ContextEventKind = "retrieval.executed"
+	EventKindRetrievalMissed        ContextEventKind = "retrieval.missed"
+	EventKindAnswerCorrected        ContextEventKind = "answer.corrected"
+	EventKindMemoryClaimProposed    ContextEventKind = "memory.claim_proposed"
+	EventKindMemoryClaimPromoted    ContextEventKind = "memory.claim_promoted"
 	EventKindMemoryClaimInvalidated ContextEventKind = "memory.claim_invalidated"
-	EventKindProjectionGenerated ContextEventKind = "projection.generated"
+	EventKindProjectionGenerated    ContextEventKind = "projection.generated"
 )
 
 // IsValid reports whether k is a known ContextEventKind.

@@ -3,8 +3,8 @@ package adapters
 import (
 	"fmt"
 
-	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/companion"
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 )
 
 // ConvertConversationEvent converts a companion.ConversationEvent to a contextengine.ContextEvent.
@@ -17,16 +17,16 @@ func ConvertConversationEvent(workspaceID string, src companion.ConversationEven
 		Source:      src.EventType,
 		SessionID:   src.ConversationID,
 		Data: map[string]any{
-			"turn_id":            src.TurnID,
-			"tool_name":          src.ToolName,
-			"tool_run_id":        src.ToolRunID,
+			"turn_id":             src.TurnID,
+			"tool_name":           src.ToolName,
+			"tool_run_id":         src.ToolRunID,
 			"parent_tool_call_id": src.ParentToolCallID,
-			"payload_json":       src.PayloadJSON,
-			"payload_ref":        src.PayloadRef,
-			"token_count":        src.TokenCount,
-			"content_hash":       src.ContentHash,
-			"content":            src.Content,
-			"created_at":         src.CreatedAt,
+			"payload_json":        src.PayloadJSON,
+			"payload_ref":         src.PayloadRef,
+			"token_count":         src.TokenCount,
+			"content_hash":        src.ContentHash,
+			"content":             src.Content,
+			"created_at":          src.CreatedAt,
 		},
 	}
 }

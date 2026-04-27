@@ -31,8 +31,8 @@ func ConvertTask(src tasks.Task) contextengine.TaskContext {
 			Path:   src.ScopePath,
 			TaskID: src.ID,
 		},
-		OpenGaps:       extractOpenGaps(src),
-		NextActions:    extractNextActions(src),
+		OpenGaps:        extractOpenGaps(src),
+		NextActions:     extractNextActions(src),
 		RelatedCodeRefs: relatedCodeRefs,
 		ProjectionMeta: contextengine.ProjectionMeta{
 			ProjectionID:      projectionID,

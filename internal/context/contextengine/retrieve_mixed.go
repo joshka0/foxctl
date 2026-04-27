@@ -32,9 +32,9 @@ func RetrieveMixed(
 
 	// Fan out to all four lanes concurrently.
 	type laneResult struct {
-		pack   EvidencePack
-		lane   EvidenceLane
-		err    error
+		pack EvidencePack
+		lane EvidenceLane
+		err  error
 	}
 
 	ch := make(chan laneResult, 4)

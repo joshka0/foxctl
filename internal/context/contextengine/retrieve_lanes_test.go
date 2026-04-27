@@ -11,8 +11,10 @@ import (
 
 // --- Helpers ---
 
-var testNow = time.Date(2025, 3, 15, 10, 0, 0, 0, time.UTC)
-var testIDCounter int64
+var (
+	testNow       = time.Date(2025, 3, 15, 10, 0, 0, 0, time.UTC)
+	testIDCounter int64
+)
 
 func testIDGen() string {
 	n := atomic.AddInt64(&testIDCounter, 1)
@@ -313,12 +315,12 @@ func TestRetrieveContext_ReturnsEvidencePack(t *testing.T) {
 
 	queryFn := func(_ context.Context, workspaceID string) (*ContextPacket, error) {
 		return &ContextPacket{
-			WorkspaceID: "ws-test",
-			Objective:   "Implement auth system",
-			Phase:       "implementation",
+			WorkspaceID:     "ws-test",
+			Objective:       "Implement auth system",
+			Phase:           "implementation",
 			HardConstraints: []string{"Must use JWT"},
-			Blockers:    []string{"Missing token secret"},
-			NextActions: []string{"Generate secret key"},
+			Blockers:        []string{"Missing token secret"},
+			NextActions:     []string{"Generate secret key"},
 			RecentDecisions: []RecentDecision{
 				{ID: "dec-1", Text: "Use RS256 algorithm"},
 			},

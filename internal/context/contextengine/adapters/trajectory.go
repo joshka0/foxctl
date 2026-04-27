@@ -106,17 +106,17 @@ func ConvertTrajectory(src trajectory.Trajectory) contextengine.ContextPacket {
 		Phase:        string(src.Status),
 		RelevantRefs: taskRefs,
 		Metadata: map[string]any{
-			"id":               src.ID,
-			"root_request_id":  src.RootRequestID,
-			"epic_id":          src.EpicID,
-			"agent_role":       src.AgentRole,
-			"job_id":           src.JobID,
-			"trace_id":         src.TraceID,
-			"status":           string(src.Status),
-			"session_id":       src.SessionID,
-			"artifact_digest":  src.ArtifactDigest,
-			"created_at":       src.CreatedAt,
-			"updated_at":       src.UpdatedAt,
+			"id":              src.ID,
+			"root_request_id": src.RootRequestID,
+			"epic_id":         src.EpicID,
+			"agent_role":      src.AgentRole,
+			"job_id":          src.JobID,
+			"trace_id":        src.TraceID,
+			"status":          string(src.Status),
+			"session_id":      src.SessionID,
+			"artifact_digest": src.ArtifactDigest,
+			"created_at":      src.CreatedAt,
+			"updated_at":      src.UpdatedAt,
 		},
 	}
 }
@@ -133,10 +133,10 @@ func safeFirst(ss []string) string {
 // summarizing the trajectory outcome.
 func ConvertTrajectoryToContextEvent(src trajectory.Trajectory) contextengine.ContextEvent {
 	data := map[string]any{
-		"trajectory_id": src.ID,
-		"agent_role":    src.AgentRole,
-		"job_id":        src.JobID,
-		"trace_id":      src.TraceID,
+		"trajectory_id":   src.ID,
+		"agent_role":      src.AgentRole,
+		"job_id":          src.JobID,
+		"trace_id":        src.TraceID,
 		"artifact_digest": src.ArtifactDigest,
 	}
 	if src.Outcome != nil {

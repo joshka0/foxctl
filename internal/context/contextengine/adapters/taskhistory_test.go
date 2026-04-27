@@ -69,20 +69,20 @@ func TestConvertPack(t *testing.T) {
 func TestConvertSessionSummary(t *testing.T) {
 	now := time.Now().UTC()
 	src := taskhistory.SessionSummary{
-		ID:                "sess1",
-		Reason:            "task handoff",
-		ProjectName:       "foxctl",
-		Summary:           "Implemented store layer",
-		Accomplished:      []string{"Created SQLite store"},
-		Decisions:         []string{"Use WAL mode"},
-		Gotchas:           []string{"Watch for lock contention"},
-		KeyFiles:          []string{"internal/storage/store.go"},
-		TimelineSummaries: []string{"Started store"},
-		TimelineTools:     []string{"go test"},
-		TimelineFiles:     []string{"store.go"},
+		ID:                 "sess1",
+		Reason:             "task handoff",
+		ProjectName:        "foxctl",
+		Summary:            "Implemented store layer",
+		Accomplished:       []string{"Created SQLite store"},
+		Decisions:          []string{"Use WAL mode"},
+		Gotchas:            []string{"Watch for lock contention"},
+		KeyFiles:           []string{"internal/storage/store.go"},
+		TimelineSummaries:  []string{"Started store"},
+		TimelineTools:      []string{"go test"},
+		TimelineFiles:      []string{"store.go"},
 		RecentFilesTouched: []string{"store.go"},
-		StartedAt:         now,
-		EndedAt:           now,
+		StartedAt:          now,
+		EndedAt:            now,
 	}
 
 	got := ConvertSessionSummary("ws1", src)

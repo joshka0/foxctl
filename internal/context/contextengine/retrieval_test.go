@@ -35,11 +35,11 @@ func TestRetrievalFeedbackKind_IsValid(t *testing.T) {
 func TestRetrievalEpisode_Validate(t *testing.T) {
 	t.Parallel()
 	validEp := RetrievalEpisode{
-		ID:        "ep-1",
+		ID:          "ep-1",
 		WorkspaceID: "ws-1",
-		Query:     "how does auth work",
-		Lane:      LaneCode,
-		CreatedAt: time.Now(),
+		Query:       "how does auth work",
+		Lane:        LaneCode,
+		CreatedAt:   time.Now(),
 	}
 
 	t.Run("valid", func(t *testing.T) {
@@ -92,16 +92,16 @@ func TestRetrievalEpisode_Validate(t *testing.T) {
 func TestRetrievalEpisode_RoundTrip(t *testing.T) {
 	t.Parallel()
 	orig := RetrievalEpisode{
-		ID:             "ep-1",
-		WorkspaceID:    "ws-1",
-		Query:          "authentication middleware",
-		Lane:           LaneMixed,
-		PackID:         "pack-42",
-		DurationMs:     150,
-		TokensUsed:     500,
-		HitCount:       10,
-		SubEpisodeIDs:  []string{"ep-2", "ep-3"},
-		CreatedAt:      time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
+		ID:            "ep-1",
+		WorkspaceID:   "ws-1",
+		Query:         "authentication middleware",
+		Lane:          LaneMixed,
+		PackID:        "pack-42",
+		DurationMs:    150,
+		TokensUsed:    500,
+		HitCount:      10,
+		SubEpisodeIDs: []string{"ep-2", "ep-3"},
+		CreatedAt:     time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
 	}
 
 	data, err := json.Marshal(orig)
@@ -131,12 +131,12 @@ func TestRetrievalEpisode_RoundTrip(t *testing.T) {
 func TestRetrievalFeedback_Validate(t *testing.T) {
 	t.Parallel()
 	validFB := RetrievalFeedback{
-		ID:         "fb-1",
+		ID:          "fb-1",
 		WorkspaceID: "ws-1",
-		EpisodeID:  "ep-1",
-		Kind:       RetrievalFeedbackKindAnswerAccepted,
-		Query:      "how does auth work",
-		CreatedAt:  time.Now(),
+		EpisodeID:   "ep-1",
+		Kind:        RetrievalFeedbackKindAnswerAccepted,
+		Query:       "how does auth work",
+		CreatedAt:   time.Now(),
 	}
 
 	t.Run("valid", func(t *testing.T) {

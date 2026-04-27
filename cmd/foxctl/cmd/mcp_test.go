@@ -13,6 +13,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -419,7 +420,7 @@ func TestHandleContextObservations(t *testing.T) {
 		Count:        2,
 		Project:      "foxctl",
 		Area:         "runtime",
-		EvidenceRefs: []string{"handoff:T-1038"},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeRun, Ref: "handoff:T-1038"}},
 	}); err != nil {
 		t.Fatalf("AppendObservation: %v", err)
 	}
@@ -644,7 +645,7 @@ func TestHandleContextTensions(t *testing.T) {
 		Kind:        "contradiction",
 		Statement:   "Runtime writes are bypassing the promotion path.",
 		Impact:      "medium",
-		RelatedRefs: []string{"note:write-policy"},
+		RelatedRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeNote, Ref: "write-policy"}},
 	}); err != nil {
 		t.Fatalf("AppendTension: %v", err)
 	}
@@ -669,7 +670,7 @@ func TestHandleContextRethinkAndPromote(t *testing.T) {
 		Statement:   "Runtime writes are bypassing the promotion path.",
 		Impact:      "high",
 		Count:       2,
-		RelatedRefs: []string{"note:write-policy"},
+		RelatedRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeNote, Ref: "write-policy"}},
 	}); err != nil {
 		t.Fatalf("AppendTension: %v", err)
 	}
@@ -680,7 +681,7 @@ func TestHandleContextRethinkAndPromote(t *testing.T) {
 		Count:        2,
 		Project:      "foxctl",
 		Area:         "runtime",
-		EvidenceRefs: []string{"handoff:T-1038"},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeRun, Ref: "handoff:T-1038"}},
 	}); err != nil {
 		t.Fatalf("AppendObservation: %v", err)
 	}
@@ -722,7 +723,7 @@ func TestHandleContextMergePromotion(t *testing.T) {
 		Count:        2,
 		Project:      "foxctl",
 		Area:         "runtime",
-		EvidenceRefs: []string{"handoff:T-1038"},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeRun, Ref: "handoff:T-1038"}},
 	}); err != nil {
 		t.Fatalf("AppendObservation: %v", err)
 	}
@@ -798,7 +799,7 @@ func TestHandleContextRetrieve(t *testing.T) {
 		WorkspaceID:  "ws-test",
 		Objective:    "Compact handoff work",
 		Phase:        "design",
-		RelevantRefs: []string{"path:notes/patterns/compact-handoff-pattern.md"},
+		RelevantRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "notes/patterns/compact-handoff-pattern.md"}},
 		UpdatedAt:    time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)
@@ -851,7 +852,7 @@ func TestHandleContextContradictions(t *testing.T) {
 		Impact:      "high",
 		Status:      "open",
 		Count:       2,
-		RelatedRefs: []string{"note:write-policy"},
+		RelatedRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeNote, Ref: "write-policy"}},
 	}); err != nil {
 		t.Fatalf("AppendTension: %v", err)
 	}

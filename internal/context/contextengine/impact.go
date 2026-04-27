@@ -9,13 +9,13 @@ import (
 type ImpactEdgeKind string
 
 const (
-	ImpactEdgeKindDependsOn    ImpactEdgeKind = "depends_on"
-	ImpactEdgeKindCites        ImpactEdgeKind = "cites"
+	ImpactEdgeKindDependsOn     ImpactEdgeKind = "depends_on"
+	ImpactEdgeKindCites         ImpactEdgeKind = "cites"
 	ImpactEdgeKindGeneratedFrom ImpactEdgeKind = "generated_from"
-	ImpactEdgeKindValidates    ImpactEdgeKind = "validates"
-	ImpactEdgeKindInvalidates  ImpactEdgeKind = "invalidates"
-	ImpactEdgeKindSupersedes   ImpactEdgeKind = "supersedes"
-	ImpactEdgeKindRelatesTo    ImpactEdgeKind = "relates_to"
+	ImpactEdgeKindValidates     ImpactEdgeKind = "validates"
+	ImpactEdgeKindInvalidates   ImpactEdgeKind = "invalidates"
+	ImpactEdgeKindSupersedes    ImpactEdgeKind = "supersedes"
+	ImpactEdgeKindRelatesTo     ImpactEdgeKind = "relates_to"
 )
 
 // IsValid reports whether k is a known ImpactEdgeKind.

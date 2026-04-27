@@ -20,13 +20,13 @@ func TestConvertTopOfMind(t *testing.T) {
 		RecentDecisions: []contextplane.RecentDecision{
 			{ID: "d1", Text: "Use TDD", Ref: "path:design.md"},
 		},
-		OpenLoops:    []string{"verify coverage"},
-		NextActions:  []string{"write tests"},
+		OpenLoops:   []string{"verify coverage"},
+		NextActions: []string{"write tests"},
 		RelevantRefs: []contextengine.EvidenceRef{
 			{Type: contextengine.RefTypePath, Ref: "types.go"},
 			{Type: contextengine.RefTypeTask, Ref: "abc"},
 		},
-		UpdatedAt:    now,
+		UpdatedAt: now,
 	}
 
 	got := ConvertTopOfMind(src)
@@ -144,18 +144,18 @@ func TestConvertObservation(t *testing.T) {
 func TestConvertTension(t *testing.T) {
 	now := time.Now().UTC()
 	src := contextplane.Tension{
-		ID:          "ten1",
-		Kind:        "architectural",
-		Statement:   "Circular dependency risk",
-		Impact:      "high",
+		ID:        "ten1",
+		Kind:      "architectural",
+		Statement: "Circular dependency risk",
+		Impact:    "high",
 		RelatedRefs: []contextengine.EvidenceRef{
 			{Type: contextengine.RefTypePath, Ref: "a.go"},
 			{Type: contextengine.RefTypePath, Ref: "b.go"},
 		},
-		Status:      "open",
-		Count:       3,
-		CreatedAt:   now,
-		LastSeen:    now,
+		Status:    "open",
+		Count:     3,
+		CreatedAt: now,
+		LastSeen:  now,
 	}
 
 	got := ConvertTension("ws1", src)
@@ -244,11 +244,11 @@ func TestConvertTaskPacket(t *testing.T) {
 			Status:    "in_progress",
 			ScopePath: "internal/context/",
 		},
-		Objective:   "Create 8 adapter files",
-		Phase:       "implementation",
-		NextActions: []string{"Write tests"},
+		Objective:    "Create 8 adapter files",
+		Phase:        "implementation",
+		NextActions:  []string{"Write tests"},
 		RelevantRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "types.go"}},
-		GeneratedAt: now,
+		GeneratedAt:  now,
 	}
 
 	got := ConvertTaskPacket(src)

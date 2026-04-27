@@ -101,13 +101,13 @@ func TestImpactEdge_Validate(t *testing.T) {
 func TestImpactEdge_RoundTrip(t *testing.T) {
 	t.Parallel()
 	orig := ImpactEdge{
-		ID:             "edge-1",
-		WorkspaceID:    "ws-1",
-		From:           EvidenceRef{Type: RefTypeSymbol, Ref: "AuthService"},
-		To:             EvidenceRef{Type: RefTypeSymbol, Ref: "DatabaseLayer"},
-		Kind:           ImpactEdgeKindCites,
-		SourceEventID:  "evt-42",
-		CreatedAt:      time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
+		ID:            "edge-1",
+		WorkspaceID:   "ws-1",
+		From:          EvidenceRef{Type: RefTypeSymbol, Ref: "AuthService"},
+		To:            EvidenceRef{Type: RefTypeSymbol, Ref: "DatabaseLayer"},
+		Kind:          ImpactEdgeKindCites,
+		SourceEventID: "evt-42",
+		CreatedAt:     time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC),
 	}
 
 	data, err := json.Marshal(orig)

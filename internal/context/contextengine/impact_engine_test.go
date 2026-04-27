@@ -24,7 +24,7 @@ func TestComputeImpact_IsPureFunction(t *testing.T) {
 		CreatedAt:   now,
 	}
 	graph := &StubImpactGraph{
-		edges: []ImpactEdge{},
+		edges:  []ImpactEdge{},
 		claims: []MemoryClaim{},
 	}
 
@@ -573,13 +573,13 @@ func TestResolveStaleness_TransitionsCorrectly(t *testing.T) {
 	ctx := context.Background()
 
 	marker := StalenessMarker{
-		ID:            "marker-1",
-		WorkspaceID:   "ws-1",
-		TargetRef:     EvidenceRef{Type: RefTypePath, Ref: "src/main.go"},
-		Status:        StalenessStatusDirty,
+		ID:             "marker-1",
+		WorkspaceID:    "ws-1",
+		TargetRef:      EvidenceRef{Type: RefTypePath, Ref: "src/main.go"},
+		Status:         StalenessStatusDirty,
 		CausedByEvents: []string{"evt-1"},
-		CreatedAt:     now.Add(-time.Hour),
-		UpdatedAt:     now.Add(-time.Hour),
+		CreatedAt:      now.Add(-time.Hour),
+		UpdatedAt:      now.Add(-time.Hour),
 	}
 	_, _ = store.UpsertStaleness(ctx, marker)
 
@@ -605,13 +605,13 @@ func TestResolveStaleness_GuardsDoubleResolve(t *testing.T) {
 	ctx := context.Background()
 
 	marker := StalenessMarker{
-		ID:            "marker-1",
-		WorkspaceID:   "ws-1",
-		TargetRef:     EvidenceRef{Type: RefTypePath, Ref: "src/main.go"},
-		Status:        StalenessStatusFresh,
+		ID:              "marker-1",
+		WorkspaceID:     "ws-1",
+		TargetRef:       EvidenceRef{Type: RefTypePath, Ref: "src/main.go"},
+		Status:          StalenessStatusFresh,
 		ResolvedByEvent: "evt-first",
-		CreatedAt:     now.Add(-time.Hour),
-		UpdatedAt:     now.Add(-time.Hour),
+		CreatedAt:       now.Add(-time.Hour),
+		UpdatedAt:       now.Add(-time.Hour),
 	}
 	_, _ = store.UpsertStaleness(ctx, marker)
 
@@ -642,13 +642,13 @@ func TestResolveStaleness_CommitResolvesDirtyMarkers(t *testing.T) {
 
 	// Create dirty marker
 	marker := StalenessMarker{
-		ID:            "marker-1",
-		WorkspaceID:   "ws-1",
-		TargetRef:     EvidenceRef{Type: RefTypePath, Ref: "src/main.go"},
-		Status:        StalenessStatusDirty,
+		ID:             "marker-1",
+		WorkspaceID:    "ws-1",
+		TargetRef:      EvidenceRef{Type: RefTypePath, Ref: "src/main.go"},
+		Status:         StalenessStatusDirty,
 		CausedByEvents: []string{"evt-dirty"},
-		CreatedAt:     now.Add(-time.Hour),
-		UpdatedAt:     now.Add(-time.Hour),
+		CreatedAt:      now.Add(-time.Hour),
+		UpdatedAt:      now.Add(-time.Hour),
 	}
 	_, _ = store.UpsertStaleness(ctx, marker)
 
@@ -700,13 +700,13 @@ func TestResolveStaleness_CannotResolveSuperseded(t *testing.T) {
 	ctx := context.Background()
 
 	marker := StalenessMarker{
-		ID:            "marker-1",
-		WorkspaceID:   "ws-1",
-		TargetRef:     EvidenceRef{Type: RefTypePath, Ref: "src/main.go"},
-		Status:        StalenessStatusSuperseded,
+		ID:              "marker-1",
+		WorkspaceID:     "ws-1",
+		TargetRef:       EvidenceRef{Type: RefTypePath, Ref: "src/main.go"},
+		Status:          StalenessStatusSuperseded,
 		ResolvedByEvent: "evt-original",
-		CreatedAt:     now.Add(-time.Hour),
-		UpdatedAt:     now.Add(-time.Hour),
+		CreatedAt:       now.Add(-time.Hour),
+		UpdatedAt:       now.Add(-time.Hour),
 	}
 	_, _ = store.UpsertStaleness(ctx, marker)
 
@@ -817,13 +817,13 @@ func TestIntegration_CommitFlow(t *testing.T) {
 
 	// Setup: dirty marker
 	marker := StalenessMarker{
-		ID:            "marker-1",
-		WorkspaceID:   "ws-1",
-		TargetRef:     EvidenceRef{Type: RefTypePath, Ref: "src/main.go"},
-		Status:        StalenessStatusDirty,
+		ID:             "marker-1",
+		WorkspaceID:    "ws-1",
+		TargetRef:      EvidenceRef{Type: RefTypePath, Ref: "src/main.go"},
+		Status:         StalenessStatusDirty,
 		CausedByEvents: []string{"evt-dirty"},
-		CreatedAt:     now.Add(-time.Hour),
-		UpdatedAt:     now.Add(-time.Hour),
+		CreatedAt:      now.Add(-time.Hour),
+		UpdatedAt:      now.Add(-time.Hour),
 	}
 	_, _ = store.UpsertStaleness(ctx, marker)
 

@@ -9,13 +9,13 @@ import (
 type StalenessStatus string
 
 const (
-	StalenessStatusFresh            StalenessStatus = "fresh"
-	StalenessStatusDirty            StalenessStatus = "dirty"
+	StalenessStatusFresh             StalenessStatus = "fresh"
+	StalenessStatusDirty             StalenessStatus = "dirty"
 	StalenessStatusNeedsRevalidation StalenessStatus = "needs_revalidation"
-	StalenessStatusStale            StalenessStatus = "stale"
+	StalenessStatusStale             StalenessStatus = "stale"
 	StalenessStatusContradicted      StalenessStatus = "contradicted"
-	StalenessStatusSuperseded       StalenessStatus = "superseded"
-	StalenessStatusUnknown          StalenessStatus = "unknown"
+	StalenessStatusSuperseded        StalenessStatus = "superseded"
+	StalenessStatusUnknown           StalenessStatus = "unknown"
 )
 
 // IsValid reports whether s is a known StalenessStatus.
@@ -86,8 +86,8 @@ var stalenessTransitionValid = map[StalenessStatus]map[StalenessStatus]bool{
 		StalenessStatusNeedsRevalidation: true,
 	},
 	StalenessStatusNeedsRevalidation: {
-		StalenessStatusFresh:    true,
-		StalenessStatusStale:    true,
+		StalenessStatusFresh:      true,
+		StalenessStatusStale:      true,
 		StalenessStatusSuperseded: true,
 	},
 	StalenessStatusStale: {

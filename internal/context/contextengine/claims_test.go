@@ -32,8 +32,8 @@ func roundTripJSON[T any](t *testing.T, v T) error {
 func TestClaimStatus_IsValid(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		status  ClaimStatus
-		want    bool
+		status ClaimStatus
+		want   bool
 	}{
 		{ClaimStatusCandidate, true},
 		{ClaimStatusCurrent, true},
@@ -169,8 +169,8 @@ func TestMemoryClaim_RoundTrip(t *testing.T) {
 		Scope: ClaimScope{
 			Path: "/path/to/file.go",
 		},
-		Summary:   "This is a test claim",
-		Confidence: 0.85,
+		Summary:     "This is a test claim",
+		Confidence:  0.85,
 		BlastRadius: "low",
 		SourceRefs: []EvidenceRef{
 			{Type: RefTypePath, Ref: "main.go:42"},
@@ -399,7 +399,7 @@ func TestApplyClaimTransition(t *testing.T) {
 		ID:          "claim-1",
 		WorkspaceID: "ws-1",
 		Status:      ClaimStatusCandidate,
-		Reason:     "",
+		Reason:      "",
 		CreatedAt:   now.Add(-time.Hour),
 		UpdatedAt:   now.Add(-time.Hour),
 	}
@@ -427,7 +427,7 @@ func TestApplyClaimTransition_SameStatus(t *testing.T) {
 		ID:          "claim-1",
 		WorkspaceID: "ws-1",
 		Status:      ClaimStatusCurrent,
-		Reason:     "original",
+		Reason:      "original",
 		CreatedAt:   now.Add(-time.Hour),
 		UpdatedAt:   now.Add(-time.Hour),
 	}
@@ -486,7 +486,7 @@ func TestApplyClaimTransition_AllValidPaths(t *testing.T) {
 
 	validPaths := []struct {
 		from, to ClaimStatus
-		reason  string
+		reason   string
 	}{
 		{ClaimStatusCandidate, ClaimStatusCurrent, "promoted"},
 		{ClaimStatusCandidate, ClaimStatusRejected, "rejected"},

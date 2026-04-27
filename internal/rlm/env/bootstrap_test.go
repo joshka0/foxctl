@@ -38,10 +38,10 @@ func TestBootstrapBuildIncludesACAAndHandles(t *testing.T) {
 		t.Fatal(err)
 	}
 	handoff := contextplane.Handoff{
-		TaskID:       "T-1",
-		Phase:        "analyze",
-		Outcome:      "partial",
-		Summary:      "Collected auth evidence.",
+		TaskID:  "T-1",
+		Phase:   "analyze",
+		Outcome: "partial",
+		Summary: "Collected auth evidence.",
 		EvidenceRefs: []contextengine.EvidenceRef{
 			{Type: contextengine.RefTypeArtifact, Ref: "turn-1"},
 			{Type: contextengine.RefTypePath, Ref: "internal/auth/store.go"},

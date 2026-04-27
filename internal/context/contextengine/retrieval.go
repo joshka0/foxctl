@@ -9,7 +9,7 @@ import (
 type RetrievalFeedbackKind string
 
 const (
-	RetrievalFeedbackKindEvidenceUsed        RetrievalFeedbackKind = "evidence_used"
+	RetrievalFeedbackKindEvidenceUsed       RetrievalFeedbackKind = "evidence_used"
 	RetrievalFeedbackKindAnswerAccepted     RetrievalFeedbackKind = "answer_accepted"
 	RetrievalFeedbackKindAnswerCorrected    RetrievalFeedbackKind = "answer_corrected"
 	RetrievalFeedbackKindRetrievalMissed    RetrievalFeedbackKind = "retrieval_missed"
