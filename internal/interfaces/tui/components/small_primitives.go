@@ -1,8 +1,6 @@
 package components
 
 import (
-	"strings"
-
 	"github.com/grindlemire/go-tui"
 	"github.com/joshka0/foxctl/internal/interfaces/tui/theme"
 )
@@ -284,28 +282,4 @@ func (kh *KeybindHint) Render(buf *tui.Buffer) {
 			buf.SetString(0, 1, kh.desc, descStyle)
 		}
 	}
-}
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-// padOrTruncate pads s to exactly width display cells with trailing spaces, or
-// truncates with … if s exceeds width in display width.
-func padOrTruncate(s string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	sw := runeWidth(s)
-	if sw > width {
-		if width <= 1 {
-			return "…"
-		}
-		return truncate(s, width)
-	}
-	// Pad with spaces to reach exactly width display cells.
-	if sw < width {
-		return s + strings.Repeat(" ", width-sw)
-	}
-	return s
 }

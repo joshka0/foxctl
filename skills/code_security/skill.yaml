@@ -53,9 +53,9 @@ signature:
       Use code/security to scan for secrets, injection risks, and unsafe crypto.
       Example commands:
         foxctl run code/security --input '{"path":"./src","scan_mode":"scan","severity_threshold":"medium"}'
-        foxctl skills run code/security --path ./src --scan_mode scan --severity_threshold medium
+        foxctl skills run code/security --path ./src --scan-mode scan --severity-threshold medium
         foxctl run code/security --input '{"path":"./src","scan_mode":"secrets"}'
-        foxctl skills run code/security --path ./src --scan_mode secrets
+        foxctl skills run code/security --path ./src --scan-mode secrets
     workflows:
       - id: scan-all
         description: "Scan for security issues."

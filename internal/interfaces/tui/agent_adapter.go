@@ -48,6 +48,13 @@ type AskAgentResponse struct {
 	ConversationID string `json:"conversation_id"`
 }
 
+type CancelAskAgentResponse struct {
+	OK            bool   `json:"ok"`
+	AgentID       string `json:"agent_id"`
+	CorrelationID string `json:"correlation_id"`
+	Cancelled     int    `json:"cancelled"`
+}
+
 func NewAgentAdapter(client *APIClient) (*AgentAdapter, error) {
 	if client == nil {
 		return nil, errors.New("api client is required")
@@ -111,6 +118,24 @@ func (a *AgentAdapter) GetAgent(ctx context.Context, agentID string) (GetAgentRe
 	path := "/api/agents/" + url.PathEscape(agentID)
 	if err := a.client.RequestJSON(ctx, http.MethodGet, path, nil, &response); err != nil {
 		return GetAgentResponse{}, fmt.Errorf("get agent %q: %w", agentID, err)
+	}
+	return response, nil
+}
+
+func (a *AgentAdapter) CancelAsk(ctx context.Context, agentID string) (CancelAskAgentResponse, error) {
+	if a == nil || a.client == nil {
+		return CancelAskAgentResponse{}, errors.New("agent adapter is not configured")
+	}
+
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return CancelAskAgentResponse{}, errors.New("agent id is required")
+	}
+
+	var response CancelAskAgentResponse
+	path := "/api/agents/" + url.PathEscape(agentID) + "/ask-stream/cancel"
+	if err := a.client.RequestJSON(ctx, http.MethodPost, path, nil, &response); err != nil {
+		return CancelAskAgentResponse{}, fmt.Errorf("cancel ask for agent %q: %w", agentID, err)
 	}
 	return response, nil
 }

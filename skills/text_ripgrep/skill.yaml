@@ -67,7 +67,7 @@ signature:
         foxctl run text/ripgrep --input '{"pattern":"TODO","path":"."}'
         foxctl skills run text/ripgrep --pattern TODO --path .
         foxctl run text/ripgrep --input '{"pattern":"TODO","path":"./src","glob":["*.go"],"context_lines":2}'
-        foxctl skills run text/ripgrep --pattern TODO --path ./src --glob '*.go' --context_lines 2
+        foxctl skills run text/ripgrep --pattern TODO --path ./src --glob '*.go' --context-lines 2
     workflows:
       - id: search-todo-comments
         description: "Find all TODO comments in the current workspace."

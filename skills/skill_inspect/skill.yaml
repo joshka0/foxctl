@@ -35,9 +35,9 @@ signature:
       Use skill/inspect to retrieve manifest details or generated examples for a skill.
       Example commands:
         foxctl run skill/inspect --input '{"skill_name":"fs/ls","view":"api"}'
-        foxctl skills run skill/inspect --skill_name fs/ls --view api
+        foxctl skills run skill/inspect --skill-name fs/ls --view api
         foxctl run skill/inspect --input '{"skill_name":"todo/manage","view":"examples"}'
-        foxctl skills run skill/inspect --skill_name todo/manage --view examples
+        foxctl skills run skill/inspect --skill-name todo/manage --view examples
     workflows:
       - id: inspect-api
         description: "Inspect a skill API."

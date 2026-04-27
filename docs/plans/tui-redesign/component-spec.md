@@ -357,7 +357,7 @@ is required.
 
 | Snapshot | Shows |
 |----------|-------|
-| `tabs-active-focused` | Tabs bar focused; active tab has underline + colored background. Inactive tabs are plain. |
+| `tabs-active-focused` | Tabs bar focused; active tab has underline + colored background. Inactive tabs use `TextMuted` (dimmed foreground, no background). |
 | `tabs-active-unfocused` | Same content, unfocused; active tab still indicated but less prominent. |
 
 ### (7) Visible Focus Indicator Requirement
@@ -370,7 +370,10 @@ Acceptable indicators:
 - **Inverse video** (foreground/background swap on the active tab label).
 
 The indicator must be distinguishable in the raw cell buffer beyond just bold
-text. Inactive tabs must be clearly less prominent than the active tab.
+text. Inactive tabs must be clearly less prominent than the active tab. In the
+implementation, inactive tabs render with the `TextMuted` theme token (dimmed
+foreground, no background or underline), while the active tab uses
+`ColorSurfaceActive` or an underline in `ColorAccent`.
 
 When `Focused=true`, the active tab indicator may become more prominent (e.g.,
 brighter color or thicker underline) compared to the unfocused state.

@@ -1,6 +1,6 @@
 ---
 name: foxctl-room-view
-description: "Presentation-layer guidance for room-attached panes: tmux/zellij viewer setup, PTY inspection, manual pane pokes, and viewer-vs-transport debugging."
+description: "Viewer-layer guidance for room panes: tmux or zellij setup, PTY inspection, manual pane pokes, and transport-vs-viewer debugging."
 ---
 
 # foxctl-room-view

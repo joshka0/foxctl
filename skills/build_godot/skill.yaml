@@ -81,7 +81,7 @@ signature:
         foxctl run build/godot --input '{"action":"list_presets"}'
         foxctl skills run build/godot --action list_presets
         foxctl run build/godot --input '{"action":"export","preset":"Windows Desktop","output_path":"exports/game.exe"}'
-        foxctl skills run build/godot --action export --preset "Windows Desktop" --output_path exports/game.exe
+        foxctl skills run build/godot --action export --preset "Windows Desktop" --output-path exports/game.exe
   returns:
     - name: presets
       type: array

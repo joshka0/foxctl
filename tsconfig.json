@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/data" },
+    { "path": "./packages/foxterm" },
     { "path": "./packages/gui-agent" },
     { "path": "./packages/gui-auth-gateway" }
   ]

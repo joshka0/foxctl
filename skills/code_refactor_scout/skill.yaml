@@ -227,7 +227,7 @@ signature:
         foxctl run code/refactor_scout --input '{"path":"./internal","language":"go","focus":"slop"}'
         foxctl run code/refactor_scout --input '{"path":"./internal/runtime/actor","language":"go","focus":"dead"}'
         foxctl run code/refactor_scout --input '{"path":"./internal/runtime/actor","language":"go","focus":"slop","min_score":80,"max_results":8}'
-        foxctl skills run code/refactor_scout --path ./internal --rule_set aggressive
+        foxctl skills run code/refactor_scout --path ./internal --rule-set aggressive
     workflows:
       - id: go-hotspots
         description: "Find likely Go refactor hotspots with AST-backed scoring"

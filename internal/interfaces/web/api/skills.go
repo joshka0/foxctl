@@ -2,7 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -10,6 +15,11 @@ import (
 	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
+)
+
+const (
+	mcpDefaultPIDFile = "~/.foxctl/mcp-daemon.pid"
+	mcpDefaultAddr    = ":8091"
 )
 
 // SkillResponse represents a skill in API responses.
@@ -213,8 +223,8 @@ func parameterToSchema(p skill.Parameter) map[string]any {
 	return schema
 }
 
-// SkillDetailHandler returns a handler for GET /api/skills/{name}.
-// Get detailed info about a specific skill.
+// SkillDetailHandler returns a handler for GET /api/skills/manifest/{name}.
+// Get detailed info about a specific skill without affecting /api/skills CRUD routes.
 func SkillDetailHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -222,15 +232,16 @@ func SkillDetailHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc 
 			return
 		}
 
-		// Extract skill name from path: /api/skills/{category}/{name}
-		// e.g., /api/skills/code/complexity -> code/complexity
-		path := r.URL.Path
-		const prefix = "/api/skills/"
-		if len(path) <= len(prefix) {
+		const prefix = "/api/skills/manifest/"
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			httpError(w, http.StatusBadRequest, "invalid path")
+			return
+		}
+		skillName := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, prefix))
+		if skillName == "" {
 			httpError(w, http.StatusBadRequest, "missing skill name")
 			return
 		}
-		skillName := path[len(prefix):]
 
 		// Discover and find the specific skill
 		manifests, err := skill.Discover(cfg.Paths.Skills)
@@ -262,6 +273,130 @@ func SkillDetailHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc 
 
 		httpError(w, http.StatusNotFound, "skill not found")
 	}
+}
+
+// MCPStatusHandler returns lightweight read-only MCP daemon + backend status.
+func MCPStatusHandler(cfg config.Config, _ zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		pidFile := expandUserPath(mcpDefaultPIDFile)
+		pid, addr, ok := readMCPPIDFile(pidFile)
+		if strings.TrimSpace(addr) == "" {
+			addr = mcpDefaultAddr
+		}
+		healthURL := fmt.Sprintf("http://localhost%s/health", extractMCPPort(addr))
+
+		running := false
+		var health map[string]any
+		var healthErr string
+		if ok {
+			client := &http.Client{Timeout: 2 * time.Second}
+			resp, err := client.Get(healthURL)
+			if err != nil {
+				healthErr = err.Error()
+			} else {
+				defer resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					running = true
+					_ = json.NewDecoder(resp.Body).Decode(&health)
+				} else {
+					healthErr = fmt.Sprintf("health check failed: http %d", resp.StatusCode)
+				}
+			}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"daemon": map[string]any{
+				"running":    running,
+				"pid":        pid,
+				"addr":       addr,
+				"pid_file":   pidFile,
+				"health_url": healthURL,
+				"health":     health,
+				"error":      healthErr,
+			},
+			"backends": []map[string]any{
+				{"name": "tavily", "configured": strings.TrimSpace(cfg.Search.TavilyAPIKey) != ""},
+				{"name": "exa", "configured": strings.TrimSpace(cfg.Search.ExaAPIKey) != ""},
+				{"name": "perplexity", "configured": strings.TrimSpace(cfg.Search.PerplexityAPIKey) != ""},
+			},
+		})
+	}
+}
+
+// MCPToolsHandler returns a read-only skill-backed MCP tool inventory.
+func MCPToolsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		manifests, err := skill.Discover(cfg.Paths.Skills)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to discover skills for mcp tools facade")
+			httpError(w, http.StatusInternalServerError, "failed to discover skills")
+			return
+		}
+
+		tools := make([]map[string]any, 0, len(manifests))
+		for _, m := range manifests {
+			tools = append(tools, map[string]any{
+				"name":         m.Signature.Command,
+				"display_name": m.Metadata.Name,
+				"description":  m.Metadata.Description,
+				"source":       "skill",
+				"schema":       buildJSONSchema(m),
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"tools":  tools,
+			"count":  len(tools),
+			"source": "skills",
+		})
+	}
+}
+
+func expandUserPath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil && home != "" {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
+}
+
+func extractMCPPort(addr string) string {
+	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
+		return addr[idx:]
+	}
+	return addr
+}
+
+func readMCPPIDFile(path string) (pid int, addr string, ok bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, "", false
+	}
+	lines := strings.SplitN(strings.TrimSpace(string(data)), "\n", 2)
+	if len(lines) == 0 {
+		return 0, "", false
+	}
+	parsedPID, err := strconv.Atoi(strings.TrimSpace(lines[0]))
+	if err != nil {
+		return 0, "", false
+	}
+	parsedAddr := ""
+	if len(lines) > 1 {
+		parsedAddr = strings.TrimSpace(lines[1])
+	}
+	return parsedPID, parsedAddr, true
 }
 
 // SkillsSchemaHandler returns OpenAI-compatible tool definitions.

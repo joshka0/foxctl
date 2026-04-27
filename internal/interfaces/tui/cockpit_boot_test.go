@@ -902,3 +902,209 @@ func containsAt(s, substr string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// VAL-SKEL-012: Status footer — connection + active entity + keybindings
+//
+// Tests verify the footer is visible on every M3 screen and contains all
+// three required elements in ≥3 captured snapshots across different states.
+// ---------------------------------------------------------------------------
+
+// assertFooterElements checks that the footer row contains all three required
+// elements: connection status indicator, active entity (when expected), and
+// ≥3 keybinding hints.
+func assertFooterElements(t *testing.T, mt *gotui.MockTerminal, width, height int, expectActiveEntity bool) {
+	t.Helper()
+	footerText := rowTextFromMT(mt, height-1, width)
+
+	// (i) Connection status indicator must be present.
+	// We check for one of the status icons or labels.
+	statusFound := containsSubstring(footerText, "connected") ||
+		containsSubstring(footerText, "connecting") ||
+		containsSubstring(footerText, "error") ||
+		containsSubstring(footerText, "degraded") ||
+		containsSubstring(footerText, "done") ||
+		containsSubstring(footerText, "✓") ||
+		containsSubstring(footerText, "✗")
+	if !statusFound {
+		t.Errorf("footer missing connection status indicator: %q", footerText)
+	}
+
+	// (ii) Active entity label (when expected).
+	if expectActiveEntity {
+		if !containsSubstring(footerText, "agent:") {
+			t.Errorf("footer missing active entity label (expected 'agent:...'): %q", footerText)
+		}
+	}
+
+	// (iii) Compact keybinding hint strip with ≥3 bindings.
+	bindings := []string{"ESC", "↑↓", "Enter", "e", "Ctrl+X", "r", "Tab"}
+	found := 0
+	for _, b := range bindings {
+		if containsSubstring(footerText, b) {
+			found++
+		}
+	}
+	if found < 3 {
+		t.Errorf("footer has %d keybinding hints, expected ≥3: %q", found, footerText)
+	}
+}
+
+// --- Test: Loading state footer contains all 3 elements ---
+
+func TestStatusFooter_LoadingState(t *testing.T) {
+	cs := NewCockpitScreen("http://localhost:9999")
+	cs.UpdateSize(80, 24)
+	cs.SetPhase(CockpitPhaseLoading)
+
+	_, mt := renderCockpitToMT(cs, 80, 24)
+	assertFooterElements(t, mt, 80, 24, false)
+
+	// Loading-specific assertions.
+	footerText := rowTextFromMT(mt, 23, 80)
+	if !containsSubstring(footerText, "connecting") {
+		t.Errorf("loading footer should show 'connecting', got: %q", footerText)
+	}
+	if !containsSubstring(footerText, "ESC") {
+		t.Errorf("loading footer should show ESC binding, got: %q", footerText)
+	}
+}
+
+// --- Test: Error state footer contains all 3 elements ---
+
+func TestStatusFooter_ErrorState(t *testing.T) {
+	cs := NewCockpitScreen("http://localhost:9999")
+	cs.UpdateSize(80, 24)
+	cs.SetPhase(CockpitPhaseError)
+
+	_, mt := renderCockpitToMT(cs, 80, 24)
+	assertFooterElements(t, mt, 80, 24, false)
+
+	// Error-specific assertions.
+	footerText := rowTextFromMT(mt, 23, 80)
+	if !containsSubstring(footerText, "error") {
+		t.Errorf("error footer should show 'error' status, got: %q", footerText)
+	}
+	if !containsSubstring(footerText, "r") {
+		t.Errorf("error footer should show 'r' retry binding, got: %q", footerText)
+	}
+	if !containsSubstring(footerText, "retry") {
+		t.Errorf("error footer should show 'retry' hint, got: %q", footerText)
+	}
+}
+
+// --- Test: Ready state footer (no selection) contains status + keybindings ---
+
+func TestStatusFooter_ReadyStateNoSelection(t *testing.T) {
+	cs := NewCockpitScreen("http://localhost:8090")
+	cs.UpdateSize(80, 24)
+	cs.SetPhase(CockpitPhaseReady)
+
+	_, mt := renderCockpitToMT(cs, 80, 24)
+	assertFooterElements(t, mt, 80, 24, false)
+
+	// Ready-specific assertions.
+	footerText := rowTextFromMT(mt, 23, 80)
+	if !containsSubstring(footerText, "connected") {
+		t.Errorf("ready footer should show 'connected' status, got: %q", footerText)
+	}
+	if !containsSubstring(footerText, "↑↓") {
+		t.Errorf("ready footer should show '↑↓' nav binding, got: %q", footerText)
+	}
+	if !containsSubstring(footerText, "Enter") {
+		t.Errorf("ready footer should show 'Enter' submit binding, got: %q", footerText)
+	}
+	if !containsSubstring(footerText, "e") {
+		t.Errorf("ready footer should show 'e' evidence binding, got: %q", footerText)
+	}
+}
+
+// --- Test: Ready state footer (with selected agent) contains active entity ---
+
+func TestStatusFooter_ReadyStateWithSelection(t *testing.T) {
+	cs := NewCockpitScreen("http://localhost:8090")
+	cs.SetAgents([]AgentInventoryItem{
+		{ID: "agent-abc12345", Role: "researcher", Status: "running", Workspace: "ws1", ParentID: "—", LastActive: "2m"},
+		{ID: "agent-def67890", Role: "coder", Status: "idle", Workspace: "ws1", ParentID: "—", LastActive: "5m"},
+	})
+	// sortAgents orders by Role then ID, so coder sorts before researcher.
+	// Select index 1 to target the researcher.
+	cs.SetSelectedIndex(1)
+	// Use width 120 so all keybindings (including Ctrl+X:cancel) fit alongside
+	// the active entity label without truncation.
+	cs.UpdateSize(120, 24)
+	cs.SetPhase(CockpitPhaseReady)
+
+	_, mt := renderCockpitToMT(cs, 120, 24)
+	assertFooterElements(t, mt, 120, 24, true)
+
+	// Active entity-specific assertions.
+	footerText := rowTextFromMT(mt, 23, 120)
+	if !containsSubstring(footerText, "agent:") {
+		t.Errorf("ready footer with selection should show 'agent:' label, got: %q", footerText)
+	}
+	if !containsSubstring(footerText, "researcher") {
+		t.Errorf("ready footer with selection should show agent role 'researcher', got: %q", footerText)
+	}
+	if !containsSubstring(footerText, "Ctrl+X") {
+		t.Errorf("ready footer with selection should show 'Ctrl+X' cancel binding, got: %q", footerText)
+	}
+}
+
+// --- Test: Ready state footer with stream status shows stream status ---
+
+func TestStatusFooter_ReadyStateWithStreamStatus(t *testing.T) {
+	cs := NewCockpitScreen("http://localhost:8090")
+	cs.SetAgents([]AgentInventoryItem{
+		{ID: "agent-abc12345", Role: "researcher", Status: "running", Workspace: "ws1", ParentID: "—", LastActive: "2m"},
+	})
+	cs.SetSelectedIndex(0)
+	cs.UpdateSize(80, 24)
+	cs.SetPhase(CockpitPhaseReady)
+	cs.streamStatus = "✓ done"
+
+	_, mt := renderCockpitToMT(cs, 80, 24)
+	assertFooterElements(t, mt, 80, 24, true)
+
+	footerText := rowTextFromMT(mt, 23, 80)
+	if !containsSubstring(footerText, "done") {
+		t.Errorf("ready footer with stream should show 'done' status, got: %q", footerText)
+	}
+}
+
+// --- Test: Footer visible at minimum terminal size ---
+
+func TestStatusFooter_MinimumSize(t *testing.T) {
+	cs := NewCockpitScreen("http://localhost:8090")
+	cs.SetAgents([]AgentInventoryItem{
+		{ID: "agent-abc", Role: "researcher", Status: "running", Workspace: "ws1", ParentID: "—", LastActive: "2m"},
+	})
+	cs.SetSelectedIndex(0)
+	cs.UpdateSize(60, 15)
+	cs.SetPhase(CockpitPhaseReady)
+
+	_, mt := renderCockpitToMT(cs, 60, 15)
+	assertFooterElements(t, mt, 60, 15, true)
+}
+
+// --- Test: Footer visible during loading at minimum size ---
+
+func TestStatusFooter_LoadingAtMinimumSize(t *testing.T) {
+	cs := NewCockpitScreen("http://localhost:8090")
+	cs.UpdateSize(60, 15)
+	cs.SetPhase(CockpitPhaseLoading)
+
+	_, mt := renderCockpitToMT(cs, 60, 15)
+	assertFooterElements(t, mt, 60, 15, false)
+}
+
+// --- Test: Footer visible during error at minimum size ---
+
+func TestStatusFooter_ErrorAtMinimumSize(t *testing.T) {
+	cs := NewCockpitScreen("http://localhost:8090")
+	cs.UpdateSize(60, 15)
+	cs.SetPhase(CockpitPhaseError)
+
+	_, mt := renderCockpitToMT(cs, 60, 15)
+	assertFooterElements(t, mt, 60, 15, false)
+}

@@ -12,6 +12,7 @@ import (
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	"github.com/joshka0/foxctl/internal/v2/core/events"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
 )
 
 type stageFunc func(ctx context.Context, st *executionState) *v2errors.V2Error
@@ -25,6 +26,8 @@ type executionState struct {
 	in            run.TurnInput
 	out           run.TurnOutput
 	turn          run.TurnRecord
+	tools         []coretool.ToolDef
+	modelMessages []ModelMessage
 	streamVersion int64
 	sequence      int64
 }
@@ -88,7 +91,7 @@ func (p *Pipeline) RunTurn(ctx context.Context, in run.TurnInput) (run.TurnOutpu
 		p.observe(stage.name)
 		if err := ctx.Err(); err != nil {
 			verr := contextError(stage.name, err)
-			_ = p.emitRunFailed(ctx, st, stage.name, verr)
+			_ = p.emitRunFailed(context.WithoutCancel(ctx), st, stage.name, verr)
 			return st.out, verr
 		}
 
@@ -109,7 +112,11 @@ func (p *Pipeline) RunTurn(ctx context.Context, in run.TurnInput) (run.TurnOutpu
 			continue
 		}
 
-		if emitErr := p.emitRunFailed(ctx, st, stage.name, verr); emitErr != nil {
+		emitCtx := ctx
+		if verr.Kind == v2errors.ErrTimeout {
+			emitCtx = context.WithoutCancel(ctx)
+		}
+		if emitErr := p.emitRunFailed(emitCtx, st, stage.name, verr); emitErr != nil {
 			return st.out, emitErr
 		}
 		return st.out, verr

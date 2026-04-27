@@ -172,6 +172,9 @@ func (t *Tabs) moveFirst() bool {
 	if len(t.labels) == 0 {
 		return true
 	}
+	if t.activeIdx == 0 {
+		return true // already at first — consume key but don't fire onChange
+	}
 	t.activeIdx = 0
 	t.fireOnChange()
 	return true
@@ -181,6 +184,9 @@ func (t *Tabs) moveLast() bool {
 	n := len(t.labels)
 	if n == 0 {
 		return true
+	}
+	if t.activeIdx == n-1 {
+		return true // already at last — consume key but don't fire onChange
 	}
 	t.activeIdx = n - 1
 	t.fireOnChange()

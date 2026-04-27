@@ -46,9 +46,9 @@ signature:
       statistics.
       Example commands:
         foxctl run code/diff --input '{"old_path":"./before.go","new_path":"./after.go","format":"unified"}'
-        foxctl skills run code/diff --old_path ./before.go --new_path ./after.go --format unified
+        foxctl skills run code/diff --old-path ./before.go --new-path ./after.go --format unified
         foxctl run code/diff --input '{"old_path":"./before.go","new_path":"./after.go","format":"stats","ignore_whitespace":true}'
-        foxctl skills run code/diff --old_path ./before.go --new_path ./after.go --format stats --ignore_whitespace
+        foxctl skills run code/diff --old-path ./before.go --new-path ./after.go --format stats --ignore-whitespace
     workflows:
       - id: unified-diff
         description: "Show a unified diff."

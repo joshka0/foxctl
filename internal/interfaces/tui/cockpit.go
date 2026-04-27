@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"errors"
+	"sort"
 	"strings"
 	"sync"
 
 	gotui "github.com/grindlemire/go-tui"
+	"github.com/joshka0/foxctl/internal/interfaces/tui/components"
 	"github.com/joshka0/foxctl/internal/interfaces/tui/theme"
 )
 
@@ -15,8 +18,20 @@ const (
 	MinTermHeight = 15
 )
 
+// AgentInventoryItem is a row in the Main lane agent inventory. It contains
+// the six required display fields per information-architecture.md.
+type AgentInventoryItem struct {
+	ID         string
+	Role       string
+	Status     string
+	Workspace  string
+	ParentID   string // "—" if root (no parent)
+	LastActive string // formatted timestamp or "—" if never
+}
+
 // StubAgent is a lightweight agent record used by the walking skeleton to
 // display inventory rows before the live API is connected.
+// Deprecated: use AgentInventoryItem for new code.
 type StubAgent struct {
 	ID     string
 	Role   string
@@ -37,11 +52,26 @@ type CockpitScreen struct {
 	height        int
 	tooSmall      bool
 	phase         CockpitPhase
-	stubAgents    []StubAgent
+	agents        []AgentInventoryItem
 	selectedIndex int
+	focusedLane   int          // 0=Main, 1=Detail, 2=Evidence
 	bootManager   *BootManager // nil until SetBootManager is called
 	phaseChanges  chan CockpitPhase
 	app           *gotui.App // reference for triggering re-renders
+
+	// Ask-stream state (M3 walking skeleton)
+	askStreamRuntime *AgentAskStreamRuntime
+	composerText     string
+	streamLines      []string
+	streamStatus     string // terminal status marker (e.g., "✓", "done", "⚠ error")
+	statusMessage    string // ephemeral user-visible status (e.g., double-submit rejection)
+
+	// Evidence drawer state (M3 walking skeleton)
+	drawerOpen         bool
+	drawerTitle        string
+	drawerContent      []string
+	drawerScrollOffset int
+	selectedStreamLine int // index of the selected stream line for evidence drawer
 }
 
 // CockpitPhase represents the current display phase of the cockpit.
@@ -66,16 +96,44 @@ func NewCockpitScreen(apiURL string) *CockpitScreen {
 		apiURL:        apiURL,
 		phase:         CockpitPhaseLoading,
 		selectedIndex: -1,
+		focusedLane:   0, // Main lane is focused by default
 		phaseChanges:  make(chan CockpitPhase, 8),
 	}
 }
 
 // SetStubAgents sets the stub agent list for the walking-skeleton inventory.
+// Deprecated: use SetAgents for new code.
 func (c *CockpitScreen) SetStubAgents(agents []StubAgent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.stubAgents = agents
+	items := make([]AgentInventoryItem, len(agents))
+	for i, a := range agents {
+		items[i] = AgentInventoryItem{
+			ID:     a.ID,
+			Role:   a.Role,
+			Status: a.Status,
+		}
+	}
+	c.agents = items
 	c.clampSelectionLocked()
+}
+
+// SetAgents sets the live agent inventory items. The items are sorted
+// deterministically (by Role ascending, then ID ascending) before storage.
+func (c *CockpitScreen) SetAgents(agents []AgentInventoryItem) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.agents = sortAgents(agents)
+	c.clampSelectionLocked()
+}
+
+// Agents returns a copy of the current agent inventory items.
+func (c *CockpitScreen) Agents() []AgentInventoryItem {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	result := make([]AgentInventoryItem, len(c.agents))
+	copy(result, c.agents)
+	return result
 }
 
 // SelectedIndex returns the index of the currently selected agent (-1 if none).
@@ -86,12 +144,19 @@ func (c *CockpitScreen) SelectedIndex() int {
 }
 
 // SetSelectedIndex sets the selected agent index. The value is clamped to
-// [0, len(stubAgents)-1].
+// [0, len(agents)-1]. Use ClearSelection to set selectedIndex to -1.
 func (c *CockpitScreen) SetSelectedIndex(idx int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.selectedIndex = idx
 	c.clampSelectionLocked()
+}
+
+// ClearSelection sets selectedIndex to -1 (no selection) without clamping.
+func (c *CockpitScreen) ClearSelection() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.selectedIndex = -1
 }
 
 // ClampSelection clamps the current selectedIndex to a valid range.
@@ -103,7 +168,7 @@ func (c *CockpitScreen) ClampSelection() {
 
 // clampSelectionLocked clamps selectedIndex. Caller must hold c.mu.
 func (c *CockpitScreen) clampSelectionLocked() {
-	n := len(c.stubAgents)
+	n := len(c.agents)
 	if n == 0 {
 		c.selectedIndex = -1
 		return
@@ -120,7 +185,7 @@ func (c *CockpitScreen) clampSelectionLocked() {
 func (c *CockpitScreen) NavigateDown() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	n := len(c.stubAgents)
+	n := len(c.agents)
 	if n == 0 {
 		return
 	}
@@ -135,7 +200,7 @@ func (c *CockpitScreen) NavigateDown() {
 func (c *CockpitScreen) NavigateUp() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	n := len(c.stubAgents)
+	n := len(c.agents)
 	if n == 0 {
 		return
 	}
@@ -144,6 +209,31 @@ func (c *CockpitScreen) NavigateUp() {
 	} else {
 		c.selectedIndex--
 	}
+}
+
+// FocusedLane returns the currently focused lane index:
+// 0 = Main, 1 = Detail, 2 = Evidence.
+func (c *CockpitScreen) FocusedLane() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.focusedLane
+}
+
+// SetFocusedLane sets the focused lane index. Values are wrapped to [0,2].
+func (c *CockpitScreen) SetFocusedLane(lane int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.focusedLane = ((lane % 3) + 3) % 3
+}
+
+// CycleFocusForward moves focus to the next lane (Main → Detail → Evidence → Main).
+func (c *CockpitScreen) CycleFocusForward() {
+	c.SetFocusedLane(c.FocusedLane() + 1)
+}
+
+// CycleFocusBackward moves focus to the previous lane (Main ← Detail ← Evidence ← Main).
+func (c *CockpitScreen) CycleFocusBackward() {
+	c.SetFocusedLane(c.FocusedLane() - 1)
 }
 
 // UpdateSize updates the terminal dimensions and returns whether the "too
@@ -210,6 +300,248 @@ func (c *CockpitScreen) SetBootManager(bm *BootManager) {
 	c.bootManager = bm
 }
 
+// SetAskStreamRuntime sets the ask-stream runtime used for streaming asks.
+func (c *CockpitScreen) SetAskStreamRuntime(rt *AgentAskStreamRuntime) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.askStreamRuntime = rt
+}
+
+// ComposerText returns the current composer input text.
+func (c *CockpitScreen) ComposerText() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.composerText
+}
+
+// SetComposerText sets the composer input text.
+func (c *CockpitScreen) SetComposerText(text string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.composerText = text
+}
+
+// ClearComposer clears the composer input text.
+func (c *CockpitScreen) ClearComposer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.composerText = ""
+}
+
+// openEvidenceDrawer opens the evidence drawer for the currently selected
+// transcript row. It sets drawer state based on the selected stream line.
+func (c *CockpitScreen) openEvidenceDrawer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.selectedIndex < 0 || c.selectedIndex >= len(c.agents) {
+		return
+	}
+
+	// Determine what to show in the drawer based on the current stream state.
+	// If there are stream lines, show the raw payload of the selected stream line
+	// (default to the last line, but if the user has navigated to a specific row
+	// in the stream, show that row).
+	if len(c.streamLines) > 0 {
+		// Use the selected stream line if available, otherwise last line.
+		lineIdx := len(c.streamLines) - 1
+		if c.selectedStreamLine >= 0 && c.selectedStreamLine < len(c.streamLines) {
+			lineIdx = c.selectedStreamLine
+		}
+		lastLine := c.streamLines[lineIdx]
+		c.drawerTitle = "Evidence"
+		c.drawerContent = c.buildEvidenceContent(lastLine)
+	} else {
+		// No stream lines — show agent raw details.
+		a := c.agents[c.selectedIndex]
+		c.drawerTitle = "Agent: " + a.ID
+		c.drawerContent = []string{
+			"ID: " + a.ID,
+			"Role: " + a.Role,
+			"Status: " + a.Status,
+			"Workspace: " + a.Workspace,
+			"Parent: " + a.ParentID,
+			"Last Active: " + a.LastActive,
+		}
+	}
+	c.drawerOpen = true
+	c.drawerScrollOffset = 0
+}
+
+// buildEvidenceContent builds raw payload content for the evidence drawer
+// based on a stream line. It recognizes three row types:
+//
+//	(a) text reply — "assistant: ..."
+//	(b) tool call — "tool: ..."
+//	(c) error — "⚠ ..." or status containing error
+func (c *CockpitScreen) buildEvidenceContent(line string) []string {
+	var content []string
+	content = append(content, "Raw payload:", "")
+
+	switch {
+	case strings.HasPrefix(line, "assistant: "):
+		text := strings.TrimPrefix(line, "assistant: ")
+		content = append(content, "Type: text reply")
+		content = append(content, "")
+		content = append(content, "Content:")
+		content = append(content, text)
+	case strings.HasPrefix(line, "tool: "):
+		toolName := strings.TrimPrefix(line, "tool: ")
+		content = append(content, "Type: tool call")
+		content = append(content, "")
+		content = append(content, "Tool: "+toolName)
+		content = append(content, "")
+		content = append(content, "Arguments: {}")
+		content = append(content, "Result: (pending)")
+	case strings.HasPrefix(line, "result: "):
+		result := strings.TrimPrefix(line, "result: ")
+		content = append(content, "Type: tool result")
+		content = append(content, "")
+		content = append(content, "Result: "+result)
+	case strings.HasPrefix(line, "you: "):
+		text := strings.TrimPrefix(line, "you: ")
+		content = append(content, "Type: user message")
+		content = append(content, "")
+		content = append(content, "Content: "+text)
+	case strings.HasPrefix(line, "⚠ "):
+		errText := strings.TrimPrefix(line, "⚠ ")
+		content = append(content, "Type: error")
+		content = append(content, "")
+		content = append(content, "Error: "+errText)
+		content = append(content, "")
+		content = append(content, "Code: ERUNTIME")
+		content = append(content, "Details: "+errText)
+	case strings.HasPrefix(line, "� malformed"):
+		content = append(content, "Type: malformed event")
+		content = append(content, "")
+		content = append(content, "Raw: "+strings.TrimPrefix(line, "� malformed event: "))
+	default:
+		content = append(content, "Type: unknown")
+		content = append(content, "")
+		content = append(content, line)
+	}
+
+	return content
+}
+
+// CloseEvidenceDrawer closes the evidence drawer.
+func (c *CockpitScreen) CloseEvidenceDrawer() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.drawerOpen = false
+}
+
+// EvidenceDrawerOpen reports whether the evidence drawer is open.
+func (c *CockpitScreen) EvidenceDrawerOpen() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.drawerOpen
+}
+
+// EvidenceDrawerTitle returns the current drawer title.
+func (c *CockpitScreen) EvidenceDrawerTitle() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.drawerTitle
+}
+
+// EvidenceDrawerContent returns the current drawer content.
+func (c *CockpitScreen) EvidenceDrawerContent() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	result := make([]string, len(c.drawerContent))
+	copy(result, c.drawerContent)
+	return result
+}
+
+// SubmitComposer submits the current composer text to the selected agent's
+// ask-stream. Returns an error if no agent is selected, the composer is empty,
+// or a stream is already in flight (double-submit guard).
+func (c *CockpitScreen) SubmitComposer() error {
+	c.mu.Lock()
+	selectedIndex := c.selectedIndex
+	agents := c.agents
+	text := strings.TrimSpace(c.composerText)
+	rt := c.askStreamRuntime
+	c.mu.Unlock()
+
+	if selectedIndex < 0 || selectedIndex >= len(agents) {
+		return errors.New("select an agent first")
+	}
+	if text == "" {
+		return errors.New("composer text is empty")
+	}
+	if rt == nil {
+		return errors.New("ask-stream runtime is not configured")
+	}
+
+	agentID := agents[selectedIndex].ID
+	if err := rt.Submit(agentID, text); err != nil {
+		c.mu.Lock()
+		c.statusMessage = err.Error()
+		c.mu.Unlock()
+		return err
+	}
+
+	c.mu.Lock()
+	c.statusMessage = ""
+	c.streamLines = append(c.streamLines, "you: "+text)
+	c.composerText = ""
+	c.mu.Unlock()
+	return nil
+}
+
+// ApplyAskStreamUpdate applies one ask-stream update to the cockpit state.
+// Callers should drain the runtime's Updates() channel and feed each update
+// through this method.
+func (c *CockpitScreen) ApplyAskStreamUpdate(update AgentAskStreamUpdate) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	switch update.Type {
+	case AgentAskUpdateToken:
+		if update.Token != nil {
+			c.streamStatus = ""
+			if len(c.streamLines) == 0 {
+				c.streamLines = append(c.streamLines, "assistant: "+update.Token.Delta)
+			} else {
+				last := len(c.streamLines) - 1
+				if strings.HasPrefix(c.streamLines[last], "assistant: ") {
+					c.streamLines[last] += update.Token.Delta
+				} else {
+					c.streamLines = append(c.streamLines, "assistant: "+update.Token.Delta)
+				}
+			}
+		}
+	case AgentAskUpdateToolCall:
+		if update.ToolCall != nil {
+			c.streamLines = append(c.streamLines, "tool: "+update.ToolCall.ToolName)
+		}
+	case AgentAskUpdateToolResult:
+		if update.ToolResult != nil {
+			c.streamLines = append(c.streamLines, "result: "+update.ToolResult.Output)
+		}
+	case AgentAskUpdateDone:
+		c.streamStatus = "✓ done"
+	case AgentAskUpdateError:
+		if update.Error != nil {
+			c.streamStatus = "⚠ " + update.Error.Err.Error()
+		}
+	case AgentAskUpdateCancelled:
+		c.streamStatus = "⊘ cancelled"
+	case AgentAskUpdateRejected:
+		if update.Rejected != nil {
+			c.statusMessage = update.Rejected.Reason
+		}
+	case AgentAskUpdateMalformed:
+		if update.Malformed != nil {
+			c.streamLines = append(c.streamLines, "� malformed event: "+update.Malformed.RawData)
+		} else {
+			c.streamLines = append(c.streamLines, "� malformed event")
+		}
+	}
+}
+
 // Render implements gotui.Component.
 func (c *CockpitScreen) Render(app *gotui.App) *gotui.Element {
 	if app != nil {
@@ -254,6 +586,13 @@ func (c *CockpitScreen) Render(app *gotui.App) *gotui.Element {
 func (c *CockpitScreen) KeyMap() gotui.KeyMap {
 	km := gotui.KeyMap{
 		gotui.On(gotui.KeyEscape, func(ke gotui.KeyEvent) {
+			c.mu.Lock()
+			drawerOpen := c.drawerOpen
+			c.mu.Unlock()
+			if drawerOpen {
+				c.CloseEvidenceDrawer()
+				return
+			}
 			if ke.App() != nil {
 				ke.App().Stop()
 			}
@@ -290,6 +629,24 @@ func (c *CockpitScreen) KeyMap() gotui.KeyMap {
 		}),
 		gotui.On(gotui.Rune('k'), func(ke gotui.KeyEvent) {
 			c.NavigateUp()
+		}),
+		gotui.On(gotui.KeyTab, func(ke gotui.KeyEvent) {
+			if ke.Mod.Has(gotui.ModShift) {
+				c.CycleFocusBackward()
+			} else {
+				c.CycleFocusForward()
+			}
+		}),
+		gotui.On(gotui.Rune('x').Ctrl(), func(ke gotui.KeyEvent) {
+			c.mu.Lock()
+			rt := c.askStreamRuntime
+			c.mu.Unlock()
+			if rt != nil {
+				_ = rt.Cancel()
+			}
+		}),
+		gotui.On(gotui.Rune('e'), func(ke gotui.KeyEvent) {
+			c.openEvidenceDrawer()
 		}),
 	}
 	return km
@@ -373,15 +730,7 @@ func (c *CockpitScreen) renderLoading(width, height int, apiURL string) *gotui.E
 			gotui.WithTextStyle(textStyle),
 		),
 	)
-	root.AddChild(
-		gotui.New(
-			gotui.WithWidth(width),
-			gotui.WithHeight(1),
-			gotui.WithBackground(bgStyle),
-			gotui.WithText("ESC:quit"),
-			gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
-		),
-	)
+	root.AddChild(c.renderStatusFooterElement(width, CockpitPhaseLoading))
 	return root
 }
 
@@ -432,15 +781,7 @@ func (c *CockpitScreen) renderError(width, height int, apiURL string) *gotui.Ele
 		),
 	)
 	root.AddChild(content)
-	root.AddChild(
-		gotui.New(
-			gotui.WithWidth(width),
-			gotui.WithHeight(1),
-			gotui.WithBackground(bgStyle),
-			gotui.WithText("ESC:quit  r:retry"),
-			gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
-		),
-	)
+	root.AddChild(c.renderStatusFooterElement(width, CockpitPhaseError))
 	return root
 }
 
@@ -449,7 +790,7 @@ func (c *CockpitScreen) renderError(width, height int, apiURL string) *gotui.Ele
 // width. At very narrow widths the Evidence lane may collapse to 0 width.
 func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 	c.mu.Lock()
-	agents := c.stubAgents
+	agents := c.agents
 	selIdx := c.selectedIndex
 	c.mu.Unlock()
 
@@ -498,15 +839,23 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 
 	// Build body rows.
 	bodyLines := make([]string, 0, contentHeight-1)
+	var detailPaneRows []string // extracted from DetailPane render
 	if contentHeight > 1 {
 		if len(agents) == 0 {
 			// Empty state: show guidance in Main lane.
+			emptyMsg := "No agents running."
+			ctaMsg := "Spawn: foxctl agent spawn --role ..."
+			mid := (contentHeight - 1) / 2
 			for row := 0; row < contentHeight-1; row++ {
 				var mainBody, detailBody, evidenceBody string
-				if row == (contentHeight-1)/2 {
-					mainBody = centerInWidth("No agents. foxctl agent spawn --role ...", mainW)
+				switch row {
+				case mid:
+					mainBody = centerInWidth(emptyMsg, mainW)
 					detailBody = centerInWidth("Select an agent.", detailW)
-				} else {
+				case mid + 1:
+					mainBody = centerInWidth(ctaMsg, mainW)
+					detailBody = padString("", detailW)
+				default:
 					mainBody = padString("", mainW)
 					detailBody = padString("", detailW)
 				}
@@ -517,25 +866,73 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 				))
 			}
 		} else {
-			// Render agent rows.
+			// Determine DetailPane height: reserve bottom rows for stream content
+			// when stream lines exist.
+			c.mu.Lock()
+			hasStream := len(c.streamLines) > 0 || c.streamStatus != ""
+			c.mu.Unlock()
+
+			detailPaneH := contentHeight - 1
+			var streamRows []string
+			if hasStream && detailPaneH > 6 {
+				// Reserve bottom 40% for stream content, min 3 rows.
+				streamH := (detailPaneH * 40 / 100)
+				if streamH < 3 {
+					streamH = 3
+				}
+				detailPaneH = detailPaneH - streamH
+				if detailPaneH < 3 {
+					detailPaneH = 3
+					streamH = contentHeight - 1 - detailPaneH
+				}
+				streamRows = c.buildStreamRows(detailW, streamH)
+			}
+
+			// Pre-render DetailPane for the selected agent.
+			if selIdx >= 0 && selIdx < len(agents) && detailW > 0 {
+				detailPaneRows = c.renderDetailPaneRows(agents[selIdx], detailW, detailPaneH)
+			}
+
+			// Render agent rows with six required fields:
+			// short ID, role, status, workspace label, parent link, last-activity time.
 			for row := 0; row < contentHeight-1; row++ {
 				var mainBody, detailBody, evidenceBody string
 				if row < len(agents) {
 					a := agents[row]
-					label := shortID(a.ID) + " " + a.Role
+					label := buildAgentInventoryLabel(a, mainW)
 					if row == selIdx {
 						label = "▸ " + label
 						mainBody = padString(label, mainW)
-						// Detail shows selected agent info.
-						detailBody = padString("Role: "+a.Role+"  Status: "+a.Status, detailW)
 					} else {
 						mainBody = padString("  "+label, mainW)
-						detailBody = padString("", detailW)
 					}
 				} else {
 					mainBody = padString("", mainW)
+				}
+
+				// Detail lane: use DetailPane rows when an agent is selected;
+				// otherwise show empty-state guidance.
+				if selIdx >= 0 && row < len(detailPaneRows) {
+					detailBody = detailPaneRows[row]
+				} else if selIdx >= 0 && row >= len(detailPaneRows) {
+					streamRow := row - len(detailPaneRows)
+					if streamRow < len(streamRows) {
+						detailBody = streamRows[streamRow]
+					} else {
+						detailBody = padString("", detailW)
+					}
+				} else if selIdx < 0 {
+					// No selection: show empty-state guidance in the middle row.
+					mid := (contentHeight - 1) / 2
+					if row == mid {
+						detailBody = centerInWidth("Select an agent.", detailW)
+					} else {
+						detailBody = padString("", detailW)
+					}
+				} else {
 					detailBody = padString("", detailW)
 				}
+
 				evidenceBody = padString("", evidenceW)
 				bodyLines = append(bodyLines, buildLanedRow(
 					mainBody, detailBody, evidenceBody,
@@ -588,6 +985,7 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 			gotui.WithBackground(bgStyle),
 			gotui.WithText(line),
 			gotui.WithTextStyle(lineStyle),
+			gotui.WithWrap(false),
 		))
 	}
 
@@ -605,15 +1003,284 @@ func (c *CockpitScreen) renderReady(width, height int) *gotui.Element {
 	root.AddChild(contentArea)
 
 	// Status footer.
-	footerHint := "● connected  ESC:quit  ↑↓:nav  Enter:submit  e:evidence"
-	root.AddChild(gotui.New(
+	c.mu.Lock()
+	drawerOpen := c.drawerOpen
+	drawerTitle := c.drawerTitle
+	drawerContent := c.drawerContent
+	drawerScrollOffset := c.drawerScrollOffset
+	c.mu.Unlock()
+
+	root.AddChild(c.renderStatusFooterElement(width, CockpitPhaseReady))
+
+	// Render evidence drawer on top if open.
+	if drawerOpen {
+		drawer := components.NewDrawer(drawerTitle, drawerContent, width, contentHeight,
+			components.WithDrawerOpen(true),
+			components.WithDrawerFocused(true),
+			components.WithDrawerWidth(evidenceW),
+		)
+		drawer.SetScrollOffset(drawerScrollOffset)
+		// Render drawer into an overlay buffer and composite on top.
+		drawerBuf := gotui.NewBuffer(width, contentHeight)
+		drawer.Render(drawerBuf)
+		// Add drawer as an overlay child element.
+		var overlayLines []string
+		for y := 0; y < contentHeight; y++ {
+			var line strings.Builder
+			for x := 0; x < width; x++ {
+				cell := drawerBuf.Cell(x, y)
+				if cell.Rune != 0 {
+					line.WriteRune(cell.Rune)
+				} else {
+					line.WriteRune(' ')
+				}
+			}
+			overlayLines = append(overlayLines, line.String())
+		}
+		overlayText := strings.Join(overlayLines, "\n")
+		overlayEl := gotui.New(
+			gotui.WithWidth(width),
+			gotui.WithHeight(contentHeight),
+			gotui.WithText(overlayText),
+			gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextPrimary).Background(theme.Colors.Background)),
+		)
+		root.AddChild(overlayEl)
+	}
+
+	return root
+}
+
+// renderStatusFooterElement builds a StatusFooter for the given phase and
+// returns it as a go-tui Element. It reads the current selection and stream
+// state from the CockpitScreen to determine the active entity label and
+// connection status.
+func (c *CockpitScreen) renderStatusFooterElement(width int, phase CockpitPhase) *gotui.Element {
+	c.mu.Lock()
+	agents := c.agents
+	selectedIndex := c.selectedIndex
+	statusMsg := c.statusMessage
+	streamStatus := c.streamStatus
+	c.mu.Unlock()
+
+	var connStatus components.StatusVariant
+	var connLabel string
+	switch phase {
+	case CockpitPhaseLoading:
+		connStatus = components.StatusPending
+		connLabel = "connecting…"
+	case CockpitPhaseError:
+		connStatus = components.StatusError
+		connLabel = "error"
+	case CockpitPhaseReady:
+		connStatus = components.StatusOK
+		connLabel = "connected"
+	default:
+		connStatus = components.StatusPending
+		connLabel = "connecting…"
+	}
+
+	// Override label with ephemeral status messages.
+	if statusMsg != "" {
+		connLabel = statusMsg
+	} else if streamStatus != "" {
+		connLabel = streamStatus
+	}
+
+	// Build active entity label.
+	var activeEntity string
+	if selectedIndex >= 0 && selectedIndex < len(agents) {
+		a := agents[selectedIndex]
+		activeEntity = "agent: " + shortID(a.ID) + " (" + a.Role + ")"
+	}
+
+	// Build keybinding hints based on phase.
+	var keybinds []components.KeybindHintConfig
+	switch phase {
+	case CockpitPhaseLoading:
+		keybinds = []components.KeybindHintConfig{
+			{Key: "ESC", Desc: "quit"},
+			{Key: "q", Desc: "quit"},
+			{Key: "↑↓", Desc: "nav"},
+		}
+	case CockpitPhaseError:
+		keybinds = []components.KeybindHintConfig{
+			{Key: "ESC", Desc: "quit"},
+			{Key: "r", Desc: "retry"},
+			{Key: "↑↓", Desc: "nav"},
+		}
+	case CockpitPhaseReady:
+		keybinds = []components.KeybindHintConfig{
+			{Key: "ESC", Desc: "quit"},
+			{Key: "↑↓", Desc: "nav"},
+			{Key: "Enter", Desc: "submit"},
+			{Key: "e", Desc: "evidence"},
+			{Key: "Ctrl+X", Desc: "cancel"},
+		}
+	default:
+		keybinds = []components.KeybindHintConfig{
+			{Key: "ESC", Desc: "quit"},
+		}
+	}
+
+	sf := components.NewStatusFooter(components.StatusFooterConfig{
+		ConnectionStatus: connStatus,
+		ConnectionLabel:  connLabel,
+		ActiveEntity:     activeEntity,
+		Keybinds:         keybinds,
+		Width:            width,
+	})
+
+	buf := gotui.NewBuffer(width, 1)
+	sf.Render(buf)
+
+	// Convert buffer to text for go-tui Element.
+	var line strings.Builder
+	for x := 0; x < width; x++ {
+		cell := buf.Cell(x, 0)
+		if cell.Rune != 0 {
+			line.WriteRune(cell.Rune)
+		} else {
+			line.WriteRune(' ')
+		}
+	}
+
+	return gotui.New(
 		gotui.WithWidth(width),
 		gotui.WithHeight(1),
-		gotui.WithBackground(bgStyle),
-		gotui.WithText(footerHint),
+		gotui.WithBackground(gotui.NewStyle().Background(theme.Colors.Background)),
+		gotui.WithText(line.String()),
 		gotui.WithTextStyle(gotui.NewStyle().Foreground(theme.Colors.TextMuted).Background(theme.Colors.Background)),
-	))
-	return root
+	)
+}
+
+// buildStreamRows builds the stream transcript rows for the Detail lane.
+// It returns at most maxRows lines, including the terminal status marker.
+func (c *CockpitScreen) buildStreamRows(width, maxRows int) []string {
+	if maxRows <= 0 || width <= 0 {
+		return nil
+	}
+
+	c.mu.Lock()
+	lines := make([]string, len(c.streamLines))
+	copy(lines, c.streamLines)
+	status := c.streamStatus
+	c.mu.Unlock()
+
+	if len(lines) == 0 && status == "" {
+		return nil
+	}
+
+	var rows []string
+	for _, line := range lines {
+		truncated := truncateLabel(line, width)
+		rows = append(rows, padString(truncated, width))
+		if len(rows) >= maxRows {
+			return rows
+		}
+	}
+	if status != "" && len(rows) < maxRows {
+		statusLine := truncateLabel(status, width)
+		rows = append(rows, padString(statusLine, width))
+	}
+	return rows
+}
+
+// buildAgentInventoryLabel builds a compact inventory row label from an
+// AgentInventoryItem, fitting as many of the six required fields as possible
+// into the given width: short ID, role, status, workspace, parent, last active.
+func buildAgentInventoryLabel(a AgentInventoryItem, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	parent := a.ParentID
+	if parent == "" {
+		parent = "—"
+	}
+	last := a.LastActive
+	if last == "" {
+		last = "—"
+	}
+	ws := a.Workspace
+	if ws == "" {
+		ws = "—"
+	}
+
+	// Try the full format first.
+	full := shortID(a.ID) + " " + a.Role + " " + a.Status + " " + ws + " " + parent + " " + last
+	if runeWidth(full) <= width {
+		return full
+	}
+
+	// Fallback: drop last-active.
+	medium := shortID(a.ID) + " " + a.Role + " " + a.Status + " " + ws + " " + parent
+	if runeWidth(medium) <= width {
+		return medium
+	}
+
+	// Fallback: drop parent too.
+	short := shortID(a.ID) + " " + a.Role + " " + a.Status + " " + ws
+	if runeWidth(short) <= width {
+		return short
+	}
+
+	// Fallback: just ID + role + status.
+	minimal := shortID(a.ID) + " " + a.Role + " " + a.Status
+	if runeWidth(minimal) <= width {
+		return minimal
+	}
+
+	// Ultimate fallback: truncate.
+	return truncateLabel(minimal, width)
+}
+
+// truncateLabel truncates s to fit within maxCells display width.
+func truncateLabel(s string, maxCells int) string {
+	if maxCells <= 0 {
+		return ""
+	}
+	totalWidth := 0
+	for i, r := range s {
+		rw := int(gotui.RuneWidth(r))
+		if totalWidth+rw > maxCells {
+			if maxCells >= 1 {
+				avail := maxCells - 1
+				w := 0
+				for j, rr := range s {
+					rrw := int(gotui.RuneWidth(rr))
+					if w+rrw > avail {
+						return string([]rune(s[:j])) + "…"
+					}
+					w += rrw
+				}
+			}
+			return string([]rune(s[:i])) + "…"
+		}
+		totalWidth += rw
+	}
+	return s
+}
+
+// runeWidth returns the number of terminal cells occupied by s.
+func runeWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		w += int(gotui.RuneWidth(r))
+	}
+	return w
+}
+
+// sortAgents returns a deterministically sorted copy of agents:
+// by Role ascending, then ID ascending.
+func sortAgents(agents []AgentInventoryItem) []AgentInventoryItem {
+	result := make([]AgentInventoryItem, len(agents))
+	copy(result, agents)
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Role != result[j].Role {
+			return result[i].Role < result[j].Role
+		}
+		return result[i].ID < result[j].ID
+	})
+	return result
 }
 
 // buildLanedRow concatenates Main + Detail + Evidence lane content with
@@ -685,6 +1352,91 @@ func padString(s string, width int) string {
 	return s + strings.Repeat(" ", width-sw)
 }
 
+// renderDetailPaneRows renders a DetailPane for the given agent and returns
+// the text content of each row, padded to the given width. The height
+// determines how many rows to extract.
+func (c *CockpitScreen) renderDetailPaneRows(a AgentInventoryItem, width, height int) []string {
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+
+	// Map status string to StatusVariant.
+	var status components.StatusVariant
+	switch a.Status {
+	case "running", "healthy", "ok":
+		status = components.StatusOK
+	case "idle", "degraded", "warn":
+		status = components.StatusWarn
+	case "error", "failed", "dead":
+		status = components.StatusError
+	case "loading", "starting", "pending":
+		status = components.StatusPending
+	default:
+		if a.Status != "" {
+			status = components.StatusOK
+		} else {
+			status = components.StatusNone
+		}
+	}
+
+	// Build sections: Runtime, Hierarchy, Recent Activity.
+	sections := []components.Section{
+		{
+			Title: "Runtime",
+			Lines: []string{
+				"Status: " + a.Status,
+				"Workspace: " + a.Workspace,
+				"Last Active: " + a.LastActive,
+			},
+		},
+		{
+			Title: "Hierarchy",
+			Lines: []string{
+				"Parent: " + a.ParentID,
+				"Children: —", // not yet available from inventory
+			},
+		},
+		{
+			Title: "Recent Activity",
+			Lines: []string{
+				"No recent activity.",
+			},
+		},
+	}
+
+	c.mu.Lock()
+	focused := c.focusedLane == 1 // Detail lane focused
+	c.mu.Unlock()
+
+	dp := components.NewDetailPane(
+		a.Role+" ("+shortID(a.ID)+")",
+		status,
+		sections,
+		width,
+		height,
+		components.WithDPFocused(focused),
+		components.WithHasEntity(true),
+	)
+
+	buf := gotui.NewBuffer(width, height)
+	dp.Render(buf)
+
+	rows := make([]string, height)
+	for y := 0; y < height; y++ {
+		var b strings.Builder
+		for x := 0; x < width; x++ {
+			cell := buf.Cell(x, y)
+			if cell.Rune != 0 {
+				b.WriteRune(cell.Rune)
+			} else {
+				b.WriteRune(' ')
+			}
+		}
+		rows[y] = b.String()
+	}
+	return rows
+}
+
 // tooSmallMessage is the guard message shown when the terminal is below
 // minimum size.
 const tooSmallMessage = "terminal too small — resize to ≥60x15"
@@ -701,11 +1453,32 @@ const tooSmallMessage = "terminal too small — resize to ≥60x15"
 func RunCockpit(apiURL string) error {
 	cockpit := NewCockpitScreen(apiURL)
 
+	// Build an API client and agent adapter so the boot manager can fetch
+	// the live agent inventory after the health check succeeds.
+	apiClient, err := NewAPIClient(apiURL, nil)
+	if err != nil {
+		return err
+	}
+	agentAdapter, err := NewAgentAdapter(apiClient)
+	if err != nil {
+		return err
+	}
+
 	bm := NewBootManager(BootConfig{
-		APIURL: apiURL,
-		Screen: cockpit,
+		APIURL:       apiURL,
+		Screen:       cockpit,
+		AgentAdapter: agentAdapter,
 	})
 	cockpit.SetBootManager(bm)
+
+	// Live refresh: single SSE subscription to /api/events that triggers
+	// debounced re-fetches of the agent inventory when external changes
+	// occur (e.g., foxctl agent spawn / kill).
+	eventsSub := NewEventsSubscriber(EventsSubscriberConfig{
+		APIClient:    apiClient,
+		AgentAdapter: agentAdapter,
+		Screen:       cockpit,
+	})
 
 	app, err := gotui.NewApp(gotui.WithRootComponent(cockpit))
 	if err != nil {
@@ -716,7 +1489,12 @@ func RunCockpit(apiURL string) error {
 	// This ensures the first frame renders in Loading state immediately.
 	bm.Start()
 
-	// Cleanup: stop the boot manager and close the app.
+	// Start the live-refresh subscriber. It will reconnect automatically
+	// and debounce re-fetches to avoid hammering the API.
+	eventsSub.Start()
+
+	// Cleanup: stop the subscriber, boot manager, and close the app.
+	defer eventsSub.Stop()
 	defer bm.Stop()
 	defer app.Close()
 

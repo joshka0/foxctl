@@ -57,7 +57,7 @@ signature:
       Use hooks/overseer_inbox to fetch mailbox messages before tool use.
       Example commands:
         foxctl run hooks/overseer_inbox --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Edit"}'
-        foxctl skills run hooks/overseer_inbox --event PreToolUse --workspace_root /workspace/project --tool_name Edit
+        foxctl skills run hooks/overseer_inbox --event PreToolUse --workspace-root /workspace/project --tool-name Edit
     workflows:
       - id: check-inbox
         description: "Check for overseer messages."

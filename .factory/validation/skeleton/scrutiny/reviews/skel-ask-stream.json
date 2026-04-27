@@ -1,0 +1,34 @@
+{
+  "featureId": "skel-ask-stream",
+  "reviewedAt": "2026-04-20T23:00:00Z",
+  "commitId": "77364e4f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Feature skel-ask-stream implementation covers the ask/chat streaming workflow: POST /api/agents/{id}/ask-stream is called on submit, tokens render progressively, goroutine cleanup is correct, and double-submit is rejected with a user-visible message. The implementation also includes the skel-cancel feature (Ctrl+X cancel, distinct ⊘ cancelled state, rapid resubmit) which is VAL-SKEL-007, plus VAL-SKEL-016 malformed SSE handling. Tests are comprehensive with runtime-level and cockpit-level coverage. The only substantive concern is that the handoff file (named skel-ask-stream) actually contains skel-cancel code — a mission tracking mismatch — but the code itself is correct and well-tested.",
+    "issues": [
+      {
+        "file": "agent_ask_stream_runtime.go",
+        "line": 310,
+        "severity": "non_blocking",
+        "description": "Test sleeps 200ms for goroutine-leak check but VAL-SKEL-006 specifies goroutines must exit within 500ms. A goroutine that takes 350ms to exit would pass the test but technically violate the 500ms requirement. Consider increasing the sleep to 500ms or verifying the actual exit timing more precisely."
+      },
+      {
+        "file": "mission tracking",
+        "line": 0,
+        "severity": "non_blocking",
+        "description": "The handoff file for skel-ask-stream (2026-04-19T23-16-25-322Z__skel-ask-stream__037b92ba-08db-426e-afa2-070b887db1a3.json) contains code for skel-cancel, not skel-ask-stream. The features.json also records workerSessionId '8a49cef6-96f4-4304-99b4-e72cb59b6196' for skel-ask-stream but no transcript exists for that session. The actual work was done by session 037b92ba and committed as 77364e4f. This is a mission tracking mismatch, not a code defect — the implementation is correct."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The tui-engineer-worker skill procedure requires the worker to implement and test the feature described in features.json. The worker (session 037b92ba) followed procedure correctly. However, the mission tracking system assigned the wrong session ID to skel-ask-stream in features.json (8a49cef6... instead of 037b92ba...), and the handoff file was named skel-ask-stream despite containing skel-cancel implementation. This is a data-layer issue in the mission runner, not a worker deviation.",
+      "evidence": "features.json workerSessionIds for skel-ask-stream: '8a49cef6-96f4-4304-99b4-e72cb59b6196' (no matching transcript); handoff file 'skel-ask-stream__037b92ba...' contains featureId: 'skel-ask-stream' but implementation is skel-cancel (Ctrl+X cancel, AgentAskCanceler, AgentAskUpdateCancelled, rapid resubmit)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "skel-ask-stream passes scrutiny. The implementation (commit 77364e4f) correctly handles: (1) POST /api/agents/{id}/ask-stream on submit, (2) progressive token rendering across ≥3 frames (tested), (3) terminal status marker on done (✓ done, no trailing caret), (4) goroutine cleanup via WaitGroup+defer close (goroutine-leak test passes), (5) double-submit rejection with user-visible message 'Stream in flight. Press Ctrl+X to cancel first' (tested). The implementation additionally covers VAL-SKEL-007 (cancel) and VAL-SKEL-016 (malformed SSE) which were likely needed as preconditions. Two non-blocking observations: test sleep of 200ms is shorter than the 500ms spec requirement for goroutine exit, and a mission data inconsistency where the handoff file named for skel-ask-stream actually contains skel-cancel code."
+}

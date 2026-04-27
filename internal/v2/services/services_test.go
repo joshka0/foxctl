@@ -403,6 +403,35 @@ func TestKillService_ProjectionNotFoundReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestKillService_TerminalProjectionIsIdempotent(t *testing.T) {
+	t.Parallel()
+
+	projections := newFakeProjectionStore()
+	projections.byRun["run-done"] = services.RunState{
+		RunID:  "run-done",
+		Status: "completed",
+	}
+	killer := &fakeKiller{}
+
+	svc := services.NewKillService(services.KillDependencies{
+		Killer:      killer,
+		Projections: projections,
+	})
+
+	resp, err := svc.Kill(context.Background(), kill.Request{
+		RunID: "run-done",
+	})
+	if err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+	if resp.Status != "completed" {
+		t.Fatalf("status=%q want completed", resp.Status)
+	}
+	if killer.last != "" {
+		t.Fatalf("killer target=%q want empty", killer.last)
+	}
+}
+
 func TestListService_UsesProjectionAndFilters(t *testing.T) {
 	t.Parallel()
 

@@ -1,6 +1,6 @@
 ---
 name: foxctl-epic-pipeline
-description: "Run the foxctl room-agile epic creation pipeline from intake to dispatch readiness. Use when importing Factory missions or plan files into foxctl, shaping room epics, grading readiness, computing frontiers, and keeping epic creation separate from implementation."
+description: "Turn Factory missions or plans into foxctl room-agile epics, grade readiness, compute frontiers, and stop before implementation."
 ---
 
 # foxctl-epic-pipeline

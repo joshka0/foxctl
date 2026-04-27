@@ -1,0 +1,28 @@
+{
+  "featureId": "skel-detail",
+  "reviewedAt": "2026-04-20T22:35:00Z",
+  "commitId": "7db85d3b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "skel-detail implementation fully satisfies VAL-SKEL-005. The commit adds focused-lane state (0=Main, 1=Detail, 2=Evidence) with Tab/Shift+Tab cycling, integrates the M2 DetailPane component into renderReady via renderDetailPaneRows(), and adds 12 unit tests covering all required behaviors. All TUI package tests pass under -race; go vet is clean.",
+    "issues": [
+      {
+        "file": "internal/interfaces/tui/cockpit_detail_test.go",
+        "line": 352,
+        "severity": "non_blocking",
+        "description": "TestDetailLane_ScrollWhenFocusedAndOverflow only verifies that DetailPane renders without panic and produces non-empty content. It does not verify that scrolling within the Detail pane actually works (e.g., that scroll offset is maintained correctly when focus changes). This is acceptable for a skeleton test but leaves scroll behavior underexercised."
+      },
+      {
+        "file": "internal/interfaces/tui/cockpit.go",
+        "line": 216,
+        "severity": "non_blocking",
+        "description": "CycleFocusForward briefly releases c.mu between FocusedLane() and SetFocusedLane(). The FocusedLane() call locks/unlocks the mutex, then SetFocusedLane() locks again. This creates a narrow window between unlock and lock where another goroutine could observe inconsistent state. In practice this is benign since (a) KeyMap callbacks run on the main TUI event loop (single-threaded) and (b) the final state written is deterministic. No data race is detectable, but the pattern could be tightened by reading focusedLane into a local variable under one lock."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Pass. skel-detail implements VAL-SKEL-005 correctly: focusedLane state with Tab/Shift+Tab cycling, DetailPane integration via renderDetailPaneRows() mapping agent status to StatusVariant, all three required sections (Runtime/Hierarchy/Recent Activity), selection surviving Tab round-trips, empty states, focus indicator, status badge, workspace info, and parent display. 12 new unit tests cover the behaviors. No regressions; all TUI tests pass under -race. Two non-blocking observations: scroll test is shallow, and CycleFocusForward has a minor lock-release gap (benign in practice)."
+}

@@ -1,0 +1,43 @@
+{
+  "featureId": "misc-extract-widget-utils",
+  "reviewedAt": "2026-04-21T00:00:00Z",
+  "commitId": "cf801bee",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "All four utilities (truncate, runeWidth, center, padOrTruncate) were correctly extracted from entity_list.go and small_primitives.go into utils.go. The dead rune-array phantom allocation in center() was removed — the old code built a []rune slice then discarded it in favor of strings.Repeat + concatenation; the new code uses only the correct path. All six importing files (entity_list.go, small_primitives.go, detail_pane.go, tabs.go, drawer.go, stream_viewer.go) call the utilities without any import changes since they're all in the same package. The utils_test.go has 11 table-driven tests covering ASCII, CJK, mixed widths, combining marks, ZWJ emoji, and edge cases — all pass. go test -race -count=1 passes, go vet passes.",
+    "issues": [
+      {
+        "file": "internal/interfaces/tui/components/utils.go",
+        "line": 55,
+        "severity": "non_blocking",
+        "description": "The center() function handles ASCII padding correctly but the centering formula (pad := (width - sw) / 2) produces asymmetric results when (width - sw) is odd — the extra space goes to the right side. This is standard behavior and the tests confirm expected behavior, so no change is required."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "Feature description says to 'update detail_pane.go, tabs.go, drawer.go, stream_viewer.go, small_primitives.go to import from the new utils.go'. Since all these files are in the same package (internal/interfaces/tui/components), no import statements are needed — package-private functions are accessed directly by name. The worker correctly recognized this and made no import changes. This is not a gap in AGENTS.md; the description assumed cross-package boundaries.",
+      "evidence": "All 6 callers grep results show function usage with no import lines added. All files declare 'package components' and are in the same directory."
+    },
+    {
+      "area": "skills",
+      "observation": "Worker used the tui-engineer-worker skill correctly. skillFeedback.confirmProcedure=true with no deviations. The skill file instructs to run baseline tests before changes, create the new file, verify via grep, then run tests — worker followed this exactly.",
+      "evidence": "Handoff skillFeedback: followedProcedure=true, deviations=[], suggestedChanges=[]. Transcript shows baseline test run before changes, new files created, grep verification, final tests run."
+    },
+    {
+      "area": "services",
+      "observation": "Worker used only go test and go vet commands, both already documented in .factory/services.yaml. No undocumented commands or services were started.",
+      "evidence": "Handoff verification.commandsRun shows only: go test -race -count=1 (components), go test -race -count=1 (full TUI), go vet, rg -n grep."
+    },
+    {
+      "area": "knowledge",
+      "observation": "No knowledge gaps found. The worker correctly handled: (1) package-private function access across files in the same package, (2) the dead rune-array removal (it was a phantom allocation in the old center() that was never used since the function returned via strings.Repeat concatenation), (3) go-tui RuneWidth behavior for ZWJ emoji sequences.",
+      "evidence": "center() old code had 'result := make([]rune, width)' which was immediately followed by '// Convert to string... use string concatenation' and returned leftPad+s+rightPad — the []rune was truly dead code."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "PASS — All 4 utilities extracted correctly into utils.go, dead rune-array phantom allocation in center() removed, 11 new tests covering ASCII/CJK/mixed/combining/ZWJ all pass, all existing widget tests pass unchanged, go vet clean, exactly 1 declaration per function in the package. Feature description's mention of 'import' updates was not applicable since all callers are in the same package — worker handled this correctly. No blocking issues."
+}

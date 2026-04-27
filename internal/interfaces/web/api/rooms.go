@@ -232,6 +232,19 @@ type roomMessageEvent struct {
 	Error         string `json:"error,omitempty"`
 }
 
+type roomInvalidationEvent struct {
+	WorkspaceID string `json:"workspace_id"`
+	RoomID      string `json:"room_id"`
+	Stream      string `json:"stream,omitempty"`
+	Mutation    string `json:"mutation,omitempty"`
+	Action      string `json:"action,omitempty"`
+	ActorID     string `json:"actor_id,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
+	ReminderID  string `json:"reminder_id,omitempty"`
+	MemberID    string `json:"member_id,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
+}
+
 type roomAgentDispatchRequest struct {
 	WorkspaceID string
 	RoomID      string
@@ -590,14 +603,16 @@ func handleRoomSubresourceRoute(w http.ResponseWriter, r *http.Request, cfg conf
 	switch parts[0] {
 	case "events":
 		handleRoomGetOnly(w, r, func() { handleRoomEventsGet(w, r, roomID, events) })
+	case "control-snapshot":
+		handleRoomGetOnly(w, r, func() { handleRoomControlSnapshotGet(w, r, cfg, log, roomID) })
 	case "status":
 		handleRoomGetOnly(w, r, func() { handleRoomStatusGet(w, r, cfg, log, roomID) })
 	case "inbox":
 		handleRoomGetOnly(w, r, func() { handleRoomInboxGet(w, r, cfg, log, roomID) })
 	case "tasks":
-		handleRoomTasksRoute(w, r, cfg, log, roomID, parts)
+		handleRoomTasksRoute(w, r, cfg, log, events, roomID, parts)
 	case "loop":
-		handleRoomLoopRoute(w, r, cfg, log, roomID)
+		handleRoomLoopRoute(w, r, cfg, log, events, roomID)
 	case "coordinator":
 		handleRoomPostOnly(w, r, func() { handleRoomCoordinatorSet(w, r, cfg, log, roomID) })
 	case "messages":
@@ -639,10 +654,10 @@ func handleRoomEventsGet(w http.ResponseWriter, r *http.Request, roomID string, 
 	streamer.TopicHandler(roomEventTopic(workspaceID, roomID)).ServeHTTP(w, r)
 }
 
-func handleRoomTasksRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string, parts []string) {
+func handleRoomTasksRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, events roomEventPublisher, roomID string, parts []string) {
 	if len(parts) >= 3 {
 		handleRoomPostOnly(w, r, func() {
-			handleRoomTaskAction(w, r, cfg, log, roomID, strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2]))
+			handleRoomTaskAction(w, r, cfg, log, events, roomID, strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2]))
 		})
 		return
 	}
@@ -656,12 +671,12 @@ func handleRoomTasksRoute(w http.ResponseWriter, r *http.Request, cfg config.Con
 	}
 }
 
-func handleRoomLoopRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+func handleRoomLoopRoute(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, events roomEventPublisher, roomID string) {
 	switch r.Method {
 	case http.MethodGet:
 		handleRoomLoopGet(w, r, cfg, log, roomID)
 	case http.MethodPatch:
-		handleRoomLoopPatch(w, r, cfg, log, roomID)
+		handleRoomLoopPatch(w, r, cfg, log, events, roomID)
 	default:
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -2009,6 +2024,17 @@ func publishRoomMessageEvent(events roomEventPublisher, event roomMessageEvent) 
 		return
 	}
 	events.Publish("room.message", event)
+}
+
+func publishRoomInvalidationEvent(events roomEventPublisher, eventType string, event roomInvalidationEvent) {
+	if events == nil {
+		return
+	}
+	if topicPublisher, ok := events.(roomTopicEventPublisher); ok {
+		topicPublisher.PublishTopic(roomEventTopic(event.WorkspaceID, event.RoomID), eventType, event)
+		return
+	}
+	events.Publish(eventType, event)
 }
 
 func roomEventTopic(workspaceID, roomID string) string {

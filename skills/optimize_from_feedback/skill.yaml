@@ -41,7 +41,7 @@ signature:
       Use optimize/feedback to analyze recorded feedback and recommend improvements.
       Example commands:
         foxctl run optimize/feedback --input '{"workspace":"./","min_rating":3}'
-        foxctl skills run optimize/feedback --workspace ./ --min_rating 3
+        foxctl skills run optimize/feedback --workspace ./ --min-rating 3
     workflows:
       - id: analyze-feedback
         description: "Analyze feedback in a workspace."

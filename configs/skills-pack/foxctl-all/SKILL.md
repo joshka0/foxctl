@@ -1,11 +1,12 @@
 ---
 name: foxctl-all
-description: "Single condensed entrypoint for all foxctl workflows (core, code, dev, orchestrate, room collaboration, integrations, mobile)."
+description: "Single entrypoint for foxctl workflows: core, code, dev, orchestration, room collaboration, integrations, and mobile."
 ---
 
 ## Quick Reference
 
-Run: `foxctl run <skill> --input '<json>'` or `foxctl run <skill> --flag value`
+Run: `foxctl run <skill> --input '<json>'` for job-tracked JSON execution, or
+`foxctl skills run <skill> --flag value` for direct parameter flags.
 Help: `foxctl run <skill> --help` | Examples: `foxctl run <skill> --examples`
 List: `foxctl skills list`
 
@@ -183,13 +184,13 @@ foxctl index git-diff            # Index changed files
 
 ```bash
 # Understand before editing
-foxctl run code/symbols --path internal/agent/daemon/daemon.go
-foxctl run code/semantic_search --query "task guard" --format tree --limit 10
+foxctl run code/symbols --input '{"path":"internal/agent/daemon/daemon.go"}'
+foxctl run code/semantic_search --input '{"query":"task guard","format":"tree","limit":10}'
 
 # Verify changes
 foxctl run git/status
-foxctl run test/run --path ./...
-foxctl run ci/checks --pr 123
+foxctl skills run test/run --path ./...
+foxctl skills run ci/checks --pr 123
 
 # Task workflow
 foxctl todo add --title "Implement feature X"

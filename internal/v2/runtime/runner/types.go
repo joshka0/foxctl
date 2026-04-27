@@ -7,6 +7,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/v2/core/events"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
+	coretool "github.com/joshka0/foxctl/internal/v2/core/tool"
 )
 
 const (
@@ -30,6 +31,8 @@ type ModelInput struct {
 	Prompt        string
 	Iteration     int
 	MaxIterations int
+	Tools         []coretool.ToolDef
+	Messages      []ModelMessage
 }
 
 // ModelResponse captures model output for one iteration.
@@ -37,6 +40,15 @@ type ModelResponse struct {
 	Message   string
 	ToolCalls []run.ToolCall
 	Done      bool
+}
+
+// ModelMessage is the provider-neutral message history passed to a model.
+type ModelMessage struct {
+	Role       string
+	Content    string
+	ToolCalls  []run.ToolCall
+	ToolCallID string
+	Name       string
 }
 
 // ToolResult captures tool execution output.
@@ -70,6 +82,7 @@ type Config struct {
 	EventBus       EventPublisher
 	Model          Model
 	RLMREPLFactory RLMREPLRunnerFactory
+	Tools          []coretool.ToolDef
 	ToolExecutor   ToolExecutor
 	TurnRecorder   run.TurnRecorder
 	Hooks          HookRunner

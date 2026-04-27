@@ -16,7 +16,8 @@ type ErrorPayload struct {
 
 // RunStartedPayload captures run-start context.
 type RunStartedPayload struct {
-	Mode string `json:"mode,omitempty"`
+	Mode   string `json:"mode,omitempty"`
+	Prompt string `json:"prompt,omitempty"`
 }
 
 // RunCompletedPayload captures run-completion context.

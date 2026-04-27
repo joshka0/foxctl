@@ -52,9 +52,9 @@ signature:
       Use code/imports to list imports or analyze dependency graphs.
       Example commands:
         foxctl run code/imports --input '{"path":"./src","query_type":"list"}'
-        foxctl skills run code/imports --path ./src --query_type list
+        foxctl skills run code/imports --path ./src --query-type list
         foxctl run code/imports --input '{"path":"./src","query_type":"graph","max_depth":2}'
-        foxctl skills run code/imports --path ./src --query_type graph --max_depth 2
+        foxctl skills run code/imports --path ./src --query-type graph --max-depth 2
     workflows:
       - id: list-imports
         description: "List imports for a directory."

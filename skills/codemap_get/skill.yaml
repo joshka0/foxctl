@@ -47,7 +47,7 @@ signature:
         foxctl run codemap/get --input '{"id":"codemap://auth-flow"}'
         foxctl skills run codemap/get --id codemap://auth-flow
         foxctl run codemap/get --input '{"id":"auth-flow","include_traces":false}'
-        foxctl skills run codemap/get --id auth-flow --include_traces=false
+        foxctl skills run codemap/get --id auth-flow --include-traces=false
     workflows:
       - id: get-codemap
         description: "Get a codemap by ID."

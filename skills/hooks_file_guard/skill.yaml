@@ -57,7 +57,7 @@ signature:
       Use hooks/file_guard to prevent concurrent edits from multiple agents.
       Example commands:
         foxctl run hooks/file_guard --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
-        foxctl skills run hooks/file_guard --event PreToolUse --workspace_root /workspace/project --tool_name Edit --tool_input '{"file_path":"main.go"}'
+        foxctl skills run hooks/file_guard --event PreToolUse --workspace-root /workspace/project --tool-name Edit --tool-input '{"file_path":"main.go"}'
     workflows:
       - id: guard-file-edit
         description: "Guard a file edit operation."

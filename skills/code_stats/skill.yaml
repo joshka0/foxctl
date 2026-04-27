@@ -41,9 +41,9 @@ signature:
       Use code/stats to get file counts and language breakdowns.
       Example commands:
         foxctl run code/stats --input '{"path":"./src","breakdown_by":"language"}'
-        foxctl skills run code/stats --path ./src --breakdown_by language
+        foxctl skills run code/stats --path ./src --breakdown-by language
         foxctl run code/stats --input '{"path":".","breakdown_by":"directory","max_depth":2}'
-        foxctl skills run code/stats --path . --breakdown_by directory --max_depth 2
+        foxctl skills run code/stats --path . --breakdown-by directory --max-depth 2
     workflows:
       - id: by-language
         description: "Break down stats by language."

@@ -49,7 +49,7 @@ signature:
       Use session/export-dspy to export sessions for training data.
       Example commands:
         foxctl run session/export-dspy --input '{"project":"foxctl","format":"jsonl","output_file":"/tmp/training.jsonl"}'
-        foxctl skills run session/export-dspy --project foxctl --format jsonl --output_file /tmp/training.jsonl
+        foxctl skills run session/export-dspy --project foxctl --format jsonl --output-file /tmp/training.jsonl
     workflows:
       - id: export-project
         description: "Export sessions for a project."

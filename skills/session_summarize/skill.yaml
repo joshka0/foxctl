@@ -53,9 +53,9 @@ signature:
       Use session/summarize to generate structured summaries for a session.
       Example commands:
         foxctl run session/summarize --input '{"session_id":"abc123"}'
-        foxctl skills run session/summarize --session_id abc123
+        foxctl skills run session/summarize --session-id abc123
         foxctl run session/summarize --input '{"session_id":"abc123","force":true,"max_tokens":12000}'
-        foxctl skills run session/summarize --session_id abc123 --force --max_tokens 12000
+        foxctl skills run session/summarize --session-id abc123 --force --max-tokens 12000
 
         # Generate a pasteable seed prompt for the next context window
         foxctl run session/summarize --no-cas --input '{"session_id":"abc123","mode":"seed","query":"what are we doing next"}'

@@ -55,7 +55,7 @@ signature:
         foxctl run ci/prcomments --input '{"pr":"123","format":"markdown"}'
         foxctl skills run ci/prcomments --pr 123 --format markdown
         foxctl run ci/prcomments --input '{"pr":"123","format":"json","errors_only":true}'
-        foxctl skills run ci/prcomments --pr 123 --format json --errors_only
+        foxctl skills run ci/prcomments --pr 123 --format json --errors-only
     workflows:
       - id: comments-markdown
         description: "Render comments as markdown."
