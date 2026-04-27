@@ -114,6 +114,7 @@ func RetrieveContext(ctx context.Context, cfg LaneConfig, queryFn ContextQueryFu
 		},
 	}
 
+	_ = recordPack(ctx, cfg, pack)
 	_ = recordEpisode(ctx, cfg, query, LaneContext, packID, elapsed.Milliseconds(), len(nodes), nil)
 	return pack, nil
 }

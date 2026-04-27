@@ -37,6 +37,10 @@ func (laneRetrievalStore) RecordRetrievalEpisode(_ context.Context, ep contexten
 	return ep, nil
 }
 
+func (laneRetrievalStore) PutEvidencePack(_ context.Context, pack contextengine.EvidencePack) (contextengine.EvidencePack, error) {
+	return pack, nil
+}
+
 func (a *ReadOnlyAdapter) laneConfig() contextengine.LaneConfig {
 	var store contextengine.RetrievalStore = laneRetrievalStore{}
 	if a.ceStore != nil {

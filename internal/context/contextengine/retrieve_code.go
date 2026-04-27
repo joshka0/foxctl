@@ -82,6 +82,7 @@ func RetrieveCode(ctx context.Context, cfg LaneConfig, searchFn CodeSearchFunc, 
 		},
 	}
 
+	_ = recordPack(ctx, cfg, pack)
 	_ = recordEpisode(ctx, cfg, query, LaneCode, packID, elapsed.Milliseconds(), len(nodes), nil)
 	return pack, nil
 }

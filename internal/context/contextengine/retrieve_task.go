@@ -54,6 +54,7 @@ func RetrieveTask(ctx context.Context, cfg LaneConfig, taskQueryFn TaskQueryFunc
 				DurationMs: elapsed.Milliseconds(),
 			},
 		}
+		_ = recordPack(ctx, cfg, pack)
 		_ = recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), len(nodes), nil)
 		return pack, nil
 	}
@@ -100,6 +101,7 @@ func RetrieveTask(ctx context.Context, cfg LaneConfig, taskQueryFn TaskQueryFunc
 		},
 	}
 
+	_ = recordPack(ctx, cfg, pack)
 	_ = recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), len(nodes), nil)
 	return pack, nil
 }

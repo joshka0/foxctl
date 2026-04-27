@@ -61,9 +61,10 @@ func TestSmokeContextEngineWiring(t *testing.T) {
 	adapter.SetTaskStore(bs.TaskStore())
 
 	beforeEpisodes := countRows(t, dbPath, "retrieval_episodes")
+	beforePacks := countRows(t, dbPath, "evidence_packs")
 	beforeEvents := countRows(t, dbPath, "context_events")
 	beforeStaleness := countRows(t, dbPath, "staleness_markers")
-	t.Logf("baseline: episodes=%d events=%d staleness=%d", beforeEpisodes, beforeEvents, beforeStaleness)
+	t.Logf("baseline: episodes=%d packs=%d events=%d staleness=%d", beforeEpisodes, beforePacks, beforeEvents, beforeStaleness)
 
 	// retrieve_mixed exercises the most lanes; even when downstream lookups
 	// return zero hits, each lane's wrapper still RecordRetrievalEpisode.
@@ -79,6 +80,14 @@ func TestSmokeContextEngineWiring(t *testing.T) {
 			beforeEpisodes, afterEpisodes)
 	} else {
 		t.Logf("retrieve_mixed recorded %d retrieval_episodes (was %d)", afterEpisodes-beforeEpisodes, beforeEpisodes)
+	}
+
+	afterPacks := countRows(t, dbPath, "evidence_packs")
+	if afterPacks <= beforePacks {
+		t.Errorf("retrieve_mixed did not persist any evidence_packs (before=%d, after=%d) — recordPack likely not wired into lanes",
+			beforePacks, afterPacks)
+	} else {
+		t.Logf("retrieve_mixed persisted %d evidence_packs (was %d)", afterPacks-beforePacks, beforePacks)
 	}
 
 	// --- Phase 3: memoryflow Edit lifecycle → context_events + staleness_markers ---

@@ -73,6 +73,7 @@ func RetrieveMemory(ctx context.Context, cfg LaneConfig, queryFn MemoryQueryFunc
 		},
 	}
 
+	_ = recordPack(ctx, cfg, pack)
 	_ = recordEpisode(ctx, cfg, query, LaneMemory, packID, elapsed.Milliseconds(), len(nodes), nil)
 	return pack, nil
 }

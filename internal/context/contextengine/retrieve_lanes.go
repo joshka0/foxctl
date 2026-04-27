@@ -78,9 +78,11 @@ type LaneConfig struct {
 	WorkspaceID string
 }
 
-// RetrievalStore is the subset of the store interface needed for recording episodes.
+// RetrievalStore is the subset of the store interface needed for recording
+// retrieval episodes and persisting the EvidencePacks they produce.
 type RetrievalStore interface {
 	RecordRetrievalEpisode(ctx context.Context, episode RetrievalEpisode) (RetrievalEpisode, error)
+	PutEvidencePack(ctx context.Context, pack EvidencePack) (EvidencePack, error)
 }
 
 // validateQuery rejects empty queries with a typed error.
@@ -105,5 +107,16 @@ func recordEpisode(ctx context.Context, cfg LaneConfig, query string, lane Evide
 		CreatedAt:     cfg.Clock(),
 	}
 	_, err := cfg.Store.RecordRetrievalEpisode(ctx, episode)
+	return err
+}
+
+// recordPack persists an EvidencePack via the lane store. Best-effort: errors
+// are returned for the caller to swallow, mirroring recordEpisode. Lanes call
+// this unconditionally on the success path before returning a pack.
+func recordPack(ctx context.Context, cfg LaneConfig, pack EvidencePack) error {
+	if cfg.Store == nil {
+		return nil
+	}
+	_, err := cfg.Store.PutEvidencePack(ctx, pack)
 	return err
 }

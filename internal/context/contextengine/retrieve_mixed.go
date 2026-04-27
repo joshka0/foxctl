@@ -118,6 +118,7 @@ func RetrieveMixed(
 		Metadata: packMeta,
 	}
 
+	_ = recordPack(ctx, cfg, pack)
 	_ = recordEpisode(ctx, cfg, query, LaneMixed, packID, elapsed.Milliseconds(), len(fusedNodes), subEpisodeIDs)
 
 	// If ALL lanes failed, return an error.
