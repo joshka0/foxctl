@@ -58,7 +58,7 @@ func (s *VerifierStack) Verify(artifact WorkArtifact, item WorkItem) WorkVerdict
 	}
 
 	var minConfidence float64 = 1.0
-	var allFeedback = make(map[string]any)
+	allFeedback := make(map[string]any)
 	var allDetails []string
 	allPassed := true
 	anyRepairable := false

@@ -14,40 +14,40 @@ const (
 type ProblemArchetype string
 
 const (
-	StatusPending  WorkItemStatus = "pending"
-	StatusReady    WorkItemStatus = "ready"
-	StatusSolving  WorkItemStatus = "solving"
-	StatusSolved   WorkItemStatus = "solved"
-	StatusBlocked  WorkItemStatus = "blocked"
-	StatusFailed   WorkItemStatus = "failed"
+	StatusPending WorkItemStatus = "pending"
+	StatusReady   WorkItemStatus = "ready"
+	StatusSolving WorkItemStatus = "solving"
+	StatusSolved  WorkItemStatus = "solved"
+	StatusBlocked WorkItemStatus = "blocked"
+	StatusFailed  WorkItemStatus = "failed"
 )
 
 type WorkItemStatus string
 
 type WorkItem struct {
-	ID              string         `json:"id"`
-	Goal            string         `json:"goal"`
+	ID              string           `json:"id"`
+	Goal            string           `json:"goal"`
 	Archetype       ProblemArchetype `json:"archetype"`
-	DependsOn       []string       `json:"depends_on,omitempty"`
-	Status          WorkItemStatus `json:"status"`
-	Attempts        int            `json:"attempts"`
-	MaxAttempts     int            `json:"max_attempts,omitempty"`
-	Priority        float64        `json:"priority"`
-	Risk            float64        `json:"risk"`
-	MaxSummaryChars int            `json:"max_summary_chars,omitempty"`
-	Payload         map[string]any `json:"payload,omitempty"`
+	DependsOn       []string         `json:"depends_on,omitempty"`
+	Status          WorkItemStatus   `json:"status"`
+	Attempts        int              `json:"attempts"`
+	MaxAttempts     int              `json:"max_attempts,omitempty"`
+	Priority        float64          `json:"priority"`
+	Risk            float64          `json:"risk"`
+	MaxSummaryChars int              `json:"max_summary_chars,omitempty"`
+	Payload         map[string]any   `json:"payload,omitempty"`
 }
 
 type WorkArtifact struct {
-	WorkItemID      string         `json:"work_item_id"`
-	Status          string         `json:"status"`
-	Answer          any            `json:"answer,omitempty"`
-	Code            string         `json:"code,omitempty"`
-	Derived         map[string]any `json:"derived,omitempty"`
-	Evidence        map[string]any `json:"evidence,omitempty"`
-	Checks          []string       `json:"checks,omitempty"`
+	WorkItemID      string           `json:"work_item_id"`
+	Status          string           `json:"status"`
+	Answer          any              `json:"answer,omitempty"`
+	Code            string           `json:"code,omitempty"`
+	Derived         map[string]any   `json:"derived,omitempty"`
+	Evidence        map[string]any   `json:"evidence,omitempty"`
+	Checks          []string         `json:"checks,omitempty"`
 	Counterexamples []map[string]any `json:"counterexamples,omitempty"`
-	Confidence      float64        `json:"confidence"`
+	Confidence      float64          `json:"confidence"`
 }
 
 type WorkVerdict struct {

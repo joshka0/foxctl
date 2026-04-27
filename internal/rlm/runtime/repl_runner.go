@@ -119,7 +119,7 @@ type REPLRunnerPhase struct {
 	MaxREPLCodeCommentLines    int
 	IncludePriorAssistantText  bool
 	FilterOverlongREPLCode     bool
-	RequireScaffoldContract   bool
+	RequireScaffoldContract    bool
 	FilterREPLCodeMaxTokens    int
 	FilterOverlongOutput       bool
 	FilterOutputMaxTokens      int
