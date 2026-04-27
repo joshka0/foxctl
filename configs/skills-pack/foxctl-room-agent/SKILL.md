@@ -1,6 +1,6 @@
 ---
 name: foxctl-room-agent
-description: "Participant-agent protocol for transport-first rooms: startup, membership checks, inbox/task handling, durable replies, reminders, and escalation."
+description: "Protocol for participant agents in transport-first rooms: join, check membership, handle inbox/tasks, reply durably, and escalate."
 ---
 
 # foxctl-room-agent

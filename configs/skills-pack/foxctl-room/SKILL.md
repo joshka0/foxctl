@@ -1,6 +1,6 @@
 ---
 name: foxctl-room
-description: "Durable multi-agent room coordination with transport-first participant delivery, explicit participant state, optional tmux/zellij viewers, room tasks, and a central room loop."
+description: "Run durable multi-agent rooms with transport-first delivery, participant state, room tasks, and optional tmux or zellij viewers."
 ---
 
 ## What I do

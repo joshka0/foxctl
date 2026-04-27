@@ -67,8 +67,8 @@ foxctl run code/diff --input '{"base": "origin/main", "head": "HEAD"}'
 # Using --input JSON
 foxctl run code/symbols --input '{"path": "file.go"}'
 
-# Using flags directly
-foxctl run code/symbols --path file.go
+# Using direct parameter flags
+foxctl skills run code/symbols --path file.go
 ```
 
 ### Discovery

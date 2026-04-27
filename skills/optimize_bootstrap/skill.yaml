@@ -41,7 +41,7 @@ signature:
       Use optimize/bootstrap to generate few-shot examples for a role.
       Example commands:
         foxctl run optimize/bootstrap --input '{"role":"coder","max_examples":5}'
-        foxctl skills run optimize/bootstrap --role coder --max_examples 5
+        foxctl skills run optimize/bootstrap --role coder --max-examples 5
     workflows:
       - id: bootstrap-examples
         description: "Generate example prompts."

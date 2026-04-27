@@ -39,19 +39,15 @@ type sqlStore struct {
 
 // Open initializes the persistent store rooted at the provided path.
 // Open opens a SQLite-backed job Store at root/jobs.db and applies migrations.
-// If the on-disk database cannot be opened due to a read-only filesystem, Open writes a brief warning to stderr and falls back to an in-memory store.
+// If the on-disk database cannot be opened due to filesystem permissions, Open writes a brief warning to stderr and falls back to an in-memory store.
 // On success it returns the Store; on failure it returns a non-nil error.
 func Open(ctx context.Context, root string) (Store, error) {
 	db, closeFn, err := dbutil.OpenStoreDB(ctx, root, "JOBS", "jobs.db", migrate)
 	if err != nil {
-		// Check if error is due to readonly filesystem
-		if isReadonlyError(err) {
-			// Print helpful warning for sandbox users
-			fmt.Fprintf(os.Stderr, "warning: readonly filesystem detected, using in-memory job store\n")
-			fmt.Fprintf(os.Stderr, "hint: if using Codex, add: --add-dir ~/.foxctl\n")
-			fmt.Fprintf(os.Stderr, "hint: if using Claude Code, this is expected in sandbox mode\n")
+		if isFilesystemAccessError(err) {
+			fmt.Fprintf(os.Stderr, "warning: job store is not writable, using in-memory job store\n")
+			fmt.Fprintf(os.Stderr, "hint: use `foxctl run --ephemeral` for transient skill runs, or set FOXCTL_STORAGE_ROOT/FOXCTL_JOBS_DB_PATH to a writable path\n")
 
-			// Fall back to in-memory database for sandbox environments
 			memDB, memErr := dbutil.OpenSQLiteInMemory(ctx, migrate)
 			if memErr != nil {
 				return nil, fmt.Errorf("jobs: open in-memory db: %w", memErr)
@@ -63,16 +59,22 @@ func Open(ctx context.Context, root string) (Store, error) {
 	return &sqlStore{db: db, close: closeFn}, nil
 }
 
-// isReadonlyError reports whether err represents a readonly-filesystem or readonly-database condition.
-// It returns true when the error string contains known readonly-related substrings, false otherwise.
-func isReadonlyError(err error) bool {
+// isFilesystemAccessError reports whether err represents a local filesystem access
+// failure that should degrade job persistence to an in-memory store. SQLite can
+// surface sandboxed writes as generic "unable to open database file" errors
+// while checking journal mode or creating WAL sidecars, so keep this broader than
+// strictly read-only wording.
+func isFilesystemAccessError(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
+	errStr := strings.ToLower(err.Error())
 	return strings.Contains(errStr, "readonly database") ||
 		strings.Contains(errStr, "read-only file system") ||
-		strings.Contains(errStr, "attempt to write a readonly database")
+		strings.Contains(errStr, "attempt to write a readonly database") ||
+		strings.Contains(errStr, "operation not permitted") ||
+		strings.Contains(errStr, "permission denied") ||
+		strings.Contains(errStr, "unable to open database file")
 }
 
 func (s *sqlStore) Close() error {

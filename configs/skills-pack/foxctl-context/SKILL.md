@@ -1,6 +1,6 @@
 ---
 name: foxctl-context
-description: "ACA control plane, transcript-family history, context architecture, Obsidian knowledge-layer, and refactor scout/advisor workflows for foxctl."
+description: "Foxctl context workflows for ACA, transcript history, context architecture, Obsidian knowledge, and refactor scouting."
 ---
 
 ## What I do

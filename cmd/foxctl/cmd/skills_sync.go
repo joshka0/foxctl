@@ -36,7 +36,7 @@ type skillsSyncChange struct {
 func newSkillsSyncCommand() *cobra.Command {
 	opts := skillsSyncOptions{
 		mode:    "copy",
-		targets: []string{"codex", "gemini", "claude", "factory", "agents", "opencode"},
+		targets: []string{"codex", "gemini", "gemini-home", "claude", "factory", "agents", "opencode"},
 	}
 
 	cmd := &cobra.Command{
@@ -69,7 +69,7 @@ remove legacy agentctl skills or migrate agentctl databases.`,
 	}
 
 	cmd.Flags().StringVar(&opts.sourceDir, "source", "", "Source skills-pack directory (default: nearest configs/skills-pack)")
-	cmd.Flags().StringSliceVar(&opts.targets, "targets", opts.targets, "Comma-separated targets: codex,gemini,claude,factory,agents,opencode")
+	cmd.Flags().StringSliceVar(&opts.targets, "targets", opts.targets, "Comma-separated targets: codex,gemini,gemini-home,claude,factory,agents,opencode")
 	cmd.Flags().StringVar(&opts.mode, "mode", opts.mode, "Install mode: copy or symlink")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "Preview changes without writing files")
 	return cmd
@@ -150,12 +150,13 @@ func resolveSkillsSyncTargets(names []string, foxctlHome string) ([]skillsSyncTa
 		return nil, fmt.Errorf("resolve home: %w", err)
 	}
 	all := map[string]string{
-		"codex":    filepath.Join(home, ".codex", "skills"),
-		"gemini":   filepath.Join(home, ".gemini", "skills"),
-		"claude":   filepath.Join(home, ".claude", "skills"),
-		"factory":  filepath.Join(home, ".factory", "skills"),
-		"agents":   filepath.Join(home, ".agents", "skills"),
-		"opencode": filepath.Join(home, ".opencode", "skills"),
+		"codex":       filepath.Join(home, ".codex", "skills"),
+		"gemini":      filepath.Join(home, ".gemini", "antigravity", "skills"),
+		"gemini-home": filepath.Join(home, ".gemini", "skills"),
+		"claude":      filepath.Join(home, ".claude", "skills"),
+		"factory":     filepath.Join(home, ".factory", "skills"),
+		"agents":      filepath.Join(home, ".agents", "skills"),
+		"opencode":    filepath.Join(home, ".opencode", "skills"),
 	}
 	if strings.TrimSpace(foxctlHome) != "" {
 		all["foxctl"] = filepath.Join(foxctlHome, "skills")

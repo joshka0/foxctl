@@ -17,6 +17,7 @@ RUN apt-get update \
 WORKDIR /workspace
 
 COPY go.mod go.sum ./
+COPY foxprox/go.mod foxprox/go.sum ./foxprox/
 
 # Pre-warm module cache and install tools used by CI
 RUN go mod download \

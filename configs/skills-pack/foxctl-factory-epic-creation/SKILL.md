@@ -1,6 +1,6 @@
 ---
 name: foxctl-factory-epic-creation
-description: "Import a Factory mission into foxctl and normalize it into a canonical room-agile epic creation artifact. Use when converting Factory mission structure, validation, and evidence into a foxctl epic, cross-checking epic-creation Definition of Done, filling missing planning structure, and explicitly stopping before implementation begins."
+description: "Import a Factory mission into foxctl and normalize it into a canonical room-agile epic artifact, stopping before implementation."
 ---
 
 # foxctl-factory-epic-creation

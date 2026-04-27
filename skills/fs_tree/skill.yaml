@@ -56,7 +56,7 @@ signature:
       formatting options.
       Example commands:
         foxctl run fs/tree --input '{"path":".","max_depth":2}'
-        foxctl skills run fs/tree --path . --max_depth 2
+        foxctl skills run fs/tree --path . --max-depth 2
         foxctl run fs/tree --input '{"path":"./src","format":"list","pattern":"*.go"}'
         foxctl skills run fs/tree --path ./src --format list --pattern '*.go'
     workflows:

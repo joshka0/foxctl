@@ -229,6 +229,7 @@ func chooseRLMRunner(
 				},
 			}
 		}
+
 		return rlm.LLMRunner{
 			Tools: adapter,
 			Config: rlm.LLMConfig{

@@ -34,7 +34,7 @@ signature:
       Use graph/pagerank to recompute PageRank scores for graph nodes.
       Example commands:
         foxctl run graph/pagerank --input '{"workspace":"./","damping_factor":0.85}'
-        foxctl skills run graph/pagerank --workspace ./ --damping_factor 0.85
+        foxctl skills run graph/pagerank --workspace ./ --damping-factor 0.85
     workflows:
       - id: recompute
         description: "Recompute PageRank for the current workspace."

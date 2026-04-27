@@ -116,7 +116,7 @@ signature:
       previews when needed.
       Example commands:
         foxctl run text/replace --input '{"pattern":"TODO","replacement":"DONE","paths":["./src"],"dry_run":true}'
-        foxctl skills run text/replace --pattern TODO --replacement DONE --paths ./src --dry_run
+        foxctl skills run text/replace --pattern TODO --replacement DONE --paths ./src --dry-run
         foxctl run text/replace --input '{"pattern":"foo","replacement":"bar","paths":["./README.md"],"literal":true}'
         foxctl skills run text/replace --pattern foo --replacement bar --paths ./README.md --literal
     workflows:

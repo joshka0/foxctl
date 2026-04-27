@@ -58,6 +58,7 @@ This is the canonical map for docs in this repository.
 
 - [docs/plans/README.md](plans/README.md) - Active and current planning docs.
 - [docs/plans/features/eino-go-native-runtime-plan.md](plans/features/eino-go-native-runtime-plan.md) - Eino `AgentEngine` integration + Go-native orchestration runtime; Jido optional.
+- [docs/plans/features/opentui-agent-terminal-facades.md](plans/features/opentui-agent-terminal-facades.md) - Backend facade backlog for a greenfield OpenTUI agent terminal over v2 runtime, room, orchestration, skills, jobs, MCP, and CAS APIs.
 - [docs/plans/gui-agent-improvement-roadmap.md](plans/gui-agent-improvement-roadmap.md) - Converged roadmap for turning `gui-agent` into a coherent operator control plane.
 - [docs/plans/features/v2-skills-parity-plan.md](plans/features/v2-skills-parity-plan.md) - Bring v2 profiles/tooling up to parity with ACA, Obsidian, and newer retrieval surfaces.
 - [docs/plans/features/foxctl-rlm-integration-outline.md](plans/features/foxctl-rlm-integration-outline.md) - Concrete outline for adding an RLM query-time runtime over ACA, companion memory, and repo/vault state.

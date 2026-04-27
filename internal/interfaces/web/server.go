@@ -387,6 +387,11 @@ func (s *Server) Handler() http.Handler {
 	// --- SSE Events ---
 	apiMux.HandleFunc("/api/events", sse.Handler(s.sseHub))
 	apiMux.HandleFunc("/api/logs/cleanup", api.LogCleanupHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/v2/events/stream", api.V2EventsStreamHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/v2/events", api.V2EventsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/v2/model", api.V2ModelHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/v2/runs", api.V2RunsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/v2/runs/", api.V2RunDetailHandler(s.cfg, s.log, s.orchRuntime))
 
 	// --- OAuth AuthBroker Callback ---
 	apiMux.HandleFunc("/api/oauth/callback", api.OAuthCallbackHandler(s.cfg, s.log))
@@ -406,6 +411,7 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/jobs/", api.JobDetailHandler(s.cfg, s.log))
 
 	// --- CAS (Phase 2) ---
+	apiMux.HandleFunc("/api/cas", api.CASHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/cas/", api.CASHandler(s.cfg, s.log))
 
 	// --- Workspaces ---
@@ -419,6 +425,7 @@ func (s *Server) Handler() http.Handler {
 
 	// --- Skills (Phase 4) ---
 	apiMux.HandleFunc("/api/skills", api.SkillsListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/skills/manifest/", api.SkillDetailHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/skills/schema", api.SkillsSchemaHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/skills/run", api.SkillsRunHandler(s.cfg, s.log))
 	// Skill CRUD routes - supports all HTTP methods:
@@ -428,6 +435,10 @@ func (s *Server) Handler() http.Handler {
 	//   PUT    /api/skills/todo/manage/{id}   → update
 	//   DELETE /api/skills/todo/manage/{id}   → delete
 	apiMux.HandleFunc("/api/skills/", api.SkillsCRUDHandler(s.cfg, s.log))
+
+	// --- MCP Facade (read-only) ---
+	apiMux.HandleFunc("/api/mcp/status", api.MCPStatusHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/mcp/tools", api.MCPToolsHandler(s.cfg, s.log))
 
 	// --- Console (Phase 6-8) ---
 	apiMux.HandleFunc("/api/console/sessions", api.ConsoleSessionsHandler(s.consoleSessions, s.cfg, s.log))
@@ -444,6 +455,8 @@ func (s *Server) Handler() http.Handler {
 	// --- Agents (Phase 11) ---
 	apiMux.HandleFunc("/api/agents", api.AgentsListHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/agents/", api.AgentDetailHandlerWithRuntime(s.cfg, s.log, s.sseHub, s.orchRuntime))
+	apiMux.HandleFunc("/api/foxprox", api.FoxproxHandler())
+	apiMux.HandleFunc("/api/foxprox/", api.FoxproxHandler())
 
 	// --- Stats & Insights (Phase 11) ---
 	apiMux.HandleFunc("/api/stats", api.StatsHandler(s.cfg, s.log))
@@ -654,9 +667,9 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	// Route canonical API handlers.
-	mux := http.NewServeMux()
-	mux.Handle("/api/", apiMux)
-	mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
+	apiHandler := http.NewServeMux()
+	apiHandler.Handle("/api/", apiMux)
+	apiHandler.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusGone)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -667,27 +680,35 @@ func (s *Server) Handler() http.Handler {
 			},
 		})
 	})
-	mux.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleTransport))
+	apiHandler.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleTransport))
 
-	// --- Kubernetes Probes (root path, not under /api/) ---
-	mux.HandleFunc("/healthz", api.LivenessHandler())
-	mux.HandleFunc("/readyz", api.ReadinessHandler(s.cfg))
+	// Apply auth middleware to API routes only.
+	// OptionalIdentity always runs so handlers can audit.
+	protected := api.OptionalIdentity(apiHandler)
+	if s.opts.RequireAuth {
+		protected = api.RequireIdentity(protected)
+	}
 
-	// --- Static UI (optional) ---
+	// Public mux for endpoints that bypass auth (probes, static UI).
+	public := http.NewServeMux()
+	public.HandleFunc("/healthz", api.LivenessHandler())
+	public.HandleFunc("/readyz", api.ReadinessHandler(s.cfg))
+
+	// Static UI (optional) — served publicly; the SPA handles its own auth.
 	if s.opts.UIDir != "" {
 		fs := http.FileServer(http.Dir(s.opts.UIDir))
-		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Don't serve static files for API routes
+		public.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// API routes go to the protected handler
 			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
-				http.NotFound(w, r)
+				protected.ServeHTTP(w, r)
 				return
 			}
 			fs.ServeHTTP(w, r)
 		}))
 	} else {
-		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		public.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/ws/") {
-				http.NotFound(w, r)
+				protected.ServeHTTP(w, r)
 				return
 			}
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -695,8 +716,8 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 
-	// Apply middleware
-	h := withCORS(s.opts.DevCORS, mux)
+	// Apply global middleware (CORS, logging) to the public mux.
+	h := withCORS(s.opts.DevCORS, public)
 	h = withRequestLogging(s.log, h)
 	return h
 }

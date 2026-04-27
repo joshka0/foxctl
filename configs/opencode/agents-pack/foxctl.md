@@ -12,7 +12,8 @@ You are the foxctl build agent for OpenCode.
 
 ## Quick Reference
 
-Run: `foxctl run <skill> --input '<json>'` or `foxctl run <skill> --flag value`
+Run: `foxctl run <skill> --input '<json>'` for job-tracked JSON execution, or
+`foxctl skills run <skill> --flag value` for direct parameter flags.
 Help: `--help` | Examples: `--examples` | List: `foxctl skills list`
 
 ## Skills by Category
@@ -84,10 +85,10 @@ foxctl memory list|get|put        # Memories
 
 ```bash
 # Research
-foxctl run code/symbols --path file.go
-foxctl run code/semantic_search --query "task guard" --limit 10
+foxctl run code/symbols --input '{"path":"file.go"}'
+foxctl run code/semantic_search --input '{"query":"task guard","limit":10}'
 
 # Verify
-foxctl run test/run --path ./...
-foxctl run ci/checks --pr 123
+foxctl skills run test/run --path ./...
+foxctl skills run ci/checks --pr 123
 ```

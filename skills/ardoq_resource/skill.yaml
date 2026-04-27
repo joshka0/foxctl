@@ -1,0 +1,251 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: ardoq/resource
+  version: 0.1.0
+  description: "List, summarize, and join Ardoq workspaces, components, references, owner relationships, and transactional batch mutations"
+  tags: ["ardoq", "architecture", "workspace", "component", "reference"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/ardoq_resource/ardoq_resource
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: ardoq/resource
+  parameters:
+    - name: api_host
+      type: string
+      required: false
+      description: "Override ARDOQ_API_HOST for this call, for example https://foxway.ardoq.com"
+    - name: org_label
+      type: string
+      required: false
+      description: "Override ARDOQ_ORG_LABEL for this call"
+    - name: format
+      type: string
+      required: false
+      default: json
+      description: "Output shape inside the standard JSON envelope: json returns full structured data, markdown returns a slim rendered markdown result, text returns a slim tab-separated plain-text result, graph returns Mermaid graph text, ascii returns a terminal tree graph"
+      enum: ["json", "markdown", "text", "graph", "ascii"]
+    - name: format_limit
+      type: integer
+      required: false
+      default: 100
+      description: "Maximum rows to render for formatted list operations"
+    - name: operation
+      type: string
+      required: false
+      description: "Operation: list_workspaces, get_workspace, workspace_context, list_components, get_component, list_references, get_reference, inventory, owner_lookup, batch, upsert_component, upsert_reference"
+      enum: ["list_workspaces", "get_workspace", "workspace_context", "list_components", "get_component", "list_references", "get_reference", "inventory", "owner_lookup", "batch", "upsert_component", "upsert_reference"]
+      default: "list_workspaces"
+    - name: workspaces
+      type: object
+      required: false
+      description: "Options for listing workspaces"
+      properties:
+        name:
+          type: string
+          description: "Workspace name filter"
+        query:
+          type: object
+          description: "Additional Ardoq query parameters"
+    - name: workspace
+      type: object
+      required: false
+      description: "Options for fetching one workspace"
+      properties:
+        id:
+          type: string
+          description: "Ardoq OID"
+    - name: context
+      type: object
+      required: false
+      description: "Options for fetching workspace metamodel context"
+      properties:
+        id:
+          type: string
+          description: "Workspace Ardoq OID"
+    - name: components
+      type: object
+      required: false
+      description: "Options for listing components. Use query for customFields.* filters."
+      properties:
+        root_workspace:
+          type: string
+          description: "Workspace Ardoq OID; sent as rootWorkspace"
+        type_id:
+          type: string
+          description: "Component type identifier; sent as typeId"
+        name:
+          type: string
+          description: "Component name filter"
+        component_key:
+          type: string
+          description: "Component key filter; sent as componentKey"
+        query:
+          type: object
+          description: "Additional Ardoq query parameters such as customFields.external_id"
+    - name: component
+      type: object
+      required: false
+      description: "Options for fetching one component"
+      properties:
+        id:
+          type: string
+          description: "Ardoq OID"
+    - name: references
+      type: object
+      required: false
+      description: "Options for listing references. Use query for customFields.* filters."
+      properties:
+        root_workspace:
+          type: string
+          description: "Source workspace Ardoq OID; sent as rootWorkspace"
+        target_workspace:
+          type: string
+          description: "Target workspace Ardoq OID; sent as targetWorkspace"
+        source:
+          type: string
+          description: "Source component identifier"
+        target:
+          type: string
+          description: "Target component identifier"
+        type:
+          type: string
+          description: "Reference type identifier"
+        query:
+          type: object
+          description: "Additional Ardoq query parameters such as customFields.external_id"
+    - name: reference
+      type: object
+      required: false
+      description: "Options for fetching one reference"
+      properties:
+        id:
+          type: string
+          description: "Ardoq OID"
+    - name: inventory
+      type: object
+      required: false
+      description: "Options for inventory summaries that join workspaces with component counts and type counts"
+      properties:
+        include_empty:
+          type: boolean
+          description: "Include workspaces with no returned components"
+    - name: owner_lookup
+      type: object
+      required: false
+      description: "Find components owned by a person by resolving Person components, reference type names, workspaces, components, and references"
+      properties:
+        name:
+          type: string
+          description: "Person component name, for example Robert Kaev"
+        email:
+          type: string
+          description: "Person email matched against user_principal_name or contact_email"
+        person_id:
+          type: string
+          description: "Exact Person component Ardoq OID"
+        reference_type_names:
+          type: array
+          items:
+            type: string
+          description: "Explicit ownership relationship names. Defaults to Owns, Technical Owner, Technical owner of, Business owner of, Product owner of"
+        include_expert:
+          type: boolean
+          description: "Also include Is expert in relationships"
+    - name: batch
+      type: object
+      required: false
+      description: "Raw Ardoq Batch API request body for transactional create/update/upsert/delete operations"
+      properties:
+        body:
+          type: object
+          description: "Body sent to POST /api/v2/batch"
+    - name: upsert_component
+      type: object
+      required: false
+      description: "Convenience wrapper for one Batch API component upsert"
+      properties:
+        batch_id:
+          type: string
+          description: "Optional batchId used to reference this component in the same batch response"
+        unique_by:
+          type: array
+          items:
+            type: string
+          description: "Ardoq uniqueBy fields, for example ['customFields.external_id', 'rootWorkspace'] or ['name', 'rootWorkspace']"
+        body:
+          type: object
+          description: "Component body, including rootWorkspace, typeId, name, and optional customFields"
+        aliases:
+          type: object
+          description: "Optional Ardoq batch aliases object"
+    - name: upsert_reference
+      type: object
+      required: false
+      description: "Convenience wrapper for one Batch API reference upsert"
+      properties:
+        batch_id:
+          type: string
+          description: "Optional batchId used to reference this reference in the same batch response"
+        unique_by:
+          type: array
+          items:
+            type: string
+          description: "Ardoq uniqueBy fields, for example ['source', 'target', 'type'] or ['customFields.external_id', 'source.rootWorkspace']"
+        body:
+          type: object
+          description: "Reference body, including source, target, type, and optional customFields"
+        aliases:
+          type: object
+          description: "Optional Ardoq batch aliases object"
+  help:
+    short: "Use the Ardoq Public API for workspaces, components, references, and batch mutations"
+    long: |
+      Requires ARDOQ_API_TOKEN. ARDOQ_ORG_LABEL and ARDOQ_API_HOST can be set as environment variables or passed as org_label/api_host.
+
+      Ardoq's component and reference POST/PATCH endpoints are deprecated in favor of the transactional Batch API, so this skill exposes direct read operations, joined reporting operations, and writes through batch/upsert helpers.
+
+      Examples:
+        foxctl run ardoq/resource --input '{"api_host":"https://foxway.ardoq.com","org_label":"FOXWAY","operation":"inventory"}'
+        foxctl run ardoq/resource --input '{"api_host":"https://foxway.ardoq.com","org_label":"FOXWAY","operation":"inventory","format":"markdown"}'
+        foxctl run ardoq/resource --input '{"api_host":"https://foxway.ardoq.com","org_label":"FOXWAY","operation":"inventory","format":"graph","format_limit":10}'
+        foxctl run ardoq/resource --input '{"api_host":"https://foxway.ardoq.com","org_label":"FOXWAY","operation":"inventory","format":"ascii","format_limit":10}'
+        foxctl run ardoq/resource --input '{"api_host":"https://foxway.ardoq.com","org_label":"FOXWAY","operation":"owner_lookup","owner_lookup":{"name":"Robert Kaev"}}'
+        foxctl run ardoq/resource --input '{"api_host":"https://foxway.ardoq.com","org_label":"FOXWAY","operation":"owner_lookup","owner_lookup":{"name":"Robert Kaev"},"format":"graph"}'
+        foxctl run ardoq/resource --input '{"api_host":"https://foxway.ardoq.com","org_label":"FOXWAY","operation":"owner_lookup","owner_lookup":{"name":"Robert Kaev"},"format":"ascii"}'
+        foxctl run ardoq/resource --input '{"api_host":"https://foxway.ardoq.com","org_label":"FOXWAY","operation":"owner_lookup","owner_lookup":{"name":"Robert Kaev"},"format":"text"}'
+        foxctl run ardoq/resource --input '{"operation":"list_components","components":{"root_workspace":"91ab09087115f76e365134c5","query":{"customFields.external_id":"svc-api"}}}'
+        foxctl run ardoq/resource --input '{"operation":"upsert_component","upsert_component":{"unique_by":["customFields.external_id","rootWorkspace"],"body":{"rootWorkspace":"91ab09087115f76e365134c5","typeId":"p1024822409134","name":"API Service","customFields":{"external_id":"svc-api"}}}}'
+returns:
+  - name: operation
+    type: string
+    description: "The operation that was performed"
+  - name: summary
+    type: string
+    description: "Human-readable operation summary"
+  - name: component_summary
+    type: string
+    description: "Markdown table for inventory output"
+  - name: ownership_summary
+    type: string
+    description: "Markdown table for owner_lookup output"
+  - name: rendered
+    type: string
+    description: "Human-ready formatted output when format is markdown, text, graph, or ascii"
+  - name: artifact
+    type: string
+    description: "CAS digest if the response exceeds inline output limits"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

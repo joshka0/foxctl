@@ -229,6 +229,45 @@ func TestLLMRunnerPreservesStopReasonBeforeAssistantResponse(t *testing.T) {
 	}
 }
 
+func TestLLMRunnerPreservesCancelledBeforeAssistantResponse(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called when context is already cancelled")
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	runner := LLMRunner{
+		Tools: fakeLLMToolExecutor{},
+		Config: LLMConfig{
+			Provider:      "lmstudio",
+			APIKey:        "lm-studio",
+			BaseURL:       server.URL + "/v1",
+			Model:         "test-model",
+			Timeout:       5 * time.Second,
+			MaxIterations: 2,
+		},
+	}
+
+	_, err := runner.Run(ctx, Task{
+		Prompt:        "inspect auth flow",
+		WorkspaceRoot: "/tmp/workspace",
+		MaxIterations: 2,
+	}, Environment{
+		Tools: []Tool{{Name: "search_repo", Description: "repo", ReadOnly: true}},
+	})
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	want := "rlm llm runner: cancelled before assistant response: context deadline exceeded"
+	if err.Error() != want {
+		t.Fatalf("err=%v want %q", err, want)
+	}
+}
+
 func TestLLMRunnerRequireToolUseRejectsZeroToolCallAnswer(t *testing.T) {
 	t.Parallel()
 

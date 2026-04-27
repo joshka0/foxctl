@@ -422,6 +422,54 @@ func TestTabsOnChangeCallback(t *testing.T) {
 	}
 }
 
+func TestTabsNoOnChangeWhenAlreadyAtBoundary(t *testing.T) {
+	t.Parallel()
+	labels := []string{"Agents", "Rooms", "Events"}
+
+	// Already at first tab: moveFirst should NOT fire onChange.
+	var calls []int
+	tabs := NewTabs(labels, 40,
+		WithTabsFocused(true),
+		WithTabsActiveIndex(0),
+		WithTabsOnChange(func(idx int) { calls = append(calls, idx) }),
+	)
+
+	tabs.HandleKey(tui.KeyEvent{Key: tui.KeyHome})
+	if len(calls) != 0 {
+		t.Errorf("moveFirst at already-first: expected 0 onChange calls, got %v", calls)
+	}
+
+	// Already at last tab: moveLast should NOT fire onChange.
+	tabs2 := NewTabs(labels, 40,
+		WithTabsFocused(true),
+		WithTabsActiveIndex(2),
+		WithTabsOnChange(func(idx int) { calls = append(calls, idx) }),
+	)
+
+	tabs2.HandleKey(tui.KeyEvent{Key: tui.KeyEnd})
+	if len(calls) != 0 {
+		t.Errorf("moveLast at already-last: expected 0 onChange calls, got %v", calls)
+	}
+
+	// Verify that moveFirst/moveLast DO fire when the index actually changes.
+	tabs3 := NewTabs(labels, 40,
+		WithTabsFocused(true),
+		WithTabsActiveIndex(1),
+		WithTabsOnChange(func(idx int) { calls = append(calls, idx) }),
+	)
+
+	tabs3.HandleKey(tui.KeyEvent{Key: tui.KeyHome})
+	if len(calls) != 1 || calls[0] != 0 {
+		t.Errorf("moveFirst from middle: expected [0], got %v", calls)
+	}
+
+	calls = nil
+	tabs3.HandleKey(tui.KeyEvent{Key: tui.KeyEnd})
+	if len(calls) != 1 || calls[0] != 2 {
+		t.Errorf("moveLast from middle: expected [2], got %v", calls)
+	}
+}
+
 // --- Tests: Clamping ---
 
 func TestTabsActiveIndexClamped(t *testing.T) {

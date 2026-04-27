@@ -419,6 +419,24 @@ Current high-signal docs:
 - [docs/guides/kubernetes.md](docs/guides/kubernetes.md)
 - [docs/spec/agent_hierarchy.md](docs/spec/agent_hierarchy.md)
 
+## foxprox
+
+`foxprox/` is a self-contained Go module (`github.com/joshka/foxprox`) implementing
+the Foxprox agent terminal coordination protocol — a local-first daemon for PTY-backed
+sessions, multi-agent rooms, typed intents, and structured message delivery.
+
+It lives in this repo via a `go.mod` replace directive and is wired into the foxctl
+web server through a thin bridge layer (`internal/interfaces/foxproxbridge/`). The
+module is fully independent: it has its own `go.mod`, its own tests, and can be
+split into a separate repository at any point via `git subtree split`.
+
+Key commands built from the module:
+
+- `foxproxd` — the daemon
+- `foxproxctl` — CLI client (sessions, rooms, messages)
+
+Protocol spec: [foxprox/docs/Foxprox-v0.1.md](foxprox/docs/Foxprox-v0.1.md)
+
 ## License
 
 Apache License 2.0

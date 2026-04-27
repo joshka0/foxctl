@@ -1,6 +1,6 @@
 ---
 name: hard-cut
-description: "Apply a deliberate breaking change with one canonical contract and no compatibility layer. Use when replacing old names, shapes, routes, fields, or product language and the goal is to remove legacy support rather than preserve it."
+description: "Deliberately replace a legacy contract with one canonical shape and no compatibility layer for names, fields, routes, or product language."
 ---
 
 ## What I do

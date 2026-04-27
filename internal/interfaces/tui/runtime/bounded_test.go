@@ -129,17 +129,37 @@ func TestBounded_ConfigurableBufferSize(t *testing.T) {
 
 // TestBounded_StopIsIdempotent verifies (ii): Stop() is safe to call
 // concurrently twice without panic and completes within 100ms.
+// Uses channel-based synchronization instead of time.Sleep so the test
+// is deterministic and not flaky under load.
 func TestBounded_StopIsIdempotent(t *testing.T) {
 	t.Parallel()
 
+	// Synchronize via a channel instead of time.Sleep: the handler signals
+	// when it has been invoked, proving the runtime goroutine is alive.
+	handlerStarted := make(chan struct{})
 	b, err := NewBounded[simpleReq, simpleUpd](
 		context.Background(),
 		4,
 		4,
-		simpleHandler,
+		func(ctx context.Context, req simpleReq) simpleUpd {
+			close(handlerStarted)
+			return simpleUpd{Val: req.Val * 2}
+		},
 	)
 	if err != nil {
 		t.Fatalf("NewBounded error: %v", err)
+	}
+
+	// Enqueue one item and wait for the handler to start, proving the
+	// runtime goroutine is alive. This is deterministic — no sleep.
+	if err := b.Enqueue(context.Background(), simpleReq{Val: 1}); err != nil {
+		t.Fatalf("Enqueue error: %v", err)
+	}
+	select {
+	case <-handlerStarted:
+		// Handler is running; runtime is alive.
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not start within 2s")
 	}
 
 	start := time.Now()
@@ -159,6 +179,8 @@ func TestBounded_StopIsIdempotent(t *testing.T) {
 	if elapsed > 100*time.Millisecond {
 		t.Fatalf("concurrent double Stop took %v, want <100ms", elapsed)
 	}
+
+	_ = drainUpdates(t, b.Updates())
 }
 
 // TestBounded_EnqueueOnStoppedReturnsErrStopped verifies (iii): Enqueue on a

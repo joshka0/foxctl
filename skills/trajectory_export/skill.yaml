@@ -58,7 +58,7 @@ signature:
       Use trajectory/export to export stored trajectories.
       Example commands:
         foxctl run trajectory/export --input '{"workspace_id":"default","limit":10}'
-        foxctl skills run trajectory/export --workspace_id default --limit 10
+        foxctl skills run trajectory/export --workspace-id default --limit 10
     workflows:
       - id: export-trajectories
         description: "Export the latest trajectories."

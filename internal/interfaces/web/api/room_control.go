@@ -18,17 +18,27 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/blackboard"
 	"github.com/joshka0/foxctl/internal/storage/coordination"
 	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
+	coreorchestration "github.com/joshka0/foxctl/internal/v2/core/orchestration"
 )
 
 type roomStatusParticipantResponse struct {
-	ActorID              string                   `json:"actor_id"`
-	Role                 string                   `json:"role,omitempty"`
-	LastActiveAt         *time.Time               `json:"last_active_at,omitempty"`
-	Status               string                   `json:"status"`
-	AssignedTaskCount    int                      `json:"assigned_task_count"`
-	OwnedTaskCount       int                      `json:"owned_task_count"`
-	ActionableInboxCount int                      `json:"actionable_inbox_count"`
-	LatestActionable     *roomStatusEntryResponse `json:"latest_actionable,omitempty"`
+	ActorID              string                       `json:"actor_id"`
+	Role                 string                       `json:"role,omitempty"`
+	Backend              string                       `json:"backend,omitempty"`
+	Session              string                       `json:"session,omitempty"`
+	PaneID               string                       `json:"pane_id,omitempty"`
+	Unbound              bool                         `json:"unbound,omitempty"`
+	TransportEndpoint    string                       `json:"transport_endpoint,omitempty"`
+	TransportKind        string                       `json:"transport_kind,omitempty"`
+	DeliveryBinding      *RoomDeliveryBindingResponse `json:"delivery_binding,omitempty"`
+	TransportStatus      string                       `json:"transport_status,omitempty"`
+	RuntimeBindingStatus string                       `json:"runtime_binding_status,omitempty"`
+	LastActiveAt         *time.Time                   `json:"last_active_at,omitempty"`
+	Status               string                       `json:"status"`
+	AssignedTaskCount    int                          `json:"assigned_task_count"`
+	OwnedTaskCount       int                          `json:"owned_task_count"`
+	ActionableInboxCount int                          `json:"actionable_inbox_count"`
+	LatestActionable     *roomStatusEntryResponse     `json:"latest_actionable,omitempty"`
 }
 
 type roomTaskPulseSummaryResponse struct {
@@ -142,6 +152,51 @@ type roomLoopDeliveryTraceResponse struct {
 	CursorAfterMessageID    string     `json:"cursor_after_message_id,omitempty"`
 	CursorAdvanced          bool       `json:"cursor_advanced,omitempty"`
 	ObservedAt              *time.Time `json:"observed_at,omitempty"`
+}
+
+type roomControlSnapshotLoopHealthResponse struct {
+	Status      string `json:"status"`
+	Reason      string `json:"reason,omitempty"`
+	LastTickAge string `json:"last_tick_age,omitempty"`
+}
+
+type roomControlSnapshotInboxResponse struct {
+	ActorID          string                    `json:"actor_id"`
+	Count            int                       `json:"count"`
+	AckRequired      int                       `json:"ack_required"`
+	ReplyExpected    int                       `json:"reply_expected"`
+	LatestActionable []roomStatusEntryResponse `json:"latest_actionable,omitempty"`
+}
+
+type roomControlSnapshotMessageResponse struct {
+	ID               string                   `json:"id"`
+	TaskID           string                   `json:"task_id,omitempty"`
+	RelatedMessageID string                   `json:"related_message_id,omitempty"`
+	Sender           string                   `json:"sender"`
+	Recipient        string                   `json:"recipient"`
+	Subject          string                   `json:"subject"`
+	Kind             agent.BoardMessageKind   `json:"kind"`
+	Status           agent.BoardMessageStatus `json:"status"`
+	AckRequired      bool                     `json:"ack_required,omitempty"`
+	ReplyExpected    bool                     `json:"reply_expected,omitempty"`
+	Priority         int                      `json:"priority"`
+	CreatedAt        time.Time                `json:"created_at"`
+	Preview          string                   `json:"preview,omitempty"`
+}
+
+type roomLinkedOrchestrationCardResponse struct {
+	IssueID         string                         `json:"issue_id"`
+	IssueIdentifier string                         `json:"issue_identifier,omitempty"`
+	Title           string                         `json:"title,omitempty"`
+	State           coreorchestration.State        `json:"state"`
+	Lane            coreorchestration.Lane         `json:"lane,omitempty"`
+	TrackerState    string                         `json:"tracker_state,omitempty"`
+	PolicyStatus    coreorchestration.PolicyStatus `json:"policy_status,omitempty"`
+	LastOutcome     coreorchestration.Outcome      `json:"last_outcome,omitempty"`
+	Eligibility     coreorchestration.Eligibility  `json:"eligibility,omitempty"`
+	RunID           string                         `json:"run_id,omitempty"`
+	AgentID         string                         `json:"agent_id,omitempty"`
+	LinkedTaskID    string                         `json:"linked_task_id,omitempty"`
 }
 
 type roomLoopPatchRequest struct {
@@ -274,6 +329,304 @@ func handleRoomStatusGet(w http.ResponseWriter, r *http.Request, cfg config.Conf
 		"action_required": apiBuildRoomStatusActionRequired(summary, messages, tasks, backlog, taskPulse, filters, staleAfter, now, verbose),
 		"loop":            apiConvertRoomLoop(loop),
 	})
+}
+
+func handleRoomControlSnapshotGet(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+	workspaceID := roomWorkspaceID(r)
+	if workspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id required")
+		return
+	}
+	actorID := strings.TrimSpace(r.URL.Query().Get("actor_id"))
+	if actorID == "" {
+		httpError(w, http.StatusBadRequest, "actor_id required")
+		return
+	}
+	taskFilter := strings.TrimSpace(r.URL.Query().Get("task_id"))
+	issueFilter := strings.TrimSpace(r.URL.Query().Get("issue_id"))
+
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+
+	summary, messages, err := apiLoadRoomState(r.Context(), store, workspaceID, roomID, actorID, apiRoomTaskScanLimit)
+	if err != nil {
+		if errors.Is(err, blackboard.ErrRoomNotFound) {
+			httpError(w, http.StatusNotFound, "room not found")
+			return
+		}
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room snapshot state")
+		httpError(w, http.StatusInternalServerError, "failed to load room snapshot")
+		return
+	}
+	if !apiRoomHasParticipant(summary, actorID) && !apiRoomIsLocalSuperuser(actorID) {
+		httpError(w, http.StatusForbidden, "only current room members can inspect room control snapshot")
+		return
+	}
+
+	taskStore, err := taskstore.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open task store")
+		httpError(w, http.StatusInternalServerError, "failed to open task store")
+		return
+	}
+	defer taskStore.Close()
+
+	tasks, err := apiListRoomTasks(r.Context(), taskStore, ws.CanonicalID(workspaceID), messages, "")
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to list room tasks")
+		httpError(w, http.StatusInternalServerError, "failed to load room tasks")
+		return
+	}
+	tasks = apiFilterRoomTasksByID(tasks, taskFilter)
+	taskSet := make(map[string]struct{}, len(tasks))
+	taskPayload := make([]roomTaskResponse, 0, len(tasks))
+	for _, task := range tasks {
+		taskSet[strings.TrimSpace(task.ID)] = struct{}{}
+		taskPayload = append(taskPayload, convertRoomTask(task))
+	}
+
+	coordStore, err := coordination.Open(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open coordination store")
+		httpError(w, http.StatusInternalServerError, "failed to open coordination store")
+		return
+	}
+	defer coordStore.Close()
+
+	loop, err := apiLoadRoomLoop(r.Context(), coordStore, workspaceID, roomID)
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to load room loop")
+		httpError(w, http.StatusInternalServerError, "failed to load room loop")
+		return
+	}
+	reminders, err := coordStore.ListRoomReminders(r.Context(), workspaceID, strings.TrimSpace(roomID), false)
+	if err != nil {
+		log.Error().Err(err).Str("room_id", roomID).Msg("failed to list room reminders")
+		httpError(w, http.StatusInternalServerError, "failed to load room reminders")
+		return
+	}
+	reminderPayload := make([]RoomReminderResponse, 0, len(reminders))
+	for _, reminder := range reminders {
+		reminderPayload = append(reminderPayload, convertRoomReminder(reminder))
+	}
+
+	inboxEntries := apiBuildRoomStatusEntries(actorID, messages)
+	if len(inboxEntries) > 25 {
+		inboxEntries = inboxEntries[:25]
+	}
+	cards, cardsErr := apiLoadRoomLinkedOrchestrationCards(r.Context(), cfg, workspaceID, taskSet, issueFilter)
+	if cardsErr != nil {
+		log.Warn().Err(cardsErr).Str("room_id", roomID).Msg("failed to load linked orchestration cards for room snapshot")
+	}
+
+	response := map[string]any{
+		"room":                       convertRoomSummary(summary),
+		"participants":               apiBuildRoomStatusParticipants(summary, messages, tasks, loop.TaskStaleAfter),
+		"loop":                       apiConvertRoomLoop(loop),
+		"loop_health":                apiBuildRoomLoopHealthSnapshot(r.Context(), coordStore, loop, time.Now().UTC()),
+		"inbox":                      apiBuildRoomControlSnapshotInbox(actorID, inboxEntries),
+		"tasks":                      taskPayload,
+		"task_count":                 len(taskPayload),
+		"reminders":                  reminderPayload,
+		"messages":                   apiBuildRoomControlSnapshotMessages(messages, taskFilter),
+		"linked_orchestration_cards": cards,
+		"task_card_link":             "issue_id_equals_task_id",
+	}
+	if taskFilter != "" {
+		response["task_filter"] = taskFilter
+	}
+	if issueFilter != "" {
+		response["issue_filter"] = issueFilter
+	}
+	if cardsErr != nil {
+		response["orchestration_cards_error"] = cardsErr.Error()
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func apiBuildRoomControlSnapshotInbox(actorID string, entries []roomInboxEntryResponse) roomControlSnapshotInboxResponse {
+	resp := roomControlSnapshotInboxResponse{
+		ActorID:          actorID,
+		Count:            len(entries),
+		LatestActionable: make([]roomStatusEntryResponse, 0, len(entries)),
+	}
+	for _, entry := range entries {
+		for _, flag := range entry.Flags {
+			switch flag {
+			case "ACK-REQUIRED":
+				resp.AckRequired++
+			case "REPLY-EXPECTED":
+				resp.ReplyExpected++
+			}
+		}
+		resp.LatestActionable = append(resp.LatestActionable, apiRoomStatusEntryFromInbox(entry))
+	}
+	return resp
+}
+
+func apiBuildRoomControlSnapshotMessages(messages []agent.BoardMessage, taskFilter string) []roomControlSnapshotMessageResponse {
+	filtered := make([]agent.BoardMessage, 0, len(messages))
+	for _, message := range messages {
+		if taskFilter != "" && strings.TrimSpace(message.TaskID) != taskFilter {
+			continue
+		}
+		filtered = append(filtered, message)
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if !filtered[i].CreatedAt.Equal(filtered[j].CreatedAt) {
+			return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+		}
+		return filtered[i].ID > filtered[j].ID
+	})
+	if len(filtered) > 25 {
+		filtered = filtered[:25]
+	}
+	resp := make([]roomControlSnapshotMessageResponse, 0, len(filtered))
+	for _, message := range filtered {
+		resp = append(resp, roomControlSnapshotMessageResponse{
+			ID:               strings.TrimSpace(message.ID),
+			TaskID:           strings.TrimSpace(message.TaskID),
+			RelatedMessageID: strings.TrimSpace(message.RelatedMessageID),
+			Sender:           strings.TrimSpace(message.Sender),
+			Recipient:        strings.TrimSpace(message.Recipient),
+			Subject:          strings.TrimSpace(message.Subject),
+			Kind:             message.Kind,
+			Status:           message.Status,
+			AckRequired:      message.AckRequired,
+			ReplyExpected:    message.ReplyExpected,
+			Priority:         message.Priority,
+			CreatedAt:        message.CreatedAt.UTC(),
+			Preview:          apiSummarizeRoomPreview(message.Body),
+		})
+	}
+	return resp
+}
+
+func apiBuildRoomLoopHealthSnapshot(ctx context.Context, store *coordination.Store, loop coordination.RoomLoop, now time.Time) roomControlSnapshotLoopHealthResponse {
+	if !loop.Enabled {
+		return roomControlSnapshotLoopHealthResponse{
+			Status: "stale",
+			Reason: "loop is disabled",
+		}
+	}
+	if loop.LastTickAt == nil || loop.LastTickAt.IsZero() {
+		return roomControlSnapshotLoopHealthResponse{
+			Status: "missing_heartbeat",
+			Reason: "no heartbeat recorded",
+		}
+	}
+	tickAge := now.Sub(loop.LastTickAt.UTC())
+	if tickAge > apiRoomLoopHeartbeatGrace {
+		return roomControlSnapshotLoopHealthResponse{
+			Status:      "stale",
+			Reason:      "heartbeat is stale",
+			LastTickAge: tickAge.Round(time.Second).String(),
+		}
+	}
+	if strings.TrimSpace(loop.DeliveryLeaseName) == "" || strings.TrimSpace(loop.DeliveryOwnerID) == "" {
+		return roomControlSnapshotLoopHealthResponse{
+			Status:      "missing_owner",
+			Reason:      "delivery owner is missing",
+			LastTickAge: tickAge.Round(time.Second).String(),
+		}
+	}
+	lease, err := store.GetLease(ctx, loop.DeliveryLeaseName)
+	if err != nil || lease == nil {
+		return roomControlSnapshotLoopHealthResponse{
+			Status:      "missing_owner",
+			Reason:      "delivery owner lease is unavailable",
+			LastTickAge: tickAge.Round(time.Second).String(),
+		}
+	}
+	if strings.TrimSpace(lease.OwnerID) != strings.TrimSpace(loop.DeliveryOwnerID) || now.After(lease.ExpiresAt.UTC()) {
+		return roomControlSnapshotLoopHealthResponse{
+			Status:      "missing_owner",
+			Reason:      "delivery owner lease is stale",
+			LastTickAge: tickAge.Round(time.Second).String(),
+		}
+	}
+	return roomControlSnapshotLoopHealthResponse{
+		Status:      "active",
+		LastTickAge: tickAge.Round(time.Second).String(),
+	}
+}
+
+func apiLoadRoomLinkedOrchestrationCards(ctx context.Context, cfg config.Config, workspaceID string, taskSet map[string]struct{}, issueFilter string) ([]roomLinkedOrchestrationCardResponse, error) {
+	if len(taskSet) == 0 && strings.TrimSpace(issueFilter) == "" {
+		return []roomLinkedOrchestrationCardResponse{}, nil
+	}
+
+	store, closeFn, err := openOrchestrationStore(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = closeFn() }()
+
+	board, err := store.Board(ctx, coreorchestration.BoardRequest{
+		WorkspaceID: strings.TrimSpace(workspaceID),
+		Limit:       200,
+	})
+	if err != nil {
+		return nil, err
+	}
+	issueFilter = strings.TrimSpace(issueFilter)
+
+	// TODO(opentui-facades): replace issue_id==task_id linkage with explicit room-task-card joins once schema work lands.
+	cards := make([]roomLinkedOrchestrationCardResponse, 0, len(taskSet))
+	for _, lane := range board.Lanes {
+		for _, card := range lane.Cards {
+			if issueFilter != "" && card.IssueID != issueFilter {
+				continue
+			}
+			if issueFilter == "" && len(taskSet) > 0 {
+				if _, ok := taskSet[strings.TrimSpace(card.IssueID)]; !ok {
+					continue
+				}
+			}
+			linkedTaskID := ""
+			if _, ok := taskSet[strings.TrimSpace(card.IssueID)]; ok {
+				linkedTaskID = strings.TrimSpace(card.IssueID)
+			}
+			cards = append(cards, roomLinkedOrchestrationCardResponse{
+				IssueID:         strings.TrimSpace(card.IssueID),
+				IssueIdentifier: strings.TrimSpace(card.IssueIdentifier),
+				Title:           strings.TrimSpace(card.Title),
+				State:           card.State,
+				Lane:            card.Lane,
+				TrackerState:    strings.TrimSpace(card.TrackerState),
+				PolicyStatus:    card.PolicyStatus,
+				LastOutcome:     card.LastOutcome,
+				Eligibility:     card.Eligibility,
+				RunID:           strings.TrimSpace(card.RunID),
+				AgentID:         strings.TrimSpace(card.AgentID),
+				LinkedTaskID:    linkedTaskID,
+			})
+		}
+	}
+	sort.SliceStable(cards, func(i, j int) bool {
+		return cards[i].IssueID < cards[j].IssueID
+	})
+	return cards, nil
+}
+
+func apiFilterRoomTasksByID(tasks []taskstore.Task, taskID string) []taskstore.Task {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return tasks
+	}
+	out := make([]taskstore.Task, 0, 1)
+	for _, task := range tasks {
+		if strings.TrimSpace(task.ID) != taskID {
+			continue
+		}
+		out = append(out, task)
+	}
+	return out
 }
 
 func handleRoomInboxGet(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
@@ -546,7 +899,7 @@ func handleRoomLoopGet(w http.ResponseWriter, r *http.Request, cfg config.Config
 	})
 }
 
-func handleRoomLoopPatch(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID string) {
+func handleRoomLoopPatch(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, events roomEventPublisher, roomID string) {
 	var req roomLoopPatchRequest
 	if err := readJSON(w, r, &req); err != nil {
 		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -613,6 +966,15 @@ func handleRoomLoopPatch(w http.ResponseWriter, r *http.Request, cfg config.Conf
 		httpError(w, http.StatusInternalServerError, "failed to update room loop")
 		return
 	}
+	publishRoomInvalidationEvent(events, "room.loop.updated", roomInvalidationEvent{
+		WorkspaceID: req.WorkspaceID,
+		RoomID:      strings.TrimSpace(roomID),
+		Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Mutation:    "loop",
+		Action:      "patch",
+		ActorID:     req.ActorID,
+		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"room_id": roomID,
 		"loop":    apiConvertRoomLoop(persisted),
@@ -885,7 +1247,7 @@ func handleRoomMessagesResolveBulk(w http.ResponseWriter, r *http.Request, cfg c
 	})
 }
 
-func handleRoomTaskAction(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, roomID, taskID, action string) {
+func handleRoomTaskAction(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger, events roomEventPublisher, roomID, taskID, action string) {
 	var req roomTaskActionRequest
 	if err := readJSON(w, r, &req); err != nil {
 		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -971,6 +1333,16 @@ func handleRoomTaskAction(w http.ResponseWriter, r *http.Request, cfg config.Con
 		httpError(w, http.StatusInternalServerError, "failed to update room task")
 		return
 	}
+	publishRoomInvalidationEvent(events, "room.task.updated", roomInvalidationEvent{
+		WorkspaceID: req.WorkspaceID,
+		RoomID:      strings.TrimSpace(roomID),
+		Stream:      agent.RoomStreamName(strings.TrimSpace(roomID)),
+		Mutation:    "task",
+		Action:      strings.ToLower(strings.TrimSpace(action)),
+		ActorID:     req.ActorID,
+		TaskID:      strings.TrimSpace(task.ID),
+		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
+	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"room_id": roomID,
@@ -1802,6 +2174,14 @@ func apiBuildRoomTaskPulseSummary(tasks []taskstore.Task, now time.Time, staleAf
 
 func apiBuildRoomStatusParticipants(room agent.RoomSummary, messages []agent.BoardMessage, tasks []taskstore.Task, staleAfter time.Duration) []roomStatusParticipantResponse {
 	latestBySender := apiLatestRoomSenderActivity(messages)
+	memberByActor := make(map[string]agent.RoomMember, len(room.Members))
+	for _, member := range room.Members {
+		key := strings.TrimSpace(member.ActorID)
+		if key == "" {
+			continue
+		}
+		memberByActor[key] = member
+	}
 	participantSet := map[string]struct{}{}
 	for _, member := range room.Members {
 		if id := strings.TrimSpace(member.ActorID); id != "" {
@@ -1816,10 +2196,36 @@ func apiBuildRoomStatusParticipants(room agent.RoomSummary, messages []agent.Boa
 	now := time.Now().UTC()
 	participants := make([]roomStatusParticipantResponse, 0, len(participantSet))
 	for actorID := range participantSet {
+		member := memberByActor[actorID]
 		p := roomStatusParticipantResponse{
 			ActorID: actorID,
 			Role:    apiRoomMemberRole(room.Members, actorID),
 			Status:  "idle",
+			Backend: strings.TrimSpace(member.Backend),
+			Session: strings.TrimSpace(member.Session),
+			PaneID:  strings.TrimSpace(member.PaneID),
+			Unbound: member.Unbound,
+			TransportEndpoint: strings.TrimSpace(firstNonEmpty(
+				member.TransportEndpoint,
+				func() string {
+					if member.DeliveryBinding == nil {
+						return ""
+					}
+					return member.DeliveryBinding.TransportEndpoint
+				}(),
+			)),
+			TransportKind: strings.TrimSpace(firstNonEmpty(
+				member.TransportKind,
+				func() string {
+					if member.DeliveryBinding == nil {
+						return ""
+					}
+					return member.DeliveryBinding.TransportKind
+				}(),
+			)),
+			DeliveryBinding:      convertRoomDeliveryBinding(member.DeliveryBinding),
+			TransportStatus:      apiRoomParticipantTransportStatus(member),
+			RuntimeBindingStatus: apiRoomParticipantBindingStatus(member),
 		}
 		if ts, ok := latestBySender[actorID]; ok {
 			tsCopy := ts
@@ -2256,6 +2662,64 @@ func apiRoomMemberRole(members []agent.RoomMember, actorID string) string {
 		}
 	}
 	return ""
+}
+
+func apiRoomParticipantTransportStatus(member agent.RoomMember) string {
+	if member.Unbound {
+		return "unbound"
+	}
+	kind := strings.TrimSpace(firstNonEmpty(
+		member.TransportKind,
+		func() string {
+			if member.DeliveryBinding == nil {
+				return ""
+			}
+			return member.DeliveryBinding.TransportKind
+		}(),
+	))
+	endpoint := strings.TrimSpace(firstNonEmpty(
+		member.TransportEndpoint,
+		func() string {
+			if member.DeliveryBinding == nil {
+				return ""
+			}
+			return member.DeliveryBinding.TransportEndpoint
+		}(),
+	))
+	if kind == "" && endpoint == "" {
+		return "unregistered"
+	}
+	if endpoint == "" {
+		return "missing_endpoint"
+	}
+	switch strings.ToLower(kind) {
+	case "pane_socket":
+		return "ready"
+	case "mux_pane":
+		return "legacy_mux"
+	default:
+		return "custom"
+	}
+}
+
+func apiRoomParticipantBindingStatus(member agent.RoomMember) string {
+	if member.Unbound {
+		return "detached"
+	}
+	if member.DeliveryBinding != nil {
+		if health := strings.TrimSpace(member.DeliveryBinding.Health); health != "" {
+			return strings.ToLower(health)
+		}
+		if strings.TrimSpace(member.DeliveryBinding.MuxSession) != "" ||
+			strings.TrimSpace(member.DeliveryBinding.MuxPaneID) != "" ||
+			strings.TrimSpace(member.DeliveryBinding.TransportEndpoint) != "" {
+			return "bound"
+		}
+	}
+	if strings.TrimSpace(member.Backend) != "" || strings.TrimSpace(member.Session) != "" || strings.TrimSpace(member.PaneID) != "" {
+		return "legacy_bound"
+	}
+	return "unknown"
 }
 
 func apiSummarizeRoomPreview(body string) string {

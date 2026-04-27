@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/joshka0/foxctl/internal/interfaces/foxproxbridge"
 	"github.com/joshka0/foxctl/internal/interfaces/web"
 	"github.com/joshka0/foxctl/internal/platform/logging"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
@@ -40,18 +43,25 @@ Examples:
   # Start server with CORS enabled for development
   foxctl web serve --dev-cors
 
+  # Start server with embedded Foxprox broker for foxterm CLI sessions
+  foxctl web serve --foxprox
+
   # Start server with static UI files
   foxctl web serve --ui-dir ./packages/gui-agent/dist`,
 	RunE: runWebServe,
 }
 
 var (
-	webPort     int
-	webDevCORS  bool
-	webUIDir    string
-	webChat     string
-	webDBDriver string
-	webDBDSN    string
+	webPort        int
+	webDevCORS     bool
+	webUIDir       string
+	webChat        string
+	webDBDriver    string
+	webDBDSN       string
+	webFoxprox     bool
+	webFoxproxDir  string
+	webFoxproxSock string
+	webRequireAuth bool
 )
 
 func init() {
@@ -64,6 +74,10 @@ func init() {
 	webServeCmd.Flags().StringVar(&webChat, "chat", "", "Chat adapter to enable (discord|telegram|teams)")
 	webServeCmd.Flags().StringVar(&webDBDriver, "db-driver", "", "Database driver (sqlite|libsql|turso|postgres)")
 	webServeCmd.Flags().StringVar(&webDBDSN, "db-dsn", "", "PostgreSQL DSN (overrides FOXCTL_POSTGRES_DSN)")
+	webServeCmd.Flags().BoolVar(&webFoxprox, "foxprox", false, "Start an embedded Foxprox daemon for terminal-backed agents")
+	webServeCmd.Flags().StringVar(&webFoxproxDir, "foxprox-data-dir", defaultWebFoxproxDataDir(), "Directory for embedded Foxprox state (empty = in-memory)")
+	webServeCmd.Flags().StringVar(&webFoxproxSock, "foxprox-socket", "", "Unix socket path for embedded Foxprox daemon")
+	webServeCmd.Flags().BoolVar(&webRequireAuth, "require-auth", false, "Require authenticated identity for API requests (Tailscale or Better Auth)")
 }
 
 func runWebServe(cmd *cobra.Command, _ []string) error {
@@ -111,6 +125,24 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		Str("component", "web").
 		Logger()
 
+	var foxproxd foxproxbridge.DaemonLifecycle
+	var foxproxOwned bool
+	var foxproxErrCh <-chan error
+	if webFoxprox {
+		started, waitCh, err := startWebFoxproxDaemon(logWriter)
+		if err != nil {
+			return err
+		}
+		foxproxd = started
+		foxproxOwned = started != nil
+		foxproxErrCh = waitCh
+		if foxproxOwned {
+			log.Info().Str("socket", foxproxd.SocketPath()).Msg("Embedded Foxprox daemon started")
+		} else {
+			log.Info().Str("socket", webFoxproxSocketPath()).Msg("Foxprox daemon already running; reusing socket")
+		}
+	}
+
 	// Create web server
 	addr := fmt.Sprintf(":%d", webPort)
 	opts := web.Options{
@@ -118,6 +150,7 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		DevCORS:     webDevCORS,
 		UIDir:       webUIDir,
 		ChatAdapter: webChat,
+		RequireAuth: webRequireAuth,
 	}
 
 	server, err := web.NewServer(ctx, opts, cfg, log)
@@ -164,6 +197,11 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		log.Info().Str("signal", sig.String()).Msg("Received signal, shutting down gracefully")
 	case err := <-errCh:
 		return fmt.Errorf("server error: %w", err)
+	case err := <-foxproxErrCh:
+		if err != nil {
+			return fmt.Errorf("foxprox daemon error: %w", err)
+		}
+		return fmt.Errorf("foxprox daemon stopped")
 	case <-ctx.Done():
 		log.Info().Msg("Context cancelled, shutting down")
 	}
@@ -181,6 +219,15 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	// Stop chat adapter if running (use shutdown context for bounded disconnect)
 	server.StopChatAdapter(shutdownCtx)
 
+	if foxproxOwned {
+		if err := foxproxd.Shutdown(shutdownCtx); err != nil {
+			observability.Emit(context.Background(), observability.NewEvent("web.foxprox_shutdown_error").
+				WithComponent(observability.ComponentCLI).
+				Error(err, 0))
+			return err
+		}
+	}
+
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		observability.Emit(context.Background(), observability.NewEvent("web.shutdown_error").
 			WithComponent(observability.ComponentCLI).
@@ -190,4 +237,47 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 
 	log.Info().Msg("Server stopped")
 	return nil
+}
+
+func startWebFoxproxDaemon(logWriter io.Writer) (foxproxbridge.DaemonLifecycle, <-chan error, error) {
+	d, err := foxproxbridge.NewDaemon(foxproxbridge.DaemonOptions{
+		DataDir:    webFoxproxDir,
+		SocketPath: webFoxproxSock,
+		LogWriter:  logWriter,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if d == nil {
+		return nil, nil, fmt.Errorf("foxprox: implementation not linked; import foxproxbridge/foxproxwire")
+	}
+	if err := d.Start(); err != nil {
+		if errors.Is(err, foxproxbridge.ErrBrokerAlreadyRunning) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("failed to start embedded Foxprox daemon: %w", err)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- d.Wait(context.Background())
+	}()
+	return d, errCh, nil
+}
+
+func defaultWebFoxproxDataDir() string {
+	if dir := os.Getenv("FOXCTL_Foxprox_DATA_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".foxctl", "foxprox")
+}
+
+func webFoxproxSocketPath() string {
+	if webFoxproxSock != "" {
+		return webFoxproxSock
+	}
+	return foxproxbridge.DefaultSocketPath()
 }

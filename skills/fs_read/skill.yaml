@@ -32,7 +32,7 @@ signature:
         foxctl run fs/read --input '{"path":"./README.md"}'
         foxctl skills run fs/read --path ./README.md
         foxctl run fs/read --input '{"path":"./large.json","max_bytes":4096}'
-        foxctl skills run fs/read --path ./large.json --max_bytes 4096
+        foxctl skills run fs/read --path ./large.json --max-bytes 4096
     workflows:
       - id: read-basic
         description: "Read README.md from the workspace."

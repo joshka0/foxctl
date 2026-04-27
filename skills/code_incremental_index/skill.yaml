@@ -45,9 +45,9 @@ signature:
       Use code/incremental_index to update the symbol index for one file.
       Example commands:
         foxctl run code/incremental_index --input '{"file":"./main.go","workspace_id":"default","symbols":true}'
-        foxctl skills run code/incremental_index --file ./main.go --workspace_id default --symbols
+        foxctl skills run code/incremental_index --file ./main.go --workspace-id default --symbols
         foxctl run code/incremental_index --input '{"file":"./main.go","embed_queue":true}'
-        foxctl skills run code/incremental_index --file ./main.go --embed_queue
+        foxctl skills run code/incremental_index --file ./main.go --embed-queue
     workflows:
       - id: index-file
         description: "Index a file for symbol search."

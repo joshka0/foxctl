@@ -1,6 +1,6 @@
 ---
 name: foxctl-code
-description: "Code intelligence and analysis: symbols, diffs, complexity, imports, security scan, semantic search, and repo graph DAG grep."
+description: "Code analysis for symbols, diffs, imports, complexity, security scan, semantic search, and repo graph or DAG queries."
 ---
 
 ## What I do

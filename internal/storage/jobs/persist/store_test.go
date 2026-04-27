@@ -3,6 +3,7 @@ package persist
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -162,5 +163,29 @@ func TestRecoverOrphanedJobs(t *testing.T) {
 	}
 	if stored.State != types.StateError {
 		t.Fatalf("expected error state, got %s", stored.State)
+	}
+}
+
+func TestIsFilesystemAccessError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "readonly", err: errors.New("attempt to write a readonly database"), want: true},
+		{name: "permission", err: errors.New("open /path/jobs.db: permission denied"), want: true},
+		{name: "operation not permitted", err: errors.New("open /path/jobs.db: operation not permitted"), want: true},
+		{name: "sqlite unable open", err: errors.New("sqliteutil: check journal_mode: unable to open database file (14)"), want: true},
+		{name: "wrapped", err: fmt.Errorf("jobs: open db: %w", errors.New("read-only file system")), want: true},
+		{name: "migration", err: errors.New("jobs: migrate: syntax error"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isFilesystemAccessError(tt.err); got != tt.want {
+				t.Fatalf("isFilesystemAccessError()=%v want %v", got, tt.want)
+			}
+		})
 	}
 }

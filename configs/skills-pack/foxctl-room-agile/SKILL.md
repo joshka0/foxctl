@@ -1,6 +1,6 @@
 ---
 name: foxctl-room-agile
-description: "Run an agile-style epic/milestone/story workflow inside an existing foxctl room using durable epic intake, milestone proposals, story proposals, review summaries, and delivery logs."
+description: "Run agile workflow inside a foxctl room with durable epic intake, milestone and story proposals, reviews, and delivery logs."
 ---
 
 # foxctl-room-agile

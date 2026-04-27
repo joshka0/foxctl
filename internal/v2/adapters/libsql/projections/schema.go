@@ -24,6 +24,9 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 			updated_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_v2_run_state_status ON v2_run_state(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_v2_run_state_request_id ON v2_run_state(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_v2_run_state_command ON v2_run_state(command)`,
+		`CREATE INDEX IF NOT EXISTS idx_v2_run_state_actor_id ON v2_run_state(actor_id)`,
 		`CREATE TABLE IF NOT EXISTS v2_agent_state (
 			agent_id TEXT PRIMARY KEY,
 			state TEXT NOT NULL,

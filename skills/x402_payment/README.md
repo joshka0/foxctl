@@ -17,6 +17,10 @@ This skill implements the [x402 protocol](https://x402.org) for handling HTTP 40
 
 ## Usage
 
+Examples assume the skill is installed. JSON goes through `--input`; use
+`--input-file -` when piping raw JSON, or `foxctl skills run` for direct
+parameter flags.
+
 ```bash
 # Initialize a CDP wallet (recommended)
 foxctl run x402/payment --input '{

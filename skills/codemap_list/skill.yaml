@@ -51,7 +51,7 @@ signature:
         foxctl run codemap/list --input '{"limit":5,"offset":0}'
         foxctl skills run codemap/list --limit 5 --offset 0
         foxctl run codemap/list --input '{"query":"auth","summary_only":true}'
-        foxctl skills run codemap/list --query auth --summary_only
+        foxctl skills run codemap/list --query auth --summary-only
     workflows:
       - id: list-basic
         description: "List codemaps with pagination."

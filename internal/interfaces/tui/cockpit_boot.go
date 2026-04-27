@@ -18,14 +18,15 @@ import (
 // Use NewBootManager to construct one. Call Start() after the go-tui event
 // loop begins rendering. Call Stop() to cancel the background goroutine.
 type BootManager struct {
-	mu       sync.Mutex
-	apiURL   string
-	screen   *CockpitScreen
-	client   *http.Client
-	timeout  time.Duration
-	cancelFn context.CancelFunc
-	done     chan struct{}
-	retrying bool
+	mu           sync.Mutex
+	apiURL       string
+	screen       *CockpitScreen
+	client       *http.Client
+	timeout      time.Duration
+	cancelFn     context.CancelFunc
+	done         chan struct{}
+	retrying     bool
+	agentAdapter *AgentAdapter
 }
 
 // BootConfig configures the BootManager.
@@ -43,6 +44,11 @@ type BootConfig struct {
 	// Timeout is the maximum time to wait for the daemon to become healthy
 	// before transitioning to error. Must be > 0. Default 5s.
 	Timeout time.Duration
+
+	// AgentAdapter is optional. When provided, the BootManager fetches the
+	// agent inventory via GET /api/agents after the health check succeeds and
+	// populates the CockpitScreen before transitioning to Ready.
+	AgentAdapter *AgentAdapter
 }
 
 // DefaultBootTimeout is the default time to wait for the daemon to become
@@ -67,11 +73,12 @@ func NewBootManager(cfg BootConfig) *BootManager {
 		}
 	}
 	return &BootManager{
-		apiURL:  cfg.APIURL,
-		screen:  cfg.Screen,
-		client:  client,
-		timeout: timeout,
-		done:    make(chan struct{}),
+		apiURL:       cfg.APIURL,
+		screen:       cfg.Screen,
+		client:       client,
+		timeout:      timeout,
+		agentAdapter: cfg.AgentAdapter,
+		done:         make(chan struct{}),
 	}
 }
 
@@ -161,10 +168,47 @@ func (bm *BootManager) run(ctx context.Context) {
 		case <-ticker.C:
 			healthy := bm.checkHealth(ctx)
 			if healthy {
-				bm.screen.SetPhase(CockpitPhaseReady)
+				bm.fetchAgentsAndTransitionReady(ctx)
 				return
 			}
 		}
+	}
+}
+
+// fetchAgentsAndTransitionReady fetches the agent inventory (if an adapter is
+// configured) and transitions the screen to Ready. This runs on the background
+// goroutine, not the UI thread.
+func (bm *BootManager) fetchAgentsAndTransitionReady(ctx context.Context) {
+	if bm.agentAdapter != nil {
+		resp, err := bm.agentAdapter.ListAgents(ctx, 0)
+		if err == nil {
+			items := make([]AgentInventoryItem, len(resp.Agents))
+			for i, a := range resp.Agents {
+				items[i] = agentRecordToInventoryItem(a)
+			}
+			bm.screen.SetAgents(items)
+		}
+		// On error, we still transition to Ready — the screen will show an
+		// empty inventory and the user can retry if needed.
+	}
+	bm.screen.SetPhase(CockpitPhaseReady)
+}
+
+// agentRecordToInventoryItem maps an AgentRecord from the API to an
+// AgentInventoryItem for display in the Main lane.
+func agentRecordToInventoryItem(a AgentRecord) AgentInventoryItem {
+	parent := a.ParentID
+	if parent == "" {
+		parent = "—"
+	}
+	return AgentInventoryItem{
+		ID:        a.ID,
+		Role:      a.Role,
+		Status:    a.State,
+		Workspace: a.Namespace,
+		ParentID:  parent,
+		// LastActive is not available from AgentRecord; show "—" for now.
+		LastActive: "—",
 	}
 }
 

@@ -13,6 +13,21 @@ Run any installed foxctl skill with JSON envelope I/O.
 foxctl run <skill-name> --input '<json>'
 ```
 
+Use `foxctl run` for job-tracked execution of installed skills. Use
+`foxctl run <skill-name> --ephemeral --input '<json>'` when the jobs store is
+not writable or you do not need history. Use `foxctl skills run <skill-name>`
+for direct skill execution with manifest-derived flags.
+
+Input modes:
+
+| Mode | Use |
+| ---- | --- |
+| `--input '<json>'` | Pass raw JSON inline |
+| `--input-file input.json` | Read raw JSON from a file |
+| `--input-file -` | Pipe raw JSON from stdin |
+| `--input stdin` | Read an envelope from stdin and pass its `data` field |
+| `--input sha256:<hex>` | Read raw JSON from CAS |
+
 ## Available Skills
 
 ### File System
@@ -57,6 +72,12 @@ foxctl run <skill-name> --input '<json>'
 ```bash
 # List files
 foxctl run fs/ls --input '{"path": "."}'
+
+# List files without job persistence
+foxctl run fs/ls --ephemeral --input '{"path": "."}'
+
+# List files with direct parameter flags
+foxctl skills run fs/ls --path .
 
 # Read a file
 foxctl run fs/read --input '{"path": "README.md"}'

@@ -1,6 +1,6 @@
 ---
 name: foxctl-integrations
-description: "Provider + integration glue: MCP server setup, provider config sync, and OpenAPI requests."
+description: "Provider and integration glue for MCP setup, provider config sync, and OpenAPI-backed requests."
 ---
 
 ## What I do

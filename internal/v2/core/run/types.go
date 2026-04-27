@@ -7,6 +7,7 @@ import (
 
 // ToolCall is a model-requested tool invocation inside an iteration.
 type ToolCall struct {
+	ID   string          `json:"id,omitempty"`
 	Name string          `json:"name"`
 	Args json.RawMessage `json:"args,omitempty"`
 }

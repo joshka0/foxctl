@@ -39,6 +39,30 @@ func TestRunCommandExamplesWithoutSkill(t *testing.T) {
 	if !ok || len(examples) == 0 {
 		t.Fatalf("expected examples list, got %T", data["examples"])
 	}
+	if hint, ok := data["hint"].(string); !ok || !bytes.Contains([]byte(hint), []byte("foxctl skills run")) {
+		t.Fatalf("expected hint to mention foxctl skills run, got %q", hint)
+	}
+	foundEphemeral := false
+	foundSkillsRun := false
+	for _, item := range examples {
+		example, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("expected example map, got %T", item)
+		}
+		command, _ := example["command"].(string)
+		if bytes.Contains([]byte(command), []byte("--ephemeral")) {
+			foundEphemeral = true
+		}
+		if bytes.Contains([]byte(command), []byte("foxctl skills run")) {
+			foundSkillsRun = true
+		}
+	}
+	if !foundEphemeral {
+		t.Fatalf("expected examples to include --ephemeral")
+	}
+	if !foundSkillsRun {
+		t.Fatalf("expected examples to include foxctl skills run")
+	}
 }
 
 func TestRunCommandExamplesForSkill(t *testing.T) {

@@ -1,0 +1,15 @@
+{
+  "featureId": "misc-architecture-doc-correction",
+  "reviewedAt": "2026-04-21T02:40:00Z",
+  "commitId": "80bfeb0e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "All four required changes verified. architecture.md Decision (c) now correctly states that 2 of 3 runtimes delegate to Bounded (ConsoleAskRuntime and ConsoleCancelRuntime), with ConsoleStreamPump retaining independent lifecycle due to its source-driven SSE callback model. The rationale is explained clearly. The traceability table row 2 is updated. The citation to internal/interfaces/tui/components/README.md is present and accurate. component-spec.md Tabs section now specifies TextMuted for inactive tabs with a clear implementation note. make check-doc-links passes (exit 0).",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Feature misc-architecture-doc-correction passes review. The doc corrections are accurate and complete: (1) Decision (c) now correctly describes 2 of 3 runtimes delegating to Bounded with rationale for pump independence; (2) traceability table row 2 updated to match; (3) internal/interfaces/tui/components/README.md is cited; (4) component-spec.md Tabs section now specifies TextMuted for inactive tabs. All verification steps passed, no issues found."
+}
