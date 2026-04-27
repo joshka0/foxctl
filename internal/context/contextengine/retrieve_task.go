@@ -36,7 +36,8 @@ func RetrieveTask(ctx context.Context, cfg LaneConfig, taskQueryFn TaskQueryFunc
 					"error": err.Error(),
 				},
 			}
-			_ = recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), 0, nil)
+			episodeID, _ := recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), 0, nil)
+			pack.Metadata["episode_id"] = episodeID
 			return pack, LaneError{Lane: LaneTask, Err: err}
 		}
 
@@ -55,7 +56,8 @@ func RetrieveTask(ctx context.Context, cfg LaneConfig, taskQueryFn TaskQueryFunc
 			},
 		}
 		_ = recordPack(ctx, cfg, pack)
-		_ = recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), len(nodes), nil)
+		episodeID, _ := recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), len(nodes), nil)
+		pack.Metadata = map[string]any{"episode_id": episodeID}
 		return pack, nil
 	}
 
@@ -78,7 +80,8 @@ func RetrieveTask(ctx context.Context, cfg LaneConfig, taskQueryFn TaskQueryFunc
 				"error": err.Error(),
 			},
 		}
-		_ = recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), 0, nil)
+		episodeID, _ := recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), 0, nil)
+		pack.Metadata["episode_id"] = episodeID
 		return pack, LaneError{Lane: LaneTask, Err: err}
 	}
 
@@ -102,7 +105,8 @@ func RetrieveTask(ctx context.Context, cfg LaneConfig, taskQueryFn TaskQueryFunc
 	}
 
 	_ = recordPack(ctx, cfg, pack)
-	_ = recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), len(nodes), nil)
+	episodeID, _ := recordEpisode(ctx, cfg, query, LaneTask, packID, elapsed.Milliseconds(), len(nodes), nil)
+	pack.Metadata = map[string]any{"episode_id": episodeID}
 	return pack, nil
 }
 

@@ -33,7 +33,8 @@ func RetrieveCode(ctx context.Context, cfg LaneConfig, searchFn CodeSearchFunc, 
 				"error": err.Error(),
 			},
 		}
-		_ = recordEpisode(ctx, cfg, query, LaneCode, packID, elapsed.Milliseconds(), 0, nil)
+		episodeID, _ := recordEpisode(ctx, cfg, query, LaneCode, packID, elapsed.Milliseconds(), 0, nil)
+		pack.Metadata["episode_id"] = episodeID
 		return pack, LaneError{Lane: LaneCode, Err: err}
 	}
 
@@ -83,6 +84,7 @@ func RetrieveCode(ctx context.Context, cfg LaneConfig, searchFn CodeSearchFunc, 
 	}
 
 	_ = recordPack(ctx, cfg, pack)
-	_ = recordEpisode(ctx, cfg, query, LaneCode, packID, elapsed.Milliseconds(), len(nodes), nil)
+	episodeID, _ := recordEpisode(ctx, cfg, query, LaneCode, packID, elapsed.Milliseconds(), len(nodes), nil)
+	pack.Metadata = map[string]any{"episode_id": episodeID}
 	return pack, nil
 }

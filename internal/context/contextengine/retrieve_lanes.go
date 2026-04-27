@@ -94,9 +94,11 @@ func validateQuery(query string, lane EvidenceLane) error {
 }
 
 // recordEpisode creates and records a RetrievalEpisode.
-func recordEpisode(ctx context.Context, cfg LaneConfig, query string, lane EvidenceLane, packID string, durationMs int64, hitCount int, subEpisodeIDs []string) error {
+// Returns the generated episode ID.
+func recordEpisode(ctx context.Context, cfg LaneConfig, query string, lane EvidenceLane, packID string, durationMs int64, hitCount int, subEpisodeIDs []string) (string, error) {
+	episodeID := cfg.IDGen()
 	episode := RetrievalEpisode{
-		ID:            cfg.IDGen(),
+		ID:            episodeID,
 		WorkspaceID:   cfg.WorkspaceID,
 		Query:         query,
 		Lane:          lane,
@@ -107,7 +109,7 @@ func recordEpisode(ctx context.Context, cfg LaneConfig, query string, lane Evide
 		CreatedAt:     cfg.Clock(),
 	}
 	_, err := cfg.Store.RecordRetrievalEpisode(ctx, episode)
-	return err
+	return episodeID, err
 }
 
 // recordPack persists an EvidencePack via the lane store. Best-effort: errors

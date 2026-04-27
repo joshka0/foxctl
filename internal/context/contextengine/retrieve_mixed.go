@@ -71,6 +71,9 @@ func RetrieveMixed(
 
 	for i := 0; i < 4; i++ {
 		result := <-ch
+		// Extract the sub-lane episode ID from the pack metadata.
+		epID := extractEpisodeID(result.pack.Metadata)
+
 		if result.err != nil {
 			// Check if it's a LaneError (partial failure with results).
 			if le, ok := result.err.(LaneError); ok {
@@ -78,14 +81,20 @@ func RetrieveMixed(
 				// Partial failure: still collect nodes from the pack.
 				if len(result.pack.Nodes) > 0 {
 					allNodes = append(allNodes, result.pack.Nodes...)
-					lanesSucceeded++
 				}
+				// Even on partial failure, the lane recorded an episode.
+				if epID != "" {
+					subEpisodeIDs = append(subEpisodeIDs, epID)
+				}
+				lanesSucceeded++
 			}
 			// Non-LaneError (e.g. EmptyQueryError): skip.
 			continue
 		}
 		allNodes = append(allNodes, result.pack.Nodes...)
-		subEpisodeIDs = append(subEpisodeIDs, result.pack.ID)
+		if epID != "" {
+			subEpisodeIDs = append(subEpisodeIDs, epID)
+		}
 		lanesSucceeded++
 	}
 
@@ -119,7 +128,7 @@ func RetrieveMixed(
 	}
 
 	_ = recordPack(ctx, cfg, pack)
-	_ = recordEpisode(ctx, cfg, query, LaneMixed, packID, elapsed.Milliseconds(), len(fusedNodes), subEpisodeIDs)
+	_, _ = recordEpisode(ctx, cfg, query, LaneMixed, packID, elapsed.Milliseconds(), len(fusedNodes), subEpisodeIDs)
 
 	// If ALL lanes failed, return an error.
 	if lanesSucceeded == 0 && len(laneErrors) > 0 {
@@ -238,4 +247,20 @@ func nodeTypeToLane(nt EvidenceNodeType) EvidenceLane {
 	default:
 		return LaneMixed
 	}
+}
+
+// extractEpisodeID retrieves the episode_id from pack metadata.
+func extractEpisodeID(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	v, ok := meta["episode_id"]
+	if !ok {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return s
 }

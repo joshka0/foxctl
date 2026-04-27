@@ -33,7 +33,8 @@ func RetrieveContext(ctx context.Context, cfg LaneConfig, queryFn ContextQueryFu
 				"error": err.Error(),
 			},
 		}
-		_ = recordEpisode(ctx, cfg, query, LaneContext, packID, elapsed.Milliseconds(), 0, nil)
+		episodeID, _ := recordEpisode(ctx, cfg, query, LaneContext, packID, elapsed.Milliseconds(), 0, nil)
+		pack.Metadata["episode_id"] = episodeID
 		return pack, LaneError{Lane: LaneContext, Err: err}
 	}
 
@@ -115,7 +116,8 @@ func RetrieveContext(ctx context.Context, cfg LaneConfig, queryFn ContextQueryFu
 	}
 
 	_ = recordPack(ctx, cfg, pack)
-	_ = recordEpisode(ctx, cfg, query, LaneContext, packID, elapsed.Milliseconds(), len(nodes), nil)
+	episodeID, _ := recordEpisode(ctx, cfg, query, LaneContext, packID, elapsed.Milliseconds(), len(nodes), nil)
+	pack.Metadata = map[string]any{"episode_id": episodeID}
 	return pack, nil
 }
 

@@ -1065,6 +1065,339 @@ func TestFuseNodes_DeduplicatesByRefIdentity(t *testing.T) {
 	}
 }
 
+// ==========================================================================
+// VAL-RETR-008: Each lane records RetrievalEpisode even on empty results
+// VAL-RETR-009: Mixed lane records sub-episodes even when sub-lanes empty
+// ==========================================================================
+
+// --- Empty-result episode recording for each individual lane ---
+
+func TestRetrieveCode_RecordsEpisodeOnEmptyResults(t *testing.T) {
+	resetTestIDCounter()
+	store := NewMemoryStore()
+	cfg := LaneConfig{
+		Store:       store,
+		IDGen:       testIDGen,
+		Clock:       testClock,
+		WorkspaceID: "ws-test",
+	}
+
+	searchFn := func(_ context.Context, _ string) ([]CodeSearchHit, error) {
+		return nil, nil // empty results, no error
+	}
+
+	pack, err := RetrieveCode(context.Background(), cfg, searchFn, "auth")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Pack should have no nodes but be valid.
+	if len(pack.Nodes) != 0 {
+		t.Errorf("expected 0 nodes, got %d", len(pack.Nodes))
+	}
+	if pack.Lane != LaneCode {
+		t.Errorf("expected lane code, got %q", pack.Lane)
+	}
+
+	// Must still record exactly 1 episode.
+	episodes := listAllEpisodes(store)
+	if len(episodes) != 1 {
+		t.Fatalf("expected 1 episode for empty code results, got %d", len(episodes))
+	}
+	if episodes[0].Lane != LaneCode {
+		t.Errorf("expected lane code, got %q", episodes[0].Lane)
+	}
+	if episodes[0].HitCount != 0 {
+		t.Errorf("expected hit_count 0, got %d", episodes[0].HitCount)
+	}
+}
+
+func TestRetrieveMemory_RecordsEpisodeOnEmptyResults(t *testing.T) {
+	resetTestIDCounter()
+	store := NewMemoryStore()
+	cfg := LaneConfig{
+		Store:       store,
+		IDGen:       testIDGen,
+		Clock:       testClock,
+		WorkspaceID: "ws-test",
+	}
+
+	queryFn := func(_ context.Context, _, _ string) ([]MemoryClaim, error) {
+		return nil, nil // no claims, no error
+	}
+
+	pack, err := RetrieveMemory(context.Background(), cfg, queryFn, "test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(pack.Nodes) != 0 {
+		t.Errorf("expected 0 nodes, got %d", len(pack.Nodes))
+	}
+
+	episodes := listAllEpisodes(store)
+	if len(episodes) != 1 {
+		t.Fatalf("expected 1 episode for empty memory results, got %d", len(episodes))
+	}
+	if episodes[0].Lane != LaneMemory {
+		t.Errorf("expected lane memory, got %q", episodes[0].Lane)
+	}
+}
+
+func TestRetrieveContext_RecordsEpisodeOnNilPacket(t *testing.T) {
+	resetTestIDCounter()
+	store := NewMemoryStore()
+	cfg := LaneConfig{
+		Store:       store,
+		IDGen:       testIDGen,
+		Clock:       testClock,
+		WorkspaceID: "ws-test",
+	}
+
+	// Simulate: no TopOfMind in workspace → queryFn returns nil.
+	queryFn := func(_ context.Context, _ string) (*ContextPacket, error) {
+		return nil, nil // no context packet, no error
+	}
+
+	pack, err := RetrieveContext(context.Background(), cfg, queryFn, "test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(pack.Nodes) != 0 {
+		t.Errorf("expected 0 nodes when context packet is nil, got %d", len(pack.Nodes))
+	}
+	if pack.Lane != LaneContext {
+		t.Errorf("expected lane context, got %q", pack.Lane)
+	}
+
+	// Must still record exactly 1 episode.
+	episodes := listAllEpisodes(store)
+	if len(episodes) != 1 {
+		t.Fatalf("expected 1 episode for nil context packet, got %d", len(episodes))
+	}
+	if episodes[0].Lane != LaneContext {
+		t.Errorf("expected lane context, got %q", episodes[0].Lane)
+	}
+	if episodes[0].HitCount != 0 {
+		t.Errorf("expected hit_count 0, got %d", episodes[0].HitCount)
+	}
+}
+
+func TestRetrieveTask_RecordsEpisodeOnNoTasks(t *testing.T) {
+	resetTestIDCounter()
+	store := NewMemoryStore()
+	cfg := LaneConfig{
+		Store:       store,
+		IDGen:       testIDGen,
+		Clock:       testClock,
+		WorkspaceID: "ws-test",
+	}
+
+	taskListFn := func(_ context.Context, _ string) ([]string, error) {
+		return nil, nil // no tasks, no error
+	}
+	taskQueryFn := func(_ context.Context, _, _ string) (*TaskContext, error) {
+		return nil, nil
+	}
+
+	pack, err := RetrieveTask(context.Background(), cfg, taskQueryFn, taskListFn, "", "test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(pack.Nodes) != 0 {
+		t.Errorf("expected 0 nodes, got %d", len(pack.Nodes))
+	}
+
+	episodes := listAllEpisodes(store)
+	if len(episodes) != 1 {
+		t.Fatalf("expected 1 episode for empty task results, got %d", len(episodes))
+	}
+	if episodes[0].Lane != LaneTask {
+		t.Errorf("expected lane task, got %q", episodes[0].Lane)
+	}
+}
+
+func TestRetrieveTask_RecordsEpisodeOnNilTaskContext(t *testing.T) {
+	resetTestIDCounter()
+	store := NewMemoryStore()
+	cfg := LaneConfig{
+		Store:       store,
+		IDGen:       testIDGen,
+		Clock:       testClock,
+		WorkspaceID: "ws-test",
+	}
+
+	taskListFn := func(_ context.Context, _ string) ([]string, error) {
+		return []string{"task-1"}, nil // task IDs exist
+	}
+	taskQueryFn := func(_ context.Context, _, _ string) (*TaskContext, error) {
+		return nil, nil // but task context is nil
+	}
+
+	pack, err := RetrieveTask(context.Background(), cfg, taskQueryFn, taskListFn, "", "test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(pack.Nodes) != 0 {
+		t.Errorf("expected 0 nodes when task context is nil, got %d", len(pack.Nodes))
+	}
+
+	episodes := listAllEpisodes(store)
+	if len(episodes) != 1 {
+		t.Fatalf("expected 1 episode for nil task context, got %d", len(episodes))
+	}
+}
+
+// --- VAL-RETR-009: Mixed lane records exactly 5 episodes even when sub-lanes empty ---
+
+func TestRetrieveMixed_RecordsAllSubEpisodesWithEmptyResults(t *testing.T) {
+	resetTestIDCounter()
+	store := NewMemoryStore()
+	cfg := LaneConfig{
+		Store:       store,
+		IDGen:       testIDGen,
+		Clock:       testClock,
+		WorkspaceID: "ws-test",
+	}
+
+	// All lanes return empty results.
+	codeFn := func(_ context.Context, _ string) ([]CodeSearchHit, error) {
+		return nil, nil
+	}
+	memoryFn := func(_ context.Context, _, _ string) ([]MemoryClaim, error) {
+		return nil, nil
+	}
+	contextFn := func(_ context.Context, _ string) (*ContextPacket, error) {
+		return nil, nil // no TopOfMind
+	}
+	taskQueryFn := func(_ context.Context, _, _ string) (*TaskContext, error) {
+		return nil, nil
+	}
+	taskListFn := func(_ context.Context, _ string) ([]string, error) {
+		return nil, nil
+	}
+
+	pack, err := RetrieveMixed(context.Background(), cfg, codeFn, memoryFn, contextFn, taskQueryFn, taskListFn, "", "test query")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if pack.Lane != LaneMixed {
+		t.Errorf("expected lane mixed, got %q", pack.Lane)
+	}
+
+	// Must have exactly 5 episodes: 4 sub-lane + 1 parent mixed.
+	episodes := listAllEpisodes(store)
+	if len(episodes) != 5 {
+		// Debug: list which lanes recorded episodes
+		var lanes []string
+		for _, ep := range episodes {
+			lanes = append(lanes, string(ep.Lane))
+		}
+		t.Fatalf("expected exactly 5 episodes (4 sub + 1 parent), got %d: lanes=%v", len(episodes), lanes)
+	}
+
+	// Count episodes per lane.
+	laneCounts := make(map[EvidenceLane]int)
+	for _, ep := range episodes {
+		laneCounts[ep.Lane]++
+	}
+	for _, lane := range []EvidenceLane{LaneCode, LaneMemory, LaneContext, LaneTask, LaneMixed} {
+		if laneCounts[lane] != 1 {
+			t.Errorf("expected exactly 1 episode for lane %q, got %d", lane, laneCounts[lane])
+		}
+	}
+
+	// Find the mixed parent episode and verify sub-episode IDs.
+	var parentEpisode *RetrievalEpisode
+	for i := range episodes {
+		if episodes[i].Lane == LaneMixed {
+			parentEpisode = &episodes[i]
+			break
+		}
+	}
+	if parentEpisode == nil {
+		t.Fatal("expected a mixed lane parent episode")
+	}
+	if len(parentEpisode.SubEpisodeIDs) != 4 {
+		t.Errorf("expected 4 sub_episode_ids, got %d", len(parentEpisode.SubEpisodeIDs))
+	}
+
+	// Each sub-episode ID should reference an actual sub-lane episode.
+	subIDs := make(map[string]bool)
+	for _, ep := range episodes {
+		if ep.Lane != LaneMixed {
+			subIDs[ep.ID] = true
+		}
+	}
+	for _, subID := range parentEpisode.SubEpisodeIDs {
+		if !subIDs[subID] {
+			t.Errorf("parent sub_episode_id %q does not match any sub-lane episode", subID)
+		}
+	}
+}
+
+func TestRetrieveMixed_RecordsAllSubEpisodesWithPartialEmptyResults(t *testing.T) {
+	resetTestIDCounter()
+	store := NewMemoryStore()
+	cfg := LaneConfig{
+		Store:       store,
+		IDGen:       testIDGen,
+		Clock:       testClock,
+		WorkspaceID: "ws-test",
+	}
+
+	// Only code lane returns results; memory, context, and task are empty.
+	codeFn := func(_ context.Context, _ string) ([]CodeSearchHit, error) {
+		return []CodeSearchHit{{Path: "auth.go", Snippet: "code", Score: 0.9}}, nil
+	}
+	memoryFn := func(_ context.Context, _, _ string) ([]MemoryClaim, error) {
+		return nil, nil // empty
+	}
+	contextFn := func(_ context.Context, _ string) (*ContextPacket, error) {
+		return nil, nil // empty — no TopOfMind
+	}
+	taskQueryFn := func(_ context.Context, _, _ string) (*TaskContext, error) {
+		return nil, nil // empty
+	}
+	taskListFn := func(_ context.Context, _ string) ([]string, error) {
+		return nil, nil // no tasks
+	}
+
+	_, err := RetrieveMixed(context.Background(), cfg, codeFn, memoryFn, contextFn, taskQueryFn, taskListFn, "", "auth")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Must have exactly 5 episodes even though only code returned results.
+	episodes := listAllEpisodes(store)
+	if len(episodes) != 5 {
+		var lanes []string
+		for _, ep := range episodes {
+			lanes = append(lanes, string(ep.Lane))
+		}
+		t.Fatalf("expected exactly 5 episodes (4 sub + 1 parent), got %d: lanes=%v", len(episodes), lanes)
+	}
+
+	// Parent episode must have 4 sub-episode IDs.
+	var parentEpisode *RetrievalEpisode
+	for i := range episodes {
+		if episodes[i].Lane == LaneMixed {
+			parentEpisode = &episodes[i]
+			break
+		}
+	}
+	if parentEpisode == nil {
+		t.Fatal("expected a mixed lane parent episode")
+	}
+	if len(parentEpisode.SubEpisodeIDs) != 4 {
+		t.Errorf("expected 4 sub_episode_ids with partial empty results, got %d", len(parentEpisode.SubEpisodeIDs))
+	}
+}
+
 // --- Helper ---
 
 func listAllEpisodes(store *MemoryStore) []RetrievalEpisode {

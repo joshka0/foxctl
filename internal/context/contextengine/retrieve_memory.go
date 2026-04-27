@@ -34,7 +34,8 @@ func RetrieveMemory(ctx context.Context, cfg LaneConfig, queryFn MemoryQueryFunc
 				"error": err.Error(),
 			},
 		}
-		_ = recordEpisode(ctx, cfg, query, LaneMemory, packID, elapsed.Milliseconds(), 0, nil)
+		episodeID, _ := recordEpisode(ctx, cfg, query, LaneMemory, packID, elapsed.Milliseconds(), 0, nil)
+		pack.Metadata["episode_id"] = episodeID
 		return pack, LaneError{Lane: LaneMemory, Err: err}
 	}
 
@@ -74,7 +75,8 @@ func RetrieveMemory(ctx context.Context, cfg LaneConfig, queryFn MemoryQueryFunc
 	}
 
 	_ = recordPack(ctx, cfg, pack)
-	_ = recordEpisode(ctx, cfg, query, LaneMemory, packID, elapsed.Milliseconds(), len(nodes), nil)
+	episodeID, _ := recordEpisode(ctx, cfg, query, LaneMemory, packID, elapsed.Milliseconds(), len(nodes), nil)
+	pack.Metadata = map[string]any{"episode_id": episodeID}
 	return pack, nil
 }
 
