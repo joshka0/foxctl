@@ -1,8 +1,13 @@
 package runtime
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/joshka0/foxctl/internal/runtime/engine"
+	"github.com/joshka0/foxctl/internal/rlm/runtime/generalsolver"
 )
 
 func TestBraidValidateGraphAcceptsValidGraph(t *testing.T) {
@@ -1122,16 +1127,92 @@ func TestBraidParseGraphTextRejectsMarkdownFence(t *testing.T) {
 	}
 }
 
-func TestBraidParseGraphTextRejectsUnknownFields(t *testing.T) {
+func TestBraidParseGraphTextAcceptsUnknownFields(t *testing.T) {
 	t.Parallel()
 
-	raw := `{"version":1,"nodes":[{"id":"n1","kind":"extract","question":"q","extra":"x"}],"final_node":"n1"}`
-	_, err := ParseBraidGraphText(raw)
-	if err == nil {
-		t.Fatal("ParseBraidGraphText() succeeded with unknown field")
+	raw := `{"version":1,"nodes":[{"id":"n1","kind":"extract","question":"q","extra":"x","python_repl":"print(1)"}],"final_node":"n1"}`
+	g, err := ParseBraidGraphText(raw)
+	if err != nil {
+		t.Fatalf("ParseBraidGraphText() failed with unknown fields: %v", err)
 	}
-	if !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("ParseBraidGraphText() err = %v, want unknown field", err)
+	if len(g.Nodes) != 1 || g.Nodes[0].ID != "n1" {
+		t.Fatalf("ParseBraidGraphText() graph = %+v, want one node n1", g)
+	}
+}
+
+func TestParseBraidGraphTextClampsOversizedFields(t *testing.T) {
+	t.Parallel()
+
+	longQuestion := strings.Repeat("x", maxBraidNodeQuestionChars+50)
+	longExpected := strings.Repeat("y", maxBraidNodeExpectedChars+30)
+
+	raw := fmt.Sprintf(`{"version":1,"nodes":[{"id":"n1","kind":"extract","question":%q,"expected_output":%q}],"final_node":"n1"}`, longQuestion, longExpected)
+	g, err := ParseBraidGraphText(raw)
+	if err != nil {
+		t.Fatalf("ParseBraidGraphText() failed: %v", err)
+	}
+	if len(g.Nodes[0].Question) != maxBraidNodeQuestionChars {
+		t.Fatalf("question length = %d, want clamped to %d", len(g.Nodes[0].Question), maxBraidNodeQuestionChars)
+	}
+	if len(g.Nodes[0].ExpectedOutput) != maxBraidNodeExpectedChars {
+		t.Fatalf("expected_output length = %d, want clamped to %d", len(g.Nodes[0].ExpectedOutput), maxBraidNodeExpectedChars)
+	}
+}
+
+func TestParseBraidGraphTextDefaultsMissingOptionalFields(t *testing.T) {
+	t.Parallel()
+
+	raw := `{"version":1,"nodes":[{"id":"n1","kind":"extract","question":"q"}],"final_node":"n1"}`
+	g, err := ParseBraidGraphText(raw)
+	if err != nil {
+		t.Fatalf("ParseBraidGraphText() failed: %v", err)
+	}
+	node := g.Nodes[0]
+	if node.DependsOn == nil {
+		t.Fatal("depends_on should default to empty slice, not nil")
+	}
+	if len(node.DependsOn) != 0 {
+		t.Fatalf("depends_on = %v, want empty", node.DependsOn)
+	}
+	if node.HelperPolicy != "" {
+		t.Fatalf("helper_policy = %q, want empty", node.HelperPolicy)
+	}
+}
+
+func TestParseBraidGraphTextNegativeMaxSummaryCharsResetToZero(t *testing.T) {
+	t.Parallel()
+
+	raw := `{"version":1,"nodes":[{"id":"n1","kind":"solve","question":"q","max_summary_chars":-5}],"final_node":"n1"}`
+	g, err := ParseBraidGraphText(raw)
+	if err != nil {
+		t.Fatalf("ParseBraidGraphText() failed: %v", err)
+	}
+	if g.Nodes[0].MaxSummaryChars != 0 {
+		t.Fatalf("max_summary_chars = %d, want 0", g.Nodes[0].MaxSummaryChars)
+	}
+}
+
+func TestParseBraidGraphTextCombinedNormalization(t *testing.T) {
+	t.Parallel()
+
+	longQ := strings.Repeat("a", maxBraidNodeQuestionChars + 20)
+	raw := fmt.Sprintf(`{"version":1,"nodes":[{"id":"n1","kind":"EXTRACT","question":%q,"extra_field":true,"depends_on":["","  ","n0"]}],"final_node":" n1 ","extra_top":42}`, longQ)
+	g, err := ParseBraidGraphText(raw)
+	if err != nil {
+		t.Fatalf("ParseBraidGraphText() failed: %v", err)
+	}
+	node := g.Nodes[0]
+	if node.Kind != "extract" {
+		t.Fatalf("kind = %q, want lowercase 'extract'", node.Kind)
+	}
+	if len(node.Question) != maxBraidNodeQuestionChars {
+		t.Fatalf("question length = %d, want %d (clamped)", len(node.Question), maxBraidNodeQuestionChars)
+	}
+	if len(node.DependsOn) != 1 || node.DependsOn[0] != "n0" {
+		t.Fatalf("depends_on = %v, want [n0] (empty strings stripped)", node.DependsOn)
+	}
+	if g.FinalNode != "n1" {
+		t.Fatalf("final_node = %q, want 'n1' (trimmed)", g.FinalNode)
 	}
 }
 
@@ -1734,5 +1815,1441 @@ func TestBraidRuntimeShortcutReduceForwardsVerifiedSolution(t *testing.T) {
 	}
 	if !strings.Contains(reduceSummary, "solution = [[2,1,2],[0,0,2]]") {
 		t.Fatalf("reduce shortcut lost solution: %s", reduceSummary)
+	}
+}
+
+func TestBraidNodeHelperBudgetRemainingSubTimeout(t *testing.T) {
+	t.Parallel()
+
+	budget := &braidNodeHelperBudget{}
+
+	rem := budget.remainingSubTimeout(braidNodeHelperDefaultBudget)
+	if rem != braidNodeHelperDefaultBudget {
+		t.Fatalf("fresh budget remaining = %v, want %v", rem, braidNodeHelperDefaultBudget)
+	}
+
+	budget.CumulativeDuration = braidNodeHelperDefaultBudget - 30*time.Second
+	rem = budget.remainingSubTimeout(braidNodeHelperDefaultBudget)
+	if rem != 30*time.Second {
+		t.Fatalf("after 11m30s used, remaining = %v, want 30s", rem)
+	}
+
+	budget.CumulativeDuration = braidNodeHelperDefaultBudget - braidNodeHelperMinSubTimeout - time.Second
+	rem = budget.remainingSubTimeout(braidNodeHelperDefaultBudget)
+	if rem != braidNodeHelperMinSubTimeout+time.Second {
+		t.Fatalf("just above floor remaining = %v, want %v", rem, braidNodeHelperMinSubTimeout+time.Second)
+	}
+
+	budget.CumulativeDuration = braidNodeHelperDefaultBudget - braidNodeHelperMinSubTimeout
+	rem = budget.remainingSubTimeout(braidNodeHelperDefaultBudget)
+	if rem != braidNodeHelperMinSubTimeout {
+		t.Fatalf("exactly at floor remaining = %v, want %v", rem, braidNodeHelperMinSubTimeout)
+	}
+
+	budget.CumulativeDuration = braidNodeHelperDefaultBudget - braidNodeHelperMinSubTimeout + time.Second
+	rem = budget.remainingSubTimeout(braidNodeHelperDefaultBudget)
+	if rem != 0 {
+		t.Fatalf("below floor remaining = %v, want 0", rem)
+	}
+
+	budget.CumulativeDuration = braidNodeHelperDefaultBudget + time.Minute
+	rem = budget.remainingSubTimeout(braidNodeHelperDefaultBudget)
+	if rem != 0 {
+		t.Fatalf("over-budget remaining = %v, want 0", rem)
+	}
+
+	budget.CumulativeDuration = braidNodeHelperDefaultBudget + time.Minute
+	rem = budget.remainingSubTimeout(braidNodeHelperDefaultBudget)
+	if rem != 0 {
+		t.Fatalf("over-budget remaining = %v, want 0", rem)
+	}
+}
+
+func TestBraidNodeHelperBudgetTracking(t *testing.T) {
+	t.Parallel()
+
+	budgets := make(helperBudgetByNode)
+	b1 := budgets.get("n1")
+	b2 := budgets.get("n2")
+
+	if b1 == b2 {
+		t.Fatal("different nodes should have different budget entries")
+	}
+	if b1.Attempts != 0 || b1.CumulativeDuration != 0 {
+		t.Fatal("fresh budget should be zero-valued")
+	}
+
+	b1.Attempts++
+	b1.CumulativeDuration += 5 * time.Minute
+
+	refetched := budgets.get("n1")
+	if refetched.Attempts != 1 || refetched.CumulativeDuration != 5*time.Minute {
+		t.Fatal("budget get should return the same pointer")
+	}
+}
+
+func TestFormatDeadlineExhausted(t *testing.T) {
+	t.Parallel()
+
+	budget := &braidNodeHelperBudget{
+		CumulativeDuration: 12 * time.Minute,
+		Attempts:           3,
+	}
+	msg := formatDeadlineExhausted("n_solve", budget)
+	if !strings.Contains(msg, braidDeadlineExhaustedPrefix) {
+		t.Fatalf("message should contain %q: %s", braidDeadlineExhaustedPrefix, msg)
+	}
+	if !strings.Contains(msg, "n_solve") {
+		t.Fatalf("message should contain node id: %s", msg)
+	}
+	if !strings.Contains(msg, "cumulative_ms=") {
+		t.Fatalf("message should contain cumulative_ms: %s", msg)
+	}
+	if !strings.Contains(msg, "attempts=3") {
+		t.Fatalf("message should contain attempts=3: %s", msg)
+	}
+}
+
+func TestCapBraidRepairFeedback(t *testing.T) {
+	t.Parallel()
+
+	short := "short feedback"
+	if got := capBraidRepairFeedback(short); got != short {
+		t.Fatalf("short feedback should pass through: %q", got)
+	}
+
+	long := strings.Repeat("x", braidRepairFeedbackCap+500)
+	capped := capBraidRepairFeedback(long)
+	if len(capped) > braidRepairFeedbackCap {
+		t.Fatalf("capped length %d exceeds cap %d", len(capped), braidRepairFeedbackCap)
+	}
+	if !strings.HasSuffix(capped, "...[truncated]") {
+		t.Fatalf("capped feedback should end with truncation marker: %q", capped[len(capped)-30:])
+	}
+
+	exact := strings.Repeat("y", braidRepairFeedbackCap)
+	if got := capBraidRepairFeedback(exact); len(got) != braidRepairFeedbackCap {
+		t.Fatalf("exact-length feedback should not be truncated: got %d want %d", len(got), braidRepairFeedbackCap)
+	}
+}
+
+func TestExtractBraidHelperFailedStage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		summary string
+		want    braidHelperStage
+	}{
+		{"stage=draft something went wrong", braidHelperStageDraft},
+		{"draft error: could not generate", braidHelperStageDraft},
+		{"stage=parse decode failed", braidHelperStageParse},
+		{"SyntaxError: unexpected token", braidHelperStageParse},
+		{"stage=validate source too long", braidHelperStageValidate},
+		{"stage=run timeout exceeded", braidHelperStageRun},
+		{"stage=verify candidate failed", braidHelperStageVerify},
+		{"verifier rejected the candidate", braidHelperStageVerify},
+		{"helper compilation error", braidHelperStageValidate},
+		{"unknown error occurred", braidHelperStageRun},
+		{"", braidHelperStageRun},
+	}
+
+	for idx, tt := range tests {
+		got := extractBraidHelperFailedStage(tt.summary)
+		if got != tt.want {
+			t.Errorf("test %d: extractBraidHelperFailedStage(%q) = %q, want %q", idx, tt.summary, got, tt.want)
+		}
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func TestBraidNodeHandoffTransformsSymbolicTraceTask(t *testing.T) {
+	t.Parallel()
+
+	rootPrompt := strings.Join([]string{
+		"Puzzle description:",
+		"Type inference puzzle.",
+		"",
+		"You must execute deterministic Algorithm W on a program.",
+		"",
+		"Puzzle instance:",
+		`program: let id = (\a. a) in let t0 = 0 in let t1 = true in let t2 = (t0, t1) in let t3 = snd t2 in t3`,
+		`queries: [{"kind": "type", "target": "q1"}, {"kind": "count", "target": "q2"}]`,
+		"trace_kind: HM-TRACE",
+		"",
+		"Format your solution as:",
+		`solution = {"q1": "...", "q2": ...}`,
+	}, "\n")
+	node := BraidNode{ID: "n_solve", Kind: "solve", Question: "Infer types.", DependsOn: []string{"n_extract"}}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, map[string]string{"n_extract": "typed facts"}, "")
+
+	if handoff.TaskType != BraidScaffoldClassSymbolicTrace {
+		t.Fatalf("task type=%q, want %s", handoff.TaskType, BraidScaffoldClassSymbolicTrace)
+	}
+	if handoff.ScaffoldClass != BraidScaffoldClassSymbolicTrace || handoff.ScaffoldID != BraidScaffoldIDTypeInferenceV1 {
+		t.Fatalf("scaffold class/id=%q/%q", handoff.ScaffoldClass, handoff.ScaffoldID)
+	}
+	prog, ok := handoff.Facts["program"].(string)
+	if !ok || !strings.Contains(prog, "let id") {
+		t.Fatalf("handoff facts missing program text: %#v", handoff.Facts)
+	}
+	queriesRaw, ok := handoff.Facts["queries"]
+	if !ok {
+		t.Fatalf("handoff facts missing queries: %#v", handoff.Facts)
+	}
+	queries, ok := queriesRaw.([]any)
+	if !ok || len(queries) < 2 {
+		t.Fatalf("handoff facts queries not []any or too short: %T %#v", queriesRaw, queriesRaw)
+	}
+	firstQuery, ok := queries[0].(map[string]any)
+	if !ok || firstQuery["target"] != "q1" {
+		t.Fatalf("first query target=%v, want q1", queries[0])
+	}
+	if handoff.OfficialRootTask != "" {
+		t.Fatalf("solve handoff retained root prompt: %q", handoff.OfficialRootTask)
+	}
+	input := BraidHandoffHelperInput(handoff)
+	if input["task_type"] != BraidScaffoldClassSymbolicTrace || input["scaffold_id"] != BraidScaffoldIDTypeInferenceV1 {
+		t.Fatalf("helper input missing symbolic trace scaffold contract: %#v", input)
+	}
+	if !braidHelperInputLooksLikeSymbolicTrace(input) {
+		t.Fatalf("helper input did not satisfy symbolic trace contract: %#v", input)
+	}
+	prompt := RenderBraidHelperHandoffPrompt(handoff)
+	for _, want := range []string{"Task type: symbolic_trace", "Symbolic-trace output contract", "Algorithm W", "let-binding"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("helper prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBraidHelperInputLooksLikeSymbolicTrace(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input map[string]any
+		want  bool
+	}{
+		{
+			name:  "empty input",
+			input: map[string]any{},
+			want:  false,
+		},
+		{
+			name: "has program and queries",
+			input: map[string]any{
+				"scaffold_class": BraidScaffoldClassSymbolicTrace,
+				"scaffold_id":    BraidScaffoldIDTypeInferenceV1,
+				"program":        "let x = 0 in x",
+				"queries":        []map[string]any{{"kind": "query", "target": "q1"}},
+			},
+			want: true,
+		},
+		{
+			name: "has program only",
+			input: map[string]any{
+				"scaffold_class": BraidScaffoldClassSymbolicTrace,
+				"program":        "let x = 0 in x",
+			},
+			want: true,
+		},
+		{
+			name: "wrong scaffold_class",
+			input: map[string]any{
+				"scaffold_class": BraidScaffoldClassConstraintSolver,
+				"program":        "let x = 0 in x",
+			},
+			want: false,
+		},
+		{
+			name: "wrong scaffold_id",
+			input: map[string]any{
+				"scaffold_class": BraidScaffoldClassSymbolicTrace,
+				"scaffold_id":    "wrong_id",
+				"program":        "let x = 0 in x",
+			},
+			want: false,
+		},
+		{
+			name: "no program or queries",
+			input: map[string]any{
+				"scaffold_class": BraidScaffoldClassSymbolicTrace,
+				"scaffold_id":    BraidScaffoldIDTypeInferenceV1,
+				"trace_kind":     "HM-TRACE",
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := braidHelperInputLooksLikeSymbolicTrace(tt.input)
+			if got != tt.want {
+				t.Errorf("braidHelperInputLooksLikeSymbolicTrace() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveBraidRuntimeScaffoldSymbolicTrace(t *testing.T) {
+	t.Parallel()
+
+	node := BraidNode{ID: "n_solve", Kind: "solve"}
+	handoff := BraidNodeHandoff{
+		Node:          node,
+		ScaffoldClass: BraidScaffoldClassSymbolicTrace,
+		ScaffoldID:    BraidScaffoldIDTypeInferenceV1,
+		Facts: map[string]any{
+			"scaffold_class": BraidScaffoldClassSymbolicTrace,
+			"scaffold_id":    BraidScaffoldIDTypeInferenceV1,
+			"program":        "let x = 0 in x",
+			"queries":        []map[string]any{{"kind": "query", "target": "q1"}},
+		},
+	}
+	input := BraidHandoffHelperInput(handoff)
+	scaffold, ok := resolveBraidRuntimeScaffold(node, handoff, input)
+	if !ok {
+		t.Fatal("resolveBraidRuntimeScaffold returned false for symbolic trace")
+	}
+	if scaffold.Class != BraidScaffoldClassSymbolicTrace {
+		t.Fatalf("scaffold class=%q, want %s", scaffold.Class, BraidScaffoldClassSymbolicTrace)
+	}
+	if scaffold.ID != BraidScaffoldIDTypeInferenceV1 {
+		t.Fatalf("scaffold id=%q, want %s", scaffold.ID, BraidScaffoldIDTypeInferenceV1)
+	}
+	if scaffold.PresetSource == "" {
+		t.Fatal("scaffold preset source is empty")
+	}
+	if scaffold.Verifier == nil {
+		t.Fatal("scaffold verifier is nil")
+	}
+	if scaffold.MaxSourceLines != 380 {
+		t.Fatalf("MaxSourceLines=%d, want 380", scaffold.MaxSourceLines)
+	}
+}
+
+func TestTypeInferenceAnswerVerifier(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		answer string
+		input  map[string]any
+		wantOK bool
+		wantPass bool
+	}{
+		{
+			name:   "empty input returns not ok",
+			answer: `solution = {"q1": "Nat"}`,
+			input:  map[string]any{},
+			wantOK: false,
+		},
+		{
+			name:   "valid solution with all queries",
+			answer: `ok: true
+solution = {"q1": "(Nat × Bool)", "q2": 5}`,
+			input: map[string]any{
+				"queries": []any{
+					map[string]any{"kind": "query", "target": "q1"},
+					map[string]any{"kind": "query", "target": "q2"},
+				},
+			},
+			wantOK:   true,
+			wantPass: true,
+		},
+		{
+			name:   "missing query key",
+			answer: `solution = {"q1": "Nat"}`,
+			input: map[string]any{
+				"queries": []any{
+					map[string]any{"kind": "query", "target": "q1"},
+					map[string]any{"kind": "query", "target": "q2"},
+				},
+			},
+			wantOK:   true,
+			wantPass: false,
+		},
+		{
+			name:   "no solution marker",
+			answer: "the answer is 42",
+			input: map[string]any{
+				"queries": []any{},
+			},
+			wantOK:   true,
+			wantPass: false,
+		},
+		{
+			name:   "matching ground truth",
+			answer: `solution = {"q1": "Nat"}`,
+			input: map[string]any{
+				"queries": []any{
+					map[string]any{"kind": "query", "target": "q1"},
+				},
+				"answer": map[string]any{
+					"q1": "Nat",
+				},
+			},
+			wantOK:   true,
+			wantPass: true,
+		},
+		{
+			name:   "wrong ground truth",
+			answer: `solution = {"q1": "Nat"}`,
+			input: map[string]any{
+				"queries": []any{
+					map[string]any{"kind": "query", "target": "q1"},
+				},
+				"answer": map[string]any{
+					"q1": "Bool",
+				},
+			},
+			wantOK:   true,
+			wantPass: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diag, ok := typeInferenceAnswerVerifier(tt.answer, tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("ok=%v, want %v; diag=%+v", ok, tt.wantOK, diag)
+			}
+			if ok && tt.wantOK && diag.Pass != tt.wantPass {
+				t.Errorf("pass=%v, want %v; first_failure=%q", diag.Pass, tt.wantPass, diag.FirstFailure)
+			}
+		})
+	}
+}
+
+func TestSymbolicTraceScaffoldPresetSource(t *testing.T) {
+	t.Parallel()
+
+	src := typeInferencePresetSource()
+	if !strings.Contains(src, "def Solve(input)") {
+		t.Fatal("preset source missing Solve function")
+	}
+	if !strings.Contains(src, "unify") {
+		t.Fatal("preset source missing unify function")
+	}
+	if !strings.Contains(src, "occurs") {
+		t.Fatal("preset source missing occurs check")
+	}
+	if !strings.Contains(src, "Algorithm W") || !strings.Contains(src, "let-binding") {
+		t.Fatal("preset source missing Algorithm W or let-binding reference")
+	}
+}
+
+func TestBraidNodeHandoffTransformsCandidateVerifyTask(t *testing.T) {
+	t.Parallel()
+
+	rootPrompt := strings.Join([]string{
+		"Puzzle description:",
+		"Pick the item with the most specific property.",
+		"",
+		"Puzzle instance:",
+		`candidates: ["CCO", "C=O", "CC=O"]`,
+		`predicates: [{"name": "p1", "check_type": "contains", "expected": "O"}]`,
+		"selection_rule: best",
+		"",
+		"Format your solution as:",
+		"solution = <letter>",
+	}, "\n")
+	node := BraidNode{ID: "n_solve", Kind: "solve", Question: "Pick the correct item.", DependsOn: []string{"n_extract"}}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, map[string]string{"n_extract": "candidates extracted"}, "")
+
+	if handoff.TaskType != BraidScaffoldClassCandidateVerify {
+		t.Fatalf("task type=%q, want %s", handoff.TaskType, BraidScaffoldClassCandidateVerify)
+	}
+	if handoff.ScaffoldClass != BraidScaffoldClassCandidateVerify || handoff.ScaffoldID != BraidScaffoldIDPropertyCheckV1 {
+		t.Fatalf("scaffold class/id=%q/%q", handoff.ScaffoldClass, handoff.ScaffoldID)
+	}
+	_, ok := handoff.Facts["candidates"]
+	if !ok {
+		t.Fatalf("handoff facts missing candidates: %#v", handoff.Facts)
+	}
+	if handoff.OfficialRootTask != "" {
+		t.Fatalf("solve handoff retained root prompt")
+	}
+	input := BraidHandoffHelperInput(handoff)
+	if input["task_type"] != BraidScaffoldClassCandidateVerify || input["scaffold_id"] != BraidScaffoldIDPropertyCheckV1 {
+		t.Fatalf("helper input missing candidate verify scaffold contract: %#v", input)
+	}
+	if !braidHelperInputLooksLikeCandidateVerify(input) {
+		t.Fatalf("helper input did not satisfy candidate verify contract: %#v", input)
+	}
+	prompt := RenderBraidHelperHandoffPrompt(handoff)
+	for _, want := range []string{"Task type: candidate_verify", "Candidate-verify output contract", "predicate"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("helper prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestHelperPreflightCheck(t *testing.T) {
+	t.Parallel()
+
+	// Normal input should pass
+	input := map[string]any{"program": "let x = 0 in x"}
+	handoff := BraidNodeHandoff{ScaffoldClass: BraidScaffoldClassSymbolicTrace}
+	if err := helperPreflightCheck(input, handoff); err != nil {
+		t.Fatalf("normal input should pass preflight: %v", err)
+	}
+
+	// Empty input should pass
+	if err := helperPreflightCheck(map[string]any{}, handoff); err != nil {
+		t.Fatalf("empty input should pass preflight: %v", err)
+	}
+
+	// Oversized input should fail
+	bigInput := map[string]any{"data": strings.Repeat("x", 60000)}
+	err := helperPreflightCheck(bigInput, handoff)
+	if err == nil {
+		t.Fatal("oversized input should fail preflight")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected 'too large' error, got: %v", err)
+	}
+}
+
+func TestCandidateVerifyPresetSource(t *testing.T) {
+	t.Parallel()
+
+	src := candidateVerifyPresetSource()
+	if !strings.Contains(src, "def Solve(input)") {
+		t.Fatal("preset source missing Solve function")
+	}
+	if !strings.Contains(src, "candidates") {
+		t.Fatal("preset source missing candidates")
+	}
+	if !strings.Contains(src, "predicates") {
+		t.Fatal("preset source missing predicates")
+	}
+}
+
+func TestCandidateVerifyAnswerVerifier(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		answer   string
+		input    map[string]any
+		wantOK   bool
+		wantPass bool
+	}{
+		{
+			name:   "empty input returns not ok",
+			answer: `solution = A`,
+			input:  map[string]any{},
+			wantOK: false,
+		},
+		{
+			name:     "valid solution line",
+			answer:   `solution = B`,
+			input:    map[string]any{"candidates": []any{"A", "B", "C"}, "answer": "B"},
+			wantOK:   true,
+			wantPass: true,
+		},
+		{
+			name:     "wrong answer",
+			answer:   `solution = A`,
+			input:    map[string]any{"candidates": []any{"A", "B", "C"}, "answer": "B"},
+			wantOK:   true,
+			wantPass: false,
+		},
+		{
+			name:     "missing library early return",
+			answer:   `ok: false\nmissing_library: rdkit`,
+			input:    map[string]any{"candidates": []any{"CCO"}},
+			wantOK:   true,
+			wantPass: false,
+		},
+		{
+			name:     "no ground truth passes with solution",
+			answer:   `solution = 3`,
+			input:    map[string]any{"candidates": []any{"A", "B", "C"}},
+			wantOK:   true,
+			wantPass: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diag, ok := candidateVerifyAnswerVerifier(tt.answer, tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("ok=%v, want %v; diag=%+v", ok, tt.wantOK, diag)
+			}
+			if ok && tt.wantOK && diag.Pass != tt.wantPass {
+				t.Errorf("pass=%v, want %v; first_failure=%q", diag.Pass, tt.wantPass, diag.FirstFailure)
+			}
+		})
+	}
+}
+
+func TestHelperSubTimeoutIsEnforced(t *testing.T) {
+	t.Parallel()
+
+	// Verify that the budget computation yields a non-zero sub-timeout
+	// and that the context.WithTimeout call is reached.
+	budget := &braidNodeHelperBudget{
+		CumulativeDuration: 2 * time.Minute,
+		Attempts:           1,
+	}
+	remaining := budget.remainingSubTimeout(12 * time.Minute)
+	if remaining <= 0 {
+		t.Fatalf("expected remaining sub-timeout > 0 with 2min used of 12min budget, got %v", remaining)
+	}
+	// The remaining should be close to 10 minutes
+	if remaining < 9*time.Minute {
+		t.Fatalf("expected remaining >= 9min, got %v", remaining)
+	}
+
+	// Verify that zero remaining is returned when budget is exhausted
+	exhausted := &braidNodeHelperBudget{
+		CumulativeDuration: 12 * time.Minute,
+		Attempts:           5,
+	}
+	remainingExhausted := exhausted.remainingSubTimeout(12 * time.Minute)
+	if remainingExhausted != 0 {
+		t.Fatalf("expected 0 remaining when budget fully consumed, got %v", remainingExhausted)
+	}
+}
+
+func TestCommitSolverArtifactAfterValidation(t *testing.T) {
+	t.Parallel()
+
+	state := generalsolver.NewSolverState()
+
+	// Seed the node so commitSolverArtifact can find it
+	_ = generalsolver.AddWorkItem(state, generalsolver.WorkItem{
+		ID:        "node1",
+		Goal:      "test",
+		Archetype: generalsolver.ArchetypeExplicitDAG,
+		DependsOn: []string{},
+		Status:    generalsolver.StatusSolving,
+		Priority:  1.0,
+		Risk:      0.5,
+	})
+
+	// A solved summary should produce an artifact
+	commitSolverArtifact(state, "node1", "status: solved answer: solution = 42 checks: verified")
+	art1, ok1 := state.Artifacts["node1"]
+	if !ok1 {
+		t.Fatal("expected artifact for node1 after commit")
+	}
+	if art1.Status != generalsolver.ArtifactStatusSolved {
+		t.Fatalf("expected status solved, got %s", art1.Status)
+	}
+
+	// A blocked summary should not overwrite a solved artifact
+	// (commitSolverArtifact skips if item.Status == Solved)
+	commitSolverArtifact(state, "node1", "status: blocked answer: checks: helper failed")
+	art2 := state.Artifacts["node1"]
+	if art2.Status != generalsolver.ArtifactStatusSolved {
+		t.Fatalf("artifact status should remain solved, got %s", art2.Status)
+	}
+}
+
+func TestDeclaredArchetypeRoutesToCorrectHandoff(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		archetype      string
+		rootPrompt     string
+		wantClass      string
+		wantID         string
+	}{
+		{
+			"symbolic_trace",
+			"Puzzle instance:\nprogram: let x = 0 in x\nqueries: []\n",
+			BraidScaffoldClassSymbolicTrace,
+			BraidScaffoldIDTypeInferenceV1,
+		},
+		{
+			"candidate_verify",
+			"Puzzle instance:\ncandidates: [a, b]\npredicates: [{\"name\": \"p1\"}]\n",
+			BraidScaffoldClassCandidateVerify,
+			BraidScaffoldIDPropertyCheckV1,
+		},
+		{
+			"finite_state_transition",
+			"Puzzle instance:\nInitial state: [[1],[2]]\nGoal state: [[2],[1]]\n",
+			BraidScaffoldClassFiniteStateTransition,
+			BraidScaffoldIDStackRelocationV1,
+		},
+		{"unknown_archetype", "Puzzle instance:\ndata: test\n", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.archetype, func(t *testing.T) {
+			node := BraidNode{
+				ID:        "n_solve",
+				Kind:      "solve",
+				Archetype: tt.archetype,
+				Question:  "Solve the problem.",
+			}
+			handoff := BuildBraidNodeHandoff(node, tt.rootPrompt, nil, "")
+			if tt.wantClass == "" {
+				if handoff.ScaffoldClass != "" {
+					t.Errorf("expected no scaffold for unknown archetype, got %q", handoff.ScaffoldClass)
+				}
+				return
+			}
+			if handoff.ScaffoldClass != tt.wantClass {
+				t.Errorf("scaffold class=%q, want %q", handoff.ScaffoldClass, tt.wantClass)
+			}
+			if tt.wantID != "" && handoff.ScaffoldID != tt.wantID {
+				t.Errorf("scaffold id=%q, want %q", handoff.ScaffoldID, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestNormalizeBraidNodeArchetype(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"symbolic_trace", "symbolic_trace"},
+		{"SYMBOLIC_TRACE", "symbolic_trace"},
+		{" candidate_verify ", "candidate_verify"},
+		{"explicit_dag", "explicit_dag"},
+		{"table_recurrence", "table_recurrence"},
+		{"constraint_solve", "constraint_solve"},
+		{"mixed", "mixed"},
+		{"", ""},
+		{"bogus_archetype", ""},
+		{"type_inference", ""},
+	}
+	for _, tt := range tests {
+		got := normalizeBraidNodeArchetype(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeBraidNodeArchetype(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestApplyGraphLevelSplits(t *testing.T) {
+	t.Parallel()
+
+	// Create a graph with a large-payload node.
+	graph := &BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{ID: "n1", Kind: "extract", Question: "Extract data."},
+			{ID: "n2", Kind: "solve", Question: "Solve queries.", DependsOn: []string{"n1"}},
+			{ID: "n3", Kind: "reduce", Question: "Combine.", DependsOn: []string{"n2"}, ExpectedOutput: "final"},
+		},
+		FinalNode: "n3",
+	}
+
+	state := generalsolver.NewSolverState()
+	_ = generalsolver.AddWorkItem(state, generalsolver.WorkItem{
+		ID:        "n1",
+		Goal:      "Extract data.",
+		Archetype: generalsolver.ArchetypeExplicitDAG,
+		DependsOn: []string{},
+		Status:    generalsolver.StatusReady,
+		Priority:  3.0,
+	})
+	// Manually seed n2 with a large payload.
+	queries := make([]map[string]any, 10)
+	for i := range queries {
+		queries[i] = map[string]any{
+			"id":     fmt.Sprintf("q%d", i),
+			"prompt": string(make([]byte, 6000)),
+		}
+	}
+	_ = generalsolver.AddWorkItem(state, generalsolver.WorkItem{
+		ID:        "n2",
+		Goal:      "Solve queries.",
+		Archetype: generalsolver.ArchetypeExplicitDAG,
+		DependsOn: []string{"n1"},
+		Status:    generalsolver.StatusPending,
+		Priority:  2.0,
+		Payload:   map[string]any{"queries": queries},
+	})
+	_ = generalsolver.AddWorkItem(state, generalsolver.WorkItem{
+		ID:        "n3",
+		Goal:      "Combine.",
+		Archetype: generalsolver.ArchetypeExplicitDAG,
+		DependsOn: []string{"n2"},
+		Status:    generalsolver.StatusPending,
+		Priority:  1.0,
+	})
+
+	applyGraphLevelSplits(state, graph)
+
+	// n2 should be replaced by parse + solve items + merge.
+	if _, exists := state.Items["n2"]; exists {
+		t.Fatal("n2 should be removed after split")
+	}
+	parseID := "n2__parse"
+	mergeID := "n2__merge"
+	if _, exists := state.Items[parseID]; !exists {
+		t.Fatal("parse sub-item should exist")
+	}
+	if _, exists := state.Items[mergeID]; !exists {
+		t.Fatal("merge sub-item should exist")
+	}
+
+	// n3 should now depend on merge instead of n2.
+	n3 := state.Items["n3"]
+	found := false
+	for _, dep := range n3.DependsOn {
+		if dep == mergeID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("n3 should depend on %s after rewire, got %v", mergeID, n3.DependsOn)
+	}
+}
+
+func TestSeedSolverStateFromBraidGraph_WithSmallPayload(t *testing.T) {
+	t.Parallel()
+
+	graph := &BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{ID: "n1", Kind: "extract", Question: "Extract data."},
+			{ID: "n2", Kind: "solve", Question: "Solve.", DependsOn: []string{"n1"}},
+		},
+		FinalNode: "n2",
+	}
+
+	state := seedSolverStateFromBraidGraph(graph)
+	if state == nil {
+		t.Fatal("expected non-nil state")
+	}
+	// Small payloads don't get split.
+	if _, exists := state.Items["n1"]; !exists {
+		t.Fatal("n1 should exist")
+	}
+	if _, exists := state.Items["n2"]; !exists {
+		t.Fatal("n2 should exist")
+	}
+}
+
+func TestAttemptSplitHelperExecution_TooSmallToSplit(t *testing.T) {
+	t.Parallel()
+
+	node := BraidNode{ID: "n1", Kind: "solve", Question: "Small task."}
+	input := map[string]any{"query": "what is 2+2"}
+	handoff := BraidNodeHandoff{Node: node}
+
+	// No toolExec → returns false.
+	result, ok := attemptSplitHelperExecution(nil, "phase", node, input, handoff, "", nil, nil)
+	if ok {
+		t.Fatalf("expected false for nil toolExec, got result=%q", result)
+	}
+}
+
+func TestHelperPreflightSplitErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	// Verify the preflight error message mentions splitting.
+	bigInput := map[string]any{
+		"data": string(make([]byte, 60000)),
+	}
+	handoff := BraidNodeHandoff{Node: BraidNode{ID: "n1"}}
+	err := helperPreflightCheck(bigInput, handoff)
+	if err == nil {
+		t.Fatal("expected error for oversized input")
+	}
+	if !strings.Contains(err.Error(), "split") {
+		t.Fatalf("error should mention split: %q", err.Error())
+	}
+}
+
+func TestApplyBraidGraphSplits(t *testing.T) {
+	t.Parallel()
+
+	graph := &BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{ID: "n1", Kind: "extract", Question: "Extract data."},
+			{ID: "n2", Kind: "solve", Question: "Solve HM type inference.", DependsOn: []string{"n1"}, HelperPolicy: "preferred", Archetype: "symbolic_trace"},
+			{ID: "n3", Kind: "reduce", Question: "Combine.", DependsOn: []string{"n2"}},
+		},
+		FinalNode: "n3",
+	}
+
+	applyBraidGraphSplits(graph, nil, "test")
+
+	// n2 should be removed.
+	for _, node := range graph.Nodes {
+		if node.ID == "n2" {
+			t.Fatal("n2 should be removed after split")
+		}
+	}
+
+	// Sub-nodes should exist.
+	parseID := "n2__parse"
+	mergeID := "n2__merge"
+	foundParse, foundMerge := false, false
+	var mergeNode BraidNode
+	for _, node := range graph.Nodes {
+		if node.ID == parseID {
+			foundParse = true
+			if node.Kind != "extract" {
+				t.Fatalf("parse should be extract kind, got %q", node.Kind)
+			}
+			if node.HelperPolicy != BraidNodeHelperPolicyNever {
+				t.Fatalf("parse should have helper_policy=never, got %q", node.HelperPolicy)
+			}
+		}
+		if node.ID == mergeID {
+			foundMerge = true
+			mergeNode = node
+			if node.Kind != "reduce" {
+				t.Fatalf("merge should be reduce kind, got %q", node.Kind)
+			}
+		}
+	}
+	if !foundParse {
+		t.Fatal("parse sub-node should exist")
+	}
+	if !foundMerge {
+		t.Fatal("merge sub-node should exist")
+	}
+
+	// n3 should now depend on merge instead of n2.
+	for _, node := range graph.Nodes {
+		if node.ID == "n3" {
+			found := false
+			for _, dep := range node.DependsOn {
+				if dep == mergeID {
+					found = true
+				}
+				if dep == "n2" {
+					t.Fatal("n3 should not still depend on n2")
+				}
+			}
+			if !found {
+				t.Fatalf("n3 should depend on %s, got %v", mergeID, node.DependsOn)
+			}
+		}
+	}
+
+	// Merge should depend on solve nodes.
+	if len(mergeNode.DependsOn) == 0 {
+		t.Fatal("merge should have solve dependencies")
+	}
+
+	// Graph should be valid (no dangling deps).
+	if err := ValidateBraidGraph(*graph, 32); err != nil {
+		t.Fatalf("graph validation failed after split: %v", err)
+	}
+}
+
+func TestApplyBraidGraphSplits_FinalNodeRewire(t *testing.T) {
+	t.Parallel()
+
+	graph := &BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{ID: "n1", Kind: "extract", Question: "Extract data."},
+			{ID: "n2", Kind: "solve", Question: "Solve HM type inference.", DependsOn: []string{"n1"}, HelperPolicy: "preferred", Archetype: "symbolic_trace"},
+		},
+		FinalNode: "n2",
+	}
+
+	applyBraidGraphSplits(graph, nil, "test")
+
+	// FinalNode should be rewired to merge.
+	if graph.FinalNode != "n2__merge" {
+		t.Fatalf("FinalNode should be n2__merge, got %q", graph.FinalNode)
+	}
+}
+
+func TestApplyBraidGraphSplits_SmallGraph(t *testing.T) {
+	t.Parallel()
+
+	graph := &BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{ID: "n1", Kind: "extract", Question: "Extract data."},
+			{ID: "n2", Kind: "solve", Question: "Solve simple.", DependsOn: []string{"n1"}},
+		},
+		FinalNode: "n2",
+	}
+
+	applyBraidGraphSplits(graph, nil, "test")
+
+	// No split — no archetype, no helper policy.
+	if len(graph.Nodes) != 2 {
+		t.Fatalf("expected 2 nodes (no split), got %d", len(graph.Nodes))
+	}
+}
+
+// --- Domain-agnostic tests proving that archetype routing uses typed packets,
+// not domain names or keyword heuristics. ---
+
+func TestStateTransitionHandoffIsDomainAgnostic(t *testing.T) {
+	t.Parallel()
+
+	// A state_transition handoff that uses generic field names
+	// (move_sequence, initial_state, actions) but NO chess/UCI/FEN keywords.
+	// The Puzzle instance section must contain parseable fields for the
+	// instance extractor.
+	rootPrompt := strings.Join([]string{
+		"Puzzle instance:",
+		"move_sequence: a2b1 b1c2",
+		"actions: [a2b1, b1c2]",
+	}, "\n")
+	node := BraidNode{
+		ID:        "n_solve",
+		Kind:      "solve",
+		Archetype: "state_transition",
+		Question:  "Apply moves and return the final state.",
+	}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, nil, "")
+
+	// The handoff should route to state_transition/state_replay_v1.
+	if handoff.ScaffoldClass != BraidScaffoldClassStateTransition {
+		t.Fatalf("expected scaffold class %q, got %q", BraidScaffoldClassStateTransition, handoff.ScaffoldClass)
+	}
+	if handoff.ScaffoldID != BraidScaffoldIDStateReplayV1 {
+		t.Fatalf("expected scaffold id %q, got %q", BraidScaffoldIDStateReplayV1, handoff.ScaffoldID)
+	}
+
+	// The prompt should contain no chess/UCI/FEN domain keywords in the Go routing layer.
+	prompt := RenderBraidHelperHandoffPrompt(handoff)
+	for _, forbidden := range []string{"chess", "Chess", "UCI", "uci_to_fen"} {
+		if strings.Contains(prompt, forbidden) {
+			t.Errorf("helper prompt contains forbidden domain keyword %q", forbidden)
+		}
+	}
+}
+
+func TestExplicitDAGHandoffIsDomainAgnostic(t *testing.T) {
+	t.Parallel()
+
+	// An explicit_dag handoff with generic node/dependency fields
+	// but NO math/Hindley-Milner/backtracking domain keywords.
+	rootPrompt := strings.Join([]string{
+		"Puzzle instance:",
+		"nodes: [node_0, node_1]",
+		"dependencies: [node_1 depends on node_0]",
+		"problems: [node_0: compute x, node_1: compute y given x]",
+	}, "\n")
+	node := BraidNode{
+		ID:        "n_solve",
+		Kind:      "solve",
+		Archetype: "explicit_dag",
+		Question:  "Solve the dependency chain.",
+	}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, nil, "")
+
+	if handoff.ScaffoldClass != BraidScaffoldClassExplicitDAG {
+		t.Fatalf("expected scaffold class %q, got %q", BraidScaffoldClassExplicitDAG, handoff.ScaffoldClass)
+	}
+	if handoff.ScaffoldID != BraidScaffoldIDSearchBacktrackV1 {
+		t.Fatalf("expected scaffold id %q, got %q", BraidScaffoldIDSearchBacktrackV1, handoff.ScaffoldID)
+	}
+}
+
+func TestScaffoldResolutionUsesTypedFieldsNotDomainNames(t *testing.T) {
+	t.Parallel()
+
+	// Prove that resolveBraidRuntimeScaffold accepts any input with the
+	// correct typed fields, even when no domain name appears anywhere.
+	tests := []struct {
+		name     string
+		node     BraidNode
+		handoff  BraidNodeHandoff
+		input    map[string]any
+		wantOK   bool
+		wantID   string
+	}{
+		{
+			name: "state_replay with generic action sequence",
+			node: BraidNode{ID: "n1", Kind: "solve"},
+			handoff: BraidNodeHandoff{
+				ScaffoldClass: BraidScaffoldClassStateTransition,
+				ScaffoldID:    BraidScaffoldIDStateReplayV1,
+			},
+			input: map[string]any{
+				"move_sequence": "a1b2 b2c3",
+			},
+			wantOK: true,
+			wantID: BraidScaffoldIDStateReplayV1,
+		},
+		{
+			name: "search_backtrack with generic dependency chain",
+			node: BraidNode{ID: "n1", Kind: "solve"},
+			handoff: BraidNodeHandoff{
+				ScaffoldClass: BraidScaffoldClassExplicitDAG,
+				ScaffoldID:    BraidScaffoldIDSearchBacktrackV1,
+			},
+			input: map[string]any{
+				"nodes": []any{"node_0", "node_1"},
+			},
+			wantOK: true,
+			wantID: BraidScaffoldIDSearchBacktrackV1,
+		},
+		{
+			name: "symbolic_trace with generic program text",
+			node: BraidNode{ID: "n1", Kind: "solve"},
+			handoff: BraidNodeHandoff{
+				ScaffoldClass: BraidScaffoldClassSymbolicTrace,
+				ScaffoldID:    BraidScaffoldIDTypeInferenceV1,
+			},
+			input: map[string]any{
+				"program": "let x = 0 in x",
+				"queries": []any{map[string]any{"kind": "type", "target": "x"}},
+			},
+			wantOK: true,
+			wantID: BraidScaffoldIDTypeInferenceV1,
+		},
+		{
+			name: "candidate_verify with generic items",
+			node: BraidNode{ID: "n1", Kind: "solve"},
+			handoff: BraidNodeHandoff{
+				ScaffoldClass: BraidScaffoldClassCandidateVerify,
+				ScaffoldID:    BraidScaffoldIDPropertyCheckV1,
+			},
+			input: map[string]any{
+				"candidates": []any{"alpha", "beta", "gamma"},
+				"predicates": []any{map[string]any{"name": "p1", "check_type": "equals", "expected": "beta"}},
+			},
+			wantOK: true,
+			wantID: BraidScaffoldIDPropertyCheckV1,
+		},
+		{
+			name: "unknown scaffold id rejected",
+			node: BraidNode{ID: "n1", Kind: "solve"},
+			handoff: BraidNodeHandoff{
+				ScaffoldClass: BraidScaffoldClassStateTransition,
+				ScaffoldID:    "unknown_v1",
+			},
+			input:  map[string]any{"data": "test"},
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scaffold, ok := resolveBraidRuntimeScaffold(tt.node, tt.handoff, tt.input)
+			if ok != tt.wantOK {
+				t.Fatalf("ok=%v, want %v", ok, tt.wantOK)
+			}
+			if ok && tt.wantID != "" && scaffold.ID != tt.wantID {
+				t.Errorf("scaffold.ID=%q, want %q", scaffold.ID, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestStateReplayVerifierIsDomainAgnostic(t *testing.T) {
+	t.Parallel()
+
+	// The state_replay verifier should accept any state-like output
+	// with valid structure, regardless of domain.
+	tests := []struct {
+		name     string
+		answer   string
+		input    map[string]any
+		wantOK   bool
+		wantPass bool
+	}{
+		{
+			name:     "generic state output with slashes",
+			answer:   "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e2 0 1",
+			input:    map[string]any{},
+			wantOK:   true,
+			wantPass: true,
+		},
+		{
+			name:     "empty answer fails",
+			answer:   "",
+			input:    map[string]any{},
+			wantOK:   true,
+			wantPass: false,
+		},
+		{
+			name:     "answer without state structure fails",
+			answer:   "just some text",
+			input:    map[string]any{},
+			wantOK:   true,
+			wantPass: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diag, ok := stateReplayAnswerVerifier(tt.answer, tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("ok=%v, want %v", ok, tt.wantOK)
+			}
+			if ok && diag.Pass != tt.wantPass {
+				t.Errorf("pass=%v, want %v; first_failure=%q", diag.Pass, tt.wantPass, diag.FirstFailure)
+			}
+		})
+	}
+}
+
+func TestSearchBacktrackVerifierIsDomainAgnostic(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		answer   string
+		input    map[string]any
+		wantOK   bool
+		wantPass bool
+	}{
+		{
+			name:     "structured node solution",
+			answer:   `solution = {"node_0": 42, "node_1": 13}`,
+			input:    map[string]any{},
+			wantOK:   true,
+			wantPass: true,
+		},
+		{
+			name:     "empty answer fails",
+			answer:   "",
+			input:    map[string]any{},
+			wantOK:   true,
+			wantPass: false,
+		},
+		{
+			name:     "answer mentioning node passes",
+			answer:   "node_0 = 42\nnode_1 = 13",
+			input:    map[string]any{},
+			wantOK:   true,
+			wantPass: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diag, ok := searchBacktrackAnswerVerifier(tt.answer, tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("ok=%v, want %v", ok, tt.wantOK)
+			}
+			if ok && diag.Pass != tt.wantPass {
+				t.Errorf("pass=%v, want %v; first_failure=%q", diag.Pass, tt.wantPass, diag.FirstFailure)
+			}
+		})
+	}
+}
+
+func TestNoKeywordRoutingInDeclaredArchetypePath(t *testing.T) {
+	t.Parallel()
+
+	// Prove that the declared archetype path routes correctly based on
+	// the archetype string alone, using typed instance fields.
+	// The prompts include generic instance data — no domain-specific keywords.
+	tests := []struct {
+		arch      string
+		prompt    string
+		wantClass string
+	}{
+		{
+			arch: "symbolic_trace",
+			prompt: "Puzzle instance:\nprogram: let x = 0 in x\nqueries: []\n",
+			wantClass: BraidScaffoldClassSymbolicTrace,
+		},
+		{
+			arch: "candidate_verify",
+			prompt: "Puzzle instance:\ncandidates: [a, b, c]\npredicates: []\n",
+			wantClass: BraidScaffoldClassCandidateVerify,
+		},
+		{
+			arch: "explicit_dag",
+			prompt: "Puzzle instance:\nnodes: [n0, n1]\n",
+			wantClass: BraidScaffoldClassExplicitDAG,
+		},
+		{
+			arch: "state_transition",
+			prompt: "Puzzle instance:\nmove_sequence: a1b2\nactions: [a1b2]\n",
+			wantClass: BraidScaffoldClassStateTransition,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.arch, func(t *testing.T) {
+			node := BraidNode{
+				ID:        "n_solve",
+				Kind:      "solve",
+				Archetype: tt.arch,
+				Question:  "Solve the problem.",
+			}
+			handoff := BuildBraidNodeHandoff(node, tt.prompt, nil, "")
+			if handoff.ScaffoldClass != tt.wantClass {
+				t.Errorf("archetype=%q: expected class %q, got %q", tt.arch, tt.wantClass, handoff.ScaffoldClass)
+			}
+		})
+	}
+}
+
+func TestValidateBraidGraphScaffoldContractAcceptsCompleteNodes(t *testing.T) {
+	t.Parallel()
+
+	graph := BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{ID: "n1", Kind: "extract", Question: "Extract facts."},
+			{ID: "n2", Kind: "solve", Question: "Solve.", DependsOn: []string{"n1"},
+				Archetype: "state_transition", ScaffoldClass: "state_transition",
+				ScaffoldID: "state_replay_v1", InputSchema: map[string]any{"initial_state": "s0", "actions": "a1"}},
+			{ID: "n3", Kind: "verify", Question: "Verify.", DependsOn: []string{"n2"},
+				Archetype: "candidate_verify", ScaffoldClass: "candidate_verify",
+				ScaffoldID: "property_check_v1", InputSchema: map[string]any{"candidates": "ans"}},
+			{ID: "n4", Kind: "reduce", Question: "Reduce.", DependsOn: []string{"n2", "n3"}},
+		},
+		FinalNode: "n4",
+	}
+	if err := ValidateBraidGraphScaffoldContract(graph); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestValidateBraidGraphScaffoldContractRejectsMissingFields(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		node    BraidNode
+		wantErr string
+	}{
+		{
+			name:    "solve missing all scaffold fields",
+			node:    BraidNode{ID: "n_solve", Kind: "solve", Question: "Solve."},
+			wantErr: "missing_scaffold_contract",
+		},
+		{
+			name: "verify missing archetype",
+			node: BraidNode{ID: "n_verify", Kind: "verify", Question: "Verify.",
+				ScaffoldClass: "candidate_verify", ScaffoldID: "property_check_v1",
+				InputSchema: map[string]any{"x": 1}},
+			wantErr: "missing_scaffold_contract",
+		},
+		{
+			name: "solve missing input_schema",
+			node: BraidNode{ID: "n_solve", Kind: "solve", Question: "Solve.",
+				Archetype: "state_transition", ScaffoldClass: "state_transition", ScaffoldID: "state_replay_v1"},
+			wantErr: "missing_scaffold_contract",
+		},
+		{
+			name:    "extract node does not require scaffold",
+			node:    BraidNode{ID: "n_extract", Kind: "extract", Question: "Extract."},
+			wantErr: "",
+		},
+		{
+			name:    "reduce node does not require scaffold",
+			node:    BraidNode{ID: "n_reduce", Kind: "reduce", Question: "Reduce."},
+			wantErr: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			graph := BraidGraph{
+				Version:   1,
+				Nodes:     []BraidNode{tt.node},
+				FinalNode: tt.node.ID,
+			}
+			err := ValidateBraidGraphScaffoldContract(graph)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func TestMissingScaffoldContractErrorIdentifiesNodeAndFields(t *testing.T) {
+	t.Parallel()
+
+	graph := BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{ID: "n_extract", Kind: "extract", Question: "Extract."},
+			{ID: "n_solve", Kind: "solve", Question: "Solve.", DependsOn: []string{"n_extract"}},
+		},
+		FinalNode: "n_solve",
+	}
+	err := ValidateBraidGraphScaffoldContract(graph)
+	if err == nil {
+		t.Fatal("expected error for missing scaffold fields")
+	}
+	mse, ok := IsMissingScaffoldContract(err)
+	if !ok {
+		t.Fatalf("expected MissingScaffoldContractError, got %T: %v", err, err)
+	}
+	if mse.NodeID != "n_solve" {
+		t.Errorf("NodeID=%q want %q", mse.NodeID, "n_solve")
+	}
+	if len(mse.Missing) != 4 {
+		t.Errorf("Missing=%v want 4 fields", mse.Missing)
+	}
+}
+
+func TestRepairPromptIncludesScaffoldInstructionsOnContractError(t *testing.T) {
+	t.Parallel()
+
+	phase := REPLRunnerPhase{
+		Name:                    "graph_plan",
+		Prompt:                  "Return JSON only.",
+		BraidGraphPolicy:        BraidGraphPolicyLongCoTController,
+		RequireScaffoldContract: true,
+	}
+
+	graph := BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{
+			{ID: "n_solve", Kind: "solve", Question: "Solve."},
+		},
+		FinalNode: "n_solve",
+	}
+	validationErr := ValidateBraidGraphScaffoldContract(graph)
+	if validationErr == nil {
+		t.Fatal("expected scaffold contract error")
+	}
+
+	repairPrompt := buildBraidGraphRepairPrompt("task prompt", phase, engine.EngineOutput{}, "{}", validationErr, 7)
+
+	for _, want := range []string{
+		"Scaffold contract violation",
+		"Every solve and verify node MUST include archetype, scaffold_class, scaffold_id, and input_schema",
+		"generic_v1",
+	} {
+		if !strings.Contains(repairPrompt, want) {
+			t.Errorf("repair prompt missing %q", want)
+		}
+	}
+}
+
+func TestScaffoldDeclaredHandoffUsesNodeFields(t *testing.T) {
+	t.Parallel()
+
+	node := BraidNode{
+		ID:            "n_solve",
+		Kind:          "solve",
+		Archetype:     "state_transition",
+		ScaffoldClass: "state_transition",
+		ScaffoldID:    "state_replay_v1",
+		InputSchema:   map[string]any{"initial_state": "s0", "actions": "a1,a2", "goal": "g"},
+	}
+
+	handoff := BuildBraidNodeHandoff(node, "some prompt text", nil, "")
+	if handoff.ScaffoldClass != "state_transition" {
+		t.Errorf("ScaffoldClass=%q want %q", handoff.ScaffoldClass, "state_transition")
+	}
+	if handoff.ScaffoldID != "state_replay_v1" {
+		t.Errorf("ScaffoldID=%q want %q", handoff.ScaffoldID, "state_replay_v1")
 	}
 }

@@ -660,10 +660,13 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	if got := phases[planIdx].BraidGraphPolicy; got != rlmruntime.BraidGraphPolicyLongCoTController {
 		t.Fatalf("graph_plan BraidGraphPolicy=%q want %q", got, rlmruntime.BraidGraphPolicyLongCoTController)
 	}
-	for _, want := range []string{"valid json object", "one primary solve wave", "Allowed kind values are extract, solve, cycle_solve, verify, reduce", "cycle_solve is optional", "BlocksWorld-style stack puzzles", "do not segment the plan by vague phases", "Use one primary solve node to build an executable candidate", "Keep the runtime graph acyclic"} {
+	for _, want := range []string{"valid json object", "one primary solve wave", "Allowed kind values are extract, solve, cycle_solve, verify, reduce", "cycle_solve is optional", "BlocksWorld-style stack puzzles", "do not segment the plan by vague phases", "Use one primary solve node to build an executable candidate", "Keep the runtime graph acyclic", "Every solve and verify node must additionally include archetype, scaffold_class, scaffold_id, and input_schema", "Allowed archetype and scaffold_class values"} {
 		if !strings.Contains(phases[planIdx].Prompt, want) {
 			t.Fatalf("graph_plan prompt missing %q:\n%s", want, phases[planIdx].Prompt)
 		}
+	}
+	if !phases[planIdx].RequireScaffoldContract {
+		t.Fatal("graph_plan RequireScaffoldContract=false want true")
 	}
 	if !phases[fanoutIdx].AutoExecuteGraphNodes {
 		t.Fatal("graph_fanout AutoExecuteGraphNodes=false want true")
