@@ -341,6 +341,13 @@ func (s *ChildSpawner) publishHeartbeats(req spawn.Request, entry *processEntry)
 		case <-entry.done:
 			return
 		case <-ticker.C:
+			// Guard against publish racing with done closure:
+			// if done is already closed, skip this heartbeat.
+			select {
+			case <-entry.done:
+				return
+			default:
+			}
 			_ = s.publish(context.Background(), coreworker.LifecycleEvent{
 				EventKind:     coreworker.EventWorkerHeartbeat,
 				ObservedAt:    s.now().UTC(),
