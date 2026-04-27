@@ -169,93 +169,6 @@ func (m *ConversationMemory) claimWork(ctx context.Context, tx *sql.Tx, convID s
 	return fromEvent, toEvent, true, nil
 }
 
-func containsPreference(text string) bool {
-	for _, signal := range []string{"i prefer", "i always", "i never", "i don't like", "don't like", "i like", "i enjoy"} {
-		if strings.Contains(text, signal) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasMemoryWorthySignals checks if a message should pass Tier 1 extraction.
-// tool_result events ALWAYS return true.
-func hasMemoryWorthySignals(event ConversationEvent) bool {
-	eventType := strings.ToLower(strings.TrimSpace(event.EventType))
-	if eventType == "tool_result" {
-		return true
-	}
-	if eventType != "user_message" && eventType != "assistant_message" {
-		return false
-	}
-
-	text := strings.ToLower(event.Content)
-	if containsPreference(text) {
-		return true
-	}
-	if containsDecision(text) {
-		return true
-	}
-	if containsQuestion(text) {
-		return true
-	}
-	if containsDefinition(text) {
-		return true
-	}
-	if containsGoalChange(text) {
-		return true
-	}
-	return containsRetraction(text)
-}
-
-func containsDecision(text string) bool {
-	for _, signal := range []string{"let's go with", "decided to", "the plan is", "we will", "we're going to", "i've decided", "i decided", "let us", "let's do"} {
-		if strings.Contains(text, signal) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsQuestion(text string) bool {
-	if strings.HasSuffix(text, "?") {
-		return true
-	}
-	for _, signal := range []string{"what about", "should we", "could we", "can we", "what if", "how about", "when do", "where should"} {
-		if strings.Contains(text, signal) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsDefinition(text string) bool {
-	for _, signal := range []string{" means", " by", " i mean", " is when", "defined as", "is called"} {
-		if strings.Contains(text, signal) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsGoalChange(text string) bool {
-	for _, signal := range []string{"the goal is", "we need to", "let's focus", "from now on", "going forward", "new objective", "change the goal", "priority is"} {
-		if strings.Contains(text, signal) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsRetraction(text string) bool {
-	for _, signal := range []string{"actually no", "that was wrong", "forget that", "disregard", "scratch that", "nevermind", "i retract", "i take it back"} {
-		if strings.Contains(text, signal) {
-			return true
-		}
-	}
-	return false
-}
-
 // BuildHybridContextLayers is the main hybrid pipeline entry point.
 // It claims a range of events, processes Tier 0 and Tier 1 work, and returns.
 func (m *ConversationMemory) BuildHybridContextLayers(ctx context.Context, conversationID string) error {
@@ -365,7 +278,7 @@ func (m *ConversationMemory) BuildHybridContextLayers(ctx context.Context, conve
 			return fmt.Errorf("process tier0: %w", err)
 		}
 
-		if hasMemoryWorthySignals(event) {
+		if has, _ := m.extractionPolicy.ShouldExtract(event); has {
 			if err := m.processEventTier1(ctx, tx, conversationID, event); err != nil {
 				return fmt.Errorf("process tier1: %w", err)
 			}
@@ -405,14 +318,9 @@ func (m *ConversationMemory) processEventTier1(ctx context.Context, tx *sql.Tx, 
 		return nil
 	}
 
-	extractions := extractProfileClaims(text)
+	_, categories := m.extractionPolicy.ShouldExtract(event)
+	extractions := m.extractionPolicy.ExtractEntries(text, categories)
 	extractions = append(extractions, extractExplicitFacts(text)...)
-	extractions = append(extractions, extractDecisions(text)...)
-	extractions = append(extractions, extractOpenQuestions(text)...)
-	if goal := extractGoalChange(text); goal != nil {
-		extractions = append(extractions, *goal)
-	}
-	extractions = append(extractions, extractRetractions(text)...)
 
 	for _, entry := range extractions {
 		if err := m.persistDeterministicExtraction(ctx, tx, convID, event.ID, entry); err != nil {

@@ -320,11 +320,11 @@ func (m *ConversationMemory) checkEpisodeBoundary(ctx context.Context, tx *sql.T
 		}
 	}
 
-	if isRetractionSignal(event.Content) {
+	if m.signalExtractor.DetectBoundarySignal(event.Content) == SignalAssumptionInvalidated {
 		return "assumption_invalidated", nil
 	}
 
-	if isUserRedirectSignal(event.Content) {
+	if m.signalExtractor.DetectBoundarySignal(event.Content) == SignalUserRedirect {
 		return "user_redirect", nil
 	}
 
@@ -517,111 +517,6 @@ func normalizeEntryKey(ctx context.Context, tx *sql.Tx, convID, entryType, rawTe
 	return "", true
 }
 
-// extractProfileClaims extracts preference-type claims from text.
-func extractProfileClaims(text string) []ExtractedEntry {
-	return extractByPatterns(text, []string{
-		"i prefer",
-		"i'd prefer",
-		"i always",
-		"i never",
-		"i don't like",
-		"i dislike",
-		"i like",
-	}, "preference", 0.86)
-}
-
-// extractDecisions extracts decision-type claims from text.
-func extractDecisions(text string) []ExtractedEntry {
-	return extractByPatterns(text, []string{
-		"let's decide",
-		"let's go with",
-		"we decided",
-		"i decided",
-		"we will",
-		"i'll do",
-		"i will do",
-		"we should do",
-	}, "decision", 0.8)
-}
-
-// extractOpenQuestions extracts questions from text.
-func extractOpenQuestions(text string) []ExtractedEntry {
-	var out []ExtractedEntry
-	seen := map[string]struct{}{}
-
-	for _, sentence := range splitSentences(text) {
-		if strings.Contains(sentence, "?") {
-			for _, question := range splitQuestionParts(sentence) {
-				question = strings.TrimSpace(question)
-				if question == "" {
-					continue
-				}
-				if _, ok := seen[question]; ok {
-					continue
-				}
-				seen[question] = struct{}{}
-				out = append(out, ExtractedEntry{
-					EntryType:  "open_question",
-					RawText:    question,
-					Value:      question,
-					Confidence: 0.72,
-				})
-			}
-		}
-	}
-
-	for _, extra := range extractByPatterns(text, []string{
-		"what should",
-		"should we",
-		"could we",
-		"how should",
-		"why don't we",
-		"can we",
-		"what about",
-	}, "open_question", 0.66) {
-		if _, ok := seen[extra.Value]; ok {
-			continue
-		}
-		seen[extra.Value] = struct{}{}
-		out = append(out, extra)
-	}
-
-	return out
-}
-
-// extractGoalChange extracts goal changes from text.
-func extractGoalChange(text string) *ExtractedEntry {
-	goal := firstMatchAfterPattern(text, []string{
-		"the goal is",
-		"our goal is",
-		"let's focus on",
-		"let's work toward",
-		"goal:",
-	})
-	if goal == "" {
-		return nil
-	}
-	return &ExtractedEntry{
-		EntryType:  "goal",
-		RawText:    goal,
-		Value:      goal,
-		Confidence: 0.9,
-	}
-}
-
-// extractRetractions extracts retraction signals from text.
-func extractRetractions(text string) []ExtractedEntry {
-	if !isRetractionSignal(text) {
-		return nil
-	}
-	return []ExtractedEntry{{
-		EntryType:  "retraction",
-		RawText:    strings.TrimSpace(text),
-		Value:      strings.TrimSpace(text),
-		Confidence: 0.93,
-	}}
-}
-
 func extractExplicitFacts(text string) []ExtractedEntry {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -743,13 +638,13 @@ func (m *ConversationMemory) runGateMissBackstop(ctx context.Context, tx *sql.Tx
 			continue
 		}
 
-		extractions := extractProfileClaims(text)
-		extractions = append(extractions, extractDecisions(text)...)
-		extractions = append(extractions, extractOpenQuestions(text)...)
-		if goal := extractGoalChange(text); goal != nil {
-			extractions = append(extractions, *goal)
+		// Use all categories for backstop extraction
+		allCategories := []string{
+			ExtractionCategoryPreference, ExtractionCategoryDecision,
+			ExtractionCategoryQuestion, ExtractionCategoryGoalChange,
+			ExtractionCategoryRetraction,
 		}
-		extractions = append(extractions, extractRetractions(text)...)
+		extractions := m.extractionPolicy.ExtractEntries(text, allCategories)
 
 		for _, entry := range extractions {
 			if err := m.persistDeterministicExtraction(ctx, tx, convID, ev.id, entry); err != nil {
@@ -1133,44 +1028,6 @@ func extractTopicTokens(text string, max int) []string {
 		out = out[:max]
 	}
 	return out
-}
-
-func isRetractionSignal(text string) bool {
-	lower := strings.ToLower(text)
-	patterns := []string{
-		"actually no",
-		"that was wrong",
-		"that's wrong",
-		"that's incorrect",
-		"never mind",
-		"i'm sorry",
-		"i take that back",
-		"assumption invalidated",
-		"let's reset",
-	}
-	for _, p := range patterns {
-		if strings.Contains(lower, p) {
-			return true
-		}
-	}
-	return false
-}
-
-func isUserRedirectSignal(text string) bool {
-	lower := strings.ToLower(text)
-	patterns := []string{
-		"let's move on to",
-		"forget that, let's",
-		"let's switch to",
-		"let's pivot to",
-		"moving on to",
-	}
-	for _, p := range patterns {
-		if strings.Contains(lower, p) {
-			return true
-		}
-	}
-	return false
 }
 
 func isStopWord(token string) bool {

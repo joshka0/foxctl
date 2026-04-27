@@ -40,6 +40,8 @@ type ConversationMemory struct {
 	idGenerator          func() string
 	idSeq                uint64
 	mu                   sync.RWMutex
+	extractionPolicy     ExtractionPolicy // Typed extraction policy (replaces keyword heuristics)
+	signalExtractor      SignalExtractor  // Typed episode boundary signals (replaces isRetractionSignal/isUserRedirectSignal)
 }
 
 // MemoryConfig configures conversation memory behavior.
@@ -162,6 +164,15 @@ func NewConversationMemory(db *sql.DB, opts ...MemoryOption) (*ConversationMemor
 	}
 	if m.tokenCounter == nil {
 		m.tokenCounter = NewHeuristicTokenCounter()
+	}
+	if m.extractionPolicy == nil {
+		m.extractionPolicy = NewCompositeExtractionPolicy(
+			ToolResultBypassPolicy{},
+			NewDefaultPatternExtractionPolicy(),
+		)
+	}
+	if m.signalExtractor == nil {
+		m.signalExtractor = NewDefaultTypedSignalExtractor()
 	}
 
 	if err := m.ensureSchema(context.Background()); err != nil {
@@ -733,7 +744,7 @@ func (m *ConversationMemory) extractUserFactsFromTurn(ctx context.Context, conve
 		return nil
 	}
 
-	extractions := extractProfileClaims(content)
+	extractions := m.extractionPolicy.ExtractEntries(content, []string{ExtractionCategoryPreference})
 	extractions = append(extractions, extractExplicitFacts(content)...)
 	if len(extractions) == 0 {
 		return nil
