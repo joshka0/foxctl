@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 )
 
@@ -83,7 +84,7 @@ func (s *WorkspaceStore) ApplyMemoryProposal(ctx context.Context, id string) (*M
 	}
 
 	var result map[string]any
-	switch strings.TrimSpace(proposal.Kind) {
+	switch string(proposal.Kind) {
 	case "retrieval_policy_patch":
 		policyPath, err := s.SetRetrievalPackageNoteFallback(true)
 		if err != nil {
@@ -105,7 +106,7 @@ func (s *WorkspaceStore) ApplyMemoryProposal(ctx context.Context, id string) (*M
 		}
 		sourceKind := "evidence_import"
 		noteType := "evidence"
-		if strings.TrimSpace(proposal.Kind) == "methodology_draft" {
+		if proposal.Kind == PolicyKindMethodologyDraft {
 			noteType = "pattern"
 		}
 		job, err := ensurePromotionJobRow(ctx, db, sourceRef, sourceKind, noteType, changeString(proposal.ProposedChange, "title"), draftPath)
@@ -120,12 +121,12 @@ func (s *WorkspaceStore) ApplyMemoryProposal(ctx context.Context, id string) (*M
 			"next_action":   "context proposal merge",
 		}
 	default:
-		return nil, nil, ProposalWorkPacket{}, fmt.Errorf("proposal kind %s is not auto-applicable in phase 1", proposal.Kind)
+		return nil, nil, ProposalWorkPacket{}, fmt.Errorf("proposal kind %s is not auto-applicable in phase 1", string(proposal.Kind))
 	}
 
 	nextStatus := "applied"
 	nextApplyStatus := "applied"
-	if proposal.Kind == "external_evidence_import" || proposal.Kind == "methodology_draft" {
+	if proposal.Kind == PolicyKindExternalImport || proposal.Kind == PolicyKindMethodologyDraft {
 		nextStatus = "prepared"
 		nextApplyStatus = "review_prepared"
 	}
@@ -177,10 +178,10 @@ func (s *WorkspaceStore) MergeMemoryProposal(ctx context.Context, vaultName, vau
 	default:
 		return nil, PromotionMergeResult{}, ProposalWorkPacket{}, fmt.Errorf("proposal %s is not prepared for merge", proposal.ID)
 	}
-	switch strings.TrimSpace(proposal.Kind) {
+	switch string(proposal.Kind) {
 	case "external_evidence_import", "methodology_draft":
 	default:
-		return nil, PromotionMergeResult{}, ProposalWorkPacket{}, fmt.Errorf("proposal kind %s does not support direct merge", proposal.Kind)
+		return nil, PromotionMergeResult{}, ProposalWorkPacket{}, fmt.Errorf("proposal kind %s does not support direct merge", string(proposal.Kind))
 	}
 
 	draftPath := firstNonEmpty(strings.TrimSpace(draftPathOverride), changeString(proposal.ProposedChange, "draft_path"))
@@ -203,7 +204,7 @@ func (s *WorkspaceStore) MergeMemoryProposal(ctx context.Context, vaultName, vau
 	}
 	sourceKind := "evidence_import"
 	noteType := "evidence"
-	if proposal.Kind == "methodology_draft" {
+	if proposal.Kind == PolicyKindMethodologyDraft {
 		noteType = "pattern"
 	}
 	if _, err := ensurePromotionJobRow(ctx, db, sourceRef, sourceKind, noteType, changeString(proposal.ProposedChange, "title"), draftPath); err != nil {
@@ -398,10 +399,10 @@ func memoryProposalFromRetrievalInspection(inspection RetrievalInspection) Memor
 	}
 }
 
-func proposalShapeFromRetrievalAction(kind string) (proposalKind, blastRadius string, reviewRequired bool) {
+func proposalShapeFromRetrievalAction(kind string) (proposalKind PolicyKind, blastRadius string, reviewRequired bool) {
 	switch strings.TrimSpace(kind) {
 	case "policy_patch":
-		return "retrieval_policy_patch", "low", false
+		return PolicyKindRetrievalPatch, "low", false
 	case "metadata_patch":
 		return "bridge_metadata_patch", "medium", true
 	case "draft_package_note":
@@ -412,13 +413,13 @@ func proposalShapeFromRetrievalAction(kind string) (proposalKind, blastRadius st
 }
 
 func memoryProposalFromEvidenceImport(run EvidenceImportRun, extraction EvidenceExtraction, target EvidenceTargetSuggestion) MemoryProposal {
-	proposalKind := "external_evidence_import"
+	proposalKind := PolicyKindExternalImport
 	blastRadius := "medium"
 	reviewRequired := true
 	reviewAction := "review_and_merge"
 	topicKey := normalizeEvidenceTopic(firstNonEmpty(strings.TrimSpace(run.Title), strings.TrimSpace(run.SourceRef), strings.TrimSpace(extraction.Summary)))
 	if looksMethodologyEvidence(run, extraction) {
-		proposalKind = "methodology_draft"
+		proposalKind = PolicyKindMethodologyDraft
 		blastRadius = "high"
 		reviewAction = "draft_methodology_update"
 	}
@@ -451,7 +452,7 @@ func memoryProposalFromEvidenceImport(run EvidenceImportRun, extraction Evidence
 		summary = strings.TrimSuffix(summary, ".") + fmt.Sprintf(" Suggested target: %s.", target.Path)
 	}
 	return MemoryProposal{
-		DedupeKey:        fmt.Sprintf("%s|%s", proposalKind, topicKey),
+		DedupeKey:        fmt.Sprintf("%s|%s", string(proposalKind), topicKey),
 		Kind:             proposalKind,
 		Classification:   "external_evidence",
 		Status:           "open",
@@ -459,7 +460,7 @@ func memoryProposalFromEvidenceImport(run EvidenceImportRun, extraction Evidence
 		Confidence:       0.72,
 		BlastRadius:      blastRadius,
 		Summary:          summary,
-		SourceRefs:       uniqueStrings([]string{"draft:" + run.DraftPath, "external:" + run.SourceKind + ":" + run.SourceRef, "topic:" + topicKey}),
+		SourceRefs:       uniqueEvidenceRefs(stringsToEvidenceRefs([]string{"draft:" + run.DraftPath, "external:" + run.SourceKind + ":" + run.SourceRef, "topic:" + topicKey})),
 		ProposedChange:   change,
 		EvaluationStatus: "not_evaluated",
 		ApplyStatus:      "pending",
@@ -491,8 +492,8 @@ func looksMethodologyEvidence(run EvidenceImportRun, extraction EvidenceExtracti
 	return false
 }
 
-func memoryProposalSourceRefs(inspection RetrievalInspection) []string {
-	refs := append([]string(nil), inspection.Observation.EvidenceRefs...)
+func memoryProposalSourceRefs(inspection RetrievalInspection) []contextengine.EvidenceRef {
+	refs := evidenceRefsToStrings(append([]contextengine.EvidenceRef(nil), inspection.Observation.EvidenceRefs...))
 	if q := strings.TrimSpace(inspection.Query); q != "" {
 		refs = append(refs, "query:"+q)
 	}
@@ -510,13 +511,13 @@ func memoryProposalSourceRefs(inspection RetrievalInspection) []string {
 	if candidate := strings.TrimSpace(inspection.CandidateNote); candidate != "" {
 		refs = append(refs, "note:"+candidate)
 	}
-	return uniqueStrings(refs)
+	return stringsToEvidenceRefs(uniqueStrings(refs))
 }
 
 func memoryProposalKey(proposal MemoryProposal) string {
 	changeJSON, _ := json.Marshal(proposal.ProposedChange)
 	keyParts := []string{
-		strings.ToLower(strings.TrimSpace(proposal.Kind)),
+		strings.ToLower(strings.TrimSpace(string(proposal.Kind))),
 		strings.ToLower(strings.TrimSpace(proposal.Classification)),
 		strings.ToLower(strings.TrimSpace(proposal.Summary)),
 		string(changeJSON),
@@ -549,11 +550,11 @@ func buildApplyProposalWorkPacket(proposal *MemoryProposal, result map[string]an
 	}
 	packet := ProposalWorkPacket{
 		ProposalID:     proposal.ID,
-		ProposalKind:   proposal.Kind,
+		ProposalKind:   string(proposal.Kind),
 		Status:         proposal.Status,
 		ReviewRequired: proposal.ReviewRequired,
 	}
-	switch strings.TrimSpace(proposal.Kind) {
+	switch string(proposal.Kind) {
 	case "retrieval_policy_patch":
 		packet.Action = "retrieval_policy_patch"
 		packet.PolicyPath = changeString(result, "policy_path")
@@ -579,7 +580,7 @@ func buildMergeProposalWorkPacket(proposal *MemoryProposal, merge PromotionMerge
 	}
 	return ProposalWorkPacket{
 		ProposalID:     proposal.ID,
-		ProposalKind:   proposal.Kind,
+		ProposalKind:   string(proposal.Kind),
 		Action:         "merge_promotion",
 		Status:         "merged",
 		ReviewRequired: proposal.ReviewRequired,
@@ -599,7 +600,7 @@ func buildStoredPreparedProposalWorkPacket(proposal *MemoryProposal) (ProposalWo
 	if !strings.EqualFold(strings.TrimSpace(proposal.Status), "prepared") || !strings.EqualFold(strings.TrimSpace(proposal.ApplyStatus), "review_prepared") {
 		return ProposalWorkPacket{}, false
 	}
-	switch strings.TrimSpace(proposal.Kind) {
+	switch string(proposal.Kind) {
 	case "external_evidence_import", "methodology_draft":
 	default:
 		return ProposalWorkPacket{}, false
@@ -611,7 +612,7 @@ func buildStoredPreparedProposalWorkPacket(proposal *MemoryProposal) (ProposalWo
 	}
 	packet := ProposalWorkPacket{
 		ProposalID:        proposal.ID,
-		ProposalKind:      proposal.Kind,
+		ProposalKind:      string(proposal.Kind),
 		Action:            "merge_promotion",
 		Status:            "prepared",
 		ReviewRequired:    proposal.ReviewRequired,

@@ -9,7 +9,7 @@ import (
 
 // ConvertTopOfMind converts a contextplane.TopOfMind to a contextengine.ContextPacket.
 func ConvertTopOfMind(src contextplane.TopOfMind) contextengine.ContextPacket {
-	refs := ParseOrInferRefs(src.RelevantRefs)
+	refs := append([]contextengine.EvidenceRef(nil), src.RelevantRefs...)
 	decisions := make([]contextengine.RecentDecision, 0, len(src.RecentDecisions))
 	for _, d := range src.RecentDecisions {
 		decisions = append(decisions, contextengine.RecentDecision{
@@ -37,11 +37,9 @@ func ConvertTopOfMind(src contextplane.TopOfMind) contextengine.ContextPacket {
 
 // ConvertHandoff converts a contextplane.Handoff to a contextengine.ContextPacket.
 func ConvertHandoff(src contextplane.Handoff) contextengine.ContextPacket {
-	refs := ParseOrInferRefs(src.EvidenceRefs)
-	fileRefs := ParseOrInferRefs(src.FilesTouched)
-	allRefs := make([]contextengine.EvidenceRef, 0, len(refs)+len(fileRefs))
-	allRefs = append(allRefs, refs...)
-	allRefs = append(allRefs, fileRefs...)
+	allRefs := make([]contextengine.EvidenceRef, 0, len(src.EvidenceRefs)+len(src.FileRefs))
+	allRefs = append(allRefs, src.EvidenceRefs...)
+	allRefs = append(allRefs, src.FileRefs...)
 
 	return contextengine.ContextPacket{
 		WorkspaceID: src.TaskID,
@@ -62,10 +60,9 @@ func ConvertHandoff(src contextplane.Handoff) contextengine.ContextPacket {
 
 // ConvertObservation converts a contextplane.Observation to a contextengine.EvidenceNode.
 func ConvertObservation(workspaceID string, src contextplane.Observation) contextengine.EvidenceNode {
-	refs := ParseOrInferRefs(src.EvidenceRefs)
 	ref := contextengine.EvidenceRef{Type: contextengine.RefTypeNote, Ref: src.ID}
-	if len(refs) > 0 {
-		ref = refs[0]
+	if len(src.EvidenceRefs) > 0 {
+		ref = src.EvidenceRefs[0]
 	}
 	return contextengine.EvidenceNode{
 		ID:          src.ID,
@@ -80,17 +77,16 @@ func ConvertObservation(workspaceID string, src contextplane.Observation) contex
 		Metadata: map[string]any{
 			"project":       src.Project,
 			"area":          src.Area,
-			"evidence_refs": FormatStringRefs(refs),
+			"evidence_refs": contextplane.EvidenceRefsToStrings(src.EvidenceRefs),
 		},
 	}
 }
 
 // ConvertTension converts a contextplane.Tension to a contextengine.EvidenceNode.
 func ConvertTension(workspaceID string, src contextplane.Tension) contextengine.EvidenceNode {
-	refs := ParseOrInferRefs(src.RelatedRefs)
 	ref := contextengine.EvidenceRef{Type: contextengine.RefTypeNote, Ref: src.ID}
-	if len(refs) > 0 {
-		ref = refs[0]
+	if len(src.RelatedRefs) > 0 {
+		ref = src.RelatedRefs[0]
 	}
 	return contextengine.EvidenceNode{
 		ID:          src.ID,
@@ -105,18 +101,17 @@ func ConvertTension(workspaceID string, src contextplane.Tension) contextengine.
 			"kind":         src.Kind,
 			"impact":       src.Impact,
 			"status":       src.Status,
-			"related_refs": FormatStringRefs(refs),
+			"related_refs": contextplane.EvidenceRefsToStrings(src.RelatedRefs),
 		},
 	}
 }
 
 // ConvertMemoryProposal converts a contextplane.MemoryProposal to a contextengine.MemoryClaim.
 func ConvertMemoryProposal(workspaceID string, src contextplane.MemoryProposal) contextengine.MemoryClaim {
-	refs := ParseOrInferRefs(src.SourceRefs)
 	return contextengine.MemoryClaim{
 		ID:          src.ID,
 		WorkspaceID: workspaceID,
-		ClaimType:   src.Kind,
+		ClaimType:   string(src.Kind),
 		Status:      mapProposalStatus(src.Status),
 		Scope: contextengine.ClaimScope{
 			Path: src.BlastRadius,
@@ -124,7 +119,7 @@ func ConvertMemoryProposal(workspaceID string, src contextplane.MemoryProposal) 
 		Summary:     src.Summary,
 		Confidence:  src.Confidence,
 		BlastRadius: src.BlastRadius,
-		SourceRefs:  refs,
+		SourceRefs:  append([]contextengine.EvidenceRef(nil), src.SourceRefs...),
 		Reason:      src.EvaluationStatus,
 		CreatedAt:   src.CreatedAt,
 		UpdatedAt:   src.UpdatedAt,
@@ -150,7 +145,7 @@ func mapProposalStatus(status string) contextengine.ClaimStatus {
 
 // ConvertTaskPacket converts a contextplane.TaskPacket to a contextengine.TaskContext.
 func ConvertTaskPacket(src contextplane.TaskPacket) contextengine.TaskContext {
-	refs := ParseOrInferRefs(src.RelevantRefs)
+	refs := append([]contextengine.EvidenceRef(nil), src.RelevantRefs...)
 
 	projectionID := ""
 	projectionType := "task_packet"

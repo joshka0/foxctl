@@ -1,6 +1,45 @@
 package contextplane
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"github.com/joshka0/foxctl/internal/context/contextengine"
+)
+
+// PolicyKind is a typed enum for MemoryProposal.Kind.
+type PolicyKind string
+
+const (
+	PolicyKindRetrievalPatch     PolicyKind = "retrieval_policy_patch"
+	PolicyKindExternalImport     PolicyKind = "external_evidence_import"
+	PolicyKindMethodologyDraft   PolicyKind = "methodology_draft"
+	PolicyKindContradictionNote  PolicyKind = "contradiction_note"
+	PolicyKindObservationPromote PolicyKind = "observation_promote"
+	PolicyKindTensionResolve     PolicyKind = "tension_resolve"
+	PolicyKindMemoryDraft        PolicyKind = "memory_draft"
+)
+
+// IsValid reports whether k is a known PolicyKind.
+func (k PolicyKind) IsValid() bool {
+	switch k {
+	case PolicyKindRetrievalPatch, PolicyKindExternalImport, PolicyKindMethodologyDraft,
+		PolicyKindContradictionNote, PolicyKindObservationPromote, PolicyKindTensionResolve,
+		PolicyKindMemoryDraft:
+		return true
+	default:
+		return false
+	}
+}
+
+// ParsePolicyKind parses a string into a PolicyKind. Returns error for unknown kinds.
+func ParsePolicyKind(s string) (PolicyKind, error) {
+	k := PolicyKind(s)
+	if !k.IsValid() {
+		return "", fmt.Errorf("unknown policy kind: %q", s)
+	}
+	return k, nil
+}
 
 // RecentDecision captures a bounded decision item in top-of-mind.
 type RecentDecision struct {
@@ -11,58 +50,62 @@ type RecentDecision struct {
 
 // TopOfMind is the derived orientation bundle for the current workspace frontier.
 type TopOfMind struct {
-	WorkspaceID     string           `json:"workspace_id"`
-	Objective       string           `json:"objective"`
-	Phase           string           `json:"phase"`
-	ActiveTaskIDs   []string         `json:"active_task_ids,omitempty"`
-	HardConstraints []string         `json:"hard_constraints,omitempty"`
-	Blockers        []string         `json:"blockers,omitempty"`
-	RecentDecisions []RecentDecision `json:"recent_decisions,omitempty"`
-	OpenLoops       []string         `json:"open_loops,omitempty"`
-	NextActions     []string         `json:"next_actions,omitempty"`
-	RelevantRefs    []string         `json:"relevant_refs,omitempty"`
-	UpdatedAt       time.Time        `json:"updated_at"`
+	WorkspaceID         string                        `json:"workspace_id"`
+	Objective           string                        `json:"objective"`
+	Phase               string                        `json:"phase"`
+	ActiveTaskIDs       []string                      `json:"active_task_ids,omitempty"`
+	HardConstraints     []string                      `json:"hard_constraints,omitempty"`
+	Blockers            []string                      `json:"blockers,omitempty"`
+	RecentDecisions     []RecentDecision              `json:"recent_decisions,omitempty"`
+	OpenLoops           []string                      `json:"open_loops,omitempty"`
+	NextActions         []string                      `json:"next_actions,omitempty"`
+	RelevantRefs        []contextengine.EvidenceRef   `json:"relevant_refs,omitempty"`
+	ProjectionMeta      *contextengine.ProjectionMeta `json:"projection_meta,omitempty"`
+	StaleWarnings       []string                      `json:"stale_warnings,omitempty"`
+	KnownGaps           []string                      `json:"known_gaps,omitempty"`
+	GeneratedFromEvents []string                      `json:"generated_from_events,omitempty"`
+	UpdatedAt           time.Time                     `json:"updated_at"`
 }
 
 // Handoff captures the compact output of a bounded work phase.
 type Handoff struct {
-	TaskID              string    `json:"task_id"`
-	Phase               string    `json:"phase"`
-	Outcome             string    `json:"outcome"`
-	Summary             string    `json:"summary"`
-	EvidenceRefs        []string  `json:"evidence_refs,omitempty"`
-	FilesTouched        []string  `json:"files_touched,omitempty"`
-	Observations        []string  `json:"observations,omitempty"`
-	Tensions            []string  `json:"tensions,omitempty"`
-	NextActions         []string  `json:"next_actions,omitempty"`
-	PromotionCandidates []string  `json:"promotion_candidates,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
+	TaskID              string                      `json:"task_id"`
+	Phase               string                      `json:"phase"`
+	Outcome             string                      `json:"outcome"`
+	Summary             string                      `json:"summary"`
+	EvidenceRefs        []contextengine.EvidenceRef `json:"evidence_refs,omitempty"`
+	FileRefs            []contextengine.EvidenceRef `json:"file_refs,omitempty"`
+	Observations        []string                    `json:"observations,omitempty"`
+	Tensions            []string                    `json:"tensions,omitempty"`
+	NextActions         []string                    `json:"next_actions,omitempty"`
+	PromotionCandidates []string                    `json:"promotion_candidates,omitempty"`
+	CreatedAt           time.Time                   `json:"created_at"`
 }
 
 // Observation records a repeatable system learning.
 type Observation struct {
-	ID           string    `json:"id"`
-	Statement    string    `json:"statement"`
-	Confidence   float64   `json:"confidence"`
-	Count        int       `json:"count"`
-	Project      string    `json:"project,omitempty"`
-	Area         string    `json:"area,omitempty"`
-	EvidenceRefs []string  `json:"evidence_refs,omitempty"`
-	FirstSeen    time.Time `json:"first_seen"`
-	LastSeen     time.Time `json:"last_seen"`
+	ID           string                      `json:"id"`
+	Statement    string                      `json:"statement"`
+	Confidence   float64                     `json:"confidence"`
+	Count        int                         `json:"count"`
+	Project      string                      `json:"project,omitempty"`
+	Area         string                      `json:"area,omitempty"`
+	EvidenceRefs []contextengine.EvidenceRef `json:"evidence_refs,omitempty"`
+	FirstSeen    time.Time                   `json:"first_seen"`
+	LastSeen     time.Time                   `json:"last_seen"`
 }
 
 // Tension records a contradiction or drag source.
 type Tension struct {
-	ID          string    `json:"id"`
-	Kind        string    `json:"kind"`
-	Statement   string    `json:"statement"`
-	Impact      string    `json:"impact"`
-	RelatedRefs []string  `json:"related_refs,omitempty"`
-	Status      string    `json:"status"`
-	Count       int       `json:"count,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	LastSeen    time.Time `json:"last_seen,omitempty"`
+	ID          string                      `json:"id"`
+	Kind        string                      `json:"kind"`
+	Statement   string                      `json:"statement"`
+	Impact      string                      `json:"impact"`
+	RelatedRefs []contextengine.EvidenceRef `json:"related_refs,omitempty"`
+	Status      string                      `json:"status"`
+	Count       int                         `json:"count,omitempty"`
+	CreatedAt   time.Time                   `json:"created_at"`
+	LastSeen    time.Time                   `json:"last_seen,omitempty"`
 }
 
 // HandoffRecord wraps a handoff with its persisted path.
@@ -156,22 +199,22 @@ type GraphCorrectionRun struct {
 
 // MemoryProposal records one typed, deduped suggestion for evolving ACA memory state.
 type MemoryProposal struct {
-	ID               string         `json:"id"`
-	DedupeKey        string         `json:"dedupe_key,omitempty"`
-	Kind             string         `json:"kind"`
-	Classification   string         `json:"classification,omitempty"`
-	Status           string         `json:"status"`
-	ReviewRequired   bool           `json:"review_required"`
-	Confidence       float64        `json:"confidence"`
-	BlastRadius      string         `json:"blast_radius,omitempty"`
-	Summary          string         `json:"summary"`
-	SourceRefs       []string       `json:"source_refs,omitempty"`
-	ProposedChange   map[string]any `json:"proposed_change,omitempty"`
-	EvaluationStatus string         `json:"evaluation_status,omitempty"`
-	ApplyStatus      string         `json:"apply_status,omitempty"`
-	Count            int            `json:"count"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	ID               string                      `json:"id"`
+	DedupeKey        string                      `json:"dedupe_key,omitempty"`
+	Kind             PolicyKind                  `json:"kind"`
+	Classification   string                      `json:"classification,omitempty"`
+	Status           string                      `json:"status"`
+	ReviewRequired   bool                        `json:"review_required"`
+	Confidence       float64                     `json:"confidence"`
+	BlastRadius      string                      `json:"blast_radius,omitempty"`
+	Summary          string                      `json:"summary"`
+	SourceRefs       []contextengine.EvidenceRef `json:"source_refs,omitempty"`
+	ProposedChange   map[string]any              `json:"proposed_change,omitempty"`
+	EvaluationStatus string                      `json:"evaluation_status,omitempty"`
+	ApplyStatus      string                      `json:"apply_status,omitempty"`
+	Count            int                         `json:"count"`
+	CreatedAt        time.Time                   `json:"created_at"`
+	UpdatedAt        time.Time                   `json:"updated_at"`
 }
 
 // EvidenceImportRun records one external-evidence intake into the ACA inbox.
@@ -279,6 +322,96 @@ type RetrievalResult struct {
 	GeneratedAt   time.Time            `json:"generated_at"`
 }
 
+// ToEvidencePack converts the RetrievalResult into a canonical EvidencePack.
+// All observations, tensions, and vault hits are converted to EvidenceNodes.
+func (r *RetrievalResult) ToEvidencePack() contextengine.EvidencePack {
+	nodes := make([]contextengine.EvidenceNode, 0)
+	for _, obs := range r.Observations {
+		ref := contextengine.EvidenceRef{Type: contextengine.RefTypeNote, Ref: obs.ID}
+		if len(obs.EvidenceRefs) > 0 {
+			ref = obs.EvidenceRefs[0]
+		}
+		nodes = append(nodes, contextengine.EvidenceNode{
+			ID:          obs.ID,
+			WorkspaceID: r.WorkspaceID,
+			NodeType:    contextengine.EvidenceNodeTypeObservation,
+			Ref:         ref,
+			Statement:   obs.Statement,
+			Confidence:  obs.Confidence,
+			Count:       obs.Count,
+			FirstSeen:   obs.FirstSeen,
+			LastSeen:    obs.LastSeen,
+			Grounding:   contextengine.GroundingValidated,
+			Metadata: map[string]any{
+				"project": obs.Project,
+				"area":    obs.Area,
+			},
+		})
+	}
+	for _, t := range r.Tensions {
+		ref := contextengine.EvidenceRef{Type: contextengine.RefTypeNote, Ref: t.ID}
+		if len(t.RelatedRefs) > 0 {
+			ref = t.RelatedRefs[0]
+		}
+		nodes = append(nodes, contextengine.EvidenceNode{
+			ID:          t.ID,
+			WorkspaceID: r.WorkspaceID,
+			NodeType:    contextengine.EvidenceNodeTypeTension,
+			Ref:         ref,
+			Statement:   t.Statement,
+			Count:       t.Count,
+			FirstSeen:   t.CreatedAt,
+			LastSeen:    t.LastSeen,
+			Metadata: map[string]any{
+				"kind":   t.Kind,
+				"impact": t.Impact,
+				"status": t.Status,
+			},
+		})
+	}
+	for _, hit := range r.VaultHits {
+		ref := contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: hit.Path}
+		if hit.PrimaryAnchorPath != "" {
+			ref = contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: hit.PrimaryAnchorPath}
+		}
+		nodes = append(nodes, contextengine.EvidenceNode{
+			ID:          fmt.Sprintf("hit_%s_%s", r.WorkspaceID, hit.Path),
+			WorkspaceID: r.WorkspaceID,
+			NodeType:    contextengine.EvidenceNodeTypeRetrieval,
+			Ref:         ref,
+			Statement:   hit.Snippet,
+			Confidence:  float64(hit.Score) / 100.0,
+			Grounding:   contextengine.GroundingIndexed,
+			Metadata: map[string]any{
+				"title":               hit.Title,
+				"type":                hit.Type,
+				"trust":               hit.Trust,
+				"score":               hit.Score,
+				"primary_anchor_path": hit.PrimaryAnchorPath,
+				"repo_paths":          hit.RepoPaths,
+				"anchor_paths":        hit.AnchorPaths,
+				"anchor_roles":        hit.AnchorRoles,
+				"symbols":             hit.Symbols,
+			},
+		})
+	}
+	return contextengine.EvidencePack{
+		ID:          fmt.Sprintf("retrieval_%s_%d", r.WorkspaceID, r.GeneratedAt.Unix()),
+		WorkspaceID: r.WorkspaceID,
+		Query:       r.Query,
+		Lane:        contextengine.LaneContext,
+		Nodes:       nodes,
+		Telemetry: contextengine.EvidenceTelemetry{
+			TokensUsed: r.Weights.BaseIndexScore,
+		},
+		Metadata: map[string]any{
+			"semantic_model": r.SemanticModel,
+			"semantic_used":  r.SemanticUsed,
+			"generated_at":   r.GeneratedAt,
+		},
+	}
+}
+
 // ContradictionFinding links an open tension to potentially conflicting or relevant durable notes.
 type ContradictionFinding struct {
 	Tension          Tension        `json:"tension"`
@@ -302,17 +435,17 @@ type TaskCandidate struct {
 
 // TaskPacket is the bounded dispatch payload for a worker phase.
 type TaskPacket struct {
-	WorkspaceID     string           `json:"workspace_id"`
-	Task            TaskCandidate    `json:"task"`
-	Objective       string           `json:"objective"`
-	Phase           string           `json:"phase"`
-	HardConstraints []string         `json:"hard_constraints,omitempty"`
-	Blockers        []string         `json:"blockers,omitempty"`
-	RecentDecisions []RecentDecision `json:"recent_decisions,omitempty"`
-	NextActions     []string         `json:"next_actions,omitempty"`
-	RelevantRefs    []string         `json:"relevant_refs,omitempty"`
-	LatestHandoff   *HandoffRecord   `json:"latest_handoff,omitempty"`
-	GeneratedAt     time.Time        `json:"generated_at"`
+	WorkspaceID     string                      `json:"workspace_id"`
+	Task            TaskCandidate               `json:"task"`
+	Objective       string                      `json:"objective"`
+	Phase           string                      `json:"phase"`
+	HardConstraints []string                    `json:"hard_constraints,omitempty"`
+	Blockers        []string                    `json:"blockers,omitempty"`
+	RecentDecisions []RecentDecision            `json:"recent_decisions,omitempty"`
+	NextActions     []string                    `json:"next_actions,omitempty"`
+	RelevantRefs    []contextengine.EvidenceRef `json:"relevant_refs,omitempty"`
+	LatestHandoff   *HandoffRecord              `json:"latest_handoff,omitempty"`
+	GeneratedAt     time.Time                   `json:"generated_at"`
 }
 
 // Layout describes the workspace-local ACA runtime scaffold.
@@ -345,3 +478,71 @@ type Layout struct {
 	ObsidianProjectMOCPath string
 	ObsidianInboxDraftsDir string
 }
+
+// FilesTouched returns the file paths from FileRefs as plain strings.
+// This is a convenience accessor for the renamed FileRefs field.
+func (h Handoff) FilesTouched() []string {
+	return EvidenceRefsToStrings(h.FileRefs)
+}
+
+// EvidenceRefsToStrings converts []EvidenceRef to []string using FormatEvidenceRef.
+func EvidenceRefsToStrings(refs []contextengine.EvidenceRef) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if s := contextengine.FormatEvidenceRef(ref); s != "" {
+			out = append(out, s)
+		} else {
+			out = append(out, ref.Ref)
+		}
+	}
+	return out
+}
+
+// StringsToEvidenceRefs converts []string to []EvidenceRef.
+// Each string is parsed as "type:value"; bare values get RefTypePath.
+func StringsToEvidenceRefs(items []string) []contextengine.EvidenceRef {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]contextengine.EvidenceRef, 0, len(items))
+	for _, s := range items {
+		if s == "" {
+			continue
+		}
+		ref, err := contextengine.ParseEvidenceRef(s)
+		if err == nil {
+			out = append(out, ref)
+		} else {
+			out = append(out, contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: s})
+		}
+	}
+	return out
+}
+
+// UniqueEvidenceRefs deduplicates EvidenceRef by identity (Type+Ref).
+func UniqueEvidenceRefs(refs []contextengine.EvidenceRef) []contextengine.EvidenceRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(refs))
+	out := make([]contextengine.EvidenceRef, 0, len(refs))
+	for _, ref := range refs {
+		key := string(ref.Type) + ":" + ref.Ref
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, ref)
+	}
+	return out
+}
+
+// Internal aliases for backward compatibility with callers in this package.
+var (
+	uniqueEvidenceRefs    = UniqueEvidenceRefs
+	evidenceRefsToStrings = EvidenceRefsToStrings
+	stringsToEvidenceRefs = StringsToEvidenceRefs
+)

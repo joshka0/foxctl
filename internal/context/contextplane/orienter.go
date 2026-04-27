@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage"
@@ -120,7 +121,7 @@ func (o *Orienter) Build(ctx context.Context, workspacePath string) (TopOfMind, 
 		collectTaskTitles(taskList, active.ID, []string{tasks.StatusPending}, 3)...,
 	), 3)
 	top.NextActions = uniqueLimit(buildNextActions(active, activeOK, taskList), 3)
-	top.RelevantRefs = uniqueLimit(buildRelevantRefs(active, activeOK, recentSessions), 4)
+	top.RelevantRefs = uniqueEvidenceRefsLimit(buildRelevantRefs(active, activeOK, recentSessions), 4)
 
 	if len(top.HardConstraints) == 0 {
 		top.HardConstraints = []string{"Keep the control plane file-first and bounded."}
@@ -289,14 +290,14 @@ func buildNextActions(active tasks.Task, activeOK bool, taskList []tasks.Task) [
 	return out
 }
 
-func buildRelevantRefs(active tasks.Task, activeOK bool, sessions []storage.Session) []string {
-	var refs []string
+func buildRelevantRefs(active tasks.Task, activeOK bool, sessions []storage.Session) []contextengine.EvidenceRef {
+	var refs []contextengine.EvidenceRef
 	if activeOK {
 		if strings.TrimSpace(active.PlanFile) != "" {
-			refs = append(refs, "plan:"+strings.TrimSpace(active.PlanFile))
+			refs = append(refs, contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: strings.TrimSpace(active.PlanFile)})
 		}
 		if strings.TrimSpace(active.ScopePath) != "" {
-			refs = append(refs, "path:"+strings.TrimSpace(active.ScopePath))
+			refs = append(refs, contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: strings.TrimSpace(active.ScopePath)})
 		}
 	}
 	for _, session := range sessions {
@@ -305,14 +306,14 @@ func buildRelevantRefs(active tasks.Task, activeOK bool, sessions []storage.Sess
 			if file == "" {
 				continue
 			}
-			refs = append(refs, "path:"+file)
+			refs = append(refs, contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: file})
 		}
 		if len(refs) >= 4 {
 			break
 		}
 	}
 	if len(refs) == 0 && len(sessions) > 0 {
-		refs = append(refs, "session:"+sessions[0].ID)
+		refs = append(refs, contextengine.EvidenceRef{Type: contextengine.RefTypeSession, Ref: sessions[0].ID})
 	}
 	return refs
 }
@@ -366,4 +367,24 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func uniqueEvidenceRefsLimit(refs []contextengine.EvidenceRef, limit int) []contextengine.EvidenceRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(refs))
+	out := make([]contextengine.EvidenceRef, 0, limit)
+	for _, ref := range refs {
+		key := string(ref.Type) + ":" + ref.Ref
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, ref)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
 }

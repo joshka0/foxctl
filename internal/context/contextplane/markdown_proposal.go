@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	obsidiantool "github.com/joshka0/foxctl/internal/tooling/tools/obsidian"
 	"gopkg.in/yaml.v3"
 )
@@ -123,14 +124,17 @@ func (s *WorkspaceStore) DraftMarkdownProposal(ctx context.Context, in MarkdownP
 	now := time.Now().UTC()
 	proposal := MemoryProposal{
 		DedupeKey:        dedupeKey,
-		Kind:             firstNonEmpty(strings.TrimSpace(in.Kind), "room_agile_draft"),
+		Kind:             PolicyKind(firstNonEmpty(strings.TrimSpace(in.Kind), "room_agile_draft")),
 		Classification:   firstNonEmpty(strings.TrimSpace(in.Classification), noteType),
 		Status:           "open",
 		ReviewRequired:   true,
 		Confidence:       firstNonZeroFloat64(in.Confidence, 0.82),
 		BlastRadius:      firstNonEmpty(strings.TrimSpace(in.BlastRadius), "medium"),
 		Summary:          firstNonEmpty(strings.TrimSpace(in.Summary), fmt.Sprintf("Review ACA draft for %s %s.", sourceKind, sourceID)),
-		SourceRefs:       uniqueStrings(append([]string{"draft:" + draftRel, sourceKind + ":" + sourceID}, in.SourceRefs...)),
+		SourceRefs:       uniqueEvidenceRefs(append([]contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: "draft:" + draftRel},
+			{Type: contextengine.RefTypePath, Ref: sourceKind + ":" + sourceID},
+		}, stringsToEvidenceRefs(in.SourceRefs)...)),
 		ProposedChange:   change,
 		EvaluationStatus: "not_evaluated",
 		ApplyStatus:      "pending",

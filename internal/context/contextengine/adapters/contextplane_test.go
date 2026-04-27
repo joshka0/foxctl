@@ -22,7 +22,10 @@ func TestConvertTopOfMind(t *testing.T) {
 		},
 		OpenLoops:    []string{"verify coverage"},
 		NextActions:  []string{"write tests"},
-		RelevantRefs: []string{"path:types.go", "task:abc"},
+		RelevantRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: "types.go"},
+			{Type: contextengine.RefTypeTask, Ref: "abc"},
+		},
 		UpdatedAt:    now,
 	}
 
@@ -76,8 +79,8 @@ func TestConvertHandoff(t *testing.T) {
 		Phase:               "done",
 		Outcome:             "success",
 		Summary:             "Implemented adapters",
-		EvidenceRefs:        []string{"path:adapters.go"},
-		FilesTouched:        []string{"path:new_file.go"},
+		EvidenceRefs:        []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "adapters.go"}},
+		FileRefs:            []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "new_file.go"}},
 		Observations:        []string{"Types are clean"},
 		Tensions:            []string{"Need more tests"},
 		NextActions:         []string{"Run coverage"},
@@ -111,7 +114,7 @@ func TestConvertObservation(t *testing.T) {
 		Count:        5,
 		Project:      "foxctl",
 		Area:         "contextengine",
-		EvidenceRefs: []string{"path:test.go"},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "test.go"}},
 		FirstSeen:    now,
 		LastSeen:     now,
 	}
@@ -145,7 +148,10 @@ func TestConvertTension(t *testing.T) {
 		Kind:        "architectural",
 		Statement:   "Circular dependency risk",
 		Impact:      "high",
-		RelatedRefs: []string{"path:a.go", "path:b.go"},
+		RelatedRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: "a.go"},
+			{Type: contextengine.RefTypePath, Ref: "b.go"},
+		},
 		Status:      "open",
 		Count:       3,
 		CreatedAt:   now,
@@ -172,20 +178,20 @@ func TestConvertMemoryProposal(t *testing.T) {
 	now := time.Now().UTC()
 	src := contextplane.MemoryProposal{
 		ID:             "mp1",
-		Kind:           "preference",
+		Kind:           contextplane.PolicyKindMemoryDraft,
 		Classification: "workspace",
 		Status:         "active",
 		Confidence:     0.8,
 		BlastRadius:    "internal/context/",
 		Summary:        "Prefer typed enums over raw strings",
-		SourceRefs:     []string{"path:refs.go"},
+		SourceRefs:     []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "refs.go"}},
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 
 	got := ConvertMemoryProposal("ws1", src)
 
-	if got.ClaimType != "preference" {
+	if got.ClaimType != string(contextplane.PolicyKindMemoryDraft) {
 		t.Errorf("ClaimType = %q", got.ClaimType)
 	}
 	if got.Status != contextengine.ClaimStatusCandidate {
@@ -241,7 +247,7 @@ func TestConvertTaskPacket(t *testing.T) {
 		Objective:   "Create 8 adapter files",
 		Phase:       "implementation",
 		NextActions: []string{"Write tests"},
-		RelevantRefs: []string{"path:types.go"},
+		RelevantRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "types.go"}},
 		GeneratedAt: now,
 	}
 

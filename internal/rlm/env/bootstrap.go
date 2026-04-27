@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
@@ -230,7 +231,15 @@ func latestHandoff(dir string) (map[string]any, []string, error) {
 			"summary":    handoff.Summary,
 			"created_at": handoff.CreatedAt,
 		}
-		return payload, append([]string(nil), handoff.EvidenceRefs...), nil
+		refs := make([]string, 0, len(handoff.EvidenceRefs))
+		for _, ref := range handoff.EvidenceRefs {
+			if s := contextengine.FormatEvidenceRef(ref); s != "" {
+				refs = append(refs, s)
+			} else {
+				refs = append(refs, ref.Ref)
+			}
+		}
+		return payload, refs, nil
 	}
 	return nil, nil, nil
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
 	tphistory "github.com/joshka0/foxctl/internal/context/transcriptpipeline/history"
@@ -41,7 +42,7 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 		WorkspaceID:  wsID,
 		Objective:    "Compact Handoff Pattern",
 		Phase:        "design",
-		RelevantRefs: []string{"path:internal/context/contextplane/store.go"},
+		RelevantRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/store.go"}},
 		UpdatedAt:    time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)
@@ -51,8 +52,8 @@ func TestCollectorCollectBuildsPack(t *testing.T) {
 		Phase:        "design",
 		Outcome:      "partial",
 		Summary:      "Collected compact handoff evidence.",
-		FilesTouched: []string{"internal/context/contextplane/store.go"},
-		EvidenceRefs: []string{"path:internal/context/contextplane/store.go"},
+		FileRefs:     []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/store.go"}},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/store.go"}},
 		CreatedAt:    time.Date(2026, 3, 14, 1, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveHandoff: %v", err)

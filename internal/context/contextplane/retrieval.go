@@ -9,6 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/rerank"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
@@ -331,14 +332,17 @@ func trustWeight(trust string, weights RetrievalWeights) int {
 	}
 }
 
-func matchesRefs(path string, refs []string) bool {
+func matchesRefs(path string, refs []contextengine.EvidenceRef) bool {
 	path = filepathBaseAware(path)
 	for _, ref := range refs {
-		ref = strings.TrimSpace(strings.TrimPrefix(ref, "path:"))
-		if ref == "" {
+		refStr := strings.TrimSpace(strings.TrimPrefix(contextengine.FormatEvidenceRef(ref), "path:"))
+		if refStr == "" {
+			refStr = strings.TrimSpace(strings.TrimPrefix(ref.Ref, "path:"))
+		}
+		if refStr == "" {
 			continue
 		}
-		if filepathBaseAware(ref) == path {
+		if filepathBaseAware(refStr) == path {
 			return true
 		}
 	}
@@ -404,7 +408,7 @@ func scoreVaultHit(entry scoredVaultHit, maxSemantic int, codeCentric bool, work
 	if opts.UseRelevantRefBoost && result.TopOfMind != nil && matchesRefs(hit.Path, result.TopOfMind.RelevantRefs) {
 		score += result.Weights.RelevantRef
 	}
-	if opts.UseHandoffRefBoost && report.LatestHandoff != nil && matchesRefs(hit.Path, append(report.LatestHandoff.Handoff.EvidenceRefs, report.LatestHandoff.Handoff.FilesTouched...)) {
+	if opts.UseHandoffRefBoost && report.LatestHandoff != nil && matchesRefs(hit.Path, append(report.LatestHandoff.Handoff.EvidenceRefs, report.LatestHandoff.Handoff.FileRefs...)) {
 		score += result.Weights.HandoffRef
 	}
 	if opts.UseCodeHints && codeCentric && matchesCodePaths(hit.RepoPaths, codeHints.Paths) {
@@ -1149,15 +1153,15 @@ func deriveCodeHints(ctx context.Context, repo *repoindex.Store, query string, t
 	hints := retrievalCodeHints{}
 	if top != nil {
 		for _, ref := range top.RelevantRefs {
-			if trimmed, ok := trimPathRef(ref); ok {
+			if trimmed, ok := trimPathRef(contextengine.FormatEvidenceRef(ref)); ok {
 				hints.Paths = append(hints.Paths, trimmed)
 			}
 		}
 	}
 	if latest != nil {
-		hints.Paths = append(hints.Paths, latest.Handoff.FilesTouched...)
+		hints.Paths = append(hints.Paths, latest.Handoff.FilesTouched()...)
 		for _, ref := range latest.Handoff.EvidenceRefs {
-			if trimmed, ok := trimPathRef(ref); ok {
+			if trimmed, ok := trimPathRef(contextengine.FormatEvidenceRef(ref)); ok {
 				hints.Paths = append(hints.Paths, trimmed)
 			}
 		}
@@ -1187,15 +1191,15 @@ func continuityBundlePaths(top *TopOfMind, latest *HandoffRecord, opts Retrieval
 	var paths []string
 	if top != nil {
 		for _, ref := range top.RelevantRefs {
-			if trimmed, ok := trimPathRef(ref); ok {
+			if trimmed, ok := trimPathRef(contextengine.FormatEvidenceRef(ref)); ok {
 				paths = append(paths, trimmed)
 			}
 		}
 	}
 	if latest != nil {
-		paths = append(paths, latest.Handoff.FilesTouched...)
+		paths = append(paths, latest.Handoff.FilesTouched()...)
 		for _, ref := range latest.Handoff.EvidenceRefs {
-			if trimmed, ok := trimPathRef(ref); ok {
+			if trimmed, ok := trimPathRef(contextengine.FormatEvidenceRef(ref)); ok {
 				paths = append(paths, trimmed)
 			}
 		}
