@@ -22,51 +22,20 @@ type RealClock struct{}
 
 func (RealClock) Now() time.Time { return time.Now().UTC() }
 
-// EventFilter constrains a ListEvents query.
-type EventFilter struct {
-	WorkspaceID string
-	Kind        contextengine.ContextEventKind
-	TaskID      string
-	SessionID   string
-	Limit       int
-	Offset      int
-}
+// EventFilter is an alias for the domain-level filter type.
+type EventFilter = contextengine.EventFilter
 
-// ClaimFilter constrains a ListClaims query.
-type ClaimFilter struct {
-	WorkspaceID string
-	Status      contextengine.ClaimStatus
-	Limit       int
-	Offset      int
-}
+// ClaimFilter is an alias for the domain-level filter type.
+type ClaimFilter = contextengine.ClaimFilter
 
-// StalenessFilter constrains a ListStaleness query.
-type StalenessFilter struct {
-	WorkspaceID string
-	TargetRef   *contextengine.EvidenceRef
-	Status      contextengine.StalenessStatus
-	Limit       int
-	Offset      int
-}
+// StalenessFilter is an alias for the domain-level filter type.
+type StalenessFilter = contextengine.StalenessFilter
 
-// ImpactFilter constrains a ListImpactEdges query.
-type ImpactFilter struct {
-	WorkspaceID string
-	FromRef     *contextengine.EvidenceRef
-	ToRef       *contextengine.EvidenceRef
-	Kind        contextengine.ImpactEdgeKind
-	Limit       int
-	Offset      int
-}
+// ImpactFilter is an alias for the domain-level filter type.
+type ImpactFilter = contextengine.ImpactFilter
 
-// ProjectionFilter constrains a ListProjections query.
-type ProjectionFilter struct {
-	WorkspaceID    string
-	ProjectionType string
-	TaskID         string
-	Limit          int
-	Offset         int
-}
+// ProjectionFilter is an alias for the domain-level filter type.
+type ProjectionFilter = contextengine.ProjectionFilter
 
 // Store defines the abstract persistence interface for the context engine.
 type Store interface {
@@ -119,19 +88,8 @@ type Store interface {
 	ExplainQueryPlan(ctx context.Context, query string, args ...any) (string, error)
 }
 
-// ProjectionRow is a stored projection record.
-type ProjectionRow struct {
-	ID                  string
-	WorkspaceID         string
-	ProjectionType      string
-	ProjectionVersion   int
-	TaskID              string
-	GeneratedFromEvents []string
-	Payload             json.RawMessage
-	GeneratedAt         time.Time
-	ExpiresAt           time.Time
-	CreatedAt           time.Time
-}
+// ProjectionRow is an alias for the domain-level type.
+type ProjectionRow = contextengine.ProjectionRow
 
 // sqliteStore implements Store using SQLite.
 type sqliteStore struct {

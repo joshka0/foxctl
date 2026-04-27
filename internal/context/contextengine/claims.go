@@ -36,6 +36,8 @@ type ClaimScope struct {
 	TaskID string `json:"task_id,omitempty"`
 	// SessionID is the session scope, if applicable.
 	SessionID string `json:"session_id,omitempty"`
+	// Refs are evidence refs derived from the scope path and related paths.
+	Refs []EvidenceRef `json:"refs,omitempty"`
 }
 
 // MemoryClaim is a derived memory assertion with a lifecycle.
