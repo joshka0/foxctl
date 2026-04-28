@@ -11,8 +11,91 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/rlm/runtime/generalsolver"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
+
+// braidNodeHelperBudget tracks cumulative helper wall-clock time and attempt
+// count per braid node so that repair attempts get bounded sub-timeouts derived
+// from remaining budget instead of inheriting an almost-expired context.
+type braidNodeHelperBudget struct {
+	CumulativeDuration time.Duration
+	Attempts           int
+}
+
+const (
+	// braidNodeHelperDefaultBudget is the default wall-clock budget allocated to
+	// helper attempts for a single node when no explicit timeout is configured.
+	braidNodeHelperDefaultBudget = 12 * time.Minute
+
+	// braidNodeHelperMinSubTimeout is the minimum sub-timeout for a repair
+	// attempt. If the remaining budget falls below this floor, the attempt is
+	// skipped with a deadline_exhausted verdict.
+	braidNodeHelperMinSubTimeout = 10 * time.Second
+
+	// braidRepairFeedbackCap limits repair feedback text to avoid pushing the
+	// next attempt's input over the token budget.
+	braidRepairFeedbackCap = 1800
+
+	// braidDeadlineExhaustedPrefix marks feedback produced when a repair attempt
+	// is skipped because cumulative helper duration consumed the node budget.
+	braidDeadlineExhaustedPrefix = "deadline_exhausted"
+)
+
+// braidHelperStage enumerates the stages of a helper attempt lifecycle.
+type braidHelperStage string
+
+const (
+	braidHelperStageDraft    braidHelperStage = "draft"
+	braidHelperStageParse    braidHelperStage = "parse"
+	braidHelperStageValidate braidHelperStage = "validate"
+	braidHelperStageRun      braidHelperStage = "run"
+	braidHelperStageVerify   braidHelperStage = "verify"
+)
+
+// helperBudgetByNode tracks per-node helper budgets during graph execution.
+type helperBudgetByNode map[string]*braidNodeHelperBudget
+
+func (m helperBudgetByNode) get(nodeID string) *braidNodeHelperBudget {
+	budget, ok := m[nodeID]
+	if !ok {
+		budget = &braidNodeHelperBudget{}
+		m[nodeID] = budget
+	}
+	return budget
+}
+
+// remainingSubTimeout returns the bounded sub-timeout for the next attempt. If
+// the remaining budget is below the minimum floor, it returns 0 to signal that
+// the attempt should be skipped.
+func (b *braidNodeHelperBudget) remainingSubTimeout(totalBudget time.Duration) time.Duration {
+	remaining := totalBudget - b.CumulativeDuration
+	if remaining < braidNodeHelperMinSubTimeout {
+		return 0
+	}
+	return remaining
+}
+
+// formatDeadlineExhausted produces a structured feedback string for a skipped
+// repair attempt.
+func formatDeadlineExhausted(nodeID string, budget *braidNodeHelperBudget) string {
+	return fmt.Sprintf("%s: node=%s cumulative_ms=%d attempts=%d",
+		braidDeadlineExhaustedPrefix, nodeID,
+		budget.CumulativeDuration.Milliseconds(),
+		budget.Attempts,
+	)
+}
+
+// capBraidRepairFeedback truncates repair feedback to the budget cap.
+func capBraidRepairFeedback(feedback string) string {
+	if len(feedback) <= braidRepairFeedbackCap {
+		return feedback
+	}
+	if braidRepairFeedbackCap < 32 {
+		return feedback[:braidRepairFeedbackCap]
+	}
+	return feedback[:braidRepairFeedbackCap-15] + "...[truncated]"
+}
 
 func executePhaseBraidGraph(
 	ctx context.Context,
@@ -50,6 +133,11 @@ func executePhaseBraidGraph(
 	summaries := map[string]string{}
 	executed := map[string]struct{}{}
 	repairFeedbackByNode := map[string]string{}
+	helperBudgets := make(helperBudgetByNode, len(graph.Nodes))
+	// Apply structural splits to the graph before execution so that
+	// readyBraidNodes operates on the decomposed graph, not the original.
+	applyBraidGraphSplits(graph, toolExec, phaseName)
+	solverState := seedSolverStateFromBraidGraph(graph)
 	repairAttempts := 0
 	submitted := 0
 	wave := 0
@@ -69,10 +157,12 @@ graphLoop:
 					recordBraidNodeEvent(toolExec, phaseName, wave, node, "runtime_shortcut", summary)
 					summaries[node.ID] = summary
 					executed[node.ID] = struct{}{}
+					commitSolverArtifact(solverState, node.ID, summary)
 					continue
 				}
-				if summary, handled, err := runBraidNodeHelperFirst(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], phase.DisableHelperFirstFallback, toolExec, output, graph); handled {
+				if summary, handled, err := runBraidNodeHelperFirst(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], phase.DisableHelperFirstFallback, toolExec, output, graph, helperBudgets.get(node.ID)); handled {
 					if err != nil {
+						recordSolverFailure(solverState, node.ID, "helper_first", err.Error())
 						if prepareBraidRepair(phase, graph, node, summary, summaries, executed, repairFeedbackByNode, &repairAttempts) {
 							recordBraidNodeEvent(toolExec, phaseName, wave, node, "repairing", err.Error())
 							continue graphLoop
@@ -82,12 +172,13 @@ graphLoop:
 					}
 					summaries[node.ID] = summary
 					executed[node.ID] = struct{}{}
+					commitSolverArtifact(solverState, node.ID, summary)
 					continue
 				}
 				if maxSubcalls > 0 && submitted+1 > maxSubcalls {
 					return fmt.Errorf("rlm repl runner phase %q: braid graph needs %d subcalls, exceeds max %d", phaseName, submitted+1, maxSubcalls)
 				}
-				summary, err := runDirectBraidNode(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], toolExec, output)
+				summary, err := runDirectBraidNode(ctx, phaseName, node, rootPrompt, deps, capBraidRepairFeedback(repairFeedbackByNode[node.ID]), toolExec, output)
 				if err != nil {
 					return err
 				}
@@ -105,11 +196,13 @@ graphLoop:
 						recordBraidNodeEvent(toolExec, phaseName, wave, node, "helper_recovered", recovered)
 						summaries[node.ID] = recovered
 						if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, node, recovered, graph.FinalNode, graph); recoveredErr == nil {
+							commitSolverArtifact(solverState, node.ID, recovered)
 							continue
 						} else {
 							err = recoveredErr
 						}
 					}
+					recordSolverFailure(solverState, node.ID, "validate", err.Error())
 					if prepareBraidRepair(phase, graph, node, summary, summaries, executed, repairFeedbackByNode, &repairAttempts) {
 						recordBraidNodeEvent(toolExec, phaseName, wave, node, "repairing", err.Error())
 						continue graphLoop
@@ -117,6 +210,7 @@ graphLoop:
 					recordBraidNodeEvent(toolExec, phaseName, wave, node, "rejected", err.Error())
 					return err
 				}
+				commitSolverArtifact(solverState, node.ID, summary)
 			}
 			continue
 		}
@@ -130,10 +224,12 @@ graphLoop:
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "runtime_shortcut", summary)
 				summaries[node.ID] = summary
 				executed[node.ID] = struct{}{}
+				commitSolverArtifact(solverState, node.ID, summary)
 				continue
 			}
-			if summary, handled, err := runBraidNodeHelperFirst(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], phase.DisableHelperFirstFallback, toolExec, output, graph); handled {
+			if summary, handled, err := runBraidNodeHelperFirst(ctx, phaseName, node, rootPrompt, deps, repairFeedbackByNode[node.ID], phase.DisableHelperFirstFallback, toolExec, output, graph, helperBudgets.get(node.ID)); handled {
 				if err != nil {
+					recordSolverFailure(solverState, node.ID, "helper_first", err.Error())
 					if prepareBraidRepair(phase, graph, node, summary, summaries, executed, repairFeedbackByNode, &repairAttempts) {
 						recordBraidNodeEvent(toolExec, phaseName, wave, node, "repairing", err.Error())
 						continue graphLoop
@@ -143,6 +239,7 @@ graphLoop:
 				}
 				summaries[node.ID] = summary
 				executed[node.ID] = struct{}{}
+				commitSolverArtifact(solverState, node.ID, summary)
 				continue
 			}
 			if maxSubcalls > 0 && submitted+1 > maxSubcalls {
@@ -183,11 +280,13 @@ graphLoop:
 					recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "helper_recovered", recovered)
 					summaries[nodeID] = recovered
 					if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], recovered, graph.FinalNode, graph); recoveredErr == nil {
+						commitSolverArtifact(solverState, nodeID, recovered)
 						continue
 					} else {
 						err = recoveredErr
 					}
 				}
+				recordSolverFailure(solverState, nodeID, "validate", err.Error())
 				if prepareBraidRepair(phase, graph, nodesByID[nodeID], summary, summaries, executed, repairFeedbackByNode, &repairAttempts) {
 					recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "repairing", err.Error())
 					continue graphLoop
@@ -195,6 +294,7 @@ graphLoop:
 				recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "rejected", err.Error())
 				return err
 			}
+			commitSolverArtifact(solverState, nodeID, summary)
 		}
 	}
 
@@ -202,6 +302,7 @@ graphLoop:
 		return fmt.Errorf("rlm repl runner phase %q: braid final_node %q did not complete", phaseName, graph.FinalNode)
 	}
 	appendBraidFinalHandoff(output, graph, summaries)
+	appendSolverStateTelemetry(output, solverState, phaseName)
 	_ = nodesByID
 	return nil
 }
@@ -217,6 +318,7 @@ func runBraidNodeHelperFirst(
 	toolExec *replToolExecutor,
 	output *engine.EngineOutput,
 	graph *BraidGraph,
+	budget *braidNodeHelperBudget,
 ) (string, bool, error) {
 	policy := braidNodeEffectiveHelperPolicy(node)
 	if policy != BraidNodeHelperPolicyPreferred && policy != BraidNodeHelperPolicyRequired {
@@ -228,12 +330,40 @@ func runBraidNodeHelperFirst(
 	if graph == nil {
 		return "", false, nil
 	}
+	if budget != nil {
+		remaining := budget.remainingSubTimeout(braidNodeHelperDefaultBudget)
+		if remaining == 0 {
+			message := formatDeadlineExhausted(node.ID, budget)
+			recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_deadline_exhausted", message)
+			if policy == BraidNodeHelperPolicyRequired || disableFallback {
+				summary := "status: blocked\nanswer:\nchecks: " + message
+				return summary, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper-first deadline exhausted: %s", phaseName, node.ID, message)
+			}
+			return "", false, nil
+		}
+	}
 	recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first", policy)
 	start := time.Now()
-	summary, ok := runBraidNodeHelper(ctx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, "helper_policy="+policy, toolExec, output)
+	// Derive a child context with the remaining budget as a hard deadline
+	// so the helper cannot run past the node's allocated sub-timeout.
+	helperCtx := ctx
+	if budget != nil {
+		remaining := budget.remainingSubTimeout(braidNodeHelperDefaultBudget)
+		if remaining > 0 {
+			var cancel context.CancelFunc
+			helperCtx, cancel = context.WithTimeout(ctx, remaining)
+			defer cancel()
+		}
+	}
+	summary, ok := runBraidNodeHelper(helperCtx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, "helper_policy="+policy, toolExec, output)
 	duration := time.Since(start)
+	if budget != nil {
+		budget.CumulativeDuration += duration
+		budget.Attempts++
+	}
 	if !ok {
-		message := fmt.Sprintf("helper did not produce an answer after %dms", duration.Milliseconds())
+		stage := extractBraidHelperFailedStage(summary)
+		message := fmt.Sprintf("stage=%s duration_ms=%d: helper did not produce an answer", stage, duration.Milliseconds())
 		if policy == BraidNodeHelperPolicyRequired || disableFallback {
 			recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_failed", message)
 			summary := "status: blocked\nanswer:\nchecks: " + message
@@ -243,7 +373,7 @@ func runBraidNodeHelperFirst(
 		return "", false, nil
 	}
 	if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
-		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_rejected", err.Error())
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_rejected", "stage=verify duration_ms="+fmt.Sprintf("%d", duration.Milliseconds())+" "+err.Error())
 		return summary, true, err
 	}
 	recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_completed", fmt.Sprintf("duration_ms=%d summary: %s", duration.Milliseconds(), summary))
@@ -361,6 +491,12 @@ func runBraidNodeHelper(
 	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikePackageWasteOptimization(input) {
 		instructions += "\n" + buildPackageWasteOptimizationHelperContract()
 	}
+	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeSymbolicTrace(input) {
+		instructions += "\n" + buildSymbolicTraceHelperContract()
+	}
+	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeCandidateVerify(input) {
+		instructions += "\n" + buildCandidateVerifyHelperContract()
+	}
 	argsMap := map[string]any{
 		"prompt":       prompt,
 		"instructions": instructions,
@@ -385,6 +521,16 @@ func runBraidNodeHelper(
 			helperCfg.AnswerVerifier = packageWasteAnswerVerifier
 		}
 		helperExec = &HelperFactoryTools{Config: helperCfg}
+	}
+	// Preflight: reject oversized input packets before spending LLM tokens.
+	if err := helperPreflightCheck(input, handoff); err != nil {
+		// Attempt to split the oversized input into smaller sub-items.
+		if splitResult, ok := attemptSplitHelperExecution(ctx, phaseName, node, input, handoff, instructions, toolExec, output); ok {
+			return splitResult, true
+		}
+		preflightMsg := fmt.Sprintf("stage=preflight: %s", err.Error())
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_failed", preflightMsg)
+		return "status: blocked\nanswer:\nchecks: " + preflightMsg, true
 	}
 	var result string
 	var execErr error
@@ -1819,6 +1965,175 @@ Generic resource-allocation helper contract:
 `)
 }
 
+func buildSymbolicTraceHelperContract() string {
+	return strings.TrimSpace(`
+Generic symbolic-trace helper contract:
+- Treat the typed input as an ordered symbolic trace, not prose generation.
+- Use only explicit fields: program, queries, trace_kind, events, state, rules, and checks.
+- Parse the program/events into an ordered sequence of operations.
+- Maintain an environment mapping variables to types/values, updating step by step.
+- Apply each operation in order, checking invariants after every step.
+- Answer each query from the queries field by looking up the final or intermediate state.
+- Return ok:true only with all query answers in the requested JSON format.
+- If verification fails, return ok:false with first_failure, failed_step, observed, expected, and repair_hint.
+`)
+}
+
+func buildCandidateVerifyHelperContract() string {
+	return strings.TrimSpace(`
+Generic candidate-verify helper contract:
+- Treat the typed input as a candidate enumeration and verification problem, not prose generation.
+- Use only explicit fields: candidates, predicates, selection_rule, and output_schema.
+- candidates is a list of items to evaluate (SMILES strings, moves, tuples, etc.).
+- predicates is a list of named property checks to apply to each candidate.
+- selection_rule describes how to pick the answer: "best", "all_matching", "nth", "count_matching", etc.
+- Evaluate every predicate for every candidate. Do not skip or short-circuit.
+- If a required library is unavailable (e.g., rdkit, python-chess), return ok:false with a structured failure naming the missing library — do not time out attempting to install it.
+- Return ok:true only with the answer in the requested output_schema format.
+- If verification fails, return ok:false with first_failure, failed_candidate, observed, expected, and repair_hint.
+`)
+}
+
+const (
+	helperPreflightMaxInputChars = 50000
+)
+
+// helperPreflightCheck validates the helper input packet before spending LLM
+// tokens. Returns an error if the packet is too large or structurally invalid.
+func helperPreflightCheck(input map[string]any, handoff BraidNodeHandoff) error {
+	if len(input) == 0 {
+		return nil
+	}
+	// Estimate serialized size.
+	estimated, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Errorf("input serialization estimate failed: %w", err)
+	}
+	if len(estimated) > helperPreflightMaxInputChars {
+		return fmt.Errorf("helper input packet too large: %d bytes (max %d); split the work item into smaller sub-items", len(estimated), helperPreflightMaxInputChars)
+	}
+	// Check for known library requirements in the handoff scaffold.
+	switch handoff.ScaffoldClass {
+	case BraidScaffoldClassSymbolicTrace:
+		// Symbolic trace helpers should work without external libraries.
+	case BraidScaffoldClassFiniteStateTransition:
+		// State transition helpers use pure Python.
+	default:
+		// No preflight library checks for other scaffolds yet.
+	}
+	return nil
+}
+
+// attemptSplitHelperExecution tries to decompose an oversized helper input
+// into smaller sub-items and execute them sequentially, then merge the results.
+// Returns the merged summary and true if the split succeeded, or ("", false)
+// if the input cannot be meaningfully split.
+func attemptSplitHelperExecution(
+	ctx context.Context,
+	phaseName string,
+	node BraidNode,
+	input map[string]any,
+	handoff BraidNodeHandoff,
+	instructions string,
+	toolExec *replToolExecutor,
+	output *engine.EngineOutput,
+) (string, bool) {
+	if toolExec == nil || toolExec.helperFactory == nil {
+		return "", false
+	}
+	// Build a synthetic work item to analyze for splitting.
+	splitItem := generalsolver.WorkItem{
+		ID:        node.ID,
+		Goal:      node.Question,
+		Archetype: generalsolver.ArchetypeMixed,
+		Payload:   input,
+	}
+	plan := generalsolver.AnalyzeForSplit(splitItem)
+	if plan.Strategy == generalsolver.SplitStrategyNone {
+		return "", false
+	}
+
+	// Extract query-able chunks from the input.
+	chunks := generalsolver.ExtractQueryableChunks(input)
+	if len(chunks) < 2 {
+		return "", false
+	}
+	if len(chunks) > generalsolver.SplitMaxSubItems {
+		chunks = chunks[:generalsolver.SplitMaxSubItems]
+	}
+
+	recordBraidNodeEvent(toolExec, phaseName, 0, node, "split", fmt.Sprintf("splitting into %d sub-items: %s", len(chunks), plan.Reason))
+
+	var subAnswers []string
+	for i, chunk := range chunks {
+		// Build a sub-input with just this chunk.
+		subInput := map[string]any{
+			"split_role":   "solve",
+			"chunk_index":  i,
+			"total_chunks": len(chunks),
+			"parent_id":    node.ID,
+		}
+		// Merge chunk data into sub-input.
+		for k, v := range chunk {
+			subInput[k] = v
+		}
+		// Keep non-chunk fields from original input (e.g., environment).
+		for k, v := range input {
+			switch k {
+			case "queries", "sub_problems", "subproblems", "bindings", "events", "constraints":
+				// Skip the array being split.
+			default:
+				if _, exists := subInput[k]; !exists {
+					subInput[k] = v
+				}
+			}
+		}
+
+		// Check size.
+		if estimated, err := json.Marshal(subInput); err != nil || len(estimated) > helperPreflightMaxInputChars {
+			recordBraidNodeEvent(toolExec, phaseName, 0, node, "split_chunk_oversized", fmt.Sprintf("chunk %d still too large (%d bytes)", i, len(estimated)))
+			subAnswers = append(subAnswers, fmt.Sprintf("chunk_%d: [oversized, skipped]", i))
+			continue
+		}
+
+		subArgsMap := map[string]any{
+			"prompt":       RenderBraidHelperHandoffPrompt(handoff),
+			"instructions": instructions,
+			"max_attempts": 3,
+			"input":        subInput,
+		}
+		subArgs, err := json.Marshal(subArgsMap)
+		if err != nil {
+			subAnswers = append(subAnswers, fmt.Sprintf("chunk_%d: [marshal error]", i))
+			continue
+		}
+
+		callID := fmt.Sprintf("auto_%s_%s_split_%02d_%s", sanitizeToolCallIDPart(phaseName), sanitizeToolCallIDPart(node.ID), i, sanitizeToolCallIDPart(EphemeralHelperSolveToolName))
+		rawArgs := json.RawMessage(subArgs)
+		result, execErr := toolExec.helperFactory.Execute(ctx, EphemeralHelperSolveToolName, rawArgs)
+		toolCall := engine.ToolCall{ID: callID, Name: EphemeralHelperSolveToolName, Arguments: rawArgs}
+		toolResult := engine.ToolResult{ToolCallID: callID, Content: result}
+		if execErr != nil {
+			toolResult.IsError = true
+			toolResult.Content = execErr.Error()
+		}
+		output.ToolCalls = append(output.ToolCalls, toolCall)
+		output.ToolResults = append(output.ToolResults, toolResult)
+
+		answer := helperAnswerFromToolResult(result)
+		if strings.TrimSpace(answer) == "" {
+			answer = "[no answer]"
+		}
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "split_chunk_completed", fmt.Sprintf("chunk %d/%d: %s", i+1, len(chunks), safeTelemetryExcerpt(answer, 100)))
+		subAnswers = append(subAnswers, answer)
+	}
+
+	// Merge sub-answers into a combined result.
+	merged := fmt.Sprintf("status: completed summary: split-solved %d chunks answer: %s checks: ephemeral_helper_solve ran split execution over %d sub-items.",
+		len(subAnswers), strings.Join(subAnswers, "; "), len(chunks))
+	return merged, true
+}
+
 func formatBraidHelperNodeSummary(node BraidNode, answer string) string {
 	return formatBraidHelperNodeSummaryVerified(node, answer, false)
 }
@@ -3019,9 +3334,42 @@ func prepareBraidRepair(
 		delete(repairFeedbackByNode, nodeID)
 	}
 	for _, solveID := range solveIDs {
-		repairFeedbackByNode[solveID] = buildBraidRepairFeedback(failedNode, failedSummary)
+		repairFeedbackByNode[solveID] = capBraidRepairFeedback(buildBraidRepairFeedback(failedNode, failedSummary))
 	}
 	return true
+}
+
+// extractBraidHelperFailedStage attempts to identify the failure stage from a
+// helper output summary. Returns "run" as the default when no stage marker is
+// found.
+func extractBraidHelperFailedStage(summary string) braidHelperStage {
+	lower := strings.ToLower(summary)
+	for _, stage := range []braidHelperStage{
+		braidHelperStageDraft,
+		braidHelperStageParse,
+		braidHelperStageValidate,
+		braidHelperStageRun,
+		braidHelperStageVerify,
+	} {
+		if strings.Contains(lower, "stage="+string(stage)) {
+			return stage
+		}
+		if strings.Contains(lower, string(stage)+" error") ||
+			strings.Contains(lower, string(stage)+" failed") ||
+			strings.Contains(lower, string(stage)+" timed out") {
+			return stage
+		}
+	}
+	if strings.Contains(lower, "syntax") || strings.Contains(lower, "parse") {
+		return braidHelperStageParse
+	}
+	if strings.Contains(lower, "verify") || strings.Contains(lower, "verifier") {
+		return braidHelperStageVerify
+	}
+	if strings.Contains(lower, "compil") || strings.Contains(lower, "validation") {
+		return braidHelperStageValidate
+	}
+	return braidHelperStageRun
 }
 
 func buildBraidRepairFeedback(failedNode BraidNode, failedSummary string) string {
@@ -3538,4 +3886,367 @@ func formatBraidNodeSummary(item rlmNodeSummary) string {
 		parts = append(parts, "error: "+strings.TrimSpace(item.ErrorMessage))
 	}
 	return strings.Join(parts, " ")
+}
+
+// seedSolverStateFromBraidGraph creates a generalsolver.SolverState seeded
+// from the braid graph nodes using the bridge adapter.
+func seedSolverStateFromBraidGraph(graph *BraidGraph) *generalsolver.SolverState {
+	if graph == nil || len(graph.Nodes) == 0 {
+		return generalsolver.NewSolverState()
+	}
+	state := generalsolver.NewSolverState()
+	nodeLikes := make([]generalsolver.BraidNodeLike, len(graph.Nodes))
+	for i, node := range graph.Nodes {
+		nodeLikes[i] = generalsolver.BraidNodeLike{
+			ID:              node.ID,
+			Kind:            node.Kind,
+			Question:        node.Question,
+			DependsOn:       node.DependsOn,
+			MaxSummaryChars: node.MaxSummaryChars,
+			HelperPolicy:    node.HelperPolicy,
+			Archetype:       node.Archetype,
+			ScaffoldClass:   node.ScaffoldClass,
+			ScaffoldID:      node.ScaffoldID,
+			InputSchema:     node.InputSchema,
+		}
+	}
+	if err := generalsolver.BraidToWorkItems(state, nodeLikes, graph.FinalNode); err != nil {
+		return generalsolver.NewSolverState()
+	}
+	// Proactively split large work items during seeding so the solver state
+	// has decomposed sub-items before execution begins.
+	applyGraphLevelSplits(state, graph)
+	return state
+}
+
+// applyBraidGraphSplits rewrites the BraidGraph by decomposing nodes whose
+// helper input would exceed structural thresholds (bindings, queries, events,
+// constraints counts). This is the execution-path integration: the rewritten
+// graph is what readyBraidNodes actually iterates over, so splits produce real
+// sub-nodes that execute independently.
+//
+// For each oversized node, the original is removed and replaced with:
+//   - <id>__parse: extracts/normalizes the raw input
+//   - <id>__solve_01..<id>__solve_NN: independent sub-problems
+//   - <id>__merge: combines sub-results into the original node's output
+//
+// Downstream nodes that depended on the original are rewired to depend on
+// the merge node.
+func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseName string) {
+	if graph == nil || len(graph.Nodes) == 0 {
+		return
+	}
+
+	// Collect nodes that need splitting.
+	var toSplit []string
+	for _, node := range graph.Nodes {
+		if node.Kind != "solve" && node.Kind != "cycle_solve" {
+			continue
+		}
+		policy := braidNodeEffectiveHelperPolicy(node)
+		if policy != BraidNodeHelperPolicyPreferred && policy != BraidNodeHelperPolicyRequired {
+			continue
+		}
+		// Check archetype-based preemptive split.
+		if shouldPreemptiveSplitByArchetype(node) {
+			toSplit = append(toSplit, node.ID)
+			continue
+		}
+		// Check structural thresholds from parsed instance fields.
+		if shouldStructuralSplitFromQuestion(node) {
+			toSplit = append(toSplit, node.ID)
+			continue
+		}
+	}
+
+	if len(toSplit) == 0 {
+		return
+	}
+
+	// Build a lookup map for rewiring.
+	nodesByID := make(map[string]*BraidNode, len(graph.Nodes))
+	for i := range graph.Nodes {
+		nodesByID[graph.Nodes[i].ID] = &graph.Nodes[i]
+	}
+
+	var newNodes []BraidNode
+	removeIDs := map[string]bool{}
+
+	for _, nodeID := range toSplit {
+		node, ok := nodesByID[nodeID]
+		if !ok {
+			continue
+		}
+		// Parse instance fields for chunk data.
+		chunkCount := splitChunkCountForNode(*node)
+
+		parseID := nodeID + "__parse"
+		mergeID := nodeID + "__merge"
+		solveIDs := make([]string, chunkCount)
+		for i := range solveIDs {
+			solveIDs[i] = fmt.Sprintf("%s__solve_%02d", nodeID, i)
+		}
+
+		// Parse node: inherits original deps.
+		newNodes = append(newNodes, BraidNode{
+			ID:              parseID,
+			Kind:            "extract",
+			Question:        fmt.Sprintf("Parse and normalize input for sub-problem decomposition (parent: %s)", nodeID),
+			DependsOn:       append([]string(nil), node.DependsOn...),
+			HelperPolicy:    BraidNodeHelperPolicyNever,
+			MaxSummaryChars: 4000,
+		})
+
+		// Solve nodes: each handles one chunk.
+		for i, solveID := range solveIDs {
+			chunkGoal := fmt.Sprintf("Solve sub-problem %d/%d (parent: %s)", i+1, chunkCount, nodeID)
+			newNodes = append(newNodes, BraidNode{
+				ID:              solveID,
+				Kind:            "solve",
+				Question:        chunkGoal,
+				DependsOn:       []string{parseID},
+				HelperPolicy:    node.HelperPolicy,
+				Archetype:       node.Archetype,
+				MaxSummaryChars: node.MaxSummaryChars,
+			})
+		}
+
+		// Merge node: combines sub-results.
+		newNodes = append(newNodes, BraidNode{
+			ID:              mergeID,
+			Kind:            "reduce",
+			Question:        fmt.Sprintf("Merge %d sub-problem results into final answer (parent: %s)", chunkCount, nodeID),
+			DependsOn:       solveIDs,
+			ExpectedOutput:  node.ExpectedOutput,
+			MaxSummaryChars: node.MaxSummaryChars,
+		})
+
+		// Rewire downstream nodes to depend on merge instead of original.
+		for i := range graph.Nodes {
+			if removeIDs[graph.Nodes[i].ID] {
+				continue
+			}
+			for j, depID := range graph.Nodes[i].DependsOn {
+				if depID == nodeID {
+					graph.Nodes[i].DependsOn[j] = mergeID
+				}
+			}
+		}
+
+		// If this node was the final node, update final node to merge.
+		if graph.FinalNode == nodeID {
+			graph.FinalNode = mergeID
+		}
+
+		removeIDs[nodeID] = true
+		if toolExec != nil && toolExec.recorder != nil {
+			toolExec.recorder.RecordBraidEvent(BraidEvent{
+				Phase:   phaseName,
+				NodeID:  nodeID,
+				Status:  "graph_split",
+				Message: fmt.Sprintf("split into %d solve + parse + merge nodes (archetype=%s)", chunkCount, node.Archetype),
+			})
+		}
+	}
+
+	// Rebuild graph.Nodes: remove originals, add new sub-nodes.
+	filtered := make([]BraidNode, 0, len(graph.Nodes)-len(removeIDs)+len(newNodes))
+	for _, node := range graph.Nodes {
+		if !removeIDs[node.ID] {
+			filtered = append(filtered, node)
+		}
+	}
+	filtered = append(filtered, newNodes...)
+	graph.Nodes = filtered
+}
+
+// shouldPreemptiveSplitByArchetype returns true when a node's archetype
+// signals a structurally multi-binding problem that should be preemptively
+// decomposed regardless of payload size.
+func shouldPreemptiveSplitByArchetype(node BraidNode) bool {
+	archetype := strings.ToLower(strings.TrimSpace(node.Archetype))
+	switch archetype {
+	case "symbolic_trace":
+		// Symbolic trace problems (HM type inference, etc.) are structurally
+		// multi-binding. Even small instances benefit from parse/solve/merge.
+		return true
+	default:
+		return false
+	}
+}
+
+// shouldStructuralSplitFromQuestion returns true when the node's question
+// contains parseable arrays that exceed count thresholds.
+func shouldStructuralSplitFromQuestion(node BraidNode) bool {
+	if parsed, ok := helperFactoryExtractInstanceFields(node.Question); ok && len(parsed) > 0 {
+		syntheticItem := generalsolver.WorkItem{
+			ID:      node.ID,
+			Payload: parsed,
+		}
+		plan := generalsolver.AnalyzeForSplit(syntheticItem)
+		return plan.Strategy != generalsolver.SplitStrategyNone
+	}
+	return false
+}
+
+// splitChunkCountForNode determines how many solve sub-items to create.
+func splitChunkCountForNode(node BraidNode) int {
+	// Try structural analysis first.
+	if parsed, ok := helperFactoryExtractInstanceFields(node.Question); ok && len(parsed) > 0 {
+		syntheticItem := generalsolver.WorkItem{
+			ID:      node.ID,
+			Payload: parsed,
+		}
+		plan := generalsolver.AnalyzeForSplit(syntheticItem)
+		if plan.ChunkCount > 0 {
+			return plan.ChunkCount
+		}
+	}
+	// Archetype-based default: 4 chunks for compute-heavy archetypes.
+	archetype := strings.ToLower(strings.TrimSpace(node.Archetype))
+	switch archetype {
+	case "symbolic_trace":
+		return 4
+	default:
+		return 2
+	}
+}
+
+// applyGraphLevelSplits examines each work item in the solver state and splits
+// items whose payloads exceed the splitting threshold. Split items are replaced
+// with parse → solve₁…solveₙ → merge sub-items.
+func applyGraphLevelSplits(state *generalsolver.SolverState, graph *BraidGraph) {
+	if state == nil {
+		return
+	}
+	// Collect IDs that need splitting (cannot iterate and mutate simultaneously).
+	var toSplit []string
+	for id, item := range state.Items {
+		if item.Status != generalsolver.StatusReady && item.Status != generalsolver.StatusPending {
+			continue
+		}
+		plan := generalsolver.AnalyzeForSplit(item)
+		if plan.Strategy != generalsolver.SplitStrategyNone {
+			toSplit = append(toSplit, id)
+		}
+	}
+	for _, id := range toSplit {
+		// Item may have been removed by a prior split's rewireDependents.
+		if _, exists := state.Items[id]; !exists {
+			continue
+		}
+		if _, err := generalsolver.SplitWorkItem(state, id); err != nil {
+			// Log but don't block — the original item stays unsplit.
+			_ = err
+		}
+	}
+}
+
+// commitSolverArtifact records a successful helper result as a WorkArtifact
+// in the solver state. Failures are silently ignored so the solver state
+// shadow never blocks the primary execution path.
+func commitSolverArtifact(state *generalsolver.SolverState, nodeID string, summary string) {
+	if state == nil {
+		return
+	}
+	item, exists := state.Items[nodeID]
+	if !exists {
+		return
+	}
+	if item.Status == generalsolver.StatusSolved {
+		return
+	}
+	artifact := generalsolver.BraidSummaryToArtifact(nodeID, summary)
+	item.Status = generalsolver.StatusSolving
+	state.Items[nodeID] = item
+	_ = generalsolver.CommitArtifact(state, nodeID, artifact)
+}
+
+// recordSolverFailure records a failed helper attempt in the solver state.
+func recordSolverFailure(state *generalsolver.SolverState, nodeID string, stage string, errText string) {
+	if state == nil {
+		return
+	}
+	item, exists := state.Items[nodeID]
+	if !exists {
+		return
+	}
+	if item.Status == generalsolver.StatusSolved {
+		return
+	}
+	item.Status = generalsolver.StatusSolving
+	state.Items[nodeID] = item
+	feedback := map[string]any{
+		"stage": stage,
+	}
+	if errText != "" {
+		feedback["error"] = truncateForSolverFeedback(errText, 500)
+	}
+	_ = generalsolver.RecordFailure(state, nodeID, stage+": "+truncateForSolverFeedback(errText, 200), feedback)
+}
+
+func truncateForSolverFeedback(s string, maxLen int) string {
+	if maxLen <= 0 || len(s) <= maxLen {
+		return s
+	}
+	if maxLen < 15 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-12] + "...[trunc]"
+}
+
+// appendSolverStateTelemetry adds the solver state summary to the output
+// telemetry as a structured shadow alongside the existing summaries map.
+func appendSolverStateTelemetry(output *engine.EngineOutput, state *generalsolver.SolverState, phaseName string) {
+	if output == nil || state == nil {
+		return
+	}
+	// Compact failures first so the summary reflects post-compaction state.
+	digest := generalsolver.CompactFailureDigest(state)
+	summary := generalsolver.SummarizeState(state)
+	telemetry := map[string]any{
+		"phase":         phaseName,
+		"total_items":   summary.TotalItems,
+		"solved_count":  len(summary.SolvedIDs),
+		"blocked_count": len(summary.BlockedIDs),
+		"ready_count":   summary.ReadyCount,
+		"artifacts":     summary.Artifacts,
+		"failure_count": summary.FailureCount,
+		"digest_count":  summary.DigestCount,
+	}
+	if len(summary.SolvedIDs) > 0 {
+		telemetry["solved_ids"] = summary.SolvedIDs
+	}
+	if len(summary.BlockedIDs) > 0 {
+		telemetry["blocked_ids"] = summary.BlockedIDs
+	}
+	if digest != "" {
+		telemetry["failure_digest"] = digest
+	}
+	if len(summary.ByStatus) > 0 {
+		statusMap := make(map[string]int, len(summary.ByStatus))
+		for k, v := range summary.ByStatus {
+			statusMap[string(k)] = v
+		}
+		telemetry["by_status"] = statusMap
+	}
+	if len(summary.ByArchetype) > 0 {
+		archMap := make(map[string]int, len(summary.ByArchetype))
+		for k, v := range summary.ByArchetype {
+			archMap[string(k)] = v
+		}
+		telemetry["by_archetype"] = archMap
+	}
+	body, err := json.Marshal(telemetry)
+	if err != nil {
+		return
+	}
+	output.ToolCalls = append(output.ToolCalls, engine.ToolCall{
+		ID:   "solver_state_" + sanitizeToolCallIDPart(phaseName),
+		Name: "solver_state_telemetry",
+	})
+	output.ToolResults = append(output.ToolResults, engine.ToolResult{
+		ToolCallID: "solver_state_" + sanitizeToolCallIDPart(phaseName),
+		Content:    string(body),
+	})
 }

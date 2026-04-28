@@ -119,6 +119,7 @@ type REPLRunnerPhase struct {
 	MaxREPLCodeCommentLines    int
 	IncludePriorAssistantText  bool
 	FilterOverlongREPLCode     bool
+	RequireScaffoldContract    bool
 	FilterREPLCodeMaxTokens    int
 	FilterOverlongOutput       bool
 	FilterOutputMaxTokens      int
@@ -1206,7 +1207,15 @@ func validateBraidGraphForPhase(phase REPLRunnerPhase, graph BraidGraph, maxNode
 	if err := ValidateBraidGraph(graph, maxNodes); err != nil {
 		return err
 	}
-	return ValidateBraidGraphPolicy(graph, phase.BraidGraphPolicy)
+	if err := ValidateBraidGraphPolicy(graph, phase.BraidGraphPolicy); err != nil {
+		return err
+	}
+	if phase.RequireScaffoldContract {
+		if err := ValidateBraidGraphScaffoldContract(graph); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runREPLLLMWithTransientRetry(ctx context.Context, llm *engine.LLMChatEngine, input engine.EngineInput) (engine.EngineOutput, error) {
@@ -1285,8 +1294,17 @@ func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, p
 		b.WriteString("The verify node question or expected_output must explicitly say it checks original constraints by substituting candidate values into the original problem placeholders.\n")
 	}
 	b.WriteString("Schema:\n")
-	b.WriteString(`{"version":1,"nodes":[{"id":"n1","kind":"extract|solve|cycle_solve|verify|reduce","question":"...","depends_on":["n0"],"expected_output":"...","max_summary_chars":256,"helper_policy":"auto|preferred|required|never"}],"final_node":"n1"}`)
-	b.WriteString("\n\nPrevious invalid response:\n")
+	b.WriteString(`{"version":1,"nodes":[{"id":"n1","kind":"extract|solve|cycle_solve|verify|reduce","question":"...","depends_on":["n0"],"expected_output":"...","max_summary_chars":256,"helper_policy":"auto|preferred|required|never","archetype":"symbolic_trace|candidate_verify|state_transition|explicit_dag|graph_search|numeric_dp|sequence_simulation|constraint_solver|mixed","scaffold_class":"symbolic_trace|candidate_verify|state_transition|explicit_dag|graph_search|numeric_dp|sequence_simulation|constraint_solver","scaffold_id":"type_inference_v1|property_check_v1|state_replay_v1|search_backtrack_v1|generic_v1","input_schema":{"key":"value"}}],"final_node":"n1"}`)
+	b.WriteString("\n")
+	// If the error is a scaffold contract violation, add explicit repair instructions.
+	if mse, ok := IsMissingScaffoldContract(validationErr); ok {
+		fmt.Fprintf(&b, "\nScaffold contract violation on node %q: missing %v.\n", mse.NodeID, mse.Missing)
+		b.WriteString("Every solve and verify node MUST include archetype, scaffold_class, scaffold_id, and input_schema.\n")
+		b.WriteString("If you cannot choose a specific scaffold, use:\n")
+		b.WriteString(`  "archetype": "mixed", "scaffold_class": "explicit_dag", "scaffold_id": "generic_v1", "input_schema": {"prompt": "..."}` + "\n")
+		b.WriteString("Do NOT omit these fields. Repair this graph JSON only — do not solve the task.\n")
+	}
+	b.WriteString("\nReturn JSON only. No markdown fences and no prose.\n")
 	b.WriteString(safeTelemetryExcerpt(invalidOutput, 3000))
 	return b.String()
 }

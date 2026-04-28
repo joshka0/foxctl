@@ -435,7 +435,7 @@ Key commands built from the module:
 - `foxproxd` — the daemon
 - `foxproxctl` — CLI client (sessions, rooms, messages)
 
-Protocol spec: [foxprox/docs/Foxprox-v0.1.md](foxprox/docs/Foxprox-v0.1.md)
+Protocol spec: [foxprox/docs/ATCP-v0.1.md](foxprox/docs/ATCP-v0.1.md)
 
 ## License
 

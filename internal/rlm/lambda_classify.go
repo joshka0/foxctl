@@ -213,7 +213,12 @@ var stopWords = map[string]struct{}{
 	"in": {}, "on": {}, "at": {}, "to": {}, "for": {}, "of": {}, "with": {},
 	"by": {}, "from": {}, "up": {}, "about": {}, "into": {}, "through": {},
 	"and": {}, "or": {}, "but": {}, "not": {}, "no": {},
-	"return": {}, "key": {}, "files": {}, "concise": {}, "grounded": {}, "summary": {},
+	// Instruction-tail words: common output format directives that are not
+	// content-bearing for search.
+	"return": {}, "give": {}, "provide": {}, "list": {}, "describe": {},
+	"explain": {}, "show": {}, "tell": {}, "summarize": {},
+	"key": {}, "files": {}, "concise": {}, "grounded": {}, "summary": {},
+	"brief": {}, "detailed": {}, "short": {}, "long": {}, "report": {},
 }
 
 func filterStopWords(query string) string {

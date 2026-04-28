@@ -2,8 +2,8 @@
 
 Status: draft
 Owner: joshka
-Source spec: [../atcp/ATCP-v0.1.md](../atcp/ATCP-v0.1.md)
-Draft types: [../atcp/types.go](../atcp/types.go)
+Source spec: [../foxprox/ATCP-v0.1.md](../foxprox/ATCP-v0.1.md)
+Draft types: [../foxprox/types.go](../foxprox/types.go)
 
 ## 1. Goals
 

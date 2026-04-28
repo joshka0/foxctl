@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -45,6 +46,27 @@ const REPLPhaseOutputKindCycleWitness = "cycle_witness"
 
 const BraidGraphPolicyLongCoTController = "longcot_controller"
 
+// MissingScaffoldContractError is returned when an executable graph node
+// (solve, verify) is missing required scaffold metadata fields.
+type MissingScaffoldContractError struct {
+	NodeID  string
+	Missing []string
+}
+
+func (e MissingScaffoldContractError) Error() string {
+	return fmt.Sprintf("braid graph: missing_scaffold_contract: node %q missing %v", e.NodeID, e.Missing)
+}
+
+// IsMissingScaffoldContract checks whether an error is a scaffold contract
+// validation failure.
+func IsMissingScaffoldContract(err error) (MissingScaffoldContractError, bool) {
+	var mse MissingScaffoldContractError
+	if ok := errors.As(err, &mse); ok {
+		return mse, true
+	}
+	return MissingScaffoldContractError{}, false
+}
+
 // BraidGraph is the runtime contract emitted by the parent model.
 type BraidGraph struct {
 	Version   int         `json:"version"`
@@ -54,13 +76,17 @@ type BraidGraph struct {
 
 // BraidNode is one reasoning node in a bounded graph.
 type BraidNode struct {
-	ID              string   `json:"id"`
-	Kind            string   `json:"kind"`
-	Question        string   `json:"question"`
-	DependsOn       []string `json:"depends_on,omitempty"`
-	ExpectedOutput  string   `json:"expected_output,omitempty"`
-	MaxSummaryChars int      `json:"max_summary_chars,omitempty"`
-	HelperPolicy    string   `json:"helper_policy,omitempty"`
+	ID              string         `json:"id"`
+	Kind            string         `json:"kind"`
+	Question        string         `json:"question"`
+	DependsOn       []string       `json:"depends_on,omitempty"`
+	ExpectedOutput  string         `json:"expected_output,omitempty"`
+	MaxSummaryChars int            `json:"max_summary_chars,omitempty"`
+	HelperPolicy    string         `json:"helper_policy,omitempty"`
+	Archetype       string         `json:"archetype,omitempty"`
+	ScaffoldClass   string         `json:"scaffold_class,omitempty"`
+	ScaffoldID      string         `json:"scaffold_id,omitempty"`
+	InputSchema     map[string]any `json:"input_schema,omitempty"`
 }
 
 // BraidNodeHandoff is the bounded runtime packet passed from a parent graph
@@ -88,7 +114,9 @@ type BraidHandoffBudget struct {
 	MaxRepairFeedbackChars    int `json:"max_repair_feedback_chars,omitempty"`
 }
 
-// ParseBraidGraphText accepts only the canonical raw JSON graph payload.
+// ParseBraidGraphText accepts the raw JSON graph payload. Unknown fields are
+// silently stripped during normalization so model variance (extra fields like
+// python_repl) does not cause parse failure.
 func ParseBraidGraphText(text string) (BraidGraph, error) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -96,7 +124,6 @@ func ParseBraidGraphText(text string) (BraidGraph, error) {
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader([]byte(trimmed)))
-	decoder.DisallowUnknownFields()
 	var graph BraidGraph
 	if err := decoder.Decode(&graph); err != nil {
 		return BraidGraph{}, fmt.Errorf("braid graph: parse JSON: %w", err)
@@ -188,6 +215,38 @@ func ValidateBraidGraph(g BraidGraph, maxNodes int) error {
 	}
 	if err := validateBraidGraphAcyclic(deps); err != nil {
 		return err
+	}
+	return nil
+}
+
+// ValidateBraidGraphScaffoldContract checks that every executable node
+// (solve, verify) declares archetype, scaffold_class, scaffold_id, and
+// input_schema. Returns a MissingScaffoldContractError with the list of
+// missing fields per node.
+func ValidateBraidGraphScaffoldContract(g BraidGraph) error {
+	for _, node := range g.Nodes {
+		if !braidNodeRequiresScaffoldContract(node.Kind) {
+			continue
+		}
+		missing := []string{}
+		if strings.TrimSpace(node.Archetype) == "" {
+			missing = append(missing, "archetype")
+		}
+		if strings.TrimSpace(node.ScaffoldClass) == "" {
+			missing = append(missing, "scaffold_class")
+		}
+		if strings.TrimSpace(node.ScaffoldID) == "" {
+			missing = append(missing, "scaffold_id")
+		}
+		if len(node.InputSchema) == 0 {
+			missing = append(missing, "input_schema")
+		}
+		if len(missing) > 0 {
+			return MissingScaffoldContractError{NodeID: node.ID, Missing: missing}
+		}
+		if !validBraidNodeScaffoldClass(node.ScaffoldClass) {
+			return fmt.Errorf("braid graph: node %q has invalid scaffold_class %q", node.ID, node.ScaffoldClass)
+		}
 	}
 	return nil
 }
@@ -443,6 +502,26 @@ func applyBraidTypedHandoff(handoff *BraidNodeHandoff, rootPrompt string) {
 	if handoff == nil || !braidNodeCanUseTypedHandoff(handoff.Node.Kind) {
 		return
 	}
+	node := handoff.Node
+
+	// Primary path: use the declared scaffold_class and scaffold_id from the
+	// graph plan node. These are the hard schema contract.
+	declaredClass := strings.TrimSpace(node.ScaffoldClass)
+	declaredID := strings.TrimSpace(node.ScaffoldID)
+	if declaredClass != "" {
+		applyBraidDeclaredScaffoldHandoff(handoff, rootPrompt, declaredClass, declaredID)
+		return
+	}
+
+	// Legacy fallback: archetype field (pre-contract graphs).
+	declaredArchetype := strings.TrimSpace(node.Archetype)
+	if declaredArchetype != "" {
+		applyBraidDeclaredArchetypeHandoff(handoff, rootPrompt, declaredArchetype)
+		return
+	}
+
+	// Narrow instance-based fallback: detect from typed fields in the prompt
+	// instance section. No domain keyword heuristics.
 	instance, ok := helperFactoryExtractInstanceFields(rootPrompt)
 	if !ok {
 		return
@@ -463,10 +542,128 @@ func applyBraidTypedHandoff(handoff *BraidNodeHandoff, rootPrompt string) {
 		applyBraidSequenceSimulationHandoff(handoff, instance)
 		return
 	}
+	if braidInstanceLooksLikeSymbolicTrace(instance) {
+		applyBraidSymbolicTraceHandoff(handoff, instance)
+		return
+	}
+	if braidInstanceLooksLikeCandidateVerify(instance) {
+		applyBraidCandidateVerifyHandoff(handoff, instance)
+		return
+	}
 	if !braidInstanceLooksLikeStateTransition(instance) {
 		return
 	}
 	applyBraidStackTransitionHandoff(handoff, instance)
+}
+
+// applyBraidDeclaredScaffoldHandoff routes from the model-declared scaffold_class
+// and scaffold_id fields on the graph node. This is the primary contract path.
+// No keyword heuristics are used. The input_schema on the node provides typed fields.
+func applyBraidDeclaredScaffoldHandoff(handoff *BraidNodeHandoff, rootPrompt string, scaffoldClass, scaffoldID string) {
+	instance := handoff.Node.InputSchema
+	if len(instance) == 0 {
+		// Try extracting from prompt as fallback
+		if extracted, ok := helperFactoryExtractInstanceFields(rootPrompt); ok {
+			instance = extracted
+		}
+	}
+	switch scaffoldClass {
+	case BraidScaffoldClassSymbolicTrace:
+		applyBraidSymbolicTraceHandoff(handoff, instance)
+	case BraidScaffoldClassCandidateVerify:
+		if validateCandidateVerifyInstance(instance) {
+			applyBraidCandidateVerifyHandoff(handoff, instance)
+		}
+	case BraidScaffoldClassStateTransition:
+		if len(instance) > 0 {
+			if _, hasInitial := instance["initial_state"]; hasInitial {
+				if _, hasGoal := instance["goal_state"]; hasGoal {
+					applyBraidStackTransitionHandoff(handoff, instance)
+					return
+				}
+			}
+		}
+		applyBraidStateTransitionHandoff(handoff, instance)
+	case BraidScaffoldClassExplicitDAG:
+		applyBraidExplicitDAGHandoff(handoff, instance)
+	case BraidScaffoldClassGraphSearch:
+		applyBraidGraphSearchHandoff(handoff, instance)
+	case BraidScaffoldClassNumericDP:
+		applyBraidNumericDPHandoff(handoff, instance)
+	case BraidScaffoldClassSequenceSimulation:
+		applyBraidSequenceSimulationHandoff(handoff, instance)
+	case BraidScaffoldClassConstraintSolver:
+		applyBraidConstraintSolverHandoff(handoff, instance)
+	case BraidScaffoldClassFiniteStateTransition:
+		if len(instance) > 0 {
+			applyBraidStackTransitionHandoff(handoff, instance)
+		}
+	default:
+		// Unknown scaffold class — no routing.
+	}
+}
+
+// applyBraidDeclaredArchetypeHandoff is the legacy path that routes from a
+// model-declared archetype field. Superseded by applyBraidDeclaredScaffoldHandoff
+// for new graphs that include scaffold_class/scaffold_id. No keyword heuristics.
+func applyBraidDeclaredArchetypeHandoff(handoff *BraidNodeHandoff, rootPrompt string, archetype string) {
+	switch archetype {
+	case "symbolic_trace":
+		instance, ok := helperFactoryExtractInstanceFields(rootPrompt)
+		if ok {
+			applyBraidSymbolicTraceHandoff(handoff, instance)
+		}
+	case "candidate_verify":
+		instance, ok := helperFactoryExtractInstanceFields(rootPrompt)
+		if ok && validateCandidateVerifyInstance(instance) {
+			applyBraidCandidateVerifyHandoff(handoff, instance)
+		}
+	case "finite_state_transition", "state_transition":
+		instance, ok := helperFactoryExtractInstanceFields(rootPrompt)
+		if !ok {
+			return
+		}
+		if braidInstanceLooksLikeStateTransition(instance) {
+			applyBraidStackTransitionHandoff(handoff, instance)
+		} else {
+			applyBraidStateTransitionHandoff(handoff, instance)
+		}
+	case "graph_search":
+		instance, ok := helperFactoryExtractInstanceFields(rootPrompt)
+		if ok {
+			applyBraidGraphSearchHandoff(handoff, instance)
+		}
+	case "numeric_dp", "table_recurrence":
+		instance, ok := helperFactoryExtractInstanceFields(rootPrompt)
+		if ok && braidInstanceLooksLikeNumericDP(instance) {
+			applyBraidNumericDPHandoff(handoff, instance)
+		}
+	case "sequence_simulation":
+		instance, ok := helperFactoryExtractInstanceFields(rootPrompt)
+		if ok && braidInstanceLooksLikeSequenceSimulation(instance) {
+			applyBraidSequenceSimulationHandoff(handoff, instance)
+		}
+	case "constraint_solver":
+		instance, ok := helperFactoryExtractInstanceFields(rootPrompt)
+		if ok && braidInstanceLooksLikeConstraintSolver(instance) {
+			applyBraidConstraintSolverHandoff(handoff, instance)
+		}
+	case "explicit_dag":
+		instance, ok := helperFactoryExtractInstanceFields(rootPrompt)
+		if ok {
+			applyBraidExplicitDAGHandoff(handoff, instance)
+		}
+	default:
+		// Unknown declared archetype — no routing.
+	}
+}
+
+// validateCandidateVerifyInstance checks that the typed packet has the
+// required fields for a candidate_verify handoff.
+func validateCandidateVerifyInstance(instance map[string]any) bool {
+	_, hasCandidates := instance["candidates"]
+	_, hasPredicates := instance["predicates"]
+	return hasCandidates || hasPredicates
 }
 
 func applyBraidStackTransitionHandoff(handoff *BraidNodeHandoff, instance map[string]any) {
@@ -714,6 +911,169 @@ func braidInstanceLooksLikeConstraintSolver(instance map[string]any) bool {
 	return ok
 }
 
+func braidInstanceLooksLikeSymbolicTrace(instance map[string]any) bool {
+	_, hasProgram := instance["program"]
+	_, hasQueries := instance["queries"]
+	// Require scaffold_class for unambiguous detection, or accept
+	// program+queries as a strong signal.
+	if class, ok := instance["scaffold_class"].(string); ok && strings.TrimSpace(class) == BraidScaffoldClassSymbolicTrace {
+		return true
+	}
+	return hasProgram && hasQueries
+}
+
+func braidInstanceLooksLikeCandidateVerify(instance map[string]any) bool {
+	_, hasCandidates := instance["candidates"]
+	_, hasPredicates := instance["predicates"]
+	if class, ok := instance["scaffold_class"].(string); ok && strings.TrimSpace(class) == BraidScaffoldClassCandidateVerify {
+		return true
+	}
+	return hasCandidates || hasPredicates
+}
+
+func applyBraidSymbolicTraceHandoff(handoff *BraidNodeHandoff, instance map[string]any) {
+	handoff.TaskType = BraidScaffoldClassSymbolicTrace
+	handoff.ScaffoldClass = BraidScaffoldClassSymbolicTrace
+	handoff.ScaffoldID = BraidScaffoldIDTypeInferenceV1
+
+	facts := map[string]any{
+		"scaffold_class": BraidScaffoldClassSymbolicTrace,
+		"scaffold_id":    BraidScaffoldIDTypeInferenceV1,
+		"trace_kind":     "environment_update",
+	}
+	// Forward typed fields from the instance if present.
+	for _, key := range []string{"program", "queries", "environment", "bindings", "events"} {
+		if val, ok := instance[key]; ok {
+			facts[key] = val
+		}
+	}
+	handoff.Facts = facts
+	handoff.Rules = []string{
+		"Parse the program/trace as a sequence of binding or environment-update steps.",
+		"Maintain an environment mapping variables to type schemes or values.",
+		"Apply the appropriate inference algorithm (e.g., Algorithm W for let-bindings).",
+		"Unification must include occurs check.",
+		"Maintain a trace recording each step with its index.",
+		"Answer queries by looking up in the final state.",
+	}
+	handoff.AnswerFormat = `solution = {"q1": "<answer>", "q2": "<answer>"} or solution = <single_answer>`
+	handoff.Checks = []string{
+		"program/trace text is non-empty",
+		"every binding/step appears in the environment after processing",
+		"unification applies substitution compositionally with occurs check",
+		"query answers reference entries that exist in the trace",
+	}
+	if handoff.Node.Kind != "extract" {
+		handoff.OfficialRootTask = ""
+	}
+}
+
+func applyBraidCandidateVerifyHandoff(handoff *BraidNodeHandoff, instance map[string]any) {
+	handoff.TaskType = BraidScaffoldClassCandidateVerify
+	handoff.ScaffoldClass = BraidScaffoldClassCandidateVerify
+	handoff.ScaffoldID = BraidScaffoldIDPropertyCheckV1
+
+	facts := map[string]any{
+		"scaffold_class": BraidScaffoldClassCandidateVerify,
+		"scaffold_id":    BraidScaffoldIDPropertyCheckV1,
+		"selection_rule": "best",
+	}
+	// Forward typed fields from the instance.
+	for _, key := range []string{"candidates", "predicates", "selection_rule", "output_schema"} {
+		if val, ok := instance[key]; ok {
+			facts[key] = val
+		}
+	}
+	handoff.Facts = facts
+	handoff.Rules = []string{
+		"Evaluate each predicate/property for each candidate.",
+		"Apply the selection rule to pick the answer.",
+		"If a required library is unavailable, return a structured missing_backend error immediately — do not attempt to install it.",
+	}
+	handoff.AnswerFormat = "solution = <answer>"
+	handoff.Checks = []string{
+		"every candidate was evaluated",
+		"every predicate was checked",
+		"selection rule was applied correctly",
+		"answer matches the requested output format",
+	}
+	if handoff.Node.Kind != "extract" {
+		handoff.OfficialRootTask = ""
+	}
+}
+
+// applyBraidStateTransitionHandoff handles the generic state_transition/state_replay_v1
+// archetype. The model should emit archetype=state_transition with input_schema
+// containing the move_sequence or actions. The preset source handles replay generically.
+func applyBraidStateTransitionHandoff(handoff *BraidNodeHandoff, instance map[string]any) {
+	handoff.TaskType = BraidScaffoldClassStateTransition
+	handoff.ScaffoldClass = BraidScaffoldClassStateTransition
+	handoff.ScaffoldID = BraidScaffoldIDStateReplayV1
+
+	facts := map[string]any{
+		"scaffold_class": BraidScaffoldClassStateTransition,
+		"scaffold_id":    BraidScaffoldIDStateReplayV1,
+	}
+	for _, key := range []string{"move_sequence", "initial_state", "actions", "transitions"} {
+		if val, ok := instance[key]; ok {
+			facts[key] = val
+		}
+	}
+	handoff.Facts = facts
+	handoff.Rules = []string{
+		"Apply each action sequentially from the initial state.",
+		"Handle all action types correctly.",
+		"Track all state components.",
+		"Return the final state in the requested format.",
+	}
+	handoff.AnswerFormat = "solution = <state_representation>"
+	handoff.Checks = []string{
+		"all actions were applied",
+		"state components are consistent",
+		"output format is valid",
+	}
+	if handoff.Node.Kind != "extract" {
+		handoff.Node.MaxSummaryChars = 200
+	}
+}
+
+// applyBraidSearchBacktrackHandoff handles the generic explicit_dag/search_backtrack_v1 archetype.
+func applyBraidSearchBacktrackHandoff(handoff *BraidNodeHandoff, instance map[string]any) {
+	handoff.TaskType = BraidScaffoldClassExplicitDAG
+	handoff.ScaffoldClass = BraidScaffoldClassExplicitDAG
+	handoff.ScaffoldID = BraidScaffoldIDSearchBacktrackV1
+
+	facts := map[string]any{
+		"scaffold_class": BraidScaffoldClassExplicitDAG,
+		"scaffold_id":    BraidScaffoldIDSearchBacktrackV1,
+	}
+	for _, key := range []string{"nodes", "dependencies", "problems"} {
+		if val, ok := instance[key]; ok {
+			facts[key] = val
+		}
+	}
+	handoff.Facts = facts
+	handoff.Rules = []string{
+		"Parse sub-problems from the input.",
+		"Identify dependencies between sub-problems.",
+		"Solve leaf nodes first, then propagate forward.",
+		"Return structured JSON with each node's answer.",
+	}
+	handoff.AnswerFormat = `solution = {"node_0": <answer>, "node_1": <answer>, ...}`
+	handoff.Checks = []string{
+		"all sub-problems were solved",
+		"dependencies were resolved correctly",
+		"answers are in the expected format",
+	}
+	if handoff.Node.Kind != "extract" {
+		handoff.Node.MaxSummaryChars = 500
+	}
+}
+
+func applyBraidExplicitDAGHandoff(handoff *BraidNodeHandoff, instance map[string]any) {
+	applyBraidSearchBacktrackHandoff(handoff, instance)
+}
+
 func RenderBraidNodeHandoffPrompt(handoff BraidNodeHandoff) string {
 	node := handoff.Node
 	var b strings.Builder
@@ -854,6 +1214,24 @@ func RenderBraidHelperHandoffPrompt(handoff BraidNodeHandoff) string {
 		b.WriteString("- Return `solution = {\"variable\": integer, ...}` only after evaluating every typed constraint.\n")
 		b.WriteString("- If verification fails, return ok:false with first_failure, failed_constraint, observed, expected, and repair_hint.\n")
 	}
+	if handoff.ScaffoldClass == BraidScaffoldClassSymbolicTrace {
+		b.WriteString("Symbolic-trace output contract:\n")
+		b.WriteString("- Treat the input as a typed symbolic trace, not prose generation.\n")
+		b.WriteString("- Parse the program text from the program field into let-bindings.\n")
+		b.WriteString("- Execute Algorithm W: maintain type environment, substitution, and binding trace.\n")
+		b.WriteString("- For each let-binding: infer type, unify constraints with occurs check, generalize over free variables.\n")
+		b.WriteString("- Answer each query from the queries field by looking up type schemes or trace entries.\n")
+		b.WriteString("- Return `solution = {\"q1\": \"...\", \"q2\": \"...\", ...}` with all query answers.\n")
+		b.WriteString("- If verification fails, return ok:false with first_failure, failed_binding, observed, expected, and repair_hint.\n")
+	}
+	if handoff.ScaffoldClass == BraidScaffoldClassCandidateVerify {
+		b.WriteString("Candidate-verify output contract:\n")
+		b.WriteString("- Treat the input as a candidate enumeration and verification problem, not prose generation.\n")
+		b.WriteString("- Evaluate every predicate for every candidate. Do not skip or short-circuit.\n")
+		b.WriteString("- If a required library is unavailable (e.g., rdkit, python-chess), return ok:false with missing_library immediately.\n")
+		b.WriteString("- Return `solution = <answer>` matching the output_schema.\n")
+		b.WriteString("- If verification fails, return ok:false with first_failure, failed_candidate, observed, expected, and repair_hint.\n")
+	}
 	if len(handoff.Checks) > 0 {
 		b.WriteString("Verifier checks the helper must satisfy before returning an answer:\n")
 		for _, check := range handoff.Checks {
@@ -973,9 +1351,18 @@ func normalizeBraidGraph(g BraidGraph) BraidGraph {
 	for idx := range g.Nodes {
 		g.Nodes[idx].ID = strings.TrimSpace(g.Nodes[idx].ID)
 		g.Nodes[idx].Kind = strings.ToLower(strings.TrimSpace(g.Nodes[idx].Kind))
-		g.Nodes[idx].Question = strings.TrimSpace(g.Nodes[idx].Question)
-		g.Nodes[idx].ExpectedOutput = strings.TrimSpace(g.Nodes[idx].ExpectedOutput)
+		g.Nodes[idx].Question = clampString(strings.TrimSpace(g.Nodes[idx].Question), maxBraidNodeQuestionChars)
+		g.Nodes[idx].ExpectedOutput = clampString(strings.TrimSpace(g.Nodes[idx].ExpectedOutput), maxBraidNodeExpectedChars)
 		g.Nodes[idx].HelperPolicy = normalizeBraidNodeHelperPolicy(g.Nodes[idx].HelperPolicy)
+		g.Nodes[idx].Archetype = normalizeBraidNodeArchetype(g.Nodes[idx].Archetype)
+		g.Nodes[idx].ScaffoldClass = strings.ToLower(strings.TrimSpace(g.Nodes[idx].ScaffoldClass))
+		g.Nodes[idx].ScaffoldID = strings.ToLower(strings.TrimSpace(g.Nodes[idx].ScaffoldID))
+		if g.Nodes[idx].MaxSummaryChars < 0 {
+			g.Nodes[idx].MaxSummaryChars = 0
+		}
+		if g.Nodes[idx].DependsOn == nil {
+			g.Nodes[idx].DependsOn = []string{}
+		}
 		trimmedDeps := make([]string, 0, len(g.Nodes[idx].DependsOn))
 		for _, dep := range g.Nodes[idx].DependsOn {
 			dep = strings.TrimSpace(dep)
@@ -989,6 +1376,13 @@ func normalizeBraidGraph(g BraidGraph) BraidGraph {
 	return g
 }
 
+func clampString(s string, maxLen int) string {
+	if maxLen <= 0 || len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen]
+}
+
 func normalizeBraidNodeHelperPolicy(policy string) string {
 	switch strings.ToLower(strings.TrimSpace(policy)) {
 	case "":
@@ -1000,9 +1394,51 @@ func normalizeBraidNodeHelperPolicy(policy string) string {
 	}
 }
 
+// normalizeBraidNodeArchetype validates and normalizes the declared archetype
+// from a braid graph node. Returns empty string for unknown archetypes so the
+// runtime falls back to prompt-based detection.
+func normalizeBraidNodeArchetype(archetype string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(archetype))
+	switch trimmed {
+	case "symbolic_trace", "state_transition", "candidate_verify",
+		"explicit_dag", "table_recurrence", "constraint_solve",
+		"finite_state_transition", "graph_search", "numeric_dp",
+		"sequence_simulation", "mixed":
+		return trimmed
+	default:
+		return ""
+	}
+}
+
 func validBraidNodeHelperPolicy(policy string) bool {
 	switch normalizeBraidNodeHelperPolicy(policy) {
 	case "", BraidNodeHelperPolicyAuto, BraidNodeHelperPolicyPreferred, BraidNodeHelperPolicyRequired, BraidNodeHelperPolicyNever:
+		return true
+	default:
+		return false
+	}
+}
+
+func validBraidNodeScaffoldClass(cls string) bool {
+	switch strings.TrimSpace(cls) {
+	case BraidScaffoldClassStateTransition,
+		BraidScaffoldClassSymbolicTrace,
+		BraidScaffoldClassCandidateVerify,
+		BraidScaffoldClassGraphSearch,
+		BraidScaffoldClassConstraintSolver,
+		BraidScaffoldClassSequenceSimulation,
+		BraidScaffoldClassNumericDP,
+		BraidScaffoldClassExplicitDAG,
+		BraidScaffoldClassFiniteStateTransition:
+		return true
+	default:
+		return false
+	}
+}
+
+func braidNodeRequiresScaffoldContract(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "solve", "verify":
 		return true
 	default:
 		return false

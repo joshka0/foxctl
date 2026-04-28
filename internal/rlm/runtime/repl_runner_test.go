@@ -1651,8 +1651,17 @@ func TestExecutePhaseBraidGraphUsesPreferredHelperBeforeChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("executePhaseBraidGraph() error = %v", err)
 	}
-	if len(output.ToolCalls) != 1 || output.ToolCalls[0].Name != EphemeralHelperSolveToolName {
-		t.Fatalf("tool calls=%#v, want one helper call", output.ToolCalls)
+	if len(output.ToolCalls) != 2 || output.ToolCalls[0].Name != EphemeralHelperSolveToolName {
+		t.Fatalf("tool calls=%#v, want helper call + solver telemetry", output.ToolCalls)
+	}
+	var foundTelemetry bool
+	for _, tc := range output.ToolCalls {
+		if tc.Name == "solver_state_telemetry" {
+			foundTelemetry = true
+		}
+	}
+	if !foundTelemetry {
+		t.Fatal("missing solver_state_telemetry tool call")
 	}
 	handoff := latestBraidFinalHandoff(output)
 	if !strings.Contains(handoff, `"verified_answer": "solution = helper"`) {
