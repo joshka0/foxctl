@@ -27,7 +27,7 @@ func BraidToWorkItems(state *SolverState, nodes []BraidNodeLike, finalNodeID str
 			Risk:            braidKindRisk(node.Kind, finalNodeID),
 			MaxSummaryChars: node.MaxSummaryChars,
 			Payload: map[string]any{
-				"braid_kind":        node.Kind,
+				"braid_kind":          node.Kind,
 				"braid_helper_policy": node.HelperPolicy,
 			},
 		}

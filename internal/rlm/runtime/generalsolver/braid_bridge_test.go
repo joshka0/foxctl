@@ -99,11 +99,11 @@ func TestBraidToWorkItemsDependencyPropagation(t *testing.T) {
 
 func TestBraidSummaryToArtifact(t *testing.T) {
 	tests := []struct {
-		name         string
-		nodeID       string
-		summary      string
-		wantStatus   string
-		wantAnswer   string
+		name       string
+		nodeID     string
+		summary    string
+		wantStatus string
+		wantAnswer string
 	}{
 		{
 			name:       "solved with solution",

@@ -74,15 +74,15 @@ func TestRenderStateMarkdownWithDigests(t *testing.T) {
 
 func TestRenderWorkItemMarkdown(t *testing.T) {
 	item := WorkItem{
-		ID:        "n1",
-		Goal:      "solve the DAG",
-		Archetype: ArchetypeExplicitDAG,
-		Status:    StatusReady,
-		Priority:  1.5,
-		Risk:      0.3,
-		Attempts:  0,
+		ID:          "n1",
+		Goal:        "solve the DAG",
+		Archetype:   ArchetypeExplicitDAG,
+		Status:      StatusReady,
+		Priority:    1.5,
+		Risk:        0.3,
+		Attempts:    0,
 		MaxAttempts: 5,
-		DependsOn: []string{"n0"},
+		DependsOn:   []string{"n0"},
 	}
 	md := RenderWorkItemMarkdown(item)
 	if !strings.Contains(md, "n1") {

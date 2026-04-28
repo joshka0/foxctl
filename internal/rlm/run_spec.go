@@ -8,9 +8,9 @@ import (
 type ToolProfile string
 
 const (
-	ToolProfileDefault               ToolProfile = "default"
-	ToolProfileCodeIntel             ToolProfile = "code-intel"
-	ToolProfileLongCoTNoModelTools   ToolProfile = "longcot-no-model-tools"
+	ToolProfileDefault             ToolProfile = "default"
+	ToolProfileCodeIntel           ToolProfile = "code-intel"
+	ToolProfileLongCoTNoModelTools ToolProfile = "longcot-no-model-tools"
 )
 
 // ToolPolicy captures the effective model-visible tool policy for one run.

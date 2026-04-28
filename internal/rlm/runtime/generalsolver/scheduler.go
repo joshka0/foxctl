@@ -111,10 +111,10 @@ func (s *Scheduler) RunToCompletion(fn func(item WorkItem) (WorkArtifact, WorkVe
 }
 
 type SchedulerReport struct {
-	ItemsProcessed int             `json:"items_processed"`
-	Committed      int             `json:"committed"`
-	Repairs        int             `json:"repairs"`
-	Rejections     int             `json:"rejections"`
+	ItemsProcessed int              `json:"items_processed"`
+	Committed      int              `json:"committed"`
+	Repairs        int              `json:"repairs"`
+	Rejections     int              `json:"rejections"`
 	Errors         []SchedulerError `json:"errors,omitempty"`
 }
 

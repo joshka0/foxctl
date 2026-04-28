@@ -128,7 +128,7 @@ func TestChildSpawner_SpawnChild_EmitsRecentLogsInRawState(t *testing.T) {
 		BuildCommand: func(req spawn.Request) (CommandSpec, error) {
 			return CommandSpec{
 				Path: "/bin/sh",
-				Args: []string{"-c", "echo hello-stdout; echo hello-stderr 1>&2; exit 0"},
+				Args: []string{"-c", "echo hello-stdout; sleep 0.3; echo hello-stderr 1>&2; exit 0"},
 			}, nil
 		},
 	})

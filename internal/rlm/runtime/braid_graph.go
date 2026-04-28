@@ -974,9 +974,9 @@ func applyBraidCandidateVerifyHandoff(handoff *BraidNodeHandoff, instance map[st
 	handoff.ScaffoldID = BraidScaffoldIDPropertyCheckV1
 
 	facts := map[string]any{
-		"scaffold_class":  BraidScaffoldClassCandidateVerify,
-		"scaffold_id":     BraidScaffoldIDPropertyCheckV1,
-		"selection_rule":  "best",
+		"scaffold_class": BraidScaffoldClassCandidateVerify,
+		"scaffold_id":    BraidScaffoldIDPropertyCheckV1,
+		"selection_rule": "best",
 	}
 	// Forward typed fields from the instance.
 	for _, key := range []string{"candidates", "predicates", "selection_rule", "output_schema"} {

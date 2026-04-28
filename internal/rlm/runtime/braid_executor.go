@@ -2073,10 +2073,10 @@ func attemptSplitHelperExecution(
 	for i, chunk := range chunks {
 		// Build a sub-input with just this chunk.
 		subInput := map[string]any{
-			"split_role":    "solve",
-			"chunk_index":   i,
-			"total_chunks":  len(chunks),
-			"parent_id":     node.ID,
+			"split_role":   "solve",
+			"chunk_index":  i,
+			"total_chunks": len(chunks),
+			"parent_id":    node.ID,
 		}
 		// Merge chunk data into sub-input.
 		for k, v := range chunk {
@@ -3342,6 +3342,7 @@ func prepareBraidRepair(
 	}
 	return true
 }
+
 // extractBraidHelperFailedStage attempts to identify the failure stage from a
 // helper output summary. Returns "run" as the default when no stage marker is
 // found.
@@ -3438,9 +3439,11 @@ func braidNodeClosureFrom(graph BraidGraph, startID string) map[string]struct{} 
 	return out
 }
 
-var braidSummaryStatusRE = regexp.MustCompile(`(?i)(?:^|\s)status\s*:\s*([a-z][a-z0-9_-]*)`)
-var braidPassTrueRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*true(?:[^a-z0-9_]|$)`)
-var braidPassFalseRE = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*false(?:[^a-z0-9_]|$)`)
+var (
+	braidSummaryStatusRE = regexp.MustCompile(`(?i)(?:^|\s)status\s*:\s*([a-z][a-z0-9_-]*)`)
+	braidPassTrueRE      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*true(?:[^a-z0-9_]|$)`)
+	braidPassFalseRE     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*false(?:[^a-z0-9_]|$)`)
+)
 
 func validateBraidNodeExecutionSummary(phaseName string, node BraidNode, summary string, finalNodeID string) error {
 	return validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, finalNodeID, nil)
@@ -4042,10 +4045,10 @@ func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseN
 		removeIDs[nodeID] = true
 		if toolExec != nil && toolExec.recorder != nil {
 			toolExec.recorder.RecordBraidEvent(BraidEvent{
-				Phase:    phaseName,
-				NodeID:   nodeID,
-				Status:   "graph_split",
-				Message:  fmt.Sprintf("split into %d solve + parse + merge nodes (archetype=%s)", chunkCount, node.Archetype),
+				Phase:   phaseName,
+				NodeID:  nodeID,
+				Status:  "graph_split",
+				Message: fmt.Sprintf("split into %d solve + parse + merge nodes (archetype=%s)", chunkCount, node.Archetype),
 			})
 		}
 	}

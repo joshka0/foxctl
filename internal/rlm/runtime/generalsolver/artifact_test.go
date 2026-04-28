@@ -194,9 +194,9 @@ func TestParseWorkArtifactFromText(t *testing.T) {
 
 func TestValidateWorkArtifact(t *testing.T) {
 	tests := []struct {
-		name    string
-		artifact WorkArtifact
-		wantErr bool
+		name        string
+		artifact    WorkArtifact
+		wantErr     bool
 		errContains string
 	}{
 		{

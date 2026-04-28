@@ -19,10 +19,10 @@ const (
 	// when arrays exceed these counts. These target the common case where the
 	// helper receives hundreds of items that are individually small but
 	// collectively overwhelm a single helper attempt.
-	SplitMinBindings  = 8   // split when len(bindings) > 8
-	SplitMinQueries   = 1   // split when len(queries) > 1
-	SplitMinEvents    = 16  // split when len(events) > 16
-	SplitMinConstraints = 8 // split when len(constraints) > 8
+	SplitMinBindings    = 8  // split when len(bindings) > 8
+	SplitMinQueries     = 1  // split when len(queries) > 1
+	SplitMinEvents      = 16 // split when len(events) > 16
+	SplitMinConstraints = 8  // split when len(constraints) > 8
 
 	// SplitMinSubItemBytes is the minimum payload size for a sub-item.
 	// If a chunk would be smaller than this, it gets merged into the
@@ -48,13 +48,13 @@ const (
 
 // SplitPlan describes the result of analyzing a work item for splitting.
 type SplitPlan struct {
-	Strategy    SplitStrategy `json:"strategy"`
-	ParentID    string        `json:"parent_id"`
-	ParseID     string        `json:"parse_id,omitempty"`
-	MergeID     string        `json:"merge_id,omitempty"`
-	SolveIDs    []string      `json:"solve_ids,omitempty"`
-	ChunkCount  int           `json:"chunk_count,omitempty"`
-	Reason      string        `json:"reason,omitempty"`
+	Strategy   SplitStrategy `json:"strategy"`
+	ParentID   string        `json:"parent_id"`
+	ParseID    string        `json:"parse_id,omitempty"`
+	MergeID    string        `json:"merge_id,omitempty"`
+	SolveIDs   []string      `json:"solve_ids,omitempty"`
+	ChunkCount int           `json:"chunk_count,omitempty"`
+	Reason     string        `json:"reason,omitempty"`
 }
 
 // AnalyzeForSplit determines whether a work item needs splitting based on
@@ -178,10 +178,10 @@ func ApplySplit(state *SolverState, parentID string, plan SplitPlan) ([]string, 
 		Priority:  parent.Priority + 0.5,
 		Risk:      0.1,
 		Payload: map[string]any{
-			"split_role":    "parse",
-			"parent_id":     parentID,
-			"strategy":      string(plan.Strategy),
-			"chunk_count":   plan.ChunkCount,
+			"split_role":     "parse",
+			"parent_id":      parentID,
+			"strategy":       string(plan.Strategy),
+			"chunk_count":    plan.ChunkCount,
 			"parent_payload": parent.Payload,
 		},
 	}); err != nil {
@@ -199,10 +199,10 @@ func ApplySplit(state *SolverState, parentID string, plan SplitPlan) ([]string, 
 	for i, solveID := range solveIDs {
 		goal := fmt.Sprintf("Solve sub-problem %d/%d", i+1, plan.ChunkCount)
 		payload := map[string]any{
-			"split_role": "solve",
-			"parent_id":  parentID,
+			"split_role":  "solve",
+			"parent_id":   parentID,
 			"chunk_index": i,
-			"parse_id":   parseID,
+			"parse_id":    parseID,
 		}
 		// Attach chunk-specific payload if we have query decomposition.
 		if plan.Strategy == SplitStrategyQueryDecomposition && i < len(queries) {
@@ -524,9 +524,9 @@ func RenderSplitMergePayload(artifacts map[string]WorkArtifact, solveIDs []strin
 			continue
 		}
 		entry := map[string]any{
-			"id":          id,
-			"status":      art.Status,
-			"confidence":  art.Confidence,
+			"id":         id,
+			"status":     art.Status,
+			"confidence": art.Confidence,
 		}
 		if art.Answer != nil {
 			entry["answer"] = art.Answer
@@ -537,10 +537,10 @@ func RenderSplitMergePayload(artifacts map[string]WorkArtifact, solveIDs []strin
 		subResults = append(subResults, entry)
 	}
 	return map[string]any{
-		"split_role":   "merge",
-		"parent_goal":  parentGoal,
-		"sub_results":  subResults,
-		"solve_count":  len(solveIDs),
+		"split_role":  "merge",
+		"parent_goal": parentGoal,
+		"sub_results": subResults,
+		"solve_count": len(solveIDs),
 	}
 }
 

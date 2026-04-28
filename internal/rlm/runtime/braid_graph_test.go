@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/joshka0/foxctl/internal/runtime/engine"
 	"github.com/joshka0/foxctl/internal/rlm/runtime/generalsolver"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
 func TestBraidValidateGraphAcceptsValidGraph(t *testing.T) {
@@ -1195,7 +1195,7 @@ func TestParseBraidGraphTextNegativeMaxSummaryCharsResetToZero(t *testing.T) {
 func TestParseBraidGraphTextCombinedNormalization(t *testing.T) {
 	t.Parallel()
 
-	longQ := strings.Repeat("a", maxBraidNodeQuestionChars + 20)
+	longQ := strings.Repeat("a", maxBraidNodeQuestionChars+20)
 	raw := fmt.Sprintf(`{"version":1,"nodes":[{"id":"n1","kind":"EXTRACT","question":%q,"extra_field":true,"depends_on":["","  ","n0"]}],"final_node":" n1 ","extra_top":42}`, longQ)
 	g, err := ParseBraidGraphText(raw)
 	if err != nil {
@@ -2137,10 +2137,10 @@ func TestTypeInferenceAnswerVerifier(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
-		answer string
-		input  map[string]any
-		wantOK bool
+		name     string
+		answer   string
+		input    map[string]any
+		wantOK   bool
 		wantPass bool
 	}{
 		{
@@ -2150,7 +2150,7 @@ func TestTypeInferenceAnswerVerifier(t *testing.T) {
 			wantOK: false,
 		},
 		{
-			name:   "valid solution with all queries",
+			name: "valid solution with all queries",
 			answer: `ok: true
 solution = {"q1": "(Nat × Bool)", "q2": 5}`,
 			input: map[string]any{
@@ -2456,10 +2456,10 @@ func TestDeclaredArchetypeRoutesToCorrectHandoff(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		archetype      string
-		rootPrompt     string
-		wantClass      string
-		wantID         string
+		archetype  string
+		rootPrompt string
+		wantClass  string
+		wantID     string
 	}{
 		{
 			"symbolic_trace",
@@ -2860,12 +2860,12 @@ func TestScaffoldResolutionUsesTypedFieldsNotDomainNames(t *testing.T) {
 	// Prove that resolveBraidRuntimeScaffold accepts any input with the
 	// correct typed fields, even when no domain name appears anywhere.
 	tests := []struct {
-		name     string
-		node     BraidNode
-		handoff  BraidNodeHandoff
-		input    map[string]any
-		wantOK   bool
-		wantID   string
+		name    string
+		node    BraidNode
+		handoff BraidNodeHandoff
+		input   map[string]any
+		wantOK  bool
+		wantID  string
 	}{
 		{
 			name: "state_replay with generic action sequence",
@@ -3050,23 +3050,23 @@ func TestNoKeywordRoutingInDeclaredArchetypePath(t *testing.T) {
 		wantClass string
 	}{
 		{
-			arch: "symbolic_trace",
-			prompt: "Puzzle instance:\nprogram: let x = 0 in x\nqueries: []\n",
+			arch:      "symbolic_trace",
+			prompt:    "Puzzle instance:\nprogram: let x = 0 in x\nqueries: []\n",
 			wantClass: BraidScaffoldClassSymbolicTrace,
 		},
 		{
-			arch: "candidate_verify",
-			prompt: "Puzzle instance:\ncandidates: [a, b, c]\npredicates: []\n",
+			arch:      "candidate_verify",
+			prompt:    "Puzzle instance:\ncandidates: [a, b, c]\npredicates: []\n",
 			wantClass: BraidScaffoldClassCandidateVerify,
 		},
 		{
-			arch: "explicit_dag",
-			prompt: "Puzzle instance:\nnodes: [n0, n1]\n",
+			arch:      "explicit_dag",
+			prompt:    "Puzzle instance:\nnodes: [n0, n1]\n",
 			wantClass: BraidScaffoldClassExplicitDAG,
 		},
 		{
-			arch: "state_transition",
-			prompt: "Puzzle instance:\nmove_sequence: a1b2\nactions: [a1b2]\n",
+			arch:      "state_transition",
+			prompt:    "Puzzle instance:\nmove_sequence: a1b2\nactions: [a1b2]\n",
 			wantClass: BraidScaffoldClassStateTransition,
 		},
 	}
@@ -3094,12 +3094,16 @@ func TestValidateBraidGraphScaffoldContractAcceptsCompleteNodes(t *testing.T) {
 		Version: 1,
 		Nodes: []BraidNode{
 			{ID: "n1", Kind: "extract", Question: "Extract facts."},
-			{ID: "n2", Kind: "solve", Question: "Solve.", DependsOn: []string{"n1"},
+			{
+				ID: "n2", Kind: "solve", Question: "Solve.", DependsOn: []string{"n1"},
 				Archetype: "state_transition", ScaffoldClass: "state_transition",
-				ScaffoldID: "state_replay_v1", InputSchema: map[string]any{"initial_state": "s0", "actions": "a1"}},
-			{ID: "n3", Kind: "verify", Question: "Verify.", DependsOn: []string{"n2"},
+				ScaffoldID: "state_replay_v1", InputSchema: map[string]any{"initial_state": "s0", "actions": "a1"},
+			},
+			{
+				ID: "n3", Kind: "verify", Question: "Verify.", DependsOn: []string{"n2"},
 				Archetype: "candidate_verify", ScaffoldClass: "candidate_verify",
-				ScaffoldID: "property_check_v1", InputSchema: map[string]any{"candidates": "ans"}},
+				ScaffoldID: "property_check_v1", InputSchema: map[string]any{"candidates": "ans"},
+			},
 			{ID: "n4", Kind: "reduce", Question: "Reduce.", DependsOn: []string{"n2", "n3"}},
 		},
 		FinalNode: "n4",
@@ -3124,15 +3128,19 @@ func TestValidateBraidGraphScaffoldContractRejectsMissingFields(t *testing.T) {
 		},
 		{
 			name: "verify missing archetype",
-			node: BraidNode{ID: "n_verify", Kind: "verify", Question: "Verify.",
+			node: BraidNode{
+				ID: "n_verify", Kind: "verify", Question: "Verify.",
 				ScaffoldClass: "candidate_verify", ScaffoldID: "property_check_v1",
-				InputSchema: map[string]any{"x": 1}},
+				InputSchema: map[string]any{"x": 1},
+			},
 			wantErr: "missing_scaffold_contract",
 		},
 		{
 			name: "solve missing input_schema",
-			node: BraidNode{ID: "n_solve", Kind: "solve", Question: "Solve.",
-				Archetype: "state_transition", ScaffoldClass: "state_transition", ScaffoldID: "state_replay_v1"},
+			node: BraidNode{
+				ID: "n_solve", Kind: "solve", Question: "Solve.",
+				Archetype: "state_transition", ScaffoldClass: "state_transition", ScaffoldID: "state_replay_v1",
+			},
 			wantErr: "missing_scaffold_contract",
 		},
 		{

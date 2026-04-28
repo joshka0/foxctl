@@ -7,10 +7,10 @@ import (
 )
 
 const (
-	ArtifactStatusSolved   = "solved"
-	ArtifactStatusPartial  = "partial"
-	ArtifactStatusBlocked  = "blocked"
-	ArtifactStatusFailed   = "failed"
+	ArtifactStatusSolved  = "solved"
+	ArtifactStatusPartial = "partial"
+	ArtifactStatusBlocked = "blocked"
+	ArtifactStatusFailed  = "failed"
 )
 
 var validArtifactStatuses = map[string]bool{

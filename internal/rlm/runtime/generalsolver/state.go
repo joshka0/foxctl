@@ -6,10 +6,10 @@ import (
 )
 
 const (
-	defaultMaxAttempts = 5
-	maxWorkItems       = 128
-	maxDigests         = 64
-	maxFailureEntries  = 256
+	defaultMaxAttempts    = 5
+	maxWorkItems          = 128
+	maxDigests            = 64
+	maxFailureEntries     = 256
 	maxFailureDigestChars = 2000
 )
 
@@ -207,12 +207,12 @@ func SummarizeState(state *SolverState) StateSummary {
 		return StateSummary{}
 	}
 	summary := StateSummary{
-		TotalItems:    len(state.Items),
-		Artifacts:     len(state.Artifacts),
-		FailureCount:  len(state.FailureLog),
-		DigestCount:   len(state.Digests),
-		ByStatus:      make(map[WorkItemStatus]int),
-		ByArchetype:   make(map[ProblemArchetype]int),
+		TotalItems:   len(state.Items),
+		Artifacts:    len(state.Artifacts),
+		FailureCount: len(state.FailureLog),
+		DigestCount:  len(state.Digests),
+		ByStatus:     make(map[WorkItemStatus]int),
+		ByArchetype:  make(map[ProblemArchetype]int),
 	}
 	for _, item := range state.Items {
 		summary.ByStatus[item.Status]++
@@ -230,15 +230,15 @@ func SummarizeState(state *SolverState) StateSummary {
 }
 
 type StateSummary struct {
-	TotalItems   int                        `json:"total_items"`
-	SolvedIDs    []string                   `json:"solved_ids,omitempty"`
-	BlockedIDs   []string                   `json:"blocked_ids,omitempty"`
-	ReadyCount   int                        `json:"ready_count"`
-	Artifacts    int                        `json:"artifacts"`
-	FailureCount int                        `json:"failure_count"`
-	DigestCount  int                        `json:"digest_count"`
-	ByStatus     map[WorkItemStatus]int     `json:"by_status"`
-	ByArchetype  map[ProblemArchetype]int   `json:"by_archetype"`
+	TotalItems   int                      `json:"total_items"`
+	SolvedIDs    []string                 `json:"solved_ids,omitempty"`
+	BlockedIDs   []string                 `json:"blocked_ids,omitempty"`
+	ReadyCount   int                      `json:"ready_count"`
+	Artifacts    int                      `json:"artifacts"`
+	FailureCount int                      `json:"failure_count"`
+	DigestCount  int                      `json:"digest_count"`
+	ByStatus     map[WorkItemStatus]int   `json:"by_status"`
+	ByArchetype  map[ProblemArchetype]int `json:"by_archetype"`
 }
 
 func allDependenciesSolved(state *SolverState, item WorkItem) bool {

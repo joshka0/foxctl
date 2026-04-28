@@ -121,9 +121,9 @@ func TestAnalyzeForSplit_Bindings(t *testing.T) {
 	bindings := make([]any, 600)
 	for i := range bindings {
 		bindings[i] = map[string]any{
-			"var":   fmt.Sprintf("x%d", i),
-			"type":  "int",
-			"expr":  string(make([]byte, 80)),
+			"var":  fmt.Sprintf("x%d", i),
+			"type": "int",
+			"expr": string(make([]byte, 80)),
 		}
 	}
 	payload := map[string]any{
@@ -376,28 +376,28 @@ func TestIsSplitSubItem(t *testing.T) {
 		expect bool
 	}{
 		{
-			name: "parse sub-item",
-			item: WorkItem{Payload: map[string]any{"split_role": "parse"}},
+			name:   "parse sub-item",
+			item:   WorkItem{Payload: map[string]any{"split_role": "parse"}},
 			expect: true,
 		},
 		{
-			name: "solve sub-item",
-			item: WorkItem{Payload: map[string]any{"split_role": "solve"}},
+			name:   "solve sub-item",
+			item:   WorkItem{Payload: map[string]any{"split_role": "solve"}},
 			expect: true,
 		},
 		{
-			name: "merge sub-item",
-			item: WorkItem{Payload: map[string]any{"split_role": "merge"}},
+			name:   "merge sub-item",
+			item:   WorkItem{Payload: map[string]any{"split_role": "merge"}},
 			expect: true,
 		},
 		{
-			name: "regular item",
-			item: WorkItem{Payload: map[string]any{"query": "x"}},
+			name:   "regular item",
+			item:   WorkItem{Payload: map[string]any{"query": "x"}},
 			expect: false,
 		},
 		{
-			name: "nil payload",
-			item: WorkItem{},
+			name:   "nil payload",
+			item:   WorkItem{},
 			expect: false,
 		},
 	}
