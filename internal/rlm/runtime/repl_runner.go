@@ -1320,7 +1320,7 @@ func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, p
 	// If the error is a scaffold contract violation, add explicit repair instructions.
 	if mse, ok := IsMissingScaffoldContract(validationErr); ok {
 		fmt.Fprintf(&b, "\nScaffold contract violation on node %q: missing %v.\n", mse.NodeID, mse.Missing)
-		b.WriteString("Every solve and verify node MUST include archetype, scaffold_class, scaffold_id, and input_schema.\n")
+		b.WriteString("Every solve, cycle_solve, and verify node MUST include archetype, scaffold_class, scaffold_id, and input_schema.\n")
 		b.WriteString("Use only supported scaffold pairs:\n")
 		b.WriteString("- state_transition/state_replay_v1\n")
 		b.WriteString("- finite_state_transition/stack_relocation_v1\n")
@@ -2335,6 +2335,7 @@ func buildChildRuntimePrompt(parentPrompt, childPrompt string, remainingDepth, r
 		b.WriteString("- Recursive child calls are optional. If decomposition is not needed, solve directly; do not claim the runtime is unavailable.\n")
 	}
 	b.WriteString("- Preserve the requested answer format from the child task.\n")
+	b.WriteString("- If the child task asks for a compact summary, prefer one NodeArtifact JSON object: {\"status\":\"solved|partial|blocked\",\"answer\":\"...\",\"checks\":[\"...\"],\"confidence\":0.0}.\n")
 	b.WriteString("- Final child responses must be compact: for math or puzzle tasks, prefer one line such as `solution = ...`; otherwise use at most 120 words.\n")
 	b.WriteString("- Do not return a dependency graph, full proof, scratch transcript, or tool log unless the child task explicitly asks for it.\n")
 	b.WriteString("- If scratch REPL calls fail twice, stop using the REPL and return the best compact answer or one short blocker line.\n\n")
@@ -2633,6 +2634,25 @@ func validateChildSummaryFinalText(text string) error {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
 		return fmt.Errorf("child summary final response is empty")
+	}
+	if artifact, ok := parseBraidNodeArtifact(trimmed); ok {
+		lower := strings.ToLower(strings.Join([]string{
+			trimmed,
+			braidNodeArtifactAnswerString(artifact),
+			braidNodeArtifactChecksText(artifact),
+		}, "\n"))
+		if looksLikePseudoToolCall(lower) {
+			return fmt.Errorf("child summary final response looks like a tool call or code instead of structured lines")
+		}
+		if forbidden := firstForbiddenChildSummaryRuntimeToken(lower); forbidden != "" {
+			return fmt.Errorf("child summary final response mentions forbidden runtime protocol detail %q", forbidden)
+		}
+		if artifact.Status == "blocked" {
+			if forbidden := firstForbiddenChildSummaryBlockerToken(lower); forbidden != "" {
+				return fmt.Errorf("child summary final response treats dependency-cycle constraint as blocked via %q", forbidden)
+			}
+		}
+		return nil
 	}
 	lower := strings.ToLower(trimmed)
 	if looksLikePseudoToolCall(lower) {
@@ -3022,9 +3042,10 @@ func buildStructuredFinalRepairPrompt(originalPrompt string, phase REPLRunnerPha
 	switch strings.TrimSpace(phase.FinalOutputKind) {
 	case "child_summary":
 		b.WriteString("Required format:\n")
-		b.WriteString("status: solved|partial|blocked\n")
-		b.WriteString("answer: <answer or empty>\n")
-		b.WriteString("checks: <one compact check or blocker>\n")
+		b.WriteString(`{"status":"solved|partial|blocked","answer":"<answer or empty>","checks":["<one compact check or blocker>"],"confidence":0.0}`)
+		b.WriteString("\n")
+		b.WriteString("Legacy fallback is also accepted:\n")
+		b.WriteString("status: solved|partial|blocked\nanswer: <answer or empty>\nchecks: <one compact check or blocker>\n")
 		b.WriteString("Do not mention runtime depth, recursion budget, subagents, rlm_query, rlm_wait, or rlm_result. If blocked, name only the mathematical or information blocker.\n")
 		b.WriteString("Do not mark circular-looking dependencies as blocked. Treat them as simultaneous constraints or a fixed-point problem; report the attempted values/checks instead.\n")
 		b.WriteString("A response containing circular dependency, dependency cycle, or external resolution as a blocker will be rejected again.\n")
@@ -3958,6 +3979,9 @@ func (e *replToolExecutor) failedSubcallFailure(ctx context.Context) error {
 }
 
 func (e *replToolExecutor) recordBudgetError(fallback BudgetLimit, err error) {
+	if e == nil || e.recorder == nil || err == nil {
+		return
+	}
 	limit := fallback
 	var exceeded LimitExceededError
 	if errors.As(err, &exceeded) && exceeded.Limit != "" {

@@ -31,6 +31,7 @@ const (
 	LimitIterations         BudgetLimit = "iterations"
 	LimitParentTokens       BudgetLimit = "parent_tokens"
 	LimitChildTokens        BudgetLimit = "child_tokens"
+	LimitHelperCalls        BudgetLimit = "helper_calls"
 	LimitChildren           BudgetLimit = "children"
 	LimitConcurrentChildren BudgetLimit = "concurrent_children"
 	LimitTotalNodes         BudgetLimit = "total_nodes"
@@ -87,6 +88,7 @@ type BudgetConfig struct {
 	MaxIterations   int              `json:"max_iterations,omitempty"`
 	MaxParentTokens int              `json:"max_parent_tokens,omitempty"`
 	MaxChildTokens  int              `json:"max_child_tokens,omitempty"`
+	MaxHelperCalls  int              `json:"max_helper_calls,omitempty"`
 	MaxChildren     int              `json:"max_children,omitempty"`
 	MaxConcurrent   int              `json:"max_concurrent,omitempty"`
 	MaxTotalNodes   int              `json:"max_total_nodes,omitempty"`
@@ -105,6 +107,7 @@ type BudgetSnapshot struct {
 	IterationsUsed int       `json:"iterations_used"`
 	ParentTokens   int       `json:"parent_tokens"`
 	ChildTokens    int       `json:"child_tokens"`
+	HelperCalls    int       `json:"helper_calls"`
 	ChildrenUsed   int       `json:"children_used"`
 	ChildrenActive int       `json:"children_active"`
 	TotalNodesUsed int       `json:"total_nodes_used"`
@@ -336,6 +339,16 @@ func (b *Budget) ConsumeChildTokens(ctx context.Context, count int) error {
 	return b.consumeLocked(LimitChildTokens, &b.state.ChildTokens, b.cfg.MaxChildTokens, count)
 }
 
+// ConsumeHelperCall accounts one generated-helper/tool-synthesis execution.
+func (b *Budget) ConsumeHelperCall(ctx context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := b.checkLocked(ctx); err != nil {
+		return err
+	}
+	return b.consumeLocked(LimitHelperCalls, &b.state.HelperCalls, b.cfg.MaxHelperCalls, 1)
+}
+
 // Deadline returns the effective wall-clock deadline if configured.
 func (b *Budget) Deadline() (time.Time, bool) {
 	b.mu.Lock()
@@ -434,6 +447,7 @@ func validateConfig(cfg BudgetConfig) error {
 		{name: "max_iterations", value: cfg.MaxIterations},
 		{name: "max_parent_tokens", value: cfg.MaxParentTokens},
 		{name: "max_child_tokens", value: cfg.MaxChildTokens},
+		{name: "max_helper_calls", value: cfg.MaxHelperCalls},
 		{name: "max_children", value: cfg.MaxChildren},
 		{name: "max_concurrent", value: cfg.MaxConcurrent},
 		{name: "max_total_nodes", value: cfg.MaxTotalNodes},

@@ -2346,6 +2346,28 @@ func TestValidateChildSummaryRejectsRuntimeProtocolBlocker(t *testing.T) {
 	}
 }
 
+func TestValidateChildSummaryAcceptsNodeArtifact(t *testing.T) {
+	t.Parallel()
+
+	text := `{"status":"solved","answer":"solution = 42","checks":["computed deterministically"],"confidence":0.9}`
+	if err := validateChildSummaryFinalText(text); err != nil {
+		t.Fatalf("validateChildSummaryFinalText() structured artifact error = %v", err)
+	}
+}
+
+func TestValidateChildSummaryRejectsNodeArtifactRuntimeProtocolBlocker(t *testing.T) {
+	t.Parallel()
+
+	text := `{"status":"blocked","answer":"","checks":["remaining depth is 0 and rlm_query is unavailable"],"confidence":0.2}`
+	err := validateChildSummaryFinalText(text)
+	if err == nil {
+		t.Fatal("validateChildSummaryFinalText() succeeded for structured runtime protocol blocker")
+	}
+	if !strings.Contains(err.Error(), "forbidden runtime protocol detail") {
+		t.Fatalf("validateChildSummaryFinalText() err=%v, want forbidden runtime protocol detail", err)
+	}
+}
+
 func TestValidateChildSummaryRejectsCircularDependencyBlocker(t *testing.T) {
 	t.Parallel()
 
@@ -3760,6 +3782,7 @@ func TestBuildChildRuntimePromptClarifiesLeafDepth(t *testing.T) {
 		"Leaf-child mode",
 		"solve directly with the child task",
 		"Do not discuss recursion, depth, budget",
+		"NodeArtifact JSON",
 		"Original parent task for grounding",
 		"Parent: Move block A onto block B.",
 		"Move block A onto block B.",

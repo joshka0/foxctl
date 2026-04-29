@@ -46,7 +46,7 @@ const REPLPhaseOutputKindCyclePacket = "cycle_packet"
 const REPLPhaseOutputKindCycleWitness = "cycle_witness"
 
 // MissingScaffoldContractError is returned when an executable graph node
-// (solve, verify) is missing required scaffold metadata fields.
+// (solve, cycle_solve, verify) is missing required scaffold metadata fields.
 type MissingScaffoldContractError struct {
 	NodeID  string
 	Missing []string
@@ -275,7 +275,7 @@ func sortedBraidGraphNodeIDs(ids map[string]int) []string {
 }
 
 // ValidateBraidGraphScaffoldContract checks that every executable node
-// (solve, verify) declares archetype, scaffold_class, scaffold_id, and
+// (solve, cycle_solve, verify) declares archetype, scaffold_class, scaffold_id, and
 // input_schema. Returns a MissingScaffoldContractError with the list of
 // missing fields per node.
 func ValidateBraidGraphScaffoldContract(g BraidGraph) error {
@@ -1276,6 +1276,7 @@ func RenderBraidNodeHandoffPrompt(handoff BraidNodeHandoff) string {
 	if maxSummaryChars := handoff.Budget.MaxSummaryChars; maxSummaryChars > 0 {
 		fmt.Fprintf(&b, "Return a compact summary under %d characters.\n", maxSummaryChars)
 	}
+	b.WriteString("Return one compact NodeArtifact JSON object when this is the final child response: {\"status\":\"solved|partial|blocked\",\"answer\":\"...\",\"checks\":[\"...\"],\"confidence\":0.0}. For verify nodes, use status \"pass\" or set pass:true only when every original constraint is checked. Legacy status/answer/checks lines are accepted only as fallback.\n")
 	return strings.TrimSpace(b.String())
 }
 
@@ -1688,7 +1689,7 @@ func normalizeBraidNodeScaffoldID(cls, id string) string {
 
 func braidNodeRequiresScaffoldContract(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case "solve", "verify":
+	case "solve", "cycle_solve", "verify":
 		return true
 	default:
 		return false

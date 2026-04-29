@@ -686,7 +686,7 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	if got := phases[planIdx].BraidGraphPolicy; got != rlmruntime.BraidGraphPolicyLongCoTController {
 		t.Fatalf("graph_plan BraidGraphPolicy=%q want %q", got, rlmruntime.BraidGraphPolicyLongCoTController)
 	}
-	for _, want := range []string{"valid json object", "one primary solve wave", "Allowed kind values are extract, solve, cycle_solve, verify, reduce", "cycle_solve is optional", "BlocksWorld-style stack puzzles", "do not segment the plan by vague phases", "Use one primary solve node to build an executable candidate", "Keep the runtime graph acyclic", "Every solve and verify node must additionally include archetype, scaffold_class, scaffold_id, and input_schema", "Allowed scaffold pairs are strict", "Do not use generic_v1", "Use state_transition/state_replay_v1 only for replaying an explicit action sequence"} {
+	for _, want := range []string{"valid json object", "one primary solve wave", "Allowed kind values are extract, solve, cycle_solve, verify, reduce", "cycle_solve is optional", "BlocksWorld-style stack puzzles", "do not segment the plan by vague phases", "Use one primary solve node to build an executable candidate", "Keep the runtime graph acyclic", "Every solve, cycle_solve, and verify node must additionally include archetype, scaffold_class, scaffold_id, and input_schema", "Allowed scaffold pairs are strict", "Do not use generic_v1", "Use state_transition/state_replay_v1 only for replaying an explicit action sequence"} {
 		if !strings.Contains(phases[planIdx].Prompt, want) {
 			t.Fatalf("graph_plan prompt missing %q:\n%s", want, phases[planIdx].Prompt)
 		}
@@ -696,6 +696,12 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	}
 	if !phases[fanoutIdx].AutoExecuteGraphNodes {
 		t.Fatal("graph_fanout AutoExecuteGraphNodes=false want true")
+	}
+	if got := phases[fanoutIdx].BraidGraphPolicy; got != rlmruntime.BraidGraphPolicyLongCoTController {
+		t.Fatalf("graph_fanout BraidGraphPolicy=%q want %q", got, rlmruntime.BraidGraphPolicyLongCoTController)
+	}
+	if !phases[fanoutIdx].RequireScaffoldContract {
+		t.Fatal("graph_fanout RequireScaffoldContract=false want true")
 	}
 	if phases[fanoutIdx].DisableHelperFirstFallback {
 		t.Fatal("graph_fanout DisableHelperFirstFallback=true want false")

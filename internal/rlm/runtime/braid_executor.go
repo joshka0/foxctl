@@ -134,6 +134,9 @@ func executePhaseBraidGraph(
 	// Apply structural splits to the graph before execution so that
 	// readyBraidNodes operates on the decomposed graph, not the original.
 	applyBraidGraphSplits(graph, toolExec, phaseName)
+	if err := validateBraidGraphAfterRuntimeRewrite(phase, *graph); err != nil {
+		return fmt.Errorf("rlm repl runner phase %q: rewritten braid graph invalid: %w", phaseName, err)
+	}
 	nodesByID := make(map[string]BraidNode, len(graph.Nodes))
 	for _, node := range graph.Nodes {
 		nodesByID[node.ID] = node
@@ -153,6 +156,9 @@ graphLoop:
 				if node, ok := braidGraphNodeByID(*graph, nodeID); ok {
 					recordBraidNodeEvent(toolExec, phaseName, wave, node, "router_dependencies_applied", strings.Join(node.DependsOn, ", "))
 				}
+			}
+			if err := validateBraidGraphAfterRuntimeRewrite(phase, *graph); err != nil {
+				return fmt.Errorf("rlm repl runner phase %q: adaptive braid graph invalid: %w", phaseName, err)
 			}
 			nodesByID = make(map[string]BraidNode, len(graph.Nodes))
 			for _, node := range graph.Nodes {
@@ -391,6 +397,12 @@ func runBraidNodeHelperFirst(
 				return summary, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper-first deadline exhausted: %s", phaseName, node.ID, message)
 			}
 			return "", false, nil
+		}
+	}
+	if toolExec != nil && toolExec.budget != nil {
+		if err := toolExec.budget.ConsumeHelperCall(ctx); err != nil {
+			toolExec.recordBudgetError(LimitHelperCalls, err)
+			return "status: blocked\nanswer:\nchecks: " + err.Error(), true, err
 		}
 	}
 	recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first", policy)
@@ -2773,6 +2785,13 @@ func attemptSplitHelperExecution(
 
 		callID := fmt.Sprintf("auto_%s_%s_split_%02d_%s", sanitizeToolCallIDPart(phaseName), sanitizeToolCallIDPart(node.ID), i, sanitizeToolCallIDPart(EphemeralHelperSolveToolName))
 		rawArgs := json.RawMessage(subArgs)
+		if toolExec != nil && toolExec.budget != nil {
+			if err := toolExec.budget.ConsumeHelperCall(ctx); err != nil {
+				toolExec.recordBudgetError(LimitHelperCalls, err)
+				subAnswers = append(subAnswers, fmt.Sprintf("chunk_%d: [helper budget exceeded: %s]", i, err.Error()))
+				continue
+			}
+		}
 		result, execErr := toolExec.helperFactory.Execute(ctx, EphemeralHelperSolveToolName, rawArgs)
 		toolCall := engine.ToolCall{ID: callID, Name: EphemeralHelperSolveToolName, Arguments: rawArgs}
 		toolResult := engine.ToolResult{ToolCallID: callID, Content: result}
@@ -5575,6 +5594,63 @@ var (
 	braidPassFalseRE     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*false(?:[^a-z0-9_]|$)`)
 )
 
+type braidNodeArtifact struct {
+	Status          string           `json:"status"`
+	Answer          any              `json:"answer,omitempty"`
+	Checks          []any            `json:"checks,omitempty"`
+	Counterexamples []map[string]any `json:"counterexamples,omitempty"`
+	Confidence      float64          `json:"confidence,omitempty"`
+	Pass            *bool            `json:"pass,omitempty"`
+	Provenance      map[string]any   `json:"provenance,omitempty"`
+}
+
+func parseBraidNodeArtifact(summary string) (braidNodeArtifact, bool) {
+	trimmed := strings.TrimSpace(summary)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
+		return braidNodeArtifact{}, false
+	}
+	var artifact braidNodeArtifact
+	if err := json.Unmarshal([]byte(trimmed), &artifact); err != nil {
+		return braidNodeArtifact{}, false
+	}
+	if strings.TrimSpace(artifact.Status) == "" {
+		return braidNodeArtifact{}, false
+	}
+	artifact.Status = strings.ToLower(strings.TrimSpace(artifact.Status))
+	return artifact, true
+}
+
+func braidNodeArtifactAnswerString(artifact braidNodeArtifact) string {
+	switch typed := artifact.Answer.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		encoded, err := json.Marshal(typed)
+		if err == nil {
+			return strings.TrimSpace(string(encoded))
+		}
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+}
+
+func braidNodeArtifactChecksText(artifact braidNodeArtifact) string {
+	if len(artifact.Checks) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(artifact.Checks))
+	for _, check := range artifact.Checks {
+		switch typed := check.(type) {
+		case string:
+			parts = append(parts, typed)
+		default:
+			parts = append(parts, fmt.Sprint(typed))
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 func validateBraidNodeExecutionSummary(phaseName string, node BraidNode, summary string, finalNodeID string) error {
 	return validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, finalNodeID, nil)
 }
@@ -5603,7 +5679,11 @@ func validateBraidNodeExecutionSummaryInGraph(phaseName string, node BraidNode, 
 			}
 		}
 	}
-	if isBraidSolveKind(node.Kind) && braidSolveNodeRequiresTargetSolutionLine(node) && !strings.Contains(strings.ToLower(summary), "solution =") {
+	solutionLineSource := summary
+	if artifact, ok := parseBraidNodeArtifact(summary); ok {
+		solutionLineSource = braidNodeArtifactAnswerString(artifact)
+	}
+	if isBraidSolveKind(node.Kind) && braidSolveNodeRequiresTargetSolutionLine(node) && !strings.Contains(strings.ToLower(solutionLineSource), "solution =") {
 		return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) did not provide a target solution line: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
 	}
 	if node.ID == finalNodeID || node.Kind == "extract" || node.Kind == "verify" || node.Kind == "reduce" {
@@ -5700,6 +5780,32 @@ func parseBraidScalarAnswer(answer string) any {
 }
 
 func braidVerificationSummaryPassed(summary string) bool {
+	if artifact, ok := parseBraidNodeArtifact(summary); ok {
+		if artifact.Pass != nil && *artifact.Pass {
+			return true
+		}
+		switch artifact.Status {
+		case "pass", "passed", "ok":
+			return true
+		}
+		checks := strings.ToLower(braidNodeArtifactChecksText(artifact))
+		for _, marker := range []string{
+			"verification: pass",
+			"verification pass",
+			"verified: pass",
+			"verdict: pass",
+			"checks: verified",
+			"verified",
+			"all moves valid",
+			"final state matches",
+			"matches the goal state",
+		} {
+			if strings.Contains(checks, marker) {
+				return true
+			}
+		}
+		return false
+	}
 	statuses := braidSummaryStatuses(summary)
 	if braidStatusesContainAny(statuses, "pass", "passed") {
 		return true
@@ -5816,6 +5922,9 @@ func validateCycleSolveSummaryJSON(summary string) error {
 }
 
 func extractCycleSolveJSON(summary string) (string, error) {
+	if artifact, ok := parseBraidNodeArtifact(summary); ok {
+		summary = braidNodeArtifactAnswerString(artifact)
+	}
 	const marker = "cycle_json"
 	lower := strings.ToLower(summary)
 	markerIdx := strings.Index(lower, marker)
@@ -5879,6 +5988,13 @@ func cycleJSONValuesEqual(observed any, expected any) bool {
 }
 
 func braidSummaryStatuses(summary string) []string {
+	if artifact, ok := parseBraidNodeArtifact(summary); ok {
+		statuses := []string{artifact.Status}
+		if artifact.Pass != nil && *artifact.Pass {
+			statuses = append(statuses, "pass")
+		}
+		return statuses
+	}
 	matches := braidSummaryStatusRE.FindAllStringSubmatch(summary, -1)
 	statuses := make([]string, 0, len(matches))
 	for _, match := range matches {
@@ -6113,6 +6229,23 @@ func formatBraidNodeSummary(item rlmNodeSummary) string {
 		parts = append(parts, "error: "+strings.TrimSpace(item.ErrorMessage))
 	}
 	return strings.Join(parts, " ")
+}
+
+func validateBraidGraphAfterRuntimeRewrite(phase REPLRunnerPhase, graph BraidGraph) error {
+	if err := ValidateBraidGraph(graph, phase.MaxGraphNodes); err != nil {
+		return err
+	}
+	if strings.TrimSpace(phase.BraidGraphPolicy) != "" {
+		if err := ValidateBraidGraphPolicy(graph, phase.BraidGraphPolicy); err != nil {
+			return err
+		}
+	}
+	if phase.RequireScaffoldContract {
+		if err := ValidateBraidGraphScaffoldContract(graph); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // seedSolverStateFromBraidGraph creates a generalsolver.SolverState seeded

@@ -117,6 +117,24 @@ func TestBudgetTokenAccounting(t *testing.T) {
 	}
 }
 
+func TestBudgetHelperCallAccounting(t *testing.T) {
+	t.Parallel()
+
+	budget, err := NewBudget(BudgetConfig{MaxHelperCalls: 1})
+	if err != nil {
+		t.Fatalf("NewBudget() error = %v", err)
+	}
+
+	if err := budget.ConsumeHelperCall(context.Background()); err != nil {
+		t.Fatalf("ConsumeHelperCall() first error = %v", err)
+	}
+	requireLimitExceeded(t, budget.ConsumeHelperCall(context.Background()), LimitHelperCalls)
+
+	if snapshot := budget.Snapshot(); snapshot.HelperCalls != 1 {
+		t.Fatalf("snapshot.HelperCalls = %d, want 1", snapshot.HelperCalls)
+	}
+}
+
 func TestBudgetRejectsMaxChildren(t *testing.T) {
 	t.Parallel()
 
@@ -253,6 +271,7 @@ func TestBudgetSnapshotJSONStable(t *testing.T) {
 		MaxIterations:   5,
 		MaxParentTokens: 20,
 		MaxChildTokens:  10,
+		MaxHelperCalls:  2,
 	})
 	if err != nil {
 		t.Fatalf("NewBudget() error = %v", err)
@@ -263,6 +282,9 @@ func TestBudgetSnapshotJSONStable(t *testing.T) {
 	}
 	if err := budget.ConsumeParentTokens(context.Background(), 7); err != nil {
 		t.Fatalf("ConsumeParentTokens() error = %v", err)
+	}
+	if err := budget.ConsumeHelperCall(context.Background()); err != nil {
+		t.Fatalf("ConsumeHelperCall() error = %v", err)
 	}
 
 	snapshot := budget.Snapshot()

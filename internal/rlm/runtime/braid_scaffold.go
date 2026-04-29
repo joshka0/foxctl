@@ -32,6 +32,7 @@ const (
 type braidRuntimeScaffold struct {
 	Class          string
 	ID             string
+	Language       string
 	PresetName     string
 	PresetSource   string
 	PresetInput    map[string]any
@@ -55,6 +56,7 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 		return braidRuntimeScaffold{
 			Class:          BraidScaffoldClassFiniteStateTransition,
 			ID:             BraidScaffoldIDStackRelocationV1,
+			Language:       HelperLanguageGo,
 			PresetName:     BraidScaffoldClassFiniteStateTransition + "/" + BraidScaffoldIDStackRelocationV1,
 			PresetSource:   stackTransitionPlannerPresetSource(),
 			PresetInput:    cloneMapAny(input),
@@ -71,6 +73,7 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 			return braidRuntimeScaffold{
 				Class:          BraidScaffoldClassGraphSearch,
 				ID:             BraidScaffoldIDResourcePathMinInitialV1,
+				Language:       HelperLanguageGo,
 				PresetName:     BraidScaffoldClassGraphSearch + "/" + BraidScaffoldIDResourcePathMinInitialV1,
 				PresetSource:   gridResourcePathPresetSource(),
 				PresetInput:    cloneMapAny(input),
@@ -85,6 +88,7 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 			return braidRuntimeScaffold{
 				Class:          BraidScaffoldClassGraphSearch,
 				ID:             BraidScaffoldIDExplicitShortestPathV1,
+				Language:       HelperLanguageGo,
 				PresetName:     BraidScaffoldClassGraphSearch + "/" + BraidScaffoldIDExplicitShortestPathV1,
 				PresetSource:   explicitShortestPathPresetSource(),
 				PresetInput:    cloneMapAny(input),
@@ -105,6 +109,7 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 		return braidRuntimeScaffold{
 			Class:          BraidScaffoldClassNumericDP,
 			ID:             BraidScaffoldIDRecurrenceTableV1,
+			Language:       HelperLanguageGo,
 			PresetName:     BraidScaffoldClassNumericDP + "/" + BraidScaffoldIDRecurrenceTableV1,
 			PresetSource:   numericDPTablePresetSource(),
 			PresetInput:    cloneMapAny(input),
@@ -122,6 +127,7 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 		return braidRuntimeScaffold{
 			Class:          BraidScaffoldClassSequenceSimulation,
 			ID:             BraidScaffoldIDJSONPatchSequenceV1,
+			Language:       HelperLanguageGo,
 			PresetName:     BraidScaffoldClassSequenceSimulation + "/" + BraidScaffoldIDJSONPatchSequenceV1,
 			PresetSource:   jsonPatchSequenceSimulationPresetSource(),
 			PresetInput:    cloneMapAny(input),
@@ -139,6 +145,7 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 		return braidRuntimeScaffold{
 			Class:          BraidScaffoldClassConstraintSolver,
 			ID:             BraidScaffoldIDFiniteDomainV1,
+			Language:       HelperLanguageGo,
 			PresetName:     BraidScaffoldClassConstraintSolver + "/" + BraidScaffoldIDFiniteDomainV1,
 			PresetSource:   finiteDomainConstraintPresetSource(),
 			PresetInput:    cloneMapAny(input),
@@ -156,6 +163,7 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 		return braidRuntimeScaffold{
 			Class:          BraidScaffoldClassSymbolicTrace,
 			ID:             BraidScaffoldIDTypeInferenceV1,
+			Language:       HelperLanguagePython,
 			PresetName:     BraidScaffoldClassSymbolicTrace + "/" + BraidScaffoldIDTypeInferenceV1,
 			PresetSource:   typeInferencePresetSource(),
 			PresetInput:    cloneMapAny(input),
@@ -173,6 +181,7 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 		return braidRuntimeScaffold{
 			Class:          BraidScaffoldClassCandidateVerify,
 			ID:             BraidScaffoldIDPropertyCheckV1,
+			Language:       HelperLanguagePython,
 			PresetName:     BraidScaffoldClassCandidateVerify + "/" + BraidScaffoldIDPropertyCheckV1,
 			PresetSource:   candidateVerifyPresetSource(),
 			PresetInput:    cloneMapAny(input),
@@ -190,6 +199,7 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 		return braidRuntimeScaffold{
 			Class:          BraidScaffoldClassStateTransition,
 			ID:             BraidScaffoldIDStateReplayV1,
+			Language:       HelperLanguagePython,
 			PresetName:     BraidScaffoldClassStateTransition + "/" + BraidScaffoldIDStateReplayV1,
 			PresetSource:   stateReplayPresetSource(),
 			PresetInput:    cloneMapAny(input),
@@ -204,6 +214,7 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 		return braidRuntimeScaffold{
 			Class:          BraidScaffoldClassExplicitDAG,
 			ID:             BraidScaffoldIDSearchBacktrackV1,
+			Language:       HelperLanguagePython,
 			PresetName:     BraidScaffoldClassExplicitDAG + "/" + BraidScaffoldIDSearchBacktrackV1,
 			PresetInput:    cloneMapAny(input),
 			MaxSourceLines: 250,
@@ -293,6 +304,9 @@ func applyBraidRuntimeScaffoldToHelperConfig(cfg HelperFactoryConfig, scaffold b
 	cfg.PresetSource = scaffold.PresetSource
 	cfg.PresetInput = cloneMapAny(scaffold.PresetInput)
 	cfg.AnswerVerifier = scaffold.Verifier
+	if strings.TrimSpace(scaffold.Language) != "" {
+		cfg.Language = strings.TrimSpace(scaffold.Language)
+	}
 	if scaffold.MaxSourceLines > cfg.MaxSourceLines {
 		cfg.MaxSourceLines = scaffold.MaxSourceLines
 	}

@@ -741,8 +741,8 @@ func TestBraidNodeCanFallbackFromPreferredCycleHelperFailure(t *testing.T) {
 	if braidNodeCanFallbackFromHelperFailure(BraidNode{Kind: "cycle_solve"}, BraidNodeHelperPolicyRequired) {
 		t.Fatal("required cycle_solve helper failure should remain terminal")
 	}
-	if braidNodeCanFallbackFromHelperFailure(BraidNode{Kind: "solve"}, BraidNodeHelperPolicyPreferred) {
-		t.Fatal("ordinary solve helper fallback remains disabled under hard graph policy")
+	if !braidNodeCanFallbackFromHelperFailure(BraidNode{Kind: "solve"}, BraidNodeHelperPolicyPreferred) {
+		t.Fatal("preferred solve helper failure should allow child fallback")
 	}
 }
 
@@ -780,6 +780,35 @@ func TestBraidVerifySummaryRequiresPassSignal(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("validateBraidNodeExecutionSummary() verified-check summary error = %v", err)
+	}
+}
+
+func TestBraidNodeArtifactValidation(t *testing.T) {
+	t.Parallel()
+
+	verifyArtifact := `{"status":"pass","answer":"pass: true","checks":["verified original constraints"],"confidence":0.95}`
+	if err := validateBraidNodeExecutionSummary("graph_fanout", BraidNode{ID: "n_verify", Kind: "verify"}, verifyArtifact, "n_reduce"); err != nil {
+		t.Fatalf("validateBraidNodeExecutionSummary() structured verify error = %v", err)
+	}
+
+	solveArtifact := `{"status":"solved","answer":"solution = {\"node_2\":1071}","checks":["computed deterministically"],"confidence":0.9}`
+	node := BraidNode{ID: "n_solve__adaptive_00_node_2", Kind: "solve"}
+	if err := validateBraidNodeExecutionSummary("graph_fanout", node, solveArtifact, "n_reduce"); err != nil {
+		t.Fatalf("validateBraidNodeExecutionSummary() structured solve error = %v", err)
+	}
+
+	blockedArtifact := `{"status":"blocked","answer":"","checks":["missing dependency"],"confidence":0.2}`
+	if err := validateBraidNodeExecutionSummary("graph_fanout", BraidNode{ID: "n_solve", Kind: "solve"}, blockedArtifact, "n_reduce"); err == nil {
+		t.Fatal("validateBraidNodeExecutionSummary() accepted structured blocked artifact")
+	}
+}
+
+func TestBraidCycleSolveArtifactValidation(t *testing.T) {
+	t.Parallel()
+
+	artifact := `{"status":"solved","answer":"cycle_json: {\"pass\":true,\"candidates\":{\"node_2\":1071},\"checks\":[{\"name\":\"fixed_point\",\"ok\":true,\"observed\":6,\"expected\":6}]}","checks":["bounded fixed-point search passed"],"confidence":0.9}`
+	if err := validateBraidNodeExecutionSummary("graph_fanout", BraidNode{ID: "n_cycle", Kind: "cycle_solve"}, artifact, "n_reduce"); err != nil {
+		t.Fatalf("validateBraidNodeExecutionSummary() structured cycle_solve error = %v", err)
 	}
 }
 
@@ -3727,11 +3756,18 @@ func TestResolveBraidRuntimeScaffoldSymbolicTrace(t *testing.T) {
 	if scaffold.PresetSource == "" {
 		t.Fatal("scaffold preset source is empty")
 	}
+	if scaffold.Language != HelperLanguagePython {
+		t.Fatalf("scaffold language=%q, want %q", scaffold.Language, HelperLanguagePython)
+	}
 	if scaffold.Verifier == nil {
 		t.Fatal("scaffold verifier is nil")
 	}
 	if scaffold.MaxSourceLines != 380 {
 		t.Fatalf("MaxSourceLines=%d, want 380", scaffold.MaxSourceLines)
+	}
+	cfg := applyBraidRuntimeScaffoldToHelperConfig(HelperFactoryConfig{Language: HelperLanguageGo}, scaffold)
+	if cfg.Language != HelperLanguagePython {
+		t.Fatalf("helper config language=%q, want %q", cfg.Language, HelperLanguagePython)
 	}
 }
 
@@ -5312,7 +5348,12 @@ func TestValidateBraidGraphScaffoldContractAcceptsCompleteNodes(t *testing.T) {
 				ScaffoldID: "state_replay_v1", InputSchema: map[string]any{"actions": "e2e4 e7e5"},
 			},
 			{
-				ID: "n3", Kind: "verify", Question: "Verify.", DependsOn: []string{"n2"},
+				ID: "n_cycle", Kind: "cycle_solve", Question: "Solve fixed point.", DependsOn: []string{"n2"},
+				Archetype: "explicit_dag", ScaffoldClass: "explicit_dag",
+				ScaffoldID: "search_backtrack_v1", InputSchema: map[string]any{"prompt": "solve mutual constraints", "cycle_clusters": []any{[]any{"node_2", "node_5"}}},
+			},
+			{
+				ID: "n3", Kind: "verify", Question: "Verify.", DependsOn: []string{"n_cycle"},
 				Archetype: "candidate_verify", ScaffoldClass: "candidate_verify",
 				ScaffoldID: "property_check_v1", InputSchema: map[string]any{"candidates": "ans"},
 			},
@@ -5336,6 +5377,11 @@ func TestValidateBraidGraphScaffoldContractRejectsMissingFields(t *testing.T) {
 		{
 			name:    "solve missing all scaffold fields",
 			node:    BraidNode{ID: "n_solve", Kind: "solve", Question: "Solve."},
+			wantErr: "missing_scaffold_contract",
+		},
+		{
+			name:    "cycle_solve missing all scaffold fields",
+			node:    BraidNode{ID: "n_cycle", Kind: "cycle_solve", Question: "Solve fixed point."},
 			wantErr: "missing_scaffold_contract",
 		},
 		{
@@ -5678,7 +5724,7 @@ func TestRepairPromptIncludesScaffoldInstructionsOnContractError(t *testing.T) {
 		"Repair counterexample JSON",
 		"braid_graph_contract_failure",
 		"missing_fields",
-		"Every solve and verify node MUST include archetype, scaffold_class, scaffold_id, and input_schema",
+		"Every solve, cycle_solve, and verify node MUST include archetype, scaffold_class, scaffold_id, and input_schema",
 		"explicit_dag/search_backtrack_v1",
 	} {
 		if !strings.Contains(repairPrompt, want) {
