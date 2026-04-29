@@ -123,6 +123,8 @@ pr*.txt
 # Temp workspace output
 /tmp/
 /.tmp/
+/artifacts/
+/prompt-exports/
 
 # OpenCode
 .opencode/
