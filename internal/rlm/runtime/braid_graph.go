@@ -696,6 +696,10 @@ func applyBraidDeclaredScaffoldHandoff(handoff *BraidNodeHandoff, rootPrompt str
 		}
 		applyBraidStateTransitionHandoff(handoff, instance)
 	case BraidScaffoldClassExplicitDAG:
+		if braidInstanceLooksLikeStateTransition(instance) {
+			applyBraidStackTransitionHandoff(handoff, instance)
+			return
+		}
 		applyBraidExplicitDAGHandoff(handoff, instance)
 	case BraidScaffoldClassGraphSearch:
 		applyBraidGraphSearchHandoff(handoff, instance)

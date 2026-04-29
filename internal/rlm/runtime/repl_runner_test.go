@@ -1697,6 +1697,29 @@ func TestVerifiedAnswerFromBraidFinalHandoff(t *testing.T) {
 	}
 }
 
+func TestRenderBraidFinalHandoffPreservesLongVerifiedAnswer(t *testing.T) {
+	t.Parallel()
+
+	moves := make([]string, 0, 180)
+	for i := 0; i < 180; i++ {
+		moves = append(moves, fmt.Sprintf("[%d,%d,%d]", i, i%3, (i+1)%3))
+	}
+	answer := "solution = [" + strings.Join(moves, ",") + "]"
+	summary := "status: completed summary: status: solved answer: " + answer + " checks: reduce forwarded verified solve answer."
+
+	handoff := renderBraidFinalHandoff(BraidGraph{FinalNode: "n_reduce"}, summary)
+	got, ok := verifiedAnswerFromBraidFinalHandoff(handoff)
+	if !ok {
+		t.Fatalf("verified answer missing from handoff: %s", handoff)
+	}
+	if got != answer {
+		t.Fatalf("verified answer was truncated or changed\ngot:  %q\nwant: %q", got, answer)
+	}
+	if !strings.Contains(handoff, "...[truncated]") {
+		t.Fatalf("expected compact final_summary to be truncated: %s", handoff)
+	}
+}
+
 func TestExecutePhaseBraidGraphCanDisableHelperFirstFallback(t *testing.T) {
 	t.Parallel()
 

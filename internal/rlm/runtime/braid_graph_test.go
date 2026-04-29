@@ -2378,6 +2378,45 @@ func TestDeclaredStateTransitionHandoffUsesParsedInstanceValues(t *testing.T) {
 	}
 }
 
+func TestDeclaredExplicitDAGHandoffUsesTypedStackTransitionEvidence(t *testing.T) {
+	t.Parallel()
+
+	rootPrompt := strings.Join([]string{
+		"Puzzle instance:",
+		"Initial state: [[0], [1, 2], []]",
+		"Goal state: [[], [1], [2, 0]]",
+		"Number of blocks: 3",
+		"Number of stacks: 3",
+	}, "\n")
+	node := BraidNode{
+		ID:            "n_solve_state",
+		Kind:          "solve",
+		Question:      "Construct a complete candidate move sequence.",
+		DependsOn:     []string{"n_extract"},
+		ScaffoldClass: BraidScaffoldClassExplicitDAG,
+		ScaffoldID:    BraidScaffoldIDSearchBacktrackV1,
+		InputSchema: map[string]any{
+			"source_ref": "official_prompt",
+			"prompt":     "use the official prompt state",
+		},
+	}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, map[string]string{"n_extract": "facts"}, "")
+	if handoff.ScaffoldClass != BraidScaffoldClassFiniteStateTransition || handoff.ScaffoldID != BraidScaffoldIDStackRelocationV1 {
+		t.Fatalf("scaffold class/id=%q/%q", handoff.ScaffoldClass, handoff.ScaffoldID)
+	}
+	input := BraidHandoffHelperInput(handoff)
+	scaffold, ok := resolveBraidRuntimeScaffold(node, handoff, input)
+	if !ok {
+		t.Fatal("resolveBraidRuntimeScaffold returned false for typed stack evidence")
+	}
+	if scaffold.PresetName != BraidScaffoldClassFiniteStateTransition+"/"+BraidScaffoldIDStackRelocationV1 {
+		t.Fatalf("preset=%q", scaffold.PresetName)
+	}
+	if scaffold.PresetSource == "" || scaffold.Verifier == nil {
+		t.Fatalf("scaffold missing preset/verifier: %+v", scaffold)
+	}
+}
+
 func TestBraidNodeHandoffTransformsGridResourceGraphSearchTask(t *testing.T) {
 	t.Parallel()
 
@@ -3146,6 +3185,21 @@ func TestBraidNodeUsesChildREPLInsteadOfHelperWithoutRuntimeVerifier(t *testing.
 	explicit.InputSchema["answer"] = "42"
 	if braidNodeShouldUseChildREPLInsteadOfHelper(explicit, "root task", nil, "") {
 		t.Fatal("explicit DAG with expected answer should keep helper-first verifier path")
+	}
+
+	explicit.InputSchema = map[string]any{
+		"source_ref": "official_prompt",
+		"prompt":     "use the official prompt state",
+	}
+	rootPrompt := strings.Join([]string{
+		"Puzzle instance:",
+		"Initial state: [[0], [1, 2], []]",
+		"Goal state: [[], [1], [2, 0]]",
+		"Number of blocks: 3",
+		"Number of stacks: 3",
+	}, "\n")
+	if braidNodeShouldUseChildREPLInsteadOfHelper(explicit, rootPrompt, nil, "") {
+		t.Fatal("explicit DAG with typed stack transition evidence should keep helper-first")
 	}
 }
 

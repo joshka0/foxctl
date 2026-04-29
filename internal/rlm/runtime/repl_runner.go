@@ -1310,6 +1310,7 @@ func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, p
 	if strings.TrimSpace(phase.BraidGraphPolicy) == BraidGraphPolicyLongCoTController {
 		b.WriteString("LongCoT controller policy is mandatory: include extract, at least one solve-like node, verify, and reduce; keep the graph acyclic and shorten invalid fields instead of deleting required node kinds.\n")
 		b.WriteString("Use one primary solve node only when it has one target, a runtime-checkable typed input schema, declared solve_targets/nodes_to_solve, or declared cycle_clusters. Add another solve-like node only for a real alternate candidate, concrete repair, or true dependency cluster. Do not split state-transition, planning, simulation, or BlocksWorld-style tasks into vague prose segments.\n")
+		b.WriteString("If the task has explicit initial_state and goal_state arrays for stacks or other finite transitions, prefer finite_state_transition/stack_relocation_v1 or state_transition/state_replay_v1 over explicit_dag.\n")
 		b.WriteString("cycle_solve is optional. Use it only for a true strongly connected/fixed-point constraint cluster. In input_schema, target_nodes means final requested outputs, solve_targets means independent split work items, and cycle_clusters means atomic strongly connected clusters. If a solve node covers a cluster, declare input_schema.cycle_clusters as arrays of target ids, for example {\"target_nodes\":[\"node_4\",\"node_2\",\"node_7\"],\"cycle_clusters\":[[\"node_2\",\"node_5\",\"node_6\",\"node_7\"]],\"prompt\":\"...\"}.\n")
 		b.WriteString("Do not copy large literals from the task into node questions or input_schema. Arrays, tables, code blocks, formulas, move lists, or long prose must stay in the root task and dependency summaries. Use source_ref fields such as \"official_prompt\", \"extract_summary\", or \"candidate_answer\" plus short selectors.\n")
 		b.WriteString("If a solve node lists multiple input_schema.target_nodes and they are independent work items, add input_schema.solve_targets with the same or smaller explicit node ids. If they are mutually dependent, change the node kind to cycle_solve or declare cycle_clusters. Do not leave a multi-target solve with only target_nodes.\n")
@@ -2979,8 +2980,9 @@ func verifiedAnswerFromBraidFinalHandoff(handoff string) (string, bool) {
 }
 
 func renderBraidFinalHandoff(graph BraidGraph, finalSummary string) string {
-	finalSummary = compactBraidFinalHandoffText(finalSummary, 1200)
+	finalSummary = strings.TrimSpace(finalSummary)
 	answer, hasAnswer := braidSolutionAnswerFromSummary(finalSummary)
+	finalSummary = compactBraidFinalHandoffText(finalSummary, 1200)
 	payload := map[string]any{
 		"final_node":    strings.TrimSpace(graph.FinalNode),
 		"final_summary": finalSummary,

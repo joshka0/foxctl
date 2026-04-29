@@ -462,6 +462,10 @@ func braidNodeShouldUseChildREPLInsteadOfHelper(node BraidNode, rootPrompt strin
 	if handoffInput := BraidHandoffHelperInput(handoff); len(handoffInput) > 0 {
 		input = mergeHelperFactoryInput(input, handoffInput)
 	}
+	input = enrichBraidHelperInputWithStructuredTargets(input, rootPrompt)
+	if scaffold, ok := resolveBraidRuntimeScaffold(node, handoff, input); ok && scaffold.Class != BraidScaffoldClassExplicitDAG {
+		return false
+	}
 	if strings.TrimSpace(node.ScaffoldClass) == BraidScaffoldClassExplicitDAG &&
 		strings.TrimSpace(node.ScaffoldID) == BraidScaffoldIDSearchBacktrackV1 &&
 		!braidExplicitDAGInputHasRuntimeCheck(node.InputSchema) &&
@@ -471,7 +475,8 @@ func braidNodeShouldUseChildREPLInsteadOfHelper(node BraidNode, rootPrompt strin
 		}
 		return true
 	}
-	if _, ok := resolveBraidRuntimeScaffold(node, handoff, input); ok {
+	if strings.TrimSpace(node.ScaffoldClass) == BraidScaffoldClassExplicitDAG &&
+		strings.TrimSpace(node.ScaffoldID) == BraidScaffoldIDSearchBacktrackV1 {
 		return false
 	}
 	return true
