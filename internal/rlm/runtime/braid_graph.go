@@ -338,67 +338,18 @@ func validateBraidNodeScaffoldInput(node BraidNode) error {
 }
 
 func braidScaffoldInputMatches(cls, id string, input map[string]any) bool {
-	switch strings.TrimSpace(cls) {
-	case BraidScaffoldClassFiniteStateTransition:
-		return strings.TrimSpace(id) == BraidScaffoldIDStackRelocationV1 && braidHelperInputLooksLikeStackRelocation(input)
-	case BraidScaffoldClassGraphSearch:
-		switch strings.TrimSpace(id) {
-		case BraidScaffoldIDResourcePathMinInitialV1:
-			return braidHelperInputLooksLikeResourcePathMinInitial(input)
-		case BraidScaffoldIDExplicitShortestPathV1:
-			return braidHelperInputLooksLikeExplicitShortestPath(input)
-		default:
-			return false
-		}
-	case BraidScaffoldClassNumericDP:
-		return strings.TrimSpace(id) == BraidScaffoldIDRecurrenceTableV1 && braidHelperInputLooksLikeNumericDP(input)
-	case BraidScaffoldClassSequenceSimulation:
-		return strings.TrimSpace(id) == BraidScaffoldIDJSONPatchSequenceV1 && braidHelperInputLooksLikeSequenceSimulation(input)
-	case BraidScaffoldClassConstraintSolver:
-		return strings.TrimSpace(id) == BraidScaffoldIDFiniteDomainV1 && braidHelperInputLooksLikeFiniteDomainConstraint(input)
-	case BraidScaffoldClassSymbolicTrace:
-		return strings.TrimSpace(id) == BraidScaffoldIDTypeInferenceV1 && braidHelperInputLooksLikeSymbolicTrace(input)
-	case BraidScaffoldClassCandidateVerify:
-		return strings.TrimSpace(id) == BraidScaffoldIDPropertyCheckV1 && braidHelperInputLooksLikeCandidateVerify(input)
-	case BraidScaffoldClassStateTransition:
-		return strings.TrimSpace(id) == BraidScaffoldIDStateReplayV1 && braidHelperInputLooksLikeStateReplay(input)
-	case BraidScaffoldClassExplicitDAG:
-		return strings.TrimSpace(id) == BraidScaffoldIDSearchBacktrackV1
-	default:
+	contract, ok := braidScaffoldContractFor(cls, id)
+	if !ok || contract.ValidateInput == nil {
 		return false
 	}
+	return contract.ValidateInput(input)
 }
 
 func braidScaffoldInputExpectation(cls, id string) string {
-	switch strings.TrimSpace(cls) {
-	case BraidScaffoldClassFiniteStateTransition:
-		return "initial_state and goal_state stack arrays with the same item multiset"
-	case BraidScaffoldClassGraphSearch:
-		switch strings.TrimSpace(id) {
-		case BraidScaffoldIDResourcePathMinInitialV1:
-			return "grid_layout rectangular numeric grid"
-		case BraidScaffoldIDExplicitShortestPathV1:
-			return "explicit graph edges/nodes and optional objective=shortest_path_length"
-		default:
-			return "supported graph_search input"
-		}
-	case BraidScaffoldClassNumericDP:
-		return "recurrence/table fields accepted by numeric_dp, not only prose placeholders"
-	case BraidScaffoldClassSequenceSimulation:
-		return "initial state plus executable transition/update sequence"
-	case BraidScaffoldClassConstraintSolver:
-		return "finite domains, variables, and constraints/witness fields"
-	case BraidScaffoldClassSymbolicTrace:
-		return "program or queries fields"
-	case BraidScaffoldClassCandidateVerify:
-		return "candidates or predicates fields"
-	case BraidScaffoldClassStateTransition:
-		return "move_sequence/actions/transitions containing concrete replayable moves"
-	case BraidScaffoldClassExplicitDAG:
-		return "any non-empty problem payload for explicit dependency search"
-	default:
-		return "supported scaffold input"
+	if contract, ok := braidScaffoldContractFor(cls, id); ok {
+		return contract.ExpectedInput
 	}
+	return "supported scaffold input"
 }
 
 func ValidateBraidGraphPolicy(g BraidGraph, policy string) error {
@@ -544,11 +495,31 @@ func anyDepKind(depIDs []string, byID map[string]BraidNode, kind string) bool {
 
 func anyDepSolveKind(depIDs []string, byID map[string]BraidNode) bool {
 	for _, depID := range depIDs {
-		if isBraidSolveKind(byID[depID].Kind) {
+		node := byID[depID]
+		if isBraidSolveKind(node.Kind) {
+			return true
+		}
+		if isBraidSplitMergeNode(node) {
+			return true
+		}
+		if node.Kind == "reduce" && strings.HasSuffix(node.ID, "__adaptive_merge") {
 			return true
 		}
 	}
 	return false
+}
+
+func isBraidSplitMergeNode(node BraidNode) bool {
+	if strings.TrimSpace(node.Kind) != "reduce" || !strings.HasSuffix(strings.TrimSpace(node.ID), "__merge") {
+		return false
+	}
+	if strings.TrimSpace(stringFromAny(node.InputSchema["split_role"])) != "merge" {
+		return false
+	}
+	if len(stringSliceFromAny(node.InputSchema["solve_ids"])) == 0 {
+		return false
+	}
+	return true
 }
 
 func mentionsOriginalConstraints(text string) bool {
@@ -1600,47 +1571,12 @@ func validBraidNodeHelperPolicy(policy string) bool {
 }
 
 func validBraidNodeScaffoldClass(cls string) bool {
-	switch strings.TrimSpace(cls) {
-	case BraidScaffoldClassStateTransition,
-		BraidScaffoldClassSymbolicTrace,
-		BraidScaffoldClassCandidateVerify,
-		BraidScaffoldClassGraphSearch,
-		BraidScaffoldClassConstraintSolver,
-		BraidScaffoldClassSequenceSimulation,
-		BraidScaffoldClassNumericDP,
-		BraidScaffoldClassExplicitDAG,
-		BraidScaffoldClassFiniteStateTransition:
-		return true
-	default:
-		return false
-	}
+	return braidScaffoldClassKnown(cls)
 }
 
 func validBraidNodeScaffoldPair(cls, id string) bool {
-	cls = strings.TrimSpace(cls)
-	id = strings.TrimSpace(id)
-	switch cls {
-	case BraidScaffoldClassFiniteStateTransition:
-		return id == BraidScaffoldIDStackRelocationV1
-	case BraidScaffoldClassGraphSearch:
-		return id == BraidScaffoldIDResourcePathMinInitialV1 || id == BraidScaffoldIDExplicitShortestPathV1
-	case BraidScaffoldClassNumericDP:
-		return id == BraidScaffoldIDRecurrenceTableV1
-	case BraidScaffoldClassSequenceSimulation:
-		return id == BraidScaffoldIDJSONPatchSequenceV1
-	case BraidScaffoldClassConstraintSolver:
-		return id == BraidScaffoldIDFiniteDomainV1
-	case BraidScaffoldClassSymbolicTrace:
-		return id == BraidScaffoldIDTypeInferenceV1
-	case BraidScaffoldClassCandidateVerify:
-		return id == BraidScaffoldIDPropertyCheckV1
-	case BraidScaffoldClassStateTransition:
-		return id == BraidScaffoldIDStateReplayV1
-	case BraidScaffoldClassExplicitDAG:
-		return id == BraidScaffoldIDSearchBacktrackV1
-	default:
-		return false
-	}
+	_, ok := braidScaffoldContractFor(cls, id)
+	return ok
 }
 
 func normalizeBraidNodeScaffoldID(cls, id string) string {

@@ -47,13 +47,14 @@ type Event struct {
 
 // ParentLLMCallEvent records one parent model invocation/result.
 type ParentLLMCallEvent struct {
-	CallID           string   `json:"call_id,omitempty"`
-	Model            string   `json:"model,omitempty"`
-	PromptTokens     int      `json:"prompt_tokens,omitempty"`
-	CompletionTokens int      `json:"completion_tokens,omitempty"`
-	FinishReason     string   `json:"finish_reason,omitempty"`
-	ToolCalls        int      `json:"tool_calls,omitempty"`
-	ToolNames        []string `json:"tool_names,omitempty"`
+	CallID             string   `json:"call_id,omitempty"`
+	Model              string   `json:"model,omitempty"`
+	RequestedMaxTokens int      `json:"requested_max_tokens,omitempty"`
+	PromptTokens       int      `json:"prompt_tokens,omitempty"`
+	CompletionTokens   int      `json:"completion_tokens,omitempty"`
+	FinishReason       string   `json:"finish_reason,omitempty"`
+	ToolCalls          int      `json:"tool_calls,omitempty"`
+	ToolNames          []string `json:"tool_names,omitempty"`
 }
 
 // REPLCallEvent records one REPL invocation.

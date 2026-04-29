@@ -41,6 +41,113 @@ type braidRuntimeScaffold struct {
 	Verifier       HelperAnswerVerifier
 }
 
+type braidScaffoldContract struct {
+	Class         string
+	ID            string
+	ExpectedInput string
+	ValidateInput func(map[string]any) bool
+	SplitPolicy   *BraidSplitPolicy
+}
+
+type BraidSplitPolicy struct {
+	Mode          string
+	ChunkKeys     []string
+	MaxChunks     int
+	PreserveKeys  []string
+	RequiresMerge bool
+}
+
+var braidScaffoldContracts = []braidScaffoldContract{
+	{
+		Class:         BraidScaffoldClassFiniteStateTransition,
+		ID:            BraidScaffoldIDStackRelocationV1,
+		ExpectedInput: "initial_state and goal_state stack arrays with the same item multiset",
+		ValidateInput: braidHelperInputLooksLikeStackRelocation,
+	},
+	{
+		Class:         BraidScaffoldClassGraphSearch,
+		ID:            BraidScaffoldIDResourcePathMinInitialV1,
+		ExpectedInput: "grid_layout rectangular numeric grid",
+		ValidateInput: braidHelperInputLooksLikeResourcePathMinInitial,
+	},
+	{
+		Class:         BraidScaffoldClassGraphSearch,
+		ID:            BraidScaffoldIDExplicitShortestPathV1,
+		ExpectedInput: "explicit graph edges/nodes and optional objective=shortest_path_length",
+		ValidateInput: braidHelperInputLooksLikeExplicitShortestPath,
+	},
+	{
+		Class:         BraidScaffoldClassNumericDP,
+		ID:            BraidScaffoldIDRecurrenceTableV1,
+		ExpectedInput: "recurrence/table fields accepted by numeric_dp, not only prose placeholders",
+		ValidateInput: braidHelperInputLooksLikeNumericDP,
+	},
+	{
+		Class:         BraidScaffoldClassSequenceSimulation,
+		ID:            BraidScaffoldIDJSONPatchSequenceV1,
+		ExpectedInput: "initial state plus executable transition/update sequence",
+		ValidateInput: braidHelperInputLooksLikeSequenceSimulation,
+	},
+	{
+		Class:         BraidScaffoldClassConstraintSolver,
+		ID:            BraidScaffoldIDFiniteDomainV1,
+		ExpectedInput: "finite domains, variables, and constraints/witness fields",
+		ValidateInput: braidHelperInputLooksLikeFiniteDomainConstraint,
+	},
+	{
+		Class:         BraidScaffoldClassSymbolicTrace,
+		ID:            BraidScaffoldIDTypeInferenceV1,
+		ExpectedInput: "symbolic_trace/type_inference fields such as program, bindings/events, requested bindings, or trace checkpoints",
+		ValidateInput: braidHelperInputLooksLikeSymbolicTrace,
+		SplitPolicy: &BraidSplitPolicy{
+			Mode:          "sequential",
+			ChunkKeys:     []string{"bindings", "events"},
+			MaxChunks:     12,
+			PreserveKeys:  []string{"program", "trace_kind", "requested_bindings", "queries", "scaffold_class", "scaffold_id"},
+			RequiresMerge: true,
+		},
+	},
+	{
+		Class:         BraidScaffoldClassCandidateVerify,
+		ID:            BraidScaffoldIDPropertyCheckV1,
+		ExpectedInput: "candidate answers plus predicates/properties/checks to verify",
+		ValidateInput: braidHelperInputLooksLikeCandidateVerify,
+	},
+	{
+		Class:         BraidScaffoldClassStateTransition,
+		ID:            BraidScaffoldIDStateReplayV1,
+		ExpectedInput: "initial state plus explicit actions/moves/events and output target",
+		ValidateInput: braidHelperInputLooksLikeStateReplay,
+	},
+	{
+		Class:         BraidScaffoldClassExplicitDAG,
+		ID:            BraidScaffoldIDSearchBacktrackV1,
+		ExpectedInput: "explicit_dag prompt/source_ref plus target_nodes, solve_targets/nodes_to_solve, cycle_clusters, or another runtime-checkable payload",
+		ValidateInput: func(map[string]any) bool { return true },
+	},
+}
+
+func braidScaffoldContractFor(cls, id string) (braidScaffoldContract, bool) {
+	cls = strings.TrimSpace(cls)
+	id = strings.TrimSpace(id)
+	for _, contract := range braidScaffoldContracts {
+		if contract.Class == cls && contract.ID == id {
+			return contract, true
+		}
+	}
+	return braidScaffoldContract{}, false
+}
+
+func braidScaffoldClassKnown(cls string) bool {
+	cls = strings.TrimSpace(cls)
+	for _, contract := range braidScaffoldContracts {
+		if contract.Class == cls {
+			return true
+		}
+	}
+	return false
+}
+
 func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input map[string]any) (braidRuntimeScaffold, bool) {
 	if !isBraidSolveKind(node.Kind) || len(input) == 0 {
 		return braidRuntimeScaffold{}, false
@@ -430,7 +537,11 @@ func braidHelperInputLooksLikeSymbolicTrace(input map[string]any) bool {
 	}
 	_, hasProgram := input["program"]
 	_, hasQueries := input["queries"]
-	return hasProgram || hasQueries
+	_, hasBindings := input["bindings"]
+	_, hasEvents := input["events"]
+	_, hasChunk := input["chunk"]
+	_, hasChunkItems := input["chunk_items"]
+	return hasProgram || hasQueries || hasBindings || hasEvents || hasChunk || hasChunkItems
 }
 
 func typeInferencePresetSource() string {
@@ -665,8 +776,7 @@ func typeInferenceAnswerVerifier(answer string, input map[string]any) (HelperVer
 		}
 		return base, true
 	}
-	// No ground truth: pass if all queries answered
-	base.Pass = true
+	base.FirstFailure = "type inference verifier requires expected answers or a deterministic checker"
 	return base, true
 }
 
@@ -680,9 +790,55 @@ func braidHelperInputLooksLikeCandidateVerify(input map[string]any) bool {
 	if id, ok := input["scaffold_id"].(string); ok && strings.TrimSpace(id) != "" && strings.TrimSpace(id) != BraidScaffoldIDPropertyCheckV1 {
 		return false
 	}
-	_, hasCandidates := input["candidates"]
-	_, hasPredicates := input["predicates"]
-	return hasCandidates || hasPredicates
+	return candidateVerifyConcreteField(input["candidates"]) ||
+		candidateVerifyConcreteField(input["predicates"]) ||
+		candidateVerifyConcreteField(input["properties"]) ||
+		candidateVerifyConcreteField(input["checks"])
+}
+
+func candidateVerifyConcreteField(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return false
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" || isSchemaPlaceholderAnswer(trimmed) {
+			return false
+		}
+		if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
+			var decoded any
+			if json.Unmarshal([]byte(trimmed), &decoded) == nil {
+				return candidateVerifyConcreteField(decoded)
+			}
+		}
+		return true
+	case []any:
+		for _, item := range typed {
+			if candidateVerifyConcreteField(item) {
+				return true
+			}
+		}
+		return false
+	case []string:
+		for _, item := range typed {
+			if candidateVerifyConcreteField(item) {
+				return true
+			}
+		}
+		return false
+	case map[string]any:
+		if len(typed) == 0 {
+			return false
+		}
+		for _, item := range typed {
+			if candidateVerifyConcreteField(item) {
+				return true
+			}
+		}
+		return false
+	default:
+		return true
+	}
 }
 
 func candidateVerifyPresetSource() string {
@@ -885,7 +1041,7 @@ func candidateVerifyAnswerVerifier(answer string, input map[string]any) (HelperV
 		base.FirstFailure = fmt.Sprintf("solution looks like a placeholder: %q", solutionVal)
 		return base, true
 	}
-	base.Pass = true
+	base.FirstFailure = "candidate verifier requires expected answer or deterministic predicate evaluation"
 	return base, true
 }
 
@@ -1118,42 +1274,74 @@ func stateReplayPresetSource() string {
 
 func stateReplayAnswerVerifier(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
 	base := HelperVerifierDiagnostic{Pass: false, FailureKind: "state_replay"}
-	trimmed := strings.TrimSpace(answer)
-	if trimmed == "" {
+	candidate := normalizeStateReplayVerifierText(answer)
+	if candidate == "" {
 		base.FirstFailure = "empty answer"
 		return base, true
 	}
-	// Check for FEN-like pattern (at least 8 slashes for 8 ranks)
-	if strings.Count(trimmed, "/") < 7 {
-		// Try to extract FEN from answer text
-		for _, line := range strings.Split(trimmed, "\n") {
-			line = strings.TrimSpace(line)
-			if strings.Count(line, "/") >= 7 {
-				trimmed = line
-				break
-			}
-		}
-	}
-	// Check ground truth if available
 	if expected, ok := input["answer"]; ok {
-		expectedStr := strings.TrimSpace(fmt.Sprintf("%v", expected))
-		// Normalize FEN for comparison (collapse whitespace)
-		normalized := strings.Join(strings.Fields(trimmed), " ")
-		expectedNorm := strings.Join(strings.Fields(expectedStr), " ")
-		if strings.HasPrefix(normalized, expectedNorm) || strings.Contains(normalized, expectedNorm) {
+		expectedNorm := normalizeStateReplayVerifierText(fmt.Sprintf("%v", expected))
+		if expectedNorm == "" {
+			base.FirstFailure = "expected final state is empty"
+			return base, true
+		}
+		if candidate == expectedNorm {
 			base.Pass = true
 			return base, true
 		}
-		base.FirstFailure = fmt.Sprintf("FEN mismatch: got %q, want %q", safeTelemetryExcerpt(normalized, 100), expectedStr)
+		base.FirstFailure = fmt.Sprintf("state mismatch: got %q, want %q", safeTelemetryExcerpt(candidate, 100), safeTelemetryExcerpt(expectedNorm, 100))
 		return base, true
 	}
-	// No ground truth: pass if FEN has valid structure
-	if strings.Count(trimmed, "/") >= 7 {
-		base.Pass = true
+
+	if len(stateReplayActionList(input)) > 0 {
+		base.FirstFailure = "state replay verifier has actions but no deterministic expected final state"
 		return base, true
 	}
-	base.FirstFailure = "answer does not contain a valid FEN"
+
+	base.FirstFailure = "state replay verifier requires an expected final state or deterministic replay backend"
 	return base, true
+}
+
+func normalizeStateReplayVerifierText(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "\"") {
+		var decoded string
+		if json.Unmarshal([]byte(trimmed), &decoded) == nil {
+			trimmed = strings.TrimSpace(decoded)
+		}
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "solution") {
+		if _, after, ok := strings.Cut(trimmed, "="); ok {
+			trimmed = strings.TrimSpace(after)
+		}
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		line = strings.TrimSpace(strings.Trim(line, `"'`))
+		if strings.Count(line, "/") >= 7 {
+			return strings.Join(strings.Fields(line), " ")
+		}
+	}
+	trimmed = strings.Trim(trimmed, `"'`)
+	if strings.Count(trimmed, "/") >= 7 {
+		return strings.Join(strings.Fields(trimmed), " ")
+	}
+	return strings.Join(strings.Fields(trimmed), " ")
+}
+
+func stateReplayActionList(input map[string]any) []string {
+	if len(input) == 0 {
+		return nil
+	}
+	for _, key := range []string{"actions", "move_sequence", "moves", "transitions"} {
+		if values := stringSliceFromAny(input[key]); len(values) > 0 {
+			return values
+		}
+	}
+	return nil
 }
 
 // --- Math backtracking chain explicit DAG scaffold ---

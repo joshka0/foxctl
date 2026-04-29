@@ -306,29 +306,63 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 				diagMap := helperVerifierDiagnosticMap(diag)
 				errText := helperVerifierDiagnosticError(diag)
 				verifierFeedback := repairHarness.RecordVerifierFailure(attempt, answer, diagMap)
-				lastFeedback = helperFactoryRepairFeedbackWithVerifier("verify", errText, draft.Source, raw, helperInput, result.Output, verifierFeedback)
-				repairState = &helperFactoryRepairState{
-					Stage:    "verify",
-					Error:    errText,
-					Source:   draft.Source,
-					Raw:      raw,
-					Input:    cloneMapAny(helperInput),
-					Output:   cloneMapAny(result.Output),
-					Verifier: verifierFeedback,
-					Language: helperLanguage,
+				repairedAnswer, repairedRaw, answerRepairErr := h.repairAnswer(ctx, taskCtx, helperInput, result.Output, verifierFeedback, errText)
+				if answerRepairErr == nil {
+					if repairedDiag, repairedApplicable := h.Config.AnswerVerifier(repairedAnswer, helperInput); repairedApplicable && repairedDiag.Pass {
+						result.Output["answer"] = repairedAnswer
+						result.Output["verified"] = true
+						result.Output["verifier_diagnostic"] = helperVerifierDiagnosticMap(repairedDiag)
+						attempts = append(attempts, map[string]any{
+							"attempt":             attempt,
+							"ok":                  true,
+							"stage":               "answer_repair",
+							"source":              draft.Source,
+							"input":               helperInput,
+							"output":              result.Output,
+							"raw":                 repairedRaw,
+							"verifier_diagnostic": helperVerifierDiagnosticMap(repairedDiag),
+							"language":            helperLanguage,
+						})
+						answer = repairedAnswer
+						verified = true
+					} else if repairedApplicable {
+						answerRepairErr = fmt.Errorf("repaired answer failed verifier: %s", helperVerifierDiagnosticError(repairedDiag))
+					} else {
+						answerRepairErr = fmt.Errorf("repaired answer was not applicable to verifier")
+					}
 				}
-				attempts = append(attempts, map[string]any{
-					"attempt":             attempt,
-					"ok":                  false,
-					"stage":               "verify",
-					"error":               errText,
-					"source":              draft.Source,
-					"input":               helperInput,
-					"output":              result.Output,
-					"verifier_diagnostic": diagMap,
-					"language":            helperLanguage,
-				})
-				continue
+				if !verified {
+					attempts = append(attempts, map[string]any{
+						"attempt": attempt,
+						"ok":      false,
+						"stage":   "answer_repair",
+						"error":   answerRepairErr.Error(),
+						"raw":     repairedRaw,
+					})
+					lastFeedback = helperFactoryRepairFeedbackWithVerifier("verify", errText, draft.Source, raw, helperInput, result.Output, verifierFeedback)
+					repairState = &helperFactoryRepairState{
+						Stage:    "verify",
+						Error:    errText,
+						Source:   draft.Source,
+						Raw:      raw,
+						Input:    cloneMapAny(helperInput),
+						Output:   cloneMapAny(result.Output),
+						Verifier: verifierFeedback,
+						Language: helperLanguage,
+					}
+					attempts = append(attempts, map[string]any{
+						"attempt":             attempt,
+						"ok":                  false,
+						"stage":               "verify",
+						"error":               errText,
+						"source":              draft.Source,
+						"input":               helperInput,
+						"output":              result.Output,
+						"verifier_diagnostic": diagMap,
+						"language":            helperLanguage,
+					})
+					continue
+				}
 			}
 			if applicable && diag.Pass {
 				verified = true
@@ -345,19 +379,27 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			"language": helperLanguage,
 		})
 		out := map[string]any{
-			"ok":                true,
-			"answer":            answer,
-			"output_summary":    compactHelperFactoryMap(result.Output),
-			"input_summary":     compactHelperFactoryMap(helperInput),
-			"runner":            result.Metadata,
-			"provider":          strings.TrimSpace(h.Config.LLM.Provider),
-			"model":             strings.TrimSpace(h.Config.LLM.Model),
-			"preset":            strings.TrimSpace(h.Config.PresetName),
-			"attempts":          compactHelperFactoryAttempts(attempts),
-			"capability_policy": h.effectiveCapabilityPolicy(helperLanguage),
+			"ok":                   true,
+			"answer":               answer,
+			"requested_max_tokens": h.Config.LLM.MaxTokens,
+			"output_summary":       compactHelperFactoryMap(result.Output),
+			"input_summary":        compactHelperFactoryMap(helperInput),
+			"runner":               result.Metadata,
+			"provider":             strings.TrimSpace(h.Config.LLM.Provider),
+			"model":                strings.TrimSpace(h.Config.LLM.Model),
+			"preset":               strings.TrimSpace(h.Config.PresetName),
+			"attempts":             compactHelperFactoryAttempts(attempts),
+			"capability_policy":    h.effectiveCapabilityPolicy(helperLanguage),
 		}
 		if verified {
 			out["verified"] = true
+			out["verification"] = map[string]any{
+				"pass":             true,
+				"verifier_id":      strings.TrimSpace(h.Config.PresetName),
+				"verifier_kind":    "runtime_scaffold",
+				"candidate_digest": hashHelperFactoryString(answer),
+				"input_digest":     hashHelperFactoryString(helperFactoryJSONSummary(helperInput)),
+			}
 		}
 		if repairHarness.HasCandidates() {
 			out["candidate_beam"] = compactHelperFactoryCandidateBeam(repairHarness.CandidateBeam())
@@ -368,13 +410,14 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 		return marshalHelperFactoryOutput(out)
 	}
 	out := map[string]any{
-		"ok":                false,
-		"error":             fmt.Sprintf("helper factory failed after %d attempts: %s", attemptLimit, helperFactoryFirstFeedbackLine(lastFeedback)),
-		"provider":          strings.TrimSpace(h.Config.LLM.Provider),
-		"model":             strings.TrimSpace(h.Config.LLM.Model),
-		"preset":            strings.TrimSpace(h.Config.PresetName),
-		"attempts":          compactHelperFactoryAttempts(attempts),
-		"capability_policy": h.effectiveCapabilityPolicy(h.helperLanguage(0)),
+		"ok":                   false,
+		"error":                fmt.Sprintf("helper factory failed after %d attempts: %s", attemptLimit, helperFactoryFirstFeedbackLine(lastFeedback)),
+		"requested_max_tokens": h.Config.LLM.MaxTokens,
+		"provider":             strings.TrimSpace(h.Config.LLM.Provider),
+		"model":                strings.TrimSpace(h.Config.LLM.Model),
+		"preset":               strings.TrimSpace(h.Config.PresetName),
+		"attempts":             compactHelperFactoryAttempts(attempts),
+		"capability_policy":    h.effectiveCapabilityPolicy(h.helperLanguage(0)),
 	}
 	if repairHarness.HasCandidates() {
 		out["candidate_beam"] = compactHelperFactoryCandidateBeam(repairHarness.CandidateBeam())
@@ -488,6 +531,91 @@ func (h *HelperFactoryTools) repair(ctx context.Context, taskCtx helperFactoryTa
 		draft.Input = cloneMapAny(taskCtx.DefaultInput)
 	}
 	return draft, raw, nil
+}
+
+func (h *HelperFactoryTools) repairAnswer(ctx context.Context, taskCtx helperFactoryTaskContext, input, output, verifier map[string]any, errText string) (string, string, error) {
+	llmCfg := helperFactoryLLMChatConfig(h.Config.LLM)
+	llmCfg.MaxIterations = 1
+	llmCfg.ToolChoice = nil
+	llmCfg.ResponseFormat = helperFactoryAnswerRepairResponseFormat()
+	llmCfg.UseReasoningContentAsText = true
+
+	prompt := buildHelperFactoryAnswerRepairPrompt(taskCtx, input, output, verifier, errText, h.Config.ExtractSolutionLine)
+	llmOutput, err := runHelperFactoryLLM(ctx, llmCfg, prompt)
+	if err != nil {
+		return "", "", fmt.Errorf("helper factory answer repair: LLM call: %w", err)
+	}
+	raw := strings.TrimSpace(llmOutput.AssistantText)
+	if raw == "" && llmOutput.StopReason != "" && llmOutput.StopReason != engine.StopReasonEndTurn {
+		detail := strings.TrimSpace(llmOutput.Error)
+		if detail == "" {
+			detail = string(llmOutput.StopReason)
+		}
+		return "", raw, fmt.Errorf("helper factory answer repair stopped with %s: %s", llmOutput.StopReason, detail)
+	}
+	answer, ok := decodeHelperFactoryAnswerRepair(raw, h.Config.ExtractSolutionLine)
+	if !ok {
+		return "", raw, fmt.Errorf("decode answer repair JSON: no usable answer found")
+	}
+	return answer, raw, nil
+}
+
+func helperFactoryAnswerRepairResponseFormat() json.RawMessage {
+	return json.RawMessage(`{"type":"json_schema","json_schema":{"name":"helper_answer_repair","strict":false,"schema":{"type":"object","properties":{"answer":{"type":"string"},"solution":{"type":"string"},"ok":{"type":"boolean"}},"additionalProperties":true}}}`)
+}
+
+func buildHelperFactoryAnswerRepairPrompt(taskCtx helperFactoryTaskContext, input, output, verifier map[string]any, errText string, extractSolution bool) string {
+	var b strings.Builder
+	b.WriteString("Repair only the final helper answer artifact. Do not rewrite helper source. Do not explain. Return exactly one JSON object with an answer string.\n")
+	if extractSolution {
+		b.WriteString("The answer string must include the exact final answer prefix `solution =` and match the requested output format.\n")
+	}
+	b.WriteString("\nVerifier failure:\n")
+	b.WriteString(compactHelperFactoryLongText(strings.TrimSpace(errText), 1200))
+	if len(verifier) > 0 {
+		b.WriteString("\n\nStructured verifier counterexample:\n")
+		b.WriteString(helperFactoryVerifierSummary(verifier))
+	}
+	if len(output) > 0 {
+		b.WriteString("\n\nPrevious helper output summary:\n")
+		b.WriteString(helperFactoryJSONSummary(output))
+	}
+	if len(input) > 0 {
+		b.WriteString("\n\nInput/output contract summary:\n")
+		b.WriteString(helperFactoryJSONSummary(input))
+	}
+	if strings.TrimSpace(taskCtx.Prompt) != "" {
+		b.WriteString("\n\nTask context summary:\n")
+		if taskCtx.Compacted {
+			b.WriteString(helperFactoryJSONSummary(taskCtx.DefaultInput))
+		} else {
+			b.WriteString(compactHelperFactoryLongText(taskCtx.Prompt, 1800))
+		}
+	}
+	b.WriteString("\n\nReturn shape: {\"answer\":\"solution = ...\"}")
+	return b.String()
+}
+
+func decodeHelperFactoryAnswerRepair(text string, extractSolution bool) (string, bool) {
+	for _, candidate := range helperFactoryJSONCandidates(text) {
+		decoder := json.NewDecoder(strings.NewReader(candidate))
+		decoder.UseNumber()
+		var parsed map[string]any
+		if err := decoder.Decode(&parsed); err != nil {
+			continue
+		}
+		if answer, ok := helperFactoryAnswer(parsed, extractSolution); ok {
+			return answer, true
+		}
+	}
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(text, "solution =") {
+		if extractSolution {
+			return text, true
+		}
+		return strings.TrimSpace(strings.TrimPrefix(text, "solution =")), true
+	}
+	return "", false
 }
 
 type helperFactorySourceBudget struct {
@@ -1340,6 +1468,12 @@ func decodeHelperFactoryDraft(text string, draft *helperFactoryDraft) error {
 		*draft = parsed
 		return nil
 	}
+	for _, source := range helperFactorySourceCandidates(text) {
+		if helperFactoryLooksLikeSource(source) {
+			*draft = helperFactoryDraft{Source: strings.TrimSpace(source)}
+			return nil
+		}
+	}
 	return fmt.Errorf("no valid draft JSON object found")
 }
 
@@ -1512,6 +1646,56 @@ func helperFactoryJSONCandidates(text string) []string {
 		unique = append(unique, value)
 	}
 	return unique
+}
+
+func helperFactorySourceCandidates(text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	var out []string
+	for _, block := range helperFactoryFencedBlocks(text) {
+		out = append(out, block)
+	}
+	out = append(out, text)
+	seen := map[string]struct{}{}
+	unique := make([]string, 0, len(out))
+	for _, value := range out {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
+}
+
+func helperFactoryFencedBlocks(text string) []string {
+	var blocks []string
+	rest := text
+	for {
+		start := strings.Index(rest, "```")
+		if start < 0 {
+			break
+		}
+		afterStart := rest[start+3:]
+		lineEnd := strings.IndexByte(afterStart, '\n')
+		if lineEnd < 0 {
+			break
+		}
+		afterInfo := afterStart[lineEnd+1:]
+		end := strings.Index(afterInfo, "```")
+		if end < 0 {
+			break
+		}
+		blocks = append(blocks, strings.TrimSpace(afterInfo[:end]))
+		rest = afterInfo[end+3:]
+	}
+	return blocks
 }
 
 func helperFactoryAnswer(output map[string]any, extractSolution bool) (string, bool) {
@@ -1709,7 +1893,7 @@ func compactHelperFactoryAttempts(attempts []map[string]any) []map[string]any {
 	out := make([]map[string]any, 0, len(attempts))
 	for _, attempt := range attempts {
 		item := map[string]any{}
-		for _, key := range []string{"attempt", "ok", "stage", "error", "preset"} {
+		for _, key := range []string{"attempt", "ok", "stage", "error", "preset", "requested_max_tokens"} {
 			if value, ok := attempt[key]; ok {
 				item[key] = value
 			}

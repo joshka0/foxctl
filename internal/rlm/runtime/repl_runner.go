@@ -1398,12 +1398,13 @@ func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, p
 		b.WriteString("Use one primary solve node only when it has one target, a runtime-checkable typed input schema, declared solve_targets/nodes_to_solve, or declared cycle_clusters. Add another solve-like node only for a real alternate candidate, concrete repair, or true dependency cluster. Do not split state-transition, planning, simulation, or BlocksWorld-style tasks into vague prose segments.\n")
 		b.WriteString("If the task has explicit initial_state and goal_state arrays for stacks or other finite transitions, prefer finite_state_transition/stack_relocation_v1 or state_transition/state_replay_v1 over explicit_dag.\n")
 		b.WriteString("cycle_solve is optional. Use it only for a true strongly connected/fixed-point constraint cluster. In input_schema, target_nodes means final requested outputs, solve_targets means independent split work items, and cycle_clusters means atomic strongly connected clusters. If a solve node covers a cluster, declare input_schema.cycle_clusters as arrays of target ids, for example {\"target_nodes\":[\"node_4\",\"node_2\",\"node_7\"],\"cycle_clusters\":[[\"node_2\",\"node_5\",\"node_6\",\"node_7\"]],\"prompt\":\"...\"}.\n")
-		b.WriteString("Do not copy large literals from the task into node questions or input_schema. Arrays, tables, code blocks, formulas, move lists, or long prose must stay in the root task and dependency summaries. Use source_ref fields such as \"official_prompt\", \"extract_summary\", or \"candidate_answer\" plus short selectors.\n")
+		b.WriteString("A source_ref is only a binding reference, not concrete typed input. Do not declare a specialized scaffold with only source_ref/dependency_ref/prose placeholders. If concrete fields would be too large to copy, use explicit_dag/search_backtrack_v1 with source_ref and a single solve target instead.\n")
+		b.WriteString("Do not copy large literals into node questions. For input_schema, either provide the small concrete fields required by the declared scaffold, or use explicit_dag/search_backtrack_v1 with source_ref fields such as \"official_prompt\", \"extract_summary\", or \"candidate_answer\" plus short selectors.\n")
 		b.WriteString("If a solve node lists multiple input_schema.target_nodes and they are independent work items, add input_schema.solve_targets with the same or smaller explicit node ids. If they are mutually dependent, change the node kind to cycle_solve or declare cycle_clusters. Do not leave a multi-target solve with only target_nodes.\n")
 		b.WriteString("The verify node question or expected_output must explicitly say it checks original constraints by substituting candidate values into the original problem placeholders.\n")
 	}
 	b.WriteString("Schema:\n")
-	b.WriteString(`{"version":1,"nodes":[{"id":"n1","kind":"extract|solve|cycle_solve|verify|reduce","question":"...","depends_on":["n0"],"expected_output":"...","max_summary_chars":256,"helper_policy":"auto|preferred|required|never","archetype":"symbolic_trace|candidate_verify|state_transition|explicit_dag|graph_search|numeric_dp|sequence_simulation|constraint_solver|mixed","scaffold_class":"symbolic_trace|candidate_verify|state_transition|explicit_dag|graph_search|numeric_dp|sequence_simulation|constraint_solver","scaffold_id":"type_inference_v1|property_check_v1|state_replay_v1|stack_relocation_v1|search_backtrack_v1|recurrence_table_v1|resource_path_min_initial_v1|explicit_shortest_path_v1|json_patch_v1|finite_domain_v1","input_schema":{"prompt":"...","target_nodes":["node_0"],"cycle_clusters":[["node_2","node_5"]]}}],"final_node":"n1"}`)
+	b.WriteString(`{"version":1,"nodes":[{"id":"n1","kind":"extract|solve|cycle_solve|verify|reduce","question":"...","depends_on":["n0"],"expected_output":"...","max_summary_chars":256,"helper_policy":"auto|preferred|required|never","archetype":"symbolic_trace|candidate_verify|state_transition|finite_state_transition|explicit_dag|graph_search|numeric_dp|sequence_simulation|constraint_solver|mixed","scaffold_class":"symbolic_trace|candidate_verify|state_transition|finite_state_transition|explicit_dag|graph_search|numeric_dp|sequence_simulation|constraint_solver","scaffold_id":"type_inference_v1|property_check_v1|state_replay_v1|stack_relocation_v1|search_backtrack_v1|recurrence_table_v1|resource_path_min_initial_v1|explicit_shortest_path_v1|json_patch_v1|finite_domain_v1","input_schema":{"prompt":"...","target_nodes":["node_0"],"cycle_clusters":[["node_2","node_5"]]}}],"final_node":"n1"}`)
 	b.WriteString("\n")
 	// If the error is a scaffold contract violation, add explicit repair instructions.
 	if mse, ok := IsMissingScaffoldContract(validationErr); ok {
@@ -1426,6 +1427,9 @@ func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, p
 		fmt.Fprintf(&b, "\nScaffold input violation on node %q: %s/%s input_schema keys %v do not satisfy the typed scaffold contract.\n", ise.NodeID, ise.ScaffoldClass, ise.ScaffoldID, ise.InputKeys)
 		fmt.Fprintf(&b, "Expected input: %s.\n", ise.Expected)
 		b.WriteString("Either provide concrete typed input_schema fields for that scaffold, or change the node to explicit_dag/search_backtrack_v1 with input_schema {\"prompt\":\"...\"}.\n")
+		b.WriteString("If input_schema currently has only source_ref, dependency_ref, selector, or prompt placeholders, it is not valid specialized scaffold input; switch that node to explicit_dag/search_backtrack_v1 unless you can emit the concrete fields now.\n")
+		b.WriteString("Minimal valid fallback shape: {\"archetype\":\"explicit_dag\",\"scaffold_class\":\"explicit_dag\",\"scaffold_id\":\"search_backtrack_v1\",\"input_schema\":{\"source_ref\":\"official_prompt\",\"prompt\":\"solve the bounded work item\",\"target_nodes\":[\"node_id\"],\"solve_targets\":[\"node_id\"]}}.\n")
+		b.WriteString("Minimal symbolic_trace/type_inference_v1 shape: {\"program\":\"...\",\"bindings\":[{\"name\":\"x\",\"expr\":\"...\"}],\"queries\":[\"x\"]}. Minimal candidate_verify/property_check_v1 shape: {\"candidates\":[\"candidate answer\"],\"predicates\":[{\"name\":\"check\",\"description\":\"concrete check\"}]}.\n")
 		b.WriteString("Do not use state_transition, numeric_dp, graph_search, sequence_simulation, constraint_solver, or symbolic_trace with only prose placeholders.\n")
 		b.WriteString("Repair this graph JSON only — do not solve the task.\n")
 	}
@@ -1435,6 +1439,8 @@ func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, p
 		b.WriteString("- For independent work items, keep kind=solve and add input_schema.solve_targets or input_schema.nodes_to_solve with explicit node ids.\n")
 		b.WriteString("- For mutually dependent work items, use kind=cycle_solve and add input_schema.cycle_clusters as arrays of node ids.\n")
 		b.WriteString("- For one broad runtime-checkable task, replace prose-only input_schema with concrete typed fields accepted by the scaffold.\n")
+		b.WriteString("Minimal independent shape: {\"target_nodes\":[\"node_0\",\"node_1\"],\"solve_targets\":[\"node_0\",\"node_1\"],\"prompt\":\"solve these independent targets from the source_ref\"}.\n")
+		b.WriteString("Minimal cycle shape: {\"target_nodes\":[\"node_0\",\"node_1\"],\"cycle_clusters\":[[\"node_0\",\"node_1\"]],\"prompt\":\"solve this fixed-point cluster\"}.\n")
 		b.WriteString("Do not leave input_schema with only target_nodes when there is more than one target.\n")
 	}
 	if validationErr != nil && strings.Contains(validationErr.Error(), "mentions multiple work items but must declare") {
@@ -1478,14 +1484,37 @@ func braidGraphRepairCounterexample(err error) map[string]any {
 	}
 	if ise, ok := IsInvalidScaffoldInput(err); ok {
 		return map[string]any{
-			"failure_kind":   "braid_graph_contract_failure",
-			"first_failure":  "invalid scaffold input schema",
-			"failed_node":    ise.NodeID,
-			"scaffold_class": ise.ScaffoldClass,
-			"scaffold_id":    ise.ScaffoldID,
-			"input_keys":     append([]string(nil), ise.InputKeys...),
-			"expected":       ise.Expected,
-			"repair_hint":    "provide concrete typed input_schema fields for the declared scaffold, or switch this node to explicit_dag/search_backtrack_v1 with a prompt payload",
+			"failure_kind":              "braid_graph_contract_failure",
+			"first_failure":             "invalid scaffold input schema",
+			"failed_node":               ise.NodeID,
+			"scaffold_class":            ise.ScaffoldClass,
+			"scaffold_id":               ise.ScaffoldID,
+			"input_keys":                append([]string(nil), ise.InputKeys...),
+			"expected":                  ise.Expected,
+			"forbidden_input_keys_only": []string{"source_ref", "dependency_ref", "selector", "prompt"},
+			"minimal_valid_fallback": map[string]any{
+				"archetype":      BraidScaffoldClassExplicitDAG,
+				"scaffold_class": BraidScaffoldClassExplicitDAG,
+				"scaffold_id":    BraidScaffoldIDSearchBacktrackV1,
+				"input_schema": map[string]any{
+					"source_ref":    "official_prompt",
+					"prompt":        "solve the bounded work item",
+					"target_nodes":  []string{"node_id"},
+					"solve_targets": []string{"node_id"},
+				},
+			},
+			"minimal_valid_specialized_examples": map[string]any{
+				"symbolic_trace/type_inference_v1": map[string]any{
+					"program":  "...",
+					"bindings": []map[string]string{{"name": "x", "expr": "..."}},
+					"queries":  []string{"x"},
+				},
+				"candidate_verify/property_check_v1": map[string]any{
+					"candidates": []string{"candidate answer"},
+					"predicates": []map[string]string{{"name": "check", "description": "concrete check"}},
+				},
+			},
+			"repair_hint": "provide concrete typed input_schema fields for the declared scaffold, or switch this node to explicit_dag/search_backtrack_v1 with a prompt payload",
 		}
 	}
 	if ude, ok := IsUnknownBraidDependency(err); ok {
@@ -1503,8 +1532,21 @@ func braidGraphRepairCounterexample(err error) map[string]any {
 		return map[string]any{
 			"failure_kind":  "braid_graph_contract_failure",
 			"first_failure": "multi-target solve node has only target_nodes",
-			"expected":      "input_schema.target_nodes is for final requested outputs; multi-target solve nodes must also declare solve_targets, nodes_to_solve, cycle_clusters, or concrete runtime-checkable fields",
-			"repair_hint":   "add solve_targets for independent work items or cycle_clusters for mutually dependent work; do not leave only target_nodes",
+			"forbidden_input_shape": map[string]any{
+				"target_nodes": []string{"node_0", "node_1"},
+			},
+			"minimal_valid_shape_independent": map[string]any{
+				"target_nodes":  []string{"node_0", "node_1"},
+				"solve_targets": []string{"node_0", "node_1"},
+				"prompt":        "solve these independent targets from the source_ref",
+			},
+			"minimal_valid_shape_cycle": map[string]any{
+				"target_nodes":   []string{"node_0", "node_1"},
+				"cycle_clusters": [][]string{{"node_0", "node_1"}},
+				"prompt":         "solve this fixed-point cluster",
+			},
+			"expected":    "input_schema.target_nodes is for final requested outputs; multi-target solve nodes must also declare solve_targets, nodes_to_solve, cycle_clusters, or concrete runtime-checkable fields",
+			"repair_hint": "add solve_targets for independent work items or cycle_clusters for mutually dependent work; do not leave only target_nodes",
 		}
 	}
 	if strings.Contains(err.Error(), "mentions multiple work items but must declare") {
@@ -1572,13 +1614,14 @@ func recordParentLLMIterations(recorder *Recorder, model string, output engine.E
 	}
 	for idx, iteration := range output.Iterations {
 		recorder.RecordParentLLMCall(ParentLLMCallEvent{
-			CallID:           fmt.Sprintf("parent-%d", offset+idx+1),
-			Model:            model,
-			PromptTokens:     iteration.PromptTokens,
-			CompletionTokens: iteration.CompletionTokens,
-			FinishReason:     iteration.FinishReason,
-			ToolCalls:        iteration.ToolCalls,
-			ToolNames:        append([]string(nil), iteration.ToolNames...),
+			CallID:             fmt.Sprintf("parent-%d", offset+idx+1),
+			Model:              model,
+			RequestedMaxTokens: iteration.RequestedMaxTokens,
+			PromptTokens:       iteration.PromptTokens,
+			CompletionTokens:   iteration.CompletionTokens,
+			FinishReason:       iteration.FinishReason,
+			ToolCalls:          iteration.ToolCalls,
+			ToolNames:          append([]string(nil), iteration.ToolNames...),
 		})
 	}
 }
@@ -2864,10 +2907,10 @@ func validateStructuredFinalRepairAttempt(output engine.EngineOutput, err error)
 }
 
 func structuredFinalRepairMaxTokens(maxTokens int) int {
-	if maxTokens <= 0 || maxTokens > 512 {
-		return 512
+	if maxTokens > 0 {
+		return maxTokens
 	}
-	return maxTokens
+	return 8192
 }
 
 func validateRequiredPhaseToolResultsOK(phase REPLRunnerPhase, output engine.EngineOutput) error {
@@ -2997,7 +3040,7 @@ func buildREPLPhasePrompt(originalPrompt string, phase REPLRunnerPhase, prior en
 	return b.String()
 }
 
-func appendBraidFinalHandoff(output *engine.EngineOutput, graph *BraidGraph, summaries map[string]string) {
+func appendBraidFinalHandoff(output *engine.EngineOutput, graph *BraidGraph, summaries map[string]string, records map[string]braidNodeExecutionRecord) {
 	if output == nil || graph == nil || strings.TrimSpace(graph.FinalNode) == "" {
 		return
 	}
@@ -3005,7 +3048,8 @@ func appendBraidFinalHandoff(output *engine.EngineOutput, graph *BraidGraph, sum
 	if finalSummary == "" {
 		return
 	}
-	content := renderBraidFinalHandoff(*graph, finalSummary)
+	finalRecord := records[strings.TrimSpace(graph.FinalNode)]
+	content := renderBraidFinalHandoff(*graph, finalSummary, finalRecord.Certification != nil && finalRecord.Certification.Pass)
 	if strings.TrimSpace(content) == "" {
 		return
 	}
@@ -3065,7 +3109,7 @@ func verifiedAnswerFromBraidFinalHandoff(handoff string) (string, bool) {
 	return "", false
 }
 
-func renderBraidFinalHandoff(graph BraidGraph, finalSummary string) string {
+func renderBraidFinalHandoff(graph BraidGraph, finalSummary string, runtimeVerified bool) string {
 	finalSummary = strings.TrimSpace(finalSummary)
 	answer, hasAnswer := braidSolutionAnswerFromSummary(finalSummary)
 	finalSummary = compactBraidFinalHandoffText(finalSummary, 1200)
@@ -3074,12 +3118,16 @@ func renderBraidFinalHandoff(graph BraidGraph, finalSummary string) string {
 		"final_summary": finalSummary,
 	}
 	if hasAnswer {
-		payload["verified_answer"] = answer
-		payload["required_output"] = "return exactly this answer line"
+		if runtimeVerified {
+			payload["verified_answer"] = answer
+			payload["required_output"] = "return exactly this answer line"
+		} else {
+			payload["candidate_answer"] = answer
+		}
 	}
 	body, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		if hasAnswer {
+		if hasAnswer && runtimeVerified {
 			return "verified_answer: " + answer + "\nfinal_summary: " + finalSummary
 		}
 		return "final_summary: " + finalSummary

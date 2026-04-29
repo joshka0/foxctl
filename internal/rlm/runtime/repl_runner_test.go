@@ -1665,7 +1665,10 @@ func TestExecutePhaseBraidGraphUsesPreferredHelperBeforeChild(t *testing.T) {
 		t.Fatal("missing solver_state_telemetry tool call")
 	}
 	handoff := latestBraidFinalHandoff(output)
-	if !strings.Contains(handoff, `"verified_answer": "solution = helper"`) {
+	if strings.Contains(handoff, `"verified_answer":`) {
+		t.Fatalf("non-runtime-verified helper should not produce verified handoff: %s", handoff)
+	}
+	if !strings.Contains(handoff, `"candidate_answer": "solution = helper"`) {
 		t.Fatalf("missing compact final handoff: %s", handoff)
 	}
 	prompt := buildREPLPhasePrompt("large original prompt should be omitted", REPLRunnerPhase{Name: "final", Final: true}, output, replRunnerRunState{braidGraph: graph})
@@ -1730,7 +1733,10 @@ func TestBraidGraphRuntimeSplitRecordsGraphRewrite(t *testing.T) {
 			Archetype:     BraidScaffoldClassSymbolicTrace,
 			ScaffoldClass: BraidScaffoldClassSymbolicTrace,
 			ScaffoldID:    BraidScaffoldIDTypeInferenceV1,
-			InputSchema:   map[string]any{"prompt": "trace bindings"},
+			InputSchema: map[string]any{
+				"program":  "let ...",
+				"bindings": testBraidSplitBindings(24),
+			},
 		}},
 		FinalNode: "n_solve",
 	}
@@ -1767,7 +1773,7 @@ func TestRenderBraidFinalHandoffPreservesLongVerifiedAnswer(t *testing.T) {
 	answer := "solution = [" + strings.Join(moves, ",") + "]"
 	summary := "status: completed summary: status: solved answer: " + answer + " checks: reduce forwarded verified solve answer."
 
-	handoff := renderBraidFinalHandoff(BraidGraph{FinalNode: "n_reduce"}, summary)
+	handoff := renderBraidFinalHandoff(BraidGraph{FinalNode: "n_reduce"}, summary, true)
 	got, ok := verifiedAnswerFromBraidFinalHandoff(handoff)
 	if !ok {
 		t.Fatalf("verified answer missing from handoff: %s", handoff)
@@ -1784,13 +1790,26 @@ func TestRenderBraidFinalHandoffExtractsNodeArtifactAnswer(t *testing.T) {
 	t.Parallel()
 
 	summary := `{"status":"solved","answer":"solution = [[1,0,2]]","checks":["verified"],"confidence":1}`
-	handoff := renderBraidFinalHandoff(BraidGraph{FinalNode: "n_reduce"}, summary)
+	handoff := renderBraidFinalHandoff(BraidGraph{FinalNode: "n_reduce"}, summary, true)
 	got, ok := verifiedAnswerFromBraidFinalHandoff(handoff)
 	if !ok {
 		t.Fatalf("verified answer missing from handoff: %s", handoff)
 	}
 	if got != "solution = [[1,0,2]]" {
 		t.Fatalf("verified answer=%q", got)
+	}
+}
+
+func TestRenderBraidFinalHandoffDoesNotVerifyModelAuthoredAnswer(t *testing.T) {
+	t.Parallel()
+
+	summary := "status: completed summary: status: solved answer: solution = 42 checks: model-authored reduce."
+	handoff := renderBraidFinalHandoff(BraidGraph{FinalNode: "n_reduce"}, summary, false)
+	if answer, ok := verifiedAnswerFromBraidFinalHandoff(handoff); ok {
+		t.Fatalf("model-authored handoff should not have verified answer: %q", answer)
+	}
+	if !strings.Contains(handoff, "candidate_answer") {
+		t.Fatalf("handoff should retain candidate answer without verifying it: %s", handoff)
 	}
 }
 

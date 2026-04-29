@@ -339,14 +339,15 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 		}
 
 		output.Iterations = append(output.Iterations, IterationUsage{
-			Iteration:        iteration,
-			MessageCount:     len(messages),
-			PromptTokens:     resp.Usage.PromptTokens,
-			CompletionTokens: resp.Usage.CompletionTokens,
-			TotalTokens:      resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
-			FinishReason:     choice.FinishReason,
-			ToolCalls:        len(choice.Message.ToolCalls),
-			ToolNames:        oaiToolCallNames(choice.Message.ToolCalls),
+			Iteration:          iteration,
+			MessageCount:       len(messages),
+			RequestedMaxTokens: e.config.MaxTokens,
+			PromptTokens:       resp.Usage.PromptTokens,
+			CompletionTokens:   resp.Usage.CompletionTokens,
+			TotalTokens:        resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
+			FinishReason:       choice.FinishReason,
+			ToolCalls:          len(choice.Message.ToolCalls),
+			ToolNames:          oaiToolCallNames(choice.Message.ToolCalls),
 		})
 
 		if len(choice.Message.ToolCalls) > 0 {
@@ -449,14 +450,15 @@ func logLLMIteration(ctx context.Context, e *LLMChatEngine, resp *oaiResponse, m
 	promptTokens := resp.Usage.PromptTokens
 	completionTokens := resp.Usage.CompletionTokens
 	totalTokens := promptTokens + completionTokens
-	fmt.Fprintf(os.Stderr, "[CONTEXT] iter=%d msgs=%d prompt_tokens=%d completion_tokens=%d total=%d finish=%s tool_calls=%d\n",
-		iteration, len(messages), promptTokens, completionTokens, totalTokens, finishReason, len(resp.Choices[0].Message.ToolCalls))
+	fmt.Fprintf(os.Stderr, "[CONTEXT] iter=%d msgs=%d requested_max_tokens=%d prompt_tokens=%d completion_tokens=%d total=%d finish=%s tool_calls=%d\n",
+		iteration, len(messages), e.config.MaxTokens, promptTokens, completionTokens, totalTokens, finishReason, len(resp.Choices[0].Message.ToolCalls))
 	observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
 		WithComponent(observability.ComponentAgent).
 		WithSession(e.hookContext.SessionID, e.hookContext.ActorID).
 		WithWorkspace(e.hookContext.WorkspaceID).
 		WithData("iteration", iteration).
 		WithData("message_count", len(messages)).
+		WithData("requested_max_tokens", e.config.MaxTokens).
 		WithData("prompt_tokens", promptTokens).
 		WithData("completion_tokens", completionTokens).
 		WithData("total_tokens", totalTokens).
@@ -643,11 +645,12 @@ func (e *LLMChatEngine) recordFinalizeUsage(output *EngineOutput, resp *oaiRespo
 	}
 	output.Tokens.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
 	output.Iterations = append(output.Iterations, IterationUsage{
-		Iteration:        len(output.Iterations) + 1,
-		PromptTokens:     resp.Usage.PromptTokens,
-		CompletionTokens: resp.Usage.CompletionTokens,
-		TotalTokens:      resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
-		FinishReason:     finishReason,
+		Iteration:          len(output.Iterations) + 1,
+		RequestedMaxTokens: e.config.MaxTokens,
+		PromptTokens:       resp.Usage.PromptTokens,
+		CompletionTokens:   resp.Usage.CompletionTokens,
+		TotalTokens:        resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
+		FinishReason:       finishReason,
 	})
 	if e.config.MaxTokens > 0 && resp.Usage.CompletionTokens > e.config.MaxTokens {
 		finalText := ""
