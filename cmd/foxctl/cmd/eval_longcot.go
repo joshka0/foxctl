@@ -1863,7 +1863,6 @@ func longCoTBraidSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRu
 			Tools:                      []string{rlmruntime.RLMQueryToolName},
 			MaxIterations:              1,
 			AutoExecuteGraphNodes:      true,
-			DisableHelperFirstFallback: true,
 			BraidRepairAttempts:        2,
 		},
 		{

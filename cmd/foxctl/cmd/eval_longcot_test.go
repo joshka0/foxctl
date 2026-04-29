@@ -697,6 +697,9 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	if !phases[fanoutIdx].AutoExecuteGraphNodes {
 		t.Fatal("graph_fanout AutoExecuteGraphNodes=false want true")
 	}
+	if phases[fanoutIdx].DisableHelperFirstFallback {
+		t.Fatal("graph_fanout DisableHelperFirstFallback=true want false")
+	}
 	if !stringSlicesEqual(phases[fanoutIdx].Tools, []string{rlmruntime.RLMQueryToolName}) {
 		t.Fatalf("graph_fanout tools=%v want [%s]", phases[fanoutIdx].Tools, rlmruntime.RLMQueryToolName)
 	}

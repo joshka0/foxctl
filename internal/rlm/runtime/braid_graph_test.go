@@ -771,6 +771,16 @@ func TestBraidVerifySummaryRequiresPassSignal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validateBraidNodeExecutionSummary() pass summary error = %v", err)
 	}
+
+	err = validateBraidNodeExecutionSummary(
+		"graph_fanout",
+		BraidNode{ID: "n_verify", Kind: "verify"},
+		"status: completed summary: status: solved answer: solution = 42 checks: verified 17+25=42",
+		"n_reduce",
+	)
+	if err != nil {
+		t.Fatalf("validateBraidNodeExecutionSummary() verified-check summary error = %v", err)
+	}
 }
 
 func TestHelperAnswerFromToolResultRequiresOKAnswer(t *testing.T) {
@@ -2950,18 +2960,18 @@ func TestNormalizeBraidAdaptiveTargetSummaryRejectsBlockedProse(t *testing.T) {
 	}
 }
 
-func TestBraidVerifyPreferredHelperDoesNotFallback(t *testing.T) {
+func TestBraidPreferredHelperFailureFallbackPolicy(t *testing.T) {
 	t.Parallel()
 
 	node := BraidNode{ID: "n_verify", Kind: "verify"}
-	if braidNodeCanFallbackFromHelperFailure(node, BraidNodeHelperPolicyPreferred) {
-		t.Fatal("preferred verify helper should not fall back after deterministic helper rejection")
+	if !braidNodeCanFallbackFromHelperFailure(node, BraidNodeHelperPolicyPreferred) {
+		t.Fatal("preferred verify helper should fall back to child RLM after helper execution failure")
 	}
 	if braidNodeCanFallbackFromHelperFailure(node, BraidNodeHelperPolicyRequired) {
 		t.Fatal("required verify helper should not fall back")
 	}
-	if braidNodeCanFallbackFromHelperFailure(BraidNode{ID: "n_solve", Kind: "solve"}, BraidNodeHelperPolicyPreferred) {
-		t.Fatal("solve helper should not fall back")
+	if !braidNodeCanFallbackFromHelperFailure(BraidNode{ID: "n_solve", Kind: "solve"}, BraidNodeHelperPolicyPreferred) {
+		t.Fatal("preferred solve helper should fall back to child RLM after helper execution failure")
 	}
 }
 

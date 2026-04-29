@@ -415,7 +415,7 @@ func runBraidNodeHelperFirst(
 	if !ok {
 		stage := extractBraidHelperFailedStage(summary)
 		message := fmt.Sprintf("stage=%s duration_ms=%d: helper did not produce an answer", stage, duration.Milliseconds())
-		if policy == BraidNodeHelperPolicyRequired || (disableFallback && !braidNodeCanFallbackFromHelperFailure(node, policy)) {
+		if policy == BraidNodeHelperPolicyRequired || disableFallback {
 			recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_failed", message)
 			summary := "status: blocked\nanswer:\nchecks: " + message
 			return summary, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper-first failed: %s", phaseName, node.ID, message)
@@ -425,7 +425,7 @@ func runBraidNodeHelperFirst(
 	}
 	if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_rejected", "stage=verify duration_ms="+fmt.Sprintf("%d", duration.Milliseconds())+" "+err.Error())
-		if policy == BraidNodeHelperPolicyRequired || (disableFallback && !braidNodeCanFallbackFromHelperFailure(node, policy)) {
+		if policy == BraidNodeHelperPolicyRequired || disableFallback {
 			return summary, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper-first failed: %w", phaseName, node.ID, err)
 		}
 		return "", false, nil
@@ -435,7 +435,7 @@ func runBraidNodeHelperFirst(
 }
 
 func braidNodeCanFallbackFromHelperFailure(node BraidNode, policy string) bool {
-	return policy == BraidNodeHelperPolicyPreferred && node.Kind == "cycle_solve"
+	return policy == BraidNodeHelperPolicyPreferred && (isBraidSolveKind(node.Kind) || node.Kind == "verify")
 }
 
 func braidNodeShouldUseChildREPLInsteadOfHelper(node BraidNode, rootPrompt string, dependencySummaries map[string]string, repairFeedback string) bool {
@@ -5713,6 +5713,7 @@ func braidVerificationSummaryPassed(summary string) bool {
 		"verification pass",
 		"verified: pass",
 		"verdict: pass",
+		"checks: verified",
 		"all moves valid",
 		"final state matches",
 		"matches the goal state",
