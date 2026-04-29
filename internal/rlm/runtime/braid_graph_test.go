@@ -2076,6 +2076,39 @@ func TestBraidHandoffHelperInputIncludesTargetLocalContext(t *testing.T) {
 	}
 }
 
+func TestBraidCycleSolveTypedHandoffIncludesInputSchema(t *testing.T) {
+	t.Parallel()
+
+	node := BraidNode{
+		ID:            "n_cycle",
+		Kind:          "cycle_solve",
+		Question:      "Solve the fixed-point cluster.",
+		Archetype:     BraidScaffoldClassConstraintSolver,
+		ScaffoldClass: BraidScaffoldClassConstraintSolver,
+		ScaffoldID:    BraidScaffoldIDFiniteDomainV1,
+		InputSchema: map[string]any{
+			"target_nodes":   []any{"node_2", "node_5"},
+			"cycle_clusters": []any{[]any{"node_2", "node_5"}},
+			"variables": map[string]any{
+				"node_2": []any{float64(1), float64(2)},
+				"node_5": []any{float64(3), float64(4)},
+			},
+			"constraints": []any{"node_5 depends on node_2"},
+		},
+	}
+	handoff := BuildBraidNodeHandoff(node, "root problem", nil, "")
+	input := BraidHandoffHelperInput(handoff)
+	if _, ok := input["cycle_clusters"]; !ok {
+		t.Fatalf("cycle_clusters missing from helper input: %#v", input)
+	}
+	if input["scaffold_class"] != BraidScaffoldClassConstraintSolver {
+		t.Fatalf("scaffold_class=%v", input["scaffold_class"])
+	}
+	if input["task_type"] != BraidScaffoldClassConstraintSolver {
+		t.Fatalf("task_type=%v", input["task_type"])
+	}
+}
+
 func TestBraidParseGraphTextRejectsMarkdownFence(t *testing.T) {
 	t.Parallel()
 
@@ -4219,6 +4252,7 @@ func TestNormalizeBraidNodeArchetype(t *testing.T) {
 		{"explicit_dag", "explicit_dag"},
 		{"table_recurrence", "table_recurrence"},
 		{"constraint_solve", "constraint_solve"},
+		{"constraint_solver", "constraint_solve"},
 		{"mixed", "mixed"},
 		{"", ""},
 		{"bogus_archetype", ""},

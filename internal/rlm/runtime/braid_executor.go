@@ -751,6 +751,12 @@ func braidDependencyVerificationPassed(dependencySummaries map[string]string) bo
 }
 
 func braidSolutionAnswerFromSummary(summary string) (string, bool) {
+	if artifact, ok := parseBraidNodeArtifact(summary); ok {
+		answer := braidNodeArtifactAnswerString(artifact)
+		if strings.HasPrefix(answer, "solution =") {
+			return answer, true
+		}
+	}
 	idx := strings.Index(summary, "answer: solution =")
 	if idx < 0 {
 		return "", false
@@ -778,6 +784,12 @@ func recoverBraidNodeWithHelper(
 ) (string, bool) {
 	if !braidNodeShouldForceHelper(node, failedSummary) {
 		return "", false
+	}
+	if toolExec != nil && toolExec.budget != nil {
+		if err := toolExec.budget.ConsumeHelperCall(ctx); err != nil {
+			toolExec.recordBudgetError(LimitHelperCalls, err)
+			return "status: blocked\nanswer:\nchecks: " + err.Error(), true
+		}
 	}
 	return runBraidNodeHelper(ctx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, failedSummary, toolExec, output)
 }
@@ -2749,6 +2761,7 @@ func attemptSplitHelperExecution(
 	recordBraidNodeEvent(toolExec, phaseName, 0, node, "split", fmt.Sprintf("splitting into %d sub-items: %s", len(chunks), plan.Reason))
 
 	var subAnswers []string
+	var failures []string
 	for i, chunk := range chunks {
 		// Build a sub-input with just this chunk.
 		subInput := map[string]any{
@@ -2776,7 +2789,7 @@ func attemptSplitHelperExecution(
 		// Check size.
 		if estimated, err := json.Marshal(subInput); err != nil || len(estimated) > helperPreflightMaxInputChars {
 			recordBraidNodeEvent(toolExec, phaseName, 0, node, "split_chunk_oversized", fmt.Sprintf("chunk %d still too large (%d bytes)", i, len(estimated)))
-			subAnswers = append(subAnswers, fmt.Sprintf("chunk_%d: [oversized, skipped]", i))
+			failures = append(failures, fmt.Sprintf("chunk_%d oversized", i))
 			continue
 		}
 
@@ -2788,7 +2801,7 @@ func attemptSplitHelperExecution(
 		}
 		subArgs, err := json.Marshal(subArgsMap)
 		if err != nil {
-			subAnswers = append(subAnswers, fmt.Sprintf("chunk_%d: [marshal error]", i))
+			failures = append(failures, fmt.Sprintf("chunk_%d marshal_error", i))
 			continue
 		}
 
@@ -2797,7 +2810,7 @@ func attemptSplitHelperExecution(
 		if toolExec != nil && toolExec.budget != nil {
 			if err := toolExec.budget.ConsumeHelperCall(ctx); err != nil {
 				toolExec.recordBudgetError(LimitHelperCalls, err)
-				subAnswers = append(subAnswers, fmt.Sprintf("chunk_%d: [helper budget exceeded: %s]", i, err.Error()))
+				failures = append(failures, fmt.Sprintf("chunk_%d helper_budget_exceeded: %s", i, err.Error()))
 				continue
 			}
 		}
@@ -2810,13 +2823,21 @@ func attemptSplitHelperExecution(
 		}
 		output.ToolCalls = append(output.ToolCalls, toolCall)
 		output.ToolResults = append(output.ToolResults, toolResult)
+		if execErr != nil {
+			failures = append(failures, fmt.Sprintf("chunk_%d helper_error: %s", i, execErr.Error()))
+			continue
+		}
 
 		answer := helperAnswerFromToolResult(result)
 		if strings.TrimSpace(answer) == "" {
-			answer = "[no answer]"
+			failures = append(failures, fmt.Sprintf("chunk_%d no_answer", i))
+			continue
 		}
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "split_chunk_completed", fmt.Sprintf("chunk %d/%d: %s", i+1, len(chunks), safeTelemetryExcerpt(answer, 100)))
 		subAnswers = append(subAnswers, answer)
+	}
+	if len(failures) > 0 {
+		return fmt.Sprintf("status: blocked summary: split execution failed for %d/%d chunks answer: checks: %s", len(failures), len(chunks), strings.Join(failures, "; ")), true
 	}
 
 	// Merge sub-answers into a combined result.

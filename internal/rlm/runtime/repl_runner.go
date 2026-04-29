@@ -3640,6 +3640,12 @@ func (e *replToolExecutor) Execute(ctx context.Context, name string, args json.R
 		return e.executeAsyncRLMTool(ctx, name, args)
 	default:
 		if e.extraToolExecutor != nil && extraToolNameAllowed(e.extraToolExecutor, name) {
+			if name == EphemeralHelperSolveToolName && e.budget != nil {
+				if err := e.budget.ConsumeHelperCall(ctx); err != nil {
+					e.recordBudgetError(LimitHelperCalls, err)
+					return "", err
+				}
+			}
 			return e.extraToolExecutor.Execute(ctx, name, args)
 		}
 		return "", fmt.Errorf("unknown RLM REPL tool %q", name)

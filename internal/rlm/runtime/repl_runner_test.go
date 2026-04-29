@@ -1780,6 +1780,20 @@ func TestRenderBraidFinalHandoffPreservesLongVerifiedAnswer(t *testing.T) {
 	}
 }
 
+func TestRenderBraidFinalHandoffExtractsNodeArtifactAnswer(t *testing.T) {
+	t.Parallel()
+
+	summary := `{"status":"solved","answer":"solution = [[1,0,2]]","checks":["verified"],"confidence":1}`
+	handoff := renderBraidFinalHandoff(BraidGraph{FinalNode: "n_reduce"}, summary)
+	got, ok := verifiedAnswerFromBraidFinalHandoff(handoff)
+	if !ok {
+		t.Fatalf("verified answer missing from handoff: %s", handoff)
+	}
+	if got != "solution = [[1,0,2]]" {
+		t.Fatalf("verified answer=%q", got)
+	}
+}
+
 func TestExecutePhaseBraidGraphCanDisableHelperFirstFallback(t *testing.T) {
 	t.Parallel()
 

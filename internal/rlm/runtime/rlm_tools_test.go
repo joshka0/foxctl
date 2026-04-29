@@ -240,7 +240,7 @@ func TestRLMToolsWaitCompactsChildSummaries(t *testing.T) {
 	}
 }
 
-func TestRLMToolsQueryRejectsNegativeRequiredSubcalls(t *testing.T) {
+func TestRLMToolsQueryRejectsRuntimeOwnedFields(t *testing.T) {
 	t.Parallel()
 
 	store := newSchedulerTestStore(t)
@@ -253,9 +253,13 @@ func TestRLMToolsQueryRejectsNegativeRequiredSubcalls(t *testing.T) {
 	})
 	executor := newRLMToolsExecutorForTest(t, scheduler, store)
 
-	_, err := executor.Execute(context.Background(), RLMQueryToolName, json.RawMessage(`{"prompt":"child","required_subcalls":-1}`))
+	_, err := executor.Execute(context.Background(), RLMQueryToolName, json.RawMessage(`{"prompt":"child","required_subcalls":1}`))
 	if err == nil {
-		t.Fatal("expected required_subcalls validation error")
+		t.Fatal("expected required_subcalls ownership error")
+	}
+	_, err = executor.Execute(context.Background(), RLMQueryToolName, json.RawMessage(`{"prompt":"child","parent_node_id":"root.1"}`))
+	if err == nil {
+		t.Fatal("expected parent_node_id ownership error")
 	}
 }
 
@@ -360,7 +364,7 @@ func TestRLMToolsResultFetchesCompletedChild(t *testing.T) {
 	}
 }
 
-func TestRLMToolsWaitRejectsForeignChild(t *testing.T) {
+func TestRLMToolsWaitAndResultRejectRuntimeOwnedFields(t *testing.T) {
 	t.Parallel()
 
 	store := newSchedulerTestStore(t)
@@ -384,27 +388,24 @@ func TestRLMToolsWaitRejectsForeignChild(t *testing.T) {
 		t.Fatalf("root children = %d, want 1", len(children))
 	}
 
-	if _, err := executor.Execute(context.Background(), RLMQueryToolName, json.RawMessage(`{
-		"prompt":"grandchild",
-		"parent_node_id":"`+children[0].ID+`"
-	}`)); err != nil {
-		t.Fatalf("Execute(rlm_query grandchild) error = %v", err)
-	}
-	grandchildren, err := store.ListChildren(context.Background(), "run-1", children[0].ID)
-	if err != nil {
-		t.Fatalf("ListChildren(%s) error = %v", children[0].ID, err)
-	}
-	if len(grandchildren) != 1 {
-		t.Fatalf("grandchildren = %d, want 1", len(grandchildren))
-	}
-
 	_, err = executor.Execute(context.Background(), RLMWaitToolName, json.RawMessage(`{
 		"parent_node_id":"root",
-		"child_ids":["`+grandchildren[0].ID+`"],
 		"timeout_ms":10
 	}`))
-	if !errors.Is(err, ErrNodeOwnership) {
-		t.Fatalf("Execute(rlm_wait) error = %v, want ErrNodeOwnership", err)
+	if err == nil {
+		t.Fatal("expected rlm_wait parent_node_id ownership error")
+	}
+	_, err = executor.Execute(context.Background(), RLMWaitToolName, json.RawMessage(`{"child_ids":["root.1"],"timeout_ms":10}`))
+	if err == nil {
+		t.Fatal("expected rlm_wait child_ids ownership error")
+	}
+	_, err = executor.Execute(context.Background(), RLMResultToolName, json.RawMessage(`{"node_id":"root.1"}`))
+	if err == nil {
+		t.Fatal("expected rlm_result node_id ownership error")
+	}
+	_, err = executor.Execute(context.Background(), RLMResultToolName, json.RawMessage(`{"run_id":"run-1"}`))
+	if err == nil {
+		t.Fatal("expected rlm_result run_id ownership error")
 	}
 }
 

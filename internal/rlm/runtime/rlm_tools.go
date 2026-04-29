@@ -160,12 +160,10 @@ func (e *RLMToolsExecutor) rlmSchedulerToolDefs() []engine.ToolDef {
 }
 
 type rlmQueryToolInput struct {
-	Prompt           string         `json:"prompt"`
-	ParentNodeID     string         `json:"parent_node_id,omitempty"`
-	MaxIterations    int            `json:"max_iterations,omitempty"`
-	MaxSummaryChars  int            `json:"max_summary_chars,omitempty"`
-	RequiredSubcalls int            `json:"required_subcalls,omitempty"`
-	Metadata         map[string]any `json:"metadata,omitempty"`
+	Prompt          string         `json:"prompt"`
+	MaxIterations   int            `json:"max_iterations,omitempty"`
+	MaxSummaryChars int            `json:"max_summary_chars,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 type rlmQueryToolOutput struct {
@@ -175,6 +173,9 @@ type rlmQueryToolOutput struct {
 }
 
 func (e *RLMToolsExecutor) executeQuery(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := rejectRLMToolFields(args, RLMQueryToolName, "parent_node_id", "node_id", "run_id", "child_ids", "required_subcalls"); err != nil {
+		return "", err
+	}
 	var input rlmQueryToolInput
 	if err := json.Unmarshal(args, &input); err != nil {
 		return "", fmt.Errorf("decode rlm_query args: %w", err)
@@ -187,17 +188,14 @@ func (e *RLMToolsExecutor) executeQuery(ctx context.Context, args json.RawMessag
 	if input.Prompt == "" {
 		return "", fmt.Errorf("rlm_query requires non-empty prompt")
 	}
-	if input.RequiredSubcalls < 0 {
-		return "", fmt.Errorf("rlm_query required_subcalls must be >= 0")
-	}
 
-	parentNodeID := e.resolveParentNodeID(input.ParentNodeID)
+	parentNodeID := e.parentNodeID
 	if parentNodeID == "" {
 		return "", fmt.Errorf("rlm_query requires parent_node_id")
 	}
 
-	ordinal := e.nextSubmittedOrdinal()
-	requiredSubcalls := maxInt(input.RequiredSubcalls, e.requiredSubcallsForChild(ordinal))
+	ordinal := e.reserveSubmittedOrdinal()
+	requiredSubcalls := e.requiredSubcallsForChild(ordinal)
 
 	handle, err := e.scheduler.Submit(ctx, parentNodeID, QueryRequest{
 		Prompt:           input.Prompt,
@@ -219,12 +217,10 @@ func (e *RLMToolsExecutor) executeQuery(ctx context.Context, args json.RawMessag
 }
 
 type rlmWaitToolInput struct {
-	ParentNodeID    string   `json:"parent_node_id,omitempty"`
-	ChildIDs        []string `json:"child_ids,omitempty"`
-	Children        []int    `json:"children,omitempty"`
-	MinComplete     int      `json:"min_complete,omitempty"`
-	TimeoutMS       int64    `json:"timeout_ms,omitempty"`
-	MaxSummaryChars int      `json:"max_summary_chars,omitempty"`
+	Children        []int `json:"children,omitempty"`
+	MinComplete     int   `json:"min_complete,omitempty"`
+	TimeoutMS       int64 `json:"timeout_ms,omitempty"`
+	MaxSummaryChars int   `json:"max_summary_chars,omitempty"`
 }
 
 type rlmNodeSummary struct {
@@ -249,12 +245,15 @@ type rlmWaitToolOutput struct {
 }
 
 func (e *RLMToolsExecutor) executeWait(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := rejectRLMToolFields(args, RLMWaitToolName, "parent_node_id", "node_id", "run_id", "child_ids", "required_subcalls"); err != nil {
+		return "", err
+	}
 	var input rlmWaitToolInput
 	if err := json.Unmarshal(args, &input); err != nil {
 		return "", fmt.Errorf("decode rlm_wait args: %w", err)
 	}
 
-	parentNodeID := e.resolveParentNodeID(input.ParentNodeID)
+	parentNodeID := e.parentNodeID
 	if parentNodeID == "" {
 		return "", fmt.Errorf("rlm_wait requires parent_node_id")
 	}
@@ -286,10 +285,8 @@ func (e *RLMToolsExecutor) executeWait(ctx context.Context, args json.RawMessage
 }
 
 type rlmResultToolInput struct {
-	Child           int    `json:"child,omitempty"`
-	NodeID          string `json:"node_id"`
-	RunID           string `json:"run_id,omitempty"`
-	MaxSummaryChars int    `json:"max_summary_chars,omitempty"`
+	Child           int `json:"child,omitempty"`
+	MaxSummaryChars int `json:"max_summary_chars,omitempty"`
 }
 
 type rlmResultSummary struct {
@@ -311,16 +308,20 @@ type rlmResultToolOutput struct {
 }
 
 func (e *RLMToolsExecutor) executeResult(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := rejectRLMToolFields(args, RLMResultToolName, "parent_node_id", "node_id", "run_id", "child_ids", "required_subcalls"); err != nil {
+		return "", err
+	}
 	var input rlmResultToolInput
 	if err := json.Unmarshal(args, &input); err != nil {
 		return "", fmt.Errorf("decode rlm_result args: %w", err)
 	}
 
-	nodeID := strings.TrimSpace(input.NodeID)
+	nodeID := ""
 	child := input.Child
 	if child > 0 {
-		if resolved := e.nodeIDForChild(child); resolved != "" {
-			nodeID = resolved
+		nodeID = e.nodeIDForChild(child)
+		if nodeID == "" {
+			return "", fmt.Errorf("rlm_result child %d was not submitted by this tool session", child)
 		}
 	}
 	if nodeID == "" {
@@ -329,10 +330,7 @@ func (e *RLMToolsExecutor) executeResult(ctx context.Context, args json.RawMessa
 	if nodeID == "" {
 		return "", fmt.Errorf("rlm_result requires a submitted child")
 	}
-	runID := strings.TrimSpace(input.RunID)
-	if runID == "" {
-		runID = e.runID
-	}
+	runID := e.runID
 	if runID == "" {
 		return "", fmt.Errorf("rlm_result requires run_id")
 	}
@@ -349,10 +347,27 @@ func (e *RLMToolsExecutor) executeResult(ctx context.Context, args json.RawMessa
 	})
 }
 
-func (e *RLMToolsExecutor) nextSubmittedOrdinal() int {
+func rejectRLMToolFields(args json.RawMessage, toolName string, disallowed ...string) error {
+	if len(args) == 0 || string(args) == "null" {
+		return nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(args, &raw); err != nil {
+		return nil
+	}
+	for _, field := range disallowed {
+		if _, ok := raw[field]; ok {
+			return fmt.Errorf("%s field %q is runtime-owned and not accepted from model input", toolName, field)
+		}
+	}
+	return nil
+}
+
+func (e *RLMToolsExecutor) reserveSubmittedOrdinal() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.nextChild + 1
+	e.nextChild++
+	return e.nextChild
 }
 
 func (e *RLMToolsExecutor) recordSubmitted(handle NodeHandle, ordinal int) int {
@@ -360,9 +375,6 @@ func (e *RLMToolsExecutor) recordSubmitted(handle NodeHandle, ordinal int) int {
 	defer e.mu.Unlock()
 	if ordinal <= 0 {
 		ordinal = e.nextChild + 1
-	}
-	if ordinal > e.nextChild {
-		e.nextChild = ordinal
 	}
 	generation := e.generation
 	if generation <= 0 {
@@ -394,9 +406,6 @@ func (e *RLMToolsExecutor) resolveWaitChildNodeIDs(input rlmWaitToolInput) ([]st
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if len(input.ChildIDs) > 0 {
-		return trimNonEmptyStrings(input.ChildIDs), 0
-	}
 	if len(input.Children) > 0 {
 		out := make([]string, 0, len(input.Children))
 		for _, child := range input.Children {

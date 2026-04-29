@@ -981,7 +981,7 @@ func applyBraidConstraintSolverHandoff(handoff *BraidNodeHandoff, instance map[s
 
 func braidNodeCanUseTypedHandoff(kind string) bool {
 	switch strings.TrimSpace(kind) {
-	case "solve", "verify", "reduce":
+	case "solve", "cycle_solve", "verify", "reduce":
 		return true
 	default:
 		return false
@@ -1583,6 +1583,8 @@ func normalizeBraidNodeArchetype(archetype string) string {
 		"finite_state_transition", "graph_search", "numeric_dp",
 		"sequence_simulation", "mixed":
 		return trimmed
+	case "constraint_solver":
+		return "constraint_solve"
 	default:
 		return ""
 	}
