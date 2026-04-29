@@ -1,0 +1,68 @@
+apiVersion: foxctl/v1
+kind: Skill
+metadata:
+  name: cloud/localstack_blueprint
+  version: 0.1.0
+  description: "Plan or apply a safe AWS blueprint against LocalStack"
+  tags: ["cloud", "localstack", "aws", "portfolio", "mcp"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/cloud_localstack_blueprint/cloud_localstack_blueprint
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: cloud/localstack_blueprint
+  parameters:
+    - name: scenario
+      type: string
+      required: true
+      enum: ["event-pipeline", "gitops-state", "eks-observability"]
+      description: "Blueprint to plan or apply"
+    - name: run_id
+      type: string
+      required: false
+      description: "Stable run identifier used to stamp resource names"
+    - name: endpoint
+      type: string
+      required: false
+      default: "http://127.0.0.1:4566"
+      description: "LocalStack edge endpoint"
+    - name: mode
+      type: string
+      required: false
+      enum: ["plan", "apply"]
+      default: "plan"
+      description: "plan returns the blueprint; apply creates emulated resources"
+  returns:
+    - name: tool
+      type: object
+      description: "MCP-style tool descriptor and arguments"
+    - name: resources
+      type: array
+      description: "Resources planned or created for this run"
+    - name: commands
+      type: array
+      description: "LocalStack-safe AWS CLI commands"
+    - name: production_notes
+      type: array
+      description: "Controls needed before real AWS"
+  help:
+    short: "Run a LocalStack-backed AWS blueprint."
+    long: |
+      Use this skill as the foxctl side of the portfolio cloud lab. It emits a stable,
+      MCP-shaped operation that can be exposed through foxctl mcp serve or called
+      directly through foxctl run.
+
+      Example:
+        foxctl run cloud/localstack_blueprint --input '{"scenario":"event-pipeline","mode":"apply","endpoint":"http://127.0.0.1:4566"}'
+capabilities:
+  network: "local"
+  filesystem:
+    - type: workdir
+  pure: false
+openapi:
+  enabled: true
+  methods:
+    POST: "true"
