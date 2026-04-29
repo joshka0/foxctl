@@ -104,6 +104,9 @@ func TestHelperFactoryToolsDraftsPythonRunsAndReturnsAnswer(t *testing.T) {
 	if len(prompts) != 1 || !strings.Contains(prompts[0], "short-lived Python helper") || !strings.Contains(prompts[0], "source_b64") {
 		t.Fatalf("expected Python helper prompt, got %#v", prompts)
 	}
+	if !strings.Contains(prompts[0], "Runtime capability policy:") || !strings.Contains(prompts[0], "network: none") || !strings.Contains(prompts[0], "filesystem: none") {
+		t.Fatalf("expected capability policy in Python helper prompt, got %#v", prompts)
+	}
 }
 
 func TestHelperFactoryToolsAcceptsSourceB64Draft(t *testing.T) {
@@ -481,11 +484,12 @@ func TestHelperFactoryToolsRepairsPythonSourceWithoutTaskContext(t *testing.T) {
 func TestHelperFactoryPythonPromptsForbidDynamicEvaluation(t *testing.T) {
 	t.Parallel()
 
-	draftPrompt := buildHelperFactoryDraftPrompt("Parse values safely.", "", "", HelperLanguagePython, helperFactorySourceBudget{})
+	policy := ToolCapabilityPolicy{Network: "none", Filesystem: "none", Process: "none"}
+	draftPrompt := buildHelperFactoryDraftPrompt("Parse values safely.", "", "", HelperLanguagePython, helperFactorySourceBudget{}, policy)
 	repairPrompt := buildHelperFactorySourceRepairPrompt(HelperLanguagePython, &helperFactoryRepairState{
 		Stage: "validate",
 		Error: "disallowed call eval",
-	}, helperFactorySourceBudget{})
+	}, helperFactorySourceBudget{}, policy)
 	for _, prompt := range []string{draftPrompt, repairPrompt} {
 		for _, want := range []string{"Never call eval", "ast.literal_eval", "json.loads"} {
 			if !strings.Contains(prompt, want) {
@@ -498,12 +502,13 @@ func TestHelperFactoryPythonPromptsForbidDynamicEvaluation(t *testing.T) {
 func TestHelperFactoryPythonRepairPromptForbidsSysImport(t *testing.T) {
 	t.Parallel()
 
-	draftPrompt := buildHelperFactoryDraftPrompt("Compute compactly.", "", "", HelperLanguagePython, helperFactorySourceBudget{})
+	policy := ToolCapabilityPolicy{Network: "none", Filesystem: "none", Process: "none"}
+	draftPrompt := buildHelperFactoryDraftPrompt("Compute compactly.", "", "", HelperLanguagePython, helperFactorySourceBudget{}, policy)
 	repairPrompt := buildHelperFactorySourceRepairPrompt(HelperLanguagePython, &helperFactoryRepairState{
 		Stage:  "run",
 		Error:  "python skill validation/run failed: ValueError: disallowed import sys",
 		Source: "import sys\n\ndef solve(input):\n    sys.set_int_max_str_digits(20000)\n    return {\"ok\": True, \"answer\": str(10**10000)}",
-	}, helperFactorySourceBudget{})
+	}, helperFactorySourceBudget{}, policy)
 	for _, want := range []string{
 		"Do not import os, sys",
 		"Disallowed imports include os, sys",
@@ -1571,6 +1576,44 @@ func TestHelperFactoryToolsUsesPresetSourceBeforeDrafting(t *testing.T) {
 	}
 	if strings.Contains(raw, `"output":`) {
 		t.Fatalf("compact helper output should use output_summary, got: %s", raw)
+	}
+	if !strings.Contains(raw, `"capability_policy"`) || !strings.Contains(raw, `"network":"none"`) {
+		t.Fatalf("helper output missing capability policy: %s", raw)
+	}
+}
+
+func TestHelperFactoryToolsRejectsCapabilityPolicyViolation(t *testing.T) {
+	t.Parallel()
+
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		TaskPrompt:          "Return solution = unsafe.",
+		Attempts:            1,
+		ExtractSolutionLine: true,
+		Language:            HelperLanguagePython,
+		PresetSource: `import os
+def solve(input):
+    return {"ok": True, "answer": open("/etc/passwd").read()}`,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK       bool             `json:"ok"`
+		Error    string           `json:"error"`
+		Attempts []map[string]any `json:"attempts"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if got.OK {
+		t.Fatalf("unsafe helper unexpectedly succeeded: %s", raw)
+	}
+	if !strings.Contains(got.Error, "capability policy violation") {
+		t.Fatalf("error=%q, want capability policy violation; raw=%s", got.Error, raw)
+	}
+	if len(got.Attempts) == 0 || got.Attempts[0]["stage"] != "draft" {
+		t.Fatalf("attempts=%#v, want draft-stage policy failure", got.Attempts)
 	}
 }
 

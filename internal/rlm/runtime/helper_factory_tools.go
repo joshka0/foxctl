@@ -42,10 +42,19 @@ type HelperFactoryConfig struct {
 	MaxSourceChars      int
 	AnswerVerifier      HelperAnswerVerifier
 	Search              HelperSearchConfig
+	Capability          ToolCapabilityPolicy
 }
 
 type HelperSearchConfig struct {
 	BeamWidth int
+}
+
+type ToolCapabilityPolicy struct {
+	Network        string   `json:"network,omitempty"`
+	Filesystem     string   `json:"filesystem,omitempty"`
+	Process        string   `json:"process,omitempty"`
+	AllowedImports []string `json:"allowed_imports,omitempty"`
+	MaxOutputBytes int      `json:"max_output_bytes,omitempty"`
 }
 
 type HelperFactoryTools struct {
@@ -335,15 +344,16 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			"language": helperLanguage,
 		})
 		out := map[string]any{
-			"ok":             true,
-			"answer":         answer,
-			"output_summary": compactHelperFactoryMap(result.Output),
-			"input_summary":  compactHelperFactoryMap(helperInput),
-			"runner":         result.Metadata,
-			"provider":       strings.TrimSpace(h.Config.LLM.Provider),
-			"model":          strings.TrimSpace(h.Config.LLM.Model),
-			"preset":         strings.TrimSpace(h.Config.PresetName),
-			"attempts":       compactHelperFactoryAttempts(attempts),
+			"ok":                true,
+			"answer":            answer,
+			"output_summary":    compactHelperFactoryMap(result.Output),
+			"input_summary":     compactHelperFactoryMap(helperInput),
+			"runner":            result.Metadata,
+			"provider":          strings.TrimSpace(h.Config.LLM.Provider),
+			"model":             strings.TrimSpace(h.Config.LLM.Model),
+			"preset":            strings.TrimSpace(h.Config.PresetName),
+			"attempts":          compactHelperFactoryAttempts(attempts),
+			"capability_policy": h.effectiveCapabilityPolicy(helperLanguage),
 		}
 		if verified {
 			out["verified"] = true
@@ -357,12 +367,13 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 		return marshalHelperFactoryOutput(out)
 	}
 	out := map[string]any{
-		"ok":       false,
-		"error":    fmt.Sprintf("helper factory failed after %d attempts: %s", attemptLimit, helperFactoryFirstFeedbackLine(lastFeedback)),
-		"provider": strings.TrimSpace(h.Config.LLM.Provider),
-		"model":    strings.TrimSpace(h.Config.LLM.Model),
-		"preset":   strings.TrimSpace(h.Config.PresetName),
-		"attempts": compactHelperFactoryAttempts(attempts),
+		"ok":                false,
+		"error":             fmt.Sprintf("helper factory failed after %d attempts: %s", attemptLimit, helperFactoryFirstFeedbackLine(lastFeedback)),
+		"provider":          strings.TrimSpace(h.Config.LLM.Provider),
+		"model":             strings.TrimSpace(h.Config.LLM.Model),
+		"preset":            strings.TrimSpace(h.Config.PresetName),
+		"attempts":          compactHelperFactoryAttempts(attempts),
+		"capability_policy": h.effectiveCapabilityPolicy(h.helperLanguage(0)),
 	}
 	if repairHarness.HasCandidates() {
 		out["candidate_beam"] = compactHelperFactoryCandidateBeam(repairHarness.CandidateBeam())
@@ -386,7 +397,7 @@ func (h *HelperFactoryTools) attemptLimit(maxAttempts int) int {
 
 func (h *HelperFactoryTools) draftForAttempt(ctx context.Context, attempt int, taskCtx helperFactoryTaskContext, instructions, feedback string, repairState *helperFactoryRepairState) (helperFactoryDraft, string, error) {
 	if strings.TrimSpace(h.Config.PresetSource) != "" && attempt == 1 {
-		if err := h.validateSourceBudget(h.Config.PresetSource); err != nil {
+		if err := h.validateSourceContract(h.helperLanguage(attempt), h.Config.PresetSource); err != nil {
 			return helperFactoryDraft{}, "", err
 		}
 		return helperFactoryDraft{
@@ -408,7 +419,7 @@ func (h *HelperFactoryTools) draft(ctx context.Context, taskCtx helperFactoryTas
 	llmCfg.ResponseFormat = helperFactoryDraftResponseFormat()
 	llmCfg.UseReasoningContentAsText = true
 
-	output, err := runHelperFactoryLLM(ctx, llmCfg, buildHelperFactoryDraftPrompt(taskCtx.Prompt, instructions, feedback, language, h.sourceBudget()))
+	output, err := runHelperFactoryLLM(ctx, llmCfg, buildHelperFactoryDraftPrompt(taskCtx.Prompt, instructions, feedback, language, h.sourceBudget(), h.effectiveCapabilityPolicy(language)))
 	if err != nil {
 		return helperFactoryDraft{}, "", fmt.Errorf("helper factory draft: LLM call: %w", err)
 	}
@@ -427,7 +438,7 @@ func (h *HelperFactoryTools) draft(ctx context.Context, taskCtx helperFactoryTas
 	if strings.TrimSpace(draft.Source) == "" {
 		return helperFactoryDraft{}, raw, fmt.Errorf("draft source is empty")
 	}
-	if err := h.validateSourceBudget(draft.Source); err != nil {
+	if err := h.validateSourceContract(language, draft.Source); err != nil {
 		return helperFactoryDraft{}, raw, err
 	}
 	if len(draft.Input) == 0 && len(taskCtx.DefaultInput) > 0 {
@@ -447,7 +458,7 @@ func (h *HelperFactoryTools) repair(ctx context.Context, taskCtx helperFactoryTa
 	llmCfg.ResponseFormat = helperFactoryDraftResponseFormat()
 	llmCfg.UseReasoningContentAsText = true
 
-	output, err := runHelperFactoryLLM(ctx, llmCfg, buildHelperFactorySourceRepairPrompt(language, repairState, h.sourceBudget()))
+	output, err := runHelperFactoryLLM(ctx, llmCfg, buildHelperFactorySourceRepairPrompt(language, repairState, h.sourceBudget(), h.effectiveCapabilityPolicy(language)))
 	if err != nil {
 		return helperFactoryDraft{}, "", fmt.Errorf("helper factory repair: LLM call: %w", err)
 	}
@@ -466,7 +477,7 @@ func (h *HelperFactoryTools) repair(ctx context.Context, taskCtx helperFactoryTa
 	if strings.TrimSpace(draft.Source) == "" {
 		return helperFactoryDraft{}, raw, fmt.Errorf("repair source is empty")
 	}
-	if err := h.validateSourceBudget(draft.Source); err != nil {
+	if err := h.validateSourceContract(language, draft.Source); err != nil {
 		return helperFactoryDraft{}, raw, err
 	}
 	if len(draft.Input) == 0 && len(repairState.Input) > 0 {
@@ -495,6 +506,13 @@ func (h *HelperFactoryTools) sourceBudget() helperFactorySourceBudget {
 	return helperFactorySourceBudget{MaxLines: maxLines, MaxChars: maxChars}
 }
 
+func (h *HelperFactoryTools) validateSourceContract(language, source string) error {
+	if err := h.validateSourceBudget(source); err != nil {
+		return err
+	}
+	return validateHelperSourceCapabilities(language, source, h.effectiveCapabilityPolicy(language))
+}
+
 func (h *HelperFactoryTools) validateSourceBudget(source string) error {
 	budget := h.sourceBudget()
 	source = strings.TrimSpace(source)
@@ -513,6 +531,92 @@ func (h *HelperFactoryTools) validateSourceBudget(source string) error {
 		}
 	}
 	return nil
+}
+
+func (h *HelperFactoryTools) effectiveCapabilityPolicy(language string) ToolCapabilityPolicy {
+	policy := h.Config.Capability
+	if strings.TrimSpace(policy.Network) == "" {
+		policy.Network = "none"
+	}
+	if strings.TrimSpace(policy.Filesystem) == "" {
+		policy.Filesystem = "none"
+	}
+	if strings.TrimSpace(policy.Process) == "" {
+		policy.Process = "none"
+	}
+	if policy.MaxOutputBytes <= 0 {
+		policy.MaxOutputBytes = 64 * 1024
+	}
+	if len(policy.AllowedImports) == 0 {
+		switch strings.ToLower(strings.TrimSpace(language)) {
+		case HelperLanguagePython:
+			policy.AllowedImports = []string{"ast", "bisect", "collections", "copy", "functools", "heapq", "itertools", "json", "math", "operator", "re", "statistics"}
+		default:
+			policy.AllowedImports = []string{"encoding/json", "fmt", "math", "sort", "strconv", "strings"}
+		}
+	}
+	return policy
+}
+
+func validateHelperSourceCapabilities(language, source string, policy ToolCapabilityPolicy) error {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return nil
+	}
+	var violations []string
+	lowerSource := strings.ToLower(source)
+	if strings.TrimSpace(policy.Network) == "none" {
+		for _, marker := range helperCapabilityNetworkMarkers(language) {
+			if strings.Contains(lowerSource, strings.ToLower(marker)) {
+				violations = append(violations, "network capability is none but source references "+marker)
+			}
+		}
+	}
+	if strings.TrimSpace(policy.Filesystem) == "none" {
+		for _, marker := range helperCapabilityFilesystemMarkers(language) {
+			if strings.Contains(lowerSource, strings.ToLower(marker)) {
+				violations = append(violations, "filesystem capability is none but source references "+marker)
+			}
+		}
+	}
+	if strings.TrimSpace(policy.Process) == "none" {
+		for _, marker := range helperCapabilityProcessMarkers(language) {
+			if strings.Contains(lowerSource, strings.ToLower(marker)) {
+				violations = append(violations, "process capability is none but source references "+marker)
+			}
+		}
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf("helper capability policy violation: %s", strings.Join(violations, "; "))
+	}
+	return nil
+}
+
+func helperCapabilityNetworkMarkers(language string) []string {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case HelperLanguagePython:
+		return []string{"import socket", "import requests", "import urllib", "from urllib", "import http", "from http"}
+	default:
+		return []string{"\"net\"", "\"net/http\"", "\"net/url\"", "\"http\""}
+	}
+}
+
+func helperCapabilityFilesystemMarkers(language string) []string {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case HelperLanguagePython:
+		return []string{"import os", "from os", "import pathlib", "from pathlib", "import shutil", "from shutil", "open(", ".open("}
+	default:
+		return []string{"\"os\"", "\"io/fs\"", "\"path/filepath\"", "os.", "ioutil.", "filepath."}
+	}
+}
+
+func helperCapabilityProcessMarkers(language string) []string {
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case HelperLanguagePython:
+		return []string{"import subprocess", "from subprocess", "import sys", "from sys", "__import__", "eval(", "exec(", "compile("}
+	default:
+		return []string{"\"os/exec\"", "\"syscall\"", "\"unsafe\"", "exec.", "syscall.", "unsafe."}
+	}
 }
 
 type helperSkillRunner interface {
@@ -668,12 +772,31 @@ func helperFactorySystemPrompt() string {
 	return "You synthesize short-lived deterministic helper programs. Return only one JSON object. Prefer source_b64 containing base64-encoded compilable/runnable source code. The decoded source must be code, not prose, not placeholders, not escaped pseudo-code, not string-concatenation that describes code, and not another JSON object."
 }
 
-func buildHelperFactoryDraftPrompt(taskPrompt, instructions, feedback, language string, budget helperFactorySourceBudget) string {
+func renderHelperCapabilityPolicy(policy ToolCapabilityPolicy) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "- network: %s\n", strings.TrimSpace(policy.Network))
+	fmt.Fprintf(&b, "- filesystem: %s\n", strings.TrimSpace(policy.Filesystem))
+	fmt.Fprintf(&b, "- process: %s\n", strings.TrimSpace(policy.Process))
+	if policy.MaxOutputBytes > 0 {
+		fmt.Fprintf(&b, "- max_output_bytes: %d\n", policy.MaxOutputBytes)
+	}
+	if len(policy.AllowedImports) > 0 {
+		imports := append([]string(nil), policy.AllowedImports...)
+		sort.Strings(imports)
+		fmt.Fprintf(&b, "- allowed_imports: %s\n", strings.Join(imports, ", "))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func buildHelperFactoryDraftPrompt(taskPrompt, instructions, feedback, language string, budget helperFactorySourceBudget, policy ToolCapabilityPolicy) string {
 	var b strings.Builder
 	b.WriteString("Task:\n")
 	b.WriteString(strings.TrimSpace(taskPrompt))
 	maxLines := firstPositiveInt(budget.MaxLines, helperFactoryDefaultMaxSourceLines)
 	maxChars := firstPositiveInt(budget.MaxChars, helperFactoryDefaultMaxSourceChars)
+	b.WriteString("\n\nRuntime capability policy:\n")
+	b.WriteString(renderHelperCapabilityPolicy(policy))
+	b.WriteString("\n")
 	if language == HelperLanguagePython {
 		b.WriteString("\n\nWrite a short-lived Python helper for this exact task.\n")
 		b.WriteString("Return only JSON with this shape: {\"source_b64\":\"<base64 utf-8 Python source>\", \"input\":{}}.\n")
@@ -713,13 +836,16 @@ func buildHelperFactoryDraftPrompt(taskPrompt, instructions, feedback, language 
 	return b.String()
 }
 
-func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactoryRepairState, budget helperFactorySourceBudget) string {
+func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactoryRepairState, budget helperFactorySourceBudget, policy ToolCapabilityPolicy) string {
 	var b strings.Builder
 	maxLines := firstPositiveInt(budget.MaxLines, helperFactoryDefaultMaxSourceLines)
 	maxChars := firstPositiveInt(budget.MaxChars, helperFactoryDefaultMaxSourceChars)
 	b.WriteString("Repair a failed helper source file. Do not solve the original task. Do not mention the task. Return only one JSON object with a complete replacement source_b64 field")
 	b.WriteString(" and optional input field.\n")
 	fmt.Fprintf(&b, "Replacement source must be at most %d non-empty lines and %d characters.\n", maxLines, maxChars)
+	b.WriteString("\nRuntime capability policy:\n")
+	b.WriteString(renderHelperCapabilityPolicy(policy))
+	b.WriteString("\n")
 	b.WriteString("\nLanguage: ")
 	if language == HelperLanguagePython {
 		b.WriteString("python\n")
