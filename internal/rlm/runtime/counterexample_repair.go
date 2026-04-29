@@ -41,6 +41,47 @@ func (h *CounterexampleRepairHarness) RecordSelfReportedFailure(output map[strin
 	return feedback
 }
 
+func (h *CounterexampleRepairHarness) RecordContractFailure(stage, errText string, observed any, expected string) map[string]any {
+	counterexample := map[string]any{
+		"failure_kind":  "helper_contract_failure",
+		"stage":         stage,
+		"first_failure": errText,
+		"observed":      compactHelperFactoryVerifierScalar(observed),
+		"expected":      expected,
+		"repair_hint":   helperContractFailureRepairHint(stage),
+	}
+	feedback := map[string]any{
+		"counterexample": counterexample,
+		"search_policy": map[string]any{
+			"kind": "helper_contract_repair",
+			"instructions": []string{
+				"treat this helper contract failure as a concrete counterexample",
+				"repair the output protocol before changing the solving strategy",
+				"return exactly one valid JSON object with a valid helper source and input",
+			},
+		},
+	}
+	if h != nil {
+		h.lastCounterexample = cloneMapAny(counterexample)
+	}
+	return feedback
+}
+
+func helperContractFailureRepairHint(stage string) string {
+	switch stage {
+	case "draft":
+		return "return exactly one JSON object containing source or source_b64 and optional input; no markdown or trailing prose"
+	case "validate":
+		return "make the helper source satisfy the runtime entrypoint and source-size contract"
+	case "run":
+		return "make the helper execute against the provided input without exceptions"
+	case "finalize":
+		return "return ok:true with answer or solution in the required schema, or ok:false with first_failure and repair_hint"
+	default:
+		return "repair the helper contract before attempting semantic solving"
+	}
+}
+
 func (h *CounterexampleRepairHarness) VerifierFeedback(current map[string]any) map[string]any {
 	if h == nil {
 		return helperFactoryVerifierFeedbackMap(current, nil, nil, 0)

@@ -162,7 +162,8 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 	for attempt := 1; attempt <= attemptLimit; attempt++ {
 		draft, raw, err := h.draftForAttempt(ctx, attempt, taskCtx, instructions, lastFeedback, repairState)
 		if err != nil {
-			lastFeedback = helperFactoryRepairFeedback("draft", err.Error(), "", raw, nil, nil)
+			contractFeedback := repairHarness.RecordContractFailure("draft", err.Error(), raw, "valid helper draft JSON object")
+			lastFeedback = helperFactoryRepairFeedbackWithVerifier("draft", err.Error(), "", raw, nil, nil, contractFeedback)
 			repairState = nil
 			if strings.TrimSpace(raw) != "" {
 				repairState = &helperFactoryRepairState{
@@ -180,12 +181,16 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 				"error":   err.Error(),
 				"raw":     raw,
 			})
+			if len(contractFeedback) > 0 {
+				attempts[len(attempts)-1]["contract_feedback"] = contractFeedback
+			}
 			continue
 		}
 		helperLanguage := h.helperLanguage(attempt)
 		if helperFactorySourceNeedsTaskRedraft(helperLanguage, draft.Source) {
 			errText := fmt.Sprintf("helper source is structurally incomplete for %s", helperLanguage)
-			lastFeedback = helperFactoryRepairFeedback("draft", errText, draft.Source, raw, draft.Input, nil)
+			contractFeedback := repairHarness.RecordContractFailure("draft", errText, draft.Source, "complete helper source with required entrypoint")
+			lastFeedback = helperFactoryRepairFeedbackWithVerifier("draft", errText, draft.Source, raw, draft.Input, nil, contractFeedback)
 			repairState = nil
 			attempts = append(attempts, map[string]any{
 				"attempt":  attempt,
@@ -196,11 +201,15 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 				"raw":      raw,
 				"language": helperLanguage,
 			})
+			if len(contractFeedback) > 0 {
+				attempts[len(attempts)-1]["contract_feedback"] = contractFeedback
+			}
 			continue
 		}
 		runner, err := h.newHelperRunner(ctx, helperLanguage, draft.Source)
 		if err != nil {
-			lastFeedback = helperFactoryRepairFeedback("validate", err.Error(), draft.Source, raw, draft.Input, nil)
+			contractFeedback := repairHarness.RecordContractFailure("validate", err.Error(), draft.Source, "source accepted by helper validator")
+			lastFeedback = helperFactoryRepairFeedbackWithVerifier("validate", err.Error(), draft.Source, raw, draft.Input, nil, contractFeedback)
 			repairState = &helperFactoryRepairState{
 				Stage:    "validate",
 				Error:    err.Error(),
@@ -217,12 +226,16 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 				"source":   draft.Source,
 				"language": helperLanguage,
 			})
+			if len(contractFeedback) > 0 {
+				attempts[len(attempts)-1]["contract_feedback"] = contractFeedback
+			}
 			continue
 		}
 		helperInput := helperFactoryEffectiveInput(taskCtx.DefaultInput, draft.Input, explicitInput, prompt)
 		result, err := runner.Run(ctx, helperInput)
 		if err != nil {
-			lastFeedback = helperFactoryRepairFeedback("run", err.Error(), draft.Source, raw, helperInput, nil)
+			contractFeedback := repairHarness.RecordContractFailure("run", err.Error(), result.Output, "helper executes successfully and returns structured output")
+			lastFeedback = helperFactoryRepairFeedbackWithVerifier("run", err.Error(), draft.Source, raw, helperInput, nil, contractFeedback)
 			repairState = &helperFactoryRepairState{
 				Stage:    "run",
 				Error:    err.Error(),
@@ -240,6 +253,9 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 				"input":    helperInput,
 				"language": helperLanguage,
 			})
+			if len(contractFeedback) > 0 {
+				attempts[len(attempts)-1]["contract_feedback"] = contractFeedback
+			}
 			continue
 		}
 		answer, ok := helperFactoryAnswer(result.Output, h.Config.ExtractSolutionLine)
@@ -504,12 +520,11 @@ type helperSkillRunner interface {
 }
 
 func (h *HelperFactoryTools) helperLanguage(attempt int) string {
-	if strings.TrimSpace(h.Config.PresetSource) != "" && attempt == 1 {
-		return HelperLanguageGo
-	}
 	switch strings.ToLower(strings.TrimSpace(h.Config.Language)) {
 	case HelperLanguagePython:
 		return HelperLanguagePython
+	case HelperLanguageGo:
+		return HelperLanguageGo
 	default:
 		return HelperLanguageGo
 	}
@@ -666,7 +681,9 @@ func buildHelperFactoryDraftPrompt(taskPrompt, instructions, feedback, language 
 		b.WriteString("The Python source must define solve(input) or Solve(input), where input is a dict.\n")
 		fmt.Fprintf(&b, "Keep source short and task-scoped: at most %d non-empty lines and %d characters, no full proof transcript, no unrelated subproblems, no long comments.\n", maxLines, maxChars)
 		b.WriteString("The decoded source must be actual Python source text. Do not include markdown fences, shell commands, JSON inside source, or placeholder code.\n")
-		b.WriteString("Use only standard algorithm imports if needed: bisect, collections, copy, functools, heapq, itertools, json, math, operator, statistics.\n")
+		b.WriteString("Use only standard algorithm imports if needed: ast, bisect, collections, copy, functools, heapq, itertools, json, math, operator, re, statistics.\n")
+		b.WriteString("Do not import os, sys, subprocess, pathlib, socket, requests, urllib, or other runtime/control modules. If a computation creates a huge integer, avoid decimal string materialization unless the task explicitly requires the full decimal expansion.\n")
+		b.WriteString("Never call eval, exec, compile, __import__, open, input, globals, locals, or getattr/setattr/delattr. Use ast.literal_eval or json.loads for parsing data.\n")
 		b.WriteString("Do not use ellipses, placeholders, escaped braces, or backslashes before Python punctuation. Source must parse as Python after JSON decoding.\n")
 		b.WriteString("Valid decoded source example: def solve(input):\\n    return {\"ok\": True, \"answer\": \"solution = 42\"}\n")
 	} else {
@@ -707,7 +724,9 @@ func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactory
 		b.WriteString("python\n")
 		b.WriteString("Contract: define solve(input) or Solve(input), return a dict containing ok and answer/solution.\n")
 		b.WriteString("Use clear multi-line Python. Do not compress compound for/if/while blocks after semicolons. Do not include JSON fragments, markdown, shell commands, prose, or placeholders in source.\n")
-		b.WriteString("Allowed imports: bisect, collections, copy, functools, heapq, itertools, json, math, operator, statistics.\n")
+		b.WriteString("Allowed imports: ast, bisect, collections, copy, functools, heapq, itertools, json, math, operator, re, statistics.\n")
+		b.WriteString("Disallowed imports include os, sys, subprocess, pathlib, socket, requests, urllib, and runtime/control modules.\n")
+		b.WriteString("Never call eval, exec, compile, __import__, open, input, globals, locals, or getattr/setattr/delattr. Use ast.literal_eval or json.loads for parsing data.\n")
 		b.WriteString("Return shape example: {\"source_b64\":\"ZGVmIHNvbHZlKGlucHV0KTpcbiAgICByZXR1cm4ge1wib2tcIjogVHJ1ZSwgXCJhbnN3ZXJcIjogXCJzb2x1dGlvbiA9IDQyXCJ9\"}\n")
 	} else {
 		b.WriteString("go\n")
@@ -725,6 +744,9 @@ func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactory
 	b.WriteString("- If the previous source exceeded the source budget, keep the algorithm and remove comments, unused helpers, and redundant checks before changing the approach.\n")
 	b.WriteString("- If the previous source raised a runtime exception, fix that concrete exception first and preserve the intended input shape.\n")
 	b.WriteString("- If the previous source returned ok:false, either produce a real checked answer or return no usable answer; do not hide failure behind an answer string.\n")
+	if strings.Contains(strings.ToLower(repair.Error), "disallowed import sys") {
+		b.WriteString("- The previous source imported sys. Remove that import. Do not call sys.set_int_max_str_digits; instead avoid converting huge integers to decimal strings, compute only requested compact values, or return a checked symbolic/modular/derived value when full decimal output is not explicitly required.\n")
+	}
 	if strings.TrimSpace(repair.Source) != "" {
 		b.WriteString("\n\nInvalid source to repair:\n")
 		b.WriteString(compactHelperFactoryLongText(repair.Source, 5000))
@@ -1360,7 +1382,29 @@ func helperFactoryAnswer(output map[string]any, extractSolution bool) (string, b
 			return answer, true
 		}
 	}
+	if !extractSolution {
+		if answer, ok := helperFactoryStructuredCycleAnswer(output); ok {
+			return answer, true
+		}
+	}
 	return "", false
+}
+
+func helperFactoryStructuredCycleAnswer(output map[string]any) (string, bool) {
+	if _, ok := output["pass"].(bool); !ok {
+		return "", false
+	}
+	if _, ok := output["candidates"]; !ok {
+		return "", false
+	}
+	if _, ok := output["checks"]; !ok {
+		return "", false
+	}
+	body, err := json.Marshal(output)
+	if err != nil || len(body) == 0 || string(body) == "null" || string(body) == "{}" {
+		return "", false
+	}
+	return "cycle_json: " + string(body), true
 }
 
 func helperFactoryAnswerValue(key string, value any, extractSolution bool) (string, bool) {
@@ -1373,6 +1417,11 @@ func helperFactoryAnswerValue(key string, value any, extractSolution bool) (stri
 		if extractSolution {
 			if line, ok := rlm.ExtractSolutionLine(text); ok {
 				return line, true
+			}
+			if strings.EqualFold(key, "answer") {
+				if solution, ok := helperFactoryStructuredJSONSolutionString(text); ok {
+					return solution, true
+				}
 			}
 			if strings.EqualFold(key, "solution") {
 				return "solution = " + text, true
@@ -1395,7 +1444,17 @@ func helperFactoryAnswerValue(key string, value any, extractSolution bool) (stri
 				return answer, true
 			}
 		}
-		return "", false
+		if !strings.EqualFold(key, "solution") && !(extractSolution && strings.EqualFold(key, "answer")) {
+			return "", false
+		}
+		if len(typed) == 0 {
+			return "", false
+		}
+		body, err := json.Marshal(typed)
+		if err != nil || len(body) == 0 || string(body) == "null" || string(body) == "{}" {
+			return "", false
+		}
+		return "solution = " + string(body), true
 	case []any:
 		if !strings.EqualFold(key, "solution") && !(extractSolution && strings.EqualFold(key, "answer")) {
 			return "", false
@@ -1418,6 +1477,41 @@ func helperFactoryAnswerValue(key string, value any, extractSolution bool) (stri
 		}
 		return "solution = " + string(body), true
 	}
+}
+
+func helperFactoryStructuredJSONSolutionString(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", false
+	}
+	if !strings.HasPrefix(text, "{") && !strings.HasPrefix(text, "[") {
+		return "", false
+	}
+	var decoded any
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
+		return "", false
+	}
+	if decoder.More() {
+		return "", false
+	}
+	if strings.TrimSpace(text[decoder.InputOffset():]) != "" {
+		return "", false
+	}
+	switch typed := decoded.(type) {
+	case map[string]any:
+		if len(typed) == 0 {
+			return "", false
+		}
+	case []any:
+		if len(typed) == 0 {
+			return "", false
+		}
+	default:
+		return "", false
+	}
+	return "solution = " + text, true
 }
 
 func helperFactoryCanonicalMoveSolution(values []any) (string, bool) {
@@ -1585,6 +1679,9 @@ func helperFactoryFinalizeFeedbackMap(output map[string]any) map[string]any {
 	}
 	counterexample := helperFactoryCounterexamplePacket(output)
 	if len(counterexample) == 0 {
+		counterexample = helperFactoryInvalidAnswerShapePacket(output)
+	}
+	if len(counterexample) == 0 {
 		if okValue, exists := output["ok"]; exists {
 			if okBool, isBool := okValue.(bool); isBool && !okBool {
 				counterexample = map[string]any{
@@ -1610,6 +1707,27 @@ func helperFactoryFinalizeFeedbackMap(output map[string]any) map[string]any {
 			},
 		},
 	}
+}
+
+func helperFactoryInvalidAnswerShapePacket(output map[string]any) map[string]any {
+	for _, key := range []string{"answer", "solution"} {
+		raw, ok := output[key]
+		if !ok || raw == nil {
+			continue
+		}
+		switch raw.(type) {
+		case string:
+			continue
+		}
+		return map[string]any{
+			"failure_kind": "invalid_answer_shape",
+			"message":      key + " was structured data, but this helper mode needs one final answer string",
+			"observed":     compactHelperFactoryVerifierDataSummary(raw),
+			"expected":     "return answer as a string in the requested output format; for cycle_solve use answer: \"cycle_json: {...}\" with pass, candidates, and checks",
+			"repair_hint":  "wrap the verified candidate map inside the required answer string instead of returning the map directly",
+		}
+	}
+	return nil
 }
 
 func helperFactoryCounterexamplePacket(current map[string]any) map[string]any {
@@ -1806,12 +1924,16 @@ func compactHelperFactoryMap(value map[string]any) map[string]any {
 		"json_hash":  hashHelperFactoryString(string(body)),
 		"json_chars": len(body),
 	}
-	for _, key := range []string{"answer", "solution", "error", "ok"} {
+	for _, key := range []string{"answer", "solution", "error", "ok", "pass", "first_failure", "failed_step", "failed_at_step", "failed_node", "message", "repair_hint", "observed", "expected"} {
 		if raw, ok := value[key]; ok {
 			switch typed := raw.(type) {
 			case string:
 				out[key] = compactHelperFactoryString(typed)
 			case bool:
+				out[key] = typed
+			case float64:
+				out[key] = typed
+			case int:
 				out[key] = typed
 			default:
 				out[key+"_summary"] = compactHelperFactoryVerifierDataSummary(typed)

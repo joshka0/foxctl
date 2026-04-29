@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +103,60 @@ func TestLLMRunnerUsesOpenAICompatibleChatPath(t *testing.T) {
 	properties, ok := parameters["properties"].(map[string]any)
 	if !ok || properties["query"] == nil {
 		t.Fatalf("properties=%v", parameters["properties"])
+	}
+}
+
+func TestLLMRunnerSanitizesFinalAnswer(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-test",
+			"choices": []map[string]any{
+				{
+					"index": 0,
+					"message": map[string]any{
+						"role":    "assistant",
+						"content": "<|channel>thought\ninternal notes<channel|>Final answer",
+					},
+					"finish_reason": "stop",
+				},
+			},
+			"usage": map[string]any{
+				"prompt_tokens":     10,
+				"completion_tokens": 4,
+				"total_tokens":      14,
+			},
+		})
+	}))
+	defer server.Close()
+
+	runner := LLMRunner{
+		Tools: fakeLLMToolExecutor{},
+		Config: LLMConfig{
+			Provider: "lmstudio",
+			APIKey:   "lm-studio",
+			BaseURL:  server.URL + "/v1",
+			Model:    "test-model",
+			Timeout:  5 * time.Second,
+		},
+	}
+
+	result, err := runner.Run(context.Background(), Task{
+		Prompt:        "inspect auth flow",
+		WorkspaceRoot: "/tmp/workspace",
+		MaxIterations: 1,
+	}, Environment{
+		Tools: []Tool{{Name: "retrieve_code", Description: "code retrieval", ReadOnly: true}},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Answer != "Final answer" {
+		t.Fatalf("answer=%q", result.Answer)
+	}
+	if result.Metadata["output_sanitization"] == nil {
+		t.Fatalf("missing output_sanitization metadata: %#v", result.Metadata)
 	}
 }
 
@@ -257,7 +312,7 @@ func TestLLMRunnerPreservesCancelledBeforeAssistantResponse(t *testing.T) {
 		WorkspaceRoot: "/tmp/workspace",
 		MaxIterations: 2,
 	}, Environment{
-		Tools: []Tool{{Name: "search_repo", Description: "repo", ReadOnly: true}},
+		Tools: []Tool{{Name: "retrieve_code", Description: "repo", ReadOnly: true}},
 	})
 	if err == nil {
 		t.Fatal("expected cancellation error")
@@ -350,6 +405,68 @@ func TestLLMRunnerRequireToolUseRejectsEmptyToolSurface(t *testing.T) {
 	}
 }
 
+func TestLLMSystemPromptUsesCompositeToolsOnlyWhenLegacyAbsent(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildLLMSystemPrompt(Environment{
+		Tools: compositeOnlyTools(),
+	}, Task{
+		Prompt:        "find the retrieval prompt wiring",
+		WorkspaceRoot: "/repo",
+	})
+
+	assertMentionsTools(t, prompt, []string{
+		"retrieve_code",
+		"retrieve_memory",
+		"retrieve_context",
+		"retrieve_task",
+		"retrieve_mixed",
+		"load_evidence_ref",
+	})
+}
+
+func TestStagedPromptsUseLoadEvidenceRefWhenLegacyAbsent(t *testing.T) {
+	t.Parallel()
+
+	base := BuildLLMSystemPrompt(Environment{
+		Tools: compositeOnlyTools(),
+	}, Task{Prompt: "inspect staged prompts", WorkspaceRoot: "/repo"})
+	phase := Phase{
+		Name:         "inspection",
+		Objective:    "Open and inspect the strongest candidates from discovery.",
+		AllowedTools: []string{"load_evidence_ref", "retrieve_code"},
+		RequireOneOf: []string{"load_evidence_ref"},
+	}
+	systemPrompt := buildPhaseSystemPrompt(base, "inspect staged prompts", phase, []string{"internal/rlm/llm_runner.go"}, nil)
+	userPrompt := buildPhasePrompt("inspect staged prompts", phase, []string{"internal/rlm/llm_runner.go"}, nil)
+	combined := systemPrompt + "\n" + userPrompt
+
+	assertMentionsTools(t, combined, []string{"retrieve_code", "load_evidence_ref"})
+	if !strings.Contains(userPrompt, "load_evidence_ref") {
+		t.Fatalf("staged inspection prompt did not require load_evidence_ref:\n%s", userPrompt)
+	}
+}
+
+func compositeOnlyTools() []Tool {
+	return []Tool{
+		{Name: "retrieve_code", ReadOnly: true},
+		{Name: "retrieve_memory", ReadOnly: true},
+		{Name: "retrieve_context", ReadOnly: true},
+		{Name: "retrieve_task", ReadOnly: true},
+		{Name: "retrieve_mixed", ReadOnly: true},
+		{Name: "load_evidence_ref", ReadOnly: true},
+	}
+}
+
+func assertMentionsTools(t *testing.T, prompt string, tools []string) {
+	t.Helper()
+	for _, tool := range tools {
+		if !strings.Contains(prompt, tool) {
+			t.Fatalf("prompt missing tool %q:\n%s", tool, prompt)
+		}
+	}
+}
+
 func TestCollectRetrievedPaths(t *testing.T) {
 	t.Parallel()
 
@@ -365,8 +482,8 @@ func TestCollectRetrievedPaths(t *testing.T) {
 		},
 	}
 
-	got := collectRetrievedPaths(results, "/repo", "See internal/auth/service.go for the final entrypoint.")
-	want := []string{"internal/auth/handler.go", "internal/auth/middleware.go", "internal/auth/service.go"}
+	got := collectRetrievedPaths(results, "/repo", "See internal/auth/service.go and web/src/AuthPanel.tsx for the final entrypoints.")
+	want := []string{"internal/auth/handler.go", "internal/auth/middleware.go", "internal/auth/service.go", "web/src/AuthPanel.tsx"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("collectRetrievedPaths()=%v want %v", got, want)
 	}
@@ -381,7 +498,7 @@ func TestSummarizeParentToolUsage(t *testing.T) {
 			PromptTokens:            100,
 			CompletionTokens:        10,
 			ToolCalls:               1,
-			ToolNames:               []string{"code_search_ensemble"},
+			ToolNames:               []string{"retrieve_code"},
 			ToolResultTokenEstimate: 42,
 		},
 		{
@@ -389,7 +506,7 @@ func TestSummarizeParentToolUsage(t *testing.T) {
 			PromptTokens:     145,
 			CompletionTokens: 20,
 		},
-	}, "code_search_ensemble")
+	}, "retrieve_code")
 
 	if intFromAny(got["target_tool_invocations"]) != 1 {
 		t.Fatalf("usage=%v", got)

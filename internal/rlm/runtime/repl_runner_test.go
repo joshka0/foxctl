@@ -531,19 +531,19 @@ func TestMultiToolExecutorCombinesTools(t *testing.T) {
 
 	exec := MultiToolExecutor{
 		fakeREPLExtraToolExecutor{},
-		&EphemeralSkillTools{},
+		&HelperFactoryTools{},
 	}
 	defs := exec.List()
-	var sawExtra, sawDraft bool
+	var sawExtra, sawHelper bool
 	for _, def := range defs {
 		switch def.Name {
 		case "extra_test_tool":
 			sawExtra = true
-		case EphemeralSkillDraftToolName:
-			sawDraft = true
+		case EphemeralHelperSolveToolName:
+			sawHelper = true
 		}
 	}
-	if !sawExtra || !sawDraft {
+	if !sawExtra || !sawHelper {
 		t.Fatalf("combined tool defs missing expected tools: %#v", defs)
 	}
 }
@@ -567,8 +567,6 @@ func TestREPLRunnerExtraToolExecutorPrefersHelperFactory(t *testing.T) {
 		switch def.Name {
 		case EphemeralHelperSolveToolName:
 			sawHelper = true
-		case EphemeralSkillDraftToolName, EphemeralSkillRunToolName:
-			t.Fatalf("legacy ephemeral skill tool leaked into helper surface: %#v", defs)
 		}
 	}
 	if !sawHelper {
@@ -1393,7 +1391,7 @@ func TestREPLRunnerStagedBraidGraphPhaseRepairsAndCarriesState(t *testing.T) {
 			_, _ = w.Write([]byte(`{
 				"id":"chatcmpl-braid-repair",
 				"choices":[{
-					"message":{"role":"assistant","content":"{\"version\":1,\"nodes\":[{\"id\":\"n1\",\"kind\":\"extract\",\"question\":\"extract context\"},{\"id\":\"n2\",\"kind\":\"cycle_solve\",\"question\":\"solve fixed point\",\"depends_on\":[\"n1\"]},{\"id\":\"n3\",\"kind\":\"solve\",\"question\":\"solve requested values\",\"depends_on\":[\"n1\",\"n2\"]},{\"id\":\"n4\",\"kind\":\"verify\",\"question\":\"verify candidate\",\"depends_on\":[\"n2\",\"n3\"]},{\"id\":\"n5\",\"kind\":\"reduce\",\"depends_on\":[\"n3\",\"n4\"]}],\"final_node\":\"n5\"}"},
+					"message":{"role":"assistant","content":"{\"version\":1,\"nodes\":[{\"id\":\"n1\",\"kind\":\"extract\",\"question\":\"extract context\"},{\"id\":\"n2\",\"kind\":\"cycle_solve\",\"question\":\"solve fixed point\",\"depends_on\":[\"n1\"],\"input_schema\":{\"cycle_clusters\":[[\"node_2\",\"node_5\"]]}},{\"id\":\"n3\",\"kind\":\"solve\",\"question\":\"solve requested values\",\"depends_on\":[\"n1\",\"n2\"]},{\"id\":\"n4\",\"kind\":\"verify\",\"question\":\"verify candidate\",\"depends_on\":[\"n2\",\"n3\"]},{\"id\":\"n5\",\"kind\":\"reduce\",\"depends_on\":[\"n3\",\"n4\"]}],\"final_node\":\"n5\"}"},
 					"finish_reason":"stop"
 				}],
 				"usage":{"prompt_tokens":10,"completion_tokens":12}
@@ -1495,6 +1493,9 @@ func TestREPLRunnerStagedBraidGraphPhaseRepairsAndCarriesState(t *testing.T) {
 	}
 	if !strings.Contains(repairPrompt, "checks original constraints by substituting candidate values") {
 		t.Fatalf("repair prompt missing verify-node original-constraints guidance:\n%s", repairPrompt)
+	}
+	if !strings.Contains(repairPrompt, "Do not leave a multi-target solve with only target_nodes") || !strings.Contains(repairPrompt, "input_schema.solve_targets") {
+		t.Fatalf("repair prompt missing multi-target solve contract guidance:\n%s", repairPrompt)
 	}
 	if calls != 3 {
 		t.Fatalf("calls=%d want 3", calls)
@@ -2361,6 +2362,25 @@ func TestValidateChildSummaryRejectsCircularDependencyBlocker(t *testing.T) {
 	}
 }
 
+func TestValidateChildSummaryLengthUsesCharactersNotBytes(t *testing.T) {
+	t.Parallel()
+
+	text := strings.Join([]string{
+		"status: solved",
+		"answer: solution = ok",
+		"checks: " + strings.Repeat("é", 1155),
+	}, "\n")
+	if chars := runeLen(strings.TrimSpace(text)); chars != 1200 {
+		t.Fatalf("test summary chars=%d, want 1200", chars)
+	}
+	if bytes := len(strings.TrimSpace(text)); bytes <= 1200 {
+		t.Fatalf("test summary bytes=%d, want >1200", bytes)
+	}
+	if err := validateChildSummaryFinalText(text); err != nil {
+		t.Fatalf("validateChildSummaryFinalText() err=%v, want nil", err)
+	}
+}
+
 func TestStructuredFinalRepairPromptWarnsAboutCircularDependencyBlockers(t *testing.T) {
 	t.Parallel()
 
@@ -2967,6 +2987,24 @@ func TestValidateREPLPhaseOutputValidatesCyclePacket(t *testing.T) {
 	}
 }
 
+func TestShouldFilterInvalidCyclePacket(t *testing.T) {
+	t.Parallel()
+
+	phase := REPLRunnerPhase{
+		OutputKind:           REPLPhaseOutputKindCyclePacket,
+		FilterOverlongOutput: true,
+	}
+	if !shouldFilterInvalidCyclePacket(phase, engine.EngineOutput{AssistantText: "I explored the cycle"}, fmt.Errorf("parse JSON")) {
+		t.Fatal("expected invalid non-empty cycle packet to be filtered")
+	}
+	if shouldFilterInvalidCyclePacket(phase, engine.EngineOutput{}, fmt.Errorf("parse JSON")) {
+		t.Fatal("empty cycle packet should not be filtered")
+	}
+	if shouldFilterInvalidCyclePacket(REPLRunnerPhase{OutputKind: REPLPhaseOutputKindCyclePacket}, engine.EngineOutput{AssistantText: "I explored the cycle"}, fmt.Errorf("parse JSON")) {
+		t.Fatal("cycle packet without filter enabled should not be filtered")
+	}
+}
+
 func TestValidateREPLPhaseOutputValidatesCycleWitness(t *testing.T) {
 	t.Parallel()
 
@@ -3047,6 +3085,31 @@ func TestBuildCyclePacketFilterPromptPreservesPacketContract(t *testing.T) {
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("packet filter prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestBuildCycleWitnessRepairPromptRejectsCandidateMapContract(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildCycleWitnessRepairPrompt(
+		"solve",
+		REPLRunnerPhase{Name: "witness", OutputKind: REPLPhaseOutputKindCycleWitness},
+		engine.EngineOutput{AssistantText: `{"unknowns":["node_2"],"candidate_bounds":{"node_2":[0,2000]},"constraints":["node_2 = 1132"]}`},
+		`{"node_2":1132}`,
+		fmt.Errorf(`cycle witness: parse JSON: json: unknown field "node_2"`),
+	)
+	for _, want := range []string{
+		"Cycle witness repair required",
+		"bounded-search spec",
+		"Do not include markdown, prose, code, cycle_json, or a direct candidate map",
+		`"checker_kind":"bounded_search"`,
+		`{"node_2":1132}`,
+		"Do not return the candidate map directly",
+		"product of all variable domain widths below 100000",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("witness repair prompt missing %q:\n%s", want, prompt)
 		}
 	}
 }
@@ -3793,6 +3856,43 @@ func TestREPLRunnerAsyncRecursionRejectsStaleWaitBeforeFinalAnswer(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "changed after the last rlm_wait") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestNormalizeMaxTokenChildSummaryWrapsPartialAnswer(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeMaxTokenChildSummary("Looking at the task...\nanswer: solution = [1, 2, 3]\nmore scratch")
+	for _, want := range []string{"status: partial", "answer: solution = [1, 2, 3]", "checks: max-token child output was salvaged"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("normalized summary missing %q:\n%s", want, got)
+		}
+	}
+	if err := validateChildSummaryFinalText(got); err != nil {
+		t.Fatalf("validateChildSummaryFinalText() error = %v", err)
+	}
+}
+
+func TestIsREPLMaxTokenError(t *testing.T) {
+	t.Parallel()
+
+	if !isREPLMaxTokenError(fmt.Errorf("rlm repl runner: model hit max token stop before producing a valid final answer")) {
+		t.Fatal("expected max-token error to be recognized")
+	}
+	if isREPLMaxTokenError(fmt.Errorf("rlm repl runner: tool failed")) {
+		t.Fatal("non max-token error should not be recognized")
+	}
+}
+
+func TestIsChildSummaryFinalRepairError(t *testing.T) {
+	t.Parallel()
+
+	err := fmt.Errorf("rlm repl runner: final output repair failed for child_summary: child summary final response must include status: solved|partial|blocked")
+	if !isChildSummaryFinalRepairError(err) {
+		t.Fatal("expected child summary final repair error to be recognized")
+	}
+	if isChildSummaryFinalRepairError(fmt.Errorf("rlm repl runner: python_repl failed")) {
+		t.Fatal("non child-summary error should not be recognized")
 	}
 }
 

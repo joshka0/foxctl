@@ -305,11 +305,14 @@ func TestQueryVariantsPreferContentTermsBeforeTail(t *testing.T) {
 }
 
 func TestSearchToolForTask(t *testing.T) {
-	if got := SearchToolForTask(TaskTypeMemoryRecall); got != "memory_ensemble_retrieve" {
-		t.Fatalf("got=%s want memory_ensemble_retrieve", got)
+	if got := SearchToolForTask(TaskTypeMemoryRecall); got != "retrieve_memory" {
+		t.Fatalf("got=%s want retrieve_memory", got)
 	}
-	if got := SearchToolForTask(TaskTypeCodeLocate); got != "code_search_ensemble" {
-		t.Fatalf("got=%s want code_search_ensemble", got)
+	if got := SearchToolForTask(TaskTypeCodeLocate); got != "retrieve_code" {
+		t.Fatalf("got=%s want retrieve_code", got)
+	}
+	if got := SearchToolForTask(TaskTypeGeneral); got != "retrieve_mixed" {
+		t.Fatalf("got=%s want retrieve_mixed", got)
 	}
 }
 
@@ -361,6 +364,141 @@ func TestLambdaRunnerEphemeralSkill(t *testing.T) {
 	}
 	if result.Metadata["lambda_mode"] != "ephemeral_helper" {
 		t.Fatalf("lambda_mode=%v", result.Metadata["lambda_mode"])
+	}
+}
+
+func TestLambdaRunnerEphemeralSkillSanitizesFinalAnswer(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-test",
+			"choices": []map[string]any{{
+				"index": 0,
+				"message": map[string]any{
+					"role": "assistant",
+					"content": `{
+						"source":"func Solve(input map[string]any) map[string]any { return map[string]any{\"answer\": \"<|channel>thought notes<channel|>solution = 42\"} }",
+						"input":{}
+					}`,
+				},
+				"finish_reason": "stop",
+			}},
+		})
+	}))
+	defer server.Close()
+
+	runner := LambdaRunner{
+		Tools: fakeLLMToolExecutor{},
+		Config: LambdaConfig{
+			EphemeralSkills:     true,
+			ExtractSolutionLine: true,
+			LLM: LLMConfig{
+				Provider: "lmstudio",
+				BaseURL:  server.URL + "/v1",
+				AuthMode: "none",
+				Model:    "test-model",
+				Timeout:  5 * time.Second,
+			},
+		},
+	}
+	result, err := runner.Run(context.Background(), Task{Prompt: "compute 17+25"}, Environment{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Answer != "solution = 42" {
+		t.Fatalf("answer=%q", result.Answer)
+	}
+	if result.Metadata["output_sanitization"] == nil {
+		t.Fatalf("missing output_sanitization metadata: %#v", result.Metadata)
+	}
+}
+
+func TestLambdaLeafSanitizesJudgeAnswer(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-test",
+			"choices": []map[string]any{{
+				"index": 0,
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "<|channel>thought\nprivate<channel|>Leaf answer",
+				},
+				"finish_reason": "stop",
+			}},
+		})
+	}))
+	defer server.Close()
+
+	runner := LambdaRunner{
+		Tools: lambdaFakeToolExecutor{},
+		Config: LambdaConfig{
+			LLM: LLMConfig{
+				Provider: "lmstudio",
+				BaseURL:  server.URL + "/v1",
+				AuthMode: "none",
+				Model:    "test-model",
+				Timeout:  5 * time.Second,
+			},
+		},
+	}
+	result, err := runner.leaf(context.Background(), Task{Prompt: "find answer"}, Environment{}, LambdaPlan{
+		TaskType: TaskTypeGeneral,
+		TauStar:  1,
+	})
+	if err != nil {
+		t.Fatalf("leaf() error = %v", err)
+	}
+	if result.Answer != "Leaf answer" {
+		t.Fatalf("answer=%q", result.Answer)
+	}
+	if result.Metadata["output_sanitization"] == nil {
+		t.Fatalf("missing output_sanitization metadata: %#v", result.Metadata)
+	}
+}
+
+func TestLambdaReduceSanitizesSynthesizedAnswer(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-test",
+			"choices": []map[string]any{{
+				"index": 0,
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "<|tool_call>{\"name\":\"noop\"}<tool_call|><|channel>thought\nscratch<channel|>Synthesized answer",
+				},
+				"finish_reason": "stop",
+			}},
+		})
+	}))
+	defer server.Close()
+
+	runner := LambdaRunner{
+		Config: LambdaConfig{
+			LLM: LLMConfig{
+				Provider: "lmstudio",
+				BaseURL:  server.URL + "/v1",
+				AuthMode: "none",
+				Model:    "test-model",
+				Timeout:  5 * time.Second,
+			},
+		},
+	}
+	result, err := runner.reduce(context.Background(), Task{Prompt: "merge"}, LambdaPlan{
+		ComposeOp: ComposeSynthesize,
+	}, []Result{{Answer: "partial"}})
+	if err != nil {
+		t.Fatalf("reduce() error = %v", err)
+	}
+	if result.Answer != "Synthesized answer" {
+		t.Fatalf("answer=%q", result.Answer)
+	}
+	if result.Metadata["output_sanitization"] == nil {
+		t.Fatalf("missing output_sanitization metadata: %#v", result.Metadata)
 	}
 }
 
@@ -505,6 +643,27 @@ func TestSelectLambdaRetrievedPathsPrefersAnswerCitations(t *testing.T) {
 	want := []string{
 		"cmd/foxctl/cmd/eval_longcot.go",
 		"internal/tooling/evals/longcotbridge/verifier.go",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("paths=%v want %v", got, want)
+	}
+	if strings.Join(answerPaths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("answer_paths=%v want %v", answerPaths, want)
+	}
+	if source != "answer_paths" {
+		t.Fatalf("source=%q want answer_paths", source)
+	}
+}
+
+func TestSelectLambdaRetrievedPathsRecognizesCommonRepoExtensions(t *testing.T) {
+	t.Parallel()
+
+	answer := "Relevant paths: `web/src/AuthPanel.tsx`, `scripts/solve.py`, and `lib/jido/agent_server.ex`."
+	got, answerPaths, source := selectLambdaRetrievedPaths(answer, nil, "")
+	want := []string{
+		"web/src/AuthPanel.tsx",
+		"scripts/solve.py",
+		"lib/jido/agent_server.ex",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("paths=%v want %v", got, want)

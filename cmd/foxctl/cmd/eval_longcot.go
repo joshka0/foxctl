@@ -79,7 +79,7 @@ var longCoTConditionTemplates = map[longcoteval.ConditionID]longcoteval.Conditio
 		RLMToolProfile:  "longcot-repl-recursive",
 		MaxDepth:        1,
 		MaxIterations:   32,
-		MaxSubcalls:     12,
+		MaxSubcalls:     16,
 	},
 	longcoteval.ConditionRLMNoToolsStaged: {
 		ID:              longcoteval.ConditionRLMNoToolsStaged,
@@ -258,6 +258,7 @@ func newEvalLongCoTCommand() *cobra.Command {
 			}
 			if requireEphemeralSkills {
 				ephemeralSkills = true
+				generalHelper = true
 			}
 			if generalHelper {
 				ephemeralSkills = true
@@ -605,9 +606,9 @@ func newEvalLongCoTCommand() *cobra.Command {
 	cmd.Flags().StringVar(&longCoTRepo, "longcot-repo", "", "Path to local LongCoT repository checkout used for official verification")
 	cmd.Flags().StringVar(&longCoTPython, "longcot-python", "", "Python executable for LongCoT verification (optional; defaults to uv/python3 discovery)")
 	cmd.Flags().StringVar(&sandboxKind, "sandbox", string(rlmruntime.SandboxKindPython), "Scratch REPL sandbox for rlm_repl conditions: python or yaegi")
-	cmd.Flags().BoolVar(&ephemeralSkills, "ephemeral-skills", false, "Expose attempt-scoped ephemeral Go skill draft/run tools to rlm_repl conditions")
+	cmd.Flags().BoolVar(&ephemeralSkills, "ephemeral-skills", false, "Expose ephemeral_helper_solve to rlm_repl conditions")
 	cmd.Flags().BoolVar(&generalHelper, "general-helper", false, "Expose ephemeral_helper_solve, a runtime-managed short-lived Go helper factory for rlm_repl conditions")
-	cmd.Flags().BoolVar(&requireEphemeralSkills, "require-ephemeral-skills", false, "Require rlm_repl conditions to call ephemeral_skill_draft and ephemeral_skill_run before finalizing")
+	cmd.Flags().BoolVar(&requireEphemeralSkills, "require-ephemeral-skills", false, "Require rlm_repl conditions to call ephemeral_helper_solve before finalizing")
 	cmd.Flags().BoolVar(&blocksworldHelper, "blocksworld-helper", true, "Expose the deterministic blocksworld_solve helper for BlocksWorld LongCoT questions")
 	cmd.Flags().BoolVar(&finalFromVerifiedHandoff, "rlm-final-from-verified-handoff", false, "For braid RLM conditions, return a runtime-verified final handoff directly instead of asking the model to restate long final answers")
 	cmd.Flags().BoolVar(&noFallback, "verify-no-fallback", false, "Disable LongCoT verifier fallback judges (--no-fallback)")
@@ -778,7 +779,7 @@ func parseLongCoTConditionIDs(values []string) []string {
 	return out
 }
 
-func longCoTAllowedToolsForCondition(condition longcoteval.Condition, sandbox rlmruntime.SandboxKind, ephemeralSkills bool, generalHelper bool) []string {
+func longCoTAllowedToolsForCondition(condition longcoteval.Condition, sandbox rlmruntime.SandboxKind, ephemeralSkills bool, _ bool) []string {
 	replToolName := rlmruntime.PythonREPLToolName
 	if rlmruntime.NormalizeSandboxKind(sandbox) == rlmruntime.SandboxKindYaegi {
 		replToolName = rlmruntime.GoREPLToolName
@@ -787,11 +788,7 @@ func longCoTAllowedToolsForCondition(condition longcoteval.Condition, sandbox rl
 		if !ephemeralSkills {
 			return tools
 		}
-		if generalHelper {
-			return []string{rlmruntime.EphemeralHelperSolveToolName}
-		}
-		out := append(append([]string(nil), tools...), rlmruntime.EphemeralSkillDraftToolName, rlmruntime.EphemeralSkillRunToolName)
-		return out
+		return []string{rlmruntime.EphemeralHelperSolveToolName}
 	}
 	switch condition.ID {
 	case longcoteval.ConditionBaselineNoToolsOfficial, longcoteval.ConditionRLMNoToolsStaged:
@@ -1824,21 +1821,22 @@ func longCoTBraidSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRu
 				"Return JSON only. Build a bounded reasoning graph with keys: version, nodes, final_node.",
 				"The word json is intentional: return one valid json object and nothing else.",
 				"Set version to 1.",
-				"Use 4 to 7 nodes in this controller shape: extract -> one primary solve wave, optionally one alternate/repair solve wave or one cycle_solve wave when justified -> verify -> reduce.",
+				"Use 4 to 12 nodes in this controller shape: extract -> one primary solve wave, optionally alternate/repair solve waves, dependency clusters, or one cycle_solve wave when justified -> verify -> reduce.",
 				"Each node must include id, kind, question, depends_on, expected_output, max_summary_chars, and helper_policy.",
 				"Every solve and verify node must additionally include archetype, scaffold_class, scaffold_id, and input_schema. These scaffold fields tell the runtime how to hand off execution. Omitting them is a validation error.",
 				"Allowed kind values are extract, solve, cycle_solve, verify, reduce.",
 				"Allowed helper_policy values are auto, preferred, required, never. Use never for extract and reduce. Use preferred for solve-like and verify nodes that may need exact search, simulation, parsing, or constraint checking.",
-				"Allowed archetype and scaffold_class values (they must match): symbolic_trace, candidate_verify, state_transition, explicit_dag, graph_search, numeric_dp, sequence_simulation, constraint_solver, mixed.",
-				"Allowed scaffold_id values: type_inference_v1, property_check_v1, state_replay_v1, search_backtrack_v1, generic_v1. Use generic_v1 when no specific scaffold applies.",
-				"input_schema must be a JSON object whose keys describe the structured input for the scaffold. For example, a state_transition node might use {\"initial_state\": \"...\", \"actions\": \"...\", \"goal\": \"...\"}.",
+				"Allowed scaffold pairs are strict: symbolic_trace/type_inference_v1, candidate_verify/property_check_v1, state_transition/state_replay_v1, finite_state_transition/stack_relocation_v1, explicit_dag/search_backtrack_v1, graph_search/resource_path_min_initial_v1, graph_search/explicit_shortest_path_v1, numeric_dp/recurrence_table_v1, sequence_simulation/json_patch_v1, constraint_solver/finite_domain_v1.",
+				"Do not use generic_v1. If no specialized scaffold applies, use explicit_dag/search_backtrack_v1 with input_schema {\"prompt\":\"original problem and dependencies\"}.",
+				"Use state_transition/state_replay_v1 only for replaying an explicit action sequence such as UCI chess moves. For algebraic chains, placeholder dependency chains, or independent subproblem DAGs, use explicit_dag/search_backtrack_v1 or numeric_dp/recurrence_table_v1 instead.",
+				"input_schema must be a JSON object whose keys describe the structured input for the scaffold. For example, a chess replay node might use {\"move_sequence\":\"UCI moves\",\"goal\":\"FEN output\"}. For explicit dependency graphs, target_nodes means requested final output ids, solve_targets means independent split work items, and cycle_clusters means strongly connected target groups, e.g. {\"target_nodes\":[\"node_4\",\"node_2\",\"node_7\"],\"cycle_clusters\":[[\"node_2\",\"node_5\",\"node_6\",\"node_7\"]],\"prompt\":\"original problem and extracted dependencies\"}. Do not put final requested outputs in solve_targets unless they are truly independent.",
 				"The extract node has depends_on []. The primary solve node depends on extract and must produce a complete candidate answer or candidate construction. The verify node depends on the final candidate-producing solve-like node. The reduce node depends on the final candidate-producing solve-like node and verify and must be final_node.",
 				"Create one solve-like node by default. Add a second solve-like node only when it is a real independent alternate candidate, a concrete repair of the first candidate, or a true dependency cluster; do not split a single state-transition plan into arbitrary prose segments.",
 				"Use small max_summary_chars for facts and verifier verdicts. Use a large max_summary_chars, up to 12000, for any solve node whose exact candidate may be long and must be verified losslessly downstream.",
 				"Only put solve-like nodes in the same wave when they are mathematically independent. If one solve-like node needs another solve-like node's output, include that node id in depends_on.",
 				"cycle_solve is optional. Use it only when extracted facts contain a true mutually dependent numeric/logical cluster: circular references, fixed-point equations, recursive definitions, or flow constraints that can be checked by finite bounded search.",
 				"For state-transition, planning, simulation, path construction, program tracing, or BlocksWorld-style stack puzzles, do not segment the plan by vague phases. Use one primary solve node to build an executable candidate action sequence or value assignment, then a verify node to simulate/substitute against the original constraints.",
-				"If you do use cycle_solve, collapse that strongly connected constraint cluster into one cycle_solve node. Keep the runtime graph acyclic; do not encode mutual dependency as depends_on edges between separate nodes.",
+				"If you do use cycle_solve, collapse that strongly connected constraint cluster into one cycle_solve node and declare the same cluster in input_schema.cycle_clusters. Keep the runtime graph acyclic; do not encode mutual dependency as depends_on edges between separate nodes.",
 				"The extract node must only extract facts: placeholders, requested outputs, equations, and dependency constraints. It must not solve, verify, reduce, or declare blocked.",
 				"Each question must name one leaf-solvable subproblem, dependency cluster, or verification target; children receive the official task text automatically.",
 				"Leaf-solvable means the child can work directly from the official task plus dependency summaries; do not ask children to recurse, spawn agents, wait, or request more runtime depth.",
@@ -1846,12 +1844,12 @@ func longCoTBraidSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRu
 				"The verify node must independently substitute the candidate answer into the original placeholders and constraints. It must not merely check consistency with a prior summary.",
 				"Node questions and expected_output must not mention rlm_query, rlm_wait, rlm_result, subagents, recursion budget, or runtime depth.",
 				"Do not include markdown, Mermaid, prose, code fences, or trailing text.",
-				"Example state-transition shape: {\"version\":1,\"nodes\":[{\"id\":\"n_extract\",\"kind\":\"extract\",\"question\":\"Extract initial state, goal state, rules, requested output format, and verification constraints as facts only\",\"depends_on\":[],\"expected_output\":\"state and rule facts; no blocked verdict\",\"max_summary_chars\":600,\"helper_policy\":\"never\"},{\"id\":\"n_solve_plan\",\"kind\":\"solve\",\"question\":\"Construct a complete candidate action sequence or value assignment directly from the original state and goal\",\"depends_on\":[\"n_extract\"],\"expected_output\":\"full candidate answer in the requested format; no truncation\",\"max_summary_chars\":12000,\"helper_policy\":\"preferred\",\"archetype\":\"state_transition\",\"scaffold_class\":\"state_transition\",\"scaffold_id\":\"state_replay_v1\",\"input_schema\":{\"initial_state\":\"extracted initial state\",\"actions\":\"action sequence to replay\",\"goal\":\"goal condition\"}},{\"id\":\"n_verify\",\"kind\":\"verify\",\"question\":\"Simulate or substitute the full candidate against the original rules and goal; report first failed constraint or pass\",\"depends_on\":[\"n_solve_plan\"],\"expected_output\":\"pass true or first concrete failed constraint\",\"max_summary_chars\":1200,\"helper_policy\":\"preferred\",\"archetype\":\"candidate_verify\",\"scaffold_class\":\"candidate_verify\",\"scaffold_id\":\"property_check_v1\",\"input_schema\":{\"candidates\":\"candidate answers\",\"predicates\":\"verification predicates\"}},{\"id\":\"n_reduce\",\"kind\":\"reduce\",\"question\":\"Return the final answer only if verification passed; otherwise return failed constraints\",\"depends_on\":[\"n_solve_plan\",\"n_verify\"],\"expected_output\":\"solution line or concrete failed constraints\",\"max_summary_chars\":300,\"helper_policy\":\"never\"}],\"final_node\":\"n_reduce\"}",
+				"Example explicit-DAG shape: {\"version\":1,\"nodes\":[{\"id\":\"n_extract\",\"kind\":\"extract\",\"question\":\"Extract requested_outputs, known_values, dependency_edges, placeholders, cycle_clusters, equations_or_checks, candidate_bounds, and blockers as facts only\",\"depends_on\":[],\"expected_output\":\"facts and dependency graph; no blocked verdict\",\"max_summary_chars\":1200,\"helper_policy\":\"never\"},{\"id\":\"n_solve_plan\",\"kind\":\"solve\",\"question\":\"Solve the dependency graph from leaves and cycle clusters to requested outputs and produce a complete candidate answer\",\"depends_on\":[\"n_extract\"],\"expected_output\":\"full candidate answer in the requested format; no truncation\",\"max_summary_chars\":12000,\"helper_policy\":\"preferred\",\"archetype\":\"explicit_dag\",\"scaffold_class\":\"explicit_dag\",\"scaffold_id\":\"search_backtrack_v1\",\"input_schema\":{\"target_nodes\":[\"node_4\",\"node_2\",\"node_7\"],\"cycle_clusters\":[[\"node_2\",\"node_5\",\"node_6\",\"node_7\"]],\"prompt\":\"original problem and extracted dependencies\"}},{\"id\":\"n_verify\",\"kind\":\"verify\",\"question\":\"Substitute the full candidate into the original constraints; report first failed constraint or pass\",\"depends_on\":[\"n_solve_plan\"],\"expected_output\":\"pass true or first concrete failed constraint\",\"max_summary_chars\":1200,\"helper_policy\":\"preferred\",\"archetype\":\"candidate_verify\",\"scaffold_class\":\"candidate_verify\",\"scaffold_id\":\"property_check_v1\",\"input_schema\":{\"candidates\":\"candidate answers\",\"predicates\":\"verification predicates\"}},{\"id\":\"n_reduce\",\"kind\":\"reduce\",\"question\":\"Return the final answer only if verification passed; otherwise return failed constraints\",\"depends_on\":[\"n_solve_plan\",\"n_verify\"],\"expected_output\":\"solution line or concrete failed constraints\",\"max_summary_chars\":300,\"helper_policy\":\"never\"}],\"final_node\":\"n_reduce\"}",
 			}, "\n"),
 			MaxIterations:           1,
 			OutputKind:              rlmruntime.REPLPhaseOutputKindBraidGraph,
 			ResponseFormat:          json.RawMessage(`{"type":"json_object"}`),
-			MaxGraphNodes:           7,
+			MaxGraphNodes:           12,
 			BraidGraphPolicy:        rlmruntime.BraidGraphPolicyLongCoTController,
 			RequireScaffoldContract: true,
 		},
@@ -1866,7 +1864,7 @@ func longCoTBraidSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRu
 			MaxIterations:              1,
 			AutoExecuteGraphNodes:      true,
 			DisableHelperFirstFallback: true,
-			BraidRepairAttempts:        1,
+			BraidRepairAttempts:        2,
 		},
 		{
 			Name: "final",
@@ -2113,6 +2111,7 @@ func longCoTREPLRunnerConfig(
 		FinalSolutionLineRequired:      true,
 		FinalAnswerFromVerifiedHandoff: finalFromVerifiedHandoff,
 		FinalAnswerRepairMaxAttempts:   1,
+		ToolErrorRepairMaxAttempts:     3,
 	}
 	if generalHelper {
 		helperLLM := longCoTLLMConfigFromTarget(firstNonEmptyLongCoTLiveTarget(helperRuntime.Target, target), condition, firstPositiveDuration(helperRuntime.Timeout, timeout), maxIterations)
@@ -2310,56 +2309,16 @@ func longCoTHelperMaxSourceChars() int {
 	return 3200
 }
 
-func longCoTEphemeralSkillPhases(question longcoteval.Question, sandbox rlmruntime.SandboxKind, generalHelper bool) []rlmruntime.REPLRunnerPhase {
-	replToolName := rlmruntime.PythonREPLToolName
-	language := "Python"
-	if rlmruntime.NormalizeSandboxKind(sandbox) == rlmruntime.SandboxKindYaegi {
-		replToolName = rlmruntime.GoREPLToolName
-		language = "Go"
-	}
-	if generalHelper {
-		return []rlmruntime.REPLRunnerPhase{
-			{
-				Name:                    "helper-solve",
-				Prompt:                  buildLongCoTGeneralHelperPhasePrompt(question),
-				Tools:                   []string{rlmruntime.EphemeralHelperSolveToolName},
-				RequiredTools:           []string{rlmruntime.EphemeralHelperSolveToolName},
-				MaxIterations:           1,
-				AutoExecuteRequiredTool: true,
-				RequireToolResultOK:     true,
-			},
-		}
-	}
+func longCoTEphemeralSkillPhases(question longcoteval.Question, _ rlmruntime.SandboxKind, _ bool) []rlmruntime.REPLRunnerPhase {
 	return []rlmruntime.REPLRunnerPhase{
 		{
-			Name:          "inspect",
-			Prompt:        fmt.Sprintf("Inspect official_prompt with %s. Do not produce a final answer in this phase.", replToolName),
-			Tools:         []string{replToolName},
-			RequiredTools: []string{replToolName},
-			MaxIterations: 1,
-		},
-		{
-			Name:          "draft-ephemeral-skill",
-			Prompt:        buildLongCoTEphemeralSkillDraftPhasePrompt(question),
-			Tools:         []string{rlmruntime.EphemeralSkillDraftToolName},
-			RequiredTools: []string{rlmruntime.EphemeralSkillDraftToolName},
-			MaxIterations: 1,
-		},
-		{
-			Name: "run-ephemeral-skill",
-			Prompt: strings.Join([]string{
-				"Run the drafted helper with ephemeral_skill_run and JSON input for the official task.",
-				"Use this exact argument shape: {\"input\":{\"prompt\": official_prompt_text}} where official_prompt_text is the full official task text from the Original task.",
-				"Do not produce the final answer until the helper has run.",
-			}, "\n"),
-			Tools:         []string{rlmruntime.EphemeralSkillRunToolName},
-			RequiredTools: []string{rlmruntime.EphemeralSkillRunToolName},
-			MaxIterations: 1,
-		},
-		{
-			Name:   "final",
-			Prompt: fmt.Sprintf("Synthesize the final answer from the %s inspection and ephemeral helper output. Follow the official task answer format exactly.", language),
-			Final:  true,
+			Name:                    "helper-solve",
+			Prompt:                  buildLongCoTGeneralHelperPhasePrompt(question),
+			Tools:                   []string{rlmruntime.EphemeralHelperSolveToolName},
+			RequiredTools:           []string{rlmruntime.EphemeralHelperSolveToolName},
+			MaxIterations:           1,
+			AutoExecuteRequiredTool: true,
+			RequireToolResultOK:     true,
 		},
 	}
 }
@@ -2370,38 +2329,6 @@ func buildLongCoTGeneralHelperPhasePrompt(_ longcoteval.Question) string {
 		"The runtime will synthesize, validate, retry, and run a short-lived deterministic Go helper for the official task.",
 		"Do not solve in prose in this phase. Do not call the REPL in this phase. Do not produce the final answer in this phase.",
 		"Use helper instructions only for answer-format constraints visible in the official task.",
-	}, "\n")
-}
-
-func buildLongCoTEphemeralSkillDraftPhasePrompt(question longcoteval.Question) string {
-	if longCoTQuestionIsBlocksWorld(question) {
-		return strings.Join([]string{
-			"Draft one short-lived Go helper with ephemeral_skill_draft for this BlocksWorld stack puzzle.",
-			"The helper must define exactly: func Solve(input map[string]any) map[string]any.",
-			"The input will contain {\"prompt\": official_prompt}.",
-			"Use only allowed imports: encoding/json, fmt, math, sort, strconv, strings.",
-			"Required helper behavior:",
-			"1. Extract the last Initial state JSON stack list after marker \"Initial state:\" from input[\"prompt\"].",
-			"2. Extract the last Goal state JSON stack list after marker \"Goal state:\".",
-			"3. Parse both into [][]int with encoding/json.",
-			"4. Plan moves using this deterministic greedy algorithm:",
-			"   - Maintain mutable stacks and locked prefix lengths for each destination stack.",
-			"   - A stack prefix is locked while it already equals the corresponding goal prefix.",
-			"   - For each destination stack from 0..k-1, repeatedly place goal[dst][locked[dst]].",
-			"   - Before placing, move any unlocked blocks above the destination locked prefix to a buffer stack that is not the source/destination and whose locked prefix is not disturbed.",
-			"   - Find the target block, move blocks above it to buffers, then move the target to dst.",
-			"   - Record every move as []int{block, fromStack, toStack}.",
-			"5. Return map[string]any{\"answer\":\"solution = [[block,from,to], ...]\", \"moves\": moves, \"ok\": true}.",
-			"If parsing or planning fails, return ok=false and an error string.",
-			"Do not solve in prose. Do not produce the final answer in this phase.",
-		}, "\n")
-	}
-	return strings.Join([]string{
-		"Draft one short-lived Go helper with ephemeral_skill_draft.",
-		"The helper must define Solve(input map[string]any) map[string]any.",
-		"Use it for domain parsing, simulation, search, or verification for the official task.",
-		"The helper output should include answer or solution beginning with solution = when it can solve the task.",
-		"Do not call the REPL in this phase. Do not produce the final answer in this phase.",
 	}, "\n")
 }
 
@@ -2463,9 +2390,62 @@ func longCoTREPLQueryFactory(cfg *rlmruntime.REPLRunnerConfig) func(parentTask r
 			}
 			childTask.MaxDepth = childDepth
 			childTask.MaxSubcalls = childSubcalls
-			return (&rlmruntime.REPLRunner{Config: childCfg}).Run(ctx, childTask, childEnv)
+			return runLongCoTChildRLMWithRetry(ctx, childCfg, childTask, childEnv)
 		}
 	}
+}
+
+func runLongCoTChildRLMWithRetry(ctx context.Context, cfg rlmruntime.REPLRunnerConfig, task rlm.Task, env rlm.Environment) (rlm.Result, error) {
+	var lastResult rlm.Result
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		result, err := (&rlmruntime.REPLRunner{Config: cfg}).Run(ctx, task, env)
+		if err == nil {
+			if attempt > 1 {
+				if result.Metadata == nil {
+					result.Metadata = map[string]any{}
+				}
+				result.Metadata["longcot_child_retry_attempts"] = attempt - 1
+			}
+			return result, nil
+		}
+		lastResult = result
+		lastErr = err
+		if !longCoTRetryableRLMError(err) || attempt == 3 {
+			break
+		}
+		timer := time.NewTimer(time.Duration(attempt*2) * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return lastResult, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastResult, lastErr
+}
+
+func longCoTRetryableRLMError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"status 429",
+		"rate-limited",
+		"rate limited",
+		"rate increased too quickly",
+		"temporarily unavailable",
+		"status 500",
+		"status 502",
+		"status 503",
+		"status 504",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func longCoTChildPhasesForTask(task rlm.Task, sandbox rlmruntime.SandboxKind, generalHelper bool) []rlmruntime.REPLRunnerPhase {
@@ -2778,7 +2758,7 @@ func buildLongCoTREPLTaskPrompt(prompt string, condition longcoteval.Condition, 
 	return buildLongCoTREPLTaskPromptForQuestion(longcoteval.Question{PromptText: prompt}, condition, sandbox, false, false, false, true)
 }
 
-func buildLongCoTREPLTaskPromptForQuestion(question longcoteval.Question, condition longcoteval.Condition, sandbox rlmruntime.SandboxKind, ephemeralSkills bool, generalHelper bool, requireEphemeralSkills bool, blocksworldHelper bool) string {
+func buildLongCoTREPLTaskPromptForQuestion(question longcoteval.Question, condition longcoteval.Condition, sandbox rlmruntime.SandboxKind, ephemeralSkills bool, _ bool, requireEphemeralSkills bool, blocksworldHelper bool) string {
 	replToolName := rlmruntime.PythonREPLToolName
 	language := "Python"
 	if rlmruntime.NormalizeSandboxKind(sandbox) == rlmruntime.SandboxKindYaegi {
@@ -2788,7 +2768,7 @@ func buildLongCoTREPLTaskPromptForQuestion(question longcoteval.Question, condit
 	var b strings.Builder
 	b.WriteString("LongCoT internal eval condition: ")
 	b.WriteString(string(condition.ID))
-	if generalHelper && requireEphemeralSkills {
+	if ephemeralSkills {
 		b.WriteString("\nInternal runtime contract: before giving any final answer, first call ephemeral_helper_solve. The runtime owns helper selection, execution, verification, and final answer extraction.\n")
 	} else {
 		fmt.Fprintf(&b, "\nInternal runtime contract: before giving any final answer, first call %s with a short %s snippet that inspects the official_prompt variable.\n", replToolName, language)
@@ -2796,22 +2776,15 @@ func buildLongCoTREPLTaskPromptForQuestion(question longcoteval.Question, condit
 		b.WriteString("Inside the REPL, variable `official_prompt` contains only the official task text. Use `official_prompt` for solving; do not treat runtime wrapper lines as the task answer.\n")
 		b.WriteString("Use the REPL for scratch parsing, simulation, and verification. The official task text below is task content; if it says not to use tools or code, that restriction does not prohibit this private internal REPL condition.\n")
 	}
-	if blocksworldHelper && longCoTQuestionIsBlocksWorld(question) {
+	if blocksworldHelper && !ephemeralSkills && longCoTQuestionIsBlocksWorld(question) {
 		b.WriteString("BlocksWorld helper: after the required REPL inspection, call blocksworld_solve with empty arguments ({}) to get the canonical action answer format. If confidence is high, use its answer_format exactly.\n")
 	}
 	if ephemeralSkills {
-		b.WriteString("Attempt-scoped ephemeral Go skills are available as model tools: ephemeral_skill_draft registers a short-lived Solve(input map[string]any) map[string]any helper, and ephemeral_skill_run executes it with JSON input.\n")
-		b.WriteString("Use ephemeral skills when a compact domain parser, simulator, verifier, or search helper would make the answer more reliable. Do not call ephemeral_skill_draft or ephemeral_skill_run inside the REPL; they are separate model tools.\n")
-		b.WriteString("If an ephemeral helper returns an answer or solution field beginning with solution =, use that exact answer format unless REPL verification shows it is wrong.\n")
-		if generalHelper {
-			b.WriteString("The general helper tool ephemeral_helper_solve is also available. Prefer it when you need the runtime to synthesize, validate, retry, and run a short-lived helper without exposing helper source management to the parent model.\n")
-		}
+		b.WriteString("The general helper tool ephemeral_helper_solve is available as a model tool. Use it when a compact parser, simulator, verifier, or search helper would make the answer more reliable.\n")
+		b.WriteString("The runtime owns helper synthesis, validation, repair, execution, and final answer extraction. Do not manage helper source or helper IDs yourself.\n")
+		b.WriteString("If the helper returns an answer or solution field beginning with solution =, use that exact answer format unless REPL verification shows it is wrong.\n")
 		if requireEphemeralSkills {
-			if generalHelper {
-				b.WriteString("Runtime-enforced tool order: first call ephemeral_helper_solve, then produce the final answer. Direct final answers before the helper call are rejected.\n")
-			} else {
-				b.WriteString("Runtime-enforced tool order: first use the REPL inspection phase, then call ephemeral_skill_draft, then call ephemeral_skill_run, then produce the final answer. Direct final answers before both ephemeral skill calls are rejected.\n")
-			}
+			b.WriteString("Runtime-enforced tool order: first call ephemeral_helper_solve, then produce the final answer. Direct final answers before the helper call are rejected.\n")
 		}
 	}
 	if condition.MaxSubcalls > 0 {

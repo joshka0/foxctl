@@ -47,36 +47,12 @@ func (r InspectRunner) Run(ctx context.Context, task Task, env Environment) (Res
 	}
 
 	if r.Tools != nil {
-		if repoSummary, repoRefs, err := inspectRepo(ctx, r.Tools, task.Prompt); err == nil {
-			if repoSummary != "" {
-				answerParts = append(answerParts, repoSummary)
+		tools := newAllowlistedToolExecutor(r.Tools, env.Tools)
+		if summary, refs, err := inspectMixed(ctx, tools, task.Prompt); err == nil {
+			if summary != "" {
+				answerParts = append(answerParts, summary)
 			}
-			evidence = append(evidence, repoRefs...)
-		}
-		if len(env.VaultHandles) > 0 {
-			if vaultSummary, vaultRefs, err := inspectVault(ctx, r.Tools, task.Prompt); err == nil {
-				if vaultSummary != "" {
-					answerParts = append(answerParts, vaultSummary)
-				}
-				evidence = append(evidence, vaultRefs...)
-			}
-		}
-		if len(env.SceneHandles) > 0 || len(env.ActiveThreadIDs) > 0 {
-			if sceneSummary, sceneRefs, err := inspectScenes(ctx, r.Tools, task.Prompt); err == nil {
-				if sceneSummary != "" {
-					answerParts = append(answerParts, sceneSummary)
-				}
-				evidence = append(evidence, sceneRefs...)
-			}
-		}
-		if shouldSubcall(task, env) {
-			if subSummary, subRefs, err := inspectSubcall(ctx, r.Tools, task, env); err == nil {
-				if subSummary != "" {
-					answerParts = append(answerParts, subSummary)
-				}
-				evidence = append(evidence, subRefs...)
-				metadata["subcall_used"] = true
-			}
+			evidence = append(evidence, refs...)
 		}
 	}
 
@@ -88,108 +64,36 @@ func (r InspectRunner) Run(ctx context.Context, task Task, env Environment) (Res
 		Answer:       strings.Join(answerParts, "\n"),
 		EvidenceRefs: uniqueStringsRLM(evidence),
 		Iterations:   1,
-		Subcalls:     boolToInt(metadata["subcall_used"] == true),
+		Subcalls:     0,
 		Metadata:     metadata,
 	}, nil
 }
 
-func shouldSubcall(task Task, env Environment) bool {
-	if task.MaxDepth <= 0 || task.MaxSubcalls <= 0 {
-		return false
-	}
-	handleCount := len(env.RepoHandles) + len(env.VaultHandles) + len(env.SceneHandles) + len(env.ArtifactHandles)
-	return handleCount > 3
-}
-
-func inspectRepo(ctx context.Context, tools ToolExecutor, query string) (string, []string, error) {
-	payload, err := tools.Execute(ctx, "search_repo", mustJSONRLM(map[string]any{
+func inspectMixed(ctx context.Context, tools ToolExecutor, query string) (string, []string, error) {
+	payload, err := tools.Execute(ctx, "retrieve_mixed", mustJSONRLM(map[string]any{
 		"query": query,
 		"limit": 3,
 	}))
 	if err != nil {
 		return "", nil, err
 	}
-	results := decodeResults(payload["results"])
-	if len(results) == 0 {
+	refs := collectEvidenceRefsFromPayload(payload)
+	if len(refs) == 0 {
 		return "", nil, nil
 	}
-	paths := make([]string, 0, len(results))
-	for _, item := range results {
-		if path := strings.TrimSpace(fmt.Sprint(item["path"])); path != "" {
-			paths = append(paths, "path:"+path)
-		}
-	}
-	return "Repo focus: " + strings.Join(shortenRefs(paths, 3), ", "), paths, nil
+	return "Mixed evidence focus: " + strings.Join(shortenRefs(refs, 3), ", "), refs, nil
 }
 
-func inspectVault(ctx context.Context, tools ToolExecutor, query string) (string, []string, error) {
-	payload, err := tools.Execute(ctx, "search_vault", mustJSONRLM(map[string]any{
-		"query": query,
-		"limit": 3,
-	}))
-	if err != nil {
-		return "", nil, err
-	}
-	results := decodeResults(payload["results"])
-	if len(results) == 0 {
-		return "", nil, nil
-	}
-	refs := make([]string, 0, len(results))
-	for _, item := range results {
-		if path := strings.TrimSpace(fmt.Sprint(item["path"])); path != "" {
-			refs = append(refs, "note:"+path)
+func collectEvidenceRefsFromPayload(payload map[string]any) []string {
+	var refs []string
+	collectEvidenceRefsRecursive(payload, &refs)
+	if len(refs) == 0 {
+		var decoded any
+		if body, err := json.Marshal(payload); err == nil && json.Unmarshal(body, &decoded) == nil {
+			collectEvidenceRefsRecursive(decoded, &refs)
 		}
 	}
-	return "Vault focus: " + strings.Join(shortenRefs(refs, 3), ", "), refs, nil
-}
-
-func inspectScenes(ctx context.Context, tools ToolExecutor, query string) (string, []string, error) {
-	payload, err := tools.Execute(ctx, "search_scenes", mustJSONRLM(map[string]any{
-		"query": query,
-		"limit": 3,
-	}))
-	if err != nil {
-		return "", nil, err
-	}
-	results := decodeResults(payload["results"])
-	if len(results) == 0 {
-		return "", nil, nil
-	}
-	refs := make([]string, 0, len(results))
-	for _, item := range results {
-		if handle := strings.TrimSpace(fmt.Sprint(item["handle"])); handle != "" {
-			refs = append(refs, handle)
-		}
-	}
-	return "Scene focus: " + strings.Join(shortenRefs(refs, 3), ", "), refs, nil
-}
-
-func inspectSubcall(ctx context.Context, tools ToolExecutor, task Task, env Environment) (string, []string, error) {
-	payload, err := tools.Execute(ctx, "subcall", mustJSONRLM(map[string]any{
-		"prompt":           "Inspect the most relevant subset for: " + task.Prompt,
-		"repo_handles":     shortenRefs(env.RepoHandles, 1),
-		"vault_handles":    shortenRefs(env.VaultHandles, 1),
-		"scene_handles":    shortenRefs(env.SceneHandles, 1),
-		"artifact_handles": shortenRefs(env.ArtifactHandles, 1),
-		"max_depth":        task.MaxDepth - 1,
-		"max_iterations":   maxInt(task.MaxIterations-1, 1),
-		"max_subcalls":     maxInt(task.MaxSubcalls-1, 0),
-	}))
-	if err != nil {
-		return "", nil, err
-	}
-	raw, err := json.Marshal(payload["result"])
-	if err != nil {
-		return "", nil, err
-	}
-	var result Result
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return "", nil, err
-	}
-	if strings.TrimSpace(result.Answer) == "" {
-		return "", nil, nil
-	}
-	return "Subcall: " + strings.TrimSpace(result.Answer), result.EvidenceRefs, nil
+	return uniqueStringsRLM(refs)
 }
 
 func decodeResults(value any) []map[string]any {

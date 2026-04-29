@@ -51,11 +51,11 @@ var compositionTable = map[TaskType]ComposeOp{
 
 // searchToolByTaskType maps task type to the primary search tool for leaf execution.
 var searchToolByTaskType = map[TaskType]string{
-	TaskTypeCodeLocate:     "code_search_ensemble",
-	TaskTypeCodeUnderstand: "code_search_ensemble",
-	TaskTypeMemoryRecall:   "memory_ensemble_retrieve",
-	TaskTypeEvidenceAudit:  "code_search_ensemble",
-	TaskTypeGeneral:        "code_search_ensemble",
+	TaskTypeCodeLocate:     "retrieve_code",
+	TaskTypeCodeUnderstand: "retrieve_code",
+	TaskTypeMemoryRecall:   "retrieve_memory",
+	TaskTypeEvidenceAudit:  "retrieve_mixed",
+	TaskTypeGeneral:        "retrieve_mixed",
 }
 
 // ComposeOpForTask returns the composition operator for a task type.
@@ -71,7 +71,7 @@ func SearchToolForTask(tt TaskType) string {
 	if tool, ok := searchToolByTaskType[tt]; ok {
 		return tool
 	}
-	return "code_search_ensemble"
+	return "retrieve_mixed"
 }
 
 // LambdaConfig holds tuning parameters for the lambda runner.

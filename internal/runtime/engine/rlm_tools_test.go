@@ -144,6 +144,39 @@ func TestRLMToolExecutor_Query(t *testing.T) {
 	}
 }
 
+func TestRLMToolExecutor_QueryExactKeyScopePrecedence(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestContextStore(t)
+	defer store.Close()
+
+	exec := NewRLMToolExecutor(store, "test-conv-precedence")
+
+	_, _ = exec.Execute(ctx, "rlm_context_put", json.RawMessage(`{"key": "mode", "value": "global", "scope": "global"}`))
+	_, _ = exec.Execute(ctx, "rlm_context_put", json.RawMessage(`{"key": "mode", "value": "conversation", "scope": "conversation"}`))
+	_, _ = exec.Execute(ctx, "rlm_context_put", json.RawMessage(`{"key": "mode", "value": "turn", "scope": "turn"}`))
+
+	result, err := exec.Execute(ctx, "rlm_context_query", json.RawMessage(`{"key": "mode"}`))
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+
+	var resp struct {
+		Variables []struct {
+			Value string `json:"value"`
+			Scope string `json:"scope"`
+		} `json:"variables"`
+	}
+	if err := json.Unmarshal([]byte(result), &resp); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+	if len(resp.Variables) != 1 {
+		t.Fatalf("Expected 1 variable, got %d", len(resp.Variables))
+	}
+	if resp.Variables[0].Value != "turn" || resp.Variables[0].Scope != "turn" {
+		t.Fatalf("Expected turn scope to win, got value=%q scope=%q", resp.Variables[0].Value, resp.Variables[0].Scope)
+	}
+}
+
 func TestRLMToolExecutor_QueryPattern(t *testing.T) {
 	ctx := context.Background()
 	store := setupTestContextStore(t)
@@ -293,6 +326,21 @@ func TestRLMToolExecutor_InvalidInput(t *testing.T) {
 	_, err = exec.Execute(ctx, "rlm_context_put", json.RawMessage(`{"key": "test", "value": "v", "scope": "invalid"}`))
 	if err == nil {
 		t.Error("Expected error for invalid scope")
+	}
+
+	_, err = exec.Execute(ctx, "rlm_context_query", json.RawMessage(`{"key": "test", "scope": "invalid"}`))
+	if err == nil {
+		t.Error("Expected error for invalid query scope")
+	}
+
+	_, err = exec.Execute(ctx, "rlm_context_query", json.RawMessage(`{"semantic_query": "test", "scope": "invalid"}`))
+	if err == nil {
+		t.Error("Expected error for invalid semantic query scope")
+	}
+
+	_, err = exec.Execute(ctx, "rlm_context_list", json.RawMessage(`{"scope": "invalid"}`))
+	if err == nil {
+		t.Error("Expected error for invalid list scope")
 	}
 }
 
@@ -611,6 +659,69 @@ func TestRLMToolExecutor_SemanticQuery_VectorByTypeFiltersSessionAndAddsLayer(t 
 
 	if got, _ := resp.Stats["method"].(string); got != "hybrid" {
 		t.Fatalf("Expected stats.method=hybrid, got %q", got)
+	}
+}
+
+func TestRLMToolExecutor_SemanticQuery_ExcludesDeletedSoftEpisodes(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestContextStore(t)
+	defer store.Close()
+
+	companionDB := setupTestCompanionDB(t)
+	convID := "conv-deleted-episode"
+
+	exec := NewRLMToolExecutor(store, convID)
+	exec.SetCompanionDB(companionDB)
+
+	if _, err := companionDB.ExecContext(ctx, `
+		INSERT INTO companion_soft_episodes
+			(conversation_id, episode_type, start_event_id, end_event_id, summary, needs_summary, assumption_ids, token_count, boundary_hash, created_at, deleted_at)
+		VALUES
+			(?, 'planning', 1, 1, 'Deleted episode should not appear.', 0, '[]', 12, 'episode-deleted', '2026-02-01 10:01:00', '2026-02-01 10:02:00'),
+			(?, 'planning', 2, 2, 'Active episode should appear.', 0, '[]', 12, 'episode-active', '2026-02-01 10:03:00', NULL)
+	`, convID, convID); err != nil {
+		t.Fatalf("insert soft episodes: %v", err)
+	}
+
+	out, err := exec.Execute(ctx, "rlm_context_query", json.RawMessage(`{"semantic_query":"episode","limit":5}`))
+	if err != nil {
+		t.Fatalf("Execute semantic query failed: %v", err)
+	}
+	if strings.Contains(out, "Deleted episode should not appear") {
+		t.Fatalf("Deleted soft episode was returned: %s", out)
+	}
+	if !strings.Contains(out, "Active episode should appear") {
+		t.Fatalf("Expected active soft episode in response: %s", out)
+	}
+}
+
+func TestRLMToolExecutor_SemanticQuery_HardStateRetractionDoesNotResurrectOlderActive(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestContextStore(t)
+	defer store.Close()
+
+	companionDB := setupTestCompanionDB(t)
+	convID := "conv-retraction"
+
+	exec := NewRLMToolExecutor(store, convID)
+	exec.SetCompanionDB(companionDB)
+
+	if _, err := companionDB.ExecContext(ctx, `
+		INSERT INTO companion_hard_state_entries
+			(conversation_id, entry_type, key, value_json, status, source_event_id, confidence, created_at)
+		VALUES
+			(?, 'preference', 'editor', '{"value":"vim"}', 'active', 1, 0.90, '2026-02-01 10:00:00'),
+			(?, 'preference', 'editor', '{"value":"vim"}', 'retracted', 2, 1.00, '2026-02-01 10:01:00')
+	`, convID, convID); err != nil {
+		t.Fatalf("insert hard state entries: %v", err)
+	}
+
+	out, err := exec.Execute(ctx, "rlm_context_query", json.RawMessage(`{"semantic_query":"editor","limit":5}`))
+	if err != nil {
+		t.Fatalf("Execute semantic query failed: %v", err)
+	}
+	if strings.Contains(out, "vim") || strings.Contains(out, "preference:editor") {
+		t.Fatalf("Retracted hard state was returned: %s", out)
 	}
 }
 

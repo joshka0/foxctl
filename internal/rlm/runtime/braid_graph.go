@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -44,8 +45,6 @@ const REPLPhaseOutputKindCyclePacket = "cycle_packet"
 // runtime checks deterministically before emitting cycle_json.
 const REPLPhaseOutputKindCycleWitness = "cycle_witness"
 
-const BraidGraphPolicyLongCoTController = "longcot_controller"
-
 // MissingScaffoldContractError is returned when an executable graph node
 // (solve, verify) is missing required scaffold metadata fields.
 type MissingScaffoldContractError struct {
@@ -65,6 +64,49 @@ func IsMissingScaffoldContract(err error) (MissingScaffoldContractError, bool) {
 		return mse, true
 	}
 	return MissingScaffoldContractError{}, false
+}
+
+// InvalidScaffoldInputError is returned when a node declares a supported
+// scaffold pair but its input_schema does not satisfy that scaffold's typed
+// input contract.
+type InvalidScaffoldInputError struct {
+	NodeID        string
+	ScaffoldClass string
+	ScaffoldID    string
+	InputKeys     []string
+	Expected      string
+}
+
+func (e InvalidScaffoldInputError) Error() string {
+	return fmt.Sprintf("braid graph: invalid_scaffold_input: node %q input_schema keys %v do not satisfy %s/%s: %s", e.NodeID, e.InputKeys, e.ScaffoldClass, e.ScaffoldID, e.Expected)
+}
+
+func IsInvalidScaffoldInput(err error) (InvalidScaffoldInputError, bool) {
+	var ise InvalidScaffoldInputError
+	if ok := errors.As(err, &ise); ok {
+		return ise, true
+	}
+	return InvalidScaffoldInputError{}, false
+}
+
+// UnknownBraidDependencyError is returned when a graph node references a
+// dependency id that is not declared in the graph.
+type UnknownBraidDependencyError struct {
+	NodeID    string
+	DepID     string
+	KnownNode []string
+}
+
+func (e UnknownBraidDependencyError) Error() string {
+	return fmt.Sprintf("braid graph: node %q depends on unknown node %q", e.NodeID, e.DepID)
+}
+
+func IsUnknownBraidDependency(err error) (UnknownBraidDependencyError, bool) {
+	var ude UnknownBraidDependencyError
+	if ok := errors.As(err, &ude); ok {
+		return ude, true
+	}
+	return UnknownBraidDependencyError{}, false
 }
 
 // BraidGraph is the runtime contract emitted by the parent model.
@@ -209,7 +251,11 @@ func ValidateBraidGraph(g BraidGraph, maxNodes int) error {
 	for _, node := range g.Nodes {
 		for _, depID := range node.DependsOn {
 			if _, ok := ids[depID]; !ok {
-				return fmt.Errorf("braid graph: node %q depends on unknown node %q", node.ID, depID)
+				return UnknownBraidDependencyError{
+					NodeID:    node.ID,
+					DepID:     depID,
+					KnownNode: sortedBraidGraphNodeIDs(ids),
+				}
 			}
 		}
 	}
@@ -217,6 +263,15 @@ func ValidateBraidGraph(g BraidGraph, maxNodes int) error {
 		return err
 	}
 	return nil
+}
+
+func sortedBraidGraphNodeIDs(ids map[string]int) []string {
+	out := make([]string, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ValidateBraidGraphScaffoldContract checks that every executable node
@@ -247,8 +302,103 @@ func ValidateBraidGraphScaffoldContract(g BraidGraph) error {
 		if !validBraidNodeScaffoldClass(node.ScaffoldClass) {
 			return fmt.Errorf("braid graph: node %q has invalid scaffold_class %q", node.ID, node.ScaffoldClass)
 		}
+		if !validBraidNodeScaffoldPair(node.ScaffoldClass, node.ScaffoldID) {
+			return fmt.Errorf("braid graph: node %q has unsupported scaffold pair %q/%q", node.ID, node.ScaffoldClass, node.ScaffoldID)
+		}
+		if err := validateBraidNodeScaffoldInput(node); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func validateBraidNodeScaffoldInput(node BraidNode) error {
+	input := cloneMapAny(node.InputSchema)
+	if len(input) == 0 {
+		return InvalidScaffoldInputError{
+			NodeID:        node.ID,
+			ScaffoldClass: strings.TrimSpace(node.ScaffoldClass),
+			ScaffoldID:    strings.TrimSpace(node.ScaffoldID),
+			InputKeys:     nil,
+			Expected:      braidScaffoldInputExpectation(node.ScaffoldClass, node.ScaffoldID),
+		}
+	}
+	input["scaffold_class"] = strings.TrimSpace(node.ScaffoldClass)
+	input["scaffold_id"] = strings.TrimSpace(node.ScaffoldID)
+	if braidScaffoldInputMatches(node.ScaffoldClass, node.ScaffoldID, input) {
+		return nil
+	}
+	return InvalidScaffoldInputError{
+		NodeID:        node.ID,
+		ScaffoldClass: strings.TrimSpace(node.ScaffoldClass),
+		ScaffoldID:    strings.TrimSpace(node.ScaffoldID),
+		InputKeys:     sortedHelperFactoryMapKeys(input),
+		Expected:      braidScaffoldInputExpectation(node.ScaffoldClass, node.ScaffoldID),
+	}
+}
+
+func braidScaffoldInputMatches(cls, id string, input map[string]any) bool {
+	switch strings.TrimSpace(cls) {
+	case BraidScaffoldClassFiniteStateTransition:
+		return strings.TrimSpace(id) == BraidScaffoldIDStackRelocationV1 && braidHelperInputLooksLikeStackRelocation(input)
+	case BraidScaffoldClassGraphSearch:
+		switch strings.TrimSpace(id) {
+		case BraidScaffoldIDResourcePathMinInitialV1:
+			return braidHelperInputLooksLikeResourcePathMinInitial(input)
+		case BraidScaffoldIDExplicitShortestPathV1:
+			return braidHelperInputLooksLikeExplicitShortestPath(input)
+		default:
+			return false
+		}
+	case BraidScaffoldClassNumericDP:
+		return strings.TrimSpace(id) == BraidScaffoldIDRecurrenceTableV1 && braidHelperInputLooksLikeNumericDP(input)
+	case BraidScaffoldClassSequenceSimulation:
+		return strings.TrimSpace(id) == BraidScaffoldIDJSONPatchSequenceV1 && braidHelperInputLooksLikeSequenceSimulation(input)
+	case BraidScaffoldClassConstraintSolver:
+		return strings.TrimSpace(id) == BraidScaffoldIDFiniteDomainV1 && braidHelperInputLooksLikeFiniteDomainConstraint(input)
+	case BraidScaffoldClassSymbolicTrace:
+		return strings.TrimSpace(id) == BraidScaffoldIDTypeInferenceV1 && braidHelperInputLooksLikeSymbolicTrace(input)
+	case BraidScaffoldClassCandidateVerify:
+		return strings.TrimSpace(id) == BraidScaffoldIDPropertyCheckV1 && braidHelperInputLooksLikeCandidateVerify(input)
+	case BraidScaffoldClassStateTransition:
+		return strings.TrimSpace(id) == BraidScaffoldIDStateReplayV1 && braidHelperInputLooksLikeStateReplay(input)
+	case BraidScaffoldClassExplicitDAG:
+		return strings.TrimSpace(id) == BraidScaffoldIDSearchBacktrackV1
+	default:
+		return false
+	}
+}
+
+func braidScaffoldInputExpectation(cls, id string) string {
+	switch strings.TrimSpace(cls) {
+	case BraidScaffoldClassFiniteStateTransition:
+		return "initial_state and goal_state stack arrays with the same item multiset"
+	case BraidScaffoldClassGraphSearch:
+		switch strings.TrimSpace(id) {
+		case BraidScaffoldIDResourcePathMinInitialV1:
+			return "grid_layout rectangular numeric grid"
+		case BraidScaffoldIDExplicitShortestPathV1:
+			return "explicit graph edges/nodes and optional objective=shortest_path_length"
+		default:
+			return "supported graph_search input"
+		}
+	case BraidScaffoldClassNumericDP:
+		return "recurrence/table fields accepted by numeric_dp, not only prose placeholders"
+	case BraidScaffoldClassSequenceSimulation:
+		return "initial state plus executable transition/update sequence"
+	case BraidScaffoldClassConstraintSolver:
+		return "finite domains, variables, and constraints/witness fields"
+	case BraidScaffoldClassSymbolicTrace:
+		return "program or queries fields"
+	case BraidScaffoldClassCandidateVerify:
+		return "candidates or predicates fields"
+	case BraidScaffoldClassStateTransition:
+		return "move_sequence/actions/transitions containing concrete replayable moves"
+	case BraidScaffoldClassExplicitDAG:
+		return "any non-empty problem payload for explicit dependency search"
+	default:
+		return "supported scaffold input"
+	}
 }
 
 func ValidateBraidGraphPolicy(g BraidGraph, policy string) error {
@@ -269,6 +419,8 @@ func NormalizeBraidGraphForPolicy(g BraidGraph, policy string, maxNodes int) Bra
 			g.Nodes[idx].MaxSummaryChars = maxBraidNodeSummaryChars
 		}
 		g.Nodes[idx].HelperPolicy = normalizeBraidNodeHelperPolicy(g.Nodes[idx].HelperPolicy)
+		g.Nodes[idx].ScaffoldID = normalizeBraidNodeScaffoldID(g.Nodes[idx].ScaffoldClass, g.Nodes[idx].ScaffoldID)
+		normalizeInvalidSolveScaffoldToExplicitDAG(&g.Nodes[idx])
 	}
 	if strings.TrimSpace(policy) != BraidGraphPolicyLongCoTController {
 		return g
@@ -276,122 +428,91 @@ func NormalizeBraidGraphForPolicy(g BraidGraph, policy string, maxNodes int) Bra
 	return normalizeLongCoTControllerBraidGraph(g, maxNodes)
 }
 
-func normalizeLongCoTControllerBraidGraph(g BraidGraph, maxNodes int) BraidGraph {
-	byID := make(map[string]BraidNode, len(g.Nodes))
+func uniqueBraidNodeID(existing map[string]BraidNode, preferred string) string {
+	if _, ok := existing[preferred]; !ok {
+		return preferred
+	}
+	for idx := 2; ; idx++ {
+		candidate := fmt.Sprintf("%s_%d", preferred, idx)
+		if _, ok := existing[candidate]; !ok {
+			return candidate
+		}
+	}
+}
+
+func normalizeBraidGraphDependencies(g BraidGraph) BraidGraph {
+	known := make(map[string]bool, len(g.Nodes))
 	for _, node := range g.Nodes {
-		byID[node.ID] = node
+		if node.ID != "" {
+			known[node.ID] = true
+		}
 	}
 	for idx := range g.Nodes {
-		if isBraidSolveKind(g.Nodes[idx].Kind) || g.Nodes[idx].Kind == "verify" {
-			if g.Nodes[idx].HelperPolicy == "" || g.Nodes[idx].HelperPolicy == BraidNodeHelperPolicyAuto {
-				g.Nodes[idx].HelperPolicy = BraidNodeHelperPolicyPreferred
+		nodeID := g.Nodes[idx].ID
+		if len(g.Nodes[idx].DependsOn) == 0 {
+			continue
+		}
+		seen := make(map[string]bool, len(g.Nodes[idx].DependsOn))
+		deps := make([]string, 0, len(g.Nodes[idx].DependsOn))
+		for _, dep := range g.Nodes[idx].DependsOn {
+			dep = strings.TrimSpace(dep)
+			if dep == "" || dep == nodeID || !known[dep] || seen[dep] {
+				continue
 			}
+			deps = append(deps, dep)
+			seen[dep] = true
 		}
-		if g.Nodes[idx].Kind == "verify" {
-			normalizeLongCoTVerifyNode(&g.Nodes[idx])
-		}
-		if g.Nodes[idx].Kind == "reduce" && g.Nodes[idx].ID == g.FinalNode {
-			normalizeLongCoTFinalReduceDeps(&g.Nodes[idx], byID)
-		}
+		g.Nodes[idx].DependsOn = deps
 	}
 	return g
 }
 
-func normalizeLongCoTFinalReduceDeps(node *BraidNode, byID map[string]BraidNode) {
-	if node == nil || len(node.DependsOn) == 0 {
-		return
-	}
-	seen := make(map[string]bool, len(node.DependsOn)+4)
-	deps := make([]string, 0, len(node.DependsOn)+4)
-	for _, depID := range node.DependsOn {
-		if !seen[depID] {
-			deps = append(deps, depID)
-			seen[depID] = true
-		}
-		dep := byID[depID]
-		if dep.Kind != "verify" {
-			continue
-		}
-		for _, verifyDepID := range dep.DependsOn {
-			if seen[verifyDepID] {
-				continue
-			}
-			if isBraidSolveKind(byID[verifyDepID].Kind) {
-				deps = append(deps, verifyDepID)
-				seen[verifyDepID] = true
-			}
+func firstBraidNodeByKind(nodes []BraidNode, kind string) BraidNode {
+	for _, node := range nodes {
+		if node.Kind == kind {
+			return node
 		}
 	}
-	node.DependsOn = deps
+	return BraidNode{}
 }
 
-func normalizeLongCoTVerifyNode(node *BraidNode) {
-	if node == nil {
-		return
+func firstBraidSolveNode(nodes []BraidNode) BraidNode {
+	for _, node := range nodes {
+		if isBraidSolveKind(node.Kind) {
+			return node
+		}
 	}
-	if mentionsOriginalConstraints(node.Question + " " + node.ExpectedOutput) {
-		return
-	}
-	const verifyQuestion = "Verify the candidate against the original task constraints by simulation or substitution."
-	const verifyExpected = "pass true only if every original constraint, rule, and goal is satisfied"
-	if strings.TrimSpace(node.Question) == "" || len(node.Question) > maxBraidNodeQuestionChars-len(" "+verifyQuestion) {
-		node.Question = verifyQuestion
-	} else {
-		node.Question = strings.TrimSpace(node.Question) + " " + verifyQuestion
-	}
-	if strings.TrimSpace(node.ExpectedOutput) == "" || len(node.ExpectedOutput) > maxBraidNodeExpectedChars-len("; "+verifyExpected) {
-		node.ExpectedOutput = verifyExpected
-	} else {
-		node.ExpectedOutput = strings.TrimSpace(node.ExpectedOutput) + "; " + verifyExpected
-	}
-	if len(node.Question) > maxBraidNodeQuestionChars {
-		node.Question = verifyQuestion
-	}
-	if len(node.ExpectedOutput) > maxBraidNodeExpectedChars {
-		node.ExpectedOutput = verifyExpected
-	}
+	return BraidNode{}
 }
 
-func validateLongCoTControllerBraidGraph(g BraidGraph) error {
-	if len(g.Nodes) < 4 {
-		return fmt.Errorf("braid graph: longcot_controller requires at least 4 nodes")
-	}
-	byID := make(map[string]BraidNode, len(g.Nodes))
-	byKind := map[string][]BraidNode{}
-	for _, node := range g.Nodes {
-		byID[node.ID] = node
-		byKind[node.Kind] = append(byKind[node.Kind], node)
-	}
-	for _, kind := range []string{"extract", "verify", "reduce"} {
-		if len(byKind[kind]) == 0 {
-			return fmt.Errorf("braid graph: longcot_controller requires a %s node", kind)
+func lastBraidSolveNode(nodes []BraidNode) BraidNode {
+	for idx := len(nodes) - 1; idx >= 0; idx-- {
+		if isBraidSolveKind(nodes[idx].Kind) {
+			return nodes[idx]
 		}
 	}
-	if countBraidSolveNodes(byKind) < 1 {
-		return fmt.Errorf("braid graph: longcot_controller requires at least one solve-like node")
-	}
-	final, ok := byID[g.FinalNode]
-	if !ok || final.Kind != "reduce" {
-		return fmt.Errorf("braid graph: longcot_controller final_node must be a reduce node")
-	}
-	if len(final.DependsOn) == 0 {
-		return fmt.Errorf("braid graph: longcot_controller reduce node must depend on verification")
-	}
-	if !anyDepKind(final.DependsOn, byID, "verify") {
-		return fmt.Errorf("braid graph: longcot_controller reduce node must depend on a verify node")
-	}
-	for _, verify := range byKind["verify"] {
-		if len(verify.DependsOn) == 0 {
-			return fmt.Errorf("braid graph: longcot_controller verify node %q must depend on a solve-like node", verify.ID)
-		}
-		if !anyDepSolveKind(verify.DependsOn, byID) {
-			return fmt.Errorf("braid graph: longcot_controller verify node %q must depend on a solve-like node", verify.ID)
-		}
-		if !mentionsOriginalConstraints(verify.Question + " " + verify.ExpectedOutput) {
-			return fmt.Errorf("braid graph: longcot_controller verify node %q must check original constraints, not prior summary only", verify.ID)
+	return BraidNode{}
+}
+
+func firstBraidReduceNode(nodes []BraidNode, finalNodeID string) BraidNode {
+	for _, node := range nodes {
+		if node.ID == finalNodeID && node.Kind == "reduce" {
+			return node
 		}
 	}
-	return nil
+	return firstBraidNodeByKind(nodes, "reduce")
+}
+
+func filterBraidDepsToSelected(deps []string, selected map[string]bool) []string {
+	out := make([]string, 0, len(deps))
+	seen := map[string]bool{}
+	for _, dep := range deps {
+		if selected[dep] && !seen[dep] {
+			out = append(out, dep)
+			seen[dep] = true
+		}
+	}
+	return out
 }
 
 func dependsOnBraidNode(node BraidNode, id string) bool {
@@ -560,13 +681,7 @@ func applyBraidTypedHandoff(handoff *BraidNodeHandoff, rootPrompt string) {
 // and scaffold_id fields on the graph node. This is the primary contract path.
 // No keyword heuristics are used. The input_schema on the node provides typed fields.
 func applyBraidDeclaredScaffoldHandoff(handoff *BraidNodeHandoff, rootPrompt string, scaffoldClass, scaffoldID string) {
-	instance := handoff.Node.InputSchema
-	if len(instance) == 0 {
-		// Try extracting from prompt as fallback
-		if extracted, ok := helperFactoryExtractInstanceFields(rootPrompt); ok {
-			instance = extracted
-		}
-	}
+	instance := braidDeclaredScaffoldInstance(handoff.Node.InputSchema, rootPrompt)
 	switch scaffoldClass {
 	case BraidScaffoldClassSymbolicTrace:
 		applyBraidSymbolicTraceHandoff(handoff, instance)
@@ -575,13 +690,9 @@ func applyBraidDeclaredScaffoldHandoff(handoff *BraidNodeHandoff, rootPrompt str
 			applyBraidCandidateVerifyHandoff(handoff, instance)
 		}
 	case BraidScaffoldClassStateTransition:
-		if len(instance) > 0 {
-			if _, hasInitial := instance["initial_state"]; hasInitial {
-				if _, hasGoal := instance["goal_state"]; hasGoal {
-					applyBraidStackTransitionHandoff(handoff, instance)
-					return
-				}
-			}
+		if braidInstanceLooksLikeStateTransition(instance) {
+			applyBraidStackTransitionHandoff(handoff, instance)
+			return
 		}
 		applyBraidStateTransitionHandoff(handoff, instance)
 	case BraidScaffoldClassExplicitDAG:
@@ -601,6 +712,19 @@ func applyBraidDeclaredScaffoldHandoff(handoff *BraidNodeHandoff, rootPrompt str
 	default:
 		// Unknown scaffold class — no routing.
 	}
+}
+
+func braidDeclaredScaffoldInstance(schema map[string]any, rootPrompt string) map[string]any {
+	instance := cloneMapAny(schema)
+	if extracted, ok := helperFactoryExtractInstanceFields(rootPrompt); ok {
+		if len(instance) == 0 {
+			return extracted
+		}
+		for key, value := range extracted {
+			instance[key] = cloneAny(value)
+		}
+	}
+	return instance
 }
 
 // applyBraidDeclaredArchetypeHandoff is the legacy path that routes from a
@@ -1047,7 +1171,7 @@ func applyBraidSearchBacktrackHandoff(handoff *BraidNodeHandoff, instance map[st
 		"scaffold_class": BraidScaffoldClassExplicitDAG,
 		"scaffold_id":    BraidScaffoldIDSearchBacktrackV1,
 	}
-	for _, key := range []string{"nodes", "dependencies", "problems"} {
+	for _, key := range []string{"nodes", "dependencies", "problems", "target_nodes", "cycle_clusters"} {
 		if val, ok := instance[key]; ok {
 			facts[key] = val
 		}
@@ -1109,10 +1233,11 @@ func RenderBraidNodeHandoffPrompt(handoff BraidNodeHandoff) string {
 		}
 	}
 	if node.Kind == "extract" {
-		b.WriteString("Extract-node contract: return facts only. Do not solve, verify, reduce, declare blocked, or treat circular-looking references as a blocker. Produce a compact constraint packet with fields: requested_outputs, known_values, dependency_edges, placeholders, cycle_cluster, equations_or_checks, candidate_bounds, blockers.\n")
+		b.WriteString("Extract-node contract: return facts only. Do not solve, verify, reduce, declare blocked, or treat circular-looking references as a blocker. Produce a compact constraint packet with fields: requested_outputs, known_values, dependency_edges, placeholders, cycle_clusters, equations_or_checks, candidate_bounds, blockers.\n")
 	}
 	if node.Kind == "cycle_solve" {
 		b.WriteString("Cycle-solve contract: solve one mutually dependent constraint cluster as a bounded mathematical subproblem. Represent unknowns as variables and constraints, then use candidate search, fixed-point iteration, constraint propagation, or direct algebraic substitution. Do not report a runtime dependency cycle as a blocker. Block only when finite candidate bounds cannot be derived or all tested candidates fail, and include the attempted bounds/checks.\n")
+		b.WriteString(cycleSolveHelperOutputContract())
 		b.WriteString("Context policy: use only this node task, dependency summaries, and repair feedback. The full official root task is intentionally withheld to prevent broad narrative solving; rely on the extract constraint packet.\n")
 	}
 	if strings.TrimSpace(handoff.OfficialRootTask) != "" {
@@ -1282,6 +1407,21 @@ func BraidHandoffHelperInput(handoff BraidNodeHandoff) map[string]any {
 	for key, value := range handoff.Facts {
 		out[key] = cloneAny(value)
 	}
+	if strings.TrimSpace(handoff.Node.ID) != "" {
+		out["node_id"] = strings.TrimSpace(handoff.Node.ID)
+	}
+	if strings.TrimSpace(handoff.Node.Question) != "" {
+		out["work_item_question"] = strings.TrimSpace(handoff.Node.Question)
+	}
+	if strings.TrimSpace(handoff.Node.ExpectedOutput) != "" {
+		out["expected_output"] = strings.TrimSpace(handoff.Node.ExpectedOutput)
+	}
+	if strings.TrimSpace(handoff.OfficialRootTask) != "" {
+		out["root_task"] = strings.TrimSpace(handoff.OfficialRootTask)
+		if existing := strings.TrimSpace(fmt.Sprintf("%v", out["prompt"])); existing == "" || braidInputPromptLooksLikePlaceholder(existing) {
+			out["prompt"] = strings.TrimSpace(handoff.OfficialRootTask)
+		}
+	}
 	if strings.TrimSpace(handoff.TaskType) != "" {
 		out["task_type"] = strings.TrimSpace(handoff.TaskType)
 	}
@@ -1302,17 +1442,31 @@ func BraidHandoffHelperInput(handoff BraidNodeHandoff) map[string]any {
 	}
 	if len(handoff.DependencySummaries) > 0 {
 		deps := map[string]any{}
+		depText := map[string]any{}
 		for _, depID := range handoff.Dependencies {
 			if summary := strings.TrimSpace(handoff.DependencySummaries[depID]); summary != "" {
-				deps[depID] = summary
-				out[depID] = summary
+				packet := braidDependencyHandoffPacket(summary)
+				deps[depID] = packet
+				depText[depID] = summary
+				out[depID] = packet
 			}
 		}
 		if len(deps) > 0 {
 			out["dependency_summaries"] = deps
+			out["dependency_summary_text"] = depText
 		}
 	}
 	return out
+}
+
+func braidInputPromptLooksLikePlaceholder(value string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	switch trimmed {
+	case "", "original problem", "original prompt", "original problem and extracted dependencies", "original problem and extracted dependency graph":
+		return true
+	default:
+		return false
+	}
 }
 
 func compactBraidHandoffText(value string, limit int) string {
@@ -1376,6 +1530,45 @@ func normalizeBraidGraph(g BraidGraph) BraidGraph {
 	return g
 }
 
+func normalizeInvalidSolveScaffoldToExplicitDAG(node *BraidNode) {
+	if node == nil || !isBraidSolveKind(node.Kind) {
+		return
+	}
+	if strings.TrimSpace(node.ScaffoldClass) == "" || strings.TrimSpace(node.ScaffoldID) == "" || len(node.InputSchema) == 0 {
+		return
+	}
+	if !validBraidNodeScaffoldClass(node.ScaffoldClass) || !validBraidNodeScaffoldPair(node.ScaffoldClass, node.ScaffoldID) {
+		return
+	}
+	input := cloneMapAny(node.InputSchema)
+	input["scaffold_class"] = strings.TrimSpace(node.ScaffoldClass)
+	input["scaffold_id"] = strings.TrimSpace(node.ScaffoldID)
+	if braidScaffoldInputMatches(node.ScaffoldClass, node.ScaffoldID, input) {
+		return
+	}
+	originalClass := strings.TrimSpace(node.ScaffoldClass)
+	originalID := strings.TrimSpace(node.ScaffoldID)
+	originalInput := cloneMapAny(node.InputSchema)
+	prompt := strings.TrimSpace(stringFromAny(originalInput["prompt"]))
+	if prompt == "" {
+		prompt = strings.TrimSpace(node.Question)
+	}
+	if prompt == "" {
+		prompt = "solve explicit dependency task"
+	}
+	node.Archetype = BraidScaffoldClassExplicitDAG
+	node.ScaffoldClass = BraidScaffoldClassExplicitDAG
+	node.ScaffoldID = BraidScaffoldIDSearchBacktrackV1
+	node.InputSchema = map[string]any{
+		"prompt": prompt,
+		"declared_scaffold": map[string]any{
+			"scaffold_class": originalClass,
+			"scaffold_id":    originalID,
+			"input_schema":   originalInput,
+		},
+	}
+}
+
 func clampString(s string, maxLen int) string {
 	if maxLen <= 0 || len(s) <= maxLen {
 		return s
@@ -1433,6 +1626,63 @@ func validBraidNodeScaffoldClass(cls string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func validBraidNodeScaffoldPair(cls, id string) bool {
+	cls = strings.TrimSpace(cls)
+	id = strings.TrimSpace(id)
+	switch cls {
+	case BraidScaffoldClassFiniteStateTransition:
+		return id == BraidScaffoldIDStackRelocationV1
+	case BraidScaffoldClassGraphSearch:
+		return id == BraidScaffoldIDResourcePathMinInitialV1 || id == BraidScaffoldIDExplicitShortestPathV1
+	case BraidScaffoldClassNumericDP:
+		return id == BraidScaffoldIDRecurrenceTableV1
+	case BraidScaffoldClassSequenceSimulation:
+		return id == BraidScaffoldIDJSONPatchSequenceV1
+	case BraidScaffoldClassConstraintSolver:
+		return id == BraidScaffoldIDFiniteDomainV1
+	case BraidScaffoldClassSymbolicTrace:
+		return id == BraidScaffoldIDTypeInferenceV1
+	case BraidScaffoldClassCandidateVerify:
+		return id == BraidScaffoldIDPropertyCheckV1
+	case BraidScaffoldClassStateTransition:
+		return id == BraidScaffoldIDStateReplayV1
+	case BraidScaffoldClassExplicitDAG:
+		return id == BraidScaffoldIDSearchBacktrackV1
+	default:
+		return false
+	}
+}
+
+func normalizeBraidNodeScaffoldID(cls, id string) string {
+	cls = strings.TrimSpace(cls)
+	id = strings.TrimSpace(id)
+	if id != BraidScaffoldIDGenericV1 {
+		return id
+	}
+	switch cls {
+	case BraidScaffoldClassFiniteStateTransition:
+		return BraidScaffoldIDStackRelocationV1
+	case BraidScaffoldClassGraphSearch:
+		return BraidScaffoldIDExplicitShortestPathV1
+	case BraidScaffoldClassNumericDP:
+		return BraidScaffoldIDRecurrenceTableV1
+	case BraidScaffoldClassSequenceSimulation:
+		return BraidScaffoldIDJSONPatchSequenceV1
+	case BraidScaffoldClassConstraintSolver:
+		return BraidScaffoldIDFiniteDomainV1
+	case BraidScaffoldClassSymbolicTrace:
+		return BraidScaffoldIDTypeInferenceV1
+	case BraidScaffoldClassCandidateVerify:
+		return BraidScaffoldIDPropertyCheckV1
+	case BraidScaffoldClassStateTransition:
+		return BraidScaffoldIDStateReplayV1
+	case BraidScaffoldClassExplicitDAG:
+		return BraidScaffoldIDSearchBacktrackV1
+	default:
+		return id
 	}
 }
 

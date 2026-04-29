@@ -306,19 +306,10 @@ func (r *REPLRunner) Run(ctx context.Context, task rlm.Task, env rlm.Environment
 	answer := strings.TrimSpace(output.AssistantText)
 	sanitizedAnswer, sanitization := rlm.SanitizeOutputText(answer)
 	answer = sanitizedAnswer
-	var finalizedFromEphemeral bool
-	var ephemeralFinalRaw string
-	if r.Config.ExtractSolutionLine {
-		if finalAnswer, raw, ok := finalAnswerFromEphemeralSkillRun(output.ToolResults); ok {
-			answer = finalAnswer
-			ephemeralFinalRaw = raw
-			finalizedFromEphemeral = true
-		}
-	}
 	var solutionExtracted bool
 	var solutionFound bool
 	var solutionRawText string
-	if (r.Config.ExtractSolutionLine || r.Config.FinalSolutionLineRequired) && !finalizedFromEphemeral {
+	if r.Config.ExtractSolutionLine || r.Config.FinalSolutionLineRequired {
 		if line, ok := rlm.ExtractSolutionLine(answer); ok {
 			solutionFound = true
 			if line != answer {
@@ -328,7 +319,7 @@ func (r *REPLRunner) Run(ctx context.Context, task rlm.Task, env rlm.Environment
 			answer = line
 		}
 	}
-	if r.Config.FinalSolutionLineRequired && !finalizedFromEphemeral && !solutionFound {
+	if r.Config.FinalSolutionLineRequired && !solutionFound {
 		err := fmt.Errorf("rlm repl runner: final answer did not contain a solution = line")
 		recorder.RecordError(RuntimeErrorEvent{
 			Code:             "missing_solution_line",
@@ -419,13 +410,6 @@ func (r *REPLRunner) Run(ctx context.Context, task rlm.Task, env rlm.Environment
 		metadata["solution_extraction"] = map[string]any{
 			"changed":  true,
 			"raw_text": solutionRawText,
-		}
-	}
-	if finalizedFromEphemeral {
-		metadata["ephemeral_skill_finalization"] = map[string]any{
-			"changed":  true,
-			"raw_text": ephemeralFinalRaw,
-			"source":   EphemeralSkillRunToolName,
 		}
 	}
 	if helperTrace, ok := helperFactoryTraceFromToolResults(output.ToolResults); ok {
@@ -521,8 +505,6 @@ func (r *REPLRunner) extraToolExecutor(task rlm.Task) engine.ToolExecutor {
 	}
 	if r.Config.HelperFactory != nil {
 		executors = append(executors, r.helperFactoryForTask(task))
-	} else if r.Config.EphemeralSkills {
-		executors = append(executors, &EphemeralSkillTools{})
 	}
 	switch len(executors) {
 	case 0:
@@ -753,17 +735,20 @@ func (r *REPLRunner) runStagedREPLLoop(
 			MaxTokens:   phaseMaxTokens,
 			Temperature: llmCfg.Temperature,
 		})
-		if phase.FilterOverlongOutput && strings.TrimSpace(phase.OutputKind) == REPLPhaseOutputKindCyclePacket && attemptOutput.StopReason == engine.StopReasonMaxTokens && strings.TrimSpace(attemptOutput.AssistantText) != "" {
+		validationErr := validateREPLAttemptOutputForPhase(phase, attemptOutput, err, phaseMaxTokens)
+		if shouldFilterInvalidCyclePacket(phase, attemptOutput, validationErr) {
 			filterOutput, filterErr := runCyclePacketFilter(ctx, llmCfg, systemPrompt, task, phase, output, attemptOutput.AssistantText)
 			attemptOutput = mergeEngineOutputs(attemptOutput, filterOutput)
 			if filterErr != nil {
 				err = filterErr
+				validationErr = filterErr
 			} else {
 				attemptOutput.AssistantText = filterOutput.AssistantText
 				attemptOutput.StopReason = filterOutput.StopReason
+				err = nil
+				validationErr = validateREPLAttemptOutputForPhase(phase, attemptOutput, nil, phaseMaxTokens)
 			}
 		}
-		validationErr := validateREPLAttemptOutputForPhase(phase, attemptOutput, err, phaseMaxTokens)
 		skipREPLCodeExecution := false
 		if validationErr != nil &&
 			strings.TrimSpace(phase.OutputKind) == REPLPhaseOutputKindREPLCode &&
@@ -812,6 +797,22 @@ func (r *REPLRunner) runStagedREPLLoop(
 		}
 		if strings.TrimSpace(phase.OutputKind) == REPLPhaseOutputKindCycleWitness {
 			if err := autoCheckPhaseCycleWitness(phaseName, &attemptOutput); err != nil {
+				if strings.TrimSpace(attemptOutput.AssistantText) != "" {
+					filterOutput, filterErr := runCycleWitnessRepair(ctx, llmCfg, systemPrompt, task, phase, output, attemptOutput.AssistantText, err)
+					attemptOutput = mergeEngineOutputs(attemptOutput, filterOutput)
+					if filterErr == nil {
+						attemptOutput.AssistantText = filterOutput.AssistantText
+						attemptOutput.StopReason = filterOutput.StopReason
+						err = autoCheckPhaseCycleWitness(phaseName, &attemptOutput)
+					} else {
+						err = filterErr
+					}
+				}
+				if err == nil {
+					output = mergeEngineOutputs(output, attemptOutput)
+					recordParentLLMIterations(recorder, llmCfg.Model, attemptOutput, len(output.Iterations)-len(attemptOutput.Iterations))
+					continue
+				}
 				recorder.RecordError(RuntimeErrorEvent{Code: "phase_" + phaseName, Message: err.Error()})
 				output = mergeEngineOutputs(output, attemptOutput)
 				recordParentLLMIterations(recorder, llmCfg.Model, attemptOutput, len(output.Iterations)-len(attemptOutput.Iterations))
@@ -1172,35 +1173,48 @@ func (r *REPLRunner) parseAndRepairBraidGraphPhaseOutput(
 		}
 	}
 	initialErr := err
+	repairAttempts := firstPositiveInt(r.Config.ToolErrorRepairMaxAttempts, 1)
+	mergedRepairOutput := engine.EngineOutput{}
+	invalidOutput := phaseOutput.AssistantText
+	for attempt := 1; attempt <= repairAttempts; attempt++ {
+		repairOutput, runErr := runREPLLLMWithTransientRetry(ctx, llm, engine.EngineInput{
+			SystemPrompt: systemPrompt,
+			Messages: []engine.Message{engine.NewUserMessage(buildBraidGraphRepairPrompt(
+				task.Prompt,
+				phase,
+				mergeEngineOutputs(prior, mergedRepairOutput),
+				invalidOutput,
+				err,
+				maxNodes,
+			))},
+			Tools:       nil,
+			Workspace:   task.WorkspaceRoot,
+			MaxTokens:   llmCfg.MaxTokens,
+			Temperature: llmCfg.Temperature,
+		})
+		mergedRepairOutput = mergeEngineOutputs(mergedRepairOutput, repairOutput)
+		if validationErr := validateREPLAttemptOutput(repairOutput, runErr, llmCfg.MaxTokens); validationErr != nil {
+			return BraidGraph{}, mergedRepairOutput, validationErr
+		}
 
-	repairOutput, runErr := runREPLLLMWithTransientRetry(ctx, llm, engine.EngineInput{
-		SystemPrompt: systemPrompt,
-		Messages: []engine.Message{engine.NewUserMessage(buildBraidGraphRepairPrompt(
-			task.Prompt,
-			phase,
-			prior,
-			phaseOutput.AssistantText,
-			err,
-			maxNodes,
-		))},
-		Tools:       nil,
-		Workspace:   task.WorkspaceRoot,
-		MaxTokens:   llmCfg.MaxTokens,
-		Temperature: llmCfg.Temperature,
-	})
-	if validationErr := validateREPLAttemptOutput(repairOutput, runErr, llmCfg.MaxTokens); validationErr != nil {
-		return BraidGraph{}, repairOutput, validationErr
+		repaired, parseErr := ParseBraidGraphText(repairOutput.AssistantText)
+		if parseErr != nil {
+			err = parseErr
+			invalidOutput = repairOutput.AssistantText
+			continue
+		}
+		repaired = NormalizeBraidGraphForPolicy(repaired, phase.BraidGraphPolicy, maxNodes)
+		if validateErr := validateBraidGraphForPhase(phase, repaired, maxNodes); validateErr != nil {
+			err = validateErr
+			invalidOutput = repairOutput.AssistantText
+			continue
+		}
+		return repaired, mergedRepairOutput, nil
 	}
-
-	repaired, parseErr := ParseBraidGraphText(repairOutput.AssistantText)
-	if parseErr != nil {
-		return BraidGraph{}, repairOutput, fmt.Errorf("rlm repl runner: braid_graph repair parse failed (initial error: %v): %w", initialErr, parseErr)
+	if _, parseErr := ParseBraidGraphText(invalidOutput); parseErr != nil {
+		return BraidGraph{}, mergedRepairOutput, fmt.Errorf("rlm repl runner: braid_graph repair parse failed after %d attempt(s) (initial error: %v): %w", repairAttempts, initialErr, parseErr)
 	}
-	repaired = NormalizeBraidGraphForPolicy(repaired, phase.BraidGraphPolicy, maxNodes)
-	if validateErr := validateBraidGraphForPhase(phase, repaired, maxNodes); validateErr != nil {
-		return BraidGraph{}, repairOutput, fmt.Errorf("rlm repl runner: braid_graph repair validation failed (initial error: %v): %w", initialErr, validateErr)
-	}
-	return repaired, repairOutput, nil
+	return BraidGraph{}, mergedRepairOutput, fmt.Errorf("rlm repl runner: braid_graph repair validation failed after %d attempt(s) (initial error: %v): %w", repairAttempts, initialErr, err)
 }
 
 func validateBraidGraphForPhase(phase REPLRunnerPhase, graph BraidGraph, maxNodes int) error {
@@ -1281,6 +1295,12 @@ func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, p
 		b.WriteString("Error:\n")
 		b.WriteString(strings.TrimSpace(validationErr.Error()))
 		b.WriteString("\n")
+		if counterexample := braidGraphRepairCounterexample(validationErr); len(counterexample) > 0 {
+			b.WriteString("Repair counterexample JSON:\n")
+			body, _ := json.Marshal(counterexample)
+			b.Write(body)
+			b.WriteString("\n")
+		}
 	}
 	if maxNodes > 0 {
 		fmt.Fprintf(&b, "Node cap: %d\n", maxNodes)
@@ -1289,24 +1309,154 @@ func buildBraidGraphRepairPrompt(originalPrompt string, phase REPLRunnerPhase, p
 	b.WriteString("Use kind extract|solve|cycle_solve|verify|reduce. Keep each question under 220 characters and expected_output under 120 characters.\n")
 	if strings.TrimSpace(phase.BraidGraphPolicy) == BraidGraphPolicyLongCoTController {
 		b.WriteString("LongCoT controller policy is mandatory: include extract, at least one solve-like node, verify, and reduce; keep the graph acyclic and shorten invalid fields instead of deleting required node kinds.\n")
-		b.WriteString("Use one primary solve node by default. Add another solve-like node only for a real alternate candidate, concrete repair, or true dependency cluster. Do not split state-transition, planning, simulation, or BlocksWorld-style tasks into vague prose segments.\n")
-		b.WriteString("cycle_solve is optional. Use it only for a true strongly connected/fixed-point constraint cluster.\n")
+		b.WriteString("Use one primary solve node only when it has one target, a runtime-checkable typed input schema, declared solve_targets/nodes_to_solve, or declared cycle_clusters. Add another solve-like node only for a real alternate candidate, concrete repair, or true dependency cluster. Do not split state-transition, planning, simulation, or BlocksWorld-style tasks into vague prose segments.\n")
+		b.WriteString("cycle_solve is optional. Use it only for a true strongly connected/fixed-point constraint cluster. In input_schema, target_nodes means final requested outputs, solve_targets means independent split work items, and cycle_clusters means atomic strongly connected clusters. If a solve node covers a cluster, declare input_schema.cycle_clusters as arrays of target ids, for example {\"target_nodes\":[\"node_4\",\"node_2\",\"node_7\"],\"cycle_clusters\":[[\"node_2\",\"node_5\",\"node_6\",\"node_7\"]],\"prompt\":\"...\"}.\n")
+		b.WriteString("If a solve node lists multiple input_schema.target_nodes and they are independent work items, add input_schema.solve_targets with the same or smaller explicit node ids. If they are mutually dependent, change the node kind to cycle_solve or declare cycle_clusters. Do not leave a multi-target solve with only target_nodes.\n")
 		b.WriteString("The verify node question or expected_output must explicitly say it checks original constraints by substituting candidate values into the original problem placeholders.\n")
 	}
 	b.WriteString("Schema:\n")
-	b.WriteString(`{"version":1,"nodes":[{"id":"n1","kind":"extract|solve|cycle_solve|verify|reduce","question":"...","depends_on":["n0"],"expected_output":"...","max_summary_chars":256,"helper_policy":"auto|preferred|required|never","archetype":"symbolic_trace|candidate_verify|state_transition|explicit_dag|graph_search|numeric_dp|sequence_simulation|constraint_solver|mixed","scaffold_class":"symbolic_trace|candidate_verify|state_transition|explicit_dag|graph_search|numeric_dp|sequence_simulation|constraint_solver","scaffold_id":"type_inference_v1|property_check_v1|state_replay_v1|search_backtrack_v1|generic_v1","input_schema":{"key":"value"}}],"final_node":"n1"}`)
+	b.WriteString(`{"version":1,"nodes":[{"id":"n1","kind":"extract|solve|cycle_solve|verify|reduce","question":"...","depends_on":["n0"],"expected_output":"...","max_summary_chars":256,"helper_policy":"auto|preferred|required|never","archetype":"symbolic_trace|candidate_verify|state_transition|explicit_dag|graph_search|numeric_dp|sequence_simulation|constraint_solver|mixed","scaffold_class":"symbolic_trace|candidate_verify|state_transition|explicit_dag|graph_search|numeric_dp|sequence_simulation|constraint_solver","scaffold_id":"type_inference_v1|property_check_v1|state_replay_v1|stack_relocation_v1|search_backtrack_v1|recurrence_table_v1|resource_path_min_initial_v1|explicit_shortest_path_v1|json_patch_v1|finite_domain_v1","input_schema":{"prompt":"...","target_nodes":["node_0"],"cycle_clusters":[["node_2","node_5"]]}}],"final_node":"n1"}`)
 	b.WriteString("\n")
 	// If the error is a scaffold contract violation, add explicit repair instructions.
 	if mse, ok := IsMissingScaffoldContract(validationErr); ok {
 		fmt.Fprintf(&b, "\nScaffold contract violation on node %q: missing %v.\n", mse.NodeID, mse.Missing)
 		b.WriteString("Every solve and verify node MUST include archetype, scaffold_class, scaffold_id, and input_schema.\n")
-		b.WriteString("If you cannot choose a specific scaffold, use:\n")
-		b.WriteString(`  "archetype": "mixed", "scaffold_class": "explicit_dag", "scaffold_id": "generic_v1", "input_schema": {"prompt": "..."}` + "\n")
+		b.WriteString("Use only supported scaffold pairs:\n")
+		b.WriteString("- state_transition/state_replay_v1\n")
+		b.WriteString("- finite_state_transition/stack_relocation_v1\n")
+		b.WriteString("- candidate_verify/property_check_v1\n")
+		b.WriteString("- symbolic_trace/type_inference_v1\n")
+		b.WriteString("- explicit_dag/search_backtrack_v1\n")
+		b.WriteString("- numeric_dp/recurrence_table_v1\n")
+		b.WriteString("- graph_search/resource_path_min_initial_v1 or graph_search/explicit_shortest_path_v1\n")
+		b.WriteString("- sequence_simulation/json_patch_v1\n")
+		b.WriteString("- constraint_solver/finite_domain_v1\n")
+		b.WriteString("If you cannot choose a specialized scaffold, use explicit_dag/search_backtrack_v1 with input_schema {\"prompt\":\"...\"}.\n")
 		b.WriteString("Do NOT omit these fields. Repair this graph JSON only — do not solve the task.\n")
+	}
+	if ise, ok := IsInvalidScaffoldInput(validationErr); ok {
+		fmt.Fprintf(&b, "\nScaffold input violation on node %q: %s/%s input_schema keys %v do not satisfy the typed scaffold contract.\n", ise.NodeID, ise.ScaffoldClass, ise.ScaffoldID, ise.InputKeys)
+		fmt.Fprintf(&b, "Expected input: %s.\n", ise.Expected)
+		b.WriteString("Either provide concrete typed input_schema fields for that scaffold, or change the node to explicit_dag/search_backtrack_v1 with input_schema {\"prompt\":\"...\"}.\n")
+		b.WriteString("Do not use state_transition, numeric_dp, graph_search, sequence_simulation, constraint_solver, or symbolic_trace with only prose placeholders.\n")
+		b.WriteString("Repair this graph JSON only — do not solve the task.\n")
+	}
+	if validationErr != nil && strings.Contains(validationErr.Error(), "with multiple target_nodes must declare solve_targets") {
+		b.WriteString("\nMulti-target solve contract violation.\n")
+		b.WriteString("Repair options:\n")
+		b.WriteString("- For independent work items, keep kind=solve and add input_schema.solve_targets or input_schema.nodes_to_solve with explicit node ids.\n")
+		b.WriteString("- For mutually dependent work items, use kind=cycle_solve and add input_schema.cycle_clusters as arrays of node ids.\n")
+		b.WriteString("- For one broad runtime-checkable task, replace prose-only input_schema with concrete typed fields accepted by the scaffold.\n")
+		b.WriteString("Do not leave input_schema with only target_nodes when there is more than one target.\n")
+	}
+	if validationErr != nil && strings.Contains(validationErr.Error(), "mentions multiple work items but must declare") {
+		b.WriteString("\nImplicit multi-work-item solve contract violation.\n")
+		b.WriteString("The solve node mentions several work items but does not expose them in input_schema. Repair by adding input_schema.target_nodes plus input_schema.solve_targets/nodes_to_solve for independent work, or input_schema.cycle_clusters for mutually dependent work.\n")
+		b.WriteString("Do not leave an explicit_dag/search_backtrack_v1 solve node with only a prose prompt when it covers several named work items.\n")
+	}
+	if validationErr != nil && strings.Contains(validationErr.Error(), "must declare input_schema.cycle_clusters") {
+		b.WriteString("\nCycle-solve missing cluster contract violation.\n")
+		b.WriteString("Every cycle_solve node must include input_schema.cycle_clusters as an array of arrays of explicit node ids. Example: {\"target_nodes\":[\"node_2\",\"node_5\"],\"cycle_clusters\":[[\"node_2\",\"node_5\"]],\"prompt\":\"...\"}.\n")
+		b.WriteString("If the work items are not mutually dependent, change kind to solve and use input_schema.solve_targets or input_schema.nodes_to_solve instead.\n")
+	}
+	if validationErr != nil && strings.Contains(validationErr.Error(), "overbroad cycle cluster") {
+		b.WriteString("\nOverbroad cycle_solve contract violation.\n")
+		b.WriteString("A cycle_solve node may cover only one compact strongly connected/fixed-point cluster. Do not put the entire dependency graph into one cycle cluster.\n")
+		b.WriteString("Repair by using an extract node plus either input_schema.solve_targets/nodes_to_solve for independent work items or smaller input_schema.cycle_clusters for actual mutual dependencies.\n")
+	}
+	if validationErr != nil && strings.Contains(validationErr.Error(), "targets non-cycle node") {
+		b.WriteString("\nCycle-solve target contract violation.\n")
+		b.WriteString("A cycle_solve node may target only nodes inside its declared cycle_clusters. Do not ask it to solve upstream leaves, downstream nodes, or final requested outputs outside the cycle.\n")
+		b.WriteString("Repair by narrowing cycle_solve.input_schema.target_nodes to the cycle cluster only, then add separate solve/reduce nodes for non-cycle requested outputs that depend on the cycle result.\n")
 	}
 	b.WriteString("\nReturn JSON only. No markdown fences and no prose.\n")
 	b.WriteString(safeTelemetryExcerpt(invalidOutput, 3000))
 	return b.String()
+}
+
+func braidGraphRepairCounterexample(err error) map[string]any {
+	if err == nil {
+		return nil
+	}
+	if mse, ok := IsMissingScaffoldContract(err); ok {
+		return map[string]any{
+			"failure_kind":   "braid_graph_contract_failure",
+			"first_failure":  "missing scaffold contract fields",
+			"failed_node":    mse.NodeID,
+			"missing_fields": append([]string(nil), mse.Missing...),
+			"expected":       "every solve, cycle_solve, and verify node declares archetype, scaffold_class, scaffold_id, and input_schema",
+			"repair_hint":    "add the missing scaffold fields using one supported scaffold pair; do not remove required controller nodes",
+		}
+	}
+	if ise, ok := IsInvalidScaffoldInput(err); ok {
+		return map[string]any{
+			"failure_kind":   "braid_graph_contract_failure",
+			"first_failure":  "invalid scaffold input schema",
+			"failed_node":    ise.NodeID,
+			"scaffold_class": ise.ScaffoldClass,
+			"scaffold_id":    ise.ScaffoldID,
+			"input_keys":     append([]string(nil), ise.InputKeys...),
+			"expected":       ise.Expected,
+			"repair_hint":    "provide concrete typed input_schema fields for the declared scaffold, or switch this node to explicit_dag/search_backtrack_v1 with a prompt payload",
+		}
+	}
+	if ude, ok := IsUnknownBraidDependency(err); ok {
+		return map[string]any{
+			"failure_kind":  "braid_graph_contract_failure",
+			"first_failure": "unknown dependency id",
+			"failed_node":   ude.NodeID,
+			"unknown_dep":   ude.DepID,
+			"known_nodes":   append([]string(nil), ude.KnownNode...),
+			"expected":      "every depends_on entry references an existing node id",
+			"repair_hint":   "rename the dependency to an existing node id or add the missing node with a complete scaffold contract",
+		}
+	}
+	if strings.Contains(err.Error(), "with multiple target_nodes must declare solve_targets") {
+		return map[string]any{
+			"failure_kind":  "braid_graph_contract_failure",
+			"first_failure": "multi-target solve node has only target_nodes",
+			"expected":      "input_schema.target_nodes is for final requested outputs; multi-target solve nodes must also declare solve_targets, nodes_to_solve, cycle_clusters, or concrete runtime-checkable fields",
+			"repair_hint":   "add solve_targets for independent work items or cycle_clusters for mutually dependent work; do not leave only target_nodes",
+		}
+	}
+	if strings.Contains(err.Error(), "mentions multiple work items but must declare") {
+		return map[string]any{
+			"failure_kind":  "braid_graph_contract_failure",
+			"first_failure": "explicit_dag solve node hides multiple work items behind prose",
+			"expected":      "multi-work-item explicit_dag solve nodes must declare target_nodes plus solve_targets/nodes_to_solve, cycle_clusters, or concrete runtime-checkable fields",
+			"repair_hint":   "make the work item set machine-readable in input_schema so the runtime can split, schedule, and verify it",
+		}
+	}
+	if strings.Contains(err.Error(), "must declare input_schema.cycle_clusters") {
+		return map[string]any{
+			"failure_kind":  "braid_graph_contract_failure",
+			"first_failure": "cycle_solve node is missing cycle_clusters",
+			"expected":      "every cycle_solve input_schema includes cycle_clusters as an array of arrays of explicit node ids",
+			"repair_hint":   "add input_schema.cycle_clusters for mutually dependent work, or change kind to solve and use solve_targets/nodes_to_solve for independent work",
+		}
+	}
+	if strings.Contains(err.Error(), "overbroad cycle cluster") {
+		return map[string]any{
+			"failure_kind":  "braid_graph_contract_failure",
+			"first_failure": "cycle_solve cluster is too broad",
+			"expected":      "cycle_solve covers one compact strongly connected/fixed-point cluster, not the whole dependency graph",
+			"repair_hint":   "split independent targets into solve_targets/nodes_to_solve and reserve cycle_clusters for smaller mutual-dependency groups",
+		}
+	}
+	if strings.Contains(err.Error(), "targets non-cycle node") {
+		return map[string]any{
+			"failure_kind":  "braid_graph_contract_failure",
+			"first_failure": "cycle_solve targets nodes outside declared cycle_clusters",
+			"expected":      "cycle_solve target_nodes is a subset of the union of cycle_clusters",
+			"repair_hint":   "narrow cycle_solve to the mutual-dependency cluster and add separate solve/reduce nodes for non-cycle target outputs",
+		}
+	}
+	return map[string]any{
+		"failure_kind":  "braid_graph_contract_failure",
+		"first_failure": strings.TrimSpace(err.Error()),
+		"expected":      "valid braid graph JSON matching the phase schema and policy",
+		"repair_hint":   "repair the graph JSON only; keep output as JSON with no markdown or prose",
+	}
 }
 
 func buildToolErrorRepairPrompt(taskPrompt string, prior engine.EngineOutput, errText string, attempt, attempts int) string {
@@ -1877,6 +2027,9 @@ func (r *REPLRunner) newAsyncNodeBackend(toolExec *replToolExecutor, identity Id
 			var err error
 			childResult, err = toolExec.rlmQuery(ctx, childTask, toolExec.parentEnv)
 			if err != nil {
+				if salvaged, ok := r.salvageChildResultAfterError(ctx, toolExec, childTask, input, childResult, err); ok {
+					return salvaged, nil
+				}
 				return NodeResult{}, err
 			}
 			validationErr = validateRequiredSubcalls(childResult, input.RequiredSubcalls)
@@ -1939,6 +2092,119 @@ func (r *REPLRunner) newAsyncNodeBackend(toolExec *replToolExecutor, identity Id
 			Metadata: metadata,
 		}, nil
 	})
+}
+
+func (r *REPLRunner) salvageChildResultAfterError(ctx context.Context, toolExec *replToolExecutor, childTask rlm.Task, input NodeInput, childResult rlm.Result, runErr error) (NodeResult, bool) {
+	salvageReason := ""
+	salvageMessage := ""
+	switch {
+	case isREPLMaxTokenError(runErr):
+		salvageReason = "max_tokens"
+		salvageMessage = "salvaged max-token child output as partial summary"
+	case isChildSummaryFinalRepairError(runErr):
+		salvageReason = "child_summary_schema"
+		salvageMessage = "salvaged invalid child summary output as partial summary"
+	default:
+		return NodeResult{}, false
+	}
+	rawSummary := strings.TrimSpace(childResult.Answer)
+	if rawSummary == "" {
+		return NodeResult{}, false
+	}
+	summaryLimit := firstPositiveInt(input.SummaryMaxChars, r.Config.ChildSummaryMaxChars)
+	summary, truncated := compactRLMSummaryText(rawSummary, summaryLimit)
+	if strings.TrimSpace(summary) == "" {
+		return NodeResult{}, false
+	}
+	summary = normalizeMaxTokenChildSummary(summary)
+
+	metadata := cloneMapAny(childResult.Metadata)
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["salvaged_after_error"] = true
+	metadata["salvage_reason"] = salvageReason
+	metadata["salvage_error"] = runErr.Error()
+	metadata["summary_chars"] = runeLen(summary)
+	metadata["summary_truncated"] = truncated
+	if summaryLimit > 0 {
+		metadata["summary_max_chars"] = summaryLimit
+	}
+	if truncated {
+		metadata["raw_summary_chars"] = runeLen(rawSummary)
+	}
+	metadata["summary_compaction_method"] = "deterministic_salvage"
+	metadata["run_id"] = childTask.RunID
+	metadata["agent_id"] = childTask.AgentID
+	metadata["parent_agent_id"] = childTask.ParentAgentID
+	metadata["output_namespace"] = childTask.OutputNamespace
+	if toolExec != nil && toolExec.recorder != nil {
+		toolExec.recorder.RecordNodeCompleted(NodeEvent{
+			RunID:        childTask.RunID,
+			NodeID:       childTask.AgentID,
+			Status:       NodeStatusCompleted,
+			Message:      salvageMessage,
+			ParentNodeID: childTask.ParentAgentID,
+		})
+	}
+	return NodeResult{
+		Status:   NodeStatusCompleted,
+		Summary:  summary,
+		Answer:   childResult.Answer,
+		Metadata: metadata,
+	}, true
+}
+
+func isChildSummaryFinalRepairError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "final output repair failed for child_summary") ||
+		(strings.Contains(lower, "child summary final response") &&
+			strings.Contains(lower, "status: solved|partial|blocked"))
+}
+
+func isREPLMaxTokenError(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "max token") ||
+		strings.Contains(lower, "max_tokens") ||
+		strings.Contains(lower, "completion exceeded configured max tokens")
+}
+
+func normalizeMaxTokenChildSummary(summary string) string {
+	trimmed := strings.TrimSpace(summary)
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, "status:") && strings.Contains(lower, "answer:") && strings.Contains(lower, "checks:") {
+		return trimmed
+	}
+	answer := childSummaryAnswerExcerpt(trimmed)
+	checks := "max-token child output was salvaged; downstream verifier must confirm before final use"
+	return "status: partial\nanswer: " + answer + "\nchecks: " + checks
+}
+
+func childSummaryAnswerExcerpt(text string) string {
+	if line, ok := rlm.ExtractSolutionLine(text); ok {
+		return line
+	}
+	lower := strings.ToLower(text)
+	for _, marker := range []string{"answer:", "solution:", "final:"} {
+		if idx := strings.LastIndex(lower, marker); idx >= 0 {
+			value := strings.TrimSpace(text[idx+len(marker):])
+			if value != "" {
+				value, _ = compactRLMSummaryText(value, 600)
+				return value
+			}
+		}
+	}
+	text, _ = compactRLMSummaryText(text, 600)
+	return text
 }
 
 func (r *REPLRunner) compactChildSummary(ctx context.Context, toolExec *replToolExecutor, childTask rlm.Task, rawSummary string, maxChars int) (string, bool, map[string]any) {
@@ -2220,6 +2486,19 @@ func replOverrunHasUsableText(output engine.EngineOutput, maxTokens int) bool {
 	return len(answer) <= limit
 }
 
+func shouldFilterInvalidCyclePacket(phase REPLRunnerPhase, output engine.EngineOutput, validationErr error) bool {
+	if validationErr == nil {
+		return false
+	}
+	if !phase.FilterOverlongOutput {
+		return false
+	}
+	if strings.TrimSpace(phase.OutputKind) != REPLPhaseOutputKindCyclePacket {
+		return false
+	}
+	return strings.TrimSpace(output.AssistantText) != ""
+}
+
 func replBudgetedIterationCount(iterations []engine.IterationUsage) int {
 	count := 0
 	for _, iteration := range iterations {
@@ -2392,9 +2671,6 @@ func validateChildSummaryFinalText(text string) error {
 	}
 	if strings.TrimSpace(fields["checks"]) == "" {
 		return fmt.Errorf("child summary final response must include non-empty checks line")
-	}
-	if len(trimmed) > 1200 {
-		return fmt.Errorf("child summary final response too long: chars=%d max=1200", len(trimmed))
 	}
 	return nil
 }
@@ -2845,16 +3121,71 @@ func runCyclePacketFilter(ctx context.Context, llmCfg engine.LLMChatConfig, syst
 	return filterOutput, nil
 }
 
+func runCycleWitnessRepair(ctx context.Context, llmCfg engine.LLMChatConfig, systemPrompt string, task rlm.Task, phase REPLRunnerPhase, prior engine.EngineOutput, invalidOutput string, validationErr error) (engine.EngineOutput, error) {
+	filterMaxTokens := phaseOutputFilterMaxTokens(phase, phase.MaxTokens)
+	filterCfg := llmCfg
+	filterCfg.MaxTokens = filterMaxTokens
+	filterCfg.MaxIterations = 1
+	filterCfg.ToolChoice = nil
+	filterCfg.ParseReasoningToolCalls = false
+	filterLLM, err := engine.NewLLMChatEngine(filterCfg)
+	if err != nil {
+		return engine.EngineOutput{}, err
+	}
+	filterOutput, runErr := filterLLM.Run(ctx, engine.EngineInput{
+		SystemPrompt: systemPrompt,
+		Messages: []engine.Message{engine.NewUserMessage(buildCycleWitnessRepairPrompt(
+			task.Prompt,
+			phase,
+			prior,
+			invalidOutput,
+			validationErr,
+		))},
+		Workspace:   task.WorkspaceRoot,
+		MaxTokens:   filterMaxTokens,
+		Temperature: llmCfg.Temperature,
+	})
+	if runErr != nil {
+		return filterOutput, runErr
+	}
+	if _, err := CheckCycleWitnessText(filterOutput.AssistantText); err != nil {
+		return filterOutput, err
+	}
+	return filterOutput, nil
+}
+
 func buildCyclePacketFilterPrompt(originalPrompt string, phase REPLRunnerPhase, prior engine.EngineOutput, overlongOutput string) string {
 	var b strings.Builder
 	b.WriteString(buildREPLPhasePrompt(originalPrompt, phase, prior, replRunnerRunState{}))
 	b.WriteString("\n\nCycle packet filter required.\n")
-	b.WriteString("The previous cycle_packet response exceeded the JSON budget. Treat it as exploration notes.\n")
+	b.WriteString("The previous cycle_packet response was invalid or exceeded the JSON budget. Treat it as exploration notes.\n")
 	b.WriteString("Return one compact raw JSON object only. Do not include markdown, prose, code, or explanations.\n")
 	b.WriteString("Required keys: unknowns, known_values, constraints, candidate_bounds, requested_outputs, blockers.\n")
 	b.WriteString("Preserve finite bounds and concrete constraints. If bounds are missing, put a short explanation string in candidate_bounds and blockers.\n")
-	b.WriteString("Overlong cycle_packet response:\n")
+	b.WriteString("Invalid or overlong cycle_packet response:\n")
 	b.WriteString(safeTelemetryExcerpt(overlongOutput, 5000))
+	return b.String()
+}
+
+func buildCycleWitnessRepairPrompt(originalPrompt string, phase REPLRunnerPhase, prior engine.EngineOutput, invalidOutput string, validationErr error) string {
+	var b strings.Builder
+	b.WriteString(buildREPLPhasePrompt(originalPrompt, phase, prior, replRunnerRunState{}))
+	b.WriteString("\n\nCycle witness repair required.\n")
+	b.WriteString("The previous response was not a valid cycle_witness bounded-search spec. Treat it as scratch notes or a candidate assignment, not as final output.\n")
+	if validationErr != nil {
+		b.WriteString("Validation error:\n")
+		b.WriteString(strings.TrimSpace(validationErr.Error()))
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Return one compact raw JSON object only. Do not include markdown, prose, code, cycle_json, or a direct candidate map.\n")
+	b.WriteString("Required schema:\n")
+	b.WriteString(`{"version":1,"checker_kind":"bounded_search","variables":[{"name":"x","type":"int","min":0,"max":20}],"known_values":{"target":6},"constraints":[{"name":"fixed_point","op":"eq","left":{"var":"x"},"right":{"known":"target"}}],"claims":{"answer":{"var":"x"}},"requested_outputs":["answer"]}`)
+	b.WriteString("\n")
+	b.WriteString("Use finite integer bounds. Put concrete known numbers in known_values. Put formulas/checks in constraints. Use claims for requested outputs that are derived from variables.\n")
+	b.WriteString("Keep the product of all variable domain widths below 100000. If the prior witness exceeded the cap, narrow bounds from constraints or move dependent quantities into claims/known_values instead of searching them as independent variables.\n")
+	b.WriteString("If prior output was a candidate map such as {\"node_2\":1132}, convert those names into variables or known_values, then add constraints that the runtime can check. Do not return the candidate map directly.\n")
+	b.WriteString("Invalid cycle_witness response:\n")
+	b.WriteString(safeTelemetryExcerpt(invalidOutput, 4000))
 	return b.String()
 }
 

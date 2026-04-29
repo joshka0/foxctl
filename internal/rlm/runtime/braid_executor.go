@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/rlm"
 	"github.com/joshka0/foxctl/internal/rlm/runtime/generalsolver"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
@@ -117,10 +118,6 @@ func executePhaseBraidGraph(
 		return fmt.Errorf("rlm repl runner phase %q cannot auto-execute braid graph without %s", phaseName, RLMQueryToolName)
 	}
 
-	nodesByID := make(map[string]BraidNode, len(graph.Nodes))
-	for _, node := range graph.Nodes {
-		nodesByID[node.ID] = node
-	}
 	if toolExec.recorder != nil {
 		toolExec.recorder.RecordBraidEvent(BraidEvent{
 			Phase:     phaseName,
@@ -137,12 +134,31 @@ func executePhaseBraidGraph(
 	// Apply structural splits to the graph before execution so that
 	// readyBraidNodes operates on the decomposed graph, not the original.
 	applyBraidGraphSplits(graph, toolExec, phaseName)
+	nodesByID := make(map[string]BraidNode, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		nodesByID[node.ID] = node
+	}
 	solverState := seedSolverStateFromBraidGraph(graph)
 	repairAttempts := 0
 	submitted := 0
 	wave := 0
 graphLoop:
 	for len(executed) < len(graph.Nodes) {
+		nodesByID = make(map[string]BraidNode, len(graph.Nodes))
+		for _, node := range graph.Nodes {
+			nodesByID[node.ID] = node
+		}
+		if rewired := applyAdaptiveRouterSummaryDependencies(graph, summaries, executed); len(rewired) > 0 {
+			for _, nodeID := range rewired {
+				if node, ok := braidGraphNodeByID(*graph, nodeID); ok {
+					recordBraidNodeEvent(toolExec, phaseName, wave, node, "router_dependencies_applied", strings.Join(node.DependsOn, ", "))
+				}
+			}
+			nodesByID = make(map[string]BraidNode, len(graph.Nodes))
+			for _, node := range graph.Nodes {
+				nodesByID[node.ID] = node
+			}
+		}
 		ready := readyBraidNodes(*graph, executed, summaries)
 		if len(ready) == 0 {
 			return fmt.Errorf("rlm repl runner phase %q: braid graph stalled before final_node %q", phaseName, graph.FinalNode)
@@ -153,7 +169,7 @@ graphLoop:
 			for _, node := range ready {
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "ready", "")
 				deps := dependencySummarySubset(node, summaries)
-				if summary, ok := runBraidRuntimeNodeShortcut(node, deps); ok {
+				if summary, ok := runBraidRuntimeNodeShortcut(node, deps, nodesByID); ok {
 					recordBraidNodeEvent(toolExec, phaseName, wave, node, "runtime_shortcut", summary)
 					summaries[node.ID] = summary
 					executed[node.ID] = struct{}{}
@@ -183,23 +199,37 @@ graphLoop:
 					return err
 				}
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "completed", summary)
+				if normalized, ok := normalizeBraidAdaptiveTargetSummary(node, summary); ok {
+					recordBraidNodeEvent(toolExec, phaseName, wave, node, "normalized", normalized)
+					summary = normalized
+				}
+				concreteVerifyFailure := false
+				if normalized, ok := normalizeBraidVerificationFailureSummary(node, summary); ok {
+					recordBraidNodeEvent(toolExec, phaseName, wave, node, "verification_failed", normalized)
+					summary = normalized
+					concreteVerifyFailure = true
+				}
 				summaries[node.ID] = summary
 				executed[node.ID] = struct{}{}
-				if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], summary, toolExec, output); ok {
-					recordBraidNodeEvent(toolExec, phaseName, wave, node, "helper_recovered", recovered)
-					summaries[node.ID] = recovered
-					summary = recovered
-				}
-				submitted++
-				if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+				if !concreteVerifyFailure {
 					if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], summary, toolExec, output); ok {
 						recordBraidNodeEvent(toolExec, phaseName, wave, node, "helper_recovered", recovered)
 						summaries[node.ID] = recovered
-						if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, node, recovered, graph.FinalNode, graph); recoveredErr == nil {
-							commitSolverArtifact(solverState, node.ID, recovered)
-							continue
-						} else {
-							err = recoveredErr
+						summary = recovered
+					}
+				}
+				submitted++
+				if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+					if !concreteVerifyFailure {
+						if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], summary, toolExec, output); ok {
+							recordBraidNodeEvent(toolExec, phaseName, wave, node, "helper_recovered", recovered)
+							summaries[node.ID] = recovered
+							if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, node, recovered, graph.FinalNode, graph); recoveredErr == nil {
+								commitSolverArtifact(solverState, node.ID, recovered)
+								continue
+							} else {
+								err = recoveredErr
+							}
 						}
 					}
 					recordSolverFailure(solverState, node.ID, "validate", err.Error())
@@ -220,7 +250,7 @@ graphLoop:
 		for _, node := range ready {
 			recordBraidNodeEvent(toolExec, phaseName, wave, node, "ready", "")
 			deps := dependencySummarySubset(node, summaries)
-			if summary, ok := runBraidRuntimeNodeShortcut(node, deps); ok {
+			if summary, ok := runBraidRuntimeNodeShortcut(node, deps, nodesByID); ok {
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "runtime_shortcut", summary)
 				summaries[node.ID] = summary
 				executed[node.ID] = struct{}{}
@@ -268,22 +298,36 @@ graphLoop:
 				summary = "status: blocked blocker: child returned no summary"
 			}
 			recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "completed", summary)
+			if normalized, ok := normalizeBraidAdaptiveTargetSummary(nodesByID[nodeID], summary); ok {
+				recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "normalized", normalized)
+				summary = normalized
+			}
+			concreteVerifyFailure := false
+			if normalized, ok := normalizeBraidVerificationFailureSummary(nodesByID[nodeID], summary); ok {
+				recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "verification_failed", normalized)
+				summary = normalized
+				concreteVerifyFailure = true
+			}
 			summaries[nodeID] = summary
 			executed[nodeID] = struct{}{}
-			if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, nodesByID[nodeID], rootPrompt, dependencySummarySubset(nodesByID[nodeID], summaries), repairFeedbackByNode[nodeID], summary, toolExec, output); ok {
-				recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "helper_recovered", recovered)
-				summaries[nodeID] = recovered
-				summary = recovered
-			}
-			if err := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], summary, graph.FinalNode, graph); err != nil {
+			if !concreteVerifyFailure {
 				if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, nodesByID[nodeID], rootPrompt, dependencySummarySubset(nodesByID[nodeID], summaries), repairFeedbackByNode[nodeID], summary, toolExec, output); ok {
 					recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "helper_recovered", recovered)
 					summaries[nodeID] = recovered
-					if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], recovered, graph.FinalNode, graph); recoveredErr == nil {
-						commitSolverArtifact(solverState, nodeID, recovered)
-						continue
-					} else {
-						err = recoveredErr
+					summary = recovered
+				}
+			}
+			if err := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], summary, graph.FinalNode, graph); err != nil {
+				if !concreteVerifyFailure {
+					if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, nodesByID[nodeID], rootPrompt, dependencySummarySubset(nodesByID[nodeID], summaries), repairFeedbackByNode[nodeID], summary, toolExec, output); ok {
+						recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "helper_recovered", recovered)
+						summaries[nodeID] = recovered
+						if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], recovered, graph.FinalNode, graph); recoveredErr == nil {
+							commitSolverArtifact(solverState, nodeID, recovered)
+							continue
+						} else {
+							err = recoveredErr
+						}
 					}
 				}
 				recordSolverFailure(solverState, nodeID, "validate", err.Error())
@@ -330,6 +374,13 @@ func runBraidNodeHelperFirst(
 	if graph == nil {
 		return "", false, nil
 	}
+	if summary, handled, err := runBraidNodeREPLFirst(ctx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, toolExec, output, graph); handled {
+		return summary, true, err
+	}
+	if toolExec.budget != nil && braidNodeShouldUseChildREPLInsteadOfHelper(node, rootPrompt, dependencySummaries, repairFeedback) {
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_skipped", "no applicable runtime verifier; falling through to child RLM with python_repl")
+		return "", false, nil
+	}
 	if budget != nil {
 		remaining := budget.remainingSubTimeout(braidNodeHelperDefaultBudget)
 		if remaining == 0 {
@@ -364,7 +415,7 @@ func runBraidNodeHelperFirst(
 	if !ok {
 		stage := extractBraidHelperFailedStage(summary)
 		message := fmt.Sprintf("stage=%s duration_ms=%d: helper did not produce an answer", stage, duration.Milliseconds())
-		if policy == BraidNodeHelperPolicyRequired || disableFallback {
+		if policy == BraidNodeHelperPolicyRequired || (disableFallback && !braidNodeCanFallbackFromHelperFailure(node, policy)) {
 			recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_failed", message)
 			summary := "status: blocked\nanswer:\nchecks: " + message
 			return summary, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper-first failed: %s", phaseName, node.ID, message)
@@ -374,13 +425,266 @@ func runBraidNodeHelperFirst(
 	}
 	if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_rejected", "stage=verify duration_ms="+fmt.Sprintf("%d", duration.Milliseconds())+" "+err.Error())
-		return summary, true, err
+		if policy == BraidNodeHelperPolicyRequired || (disableFallback && !braidNodeCanFallbackFromHelperFailure(node, policy)) {
+			return summary, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper-first failed: %w", phaseName, node.ID, err)
+		}
+		return "", false, nil
 	}
 	recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_completed", fmt.Sprintf("duration_ms=%d summary: %s", duration.Milliseconds(), summary))
 	return summary, true, nil
 }
 
-func runBraidRuntimeNodeShortcut(node BraidNode, dependencySummaries map[string]string) (string, bool) {
+func braidNodeCanFallbackFromHelperFailure(node BraidNode, policy string) bool {
+	return policy == BraidNodeHelperPolicyPreferred && node.Kind == "cycle_solve"
+}
+
+func braidNodeShouldUseChildREPLInsteadOfHelper(node BraidNode, rootPrompt string, dependencySummaries map[string]string, repairFeedback string) bool {
+	if !isBraidSolveKind(node.Kind) {
+		return false
+	}
+	if node.Kind == "cycle_solve" {
+		return false
+	}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, dependencySummaries, repairFeedback)
+	input := braidHelperInput(rootPrompt, handoff.DependencySummaries)
+	if handoffInput := BraidHandoffHelperInput(handoff); len(handoffInput) > 0 {
+		input = mergeHelperFactoryInput(input, handoffInput)
+	}
+	if strings.TrimSpace(node.ScaffoldClass) == BraidScaffoldClassExplicitDAG &&
+		strings.TrimSpace(node.ScaffoldID) == BraidScaffoldIDSearchBacktrackV1 &&
+		!braidExplicitDAGInputHasRuntimeCheck(node.InputSchema) &&
+		!braidExplicitDAGInputHasRuntimeCheck(input) {
+		if len(stringSliceFromAny(input["target_nodes"])) > 0 || len(extractBraidCycleClustersFromAny(input["cycle_clusters"])) > 0 {
+			return false
+		}
+		return true
+	}
+	if _, ok := resolveBraidRuntimeScaffold(node, handoff, input); ok {
+		return false
+	}
+	return true
+}
+
+func braidExplicitDAGInputHasRuntimeCheck(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if strings.TrimSpace(stringFromAny(input["answer"])) != "" {
+		return true
+	}
+	if strings.TrimSpace(stringFromAny(input["expected_answer"])) != "" {
+		return true
+	}
+	if strings.TrimSpace(stringFromAny(input["expected_value"])) != "" {
+		return true
+	}
+	return false
+}
+
+func runBraidNodeREPLFirst(
+	ctx context.Context,
+	phaseName string,
+	node BraidNode,
+	rootPrompt string,
+	dependencySummaries map[string]string,
+	repairFeedback string,
+	toolExec *replToolExecutor,
+	output *engine.EngineOutput,
+	graph *BraidGraph,
+) (string, bool, error) {
+	if toolExec == nil || output == nil || graph == nil {
+		return "", false, nil
+	}
+	if toolExec.replToolName != "" && toolExec.replToolName != PythonREPLToolName {
+		return "", false, nil
+	}
+	if !braidNodeShouldUsePythonREPLFirst(node) {
+		return "", false, nil
+	}
+	handoff := BuildBraidNodeHandoff(node, rootPrompt, dependencySummaries, repairFeedback)
+	input := braidHelperInput(rootPrompt, handoff.DependencySummaries)
+	if handoffInput := BraidHandoffHelperInput(handoff); len(handoffInput) > 0 {
+		input = mergeHelperFactoryInput(input, handoffInput)
+	}
+	code, err := buildBraidPythonREPLSolveCode(node, input)
+	if err != nil {
+		return "", false, nil
+	}
+	args, err := json.Marshal(map[string]any{"code": code})
+	if err != nil {
+		return "", false, nil
+	}
+	recordBraidNodeEvent(toolExec, phaseName, 0, node, "python_repl_first", "executing deterministic scratch calculation")
+	callID := fmt.Sprintf("auto_%s_%s_%s", sanitizeToolCallIDPart(phaseName), sanitizeToolCallIDPart(node.ID), sanitizeToolCallIDPart(PythonREPLToolName))
+	rawArgs := json.RawMessage(args)
+	result, execErr := toolExec.Execute(ctx, PythonREPLToolName, rawArgs)
+	toolCall := engine.ToolCall{ID: callID, Name: PythonREPLToolName, Arguments: rawArgs}
+	toolResult := engine.ToolResult{ToolCallID: callID, Content: result}
+	if execErr != nil {
+		toolResult.IsError = true
+		toolResult.Content = execErr.Error()
+	}
+	output.ToolCalls = append(output.ToolCalls, toolCall)
+	output.ToolResults = append(output.ToolResults, toolResult)
+	if execErr != nil {
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "python_repl_first_failed", execErr.Error())
+		return "", false, nil
+	}
+	summary, ok := braidSummaryFromPythonREPLResult(result)
+	if !ok {
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "python_repl_first_unusable", safeTelemetryExcerpt(result, 300))
+		return "", false, nil
+	}
+	if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "python_repl_first_rejected", err.Error())
+		if braidPythonREPLSummaryIsSoftMiss(summary) {
+			return "", false, nil
+		}
+		return summary, true, err
+	}
+	recordBraidNodeEvent(toolExec, phaseName, 0, node, "python_repl_first_completed", summary)
+	return summary, true, nil
+}
+
+func braidPythonREPLSummaryIsSoftMiss(summary string) bool {
+	lower := strings.ToLower(summary)
+	return strings.Contains(lower, "python_repl executed deterministic extraction") &&
+		(strings.Contains(lower, "target was unresolved") || strings.Contains(lower, "target value is not present"))
+}
+
+func braidNodeShouldUsePythonREPLFirst(node BraidNode) bool {
+	if !isBraidSolveKind(node.Kind) {
+		return false
+	}
+	if node.Kind == "cycle_solve" {
+		return false
+	}
+	if strings.TrimSpace(node.ScaffoldClass) != BraidScaffoldClassExplicitDAG || strings.TrimSpace(node.ScaffoldID) != BraidScaffoldIDSearchBacktrackV1 {
+		return false
+	}
+	return strings.Contains(node.ID, "__adaptive_") || expectedOutputRequiresStructuredNodeValues(strings.ToLower(node.ExpectedOutput))
+}
+
+func buildBraidPythonREPLSolveCode(node BraidNode, input map[string]any) (string, error) {
+	input = cloneMapAny(input)
+	if strings.TrimSpace(stringFromAny(input["target_node"])) == "" {
+		if target := braidNodeTargetID(node); target != "" {
+			input["target_node"] = target
+		}
+	}
+	packet := map[string]any{
+		"node_id":         node.ID,
+		"question":        node.Question,
+		"expected_output": node.ExpectedOutput,
+		"input":           input,
+	}
+	body, err := json.Marshal(packet)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("import json, re, ast\n")
+	b.WriteString("__braid_packet = json.loads(")
+	b.WriteString(strconv.Quote(string(body)))
+	b.WriteString(")\n")
+	b.WriteString(`def __extract_solution(text):
+    text = str(text or "")
+    m = re.search(r"solution\s*=\s*(.+?)(?:\s+checks:|$)", text, re.S)
+    if not m:
+        return None
+    raw = m.group(1).strip()
+    for parser in (json.loads, ast.literal_eval):
+        try:
+            return parser(raw)
+        except Exception:
+            pass
+    return raw
+
+def __walk_values(value, out):
+    if isinstance(value, dict):
+        if "answer" in value:
+            sol = __extract_solution(value.get("answer"))
+            if sol is not None:
+                __walk_values(sol, out)
+        if "solution" in value:
+            __walk_values(value.get("solution"), out)
+        for k, v in value.items():
+            if isinstance(k, str) and re.fullmatch(r"node_\d+", k):
+                out[k] = v
+            else:
+                __walk_values(v, out)
+    elif isinstance(value, list):
+        for item in value:
+            __walk_values(item, out)
+
+data = __braid_packet["input"]
+target = str(data.get("target_node") or "")
+expected = str(__braid_packet.get("expected_output") or "")
+values = {}
+__walk_values(data.get("dependency_summaries", {}), values)
+__walk_values(data, values)
+answer = None
+checks = []
+if target and target in values:
+    answer = values[target]
+    checks.append("target value came from executed dependency summary extraction")
+elif target and target in data:
+    answer = data[target]
+    checks.append("target value came from explicit input field")
+elif target:
+    checks.append("target value is not present in dependency summaries")
+else:
+    checks.append("target_node missing")
+if answer is None:
+    print("status: blocked summary: answer: checks: python_repl executed deterministic extraction but target was unresolved. detail: " + "; ".join(checks))
+else:
+    print("status: completed summary: status: solved answer: solution = " + json.dumps({target: answer}, separators=(",", ":")) + " checks: python_repl executed deterministic extraction; " + "; ".join(checks))
+`)
+	return b.String(), nil
+}
+
+func braidNodeTargetID(node BraidNode) string {
+	for _, value := range []string{node.ExpectedOutput, node.ID, node.Question} {
+		ids := braidNodeIDRE.FindAllString(value, -1)
+		if len(ids) == 1 {
+			return ids[0]
+		}
+	}
+	return ""
+}
+
+func braidSummaryFromPythonREPLResult(result string) (string, bool) {
+	var decoded struct {
+		OK     bool           `json:"ok"`
+		Output string         `json:"output"`
+		Meta   map[string]any `json:"metadata"`
+	}
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		return "", false
+	}
+	if !decoded.OK {
+		return "", false
+	}
+	output := strings.TrimSpace(decoded.Output)
+	if output == "" && decoded.Meta != nil {
+		output = strings.TrimSpace(stringFromAny(decoded.Meta["stdout"]))
+	}
+	if strings.Contains(output, "stdout:\n") {
+		output = strings.TrimSpace(strings.TrimPrefix(output, "stdout:\n"))
+		if idx := strings.Index(output, "\nresult:\n"); idx >= 0 {
+			output = strings.TrimSpace(output[:idx])
+		}
+	}
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "status:") {
+			return line, true
+		}
+	}
+	return "", false
+}
+
+func runBraidRuntimeNodeShortcut(node BraidNode, dependencySummaries map[string]string, nodesByID map[string]BraidNode) (string, bool) {
 	switch node.Kind {
 	case "verify":
 		for _, summary := range dependencySummaries {
@@ -392,8 +696,12 @@ func runBraidRuntimeNodeShortcut(node BraidNode, dependencySummaries map[string]
 		if !braidDependencyVerificationPassed(dependencySummaries) {
 			return "", false
 		}
-		for _, summary := range dependencySummaries {
-			if answer, ok := braidSolutionAnswerFromSummary(summary); ok {
+		for _, depID := range node.DependsOn {
+			depNode := nodesByID[depID]
+			if depNode.ID == "" || !isBraidSolveKind(depNode.Kind) {
+				continue
+			}
+			if answer, ok := braidSolutionAnswerFromSummary(dependencySummaries[depID]); ok {
 				return "status: completed summary: status: solved answer: " + answer + " checks: reduce forwarded verified solve answer.", true
 			}
 		}
@@ -402,7 +710,11 @@ func runBraidRuntimeNodeShortcut(node BraidNode, dependencySummaries map[string]
 }
 
 func braidDependencyHasRuntimeVerifiedSolution(summary string) bool {
-	if _, ok := braidSolutionAnswerFromSummary(summary); !ok {
+	answer, ok := braidSolutionAnswerFromSummary(summary)
+	if !ok {
+		return false
+	}
+	if braidSolveAnswerRejectionReason(BraidNode{Kind: "solve"}, answer) != "" {
 		return false
 	}
 	return strings.Contains(summary, "checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier")
@@ -472,6 +784,16 @@ func runBraidNodeHelper(
 	if handoffInput := BraidHandoffHelperInput(handoff); len(handoffInput) > 0 {
 		input = mergeHelperFactoryInput(input, handoffInput)
 	}
+	input = enrichBraidHelperInputWithStructuredTargets(input, rootPrompt)
+	if targetText := strings.TrimSpace(stringFromAny(input["target_problem_text"])); targetText != "" {
+		prompt += "\nTarget problem text:\n" + targetText + "\n"
+	}
+	if targetTexts, _ := input["target_problem_texts"].(map[string]any); len(targetTexts) > 0 {
+		prompt += "\nTarget problem texts:\n" + renderBraidHandoffFacts(targetTexts) + "\n"
+	}
+	if node.Kind == "verify" {
+		input = normalizeBraidVerifyHelperInput(input)
+	}
 	instructions := buildBraidHelperRecoveryInstructions(node, triggerSummary)
 	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeTransitionSystem(input) {
 		instructions += "\n" + buildTransitionSystemHelperContract()
@@ -497,6 +819,12 @@ func runBraidNodeHelper(
 	if isBraidSolveKind(node.Kind) && braidHelperInputLooksLikeCandidateVerify(input) {
 		instructions += "\n" + buildCandidateVerifyHelperContract()
 	}
+	if isBraidSolveKind(node.Kind) && handoff.ScaffoldClass == BraidScaffoldClassExplicitDAG {
+		instructions += "\n" + buildExplicitDAGHelperContract()
+		if !braidHelperInputLooksLikeExplicitDAGPreset(input) {
+			instructions += "\n" + buildSingleWorkItemHelperContract()
+		}
+	}
 	argsMap := map[string]any{
 		"prompt":       prompt,
 		"instructions": instructions,
@@ -512,9 +840,18 @@ func runBraidNodeHelper(
 	callID := fmt.Sprintf("auto_%s_%s_%s", sanitizeToolCallIDPart(phaseName), sanitizeToolCallIDPart(node.ID), sanitizeToolCallIDPart(EphemeralHelperSolveToolName))
 	rawArgs := json.RawMessage(args)
 	helperExec := toolExec.helperFactory
+	if helperExec != nil && node.Kind == "verify" {
+		helperCfg := helperExec.Config
+		helperCfg.ExtractSolutionLine = false
+		helperCfg.AnswerVerifier = braidVerifyHelperAnswerContract
+		helperExec = &HelperFactoryTools{Config: helperCfg}
+	}
 	if isBraidSolveKind(node.Kind) && helperExec != nil {
 		helperCfg := helperExec.Config
 		helperCfg.Search.BeamWidth = firstPositiveInt(helperCfg.Search.BeamWidth, 3)
+		if node.Kind == "cycle_solve" {
+			helperCfg.ExtractSolutionLine = false
+		}
 		if scaffold, ok := resolveBraidRuntimeScaffold(node, handoff, input); ok && strings.TrimSpace(helperCfg.PresetSource) == "" {
 			helperCfg = applyBraidRuntimeScaffoldToHelperConfig(helperCfg, scaffold)
 		} else if helperCfg.AnswerVerifier == nil && braidHelperInputLooksLikePackageWasteOptimization(input) {
@@ -550,8 +887,16 @@ func runBraidNodeHelper(
 	if execErr != nil {
 		return "", false
 	}
+	if node.Kind == "verify" {
+		if summary, ok := helperVerifyFailureSummaryFromToolResult(result); ok {
+			return summary, true
+		}
+	}
 	answer, helperVerified := helperAnswerAndVerifiedFromToolResult(result)
 	if strings.TrimSpace(answer) == "" {
+		if summary, ok := helperFailureSummaryFromToolResult(node, result); ok {
+			return summary, true
+		}
 		return "", false
 	}
 	if isBraidSolveKind(node.Kind) {
@@ -564,6 +909,124 @@ func runBraidNodeHelper(
 	return formatBraidHelperNodeSummaryVerified(node, answer, helperVerified), true
 }
 
+func enrichBraidHelperInputWithStructuredTargets(input map[string]any, _ string) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	target := strings.TrimSpace(stringFromAny(input["target_node"]))
+	if target == "" {
+		targets := stringSliceFromAny(input["target_nodes"])
+		if len(targets) == 1 {
+			target = strings.TrimSpace(targets[0])
+		}
+	}
+	if target == "" {
+		targets := stringSliceFromAny(input["target_nodes"])
+		if len(targets) == 0 {
+			return input
+		}
+		texts := map[string]any{}
+		for _, candidate := range targets {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				continue
+			}
+			if text := structuredProblemTextForTarget(input, candidate); text != "" {
+				texts[candidate] = text
+			}
+		}
+		existingTexts, _ := input["target_problem_texts"].(map[string]any)
+		if len(texts) == 0 || len(existingTexts) > 0 {
+			return input
+		}
+		out := cloneMapAny(input)
+		out["target_problem_texts"] = texts
+		return out
+	}
+	if strings.TrimSpace(stringFromAny(input["target_problem_text"])) != "" {
+		return input
+	}
+	text := structuredProblemTextForTarget(input, target)
+	if text == "" {
+		return input
+	}
+	out := cloneMapAny(input)
+	out["target_problem_text"] = text
+	if strings.TrimSpace(stringFromAny(out["prompt"])) == "" || braidInputPromptLooksLikePlaceholder(strings.TrimSpace(stringFromAny(out["prompt"]))) {
+		out["prompt"] = text
+	}
+	return out
+}
+
+func structuredProblemTextForTarget(input map[string]any, target string) string {
+	target = strings.TrimSpace(target)
+	if len(input) == 0 || target == "" {
+		return ""
+	}
+	if text := strings.TrimSpace(stringFromAny(input["target_problem_text"])); text != "" {
+		if currentTarget := strings.TrimSpace(stringFromAny(input["target_node"])); currentTarget == "" || currentTarget == target {
+			return text
+		}
+	}
+	for _, key := range []string{"target_problem_texts", "problem_texts"} {
+		if text := structuredProblemTextFromMap(input[key], target); text != "" {
+			return text
+		}
+	}
+	if text := structuredProblemTextFromProblems(input["problems"], target); text != "" {
+		return text
+	}
+	return ""
+}
+
+func structuredProblemTextFromMap(raw any, target string) string {
+	values, ok := raw.(map[string]any)
+	if !ok || target == "" {
+		return ""
+	}
+	value, ok := values[target]
+	if !ok {
+		return ""
+	}
+	return structuredProblemTextFromValue(value)
+}
+
+func structuredProblemTextFromProblems(raw any, target string) string {
+	if target == "" {
+		return ""
+	}
+	switch typed := raw.(type) {
+	case map[string]any:
+		if value, ok := typed[target]; ok {
+			return structuredProblemTextFromValue(value)
+		}
+	case []any:
+		for _, item := range typed {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			id := strings.TrimSpace(stringFromAny(firstMapValue(entry, "id", "node_id", "target", "target_node")))
+			if id != target {
+				continue
+			}
+			return structuredProblemTextFromValue(entry)
+		}
+	}
+	return ""
+}
+
+func structuredProblemTextFromValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		return strings.TrimSpace(stringFromAny(firstMapValue(typed, "text", "question", "prompt", "problem")))
+	default:
+		return ""
+	}
+}
+
 func braidHelperInput(rootPrompt string, dependencySummaries map[string]string) map[string]any {
 	input := map[string]any{}
 	if parsed, ok := helperFactoryExtractInstanceFields(rootPrompt); ok {
@@ -573,19 +1036,188 @@ func braidHelperInput(rootPrompt string, dependencySummaries map[string]string) 
 		return input
 	}
 	deps := map[string]any{}
+	depText := map[string]any{}
 	for key, value := range dependencySummaries {
 		trimmedKey := strings.TrimSpace(key)
 		trimmedValue := strings.TrimSpace(value)
 		if trimmedKey == "" || trimmedValue == "" {
 			continue
 		}
-		deps[trimmedKey] = trimmedValue
-		input[trimmedKey] = trimmedValue
+		packet := braidDependencyHandoffPacket(trimmedValue)
+		deps[trimmedKey] = packet
+		depText[trimmedKey] = trimmedValue
+		input[trimmedKey] = packet
+		for _, alias := range braidDependencyAliases(trimmedKey) {
+			if _, exists := input[alias]; !exists {
+				input[alias] = packet
+			}
+		}
 	}
 	if len(deps) > 0 {
 		input["dependency_summaries"] = deps
+		input["dependency_summary_text"] = depText
 	}
 	return input
+}
+
+func braidDependencyAliases(nodeID string) []string {
+	sanitized := sanitizeToolCallIDPart(nodeID)
+	collapsed := collapseRepeatedUnderscores(sanitized)
+	out := []string{}
+	if sanitized != "" && sanitized != nodeID {
+		out = append(out, sanitized)
+	}
+	if collapsed != "" && collapsed != nodeID && collapsed != sanitized {
+		out = append(out, collapsed)
+	}
+	return out
+}
+
+func collapseRepeatedUnderscores(value string) string {
+	for strings.Contains(value, "__") {
+		value = strings.ReplaceAll(value, "__", "_")
+	}
+	return value
+}
+
+func braidDependencyHandoffPacket(summary string) map[string]any {
+	packet := map[string]any{"summary": strings.TrimSpace(summary)}
+	if answer := extractBraidDependencyAnswer(summary); answer != "" {
+		packet["answer"] = answer
+		packet["status"] = "completed"
+		if line, ok := rlm.ExtractSolutionLine(answer); ok {
+			packet["solution_line"] = line
+			solutionText := strings.TrimSpace(strings.TrimPrefix(line, "solution ="))
+			packet["solution_text"] = solutionText
+			if parsed, ok := parseBraidSolutionPayload(solutionText); ok {
+				packet["solution"] = parsed
+			} else {
+				packet["solution"] = solutionText
+			}
+		}
+	}
+	return packet
+}
+
+func parseBraidSolutionPayload(payload string) (any, bool) {
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return nil, false
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(payload), &parsed); err == nil {
+		return parsed, true
+	}
+	return nil, false
+}
+
+func extractBraidDependencyAnswer(summary string) string {
+	text := strings.TrimSpace(summary)
+	if text == "" {
+		return ""
+	}
+	idx := strings.LastIndex(text, " answer:")
+	prefixLen := len(" answer:")
+	if idx < 0 {
+		idx = strings.LastIndex(text, "answer:")
+		prefixLen = len("answer:")
+	}
+	if idx < 0 {
+		return ""
+	}
+	answer := strings.TrimSpace(text[idx+prefixLen:])
+	for _, marker := range []string{" checks:", " error:", " summary:"} {
+		if stop := strings.Index(answer, marker); stop >= 0 {
+			answer = strings.TrimSpace(answer[:stop])
+		}
+	}
+	return answer
+}
+
+func normalizeBraidVerifyHelperInput(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return input
+	}
+	out := cloneMapAny(input)
+	candidates := braidDependencyCandidateMap(out)
+	if len(candidates) == 0 {
+		return out
+	}
+	if value, exists := out["candidates"]; !exists || braidHelperValueLooksPlaceholder(value) || braidVerifyCandidateValueLooksPlaceholder(value) {
+		out["candidates"] = flattenBraidDependencyCandidateMap(candidates)
+	}
+	if value, exists := out["predicates"]; exists && braidHelperValueLooksPlaceholder(value) {
+		delete(out, "predicates")
+	}
+	return out
+}
+
+func braidVerifyCandidateValueLooksPlaceholder(value any) bool {
+	text, ok := value.(string)
+	if !ok {
+		return false
+	}
+	return len(extractBraidNodeIDsFromText(text)) > 0
+}
+
+func flattenBraidDependencyCandidateMap(candidates map[string]any) any {
+	if len(candidates) != 1 {
+		return candidates
+	}
+	for _, value := range candidates {
+		return value
+	}
+	return candidates
+}
+
+func braidDependencyCandidateMap(input map[string]any) map[string]any {
+	deps, _ := input["dependency_summaries"].(map[string]any)
+	if len(deps) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for depID, raw := range deps {
+		packet, _ := raw.(map[string]any)
+		if len(packet) == 0 {
+			continue
+		}
+		switch {
+		case packet["solution"] != nil:
+			out[depID] = packet["solution"]
+		case packet["solution_line"] != nil:
+			out[depID] = packet["solution_line"]
+		case packet["answer"] != nil:
+			out[depID] = packet["answer"]
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func braidHelperValueLooksPlaceholder(value any) bool {
+	switch typed := value.(type) {
+	case string:
+		return isSchemaPlaceholderAnswer(typed) || len(extractBraidNodeIDsFromText(typed)) > 0 && strings.Contains(strings.ToLower(typed), "answer")
+	case []any:
+		if len(typed) == 0 {
+			return true
+		}
+		for _, item := range typed {
+			if !braidHelperValueLooksPlaceholder(item) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		if len(typed) == 0 {
+			return true
+		}
+		return false
+	default:
+		return value == nil
+	}
 }
 
 func braidNodeEffectiveHelperPolicy(node BraidNode) string {
@@ -658,6 +1290,9 @@ func buildBraidHelperRecoveryInstructions(node BraidNode, failedSummary string) 
 	b.WriteString("The previous child blocked because the task needs executable search, simulation, parsing, or verification. Do not refuse for that reason.\n")
 	b.WriteString("Draft and run a short-lived helper that computes this node's answer directly. Prefer a deterministic state transformer or verifier when the task involves moves, stacks, transitions, paths, arithmetic search, or exact constraint checking.\n")
 	b.WriteString("Return the computed answer only, in the node's requested format. If this node can produce the final benchmark answer, return a line beginning with solution =.\n")
+	if node.Kind == "cycle_solve" {
+		b.WriteString(cycleSolveHelperOutputContract())
+	}
 	if isBraidSolveKind(node.Kind) {
 		b.WriteString("For a solve node, build a complete candidate and run an internal deterministic check before returning it. Do not emit a partial action list, copied prefix, or unchecked guess. If the check fails, return `status: blocked first_failure: ...` instead of `solution = ...`.\n")
 		b.WriteString("For state-transition tasks, model state explicitly, apply every candidate transition, and only return a candidate when final state and action legality both check out.\n")
@@ -666,7 +1301,7 @@ func buildBraidHelperRecoveryInstructions(node BraidNode, failedSummary string) 
 	if node.Kind == "verify" {
 		b.WriteString("For a verify node, simulate or substitute the candidate against the original constraints. Return `pass: true` only when every constraint is verified.\n")
 		b.WriteString("If verification fails, return `pass: false first_failure: ...` with the earliest illegal transition, bad substitution, missing candidate, or observed-vs-expected mismatch. Include the failed step index when applicable.\n")
-		b.WriteString("Dependency summaries are passed in the helper input under dependency_summaries and by dependency node id, for example input['n_solve'] when the graph has an n_solve dependency.\n")
+		b.WriteString("Dependency handoffs are typed packets under dependency_summaries and by dependency node id, for example input['n_solve'] when the graph has an n_solve dependency. Raw prose summaries are under dependency_summary_text.\n")
 	}
 	if strings.TrimSpace(node.ExpectedOutput) != "" {
 		b.WriteString("Expected node output: ")
@@ -676,6 +1311,10 @@ func buildBraidHelperRecoveryInstructions(node BraidNode, failedSummary string) 
 	b.WriteString("Previous blocked summary:\n")
 	b.WriteString(safeTelemetryExcerpt(failedSummary, 900))
 	return b.String()
+}
+
+func cycleSolveHelperOutputContract() string {
+	return "Cycle-solve output contract: return one answer string beginning with `cycle_json:` followed by one valid JSON object. Do not return `solution =` for a cycle_solve node. Do not return the candidate map directly as answer. The JSON object must be exactly shaped as {\"pass\":true,\"candidates\":{\"node_id\":value},\"checks\":[{\"name\":\"...\",\"ok\":true,\"observed\":value,\"expected\":value}]}. Every check must have ok=true and matching observed/expected values. Python helpers should return exactly {\"ok\": True, \"answer\": \"cycle_json: {\\\"pass\\\":true,\\\"candidates\\\":{\\\"node_id\\\":1},\\\"checks\\\":[{\\\"name\\\":\\\"fixed_point\\\",\\\"ok\\\":true,\\\"observed\\\":1,\\\"expected\\\":1}]}\"}. If no candidate passes, return {\"ok\": False, \"first_failure\": \"...\", \"repair_hint\": \"...\"} with attempted bounds and the first failed check.\n"
 }
 
 func braidHelperInputLooksLikeTransitionSystem(input map[string]any) bool {
@@ -1994,6 +2633,30 @@ Generic candidate-verify helper contract:
 `)
 }
 
+func buildSingleWorkItemHelperContract() string {
+	return strings.TrimSpace(`
+Generic single-work-item helper contract:
+- Treat work_item_question and expected_output as the primary local task.
+- Use root_task only for definitions and constraints that the local task explicitly references.
+- Do not parse, invent, or solve node_0/node_1 dependency graphs unless nodes, dependencies, or problems are explicitly present in input.
+- Return one concrete checked answer as solution = <value>, or return ok:false with first_failure and repair_hint.
+- Never return UNKNOWN, UNSOLVED, placeholders, scaffold metadata, or an answer_format template as the answer.
+- Verify the candidate by direct substitution, simulation, or a small independent check before returning ok:true.
+`)
+}
+
+func buildExplicitDAGHelperContract() string {
+	return strings.TrimSpace(`
+Generic explicit-DAG helper contract:
+- Treat problems, dependencies, dependency_summaries, work_item_question, and root_task as a dependency graph.
+- If problems is only a list of labels, recover the actual subproblem text from root_task or dependency_summaries before solving.
+- Solve leaf prerequisites first, substitute concrete values into dependent nodes, and keep a small checked table of node answers.
+- Return the concrete values requested by expected_output; if multiple node values are requested, return solution = {"node_id": value, ...}.
+- Do not return a single scalar unless expected_output asks for exactly one scalar.
+- Never mark a node solved with UNKNOWN, UNSOLVED, null, or a placeholder.
+`)
+}
+
 const (
 	helperPreflightMaxInputChars = 50000
 )
@@ -2141,6 +2804,12 @@ func formatBraidHelperNodeSummary(node BraidNode, answer string) string {
 func formatBraidHelperNodeSummaryVerified(node BraidNode, answer string, verified bool) string {
 	answer = strings.TrimSpace(answer)
 	if node.Kind == "verify" {
+		if pass, ok := braidVerifyAnswerJSONPass(answer); ok {
+			if pass {
+				return "status: pass summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints."
+			}
+			return "status: blocked summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints and found a concrete failure."
+		}
 		if braidPassFalseRE.MatchString(answer) {
 			return "status: blocked summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints and found a concrete failure."
 		}
@@ -2152,16 +2821,204 @@ func formatBraidHelperNodeSummaryVerified(node BraidNode, answer string, verifie
 	if isBraidSolveKind(node.Kind) && braidPassFalseRE.MatchString(answer) {
 		return "status: blocked summary: answer: " + answer + " checks: ephemeral_helper_solve self-verified candidate and found a concrete failure."
 	}
+	if node.Kind == "cycle_solve" {
+		if _, err := extractCycleSolveJSON(answer); err != nil {
+			return "status: blocked summary: answer: " + safeTelemetryExcerpt(answer, 600) + " checks: ephemeral_helper_solve produced an unusable cycle candidate. detail: " + err.Error()
+		}
+	}
 	if isBraidSolveKind(node.Kind) {
 		statuses := braidSummaryStatuses(answer)
 		if braidStatusesContainAny(statuses, "blocked", "failed", "failure", "error") {
 			return "status: blocked summary: answer: " + safeTelemetryExcerpt(answer, 600) + " checks: ephemeral_helper_solve did not produce a verified candidate."
+		}
+		if !verified && braidSolveNodeRequiresRuntimeVerification(node) {
+			return "status: blocked summary: answer: " + safeTelemetryExcerpt(answer, 600) + " checks: ephemeral_helper_solve produced an unverified explicit dependency candidate. detail: runtime verification is required before this solve node can feed downstream nodes."
+		}
+		if reason := braidSolveAnswerRejectionReason(node, answer); reason != "" {
+			return "status: blocked summary: answer: " + safeTelemetryExcerpt(answer, 600) + " checks: ephemeral_helper_solve produced an unusable candidate. detail: " + reason
 		}
 	}
 	if verified {
 		return "status: completed summary: status: solved answer: " + answer + " checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier."
 	}
 	return "status: completed summary: status: solved answer: " + answer + " checks: ephemeral_helper_solve produced and ran an executable helper for this node."
+}
+
+func braidVerifyAnswerJSONPass(answer string) (bool, bool) {
+	payload := strings.TrimSpace(answer)
+	if strings.HasPrefix(strings.ToLower(payload), "solution") {
+		_, after, ok := strings.Cut(payload, "=")
+		if !ok {
+			return false, false
+		}
+		payload = strings.TrimSpace(after)
+	}
+	if idx := strings.Index(payload, "{"); idx >= 0 {
+		payload = payload[idx:]
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		return false, false
+	}
+	return braidVerifyJSONPass(decoded)
+}
+
+func braidVerifyJSONPass(value any) (bool, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		if raw, ok := typed["pass"]; ok {
+			if b, ok := raw.(bool); ok {
+				return b, true
+			}
+		}
+		if raw, ok := typed["verified"]; ok {
+			if b, ok := raw.(bool); ok {
+				return b, true
+			}
+		}
+		for _, child := range typed {
+			if pass, ok := braidVerifyJSONPass(child); ok {
+				return pass, true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if pass, ok := braidVerifyJSONPass(child); ok {
+				return pass, true
+			}
+		}
+	}
+	return false, false
+}
+
+func normalizeBraidVerificationFailureSummary(node BraidNode, summary string) (string, bool) {
+	if node.Kind != "verify" || braidVerificationSummaryPassed(summary) {
+		return "", false
+	}
+	if !braidVerificationSummaryHasConcreteFailure(summary) {
+		return "", false
+	}
+	detail := safeTelemetryExcerpt(strings.TrimSpace(summary), 900)
+	if detail == "" {
+		detail = "verification failed"
+	}
+	return "status: blocked summary: answer: pass: false first_failure: " + detail + " checks: verifier found a concrete failed constraint; repair the upstream candidate instead of retrying verifier helper.", true
+}
+
+func braidVerificationSummaryHasConcreteFailure(summary string) bool {
+	lower := strings.ToLower(strings.TrimSpace(summary))
+	if lower == "" {
+		return false
+	}
+	if braidPassFalseRE.MatchString(summary) {
+		return true
+	}
+	for _, marker := range []string{
+		"first_failure",
+		"first failure",
+		"failed constraint",
+		"failing constraint",
+		"constraint failure",
+		"critical constraint",
+		"constraint violation",
+		"does not satisfy",
+		"not satisfy",
+		"mismatch",
+		"not equal",
+		"!=",
+		"≠",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func braidSolveNodeRequiresRuntimeVerification(node BraidNode) bool {
+	if !isBraidSolveKind(node.Kind) {
+		return false
+	}
+	if strings.TrimSpace(node.ScaffoldClass) != BraidScaffoldClassExplicitDAG || strings.TrimSpace(node.ScaffoldID) != BraidScaffoldIDSearchBacktrackV1 {
+		return false
+	}
+	if strings.Contains(node.ID, "__adaptive_") || strings.HasSuffix(node.ID, "__adaptive_merge") {
+		if len(stringSliceFromAny(node.InputSchema["target_node"])) == 1 || len(stringSliceFromAny(node.InputSchema["target_nodes"])) == 1 {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func braidSolveAnswerRejectionReason(node BraidNode, answer string) string {
+	trimmed := strings.TrimSpace(answer)
+	if trimmed == "" {
+		return "empty answer"
+	}
+	lower := strings.ToLower(trimmed)
+	switch {
+	case strings.Contains(lower, "<answer>") || strings.Contains(lower, "\\u003canswer\\u003e") || strings.Contains(lower, "u003canswer"):
+		return "answer contains placeholder answer markers"
+	case strings.Contains(lower, `"root_task"`) || strings.Contains(lower, `"work_item_question"`) || strings.Contains(lower, `"answer_format"`):
+		return "answer appears to echo the helper input packet"
+	case strings.Contains(lower, `"scaffold_class"`) || strings.Contains(lower, `"scaffold_id"`) || strings.Contains(lower, `"task_type"`):
+		return "answer appears to echo scaffold metadata"
+	case strings.Contains(lower, "official task text begins"):
+		return "answer includes runtime prompt text"
+	case strings.Contains(strings.ToUpper(trimmed), "UNSOLVED"):
+		return "answer contains unresolved values"
+	case strings.Contains(strings.ToUpper(trimmed), "UNKNOWN"):
+		return "answer contains unknown values"
+	}
+	expected := strings.ToLower(strings.TrimSpace(node.ExpectedOutput))
+	if expected != "" && expectedOutputRequiresStructuredNodeValues(expected) {
+		hasNodeValue := strings.Contains(lower, "node_") || strings.Contains(trimmed, "[") || strings.Contains(trimmed, "{")
+		if !hasNodeValue {
+			return "answer does not contain structured node values required by expected_output"
+		}
+	}
+	if isMultiVariableSolveNode(node) && !strings.Contains(trimmed, "{") && !strings.Contains(trimmed, "[") {
+		return "answer does not contain structured values required by multi-variable input_schema"
+	}
+	if expected != "" && (strings.Contains(expected, "final answer") || strings.Contains(expected, "final answers")) {
+		if len([]rune(trimmed)) < 16 {
+			return "answer too short for requested final values"
+		}
+	}
+	if strings.HasPrefix(lower, "solution = ") {
+		payload := strings.TrimSpace(trimmed[len("solution = "):])
+		if len([]rune(payload)) == 1 && strings.ContainsAny(payload, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+			return "single-letter solution is not a structured candidate"
+		}
+	}
+	return ""
+}
+
+func expectedOutputRequiresStructuredNodeValues(expected string) bool {
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	if expected == "" {
+		return false
+	}
+	nodeIDs := extractBraidNodeIDsFromText(expected)
+	if len(nodeIDs) > 1 {
+		return true
+	}
+	return strings.Contains(expected, "answers for nodes") ||
+		strings.Contains(expected, "answer for nodes") ||
+		(strings.Contains(expected, "nodes ") && strings.Contains(expected, "through"))
+}
+
+func isMultiVariableSolveNode(node BraidNode) bool {
+	if !isBraidSolveKind(node.Kind) || len(node.InputSchema) == 0 {
+		return false
+	}
+	vars := stringSliceFromAny(node.InputSchema["variables"])
+	if len(vars) > 1 {
+		return true
+	}
+	targets := stringSliceFromAny(node.InputSchema["target_nodes"])
+	return len(targets) > 1
 }
 
 func helperAnswerFromToolResult(result string) string {
@@ -2183,6 +3040,249 @@ func helperAnswerAndVerifiedFromToolResult(result string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(result), false
+}
+
+func helperFailureSummaryFromToolResult(node BraidNode, result string) (string, bool) {
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		return "", false
+	}
+	if ok, _ := decoded["ok"].(bool); ok {
+		return "", false
+	}
+	detail := strings.TrimSpace(stringFromAny(decoded["error"]))
+	if detail == "" {
+		detail = "helper returned ok:false without a usable answer"
+	}
+	if preset := strings.TrimSpace(stringFromAny(decoded["preset"])); preset != "" {
+		detail += "; preset=" + preset
+	}
+	if attempts, ok := decoded["attempts"].([]any); ok && len(attempts) > 0 {
+		detail += "; attempts=" + compactHelperFailureAttempts(attempts)
+	}
+	counterexample := helperCounterexampleSummaryFromToolResult(decoded)
+	if node.Kind == "verify" {
+		summary := "status: blocked summary: answer: pass: false checks: ephemeral_helper_solve failed before producing a passing verification. detail: " + safeTelemetryExcerpt(detail, 900)
+		if counterexample != "" {
+			summary += " counterexample: " + counterexample
+		}
+		return summary, true
+	}
+	summary := "status: blocked summary: answer: checks: ephemeral_helper_solve failed before producing a usable candidate. detail: " + safeTelemetryExcerpt(detail, 900)
+	if counterexample != "" {
+		summary += " counterexample: " + counterexample
+	}
+	return summary, true
+}
+
+func helperVerifyFailureSummaryFromToolResult(result string) (string, bool) {
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(result), &decoded); err != nil {
+		return "", false
+	}
+	output, _ := decoded["output_summary"].(map[string]any)
+	if len(output) == 0 {
+		return "", false
+	}
+	pass, hasPass := output["pass"].(bool)
+	if !hasPass || pass {
+		return "", false
+	}
+	detailParts := []string{"pass: false"}
+	for _, key := range []string{"first_failure", "failed_step", "failed_at_step", "failed_node", "message", "repair_hint"} {
+		if value := strings.TrimSpace(stringFromAny(output[key])); value != "" {
+			detailParts = append(detailParts, key+": "+value)
+		}
+	}
+	for _, key := range []string{"observed", "expected"} {
+		if value, ok := output[key+"_summary"]; ok {
+			detailParts = append(detailParts, key+": "+safeTelemetryExcerpt(fmt.Sprintf("%v", value), 180))
+		}
+	}
+	if answer := strings.TrimSpace(stringFromAny(output["answer"])); answer != "" {
+		detailParts = append(detailParts, "candidate: "+safeTelemetryExcerpt(answer, 220))
+	}
+	detail := strings.Join(detailParts, "; ")
+	return "status: blocked summary: answer: " + detail + " checks: ephemeral_helper_solve simulated original constraints and found a concrete failure.", true
+}
+
+func braidVerifyHelperAnswerContract(answer string, input map[string]any) (HelperVerifierDiagnostic, bool) {
+	trimmed := strings.TrimSpace(answer)
+	if trimmed == "" {
+		return HelperVerifierDiagnostic{
+			Pass:         false,
+			FailureKind:  "verify_contract",
+			FirstFailure: "empty verifier answer",
+			Expected:     "pass: true or pass: false with diagnostic fields",
+			RepairHint:   "return explicit pass true/false; do not return a solution line from a verify helper",
+		}, true
+	}
+	if braidPassTrueRE.MatchString(trimmed) || braidPassFalseRE.MatchString(trimmed) {
+		return HelperVerifierDiagnostic{Pass: true}, true
+	}
+	if diag, ok := braidVerifyAnswerJSONContract(trimmed); ok {
+		return diag, true
+	}
+	return HelperVerifierDiagnostic{
+		Pass:         false,
+		FailureKind:  "verify_contract",
+		FirstFailure: "verifier answer did not contain explicit pass true/false",
+		Observed:     safeTelemetryExcerpt(trimmed, 300),
+		Expected:     "pass: true, or pass: false first_failure: <concrete mismatch>",
+		RepairHint:   "simulate/substitute the candidate and return explicit pass true/false; do not return solution = ... from a verify helper",
+	}, true
+}
+
+func braidVerifyAnswerJSONContract(answer string) (HelperVerifierDiagnostic, bool) {
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return HelperVerifierDiagnostic{}, false
+	}
+	if idx := strings.Index(answer, "{"); idx >= 0 {
+		answer = answer[idx:]
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(answer), &decoded); err != nil {
+		return HelperVerifierDiagnostic{}, false
+	}
+	pass, ok := decoded["pass"].(bool)
+	if !ok {
+		return HelperVerifierDiagnostic{}, false
+	}
+	if !pass {
+		return HelperVerifierDiagnostic{Pass: true}, true
+	}
+	if braidVerifyJSONHasNonEmptyEvidence(decoded) {
+		return HelperVerifierDiagnostic{Pass: true}, true
+	}
+	return HelperVerifierDiagnostic{
+		Pass:         false,
+		FailureKind:  "verify_contract",
+		FirstFailure: "verifier pass:true JSON included no concrete checks, evidence, or candidate values",
+		Observed:     safeTelemetryExcerpt(answer, 300),
+		Expected:     "pass:true JSON must include non-empty checks, evidence, observations, or candidate values",
+		RepairHint:   "simulate or substitute the candidate and include at least one concrete check/evidence item; otherwise return pass:false with first_failure",
+	}, true
+}
+
+func braidVerifyJSONHasNonEmptyEvidence(decoded map[string]any) bool {
+	for _, key := range []string{"checks", "evidence", "observations", "candidate", "candidates", "verified_constraints"} {
+		value, ok := decoded[key]
+		if !ok || value == nil {
+			continue
+		}
+		switch typed := value.(type) {
+		case []any:
+			if len(typed) > 0 {
+				return true
+			}
+		case map[string]any:
+			if len(typed) > 0 {
+				return true
+			}
+		case string:
+			if strings.TrimSpace(typed) != "" {
+				return true
+			}
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+func helperCounterexampleSummaryFromToolResult(decoded map[string]any) string {
+	counterexample := helperCounterexampleFromToolResult(decoded)
+	if len(counterexample) == 0 {
+		return ""
+	}
+	body, err := json.Marshal(counterexample)
+	if err != nil || len(body) == 0 {
+		return ""
+	}
+	return safeTelemetryExcerpt(string(body), 700)
+}
+
+func helperCounterexampleFromToolResult(decoded map[string]any) map[string]any {
+	if len(decoded) == 0 {
+		return nil
+	}
+	if repairHarness, ok := decoded["repair_harness"].(map[string]any); ok {
+		if latest, ok := repairHarness["latest_counterexample"].(map[string]any); ok && len(latest) > 0 {
+			return cloneMapAny(latest)
+		}
+	}
+	if feedback, ok := decoded["finalize_feedback"].(map[string]any); ok {
+		if counterexample, ok := feedback["counterexample"].(map[string]any); ok && len(counterexample) > 0 {
+			return cloneMapAny(counterexample)
+		}
+	}
+	if attempts, ok := decoded["attempts"].([]any); ok {
+		for i := len(attempts) - 1; i >= 0; i-- {
+			attempt, ok := attempts[i].(map[string]any)
+			if !ok {
+				continue
+			}
+			if diag, ok := attempt["verifier_diagnostic"].(map[string]any); ok {
+				if counterexample := helperFactoryCounterexamplePacket(diag); len(counterexample) > 0 {
+					return counterexample
+				}
+			}
+			if feedback, ok := attempt["finalize_feedback"].(map[string]any); ok {
+				if counterexample, ok := feedback["counterexample"].(map[string]any); ok && len(counterexample) > 0 {
+					return cloneMapAny(counterexample)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func compactHelperFailureAttempts(attempts []any) string {
+	parts := make([]string, 0, len(attempts))
+	for _, raw := range attempts {
+		attempt, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		stage := strings.TrimSpace(stringFromAny(attempt["stage"]))
+		errText := strings.TrimSpace(stringFromAny(attempt["error"]))
+		if stage == "" && errText == "" {
+			continue
+		}
+		if errText != "" {
+			parts = append(parts, stage+":"+safeTelemetryExcerpt(errText, 120))
+		} else {
+			parts = append(parts, stage)
+		}
+	}
+	if len(parts) == 0 {
+		return "unavailable"
+	}
+	return strings.Join(parts, " | ")
+}
+
+func stringFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case fmt.Stringer:
+		return typed.String()
+	default:
+		if value == nil {
+			return ""
+		}
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func verifyStackMoveCandidateFromInput(answer string, rawInput any) (bool, string, bool) {
@@ -3314,12 +4414,39 @@ func prepareBraidRepair(
 		return false
 	}
 	statuses := braidSummaryStatuses(failedSummary)
-	if !braidStatusesContainAny(statuses, "blocked") || braidStatusesContainAny(statuses, "failed", "failure", "error") {
+	if !braidStatusesContainAny(statuses, "blocked", "partial") || braidStatusesContainAny(statuses, "failed", "failure", "error") {
+		return false
+	}
+	if braidFailureIsHelperContractFailure(failedSummary) {
 		return false
 	}
 	solveIDs := braidRepairSolveNodeIDs(*graph, failedNode)
 	if len(solveIDs) == 0 {
 		return false
+	}
+	if braidFailureSignalsUnresolvedWork(failedSummary) {
+		for _, solveID := range solveIDs {
+			node, ok := braidGraphNodeByID(*graph, solveID)
+			if !ok {
+				continue
+			}
+			plan, ok := buildAdaptiveBraidSplitPlan(node, failedSummary)
+			if !ok {
+				continue
+			}
+			if applyAdaptiveBraidSplitPlan(graph, plan) {
+				*repairAttempts++
+				for nodeID := range braidNodeClosureFrom(*graph, plan.MergeNodeID) {
+					delete(summaries, nodeID)
+					delete(executed, nodeID)
+					delete(repairFeedbackByNode, nodeID)
+				}
+				delete(summaries, solveID)
+				delete(executed, solveID)
+				delete(repairFeedbackByNode, solveID)
+				return true
+			}
+		}
 	}
 	*repairAttempts++
 	affected := map[string]struct{}{}
@@ -3337,6 +4464,1013 @@ func prepareBraidRepair(
 		repairFeedbackByNode[solveID] = capBraidRepairFeedback(buildBraidRepairFeedback(failedNode, failedSummary))
 	}
 	return true
+}
+
+func braidFailureIsHelperContractFailure(summary string) bool {
+	lower := strings.ToLower(summary)
+	if !strings.Contains(lower, "ephemeral_helper_solve") && !strings.Contains(lower, "helper factory") {
+		return false
+	}
+	for _, marker := range []string{
+		"decode draft json",
+		"decode repair json",
+		"no valid draft json object",
+		"source is structurally incomplete",
+		"python skill validation/run failed",
+		"syntaxerror",
+		"indentationerror",
+		"source accepted by helper validator",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+type braidAdaptiveSplitPlan struct {
+	ParentNodeID string
+	RouterNodeID string
+	MergeNodeID  string
+	Reason       string
+	Targets      []braidAdaptiveSplitTarget
+}
+
+type braidAdaptiveSplitTarget struct {
+	ID             string
+	Kind           string
+	Question       string
+	DependsOn      []string
+	ExpectedOutput string
+	InputSchema    map[string]any
+}
+
+const maxAdaptiveBraidSplitTargets = 12
+
+func braidFailureSignalsUnresolvedWork(summary string) bool {
+	lower := strings.ToLower(summary)
+	upper := strings.ToUpper(summary)
+	if strings.Contains(upper, "UNSOLVED") {
+		return true
+	}
+	if strings.Contains(lower, "answer contains unresolved values") {
+		return true
+	}
+	if strings.Contains(lower, "does not contain structured node values") {
+		return true
+	}
+	if strings.Contains(lower, "failure_kind") && strings.Contains(lower, "search_backtrack") && strings.Contains(lower, "unresolved") {
+		return true
+	}
+	if strings.Contains(lower, "helper output did not include a usable answer") && strings.Contains(lower, "candidate_frontier") {
+		return true
+	}
+	return false
+}
+
+func buildAdaptiveBraidSplitPlan(node BraidNode, failedSummary string) (braidAdaptiveSplitPlan, bool) {
+	if !isBraidSolveKind(node.Kind) {
+		return braidAdaptiveSplitPlan{}, false
+	}
+	targets := adaptiveBraidSplitTargetIDs(node)
+	cycleClusters := adaptiveBraidCycleClusters(node)
+	requestedTargets := adaptiveBraidRequestedTargetIDs(node)
+	if len(targets) < 2 && len(cycleClusters) == 0 {
+		return braidAdaptiveSplitPlan{}, false
+	}
+	if len(targets) > maxAdaptiveBraidSplitTargets {
+		targets = targets[:maxAdaptiveBraidSplitTargets]
+	}
+	mergeID := node.ID + "__adaptive_merge"
+	routerID := node.ID + "__adaptive_router"
+	plan := braidAdaptiveSplitPlan{
+		ParentNodeID: node.ID,
+		RouterNodeID: routerID,
+		MergeNodeID:  mergeID,
+		Reason:       safeTelemetryExcerpt(failedSummary, 300),
+		Targets:      make([]braidAdaptiveSplitTarget, 0, len(targets)+len(cycleClusters)),
+	}
+	priorID := ""
+	clusterMembers := map[string]bool{}
+	for _, cluster := range cycleClusters {
+		for _, id := range cluster {
+			clusterMembers[id] = true
+		}
+	}
+	targetIndex := 0
+	for _, cluster := range cycleClusters {
+		if len(cluster) < 2 {
+			continue
+		}
+		if len(requestedTargets) > 0 && !braidNodeIDListsIntersect(cluster, requestedTargets) {
+			continue
+		}
+		solveID := fmt.Sprintf("%s__adaptive_%02d_cycle_%s", node.ID, targetIndex, sanitizeToolCallIDPart(strings.Join(cluster, "_")))
+		deps := []string{routerID}
+		if priorID != "" {
+			deps = append(deps, priorID)
+		}
+		input := cloneMapAny(node.InputSchema)
+		if input == nil {
+			input = map[string]any{}
+		}
+		input["target_nodes"] = stringSliceToAny(cluster)
+		input["cycle_clusters"] = []any{stringSliceToAny(cluster)}
+		input["adaptive_parent"] = node.ID
+		input["router_node"] = routerID
+		input["expected_output"] = fmt.Sprintf("solution = %s", braidNodeAnswerObjectTemplate(cluster))
+		delete(input, "target_node")
+		delete(input, "solve_targets")
+		plan.Targets = append(plan.Targets, braidAdaptiveSplitTarget{
+			ID:             solveID,
+			Kind:           "cycle_solve",
+			Question:       fmt.Sprintf("Solve mutually dependent target cluster %s for parent %s as one fixed-point or constraint-search problem. Use the router dependency packet and dependency summaries; return all cluster values and checks. Parent task: %s", strings.Join(cluster, ", "), node.ID, strings.TrimSpace(node.Question)),
+			DependsOn:      deps,
+			ExpectedOutput: fmt.Sprintf("solution = %s", braidNodeAnswerObjectTemplate(cluster)),
+			InputSchema:    input,
+		})
+		priorID = solveID
+		targetIndex++
+	}
+	for _, targetID := range targets {
+		if clusterMembers[targetID] {
+			continue
+		}
+		solveID := fmt.Sprintf("%s__adaptive_%02d_%s", node.ID, targetIndex, sanitizeToolCallIDPart(targetID))
+		deps := []string{routerID}
+		if priorID != "" {
+			deps = append(deps, priorID)
+		}
+		input := cloneMapAny(node.InputSchema)
+		if input == nil {
+			input = map[string]any{}
+		}
+		input["target_node"] = targetID
+		input["target_nodes"] = []any{targetID}
+		input["adaptive_parent"] = node.ID
+		input["router_node"] = routerID
+		input["expected_output"] = fmt.Sprintf("solution = {\"%s\": <answer>}", targetID)
+		delete(input, "solve_targets")
+		plan.Targets = append(plan.Targets, braidAdaptiveSplitTarget{
+			ID:             solveID,
+			Kind:           node.Kind,
+			Question:       fmt.Sprintf("Solve only %s for parent %s. Use the router dependency packet and dependency summaries as already solved inputs; return this target's candidate and checks. Parent task: %s", targetID, node.ID, strings.TrimSpace(node.Question)),
+			DependsOn:      deps,
+			ExpectedOutput: fmt.Sprintf("solution = <answer for %s>", targetID),
+			InputSchema:    input,
+		})
+		priorID = solveID
+		targetIndex++
+	}
+	if len(cycleClusters) > 0 {
+		outsideRequested := make([]string, 0, len(requestedTargets))
+		for _, targetID := range requestedTargets {
+			if !clusterMembers[targetID] {
+				outsideRequested = append(outsideRequested, targetID)
+			}
+		}
+		if len(outsideRequested) > 0 {
+			solveID := fmt.Sprintf("%s__adaptive_%02d_requested_outputs", node.ID, targetIndex)
+			deps := []string{routerID}
+			if priorID != "" {
+				deps = append(deps, priorID)
+			}
+			input := cloneMapAny(node.InputSchema)
+			if input == nil {
+				input = map[string]any{}
+			}
+			input["target_nodes"] = stringSliceToAny(outsideRequested)
+			input["adaptive_parent"] = node.ID
+			input["router_node"] = routerID
+			input["expected_output"] = strings.TrimSpace(node.ExpectedOutput)
+			delete(input, "target_node")
+			delete(input, "solve_targets")
+			plan.Targets = append(plan.Targets, braidAdaptiveSplitTarget{
+				ID:             solveID,
+				Kind:           node.Kind,
+				Question:       fmt.Sprintf("Solve requested outputs %s for parent %s using prior cycle-cluster results and the router dependency packet. Parent task: %s", strings.Join(outsideRequested, ", "), node.ID, strings.TrimSpace(node.Question)),
+				DependsOn:      deps,
+				ExpectedOutput: node.ExpectedOutput,
+				InputSchema:    input,
+			})
+		}
+	}
+	return plan, len(plan.Targets) > 0
+}
+
+func adaptiveBraidSplitTargetIDs(node BraidNode) []string {
+	input := node.InputSchema
+	if len(input) == 0 {
+		return extractBraidNodeIDsFromText(node.Question)
+	}
+	for _, key := range []string{"solve_targets", "nodes_to_solve", "intermediate_dependencies"} {
+		if ids := extractBraidNodeIDsFromAny(input[key]); len(ids) > 1 {
+			return ids
+		}
+		if ids := stringSliceFromAny(input[key]); len(ids) > 0 {
+			return dedupeNonEmptyStrings(ids)
+		}
+	}
+	if rawTarget, ok := input["target_node"]; ok {
+		if id := strings.TrimSpace(fmt.Sprintf("%v", rawTarget)); id != "" {
+			return []string{id}
+		}
+	}
+	for _, key := range []string{"problems", "dependencies"} {
+		if ids := extractBraidNodeIDsFromAny(input[key]); len(ids) > 1 {
+			return ids
+		}
+	}
+	return nil
+}
+
+func adaptiveBraidRequestedTargetIDs(node BraidNode) []string {
+	input := node.InputSchema
+	if len(input) > 0 {
+		for _, key := range []string{"target_nodes", "requested_outputs"} {
+			if ids := extractBraidNodeIDsFromAny(input[key]); len(ids) > 0 {
+				return ids
+			}
+			if ids := stringSliceFromAny(input[key]); len(ids) > 0 {
+				return dedupeNonEmptyStrings(ids)
+			}
+		}
+	}
+	if ids := extractBraidNodeIDsFromText(node.ExpectedOutput); len(ids) > 0 {
+		return ids
+	}
+	return nil
+}
+
+func adaptiveBraidCycleClusters(node BraidNode) [][]string {
+	input := node.InputSchema
+	if len(input) == 0 {
+		return nil
+	}
+	return extractBraidCycleClustersFromAny(input["cycle_clusters"])
+}
+
+func extractBraidCycleClustersFromAny(value any) [][]string {
+	switch typed := value.(type) {
+	case []any:
+		out := make([][]string, 0, len(typed))
+		for _, item := range typed {
+			ids := extractBraidCycleClusterIDs(item)
+			if len(ids) > 1 {
+				out = append(out, ids)
+			}
+		}
+		return out
+	case []string:
+		ids := dedupeNonEmptyStrings(typed)
+		if len(ids) > 1 {
+			return [][]string{ids}
+		}
+	case map[string]any:
+		ids := extractBraidCycleClusterIDs(typed)
+		if len(ids) > 1 {
+			return [][]string{ids}
+		}
+	}
+	return nil
+}
+
+func extractBraidCycleClusterIDs(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return dedupeNonEmptyStrings(typed)
+	case []any:
+		ids := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if id := strings.TrimSpace(fmt.Sprintf("%v", item)); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		return dedupeNonEmptyStrings(ids)
+	case map[string]any:
+		for _, key := range []string{"nodes", "target_nodes", "ids"} {
+			if ids := extractBraidCycleClusterIDs(typed[key]); len(ids) > 1 {
+				return ids
+			}
+		}
+	}
+	return nil
+}
+
+func braidNodeIDListsIntersect(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return false
+	}
+	seen := make(map[string]bool, len(a))
+	for _, id := range a {
+		seen[id] = true
+	}
+	for _, id := range b {
+		if seen[id] {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceToAny(values []string) []any {
+	out := make([]any, 0, len(values))
+	for _, value := range values {
+		out = append(out, value)
+	}
+	return out
+}
+
+func braidNodeAnswerObjectTemplate(ids []string) string {
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		parts = append(parts, fmt.Sprintf("%q: <answer>", id))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+func adaptiveBraidSplitDeclaredTargetIDs(node BraidNode) []string {
+	input := node.InputSchema
+	if len(input) == 0 {
+		return nil
+	}
+	for _, key := range []string{"solve_targets", "nodes_to_solve"} {
+		if ids := extractBraidNodeIDsFromAny(input[key]); len(ids) > 1 {
+			return ids
+		}
+		if ids := stringSliceFromAny(input[key]); len(ids) > 1 {
+			return dedupeNonEmptyStrings(ids)
+		}
+	}
+	return nil
+}
+
+var braidNodeIDRangeRE = regexp.MustCompile(`\bnode_(\d+)\s*(?:to|-|through)\s*node_(\d+)\b`)
+var braidNodeIDRE = regexp.MustCompile(`\bnode_\d+\b`)
+var braidBareNodeListRE = regexp.MustCompile(`\bnodes?\s+((?:\d+\s*(?:,|and|through|to|-)?\s*){2,})`)
+var braidBareNIDRE = regexp.MustCompile(`\bn(\d+)\b`)
+var braidIntegerRE = regexp.MustCompile(`\d+`)
+
+func extractBraidNodeIDsFromAny(value any) []string {
+	switch typed := value.(type) {
+	case string:
+		return extractBraidNodeIDsFromText(typed)
+	case []string:
+		return extractBraidNodeIDsFromText(strings.Join(typed, "\n"))
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			parts = append(parts, fmt.Sprintf("%v", item))
+		}
+		return extractBraidNodeIDsFromText(strings.Join(parts, "\n"))
+	default:
+		if value == nil {
+			return nil
+		}
+		return extractBraidNodeIDsFromText(fmt.Sprintf("%v", value))
+	}
+}
+
+func extractBraidNodeIDsFromText(text string) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	out := []string{}
+	for _, match := range braidNodeIDRangeRE.FindAllStringSubmatch(text, -1) {
+		if len(match) != 3 {
+			continue
+		}
+		start, errStart := strconv.Atoi(match[1])
+		end, errEnd := strconv.Atoi(match[2])
+		if errStart != nil || errEnd != nil {
+			continue
+		}
+		if start <= end {
+			for i := start; i <= end && len(out) < maxAdaptiveBraidSplitTargets; i++ {
+				out = append(out, fmt.Sprintf("node_%d", i))
+			}
+		} else {
+			for i := start; i >= end && len(out) < maxAdaptiveBraidSplitTargets; i-- {
+				out = append(out, fmt.Sprintf("node_%d", i))
+			}
+		}
+	}
+	for _, id := range braidNodeIDRE.FindAllString(text, -1) {
+		out = append(out, id)
+	}
+	for _, match := range braidBareNodeListRE.FindAllStringSubmatch(strings.ToLower(text), -1) {
+		if len(match) != 2 {
+			continue
+		}
+		for _, number := range braidIntegerRE.FindAllString(match[1], -1) {
+			out = append(out, "node_"+number)
+		}
+	}
+	for _, match := range braidBareNIDRE.FindAllStringSubmatch(strings.ToLower(text), -1) {
+		if len(match) == 2 {
+			out = append(out, "node_"+match[1])
+		}
+	}
+	return dedupeNonEmptyStrings(out)
+}
+
+func stringSliceFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if s := strings.TrimSpace(fmt.Sprintf("%v", item)); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return nil
+		}
+		var decoded []string
+		if strings.HasPrefix(trimmed, "[") && json.Unmarshal([]byte(trimmed), &decoded) == nil {
+			return decoded
+		}
+		return []string{trimmed}
+	default:
+		return nil
+	}
+}
+
+func dedupeNonEmptyStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func applyAdaptiveBraidSplitPlan(graph *BraidGraph, plan braidAdaptiveSplitPlan) bool {
+	if graph == nil || strings.TrimSpace(plan.ParentNodeID) == "" || len(plan.Targets) == 0 {
+		return false
+	}
+	parent, ok := braidGraphNodeByID(*graph, plan.ParentNodeID)
+	if !ok {
+		return false
+	}
+	newNodes := make([]BraidNode, 0, len(plan.Targets)+1)
+	routerID := strings.TrimSpace(plan.RouterNodeID)
+	if routerID == "" {
+		routerID = plan.ParentNodeID + "__adaptive_router"
+	}
+	newNodes = append(newNodes, BraidNode{
+		ID:              routerID,
+		Kind:            "extract",
+		Question:        fmt.Sprintf("Create a compact routing packet for parent %s. Include target ids, target-local inputs, dependency edges among targets, dependency edges to already solved parent dependencies, and the exact final output format. Do not solve target values.", plan.ParentNodeID),
+		DependsOn:       append([]string(nil), parent.DependsOn...),
+		ExpectedOutput:  "routing packet with target ids, dependencies, local inputs, and answer format; no final numeric answers",
+		MaxSummaryChars: 2400,
+		HelperPolicy:    BraidNodeHelperPolicyNever,
+	})
+	solveIDs := make([]string, 0, len(plan.Targets))
+	for _, target := range plan.Targets {
+		if strings.TrimSpace(target.ID) == "" {
+			return false
+		}
+		kind := strings.TrimSpace(target.Kind)
+		if kind == "" {
+			kind = parent.Kind
+		}
+		solveIDs = append(solveIDs, target.ID)
+		newNodes = append(newNodes, BraidNode{
+			ID:              target.ID,
+			Kind:            kind,
+			Question:        target.Question,
+			DependsOn:       append([]string(nil), target.DependsOn...),
+			ExpectedOutput:  target.ExpectedOutput,
+			MaxSummaryChars: parent.MaxSummaryChars,
+			HelperPolicy:    parent.HelperPolicy,
+			Archetype:       BraidScaffoldClassExplicitDAG,
+			ScaffoldClass:   BraidScaffoldClassExplicitDAG,
+			ScaffoldID:      BraidScaffoldIDSearchBacktrackV1,
+			InputSchema:     target.InputSchema,
+		})
+	}
+	mergeID := strings.TrimSpace(plan.MergeNodeID)
+	if mergeID == "" {
+		mergeID = plan.ParentNodeID + "__adaptive_merge"
+	}
+	newNodes = append(newNodes, BraidNode{
+		ID:              mergeID,
+		Kind:            "reduce",
+		Question:        fmt.Sprintf("Merge adaptive split results for parent %s into the parent node's expected output.", plan.ParentNodeID),
+		DependsOn:       solveIDs,
+		ExpectedOutput:  parent.ExpectedOutput,
+		MaxSummaryChars: parent.MaxSummaryChars,
+		HelperPolicy:    BraidNodeHelperPolicyNever,
+	})
+
+	filtered := make([]BraidNode, 0, len(graph.Nodes)-1+len(newNodes))
+	for _, node := range graph.Nodes {
+		if node.ID == plan.ParentNodeID {
+			continue
+		}
+		for i, depID := range node.DependsOn {
+			if depID == plan.ParentNodeID {
+				node.DependsOn[i] = mergeID
+			}
+		}
+		filtered = append(filtered, node)
+	}
+	filtered = append(filtered, newNodes...)
+	graph.Nodes = filtered
+	if graph.FinalNode == plan.ParentNodeID {
+		graph.FinalNode = mergeID
+	}
+	return true
+}
+
+func applyAdaptiveRouterSummaryDependencies(graph *BraidGraph, summaries map[string]string, executed map[string]struct{}) []string {
+	if graph == nil || len(graph.Nodes) == 0 || len(summaries) == 0 {
+		return nil
+	}
+	rewired := []string{}
+	for _, router := range graph.Nodes {
+		if !strings.HasSuffix(router.ID, "__adaptive_router") {
+			continue
+		}
+		routerSummary := strings.TrimSpace(summaries[router.ID])
+		if routerSummary == "" {
+			continue
+		}
+		packet, ok := extractBraidRouterPacketFromSummary(routerSummary)
+		if !ok || len(packet.DependencyEdges) == 0 {
+			continue
+		}
+		parentPrefix := strings.TrimSuffix(router.ID, "__adaptive_router")
+		targetNodeByTargetID := map[string]string{}
+		templateNode := BraidNode{}
+		for _, node := range graph.Nodes {
+			if !strings.HasPrefix(node.ID, parentPrefix+"__adaptive_") || node.ID == router.ID || strings.HasSuffix(node.ID, "__adaptive_merge") {
+				continue
+			}
+			if templateNode.ID == "" && isBraidSolveKind(node.Kind) {
+				templateNode = node
+			}
+			targetID := braidAdaptiveNodeSingleTargetID(node)
+			if targetID == "" {
+				continue
+			}
+			targetNodeByTargetID[targetID] = node.ID
+		}
+		for _, targetID := range packet.TargetIDs {
+			if len(targetNodeByTargetID) >= maxAdaptiveBraidSplitTargets {
+				break
+			}
+			if _, exists := targetNodeByTargetID[targetID]; exists {
+				continue
+			}
+			nodeID := fmt.Sprintf("%s__adaptive_extra_%02d_%s", parentPrefix, len(targetNodeByTargetID), sanitizeToolCallIDPart(targetID))
+			input := cloneMapAny(templateNode.InputSchema)
+			if input == nil {
+				input = map[string]any{}
+			}
+			input["target_node"] = targetID
+			input["target_nodes"] = []any{targetID}
+			input["adaptive_parent"] = parentPrefix
+			input["router_node"] = router.ID
+			input["expected_output"] = fmt.Sprintf("solution = {\"%s\": <answer>}", targetID)
+			delete(input, "solve_targets")
+			newNode := BraidNode{
+				ID:              nodeID,
+				Kind:            firstNonEmptyString(templateNode.Kind, "solve"),
+				Question:        fmt.Sprintf("Solve only %s for parent %s. Use the router dependency packet and dependency summaries as already solved inputs; return this target's candidate and checks.", targetID, parentPrefix),
+				DependsOn:       []string{router.ID},
+				ExpectedOutput:  fmt.Sprintf("solution = <answer for %s>", targetID),
+				MaxSummaryChars: templateNode.MaxSummaryChars,
+				HelperPolicy:    firstNonEmptyString(templateNode.HelperPolicy, BraidNodeHelperPolicyPreferred),
+				Archetype:       BraidScaffoldClassExplicitDAG,
+				ScaffoldClass:   BraidScaffoldClassExplicitDAG,
+				ScaffoldID:      BraidScaffoldIDSearchBacktrackV1,
+				InputSchema:     input,
+			}
+			graph.Nodes = append(graph.Nodes, newNode)
+			targetNodeByTargetID[targetID] = nodeID
+			rewired = append(rewired, nodeID)
+			mergeID := parentPrefix + "__adaptive_merge"
+			for i := range graph.Nodes {
+				if graph.Nodes[i].ID == mergeID {
+					graph.Nodes[i].DependsOn = dedupeNonEmptyStrings(append(graph.Nodes[i].DependsOn, nodeID))
+					break
+				}
+			}
+		}
+		if len(targetNodeByTargetID) == 0 {
+			continue
+		}
+		incoming := map[string][]string{}
+		for _, edge := range packet.DependencyEdges {
+			fromNodeID, fromOK := targetNodeByTargetID[edge.From]
+			toNodeID, toOK := targetNodeByTargetID[edge.To]
+			if !fromOK || !toOK || fromNodeID == toNodeID {
+				continue
+			}
+			incoming[toNodeID] = append(incoming[toNodeID], fromNodeID)
+		}
+		if collapsed := collapseAdaptiveRouterCycles(graph, parentPrefix, router.ID, targetNodeByTargetID, incoming, executed, templateNode); len(collapsed) > 0 {
+			rewired = append(rewired, collapsed...)
+			continue
+		}
+		for i := range graph.Nodes {
+			node := &graph.Nodes[i]
+			targetID := braidAdaptiveNodeSingleTargetID(*node)
+			if targetID == "" {
+				continue
+			}
+			mappedNodeID, ok := targetNodeByTargetID[targetID]
+			if !ok || mappedNodeID != node.ID {
+				continue
+			}
+			if _, done := executed[node.ID]; done {
+				continue
+			}
+			newDeps := dedupeNonEmptyStrings(append([]string{router.ID}, incoming[node.ID]...))
+			if len(newDeps) == 0 || reflect.DeepEqual(node.DependsOn, newDeps) {
+				continue
+			}
+			node.DependsOn = newDeps
+			rewired = append(rewired, node.ID)
+		}
+	}
+	return dedupeNonEmptyStrings(rewired)
+}
+
+func collapseAdaptiveRouterCycles(graph *BraidGraph, parentPrefix, routerID string, targetNodeByTargetID map[string]string, incoming map[string][]string, executed map[string]struct{}, templateNode BraidNode) []string {
+	if graph == nil || len(targetNodeByTargetID) == 0 || len(incoming) == 0 {
+		return nil
+	}
+	nodeToTarget := map[string]string{}
+	for targetID, nodeID := range targetNodeByTargetID {
+		nodeToTarget[nodeID] = targetID
+	}
+	graphEdges := map[string][]string{}
+	for toNodeID, fromNodeIDs := range incoming {
+		if _, ok := nodeToTarget[toNodeID]; !ok {
+			continue
+		}
+		for _, fromNodeID := range fromNodeIDs {
+			if _, ok := nodeToTarget[fromNodeID]; ok {
+				graphEdges[fromNodeID] = append(graphEdges[fromNodeID], toNodeID)
+			}
+		}
+	}
+	components := braidStronglyConnectedComponents(graphEdges)
+	rewired := []string{}
+	for _, component := range components {
+		if len(component) < 2 || len(component) > maxControllerCycleClusterSize {
+			continue
+		}
+		skip := false
+		for _, nodeID := range component {
+			if _, done := executed[nodeID]; done {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+		targets := make([]string, 0, len(component))
+		member := map[string]struct{}{}
+		for _, nodeID := range component {
+			member[nodeID] = struct{}{}
+			if targetID := nodeToTarget[nodeID]; targetID != "" {
+				targets = append(targets, targetID)
+			}
+		}
+		sort.Strings(targets)
+		if len(targets) < 2 {
+			continue
+		}
+		cycleID := fmt.Sprintf("%s__adaptive_cycle_%s", parentPrefix, sanitizeToolCallIDPart(strings.Join(targets, "_")))
+		if _, exists := braidGraphNodeByID(*graph, cycleID); exists {
+			continue
+		}
+		cycleDeps := []string{routerID}
+		for _, nodeID := range component {
+			for _, depID := range incoming[nodeID] {
+				if _, isMember := member[depID]; isMember {
+					continue
+				}
+				if depID != "" {
+					cycleDeps = append(cycleDeps, depID)
+				}
+			}
+		}
+		input := cloneMapAny(templateNode.InputSchema)
+		if input == nil {
+			input = map[string]any{}
+		}
+		input["target_nodes"] = stringSliceToAny(targets)
+		input["cycle_clusters"] = []any{stringSliceToAny(targets)}
+		input["adaptive_parent"] = parentPrefix
+		input["router_node"] = routerID
+		input["expected_output"] = fmt.Sprintf("solution = %s", braidNodeAnswerObjectTemplate(targets))
+		delete(input, "target_node")
+		delete(input, "solve_targets")
+		cycleNode := BraidNode{
+			ID:              cycleID,
+			Kind:            "cycle_solve",
+			Question:        fmt.Sprintf("Solve mutually dependent adaptive target cluster %s for parent %s as one fixed-point or constraint-search problem. Use the router dependency packet and dependency summaries; return all cluster values and checks.", strings.Join(targets, ", "), parentPrefix),
+			DependsOn:       dedupeNonEmptyStrings(cycleDeps),
+			ExpectedOutput:  fmt.Sprintf("solution = %s", braidNodeAnswerObjectTemplate(targets)),
+			MaxSummaryChars: firstPositiveInt(templateNode.MaxSummaryChars, minCycleSolveSummaryChars),
+			HelperPolicy:    firstNonEmptyString(templateNode.HelperPolicy, BraidNodeHelperPolicyPreferred),
+			Archetype:       BraidScaffoldClassExplicitDAG,
+			ScaffoldClass:   BraidScaffoldClassExplicitDAG,
+			ScaffoldID:      BraidScaffoldIDSearchBacktrackV1,
+			InputSchema:     input,
+		}
+		filtered := make([]BraidNode, 0, len(graph.Nodes)+1-len(component))
+		for _, node := range graph.Nodes {
+			if _, isMember := member[node.ID]; isMember {
+				continue
+			}
+			for i, depID := range node.DependsOn {
+				if _, isMember := member[depID]; isMember {
+					node.DependsOn[i] = cycleID
+				}
+			}
+			if _, isAdaptiveTarget := nodeToTarget[node.ID]; isAdaptiveTarget {
+				derivedDeps := []string{routerID}
+				for _, depID := range incoming[node.ID] {
+					if _, isMember := member[depID]; isMember {
+						derivedDeps = append(derivedDeps, cycleID)
+					} else if depID != "" {
+						derivedDeps = append(derivedDeps, depID)
+					}
+				}
+				node.DependsOn = derivedDeps
+			}
+			node.DependsOn = dedupeNonEmptyStrings(node.DependsOn)
+			filtered = append(filtered, node)
+		}
+		filtered = append(filtered, cycleNode)
+		graph.Nodes = filtered
+		rewired = append(rewired, cycleID)
+	}
+	return dedupeNonEmptyStrings(rewired)
+}
+
+func braidStronglyConnectedComponents(edges map[string][]string) [][]string {
+	nodes := map[string]struct{}{}
+	for from, tos := range edges {
+		nodes[from] = struct{}{}
+		for _, to := range tos {
+			nodes[to] = struct{}{}
+		}
+	}
+	ordered := make([]string, 0, len(nodes))
+	for node := range nodes {
+		ordered = append(ordered, node)
+	}
+	sort.Strings(ordered)
+	index := 0
+	stack := []string{}
+	onStack := map[string]bool{}
+	indices := map[string]int{}
+	lowlink := map[string]int{}
+	out := [][]string{}
+	var visit func(string)
+	visit = func(v string) {
+		indices[v] = index
+		lowlink[v] = index
+		index++
+		stack = append(stack, v)
+		onStack[v] = true
+		for _, w := range edges[v] {
+			if _, ok := indices[w]; !ok {
+				visit(w)
+				if lowlink[w] < lowlink[v] {
+					lowlink[v] = lowlink[w]
+				}
+			} else if onStack[w] && indices[w] < lowlink[v] {
+				lowlink[v] = indices[w]
+			}
+		}
+		if lowlink[v] != indices[v] {
+			return
+		}
+		component := []string{}
+		for {
+			w := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			onStack[w] = false
+			component = append(component, w)
+			if w == v {
+				break
+			}
+		}
+		sort.Strings(component)
+		out = append(out, component)
+	}
+	for _, node := range ordered {
+		if _, ok := indices[node]; !ok {
+			visit(node)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.Join(out[i], ",") < strings.Join(out[j], ",")
+	})
+	return out
+}
+
+type braidDependencyEdge struct {
+	From string
+	To   string
+}
+
+type braidRouterPacket struct {
+	TargetIDs       []string
+	DependencyEdges []braidDependencyEdge
+}
+
+func extractBraidRouterPacketFromSummary(summary string) (braidRouterPacket, bool) {
+	value, ok := extractFirstJSONObjectFromText(summary)
+	if !ok {
+		return braidRouterPacket{}, false
+	}
+	packet := braidRouterPacket{
+		TargetIDs:       extractBraidNodeIDsFromAny(firstMapValue(value, "target_ids", "targets", "target_nodes")),
+		DependencyEdges: extractBraidDependencyEdgesFromAny(firstMapValue(value, "dependency_edges", "edges", "dependencies")),
+	}
+	if len(packet.TargetIDs) == 0 {
+		packet.TargetIDs = extractBraidNodeIDsFromAny(firstMapValue(value, "nodes", "work_items"))
+	}
+	packet.TargetIDs = dedupeNonEmptyStrings(packet.TargetIDs)
+	packet.DependencyEdges = dedupeBraidDependencyEdges(packet.DependencyEdges)
+	if len(packet.TargetIDs) == 0 && len(packet.DependencyEdges) == 0 {
+		return braidRouterPacket{}, false
+	}
+	return packet, true
+}
+
+func extractFirstJSONObjectFromText(text string) (map[string]any, bool) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, false
+	}
+	start := strings.Index(text, "{")
+	if start < 0 {
+		return nil, false
+	}
+	decoder := json.NewDecoder(strings.NewReader(text[start:]))
+	decoder.UseNumber()
+	var decoded map[string]any
+	if err := decoder.Decode(&decoded); err != nil || len(decoded) == 0 {
+		return nil, false
+	}
+	return decoded, true
+}
+
+func extractBraidDependencyEdgesFromAny(value any) []braidDependencyEdge {
+	switch typed := value.(type) {
+	case []any:
+		if len(typed) == 2 {
+			to := normalizeBraidNodeRef(stringFromAny(typed[0]))
+			from := normalizeBraidNodeRef(stringFromAny(typed[1]))
+			if from != "" && to != "" && from != to {
+				return []braidDependencyEdge{{From: from, To: to}}
+			}
+		}
+		out := make([]braidDependencyEdge, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, extractBraidDependencyEdgesFromAny(item)...)
+		}
+		return out
+	case []string:
+		if len(typed) == 2 {
+			to := normalizeBraidNodeRef(typed[0])
+			from := normalizeBraidNodeRef(typed[1])
+			if from != "" && to != "" && from != to {
+				return []braidDependencyEdge{{From: from, To: to}}
+			}
+		}
+		out := make([]braidDependencyEdge, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, extractBraidDependencyEdgesFromAny(item)...)
+		}
+		return out
+	case map[string]any:
+		if from := normalizeBraidNodeRef(stringFromAny(firstMapValue(typed, "from", "source", "dependency", "dep"))); from != "" {
+			if to := normalizeBraidNodeRef(stringFromAny(firstMapValue(typed, "to", "target", "dependent", "node"))); to != "" {
+				return []braidDependencyEdge{{From: from, To: to}}
+			}
+		}
+		out := []braidDependencyEdge{}
+		for to, rawDeps := range typed {
+			toID := normalizeBraidNodeRef(to)
+			if toID == "" {
+				continue
+			}
+			for _, fromID := range extractBraidNodeIDsFromAny(rawDeps) {
+				fromID = normalizeBraidNodeRef(fromID)
+				if fromID != "" && fromID != toID {
+					out = append(out, braidDependencyEdge{From: fromID, To: toID})
+				}
+			}
+		}
+		return out
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return nil
+		}
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			var decoded any
+			if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+				return extractBraidDependencyEdgesFromAny(decoded)
+			}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func dedupeBraidDependencyEdges(edges []braidDependencyEdge) []braidDependencyEdge {
+	seen := map[string]struct{}{}
+	out := make([]braidDependencyEdge, 0, len(edges))
+	for _, edge := range edges {
+		from := normalizeBraidNodeRef(edge.From)
+		to := normalizeBraidNodeRef(edge.To)
+		if from == "" || to == "" || from == to {
+			continue
+		}
+		key := from + "->" + to
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, braidDependencyEdge{From: from, To: to})
+	}
+	return out
+}
+
+func normalizeBraidNodeRef(ref string) string {
+	ref = strings.TrimSpace(strings.ToLower(ref))
+	if strings.HasPrefix(ref, "node_") {
+		if number := strings.TrimPrefix(ref, "node_"); number != "" {
+			if _, err := strconv.Atoi(number); err != nil {
+				return ""
+			}
+			return "node_" + number
+		}
+		return ""
+	}
+	if strings.HasPrefix(ref, "n") {
+		number := strings.TrimPrefix(ref, "n")
+		if number == "" {
+			return ""
+		}
+		if _, err := strconv.Atoi(number); err != nil {
+			return ""
+		}
+		return "node_" + number
+	}
+	return ""
+}
+
+func braidAdaptiveNodeSingleTargetID(node BraidNode) string {
+	if len(node.InputSchema) == 0 {
+		return ""
+	}
+	if raw := strings.TrimSpace(fmt.Sprintf("%v", node.InputSchema["target_node"])); raw != "" && raw != "<nil>" {
+		return raw
+	}
+	ids := extractBraidNodeIDsFromAny(node.InputSchema["target_nodes"])
+	if len(ids) == 1 {
+		return ids[0]
+	}
+	return ""
+}
+
+func braidGraphNodeByID(graph BraidGraph, nodeID string) (BraidNode, bool) {
+	for _, node := range graph.Nodes {
+		if node.ID == nodeID {
+			return node, true
+		}
+	}
+	return BraidNode{}, false
 }
 
 // extractBraidHelperFailedStage attempts to identify the failure stage from a
@@ -3377,7 +5511,7 @@ func buildBraidRepairFeedback(failedNode BraidNode, failedSummary string) string
 	switch failedNode.Kind {
 	case "solve", "cycle_solve":
 		b.WriteString("Previous solve-like node returned blocked. Revise this node and produce candidate values or a concrete mathematical check before returning.\n")
-		b.WriteString("Do not treat circular-looking or mutual LongCoT dependencies as runtime blockers. Treat them as simultaneous constraints, fixed-point equations, or a small candidate search.\n")
+		b.WriteString("Do not treat circular-looking or mutual mutual dependencies as runtime blockers. Treat them as simultaneous constraints, fixed-point equations, or a small candidate search.\n")
 	default:
 		fmt.Fprintf(&b, "Previous %s node found a concrete failed constraint. Revise this solve node's candidate values to address the failure before returning.\n", failedNode.Kind)
 	}
@@ -3469,6 +5603,9 @@ func validateBraidNodeExecutionSummaryInGraph(phaseName string, node BraidNode, 
 			}
 		}
 	}
+	if isBraidSolveKind(node.Kind) && braidSolveNodeRequiresTargetSolutionLine(node) && !strings.Contains(strings.ToLower(summary), "solution =") {
+		return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) did not provide a target solution line: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
+	}
 	if node.ID == finalNodeID || node.Kind == "extract" || node.Kind == "verify" || node.Kind == "reduce" {
 		if !braidStatusesContainAny(statuses, "solved", "ok", "completed", "pass", "passed") {
 			return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) returned unsupported status %q", phaseName, node.ID, node.Kind, strings.Join(statuses, ","))
@@ -3478,6 +5615,88 @@ func validateBraidNodeExecutionSummaryInGraph(phaseName string, node BraidNode, 
 		return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) did not report verification pass: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
 	}
 	return nil
+}
+
+func braidSolveNodeRequiresTargetSolutionLine(node BraidNode) bool {
+	if !isBraidSolveKind(node.Kind) {
+		return false
+	}
+	return strings.Contains(node.ID, "__adaptive_") && !strings.HasSuffix(node.ID, "__adaptive_merge")
+}
+
+func normalizeBraidAdaptiveTargetSummary(node BraidNode, summary string) (string, bool) {
+	if !braidSolveNodeRequiresTargetSolutionLine(node) || strings.Contains(strings.ToLower(summary), "solution =") {
+		return "", false
+	}
+	target := braidNodeTargetID(node)
+	if target == "" {
+		return "", false
+	}
+	answer, ok := braidConcreteAnswerFromSummary(summary)
+	if !ok {
+		return "", false
+	}
+	payload := map[string]any{target: parseBraidScalarAnswer(answer)}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", false
+	}
+	return "status: completed summary: status: solved answer: solution = " + string(body) + " checks: normalized adaptive target answer from child summary.", true
+}
+
+func braidConcreteAnswerFromSummary(summary string) (string, bool) {
+	re := regexp.MustCompile(`(?is)\banswer\s*:\s*(.+?)(?:\s+checks\s*:|$)`)
+	match := re.FindStringSubmatch(summary)
+	if len(match) < 2 {
+		return "", false
+	}
+	answer := strings.TrimSpace(match[1])
+	answer = strings.Trim(answer, "`")
+	if answer == "" {
+		return "", false
+	}
+	lower := strings.ToLower(answer)
+	blockers := []string{
+		"missing",
+		"cannot solve",
+		"can't solve",
+		"blocked",
+		"unknown",
+		"not available",
+		"insufficient",
+		"unable to",
+		"need ",
+		"needs ",
+		"requires ",
+		"placeholder",
+	}
+	for _, blocker := range blockers {
+		if strings.Contains(lower, blocker) {
+			return "", false
+		}
+	}
+	if len([]rune(answer)) > 1200 {
+		return "", false
+	}
+	return answer, true
+}
+
+func parseBraidScalarAnswer(answer string) any {
+	trimmed := strings.TrimSpace(answer)
+	if trimmed == "" {
+		return ""
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+		return decoded
+	}
+	if n, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		return n
+	}
+	if f, err := strconv.ParseFloat(trimmed, 64); err == nil {
+		return f
+	}
+	return trimmed
 }
 
 func braidVerificationSummaryPassed(summary string) bool {
@@ -3506,7 +5725,10 @@ func braidVerificationSummaryPassed(summary string) bool {
 }
 
 func braidNodePartialCanFeedDownstream(node BraidNode, finalNodeID string, graph *BraidGraph) bool {
-	if graph == nil || node.ID == finalNodeID || node.Kind != "solve" {
+	if graph == nil || node.ID == finalNodeID {
+		return false
+	}
+	if node.Kind != "solve" && node.Kind != "extract" {
 		return false
 	}
 	for _, candidate := range graph.Nodes {
@@ -3518,6 +5740,10 @@ func braidNodePartialCanFeedDownstream(node BraidNode, finalNodeID string, graph
 		}
 	}
 	return false
+}
+
+func isGeneratedBraidSplitParseNode(node BraidNode) bool {
+	return node.Kind == "extract" && strings.HasSuffix(node.ID, "__parse")
 }
 
 func braidNodeDependsOn(graph BraidGraph, nodeID string, dependencyID string) bool {
@@ -3937,10 +6163,12 @@ func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseN
 		return
 	}
 
+	applyBraidRouterSplits(graph, toolExec, phaseName)
+
 	// Collect nodes that need splitting.
 	var toSplit []string
 	for _, node := range graph.Nodes {
-		if node.Kind != "solve" && node.Kind != "cycle_solve" {
+		if node.Kind != "solve" {
 			continue
 		}
 		policy := braidNodeEffectiveHelperPolicy(node)
@@ -4007,6 +6235,9 @@ func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseN
 				DependsOn:       []string{parseID},
 				HelperPolicy:    node.HelperPolicy,
 				Archetype:       node.Archetype,
+				ScaffoldClass:   node.ScaffoldClass,
+				ScaffoldID:      node.ScaffoldID,
+				InputSchema:     cloneMapAny(node.InputSchema),
 				MaxSummaryChars: node.MaxSummaryChars,
 			})
 		}
@@ -4058,6 +6289,57 @@ func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseN
 	}
 	filtered = append(filtered, newNodes...)
 	graph.Nodes = filtered
+}
+
+func applyBraidRouterSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseName string) {
+	if graph == nil || len(graph.Nodes) == 0 {
+		return
+	}
+	for {
+		applied := false
+		for _, node := range append([]BraidNode(nil), graph.Nodes...) {
+			if !shouldBraidRouterSplitNode(node) {
+				continue
+			}
+			plan, ok := buildAdaptiveBraidSplitPlan(node, "router pre-split broad solve node before helper execution")
+			if !ok {
+				continue
+			}
+			if applyAdaptiveBraidSplitPlan(graph, plan) {
+				applied = true
+				if toolExec != nil && toolExec.recorder != nil {
+					toolExec.recorder.RecordBraidEvent(BraidEvent{
+						Phase:   phaseName,
+						NodeID:  node.ID,
+						Status:  "router_split",
+						Message: fmt.Sprintf("split broad solve node into %d target nodes", len(plan.Targets)),
+					})
+				}
+				break
+			}
+		}
+		if !applied {
+			return
+		}
+	}
+}
+
+func shouldBraidRouterSplitNode(node BraidNode) bool {
+	if node.Kind != "solve" {
+		return false
+	}
+	policy := braidNodeEffectiveHelperPolicy(node)
+	if policy != BraidNodeHelperPolicyPreferred && policy != BraidNodeHelperPolicyRequired {
+		return false
+	}
+	if strings.Contains(node.ID, "__adaptive_") || strings.HasSuffix(node.ID, "__adaptive_merge") {
+		return false
+	}
+	if len(adaptiveBraidCycleClusters(node)) > 0 {
+		return true
+	}
+	targets := adaptiveBraidSplitDeclaredTargetIDs(node)
+	return len(targets) >= 2
 }
 
 // shouldPreemptiveSplitByArchetype returns true when a node's archetype

@@ -130,7 +130,7 @@ func TestChooseRLMRunnerReplWithEphemeralSkills(t *testing.T) {
 	if !strings.Contains(replRunner.Config.SystemPrompt, rlmruntime.EphemeralHelperSolveToolName) {
 		t.Fatalf("system prompt missing helper-solve instructions:\n%s", replRunner.Config.SystemPrompt)
 	}
-	if strings.Contains(replRunner.Config.SystemPrompt, rlmruntime.EphemeralSkillDraftToolName) {
+	if strings.Contains(replRunner.Config.SystemPrompt, "ephemeral_skill_draft") {
 		t.Fatalf("system prompt still references ephemeral skill draft surface:\n%s", replRunner.Config.SystemPrompt)
 	}
 }

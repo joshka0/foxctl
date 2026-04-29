@@ -54,8 +54,8 @@ func TestCheckCycleWitnessRejectsExcessiveDomain(t *testing.T) {
 
 	text := `{"version":1,"checker_kind":"bounded_search","variables":[{"name":"x","min":0,"max":1000},{"name":"y","min":0,"max":1000}],"constraints":[{"name":"sum","op":"eq","left":{"op":"add","args":[{"var":"x"},{"var":"y"}]},"right":{"const":1}}]}`
 	_, err := CheckCycleWitnessText(text)
-	if err == nil || !strings.Contains(err.Error(), "domain exceeds max") {
-		t.Fatalf("err=%v want domain cap error", err)
+	if err == nil || !strings.Contains(err.Error(), "domain exceeds max") || !strings.Contains(err.Error(), `variable "y"`) || !strings.Contains(err.Error(), "current_product=") {
+		t.Fatalf("err=%v want detailed domain cap error", err)
 	}
 }
 

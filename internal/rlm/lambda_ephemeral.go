@@ -60,7 +60,7 @@ func (r LambdaRunner) runEphemeralHelper(ctx context.Context, task Task, cfg Lam
 			})
 			continue
 		}
-		answer, ok := lambdaEphemeralAnswer(helperResult.Output, cfg.ExtractSolutionLine)
+		answer, answerSanitization, ok := lambdaEphemeralAnswer(helperResult.Output, cfg.ExtractSolutionLine)
 		if !ok {
 			lastErr = "helper output did not include a usable answer"
 			attempts = append(attempts, map[string]any{
@@ -77,16 +77,20 @@ func (r LambdaRunner) runEphemeralHelper(ctx context.Context, task Task, cfg Lam
 			"ok":      true,
 			"stage":   "done",
 		})
+		metadata := map[string]any{
+			"helper_solve_attempts": attempts,
+			"helper_solve_output":   helperResult.Output,
+			"helper_solve_input":    input,
+			"helper_solve_runner":   helperResult.Metadata,
+		}
+		if answerSanitization.Changed {
+			metadata["output_sanitization"] = answerSanitization
+		}
 		return Result{
 			Answer:     answer,
 			Iterations: attempt,
 			Subcalls:   0,
-			Metadata: map[string]any{
-				"helper_solve_attempts": attempts,
-				"helper_solve_output":   helperResult.Output,
-				"helper_solve_input":    input,
-				"helper_solve_runner":   helperResult.Metadata,
-			},
+			Metadata:   metadata,
 		}, nil
 	}
 	return Result{}, fmt.Errorf("helper solve shortcut failed after %d attempts: %s", cfg.EphemeralSkillAttempts, lastErr)
@@ -213,21 +217,21 @@ func uniqueHelperSolveCandidates(values []string) []string {
 	return out
 }
 
-func lambdaEphemeralAnswer(output map[string]any, extractSolution bool) (string, bool) {
+func lambdaEphemeralAnswer(output map[string]any, extractSolution bool) (string, OutputSanitization, bool) {
 	for _, key := range []string{"answer", "solution"} {
 		value, ok := output[key].(string)
 		if !ok {
 			continue
 		}
-		value = strings.TrimSpace(value)
+		value, sanitization := SanitizeOutputText(value)
 		if extractSolution {
 			if line, ok := ExtractSolutionLine(value); ok {
-				return line, true
+				return line, sanitization, true
 			}
 		}
 		if value != "" {
-			return value, true
+			return value, sanitization, true
 		}
 	}
-	return "", false
+	return "", OutputSanitization{}, false
 }

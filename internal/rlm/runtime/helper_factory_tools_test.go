@@ -478,6 +478,45 @@ func TestHelperFactoryToolsRepairsPythonSourceWithoutTaskContext(t *testing.T) {
 	}
 }
 
+func TestHelperFactoryPythonPromptsForbidDynamicEvaluation(t *testing.T) {
+	t.Parallel()
+
+	draftPrompt := buildHelperFactoryDraftPrompt("Parse values safely.", "", "", HelperLanguagePython, helperFactorySourceBudget{})
+	repairPrompt := buildHelperFactorySourceRepairPrompt(HelperLanguagePython, &helperFactoryRepairState{
+		Stage: "validate",
+		Error: "disallowed call eval",
+	}, helperFactorySourceBudget{})
+	for _, prompt := range []string{draftPrompt, repairPrompt} {
+		for _, want := range []string{"Never call eval", "ast.literal_eval", "json.loads"} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("prompt missing %q:\n%s", want, prompt)
+			}
+		}
+	}
+}
+
+func TestHelperFactoryPythonRepairPromptForbidsSysImport(t *testing.T) {
+	t.Parallel()
+
+	draftPrompt := buildHelperFactoryDraftPrompt("Compute compactly.", "", "", HelperLanguagePython, helperFactorySourceBudget{})
+	repairPrompt := buildHelperFactorySourceRepairPrompt(HelperLanguagePython, &helperFactoryRepairState{
+		Stage:  "run",
+		Error:  "python skill validation/run failed: ValueError: disallowed import sys",
+		Source: "import sys\n\ndef solve(input):\n    sys.set_int_max_str_digits(20000)\n    return {\"ok\": True, \"answer\": str(10**10000)}",
+	}, helperFactorySourceBudget{})
+	for _, want := range []string{
+		"Do not import os, sys",
+		"Disallowed imports include os, sys",
+		"Remove that import",
+		"Do not call sys.set_int_max_str_digits",
+		"avoid converting huge integers to decimal strings",
+	} {
+		if !strings.Contains(draftPrompt+"\n"+repairPrompt, want) {
+			t.Fatalf("helper prompt missing %q\nDRAFT:\n%s\nREPAIR:\n%s", want, draftPrompt, repairPrompt)
+		}
+	}
+}
+
 func TestHelperFactoryToolsRepairsVerifierCounterexample(t *testing.T) {
 	t.Parallel()
 
@@ -573,6 +612,28 @@ func TestCounterexampleRepairHarnessRecordsStructuredDiagnostic(t *testing.T) {
 	latest, ok := telemetry["latest_counterexample"].(map[string]any)
 	if !ok || latest["failed_node"] != "n7" {
 		t.Fatalf("telemetry missing latest counterexample: %#v", telemetry)
+	}
+}
+
+func TestCounterexampleRepairHarnessRecordsContractFailure(t *testing.T) {
+	t.Parallel()
+
+	harness := NewCounterexampleRepairHarness(2)
+	feedback := harness.RecordContractFailure("draft", "decode draft JSON: no valid draft JSON object found", "not json", "valid helper draft JSON object")
+	counterexample, ok := feedback["counterexample"].(map[string]any)
+	if !ok {
+		t.Fatalf("feedback missing counterexample: %#v", feedback)
+	}
+	if counterexample["failure_kind"] != "helper_contract_failure" || counterexample["stage"] != "draft" {
+		t.Fatalf("unexpected counterexample: %#v", counterexample)
+	}
+	if !strings.Contains(fmt.Sprint(counterexample["repair_hint"]), "JSON object") {
+		t.Fatalf("counterexample missing contract repair hint: %#v", counterexample)
+	}
+	telemetry := harness.Telemetry()
+	latest, ok := telemetry["latest_counterexample"].(map[string]any)
+	if !ok || latest["failure_kind"] != "helper_contract_failure" {
+		t.Fatalf("telemetry missing latest contract counterexample: %#v", telemetry)
 	}
 }
 
@@ -745,6 +806,31 @@ func TestCompactHelperFactoryMapSummarizesStructuredSolution(t *testing.T) {
 	}
 }
 
+func TestCompactHelperFactoryMapKeepsVerifierDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	summary := compactHelperFactoryMap(map[string]any{
+		"ok":            true,
+		"pass":          false,
+		"first_failure": "node_2 mismatch",
+		"observed":      map[string]any{"node_2": 3},
+		"expected":      map[string]any{"node_2": 2692},
+		"repair_hint":   "repair node_2",
+	})
+	if summary["pass"] != false {
+		t.Fatalf("pass=%#v want false", summary["pass"])
+	}
+	if summary["first_failure"] != "node_2 mismatch" {
+		t.Fatalf("first_failure=%#v", summary["first_failure"])
+	}
+	if _, ok := summary["observed_summary"]; !ok {
+		t.Fatalf("missing observed_summary: %#v", summary)
+	}
+	if _, ok := summary["expected_summary"]; !ok {
+		t.Fatalf("missing expected_summary: %#v", summary)
+	}
+}
+
 func TestHelperFactoryAnswerAcceptsNestedSolutionObject(t *testing.T) {
 	t.Parallel()
 
@@ -765,6 +851,41 @@ func TestHelperFactoryAnswerAcceptsNestedSolutionObject(t *testing.T) {
 	}
 }
 
+func TestHelperFactoryAnswerAcceptsStructuredCyclePayloadWithoutSolutionExtraction(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := helperFactoryAnswer(map[string]any{
+		"pass":       true,
+		"candidates": map[string]any{"node_2": float64(2692)},
+		"checks":     []any{map[string]any{"name": "fixed_point", "ok": true, "observed": float64(6), "expected": float64(6)}},
+	}, false)
+	if !ok {
+		t.Fatal("helperFactoryAnswer() rejected structured cycle payload")
+	}
+	if !strings.HasPrefix(answer, "cycle_json: ") || !strings.Contains(answer, `"candidates"`) || !strings.Contains(answer, `"checks"`) {
+		t.Fatalf("answer=%q, want cycle_json payload", answer)
+	}
+}
+
+func TestHelperFactoryFinalizeFeedbackReportsInvalidStructuredAnswer(t *testing.T) {
+	t.Parallel()
+
+	feedback := helperFactoryFinalizeFeedbackMap(map[string]any{
+		"ok":     true,
+		"answer": map[string]any{"node_2": float64(2600), "node_7": float64(-175)},
+	})
+	counterexample, ok := feedback["counterexample"].(map[string]any)
+	if !ok {
+		t.Fatalf("feedback=%v, want counterexample", feedback)
+	}
+	if counterexample["failure_kind"] != "invalid_answer_shape" {
+		t.Fatalf("failure_kind=%v, want invalid_answer_shape", counterexample["failure_kind"])
+	}
+	if !strings.Contains(fmt.Sprint(counterexample["expected"]), "cycle_json") {
+		t.Fatalf("counterexample=%v, want cycle_json repair hint", counterexample)
+	}
+}
+
 func TestHelperFactoryAnswerAcceptsStructuredAnswerWhenSolutionLineRequired(t *testing.T) {
 	t.Parallel()
 
@@ -779,6 +900,52 @@ func TestHelperFactoryAnswerAcceptsStructuredAnswerWhenSolutionLineRequired(t *t
 	}
 	if answer != "solution = [[1,0,2]]" {
 		t.Fatalf("answer=%q", answer)
+	}
+}
+
+func TestHelperFactoryAnswerAcceptsStructuredAnswerObjectWhenSolutionLineRequired(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := helperFactoryAnswer(map[string]any{
+		"ok": true,
+		"answer": map[string]any{
+			"node_7": "26",
+			"node_3": "2692",
+			"node_4": "2013^4025",
+		},
+	}, true)
+	if !ok {
+		t.Fatalf("expected structured answer object to be accepted")
+	}
+	if answer != `solution = {"node_3":"2692","node_4":"2013^4025","node_7":"26"}` {
+		t.Fatalf("answer=%q", answer)
+	}
+}
+
+func TestHelperFactoryAnswerCanonicalizesStructuredJSONStringWhenSolutionLineRequired(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := helperFactoryAnswer(map[string]any{
+		"ok":     true,
+		"answer": `{"node_3":4,"node_5":1562}`,
+	}, true)
+	if !ok {
+		t.Fatalf("expected structured JSON answer string to be accepted")
+	}
+	if answer != `solution = {"node_3":4,"node_5":1562}` {
+		t.Fatalf("answer=%q", answer)
+	}
+}
+
+func TestHelperFactoryAnswerRejectsNonJSONAnswerStringWhenSolutionLineRequired(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := helperFactoryAnswer(map[string]any{
+		"ok":     true,
+		"answer": `node_3 is 4 and node_5 is 1562`,
+	}, true)
+	if ok {
+		t.Fatalf("helperFactoryAnswer() answer=%q ok=%v, want rejected", answer, ok)
 	}
 }
 
@@ -1404,6 +1571,36 @@ func TestHelperFactoryToolsUsesPresetSourceBeforeDrafting(t *testing.T) {
 	}
 	if strings.Contains(raw, `"output":`) {
 		t.Fatalf("compact helper output should use output_summary, got: %s", raw)
+	}
+}
+
+func TestHelperFactoryToolsUsesConfiguredLanguageForPresetSource(t *testing.T) {
+	t.Parallel()
+
+	tools := &HelperFactoryTools{Config: HelperFactoryConfig{
+		TaskPrompt:          "Return solution = preset.",
+		Attempts:            1,
+		ExtractSolutionLine: true,
+		Language:            HelperLanguagePython,
+		PresetName:          "python_preset",
+		PresetSource: `def solve(input_data):
+    return {"ok": True, "answer": "solution = python-preset"}
+`,
+	}}
+	raw, err := tools.Execute(context.Background(), EphemeralHelperSolveToolName, nil)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	var got struct {
+		OK     bool   `json:"ok"`
+		Answer string `json:"answer"`
+		Preset string `json:"preset"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decode output: %v\n%s", err, raw)
+	}
+	if !got.OK || got.Answer != "solution = python-preset" || got.Preset != "python_preset" {
+		t.Fatalf("output ok=%v answer=%q preset=%q raw=%s", got.OK, got.Answer, got.Preset, raw)
 	}
 }
 

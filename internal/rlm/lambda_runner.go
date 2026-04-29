@@ -41,6 +41,7 @@ func (r LambdaRunner) Run(ctx context.Context, task Task, env Environment) (Resu
 	if r.Tools == nil {
 		return Result{}, fmt.Errorf("rlm lambda runner requires tool adapter")
 	}
+	r.Tools = newAllowlistedToolExecutor(r.Tools, env.Tools)
 
 	cfg := r.Config.Defaults()
 	if cfg.EphemeralSkills {
@@ -190,24 +191,30 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 		return Result{}, fmt.Errorf("lambda leaf search: %w", err)
 	}
 
-	// Extract candidate paths from search result.
-	candidates := extractCandidatePaths(searchResult, task.WorkspaceRoot)
+	// Extract candidate refs from the composite retrieval result.
+	candidateRefs := extractCandidateEvidenceRefs(searchResult)
+	candidates := evidenceRefsToPaths(candidateRefs, task.WorkspaceRoot)
+	if len(candidates) == 0 {
+		candidates = extractCandidatePaths(searchResult, task.WorkspaceRoot)
+		candidateRefs = pathsToEvidenceRefs(candidates)
+	}
 	evidenceRefs := extractEvidenceRefs(searchResult)
+	evidenceRefs = uniqueStringsRLM(append(evidenceRefs, candidateRefs...))
 
 	// Step 2: Load top candidates deterministically (no LLM).
 	var loadedSnippets []string
-	for i, path := range candidates {
+	for i, ref := range candidateRefs {
 		if i >= plan.TauStar {
 			break
 		}
-		loadResult, err := r.Tools.Execute(ctx, "load_file", jsonArgs(map[string]any{
-			"path": path,
+		loadResult, err := r.Tools.Execute(ctx, "load_evidence_ref", jsonArgs(map[string]any{
+			"ref": ref,
 		}))
 		if err != nil {
 			continue
 		}
 		if snippet := extractTextFromToolResult(loadResult, 2000); snippet != "" {
-			loadedSnippets = append(loadedSnippets, fmt.Sprintf("File: %s\n%s", path, snippet))
+			loadedSnippets = append(loadedSnippets, fmt.Sprintf("Evidence: %s\n%s", ref, snippet))
 		}
 	}
 
@@ -219,7 +226,7 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 		evidenceBlock = formatMapAsText(searchResult)
 	}
 
-	answer, err := r.judgeEvidence(ctx, cfg.LLM, task.Prompt, evidenceBlock)
+	answer, answerSanitization, err := r.judgeEvidence(ctx, cfg.LLM, task.Prompt, evidenceBlock)
 	if err != nil {
 		// Fallback: return the search result summary without LLM judgment.
 		return Result{
@@ -242,7 +249,7 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 
 	retrievedPaths, answerPaths, pathSource := selectLambdaRetrievedPaths(answer, candidates, task.WorkspaceRoot)
 
-	return Result{
+	result := Result{
 		Answer:         answer,
 		EvidenceRefs:   evidenceRefs,
 		RetrievedPaths: retrievedPaths,
@@ -257,7 +264,11 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 			"retrieved_path_source": pathSource,
 			"files_loaded":          len(loadedSnippets),
 		},
-	}, nil
+	}
+	if answerSanitization.Changed {
+		result.Metadata["output_sanitization"] = answerSanitization
+	}
+	return result, nil
 }
 
 // split produces k* subproblems by running parallel searches with varied query formulations.
@@ -288,6 +299,7 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 	var candidatePaths []string
 	var totalIterations int
 	var totalSubcalls int
+	var answerSanitization OutputSanitization
 
 	for _, p := range partials {
 		evidence = append(evidence, p.EvidenceRefs...)
@@ -315,21 +327,23 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 
 	case ComposeRerank:
 		// 1 LLM call to re-rank all collected evidence.
-		synthesized, err := r.judgeEvidence(ctx, cfg.LLM, task.Prompt,
+		synthesized, sanitization, err := r.judgeEvidence(ctx, cfg.LLM, task.Prompt,
 			formatPartialsAsEvidence(partials))
 		if err != nil {
 			answer = composeUnion(partials)
 		} else {
 			answer = synthesized
+			answerSanitization = sanitization
 		}
 
 	case ComposeSynthesize:
 		// 1 LLM call to synthesize partial answers.
-		synthesized, err := r.synthesizePartials(ctx, cfg.LLM, task.Prompt, partials)
+		synthesized, sanitization, err := r.synthesizePartials(ctx, cfg.LLM, task.Prompt, partials)
 		if err != nil {
 			answer = composeUnion(partials)
 		} else {
 			answer = synthesized
+			answerSanitization = sanitization
 		}
 
 	default:
@@ -337,7 +351,7 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 	}
 	finalPaths, answerPaths, pathSource := selectLambdaRetrievedPaths(answer, candidatePaths, task.WorkspaceRoot)
 
-	return Result{
+	result := Result{
 		Answer:         answer,
 		EvidenceRefs:   evidence,
 		RetrievedPaths: finalPaths,
@@ -352,17 +366,21 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 			"answer_paths":          answerPaths,
 			"retrieved_path_source": pathSource,
 		},
-	}, nil
+	}
+	if answerSanitization.Changed {
+		result.Metadata["output_sanitization"] = answerSanitization
+	}
+	return result, nil
 }
 
 // judgeEvidence asks the LLM to answer a question given collected evidence (1 call).
-func (r LambdaRunner) judgeEvidence(ctx context.Context, cfg LLMConfig, query, evidence string) (string, error) {
+func (r LambdaRunner) judgeEvidence(ctx context.Context, cfg LLMConfig, query, evidence string) (string, OutputSanitization, error) {
 	llmCfg := lambdaLLMChatConfig(cfg)
 	llmCfg.MaxIterations = 1
 
 	llm, err := engine.NewLLMChatEngine(llmCfg)
 	if err != nil {
-		return "", fmt.Errorf("lambda judge: init LLM: %w", err)
+		return "", OutputSanitization{}, fmt.Errorf("lambda judge: init LLM: %w", err)
 	}
 
 	prompt := fmt.Sprintf(`Based on the following evidence, answer the question concisely.
@@ -381,19 +399,23 @@ Answer:`, query, truncateRLMText(evidence, 8000))
 		Messages:     []engine.Message{engine.NewUserMessage(prompt)},
 	})
 	if err != nil {
-		return "", fmt.Errorf("lambda judge: LLM call: %w", err)
+		return "", OutputSanitization{}, fmt.Errorf("lambda judge: LLM call: %w", err)
 	}
-	return strings.TrimSpace(output.AssistantText), nil
+	answer, sanitization := SanitizeOutputText(output.AssistantText)
+	if answer == "" {
+		return "", sanitization, fmt.Errorf("lambda judge: empty assistant response after sanitization")
+	}
+	return answer, sanitization, nil
 }
 
 // synthesizePartials asks the LLM to merge multiple partial answers (1 call).
-func (r LambdaRunner) synthesizePartials(ctx context.Context, cfg LLMConfig, query string, partials []Result) (string, error) {
+func (r LambdaRunner) synthesizePartials(ctx context.Context, cfg LLMConfig, query string, partials []Result) (string, OutputSanitization, error) {
 	llmCfg := lambdaLLMChatConfig(cfg)
 	llmCfg.MaxIterations = 1
 
 	llm, err := engine.NewLLMChatEngine(llmCfg)
 	if err != nil {
-		return "", fmt.Errorf("lambda synthesize: init LLM: %w", err)
+		return "", OutputSanitization{}, fmt.Errorf("lambda synthesize: init LLM: %w", err)
 	}
 
 	var partialTexts []string
@@ -414,9 +436,13 @@ Synthesized answer:`, query, strings.Join(partialTexts, "\n\n"))
 		Messages:     []engine.Message{engine.NewUserMessage(prompt)},
 	})
 	if err != nil {
-		return "", fmt.Errorf("lambda synthesize: LLM call: %w", err)
+		return "", OutputSanitization{}, fmt.Errorf("lambda synthesize: LLM call: %w", err)
 	}
-	return strings.TrimSpace(output.AssistantText), nil
+	answer, sanitization := SanitizeOutputText(output.AssistantText)
+	if answer == "" {
+		return "", sanitization, fmt.Errorf("lambda synthesize: empty assistant response after sanitization")
+	}
+	return answer, sanitization, nil
 }
 
 // --- Deterministic composition helpers ---
@@ -508,6 +534,51 @@ func extractCandidatePaths(result map[string]any, workspaceRoot string) []string
 	return uniqueStringsRLM(paths)
 }
 
+func extractCandidateEvidenceRefs(result map[string]any) []string {
+	var refs []string
+	collectEvidenceRefsRecursive(result, &refs)
+	return uniqueStringsRLM(refs)
+}
+
+func collectEvidenceRefsRecursive(value any, out *[]string) {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, child := range v {
+			if key == "ref" && child != nil {
+				if ref := strings.TrimSpace(fmt.Sprint(child)); ref != "" {
+					*out = append(*out, ref)
+				}
+			}
+			collectEvidenceRefsRecursive(child, out)
+		}
+	case []any:
+		for _, child := range v {
+			collectEvidenceRefsRecursive(child, out)
+		}
+	}
+}
+
+func evidenceRefsToPaths(refs []string, workspaceRoot string) []string {
+	paths := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if normalized := normalizeRetrievedPath(ref, workspaceRoot); normalized != "" {
+			paths = append(paths, normalized)
+		}
+	}
+	return uniqueStringsRLM(paths)
+}
+
+func pathsToEvidenceRefs(paths []string) []string {
+	refs := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path != "" {
+			refs = append(refs, "path:"+path)
+		}
+	}
+	return refs
+}
+
 func extractEvidenceRefs(result map[string]any) []string {
 	if refs, ok := result["evidence_refs"].([]string); ok {
 		return refs
@@ -561,7 +632,7 @@ func stringFromAny(v any) string {
 // extractAnswerPaths pulls file paths from the LLM answer text using backtick-wrapped
 // paths (e.g. `internal/rlm/runner.go`) and code-fenced paths, plus bare paths on
 // lines starting with list markers.
-var answerPathRE = regexp.MustCompile(`(?:^|[\s"` + "`" + `(]|\*)([A-Za-z0-9_./-]+\.(?:go|md|yaml|yml|tf|sh|json|sql|toml|txt))(?:[` + "`" + `\s)"',:;]|$)`)
+var answerPathRE = regexp.MustCompile(`(?:^|[\s"` + "`" + `(]|\*)([A-Za-z0-9_./-]+\.(?:` + answerPathExtensionPattern + `))(?:[` + "`" + `\s)"',:;]|$)`)
 
 func extractAnswerPaths(answer, workspaceRoot string) []string {
 	matches := answerPathRE.FindAllStringSubmatch(answer, -1)

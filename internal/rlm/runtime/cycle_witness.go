@@ -134,7 +134,7 @@ func ValidateCycleWitness(w CycleWitness) error {
 			return fmt.Errorf("cycle witness: variable %q has invalid domain width", name)
 		}
 		if product > maxCycleWitnessDomainProduct/width {
-			return fmt.Errorf("cycle witness: bounded search domain exceeds max %d", maxCycleWitnessDomainProduct)
+			return fmt.Errorf("cycle witness: bounded search domain exceeds max %d at variable %q: current_product=%d width=%d next_product=%d; reduce finite bounds or encode dependent values as claims/known_values instead of independent variables", maxCycleWitnessDomainProduct, name, product, width, product*width)
 		}
 		product *= width
 	}

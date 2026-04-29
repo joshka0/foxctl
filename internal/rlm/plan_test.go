@@ -8,12 +8,36 @@ import (
 func TestClassifyQueryReturnsTypedPlan(t *testing.T) {
 	t.Parallel()
 
-	qp := ClassifyQuery("storage memory package")
+	qp := ClassifyQuery("inspect internal/rlm/plan.go ClassifyQuery()")
 	if qp.Route != QueryRouteCode {
 		t.Fatalf("ClassifyQuery() route=%s want %s", qp.Route, QueryRouteCode)
 	}
 	if qp.Confidence <= 0 {
 		t.Fatalf("ClassifyQuery() confidence=%.2f want positive", qp.Confidence)
+	}
+}
+
+func TestClassifyQueryFallsBackToMixedForUncertainPrompt(t *testing.T) {
+	t.Parallel()
+
+	qp := ClassifyQuery("what should we consider before planning the next review")
+	if qp.Route != QueryRouteMixed {
+		t.Fatalf("ClassifyQuery() route=%s want %s", qp.Route, QueryRouteMixed)
+	}
+}
+
+func TestBuildPlanAutoFallsBackToMixedForUncertainPrompt(t *testing.T) {
+	t.Parallel()
+
+	plan := BuildPlan("what should we consider before planning the next review", RouteProfileAuto, PlanModeStaged)
+	if plan.RouteProfile != RouteProfileMixed {
+		t.Fatalf("route=%s want %s", plan.RouteProfile, RouteProfileMixed)
+	}
+	if plan.QueryPlan.Route != QueryRouteMixed {
+		t.Fatalf("query_plan.route=%s want %s", plan.QueryPlan.Route, QueryRouteMixed)
+	}
+	if len(plan.Phases) == 0 || len(plan.Phases[0].RequireOneOf) == 0 || plan.Phases[0].RequireOneOf[0] != "retrieve_mixed" {
+		t.Fatalf("mixed plan phases=%+v", plan.Phases)
 	}
 }
 

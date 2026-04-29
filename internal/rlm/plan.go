@@ -3,6 +3,7 @@ package rlm
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 type RouteProfile string
@@ -54,14 +55,101 @@ type StructuredClassifier interface {
 type defaultClassifier struct{}
 
 func (defaultClassifier) Classify(query string) QueryPlan {
-	// Route is determined by the caller's explicit profile or defaults to code retrieval.
-	// The structured classifier provides a typed signal, not keyword matching.
-	// The task type system is based on LLM classification, not keyword heuristics.
-	return QueryPlan{
-		Route:      QueryRouteCode,
-		Confidence: 0.7,
-		Rationale:  "default code retrieval route",
+	signals := collectQuerySignals(query)
+	if signals.CodeScore >= 2 {
+		return QueryPlan{
+			Route:      QueryRouteCode,
+			Confidence: clampConfidence(0.45 + float64(signals.CodeScore)*0.12),
+			Rationale:  "structural code signals",
+		}
 	}
+	return QueryPlan{
+		Route:      QueryRouteMixed,
+		Confidence: 0.35,
+		Rationale:  "insufficient structural route signal",
+	}
+}
+
+type querySignals struct {
+	CodeScore int
+}
+
+func collectQuerySignals(query string) querySignals {
+	fields := strings.Fields(query)
+	signals := querySignals{}
+	for _, field := range fields {
+		rawToken := strings.Trim(field, " \t\r\n.,;:!?[]{}<>\"'")
+		token := strings.Trim(rawToken, "()")
+		if token == "" {
+			continue
+		}
+		if looksLikePath(token) {
+			signals.CodeScore += 2
+		}
+		if looksLikeSymbol(token) {
+			signals.CodeScore++
+		}
+		if looksLikeCall(rawToken) {
+			signals.CodeScore += 2
+		}
+		if strings.ContainsAny(token, "{}[]=|&;") {
+			signals.CodeScore++
+		}
+	}
+	return signals
+}
+
+func looksLikePath(token string) bool {
+	if strings.Contains(token, "/") || strings.Contains(token, `\`) {
+		return true
+	}
+	lastDot := strings.LastIndex(token, ".")
+	if lastDot <= 0 || lastDot == len(token)-1 {
+		return false
+	}
+	ext := token[lastDot+1:]
+	if len(ext) > 8 {
+		return false
+	}
+	for _, r := range ext {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func looksLikeSymbol(token string) bool {
+	if strings.Contains(token, "::") || strings.Contains(token, ".") {
+		return true
+	}
+	if strings.Contains(token, "_") {
+		return true
+	}
+	seenLower := false
+	for _, r := range token {
+		if unicode.IsLower(r) {
+			seenLower = true
+			continue
+		}
+		if seenLower && unicode.IsUpper(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeCall(token string) bool {
+	open := strings.Index(token, "(")
+	close := strings.LastIndex(token, ")")
+	return open > 0 && close > open
+}
+
+func clampConfidence(value float64) float64 {
+	if value > 0.95 {
+		return 0.95
+	}
+	return value
 }
 
 // ClassifyQuery produces a typed QueryPlan from a query string using the structured classifier.

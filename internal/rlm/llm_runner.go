@@ -20,7 +20,7 @@ type LLMToolExecutor struct {
 }
 
 func NewLLMToolExecutor(adapter ToolExecutor, tools []Tool) *LLMToolExecutor {
-	return &LLMToolExecutor{adapter: adapter, tools: tools}
+	return &LLMToolExecutor{adapter: newAllowlistedToolExecutor(adapter, tools), tools: tools}
 }
 
 func (e *LLMToolExecutor) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
@@ -210,7 +210,7 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	if pass.RequireToolUse && len(output.ToolCalls) == 0 {
 		return Result{}, fmt.Errorf("rlm llm runner: model answered without using tools")
 	}
-	answer := strings.TrimSpace(output.AssistantText)
+	answer, sanitization := SanitizeOutputText(output.AssistantText)
 	if answer == "" {
 		if output.StopReason != "" && output.StopReason != engine.StopReasonEndTurn {
 			detail := strings.TrimSpace(output.Error)
@@ -223,7 +223,7 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	}
 	evidence := collectEvidenceRefs(env)
 	retrievedPaths := collectRetrievedPaths(output.ToolResults, task.WorkspaceRoot, answer)
-	parentUsage := summarizeParentToolUsage(output.Iterations, "code_search_ensemble")
+	parentUsage := summarizeParentToolUsage(output.Iterations, "retrieve_code")
 	metadata := map[string]any{
 		"stop_reason":            output.StopReason,
 		"provider":               llmCfg.Provider,
@@ -238,6 +238,9 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 		"parent_total_tokens":    output.Tokens.TotalTokens,
 		"parent_iteration_count": len(output.Iterations),
 		"parent_tool_usage":      parentUsage,
+	}
+	if sanitization.Changed {
+		metadata["output_sanitization"] = sanitization
 	}
 	for key, value := range pass.Metadata {
 		metadata[key] = value
@@ -258,7 +261,10 @@ func BuildLLMSystemPrompt(env Environment, task Task) string {
 	b.WriteString("Use tools to inspect external state before answering. Do not invent unavailable evidence.\n")
 	b.WriteString("Prefer repo, scene, vault, and artifact handles already present in the environment.\n")
 	b.WriteString("If the prompt is about the current workspace, inspect with at least one tool before writing the final synthesis.\n")
-	b.WriteString("For repo questions, start with code_search_ensemble. Use semantic_search_code or smart_search_code only as follow-up discovery lanes when the ensemble leaves uncertainty. Use search_repo only as a shallow fallback, then load_file for exact verification, and ripgrep_code for literal patterns.\n")
+	if guidance := toolSurfaceGuidance(env.Tools); guidance != "" {
+		b.WriteString(guidance)
+		b.WriteString("\n")
+	}
 	b.WriteString("Cite exact relative repo file paths you inspected. Do not cite .foxctl or .claude runtime files as repository evidence.\n")
 	b.WriteString("Return a concise synthesis with supporting evidence.\n")
 	if len(env.Tools) > 0 {
@@ -430,9 +436,9 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, sp
 	finalResult.Metadata["parent_input_tokens_total"] = sumIntMetadata(phaseMeta, "parent_input_tokens")
 	finalResult.Metadata["parent_output_tokens_total"] = sumIntMetadata(phaseMeta, "parent_output_tokens")
 	finalResult.Metadata["parent_total_tokens_total"] = sumIntMetadata(phaseMeta, "parent_total_tokens")
-	finalResult.Metadata["parent_code_search_ensemble_prompt_delta_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_prompt_delta_total")
-	finalResult.Metadata["parent_code_search_ensemble_invocations_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_invocations")
-	finalResult.Metadata["parent_code_search_ensemble_result_token_estimate_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_result_token_estimate_total")
+	finalResult.Metadata["parent_retrieve_code_prompt_delta_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_prompt_delta_total")
+	finalResult.Metadata["parent_retrieve_code_invocations_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_invocations")
+	finalResult.Metadata["parent_retrieve_code_result_token_estimate_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_result_token_estimate_total")
 	return finalResult, nil
 }
 
@@ -481,7 +487,7 @@ func buildPhasePrompt(query string, phase Phase, candidatePaths, phaseNotes []st
 		b.WriteString(guidance)
 	}
 	if phase.Name == "inspection" || phase.Name == "verification" {
-		b.WriteString("\nYou must open at least one candidate path with load_file or read_note before you finish.")
+		b.WriteString("\nYou must load at least one candidate evidence reference with load_evidence_ref before you finish.")
 	}
 	if len(candidatePaths) > 0 {
 		b.WriteString("\nFocus on these candidate paths if they seem relevant: ")
@@ -491,6 +497,50 @@ func buildPhasePrompt(query string, phase Phase, candidatePaths, phaseNotes []st
 		b.WriteString("\nUse prior findings, but verify them with this phase's tools.")
 	}
 	return b.String()
+}
+
+func toolSurfaceGuidance(tools []Tool) string {
+	present := make(map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Name)
+		if name != "" {
+			present[name] = struct{}{}
+		}
+	}
+	has := func(name string) bool {
+		_, ok := present[name]
+		return ok
+	}
+
+	var guidance []string
+	if has("retrieve_code") {
+		text := "For repo questions, start with retrieve_code."
+		if has("load_evidence_ref") {
+			text = "For repo questions, start with retrieve_code and use load_evidence_ref for exact evidence verification."
+		}
+		guidance = append(guidance, text)
+	}
+	if has("retrieve_memory") || has("retrieve_context") || has("retrieve_task") {
+		var lanes []string
+		for _, name := range []string{"retrieve_memory", "retrieve_context", "retrieve_task"} {
+			if has(name) {
+				lanes = append(lanes, name)
+			}
+		}
+		text := "For memory or task recall, use " + strings.Join(lanes, ", ") + "."
+		if has("load_evidence_ref") {
+			text = "For memory or task recall, use " + strings.Join(lanes, ", ") + " and verify specific evidence with load_evidence_ref."
+		}
+		guidance = append(guidance, text)
+	}
+	if has("retrieve_mixed") {
+		guidance = append(guidance, "For mixed or uncertain questions, use retrieve_mixed to gather evidence across lanes.")
+	}
+	if has("load_evidence_ref") && len(guidance) == 0 {
+		guidance = append(guidance, "Use load_evidence_ref to inspect and verify referenced evidence.")
+	}
+
+	return strings.Join(guidance, "\n")
 }
 
 func buildSynthesisSystemPrompt(base string, plan Plan, candidatePaths, phaseNotes []string) string {
@@ -567,7 +617,9 @@ func collectEvidenceRefs(env Environment) []string {
 	return uniqueStringsRLM(out)
 }
 
-var answerPathPattern = regexp.MustCompile(`(?m)(?:^|[\s` + "`" + `("'“])([A-Za-z0-9._/-]+\.(?:go|md|yaml|yml|tf|sh|json|sql|toml|txt))(?:$|[\s` + "`" + `)"'”:,])`)
+const answerPathExtensionPattern = `go|md|yaml|yml|tf|sh|json|sql|toml|txt|ts|tsx|js|jsx|mjs|cjs|py|rs|gd|ex|exs|html|css|scss|swift|kt|java|rb|php|vue|svelte|proto|graphql|gql|xml|csv|ini|env|dockerfile`
+
+var answerPathPattern = regexp.MustCompile(`(?m)(?:^|[\s` + "`" + `("'“])([A-Za-z0-9._/-]+\.(?:` + answerPathExtensionPattern + `))(?:$|[\s` + "`" + `)"'”:,])`)
 
 func collectRetrievedPaths(results []engine.ToolResult, workspaceRoot, answer string) []string {
 	out := make([]string, 0, len(results))

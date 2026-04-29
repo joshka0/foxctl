@@ -101,6 +101,46 @@ func TestPythonSkillRunnerRepairsEscapedSynthesizedSource(t *testing.T) {
 	}
 }
 
+func TestPythonSkillRunnerPreservesEscapedNewlineInsideDecodedSource(t *testing.T) {
+	t.Parallel()
+
+	runner, err := NewPythonSkillRunner(context.Background(), PythonSkillSpec{
+		Source: `def solve(input):
+    prompt = input.get("prompt", "")
+    lines = prompt.split('\n')
+    return {"ok": True, "answer": "solution = " + str(len(lines))}
+`,
+	})
+	if err != nil {
+		t.Fatalf("NewPythonSkillRunner() error = %v", err)
+	}
+	result, err := runner.Run(context.Background(), map[string]any{"prompt": "a\nb\nc"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output["answer"] != "solution = 3" {
+		t.Fatalf("answer=%v", result.Output["answer"])
+	}
+}
+
+func TestPythonSkillRunnerRepairsRawNewlineInsideStringLiteral(t *testing.T) {
+	t.Parallel()
+
+	runner, err := NewPythonSkillRunner(context.Background(), PythonSkillSpec{
+		Source: "def solve(input):\n    sep = '\n'\n    return {\"ok\": True, \"answer\": \"solution = \" + str(len(input.get(\"text\", \"\").split(sep)))}\n",
+	})
+	if err != nil {
+		t.Fatalf("NewPythonSkillRunner() error = %v", err)
+	}
+	result, err := runner.Run(context.Background(), map[string]any{"text": "a\nb"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output["answer"] != "solution = 2" {
+		t.Fatalf("answer=%v", result.Output["answer"])
+	}
+}
+
 func TestPythonSkillRunnerRejectsUnsafeImport(t *testing.T) {
 	t.Parallel()
 
@@ -114,6 +154,53 @@ def solve(input):
 	})
 	if err == nil || (!strings.Contains(err.Error(), "disallowed import os") && !strings.Contains(err.Error(), "disallowed selector os.getcwd")) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPythonSkillRunnerAllowsRegexImport(t *testing.T) {
+	t.Parallel()
+
+	runner, err := NewPythonSkillRunner(context.Background(), PythonSkillSpec{
+		Source: `
+import re
+
+def solve(input):
+    return {"ok": True, "answer": "solution = " + str(len(re.findall(r"[a-z]+", input.get("text", ""))))}
+`,
+	})
+	if err != nil {
+		t.Fatalf("NewPythonSkillRunner() error = %v", err)
+	}
+	result, err := runner.Run(context.Background(), map[string]any{"text": "a 1 bc"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output["answer"] != "solution = 2" {
+		t.Fatalf("answer=%v", result.Output["answer"])
+	}
+}
+
+func TestPythonSkillRunnerAllowsASTLiteralEval(t *testing.T) {
+	t.Parallel()
+
+	runner, err := NewPythonSkillRunner(context.Background(), PythonSkillSpec{
+		Source: `
+import ast
+
+def solve(input):
+    values = ast.literal_eval(input.get("values", "[]"))
+    return {"ok": True, "answer": "solution = " + str(sum(values))}
+`,
+	})
+	if err != nil {
+		t.Fatalf("NewPythonSkillRunner() error = %v", err)
+	}
+	result, err := runner.Run(context.Background(), map[string]any{"values": "[1, 2, 3]"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.Output["answer"] != "solution = 6" {
+		t.Fatalf("answer=%v", result.Output["answer"])
 	}
 }
 

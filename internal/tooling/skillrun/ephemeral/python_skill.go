@@ -139,6 +139,7 @@ func normalizePythonSkillSource(source string) string {
 		source = strings.TrimSpace(parsed)
 	}
 	source = normalizeEscapedPythonSource(source)
+	source = normalizePythonStringLiteralNewlines(source)
 	source = trimPythonJSONSourceFragments(source)
 	source = trimJSONSourceFragments(source)
 	if extracted, ok := extractWrappedPythonSolveSource(source); ok {
@@ -148,6 +149,7 @@ func normalizePythonSkillSource(source string) string {
 }
 
 func normalizeEscapedPythonSource(source string) string {
+	hasRealNewlines := strings.Contains(source, "\n")
 	replacements := []struct {
 		old string
 		new string
@@ -161,9 +163,91 @@ func normalizeEscapedPythonSource(source string) string {
 		{`\"`, `"`},
 	}
 	for _, replacement := range replacements {
+		if hasRealNewlines && strings.Contains(replacement.old, `\n`) {
+			continue
+		}
 		source = strings.ReplaceAll(source, replacement.old, replacement.new)
 	}
 	return source
+}
+
+func normalizePythonStringLiteralNewlines(source string) string {
+	if !strings.Contains(source, "\n") {
+		return source
+	}
+	var b strings.Builder
+	b.Grow(len(source))
+	inQuote := rune(0)
+	triple := false
+	escaped := false
+	inComment := false
+	runes := []rune(source)
+	for i := 0; i < len(runes); i++ {
+		ch := runes[i]
+		if inComment {
+			b.WriteRune(ch)
+			if ch == '\n' || ch == '\r' {
+				inComment = false
+			}
+			continue
+		}
+		if inQuote != 0 {
+			if escaped {
+				b.WriteRune(ch)
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				b.WriteRune(ch)
+				escaped = true
+				continue
+			}
+			if !triple && (ch == '\n' || ch == '\r') {
+				b.WriteString(`\n`)
+				if ch == '\r' && i+1 < len(runes) && runes[i+1] == '\n' {
+					i++
+				}
+				continue
+			}
+			if ch == inQuote {
+				if triple {
+					if i+2 < len(runes) && runes[i+1] == inQuote && runes[i+2] == inQuote {
+						b.WriteRune(ch)
+						b.WriteRune(runes[i+1])
+						b.WriteRune(runes[i+2])
+						i += 2
+						inQuote = 0
+						triple = false
+						continue
+					}
+				} else {
+					b.WriteRune(ch)
+					inQuote = 0
+					continue
+				}
+			}
+			b.WriteRune(ch)
+			continue
+		}
+		if ch == '#' {
+			inComment = true
+			b.WriteRune(ch)
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			inQuote = ch
+			triple = i+2 < len(runes) && runes[i+1] == ch && runes[i+2] == ch
+			b.WriteRune(ch)
+			if triple {
+				b.WriteRune(runes[i+1])
+				b.WriteRune(runes[i+2])
+				i += 2
+			}
+			continue
+		}
+		b.WriteRune(ch)
+	}
+	return b.String()
 }
 
 func trimPythonJSONSourceFragments(source string) string {
@@ -289,8 +373,8 @@ import sys
 import traceback
 
 ALLOWED_IMPORTS = {
-    "bisect", "collections", "copy", "functools", "heapq", "itertools", "json",
-    "math", "operator", "statistics",
+    "ast", "bisect", "collections", "copy", "functools", "heapq", "itertools", "json",
+    "math", "operator", "re", "statistics",
 }
 SAFE_BUILTINS = {
     "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,

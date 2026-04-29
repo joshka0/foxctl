@@ -184,6 +184,9 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 		if handoff.ScaffoldID != BraidScaffoldIDStateReplayV1 {
 			return braidRuntimeScaffold{}, false
 		}
+		if !braidHelperInputLooksLikeStateReplay(input) {
+			return braidRuntimeScaffold{}, false
+		}
 		return braidRuntimeScaffold{
 			Class:          BraidScaffoldClassStateTransition,
 			ID:             BraidScaffoldIDStateReplayV1,
@@ -202,7 +205,6 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 			Class:          BraidScaffoldClassExplicitDAG,
 			ID:             BraidScaffoldIDSearchBacktrackV1,
 			PresetName:     BraidScaffoldClassExplicitDAG + "/" + BraidScaffoldIDSearchBacktrackV1,
-			PresetSource:   searchBacktrackPresetSource(),
 			PresetInput:    cloneMapAny(input),
 			MaxSourceLines: 250,
 			MaxSourceChars: 12000,
@@ -211,6 +213,79 @@ func resolveBraidRuntimeScaffold(node BraidNode, handoff BraidNodeHandoff, input
 	default:
 		return braidRuntimeScaffold{}, false
 	}
+}
+
+func braidHelperInputLooksLikeExplicitDAGPreset(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	if _, ok := input["nodes"]; ok {
+		return true
+	}
+	if _, ok := input["dependencies"]; ok {
+		return true
+	}
+	if _, ok := input["problems"]; ok {
+		return true
+	}
+	return false
+}
+
+func braidHelperInputLooksLikeStateReplay(input map[string]any) bool {
+	if len(input) == 0 {
+		return false
+	}
+	for _, key := range []string{"move_sequence", "actions", "transitions"} {
+		if valueLooksLikeUCIMoveSequence(input[key]) {
+			return true
+		}
+	}
+	return false
+}
+
+func valueLooksLikeUCIMoveSequence(value any) bool {
+	switch typed := value.(type) {
+	case string:
+		return stringLooksLikeUCIMoveSequence(typed)
+	case []any:
+		for _, item := range typed {
+			if text, ok := item.(string); ok && looksLikeUCIMoveToken(strings.TrimSpace(text)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func stringLooksLikeUCIMoveSequence(value string) bool {
+	for _, token := range strings.Fields(strings.TrimSpace(value)) {
+		token = strings.Trim(token, "[](),.;:'\"")
+		if looksLikeUCIMoveToken(token) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeUCIMoveToken(token string) bool {
+	if len(token) != 4 && len(token) != 5 {
+		return false
+	}
+	if token[0] < 'a' || token[0] > 'h' || token[2] < 'a' || token[2] > 'h' {
+		return false
+	}
+	if token[1] < '1' || token[1] > '8' || token[3] < '1' || token[3] > '8' {
+		return false
+	}
+	if len(token) == 5 {
+		switch token[4] {
+		case 'q', 'r', 'b', 'n':
+			return true
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func applyBraidRuntimeScaffoldToHelperConfig(cfg HelperFactoryConfig, scaffold braidRuntimeScaffold) HelperFactoryConfig {
@@ -792,15 +867,72 @@ func candidateVerifyAnswerVerifier(answer string, input map[string]any) (HelperV
 	}
 	// Reject placeholder patterns like "Consider the..." or "selected mol as..."
 	lower := strings.ToLower(solutionVal)
-	placeholders := []string{"consider ", "selected ", "insert ", "replace ", "fill in", "todo", "tbd", "placeholder"}
-	for _, ph := range placeholders {
-		if strings.HasPrefix(lower, ph) {
-			base.FirstFailure = fmt.Sprintf("solution looks like a placeholder: %q", solutionVal)
-			return base, true
-		}
+	if isSchemaPlaceholderAnswer(lower) {
+		base.FirstFailure = fmt.Sprintf("solution looks like a placeholder: %q", solutionVal)
+		return base, true
 	}
 	base.Pass = true
 	return base, true
+}
+
+func isSchemaPlaceholderAnswer(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return true
+	}
+	lower = strings.Trim(lower, `"'`)
+	if strings.HasPrefix(lower, "{") {
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(value), &decoded); err == nil {
+			for _, key := range []string{"value", "answer", "solution"} {
+				if isSchemaPlaceholderAnswer(fmt.Sprintf("%v", decoded[key])) {
+					return true
+				}
+			}
+		}
+	}
+	if strings.HasPrefix(lower, "[") {
+		var decoded []any
+		if err := json.Unmarshal([]byte(value), &decoded); err == nil {
+			for _, item := range decoded {
+				if isSchemaPlaceholderAnswer(fmt.Sprintf("%v", item)) {
+					return true
+				}
+			}
+		}
+	}
+	placeholders := []string{
+		"<answer>",
+		"answer",
+		"answers",
+		"candidate",
+		"candidates",
+		"candidate answer",
+		"candidate answers",
+		"candidate values",
+		"numerical answer",
+		"numerical answers",
+		"output value",
+		"output values",
+		"verification predicates",
+		"predicate checks",
+		"constraint checks",
+		"problem constraint checks",
+		"consider ",
+		"selected ",
+		"insert ",
+		"replace ",
+		"fill in",
+		"todo",
+		"tbd",
+		"placeholder",
+	}
+	for _, ph := range placeholders {
+		if lower == ph || strings.HasPrefix(lower, ph) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- State replay scaffold (generic state_transition/state_replay_v1) ---
@@ -1088,20 +1220,26 @@ func searchBacktrackAnswerVerifier(answer string, input map[string]any) (HelperV
 		base.FirstFailure = "empty answer"
 		return base, true
 	}
-	// Check for structured solution
-	if strings.Contains(trimmed, "node_") || strings.Contains(trimmed, "solution") {
-		// If ground truth available, check it
-		if expected, ok := input["answer"]; ok {
-			expectedStr := strings.TrimSpace(fmt.Sprintf("%v", expected))
-			if expectedStr != "" && strings.Contains(trimmed, expectedStr) {
-				base.Pass = true
-				return base, true
-			}
-		}
-		// No ground truth or not matched: pass if solution structure is present
-		base.Pass = true
+	if strings.Contains(strings.ToUpper(trimmed), "UNSOLVED") || strings.Contains(strings.ToLower(trimmed), "null") {
+		base.FirstFailure = "answer contains unresolved values"
+		base.RepairHint = "return only fully solved node values or ok:false with first_failure"
 		return base, true
 	}
-	base.FirstFailure = "answer does not contain structured solution"
-	return base, true
+	if !strings.Contains(trimmed, "node_") && !strings.Contains(trimmed, "solution") {
+		base.FirstFailure = "answer does not contain structured solution"
+		return base, true
+	}
+	if expected, ok := input["answer"]; ok {
+		expectedStr := strings.TrimSpace(fmt.Sprintf("%v", expected))
+		if expectedStr != "" && strings.Contains(trimmed, expectedStr) {
+			base.Pass = true
+			return base, true
+		}
+		base.FirstFailure = "answer did not contain expected value"
+		base.RepairHint = "substitute the candidate into the explicit dependency graph and return the requested output values"
+		return base, true
+	}
+	// A structured explicit-DAG answer is a candidate, not a runtime-verified
+	// solution, unless the input provides machine-checkable expected values.
+	return HelperVerifierDiagnostic{}, false
 }

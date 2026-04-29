@@ -89,6 +89,32 @@ func TestResolveLongCoTConditionsRequiresExactIDs(t *testing.T) {
 	}
 }
 
+func TestLongCoTRetryableRLMError(t *testing.T) {
+	t.Parallel()
+
+	retryable := []error{
+		fmt.Errorf("rlm repl runner: API error (status 429): provider returned error"),
+		fmt.Errorf("provider is temporarily rate-limited upstream"),
+		fmt.Errorf("Upstream error from Alibaba: Request rate increased too quickly"),
+		fmt.Errorf("API error (status 503): service unavailable"),
+	}
+	for _, err := range retryable {
+		if !longCoTRetryableRLMError(err) {
+			t.Fatalf("longCoTRetryableRLMError(%v)=false, want true", err)
+		}
+	}
+	nonRetryable := []error{
+		nil,
+		fmt.Errorf("braid node did not complete: status blocked"),
+		fmt.Errorf("API error (status 400): invalid request"),
+	}
+	for _, err := range nonRetryable {
+		if longCoTRetryableRLMError(err) {
+			t.Fatalf("longCoTRetryableRLMError(%v)=true, want false", err)
+		}
+	}
+}
+
 func TestResolveLongCoTLiveTargetOpenRouterUsesBearerWithGlobalAuthNone(t *testing.T) {
 	t.Parallel()
 
@@ -175,8 +201,8 @@ func TestResolveLongCoTConditionsBraidSingle(t *testing.T) {
 	if got.RLMToolProfile != "longcot-repl-recursive" {
 		t.Fatalf("tool profile=%q want longcot-repl-recursive", got.RLMToolProfile)
 	}
-	if got.MaxDepth != 1 || got.MaxIterations != 32 || got.MaxSubcalls != 12 {
-		t.Fatalf("limits depth=%d iterations=%d subcalls=%d want 1/32/12", got.MaxDepth, got.MaxIterations, got.MaxSubcalls)
+	if got.MaxDepth != 1 || got.MaxIterations != 32 || got.MaxSubcalls != 16 {
+		t.Fatalf("limits depth=%d iterations=%d subcalls=%d want 1/32/16", got.MaxDepth, got.MaxIterations, got.MaxSubcalls)
 	}
 	wantTools := []string{rlmruntime.PythonREPLToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName}
 	if !stringSlicesEqual(got.AllowedTools, wantTools) {
@@ -654,13 +680,13 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	if got := strings.TrimSpace(string(phases[planIdx].ResponseFormat)); got != `{"type":"json_object"}` {
 		t.Fatalf("graph_plan ResponseFormat=%q want json_object", got)
 	}
-	if got := phases[planIdx].MaxGraphNodes; got != 7 {
-		t.Fatalf("graph_plan MaxGraphNodes=%d want 7", got)
+	if got := phases[planIdx].MaxGraphNodes; got != 12 {
+		t.Fatalf("graph_plan MaxGraphNodes=%d want 12", got)
 	}
 	if got := phases[planIdx].BraidGraphPolicy; got != rlmruntime.BraidGraphPolicyLongCoTController {
 		t.Fatalf("graph_plan BraidGraphPolicy=%q want %q", got, rlmruntime.BraidGraphPolicyLongCoTController)
 	}
-	for _, want := range []string{"valid json object", "one primary solve wave", "Allowed kind values are extract, solve, cycle_solve, verify, reduce", "cycle_solve is optional", "BlocksWorld-style stack puzzles", "do not segment the plan by vague phases", "Use one primary solve node to build an executable candidate", "Keep the runtime graph acyclic", "Every solve and verify node must additionally include archetype, scaffold_class, scaffold_id, and input_schema", "Allowed archetype and scaffold_class values"} {
+	for _, want := range []string{"valid json object", "one primary solve wave", "Allowed kind values are extract, solve, cycle_solve, verify, reduce", "cycle_solve is optional", "BlocksWorld-style stack puzzles", "do not segment the plan by vague phases", "Use one primary solve node to build an executable candidate", "Keep the runtime graph acyclic", "Every solve and verify node must additionally include archetype, scaffold_class, scaffold_id, and input_schema", "Allowed scaffold pairs are strict", "Do not use generic_v1", "Use state_transition/state_replay_v1 only for replaying an explicit action sequence"} {
 		if !strings.Contains(phases[planIdx].Prompt, want) {
 			t.Fatalf("graph_plan prompt missing %q:\n%s", want, phases[planIdx].Prompt)
 		}
@@ -674,8 +700,8 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	if !stringSlicesEqual(phases[fanoutIdx].Tools, []string{rlmruntime.RLMQueryToolName}) {
 		t.Fatalf("graph_fanout tools=%v want [%s]", phases[fanoutIdx].Tools, rlmruntime.RLMQueryToolName)
 	}
-	if phases[fanoutIdx].BraidRepairAttempts != 1 {
-		t.Fatalf("graph_fanout BraidRepairAttempts=%d want 1", phases[fanoutIdx].BraidRepairAttempts)
+	if phases[fanoutIdx].BraidRepairAttempts != 2 {
+		t.Fatalf("graph_fanout BraidRepairAttempts=%d want 2", phases[fanoutIdx].BraidRepairAttempts)
 	}
 }
 
@@ -1574,8 +1600,13 @@ func TestBuildLongCoTREPLTaskPromptCanDisableBlocksWorldHelper(t *testing.T) {
 	if strings.Contains(prompt, "blocksworld_solve") {
 		t.Fatalf("prompt unexpectedly mentions blocksworld helper:\n%s", prompt)
 	}
-	if !strings.Contains(prompt, rlmruntime.EphemeralSkillDraftToolName) || !strings.Contains(prompt, rlmruntime.EphemeralSkillRunToolName) {
-		t.Fatalf("prompt missing ephemeral skill instructions:\n%s", prompt)
+	if !strings.Contains(prompt, rlmruntime.EphemeralHelperSolveToolName) {
+		t.Fatalf("prompt missing helper solve instructions:\n%s", prompt)
+	}
+	for _, forbidden := range []string{"ephemeral_skill_draft", "ephemeral_skill_run"} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("prompt unexpectedly contains legacy helper tool %q:\n%s", forbidden, prompt)
+		}
 	}
 }
 
