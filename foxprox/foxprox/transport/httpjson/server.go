@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -95,7 +96,7 @@ type SessionResponse struct {
 	Status           string              `json:"status"`
 	PID              int                 `json:"pid"`
 	CreatedAt        time.Time           `json:"created_at"`
-	ExitedAt         time.Time           `json:"exited_at,omitempty"`
+	ExitedAt         *time.Time          `json:"exited_at,omitempty"`
 	ExitCode         int                 `json:"exit_code,omitempty"`
 	ExitError        string              `json:"exit_error,omitempty"`
 	LastSeq          uint64              `json:"last_seq"`
@@ -107,7 +108,7 @@ type SessionResponse struct {
 	Readiness        ReadinessProfileDTO `json:"readiness,omitempty"`
 	OutputBytesTotal int64               `json:"output_bytes_total"`
 	OutputRateBPS    float64             `json:"output_rate_bps"`
-	LastOutputAt     time.Time           `json:"last_output_at,omitempty"`
+	LastOutputAt     *time.Time          `json:"last_output_at,omitempty"`
 }
 
 type ReadinessProfileDTO struct {
@@ -119,34 +120,34 @@ type ReadinessProfileDTO struct {
 
 // ReadinessResponse reports whether a session's PTY output is currently idle.
 type ReadinessResponse struct {
-	SessionID        string    `json:"session_id"`
-	Idle             bool      `json:"idle"`
-	IdleForMS        int64     `json:"idle_for_ms"`
-	ThresholdBPS     float64   `json:"threshold_bps"`
-	DebounceMS       int64     `json:"debounce_ms"`
-	ScreenMatch      bool      `json:"screen_match,omitempty"`
-	ScreenRegex      string    `json:"screen_regex,omitempty"`
-	ScreenLine       string    `json:"screen_line,omitempty"`
-	OutputBytesTotal int64     `json:"output_bytes_total"`
-	OutputRateBPS    float64   `json:"output_rate_bps"`
-	LastOutputAt     time.Time `json:"last_output_at,omitempty"`
+	SessionID        string     `json:"session_id"`
+	Idle             bool       `json:"idle"`
+	IdleForMS        int64      `json:"idle_for_ms"`
+	ThresholdBPS     float64    `json:"threshold_bps"`
+	DebounceMS       int64      `json:"debounce_ms"`
+	ScreenMatch      bool       `json:"screen_match,omitempty"`
+	ScreenRegex      string     `json:"screen_regex,omitempty"`
+	ScreenLine       string     `json:"screen_line,omitempty"`
+	OutputBytesTotal int64      `json:"output_bytes_total"`
+	OutputRateBPS    float64    `json:"output_rate_bps"`
+	LastOutputAt     *time.Time `json:"last_output_at,omitempty"`
 }
 
 // ActivityResponse reports whether a session produced output since a caller's
 // previous heartbeat cursor.
 type ActivityResponse struct {
-	SessionID             string    `json:"session_id"`
-	Working               bool      `json:"working"`
-	OutputChanged         bool      `json:"output_changed"`
-	SinceSeq              uint64    `json:"since_seq"`
-	CurrentSeq            uint64    `json:"current_seq"`
-	SeqDelta              uint64    `json:"seq_delta"`
-	SinceOutputBytesTotal int64     `json:"since_output_bytes_total"`
-	OutputBytesTotal      int64     `json:"output_bytes_total"`
-	OutputBytesDelta      int64     `json:"output_bytes_delta"`
-	OutputRateBPS         float64   `json:"output_rate_bps"`
-	IdleForMS             int64     `json:"idle_for_ms"`
-	LastOutputAt          time.Time `json:"last_output_at,omitempty"`
+	SessionID             string     `json:"session_id"`
+	Working               bool       `json:"working"`
+	OutputChanged         bool       `json:"output_changed"`
+	SinceSeq              uint64     `json:"since_seq"`
+	CurrentSeq            uint64     `json:"current_seq"`
+	SeqDelta              uint64     `json:"seq_delta"`
+	SinceOutputBytesTotal int64      `json:"since_output_bytes_total"`
+	OutputBytesTotal      int64      `json:"output_bytes_total"`
+	OutputBytesDelta      int64      `json:"output_bytes_delta"`
+	OutputRateBPS         float64    `json:"output_rate_bps"`
+	IdleForMS             int64      `json:"idle_for_ms"`
+	LastOutputAt          *time.Time `json:"last_output_at,omitempty"`
 }
 
 // TerminalResponse is the common reply for terminal.* endpoints.
@@ -172,19 +173,20 @@ type LeaseReleaseRequest struct {
 
 // LeaseResponse mirrors lease.Lease's public state.
 type LeaseResponse struct {
-	ID         string    `json:"id"`
-	SessionID  string    `json:"session_id"`
-	Scope      string    `json:"scope"`
-	Owner      string    `json:"owner"`
-	AcquiredAt time.Time `json:"acquired_at"`
-	TTLMS      int       `json:"ttl_ms"`
-	Reason     string    `json:"reason,omitempty"`
-	ReleasedAt time.Time `json:"released_at,omitempty"`
+	ID         string     `json:"id"`
+	SessionID  string     `json:"session_id"`
+	Scope      string     `json:"scope"`
+	Owner      string     `json:"owner"`
+	AcquiredAt time.Time  `json:"acquired_at"`
+	TTLMS      int        `json:"ttl_ms"`
+	Reason     string     `json:"reason,omitempty"`
+	ReleasedAt *time.Time `json:"released_at,omitempty"`
 }
 
 // ErrorResponse is the canonical JSON error body.
 type ErrorResponse struct {
 	Error string `json:"error"`
+	Code  string `json:"code,omitempty"`
 }
 
 // --- handlers ---
@@ -322,7 +324,7 @@ func (s *Server) getSessionReadiness(w http.ResponseWriter, r *http.Request) {
 		ScreenLine:       screenLine,
 		OutputBytesTotal: ready.OutputStats.BytesTotal,
 		OutputRateBPS:    ready.OutputStats.RateBPS,
-		LastOutputAt:     ready.OutputStats.LastOutputAt,
+		LastOutputAt:     timePtrUTC(ready.OutputStats.LastOutputAt),
 	})
 }
 
@@ -402,20 +404,21 @@ func (s *Server) terminalWriteBytes(w http.ResponseWriter, r *http.Request) {
 	}, func() any { return &intents.TerminalWriteBytes{} })
 }
 
+const RequestMaxBytes = 1 << 20
+
 // TerminalRequestMaxBytes caps the size of a single terminal.* request
 // body. 1 MiB is well beyond what any typed intent should carry — even a
 // bracketed-paste blob above this size belongs in a separate upload
 // path. The limit exists to stop a hostile or broken client from pinning
 // the broker on io.ReadAll of an unbounded stream.
-const TerminalRequestMaxBytes = 1 << 20
+const TerminalRequestMaxBytes = RequestMaxBytes
 
 // runTerminal is the shared decode + dispatch path for every terminal
 // endpoint. It expects a top-level session_id field plus the intent fields.
 //
-// Body handling is paranoid on purpose: the request is capped by
-// MaxBytesReader and decoded with DisallowUnknownFields twice (once into
-// the envelope shape, once into the typed intent) so clients cannot smuggle
-// extra fields or pump unbounded bytes through a single connection.
+// Body handling is capped by MaxBytesReader. The combined terminal body
+// intentionally accepts extra fields because it contains both session_id and
+// endpoint-specific intent fields.
 func (s *Server) runTerminal(w http.ResponseWriter, r *http.Request, dispatch func(string, any) (int, error), make func() any) {
 	r.Body = http.MaxBytesReader(w, r.Body, TerminalRequestMaxBytes)
 	raw, err := io.ReadAll(r.Body)
@@ -521,9 +524,15 @@ func (s *Server) leaseList(w http.ResponseWriter, r *http.Request) {
 // the top-level value — bodies like `{...} {...}` or `{...}garbage` fail
 // with 400 instead of silently dropping the extra data.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, RequestMaxBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		var mbErr *http.MaxBytesError
+		if errors.As(err, &mbErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("request body exceeds %d bytes", RequestMaxBytes))
+			return false
+		}
 		writeError(w, http.StatusBadRequest, "invalid json: "+err.Error())
 		return false
 	}
@@ -541,7 +550,7 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, ErrorResponse{Error: msg})
+	writeJSON(w, status, ErrorResponse{Error: msg, Code: errorCode(msg)})
 }
 
 func notFoundOrInternal(w http.ResponseWriter, err error) {
@@ -589,7 +598,7 @@ func toSessionResponse(snap session.Snapshot) SessionResponse {
 		Status:           snap.Status.String(),
 		PID:              snap.PID,
 		CreatedAt:        snap.CreatedAt,
-		ExitedAt:         snap.ExitedAt,
+		ExitedAt:         timePtrUTC(snap.ExitedAt),
 		ExitCode:         snap.ExitCode,
 		ExitError:        snap.ExitError,
 		LastSeq:          snap.LastSeq,
@@ -601,7 +610,7 @@ func toSessionResponse(snap session.Snapshot) SessionResponse {
 		Readiness:        readinessProfileToDTO(snap.ReadinessProfile),
 		OutputBytesTotal: snap.OutputBytesTotal,
 		OutputRateBPS:    snap.OutputRateBPS,
-		LastOutputAt:     snap.LastOutputAt,
+		LastOutputAt:     timePtrUTC(snap.LastOutputAt),
 	}
 }
 
@@ -655,7 +664,7 @@ func activityResponseFromSnapshot(sessionID string, snap session.Snapshot, since
 		OutputBytesDelta:      bytesDelta,
 		OutputRateBPS:         snap.OutputRateBPS,
 		IdleForMS:             int64(idleFor / time.Millisecond),
-		LastOutputAt:          snap.LastOutputAt,
+		LastOutputAt:          timePtrUTC(snap.LastOutputAt),
 	}
 }
 
@@ -670,22 +679,23 @@ func toLeaseResponse(l *lease.Lease) LeaseResponse {
 	}
 	if r := l.Reason(); r != lease.ReasonActive {
 		resp.Reason = r.String()
-		resp.ReleasedAt = l.ReleasedAt()
+		resp.ReleasedAt = timePtrUTC(l.ReleasedAt())
 	}
 	return resp
 }
 
 // parseSinceParam reads ?since=<uint64> with a default of 0.
-func parseSinceParam(r *http.Request) uint64 {
+func parseSinceParam(w http.ResponseWriter, r *http.Request) (uint64, bool) {
 	s := strings.TrimSpace(r.URL.Query().Get("since"))
 	if s == "" {
-		return 0
+		return 0, true
 	}
 	v, err := strconv.ParseUint(s, 10, 64)
 	if err != nil {
-		return 0
+		writeError(w, http.StatusBadRequest, "since must be an unsigned integer")
+		return 0, false
 	}
-	return v
+	return v, true
 }
 
 func parseFloatQuery(w http.ResponseWriter, r *http.Request, key string, def float64) (float64, bool) {
@@ -696,6 +706,10 @@ func parseFloatQuery(w http.ResponseWriter, r *http.Request, key string, def flo
 	v, err := strconv.ParseFloat(raw, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, key+" must be a number")
+		return 0, false
+	}
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		writeError(w, http.StatusBadRequest, key+" must be finite")
 		return 0, false
 	}
 	return v, true
@@ -712,6 +726,24 @@ func parseIntQuery(w http.ResponseWriter, r *http.Request, key string, def int) 
 		return 0, false
 	}
 	return v, true
+}
+
+func timePtrUTC(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	utc := t.UTC()
+	return &utc
+}
+
+func errorCode(msg string) string {
+	code := strings.TrimSpace(strings.ToLower(msg))
+	code = strings.TrimPrefix(code, "foxprox router: ")
+	code = strings.TrimPrefix(code, "foxprox room: ")
+	code = strings.TrimPrefix(code, "foxprox broker: ")
+	code = strings.TrimPrefix(code, "foxprox session: ")
+	code = strings.NewReplacer(" ", "_", ":", "", "-", "_").Replace(code)
+	return code
 }
 
 func parseInt64Query(w http.ResponseWriter, r *http.Request, key string, def int64) (int64, bool) {

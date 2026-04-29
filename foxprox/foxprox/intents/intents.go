@@ -7,6 +7,11 @@
 // definition without import cycles.
 package intents
 
+import (
+	"encoding/base64"
+	"encoding/json"
+)
+
 // TerminalText requests literal text to be typed into a session.
 //
 // Encoding defaults to UTF-8 when empty. Non-UTF-8 encodings are not yet
@@ -59,8 +64,33 @@ type TerminalPaste struct {
 // sessions whose adapter has the "write_bytes" capability enabled, and it is
 // lease-gated like any other input intent.
 type TerminalWriteBytes struct {
-	Bytes   []byte `json:"bytes"`
-	LeaseID string `json:"lease_id,omitempty"`
+	Bytes    []byte `json:"bytes,omitempty"`
+	BytesB64 string `json:"bytes_b64,omitempty"`
+	LeaseID  string `json:"lease_id,omitempty"`
+}
+
+// UnmarshalJSON accepts the explicit bytes_b64 field preferred by non-Go
+// clients while retaining Go's legacy []byte/base64 "bytes" field.
+func (t *TerminalWriteBytes) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Bytes    []byte `json:"bytes,omitempty"`
+		BytesB64 string `json:"bytes_b64,omitempty"`
+		LeaseID  string `json:"lease_id,omitempty"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	t.Bytes = wire.Bytes
+	if wire.BytesB64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(wire.BytesB64)
+		if err != nil {
+			return err
+		}
+		t.Bytes = decoded
+	}
+	t.BytesB64 = wire.BytesB64
+	t.LeaseID = wire.LeaseID
+	return nil
 }
 
 // BracketedPolicy is the enum representation of TerminalPaste.Bracketed.

@@ -148,8 +148,9 @@ func init() {
 		{TerminalPaste, CategoryIntent, []addressing.Scheme{addressing.SchemeSession}, "Paste text with bracketed-paste policy."},
 		{TerminalWriteBytes, CategoryIntent, []addressing.Scheme{addressing.SchemeSession}, "Raw byte escape hatch (capability-gated)."},
 
-		// Terminal observations (target = session).
-		{TerminalOutput, CategoryEvent, []addressing.Scheme{addressing.SchemeSession}, "PTY output frame."},
+		// Terminal observations. Room streams fan in session output and retarget
+		// terminal.output to room:<id> while preserving session_id in the body.
+		{TerminalOutput, CategoryEvent, []addressing.Scheme{addressing.SchemeSession, addressing.SchemeRoom}, "PTY output frame."},
 		{TerminalModeChanged, CategoryEvent, []addressing.Scheme{addressing.SchemeSession}, "Terminal mode toggled (bracketed paste, alt screen, ...)."},
 		{TerminalScreenSnapshot, CategoryEvent, []addressing.Scheme{addressing.SchemeSession}, "Snapshot of the current screen model."},
 		{TerminalReady, CategoryEvent, []addressing.Scheme{addressing.SchemeSession}, "Terminal readiness state changed."},
