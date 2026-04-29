@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -567,21 +568,21 @@ func validateHelperSourceCapabilities(language, source string, policy ToolCapabi
 	lowerSource := strings.ToLower(source)
 	if strings.TrimSpace(policy.Network) == "none" {
 		for _, marker := range helperCapabilityNetworkMarkers(language) {
-			if strings.Contains(lowerSource, strings.ToLower(marker)) {
+			if helperSourceContainsCapabilityMarker(language, lowerSource, marker) {
 				violations = append(violations, "network capability is none but source references "+marker)
 			}
 		}
 	}
 	if strings.TrimSpace(policy.Filesystem) == "none" {
 		for _, marker := range helperCapabilityFilesystemMarkers(language) {
-			if strings.Contains(lowerSource, strings.ToLower(marker)) {
+			if helperSourceContainsCapabilityMarker(language, lowerSource, marker) {
 				violations = append(violations, "filesystem capability is none but source references "+marker)
 			}
 		}
 	}
 	if strings.TrimSpace(policy.Process) == "none" {
 		for _, marker := range helperCapabilityProcessMarkers(language) {
-			if strings.Contains(lowerSource, strings.ToLower(marker)) {
+			if helperSourceContainsCapabilityMarker(language, lowerSource, marker) {
 				violations = append(violations, "process capability is none but source references "+marker)
 			}
 		}
@@ -590,6 +591,24 @@ func validateHelperSourceCapabilities(language, source string, policy ToolCapabi
 		return fmt.Errorf("helper capability policy violation: %s", strings.Join(violations, "; "))
 	}
 	return nil
+}
+
+func helperSourceContainsCapabilityMarker(language, lowerSource, marker string) bool {
+	marker = strings.ToLower(strings.TrimSpace(marker))
+	if marker == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(language)) {
+	case HelperLanguagePython:
+		return strings.Contains(lowerSource, marker)
+	default:
+		switch marker {
+		case "os.", "ioutil.", "filepath.", "exec.", "syscall.", "unsafe.":
+			return regexp.MustCompile(`(^|[^a-z0-9_])`+regexp.QuoteMeta(marker)).FindStringIndex(lowerSource) != nil
+		default:
+			return strings.Contains(lowerSource, marker)
+		}
+	}
 }
 
 func helperCapabilityNetworkMarkers(language string) []string {

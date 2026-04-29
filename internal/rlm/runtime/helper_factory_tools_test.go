@@ -1617,6 +1617,20 @@ def solve(input):
 	}
 }
 
+func TestValidateHelperSourceCapabilitiesDoesNotFlagGoIdentifierSuffix(t *testing.T) {
+	t.Parallel()
+
+	source := `func Solve(input map[string]any) map[string]any {
+		pos := []int{1, 2, 3}
+		next := append([]int(nil), pos...)
+		return map[string]any{"ok": true, "answer": next}
+	}`
+	policy := ToolCapabilityPolicy{Network: "none", Filesystem: "none", Process: "none"}
+	if err := validateHelperSourceCapabilities(HelperLanguageGo, source, policy); err != nil {
+		t.Fatalf("validateHelperSourceCapabilities() error=%v", err)
+	}
+}
+
 func TestHelperFactoryToolsUsesConfiguredLanguageForPresetSource(t *testing.T) {
 	t.Parallel()
 

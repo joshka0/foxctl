@@ -420,7 +420,6 @@ func NormalizeBraidGraphForPolicy(g BraidGraph, policy string, maxNodes int) Bra
 		}
 		g.Nodes[idx].HelperPolicy = normalizeBraidNodeHelperPolicy(g.Nodes[idx].HelperPolicy)
 		g.Nodes[idx].ScaffoldID = normalizeBraidNodeScaffoldID(g.Nodes[idx].ScaffoldClass, g.Nodes[idx].ScaffoldID)
-		normalizeInvalidSolveScaffoldToExplicitDAG(&g.Nodes[idx])
 	}
 	if strings.TrimSpace(policy) != BraidGraphPolicyLongCoTController {
 		return g
@@ -1533,45 +1532,6 @@ func normalizeBraidGraph(g BraidGraph) BraidGraph {
 		g.Nodes[idx].DependsOn = trimmedDeps
 	}
 	return g
-}
-
-func normalizeInvalidSolveScaffoldToExplicitDAG(node *BraidNode) {
-	if node == nil || !isBraidSolveKind(node.Kind) {
-		return
-	}
-	if strings.TrimSpace(node.ScaffoldClass) == "" || strings.TrimSpace(node.ScaffoldID) == "" || len(node.InputSchema) == 0 {
-		return
-	}
-	if !validBraidNodeScaffoldClass(node.ScaffoldClass) || !validBraidNodeScaffoldPair(node.ScaffoldClass, node.ScaffoldID) {
-		return
-	}
-	input := cloneMapAny(node.InputSchema)
-	input["scaffold_class"] = strings.TrimSpace(node.ScaffoldClass)
-	input["scaffold_id"] = strings.TrimSpace(node.ScaffoldID)
-	if braidScaffoldInputMatches(node.ScaffoldClass, node.ScaffoldID, input) {
-		return
-	}
-	originalClass := strings.TrimSpace(node.ScaffoldClass)
-	originalID := strings.TrimSpace(node.ScaffoldID)
-	originalInput := cloneMapAny(node.InputSchema)
-	prompt := strings.TrimSpace(stringFromAny(originalInput["prompt"]))
-	if prompt == "" {
-		prompt = strings.TrimSpace(node.Question)
-	}
-	if prompt == "" {
-		prompt = "solve explicit dependency task"
-	}
-	node.Archetype = BraidScaffoldClassExplicitDAG
-	node.ScaffoldClass = BraidScaffoldClassExplicitDAG
-	node.ScaffoldID = BraidScaffoldIDSearchBacktrackV1
-	node.InputSchema = map[string]any{
-		"prompt": prompt,
-		"declared_scaffold": map[string]any{
-			"scaffold_class": originalClass,
-			"scaffold_id":    originalID,
-			"input_schema":   originalInput,
-		},
-	}
 }
 
 func clampString(s string, maxLen int) string {

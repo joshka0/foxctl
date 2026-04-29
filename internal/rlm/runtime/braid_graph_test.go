@@ -5541,7 +5541,7 @@ func TestValidateBraidGraphScaffoldContractRejectsInvalidTypedInput(t *testing.T
 	}
 }
 
-func TestNormalizeBraidGraphFallsBackInvalidSolveScaffoldToExplicitDAG(t *testing.T) {
+func TestNormalizeBraidGraphPreservesInvalidTypedScaffoldForValidation(t *testing.T) {
 	t.Parallel()
 
 	graph := BraidGraph{
@@ -5563,17 +5563,18 @@ func TestNormalizeBraidGraphFallsBackInvalidSolveScaffoldToExplicitDAG(t *testin
 
 	normalized := NormalizeBraidGraphForPolicy(graph, BraidGraphPolicyLongCoTController, 8)
 	node := normalized.Nodes[0]
-	if node.ScaffoldClass != BraidScaffoldClassExplicitDAG || node.ScaffoldID != BraidScaffoldIDSearchBacktrackV1 {
-		t.Fatalf("scaffold=%s/%s, want explicit_dag/search_backtrack_v1", node.ScaffoldClass, node.ScaffoldID)
+	if node.ScaffoldClass != BraidScaffoldClassNumericDP || node.ScaffoldID != BraidScaffoldIDRecurrenceTableV1 {
+		t.Fatalf("scaffold=%s/%s, want numeric_dp/recurrence_table_v1", node.ScaffoldClass, node.ScaffoldID)
 	}
-	if node.Archetype != BraidScaffoldClassExplicitDAG {
-		t.Fatalf("archetype=%q, want explicit_dag", node.Archetype)
+	if node.Archetype != BraidScaffoldClassNumericDP {
+		t.Fatalf("archetype=%q, want numeric_dp", node.Archetype)
 	}
-	if _, ok := node.InputSchema["declared_scaffold"].(map[string]any); !ok {
-		t.Fatalf("declared_scaffold missing from input_schema: %#v", node.InputSchema)
+	err := ValidateBraidGraphScaffoldContract(normalized)
+	if err == nil {
+		t.Fatal("ValidateBraidGraphScaffoldContract() succeeded after invalid scaffold normalization")
 	}
-	if err := ValidateBraidGraphScaffoldContract(normalized); err != nil {
-		t.Fatalf("normalized scaffold contract rejected: %v", err)
+	if _, ok := IsInvalidScaffoldInput(err); !ok {
+		t.Fatalf("error=%T %v, want InvalidScaffoldInputError", err, err)
 	}
 }
 
