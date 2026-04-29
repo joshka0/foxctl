@@ -1534,6 +1534,26 @@ func normalizeBraidGraph(g BraidGraph) BraidGraph {
 	return g
 }
 
+func cloneBraidGraph(g BraidGraph) BraidGraph {
+	out := g
+	if len(g.Nodes) > 0 {
+		out.Nodes = make([]BraidNode, len(g.Nodes))
+		for idx, node := range g.Nodes {
+			out.Nodes[idx] = cloneBraidNode(node)
+		}
+	}
+	return out
+}
+
+func cloneBraidNode(node BraidNode) BraidNode {
+	out := node
+	if len(node.DependsOn) > 0 {
+		out.DependsOn = append([]string(nil), node.DependsOn...)
+	}
+	out.InputSchema = cloneMapAny(node.InputSchema)
+	return out
+}
+
 func clampString(s string, maxLen int) string {
 	if maxLen <= 0 || len(s) <= maxLen {
 		return s

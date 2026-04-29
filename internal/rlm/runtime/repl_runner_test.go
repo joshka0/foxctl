@@ -1717,6 +1717,46 @@ func TestBraidGraphRewriteSummaryReportsNormalizationChanges(t *testing.T) {
 	}
 }
 
+func TestBraidGraphRuntimeSplitRecordsGraphRewrite(t *testing.T) {
+	t.Parallel()
+
+	graph := BraidGraph{
+		Version: 1,
+		Nodes: []BraidNode{{
+			ID:            "n_solve",
+			Kind:          "solve",
+			Question:      "Solve typed symbolic trace.",
+			HelperPolicy:  BraidNodeHelperPolicyPreferred,
+			Archetype:     BraidScaffoldClassSymbolicTrace,
+			ScaffoldClass: BraidScaffoldClassSymbolicTrace,
+			ScaffoldID:    BraidScaffoldIDTypeInferenceV1,
+			InputSchema:   map[string]any{"prompt": "trace bindings"},
+		}},
+		FinalNode: "n_solve",
+	}
+	recorder := NewRecorder()
+	before := cloneBraidGraph(graph)
+	applyBraidGraphSplits(&graph, &replToolExecutor{recorder: recorder}, "braid")
+	recordBraidGraphRewriteIfChanged(recorder, REPLRunnerPhase{Name: "braid"}, "graph_runtime_split", before, graph)
+
+	var saw bool
+	for _, event := range recorder.Events() {
+		if event.Braid == nil || event.Braid.Status != "graph_runtime_split" {
+			continue
+		}
+		saw = true
+		if !strings.Contains(event.Braid.Message, "nodes:1->") {
+			t.Fatalf("rewrite message=%q, want node-count delta", event.Braid.Message)
+		}
+		if !strings.Contains(event.Braid.Message, "node_ids:n_solve->") {
+			t.Fatalf("rewrite message=%q, want node id delta", event.Braid.Message)
+		}
+	}
+	if !saw {
+		t.Fatal("missing graph_runtime_split braid event")
+	}
+}
+
 func TestRenderBraidFinalHandoffPreservesLongVerifiedAnswer(t *testing.T) {
 	t.Parallel()
 

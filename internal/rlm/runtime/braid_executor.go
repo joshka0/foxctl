@@ -133,7 +133,11 @@ func executePhaseBraidGraph(
 	helperBudgets := make(helperBudgetByNode, len(graph.Nodes))
 	// Apply structural splits to the graph before execution so that
 	// readyBraidNodes operates on the decomposed graph, not the original.
+	beforeRuntimeSplits := cloneBraidGraph(*graph)
 	applyBraidGraphSplits(graph, toolExec, phaseName)
+	if toolExec != nil {
+		recordBraidGraphRewriteIfChanged(toolExec.recorder, phase, "graph_runtime_split", beforeRuntimeSplits, *graph)
+	}
 	if err := validateBraidGraphAfterRuntimeRewrite(phase, *graph); err != nil {
 		return fmt.Errorf("rlm repl runner phase %q: rewritten braid graph invalid: %w", phaseName, err)
 	}
