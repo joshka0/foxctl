@@ -58,6 +58,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS foxprox_room_members_active_session_uniq
 	ON foxprox_room_members(session_id)
 	WHERE left_at = '';
 
+-- Enforce one active membership row per agent in a room. This matches the
+-- in-memory store invariant used by JoinRoom.
+CREATE UNIQUE INDEX IF NOT EXISTS foxprox_room_members_active_room_agent_uniq
+	ON foxprox_room_members(room_id, agent_id)
+	WHERE left_at = '';
+
 CREATE TABLE IF NOT EXISTS foxprox_messages (
 	id         TEXT PRIMARY KEY,
 	room_id    TEXT NOT NULL,

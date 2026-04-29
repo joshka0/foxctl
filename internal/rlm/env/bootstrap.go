@@ -10,13 +10,16 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/repoquery"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/rlm"
+	ctxengstore "github.com/joshka0/foxctl/internal/storage/contextengine"
 	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/storage/tasks"
 	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
@@ -40,7 +43,9 @@ type BootstrapConfig struct {
 
 // Bootstrapper builds a typed read-only RLM environment from current foxctl state.
 type Bootstrapper struct {
-	cfg BootstrapConfig
+	cfg       BootstrapConfig
+	ceStore   ctxengstore.Store
+	taskStore tasks.Store
 }
 
 // NewBootstrapper creates a new environment bootstrapper.
@@ -60,10 +65,59 @@ func NewBootstrapper(cfg BootstrapConfig) *Bootstrapper {
 	return &Bootstrapper{cfg: cfg}
 }
 
+// ContextEngineStore returns the lazily-opened contextengine SQLite store.
+// Returns nil before Build has been called or if the store could not be opened.
+// Lifetime is owned by the Bootstrapper; call Close to release it.
+func (b *Bootstrapper) ContextEngineStore() ctxengstore.Store {
+	return b.ceStore
+}
+
+// TaskStore returns the lazily-opened tasks SQLite store. Returns nil before
+// Build has been called or if the store could not be opened. Lifetime is
+// owned by the Bootstrapper; call Close to release it.
+func (b *Bootstrapper) TaskStore() tasks.Store {
+	return b.taskStore
+}
+
+// Close releases bootstrapper-owned resources. Safe to call multiple times.
+func (b *Bootstrapper) Close() error {
+	if b == nil {
+		return nil
+	}
+	var firstErr error
+	if b.ceStore != nil {
+		if err := b.ceStore.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		b.ceStore = nil
+	}
+	if b.taskStore != nil {
+		if err := b.taskStore.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		b.taskStore = nil
+	}
+	return firstErr
+}
+
 // Build prepares an RLM environment from ACA, repo index, vault index, and optional companion state.
 func (b *Bootstrapper) Build(ctx context.Context, task rlm.Task) (rlm.Environment, error) {
 	env := rlm.Environment{
 		Tools: DefaultTools(),
+	}
+
+	// Open the contextengine store (best-effort; errors do not fail bootstrap).
+	if b.ceStore == nil && strings.TrimSpace(b.cfg.AppConfig.Storage.Root) != "" {
+		if store, err := ctxengstore.Open(ctx, b.cfg.AppConfig.Storage.Root); err == nil {
+			b.ceStore = store
+		}
+	}
+
+	// Open the tasks store (best-effort; errors do not fail bootstrap).
+	if b.taskStore == nil && strings.TrimSpace(b.cfg.AppConfig.Storage.Root) != "" {
+		if store, err := tasks.Open(ctx, b.cfg.AppConfig.Storage.Root); err == nil {
+			b.taskStore = store
+		}
 	}
 
 	workspaceRoot := ws.Normalize(strings.TrimSpace(task.WorkspaceRoot))
@@ -230,7 +284,15 @@ func latestHandoff(dir string) (map[string]any, []string, error) {
 			"summary":    handoff.Summary,
 			"created_at": handoff.CreatedAt,
 		}
-		return payload, append([]string(nil), handoff.EvidenceRefs...), nil
+		refs := make([]string, 0, len(handoff.EvidenceRefs))
+		for _, ref := range handoff.EvidenceRefs {
+			if s := contextengine.FormatEvidenceRef(ref); s != "" {
+				refs = append(refs, s)
+			} else {
+				refs = append(refs, ref.Ref)
+			}
+		}
+		return payload, refs, nil
 	}
 	return nil, nil, nil
 }

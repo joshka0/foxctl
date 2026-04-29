@@ -10,6 +10,7 @@ import (
 	"github.com/joshka0/foxctl/internal/agent/optimization"
 	"github.com/joshka0/foxctl/internal/domain/agent"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/rlm/optdata"
 	storagents "github.com/joshka0/foxctl/internal/storage/agents"
 	"github.com/spf13/cobra"
 )
@@ -89,6 +90,11 @@ func TestNewOptimizeCommandIncludesPromptCommands(t *testing.T) {
 	if promptCmd == nil {
 		t.Fatal("missing prompt command")
 	}
+	for _, flagName := range []string{"rlm-trace-file", "rlm-trace-component"} {
+		if flag := promptCmd.Flags().Lookup(flagName); flag == nil {
+			t.Fatalf("missing prompt flag %q", flagName)
+		}
+	}
 	subcommands := map[string]bool{"propose": false, "cycle": false}
 	for _, child := range promptCmd.Commands() {
 		if _, ok := subcommands[child.Name()]; ok {
@@ -99,6 +105,65 @@ func TestNewOptimizeCommandIncludesPromptCommands(t *testing.T) {
 		if !found {
 			t.Fatalf("missing prompt subcommand %q", name)
 		}
+	}
+	var proposeCmd *cobra.Command
+	for _, child := range promptCmd.Commands() {
+		if child.Name() == "propose" {
+			proposeCmd = child
+			break
+		}
+	}
+	if proposeCmd == nil {
+		t.Fatal("missing propose command")
+	}
+	if flag := proposeCmd.Flags().Lookup("rlm-trace-file"); flag == nil {
+		t.Fatal("missing propose flag rlm-trace-file")
+	}
+}
+
+func TestLoadRLMTracePreferenceExamples(t *testing.T) {
+	t.Parallel()
+
+	builder := optdata.NewRecordBuilder(optdata.WithBuilderNow(func() time.Time {
+		return time.Date(2026, time.April, 23, 10, 0, 0, 0, time.UTC)
+	}))
+	path := filepath.Join(t.TempDir(), "rlm-trace.jsonl")
+	records := []optdata.TrajectoryRecord{
+		builder.Build(optdata.BuildInput{
+			RecordID: "bad",
+			Prompt: optdata.PromptComponents{
+				User:   "solve 2+2",
+				System: "Use tools loosely.",
+			},
+			Execution: optdata.ExecutionMetadata{Runtime: "rlm", Mode: "repl", Success: false, ErrorMessage: "bad format"},
+			Metrics:   []optdata.MetricFeedback{{Name: "success", Value: 0}},
+		}),
+		builder.Build(optdata.BuildInput{
+			RecordID: "good",
+			Prompt: optdata.PromptComponents{
+				User:   "solve 2+2",
+				System: "Use tools, then return only solution = ...",
+			},
+			Execution: optdata.ExecutionMetadata{Runtime: "rlm", Mode: "repl", Success: true},
+			Metrics:   []optdata.MetricFeedback{{Name: "success", Value: 1}},
+		}),
+	}
+	if err := optdata.AppendTrajectoryRecordsFile(path, records); err != nil {
+		t.Fatalf("AppendTrajectoryRecordsFile: %v", err)
+	}
+
+	examples, err := loadRLMTracePreferenceExamples(path, "rlm", "gepa", "system", "local_lmstudio")
+	if err != nil {
+		t.Fatalf("loadRLMTracePreferenceExamples: %v", err)
+	}
+	if len(examples) != 1 {
+		t.Fatalf("len(examples)=%d want 1", len(examples))
+	}
+	if examples[0].Chosen.VariantID != "good" {
+		t.Fatalf("chosen=%q want good", examples[0].Chosen.VariantID)
+	}
+	if examples[0].Rejected.VariantID != "bad" {
+		t.Fatalf("rejected=%q want bad", examples[0].Rejected.VariantID)
 	}
 }
 

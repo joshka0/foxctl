@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
@@ -42,8 +43,8 @@ func newCaptureCommand() *cobra.Command {
 				Phase:               defaultString(phase, "work"),
 				Outcome:             defaultString(outcome, "partial"),
 				Summary:             strings.TrimSpace(summary),
-				EvidenceRefs:        evidenceRefs,
-				FilesTouched:        filesTouched,
+				EvidenceRefs:        parseEvidenceRefs(evidenceRefs),
+				FileRefs:            parseEvidenceRefs(filesTouched),
 				Observations:        observations,
 				Tensions:            tensions,
 				NextActions:         nextActions,
@@ -112,7 +113,7 @@ func newObserveCommand() *cobra.Command {
 				Count:        count,
 				Project:      strings.TrimSpace(project),
 				Area:         strings.TrimSpace(area),
-				EvidenceRefs: evidenceRefs,
+				EvidenceRefs: parseEvidenceRefs(evidenceRefs),
 			}
 			path := ""
 			summaryText := "Recorded observation."
@@ -171,7 +172,7 @@ func newTensionCommand() *cobra.Command {
 				Statement:   strings.TrimSpace(statement),
 				Impact:      defaultString(impact, "medium"),
 				Status:      defaultString(status, "open"),
-				RelatedRefs: relatedRefs,
+				RelatedRefs: parseEvidenceRefs(relatedRefs),
 			}
 			path := ""
 			summaryText := "Recorded tension."
@@ -222,6 +223,21 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func parseEvidenceRefs(raw []string) []contextengine.EvidenceRef {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]contextengine.EvidenceRef, 0, len(raw))
+	for _, s := range raw {
+		ref, err := contextengine.ParseEvidenceRef(strings.TrimSpace(s))
+		if err != nil {
+			continue
+		}
+		out = append(out, ref)
+	}
+	return out
 }
 
 func init() {

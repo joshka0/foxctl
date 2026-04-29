@@ -38,6 +38,8 @@ type VerifyRow struct {
 
 type OfficialResponse struct {
 	QuestionID   string         `json:"question_id"`
+	Domain       string         `json:"domain,omitempty"`
+	Difficulty   string         `json:"difficulty,omitempty"`
 	Successful   bool           `json:"successful"`
 	ResponseText string         `json:"response_text"`
 	Model        string         `json:"model,omitempty"`
@@ -56,6 +58,10 @@ type Verifier interface {
 // OfficialResponseForAttempt converts an attempt into the JSONL shape expected
 // by the official LongCoT verifier harness.
 func OfficialResponseForAttempt(attempt Attempt) OfficialResponse {
+	return OfficialResponseForAttemptQuestion(attempt, Question{})
+}
+
+func OfficialResponseForAttemptQuestion(attempt Attempt, question Question) OfficialResponse {
 	usage := map[string]any{}
 	if attempt.Usage.InputTokens != 0 {
 		usage["prompt_tokens"] = attempt.Usage.InputTokens
@@ -74,6 +80,8 @@ func OfficialResponseForAttempt(attempt Attempt) OfficialResponse {
 	}
 	return OfficialResponse{
 		QuestionID:   attempt.QuestionID,
+		Domain:       question.Domain,
+		Difficulty:   question.Difficulty,
 		Successful:   attempt.Status == AttemptStatusOK && !attempt.LeakageFlags.Leaked(),
 		ResponseText: attempt.ResponseText,
 		Model:        attempt.Model,

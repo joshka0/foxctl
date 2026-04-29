@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/rlm"
 	rlmenv "github.com/joshka0/foxctl/internal/rlm/env"
+	rlmruntime "github.com/joshka0/foxctl/internal/rlm/runtime"
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/spf13/cobra"
 )
@@ -43,24 +46,37 @@ func newRLMRunCommand() *cobra.Command {
 	var toolProfile string
 	var routeProfile string
 	var planMode string
+	var sandboxKind string
+	var ephemeralSkills bool
+	var extractSolution bool
+	var optTraceOut string
+	var trajectoryOut string
 
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Bootstrap and execute the experimental read-only RLM runtime",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			inputPrompt := strings.TrimSpace(prompt)
+			traceOutPath, err := resolveRLMTraceOutputPath(optTraceOut, trajectoryOut)
+			if err != nil {
+				return err
+			}
 			cfg, err := loadConfig(cmd.Context())
 			if err != nil {
 				return err
 			}
 			task := rlm.Task{
-				Prompt:        strings.TrimSpace(prompt),
+				Prompt:        inputPrompt,
 				WorkspaceID:   "",
 				WorkspaceRoot: resolveContextWorkspace(workspacePath),
 				MaxDepth:      maxDepth,
 				MaxIterations: maxIterations,
 				MaxSubcalls:   maxSubcalls,
 			}
-			companionDB, companionClose, _ := openRLMCompanionDB(cmd.Context(), cfg)
+			companionDB, companionClose, err := openRLMCompanionDB(cmd.Context(), cfg)
+			if err != nil {
+				return err
+			}
 			if companionClose != nil {
 				defer func() { _ = companionClose() }()
 			}
@@ -73,41 +89,94 @@ func newRLMRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			env.Tools = rlmenv.FilterTools(env.Tools, toolProfile)
+			defer func() { _ = bootstrapper.Close() }()
+			ceStore := bootstrapper.ContextEngineStore()
+			taskStore := bootstrapper.TaskStore()
+			spec, err := rlm.ResolveRunSpec(rlm.ResolveRunSpecInput{
+				Prompt:               task.Prompt,
+				RequestedRoute:       rlm.RouteProfile(routeProfile),
+				RequestedPlanMode:    rlm.PlanMode(planMode),
+				RequestedToolProfile: toolProfile,
+				AvailableTools:       env.Tools,
+			})
+			if err != nil {
+				return err
+			}
+			env.Tools = append([]rlm.Tool(nil), spec.ToolPolicy.Tools...)
+			traceTask, traceEnv := applyRLMScoutRole(task, env)
 			var runRecursive func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)
 			runRecursive = func(ctx context.Context, currentTask rlm.Task, currentEnv rlm.Environment) (rlm.Result, error) {
 				currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 				currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 				currentAdapter.SetSubcall(runRecursive)
-				runner := chooseRLMRunner(executor, currentAdapter, currentTask, currentEnv, llmProvider, llmModel, llmBaseURL, llmAPIKey, llmTimeout, requireToolUse, routeProfile, planMode)
+				currentAdapter.SetContextEngineStore(ceStore)
+				currentAdapter.SetTaskStore(taskStore)
+				runner := chooseRLMRunner(executor, currentAdapter, currentTask, currentEnv, llmProvider, llmModel, llmBaseURL, llmAPIKey, llmTimeout, requireToolUse, routeProfile, planMode, sandboxKind, ephemeralSkills, extractSolution)
 				return runner.Run(ctx, currentTask, currentEnv)
 			}
-			result, err := runRecursive(cmd.Context(), task, env)
-			if err != nil {
-				return err
+			mode := normalizedRLMExecutor(executor)
+			result, runErr := runRecursive(cmd.Context(), task, env)
+			if traceOutPath != "" {
+				traceRecord := buildRLMOptimizerTraceRecord(rlmOptimizerTraceInput{
+					Executor:        strings.TrimSpace(executor),
+					Mode:            mode,
+					ToolProfile:     string(spec.ToolPolicy.Profile),
+					RouteProfile:    string(spec.RouteProfile),
+					PlanMode:        string(spec.PlanMode),
+					SandboxKind:     strings.TrimSpace(sandboxKind),
+					EphemeralSkills: ephemeralSkills,
+					ExtractSolution: extractSolution,
+					LLMProvider:     strings.TrimSpace(llmProvider),
+					LLMModel:        strings.TrimSpace(llmModel),
+					LLMBaseURL:      strings.TrimSpace(llmBaseURL),
+					InputPrompt:     inputPrompt,
+					Task:            traceTask,
+					Environment:     traceEnv,
+					Result:          result,
+					RunErr:          runErr,
+				})
+				if err := appendRLMOptimizerTraceRecord(traceOutPath, traceRecord); err != nil {
+					return err
+				}
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("rlm/run", map[string]any{
+			if runErr != nil {
+				return runErr
+			}
+			responseData := map[string]any{
 				"task":        task,
 				"environment": env,
 				"result":      result,
-				"mode":        normalizedRLMExecutor(executor),
-			}, envelope.WithMeta(envelope.Meta{Source: "cli", Workspace: task.WorkspaceRoot})))
+				"mode":        mode,
+				"run_spec":    spec,
+			}
+			if traceOutPath != "" {
+				responseData["optimizer_trace"] = map[string]any{
+					"path":   traceOutPath,
+					"format": "jsonl",
+				}
+			}
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("rlm/run", responseData, envelope.WithMeta(envelope.Meta{Source: "cli", Workspace: task.WorkspaceRoot})))
 		},
 	}
 
 	cmd.Flags().StringVar(&prompt, "prompt", "", "Prompt for the RLM runtime")
 	cmd.Flags().StringVar(&workspacePath, "workspace", "", "Workspace path (default: current workspace)")
 	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Optional vault path for knowledge-plane bootstrap")
-	cmd.Flags().StringVar(&executor, "executor", "inspect", "Executor mode: inspect or llm")
+	cmd.Flags().StringVar(&executor, "executor", "inspect", "Executor mode: inspect, llm, or repl")
 	cmd.Flags().StringVar(&llmProvider, "llm-provider", "", "LLM provider override (e.g. lmstudio, openai, openrouter)")
 	cmd.Flags().StringVar(&llmModel, "llm-model", "", "LLM model override")
 	cmd.Flags().StringVar(&llmBaseURL, "llm-base-url", "", "LLM base URL override")
 	cmd.Flags().StringVar(&llmAPIKey, "llm-api-key", "", "LLM API key override")
 	cmd.Flags().DurationVar(&llmTimeout, "llm-timeout", 0, "LLM timeout override")
 	cmd.Flags().BoolVar(&requireToolUse, "require-tool-use", true, "Require the LLM executor to make at least one tool call before answering")
-	cmd.Flags().StringVar(&toolProfile, "tool-profile", rlmenv.ToolProfileDefault, "Experimental RLM tool profile: default or code-intel")
+	cmd.Flags().StringVar(&toolProfile, "tool-profile", rlmenv.ToolProfileDefault, "Experimental RLM tool profile")
 	cmd.Flags().StringVar(&routeProfile, "route-profile", string(rlm.RouteProfileAuto), "Experimental RLM route profile: auto, code_retrieval, memory_recall, mixed, or evidence_audit")
-	cmd.Flags().StringVar(&planMode, "plan-mode", string(rlm.PlanModeFree), "Experimental planning mode: free, guided, staged, or hard")
+	cmd.Flags().StringVar(&planMode, "plan-mode", string(rlm.PlanModeFree), "Experimental planning mode: free, staged, or lambda-retrieval")
+	cmd.Flags().StringVar(&sandboxKind, "sandbox", string(rlmruntime.SandboxKindPython), "Scratch REPL sandbox for --executor repl: python or yaegi")
+	cmd.Flags().BoolVar(&ephemeralSkills, "ephemeral-skills", false, "Enable runtime-managed ephemeral helper solve support for --executor repl")
+	cmd.Flags().BoolVar(&extractSolution, "extract-solution", false, "For --executor repl, return only the final solution = ... line when present")
+	cmd.Flags().StringVar(&optTraceOut, "opt-trace-out", "", "Append one optimizer-ready JSONL trace record per run")
+	cmd.Flags().StringVar(&trajectoryOut, "trajectory-out", "", "Alias for --opt-trace-out (append optimizer-ready JSONL trace records)")
 	cmd.Flags().IntVar(&maxDepth, "max-depth", 1, "Maximum recursion depth")
 	cmd.Flags().IntVar(&maxIterations, "max-iterations", 8, "Maximum root iterations")
 	cmd.Flags().IntVar(&maxSubcalls, "max-subcalls", 8, "Maximum subcalls")
@@ -119,6 +188,8 @@ func normalizedRLMExecutor(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "llm", "lmstudio":
 		return "llm"
+	case "repl", "rlm-repl":
+		return "repl"
 	default:
 		return "inspect"
 	}
@@ -134,10 +205,30 @@ func chooseRLMRunner(
 	requireToolUse bool,
 	routeProfile string,
 	planMode string,
+	sandboxKind string,
+	ephemeralSkills bool,
+	extractSolution bool,
 ) rlm.Runner {
 	switch strings.ToLower(strings.TrimSpace(executor)) {
 	case "llm", "lmstudio":
 		pm := rlm.NormalizePlanMode(planMode)
+		if pm == rlm.PlanModeLambda {
+			llmCfg := rlm.LLMConfig{
+				Provider: firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
+				Model:    firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
+				BaseURL:  firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
+				APIKey:   firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
+				Timeout:  llmTimeout,
+			}
+			return rlm.LambdaRunner{
+				Tools: adapter,
+				Config: rlm.LambdaConfig{
+					LLM:                 llmCfg,
+					EphemeralSkills:     ephemeralSkills,
+					ExtractSolutionLine: extractSolution,
+				},
+			}
+		}
 		return rlm.LLMRunner{
 			Tools: adapter,
 			Config: rlm.LLMConfig{
@@ -152,8 +243,115 @@ func chooseRLMRunner(
 				PlanMode:       pm,
 			},
 		}
+	case "repl", "rlm-repl":
+		timeout := llmTimeout
+		if timeout <= 0 {
+			timeout = 90 * time.Second
+		}
+		kind := rlmruntime.NormalizeSandboxKind(rlmruntime.SandboxKind(sandboxKind))
+		recursionEnabled := task.MaxDepth > 0 && task.MaxSubcalls > 0
+		helperFactory := &rlmruntime.HelperFactoryConfig{
+			Attempts:            3,
+			ExtractSolutionLine: extractSolution,
+		}
+		return &rlmruntime.REPLRunner{
+			Config: rlmruntime.REPLRunnerConfig{
+				LLM: rlm.LLMConfig{
+					Provider:       firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
+					Model:          firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
+					BaseURL:        firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
+					APIKey:         firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
+					Timeout:        timeout,
+					MaxIterations:  task.MaxIterations,
+					RequireToolUse: requireToolUse,
+				},
+				Budget: rlmruntime.BudgetConfig{
+					MaxDepth:       task.MaxDepth,
+					MaxIterations:  task.MaxIterations,
+					MaxSubcalls:    task.MaxSubcalls,
+					MaxREPLCalls:   task.MaxIterations,
+					MaxHelperCalls: task.MaxIterations,
+					MaxDuration:    timeout,
+				},
+				Sandbox:         rlmruntime.SandboxConfig{Kind: kind},
+				SystemPrompt:    buildRLMREPLCLISystemPromptForPolicy(kind, true, recursionEnabled),
+				AsyncRecursion:  true,
+				RecursionPolicy: rlmruntime.RecursionPolicyOptional,
+				RLMQueryFactory: newRLMREPLQueryFactory(adapter),
+				InitialState: map[string]any{
+					"official_prompt": task.Prompt,
+				},
+				EphemeralSkills:     false,
+				HelperFactory:       helperFactory,
+				ExtractSolutionLine: extractSolution,
+			},
+		}
 	default:
 		return rlm.InspectRunner{Tools: adapter}
+	}
+}
+
+func buildRLMREPLCLISystemPromptForPolicy(kind rlmruntime.SandboxKind, helperEnabled bool, recursionEnabled bool) string {
+	var b strings.Builder
+	b.WriteString(rlmruntime.BuildREPLSystemPrompt())
+	b.WriteString("\n\nRuntime protocol for this run:\n")
+	b.WriteString("- Compute locally in the scratch REPL first.\n")
+	if helperEnabled {
+		b.WriteString("- Use ephemeral_helper_solve when a short-lived helper improves parsing, simulation, or verification.\n")
+		b.WriteString("- Treat ephemeral_helper_solve as a helper shortcut only; it is not recursive execution.\n")
+		b.WriteString("- If helper output returns ok=true, synthesize the final answer from that output.\n")
+	}
+	if recursionEnabled {
+		b.WriteString("- For child decomposition, call rlm_query, then call rlm_wait({}) before finalizing.\n")
+		b.WriteString("- Use rlm_result only to re-read one child result when needed.\n")
+		b.WriteString("- Follow this order: compute locally, use helper when useful, query child, wait, then synthesize.\n")
+	} else {
+		b.WriteString("- Child recursion tools are not enabled in this run; solve directly with the scratch REPL and helper shortcut.\n")
+	}
+	if rlmruntime.NormalizeSandboxKind(kind) == rlmruntime.SandboxKindYaegi {
+		b.WriteString("\nThe scratch REPL is Go, but helper and recursion tools are separate model tools, not Go functions inside go_repl.\n")
+	}
+	return b.String()
+}
+
+func newRLMREPLQueryFactory(adapter *rlmenv.ReadOnlyAdapter) func(parentTask rlm.Task, env rlm.Environment) rlmruntime.RLMQueryRunFunc {
+	if adapter == nil {
+		return nil
+	}
+	return func(_ rlm.Task, _ rlm.Environment) rlmruntime.RLMQueryRunFunc {
+		return func(ctx context.Context, task rlm.Task, env rlm.Environment) (rlm.Result, error) {
+			args, err := json.Marshal(map[string]any{
+				"prompt":           task.Prompt,
+				"role":             task.Role,
+				"repo_handles":     env.RepoHandles,
+				"vault_handles":    env.VaultHandles,
+				"scene_handles":    env.SceneHandles,
+				"artifact_handles": env.ArtifactHandles,
+				"max_depth":        task.MaxDepth,
+				"max_iterations":   task.MaxIterations,
+				"max_subcalls":     task.MaxSubcalls,
+			})
+			if err != nil {
+				return rlm.Result{}, err
+			}
+			out, err := adapter.ExecuteInternal(ctx, "subcall", args)
+			if err != nil {
+				return rlm.Result{}, err
+			}
+			rawResult, ok := out["result"]
+			if !ok {
+				return rlm.Result{}, fmt.Errorf("subcall returned no result payload")
+			}
+			body, err := json.Marshal(rawResult)
+			if err != nil {
+				return rlm.Result{}, err
+			}
+			var result rlm.Result
+			if err := json.Unmarshal(body, &result); err != nil {
+				return rlm.Result{}, err
+			}
+			return result, nil
+		}
 	}
 }
 

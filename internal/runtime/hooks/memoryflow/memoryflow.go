@@ -2,6 +2,8 @@ package memoryflow
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,11 +12,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/todosync"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/hooks/lifecycle"
 	"github.com/joshka0/foxctl/internal/storage"
+	ctxengstore "github.com/joshka0/foxctl/internal/storage/contextengine"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 )
 
@@ -210,6 +214,10 @@ func HandleLifecycle(ctx context.Context, deps Dependencies, req LifecycleReques
 		if envEnabledInverse("FOXCTL_MEMORY_EMBED", true) && (strings.TrimSpace(deps.Config.Embedding.APIKey) != "" || strings.TrimSpace(deps.Config.Embedding.VoyageAPIKey) != "" || strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != "" || strings.TrimSpace(deps.Config.Embedding.Provider) != "") {
 			_ = refreshMemoryEmbedding(ctx, deps, target, req.Payload)
 		}
+		// Best-effort: emit a code.changed_dirty event into the contextengine
+		// store and apply invalidation so dirty-edit staleness markers are
+		// created. Failures are non-fatal — the editor must continue.
+		_ = emitDirtyEditEvent(ctx, deps.Config, target, req.Payload)
 		return response, nil
 	default:
 		if strings.Contains(strings.ToLower(toolName), "memory") && envEnabledInverse("FOXCTL_MEMORY_EMBED", true) {
@@ -337,6 +345,58 @@ func matchesAny(prompt string, patterns ...string) bool {
 		}
 	}
 	return false
+}
+
+// emitDirtyEditEvent appends a code.changed_dirty ContextEvent and applies
+// invalidation against the contextengine SQLite store. Best-effort: errors
+// are swallowed so the editor flow is never blocked by storage hiccups.
+func emitDirtyEditEvent(ctx context.Context, cfg config.Config, workspacePath string, payload LifecyclePayload) error {
+	if strings.TrimSpace(cfg.Storage.Root) == "" {
+		return nil
+	}
+	filePath := strings.TrimSpace(payload.ToolInput.FilePath)
+	if filePath == "" {
+		filePath = strings.TrimSpace(payload.ToolInput.Path)
+	}
+	if filePath == "" {
+		return nil
+	}
+	relPath := strings.TrimPrefix(filepath.ToSlash(filePath), filepath.ToSlash(workspacePath)+"/")
+	store, err := ctxengstore.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	wsID := workspace.ID(workspacePath)
+	now := time.Now().UTC()
+	event := contextengine.ContextEvent{
+		ID:          newDirtyEventID(),
+		WorkspaceID: wsID,
+		Kind:        contextengine.EventKindCodeChangedDirty,
+		Source:      "memoryflow.lifecycle",
+		Refs: []contextengine.EvidenceRef{{
+			Type:        contextengine.RefTypePath,
+			Ref:         relPath,
+			WorkspaceID: wsID,
+		}},
+		Data: map[string]any{
+			"tool":      payload.ToolName,
+			"file":      relPath,
+			"timestamp": now.Format(time.RFC3339Nano),
+		},
+		CreatedAt: now,
+	}
+	if _, err := store.AppendEvent(ctx, event); err != nil {
+		return err
+	}
+	return contextengine.ApplyInvalidation(ctx, store, event)
+}
+
+func newDirtyEventID() string {
+	var buf [12]byte
+	_, _ = rand.Read(buf[:])
+	return "evt-dirty-" + hex.EncodeToString(buf[:])
 }
 
 func trimFilePrefix(summary, filenameNoExt string) string {

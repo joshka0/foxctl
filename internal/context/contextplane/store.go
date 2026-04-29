@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
@@ -286,8 +287,8 @@ func (s *WorkspaceStore) SaveHandoff(handoff Handoff) (string, error) {
 	if handoff.CreatedAt.IsZero() {
 		handoff.CreatedAt = timeutil.NowUTC()
 	}
-	handoff.EvidenceRefs = uniqueStrings(handoff.EvidenceRefs)
-	handoff.FilesTouched = uniqueStrings(handoff.FilesTouched)
+	handoff.EvidenceRefs = uniqueEvidenceRefs(handoff.EvidenceRefs)
+	handoff.FileRefs = uniqueEvidenceRefs(handoff.FileRefs)
 	handoff.Observations = uniqueStrings(handoff.Observations)
 	handoff.Tensions = uniqueStrings(handoff.Tensions)
 	handoff.NextActions = uniqueStrings(handoff.NextActions)
@@ -497,7 +498,7 @@ func (s *WorkspaceStore) GenerateMaintenanceTasks(ctx context.Context, limit int
 			Kind:       "maintenance",
 			Priority:   maintenancePriority(tension),
 			Reason:     tension.Statement,
-			SourceRefs: uniqueStrings(append([]string{"tension:" + tension.ID}, tension.RelatedRefs...)),
+			SourceRefs: uniqueStrings(append([]string{"tension:" + tension.ID}, evidenceRefsToStrings(tension.RelatedRefs)...)),
 			Status:     "open",
 			CreatedAt:  stamp,
 		}
@@ -876,7 +877,7 @@ func renderOrientationMarkdown(top TopOfMind) string {
 	}
 	writeListSection(&b, "Open Loops", top.OpenLoops)
 	writeListSection(&b, "Next Actions", top.NextActions)
-	writeListSection(&b, "Relevant Refs", top.RelevantRefs)
+	writeListSection(&b, "Relevant Refs", evidenceRefsToStrings(top.RelevantRefs))
 	return b.String()
 }
 
@@ -890,7 +891,7 @@ func renderPromotionDraft(title, noteType string, handoff Handoff, sourceRef str
 	b.WriteString("provenance_refs:\n")
 	b.WriteString(fmt.Sprintf("  - %s\n", sourceRef))
 	for _, ref := range handoff.EvidenceRefs {
-		b.WriteString(fmt.Sprintf("  - %s\n", ref))
+		b.WriteString(fmt.Sprintf("  - %s\n", contextengine.FormatEvidenceRef(ref)))
 	}
 	b.WriteString(fmt.Sprintf("updated: %s\n", timeutil.NowUTC().Format("2006-01-02")))
 	b.WriteString("---\n\n")
@@ -900,7 +901,7 @@ func renderPromotionDraft(title, noteType string, handoff Handoff, sourceRef str
 	writeDraftSection(&b, "Observations", handoff.Observations)
 	writeDraftSection(&b, "Tensions", handoff.Tensions)
 	writeDraftSection(&b, "Next Actions", handoff.NextActions)
-	writeDraftSection(&b, "Files Touched", handoff.FilesTouched)
+	writeDraftSection(&b, "Files Touched", handoff.FilesTouched())
 	b.WriteString("## Promotion Notes\n\n")
 	b.WriteString("- Review and merge into canonical notes only after validation.\n")
 	b.WriteString("- Preserve provenance when promoting durable claims.\n")
@@ -917,7 +918,7 @@ func renderObservationPromotionDraft(title, noteType string, obs Observation, so
 	b.WriteString("provenance_refs:\n")
 	b.WriteString(fmt.Sprintf("  - %s\n", sourceRef))
 	for _, ref := range obs.EvidenceRefs {
-		b.WriteString(fmt.Sprintf("  - %s\n", ref))
+		b.WriteString(fmt.Sprintf("  - %s\n", contextengine.FormatEvidenceRef(ref)))
 	}
 	b.WriteString(fmt.Sprintf("updated: %s\n", timeutil.NowUTC().Format("2006-01-02")))
 	b.WriteString("---\n\n")

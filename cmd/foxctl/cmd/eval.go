@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/executil"
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
@@ -43,6 +44,7 @@ func newEvalCommand() *cobra.Command {
 	cmd.AddCommand(newEvalTranscriptMemoryCommand())
 	cmd.AddCommand(newEvalAgentsCommand())
 	cmd.AddCommand(newEvalCodeSearchEnsembleCommand())
+	cmd.AddCommand(newEvalLongCoTCommand())
 	return cmd
 }
 
@@ -1087,6 +1089,9 @@ func runRLMEvalMode(ctx context.Context, cfg config.Config, workspacePath, vault
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = bootstrapper.Close() }()
+	ceStore := bootstrapper.ContextEngineStore()
+	taskStore := bootstrapper.TaskStore()
 	env.Tools = rlmenv.FilterTools(env.Tools, toolProfile)
 
 	var runRecursive func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)
@@ -1094,7 +1099,9 @@ func runRLMEvalMode(ctx context.Context, cfg config.Config, workspacePath, vault
 		currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 		currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 		currentAdapter.SetSubcall(runRecursive)
-		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileAuto), string(rlm.PlanModeFree))
+		currentAdapter.SetContextEngineStore(ceStore)
+		currentAdapter.SetTaskStore(taskStore)
+		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileAuto), string(rlm.PlanModeFree), "", false, false)
 		return runner.Run(runCtx, currentTask, currentEnv)
 	}
 
@@ -1135,13 +1142,18 @@ func runRLMStagedEvalMode(ctx context.Context, cfg config.Config, workspacePath,
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = bootstrapper.Close() }()
+	ceStore := bootstrapper.ContextEngineStore()
+	taskStore := bootstrapper.TaskStore()
 
 	var runRecursive func(context.Context, rlm.Task, rlm.Environment) (rlm.Result, error)
 	runRecursive = func(runCtx context.Context, currentTask rlm.Task, currentEnv rlm.Environment) (rlm.Result, error) {
 		currentTask, currentEnv = applyRLMScoutRole(currentTask, currentEnv)
 		currentAdapter := rlmenv.NewReadOnlyAdapter(cfg, currentTask.WorkspaceRoot, strings.TrimSpace(vaultPath), companionDB, currentEnv)
 		currentAdapter.SetSubcall(runRecursive)
-		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileCodeRetrieval), string(rlm.PlanModeStaged))
+		currentAdapter.SetContextEngineStore(ceStore)
+		currentAdapter.SetTaskStore(taskStore)
+		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileCodeRetrieval), string(rlm.PlanModeStaged), "", false, false)
 		return runner.Run(runCtx, currentTask, currentEnv)
 	}
 
@@ -1245,15 +1257,15 @@ func extractACAResultPaths(result contextplane.RetrievalResult, limit int, opts 
 	if opts.IncludeControlPlaneRefs {
 		if result.TopOfMind != nil {
 			for _, ref := range result.TopOfMind.RelevantRefs {
-				appendRef(ref)
+				appendRef(contextengine.FormatEvidenceRef(ref))
 			}
 		}
 		if result.LatestHandoff != nil {
-			for _, path := range result.LatestHandoff.Handoff.FilesTouched {
+			for _, path := range result.LatestHandoff.Handoff.FilesTouched() {
 				appendPath(path)
 			}
 			for _, ref := range result.LatestHandoff.Handoff.EvidenceRefs {
-				appendRef(ref)
+				appendRef(contextengine.FormatEvidenceRef(ref))
 			}
 		}
 	}

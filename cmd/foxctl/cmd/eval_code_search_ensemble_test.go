@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +18,37 @@ func TestBuildCodeSearchEnsembleEvalQuery(t *testing.T) {
 	want := "Which files matter?\n\nContext:\nLegacy runtime only."
 	if got != want {
 		t.Fatalf("query=%q want %q", got, want)
+	}
+}
+
+type fakeCodeSearchEnsembleInternalExecutor struct {
+	toolName string
+	payload  string
+}
+
+func (f *fakeCodeSearchEnsembleInternalExecutor) ExecuteInternal(_ context.Context, name string, args json.RawMessage) (map[string]any, error) {
+	f.toolName = name
+	f.payload = string(args)
+	return map[string]any{"status": "ok"}, nil
+}
+
+func TestRunCodeSearchEnsembleInternalUsesExecuteInternalBypass(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeCodeSearchEnsembleInternalExecutor{}
+	payload := json.RawMessage(`{"query":"trace execution path"}`)
+	out, err := runCodeSearchEnsembleInternal(t.Context(), executor, payload)
+	if err != nil {
+		t.Fatalf("runCodeSearchEnsembleInternal() error = %v", err)
+	}
+	if executor.toolName != "code_search_ensemble" {
+		t.Fatalf("tool name=%q want code_search_ensemble", executor.toolName)
+	}
+	if executor.payload != string(payload) {
+		t.Fatalf("payload=%q want %q", executor.payload, string(payload))
+	}
+	if strings.TrimSpace(out["status"].(string)) != "ok" {
+		t.Fatalf("output=%v", out)
 	}
 }
 

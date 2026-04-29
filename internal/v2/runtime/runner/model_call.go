@@ -5,12 +5,28 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/joshka0/foxctl/internal/rlm"
 	v2errors "github.com/joshka0/foxctl/internal/v2/core/errors"
 	"github.com/joshka0/foxctl/internal/v2/core/events"
 	"github.com/joshka0/foxctl/internal/v2/core/run"
 )
 
 func (p *Pipeline) stageModelCall(ctx context.Context, st *executionState) *v2errors.V2Error {
+	switch st.in.Backend {
+	case run.TurnBackendRLMREPL:
+		return p.stageModelCallRLMREPL(ctx, st)
+	case run.TurnBackendLLMChat:
+		return p.stageModelCallLLMChat(ctx, st)
+	default:
+		return &v2errors.V2Error{
+			Kind:    v2errors.ErrValidation,
+			Message: fmt.Sprintf("unsupported backend %q", st.in.Backend),
+			Fatal:   true,
+		}
+	}
+}
+
+func (p *Pipeline) stageModelCallLLMChat(ctx context.Context, st *executionState) *v2errors.V2Error {
 	if len(st.modelMessages) == 0 {
 		st.modelMessages = []ModelMessage{{Role: "user", Content: st.in.Prompt}}
 	}
@@ -91,6 +107,38 @@ func (p *Pipeline) stageModelCall(ctx context.Context, st *executionState) *v2er
 	if emitErr := p.emitStageFailed(ctx, st, StageModelCall, verr); emitErr != nil {
 		return emitErr
 	}
+	return nil
+}
+
+func (p *Pipeline) stageModelCallRLMREPL(ctx context.Context, st *executionState) *v2errors.V2Error {
+	runnerInstance, err := p.cfg.RLMREPLFactory.New(st.in.RLM)
+	if err != nil {
+		return asStageError(StageModelCall, err, true)
+	}
+	result, err := runnerInstance.Run(ctx, taskFromTurnInput(st.in), rlm.Environment{})
+	if err != nil {
+		return asStageError(StageModelCall, err, true)
+	}
+
+	st.out.Summary = strings.TrimSpace(result.Answer)
+	st.out.Iterations = result.Iterations
+	if st.out.Iterations <= 0 {
+		st.out.Iterations = 1
+	}
+	st.out.ToolCalls = rlmResultToolCalls(result)
+	st.out.Metadata = cloneMetadata(result.Metadata)
+	st.turn.Iterations = append(st.turn.Iterations, run.IterationRecord{
+		TurnID:         st.in.TurnID,
+		IterationIndex: 1,
+		TraceID:        st.turn.TraceID,
+		SpanID:         fmt.Sprintf("%s:iter:%d", st.turn.RootSpanID, 1),
+		ParentSpanID:   st.turn.RootSpanID,
+		Message: run.MessageRef{
+			ID:   "msg-iter-1",
+			Role: "assistant",
+			Text: st.out.Summary,
+		},
+	})
 	return nil
 }
 

@@ -124,6 +124,52 @@ func TestLLMChatEngine_Run_NoToolCalls(t *testing.T) {
 	}
 }
 
+func TestLLMChatEngine_Run_CanUseReasoningContentAsText(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := oaiResponse{
+			ID: "test-reasoning-text",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message:      oaiMessage{Role: "assistant", ReasoningContent: `{"source":"func Solve(input map[string]any) map[string]any { return map[string]any{\"answer\":\"solution = 1\"} }"}`},
+					FinishReason: "stop",
+				},
+			},
+			Usage: struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+			}{
+				PromptTokens:     10,
+				CompletionTokens: 8,
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:                    "test-key",
+			BaseURL:                   "http://mock",
+			Model:                     "test-model",
+			MaxIterations:             10,
+			UseReasoningContentAsText: true,
+		},
+		client: &http.Client{Transport: &handlerTransport{handler: handler}},
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output.AssistantText, `"source"`) {
+		t.Fatalf("assistant text = %q", output.AssistantText)
+	}
+}
+
 func TestLLMChatEngine_Run_NoAuthHeaderWhenAuthModeNone(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := strings.TrimSpace(r.Header.Get("Authorization")); got != "" {
@@ -289,6 +335,118 @@ func TestLLMChatEngine_Run_EmptyFinalResponseForcesFinalize(t *testing.T) {
 	}
 }
 
+func TestLLMChatEngine_Run_FinalizeTokenOverrunKeepsCompactVisibleAnswer(t *testing.T) {
+	callCount := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		resp := oaiResponse{
+			ID: fmt.Sprintf("test-overrun-%d", callCount),
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{{
+				Message:      oaiMessage{Role: "assistant"},
+				FinishReason: "stop",
+			}},
+			Usage: struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+			}{
+				PromptTokens:     6,
+				CompletionTokens: 64,
+			},
+		}
+		if callCount == 2 {
+			resp.Choices[0].Message.Content = "Fallback final answer."
+			resp.Usage.CompletionTokens = 512
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:        "test-key",
+			BaseURL:       "http://mock",
+			Model:         "test-model",
+			MaxTokens:     128,
+			MaxIterations: 10,
+		},
+		client: &http.Client{Transport: &handlerTransport{handler: handler}},
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.StopReason == StopReasonError {
+		t.Fatalf("unexpected stop_reason=%q error=%q", output.StopReason, output.Error)
+	}
+	if output.AssistantText != "Fallback final answer." {
+		t.Fatalf("assistant_text=%q", output.AssistantText)
+	}
+	if len(output.Iterations) != 2 {
+		t.Fatalf("iterations=%d want 2", len(output.Iterations))
+	}
+	if output.Iterations[1].CompletionTokens != 512 {
+		t.Fatalf("finalize completion_tokens=%d want 512", output.Iterations[1].CompletionTokens)
+	}
+}
+
+func TestLLMChatEngine_Run_FinalizeTokenOverrunStopsWithLargeVisibleAnswer(t *testing.T) {
+	callCount := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		resp := oaiResponse{
+			ID: fmt.Sprintf("test-overrun-large-%d", callCount),
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{{
+				Message:      oaiMessage{Role: "assistant"},
+				FinishReason: "stop",
+			}},
+			Usage: struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+			}{
+				PromptTokens:     6,
+				CompletionTokens: 64,
+			},
+		}
+		if callCount == 2 {
+			resp.Choices[0].Message.Content = strings.Repeat("x", 3000)
+			resp.Usage.CompletionTokens = 512
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:        "test-key",
+			BaseURL:       "http://mock",
+			Model:         "test-model",
+			MaxTokens:     128,
+			MaxIterations: 10,
+		},
+		client: &http.Client{Transport: &handlerTransport{handler: handler}},
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.StopReason != StopReasonError {
+		t.Fatalf("stop_reason=%q want %q", output.StopReason, StopReasonError)
+	}
+	if !strings.Contains(output.Error, "completion exceeded configured max tokens during finalize") {
+		t.Fatalf("error=%q", output.Error)
+	}
+}
+
 func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 	callCount := 0
 
@@ -431,6 +589,122 @@ func TestExtractFinalAnswerJSONPayload(t *testing.T) {
 				t.Fatalf("extractFinalAnswerJSONPayload() = %s, want %s", gotBytes, wantBytes)
 			}
 		})
+	}
+}
+
+func TestLLMChatEngine_Run_WithReasoningContentToolCall(t *testing.T) {
+	callCount := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		if callCount == 1 {
+			_, _ = w.Write([]byte(`{
+				"id":"test-reasoning-tool",
+				"choices":[{
+					"message":{
+						"role":"assistant",
+						"content":"",
+						"reasoning_content":"<tool_call>\n<function=python_repl>\n{\"code\":\"1+1\"}\n</function>\n</tool_call>",
+						"tool_calls":[]
+					},
+					"finish_reason":"stop"
+				}],
+				"usage":{"prompt_tokens":10,"completion_tokens":4}
+			}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{
+			"id":"test-final",
+			"choices":[{
+				"message":{"role":"assistant","content":"done"},
+				"finish_reason":"stop"
+			}],
+			"usage":{"prompt_tokens":15,"completion_tokens":2}
+		}`))
+	})
+	var gotArgs json.RawMessage
+	mockExecutor := &MockToolExecutor{
+		ExecuteFn: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
+			if name != "python_repl" {
+				t.Fatalf("tool name = %q", name)
+			}
+			gotArgs = append([]byte(nil), args...)
+			return `{"output":"2"}`, nil
+		},
+	}
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:                  "test-key",
+			BaseURL:                 "http://mock",
+			Model:                   "test-model",
+			MaxIterations:           10,
+			ParseReasoningToolCalls: true,
+		},
+		client:     &http.Client{Transport: &handlerTransport{handler: handler}},
+		toolRunner: NewToolRunner(mockExecutor, nil, ToolRunnerConfig{}),
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "call the tool"}},
+		Tools:    []ToolDef{{Name: "python_repl", Description: "Execute Python"}},
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if output.AssistantText != "done" {
+		t.Fatalf("assistant text = %q", output.AssistantText)
+	}
+	if len(output.ToolCalls) != 1 || output.ToolCalls[0].Name != "python_repl" {
+		t.Fatalf("tool calls = %+v", output.ToolCalls)
+	}
+	if strings.TrimSpace(string(gotArgs)) != `{"code":"1+1"}` {
+		t.Fatalf("args = %s", gotArgs)
+	}
+}
+
+func TestLLMChatEngine_CallLLMMergesExtraBody(t *testing.T) {
+	var got map[string]any
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"test-extra-body",
+			"choices":[{
+				"message":{"role":"assistant","content":"done"},
+				"finish_reason":"stop"
+			}],
+			"usage":{"prompt_tokens":5,"completion_tokens":1}
+		}`))
+	})
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:      "test-key",
+			BaseURL:     "http://mock",
+			Model:       "qwen/qwen3.6-plus",
+			MaxTokens:   128,
+			ExtraBody:   map[string]any{"reasoning": map[string]any{"effort": "none", "exclude": true}},
+			Temperature: 0,
+		},
+		client: &http.Client{Transport: &handlerTransport{handler: handler}},
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "answer"}},
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if output.AssistantText != "done" {
+		t.Fatalf("assistant text=%q", output.AssistantText)
+	}
+	reasoning, ok := got["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("reasoning missing/wrong type: %#v", got["reasoning"])
+	}
+	if reasoning["effort"] != "none" || reasoning["exclude"] != true {
+		t.Fatalf("reasoning=%#v", reasoning)
 	}
 }
 

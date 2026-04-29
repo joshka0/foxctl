@@ -80,9 +80,22 @@ type LLMChatConfig struct {
 	// ResponseFormat enforces structured outputs when supported by the provider.
 	ResponseFormat json.RawMessage
 
+	// ExtraBody is merged into the OpenAI-compatible request body after the
+	// standard fields are built. Use it for provider/model-specific controls.
+	ExtraBody map[string]any
+
 	// ToolChoice forwards an OpenAI-compatible tool_choice override when tools
 	// are present, for example `"auto"` or `"required"`.
 	ToolChoice json.RawMessage
+
+	// ParseReasoningToolCalls accepts LMStudio/local-model tool-call markup in
+	// reasoning_content when a provider does not populate tool_calls.
+	ParseReasoningToolCalls bool
+
+	// UseReasoningContentAsText lets internal structured-output calls recover
+	// content from reasoning_content when local backends leave content empty.
+	// Keep this disabled for user-facing final answers.
+	UseReasoningContentAsText bool
 
 	// PassthroughToolCalls returns model-requested tool calls without executing
 	// them inside this engine. This lets an outer runtime own tool policy,
@@ -321,6 +334,9 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 			return output, nil
 		}
 		choice := resp.Choices[0]
+		if e.config.ParseReasoningToolCalls && len(choice.Message.ToolCalls) == 0 && len(tools) > 0 {
+			choice.Message.ToolCalls = parseReasoningContentToolCalls(choice.Message.ReasoningContent)
+		}
 
 		output.Iterations = append(output.Iterations, IterationUsage{
 			Iteration:        iteration,
@@ -370,15 +386,17 @@ func (e *LLMChatEngine) finishIfIterationExceeded(ctx context.Context, iteration
 	if output.AssistantText == "" {
 		finalizeMessages := append(messages, oaiMessage{
 			Role:    "user",
-			Content: "Your tool budget is exhausted. Produce your complete text response NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
+			Content: boundedFinalizePrompt("Your tool budget is exhausted.", output.ToolCalls),
 		})
 		if finalResp, err := e.callLLM(ctx, finalizeMessages, nil); err == nil && len(finalResp.Choices) > 0 {
-			output.AssistantText = resolveAssistantContent(finalResp.Choices[0].Message)
-			output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+			output.AssistantText = e.resolveAssistantContent(finalResp.Choices[0].Message)
+			e.recordFinalizeUsage(output, finalResp, "max_iterations_finalize")
 			fmt.Fprintf(os.Stderr, "[CONTEXT] finalize: prompt_tokens=%d completion_tokens=%d\n", finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
 		}
 	}
-	output.StopReason = StopReasonMaxIterations
+	if output.StopReason != StopReasonError {
+		output.StopReason = StopReasonMaxIterations
+	}
 	return true
 }
 
@@ -464,7 +482,7 @@ func (e *LLMChatEngine) finishIfContextBudgetExceeded(ctx context.Context, resp 
 		Canceled(iterDuration))
 	output.StopReason = StopReasonContextBudget
 	if len(resp.Choices) > 0 {
-		output.AssistantText = resolveAssistantContent(resp.Choices[0].Message)
+		output.AssistantText = e.resolveAssistantContent(resp.Choices[0].Message)
 	}
 	return true
 }
@@ -488,7 +506,7 @@ func (e *LLMChatEngine) handleToolCallIteration(ctx context.Context, choiceMessa
 		tools = nil
 		messages = append(messages, oaiMessage{
 			Role:    "user",
-			Content: "SYNTHESIS PHASE: Your tool budget is ending. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls),
+			Content: boundedFinalizePrompt("SYNTHESIS PHASE: Your tool budget is ending.", output.ToolCalls),
 		})
 	}
 	return messages, tools, false
@@ -590,7 +608,7 @@ func (e *LLMChatEngine) enforceRequiredContextQuery(choiceMessage oaiMessage, me
 	if os.Getenv("FOXCTL_DEBUG_CONTEXT_QUERY") == "1" {
 		fmt.Fprintf(os.Stderr, "[CTX-POLICY] unsatisfied context query: nudging model and continuing\n")
 	}
-	assistantText := resolveAssistantContent(choiceMessage)
+	assistantText := e.resolveAssistantContent(choiceMessage)
 	*messages = append(*messages,
 		oaiMessage{Role: "assistant", Content: assistantText},
 		oaiMessage{Role: "user", Content: "You MUST use the rlm_context_query tool to retrieve conversation context BEFORE responding. Please query context first, then respond."},
@@ -599,23 +617,48 @@ func (e *LLMChatEngine) enforceRequiredContextQuery(choiceMessage oaiMessage, me
 }
 
 func (e *LLMChatEngine) finalizeAssistantChoice(ctx context.Context, choiceMessage oaiMessage, finishReason string, messages []oaiMessage, output *EngineOutput) {
-	output.AssistantText = resolveAssistantContent(choiceMessage)
+	output.AssistantText = e.resolveAssistantContent(choiceMessage)
 	output.StopReason = mapFinishReason(finishReason)
 	if strings.TrimSpace(output.AssistantText) != "" {
 		return
 	}
-	finalPrompt := "You returned an empty response. Respond to the user's latest message now with plain text."
+	finalPrompt := boundedFinalizePrompt("You returned an empty response.", nil)
 	if len(output.ToolCalls) > 0 {
-		finalPrompt = "You stopped without producing a text response. Write your complete report NOW.\n\nResearch:\n" + buildResearchSummary(output.ToolCalls)
+		finalPrompt = boundedFinalizePrompt("You stopped without producing a text response.", output.ToolCalls)
 	}
 	finalizeMessages := append(messages,
 		oaiMessage{Role: "assistant", Content: ""},
 		oaiMessage{Role: "user", Content: finalPrompt},
 	)
 	if finalResp, finalErr := e.callLLM(ctx, finalizeMessages, nil); finalErr == nil && len(finalResp.Choices) > 0 {
-		output.AssistantText = strings.TrimSpace(resolveAssistantContent(finalResp.Choices[0].Message))
-		output.Tokens.Add(finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+		output.AssistantText = strings.TrimSpace(e.resolveAssistantContent(finalResp.Choices[0].Message))
+		e.recordFinalizeUsage(output, finalResp, "empty_response_finalize")
 		fmt.Fprintf(os.Stderr, "[CONTEXT] finalize (early stop): prompt_tokens=%d completion_tokens=%d\n", finalResp.Usage.PromptTokens, finalResp.Usage.CompletionTokens)
+	}
+}
+
+func (e *LLMChatEngine) recordFinalizeUsage(output *EngineOutput, resp *oaiResponse, finishReason string) {
+	if output == nil || resp == nil {
+		return
+	}
+	output.Tokens.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+	output.Iterations = append(output.Iterations, IterationUsage{
+		Iteration:        len(output.Iterations) + 1,
+		PromptTokens:     resp.Usage.PromptTokens,
+		CompletionTokens: resp.Usage.CompletionTokens,
+		TotalTokens:      resp.Usage.PromptTokens + resp.Usage.CompletionTokens,
+		FinishReason:     finishReason,
+	})
+	if e.config.MaxTokens > 0 && resp.Usage.CompletionTokens > e.config.MaxTokens {
+		finalText := ""
+		if len(resp.Choices) > 0 {
+			finalText = strings.TrimSpace(e.resolveAssistantContent(resp.Choices[0].Message))
+		}
+		if finalText != "" && len(finalText) <= compactFinalizeVisibleCharLimit(e.config.MaxTokens) {
+			return
+		}
+		output.StopReason = StopReasonError
+		output.Error = fmt.Sprintf("model completion exceeded configured max tokens during finalize: completion_tokens=%d max_tokens=%d", resp.Usage.CompletionTokens, e.config.MaxTokens)
 	}
 }
 
@@ -641,6 +684,39 @@ func estimateEngineTokens(chars int) int {
 		return 0
 	}
 	return chars / 4
+}
+
+func boundedFinalizePrompt(reason string, toolCalls []ToolCall) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "Finalize the answer now."
+	}
+	var b strings.Builder
+	b.WriteString(reason)
+	b.WriteString("\n\nWrite the final answer now. Keep it bounded and task-shaped:\n")
+	b.WriteString("- If the user requested an exact output format, return only that format.\n")
+	b.WriteString("- Do not write a complete report, dependency graph, scratch work, tool log, or proof unless explicitly requested.\n")
+	b.WriteString("- If blocked, return one short blocker line and the best partial answer.\n")
+	b.WriteString("- Otherwise keep the answer under 120 words.\n")
+	if len(toolCalls) > 0 {
+		b.WriteString("\nResearch summary:\n")
+		b.WriteString(buildResearchSummary(toolCalls))
+	}
+	return b.String()
+}
+
+func compactFinalizeVisibleCharLimit(maxTokens int) int {
+	if maxTokens <= 0 {
+		return 8192
+	}
+	limit := maxTokens * 4
+	if limit < 2048 {
+		return 2048
+	}
+	if limit > 8192 {
+		return 8192
+	}
+	return limit
 }
 
 // buildMessages converts EngineInput messages to OpenAI format.
@@ -754,7 +830,11 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 		reqBody.ResponseFormat = e.config.ResponseFormat
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
+	requestBody, err := oaiRequestBodyMap(reqBody, e.config.ExtraBody)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	jsonBody, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -807,7 +887,7 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 
 	if os.Getenv("FOXCTL_DEBUG_LLM_EMPTY") == "1" &&
 		len(oaiResp.Choices) > 0 &&
-		resolveAssistantContent(oaiResp.Choices[0].Message) == "" &&
+		e.resolveAssistantContent(oaiResp.Choices[0].Message) == "" &&
 		len(oaiResp.Choices[0].Message.ToolCalls) == 0 {
 		raw := string(body)
 		if len(raw) > 800 {
@@ -819,14 +899,84 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 	return &oaiResp, nil
 }
 
+func oaiRequestBodyMap(req oaiRequest, extra map[string]any) (map[string]any, error) {
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return nil, err
+	}
+	for key, value := range extra {
+		key = strings.TrimSpace(key)
+		if key == "" || value == nil {
+			continue
+		}
+		body[key] = value
+	}
+	return body, nil
+}
+
+func (e *LLMChatEngine) resolveAssistantContent(msg oaiMessage) string {
+	return resolveAssistantContentWithReasoning(msg, e.config.UseReasoningContentAsText)
+}
+
 func resolveAssistantContent(msg oaiMessage) string {
+	return resolveAssistantContentWithReasoning(msg, false)
+}
+
+func resolveAssistantContentWithReasoning(msg oaiMessage, useReasoning bool) string {
 	if strings.TrimSpace(msg.Content) != "" {
 		return msg.Content
 	}
 	if strings.TrimSpace(msg.OutputText) != "" {
 		return msg.OutputText
 	}
+	if useReasoning && strings.TrimSpace(msg.ReasoningContent) != "" {
+		return msg.ReasoningContent
+	}
 	return ""
+}
+
+func parseReasoningContentToolCalls(content string) []oaiToolCall {
+	content = strings.TrimSpace(content)
+	if content == "" || !strings.Contains(content, "<tool_call>") {
+		return nil
+	}
+	var calls []oaiToolCall
+	remaining := content
+	for {
+		start := strings.Index(remaining, "<function=")
+		if start < 0 {
+			break
+		}
+		remaining = remaining[start+len("<function="):]
+		nameEnd := strings.Index(remaining, ">")
+		if nameEnd < 0 {
+			break
+		}
+		name := strings.TrimSpace(remaining[:nameEnd])
+		remaining = remaining[nameEnd+1:]
+		closeIdx := strings.Index(remaining, "</function>")
+		if closeIdx < 0 {
+			break
+		}
+		args := strings.TrimSpace(remaining[:closeIdx])
+		remaining = remaining[closeIdx+len("</function>"):]
+		if name == "" || !json.Valid([]byte(args)) {
+			continue
+		}
+		calls = append(calls, oaiToolCall{
+			ID:   fmt.Sprintf("reasoning_call_%d", len(calls)+1),
+			Type: "function",
+			Function: oaiFunction{
+				Name:      name,
+				Arguments: args,
+			},
+		})
+	}
+	return calls
 }
 
 // OpenAI API types
@@ -842,11 +992,12 @@ type oaiRequest struct {
 }
 
 type oaiMessage struct {
-	Role       string        `json:"role"`
-	Content    string        `json:"content,omitempty"`
-	OutputText string        `json:"output_text,omitempty"`
-	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string        `json:"tool_call_id,omitempty"`
+	Role             string        `json:"role"`
+	Content          string        `json:"content,omitempty"`
+	OutputText       string        `json:"output_text,omitempty"`
+	ReasoningContent string        `json:"reasoning_content,omitempty"`
+	ToolCalls        []oaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string        `json:"tool_call_id,omitempty"`
 }
 
 type oaiToolCall struct {

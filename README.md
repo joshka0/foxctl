@@ -65,6 +65,95 @@ Two important rules:
 - `internal/v2/*` is not the default destination for new code; it is scoped to
   the newer agent/runtime/orchestration stack
 
+## Context Engine
+
+The **Unified Context Engine** transforms raw events (file writes, commits,
+corrections, task changes, tool calls) into structured, typed, and validated
+context primitives. It replaces scattered string-based references and keyword
+heuristics with a single canonical type system.
+
+**Pipeline:**
+
+```
+events → evidence → claims → impact/staleness → projections → retrieval packs → feedback
+```
+
+### Where the Code Lives
+
+```text
+internal/context/contextengine/           # Canonical domain types + pure validation
+  refs.go              EvidenceRef, RefType — typed references replacing raw strings
+  events.go            ContextEvent, ContextEventKind — append-only event log entries
+  evidence.go          EvidenceNode, EvidencePack — structured evidence with grounding
+  claims.go            MemoryClaim, ClaimStatus, ClaimScope — lifecycle-managed claims
+  impact.go            ImpactEdge, ImpactEdgeKind — directional dependency graph
+  impact_engine.go     ComputeImpact, ApplyInvalidation, ResolveStaleness
+  staleness.go         StalenessMarker — reactive invalidation from dirty edits
+  projections.go       ProjectionMeta, WorkingSet, TaskContext, ContextPacket
+  retrieval.go         RetrievalEpisode, RetrievalFeedback — retrieval telemetry
+  retrieve_lanes.go    5 lane services (code, memory, context, task, mixed)
+  filters.go           Typed filter predicates for evidence queries
+  validate.go          Validation functions for all canonical types
+
+internal/context/contextengine/adapters/  # Bidirectional type conversions
+  contextplane.go      TopOfMind, Handoff, Observation, TaskPacket → canonical
+  companion.go         ConversationEvent, EvidenceSnippet, Assumption → canonical
+  retrievalv2.go       SearchResponse, FusedHit → canonical
+  taskhistory.go       Pack, SessionSummary → canonical
+  taskstore.go         Task, Epic → canonical
+  trajectory.go        Event, Trajectory → canonical
+  observability.go     WideEvent → canonical
+  rlm.go               NodeResult → canonical
+
+internal/storage/contextengine/           # Durable store
+  schema.go            9 entity tables, 18 indexes, CAS integration
+  store.go             Store interface + SQLite implementation
+
+internal/context/contextplane/types.go   # Updated: []EvidenceRef, ProjectionMeta
+internal/context/companion/              # ExtractionPolicy interface, TypedSignalExtractor
+internal/rlm/                            # Composite DefaultTools (6), typed QueryPlan
+```
+
+### Key Concepts
+
+- **EvidenceRef** — typed reference (`file://`, `symbol://`, `note://`, etc.)
+  replacing raw `[]string` throughout the codebase
+- **EvidencePack** — a compact, serializable bundle of evidence items returned
+  by retrieval lanes; large packs go to CAS
+- **MemoryClaim** — a durable assertion with typed lifecycle transitions
+  (Candidate → Current → NeedsRevalidation → Stale → Superseded/Rejected)
+- **Impact Engine** — computes downstream effects of changes, marks stale
+  evidence, and resolves invalidation chains
+- **Retrieval Lanes** — five composable lane services (code, memory, context,
+  task, mixed) that return `EvidencePack` and record telemetry episodes
+- **ExtractionPolicy** — replaces keyword heuristics with typed interfaces
+  for companion signal extraction; 3 concrete implementations
+
+### Design Invariants
+
+| Invariant | Rule |
+|-----------|------|
+| Pure core | `contextengine/` has zero IO imports — only stdlib |
+| No keyword heuristics | Classification uses typed fields, scored features, or structured policies |
+| Append-only events | `ContextEvent`, `RetrievalEpisode`, `RetrievalFeedback` never mutate |
+| Typed transitions | Claim and staleness status changes go through explicit transition functions |
+| CAS for large payloads | Evidence packs exceeding 64KB persist to CAS with summary inline |
+| Bidirectional adapters | Adapters import contextengine + source package; no cycles |
+
+### Dependency Direction
+
+```
+internal/context/contextengine/        ← pure, no IO imports
+         ↑
+internal/context/contextengine/adapters/ ← imports both sides
+         ↑
+internal/storage/contextengine/        ← imports contextengine only
+         ↑
+internal/context/contextplane/         ← uses adapters + contextengine
+internal/context/companion/            ← uses adapters + contextengine
+internal/rlm/                          ← uses adapters + contextengine
+```
+
 ## Install
 
 ### Recommended
@@ -346,7 +435,7 @@ Key commands built from the module:
 - `foxproxd` — the daemon
 - `foxproxctl` — CLI client (sessions, rooms, messages)
 
-Protocol spec: [foxprox/docs/Foxprox-v0.1.md](foxprox/docs/Foxprox-v0.1.md)
+Protocol spec: [foxprox/docs/ATCP-v0.1.md](foxprox/docs/ATCP-v0.1.md)
 
 ## License
 

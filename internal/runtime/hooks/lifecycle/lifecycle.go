@@ -689,7 +689,7 @@ func captureHandoff(store *contextplane.WorkspaceStore, taskID, phase, summary, 
 		Phase:        phase,
 		Outcome:      "partial",
 		Summary:      strings.TrimSpace(summary),
-		EvidenceRefs: []string{evidenceRef},
+		EvidenceRefs: contextplane.StringsToEvidenceRefs([]string{evidenceRef}),
 	}
 	return store.SaveHandoff(record)
 }

@@ -40,6 +40,39 @@ func RenderMarkdown(result RunResult) string {
 		)
 	}
 
+	if hasReviewTelemetry(conditions) {
+		b.WriteString("\n## RLM Review Telemetry\n\n")
+		b.WriteString("| Condition | review | recursive | fallback | candidate compact | output sanitize | child trunc | child rewrite | mean base tok | mean review tok |\n")
+		b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
+		for _, item := range conditions {
+			if item.ReviewAttempts == 0 &&
+				item.ReviewRecursiveRequested == 0 &&
+				item.ReviewRecursiveUsed == 0 &&
+				item.ReviewFallbacks == 0 &&
+				item.ReviewCandidateCompactions == 0 &&
+				item.OutputSanitizations == 0 &&
+				item.PreReviewOutputSanitizations == 0 &&
+				item.ChildSummariesTruncated == 0 &&
+				item.ChildSummariesRewritten == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "| `%s` | %d | %d/%d | %d | %d | %d/%d | %d | %d | %.0f | %.0f |\n",
+				item.ConditionID,
+				item.ReviewAttempts,
+				item.ReviewRecursiveUsed,
+				item.ReviewRecursiveRequested,
+				item.ReviewFallbacks,
+				item.ReviewCandidateCompactions,
+				item.OutputSanitizations,
+				item.PreReviewOutputSanitizations,
+				item.ChildSummariesTruncated,
+				item.ChildSummariesRewritten,
+				item.MeanBaseTokens,
+				item.MeanReviewTokens,
+			)
+		}
+	}
+
 	if len(result.Summary.Comparisons) > 0 {
 		b.WriteString("\n## Paired Comparisons\n\n")
 		b.WriteString("| Baseline | Candidate | pairs | wins | losses | tie correct | tie incorrect | mean token Δ | mean cost Δ | mean ms Δ |\n")
@@ -70,4 +103,21 @@ func RenderMarkdown(result RunResult) string {
 		fmt.Fprintf(&b, "\nDuplicate attempts replaced by latest input order: `%d`\n", result.Summary.DuplicateAttempts)
 	}
 	return b.String()
+}
+
+func hasReviewTelemetry(conditions []ConditionSummary) bool {
+	for _, item := range conditions {
+		if item.ReviewAttempts > 0 ||
+			item.ReviewRecursiveRequested > 0 ||
+			item.ReviewRecursiveUsed > 0 ||
+			item.ReviewFallbacks > 0 ||
+			item.ReviewCandidateCompactions > 0 ||
+			item.OutputSanitizations > 0 ||
+			item.PreReviewOutputSanitizations > 0 ||
+			item.ChildSummariesTruncated > 0 ||
+			item.ChildSummariesRewritten > 0 {
+			return true
+		}
+	}
+	return false
 }

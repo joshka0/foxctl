@@ -12,6 +12,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/joshka/foxprox/foxprox/broker/vtscreen"
 	foxproxclient "github.com/joshka/foxprox/foxprox/client"
@@ -76,7 +77,7 @@ func (cs *clientShim) ListSessions(ctx context.Context) ([]foxproxbridge.Session
 			Status:           s.Status,
 			PID:              s.PID,
 			CreatedAt:        s.CreatedAt,
-			ExitedAt:         s.ExitedAt,
+			ExitedAt:         timeValue(s.ExitedAt),
 			ExitCode:         s.ExitCode,
 			ExitError:        s.ExitError,
 			LastSeq:          s.LastSeq,
@@ -155,11 +156,18 @@ func (cs *clientShim) ListRooms(ctx context.Context) ([]foxproxbridge.RoomInfo, 
 			Workspace:   r.Workspace,
 			Title:       r.Title,
 			Description: r.Description,
-			ArchivedAt:  r.ArchivedAt,
+			ArchivedAt:  timeValue(r.ArchivedAt),
 			CreatedAt:   r.CreatedAt,
 		}
 	}
 	return out, nil
+}
+
+func timeValue(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }
 
 func (cs *clientShim) CreateRoom(ctx context.Context, workspace, title, description string) (foxproxbridge.RoomInfo, error) {

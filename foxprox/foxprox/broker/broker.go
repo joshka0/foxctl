@@ -484,10 +484,12 @@ func (b *Broker) SessionReady(sessionID string) (bool, string, error) {
 	switch {
 	case ready.Idle:
 		return true, "ready", nil
-	case !ready.Idle:
-		return false, "output_busy", nil
 	case ready.ScreenRegex != "" && !ready.ScreenMatch:
 		return false, "screen_regex_no_match", nil
+	case ready.AltScreen:
+		return false, "alt_screen", nil
+	case !ready.Idle:
+		return false, "output_busy", nil
 	default:
 		return false, "not_ready", nil
 	}

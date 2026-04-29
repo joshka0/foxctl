@@ -14,6 +14,18 @@ func (p *Pipeline) stageInitContext(ctx context.Context, st *executionState) *v2
 	if st.in.MaxIterations <= 0 {
 		st.in.MaxIterations = DefaultMaxIterations
 	}
+	st.in.Backend = run.NormalizeTurnBackend(st.in.Backend)
+	if !run.IsSupportedTurnBackend(st.in.Backend) {
+		return &v2errors.V2Error{
+			Kind:    v2errors.ErrValidation,
+			Message: fmt.Sprintf("unsupported backend %q", st.in.Backend),
+			Fatal:   true,
+			Details: map[string]any{
+				"field":   "backend",
+				"backend": string(st.in.Backend),
+			},
+		}
+	}
 	if strings.TrimSpace(st.in.Command) == "" {
 		st.in.Command = "run"
 	}

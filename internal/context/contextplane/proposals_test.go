@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 )
 
 func TestRecordRetrievalProposalDedupes(t *testing.T) {
@@ -22,7 +24,7 @@ func TestRecordRetrievalProposalDedupes(t *testing.T) {
 			Count:        1,
 			Project:      "foxctl",
 			Area:         "aca-retrieval",
-			EvidenceRefs: []string{"query:storage memory package"},
+			EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "storage memory package"}},
 			FirstSeen:    time.Now().UTC(),
 			LastSeen:     time.Now().UTC(),
 		},
@@ -62,7 +64,7 @@ func TestRecordRetrievalProposalDedupes(t *testing.T) {
 func TestApplyAndRejectMemoryProposal(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	proposal, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
-		Kind:           "retrieval_policy_patch",
+		Kind:           PolicyKindRetrievalPatch,
 		Classification: "package_note_fallback_disabled",
 		Status:         "open",
 		Confidence:     0.82,
@@ -101,7 +103,7 @@ func TestApplyAndRejectMemoryProposal(t *testing.T) {
 	}
 
 	manual, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
-		Kind:           "manual_review",
+		Kind:           PolicyKind("manual_review"),
 		Classification: "ranking_mismatch",
 		Status:         "open",
 		Confidence:     0.68,
@@ -126,7 +128,7 @@ func TestApplyEvidenceProposalPreparesReviewJob(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	proposal, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
 		DedupeKey:      "methodology_draft|aca-vocabulary",
-		Kind:           "methodology_draft",
+		Kind:           PolicyKindMethodologyDraft,
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
@@ -224,7 +226,7 @@ Imported evidence says we should unify ACA vocabulary.
 	}
 	proposal, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
 		DedupeKey:      "methodology_draft|aca-vocabulary",
-		Kind:           "methodology_draft",
+		Kind:           PolicyKindMethodologyDraft,
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,
@@ -273,7 +275,7 @@ func TestClaimAndReleaseProposalMergeTask(t *testing.T) {
 	store := NewWorkspaceStore(t.TempDir())
 	proposal, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
 		DedupeKey:      "external_evidence_import|aca-vocabulary-claim",
-		Kind:           "external_evidence_import",
+		Kind:           PolicyKindExternalImport,
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,

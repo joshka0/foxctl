@@ -12,9 +12,12 @@ type ConditionID string
 const (
 	ConditionBaselineNoToolsOfficial ConditionID = "baseline_no_tools_official_prompt"
 	ConditionRLMNoToolsSingle        ConditionID = "rlm_no_tools_single"
+	ConditionRLMReplNoSubcalls       ConditionID = "rlm_repl_no_subcalls"
+	ConditionRLMReplRecursive        ConditionID = "rlm_repl_recursive"
+	ConditionRLMBraidSingle          ConditionID = "rlm_braid_single"
 	ConditionRLMNoToolsStaged        ConditionID = "rlm_no_tools_staged"
-	ConditionRLMMinimalToolsSingle   ConditionID = "rlm_minimal_tools_single"
-	ConditionRLMMinimalToolsStaged   ConditionID = "rlm_minimal_tools_staged"
+	ConditionRLMNoModelToolsSingle   ConditionID = "rlm_no_model_tools_single"
+	ConditionRLMNoModelToolsStaged   ConditionID = "rlm_no_model_tools_staged"
 )
 
 // ConditionKind groups conditions by execution family.
@@ -44,15 +47,27 @@ const (
 )
 
 // Question is the normalized metadata foxctl needs from the official LongCoT
-// question loader. QuestionHash lets reports avoid carrying full prompt text.
+// dataset shape and verifier bridge.
 type Question struct {
-	ID           string   `json:"question_id"`
-	Domain       string   `json:"domain,omitempty"`
-	Difficulty   string   `json:"difficulty,omitempty"`
-	TaskFamily   string   `json:"task_family,omitempty"`
-	Tags         []string `json:"tags,omitempty"`
-	QuestionText string   `json:"question,omitempty"`
-	QuestionHash string   `json:"question_hash,omitempty"`
+	ID                    string                `json:"question_id"`
+	Domain                string                `json:"domain,omitempty"`
+	Split                 string                `json:"split,omitempty"` // legacy fixture compatibility
+	Difficulty            string                `json:"difficulty,omitempty"`
+	Template              string                `json:"template,omitempty"`
+	PromptText            string                `json:"prompt,omitempty"`
+	Answer                string                `json:"answer,omitempty"`
+	Canary                string                `json:"canary,omitempty"`
+	QuestionHash          string                `json:"question_hash,omitempty"`
+	AllowOptionalSubcalls bool                  `json:"allow_optional_subcalls,omitempty"`
+	RLMReview             bool                  `json:"rlm_review,omitempty"`
+	RLMReviewRecursive    bool                  `json:"rlm_review_recursive,omitempty"`
+	RequiredSubcallRules  []RequiredSubcallRule `json:"required_subcall_rules,omitempty"`
+}
+
+// RequiredSubcallRule declares a runtime-owned recursive-shape requirement.
+type RequiredSubcallRule struct {
+	Child            int `json:"child"`
+	RequiredSubcalls int `json:"required_subcalls"`
 }
 
 // Condition describes one configured benchmark arm.
@@ -65,6 +80,7 @@ type Condition struct {
 	RLMToolProfile        string        `json:"rlm_tool_profile,omitempty"`
 	AllowedTools          []string      `json:"allowed_tools,omitempty"`
 	MaxTokens             int           `json:"max_tokens,omitempty"`
+	MaxDepth              int           `json:"max_depth,omitempty"`
 	MaxIterations         int           `json:"max_iterations,omitempty"`
 	MaxSubcalls           int           `json:"max_subcalls,omitempty"`
 	TimeoutMS             int64         `json:"timeout_ms,omitempty"`
@@ -116,6 +132,7 @@ type LeakageFlags struct {
 	ArtifactEnabled               bool     `json:"artifact_enabled"`
 	ShellEnabled                  bool     `json:"shell_enabled"`
 	SubcallEnabled                bool     `json:"subcall_enabled"`
+	SubcallAllowed                bool     `json:"subcall_allowed,omitempty"`
 	VerifierAccessibleDuringSolve bool     `json:"verifier_accessible_during_solve"`
 	DatasetAccessibleDuringSolve  bool     `json:"dataset_accessible_during_solve"`
 	AnswerAccessibleDuringSolve   bool     `json:"answer_accessible_during_solve"`
@@ -124,7 +141,7 @@ type LeakageFlags struct {
 
 // Leaked reports whether any leakage flag invalidates primary benchmark use.
 func (f LeakageFlags) Leaked() bool {
-	return f.FilesystemEnabled || f.NetworkEnabled || f.RepoSearchEnabled || f.MemoryEnabled || f.VaultEnabled || f.ArtifactEnabled || f.ShellEnabled || f.SubcallEnabled || f.VerifierAccessibleDuringSolve || f.DatasetAccessibleDuringSolve || f.AnswerAccessibleDuringSolve || len(f.ForbiddenToolNames) > 0
+	return f.FilesystemEnabled || f.NetworkEnabled || f.RepoSearchEnabled || f.MemoryEnabled || f.VaultEnabled || f.ArtifactEnabled || f.ShellEnabled || (f.SubcallEnabled && !f.SubcallAllowed) || f.VerifierAccessibleDuringSolve || f.DatasetAccessibleDuringSolve || f.AnswerAccessibleDuringSolve || len(f.ForbiddenToolNames) > 0
 }
 
 // RLMAttemptMeta stores RLM-specific telemetry without forcing baseline arms to

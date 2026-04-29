@@ -117,7 +117,7 @@ func TestChildSpawner_SpawnChild_EmitsFailedOnCommandError(t *testing.T) {
 func TestChildSpawner_SpawnChild_EmitsRecentLogsInRawState(t *testing.T) {
 	t.Parallel()
 
-	state := runtimeworkers.NewStateComponent(runtimeworkers.Config{Buffer: 32})
+	state := runtimeworkers.NewStateComponent(runtimeworkers.Config{Buffer: 64})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -128,7 +128,7 @@ func TestChildSpawner_SpawnChild_EmitsRecentLogsInRawState(t *testing.T) {
 		BuildCommand: func(req spawn.Request) (CommandSpec, error) {
 			return CommandSpec{
 				Path: "/bin/sh",
-				Args: []string{"-c", "echo hello-stdout; sleep 1; echo hello-stderr 1>&2; sleep 1; exit 0"},
+				Args: []string{"-c", "echo hello-stdout; sleep 0.3; echo hello-stderr 1>&2; exit 0"},
 			}, nil
 		},
 	})
@@ -152,6 +152,9 @@ func TestChildSpawner_SpawnChild_EmitsRecentLogsInRawState(t *testing.T) {
 	}
 	_ = waitForWorkerStatus(t, state, "subprocess:agent:logs-1", coreworker.StatusCompleted)
 
+	// Give log goroutines time to finish their final publishes before
+	// cancelling the state component's context, avoiding a send-on-closed-channel race.
+	time.Sleep(50 * time.Millisecond)
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("state.Run() error = %v", err)

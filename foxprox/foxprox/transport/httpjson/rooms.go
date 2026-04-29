@@ -24,12 +24,12 @@ type CreateRoomRequest struct {
 
 // RoomResponse is the wire form of a room record.
 type RoomResponse struct {
-	ID          string    `json:"id"`
-	Workspace   string    `json:"workspace"`
-	Title       string    `json:"title,omitempty"`
-	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	ArchivedAt  time.Time `json:"archived_at,omitempty"`
+	ID          string     `json:"id"`
+	Workspace   string     `json:"workspace"`
+	Title       string     `json:"title,omitempty"`
+	Description string     `json:"description,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
 }
 
 // JoinRoomRequest is the JSON body for POST /v1/rooms/{id}/join. Uses the
@@ -51,16 +51,16 @@ type LeaveRoomRequest struct {
 
 // MemberResponse is the wire form of a room member row.
 type MemberResponse struct {
-	RoomID     string    `json:"room_id"`
-	AgentID    string    `json:"agent_id"`
-	SessionID  string    `json:"session_id"`
-	InboxID    string    `json:"inbox_id"`
-	Role       string    `json:"role,omitempty"`
-	RoleCustom string    `json:"role_custom,omitempty"`
-	CanMutate  bool      `json:"can_mutate"`
-	ImportHint string    `json:"import_hint,omitempty"`
-	JoinedAt   time.Time `json:"joined_at"`
-	LeftAt     time.Time `json:"left_at,omitempty"`
+	RoomID     string     `json:"room_id"`
+	AgentID    string     `json:"agent_id"`
+	SessionID  string     `json:"session_id"`
+	InboxID    string     `json:"inbox_id"`
+	Role       string     `json:"role,omitempty"`
+	RoleCustom string     `json:"role_custom,omitempty"`
+	CanMutate  bool       `json:"can_mutate"`
+	ImportHint string     `json:"import_hint,omitempty"`
+	JoinedAt   time.Time  `json:"joined_at"`
+	LeftAt     *time.Time `json:"left_at,omitempty"`
 }
 
 // SendMessageRequest is the JSON body for POST /v1/messages. For this slice
@@ -301,7 +301,8 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 			errors.Is(err, router.ErrEmptyMessage),
 			errors.Is(err, router.ErrUnsupportedDelivery):
 			writeError(w, http.StatusBadRequest, err.Error())
-		case errors.Is(err, router.ErrNoActiveMembers):
+		case errors.Is(err, router.ErrNoActiveMembers),
+			errors.Is(err, router.ErrNoMutableMembers):
 			writeError(w, http.StatusConflict, err.Error())
 		case errors.Is(err, room.ErrRoomNotFound):
 			writeError(w, http.StatusNotFound, err.Error())
@@ -517,7 +518,7 @@ func toRoomResponse(rm room.Room) RoomResponse {
 		Title:       rm.Title,
 		Description: rm.Description,
 		CreatedAt:   rm.CreatedAt.UTC(),
-		ArchivedAt:  rm.ArchivedAt.UTC(),
+		ArchivedAt:  timePtrUTC(rm.ArchivedAt),
 	}
 }
 
@@ -532,7 +533,7 @@ func toMemberResponse(mem room.Member) MemberResponse {
 		CanMutate:  mem.CanMutate,
 		ImportHint: mem.ImportHint,
 		JoinedAt:   mem.JoinedAt.UTC(),
-		LeftAt:     mem.LeftAt.UTC(),
+		LeftAt:     timePtrUTC(mem.LeftAt),
 	}
 }
 

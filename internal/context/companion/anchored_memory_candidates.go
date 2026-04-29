@@ -203,14 +203,15 @@ func extractCandidatesFromText(sourceEventID int64, text, source string, scope A
 		return nil
 	}
 
-	extractions := extractProfileClaims(text)
-	extractions = append(extractions, extractExplicitFacts(text)...)
-	extractions = append(extractions, extractDecisions(text)...)
-	extractions = append(extractions, extractOpenQuestions(text)...)
-	if goal := extractGoalChange(text); goal != nil {
-		extractions = append(extractions, *goal)
+	// Use the extraction policy to extract entries for all categories
+	policy := NewDefaultPatternExtractionPolicy()
+	allCategories := []string{
+		ExtractionCategoryPreference, ExtractionCategoryDecision,
+		ExtractionCategoryQuestion, ExtractionCategoryGoalChange,
+		ExtractionCategoryRetraction,
 	}
-	extractions = append(extractions, extractRetractions(text)...)
+	extractions := policy.ExtractEntries(text, allCategories)
+	extractions = append(extractions, extractExplicitFacts(text)...)
 
 	out := make([]AnchoredMemoryCandidate, 0, len(extractions))
 	for _, entry := range extractions {

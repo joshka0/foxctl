@@ -2,6 +2,7 @@ package env
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/joshka0/foxctl/internal/rlm"
@@ -11,21 +12,41 @@ func TestFilterToolsCodeIntel(t *testing.T) {
 	t.Parallel()
 
 	in := []rlm.Tool{
-		{Name: "get_top_of_mind"},
-		{Name: "semantic_search_code"},
-		{Name: "smart_search_code"},
-		{Name: "ripgrep_code"},
-		{Name: "code_search_ensemble"},
-		{Name: "search_repo"},
-		{Name: "load_file"},
-		{Name: "read_note"},
+		{Name: "retrieve_code"},
+		{Name: "retrieve_memory"},
+		{Name: "retrieve_context"},
+		{Name: "retrieve_task"},
+		{Name: "retrieve_mixed"},
+		{Name: "load_evidence_ref"},
 	}
 	got := FilterTools(in, ToolProfileCodeIntel)
 	var names []string
 	for _, tool := range got {
 		names = append(names, tool.Name)
 	}
-	want := []string{"semantic_search_code", "smart_search_code", "ripgrep_code", "code_search_ensemble", "load_file", "read_note"}
+	want := []string{"retrieve_code", "load_evidence_ref"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("FilterTools()=%v want %v", names, want)
+	}
+}
+
+func TestFilterToolsMemoryRecall(t *testing.T) {
+	t.Parallel()
+
+	in := []rlm.Tool{
+		{Name: "retrieve_code"},
+		{Name: "retrieve_memory"},
+		{Name: "retrieve_context"},
+		{Name: "retrieve_task"},
+		{Name: "retrieve_mixed"},
+		{Name: "load_evidence_ref"},
+	}
+	got := FilterTools(in, ToolProfileMemoryRecall)
+	var names []string
+	for _, tool := range got {
+		names = append(names, tool.Name)
+	}
+	want := []string{"retrieve_memory", "retrieve_context", "load_evidence_ref"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("FilterTools()=%v want %v", names, want)
 	}
@@ -35,17 +56,35 @@ func TestFilterToolsLongCoTMinimalReturnsNoTools(t *testing.T) {
 	t.Parallel()
 
 	in := []rlm.Tool{
-		{Name: "get_top_of_mind"},
-		{Name: "semantic_search_code"},
-		{Name: "code_search_ensemble"},
-		{Name: "load_file"},
-		{Name: "search_vault"},
-		{Name: "subcall"},
+		{Name: "retrieve_code"},
+		{Name: "retrieve_mixed"},
+		{Name: "load_evidence_ref"},
 	}
-	for _, profile := range []string{ToolProfileLongCoTMinimal, ToolProfileLongCoTRLM} {
+	for _, profile := range []string{ToolProfileLongCoTNoModelTools} {
 		if got := FilterTools(in, profile); len(got) != 0 {
 			t.Fatalf("FilterTools(%q)=%v want no tools", profile, got)
 		}
+	}
+}
+
+func TestResolveToolProfileUnknownFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	in := []rlm.Tool{
+		{Name: "retrieve_code"},
+		{Name: "load_evidence_ref"},
+	}
+
+	if got := FilterTools(in, "longcot-repl"); len(got) != 0 {
+		t.Fatalf("FilterTools(unknown)=%v want no tools", got)
+	}
+
+	_, err := ResolveToolProfile(in, "longcot-repl")
+	if err == nil {
+		t.Fatal("ResolveToolProfile() error = nil, want unsupported profile error")
+	}
+	if !strings.Contains(err.Error(), "unsupported tool profile") {
+		t.Fatalf("ResolveToolProfile() error = %v", err)
 	}
 }
 

@@ -91,6 +91,10 @@ Retrieve context by key, pattern, or semantic search.
 }
 ```
 
+Exact key lookup uses scope precedence `turn` → `conversation` → `global` when
+`scope` is omitted. `scope` must be one of `turn`, `conversation`, or `global`;
+invalid scopes fail closed instead of widening the query.
+
 #### `rlm_context_list`
 List available context keys.
 
@@ -138,12 +142,14 @@ RLM context complements the [Companion Memory System](./companion-memory.md):
 
 | System | Purpose | Storage |
 |--------|---------|---------|
-| Companion Memory | Turn-by-turn conversation history | L0/L1/L2 in companion.db |
+| Companion Memory | Hybrid conversation memory: hard-state facts, soft episodes, and evidence snippets | companion.db |
 | RLM Context | Structured facts and preferences | context_vars in contextvar.db |
 
 **When to use each:**
 - **Companion Memory**: "What did we talk about yesterday?"
 - **RLM Context**: "What's the user's preferred coding style?"
+- **RLM semantic query**: `rlm_context_query(semantic_query=...)` returns a capped
+  hybrid companion-memory response with trust layers (`H1`, `E1`, `EVD`).
 
 ## Data Flow
 
@@ -188,15 +194,14 @@ LLM responds: "Your name is Sarah!"
 ```
 LLM calls: rlm_context_query(semantic_query="topics we discussed")
     │
-    ├─▶ If embedding provider configured:
-    │      Generate query embedding
-    │      Vector similarity search in Memory Store
+    ├─▶ Read active companion hard-state entries (H1)
     │
-    └─▶ Fallback:
-           Text search in Memory Store
+    ├─▶ Read non-deleted summarized soft episodes (E1)
+    │
+    └─▶ Read matching evidence snippets with source verification (EVD)
     │
     ▼
-Response: {"memories": [...], "found": true, "count": 5}
+Response: {"memories": [...], "found": true, "count": 5, "stats": {"method": "hybrid"}}
 ```
 
 ## Storage Schema

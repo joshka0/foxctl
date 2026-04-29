@@ -33,7 +33,7 @@ func TestReadOnlyRunnerReturnsNotImplemented(t *testing.T) {
 
 	runner := ReadOnlyRunner{}
 	_, err := runner.Run(context.Background(), Task{Prompt: "inspect"}, Environment{
-		Tools: []Tool{{Name: "search_repo", ReadOnly: true}},
+		Tools: []Tool{{Name: "retrieve_mixed", ReadOnly: true}},
 	})
 	if !errors.Is(err, ErrNotImplemented) {
 		t.Fatalf("err=%v want ErrNotImplemented", err)
@@ -53,7 +53,7 @@ func TestReadOnlyRunnerExecutesRunFunc(t *testing.T) {
 		},
 	}
 	got, err := runner.Run(context.Background(), Task{Prompt: "inspect repo"}, Environment{
-		Tools: []Tool{{Name: "search_repo", ReadOnly: true}},
+		Tools: []Tool{{Name: "retrieve_mixed", ReadOnly: true}},
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -64,7 +64,7 @@ func TestReadOnlyRunnerExecutesRunFunc(t *testing.T) {
 	if got.Iterations != 1 {
 		t.Fatalf("iterations=%d", got.Iterations)
 	}
-	if len(got.EvidenceRefs) != 1 || got.EvidenceRefs[0] != "search_repo" {
+	if len(got.EvidenceRefs) != 1 || got.EvidenceRefs[0] != "retrieve_mixed" {
 		t.Fatalf("evidence=%v", got.EvidenceRefs)
 	}
 }

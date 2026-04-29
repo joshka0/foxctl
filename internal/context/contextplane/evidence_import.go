@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/intelligence/verification"
 	"github.com/joshka0/foxctl/internal/platform/timeutil"
 	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
@@ -94,7 +95,7 @@ func (s *WorkspaceStore) ImportEvidence(ctx context.Context, casRoot, vaultPath 
 	writer.VaultPath = vaultPath
 	project := filepath.Base(strings.TrimSpace(s.layout.WorkspacePath))
 	draftPath := filepath.ToSlash(filepath.Join(writer.Policy.InboxPrefix, "external-evidence", project, fmt.Sprintf("%s-%s.md", safeFileSlug(title, "evidence-import"), timeutil.NowUTC().Format("20060102T150405Z"))))
-	if err := writer.CreateNote(ctx, draftPath, renderEvidenceImportDraft(title, sourceKind, sourceRef, artifactDigest, extraction, content), true); err != nil {
+	if err := writer.CreateNote(ctx, draftPath, renderEvidenceImportDraft(title, sourceKind, sourceRef, artifactDigest, s.layout.WorkspacePath, extraction, content), true); err != nil {
 		return EvidenceImportResult{}, err
 	}
 
@@ -251,14 +252,14 @@ func persistEvidenceContentArtifact(ctx context.Context, casRoot, content string
 	return obj.Digest, nil
 }
 
-func renderEvidenceImportDraft(title, sourceKind, sourceRef, artifactDigest string, extraction EvidenceExtraction, rawContent string) string {
+func renderEvidenceImportDraft(title, sourceKind, sourceRef, artifactDigest, workspaceID string, extraction EvidenceExtraction, rawContent string) string {
 	var b strings.Builder
 	frontmatter := map[string]any{
 		"title":           title,
 		"type":            "evidence",
 		"status":          "draft",
 		"trust":           "raw",
-		"provenance_refs": buildEvidenceProvenanceRefs(sourceKind, sourceRef, artifactDigest),
+		"provenance_refs": buildEvidenceProvenanceRefs(sourceKind, sourceRef, artifactDigest, workspaceID),
 		"updated":         timeutil.NowUTC().Format("2006-01-02"),
 	}
 	frontmatterYAML, err := yaml.Marshal(frontmatter)
@@ -303,14 +304,38 @@ func renderEvidenceImportDraft(title, sourceKind, sourceRef, artifactDigest stri
 	return b.String()
 }
 
-func buildEvidenceProvenanceRefs(sourceKind, sourceRef, artifactDigest string) []string {
-	refs := []string{
-		fmt.Sprintf("external:%s:%s", strings.TrimSpace(sourceKind), strings.TrimSpace(sourceRef)),
+func buildEvidenceProvenanceRefs(sourceKind, sourceRef, artifactDigest, workspaceID string) []contextengine.EvidenceRef {
+	kind := strings.TrimSpace(sourceKind)
+	ref := strings.TrimSpace(sourceRef)
+	refs := make([]contextengine.EvidenceRef, 0, 2)
+
+	if ref != "" {
+		// Try to parse as a typed ref (e.g. "path:foo", "symbol:Bar"); otherwise fall back.
+		parsed, err := contextengine.ParseEvidenceRef(ref)
+		if err != nil {
+			parsed = contextengine.EvidenceRef{
+				Type: fallbackRefTypeForSourceKind(kind),
+				Ref:  fmt.Sprintf("%s:%s", kind, ref),
+			}
+		}
+		refs = append(refs, contextengine.NormalizeEvidenceRef(parsed, workspaceID))
 	}
-	if strings.TrimSpace(artifactDigest) != "" {
-		refs = append(refs, "artifact:"+strings.TrimSpace(artifactDigest))
+	if digest := strings.TrimSpace(artifactDigest); digest != "" {
+		refs = append(refs, contextengine.NormalizeEvidenceRef(contextengine.EvidenceRef{
+			Type: contextengine.RefTypeArtifact,
+			Ref:  digest,
+		}, workspaceID))
 	}
 	return refs
+}
+
+func fallbackRefTypeForSourceKind(kind string) contextengine.RefType {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "file", "path":
+		return contextengine.RefTypePath
+	default:
+		return contextengine.RefTypeNote
+	}
 }
 
 func suggestedEvidenceTitle(sourceKind, sourceRef, content string) string {

@@ -113,7 +113,7 @@ func TestDaemon_RoomsOverWire(t *testing.T) {
 	}
 	var aliceActive, bobActive int
 	for _, m := range members {
-		if !m.LeftAt.IsZero() {
+		if m.LeftAt != nil && !m.LeftAt.IsZero() {
 			continue
 		}
 		switch m.AgentID {

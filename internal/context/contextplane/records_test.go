@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 )
 
 func TestWorkspaceStoreSaveHandoffAndAppendRecords(t *testing.T) {
@@ -18,7 +20,7 @@ func TestWorkspaceStoreSaveHandoffAndAppendRecords(t *testing.T) {
 		Phase:        "formalize",
 		Outcome:      "partial",
 		Summary:      "Defined planes and promotion rules.",
-		EvidenceRefs: []string{"note:arscontexta-review"},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeNote, Ref: "arscontexta-review"}},
 		NextActions:  []string{"Draft ADR-0001"},
 	})
 	if err != nil {
@@ -39,7 +41,7 @@ func TestWorkspaceStoreSaveHandoffAndAppendRecords(t *testing.T) {
 		Count:        2,
 		Project:      "foxctl",
 		Area:         "runtime",
-		EvidenceRefs: []string{"handoff:T-1038"},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeTask, Ref: "T-1038"}},
 	})
 	if err != nil {
 		t.Fatalf("AppendObservation: %v", err)
@@ -57,7 +59,7 @@ func TestWorkspaceStoreSaveHandoffAndAppendRecords(t *testing.T) {
 		Count:        1,
 		Project:      "foxctl",
 		Area:         "runtime",
-		EvidenceRefs: []string{"handoff:T-1041"},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeTask, Ref: "T-1041"}},
 	})
 	if err != nil {
 		t.Fatalf("AppendObservation merge: %v", err)
@@ -81,7 +83,7 @@ func TestWorkspaceStoreSaveHandoffAndAppendRecords(t *testing.T) {
 		Kind:        "contradiction",
 		Statement:   "Runtime writes are bypassing the promotion path.",
 		Impact:      "medium",
-		RelatedRefs: []string{"note:write-policy"},
+		RelatedRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeNote, Ref: "write-policy"}},
 	})
 	if err != nil {
 		t.Fatalf("AppendTension: %v", err)
@@ -97,7 +99,7 @@ func TestWorkspaceStoreSaveHandoffAndAppendRecords(t *testing.T) {
 		Kind:        "contradiction",
 		Statement:   "Runtime writes are bypassing the promotion path.",
 		Impact:      "high",
-		RelatedRefs: []string{"run:R-2026-03-09-02"},
+		RelatedRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeRun, Ref: "R-2026-03-09-02"}},
 	})
 	if err != nil {
 		t.Fatalf("AppendTension merge: %v", err)
@@ -127,7 +129,7 @@ func TestDraftPromotionFromObservation(t *testing.T) {
 		Count:        2,
 		Project:      "foxctl",
 		Area:         "runtime",
-		EvidenceRefs: []string{"handoff:T-1038"},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeTask, Ref: "T-1038"}},
 	}); err != nil {
 		t.Fatalf("AppendObservation: %v", err)
 	}
@@ -154,7 +156,7 @@ func TestMergePromotionDraft(t *testing.T) {
 		Count:        2,
 		Project:      "foxctl",
 		Area:         "runtime",
-		EvidenceRefs: []string{"handoff:T-1038"},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeTask, Ref: "T-1038"}},
 	}); err != nil {
 		t.Fatalf("AppendObservation: %v", err)
 	}
@@ -250,7 +252,7 @@ func TestBuildReportAndGenerateMaintenanceTasks(t *testing.T) {
 		Count:        2,
 		Project:      "foxctl",
 		Area:         "runtime",
-		EvidenceRefs: []string{"handoff:T-1038"},
+		EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeTask, Ref: "T-1038"}},
 	}); err != nil {
 		t.Fatalf("AppendObservation: %v", err)
 	}
@@ -259,7 +261,7 @@ func TestBuildReportAndGenerateMaintenanceTasks(t *testing.T) {
 		Statement:   "Runtime writes are bypassing the promotion path.",
 		Impact:      "high",
 		Count:       2,
-		RelatedRefs: []string{"note:write-policy"},
+		RelatedRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeNote, Ref: "write-policy"}},
 	}); err != nil {
 		t.Fatalf("AppendTension: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
@@ -38,7 +39,7 @@ func TestWorkerRunOnce(t *testing.T) {
 		Impact:      "high",
 		Status:      "open",
 		Count:       2,
-		RelatedRefs: []string{"note:write-policy"},
+		RelatedRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeNote, Ref: "write-policy"}},
 		CreatedAt:   time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("AppendTension: %v", err)
@@ -75,7 +76,7 @@ func TestWorkerRunOnceGeneratesProposalMergeMaintenanceTasks(t *testing.T) {
 	store := NewWorkspaceStore(workspace)
 	if _, err := store.RecordMemoryProposal(context.Background(), MemoryProposal{
 		DedupeKey:      "external_evidence_import|aca-vocabulary",
-		Kind:           "external_evidence_import",
+		Kind:           PolicyKindExternalImport,
 		Classification: "external_evidence",
 		Status:         "prepared",
 		ReviewRequired: true,

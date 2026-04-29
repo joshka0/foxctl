@@ -32,6 +32,7 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/mailbox"
 	memorystore "github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/joshka0/foxctl/internal/storage/sessions"
+	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 	"github.com/joshka0/foxctl/internal/storage/tasks"
 	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
@@ -282,6 +283,14 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	opts.WorkspaceRoot = absWorkspace
 
+	prevPool := sqliteutil.GetGlobalPool()
+	sharedPool := sqliteutil.NewPool()
+	sqliteutil.SetGlobalPool(sharedPool)
+	defer func() {
+		sqliteutil.SetGlobalPool(prevPool)
+		_ = sharedPool.Close()
+	}()
+
 	// 1. Open stores
 	stores, err := openDaemonStores(ctx, opts.StorageRoot, opts)
 	if err != nil {
@@ -529,6 +538,10 @@ func buildToolsConfig(opts Options, agentRecord agent.Agent, traceID string, sto
 	if workspaceRoot == "" {
 		workspaceRoot = "."
 	}
+	repoIndexWorkspaceRoot := strings.TrimSpace(opts.RepoIndexWorkspaceRoot)
+	if repoIndexWorkspaceRoot == "" {
+		repoIndexWorkspaceRoot = workspaceRoot
+	}
 	return tools.Config{
 		WorkspaceRoot: workspaceRoot,
 		WorkspaceID:   agentRecord.Namespace,
@@ -555,7 +568,7 @@ func buildToolsConfig(opts Options, agentRecord agent.Agent, traceID string, sto
 			return storagents.Open(ctx, opts.StorageRoot)
 		},
 		OpenRepoIndexStore: func(ctx context.Context) (*repoindex.Store, error) {
-			return repoindex.Open(ctx, opts.StorageRoot, workspaceRoot)
+			return repoindex.Open(ctx, opts.StorageRoot, repoIndexWorkspaceRoot)
 		},
 		EndTick: endTick,
 	}

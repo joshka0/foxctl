@@ -24,6 +24,7 @@ type codeSearchEnsembleEvalResult struct {
 	Category                   string                             `json:"category,omitempty"`
 	TaskType                   string                             `json:"task_type,omitempty"`
 	RouteFamily                string                             `json:"route_family,omitempty"`
+	AdapterExecutionPath       string                             `json:"adapter_execution_path,omitempty"`
 	Status                     string                             `json:"status,omitempty"`
 	Summary                    string                             `json:"summary,omitempty"`
 	AnswerBasis                string                             `json:"answer_basis,omitempty"`
@@ -181,6 +182,10 @@ type codeSearchEnsembleOutput struct {
 	} `json:"metadata,omitempty"`
 }
 
+type codeSearchEnsembleInternalExecutor interface {
+	ExecuteInternal(ctx context.Context, name string, args json.RawMessage) (map[string]any, error)
+}
+
 func newEvalCodeSearchEnsembleCommand() *cobra.Command {
 	var (
 		workspace               string
@@ -278,6 +283,10 @@ func newEvalCodeSearchEnsembleCommand() *cobra.Command {
 				"results":                 results,
 				"summary":                 summary,
 				"cli_command":             cmd.CommandPath(),
+				"effective_contract": map[string]any{
+					"adapter_execution_path": "internal_adapter_bypass_v1",
+					"tool_name":              "code_search_ensemble",
+				},
 			}
 
 			if strings.TrimSpace(reportFile) != "" {
@@ -350,10 +359,11 @@ func runSingleCodeSearchEnsembleEval(
 	llmMaxCandidates int,
 ) codeSearchEnsembleEvalResult {
 	result := codeSearchEnsembleEvalResult{
-		CaseID:   strings.TrimSpace(evalCase.ID),
-		Category: strings.TrimSpace(evalCase.Category),
-		TaskType: normalizeCodeSearchEvalTaskType(evalCase),
-		Status:   "ok",
+		CaseID:               strings.TrimSpace(evalCase.ID),
+		Category:             strings.TrimSpace(evalCase.Category),
+		TaskType:             normalizeCodeSearchEvalTaskType(evalCase),
+		AdapterExecutionPath: "internal_adapter_bypass_v1",
+		Status:               "ok",
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -388,9 +398,12 @@ func runSingleCodeSearchEnsembleEval(
 		result.Error = err.Error()
 		return result
 	}
+	defer func() { _ = bootstrapper.Close() }()
 	env.Tools = rlmenv.FilterTools(env.Tools, toolProfile)
 
 	adapter := rlmenv.NewReadOnlyAdapter(cfg, workspace, strings.TrimSpace(vaultPath), companionDB, env)
+	adapter.SetContextEngineStore(bootstrapper.ContextEngineStore())
+	adapter.SetTaskStore(bootstrapper.TaskStore())
 
 	start := time.Now()
 	payload := map[string]any{
@@ -426,7 +439,7 @@ func runSingleCodeSearchEnsembleEval(
 		result.Error = err.Error()
 		return result
 	}
-	out, err := adapter.Execute(runCtx, "code_search_ensemble", raw)
+	out, err := runCodeSearchEnsembleInternal(runCtx, adapter, raw)
 	result.DurationMS = time.Since(start).Milliseconds()
 	if err != nil {
 		result.Status = "error"
@@ -485,6 +498,10 @@ func runSingleCodeSearchEnsembleEval(
 	result.ExcludedPathHits, result.WrongScopePenalty = scoreExcludedPaths(evalCase.ExcludedPaths, strings.Join(result.Files, "\n"))
 	result.Passed = shouldPassCodeSearchEnsembleEval(result, evalCase, passThreshold)
 	return result
+}
+
+func runCodeSearchEnsembleInternal(ctx context.Context, executor codeSearchEnsembleInternalExecutor, payload json.RawMessage) (map[string]any, error) {
+	return executor.ExecuteInternal(ctx, "code_search_ensemble", payload)
 }
 
 func buildCodeSearchEnsembleEvalQuery(evalCase promptEvalCase) string {

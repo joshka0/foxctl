@@ -35,6 +35,7 @@ func InferInsights(summary, project, area string, evidenceRefs []string) Inferen
 	}
 	lowered := strings.ToLower(summary)
 	result := InferenceResult{}
+	refsWithContext := uniqueEvidenceRefs(stringsToEvidenceRefs(evidenceRefs))
 	for _, rule := range inferenceRules {
 		if !matchesAny(lowered, rule.patterns) {
 			continue
@@ -47,7 +48,7 @@ func InferInsights(summary, project, area string, evidenceRefs []string) Inferen
 				Count:        1,
 				Project:      strings.TrimSpace(project),
 				Area:         strings.TrimSpace(area),
-				EvidenceRefs: uniqueStrings(evidenceRefs),
+				EvidenceRefs: refsWithContext,
 			})
 		case "tension":
 			result.Tensions = append(result.Tensions, Tension{
@@ -55,7 +56,7 @@ func InferInsights(summary, project, area string, evidenceRefs []string) Inferen
 				Statement:   summary,
 				Impact:      "medium",
 				Status:      "open",
-				RelatedRefs: uniqueStrings(evidenceRefs),
+				RelatedRefs: refsWithContext,
 			})
 		}
 	}

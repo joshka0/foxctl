@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	mcpmodels "github.com/XiaoConstantine/mcp-go/pkg/model"
 
@@ -28,22 +29,7 @@ func (r *RegistryToolExecutor) Execute(ctx context.Context, name string, args js
 		return "", fmt.Errorf("tool registry not configured")
 	}
 
-	if canonical, ok := toolnames.CanonicalizeToolName(toolnames.ToolModeLegacy, name); ok {
-		name = canonical
-	}
-
-	switch name {
-	case repoindex.ToolSearchLegacy:
-		name = repoindex.ToolSearch
-	case repoindex.ToolExpandLegacy:
-		name = repoindex.ToolExpand
-	case repoindex.ToolOpenLegacy:
-		name = repoindex.ToolOpen
-	case repoindex.ToolDAGGrepLegacy:
-		name = repoindex.ToolDAGGrep
-	}
-
-	coreTool, err := r.registry.Get(name)
+	_, coreTool, err := r.resolveTool(name)
 	if err != nil {
 		return "", fmt.Errorf("tool %q not found: %w", name, err)
 	}
@@ -75,6 +61,69 @@ func (r *RegistryToolExecutor) Execute(ctx context.Context, name string, args js
 		return "", fmt.Errorf("marshal result: %w", err)
 	}
 	return string(b), nil
+}
+
+func (r *RegistryToolExecutor) resolveTool(name string) (string, Tool, error) {
+	candidates := []string{name}
+	if canonical, ok := toolnames.CanonicalizeToolName(toolnames.ToolModeRuntime, name); ok {
+		candidates = append(candidates, canonical)
+		candidates = append(candidates, runtimeToNamespaceDottedToolName(canonical))
+		candidates = append(candidates, runtimeToLegacyToolName(canonical))
+	}
+	if canonical, ok := toolnames.CanonicalizeToolName(toolnames.ToolModeLegacy, name); ok {
+		candidates = append(candidates, canonical)
+		candidates = append(candidates, legacyRepoIndexToolName(canonical))
+	}
+
+	var lastErr error
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		coreTool, err := r.registry.Get(candidate)
+		if err == nil {
+			return candidate, coreTool, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("tool name is required")
+	}
+	return "", nil, lastErr
+}
+
+func runtimeToLegacyToolName(name string) string {
+	if canonical, ok := toolnames.CanonicalizeToolName(toolnames.ToolModeLegacy, name); ok {
+		return canonical
+	}
+	return ""
+}
+
+func runtimeToNamespaceDottedToolName(name string) string {
+	if n := strings.IndexByte(name, '_'); n >= 0 {
+		return name[:n] + "." + name[n+1:]
+	}
+	return ""
+}
+
+func legacyRepoIndexToolName(name string) string {
+	switch name {
+	case repoindex.ToolSearchLegacy:
+		return repoindex.ToolSearch
+	case repoindex.ToolExpandLegacy:
+		return repoindex.ToolExpand
+	case repoindex.ToolOpenLegacy:
+		return repoindex.ToolOpen
+	case repoindex.ToolDAGGrepLegacy:
+		return repoindex.ToolDAGGrep
+	default:
+		return ""
+	}
 }
 
 // List implements engine.ToolExecutor.

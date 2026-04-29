@@ -20,6 +20,7 @@ import (
 	"github.com/joshka0/foxctl/internal/intelligence/verification"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/rlm/optdata"
 	"github.com/joshka0/foxctl/internal/runtime/runservice"
 	storagents "github.com/joshka0/foxctl/internal/storage/agents"
 	"github.com/joshka0/foxctl/internal/storage/cache"
@@ -600,6 +601,8 @@ func newOptimizePromptCommand() *cobra.Command {
 		transcriptArtifact string
 		preferenceFile     string
 		preferenceArtifact string
+		rlmTraceFile       string
+		rlmTraceComponent  string
 		save               bool
 		mode               string
 		backend            string
@@ -659,6 +662,11 @@ calls are made during optimization unless you layer in a custom evaluator later.
 			if err != nil {
 				return writeOptimizeError(out, optimizePromptCommand, fmt.Sprintf("load preference dataset: %v", err))
 			}
+			rlmPreferenceExamples, err := loadRLMTracePreferenceExamples(rlmTraceFile, agentRole, mode, rlmTraceComponent, optimizerCfg.TargetProfile)
+			if err != nil {
+				return writeOptimizeError(out, optimizePromptCommand, fmt.Sprintf("load RLM trace dataset: %v", err))
+			}
+			preferenceExamples = append(preferenceExamples, rlmPreferenceExamples...)
 			if len(transcriptExamples) > 0 {
 				optimizer.SetTranscriptExamples(transcriptExamples)
 			}
@@ -692,6 +700,7 @@ calls are made during optimization unless you layer in a custom evaluator later.
 				},
 				"transcript_example_count": len(transcriptExamples),
 				"preference_example_count": len(preferenceExamples),
+				"rlm_trace_example_count":  len(rlmPreferenceExamples),
 				"cli_command":              cmd.CommandPath(),
 			}
 
@@ -765,6 +774,8 @@ calls are made during optimization unless you layer in a custom evaluator later.
 	cmd.Flags().StringVar(&transcriptArtifact, "transcript-dataset-artifact", "", "CAS digest for a transcript dataset JSONL artifact")
 	cmd.Flags().StringVar(&preferenceFile, "preference-dataset-file", "", "Ranked preference dataset JSONL file to incorporate into GEPA mode")
 	cmd.Flags().StringVar(&preferenceArtifact, "preference-dataset-artifact", "", "CAS digest for a ranked preference dataset JSONL artifact")
+	cmd.Flags().StringVar(&rlmTraceFile, "rlm-trace-file", "", "RLM optimizer trajectory JSONL file to convert into prompt preference examples")
+	cmd.Flags().StringVar(&rlmTraceComponent, "rlm-trace-component", "system", "RLM prompt component to optimize from trace data: system, task, repl_system_prompt, helper_solve_system, or helper_solve_draft")
 	cmd.Flags().BoolVar(&save, "save", true, "Persist the optimized prompt variant")
 	cmd.Flags().StringVar(&mode, "mode", "gepa", "Optimization mode: gepa, copro, mipro-light, mipro-medium, or mipro-heavy")
 	cmd.Flags().StringVar(&backend, "backend", "auto", "Prompt optimization backend: auto, foxctl, or dspy-go (GEPA defaults to dspy-go)")
@@ -789,6 +800,8 @@ func newOptimizePromptProposeCommand() *cobra.Command {
 		transcriptArtifact string
 		preferenceFile     string
 		preferenceArtifact string
+		rlmTraceFile       string
+		rlmTraceComponent  string
 		mode               string
 		backend            string
 		count              int
@@ -839,6 +852,11 @@ func newOptimizePromptProposeCommand() *cobra.Command {
 			if err != nil {
 				return writeOptimizeError(out, optimizePromptCommand, fmt.Sprintf("load preference dataset: %v", err))
 			}
+			rlmPreferenceExamples, err := loadRLMTracePreferenceExamples(rlmTraceFile, agentRole, mode, rlmTraceComponent, optimizerCfg.TargetProfile)
+			if err != nil {
+				return writeOptimizeError(out, optimizePromptCommand, fmt.Sprintf("load RLM trace dataset: %v", err))
+			}
+			preferenceExamples = append(preferenceExamples, rlmPreferenceExamples...)
 			if len(transcriptExamples) > 0 {
 				optimizer.SetTranscriptExamples(transcriptExamples)
 			}
@@ -862,6 +880,7 @@ func newOptimizePromptProposeCommand() *cobra.Command {
 				"candidate_count":          len(candidates),
 				"transcript_example_count": len(transcriptExamples),
 				"preference_example_count": len(preferenceExamples),
+				"rlm_trace_example_count":  len(rlmPreferenceExamples),
 				"candidates":               candidates,
 				"cli_command":              cmd.CommandPath(),
 			}
@@ -919,6 +938,8 @@ func newOptimizePromptProposeCommand() *cobra.Command {
 	cmd.Flags().StringVar(&transcriptArtifact, "transcript-dataset-artifact", "", "CAS digest for a transcript dataset JSONL artifact")
 	cmd.Flags().StringVar(&preferenceFile, "preference-dataset-file", "", "Ranked preference dataset JSONL file to incorporate into GEPA mode")
 	cmd.Flags().StringVar(&preferenceArtifact, "preference-dataset-artifact", "", "CAS digest for a ranked preference dataset JSONL artifact")
+	cmd.Flags().StringVar(&rlmTraceFile, "rlm-trace-file", "", "RLM optimizer trajectory JSONL file to convert into prompt preference examples")
+	cmd.Flags().StringVar(&rlmTraceComponent, "rlm-trace-component", "system", "RLM prompt component to optimize from trace data: system, task, repl_system_prompt, helper_solve_system, or helper_solve_draft")
 	cmd.Flags().StringVar(&mode, "mode", "gepa", "Optimization mode")
 	cmd.Flags().StringVar(&backend, "backend", "auto", "Prompt optimization backend: auto, foxctl, or dspy-go (GEPA defaults to dspy-go)")
 	cmd.Flags().IntVar(&count, "count", 5, "Number of candidates to propose")
@@ -1337,6 +1358,23 @@ func loadPreferenceDatasetExamples(ctx context.Context, casRoot, filePath, artif
 	default:
 		return nil, nil
 	}
+}
+
+func loadRLMTracePreferenceExamples(filePath, agentRole, mode, component, targetProfile string) ([]optimization.PromptPreferenceExample, error) {
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return nil, nil
+	}
+	records, err := optdata.LoadTrajectoryRecordsFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("load RLM trace file: %w", err)
+	}
+	return optdata.BuildPromptPreferenceExamples(records, optdata.PreferenceBuildOptions{
+		AgentRole:       agentRole,
+		Mode:            mode,
+		TargetComponent: component,
+		TargetProfile:   targetProfile,
+	}), nil
 }
 
 func loadPromptEvalCases(filePath string) ([]promptEvalCase, error) {

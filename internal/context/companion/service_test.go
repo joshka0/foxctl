@@ -153,6 +153,62 @@ func TestShouldRecoverContextToolLeak(t *testing.T) {
 	}
 }
 
+func TestLooksLikeToolCallMarkup(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{
+			name: "openai compatible marker",
+			text: `<|tool_call>call:repo_index_dag_grep{query: "repo index"}<tool_call|>`,
+			want: true,
+		},
+		{
+			name: "xml marker",
+			text: "<tool_call>{}</tool_call>",
+			want: true,
+		},
+		{
+			name: "normal answer",
+			text: "The repo index DAG grep returned one seed and two edges.",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := looksLikeToolCallMarkup(tt.text)
+			if got != tt.want {
+				t.Fatalf("looksLikeToolCallMarkup() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMissingExplicitlyRequestedTools(t *testing.T) {
+	toolDefs := []engine.ToolDef{
+		{Name: "repo_index_search"},
+		{Name: "repo_index_dag_grep"},
+	}
+	calls := []engine.ToolCall{{Name: "repo_index_search"}}
+	got := missingExplicitlyRequestedTools(
+		`Use repo_index_dag_grep with query "repo index dag grep" once.`,
+		calls,
+		toolDefs,
+	)
+	if len(got) != 1 || got[0] != "repo_index_dag_grep" {
+		t.Fatalf("missingExplicitlyRequestedTools() = %#v", got)
+	}
+}
+
+func TestExtractRequestedQuery(t *testing.T) {
+	got := extractRequestedQuery(`Use repo_index_dag_grep with query "repo index dag grep" once.`)
+	if got != "repo index dag grep" {
+		t.Fatalf("extractRequestedQuery() = %q", got)
+	}
+}
+
 func TestBuildStructuredConversationState(t *testing.T) {
 	frame := conversationContextFrame{
 		HasHistory:        true,

@@ -1,47 +1,27 @@
 package env
 
 import (
-	"strings"
-
 	"github.com/joshka0/foxctl/internal/rlm"
 )
 
 const (
-	ToolProfileDefault        = "default"
-	ToolProfileCodeIntel      = "code-intel"
-	ToolProfileLongCoTMinimal = "longcot-minimal"
-	ToolProfileLongCoTRLM     = "longcot-rlm"
+	ToolProfileDefault             = string(rlm.ToolProfileDefault)
+	ToolProfileCodeIntel           = string(rlm.ToolProfileCodeIntel)
+	ToolProfileMemoryRecall        = string(rlm.ToolProfileMemoryRecall)
+	ToolProfileLongCoTNoModelTools = string(rlm.ToolProfileLongCoTNoModelTools)
 )
 
+// ResolveToolProfile resolves one tool policy profile against available tools.
+func ResolveToolProfile(tools []rlm.Tool, profile string) (rlm.ToolPolicy, error) {
+	return rlm.ResolveToolPolicy(tools, profile)
+}
+
 // FilterTools returns a constrained tool set for one experimental profile.
+// Unknown profiles fail closed to an empty model-visible tool set.
 func FilterTools(tools []rlm.Tool, profile string) []rlm.Tool {
-	switch strings.ToLower(strings.TrimSpace(profile)) {
-	case "", ToolProfileDefault:
-		return append([]rlm.Tool(nil), tools...)
-	case ToolProfileLongCoTMinimal, ToolProfileLongCoTRLM:
-		// LongCoT primary conditions must not expose repo, vault, memory,
-		// artifact, file, or subcall tools. The RLM profile is intentionally
-		// empty until deterministic non-leaky tools exist.
+	resolved, err := ResolveToolProfile(tools, profile)
+	if err != nil {
 		return []rlm.Tool{}
-	case ToolProfileCodeIntel:
-		allowed := map[string]struct{}{
-			"semantic_search_code": {},
-			"smart_search_code":    {},
-			"ripgrep_code":         {},
-			"code_search_ensemble": {},
-			"load_file":            {},
-			"search_vault":         {},
-			"read_note":            {},
-			"subcall":              {},
-		}
-		out := make([]rlm.Tool, 0, len(tools))
-		for _, tool := range tools {
-			if _, ok := allowed[strings.TrimSpace(tool.Name)]; ok {
-				out = append(out, tool)
-			}
-		}
-		return out
-	default:
-		return append([]rlm.Tool(nil), tools...)
 	}
+	return resolved.Tools
 }

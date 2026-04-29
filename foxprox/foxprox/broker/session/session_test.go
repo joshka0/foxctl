@@ -236,6 +236,32 @@ func TestSession_ReadinessForProfileRequiresScreenMatch(t *testing.T) {
 	}
 }
 
+func TestSession_ReadinessForProfileRequiresNotAltScreen(t *testing.T) {
+	s, err := New(Spec{
+		Cmd: []string{"sleep", "30"},
+		Readiness: ReadinessProfile{
+			ScreenRegex:         `PROMPT>$`,
+			ThresholdBPS:        32,
+			Debounce:            500 * time.Millisecond,
+			RequireNotAltScreen: true,
+		},
+	}, OutputLogOptions{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	base := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
+	s.createdAt = base
+	s.now = func() time.Time { return base.Add(time.Second) }
+	s.recordOutputAt(len("PROMPT>"), base)
+	s.Screen().Feed([]byte("PROMPT>"))
+	s.Tracker().Feed([]byte("\x1b[?1049h"))
+
+	ready := s.ProfileReadiness()
+	if ready.Idle || !ready.AltScreen || !ready.ScreenMatch {
+		t.Fatalf("ready = %+v, want blocked by alt screen despite screen match", ready)
+	}
+}
+
 func TestSession_SpawnErrorYieldsStatusError(t *testing.T) {
 	s, err := New(Spec{Cmd: []string{"/definitely/not/a/real/binary"}}, OutputLogOptions{})
 	if err != nil {

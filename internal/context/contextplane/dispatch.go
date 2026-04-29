@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 )
 
@@ -77,18 +78,18 @@ func (s *WorkspaceStore) BuildTaskPacket(ctx context.Context, tasks taskstore.St
 		Blockers:        append([]string(nil), top.Blockers...),
 		RecentDecisions: append([]RecentDecision(nil), top.RecentDecisions...),
 		NextActions:     append([]string(nil), top.NextActions...),
-		RelevantRefs:    append([]string(nil), top.RelevantRefs...),
+		RelevantRefs:    append([]contextengine.EvidenceRef(nil), top.RelevantRefs...),
 		GeneratedAt:     top.UpdatedAt,
 	}
 	if len(handoffs) > 0 {
 		packet.LatestHandoff = &handoffs[0]
-		packet.RelevantRefs = uniqueStrings(append(packet.RelevantRefs, handoffs[0].Handoff.EvidenceRefs...))
+		packet.RelevantRefs = uniqueEvidenceRefs(append(packet.RelevantRefs, handoffs[0].Handoff.EvidenceRefs...))
 	}
 	if candidate.ScopePath != "" {
-		packet.RelevantRefs = uniqueStrings(append(packet.RelevantRefs, "path:"+candidate.ScopePath))
+		packet.RelevantRefs = uniqueEvidenceRefs(append(packet.RelevantRefs, contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: candidate.ScopePath}))
 	}
 	if candidate.PlanFile != "" {
-		packet.RelevantRefs = uniqueStrings(append(packet.RelevantRefs, "plan:"+candidate.PlanFile))
+		packet.RelevantRefs = uniqueEvidenceRefs(append(packet.RelevantRefs, contextengine.EvidenceRef{Type: contextengine.RefTypePath, Ref: candidate.PlanFile}))
 	}
 	if len(packet.RelevantRefs) > 8 {
 		packet.RelevantRefs = packet.RelevantRefs[:8]

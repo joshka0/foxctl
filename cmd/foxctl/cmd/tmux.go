@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/agent/prompts"
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/agent"
 	"github.com/joshka0/foxctl/internal/protocol"
@@ -1476,14 +1477,14 @@ func defaultTmuxObservationStatement(override string, capture tmuxbridge.ReadRes
 	return fmt.Sprintf("tmux bridge message from %s to %s: %s", msg.From, target, content)
 }
 
-func tmuxObservationEvidenceRefs(capture tmuxbridge.ReadResult, msg tmuxbridge.BridgeMessage) []string {
-	refs := []string{
-		"tmux:" + firstNonEmpty(strings.TrimSpace(capture.Pane.Label), strings.TrimSpace(capture.ResolvedTarget), strings.TrimSpace(capture.Target)),
-		"tmux-session:" + capture.Pane.Session,
-		"tmux-bridge:from:" + msg.From,
+func tmuxObservationEvidenceRefs(capture tmuxbridge.ReadResult, msg tmuxbridge.BridgeMessage) []contextengine.EvidenceRef {
+	refs := []contextengine.EvidenceRef{
+		{Type: contextengine.RefTypeRun, Ref: "tmux:" + firstNonEmpty(strings.TrimSpace(capture.Pane.Label), strings.TrimSpace(capture.ResolvedTarget), strings.TrimSpace(capture.Target))},
+		{Type: contextengine.RefTypeRun, Ref: "tmux-session:" + capture.Pane.Session},
+		{Type: contextengine.RefTypeRun, Ref: "tmux-bridge:from:" + msg.From},
 	}
 	if strings.TrimSpace(msg.ReplyTo) != "" {
-		refs = append(refs, "tmux-bridge:reply_to:"+strings.TrimSpace(msg.ReplyTo))
+		refs = append(refs, contextengine.EvidenceRef{Type: contextengine.RefTypeRun, Ref: "tmux-bridge:reply_to:" + strings.TrimSpace(msg.ReplyTo)})
 	}
 	return refs
 }

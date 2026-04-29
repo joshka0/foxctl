@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -347,7 +348,7 @@ func newACAInspectHarness(t *testing.T) acaInspectHarness {
 		WorkspaceID:  filepath.Base(workspacePath),
 		Objective:    "Improve ACA retrieval",
 		Phase:        "experiment",
-		RelevantRefs: []string{"path:internal/storage/memory/store.go"},
+		RelevantRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/storage/memory/store.go"}},
 		UpdatedAt:    time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)

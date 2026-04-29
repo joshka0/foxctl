@@ -14,6 +14,12 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/contextvar"
 )
 
+const (
+	rlmContextDefaultQueryLimit = 20
+	rlmContextMaxQueryLimit     = 100
+	rlmContextMaxListKeys       = 100
+)
+
 // RLMToolExecutor implements ToolExecutor for RLM context operations.
 // These tools allow the LLM to query and store context in stateless mode.
 type RLMToolExecutor struct {
@@ -295,17 +301,9 @@ func (e *RLMToolExecutor) executePut(ctx context.Context, args json.RawMessage) 
 		return "", errors.New("key is required")
 	}
 
-	// Map scope string to type
-	var scope contextvar.Scope
-	switch input.Scope {
-	case "global":
-		scope = contextvar.ScopeGlobal
-	case "turn":
-		scope = contextvar.ScopeTurn
-	case "conversation", "":
-		scope = contextvar.ScopeConversation
-	default:
-		return "", fmt.Errorf("invalid scope: %s", input.Scope)
+	scope, err := parseRLMContextScope(input.Scope, contextvar.ScopeConversation)
+	if err != nil {
+		return "", err
 	}
 
 	// Build params
@@ -356,15 +354,23 @@ func (e *RLMToolExecutor) executeQuery(ctx context.Context, args json.RawMessage
 	// Track query
 	e.queryCount++
 
+	scope, err := parseRLMContextScope(input.Scope, "")
+	if err != nil {
+		return "", err
+	}
+
 	// Handle semantic query over named memories
 	if input.SemanticQuery != "" {
 		return e.executeSemanticQuery(ctx, input)
 	}
 
 	// Build query params
-	limit := 20
+	limit := rlmContextDefaultQueryLimit
 	if input.Limit > 0 {
 		limit = input.Limit
+	}
+	if limit > rlmContextMaxQueryLimit {
+		limit = rlmContextMaxQueryLimit
 	}
 
 	params := contextvar.QueryParams{
@@ -372,16 +378,7 @@ func (e *RLMToolExecutor) executeQuery(ctx context.Context, args json.RawMessage
 		Key:            input.Key,
 		KeyPattern:     input.KeyPattern,
 		Limit:          limit,
-	}
-
-	// Map scope
-	switch input.Scope {
-	case "global":
-		params.Scope = contextvar.ScopeGlobal
-	case "conversation":
-		params.Scope = contextvar.ScopeConversation
-	case "turn":
-		params.Scope = contextvar.ScopeTurn
+		Scope:          scope,
 	}
 
 	// For exact key match, try GetByKey first
@@ -395,18 +392,17 @@ func (e *RLMToolExecutor) executeQuery(ctx context.Context, args json.RawMessage
 			if v != nil {
 				// Increment access count
 				_ = e.store.IncrementAccess(ctx, v.ID)
-				return formatQueryResult([]contextvar.Variable{*v})
+				return formatQueryResult([]contextvar.Variable{*v}, 1, false)
 			}
 		} else {
-			// Try conversation scope first, then global
-			for _, scope := range []contextvar.Scope{contextvar.ScopeConversation, contextvar.ScopeGlobal, contextvar.ScopeTurn} {
+			for _, scope := range []contextvar.Scope{contextvar.ScopeTurn, contextvar.ScopeConversation, contextvar.ScopeGlobal} {
 				v, err := e.store.GetByKey(ctx, e.conversationID, scope, input.Key)
 				if err != nil && !errors.Is(err, contextvar.ErrNotFound) {
 					return "", fmt.Errorf("query failed: %w", err)
 				}
 				if v != nil {
 					_ = e.store.IncrementAccess(ctx, v.ID)
-					return formatQueryResult([]contextvar.Variable{*v})
+					return formatQueryResult([]contextvar.Variable{*v}, 1, false)
 				}
 			}
 		}
@@ -426,7 +422,7 @@ func (e *RLMToolExecutor) executeQuery(ctx context.Context, args json.RawMessage
 		_ = e.store.IncrementAccess(ctx, v.ID)
 	}
 
-	return formatQueryResult(result.Variables)
+	return formatQueryResult(result.Variables, result.TotalCount, result.HasMore)
 }
 
 // executeSemanticQuery searches named memories using semantic similarity.
@@ -590,6 +586,7 @@ func (e *RLMToolExecutor) appendHybridEpisodes(ctx context.Context, remaining in
 		FROM companion_soft_episodes
 		WHERE conversation_id = %s
 		  AND needs_summary = 0
+		  AND deleted_at IS NULL
 		ORDER BY end_event_id DESC
 	`, e.ph(1)), e.conversationID)
 	if err != nil {
@@ -820,15 +817,9 @@ func (e *RLMToolExecutor) executeList(ctx context.Context, args json.RawMessage)
 		return "", fmt.Errorf("invalid input: %w", err)
 	}
 
-	// Map scope
-	var scope contextvar.Scope
-	switch input.Scope {
-	case "global":
-		scope = contextvar.ScopeGlobal
-	case "conversation":
-		scope = contextvar.ScopeConversation
-	case "turn":
-		scope = contextvar.ScopeTurn
+	scope, err := parseRLMContextScope(input.Scope, "")
+	if err != nil {
+		return "", err
 	}
 
 	result, err := e.store.ListKeys(ctx, e.conversationID, scope)
@@ -836,10 +827,18 @@ func (e *RLMToolExecutor) executeList(ctx context.Context, args json.RawMessage)
 		return "", fmt.Errorf("list failed: %w", err)
 	}
 
-	// Format output
+	keys := result.Keys
+	truncated := false
+	if len(keys) > rlmContextMaxListKeys {
+		keys = keys[:rlmContextMaxListKeys]
+		truncated = true
+	}
+
 	output := map[string]interface{}{
-		"keys":        result.Keys,
+		"keys":        keys,
 		"total_count": result.TotalCount,
+		"count":       len(keys),
+		"truncated":   truncated,
 	}
 
 	b, _ := json.Marshal(output)
@@ -1065,8 +1064,23 @@ func appendUnique(slice []string, item string) []string {
 	return append(slice, item)
 }
 
+func parseRLMContextScope(raw string, defaultScope contextvar.Scope) (contextvar.Scope, error) {
+	switch raw {
+	case "":
+		return defaultScope, nil
+	case "global":
+		return contextvar.ScopeGlobal, nil
+	case "conversation":
+		return contextvar.ScopeConversation, nil
+	case "turn":
+		return contextvar.ScopeTurn, nil
+	default:
+		return "", fmt.Errorf("invalid scope: %s", raw)
+	}
+}
+
 // formatQueryResult formats query results for the LLM.
-func formatQueryResult(variables []contextvar.Variable) (string, error) {
+func formatQueryResult(variables []contextvar.Variable, totalCount int, hasMore bool) (string, error) {
 	// Convert to a format suitable for LLM consumption
 	results := make([]map[string]interface{}, len(variables))
 	for i, v := range variables {
@@ -1092,9 +1106,11 @@ func formatQueryResult(variables []contextvar.Variable) (string, error) {
 	}
 
 	output := map[string]interface{}{
-		"variables": results,
-		"found":     len(results) > 0,
-		"count":     len(results),
+		"variables":   results,
+		"found":       len(results) > 0,
+		"count":       len(results),
+		"total_count": totalCount,
+		"truncated":   hasMore,
 	}
 
 	b, err := json.Marshal(output)

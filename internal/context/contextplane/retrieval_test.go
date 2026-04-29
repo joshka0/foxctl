@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/rerank"
 	"github.com/joshka0/foxctl/internal/storage/memory"
@@ -27,7 +28,7 @@ func TestRetrieveBlendsACAStateAndVaultHits(t *testing.T) {
 		Objective:     "Compact handoff work",
 		Phase:         "design",
 		ActiveTaskIDs: []string{"T-1042"},
-		RelevantRefs:  []string{"path:notes/patterns/compact-handoff-pattern.md"},
+		RelevantRefs:  []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "notes/patterns/compact-handoff-pattern.md"}},
 		UpdatedAt:     time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)
@@ -352,7 +353,7 @@ func TestRetrieveWithOptions_ControlOnlySkipsVaultHits(t *testing.T) {
 		WorkspaceID:  "ws-test",
 		Objective:    "Compact handoff work",
 		Phase:        "design",
-		RelevantRefs: []string{"path:notes/patterns/compact-handoff-pattern.md"},
+		RelevantRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "notes/patterns/compact-handoff-pattern.md"}},
 		UpdatedAt:    time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)
@@ -474,15 +475,15 @@ func TestFilterNoisyPaths(t *testing.T) {
 
 func TestContinuityBundlePaths(t *testing.T) {
 	top := &TopOfMind{
-		RelevantRefs: []string{
-			"path:internal/context/contextplane/store.go",
-			"note:ignored",
+		RelevantRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/store.go"},
+			{Type: contextengine.RefTypeNote, Ref: "ignored"},
 		},
 	}
 	handoff := &HandoffRecord{
 		Handoff: Handoff{
-			FilesTouched: []string{"internal/context/contextplane/dispatch.go"},
-			EvidenceRefs: []string{"path:internal/context/contextplane/retrieval.go"},
+			FileRefs:     []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/dispatch.go"}},
+			EvidenceRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/retrieval.go"}},
 		},
 	}
 	opts := DefaultRetrievalOptions()
@@ -507,7 +508,7 @@ func TestRetrieveWithOptions_CoChangePriorBoostsRelatedRepoPaths(t *testing.T) {
 		WorkspaceID:  "ws-test",
 		Objective:    "Refine ACA retrieval",
 		Phase:        "design",
-		RelevantRefs: []string{"path:internal/context/contextplane/store.go"},
+		RelevantRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypePath, Ref: "internal/context/contextplane/store.go"}},
 		UpdatedAt:    time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveTopOfMind: %v", err)
@@ -584,7 +585,7 @@ func TestDetectContradictions(t *testing.T) {
 		Impact:      "high",
 		Status:      "open",
 		Count:       2,
-		RelatedRefs: []string{"note:write-policy"},
+		RelatedRefs: []contextengine.EvidenceRef{{Type: contextengine.RefTypeNote, Ref: "write-policy"}},
 	}); err != nil {
 		t.Fatalf("AppendTension: %v", err)
 	}

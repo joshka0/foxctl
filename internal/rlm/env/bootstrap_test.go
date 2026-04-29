@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -37,11 +38,14 @@ func TestBootstrapBuildIncludesACAAndHandles(t *testing.T) {
 		t.Fatal(err)
 	}
 	handoff := contextplane.Handoff{
-		TaskID:       "T-1",
-		Phase:        "analyze",
-		Outcome:      "partial",
-		Summary:      "Collected auth evidence.",
-		EvidenceRefs: []string{"artifact:turn-1", "path:internal/auth/store.go"},
+		TaskID:  "T-1",
+		Phase:   "analyze",
+		Outcome: "partial",
+		Summary: "Collected auth evidence.",
+		EvidenceRefs: []contextengine.EvidenceRef{
+			{Type: contextengine.RefTypeArtifact, Ref: "turn-1"},
+			{Type: contextengine.RefTypePath, Ref: "internal/auth/store.go"},
+		},
 	}
 	handoffBody, _ := json.Marshal(handoff)
 	if err := os.WriteFile(filepath.Join(layout.HandoffsDir, "handoff-001.json"), handoffBody, 0o644); err != nil {

@@ -7,6 +7,7 @@ import (
 
 type LeakageOptions struct {
 	NetworkEnabled                bool
+	SubcallsAllowed               bool
 	VerifierAccessibleDuringSolve bool
 	DatasetAccessibleDuringSolve  bool
 	AnswerAccessibleDuringSolve   bool
@@ -30,6 +31,7 @@ var forbiddenPrimaryTools = map[string]struct{}{
 	"memory_ensemble_retrieve": {},
 	"code_search_ensemble":     {},
 	"subcall":                  {},
+	"rlm_query":                {},
 	"shell":                    {},
 	"structured_shell":         {},
 }
@@ -41,7 +43,7 @@ var (
 	vaultTools      = exactSet("search_vault", "read_note")
 	artifactTools   = exactSet("search_artifacts", "load_artifact")
 	shellTools      = exactSet("shell", "structured_shell")
-	subcallTools    = exactSet("subcall")
+	subcallTools    = exactSet("subcall", "rlm_query")
 )
 
 // AssessLeakage derives benchmark-contamination flags from exact tool names and
@@ -49,6 +51,7 @@ var (
 func AssessLeakage(exposedToolNames []string, opts LeakageOptions) LeakageFlags {
 	flags := LeakageFlags{
 		NetworkEnabled:                opts.NetworkEnabled,
+		SubcallAllowed:                opts.SubcallsAllowed,
 		VerifierAccessibleDuringSolve: opts.VerifierAccessibleDuringSolve,
 		DatasetAccessibleDuringSolve:  opts.DatasetAccessibleDuringSolve,
 		AnswerAccessibleDuringSolve:   opts.AnswerAccessibleDuringSolve,
@@ -58,7 +61,7 @@ func AssessLeakage(exposedToolNames []string, opts LeakageOptions) LeakageFlags 
 		if name == "" {
 			continue
 		}
-		if _, ok := forbiddenPrimaryTools[name]; ok {
+		if _, ok := forbiddenPrimaryTools[name]; ok && !opts.toolAllowed(name) {
 			flags.ForbiddenToolNames = append(flags.ForbiddenToolNames, name)
 		}
 		if _, ok := filesystemTools[name]; ok {
@@ -85,6 +88,15 @@ func AssessLeakage(exposedToolNames []string, opts LeakageOptions) LeakageFlags 
 	}
 	flags.ForbiddenToolNames = uniqueSorted(flags.ForbiddenToolNames)
 	return flags
+}
+
+func (opts LeakageOptions) toolAllowed(name string) bool {
+	if opts.SubcallsAllowed {
+		if _, ok := subcallTools[name]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func exactSet(values ...string) map[string]struct{} {

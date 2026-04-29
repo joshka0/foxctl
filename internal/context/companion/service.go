@@ -1098,6 +1098,9 @@ func (s *Service) maybeRecoverCompanionResponse(ctx context.Context, req ChatReq
 	if enforceGrounded && len(output.ToolCalls) == 0 {
 		output, responseText = s.applyForcedGroundingFallback(ctx, req, systemPrompt, engineCfg, toolExecutor, toolDefs, output, responseText)
 	}
+	if enforceGrounded {
+		output, responseText = s.applyMissingRequestedToolFallback(ctx, req, systemPrompt, engineCfg, toolExecutor, toolDefs, output, responseText)
+	}
 	if enforceGrounded && len(output.ToolCalls) == 0 && strings.TrimSpace(responseText) == "" {
 		responseText = "I could not complete a tool-grounded research pass in this turn. Retry with a narrower target (path/function) or use a model with stronger tool-calling support."
 	}
@@ -1116,11 +1119,48 @@ func (s *Service) applyForcedGroundingFallback(ctx context.Context, req ChatRequ
 			s.logger.Warn().Err(synthErr).Str("conversation_id", req.ConversationID).Msg("forced grounded synthesis failed")
 		} else if strings.TrimSpace(synthText) != "" {
 			responseText = strings.TrimSpace(synthText)
+			if looksLikeToolCallMarkup(responseText) {
+				responseText = buildForcedResearchFallbackReport(forcedCalls, forcedResults)
+			}
 			output.Tokens.Add(synthTokens.InputTokens, synthTokens.OutputTokens)
 			s.logger.Debug().Str("conversation_id", req.ConversationID).Int("forced_tool_calls", len(forcedCalls)).Msg("forced grounded synthesis completed")
 		}
 	}
 	if strings.TrimSpace(responseText) == "" && len(forcedCalls) > 0 {
+		responseText = buildForcedResearchFallbackReport(forcedCalls, forcedResults)
+	}
+	return output, responseText
+}
+
+func (s *Service) applyMissingRequestedToolFallback(ctx context.Context, req ChatRequest, systemPrompt string, engineCfg engine.LLMChatConfig, toolExecutor engine.ToolExecutor, toolDefs []engine.ToolDef, output engine.EngineOutput, responseText string) (engine.EngineOutput, string) {
+	missing := missingExplicitlyRequestedTools(req.Message, output.ToolCalls, toolDefs)
+	if len(missing) == 0 {
+		return output, responseText
+	}
+	forcedCalls, forcedResults, forcedEvidence := s.collectForcedNamedToolEvidence(ctx, toolExecutor, missing, req.Message)
+	if len(forcedCalls) > 0 {
+		output.ToolCalls = append(output.ToolCalls, forcedCalls...)
+		output.ToolResults = append(output.ToolResults, forcedResults...)
+	}
+	if forcedEvidence == "" {
+		return output, responseText
+	}
+	synthText, synthTokens, synthErr := s.synthesizeForcedResearchAnswer(ctx, req, engineCfg, systemPrompt, req.Message, forcedEvidence)
+	if synthErr != nil {
+		s.logger.Warn().Err(synthErr).Str("conversation_id", req.ConversationID).Msg("missing requested tool synthesis failed")
+		if strings.TrimSpace(responseText) == "" {
+			responseText = buildForcedResearchFallbackReport(forcedCalls, forcedResults)
+		}
+		return output, responseText
+	}
+	if strings.TrimSpace(synthText) != "" {
+		responseText = strings.TrimSpace(synthText)
+		if looksLikeToolCallMarkup(responseText) {
+			responseText = buildForcedResearchFallbackReport(forcedCalls, forcedResults)
+		}
+		output.Tokens.Add(synthTokens.InputTokens, synthTokens.OutputTokens)
+	}
+	if strings.TrimSpace(responseText) == "" {
 		responseText = buildForcedResearchFallbackReport(forcedCalls, forcedResults)
 	}
 	return output, responseText
@@ -1355,6 +1395,116 @@ func (s *Service) collectForcedResearchEvidence(
 	return calls, results, strings.Join(evidenceBlocks, "\n\n")
 }
 
+func (s *Service) collectForcedNamedToolEvidence(
+	ctx context.Context,
+	toolExecutor engine.ToolExecutor,
+	names []string,
+	query string,
+) ([]engine.ToolCall, []engine.ToolResult, string) {
+	if toolExecutor == nil || len(names) == 0 {
+		return nil, nil, ""
+	}
+
+	var calls []engine.ToolCall
+	var results []engine.ToolResult
+	var evidenceBlocks []string
+	for _, name := range names {
+		args, ok := forcedArgsForTool(name, query)
+		if !ok {
+			continue
+		}
+		argBytes, err := json.Marshal(args)
+		if err != nil {
+			continue
+		}
+		callID := fmt.Sprintf("forced_missing_%s_%d", name, len(calls)+1)
+		resultText, callErr := toolExecutor.Execute(ctx, name, argBytes)
+		calls = append(calls, engine.ToolCall{
+			ID:        callID,
+			Name:      name,
+			Arguments: json.RawMessage(argBytes),
+		})
+
+		content := strings.TrimSpace(resultText)
+		isError := callErr != nil
+		if callErr != nil {
+			content = fmt.Sprintf("forced requested tool call failed: %v", callErr)
+		}
+		content = truncateForPrompt(content, 5000)
+		results = append(results, engine.ToolResult{
+			ToolCallID: callID,
+			Content:    content,
+			IsError:    isError,
+		})
+		if content != "" {
+			if isError {
+				evidenceBlocks = append(evidenceBlocks, "## "+name+"\nERROR: "+content)
+			} else {
+				evidenceBlocks = append(evidenceBlocks, "## "+name+"\n"+content)
+			}
+		}
+	}
+	return calls, results, strings.Join(evidenceBlocks, "\n\n")
+}
+
+func missingExplicitlyRequestedTools(message string, calls []engine.ToolCall, toolDefs []engine.ToolDef) []string {
+	message = strings.TrimSpace(message)
+	if message == "" || len(toolDefs) == 0 {
+		return nil
+	}
+	called := make(map[string]struct{}, len(calls))
+	for _, call := range calls {
+		name := strings.TrimSpace(call.Name)
+		if name != "" {
+			called[name] = struct{}{}
+		}
+	}
+
+	var missing []string
+	for _, def := range toolDefs {
+		name := strings.TrimSpace(def.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := called[name]; ok {
+			continue
+		}
+		if !strings.Contains(message, name) {
+			continue
+		}
+		if _, ok := forcedArgsForTool(name, message); !ok {
+			continue
+		}
+		missing = append(missing, name)
+	}
+	return missing
+}
+
+func forcedArgsForTool(name string, query string) (map[string]any, bool) {
+	switch name {
+	case "repo_index_dag_grep":
+		return map[string]any{
+			"query":     extractRequestedQuery(query),
+			"render":    "tree",
+			"edge_sets": []string{"structural"},
+			"depth":     2,
+			"budget":    80,
+			"k":         5,
+		}, true
+	default:
+		return nil, false
+	}
+}
+
+func extractRequestedQuery(message string) string {
+	message = strings.TrimSpace(message)
+	matches := regexp.MustCompile(`(?i)\bquery\s*[:=]?\s*"([^"]+)"`).FindStringSubmatch(message)
+	if len(matches) == 2 && strings.TrimSpace(matches[1]) != "" {
+		return strings.TrimSpace(matches[1])
+	}
+	return message
+}
+
 func (s *Service) synthesizeForcedResearchAnswer(
 	ctx context.Context,
 	req ChatRequest,
@@ -1534,6 +1684,14 @@ func shouldRecoverContextToolLeak(responseText string, rawAssistantText string, 
 		return true
 	}
 	return false
+}
+
+func looksLikeToolCallMarkup(text string) bool {
+	text = strings.TrimSpace(text)
+	return strings.Contains(text, "<|tool_call>") ||
+		strings.Contains(text, "<|tool_call_end|>") ||
+		strings.Contains(text, "<tool_call>") ||
+		strings.Contains(text, "</tool_call>")
 }
 
 func hasContextToolCalls(calls []engine.ToolCall) bool {

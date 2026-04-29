@@ -472,7 +472,7 @@ func buildRetrievalObservation(project, classification, query string, expectedPa
 		Count:        1,
 		Project:      strings.TrimSpace(project),
 		Area:         "aca-retrieval",
-		EvidenceRefs: uniqueStrings(evidence),
+		EvidenceRefs: stringsToEvidenceRefs(uniqueStrings(evidence)),
 		FirstSeen:    now,
 		LastSeen:     now,
 	}

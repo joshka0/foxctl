@@ -48,6 +48,57 @@ func TestSummarizeKeepsLatestDuplicate(t *testing.T) {
 	}
 }
 
+func TestSummarizeReviewTelemetry(t *testing.T) {
+	t.Parallel()
+
+	attempts := []Attempt{attempt("q1", ConditionRLMReplRecursive, true, 1000, 10)}
+	attempts[0].RLM = &RLMAttemptMeta{Metadata: map[string]any{
+		"parent_total_tokens":            250,
+		"child_total_tokens":             50,
+		"pre_review_output_sanitization": map[string]any{"changed": true},
+		"review": map[string]any{
+			"review_recursive_requested":  true,
+			"review_recursive_used":       true,
+			"review_candidate_compaction": map[string]any{"changed": true},
+			"parent_total_tokens":         400,
+			"child_total_tokens":          300,
+			"recursive_trace": map[string]any{
+				"children": []any{
+					map[string]any{
+						"summary_truncated":         true,
+						"summary_compaction_method": "rewrite",
+					},
+				},
+			},
+		},
+	}}
+
+	summary := Summarize(attempts, nil)
+	if len(summary.Conditions) != 1 {
+		t.Fatalf("conditions=%d", len(summary.Conditions))
+	}
+	got := summary.Conditions[0]
+	if got.ReviewAttempts != 1 ||
+		got.ReviewRecursiveRequested != 1 ||
+		got.ReviewRecursiveUsed != 1 ||
+		got.ReviewCandidateCompactions != 1 ||
+		got.PreReviewOutputSanitizations != 1 ||
+		got.ChildSummariesTruncated != 1 ||
+		got.ChildSummariesRewritten != 1 {
+		t.Fatalf("review summary=%+v", got)
+	}
+	if got.MeanBaseTokens != 300 || got.MeanReviewTokens != 700 {
+		t.Fatalf("token split base=%v review=%v", got.MeanBaseTokens, got.MeanReviewTokens)
+	}
+
+	attempts[0].Usage.TotalTokens = 500
+	summary = Summarize(attempts, nil)
+	got = summary.Conditions[0]
+	if got.MeanBaseTokens != 300 || got.MeanReviewTokens != 200 {
+		t.Fatalf("clamped token split base=%v review=%v", got.MeanBaseTokens, got.MeanReviewTokens)
+	}
+}
+
 func attempt(questionID string, conditionID ConditionID, correct bool, tokens int, duration int64) Attempt {
 	status := VerifierStatusIncorrect
 	if correct {

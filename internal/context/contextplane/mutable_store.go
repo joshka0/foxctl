@@ -291,7 +291,7 @@ func upsertObservationRow(ctx context.Context, db *sql.DB, obs Observation) erro
 	if obs.LastSeen.IsZero() {
 		obs.LastSeen = obs.FirstSeen
 	}
-	evidenceJSON, err := json.Marshal(uniqueStrings(obs.EvidenceRefs))
+	evidenceJSON, err := json.Marshal(evidenceRefsToStrings(uniqueEvidenceRefs(obs.EvidenceRefs)))
 	if err != nil {
 		return fmt.Errorf("marshal observation refs: %w", err)
 	}
@@ -335,7 +335,7 @@ func upsertTensionRow(ctx context.Context, db *sql.DB, tension Tension) error {
 	if tension.Count <= 0 {
 		tension.Count = 1
 	}
-	relatedJSON, err := json.Marshal(uniqueStrings(tension.RelatedRefs))
+	relatedJSON, err := json.Marshal(evidenceRefsToStrings(uniqueEvidenceRefs(tension.RelatedRefs)))
 	if err != nil {
 		return fmt.Errorf("marshal tension refs: %w", err)
 	}
@@ -809,7 +809,7 @@ func upsertMemoryProposalRow(ctx context.Context, db *sql.DB, proposal MemoryPro
 	if proposal.Count <= 0 {
 		proposal.Count = 1
 	}
-	sourceJSON, err := json.Marshal(uniqueStrings(proposal.SourceRefs))
+	sourceJSON, err := json.Marshal(evidenceRefsToStrings(uniqueEvidenceRefs(proposal.SourceRefs)))
 	if err != nil {
 		return fmt.Errorf("marshal proposal source refs: %w", err)
 	}
@@ -1032,9 +1032,11 @@ func scanObservationRow(scanner interface{ Scan(dest ...any) error }) (Observati
 		item.Area = area.String
 	}
 	if evidenceJSON != "" {
-		if err := json.Unmarshal([]byte(evidenceJSON), &item.EvidenceRefs); err != nil {
+		var rawRefs []string
+		if err := json.Unmarshal([]byte(evidenceJSON), &rawRefs); err != nil {
 			return Observation{}, fmt.Errorf("decode observation refs: %w", err)
 		}
+		item.EvidenceRefs = stringsToEvidenceRefs(rawRefs)
 	}
 	item.FirstSeen = timeutil.MustParseRFC3339Nano(firstSeen)
 	item.LastSeen = timeutil.MustParseRFC3339Nano(lastSeen)
@@ -1049,9 +1051,11 @@ func scanTensionRow(scanner interface{ Scan(dest ...any) error }) (Tension, erro
 		return Tension{}, fmt.Errorf("scan tension: %w", err)
 	}
 	if refsJSON != "" {
-		if err := json.Unmarshal([]byte(refsJSON), &item.RelatedRefs); err != nil {
+		var rawRefs []string
+		if err := json.Unmarshal([]byte(refsJSON), &rawRefs); err != nil {
 			return Tension{}, fmt.Errorf("decode tension refs: %w", err)
 		}
+		item.RelatedRefs = stringsToEvidenceRefs(rawRefs)
 	}
 	item.CreatedAt = timeutil.MustParseRFC3339Nano(createdAt)
 	item.LastSeen = timeutil.MustParseRFC3339Nano(lastSeen)
@@ -1189,9 +1193,11 @@ func scanMemoryProposalRow(scanner interface{ Scan(dest ...any) error }) (Memory
 		item.Classification = classification.String
 	}
 	if sourceJSON != "" {
-		if err := json.Unmarshal([]byte(sourceJSON), &item.SourceRefs); err != nil {
+		var rawRefs []string
+		if err := json.Unmarshal([]byte(sourceJSON), &rawRefs); err != nil {
 			return MemoryProposal{}, fmt.Errorf("decode memory proposal refs: %w", err)
 		}
+		item.SourceRefs = stringsToEvidenceRefs(rawRefs)
 	}
 	if changeJSON != "" {
 		if err := json.Unmarshal([]byte(changeJSON), &item.ProposedChange); err != nil {

@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/context/transcriptpipeline"
 	tphistory "github.com/joshka0/foxctl/internal/context/transcriptpipeline/history"
@@ -361,16 +362,16 @@ func collectFiles(workspacePath string, packet contextplane.TaskPacket, handoffs
 		appendPath(plan)
 	}
 	for _, ref := range packet.RelevantRefs {
-		if trimmed, ok := trimPathRef(ref); ok {
+		if trimmed, ok := trimPathRef(contextengine.FormatEvidenceRef(ref)); ok {
 			appendPath(trimmed)
 		}
 	}
 	for _, handoff := range handoffs {
-		for _, path := range handoff.Handoff.FilesTouched {
+		for _, path := range handoff.Handoff.FilesTouched() {
 			appendPath(path)
 		}
 		for _, ref := range handoff.Handoff.EvidenceRefs {
-			if trimmed, ok := trimPathRef(ref); ok {
+			if trimmed, ok := trimPathRef(contextengine.FormatEvidenceRef(ref)); ok {
 				appendPath(trimmed)
 			}
 		}
@@ -2213,16 +2214,16 @@ func collectSessionRefs(packet contextplane.TaskPacket, handoffs []contextplane.
 		}
 	}
 	for _, ref := range packet.RelevantRefs {
-		appendRef(ref)
+		appendRef(contextengine.FormatEvidenceRef(ref))
 	}
 	if packet.LatestHandoff != nil {
 		for _, ref := range packet.LatestHandoff.Handoff.EvidenceRefs {
-			appendRef(ref)
+			appendRef(contextengine.FormatEvidenceRef(ref))
 		}
 	}
 	for _, handoff := range handoffs {
 		for _, ref := range handoff.Handoff.EvidenceRefs {
-			appendRef(ref)
+			appendRef(contextengine.FormatEvidenceRef(ref))
 		}
 	}
 	return uniqueStrings(refs)

@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
@@ -21,7 +20,7 @@ type LLMToolExecutor struct {
 }
 
 func NewLLMToolExecutor(adapter ToolExecutor, tools []Tool) *LLMToolExecutor {
-	return &LLMToolExecutor{adapter: adapter, tools: tools}
+	return &LLMToolExecutor{adapter: newAllowlistedToolExecutor(adapter, tools), tools: tools}
 }
 
 func (e *LLMToolExecutor) Execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
@@ -67,12 +66,17 @@ type LLMConfig struct {
 	Provider       string
 	APIKey         string
 	BaseURL        string
+	AuthMode       string
+	AuthHeader     string
+	AuthPrefix     string
 	Model          string
 	Timeout        time.Duration
 	MaxTokens      int
 	Temperature    float64
 	MaxIterations  int
 	RequireToolUse bool
+	QwenNoThink    bool
+	ExtraBody      map[string]any
 	RouteProfile   RouteProfile
 	PlanMode       PlanMode
 }
@@ -93,16 +97,33 @@ func (r LLMRunner) Run(ctx context.Context, task Task, env Environment) (Result,
 	if r.Tools == nil {
 		return Result{}, fmt.Errorf("rlm llm runner requires tool adapter")
 	}
-	plan := BuildPlan(task.Prompt, r.Config.RouteProfile, r.Config.PlanMode)
-	if plan.Mode == PlanModeStaged && len(plan.Phases) > 0 {
-		return r.runStaged(ctx, task, env, plan)
+	spec, err := ResolveRunSpec(ResolveRunSpecInput{
+		Prompt:               task.Prompt,
+		RequestedRoute:       r.Config.RouteProfile,
+		RequestedPlanMode:    r.Config.PlanMode,
+		RequestedToolProfile: string(ToolProfileDefault),
+		AvailableTools:       env.Tools,
+	})
+	if err != nil {
+		return Result{}, err
 	}
-	return r.runSinglePass(ctx, task, env, runPassConfig{
+	effectiveEnv := env
+	effectiveEnv.Tools = append([]Tool(nil), spec.ToolPolicy.Tools...)
+	if spec.PlanMode == PlanModeStaged && len(spec.Plan.Phases) > 0 {
+		return r.runStaged(ctx, task, effectiveEnv, spec)
+	}
+	return r.runSinglePass(ctx, task, effectiveEnv, runPassConfig{
 		Prompt:         task.Prompt,
-		Tools:          env.Tools,
-		SystemPrompt:   buildRLMSystemPrompt(env, task),
+		Tools:          effectiveEnv.Tools,
+		SystemPrompt:   BuildLLMSystemPrompt(effectiveEnv, task),
 		RequireToolUse: r.Config.RequireToolUse,
 		MaxIterations:  task.MaxIterations,
+		Metadata: map[string]any{
+			"effective_route_profile": spec.RouteProfile,
+			"effective_plan_mode":     spec.PlanMode,
+			"tool_policy_profile":     spec.ToolPolicy.Profile,
+			"allowed_tools":           append([]string(nil), spec.ToolPolicy.AllowedTools...),
+		},
 	})
 }
 
@@ -112,9 +133,13 @@ type runPassConfig struct {
 	SystemPrompt   string
 	RequireToolUse bool
 	MaxIterations  int
+	Metadata       map[string]any
 }
 
 func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment, pass runPassConfig) (Result, error) {
+	if pass.RequireToolUse && len(pass.Tools) == 0 {
+		return Result{}, fmt.Errorf("rlm llm runner: require-tool-use is enabled but no tools are available")
+	}
 	llmCfg := engine.DefaultLLMChatConfig()
 	if strings.TrimSpace(r.Config.Provider) != "" {
 		llmCfg.Provider = strings.TrimSpace(r.Config.Provider)
@@ -124,6 +149,15 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	}
 	if strings.TrimSpace(r.Config.BaseURL) != "" {
 		llmCfg.BaseURL = strings.TrimSpace(r.Config.BaseURL)
+	}
+	if strings.TrimSpace(r.Config.AuthMode) != "" {
+		llmCfg.AuthMode = strings.TrimSpace(r.Config.AuthMode)
+	}
+	if strings.TrimSpace(r.Config.AuthHeader) != "" {
+		llmCfg.AuthHeader = strings.TrimSpace(r.Config.AuthHeader)
+	}
+	if r.Config.AuthPrefix != "" {
+		llmCfg.AuthPrefix = r.Config.AuthPrefix
 	}
 	if strings.TrimSpace(r.Config.Model) != "" {
 		llmCfg.Model = strings.TrimSpace(r.Config.Model)
@@ -137,6 +171,7 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	if r.Config.Temperature != 0 {
 		llmCfg.Temperature = r.Config.Temperature
 	}
+	llmCfg.ExtraBody = cloneStringAnyMap(r.Config.ExtraBody)
 	if pass.MaxIterations > 0 {
 		llmCfg.MaxIterations = pass.MaxIterations
 	} else if r.Config.MaxIterations > 0 {
@@ -175,7 +210,7 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	if pass.RequireToolUse && len(output.ToolCalls) == 0 {
 		return Result{}, fmt.Errorf("rlm llm runner: model answered without using tools")
 	}
-	answer := strings.TrimSpace(output.AssistantText)
+	answer, sanitization := SanitizeOutputText(output.AssistantText)
 	if answer == "" {
 		if output.StopReason != "" && output.StopReason != engine.StopReasonEndTurn {
 			detail := strings.TrimSpace(output.Error)
@@ -188,38 +223,48 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	}
 	evidence := collectEvidenceRefs(env)
 	retrievedPaths := collectRetrievedPaths(output.ToolResults, task.WorkspaceRoot, answer)
-	parentUsage := summarizeParentToolUsage(output.Iterations, "code_search_ensemble")
+	parentUsage := summarizeParentToolUsage(output.Iterations, "retrieve_code")
+	metadata := map[string]any{
+		"stop_reason":            output.StopReason,
+		"provider":               llmCfg.Provider,
+		"model":                  llmCfg.Model,
+		"tool_calls":             len(output.ToolCalls),
+		"tool_names":             toolCallNames(output.ToolCalls),
+		"llm_error":              output.Error,
+		"require_tool_use":       pass.RequireToolUse,
+		"retrieved_paths":        retrievedPaths,
+		"parent_input_tokens":    output.Tokens.InputTokens,
+		"parent_output_tokens":   output.Tokens.OutputTokens,
+		"parent_total_tokens":    output.Tokens.TotalTokens,
+		"parent_iteration_count": len(output.Iterations),
+		"parent_tool_usage":      parentUsage,
+	}
+	if sanitization.Changed {
+		metadata["output_sanitization"] = sanitization
+	}
+	for key, value := range pass.Metadata {
+		metadata[key] = value
+	}
 	return Result{
 		Answer:         answer,
 		EvidenceRefs:   evidence,
 		RetrievedPaths: retrievedPaths,
 		Iterations:     1,
 		Subcalls:       len(output.ToolCalls),
-		Metadata: map[string]any{
-			"stop_reason":            output.StopReason,
-			"provider":               llmCfg.Provider,
-			"model":                  llmCfg.Model,
-			"tool_calls":             len(output.ToolCalls),
-			"tool_names":             toolCallNames(output.ToolCalls),
-			"llm_error":              output.Error,
-			"require_tool_use":       pass.RequireToolUse,
-			"retrieved_paths":        retrievedPaths,
-			"parent_input_tokens":    output.Tokens.InputTokens,
-			"parent_output_tokens":   output.Tokens.OutputTokens,
-			"parent_total_tokens":    output.Tokens.TotalTokens,
-			"parent_iteration_count": len(output.Iterations),
-			"parent_tool_usage":      parentUsage,
-		},
+		Metadata:       metadata,
 	}, nil
 }
 
-func buildRLMSystemPrompt(env Environment, task Task) string {
+func BuildLLMSystemPrompt(env Environment, task Task) string {
 	var b strings.Builder
 	b.WriteString("You are an experimental read-only recursive reasoning runtime.\n")
 	b.WriteString("Use tools to inspect external state before answering. Do not invent unavailable evidence.\n")
 	b.WriteString("Prefer repo, scene, vault, and artifact handles already present in the environment.\n")
 	b.WriteString("If the prompt is about the current workspace, inspect with at least one tool before writing the final synthesis.\n")
-	b.WriteString("For repo questions, start with code_search_ensemble. Use semantic_search_code or smart_search_code only as follow-up discovery lanes when the ensemble leaves uncertainty. Use search_repo only as a shallow fallback, then load_file for exact verification, and ripgrep_code for literal patterns.\n")
+	if guidance := toolSurfaceGuidance(env.Tools); guidance != "" {
+		b.WriteString(guidance)
+		b.WriteString("\n")
+	}
 	b.WriteString("Cite exact relative repo file paths you inspected. Do not cite .foxctl or .claude runtime files as repository evidence.\n")
 	b.WriteString("Return a concise synthesis with supporting evidence.\n")
 	if len(env.Tools) > 0 {
@@ -264,8 +309,9 @@ func buildRLMSystemPrompt(env Environment, task Task) string {
 	return b.String()
 }
 
-func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, plan Plan) (Result, error) {
-	baseStageEnv := routeStageEnvironment(env, plan.RouteProfile)
+func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, spec RunSpec) (Result, error) {
+	plan := spec.Plan
+	baseStageEnv := routeStageEnvironment(env, spec.RouteProfile)
 	allPaths := make([]string, 0, 16)
 	allEvidence := make([]string, 0, 16)
 	phaseNotes := make([]string, 0, len(plan.Phases))
@@ -276,14 +322,26 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 		rankedPaths := rerankCandidatePaths(task.Prompt, allPaths)
 		phaseEnv := stagedPhaseEnvironment(baseStageEnv, rankedPaths, phase.Name == "discovery")
 		phaseTools := filterToolsByNames(phaseEnv.Tools, phase.AllowedTools)
+		if len(phaseTools) == 0 && phase.RequireToolUse {
+			return Result{}, fmt.Errorf("rlm llm runner: %s phase requires tool use but no tools are available", phase.Name)
+		}
+		promptEnv := phaseEnv
+		promptEnv.Tools = append([]Tool(nil), phaseTools...)
 		phasePrompt := buildPhasePrompt(task.Prompt, phase, rankedPaths, phaseNotes)
-		phaseSystemPrompt := buildPhaseSystemPrompt(buildRLMSystemPrompt(phaseEnv, task), task.Prompt, phase, rankedPaths, phaseNotes)
+		phaseSystemPrompt := buildPhaseSystemPrompt(BuildLLMSystemPrompt(promptEnv, task), task.Prompt, phase, rankedPaths, phaseNotes)
 		phaseResult, err := r.runSinglePass(ctx, task, phaseEnv, runPassConfig{
 			Prompt:         phasePrompt,
 			Tools:          phaseTools,
 			SystemPrompt:   phaseSystemPrompt,
 			RequireToolUse: phase.RequireToolUse,
 			MaxIterations:  phase.MaxIterations,
+			Metadata: map[string]any{
+				"effective_route_profile": spec.RouteProfile,
+				"effective_plan_mode":     spec.PlanMode,
+				"tool_policy_profile":     spec.ToolPolicy.Profile,
+				"allowed_tools":           append([]string(nil), spec.ToolPolicy.AllowedTools...),
+				"phase_name":              phase.Name,
+			},
 		})
 		if err != nil {
 			return Result{}, fmt.Errorf("rlm llm runner: %s phase failed: %w", phase.Name, err)
@@ -300,6 +358,13 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 				SystemPrompt:   phaseSystemPrompt + "\nRequired tool retry: only the required tools are available in this retry.",
 				RequireToolUse: phase.RequireToolUse,
 				MaxIterations:  maxInt(1, phase.MaxIterations-1),
+				Metadata: map[string]any{
+					"effective_route_profile": spec.RouteProfile,
+					"effective_plan_mode":     spec.PlanMode,
+					"tool_policy_profile":     spec.ToolPolicy.Profile,
+					"allowed_tools":           append([]string(nil), spec.ToolPolicy.AllowedTools...),
+					"phase_name":              phase.Name,
+				},
 			})
 			if retryErr != nil {
 				return Result{}, fmt.Errorf("rlm llm runner: %s phase failed: %w", phase.Name, retryErr)
@@ -338,9 +403,15 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 	finalResult, err := r.runSinglePass(ctx, task, finalEnv, runPassConfig{
 		Prompt:         finalPrompt,
 		Tools:          nil,
-		SystemPrompt:   buildSynthesisSystemPrompt(buildRLMSystemPrompt(finalEnv, task), plan, allPaths, phaseNotes),
+		SystemPrompt:   buildSynthesisSystemPrompt(BuildLLMSystemPrompt(finalEnv, task), plan, allPaths, phaseNotes),
 		RequireToolUse: false,
 		MaxIterations:  1,
+		Metadata: map[string]any{
+			"effective_route_profile": spec.RouteProfile,
+			"effective_plan_mode":     spec.PlanMode,
+			"tool_policy_profile":     spec.ToolPolicy.Profile,
+			"allowed_tools":           append([]string(nil), spec.ToolPolicy.AllowedTools...),
+		},
 	})
 	if err != nil && len(phaseNotes) > 0 {
 		finalResult = Result{Answer: phaseNotes[len(phaseNotes)-1]}
@@ -354,8 +425,10 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 	if finalResult.Metadata == nil {
 		finalResult.Metadata = map[string]any{}
 	}
-	finalResult.Metadata["plan_mode"] = plan.Mode
-	finalResult.Metadata["route_profile"] = plan.RouteProfile
+	finalResult.Metadata["plan_mode"] = spec.PlanMode
+	finalResult.Metadata["route_profile"] = spec.RouteProfile
+	finalResult.Metadata["tool_policy_profile"] = spec.ToolPolicy.Profile
+	finalResult.Metadata["allowed_tools"] = append([]string(nil), spec.ToolPolicy.AllowedTools...)
 	finalResult.Metadata["phase_count"] = len(plan.Phases)
 	finalResult.Metadata["phases"] = phaseMeta
 	finalResult.Metadata["tool_calls"] = totalToolCalls
@@ -363,9 +436,9 @@ func (r LLMRunner) runStaged(ctx context.Context, task Task, env Environment, pl
 	finalResult.Metadata["parent_input_tokens_total"] = sumIntMetadata(phaseMeta, "parent_input_tokens")
 	finalResult.Metadata["parent_output_tokens_total"] = sumIntMetadata(phaseMeta, "parent_output_tokens")
 	finalResult.Metadata["parent_total_tokens_total"] = sumIntMetadata(phaseMeta, "parent_total_tokens")
-	finalResult.Metadata["parent_code_search_ensemble_prompt_delta_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_prompt_delta_total")
-	finalResult.Metadata["parent_code_search_ensemble_invocations_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_invocations")
-	finalResult.Metadata["parent_code_search_ensemble_result_token_estimate_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_result_token_estimate_total")
+	finalResult.Metadata["parent_retrieve_code_prompt_delta_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_prompt_delta_total")
+	finalResult.Metadata["parent_retrieve_code_invocations_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_invocations")
+	finalResult.Metadata["parent_retrieve_code_result_token_estimate_total"] = sumNestedIntMetadata(phaseMeta, "parent_tool_usage", "target_tool_result_token_estimate_total")
 	return finalResult, nil
 }
 
@@ -386,14 +459,6 @@ func buildPhaseSystemPrompt(base, query string, phase Phase, candidatePaths, pha
 	if guidance := phaseGuidance(phase.Name); guidance != "" {
 		b.WriteString("\nPhase guidance: ")
 		b.WriteString(guidance)
-	}
-	if hints := queryGuidanceHints(query, phase.Name, candidatePaths); len(hints) > 0 {
-		b.WriteString("\nGeneral heuristics:\n")
-		for _, hint := range hints {
-			b.WriteString("- ")
-			b.WriteString(hint)
-			b.WriteString("\n")
-		}
 	}
 	if len(candidatePaths) > 0 {
 		b.WriteString("\nCandidate paths from prior phases: ")
@@ -422,24 +487,60 @@ func buildPhasePrompt(query string, phase Phase, candidatePaths, phaseNotes []st
 		b.WriteString(guidance)
 	}
 	if phase.Name == "inspection" || phase.Name == "verification" {
-		b.WriteString("\nYou must open at least one candidate path with load_file or read_note before you finish.")
+		b.WriteString("\nYou must load at least one candidate evidence reference with load_evidence_ref before you finish.")
 	}
 	if len(candidatePaths) > 0 {
 		b.WriteString("\nFocus on these candidate paths if they seem relevant: ")
 		b.WriteString(strings.Join(shortenRefs(candidatePaths, 8), ", "))
 	}
-	if hints := queryGuidanceHints(query, phase.Name, candidatePaths); len(hints) > 0 {
-		b.WriteString("\nQuery guidance:\n")
-		for _, hint := range hints {
-			b.WriteString("- ")
-			b.WriteString(hint)
-			b.WriteString("\n")
-		}
-	}
 	if len(phaseNotes) > 0 {
 		b.WriteString("\nUse prior findings, but verify them with this phase's tools.")
 	}
 	return b.String()
+}
+
+func toolSurfaceGuidance(tools []Tool) string {
+	present := make(map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Name)
+		if name != "" {
+			present[name] = struct{}{}
+		}
+	}
+	has := func(name string) bool {
+		_, ok := present[name]
+		return ok
+	}
+
+	var guidance []string
+	if has("retrieve_code") {
+		text := "For repo questions, start with retrieve_code."
+		if has("load_evidence_ref") {
+			text = "For repo questions, start with retrieve_code and use load_evidence_ref for exact evidence verification."
+		}
+		guidance = append(guidance, text)
+	}
+	if has("retrieve_memory") || has("retrieve_context") || has("retrieve_task") {
+		var lanes []string
+		for _, name := range []string{"retrieve_memory", "retrieve_context", "retrieve_task"} {
+			if has(name) {
+				lanes = append(lanes, name)
+			}
+		}
+		text := "For memory or task recall, use " + strings.Join(lanes, ", ") + "."
+		if has("load_evidence_ref") {
+			text = "For memory or task recall, use " + strings.Join(lanes, ", ") + " and verify specific evidence with load_evidence_ref."
+		}
+		guidance = append(guidance, text)
+	}
+	if has("retrieve_mixed") {
+		guidance = append(guidance, "For mixed or uncertain questions, use retrieve_mixed to gather evidence across lanes.")
+	}
+	if has("load_evidence_ref") && len(guidance) == 0 {
+		guidance = append(guidance, "Use load_evidence_ref to inspect and verify referenced evidence.")
+	}
+
+	return strings.Join(guidance, "\n")
 }
 
 func buildSynthesisSystemPrompt(base string, plan Plan, candidatePaths, phaseNotes []string) string {
@@ -516,7 +617,9 @@ func collectEvidenceRefs(env Environment) []string {
 	return uniqueStringsRLM(out)
 }
 
-var answerPathPattern = regexp.MustCompile(`(?m)(?:^|[\s` + "`" + `("'“])([A-Za-z0-9._/-]+\.(?:go|md|yaml|yml|tf|sh|json|sql|toml|txt))(?:$|[\s` + "`" + `)"'”:,])`)
+const answerPathExtensionPattern = `go|md|yaml|yml|tf|sh|json|sql|toml|txt|ts|tsx|js|jsx|mjs|cjs|py|rs|gd|ex|exs|html|css|scss|swift|kt|java|rb|php|vue|svelte|proto|graphql|gql|xml|csv|ini|env|dockerfile`
+
+var answerPathPattern = regexp.MustCompile(`(?m)(?:^|[\s` + "`" + `("'“])([A-Za-z0-9._/-]+\.(?:` + answerPathExtensionPattern + `))(?:$|[\s` + "`" + `)"'”:,])`)
 
 func collectRetrievedPaths(results []engine.ToolResult, workspaceRoot, answer string) []string {
 	out := make([]string, 0, len(results))
@@ -774,164 +877,31 @@ func phaseGuidance(phaseName string) string {
 		return "Do not do another broad search if candidate paths already exist. Open the 1-2 strongest candidates directly."
 	case "verification":
 		return "Re-open or literal-check the single strongest inspected path and confirm it really matches the query."
+	case "recall":
+		return "Retrieve the most relevant memory and context entries first. Use load_evidence_ref to verify specific entries."
+	case "audit":
+		return "Cross-check evidence from multiple lanes. Look for consistency across sources."
 	default:
 		return ""
 	}
 }
 
-func queryGuidanceHints(query, phaseName string, candidatePaths []string) []string {
-	q := strings.ToLower(strings.TrimSpace(query))
-	hints := make([]string, 0, 4)
-	if strings.Contains(q, "package") {
-		hints = append(hints, "Prefer directory or package matches over basename-only coincidences.")
-	}
-	if strings.Contains(q, "semantic") && strings.Contains(q, "index") {
-		hints = append(hints, "Prefer paths under internal/intelligence/indexing/semantic or closely related indexing directories.")
-		hints = append(hints, "Avoid generic repository or events files unless they explicitly mention semantic indexing.")
-	}
-	if containsAny(q, "web", "api", "handler", "transport") {
-		hints = append(hints, "Prefer handler, server, transport, bridge, http, or api paths over unrelated tool clients.")
-		hints = append(hints, "Avoid obsidian/tooling paths unless the query explicitly mentions them.")
-	}
-	if phaseName == "inspection" && len(candidatePaths) > 0 {
-		hints = append(hints, "Choose the candidate whose directory and filename most directly match the query terms.")
-	}
-	return hints
-}
-
-func rerankCandidatePaths(query string, paths []string) []string {
-	type scoredPath struct {
-		Path  string
-		Score int
-	}
+// rerankCandidatePaths deduplicates and sorts paths by depth.
+// Keyword-based scoring has been removed; paths are ordered by directory depth
+// (deeper paths first) as a proxy for specificity.
+func rerankCandidatePaths(_ string, paths []string) []string {
 	normalized := dedupePathsCaseInsensitive(paths)
 	if len(normalized) <= 1 {
 		return normalized
 	}
-	scored := make([]scoredPath, 0, len(normalized))
-	for _, path := range normalized {
-		scored = append(scored, scoredPath{
-			Path:  path,
-			Score: scoreCandidatePath(query, path),
-		})
-	}
-	sort.SliceStable(scored, func(i, j int) bool {
-		if scored[i].Score == scored[j].Score {
-			if pathDepth(scored[i].Path) == pathDepth(scored[j].Path) {
-				return scored[i].Path < scored[j].Path
-			}
-			return pathDepth(scored[i].Path) > pathDepth(scored[j].Path)
+	sort.SliceStable(normalized, func(i, j int) bool {
+		di, dj := pathDepth(normalized[i]), pathDepth(normalized[j])
+		if di == dj {
+			return normalized[i] < normalized[j]
 		}
-		return scored[i].Score > scored[j].Score
+		return di > dj
 	})
-	out := make([]string, 0, len(scored))
-	for _, item := range scored {
-		out = append(out, item.Path)
-	}
-	return out
-}
-
-func scoreCandidatePath(query, path string) int {
-	q := strings.ToLower(strings.TrimSpace(query))
-	p := strings.ToLower(strings.TrimSpace(filepath.ToSlash(path)))
-	if p == "" {
-		return -1000
-	}
-	score := 0
-	tokens := tokenizeQueryTerms(q)
-	for _, token := range tokens {
-		if token == "" {
-			continue
-		}
-		switch {
-		case strings.Contains("/"+p+"/", "/"+token+"/"):
-			score += 8
-		case strings.Contains(p, token):
-			score += 4
-		}
-	}
-	if strings.Contains(q, "package") {
-		if strings.Count(p, "/") >= 2 {
-			score += 2
-		}
-		if !strings.Contains(p, "/") {
-			score -= 4
-		}
-	}
-	if containsAny(q, "semantic", "index") {
-		if strings.Contains(p, "indexing/semantic") {
-			score += 12
-		}
-		if strings.Contains(p, "repository") || strings.Contains(p, "events/") || strings.Contains(p, "builder") {
-			score -= 6
-		}
-	}
-	if containsAny(q, "web", "api", "handler", "transport") {
-		if containsAny(p, "web/", "/web", "api", "handler", "http", "transport", "server", "bridge") {
-			score += 8
-		}
-		if containsAny(p, "obsidian", "godot", "gui-agent") {
-			score -= 8
-		}
-	}
-	if containsAny(q, "storage", "memory") {
-		if containsAny(p, "storage/memory", "/memory/", "memoryflow", "stores.go", "store.go") {
-			score += 10
-		}
-	}
-	if containsAny(q, "skill", "output", "envelope", "cas") {
-		if containsAny(p, "skillout", "cas", "envelope", "skillmain") {
-			score += 8
-		}
-	}
-	if containsAny(q, "platform", "config") {
-		if containsAny(p, "config", "platform") {
-			score += 8
-		}
-	}
-	if containsAny(q, "cmd", "runtime") {
-		if containsAny(p, "cmd/", "/cmd", "runtime") {
-			score += 8
-		}
-	}
-	score += minInt(pathDepth(p), 6)
-	return score
-}
-
-func tokenizeQueryTerms(query string) []string {
-	parts := strings.FieldsFunc(query, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
-	})
-	out := make([]string, 0, len(parts)+8)
-	for _, part := range parts {
-		part = strings.TrimSpace(strings.ToLower(part))
-		if len(part) < 3 {
-			continue
-		}
-		switch part {
-		case "handlers":
-			part = "handler"
-		case "settings":
-			part = "config"
-		}
-		out = append(out, part)
-	}
-	if containsAny(query, "web", "api", "handler", "transport") {
-		out = append(out, "web", "api", "handler", "transport", "http", "server")
-	}
-	if containsAny(query, "semantic", "index") {
-		out = append(out, "semantic", "index", "indexing", "provider", "indexer")
-	}
-	if containsAny(query, "storage", "memory") {
-		out = append(out, "storage", "memory", "store")
-	}
-	if containsAny(query, "skill", "output", "envelope", "cas") {
-		out = append(out, "skill", "output", "envelope", "cas")
-	}
-	if containsAny(query, "platform", "config") {
-		out = append(out, "platform", "config")
-	}
-	return uniqueStringsRLM(out)
+	return normalized
 }
 
 func dedupePathsCaseInsensitive(paths []string) []string {
@@ -965,4 +935,15 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func cloneStringAnyMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
