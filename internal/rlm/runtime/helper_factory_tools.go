@@ -685,6 +685,7 @@ func buildHelperFactoryDraftPrompt(taskPrompt, instructions, feedback, language 
 		b.WriteString("Do not import os, sys, subprocess, pathlib, socket, requests, urllib, or other runtime/control modules. If a computation creates a huge integer, avoid decimal string materialization unless the task explicitly requires the full decimal expansion.\n")
 		b.WriteString("Never call eval, exec, compile, __import__, open, input, globals, locals, or getattr/setattr/delattr. Use ast.literal_eval or json.loads for parsing data.\n")
 		b.WriteString("Do not use ellipses, placeholders, escaped braces, or backslashes before Python punctuation. Source must parse as Python after JSON decoding.\n")
+		b.WriteString("Inside Python source use Python literals True, False, and None. Do not write JSON literals true, false, or null in Python code.\n")
 		b.WriteString("Valid decoded source example: def solve(input):\\n    return {\"ok\": True, \"answer\": \"solution = 42\"}\n")
 	} else {
 		b.WriteString("\n\nWrite a short-lived Go helper for this exact task.\n")
@@ -727,6 +728,7 @@ func buildHelperFactorySourceRepairPrompt(language string, repair *helperFactory
 		b.WriteString("Allowed imports: ast, bisect, collections, copy, functools, heapq, itertools, json, math, operator, re, statistics.\n")
 		b.WriteString("Disallowed imports include os, sys, subprocess, pathlib, socket, requests, urllib, and runtime/control modules.\n")
 		b.WriteString("Never call eval, exec, compile, __import__, open, input, globals, locals, or getattr/setattr/delattr. Use ast.literal_eval or json.loads for parsing data.\n")
+		b.WriteString("Inside Python source use Python literals True, False, and None. Do not write JSON literals true, false, or null in Python code.\n")
 		b.WriteString("Return shape example: {\"source_b64\":\"ZGVmIHNvbHZlKGlucHV0KTpcbiAgICByZXR1cm4ge1wib2tcIjogVHJ1ZSwgXCJhbnN3ZXJcIjogXCJzb2x1dGlvbiA9IDQyXCJ9\"}\n")
 	} else {
 		b.WriteString("go\n")

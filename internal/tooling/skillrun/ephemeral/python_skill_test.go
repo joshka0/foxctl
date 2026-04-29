@@ -157,6 +157,21 @@ def solve(input):
 	}
 }
 
+func TestPythonSkillRunnerRejectsJSONLiteralsInSource(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewPythonSkillRunner(context.Background(), PythonSkillSpec{
+		Source: `def solve(input):
+    return {"ok": true, "answer": "solution = 42"}`,
+	})
+	if err == nil {
+		t.Fatal("NewPythonSkillRunner() succeeded with JSON literal in Python source")
+	}
+	if !strings.Contains(err.Error(), "Python literal spelling") {
+		t.Fatalf("NewPythonSkillRunner() err=%v, want Python literal spelling", err)
+	}
+}
+
 func TestPythonSkillRunnerAllowsRegexImport(t *testing.T) {
 	t.Parallel()
 

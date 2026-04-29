@@ -424,6 +424,8 @@ def validate(tree):
             solve_count += 1
             if len(node.args.args) != 1 or node.args.vararg or node.args.kwarg:
                 raise ValueError("solve must accept exactly one input argument")
+        if isinstance(node, ast.Name) and node.id in ("true", "false", "null"):
+            raise ValueError(f"use Python literal spelling for {node.id}: True, False, or None; do not use JSON literals inside Python source")
         if isinstance(node, ast.Call):
             fn = node.func
             if isinstance(fn, ast.Name) and fn.id in DISALLOWED_CALLS:
