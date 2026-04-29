@@ -1697,6 +1697,26 @@ func TestVerifiedAnswerFromBraidFinalHandoff(t *testing.T) {
 	}
 }
 
+func TestBraidGraphRewriteSummaryReportsNormalizationChanges(t *testing.T) {
+	t.Parallel()
+
+	before := BraidGraph{
+		FinalNode: "n_solve",
+		Nodes: []BraidNode{{
+			ID:              "n_solve",
+			Kind:            "solve",
+			MaxSummaryChars: 25000,
+		}},
+	}
+	after := NormalizeBraidGraphForPolicy(before, BraidGraphPolicyLongCoTController, 8)
+	summary := braidGraphRewriteSummary(before, after)
+	for _, want := range []string{"final_node:n_solve->", "nodes:1->", "node_ids:n_solve->"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("rewrite summary missing %q: %s", want, summary)
+		}
+	}
+}
+
 func TestRenderBraidFinalHandoffPreservesLongVerifiedAnswer(t *testing.T) {
 	t.Parallel()
 

@@ -831,6 +831,7 @@ func (r *REPLRunner) runStagedREPLLoop(
 				output,
 				attemptOutput,
 				phaseCap,
+				recorder,
 			)
 			if len(graphRepairOutput.Iterations) > 0 || len(graphRepairOutput.ToolCalls) > 0 || len(graphRepairOutput.ToolResults) > 0 {
 				attemptOutput = mergeEngineOutputs(attemptOutput, graphRepairOutput)
@@ -1162,14 +1163,18 @@ func (r *REPLRunner) parseAndRepairBraidGraphPhaseOutput(
 	prior engine.EngineOutput,
 	phaseOutput engine.EngineOutput,
 	maxNodes int,
+	recorder *Recorder,
 ) (BraidGraph, engine.EngineOutput, error) {
 	graph, err := ParseBraidGraphText(phaseOutput.AssistantText)
 	if err == nil {
-		graph = NormalizeBraidGraphForPolicy(graph, phase.BraidGraphPolicy, maxNodes)
-		if validateErr := validateBraidGraphForPhase(phase, graph, maxNodes); validateErr == nil {
-			return graph, engine.EngineOutput{}, nil
+		original := graph
+		normalized := NormalizeBraidGraphForPolicy(graph, phase.BraidGraphPolicy, maxNodes)
+		recordBraidGraphRewriteIfChanged(recorder, phase, "graph_normalized", original, normalized)
+		if validateErr := validateBraidGraphForPhase(phase, normalized, maxNodes); validateErr == nil {
+			return normalized, engine.EngineOutput{}, nil
 		} else {
 			err = validateErr
+			graph = normalized
 		}
 	}
 	initialErr := err
@@ -1203,11 +1208,22 @@ func (r *REPLRunner) parseAndRepairBraidGraphPhaseOutput(
 			invalidOutput = repairOutput.AssistantText
 			continue
 		}
+		originalRepaired := repaired
 		repaired = NormalizeBraidGraphForPolicy(repaired, phase.BraidGraphPolicy, maxNodes)
+		recordBraidGraphRewriteIfChanged(recorder, phase, "graph_repair_normalized", originalRepaired, repaired)
 		if validateErr := validateBraidGraphForPhase(phase, repaired, maxNodes); validateErr != nil {
 			err = validateErr
 			invalidOutput = repairOutput.AssistantText
 			continue
+		}
+		if recorder != nil {
+			recorder.RecordBraidEvent(BraidEvent{
+				Phase:     strings.TrimSpace(phase.Name),
+				Status:    "graph_repaired",
+				FinalNode: strings.TrimSpace(repaired.FinalNode),
+				NodeCount: len(repaired.Nodes),
+				Message:   fmt.Sprintf("attempt=%d", attempt),
+			})
 		}
 		return repaired, mergedRepairOutput, nil
 	}
@@ -1230,6 +1246,76 @@ func validateBraidGraphForPhase(phase REPLRunnerPhase, graph BraidGraph, maxNode
 		}
 	}
 	return nil
+}
+
+func recordBraidGraphRewriteIfChanged(recorder *Recorder, phase REPLRunnerPhase, status string, before, after BraidGraph) {
+	if recorder == nil {
+		return
+	}
+	message := braidGraphRewriteSummary(before, after)
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	recorder.RecordBraidEvent(BraidEvent{
+		Phase:     strings.TrimSpace(phase.Name),
+		Status:    status,
+		FinalNode: strings.TrimSpace(after.FinalNode),
+		NodeCount: len(after.Nodes),
+		Message:   message,
+	})
+}
+
+func braidGraphRewriteSummary(before, after BraidGraph) string {
+	var changes []string
+	if strings.TrimSpace(before.FinalNode) != strings.TrimSpace(after.FinalNode) {
+		changes = append(changes, fmt.Sprintf("final_node:%s->%s", strings.TrimSpace(before.FinalNode), strings.TrimSpace(after.FinalNode)))
+	}
+	if len(before.Nodes) != len(after.Nodes) {
+		changes = append(changes, fmt.Sprintf("nodes:%d->%d", len(before.Nodes), len(after.Nodes)))
+	}
+	beforeIDs := braidGraphNodeIDs(before)
+	afterIDs := braidGraphNodeIDs(after)
+	if strings.Join(beforeIDs, ",") != strings.Join(afterIDs, ",") {
+		changes = append(changes, "node_ids:"+strings.Join(beforeIDs, ",")+"->"+strings.Join(afterIDs, ","))
+	}
+	if changed := braidGraphSummaryCharChanges(before, after); changed != "" {
+		changes = append(changes, changed)
+	}
+	return strings.Join(changes, "; ")
+}
+
+func braidGraphNodeIDs(graph BraidGraph) []string {
+	out := make([]string, 0, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		out = append(out, strings.TrimSpace(node.ID))
+	}
+	return out
+}
+
+func braidGraphSummaryCharChanges(before, after BraidGraph) string {
+	beforeByID := map[string]int{}
+	for _, node := range before.Nodes {
+		if id := strings.TrimSpace(node.ID); id != "" {
+			beforeByID[id] = node.MaxSummaryChars
+		}
+	}
+	var changed []string
+	for _, node := range after.Nodes {
+		id := strings.TrimSpace(node.ID)
+		if id == "" {
+			continue
+		}
+		if beforeMax, ok := beforeByID[id]; ok && beforeMax != node.MaxSummaryChars {
+			changed = append(changed, fmt.Sprintf("%s:%d->%d", id, beforeMax, node.MaxSummaryChars))
+		}
+	}
+	if len(changed) == 0 {
+		return ""
+	}
+	if len(changed) > 4 {
+		changed = append(changed[:4], fmt.Sprintf("+%d more", len(changed)-4))
+	}
+	return "max_summary_chars:" + strings.Join(changed, ",")
 }
 
 func runREPLLLMWithTransientRetry(ctx context.Context, llm *engine.LLMChatEngine, input engine.EngineInput) (engine.EngineOutput, error) {
