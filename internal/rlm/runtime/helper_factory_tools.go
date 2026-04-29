@@ -1198,10 +1198,6 @@ func compactHelperFactoryLongText(value string, limit int) string {
 	return value[:limit] + "...[truncated]"
 }
 
-func helperFactoryRepairFeedback(stage, errText, source, raw string, input, output map[string]any) string {
-	return helperFactoryRepairFeedbackWithVerifier(stage, errText, source, raw, input, output, nil)
-}
-
 func helperFactoryRepairFeedbackWithVerifier(stage, errText, source, raw string, input, output, verifier map[string]any) string {
 	var b strings.Builder
 	b.WriteString("stage: ")

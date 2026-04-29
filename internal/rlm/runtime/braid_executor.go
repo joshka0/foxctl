@@ -4886,9 +4886,7 @@ func extractBraidNodeIDsFromText(text string) []string {
 			}
 		}
 	}
-	for _, id := range braidNodeIDRE.FindAllString(text, -1) {
-		out = append(out, id)
-	}
+	out = append(out, braidNodeIDRE.FindAllString(text, -1)...)
 	for _, match := range braidBareNodeListRE.FindAllStringSubmatch(strings.ToLower(text), -1) {
 		if len(match) != 2 {
 			continue
@@ -5858,10 +5856,6 @@ func braidNodePartialCanFeedDownstream(node BraidNode, finalNodeID string, graph
 		}
 	}
 	return false
-}
-
-func isGeneratedBraidSplitParseNode(node BraidNode) bool {
-	return node.Kind == "extract" && strings.HasSuffix(node.ID, "__parse")
 }
 
 func braidNodeDependsOn(graph BraidGraph, nodeID string, dependencyID string) bool {

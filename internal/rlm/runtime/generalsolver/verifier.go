@@ -59,7 +59,6 @@ func (s *VerifierStack) Verify(artifact WorkArtifact, item WorkItem) WorkVerdict
 
 	var minConfidence float64 = 1.0
 	allFeedback := make(map[string]any)
-	var allDetails []string
 	allPassed := true
 	anyRepairable := false
 
@@ -68,7 +67,6 @@ func (s *VerifierStack) Verify(artifact WorkArtifact, item WorkItem) WorkVerdict
 		if result.Confidence < minConfidence {
 			minConfidence = result.Confidence
 		}
-		allDetails = append(allDetails, result.Details...)
 		for k, v := range result.Feedback {
 			allFeedback[k] = v
 		}
