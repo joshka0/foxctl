@@ -5,8 +5,10 @@ import (
 	"strings"
 )
 
-const BraidGraphPolicyLongCoTController = "longcot_controller"
-const maxControllerCycleClusterSize = 6
+const (
+	BraidGraphPolicyLongCoTController = "longcot_controller"
+	maxControllerCycleClusterSize     = 6
+)
 
 func normalizeLongCoTControllerBraidGraph(g BraidGraph, maxNodes int) BraidGraph {
 	g = normalizeLongCoTControllerVerify(g)

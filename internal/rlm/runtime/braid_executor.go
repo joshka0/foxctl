@@ -4833,11 +4833,13 @@ func adaptiveBraidSplitDeclaredTargetIDs(node BraidNode) []string {
 	return nil
 }
 
-var braidNodeIDRangeRE = regexp.MustCompile(`\bnode_(\d+)\s*(?:to|-|through)\s*node_(\d+)\b`)
-var braidNodeIDRE = regexp.MustCompile(`\bnode_\d+\b`)
-var braidBareNodeListRE = regexp.MustCompile(`\bnodes?\s+((?:\d+\s*(?:,|and|through|to|-)?\s*){2,})`)
-var braidBareNIDRE = regexp.MustCompile(`\bn(\d+)\b`)
-var braidIntegerRE = regexp.MustCompile(`\d+`)
+var (
+	braidNodeIDRangeRE  = regexp.MustCompile(`\bnode_(\d+)\s*(?:to|-|through)\s*node_(\d+)\b`)
+	braidNodeIDRE       = regexp.MustCompile(`\bnode_\d+\b`)
+	braidBareNodeListRE = regexp.MustCompile(`\bnodes?\s+((?:\d+\s*(?:,|and|through|to|-)?\s*){2,})`)
+	braidBareNIDRE      = regexp.MustCompile(`\bn(\d+)\b`)
+	braidIntegerRE      = regexp.MustCompile(`\d+`)
+)
 
 func extractBraidNodeIDsFromAny(value any) []string {
 	switch typed := value.(type) {
