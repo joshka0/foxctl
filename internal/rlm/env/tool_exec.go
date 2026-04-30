@@ -103,7 +103,11 @@ func (a *ReadOnlyAdapter) codeSearchFnForTask(limit int, taskType string) contex
 		if strings.TrimSpace(a.workspaceRoot) == "" {
 			return nil, nil
 		}
+		normalizedTaskType, _ := normalizeCodeSearchTaskType(taskType)
 		ensembleHits, ensembleErr := a.codeSearchEnsembleHits(ctx, query, taskType, limit)
+		if normalizedTaskType == codeSearchTaskExecutionTrace && len(ensembleHits) > 0 {
+			return mergeCodeSearchHits(limit, nil, ensembleHits), nil
+		}
 		repoHits, repoErr := a.repoIndexCodeSearch(ctx, query, limit)
 		localHits, localErr := a.localCodeProbeSearch(query, taskType, limit)
 		lexicalHits, lexicalErr := a.localLexicalCodeSearch(query, limit)
@@ -139,6 +143,12 @@ func (a *ReadOnlyAdapter) codeSearchEnsembleHits(ctx context.Context, query, tas
 		return nil, nil
 	}
 	normalizedTaskType, _ := normalizeCodeSearchTaskType(taskType)
+	ensembleFiles := maxInt(limit, 4)
+	ensembleCandidates := maxInt(limit*4, 16)
+	if normalizedTaskType == codeSearchTaskExecutionTrace && ensembleFiles > 4 {
+		ensembleFiles = 4
+		ensembleCandidates = 8
+	}
 	args := mustJSON(map[string]any{
 		"query":     query,
 		"task_type": normalizedTaskType,
@@ -146,9 +156,10 @@ func (a *ReadOnlyAdapter) codeSearchEnsembleHits(ctx context.Context, query, tas
 			"require_grounding": true,
 		},
 		"budget": map[string]any{
-			"max_candidates": maxInt(limit*4, 16),
-			"max_files":      maxInt(limit, 4),
-			"max_snippets":   maxInt(limit, 4),
+			"max_candidates": ensembleCandidates,
+			"max_files":      ensembleFiles,
+			"max_snippets":   ensembleFiles,
+			"max_steps":      4,
 		},
 	})
 	out, err := a.codeSearchEnsemble(ctx, args)
@@ -1938,6 +1949,9 @@ func (a *ReadOnlyAdapter) stalenessLookupFn() contextengine.StalenessLookupFunc 
 		markers := make([]contextengine.StalenessMarker, 0, len(refs))
 		for _, ref := range refs {
 			ref := ref
+			if !shouldLookupStalenessRef(ref) {
+				continue
+			}
 			found, err := a.ceStore.ListStaleness(ctx, ctxengstore.StalenessFilter{
 				WorkspaceID: workspaceID,
 				TargetRef:   &ref,
@@ -1949,6 +1963,18 @@ func (a *ReadOnlyAdapter) stalenessLookupFn() contextengine.StalenessLookupFunc 
 			markers = append(markers, found...)
 		}
 		return markers, nil
+	}
+}
+
+func shouldLookupStalenessRef(ref contextengine.EvidenceRef) bool {
+	switch ref.Type {
+	case contextengine.RefTypeMemoryClaim, contextengine.RefTypeNote, contextengine.RefTypeTask,
+		contextengine.RefTypeSession, contextengine.RefTypeArtifact, contextengine.RefTypeTrajectory,
+		contextengine.RefTypeCommit, contextengine.RefTypeEvent, contextengine.RefTypeRun,
+		contextengine.RefTypeToolCall:
+		return true
+	default:
+		return false
 	}
 }
 

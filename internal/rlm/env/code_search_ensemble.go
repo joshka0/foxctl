@@ -186,6 +186,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 	if input.Constraints.RequireGrounding != nil {
 		requireGrounding = *input.Constraints.RequireGrounding
 	}
+	fastProbeMode := input.Budget.MaxSteps > 0 && input.Budget.MaxSteps <= 4
 
 	normalizedCandidates := normalizeCodeSearchPaths(input.CandidatePaths)
 	excluded := normalizeCodeSearchPaths(input.Constraints.ExcludePaths)
@@ -193,6 +194,14 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 	traceAnchors := deriveExecutionTraceAnchors(input.Query, taskType)
 	exactProbes := codeSearchTaskExactProbes(input.Query, taskType)
 	pathProbes := codeSearchTaskPathProbes(input.Query, taskType, exactProbes)
+	if fastProbeMode && taskType == codeSearchTaskExecutionTrace {
+		exactProbes = limitCodeSearchProbeList(exactProbes, 4)
+		pathProbes = limitCodeSearchProbeList(pathProbes, 8)
+		traceAnchors.SourceExactProbes = limitCodeSearchProbeList(traceAnchors.SourceExactProbes, 3)
+		traceAnchors.TargetExactProbes = limitCodeSearchProbeList(traceAnchors.TargetExactProbes, 3)
+		traceAnchors.SourcePathProbes = limitCodeSearchProbeList(traceAnchors.SourcePathProbes, 4)
+		traceAnchors.TargetPathProbes = limitCodeSearchProbeList(traceAnchors.TargetPathProbes, 4)
+	}
 	preferredSymbolProbes := codeSearchSymbolProbes(input.Query)
 	metadata := map[string]any{
 		"task_type_defaulted": defaulted,
@@ -408,7 +417,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 
 	var motifHits []contextplane.RepoMotifSearchHit
 	motifPathScores := map[string]float64{}
-	if taskType == codeSearchTaskExecutionTrace || taskType == codeSearchTaskFileLocate {
+	if (taskType == codeSearchTaskExecutionTrace || taskType == codeSearchTaskFileLocate) && (!fastProbeMode || input.Budget.AllowScouts) {
 		stageStart := time.Now()
 		var motifErr error
 		motifHits, motifErr = a.searchRepoMotifs(ctx, input.Query, input.Budget.MaxCandidates)
@@ -427,7 +436,11 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 	defer func() { _ = store.Close() }()
 	querySvc := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
 
-	for _, probe := range codeSearchRepoProbes(input.Query) {
+	repoProbes := codeSearchRepoProbes(input.Query)
+	if fastProbeMode && taskType == codeSearchTaskExecutionTrace {
+		repoProbes = limitCodeSearchProbeList(repoProbes, 3)
+	}
+	for _, probe := range repoProbes {
 		stageStart := time.Now()
 		searchOut, err := querySvc.SearchWithProjection(ctx, repoquery.SearchRequest{
 			Query: probe,
@@ -466,6 +479,9 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 			{query: traceAnchors.TargetQuery, exactProbes: traceAnchors.TargetExactProbes, source: "trace_target_repo", label: "trace target repo anchor"},
 		} {
 			probes := codeSearchExecutionTraceSideRepoProbes(side.query, side.exactProbes)
+			if fastProbeMode {
+				probes = limitCodeSearchProbeList(probes, 2)
+			}
 			for _, probe := range probes {
 				stageStart := time.Now()
 				searchOut, err := querySvc.SearchWithProjection(ctx, repoquery.SearchRequest{
@@ -2459,6 +2475,13 @@ func codeSearchTaskPathProbes(query, taskType string, exactProbes []string) []st
 	return out
 }
 
+func limitCodeSearchProbeList(probes []string, limit int) []string {
+	if limit <= 0 || len(probes) <= limit {
+		return probes
+	}
+	return append([]string(nil), probes[:limit]...)
+}
+
 func deriveExecutionTraceAnchors(query, taskType string) codeSearchTraceAnchors {
 	if taskType != codeSearchTaskExecutionTrace {
 		return codeSearchTraceAnchors{}
@@ -3547,10 +3570,13 @@ func prioritizedGroundingCandidates(ranked []*codeSearchCandidate, query, taskTy
 			score += 2.0
 		}
 		if candidateHasSource(candidate, "execution_bridge") {
-			score += 1.4
+			score += 1.4 + codeSearchExecutionBridgeWeight(candidate.Path)
 		}
 		if candidateHasSource(candidate, "execution_graph") {
 			score += 0.6
+		}
+		if candidateHasAnySource(candidate, "trace_source_anchor", "trace_source_repo", "trace_target_anchor", "trace_target_repo") {
+			score -= 1.35
 		}
 		return score
 	})
