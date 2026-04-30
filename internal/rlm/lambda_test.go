@@ -629,6 +629,56 @@ func TestExtractCandidatePathsFromTypedToolPayload(t *testing.T) {
 	}
 }
 
+func TestExtractCandidateEvidenceRefsIncludesLoadRefs(t *testing.T) {
+	t.Parallel()
+
+	result := map[string]any{
+		"path_set": map[string]any{
+			"must": []any{
+				map[string]any{"load_ref": "path:internal/rlm/env/tools.go"},
+			},
+		},
+		"load_refs": []any{"path:internal/rlm/env/adapter.go"},
+	}
+
+	got := extractCandidateEvidenceRefs(result)
+	want := []string{
+		"path:internal/rlm/env/tools.go",
+		"path:internal/rlm/env/adapter.go",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("refs=%v want %v", got, want)
+	}
+}
+
+func TestLambdaSearchArgsUsesGatherPayloadAndAnswerSurface(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		Prompt: "fallback query",
+		Metadata: map[string]any{
+			"gather_context_payload": map[string]any{
+				"query":     "runtime-selected query",
+				"task_type": "file_locate",
+			},
+		},
+	}
+
+	got := lambdaSearchArgs(task, LambdaPlan{TaskType: TaskTypeCodeLocate, TauStar: 4})
+	if got["query"] != "runtime-selected query" {
+		t.Fatalf("query=%v", got["query"])
+	}
+	if got["task_type"] != "file_locate" {
+		t.Fatalf("task_type=%v", got["task_type"])
+	}
+	if got["response_mode"] != "answer_surface" {
+		t.Fatalf("response_mode=%v", got["response_mode"])
+	}
+	if got["limit"] != 4 {
+		t.Fatalf("limit=%v", got["limit"])
+	}
+}
+
 func TestSelectLambdaRetrievedPathsPrefersAnswerCitations(t *testing.T) {
 	t.Parallel()
 

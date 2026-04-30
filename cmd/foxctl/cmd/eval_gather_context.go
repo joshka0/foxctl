@@ -281,6 +281,9 @@ func runSingleRLMSearchAgentEval(
 		MaxDepth:      0,
 		MaxIterations: maxIterations,
 		MaxSubcalls:   0,
+		Metadata: map[string]any{
+			"gather_context_payload": gatherPayload,
+		},
 	}
 	bootstrapper := rlmenv.NewBootstrapper(rlmenv.BootstrapConfig{
 		AppConfig:   cfg,
@@ -300,19 +303,28 @@ func runSingleRLMSearchAgentEval(
 	adapter.SetContextEngineStore(bootstrapper.ContextEngineStore())
 	adapter.SetTaskStore(bootstrapper.TaskStore())
 
-	runner := rlm.LLMRunner{
-		Config: rlm.LLMConfig{
-			Provider:       target.Provider,
-			APIKey:         target.APIKey,
-			BaseURL:        target.BaseURL,
-			Model:          target.Model,
-			Timeout:        timeout,
-			MaxIterations:  maxIterations,
-			RequireToolUse: len(env.Tools) > 0,
-			RouteProfile:   rlm.NormalizeRouteProfile(routeProfile),
-			PlanMode:       rlm.NormalizePlanMode(planMode),
-		},
-		Tools: adapter,
+	llmConfig := rlm.LLMConfig{
+		Provider:       target.Provider,
+		APIKey:         target.APIKey,
+		BaseURL:        target.BaseURL,
+		Model:          target.Model,
+		Timeout:        timeout,
+		MaxIterations:  maxIterations,
+		RequireToolUse: len(env.Tools) > 0,
+		RouteProfile:   rlm.NormalizeRouteProfile(routeProfile),
+		PlanMode:       rlm.NormalizePlanMode(planMode),
+	}
+	var runner rlm.Runner
+	if llmConfig.PlanMode == rlm.PlanModeLambda {
+		runner = rlm.LambdaRunner{
+			Config: rlm.LambdaConfig{LLM: llmConfig},
+			Tools:  adapter,
+		}
+	} else {
+		runner = rlm.LLMRunner{
+			Config: llmConfig,
+			Tools:  adapter,
+		}
 	}
 
 	start := time.Now()

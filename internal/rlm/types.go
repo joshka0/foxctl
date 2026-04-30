@@ -7,18 +7,19 @@ import (
 
 // Task describes one bounded RLM run request.
 type Task struct {
-	Prompt          string `json:"prompt"`
-	Role            string `json:"role,omitempty"`
-	RunID           string `json:"run_id,omitempty"`
-	AgentID         string `json:"agent_id,omitempty"`
-	ParentAgentID   string `json:"parent_agent_id,omitempty"`
-	OutputRoot      string `json:"output_root,omitempty"`
-	OutputNamespace string `json:"output_namespace,omitempty"`
-	WorkspaceID     string `json:"workspace_id,omitempty"`
-	WorkspaceRoot   string `json:"workspace_root,omitempty"`
-	MaxDepth        int    `json:"max_depth,omitempty"`
-	MaxIterations   int    `json:"max_iterations,omitempty"`
-	MaxSubcalls     int    `json:"max_subcalls,omitempty"`
+	Prompt          string         `json:"prompt"`
+	Role            string         `json:"role,omitempty"`
+	RunID           string         `json:"run_id,omitempty"`
+	AgentID         string         `json:"agent_id,omitempty"`
+	ParentAgentID   string         `json:"parent_agent_id,omitempty"`
+	OutputRoot      string         `json:"output_root,omitempty"`
+	OutputNamespace string         `json:"output_namespace,omitempty"`
+	WorkspaceID     string         `json:"workspace_id,omitempty"`
+	WorkspaceRoot   string         `json:"workspace_root,omitempty"`
+	MaxDepth        int            `json:"max_depth,omitempty"`
+	MaxIterations   int            `json:"max_iterations,omitempty"`
+	MaxSubcalls     int            `json:"max_subcalls,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 // Tool is a typed environment tool handle exposed to the RLM runtime.

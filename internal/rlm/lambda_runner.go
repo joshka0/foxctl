@@ -182,14 +182,11 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 	searchTool := SearchToolForTask(plan.TaskType)
 
 	// Step 1: Run search deterministically (no LLM).
-	searchResult, err := r.Tools.Execute(ctx, searchTool, jsonArgs(map[string]any{
-		"query":  task.Prompt,
-		"limit":  plan.TauStar,
-		"budget": map[string]any{"max_candidates": plan.TauStar},
-	}))
+	searchResult, err := r.Tools.Execute(ctx, searchTool, jsonArgs(lambdaSearchArgs(task, plan)))
 	if err != nil {
 		return Result{}, fmt.Errorf("lambda leaf search: %w", err)
 	}
+	gatherSurface := lambdaGatherContextSurfaceMetadata(searchResult, task.WorkspaceRoot)
 
 	// Extract candidate refs from the composite retrieval result.
 	candidateRefs := extractCandidateEvidenceRefs(searchResult)
@@ -229,7 +226,7 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 	answer, answerSanitization, err := r.judgeEvidence(ctx, cfg.LLM, task.Prompt, evidenceBlock)
 	if err != nil {
 		// Fallback: return the search result summary without LLM judgment.
-		return Result{
+		result := Result{
 			Answer:         formatMapAsText(searchResult),
 			EvidenceRefs:   evidenceRefs,
 			RetrievedPaths: candidates,
@@ -244,7 +241,11 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 				"files_loaded":          len(loadedSnippets),
 				"retrieved_path_source": "candidate_paths_fallback",
 			},
-		}, nil
+		}
+		for key, value := range gatherSurface {
+			result.Metadata[key] = value
+		}
+		return result, nil
 	}
 
 	retrievedPaths, answerPaths, pathSource := selectLambdaRetrievedPaths(answer, candidates, task.WorkspaceRoot)
@@ -268,6 +269,9 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 	if answerSanitization.Changed {
 		result.Metadata["output_sanitization"] = answerSanitization
 	}
+	for key, value := range gatherSurface {
+		result.Metadata[key] = value
+	}
 	return result, nil
 }
 
@@ -284,6 +288,7 @@ func (r LambdaRunner) split(ctx context.Context, task Task, _ Environment, plan 
 			MaxDepth:      task.MaxDepth,
 			MaxIterations: 1,
 			MaxSubcalls:   1,
+			Metadata:      copyTaskMetadata(task.Metadata),
 		})
 	}
 	return tasks
@@ -544,9 +549,16 @@ func collectEvidenceRefsRecursive(value any, out *[]string) {
 	switch v := value.(type) {
 	case map[string]any:
 		for key, child := range v {
-			if key == "ref" && child != nil {
+			if (key == "ref" || key == "load_ref") && child != nil {
 				if ref := strings.TrimSpace(fmt.Sprint(child)); ref != "" {
 					*out = append(*out, ref)
+				}
+			}
+			if key == "load_refs" && child != nil {
+				for _, ref := range stringsFromAny(child) {
+					if ref = strings.TrimSpace(ref); ref != "" {
+						*out = append(*out, ref)
+					}
 				}
 			}
 			collectEvidenceRefsRecursive(child, out)
@@ -593,6 +605,113 @@ func extractEvidenceRefs(result map[string]any) []string {
 		return out
 	}
 	return nil
+}
+
+func lambdaSearchArgs(task Task, plan LambdaPlan) map[string]any {
+	if payload, ok := task.Metadata["gather_context_payload"].(map[string]any); ok && len(payload) > 0 {
+		args := copyMapAny(payload)
+		if strings.TrimSpace(fmt.Sprint(args["query"])) == "" {
+			args["query"] = task.Prompt
+		}
+		if _, ok := args["limit"]; !ok && plan.TauStar > 0 {
+			args["limit"] = plan.TauStar
+		}
+		if _, ok := args["response_mode"]; !ok {
+			args["response_mode"] = "answer_surface"
+		}
+		if _, ok := args["budget"]; !ok && plan.TauStar > 0 {
+			args["budget"] = map[string]any{"max_candidates": plan.TauStar}
+		}
+		return args
+	}
+	args := map[string]any{
+		"query":         task.Prompt,
+		"response_mode": "answer_surface",
+		"limit":         plan.TauStar,
+		"budget":        map[string]any{"max_candidates": plan.TauStar},
+	}
+	if taskType := lambdaGatherTaskType(plan.TaskType); taskType != "" {
+		args["task_type"] = taskType
+	}
+	return args
+}
+
+func lambdaGatherTaskType(taskType TaskType) string {
+	switch taskType {
+	case TaskTypeCodeLocate:
+		return "file_locate"
+	case TaskTypeCodeUnderstand:
+		return "execution_trace"
+	case TaskTypeMemoryRecall:
+		return "memory_recall"
+	case TaskTypeEvidenceAudit:
+		return "evidence_audit"
+	default:
+		return ""
+	}
+}
+
+func lambdaGatherContextSurfaceMetadata(payload map[string]any, workspaceRoot string) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	out := map[string]any{}
+	if selectedPaths := pathsFromSelectedPathItems(payload["selected_paths"], workspaceRoot); len(selectedPaths) > 0 {
+		out["gather_context_selected_paths"] = uniqueStringsRLM(selectedPaths)
+	}
+	if answerSeedPaths := pathsFromNestedPathList(payload, []string{"answer_seed", "paths"}, workspaceRoot); len(answerSeedPaths) > 0 {
+		out["gather_context_answer_seed_paths"] = uniqueStringsRLM(answerSeedPaths)
+	}
+	if pathSetMust := pathsFromNestedPathItems(payload, []string{"path_set", "must"}, workspaceRoot); len(pathSetMust) > 0 {
+		out["gather_context_path_set_must"] = uniqueStringsRLM(pathSetMust)
+	}
+	if status := stringFromNestedMap(payload, []string{"certificate", "status"}); status != "" {
+		out["gather_context_certificate_statuses"] = []string{status}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func copyTaskMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		if m, ok := value.(map[string]any); ok {
+			out[key] = copyMapAny(m)
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func copyMapAny(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func stringsFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return typed
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func extractTextFromToolResult(result map[string]any, maxLen int) string {
