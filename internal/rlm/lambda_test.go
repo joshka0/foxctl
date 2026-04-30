@@ -745,6 +745,40 @@ func TestSelectLambdaRetrievedPathsFallsBackToCandidates(t *testing.T) {
 	}
 }
 
+func TestLambdaReducePreservesGatherSurfaceMetadata(t *testing.T) {
+	t.Parallel()
+
+	runner := LambdaRunner{}
+	result, err := runner.reduce(context.Background(), Task{Prompt: "merge"}, LambdaPlan{
+		ComposeOp: ComposeUnion,
+	}, []Result{
+		{
+			Answer:         "partial",
+			RetrievedPaths: []string{"internal/rlm/env/code_search_ensemble.go"},
+			Metadata: map[string]any{
+				"candidate_paths":                     []string{"internal/rlm/env/code_search_ensemble.go"},
+				"gather_context_selected_paths":       []string{"internal/rlm/env/code_search_ensemble.go"},
+				"gather_context_answer_seed_paths":    []string{"internal/rlm/env/code_search_ensemble.go"},
+				"gather_context_path_set_must":        []string{"internal/rlm/env/code_search_ensemble.go"},
+				"gather_context_certificate_statuses": []string{"certified"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("reduce() error = %v", err)
+	}
+	for _, key := range []string{
+		"gather_context_selected_paths",
+		"gather_context_answer_seed_paths",
+		"gather_context_path_set_must",
+		"gather_context_certificate_statuses",
+	} {
+		if got := stringSliceFromAny(result.Metadata[key]); len(got) != 1 {
+			t.Fatalf("%s=%v want one value", key, result.Metadata[key])
+		}
+	}
+}
+
 type lambdaFakeToolExecutor struct {
 	delays map[string]time.Duration
 }

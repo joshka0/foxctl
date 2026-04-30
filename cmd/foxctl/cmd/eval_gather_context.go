@@ -361,6 +361,18 @@ func runSingleRLMSearchAgentEval(
 
 	judgeOutput := result.Output
 	structured, ok := parseStructuredAgentEvalOutput(result.Output)
+	if !ok && llmConfig.PlanMode == rlm.PlanModeLambda && len(rlmResult.RetrievedPaths) > 0 {
+		structured = structuredAgentEvalOutput{
+			Summary:   "Lambda retrieval returned deterministic repo paths from gather_context.",
+			Paths:     append([]string(nil), rlmResult.RetrievedPaths...),
+			Rationale: "The lambda runner supplied retrieved paths directly when final answer text was not structured JSON.",
+		}
+		if body, err := json.Marshal(structured); err == nil {
+			result.Output = string(body)
+			judgeOutput = result.Output
+			ok = true
+		}
+	}
 	if hasCodeCorrectnessExpectations(evalCase) && !ok {
 		result.Error = firstNonEmpty(result.Error, "expected structured JSON output with summary, paths, symbols, snippets, facts, and rationale")
 	}

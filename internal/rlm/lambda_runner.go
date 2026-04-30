@@ -302,6 +302,10 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 	var evidence []string
 	var paths []string
 	var candidatePaths []string
+	var gatherSelectedPaths []string
+	var gatherAnswerSeedPaths []string
+	var gatherPathSetMust []string
+	var gatherCertificateStatuses []string
 	var totalIterations int
 	var totalSubcalls int
 	var answerSanitization OutputSanitization
@@ -310,6 +314,10 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 		evidence = append(evidence, p.EvidenceRefs...)
 		paths = append(paths, p.RetrievedPaths...)
 		candidatePaths = append(candidatePaths, stringSliceFromAny(p.Metadata["candidate_paths"])...)
+		gatherSelectedPaths = append(gatherSelectedPaths, stringSliceFromAny(p.Metadata["gather_context_selected_paths"])...)
+		gatherAnswerSeedPaths = append(gatherAnswerSeedPaths, stringSliceFromAny(p.Metadata["gather_context_answer_seed_paths"])...)
+		gatherPathSetMust = append(gatherPathSetMust, stringSliceFromAny(p.Metadata["gather_context_path_set_must"])...)
+		gatherCertificateStatuses = append(gatherCertificateStatuses, stringSliceFromAny(p.Metadata["gather_context_certificate_statuses"])...)
 		totalIterations += p.Iterations
 		totalSubcalls += p.Subcalls
 	}
@@ -374,6 +382,18 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 	}
 	if answerSanitization.Changed {
 		result.Metadata["output_sanitization"] = answerSanitization
+	}
+	if gatherSelectedPaths = uniqueStringsRLM(gatherSelectedPaths); len(gatherSelectedPaths) > 0 {
+		result.Metadata["gather_context_selected_paths"] = gatherSelectedPaths
+	}
+	if gatherAnswerSeedPaths = uniqueStringsRLM(gatherAnswerSeedPaths); len(gatherAnswerSeedPaths) > 0 {
+		result.Metadata["gather_context_answer_seed_paths"] = gatherAnswerSeedPaths
+	}
+	if gatherPathSetMust = uniqueStringsRLM(gatherPathSetMust); len(gatherPathSetMust) > 0 {
+		result.Metadata["gather_context_path_set_must"] = gatherPathSetMust
+	}
+	if gatherCertificateStatuses = uniqueStringsRLM(gatherCertificateStatuses); len(gatherCertificateStatuses) > 0 {
+		result.Metadata["gather_context_certificate_statuses"] = gatherCertificateStatuses
 	}
 	return result, nil
 }
