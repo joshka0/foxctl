@@ -33,25 +33,32 @@ var taskDigitMap = map[string]TaskType{
 // classifyTask makes one bounded LLM call to classify the query into a task type.
 // Returns TaskTypeGeneral on any error.
 func classifyTask(ctx context.Context, cfg LLMConfig, prompt string) (TaskType, error) {
+	taskType, _, err := classifyTaskWithUsage(ctx, cfg, prompt)
+	return taskType, err
+}
+
+func classifyTaskWithUsage(ctx context.Context, cfg LLMConfig, prompt string) (TaskType, engine.TokenUsage, error) {
 	llmCfg := lambdaLLMChatConfig(cfg)
 	llmCfg.MaxIterations = 1
 	llmCfg.MaxTokens = 16
+	classifyPrompt := fmt.Sprintf(classifyPromptTemplate, truncateRLMText(prompt, 500))
+	estimatedUsage := estimateLambdaTokenUsage("You are a task classifier. Reply with exactly one digit and nothing else.\n"+classifyPrompt, "")
 
 	llm, err := engine.NewLLMChatEngine(llmCfg)
 	if err != nil {
-		return TaskTypeGeneral, fmt.Errorf("lambda classify: init LLM: %w", err)
+		return TaskTypeGeneral, estimatedUsage, fmt.Errorf("lambda classify: init LLM: %w", err)
 	}
 
 	output, err := llm.Run(ctx, engine.EngineInput{
 		SystemPrompt: "You are a task classifier. Reply with exactly one digit and nothing else.",
-		Messages:     []engine.Message{engine.NewUserMessage(fmt.Sprintf(classifyPromptTemplate, truncateRLMText(prompt, 500)))},
+		Messages:     []engine.Message{engine.NewUserMessage(classifyPrompt)},
 	})
 	if err != nil {
-		return TaskTypeGeneral, fmt.Errorf("lambda classify: LLM call: %w", err)
+		return TaskTypeGeneral, fillMissingLambdaUsage(output.Tokens, estimatedUsage, output.AssistantText), fmt.Errorf("lambda classify: LLM call: %w", err)
 	}
 
 	resp := strings.TrimSpace(output.AssistantText)
-	return parseTaskType(resp), nil
+	return parseTaskType(resp), fillMissingLambdaUsage(output.Tokens, estimatedUsage, resp), nil
 }
 
 func lambdaLLMChatConfig(cfg LLMConfig) engine.LLMChatConfig {

@@ -384,6 +384,7 @@ func TestLambdaRunnerEphemeralSkillSanitizesFinalAnswer(t *testing.T) {
 				},
 				"finish_reason": "stop",
 			}},
+			"usage": map[string]any{"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19},
 		})
 	}))
 	defer server.Close()
@@ -428,6 +429,7 @@ func TestLambdaLeafSanitizesJudgeAnswer(t *testing.T) {
 				},
 				"finish_reason": "stop",
 			}},
+			"usage": map[string]any{"prompt_tokens": 21, "completion_tokens": 8, "total_tokens": 29},
 		})
 	}))
 	defer server.Close()
@@ -456,6 +458,9 @@ func TestLambdaLeafSanitizesJudgeAnswer(t *testing.T) {
 	}
 	if result.Metadata["output_sanitization"] == nil {
 		t.Fatalf("missing output_sanitization metadata: %#v", result.Metadata)
+	}
+	if got := intFromAny(result.Metadata["parent_total_tokens"]); got != 29 {
+		t.Fatalf("parent_total_tokens=%d want 29", got)
 	}
 }
 
@@ -679,6 +684,42 @@ func TestLambdaSearchArgsUsesGatherPayloadAndAnswerSurface(t *testing.T) {
 	}
 }
 
+func TestExplicitLambdaTaskTypeUsesGatherPayload(t *testing.T) {
+	t.Parallel()
+
+	taskType, source := explicitLambdaTaskType(Task{Metadata: map[string]any{
+		"gather_context_payload": map[string]any{"task_type": "file_locate"},
+	}})
+	if taskType != TaskTypeCodeLocate || source != "gather_context_payload" {
+		t.Fatalf("taskType=%s source=%s", taskType, source)
+	}
+}
+
+func TestLambdaAnswerFromAnswerSurface(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := lambdaAnswerFromAnswerSurface(map[string]any{
+		"schema_version": "context_answer_surface/v2",
+		"answer_seed": map[string]any{
+			"paths": []any{"internal/rlm/env/code_search_ensemble.go"},
+			"facts": []any{"code_search_ensemble is implemented in the RLM env package."},
+		},
+	}, nil)
+	if !ok {
+		t.Fatal("lambdaAnswerFromAnswerSurface() ok=false")
+	}
+	var out structuredLambdaAnswerForTest
+	if err := json.Unmarshal([]byte(answer), &out); err != nil {
+		t.Fatalf("answer JSON error: %v", err)
+	}
+	if strings.Join(out.Paths, "\n") != "internal/rlm/env/code_search_ensemble.go" {
+		t.Fatalf("paths=%v", out.Paths)
+	}
+	if len(out.Facts) != 1 {
+		t.Fatalf("facts=%v", out.Facts)
+	}
+}
+
 func TestSelectLambdaRetrievedPathsPrefersAnswerCitations(t *testing.T) {
 	t.Parallel()
 
@@ -781,6 +822,11 @@ func TestLambdaReducePreservesGatherSurfaceMetadata(t *testing.T) {
 
 type lambdaFakeToolExecutor struct {
 	delays map[string]time.Duration
+}
+
+type structuredLambdaAnswerForTest struct {
+	Paths []string `json:"paths"`
+	Facts []string `json:"facts"`
 }
 
 func (f lambdaFakeToolExecutor) Execute(ctx context.Context, _ string, args json.RawMessage) (map[string]any, error) {
