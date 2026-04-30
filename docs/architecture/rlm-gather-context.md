@@ -36,10 +36,13 @@ parallel source-profile subsystem:
 | `mixed` | fused lane retrieval through existing `RetrieveMixed` behavior |
 
 `load_evidence_ref` is the follow-up inspection tool for refs returned by the
-bundle. `retrieve_code`, `retrieve_memory`, `retrieve_context`, and
-`retrieve_mixed` remain raw retrieval/debug tools. The `context` lane reads the
-RLM bootstrapper's ACA projection for top-of-mind state, adds the latest handoff
-as first-class context evidence, and can append contextplane retrieval packs from
+bundle. The `gather-context` tool profile exposes only `gather_context` and
+`load_evidence_ref` to the model, so small-model evals copy the runtime-selected
+answer seed and inspect refs only for verification. `retrieve_code`,
+`retrieve_memory`, `retrieve_context`, and `retrieve_mixed` remain raw
+retrieval/debug tools in broader profiles. The `context` lane reads the RLM
+bootstrapper's ACA projection for top-of-mind state, adds the latest handoff as
+first-class context evidence, and can append contextplane retrieval packs from
 the Obsidian/ACA index when a vault path is configured.
 
 ## Regression Gate
@@ -53,6 +56,7 @@ env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 go build -tags=libsqlite3 -o /
   --workspace . \
   --eval-dataset-file /tmp/gather-context-eval.jsonl \
   --lane code \
+  --tool-profile gather-context \
   --max-context-chars 6000 \
   --pass-threshold 0.8
 ```

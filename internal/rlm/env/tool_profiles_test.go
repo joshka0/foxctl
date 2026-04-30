@@ -31,6 +31,29 @@ func TestFilterToolsCodeIntel(t *testing.T) {
 	}
 }
 
+func TestFilterToolsGatherContext(t *testing.T) {
+	t.Parallel()
+
+	in := []rlm.Tool{
+		{Name: "retrieve_code"},
+		{Name: "retrieve_memory"},
+		{Name: "retrieve_context"},
+		{Name: "retrieve_task"},
+		{Name: "gather_context"},
+		{Name: "retrieve_mixed"},
+		{Name: "load_evidence_ref"},
+	}
+	got := FilterTools(in, ToolProfileGatherContext)
+	var names []string
+	for _, tool := range got {
+		names = append(names, tool.Name)
+	}
+	want := []string{"gather_context", "load_evidence_ref"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("FilterTools()=%v want %v", names, want)
+	}
+}
+
 func TestFilterToolsMemoryRecall(t *testing.T) {
 	t.Parallel()
 

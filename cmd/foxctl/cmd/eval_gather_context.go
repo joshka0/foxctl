@@ -220,7 +220,7 @@ func newEvalGatherContextCommand() *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 8, "Maximum evidence sources requested from gather_context")
 	cmd.Flags().IntVar(&maxContextChars, "max-context-chars", 6000, "Maximum approximate context chars emitted by gather_context")
 	cmd.Flags().StringSliceVar(&lanes, "lane", []string{"code"}, "Context lanes to gather (code, memory, context, task, mixed)")
-	cmd.Flags().StringVar(&toolProfile, "tool-profile", rlmenv.ToolProfileCodeIntel, "RLM tool profile used for environment bootstrap")
+	cmd.Flags().StringVar(&toolProfile, "tool-profile", rlmenv.ToolProfileGatherContext, "RLM tool profile used for environment bootstrap")
 	cmd.Flags().StringSliceVar(&agentBaselineResults, "agent-baseline-results", nil, "Optional JSONL external/subagent baseline results to compare against gather_context (repeatable)")
 	cmd.Flags().StringSliceVar(&rlmAgentTargets, "rlm-agent-target", nil, "Optional RLM mini-agent benchmark target in provider:model format (repeatable)")
 	cmd.Flags().StringSliceVar(&rlmAgentModels, "rlm-agent-model", nil, "Optional RLM mini-agent model using --rlm-agent-provider (repeatable)")

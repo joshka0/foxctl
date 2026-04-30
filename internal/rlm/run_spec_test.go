@@ -138,6 +138,28 @@ func TestResolveToolPolicyCodeIntelReturnsCodeTools(t *testing.T) {
 	}
 }
 
+func TestResolveToolPolicyGatherContextReturnsBundleTools(t *testing.T) {
+	t.Parallel()
+
+	allTools := []Tool{
+		{Name: "retrieve_code", ReadOnly: true},
+		{Name: "retrieve_memory", ReadOnly: true},
+		{Name: "retrieve_context", ReadOnly: true},
+		{Name: "retrieve_task", ReadOnly: true},
+		{Name: "gather_context", ReadOnly: true},
+		{Name: "retrieve_mixed", ReadOnly: true},
+		{Name: "load_evidence_ref", ReadOnly: true},
+	}
+	policy, err := ResolveToolPolicy(allTools, string(ToolProfileGatherContext))
+	if err != nil {
+		t.Fatalf("ResolveToolPolicy() error = %v", err)
+	}
+	wantNames := []string{"gather_context", "load_evidence_ref"}
+	if got := names(policy.Tools); !reflect.DeepEqual(got, wantNames) {
+		t.Fatalf("gather-context tool names=%v want %v", got, wantNames)
+	}
+}
+
 func TestResolveToolPolicyMemoryRecallReturnsMemoryTools(t *testing.T) {
 	t.Parallel()
 

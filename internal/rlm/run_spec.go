@@ -9,6 +9,7 @@ type ToolProfile string
 
 const (
 	ToolProfileDefault             ToolProfile = "default"
+	ToolProfileGatherContext       ToolProfile = "gather-context"
 	ToolProfileCodeIntel           ToolProfile = "code-intel"
 	ToolProfileMemoryRecall        ToolProfile = "memory-recall"
 	ToolProfileLongCoTNoModelTools ToolProfile = "longcot-no-model-tools"
@@ -88,6 +89,19 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 			AllowedTools: collectToolNames(tools),
 			Tools:        tools,
 		}, nil
+	case ToolProfileGatherContext:
+		// Gather context: force composite context gathering first, then allow
+		// bounded ref inspection only for verification.
+		allow := map[string]struct{}{
+			"gather_context":    {},
+			"load_evidence_ref": {},
+		}
+		tools := filterToolsBySet(available, allow)
+		return ToolPolicy{
+			Profile:      resolvedProfile,
+			AllowedTools: collectToolNames(tools),
+			Tools:        tools,
+		}, nil
 	case ToolProfileCodeIntel:
 		// Code intel: gather_context + retrieve_code + load_evidence_ref.
 		allow := map[string]struct{}{
@@ -131,6 +145,8 @@ func NormalizeToolProfile(value string) (ToolProfile, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", string(ToolProfileDefault):
 		return ToolProfileDefault, nil
+	case string(ToolProfileGatherContext):
+		return ToolProfileGatherContext, nil
 	case string(ToolProfileCodeIntel):
 		return ToolProfileCodeIntel, nil
 	case string(ToolProfileMemoryRecall):
