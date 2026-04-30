@@ -178,6 +178,20 @@ func TestSemanticIndexUpdate_NoFilesError(t *testing.T) {
 	}
 }
 
+func TestSemanticIndexOpenAICompatDimensionsKnownLocalModel(t *testing.T) {
+	got := semanticIndexOpenAICompatDimensions("text-embedding-embeddinggemma-300m-qat", 1024)
+	if got != 768 {
+		t.Fatalf("dimensions=%d want 768", got)
+	}
+}
+
+func TestSemanticIndexOpenAICompatDimensionsCustomModelUsesConfigured(t *testing.T) {
+	got := semanticIndexOpenAICompatDimensions("custom-local-embedding-model", 512)
+	if got != 512 {
+		t.Fatalf("dimensions=%d want configured 512", got)
+	}
+}
+
 func TestFindFilesMatchingGlob(t *testing.T) {
 	// Create temp directory structure
 	tmpDir := t.TempDir()

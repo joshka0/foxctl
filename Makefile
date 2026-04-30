@@ -29,6 +29,9 @@ GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
+# Skills that can run without CGO, but should also get a CGO artifact when
+# local libsql/vector-backed stores are available.
+OPTIONAL_CGO_SKILLS := code_semantic_search
 
 .PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-race-shard test-race-impacted test-race-shard-impacted test-integration test-integration-impacted test-integration-cmd cover check-coverage check-coverage-strict check-doc-links check-large-files check-tech-debt check-duplication test-timing build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-impact skills-build-impacted packages-impact test-short-impacted test-cgo-short-impacted skills-install skills-install-cgo skills-install-all skills-test completions init go-tui-build go-tui-spawn go-tui-agent go-tui go-tui-smoke tui ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean gepa-prompt gepa-cycle gepa-dataset-export gepa-dataset-export-ranked gepa-claude-export gepa-claude-rewrite gepa-leaderboard gepa-compare-batch gepa-judge-baseline eval-code-search-foxctl-package eval-code-search-praze-infra eval-code-search-foxctl-repo-grounded eval-code-search-foxctl-change-impact eval-code-search-foxctl-trace-symbol eval-code-search-foxctl-bridge-esoteric eval-retrieval-foxctl eval-retrieval-foxctl-mixed eval-retrieval-foxctl-cochange eval-retrieval-jido eval-retrieval-praze eval-retrieval-praze-mixed eval-retrieval-praze-k8s
 
@@ -653,7 +656,7 @@ skills-build-cgo:
 		for dir in $(SKILL_DIRS); do \
 			name=$$(basename "$$dir"); \
 			needs_cgo=0; \
-			if echo " $(CGO_SKILLS) " | grep -q " $$name "; then \
+			if echo " $(CGO_SKILLS) $(OPTIONAL_CGO_SKILLS) " | grep -q " $$name "; then \
 				needs_cgo=1; \
 			elif ls "$$dir"/*.go >/dev/null 2>&1 && grep -qE '^//go:build cgo|^// +build cgo' "$$dir"/*.go; then \
 				needs_cgo=1; \

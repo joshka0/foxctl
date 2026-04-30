@@ -1,6 +1,11 @@
 # RLM Context System
 
 > Status: Fully implemented with contextvar store and RLM tools
+>
+> Scope: this page covers the legacy context-variable tool family
+> (`rlm_context_put`, `rlm_context_query`, `rlm_context_list`, and
+> personality adjustment). For the current RLM-facing retrieval controller, see
+> [RLM Gather Context](../architecture/rlm-gather-context.md).
 
 ## Overview
 

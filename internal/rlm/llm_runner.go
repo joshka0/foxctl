@@ -223,6 +223,7 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 	}
 	evidence := collectEvidenceRefs(env)
 	retrievedPaths := collectRetrievedPaths(output.ToolResults, task.WorkspaceRoot, answer)
+	gatherSurface := collectGatherContextSurfaceMetadata(output.ToolCalls, output.ToolResults, task.WorkspaceRoot)
 	parentUsage := summarizeParentToolUsage(output.Iterations, "retrieve_code")
 	metadata := map[string]any{
 		"stop_reason":            output.StopReason,
@@ -238,6 +239,9 @@ func (r LLMRunner) runSinglePass(ctx context.Context, task Task, env Environment
 		"parent_total_tokens":    output.Tokens.TotalTokens,
 		"parent_iteration_count": len(output.Iterations),
 		"parent_tool_usage":      parentUsage,
+	}
+	for key, value := range gatherSurface {
+		metadata[key] = value
 	}
 	if sanitization.Changed {
 		metadata["output_sanitization"] = sanitization
@@ -513,10 +517,17 @@ func toolSurfaceGuidance(tools []Tool) string {
 	}
 
 	var guidance []string
-	if has("retrieve_code") {
-		text := "For repo questions, start with retrieve_code."
+	if has("gather_context") {
+		text := "For repo, memory, task, or mixed context questions, start with gather_context using response_mode=\"answer_surface\" and use its certified answer_seed as the bounded answer context. Copy answer_seed.paths and answer_seed.facts when present rather than re-inferring answers from raw evidence."
 		if has("load_evidence_ref") {
-			text = "For repo questions, start with retrieve_code and use load_evidence_ref for exact evidence verification."
+			text = "For repo, memory, task, or mixed context questions, start with gather_context using response_mode=\"answer_surface\", copy answer_seed.paths and answer_seed.facts when present, then use load_evidence_ref only to verify a specific load_ref from path_set.must or load_queue. Do not narrow the final answer to only the loaded file."
+		}
+		guidance = append(guidance, text)
+	}
+	if has("retrieve_code") {
+		text := "Use retrieve_code only for narrow raw code lookup when gather_context is unavailable or too broad."
+		if has("load_evidence_ref") {
+			text = "Use retrieve_code only for narrow raw code lookup when gather_context is unavailable or too broad, and use load_evidence_ref for exact evidence verification."
 		}
 		guidance = append(guidance, text)
 	}
@@ -527,14 +538,14 @@ func toolSurfaceGuidance(tools []Tool) string {
 				lanes = append(lanes, name)
 			}
 		}
-		text := "For memory or task recall, use " + strings.Join(lanes, ", ") + "."
+		text := "Use " + strings.Join(lanes, ", ") + " only for lane-specific debugging or follow-up retrieval."
 		if has("load_evidence_ref") {
-			text = "For memory or task recall, use " + strings.Join(lanes, ", ") + " and verify specific evidence with load_evidence_ref."
+			text = "Use " + strings.Join(lanes, ", ") + " only for lane-specific debugging or follow-up retrieval, and verify specific evidence with load_evidence_ref."
 		}
 		guidance = append(guidance, text)
 	}
 	if has("retrieve_mixed") {
-		guidance = append(guidance, "For mixed or uncertain questions, use retrieve_mixed to gather evidence across lanes.")
+		guidance = append(guidance, "Use retrieve_mixed only when you need the raw fused EvidencePack instead of a reduced ContextBundle.")
 	}
 	if has("load_evidence_ref") && len(guidance) == 0 {
 		guidance = append(guidance, "Use load_evidence_ref to inspect and verify referenced evidence.")
@@ -639,6 +650,103 @@ func collectRetrievedPaths(results []engine.ToolResult, workspaceRoot, answer st
 		}
 	}
 	return uniqueStringsRLM(out)
+}
+
+func collectGatherContextSurfaceMetadata(calls []engine.ToolCall, results []engine.ToolResult, workspaceRoot string) map[string]any {
+	callNames := make(map[string]string, len(calls))
+	for _, call := range calls {
+		callNames[call.ID] = call.Name
+	}
+	selectedPaths := make([]string, 0)
+	answerSeedPaths := make([]string, 0)
+	pathSetMust := make([]string, 0)
+	certificateStatuses := make([]string, 0)
+	for _, result := range results {
+		if result.IsError || callNames[result.ToolCallID] != "gather_context" {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(result.Content)), &payload); err != nil {
+			continue
+		}
+		selectedPaths = append(selectedPaths, pathsFromSelectedPathItems(payload["selected_paths"], workspaceRoot)...)
+		answerSeedPaths = append(answerSeedPaths, pathsFromNestedPathList(payload, []string{"answer_seed", "paths"}, workspaceRoot)...)
+		pathSetMust = append(pathSetMust, pathsFromNestedPathItems(payload, []string{"path_set", "must"}, workspaceRoot)...)
+		if status := stringFromNestedMap(payload, []string{"certificate", "status"}); status != "" {
+			certificateStatuses = append(certificateStatuses, status)
+		}
+	}
+	out := map[string]any{}
+	if len(selectedPaths) > 0 {
+		out["gather_context_selected_paths"] = uniqueStringsRLM(selectedPaths)
+	}
+	if len(answerSeedPaths) > 0 {
+		out["gather_context_answer_seed_paths"] = uniqueStringsRLM(answerSeedPaths)
+	}
+	if len(pathSetMust) > 0 {
+		out["gather_context_path_set_must"] = uniqueStringsRLM(pathSetMust)
+	}
+	if len(certificateStatuses) > 0 {
+		out["gather_context_certificate_statuses"] = uniqueStringsRLM(certificateStatuses)
+	}
+	return out
+}
+
+func pathsFromNestedPathList(payload map[string]any, keys []string, workspaceRoot string) []string {
+	value := nestedMapValue(payload, keys)
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if normalized := normalizeRetrievedPath(fmt.Sprint(item), workspaceRoot); normalized != "" {
+			out = append(out, normalized)
+		}
+	}
+	return out
+}
+
+func pathsFromNestedPathItems(payload map[string]any, keys []string, workspaceRoot string) []string {
+	return pathsFromSelectedPathItems(nestedMapValue(payload, keys), workspaceRoot)
+}
+
+func pathsFromSelectedPathItems(value any, workspaceRoot string) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if normalized := normalizeRetrievedPath(fmt.Sprint(m["path"]), workspaceRoot); normalized != "" {
+			out = append(out, normalized)
+		}
+	}
+	return out
+}
+
+func stringFromNestedMap(payload map[string]any, keys []string) string {
+	value := nestedMapValue(payload, keys)
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func nestedMapValue(payload map[string]any, keys []string) any {
+	var current any = payload
+	for _, key := range keys {
+		m, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = m[key]
+	}
+	return current
 }
 
 func summarizeParentToolUsage(iterations []engine.IterationUsage, toolName string) map[string]any {

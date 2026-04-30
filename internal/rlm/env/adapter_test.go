@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/context/contextplane"
 	"github.com/joshka0/foxctl/internal/domain/skill"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -16,6 +18,10 @@ import (
 	"github.com/joshka0/foxctl/internal/rlm"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage/cas"
+	ctxengstore "github.com/joshka0/foxctl/internal/storage/contextengine"
+	"github.com/joshka0/foxctl/internal/storage/obsidianindex"
+	"github.com/joshka0/foxctl/internal/storage/sessions"
+	taskstore "github.com/joshka0/foxctl/internal/storage/tasks"
 	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
@@ -136,6 +142,208 @@ func TestReadOnlyAdapterBasicTools(t *testing.T) {
 	}
 }
 
+func TestReadOnlyAdapterLoadEvidenceRefLoadsTaskAndBoundsPath(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+
+	if err := os.WriteFile(filepath.Join(workspace, "long.txt"), []byte(strings.Repeat("abcdef", 40)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := taskstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	_, err = store.Add(ctx, taskstore.Task{
+		ID:          "task-1",
+		WorkspaceID: workspaceID,
+		Title:       "Wire evidence loading",
+		Status:      taskstore.StatusInProgress,
+		ScopePath:   "internal/rlm/env",
+		CreatedAt:   time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := NewReadOnlyAdapter(config.Config{}, workspace, "", nil, rlm.Environment{})
+	adapter.SetTaskStore(store)
+
+	out, err := adapter.ExecuteInternal(ctx, "load_evidence_ref", mustJSON(map[string]any{
+		"ref":        "path:long.txt",
+		"max_tokens": 5,
+	}))
+	if err != nil {
+		t.Fatalf("load path: %v", err)
+	}
+	content, _ := out["content"].(string)
+	if len(content) > 20 {
+		t.Fatalf("content length=%d want bounded; out=%v", len(content), out)
+	}
+	if out["truncated"] != true {
+		t.Fatalf("expected truncated=true: %v", out)
+	}
+
+	out, err = adapter.ExecuteInternal(ctx, "load_evidence_ref", mustJSON(map[string]any{
+		"ref": "task:task-1",
+	}))
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if out["loaded"] != true {
+		t.Fatalf("loaded=%v out=%v", out["loaded"], out)
+	}
+	if out["task_context"] == nil {
+		t.Fatalf("missing task_context: %v", out)
+	}
+}
+
+func TestReadOnlyAdapterLoadEvidenceRefLoadsSymbolAndContextEvent(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+
+	repoFile := filepath.Join(workspace, "internal", "rlm", "env", "tool_exec.go")
+	if err := os.MkdirAll(filepath.Dir(repoFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(repoFile, []byte("package env\n\nfunc gatherContext() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repoStore, err := repoindex.Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoKey := repoStore.RepoKey()
+	err = repoStore.ReplaceAll(ctx, []repoindex.Node{{
+		ID:        repoindex.SymbolID(repoKey, "go:internal/rlm/env", "func:gatherContext"),
+		Kind:      repoindex.NodeSymbol,
+		Pkg:       "go:internal/rlm/env",
+		File:      "internal/rlm/env/tool_exec.go",
+		Name:      "gatherContext",
+		Summary:   "loads gather_context arguments",
+		SpanStart: 3,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repoStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	ceStore, err := ctxengstore.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ceStore.Close() })
+	_, err = ceStore.AppendEvent(ctx, contextengine.ContextEvent{
+		ID:          "evt-1",
+		WorkspaceID: workspaceID,
+		Kind:        contextengine.EventKindRetrievalExecuted,
+		Source:      "test",
+		Data:        map[string]any{"query": "gather_context"},
+		CreatedAt:   time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{}
+	cfg.Storage.Root = storageRoot
+	adapter := NewReadOnlyAdapter(cfg, workspace, "", nil, rlm.Environment{})
+	adapter.SetContextEngineStore(ceStore)
+
+	out, err := adapter.ExecuteInternal(ctx, "load_evidence_ref", mustJSON(map[string]any{
+		"ref": "symbol:gatherContext",
+	}))
+	if err != nil {
+		t.Fatalf("load symbol: %v", err)
+	}
+	if out["loaded"] != true {
+		t.Fatalf("symbol loaded=%v out=%v", out["loaded"], out)
+	}
+	rawAnchors, _ := json.Marshal(out["anchors"])
+	var anchors []map[string]any
+	if err := json.Unmarshal(rawAnchors, &anchors); err != nil {
+		t.Fatalf("decode anchors: %v", err)
+	}
+	if len(anchors) == 0 || anchors[0]["path"] != "internal/rlm/env/tool_exec.go" {
+		t.Fatalf("anchors=%v", anchors)
+	}
+
+	out, err = adapter.ExecuteInternal(ctx, "load_evidence_ref", mustJSON(map[string]any{
+		"ref": "event:evt-1",
+	}))
+	if err != nil {
+		t.Fatalf("load event: %v", err)
+	}
+	if out["loaded"] != true {
+		t.Fatalf("event loaded=%v out=%v", out["loaded"], out)
+	}
+}
+
+func TestReadOnlyAdapterGatherContextIncludesSessionRecall(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	workspaceID := ws.ID(workspace)
+	sessionStore, err := sessions.Open(ctx, storageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = sessionStore.Save(ctx, sessions.Session{
+		ID:            "sess-rlm-1",
+		WorkspaceID:   workspaceID,
+		WorkspacePath: workspace,
+		ProjectName:   "foxctl",
+		Summary:       "Implemented gather_context certification for RLM.",
+		Decisions:     []string{"Use ContextBundle as the bounded answering surface."},
+		KeyFiles:      []string{"internal/context/contextengine/context_gather.go"},
+		StartedAt:     time.Date(2026, 4, 30, 9, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Config{}
+	cfg.Storage.Root = storageRoot
+	adapter := NewReadOnlyAdapter(cfg, workspace, "", nil, rlm.Environment{
+		Tools: []rlm.Tool{{Name: "gather_context", ReadOnly: true}},
+	})
+	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
+		"query": "gather_context certification",
+		"lanes": []string{"context"},
+		"limit": 3,
+	}))
+	if err != nil {
+		t.Fatalf("gather_context: %v", err)
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	var bundle contextengine.ContextBundle
+	if err := json.Unmarshal(body, &bundle); err != nil {
+		t.Fatalf("decode bundle: %v", err)
+	}
+	found := false
+	for _, node := range bundle.Evidence {
+		if node.Ref.Type == contextengine.RefTypeSession && node.Ref.Ref == "sess-rlm-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("session recall evidence missing: %#v", bundle.Evidence)
+	}
+}
+
 func TestReadOnlyAdapterExecuteDeniesToolsOutsideAllowlist(t *testing.T) {
 	t.Parallel()
 
@@ -170,6 +378,196 @@ func TestReadOnlyAdapterExecuteInternalBypassesAllowlist(t *testing.T) {
 	}
 	if out["top_of_mind"] == nil {
 		t.Fatalf("ExecuteInternal() output=%v", out)
+	}
+}
+
+func TestDirectContextPackFromObsidianHits(t *testing.T) {
+	t.Parallel()
+
+	pack := directContextPackFromObsidianHits("ws-test", "context bundle docs", []obsidianindex.SearchHit{{
+		Path:    "docs/architecture/rlm-gather-context.md",
+		Title:   "RLM Gather Context",
+		Type:    "architecture",
+		Project: "foxctl",
+		Status:  "current",
+		Trust:   "verified",
+		Score:   900,
+		Snippet: "ContextBundle certification bridge",
+	}})
+	if pack.Lane != contextengine.LaneContext || len(pack.Nodes) != 1 {
+		t.Fatalf("pack=%+v", pack)
+	}
+	node := pack.Nodes[0]
+	if node.Ref.Type != contextengine.RefTypePath || node.Ref.Ref != "docs/architecture/rlm-gather-context.md" {
+		t.Fatalf("ref=%+v", node.Ref)
+	}
+	if node.Statement != "ContextBundle certification bridge" {
+		t.Fatalf("statement=%q", node.Statement)
+	}
+}
+
+func TestReadOnlyAdapterGatherContext(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewReadOnlyAdapter(config.Config{}, t.TempDir(), "", nil, rlm.Environment{
+		TopOfMind: map[string]any{"objective": "certify context", "phase": "implementation"},
+		Tools: []rlm.Tool{
+			{Name: "gather_context", ReadOnly: true},
+		},
+	})
+
+	out, err := adapter.ExecuteInternal(context.Background(), "gather_context", mustJSON(map[string]any{
+		"query": "certify context",
+		"lanes": []string{"context"},
+		"limit": 3,
+	}))
+	if err != nil {
+		t.Fatalf("gather_context: %v", err)
+	}
+	if out["certificate"] == nil {
+		t.Fatalf("output missing certificate: %v", out)
+	}
+	if out["answerable"] != true {
+		t.Fatalf("answerable=%v output=%v", out["answerable"], out)
+	}
+
+	if _, err := adapter.Execute(context.Background(), "gather_context", mustJSON(map[string]any{"query": "certify"})); err != nil {
+		t.Fatalf("allowlisted gather_context Execute: %v", err)
+	}
+}
+
+func TestReadOnlyAdapterGatherContextAnswerSurfaceOmitsRawEvidence(t *testing.T) {
+	t.Parallel()
+
+	adapter := NewReadOnlyAdapter(config.Config{}, t.TempDir(), "", nil, rlm.Environment{
+		TopOfMind: map[string]any{
+			"objective": "certify context",
+			"relevant_refs": []map[string]any{{
+				"type": "path",
+				"ref":  "internal/context/contextengine/context_bundle.go",
+			}},
+		},
+		Tools: []rlm.Tool{{Name: "gather_context", ReadOnly: true}},
+	})
+
+	out, err := adapter.ExecuteInternal(context.Background(), "gather_context", mustJSON(map[string]any{
+		"query":         "certify context",
+		"lanes":         []string{"context"},
+		"limit":         3,
+		"response_mode": "answer_surface",
+	}))
+	if err != nil {
+		t.Fatalf("gather_context answer_surface: %v", err)
+	}
+	if _, ok := out["evidence"]; ok {
+		t.Fatalf("answer_surface should omit raw evidence: %v", out)
+	}
+	if out["selected_paths"] == nil {
+		t.Fatalf("answer_surface missing selected_paths: %v", out)
+	}
+	if out["answer_candidates"] == nil {
+		t.Fatalf("answer_surface missing answer_candidates: %v", out)
+	}
+	if out["schema_version"] != "context_answer_surface/v2" {
+		t.Fatalf("schema_version=%v output=%v", out["schema_version"], out)
+	}
+	seed, ok := out["answer_seed"].(map[string]any)
+	if !ok || seed["paths"] == nil {
+		t.Fatalf("answer_surface missing answer_seed.paths: %v", out)
+	}
+	pathSet, ok := out["path_set"].(map[string]any)
+	if !ok || pathSet["must"] == nil {
+		t.Fatalf("answer_surface missing path_set.must: %v", out)
+	}
+	loadQueue, ok := out["load_queue"].([]map[string]any)
+	if !ok || len(loadQueue) == 0 || loadQueue[0]["ref"] == "" {
+		t.Fatalf("answer_surface missing load_queue refs: %T %v", out["load_queue"], out["load_queue"])
+	}
+}
+
+func TestReadOnlyAdapterGatherContextIncludesACAContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+	vault := t.TempDir()
+	notePath := filepath.Join(vault, "notes", "repo", "foxctl", "contextbundle-certification.md")
+	if err := os.MkdirAll(filepath.Dir(notePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(notePath, []byte(`# ContextBundle Certification
+
+The certified bundle gate requires runtime certification before an answerer trusts gathered context.
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	index, err := obsidianindex.Open(ctx, storageRoot, vault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := index.Rebuild(ctx, vault); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	workspaceID := ws.ID(workspace)
+	acaStore := contextplane.NewWorkspaceStore(workspace)
+	if _, err := acaStore.SaveTopOfMind(contextplane.TopOfMind{
+		WorkspaceID: workspaceID,
+		Objective:   "Wire ACA context into gather_context",
+		Phase:       "implementation",
+		UpdatedAt:   time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var cfg config.Config
+	cfg.Storage.Root = storageRoot
+	adapter := NewReadOnlyAdapter(cfg, workspace, vault, nil, rlm.Environment{
+		TopOfMind: map[string]any{
+			"workspace_id": workspaceID,
+			"objective":    "Wire ACA context into gather_context",
+			"phase":        "implementation",
+		},
+		LatestHandoff: map[string]any{
+			"summary": "Runtime certification belongs to ContextCertificate.",
+			"ref":     "note:handoff:contextbundle-certification",
+			"file_refs": []any{
+				map[string]any{"type": "path", "ref": "internal/context/contextengine/context_certify.go"},
+			},
+		},
+		Tools: []rlm.Tool{{Name: "gather_context", ReadOnly: true}},
+	})
+
+	out, err := adapter.ExecuteInternal(ctx, "gather_context", mustJSON(map[string]any{
+		"query": "ContextBundle certified bundle gate runtime certification",
+		"lanes": []string{"context"},
+		"limit": 8,
+	}))
+	if err != nil {
+		t.Fatalf("gather_context: %v", err)
+	}
+	var bundle contextengine.ContextBundle
+	body, _ := json.Marshal(out)
+	if err := json.Unmarshal(body, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	var facts []string
+	for _, fact := range bundle.Facts {
+		facts = append(facts, fact.Fact)
+	}
+	joined := strings.Join(facts, "\n")
+	if !strings.Contains(joined, "Runtime certification belongs to ContextCertificate") {
+		t.Fatalf("missing handoff fact: %s", joined)
+	}
+	if !strings.Contains(joined, "certified bundle gate requires runtime certification") {
+		t.Fatalf("missing ACA vault fact: %s", joined)
+	}
+	if bundle.SourceCoverage["context"] == 0 {
+		t.Fatalf("source coverage missing context lane: %#v", bundle.SourceCoverage)
 	}
 }
 

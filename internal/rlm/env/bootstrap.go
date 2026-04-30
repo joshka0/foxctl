@@ -277,12 +277,15 @@ func latestHandoff(dir string) (map[string]any, []string, error) {
 			return nil, nil, err
 		}
 		payload := map[string]any{
-			"path":       path,
-			"task_id":    handoff.TaskID,
-			"phase":      handoff.Phase,
-			"outcome":    handoff.Outcome,
-			"summary":    handoff.Summary,
-			"created_at": handoff.CreatedAt,
+			"path":          path,
+			"task_id":       handoff.TaskID,
+			"phase":         handoff.Phase,
+			"outcome":       handoff.Outcome,
+			"summary":       handoff.Summary,
+			"created_at":    handoff.CreatedAt,
+			"ref":           "note:handoff:" + entry.Name(),
+			"evidence_refs": handoff.EvidenceRefs,
+			"file_refs":     handoff.FileRefs,
 		}
 		refs := make([]string, 0, len(handoff.EvidenceRefs))
 		for _, ref := range handoff.EvidenceRefs {

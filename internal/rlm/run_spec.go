@@ -72,12 +72,13 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 
 	switch resolvedProfile {
 	case ToolProfileDefault:
-		// Default profile: all 6 composite tools.
+		// Default profile: all composite retrieval tools.
 		allow := map[string]struct{}{
 			"retrieve_code":     {},
 			"retrieve_memory":   {},
 			"retrieve_context":  {},
 			"retrieve_task":     {},
+			"gather_context":    {},
 			"retrieve_mixed":    {},
 			"load_evidence_ref": {},
 		}
@@ -88,8 +89,9 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 			Tools:        tools,
 		}, nil
 	case ToolProfileCodeIntel:
-		// Code intel: retrieve_code + load_evidence_ref.
+		// Code intel: gather_context + retrieve_code + load_evidence_ref.
 		allow := map[string]struct{}{
+			"gather_context":    {},
 			"retrieve_code":     {},
 			"load_evidence_ref": {},
 		}
@@ -100,8 +102,9 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 			Tools:        tools,
 		}, nil
 	case ToolProfileMemoryRecall:
-		// Memory recall: retrieve_memory + retrieve_context + load_evidence_ref.
+		// Memory recall: gather_context + retrieve_memory + retrieve_context + load_evidence_ref.
 		allow := map[string]struct{}{
+			"gather_context":    {},
 			"retrieve_memory":   {},
 			"retrieve_context":  {},
 			"load_evidence_ref": {},

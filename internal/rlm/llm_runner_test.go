@@ -420,6 +420,7 @@ func TestLLMSystemPromptUsesCompositeToolsOnlyWhenLegacyAbsent(t *testing.T) {
 		"retrieve_memory",
 		"retrieve_context",
 		"retrieve_task",
+		"gather_context",
 		"retrieve_mixed",
 		"load_evidence_ref",
 	})
@@ -453,6 +454,7 @@ func compositeOnlyTools() []Tool {
 		{Name: "retrieve_memory", ReadOnly: true},
 		{Name: "retrieve_context", ReadOnly: true},
 		{Name: "retrieve_task", ReadOnly: true},
+		{Name: "gather_context", ReadOnly: true},
 		{Name: "retrieve_mixed", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
 	}
@@ -486,6 +488,37 @@ func TestCollectRetrievedPaths(t *testing.T) {
 	want := []string{"internal/auth/handler.go", "internal/auth/middleware.go", "internal/auth/service.go", "web/src/AuthPanel.tsx"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("collectRetrievedPaths()=%v want %v", got, want)
+	}
+}
+
+func TestCollectGatherContextSurfaceMetadata(t *testing.T) {
+	t.Parallel()
+
+	metadata := collectGatherContextSurfaceMetadata(
+		[]engine.ToolCall{{ID: "call-1", Name: "gather_context"}},
+		[]engine.ToolResult{{
+			ToolCallID: "call-1",
+			Content: `{
+				"schema_version": "context_answer_surface/v2",
+				"selected_paths": [{"path": "internal/rlm/env/tool_exec.go"}],
+				"answer_seed": {"paths": ["internal/context/contextengine/context_gather.go"]},
+				"path_set": {"must": [{"path": "internal/rlm/env/tools.go"}]},
+				"certificate": {"status": "certified"}
+			}`,
+		}},
+		"/workspace",
+	)
+	if !reflect.DeepEqual(metadata["gather_context_selected_paths"], []string{"internal/rlm/env/tool_exec.go"}) {
+		t.Fatalf("selected paths=%v", metadata["gather_context_selected_paths"])
+	}
+	if !reflect.DeepEqual(metadata["gather_context_answer_seed_paths"], []string{"internal/context/contextengine/context_gather.go"}) {
+		t.Fatalf("answer seed paths=%v", metadata["gather_context_answer_seed_paths"])
+	}
+	if !reflect.DeepEqual(metadata["gather_context_path_set_must"], []string{"internal/rlm/env/tools.go"}) {
+		t.Fatalf("path set=%v", metadata["gather_context_path_set_must"])
+	}
+	if !reflect.DeepEqual(metadata["gather_context_certificate_statuses"], []string{"certified"}) {
+		t.Fatalf("certificate statuses=%v", metadata["gather_context_certificate_statuses"])
 	}
 }
 

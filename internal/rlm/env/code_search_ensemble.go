@@ -2574,7 +2574,7 @@ func codeSearchPhraseIdentifierProbes(query string) []string {
 }
 
 func looksLikeCodeProbe(token string) bool {
-	if strings.Contains(token, "_") || strings.Contains(token, "/") || strings.Contains(token, ".") || strings.Contains(token, ":") {
+	if strings.Contains(token, "_") || strings.Contains(token, "-") || strings.Contains(token, "/") || strings.Contains(token, ".") || strings.Contains(token, ":") {
 		return true
 	}
 	if isLikelyPascalCodeIdentifier(token) {
@@ -3112,7 +3112,7 @@ func codeSearchPathTerms(query string) []string {
 
 func isGenericCodeSearchPathWord(word string) bool {
 	switch strings.ToLower(strings.TrimSpace(word)) {
-	case "", "the", "where", "which", "what", "does", "with", "from", "into", "to", "in", "of", "for", "on", "at", "by", "via", "and", "or", "that", "this", "these", "those", "change", "changes", "changed", "file", "files", "path", "paths", "anchor", "anchors", "directly", "implemented", "defines", "defined", "connect", "connects", "used", "execution", "declared", "implementation", "manifest", "skill", "skills", "package", "packages":
+	case "", "the", "where", "which", "what", "does", "with", "from", "into", "to", "in", "of", "for", "on", "at", "by", "via", "and", "or", "that", "this", "these", "those", "change", "changes", "changed", "file", "files", "path", "paths", "anchor", "anchors", "directly", "implemented", "defines", "defined", "connect", "connects", "used", "execution", "declared", "implementation", "manifest", "skill", "skills", "package", "packages", "required", "evidence":
 		return true
 	default:
 		return false
@@ -6262,6 +6262,10 @@ func dedupeRegistrationHits(in []registrationTraceHit) []registrationTraceHit {
 }
 
 func isLikelyTextCodeFile(path string) bool {
+	switch strings.ToLower(filepath.Base(path)) {
+	case "makefile", "dockerfile", "justfile":
+		return true
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".go", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", ".yml", ".md", ".txt", ".sql", ".tf", ".sh", ".py", ".proto", ".ex", ".exs":
 		return true

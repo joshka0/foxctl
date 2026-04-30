@@ -305,14 +305,14 @@ func TestQueryVariantsPreferContentTermsBeforeTail(t *testing.T) {
 }
 
 func TestSearchToolForTask(t *testing.T) {
-	if got := SearchToolForTask(TaskTypeMemoryRecall); got != "retrieve_memory" {
-		t.Fatalf("got=%s want retrieve_memory", got)
+	if got := SearchToolForTask(TaskTypeMemoryRecall); got != "gather_context" {
+		t.Fatalf("got=%s want gather_context", got)
 	}
-	if got := SearchToolForTask(TaskTypeCodeLocate); got != "retrieve_code" {
-		t.Fatalf("got=%s want retrieve_code", got)
+	if got := SearchToolForTask(TaskTypeCodeLocate); got != "gather_context" {
+		t.Fatalf("got=%s want gather_context", got)
 	}
-	if got := SearchToolForTask(TaskTypeGeneral); got != "retrieve_mixed" {
-		t.Fatalf("got=%s want retrieve_mixed", got)
+	if got := SearchToolForTask(TaskTypeGeneral); got != "gather_context" {
+		t.Fatalf("got=%s want gather_context", got)
 	}
 }
 

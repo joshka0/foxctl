@@ -24,6 +24,7 @@ This is the canonical map for docs in this repository.
 - [configs/skills-pack/foxctl-room/SKILL.md](../configs/skills-pack/foxctl-room/SKILL.md) - Durable shared room coordination skill for room chat, relay, loop, and room tasks.
 - [docs/architecture/](architecture/) - Current runtime architecture docs.
 - [docs/architecture/context-architecture.md](architecture/context-architecture.md) - Workspace-local ACA control plane and top-of-mind slice.
+- [docs/architecture/rlm-gather-context.md](architecture/rlm-gather-context.md) - RLM `gather_context` tool over contextengine retrieval, reduction, and certification.
 - [docs/architecture/package-topology.md](architecture/package-topology.md) - Canonical grouping map for `internal/*`, including what is legacy runtime and what `internal/v2/*` is replacing.
 - [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md) - Canonical hybrid-runtime split for Jido orchestration + `foxctl` semantics.
 - [docs/architecture/go-native-runtime-and-optional-jido.md](architecture/go-native-runtime-and-optional-jido.md) - Go-native replacements for Jido dependencies, optional frameworks, and where Eino fits (Jido optional for Elixir/BEAM users).
@@ -47,12 +48,13 @@ This is the canonical map for docs in this repository.
 1. [docs/architecture/system-architecture.md](architecture/system-architecture.md)
 2. [docs/architecture/package-topology.md](architecture/package-topology.md)
 3. [docs/architecture/context-architecture.md](architecture/context-architecture.md)
-4. [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md)
-4b. [docs/architecture/go-native-runtime-and-optional-jido.md](architecture/go-native-runtime-and-optional-jido.md) (target / migration alignment)
-5. [docs/general/runtime-orchestration.md](general/runtime-orchestration.md)
-6. [docs/general/agent-daemon.md](general/agent-daemon.md)
-7. [docs/spec/agent_hierarchy.md](spec/agent_hierarchy.md)
-8. [docs/spec/overseer_profile.md](spec/overseer_profile.md)
+4. [docs/architecture/rlm-gather-context.md](architecture/rlm-gather-context.md)
+5. [docs/architecture/jido-hybrid-runtime.md](architecture/jido-hybrid-runtime.md)
+5b. [docs/architecture/go-native-runtime-and-optional-jido.md](architecture/go-native-runtime-and-optional-jido.md) (target / migration alignment)
+6. [docs/general/runtime-orchestration.md](general/runtime-orchestration.md)
+7. [docs/general/agent-daemon.md](general/agent-daemon.md)
+8. [docs/spec/agent_hierarchy.md](spec/agent_hierarchy.md)
+9. [docs/spec/overseer_profile.md](spec/overseer_profile.md)
 
 ## Planning Docs
 

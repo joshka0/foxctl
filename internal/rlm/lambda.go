@@ -51,11 +51,11 @@ var compositionTable = map[TaskType]ComposeOp{
 
 // searchToolByTaskType maps task type to the primary search tool for leaf execution.
 var searchToolByTaskType = map[TaskType]string{
-	TaskTypeCodeLocate:     "retrieve_code",
-	TaskTypeCodeUnderstand: "retrieve_code",
-	TaskTypeMemoryRecall:   "retrieve_memory",
-	TaskTypeEvidenceAudit:  "retrieve_mixed",
-	TaskTypeGeneral:        "retrieve_mixed",
+	TaskTypeCodeLocate:     "gather_context",
+	TaskTypeCodeUnderstand: "gather_context",
+	TaskTypeMemoryRecall:   "gather_context",
+	TaskTypeEvidenceAudit:  "gather_context",
+	TaskTypeGeneral:        "gather_context",
 }
 
 // ComposeOpForTask returns the composition operator for a task type.

@@ -6,7 +6,7 @@ import (
 	"github.com/joshka0/foxctl/internal/rlm"
 )
 
-// DefaultTools returns the 6 composite retrieval tools for the canonical RLM runtime.
+// DefaultTools returns the composite retrieval tools for the canonical RLM runtime.
 func DefaultTools() []rlm.Tool {
 	return []rlm.Tool{
 		{
@@ -65,6 +65,56 @@ func DefaultTools() []rlm.Tool {
 				"limit": map[string]any{
 					"type":        "integer",
 					"description": "Maximum number of evidence nodes to return. Defaults to 10.",
+				},
+			}, "query"),
+			ReadOnly: true,
+		},
+		{
+			Name:        "gather_context",
+			Description: "Gather bounded context across code, memory, context, and task lanes. Returns a reduced ContextBundle. With response_mode=answer_surface, prefer copying answer_seed.paths and answer_seed.facts, using path_set.must/load_ref for verification before inferring from raw evidence.",
+			Parameters: objectSchema(map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Context gathering query.",
+				},
+				"goal": map[string]any{
+					"type":        "string",
+					"description": "Optional context goal such as answer, plan, debug, recall, or research.",
+				},
+				"required_evidence": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional terms, symbols, or claims that the returned bundle should try to cover with evidence.",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "Maximum reduced context facts. Defaults to 10.",
+				},
+				"task_id": map[string]any{
+					"type":        "string",
+					"description": "Optional task ID for task-linked context.",
+				},
+				"task_type": map[string]any{
+					"type":        "string",
+					"description": "Optional code-lane task intent such as file_locate, symbol_inspect, execution_trace, change_impact, or registration_trace.",
+				},
+				"memory_statuses": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional memory claim statuses to include, such as current, candidate, needs_revalidation, stale, superseded, or rejected. Defaults to current.",
+				},
+				"lanes": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional lane subset: code, memory, context, task. Defaults to mixed retrieval across all lanes.",
+				},
+				"max_context_chars": map[string]any{
+					"type":        "integer",
+					"description": "Optional downstream context character budget for future reducers.",
+				},
+				"response_mode": map[string]any{
+					"type":        "string",
+					"description": "Optional response shape: full for full bundle, answer_surface or compact for answer_seed/path_set/facts without raw evidence.",
 				},
 			}, "query"),
 			ReadOnly: true,

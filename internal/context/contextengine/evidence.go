@@ -127,6 +127,12 @@ type EvidenceTelemetry struct {
 	TokensUsed int `json:"tokens_used,omitempty"`
 	// LanesFused is the number of lanes fused into this pack.
 	LanesFused int `json:"lanes_fused,omitempty"`
+	// RawContextChars is the approximate text payload size before bundle reduction.
+	RawContextChars int `json:"raw_context_chars,omitempty"`
+	// EmittedContextChars is the approximate text payload size after bundle reduction.
+	EmittedContextChars int `json:"emitted_context_chars,omitempty"`
+	// OmittedContextItems is the number of evidence items dropped by context budget reduction.
+	OmittedContextItems int `json:"omitted_context_items,omitempty"`
 }
 
 // EvidencePack is a collection of evidence nodes returned by retrieval.

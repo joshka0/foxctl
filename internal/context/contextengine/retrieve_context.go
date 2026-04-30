@@ -2,6 +2,7 @@ package contextengine
 
 import (
 	"context"
+	"fmt"
 )
 
 // RetrieveContext retrieves context from TopOfMind projection and ACA.
@@ -86,6 +87,48 @@ func RetrieveContext(ctx context.Context, cfg LaneConfig, queryFn ContextQueryFu
 			Metadata:    meta,
 		}
 		nodes = append(nodes, node)
+
+		for _, decision := range packet.RecentDecisions {
+			statement := decision.Text
+			if statement == "" {
+				continue
+			}
+			ref := EvidenceRef{Type: RefTypeNote, Ref: "top_of_mind:" + cfg.WorkspaceID + ":decision:" + decision.ID, WorkspaceID: cfg.WorkspaceID}
+			if parsed, err := ParseEvidenceRef(decision.Ref); err == nil {
+				ref = NormalizeEvidenceRef(parsed, cfg.WorkspaceID)
+			}
+			nodes = append(nodes, EvidenceNode{
+				ID:          cfg.IDGen(),
+				WorkspaceID: cfg.WorkspaceID,
+				NodeType:    EvidenceNodeTypeContext,
+				Ref:         ref,
+				Statement:   statement,
+				Confidence:  0.75,
+				Grounding:   GroundingLoaded,
+				Metadata: map[string]any{
+					"decision_id": decision.ID,
+				},
+			})
+		}
+
+		for i, action := range packet.NextActions {
+			if action == "" {
+				continue
+			}
+			nodes = append(nodes, EvidenceNode{
+				ID:          cfg.IDGen(),
+				WorkspaceID: cfg.WorkspaceID,
+				NodeType:    EvidenceNodeTypeContext,
+				Ref: EvidenceRef{
+					Type:        RefTypeNote,
+					Ref:         "top_of_mind:" + cfg.WorkspaceID + ":next_action:" + fmt.Sprint(i),
+					WorkspaceID: cfg.WorkspaceID,
+				},
+				Statement:  "Next action: " + action,
+				Confidence: 0.65,
+				Grounding:  GroundingLoaded,
+			})
+		}
 
 		// Add relevant refs as additional nodes.
 		for _, ref := range packet.RelevantRefs {

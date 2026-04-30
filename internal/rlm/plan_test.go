@@ -36,7 +36,7 @@ func TestBuildPlanAutoFallsBackToMixedForUncertainPrompt(t *testing.T) {
 	if plan.QueryPlan.Route != QueryRouteMixed {
 		t.Fatalf("query_plan.route=%s want %s", plan.QueryPlan.Route, QueryRouteMixed)
 	}
-	if len(plan.Phases) == 0 || len(plan.Phases[0].RequireOneOf) == 0 || plan.Phases[0].RequireOneOf[0] != "retrieve_mixed" {
+	if len(plan.Phases) == 0 || len(plan.Phases[0].RequireOneOf) == 0 || plan.Phases[0].RequireOneOf[0] != "gather_context" {
 		t.Fatalf("mixed plan phases=%+v", plan.Phases)
 	}
 }
@@ -62,7 +62,7 @@ func TestBuildPlanStagedCodeRetrievalUsesCompositeTools(t *testing.T) {
 	}
 	// Staged phases must only reference composite tools.
 	composites := map[string]struct{}{
-		"retrieve_code": {}, "retrieve_memory": {}, "retrieve_context": {},
+		"gather_context": {}, "retrieve_code": {}, "retrieve_memory": {}, "retrieve_context": {},
 		"retrieve_task": {}, "retrieve_mixed": {}, "load_evidence_ref": {},
 	}
 	for _, phase := range plan.Phases {
@@ -96,7 +96,7 @@ func TestBuildPlanStagedMemoryRecallUsesCompositeTools(t *testing.T) {
 		t.Fatalf("phases=%d want 2", len(plan.Phases))
 	}
 	composites := map[string]struct{}{
-		"retrieve_code": {}, "retrieve_memory": {}, "retrieve_context": {},
+		"gather_context": {}, "retrieve_code": {}, "retrieve_memory": {}, "retrieve_context": {},
 		"retrieve_task": {}, "retrieve_mixed": {}, "load_evidence_ref": {},
 	}
 	for _, phase := range plan.Phases {

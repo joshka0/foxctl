@@ -16,6 +16,7 @@ func TestFilterToolsCodeIntel(t *testing.T) {
 		{Name: "retrieve_memory"},
 		{Name: "retrieve_context"},
 		{Name: "retrieve_task"},
+		{Name: "gather_context"},
 		{Name: "retrieve_mixed"},
 		{Name: "load_evidence_ref"},
 	}
@@ -24,7 +25,7 @@ func TestFilterToolsCodeIntel(t *testing.T) {
 	for _, tool := range got {
 		names = append(names, tool.Name)
 	}
-	want := []string{"retrieve_code", "load_evidence_ref"}
+	want := []string{"retrieve_code", "gather_context", "load_evidence_ref"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("FilterTools()=%v want %v", names, want)
 	}
@@ -38,6 +39,7 @@ func TestFilterToolsMemoryRecall(t *testing.T) {
 		{Name: "retrieve_memory"},
 		{Name: "retrieve_context"},
 		{Name: "retrieve_task"},
+		{Name: "gather_context"},
 		{Name: "retrieve_mixed"},
 		{Name: "load_evidence_ref"},
 	}
@@ -46,7 +48,7 @@ func TestFilterToolsMemoryRecall(t *testing.T) {
 	for _, tool := range got {
 		names = append(names, tool.Name)
 	}
-	want := []string{"retrieve_memory", "retrieve_context", "load_evidence_ref"}
+	want := []string{"retrieve_memory", "retrieve_context", "gather_context", "load_evidence_ref"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("FilterTools()=%v want %v", names, want)
 	}
