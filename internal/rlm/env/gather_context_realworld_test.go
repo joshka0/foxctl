@@ -564,8 +564,57 @@ func TestReadOnlyAdapterGatherContextExecutionTraceUsesEnsembleBridgeFile(t *tes
 	}
 }
 
+func TestReadOnlyAdapterGatherContextSymbolInspectUsesDefinitionPath(t *testing.T) {
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	workspaceRoot := t.TempDir()
+	writeTestFile(t, filepath.Join(workspaceRoot, "internal", "rlm", "env", "adapter.go"), "package env\n\ntype ReadOnlyAdapter struct{}\n\nfunc mention() { _ = \"ReadOnlyAdapter\" }\n")
+	writeTestFile(t, filepath.Join(workspaceRoot, "internal", "rlm", "env", "tool_exec.go"), "package env\n\nfunc useAdapter(value ReadOnlyAdapter) {}\n")
+
+	cfg := config.Config{}
+	cfg.Storage.Root = storageRoot
+	adapter := NewReadOnlyAdapter(cfg, workspaceRoot, "", nil, rlm.Environment{
+		Tools: []rlm.Tool{{Name: "gather_context", ReadOnly: true}},
+	})
+
+	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
+		"query":     "Which file defines ReadOnlyAdapter?",
+		"task_type": "symbol_inspect",
+		"lanes":     []string{"code"},
+		"limit":     4,
+	}))
+	if err != nil {
+		t.Fatalf("gather_context: %v", err)
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	var bundle contextengine.ContextBundle
+	if err := json.Unmarshal(body, &bundle); err != nil {
+		t.Fatalf("decode bundle: %v", err)
+	}
+	paths := gatherContextTestPaths(bundle)
+	if !containsString(paths, "internal/rlm/env/adapter.go") {
+		t.Fatalf("paths=%v want adapter.go", paths)
+	}
+	foundDefinitionFact := false
+	for _, fact := range bundle.Facts {
+		if strings.Contains(fact.Fact, "symbol definition: ReadOnlyAdapter") {
+			foundDefinitionFact = true
+			break
+		}
+	}
+	if !foundDefinitionFact {
+		t.Fatalf("facts=%+v", bundle.Facts)
+	}
+}
+
 func gatherContextTestPaths(bundle contextengine.ContextBundle) []string {
-	paths := make([]string, 0, len(bundle.Evidence))
+	paths := make([]string, 0, len(bundle.SelectedPaths)+len(bundle.Evidence))
+	for _, selected := range bundle.SelectedPaths {
+		paths = append(paths, filepath.ToSlash(strings.TrimSpace(selected.Path)))
+	}
 	for _, node := range bundle.Evidence {
 		if node.Ref.Type == contextengine.RefTypePath {
 			paths = append(paths, filepath.ToSlash(strings.TrimSpace(node.Ref.Ref)))

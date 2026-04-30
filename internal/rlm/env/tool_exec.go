@@ -174,6 +174,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsembleHits(ctx context.Context, query, tas
 		return nil, nil
 	}
 	snippetsByPath := codeSearchEvidenceSnippetReasons(out["snippets"])
+	symbolsByPath := codeSearchEvidenceSymbolsByPath(out["symbols"])
 	directDispatch := codeSearchPathSet(stringSliceValue(out["direct_dispatch_files"]))
 	exposure := codeSearchPathSet(stringSliceValue(out["exposure_files"]))
 	structural := codeSearchPathSet(stringSliceValue(out["structural_support_files"]))
@@ -196,22 +197,38 @@ func (a *ReadOnlyAdapter) codeSearchEnsembleHits(ctx context.Context, query, tas
 		if snippet == "" {
 			snippet = path
 		}
+		symbol := symbolsByPath[path]
+		isSymbolDefinition := stringSliceHas(file.ConfirmedBy, "symbol_definition")
+		if !isSymbolDefinition {
+			symbol = codeSearchEvidenceSymbol{}
+		}
+		if symbol.Symbol != "" && !strings.Contains(snippet, symbol.Symbol) {
+			if snippet != "" {
+				snippet += "\n"
+			}
+			snippet += "symbol: " + symbol.Symbol
+		}
 		score := clampScore(file.SupportScore)
 		if score == 0 {
 			score = scoreValue(out["confidence"], 0.82)
+		}
+		if isSymbolDefinition {
+			role = "symbol_definition"
 		}
 		hits = append(hits, rankedCodeSearchHit{
 			Priority: 82 - minInt(idx, 20),
 			Hit: contextengine.CodeSearchHit{
 				Path:     path,
 				Snippet:  snippet,
+				Line:     symbol.Line,
+				Symbol:   symbol.Symbol,
 				Score:    score,
 				Language: languageFromPath(path),
 				Metadata: map[string]any{
 					"candidate_role": role,
 					"source":         "code_search_ensemble",
 					"source_profile": "repo_code",
-					"evidence_class": "structural",
+					"evidence_class": codeSearchEvidenceClassForRole(role),
 					"task_type":      normalizedTaskType,
 				},
 				Sources: append([]string(nil), file.ConfirmedBy...),
@@ -238,6 +255,68 @@ func decodeCodeSearchEvidenceFiles(raw any) []codeSearchEvidenceFile {
 	default:
 		return nil
 	}
+}
+
+func decodeCodeSearchEvidenceSymbols(raw any) []codeSearchEvidenceSymbol {
+	switch value := raw.(type) {
+	case []codeSearchEvidenceSymbol:
+		return append([]codeSearchEvidenceSymbol(nil), value...)
+	case []any:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		var symbols []codeSearchEvidenceSymbol
+		if err := json.Unmarshal(encoded, &symbols); err != nil {
+			return nil
+		}
+		return symbols
+	default:
+		return nil
+	}
+}
+
+func codeSearchEvidenceSymbolsByPath(raw any) map[string]codeSearchEvidenceSymbol {
+	out := map[string]codeSearchEvidenceSymbol{}
+	for _, symbol := range decodeCodeSearchEvidenceSymbols(raw) {
+		path := normalizeCodeSearchPath(symbol.Path)
+		if path == "" {
+			continue
+		}
+		current := out[path]
+		if current.Symbol == "" || (current.Line == 0 && symbol.Line > 0) {
+			out[path] = symbol
+		}
+	}
+	return out
+}
+
+func codeSearchEvidenceClassForRole(role string) string {
+	switch role {
+	case "symbol_definition":
+		return "symbol_definition"
+	case "registration_file":
+		return "registration"
+	case "direct_dispatch_file":
+		return "dispatch"
+	case "structural_support":
+		return "structural_support"
+	default:
+		return "structural"
+	}
+}
+
+func stringSliceHas(items []string, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return false
+	}
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func codeSearchEvidenceSnippetReasons(raw any) map[string]string {
@@ -556,6 +635,17 @@ func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, li
 		addCodeSearchCandidate(candidates, hit.Path, "exact code probe: "+hit.Probe, "exact_probe", support, hit.Line, "", "")
 		remember(hit.Path, 30, hit.Line, "", codeProbeSnippet("exact code probe: "+hit.Probe, a.repoFileExcerpt(hit.Path, hit.Line, 3, 5)))
 	}
+	if normalizedTaskType == codeSearchTaskSymbolInspect {
+		definitions := a.findGoDefinitions(codeSearchSymbolProbes(query))
+		for _, symbol := range sortedStringKeys(definitions) {
+			definition := definitions[symbol]
+			if definition.Path == "" {
+				continue
+			}
+			addCodeSearchCandidate(candidates, definition.Path, "symbol definition: "+symbol, "symbol_definition", 2.8, definition.Line, symbol, "")
+			remember(definition.Path, 95, definition.Line, symbol, codeProbeSnippet("symbol definition: "+symbol, a.repoFileExcerpt(definition.Path, definition.Line, 3, 5)))
+		}
+	}
 	if normalizedTaskType == codeSearchTaskRegistrationTrace {
 		registrationHits, registrationGaps := codeSearchRegistrationAugment(a.workspaceRoot, candidates, limit)
 		errs = append(errs, registrationGaps...)
@@ -598,6 +688,7 @@ func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, li
 				Symbol:   symbol,
 				Score:    score,
 				Language: languageFromPath(candidate.Path),
+				Metadata: localCodeProbeMetadata(candidate, normalizedTaskType),
 			},
 		})
 	}
@@ -605,6 +696,34 @@ func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, li
 		return out, nil
 	}
 	return nil, fmt.Errorf("%s", strings.Join(uniqueStrings(errs), "; "))
+}
+
+func localCodeProbeMetadata(candidate *codeSearchCandidate, taskType string) map[string]any {
+	role := ""
+	evidenceClass := "structural"
+	switch {
+	case candidateHasSource(candidate, "symbol_definition"):
+		role = "symbol_definition"
+		evidenceClass = "symbol_definition"
+	case candidateHasSource(candidate, "registration_trace"):
+		role = "registration_file"
+		evidenceClass = "registration"
+	case candidateHasSource(candidate, "exact_probe"):
+		evidenceClass = "direct"
+	case candidateHasSource(candidate, "path_probe"):
+		evidenceClass = "path"
+	}
+	metadata := map[string]any{
+		"source":         "local_code_probe",
+		"source_profile": "repo_code",
+		"evidence_class": evidenceClass,
+		"task_type":      taskType,
+		"sources":        sortedSourceKeys(candidate.Sources),
+	}
+	if role != "" {
+		metadata["candidate_role"] = role
+	}
+	return metadata
 }
 
 func (a *ReadOnlyAdapter) localLexicalCodeSearch(query string, limit int) ([]rankedCodeSearchHit, error) {
@@ -1081,6 +1200,15 @@ func isGenericRelatedSymbol(symbol string) bool {
 type goDefinitionRef struct {
 	Path string
 	Line int
+}
+
+func sortedStringKeys[V any](in map[string]V) []string {
+	out := make([]string, 0, len(in))
+	for key := range in {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (a *ReadOnlyAdapter) findGoDefinitions(symbols []string) map[string]goDefinitionRef {

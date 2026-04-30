@@ -1497,6 +1497,85 @@ func TestReadOnlyAdapterCodeSearchEnsembleExecutionTracePromotesBridgeFile(t *te
 	}
 }
 
+func TestReadOnlyAdapterCodeSearchEnsembleSymbolInspectUsesGoDefinitions(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+
+	writeTestFile(t, filepath.Join(workspace, "internal", "rlm", "env", "code_search_ensemble.go"), "package env\n\ntype codeSearchEnsembleInput struct {\n\tQuery string\n}\n\ntype codeSearchEvidenceFile struct{}\n")
+	writeTestFile(t, filepath.Join(workspace, "internal", "rlm", "env", "tool_exec.go"), "package env\n\nfunc useEvidence() { _ = \"codeSearchEnsembleInput\" }\n")
+
+	var cfg config.Config
+	cfg.Storage.Root = storageRoot
+	adapter := NewReadOnlyAdapter(cfg, workspace, "", nil, rlm.Environment{})
+
+	out, err := adapter.ExecuteInternal(ctx, "code_search_ensemble", mustJSON(map[string]any{
+		"query":     "Which file defines codeSearchEnsembleInput?",
+		"task_type": "symbol_inspect",
+		"constraints": map[string]any{
+			"require_grounding": true,
+		},
+		"budget": map[string]any{
+			"max_candidates": 8,
+			"max_files":      3,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("code_search_ensemble: %v", err)
+	}
+	rawFiles, _ := json.Marshal(out["files"])
+	var files []codeSearchEvidenceFile
+	if err := json.Unmarshal(rawFiles, &files); err != nil {
+		t.Fatalf("decode files: %v", err)
+	}
+	if len(files) == 0 || files[0].Path != "internal/rlm/env/code_search_ensemble.go" {
+		t.Fatalf("files=%+v", files)
+	}
+	if !stringSliceHas(files[0].ConfirmedBy, "symbol_definition") {
+		t.Fatalf("confirmed_by=%v", files[0].ConfirmedBy)
+	}
+	rawSymbols, _ := json.Marshal(out["symbols"])
+	var symbols []codeSearchEvidenceSymbol
+	if err := json.Unmarshal(rawSymbols, &symbols); err != nil {
+		t.Fatalf("decode symbols: %v", err)
+	}
+	found := false
+	for _, symbol := range symbols {
+		if symbol.Path == "internal/rlm/env/code_search_ensemble.go" && symbol.Symbol == "codeSearchEnsembleInput" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("symbols=%+v", symbols)
+	}
+}
+
+func TestReadOnlyAdapterLocalCodeProbeSearchSymbolInspectUsesDefinition(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	writeTestFile(t, filepath.Join(workspace, "internal", "rlm", "env", "adapter.go"), "package env\n\ntype ReadOnlyAdapter struct{}\n")
+	writeTestFile(t, filepath.Join(workspace, "internal", "rlm", "env", "tool_exec.go"), "package env\n\nfunc useAdapter(value ReadOnlyAdapter) {}\n")
+
+	adapter := NewReadOnlyAdapter(config.Config{}, workspace, "", nil, rlm.Environment{})
+	hits, err := adapter.localCodeProbeSearch("Which file defines ReadOnlyAdapter?", codeSearchTaskSymbolInspect, 4)
+	if err != nil {
+		t.Fatalf("localCodeProbeSearch: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatalf("hits=%v", hits)
+	}
+	if got := hits[0].Hit.Path; got != "internal/rlm/env/adapter.go" {
+		t.Fatalf("top hit=%q hits=%+v", got, hits)
+	}
+	if hits[0].Hit.Symbol != "ReadOnlyAdapter" {
+		t.Fatalf("symbol=%q", hits[0].Hit.Symbol)
+	}
+}
+
 func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

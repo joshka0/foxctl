@@ -275,6 +275,20 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 		addCodeSearchCandidate(candidates, candidate, "caller supplied candidate", "caller", 1.0, 0, "", "")
 	}
 
+	if taskType == codeSearchTaskSymbolInspect {
+		definitions := a.findGoDefinitions(preferredSymbolProbes)
+		if len(definitions) > 0 {
+			addLane("symbol_definition")
+			for _, symbol := range sortedStringKeys(definitions) {
+				definition := definitions[symbol]
+				if definition.Path == "" || isExcludedCodeSearchPath(definition.Path, excluded) {
+					continue
+				}
+				addCodeSearchCandidate(candidates, definition.Path, "symbol definition: "+symbol, "symbol_definition", 2.8, definition.Line, symbol, "")
+			}
+		}
+	}
+
 	for _, probe := range pathProbes {
 		stageStart := time.Now()
 		hits, err := codeSearchPathProbeSearch(a.workspaceRoot, probe, input.Budget.MaxCandidates)
@@ -2889,6 +2903,9 @@ func rankCodeSearchCandidatesWithPlan(candidates map[string]*codeSearchCandidate
 		}
 		if candidateHasSource(candidate, "exact_probe") {
 			candidate.Support += 0.2
+		}
+		if taskType == codeSearchTaskSymbolInspect && candidateHasSource(candidate, "symbol_definition") {
+			candidate.Support += 3.0
 		}
 		if len(exactProbes) > 0 && codeSearchPathTermScore(candidate.Path, pathTerms) == 0 && !candidateHasSource(candidate, "exact_probe") {
 			candidate.Support -= 0.25

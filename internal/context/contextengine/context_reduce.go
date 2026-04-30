@@ -365,10 +365,14 @@ func requiredCoverageScore(hits int, requiredCount int) float64 {
 
 func candidateRoleScore(role string) float64 {
 	switch strings.TrimSpace(strings.ToLower(role)) {
+	case "symbol_definition":
+		return 0.30
+	case "registration_file":
+		return 0.28
+	case "tool_declaration":
+		return 0.25
 	case "primary_anchor":
 		return 0.20
-	case "registration_file", "tool_declaration":
-		return 0.19
 	case "direct_dispatch_file":
 		return 0.18
 	case "definition_support":
