@@ -778,6 +778,15 @@ func lambdaAnswerFromAnswerSurface(payload map[string]any, candidates []string) 
 	if strings.TrimSpace(fmt.Sprint(payload["schema_version"])) != "context_answer_surface/v2" {
 		return "", false
 	}
+	if !boolValue(payload["answerable"]) {
+		return "", false
+	}
+	if status := strings.TrimSpace(stringFromNestedMap(payload, []string{"certificate", "status"})); strings.EqualFold(status, "failed") {
+		return "", false
+	}
+	if requiredOK, ok := optionalBoolValue(nestedMapValue(payload, []string{"certificate", "required_evidence_ok"})); ok && !requiredOK {
+		return "", false
+	}
 	paths := pathsFromNestedPathList(payload, []string{"answer_seed", "paths"}, "")
 	if len(paths) == 0 {
 		paths = candidates
@@ -798,6 +807,29 @@ func lambdaAnswerFromAnswerSurface(payload map[string]any, candidates []string) 
 		return "", false
 	}
 	return string(body), true
+}
+
+func boolValue(value any) bool {
+	got, ok := optionalBoolValue(value)
+	return ok && got
+}
+
+func optionalBoolValue(value any) (bool, bool) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "true", "yes", "1":
+			return true, true
+		case "false", "no", "0":
+			return false, true
+		default:
+			return false, false
+		}
+	default:
+		return false, false
+	}
 }
 
 func firstNonEmptyLambda(values ...string) string {

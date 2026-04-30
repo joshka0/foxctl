@@ -700,6 +700,11 @@ func TestLambdaAnswerFromAnswerSurface(t *testing.T) {
 
 	answer, ok := lambdaAnswerFromAnswerSurface(map[string]any{
 		"schema_version": "context_answer_surface/v2",
+		"answerable":     true,
+		"certificate": map[string]any{
+			"status":               "certified",
+			"required_evidence_ok": true,
+		},
 		"answer_seed": map[string]any{
 			"paths": []any{"internal/rlm/env/code_search_ensemble.go"},
 			"facts": []any{"code_search_ensemble is implemented in the RLM env package."},
@@ -717,6 +722,38 @@ func TestLambdaAnswerFromAnswerSurface(t *testing.T) {
 	}
 	if len(out.Facts) != 1 {
 		t.Fatalf("facts=%v", out.Facts)
+	}
+}
+
+func TestLambdaAnswerFromAnswerSurfaceRejectsUntrustedSurface(t *testing.T) {
+	t.Parallel()
+
+	for name, payload := range map[string]map[string]any{
+		"not_answerable": {
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     false,
+			"answer_seed":    map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+		"failed_certificate": {
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     true,
+			"certificate":    map[string]any{"status": "failed"},
+			"answer_seed":    map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+		"required_evidence_missing": {
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     true,
+			"certificate":    map[string]any{"status": "partial", "required_evidence_ok": false},
+			"answer_seed":    map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+	} {
+		payload := payload
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if answer, ok := lambdaAnswerFromAnswerSurface(payload, nil); ok {
+				t.Fatalf("lambdaAnswerFromAnswerSurface() ok=true answer=%s", answer)
+			}
+		})
 	}
 }
 

@@ -79,6 +79,7 @@ type LLMConfig struct {
 	ExtraBody      map[string]any
 	RouteProfile   RouteProfile
 	PlanMode       PlanMode
+	ToolProfile    string
 }
 
 // LLMRunner uses the existing engine.LLMChatEngine as an experimental read-only RLM backend.
@@ -101,7 +102,7 @@ func (r LLMRunner) Run(ctx context.Context, task Task, env Environment) (Result,
 		Prompt:               task.Prompt,
 		RequestedRoute:       r.Config.RouteProfile,
 		RequestedPlanMode:    r.Config.PlanMode,
-		RequestedToolProfile: string(ToolProfileDefault),
+		RequestedToolProfile: r.Config.ToolProfile,
 		AvailableTools:       env.Tools,
 	})
 	if err != nil {

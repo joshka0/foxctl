@@ -313,6 +313,7 @@ func runSingleRLMSearchAgentEval(
 		RequireToolUse: len(env.Tools) > 0,
 		RouteProfile:   rlm.NormalizeRouteProfile(routeProfile),
 		PlanMode:       rlm.NormalizePlanMode(planMode),
+		ToolProfile:    toolProfile,
 	}
 	var runner rlm.Runner
 	if llmConfig.PlanMode == rlm.PlanModeLambda {

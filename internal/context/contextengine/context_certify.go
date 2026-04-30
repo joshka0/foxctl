@@ -209,6 +209,12 @@ func certifyEvidenceSourceContracts(bundle ContextBundle) sourceContractDiagnost
 			default:
 				markBad(node)
 			}
+		case EvidenceNodeTypeRetrieval:
+			switch node.Ref.Type {
+			case RefTypeNote, RefTypeSession, RefTypeEvent, RefTypeTask, RefTypePath, RefTypeSymbol, RefTypeMemoryClaim, RefTypeArtifact, RefTypeTrajectory, RefTypeRun, RefTypeToolCall:
+			default:
+				markBad(node)
+			}
 		case EvidenceNodeTypeTrajectory:
 			switch node.Ref.Type {
 			case RefTypeTrajectory, RefTypeRun, RefTypeEvent, RefTypeToolCall, RefTypeArtifact:

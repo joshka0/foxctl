@@ -12,20 +12,21 @@ func TestFilterToolsCodeIntel(t *testing.T) {
 	t.Parallel()
 
 	in := []rlm.Tool{
+		{Name: "gather_context"},
+		{Name: "load_evidence_ref"},
+		{Name: "code_search_ensemble"},
 		{Name: "retrieve_code"},
 		{Name: "retrieve_memory"},
 		{Name: "retrieve_context"},
 		{Name: "retrieve_task"},
-		{Name: "gather_context"},
 		{Name: "retrieve_mixed"},
-		{Name: "load_evidence_ref"},
 	}
 	got := FilterTools(in, ToolProfileCodeIntel)
 	var names []string
 	for _, tool := range got {
 		names = append(names, tool.Name)
 	}
-	want := []string{"retrieve_code", "gather_context", "load_evidence_ref"}
+	want := []string{"gather_context", "load_evidence_ref", "code_search_ensemble", "retrieve_code"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("FilterTools()=%v want %v", names, want)
 	}
@@ -35,13 +36,13 @@ func TestFilterToolsGatherContext(t *testing.T) {
 	t.Parallel()
 
 	in := []rlm.Tool{
+		{Name: "gather_context"},
+		{Name: "load_evidence_ref"},
 		{Name: "retrieve_code"},
 		{Name: "retrieve_memory"},
 		{Name: "retrieve_context"},
 		{Name: "retrieve_task"},
-		{Name: "gather_context"},
 		{Name: "retrieve_mixed"},
-		{Name: "load_evidence_ref"},
 	}
 	got := FilterTools(in, ToolProfileGatherContext)
 	var names []string
@@ -58,20 +59,20 @@ func TestFilterToolsMemoryRecall(t *testing.T) {
 	t.Parallel()
 
 	in := []rlm.Tool{
+		{Name: "gather_context"},
+		{Name: "load_evidence_ref"},
 		{Name: "retrieve_code"},
 		{Name: "retrieve_memory"},
 		{Name: "retrieve_context"},
 		{Name: "retrieve_task"},
-		{Name: "gather_context"},
 		{Name: "retrieve_mixed"},
-		{Name: "load_evidence_ref"},
 	}
 	got := FilterTools(in, ToolProfileMemoryRecall)
 	var names []string
 	for _, tool := range got {
 		names = append(names, tool.Name)
 	}
-	want := []string{"retrieve_memory", "retrieve_context", "gather_context", "load_evidence_ref"}
+	want := []string{"gather_context", "load_evidence_ref", "retrieve_memory", "retrieve_context"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("FilterTools()=%v want %v", names, want)
 	}

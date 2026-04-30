@@ -3550,7 +3550,7 @@ func prioritizedGroundingCandidates(ranked []*codeSearchCandidate, query, taskTy
 		if candidateHasAnySource(candidate, "trace_source_anchor", "trace_source_repo") {
 			return false
 		}
-		return candidateHasAnySource(candidate, "path_probe", "exact_probe", "search_repo")
+		return candidateHasAnySource(candidate, "path_probe", "exact_probe", "search_repo", "execution_bridge")
 	}, func(candidate *codeSearchCandidate) float64 {
 		targetAffinity := executionTraceCandidateAffinity(candidate, targetTerms, traceAnchors.TargetPathProbes, traceAnchors.TargetExactProbes)
 		score := executionTraceAnchorPreference(candidate) + (targetAffinity * 2.4)

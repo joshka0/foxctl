@@ -1102,7 +1102,7 @@ func runRLMEvalMode(ctx context.Context, cfg config.Config, workspacePath, vault
 		currentAdapter.SetSubcall(runRecursive)
 		currentAdapter.SetContextEngineStore(ceStore)
 		currentAdapter.SetTaskStore(taskStore)
-		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileAuto), string(rlm.PlanModeFree), "", false, false)
+		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileAuto), string(rlm.PlanModeFree), toolProfile, "", false, false)
 		return runner.Run(runCtx, currentTask, currentEnv)
 	}
 
@@ -1154,7 +1154,7 @@ func runRLMStagedEvalMode(ctx context.Context, cfg config.Config, workspacePath,
 		currentAdapter.SetSubcall(runRecursive)
 		currentAdapter.SetContextEngineStore(ceStore)
 		currentAdapter.SetTaskStore(taskStore)
-		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileCodeRetrieval), string(rlm.PlanModeStaged), "", false, false)
+		runner := chooseRLMRunner("llm", currentAdapter, currentTask, currentEnv, "", "", "", "", 0, true, string(rlm.RouteProfileCodeRetrieval), string(rlm.PlanModeStaged), string(rlm.ToolProfileDefault), "", false, false)
 		return runner.Run(runCtx, currentTask, currentEnv)
 	}
 

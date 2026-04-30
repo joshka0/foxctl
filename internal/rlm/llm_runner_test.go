@@ -60,6 +60,7 @@ func TestLLMRunnerUsesOpenAICompatibleChatPath(t *testing.T) {
 			Model:         "test-model",
 			Timeout:       5 * time.Second,
 			MaxIterations: 2,
+			ToolProfile:   string(ToolProfileCodeDebug),
 		},
 	}
 
@@ -134,11 +135,12 @@ func TestLLMRunnerSanitizesFinalAnswer(t *testing.T) {
 	runner := LLMRunner{
 		Tools: fakeLLMToolExecutor{},
 		Config: LLMConfig{
-			Provider: "lmstudio",
-			APIKey:   "lm-studio",
-			BaseURL:  server.URL + "/v1",
-			Model:    "test-model",
-			Timeout:  5 * time.Second,
+			Provider:    "lmstudio",
+			APIKey:      "lm-studio",
+			BaseURL:     server.URL + "/v1",
+			Model:       "test-model",
+			Timeout:     5 * time.Second,
+			ToolProfile: string(ToolProfileCodeDebug),
 		},
 	}
 
@@ -194,6 +196,7 @@ func TestLLMRunnerReturnsErrorOnModelFailure(t *testing.T) {
 			Model:         "test-model",
 			Timeout:       5 * time.Second,
 			MaxIterations: 2,
+			ToolProfile:   string(ToolProfileCodeDebug),
 		},
 	}
 
@@ -265,6 +268,7 @@ func TestLLMRunnerPreservesStopReasonBeforeAssistantResponse(t *testing.T) {
 			Model:         "test-model",
 			Timeout:       5 * time.Second,
 			MaxIterations: 1,
+			ToolProfile:   string(ToolProfileCodeDebug),
 		},
 	}
 
@@ -304,6 +308,7 @@ func TestLLMRunnerPreservesCancelledBeforeAssistantResponse(t *testing.T) {
 			Model:         "test-model",
 			Timeout:       5 * time.Second,
 			MaxIterations: 2,
+			ToolProfile:   string(ToolProfileCodeDebug),
 		},
 	}
 
@@ -362,6 +367,7 @@ func TestLLMRunnerRequireToolUseRejectsZeroToolCallAnswer(t *testing.T) {
 			Timeout:        5 * time.Second,
 			MaxIterations:  2,
 			RequireToolUse: true,
+			ToolProfile:    string(ToolProfileCodeDebug),
 		},
 	}
 

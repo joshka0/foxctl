@@ -111,7 +111,7 @@ func newRLMRunCommand() *cobra.Command {
 				currentAdapter.SetSubcall(runRecursive)
 				currentAdapter.SetContextEngineStore(ceStore)
 				currentAdapter.SetTaskStore(taskStore)
-				runner := chooseRLMRunner(executor, currentAdapter, currentTask, currentEnv, llmProvider, llmModel, llmBaseURL, llmAPIKey, llmTimeout, requireToolUse, routeProfile, planMode, sandboxKind, ephemeralSkills, extractSolution)
+				runner := chooseRLMRunner(executor, currentAdapter, currentTask, currentEnv, llmProvider, llmModel, llmBaseURL, llmAPIKey, llmTimeout, requireToolUse, routeProfile, planMode, toolProfile, sandboxKind, ephemeralSkills, extractSolution)
 				return runner.Run(ctx, currentTask, currentEnv)
 			}
 			mode := normalizedRLMExecutor(executor)
@@ -205,6 +205,7 @@ func chooseRLMRunner(
 	requireToolUse bool,
 	routeProfile string,
 	planMode string,
+	toolProfile string,
 	sandboxKind string,
 	ephemeralSkills bool,
 	extractSolution bool,
@@ -214,11 +215,12 @@ func chooseRLMRunner(
 		pm := rlm.NormalizePlanMode(planMode)
 		if pm == rlm.PlanModeLambda {
 			llmCfg := rlm.LLMConfig{
-				Provider: firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
-				Model:    firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
-				BaseURL:  firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
-				APIKey:   firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
-				Timeout:  llmTimeout,
+				Provider:    firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
+				Model:       firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
+				BaseURL:     firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
+				APIKey:      firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
+				Timeout:     llmTimeout,
+				ToolProfile: toolProfile,
 			}
 			return rlm.LambdaRunner{
 				Tools: adapter,
@@ -241,6 +243,7 @@ func chooseRLMRunner(
 				RequireToolUse: requireToolUse,
 				RouteProfile:   rlm.NormalizeRouteProfile(routeProfile),
 				PlanMode:       pm,
+				ToolProfile:    toolProfile,
 			},
 		}
 	case "repl", "rlm-repl":

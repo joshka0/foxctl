@@ -101,6 +101,7 @@ func TestChooseRLMRunnerReplWithEphemeralSkills(t *testing.T) {
 		true,
 		"",
 		"",
+		"",
 		string(rlmruntime.SandboxKindPython),
 		true,
 		true,

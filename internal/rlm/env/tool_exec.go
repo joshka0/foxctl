@@ -56,6 +56,8 @@ type loadEvidenceRefInput struct {
 	MaxTokens int    `json:"max_tokens,omitempty"`
 }
 
+const defaultLoadEvidenceRefMaxTokens = 4096
+
 // laneRetrievalStore is a no-op fallback when the SQLite store is unavailable.
 // Episodes are recorded best-effort; a missing store must never break retrieval.
 type laneRetrievalStore struct{}
@@ -1330,6 +1332,8 @@ func mergeCodeSearchHits(limit int, repoHits []contextengine.CodeSearchHit, rank
 		if priority > existing.priority || (priority == existing.priority && hit.Score > existing.hit.Score) {
 			if strings.TrimSpace(hit.Snippet) == "" {
 				hit.Snippet = existing.hit.Snippet
+			} else if strings.Contains(existing.hit.Snippet, "excerpt:") && !strings.Contains(hit.Snippet, "excerpt:") {
+				hit.Snippet = strings.TrimSpace(hit.Snippet) + "\n" + strings.TrimSpace(existing.hit.Snippet)
 			}
 			if hit.Line == 0 {
 				hit.Line = existing.hit.Line
@@ -2065,8 +2069,9 @@ func (a *ReadOnlyAdapter) gatherContext(ctx context.Context, args json.RawMessag
 	if err != nil {
 		return nil, err
 	}
-	if strings.EqualFold(strings.TrimSpace(input.ResponseMode), "answer_surface") ||
-		strings.EqualFold(strings.TrimSpace(input.ResponseMode), "compact") {
+	responseMode := strings.TrimSpace(input.ResponseMode)
+	if strings.EqualFold(responseMode, "answer_surface") ||
+		strings.EqualFold(responseMode, "compact") {
 		return contextBundleAnswerSurfaceToMap(bundle), nil
 	}
 	return contextBundleToMap(bundle), nil
@@ -2107,6 +2112,9 @@ func (a *ReadOnlyAdapter) loadEvidenceRef(ctx context.Context, args json.RawMess
 	if refStr == "" {
 		return nil, fmt.Errorf("ref is required")
 	}
+	if input.MaxTokens <= 0 {
+		input.MaxTokens = defaultLoadEvidenceRefMaxTokens
+	}
 	ref, err := contextengine.ParseEvidenceRef(refStr)
 	if err != nil {
 		return map[string]any{
@@ -2142,11 +2150,11 @@ func (a *ReadOnlyAdapter) loadEvidenceRef(ctx context.Context, args json.RawMess
 		if err != nil {
 			return map[string]any{"ref": refStr, "loaded": false, "error": err.Error()}, nil
 		}
-		return map[string]any{
+		return boundLoadedEvidenceRef(refStr, map[string]any{
 			"ref":    refStr,
 			"loaded": true,
 			"claim":  claim,
-		}, nil
+		}, input.MaxTokens), nil
 	case contextengine.RefTypeEvent:
 		out, err := a.loadEventEvidence(ctx, refStr, ref.Ref)
 		return boundLoadedEvidenceRef(refStr, out, input.MaxTokens), err
@@ -2349,7 +2357,8 @@ func boundLoadedEvidenceRef(refStr string, out map[string]any, maxTokens int) ma
 	}
 	maxChars := maxTokens * 4
 	if maxChars <= 0 {
-		return out
+		maxChars = defaultLoadEvidenceRefMaxTokens * 4
+		maxTokens = defaultLoadEvidenceRefMaxTokens
 	}
 	body, err := json.Marshal(out)
 	if err != nil || len(body) <= maxChars {

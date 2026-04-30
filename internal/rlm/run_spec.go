@@ -10,6 +10,10 @@ type ToolProfile string
 const (
 	ToolProfileDefault             ToolProfile = "default"
 	ToolProfileGatherContext       ToolProfile = "gather-context"
+	ToolProfileLambdaRepo          ToolProfile = "lambda-repo"
+	ToolProfileCodeDebug           ToolProfile = "code-debug"
+	ToolProfileMemoryContext       ToolProfile = "memory-context"
+	ToolProfileFullDebug           ToolProfile = "full-debug"
 	ToolProfileCodeIntel           ToolProfile = "code-intel"
 	ToolProfileMemoryRecall        ToolProfile = "memory-recall"
 	ToolProfileLongCoTNoModelTools ToolProfile = "longcot-no-model-tools"
@@ -72,16 +76,43 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 	}
 
 	switch resolvedProfile {
-	case ToolProfileDefault:
-		// Default profile: all composite retrieval tools.
+	case ToolProfileDefault, ToolProfileGatherContext, ToolProfileLambdaRepo:
+		// Default/mini profile: force composite context gathering first, then
+		// allow bounded ref inspection only for verification. Raw lane tools
+		// require explicit debug profiles.
 		allow := map[string]struct{}{
-			"retrieve_code":     {},
+			"gather_context":    {},
+			"load_evidence_ref": {},
+		}
+		tools := filterToolsBySet(available, allow)
+		return ToolPolicy{
+			Profile:      resolvedProfile,
+			AllowedTools: collectToolNames(tools),
+			Tools:        tools,
+		}, nil
+	case ToolProfileCodeDebug, ToolProfileCodeIntel:
+		// Code debug: certified context first, then bounded inspection, then
+		// direct repo controller/raw code lane for retrieval diagnostics.
+		allow := map[string]struct{}{
+			"gather_context":       {},
+			"load_evidence_ref":    {},
+			"code_search_ensemble": {},
+			"retrieve_code":        {},
+		}
+		tools := filterToolsBySet(available, allow)
+		return ToolPolicy{
+			Profile:      resolvedProfile,
+			AllowedTools: collectToolNames(tools),
+			Tools:        tools,
+		}, nil
+	case ToolProfileMemoryContext, ToolProfileMemoryRecall:
+		// Memory/context debug: certified context first, then raw memory and
+		// ACA/context lanes for diagnostics.
+		allow := map[string]struct{}{
+			"gather_context":    {},
+			"load_evidence_ref": {},
 			"retrieve_memory":   {},
 			"retrieve_context":  {},
-			"retrieve_task":     {},
-			"gather_context":    {},
-			"retrieve_mixed":    {},
-			"load_evidence_ref": {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -89,39 +120,17 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 			AllowedTools: collectToolNames(tools),
 			Tools:        tools,
 		}, nil
-	case ToolProfileGatherContext:
-		// Gather context: force composite context gathering first, then allow
-		// bounded ref inspection only for verification.
+	case ToolProfileFullDebug:
 		allow := map[string]struct{}{
-			"gather_context":    {},
-			"load_evidence_ref": {},
-		}
-		tools := filterToolsBySet(available, allow)
-		return ToolPolicy{
-			Profile:      resolvedProfile,
-			AllowedTools: collectToolNames(tools),
-			Tools:        tools,
-		}, nil
-	case ToolProfileCodeIntel:
-		// Code intel: gather_context + retrieve_code + load_evidence_ref.
-		allow := map[string]struct{}{
-			"gather_context":    {},
-			"retrieve_code":     {},
-			"load_evidence_ref": {},
-		}
-		tools := filterToolsBySet(available, allow)
-		return ToolPolicy{
-			Profile:      resolvedProfile,
-			AllowedTools: collectToolNames(tools),
-			Tools:        tools,
-		}, nil
-	case ToolProfileMemoryRecall:
-		// Memory recall: gather_context + retrieve_memory + retrieve_context + load_evidence_ref.
-		allow := map[string]struct{}{
-			"gather_context":    {},
-			"retrieve_memory":   {},
-			"retrieve_context":  {},
-			"load_evidence_ref": {},
+			"gather_context":           {},
+			"load_evidence_ref":        {},
+			"code_search_ensemble":     {},
+			"retrieve_code":            {},
+			"retrieve_memory":          {},
+			"retrieve_context":         {},
+			"retrieve_task":            {},
+			"retrieve_mixed":           {},
+			"memory_ensemble_retrieve": {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -147,6 +156,14 @@ func NormalizeToolProfile(value string) (ToolProfile, error) {
 		return ToolProfileDefault, nil
 	case string(ToolProfileGatherContext):
 		return ToolProfileGatherContext, nil
+	case string(ToolProfileLambdaRepo):
+		return ToolProfileLambdaRepo, nil
+	case string(ToolProfileCodeDebug):
+		return ToolProfileCodeDebug, nil
+	case string(ToolProfileMemoryContext):
+		return ToolProfileMemoryContext, nil
+	case string(ToolProfileFullDebug):
+		return ToolProfileFullDebug, nil
 	case string(ToolProfileCodeIntel):
 		return ToolProfileCodeIntel, nil
 	case string(ToolProfileMemoryRecall):

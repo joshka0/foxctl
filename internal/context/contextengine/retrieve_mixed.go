@@ -244,6 +244,8 @@ func nodeTypeToLane(nt EvidenceNodeType) EvidenceLane {
 		return LaneContext
 	case EvidenceNodeTypeTask:
 		return LaneTask
+	case EvidenceNodeTypeRetrieval:
+		return LaneContext
 	default:
 		return LaneMixed
 	}
