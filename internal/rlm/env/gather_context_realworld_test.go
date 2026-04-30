@@ -468,6 +468,102 @@ func normalizeSemanticIndexProvider(provider string) string {
 	}
 }
 
+func TestReadOnlyAdapterGatherContextExecutionTraceUsesEnsembleBridgeFile(t *testing.T) {
+	ctx := context.Background()
+	storageRoot := t.TempDir()
+	workspaceRoot := t.TempDir()
+	writeTestFile(t, filepath.Join(workspaceRoot, "internal", "rlm", "env", "code_search_ensemble.go"), "package env\n\nfunc codeSearchEnsemble() {}\n")
+	writeTestFile(t, filepath.Join(workspaceRoot, "internal", "rlm", "env", "adapter.go"), "package env\n\ntype ReadOnlyAdapter struct{}\n\nfunc (a *ReadOnlyAdapter) Execute(name string) { if name == \"code_search_ensemble\" { codeSearchEnsemble() } }\n")
+	writeTestFile(t, filepath.Join(workspaceRoot, "cmd", "foxctl", "cmd", "eval_code_search_ensemble.go"), "package cmd\n\nfunc runSingleCodeSearchEnsembleEval() { adapter := &ReadOnlyAdapter{}; adapter.Execute(\"code_search_ensemble\") }\n")
+
+	repoStore, err := repoindex.Open(ctx, storageRoot, workspaceRoot)
+	if err != nil {
+		t.Fatalf("open repoindex: %v", err)
+	}
+	repoKey := repoStore.RepoKey()
+	now := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
+	targetID := repoindex.NamespacedID(repoKey, "sym:env:codeSearchEnsemble")
+	adapterID := repoindex.NamespacedID(repoKey, "sym:env:execute")
+	evalID := repoindex.NamespacedID(repoKey, "sym:cmd:runSingleCodeSearchEnsembleEval")
+	if err := repoStore.ReplaceAll(ctx, []repoindex.Node{
+		{
+			ID:        targetID,
+			Kind:      repoindex.NodeSymbol,
+			Pkg:       "env",
+			File:      "internal/rlm/env/code_search_ensemble.go",
+			Name:      "codeSearchEnsemble",
+			Summary:   "Main ensemble implementation.",
+			SpanStart: 3,
+			SpanEnd:   3,
+			UpdatedAt: now,
+		},
+		{
+			ID:        adapterID,
+			Kind:      repoindex.NodeSymbol,
+			Pkg:       "env",
+			File:      "internal/rlm/env/adapter.go",
+			Name:      "execute",
+			Summary:   "Adapter entrypoint dispatching code_search_ensemble.",
+			SpanStart: 5,
+			SpanEnd:   5,
+			UpdatedAt: now,
+		},
+		{
+			ID:        evalID,
+			Kind:      repoindex.NodeSymbol,
+			Pkg:       "cmd",
+			File:      "cmd/foxctl/cmd/eval_code_search_ensemble.go",
+			Name:      "runSingleCodeSearchEnsembleEval",
+			Summary:   "Eval path for code_search_ensemble.",
+			SpanStart: 3,
+			SpanEnd:   3,
+			UpdatedAt: now,
+		},
+	}, []repoindex.Edge{
+		{Src: evalID, Dst: adapterID, Type: repoindex.EdgeCalls, Weight: 1},
+		{Src: adapterID, Dst: targetID, Type: repoindex.EdgeCalls, Weight: 1},
+	}); err != nil {
+		t.Fatalf("replace repoindex: %v", err)
+	}
+	if err := repoStore.Close(); err != nil {
+		t.Fatalf("close repoindex: %v", err)
+	}
+
+	cfg := config.Config{}
+	cfg.Storage.Root = storageRoot
+	adapter := NewReadOnlyAdapter(cfg, workspaceRoot, "", nil, rlm.Environment{
+		Tools: []rlm.Tool{{Name: "gather_context", ReadOnly: true}},
+	})
+
+	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
+		"query":     "Which files connect runSingleCodeSearchEnsembleEval to code_search_ensemble execution?",
+		"task_type": "execution_trace",
+		"lanes":     []string{"code"},
+		"limit":     5,
+	}))
+	if err != nil {
+		t.Fatalf("gather_context: %v", err)
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal output: %v", err)
+	}
+	var bundle contextengine.ContextBundle
+	if err := json.Unmarshal(body, &bundle); err != nil {
+		t.Fatalf("decode bundle: %v", err)
+	}
+	paths := gatherContextTestPaths(bundle)
+	for _, want := range []string{
+		"cmd/foxctl/cmd/eval_code_search_ensemble.go",
+		"internal/rlm/env/adapter.go",
+		"internal/rlm/env/code_search_ensemble.go",
+	} {
+		if !containsString(paths, want) {
+			t.Fatalf("paths=%v want %s", paths, want)
+		}
+	}
+}
+
 func gatherContextTestPaths(bundle contextengine.ContextBundle) []string {
 	paths := make([]string, 0, len(bundle.Evidence))
 	for _, node := range bundle.Evidence {

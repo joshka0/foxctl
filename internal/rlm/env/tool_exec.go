@@ -103,17 +103,20 @@ func (a *ReadOnlyAdapter) codeSearchFnForTask(limit int, taskType string) contex
 		if strings.TrimSpace(a.workspaceRoot) == "" {
 			return nil, nil
 		}
+		ensembleHits, ensembleErr := a.codeSearchEnsembleHits(ctx, query, taskType, limit)
 		repoHits, repoErr := a.repoIndexCodeSearch(ctx, query, limit)
 		localHits, localErr := a.localCodeProbeSearch(query, taskType, limit)
 		lexicalHits, lexicalErr := a.localLexicalCodeSearch(query, limit)
 		buildTargetHits := a.localBuildTargetCodeSearchHits(query)
-		semanticHits, semanticErr := a.semanticCodeSearchHits(ctx, query, limit)
-		wideHits := mergeCodeSearchHits(maxInt(limit*6, limit), repoHits, localHits, buildTargetHits, lexicalHits, semanticHits)
+		wideHits := mergeCodeSearchHits(maxInt(limit*6, limit), repoHits, ensembleHits, localHits, buildTargetHits, lexicalHits)
 		relatedHits := a.localRelatedCodeSearchHits(query, wideHits, limit)
-		if hits := mergeCodeSearchHits(limit, repoHits, localHits, buildTargetHits, relatedHits, lexicalHits, semanticHits); len(hits) > 0 {
+		if hits := mergeCodeSearchHits(limit, repoHits, ensembleHits, localHits, buildTargetHits, relatedHits, lexicalHits); len(hits) > 0 {
 			return hits, nil
 		}
 		errs := make([]string, 0, 4)
+		if ensembleErr != nil {
+			errs = append(errs, "code search ensemble: "+ensembleErr.Error())
+		}
 		if repoErr != nil {
 			errs = append(errs, "repo index: "+repoErr.Error())
 		}
@@ -123,14 +126,179 @@ func (a *ReadOnlyAdapter) codeSearchFnForTask(limit int, taskType string) contex
 		if lexicalErr != nil {
 			errs = append(errs, "local lexical: "+lexicalErr.Error())
 		}
-		if semanticErr != nil {
-			errs = append(errs, "semantic search: "+semanticErr.Error())
-		}
 		if len(errs) > 0 {
 			return nil, fmt.Errorf("%s", strings.Join(errs, "; "))
 		}
 		return nil, nil
 	}
+}
+
+func (a *ReadOnlyAdapter) codeSearchEnsembleHits(ctx context.Context, query, taskType string, limit int) ([]rankedCodeSearchHit, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || strings.TrimSpace(a.workspaceRoot) == "" {
+		return nil, nil
+	}
+	normalizedTaskType, _ := normalizeCodeSearchTaskType(taskType)
+	args := mustJSON(map[string]any{
+		"query":     query,
+		"task_type": normalizedTaskType,
+		"constraints": map[string]any{
+			"require_grounding": true,
+		},
+		"budget": map[string]any{
+			"max_candidates": maxInt(limit*4, 16),
+			"max_files":      maxInt(limit, 4),
+			"max_snippets":   maxInt(limit, 4),
+		},
+	})
+	out, err := a.codeSearchEnsemble(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+
+	files := decodeCodeSearchEvidenceFiles(out["files"])
+	if len(files) == 0 {
+		return nil, nil
+	}
+	snippetsByPath := codeSearchEvidenceSnippetReasons(out["snippets"])
+	directDispatch := codeSearchPathSet(stringSliceValue(out["direct_dispatch_files"]))
+	exposure := codeSearchPathSet(stringSliceValue(out["exposure_files"]))
+	structural := codeSearchPathSet(stringSliceValue(out["structural_support_files"]))
+	registration := codeSearchPathSet(stringSliceValue(out["registration_files"]))
+
+	hits := make([]rankedCodeSearchHit, 0, len(files))
+	for idx, file := range files {
+		path := normalizeCodeSearchPath(file.Path)
+		if path == "" {
+			continue
+		}
+		role := codeSearchEnsembleCandidateRole(path, directDispatch, exposure, structural, registration)
+		snippet := strings.TrimSpace(file.Why)
+		if extra := strings.TrimSpace(snippetsByPath[path]); extra != "" {
+			if snippet != "" {
+				snippet += "\n"
+			}
+			snippet += extra
+		}
+		if snippet == "" {
+			snippet = path
+		}
+		score := clampScore(file.SupportScore)
+		if score == 0 {
+			score = scoreValue(out["confidence"], 0.82)
+		}
+		hits = append(hits, rankedCodeSearchHit{
+			Priority: 82 - minInt(idx, 20),
+			Hit: contextengine.CodeSearchHit{
+				Path:     path,
+				Snippet:  snippet,
+				Score:    score,
+				Language: languageFromPath(path),
+				Metadata: map[string]any{
+					"candidate_role": role,
+					"source":         "code_search_ensemble",
+					"source_profile": "repo_code",
+					"evidence_class": "structural",
+					"task_type":      normalizedTaskType,
+				},
+				Sources: append([]string(nil), file.ConfirmedBy...),
+			},
+		})
+	}
+	return hits, nil
+}
+
+func decodeCodeSearchEvidenceFiles(raw any) []codeSearchEvidenceFile {
+	switch value := raw.(type) {
+	case []codeSearchEvidenceFile:
+		return append([]codeSearchEvidenceFile(nil), value...)
+	case []any:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		var files []codeSearchEvidenceFile
+		if err := json.Unmarshal(encoded, &files); err != nil {
+			return nil
+		}
+		return files
+	default:
+		return nil
+	}
+}
+
+func codeSearchEvidenceSnippetReasons(raw any) map[string]string {
+	out := map[string]string{}
+	switch value := raw.(type) {
+	case []codeSearchEvidenceSnippet:
+		for _, snippet := range value {
+			path := normalizeCodeSearchPath(snippet.Path)
+			if path == "" {
+				continue
+			}
+			out[path] = codeSearchEvidenceSnippetReason(snippet)
+		}
+	case []any:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return out
+		}
+		var snippets []codeSearchEvidenceSnippet
+		if err := json.Unmarshal(encoded, &snippets); err != nil {
+			return out
+		}
+		for _, snippet := range snippets {
+			path := normalizeCodeSearchPath(snippet.Path)
+			if path == "" {
+				continue
+			}
+			out[path] = codeSearchEvidenceSnippetReason(snippet)
+		}
+	}
+	return out
+}
+
+func codeSearchEvidenceSnippetReason(snippet codeSearchEvidenceSnippet) string {
+	parts := make([]string, 0, 2)
+	if snippet.StartLine > 0 {
+		if snippet.EndLine > 0 && snippet.EndLine != snippet.StartLine {
+			parts = append(parts, fmt.Sprintf("lines: %d-%d", snippet.StartLine, snippet.EndLine))
+		} else {
+			parts = append(parts, fmt.Sprintf("line: %d", snippet.StartLine))
+		}
+	}
+	if reason := strings.TrimSpace(snippet.Reason); reason != "" {
+		parts = append(parts, "reason: "+reason)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func codeSearchPathSet(paths []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		path = normalizeCodeSearchPath(path)
+		if path == "" {
+			continue
+		}
+		out[path] = struct{}{}
+	}
+	return out
+}
+
+func codeSearchEnsembleCandidateRole(path string, directDispatch, exposure, structural, registration map[string]struct{}) string {
+	if _, ok := directDispatch[path]; ok {
+		return "direct_dispatch_file"
+	}
+	if _, ok := registration[path]; ok {
+		return "registration_file"
+	}
+	if _, ok := structural[path]; ok {
+		return "structural_support"
+	}
+	if _, ok := exposure[path]; ok {
+		return "primary_anchor"
+	}
+	return "primary_anchor"
 }
 
 type rankedCodeSearchHit struct {
@@ -1155,6 +1323,12 @@ func mergeCodeSearchHits(limit int, repoHits []contextengine.CodeSearchHit, rank
 			if hit.Line == 0 {
 				hit.Line = existing.hit.Line
 			}
+			if len(hit.Metadata) == 0 {
+				hit.Metadata = existing.hit.Metadata
+			}
+			if len(hit.Sources) == 0 {
+				hit.Sources = existing.hit.Sources
+			}
 			byKey[key] = mergedHit{hit: hit, priority: priority}
 			return
 		}
@@ -1163,6 +1337,12 @@ func mergeCodeSearchHits(limit int, repoHits []contextengine.CodeSearchHit, rank
 		}
 		if existing.hit.Line == 0 && hit.Line > 0 {
 			existing.hit.Line = hit.Line
+		}
+		if len(existing.hit.Metadata) == 0 && len(hit.Metadata) > 0 {
+			existing.hit.Metadata = hit.Metadata
+		}
+		if len(existing.hit.Sources) == 0 && len(hit.Sources) > 0 {
+			existing.hit.Sources = hit.Sources
 		}
 		byKey[key] = existing
 	}

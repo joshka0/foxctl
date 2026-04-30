@@ -67,6 +67,12 @@ func RetrieveCode(ctx context.Context, cfg LaneConfig, searchFn CodeSearchFunc, 
 				"language": hit.Language,
 			},
 		}
+		for key, value := range hit.Metadata {
+			node.Metadata[key] = value
+		}
+		if len(hit.Sources) > 0 {
+			node.Metadata["sources"] = append([]string(nil), hit.Sources...)
+		}
 		if hit.Path != "" {
 			node.Metadata["path"] = hit.Path
 		}

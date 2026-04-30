@@ -48,6 +48,8 @@ type CodeSearchHit struct {
 	Symbol   string
 	Score    float64
 	Language string
+	Metadata map[string]any
+	Sources  []string
 }
 
 // MemoryQueryFunc queries memory store and returns claims for the memory lane.
