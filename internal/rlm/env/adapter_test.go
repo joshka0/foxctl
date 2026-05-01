@@ -1572,7 +1572,7 @@ func TestReadOnlyAdapterLocalCodeProbeSearchSymbolInspectUsesDefinition(t *testi
 	writeTestFile(t, filepath.Join(workspace, "internal", "rlm", "env", "tool_exec.go"), "package env\n\nfunc useAdapter(value ReadOnlyAdapter) {}\n")
 
 	adapter := NewReadOnlyAdapter(config.Config{}, workspace, "", nil, rlm.Environment{})
-	hits, err := adapter.localCodeProbeSearch("Which file defines ReadOnlyAdapter?", codeSearchTaskSymbolInspect, 4)
+	hits, err := adapter.localCodeProbeSearch("Which file defines ReadOnlyAdapter?", codeSearchTaskSymbolInspect, nil, 4)
 	if err != nil {
 		t.Fatalf("localCodeProbeSearch: %v", err)
 	}
@@ -1708,6 +1708,53 @@ func TestReadOnlyAdapterCoverageFanoutFindsPathTermFile(t *testing.T) {
 	}
 	if containsString(got, "docs/memory.md") {
 		t.Fatalf("coverage code fanout included docs path: %v", got)
+	}
+}
+
+func TestGatherContextPolyglotFactsPreserveMatchedProbeTerms(t *testing.T) {
+	t.Parallel()
+
+	workspace := filepath.Join("..", "..", "..", "testdata", "fixtures", "gather-context", "polyglot-repo")
+	adapter := NewReadOnlyAdapter(config.Config{}, workspace, "", nil, rlm.Environment{
+		Tools: []rlm.Tool{{Name: "gather_context", ReadOnly: true}},
+	})
+	out, err := adapter.Execute(context.Background(), "gather_context", mustJSON(map[string]any{
+		"query":             "Where is the deploy command declared, registered, and dispatched in the Go CLI fixture?",
+		"task_type":         "registration_trace",
+		"lanes":             []string{"code"},
+		"source_profiles":   []string{"repo_code"},
+		"required_evidence": []string{"RegisterDeployCommand", "RunDeployCommand", "Dispatch"},
+		"limit":             10,
+		"max_context_chars": 7000,
+	}))
+	if err != nil {
+		t.Fatalf("gather_context: %v", err)
+	}
+	body, _ := json.Marshal(out)
+	var bundle contextengine.ContextBundle
+	if err := json.Unmarshal(body, &bundle); err != nil {
+		t.Fatalf("decode bundle: %v", err)
+	}
+	var parts []string
+	for _, fact := range bundle.Facts {
+		parts = append(parts, fact.Fact)
+		if len(fact.Metadata) > 0 {
+			metadata, _ := json.Marshal(fact.Metadata)
+			parts = append(parts, string(metadata))
+		}
+	}
+	for _, evidence := range bundle.Evidence {
+		parts = append(parts, evidence.Statement)
+		if len(evidence.Metadata) > 0 {
+			metadata, _ := json.Marshal(evidence.Metadata)
+			parts = append(parts, string(metadata))
+		}
+	}
+	text := strings.Join(parts, "\n")
+	for _, want := range []string{"RegisterDeployCommand", "RunDeployCommand", "Dispatch"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("facts/evidence missing %s:\n%s", want, text)
+		}
 	}
 }
 

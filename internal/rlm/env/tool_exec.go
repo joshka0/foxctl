@@ -115,7 +115,7 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 		liveHits, liveErr := a.liveOverlayCodeSearchHits(ctx, query, requiredEvidence, limit)
 		repoDocHits, repoDocErr := a.repoDocsSearchHits(query, requiredEvidence, sourceProfiles, limit)
 		repoHits, repoErr := a.repoIndexCodeSearch(ctx, query, limit)
-		localHits, localErr := a.localCodeProbeSearch(query, taskType, limit)
+		localHits, localErr := a.localCodeProbeSearch(query, taskType, requiredEvidence, limit)
 		lexicalHits, lexicalErr := a.localLexicalCodeSearch(query, limit)
 		buildTargetHits := a.localBuildTargetCodeSearchHits(query)
 		wideHits := mergeCodeSearchHits(maxInt(limit*6, limit), repoHits, liveHits, repoDocHits, ensembleHits, localHits, buildTargetHits, lexicalHits)
@@ -716,7 +716,7 @@ func semanticBundleSnippet(bundle semanticCandidateBundleHit) string {
 	return strings.Join(parts, "\n")
 }
 
-func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, limit int) ([]rankedCodeSearchHit, error) {
+func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, requiredEvidence []string, limit int) ([]rankedCodeSearchHit, error) {
 	if strings.TrimSpace(a.workspaceRoot) == "" {
 		return nil, nil
 	}
@@ -733,14 +733,20 @@ func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, li
 	lineHints := map[string]int{}
 	symbols := map[string]string{}
 	priorities := map[string]int{}
+	matchedTerms := map[string][]string{}
 	var errs []string
 	if scanErr != nil {
 		errs = append(errs, scanErr.Error())
 	}
-	remember := func(pathValue string, priority int, line int, symbol string, snippet string) {
+	remember := func(pathValue string, priority int, line int, symbol string, snippet string, terms ...string) {
 		pathValue = normalizeCodeSearchPath(pathValue)
 		if pathValue == "" {
 			return
+		}
+		for _, term := range terms {
+			if term = strings.TrimSpace(term); term != "" {
+				matchedTerms[pathValue] = appendUniqueStringEnv(matchedTerms[pathValue], term)
+			}
 		}
 		prevPriority := priorities[pathValue]
 		if prevPriority < priority {
@@ -769,7 +775,7 @@ func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, li
 			continue
 		}
 		addCodeSearchCandidate(candidates, hit.Path, "path probe: "+hit.Probe, "path_probe", 0.92, 0, "", "")
-		remember(hit.Path, 20, 0, "", "path probe: "+hit.Probe)
+		remember(hit.Path, 20, 0, "", "path probe: "+hit.Probe, hit.Probe)
 	}
 	for _, hit := range exactHits {
 		if hit.Path == "" {
@@ -777,7 +783,7 @@ func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, li
 		}
 		support := codeSearchFileWeight(hit.Path) + lexicalCodeTermWeight(hit.Probe)
 		addCodeSearchCandidate(candidates, hit.Path, "exact code probe: "+hit.Probe, "exact_probe", support, hit.Line, "", "")
-		remember(hit.Path, 30, hit.Line, "", codeProbeSnippet("exact code probe: "+hit.Probe, a.repoFileExcerpt(hit.Path, hit.Line, 3, 5)))
+		remember(hit.Path, 30, hit.Line, "", codeProbeSnippet("exact code probe: "+hit.Probe, a.repoFileExcerpt(hit.Path, hit.Line, 3, 5)), hit.Probe)
 	}
 	if normalizedTaskType == codeSearchTaskSymbolInspect {
 		definitions := a.findGoDefinitions(codeSearchSymbolProbes(query))
@@ -787,7 +793,7 @@ func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, li
 				continue
 			}
 			addCodeSearchCandidate(candidates, definition.Path, "symbol definition: "+symbol, "symbol_definition", 2.8, definition.Line, symbol, "")
-			remember(definition.Path, 95, definition.Line, symbol, codeProbeSnippet("symbol definition: "+symbol, a.repoFileExcerpt(definition.Path, definition.Line, 3, 5)))
+			remember(definition.Path, 95, definition.Line, symbol, codeProbeSnippet("symbol definition: "+symbol, a.repoFileExcerpt(definition.Path, definition.Line, 3, 5)), symbol)
 		}
 	}
 	if normalizedTaskType == codeSearchTaskRegistrationTrace {
@@ -798,7 +804,7 @@ func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, li
 				continue
 			}
 			addCodeSearchCandidate(candidates, hit.Path, "registration site for "+hit.Symbol, "registration_trace", 1.25, hit.Line, hit.Symbol, "")
-			remember(hit.Path, 40, hit.Line, hit.Symbol, codeProbeSnippet("registration site for "+hit.Symbol, a.repoFileExcerpt(hit.Path, hit.Line, 3, 5)))
+			remember(hit.Path, 40, hit.Line, hit.Symbol, codeProbeSnippet("registration site for "+hit.Symbol, a.repoFileExcerpt(hit.Path, hit.Line, 3, 5)), hit.Symbol)
 		}
 	}
 	ranked := rankCodeSearchCandidatesWithProbes(candidates, query, normalizedTaskType, maxInt(limit*3, limit), pathProbes, exactProbes)
@@ -823,6 +829,17 @@ func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, li
 		if snippet == "" {
 			snippet = candidate.Why
 		}
+		if terms := matchedTerms[candidate.Path]; len(terms) > 0 {
+			snippet = appendCodeSearchMatchedTerms(snippet, terms)
+		}
+		metadata := localCodeProbeMetadata(candidate, normalizedTaskType)
+		if terms := matchedTerms[candidate.Path]; len(terms) > 0 {
+			metadata["matched_terms"] = append([]string(nil), terms...)
+			metadata["coverage_terms"] = codeSearchCoverageTerms(strings.Join(terms, " "))
+			if ids := codeSearchCoverageRequirementIDs(candidate.Path, symbol, strings.Join(terms, "\n"), requiredEvidence); len(ids) > 0 {
+				metadata["coverage_requirement_ids"] = ids
+			}
+		}
 		out = append(out, rankedCodeSearchHit{
 			Priority: priorities[candidate.Path],
 			Hit: contextengine.CodeSearchHit{
@@ -832,7 +849,7 @@ func (a *ReadOnlyAdapter) localCodeProbeSearch(query string, taskType string, li
 				Symbol:   symbol,
 				Score:    score,
 				Language: languageFromPath(candidate.Path),
-				Metadata: localCodeProbeMetadata(candidate, normalizedTaskType),
+				Metadata: metadata,
 			},
 		})
 	}
@@ -868,6 +885,22 @@ func localCodeProbeMetadata(candidate *codeSearchCandidate, taskType string) map
 		metadata["candidate_role"] = role
 	}
 	return metadata
+}
+
+func appendCodeSearchMatchedTerms(snippet string, terms []string) string {
+	terms = cleanStringList(terms)
+	if len(terms) == 0 {
+		return strings.TrimSpace(snippet)
+	}
+	line := "matched terms: " + strings.Join(terms, ", ")
+	snippet = strings.TrimSpace(snippet)
+	if snippet == "" {
+		return line
+	}
+	if strings.Contains(snippet, line) {
+		return snippet
+	}
+	return snippet + "\n" + line
 }
 
 func (a *ReadOnlyAdapter) localLexicalCodeSearch(query string, limit int) ([]rankedCodeSearchHit, error) {
@@ -2466,6 +2499,7 @@ func mergeCodeSearchHits(limit int, repoHits []contextengine.CodeSearchHit, rank
 			} else if strings.Contains(existing.hit.Snippet, "excerpt:") && !strings.Contains(hit.Snippet, "excerpt:") {
 				hit.Snippet = strings.TrimSpace(hit.Snippet) + "\n" + strings.TrimSpace(existing.hit.Snippet)
 			}
+			hit = supplementCodeSearchHit(hit, existing.hit)
 			if hit.Line == 0 {
 				hit.Line = existing.hit.Line
 			}
@@ -2478,6 +2512,7 @@ func mergeCodeSearchHits(limit int, repoHits []contextengine.CodeSearchHit, rank
 			byKey[key] = mergedHit{hit: hit, priority: priority}
 			return
 		}
+		existing.hit = supplementCodeSearchHit(existing.hit, hit)
 		if existing.hit.Snippet == "" && hit.Snippet != "" {
 			existing.hit.Snippet = hit.Snippet
 		}
@@ -2526,6 +2561,38 @@ func mergeCodeSearchHits(limit int, repoHits []contextengine.CodeSearchHit, rank
 		}
 	}
 	return hits
+}
+
+func supplementCodeSearchHit(base contextengine.CodeSearchHit, extra contextengine.CodeSearchHit) contextengine.CodeSearchHit {
+	if strings.TrimSpace(extra.Snippet) != "" && !strings.Contains(base.Snippet, strings.TrimSpace(extra.Snippet)) {
+		switch {
+		case strings.TrimSpace(base.Snippet) == "":
+			base.Snippet = strings.TrimSpace(extra.Snippet)
+		case strings.Contains(extra.Snippet, "matched terms:") || strings.Contains(extra.Snippet, "exact code probe:") || strings.Contains(extra.Snippet, "symbol definition:"):
+			base.Snippet = strings.TrimSpace(base.Snippet) + "\n" + strings.TrimSpace(extra.Snippet)
+		}
+	}
+	if base.Metadata == nil && len(extra.Metadata) > 0 {
+		base.Metadata = map[string]any{}
+	}
+	if len(extra.Metadata) > 0 {
+		for key, value := range extra.Metadata {
+			switch key {
+			case "matched_terms", "coverage_terms", "coverage_requirement_ids", "sources":
+				merged := metadataStringSliceEnv(base.Metadata, key)
+				merged = appendUniqueStringsEnv(merged, metadataStringSliceEnv(extra.Metadata, key)...)
+				if len(merged) > 0 {
+					base.Metadata[key] = merged
+				}
+			default:
+				if _, ok := base.Metadata[key]; !ok {
+					base.Metadata[key] = value
+				}
+			}
+		}
+	}
+	base.Sources = appendUniqueStringsEnv(base.Sources, extra.Sources...)
+	return base
 }
 
 func (a *ReadOnlyAdapter) repoAnchorStatement(anchor repoquery.Anchor) string {
