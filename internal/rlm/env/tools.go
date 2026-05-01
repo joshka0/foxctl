@@ -43,6 +43,16 @@ func DefaultTools() []rlm.Tool {
 					"items":       map[string]any{"type": "string"},
 					"description": "Optional explicit source profiles to prefer or shape, such as repo_code, repo_docs, codemaps, cochange_history, memory, task, session, or vault_docs.",
 				},
+				"languages": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional explicit code-language constraints for repo_code searches, such as go, typescript, elixir, python, or markdown.",
+				},
+				"path_prefixes": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional repo-relative path prefixes to constrain repo_code results, such as apps/api or packages/core.",
+				},
 				"memory_statuses": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},

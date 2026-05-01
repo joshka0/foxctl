@@ -46,10 +46,17 @@ type gatherContextInput struct {
 	TaskID           string   `json:"task_id,omitempty"`
 	TaskType         string   `json:"task_type,omitempty"`
 	SourceProfiles   []string `json:"source_profiles,omitempty"`
+	Languages        []string `json:"languages,omitempty"`
+	PathPrefixes     []string `json:"path_prefixes,omitempty"`
 	MemoryStatuses   []string `json:"memory_statuses,omitempty"`
 	Lanes            []string `json:"lanes,omitempty"`
 	MaxContextChars  int      `json:"max_context_chars,omitempty"`
 	ResponseMode     string   `json:"response_mode,omitempty"`
+}
+
+type codeSearchRequestOptions struct {
+	Languages    []string
+	PathPrefixes []string
 }
 
 // loadEvidenceRefInput is the input shape for load_evidence_ref.
@@ -103,27 +110,29 @@ func (a *ReadOnlyAdapter) codeSearchFn(limit int) contextengine.CodeSearchFunc {
 }
 
 func (a *ReadOnlyAdapter) codeSearchFnForTask(limit int, taskType string, sourceProfiles ...contextengine.SourceProfile) contextengine.CodeSearchFunc {
-	return a.codeSearchFnForTaskWithRequired(limit, taskType, nil, sourceProfiles...)
+	return a.codeSearchFnForTaskWithRequired(limit, taskType, nil, codeSearchRequestOptions{}, sourceProfiles...)
 }
 
-func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType string, requiredEvidence []string, sourceProfiles ...contextengine.SourceProfile) contextengine.CodeSearchFunc {
+func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType string, requiredEvidence []string, options codeSearchRequestOptions, sourceProfiles ...contextengine.SourceProfile) contextengine.CodeSearchFunc {
 	return func(ctx context.Context, query string) ([]contextengine.CodeSearchHit, error) {
 		if strings.TrimSpace(a.workspaceRoot) == "" {
 			return nil, nil
 		}
+		options = normalizeCodeSearchRequestOptions(options)
 		ensembleHits, ensembleErr := a.codeSearchEnsembleHits(ctx, query, taskType, limit, requiredEvidence, sourceProfiles)
 		liveHits, liveErr := a.liveOverlayCodeSearchHits(ctx, query, requiredEvidence, limit)
 		repoDocHits, repoDocErr := a.repoDocsSearchHits(query, requiredEvidence, sourceProfiles, limit)
 		repoHits, repoErr := a.repoIndexCodeSearch(ctx, query, limit)
+		repoCoverageHits, repoCoverageErr := a.repoIndexCoverageSearchHits(ctx, requiredEvidence, limit)
 		localHits, localErr := a.localCodeProbeSearch(query, taskType, requiredEvidence, limit)
 		lexicalHits, lexicalErr := a.localLexicalCodeSearch(query, limit)
 		buildTargetHits := a.localBuildTargetCodeSearchHits(query)
-		wideHits := mergeCodeSearchHits(maxInt(limit*6, limit), repoHits, liveHits, repoDocHits, ensembleHits, localHits, buildTargetHits, lexicalHits)
+		wideHits := mergeCodeSearchHitsWithOptions(maxInt(limit*6, limit), options, repoHits, liveHits, repoDocHits, repoCoverageHits, ensembleHits, localHits, buildTargetHits, lexicalHits)
 		relatedHits := a.localRelatedCodeSearchHits(query, wideHits, limit)
-		baseHits := mergeCodeSearchHits(limit, repoHits, liveHits, repoDocHits, ensembleHits, localHits, buildTargetHits, relatedHits, lexicalHits)
+		baseHits := mergeCodeSearchHitsWithOptions(limit, options, repoHits, liveHits, repoDocHits, repoCoverageHits, ensembleHits, localHits, buildTargetHits, relatedHits, lexicalHits)
 		closureHits := a.localSubsystemSiblingClosureHits(query, taskType, requiredEvidence, baseHits, limit)
-		candidateLimit := codeSearchCandidatePoolLimit(limit, taskType, len(closureHits))
-		if hits := mergeCodeSearchHits(candidateLimit, repoHits, liveHits, repoDocHits, ensembleHits, localHits, buildTargetHits, relatedHits, closureHits, lexicalHits); len(hits) > 0 {
+		candidateLimit := codeSearchCandidatePoolLimit(limit, taskType, len(cleanStringList(requiredEvidence)), len(closureHits))
+		if hits := mergeCodeSearchHitsWithOptions(candidateLimit, options, repoHits, liveHits, repoDocHits, repoCoverageHits, ensembleHits, localHits, buildTargetHits, relatedHits, closureHits, lexicalHits); len(hits) > 0 {
 			annotateCodeSearchHitCoverage(hits, requiredEvidence)
 			return hits, nil
 		}
@@ -140,6 +149,9 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 		if repoErr != nil {
 			errs = append(errs, "repo index: "+repoErr.Error())
 		}
+		if repoCoverageErr != nil {
+			errs = append(errs, "repo index coverage: "+repoCoverageErr.Error())
+		}
 		if localErr != nil {
 			errs = append(errs, "local probes: "+localErr.Error())
 		}
@@ -153,15 +165,103 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 	}
 }
 
-func codeSearchCandidatePoolLimit(limit int, taskType string, closureCount int) int {
+func codeSearchCandidatePoolLimit(limit int, taskType string, requiredEvidenceCount int, closureCount int) int {
 	if limit <= 0 {
 		limit = 8
 	}
-	if !isSubsystemMapTask(taskType) {
-		return limit
+	candidateLimit := limit
+	if requiredEvidenceCount > 0 {
+		candidateLimit = maxInt(candidateLimit, limit+requiredEvidenceCount*3)
 	}
-	candidateLimit := maxInt(limit+closureCount, limit*2)
+	if isSubsystemMapTask(taskType) {
+		candidateLimit = maxInt(candidateLimit, maxInt(limit+closureCount, limit*2))
+	}
 	return minInt(candidateLimit, maxInt(limit, 32))
+}
+
+func normalizeCodeSearchRequestOptions(options codeSearchRequestOptions) codeSearchRequestOptions {
+	out := codeSearchRequestOptions{
+		Languages:    make([]string, 0, len(options.Languages)),
+		PathPrefixes: make([]string, 0, len(options.PathPrefixes)),
+	}
+	for _, language := range options.Languages {
+		switch strings.TrimSpace(strings.ToLower(language)) {
+		case "go", "golang":
+			out.Languages = appendUniqueStringEnv(out.Languages, "go")
+		case "typescript", "ts", "tsx":
+			out.Languages = appendUniqueStringEnv(out.Languages, "typescript")
+		case "javascript", "js", "jsx":
+			out.Languages = appendUniqueStringEnv(out.Languages, "javascript")
+		case "elixir", "ex", "exs":
+			out.Languages = appendUniqueStringEnv(out.Languages, "elixir")
+		case "python", "py":
+			out.Languages = appendUniqueStringEnv(out.Languages, "python")
+		case "markdown", "md", "docs":
+			out.Languages = appendUniqueStringEnv(out.Languages, "markdown")
+		}
+	}
+	for _, prefix := range options.PathPrefixes {
+		prefix = normalizeCodeSearchPath(prefix)
+		prefix = strings.Trim(prefix, "/")
+		if prefix == "" || prefix == "." {
+			continue
+		}
+		out.PathPrefixes = appendUniqueStringEnv(out.PathPrefixes, prefix)
+	}
+	return out
+}
+
+func codeSearchHitMatchesOptions(hit contextengine.CodeSearchHit, options codeSearchRequestOptions) bool {
+	if isThirdPartyCodeSearchPath(hit.Path) && !codeSearchOptionsAllowThirdParty(options) {
+		return false
+	}
+	if len(options.Languages) > 0 {
+		language := strings.TrimSpace(hit.Language)
+		if language == "" {
+			language = languageFromPath(hit.Path)
+		}
+		if !stringSliceHas(options.Languages, language) {
+			return false
+		}
+	}
+	if len(options.PathPrefixes) > 0 {
+		path := strings.Trim(normalizeCodeSearchPath(hit.Path), "/")
+		matched := false
+		for _, prefix := range options.PathPrefixes {
+			prefix = strings.Trim(prefix, "/")
+			if path == prefix || strings.HasPrefix(path, prefix+"/") {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+func codeSearchOptionsAllowThirdParty(options codeSearchRequestOptions) bool {
+	for _, prefix := range options.PathPrefixes {
+		if pathContainsThirdPartySegment(prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isThirdPartyCodeSearchPath(pathValue string) bool {
+	return pathContainsThirdPartySegment(normalizeCodeSearchPath(pathValue))
+}
+
+func pathContainsThirdPartySegment(pathValue string) bool {
+	for _, part := range strings.Split(strings.Trim(pathValue, "/"), "/") {
+		switch part {
+		case "node_modules", "deps", "_build", "vendor", "Pods", ".gradle":
+			return true
+		}
+	}
+	return false
 }
 
 func (a *ReadOnlyAdapter) codeSearchEnsembleHits(ctx context.Context, query, taskType string, limit int, requiredEvidence []string, sourceProfiles []contextengine.SourceProfile) ([]rankedCodeSearchHit, error) {
@@ -577,21 +677,95 @@ func (a *ReadOnlyAdapter) repoIndexCodeSearch(ctx context.Context, query string,
 	if err != nil {
 		return nil, err
 	}
-	hits := make([]contextengine.CodeSearchHit, 0, len(output.Anchors))
-	for _, anchor := range output.Anchors {
+	return a.repoIndexAnchorsToCodeHits(output.Anchors), nil
+}
+
+func (a *ReadOnlyAdapter) repoIndexCoverageSearchHits(ctx context.Context, requiredEvidence []string, limit int) ([]rankedCodeSearchHit, error) {
+	requirements := cleanStringList(requiredEvidence)
+	if len(requirements) == 0 || strings.TrimSpace(a.cfg.Storage.Root) == "" || strings.TrimSpace(a.workspaceRoot) == "" {
+		return nil, nil
+	}
+	store, err := repoindex.Open(ctx, a.cfg.Storage.Root, a.workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = store.Close() }()
+	service := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
+	perRequirementLimit := 4
+	if limit > 0 {
+		perRequirementLimit = maxInt(2, minInt(6, limit/2))
+	}
+	var out []rankedCodeSearchHit
+	var errs []string
+	for idx, requirement := range requirements {
+		query := strings.Join(codeSearchCoverageTerms(requirement), " ")
+		if strings.TrimSpace(query) == "" {
+			query = requirement
+		}
+		output, err := service.SearchWithProjection(ctx, repoquery.SearchRequest{
+			Query: strings.TrimSpace(query),
+			Limit: perRequirementLimit,
+		})
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		hits := a.repoIndexAnchorsToCodeHits(output.Anchors)
+		for _, hit := range hits {
+			if hit.Metadata == nil {
+				hit.Metadata = map[string]any{}
+			}
+			if strings.TrimSpace(hit.Symbol) != "" {
+				hit.Metadata["candidate_role"] = "symbol_definition"
+			}
+			hit.Metadata["source"] = "repo_index_coverage"
+			hit.Metadata["source_profile"] = "repo_code"
+			hit.Metadata["evidence_class"] = "symbol_definition"
+			hit.Metadata["coverage_requirement_ids"] = codeSearchCoverageRequirementIDs(hit.Path, hit.Symbol, hit.Snippet, []string{requirement})
+			hit.Metadata["matched_terms"] = codeSearchCoverageTerms(requirement)
+			hit.Metadata["path_family"] = filepath.ToSlash(filepath.Dir(hit.Path))
+			hit.Sources = appendUniqueStringsEnv(hit.Sources, "repo_index_coverage")
+			out = append(out, rankedCodeSearchHit{
+				Priority: 92 - minInt(idx, 16),
+				Hit:      hit,
+			})
+		}
+	}
+	if len(out) == 0 && len(errs) > 0 {
+		return nil, fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return out, nil
+}
+
+func (a *ReadOnlyAdapter) repoIndexAnchorsToCodeHits(anchors []repoquery.Anchor) []contextengine.CodeSearchHit {
+	hits := make([]contextengine.CodeSearchHit, 0, len(anchors))
+	for _, anchor := range anchors {
 		path := strings.TrimSpace(anchor.Path)
 		if path == "" {
 			continue
 		}
+		statement := a.repoAnchorStatement(anchor)
 		hits = append(hits, contextengine.CodeSearchHit{
 			Path:     path,
-			Snippet:  a.repoAnchorStatement(anchor),
+			Snippet:  statement,
 			Line:     anchor.LineHint,
+			Symbol:   strings.TrimSpace(anchor.SymbolName),
 			Score:    repoAnchorScore(anchor.Score),
 			Language: languageFromPath(path),
+			Metadata: map[string]any{
+				"candidate_role":  "repo_index_anchor",
+				"source":          "repo_index",
+				"source_profile":  "repo_code",
+				"evidence_class":  "index",
+				"coverage_terms":  codeSearchCoverageTerms(path, anchor.SymbolName, statement),
+				"path_family":     filepath.ToSlash(filepath.Dir(path)),
+				"is_test":         isTestLikeCodeSearchPath(path),
+				"repo_index_node": strings.TrimSpace(anchor.SymbolID),
+			},
+			Sources: []string{"repo_index"},
 		})
 	}
-	return hits, nil
+	return hits
 }
 
 func (a *ReadOnlyAdapter) semanticCodeSearchHits(ctx context.Context, query string, limit int) ([]rankedCodeSearchHit, error) {
@@ -2470,6 +2644,10 @@ func codeProbeSnippet(reason string, excerpt string) string {
 }
 
 func mergeCodeSearchHits(limit int, repoHits []contextengine.CodeSearchHit, rankedGroups ...[]rankedCodeSearchHit) []contextengine.CodeSearchHit {
+	return mergeCodeSearchHitsWithOptions(limit, codeSearchRequestOptions{}, repoHits, rankedGroups...)
+}
+
+func mergeCodeSearchHitsWithOptions(limit int, options codeSearchRequestOptions, repoHits []contextengine.CodeSearchHit, rankedGroups ...[]rankedCodeSearchHit) []contextengine.CodeSearchHit {
 	if limit <= 0 {
 		limit = 8
 	}
@@ -2555,6 +2733,9 @@ func mergeCodeSearchHits(limit int, repoHits []contextengine.CodeSearchHit, rank
 	})
 	hits := make([]contextengine.CodeSearchHit, 0, minInt(limit, len(out)))
 	for _, item := range out {
+		if !codeSearchHitMatchesOptions(item.hit, options) {
+			continue
+		}
 		hits = append(hits, item.hit)
 		if len(hits) >= limit {
 			break
@@ -3252,6 +3433,10 @@ func (a *ReadOnlyAdapter) gatherContext(ctx context.Context, args json.RawMessag
 	}
 	cfg := a.laneConfig()
 	sourceProfiles := contextengine.NormalizeSourceProfiles(input.SourceProfiles)
+	codeOptions := normalizeCodeSearchRequestOptions(codeSearchRequestOptions{
+		Languages:    input.Languages,
+		PathPrefixes: input.PathPrefixes,
+	})
 	req := contextengine.GatherContextRequest{
 		Query:            strings.TrimSpace(input.Query),
 		Goal:             strings.TrimSpace(input.Goal),
@@ -3267,7 +3452,7 @@ func (a *ReadOnlyAdapter) gatherContext(ctx context.Context, args json.RawMessag
 		},
 	}
 	bundle, err := contextengine.GatherContext(ctx, cfg, contextengine.GatherContextDeps{
-		CodeSearch:    a.codeSearchFnForTaskWithRequired(limit, input.TaskType, req.RequiredEvidence, sourceProfiles...),
+		CodeSearch:    a.codeSearchFnForTaskWithRequired(limit, input.TaskType, req.RequiredEvidence, codeOptions, sourceProfiles...),
 		MemoryQuery:   a.memoryQueryFnForStatuses(limit, parseMemoryClaimStatuses(input.MemoryStatuses)),
 		ContextQuery:  a.contextQueryFn(),
 		ContextPacks:  a.contextPacksFn(limit),

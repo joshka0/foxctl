@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1649,6 +1650,34 @@ func TestReadOnlyAdapterLiveOverlayFindsUntrackedCoverageFile(t *testing.T) {
 	}
 }
 
+func TestMergeCodeSearchHitsAppliesLanguageAndPathConstraints(t *testing.T) {
+	t.Parallel()
+
+	hits := mergeCodeSearchHitsWithOptions(8, normalizeCodeSearchRequestOptions(codeSearchRequestOptions{
+		Languages:    []string{"elixir"},
+		PathPrefixes: []string{"apps/api"},
+	}), nil,
+		[]rankedCodeSearchHit{{Priority: 90, Hit: contextengine.CodeSearchHit{Path: "apps/api/lib/payments.ex", Score: 0.9}}},
+		[]rankedCodeSearchHit{{Priority: 95, Hit: contextengine.CodeSearchHit{Path: "apps/api/deps/phoenix/lib/router.ex", Score: 0.99}}},
+		[]rankedCodeSearchHit{{Priority: 94, Hit: contextengine.CodeSearchHit{Path: "apps/web/src/router.ts", Score: 0.99}}},
+	)
+	got := extractCodeSearchHitPaths(hits)
+	if !reflect.DeepEqual(got, []string{"apps/api/lib/payments.ex"}) {
+		t.Fatalf("paths=%v", got)
+	}
+}
+
+func TestCodeSearchCandidatePoolLimitExpandsForRequiredEvidence(t *testing.T) {
+	t.Parallel()
+
+	if got := codeSearchCandidatePoolLimit(8, "execution_trace", 0, 0); got != 8 {
+		t.Fatalf("without requirements got %d", got)
+	}
+	if got := codeSearchCandidatePoolLimit(8, "execution_trace", 4, 0); got <= 8 {
+		t.Fatalf("with requirements got %d", got)
+	}
+}
+
 func TestReadOnlyAdapterRepoDocsSourceProfileFindsDocs(t *testing.T) {
 	t.Parallel()
 
@@ -1762,6 +1791,14 @@ func codeSearchHitPaths(hits []rankedCodeSearchHit) []string {
 	out := make([]string, 0, len(hits))
 	for _, hit := range hits {
 		out = append(out, hit.Hit.Path)
+	}
+	return out
+}
+
+func extractCodeSearchHitPaths(hits []contextengine.CodeSearchHit) []string {
+	out := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		out = append(out, hit.Path)
 	}
 	return out
 }

@@ -458,6 +458,12 @@ func buildRLMSearchAgentGatherPayload(evalCase promptEvalCase, limit int, maxCon
 	if profiles := gatherContextEvalCaseStringSlice(evalCase, "source_profiles", nil); len(profiles) > 0 {
 		payload["source_profiles"] = profiles
 	}
+	if languages := gatherContextEvalCaseStringSlice(evalCase, "languages", nil); len(languages) > 0 {
+		payload["languages"] = languages
+	}
+	if prefixes := gatherContextEvalCaseStringSlice(evalCase, "path_prefixes", nil); len(prefixes) > 0 {
+		payload["path_prefixes"] = prefixes
+	}
 	return payload
 }
 
@@ -631,6 +637,12 @@ func runSingleGatherContextEval(
 	}
 	if profiles := gatherContextEvalCaseStringSlice(evalCase, "source_profiles", nil); len(profiles) > 0 {
 		payload["source_profiles"] = profiles
+	}
+	if languages := gatherContextEvalCaseStringSlice(evalCase, "languages", nil); len(languages) > 0 {
+		payload["languages"] = languages
+	}
+	if prefixes := gatherContextEvalCaseStringSlice(evalCase, "path_prefixes", nil); len(prefixes) > 0 {
+		payload["path_prefixes"] = prefixes
 	}
 	if len(effectiveMemoryStatuses) > 0 {
 		payload["memory_statuses"] = effectiveMemoryStatuses
