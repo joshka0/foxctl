@@ -70,6 +70,29 @@ If a checked-in policy file already sets those values, passing the flag again ov
 
 For ACA retrieval evals, see [retrieval-evals.md](retrieval-evals.md).
 
+## `gather_context` Polyglot Fixture
+
+Use the polyglot fixture before tuning repo-provider behavior against foxctl.
+It is a tiny held-out workspace covering Go, TypeScript, Python, Elixir, and
+repo documentation map tasks.
+
+```bash
+./bin/foxctl eval gather-context \
+  --workspace testdata/fixtures/gather-context/polyglot-repo \
+  --eval-dataset-file testdata/evals/gather-context/polyglot-fixture.jsonl \
+  --lane code \
+  --tool-profile gather-context \
+  --limit 10 \
+  --max-context-chars 7000 \
+  --report-file /tmp/foxctl-polyglot-gather.report.json
+```
+
+Track stage-specific failures separately:
+
+- provider miss: expected path absent from raw evidence
+- reduction miss: expected path present in raw evidence but absent from selected paths
+- fact/certificate miss: path set is correct but the bundle is not certified or key facts are missing
+
 ## Native Subagent Baselines
 
 When comparing `gather_context` or Lambda RLM against a native Codex mini

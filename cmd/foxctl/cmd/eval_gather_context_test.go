@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -157,6 +159,40 @@ func TestGatherContextEvalCaseMetadataOverrides(t *testing.T) {
 	}
 	if got := gatherContextEvalCaseInt(evalCase, "max_context_chars", 6000); got != 2048 {
 		t.Fatalf("max_context_chars=%d", got)
+	}
+}
+
+func TestPolyglotGatherContextFixtureDatasetPathsExist(t *testing.T) {
+	t.Parallel()
+
+	workspace := filepath.Join("..", "..", "..", "testdata", "fixtures", "gather-context", "polyglot-repo")
+	dataset := filepath.Join("..", "..", "..", "testdata", "evals", "gather-context", "polyglot-fixture.jsonl")
+	cases, err := loadPromptEvalCases(dataset)
+	if err != nil {
+		t.Fatalf("load polyglot dataset: %v", err)
+	}
+	if len(cases) != 5 {
+		t.Fatalf("cases=%d want 5", len(cases))
+	}
+	categories := map[string]struct{}{}
+	for _, evalCase := range cases {
+		categories[evalCase.Category] = struct{}{}
+		if strings.TrimSpace(evalCase.TaskType) == "" {
+			t.Fatalf("case %s missing task_type", evalCase.ID)
+		}
+		if len(evalCase.ExpectedPaths) == 0 {
+			t.Fatalf("case %s missing expected_paths", evalCase.ID)
+		}
+		for _, path := range evalCase.ExpectedPaths {
+			if _, err := os.Stat(filepath.Join(workspace, filepath.FromSlash(path))); err != nil {
+				t.Fatalf("case %s expected path %s: %v", evalCase.ID, path, err)
+			}
+		}
+	}
+	for _, category := range []string{"polyglot-go", "polyglot-typescript", "polyglot-python", "polyglot-elixir", "polyglot-docs"} {
+		if _, ok := categories[category]; !ok {
+			t.Fatalf("missing category %s in %v", category, categories)
+		}
 	}
 }
 
