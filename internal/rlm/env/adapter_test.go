@@ -1649,6 +1649,76 @@ func TestReadOnlyAdapterLiveOverlayFindsUntrackedCoverageFile(t *testing.T) {
 	}
 }
 
+func TestReadOnlyAdapterRepoDocsSourceProfileFindsDocs(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	writeTestFile(t, filepath.Join(workspace, "docs", "README.md"), "# Docs\n\nArchitecture docs are indexed from this map.\n")
+	writeTestFile(t, filepath.Join(workspace, "docs", "architecture", "README.md"), "# Architecture\n\nThe gather context architecture lives here.\n")
+	writeTestFile(t, filepath.Join(workspace, "docs", "architecture", "rlm-gather-context.md"), "# RLM gather_context\n\nContextBundle certification and answer surfaces.\n")
+	writeTestFile(t, filepath.Join(workspace, "internal", "rlm", "env", "tool_exec.go"), "package env\n\nfunc gatherContext() {}\n")
+
+	adapter := NewReadOnlyAdapter(config.Config{}, workspace, "", nil, rlm.Environment{})
+	hits, err := adapter.repoDocsSearchHits(
+		"Which repo documentation files explain gather_context architecture?",
+		[]string{"rlm-gather-context", "architecture", "docs"},
+		[]contextengine.SourceProfile{contextengine.SourceProfileRepoDocs},
+		8,
+	)
+	if err != nil {
+		t.Fatalf("repoDocsSearchHits: %v", err)
+	}
+	got := codeSearchHitPaths(hits)
+	for _, want := range []string{
+		"docs/architecture/rlm-gather-context.md",
+		"docs/architecture/README.md",
+		"docs/README.md",
+	} {
+		if !containsString(got, want) {
+			t.Fatalf("paths=%v missing %s", got, want)
+		}
+	}
+	for _, hit := range hits {
+		if hit.Hit.Path == "internal/rlm/env/tool_exec.go" {
+			t.Fatalf("repo docs provider returned code hit: %+v", hit)
+		}
+	}
+}
+
+func TestReadOnlyAdapterCoverageFanoutFindsPathTermFile(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	writeTestFile(t, filepath.Join(workspace, "internal", "storage", "memory", "factory.go"), "package memory\n\nfunc NewStoreFactory() {}\n")
+	writeTestFile(t, filepath.Join(workspace, "internal", "storage", "memory", "vector.go"), "package memory\n\ntype VectorDimensionConfig struct{}\n")
+	writeTestFile(t, filepath.Join(workspace, "docs", "memory.md"), "# vector\n\nDocumentation should not satisfy repo_code coverage fanout.\n")
+
+	adapter := NewReadOnlyAdapter(config.Config{}, workspace, "", nil, rlm.Environment{})
+	hits, err := adapter.localCoverageCodeSearchHits(
+		"Which files configure memory vector storage dimensions?",
+		[]string{"vector"},
+		8,
+	)
+	if err != nil {
+		t.Fatalf("localCoverageCodeSearchHits: %v", err)
+	}
+	got := codeSearchHitPaths(hits)
+	if !containsString(got, "internal/storage/memory/vector.go") {
+		t.Fatalf("paths=%v missing vector.go", got)
+	}
+	if containsString(got, "docs/memory.md") {
+		t.Fatalf("coverage code fanout included docs path: %v", got)
+	}
+}
+
+func codeSearchHitPaths(hits []rankedCodeSearchHit) []string {
+	out := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		out = append(out, hit.Hit.Path)
+	}
+	return out
+}
+
 func runGitForTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

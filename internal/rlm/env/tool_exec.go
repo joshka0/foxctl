@@ -113,16 +113,17 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 		}
 		ensembleHits, ensembleErr := a.codeSearchEnsembleHits(ctx, query, taskType, limit, requiredEvidence, sourceProfiles)
 		liveHits, liveErr := a.liveOverlayCodeSearchHits(ctx, query, requiredEvidence, limit)
+		repoDocHits, repoDocErr := a.repoDocsSearchHits(query, requiredEvidence, sourceProfiles, limit)
 		repoHits, repoErr := a.repoIndexCodeSearch(ctx, query, limit)
 		localHits, localErr := a.localCodeProbeSearch(query, taskType, limit)
 		lexicalHits, lexicalErr := a.localLexicalCodeSearch(query, limit)
 		buildTargetHits := a.localBuildTargetCodeSearchHits(query)
-		wideHits := mergeCodeSearchHits(maxInt(limit*6, limit), repoHits, liveHits, ensembleHits, localHits, buildTargetHits, lexicalHits)
+		wideHits := mergeCodeSearchHits(maxInt(limit*6, limit), repoHits, liveHits, repoDocHits, ensembleHits, localHits, buildTargetHits, lexicalHits)
 		relatedHits := a.localRelatedCodeSearchHits(query, wideHits, limit)
-		baseHits := mergeCodeSearchHits(limit, repoHits, liveHits, ensembleHits, localHits, buildTargetHits, relatedHits, lexicalHits)
+		baseHits := mergeCodeSearchHits(limit, repoHits, liveHits, repoDocHits, ensembleHits, localHits, buildTargetHits, relatedHits, lexicalHits)
 		closureHits := a.localSubsystemSiblingClosureHits(query, taskType, requiredEvidence, baseHits, limit)
 		candidateLimit := codeSearchCandidatePoolLimit(limit, taskType, len(closureHits))
-		if hits := mergeCodeSearchHits(candidateLimit, repoHits, liveHits, ensembleHits, localHits, buildTargetHits, relatedHits, closureHits, lexicalHits); len(hits) > 0 {
+		if hits := mergeCodeSearchHits(candidateLimit, repoHits, liveHits, repoDocHits, ensembleHits, localHits, buildTargetHits, relatedHits, closureHits, lexicalHits); len(hits) > 0 {
 			annotateCodeSearchHitCoverage(hits, requiredEvidence)
 			return hits, nil
 		}
@@ -132,6 +133,9 @@ func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType st
 		}
 		if liveErr != nil {
 			errs = append(errs, "live overlay: "+liveErr.Error())
+		}
+		if repoDocErr != nil {
+			errs = append(errs, "repo docs: "+repoDocErr.Error())
 		}
 		if repoErr != nil {
 			errs = append(errs, "repo index: "+repoErr.Error())
@@ -902,6 +906,274 @@ func (a *ReadOnlyAdapter) localLexicalCodeSearch(query string, limit int) ([]ran
 		})
 	}
 	return out, nil
+}
+
+func (a *ReadOnlyAdapter) localCoverageCodeSearchHits(query string, requiredEvidence []string, limit int) ([]rankedCodeSearchHit, error) {
+	if strings.TrimSpace(a.workspaceRoot) == "" || len(cleanStringList(requiredEvidence)) == 0 {
+		return nil, nil
+	}
+	return a.localCoverageFileSearchHits(query, requiredEvidence, nil, limit, false)
+}
+
+func (a *ReadOnlyAdapter) repoDocsSearchHits(query string, requiredEvidence []string, sourceProfiles []contextengine.SourceProfile, limit int) ([]rankedCodeSearchHit, error) {
+	if strings.TrimSpace(a.workspaceRoot) == "" || !sourceProfileListHas(sourceProfiles, contextengine.SourceProfileRepoDocs) {
+		return nil, nil
+	}
+	return a.localCoverageFileSearchHits(query, requiredEvidence, sourceProfiles, limit, true)
+}
+
+func sourceProfileListHas(profiles []contextengine.SourceProfile, want contextengine.SourceProfile) bool {
+	for _, profile := range profiles {
+		if profile == want {
+			return true
+		}
+	}
+	return false
+}
+
+type coverageFileCandidate struct {
+	path        string
+	line        int
+	score       float64
+	excerpt     string
+	matched     []string
+	coverageIDs []string
+}
+
+func (a *ReadOnlyAdapter) localCoverageFileSearchHits(query string, requiredEvidence []string, sourceProfiles []contextengine.SourceProfile, limit int, docsOnly bool) ([]rankedCodeSearchHit, error) {
+	if limit <= 0 {
+		limit = 8
+	}
+	requirements := cleanStringList(requiredEvidence)
+	terms := codeSearchCoverageTerms(append([]string{query}, requirements...)...)
+	if len(terms) == 0 {
+		return nil, nil
+	}
+	candidates := map[string]*coverageFileCandidate{}
+	err := filepath.WalkDir(a.workspaceRoot, func(current string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if shouldSkipLocalCodeSearchDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, relErr := filepath.Rel(a.workspaceRoot, current)
+		if relErr != nil {
+			return nil
+		}
+		rel = normalizeCodeSearchPath(filepath.ToSlash(rel))
+		if rel == "" || !isLikelyTextCodeFile(rel) {
+			return nil
+		}
+		isDoc := isLikelyDocumentationPath(rel)
+		if docsOnly && !isDoc {
+			return nil
+		}
+		if !docsOnly && isDoc {
+			return nil
+		}
+		info, statErr := d.Info()
+		if statErr == nil && info.Size() > 1_000_000 {
+			return nil
+		}
+		if !docsOnly {
+			pathScore := codeSearchPathTermScore(rel, terms)
+			coverageIDs := codeSearchCoverageRequirementIDs(rel, "", "", requirements)
+			if pathScore == 0 && len(coverageIDs) == 0 {
+				return nil
+			}
+			matched := matchingTermsInText(rel, terms)
+			candidates[rel] = &coverageFileCandidate{
+				path:        rel,
+				line:        1,
+				score:       clampScore(0.60 + minFloat(0.25, pathScore*0.22) + minFloat(0.18, float64(len(coverageIDs))*0.06)),
+				excerpt:     a.repoFileExcerpt(rel, 1, 0, 5),
+				matched:     matched,
+				coverageIDs: append([]string(nil), coverageIDs...),
+			}
+			return nil
+		}
+		body, readErr := os.ReadFile(current)
+		if readErr != nil {
+			return nil
+		}
+		text := string(body)
+		line, matched := firstMatchingLine(text, terms)
+		pathScore := codeSearchPathTermScore(rel, terms)
+		coverageIDs := codeSearchCoverageRequirementIDs(rel, "", text, requirements)
+		if pathScore == 0 && len(matched) == 0 && len(coverageIDs) == 0 {
+			return nil
+		}
+		if line == 0 {
+			line = 1
+		}
+		score := 0.58 + minFloat(0.20, pathScore*0.18) + minFloat(0.12, float64(len(matched))*0.03)
+		if len(coverageIDs) > 0 {
+			score += minFloat(0.18, float64(len(coverageIDs))*0.06)
+		}
+		if docsOnly {
+			score += 0.12
+			switch {
+			case isRepoDocsRootMapPath(rel):
+				score += 0.55
+			case isRepoDocsMapPath(rel):
+				score += 0.18
+			}
+		}
+		candidates[rel] = &coverageFileCandidate{
+			path:        rel,
+			line:        line,
+			score:       clampScore(score),
+			excerpt:     a.repoFileExcerpt(rel, line, 2, 5),
+			matched:     append([]string(nil), matched...),
+			coverageIDs: append([]string(nil), coverageIDs...),
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*coverageFileCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		items = append(items, candidate)
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if len(items[i].coverageIDs) != len(items[j].coverageIDs) {
+			return len(items[i].coverageIDs) > len(items[j].coverageIDs)
+		}
+		if items[i].score != items[j].score {
+			return items[i].score > items[j].score
+		}
+		return items[i].path < items[j].path
+	})
+	maxHits := maxInt(limit*2, limit)
+	if docsOnly {
+		maxHits = maxInt(limit, 8)
+	} else {
+		items = selectCoverageFanoutItems(items, maxInt(1, minInt(len(requirements), maxInt(2, limit/2))))
+	}
+	if len(items) > maxHits {
+		items = items[:maxHits]
+	}
+	out := make([]rankedCodeSearchHit, 0, len(items))
+	for _, candidate := range items {
+		role := "primary_anchor"
+		if isTestLikeCodeSearchPath(candidate.path) {
+			role = "test_support"
+		}
+		source := "coverage_path_fanout"
+		profile := contextengine.SourceProfileRepoCode
+		priority := 26
+		if docsOnly {
+			role = "documentation_anchor"
+			if isRepoDocsRootMapPath(candidate.path) || isRepoDocsMapPath(candidate.path) {
+				role = "documentation_map"
+			}
+			source = "repo_docs_fanout"
+			profile = contextengine.SourceProfileRepoDocs
+			priority = 86
+		}
+		reason := source
+		if len(candidate.matched) > 0 {
+			reason += ": " + strings.Join(candidate.matched, ", ")
+		}
+		out = append(out, rankedCodeSearchHit{
+			Priority: priority,
+			Hit: contextengine.CodeSearchHit{
+				Path:     candidate.path,
+				Snippet:  codeProbeSnippet(reason, candidate.excerpt),
+				Line:     candidate.line,
+				Score:    candidate.score,
+				Language: languageFromPath(candidate.path),
+				Metadata: map[string]any{
+					"candidate_role":           role,
+					"source":                   source,
+					"source_profile":           string(profile),
+					"source_profiles":          contextengineSourceProfilesToStrings(sourceProfiles),
+					"evidence_class":           "coverage",
+					"coverage_terms":           codeSearchCoverageTerms(candidate.path, strings.Join(candidate.matched, " "), candidate.excerpt),
+					"coverage_requirement_ids": candidate.coverageIDs,
+					"matched_terms":            candidate.matched,
+					"path_family":              filepath.ToSlash(filepath.Dir(candidate.path)),
+					"is_test":                  isTestLikeCodeSearchPath(candidate.path),
+				},
+				Sources: []string{source},
+			},
+		})
+	}
+	return out, nil
+}
+
+func selectCoverageFanoutItems(items []*coverageFileCandidate, maxHits int) []*coverageFileCandidate {
+	if maxHits <= 0 || len(items) <= maxHits {
+		return items
+	}
+	selected := make([]*coverageFileCandidate, 0, maxHits)
+	seenPath := map[string]struct{}{}
+	seenCoverage := map[string]struct{}{}
+	add := func(item *coverageFileCandidate) bool {
+		if _, ok := seenPath[item.path]; ok {
+			return false
+		}
+		seenPath[item.path] = struct{}{}
+		selected = append(selected, item)
+		return len(selected) >= maxHits
+	}
+	for _, item := range items {
+		addedForCoverage := false
+		for _, id := range item.coverageIDs {
+			if _, ok := seenCoverage[id]; ok {
+				continue
+			}
+			seenCoverage[id] = struct{}{}
+			addedForCoverage = true
+		}
+		if addedForCoverage && add(item) {
+			return selected
+		}
+	}
+	for _, item := range items {
+		if add(item) {
+			return selected
+		}
+	}
+	return selected
+}
+
+func isRepoDocsMapPath(pathValue string) bool {
+	pathValue = strings.ToLower(filepath.ToSlash(strings.TrimSpace(pathValue)))
+	if pathValue == "" {
+		return false
+	}
+	base := filepath.Base(pathValue)
+	if base != "readme.md" {
+		return false
+	}
+	dir := strings.Trim(filepath.Dir(pathValue), "/.")
+	return dir == "docs" || strings.HasPrefix(dir, "docs/")
+}
+
+func isRepoDocsRootMapPath(pathValue string) bool {
+	pathValue = strings.ToLower(filepath.ToSlash(strings.TrimSpace(pathValue)))
+	return pathValue == "docs/readme.md"
+}
+
+func matchingTermsInText(value string, terms []string) []string {
+	value = strings.ToLower(value)
+	out := make([]string, 0, len(terms))
+	for _, term := range terms {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" {
+			continue
+		}
+		if strings.Contains(value, term) {
+			out = appendUniqueStringEnv(out, term)
+		}
+	}
+	return out
 }
 
 func (a *ReadOnlyAdapter) liveOverlayCodeSearchHits(ctx context.Context, query string, requiredEvidence []string, limit int) ([]rankedCodeSearchHit, error) {

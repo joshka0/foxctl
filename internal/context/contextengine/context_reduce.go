@@ -529,6 +529,10 @@ func candidateRoleScore(role string) float64 {
 		return 0.28
 	case "tool_declaration":
 		return 0.25
+	case "documentation_map":
+		return 0.24
+	case "documentation_anchor":
+		return 0.22
 	case "primary_anchor":
 		return 0.20
 	case "direct_dispatch_file":
