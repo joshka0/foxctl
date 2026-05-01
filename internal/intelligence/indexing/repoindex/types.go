@@ -133,6 +133,7 @@ type Edge struct {
 type IndexMeta struct {
 	RepoRoot      string    `json:"repo_root"`
 	HeadSHA       string    `json:"head_sha,omitempty"`
+	WorktreeDirty bool      `json:"worktree_dirty"`
 	SchemaVersion int       `json:"schema_version"`
 	IndexedAt     time.Time `json:"indexed_at"`
 	Languages     []string  `json:"languages,omitempty"`

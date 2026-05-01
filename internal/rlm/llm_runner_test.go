@@ -430,6 +430,15 @@ func TestLLMSystemPromptUsesCompositeToolsOnlyWhenLegacyAbsent(t *testing.T) {
 		"retrieve_mixed",
 		"load_evidence_ref",
 	})
+	for _, want := range []string{
+		"Deterministic gather trust policy",
+		"Do not spend extra tool/model turns re-ranking those paths",
+		"Fall back to verification or broader retrieval for package-owner/package-anchor questions",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
 }
 
 func TestStagedPromptsUseLoadEvidenceRefWhenLegacyAbsent(t *testing.T) {

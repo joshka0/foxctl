@@ -185,6 +185,207 @@ func TestReduceEvidenceToBundlePathFirstSelectionKeepsRequiredCoverage(t *testin
 	}
 }
 
+func TestReduceEvidenceToBundleCoverageSlotsPreserveLowerConfidenceRole(t *testing.T) {
+	t.Parallel()
+
+	pack := EvidencePack{
+		ID:          "pack-coverage",
+		WorkspaceID: "ws-1",
+		Query:       "map subsystem",
+		Lane:        LaneCode,
+		Nodes: []EvidenceNode{
+			coverageNode("node-tool", "internal/rlm/env/tools.go", "RLM tool declaration exposes gather_context.", 0.96),
+			coverageNode("node-dispatch", "internal/rlm/env/tool_exec.go", "adapter dispatch executes gather_context.", 0.95),
+			coverageNode("node-gather", "internal/context/contextengine/context_gather.go", "contextengine GatherContext retrieves packs.", 0.94),
+			coverageNode("node-reduce", "internal/context/contextengine/context_reduce.go", "contextengine reduction builds bundle.", 0.93),
+			coverageNode("node-certify", "internal/context/contextengine/context_certify.go", "contextengine certification validates bundle.", 0.62),
+			coverageNode("node-lambda", "internal/rlm/lambda_runner.go", "lambda answer_surface uses gather_context.", 0.92),
+			coverageNode("node-eval", "cmd/foxctl/cmd/eval_gather_context.go", "eval coverage checks gather_context.", 0.91),
+			coverageNode("node-noisy", "internal/rlm/env/adapter_test.go", "tests mention adapter dispatch and gather_context.", 0.99),
+		},
+	}
+
+	bundle, err := ReduceEvidenceToBundle(pack, BundleReductionOptions{
+		MaxFacts:         7,
+		MaxPaths:         7,
+		TaskType:         "subsystem_map",
+		RequiredEvidence: []string{"RLM tool declaration", "adapter dispatch", "contextengine GatherContext", "contextengine reduction", "contextengine certification", "lambda answer_surface", "eval coverage"},
+		IDGen:            defaultContextIDGen("coverage"),
+		Clock:            fixedClock,
+	})
+	if err != nil {
+		t.Fatalf("ReduceEvidenceToBundle: %v", err)
+	}
+	if got := selectedPathStrings(bundle.SelectedPaths); !containsString(got, "internal/context/contextengine/context_certify.go") {
+		t.Fatalf("selected paths=%v want certifier despite lower confidence", got)
+	}
+	if got := selectedPathStrings(bundle.SelectedPaths); containsString(got, "internal/rlm/env/adapter_test.go") {
+		t.Fatalf("selected paths=%v should not keep noisy redundant test path", got)
+	}
+	if bundle.CoverageReport == nil || len(bundle.CoverageReport.Missing) != 0 {
+		t.Fatalf("coverage report=%#v", bundle.CoverageReport)
+	}
+}
+
+func TestCertifyContextBundleFailsMissingRequiredCoverage(t *testing.T) {
+	t.Parallel()
+
+	pack := EvidencePack{
+		ID:          "pack-coverage-cert",
+		WorkspaceID: "ws-1",
+		Query:       "map subsystem",
+		Lane:        LaneCode,
+		Nodes: []EvidenceNode{
+			coverageNode("node-gather", "internal/context/contextengine/context_gather.go", "contextengine GatherContext retrieves packs.", 0.94),
+		},
+	}
+	bundle, err := ReduceEvidenceToBundle(pack, BundleReductionOptions{
+		TaskType: "subsystem_map",
+		CoverageRequirements: []CoverageRequirement{
+			{ID: "gather", Label: "contextengine GatherContext", Required: true},
+			{ID: "certifier", Label: "contextengine certification", Required: true},
+		},
+		IDGen: defaultContextIDGen("coverage-cert"),
+		Clock: fixedClock,
+	})
+	if err != nil {
+		t.Fatalf("ReduceEvidenceToBundle: %v", err)
+	}
+	if bundle.CoverageReport == nil || !containsString(bundle.CoverageReport.Missing, "certifier") {
+		t.Fatalf("coverage report=%#v", bundle.CoverageReport)
+	}
+	cert, err := CertifyContextBundle(bundle, nil, CertificationOptions{
+		IDGen: defaultContextIDGen("cert"),
+		Clock: fixedClock,
+	})
+	if err != nil {
+		t.Fatalf("CertifyContextBundle: %v", err)
+	}
+	if cert.Status != ContextCertificateStatusFailed {
+		t.Fatalf("cert status=%q want failed; cert=%#v", cert.Status, cert)
+	}
+	if cert.RequiredEvidenceOK {
+		t.Fatalf("RequiredEvidenceOK=true want false")
+	}
+	if !containsString(cert.MissingEvidence, "coverage:certifier") {
+		t.Fatalf("missing evidence=%v want coverage:certifier", cert.MissingEvidence)
+	}
+}
+
+func TestReduceEvidenceToBundleCoverageAwareFallsBackToScoreWithoutRequirements(t *testing.T) {
+	t.Parallel()
+
+	pack := EvidencePack{
+		ID:          "pack-score",
+		WorkspaceID: "ws-1",
+		Query:       "simple file locate",
+		Lane:        LaneCode,
+		Nodes: []EvidenceNode{
+			coverageNode("node-low", "internal/low.go", "low score implementation", 0.4),
+			coverageNode("node-high", "internal/high.go", "high score implementation", 0.95),
+		},
+	}
+	bundle, err := ReduceEvidenceToBundle(pack, BundleReductionOptions{
+		MaxFacts: 1,
+		MaxPaths: 1,
+		IDGen:    defaultContextIDGen("score"),
+		Clock:    fixedClock,
+	})
+	if err != nil {
+		t.Fatalf("ReduceEvidenceToBundle: %v", err)
+	}
+	if got := bundle.SelectedPaths[0].Path; got != "internal/high.go" {
+		t.Fatalf("selected=%q want high score fallback", got)
+	}
+}
+
+func TestReduceEvidenceToBundleCoverageAwareDemotesTestsForNonTestTask(t *testing.T) {
+	t.Parallel()
+
+	pack := EvidencePack{
+		ID:          "pack-test-demote",
+		WorkspaceID: "ws-1",
+		Query:       "certification implementation",
+		Lane:        LaneCode,
+		Nodes: []EvidenceNode{
+			coverageNode("node-test", "internal/context/contextengine/context_certify_test.go", "contextengine certification tests", 0.99),
+			coverageNode("node-prod", "internal/context/contextengine/context_certify.go", "contextengine certification implementation", 0.75),
+		},
+	}
+	bundle, err := ReduceEvidenceToBundle(pack, BundleReductionOptions{
+		MaxFacts:         1,
+		MaxPaths:         1,
+		TaskType:         "subsystem_map",
+		RequiredEvidence: []string{"contextengine certification"},
+		IDGen:            defaultContextIDGen("demote"),
+		Clock:            fixedClock,
+	})
+	if err != nil {
+		t.Fatalf("ReduceEvidenceToBundle: %v", err)
+	}
+	if got := bundle.SelectedPaths[0].Path; got != "internal/context/contextengine/context_certify.go" {
+		t.Fatalf("selected=%q want production file", got)
+	}
+}
+
+func TestReduceEvidenceToBundleBuildsSubsystemCategories(t *testing.T) {
+	t.Parallel()
+
+	pack := EvidencePack{
+		ID:          "pack-1",
+		WorkspaceID: "ws-1",
+		Query:       "map gather context subsystem",
+		Lane:        LaneCode,
+		Nodes: []EvidenceNode{
+			{
+				ID:          "node-rlm",
+				WorkspaceID: "ws-1",
+				NodeType:    EvidenceNodeTypeCode,
+				Ref:         EvidenceRef{Type: RefTypePath, Ref: "internal/rlm/env/tool_exec.go"},
+				Statement:   "RLM adapter calls gather_context.",
+				Confidence:  0.9,
+				Grounding:   GroundingLoaded,
+				Metadata:    map[string]any{"candidate_role": "direct_dispatch_file", "source_profile": "repo_code", "sources": []string{"cochange_history"}},
+			},
+			{
+				ID:          "node-ce",
+				WorkspaceID: "ws-1",
+				NodeType:    EvidenceNodeTypeCode,
+				Ref:         EvidenceRef{Type: RefTypePath, Ref: "internal/context/contextengine/context_gather.go"},
+				Statement:   "Context engine gathers, reduces, and certifies bundles.",
+				Confidence:  0.85,
+				Grounding:   GroundingIndexed,
+				Metadata:    map[string]any{"candidate_role": "primary_anchor", "source_profile": "repo_code", "sources": []string{"codemaps"}},
+			},
+		},
+	}
+
+	bundle, err := ReduceEvidenceToBundle(pack, BundleReductionOptions{
+		TaskType:       "subsystem_map",
+		SourceProfiles: []SourceProfile{SourceProfileRepoCode, SourceProfileCodemaps, SourceProfileCochangeHistory},
+		IDGen:          defaultContextIDGen("subsystem"),
+		Clock:          fixedClock,
+	})
+	if err != nil {
+		t.Fatalf("ReduceEvidenceToBundle: %v", err)
+	}
+	if len(bundle.Categories) != 2 {
+		t.Fatalf("categories=%#v want two package groups", bundle.Categories)
+	}
+	if bundle.Categories[0].Name != "internal/rlm/env" {
+		t.Fatalf("first category=%#v", bundle.Categories[0])
+	}
+	if len(bundle.IntegrationEdges) != 1 {
+		t.Fatalf("integration edges=%#v want one", bundle.IntegrationEdges)
+	}
+	if !containsString(bundle.Categories[0].Signals, "cochange_history") {
+		t.Fatalf("signals=%v want cochange_history", bundle.Categories[0].Signals)
+	}
+	if err := bundle.Validate(); err != nil {
+		t.Fatalf("bundle Validate: %v", err)
+	}
+}
+
 func TestCertifyContextBundleMarksStaleEvidencePartial(t *testing.T) {
 	t.Parallel()
 
@@ -466,4 +667,38 @@ func TestGatherContextIncludesSessionRecallEvidence(t *testing.T) {
 
 func fixedClock() time.Time {
 	return time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageNode(id, path, statement string, confidence float64) EvidenceNode {
+	return EvidenceNode{
+		ID:          id,
+		WorkspaceID: "ws-1",
+		NodeType:    EvidenceNodeTypeCode,
+		Ref:         EvidenceRef{Type: RefTypePath, Ref: path},
+		Statement:   statement,
+		Confidence:  confidence,
+		Grounding:   GroundingIndexed,
+		Metadata: map[string]any{
+			"path":           path,
+			"source_profile": "repo_code",
+			"coverage_terms": normalizeCoverageTerms([]string{path, statement}),
+		},
+	}
+}
+
+func selectedPathStrings(paths []ContextSelectedPath) []string {
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		out = append(out, path.Path)
+	}
+	return out
 }

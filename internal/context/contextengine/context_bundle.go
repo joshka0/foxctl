@@ -143,6 +143,7 @@ type ContextSelectedPath struct {
 	Path        string         `json:"path"`
 	EvidenceIDs []string       `json:"evidence_ids"`
 	Refs        []EvidenceRef  `json:"refs,omitempty"`
+	CoverageIDs []string       `json:"coverage_ids,omitempty"`
 	Confidence  float64        `json:"confidence,omitempty"`
 	Rank        int            `json:"rank,omitempty"`
 	Reason      string         `json:"reason,omitempty"`
@@ -200,6 +201,52 @@ func (c ContextAnswerCandidate) Validate() error {
 	return nil
 }
 
+// ContextCategory groups selected paths into a package or evidence-signal bucket
+// for architecture/subsystem map answers.
+type ContextCategory struct {
+	Name        string         `json:"name"`
+	Role        string         `json:"role,omitempty"`
+	Paths       []string       `json:"paths"`
+	EvidenceIDs []string       `json:"evidence_ids,omitempty"`
+	Signals     []string       `json:"signals,omitempty"`
+	Rank        int            `json:"rank,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// Validate checks the category contract.
+func (c ContextCategory) Validate() error {
+	if c.Name == "" {
+		return fmt.Errorf("context category: missing name")
+	}
+	if len(c.Paths) == 0 {
+		return fmt.Errorf("context category: missing paths")
+	}
+	return nil
+}
+
+// ContextIntegrationEdge describes an observed link between selected path
+// groups. It is evidence-shaped for answer surfaces and intentionally shallow;
+// deeper graph expansion remains a retrieval concern.
+type ContextIntegrationEdge struct {
+	From        string         `json:"from"`
+	To          string         `json:"to"`
+	Paths       []string       `json:"paths,omitempty"`
+	EvidenceIDs []string       `json:"evidence_ids,omitempty"`
+	Signals     []string       `json:"signals,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// Validate checks the integration edge contract.
+func (e ContextIntegrationEdge) Validate() error {
+	if e.From == "" {
+		return fmt.Errorf("context integration edge: missing from")
+	}
+	if e.To == "" {
+		return fmt.Errorf("context integration edge: missing to")
+	}
+	return nil
+}
+
 // ContextCertificate is produced by runtime validation, not by the model.
 type ContextCertificate struct {
 	ID                 string                   `json:"id"`
@@ -248,7 +295,10 @@ type ContextBundle struct {
 	Status           ContextBundleStatus      `json:"status"`
 	Answerable       bool                     `json:"answerable"`
 	Summary          string                   `json:"summary,omitempty"`
+	Categories       []ContextCategory        `json:"categories,omitempty"`
+	IntegrationEdges []ContextIntegrationEdge `json:"integration_edges,omitempty"`
 	SelectedPaths    []ContextSelectedPath    `json:"selected_paths,omitempty"`
+	CoverageReport   *CoverageReport          `json:"coverage_report,omitempty"`
 	AnswerCandidates []ContextAnswerCandidate `json:"answer_candidates,omitempty"`
 	Facts            []ContextFact            `json:"facts,omitempty"`
 	Evidence         []EvidenceNode           `json:"evidence,omitempty"`
@@ -307,6 +357,31 @@ func (b ContextBundle) Validate() error {
 			}
 		}
 	}
+	if b.CoverageReport != nil {
+		requirementIDs := map[string]struct{}{}
+		for i, req := range b.CoverageReport.Requirements {
+			if err := req.Validate(); err != nil {
+				return fmt.Errorf("context bundle: coverage_requirement[%d]: %w", i, err)
+			}
+			requirementIDs[req.ID] = struct{}{}
+		}
+		for i, covered := range b.CoverageReport.Covered {
+			if covered.RequirementID == "" {
+				return fmt.Errorf("context bundle: coverage[%d]: missing requirement_id", i)
+			}
+			if _, ok := requirementIDs[covered.RequirementID]; !ok {
+				return fmt.Errorf("context bundle: coverage[%d] references missing requirement %q", i, covered.RequirementID)
+			}
+			if covered.Path == "" {
+				return fmt.Errorf("context bundle: coverage[%d]: missing path", i)
+			}
+			for _, id := range covered.EvidenceIDs {
+				if _, ok := evidenceIDs[id]; !ok {
+					return fmt.Errorf("context bundle: coverage[%d] references missing evidence id %q", i, id)
+				}
+			}
+		}
+	}
 	for i, candidate := range b.AnswerCandidates {
 		if err := candidate.Validate(); err != nil {
 			return fmt.Errorf("context bundle: answer_candidate[%d]: %w", i, err)
@@ -314,6 +389,26 @@ func (b ContextBundle) Validate() error {
 		for _, id := range candidate.EvidenceIDs {
 			if _, ok := evidenceIDs[id]; !ok {
 				return fmt.Errorf("context bundle: answer_candidate[%d] references missing evidence id %q", i, id)
+			}
+		}
+	}
+	for i, category := range b.Categories {
+		if err := category.Validate(); err != nil {
+			return fmt.Errorf("context bundle: category[%d]: %w", i, err)
+		}
+		for _, id := range category.EvidenceIDs {
+			if _, ok := evidenceIDs[id]; !ok {
+				return fmt.Errorf("context bundle: category[%d] references missing evidence id %q", i, id)
+			}
+		}
+	}
+	for i, edge := range b.IntegrationEdges {
+		if err := edge.Validate(); err != nil {
+			return fmt.Errorf("context bundle: integration_edge[%d]: %w", i, err)
+		}
+		for _, id := range edge.EvidenceIDs {
+			if _, ok := evidenceIDs[id]; !ok {
+				return fmt.Errorf("context bundle: integration_edge[%d] references missing evidence id %q", i, id)
 			}
 		}
 	}
@@ -332,5 +427,7 @@ func (b ContextBundle) Validate() error {
 var _ Validator = ContextFact{}
 var _ Validator = ContextSelectedPath{}
 var _ Validator = ContextAnswerCandidate{}
+var _ Validator = ContextCategory{}
+var _ Validator = ContextIntegrationEdge{}
 var _ Validator = ContextCertificate{}
 var _ Validator = ContextBundle{}

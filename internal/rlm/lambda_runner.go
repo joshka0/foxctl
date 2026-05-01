@@ -73,6 +73,13 @@ func (r LambdaRunner) Run(ctx context.Context, task Task, env Environment) (Resu
 	n := estimateProblemSize(task, env)
 	plan := PlanLambda(taskType, n, cfg)
 	plan, planCaps := capLambdaPlanForTask(plan, task, cfg)
+	if lambdaShouldUseSingleGatherSurface(task, taskType) {
+		plan.KStar = 1
+		plan.Depth = 0
+		plan.TauStar = maxInt(1, minInt(cfg.ContextBudget, maxInt(1, n)))
+		plan.ComposeOp = ComposeUnion
+		planCaps["lambda_single_gather_surface"] = true
+	}
 
 	// Phase 3: Execute Phi.
 	result, err := r.executePhi(ctx, task, env, plan)
@@ -374,45 +381,51 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 		candidatePaths = paths
 	}
 
-	switch plan.ComposeOp {
-	case ComposeUnion:
-		answer = composeUnion(partials)
-
-	case ComposeIntersection:
-		answer, _ = composeIntersection(partials, paths)
-
-	case ComposeChronological:
-		answer = composeChronological(partials)
-
-	case ComposeRerank:
-		// 1 LLM call to re-rank all collected evidence.
-		synthesized, sanitization, usage, err := r.judgeEvidence(ctx, cfg.LLM, task.Prompt,
-			formatPartialsAsEvidence(partials))
-		if err != nil {
+	deterministicSurfaceReduce := false
+	if deterministic, ok := lambdaDeterministicAnswerSurfaceReduce(partials, gatherAnswerSeedPaths, gatherCertificateStatuses); ok {
+		answer = deterministic
+		deterministicSurfaceReduce = true
+	} else {
+		switch plan.ComposeOp {
+		case ComposeUnion:
 			answer = composeUnion(partials)
-		} else {
-			answer = synthesized
-			answerSanitization = sanitization
-			inputTokens += usage.InputTokens
-			outputTokens += usage.OutputTokens
-			totalTokens += usage.TotalTokens
-		}
 
-	case ComposeSynthesize:
-		// 1 LLM call to synthesize partial answers.
-		synthesized, sanitization, usage, err := r.synthesizePartials(ctx, cfg.LLM, task.Prompt, partials)
-		if err != nil {
+		case ComposeIntersection:
+			answer, _ = composeIntersection(partials, paths)
+
+		case ComposeChronological:
+			answer = composeChronological(partials)
+
+		case ComposeRerank:
+			// 1 LLM call to re-rank all collected evidence.
+			synthesized, sanitization, usage, err := r.judgeEvidence(ctx, cfg.LLM, task.Prompt,
+				formatPartialsAsEvidence(partials))
+			if err != nil {
+				answer = composeUnion(partials)
+			} else {
+				answer = synthesized
+				answerSanitization = sanitization
+				inputTokens += usage.InputTokens
+				outputTokens += usage.OutputTokens
+				totalTokens += usage.TotalTokens
+			}
+
+		case ComposeSynthesize:
+			// 1 LLM call to synthesize partial answers.
+			synthesized, sanitization, usage, err := r.synthesizePartials(ctx, cfg.LLM, task.Prompt, partials)
+			if err != nil {
+				answer = composeUnion(partials)
+			} else {
+				answer = synthesized
+				answerSanitization = sanitization
+				inputTokens += usage.InputTokens
+				outputTokens += usage.OutputTokens
+				totalTokens += usage.TotalTokens
+			}
+
+		default:
 			answer = composeUnion(partials)
-		} else {
-			answer = synthesized
-			answerSanitization = sanitization
-			inputTokens += usage.InputTokens
-			outputTokens += usage.OutputTokens
-			totalTokens += usage.TotalTokens
 		}
-
-	default:
-		answer = composeUnion(partials)
 	}
 	finalPaths, answerPaths, pathSource := selectLambdaRetrievedPaths(answer, candidatePaths, task.WorkspaceRoot)
 
@@ -434,6 +447,10 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 			"parent_output_tokens":  outputTokens,
 			"parent_total_tokens":   totalTokens,
 		},
+	}
+	if deterministicSurfaceReduce {
+		result.Metadata["lambda_reduce_answer_surface"] = true
+		result.Metadata["lambda_reduce_skip_reason"] = "trusted_answer_surface_partials"
 	}
 	if answerSanitization.Changed {
 		result.Metadata["output_sanitization"] = answerSanitization
@@ -593,6 +610,67 @@ func composeChronological(partials []Result) string {
 	return strings.Join(parts, "\n\n")
 }
 
+func lambdaDeterministicAnswerSurfaceReduce(partials []Result, answerSeedPaths []string, certificateStatuses []string) (string, bool) {
+	if len(partials) == 0 || len(answerSeedPaths) == 0 {
+		return "", false
+	}
+	for _, p := range partials {
+		if p.Metadata == nil || !boolValue(p.Metadata["lambda_answer_surface"]) {
+			return "", false
+		}
+	}
+	if len(certificateStatuses) == 0 {
+		return "", false
+	}
+	for _, status := range certificateStatuses {
+		if !strings.EqualFold(strings.TrimSpace(status), "certified") {
+			return "", false
+		}
+	}
+	paths := uniqueStringsRLM(answerSeedPaths)
+	if len(paths) == 0 {
+		return "", false
+	}
+	facts := lambdaFactsFromPartials(partials)
+	out := map[string]any{
+		"summary":   "Lambda retrieval merged deterministic repo paths from trusted gather_context answer surfaces.",
+		"paths":     paths,
+		"symbols":   []string{},
+		"facts":     facts,
+		"rationale": "Copied from gather_context answer_surface/v2 partial answer_seed paths without LLM reranking.",
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		return "", false
+	}
+	return string(body), true
+}
+
+func lambdaFactsFromPartials(partials []Result) []string {
+	factsByValue := map[string]struct{}{}
+	var facts []string
+	for _, partial := range partials {
+		var parsed struct {
+			Facts []string `json:"facts"`
+		}
+		if err := json.Unmarshal([]byte(strings.TrimSpace(partial.Answer)), &parsed); err != nil {
+			continue
+		}
+		for _, fact := range parsed.Facts {
+			fact = strings.TrimSpace(fact)
+			if fact == "" {
+				continue
+			}
+			if _, exists := factsByValue[fact]; exists {
+				continue
+			}
+			factsByValue[fact] = struct{}{}
+			facts = append(facts, fact)
+		}
+	}
+	return facts
+}
+
 // --- Helpers ---
 
 func formatPartialsAsEvidence(partials []Result) string {
@@ -629,8 +707,11 @@ func extractCandidateEvidenceRefs(result map[string]any) []string {
 func collectEvidenceRefsRecursive(value any, out *[]string) {
 	switch v := value.(type) {
 	case map[string]any:
+		if ref := evidenceRefObjectString(v); ref != "" {
+			*out = append(*out, ref)
+		}
 		for key, child := range v {
-			if (key == "ref" || key == "load_ref") && child != nil {
+			if key == "load_ref" && child != nil {
 				if ref := strings.TrimSpace(fmt.Sprint(child)); ref != "" {
 					*out = append(*out, ref)
 				}
@@ -649,6 +730,18 @@ func collectEvidenceRefsRecursive(value any, out *[]string) {
 			collectEvidenceRefsRecursive(child, out)
 		}
 	}
+}
+
+func evidenceRefObjectString(value map[string]any) string {
+	refType := strings.TrimSpace(fmt.Sprint(value["type"]))
+	refValue := strings.TrimSpace(fmt.Sprint(value["ref"]))
+	if refType == "" || refValue == "" || refType == "<nil>" || refValue == "<nil>" {
+		return ""
+	}
+	if strings.Contains(refValue, ":") {
+		return refValue
+	}
+	return refType + ":" + refValue
 }
 
 func evidenceRefsToPaths(refs []string, workspaceRoot string) []string {
@@ -723,10 +816,8 @@ func explicitLambdaTaskType(task Task) (TaskType, string) {
 		return "", ""
 	}
 	switch strings.TrimSpace(fmt.Sprint(payload["task_type"])) {
-	case "file_locate", "symbol_inspect", "registration_trace":
+	case "file_locate", "symbol_inspect", "registration_trace", "execution_trace", "change_impact", "architecture_map", "subsystem_map", "integration_surface":
 		return TaskTypeCodeLocate, "gather_context_payload"
-	case "execution_trace", "change_impact":
-		return TaskTypeCodeUnderstand, "gather_context_payload"
 	case "memory_recall":
 		return TaskTypeMemoryRecall, "gather_context_payload"
 	case "evidence_audit":
@@ -734,6 +825,17 @@ func explicitLambdaTaskType(task Task) (TaskType, string) {
 	default:
 		return "", ""
 	}
+}
+
+func lambdaShouldUseSingleGatherSurface(task Task, taskType TaskType) bool {
+	if taskType != TaskTypeCodeLocate {
+		return false
+	}
+	payload, ok := task.Metadata["gather_context_payload"].(map[string]any)
+	if !ok || len(payload) == 0 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(fmt.Sprint(payload["response_mode"])), "answer_surface")
 }
 
 func lambdaGatherTaskType(taskType TaskType) string {
@@ -775,16 +877,7 @@ func lambdaGatherContextSurfaceMetadata(payload map[string]any, workspaceRoot st
 }
 
 func lambdaAnswerFromAnswerSurface(payload map[string]any, candidates []string) (string, bool) {
-	if strings.TrimSpace(fmt.Sprint(payload["schema_version"])) != "context_answer_surface/v2" {
-		return "", false
-	}
-	if !boolValue(payload["answerable"]) {
-		return "", false
-	}
-	if status := strings.TrimSpace(stringFromNestedMap(payload, []string{"certificate", "status"})); strings.EqualFold(status, "failed") {
-		return "", false
-	}
-	if requiredOK, ok := optionalBoolValue(nestedMapValue(payload, []string{"certificate", "required_evidence_ok"})); ok && !requiredOK {
+	if !lambdaAnswerSurfaceTrusted(payload) {
 		return "", false
 	}
 	paths := pathsFromNestedPathList(payload, []string{"answer_seed", "paths"}, "")
@@ -807,6 +900,31 @@ func lambdaAnswerFromAnswerSurface(payload map[string]any, candidates []string) 
 		return "", false
 	}
 	return string(body), true
+}
+
+func lambdaAnswerSurfaceTrusted(payload map[string]any) bool {
+	if strings.TrimSpace(fmt.Sprint(payload["schema_version"])) != "context_answer_surface/v2" {
+		return false
+	}
+	if !boolValue(payload["answerable"]) {
+		return false
+	}
+	if status := strings.TrimSpace(stringFromNestedMap(payload, []string{"certificate", "status"})); !strings.EqualFold(status, "certified") {
+		return false
+	}
+	if requiredOK, ok := optionalBoolValue(nestedMapValue(payload, []string{"certificate", "required_evidence_ok"})); ok && !requiredOK {
+		return false
+	}
+	if copySeed, ok := optionalBoolValue(nestedMapValue(payload, []string{"answer_contract", "copy_answer_seed"})); ok && !copySeed {
+		return false
+	}
+	if len(anySliceFromAny(payload["missing"])) > 0 || len(anySliceFromAny(payload["conflicts"])) > 0 {
+		return false
+	}
+	if len(anySliceFromAny(nestedMapValue(payload, []string{"coverage_report", "missing"}))) > 0 {
+		return false
+	}
+	return len(pathsFromNestedPathList(payload, []string{"answer_seed", "paths"}, "")) > 0
 }
 
 func boolValue(value any) bool {
@@ -874,6 +992,21 @@ func stringsFromAny(value any) []string {
 			if s, ok := item.(string); ok {
 				out = append(out, s)
 			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func anySliceFromAny(value any) []any {
+	switch typed := value.(type) {
+	case []any:
+		return typed
+	case []string:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
 		}
 		return out
 	default:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -114,5 +115,48 @@ func TestOpenContextExtendsShortDeadlines(t *testing.T) {
 	}
 	if err := derived.Err(); err != nil {
 		t.Fatalf("expected derived context to remain usable, got %v", err)
+	}
+}
+
+func TestStoreMetaPersistsGitBaselineState(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	storageRoot := filepath.Join(root, "storage")
+	repoRoot := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+
+	store, err := Open(ctx, storageRoot, repoRoot)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	want := IndexMeta{
+		RepoRoot:      repoRoot,
+		HeadSHA:       "abc123",
+		WorktreeDirty: true,
+		IndexedAt:     time.Unix(123, 0).UTC(),
+		Languages:     []string{"go", "typescript"},
+	}
+	if err := store.SetMeta(ctx, want); err != nil {
+		t.Fatalf("set meta: %v", err)
+	}
+	got, err := store.GetMeta(ctx)
+	if err != nil {
+		t.Fatalf("get meta: %v", err)
+	}
+	if got.HeadSHA != want.HeadSHA {
+		t.Fatalf("head sha=%q want %q", got.HeadSHA, want.HeadSHA)
+	}
+	if !got.WorktreeDirty {
+		t.Fatalf("worktree dirty=false want true")
+	}
+	if got.IndexedAt.Unix() != want.IndexedAt.Unix() {
+		t.Fatalf("indexed_at=%v want %v", got.IndexedAt, want.IndexedAt)
+	}
+	if strings.Join(got.Languages, ",") != "go,typescript" {
+		t.Fatalf("languages=%v", got.Languages)
 	}
 }

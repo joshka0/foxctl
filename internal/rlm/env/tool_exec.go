@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -44,6 +45,7 @@ type gatherContextInput struct {
 	Limit            int      `json:"limit,omitempty"`
 	TaskID           string   `json:"task_id,omitempty"`
 	TaskType         string   `json:"task_type,omitempty"`
+	SourceProfiles   []string `json:"source_profiles,omitempty"`
 	MemoryStatuses   []string `json:"memory_statuses,omitempty"`
 	Lanes            []string `json:"lanes,omitempty"`
 	MaxContextChars  int      `json:"max_context_chars,omitempty"`
@@ -100,28 +102,36 @@ func (a *ReadOnlyAdapter) codeSearchFn(limit int) contextengine.CodeSearchFunc {
 	return a.codeSearchFnForTask(limit, "")
 }
 
-func (a *ReadOnlyAdapter) codeSearchFnForTask(limit int, taskType string) contextengine.CodeSearchFunc {
+func (a *ReadOnlyAdapter) codeSearchFnForTask(limit int, taskType string, sourceProfiles ...contextengine.SourceProfile) contextengine.CodeSearchFunc {
+	return a.codeSearchFnForTaskWithRequired(limit, taskType, nil, sourceProfiles...)
+}
+
+func (a *ReadOnlyAdapter) codeSearchFnForTaskWithRequired(limit int, taskType string, requiredEvidence []string, sourceProfiles ...contextengine.SourceProfile) contextengine.CodeSearchFunc {
 	return func(ctx context.Context, query string) ([]contextengine.CodeSearchHit, error) {
 		if strings.TrimSpace(a.workspaceRoot) == "" {
 			return nil, nil
 		}
-		normalizedTaskType, _ := normalizeCodeSearchTaskType(taskType)
-		ensembleHits, ensembleErr := a.codeSearchEnsembleHits(ctx, query, taskType, limit)
-		if normalizedTaskType == codeSearchTaskExecutionTrace && len(ensembleHits) > 0 {
-			return mergeCodeSearchHits(limit, nil, ensembleHits), nil
-		}
+		ensembleHits, ensembleErr := a.codeSearchEnsembleHits(ctx, query, taskType, limit, requiredEvidence, sourceProfiles)
+		liveHits, liveErr := a.liveOverlayCodeSearchHits(ctx, query, requiredEvidence, limit)
 		repoHits, repoErr := a.repoIndexCodeSearch(ctx, query, limit)
 		localHits, localErr := a.localCodeProbeSearch(query, taskType, limit)
 		lexicalHits, lexicalErr := a.localLexicalCodeSearch(query, limit)
 		buildTargetHits := a.localBuildTargetCodeSearchHits(query)
-		wideHits := mergeCodeSearchHits(maxInt(limit*6, limit), repoHits, ensembleHits, localHits, buildTargetHits, lexicalHits)
+		wideHits := mergeCodeSearchHits(maxInt(limit*6, limit), repoHits, liveHits, ensembleHits, localHits, buildTargetHits, lexicalHits)
 		relatedHits := a.localRelatedCodeSearchHits(query, wideHits, limit)
-		if hits := mergeCodeSearchHits(limit, repoHits, ensembleHits, localHits, buildTargetHits, relatedHits, lexicalHits); len(hits) > 0 {
+		baseHits := mergeCodeSearchHits(limit, repoHits, liveHits, ensembleHits, localHits, buildTargetHits, relatedHits, lexicalHits)
+		closureHits := a.localSubsystemSiblingClosureHits(query, taskType, requiredEvidence, baseHits, limit)
+		candidateLimit := codeSearchCandidatePoolLimit(limit, taskType, len(closureHits))
+		if hits := mergeCodeSearchHits(candidateLimit, repoHits, liveHits, ensembleHits, localHits, buildTargetHits, relatedHits, closureHits, lexicalHits); len(hits) > 0 {
+			annotateCodeSearchHitCoverage(hits, requiredEvidence)
 			return hits, nil
 		}
 		errs := make([]string, 0, 4)
 		if ensembleErr != nil {
 			errs = append(errs, "code search ensemble: "+ensembleErr.Error())
+		}
+		if liveErr != nil {
+			errs = append(errs, "live overlay: "+liveErr.Error())
 		}
 		if repoErr != nil {
 			errs = append(errs, "repo index: "+repoErr.Error())
@@ -139,7 +149,18 @@ func (a *ReadOnlyAdapter) codeSearchFnForTask(limit int, taskType string) contex
 	}
 }
 
-func (a *ReadOnlyAdapter) codeSearchEnsembleHits(ctx context.Context, query, taskType string, limit int) ([]rankedCodeSearchHit, error) {
+func codeSearchCandidatePoolLimit(limit int, taskType string, closureCount int) int {
+	if limit <= 0 {
+		limit = 8
+	}
+	if !isSubsystemMapTask(taskType) {
+		return limit
+	}
+	candidateLimit := maxInt(limit+closureCount, limit*2)
+	return minInt(candidateLimit, maxInt(limit, 32))
+}
+
+func (a *ReadOnlyAdapter) codeSearchEnsembleHits(ctx context.Context, query, taskType string, limit int, requiredEvidence []string, sourceProfiles []contextengine.SourceProfile) ([]rankedCodeSearchHit, error) {
 	query = strings.TrimSpace(query)
 	if query == "" || strings.TrimSpace(a.workspaceRoot) == "" {
 		return nil, nil
@@ -147,7 +168,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsembleHits(ctx context.Context, query, tas
 	normalizedTaskType, _ := normalizeCodeSearchTaskType(taskType)
 	ensembleFiles := maxInt(limit, 4)
 	ensembleCandidates := maxInt(limit*4, 16)
-	if normalizedTaskType == codeSearchTaskExecutionTrace && ensembleFiles > 4 {
+	if normalizedTaskType == codeSearchTaskExecutionTrace && len(requiredEvidence) == 0 && ensembleFiles > 4 {
 		ensembleFiles = 4
 		ensembleCandidates = 8
 	}
@@ -225,17 +246,136 @@ func (a *ReadOnlyAdapter) codeSearchEnsembleHits(ctx context.Context, query, tas
 				Score:    score,
 				Language: languageFromPath(path),
 				Metadata: map[string]any{
-					"candidate_role": role,
-					"source":         "code_search_ensemble",
-					"source_profile": "repo_code",
-					"evidence_class": codeSearchEvidenceClassForRole(role),
-					"task_type":      normalizedTaskType,
+					"candidate_role":           role,
+					"source":                   "code_search_ensemble",
+					"source_profile":           "repo_code",
+					"evidence_class":           codeSearchEvidenceClassForRole(role),
+					"task_type":                normalizedTaskType,
+					"source_profiles":          contextengineSourceProfilesToStrings(sourceProfiles),
+					"coverage_terms":           codeSearchCoverageTerms(path, symbol.Symbol, snippet),
+					"coverage_requirement_ids": codeSearchCoverageRequirementIDs(path, symbol.Symbol, snippet, requiredEvidence),
+					"path_family":              filepath.ToSlash(filepath.Dir(path)),
+					"is_test":                  isTestLikeCodeSearchPath(path),
 				},
 				Sources: append([]string(nil), file.ConfirmedBy...),
 			},
 		})
 	}
 	return hits, nil
+}
+
+func contextengineSourceProfilesToStrings(profiles []contextengine.SourceProfile) []string {
+	out := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		if profile.IsValid() {
+			out = append(out, string(profile))
+		}
+	}
+	return out
+}
+
+func codeSearchCoverageTerms(values ...string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 12)
+	for _, value := range values {
+		for _, part := range splitCodeSearchProbe(value) {
+			for _, term := range subsystemClosureTermVariants(part) {
+				if len(term) < 4 || isGenericCodeSearchPathWord(term) {
+					continue
+				}
+				if _, ok := seen[term]; ok {
+					continue
+				}
+				seen[term] = struct{}{}
+				out = append(out, term)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func codeSearchCoverageRequirementIDs(pathValue string, symbol string, snippet string, requirements []string) []string {
+	if len(requirements) == 0 {
+		return nil
+	}
+	terms := codeSearchCoverageTermSet(pathValue, symbol, snippet)
+	out := make([]string, 0, len(requirements))
+	for _, req := range requirements {
+		reqTerms := codeSearchCoverageTerms(req)
+		if codeSearchTermsCoverRequirement(terms, reqTerms) {
+			out = appendUniqueStringEnv(out, strings.Join(reqTerms, "_"))
+		}
+	}
+	return out
+}
+
+func codeSearchCoverageTermSet(values ...string) map[string]struct{} {
+	terms := map[string]struct{}{}
+	for _, term := range codeSearchCoverageTerms(values...) {
+		terms[term] = struct{}{}
+	}
+	return terms
+}
+
+func codeSearchTermsCoverRequirement(terms map[string]struct{}, reqTerms []string) bool {
+	if len(reqTerms) == 0 {
+		return false
+	}
+	covered := 0
+	for _, term := range reqTerms {
+		if _, ok := terms[term]; ok {
+			covered++
+		}
+	}
+	if len(reqTerms) <= 2 {
+		return covered == len(reqTerms)
+	}
+	return covered >= len(reqTerms)-1
+}
+
+func annotateCodeSearchHitCoverage(hits []contextengine.CodeSearchHit, requirements []string) {
+	for i := range hits {
+		hit := &hits[i]
+		if hit.Metadata == nil {
+			hit.Metadata = map[string]any{}
+		}
+		coverageTerms := codeSearchCoverageTerms(hit.Path, hit.Symbol, hit.Snippet, strings.Join(metadataStringSliceEnv(hit.Metadata, "matched_terms"), " "))
+		if len(coverageTerms) > 0 {
+			hit.Metadata["coverage_terms"] = coverageTerms
+		}
+		if ids := codeSearchCoverageRequirementIDs(hit.Path, hit.Symbol, hit.Snippet, requirements); len(ids) > 0 {
+			hit.Metadata["coverage_requirement_ids"] = ids
+		}
+		if family := filepath.ToSlash(filepath.Dir(hit.Path)); family != "." && family != "" {
+			hit.Metadata["path_family"] = family
+		}
+		hit.Metadata["is_test"] = isTestLikeCodeSearchPath(hit.Path)
+	}
+}
+
+func metadataStringSliceEnv(metadata map[string]any, key string) []string {
+	if metadata == nil {
+		return nil
+	}
+	value := metadata[key]
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			out = appendUniqueStringEnv(out, fmt.Sprint(item))
+		}
+		return out
+	case string:
+		if strings.TrimSpace(typed) == "" {
+			return nil
+		}
+		return []string{strings.TrimSpace(typed)}
+	default:
+		return nil
+	}
 }
 
 func decodeCodeSearchEvidenceFiles(raw any) []codeSearchEvidenceFile {
@@ -764,6 +904,186 @@ func (a *ReadOnlyAdapter) localLexicalCodeSearch(query string, limit int) ([]ran
 	return out, nil
 }
 
+func (a *ReadOnlyAdapter) liveOverlayCodeSearchHits(ctx context.Context, query string, requiredEvidence []string, limit int) ([]rankedCodeSearchHit, error) {
+	if strings.TrimSpace(a.workspaceRoot) == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 8
+	}
+	paths, err := gitWorkingTreeOverlayPaths(ctx, a.workspaceRoot)
+	if err != nil || len(paths) == 0 {
+		return nil, err
+	}
+	terms := codeSearchLiveOverlayTerms(query, requiredEvidence)
+	if len(terms) == 0 && len(requiredEvidence) == 0 {
+		return nil, nil
+	}
+	out := make([]rankedCodeSearchHit, 0, minInt(len(paths), maxInt(limit, 8)))
+	for _, item := range paths {
+		if item.path == "" || item.status == "deleted" || !isLikelyTextCodeFile(item.path) {
+			continue
+		}
+		abs := filepath.Join(a.workspaceRoot, filepath.FromSlash(item.path))
+		info, statErr := os.Stat(abs)
+		if statErr != nil || info.IsDir() || info.Size() > 1_000_000 {
+			continue
+		}
+		body, readErr := os.ReadFile(abs)
+		if readErr != nil {
+			continue
+		}
+		text := string(body)
+		line, matched := firstMatchingLine(text, terms)
+		pathScore := codeSearchPathTermScore(item.path, terms)
+		coverageIDs := codeSearchCoverageRequirementIDs(item.path, "", text, requiredEvidence)
+		if pathScore == 0 && len(matched) == 0 && len(coverageIDs) == 0 {
+			continue
+		}
+		if line == 0 {
+			line = 1
+		}
+		excerpt := a.repoFileExcerpt(item.path, line, 2, 4)
+		if excerpt == "" {
+			excerpt = strings.TrimSpace(firstNRunes(text, 400))
+		}
+		role := "working_tree"
+		if isTestLikeCodeSearchPath(item.path) {
+			role = "test_support"
+		}
+		score := 0.72 + minFloat(0.22, pathScore*0.2)
+		if len(coverageIDs) > 0 {
+			score += 0.08
+		}
+		out = append(out, rankedCodeSearchHit{
+			Priority: 76,
+			Hit: contextengine.CodeSearchHit{
+				Path:     item.path,
+				Snippet:  codeProbeSnippet("live working-tree overlay: "+item.status, excerpt),
+				Line:     line,
+				Score:    clampScore(score),
+				Language: languageFromPath(item.path),
+				Metadata: map[string]any{
+					"candidate_role":           role,
+					"source":                   "live_overlay",
+					"source_profile":           "repo_code",
+					"evidence_class":           "working_tree",
+					"freshness":                "working_tree",
+					"git_status":               item.status,
+					"coverage_terms":           codeSearchCoverageTerms(item.path, strings.Join(matched, " "), excerpt),
+					"coverage_requirement_ids": coverageIDs,
+					"matched_terms":            matched,
+					"path_family":              filepath.ToSlash(filepath.Dir(item.path)),
+					"is_test":                  isTestLikeCodeSearchPath(item.path),
+				},
+				Sources: []string{"live_overlay"},
+			},
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Hit.Score != out[j].Hit.Score {
+			return out[i].Hit.Score > out[j].Hit.Score
+		}
+		return out[i].Hit.Path < out[j].Hit.Path
+	})
+	if len(out) > maxInt(limit*2, limit) {
+		out = out[:maxInt(limit*2, limit)]
+	}
+	return out, nil
+}
+
+type liveOverlayPath struct {
+	path   string
+	status string
+}
+
+func gitWorkingTreeOverlayPaths(ctx context.Context, workspaceRoot string) ([]liveOverlayPath, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", workspaceRoot, "status", "--porcelain", "--untracked-files=all")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, nil
+	}
+	lines := strings.Split(string(output), "\n")
+	out := make([]liveOverlayPath, 0, len(lines))
+	for _, line := range lines {
+		if len(line) < 4 {
+			continue
+		}
+		code := strings.TrimSpace(line[:2])
+		pathValue := strings.TrimSpace(line[3:])
+		if idx := strings.Index(pathValue, " -> "); idx >= 0 {
+			pathValue = strings.TrimSpace(pathValue[idx+4:])
+		}
+		pathValue = strings.Trim(pathValue, `"`)
+		pathValue = normalizeCodeSearchPath(pathValue)
+		if pathValue == "" {
+			continue
+		}
+		status := "modified"
+		switch {
+		case strings.Contains(code, "?"):
+			status = "untracked"
+		case strings.Contains(code, "A"):
+			status = "added"
+		case strings.Contains(code, "D"):
+			status = "deleted"
+		case strings.Contains(code, "R"):
+			status = "renamed"
+		}
+		out = append(out, liveOverlayPath{path: pathValue, status: status})
+	}
+	return out, nil
+}
+
+func codeSearchLiveOverlayTerms(query string, requiredEvidence []string) []string {
+	values := []string{query}
+	values = append(values, requiredEvidence...)
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 24)
+	for _, term := range codeSearchCoverageTerms(values...) {
+		if len(term) < 4 || isGenericCodeSearchPathWord(term) {
+			continue
+		}
+		if _, ok := seen[term]; ok {
+			continue
+		}
+		seen[term] = struct{}{}
+		out = append(out, term)
+	}
+	return out
+}
+
+func firstMatchingLine(text string, terms []string) (int, []string) {
+	if len(terms) == 0 {
+		return 0, nil
+	}
+	lines := strings.Split(text, "\n")
+	for idx, line := range lines {
+		lower := strings.ToLower(line)
+		matched := make([]string, 0, 4)
+		for _, term := range terms {
+			if strings.Contains(lower, strings.ToLower(term)) {
+				matched = appendUniqueStringEnv(matched, term)
+			}
+		}
+		if len(matched) > 0 {
+			return idx + 1, matched
+		}
+	}
+	return 0, nil
+}
+
+func firstNRunes(value string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes])
+}
+
 func codeSearchLexicalTerms(query string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, 16)
@@ -1123,6 +1443,417 @@ func (a *ReadOnlyAdapter) localRelatedCodeSearchHits(query string, seeds []conte
 		hits = append(hits, rankedCodeSearchHit{Hit: candidate.hit, Priority: candidate.priority})
 	}
 	return hits
+}
+
+type subsystemSiblingCandidate struct {
+	path         string
+	line         int
+	score        float64
+	matchedTerms []string
+	excerpt      string
+	seedPaths    []string
+}
+
+type subsystemSiblingDirCandidate struct {
+	dir   string
+	count int
+	score float64
+}
+
+func (a *ReadOnlyAdapter) localSubsystemSiblingClosureHits(query string, taskType string, requiredEvidence []string, seeds []contextengine.CodeSearchHit, limit int) []rankedCodeSearchHit {
+	if strings.TrimSpace(a.workspaceRoot) == "" || len(seeds) == 0 || !isSubsystemMapTask(taskType) {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 8
+	}
+	terms := subsystemClosureTerms(query, requiredEvidence)
+	if len(terms) == 0 {
+		return nil
+	}
+	seedPathSet := map[string]struct{}{}
+	dirStats := map[string]*subsystemSiblingDirCandidate{}
+	for _, seed := range seeds {
+		pathValue := normalizeCodeSearchPath(seed.Path)
+		if pathValue == "" || !isLikelyTextCodeFile(pathValue) {
+			continue
+		}
+		seedPathSet[pathValue] = struct{}{}
+		dir := filepath.ToSlash(filepath.Dir(pathValue))
+		if dir == "" || dir == "." {
+			continue
+		}
+		item := dirStats[dir]
+		if item == nil {
+			item = &subsystemSiblingDirCandidate{dir: dir}
+			dirStats[dir] = item
+		}
+		item.count++
+		item.score += repoAnchorScore(seed.Score)
+	}
+	if len(dirStats) == 0 {
+		return nil
+	}
+	dirCandidates := make([]*subsystemSiblingDirCandidate, 0, len(dirStats))
+	for _, item := range dirStats {
+		dirCandidates = append(dirCandidates, item)
+	}
+	sort.SliceStable(dirCandidates, func(i, j int) bool {
+		if dirCandidates[i].count != dirCandidates[j].count {
+			return dirCandidates[i].count > dirCandidates[j].count
+		}
+		if dirCandidates[i].score != dirCandidates[j].score {
+			return dirCandidates[i].score > dirCandidates[j].score
+		}
+		return dirCandidates[i].dir < dirCandidates[j].dir
+	})
+	maxDirs := minInt(maxInt(limit, 4), 10)
+	if len(dirCandidates) > maxDirs {
+		dirCandidates = dirCandidates[:maxDirs]
+	}
+	candidatesByPath := map[string]*subsystemSiblingCandidate{}
+	for _, dirCandidate := range dirCandidates {
+		dir := dirCandidate.dir
+		entries, err := os.ReadDir(filepath.Join(a.workspaceRoot, filepath.FromSlash(dir)))
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || shouldSkipLocalCodeSearchDir(entry.Name()) {
+				continue
+			}
+			pathValue := normalizeCodeSearchPath(filepath.ToSlash(filepath.Join(dir, entry.Name())))
+			if pathValue == "" {
+				continue
+			}
+			if _, ok := seedPathSet[pathValue]; ok {
+				continue
+			}
+			if !isLikelyTextCodeFile(pathValue) {
+				continue
+			}
+			info, statErr := entry.Info()
+			if statErr == nil && info.Size() > 1_000_000 {
+				continue
+			}
+			body, readErr := os.ReadFile(filepath.Join(a.workspaceRoot, filepath.FromSlash(pathValue)))
+			if readErr != nil {
+				continue
+			}
+			line, score, matches := scoreSubsystemSiblingFile(pathValue, string(body), terms)
+			if score <= 0 {
+				continue
+			}
+			if isTestLikeCodeSearchPath(pathValue) {
+				score *= 0.35
+			}
+			item := candidatesByPath[pathValue]
+			if item == nil {
+				item = &subsystemSiblingCandidate{path: pathValue}
+				candidatesByPath[pathValue] = item
+			}
+			item.score += score
+			item.line = firstPositiveIntEnv(item.line, line)
+			item.matchedTerms = appendUniqueStringsEnv(item.matchedTerms, matches...)
+			item.seedPaths = appendUniqueStringsEnv(item.seedPaths, seedPathsInDir(seeds, dir)...)
+			if item.excerpt == "" {
+				item.excerpt = a.repoFileExcerpt(pathValue, line, 3, 5)
+			}
+		}
+	}
+	candidates := make([]*subsystemSiblingCandidate, 0, len(candidatesByPath))
+	for _, candidate := range candidatesByPath {
+		candidates = append(candidates, candidate)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		wi := codeSearchFileWeight(candidates[i].path)
+		wj := codeSearchFileWeight(candidates[j].path)
+		if wi != wj {
+			return wi > wj
+		}
+		return candidates[i].path < candidates[j].path
+	})
+	maxHits := minInt(maxInt(1, limit/3), 4)
+	candidates = selectSubsystemSiblingCandidates(candidates, dirCandidates, maxHits)
+	out := make([]rankedCodeSearchHit, 0, len(candidates))
+	for _, candidate := range candidates {
+		reason := "subsystem sibling closure"
+		if len(candidate.matchedTerms) > 0 {
+			reason += ": " + strings.Join(candidate.matchedTerms, ", ")
+		}
+		snippet := codeProbeSnippet(reason, candidate.excerpt)
+		out = append(out, rankedCodeSearchHit{
+			Priority: 31,
+			Hit: contextengine.CodeSearchHit{
+				Path:     candidate.path,
+				Snippet:  snippet,
+				Line:     candidate.line,
+				Score:    clampScore(0.80 + minFloat(candidate.score, 4.0)*0.04),
+				Language: languageFromPath(candidate.path),
+				Metadata: map[string]any{
+					"candidate_role":   "structural_support",
+					"source":           "local_subsystem_sibling_closure",
+					"source_profile":   "repo_code",
+					"evidence_class":   "structural",
+					"task_type":        normalizeSubsystemMapTaskType(taskType),
+					"matched_terms":    append([]string(nil), candidate.matchedTerms...),
+					"coverage_terms":   append([]string(nil), candidate.matchedTerms...),
+					"path_family":      filepath.ToSlash(filepath.Dir(candidate.path)),
+					"is_test":          isTestLikeCodeSearchPath(candidate.path),
+					"supporting_paths": append([]string(nil), candidate.seedPaths...),
+				},
+				Sources: []string{"local_subsystem_sibling_closure"},
+			},
+		})
+	}
+	return out
+}
+
+func selectSubsystemSiblingCandidates(candidates []*subsystemSiblingCandidate, dirs []*subsystemSiblingDirCandidate, maxHits int) []*subsystemSiblingCandidate {
+	if maxHits <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	if len(candidates) > maxHits {
+		out := make([]*subsystemSiblingCandidate, 0, maxHits)
+		selected := map[string]struct{}{}
+		for _, dir := range dirs {
+			if len(out) >= maxHits {
+				break
+			}
+			for _, candidate := range candidates {
+				if filepath.ToSlash(filepath.Dir(candidate.path)) != dir.dir {
+					continue
+				}
+				if _, ok := selected[candidate.path]; ok {
+					continue
+				}
+				selected[candidate.path] = struct{}{}
+				out = append(out, candidate)
+				break
+			}
+		}
+		for _, candidate := range candidates {
+			if len(out) >= maxHits {
+				break
+			}
+			if _, ok := selected[candidate.path]; ok {
+				continue
+			}
+			selected[candidate.path] = struct{}{}
+			out = append(out, candidate)
+		}
+		return out
+	}
+	return append([]*subsystemSiblingCandidate(nil), candidates...)
+}
+
+func isSubsystemMapTask(taskType string) bool {
+	switch strings.TrimSpace(taskType) {
+	case "architecture_map", "subsystem_map", "integration_surface":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeSubsystemMapTaskType(taskType string) string {
+	if isSubsystemMapTask(taskType) {
+		return strings.TrimSpace(taskType)
+	}
+	return ""
+}
+
+func subsystemClosureTerms(query string, requiredEvidence []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 16)
+	add := func(value string) {
+		for _, part := range splitCodeSearchProbe(value) {
+			for _, term := range subsystemClosureTermVariants(part) {
+				if len(term) < 4 || isGenericCodeSearchPathWord(term) {
+					continue
+				}
+				if _, ok := seen[term]; ok {
+					continue
+				}
+				seen[term] = struct{}{}
+				out = append(out, term)
+			}
+		}
+	}
+	for _, item := range requiredEvidence {
+		add(item)
+	}
+	if len(out) < 4 {
+		add(query)
+	}
+	return out
+}
+
+func subsystemClosureTermVariants(term string) []string {
+	term = strings.ToLower(strings.TrimSpace(term))
+	if term == "" {
+		return nil
+	}
+	out := []string{term}
+	add := func(value string) {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" || value == term {
+			return
+		}
+		for _, existing := range out {
+			if existing == value {
+				return
+			}
+		}
+		out = append(out, value)
+	}
+	switch {
+	case strings.HasSuffix(term, "ification") && len(term) > len("ification")+2:
+		add(strings.TrimSuffix(term, "ification") + "ify")
+	case strings.HasSuffix(term, "ication") && len(term) > len("ication")+2:
+		add(strings.TrimSuffix(term, "ication") + "ify")
+	case strings.HasSuffix(term, "ation") && len(term) > len("ation")+2:
+		add(strings.TrimSuffix(term, "ation") + "ate")
+	}
+	if strings.HasSuffix(term, "ies") && len(term) > 4 {
+		add(strings.TrimSuffix(term, "ies") + "y")
+	}
+	if strings.HasSuffix(term, "s") && len(term) > 5 {
+		add(strings.TrimSuffix(term, "s"))
+	}
+	return out
+}
+
+func scoreSubsystemSiblingFile(pathValue string, body string, terms []string) (int, float64, []string) {
+	lowerPath := strings.ToLower(pathValue)
+	lines := strings.Split(body, "\n")
+	bestLine := 1
+	bestScore := 0.0
+	matches := make([]string, 0)
+	for _, term := range terms {
+		if term == "" {
+			continue
+		}
+		termScore := 0.0
+		if strings.Contains(lowerPath, term) {
+			termScore += 2.0
+		}
+		for i, line := range lines {
+			lineLower := strings.ToLower(line)
+			if !strings.Contains(lineLower, term) {
+				continue
+			}
+			score := 1.0
+			if looksLikeDeclarationLine(line, term) {
+				score += 1.5
+			}
+			if score > termScore {
+				termScore = score
+				bestLine = i + 1
+			}
+		}
+		if termScore > 0 {
+			bestScore += termScore
+			matches = appendUniqueStringEnv(matches, term)
+		}
+	}
+	return bestLine, bestScore, matches
+}
+
+func looksLikeDeclarationLine(line string, term string) bool {
+	line = strings.TrimSpace(line)
+	term = strings.ToLower(strings.TrimSpace(term))
+	if line == "" || term == "" {
+		return false
+	}
+	lower := strings.ToLower(line)
+	if !strings.Contains(lower, term) {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(line, "func "), strings.HasPrefix(line, "type "),
+		strings.HasPrefix(line, "const "), strings.HasPrefix(line, "var "),
+		strings.HasPrefix(line, "class "), strings.HasPrefix(line, "export "),
+		strings.HasPrefix(line, "def "):
+		return true
+	default:
+		return false
+	}
+}
+
+func isTestLikeCodeSearchPath(pathValue string) bool {
+	pathValue = strings.ToLower(filepath.ToSlash(strings.TrimSpace(pathValue)))
+	if pathValue == "" {
+		return false
+	}
+	base := filepath.Base(pathValue)
+	switch {
+	case strings.HasSuffix(base, "_test.go"),
+		strings.HasSuffix(base, ".test.ts"),
+		strings.HasSuffix(base, ".test.tsx"),
+		strings.HasSuffix(base, ".test.js"),
+		strings.HasSuffix(base, ".test.jsx"),
+		strings.HasSuffix(base, ".spec.ts"),
+		strings.HasSuffix(base, ".spec.tsx"),
+		strings.HasSuffix(base, ".spec.js"),
+		strings.HasSuffix(base, ".spec.jsx"):
+		return true
+	}
+	parts := strings.Split(pathValue, "/")
+	for _, part := range parts {
+		switch part {
+		case "test", "tests", "__tests__":
+			return true
+		}
+	}
+	return false
+}
+
+func seedPathsInDir(seeds []contextengine.CodeSearchHit, dir string) []string {
+	out := make([]string, 0)
+	for _, seed := range seeds {
+		pathValue := normalizeCodeSearchPath(seed.Path)
+		if pathValue == "" {
+			continue
+		}
+		if filepath.ToSlash(filepath.Dir(pathValue)) == dir {
+			out = appendUniqueStringEnv(out, pathValue)
+		}
+	}
+	return out
+}
+
+func appendUniqueStringsEnv(values []string, additions ...string) []string {
+	for _, value := range additions {
+		values = appendUniqueStringEnv(values, value)
+	}
+	return values
+}
+
+func appendUniqueStringEnv(values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func firstPositiveIntEnv(current int, next int) int {
+	if current > 0 {
+		return current
+	}
+	if next > 0 {
+		return next
+	}
+	return 0
 }
 
 func productionCounterpartPath(pathValue string) string {
@@ -2112,7 +2843,9 @@ func shouldLookupStalenessRef(ref contextengine.EvidenceRef) bool {
 
 func (a *ReadOnlyAdapter) retrieveCode(ctx context.Context, args json.RawMessage) (map[string]any, error) {
 	var input retrieveLaneInput
-	_ = json.Unmarshal(args, &input)
+	if err := json.Unmarshal(args, &input); err != nil {
+		return nil, err
+	}
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 10
@@ -2127,7 +2860,9 @@ func (a *ReadOnlyAdapter) retrieveCode(ctx context.Context, args json.RawMessage
 
 func (a *ReadOnlyAdapter) retrieveMemory(ctx context.Context, args json.RawMessage) (map[string]any, error) {
 	var input retrieveLaneInput
-	_ = json.Unmarshal(args, &input)
+	if err := json.Unmarshal(args, &input); err != nil {
+		return nil, err
+	}
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 10
@@ -2142,7 +2877,9 @@ func (a *ReadOnlyAdapter) retrieveMemory(ctx context.Context, args json.RawMessa
 
 func (a *ReadOnlyAdapter) retrieveContext(ctx context.Context, args json.RawMessage) (map[string]any, error) {
 	var input retrieveLaneInput
-	_ = json.Unmarshal(args, &input)
+	if err := json.Unmarshal(args, &input); err != nil {
+		return nil, err
+	}
 	cfg := a.laneConfig()
 	pack, err := contextengine.RetrieveContext(ctx, cfg, a.contextQueryFn(), strings.TrimSpace(input.Query))
 	if err != nil {
@@ -2153,7 +2890,9 @@ func (a *ReadOnlyAdapter) retrieveContext(ctx context.Context, args json.RawMess
 
 func (a *ReadOnlyAdapter) retrieveTask(ctx context.Context, args json.RawMessage) (map[string]any, error) {
 	var input retrieveLaneInput
-	_ = json.Unmarshal(args, &input)
+	if err := json.Unmarshal(args, &input); err != nil {
+		return nil, err
+	}
 	cfg := a.laneConfig()
 	query := strings.TrimSpace(input.Query)
 	pack, err := contextengine.RetrieveTask(ctx, cfg, a.taskQueryFn(), a.taskListFn(query), strings.TrimSpace(input.TaskID), query)
@@ -2165,17 +2904,21 @@ func (a *ReadOnlyAdapter) retrieveTask(ctx context.Context, args json.RawMessage
 
 func (a *ReadOnlyAdapter) gatherContext(ctx context.Context, args json.RawMessage) (map[string]any, error) {
 	var input gatherContextInput
-	_ = json.Unmarshal(args, &input)
+	if err := json.Unmarshal(args, &input); err != nil {
+		return nil, err
+	}
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 10
 	}
 	cfg := a.laneConfig()
+	sourceProfiles := contextengine.NormalizeSourceProfiles(input.SourceProfiles)
 	req := contextengine.GatherContextRequest{
 		Query:            strings.TrimSpace(input.Query),
 		Goal:             strings.TrimSpace(input.Goal),
 		TaskID:           strings.TrimSpace(input.TaskID),
 		TaskType:         strings.TrimSpace(input.TaskType),
+		SourceProfiles:   sourceProfiles,
 		RequiredEvidence: cleanStringList(input.RequiredEvidence),
 		Limit:            limit,
 		Lanes:            parseGatherLanes(input.Lanes),
@@ -2185,7 +2928,7 @@ func (a *ReadOnlyAdapter) gatherContext(ctx context.Context, args json.RawMessag
 		},
 	}
 	bundle, err := contextengine.GatherContext(ctx, cfg, contextengine.GatherContextDeps{
-		CodeSearch:    a.codeSearchFnForTask(limit, input.TaskType),
+		CodeSearch:    a.codeSearchFnForTaskWithRequired(limit, input.TaskType, req.RequiredEvidence, sourceProfiles...),
 		MemoryQuery:   a.memoryQueryFnForStatuses(limit, parseMemoryClaimStatuses(input.MemoryStatuses)),
 		ContextQuery:  a.contextQueryFn(),
 		ContextPacks:  a.contextPacksFn(limit),
@@ -2207,7 +2950,9 @@ func (a *ReadOnlyAdapter) gatherContext(ctx context.Context, args json.RawMessag
 
 func (a *ReadOnlyAdapter) retrieveMixed(ctx context.Context, args json.RawMessage) (map[string]any, error) {
 	var input retrieveLaneInput
-	_ = json.Unmarshal(args, &input)
+	if err := json.Unmarshal(args, &input); err != nil {
+		return nil, err
+	}
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 10
@@ -2475,26 +3220,65 @@ func markLoadedEvidenceRef(refStr, key string, out map[string]any) map[string]an
 
 func boundLoadedEvidenceRef(refStr string, out map[string]any, maxTokens int) map[string]any {
 	if out == nil {
-		return nil
+		out = map[string]any{}
 	}
-	if _, ok := out["ref"]; !ok {
-		out["ref"] = refStr
+	generic := jsonGenericMap(out)
+	if _, ok := generic["ref"]; !ok {
+		generic["ref"] = refStr
 	}
-	if _, ok := out["loaded"]; !ok {
-		out["loaded"] = true
+	if _, ok := generic["loaded"]; !ok {
+		generic["loaded"] = true
 	}
 	maxChars := maxTokens * 4
 	if maxChars <= 0 {
 		maxChars = defaultLoadEvidenceRefMaxTokens * 4
 		maxTokens = defaultLoadEvidenceRefMaxTokens
 	}
-	body, err := json.Marshal(out)
+	body, err := json.Marshal(generic)
 	if err != nil || len(body) <= maxChars {
+		return generic
+	}
+	generic["truncated"] = true
+	generic["max_tokens"] = maxTokens
+	truncateMapStrings(generic, maxInt(128, maxChars/8))
+	body, err = json.Marshal(generic)
+	if err == nil && len(body) <= maxChars {
+		return generic
+	}
+	return compactLoadedEvidenceRef(refStr, generic, len(body), maxTokens)
+}
+
+func jsonGenericMap(in map[string]any) map[string]any {
+	if in == nil {
+		return map[string]any{}
+	}
+	body, err := json.Marshal(in)
+	if err != nil {
+		out := make(map[string]any, len(in))
+		for key, value := range in {
+			out[key] = value
+		}
 		return out
 	}
-	out["truncated"] = true
-	out["max_tokens"] = maxTokens
-	truncateMapStrings(out, maxChars)
+	var generic map[string]any
+	if err := json.Unmarshal(body, &generic); err != nil || generic == nil {
+		return map[string]any{}
+	}
+	return generic
+}
+
+func compactLoadedEvidenceRef(refStr string, generic map[string]any, omittedBytes int, maxTokens int) map[string]any {
+	out := map[string]any{
+		"ref":           refStr,
+		"truncated":     true,
+		"max_tokens":    maxTokens,
+		"omitted_bytes": omittedBytes,
+	}
+	for _, key := range []string{"loaded", "type", "error"} {
+		if value, ok := generic[key]; ok {
+			out[key] = value
+		}
+	}
 	return out
 }
 
@@ -2577,6 +3361,7 @@ func contextBundleToMap(bundle contextengine.ContextBundle) map[string]any {
 func contextBundleAnswerSurfaceToMap(bundle contextengine.ContextBundle) map[string]any {
 	answerSeed := buildContextAnswerSeed(bundle)
 	pathSet := buildContextAnswerPathSet(bundle)
+	copyable := contextBundleAnswerSurfaceCopyable(bundle)
 	out := map[string]any{
 		"schema_version":    "context_answer_surface/v2",
 		"id":                bundle.ID,
@@ -2586,8 +3371,11 @@ func contextBundleAnswerSurfaceToMap(bundle contextengine.ContextBundle) map[str
 		"status":            bundle.Status,
 		"answerable":        bundle.Answerable,
 		"summary":           bundle.Summary,
-		"answer_contract":   map[string]any{"mode": "repo_grounded_file_set", "copy_answer_seed": true, "drop_only_if_loaded_ref_disproves": true},
+		"answer_contract":   map[string]any{"mode": contextAnswerContractMode(bundle), "copy_answer_seed": copyable, "drop_only_if_loaded_ref_disproves": true},
 		"answer_seed":       answerSeed,
+		"categories":        bundle.Categories,
+		"integration_edges": bundle.IntegrationEdges,
+		"coverage_report":   bundle.CoverageReport,
 		"path_set":          pathSet,
 		"facts_to_copy":     buildContextFactsToCopy(bundle),
 		"load_queue":        buildContextLoadQueue(bundle),
@@ -2617,6 +3405,29 @@ func contextBundleAnswerSurfaceToMap(bundle contextengine.ContextBundle) map[str
 	return out
 }
 
+func contextBundleAnswerSurfaceCopyable(bundle contextengine.ContextBundle) bool {
+	if !bundle.Answerable || bundle.Certificate == nil {
+		return false
+	}
+	if bundle.Certificate.Status != contextengine.ContextCertificateStatusCertified || !bundle.Certificate.RequiredEvidenceOK {
+		return false
+	}
+	if len(bundle.Missing) > 0 || len(bundle.Conflicts) > 0 {
+		return false
+	}
+	if bundle.CoverageReport != nil && len(bundle.CoverageReport.Missing) > 0 {
+		return false
+	}
+	return len(bundle.SelectedPaths) > 0 || len(bundle.AnswerCandidates) > 0 || len(bundle.Facts) > 0
+}
+
+func contextAnswerContractMode(bundle contextengine.ContextBundle) string {
+	if len(bundle.Categories) > 0 || len(bundle.IntegrationEdges) > 0 {
+		return "repo_subsystem_map"
+	}
+	return "repo_grounded_file_set"
+}
+
 func buildContextAnswerSeed(bundle contextengine.ContextBundle) map[string]any {
 	paths := make([]string, 0, len(bundle.SelectedPaths))
 	for _, selected := range bundle.SelectedPaths {
@@ -2637,11 +3448,25 @@ func buildContextAnswerSeed(bundle contextengine.ContextBundle) map[string]any {
 		}
 	}
 	return map[string]any{
-		"summary": bundle.Summary,
-		"paths":   paths,
-		"symbols": symbols,
-		"facts":   facts,
+		"summary":    bundle.Summary,
+		"paths":      paths,
+		"symbols":    symbols,
+		"facts":      facts,
+		"categories": buildContextAnswerSeedCategories(bundle),
 	}
+}
+
+func buildContextAnswerSeedCategories(bundle contextengine.ContextBundle) []map[string]any {
+	out := make([]map[string]any, 0, len(bundle.Categories))
+	for _, category := range bundle.Categories {
+		out = append(out, map[string]any{
+			"name":    category.Name,
+			"role":    category.Role,
+			"paths":   append([]string(nil), category.Paths...),
+			"signals": append([]string(nil), category.Signals...),
+		})
+	}
+	return out
 }
 
 func buildContextAnswerPathSet(bundle contextengine.ContextBundle) map[string]any {

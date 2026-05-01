@@ -247,6 +247,7 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		return fmt.Errorf("repo index build failed: %w", err)
 
 	}
+	meta, metaErr := store.GetMeta(ctx)
 
 	data := map[string]any{
 		"workspace":   absWorkspace,
@@ -254,6 +255,9 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		"result":      result,
 		"duration_ms": time.Since(start).Milliseconds(),
 		"dry_run":     dryRun,
+	}
+	if metaErr == nil && !dryRun {
+		data["meta"] = meta
 	}
 
 	env := protocol.OK("index.repo.build", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -306,6 +310,11 @@ func runIndexRepoStatus(cmd *cobra.Command, workspace string) error {
 		"meta":       meta,
 		"stats":      stats,
 	}
+	if currentHead := repoindex.ResolveGitHead(ctx, absWorkspace); currentHead != "" {
+		data["current_head_sha"] = currentHead
+		data["index_matches_head"] = currentHead == meta.HeadSHA
+	}
+	data["current_worktree_dirty"] = repoindex.ResolveGitDirty(ctx, absWorkspace)
 
 	env := protocol.OK("index.repo.status", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)

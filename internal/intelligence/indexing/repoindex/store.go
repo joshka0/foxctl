@@ -200,6 +200,9 @@ func (s *Store) SetMeta(ctx context.Context, meta IndexMeta) error {
 	if err := setMetaValue(ctx, tx, "head_sha", meta.HeadSHA); err != nil {
 		return err
 	}
+	if err := setMetaValue(ctx, tx, "worktree_dirty", fmt.Sprintf("%t", meta.WorktreeDirty)); err != nil {
+		return err
+	}
 	if err := setMetaValue(ctx, tx, "schema_version", fmt.Sprintf("%d", meta.SchemaVersion)); err != nil {
 		return err
 	}
@@ -238,6 +241,8 @@ func (s *Store) GetMeta(ctx context.Context) (IndexMeta, error) {
 			meta.RepoRoot = value
 		case "head_sha":
 			meta.HeadSHA = value
+		case "worktree_dirty":
+			meta.WorktreeDirty = value == "true" || value == "1"
 		case "schema_version":
 			if parsed, err := parseInt(value); err == nil {
 				meta.SchemaVersion = parsed

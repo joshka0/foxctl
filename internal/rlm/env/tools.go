@@ -36,7 +36,12 @@ func DefaultTools() []rlm.Tool {
 				},
 				"task_type": map[string]any{
 					"type":        "string",
-					"description": "Optional code-lane task intent such as file_locate, symbol_inspect, execution_trace, change_impact, or registration_trace.",
+					"description": "Optional task intent such as file_locate, symbol_inspect, execution_trace, change_impact, registration_trace, architecture_map, subsystem_map, or integration_surface.",
+				},
+				"source_profiles": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional explicit source profiles to prefer or shape, such as repo_code, repo_docs, codemaps, cochange_history, memory, task, session, or vault_docs.",
 				},
 				"memory_statuses": map[string]any{
 					"type":        "array",

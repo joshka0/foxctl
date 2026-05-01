@@ -3,6 +3,7 @@ package contextengine
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -106,7 +107,12 @@ func CertifyContextBundle(bundle ContextBundle, markers []StalenessMarker, opts 
 		}
 	}
 
-	requiredEvidenceOK := len(bundle.Facts) > 0 && len(unsupportedFacts) == 0 && len(missingEvidence) == 0
+	coverageMissing := coverageReportMissing(bundle.CoverageReport)
+	for _, requirementID := range coverageMissing {
+		missingEvidence = append(missingEvidence, "coverage:"+requirementID)
+	}
+
+	requiredEvidenceOK := len(bundle.Facts) > 0 && len(unsupportedFacts) == 0 && len(missingEvidence) == 0 && len(coverageMissing) == 0
 	status := ContextCertificateStatusCertified
 	if !requiredEvidenceOK {
 		status = ContextCertificateStatusFailed
@@ -125,6 +131,11 @@ func CertifyContextBundle(bundle ContextBundle, markers []StalenessMarker, opts 
 		checks = append(checks, ContextCheck{Name: "staleness", Status: "warn", Message: fmt.Sprintf("%d stale evidence ids", len(staleEvidenceIDs))})
 	} else {
 		checks = append(checks, ContextCheck{Name: "staleness", Status: "pass"})
+	}
+	if len(coverageMissing) > 0 {
+		checks = append(checks, ContextCheck{Name: "coverage_requirements", Status: "fail", Message: fmt.Sprintf("%d required coverage slots missing", len(coverageMissing))})
+	} else if bundle.CoverageReport != nil && len(bundle.CoverageReport.Requirements) > 0 {
+		checks = append(checks, ContextCheck{Name: "coverage_requirements", Status: "pass"})
 	}
 
 	cert := ContextCertificate{
@@ -146,6 +157,19 @@ func CertifyContextBundle(bundle ContextBundle, markers []StalenessMarker, opts 
 		return ContextCertificate{}, err
 	}
 	return cert, nil
+}
+
+func coverageReportMissing(report *CoverageReport) []string {
+	if report == nil || len(report.Missing) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(report.Missing))
+	for _, id := range report.Missing {
+		if id = strings.TrimSpace(id); id != "" {
+			out = append(out, id)
+		}
+	}
+	return uniqueStrings(out)
 }
 
 // StalenessLookupFunc returns staleness markers for refs relevant to a bundle.

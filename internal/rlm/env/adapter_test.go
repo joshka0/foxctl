@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -451,10 +452,12 @@ func TestReadOnlyAdapterGatherContextAnswerSurfaceOmitsRawEvidence(t *testing.T)
 	})
 
 	out, err := adapter.ExecuteInternal(context.Background(), "gather_context", mustJSON(map[string]any{
-		"query":         "certify context",
-		"lanes":         []string{"context"},
-		"limit":         3,
-		"response_mode": "answer_surface",
+		"query":           "certify context",
+		"task_type":       "subsystem_map",
+		"source_profiles": []string{"repo_code", "codemaps", "cochange_history"},
+		"lanes":           []string{"context"},
+		"limit":           3,
+		"response_mode":   "answer_surface",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context answer_surface: %v", err)
@@ -482,6 +485,14 @@ func TestReadOnlyAdapterGatherContextAnswerSurfaceOmitsRawEvidence(t *testing.T)
 	loadQueue, ok := out["load_queue"].([]map[string]any)
 	if !ok || len(loadQueue) == 0 || loadQueue[0]["ref"] == "" {
 		t.Fatalf("answer_surface missing load_queue refs: %T %v", out["load_queue"], out["load_queue"])
+	}
+	categories, ok := out["categories"].([]contextengine.ContextCategory)
+	if !ok || len(categories) == 0 {
+		t.Fatalf("answer_surface missing subsystem categories: %T %v", out["categories"], out["categories"])
+	}
+	contract, ok := out["answer_contract"].(map[string]any)
+	if !ok || contract["mode"] != "repo_subsystem_map" {
+		t.Fatalf("answer_contract=%v", out["answer_contract"])
 	}
 }
 
@@ -1573,6 +1584,77 @@ func TestReadOnlyAdapterLocalCodeProbeSearchSymbolInspectUsesDefinition(t *testi
 	}
 	if hits[0].Hit.Symbol != "ReadOnlyAdapter" {
 		t.Fatalf("symbol=%q", hits[0].Hit.Symbol)
+	}
+}
+
+func TestReadOnlyAdapterSubsystemSiblingClosureFindsRequiredRole(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	writeTestFile(t, filepath.Join(workspace, "internal", "context", "contextengine", "context_gather.go"), "package contextengine\n\nfunc GatherContext() {}\n")
+	writeTestFile(t, filepath.Join(workspace, "internal", "context", "contextengine", "context_reduce.go"), "package contextengine\n\nfunc ReduceEvidencePacksToBundle() {}\n")
+	writeTestFile(t, filepath.Join(workspace, "internal", "context", "contextengine", "context_verify.go"), "package contextengine\n\ntype RuntimeCertificate struct{}\n\nfunc CertifyRuntimeBundle() {}\n")
+
+	adapter := NewReadOnlyAdapter(config.Config{}, workspace, "", nil, rlm.Environment{})
+	seeds := []contextengine.CodeSearchHit{
+		{Path: "internal/context/contextengine/context_gather.go", Score: 0.9},
+		{Path: "internal/context/contextengine/context_reduce.go", Score: 0.85},
+	}
+	hits := adapter.localSubsystemSiblingClosureHits(
+		"map the context runtime subsystem",
+		"subsystem_map",
+		[]string{"runtime certification"},
+		seeds,
+		6,
+	)
+	if len(hits) == 0 {
+		t.Fatalf("closure hits empty")
+	}
+	if got := hits[0].Hit.Path; got != "internal/context/contextengine/context_verify.go" {
+		t.Fatalf("top closure hit=%q hits=%+v", got, hits)
+	}
+	if hits[0].Hit.Metadata["candidate_role"] != "structural_support" {
+		t.Fatalf("metadata=%v", hits[0].Hit.Metadata)
+	}
+	matches, ok := hits[0].Hit.Metadata["matched_terms"].([]string)
+	if !ok || !containsString(matches, "certify") {
+		t.Fatalf("matched_terms=%T %v", hits[0].Hit.Metadata["matched_terms"], hits[0].Hit.Metadata["matched_terms"])
+	}
+}
+
+func TestReadOnlyAdapterLiveOverlayFindsUntrackedCoverageFile(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	runGitForTest(t, workspace, "init")
+	writeTestFile(t, filepath.Join(workspace, "internal", "context", "contextengine", "coverage.go"), "package contextengine\n\ntype CoverageRequirement struct{}\n\nfunc selectEvidenceCoverageAware() {}\n")
+
+	adapter := NewReadOnlyAdapter(config.Config{}, workspace, "", nil, rlm.Environment{})
+	hits, err := adapter.liveOverlayCodeSearchHits(context.Background(), "coverage-aware selector", []string{"CoverageRequirement"}, 8)
+	if err != nil {
+		t.Fatalf("liveOverlayCodeSearchHits: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatalf("hits empty")
+	}
+	if got := hits[0].Hit.Path; got != "internal/context/contextengine/coverage.go" {
+		t.Fatalf("top hit=%q hits=%+v", got, hits)
+	}
+	if hits[0].Hit.Metadata["source"] != "live_overlay" {
+		t.Fatalf("metadata=%v", hits[0].Hit.Metadata)
+	}
+	coverageIDs, ok := hits[0].Hit.Metadata["coverage_requirement_ids"].([]string)
+	if !ok || len(coverageIDs) == 0 {
+		t.Fatalf("coverage ids=%T %v", hits[0].Hit.Metadata["coverage_requirement_ids"], hits[0].Hit.Metadata["coverage_requirement_ids"])
+	}
+}
+
+func runGitForTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, string(output))
 	}
 }
 

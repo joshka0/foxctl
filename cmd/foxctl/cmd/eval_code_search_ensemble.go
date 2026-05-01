@@ -515,7 +515,7 @@ func buildCodeSearchEnsembleEvalQuery(evalCase promptEvalCase) string {
 
 func normalizeCodeSearchEvalTaskType(evalCase promptEvalCase) string {
 	switch strings.TrimSpace(evalCase.TaskType) {
-	case "execution_trace", "symbol_inspect", "file_locate", "change_impact", "registration_trace":
+	case "execution_trace", "symbol_inspect", "file_locate", "change_impact", "registration_trace", "architecture_map", "subsystem_map", "integration_surface":
 		return strings.TrimSpace(evalCase.TaskType)
 	default:
 		if len(evalCase.ExpectedPaths) > 0 {

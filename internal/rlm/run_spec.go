@@ -202,7 +202,7 @@ func resolveRunPlanMode(requested PlanMode) (PlanMode, error) {
 		return PlanModeStaged, nil
 	case string(PlanModeHard):
 		return PlanModeHard, nil
-	case string(PlanModeLambda):
+	case string(PlanModeLambda), "lambda":
 		return PlanModeLambda, nil
 	default:
 		return "", fmt.Errorf("rlm: unsupported plan mode %q", requested)

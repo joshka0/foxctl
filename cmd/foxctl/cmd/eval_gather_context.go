@@ -455,6 +455,9 @@ func buildRLMSearchAgentGatherPayload(evalCase promptEvalCase, limit int, maxCon
 	if statuses := gatherContextEvalCaseStringSlice(evalCase, "memory_statuses", nil); len(statuses) > 0 {
 		payload["memory_statuses"] = statuses
 	}
+	if profiles := gatherContextEvalCaseStringSlice(evalCase, "source_profiles", nil); len(profiles) > 0 {
+		payload["source_profiles"] = profiles
+	}
 	return payload
 }
 
@@ -625,6 +628,9 @@ func runSingleGatherContextEval(
 	}
 	if len(evalCase.RequiredFacts) > 0 {
 		payload["required_evidence"] = evalCase.RequiredFacts
+	}
+	if profiles := gatherContextEvalCaseStringSlice(evalCase, "source_profiles", nil); len(profiles) > 0 {
+		payload["source_profiles"] = profiles
 	}
 	if len(effectiveMemoryStatuses) > 0 {
 		payload["memory_statuses"] = effectiveMemoryStatuses

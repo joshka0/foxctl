@@ -15,16 +15,18 @@ type ContextBudget struct {
 
 // GatherContextRequest describes one context gathering operation.
 type GatherContextRequest struct {
-	Query            string                 `json:"query"`
-	Goal             string                 `json:"goal,omitempty"`
-	TaskID           string                 `json:"task_id,omitempty"`
-	TaskType         string                 `json:"task_type,omitempty"`
-	Lanes            []EvidenceLane         `json:"lanes,omitempty"`
-	Limit            int                    `json:"limit,omitempty"`
-	RequiredEvidence []string               `json:"required_evidence,omitempty"`
-	Budget           ContextBudget          `json:"budget,omitempty"`
-	Reduction        BundleReductionOptions `json:"-"`
-	Certification    CertificationOptions   `json:"-"`
+	Query                string                 `json:"query"`
+	Goal                 string                 `json:"goal,omitempty"`
+	TaskID               string                 `json:"task_id,omitempty"`
+	TaskType             string                 `json:"task_type,omitempty"`
+	SourceProfiles       []SourceProfile        `json:"source_profiles,omitempty"`
+	Lanes                []EvidenceLane         `json:"lanes,omitempty"`
+	Limit                int                    `json:"limit,omitempty"`
+	RequiredEvidence     []string               `json:"required_evidence,omitempty"`
+	CoverageRequirements []CoverageRequirement  `json:"coverage_requirements,omitempty"`
+	Budget               ContextBudget          `json:"budget,omitempty"`
+	Reduction            BundleReductionOptions `json:"-"`
+	Certification        CertificationOptions   `json:"-"`
 }
 
 // GatherContextDeps holds retrieval dependencies for GatherContext.
@@ -78,8 +80,14 @@ func GatherContext(ctx context.Context, cfg LaneConfig, deps GatherContextDeps, 
 	if strings.TrimSpace(reduction.TaskType) == "" {
 		reduction.TaskType = strings.TrimSpace(req.TaskType)
 	}
+	if len(reduction.SourceProfiles) == 0 && len(req.SourceProfiles) > 0 {
+		reduction.SourceProfiles = append([]SourceProfile(nil), req.SourceProfiles...)
+	}
 	if len(reduction.RequiredEvidence) == 0 && len(req.RequiredEvidence) > 0 {
 		reduction.RequiredEvidence = cleanRequiredEvidence(req.RequiredEvidence)
+	}
+	if len(reduction.CoverageRequirements) == 0 && len(req.CoverageRequirements) > 0 {
+		reduction.CoverageRequirements = append([]CoverageRequirement(nil), req.CoverageRequirements...)
 	}
 	bundle, err := ReduceEvidencePacksToBundle(query, req.Goal, packs, reduction)
 	if err != nil {

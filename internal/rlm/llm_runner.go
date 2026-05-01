@@ -519,9 +519,9 @@ func toolSurfaceGuidance(tools []Tool) string {
 
 	var guidance []string
 	if has("gather_context") {
-		text := "For repo, memory, task, or mixed context questions, start with gather_context using response_mode=\"answer_surface\" and use its certified answer_seed as the bounded answer context. Copy answer_seed.paths and answer_seed.facts when present rather than re-inferring answers from raw evidence."
+		text := gatherContextModelGuidance(false)
 		if has("load_evidence_ref") {
-			text = "For repo, memory, task, or mixed context questions, start with gather_context using response_mode=\"answer_surface\", copy answer_seed.paths and answer_seed.facts when present, then use load_evidence_ref only to verify a specific load_ref from path_set.must or load_queue. Do not narrow the final answer to only the loaded file."
+			text = gatherContextModelGuidance(true)
 		}
 		guidance = append(guidance, text)
 	}
@@ -553,6 +553,17 @@ func toolSurfaceGuidance(tools []Tool) string {
 	}
 
 	return strings.Join(guidance, "\n")
+}
+
+func gatherContextModelGuidance(hasLoadEvidenceRef bool) string {
+	var b strings.Builder
+	b.WriteString("For repo, memory, task, or mixed context questions, start with gather_context using response_mode=\"answer_surface\".")
+	b.WriteString(" Deterministic gather trust policy: for file_locate, execution_trace, change_impact, symbol/definition lookup, architecture_map, subsystem_map, and integration_surface tasks, if answerable=true, certificate.status is not failed, certificate.required_evidence_ok is not false, answer_seed has paths or categories, and gaps/conflicts are empty, copy answer_seed.paths, answer_seed.categories, and answer_seed.facts directly as the final answer seed. Do not spend extra tool/model turns re-ranking those paths.")
+	b.WriteString(" Fall back to verification or broader retrieval for package-owner/package-anchor questions without categories, broad synthesis beyond the returned map, stale/conflicting evidence, empty answer_seed, required evidence misses, or obvious wrong-scope paths.")
+	if hasLoadEvidenceRef {
+		b.WriteString(" Use load_evidence_ref only to verify a specific load_ref from path_set.must or load_queue; loading one ref must not narrow the final answer to only that file.")
+	}
+	return b.String()
 }
 
 func buildSynthesisSystemPrompt(base string, plan Plan, candidatePaths, phaseNotes []string) string {

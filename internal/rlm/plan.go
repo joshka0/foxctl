@@ -200,7 +200,7 @@ func NormalizePlanMode(value string) PlanMode {
 		return PlanModeStaged
 	case string(PlanModeHard):
 		return PlanModeHard
-	case string(PlanModeLambda):
+	case string(PlanModeLambda), "lambda":
 		return PlanModeLambda
 	default:
 		return PlanModeFree
