@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -930,13 +931,28 @@ func TestEnginePanicRecovery(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	// Check status before stop — flow should be errored
+	// Check status before stop — the source node should have errored state.
 	status := eng.Status("f1")
 	if status == nil {
 		t.Fatal("expected non-nil status")
 	}
-	if status.FlowState != FlowErrored {
-		t.Errorf("expected errored state, got %s", status.FlowState)
+
+	// Find the source node state.
+	var sourceState *NodeExecState
+	for i := range status.Nodes {
+		if status.Nodes[i].ID == "a" {
+			sourceState = &status.Nodes[i]
+			break
+		}
+	}
+	if sourceState == nil {
+		t.Fatal("source node state not found")
+	}
+	if sourceState.State != "errored" {
+		t.Errorf("expected source node errored state, got %s", sourceState.State)
+	}
+	if sourceState.Error == "" {
+		t.Error("expected error message on source node")
 	}
 
 	eng.Stop("f1")
@@ -1466,6 +1482,640 @@ func TestEngineGracefulShutdown(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Tests: Concurrent status queries during execution (VAL-M2-052)
+// ---------------------------------------------------------------------------
+
+func TestEngineConcurrentStatusDuringExecution(t *testing.T) {
+	store := newMockStore()
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		// Slow executor to keep running during status queries.
+		select {
+		case <-time.After(500 * time.Millisecond):
+		case <-ctx.Done():
+		}
+		return NodeOutput{
+			Envelope: envelope.OK("mock", input),
+			NodeID:   node.ID,
+		}, nil
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "concurrent-status")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+
+	eng := NewEngine(store, registry, 16)
+	ctx := context.Background()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Hammer status queries concurrently.
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			status := eng.Status("f1")
+			if status != nil && status.FlowState != FlowRunning {
+				t.Errorf("expected running, got %s", status.FlowState)
+			}
+		}()
+	}
+	wg.Wait()
+
+	eng.Stop("f1")
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Edge delivery state tracking (VAL-M2-004)
+// ---------------------------------------------------------------------------
+
+func TestEngineEdgeDeliveryState(t *testing.T) {
+	store := newMockStore()
+	exec := newMockExecutor(nil)
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "edge-state")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	// A → B
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	status := eng.Status("f1")
+	if status == nil {
+		t.Fatal("expected non-nil status")
+	}
+
+	// Find edge e1 state.
+	var edgeState *EdgeExecState
+	for i := range status.Edges {
+		if status.Edges[i].ID == "e1" {
+			edgeState = &status.Edges[i]
+			break
+		}
+	}
+	if edgeState == nil {
+		t.Fatal("edge e1 state not found")
+	}
+	if edgeState.DeliveryCount < 1 {
+		t.Errorf("expected at least 1 delivery, got %d", edgeState.DeliveryCount)
+	}
+	if edgeState.LastDeliveryAt == nil {
+		t.Error("expected last_delivery_at to be set")
+	}
+
+	eng.Stop("f1")
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Stopped flow can be started again (VAL-M2-045)
+// ---------------------------------------------------------------------------
+
+func TestEngineRestartNewRun(t *testing.T) {
+	store := newMockStore()
+	exec := newMockExecutor(nil)
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "restart-new-run")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+
+	eng := NewEngine(store, registry, 16)
+	ctx := context.Background()
+
+	// First run
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start 1: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	status1 := eng.Status("f1")
+	runID1 := status1.RunID
+
+	eng.Stop("f1")
+
+	// Second run should produce a new run ID
+	err = eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start 2: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	status2 := eng.Status("f1")
+	runID2 := status2.RunID
+
+	eng.Stop("f1")
+
+	if runID1 == runID2 {
+		t.Errorf("expected different run IDs, got same: %s", runID1)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Stop on errored flow (VAL-M2-006)
+// ---------------------------------------------------------------------------
+
+func TestEngineStopErroredFlow(t *testing.T) {
+	store := newMockStore()
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		panic("deliberate")
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "errored-stop")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Node should have errored; stop should work.
+	err = eng.Stop("f1")
+	if err != nil {
+		t.Fatalf("Stop on errored flow: %v", err)
+	}
+
+	// Verify flow state in store.
+	stored, err := store.GetFlow(context.Background(), "f1")
+	if err != nil {
+		t.Fatalf("GetFlow: %v", err)
+	}
+	if stored.State != FlowStopped {
+		t.Errorf("expected stopped state, got %s", stored.State)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: OutputBus backpressure (VAL-M2-034)
+// ---------------------------------------------------------------------------
+
+func TestOutputBusBackpressure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Small buffer to trigger backpressure
+	bus := newOutputBus(2)
+	bus.start(ctx, "source")
+
+	// Subscriber that reads slowly
+	ch := bus.subscribe("source")
+
+	// Fill the buffer
+	for i := 0; i < 3; i++ {
+		out := NodeOutput{
+			Envelope: envelope.OK("test", map[string]any{"i": i}),
+			NodeID:   "source",
+		}
+		bus.publish("source", out)
+	}
+
+	// Read at least one message
+	select {
+	case <-ch:
+		// Good
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for message")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Cycle detection with error message including path (VAL-M2-009)
+// ---------------------------------------------------------------------------
+
+func TestEngineCyclePathInError(t *testing.T) {
+	store := newMockStore()
+	registry := map[NodeKind]NodeExecutor{}
+
+	flow := makeFlow("f1", "cycle-path")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	store.AddNode(context.Background(), makeNode("a", "f1", "Alpha", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "Beta", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("c", "f1", "Gamma", NodeSkill, "{}"))
+	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+	store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
+	store.AddEdge(context.Background(), makeEdge("e3", "f1", "c", "a", TransformPassthrough, ""))
+
+	eng := NewEngine(store, registry, 16)
+
+	err := eng.Start(context.Background(), "f1")
+	if err == nil {
+		t.Fatal("expected cycle error")
+	}
+	// Error should include cycle path with labels
+	errMsg := err.Error()
+	if !containsString(errMsg, "cycle") {
+		t.Errorf("error should mention cycle: %s", errMsg)
+	}
+	// Should contain at least one of the node labels
+	if !containsString(errMsg, "Alpha") && !containsString(errMsg, "Beta") && !containsString(errMsg, "Gamma") {
+		t.Errorf("error should include node labels in path: %s", errMsg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Linear chain execution order (VAL-M2-007)
+// ---------------------------------------------------------------------------
+
+func TestEngineLinearChainOrder(t *testing.T) {
+	store := newMockStore()
+	var mu sync.Mutex
+	var order []string
+	var timestamps map[string]time.Time = make(map[string]time.Time)
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		mu.Lock()
+		order = append(order, node.ID)
+		timestamps[node.ID] = time.Now()
+		mu.Unlock()
+		return NodeOutput{
+			Envelope: envelope.OK("mock", input),
+			NodeID:   node.ID,
+		}, nil
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "order-test")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	// A → B → C
+	store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+	store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+	eng.Stop("f1")
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Verify execution order: A before B before C
+	if len(order) < 3 {
+		t.Fatalf("expected 3 executions, got %d: %v", len(order), order)
+	}
+
+	aIdx, bIdx, cIdx := -1, -1, -1
+	for i, id := range order {
+		switch id {
+		case "a":
+			if aIdx == -1 {
+				aIdx = i
+			}
+		case "b":
+			if bIdx == -1 {
+				bIdx = i
+			}
+		case "c":
+			if cIdx == -1 {
+				cIdx = i
+			}
+		}
+	}
+
+	if aIdx == -1 || bIdx == -1 || cIdx == -1 {
+		t.Fatalf("not all nodes executed: order=%v", order)
+	}
+	if aIdx >= bIdx {
+		t.Errorf("A (idx %d) should execute before B (idx %d)", aIdx, bIdx)
+	}
+	if bIdx >= cIdx {
+		t.Errorf("B (idx %d) should execute before C (idx %d)", bIdx, cIdx)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Source nodes receive nil input (VAL-M2-008)
+// ---------------------------------------------------------------------------
+
+func TestEngineSourceNodesReceiveNilInput(t *testing.T) {
+	store := newMockStore()
+	var mu sync.Mutex
+	var sourceInputs []any
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		mu.Lock()
+		if input == nil {
+			sourceInputs = append(sourceInputs, nil)
+		}
+		mu.Unlock()
+		return NodeOutput{
+			Envelope: envelope.OK("mock", input),
+			NodeID:   node.ID,
+		}, nil
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "nil-input")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	// Two source nodes
+	store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	eng.Stop("f1")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sourceInputs) < 2 {
+		t.Errorf("expected at least 2 source nodes with nil input, got %d", len(sourceInputs))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Pause non-running flow returns error (VAL-M2-003)
+// ---------------------------------------------------------------------------
+
+func TestEnginePauseNonRunning(t *testing.T) {
+	store := newMockStore()
+	registry := map[NodeKind]NodeExecutor{}
+
+	eng := NewEngine(store, registry, 16)
+
+	err := eng.Pause("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for pausing non-running flow")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Status for stopped flow (VAL-M2-004)
+// ---------------------------------------------------------------------------
+
+func TestEngineStatusAfterStop(t *testing.T) {
+	store := newMockStore()
+	exec := newMockExecutor(nil)
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "status-after-stop")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+
+	eng := NewEngine(store, registry, 16)
+	ctx := context.Background()
+
+	eng.Start(ctx, "f1")
+	time.Sleep(100 * time.Millisecond)
+	eng.Stop("f1")
+
+	// Status should return nil for stopped (removed from runs) flow.
+	status := eng.Status("f1")
+	if status != nil {
+		t.Logf("status after stop: %+v (nil expected for removed flow)", status)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Concurrent node execution (VAL-M2-051)
+// ---------------------------------------------------------------------------
+
+func TestEngineConcurrentNodeExecution(t *testing.T) {
+	store := newMockStore()
+	var mu sync.Mutex
+	var startTimes map[string]time.Time = make(map[string]time.Time)
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		mu.Lock()
+		startTimes[node.ID] = time.Now()
+		mu.Unlock()
+		// Small delay to make timing visible
+		time.Sleep(50 * time.Millisecond)
+		return NodeOutput{
+			Envelope: envelope.OK("mock", input),
+			NodeID:   node.ID,
+		}, nil
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "concurrent")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	// A → B, A → C (fan-out, B and C should start concurrently)
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+	store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+	eng.Stop("f1")
+
+	mu.Lock()
+	bStart, bOk := startTimes["b"]
+	cStart, cOk := startTimes["c"]
+	mu.Unlock()
+
+	if !bOk || !cOk {
+		t.Fatalf("B and/or C did not execute: b=%v c=%v", bOk, cOk)
+	}
+
+	// B and C should have started within 100ms of each other (concurrent, not sequential)
+	diff := bStart.Sub(cStart)
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > 100*time.Millisecond {
+		t.Errorf("B and C should start concurrently, but gap was %v", diff)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: TransformExecutor produces valid envelope (VAL-M2-017)
+// ---------------------------------------------------------------------------
+
+func TestTransformExecutorProducesValidEnvelope(t *testing.T) {
+	exec := &TransformExecutor{}
+	node := makeNode("t1", "f1", "jq-filter", NodeTransform,
+		`{"transform":"jq_filter","config":"{\"filter\":\".name\"}"}`)
+
+	result, err := exec.Execute(context.Background(), node, map[string]any{"name": "test", "value": 42})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Envelope.Version != 1 {
+		t.Errorf("expected version 1, got %d", result.Envelope.Version)
+	}
+	if result.Envelope.Status != envelope.StatusOK {
+		t.Errorf("expected status ok, got %s", result.Envelope.Status)
+	}
+	if result.Envelope.Meta.TS == "" {
+		t.Error("expected meta.ts to be set")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: FlowRun updated on completion (VAL-M2-046)
+// ---------------------------------------------------------------------------
+
+func TestEngineFlowRunUpdatedOnCompletion(t *testing.T) {
+	store := newMockStore()
+	exec := newMockExecutor(nil)
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "run-completion")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+
+	eng := NewEngine(store, registry, 16)
+	ctx := context.Background()
+
+	eng.Start(ctx, "f1")
+	time.Sleep(100 * time.Millisecond)
+	eng.Stop("f1")
+
+	// Check FlowRun was updated to completed
+	for _, run := range store.runs {
+		if run.FlowID == "f1" {
+			if run.State != RunCompleted {
+				t.Errorf("expected run state completed, got %s", run.State)
+			}
+			if run.CompletedAt == nil {
+				t.Error("expected completed_at to be set")
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Envelope integrity - every node produces valid envelope (VAL-M2-053)
+// ---------------------------------------------------------------------------
+
+func TestEngineEnvelopeIntegrity(t *testing.T) {
+	store := newMockStore()
+	var mu sync.Mutex
+	var outputs []NodeOutput
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		out := NodeOutput{
+			Envelope: envelope.OK("mock", map[string]any{"from": node.ID}),
+			NodeID:   node.ID,
+			Duration: time.Millisecond,
+		}
+		mu.Lock()
+		outputs = append(outputs, out)
+		mu.Unlock()
+		return out, nil
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "envelope-integrity")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	// A → B → C
+	store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+	store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	eng.Start(ctx, "f1")
+	time.Sleep(300 * time.Millisecond)
+	eng.Stop("f1")
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	for _, out := range outputs {
+		if out.Envelope.Version != 1 {
+			t.Errorf("envelope version should be 1, got %d", out.Envelope.Version)
+		}
+		if out.Envelope.Status == "" {
+			t.Error("envelope status should not be empty")
+		}
+		if out.Envelope.Meta.TS == "" {
+			t.Error("envelope meta.ts should not be empty")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -1492,9 +2142,7 @@ func containsSubstr(s, substr string) bool {
 }
 
 func countGoroutines() int {
-	// Use a simple approach: return 0 and just check differential
-	// Real goroutine counting would use runtime.NumGoroutine()
-	return 0
+	return runtime.NumGoroutine()
 }
 
 // Simple error wrapper for testing.

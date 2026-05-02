@@ -23,6 +23,7 @@ type evaluatorConfig struct {
 	condition    Condition
 	pauseCh      chan struct{} // signal to pause
 	resumeCh     chan struct{} // signal to resume
+	onDeliver    func(edgeID string) // called after successful delivery (for state tracking)
 }
 
 // startEvaluator starts a goroutine that subscribes to the source node's
@@ -123,6 +124,11 @@ func (cfg evaluatorConfig) executeTarget(ctx context.Context, input NodeOutput) 
 	}
 
 	cfg.bus.publish(cfg.targetNodeID, result)
+
+	// Notify state tracker of successful delivery.
+	if cfg.onDeliver != nil {
+		cfg.onDeliver(cfg.edge.ID)
+	}
 }
 
 // ---------------------------------------------------------------------------

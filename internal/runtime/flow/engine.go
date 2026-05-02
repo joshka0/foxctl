@@ -27,18 +27,19 @@ type Engine struct {
 
 	mu   sync.Mutex
 	runs map[string]*flowRun // flowID -> active run
-	bus  *OutputBus
 }
 
 // flowRun tracks the runtime state of an active flow execution.
+// Each run owns its OutputBus, so stopping one flow does not affect others.
 type flowRun struct {
 	flowID   string
 	cancel   context.CancelFunc
 	state    FlowState
 	runID    string
 	storeRun FlowRun
+	bus      *OutputBus // per-run bus
 
-	// Per-node and per-edge state.
+	// Per-node and per-edge state (guarded by Engine.mu).
 	nodeStates map[string]NodeExecState
 	edgeState  map[string]EdgeExecState
 
@@ -84,7 +85,6 @@ func NewEngine(store Store, executors map[NodeKind]NodeExecutor, busSize int) *E
 		executors: executors,
 		busSize:   busSize,
 		runs:      make(map[string]*flowRun),
-		bus:       newOutputBus(busSize),
 	}
 }
 
@@ -106,7 +106,7 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 	}
 
 	// Load flow from store.
-	flow, err := e.store.GetFlow(ctx, flowID)
+	fl, err := e.store.GetFlow(ctx, flowID)
 	if err != nil {
 		return fmt.Errorf("flow: start: %w", err)
 	}
@@ -140,6 +140,9 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 	// Create a new context for this flow run.
 	runCtx, cancel := context.WithCancel(ctx)
 
+	// Create per-run OutputBus.
+	bus := newOutputBus(e.busSize)
+
 	// Create FlowRun record.
 	now := time.Now().UTC()
 	runID := ulid.Make().String()
@@ -154,8 +157,8 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 	}
 
 	// Update flow state to running.
-	flow.State = FlowRunning
-	e.store.UpdateFlow(runCtx, flow)
+	fl.State = FlowRunning
+	e.store.UpdateFlow(runCtx, fl)
 
 	// Initialize per-node and per-edge state.
 	nodeStates := make(map[string]NodeExecState)
@@ -177,13 +180,14 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 		}
 	}
 
-	// Create the flow run tracking object.
+	// Create the flow run tracking object with its own bus.
 	run := &flowRun{
 		flowID:     flowID,
 		cancel:     cancel,
 		state:      FlowRunning,
 		runID:      runID,
 		storeRun:   storeRun,
+		bus:        bus,
 		nodeStates: nodeStates,
 		edgeState:  edgeState,
 		pauseChs:   make(map[string]chan struct{}),
@@ -193,7 +197,7 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 
 	// Start the output bus for all nodes.
 	for _, n := range nodes {
-		e.bus.start(runCtx, n.ID)
+		bus.start(runCtx, n.ID)
 	}
 
 	// Start edge evaluators.
@@ -208,9 +212,9 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 		// Parse condition.
 		var cond Condition
 		if edge.Condition != "" {
-			var err error
-			cond, err = ParseCondition(edge.Condition)
-			if err != nil {
+			var pErr error
+			cond, pErr = ParseCondition(edge.Condition)
+			if pErr != nil {
 				cond = AlwaysCondition // Fallback to always pass on parse error
 			}
 		}
@@ -224,21 +228,27 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 			edge:         edge,
 			sourceNodeID: edge.FromNodeID,
 			targetNodeID: edge.ToNodeID,
-			bus:          e.bus,
+			bus:          bus,
 			executor:     executor,
 			targetNode:   targetNode,
 			condition:    cond,
 			pauseCh:      pauseCh,
 			resumeCh:     resumeCh,
+			onDeliver: func(edgeID string) {
+				e.mu.Lock()
+				if r, ok := e.runs[flowID]; ok {
+					if es, ok := r.edgeState[edgeID]; ok {
+						es.DeliveryCount++
+						now := time.Now().UTC()
+						es.LastDeliveryAt = &now
+						r.edgeState[edgeID] = es
+					}
+				}
+				e.mu.Unlock()
+			},
 		}
 
 		startEvaluator(runCtx, cfg)
-
-		// Mark evaluator target node as running
-		if ns, ok := run.nodeStates[edge.ToNodeID]; ok {
-			ns.State = "running"
-			run.nodeStates[edge.ToNodeID] = ns
-		}
 	}
 
 	// Start source node executors.
@@ -248,34 +258,23 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 			continue
 		}
 
-		// Mark source as running
+		// Mark source as running.
 		if ns, ok := run.nodeStates[src.ID]; ok {
 			ns.State = "running"
 			run.nodeStates[src.ID] = ns
 		}
 
 		go func(node FlowNode) {
-			result := executeSourceWithResult(runCtx, executor, node, e.bus)
+			result := executeSourceWithResult(runCtx, executor, node, bus)
 
 			// Update node state based on result.
 			e.mu.Lock()
 			if r, ok := e.runs[flowID]; ok {
 				if ns, ok := r.nodeStates[node.ID]; ok {
+					ns.Duration = result.Duration.Milliseconds()
 					if result.Envelope.Status == envelope.StatusError {
 						ns.State = "errored"
 						ns.Error = result.Envelope.Error.Message
-						// Transition flow to errored state.
-						r.state = FlowErrored
-						f, ferr := e.store.GetFlow(context.Background(), flowID)
-						if ferr == nil {
-							f.State = FlowErrored
-							e.store.UpdateFlow(context.Background(), f)
-						}
-						now := time.Now().UTC()
-						r.storeRun.State = RunFailed
-						r.storeRun.Error = result.Envelope.Error.Message
-						r.storeRun.CompletedAt = &now
-						e.store.UpdateRun(context.Background(), r.storeRun)
 					} else {
 						ns.State = "completed"
 					}
@@ -285,9 +284,6 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 			e.mu.Unlock()
 		}(src)
 	}
-
-	// Monitor for flow completion in the background.
-	go e.monitorCompletion(runCtx, flowID, nodes)
 
 	return nil
 }
@@ -308,29 +304,26 @@ func (e *Engine) stopLocked(flowID string, state FlowState) error {
 		return fmt.Errorf("flow: %s not running", flowID)
 	}
 
-	// Check if already stopped or errored.
+	// Allow stopping errored flows, but reject already-stopped.
 	if run.state == FlowStopped {
 		return fmt.Errorf("flow: %s already stopped", flowID)
-	}
-	if run.state == FlowErrored {
-		// Allow stopping errored flows.
 	}
 
 	// Remove from active runs to prevent re-stop.
 	delete(e.runs, flowID)
 
-	// Cancel the context to stop all goroutines.
+	// Cancel the context to stop all goroutines (evaluators, dispatch loops).
 	run.cancel()
 
-	// Stop bus channels for all nodes.
-	e.bus.stopAll()
+	// Stop per-run bus channels.
+	run.bus.stopAll()
 
 	// Update flow state in store.
 	now := time.Now().UTC()
-	flow, err := e.store.GetFlow(context.Background(), flowID)
+	fl, err := e.store.GetFlow(context.Background(), flowID)
 	if err == nil {
-		flow.State = state
-		e.store.UpdateFlow(context.Background(), flow)
+		fl.State = state
+		e.store.UpdateFlow(context.Background(), fl)
 	}
 
 	// Update FlowRun.
@@ -338,7 +331,7 @@ func (e *Engine) stopLocked(flowID string, state FlowState) error {
 	run.storeRun.CompletedAt = &now
 	e.store.UpdateRun(context.Background(), run.storeRun)
 
-	// Update node states.
+	// Update node states: running nodes become idle (stopped before completion).
 	for id, ns := range run.nodeStates {
 		if ns.State == "running" {
 			ns.State = "idle"
@@ -373,10 +366,10 @@ func (e *Engine) Pause(flowID string) error {
 	run.state = FlowPaused
 
 	// Update flow state in store.
-	flow, err := e.store.GetFlow(context.Background(), flowID)
+	fl, err := e.store.GetFlow(context.Background(), flowID)
 	if err == nil {
-		flow.State = FlowPaused
-		e.store.UpdateFlow(context.Background(), flow)
+		fl.State = FlowPaused
+		e.store.UpdateFlow(context.Background(), fl)
 	}
 
 	return nil
@@ -401,10 +394,10 @@ func (e *Engine) resumeLocked(flowID string) error {
 	run.state = FlowRunning
 
 	// Update flow state in store.
-	flow, err := e.store.GetFlow(context.Background(), flowID)
+	fl, err := e.store.GetFlow(context.Background(), flowID)
 	if err == nil {
-		flow.State = FlowRunning
-		e.store.UpdateFlow(context.Background(), flow)
+		fl.State = FlowRunning
+		e.store.UpdateFlow(context.Background(), fl)
 	}
 
 	return nil
@@ -435,45 +428,6 @@ func (e *Engine) Status(flowID string) *EngineStatus {
 		Nodes:     nodes,
 		Edges:     edges,
 		RunID:     run.runID,
-	}
-}
-
-// monitorCompletion watches for all source nodes to complete,
-// then checks if the flow should be auto-stopped.
-func (e *Engine) monitorCompletion(ctx context.Context, flowID string, nodes []FlowNode) {
-	// Wait for context cancellation (explicit stop) or a reasonable timeout.
-	// In a production system, this would track actual node completion.
-	<-ctx.Done()
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	run, ok := e.runs[flowID]
-	if !ok {
-		return
-	}
-
-	// If the flow was already stopped/paused/errored by explicit action, skip.
-	if run.state == FlowStopped || run.state == FlowPaused {
-		return
-	}
-
-	// Check if any node errored.
-	for _, ns := range run.nodeStates {
-		if ns.State == "errored" {
-			run.state = FlowErrored
-			flow, err := e.store.GetFlow(context.Background(), flowID)
-			if err == nil {
-				flow.State = FlowErrored
-				e.store.UpdateFlow(context.Background(), flow)
-			}
-			now := time.Now().UTC()
-			run.storeRun.State = RunFailed
-			run.storeRun.Error = "node execution error"
-			run.storeRun.CompletedAt = &now
-			e.store.UpdateRun(context.Background(), run.storeRun)
-			return
-		}
 	}
 }
 
