@@ -2,6 +2,8 @@ package flow
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -519,5 +521,78 @@ func TestNodeOutput(t *testing.T) {
 	}
 	if out.Duration != 150*time.Millisecond {
 		t.Errorf("NodeOutput.Duration = %v, want %v", out.Duration, 150*time.Millisecond)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Flow.Validate() tests
+// ---------------------------------------------------------------------------
+
+func TestFlowValidate(t *testing.T) {
+	t.Run("valid short name", func(t *testing.T) {
+		f := Flow{Name: "test-flow"}
+		if err := f.Validate(); err != nil {
+			t.Errorf("expected nil error for short name, got %v", err)
+		}
+	})
+
+	t.Run("valid 256 char name", func(t *testing.T) {
+		f := Flow{Name: strings.Repeat("a", 256)}
+		if err := f.Validate(); err != nil {
+			t.Errorf("expected nil error for 256-char name, got %v", err)
+		}
+	})
+
+	t.Run("valid 1024 char name", func(t *testing.T) {
+		f := Flow{Name: strings.Repeat("b", 1024)}
+		if err := f.Validate(); err != nil {
+			t.Errorf("expected nil error for 1024-char name, got %v", err)
+		}
+	})
+
+	t.Run("rejects 1025 char name", func(t *testing.T) {
+		f := Flow{Name: strings.Repeat("c", 1025)}
+		err := f.Validate()
+		if err == nil {
+			t.Fatal("expected error for 1025-char name, got nil")
+		}
+		if !errors.Is(err, ErrNameTooLong) {
+			t.Errorf("expected ErrNameTooLong, got %v", err)
+		}
+	})
+
+	t.Run("rejects very long name", func(t *testing.T) {
+		f := Flow{Name: strings.Repeat("d", 5000)}
+		err := f.Validate()
+		if err == nil {
+			t.Fatal("expected error for 5000-char name, got nil")
+		}
+		if !errors.Is(err, ErrNameTooLong) {
+			t.Errorf("expected ErrNameTooLong, got %v", err)
+		}
+	})
+
+	t.Run("empty name passes validation", func(t *testing.T) {
+		// Empty name is allowed by Validate(); the store rejects it via
+		// UNIQUE constraint (empty strings collide).
+		f := Flow{Name: ""}
+		if err := f.Validate(); err != nil {
+			t.Errorf("expected nil error for empty name, got %v", err)
+		}
+	})
+}
+
+func TestMaxFlowNameLen(t *testing.T) {
+	if MaxFlowNameLen != 1024 {
+		t.Errorf("MaxFlowNameLen = %d, want 1024", MaxFlowNameLen)
+	}
+}
+
+func TestErrNameTooLong(t *testing.T) {
+	if ErrNameTooLong == nil {
+		t.Fatal("ErrNameTooLong should not be nil")
+	}
+	if !errors.Is(ErrNameTooLong, ErrNameTooLong) {
+		t.Error("ErrNameTooLong should match itself via errors.Is")
 	}
 }

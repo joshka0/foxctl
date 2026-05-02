@@ -975,6 +975,32 @@ func TestFlowLongName(t *testing.T) {
 			t.Error("expected 256-char name to be stored correctly")
 		}
 	})
+
+	t.Run("rejects name exceeding 1024 chars", func(t *testing.T) {
+		tooLongName := strings.Repeat("x", 1025)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", tooLongName, "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		code := assertValidErrorEnvelope(t, env, "flow/create")
+		if code != string(protocol.ErrorCodeEARG) {
+			t.Errorf("expected EARG for name exceeding max length, got %q", code)
+		}
+		if !strings.Contains(env.Error.Message, "maximum length") {
+			t.Errorf("expected error message to mention maximum length, got %q", env.Error.Message)
+		}
+	})
+
+	t.Run("accepts name at exactly 1024 chars", func(t *testing.T) {
+		boundaryWs := tempWorkspace(t)
+		exactMaxName := strings.Repeat("m", 1024)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", exactMaxName, "--workspace", boundaryWs)
+		env := parseEnvelope(t, stdout)
+		assertValidOKEnvelope(t, env, "flow/create")
+
+		data := env.Data.(map[string]any)
+		if data["name"] != exactMaxName {
+			t.Error("expected 1024-char name to be stored correctly")
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

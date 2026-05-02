@@ -3,10 +3,18 @@ package flow
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // ErrNotFound is returned when a flow, node, edge, or run is not found.
 var ErrNotFound = errors.New("flow: not found")
+
+// MaxFlowNameLen is the maximum allowed length for a flow name.
+// Names exceeding this limit are rejected with ErrNameTooLong.
+const MaxFlowNameLen = 1024
+
+// ErrNameTooLong is returned when a flow name exceeds MaxFlowNameLen.
+var ErrNameTooLong = fmt.Errorf("flow: name exceeds maximum length of %d characters", MaxFlowNameLen)
 
 // Store defines the persistence interface for flow entities.
 //

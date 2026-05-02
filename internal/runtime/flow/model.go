@@ -169,6 +169,14 @@ type Flow struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// Validate checks that the flow has valid field values. Returns nil if valid.
+func (f Flow) Validate() error {
+	if len(f.Name) > MaxFlowNameLen {
+		return ErrNameTooLong
+	}
+	return nil
+}
+
 // FlowNode is a single step in a flow that consumes an envelope and produces one.
 type FlowNode struct {
 	ID       string          `json:"id"`

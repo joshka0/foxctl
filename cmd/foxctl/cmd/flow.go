@@ -252,6 +252,11 @@ func runFlowCreate(cmd *cobra.Command, args []string) error {
 		UpdatedAt:   now,
 	}
 
+	// Validate the flow before persisting.
+	if err := f.Validate(); err != nil {
+		return writeFlowError(cmd, "flow/create", err)
+	}
+
 	created, err := store.CreateFlow(ctx, f)
 	if err != nil {
 		return writeFlowError(cmd, "flow/create", err)
@@ -664,6 +669,8 @@ func writeFlowError(cmd *cobra.Command, command string, err error) error {
 
 	if errors.Is(err, flowmodel.ErrNotFound) {
 		code = protocol.ErrorCodeENotFound
+	} else if errors.Is(err, flowmodel.ErrNameTooLong) {
+		code = protocol.ErrorCodeEARG
 	} else if strings.Contains(msg, "UNIQUE constraint failed") {
 		code = protocol.ErrorCodeEARG
 		msg = "flow already exists with this name in the workspace"
@@ -671,5 +678,3 @@ func writeFlowError(cmd *cobra.Command, command string, err error) error {
 
 	return protocol.WriteError(cmd.OutOrStdout(), command, code, msg, nil)
 }
-
-
