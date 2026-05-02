@@ -183,7 +183,8 @@ func (s *sqlStore) UpdateFlow(ctx context.Context, f flow.Flow) (flow.Flow, erro
 
 func (s *sqlStore) DeleteFlow(ctx context.Context, id string) error {
 	// Delete in order: runs, edges, nodes, then flow.
-	// Foreign keys with CASCADE handle this, but be explicit for safety.
+	// SQLite FK CASCADE handles child deletions (nodes, edges, runs).
+	// RowsAffected=0 means the flow was not found.
 	res, err := s.db.ExecContext(ctx, `DELETE FROM flows WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("flow: delete flow: %w", err)
