@@ -740,6 +740,18 @@ func runFlowStart(cmd *cobra.Command, args []string) error {
 	flowRef := args[0]
 	workspace := flowResolveWorkspace(flowWorkspaceFlag)
 
+	// Try daemon routing first.
+	handled, err := routeFlowViaDaemon(cmd, "start", flowRef)
+	if err != nil {
+		return err
+	}
+	if handled {
+		return nil
+	}
+
+	// Fallback: in-process execution.
+	fmt.Fprintf(cmd.ErrOrStderr(), "flow: using in-process execution (daemon unavailable)\n")
+
 	store, err := openFlowStore(ctx, flowWorkspaceFlag)
 	if err != nil {
 		return writeFlowError(cmd, "flow/start", err)
@@ -864,6 +876,18 @@ func runFlowStop(cmd *cobra.Command, args []string) error {
 	flowRef := args[0]
 	workspace := flowResolveWorkspace(flowWorkspaceFlag)
 
+	// Try daemon routing first.
+	handled, err := routeFlowViaDaemon(cmd, "stop", flowRef)
+	if err != nil {
+		return err
+	}
+	if handled {
+		return nil
+	}
+
+	// Fallback: in-process execution.
+	fmt.Fprintf(cmd.ErrOrStderr(), "flow: using in-process execution (daemon unavailable)\n")
+
 	store, err := openFlowStore(ctx, flowWorkspaceFlag)
 	if err != nil {
 		return writeFlowError(cmd, "flow/stop", err)
@@ -912,6 +936,18 @@ func runFlowPause(cmd *cobra.Command, args []string) error {
 	flowRef := args[0]
 	workspace := flowResolveWorkspace(flowWorkspaceFlag)
 
+	// Try daemon routing first.
+	handled, err := routeFlowViaDaemon(cmd, "pause", flowRef)
+	if err != nil {
+		return err
+	}
+	if handled {
+		return nil
+	}
+
+	// Fallback: in-process execution.
+	fmt.Fprintf(cmd.ErrOrStderr(), "flow: using in-process execution (daemon unavailable)\n")
+
 	store, err := openFlowStore(ctx, flowWorkspaceFlag)
 	if err != nil {
 		return writeFlowError(cmd, "flow/pause", err)
@@ -955,6 +991,18 @@ func runFlowStatus(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	flowRef := args[0]
 	workspace := flowResolveWorkspace(flowWorkspaceFlag)
+
+	// Try daemon routing first.
+	handled, err := routeFlowViaDaemon(cmd, "status", flowRef)
+	if err != nil {
+		return err
+	}
+	if handled {
+		return nil
+	}
+
+	// Fallback: in-process execution.
+	fmt.Fprintf(cmd.ErrOrStderr(), "flow: using in-process execution (daemon unavailable)\n")
 
 	store, err := openFlowStore(ctx, flowWorkspaceFlag)
 	if err != nil {
