@@ -19,6 +19,7 @@ type OutputBus struct {
 	channels    map[string][]chan NodeOutput
 	publishChs  map[string]chan NodeOutput
 	cancelFuncs map[string]context.CancelFunc
+	wg          sync.WaitGroup // tracks running dispatch loops
 }
 
 // newOutputBus creates a new OutputBus with the given per-consumer buffer size.
@@ -45,11 +46,13 @@ func (b *OutputBus) start(ctx context.Context, nodeID string) {
 	b.cancelFuncs[nodeID] = cancel
 	b.mu.Unlock()
 
+	b.wg.Add(1)
 	go b.dispatchLoop(nodeCtx, nodeID, ch)
 }
 
 // dispatchLoop reads from the publish channel and fans out to all subscribers.
 func (b *OutputBus) dispatchLoop(ctx context.Context, nodeID string, source <-chan NodeOutput) {
+	defer b.wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
@@ -71,24 +74,21 @@ func (b *OutputBus) deliver(nodeID string, out NodeOutput) {
 	allSubs := b.channels["__all__"]
 	b.mu.RUnlock()
 
-	for _, ch := range subs {
-		select {
-		case ch <- out:
-		default:
-			// If the channel is full, we still deliver (blocking backpressure)
-			// but we use a select with context awareness in the dispatch loop
-			// to prevent deadlocks on shutdown.
-			ch <- out
+	deliverToSubs := func(chs []chan NodeOutput) {
+		for _, ch := range chs {
+			select {
+			case ch <- out:
+			default:
+				// If the channel is full, we still deliver (blocking backpressure)
+				// but we use a select with context awareness in the dispatch loop
+				// to prevent deadlocks on shutdown.
+				ch <- out
+			}
 		}
 	}
 
-	for _, ch := range allSubs {
-		select {
-		case ch <- out:
-		default:
-			ch <- out
-		}
-	}
+	deliverToSubs(subs)
+	deliverToSubs(allSubs)
 }
 
 // subscribe creates a new subscription channel for the given node's outputs.
@@ -109,7 +109,7 @@ func (b *OutputBus) subscribeAll() <-chan NodeOutput {
 	ch := make(chan NodeOutput, b.bufferSize)
 
 	b.mu.Lock()
-	// Register under a special key that broadcastAll can target.
+	// Register under a special key that deliver can target.
 	const allKey = "__all__"
 	b.channels[allKey] = append(b.channels[allKey], ch)
 	b.mu.Unlock()
@@ -140,44 +140,60 @@ func (b *OutputBus) publish(nodeID string, out NodeOutput) {
 	}
 }
 
-// stop cancels the dispatch loop for the given node and closes all subscriber channels.
+// stop cancels the dispatch loop for the given node, waits for it to exit,
+// and closes all subscriber channels.
 func (b *OutputBus) stop(nodeID string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	cancel := b.cancelFuncs[nodeID]
+	delete(b.cancelFuncs, nodeID)
+	pub := b.publishChs[nodeID]
+	delete(b.publishChs, nodeID)
+	nodeSubs := b.channels[nodeID]
+	delete(b.channels, nodeID)
+	b.mu.Unlock()
 
-	if cancel, ok := b.cancelFuncs[nodeID]; ok {
+	// Cancel dispatch loop.
+	if cancel != nil {
 		cancel()
-		delete(b.cancelFuncs, nodeID)
 	}
-
-	if ch, ok := b.publishChs[nodeID]; ok {
-		close(ch)
-		delete(b.publishChs, nodeID)
+	// Close publish channel so dispatch loop sees !ok.
+	if pub != nil {
+		close(pub)
 	}
-
-	for _, sub := range b.channels[nodeID] {
+	// Wait for dispatch loop to finish before closing subscriber channels.
+	b.wg.Wait()
+	for _, sub := range nodeSubs {
 		close(sub)
 	}
-	delete(b.channels, nodeID)
 }
 
-// stopAll stops all dispatch loops and closes all channels.
+// stopAll stops all dispatch loops, waits for them to exit, and closes all channels.
 func (b *OutputBus) stopAll() {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	for id, cancel := range b.cancelFuncs {
-		cancel()
-		if ch, ok := b.publishChs[id]; ok {
-			close(ch)
-		}
-		for _, sub := range b.channels[id] {
-			close(sub)
-		}
-	}
+	cancels := b.cancelFuncs
+	pubs := b.publishChs
+	subs := b.channels
 	b.cancelFuncs = make(map[string]context.CancelFunc)
 	b.publishChs = make(map[string]chan NodeOutput)
 	b.channels = make(map[string][]chan NodeOutput)
+	b.mu.Unlock()
+
+	// Cancel all dispatch loops.
+	for _, cancel := range cancels {
+		cancel()
+	}
+	// Close publish channels so dispatch loops see !ok and exit.
+	for _, ch := range pubs {
+		close(ch)
+	}
+	// Wait for all dispatch loops to finish before closing subscriber channels.
+	b.wg.Wait()
+	// Close subscriber channels (safe now since no goroutine is sending).
+	for _, chs := range subs {
+		for _, ch := range chs {
+			close(ch)
+		}
+	}
 }
 
 // makeErrorOutput creates a NodeOutput containing an error envelope.
