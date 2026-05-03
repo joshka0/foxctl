@@ -89,6 +89,10 @@ type Store interface {
 	// CreateRun stores a new flow run.
 	CreateRun(ctx context.Context, r FlowRun) (FlowRun, error)
 
+	// GetRun returns the run with the given ID.
+	// Returns ErrNotFound if no run exists with that ID.
+	GetRun(ctx context.Context, id string) (FlowRun, error)
+
 	// UpdateRun updates the mutable fields of a run (state, completed_at,
 	// error).
 	UpdateRun(ctx context.Context, r FlowRun) (FlowRun, error)

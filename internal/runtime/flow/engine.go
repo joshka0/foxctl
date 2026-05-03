@@ -481,6 +481,21 @@ func (e *Engine) ActiveFlowIDs() []string {
 	return ids
 }
 
+// SubscribeOutputs returns a channel that receives all node outputs for the
+// given flow's active run. The channel is closed when the flow run ends or
+// the context is cancelled. Returns nil if the flow is not running.
+func (e *Engine) SubscribeOutputs(flowID string) <-chan NodeOutput {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	run, ok := e.runs[flowID]
+	if !ok || run.bus == nil {
+		return nil
+	}
+
+	return run.bus.subscribeAll()
+}
+
 // ---------------------------------------------------------------------------
 // Topological Sort
 // ---------------------------------------------------------------------------

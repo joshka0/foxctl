@@ -1063,6 +1063,11 @@ var (
 // ---------------------------------------------------------------------------
 
 func TestFlowStart(t *testing.T) {
+	// Disable daemon routing for in-process tests.
+	origAutoStart := flowDaemonAutoStart
+	flowDaemonAutoStart = false
+	defer func() { flowDaemonAutoStart = origAutoStart }()
+
 	// Install a mock executor so we don't need a real foxctl binary.
 	flowEngineRegistry.mu.Lock()
 	flowEngineRegistry.testExecutors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
@@ -1173,6 +1178,10 @@ func TestFlowStart(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFlowStop(t *testing.T) {
+	origAutoStart := flowDaemonAutoStart
+	flowDaemonAutoStart = false
+	defer func() { flowDaemonAutoStart = origAutoStart }()
+
 	flowEngineRegistry.mu.Lock()
 	flowEngineRegistry.testExecutors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
 		flowmodel.NodeSkill:     &mockCLIExecutor{},
@@ -1240,6 +1249,10 @@ func TestFlowStop(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFlowPause(t *testing.T) {
+	origAutoStart := flowDaemonAutoStart
+	flowDaemonAutoStart = false
+	defer func() { flowDaemonAutoStart = origAutoStart }()
+
 	flowEngineRegistry.mu.Lock()
 	flowEngineRegistry.testExecutors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
 		flowmodel.NodeSkill:     &mockCLIExecutor{},
@@ -1309,6 +1322,10 @@ func TestFlowPause(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFlowStatus(t *testing.T) {
+	origAutoStart := flowDaemonAutoStart
+	flowDaemonAutoStart = false
+	defer func() { flowDaemonAutoStart = origAutoStart }()
+
 	flowEngineRegistry.mu.Lock()
 	flowEngineRegistry.testExecutors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
 		flowmodel.NodeSkill:     &mockCLIExecutor{},
@@ -1431,6 +1448,10 @@ func TestFlowStatus(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFlowFullLifecycle(t *testing.T) {
+	origAutoStart := flowDaemonAutoStart
+	flowDaemonAutoStart = false
+	defer func() { flowDaemonAutoStart = origAutoStart }()
+
 	flowEngineRegistry.mu.Lock()
 	flowEngineRegistry.testExecutors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
 		flowmodel.NodeSkill:     &mockCLIExecutor{},

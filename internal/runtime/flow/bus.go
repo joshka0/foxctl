@@ -68,6 +68,7 @@ func (b *OutputBus) dispatchLoop(ctx context.Context, nodeID string, source <-ch
 func (b *OutputBus) deliver(nodeID string, out NodeOutput) {
 	b.mu.RLock()
 	subs := b.channels[nodeID]
+	allSubs := b.channels["__all__"]
 	b.mu.RUnlock()
 
 	for _, ch := range subs {
@@ -80,6 +81,14 @@ func (b *OutputBus) deliver(nodeID string, out NodeOutput) {
 			ch <- out
 		}
 	}
+
+	for _, ch := range allSubs {
+		select {
+		case ch <- out:
+		default:
+			ch <- out
+		}
+	}
 }
 
 // subscribe creates a new subscription channel for the given node's outputs.
@@ -88,6 +97,21 @@ func (b *OutputBus) subscribe(nodeID string) <-chan NodeOutput {
 
 	b.mu.Lock()
 	b.channels[nodeID] = append(b.channels[nodeID], ch)
+	b.mu.Unlock()
+
+	return ch
+}
+
+// subscribeAll creates a subscription channel that receives outputs from all
+// nodes. The returned channel receives copies of every output published by
+// any node on the bus.
+func (b *OutputBus) subscribeAll() <-chan NodeOutput {
+	ch := make(chan NodeOutput, b.bufferSize)
+
+	b.mu.Lock()
+	// Register under a special key that broadcastAll can target.
+	const allKey = "__all__"
+	b.channels[allKey] = append(b.channels[allKey], ch)
 	b.mu.Unlock()
 
 	return ch

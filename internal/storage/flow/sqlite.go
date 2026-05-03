@@ -507,6 +507,11 @@ func (s *sqlStore) UpdateRun(ctx context.Context, r flow.FlowRun) (flow.FlowRun,
 	return s.getRun(ctx, r.ID)
 }
 
+// GetRun returns the run with the given ID.
+func (s *sqlStore) GetRun(ctx context.Context, id string) (flow.FlowRun, error) {
+	return s.getRun(ctx, id)
+}
+
 func (s *sqlStore) getRun(ctx context.Context, id string) (flow.FlowRun, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, flow_id, state, started_at, completed_at, error

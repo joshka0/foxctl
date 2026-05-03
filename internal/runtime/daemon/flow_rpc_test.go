@@ -181,6 +181,16 @@ func (s *mockFlowStore) CreateRun(_ context.Context, r flow.FlowRun) (flow.FlowR
 	return r, nil
 }
 
+func (s *mockFlowStore) GetRun(_ context.Context, id string) (flow.FlowRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.runs[id]
+	if !ok {
+		return flow.FlowRun{}, flow.ErrNotFound
+	}
+	return r, nil
+}
+
 func (s *mockFlowStore) UpdateRun(_ context.Context, r flow.FlowRun) (flow.FlowRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
