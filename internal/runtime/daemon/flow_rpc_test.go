@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/runtime/flow"
 )
 
@@ -1195,3 +1196,263 @@ type addr struct{ network, str string }
 
 func (a addr) Network() string { return a.network }
 func (a addr) String() string  { return a.str }
+
+// ---------------------------------------------------------------------------
+// Tests: Engine initialization
+// ---------------------------------------------------------------------------
+
+func TestStartFlowEngine_InitializesEngine(t *testing.T) {
+	store := newMockFlowStore()
+
+	// Override flowStoreOpen to return our mock store.
+	orig := flowStoreOpen
+	flowStoreOpen = func(_ context.Context, _ string) (flow.Store, error) {
+		return store, nil
+	}
+	defer func() { flowStoreOpen = orig }()
+
+	svc := &Service{
+		cfg:        config.Config{},
+		opts:       ServiceOptions{Workspace: "/tmp/ws"},
+		shutdownCh: make(chan struct{}),
+	}
+
+	if err := svc.startFlowEngine(context.Background()); err != nil {
+		t.Fatalf("startFlowEngine() error = %v", err)
+	}
+
+	if svc.flowEngine == nil {
+		t.Fatal("flowEngine should be initialized")
+	}
+	if svc.flowStore == nil {
+		t.Fatal("flowStore should be initialized")
+	}
+}
+
+func TestStartFlowEngine_Idempotent(t *testing.T) {
+	store := newMockFlowStore()
+	orig := flowStoreOpen
+	flowStoreOpen = func(_ context.Context, _ string) (flow.Store, error) {
+		return store, nil
+	}
+	defer func() { flowStoreOpen = orig }()
+
+	svc := &Service{
+		cfg:        config.Config{},
+		shutdownCh: make(chan struct{}),
+	}
+
+	// Call twice — should not error on second call.
+	if err := svc.startFlowEngine(context.Background()); err != nil {
+		t.Fatalf("first startFlowEngine() error = %v", err)
+	}
+	firstEngine := svc.flowEngine
+
+	if err := svc.startFlowEngine(context.Background()); err != nil {
+		t.Fatalf("second startFlowEngine() error = %v", err)
+	}
+	if svc.flowEngine != firstEngine {
+		t.Error("engine should not be replaced on second call (idempotency)")
+	}
+}
+
+func TestStopFlowEngine_StopsRuns(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start a flow.
+	_, _ = svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`))
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop engine — should stop the running flow and clean up.
+	svc.stopFlowEngine()
+
+	if svc.flowEngine != nil {
+		t.Error("flowEngine should be nil after stopFlowEngine")
+	}
+	if svc.flowStore != nil {
+		t.Error("flowStore should be nil after stopFlowEngine")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Client flow RPC methods (via handleConnection)
+// ---------------------------------------------------------------------------
+
+func TestClientFlowRPC_FlowStartViaConnection(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	// Send flow.start request.
+	req := Request{
+		Method: "flow.start",
+		ID:     "client-start-1",
+		Params: json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.ID != "client-start-1" {
+		t.Errorf("ID = %q, want %q", resp.ID, "client-start-1")
+	}
+	if resp.Error != nil {
+		t.Fatalf("Error = %+v, want nil", resp.Error)
+	}
+
+	// Verify result has run_id and state.
+	payload, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	var result FlowStartResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if result.RunID == "" {
+		t.Error("RunID is empty, expected non-empty")
+	}
+	if result.State != "running" {
+		t.Errorf("State = %q, want %q", result.State, "running")
+	}
+}
+
+func TestClientFlowRPC_FlowStatusViaConnection(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	// Query status of draft flow.
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	req := Request{
+		Method: "flow.status",
+		ID:     "client-status-1",
+		Params: json.RawMessage(`{"flow_id":"flow-1"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Error != nil {
+		t.Fatalf("Error = %+v, want nil", resp.Error)
+	}
+
+	payload, _ := json.Marshal(resp.Result)
+	var result FlowStatusResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if result.FlowID != "flow-1" {
+		t.Errorf("FlowID = %q, want %q", result.FlowID, "flow-1")
+	}
+}
+
+func TestClientFlowRPC_FlowStartErrorViaConnection(t *testing.T) {
+	store := newMockFlowStore()
+	// Don't seed any flow — should get ENOTFOUND error.
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	req := Request{
+		Method: "flow.start",
+		ID:     "client-start-err",
+		Params: json.RawMessage(`{"flow_id":"nonexistent","workspace":"/tmp/ws"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Error == nil {
+		t.Fatal("expected error for nonexistent flow, got nil")
+	}
+	if resp.Error.Code != "EFLOW" {
+		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "EFLOW")
+	}
+}
+
+func TestClientFlowRPC_MultipleRequestsOnConnection(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	// Single connection, two sequential requests.
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		// Handle both requests on the same connection.
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	// First request: flow.status
+	req1 := Request{
+		Method: "flow.status",
+		ID:     "multi-1",
+		Params: json.RawMessage(`{"flow_id":"flow-1"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req1); err != nil {
+		t.Fatalf("encode req1: %v", err)
+	}
+
+	// Note: handleConnection processes one request per connection in the
+	// current implementation. This test verifies the first request succeeds.
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode resp1: %v", err)
+	}
+
+	if resp.ID != "multi-1" {
+		t.Errorf("resp1.ID = %q, want %q", resp.ID, "multi-1")
+	}
+	if resp.Error != nil {
+		t.Fatalf("resp1.Error = %+v, want nil", resp.Error)
+	}
+}

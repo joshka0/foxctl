@@ -498,6 +498,119 @@ func (c *Client) EnsureRunningContext(ctx context.Context) error {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Flow RPC Client Methods
+// ---------------------------------------------------------------------------
+
+// FlowStart starts a flow execution via the daemon.
+func (c *Client) FlowStart(flowID, workspace string) (*FlowStartResult, error) {
+	params := FlowStartParams{
+		FlowID:    flowID,
+		Workspace: workspace,
+	}
+
+	resp, err := c.call("flow.start", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result FlowStartResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
+// FlowStop stops a running or paused flow via the daemon.
+func (c *Client) FlowStop(flowID string) (*FlowStopResult, error) {
+	params := FlowStopParams{
+		FlowID: flowID,
+	}
+
+	resp, err := c.call("flow.stop", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result FlowStopResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
+// FlowPause pauses a running flow via the daemon.
+func (c *Client) FlowPause(flowID string) (*FlowPauseResult, error) {
+	params := FlowPauseParams{
+		FlowID: flowID,
+	}
+
+	resp, err := c.call("flow.pause", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result FlowPauseResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
+// FlowStatus returns the current status of a flow via the daemon.
+func (c *Client) FlowStatus(flowID string) (*FlowStatusResult, error) {
+	params := FlowStatusParams{
+		FlowID: flowID,
+	}
+
+	resp, err := c.call("flow.status", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result FlowStatusResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
 // marshalResult marshals the given value to JSON and returns the resulting bytes.
 // If marshaling fails, the error is wrapped with context "marshal result".
 func marshalResult(v any) ([]byte, error) {

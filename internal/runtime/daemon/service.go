@@ -44,6 +44,7 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/contextbuffer"
 	"github.com/joshka0/foxctl/internal/storage/coordination"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	flowstore "github.com/joshka0/foxctl/internal/storage/flow"
 	"github.com/joshka0/foxctl/internal/storage/mailbox"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/joshka0/foxctl/internal/storage/queue"
@@ -342,6 +343,12 @@ func (s *Service) startLeaderWorkers(ctx context.Context) error {
 			firstErr = err
 		}
 	}
+	if err := s.startFlowEngine(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: flow engine failed to start: %v\n", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	return firstErr
 }
@@ -352,6 +359,7 @@ func (s *Service) stopLeaderWorkers() {
 	s.stopFileSummaryWorker()
 	s.stopAgentOrchestration()
 	s.stopACAMaintenanceLoop()
+	s.stopFlowEngine()
 }
 
 func (s *Service) stopLeaderLease(ctx context.Context) {
@@ -2684,6 +2692,170 @@ func (s *Service) stopAllFlowRuns() {
 			fmt.Fprintf(os.Stderr, "warning: failed to stop flow %s during shutdown: %v\n", flowID, err)
 		}
 	}
+}
+
+// startFlowEngine initializes the flow engine with a SQLite store.
+// Called during leader worker startup.
+func (s *Service) startFlowEngine(ctx context.Context) error {
+	s.flowMu.Lock()
+	defer s.flowMu.Unlock()
+
+	// Idempotency: allow leader transitions to call start repeatedly.
+	if s.flowEngine != nil {
+		return nil
+	}
+
+	// Open the flow SQLite store.
+	store, err := flowStoreOpen(ctx, s.cfg.Storage.Root)
+	if err != nil {
+		return fmt.Errorf("open flow store: %w", err)
+	}
+
+	// Build the executor registry. Start with a skill executor that routes
+	// through the daemon's skill resolver (the same path as `foxctl run`).
+	executors := map[flow.NodeKind]flow.NodeExecutor{
+		flow.NodeSkill:    &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: s.opts.Workspace},
+		flow.NodeTransform: &passthroughExecutor{},
+	}
+
+	engine := flow.NewEngine(store, executors, 0)
+
+	s.flowEngine = engine
+	s.flowStore = store
+
+	fmt.Fprintf(os.Stderr, "flow engine: initialized\n")
+	return nil
+}
+
+// stopFlowEngine stops all active flow runs and closes the store.
+// Called during leader worker shutdown.
+func (s *Service) stopFlowEngine() {
+	s.stopAllFlowRuns()
+
+	s.flowMu.Lock()
+	defer s.flowMu.Unlock()
+
+	if s.flowStore != nil {
+		s.flowStore.Close()
+		s.flowStore = nil
+	}
+	s.flowEngine = nil
+}
+
+// flowStoreOpen opens the flow SQLite store. Extracted as a package-level
+// variable for testability (tests can override with mock stores).
+var flowStoreOpen = func(ctx context.Context, root string) (flow.Store, error) {
+	return flowStoreOpenImpl(ctx, root)
+}
+
+func flowStoreOpenImpl(ctx context.Context, root string) (flow.Store, error) {
+	return flowstore.Open(ctx, root)
+}
+
+// daemonSkillExecutor executes skill nodes by delegating to the daemon's
+// skill resolver and runner pipeline.
+type daemonSkillExecutor struct {
+	resolver  *SkillResolver
+	cfg       config.Config
+	workspace string
+}
+
+func (e *daemonSkillExecutor) Execute(ctx context.Context, node flow.FlowNode, input any) (flow.NodeOutput, error) {
+	// Extract skill name from node config.
+	var cfg struct {
+		Skill string          `json:"skill"`
+		Input json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(node.Config, &cfg); err != nil {
+		return flow.NodeOutput{}, fmt.Errorf("parse skill node config: %w", err)
+	}
+
+	if cfg.Skill == "" {
+		return flow.NodeOutput{}, fmt.Errorf("skill node %s: missing skill name", node.ID)
+	}
+
+	// Resolve skill handle.
+	handle, err := e.resolver.Resolve(cfg.Skill)
+	if err != nil {
+		return flow.NodeOutput{}, fmt.Errorf("resolve skill %s: %w", cfg.Skill, err)
+	}
+
+	// Build input envelope: use node config input if provided, else pass through.
+	skillInput := cfg.Input
+	if len(skillInput) == 0 {
+		if raw, ok := input.(json.RawMessage); ok && len(raw) > 0 {
+			skillInput = raw
+		} else if input != nil {
+			b, _ := json.Marshal(input)
+			skillInput = b
+		} else {
+			skillInput = []byte("{}")
+		}
+	}
+
+	// Execute skill.
+	start := time.Now()
+	extraEnv := []string{}
+	if e.workspace != "" {
+		extraEnv = append(extraEnv, "FOXCTL_WORKSPACE="+e.workspace)
+	}
+
+	stdout, stderr, err := runner.RunWithOptions(ctx, runner.RunOptions{
+		Manifest:     handle.Manifest,
+		ArtifactPath: handle.ArtifactPath,
+		Input:        skillInput,
+		ExtraEnv:     extraEnv,
+	})
+
+	duration := time.Since(start)
+
+	if err != nil {
+		errMsg := err.Error()
+		if len(stderr) > 0 {
+			errMsg = fmt.Sprintf("%s: %s", err, string(stderr))
+		}
+		return flow.NodeOutput{
+			Envelope: envelope.Error(cfg.Skill, "EEXEC", errMsg, nil),
+			Duration: duration,
+			NodeID:   node.ID,
+		}, nil
+	}
+
+	if len(stdout) == 0 {
+		return flow.NodeOutput{
+			Envelope: envelope.OK(cfg.Skill, nil),
+			Duration: duration,
+			NodeID:   node.ID,
+		}, nil
+	}
+
+	// Parse stdout as envelope.
+	var env envelope.Envelope
+	if jsonErr := json.Unmarshal(stdout, &env); jsonErr == nil && env.Version == 1 {
+		return flow.NodeOutput{
+			Envelope: env,
+			Duration: duration,
+			NodeID:   node.ID,
+		}, nil
+	}
+
+	// Fallback: wrap raw output as data.
+	return flow.NodeOutput{
+		Envelope: envelope.OK(cfg.Skill, map[string]any{"output": string(stdout)}),
+		Duration: duration,
+		NodeID:   node.ID,
+	}, nil
+}
+
+// passthroughExecutor is a no-op transform executor that passes input through unchanged.
+type passthroughExecutor struct{}
+
+func (e *passthroughExecutor) Execute(_ context.Context, node flow.FlowNode, input any) (flow.NodeOutput, error) {
+	return flow.NodeOutput{
+		Envelope: envelope.OK("transform/"+node.Label, input),
+		Duration: time.Millisecond,
+		NodeID:   node.ID,
+	}, nil
 }
 
 // resolveLLMConfig returns the LLM provider, API key, and model from centralized config.
