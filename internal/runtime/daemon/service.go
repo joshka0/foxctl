@@ -696,28 +696,28 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 	case "flow.start":
 		result, err := s.handleFlowStart(ctx, req.Params)
 		if err != nil {
-			resp.Error = &Error{Code: "EFLOW", Message: err.Error()}
+			resp.Error = &Error{Code: flowErrorCode(err), Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
 	case "flow.stop":
 		result, err := s.handleFlowStop(req.Params)
 		if err != nil {
-			resp.Error = &Error{Code: "EFLOW", Message: err.Error()}
+			resp.Error = &Error{Code: flowErrorCode(err), Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
 	case "flow.pause":
 		result, err := s.handleFlowPause(req.Params)
 		if err != nil {
-			resp.Error = &Error{Code: "EFLOW", Message: err.Error()}
+			resp.Error = &Error{Code: flowErrorCode(err), Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
 	case "flow.status":
 		result, err := s.handleFlowStatus(req.Params)
 		if err != nil {
-			resp.Error = &Error{Code: "EFLOW", Message: err.Error()}
+			resp.Error = &Error{Code: flowErrorCode(err), Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
@@ -2493,6 +2493,46 @@ func daemonizeArgs(argv []string) []string {
 
 // --- Flow RPC Handlers ---
 
+// flowRPCError is a typed error that carries a specific RPC error code.
+// Flow handlers return these so the switch in handleConnection can map to
+// the correct error code (ENOTFOUND, EARG, EALREADY, etc.).
+type flowRPCError struct {
+	Code    string
+	Message string
+}
+
+func (e *flowRPCError) Error() string { return e.Message }
+
+// flowErrorCodes maps Go error substrings from the engine/store layer to
+// RPC-level error codes.  The switch in handleConnection uses this to
+// preserve the semantic error code instead of the generic EFLOW.
+func flowErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	// Check for typed flowRPCError first.
+	var fe *flowRPCError
+	if errors.As(err, &fe) {
+		return fe.Code
+	}
+	// Fallback: inspect the error message for known patterns.
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "not found"):
+		return "ENOTFOUND"
+	case strings.Contains(msg, "already running"):
+		return "EALREADY"
+	case strings.Contains(msg, "not running") || strings.Contains(msg, "already stopped"):
+		return "ESTATE"
+	case strings.Contains(msg, "cycle detected"):
+		return "ECYCLE"
+	case strings.Contains(msg, "no nodes") || strings.Contains(msg, "no source nodes"):
+		return "EINVALID"
+	default:
+		return "EFLOW"
+	}
+}
+
 // FlowStartParams are the parameters for flow.start.
 type FlowStartParams struct {
 	FlowID    string `json:"flow_id"`
@@ -2509,7 +2549,7 @@ type FlowStartResult struct {
 // handleFlowStart starts a flow execution via the engine.
 func (s *Service) handleFlowStart(ctx context.Context, params json.RawMessage) (*FlowStartResult, error) {
 	if s.flowEngine == nil {
-		return nil, errors.New("flow engine not initialized")
+		return nil, &flowRPCError{Code: "EFLOW", Message: "flow engine not initialized"}
 	}
 
 	var p FlowStartParams
@@ -2518,11 +2558,26 @@ func (s *Service) handleFlowStart(ctx context.Context, params json.RawMessage) (
 	}
 
 	if strings.TrimSpace(p.FlowID) == "" {
-		return nil, errors.New("flow_id is required")
+		return nil, &flowRPCError{Code: "EARG", Message: "flow_id is required"}
 	}
 
 	if err := s.flowEngine.Start(ctx, p.FlowID); err != nil {
-		return nil, err
+		// Map engine errors to typed RPC errors.
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "not found"):
+			return nil, &flowRPCError{Code: "ENOTFOUND", Message: errMsg}
+		case strings.Contains(errMsg, "already running"):
+			return nil, &flowRPCError{Code: "EALREADY", Message: errMsg}
+		case strings.Contains(errMsg, "cycle detected"):
+			return nil, &flowRPCError{Code: "ECYCLE", Message: errMsg}
+		case strings.Contains(errMsg, "no nodes"):
+			return nil, &flowRPCError{Code: "EINVALID", Message: errMsg}
+		case strings.Contains(errMsg, "no source nodes"):
+			return nil, &flowRPCError{Code: "EINVALID", Message: errMsg}
+		default:
+			return nil, err
+		}
 	}
 
 	// Get the run status from the engine to extract run_id
@@ -2555,7 +2610,7 @@ type FlowStopResult struct {
 // handleFlowStop stops a running or paused flow.
 func (s *Service) handleFlowStop(params json.RawMessage) (*FlowStopResult, error) {
 	if s.flowEngine == nil {
-		return nil, errors.New("flow engine not initialized")
+		return nil, &flowRPCError{Code: "EFLOW", Message: "flow engine not initialized"}
 	}
 
 	var p FlowStopParams
@@ -2564,11 +2619,19 @@ func (s *Service) handleFlowStop(params json.RawMessage) (*FlowStopResult, error
 	}
 
 	if strings.TrimSpace(p.FlowID) == "" {
-		return nil, errors.New("flow_id is required")
+		return nil, &flowRPCError{Code: "EARG", Message: "flow_id is required"}
 	}
 
 	if err := s.flowEngine.Stop(p.FlowID); err != nil {
-		return nil, err
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "not running"):
+			return nil, &flowRPCError{Code: "ESTATE", Message: errMsg}
+		case strings.Contains(errMsg, "already stopped"):
+			return nil, &flowRPCError{Code: "ESTATE", Message: errMsg}
+		default:
+			return nil, err
+		}
 	}
 
 	return &FlowStopResult{
@@ -2591,7 +2654,7 @@ type FlowPauseResult struct {
 // handleFlowPause pauses a running flow.
 func (s *Service) handleFlowPause(params json.RawMessage) (*FlowPauseResult, error) {
 	if s.flowEngine == nil {
-		return nil, errors.New("flow engine not initialized")
+		return nil, &flowRPCError{Code: "EFLOW", Message: "flow engine not initialized"}
 	}
 
 	var p FlowPauseParams
@@ -2600,7 +2663,7 @@ func (s *Service) handleFlowPause(params json.RawMessage) (*FlowPauseResult, err
 	}
 
 	if strings.TrimSpace(p.FlowID) == "" {
-		return nil, errors.New("flow_id is required")
+		return nil, &flowRPCError{Code: "EARG", Message: "flow_id is required"}
 	}
 
 	if err := s.flowEngine.Pause(p.FlowID); err != nil {
@@ -2630,7 +2693,7 @@ type FlowStatusResult struct {
 // handleFlowStatus returns the current status of a flow.
 func (s *Service) handleFlowStatus(params json.RawMessage) (*FlowStatusResult, error) {
 	if s.flowEngine == nil {
-		return nil, errors.New("flow engine not initialized")
+		return nil, &flowRPCError{Code: "EFLOW", Message: "flow engine not initialized"}
 	}
 
 	var p FlowStatusParams
@@ -2639,7 +2702,7 @@ func (s *Service) handleFlowStatus(params json.RawMessage) (*FlowStatusResult, e
 	}
 
 	if strings.TrimSpace(p.FlowID) == "" {
-		return nil, errors.New("flow_id is required")
+		return nil, &flowRPCError{Code: "EARG", Message: "flow_id is required"}
 	}
 
 	// Check engine for live state
@@ -2658,7 +2721,7 @@ func (s *Service) handleFlowStatus(params json.RawMessage) (*FlowStatusResult, e
 	if s.flowStore != nil {
 		fl, err := s.flowStore.GetFlow(context.Background(), p.FlowID)
 		if err != nil {
-			return nil, fmt.Errorf("flow: not found: %s", p.FlowID)
+			return nil, &flowRPCError{Code: "ENOTFOUND", Message: fmt.Sprintf("flow: not found: %s", p.FlowID)}
 		}
 		return &FlowStatusResult{
 			FlowID: p.FlowID,
@@ -2666,7 +2729,7 @@ func (s *Service) handleFlowStatus(params json.RawMessage) (*FlowStatusResult, e
 		}, nil
 	}
 
-	return nil, fmt.Errorf("flow: not found: %s", p.FlowID)
+	return nil, &flowRPCError{Code: "ENOTFOUND", Message: fmt.Sprintf("flow: not found: %s", p.FlowID)}
 }
 
 // handleFlowStatusSafe returns the status result or nil on error.

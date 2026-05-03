@@ -256,10 +256,10 @@ func seedTwoNodeFlow(store *mockFlowStore, flowID, workspace string) {
 	nodeB := makeTestNode(flowID+"-n2", flowID, "B", flow.NodeSkill)
 	edge := makeTestEdge(flowID+"-e1", flowID, nodeA.ID, nodeB.ID)
 
-	store.CreateFlow(context.Background(), fl)
-	store.AddNode(context.Background(), nodeA)
-	store.AddNode(context.Background(), nodeB)
-	store.AddEdge(context.Background(), edge)
+	store.CreateFlow(context.Background(), fl)  //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA)   //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeB)   //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edge)    //nolint:errcheck // test helper
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +361,7 @@ func TestFlowStart_FlowNotFound(t *testing.T) {
 func TestFlowStart_NoNodes(t *testing.T) {
 	store := newMockFlowStore()
 	fl := makeTestFlow("flow-empty", "empty", "/tmp/ws")
-	store.CreateFlow(context.Background(), fl)
+	store.CreateFlow(context.Background(), fl) //nolint:errcheck // test helper
 	svc := newServiceWithFlowEngine(store)
 
 	params := json.RawMessage(`{"flow_id":"flow-empty","workspace":"/tmp/ws"}`)
@@ -382,11 +382,11 @@ func TestFlowStart_NoSourceNodes(t *testing.T) {
 	nodeB := makeTestNode("n2", "flow-no-src", "B", flow.NodeSkill)
 	edge1 := makeTestEdge("e1", "flow-no-src", nodeA.ID, nodeB.ID)
 	edge2 := makeTestEdge("e2", "flow-no-src", nodeB.ID, nodeA.ID)
-	store.CreateFlow(context.Background(), fl)
-	store.AddNode(context.Background(), nodeA)
-	store.AddNode(context.Background(), nodeB)
-	store.AddEdge(context.Background(), edge1)
-	store.AddEdge(context.Background(), edge2)
+	store.CreateFlow(context.Background(), fl)  //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA)   //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeB)   //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edge1)   //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edge2)   //nolint:errcheck // test helper
 
 	svc := newServiceWithFlowEngine(store)
 	params := json.RawMessage(`{"flow_id":"flow-no-src","workspace":"/tmp/ws"}`)
@@ -408,13 +408,13 @@ func TestFlowStart_CycleDetection(t *testing.T) {
 	edgeAB := makeTestEdge("ce1", "flow-cycle", nodeA.ID, nodeB.ID)
 	edgeBC := makeTestEdge("ce2", "flow-cycle", nodeB.ID, nodeC.ID)
 	edgeCA := makeTestEdge("ce3", "flow-cycle", nodeC.ID, nodeA.ID)
-	store.CreateFlow(context.Background(), fl)
-	store.AddNode(context.Background(), nodeA)
-	store.AddNode(context.Background(), nodeB)
-	store.AddNode(context.Background(), nodeC)
-	store.AddEdge(context.Background(), edgeAB)
-	store.AddEdge(context.Background(), edgeBC)
-	store.AddEdge(context.Background(), edgeCA)
+	store.CreateFlow(context.Background(), fl)   //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA)    //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeB)    //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeC)    //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeAB)   //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeBC)   //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeCA)   //nolint:errcheck // test helper
 
 	svc := newServiceWithFlowEngine(store)
 	params := json.RawMessage(`{"flow_id":"flow-cycle","workspace":"/tmp/ws"}`)
@@ -825,6 +825,390 @@ func TestFlowRPC_MalformedJSON(t *testing.T) {
 	_, err = svc.handleFlowStatus(json.RawMessage(`{invalid json`))
 	if err == nil {
 		t.Fatal("expected parse error for malformed JSON, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Error codes via RPC connection
+// ---------------------------------------------------------------------------
+
+func TestFlowRPC_ErrorCodes_StartNotFound(t *testing.T) {
+	store := newMockFlowStore()
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	req := Request{
+		Method: "flow.start",
+		ID:     "err-enotfound",
+		Params: json.RawMessage(`{"flow_id":"nonexistent","workspace":"/tmp/ws"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if resp.Error.Code != "ENOTFOUND" {
+		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "ENOTFOUND")
+	}
+}
+
+func TestFlowRPC_ErrorCodes_StartMissingFlowID(t *testing.T) {
+	store := newMockFlowStore()
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	req := Request{
+		Method: "flow.start",
+		ID:     "err-earg",
+		Params: json.RawMessage(`{"workspace":"/tmp/ws"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if resp.Error.Code != "EARG" {
+		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "EARG")
+	}
+}
+
+func TestFlowRPC_ErrorCodes_StartAlreadyRunning(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	// Start the flow first
+	_, _ = svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`))
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	// Try to start again
+	req := Request{
+		Method: "flow.start",
+		ID:     "err-ealready",
+		Params: json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if resp.Error.Code != "EALREADY" {
+		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "EALREADY")
+	}
+}
+
+func TestFlowRPC_ErrorCodes_StartCycle(t *testing.T) {
+	store := newMockFlowStore()
+	fl := makeTestFlow("flow-cycle", "cycle", "/tmp/ws")
+	nodeA := makeTestNode("cn1", "flow-cycle", "A", flow.NodeSkill)
+	nodeB := makeTestNode("cn2", "flow-cycle", "B", flow.NodeSkill)
+	nodeC := makeTestNode("cn3", "flow-cycle", "C", flow.NodeSkill)
+	edgeAB := makeTestEdge("ce1", "flow-cycle", nodeA.ID, nodeB.ID)
+	edgeBC := makeTestEdge("ce2", "flow-cycle", nodeB.ID, nodeC.ID)
+	edgeCA := makeTestEdge("ce3", "flow-cycle", nodeC.ID, nodeA.ID)
+	store.CreateFlow(context.Background(), fl)   //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA)    //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeB)    //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeC)    //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeAB)   //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeBC)   //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeCA)   //nolint:errcheck // test helper
+
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	req := Request{
+		Method: "flow.start",
+		ID:     "err-ecycle",
+		Params: json.RawMessage(`{"flow_id":"flow-cycle","workspace":"/tmp/ws"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if resp.Error.Code != "ECYCLE" {
+		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "ECYCLE")
+	}
+}
+
+func TestFlowRPC_ErrorCodes_StopNotRunning(t *testing.T) {
+	store := newMockFlowStore()
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	req := Request{
+		Method: "flow.stop",
+		ID:     "err-estate-stop",
+		Params: json.RawMessage(`{"flow_id":"flow-draft"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if resp.Error.Code != "ESTATE" {
+		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "ESTATE")
+	}
+}
+
+func TestFlowRPC_ErrorCodes_StatusNotFound(t *testing.T) {
+	store := newMockFlowStore()
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	req := Request{
+		Method: "flow.status",
+		ID:     "err-enotfound-status",
+		Params: json.RawMessage(`{"flow_id":"nonexistent"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if resp.Error.Code != "ENOTFOUND" {
+		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "ENOTFOUND")
+	}
+}
+
+func TestFlowRPC_ErrorCodes_StatusMissingFlowID(t *testing.T) {
+	store := newMockFlowStore()
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	req := Request{
+		Method: "flow.status",
+		ID:     "err-earg-status",
+		Params: json.RawMessage(`{}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if resp.Error.Code != "EARG" {
+		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "EARG")
+	}
+}
+
+func TestFlowRPC_ErrorCodes_StartNoNodes(t *testing.T) {
+	store := newMockFlowStore()
+	fl := makeTestFlow("flow-empty", "empty", "/tmp/ws")
+	store.CreateFlow(context.Background(), fl) //nolint:errcheck // test helper
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	req := Request{
+		Method: "flow.start",
+		ID:     "err-einvalid-nonodes",
+		Params: json.RawMessage(`{"flow_id":"flow-empty","workspace":"/tmp/ws"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.Error == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if resp.Error.Code != "EINVALID" {
+		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "EINVALID")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Workspace propagation
+// ---------------------------------------------------------------------------
+
+func TestFlowStart_WorkspacePropagation(t *testing.T) {
+	store := newMockFlowStore()
+	// Create flows in different workspaces
+	seedTwoNodeFlow(store, "flow-ws1", "/tmp/workspace-1")
+	seedTwoNodeFlow(store, "flow-ws2", "/tmp/workspace-2")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start flow in workspace-1
+	params1 := json.RawMessage(`{"flow_id":"flow-ws1","workspace":"/tmp/workspace-1"}`)
+	result1, err := svc.handleFlowStart(context.Background(), params1)
+	if err != nil {
+		t.Fatalf("start flow-ws1: %v", err)
+	}
+	if result1.RunID == "" {
+		t.Error("RunID should not be empty")
+	}
+
+	// Start flow in workspace-2 — should be independent
+	params2 := json.RawMessage(`{"flow_id":"flow-ws2","workspace":"/tmp/workspace-2"}`)
+	result2, err := svc.handleFlowStart(context.Background(), params2)
+	if err != nil {
+		t.Fatalf("start flow-ws2: %v", err)
+	}
+
+	if result1.RunID == result2.RunID {
+		t.Error("flows from different workspaces should have distinct run IDs")
+	}
+}
+
+func TestFlowStatus_IncludesNodeDetails(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start the flow
+	startParams := json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`)
+	_, err := svc.handleFlowStart(context.Background(), startParams)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Wait for source node to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Check status includes per-node details
+	statusParams := json.RawMessage(`{"flow_id":"flow-1"}`)
+	result, err := svc.handleFlowStatus(statusParams)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	if len(result.Nodes) != 2 {
+		t.Errorf("expected 2 node states, got %d", len(result.Nodes))
+	}
+
+	// Verify node states have IDs and states
+	for _, node := range result.Nodes {
+		if node.ID == "" {
+			t.Error("node state should have non-empty ID")
+		}
+		if node.State == "" {
+			t.Error("node state should have non-empty State")
+		}
 	}
 }
 
@@ -1410,8 +1794,8 @@ func TestClientFlowRPC_FlowStartErrorViaConnection(t *testing.T) {
 	if resp.Error == nil {
 		t.Fatal("expected error for nonexistent flow, got nil")
 	}
-	if resp.Error.Code != "EFLOW" {
-		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "EFLOW")
+	if resp.Error.Code != "ENOTFOUND" {
+		t.Errorf("Error.Code = %q, want %q", resp.Error.Code, "ENOTFOUND")
 	}
 }
 
@@ -1454,5 +1838,119 @@ func TestClientFlowRPC_MultipleRequestsOnConnection(t *testing.T) {
 	}
 	if resp.Error != nil {
 		t.Fatalf("resp1.Error = %+v, want nil", resp.Error)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Concurrent operations safety
+// ---------------------------------------------------------------------------
+
+func TestFlowRPC_ConcurrentStopSameFlow(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start the flow
+	_, err := svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`))
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Concurrent stops — first should succeed, second should fail
+	var wg sync.WaitGroup
+	var errors []error
+	var mu sync.Mutex
+
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := svc.handleFlowStop(json.RawMessage(`{"flow_id":"flow-1"}`))
+			mu.Lock()
+			errors = append(errors, err)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	// At least one should succeed (nil error) and at least one should fail
+	var successes, failures int
+	for _, e := range errors {
+		if e == nil {
+			successes++
+		} else {
+			failures++
+		}
+	}
+
+	if successes < 1 {
+		t.Error("expected at least one successful stop")
+	}
+	if failures < 1 {
+		t.Error("expected at least one failed stop (already stopped)")
+	}
+}
+
+func TestFlowRPC_ConcurrentStartSameFlow(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+
+	// Concurrent starts — one should succeed, rest should fail with EALREADY
+	var wg sync.WaitGroup
+	var results []*FlowStartResult
+	var errors []error
+	var mu sync.Mutex
+
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`))
+			mu.Lock()
+			if err != nil {
+				errors = append(errors, err)
+			} else {
+				results = append(results, result)
+			}
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	if len(results) < 1 {
+		t.Error("expected at least one successful start")
+	}
+	if len(errors) < 1 {
+		t.Error("expected at least one failed start (already running)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Stale state recovery
+// ---------------------------------------------------------------------------
+
+func TestFlowRPC_StaleStateRecovery(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start and stop a flow
+	_, _ = svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`))
+	time.Sleep(100 * time.Millisecond)
+	_, _ = svc.handleFlowStop(json.RawMessage(`{"flow_id":"flow-1"}`))
+
+	// Now start again — should create a new run
+	result, err := svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`))
+	if err != nil {
+		t.Fatalf("restart after stop: %v", err)
+	}
+	if result.RunID == "" {
+		t.Error("restart should produce a new RunID")
+	}
+	if result.State != "running" {
+		t.Errorf("restart State = %q, want %q", result.State, "running")
 	}
 }
