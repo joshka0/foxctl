@@ -2152,5 +2152,323 @@ type testError struct {
 
 func (e testError) Error() string { return e.msg }
 
+// ---------------------------------------------------------------------------
+// Tests: Retry Policy (VAL-M2-038, VAL-M2-039, VAL-M2-040)
+// ---------------------------------------------------------------------------
+
+// TestRetryPolicyRetriesOnFailure tests VAL-M2-038:
+// Edge with max_attempts=2 retries up to 2 times on failure.
+// If retry succeeds, normal delivery continues.
+func TestRetryPolicyRetriesOnFailure(t *testing.T) {
+	store := newMockStore()
+	var mu sync.Mutex
+	var execCalls []string
+
+	bAttempts := 0
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		mu.Lock()
+		execCalls = append(execCalls, node.ID)
+		mu.Unlock()
+
+		if node.ID == "b" {
+			mu.Lock()
+			bAttempts++
+			attempt := bAttempts
+			mu.Unlock()
+			// Fail on first attempt, succeed on second (retry)
+			if attempt == 1 {
+				return NodeOutput{}, fmt.Errorf("transient failure")
+			}
+		}
+
+		return NodeOutput{
+			Envelope: envelope.OK("mock", input),
+			NodeID:   node.ID,
+		}, nil
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "retry-test")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	// A → B with retry policy (max_attempts=2, delay_ms=10)
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+	edge := makeEdge("e1", "f1", "a", "b", TransformPassthrough, "")
+	edge.RetryPolicy = &RetryPolicy{MaxAttempts: 2, DelayMS: 10}
+	store.AddEdge(context.Background(), edge)
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+	eng.Stop("f1")
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// B should have been called at least twice (first fail, then retry succeeds)
+	bCalls := 0
+	for _, id := range execCalls {
+		if id == "b" {
+			bCalls++
+		}
+	}
+	if bCalls < 2 {
+		t.Errorf("expected at least 2 calls to B (initial + retry), got %d (all calls: %v)", bCalls, execCalls)
+	}
+}
+
+// TestRetryPolicyDelayRespected tests VAL-M2-039:
+// delay_ms controls the interval between retry attempts.
+func TestRetryPolicyDelayRespected(t *testing.T) {
+	store := newMockStore()
+	var mu sync.Mutex
+	var attemptTimes []time.Time
+
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		// Only record times for the target node B
+		if node.ID == "b" {
+			mu.Lock()
+			attemptTimes = append(attemptTimes, time.Now())
+			mu.Unlock()
+		}
+
+		// Always fail for this test to observe retries
+		return NodeOutput{}, fmt.Errorf("failure")
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "retry-delay")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	// A → B with retry policy (max_attempts=3, delay_ms=200)
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+	edge := makeEdge("e1", "f1", "a", "b", TransformPassthrough, "")
+	edge.RetryPolicy = &RetryPolicy{MaxAttempts: 3, DelayMS: 200}
+	store.AddEdge(context.Background(), edge)
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(1 * time.Second)
+	eng.Stop("f1")
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Should have at least 3 attempts (1 initial + 2 retries = max_attempts=3 total)
+	if len(attemptTimes) < 3 {
+		t.Fatalf("expected at least 3 attempts, got %d", len(attemptTimes))
+	}
+
+	// Check delay between first and second attempt is at least 200ms
+	delay := attemptTimes[1].Sub(attemptTimes[0])
+	if delay < 180*time.Millisecond { // allow small tolerance
+		t.Errorf("expected delay of ~200ms between attempts, got %v", delay)
+	}
+
+	// Check delay between second and third attempt
+	delay2 := attemptTimes[2].Sub(attemptTimes[1])
+	if delay2 < 180*time.Millisecond {
+		t.Errorf("expected delay of ~200ms between attempts 2 and 3, got %v", delay2)
+	}
+}
+
+// TestRetryPolicyExhaustedRetriesPropagateError tests VAL-M2-038:
+// If all retries exhausted, error flows downstream.
+func TestRetryPolicyExhaustedRetriesPropagateError(t *testing.T) {
+	store := newMockStore()
+	var mu sync.Mutex
+	var sinkInputs []any
+
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if node.ID == "b" {
+			// Always fail
+			return NodeOutput{}, fmt.Errorf("permanent failure")
+		}
+
+		// Sink C records its input
+		if node.ID == "c" {
+			sinkInputs = append(sinkInputs, input)
+		}
+
+		return NodeOutput{
+			Envelope: envelope.OK("mock", input),
+			NodeID:   node.ID,
+		}, nil
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "retry-exhausted")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	// A → B (with retry, max_attempts=2) → C
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "mid", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("c", "f1", "sink", NodeSkill, "{}"))
+	edgeAB := makeEdge("e1", "f1", "a", "b", TransformPassthrough, "")
+	edgeAB.RetryPolicy = &RetryPolicy{MaxAttempts: 2, DelayMS: 10}
+	store.AddEdge(context.Background(), edgeAB)
+	store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+	eng.Stop("f1")
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// After all retries exhausted, error from B should propagate to C
+	if len(sinkInputs) == 0 {
+		t.Error("expected sink C to receive input (error from B after exhausted retries)")
+	}
+}
+
+// TestRetryPolicyZeroMeansNoRetry tests VAL-M2-040:
+// Zero/null retry policy means no retry (single attempt).
+func TestRetryPolicyZeroMeansNoRetry(t *testing.T) {
+	store := newMockStore()
+	var mu sync.Mutex
+	var bCalls int
+
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if node.ID == "b" {
+			bCalls++
+			return NodeOutput{}, fmt.Errorf("failure")
+		}
+		return NodeOutput{
+			Envelope: envelope.OK("mock", input),
+			NodeID:   node.ID,
+		}, nil
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "no-retry")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	// A → B with no retry policy (default)
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+	edge := makeEdge("e1", "f1", "a", "b", TransformPassthrough, "")
+	// No RetryPolicy set (nil)
+	store.AddEdge(context.Background(), edge)
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	eng.Stop("f1")
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// B should have been called exactly once (no retry)
+	if bCalls != 1 {
+		t.Errorf("expected exactly 1 call to B (no retry), got %d", bCalls)
+	}
+}
+
+// TestRetryPolicyZeroMaxAttemptsNoRetry tests VAL-M2-040:
+// Explicit max_attempts=0 means no retry.
+func TestRetryPolicyZeroMaxAttemptsNoRetry(t *testing.T) {
+	store := newMockStore()
+	var mu sync.Mutex
+	var bCalls int
+
+	exec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if node.ID == "b" {
+			bCalls++
+			return NodeOutput{}, fmt.Errorf("failure")
+		}
+		return NodeOutput{
+			Envelope: envelope.OK("mock", input),
+			NodeID:   node.ID,
+		}, nil
+	})
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: exec,
+	}
+
+	flow := makeFlow("f1", "zero-retry")
+	flow.State = FlowDraft
+	store.CreateFlow(context.Background(), flow)
+
+	// A → B with max_attempts=0
+	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+	edge := makeEdge("e1", "f1", "a", "b", TransformPassthrough, "")
+	edge.RetryPolicy = &RetryPolicy{MaxAttempts: 0, DelayMS: 100}
+	store.AddEdge(context.Background(), edge)
+
+	eng := NewEngine(store, registry, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := eng.Start(ctx, "f1")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+	eng.Stop("f1")
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// B should have been called exactly once (no retry with max_attempts=0)
+	if bCalls != 1 {
+		t.Errorf("expected exactly 1 call to B (max_attempts=0), got %d", bCalls)
+	}
+}
+
 // Silence unused import
 var _ = fmt.Sprintf

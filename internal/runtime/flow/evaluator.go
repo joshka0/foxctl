@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
@@ -21,8 +22,8 @@ type evaluatorConfig struct {
 	executor     NodeExecutor
 	targetNode   FlowNode
 	condition    Condition
-	pauseCh      chan struct{} // signal to pause
-	resumeCh     chan struct{} // signal to resume
+	pauseCh      chan struct{}       // signal to pause
+	resumeCh     chan struct{}       // signal to resume
 	onDeliver    func(edgeID string) // called after successful delivery (for state tracking)
 }
 
@@ -93,6 +94,8 @@ func startEvaluator(ctx context.Context, cfg evaluatorConfig) {
 }
 
 // executeTarget runs the target executor and publishes its output.
+// If the edge has a RetryPolicy with MaxAttempts > 0, the executor is retried
+// on failure up to MaxAttempts total attempts with delay_ms between retries.
 func (cfg evaluatorConfig) executeTarget(ctx context.Context, input NodeOutput) {
 	// Recover from panics in the executor.
 	defer func() {
@@ -113,11 +116,47 @@ func (cfg evaluatorConfig) executeTarget(ctx context.Context, input NodeOutput) 
 		inputData = input.Envelope.Data
 	}
 
-	result, err := cfg.executor.Execute(ctx, cfg.targetNode, inputData)
+	// Determine max attempts from retry policy.
+	maxAttempts := 1
+	if cfg.edge.RetryPolicy != nil && cfg.edge.RetryPolicy.MaxAttempts > 0 {
+		maxAttempts = cfg.edge.RetryPolicy.MaxAttempts
+	}
+
+	var result NodeOutput
+	var err error
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Apply delay before retry (not before the first attempt).
+		if attempt > 0 && cfg.edge.RetryPolicy != nil && cfg.edge.RetryPolicy.DelayMS > 0 {
+			delay := time.Duration(cfg.edge.RetryPolicy.DelayMS) * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+		}
+
+		result, err = cfg.executor.Execute(ctx, cfg.targetNode, inputData)
+		if err == nil {
+			// Success — break out of retry loop.
+			break
+		}
+
+		// Log the retry attempt.
+		if attempt < maxAttempts-1 {
+			log.Printf("flow: edge %s: attempt %d/%d failed for node %s: %v (retrying)",
+				cfg.edge.ID, attempt+1, maxAttempts, cfg.targetNodeID, err)
+		} else {
+			log.Printf("flow: edge %s: attempt %d/%d failed for node %s: %v (retries exhausted)",
+				cfg.edge.ID, attempt+1, maxAttempts, cfg.targetNodeID, err)
+		}
+	}
+
 	if err != nil {
+		// All retries exhausted or no retry policy.
 		result = NodeOutput{
 			Envelope: envelope.Error("flow/engine", "ERUNTIME",
-				fmt.Sprintf("node %s execution failed: %v", cfg.targetNodeID, err), nil),
+				fmt.Sprintf("node %s execution failed after %d attempts: %v", cfg.targetNodeID, maxAttempts, err), nil),
 			NodeID:   cfg.targetNodeID,
 			Duration: 0,
 		}
