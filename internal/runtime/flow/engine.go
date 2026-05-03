@@ -447,6 +447,18 @@ func (e *Engine) Status(flowID string) *EngineStatus {
 	}
 }
 
+// ActiveFlowIDs returns the IDs of all flows with active (running or paused) runs.
+func (e *Engine) ActiveFlowIDs() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	ids := make([]string, 0, len(e.runs))
+	for id := range e.runs {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // ---------------------------------------------------------------------------
 // Topological Sort
 // ---------------------------------------------------------------------------

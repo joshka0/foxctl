@@ -34,6 +34,7 @@ import (
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
 	"github.com/joshka0/foxctl/internal/runtime/execution/runner"
+	"github.com/joshka0/foxctl/internal/runtime/flow"
 	"github.com/joshka0/foxctl/internal/runtime/hooks"
 	"github.com/joshka0/foxctl/internal/storage"
 	agentstore "github.com/joshka0/foxctl/internal/storage/agents"
@@ -139,6 +140,11 @@ type Service struct {
 	agentMailboxStore   mailbox.Store         // Mailbox store for agent messaging (close on shutdown)
 	agentBoardStore     blackboard.BoardStore // Blackboard store for agent coordination (close on shutdown)
 	agentSessionMap     map[string]string     // agentID (agents.db) → sessionID (runtime); protected by agentMu
+
+	// Flow engine
+	flowEngine *flow.Engine
+	flowStore  flow.Store
+	flowMu     sync.Mutex
 }
 
 // NewService creates a new daemon service.
@@ -676,6 +682,34 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 		result, err := s.handleAgentHierarchy(req.Params)
 		if err != nil {
 			resp.Error = &Error{Code: "EHIERARCHY", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "flow.start":
+		result, err := s.handleFlowStart(ctx, req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: "EFLOW", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "flow.stop":
+		result, err := s.handleFlowStop(req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: "EFLOW", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "flow.pause":
+		result, err := s.handleFlowPause(req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: "EFLOW", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "flow.status":
+		result, err := s.handleFlowStatus(req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: "EFLOW", Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
@@ -2447,6 +2481,209 @@ func daemonizeArgs(argv []string) []string {
 		}
 	}
 	return args
+}
+
+// --- Flow RPC Handlers ---
+
+// FlowStartParams are the parameters for flow.start.
+type FlowStartParams struct {
+	FlowID    string `json:"flow_id"`
+	Workspace string `json:"workspace,omitempty"`
+}
+
+// FlowStartResult is the result of starting a flow.
+type FlowStartResult struct {
+	FlowID string `json:"flow_id"`
+	RunID  string `json:"run_id"`
+	State  string `json:"state"`
+}
+
+// handleFlowStart starts a flow execution via the engine.
+func (s *Service) handleFlowStart(ctx context.Context, params json.RawMessage) (*FlowStartResult, error) {
+	if s.flowEngine == nil {
+		return nil, errors.New("flow engine not initialized")
+	}
+
+	var p FlowStartParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if strings.TrimSpace(p.FlowID) == "" {
+		return nil, errors.New("flow_id is required")
+	}
+
+	if err := s.flowEngine.Start(ctx, p.FlowID); err != nil {
+		return nil, err
+	}
+
+	// Get the run status from the engine to extract run_id
+	status := s.flowEngine.Status(p.FlowID)
+	runID := ""
+	state := string(flow.FlowRunning)
+	if status != nil {
+		runID = status.RunID
+		state = string(status.FlowState)
+	}
+
+	return &FlowStartResult{
+		FlowID: p.FlowID,
+		RunID:  runID,
+		State:  state,
+	}, nil
+}
+
+// FlowStopParams are the parameters for flow.stop.
+type FlowStopParams struct {
+	FlowID string `json:"flow_id"`
+}
+
+// FlowStopResult is the result of stopping a flow.
+type FlowStopResult struct {
+	FlowID string `json:"flow_id"`
+	State  string `json:"state"`
+}
+
+// handleFlowStop stops a running or paused flow.
+func (s *Service) handleFlowStop(params json.RawMessage) (*FlowStopResult, error) {
+	if s.flowEngine == nil {
+		return nil, errors.New("flow engine not initialized")
+	}
+
+	var p FlowStopParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if strings.TrimSpace(p.FlowID) == "" {
+		return nil, errors.New("flow_id is required")
+	}
+
+	if err := s.flowEngine.Stop(p.FlowID); err != nil {
+		return nil, err
+	}
+
+	return &FlowStopResult{
+		FlowID: p.FlowID,
+		State:  string(flow.FlowStopped),
+	}, nil
+}
+
+// FlowPauseParams are the parameters for flow.pause.
+type FlowPauseParams struct {
+	FlowID string `json:"flow_id"`
+}
+
+// FlowPauseResult is the result of pausing a flow.
+type FlowPauseResult struct {
+	FlowID string `json:"flow_id"`
+	State  string `json:"state"`
+}
+
+// handleFlowPause pauses a running flow.
+func (s *Service) handleFlowPause(params json.RawMessage) (*FlowPauseResult, error) {
+	if s.flowEngine == nil {
+		return nil, errors.New("flow engine not initialized")
+	}
+
+	var p FlowPauseParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if strings.TrimSpace(p.FlowID) == "" {
+		return nil, errors.New("flow_id is required")
+	}
+
+	if err := s.flowEngine.Pause(p.FlowID); err != nil {
+		return nil, err
+	}
+
+	return &FlowPauseResult{
+		FlowID: p.FlowID,
+		State:  string(flow.FlowPaused),
+	}, nil
+}
+
+// FlowStatusParams are the parameters for flow.status.
+type FlowStatusParams struct {
+	FlowID string `json:"flow_id"`
+}
+
+// FlowStatusResult is the result of querying flow status.
+type FlowStatusResult struct {
+	FlowID string                 `json:"flow_id"`
+	State  string                 `json:"state"`
+	RunID  string                 `json:"run_id,omitempty"`
+	Nodes  []flow.NodeExecState   `json:"nodes,omitempty"`
+	Edges  []flow.EdgeExecState   `json:"edges,omitempty"`
+}
+
+// handleFlowStatus returns the current status of a flow.
+func (s *Service) handleFlowStatus(params json.RawMessage) (*FlowStatusResult, error) {
+	if s.flowEngine == nil {
+		return nil, errors.New("flow engine not initialized")
+	}
+
+	var p FlowStatusParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if strings.TrimSpace(p.FlowID) == "" {
+		return nil, errors.New("flow_id is required")
+	}
+
+	// Check engine for live state
+	status := s.flowEngine.Status(p.FlowID)
+	if status != nil {
+		return &FlowStatusResult{
+			FlowID: p.FlowID,
+			State:  string(status.FlowState),
+			RunID:  status.RunID,
+			Nodes:  status.Nodes,
+			Edges:  status.Edges,
+		}, nil
+	}
+
+	// Fallback: check the store for persisted state
+	if s.flowStore != nil {
+		fl, err := s.flowStore.GetFlow(context.Background(), p.FlowID)
+		if err != nil {
+			return nil, fmt.Errorf("flow: not found: %s", p.FlowID)
+		}
+		return &FlowStatusResult{
+			FlowID: p.FlowID,
+			State:  string(fl.State),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("flow: not found: %s", p.FlowID)
+}
+
+// handleFlowStatusSafe returns the status result or nil on error.
+// Used by tests to check post-shutdown state.
+func (s *Service) handleFlowStatusSafe(params json.RawMessage) *FlowStatusResult {
+	result, _ := s.handleFlowStatus(params)
+	return result
+}
+
+// stopAllFlowRuns stops all active flow runs. Called during graceful shutdown.
+func (s *Service) stopAllFlowRuns() {
+	s.flowMu.Lock()
+	engine := s.flowEngine
+	s.flowMu.Unlock()
+
+	if engine == nil {
+		return
+	}
+
+	// Get all active flow IDs and stop each one.
+	for _, flowID := range engine.ActiveFlowIDs() {
+		if err := engine.Stop(flowID); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to stop flow %s during shutdown: %v\n", flowID, err)
+		}
+	}
 }
 
 // resolveLLMConfig returns the LLM provider, API key, and model from centralized config.
