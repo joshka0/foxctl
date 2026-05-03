@@ -92,4 +92,21 @@ type Store interface {
 	// UpdateRun updates the mutable fields of a run (state, completed_at,
 	// error).
 	UpdateRun(ctx context.Context, r FlowRun) (FlowRun, error)
+
+	// ---- Run Logs ----
+
+	// WriteRunLog persists a single run log entry. The seq value is assigned
+	// by the store as a per-run monotonically increasing integer.
+	WriteRunLog(ctx context.Context, log RunLog) (RunLog, error)
+
+	// ListRunLogs returns log entries for the given run, ordered by seq
+	// ascending. Accepts optional filters (WithNodeID, WithLimit, WithOffset).
+	// Returns an empty non-nil slice when there are no logs.
+	ListRunLogs(ctx context.Context, runID string, opts ...RunLogOption) ([]RunLog, error)
+
+	// StreamRunLogs yields existing logs for the given run in order, then
+	// subscribes to new logs via the returned channel. The channel is closed
+	// when the context is cancelled or the run completes. Accepts optional
+	// WithNodeID filter.
+	StreamRunLogs(ctx context.Context, runID string, opts ...RunLogOption) (<-chan RunLog, error)
 }

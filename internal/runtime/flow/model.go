@@ -238,6 +238,57 @@ type RetryPolicy struct {
 // Typed config structs
 // ---------------------------------------------------------------------------
 
+// RunLog captures a single log entry produced by a flow node during execution.
+// Each entry stores the full envelope JSON produced by the node.
+type RunLog struct {
+	ID        string            `json:"id"`
+	RunID     string            `json:"run_id"`
+	NodeID    string            `json:"node_id"`
+	Seq       int               `json:"seq"`
+	Envelope  json.RawMessage   `json:"envelope"`
+	CreatedAt time.Time         `json:"created_at"`
+}
+
+// RunLogFilter holds optional parameters for querying run logs.
+type RunLogFilter struct {
+	NodeID string
+	Limit  int
+	Offset int
+}
+
+// RunLogOption is a functional option for run log queries.
+type RunLogOption func(*RunLogFilter)
+
+// WithNodeID filters log entries by the given node ID.
+func WithNodeID(nodeID string) RunLogOption {
+	return func(f *RunLogFilter) {
+		f.NodeID = nodeID
+	}
+}
+
+// WithLimit limits the number of log entries returned.
+func WithLimit(limit int) RunLogOption {
+	return func(f *RunLogFilter) {
+		f.Limit = limit
+	}
+}
+
+// WithOffset skips the first N log entries.
+func WithOffset(offset int) RunLogOption {
+	return func(f *RunLogFilter) {
+		f.Offset = offset
+	}
+}
+
+// ApplyRunLogOptions builds a RunLogFilter from the given options.
+func ApplyRunLogOptions(opts ...RunLogOption) RunLogFilter {
+	f := RunLogFilter{}
+	for _, o := range opts {
+		o(&f)
+	}
+	return f
+}
+
 // SkillConfig is the typed config for NodeSkill.
 type SkillConfig struct {
 	Skill     string   `json:"skill"`

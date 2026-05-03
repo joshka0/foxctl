@@ -11,16 +11,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	flow "github.com/joshka0/foxctl/internal/runtime/flow"
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/joshka0/foxctl/internal/storage/sqlutil"
+	"github.com/oklog/ulid/v2"
 )
 
 type sqlStore struct {
 	db    *sql.DB
 	close func() error
+
+	// writeMu serializes write operations for SQLite concurrency safety.
+	writeMu sync.Mutex
+
+	// logSubs tracks active log subscribers for streaming.
+	logSubsMu sync.RWMutex
+	logSubs    map[string][]chan flow.RunLog // runID -> subscriber channels
 }
 
 // Open creates or opens a SQLite-backed flow store at <root>/flow.db and runs
@@ -30,7 +39,7 @@ func Open(ctx context.Context, root string) (flow.Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("flow: open db: %w", err)
 	}
-	return &sqlStore{db: db, close: closeFn}, nil
+	return &sqlStore{db: db, close: closeFn, logSubs: make(map[string][]chan flow.RunLog)}, nil
 }
 
 func (s *sqlStore) Close() error {
@@ -93,6 +102,18 @@ CREATE INDEX IF NOT EXISTS idx_flow_edges_flow_id ON flow_edges(flow_id);
 CREATE INDEX IF NOT EXISTS idx_flow_edges_from    ON flow_edges(from_node_id);
 CREATE INDEX IF NOT EXISTS idx_flow_edges_to      ON flow_edges(to_node_id);
 CREATE INDEX IF NOT EXISTS idx_flow_runs_flow_id  ON flow_runs(flow_id);
+
+CREATE TABLE IF NOT EXISTS flow_run_logs (
+    id         TEXT PRIMARY KEY,
+    run_id     TEXT NOT NULL REFERENCES flow_runs(id) ON DELETE CASCADE,
+    node_id    TEXT NOT NULL,
+    seq        INTEGER NOT NULL,
+    envelope   TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_flow_run_logs_run_seq  ON flow_run_logs(run_id, seq);
+CREATE INDEX IF NOT EXISTS idx_flow_run_logs_run_node ON flow_run_logs(run_id, node_id);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("flow: migrate: %w", err)
@@ -510,4 +531,202 @@ func (s *sqlStore) getRun(ctx context.Context, id string) (flow.FlowRun, error) 
 		}
 	}
 	return r, nil
+}
+
+// ---------------------------------------------------------------------------
+// Run Logs
+// ---------------------------------------------------------------------------
+
+// WriteRunLog inserts a new run log entry. The seq value is auto-assigned
+// as the next per-run monotonic integer. The ID is generated if empty.
+// After inserting, the log is broadcast to any active stream subscribers.
+// Concurrent writes are serialized via a mutex for SQLite safety.
+func (s *sqlStore) WriteRunLog(ctx context.Context, log flow.RunLog) (flow.RunLog, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	// Generate ID if not provided.
+	if log.ID == "" {
+		log.ID = ulid.Make().String()
+	}
+
+	// Assign created_at if not set.
+	if log.CreatedAt.IsZero() {
+		log.CreatedAt = time.Now().UTC()
+	}
+
+	// Auto-assign seq as next per-run monotonic value.
+	var maxSeq sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MAX(seq) FROM flow_run_logs WHERE run_id = $1`, log.RunID).Scan(&maxSeq)
+	if err != nil && !isNoRows(err) {
+		return flow.RunLog{}, fmt.Errorf("flow: write log seq: %w", err)
+	}
+	if maxSeq.Valid {
+		log.Seq = int(maxSeq.Int64) + 1
+	} else {
+		log.Seq = 1
+	}
+
+	// Serialize envelope to JSON if not already a string.
+	envStr := string(log.Envelope)
+
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO flow_run_logs (id, run_id, node_id, seq, envelope, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		log.ID, log.RunID, log.NodeID, log.Seq, envStr,
+		sqlutil.FormatTimestamp(log.CreatedAt))
+	if err != nil {
+		return flow.RunLog{}, fmt.Errorf("flow: write log: %w", err)
+	}
+
+	// Broadcast to stream subscribers (non-blocking).
+	s.broadcastLog(log)
+
+	return log, nil
+}
+
+// ListRunLogs returns log entries for the given run, ordered by seq ascending.
+// Supports functional options: WithNodeID, WithLimit, WithOffset.
+// Returns an empty non-nil slice when there are no logs.
+func (s *sqlStore) ListRunLogs(ctx context.Context, runID string, opts ...flow.RunLogOption) ([]flow.RunLog, error) {
+	f := flow.ApplyRunLogOptions(opts...)
+
+	query := `SELECT id, run_id, node_id, seq, envelope, created_at
+		FROM flow_run_logs WHERE run_id = $1`
+	args := []any{runID}
+	argIdx := 2
+
+	if f.NodeID != "" {
+		query += fmt.Sprintf(` AND node_id = $%d`, argIdx)
+		args = append(args, f.NodeID)
+		argIdx++
+	}
+
+	query += ` ORDER BY seq ASC`
+
+	if f.Limit > 0 {
+		query += fmt.Sprintf(` LIMIT $%d`, argIdx)
+		args = append(args, f.Limit)
+		argIdx++
+	}
+
+	if f.Offset > 0 {
+		query += fmt.Sprintf(` OFFSET $%d`, argIdx)
+		args = append(args, f.Offset)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("flow: list run logs: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []flow.RunLog
+	for rows.Next() {
+		l, scanErr := scanRunLog(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		logs = append(logs, l)
+	}
+	if logs == nil {
+		logs = []flow.RunLog{}
+	}
+	return logs, rows.Err()
+}
+
+// StreamRunLogs yields existing logs for the given run in order, then
+// subscribes to new logs via the returned channel. The channel is closed
+// when the context is cancelled or the run completes.
+func (s *sqlStore) StreamRunLogs(ctx context.Context, runID string, opts ...flow.RunLogOption) (<-chan flow.RunLog, error) {
+	f := flow.ApplyRunLogOptions(opts...)
+
+	// Check if the run exists and is completed.
+	run, err := s.getRun(ctx, runID)
+	if err != nil {
+		return nil, fmt.Errorf("flow: stream run logs: %w", err)
+	}
+
+	ch := make(chan flow.RunLog, 64)
+
+	// Register subscriber before replaying history to avoid race.
+	s.logSubsMu.Lock()
+	s.logSubs[runID] = append(s.logSubs[runID], ch)
+	s.logSubsMu.Unlock()
+
+	go func() {
+		defer func() {
+			// Unregister subscriber.
+			s.logSubsMu.Lock()
+			subs := s.logSubs[runID]
+			for i, sub := range subs {
+				if sub == ch {
+					s.logSubs[runID] = append(subs[:i], subs[i+1:]...)
+					break
+				}
+			}
+			if len(s.logSubs[runID]) == 0 {
+				delete(s.logSubs, runID)
+			}
+			s.logSubsMu.Unlock()
+			close(ch)
+		}()
+
+		// Replay existing logs.
+		existing, err := s.ListRunLogs(ctx, runID, opts...)
+		if err != nil {
+			return
+		}
+		for _, l := range existing {
+			if f.NodeID != "" && l.NodeID != f.NodeID {
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- l:
+			}
+		}
+
+		// If run is already completed, close after replay.
+		if run.State == flow.RunCompleted || run.State == flow.RunFailed {
+			return
+		}
+
+		// Wait for context cancellation.
+		<-ctx.Done()
+	}()
+
+	return ch, nil
+}
+
+// broadcastLog sends a log entry to all active subscribers for the given run.
+// Non-blocking: drops the entry if the subscriber channel is full.
+func (s *sqlStore) broadcastLog(l flow.RunLog) {
+	s.logSubsMu.RLock()
+	subs := s.logSubs[l.RunID]
+	s.logSubsMu.RUnlock()
+
+	for _, ch := range subs {
+		select {
+		case ch <- l:
+		default:
+			// Drop if subscriber is too slow.
+		}
+	}
+}
+
+// scanRunLog scans a run log row from a sql.Rows cursor.
+func scanRunLog(rows *sql.Rows) (flow.RunLog, error) {
+	var l flow.RunLog
+	var envStr string
+	var createdAt string
+	err := rows.Scan(&l.ID, &l.RunID, &l.NodeID, &l.Seq, &envStr, &createdAt)
+	if err != nil {
+		return flow.RunLog{}, fmt.Errorf("flow: scan run log: %w", err)
+	}
+	l.Envelope = json.RawMessage(envStr)
+	l.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
+	return l, nil
 }

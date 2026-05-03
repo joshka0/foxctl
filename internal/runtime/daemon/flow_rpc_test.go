@@ -188,6 +188,20 @@ func (s *mockFlowStore) UpdateRun(_ context.Context, r flow.FlowRun) (flow.FlowR
 	return r, nil
 }
 
+func (s *mockFlowStore) WriteRunLog(_ context.Context, log flow.RunLog) (flow.RunLog, error) {
+	return log, nil
+}
+
+func (s *mockFlowStore) ListRunLogs(_ context.Context, runID string, opts ...flow.RunLogOption) ([]flow.RunLog, error) {
+	return []flow.RunLog{}, nil
+}
+
+func (s *mockFlowStore) StreamRunLogs(_ context.Context, runID string, opts ...flow.RunLogOption) (<-chan flow.RunLog, error) {
+	ch := make(chan flow.RunLog)
+	close(ch)
+	return ch, nil
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------

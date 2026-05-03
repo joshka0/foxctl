@@ -2,6 +2,7 @@ package flow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -287,6 +288,27 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 			}
 			e.mu.Unlock()
 		}(src)
+	}
+
+	// Start log writer goroutines for each node.
+	// Each subscribes to the node's output channel and writes log entries
+	// to the store asynchronously (non-blocking for node execution).
+	for _, n := range nodes {
+		nodeID := n.ID
+		sub := bus.subscribe(nodeID)
+		go func(nodeID string, ch <-chan NodeOutput) {
+			for out := range ch {
+				envBytes, err := json.Marshal(out.Envelope)
+				if err != nil {
+					continue // skip malformed envelopes
+				}
+				_, _ = e.store.WriteRunLog(runCtx, RunLog{
+					RunID:    runID,
+					NodeID:   nodeID,
+					Envelope: json.RawMessage(envBytes),
+				})
+			}
+		}(nodeID, sub)
 	}
 
 	return nil
