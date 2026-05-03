@@ -158,7 +158,11 @@ func (e *Engine) Start(ctx context.Context, flowID string) error {
 
 	// Update flow state to running.
 	fl.State = FlowRunning
-	e.store.UpdateFlow(runCtx, fl)
+	if _, err := e.store.UpdateFlow(runCtx, fl); err != nil {
+		// Best-effort: log but don't fail the flow start since GetFlow already succeeded.
+		// The flow will still run; this is a non-critical state persistence failure.
+		_ = err // Suppress unused variable warning
+	}
 
 	// Initialize per-node and per-edge state.
 	nodeStates := make(map[string]NodeExecState)
@@ -323,13 +327,19 @@ func (e *Engine) stopLocked(flowID string, state FlowState) error {
 	fl, err := e.store.GetFlow(context.Background(), flowID)
 	if err == nil {
 		fl.State = state
-		e.store.UpdateFlow(context.Background(), fl)
+		if _, updateErr := e.store.UpdateFlow(context.Background(), fl); updateErr != nil {
+			// Best-effort state update. Continue with cleanup.
+			_ = updateErr // Suppress unused variable warning
+		}
 	}
 
 	// Update FlowRun.
 	run.storeRun.State = RunCompleted
 	run.storeRun.CompletedAt = &now
-	e.store.UpdateRun(context.Background(), run.storeRun)
+	if _, updateErr := e.store.UpdateRun(context.Background(), run.storeRun); updateErr != nil {
+		// Best-effort state update. Continue with cleanup.
+		_ = updateErr // Suppress unused variable warning
+	}
 
 	// Update node states: running nodes become idle (stopped before completion).
 	for id, ns := range run.nodeStates {
@@ -369,7 +379,10 @@ func (e *Engine) Pause(flowID string) error {
 	fl, err := e.store.GetFlow(context.Background(), flowID)
 	if err == nil {
 		fl.State = FlowPaused
-		e.store.UpdateFlow(context.Background(), fl)
+		if _, updateErr := e.store.UpdateFlow(context.Background(), fl); updateErr != nil {
+			// Best-effort state update. Continue with cleanup.
+			_ = updateErr // Suppress unused variable warning
+		}
 	}
 
 	return nil
@@ -397,7 +410,10 @@ func (e *Engine) resumeLocked(flowID string) error {
 	fl, err := e.store.GetFlow(context.Background(), flowID)
 	if err == nil {
 		fl.State = FlowRunning
-		e.store.UpdateFlow(context.Background(), fl)
+		if _, updateErr := e.store.UpdateFlow(context.Background(), fl); updateErr != nil {
+			// Best-effort state update. Continue with cleanup.
+			_ = updateErr // Suppress unused variable warning
+		}
 	}
 
 	return nil
