@@ -87,7 +87,7 @@ var flowDeleteCmd = &cobra.Command{
 var flowAddNodeCmd = &cobra.Command{
 	Use:   "add-node <flow-id-or-name>",
 	Short: "Add a node to a flow",
-	Long:  "Add a new node (skill, pty, http, playwright, image, transform) to a flow",
+	Long:  "Add a new node (skill, pty, http, playwright, image, transform, agent) to a flow",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runFlowAddNode,
 }

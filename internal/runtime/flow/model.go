@@ -12,6 +12,7 @@ package flow
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/domain/envelope"
@@ -61,15 +62,17 @@ const (
 	NodeImage NodeKind = "image"
 	// NodeTransform is a pure data transform (no external execution).
 	NodeTransform NodeKind = "transform"
+	// NodeAgent spawns a foxctl agent and captures its output.
+	NodeAgent NodeKind = "agent"
 )
 
 // ValidNodeKinds is the set of all valid NodeKind values.
-var ValidNodeKinds = []NodeKind{NodeSkill, NodePTY, NodeHTTP, NodePlaywright, NodeImage, NodeTransform}
+var ValidNodeKinds = []NodeKind{NodeSkill, NodePTY, NodeHTTP, NodePlaywright, NodeImage, NodeTransform, NodeAgent}
 
 // IsValid reports whether k is a recognised NodeKind.
 func (k NodeKind) IsValid() bool {
 	switch k {
-	case NodeSkill, NodePTY, NodeHTTP, NodePlaywright, NodeImage, NodeTransform:
+	case NodeSkill, NodePTY, NodeHTTP, NodePlaywright, NodeImage, NodeTransform, NodeAgent:
 		return true
 	default:
 		return false
@@ -316,4 +319,72 @@ type HTTPConfig struct {
 	Headers   map[string]string `json:"headers,omitempty"`
 	TimeoutMS int64             `json:"timeout_ms,omitempty"`
 	BodyPath  string            `json:"body_path,omitempty"` // jq-style path into envelope data for request body
+}
+
+// AgentConfig is the typed config for NodeAgent.
+// It defines how to spawn and interact with a foxctl agent.
+type AgentConfig struct {
+	// Role is the agent role (e.g., "researcher", "coder", "reviewer"). Required.
+	Role string `json:"role"`
+
+	// Prompt is the initial prompt for the agent. Required.
+	Prompt string `json:"prompt"`
+
+	// ExecMode controls agent execution: "reactive", "autonomous", "proactive".
+	// Default: "autonomous".
+	ExecMode string `json:"exec_mode,omitempty"`
+
+	// MaxIterations limits the number of tool calls per engine run. Default: 50.
+	MaxIterations int `json:"max_iterations,omitempty"`
+
+	// MaxAutoTurns limits autonomous continuation turns. Default: 1.
+	MaxAutoTurns int `json:"max_auto_turns,omitempty"`
+
+	// Timeout is the maximum duration for the agent to run (e.g., "5m").
+	// Default: agent runtime default.
+	Timeout string `json:"timeout,omitempty"`
+
+	// LLMProvider overrides the default LLM provider.
+	LLMProvider string `json:"llm_provider,omitempty"`
+
+	// LLMModel overrides the default LLM model.
+	LLMModel string `json:"llm_model,omitempty"`
+
+	// SkillsAllow restricts which skills the agent can use.
+	SkillsAllow []string `json:"skills_allow,omitempty"`
+
+	// InputMode controls how upstream data is passed to the agent.
+	// "prompt" — inject upstream data into the spawn prompt (default).
+	// "ask" — spawn first, then send upstream data as an agent.ask message.
+	InputMode string `json:"input_mode,omitempty"`
+
+	// OutputMode controls how the agent's output is captured.
+	// "session_summary" — poll until completion and capture session summary (default).
+	// "ask" — use the ask reply as the output (requires InputMode "ask").
+	OutputMode string `json:"output_mode,omitempty"`
+
+	// AskTimeoutMS is the timeout in milliseconds for waiting on an ask reply.
+	// Default: 30000 (30 seconds). Only used when InputMode is "ask".
+	AskTimeoutMS int `json:"ask_timeout_ms,omitempty"`
+
+	// Workspace overrides the workspace for the spawned agent.
+	Workspace string `json:"workspace,omitempty"`
+}
+
+// Validate checks that the AgentConfig has valid field values.
+// Role is required. Returns nil if valid.
+func (c AgentConfig) Validate() error {
+	if c.Role == "" {
+		return fmt.Errorf("flow: agent config: role is required")
+	}
+	if c.Prompt == "" && c.InputMode != "ask" {
+		return fmt.Errorf("flow: agent config: prompt is required")
+	}
+	if c.InputMode != "" && c.InputMode != "prompt" && c.InputMode != "ask" {
+		return fmt.Errorf("flow: agent config: invalid input_mode %q (must be prompt or ask)", c.InputMode)
+	}
+	if c.OutputMode != "" && c.OutputMode != "session_summary" && c.OutputMode != "ask" {
+		return fmt.Errorf("flow: agent config: invalid output_mode %q (must be session_summary or ask)", c.OutputMode)
+	}
+	return nil
 }

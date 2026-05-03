@@ -67,6 +67,7 @@ func TestNodeKind(t *testing.T) {
 		{NodePlaywright, true, "playwright"},
 		{NodeImage, true, "image"},
 		{NodeTransform, true, "transform"},
+		{NodeAgent, true, "agent"},
 		{NodeKind("unknown"), false, "unknown"},
 		{NodeKind(""), false, ""},
 	}
@@ -79,8 +80,8 @@ func TestNodeKind(t *testing.T) {
 		})
 	}
 
-	if len(ValidNodeKinds) != 6 {
-		t.Errorf("len(ValidNodeKinds) = %d, want 6", len(ValidNodeKinds))
+	if len(ValidNodeKinds) != 7 {
+		t.Errorf("len(ValidNodeKinds) = %d, want 7", len(ValidNodeKinds))
 	}
 	for _, k := range ValidNodeKinds {
 		if !k.IsValid() {

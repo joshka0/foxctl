@@ -2782,6 +2782,10 @@ func (s *Service) startFlowEngine(ctx context.Context) error {
 	executors := map[flow.NodeKind]flow.NodeExecutor{
 		flow.NodeSkill:    &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: s.opts.Workspace},
 		flow.NodeTransform: &passthroughExecutor{},
+		flow.NodeAgent:    &flow.AgentExecutor{
+			Spawner:   &daemonAgentSpawner{svc: s},
+			Workspace: s.opts.Workspace,
+		},
 	}
 
 	engine := flow.NewEngine(store, executors, 0)
@@ -2955,4 +2959,89 @@ func (s *Service) resolveLLMConfig() (provider, apiKey, model string) {
 		model = llmproviders.DefaultModelForProvider(provider)
 	}
 	return
+}
+
+// daemonAgentSpawner adapts the daemon's agent RPC methods to the
+// flow.AgentSpawner interface used by the flow engine's AgentExecutor.
+type daemonAgentSpawner struct {
+	svc *Service
+}
+
+func (d *daemonAgentSpawner) Spawn(ctx context.Context, role, prompt string, opts flow.AgentSpawnOptions) (*flow.AgentSpawnResult, error) {
+	params := AgentSpawnParams{
+		Role:          role,
+		Prompt:        prompt,
+		ExecMode:      opts.ExecMode,
+		MaxIterations: opts.MaxIterations,
+		MaxAutoTurns:  opts.MaxAutoTurns,
+		Timeout:       opts.Timeout,
+		LLMProvider:   opts.LLMProvider,
+		LLMModel:      opts.LLMModel,
+		SkillsAllow:   opts.SkillsAllow,
+		WorkspaceRoot: opts.Workspace,
+	}
+
+	result, err := d.svc.dispatchAgentSpawn(ctx, mustMarshalParams(params))
+	if err != nil {
+		return nil, err
+	}
+
+	return &flow.AgentSpawnResult{
+		AgentID:   result.AgentID,
+		SessionID: result.SessionID,
+	}, nil
+}
+
+func (d *daemonAgentSpawner) Ask(ctx context.Context, agentID string, message string, timeoutMS int) (*flow.AgentAskResult, error) {
+	params := AgentAskParams{
+		AgentID:   agentID,
+		Message:   message,
+		TimeoutMS: timeoutMS,
+	}
+
+	result, err := d.svc.handleAgentAskRPC(ctx, mustMarshalParams(params))
+	if err != nil {
+		return nil, err
+	}
+
+	return &flow.AgentAskResult{
+		Reply:  result.Reply,
+		Status: result.Status,
+	}, nil
+}
+
+func (d *daemonAgentSpawner) Info(ctx context.Context, agentID string) (*flow.AgentInfoResult, error) {
+	// Look up the session ID for this agent ID.
+	d.svc.agentMu.Lock()
+	sessionID, ok := d.svc.agentSessionMap[agentID]
+	d.svc.agentMu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("agent not found: %s", agentID)
+	}
+
+	result, err := d.svc.handleAgentStatus(mustMarshalParams(AgentStatusParams{SessionID: sessionID}))
+	if err != nil {
+		return nil, err
+	}
+
+	return &flow.AgentInfoResult{
+		Status:  result.Status,
+		Summary: result.Summary,
+		Error:   result.Error,
+	}, nil
+}
+
+func (d *daemonAgentSpawner) Kill(ctx context.Context, sessionID string) error {
+	_, err := d.svc.dispatchAgentKill(ctx, mustMarshalParams(AgentKillParams{SessionID: sessionID}))
+	return err
+}
+
+// mustMarshalParams marshals params to json.RawMessage. Panics on error
+// (should never happen with serializable structs).
+func mustMarshalParams(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(fmt.Sprintf("daemon: marshal params: %v", err))
+	}
+	return b
 }
