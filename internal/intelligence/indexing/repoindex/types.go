@@ -131,12 +131,58 @@ type Edge struct {
 
 // IndexMeta tracks the repo graph index state.
 type IndexMeta struct {
-	RepoRoot      string    `json:"repo_root"`
-	HeadSHA       string    `json:"head_sha,omitempty"`
-	WorktreeDirty bool      `json:"worktree_dirty"`
-	SchemaVersion int       `json:"schema_version"`
-	IndexedAt     time.Time `json:"indexed_at"`
-	Languages     []string  `json:"languages,omitempty"`
+	RepoRoot        string    `json:"repo_root"`
+	HeadSHA         string    `json:"head_sha,omitempty"`
+	WorktreeDirty   bool      `json:"worktree_dirty"`
+	DirtyStatusHash string    `json:"dirty_status_hash,omitempty"`
+	DefaultRef      string    `json:"default_ref,omitempty"`
+	DefaultRefSHA   string    `json:"default_ref_sha,omitempty"`
+	MergeBaseSHA    string    `json:"merge_base_sha,omitempty"`
+	CommitsAhead    int       `json:"commits_ahead,omitempty"`
+	CommitsBehind   int       `json:"commits_behind,omitempty"`
+	SchemaVersion   int       `json:"schema_version"`
+	IndexedAt       time.Time `json:"indexed_at"`
+	Languages       []string  `json:"languages,omitempty"`
+}
+
+// GitSnapshot captures commit state for freshness comparisons.
+type GitSnapshot struct {
+	HeadSHA         string `json:"head_sha,omitempty"`
+	WorktreeDirty   bool   `json:"worktree_dirty"`
+	DirtyStatusHash string `json:"dirty_status_hash,omitempty"`
+	DefaultRef      string `json:"default_ref,omitempty"`
+	DefaultRefSHA   string `json:"default_ref_sha,omitempty"`
+	MergeBaseSHA    string `json:"merge_base_sha,omitempty"`
+	CommitsAhead    int    `json:"commits_ahead,omitempty"`
+	CommitsBehind   int    `json:"commits_behind,omitempty"`
+}
+
+// FreshnessLevel classifies how trustworthy an index is for current workspace context.
+type FreshnessLevel string
+
+const (
+	FreshnessUnknown FreshnessLevel = "unknown"
+	FreshnessCurrent FreshnessLevel = "current"
+	FreshnessDirty   FreshnessLevel = "dirty"
+	FreshnessBehind  FreshnessLevel = "behind"
+	FreshnessStale   FreshnessLevel = "stale"
+)
+
+// IndexFreshnessStatus compares an indexed baseline against the current repo state.
+type IndexFreshnessStatus struct {
+	Level            FreshnessLevel `json:"level"`
+	IndexHeadSHA     string         `json:"index_head_sha,omitempty"`
+	CurrentHeadSHA   string         `json:"current_head_sha,omitempty"`
+	IndexDirty       bool           `json:"index_worktree_dirty"`
+	CurrentDirty     bool           `json:"current_worktree_dirty"`
+	IndexDirtyHash   string         `json:"index_dirty_status_hash,omitempty"`
+	CurrentDirtyHash string         `json:"current_dirty_status_hash,omitempty"`
+	DefaultRef       string         `json:"default_ref,omitempty"`
+	DefaultRefSHA    string         `json:"default_ref_sha,omitempty"`
+	MergeBaseSHA     string         `json:"merge_base_sha,omitempty"`
+	CommitsAhead     int            `json:"commits_ahead,omitempty"`
+	CommitsBehind    int            `json:"commits_behind,omitempty"`
+	Reasons          []string       `json:"reasons,omitempty"`
 }
 
 // Stats summarizes node and edge counts.

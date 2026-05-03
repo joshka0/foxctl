@@ -208,6 +208,14 @@ func (q *QueryEngine) Open(ctx context.Context, id string) (Node, error) {
 	return q.store.GetNode(ctx, id)
 }
 
+// ResolveFileNodes resolves exact repo-relative file paths to file nodes.
+func (q *QueryEngine) ResolveFileNodes(ctx context.Context, paths []string) ([]Node, error) {
+	if q == nil || q.store == nil {
+		return nil, ErrNotFound
+	}
+	return q.store.ResolveFileNodes(ctx, paths)
+}
+
 // Expand traverses the graph starting from seed node IDs.
 //
 // Index:

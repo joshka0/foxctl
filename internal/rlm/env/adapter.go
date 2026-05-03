@@ -219,6 +219,8 @@ func (a *ReadOnlyAdapter) executeInternal(ctx context.Context, name string, args
 		return a.retrieveTask(ctx, args)
 	case "gather_context":
 		return a.gatherContext(ctx, args)
+	case "expand_context_graph":
+		return a.expandContextGraph(ctx, args)
 	case "retrieve_mixed":
 		return a.retrieveMixed(ctx, args)
 	case "load_evidence_ref":

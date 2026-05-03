@@ -310,11 +310,14 @@ func runIndexRepoStatus(cmd *cobra.Command, workspace string) error {
 		"meta":       meta,
 		"stats":      stats,
 	}
-	if currentHead := repoindex.ResolveGitHead(ctx, absWorkspace); currentHead != "" {
-		data["current_head_sha"] = currentHead
-		data["index_matches_head"] = currentHead == meta.HeadSHA
+	currentSnapshot := repoindex.ResolveGitSnapshot(ctx, absWorkspace)
+	freshness := repoindex.CompareIndexFreshness(meta, currentSnapshot)
+	if currentSnapshot.HeadSHA != "" {
+		data["current_head_sha"] = currentSnapshot.HeadSHA
+		data["index_matches_head"] = currentSnapshot.HeadSHA == meta.HeadSHA
 	}
-	data["current_worktree_dirty"] = repoindex.ResolveGitDirty(ctx, absWorkspace)
+	data["current_worktree_dirty"] = currentSnapshot.WorktreeDirty
+	data["freshness"] = freshness
 
 	env := protocol.OK("index.repo.status", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)

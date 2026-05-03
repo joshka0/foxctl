@@ -203,6 +203,24 @@ func (s *Store) SetMeta(ctx context.Context, meta IndexMeta) error {
 	if err := setMetaValue(ctx, tx, "worktree_dirty", fmt.Sprintf("%t", meta.WorktreeDirty)); err != nil {
 		return err
 	}
+	if err := setMetaValue(ctx, tx, "dirty_status_hash", meta.DirtyStatusHash); err != nil {
+		return err
+	}
+	if err := setMetaValue(ctx, tx, "default_ref", meta.DefaultRef); err != nil {
+		return err
+	}
+	if err := setMetaValue(ctx, tx, "default_ref_sha", meta.DefaultRefSHA); err != nil {
+		return err
+	}
+	if err := setMetaValue(ctx, tx, "merge_base_sha", meta.MergeBaseSHA); err != nil {
+		return err
+	}
+	if err := setMetaValue(ctx, tx, "commits_ahead", fmt.Sprintf("%d", meta.CommitsAhead)); err != nil {
+		return err
+	}
+	if err := setMetaValue(ctx, tx, "commits_behind", fmt.Sprintf("%d", meta.CommitsBehind)); err != nil {
+		return err
+	}
 	if err := setMetaValue(ctx, tx, "schema_version", fmt.Sprintf("%d", meta.SchemaVersion)); err != nil {
 		return err
 	}
@@ -243,6 +261,22 @@ func (s *Store) GetMeta(ctx context.Context) (IndexMeta, error) {
 			meta.HeadSHA = value
 		case "worktree_dirty":
 			meta.WorktreeDirty = value == "true" || value == "1"
+		case "dirty_status_hash":
+			meta.DirtyStatusHash = value
+		case "default_ref":
+			meta.DefaultRef = value
+		case "default_ref_sha":
+			meta.DefaultRefSHA = value
+		case "merge_base_sha":
+			meta.MergeBaseSHA = value
+		case "commits_ahead":
+			if parsed, err := parseInt(value); err == nil {
+				meta.CommitsAhead = parsed
+			}
+		case "commits_behind":
+			if parsed, err := parseInt(value); err == nil {
+				meta.CommitsBehind = parsed
+			}
 		case "schema_version":
 			if parsed, err := parseInt(value); err == nil {
 				meta.SchemaVersion = parsed
@@ -513,6 +547,41 @@ func (s *Store) GetNodes(ctx context.Context, ids []string) ([]Node, error) {
 	}
 	defer rows.Close()
 
+	return scanNodes(rows)
+}
+
+// ResolveFileNodes returns exact file nodes for repo-relative file paths.
+func (s *Store) ResolveFileNodes(ctx context.Context, paths []string) ([]Node, error) {
+	normalized := make([]string, 0, len(paths))
+	seen := map[string]struct{}{}
+	for _, path := range paths {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		path = strings.TrimPrefix(path, "./")
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		normalized = append(normalized, path)
+	}
+	if len(normalized) == 0 {
+		return nil, nil
+	}
+	clause, args := buildInClause(normalized)
+	query := fmt.Sprintf(`
+		SELECT id, kind, pkg, file, name, signature, span_start, span_end, exported, doc, summary, meta_json, hash, updated_at
+		FROM nodes
+		WHERE repo_key = ? AND kind = ? AND file IN (%s)
+		ORDER BY file ASC, id ASC
+	`, clause)
+	args = append([]any{s.repoKey, string(NodeFile)}, args...)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	return scanNodes(rows)
 }
 

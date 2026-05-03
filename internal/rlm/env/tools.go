@@ -11,7 +11,7 @@ func DefaultTools() []rlm.Tool {
 	return []rlm.Tool{
 		{
 			Name:        "gather_context",
-			Description: "Gather bounded context across code, memory, context, and task lanes. Returns a reduced ContextBundle. With response_mode=answer_surface, prefer copying answer_seed.paths and answer_seed.facts, using path_set.must/load_ref for verification before inferring from raw evidence.",
+			Description: "Gather bounded context across code, memory, context, and task lanes. Defaults to response_mode=answer_surface for a reduced answer seed/path_set surface. Use response_mode=full only for eval/debug bundle inspection. Prefer copying answer_seed.paths and answer_seed.facts, using path_set.must/load_ref for verification before inferring from raw evidence.",
 			Parameters: objectSchema(map[string]any{
 				"query": map[string]any{
 					"type":        "string",
@@ -25,6 +25,24 @@ func DefaultTools() []rlm.Tool {
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
 					"description": "Optional terms, symbols, or claims that the returned bundle should try to cover with evidence.",
+				},
+				"coverage_requirements": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"id":              map[string]any{"type": "string"},
+							"kind":            map[string]any{"type": "string"},
+							"label":           map[string]any{"type": "string"},
+							"terms":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+							"required":        map[string]any{"type": "boolean"},
+							"min_paths":       map[string]any{"type": "integer"},
+							"weight":          map[string]any{"type": "number"},
+							"source_profiles": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						},
+					},
+					"description": "Optional structured reducer coverage slots. Prefer this when the task needs one selected path per role/concept.",
 				},
 				"limit": map[string]any{
 					"type":        "integer",
@@ -53,6 +71,11 @@ func DefaultTools() []rlm.Tool {
 					"items":       map[string]any{"type": "string"},
 					"description": "Optional repo-relative path prefixes to constrain repo_code results, such as apps/api or packages/core.",
 				},
+				"excluded_paths": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional repo-relative paths, prefixes, or glob patterns to suppress from repo_code results, such as node_modules, dist, build, generated, or nested worktrees.",
+				},
 				"memory_statuses": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
@@ -69,9 +92,83 @@ func DefaultTools() []rlm.Tool {
 				},
 				"response_mode": map[string]any{
 					"type":        "string",
-					"description": "Optional response shape: full for full bundle, answer_surface or compact for answer_seed/path_set/facts without raw evidence. Mini/default profiles should use answer_surface.",
+					"description": "Optional response shape: defaults to answer_surface. Use full only for eval/debug bundle inspection; answer_surface or compact returns answer_seed/path_set/facts without raw evidence.",
 				},
 			}, "query"),
+			ReadOnly: true,
+		},
+		{
+			Name:        "expand_context_graph",
+			Description: "Expand compact dependency, dependent, test, config, docs, schema, and data context around selected gather_context roots. Returns graph evidence and confidence, not file bodies. Use after gather_context when dependency completeness matters.",
+			Parameters: objectSchema(map[string]any{
+				"roots": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Required root refs or repo-relative paths, usually path_set.must load_ref values from gather_context.",
+				},
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Optional original context query for confidence and diagnostics.",
+				},
+				"task_type": map[string]any{
+					"type":        "string",
+					"description": "Optional task intent such as execution_trace, change_impact, subsystem_map, architecture_map, or integration_surface.",
+				},
+				"depth": map[string]any{
+					"type":        "integer",
+					"description": "Optional graph depth. Defaults to 1.",
+				},
+				"direction": map[string]any{
+					"type":        "string",
+					"description": "Optional direction: both, out, or in. Defaults to both.",
+				},
+				"source_profiles": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional source profiles for diagnostics and future provider shaping.",
+				},
+				"coverage_requirements": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"id":              map[string]any{"type": "string"},
+							"kind":            map[string]any{"type": "string"},
+							"label":           map[string]any{"type": "string"},
+							"terms":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+							"required":        map[string]any{"type": "boolean"},
+							"min_paths":       map[string]any{"type": "integer"},
+							"weight":          map[string]any{"type": "number"},
+							"source_profiles": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+						},
+					},
+					"description": "Optional structured coverage requirements copied from gather_context.",
+				},
+				"include_tests": map[string]any{
+					"type":        "boolean",
+					"description": "When true, include TESTS edges where indexed.",
+				},
+				"include_adjacent": map[string]any{
+					"type":        "boolean",
+					"description": "Reserved for bounded config/docs/schema/data adjacency expansion.",
+				},
+				"path_prefixes": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional repo-relative prefixes roots must be under.",
+				},
+				"excluded_paths": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional repo-relative paths, prefixes, or globs to suppress.",
+				},
+				"budget": map[string]any{
+					"type":                 "object",
+					"additionalProperties": true,
+					"description":          "Optional graph budget: max_roots, max_nodes, max_edges, max_depth, per_node_cap.",
+				},
+			}, "roots"),
 			ReadOnly: true,
 		},
 		{

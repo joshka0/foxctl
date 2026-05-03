@@ -7,7 +7,6 @@ import (
 	"go/ast"
 	"go/types"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -159,14 +158,12 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 		}
 	}
 
-	meta := IndexMeta{
+	meta := IndexMetaFromGitSnapshot(IndexMeta{
 		RepoRoot:      opts.RepoRoot,
-		HeadSHA:       ResolveGitHead(ctx, opts.RepoRoot),
-		WorktreeDirty: ResolveGitDirty(ctx, opts.RepoRoot),
 		SchemaVersion: schemaVersion,
 		IndexedAt:     time.Now().UTC(),
 		Languages:     buildLanguages(opts),
-	}
+	}, ResolveGitSnapshot(ctx, opts.RepoRoot))
 	if err := b.store.SetMeta(ctx, meta); err != nil {
 		return result, err
 	}
@@ -1617,26 +1614,6 @@ func importMeta(path string) []byte {
 		return nil
 	}
 	return meta
-}
-
-// ResolveGitHead returns the current Git HEAD SHA for repoRoot when available.
-func ResolveGitHead(ctx context.Context, repoRoot string) string {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "rev-parse", "HEAD")
-	output, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(output))
-}
-
-// ResolveGitDirty reports whether repoRoot has uncommitted Git changes.
-func ResolveGitDirty(ctx context.Context, repoRoot string) bool {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "status", "--porcelain")
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(output)) != ""
 }
 
 func buildLanguages(opts BuildOptions) []string {

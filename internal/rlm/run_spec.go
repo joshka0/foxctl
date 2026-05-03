@@ -81,8 +81,9 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		// allow bounded ref inspection only for verification. Raw lane tools
 		// require explicit debug profiles.
 		allow := map[string]struct{}{
-			"gather_context":    {},
-			"load_evidence_ref": {},
+			"gather_context":       {},
+			"expand_context_graph": {},
+			"load_evidence_ref":    {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -95,6 +96,7 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		// direct repo controller/raw code lane for retrieval diagnostics.
 		allow := map[string]struct{}{
 			"gather_context":       {},
+			"expand_context_graph": {},
 			"load_evidence_ref":    {},
 			"code_search_ensemble": {},
 			"retrieve_code":        {},
@@ -109,10 +111,11 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		// Memory/context debug: certified context first, then raw memory and
 		// ACA/context lanes for diagnostics.
 		allow := map[string]struct{}{
-			"gather_context":    {},
-			"load_evidence_ref": {},
-			"retrieve_memory":   {},
-			"retrieve_context":  {},
+			"gather_context":       {},
+			"expand_context_graph": {},
+			"load_evidence_ref":    {},
+			"retrieve_memory":      {},
+			"retrieve_context":     {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -122,6 +125,7 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		}, nil
 	case ToolProfileFullDebug:
 		allow := map[string]struct{}{
+			"expand_context_graph":     {},
 			"gather_context":           {},
 			"load_evidence_ref":        {},
 			"code_search_ensemble":     {},

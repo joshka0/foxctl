@@ -70,3 +70,35 @@ func TestDefaultToolsExposeGatherContext(t *testing.T) {
 	}
 	t.Fatal("DefaultTools() missing gather_context")
 }
+
+func TestDefaultToolsExposeExpandContextGraph(t *testing.T) {
+	t.Parallel()
+
+	for _, tool := range DefaultTools() {
+		if tool.Name != "expand_context_graph" {
+			continue
+		}
+		if !tool.ReadOnly {
+			t.Fatal("expand_context_graph must be read-only")
+		}
+		var schema struct {
+			Required   []string               `json:"required"`
+			Properties map[string]interface{} `json:"properties"`
+		}
+		if err := json.Unmarshal(tool.Parameters, &schema); err != nil {
+			t.Fatalf("schema decode: %v", err)
+		}
+		for _, key := range []string{"roots", "depth", "direction", "budget"} {
+			if _, ok := schema.Properties[key]; !ok {
+				t.Fatalf("expand_context_graph schema missing %s: %v", key, schema.Properties)
+			}
+		}
+		for _, required := range schema.Required {
+			if required == "roots" {
+				return
+			}
+		}
+		t.Fatalf("expand_context_graph required=%v want roots", schema.Required)
+	}
+	t.Fatal("DefaultTools() missing expand_context_graph")
+}

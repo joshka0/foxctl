@@ -51,6 +51,7 @@ func TestResolveRunSpecBuildsCanonicalPlanAndPolicy(t *testing.T) {
 
 	allTools := []Tool{
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
 		{Name: "code_search_ensemble", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
@@ -87,8 +88,8 @@ func TestResolveRunSpecBuildsCanonicalPlanAndPolicy(t *testing.T) {
 	if spec.ToolPolicy.Profile != ToolProfileDefault {
 		t.Fatalf("policy.profile=%s", spec.ToolPolicy.Profile)
 	}
-	if len(spec.ToolPolicy.Tools) != 2 {
-		t.Fatalf("policy.tools=%d want 2", len(spec.ToolPolicy.Tools))
+	if len(spec.ToolPolicy.Tools) != 3 {
+		t.Fatalf("policy.tools=%d want 3", len(spec.ToolPolicy.Tools))
 	}
 }
 
@@ -97,6 +98,7 @@ func TestResolveToolPolicyDefaultReturnsMiniSurface(t *testing.T) {
 
 	allTools := []Tool{
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
 		{Name: "code_search_ensemble", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
@@ -109,10 +111,10 @@ func TestResolveToolPolicyDefaultReturnsMiniSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveToolPolicy() error = %v", err)
 	}
-	if len(policy.Tools) != 2 {
-		t.Fatalf("default tools=%d want 2", len(policy.Tools))
+	if len(policy.Tools) != 3 {
+		t.Fatalf("default tools=%d want 3", len(policy.Tools))
 	}
-	wantNames := []string{"gather_context", "load_evidence_ref"}
+	wantNames := []string{"gather_context", "expand_context_graph", "load_evidence_ref"}
 	if got := names(policy.Tools); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("default tool names=%v want %v", got, wantNames)
 	}
@@ -123,6 +125,7 @@ func TestResolveToolPolicyCodeIntelReturnsCodeTools(t *testing.T) {
 
 	allTools := []Tool{
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
 		{Name: "code_search_ensemble", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
@@ -135,7 +138,7 @@ func TestResolveToolPolicyCodeIntelReturnsCodeTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveToolPolicy() error = %v", err)
 	}
-	wantNames := []string{"gather_context", "load_evidence_ref", "code_search_ensemble", "retrieve_code"}
+	wantNames := []string{"gather_context", "expand_context_graph", "load_evidence_ref", "code_search_ensemble", "retrieve_code"}
 	if got := names(policy.Tools); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("code-intel tool names=%v want %v", got, wantNames)
 	}
@@ -146,6 +149,7 @@ func TestResolveToolPolicyGatherContextReturnsBundleTools(t *testing.T) {
 
 	allTools := []Tool{
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
 		{Name: "retrieve_memory", ReadOnly: true},
@@ -157,7 +161,7 @@ func TestResolveToolPolicyGatherContextReturnsBundleTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveToolPolicy() error = %v", err)
 	}
-	wantNames := []string{"gather_context", "load_evidence_ref"}
+	wantNames := []string{"gather_context", "expand_context_graph", "load_evidence_ref"}
 	if got := names(policy.Tools); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("gather-context tool names=%v want %v", got, wantNames)
 	}
@@ -168,6 +172,7 @@ func TestResolveToolPolicyMemoryRecallReturnsMemoryTools(t *testing.T) {
 
 	allTools := []Tool{
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
 		{Name: "retrieve_code", ReadOnly: true},
 		{Name: "retrieve_memory", ReadOnly: true},
@@ -179,7 +184,7 @@ func TestResolveToolPolicyMemoryRecallReturnsMemoryTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveToolPolicy() error = %v", err)
 	}
-	wantNames := []string{"gather_context", "load_evidence_ref", "retrieve_memory", "retrieve_context"}
+	wantNames := []string{"gather_context", "expand_context_graph", "load_evidence_ref", "retrieve_memory", "retrieve_context"}
 	if got := names(policy.Tools); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("memory-recall tool names=%v want %v", got, wantNames)
 	}

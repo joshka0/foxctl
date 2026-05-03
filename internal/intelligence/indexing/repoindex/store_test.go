@@ -134,11 +134,17 @@ func TestStoreMetaPersistsGitBaselineState(t *testing.T) {
 	defer store.Close()
 
 	want := IndexMeta{
-		RepoRoot:      repoRoot,
-		HeadSHA:       "abc123",
-		WorktreeDirty: true,
-		IndexedAt:     time.Unix(123, 0).UTC(),
-		Languages:     []string{"go", "typescript"},
+		RepoRoot:        repoRoot,
+		HeadSHA:         "abc123",
+		WorktreeDirty:   true,
+		DirtyStatusHash: "dirty-hash",
+		DefaultRef:      "origin/main",
+		DefaultRefSHA:   "def456",
+		MergeBaseSHA:    "base789",
+		CommitsAhead:    2,
+		CommitsBehind:   3,
+		IndexedAt:       time.Unix(123, 0).UTC(),
+		Languages:       []string{"go", "typescript"},
 	}
 	if err := store.SetMeta(ctx, want); err != nil {
 		t.Fatalf("set meta: %v", err)
@@ -152,6 +158,12 @@ func TestStoreMetaPersistsGitBaselineState(t *testing.T) {
 	}
 	if !got.WorktreeDirty {
 		t.Fatalf("worktree dirty=false want true")
+	}
+	if got.DirtyStatusHash != want.DirtyStatusHash || got.DefaultRef != want.DefaultRef || got.DefaultRefSHA != want.DefaultRefSHA || got.MergeBaseSHA != want.MergeBaseSHA {
+		t.Fatalf("extended meta=%#v want %#v", got, want)
+	}
+	if got.CommitsAhead != want.CommitsAhead || got.CommitsBehind != want.CommitsBehind {
+		t.Fatalf("ahead/behind=%d/%d want %d/%d", got.CommitsAhead, got.CommitsBehind, want.CommitsAhead, want.CommitsBehind)
 	}
 	if got.IndexedAt.Unix() != want.IndexedAt.Unix() {
 		t.Fatalf("indexed_at=%v want %v", got.IndexedAt, want.IndexedAt)
