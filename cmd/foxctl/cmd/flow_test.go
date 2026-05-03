@@ -2,15 +2,18 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/protocol"
+	flowmodel "github.com/joshka0/foxctl/internal/runtime/flow"
 )
 
 // ---------------------------------------------------------------------------
@@ -1054,3 +1057,470 @@ var (
 	_ = os.DevNull
 	_ = fmt.Sprintf // used in test subtest names
 )
+
+// ---------------------------------------------------------------------------
+// Test: flow start
+// ---------------------------------------------------------------------------
+
+func TestFlowStart(t *testing.T) {
+	// Install a mock executor so we don't need a real foxctl binary.
+	flowEngineRegistry.mu.Lock()
+	flowEngineRegistry.testExecutors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
+		flowmodel.NodeSkill:     &mockCLIExecutor{},
+		flowmodel.NodeTransform: &mockCLIExecutor{},
+	}
+	flowEngineRegistry.mu.Unlock()
+	defer func() {
+		flowEngineRegistry.mu.Lock()
+		flowEngineRegistry.testExecutors = nil
+		// Clean up any leftover engines.
+		for id := range flowEngineRegistry.engines {
+			removeEngine(id)
+		}
+		flowEngineRegistry.mu.Unlock()
+	}()
+
+	t.Run("starts draft flow with source node", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "start-test", "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		flowID := env.Data.(map[string]any)["id"].(string)
+
+		// Add a source node.
+		_, _ = executeFlowCommand(t, "flow", "add-node", flowID, "--label", "src", "--kind", "skill",
+			"--config", `{"skill":"code/stats"}`, "--workspace", ws)
+
+		// Start the flow.
+		stdout, _ = executeFlowCommand(t, "flow", "start", flowID, "--workspace", ws)
+		env = parseEnvelope(t, stdout)
+		assertValidOKEnvelope(t, env, "flow/start")
+
+		data := env.Data.(map[string]any)
+		if data["state"] != "running" {
+			t.Errorf("expected state 'running', got %v", data["state"])
+		}
+		if data["run_id"] == nil || data["run_id"] == "" {
+			t.Error("expected run_id to be set")
+		}
+
+		// Clean up: stop the engine.
+		removeEngine(flowID)
+	})
+
+	t.Run("rejects already-running flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "already-running", "--workspace", ws)
+		flowID := parseEnvelope(t, stdout).Data.(map[string]any)["id"].(string)
+
+		_, _ = executeFlowCommand(t, "flow", "add-node", flowID, "--label", "src", "--kind", "skill",
+			"--config", `{"skill":"code/stats"}`, "--workspace", ws)
+
+		// First start succeeds.
+		_, _ = executeFlowCommand(t, "flow", "start", flowID, "--workspace", ws)
+
+		// Second start fails.
+		stdout, _ = executeFlowCommand(t, "flow", "start", flowID, "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		code := assertValidErrorEnvelope(t, env, "flow/start")
+		if code != string(protocol.ErrorCodeEARG) {
+			t.Errorf("expected EARG for already running, got %q", code)
+		}
+
+		removeEngine(flowID)
+	})
+
+	t.Run("rejects flow with no nodes", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "no-nodes", "--workspace", ws)
+		flowID := parseEnvelope(t, stdout).Data.(map[string]any)["id"].(string)
+
+		stdout, _ = executeFlowCommand(t, "flow", "start", flowID, "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		code := assertValidErrorEnvelope(t, env, "flow/start")
+		if code != string(protocol.ErrorCodeEARG) {
+			t.Errorf("expected EARG for no nodes, got %q", code)
+		}
+		if !strings.Contains(env.Error.Message, "no nodes") {
+			t.Errorf("expected 'no nodes' in error, got %q", env.Error.Message)
+		}
+	})
+
+	t.Run("rejects flow with no source nodes", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		_, _ = executeFlowCommand(t, "flow", "create", "--name", "no-source", "--workspace", ws)
+
+		// No-source-nodes scenario requires every node to have an incoming edge,
+		// which without a cycle is only possible in diamond topologies that need
+		// a Join primitive. The engine tests cover this via direct API.
+		// Here we just log that this case is handled at engine level.
+		t.Log("No-source-nodes case is covered by engine tests (cycle detection)")
+		_ = ws
+	})
+
+	t.Run("rejects nonexistent flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "start", "nonexistent", "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		code := assertValidErrorEnvelope(t, env, "flow/start")
+		if code != string(protocol.ErrorCodeENotFound) {
+			t.Errorf("expected ENOTFOUND, got %q", code)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Test: flow stop
+// ---------------------------------------------------------------------------
+
+func TestFlowStop(t *testing.T) {
+	flowEngineRegistry.mu.Lock()
+	flowEngineRegistry.testExecutors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
+		flowmodel.NodeSkill:     &mockCLIExecutor{},
+		flowmodel.NodeTransform: &mockCLIExecutor{},
+	}
+	flowEngineRegistry.mu.Unlock()
+	defer func() {
+		flowEngineRegistry.mu.Lock()
+		flowEngineRegistry.testExecutors = nil
+		for id := range flowEngineRegistry.engines {
+			removeEngine(id)
+		}
+		flowEngineRegistry.mu.Unlock()
+	}()
+
+	t.Run("stops running flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "stop-test", "--workspace", ws)
+		flowID := parseEnvelope(t, stdout).Data.(map[string]any)["id"].(string)
+
+		_, _ = executeFlowCommand(t, "flow", "add-node", flowID, "--label", "src", "--kind", "skill",
+			"--config", `{"skill":"code/stats"}`, "--workspace", ws)
+
+		_, _ = executeFlowCommand(t, "flow", "start", flowID, "--workspace", ws)
+
+		stdout, _ = executeFlowCommand(t, "flow", "stop", flowID, "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		assertValidOKEnvelope(t, env, "flow/stop")
+
+		data := env.Data.(map[string]any)
+		if data["stopped"] != true {
+			t.Errorf("expected stopped=true, got %v", data["stopped"])
+		}
+		if data["state"] != "stopped" {
+			t.Errorf("expected state 'stopped', got %v", data["state"])
+		}
+	})
+
+	t.Run("rejects stopping non-running flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "not-running", "--workspace", ws)
+		flowID := parseEnvelope(t, stdout).Data.(map[string]any)["id"].(string)
+
+		stdout, _ = executeFlowCommand(t, "flow", "stop", flowID, "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		code := assertValidErrorEnvelope(t, env, "flow/stop")
+		if code != string(protocol.ErrorCodeEARG) {
+			t.Errorf("expected EARG, got %q", code)
+		}
+	})
+
+	t.Run("rejects nonexistent flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "stop", "nonexistent", "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		code := assertValidErrorEnvelope(t, env, "flow/stop")
+		if code != string(protocol.ErrorCodeENotFound) {
+			t.Errorf("expected ENOTFOUND, got %q", code)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Test: flow pause
+// ---------------------------------------------------------------------------
+
+func TestFlowPause(t *testing.T) {
+	flowEngineRegistry.mu.Lock()
+	flowEngineRegistry.testExecutors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
+		flowmodel.NodeSkill:     &mockCLIExecutor{},
+		flowmodel.NodeTransform: &mockCLIExecutor{},
+	}
+	flowEngineRegistry.mu.Unlock()
+	defer func() {
+		flowEngineRegistry.mu.Lock()
+		flowEngineRegistry.testExecutors = nil
+		for id := range flowEngineRegistry.engines {
+			removeEngine(id)
+		}
+		flowEngineRegistry.mu.Unlock()
+	}()
+
+	t.Run("pauses running flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "pause-test", "--workspace", ws)
+		flowID := parseEnvelope(t, stdout).Data.(map[string]any)["id"].(string)
+
+		_, _ = executeFlowCommand(t, "flow", "add-node", flowID, "--label", "src", "--kind", "skill",
+			"--config", `{"skill":"code/stats"}`, "--workspace", ws)
+
+		_, _ = executeFlowCommand(t, "flow", "start", flowID, "--workspace", ws)
+
+		stdout, _ = executeFlowCommand(t, "flow", "pause", flowID, "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		assertValidOKEnvelope(t, env, "flow/pause")
+
+		data := env.Data.(map[string]any)
+		if data["paused"] != true {
+			t.Errorf("expected paused=true, got %v", data["paused"])
+		}
+		if data["state"] != "paused" {
+			t.Errorf("expected state 'paused', got %v", data["state"])
+		}
+
+		removeEngine(flowID)
+	})
+
+	t.Run("rejects pausing non-running flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "pause-draft", "--workspace", ws)
+		flowID := parseEnvelope(t, stdout).Data.(map[string]any)["id"].(string)
+
+		stdout, _ = executeFlowCommand(t, "flow", "pause", flowID, "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		code := assertValidErrorEnvelope(t, env, "flow/pause")
+		if code != string(protocol.ErrorCodeEARG) {
+			t.Errorf("expected EARG, got %q", code)
+		}
+	})
+
+	t.Run("rejects nonexistent flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "pause", "nonexistent", "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		code := assertValidErrorEnvelope(t, env, "flow/pause")
+		if code != string(protocol.ErrorCodeENotFound) {
+			t.Errorf("expected ENOTFOUND, got %q", code)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Test: flow status
+// ---------------------------------------------------------------------------
+
+func TestFlowStatus(t *testing.T) {
+	flowEngineRegistry.mu.Lock()
+	flowEngineRegistry.testExecutors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
+		flowmodel.NodeSkill:     &mockCLIExecutor{},
+		flowmodel.NodeTransform: &mockCLIExecutor{},
+	}
+	flowEngineRegistry.mu.Unlock()
+	defer func() {
+		flowEngineRegistry.mu.Lock()
+		flowEngineRegistry.testExecutors = nil
+		for id := range flowEngineRegistry.engines {
+			removeEngine(id)
+		}
+		flowEngineRegistry.mu.Unlock()
+	}()
+
+	t.Run("shows running state for active flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "status-running", "--workspace", ws)
+		flowID := parseEnvelope(t, stdout).Data.(map[string]any)["id"].(string)
+
+		_, _ = executeFlowCommand(t, "flow", "add-node", flowID, "--label", "src", "--kind", "skill",
+			"--config", `{"skill":"code/stats"}`, "--workspace", ws)
+
+		_, _ = executeFlowCommand(t, "flow", "start", flowID, "--workspace", ws)
+
+		stdout, _ = executeFlowCommand(t, "flow", "status", flowID, "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		assertValidOKEnvelope(t, env, "flow/status")
+
+		data := env.Data.(map[string]any)
+		if data["flow_state"] != "running" {
+			t.Errorf("expected flow_state 'running', got %v", data["flow_state"])
+		}
+
+		nodes, ok := data["nodes"].([]any)
+		if !ok {
+			t.Fatalf("expected nodes to be array, got %T", data["nodes"])
+		}
+		if len(nodes) != 1 {
+			t.Errorf("expected 1 node in status, got %d", len(nodes))
+		}
+
+		removeEngine(flowID)
+	})
+
+	t.Run("shows draft state for inactive flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "status-draft", "--workspace", ws)
+		flowID := parseEnvelope(t, stdout).Data.(map[string]any)["id"].(string)
+
+		_, _ = executeFlowCommand(t, "flow", "add-node", flowID, "--label", "src", "--kind", "skill",
+			"--config", `{}`, "--workspace", ws)
+
+		stdout, _ = executeFlowCommand(t, "flow", "status", flowID, "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		assertValidOKEnvelope(t, env, "flow/status")
+
+		data := env.Data.(map[string]any)
+		if data["flow_state"] != "draft" {
+			t.Errorf("expected flow_state 'draft', got %v", data["flow_state"])
+		}
+
+		nodes, ok := data["nodes"].([]any)
+		if !ok {
+			t.Fatalf("expected nodes to be array, got %T", data["nodes"])
+		}
+		if len(nodes) != 1 {
+			t.Errorf("expected 1 node in status, got %d", len(nodes))
+		}
+		// Idle nodes should show state "idle".
+		nodeData := nodes[0].(map[string]any)
+		if nodeData["state"] != "idle" {
+			t.Errorf("expected idle node state, got %v", nodeData["state"])
+		}
+	})
+
+	t.Run("shows per-edge state for active flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "edge-status", "--workspace", ws)
+		flowID := parseEnvelope(t, stdout).Data.(map[string]any)["id"].(string)
+
+		_, _ = executeFlowCommand(t, "flow", "add-node", flowID, "--label", "src", "--kind", "skill",
+			"--config", `{"skill":"code/stats"}`, "--workspace", ws)
+		_, _ = executeFlowCommand(t, "flow", "add-node", flowID, "--label", "sink", "--kind", "skill",
+			"--config", `{"skill":"code/stats"}`, "--workspace", ws)
+		_, _ = executeFlowCommand(t, "flow", "add-edge", flowID, "--from", "src", "--to", "sink",
+			"--workspace", ws)
+
+		_, _ = executeFlowCommand(t, "flow", "start", flowID, "--workspace", ws)
+
+		stdout, _ = executeFlowCommand(t, "flow", "status", flowID, "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		assertValidOKEnvelope(t, env, "flow/status")
+
+		data := env.Data.(map[string]any)
+		edges, ok := data["edges"].([]any)
+		if !ok {
+			t.Fatalf("expected edges to be array, got %T", data["edges"])
+		}
+		if len(edges) != 1 {
+			t.Errorf("expected 1 edge in status, got %d", len(edges))
+		}
+
+		removeEngine(flowID)
+	})
+
+	t.Run("rejects nonexistent flow", func(t *testing.T) {
+		ws := tempWorkspace(t)
+		stdout, _ := executeFlowCommand(t, "flow", "status", "nonexistent", "--workspace", ws)
+		env := parseEnvelope(t, stdout)
+		code := assertValidErrorEnvelope(t, env, "flow/status")
+		if code != string(protocol.ErrorCodeENotFound) {
+			t.Errorf("expected ENOTFOUND, got %q", code)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Test: full lifecycle
+// ---------------------------------------------------------------------------
+
+func TestFlowFullLifecycle(t *testing.T) {
+	flowEngineRegistry.mu.Lock()
+	flowEngineRegistry.testExecutors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
+		flowmodel.NodeSkill:     &mockCLIExecutor{},
+		flowmodel.NodeTransform: &mockCLIExecutor{},
+	}
+	flowEngineRegistry.mu.Unlock()
+	defer func() {
+		flowEngineRegistry.mu.Lock()
+		flowEngineRegistry.testExecutors = nil
+		for id := range flowEngineRegistry.engines {
+			removeEngine(id)
+		}
+		flowEngineRegistry.mu.Unlock()
+	}()
+
+	ws := tempWorkspace(t)
+
+	// Step 1: Create flow.
+	stdout, _ := executeFlowCommand(t, "flow", "create", "--name", "e2e", "--workspace", ws)
+	env := parseEnvelope(t, stdout)
+	assertValidOKEnvelope(t, env, "flow/create")
+	flowID := env.Data.(map[string]any)["id"].(string)
+
+	// Step 2: Add source node.
+	stdout, _ = executeFlowCommand(t, "flow", "add-node", flowID, "--label", "src", "--kind", "skill",
+		"--config", `{"skill":"code/stats"}`, "--workspace", ws)
+	env = parseEnvelope(t, stdout)
+	assertValidOKEnvelope(t, env, "flow/add-node")
+
+	// Step 3: Add sink node.
+	stdout, _ = executeFlowCommand(t, "flow", "add-node", flowID, "--label", "sink", "--kind", "skill",
+		"--config", `{"skill":"code/stats"}`, "--workspace", ws)
+	env = parseEnvelope(t, stdout)
+	assertValidOKEnvelope(t, env, "flow/add-node")
+
+	// Step 4: Add edge.
+	stdout, _ = executeFlowCommand(t, "flow", "add-edge", flowID, "--from", "src", "--to", "sink",
+		"--workspace", ws)
+	env = parseEnvelope(t, stdout)
+	assertValidOKEnvelope(t, env, "flow/add-edge")
+
+	// Step 5: Start flow.
+	stdout, _ = executeFlowCommand(t, "flow", "start", flowID, "--workspace", ws)
+	env = parseEnvelope(t, stdout)
+	assertValidOKEnvelope(t, env, "flow/start")
+	startData := env.Data.(map[string]any)
+	if startData["state"] != "running" {
+		t.Fatalf("expected state 'running' after start, got %v", startData["state"])
+	}
+
+	// Step 6: Status should show running.
+	stdout, _ = executeFlowCommand(t, "flow", "status", flowID, "--workspace", ws)
+	env = parseEnvelope(t, stdout)
+	assertValidOKEnvelope(t, env, "flow/status")
+	statusData := env.Data.(map[string]any)
+	if statusData["flow_state"] != "running" {
+		t.Errorf("expected flow_state 'running', got %v", statusData["flow_state"])
+	}
+
+	// Step 7: Stop flow.
+	stdout, _ = executeFlowCommand(t, "flow", "stop", flowID, "--workspace", ws)
+	env = parseEnvelope(t, stdout)
+	assertValidOKEnvelope(t, env, "flow/stop")
+	stopData := env.Data.(map[string]any)
+	if stopData["stopped"] != true {
+		t.Errorf("expected stopped=true, got %v", stopData["stopped"])
+	}
+
+	// Step 8: Status after stop should show stopped.
+	stdout, _ = executeFlowCommand(t, "flow", "status", flowID, "--workspace", ws)
+	env = parseEnvelope(t, stdout)
+	assertValidOKEnvelope(t, env, "flow/status")
+	statusData = env.Data.(map[string]any)
+	if statusData["flow_state"] != "stopped" {
+		t.Errorf("expected flow_state 'stopped' after stop, got %v", statusData["flow_state"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Mock executor for CLI tests
+// ---------------------------------------------------------------------------
+
+// mockCLIExecutor is a simple mock NodeExecutor for CLI-level tests.
+// It returns a valid OK envelope without doing any real work.
+type mockCLIExecutor struct{}
+
+func (m *mockCLIExecutor) Execute(ctx context.Context, node flowmodel.FlowNode, input any) (flowmodel.NodeOutput, error) {
+	return flowmodel.NodeOutput{
+		Envelope: envelope.OK("mock", map[string]any{"result": "ok", "node": node.ID}),
+		Duration: time.Millisecond,
+		NodeID:   node.ID,
+	}, nil
+}

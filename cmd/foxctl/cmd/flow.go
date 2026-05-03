@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joshka0/foxctl/internal/protocol"
@@ -115,6 +116,38 @@ var flowRemoveEdgeCmd = &cobra.Command{
 	RunE:  runFlowRemoveEdge,
 }
 
+var flowStartCmd = &cobra.Command{
+	Use:   "start <flow-id-or-name>",
+	Short: "Start a flow",
+	Long:  "Start executing a flow: validates the graph has source nodes, creates a FlowRun, and starts the engine",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runFlowStart,
+}
+
+var flowStopCmd = &cobra.Command{
+	Use:   "stop <flow-id-or-name>",
+	Short: "Stop a running flow",
+	Long:  "Gracefully stop a running flow, terminating all node execution",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runFlowStop,
+}
+
+var flowPauseCmd = &cobra.Command{
+	Use:   "pause <flow-id-or-name>",
+	Short: "Pause a running flow",
+	Long:  "Pause all evaluators in a running flow without stopping node executors",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runFlowPause,
+}
+
+var flowStatusCmd = &cobra.Command{
+	Use:   "status <flow-id-or-name>",
+	Short: "Show flow runtime status",
+	Long:  "Display the current runtime state of a flow including per-node and per-edge status",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runFlowStatus,
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -158,6 +191,10 @@ func init() {
 	flowCmd.AddCommand(flowRemoveNodeCmd)
 	flowCmd.AddCommand(flowAddEdgeCmd)
 	flowCmd.AddCommand(flowRemoveEdgeCmd)
+	flowCmd.AddCommand(flowStartCmd)
+	flowCmd.AddCommand(flowStopCmd)
+	flowCmd.AddCommand(flowPauseCmd)
+	flowCmd.AddCommand(flowStatusCmd)
 }
 
 // ---------------------------------------------------------------------------
@@ -645,6 +682,353 @@ func runFlowRemoveEdge(cmd *cobra.Command, args []string) error {
 	return protocol.WriteOK(cmd.OutOrStdout(), "flow/remove-edge", map[string]any{
 		"edge_id": edgeID,
 		"removed": true,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Engine registry (flow execution lifecycle)
+// ---------------------------------------------------------------------------
+
+// flowEngineRegistry holds active engines keyed by flow ID.
+// When a flow is started, an engine is created and kept in this registry
+// until the flow is stopped. The store is kept alive alongside the engine.
+var flowEngineRegistry struct {
+	mu      sync.Mutex
+	engines map[string]*flowmodel.Engine
+	stores  map[string]flowmodel.Store
+	cancels map[string]context.CancelFunc
+
+	// testExecutors overrides the default executor map for testing.
+	// When nil, the default SkillExecutor + TransformExecutor are used.
+	testExecutors map[flowmodel.NodeKind]flowmodel.NodeExecutor
+}
+
+func init() {
+	flowEngineRegistry.engines = make(map[string]*flowmodel.Engine)
+	flowEngineRegistry.stores = make(map[string]flowmodel.Store)
+	flowEngineRegistry.cancels = make(map[string]context.CancelFunc)
+}
+
+// getEngine returns the engine for the given flow ID, or nil if not active.
+func getEngine(flowID string) *flowmodel.Engine {
+	flowEngineRegistry.mu.Lock()
+	defer flowEngineRegistry.mu.Unlock()
+	return flowEngineRegistry.engines[flowID]
+}
+
+// removeEngine removes the engine and store from the registry.
+func removeEngine(flowID string) {
+	flowEngineRegistry.mu.Lock()
+	defer flowEngineRegistry.mu.Unlock()
+	if cancel, ok := flowEngineRegistry.cancels[flowID]; ok {
+		cancel()
+		delete(flowEngineRegistry.cancels, flowID)
+	}
+	delete(flowEngineRegistry.engines, flowID)
+	if s, ok := flowEngineRegistry.stores[flowID]; ok {
+		s.Close()
+		delete(flowEngineRegistry.stores, flowID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Flow execution command implementations
+// ---------------------------------------------------------------------------
+
+func runFlowStart(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	flowRef := args[0]
+	workspace := flowResolveWorkspace(flowWorkspaceFlag)
+
+	store, err := openFlowStore(ctx, flowWorkspaceFlag)
+	if err != nil {
+		return writeFlowError(cmd, "flow/start", err)
+	}
+	defer store.Close()
+
+	f, err := resolveFlow(ctx, store, workspace, flowRef)
+	if err != nil {
+		return writeFlowError(cmd, "flow/start", err)
+	}
+
+	// Check flow state: only draft or stopped flows can be started.
+	if f.State == flowmodel.FlowRunning {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/start",
+			protocol.ErrorCodeEARG,
+			fmt.Sprintf("flow %q is already running", f.Name),
+			map[string]any{"flow_id": f.ID, "state": string(f.State)})
+	}
+	if f.State == flowmodel.FlowPaused {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/start",
+			protocol.ErrorCodeEARG,
+			fmt.Sprintf("flow %q is paused; stop and restart to resume", f.Name),
+			map[string]any{"flow_id": f.ID, "state": string(f.State)})
+	}
+
+	// Validate the flow has nodes.
+	nodes, err := store.ListNodesByFlow(ctx, f.ID)
+	if err != nil {
+		return writeFlowError(cmd, "flow/start", err)
+	}
+	if len(nodes) == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/start",
+			protocol.ErrorCodeEARG,
+			fmt.Sprintf("flow %q has no nodes; add nodes before starting", f.Name),
+			map[string]any{"flow_id": f.ID})
+	}
+
+	// Validate source nodes exist.
+	edges, err := store.ListEdgesByFlow(ctx, f.ID)
+	if err != nil {
+		return writeFlowError(cmd, "flow/start", err)
+	}
+	hasIncoming := make(map[string]bool)
+	for _, e := range edges {
+		hasIncoming[e.ToNodeID] = true
+	}
+	var sourceCount int
+	for _, n := range nodes {
+		if !hasIncoming[n.ID] {
+			sourceCount++
+		}
+	}
+	if sourceCount == 0 {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/start",
+			protocol.ErrorCodeEARG,
+			fmt.Sprintf("flow %q has no source nodes (all nodes have incoming edges)", f.Name),
+			map[string]any{"flow_id": f.ID})
+	}
+
+	// Check if engine already exists for this flow (shouldn't happen given state checks,
+	// but defensive).
+	if existingEng := getEngine(f.ID); existingEng != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/start",
+			protocol.ErrorCodeEARG,
+			fmt.Sprintf("flow %q already has an active engine", f.Name),
+			map[string]any{"flow_id": f.ID})
+	}
+
+	// Create a long-lived store for the engine (separate from the one we close at end).
+	engineStore, err := openFlowStore(ctx, flowWorkspaceFlag)
+	if err != nil {
+		return writeFlowError(cmd, "flow/start", err)
+	}
+
+	// Build executors registry.
+	flowEngineRegistry.mu.Lock()
+	executors := flowEngineRegistry.testExecutors
+	flowEngineRegistry.mu.Unlock()
+	if executors == nil {
+		executors = map[flowmodel.NodeKind]flowmodel.NodeExecutor{
+			flowmodel.NodeSkill:     &flowmodel.SkillExecutor{},
+			flowmodel.NodeTransform: &flowmodel.TransformExecutor{},
+		}
+	}
+
+	eng := flowmodel.NewEngine(engineStore, executors, 64)
+
+	// Register engine before starting.
+	flowEngineRegistry.mu.Lock()
+	runCtx, runCancel := context.WithCancel(context.Background())
+	flowEngineRegistry.engines[f.ID] = eng
+	flowEngineRegistry.stores[f.ID] = engineStore
+	flowEngineRegistry.cancels[f.ID] = runCancel
+	flowEngineRegistry.mu.Unlock()
+
+	// Start the engine using the run context (not the CLI command context).
+	if err := eng.Start(runCtx, f.ID); err != nil {
+		// Clean up on start failure.
+		removeEngine(f.ID)
+		return writeFlowError(cmd, "flow/start", err)
+	}
+
+	// Read updated state from store.
+	updatedFlow, _ := store.GetFlow(ctx, f.ID)
+	status := eng.Status(f.ID)
+	runID := ""
+	if status != nil {
+		runID = status.RunID
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "flow/start", map[string]any{
+		"id":        f.ID,
+		"name":      f.Name,
+		"state":     updatedFlow.State,
+		"run_id":    runID,
+		"workspace": workspace,
+	})
+}
+
+func runFlowStop(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	flowRef := args[0]
+	workspace := flowResolveWorkspace(flowWorkspaceFlag)
+
+	store, err := openFlowStore(ctx, flowWorkspaceFlag)
+	if err != nil {
+		return writeFlowError(cmd, "flow/stop", err)
+	}
+	defer store.Close()
+
+	f, err := resolveFlow(ctx, store, workspace, flowRef)
+	if err != nil {
+		return writeFlowError(cmd, "flow/stop", err)
+	}
+
+	if f.State != flowmodel.FlowRunning && f.State != flowmodel.FlowPaused && f.State != flowmodel.FlowErrored {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/stop",
+			protocol.ErrorCodeEARG,
+			fmt.Sprintf("flow %q is not running (state: %s)", f.Name, f.State),
+			map[string]any{"flow_id": f.ID, "state": string(f.State)})
+	}
+
+	eng := getEngine(f.ID)
+	if eng != nil {
+		// Engine is active in this process — stop it.
+		if err := eng.Stop(f.ID); err != nil {
+			return writeFlowError(cmd, "flow/stop", err)
+		}
+		removeEngine(f.ID)
+	} else {
+		// No active engine (separate CLI process or engine exited).
+		// Update the database state directly.
+		f.State = flowmodel.FlowStopped
+		if _, err := store.UpdateFlow(ctx, f); err != nil {
+			return writeFlowError(cmd, "flow/stop", err)
+		}
+	}
+
+	updatedFlow, _ := store.GetFlow(ctx, f.ID)
+	return protocol.WriteOK(cmd.OutOrStdout(), "flow/stop", map[string]any{
+		"id":      f.ID,
+		"name":    f.Name,
+		"state":   updatedFlow.State,
+		"stopped": true,
+	})
+}
+
+func runFlowPause(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	flowRef := args[0]
+	workspace := flowResolveWorkspace(flowWorkspaceFlag)
+
+	store, err := openFlowStore(ctx, flowWorkspaceFlag)
+	if err != nil {
+		return writeFlowError(cmd, "flow/pause", err)
+	}
+	defer store.Close()
+
+	f, err := resolveFlow(ctx, store, workspace, flowRef)
+	if err != nil {
+		return writeFlowError(cmd, "flow/pause", err)
+	}
+
+	if f.State != flowmodel.FlowRunning {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/pause",
+			protocol.ErrorCodeEARG,
+			fmt.Sprintf("flow %q is not running (state: %s)", f.Name, f.State),
+			map[string]any{"flow_id": f.ID, "state": string(f.State)})
+	}
+
+	eng := getEngine(f.ID)
+	if eng == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/pause",
+			protocol.ErrorCodeEARG,
+			fmt.Sprintf("flow %q has no active engine", f.Name),
+			map[string]any{"flow_id": f.ID})
+	}
+
+	if err := eng.Pause(f.ID); err != nil {
+		return writeFlowError(cmd, "flow/pause", err)
+	}
+
+	updatedFlow, _ := store.GetFlow(ctx, f.ID)
+	return protocol.WriteOK(cmd.OutOrStdout(), "flow/pause", map[string]any{
+		"id":     f.ID,
+		"name":   f.Name,
+		"state":  updatedFlow.State,
+		"paused": true,
+	})
+}
+
+func runFlowStatus(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	flowRef := args[0]
+	workspace := flowResolveWorkspace(flowWorkspaceFlag)
+
+	store, err := openFlowStore(ctx, flowWorkspaceFlag)
+	if err != nil {
+		return writeFlowError(cmd, "flow/status", err)
+	}
+	defer store.Close()
+
+	f, err := resolveFlow(ctx, store, workspace, flowRef)
+	if err != nil {
+		return writeFlowError(cmd, "flow/status", err)
+	}
+
+	// Try to get engine status (only available for running flows).
+	eng := getEngine(f.ID)
+	if eng != nil {
+		status := eng.Status(f.ID)
+		if status != nil {
+			return protocol.WriteOK(cmd.OutOrStdout(), "flow/status", map[string]any{
+				"id":         f.ID,
+				"name":       f.Name,
+				"flow_state": string(status.FlowState),
+				"run_id":     status.RunID,
+				"nodes":      status.Nodes,
+				"edges":      status.Edges,
+				"workspace":  workspace,
+			})
+		}
+	}
+
+	// No active engine — return persisted state with idle node/edge states.
+	nodes, err := store.ListNodesByFlow(ctx, f.ID)
+	if err != nil {
+		return writeFlowError(cmd, "flow/status", err)
+	}
+	if nodes == nil {
+		nodes = []flowmodel.FlowNode{}
+	}
+
+	edges, err := store.ListEdgesByFlow(ctx, f.ID)
+	if err != nil {
+		return writeFlowError(cmd, "flow/status", err)
+	}
+	if edges == nil {
+		edges = []flowmodel.FlowEdge{}
+	}
+
+	// Build node states from persisted data (all idle since not running).
+	nodeStates := make([]map[string]any, 0, len(nodes))
+	for _, n := range nodes {
+		nodeStates = append(nodeStates, map[string]any{
+			"id":    n.ID,
+			"label": n.Label,
+			"kind":  string(n.Kind),
+			"state": "idle",
+		})
+	}
+
+	edgeStates := make([]map[string]any, 0, len(edges))
+	for _, e := range edges {
+		edgeStates = append(edgeStates, map[string]any{
+			"id":             e.ID,
+			"from":           e.FromNodeID,
+			"to":             e.ToNodeID,
+			"delivery_count": 0,
+		})
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "flow/status", map[string]any{
+		"id":         f.ID,
+		"name":       f.Name,
+		"flow_state": string(f.State),
+		"nodes":      nodeStates,
+		"edges":      edgeStates,
+		"workspace":  workspace,
 	})
 }
 
