@@ -2598,7 +2598,8 @@ func (s *Service) handleFlowStart(ctx context.Context, params json.RawMessage) (
 
 // FlowStopParams are the parameters for flow.stop.
 type FlowStopParams struct {
-	FlowID string `json:"flow_id"`
+	FlowID    string `json:"flow_id"`
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // FlowStopResult is the result of stopping a flow.
@@ -2642,7 +2643,8 @@ func (s *Service) handleFlowStop(params json.RawMessage) (*FlowStopResult, error
 
 // FlowPauseParams are the parameters for flow.pause.
 type FlowPauseParams struct {
-	FlowID string `json:"flow_id"`
+	FlowID    string `json:"flow_id"`
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // FlowPauseResult is the result of pausing a flow.
@@ -2678,7 +2680,8 @@ func (s *Service) handleFlowPause(params json.RawMessage) (*FlowPauseResult, err
 
 // FlowStatusParams are the parameters for flow.status.
 type FlowStatusParams struct {
-	FlowID string `json:"flow_id"`
+	FlowID    string `json:"flow_id"`
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // FlowStatusResult is the result of querying flow status.

@@ -531,9 +531,10 @@ func (c *Client) FlowStart(flowID, workspace string) (*FlowStartResult, error) {
 }
 
 // FlowStop stops a running or paused flow via the daemon.
-func (c *Client) FlowStop(flowID string) (*FlowStopResult, error) {
+func (c *Client) FlowStop(flowID, workspace string) (*FlowStopResult, error) {
 	params := FlowStopParams{
-		FlowID: flowID,
+		FlowID:    flowID,
+		Workspace: workspace,
 	}
 
 	resp, err := c.call("flow.stop", params)
@@ -558,9 +559,10 @@ func (c *Client) FlowStop(flowID string) (*FlowStopResult, error) {
 }
 
 // FlowPause pauses a running flow via the daemon.
-func (c *Client) FlowPause(flowID string) (*FlowPauseResult, error) {
+func (c *Client) FlowPause(flowID, workspace string) (*FlowPauseResult, error) {
 	params := FlowPauseParams{
-		FlowID: flowID,
+		FlowID:    flowID,
+		Workspace: workspace,
 	}
 
 	resp, err := c.call("flow.pause", params)
@@ -585,9 +587,10 @@ func (c *Client) FlowPause(flowID string) (*FlowPauseResult, error) {
 }
 
 // FlowStatus returns the current status of a flow via the daemon.
-func (c *Client) FlowStatus(flowID string) (*FlowStatusResult, error) {
+func (c *Client) FlowStatus(flowID, workspace string) (*FlowStatusResult, error) {
 	params := FlowStatusParams{
-		FlowID: flowID,
+		FlowID:    flowID,
+		Workspace: workspace,
 	}
 
 	resp, err := c.call("flow.status", params)
