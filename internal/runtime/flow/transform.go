@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"text/template"
 )
@@ -26,6 +29,7 @@ var transformRegistry = map[TransformKind]TransformFunc{
 	TransformJQ:          jqFilterTransform,
 	TransformSplitLines:  splitLinesTransform,
 	TransformMapFields:   mapFieldsTransform,
+	TransformFileWrite:   fileWriteTransform,
 }
 
 // GetTransform returns the TransformFunc for the given kind, or an error if
@@ -397,4 +401,235 @@ func mapFieldsTransform(_ context.Context, input any, configStr string) (any, er
 	}
 
 	return result, nil
+}
+
+// ---------------------------------------------------------------------------
+// FileWrite
+// ---------------------------------------------------------------------------
+
+// fileWriteResult is the output of a successful file_write transform.
+type fileWriteResult struct {
+	Path    string `json:"path"`
+	Format  string `json:"format"`
+	Summary string `json:"summary"`
+	Bytes   int    `json:"bytes"`
+}
+
+func fileWriteTransform(_ context.Context, input any, configStr string) (any, error) {
+	// Parse config.
+	var cfg FileWriteConfig
+	if err := json.Unmarshal([]byte(configStr), &cfg); err != nil {
+		return nil, fmt.Errorf("transform file_write: invalid config: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	// Default format to raw.
+	format := cfg.Format
+	if format == "" {
+		format = "raw"
+	}
+
+	// Resolve template variables in the path from envelope data.
+	path, err := resolvePathTemplate(cfg.Path, input)
+	if err != nil {
+		return nil, fmt.Errorf("transform file_write: %w", err)
+	}
+
+	// Render content based on format.
+	content, err := renderFileContent(input, format)
+	if err != nil {
+		return nil, fmt.Errorf("transform file_write: %w", err)
+	}
+
+	// Create parent directories if needed.
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("transform file_write: failed to create directory %q: %w", dir, err)
+		}
+	}
+
+	// Write file.
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		return nil, fmt.Errorf("transform file_write: failed to write file %q: %w", path, err)
+	}
+
+	// Build result.
+	summary := fmt.Sprintf("Wrote %d bytes to %s", len(content), path)
+	result := fileWriteResult{
+		Path:    path,
+		Format:  format,
+		Summary: summary,
+		Bytes:   len(content),
+	}
+
+	return result, nil
+}
+
+// resolvePathTemplate resolves {{.field.subfield}} template expressions in the
+// path using values from the input data. The template syntax uses Go-style
+// dot notation (e.g., {{.data.topic}}).
+func resolvePathTemplate(path string, input any) (string, error) {
+	// Quick check: if no template expressions, return as-is.
+	if !strings.Contains(path, "{{") {
+		return path, nil
+	}
+
+	// Convert input to a map for navigation.
+	m, ok := toMap(input)
+	if !ok {
+		// If input is not a map, we can't resolve templates but can still
+		// use the path as-is if it has no templates.
+		return path, nil
+	}
+
+	// Use Go text/template for resolution.
+	tmpl, err := template.New("path").Option("missingkey=error").Parse(path)
+	if err != nil {
+		return "", fmt.Errorf("invalid path template %q: %w", path, err)
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, m); err != nil {
+		return "", fmt.Errorf("failed to resolve path template %q: %w", path, err)
+	}
+
+	return buf.String(), nil
+}
+
+// renderFileContent converts the input data to bytes based on the format.
+func renderFileContent(input any, format string) ([]byte, error) {
+	switch format {
+	case "raw":
+		return renderRaw(input)
+	case "json":
+		return renderJSON(input)
+	case "markdown":
+		return renderMarkdown(input)
+	default:
+		return nil, fmt.Errorf("unsupported format %q", format)
+	}
+}
+
+// renderRaw writes the input as a string. If the input is a string, it's used
+// directly. Otherwise, it's JSON-serialized.
+func renderRaw(input any) ([]byte, error) {
+	switch v := input.(type) {
+	case string:
+		return []byte(v), nil
+	case []byte:
+		return v, nil
+	case nil:
+		return []byte{}, nil
+	default:
+		b, err := json.MarshalIndent(input, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize input: %w", err)
+		}
+		return b, nil
+	}
+}
+
+// renderJSON writes the input as pretty-printed JSON.
+func renderJSON(input any) ([]byte, error) {
+	b, err := json.MarshalIndent(input, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize input as JSON: %w", err)
+	}
+	return b, nil
+}
+
+// renderMarkdown wraps the input data in a markdown document with headers and
+// bullet points. For maps, each key becomes a bullet point. For arrays, each
+// element becomes a bullet point. For scalars, the value is written as-is with
+// a header.
+func renderMarkdown(input any) ([]byte, error) {
+	var sb strings.Builder
+
+	sb.WriteString("# Flow Output\n\n")
+
+	switch v := input.(type) {
+	case map[string]any:
+		// Sort keys for deterministic output.
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			sb.WriteString(renderMarkdownField(k, v[k], 0))
+		}
+	case []any:
+		for _, item := range v {
+			sb.WriteString(fmt.Sprintf("- %s\n", renderMarkdownValue(item)))
+		}
+	default:
+		sb.WriteString(fmt.Sprintf("%s\n", renderMarkdownValue(input)))
+	}
+
+	return []byte(sb.String()), nil
+}
+
+// renderMarkdownField renders a single key-value pair as a markdown field.
+// Nested maps get their own sub-section with indented bullets.
+func renderMarkdownField(key string, val any, depth int) string {
+	var sb strings.Builder
+	indent := strings.Repeat("  ", depth)
+
+	switch child := val.(type) {
+	case map[string]any:
+		sb.WriteString(fmt.Sprintf("%s- **%s**:\n", indent, key))
+		keys := make([]string, 0, len(child))
+		for k := range child {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			sb.WriteString(renderMarkdownField(k, child[k], depth+1))
+		}
+	default:
+		sb.WriteString(fmt.Sprintf("%s- **%s**: %s\n", indent, key, renderMarkdownValue(val)))
+	}
+
+	return sb.String()
+}
+
+// renderMarkdownValue renders a value for inline display in markdown.
+func renderMarkdownValue(val any) string {
+	switch v := val.(type) {
+	case nil:
+		return "null"
+	case string:
+		return v
+	case bool, float64, int, int64:
+		return fmt.Sprintf("%v", v)
+	case []any:
+		// Render arrays as comma-separated values.
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			parts = append(parts, renderMarkdownValue(item))
+		}
+		return strings.Join(parts, ", ")
+	case map[string]any:
+		// Render nested objects as key=value pairs.
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s=%s", k, renderMarkdownValue(v[k])))
+		}
+		return strings.Join(parts, ", ")
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprintf("%v", v)
+		}
+		return string(b)
+	}
 }

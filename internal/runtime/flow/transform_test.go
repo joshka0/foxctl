@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -756,6 +758,461 @@ func TestNestedDataTransforms(t *testing.T) {
 			t.Errorf("nested data changed: got %v, want %q", inner["inner"], "deep")
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// FileWrite tests (VAL-FILE-001 through VAL-FILE-005)
+// ---------------------------------------------------------------------------
+
+func TestFileWrite(t *testing.T) {
+	t.Run("raw format writes data to file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "output.txt")
+		config := fmt.Sprintf(`{"path":%q,"format":"raw"}`, path)
+
+		input := map[string]any{"topic": "test", "value": float64(42)}
+		out, err := fileWriteTransform(context.Background(), input, config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Check result contains expected fields.
+		result, ok := out.(fileWriteResult)
+		if !ok {
+			t.Fatalf("got %T, want fileWriteResult", out)
+		}
+		if result.Path != path {
+			t.Errorf("path: got %q, want %q", result.Path, path)
+		}
+		if result.Format != "raw" {
+			t.Errorf("format: got %q, want %q", result.Format, "raw")
+		}
+		if result.Bytes == 0 {
+			t.Error("bytes should be > 0")
+		}
+
+		// Verify file exists and has content.
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read output file: %v", err)
+		}
+		if len(data) == 0 {
+			t.Error("output file is empty")
+		}
+
+		// Raw format with object input should be JSON.
+		var parsed map[string]any
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("raw format output should be valid JSON: %v", err)
+		}
+		if parsed["topic"] != "test" {
+			t.Errorf("topic: got %v, want %q", parsed["topic"], "test")
+		}
+	})
+
+	t.Run("raw format with string input", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "output.txt")
+		config := fmt.Sprintf(`{"path":%q}`, path)
+
+		out, err := fileWriteTransform(context.Background(), "hello world", config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read output file: %v", err)
+		}
+		if string(data) != "hello world" {
+			t.Errorf("got %q, want %q", string(data), "hello world")
+		}
+		result := out.(fileWriteResult)
+		if result.Format != "raw" {
+			t.Errorf("default format: got %q, want %q", result.Format, "raw")
+		}
+	})
+
+	t.Run("json format writes pretty-printed JSON", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "output.json")
+		config := fmt.Sprintf(`{"path":%q,"format":"json"}`, path)
+
+		input := map[string]any{"name": "test", "count": float64(5)}
+		out, err := fileWriteTransform(context.Background(), input, config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read output file: %v", err)
+		}
+
+		// JSON format should produce valid JSON with indentation.
+		var parsed map[string]any
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			t.Fatalf("json format output should be valid JSON: %v", err)
+		}
+		if parsed["name"] != "test" {
+			t.Errorf("name: got %v, want %q", parsed["name"], "test")
+		}
+		// Verify it's pretty-printed (contains newlines).
+		if !strings.Contains(string(data), "\n") {
+			t.Error("json format should produce pretty-printed output with newlines")
+		}
+
+		result := out.(fileWriteResult)
+		if result.Format != "json" {
+			t.Errorf("format: got %q, want %q", result.Format, "json")
+		}
+	})
+
+	t.Run("markdown format wraps in headers and bullets", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "output.md")
+		config := fmt.Sprintf(`{"path":%q,"format":"markdown"}`, path)
+
+		input := map[string]any{
+			"title": "My Report",
+			"items": []any{"alpha", "beta"},
+		}
+		out, err := fileWriteTransform(context.Background(), input, config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read output file: %v", err)
+		}
+
+		content := string(data)
+
+		// Markdown format should contain header.
+		if !strings.Contains(content, "# Flow Output") {
+			t.Error("markdown format should contain '# Flow Output' header")
+		}
+
+		// Should contain bullet points for map keys.
+		if !strings.Contains(content, "- **title**: My Report") {
+			t.Error("markdown format should contain bullet point for 'title' key")
+		}
+
+		// Should contain bullet point for items array (rendered as comma-separated).
+		if !strings.Contains(content, "- **items**: alpha, beta") {
+			t.Errorf("markdown format should contain bullet point for 'items' key; got:\n%s", content)
+		}
+
+		result := out.(fileWriteResult)
+		if result.Format != "markdown" {
+			t.Errorf("format: got %q, want %q", result.Format, "markdown")
+		}
+	})
+
+	t.Run("creates parent directories automatically", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "deep", "nested", "dir", "output.txt")
+		config := fmt.Sprintf(`{"path":%q}`, path)
+
+		out, err := fileWriteTransform(context.Background(), "nested content", config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify file was created at the nested path.
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read output file at nested path: %v", err)
+		}
+		if string(data) != "nested content" {
+			t.Errorf("got %q, want %q", string(data), "nested content")
+		}
+
+		result := out.(fileWriteResult)
+		if result.Path != path {
+			t.Errorf("path: got %q, want %q", result.Path, path)
+		}
+	})
+
+	t.Run("template support in path from envelope data", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// Template uses {{.topic}} from the input data.
+		config := fmt.Sprintf(`{"path":%q}`, filepath.Join(tmpDir, "{{.topic}}-report.txt"))
+
+		input := map[string]any{
+			"topic": "golang",
+			"data":  "some content",
+		}
+		out, err := fileWriteTransform(context.Background(), input, config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expectedPath := filepath.Join(tmpDir, "golang-report.txt")
+		result := out.(fileWriteResult)
+		if result.Path != expectedPath {
+			t.Errorf("resolved path: got %q, want %q", result.Path, expectedPath)
+		}
+
+		// Verify file exists at the interpolated path.
+		if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+			t.Errorf("file not created at expected path %q", expectedPath)
+		}
+	})
+
+	t.Run("nested template in path", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		config := fmt.Sprintf(`{"path":%q}`, filepath.Join(tmpDir, "{{.category.name}}-output.txt"))
+
+		input := map[string]any{
+			"category": map[string]any{
+				"name": "research",
+			},
+		}
+		out, err := fileWriteTransform(context.Background(), input, config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		expectedPath := filepath.Join(tmpDir, "research-output.txt")
+		result := out.(fileWriteResult)
+		if result.Path != expectedPath {
+			t.Errorf("resolved path: got %q, want %q", result.Path, expectedPath)
+		}
+	})
+
+	t.Run("missing path returns error", func(t *testing.T) {
+		_, err := fileWriteTransform(context.Background(), "test", `{"format":"raw"}`)
+		if err == nil {
+			t.Fatal("expected error for missing path, got nil")
+		}
+		if !strings.Contains(err.Error(), "path is required") {
+			t.Errorf("error should mention path is required, got: %v", err)
+		}
+	})
+
+	t.Run("empty path returns error", func(t *testing.T) {
+		_, err := fileWriteTransform(context.Background(), "test", `{"path":""}`)
+		if err == nil {
+			t.Fatal("expected error for empty path, got nil")
+		}
+	})
+
+	t.Run("invalid format returns error", func(t *testing.T) {
+		_, err := fileWriteTransform(context.Background(), "test", `{"path":"/tmp/test.txt","format":"xml"}`)
+		if err == nil {
+			t.Fatal("expected error for invalid format, got nil")
+		}
+		if !strings.Contains(err.Error(), "invalid format") {
+			t.Errorf("error should mention invalid format, got: %v", err)
+		}
+	})
+
+	t.Run("invalid config JSON returns error", func(t *testing.T) {
+		_, err := fileWriteTransform(context.Background(), "test", `not json`)
+		if err == nil {
+			t.Fatal("expected error for invalid config JSON")
+		}
+	})
+
+	t.Run("result contains summary and bytes", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "output.txt")
+		config := fmt.Sprintf(`{"path":%q}`, path)
+
+		out, err := fileWriteTransform(context.Background(), "hello", config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		result := out.(fileWriteResult)
+		if result.Summary == "" {
+			t.Error("summary should not be empty")
+		}
+		if !strings.Contains(result.Summary, "Wrote") {
+			t.Errorf("summary should contain 'Wrote', got: %q", result.Summary)
+		}
+		if !strings.Contains(result.Summary, path) {
+			t.Errorf("summary should contain path, got: %q", result.Summary)
+		}
+		if result.Bytes != 5 { // "hello" is 5 bytes
+			t.Errorf("bytes: got %d, want 5", result.Bytes)
+		}
+	})
+
+	t.Run("nil input writes empty raw", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "output.txt")
+		config := fmt.Sprintf(`{"path":%q}`, path)
+
+		out, err := fileWriteTransform(context.Background(), nil, config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read output file: %v", err)
+		}
+		if len(data) != 0 {
+			t.Errorf("nil input should produce empty file, got %d bytes", len(data))
+		}
+
+		result := out.(fileWriteResult)
+		if result.Bytes != 0 {
+			t.Errorf("bytes for nil: got %d, want 0", result.Bytes)
+		}
+	})
+
+	t.Run("markdown with array input", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "output.md")
+		config := fmt.Sprintf(`{"path":%q,"format":"markdown"}`, path)
+
+		input := []any{"alpha", "beta", "gamma"}
+		_, err := fileWriteTransform(context.Background(), input, config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read output file: %v", err)
+		}
+
+		content := string(data)
+		if !strings.Contains(content, "- alpha") {
+			t.Error("markdown array output should contain '- alpha'")
+		}
+		if !strings.Contains(content, "- beta") {
+			t.Error("markdown array output should contain '- beta'")
+		}
+		if !strings.Contains(content, "- gamma") {
+			t.Error("markdown array output should contain '- gamma'")
+		}
+	})
+
+	t.Run("markdown with nested map", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "output.md")
+		config := fmt.Sprintf(`{"path":%q,"format":"markdown"}`, path)
+
+		input := map[string]any{
+			"parent": map[string]any{
+				"child1": "value1",
+				"child2": float64(42),
+			},
+		}
+		_, err := fileWriteTransform(context.Background(), input, config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read output file: %v", err)
+		}
+
+		content := string(data)
+		if !strings.Contains(content, "- **parent**:") {
+			t.Error("markdown should contain parent header")
+		}
+		if !strings.Contains(content, "- **child1**: value1") {
+			t.Error("markdown should contain child1 bullet")
+		}
+		if !strings.Contains(content, "- **child2**: 42") {
+			t.Error("markdown should contain child2 bullet")
+		}
+	})
+
+	t.Run("template in path with non-map input returns original path", func(t *testing.T) {
+		// Non-map input can't resolve templates, but since the path doesn't
+		// actually contain template expressions in this test, it should just work.
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "simple.txt")
+		config := fmt.Sprintf(`{"path":%q}`, path)
+
+		out, err := fileWriteTransform(context.Background(), "string input", config)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		result := out.(fileWriteResult)
+		if result.Path != path {
+			t.Errorf("path: got %q, want %q", result.Path, path)
+		}
+	})
+
+	t.Run("registered in transform registry", func(t *testing.T) {
+		fn, err := GetTransform(TransformFileWrite)
+		if err != nil {
+			t.Fatalf("file_write not registered: %v", err)
+		}
+		if fn == nil {
+			t.Fatal("file_write transform function is nil")
+		}
+	})
+
+	t.Run("applies via ApplyTransform", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "via-apply.txt")
+		config := fmt.Sprintf(`{"path":%q}`, path)
+
+		out, err := ApplyTransform(context.Background(), TransformFileWrite, config, "test content")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		result, ok := out.(fileWriteResult)
+		if !ok {
+			t.Fatalf("got %T, want fileWriteResult", out)
+		}
+		if result.Path != path {
+			t.Errorf("path: got %q, want %q", result.Path, path)
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read output file: %v", err)
+		}
+		if string(data) != "test content" {
+			t.Errorf("got %q, want %q", string(data), "test content")
+		}
+	})
+}
+
+func TestFileWriteConfigValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  FileWriteConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{"valid raw", FileWriteConfig{Path: "/tmp/test.txt", Format: "raw"}, false, ""},
+		{"valid json", FileWriteConfig{Path: "/tmp/test.json", Format: "json"}, false, ""},
+		{"valid markdown", FileWriteConfig{Path: "/tmp/test.md", Format: "markdown"}, false, ""},
+		{"valid empty format defaults to raw", FileWriteConfig{Path: "/tmp/test.txt"}, false, ""},
+		{"missing path", FileWriteConfig{Format: "raw"}, true, "path is required"},
+		{"empty path", FileWriteConfig{Path: "", Format: "raw"}, true, "path is required"},
+		{"invalid format", FileWriteConfig{Path: "/tmp/test.txt", Format: "xml"}, true, "invalid format"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.config.Validate()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tc.errMsg != "" && !strings.Contains(err.Error(), tc.errMsg) {
+					t.Errorf("error should contain %q, got: %v", tc.errMsg, err)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -89,19 +89,21 @@ const (
 	TransformJQ          TransformKind = "jq_filter"
 	TransformSplitLines  TransformKind = "split_lines"
 	TransformMapFields   TransformKind = "map_fields"
+	TransformFileWrite   TransformKind = "file_write"
 )
 
 // ValidTransformKinds is the set of all valid TransformKind values.
 var ValidTransformKinds = []TransformKind{
 	TransformPassthrough, TransformRegex, TransformTemplate,
 	TransformJQ, TransformSplitLines, TransformMapFields,
+	TransformFileWrite,
 }
 
 // IsValid reports whether t is a recognised TransformKind.
 func (t TransformKind) IsValid() bool {
 	switch t {
 	case TransformPassthrough, TransformRegex, TransformTemplate,
-		TransformJQ, TransformSplitLines, TransformMapFields:
+		TransformJQ, TransformSplitLines, TransformMapFields, TransformFileWrite:
 		return true
 	default:
 		return false
@@ -319,6 +321,32 @@ type HTTPConfig struct {
 	Headers   map[string]string `json:"headers,omitempty"`
 	TimeoutMS int64             `json:"timeout_ms,omitempty"`
 	BodyPath  string            `json:"body_path,omitempty"` // jq-style path into envelope data for request body
+}
+
+// FileWriteConfig is the typed config for the file_write transform.
+// It writes upstream envelope data to a specified file path.
+type FileWriteConfig struct {
+	// Path is the file path to write to. Required. Supports basic templating
+	// from envelope data (e.g., {{.data.topic}} in the filename).
+	Path string `json:"path"`
+
+	// Format controls the output format. One of "raw", "json", "markdown".
+	// Default: "raw".
+	Format string `json:"format,omitempty"`
+}
+
+// Validate checks that the FileWriteConfig has valid field values.
+// Path is required. Format must be one of "", "raw", "json", "markdown".
+func (c FileWriteConfig) Validate() error {
+	if c.Path == "" {
+		return fmt.Errorf("flow: file_write config: path is required")
+	}
+	switch c.Format {
+	case "", "raw", "json", "markdown":
+	default:
+		return fmt.Errorf("flow: file_write config: invalid format %q (must be raw, json, or markdown)", c.Format)
+	}
+	return nil
 }
 
 // AgentConfig is the typed config for NodeAgent.

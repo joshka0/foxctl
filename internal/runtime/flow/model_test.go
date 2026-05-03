@@ -106,6 +106,7 @@ func TestTransformKind(t *testing.T) {
 		{TransformJQ, true, "jq_filter"},
 		{TransformSplitLines, true, "split_lines"},
 		{TransformMapFields, true, "map_fields"},
+		{TransformFileWrite, true, "file_write"},
 		{TransformKind("unknown"), false, "unknown"},
 	}
 
@@ -117,8 +118,8 @@ func TestTransformKind(t *testing.T) {
 		})
 	}
 
-	if len(ValidTransformKinds) != 6 {
-		t.Errorf("len(ValidTransformKinds) = %d, want 6", len(ValidTransformKinds))
+	if len(ValidTransformKinds) != 7 {
+		t.Errorf("len(ValidTransformKinds) = %d, want 7", len(ValidTransformKinds))
 	}
 }
 
