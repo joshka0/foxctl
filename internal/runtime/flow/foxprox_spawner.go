@@ -70,14 +70,24 @@ func (c *FoxproxSpawnerConfig) defaults() {
 
 // foxproxAgentSpawner implements AgentSpawner using a foxprox HTTP client.
 // It drives CLI agents (droid, claude, etc.) via PTY sessions managed by
-// the foxprox daemon, using room-based coordination for structured message
-// delivery. The spawner creates a foxprox room for each agent, joins the
-// PTY session as a member, and sends tasks via room messages. Output comes
-// back through the flow engine's push API, not screen capture.
+// the foxprox daemon.
+//
+// Two modes of operation:
+//
+// Room-based (non-push): Creates a foxprox room for the flow run, joins the
+// agent's PTY session as a member, and sends tasks via room messages. Output
+// comes back through the flow engine's push API.
+//
+// Exec-based (push mode): When OutputMode is "push" in the spawn options,
+// uses `droid exec --auto medium "<prompt>"` instead of interactive `droid`.
+// This avoids droid's permission dialog blocking issue. The prompt (including
+// push instructions already injected by AgentExecutor) is passed as the exec
+// argument. No room creation, join, or messages needed.
 type foxproxAgentSpawner struct {
-	client FoxproxClient
-	config FoxproxSpawnerConfig
-	roomID string // set by Spawn, used by Ask/Kill
+	client   FoxproxClient
+	config   FoxproxSpawnerConfig
+	roomID   string // set by Spawn in room mode, empty in exec mode
+	execMode bool   // true when last Spawn used push mode
 }
 
 // NewFoxproxAgentSpawner creates a new AgentSpawner backed by foxprox.
@@ -89,17 +99,17 @@ func NewFoxproxAgentSpawner(client FoxproxClient, config FoxproxSpawnerConfig) *
 	}
 }
 
-// Spawn creates a foxprox PTY session, creates a foxprox room, and joins
-// the session to the room. The session ID serves as both agent_id and
-// session_id.
+// Spawn creates a foxprox PTY session. The behavior depends on whether push
+// mode is active (opts.OutputMode == "push"):
 //
-// Steps:
-//  1. Create PTY session with the CLI agent command
-//  2. Create (or reuse) a foxprox room for the flow run
-//  3. Join the PTY session to the room as a member
+// Push mode: Uses `droid exec --auto medium "<prompt>"` to run droid
+// non-interactively with auto-approval. The prompt (including push
+// instructions already injected by AgentExecutor) is passed as the exec argument.
+// No room creation or join — droid exec doesn't need rooms.
 //
-// If the config has FlowRunID and FlowNodeID set, these are injected
-// into the prompt so the agent knows where to push output.
+// Non-push mode: Creates a foxprox room, joins the session as a member. The
+// session ID serves as both agent_id and session_id. Tasks are sent via room
+// messages (Ask).
 func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, opts AgentSpawnOptions) (*AgentSpawnResult, error) {
 	// Determine the CLI command: per-node override > spawner default.
 	cliCmd := s.config.CLICmd
@@ -110,24 +120,23 @@ func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, op
 	// Determine the working directory.
 	cwd := opts.Workspace
 
-	// Inject flow run_id and node_id into the prompt if configured.
-	// This tells the agent where to push its output via `foxctl flow output`.
-	if s.config.FlowRunID != "" && s.config.FlowNodeID != "" {
-		flowContext := fmt.Sprintf(
-			"\n\n--- Flow Output Push Configuration ---\n"+
-				"You are running as part of a flow. When you have completed your task, "+
-				"push your structured output back to the flow engine by running:\n\n"+
-				"  foxctl flow output %s --node %s --data '<your-json-output>' --workspace '%s'\n\n"+
-				"Replace <your-json-output> with your actual result as a JSON object.\n"+
-				"This is REQUIRED as your final step before completing.\n",
-			s.config.FlowRunID, s.config.FlowNodeID, cwd,
-		)
-		prompt = prompt + flowContext
+	// Push mode: when OutputMode is "push", use droid exec --auto medium to
+	// avoid droid's permission dialog blocking. The AgentExecutor already
+	// injects push instructions into the prompt, so we don't add our own.
+	isPushMode := opts.OutputMode == "push"
+	s.execMode = isPushMode
+
+	var cmd []string
+	if isPushMode {
+		// In push mode, pass the full prompt as the droid exec argument.
+		cmd = []string{cliCmd, "exec", "--auto", "medium", prompt}
+	} else {
+		cmd = []string{cliCmd}
 	}
 
 	// Create the session with readiness profile for output-idle detection.
 	req := httpjson.CreateSessionRequest{
-		Cmd: []string{cliCmd},
+		Cmd: cmd,
 		Cwd: cwd,
 		Readiness: &httpjson.ReadinessProfileDTO{
 			DebounceMS:          s.config.ReadinessDebounceMS,
@@ -141,7 +150,16 @@ func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, op
 		return nil, fmt.Errorf("foxprox spawner: spawn: create session: %w", err)
 	}
 
-	// Create or reuse a foxprox room for this agent.
+	// In push mode, skip room creation and join entirely.
+	// droid exec runs non-interactively — no room coordination needed.
+	if isPushMode {
+		return &AgentSpawnResult{
+			AgentID:   resp.ID,
+			SessionID: resp.ID,
+		}, nil
+	}
+
+	// Non-push mode: create or reuse a foxprox room for this agent.
 	roomID := s.config.RoomID
 	if roomID == "" {
 		roomTitle := fmt.Sprintf("flow-run-%s", s.config.FlowRunID)
@@ -183,12 +201,27 @@ func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, op
 	}, nil
 }
 
-// Ask sends the task as a room message via foxprox client.SendMessage.
-// Foxprox's router delivers the message to the agent's PTY through the room
-// fan-out. This is fire-and-forget: the method returns immediately after the
-// message is sent. Output comes back via the flow engine's push API
-// (`foxctl flow output`), not via screen capture.
+// Ask sends the task to the agent. The behavior depends on the spawn mode:
+//
+// Exec mode (push): Returns immediately with status "exec". The prompt was
+// already passed as the droid exec argument during Spawn — no additional
+// message needed.
+//
+// Room mode (non-push): Sends the task as a room message via foxprox
+// client.SendMessage. Foxprox's router delivers the message to the agent's
+// PTY through the room fan-out. This is fire-and-forget: the method returns
+// immediately after the message is sent. Output comes back via the flow
+// engine's push API (`foxctl flow output`), not via screen capture.
 func (s *foxproxAgentSpawner) Ask(ctx context.Context, agentID string, message string, timeoutMS int) (*AgentAskResult, error) {
+	// In exec mode, the prompt was already passed as the exec argument.
+	// Return immediately — no room message needed.
+	if s.execMode {
+		return &AgentAskResult{
+			Reply:  "",
+			Status: "exec",
+		}, nil
+	}
+
 	if s.roomID == "" {
 		return nil, fmt.Errorf("foxprox spawner: ask: no room (spawn not called?)")
 	}
@@ -224,7 +257,7 @@ func (s *foxproxAgentSpawner) Info(ctx context.Context, agentID string) (*AgentI
 
 	if readiness.Idle {
 		return &AgentInfoResult{
-			Status: "completed",
+			Status:  "completed",
 			Summary: fmt.Sprintf("output idle for %dms", readiness.IdleForMS),
 		}, nil
 	}
@@ -234,10 +267,12 @@ func (s *foxproxAgentSpawner) Info(ctx context.Context, agentID string) (*AgentI
 	}, nil
 }
 
-// Kill leaves the foxprox room and then deletes the PTY session.
+// Kill terminates the agent session. In exec mode (push), it skips LeaveRoom
+// since no room was created. In room mode, it leaves the room first, then
+// deletes the PTY session.
 func (s *foxproxAgentSpawner) Kill(ctx context.Context, sessionID string) error {
-	// Leave the room first, then delete the session.
-	if s.roomID != "" {
+	// In exec mode, no room was created — skip LeaveRoom.
+	if !s.execMode && s.roomID != "" {
 		_, _ = s.client.LeaveRoom(ctx, s.roomID, httpjson.LeaveRoomRequest{
 			AgentID: sessionID,
 		})

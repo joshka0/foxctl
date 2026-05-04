@@ -160,15 +160,15 @@ type AgentSpawnResult struct {
 
 // AgentAskResult holds the result of asking an agent a question.
 type AgentAskResult struct {
-	Reply  string         `json:"reply"`
-	Status string         `json:"status"`
+	Reply  string `json:"reply"`
+	Status string `json:"status"`
 }
 
 // AgentInfoResult holds the status info for a spawned agent.
 type AgentInfoResult struct {
-	Status  string    `json:"status"`
-	Summary string    `json:"summary,omitempty"`
-	Error   string    `json:"error,omitempty"`
+	Status  string `json:"status"`
+	Summary string `json:"summary,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // AgentSpawner abstracts the daemon client operations needed to spawn and
@@ -199,6 +199,10 @@ type AgentSpawnOptions struct {
 	// foxprox spawner (e.g., "droid", "claude"). Default: "droid".
 	// This field is ignored by the daemon's internal agent runtime.
 	CLICmd string
+	// OutputMode specifies how the agent's output should be captured.
+	// When "push", the foxprox spawner uses `droid exec --auto medium`
+	// instead of interactive `droid` to avoid permission dialogs.
+	OutputMode string
 }
 
 // AgentExecutor spawns a foxctl agent, waits for completion (or ask reply),
@@ -331,6 +335,7 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 		SkillsAllow:   cfg.SkillsAllow,
 		Workspace:     workspace,
 		CLICmd:        cfg.CLICmd,
+		OutputMode:    outputMode,
 	}
 	spawnResult, err := e.Spawner.Spawn(spawnCtx, cfg.Role, prompt, spawnOpts)
 	duration := time.Since(start)
@@ -409,10 +414,10 @@ func (e *AgentExecutor) executeAskMode(
 
 	// Build output envelope from ask reply.
 	data := map[string]any{
-		"agent_id":  spawnResult.AgentID,
-		"reply":     askResult.Reply,
-		"status":    askResult.Status,
-		"role":      cfg.Role,
+		"agent_id":    spawnResult.AgentID,
+		"reply":       askResult.Reply,
+		"status":      askResult.Status,
+		"role":        cfg.Role,
 		"output_mode": "ask",
 	}
 	return NodeOutput{
@@ -455,9 +460,9 @@ func (e *AgentExecutor) executeSessionSummaryMode(
 			case "completed", "stopped", "exited":
 				// Agent finished. Return summary.
 				data := map[string]any{
-					"agent_id":  spawnResult.AgentID,
-					"summary":   info.Summary,
-					"status":    info.Status,
+					"agent_id":    spawnResult.AgentID,
+					"summary":     info.Summary,
+					"status":      info.Status,
 					"output_mode": "session_summary",
 				}
 				if info.Error != "" {

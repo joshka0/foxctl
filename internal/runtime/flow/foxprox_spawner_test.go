@@ -176,8 +176,8 @@ func TestFoxproxSpawner_Spawn_CreatesSessionRoomAndJoin(t *testing.T) {
 	}
 
 	spawner := NewFoxproxAgentSpawner(fpClient, FoxproxSpawnerConfig{
-		CLICmd:    "droid",
-		FlowRunID: "run-123",
+		CLICmd: "droid",
+		// No FlowRunID — non-push mode, uses room-based coordination.
 	})
 
 	result, err := spawner.Spawn(context.Background(), "researcher", "Research the auth module", AgentSpawnOptions{
@@ -214,8 +214,9 @@ func TestFoxproxSpawner_Spawn_CreatesSessionRoomAndJoin(t *testing.T) {
 	if roomReq.Workspace != "/tmp/workspace" {
 		t.Errorf("expected room workspace /tmp/workspace, got %q", roomReq.Workspace)
 	}
-	if !strings.Contains(roomReq.Title, "run-123") {
-		t.Errorf("expected room title containing 'run-123', got %q", roomReq.Title)
+	// Without FlowRunID, room title is based on agent session ID.
+	if !strings.Contains(roomReq.Title, "agent-fp-session-1") {
+		t.Errorf("expected room title containing 'agent-fp-session-1', got %q", roomReq.Title)
 	}
 
 	// Verify JoinRoom was called with the session.
@@ -492,6 +493,9 @@ func TestFoxproxSpawner_Spawn_ReadinessProfile(t *testing.T) {
 }
 
 func TestFoxproxSpawner_Spawn_RoomTitleWithFlowRunID(t *testing.T) {
+	// When FlowRunID is set AND OutputMode is "push", exec mode is used
+	// and no room is created. When OutputMode is not push, room-based
+	// mode is used even if FlowRunID is set on the config.
 	fpClient := &mockFoxproxClient{
 		createSessionResp: &httpjson.SessionResponse{
 			ID:     "fp-session-title",
@@ -499,18 +503,24 @@ func TestFoxproxSpawner_Spawn_RoomTitleWithFlowRunID(t *testing.T) {
 		},
 	}
 
+	// Config has FlowRunID but Spawn is called without push OutputMode
+	// → room-based mode (FlowRunID is only for prompt injection in non-push).
 	spawner := NewFoxproxAgentSpawner(fpClient, FoxproxSpawnerConfig{
-		CLICmd:    "droid",
-		FlowRunID: "my-run-42",
+		CLICmd:     "droid",
+		FlowRunID:  "my-run-42",
+		FlowNodeID: "node-42",
 	})
 
-	_, err := spawner.Spawn(context.Background(), "researcher", "test", AgentSpawnOptions{})
+	_, err := spawner.Spawn(context.Background(), "researcher", "test", AgentSpawnOptions{
+		Workspace: "/tmp/ws",
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	// Room created in non-push mode even though FlowRunID is set.
 	if len(fpClient.createRoomReqs) != 1 {
-		t.Fatalf("expected 1 CreateRoom call, got %d", len(fpClient.createRoomReqs))
+		t.Fatalf("expected 1 CreateRoom call in non-push mode, got %d", len(fpClient.createRoomReqs))
 	}
 	title := fpClient.createRoomReqs[0].Title
 	if !strings.Contains(title, "my-run-42") {
@@ -865,6 +875,309 @@ func TestFoxproxSpawner_Kill_DeleteSessionError(t *testing.T) {
 	// LeaveRoom should have been attempted despite the session delete error.
 	if len(fpClient.leaveRoomReqs) != 1 {
 		t.Errorf("expected 1 LeaveRoom call, got %d", len(fpClient.leaveRoomReqs))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests — Droid exec push mode (output_mode=push uses droid exec --auto medium)
+// ---------------------------------------------------------------------------
+
+func TestFoxproxSpawner_ExecPushMode_SpawnCreatesSessionWithDroidExec(t *testing.T) {
+	// When OutputMode is "push", the spawner should use
+	// `droid exec --auto medium "<prompt>"` instead of just `droid`.
+	fpClient := &mockFoxproxClient{
+		createSessionResp: &httpjson.SessionResponse{
+			ID:     "fp-exec-session-1",
+			Status: "running",
+		},
+	}
+
+	spawner := NewFoxproxAgentSpawner(fpClient, FoxproxSpawnerConfig{
+		CLICmd: "droid",
+	})
+
+	result, err := spawner.Spawn(context.Background(), "researcher", "Research the auth module", AgentSpawnOptions{
+		Workspace:  "/tmp/workspace",
+		OutputMode: "push",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.AgentID != "fp-exec-session-1" {
+		t.Errorf("expected agent_id fp-exec-session-1, got %q", result.AgentID)
+	}
+	if result.SessionID != "fp-exec-session-1" {
+		t.Errorf("expected session_id fp-exec-session-1, got %q", result.SessionID)
+	}
+
+	// Verify CreateSession was called with droid exec --auto medium command.
+	if len(fpClient.createSessionReqs) != 1 {
+		t.Fatalf("expected 1 CreateSession call, got %d", len(fpClient.createSessionReqs))
+	}
+	req := fpClient.createSessionReqs[0]
+	expectedCmd := []string{"droid", "exec", "--auto", "medium"}
+	if len(req.Cmd) < 4 {
+		t.Fatalf("expected cmd starting with [droid exec --auto medium <prompt>], got %v", req.Cmd)
+	}
+	for i, v := range expectedCmd {
+		if req.Cmd[i] != v {
+			t.Errorf("expected cmd[%d] = %q, got %q", i, v, req.Cmd[i])
+		}
+	}
+	// The last argument should be the prompt.
+	promptArg := strings.Join(req.Cmd[4:], " ")
+	if !strings.Contains(promptArg, "Research the auth module") {
+		t.Errorf("expected prompt arg containing 'Research the auth module', got %q", promptArg)
+	}
+}
+
+func TestFoxproxSpawner_ExecPushMode_SpawnSkipsRoomCreationAndJoin(t *testing.T) {
+	// In push mode (OutputMode "push"), room creation and join should be skipped.
+	fpClient := &mockFoxproxClient{
+		createSessionResp: &httpjson.SessionResponse{
+			ID:     "fp-exec-session-2",
+			Status: "running",
+		},
+	}
+
+	spawner := NewFoxproxAgentSpawner(fpClient, FoxproxSpawnerConfig{
+		CLICmd: "droid",
+	})
+
+	_, err := spawner.Spawn(context.Background(), "researcher", "Do research", AgentSpawnOptions{
+		Workspace:  "/tmp/workspace",
+		OutputMode: "push",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// No CreateRoom call in push mode.
+	if len(fpClient.createRoomReqs) != 0 {
+		t.Errorf("expected 0 CreateRoom calls in push mode, got %d", len(fpClient.createRoomReqs))
+	}
+
+	// No JoinRoom call in push mode.
+	if len(fpClient.joinRoomReqs) != 0 {
+		t.Errorf("expected 0 JoinRoom calls in push mode, got %d", len(fpClient.joinRoomReqs))
+	}
+
+	// Room ID should be empty.
+	if spawner.roomID != "" {
+		t.Errorf("expected empty roomID in push mode, got %q", spawner.roomID)
+	}
+}
+
+func TestFoxproxSpawner_ExecPushMode_SpawnDoesNotInjectFlowContext(t *testing.T) {
+	// In push mode, the AgentExecutor already injects push instructions.
+	// The spawner should NOT add its own flow context to avoid duplication.
+	fpClient := &mockFoxproxClient{
+		createSessionResp: &httpjson.SessionResponse{
+			ID:     "fp-exec-session-3",
+			Status: "running",
+		},
+	}
+
+	// Spawner config has FlowRunID/FlowNodeID but these are only used in
+	// non-push mode for prompt injection. Push mode ignores them.
+	spawner := NewFoxproxAgentSpawner(fpClient, FoxproxSpawnerConfig{
+		CLICmd:     "droid",
+		FlowRunID:  "run-push-789",
+		FlowNodeID: "node-agent-3",
+	})
+
+	_, err := spawner.Spawn(context.Background(), "researcher", "Original prompt", AgentSpawnOptions{
+		Workspace:  "/tmp/workspace",
+		OutputMode: "push",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(fpClient.createSessionReqs) != 1 {
+		t.Fatalf("expected 1 CreateSession call, got %d", len(fpClient.createSessionReqs))
+	}
+	req := fpClient.createSessionReqs[0]
+	promptArg := strings.Join(req.Cmd[4:], " ")
+
+	// The prompt should NOT contain the spawner's own flow output push
+	// configuration (the AgentExecutor handles that). It should be the
+	// original prompt only.
+	if strings.Contains(promptArg, "Flow Output Push Configuration") {
+		t.Errorf("push mode prompt should NOT contain spawner-injected flow context, got: %q", promptArg)
+	}
+	if !strings.Contains(promptArg, "Original prompt") {
+		t.Errorf("push mode prompt should contain the original prompt text, got: %q", promptArg)
+	}
+}
+
+func TestFoxproxSpawner_ExecPushMode_SpawnIncludesPushInstructions(t *testing.T) {
+	// The prompt passed to droid exec should contain the push instructions
+	// already injected by the AgentExecutor (simulated here).
+	fpClient := &mockFoxproxClient{
+		createSessionResp: &httpjson.SessionResponse{
+			ID:     "fp-exec-session-4",
+			Status: "running",
+		},
+	}
+
+	spawner := NewFoxproxAgentSpawner(fpClient, FoxproxSpawnerConfig{
+		CLICmd: "droid",
+	})
+
+	// Simulate the prompt as AgentExecutor would construct it (with push instructions).
+	promptWithPush := "Research the auth module\n\n--- Flow Output Push Configuration ---\nYou are running as a node..."
+	_, err := spawner.Spawn(context.Background(), "researcher", promptWithPush, AgentSpawnOptions{
+		Workspace:  "/tmp/workspace",
+		OutputMode: "push",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(fpClient.createSessionReqs) != 1 {
+		t.Fatalf("expected 1 CreateSession call, got %d", len(fpClient.createSessionReqs))
+	}
+	req := fpClient.createSessionReqs[0]
+	promptArg := strings.Join(req.Cmd[4:], " ")
+
+	if !strings.Contains(promptArg, "Flow Output Push Configuration") {
+		t.Errorf("expected prompt to contain the push instructions from AgentExecutor, got: %q", promptArg)
+	}
+}
+
+func TestFoxproxSpawner_ExecPushMode_AskReturnsImmediately(t *testing.T) {
+	// In exec mode, Ask should return immediately since the prompt was
+	// already sent as the exec argument.
+	fpClient := &mockFoxproxClient{
+		createSessionResp: &httpjson.SessionResponse{
+			ID:     "fp-exec-session-5",
+			Status: "running",
+		},
+	}
+
+	spawner := NewFoxproxAgentSpawner(fpClient, FoxproxSpawnerConfig{
+		CLICmd: "droid",
+	})
+
+	_, err := spawner.Spawn(context.Background(), "researcher", "Do work", AgentSpawnOptions{
+		Workspace:  "/tmp/workspace",
+		OutputMode: "push",
+	})
+	if err != nil {
+		t.Fatalf("spawn: unexpected error: %v", err)
+	}
+
+	// Ask should return immediately in exec mode.
+	start := time.Now()
+	result, err := spawner.Ask(context.Background(), "fp-exec-session-5", "Extra instructions", 30000)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("ask: unexpected error: %v", err)
+	}
+	if result.Status != "exec" {
+		t.Errorf("expected status exec, got %q", result.Status)
+	}
+
+	// Should return nearly instantly.
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("Ask took %v in exec mode, expected immediate return", elapsed)
+	}
+
+	// No SendMessage call in exec mode.
+	if len(fpClient.sendMessageReqs) != 0 {
+		t.Errorf("expected 0 SendMessage calls in exec mode, got %d", len(fpClient.sendMessageReqs))
+	}
+}
+
+func TestFoxproxSpawner_ExecPushMode_KillSkipsLeaveRoom(t *testing.T) {
+	// In exec mode, Kill should skip LeaveRoom since no room was created.
+	fpClient := &mockFoxproxClient{
+		createSessionResp: &httpjson.SessionResponse{
+			ID:     "fp-exec-session-6",
+			Status: "running",
+		},
+	}
+
+	spawner := NewFoxproxAgentSpawner(fpClient, FoxproxSpawnerConfig{
+		CLICmd: "droid",
+	})
+
+	_, err := spawner.Spawn(context.Background(), "researcher", "Do work", AgentSpawnOptions{
+		Workspace:  "/tmp/workspace",
+		OutputMode: "push",
+	})
+	if err != nil {
+		t.Fatalf("spawn: unexpected error: %v", err)
+	}
+
+	err = spawner.Kill(context.Background(), "fp-exec-session-6")
+	if err != nil {
+		t.Fatalf("kill: unexpected error: %v", err)
+	}
+
+	// No LeaveRoom call in exec mode.
+	if len(fpClient.leaveRoomReqs) != 0 {
+		t.Errorf("expected 0 LeaveRoom calls in exec mode, got %d", len(fpClient.leaveRoomReqs))
+	}
+
+	// Session should be deleted.
+	if len(fpClient.deleteSessionIDs) != 1 {
+		t.Fatalf("expected 1 DeleteSession call, got %d", len(fpClient.deleteSessionIDs))
+	}
+	if fpClient.deleteSessionIDs[0] != "fp-exec-session-6" {
+		t.Errorf("expected delete session fp-exec-session-6, got %q", fpClient.deleteSessionIDs[0])
+	}
+}
+
+func TestFoxproxSpawner_NonPushMode_UsesRoomBasedFlow(t *testing.T) {
+	// When FlowRunID is empty, the spawner should use the existing room-based flow.
+	fpClient := &mockFoxproxClient{
+		createSessionResp: &httpjson.SessionResponse{
+			ID:     "fp-session-room",
+			Status: "running",
+		},
+		createRoomResp: &httpjson.RoomResponse{
+			ID:        "room-nonpush",
+			Workspace: "/tmp/workspace",
+		},
+	}
+
+	spawner := NewFoxproxAgentSpawner(fpClient, FoxproxSpawnerConfig{
+		CLICmd: "droid",
+		// FlowRunID is empty — non-push mode.
+	})
+
+	result, err := spawner.Spawn(context.Background(), "researcher", "Research", AgentSpawnOptions{
+		Workspace: "/tmp/workspace",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.AgentID != "fp-session-room" {
+		t.Errorf("expected agent_id fp-session-room, got %q", result.AgentID)
+	}
+
+	// Verify room-based flow: CreateSession with just [droid].
+	if len(fpClient.createSessionReqs) != 1 {
+		t.Fatalf("expected 1 CreateSession call, got %d", len(fpClient.createSessionReqs))
+	}
+	req := fpClient.createSessionReqs[0]
+	if len(req.Cmd) != 1 || req.Cmd[0] != "droid" {
+		t.Errorf("expected cmd [droid] in non-push mode, got %v", req.Cmd)
+	}
+
+	// Room created.
+	if len(fpClient.createRoomReqs) != 1 {
+		t.Errorf("expected 1 CreateRoom call in non-push mode, got %d", len(fpClient.createRoomReqs))
+	}
+
+	// Joined room.
+	if len(fpClient.joinRoomReqs) != 1 {
+		t.Errorf("expected 1 JoinRoom call in non-push mode, got %d", len(fpClient.joinRoomReqs))
 	}
 }
 
