@@ -3,32 +3,37 @@ package flow
 import (
 	"context"
 	"fmt"
-	"strings"
-	"time"
 
-	"github.com/joshka/foxprox/foxprox/broker/vtscreen"
 	"github.com/joshka/foxprox/foxprox/client"
 	"github.com/joshka/foxprox/foxprox/transport/httpjson"
 )
 
 // FoxproxClient is the interface wrapping the foxprox HTTP client methods
 // needed by the spawner. This allows tests to inject mocks.
+//
+// Room-based coordination: the spawner creates a foxprox room for each flow
+// run, joins the agent's PTY session to the room as a member, and sends tasks
+// via room messages. The agent (droid) receives messages naturally through its
+// TUI, does the work, then pushes structured output back via
+// `foxctl flow output`. This replaces the old screen-scraping model with
+// structured message delivery through foxprox's room fan-out.
 type FoxproxClient interface {
+	// Session lifecycle
 	CreateSession(ctx context.Context, req httpjson.CreateSessionRequest) (httpjson.SessionResponse, error)
 	DeleteSession(ctx context.Context, id string) error
 	SessionReadiness(ctx context.Context, id string, opts client.SessionReadinessOptions) (httpjson.ReadinessResponse, error)
-	SessionScreen(ctx context.Context, id string) (vtscreen.Snapshot, error)
-	TerminalSubmit(ctx context.Context, req client.TerminalSubmitRequest) (client.TerminalSubmitResponse, error)
+
+	// Room coordination
+	CreateRoom(ctx context.Context, req httpjson.CreateRoomRequest) (httpjson.RoomResponse, error)
+	JoinRoom(ctx context.Context, roomID string, req httpjson.JoinRoomRequest) (httpjson.MemberResponse, error)
+	LeaveRoom(ctx context.Context, roomID string, req httpjson.LeaveRoomRequest) (httpjson.MemberResponse, error)
+	SendMessage(ctx context.Context, req httpjson.SendMessageRequest) (httpjson.SendMessageResponse, error)
 }
 
 // FoxproxSpawnerConfig configures the foxprox agent spawner.
 type FoxproxSpawnerConfig struct {
 	// CLICmd is the CLI agent command to launch (default: "droid").
 	CLICmd string
-
-	// PollInterval controls how often readiness is polled during Ask.
-	// Default: 500ms.
-	PollInterval time.Duration
 
 	// ReadinessDebounceMS is the output-idle debounce window in milliseconds.
 	// Default: 2000 (2 seconds of output silence = idle).
@@ -44,15 +49,16 @@ type FoxproxSpawnerConfig struct {
 
 	// FlowNodeID, when set, is injected into the agent's prompt.
 	FlowNodeID string
+
+	// RoomID, when set, reuses an existing room instead of creating a new one.
+	// When empty, Spawn creates a new room with a generated title.
+	RoomID string
 }
 
 // defaults applies zero-value defaults.
 func (c *FoxproxSpawnerConfig) defaults() {
 	if c.CLICmd == "" {
 		c.CLICmd = "droid"
-	}
-	if c.PollInterval == 0 {
-		c.PollInterval = 500 * time.Millisecond
 	}
 	if c.ReadinessDebounceMS == 0 {
 		c.ReadinessDebounceMS = 2000
@@ -64,12 +70,14 @@ func (c *FoxproxSpawnerConfig) defaults() {
 
 // foxproxAgentSpawner implements AgentSpawner using a foxprox HTTP client.
 // It drives CLI agents (droid, claude, etc.) via PTY sessions managed by
-// the foxprox daemon. Foxprox handles all PTY management (bracketed paste,
-// submit keys, output readiness, screen model). The spawner just orchestrates
-// session lifecycle and output capture.
+// the foxprox daemon, using room-based coordination for structured message
+// delivery. The spawner creates a foxprox room for each agent, joins the
+// PTY session as a member, and sends tasks via room messages. Output comes
+// back through the flow engine's push API, not screen capture.
 type foxproxAgentSpawner struct {
 	client FoxproxClient
 	config FoxproxSpawnerConfig
+	roomID string // set by Spawn, used by Ask/Kill
 }
 
 // NewFoxproxAgentSpawner creates a new AgentSpawner backed by foxprox.
@@ -81,9 +89,15 @@ func NewFoxproxAgentSpawner(client FoxproxClient, config FoxproxSpawnerConfig) *
 	}
 }
 
-// Spawn creates a foxprox PTY session with the CLI agent command.
-// The session ID serves as both agent_id and session_id.
-// If opts.CLICmd is set, it overrides the spawner's default CLICmd.
+// Spawn creates a foxprox PTY session, creates a foxprox room, and joins
+// the session to the room. The session ID serves as both agent_id and
+// session_id.
+//
+// Steps:
+//  1. Create PTY session with the CLI agent command
+//  2. Create (or reuse) a foxprox room for the flow run
+//  3. Join the PTY session to the room as a member
+//
 // If the config has FlowRunID and FlowNodeID set, these are injected
 // into the prompt so the agent knows where to push output.
 func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, opts AgentSpawnOptions) (*AgentSpawnResult, error) {
@@ -124,7 +138,43 @@ func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, op
 
 	resp, err := s.client.CreateSession(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("foxprox spawner: spawn: %w", err)
+		return nil, fmt.Errorf("foxprox spawner: spawn: create session: %w", err)
+	}
+
+	// Create or reuse a foxprox room for this agent.
+	roomID := s.config.RoomID
+	if roomID == "" {
+		roomTitle := fmt.Sprintf("flow-run-%s", s.config.FlowRunID)
+		if s.config.FlowRunID == "" {
+			roomTitle = fmt.Sprintf("agent-%s", resp.ID)
+		}
+		roomResp, rErr := s.client.CreateRoom(ctx, httpjson.CreateRoomRequest{
+			Workspace: cwd,
+			Title:     roomTitle,
+		})
+		if rErr != nil {
+			// Clean up the session we just created.
+			_ = s.client.DeleteSession(ctx, resp.ID)
+			return nil, fmt.Errorf("foxprox spawner: spawn: create room: %w", rErr)
+		}
+		roomID = roomResp.ID
+	}
+	s.roomID = roomID
+
+	// Join the PTY session to the room as a member.
+	_, err = s.client.JoinRoom(ctx, roomID, httpjson.JoinRoomRequest{
+		AgentID:   resp.ID,
+		SessionID: resp.ID,
+		Role:      role,
+		CanMutate: true,
+	})
+	if err != nil {
+		// Clean up session and leave room on join failure.
+		_ = s.client.DeleteSession(ctx, resp.ID)
+		_, _ = s.client.LeaveRoom(ctx, roomID, httpjson.LeaveRoomRequest{
+			AgentID: resp.ID,
+		})
+		return nil, fmt.Errorf("foxprox spawner: spawn: join room: %w", err)
 	}
 
 	return &AgentSpawnResult{
@@ -133,59 +183,36 @@ func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, op
 	}, nil
 }
 
-// Ask sends a prompt via terminal.submit, waits for output-idle readiness,
-// then captures the screen content as the reply.
+// Ask sends the task as a room message via foxprox client.SendMessage.
+// Foxprox's router delivers the message to the agent's PTY through the room
+// fan-out. This is fire-and-forget: the method returns immediately after the
+// message is sent. Output comes back via the flow engine's push API
+// (`foxctl flow output`), not via screen capture.
 func (s *foxproxAgentSpawner) Ask(ctx context.Context, agentID string, message string, timeoutMS int) (*AgentAskResult, error) {
-	// Submit the prompt via terminal.submit.
-	_, err := s.client.TerminalSubmit(ctx, client.TerminalSubmitRequest{
-		SessionID: agentID,
-		Text:      message,
+	if s.roomID == "" {
+		return nil, fmt.Errorf("foxprox spawner: ask: no room (spawn not called?)")
+	}
+
+	// Send the task as a room message. The foxprox router delivers it to
+	// the agent's PTY via the room's fan-out mechanism.
+	_, err := s.client.SendMessage(ctx, httpjson.SendMessageRequest{
+		RoomID: s.roomID,
+		Text:   message,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("foxprox spawner: ask: submit: %w", err)
+		return nil, fmt.Errorf("foxprox spawner: ask: send message: %w", err)
 	}
 
-	// Poll readiness until output-idle or timeout.
-	deadline := time.Now().Add(time.Duration(timeoutMS) * time.Millisecond)
-	pollTicker := time.NewTicker(s.config.PollInterval)
-	defer pollTicker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("foxprox spawner: ask: context cancelled: %w", ctx.Err())
-		case <-pollTicker.C:
-			if time.Now().After(deadline) {
-				return nil, fmt.Errorf("foxprox spawner: ask: timed out after %dms waiting for output idle", timeoutMS)
-			}
-
-			readiness, rErr := s.client.SessionReadiness(ctx, agentID, client.SessionReadinessOptions{})
-			if rErr != nil {
-				// Readiness error likely means session is gone.
-				return nil, fmt.Errorf("foxprox spawner: ask: readiness: %w", rErr)
-			}
-
-			if readiness.Idle {
-				// Output is idle — capture the screen.
-				screen, sErr := s.client.SessionScreen(ctx, agentID)
-				if sErr != nil {
-					return nil, fmt.Errorf("foxprox spawner: ask: screen: %w", sErr)
-				}
-
-				reply := screenToString(screen)
-				return &AgentAskResult{
-					Reply:  reply,
-					Status: "replied",
-				}, nil
-			}
-			// Not idle yet, keep polling.
-		}
-	}
+	// Fire-and-forget: return immediately. Output comes via push.
+	return &AgentAskResult{
+		Reply:  "",
+		Status: "sent",
+	}, nil
 }
 
 // Info checks the session status via the readiness endpoint.
-// If the session exists and has output activity, it's "running".
-// If the readiness check fails (session not found), it's "exited".
+// It reports "running" for active sessions, "exited" for gone sessions.
+// No screen capture is performed — the summary comes from the push output.
 func (s *foxproxAgentSpawner) Info(ctx context.Context, agentID string) (*AgentInfoResult, error) {
 	readiness, err := s.client.SessionReadiness(ctx, agentID, client.SessionReadinessOptions{})
 	if err != nil {
@@ -195,43 +222,30 @@ func (s *foxproxAgentSpawner) Info(ctx context.Context, agentID string) (*AgentI
 		}, nil
 	}
 
-	// Session exists — check if output is idle (agent finished producing).
-	// When idle, report "completed" and capture screen as summary so the
-	// flow engine's session_summary polling loop picks up the output.
 	if readiness.Idle {
-		screen, sErr := s.client.SessionScreen(ctx, agentID)
-		summary := fmt.Sprintf("output idle for %dms", readiness.IdleForMS)
-		if sErr == nil {
-			summary = screenToString(screen)
-		}
 		return &AgentInfoResult{
-			Status:  "completed",
-			Summary: summary,
+			Status: "completed",
+			Summary: fmt.Sprintf("output idle for %dms", readiness.IdleForMS),
 		}, nil
 	}
+
 	return &AgentInfoResult{
 		Status: "running",
 	}, nil
 }
 
-// Kill deletes the foxprox session, terminating the PTY process.
+// Kill leaves the foxprox room and then deletes the PTY session.
 func (s *foxproxAgentSpawner) Kill(ctx context.Context, sessionID string) error {
+	// Leave the room first, then delete the session.
+	if s.roomID != "" {
+		_, _ = s.client.LeaveRoom(ctx, s.roomID, httpjson.LeaveRoomRequest{
+			AgentID: sessionID,
+		})
+	}
+
 	err := s.client.DeleteSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("foxprox spawner: kill: %w", err)
 	}
 	return nil
-}
-
-// screenToString converts a vtscreen.Snapshot to a trimmed string,
-// joining non-empty lines with newlines.
-func screenToString(snap vtscreen.Snapshot) string {
-	var lines []string
-	for _, line := range snap.Lines {
-		trimmed := strings.TrimRight(line, " \t")
-		if trimmed != "" {
-			lines = append(lines, trimmed)
-		}
-	}
-	return strings.Join(lines, "\n")
 }
