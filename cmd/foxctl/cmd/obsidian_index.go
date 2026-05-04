@@ -25,6 +25,7 @@ func newObsidianIndexCommand() *cobra.Command {
 
 func newObsidianIndexBuildCommand() *cobra.Command {
 	var vaultPath string
+	var semanticBuild bool
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Rebuild the local vault index",
@@ -46,12 +47,43 @@ func newObsidianIndexBuildCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var semanticResult map[string]any
+			if semanticBuild {
+				provider := openObsidianSemanticProvider(cfg)
+				if provider == nil {
+					return fmt.Errorf("semantic note indexing requires FOXCTL_OBSIDIAN_SEMANTIC_ENABLED and a configured embedding provider")
+				}
+				noteCount, err := store.EnsureSemanticEmbeddings(ctx, provider)
+				if err != nil {
+					return err
+				}
+				chunkCount, err := store.EnsureChunkSemanticEmbeddings(ctx, provider)
+				if err != nil {
+					return err
+				}
+				refreshed, err := store.Stats(ctx)
+				if err != nil {
+					return err
+				}
+				result.SemanticEmbeddings = refreshed.SemanticEmbeddings
+				result.ChunkSemanticEmbeddings = refreshed.ChunkSemanticEmbeddings
+				semanticResult = map[string]any{
+					"provider_model":            provider.Model(),
+					"provider_dimensions":       provider.Dimensions(),
+					"notes_embedded":            noteCount,
+					"chunks_embedded":           chunkCount,
+					"semantic_embeddings":       refreshed.SemanticEmbeddings,
+					"chunk_semantic_embeddings": refreshed.ChunkSemanticEmbeddings,
+				}
+			}
 			return envelope.Write(cmd.OutOrStdout(), envelope.OK("obsidian/index_build", map[string]any{
-				"result": result,
+				"result":   result,
+				"semantic": semanticResult,
 			}, envelope.WithMeta(envelope.Meta{Source: "cli"})))
 		},
 	}
 	cmd.Flags().StringVar(&vaultPath, "vault-path", "", "Vault path")
+	cmd.Flags().BoolVar(&semanticBuild, "semantic", false, "Populate semantic note and chunk embeddings after rebuilding the vault index")
 	return cmd
 }
 

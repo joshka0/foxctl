@@ -22,44 +22,49 @@ import (
 )
 
 type agentEvalResult struct {
-	CaseID            string                `json:"case_id,omitempty"`
-	Category          string                `json:"category,omitempty"`
-	Role              string                `json:"role,omitempty"`
-	Label             string                `json:"label,omitempty"`
-	Provider          string                `json:"provider,omitempty"`
-	Model             string                `json:"model,omitempty"`
-	Runner            string                `json:"runner,omitempty"`
-	Status            string                `json:"status,omitempty"`
-	Output            string                `json:"output,omitempty"`
-	DurationMS        int64                 `json:"duration_ms,omitempty"`
-	ToolCallCount     int                   `json:"tool_call_count,omitempty"`
-	ToolNames         []string              `json:"tool_names,omitempty"`
-	InputTokens       int                   `json:"input_tokens,omitempty"`
-	OutputTokens      int                   `json:"output_tokens,omitempty"`
-	TotalTokens       int                   `json:"total_tokens,omitempty"`
-	TotalCostUSD      float64               `json:"total_cost_usd,omitempty"`
-	QualityScore      float64               `json:"quality_score,omitempty"`
-	AccuracyScore     float64               `json:"accuracy_score,omitempty"`
-	ThoroughnessScore float64               `json:"thoroughness_score,omitempty"`
-	PathRecall        float64               `json:"path_recall,omitempty"`
-	SymbolRecall      float64               `json:"symbol_recall,omitempty"`
-	SnippetRecall     float64               `json:"snippet_recall,omitempty"`
-	FactRecall        float64               `json:"fact_recall,omitempty"`
-	CorrectnessScore  float64               `json:"correctness_score,omitempty"`
-	PathMatchCount    int                   `json:"path_match_count,omitempty"`
-	MatchedPaths      []string              `json:"matched_paths,omitempty"`
-	MatchedSymbols    []string              `json:"matched_symbols,omitempty"`
-	MatchedSnippets   []string              `json:"matched_snippets,omitempty"`
-	MatchedFacts      []string              `json:"matched_facts,omitempty"`
-	Symbols           []string              `json:"symbols,omitempty"`
-	Snippets          []evalObservedSnippet `json:"snippets,omitempty"`
-	InvalidPaths      []string              `json:"invalid_paths,omitempty"`
-	ExcludedPathHits  []string              `json:"excluded_path_hits,omitempty"`
-	WrongScopePenalty float64               `json:"wrong_scope_penalty,omitempty"`
-	LengthQuality     float64               `json:"length_quality,omitempty"`
-	GenericPenalty    float64               `json:"generic_penalty,omitempty"`
-	Passed            bool                  `json:"passed,omitempty"`
-	Error             string                `json:"error,omitempty"`
+	CaseID                string                `json:"case_id,omitempty"`
+	Category              string                `json:"category,omitempty"`
+	Role                  string                `json:"role,omitempty"`
+	Label                 string                `json:"label,omitempty"`
+	Provider              string                `json:"provider,omitempty"`
+	Model                 string                `json:"model,omitempty"`
+	Runner                string                `json:"runner,omitempty"`
+	Status                string                `json:"status,omitempty"`
+	Output                string                `json:"output,omitempty"`
+	DurationMS            int64                 `json:"duration_ms,omitempty"`
+	ToolCallCount         int                   `json:"tool_call_count,omitempty"`
+	ToolNames             []string              `json:"tool_names,omitempty"`
+	InputTokens           int                   `json:"input_tokens,omitempty"`
+	OutputTokens          int                   `json:"output_tokens,omitempty"`
+	TotalTokens           int                   `json:"total_tokens,omitempty"`
+	TranscriptPath        string                `json:"transcript_path,omitempty"`
+	TotalCostUSD          float64               `json:"total_cost_usd,omitempty"`
+	QualityScore          float64               `json:"quality_score,omitempty"`
+	AccuracyScore         float64               `json:"accuracy_score,omitempty"`
+	ThoroughnessScore     float64               `json:"thoroughness_score,omitempty"`
+	PathRecall            float64               `json:"path_recall,omitempty"`
+	SymbolRecall          float64               `json:"symbol_recall,omitempty"`
+	SnippetRecall         float64               `json:"snippet_recall,omitempty"`
+	FactRecall            float64               `json:"fact_recall,omitempty"`
+	CorrectnessScore      float64               `json:"correctness_score,omitempty"`
+	PathMatchCount        int                   `json:"path_match_count,omitempty"`
+	MatchedPaths          []string              `json:"matched_paths,omitempty"`
+	MatchedSymbols        []string              `json:"matched_symbols,omitempty"`
+	MatchedSnippets       []string              `json:"matched_snippets,omitempty"`
+	MatchedFacts          []string              `json:"matched_facts,omitempty"`
+	Symbols               []string              `json:"symbols,omitempty"`
+	Snippets              []evalObservedSnippet `json:"snippets,omitempty"`
+	GatherSelectedPaths   []string              `json:"gather_selected_paths,omitempty"`
+	GatherAnswerSeedPaths []string              `json:"gather_answer_seed_paths,omitempty"`
+	GatherPathSetMust     []string              `json:"gather_path_set_must,omitempty"`
+	FinalAnswerLosses     []string              `json:"final_answer_losses,omitempty"`
+	InvalidPaths          []string              `json:"invalid_paths,omitempty"`
+	ExcludedPathHits      []string              `json:"excluded_path_hits,omitempty"`
+	WrongScopePenalty     float64               `json:"wrong_scope_penalty,omitempty"`
+	LengthQuality         float64               `json:"length_quality,omitempty"`
+	GenericPenalty        float64               `json:"generic_penalty,omitempty"`
+	Passed                bool                  `json:"passed,omitempty"`
+	Error                 string                `json:"error,omitempty"`
 }
 
 type agentEvalSummary struct {
@@ -96,20 +101,21 @@ type agentEvalTarget struct {
 }
 
 type externalAgentEvalRecord struct {
-	CaseID       string  `json:"case_id,omitempty"`
-	Category     string  `json:"category,omitempty"`
-	Role         string  `json:"role,omitempty"`
-	Label        string  `json:"label,omitempty"`
-	Provider     string  `json:"provider,omitempty"`
-	Model        string  `json:"model,omitempty"`
-	Runner       string  `json:"runner,omitempty"`
-	Output       string  `json:"output"`
-	DurationMS   int64   `json:"duration_ms,omitempty"`
-	InputTokens  int     `json:"input_tokens,omitempty"`
-	OutputTokens int     `json:"output_tokens,omitempty"`
-	TotalTokens  int     `json:"total_tokens,omitempty"`
-	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
-	Error        string  `json:"error,omitempty"`
+	CaseID         string  `json:"case_id,omitempty"`
+	Category       string  `json:"category,omitempty"`
+	Role           string  `json:"role,omitempty"`
+	Label          string  `json:"label,omitempty"`
+	Provider       string  `json:"provider,omitempty"`
+	Model          string  `json:"model,omitempty"`
+	Runner         string  `json:"runner,omitempty"`
+	Output         string  `json:"output"`
+	DurationMS     int64   `json:"duration_ms,omitempty"`
+	InputTokens    int     `json:"input_tokens,omitempty"`
+	OutputTokens   int     `json:"output_tokens,omitempty"`
+	TotalTokens    int     `json:"total_tokens,omitempty"`
+	TotalCostUSD   float64 `json:"total_cost_usd,omitempty"`
+	Error          string  `json:"error,omitempty"`
+	TranscriptPath string  `json:"transcript_path,omitempty"`
 }
 
 type structuredAgentEvalOutput struct {
@@ -656,21 +662,22 @@ func loadExternalAgentEvalResults(paths []string, evalCases []promptEvalCase, pa
 				return nil, fmt.Errorf("decode external result %s: %w", path, err)
 			}
 			result := agentEvalResult{
-				CaseID:       strings.TrimSpace(rec.CaseID),
-				Category:     strings.TrimSpace(rec.Category),
-				Role:         strings.TrimSpace(rec.Role),
-				Label:        firstNonEmpty(rec.Label, strings.TrimSpace(rec.Role)+"@"+strings.TrimSpace(rec.Provider)+":"+strings.TrimSpace(rec.Model)),
-				Provider:     strings.TrimSpace(rec.Provider),
-				Model:        strings.TrimSpace(rec.Model),
-				Runner:       firstNonEmpty(rec.Runner, "external"),
-				Status:       "ok",
-				Output:       strings.TrimSpace(rec.Output),
-				DurationMS:   rec.DurationMS,
-				InputTokens:  rec.InputTokens,
-				OutputTokens: rec.OutputTokens,
-				TotalTokens:  rec.TotalTokens,
-				TotalCostUSD: rec.TotalCostUSD,
-				Error:        strings.TrimSpace(rec.Error),
+				CaseID:         strings.TrimSpace(rec.CaseID),
+				Category:       strings.TrimSpace(rec.Category),
+				Role:           strings.TrimSpace(rec.Role),
+				Label:          firstNonEmpty(rec.Label, strings.TrimSpace(rec.Role)+"@"+strings.TrimSpace(rec.Provider)+":"+strings.TrimSpace(rec.Model)),
+				Provider:       strings.TrimSpace(rec.Provider),
+				Model:          strings.TrimSpace(rec.Model),
+				Runner:         firstNonEmpty(rec.Runner, "external"),
+				Status:         "ok",
+				Output:         strings.TrimSpace(rec.Output),
+				DurationMS:     rec.DurationMS,
+				InputTokens:    rec.InputTokens,
+				OutputTokens:   rec.OutputTokens,
+				TotalTokens:    rec.TotalTokens,
+				TranscriptPath: strings.TrimSpace(rec.TranscriptPath),
+				TotalCostUSD:   rec.TotalCostUSD,
+				Error:          strings.TrimSpace(rec.Error),
 			}
 			if result.Error != "" {
 				result.Status = "error"
@@ -745,7 +752,128 @@ func loadExternalAgentEvalResults(paths []string, evalCases []promptEvalCase, pa
 		}
 		_ = f.Close()
 	}
+	fillExternalAgentTranscriptTokenUsage(results)
 	return results, nil
+}
+
+func fillExternalAgentTranscriptTokenUsage(results []agentEvalResult) {
+	type group struct {
+		indices []int
+		usage   codexTranscriptTokenUsage
+		err     error
+	}
+	groups := map[string]*group{}
+	for i := range results {
+		if results[i].TotalTokens != 0 || strings.TrimSpace(results[i].TranscriptPath) == "" {
+			continue
+		}
+		path := strings.TrimSpace(results[i].TranscriptPath)
+		item, ok := groups[path]
+		if !ok {
+			usage, err := readCodexTranscriptTokenUsage(path)
+			item = &group{usage: usage, err: err}
+			groups[path] = item
+		}
+		item.indices = append(item.indices, i)
+	}
+	for path, item := range groups {
+		if item.err != nil {
+			for _, idx := range item.indices {
+				results[idx].Error = firstNonEmpty(results[idx].Error, fmt.Sprintf("read transcript token usage: %v", item.err))
+				results[idx].Status = "error"
+			}
+			continue
+		}
+		count := len(item.indices)
+		if count == 0 {
+			continue
+		}
+		input := distributeInt(item.usage.InputTokens, count)
+		output := distributeInt(item.usage.OutputTokens, count)
+		total := distributeInt(item.usage.TotalTokens, count)
+		for i, idx := range item.indices {
+			results[idx].InputTokens = input[i]
+			results[idx].OutputTokens = output[i]
+			results[idx].TotalTokens = total[i]
+			results[idx].TranscriptPath = path
+		}
+	}
+}
+
+func distributeInt(total, count int) []int {
+	if count <= 0 {
+		return nil
+	}
+	out := make([]int, count)
+	base := total / count
+	remainder := total % count
+	for i := range out {
+		out[i] = base
+		if i < remainder {
+			out[i]++
+		}
+	}
+	return out
+}
+
+type codexTranscriptTokenUsage struct {
+	InputTokens           int `json:"input_tokens,omitempty"`
+	CachedInputTokens     int `json:"cached_input_tokens,omitempty"`
+	OutputTokens          int `json:"output_tokens,omitempty"`
+	ReasoningOutputTokens int `json:"reasoning_output_tokens,omitempty"`
+	TotalTokens           int `json:"total_tokens,omitempty"`
+}
+
+func readCodexTranscriptTokenUsage(path string) (codexTranscriptTokenUsage, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return codexTranscriptTokenUsage{}, err
+	}
+	defer func() { _ = f.Close() }()
+
+	var latest codexTranscriptTokenUsage
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 64*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		usage, ok := parseCodexTranscriptTokenUsageLine([]byte(line))
+		if ok {
+			latest = usage
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return codexTranscriptTokenUsage{}, err
+	}
+	if latest.TotalTokens == 0 && latest.InputTokens == 0 && latest.OutputTokens == 0 {
+		return codexTranscriptTokenUsage{}, fmt.Errorf("no token_count event found in %s", path)
+	}
+	return latest, nil
+}
+
+func parseCodexTranscriptTokenUsageLine(line []byte) (codexTranscriptTokenUsage, bool) {
+	var event struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Type string `json:"type"`
+			Info struct {
+				TotalTokenUsage codexTranscriptTokenUsage `json:"total_token_usage"`
+			} `json:"info"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(line, &event); err != nil {
+		return codexTranscriptTokenUsage{}, false
+	}
+	if event.Type != "event_msg" || event.Payload.Type != "token_count" {
+		return codexTranscriptTokenUsage{}, false
+	}
+	usage := event.Payload.Info.TotalTokenUsage
+	if usage.TotalTokens == 0 && usage.InputTokens == 0 && usage.OutputTokens == 0 {
+		return codexTranscriptTokenUsage{}, false
+	}
+	return usage, true
 }
 
 func summarizeAgentEvalResults(results []agentEvalResult) []agentEvalSummary {

@@ -42,6 +42,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	var includeGo bool
 	var includePython bool
 	var includeRust bool
+	var includeCSharp bool
 	var includeTS bool
 	var includeElixir bool
 	var includeTerraform bool
@@ -49,12 +50,14 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	var includeShell bool
 	var includeTests bool
 	var dryRun bool
+	var progress bool
+	var incremental bool
 
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Build the repo graph index",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun)
+			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental)
 		},
 	}
 
@@ -63,6 +66,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&includeGo, "go", true, "Include Go sources")
 	cmd.Flags().BoolVar(&includePython, "python", false, "Include Python sources")
 	cmd.Flags().BoolVar(&includeRust, "rust", false, "Include Rust sources")
+	cmd.Flags().BoolVar(&includeCSharp, "csharp", false, "Include C# sources")
 	cmd.Flags().BoolVar(&includeTS, "typescript", true, "Include TypeScript sources")
 	cmd.Flags().BoolVar(&includeElixir, "elixir", false, "Include Elixir sources")
 	cmd.Flags().BoolVar(&includeTerraform, "terraform", false, "Include Terraform files as file/concept graph components")
@@ -70,6 +74,8 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&includeShell, "shell", false, "Include shell scripts as file/command graph components")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Build without writing to the index")
+	cmd.Flags().BoolVar(&progress, "progress", false, "Write coarse build progress logs to stderr")
+	cmd.Flags().BoolVar(&incremental, "incremental", false, "Skip rebuild when stored per-file state and current workspace have no delta")
 
 	return cmd
 }
@@ -188,7 +194,7 @@ func newIndexRepoAskCommand() *cobra.Command {
 	return cmd
 }
 
-func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includePython, includeRust, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun bool) error {
+func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental bool) error {
 	ctx := cmd.Context()
 	start := time.Now()
 
@@ -218,16 +224,59 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 	}
 	defer store.Close()
 
+	var delta repoindex.WorkspaceDelta
+	var deltaAvailable bool
+	if incremental {
+		if computed, err := store.ComputeDelta(ctx); err == nil {
+			delta = computed
+			deltaAvailable = true
+			meta, metaErr := store.GetMeta(ctx)
+			current := repoindex.ResolveGitSnapshot(ctx, absWorkspace)
+			freshness := repoindex.CompareIndexFreshness(meta, current)
+			if computed.Empty() && computed.Unchanged > 0 && freshness.Level == repoindex.FreshnessCurrent {
+				data := map[string]any{
+					"workspace":    absWorkspace,
+					"store_path":   store.Path(),
+					"delta":        computed,
+					"delta_counts": repoIndexDeltaCounts(computed),
+					"freshness":    freshness,
+					"duration_ms":  time.Since(start).Milliseconds(),
+					"dry_run":      dryRun,
+					"incremental":  true,
+					"skipped":      true,
+					"reason":       "file_state_current",
+				}
+				if metaErr == nil {
+					data["meta"] = meta
+				}
+				env := protocol.OK("index.repo.build", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				return protocol.Write(cmd.OutOrStdout(), env)
+			}
+		}
+	}
+
 	summaryProvider := &memorySummaryProvider{store: memStore, workspace: absWorkspace}
 	symbolSummaryProvider := &memorySymbolSummaryProvider{store: memStore, workspace: absWorkspace}
 	builder := repoindex.NewBuilder(store, absWorkspace)
-	result, err := builder.Build(ctx, repoindex.BuildOptions{
+	var progressFn func(repoindex.BuildProgress)
+	if progress {
+		progressFn = func(progress repoindex.BuildProgress) {
+			payload, err := json.Marshal(progress)
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "repoindex progress: phase=%s message=%s files=%d symbols=%d nodes=%d edges=%d\n", progress.Phase, progress.Message, progress.Result.Files, progress.Result.Symbols, progress.Result.Nodes, progress.Result.Edges)
+				return
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "repoindex progress: %s\n", payload)
+		}
+	}
+	buildOpts := repoindex.BuildOptions{
 		RepoRoot:              absWorkspace,
 		Patterns:              patterns,
 		IncludeTests:          includeTests,
 		IncludeGo:             includeGo,
 		IncludePython:         includePython,
 		IncludeRust:           includeRust,
+		IncludeCSharp:         includeCSharp,
 		IncludeTypescript:     includeTS,
 		IncludeElixir:         includeElixir,
 		IncludeTerraform:      includeTerraform,
@@ -236,7 +285,16 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		DryRun:                dryRun,
 		SummaryProvider:       summaryProvider,
 		SymbolSummaryProvider: symbolSummaryProvider,
-	})
+		Progress:              progressFn,
+	}
+	var result repoindex.BuildResult
+	var deltaBuild repoindex.BuildDeltaResult
+	if incremental && deltaAvailable {
+		deltaBuild, err = builder.BuildDelta(ctx, buildOpts, delta)
+		result = deltaBuild.Result
+	} else {
+		result, err = builder.Build(ctx, buildOpts)
+	}
 	if err != nil {
 		hint := "Verify repo index configuration, input files, and permissions."
 		data := protocol.ErrorData{Hint: hint}
@@ -247,6 +305,7 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		return fmt.Errorf("repo index build failed: %w", err)
 
 	}
+	meta, metaErr := store.GetMeta(ctx)
 
 	data := map[string]any{
 		"workspace":   absWorkspace,
@@ -254,6 +313,21 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		"result":      result,
 		"duration_ms": time.Since(start).Milliseconds(),
 		"dry_run":     dryRun,
+		"incremental": incremental,
+	}
+	if deltaAvailable {
+		data["delta"] = delta
+		data["delta_counts"] = repoIndexDeltaCounts(delta)
+		if incremental {
+			data["delta_build"] = map[string]any{
+				"mode":          deltaBuild.Mode,
+				"reason":        deltaBuild.Reason,
+				"full_fallback": deltaBuild.FullFallback,
+			}
+		}
+	}
+	if metaErr == nil && !dryRun {
+		data["meta"] = meta
 	}
 
 	env := protocol.OK("index.repo.build", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -306,9 +380,31 @@ func runIndexRepoStatus(cmd *cobra.Command, workspace string) error {
 		"meta":       meta,
 		"stats":      stats,
 	}
+	currentSnapshot := repoindex.ResolveGitSnapshot(ctx, absWorkspace)
+	freshness := repoindex.CompareIndexFreshness(meta, currentSnapshot)
+	if currentSnapshot.HeadSHA != "" {
+		data["current_head_sha"] = currentSnapshot.HeadSHA
+		data["index_matches_head"] = currentSnapshot.HeadSHA == meta.HeadSHA
+	}
+	data["current_worktree_dirty"] = currentSnapshot.WorktreeDirty
+	data["freshness"] = freshness
+	if delta, err := store.ComputeDelta(ctx); err == nil {
+		data["delta"] = delta
+		data["delta_counts"] = repoIndexDeltaCounts(delta)
+	}
 
 	env := protocol.OK("index.repo.status", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func repoIndexDeltaCounts(delta repoindex.WorkspaceDelta) map[string]int {
+	return map[string]int{
+		"added":     len(delta.Added),
+		"modified":  len(delta.Modified),
+		"deleted":   len(delta.Deleted),
+		"untracked": len(delta.Untracked),
+		"unchanged": delta.Unchanged,
+	}
 }
 
 func runIndexRepoSearch(cmd *cobra.Command, workspace, query string, limit int) error {

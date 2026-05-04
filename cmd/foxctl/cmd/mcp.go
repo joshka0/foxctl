@@ -1257,6 +1257,9 @@ func registerTools(s *server.MCPServer) {
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithArray("go_pattern", mcp.Description("Go package patterns to index (default: ./...)"), mcp.WithStringItems()),
 			mcp.WithBoolean("include_go", mcp.Description("Include Go sources (default: true)")),
+			mcp.WithBoolean("include_python", mcp.Description("Include Python sources (default: false)")),
+			mcp.WithBoolean("include_rust", mcp.Description("Include Rust sources (default: false)")),
+			mcp.WithBoolean("include_csharp", mcp.Description("Include C# sources (default: false)")),
 			mcp.WithBoolean("include_typescript", mcp.Description("Include TypeScript sources (default: true)")),
 			mcp.WithBoolean("include_elixir", mcp.Description("Include Elixir sources (default: false)")),
 			mcp.WithBoolean("include_terraform", mcp.Description("Include Terraform sources (default: false)")),
@@ -1264,6 +1267,8 @@ func registerTools(s *server.MCPServer) {
 			mcp.WithBoolean("include_shell", mcp.Description("Include shell scripts (default: false)")),
 			mcp.WithBoolean("include_tests", mcp.Description("Include test files (default: false)")),
 			mcp.WithBoolean("dry_run", mcp.Description("Build without writing to the index (default: false)")),
+			mcp.WithBoolean("progress", mcp.Description("Emit coarse build progress logs to stderr (default: false)")),
+			mcp.WithBoolean("incremental", mcp.Description("Skip rebuild when stored file state is current (default: false)")),
 		),
 		handleRepoIndexBuild,
 	)
@@ -1399,6 +1404,9 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 			mcp.WithDescription("Build or refresh the repo graph index."),
 			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
 			mcp.WithBoolean("include_go", mcp.Description("Include Go sources (default: true)")),
+			mcp.WithBoolean("include_python", mcp.Description("Include Python sources (default: false)")),
+			mcp.WithBoolean("include_rust", mcp.Description("Include Rust sources (default: false)")),
+			mcp.WithBoolean("include_csharp", mcp.Description("Include C# sources (default: false)")),
 			mcp.WithBoolean("include_typescript", mcp.Description("Include TypeScript sources (default: true)")),
 			mcp.WithBoolean("include_elixir", mcp.Description("Include Elixir sources (default: false)")),
 			mcp.WithBoolean("include_terraform", mcp.Description("Include Terraform sources (default: false)")),
@@ -1406,6 +1414,8 @@ func registerOptimizedRetrievalTools(s *server.MCPServer) {
 			mcp.WithBoolean("include_shell", mcp.Description("Include shell scripts (default: false)")),
 			mcp.WithBoolean("include_tests", mcp.Description("Include test files (default: false)")),
 			mcp.WithBoolean("dry_run", mcp.Description("Build without writing to the index (default: false)")),
+			mcp.WithBoolean("progress", mcp.Description("Emit coarse build progress logs to stderr (default: false)")),
+			mcp.WithBoolean("incremental", mcp.Description("Skip rebuild when stored file state is current (default: false)")),
 		),
 		handleRepoIndexBuild,
 	)
@@ -2018,11 +2028,12 @@ func runEnvelopeCommand(ctx context.Context, toolLabel string, run func(cmd *cob
 	}
 	cmd.SetContext(runCtx)
 
-	if err := run(cmd); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
+	runErr := run(cmd)
 
 	raw := strings.TrimSpace(out.String())
+	if raw == "" && runErr != nil {
+		return mcp.NewToolResultError(runErr.Error()), nil
+	}
 	if raw == "" {
 		return mcp.NewToolResultText("{}"), nil
 	}
@@ -2039,10 +2050,10 @@ func runEnvelopeCommand(ctx context.Context, toolLabel string, run func(cmd *cob
 		return truncateSkillOutput(ctx, raw, toolLabel)
 	}
 	if envelope.Status == "error" {
-		if envelope.Error.Message != "" {
-			return mcp.NewToolResultError(envelope.Error.Message), nil
-		}
-		return mcp.NewToolResultError(toolLabel + " command failed"), nil
+		return mcp.NewToolResultError(formatMCPEnvelopeError(envelope.Error.Message, envelope.Data, toolLabel+" command failed")), nil
+	}
+	if runErr != nil {
+		return mcp.NewToolResultError(runErr.Error()), nil
 	}
 
 	result, err := json.MarshalIndent(envelope.Data, "", "  ")
@@ -2930,7 +2941,7 @@ func renderSkillExecutionResult(ctx context.Context, skillName string, stdout, s
 			if msg == "" {
 				msg = skillName + " failed"
 			}
-			return mcp.NewToolResultError(msg), nil
+			return mcp.NewToolResultError(formatMCPEnvelopeError(msg, envelope.Data, skillName+" failed")), nil
 		}
 		result, err := json.MarshalIndent(envelope.Data, "", "  ")
 		if err != nil {
@@ -2962,6 +2973,46 @@ func decodeSkillExecutionEnvelope(stdout []byte) (skillExecutionEnvelope, bool) 
 		return envelope, false
 	}
 	return envelope, true
+}
+
+func formatMCPEnvelopeError(message string, data map[string]any, fallback string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = strings.TrimSpace(fallback)
+	}
+	if message == "" {
+		message = "foxctl command failed"
+	}
+
+	var parts []string
+	if hint := stringFromAnyMap(data, "hint"); hint != "" && !strings.Contains(message, hint) {
+		parts = append(parts, "hint: "+hint)
+	}
+	if detail := stringFromAnyMap(data, "detail"); detail != "" && !strings.Contains(message, detail) {
+		parts = append(parts, "detail: "+detail)
+	}
+	if len(parts) == 0 {
+		return message
+	}
+	return message + "\n" + strings.Join(parts, "\n")
+}
+
+func stringFromAnyMap(data map[string]any, key string) string {
+	if len(data) == 0 {
+		return ""
+	}
+	value, ok := data[key]
+	if !ok {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case fmt.Stringer:
+		return strings.TrimSpace(v.String())
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
 }
 
 func applyMCPPipeQuery(input any, query string) (any, error) {
@@ -3220,6 +3271,7 @@ func executeMCPPipeSource(ctx context.Context, toolName string, args map[string]
 				getBoolArg(args, "include_go", true),
 				getBoolArg(args, "include_python", false),
 				getBoolArg(args, "include_rust", false),
+				getBoolArg(args, "include_csharp", false),
 				getBoolArg(args, "include_typescript", true),
 				getBoolArg(args, "include_elixir", false),
 				getBoolArg(args, "include_terraform", false),
@@ -3227,6 +3279,8 @@ func executeMCPPipeSource(ctx context.Context, toolName string, args map[string]
 				getBoolArg(args, "include_shell", false),
 				getBoolArg(args, "include_tests", false),
 				getBoolArg(args, "dry_run", false),
+				getBoolArg(args, "progress", false),
+				getBoolArg(args, "incremental", false),
 			)
 		})
 	case "repo_index_status":
@@ -3423,11 +3477,12 @@ func runEnvelopeCommandForPipe(ctx context.Context, toolLabel string, run func(c
 	}
 	cmd.SetContext(runCtx)
 
-	if err := run(cmd); err != nil {
-		return nil, err
-	}
+	runErr := run(cmd)
 
 	raw := strings.TrimSpace(out.String())
+	if raw == "" && runErr != nil {
+		return nil, runErr
+	}
 	result := map[string]any{
 		"tool":   toolLabel,
 		"source": "foxctl_command",
@@ -3455,9 +3510,13 @@ func runEnvelopeCommandForPipe(ctx context.Context, toolLabel string, run func(c
 		}
 		if envelope.Status == "error" {
 			result["is_error"] = true
-			result["error"] = envelope.Error.Message
+			result["error"] = formatMCPEnvelopeError(envelope.Error.Message, envelope.Data, toolLabel+" command failed")
 		}
 		return result, nil
+	}
+
+	if runErr != nil {
+		return nil, runErr
 	}
 
 	return result, nil
@@ -4367,6 +4426,7 @@ func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	includeGo := getBoolArg(args, "include_go", true)
 	includePython := getBoolArg(args, "include_python", false)
 	includeRust := getBoolArg(args, "include_rust", false)
+	includeCSharp := getBoolArg(args, "include_csharp", false)
 	includeTS := getBoolArg(args, "include_typescript", true)
 	includeElixir := getBoolArg(args, "include_elixir", false)
 	includeTerraform := getBoolArg(args, "include_terraform", false)
@@ -4375,8 +4435,11 @@ func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	includeTests := getBoolArg(args, "include_tests", false)
 	dryRun := getBoolArg(args, "dry_run", false)
 
+	progress := getBoolArg(args, "progress", false)
+	incremental := getBoolArg(args, "incremental", false)
+
 	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun)
+		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, progress, incremental)
 	})
 }
 

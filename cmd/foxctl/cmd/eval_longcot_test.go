@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/joshka0/foxctl/internal/protocol"
 	"github.com/joshka0/foxctl/internal/rlm"
 	rlmenv "github.com/joshka0/foxctl/internal/rlm/env"
+	"github.com/joshka0/foxctl/internal/rlm/repl"
 	rlmruntime "github.com/joshka0/foxctl/internal/rlm/runtime"
 	"github.com/joshka0/foxctl/internal/tooling/evals/longcoteval"
 )
@@ -207,6 +209,83 @@ func TestResolveLongCoTConditionsBraidSingle(t *testing.T) {
 	wantTools := []string{rlmruntime.PythonREPLToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName}
 	if !stringSlicesEqual(got.AllowedTools, wantTools) {
 		t.Fatalf("allowed tools=%v want %v", got.AllowedTools, wantTools)
+	}
+}
+
+func TestResolveLongCoTConditionsLambdaReplKeepsScratchAndHelperTools(t *testing.T) {
+	t.Parallel()
+
+	conditions, err := resolveLongCoTConditions([]string{string(longcoteval.ConditionRLMLambdaReplSingle)}, longCoTConditionRuntime{
+		EphemeralSkills: true,
+		GeneralHelper:   true,
+	})
+	if err != nil {
+		t.Fatalf("resolveLongCoTConditions(lambda repl) error = %v", err)
+	}
+	got := conditions[0]
+	if got.ID != longcoteval.ConditionRLMLambdaReplSingle {
+		t.Fatalf("condition id=%q want %q", got.ID, longcoteval.ConditionRLMLambdaReplSingle)
+	}
+	if got.RLMPlanMode != "repl_lambda" {
+		t.Fatalf("plan mode=%q want repl_lambda", got.RLMPlanMode)
+	}
+	if got.MaxDepth != 2 || got.MaxSubcalls != 4 {
+		t.Fatalf("limits depth=%d subcalls=%d want 2/4", got.MaxDepth, got.MaxSubcalls)
+	}
+	wantTools := []string{rlmruntime.PythonREPLToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName, rlmruntime.EphemeralHelperSolveToolName}
+	if !stringSlicesEqual(got.AllowedTools, wantTools) {
+		t.Fatalf("allowed tools=%v want %v", got.AllowedTools, wantTools)
+	}
+}
+
+func TestResolveLongCoTConditionsLambdaAdaptiveKeepsScratchAndOptionalRecursion(t *testing.T) {
+	t.Parallel()
+
+	conditions, err := resolveLongCoTConditions([]string{string(longcoteval.ConditionRLMLambdaAdaptiveSingle)}, longCoTConditionRuntime{})
+	if err != nil {
+		t.Fatalf("resolveLongCoTConditions(lambda adaptive) error = %v", err)
+	}
+	got := conditions[0]
+	if got.ID != longcoteval.ConditionRLMLambdaAdaptiveSingle {
+		t.Fatalf("condition id=%q want %q", got.ID, longcoteval.ConditionRLMLambdaAdaptiveSingle)
+	}
+	if got.RLMPlanMode != "repl_lambda_adaptive" {
+		t.Fatalf("plan mode=%q want repl_lambda_adaptive", got.RLMPlanMode)
+	}
+	if got.MaxDepth != 2 || got.MaxSubcalls != 4 {
+		t.Fatalf("limits depth=%d subcalls=%d want 2/4", got.MaxDepth, got.MaxSubcalls)
+	}
+	wantTools := []string{rlmruntime.PythonREPLToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName}
+	if !stringSlicesEqual(got.AllowedTools, wantTools) {
+		t.Fatalf("allowed tools=%v want %v", got.AllowedTools, wantTools)
+	}
+}
+
+func TestResolveLongCoTConditionsLambdaThenBraidUsesHybridContract(t *testing.T) {
+	t.Parallel()
+
+	conditions, err := resolveLongCoTConditions([]string{string(longcoteval.ConditionRLMLambdaThenBraidSingle)}, longCoTConditionRuntime{
+		Timeout: 360 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("resolveLongCoTConditions(lambda then braid) error = %v", err)
+	}
+	got := conditions[0]
+	if got.ID != longcoteval.ConditionRLMLambdaThenBraidSingle {
+		t.Fatalf("condition id=%q want %q", got.ID, longcoteval.ConditionRLMLambdaThenBraidSingle)
+	}
+	if got.RLMPlanMode != "repl_lambda_then_braid" {
+		t.Fatalf("plan mode=%q want repl_lambda_then_braid", got.RLMPlanMode)
+	}
+	if got.MaxDepth != 2 || got.MaxSubcalls != 16 {
+		t.Fatalf("limits depth=%d subcalls=%d want 2/16", got.MaxDepth, got.MaxSubcalls)
+	}
+	wantTools := []string{rlmruntime.PythonREPLToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName}
+	if !stringSlicesEqual(got.AllowedTools, wantTools) {
+		t.Fatalf("allowed tools=%v want %v", got.AllowedTools, wantTools)
+	}
+	if fallback := longCoTBraidFallbackTimeoutMS(got.TimeoutMS); fallback != (720 * time.Second).Milliseconds() {
+		t.Fatalf("fallback timeout=%d want 720s", fallback)
 	}
 }
 
@@ -438,21 +517,31 @@ func TestEvalLongCoTLiveRequiresDataset(t *testing.T) {
 	}
 }
 
-func TestEvalLongCoTVerifyRequiresOfficialVerifier(t *testing.T) {
+func TestEvalLongCoTVerifyUsesDatasetAnswersForDatasetDryRun(t *testing.T) {
 	t.Setenv("FOXCTL_LONGCOT_REPO", "")
 	t.Setenv("LONGCOT_REPO", "")
 
 	dataset := filepath.Join("..", "..", "..", "testdata", "evals", "longcot", "fixture.jsonl")
 	env, err := runEvalLongCoTForTest(t, "--dry-run", "--dataset", dataset, "--verify")
-	if err == nil {
-		t.Fatal("expected verifier availability error")
+	if err != nil {
+		t.Fatalf("runEvalLongCoTForTest() error = %v", err)
 	}
-	if env.Status != envelope.StatusError {
-		t.Fatalf("status=%q want error", env.Status)
+	if env.Status != envelope.StatusOK {
+		t.Fatalf("status=%q want ok", env.Status)
 	}
-	if !strings.Contains(err.Error(), "official LongCoT verification failed") ||
-		!strings.Contains(err.Error(), "LongCoT verifier unavailable") {
-		t.Fatalf("error=%v", err)
+	data := decodeStringAnyMap(t, env.Data)
+	result := decodeLongCoTRunResult(t, data["result"])
+	verification := decodeStringAnyMap(t, result.Config["verification"])
+	if got := verification["verifier_name"]; got != "foxctl.dataset_answer" {
+		t.Fatalf("verifier_name=%v want foxctl.dataset_answer", got)
+	}
+	if len(result.Attempts) == 0 {
+		t.Fatal("expected dry-run attempts")
+	}
+	for _, attempt := range result.Attempts {
+		if attempt.VerifierStatus == "" {
+			t.Fatalf("attempt missing verifier status: %+v", attempt)
+		}
 	}
 }
 
@@ -618,6 +707,517 @@ func TestLongCoTREPLRunnerConfigRecursiveEnablesAsyncRecursionWhenQuestionAllows
 	}
 }
 
+func TestLongCoTREPLRunnerConfigLambdaReplUsesBoundedPhases(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:            longcoteval.ConditionRLMLambdaReplSingle,
+		Kind:          longcoteval.ConditionKindRLM,
+		RLMPlanMode:   "repl_lambda",
+		MaxDepth:      2,
+		MaxIterations: 8,
+		MaxSubcalls:   2,
+	}
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{PromptText: "Return solution = 42."},
+		condition,
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		true,
+		true,
+		false,
+		false,
+		false,
+	)
+	if !cfg.AsyncRecursion {
+		t.Fatal("expected lambda repl condition to keep async recursion available")
+	}
+	if cfg.RecursionPolicy != rlmruntime.RecursionPolicyRequired {
+		t.Fatalf("recursion policy=%q want required", cfg.RecursionPolicy)
+	}
+	if got, want := phaseNames(cfg.Phases), []string{"lambda_fanout", "lambda_wait", "lambda_verify", "lambda_final"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("lambda repl phases=%v want %v", got, want)
+	}
+	if got := cfg.Phases[0].RequiredTools; !stringSlicesEqual(got, []string{rlmruntime.RLMQueryToolName}) {
+		t.Fatalf("lambda_fanout required tools=%v want [%s]", got, rlmruntime.RLMQueryToolName)
+	}
+	if got := len(cfg.Phases[0].AutoExecuteToolCalls); got != 2 {
+		t.Fatalf("lambda_fanout auto calls=%d want 2", got)
+	}
+	if got := cfg.Phases[2].OutputKind; got != rlmruntime.REPLPhaseOutputKindREPLCode {
+		t.Fatalf("lambda_verify OutputKind=%q want %q", got, rlmruntime.REPLPhaseOutputKindREPLCode)
+	}
+	if !cfg.Phases[2].RequireVerifierArtifact {
+		t.Fatal("lambda_verify should require verifier artifact")
+	}
+	if !cfg.Phases[2].InjectVerifierPrelude || !cfg.Phases[2].RequireStructuredToolOutputOnly {
+		t.Fatalf("lambda_verify should use runtime-assisted verifier artifact helpers: inject=%v structured_only=%v", cfg.Phases[2].InjectVerifierPrelude, cfg.Phases[2].RequireStructuredToolOutputOnly)
+	}
+	if cfg.ToolErrorRepairMaxAttempts != 1 {
+		t.Fatalf("lambda repl should use one code repair attempt, got %d", cfg.ToolErrorRepairMaxAttempts)
+	}
+	if !cfg.Phases[2].DisableREPLCodeRepair || cfg.Phases[2].MaxTokens != 900 {
+		t.Fatalf("lambda_verify should be single-shot compact code: disable_repair=%v max_tokens=%d", cfg.Phases[2].DisableREPLCodeRepair, cfg.Phases[2].MaxTokens)
+	}
+	if !strings.Contains(cfg.Phases[2].Prompt, "accept_candidate") || !strings.Contains(cfg.Phases[2].Prompt, "rlm_candidates") {
+		t.Fatalf("lambda_verify prompt should expose candidate registry helpers:\n%s", cfg.Phases[2].Prompt)
+	}
+	if len(cfg.Phases[2].RequiredREPLCodeSubstrings) != 0 {
+		t.Fatalf("lambda_verify should rely on artifact validation, not brittle code substring gates: %v", cfg.Phases[2].RequiredREPLCodeSubstrings)
+	}
+	if cfg.Phases[2].VerifierRepairSubcalls != 0 {
+		t.Fatalf("lambda_verify repair subcalls=%d want 0", cfg.Phases[2].VerifierRepairSubcalls)
+	}
+	if !cfg.Phases[3].Final {
+		t.Fatal("lambda_final should be final")
+	}
+	if !cfg.Phases[3].ForwardVerifierArtifactAnswer {
+		t.Fatal("lambda_final should forward verified artifact answer")
+	}
+	if cfg.HelperFactory == nil {
+		t.Fatal("expected helper factory to remain available")
+	}
+}
+
+func TestLongCoTREPLRunnerConfigLambdaAdaptiveUsesSimpleOptionalPhases(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:            longcoteval.ConditionRLMLambdaAdaptiveSingle,
+		Kind:          longcoteval.ConditionKindRLM,
+		RLMPlanMode:   "repl_lambda_adaptive",
+		MaxDepth:      2,
+		MaxIterations: 8,
+		MaxSubcalls:   2,
+	}
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{PromptText: "Return solution = 42."},
+		condition,
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		false,
+		false,
+		false,
+		false,
+		false,
+	)
+	if !cfg.AsyncRecursion {
+		t.Fatal("expected adaptive lambda to keep async recursion available")
+	}
+	if cfg.RecursionPolicy != rlmruntime.RecursionPolicyOptional {
+		t.Fatalf("recursion policy=%q want optional", cfg.RecursionPolicy)
+	}
+	if cfg.LLM.RequireToolUse {
+		t.Fatal("adaptive lambda should be model-first and not require tool use")
+	}
+	if got, want := phaseNames(cfg.Phases), []string{"solve_direct", "tool_assist", "final"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("adaptive phases=%v want %v", got, want)
+	}
+	if cfg.Phases[0].Final {
+		t.Fatal("solve_direct should not be the final phase")
+	}
+	if cfg.Phases[0].MaxTokens != 0 {
+		t.Fatalf("solve_direct should inherit the condition token budget, got max_tokens=%d", cfg.Phases[0].MaxTokens)
+	}
+	if !cfg.Phases[2].Final {
+		t.Fatal("final should be the no-tool formatting phase")
+	}
+	if cfg.Phases[0].RequireVerifierArtifact {
+		t.Fatal("adaptive solve should not require verifier artifact")
+	}
+	if cfg.Phases[0].AutoExecuteRequiredTool {
+		t.Fatal("adaptive solve should not force tool execution")
+	}
+	if len(cfg.Phases[0].Tools) != 0 {
+		t.Fatalf("direct solve phase should not expose tools, got %v", cfg.Phases[0].Tools)
+	}
+	if !stringSlicesEqual(cfg.Phases[1].Tools, []string{rlmruntime.PythonREPLToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName}) {
+		t.Fatalf("adaptive tool-assist tools=%v", cfg.Phases[1].Tools)
+	}
+	if !stringSlicesEqual(cfg.Phases[1].RequiredTools, []string{rlmruntime.PythonREPLToolName}) {
+		t.Fatalf("tool-assist phase should require a REPL check, got %v", cfg.Phases[1].RequiredTools)
+	}
+	if cfg.Sandbox.Python.AllowPackageInstall {
+		t.Fatal("host Python sandbox should not install task packages")
+	}
+	if !cfg.Sandbox.SmolVMPython.AllowPackageInstall {
+		t.Fatal("adaptive lambda smolvm sandbox should allow policy-controlled package installs")
+	}
+	if cfg.Sandbox.SmolVMPython.Network {
+		t.Fatal("adaptive lambda smolvm sandbox should run without outbound network")
+	}
+	if cfg.Sandbox.SmolVMPython.CreateOnInit {
+		t.Fatal("adaptive lambda smolvm sandbox should require the prepared offline machine")
+	}
+	if cfg.Sandbox.SmolVMPython.MachineName != "foxctl-rlm-longcot-clean-offline" {
+		t.Fatalf("smolvm machine=%q want foxctl-rlm-longcot-clean-offline", cfg.Sandbox.SmolVMPython.MachineName)
+	}
+	if !strings.Contains(cfg.Sandbox.SmolVMPython.GuestWorkDir, "/runs/") {
+		t.Fatalf("smolvm guest workdir should be run-scoped, got %q", cfg.Sandbox.SmolVMPython.GuestWorkDir)
+	}
+	if cfg.Sandbox.SmolVMPython.SitePackagesDir != "/workspace/foxctl-rlm-python/site-packages" {
+		t.Fatalf("smolvm site packages dir=%q", cfg.Sandbox.SmolVMPython.SitePackagesDir)
+	}
+	if !stringSlicesContain(cfg.Sandbox.SmolVMPython.AllowedPackages, "python-chess") {
+		t.Fatalf("allowed packages should include python-chess, got %v", cfg.Sandbox.SmolVMPython.AllowedPackages)
+	}
+	if got := cfg.Sandbox.SmolVMPython.PackageAliases["chess"]; got != "python-chess" {
+		t.Fatalf("smolvm python package alias chess=%q want python-chess", got)
+	}
+	if got := cfg.Sandbox.SmolVMPython.PackageAliases["rdkit"]; got != "rdkit" {
+		t.Fatalf("smolvm python package alias rdkit=%q want rdkit", got)
+	}
+	if cfg.Sandbox.MachineMode != "serialized_shared" {
+		t.Fatalf("sandbox machine mode=%q want serialized_shared", cfg.Sandbox.MachineMode)
+	}
+	if cfg.Sandbox.EvalImageID != "python:3.12-alpine" {
+		t.Fatalf("sandbox eval image id=%q want python:3.12-alpine", cfg.Sandbox.EvalImageID)
+	}
+	if len(cfg.Sandbox.SmolVMPython.ForwardEnv) != 0 {
+		t.Fatalf("smolvm python sandbox should not forward API key env by default, got %v", cfg.Sandbox.SmolVMPython.ForwardEnv)
+	}
+	if !strings.Contains(cfg.Phases[1].Prompt, "packages") || !strings.Contains(cfg.Phases[1].Prompt, "python-chess") {
+		t.Fatalf("tool-assist prompt should teach package requests, got: %s", cfg.Phases[1].Prompt)
+	}
+	if !strings.Contains(cfg.Phases[1].Prompt, "official_prompt") {
+		t.Fatalf("tool-assist prompt should tell models to parse exact prompt variables, got: %s", cfg.Phases[1].Prompt)
+	}
+	if !cfg.Phases[1].RequireToolResultOK {
+		t.Fatal("tool-assist phase should require successful REPL execution")
+	}
+	if !cfg.Phases[1].AutoVerifyPriorSolutionLine {
+		t.Fatal("tool-assist phase should auto-verify a prior direct solution line")
+	}
+	if !cfg.Phases[1].IncludePriorAssistantText {
+		t.Fatal("tool-assist phase should include the prior candidate for repair")
+	}
+	if len(cfg.Phases[2].Tools) != 0 {
+		t.Fatalf("final phase should not expose tools, got %v", cfg.Phases[2].Tools)
+	}
+	if !cfg.Phases[2].BlockFinalOnFailedToolEvidence {
+		t.Fatal("adaptive final should block when prior structured tool evidence failed")
+	}
+	if !cfg.Phases[2].ForwardStructuredToolAnswer {
+		t.Fatal("adaptive final should forward the structured RLM_ANSWER_JSON sentinel when present")
+	}
+	if !cfg.Phases[2].ForwardExecutedStructuredToolAnswer {
+		t.Fatal("adaptive final should trust executed REPL structured answers after failed evidence is ruled out")
+	}
+	if !cfg.Phases[2].RequireStructuredToolAnswer {
+		t.Fatal("adaptive final should require a structured sentinel after the required tool-assist phase")
+	}
+	if cfg.Phases[2].ForwardPriorSolutionLine {
+		t.Fatal("adaptive final should not forward stale free-form prior solution lines after tool-assist runs")
+	}
+	solvePrompt := cfg.Phases[0].Prompt
+	if !strings.Contains(solvePrompt, "without calling tools") {
+		t.Fatalf("adaptive solve prompt should allow direct answers, got %q", solvePrompt)
+	}
+	toolPrompt := cfg.Phases[1].Prompt
+	if !strings.Contains(toolPrompt, "RLM_ANSWER_JSON=") {
+		t.Fatalf("adaptive solve prompt should document optional structured answer sentinel, got %q", solvePrompt)
+	}
+	if !strings.Contains(toolPrompt, "RLM_CHECK_JSON={\"pass\":false") {
+		t.Fatalf("adaptive solve prompt should document failed deterministic checks, got %q", solvePrompt)
+	}
+}
+
+func TestLongCoTREPLRunnerConfigSmolVMMachineEnvOverride(t *testing.T) {
+	t.Setenv("FOXCTL_LONGCOT_SMOLVM_MACHINE", "foxctl-rlm-longcot-glibc-builder")
+	t.Setenv("FOXCTL_LONGCOT_SMOLVM_IMAGE", "python:3.12-slim")
+	t.Setenv("FOXCTL_LONGCOT_SMOLVM_IMAGE_ID", "foxctl-longcot-python-2026-05-04")
+	t.Setenv("FOXCTL_LONGCOT_SMOLVM_MACHINE_MODE", "per_attempt")
+
+	condition := longcoteval.Condition{
+		ID:            longcoteval.ConditionRLMLambdaAdaptiveSingle,
+		Kind:          longcoteval.ConditionKindRLM,
+		RLMPlanMode:   "repl_lambda_adaptive",
+		MaxDepth:      2,
+		MaxIterations: 8,
+		MaxSubcalls:   2,
+	}
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{PromptText: "Return solution = 42."},
+		condition,
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		false,
+		false,
+		false,
+		false,
+		false,
+	)
+	if cfg.Sandbox.SmolVMPython.MachineName != "foxctl-rlm-longcot-glibc-builder" {
+		t.Fatalf("smolvm machine=%q", cfg.Sandbox.SmolVMPython.MachineName)
+	}
+	if cfg.Sandbox.SmolVMPython.Image != "python:3.12-slim" {
+		t.Fatalf("smolvm image=%q", cfg.Sandbox.SmolVMPython.Image)
+	}
+	if cfg.Sandbox.EvalImageID != "foxctl-longcot-python-2026-05-04" {
+		t.Fatalf("sandbox eval image id=%q", cfg.Sandbox.EvalImageID)
+	}
+	if cfg.Sandbox.MachineMode != "per_attempt" {
+		t.Fatalf("sandbox machine mode=%q", cfg.Sandbox.MachineMode)
+	}
+}
+
+func TestLongCoTREPLRunnerConfigSmolVMRecordsCapabilityProbe(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:            longcoteval.ConditionRLMLambdaAdaptiveSingle,
+		Kind:          longcoteval.ConditionKindRLM,
+		RLMPlanMode:   "repl_lambda_adaptive",
+		MaxDepth:      2,
+		MaxIterations: 8,
+		MaxSubcalls:   2,
+	}
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{PromptText: "Return solution = 42."},
+		condition,
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindSmolVMPython,
+		false,
+		false,
+		false,
+		false,
+		false,
+	)
+	if !stringSlicesContain(cfg.Sandbox.CapabilityProbe, "chess") || !stringSlicesContain(cfg.Sandbox.CapabilityProbe, "rdkit.Chem") {
+		t.Fatalf("sandbox capability probe missing expected modules: %v", cfg.Sandbox.CapabilityProbe)
+	}
+	if cfg.Sandbox.MachineMode != "serialized_shared" {
+		t.Fatalf("sandbox machine mode=%q want serialized_shared", cfg.Sandbox.MachineMode)
+	}
+}
+
+func TestLongCoTREPLRunnerConfigLambdaAdaptiveLongInputForcesFanoutAndOfficialPromptVerifier(t *testing.T) {
+	t.Parallel()
+
+	condition := longcoteval.Condition{
+		ID:            longcoteval.ConditionRLMLambdaAdaptiveSingle,
+		Kind:          longcoteval.ConditionKindRLM,
+		RLMPlanMode:   "repl_lambda_adaptive",
+		MaxDepth:      2,
+		MaxIterations: 8,
+		MaxSubcalls:   3,
+	}
+	longPrompt := "Return solution = <value>.\n" + strings.Repeat("node_1 depends on node_2.\n", 90)
+	cfg := longCoTREPLRunnerConfig(
+		longcoteval.Question{PromptText: longPrompt},
+		condition,
+		longCoTLiveTarget{Provider: "openai", Model: "gpt-5"},
+		longCoTHelperRuntime{Target: longCoTLiveTarget{Provider: "openai", Model: "gpt-5"}},
+		30*time.Second,
+		8,
+		t.TempDir(),
+		rlmruntime.SandboxKindPython,
+		false,
+		false,
+		false,
+		false,
+		false,
+	)
+	if cfg.RecursionPolicy != rlmruntime.RecursionPolicyOptional {
+		t.Fatalf("recursion policy=%q want optional", cfg.RecursionPolicy)
+	}
+	if got, want := phaseNames(cfg.Phases), []string{"prompt_packet", "long_fanout", "long_wait", "long_tool_verify", "final"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("adaptive long phases=%v want %v", got, want)
+	}
+	if !cfg.Phases[0].AutoExecuteRequiredTool || !stringSlicesEqual(cfg.Phases[0].RequiredTools, []string{rlmruntime.PythonREPLToolName}) {
+		t.Fatalf("prompt_packet should auto-execute python_repl, required=%v auto=%v", cfg.Phases[0].RequiredTools, cfg.Phases[0].AutoExecuteRequiredTool)
+	}
+	if !stringSlicesEqual(cfg.Phases[0].RequiredToolOutputSubstrings, []string{"PROMPT_PACKET_JSON="}) {
+		t.Fatalf("prompt_packet required output substrings=%v", cfg.Phases[0].RequiredToolOutputSubstrings)
+	}
+	if !cfg.Phases[1].AutoExecuteRequiredTool || !stringSlicesEqual(cfg.Phases[1].RequiredTools, []string{rlmruntime.RLMQueryToolName}) {
+		t.Fatalf("long_fanout should auto-execute rlm_query, required=%v auto=%v", cfg.Phases[1].RequiredTools, cfg.Phases[1].AutoExecuteRequiredTool)
+	}
+	if len(cfg.Phases[1].AutoExecuteToolCalls) != 3 {
+		t.Fatalf("long_fanout calls=%d want 3", len(cfg.Phases[1].AutoExecuteToolCalls))
+	}
+	if !strings.Contains(string(cfg.Phases[1].AutoExecuteToolCalls[0].Args), "Parser child") {
+		t.Fatalf("long_fanout first child should be parser role, args=%s", string(cfg.Phases[1].AutoExecuteToolCalls[0].Args))
+	}
+	verify := cfg.Phases[3]
+	if verify.OutputKind != rlmruntime.REPLPhaseOutputKindREPLCode {
+		t.Fatalf("long_tool_verify output kind=%q want repl_code", verify.OutputKind)
+	}
+	if len(verify.RequiredREPLCodeSubstrings) != 0 {
+		t.Fatalf("long_tool_verify should not require brittle code substrings=%v", verify.RequiredREPLCodeSubstrings)
+	}
+	if len(verify.RequiredToolOutputSubstrings) != 0 || !verify.RequireStructuredToolOutputOnly {
+		t.Fatalf("long_tool_verify should rely on strict structured output, substrings=%v strict=%v", verify.RequiredToolOutputSubstrings, verify.RequireStructuredToolOutputOnly)
+	}
+	if !verify.InjectVerifierPrelude {
+		t.Fatalf("long_tool_verify should inject verifier prelude")
+	}
+	if !verify.AllowPartialPseudoToolCallCode {
+		t.Fatalf("long_tool_verify should allow phase-scoped pseudo tool-call code salvage")
+	}
+	if len(verify.AllowedREPLImports) != 0 {
+		t.Fatalf("python long_tool_verify should not allow third-party imports by default: %v", verify.AllowedREPLImports)
+	}
+	if !strings.Contains(verify.Prompt, "accept(answer") || !strings.Contains(verify.Prompt, "reject(reason)") {
+		t.Fatalf("long_tool_verify prompt should expose accept/reject helpers:\n%s", verify.Prompt)
+	}
+	if !cfg.Phases[4].ForwardExecutedStructuredToolAnswer || !cfg.Phases[4].RequireStructuredToolAnswer {
+		t.Fatalf("final should forward executed structured tool answer: forward=%v require=%v", cfg.Phases[4].ForwardExecutedStructuredToolAnswer, cfg.Phases[4].RequireStructuredToolAnswer)
+	}
+}
+
+func TestLongCoTVerifierAllowedImportsForSmolVM(t *testing.T) {
+	t.Parallel()
+
+	got := longCoTVerifierAllowedImports(rlmruntime.SandboxKindSmolVMPython)
+	want := []string{"chess", "rdkit", "sympy", "networkx", "numpy"}
+	if !stringSlicesEqual(got, want) {
+		t.Fatalf("smolvm verifier allowed imports=%v want %v", got, want)
+	}
+	if got := longCoTVerifierAllowedImports(rlmruntime.SandboxKindPython); len(got) != 0 {
+		t.Fatalf("plain python verifier allowed imports=%v want empty", got)
+	}
+}
+
+func TestLongCoTChildSandboxConfigIsolatesScratchWorkdir(t *testing.T) {
+	t.Parallel()
+
+	cfg := rlmruntime.SandboxConfig{
+		Kind: rlmruntime.SandboxKindSmolVMPython,
+		Python: repl.Options{
+			WorkDir: "/tmp/foxctl-longcot-sandboxes/backtracking",
+		},
+		SmolVMPython: repl.SmolVMPythonOptions{
+			GuestWorkDir:    "/workspace/foxctl-rlm-python/runs/backtracking",
+			SitePackagesDir: "/workspace/foxctl-rlm-python/site-packages",
+		},
+	}
+	childTask := rlm.Task{
+		AgentID:         "eval/longcot/rlm_lambda_adaptive_single/root-2",
+		OutputNamespace: "runs/attempt/nodes/root-2",
+	}
+
+	got := longCoTChildSandboxConfig(cfg, childTask)
+	if got.Python.WorkDir == cfg.Python.WorkDir || !strings.HasSuffix(got.Python.WorkDir, filepath.Join("children", "root-2")) {
+		t.Fatalf("child python workdir=%q parent=%q", got.Python.WorkDir, cfg.Python.WorkDir)
+	}
+	if got.SmolVMPython.GuestWorkDir == cfg.SmolVMPython.GuestWorkDir || !strings.HasSuffix(got.SmolVMPython.GuestWorkDir, "/children/root-2") {
+		t.Fatalf("child smolvm guest workdir=%q parent=%q", got.SmolVMPython.GuestWorkDir, cfg.SmolVMPython.GuestWorkDir)
+	}
+	if got.SmolVMPython.SitePackagesDir != cfg.SmolVMPython.SitePackagesDir {
+		t.Fatalf("child should share package cache, got site-packages=%q", got.SmolVMPython.SitePackagesDir)
+	}
+}
+
+func TestLongCoTDefaultContextREPLCodeBuildsCompactPacket(t *testing.T) {
+	t.Parallel()
+
+	code := longCoTDefaultContextREPLCode(rlmruntime.SandboxKindPython)
+	for _, want := range []string{"official_prompt", "PROMPT_PACKET_JSON=", "answer_format", "counts", "runtime_capabilities", "exact_data_sections"} {
+		if !strings.Contains(code, want) {
+			t.Fatalf("default context code missing %q:\n%s", want, code)
+		}
+	}
+	if strings.Contains(code, "print(official_prompt)") {
+		t.Fatalf("default context code should not dump the full official prompt:\n%s", code)
+	}
+}
+
+func TestLongCoTPromptPacketIncludesSmolVMCapabilities(t *testing.T) {
+	t.Parallel()
+
+	code := longCoTPromptPacketREPLCode(rlmruntime.SandboxKindSmolVMPython)
+	for _, want := range []string{"runtime_capabilities", "official_prompt_rule", "importlib.util.find_spec", "'available'", "chess", "rdkit.Chem", "sympy", "networkx", "numpy"} {
+		if !strings.Contains(code, want) {
+			t.Fatalf("smolvm prompt packet code missing %q:\n%s", want, code)
+		}
+	}
+
+	line := longCoTCapabilityPromptLine(rlmruntime.SandboxKindSmolVMPython)
+	for _, want := range []string{"capability packet", "chess", "rdkit.Chem", "sympy"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("capability prompt line missing %q: %s", want, line)
+		}
+	}
+}
+
+func TestLongCoTApplyAttemptSandboxWorkDirSeparatesAttempts(t *testing.T) {
+	t.Parallel()
+
+	cfg := rlmruntime.REPLRunnerConfig{
+		Sandbox: rlmruntime.SandboxConfig{
+			Python:       repl.Options{WorkDir: "/tmp/foxctl-longcot-sandboxes/q-cond"},
+			SmolVMPython: repl.SmolVMPythonOptions{GuestWorkDir: "/workspace/foxctl-rlm-python/runs/q-cond"},
+		},
+	}
+	longCoTApplyAttemptSandboxWorkDir(&cfg, "attempt-abc/with spaces")
+	if !strings.HasSuffix(cfg.Sandbox.Python.WorkDir, filepath.Join("q-cond", "attempt-abc-with-spaces")) {
+		t.Fatalf("python workdir=%q", cfg.Sandbox.Python.WorkDir)
+	}
+	if !strings.HasSuffix(cfg.Sandbox.SmolVMPython.GuestWorkDir, "/q-cond/attempt-abc-with-spaces") {
+		t.Fatalf("smolvm guest workdir=%q", cfg.Sandbox.SmolVMPython.GuestWorkDir)
+	}
+}
+
+func TestLongCoTDatasetAnswerVerifier(t *testing.T) {
+	t.Parallel()
+
+	attempts := []longcoteval.Attempt{
+		{QuestionID: "math", Status: longcoteval.AttemptStatusOK, ResponseText: "solution = 42"},
+		{QuestionID: "logic", Status: longcoteval.AttemptStatusOK, ResponseText: "solution = move A to B"},
+		{QuestionID: "bad", Status: longcoteval.AttemptStatusOK, ResponseText: "solution = 41"},
+		{QuestionID: "format", Status: longcoteval.AttemptStatusOK, ResponseText: "the answer is 42"},
+	}
+	questions := []longcoteval.Question{
+		{ID: "math", Answer: `{"solution":42}`},
+		{ID: "logic", Answer: `{"solution":"move A to B"}`},
+		{ID: "bad", Answer: `{"solution":42}`},
+		{ID: "format", Answer: `{"solution":42}`},
+	}
+
+	verified, result := verifyLongCoTAttemptsAgainstDatasetAnswers(attempts, questions)
+	if result.VerifierName != "foxctl.dataset_answer" {
+		t.Fatalf("verifier name=%q", result.VerifierName)
+	}
+	if got := result.Counts["correct"]; got != 2 {
+		t.Fatalf("correct count=%d rows=%+v", got, result.Rows)
+	}
+	if got := result.Counts["incorrect"]; got != 1 {
+		t.Fatalf("incorrect count=%d rows=%+v", got, result.Rows)
+	}
+	if got := result.Counts["wrong_formatting"]; got != 1 {
+		t.Fatalf("wrong formatting count=%d rows=%+v", got, result.Rows)
+	}
+	if !verified[0].Correct || verified[0].VerifierStatus != longcoteval.VerifierStatusCorrect {
+		t.Fatalf("math attempt not correct: %+v", verified[0])
+	}
+	if !verified[1].Correct || verified[1].NormalizedAnswer != "move A to B" {
+		t.Fatalf("logic attempt not correct: %+v", verified[1])
+	}
+	if verified[2].Correct || verified[2].VerifierStatus != longcoteval.VerifierStatusIncorrect {
+		t.Fatalf("bad attempt should be incorrect: %+v", verified[2])
+	}
+	if !verified[3].WrongFormatting || verified[3].VerifierStatus != longcoteval.VerifierStatusWrongFormatting {
+		t.Fatalf("format attempt should be wrong_formatting: %+v", verified[3])
+	}
+}
+
 func TestLongCoTREPLRunnerConfigUsesQuestionRequiredSubcallRules(t *testing.T) {
 	t.Parallel()
 
@@ -683,6 +1283,9 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	if got := phases[planIdx].MaxGraphNodes; got != 12 {
 		t.Fatalf("graph_plan MaxGraphNodes=%d want 12", got)
 	}
+	if got := phases[planIdx].MaxTokens; got != longCoTBraidGraphPlanMaxTokens {
+		t.Fatalf("graph_plan MaxTokens=%d want %d", got, longCoTBraidGraphPlanMaxTokens)
+	}
 	if got := phases[planIdx].BraidGraphPolicy; got != rlmruntime.BraidGraphPolicyLongCoTController {
 		t.Fatalf("graph_plan BraidGraphPolicy=%q want %q", got, rlmruntime.BraidGraphPolicyLongCoTController)
 	}
@@ -700,6 +1303,9 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	if got := phases[fanoutIdx].BraidGraphPolicy; got != rlmruntime.BraidGraphPolicyLongCoTController {
 		t.Fatalf("graph_fanout BraidGraphPolicy=%q want %q", got, rlmruntime.BraidGraphPolicyLongCoTController)
 	}
+	if got := phases[fanoutIdx].MaxTokens; got != longCoTBraidGraphFanoutMaxTokens {
+		t.Fatalf("graph_fanout MaxTokens=%d want %d", got, longCoTBraidGraphFanoutMaxTokens)
+	}
 	if !phases[fanoutIdx].RequireScaffoldContract {
 		t.Fatal("graph_fanout RequireScaffoldContract=false want true")
 	}
@@ -711,6 +1317,9 @@ func TestLongCoTBraidSolvePhases(t *testing.T) {
 	}
 	if phases[fanoutIdx].BraidRepairAttempts != 2 {
 		t.Fatalf("graph_fanout BraidRepairAttempts=%d want 2", phases[fanoutIdx].BraidRepairAttempts)
+	}
+	if got := phases[len(phases)-1].MaxTokens; got != longCoTBraidFinalMaxTokens {
+		t.Fatalf("final MaxTokens=%d want %d", got, longCoTBraidFinalMaxTokens)
 	}
 }
 
@@ -943,7 +1552,7 @@ func TestLongCoTChildPhasesForCycleSolveUsesWitnessContract(t *testing.T) {
 	if strings.Contains(phases[2].Prompt, "helper output") {
 		t.Fatalf("cycle final prompt should not reference helper output:\n%s", phases[2].Prompt)
 	}
-	if !strings.Contains(phases[2].Prompt, "under 800 characters") {
+	if !strings.Contains(phases[2].Prompt, "under 600 characters") {
 		t.Fatalf("cycle final prompt missing compact output cap:\n%s", phases[2].Prompt)
 	}
 	if !strings.Contains(phases[2].Prompt, "pass=true|pass=false") {
@@ -981,6 +1590,23 @@ func TestLongCoTChildVerifyPhasesSkipGeneralHelper(t *testing.T) {
 		if len(phase.AutoExecuteToolCalls) > 0 && phase.AutoExecuteToolCalls[0].Tool == rlmruntime.EphemeralHelperSolveToolName {
 			t.Fatalf("verify should not auto-run helper phase: %+v", phase)
 		}
+	}
+}
+
+func TestInflateLongCoTBraidChildPhaseBudgets(t *testing.T) {
+	t.Parallel()
+
+	phases := inflateLongCoTBraidChildPhaseBudgets(longCoTChildPhasesForTask(rlm.Task{
+		Prompt: "BRAID node n_verify (verify)\nDependency summaries:\n- n_solve: status: solved",
+	}, rlmruntime.SandboxKindPython, false))
+	if got := phases[0].MaxTokens; got != longCoTBraidChildVerifyTokens {
+		t.Fatalf("verify scratch max tokens=%d want %d", got, longCoTBraidChildVerifyTokens)
+	}
+	if got := phases[0].FilterREPLCodeMaxTokens; got != longCoTBraidChildFilterTokens {
+		t.Fatalf("verify scratch filter max tokens=%d want %d", got, longCoTBraidChildFilterTokens)
+	}
+	if got := phases[1].MaxTokens; got != longCoTBraidChildMaxTokens {
+		t.Fatalf("verify final max tokens=%d want %d", got, longCoTBraidChildMaxTokens)
 	}
 }
 
@@ -2007,4 +2633,13 @@ func stringSlicesEqual(a []string, b []string) bool {
 		}
 	}
 	return true
+}
+
+func stringSlicesContain(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

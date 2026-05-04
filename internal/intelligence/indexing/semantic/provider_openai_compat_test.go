@@ -3,11 +3,14 @@ package semantic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/joshka0/foxctl/internal/platform/config"
 )
@@ -63,6 +66,63 @@ func TestOpenAICompatProviderEmbedBatch(t *testing.T) {
 	}
 	if got := vecs[0][0]; got != 0.1 {
 		t.Fatalf("first vector first value=%f", got)
+	}
+}
+
+func TestOpenAICompatProviderConnectionRefusedIsActionable(t *testing.T) {
+	provider, err := NewOpenAICompatProvider(OpenAICompatConfig{
+		Model:   "text-embedding-embeddinggemma-300m-qat",
+		BaseURL: "http://127.0.0.1:1/v1",
+		Timeout: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAICompatProvider: %v", err)
+	}
+	_, err = provider.Embed(context.Background(), "test")
+	if err == nil {
+		t.Fatal("expected embedding request error")
+	}
+	var svcErr *EmbeddingServiceError
+	if !errors.As(err, &svcErr) {
+		t.Fatalf("error type=%T want EmbeddingServiceError: %v", err, err)
+	}
+	if svcErr.Kind != "connection_refused" {
+		t.Fatalf("kind=%q want connection_refused", svcErr.Kind)
+	}
+	if !strings.Contains(err.Error(), "start LM Studio") {
+		t.Fatalf("error=%q missing LM Studio hint", err.Error())
+	}
+}
+
+func TestOpenAICompatProviderStatusErrorIsActionable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "model not found"},
+		})
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenAICompatProvider(OpenAICompatConfig{
+		Model:   "missing-model",
+		BaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAICompatProvider: %v", err)
+	}
+	_, err = provider.Embed(context.Background(), "test")
+	if err == nil {
+		t.Fatal("expected embedding status error")
+	}
+	var svcErr *EmbeddingServiceError
+	if !errors.As(err, &svcErr) {
+		t.Fatalf("error type=%T want EmbeddingServiceError: %v", err, err)
+	}
+	if svcErr.Kind != "http_404" {
+		t.Fatalf("kind=%q want http_404", svcErr.Kind)
+	}
+	if !strings.Contains(err.Error(), "/v1/embeddings") {
+		t.Fatalf("error=%q missing endpoint hint", err.Error())
 	}
 }
 

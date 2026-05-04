@@ -23,7 +23,6 @@ import (
 const testHandshakeTimeout = 10 * time.Second
 
 func TestManagerInvokeAuthSuccess(t *testing.T) {
-	t.Parallel()
 	tmp := t.TempDir()
 	buildPluginBinary(t, tmp, "auth-hmac")
 
@@ -62,7 +61,6 @@ func TestManagerInvokeAuthSuccess(t *testing.T) {
 }
 
 func TestManagerInvokeAuthPluginError(t *testing.T) {
-	t.Parallel()
 	tmp := t.TempDir()
 	buildPluginBinary(t, tmp, "auth-hmac")
 
@@ -96,7 +94,6 @@ func TestManagerInvokeAuthPluginError(t *testing.T) {
 }
 
 func TestManagerInvokeAuthTimeout(t *testing.T) {
-	t.Parallel()
 	tmp := t.TempDir()
 	buildPluginBinary(t, tmp, "auth-hmac")
 
@@ -130,7 +127,6 @@ func TestManagerInvokeAuthTimeout(t *testing.T) {
 }
 
 func TestManagerInvokePagination(t *testing.T) {
-	t.Parallel()
 	tmp := t.TempDir()
 	buildPluginBinary(t, tmp, "paging-custom")
 

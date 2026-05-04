@@ -38,6 +38,7 @@ func TestReadInboxPreTool(t *testing.T) {
 
 func TestReadInboxPostToolEnqueuesContext(t *testing.T) {
 	storageRoot := t.TempDir()
+	workspaceRoot := t.TempDir()
 	deps := Dependencies{
 		StorageRoot: storageRoot,
 		RunSkill: func(ctx context.Context, skill string, input any, workspace string, out any) error {
@@ -50,7 +51,7 @@ func TestReadInboxPostToolEnqueuesContext(t *testing.T) {
 		},
 	}
 	response, err := ReadInboxPostTool(context.Background(), deps, PostToolRequest{
-		Workspace: "/tmp/workspace",
+		Workspace: workspaceRoot,
 	})
 	if err != nil {
 		t.Fatalf("ReadInboxPostTool: %v", err)
@@ -64,7 +65,7 @@ func TestReadInboxPostToolEnqueuesContext(t *testing.T) {
 	}
 	defer store.Close()
 	result, err := store.Drain(context.Background(), contextbuffer.DrainParams{
-		WorkspaceID:  "/tmp/workspace",
+		WorkspaceID:  workspaceRoot,
 		SessionID:    "sid-123",
 		Sources:      []string{"Overseer Messages"},
 		Limit:        10,

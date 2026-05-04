@@ -183,6 +183,7 @@ func TestOperationForRLMEventNodeLifecycleMappings(t *testing.T) {
 		{eventType: EventTypeNodeCompleted, want: OpRLMNodeCompleted},
 		{eventType: EventTypeNodeFailed, want: OpRLMNodeFailed},
 		{eventType: EventTypeNodeCanceled, want: OpRLMNodeCanceled},
+		{eventType: EventTypeContract, want: OpRLMContract},
 	}
 	for _, tc := range testCases {
 		tc := tc
@@ -192,6 +193,75 @@ func TestOperationForRLMEventNodeLifecycleMappings(t *testing.T) {
 				t.Fatalf("operationForRLMEvent(%q) = %q, want %q", tc.eventType, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestObservabilityTelemetrySinkIncludesContractFields(t *testing.T) {
+	obsDir := t.TempDir()
+	observability.SetObsDirForTesting(obsDir)
+	observability.SetSamplerForTesting(observability.SampleAll{})
+	t.Cleanup(func() {
+		observability.SetObsDirForTesting("")
+		observability.SetSamplerForTesting(nil)
+	})
+
+	sink := ObservabilityTelemetrySink{
+		SessionID:   "session-contract",
+		AgentID:     "agent-root",
+		WorkspaceID: "workspace-2",
+		Command:     "test.rlm",
+	}
+	sink.EmitRLMEvent(context.Background(), Event{
+		Seq:  11,
+		Type: EventTypeContract,
+		Contract: &ContractEvent{
+			Boundary:            "tool_input",
+			Phase:               "lambda_verify",
+			Tool:                RLMQueryToolName,
+			Status:              "repaired",
+			IssueKind:           "numeric_string",
+			IssuePath:           "$.max_iterations",
+			RepairRule:          "parse_int_string",
+			RevalidateOK:        true,
+			Message:             "normalized",
+			CandidateSolved:     2,
+			CandidateRegistered: 1,
+			ToolInputBytes:      64,
+			RepairedInputBytes:  48,
+		},
+	})
+
+	records := readWideEventRecords(t, obsDir)
+	if len(records) != 1 {
+		t.Fatalf("records=%d want 1", len(records))
+	}
+	record := records[0]
+	if record.Operation != OpRLMContract {
+		t.Fatalf("operation=%q want %q", record.Operation, OpRLMContract)
+	}
+	if got := stringFromData(record.Data, "boundary"); got != "tool_input" {
+		t.Fatalf("boundary=%q", got)
+	}
+	if got := stringFromData(record.Data, "tool"); got != RLMQueryToolName {
+		t.Fatalf("tool=%q", got)
+	}
+	if got := stringFromData(record.Data, "status"); got != "repaired" {
+		t.Fatalf("status=%q", got)
+	}
+	if got := stringFromData(record.Data, "repair_rule"); got != "parse_int_string" {
+		t.Fatalf("repair_rule=%q", got)
+	}
+	if got := intFromData(record.Data, "candidate_registered"); got != 1 {
+		t.Fatalf("candidate_registered=%d", got)
+	}
+	if got := intFromData(record.Data, "tool_input_bytes"); got != 64 {
+		t.Fatalf("tool_input_bytes=%d", got)
+	}
+	if _, ok := record.Data["input"]; ok {
+		t.Fatalf("raw input leaked into contract telemetry: %#v", record.Data)
+	}
+	if _, ok := record.Data["args"]; ok {
+		t.Fatalf("raw args leaked into contract telemetry: %#v", record.Data)
 	}
 }
 

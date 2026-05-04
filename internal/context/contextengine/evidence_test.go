@@ -191,9 +191,12 @@ func TestEvidenceLane_IsValid(t *testing.T) {
 func TestEvidenceTelemetry_RoundTrip(t *testing.T) {
 	t.Parallel()
 	orig := EvidenceTelemetry{
-		DurationMs: 150,
-		TokensUsed: 500,
-		LanesFused: 3,
+		DurationMs:          150,
+		TokensUsed:          500,
+		LanesFused:          3,
+		RawContextChars:     900,
+		EmittedContextChars: 320,
+		OmittedContextItems: 2,
 	}
 
 	data, err := json.Marshal(orig)
@@ -214,6 +217,15 @@ func TestEvidenceTelemetry_RoundTrip(t *testing.T) {
 	}
 	if got.LanesFused != orig.LanesFused {
 		t.Errorf("LanesFused: got %d, want %d", got.LanesFused, orig.LanesFused)
+	}
+	if got.RawContextChars != orig.RawContextChars {
+		t.Errorf("RawContextChars: got %d, want %d", got.RawContextChars, orig.RawContextChars)
+	}
+	if got.EmittedContextChars != orig.EmittedContextChars {
+		t.Errorf("EmittedContextChars: got %d, want %d", got.EmittedContextChars, orig.EmittedContextChars)
+	}
+	if got.OmittedContextItems != orig.OmittedContextItems {
+		t.Errorf("OmittedContextItems: got %d, want %d", got.OmittedContextItems, orig.OmittedContextItems)
 	}
 }
 

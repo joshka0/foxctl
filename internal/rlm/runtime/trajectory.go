@@ -23,6 +23,7 @@ const (
 	EventTypeNodeCanceled      EventType = "node_canceled"
 	EventTypeBudget            EventType = "budget"
 	EventTypeBraid             EventType = "braid"
+	EventTypeContract          EventType = "contract"
 	EventTypeFinalAnswer       EventType = "final_answer"
 	EventTypeError             EventType = "error"
 )
@@ -41,19 +42,21 @@ type Event struct {
 	Wait          *WaitEvent          `json:"wait,omitempty"`
 	Budget        *BudgetEvent        `json:"budget,omitempty"`
 	Braid         *BraidEvent         `json:"braid,omitempty"`
+	Contract      *ContractEvent      `json:"contract,omitempty"`
 	FinalAnswer   *FinalAnswerEvent   `json:"final_answer,omitempty"`
 	RuntimeError  *RuntimeErrorEvent  `json:"error,omitempty"`
 }
 
 // ParentLLMCallEvent records one parent model invocation/result.
 type ParentLLMCallEvent struct {
-	CallID           string   `json:"call_id,omitempty"`
-	Model            string   `json:"model,omitempty"`
-	PromptTokens     int      `json:"prompt_tokens,omitempty"`
-	CompletionTokens int      `json:"completion_tokens,omitempty"`
-	FinishReason     string   `json:"finish_reason,omitempty"`
-	ToolCalls        int      `json:"tool_calls,omitempty"`
-	ToolNames        []string `json:"tool_names,omitempty"`
+	CallID             string   `json:"call_id,omitempty"`
+	Model              string   `json:"model,omitempty"`
+	RequestedMaxTokens int      `json:"requested_max_tokens,omitempty"`
+	PromptTokens       int      `json:"prompt_tokens,omitempty"`
+	CompletionTokens   int      `json:"completion_tokens,omitempty"`
+	FinishReason       string   `json:"finish_reason,omitempty"`
+	ToolCalls          int      `json:"tool_calls,omitempty"`
+	ToolNames          []string `json:"tool_names,omitempty"`
 }
 
 // REPLCallEvent records one REPL invocation.
@@ -124,6 +127,32 @@ type BraidEvent struct {
 	FinalNode string `json:"final_node,omitempty"`
 	NodeCount int    `json:"node_count,omitempty"`
 	Message   string `json:"message,omitempty"`
+}
+
+// ContractEvent records validation/repair decisions at model-runtime
+// boundaries. It intentionally stores issue classes and counts, not raw inputs.
+type ContractEvent struct {
+	Boundary             string `json:"boundary,omitempty"`
+	Phase                string `json:"phase,omitempty"`
+	Tool                 string `json:"tool,omitempty"`
+	Status               string `json:"status,omitempty"`
+	IssueKind            string `json:"issue_kind,omitempty"`
+	IssuePath            string `json:"issue_path,omitempty"`
+	RepairRule           string `json:"repair_rule,omitempty"`
+	RevalidateOK         bool   `json:"revalidate_ok,omitempty"`
+	Message              string `json:"message,omitempty"`
+	CandidateSolved      int    `json:"candidate_solved,omitempty"`
+	CandidateBlocked     int    `json:"candidate_blocked,omitempty"`
+	CandidatePartial     int    `json:"candidate_partial,omitempty"`
+	CandidatePlaceholder int    `json:"candidate_placeholder,omitempty"`
+	CandidateFailed      int    `json:"candidate_failed,omitempty"`
+	CandidatePending     int    `json:"candidate_pending,omitempty"`
+	CandidateRegistered  int    `json:"candidate_registered,omitempty"`
+	CandidateRejected    int    `json:"candidate_rejected,omitempty"`
+	AssistantChars       int    `json:"assistant_chars,omitempty"`
+	ExecutedOutputChars  int    `json:"executed_output_chars,omitempty"`
+	ToolInputBytes       int    `json:"tool_input_bytes,omitempty"`
+	RepairedInputBytes   int    `json:"repaired_input_bytes,omitempty"`
 }
 
 // FinalAnswerEvent records the terminal answer payload.
@@ -307,6 +336,15 @@ func (r *Recorder) RecordBraidEvent(event BraidEvent) Event {
 	})
 }
 
+// RecordContractEvent appends one model-runtime contract event.
+func (r *Recorder) RecordContractEvent(event ContractEvent) Event {
+	payload := event
+	return r.Record(Event{
+		Type:     EventTypeContract,
+		Contract: &payload,
+	})
+}
+
 // RecordFinalAnswer appends one final-answer event.
 func (r *Recorder) RecordFinalAnswer(event FinalAnswerEvent) Event {
 	payload := event
@@ -400,6 +438,10 @@ func cloneEvent(event Event) Event {
 	if event.Braid != nil {
 		braid := *event.Braid
 		cloned.Braid = &braid
+	}
+	if event.Contract != nil {
+		contract := *event.Contract
+		cloned.Contract = &contract
 	}
 	if event.FinalAnswer != nil {
 		answer := *event.FinalAnswer

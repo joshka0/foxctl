@@ -170,7 +170,7 @@ func buildOrFallbackQuery(query string) string {
 		if t == "" {
 			continue
 		}
-		terms = append(terms, t)
+		terms = append(terms, quoteFTSQuery(t))
 	}
 	if len(terms) < 2 {
 		return ""
@@ -185,6 +185,7 @@ func isFTSSyntaxError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "fts5") ||
 		strings.Contains(msg, "syntax error") ||
+		strings.Contains(msg, "no such column") ||
 		strings.Contains(msg, "unterminated string")
 }
 
@@ -206,6 +207,14 @@ func (q *QueryEngine) Open(ctx context.Context, id string) (Node, error) {
 		return Node{}, ErrNotFound
 	}
 	return q.store.GetNode(ctx, id)
+}
+
+// ResolveFileNodes resolves exact repo-relative file paths to file nodes.
+func (q *QueryEngine) ResolveFileNodes(ctx context.Context, paths []string) ([]Node, error) {
+	if q == nil || q.store == nil {
+		return nil, ErrNotFound
+	}
+	return q.store.ResolveFileNodes(ctx, paths)
 }
 
 // Expand traverses the graph starting from seed node IDs.

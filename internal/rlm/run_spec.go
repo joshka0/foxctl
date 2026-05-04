@@ -9,6 +9,12 @@ type ToolProfile string
 
 const (
 	ToolProfileDefault             ToolProfile = "default"
+	ToolProfileGatherContext       ToolProfile = "gather-context"
+	ToolProfileLambdaRepo          ToolProfile = "lambda-repo"
+	ToolProfileNativeExplorer      ToolProfile = "native-explorer"
+	ToolProfileCodeDebug           ToolProfile = "code-debug"
+	ToolProfileMemoryContext       ToolProfile = "memory-context"
+	ToolProfileFullDebug           ToolProfile = "full-debug"
 	ToolProfileCodeIntel           ToolProfile = "code-intel"
 	ToolProfileMemoryRecall        ToolProfile = "memory-recall"
 	ToolProfileLongCoTNoModelTools ToolProfile = "longcot-no-model-tools"
@@ -71,15 +77,16 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 	}
 
 	switch resolvedProfile {
-	case ToolProfileDefault:
-		// Default profile: all 6 composite tools.
+	case ToolProfileDefault, ToolProfileGatherContext, ToolProfileLambdaRepo, ToolProfileNativeExplorer:
+		// Default/mini profile: force composite context gathering first, then
+		// allow bounded ref inspection only for verification. Raw lane tools
+		// require explicit debug profiles.
 		allow := map[string]struct{}{
-			"retrieve_code":     {},
-			"retrieve_memory":   {},
-			"retrieve_context":  {},
-			"retrieve_task":     {},
-			"retrieve_mixed":    {},
-			"load_evidence_ref": {},
+			"gather_context":       {},
+			"gather_test_context":  {},
+			"gather_docs_context":  {},
+			"expand_context_graph": {},
+			"load_evidence_ref":    {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -87,11 +94,17 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 			AllowedTools: collectToolNames(tools),
 			Tools:        tools,
 		}, nil
-	case ToolProfileCodeIntel:
-		// Code intel: retrieve_code + load_evidence_ref.
+	case ToolProfileCodeDebug, ToolProfileCodeIntel:
+		// Code debug: certified context first, then bounded inspection, then
+		// direct repo controller/raw code lane for retrieval diagnostics.
 		allow := map[string]struct{}{
-			"retrieve_code":     {},
-			"load_evidence_ref": {},
+			"gather_context":       {},
+			"gather_test_context":  {},
+			"gather_docs_context":  {},
+			"expand_context_graph": {},
+			"load_evidence_ref":    {},
+			"code_search_ensemble": {},
+			"retrieve_code":        {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -99,12 +112,38 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 			AllowedTools: collectToolNames(tools),
 			Tools:        tools,
 		}, nil
-	case ToolProfileMemoryRecall:
-		// Memory recall: retrieve_memory + retrieve_context + load_evidence_ref.
+	case ToolProfileMemoryContext, ToolProfileMemoryRecall:
+		// Memory/context debug: certified context first, then raw memory and
+		// ACA/context lanes for diagnostics.
 		allow := map[string]struct{}{
-			"retrieve_memory":   {},
-			"retrieve_context":  {},
-			"load_evidence_ref": {},
+			"gather_context":       {},
+			"gather_test_context":  {},
+			"gather_docs_context":  {},
+			"expand_context_graph": {},
+			"load_evidence_ref":    {},
+			"retrieve_memory":      {},
+			"retrieve_context":     {},
+		}
+		tools := filterToolsBySet(available, allow)
+		return ToolPolicy{
+			Profile:      resolvedProfile,
+			AllowedTools: collectToolNames(tools),
+			Tools:        tools,
+		}, nil
+	case ToolProfileFullDebug:
+		allow := map[string]struct{}{
+			"expand_context_graph":     {},
+			"gather_context":           {},
+			"gather_test_context":      {},
+			"gather_docs_context":      {},
+			"load_evidence_ref":        {},
+			"code_search_ensemble":     {},
+			"retrieve_code":            {},
+			"retrieve_memory":          {},
+			"retrieve_context":         {},
+			"retrieve_task":            {},
+			"retrieve_mixed":           {},
+			"memory_ensemble_retrieve": {},
 		}
 		tools := filterToolsBySet(available, allow)
 		return ToolPolicy{
@@ -128,6 +167,18 @@ func NormalizeToolProfile(value string) (ToolProfile, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", string(ToolProfileDefault):
 		return ToolProfileDefault, nil
+	case string(ToolProfileGatherContext):
+		return ToolProfileGatherContext, nil
+	case string(ToolProfileLambdaRepo):
+		return ToolProfileLambdaRepo, nil
+	case string(ToolProfileNativeExplorer), "explorer":
+		return ToolProfileNativeExplorer, nil
+	case string(ToolProfileCodeDebug):
+		return ToolProfileCodeDebug, nil
+	case string(ToolProfileMemoryContext):
+		return ToolProfileMemoryContext, nil
+	case string(ToolProfileFullDebug):
+		return ToolProfileFullDebug, nil
 	case string(ToolProfileCodeIntel):
 		return ToolProfileCodeIntel, nil
 	case string(ToolProfileMemoryRecall):
@@ -166,7 +217,7 @@ func resolveRunPlanMode(requested PlanMode) (PlanMode, error) {
 		return PlanModeStaged, nil
 	case string(PlanModeHard):
 		return PlanModeHard, nil
-	case string(PlanModeLambda):
+	case string(PlanModeLambda), "lambda":
 		return PlanModeLambda, nil
 	default:
 		return "", fmt.Errorf("rlm: unsupported plan mode %q", requested)

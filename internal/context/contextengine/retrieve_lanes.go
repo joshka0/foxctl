@@ -48,6 +48,8 @@ type CodeSearchHit struct {
 	Symbol   string
 	Score    float64
 	Language string
+	Metadata map[string]any
+	Sources  []string
 }
 
 // MemoryQueryFunc queries memory store and returns claims for the memory lane.
@@ -58,11 +60,35 @@ type MemoryQueryFunc func(ctx context.Context, workspaceID, query string) ([]Mem
 // ContextQueryFunc retrieves the current TopOfMind/ContextPacket for the context lane.
 type ContextQueryFunc func(ctx context.Context, workspaceID string) (*ContextPacket, error)
 
+// ContextPackFunc retrieves additional context-lane EvidencePacks for a query.
+// Implementations can adapt ACA retrieval, vault-backed notes, or other
+// workspace context sources without changing the basic ContextPacket contract.
+type ContextPackFunc func(ctx context.Context, workspaceID, query string, limit int) ([]EvidencePack, error)
+
 // TaskQueryFunc retrieves task contexts for the task lane.
 type TaskQueryFunc func(ctx context.Context, workspaceID, taskID string) (*TaskContext, error)
 
 // TaskListFunc lists task IDs for a workspace.
 type TaskListFunc func(ctx context.Context, workspaceID string) ([]string, error)
+
+// SessionRecallFunc retrieves compact prior-session evidence for a query.
+type SessionRecallFunc func(ctx context.Context, workspaceID, query string, limit int) ([]SessionRecallHit, error)
+
+// SessionRecallHit is a source-agnostic session recall item. Adapters may
+// derive it from semantic session recall, chat archives, or transcript stores.
+type SessionRecallHit struct {
+	SessionID   string
+	Summary     string
+	Score       float64
+	Decisions   []string
+	Gotchas     []string
+	KeyFiles    []string
+	StartedAt   time.Time
+	Source      string
+	CanVerify   bool
+	SpanLocator string
+	Metadata    map[string]any
+}
 
 // IDGen generates unique identifiers.
 type IDGen func() string
@@ -97,6 +123,9 @@ func validateQuery(query string, lane EvidenceLane) error {
 // Returns the generated episode ID.
 func recordEpisode(ctx context.Context, cfg LaneConfig, query string, lane EvidenceLane, packID string, durationMs int64, hitCount int, subEpisodeIDs []string) (string, error) {
 	episodeID := cfg.IDGen()
+	if cfg.Store == nil {
+		return episodeID, nil
+	}
 	episode := RetrievalEpisode{
 		ID:            episodeID,
 		WorkspaceID:   cfg.WorkspaceID,

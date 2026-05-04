@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,6 +143,81 @@ func TestLoadExternalAgentEvalResults(t *testing.T) {
 	}
 	if !results[0].Passed {
 		t.Fatalf("expected imported result to pass: %+v", results[0])
+	}
+}
+
+func TestLoadExternalAgentEvalResultsReadsCodexTranscriptTokens(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "transcript.jsonl")
+	transcript := `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":4,"output_tokens":2,"reasoning_output_tokens":1,"total_tokens":12}}}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20,"reasoning_output_tokens":5,"total_tokens":120}}}}
+`
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o644); err != nil {
+		t.Fatalf("WriteFile(transcript) error = %v", err)
+	}
+
+	path := filepath.Join(dir, "external.jsonl")
+	body := fmt.Sprintf(`{"case_id":"case-1","label":"mini","role":"explorer","provider":"codex","model":"gpt-5.4-mini","runner":"spawn_agent","output":"The current codename is amber-river-19.","duration_ms":1200,"transcript_path":%q}
+`, transcriptPath)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile(results) error = %v", err)
+	}
+
+	results, err := loadExternalAgentEvalResults([]string{path}, []promptEvalCase{{
+		ID:             "case-1",
+		Question:       "What is the current codename?",
+		TargetResponse: "The current codename is amber-river-19.",
+	}}, 0.8)
+	if err != nil {
+		t.Fatalf("loadExternalAgentEvalResults() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("len(results)=%d want 1", len(results))
+	}
+	if results[0].InputTokens != 100 || results[0].OutputTokens != 20 || results[0].TotalTokens != 120 {
+		t.Fatalf("token usage=%+v", results[0])
+	}
+}
+
+func TestLoadExternalAgentEvalResultsDistributesSharedTranscriptTokens(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "transcript.jsonl")
+	transcript := `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":101,"output_tokens":21,"total_tokens":122}}}}
+`
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o644); err != nil {
+		t.Fatalf("WriteFile(transcript) error = %v", err)
+	}
+
+	path := filepath.Join(dir, "external.jsonl")
+	body := fmt.Sprintf(`{"case_id":"case-1","label":"mini","role":"explorer","provider":"codex","model":"gpt-5.4-mini","runner":"spawn_agent","output":"one","transcript_path":%q}
+{"case_id":"case-2","label":"mini","role":"explorer","provider":"codex","model":"gpt-5.4-mini","runner":"spawn_agent","output":"two","transcript_path":%q}
+`, transcriptPath, transcriptPath)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile(results) error = %v", err)
+	}
+
+	results, err := loadExternalAgentEvalResults([]string{path}, []promptEvalCase{
+		{ID: "case-1", Question: "one"},
+		{ID: "case-2", Question: "two"},
+	}, 0.8)
+	if err != nil {
+		t.Fatalf("loadExternalAgentEvalResults() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("len(results)=%d want 2", len(results))
+	}
+	if got := results[0].TotalTokens + results[1].TotalTokens; got != 122 {
+		t.Fatalf("distributed total=%d want 122; results=%+v", got, results)
+	}
+	if results[0].TotalTokens != 61 || results[1].TotalTokens != 61 {
+		t.Fatalf("distributed totals=%d,%d want 61,61", results[0].TotalTokens, results[1].TotalTokens)
+	}
+	if results[0].InputTokens != 51 || results[1].InputTokens != 50 {
+		t.Fatalf("distributed input=%d,%d want 51,50", results[0].InputTokens, results[1].InputTokens)
 	}
 }
 

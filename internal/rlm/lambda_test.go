@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -234,6 +235,108 @@ func TestCapLambdaPlanForTask_RecomputesTauAfterKCap(t *testing.T) {
 	}
 }
 
+func TestBuildLambdaProgram_SmallProblemDirectLeaf(t *testing.T) {
+	t.Parallel()
+
+	plan := PlanLambda(TaskTypeCodeLocate, 4, LambdaConfig{ContextBudget: 10})
+	program := BuildLambdaProgram(plan, LambdaConfig{ContextBudget: 10})
+
+	if program.SplitMode != LambdaSplitNone {
+		t.Fatalf("split_mode=%s want none", program.SplitMode)
+	}
+	if program.BranchingFactor != 1 {
+		t.Fatalf("branching_factor=%d want 1", program.BranchingFactor)
+	}
+	if program.MaxDepth != 0 {
+		t.Fatalf("max_depth=%d want 0", program.MaxDepth)
+	}
+	if program.LeafThreshold != 4 {
+		t.Fatalf("leaf_threshold=%d want 4", program.LeafThreshold)
+	}
+	if program.EstimatedLeafCalls != 1 {
+		t.Fatalf("estimated_leaf_calls=%d want 1", program.EstimatedLeafCalls)
+	}
+}
+
+func TestBuildLambdaProgram_BoundedDepthAndCalls(t *testing.T) {
+	t.Parallel()
+
+	plan := LambdaPlan{
+		TaskType:     TaskTypeGeneral,
+		ComposeOp:    ComposeSynthesize,
+		KStar:        3,
+		TauStar:      5,
+		Depth:        2,
+		CostEstimate: 123,
+		N:            45,
+	}
+	program := BuildLambdaProgram(plan, LambdaConfig{ContextBudget: 10})
+
+	if program.SplitMode != LambdaSplitQueryVariants {
+		t.Fatalf("split_mode=%s want query_variants", program.SplitMode)
+	}
+	if program.ReduceMode != LambdaReduceSynthesize {
+		t.Fatalf("reduce_mode=%s want synthesize", program.ReduceMode)
+	}
+	if program.ReduceVerifierMode != LambdaVerifierReduceOracle {
+		t.Fatalf("reduce_verifier_mode=%s want reduce_oracle", program.ReduceVerifierMode)
+	}
+	if program.EstimatedLeafCalls != 9 {
+		t.Fatalf("estimated_leaf_calls=%d want 9", program.EstimatedLeafCalls)
+	}
+	if program.EstimatedReduceCalls != 4 {
+		t.Fatalf("estimated_reduce_calls=%d want 4", program.EstimatedReduceCalls)
+	}
+	if program.EstimatedTotalCalls != 67 {
+		t.Fatalf("estimated_total_calls=%d want 67", program.EstimatedTotalCalls)
+	}
+	if program.EstimatedCost != 123 {
+		t.Fatalf("estimated_cost=%.1f want 123", program.EstimatedCost)
+	}
+}
+
+func TestLambdaRunnerRunExposesProgramMetadataForDirectLeaf(t *testing.T) {
+	t.Parallel()
+
+	runner := LambdaRunner{
+		Config: LambdaConfig{
+			ContextBudget: 10,
+			LLM: LLMConfig{
+				Provider: "lambda-test-no-provider",
+				AuthMode: "header",
+			},
+		},
+		Tools: lambdaFakeToolExecutor{},
+	}
+	result, err := runner.Run(context.Background(), Task{
+		Prompt:      "find answer",
+		MaxSubcalls: 1,
+		Metadata: map[string]any{
+			"gather_context_payload": map[string]any{"task_type": "file_locate"},
+		},
+	}, Environment{Tools: []Tool{{Name: "gather_context", ReadOnly: true}, {Name: "load_evidence_ref", ReadOnly: true}}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	program, ok := result.Metadata["lambda_program"].(LambdaProgram)
+	if !ok {
+		t.Fatalf("lambda_program metadata type=%T want LambdaProgram", result.Metadata["lambda_program"])
+	}
+	if program.SplitMode != LambdaSplitNone {
+		t.Fatalf("split_mode=%s want none", program.SplitMode)
+	}
+	if program.MaxDepth != 0 {
+		t.Fatalf("max_depth=%d want 0", program.MaxDepth)
+	}
+	if result.Metadata["lambda_program_split_mode"] != string(LambdaSplitNone) {
+		t.Fatalf("lambda_program_split_mode=%v", result.Metadata["lambda_program_split_mode"])
+	}
+	if intFromAny(result.Metadata["lambda_program_estimated_total_calls"]) <= 0 {
+		t.Fatalf("missing positive estimated calls metadata: %#v", result.Metadata)
+	}
+}
+
 func TestComposeOpForTask_Unknown(t *testing.T) {
 	if got := ComposeOpForTask(TaskType("bogus")); got != ComposeSynthesize {
 		t.Fatalf("got=%s want synthesize", got)
@@ -305,14 +408,14 @@ func TestQueryVariantsPreferContentTermsBeforeTail(t *testing.T) {
 }
 
 func TestSearchToolForTask(t *testing.T) {
-	if got := SearchToolForTask(TaskTypeMemoryRecall); got != "retrieve_memory" {
-		t.Fatalf("got=%s want retrieve_memory", got)
+	if got := SearchToolForTask(TaskTypeMemoryRecall); got != "gather_context" {
+		t.Fatalf("got=%s want gather_context", got)
 	}
-	if got := SearchToolForTask(TaskTypeCodeLocate); got != "retrieve_code" {
-		t.Fatalf("got=%s want retrieve_code", got)
+	if got := SearchToolForTask(TaskTypeCodeLocate); got != "gather_context" {
+		t.Fatalf("got=%s want gather_context", got)
 	}
-	if got := SearchToolForTask(TaskTypeGeneral); got != "retrieve_mixed" {
-		t.Fatalf("got=%s want retrieve_mixed", got)
+	if got := SearchToolForTask(TaskTypeGeneral); got != "gather_context" {
+		t.Fatalf("got=%s want gather_context", got)
 	}
 }
 
@@ -384,6 +487,7 @@ func TestLambdaRunnerEphemeralSkillSanitizesFinalAnswer(t *testing.T) {
 				},
 				"finish_reason": "stop",
 			}},
+			"usage": map[string]any{"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19},
 		})
 	}))
 	defer server.Close()
@@ -428,6 +532,7 @@ func TestLambdaLeafSanitizesJudgeAnswer(t *testing.T) {
 				},
 				"finish_reason": "stop",
 			}},
+			"usage": map[string]any{"prompt_tokens": 21, "completion_tokens": 8, "total_tokens": 29},
 		})
 	}))
 	defer server.Close()
@@ -456,6 +561,9 @@ func TestLambdaLeafSanitizesJudgeAnswer(t *testing.T) {
 	}
 	if result.Metadata["output_sanitization"] == nil {
 		t.Fatalf("missing output_sanitization metadata: %#v", result.Metadata)
+	}
+	if got := intFromAny(result.Metadata["parent_total_tokens"]); got != 29 {
+		t.Fatalf("parent_total_tokens=%d want 29", got)
 	}
 }
 
@@ -629,6 +737,336 @@ func TestExtractCandidatePathsFromTypedToolPayload(t *testing.T) {
 	}
 }
 
+func TestExtractCandidateEvidenceRefsIncludesLoadRefs(t *testing.T) {
+	t.Parallel()
+
+	result := map[string]any{
+		"path_set": map[string]any{
+			"must": []any{
+				map[string]any{"load_ref": "path:internal/rlm/env/tools.go"},
+				map[string]any{"type": "path", "ref": "internal/context/contextengine/context_gather.go"},
+				map[string]any{"ref": "internal/context/contextengine/bare-ref-should-not-load.go"},
+			},
+		},
+		"load_refs": []any{"path:internal/rlm/env/adapter.go"},
+	}
+
+	got := extractCandidateEvidenceRefs(result)
+	want := []string{
+		"path:internal/rlm/env/tools.go",
+		"path:internal/context/contextengine/context_gather.go",
+		"path:internal/rlm/env/adapter.go",
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("refs=%v want %v", got, want)
+	}
+}
+
+func TestLambdaSearchArgsUsesGatherPayloadAndAnswerSurface(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		Prompt: "fallback query",
+		Metadata: map[string]any{
+			"gather_context_payload": map[string]any{
+				"query":     "runtime-selected query",
+				"task_type": "file_locate",
+			},
+		},
+	}
+
+	got := lambdaSearchArgs(task, LambdaPlan{TaskType: TaskTypeCodeLocate, TauStar: 4})
+	if got["query"] != "runtime-selected query" {
+		t.Fatalf("query=%v", got["query"])
+	}
+	if got["task_type"] != "file_locate" {
+		t.Fatalf("task_type=%v", got["task_type"])
+	}
+	if got["response_mode"] != "answer_surface" {
+		t.Fatalf("response_mode=%v", got["response_mode"])
+	}
+	if got["limit"] != 4 {
+		t.Fatalf("limit=%v", got["limit"])
+	}
+}
+
+func TestExplicitLambdaTaskTypeUsesGatherPayload(t *testing.T) {
+	t.Parallel()
+
+	for _, taskTypeName := range []string{"file_locate", "symbol_inspect", "registration_trace"} {
+		taskTypeName := taskTypeName
+		t.Run(taskTypeName, func(t *testing.T) {
+			t.Parallel()
+			taskType, source := explicitLambdaTaskType(Task{Metadata: map[string]any{
+				"gather_context_payload": map[string]any{"task_type": taskTypeName},
+			}})
+			if taskType != TaskTypeCodeLocate || source != "gather_context_payload" {
+				t.Fatalf("taskType=%s source=%s", taskType, source)
+			}
+		})
+	}
+	for _, taskTypeName := range []string{"execution_trace", "change_impact", "architecture_map", "subsystem_map", "integration_surface"} {
+		taskTypeName := taskTypeName
+		t.Run(taskTypeName, func(t *testing.T) {
+			t.Parallel()
+			taskType, source := explicitLambdaTaskType(Task{Metadata: map[string]any{
+				"gather_context_payload": map[string]any{"task_type": taskTypeName},
+			}})
+			if taskType != TaskTypeCodeUnderstand || source != "gather_context_payload" {
+				t.Fatalf("taskType=%s source=%s", taskType, source)
+			}
+		})
+	}
+}
+
+func TestLambdaShouldUseSingleGatherSurfaceForCodeLocateAnswerSurface(t *testing.T) {
+	t.Parallel()
+
+	task := Task{Metadata: map[string]any{
+		"gather_context_payload": map[string]any{
+			"task_type":     "file_locate",
+			"response_mode": "answer_surface",
+		},
+	}}
+	if !lambdaShouldUseSingleGatherSurface(task, TaskTypeCodeLocate) {
+		t.Fatal("expected single gather surface for code locate answer_surface payload")
+	}
+	if lambdaShouldUseSingleGatherSurface(task, TaskTypeCodeUnderstand) {
+		t.Fatal("did not expect single gather surface for code understand")
+	}
+	task.Metadata["gather_context_payload"].(map[string]any)["task_type"] = "execution_trace"
+	if lambdaShouldUseSingleGatherSurface(task, TaskTypeCodeLocate) {
+		t.Fatal("did not expect single gather surface for dependency-sensitive payload")
+	}
+	if lambdaShouldUseSingleGatherSurface(task, TaskTypeCodeUnderstand) {
+		t.Fatal("did not expect single gather surface for dependency-sensitive task")
+	}
+}
+
+func TestNormalizePlanModeAcceptsLambdaAlias(t *testing.T) {
+	t.Parallel()
+
+	if got := NormalizePlanMode("lambda"); got != PlanModeLambda {
+		t.Fatalf("NormalizePlanMode(lambda)=%s want %s", got, PlanModeLambda)
+	}
+	if got, err := resolveRunPlanMode("lambda"); err != nil || got != PlanModeLambda {
+		t.Fatalf("resolveRunPlanMode(lambda)=%s err=%v want %s", got, err, PlanModeLambda)
+	}
+}
+
+func TestLambdaAnswerFromAnswerSurface(t *testing.T) {
+	t.Parallel()
+
+	answer, ok := lambdaAnswerFromAnswerSurface(map[string]any{
+		"schema_version": "context_answer_surface/v2",
+		"answerable":     true,
+		"certificate": map[string]any{
+			"status":               "certified",
+			"required_evidence_ok": true,
+			"checks": []any{
+				map[string]any{"name": "selected_refs_loadable", "status": "pass"},
+			},
+		},
+		"answer_seed": map[string]any{
+			"paths": []any{"internal/rlm/env/code_search_ensemble.go"},
+			"facts": []any{"code_search_ensemble is implemented in the RLM env package."},
+		},
+	}, nil)
+	if !ok {
+		t.Fatal("lambdaAnswerFromAnswerSurface() ok=false")
+	}
+	var out structuredLambdaAnswerForTest
+	if err := json.Unmarshal([]byte(answer), &out); err != nil {
+		t.Fatalf("answer JSON error: %v", err)
+	}
+	if strings.Join(out.Paths, "\n") != "internal/rlm/env/code_search_ensemble.go" {
+		t.Fatalf("paths=%v", out.Paths)
+	}
+	if len(out.Facts) != 1 {
+		t.Fatalf("facts=%v", out.Facts)
+	}
+}
+
+func TestLambdaAnswerFromAnswerSurfaceRejectsUntrustedSurface(t *testing.T) {
+	t.Parallel()
+
+	for name, payload := range map[string]map[string]any{
+		"not_answerable": {
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     false,
+			"answer_seed":    map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+		"failed_certificate": {
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     true,
+			"certificate":    map[string]any{"status": "failed"},
+			"answer_seed":    map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+		"required_evidence_missing": {
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     true,
+			"certificate":    map[string]any{"status": "partial", "required_evidence_ok": false},
+			"answer_seed":    map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+		"partial_certificate": {
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     true,
+			"certificate":    map[string]any{"status": "partial", "required_evidence_ok": true},
+			"answer_seed":    map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+		"coverage_missing": {
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     true,
+			"certificate":    map[string]any{"status": "certified", "required_evidence_ok": true},
+			"coverage_report": map[string]any{
+				"missing": []any{"certifier"},
+			},
+			"answer_seed": map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+		"copy_seed_disabled": {
+			"schema_version":  "context_answer_surface/v2",
+			"answerable":      true,
+			"certificate":     map[string]any{"status": "certified", "required_evidence_ok": true, "checks": []any{map[string]any{"name": "selected_refs_loadable", "status": "pass"}}},
+			"answer_contract": map[string]any{"copy_answer_seed": false},
+			"answer_seed":     map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+		"selected_refs_not_loadable": {
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     true,
+			"certificate": map[string]any{
+				"status":               "certified",
+				"required_evidence_ok": true,
+				"checks":               []any{map[string]any{"name": "selected_refs_loadable", "status": "fail"}},
+			},
+			"answer_seed": map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+	} {
+		payload := payload
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if answer, ok := lambdaAnswerFromAnswerSurface(payload, nil); ok {
+				t.Fatalf("lambdaAnswerFromAnswerSurface() ok=true answer=%s", answer)
+			}
+		})
+	}
+}
+
+func TestLambdaContextGraphTrusted(t *testing.T) {
+	t.Parallel()
+
+	trusted := map[string]any{
+		"confidence": map[string]any{
+			"overall":             0.9,
+			"completeness":        "high",
+			"trusted_for_proceed": true,
+		},
+	}
+	if !lambdaContextGraphTrusted(trusted) {
+		t.Fatal("expected high-confidence graph to be trusted")
+	}
+	for name, payload := range map[string]map[string]any{
+		"low_confidence": {
+			"confidence": map[string]any{"overall": 0.5, "completeness": "low", "trusted_for_proceed": false},
+		},
+		"missing_gap": {
+			"confidence": map[string]any{"overall": 0.9, "completeness": "high"},
+			"missing":    []any{map[string]any{"kind": "index_stale"}},
+		},
+	} {
+		payload := payload
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if lambdaContextGraphTrusted(payload) {
+				t.Fatalf("expected graph %s to be untrusted", name)
+			}
+		})
+	}
+}
+
+func TestLambdaLeafDoesNotSkipJudgeWhenRequiredGraphIsWeak(t *testing.T) {
+	t.Parallel()
+
+	runner := LambdaRunner{
+		Config: LambdaConfig{LLM: LLMConfig{Provider: "lambda-test-no-provider"}},
+		Tools:  lambdaGraphGateToolExecutor{},
+	}
+	result, err := runner.leaf(context.Background(), Task{
+		Prompt: "Trace execution through the service.",
+		Metadata: map[string]any{
+			"gather_context_payload": map[string]any{
+				"query":         "Trace execution through the service.",
+				"task_type":     "execution_trace",
+				"response_mode": "answer_surface",
+			},
+		},
+	}, Environment{}, LambdaPlan{TaskType: TaskTypeCodeUnderstand, TauStar: 2})
+	if err != nil {
+		t.Fatalf("leaf: %v", err)
+	}
+	if result.Metadata["lambda_answer_surface"] == true {
+		t.Fatalf("expected weak graph to prevent answer-surface skip: metadata=%v", result.Metadata)
+	}
+	if result.Metadata["lambda_context_graph_trusted"] != false {
+		t.Fatalf("graph trust metadata=%v", result.Metadata)
+	}
+	if result.Metadata["lambda_judge_error"] == nil {
+		t.Fatalf("expected fallback judge path with no-provider LLM: metadata=%v", result.Metadata)
+	}
+}
+
+func TestLambdaReduceSkipsLLMForTrustedAnswerSurfacePartials(t *testing.T) {
+	t.Parallel()
+
+	runner := LambdaRunner{}
+	partials := []Result{
+		{
+			Answer: `{"summary":"one","paths":["internal/rlm/env/code_search_ensemble.go"],"facts":["code search fact"]}`,
+			Metadata: map[string]any{
+				"lambda_answer_surface":               true,
+				"gather_context_answer_seed_paths":    []string{"internal/rlm/env/code_search_ensemble.go"},
+				"gather_context_certificate_statuses": []string{"certified"},
+				"parent_input_tokens":                 0,
+				"parent_output_tokens":                0,
+				"parent_total_tokens":                 0,
+			},
+			RetrievedPaths: []string{"internal/rlm/env/code_search_ensemble.go"},
+		},
+		{
+			Answer: `{"summary":"two","paths":["internal/rlm/env/adapter.go"],"facts":["adapter fact"]}`,
+			Metadata: map[string]any{
+				"lambda_answer_surface":               true,
+				"gather_context_answer_seed_paths":    []string{"internal/rlm/env/adapter.go"},
+				"gather_context_certificate_statuses": []string{"certified"},
+			},
+			RetrievedPaths: []string{"internal/rlm/env/adapter.go"},
+		},
+	}
+
+	result, err := runner.reduce(context.Background(), Task{Prompt: "Where is code search wired?"}, LambdaPlan{ComposeOp: ComposeRerank}, partials)
+	if err != nil {
+		t.Fatalf("reduce() error = %v", err)
+	}
+	if result.Metadata["lambda_reduce_answer_surface"] != true {
+		t.Fatalf("lambda_reduce_answer_surface=%v", result.Metadata["lambda_reduce_answer_surface"])
+	}
+	if got := result.Metadata["parent_total_tokens"]; got != 0 {
+		t.Fatalf("parent_total_tokens=%v, want 0", got)
+	}
+	var out structuredLambdaAnswerForTest
+	if err := json.Unmarshal([]byte(result.Answer), &out); err != nil {
+		t.Fatalf("answer JSON error: %v\n%s", err, result.Answer)
+	}
+	wantPaths := "internal/rlm/env/code_search_ensemble.go\ninternal/rlm/env/adapter.go"
+	if strings.Join(out.Paths, "\n") != wantPaths {
+		t.Fatalf("paths=%v", out.Paths)
+	}
+	if len(out.Facts) != 2 {
+		t.Fatalf("facts=%v", out.Facts)
+	}
+}
+
 func TestSelectLambdaRetrievedPathsPrefersAnswerCitations(t *testing.T) {
 	t.Parallel()
 
@@ -695,8 +1133,80 @@ func TestSelectLambdaRetrievedPathsFallsBackToCandidates(t *testing.T) {
 	}
 }
 
+func TestLambdaReducePreservesGatherSurfaceMetadata(t *testing.T) {
+	t.Parallel()
+
+	runner := LambdaRunner{}
+	result, err := runner.reduce(context.Background(), Task{Prompt: "merge"}, LambdaPlan{
+		ComposeOp: ComposeUnion,
+	}, []Result{
+		{
+			Answer:         "partial",
+			RetrievedPaths: []string{"internal/rlm/env/code_search_ensemble.go"},
+			Metadata: map[string]any{
+				"candidate_paths":                     []string{"internal/rlm/env/code_search_ensemble.go"},
+				"gather_context_selected_paths":       []string{"internal/rlm/env/code_search_ensemble.go"},
+				"gather_context_answer_seed_paths":    []string{"internal/rlm/env/code_search_ensemble.go"},
+				"gather_context_path_set_must":        []string{"internal/rlm/env/code_search_ensemble.go"},
+				"gather_context_certificate_statuses": []string{"certified"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("reduce() error = %v", err)
+	}
+	for _, key := range []string{
+		"gather_context_selected_paths",
+		"gather_context_answer_seed_paths",
+		"gather_context_path_set_must",
+		"gather_context_certificate_statuses",
+	} {
+		if got := stringSliceFromAny(result.Metadata[key]); len(got) != 1 {
+			t.Fatalf("%s=%v want one value", key, result.Metadata[key])
+		}
+	}
+}
+
 type lambdaFakeToolExecutor struct {
 	delays map[string]time.Duration
+}
+
+type lambdaGraphGateToolExecutor struct{}
+
+type structuredLambdaAnswerForTest struct {
+	Paths []string `json:"paths"`
+	Facts []string `json:"facts"`
+}
+
+func (lambdaGraphGateToolExecutor) Execute(_ context.Context, name string, _ json.RawMessage) (map[string]any, error) {
+	switch name {
+	case "gather_context":
+		return map[string]any{
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     true,
+			"certificate": map[string]any{
+				"status":               "certified",
+				"required_evidence_ok": true,
+				"checks":               []any{map[string]any{"name": "selected_refs_loadable", "status": "pass"}},
+			},
+			"answer_contract": map[string]any{"copy_answer_seed": true},
+			"answer_seed":     map[string]any{"paths": []any{"internal/service.go"}},
+			"path_set":        map[string]any{"must": []any{map[string]any{"path": "internal/service.go", "load_ref": "path:internal/service.go"}}},
+		}, nil
+	case "expand_context_graph":
+		return map[string]any{
+			"confidence": map[string]any{
+				"overall":             0.45,
+				"completeness":        "low",
+				"trusted_for_proceed": false,
+			},
+			"missing": []any{map[string]any{"kind": "index_stale"}},
+		}, nil
+	case "load_evidence_ref":
+		return map[string]any{"content": "package service"}, nil
+	default:
+		return map[string]any{}, nil
+	}
 }
 
 func (f lambdaFakeToolExecutor) Execute(ctx context.Context, _ string, args json.RawMessage) (map[string]any, error) {

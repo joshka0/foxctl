@@ -29,6 +29,7 @@ type symbolNameIndex struct {
 	byPkgFile map[string]map[string]map[string][]string
 	byPkg     map[string]map[string][]string
 	global    map[string][]string
+	suffix    map[string][]string
 }
 
 func buildSymbolNameIndex(nodes map[string]Node) symbolNameIndex {
@@ -36,6 +37,7 @@ func buildSymbolNameIndex(nodes map[string]Node) symbolNameIndex {
 		byPkgFile: make(map[string]map[string]map[string][]string),
 		byPkg:     make(map[string]map[string][]string),
 		global:    make(map[string][]string),
+		suffix:    make(map[string][]string),
 	}
 	for id, node := range nodes {
 		if node.Kind != NodeSymbol || node.Name == "" {
@@ -57,6 +59,9 @@ func buildSymbolNameIndex(nodes map[string]Node) symbolNameIndex {
 			idx.byPkg[node.Pkg][node.Name] = append(idx.byPkg[node.Pkg][node.Name], id)
 		}
 		idx.global[node.Name] = append(idx.global[node.Name], id)
+		if suffix := symbolNameSuffix(node.Name); suffix != "" && suffix != node.Name {
+			idx.suffix[suffix] = append(idx.suffix[suffix], id)
+		}
 	}
 
 	for _, byFile := range idx.byPkgFile {
@@ -72,6 +77,9 @@ func buildSymbolNameIndex(nodes map[string]Node) symbolNameIndex {
 		}
 	}
 	for _, ids := range idx.global {
+		sort.Strings(ids)
+	}
+	for _, ids := range idx.suffix {
 		sort.Strings(ids)
 	}
 
@@ -103,7 +111,20 @@ func resolveSymbolName(idx symbolNameIndex, pkg, file, name string) string {
 	if ids := idx.global[name]; len(ids) == 1 {
 		return ids[0]
 	}
+	if !strings.Contains(name, ".") {
+		if ids := idx.suffix[name]; len(ids) == 1 {
+			return ids[0]
+		}
+	}
 	return ""
+}
+
+func symbolNameSuffix(name string) string {
+	name = strings.TrimSpace(name)
+	if idx := strings.LastIndex(name, "."); idx >= 0 && idx+1 < len(name) {
+		return strings.TrimSpace(name[idx+1:])
+	}
+	return name
 }
 
 func resolveCandidateNames(name string) []string {

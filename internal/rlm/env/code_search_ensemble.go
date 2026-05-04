@@ -25,12 +25,15 @@ import (
 )
 
 const (
-	codeSearchTaskFileLocate        = "file_locate"
-	codeSearchTaskExecutionTrace    = "execution_trace"
-	codeSearchTaskSymbolInspect     = "symbol_inspect"
-	codeSearchTaskChangeImpact      = "change_impact"
-	codeSearchTaskRegistrationTrace = "registration_trace"
-	codeSearchSemanticStageTimeout  = 12 * time.Second
+	codeSearchTaskFileLocate         = "file_locate"
+	codeSearchTaskExecutionTrace     = "execution_trace"
+	codeSearchTaskSymbolInspect      = "symbol_inspect"
+	codeSearchTaskChangeImpact       = "change_impact"
+	codeSearchTaskRegistrationTrace  = "registration_trace"
+	codeSearchTaskArchitectureMap    = "architecture_map"
+	codeSearchTaskSubsystemMap       = "subsystem_map"
+	codeSearchTaskIntegrationSurface = "integration_surface"
+	codeSearchSemanticStageTimeout   = 12 * time.Second
 )
 
 type codeSearchEnsembleInput struct {
@@ -186,6 +189,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 	if input.Constraints.RequireGrounding != nil {
 		requireGrounding = *input.Constraints.RequireGrounding
 	}
+	fastProbeMode := input.Budget.MaxSteps > 0 && input.Budget.MaxSteps <= 4
 
 	normalizedCandidates := normalizeCodeSearchPaths(input.CandidatePaths)
 	excluded := normalizeCodeSearchPaths(input.Constraints.ExcludePaths)
@@ -193,6 +197,14 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 	traceAnchors := deriveExecutionTraceAnchors(input.Query, taskType)
 	exactProbes := codeSearchTaskExactProbes(input.Query, taskType)
 	pathProbes := codeSearchTaskPathProbes(input.Query, taskType, exactProbes)
+	if fastProbeMode && taskType == codeSearchTaskExecutionTrace {
+		exactProbes = limitCodeSearchProbeList(exactProbes, 4)
+		pathProbes = limitCodeSearchProbeList(pathProbes, 8)
+		traceAnchors.SourceExactProbes = limitCodeSearchProbeList(traceAnchors.SourceExactProbes, 3)
+		traceAnchors.TargetExactProbes = limitCodeSearchProbeList(traceAnchors.TargetExactProbes, 3)
+		traceAnchors.SourcePathProbes = limitCodeSearchProbeList(traceAnchors.SourcePathProbes, 4)
+		traceAnchors.TargetPathProbes = limitCodeSearchProbeList(traceAnchors.TargetPathProbes, 4)
+	}
 	preferredSymbolProbes := codeSearchSymbolProbes(input.Query)
 	metadata := map[string]any{
 		"task_type_defaulted": defaulted,
@@ -230,7 +242,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 		}
 	}
 	phraseProbeSet := map[string]struct{}{}
-	if taskType == codeSearchTaskExecutionTrace || taskType == codeSearchTaskChangeImpact {
+	if taskType == codeSearchTaskExecutionTrace || isCodeSearchImpactLikeTask(taskType) {
 		for _, probe := range phraseIdentifierProbes {
 			probe = strings.TrimSpace(strings.ToLower(probe))
 			if probe == "" {
@@ -264,6 +276,20 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 			continue
 		}
 		addCodeSearchCandidate(candidates, candidate, "caller supplied candidate", "caller", 1.0, 0, "", "")
+	}
+
+	if taskType == codeSearchTaskSymbolInspect {
+		definitions := a.findLocalDefinitions(ctx, preferredSymbolProbes, nil)
+		if len(definitions) > 0 {
+			addLane("symbol_definition")
+			for _, symbol := range sortedStringKeys(definitions) {
+				definition := definitions[symbol]
+				if definition.Path == "" || isExcludedCodeSearchPath(definition.Path, excluded) {
+					continue
+				}
+				addCodeSearchCandidate(candidates, definition.Path, "symbol definition: "+symbol, "symbol_definition", 2.8, definition.Line, symbol, "")
+			}
+		}
 	}
 
 	for _, probe := range pathProbes {
@@ -383,7 +409,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 		}
 	}
 
-	if taskType == codeSearchTaskExecutionTrace || taskType == codeSearchTaskChangeImpact {
+	if taskType == codeSearchTaskExecutionTrace || isCodeSearchImpactLikeTask(taskType) {
 		for _, probe := range exactProbes {
 			stageStart := time.Now()
 			hits, err := executionBridgeSearch(a.workspaceRoot, probe, input.Budget.MaxCandidates)
@@ -408,7 +434,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 
 	var motifHits []contextplane.RepoMotifSearchHit
 	motifPathScores := map[string]float64{}
-	if taskType == codeSearchTaskExecutionTrace || taskType == codeSearchTaskFileLocate {
+	if (taskType == codeSearchTaskExecutionTrace || taskType == codeSearchTaskFileLocate) && (!fastProbeMode || input.Budget.AllowScouts) {
 		stageStart := time.Now()
 		var motifErr error
 		motifHits, motifErr = a.searchRepoMotifs(ctx, input.Query, input.Budget.MaxCandidates)
@@ -427,7 +453,11 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 	defer func() { _ = store.Close() }()
 	querySvc := repoquery.NewQueryService(repoindex.NewQueryEngine(store))
 
-	for _, probe := range codeSearchRepoProbes(input.Query) {
+	repoProbes := codeSearchRepoProbes(input.Query)
+	if fastProbeMode && taskType == codeSearchTaskExecutionTrace {
+		repoProbes = limitCodeSearchProbeList(repoProbes, 3)
+	}
+	for _, probe := range repoProbes {
 		stageStart := time.Now()
 		searchOut, err := querySvc.SearchWithProjection(ctx, repoquery.SearchRequest{
 			Query: probe,
@@ -466,6 +496,9 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 			{query: traceAnchors.TargetQuery, exactProbes: traceAnchors.TargetExactProbes, source: "trace_target_repo", label: "trace target repo anchor"},
 		} {
 			probes := codeSearchExecutionTraceSideRepoProbes(side.query, side.exactProbes)
+			if fastProbeMode {
+				probes = limitCodeSearchProbeList(probes, 2)
+			}
 			for _, probe := range probes {
 				stageStart := time.Now()
 				searchOut, err := querySvc.SearchWithProjection(ctx, repoquery.SearchRequest{
@@ -561,7 +594,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 
 	routeFamily = inferCodeSearchRouteFamilyFromCandidates(taskType, input.Query, candidates)
 	metadata["route_family"] = string(routeFamily)
-	autoACA := taskType == codeSearchTaskFileLocate || taskType == codeSearchTaskChangeImpact
+	autoACA := taskType == codeSearchTaskFileLocate || isCodeSearchImpactLikeTask(taskType)
 	metadata["aca_auto_enabled"] = autoACA
 	if input.Constraints.IncludeACA || autoACA {
 		stageStart := time.Now()
@@ -619,7 +652,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 		}
 	}
 
-	if taskType == codeSearchTaskChangeImpact {
+	if isCodeSearchImpactLikeTask(taskType) {
 		stageStart := time.Now()
 		impactHits, impactAnchors, impactGaps := codeSearchImpactAugment(ctx, querySvc, candidates, input.Budget.MaxCandidates)
 		a.telemetry.record("impact_graph", time.Since(stageStart), nil)
@@ -868,7 +901,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 			}
 		}
 
-		if taskType == codeSearchTaskExecutionTrace || taskType == codeSearchTaskChangeImpact {
+		if taskType == codeSearchTaskExecutionTrace || isCodeSearchImpactLikeTask(taskType) {
 			neighborPaths := make([]string, 0, 8)
 			if taskType == codeSearchTaskExecutionTrace {
 				protocolImplPaths := codeSearchProtocolImplementationPaths(a.workspaceRoot, filePath, content, 2)
@@ -881,7 +914,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 					continue
 				}
 				directions := []repoindex.Direction{repoindex.DirOut}
-				if taskType == codeSearchTaskChangeImpact {
+				if isCodeSearchImpactLikeTask(taskType) {
 					directions = []repoindex.Direction{repoindex.DirOut, repoindex.DirIn}
 				}
 				for _, direction := range directions {
@@ -1042,11 +1075,6 @@ func (a *ReadOnlyAdapter) searchACAGuidance(ctx context.Context, query string, r
 		return nil, err
 	}
 	defer func() { _ = repoStore.Close() }()
-	memStore, err := memorystore.OpenWithConfig(ctx, a.cfg)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = memStore.Close() }()
 	workspaceStore := contextplane.NewWorkspaceStore(a.workspaceRoot)
 	opts := workspaceStore.CurrentRetrievalOptions()
 	opts.IncludeTopOfMindResult = false
@@ -1056,13 +1084,13 @@ func (a *ReadOnlyAdapter) searchACAGuidance(ctx context.Context, query string, r
 	opts.UseHandoffRefBoost = false
 	opts.IncludeControlPlaneRefs = false
 	opts.UseSemanticVaultSearch = false
+	opts.UseRepoMotifPrior = false
+	opts.UseCoChangePrior = false
 	if routeFamily == codeSearchRoutePackageOwner {
-		opts.UseRepoMotifPrior = false
 		opts.UseCodeHints = false
-		opts.UseCoChangePrior = false
 	}
 	opts.AllowedTrusts = []string{"canonical"}
-	result, err := workspaceStore.RetrieveWithOptionsAndMemory(ctx, index, repoStore, nil, memStore, query, limit, opts)
+	result, err := workspaceStore.RetrieveWithOptionsAndMemory(ctx, index, repoStore, nil, nil, query, limit, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -1605,7 +1633,7 @@ func codeSearchACAGuidanceSupport(taskType string, hit contextplane.RetrievalHit
 	switch taskType {
 	case codeSearchTaskFileLocate, codeSearchTaskSymbolInspect:
 		base = 0.82
-	case codeSearchTaskChangeImpact, codeSearchTaskRegistrationTrace:
+	case codeSearchTaskChangeImpact, codeSearchTaskRegistrationTrace, codeSearchTaskArchitectureMap, codeSearchTaskSubsystemMap, codeSearchTaskIntegrationSurface:
 		base = 0.72
 	case codeSearchTaskExecutionTrace:
 		base = 0.62
@@ -1680,7 +1708,7 @@ func acaRepoPathExists(workspaceRoot, repoPath string) bool {
 }
 
 func inferCodeSearchRouteFamily(taskType string, hits []contextplane.RetrievalHit) codeSearchRouteFamily {
-	if taskType == codeSearchTaskChangeImpact {
+	if isCodeSearchImpactLikeTask(taskType) {
 		for _, hit := range hits {
 			pathValue := strings.ToLower(strings.TrimSpace(hit.Path))
 			if strings.HasPrefix(pathValue, "notes/repo/") && !strings.Contains(pathValue, "/packages/") && !strings.Contains(pathValue, "/concepts/") {
@@ -1716,7 +1744,7 @@ func acaHitLooksPackageOwner(hit contextplane.RetrievalHit) bool {
 }
 
 func inferCodeSearchRouteFamilyFromCandidates(taskType, query string, candidates map[string]*codeSearchCandidate) codeSearchRouteFamily {
-	if taskType == codeSearchTaskChangeImpact {
+	if isCodeSearchImpactLikeTask(taskType) {
 		return codeSearchRouteCochangeHistory
 	}
 	if len(candidates) == 0 {
@@ -2158,10 +2186,25 @@ func normalizeCodeSearchTaskType(taskType string) (string, bool) {
 		return codeSearchTaskChangeImpact, false
 	case codeSearchTaskRegistrationTrace:
 		return codeSearchTaskRegistrationTrace, false
+	case codeSearchTaskArchitectureMap:
+		return codeSearchTaskArchitectureMap, false
+	case codeSearchTaskSubsystemMap:
+		return codeSearchTaskSubsystemMap, false
+	case codeSearchTaskIntegrationSurface:
+		return codeSearchTaskIntegrationSurface, false
 	case "":
 		return codeSearchTaskFileLocate, true
 	default:
 		return codeSearchTaskFileLocate, true
+	}
+}
+
+func isCodeSearchImpactLikeTask(taskType string) bool {
+	switch strings.TrimSpace(taskType) {
+	case codeSearchTaskChangeImpact, codeSearchTaskArchitectureMap, codeSearchTaskSubsystemMap, codeSearchTaskIntegrationSurface:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -2247,7 +2290,7 @@ func codeSearchTaskExactProbes(query, taskType string) []string {
 	for _, probe := range codeSearchExactProbes(query) {
 		add(probe)
 	}
-	if taskType == codeSearchTaskExecutionTrace || taskType == codeSearchTaskChangeImpact {
+	if taskType == codeSearchTaskExecutionTrace || isCodeSearchImpactLikeTask(taskType) {
 		for _, probe := range normalizedExactProbePrefixes(codeSearchExactProbes(query)) {
 			add(probe)
 			if len(out) >= 6 {
@@ -2419,7 +2462,7 @@ func codeSearchPathProbes(query string) []string {
 
 func codeSearchTaskPathProbes(query, taskType string, exactProbes []string) []string {
 	base := codeSearchPathProbes(query)
-	if taskType != codeSearchTaskExecutionTrace && taskType != codeSearchTaskChangeImpact {
+	if taskType != codeSearchTaskExecutionTrace && !isCodeSearchImpactLikeTask(taskType) {
 		return base
 	}
 	seen := map[string]struct{}{}
@@ -2457,6 +2500,13 @@ func codeSearchTaskPathProbes(query, taskType string, exactProbes []string) []st
 		out = append(out, probe)
 	}
 	return out
+}
+
+func limitCodeSearchProbeList(probes []string, limit int) []string {
+	if limit <= 0 || len(probes) <= limit {
+		return probes
+	}
+	return append([]string(nil), probes[:limit]...)
 }
 
 func deriveExecutionTraceAnchors(query, taskType string) codeSearchTraceAnchors {
@@ -2574,7 +2624,7 @@ func codeSearchPhraseIdentifierProbes(query string) []string {
 }
 
 func looksLikeCodeProbe(token string) bool {
-	if strings.Contains(token, "_") || strings.Contains(token, "/") || strings.Contains(token, ".") || strings.Contains(token, ":") {
+	if strings.Contains(token, "_") || strings.Contains(token, "-") || strings.Contains(token, "/") || strings.Contains(token, ".") || strings.Contains(token, ":") {
 		return true
 	}
 	if isLikelyPascalCodeIdentifier(token) {
@@ -2801,7 +2851,7 @@ func rankCodeSearchCandidatesWithPlan(candidates map[string]*codeSearchCandidate
 		case codeSearchTaskFileLocate:
 			candidate.Support += symbolScore * 0.35
 			candidate.Support -= subtypePenalty * 0.2
-		case codeSearchTaskExecutionTrace, codeSearchTaskChangeImpact, codeSearchTaskRegistrationTrace:
+		case codeSearchTaskExecutionTrace, codeSearchTaskChangeImpact, codeSearchTaskRegistrationTrace, codeSearchTaskArchitectureMap, codeSearchTaskSubsystemMap, codeSearchTaskIntegrationSurface:
 			candidate.Support += symbolScore * 0.2
 			candidate.Support -= subtypePenalty * 0.15
 		default:
@@ -2867,6 +2917,9 @@ func rankCodeSearchCandidatesWithPlan(candidates map[string]*codeSearchCandidate
 		if candidateHasSource(candidate, "exact_probe") {
 			candidate.Support += 0.2
 		}
+		if taskType == codeSearchTaskSymbolInspect && candidateHasSource(candidate, "symbol_definition") {
+			candidate.Support += 3.0
+		}
 		if len(exactProbes) > 0 && codeSearchPathTermScore(candidate.Path, pathTerms) == 0 && !candidateHasSource(candidate, "exact_probe") {
 			candidate.Support -= 0.25
 		}
@@ -2878,7 +2931,7 @@ func rankCodeSearchCandidatesWithPlan(candidates map[string]*codeSearchCandidate
 				candidate.Support -= 0.25
 			}
 		}
-		if (taskType == codeSearchTaskExecutionTrace || taskType == codeSearchTaskChangeImpact) && candidateHasSource(candidate, "execution_bridge") {
+		if (taskType == codeSearchTaskExecutionTrace || isCodeSearchImpactLikeTask(taskType)) && candidateHasSource(candidate, "execution_bridge") {
 			candidate.Support += 1.5
 		}
 		if taskType == codeSearchTaskExecutionTrace && candidateHasSource(candidate, "execution_graph") {
@@ -2922,7 +2975,7 @@ func rankCodeSearchCandidatesWithPlan(candidates map[string]*codeSearchCandidate
 		if strings.HasSuffix(candidate.Path, "_test.go") {
 			penalty := 0.6
 			switch taskType {
-			case codeSearchTaskExecutionTrace, codeSearchTaskChangeImpact, codeSearchTaskRegistrationTrace:
+			case codeSearchTaskExecutionTrace, codeSearchTaskChangeImpact, codeSearchTaskRegistrationTrace, codeSearchTaskArchitectureMap, codeSearchTaskSubsystemMap, codeSearchTaskIntegrationSurface:
 				penalty = 1.25
 			}
 			candidate.Support -= penalty
@@ -3112,7 +3165,7 @@ func codeSearchPathTerms(query string) []string {
 
 func isGenericCodeSearchPathWord(word string) bool {
 	switch strings.ToLower(strings.TrimSpace(word)) {
-	case "", "the", "where", "which", "what", "does", "with", "from", "into", "to", "in", "of", "for", "on", "at", "by", "via", "and", "or", "that", "this", "these", "those", "change", "changes", "changed", "file", "files", "path", "paths", "anchor", "anchors", "directly", "implemented", "defines", "defined", "connect", "connects", "used", "execution", "declared", "implementation", "manifest", "skill", "skills", "package", "packages":
+	case "", "the", "where", "which", "what", "does", "with", "from", "into", "to", "in", "of", "for", "on", "at", "by", "via", "and", "or", "that", "this", "these", "those", "change", "changes", "changed", "file", "files", "path", "paths", "anchor", "anchors", "directly", "implemented", "defines", "defined", "connect", "connects", "used", "execution", "declared", "implementation", "manifest", "skill", "skills", "package", "packages", "required", "evidence":
 		return true
 	default:
 		return false
@@ -3527,7 +3580,7 @@ func prioritizedGroundingCandidates(ranked []*codeSearchCandidate, query, taskTy
 		if candidateHasAnySource(candidate, "trace_source_anchor", "trace_source_repo") {
 			return false
 		}
-		return candidateHasAnySource(candidate, "path_probe", "exact_probe", "search_repo")
+		return candidateHasAnySource(candidate, "path_probe", "exact_probe", "search_repo", "execution_bridge")
 	}, func(candidate *codeSearchCandidate) float64 {
 		targetAffinity := executionTraceCandidateAffinity(candidate, targetTerms, traceAnchors.TargetPathProbes, traceAnchors.TargetExactProbes)
 		score := executionTraceAnchorPreference(candidate) + (targetAffinity * 2.4)
@@ -3547,10 +3600,13 @@ func prioritizedGroundingCandidates(ranked []*codeSearchCandidate, query, taskTy
 			score += 2.0
 		}
 		if candidateHasSource(candidate, "execution_bridge") {
-			score += 1.4
+			score += 1.4 + codeSearchExecutionBridgeWeight(candidate.Path)
 		}
 		if candidateHasSource(candidate, "execution_graph") {
 			score += 0.6
+		}
+		if candidateHasAnySource(candidate, "trace_source_anchor", "trace_source_repo", "trace_target_anchor", "trace_target_repo") {
+			score -= 1.35
 		}
 		return score
 	})
@@ -4678,6 +4734,22 @@ type codeSearchBridgeTuple struct {
 	Query        string
 }
 
+func shouldSkipCodeSearchEnsembleDir(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch name {
+	case "node_modules", "deps", "_build", "tmp", "temp", "dist", "build", "out", "archive", "vendor", "cover", "coverage", "prompt-exports", "Pods":
+		return true
+	default:
+		return false
+	}
+}
+
 func exactCodeProbeSearch(workspaceRoot, probe string, limit int) ([]codeSearchExactHit, error) {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	probe = strings.TrimSpace(probe)
@@ -4698,8 +4770,7 @@ func exactCodeProbeSearch(workspaceRoot, probe string, limit int) ([]codeSearchE
 			return nil
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", ".idea", ".vscode", "tmp", "dist", "build":
+			if shouldSkipCodeSearchEnsembleDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -4772,8 +4843,7 @@ func codeSearchPathProbeSearch(workspaceRoot, probe string, limit int) ([]codeSe
 			return nil
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", ".idea", ".vscode", "tmp", "dist", "build":
+			if shouldSkipCodeSearchEnsembleDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -4838,8 +4908,7 @@ func executionBridgeSearch(workspaceRoot, probe string, limit int) ([]codeSearch
 			return nil
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", ".idea", ".vscode", "tmp", "dist", "build":
+			if shouldSkipCodeSearchEnsembleDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -6192,8 +6261,7 @@ func registrationSiteSearch(workspaceRoot, symbol string, limit int) ([]registra
 			return nil
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", ".idea", ".vscode", "tmp", "dist", "build":
+			if shouldSkipCodeSearchEnsembleDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -6262,8 +6330,12 @@ func dedupeRegistrationHits(in []registrationTraceHit) []registrationTraceHit {
 }
 
 func isLikelyTextCodeFile(path string) bool {
+	switch strings.ToLower(filepath.Base(path)) {
+	case "makefile", "dockerfile", "justfile":
+		return true
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".go", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", ".yml", ".md", ".txt", ".sql", ".tf", ".sh", ".py", ".proto", ".ex", ".exs":
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", ".yml", ".md", ".txt", ".sql", ".tf", ".sh", ".py", ".proto", ".ex", ".exs", ".cs":
 		return true
 	default:
 		return false
@@ -6272,7 +6344,7 @@ func isLikelyTextCodeFile(path string) bool {
 
 func codeSearchFileWeight(path string) float64 {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".sql", ".tf", ".proto", ".ex", ".exs":
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".sql", ".tf", ".proto", ".ex", ".exs", ".cs":
 		return 0.98
 	case ".json", ".yaml", ".yml", ".sh":
 		return 0.8

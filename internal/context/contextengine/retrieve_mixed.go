@@ -162,10 +162,8 @@ func fuseNodes(nodes []EvidenceNode) []EvidenceNode {
 			if !containsLane(lanes, incomingLane) {
 				lanes = append(lanes, incomingLane)
 			}
-			if existing.Metadata == nil {
-				existing.Metadata = map[string]any{}
-			}
-			existing.Metadata["source_lanes"] = lanes
+			metadata := mergeNodeMetadata(existing.Metadata, node.Metadata)
+			metadata["source_lanes"] = lanes
 
 			// Take the higher confidence.
 			if node.Confidence > existing.Confidence {
@@ -179,6 +177,17 @@ func fuseNodes(nodes []EvidenceNode) []EvidenceNode {
 				} else {
 					existing.Statement = node.Statement
 				}
+			}
+			if preferFusedCanonicalNode(node, *existing) {
+				statement := existing.Statement
+				confidence := existing.Confidence
+				fusedNode := node
+				fusedNode.Statement = statement
+				fusedNode.Confidence = confidence
+				fusedNode.Metadata = metadata
+				fused[idx] = fusedNode
+			} else {
+				existing.Metadata = metadata
 			}
 		} else {
 			// First occurrence: set source_lanes from node's own lane type.
@@ -196,6 +205,52 @@ func fuseNodes(nodes []EvidenceNode) []EvidenceNode {
 	}
 
 	return fused
+}
+
+func preferFusedCanonicalNode(candidate EvidenceNode, current EvidenceNode) bool {
+	if rank := fusedNodeTypeRank(candidate.NodeType) - fusedNodeTypeRank(current.NodeType); rank != 0 {
+		return rank > 0
+	}
+	if groundingRank(candidate.Grounding) != groundingRank(current.Grounding) {
+		return groundingRank(candidate.Grounding) > groundingRank(current.Grounding)
+	}
+	if candidate.Confidence != current.Confidence {
+		return candidate.Confidence > current.Confidence
+	}
+	if candidate.ID != current.ID {
+		return candidate.ID < current.ID
+	}
+	return false
+}
+
+func fusedNodeTypeRank(nodeType EvidenceNodeType) int {
+	switch nodeType {
+	case EvidenceNodeTypeCode:
+		return 50
+	case EvidenceNodeTypeMemory:
+		return 40
+	case EvidenceNodeTypeTask:
+		return 30
+	case EvidenceNodeTypeContext:
+		return 20
+	case EvidenceNodeTypeRetrieval:
+		return 10
+	default:
+		return 0
+	}
+}
+
+func mergeNodeMetadata(left, right map[string]any) map[string]any {
+	out := make(map[string]any, len(left)+len(right)+1)
+	for k, v := range left {
+		out[k] = v
+	}
+	for k, v := range right {
+		if _, ok := out[k]; !ok {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // extractLanes gets the source_lanes from metadata.
@@ -244,6 +299,8 @@ func nodeTypeToLane(nt EvidenceNodeType) EvidenceLane {
 		return LaneContext
 	case EvidenceNodeTypeTask:
 		return LaneTask
+	case EvidenceNodeTypeRetrieval:
+		return LaneContext
 	default:
 		return LaneMixed
 	}

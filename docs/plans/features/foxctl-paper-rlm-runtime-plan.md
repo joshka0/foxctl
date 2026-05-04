@@ -26,6 +26,30 @@ enough for other foxctl tasks.
 Async fan-out/fan-in recursion is tracked as the next implementation phase in
 [rlm-recursive-fanout-runtime-plan.md](rlm-recursive-fanout-runtime-plan.md).
 
+## Direction Update: Simplify The Harness
+
+Recent LongCoT lambda probes showed that the strict parent-verifier harness can
+become a burden instead of an additive runtime. Gemini can solve some easy tasks
+without the full ceremony, while the forced sequence of context dump, three
+children, verifier-code generation, schema artifacts, repair children, and final
+handoff adds token cost and new failure modes.
+
+The next experimental path is `rlm_lambda_adaptive_single`: keep the useful RLM
+properties, but remove mandatory ceremony. The runtime should first allow a
+direct REPL-backed solve, register the resulting `solution =` candidate, and
+only add recursion or verifier code after concrete failure. Recursion becomes a
+repair/escalation mechanism, not the default shape. If this simpler condition
+beats the strict lambda/BRAID variants, make it the default LongCoT RLM harness
+and keep stricter graph/certification paths for tasks that demonstrably need
+them.
+
+The current simplification moves the LongCoT Lambda-RLM handoff to a single
+structured sentinel first: `RLM_ANSWER_JSON={"answer":"solution = ...","pass":true,"checks":[...]}`.
+Deterministic failures can still be surfaced as
+`RLM_CHECK_JSON={"pass":false,"reason":"..."}` and should block final
+forwarding. BRAID-style graph certification remains a later certification layer,
+not a prerequisite for the adaptive experiment.
+
 ## Current State
 
 `internal/rlm` is currently a bounded tool-orchestration layer, not a paper

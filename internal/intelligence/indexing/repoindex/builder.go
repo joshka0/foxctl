@@ -7,7 +7,6 @@ import (
 	"go/ast"
 	"go/types"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -27,6 +26,7 @@ const (
 	goPkgPrefix         = "go:"
 	pythonPkgPrefix     = "py:"
 	rustPkgPrefix       = "rs:"
+	csharpPkgPrefix     = "cs:"
 	tsLocalPrefix       = "ts:local:"
 	tsNpmPrefix         = "ts:npm:"
 	elixirPkgPrefix     = "ex:"
@@ -63,6 +63,19 @@ func NewBuilder(store *Store, repoRoot string) *Builder {
 // - Keywords: repo_index_build, repoindex, nodes, edges, repo_key, schema_version, buildGo, buildTS, buildElixir, ReplaceAll
 func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	result := BuildResult{}
+	start := time.Now()
+	report := func(phase, message string) {
+		if opts.Progress == nil {
+			return
+		}
+		opts.Progress(BuildProgress{
+			Phase:     phase,
+			Message:   message,
+			ElapsedMs: time.Since(start).Milliseconds(),
+			Time:      time.Now().UTC(),
+			Result:    result,
+		})
+	}
 	if opts.RepoRoot == "" {
 		opts.RepoRoot = b.repoRoot
 	}
@@ -75,9 +88,10 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	if len(opts.Patterns) == 0 {
 		opts.Patterns = []string{"./..."}
 	}
-	if !opts.IncludeGo && !opts.IncludePython && !opts.IncludeRust && !opts.IncludeTypescript && !opts.IncludeElixir && !opts.IncludeTerraform && !opts.IncludeKubernetes && !opts.IncludeShell {
+	if !opts.IncludeGo && !opts.IncludePython && !opts.IncludeRust && !opts.IncludeCSharp && !opts.IncludeTypescript && !opts.IncludeElixir && !opts.IncludeTerraform && !opts.IncludeKubernetes && !opts.IncludeShell {
 		return result, fmt.Errorf("repoindex: at least one language or config family must be enabled")
 	}
+	report("start", "initialized repoindex build")
 
 	nodes := make(map[string]Node)
 	edges := make(map[string]Edge)
@@ -86,49 +100,74 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	var locators []LocatorEntry
 
 	if opts.IncludeGo {
+		report("go", "building Go package graph")
 		if err := b.buildGo(ctx, opts, nodes, edges, &result, &locators); err != nil {
 			return result, err
 		}
+		report("go", "finished Go package graph")
 	}
 	if opts.IncludePython {
+		report("python", "building Python graph")
 		if err := b.buildPython(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
 			return result, err
 		}
+		report("python", "finished Python graph")
 	}
 	if opts.IncludeRust {
+		report("rust", "building Rust graph")
 		if err := b.buildRust(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
 			return result, err
 		}
+		report("rust", "finished Rust graph")
+	}
+	if opts.IncludeCSharp {
+		report("csharp", "building C# graph")
+		if err := b.buildCSharp(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
+			return result, err
+		}
+		report("csharp", "finished C# graph")
 	}
 	if opts.IncludeTypescript {
+		report("typescript", "building TypeScript graph")
 		if err := b.buildTS(ctx, opts, nodes, edges, &result, &pending, &pendingFileSymbols, &locators); err != nil {
 			return result, err
 		}
+		report("typescript", "finished TypeScript graph")
 	}
 	if opts.IncludeElixir {
+		report("elixir", "building Elixir graph")
 		if err := b.buildElixir(ctx, opts, nodes, edges, &result, &pending, &locators); err != nil {
 			return result, err
 		}
+		report("elixir", "finished Elixir graph")
 	}
 	if opts.IncludeTerraform {
+		report("terraform", "building Terraform graph")
 		if err := b.buildTerraform(ctx, opts, nodes, edges, &result); err != nil {
 			return result, err
 		}
+		report("terraform", "finished Terraform graph")
 	}
 	if opts.IncludeKubernetes {
+		report("kubernetes", "building Kubernetes graph")
 		if err := b.buildKubernetes(ctx, opts, nodes, edges, &result); err != nil {
 			return result, err
 		}
+		report("kubernetes", "finished Kubernetes graph")
 	}
 	if opts.IncludeShell {
+		report("shell", "building shell graph")
 		if err := b.buildShell(ctx, opts, nodes, edges, &result); err != nil {
 			return result, err
 		}
+		report("shell", "finished shell graph")
 	}
 
+	report("resolve", "resolving pending graph edges")
 	applyPendingNameEdges(nodes, edges, pending)
 	applyPendingFileSymbolEdges(nodes, edges, pendingFileSymbols)
 
+	report("rollups", "building package and repo rollups")
 	localPackages := collectLocalPackages(nodes, opts.RepoKey)
 	applyPackageRollups(nodes, localPackages)
 	applyRepoRollup(nodes, edges, opts.RepoKey, opts.RepoRoot, localPackages)
@@ -147,30 +186,102 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	}
 
 	if opts.DryRun {
+		report("done", "dry run complete")
 		return result, nil
 	}
 
+	report("persist", "replacing repoindex store")
 	if err := b.store.ReplaceAll(ctx, nodeList, edgeList); err != nil {
 		return result, err
 	}
+	report("persist", "upserting symbol locators")
 	for _, loc := range locators {
 		if err := b.store.UpsertLocator(ctx, loc); err != nil {
 			return result, fmt.Errorf("repoindex: upsert locator: %w", err)
 		}
 	}
 
-	meta := IndexMeta{
+	snapshot := ResolveGitSnapshot(ctx, opts.RepoRoot)
+	report("persist", "updating file state")
+	if err := b.store.ReplaceFileStates(ctx, buildFileStates(opts.RepoRoot, nodeList, snapshot.HeadSHA)); err != nil {
+		return result, fmt.Errorf("repoindex: replace file state: %w", err)
+	}
+
+	meta := IndexMetaFromGitSnapshot(IndexMeta{
 		RepoRoot:      opts.RepoRoot,
-		HeadSHA:       resolveGitHead(ctx, opts.RepoRoot),
 		SchemaVersion: schemaVersion,
 		IndexedAt:     time.Now().UTC(),
 		Languages:     buildLanguages(opts),
-	}
+	}, snapshot)
 	if err := b.store.SetMeta(ctx, meta); err != nil {
 		return result, err
 	}
 
+	report("done", "repoindex build complete")
 	return result, nil
+}
+
+func buildFileStates(repoRoot string, nodes []Node, headSHA string) []FileState {
+	seen := map[string]struct{}{}
+	states := make([]FileState, 0)
+	for _, node := range nodes {
+		if node.Kind != NodeFile {
+			continue
+		}
+		pathValue := filepath.ToSlash(strings.TrimSpace(node.File))
+		if pathValue == "" {
+			continue
+		}
+		if _, ok := seen[pathValue]; ok {
+			continue
+		}
+		seen[pathValue] = struct{}{}
+		state, ok := fileStateForPath(repoRoot, pathValue, headSHA)
+		if ok {
+			states = append(states, state)
+		}
+	}
+	sort.SliceStable(states, func(i, j int) bool {
+		return states[i].Path < states[j].Path
+	})
+	return states
+}
+
+func fileStateForPath(repoRoot, pathValue, headSHA string) (FileState, bool) {
+	pathValue = filepath.ToSlash(strings.TrimSpace(pathValue))
+	if pathValue == "" {
+		return FileState{}, false
+	}
+	fullPath := filepath.Join(repoRoot, filepath.FromSlash(pathValue))
+	info, err := os.Stat(fullPath)
+	if err != nil || info.IsDir() {
+		return FileState{}, false
+	}
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return FileState{}, false
+	}
+	return FileState{
+		Path:            pathValue,
+		ContentHash:     symbol.ComputeDigest(content),
+		SizeBytes:       info.Size(),
+		MTimeUnix:       info.ModTime().Unix(),
+		Language:        languageForPath(pathValue),
+		IndexedAt:       time.Now().UTC(),
+		LastSeenHeadSHA: headSHA,
+	}, true
+}
+
+func reportBuildProgress(opts BuildOptions, phase, message string, result BuildResult) {
+	if opts.Progress == nil {
+		return
+	}
+	opts.Progress(BuildProgress{
+		Phase:   phase,
+		Message: message,
+		Time:    time.Now().UTC(),
+		Result:  result,
+	})
 }
 
 func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, locators *[]LocatorEntry) error {
@@ -180,6 +291,7 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedImports | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo,
 		Tests:   opts.IncludeTests,
 	}
+	reportBuildProgress(opts, "go_load_packages", "loading Go packages", *result)
 	pkgs, err := packages.Load(cfg, opts.Patterns...)
 	if err != nil {
 		return fmt.Errorf("repoindex: load go packages: %w", err)
@@ -187,6 +299,7 @@ func (b *Builder) buildGo(ctx context.Context, opts BuildOptions, nodes map[stri
 	if packages.PrintErrors(pkgs) > 0 {
 		return fmt.Errorf("repoindex: go packages load errors")
 	}
+	reportBuildProgress(opts, "go_load_packages", fmt.Sprintf("loaded %d Go packages", len(pkgs)), *result)
 
 	for _, pkg := range pkgs {
 		pkgID := goPackageID(pkg.PkgPath)
@@ -696,6 +809,123 @@ func (b *Builder) buildRust(ctx context.Context, opts BuildOptions, nodes map[st
 			}
 		}
 	}
+
+	return nil
+}
+
+func (b *Builder) buildCSharp(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult, pending *[]pendingNameEdge, locators *[]LocatorEntry) error {
+	extractor := b.registry.Get("csharp")
+	if extractor == nil {
+		return fmt.Errorf("repoindex: no csharp extractor registered")
+	}
+
+	exclude := []string{
+		"bin/**",
+		"obj/**",
+		"node_modules/**",
+		"vendor/**",
+		"dist/**",
+		"build/**",
+		".git/**",
+		"**/*.g.cs",
+		"**/*.designer.cs",
+	}
+
+	files, err := fsutil.FindFilesRespectingGitignore(opts.RepoRoot, "**/*.cs", exclude)
+	if err != nil {
+		return fmt.Errorf("repoindex: find csharp files: %w", err)
+	}
+	sort.Strings(files)
+
+	seenPackages := make(map[string]bool)
+	projectGraph := loadCSharpProjectGraph(opts.RepoRoot, files)
+	indexedFiles := make([]csharpIndexedFile, 0, len(files))
+	for _, fileRelPath := range files {
+		if !opts.IncludeTests && fsutil.IsTestFile(fileRelPath) {
+			continue
+		}
+		absPath := filepath.Join(opts.RepoRoot, fileRelPath)
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			return fmt.Errorf("repoindex: read csharp file %s: %w", fileRelPath, err)
+		}
+
+		pkgID := csharpPackageID(fileRelPath, content)
+		pkgNodeID := PackageID(opts.RepoKey, pkgID)
+		addNode(nodes, Node{
+			ID:        pkgNodeID,
+			Kind:      NodePackage,
+			Pkg:       pkgID,
+			Name:      strings.TrimPrefix(pkgID, csharpPkgPrefix),
+			UpdatedAt: time.Now().UTC(),
+		})
+		if !seenPackages[pkgID] {
+			result.Packages++
+			seenPackages[pkgID] = true
+		}
+
+		lineCount := countLines(content)
+		fileNodeID := FileID(opts.RepoKey, pkgID, fileRelPath)
+		fileNode := Node{
+			ID:        fileNodeID,
+			Kind:      NodeFile,
+			Pkg:       pkgID,
+			File:      fileRelPath,
+			Name:      filepath.Base(fileRelPath),
+			SpanStart: 1,
+			SpanEnd:   lineCount,
+			Hash:      symbol.ComputeDigest(content),
+			UpdatedAt: time.Now().UTC(),
+		}
+		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
+		addNode(nodes, fileNode)
+		addEdge(edges, Edge{
+			Src:    pkgNodeID,
+			Dst:    fileNode.ID,
+			Type:   EdgeContains,
+			Weight: 1.0,
+		})
+		result.Files++
+		indexedFiles = append(indexedFiles, csharpIndexedFile{
+			RelPath:    fileRelPath,
+			PkgID:      pkgID,
+			FileNodeID: fileNode.ID,
+			Project:    projectGraph.ProjectForFile(fileRelPath),
+			Usings:     extractCSharpUsings(content),
+		})
+
+		syms, err := extractor.Extract(ctx, fileRelPath, content)
+		if err != nil {
+			return fmt.Errorf("repoindex: extract csharp symbols %s: %w", fileRelPath, err)
+		}
+		for _, sym := range syms {
+			sym.Key = symbol.CSharpSymbolKey(sym.Name, isExportedSymbol(sym), filepath.Base(fileRelPath))
+			srcID := SymbolID(opts.RepoKey, pkgID, sym.EffectiveID())
+			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym, locators)
+			result.Symbols++
+
+			callNames, err := extractor.ExtractCalls(ctx, sym, content)
+			if err == nil && len(callNames) > 0 && pending != nil {
+				callNames = capList(callNames, 50)
+				for _, callName := range callNames {
+					callName = strings.TrimSpace(callName)
+					if callName == "" {
+						continue
+					}
+					*pending = append(*pending, pendingNameEdge{
+						SrcID:      srcID,
+						SrcPkg:     pkgID,
+						SrcFile:    fileRelPath,
+						TargetName: callName,
+						Type:       EdgeCalls,
+						Weight:     0.85,
+					})
+				}
+			}
+		}
+	}
+
+	applyCSharpRelations(nodes, edges, opts.RepoKey, projectGraph, indexedFiles)
 
 	return nil
 }
@@ -1564,6 +1794,10 @@ func isExportedSymbol(sym symbol.Symbol) bool {
 		signature := strings.TrimSpace(sym.Signature)
 		return strings.HasPrefix(signature, "pub ") || strings.HasPrefix(signature, "pub(")
 	}
+	if sym.Language == "csharp" {
+		signature := strings.TrimSpace(sym.Signature)
+		return strings.HasPrefix(signature, "public ") || strings.HasPrefix(signature, "protected ") || strings.HasPrefix(signature, "internal ")
+	}
 	name := strings.TrimSpace(sym.Name)
 	if sym.Language == "go" && sym.Kind == symbol.KindMethod {
 		if idx := strings.LastIndex(name, "."); idx >= 0 && idx+1 < len(name) {
@@ -1600,8 +1834,35 @@ func languageFromPackageID(pkgID string) string {
 		return "python"
 	case strings.HasPrefix(pkgID, rustPkgPrefix):
 		return "rust"
+	case strings.HasPrefix(pkgID, csharpPkgPrefix):
+		return "csharp"
 	case strings.HasPrefix(pkgID, elixirPkgPrefix):
 		return "elixir"
+	default:
+		return ""
+	}
+}
+
+func languageForPath(pathValue string) string {
+	switch strings.ToLower(filepath.Ext(filepath.ToSlash(pathValue))) {
+	case ".go":
+		return "go"
+	case ".py":
+		return "python"
+	case ".rs":
+		return "rust"
+	case ".cs":
+		return "csharp"
+	case ".ts", ".tsx", ".js", ".jsx":
+		return "typescript"
+	case ".ex", ".exs":
+		return "elixir"
+	case ".tf", ".tfvars":
+		return "terraform"
+	case ".sh", ".bash", ".zsh":
+		return "shell"
+	case ".yaml", ".yml":
+		return "yaml"
 	default:
 		return ""
 	}
@@ -1618,15 +1879,6 @@ func importMeta(path string) []byte {
 	return meta
 }
 
-func resolveGitHead(ctx context.Context, repoRoot string) string {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "rev-parse", "HEAD")
-	output, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(output))
-}
-
 func buildLanguages(opts BuildOptions) []string {
 	languages := make([]string, 0, 7)
 	if opts.IncludeGo {
@@ -1637,6 +1889,9 @@ func buildLanguages(opts BuildOptions) []string {
 	}
 	if opts.IncludeRust {
 		languages = append(languages, "rust")
+	}
+	if opts.IncludeCSharp {
+		languages = append(languages, "csharp")
 	}
 	if opts.IncludeTypescript {
 		languages = append(languages, "typescript")
@@ -1680,4 +1935,31 @@ func rustModuleID(filePath string) string {
 		return rustPkgPrefix + "root"
 	}
 	return rustPkgPrefix + withoutExt
+}
+
+func csharpPackageID(filePath string, content []byte) string {
+	if ns := csharpNamespace(content); ns != "" {
+		return csharpPkgPrefix + ns
+	}
+	trimmed := strings.TrimSpace(filepath.ToSlash(filePath))
+	dir := filepath.Dir(trimmed)
+	if dir == "." || dir == "" {
+		return csharpPkgPrefix + "root"
+	}
+	return csharpPkgPrefix + dir
+}
+
+func csharpNamespace(content []byte) string {
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "namespace ") {
+			value := strings.TrimSpace(strings.TrimPrefix(line, "namespace "))
+			value = strings.Trim(value, " ;{")
+			if value != "" {
+				return value
+			}
+		}
+	}
+	return ""
 }

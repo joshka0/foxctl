@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,15 +41,30 @@ type Options struct {
 	// PreserveWorkDir keeps the session working directory after Close or process
 	// termination so failed runs can be inspected.
 	PreserveWorkDir bool
+	// AllowPackageInstall enables runtime-controlled pip installs into the
+	// session workdir. It is disabled by default.
+	AllowPackageInstall bool
+	// AllowedPackages is an allowlist of pip distribution names that may be
+	// installed through InstallPackages.
+	AllowedPackages []string
+	// PackageInstallTimeout bounds each pip install request. Defaults to 90s.
+	PackageInstallTimeout time.Duration
+	// PackageAliases maps import module names to allowed pip distribution names
+	// for automatic missing-import repair, e.g. "chess" -> "python-chess".
+	PackageAliases map[string]string
 }
 
 // PythonSession is a persistent Python subprocess that implements rlm.Sandbox.
 type PythonSession struct {
-	mu                sync.Mutex
-	pythonPath        string
-	maxOutputBytes    int
-	configuredWorkDir string
-	preserveWorkDir   bool
+	mu                    sync.Mutex
+	pythonPath            string
+	maxOutputBytes        int
+	configuredWorkDir     string
+	preserveWorkDir       bool
+	allowPackageInstall   bool
+	allowedPackages       map[string]struct{}
+	packageInstallTimeout time.Duration
+	packageAliases        map[string]string
 
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
@@ -58,10 +74,12 @@ type PythonSession struct {
 	waitErr   error
 	stderrLog *tailBuffer
 
-	workDir string
-	execSeq int
-	closed  bool
-	broken  bool
+	workDir           string
+	sitePackagesDir   string
+	execSeq           int
+	closed            bool
+	broken            bool
+	installedPackages map[string]struct{}
 }
 
 var _ rlm.Sandbox = (*PythonSession)(nil)
@@ -72,12 +90,21 @@ func NewPythonSession(opts Options) *PythonSession {
 	if maxOutputBytes <= 0 {
 		maxOutputBytes = defaultMaxOutputBytes
 	}
+	packageInstallTimeout := opts.PackageInstallTimeout
+	if packageInstallTimeout <= 0 {
+		packageInstallTimeout = 90 * time.Second
+	}
 	return &PythonSession{
-		pythonPath:        strings.TrimSpace(opts.PythonPath),
-		maxOutputBytes:    maxOutputBytes,
-		configuredWorkDir: strings.TrimSpace(opts.WorkDir),
-		preserveWorkDir:   opts.PreserveWorkDir,
-		stderrLog:         newTailBuffer(stderrTailBytes),
+		pythonPath:            strings.TrimSpace(opts.PythonPath),
+		maxOutputBytes:        maxOutputBytes,
+		configuredWorkDir:     strings.TrimSpace(opts.WorkDir),
+		preserveWorkDir:       opts.PreserveWorkDir,
+		allowPackageInstall:   opts.AllowPackageInstall,
+		allowedPackages:       normalizeAllowedPythonPackages(opts.AllowedPackages),
+		packageInstallTimeout: packageInstallTimeout,
+		packageAliases:        normalizePythonPackageAliases(opts.PackageAliases),
+		installedPackages:     map[string]struct{}{},
+		stderrLog:             newTailBuffer(stderrTailBytes),
 	}
 }
 
@@ -134,10 +161,11 @@ func (s *PythonSession) Init(ctx context.Context, state map[string]any) error {
 	} else if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return fmt.Errorf("create configured work dir: %w", err)
 	}
+	sitePackagesDir := filepath.Join(workDir, "site-packages")
 
 	cmd := exec.CommandContext(context.Background(), pythonPath, "-u", "-c", pythonBridgeScript)
 	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "FOXCTL_RLM_PARENT_PID="+strconv.Itoa(os.Getpid()))
+	cmd.Env = pythonSessionEnv(sitePackagesDir)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		_ = os.RemoveAll(workDir)
@@ -170,6 +198,7 @@ func (s *PythonSession) Init(ctx context.Context, state map[string]any) error {
 	s.waitErrCh = waitErrCh
 	s.waitErr = nil
 	s.workDir = workDir
+	s.sitePackagesDir = sitePackagesDir
 	s.closed = false
 	s.broken = false
 	s.stderrLog.Reset()
@@ -202,6 +231,103 @@ func (s *PythonSession) Init(ctx context.Context, state map[string]any) error {
 	return nil
 }
 
+// InstallPackages installs allowlisted pip packages into the session workdir and
+// makes them importable by the persistent Python process.
+func (s *PythonSession) InstallPackages(ctx context.Context, packages []string) (rlm.ExecResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return rlm.ExecResult{}, errSessionClosed
+	}
+	if s.cmd == nil {
+		return rlm.ExecResult{}, errSessionNotInitialized
+	}
+	if s.broken {
+		return rlm.ExecResult{}, errSessionBroken
+	}
+	if !s.allowPackageInstall {
+		return rlm.ExecResult{}, errors.New("python package installation is not enabled for this session")
+	}
+	return s.installPackagesLocked(ctx, packages)
+}
+
+func (s *PythonSession) installPackagesLocked(ctx context.Context, packages []string) (rlm.ExecResult, error) {
+	start := time.Now().UTC()
+	normalized, err := s.normalizeInstallPackagesLocked(packages)
+	if err != nil {
+		return rlm.ExecResult{}, err
+	}
+	if len(normalized) == 0 {
+		return rlm.ExecResult{
+			Output:     "no new packages requested",
+			DurationMS: time.Since(start).Milliseconds(),
+			ExecutedAt: start,
+			Metadata: map[string]any{
+				"ok":       true,
+				"packages": []string{},
+				"cached":   true,
+			},
+		}, nil
+	}
+	if err := os.MkdirAll(s.sitePackagesDir, 0o755); err != nil {
+		return rlm.ExecResult{}, fmt.Errorf("create site-packages dir: %w", err)
+	}
+
+	installCtx := ctx
+	cancel := func() {}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline && s.packageInstallTimeout > 0 {
+		installCtx, cancel = context.WithTimeout(ctx, s.packageInstallTimeout)
+	}
+	defer cancel()
+
+	args := append([]string{"-m", "pip", "install", "--disable-pip-version-check", "--no-input", "--target", s.sitePackagesDir}, normalized...)
+	cmd := exec.CommandContext(installCtx, s.pythonPath, args...)
+	cmd.Dir = s.workDir
+	cmd.Env = pythonSessionEnv(s.sitePackagesDir)
+	outputBytes, runErr := cmd.CombinedOutput()
+	output := strings.TrimSpace(string(outputBytes))
+	if runErr != nil {
+		return rlm.ExecResult{
+			Output:     output,
+			DurationMS: time.Since(start).Milliseconds(),
+			ExecutedAt: start,
+			Metadata: map[string]any{
+				"ok":       false,
+				"packages": normalized,
+				"error":    runErr.Error(),
+			},
+		}, fmt.Errorf("install python packages %v: %w: %s", normalized, runErr, output)
+	}
+
+	resp, err := s.sendAndReceiveLocked(ctx, pythonRequest{
+		Op:             "exec",
+		Code:           fmt.Sprintf("import importlib, sys\np = %q\nif p not in sys.path:\n    sys.path.insert(0, p)\nimportlib.invalidate_caches()", s.sitePackagesDir),
+		MaxOutputBytes: s.maxOutputBytes,
+	})
+	if err != nil {
+		s.markBrokenLocked()
+		return rlm.ExecResult{}, err
+	}
+	if !resp.OK {
+		return rlm.ExecResult{}, fmt.Errorf("refresh python import path failed: %s", firstNonEmpty(resp.Error, resp.Exception))
+	}
+
+	for _, pkg := range normalized {
+		s.installedPackages[strings.ToLower(pkg)] = struct{}{}
+	}
+	return rlm.ExecResult{
+		Output:     output,
+		DurationMS: time.Since(start).Milliseconds(),
+		ExecutedAt: start,
+		Metadata: map[string]any{
+			"ok":            true,
+			"packages":      normalized,
+			"site_packages": s.sitePackagesDir,
+		},
+	}, nil
+}
+
 // Execute runs a code snippet in the persistent Python session.
 func (s *PythonSession) Execute(ctx context.Context, code string) (rlm.ExecResult, error) {
 	start := time.Now().UTC()
@@ -223,14 +349,34 @@ func (s *PythonSession) Execute(ctx context.Context, code string) (rlm.ExecResul
 	if turnSeq > 0 {
 		s.writeTurnFileLocked(turnSeq, ".py", code)
 	}
-	resp, err := s.sendAndReceiveLocked(ctx, pythonRequest{
+	req := pythonRequest{
 		Op:             "exec",
 		Code:           code,
 		MaxOutputBytes: s.maxOutputBytes,
-	})
+	}
+	resp, err := s.sendAndReceiveLocked(ctx, req)
 	if err != nil {
 		s.markBrokenLocked()
 		return rlm.ExecResult{}, err
+	}
+	var autoInstallMetadata map[string]any
+	if !resp.OK && s.allowPackageInstall {
+		if module := missingPythonModuleFromException(resp.Exception); module != "" {
+			if pkg := s.packageForMissingModuleLocked(module); pkg != "" {
+				installResult, installErr := s.installPackagesLocked(ctx, []string{pkg})
+				if installErr == nil {
+					autoInstallMetadata = cloneExecMetadata(installResult.Metadata)
+					autoInstallMetadata["output"] = installResult.Output
+					autoInstallMetadata["duration_ms"] = installResult.DurationMS
+					autoInstallMetadata["missing_module"] = module
+					resp, err = s.sendAndReceiveLocked(ctx, req)
+					if err != nil {
+						s.markBrokenLocked()
+						return rlm.ExecResult{}, err
+					}
+				}
+			}
+		}
 	}
 
 	execResult := rlm.ExecResult{
@@ -252,6 +398,9 @@ func (s *PythonSession) Execute(ctx context.Context, code string) (rlm.ExecResul
 	}
 	if resp.Error != "" {
 		execResult.Metadata["error"] = resp.Error
+	}
+	if len(autoInstallMetadata) > 0 {
+		execResult.Metadata["package_auto_install"] = autoInstallMetadata
 	}
 	if turnSeq > 0 {
 		s.writeTurnFileLocked(turnSeq, ".output.txt", execResult.Output)
@@ -437,6 +586,49 @@ func (s *PythonSession) resetProcessLocked() {
 	s.waitErrCh = nil
 }
 
+func (s *PythonSession) normalizeInstallPackagesLocked(packages []string) ([]string, error) {
+	out := make([]string, 0, len(packages))
+	seen := map[string]struct{}{}
+	for _, pkg := range packages {
+		pkg = strings.TrimSpace(pkg)
+		if pkg == "" {
+			continue
+		}
+		if !validPythonPackageName(pkg) {
+			return nil, fmt.Errorf("python package %q is not a simple package name", pkg)
+		}
+		if len(s.allowedPackages) > 0 {
+			if _, ok := s.allowedPackages[strings.ToLower(pkg)]; !ok {
+				return nil, fmt.Errorf("python package %q is not allowed by sandbox policy", pkg)
+			}
+		}
+		key := strings.ToLower(pkg)
+		if _, ok := s.installedPackages[key]; ok {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, pkg)
+	}
+	return out, nil
+}
+
+func (s *PythonSession) packageForMissingModuleLocked(module string) string {
+	module = strings.ToLower(strings.TrimSpace(module))
+	if module == "" {
+		return ""
+	}
+	if pkg := strings.TrimSpace(s.packageAliases[module]); pkg != "" {
+		return pkg
+	}
+	if _, ok := s.allowedPackages[module]; ok {
+		return module
+	}
+	return ""
+}
+
 func (s *PythonSession) markBrokenLocked() {
 	s.broken = true
 }
@@ -487,6 +679,103 @@ func isPythonIdentifier(name string) bool {
 		}
 	}
 	return true
+}
+
+func normalizeAllowedPythonPackages(packages []string) map[string]struct{} {
+	if len(packages) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(packages))
+	for _, pkg := range packages {
+		pkg = strings.TrimSpace(pkg)
+		if pkg == "" || !validPythonPackageName(pkg) {
+			continue
+		}
+		out[strings.ToLower(pkg)] = struct{}{}
+	}
+	return out
+}
+
+func normalizePythonPackageAliases(aliases map[string]string) map[string]string {
+	if len(aliases) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(aliases))
+	for module, pkg := range aliases {
+		module = strings.ToLower(strings.TrimSpace(module))
+		pkg = strings.TrimSpace(pkg)
+		if module == "" || pkg == "" || !validPythonPackageName(module) || !validPythonPackageName(pkg) {
+			continue
+		}
+		out[module] = pkg
+	}
+	return out
+}
+
+func validPythonPackageName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func missingPythonModuleFromException(exception string) string {
+	const marker = "ModuleNotFoundError: No module named "
+	idx := strings.LastIndex(exception, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(exception[idx+len(marker):])
+	if rest == "" {
+		return ""
+	}
+	quote := rest[0]
+	if quote != '\'' && quote != '"' {
+		return ""
+	}
+	rest = rest[1:]
+	end := strings.IndexRune(rest, rune(quote))
+	if end < 0 {
+		return ""
+	}
+	module := strings.TrimSpace(rest[:end])
+	if dot := strings.Index(module, "."); dot >= 0 {
+		module = module[:dot]
+	}
+	if !validPythonPackageName(module) {
+		return ""
+	}
+	return module
+}
+
+func cloneExecMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		out[key] = value
+	}
+	return out
+}
+
+func pythonSessionEnv(sitePackagesDir string) []string {
+	env := append(os.Environ(), "FOXCTL_RLM_PARENT_PID="+strconv.Itoa(os.Getpid()))
+	sitePackagesDir = strings.TrimSpace(sitePackagesDir)
+	if sitePackagesDir == "" {
+		return env
+	}
+	pythonPath := sitePackagesDir
+	if existing := strings.TrimSpace(os.Getenv("PYTHONPATH")); existing != "" {
+		pythonPath += string(os.PathListSeparator) + existing
+	}
+	return append(env, "PYTHONPATH="+pythonPath)
 }
 
 func formatOutput(stdout, stderr, result, exception string) string {
@@ -645,6 +934,25 @@ def truncate_text(text, max_bytes):
 def send(response):
     print(json.dumps(response, ensure_ascii=False), flush=True)
 
+def emit_rlm_sentinel_globals(ns):
+    for name in ("RLM_CHECK_JSON", "RLM_ANSWER_JSON"):
+        if name not in ns:
+            continue
+        value = ns.get(name)
+        try:
+            if isinstance(value, str):
+                text = value.strip()
+            else:
+                text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            if not text:
+                continue
+            if text.startswith(name + "="):
+                print(text)
+            else:
+                print(name + "=" + text)
+        except Exception:
+            pass
+
 for raw in sys.stdin:
     raw = raw.strip()
     if not raw:
@@ -679,13 +987,18 @@ for raw in sys.stdin:
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 result_obj = None
+                compiled = None
+                eval_mode = True
                 try:
                     compiled = compile(code, "<foxctl-python-session>", "eval")
                 except SyntaxError:
+                    eval_mode = False
                     compiled = compile(code, "<foxctl-python-session>", "exec")
-                    exec(compiled, globals_ns, globals_ns)
-                else:
+                if eval_mode:
                     result_obj = eval(compiled, globals_ns, globals_ns)
+                else:
+                    exec(compiled, globals_ns, globals_ns)
+                    emit_rlm_sentinel_globals(globals_ns)
 
                 if result_obj is not None:
                     try:

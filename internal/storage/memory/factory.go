@@ -90,13 +90,16 @@ func openLibSQLFromConfig(ctx context.Context, cfg config.Config) (storage.Memor
 			LibSQL: dbdriver.LibSQLConfig{
 				Path:               cfg.Storage.Root + "/memory.libsql",
 				EnableVectorSearch: true,
-				VectorDimensions:   dbdriver.GetDefaultVectorDimensions(),
+				VectorDimensions:   cfg.Database.Vector.Dimensions,
 			},
 		}
 	}
 
 	// Ensure vector search is enabled for memory
 	dbCfg.LibSQL.EnableVectorSearch = true
+	if cfg.Database.Vector.Dimensions > 0 {
+		dbCfg.LibSQL.VectorDimensions = cfg.Database.Vector.Dimensions
+	}
 
 	store, err := OpenLibSQL(ctx, dbCfg.LibSQL)
 	if err != nil {

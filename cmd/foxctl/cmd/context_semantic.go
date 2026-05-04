@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/platform/config"
@@ -113,6 +114,7 @@ type openAICompatSemanticProvider struct {
 	inner sourceimport.Embedder
 	model string
 	dims  int
+	mu    sync.Mutex
 }
 
 func (p *openAICompatSemanticProvider) Embed(ctx context.Context, text string) ([]float32, error) {
@@ -120,6 +122,7 @@ func (p *openAICompatSemanticProvider) Embed(ctx context.Context, text string) (
 	if err != nil {
 		return nil, err
 	}
+	p.recordDimensions(len(res.Vector))
 	return res.Vector, nil
 }
 
@@ -140,7 +143,20 @@ func (p *openAICompatSemanticProvider) Model() string {
 }
 
 func (p *openAICompatSemanticProvider) Dimensions() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.dims
+}
+
+func (p *openAICompatSemanticProvider) recordDimensions(dims int) {
+	if dims <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.dims <= 0 {
+		p.dims = dims
+	}
 }
 
 func firstNonEmptySemantic(values ...string) string {

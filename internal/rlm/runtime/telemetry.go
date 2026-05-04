@@ -22,6 +22,7 @@ const (
 	OpRLMNodeCanceled      = "rlm.node_canceled"
 	OpRLMBudget            = "rlm.budget"
 	OpRLMBraid             = "rlm.braid"
+	OpRLMContract          = "rlm.contract"
 	OpRLMFinalAnswer       = "rlm.final_answer"
 	OpRLMError             = "rlm.error"
 )
@@ -119,6 +120,30 @@ func (s ObservabilityTelemetrySink) EmitRLMEvent(ctx context.Context, event Even
 				WithData("node_count", payload.NodeCount).
 				WithData("message", payload.Message)
 		}
+	case EventTypeContract:
+		if payload := event.Contract; payload != nil {
+			builder.WithData("boundary", payload.Boundary).
+				WithData("phase", payload.Phase).
+				WithData("tool", payload.Tool).
+				WithData("status", payload.Status).
+				WithData("issue_kind", payload.IssueKind).
+				WithData("issue_path", payload.IssuePath).
+				WithData("repair_rule", payload.RepairRule).
+				WithData("revalidate_ok", payload.RevalidateOK).
+				WithData("message", payload.Message).
+				WithData("candidate_solved", payload.CandidateSolved).
+				WithData("candidate_blocked", payload.CandidateBlocked).
+				WithData("candidate_partial", payload.CandidatePartial).
+				WithData("candidate_placeholder", payload.CandidatePlaceholder).
+				WithData("candidate_failed", payload.CandidateFailed).
+				WithData("candidate_pending", payload.CandidatePending).
+				WithData("candidate_registered", payload.CandidateRegistered).
+				WithData("candidate_rejected", payload.CandidateRejected).
+				WithData("assistant_chars", payload.AssistantChars).
+				WithData("executed_output_chars", payload.ExecutedOutputChars).
+				WithData("tool_input_bytes", payload.ToolInputBytes).
+				WithData("repaired_input_bytes", payload.RepairedInputBytes)
+		}
 	case EventTypeFinalAnswer:
 		if payload := event.FinalAnswer; payload != nil {
 			builder.WithData("answer_chars", len(payload.Text)).
@@ -180,6 +205,8 @@ func operationForRLMEvent(eventType EventType) string {
 		return OpRLMBudget
 	case EventTypeBraid:
 		return OpRLMBraid
+	case EventTypeContract:
+		return OpRLMContract
 	case EventTypeFinalAnswer:
 		return OpRLMFinalAnswer
 	case EventTypeError:

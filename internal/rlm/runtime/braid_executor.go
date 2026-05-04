@@ -66,6 +66,47 @@ func (m helperBudgetByNode) get(nodeID string) *braidNodeHelperBudget {
 	return budget
 }
 
+type braidNodeExecutionRecord struct {
+	Summary       string
+	Artifact      braidNodeArtifact
+	Source        string
+	Certification *RuntimeCertification
+}
+
+type RuntimeCertification struct {
+	NodeID          string           `json:"node_id"`
+	Pass            bool             `json:"pass"`
+	VerifierID      string           `json:"verifier_id"`
+	VerifierKind    string           `json:"verifier_kind"`
+	ScaffoldClass   string           `json:"scaffold_class,omitempty"`
+	ScaffoldID      string           `json:"scaffold_id,omitempty"`
+	CandidateDigest string           `json:"candidate_digest,omitempty"`
+	InputDigest     string           `json:"input_digest,omitempty"`
+	Failure         *NodeRepairCause `json:"failure,omitempty"`
+	Metadata        map[string]any   `json:"metadata,omitempty"`
+}
+
+const (
+	runtimeVerifierKindScaffold       = "runtime_scaffold"
+	runtimeVerifierKindForward        = "runtime_forward"
+	runtimeVerifierKindReducer        = "runtime_reducer"
+	runtimeVerifierKindExpectedAnswer = "runtime_expected_answer"
+)
+
+type NodeRepairCause struct {
+	FailureKind   string         `json:"failure_kind"`
+	FailedNode    string         `json:"failed_node,omitempty"`
+	FailedStep    int            `json:"failed_step,omitempty"`
+	FirstFailure  string         `json:"first_failure"`
+	Observed      any            `json:"observed,omitempty"`
+	Expected      any            `json:"expected,omitempty"`
+	Candidate     string         `json:"candidate,omitempty"`
+	InputKeys     []string       `json:"input_keys,omitempty"`
+	ExpectedInput string         `json:"expected_input,omitempty"`
+	RepairHint    string         `json:"repair_hint,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+}
+
 // remainingSubTimeout returns the bounded sub-timeout for the next attempt. If
 // the remaining budget is below the minimum floor, it returns 0 to signal that
 // the attempt should be skipped.
@@ -128,6 +169,7 @@ func executePhaseBraidGraph(
 	}
 
 	summaries := map[string]string{}
+	executionRecords := map[string]braidNodeExecutionRecord{}
 	executed := map[string]struct{}{}
 	repairFeedbackByNode := map[string]string{}
 	helperBudgets := make(helperBudgetByNode, len(graph.Nodes))
@@ -179,9 +221,16 @@ graphLoop:
 			for _, node := range ready {
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "ready", "")
 				deps := dependencySummarySubset(node, summaries)
-				if summary, ok := runBraidRuntimeNodeShortcut(node, deps, nodesByID); ok {
+				if reason := braidRuntimeMergeBlockReason(node, deps); reason != "" {
+					err := fmt.Errorf("rlm repl runner phase %q: braid node %q merge blocked: %s", phaseName, node.ID, reason)
+					recordSolverFailure(solverState, node.ID, "merge", err.Error())
+					recordBraidNodeEvent(toolExec, phaseName, wave, node, "merge_blocked", reason)
+					return err
+				}
+				if summary, cert, ok := runBraidRuntimeNodeShortcut(node, deps, nodesByID, executionRecords); ok {
 					recordBraidNodeEvent(toolExec, phaseName, wave, node, "runtime_shortcut", summary)
 					summaries[node.ID] = summary
+					recordBraidNodeExecution(executionRecords, node.ID, summary, "runtime", cert)
 					executed[node.ID] = struct{}{}
 					commitSolverArtifact(solverState, node.ID, summary)
 					continue
@@ -197,6 +246,7 @@ graphLoop:
 						return err
 					}
 					summaries[node.ID] = summary
+					recordBraidNodeExecution(executionRecords, node.ID, summary, "helper", certificationFromBraidSummary(node, summary))
 					executed[node.ID] = struct{}{}
 					commitSolverArtifact(solverState, node.ID, summary)
 					continue
@@ -220,21 +270,24 @@ graphLoop:
 					concreteVerifyFailure = true
 				}
 				summaries[node.ID] = summary
+				recordBraidNodeExecution(executionRecords, node.ID, summary, "child", nil)
 				executed[node.ID] = struct{}{}
 				if !concreteVerifyFailure {
 					if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], summary, toolExec, output); ok {
 						recordBraidNodeEvent(toolExec, phaseName, wave, node, "helper_recovered", recovered)
 						summaries[node.ID] = recovered
 						summary = recovered
+						recordBraidNodeExecution(executionRecords, node.ID, summary, "helper_recovered", certificationFromBraidSummary(node, summary))
 					}
 				}
 				submitted++
-				if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+				if err := validateBraidNodeExecutionRecordInGraph(phaseName, node, executionRecords[node.ID], graph.FinalNode, graph); err != nil {
 					if !concreteVerifyFailure {
 						if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], summary, toolExec, output); ok {
 							recordBraidNodeEvent(toolExec, phaseName, wave, node, "helper_recovered", recovered)
 							summaries[node.ID] = recovered
-							if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, node, recovered, graph.FinalNode, graph); recoveredErr == nil {
+							recordBraidNodeExecution(executionRecords, node.ID, recovered, "helper_recovered", certificationFromBraidSummary(node, recovered))
+							if recoveredErr := validateBraidNodeExecutionRecordInGraph(phaseName, node, executionRecords[node.ID], graph.FinalNode, graph); recoveredErr == nil {
 								commitSolverArtifact(solverState, node.ID, recovered)
 								continue
 							} else {
@@ -260,9 +313,16 @@ graphLoop:
 		for _, node := range ready {
 			recordBraidNodeEvent(toolExec, phaseName, wave, node, "ready", "")
 			deps := dependencySummarySubset(node, summaries)
-			if summary, ok := runBraidRuntimeNodeShortcut(node, deps, nodesByID); ok {
+			if reason := braidRuntimeMergeBlockReason(node, deps); reason != "" {
+				err := fmt.Errorf("rlm repl runner phase %q: braid node %q merge blocked: %s", phaseName, node.ID, reason)
+				recordSolverFailure(solverState, node.ID, "merge", err.Error())
+				recordBraidNodeEvent(toolExec, phaseName, wave, node, "merge_blocked", reason)
+				return err
+			}
+			if summary, cert, ok := runBraidRuntimeNodeShortcut(node, deps, nodesByID, executionRecords); ok {
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "runtime_shortcut", summary)
 				summaries[node.ID] = summary
+				recordBraidNodeExecution(executionRecords, node.ID, summary, "runtime", cert)
 				executed[node.ID] = struct{}{}
 				commitSolverArtifact(solverState, node.ID, summary)
 				continue
@@ -278,6 +338,7 @@ graphLoop:
 					return err
 				}
 				summaries[node.ID] = summary
+				recordBraidNodeExecution(executionRecords, node.ID, summary, "helper", certificationFromBraidSummary(node, summary))
 				executed[node.ID] = struct{}{}
 				commitSolverArtifact(solverState, node.ID, summary)
 				continue
@@ -319,20 +380,23 @@ graphLoop:
 				concreteVerifyFailure = true
 			}
 			summaries[nodeID] = summary
+			recordBraidNodeExecution(executionRecords, nodeID, summary, "child", nil)
 			executed[nodeID] = struct{}{}
 			if !concreteVerifyFailure {
 				if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, nodesByID[nodeID], rootPrompt, dependencySummarySubset(nodesByID[nodeID], summaries), repairFeedbackByNode[nodeID], summary, toolExec, output); ok {
 					recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "helper_recovered", recovered)
 					summaries[nodeID] = recovered
 					summary = recovered
+					recordBraidNodeExecution(executionRecords, nodeID, summary, "helper_recovered", certificationFromBraidSummary(nodesByID[nodeID], summary))
 				}
 			}
-			if err := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], summary, graph.FinalNode, graph); err != nil {
+			if err := validateBraidNodeExecutionRecordInGraph(phaseName, nodesByID[nodeID], executionRecords[nodeID], graph.FinalNode, graph); err != nil {
 				if !concreteVerifyFailure {
 					if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, nodesByID[nodeID], rootPrompt, dependencySummarySubset(nodesByID[nodeID], summaries), repairFeedbackByNode[nodeID], summary, toolExec, output); ok {
 						recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "helper_recovered", recovered)
 						summaries[nodeID] = recovered
-						if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], recovered, graph.FinalNode, graph); recoveredErr == nil {
+						recordBraidNodeExecution(executionRecords, nodeID, recovered, "helper_recovered", certificationFromBraidSummary(nodesByID[nodeID], recovered))
+						if recoveredErr := validateBraidNodeExecutionRecordInGraph(phaseName, nodesByID[nodeID], executionRecords[nodeID], graph.FinalNode, graph); recoveredErr == nil {
 							commitSolverArtifact(solverState, nodeID, recovered)
 							continue
 						} else {
@@ -355,7 +419,7 @@ graphLoop:
 	if _, ok := summaries[graph.FinalNode]; !ok {
 		return fmt.Errorf("rlm repl runner phase %q: braid final_node %q did not complete", phaseName, graph.FinalNode)
 	}
-	appendBraidFinalHandoff(output, graph, summaries)
+	appendBraidFinalHandoff(output, graph, summaries, executionRecords)
 	appendSolverStateTelemetry(output, solverState, phaseName)
 	_ = nodesByID
 	return nil
@@ -388,7 +452,13 @@ func runBraidNodeHelperFirst(
 		return summary, true, err
 	}
 	if toolExec.budget != nil && braidNodeShouldUseChildREPLInsteadOfHelper(node, rootPrompt, dependencySummaries, repairFeedback) {
-		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_skipped", "no applicable runtime verifier; falling through to child RLM with python_repl")
+		message := "no applicable runtime verifier; falling through to child RLM with python_repl"
+		if policy == BraidNodeHelperPolicyRequired {
+			message = "helper_policy=required but no applicable runtime verifier is available"
+			recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_blocked", message)
+			return "status: blocked\nanswer:\nchecks: " + message, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper required but unavailable: %s", phaseName, node.ID, message)
+		}
+		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_skipped", message)
 		return "", false, nil
 	}
 	if budget != nil {
@@ -439,7 +509,7 @@ func runBraidNodeHelperFirst(
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_fallback", message)
 		return "", false, nil
 	}
-	if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+	if err := validateBraidNodeExecutionSummaryWithCertificationInGraph(phaseName, node, summary, certificationFromBraidSummary(node, summary), graph.FinalNode, graph); err != nil {
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_rejected", "stage=verify duration_ms="+fmt.Sprintf("%d", duration.Milliseconds())+" "+err.Error())
 		if policy == BraidNodeHelperPolicyRequired || disableFallback {
 			return summary, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper-first failed: %w", phaseName, node.ID, err)
@@ -556,7 +626,7 @@ func runBraidNodeREPLFirst(
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "python_repl_first_unusable", safeTelemetryExcerpt(result, 300))
 		return "", false, nil
 	}
-	if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+	if err := validateBraidNodeExecutionSummaryWithCertificationInGraph(phaseName, node, summary, certificationFromBraidSummary(node, summary), graph.FinalNode, graph); err != nil {
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "python_repl_first_rejected", err.Error())
 		if braidPythonREPLSummaryIsSoftMiss(summary) {
 			return "", false, nil
@@ -705,42 +775,97 @@ func braidSummaryFromPythonREPLResult(result string) (string, bool) {
 	return "", false
 }
 
-func runBraidRuntimeNodeShortcut(node BraidNode, dependencySummaries map[string]string, nodesByID map[string]BraidNode) (string, bool) {
+func runBraidRuntimeNodeShortcut(node BraidNode, dependencySummaries map[string]string, nodesByID map[string]BraidNode, records map[string]braidNodeExecutionRecord) (string, *RuntimeCertification, bool) {
+	if isBraidSplitMergeNode(node) {
+		return "", nil, false
+	}
 	switch node.Kind {
 	case "verify":
-		for _, summary := range dependencySummaries {
-			if braidDependencyHasRuntimeVerifiedSolution(summary) {
-				return "status: pass summary: answer: pass: true checks: upstream solve dependency was already verified by the runtime scaffold verifier.", true
+		for depID := range dependencySummaries {
+			if braidDependencyHasRuntimeVerifiedSolution(depID, records) {
+				return formatRuntimeCertifiedArtifact(
+					"pass",
+					"pass: true",
+					[]any{"upstream solve dependency was already certified by the runtime"},
+					runtimeForwardCertification(node, depID, records[depID].Certification),
+				)
 			}
 		}
 	case "reduce":
-		if !braidDependencyVerificationPassed(dependencySummaries) {
-			return "", false
-		}
 		for _, depID := range node.DependsOn {
 			depNode := nodesByID[depID]
 			if depNode.ID == "" || !isBraidSolveKind(depNode.Kind) {
 				continue
 			}
+			if !braidDependencyHasRuntimeVerifiedSolution(depID, records) {
+				continue
+			}
 			if answer, ok := braidSolutionAnswerFromSummary(dependencySummaries[depID]); ok {
-				return "status: completed summary: status: solved answer: " + answer + " checks: reduce forwarded verified solve answer.", true
+				return formatRuntimeCertifiedArtifact(
+					"solved",
+					answer,
+					[]any{"reduce forwarded certified solve answer"},
+					runtimeForwardCertification(node, depID, records[depID].Certification),
+				)
 			}
 		}
 	}
-	return "", false
+	return "", nil, false
 }
 
-func braidDependencyHasRuntimeVerifiedSolution(summary string) bool {
-	answer, ok := braidSolutionAnswerFromSummary(summary)
+func braidDependencyHasRuntimeVerifiedSolution(nodeID string, records map[string]braidNodeExecutionRecord) bool {
+	record, ok := records[nodeID]
+	if !ok || record.Certification == nil || !record.Certification.Pass {
+		return false
+	}
+	answer, ok := braidSolutionAnswerFromSummary(record.Summary)
 	if !ok {
 		return false
 	}
 	if braidSolveAnswerRejectionReason(BraidNode{Kind: "solve"}, answer) != "" {
 		return false
 	}
-	return strings.Contains(summary, "checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier")
+	return true
 }
 
+func formatRuntimeCertifiedArtifact(status string, answer string, checks []any, cert *RuntimeCertification) (string, *RuntimeCertification, bool) {
+	if cert == nil || !cert.Pass {
+		return "", nil, false
+	}
+	artifact := braidNodeArtifact{
+		Status:     strings.ToLower(strings.TrimSpace(status)),
+		Answer:     strings.TrimSpace(answer),
+		Checks:     checks,
+		Confidence: 1,
+		Provenance: map[string]any{
+			"runtime_certification": cert,
+		},
+	}
+	body, err := json.Marshal(artifact)
+	if err != nil {
+		return "", nil, false
+	}
+	return string(body), cert, true
+}
+
+func runtimeForwardCertification(node BraidNode, sourceNodeID string, source *RuntimeCertification) *RuntimeCertification {
+	if source == nil || !source.Pass {
+		return nil
+	}
+	return &RuntimeCertification{
+		NodeID:       strings.TrimSpace(node.ID),
+		Pass:         true,
+		VerifierID:   "forward_certified_dependency",
+		VerifierKind: runtimeVerifierKindForward,
+		Metadata: map[string]any{
+			"source_node_id":     strings.TrimSpace(sourceNodeID),
+			"source_verifier_id": source.VerifierID,
+			"source_kind":        source.VerifierKind,
+		},
+	}
+}
+
+//nolint:unused // Kept for dependency-verification policy variants.
 func braidDependencyVerificationPassed(dependencySummaries map[string]string) bool {
 	for _, summary := range dependencySummaries {
 		if braidVerificationSummaryPassed(summary) {
@@ -751,6 +876,12 @@ func braidDependencyVerificationPassed(dependencySummaries map[string]string) bo
 }
 
 func braidSolutionAnswerFromSummary(summary string) (string, bool) {
+	if artifact, ok := parseBraidNodeArtifact(summary); ok {
+		answer := braidNodeArtifactAnswerString(artifact)
+		if strings.HasPrefix(answer, "solution =") {
+			return answer, true
+		}
+	}
 	idx := strings.Index(summary, "answer: solution =")
 	if idx < 0 {
 		return "", false
@@ -778,6 +909,12 @@ func recoverBraidNodeWithHelper(
 ) (string, bool) {
 	if !braidNodeShouldForceHelper(node, failedSummary) {
 		return "", false
+	}
+	if toolExec != nil && toolExec.budget != nil {
+		if err := toolExec.budget.ConsumeHelperCall(ctx); err != nil {
+			toolExec.recordBudgetError(LimitHelperCalls, err)
+			return "status: blocked\nanswer:\nchecks: " + err.Error(), true
+		}
 	}
 	return runBraidNodeHelper(ctx, phaseName, node, rootPrompt, dependencySummaries, repairFeedback, failedSummary, toolExec, output)
 }
@@ -913,7 +1050,7 @@ func runBraidNodeHelper(
 			return summary, true
 		}
 	}
-	answer, helperVerified := helperAnswerAndVerifiedFromToolResult(result)
+	answer, helperCert := helperAnswerAndCertificationFromToolResult(node, result)
 	if strings.TrimSpace(answer) == "" {
 		if summary, ok := helperFailureSummaryFromToolResult(node, result); ok {
 			return summary, true
@@ -924,10 +1061,10 @@ func runBraidNodeHelper(
 		if ok, detail, applicable := verifyStackMoveCandidateFromInput(answer, argsMap["input"]); applicable && !ok {
 			return formatBraidHelperNodeSummary(node, "pass: false first_failure: "+detail), true
 		} else if applicable && ok {
-			helperVerified = true
+			helperCert = runtimeCertificationForNode(node, "finite_state_transition/stack_relocation_v1")
 		}
 	}
-	return formatBraidHelperNodeSummaryVerified(node, answer, helperVerified), true
+	return formatBraidHelperNodeSummaryCertified(node, answer, helperCert), true
 }
 
 func enrichBraidHelperInputWithStructuredTargets(input map[string]any, _ string) map[string]any {
@@ -2749,6 +2886,7 @@ func attemptSplitHelperExecution(
 	recordBraidNodeEvent(toolExec, phaseName, 0, node, "split", fmt.Sprintf("splitting into %d sub-items: %s", len(chunks), plan.Reason))
 
 	var subAnswers []string
+	var failures []string
 	for i, chunk := range chunks {
 		// Build a sub-input with just this chunk.
 		subInput := map[string]any{
@@ -2776,7 +2914,7 @@ func attemptSplitHelperExecution(
 		// Check size.
 		if estimated, err := json.Marshal(subInput); err != nil || len(estimated) > helperPreflightMaxInputChars {
 			recordBraidNodeEvent(toolExec, phaseName, 0, node, "split_chunk_oversized", fmt.Sprintf("chunk %d still too large (%d bytes)", i, len(estimated)))
-			subAnswers = append(subAnswers, fmt.Sprintf("chunk_%d: [oversized, skipped]", i))
+			failures = append(failures, fmt.Sprintf("chunk_%d oversized", i))
 			continue
 		}
 
@@ -2788,7 +2926,7 @@ func attemptSplitHelperExecution(
 		}
 		subArgs, err := json.Marshal(subArgsMap)
 		if err != nil {
-			subAnswers = append(subAnswers, fmt.Sprintf("chunk_%d: [marshal error]", i))
+			failures = append(failures, fmt.Sprintf("chunk_%d marshal_error", i))
 			continue
 		}
 
@@ -2797,7 +2935,7 @@ func attemptSplitHelperExecution(
 		if toolExec != nil && toolExec.budget != nil {
 			if err := toolExec.budget.ConsumeHelperCall(ctx); err != nil {
 				toolExec.recordBudgetError(LimitHelperCalls, err)
-				subAnswers = append(subAnswers, fmt.Sprintf("chunk_%d: [helper budget exceeded: %s]", i, err.Error()))
+				failures = append(failures, fmt.Sprintf("chunk_%d helper_budget_exceeded: %s", i, err.Error()))
 				continue
 			}
 		}
@@ -2810,13 +2948,21 @@ func attemptSplitHelperExecution(
 		}
 		output.ToolCalls = append(output.ToolCalls, toolCall)
 		output.ToolResults = append(output.ToolResults, toolResult)
+		if execErr != nil {
+			failures = append(failures, fmt.Sprintf("chunk_%d helper_error: %s", i, execErr.Error()))
+			continue
+		}
 
 		answer := helperAnswerFromToolResult(result)
 		if strings.TrimSpace(answer) == "" {
-			answer = "[no answer]"
+			failures = append(failures, fmt.Sprintf("chunk_%d no_answer", i))
+			continue
 		}
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "split_chunk_completed", fmt.Sprintf("chunk %d/%d: %s", i+1, len(chunks), safeTelemetryExcerpt(answer, 100)))
 		subAnswers = append(subAnswers, answer)
+	}
+	if len(failures) > 0 {
+		return fmt.Sprintf("status: blocked summary: split execution failed for %d/%d chunks answer: checks: %s", len(failures), len(chunks), strings.Join(failures, "; ")), true
 	}
 
 	// Merge sub-answers into a combined result.
@@ -2830,11 +2976,26 @@ func formatBraidHelperNodeSummary(node BraidNode, answer string) string {
 }
 
 func formatBraidHelperNodeSummaryVerified(node BraidNode, answer string, verified bool) string {
+	var cert *RuntimeCertification
+	if verified {
+		cert = runtimeCertificationForNode(node, strings.TrimSpace(node.ScaffoldClass)+"/"+strings.TrimSpace(node.ScaffoldID))
+	}
+	return formatBraidHelperNodeSummaryCertified(node, answer, cert)
+}
+
+func formatBraidHelperNodeSummaryCertified(node BraidNode, answer string, cert *RuntimeCertification) string {
 	answer = strings.TrimSpace(answer)
+	verified := cert != nil && cert.Pass
 	if node.Kind == "verify" {
+		if !verified {
+			if braidPassFalseRE.MatchString(answer) {
+				return "status: blocked summary: answer: " + answer + " checks: ephemeral_helper_solve reported a concrete verification failure."
+			}
+			return "status: blocked summary: answer: pass: false checks: helper verification is non-authoritative without a runtime verifier. detail: " + safeTelemetryExcerpt(answer, 600)
+		}
 		if pass, ok := braidVerifyAnswerJSONPass(answer); ok {
 			if pass {
-				return "status: pass summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints."
+				return formatBraidCertifiedArtifactString("pass", answer, []any{"ephemeral_helper_solve simulated original constraints"}, cert)
 			}
 			return "status: blocked summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints and found a concrete failure."
 		}
@@ -2842,7 +3003,7 @@ func formatBraidHelperNodeSummaryVerified(node BraidNode, answer string, verifie
 			return "status: blocked summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints and found a concrete failure."
 		}
 		if braidPassTrueRE.MatchString(answer) || braidVerificationSummaryPassed(answer) {
-			return "status: pass summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints."
+			return formatBraidCertifiedArtifactString("pass", answer, []any{"ephemeral_helper_solve simulated original constraints"}, cert)
 		}
 		return "status: blocked summary: answer: pass: false checks: ephemeral_helper_solve simulated original constraints but did not produce a passing verification. detail: " + safeTelemetryExcerpt(answer, 600)
 	}
@@ -2867,9 +3028,25 @@ func formatBraidHelperNodeSummaryVerified(node BraidNode, answer string, verifie
 		}
 	}
 	if verified {
-		return "status: completed summary: status: solved answer: " + answer + " checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier."
+		return formatBraidCertifiedArtifactString("solved", answer, []any{"runtime scaffold verifier passed"}, cert)
 	}
 	return "status: completed summary: status: solved answer: " + answer + " checks: ephemeral_helper_solve produced and ran an executable helper for this node."
+}
+
+func formatBraidCertifiedArtifactString(status string, answer string, checks []any, cert *RuntimeCertification) string {
+	artifact := braidNodeArtifact{
+		Status:     strings.ToLower(strings.TrimSpace(status)),
+		Answer:     strings.TrimSpace(answer),
+		Checks:     checks,
+		Confidence: 1,
+		Provenance: map[string]any{
+			"runtime_certification": cert,
+		},
+	}
+	if body, err := json.Marshal(artifact); err == nil {
+		return string(body)
+	}
+	return "status: completed summary: status: " + status + " answer: " + answer + " checks: runtime certification passed."
 }
 
 func braidVerifyAnswerJSONPass(answer string) (bool, bool) {
@@ -3050,24 +3227,53 @@ func isMultiVariableSolveNode(node BraidNode) bool {
 }
 
 func helperAnswerFromToolResult(result string) string {
-	answer, _ := helperAnswerAndVerifiedFromToolResult(result)
+	answer, _ := helperAnswerAndCertificationFromToolResult(BraidNode{}, result)
 	return answer
 }
 
+//nolint:unused // Kept for older helper result consumers during LongCoT runtime migration.
 func helperAnswerAndVerifiedFromToolResult(result string) (string, bool) {
+	answer, cert := helperAnswerAndCertificationFromToolResult(BraidNode{}, result)
+	return answer, cert != nil && cert.Pass
+}
+
+func helperAnswerAndCertificationFromToolResult(node BraidNode, result string) (string, *RuntimeCertification) {
 	var decoded struct {
-		OK       bool   `json:"ok"`
-		Answer   string `json:"answer"`
-		Error    string `json:"error"`
-		Verified bool   `json:"verified"`
+		OK           bool           `json:"ok"`
+		Answer       string         `json:"answer"`
+		Error        string         `json:"error"`
+		Verification map[string]any `json:"verification"`
 	}
 	if err := json.Unmarshal([]byte(result), &decoded); err == nil {
-		if decoded.OK && strings.TrimSpace(decoded.Answer) != "" {
-			return strings.TrimSpace(decoded.Answer), decoded.Verified
+		if !decoded.OK || strings.TrimSpace(decoded.Answer) == "" {
+			return "", nil
 		}
-		return "", false
+		cert := certificationFromHelperVerification(node, decoded.Verification)
+		return strings.TrimSpace(decoded.Answer), cert
 	}
-	return strings.TrimSpace(result), false
+	return strings.TrimSpace(result), nil
+}
+
+func certificationFromHelperVerification(node BraidNode, verification map[string]any) *RuntimeCertification {
+	if len(verification) == 0 {
+		return nil
+	}
+	pass, _ := verification["pass"].(bool)
+	verifierID := strings.TrimSpace(stringFromAny(verification["verifier_id"]))
+	verifierKind := strings.TrimSpace(stringFromAny(verification["verifier_kind"]))
+	if !pass || verifierID == "" || verifierKind != runtimeVerifierKindScaffold {
+		return nil
+	}
+	return &RuntimeCertification{
+		NodeID:          strings.TrimSpace(node.ID),
+		Pass:            true,
+		VerifierID:      verifierID,
+		VerifierKind:    verifierKind,
+		ScaffoldClass:   strings.TrimSpace(node.ScaffoldClass),
+		ScaffoldID:      strings.TrimSpace(node.ScaffoldID),
+		CandidateDigest: strings.TrimSpace(stringFromAny(verification["candidate_digest"])),
+		InputDigest:     strings.TrimSpace(stringFromAny(verification["input_digest"])),
+	}
 }
 
 func helperFailureSummaryFromToolResult(node BraidNode, result string) (string, bool) {
@@ -3145,11 +3351,11 @@ func braidVerifyHelperAnswerContract(answer string, input map[string]any) (Helpe
 			RepairHint:   "return explicit pass true/false; do not return a solution line from a verify helper",
 		}, true
 	}
-	if braidPassTrueRE.MatchString(trimmed) || braidPassFalseRE.MatchString(trimmed) {
-		return HelperVerifierDiagnostic{Pass: true}, true
-	}
 	if diag, ok := braidVerifyAnswerJSONContract(trimmed); ok {
 		return diag, true
+	}
+	if braidPassTrueRE.MatchString(trimmed) || braidPassFalseRE.MatchString(trimmed) {
+		return HelperVerifierDiagnostic{Pass: true}, true
 	}
 	return HelperVerifierDiagnostic{
 		Pass:         false,
@@ -4817,6 +5023,7 @@ func braidNodeAnswerObjectTemplate(ids []string) string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
+//nolint:unused // Kept for router/pre-split diagnostics while adaptive splitting is feature-gated.
 func adaptiveBraidSplitDeclaredTargetIDs(node BraidNode) []string {
 	input := node.InputSchema
 	if len(input) == 0 {
@@ -5599,8 +5806,8 @@ func braidNodeClosureFrom(graph BraidGraph, startID string) map[string]struct{} 
 
 var (
 	braidSummaryStatusRE = regexp.MustCompile(`(?i)(?:^|\s)status\s*:\s*([a-z][a-z0-9_-]*)`)
-	braidPassTrueRE      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*true(?:[^a-z0-9_]|$)`)
-	braidPassFalseRE     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*false(?:[^a-z0-9_]|$)`)
+	braidPassTrueRE      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])"?pass"?\s*[:=]\s*true(?:[^a-z0-9_]|$)`)
+	braidPassFalseRE     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])"?pass"?\s*[:=]\s*false(?:[^a-z0-9_]|$)`)
 )
 
 type braidNodeArtifact struct {
@@ -5665,6 +5872,14 @@ func validateBraidNodeExecutionSummary(phaseName string, node BraidNode, summary
 }
 
 func validateBraidNodeExecutionSummaryInGraph(phaseName string, node BraidNode, summary string, finalNodeID string, graph *BraidGraph) error {
+	return validateBraidNodeExecutionSummaryWithCertificationInGraph(phaseName, node, summary, nil, finalNodeID, graph)
+}
+
+func validateBraidNodeExecutionRecordInGraph(phaseName string, node BraidNode, record braidNodeExecutionRecord, finalNodeID string, graph *BraidGraph) error {
+	return validateBraidNodeExecutionSummaryWithCertificationInGraph(phaseName, node, record.Summary, record.Certification, finalNodeID, graph)
+}
+
+func validateBraidNodeExecutionSummaryWithCertificationInGraph(phaseName string, node BraidNode, summary string, cert *RuntimeCertification, finalNodeID string, graph *BraidGraph) error {
 	statuses := braidSummaryStatuses(summary)
 	if len(statuses) == 0 {
 		return fmt.Errorf("rlm repl runner phase %q: braid node %q returned no status field", phaseName, node.ID)
@@ -5700,8 +5915,14 @@ func validateBraidNodeExecutionSummaryInGraph(phaseName string, node BraidNode, 
 			return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) returned unsupported status %q", phaseName, node.ID, node.Kind, strings.Join(statuses, ","))
 		}
 	}
-	if node.Kind == "verify" && !braidVerificationSummaryPassed(summary) {
-		return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) did not report verification pass: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
+	if node.Kind == "verify" {
+		if !braidVerificationSummaryPassed(summary) {
+			return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) did not report verification pass: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
+		}
+		// A text-only pass is accepted as an advisory node completion so legacy
+		// graph execution can continue, but it does not create RuntimeCertification
+		// and therefore cannot drive runtime shortcuts or verified final handoff.
+		_ = cert
 	}
 	return nil
 }
@@ -5856,6 +6077,11 @@ func braidNodePartialCanFeedDownstream(node BraidNode, finalNodeID string, graph
 		}
 	}
 	return false
+}
+
+//nolint:unused // Kept for generated split graph cleanup variants.
+func isGeneratedBraidSplitParseNode(node BraidNode) bool {
+	return node.Kind == "extract" && strings.HasSuffix(node.ID, "__parse")
 }
 
 func braidNodeDependsOn(graph BraidGraph, nodeID string, dependencyID string) bool {
@@ -6074,6 +6300,123 @@ func dependencySummarySubset(node BraidNode, summaries map[string]string) map[st
 	return out
 }
 
+func braidRuntimeMergeBlockReason(node BraidNode, dependencySummaries map[string]string) string {
+	if strings.TrimSpace(node.Kind) != "reduce" || len(node.InputSchema) == 0 {
+		return ""
+	}
+	block, _ := node.InputSchema["block_on_missing_artifact"].(bool)
+	if !block {
+		return ""
+	}
+	solveIDs := stringSliceFromAny(node.InputSchema["solve_ids"])
+	if len(solveIDs) == 0 {
+		solveIDs = append([]string(nil), node.DependsOn...)
+	}
+	allowed := map[string]struct{}{"solved": {}, "pass": {}, "passed": {}, "ok": {}, "completed": {}}
+	if required := stringSliceFromAny(node.InputSchema["required_artifact_status"]); len(required) > 0 {
+		allowed = map[string]struct{}{}
+		for _, status := range required {
+			allowed[strings.ToLower(strings.TrimSpace(status))] = struct{}{}
+		}
+	}
+	for _, depID := range solveIDs {
+		summary := strings.TrimSpace(dependencySummaries[depID])
+		if summary == "" {
+			return fmt.Sprintf("missing required split artifact %q", depID)
+		}
+		statuses := braidSummaryStatuses(summary)
+		if braidStatusesContainAny(statuses, "blocked", "failed", "failure", "error", "partial") {
+			return fmt.Sprintf("required split artifact %q is not solved/pass: %s", depID, strings.Join(statuses, ","))
+		}
+		ok := false
+		for _, status := range statuses {
+			if _, exists := allowed[strings.ToLower(strings.TrimSpace(status))]; exists {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Sprintf("required split artifact %q has unsupported status: %s", depID, strings.Join(statuses, ","))
+		}
+	}
+	return ""
+}
+
+func recordBraidNodeExecution(records map[string]braidNodeExecutionRecord, nodeID, summary, source string, cert *RuntimeCertification) {
+	if records == nil || strings.TrimSpace(nodeID) == "" {
+		return
+	}
+	if cert != nil {
+		copy := *cert
+		copy.NodeID = strings.TrimSpace(nodeID)
+		cert = &copy
+	}
+	record := braidNodeExecutionRecord{
+		Summary:       strings.TrimSpace(summary),
+		Source:        strings.TrimSpace(source),
+		Certification: cert,
+	}
+	if artifact, ok := parseBraidNodeArtifact(summary); ok {
+		record.Artifact = artifact
+	}
+	records[nodeID] = record
+}
+
+func runtimeCertificationForNode(node BraidNode, verifierID string) *RuntimeCertification {
+	verifierID = strings.TrimSpace(verifierID)
+	if verifierID == "" {
+		return nil
+	}
+	return &RuntimeCertification{
+		NodeID:        strings.TrimSpace(node.ID),
+		Pass:          true,
+		VerifierID:    verifierID,
+		VerifierKind:  runtimeVerifierKindScaffold,
+		ScaffoldClass: strings.TrimSpace(node.ScaffoldClass),
+		ScaffoldID:    strings.TrimSpace(node.ScaffoldID),
+	}
+}
+
+func certificationFromBraidSummary(node BraidNode, summary string) *RuntimeCertification {
+	artifact, ok := parseBraidNodeArtifact(summary)
+	if !ok || artifact.Provenance == nil {
+		return nil
+	}
+	raw, ok := artifact.Provenance["runtime_certification"]
+	if !ok {
+		return nil
+	}
+	certMap, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	pass, _ := certMap["pass"].(bool)
+	verifierID := strings.TrimSpace(stringFromAny(certMap["verifier_id"]))
+	verifierKind := strings.TrimSpace(stringFromAny(certMap["verifier_kind"]))
+	if !pass || verifierID == "" || verifierKind != runtimeVerifierKindScaffold {
+		return nil
+	}
+	scaffoldClass := strings.TrimSpace(stringFromAny(certMap["scaffold_class"]))
+	if scaffoldClass == "" {
+		scaffoldClass = strings.TrimSpace(node.ScaffoldClass)
+	}
+	scaffoldID := strings.TrimSpace(stringFromAny(certMap["scaffold_id"]))
+	if scaffoldID == "" {
+		scaffoldID = strings.TrimSpace(node.ScaffoldID)
+	}
+	cert := &RuntimeCertification{
+		NodeID:          strings.TrimSpace(node.ID),
+		Pass:            true,
+		VerifierID:      verifierID,
+		VerifierKind:    verifierKind,
+		ScaffoldClass:   scaffoldClass,
+		ScaffoldID:      scaffoldID,
+		CandidateDigest: strings.TrimSpace(stringFromAny(certMap["candidate_digest"])),
+		InputDigest:     strings.TrimSpace(stringFromAny(certMap["input_digest"])),
+	}
+	return cert
+}
+
 func submitBraidNode(
 	ctx context.Context,
 	phaseName string,
@@ -6288,11 +6631,11 @@ func seedSolverStateFromBraidGraph(graph *BraidGraph) *generalsolver.SolverState
 // helper input would exceed structural thresholds (bindings, queries, events,
 // constraints counts). This is the execution-path integration: the rewritten
 // graph is what readyBraidNodes actually iterates over, so splits produce real
-// sub-nodes that execute independently.
+// sub-nodes with concrete chunk payloads.
 //
 // For each oversized node, the original is removed and replaced with:
 //   - <id>__parse: extracts/normalizes the raw input
-//   - <id>__solve_01..<id>__solve_NN: independent sub-problems
+//   - <id>__solve_01..<id>__solve_NN: independent or sequential sub-problems
 //   - <id>__merge: combines sub-results into the original node's output
 //
 // Downstream nodes that depended on the original are rewired to depend on
@@ -6301,8 +6644,6 @@ func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseN
 	if graph == nil || len(graph.Nodes) == 0 {
 		return
 	}
-
-	applyBraidRouterSplits(graph, toolExec, phaseName)
 
 	// Collect nodes that need splitting.
 	var toSplit []string
@@ -6314,13 +6655,7 @@ func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseN
 		if policy != BraidNodeHelperPolicyPreferred && policy != BraidNodeHelperPolicyRequired {
 			continue
 		}
-		// Check archetype-based preemptive split.
-		if shouldPreemptiveSplitByArchetype(node) {
-			toSplit = append(toSplit, node.ID)
-			continue
-		}
-		// Check structural thresholds from parsed instance fields.
-		if shouldStructuralSplitFromQuestion(node) {
+		if braidNodeHasRegisteredSplitPolicy(node) && shouldStructuralSplitFromInput(node) {
 			toSplit = append(toSplit, node.ID)
 			continue
 		}
@@ -6344,8 +6679,11 @@ func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseN
 		if !ok {
 			continue
 		}
-		// Parse instance fields for chunk data.
-		chunkCount := splitChunkCountForNode(*node)
+		splitPayloads, splitMode := braidSplitPayloadsForNode(*node)
+		chunkCount := len(splitPayloads)
+		if chunkCount < 2 {
+			continue
+		}
 
 		parseID := nodeID + "__parse"
 		mergeID := nodeID + "__merge"
@@ -6364,29 +6702,41 @@ func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseN
 			MaxSummaryChars: 4000,
 		})
 
-		// Solve nodes: each handles one chunk.
+		// Solve nodes: each handles one concrete chunk.
 		for i, solveID := range solveIDs {
 			chunkGoal := fmt.Sprintf("Solve sub-problem %d/%d (parent: %s)", i+1, chunkCount, nodeID)
+			deps := []string{parseID}
+			if splitMode == "sequential" && i > 0 {
+				deps = append(deps, solveIDs[i-1])
+			}
 			newNodes = append(newNodes, BraidNode{
 				ID:              solveID,
 				Kind:            "solve",
 				Question:        chunkGoal,
-				DependsOn:       []string{parseID},
+				DependsOn:       deps,
 				HelperPolicy:    node.HelperPolicy,
 				Archetype:       node.Archetype,
 				ScaffoldClass:   node.ScaffoldClass,
 				ScaffoldID:      node.ScaffoldID,
-				InputSchema:     cloneMapAny(node.InputSchema),
+				InputSchema:     splitPayloads[i],
 				MaxSummaryChars: node.MaxSummaryChars,
 			})
 		}
 
 		// Merge node: combines sub-results.
 		newNodes = append(newNodes, BraidNode{
-			ID:              mergeID,
-			Kind:            "reduce",
-			Question:        fmt.Sprintf("Merge %d sub-problem results into final answer (parent: %s)", chunkCount, nodeID),
-			DependsOn:       solveIDs,
+			ID:        mergeID,
+			Kind:      "reduce",
+			Question:  fmt.Sprintf("Merge %d sub-problem results into final answer (parent: %s)", chunkCount, nodeID),
+			DependsOn: solveIDs,
+			InputSchema: map[string]any{
+				"split_role":                "merge",
+				"split_mode":                splitMode,
+				"parent_id":                 nodeID,
+				"solve_ids":                 solveIDs,
+				"required_artifact_status":  []any{"solved", "pass"},
+				"block_on_missing_artifact": true,
+			},
 			ExpectedOutput:  node.ExpectedOutput,
 			MaxSummaryChars: node.MaxSummaryChars,
 		})
@@ -6414,7 +6764,7 @@ func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseN
 				Phase:   phaseName,
 				NodeID:  nodeID,
 				Status:  "graph_split",
-				Message: fmt.Sprintf("split into %d solve + parse + merge nodes (archetype=%s)", chunkCount, node.Archetype),
+				Message: fmt.Sprintf("split into %d %s solve + parse + merge nodes (archetype=%s)", chunkCount, splitMode, node.Archetype),
 			})
 		}
 	}
@@ -6430,6 +6780,92 @@ func applyBraidGraphSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseN
 	graph.Nodes = filtered
 }
 
+func braidSplitPayloadsForNode(node BraidNode) ([]map[string]any, string) {
+	contract, ok := braidScaffoldContractFor(node.ScaffoldClass, node.ScaffoldID)
+	if !ok || contract.SplitPolicy == nil {
+		return nil, ""
+	}
+	policy := contract.SplitPolicy
+	baseInput := cloneMapAny(node.InputSchema)
+	chunks := braidSplitChunksForPolicy(baseInput, policy)
+	if len(chunks) > generalsolver.SplitMaxSubItems {
+		chunks = chunks[:generalsolver.SplitMaxSubItems]
+	}
+	if len(chunks) < 2 {
+		return nil, strings.TrimSpace(policy.Mode)
+	}
+	splitMode := strings.TrimSpace(policy.Mode)
+	if splitMode == "" {
+		splitMode = "independent"
+	}
+
+	payloads := make([]map[string]any, len(chunks))
+	parentSchema := braidSplitParentSchema(baseInput)
+	sourceRef := baseInput["source_ref"]
+	for i, chunk := range chunks {
+		payload := map[string]any{
+			"split_role":   "solve",
+			"split_mode":   splitMode,
+			"parent_id":    node.ID,
+			"chunk_index":  i,
+			"total_chunks": len(chunks),
+			"chunk":        cloneMapAny(chunk),
+			"parent_schema": map[string]any{
+				"fields": parentSchema,
+			},
+			"carry_state": splitMode == "sequential",
+		}
+		if sourceRef != nil {
+			payload["source_ref"] = sourceRef
+		}
+		for k, v := range chunk {
+			if _, exists := payload[k]; !exists {
+				payload[k] = v
+			}
+		}
+		for _, key := range policy.PreserveKeys {
+			if v, ok := baseInput[key]; ok {
+				payload[key] = v
+			}
+		}
+		payloads[i] = payload
+	}
+	return payloads, splitMode
+}
+
+func braidSplitChunksForPolicy(input map[string]any, policy *BraidSplitPolicy) []map[string]any {
+	if len(input) == 0 || policy == nil {
+		return nil
+	}
+	var chunks []map[string]any
+	for _, key := range policy.ChunkKeys {
+		items, ok := input[key].([]any)
+		if !ok || len(items) < 2 {
+			continue
+		}
+		for idx, item := range items {
+			chunks = append(chunks, map[string]any{
+				"chunk_label": strings.TrimSpace(key),
+				"chunk_index": idx,
+				"item":        item,
+			})
+			if policy.MaxChunks > 0 && len(chunks) >= policy.MaxChunks {
+				return chunks
+			}
+		}
+	}
+	return chunks
+}
+
+func braidSplitParentSchema(input map[string]any) map[string]any {
+	parent := cloneMapAny(input)
+	for _, key := range []string{"queries", "sub_problems", "subproblems", "bindings", "events", "constraints"} {
+		delete(parent, key)
+	}
+	return parent
+}
+
+//nolint:unused // Kept for feature-gated router pre-split experiments.
 func applyBraidRouterSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseName string) {
 	if graph == nil || len(graph.Nodes) == 0 {
 		return
@@ -6463,6 +6899,7 @@ func applyBraidRouterSplits(graph *BraidGraph, toolExec *replToolExecutor, phase
 	}
 }
 
+//nolint:unused // Kept with applyBraidRouterSplits.
 func shouldBraidRouterSplitNode(node BraidNode) bool {
 	if node.Kind != "solve" {
 		return false
@@ -6481,36 +6918,26 @@ func shouldBraidRouterSplitNode(node BraidNode) bool {
 	return len(targets) >= 2
 }
 
-// shouldPreemptiveSplitByArchetype returns true when a node's archetype
-// signals a structurally multi-binding problem that should be preemptively
-// decomposed regardless of payload size.
-func shouldPreemptiveSplitByArchetype(node BraidNode) bool {
-	archetype := strings.ToLower(strings.TrimSpace(node.Archetype))
-	switch archetype {
-	case "symbolic_trace":
-		// Symbolic trace problems (HM type inference, etc.) are structurally
-		// multi-binding. Even small instances benefit from parse/solve/merge.
-		return true
-	default:
-		return false
-	}
+func braidNodeHasRegisteredSplitPolicy(node BraidNode) bool {
+	contract, ok := braidScaffoldContractFor(node.ScaffoldClass, node.ScaffoldID)
+	return ok && contract.SplitPolicy != nil
 }
 
-// shouldStructuralSplitFromQuestion returns true when the node's question
-// contains parseable arrays that exceed count thresholds.
-func shouldStructuralSplitFromQuestion(node BraidNode) bool {
-	if parsed, ok := helperFactoryExtractInstanceFields(node.Question); ok && len(parsed) > 0 {
-		syntheticItem := generalsolver.WorkItem{
-			ID:      node.ID,
-			Payload: parsed,
-		}
-		plan := generalsolver.AnalyzeForSplit(syntheticItem)
-		return plan.Strategy != generalsolver.SplitStrategyNone
+func shouldStructuralSplitFromInput(node BraidNode) bool {
+	if !braidNodeHasRegisteredSplitPolicy(node) || len(node.InputSchema) == 0 {
+		return false
 	}
-	return false
+	syntheticItem := generalsolver.WorkItem{
+		ID:      node.ID,
+		Payload: cloneMapAny(node.InputSchema),
+	}
+	plan := generalsolver.AnalyzeForSplit(syntheticItem)
+	return plan.Strategy != generalsolver.SplitStrategyNone
 }
 
 // splitChunkCountForNode determines how many solve sub-items to create.
+//
+//nolint:unused // Kept for helper-factory split sizing variants.
 func splitChunkCountForNode(node BraidNode) int {
 	// Try structural analysis first.
 	if parsed, ok := helperFactoryExtractInstanceFields(node.Question); ok && len(parsed) > 0 {

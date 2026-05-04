@@ -116,6 +116,22 @@ func TestDecodeSkillExecutionEnvelope(t *testing.T) {
 	}
 }
 
+func TestFormatMCPEnvelopeErrorIncludesHintAndDetail(t *testing.T) {
+	got := formatMCPEnvelopeError("repo index build failed", map[string]any{
+		"hint":   "start LM Studio and load an embedding model",
+		"detail": "connection refused",
+	}, "fallback")
+	if !strings.Contains(got, "repo index build failed") {
+		t.Fatalf("formatted error missing message: %q", got)
+	}
+	if !strings.Contains(got, "hint: start LM Studio") {
+		t.Fatalf("formatted error missing hint: %q", got)
+	}
+	if !strings.Contains(got, "detail: connection refused") {
+		t.Fatalf("formatted error missing detail: %q", got)
+	}
+}
+
 func TestApplyMCPPipeQuery_ProjectsJSON(t *testing.T) {
 	input := map[string]any{
 		"result": map[string]any{

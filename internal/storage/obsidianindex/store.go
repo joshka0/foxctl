@@ -33,6 +33,7 @@ type Store interface {
 	SearchNotes(ctx context.Context, query string, limit int) ([]SearchHit, error)
 	SearchNotesSemantic(ctx context.Context, query string, provider semantic.EmbeddingProvider, limit int) ([]SearchHit, error)
 	EnsureSemanticEmbeddings(ctx context.Context, provider semantic.EmbeddingProvider) (int, error)
+	EnsureChunkSemanticEmbeddings(ctx context.Context, provider semantic.EmbeddingProvider) (int, error)
 	RelatedNotes(ctx context.Context, notePath string, limit int) ([]RelatedHit, error)
 	Stats(ctx context.Context) (Stats, error)
 	Health(ctx context.Context) (HealthReport, error)
@@ -929,7 +930,7 @@ func (s *sqlStore) SearchNotesSemantic(ctx context.Context, query string, provid
 	if _, err := s.EnsureSemanticEmbeddings(ctx, provider); err != nil {
 		return nil, err
 	}
-	if _, err := s.ensureChunkSemanticEmbeddings(ctx, provider); err != nil {
+	if _, err := s.EnsureChunkSemanticEmbeddings(ctx, provider); err != nil {
 		return nil, err
 	}
 	var queryEmbedding []float32
@@ -1488,7 +1489,7 @@ func splitCSV(value string) []string {
 	return uniqueStrings(strings.Split(value, ","))
 }
 
-func (s *sqlStore) ensureChunkSemanticEmbeddings(ctx context.Context, provider semantic.EmbeddingProvider) (int, error) {
+func (s *sqlStore) EnsureChunkSemanticEmbeddings(ctx context.Context, provider semantic.EmbeddingProvider) (int, error) {
 	if provider == nil {
 		return 0, fmt.Errorf("obsidianindex: embedding provider required")
 	}
@@ -1680,8 +1681,12 @@ WHERE model = ?
 	case err != nil:
 		return fmt.Errorf("obsidianindex: embedding metadata lookup: %w", err)
 	}
-	if dims != provider.Dimensions() {
-		return fmt.Errorf("obsidianindex: embedding dimension mismatch for model %q: stored=%d, provider=%d; run `foxctl obsidian index build --vault-path <vault-path>` to rebuild vault semantic embeddings", provider.Model(), dims, provider.Dimensions())
+	providerDims := provider.Dimensions()
+	if providerDims <= 0 {
+		return nil
+	}
+	if dims != providerDims {
+		return fmt.Errorf("obsidianindex: embedding dimension mismatch for model %q: stored=%d, provider=%d; run `foxctl obsidian index build --vault-path <vault-path> --semantic` to rebuild vault semantic embeddings", provider.Model(), dims, providerDims)
 	}
 	return nil
 }

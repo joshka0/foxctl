@@ -10,14 +10,17 @@ import (
 type ConditionID string
 
 const (
-	ConditionBaselineNoToolsOfficial ConditionID = "baseline_no_tools_official_prompt"
-	ConditionRLMNoToolsSingle        ConditionID = "rlm_no_tools_single"
-	ConditionRLMReplNoSubcalls       ConditionID = "rlm_repl_no_subcalls"
-	ConditionRLMReplRecursive        ConditionID = "rlm_repl_recursive"
-	ConditionRLMBraidSingle          ConditionID = "rlm_braid_single"
-	ConditionRLMNoToolsStaged        ConditionID = "rlm_no_tools_staged"
-	ConditionRLMNoModelToolsSingle   ConditionID = "rlm_no_model_tools_single"
-	ConditionRLMNoModelToolsStaged   ConditionID = "rlm_no_model_tools_staged"
+	ConditionBaselineNoToolsOfficial  ConditionID = "baseline_no_tools_official_prompt"
+	ConditionRLMNoToolsSingle         ConditionID = "rlm_no_tools_single"
+	ConditionRLMReplNoSubcalls        ConditionID = "rlm_repl_no_subcalls"
+	ConditionRLMReplRecursive         ConditionID = "rlm_repl_recursive"
+	ConditionRLMLambdaReplSingle      ConditionID = "rlm_lambda_repl_single"
+	ConditionRLMLambdaAdaptiveSingle  ConditionID = "rlm_lambda_adaptive_single"
+	ConditionRLMLambdaThenBraidSingle ConditionID = "rlm_lambda_then_braid_single"
+	ConditionRLMBraidSingle           ConditionID = "rlm_braid_single"
+	ConditionRLMNoToolsStaged         ConditionID = "rlm_no_tools_staged"
+	ConditionRLMNoModelToolsSingle    ConditionID = "rlm_no_model_tools_single"
+	ConditionRLMNoModelToolsStaged    ConditionID = "rlm_no_model_tools_staged"
 )
 
 // ConditionKind groups conditions by execution family.

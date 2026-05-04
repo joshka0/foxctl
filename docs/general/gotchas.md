@@ -70,6 +70,34 @@ CGO_ENABLED=0 go build -o ~/.foxctl/skills/code/symbols/bin ./skills/code_symbol
 
 ## Environment & Configuration
 
+### Repo Context Requires a Fresh Repoindex
+
+**Problem:** `gather_context` returns odd repo-search results, misses route
+mounts, action files, or structural neighbors, and provider telemetry shows
+`repo_index` / `repo_index_coverage` with zero hits.
+
+**Cause:** The repo graph index may be missing, empty, stale, or built for a
+different commit. Local/live providers can still return plausible files, which
+can make the result look like a ranking problem when it is actually missing
+graph/symbol data.
+
+**Solution:** Check index status before judging search quality:
+
+```bash
+foxctl index repo status --workspace /path/to/repo
+```
+
+If `nodes_total` is `0`, `index_matches_head` is false for a clean repo, or the
+language set is wrong, rebuild for the repo's languages:
+
+```bash
+foxctl index repo build --workspace /path/to/repo --go=false --typescript --elixir=false
+```
+
+For dirty worktrees, the index records the HEAD plus dirty state. `gather_context`
+should still use live-overlay providers for changed/untracked files, but indexed
+route/import/symbol closure only works when the repoindex has useful nodes.
+
 ### Skills Not Loading .env
 
 **Problem:** API keys not found in skills.

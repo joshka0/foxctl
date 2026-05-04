@@ -1872,6 +1872,7 @@ type promptEvalCase struct {
 	RequireGrounding bool                `json:"requires_grounding,omitempty"`
 	Category         string              `json:"category,omitempty"`
 	SessionID        string              `json:"session_id,omitempty"`
+	Metadata         map[string]any      `json:"metadata,omitempty"`
 }
 
 type promptComparisonTargetConfig struct {

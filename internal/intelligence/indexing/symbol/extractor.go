@@ -83,6 +83,13 @@ func (r *ExtractorRegistry) Get(language string) Extractor {
 	return r.extractors[language]
 }
 
+func extractSymbolBodyBytes(symbol Symbol, content []byte) ([]byte, bool) {
+	if symbol.StartByte < 0 || symbol.EndByte > len(content) || symbol.StartByte >= symbol.EndByte {
+		return nil, false
+	}
+	return content[symbol.StartByte:symbol.EndByte], true
+}
+
 // SupportedLanguages returns all registered languages in sorted order.
 func (r *ExtractorRegistry) SupportedLanguages() []string {
 	var langs []string
@@ -94,8 +101,9 @@ func (r *ExtractorRegistry) SupportedLanguages() []string {
 }
 
 // DefaultRegistry creates a registry with built-in extractors.
-// In v1, this includes Go, TypeScript/JavaScript, Elixir, Python, and Rust support via
-// [GoExtractor], [TypeScriptExtractor], [ElixirExtractor], [PythonExtractor], and [RustExtractor].
+// In v1, this includes Go, TypeScript/JavaScript, Elixir, Python, Rust, and C# support via
+// [GoExtractor], [TypeScriptExtractor], [ElixirExtractor], [PythonExtractor], [RustExtractor],
+// and [CSharpExtractor].
 func DefaultRegistry() *ExtractorRegistry {
 	reg := NewExtractorRegistry()
 	reg.Register("go", NewGoExtractor())
@@ -104,5 +112,6 @@ func DefaultRegistry() *ExtractorRegistry {
 	reg.Register("elixir", NewElixirExtractor())
 	reg.Register("python", NewPythonExtractor())
 	reg.Register("rust", NewRustExtractor())
+	reg.Register("csharp", NewCSharpExtractor())
 	return reg
 }

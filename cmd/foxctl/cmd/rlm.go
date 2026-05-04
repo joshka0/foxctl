@@ -15,6 +15,7 @@ import (
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/rlm"
 	rlmenv "github.com/joshka0/foxctl/internal/rlm/env"
+	"github.com/joshka0/foxctl/internal/rlm/repl"
 	rlmruntime "github.com/joshka0/foxctl/internal/rlm/runtime"
 	"github.com/joshka0/foxctl/internal/storage/dbutil"
 	"github.com/spf13/cobra"
@@ -111,7 +112,7 @@ func newRLMRunCommand() *cobra.Command {
 				currentAdapter.SetSubcall(runRecursive)
 				currentAdapter.SetContextEngineStore(ceStore)
 				currentAdapter.SetTaskStore(taskStore)
-				runner := chooseRLMRunner(executor, currentAdapter, currentTask, currentEnv, llmProvider, llmModel, llmBaseURL, llmAPIKey, llmTimeout, requireToolUse, routeProfile, planMode, sandboxKind, ephemeralSkills, extractSolution)
+				runner := chooseRLMRunner(executor, currentAdapter, currentTask, currentEnv, llmProvider, llmModel, llmBaseURL, llmAPIKey, llmTimeout, requireToolUse, routeProfile, planMode, toolProfile, sandboxKind, ephemeralSkills, extractSolution)
 				return runner.Run(ctx, currentTask, currentEnv)
 			}
 			mode := normalizedRLMExecutor(executor)
@@ -172,7 +173,7 @@ func newRLMRunCommand() *cobra.Command {
 	cmd.Flags().StringVar(&toolProfile, "tool-profile", rlmenv.ToolProfileDefault, "Experimental RLM tool profile")
 	cmd.Flags().StringVar(&routeProfile, "route-profile", string(rlm.RouteProfileAuto), "Experimental RLM route profile: auto, code_retrieval, memory_recall, mixed, or evidence_audit")
 	cmd.Flags().StringVar(&planMode, "plan-mode", string(rlm.PlanModeFree), "Experimental planning mode: free, staged, or lambda-retrieval")
-	cmd.Flags().StringVar(&sandboxKind, "sandbox", string(rlmruntime.SandboxKindPython), "Scratch REPL sandbox for --executor repl: python or yaegi")
+	cmd.Flags().StringVar(&sandboxKind, "sandbox", string(rlmruntime.SandboxKindPython), "Scratch REPL sandbox for --executor repl: python, smolvm, or yaegi")
 	cmd.Flags().BoolVar(&ephemeralSkills, "ephemeral-skills", false, "Enable runtime-managed ephemeral helper solve support for --executor repl")
 	cmd.Flags().BoolVar(&extractSolution, "extract-solution", false, "For --executor repl, return only the final solution = ... line when present")
 	cmd.Flags().StringVar(&optTraceOut, "opt-trace-out", "", "Append one optimizer-ready JSONL trace record per run")
@@ -205,6 +206,7 @@ func chooseRLMRunner(
 	requireToolUse bool,
 	routeProfile string,
 	planMode string,
+	toolProfile string,
 	sandboxKind string,
 	ephemeralSkills bool,
 	extractSolution bool,
@@ -214,11 +216,12 @@ func chooseRLMRunner(
 		pm := rlm.NormalizePlanMode(planMode)
 		if pm == rlm.PlanModeLambda {
 			llmCfg := rlm.LLMConfig{
-				Provider: firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
-				Model:    firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
-				BaseURL:  firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
-				APIKey:   firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
-				Timeout:  llmTimeout,
+				Provider:    firstNonEmpty(llmProvider, os.Getenv("FOXCTL_RLM_LLM_PROVIDER"), "lmstudio"),
+				Model:       firstNonEmpty(llmModel, os.Getenv("FOXCTL_RLM_LLM_MODEL"), os.Getenv("LMSTUDIO_MODEL")),
+				BaseURL:     firstNonEmpty(llmBaseURL, os.Getenv("FOXCTL_RLM_LLM_BASE_URL"), os.Getenv("LMSTUDIO_BASE_URL")),
+				APIKey:      firstNonEmpty(llmAPIKey, os.Getenv("FOXCTL_RLM_LLM_API_KEY"), os.Getenv("LMSTUDIO_API_KEY")),
+				Timeout:     llmTimeout,
+				ToolProfile: toolProfile,
 			}
 			return rlm.LambdaRunner{
 				Tools: adapter,
@@ -241,6 +244,7 @@ func chooseRLMRunner(
 				RequireToolUse: requireToolUse,
 				RouteProfile:   rlm.NormalizeRouteProfile(routeProfile),
 				PlanMode:       pm,
+				ToolProfile:    toolProfile,
 			},
 		}
 	case "repl", "rlm-repl":
@@ -273,7 +277,29 @@ func chooseRLMRunner(
 					MaxHelperCalls: task.MaxIterations,
 					MaxDuration:    timeout,
 				},
-				Sandbox:         rlmruntime.SandboxConfig{Kind: kind},
+				Sandbox: rlmruntime.SandboxConfig{
+					Kind: kind,
+					SmolVMPython: repl.SmolVMPythonOptions{
+						MachineName:         "foxctl-rlm-longcot-clean-offline",
+						Image:               "python:3.12-alpine",
+						GuestWorkDir:        "/workspace/foxctl-rlm-python",
+						Network:             false,
+						CreateOnInit:        false,
+						StartOnInit:         true,
+						StopOnClose:         false,
+						AllowPackageInstall: true,
+						AllowedPackages:     []string{"python-chess", "sympy", "networkx", "numpy", "rdkit", "rdkit-pypi", "requests"},
+						PackageAliases: map[string]string{
+							"chess":    "python-chess",
+							"sympy":    "sympy",
+							"networkx": "networkx",
+							"numpy":    "numpy",
+							"rdkit":    "rdkit-pypi",
+							"requests": "requests",
+						},
+						PackageInstallTimeout: 180 * time.Second,
+					},
+				},
 				SystemPrompt:    buildRLMREPLCLISystemPromptForPolicy(kind, true, recursionEnabled),
 				AsyncRecursion:  true,
 				RecursionPolicy: rlmruntime.RecursionPolicyOptional,
