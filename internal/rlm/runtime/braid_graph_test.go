@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sort"
@@ -3753,13 +3754,6 @@ func TestExtractBraidHelperFailedStage(t *testing.T) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func TestBraidNodeHandoffTransformsSymbolicTraceTask(t *testing.T) {
 	t.Parallel()
 
@@ -4450,7 +4444,7 @@ func TestAttemptSplitHelperExecution_TooSmallToSplit(t *testing.T) {
 	handoff := BraidNodeHandoff{Node: node}
 
 	// No toolExec → returns false.
-	result, ok := attemptSplitHelperExecution(nil, "phase", node, input, handoff, "", nil, nil)
+	result, ok := attemptSplitHelperExecution(context.TODO(), "phase", node, input, handoff, "", nil, nil)
 	if ok {
 		t.Fatalf("expected false for nil toolExec, got result=%q", result)
 	}

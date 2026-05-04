@@ -1346,6 +1346,7 @@ func stateReplayActionList(input map[string]any) []string {
 
 // --- Math backtracking chain explicit DAG scaffold ---
 
+//nolint:unused // Kept for the explicit-DAG math scaffold preset while scaffold routing is feature-gated.
 func searchBacktrackPresetSource() string {
 	return `def Solve(input):
     """Solve a chain of dependent math problems (backtracking/explicit DAG).

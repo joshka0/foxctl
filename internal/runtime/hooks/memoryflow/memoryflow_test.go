@@ -39,6 +39,7 @@ func TestDetectPromptMemory(t *testing.T) {
 
 func TestRecallFile(t *testing.T) {
 	storageRoot := t.TempDir()
+	workspaceRoot := t.TempDir()
 	casRoot := filepath.Join(storageRoot, "cas")
 	cfg := config.Config{}
 	cfg.Storage.Root = storageRoot
@@ -51,7 +52,7 @@ func TestRecallFile(t *testing.T) {
 	_, err = store.Save(context.Background(), storage.NamedEntry{
 		Name:      "edit:auth",
 		Type:      "gotcha",
-		Workspace: "/tmp/workspace",
+		Workspace: workspaceRoot,
 		Summary:   "auth.go: Remember to validate state before token exchange",
 		Result:    json.RawMessage(`{"file":"internal/auth/auth.go"}`),
 	})
@@ -60,7 +61,7 @@ func TestRecallFile(t *testing.T) {
 	}
 
 	resp, err := RecallFile(context.Background(), NewDependencies(cfg, lifecycle.Dependencies{}), RecallRequest{
-		Workspace: "/tmp/workspace",
+		Workspace: workspaceRoot,
 		Payload: RecallPayload{
 			ToolInput: struct {
 				FilePath string `json:"file_path,omitempty"`

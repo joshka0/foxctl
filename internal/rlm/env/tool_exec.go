@@ -731,9 +731,7 @@ func codeSearchPathExcluded(pathValue string, excludedPaths []string) bool {
 		if excluded == "" {
 			continue
 		}
-		if strings.HasSuffix(excluded, "/") {
-			excluded = strings.TrimSuffix(excluded, "/")
-		}
+		excluded = strings.TrimSuffix(excluded, "/")
 		if pathValue == excluded || strings.HasPrefix(pathValue, excluded+"/") {
 			return true
 		}
@@ -1389,6 +1387,7 @@ func (a *ReadOnlyAdapter) repoIndexAnchorsToCodeHits(anchors []repoquery.Anchor,
 	return hits
 }
 
+//nolint:unused // Kept for the semantic_code source profile fallback path while default gather_context stays lexical/index-first.
 func (a *ReadOnlyAdapter) semanticCodeSearchHits(ctx context.Context, query string, limit int) ([]rankedCodeSearchHit, error) {
 	if strings.TrimSpace(a.workspaceRoot) == "" {
 		return nil, nil
@@ -1771,6 +1770,7 @@ func rankSemanticEmbeddingCacheEntries(entries []semanticEmbeddingCacheEntry, qu
 	return out
 }
 
+//nolint:unused // Kept with semanticCodeSearchHits for opt-in semantic bundle decoding.
 type semanticCandidateBundleHit struct {
 	PrimaryPath  string
 	RelatedPaths []string
@@ -1779,6 +1779,7 @@ type semanticCandidateBundleHit struct {
 	MatchReason  string
 }
 
+//nolint:unused // Kept with semanticCodeSearchHits for opt-in semantic bundle decoding.
 func decodeSemanticCandidateBundles(raw any) []semanticCandidateBundleHit {
 	items, ok := raw.([]map[string]any)
 	if !ok {
@@ -1797,6 +1798,7 @@ func decodeSemanticCandidateBundles(raw any) []semanticCandidateBundleHit {
 	return out
 }
 
+//nolint:unused // Kept with semantic bundle decoding helpers.
 func decodeStringSliceAny(raw any) []string {
 	switch typed := raw.(type) {
 	case []string:
@@ -1822,6 +1824,7 @@ func decodeStringSliceAny(raw any) []string {
 	}
 }
 
+//nolint:unused // Kept with semanticCodeSearchHits for opt-in semantic bundle decoding.
 func semanticBundleSnippet(bundle semanticCandidateBundleHit) string {
 	parts := make([]string, 0, 2)
 	if bundle.MatchReason != "" {
@@ -5876,6 +5879,7 @@ func codeProbeSnippet(reason string, excerpt string) string {
 	}
 }
 
+//nolint:unused // Kept for tests/debug callers that want default code-search fusion without request options.
 func mergeCodeSearchHits(limit int, repoHits []contextengine.CodeSearchHit, rankedGroups ...[]rankedCodeSearchHit) []contextengine.CodeSearchHit {
 	return mergeCodeSearchHitsWithOptions(limit, codeSearchRequestOptions{}, repoHits, rankedGroups...)
 }

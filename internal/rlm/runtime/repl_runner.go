@@ -910,12 +910,10 @@ func (r *REPLRunner) runStagedREPLLoop(
 			filterOutput, filterErr := runCyclePacketFilter(ctx, llmCfg, systemPrompt, task, phase, output, attemptOutput.AssistantText)
 			attemptOutput = mergeEngineOutputs(attemptOutput, filterOutput)
 			if filterErr != nil {
-				err = filterErr
 				validationErr = filterErr
 			} else {
 				attemptOutput.AssistantText = filterOutput.AssistantText
 				attemptOutput.StopReason = filterOutput.StopReason
-				err = nil
 				validationErr = validateREPLAttemptOutputForPhase(phase, attemptOutput, nil, phaseMaxTokens)
 			}
 		}
@@ -1493,7 +1491,6 @@ func (r *REPLRunner) parseAndRepairBraidGraphPhaseOutput(
 			return normalized, engine.EngineOutput{}, nil
 		} else {
 			err = validateErr
-			graph = normalized
 		}
 	}
 	initialErr := err

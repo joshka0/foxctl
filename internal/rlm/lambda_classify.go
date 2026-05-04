@@ -32,6 +32,8 @@ var taskDigitMap = map[string]TaskType{
 
 // classifyTask makes one bounded LLM call to classify the query into a task type.
 // Returns TaskTypeGeneral on any error.
+//
+//nolint:unused // Preserved for non-accounting callers; current paths use classifyTaskWithUsage.
 func classifyTask(ctx context.Context, cfg LLMConfig, prompt string) (TaskType, error) {
 	taskType, _, err := classifyTaskWithUsage(ctx, cfg, prompt)
 	return taskType, err

@@ -801,7 +801,7 @@ func computeContextGraphConfidence(req contextengine.ContextGraphRequest, reques
 			loadability = 1 - ratioFloat(len(gap.Roots), len(requested))
 		}
 	}
-	freshness := 1.0
+	var freshness float64
 	freshnessStatus := repoindex.CompareIndexFreshness(meta, current)
 	if !metaOK {
 		freshness = 0.55

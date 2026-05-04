@@ -73,9 +73,10 @@ func newOpenAICompatRequestError(model, baseURL string, err error) error {
 func newOpenAICompatStatusError(model, baseURL string, statusCode int, message string) error {
 	kind := fmt.Sprintf("http_%d", statusCode)
 	hint := "check the embedding endpoint, API key, and model name"
-	if statusCode == 404 {
+	switch statusCode {
+	case 404:
 		hint = "verify the endpoint exposes /v1/embeddings and the configured embedding model is loaded"
-	} else if statusCode == 401 || statusCode == 403 {
+	case 401, 403:
 		hint = "check FOXCTL_EMBEDDING_API_KEY or the server authentication setting"
 	}
 	return &EmbeddingServiceError{

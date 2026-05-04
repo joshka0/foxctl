@@ -1332,6 +1332,7 @@ func compactHelperFactoryLongText(value string, limit int) string {
 	return value[:limit] + "...[truncated]"
 }
 
+//nolint:unused // Kept for callers that do not provide verifier feedback.
 func helperFactoryRepairFeedback(stage, errText, source, raw string, input, output map[string]any) string {
 	return helperFactoryRepairFeedbackWithVerifier(stage, errText, source, raw, input, output, nil)
 }
@@ -1660,9 +1661,7 @@ func helperFactorySourceCandidates(text string) []string {
 		return nil
 	}
 	var out []string
-	for _, block := range helperFactoryFencedBlocks(text) {
-		out = append(out, block)
-	}
+	out = append(out, helperFactoryFencedBlocks(text)...)
 	out = append(out, text)
 	seen := map[string]struct{}{}
 	unique := make([]string, 0, len(out))

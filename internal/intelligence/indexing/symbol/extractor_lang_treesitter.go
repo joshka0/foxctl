@@ -513,13 +513,6 @@ func treeSitterByteRange(node *sitter.Node, limit int) (int, int) {
 	return startByte, endByte
 }
 
-func extractSymbolBodyBytes(symbol Symbol, content []byte) ([]byte, bool) {
-	if symbol.StartByte < 0 || symbol.EndByte > len(content) || symbol.StartByte >= symbol.EndByte {
-		return nil, false
-	}
-	return content[symbol.StartByte:symbol.EndByte], true
-}
-
 func collectTreeSitterCallNames(root *sitter.Node, content []byte, mapper func(*sitter.Node, []byte) string) []string {
 	if root == nil {
 		return nil

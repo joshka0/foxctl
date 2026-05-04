@@ -83,6 +83,13 @@ func (r *ExtractorRegistry) Get(language string) Extractor {
 	return r.extractors[language]
 }
 
+func extractSymbolBodyBytes(symbol Symbol, content []byte) ([]byte, bool) {
+	if symbol.StartByte < 0 || symbol.EndByte > len(content) || symbol.StartByte >= symbol.EndByte {
+		return nil, false
+	}
+	return content[symbol.StartByte:symbol.EndByte], true
+}
+
 // SupportedLanguages returns all registered languages in sorted order.
 func (r *ExtractorRegistry) SupportedLanguages() []string {
 	var langs []string

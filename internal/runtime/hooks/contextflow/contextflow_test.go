@@ -10,6 +10,7 @@ import (
 
 func TestDrainUpdaterContext(t *testing.T) {
 	storageRoot := t.TempDir()
+	workspaceRoot := t.TempDir()
 	store, err := contextbuffer.Open(context.Background(), storageRoot)
 	if err != nil {
 		t.Fatalf("open contextbuffer: %v", err)
@@ -17,7 +18,7 @@ func TestDrainUpdaterContext(t *testing.T) {
 	defer store.Close()
 
 	_, err = store.Enqueue(context.Background(), contextbuffer.EnqueueParams{
-		WorkspaceID: "/tmp/workspace",
+		WorkspaceID: workspaceRoot,
 		SessionID:   "sid-123",
 		Source:      "context-updater",
 		Text:        "Relevant memory block",
@@ -29,7 +30,7 @@ func TestDrainUpdaterContext(t *testing.T) {
 	response, err := DrainUpdaterContext(context.Background(), Dependencies{
 		StorageRoot: storageRoot,
 	}, DrainRequest{
-		Workspace: "/tmp/workspace",
+		Workspace: workspaceRoot,
 		SessionID: "sid-123",
 	})
 	if err != nil {
@@ -45,7 +46,7 @@ func TestDrainUpdaterContext(t *testing.T) {
 		t.Fatalf("context = %q", response.Context)
 	}
 
-	remaining, err := store.Count(context.Background(), "/tmp/workspace", "sid-123")
+	remaining, err := store.Count(context.Background(), workspaceRoot, "sid-123")
 	if err != nil {
 		t.Fatalf("count remaining: %v", err)
 	}

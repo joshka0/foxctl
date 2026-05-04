@@ -41,43 +41,72 @@ func extractCSharpSymbolsRegex(filePath string, content []byte) []Symbol {
 	lines := strings.Split(string(content), "\n")
 	lineOffsets := computeLineOffsets(lines)
 	out := make([]Symbol, 0, 8)
+	container := ""
+	containerDepth := -1
+	pendingContainer := ""
+	braceDepth := 0
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			braceDepth += csharpBraceDelta(line)
 			continue
+		}
+		if pendingContainer != "" && strings.Contains(line, "{") {
+			container = pendingContainer
+			containerDepth = braceDepth + 1
+			pendingContainer = ""
 		}
 		name, kind := csharpRegexDeclaration(trimmed)
-		if name == "" {
-			continue
+		if name != "" {
+			symbolName := name
+			if container != "" && (kind == KindMethod || kind == KindVariable) && !strings.Contains(name, ".") {
+				symbolName = container + "." + name
+			}
+			startByte := lineOffsets[i]
+			endLine := csharpRegexEndLine(lines, i)
+			endByte := len(content)
+			if endLine-1 >= 0 && endLine-1 < len(lineOffsets) {
+				endByte = lineOffsets[endLine-1] + len(lines[endLine-1])
+			}
+			if endByte <= startByte || endByte > len(content) {
+				endByte = len(content)
+			}
+			out = append(out, Symbol{
+				ID:            ID(filePath, symbolName),
+				FilePath:      filePath,
+				Name:          symbolName,
+				Language:      "csharp",
+				Kind:          kind,
+				StartByte:     startByte,
+				EndByte:       endByte,
+				StartLine:     i + 1,
+				EndLine:       endLine,
+				Signature:     trimmed,
+				BodyDigest:    ComputeDigest(content[startByte:endByte]),
+				Documentation: extractCSharpLeadingDoc(lines, i),
+			})
+			if csharpContainerKind(kind) {
+				if strings.Contains(line, "{") {
+					container = name
+					containerDepth = braceDepth + 1
+				} else {
+					pendingContainer = name
+				}
+			}
 		}
-		startByte := lineOffsets[i]
-		endLine := csharpRegexEndLine(lines, i)
-		endByte := len(content)
-		if endLine-1 >= 0 && endLine-1 < len(lineOffsets) {
-			endByte = lineOffsets[endLine-1] + len(lines[endLine-1])
+		braceDepth += csharpBraceDelta(line)
+		if containerDepth >= 0 && braceDepth < containerDepth {
+			container = ""
+			containerDepth = -1
 		}
-		if endByte <= startByte || endByte > len(content) {
-			endByte = len(content)
-		}
-		out = append(out, Symbol{
-			ID:            ID(filePath, name),
-			FilePath:      filePath,
-			Name:          name,
-			Language:      "csharp",
-			Kind:          kind,
-			StartByte:     startByte,
-			EndByte:       endByte,
-			StartLine:     i + 1,
-			EndLine:       endLine,
-			Signature:     trimmed,
-			BodyDigest:    ComputeDigest(content[startByte:endByte]),
-			Documentation: extractCSharpLeadingDoc(lines, i),
-		})
 	}
 	return out
 }
 
 func csharpRegexDeclaration(line string) (string, Kind) {
+	if csharpStatementKeyword(line) {
+		return "", ""
+	}
 	fields := strings.Fields(line)
 	for i, field := range fields {
 		switch field {
@@ -85,9 +114,18 @@ func csharpRegexDeclaration(line string) (string, Kind) {
 			return csharpCleanIdent(nextField(fields, i+1)), KindClass
 		case "interface":
 			return csharpCleanIdent(nextField(fields, i+1)), KindInterface
-		case "struct", "record", "enum":
+		case "struct", "enum":
 			return csharpCleanIdent(nextField(fields, i+1)), KindType
+		case "record":
+			next := nextField(fields, i+1)
+			if next == "class" || next == "struct" {
+				next = nextField(fields, i+2)
+			}
+			return csharpCleanIdent(next), KindType
 		}
+	}
+	if name, ok := csharpPropertyDeclaration(line); ok {
+		return name, KindVariable
 	}
 	if strings.Contains(line, "(") && strings.Contains(line, ")") && !strings.HasPrefix(line, "if ") && !strings.HasPrefix(line, "for ") && !strings.HasPrefix(line, "while ") && !strings.HasPrefix(line, "switch ") {
 		before := strings.TrimSpace(line[:strings.Index(line, "(")])
@@ -97,6 +135,50 @@ func csharpRegexDeclaration(line string) (string, Kind) {
 		}
 	}
 	return "", ""
+}
+
+func csharpStatementKeyword(line string) bool {
+	for _, prefix := range []string{"return ", "throw ", "if ", "for ", "foreach ", "while ", "switch ", "catch ", "using "} {
+		if strings.HasPrefix(line, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func csharpPropertyDeclaration(line string) (string, bool) {
+	if !strings.Contains(line, "{") || !strings.Contains(line, "}") || !(strings.Contains(line, " get;") || strings.Contains(line, " set;")) {
+		return "", false
+	}
+	before := strings.TrimSpace(line[:strings.Index(line, "{")])
+	parts := strings.Fields(before)
+	if len(parts) == 0 {
+		return "", false
+	}
+	name := csharpCleanIdent(parts[len(parts)-1])
+	return name, name != ""
+}
+
+func csharpContainerKind(kind Kind) bool {
+	switch kind {
+	case KindClass, KindInterface, KindType:
+		return true
+	default:
+		return false
+	}
+}
+
+func csharpBraceDelta(line string) int {
+	delta := 0
+	for _, r := range line {
+		switch r {
+		case '{':
+			delta++
+		case '}':
+			delta--
+		}
+	}
+	return delta
 }
 
 func nextField(fields []string, idx int) string {

@@ -89,8 +89,8 @@ func gitDeltaPaths(ctx context.Context, repoRoot string) (untracked []string, mo
 		if idx := strings.Index(pathValue, " -> "); idx >= 0 {
 			pathValue = strings.TrimSpace(pathValue[idx+4:])
 		}
-		switch {
-		case code == "??":
+		switch code {
+		case "??":
 			untracked = appendUniqueDeltaPath(untracked, pathValue)
 		default:
 			modified = appendUniqueDeltaPath(modified, pathValue)

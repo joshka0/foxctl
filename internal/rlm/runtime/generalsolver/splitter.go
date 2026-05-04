@@ -388,7 +388,6 @@ func chunkArrayAny(items []any, label string) []map[string]any {
 	if neededChunks > SplitMaxSubItems {
 		// Redistribute to fill SplitMaxSubItems chunks evenly.
 		chunkSize = (totalItems + SplitMaxSubItems - 1) / SplitMaxSubItems
-		neededChunks = SplitMaxSubItems
 	}
 
 	var chunks []map[string]any

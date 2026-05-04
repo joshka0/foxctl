@@ -865,6 +865,7 @@ func runtimeForwardCertification(node BraidNode, sourceNodeID string, source *Ru
 	}
 }
 
+//nolint:unused // Kept for dependency-verification policy variants.
 func braidDependencyVerificationPassed(dependencySummaries map[string]string) bool {
 	for _, summary := range dependencySummaries {
 		if braidVerificationSummaryPassed(summary) {
@@ -3230,6 +3231,7 @@ func helperAnswerFromToolResult(result string) string {
 	return answer
 }
 
+//nolint:unused // Kept for older helper result consumers during LongCoT runtime migration.
 func helperAnswerAndVerifiedFromToolResult(result string) (string, bool) {
 	answer, cert := helperAnswerAndCertificationFromToolResult(BraidNode{}, result)
 	return answer, cert != nil && cert.Pass
@@ -5021,6 +5023,7 @@ func braidNodeAnswerObjectTemplate(ids []string) string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
+//nolint:unused // Kept for router/pre-split diagnostics while adaptive splitting is feature-gated.
 func adaptiveBraidSplitDeclaredTargetIDs(node BraidNode) []string {
 	input := node.InputSchema
 	if len(input) == 0 {
@@ -5088,9 +5091,7 @@ func extractBraidNodeIDsFromText(text string) []string {
 			}
 		}
 	}
-	for _, id := range braidNodeIDRE.FindAllString(text, -1) {
-		out = append(out, id)
-	}
+	out = append(out, braidNodeIDRE.FindAllString(text, -1)...)
 	for _, match := range braidBareNodeListRE.FindAllStringSubmatch(strings.ToLower(text), -1) {
 		if len(match) != 2 {
 			continue
@@ -6076,6 +6077,7 @@ func braidNodePartialCanFeedDownstream(node BraidNode, finalNodeID string, graph
 	return false
 }
 
+//nolint:unused // Kept for generated split graph cleanup variants.
 func isGeneratedBraidSplitParseNode(node BraidNode) bool {
 	return node.Kind == "extract" && strings.HasSuffix(node.ID, "__parse")
 }
@@ -6797,7 +6799,7 @@ func braidSplitPayloadsForNode(node BraidNode) ([]map[string]any, string) {
 
 	payloads := make([]map[string]any, len(chunks))
 	parentSchema := braidSplitParentSchema(baseInput)
-	sourceRef, _ := baseInput["source_ref"]
+	sourceRef := baseInput["source_ref"]
 	for i, chunk := range chunks {
 		payload := map[string]any{
 			"split_role":   "solve",
@@ -6861,6 +6863,7 @@ func braidSplitParentSchema(input map[string]any) map[string]any {
 	return parent
 }
 
+//nolint:unused // Kept for feature-gated router pre-split experiments.
 func applyBraidRouterSplits(graph *BraidGraph, toolExec *replToolExecutor, phaseName string) {
 	if graph == nil || len(graph.Nodes) == 0 {
 		return
@@ -6894,6 +6897,7 @@ func applyBraidRouterSplits(graph *BraidGraph, toolExec *replToolExecutor, phase
 	}
 }
 
+//nolint:unused // Kept with applyBraidRouterSplits.
 func shouldBraidRouterSplitNode(node BraidNode) bool {
 	if node.Kind != "solve" {
 		return false
@@ -6930,6 +6934,8 @@ func shouldStructuralSplitFromInput(node BraidNode) bool {
 }
 
 // splitChunkCountForNode determines how many solve sub-items to create.
+//
+//nolint:unused // Kept for helper-factory split sizing variants.
 func splitChunkCountForNode(node BraidNode) int {
 	// Try structural analysis first.
 	if parsed, ok := helperFactoryExtractInstanceFields(node.Question); ok && len(parsed) > 0 {
