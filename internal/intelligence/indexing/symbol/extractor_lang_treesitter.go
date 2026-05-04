@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
+	csharp "github.com/tree-sitter/tree-sitter-c-sharp/bindings/go"
 	py "github.com/tree-sitter/tree-sitter-python/bindings/go"
 	rust "github.com/tree-sitter/tree-sitter-rust/bindings/go"
 	ts "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
@@ -157,6 +158,72 @@ func extractRustCallsWithTreeSitter(_ context.Context, symbol Symbol, content []
 	return calls, true, nil
 }
 
+func extractCSharpSymbolsWithTreeSitter(_ context.Context, filePath string, content []byte) ([]Symbol, bool, error) {
+	if strings.ToLower(filepath.Ext(filePath)) != ".cs" {
+		return nil, false, nil
+	}
+	grammar := sitter.NewLanguage(csharp.Language())
+	tree, ok := parseTreeSitterContent(grammar, content)
+	if !ok {
+		return nil, false, nil
+	}
+	defer tree.Close()
+
+	lines := strings.Split(string(content), "\n")
+	symbols := make([]Symbol, 0, 16)
+	var walk func(*sitter.Node, string)
+	walk = func(node *sitter.Node, container string) {
+		if node == nil {
+			return
+		}
+		nextContainer := container
+		switch node.Kind() {
+		case "class_declaration", "interface_declaration", "struct_declaration", "enum_declaration", "record_declaration":
+			if sym, ok := csharpTreeSitterSymbol(filePath, content, lines, node, container); ok {
+				symbols = append(symbols, sym)
+				nextContainer = sym.Name
+			}
+		case "method_declaration", "constructor_declaration", "property_declaration":
+			if sym, ok := csharpTreeSitterSymbol(filePath, content, lines, node, container); ok {
+				symbols = append(symbols, sym)
+			}
+		case "field_declaration":
+			symbols = append(symbols, csharpFieldSymbols(filePath, content, lines, node, container)...)
+		}
+		cursor := node.Walk()
+		for _, child := range node.NamedChildren(cursor) {
+			c := child
+			walk(&c, nextContainer)
+		}
+	}
+	root := tree.RootNode()
+	cursor := root.Walk()
+	for _, child := range root.NamedChildren(cursor) {
+		c := child
+		walk(&c, "")
+	}
+	return symbols, true, nil
+}
+
+func extractCSharpCallsWithTreeSitter(_ context.Context, symbol Symbol, content []byte) ([]string, bool, error) {
+	if strings.ToLower(filepath.Ext(symbol.FilePath)) != ".cs" {
+		return nil, false, nil
+	}
+	body, ok := extractSymbolBodyBytes(symbol, content)
+	if !ok {
+		return nil, true, nil
+	}
+	grammar := sitter.NewLanguage(csharp.Language())
+	tree, ok := parseTreeSitterContent(grammar, body)
+	if !ok {
+		return nil, false, nil
+	}
+	defer tree.Close()
+
+	calls := collectTreeSitterCallNames(tree.RootNode(), body, csharpCallNameFromNode)
+	return calls, true, nil
+}
+
 func parseTreeSitterContent(grammar *sitter.Language, content []byte) (*sitter.Tree, bool) {
 	if grammar == nil {
 		return nil, false
@@ -190,6 +257,71 @@ func treeSitterTypeScriptLanguage(filePath string) (string, *sitter.Language, bo
 	default:
 		return "", nil, false
 	}
+}
+
+func csharpTreeSitterSymbol(filePath string, content []byte, lines []string, node *sitter.Node, container string) (Symbol, bool) {
+	if node == nil {
+		return Symbol{}, false
+	}
+	name := treeSitterNodeName(node, content)
+	if name == "" {
+		return Symbol{}, false
+	}
+	kind := KindType
+	switch node.Kind() {
+	case "class_declaration", "record_declaration":
+		kind = KindClass
+	case "interface_declaration":
+		kind = KindInterface
+	case "struct_declaration", "enum_declaration":
+		kind = KindType
+	case "method_declaration", "constructor_declaration":
+		kind = KindMethod
+	case "property_declaration":
+		kind = KindVariable
+	}
+	symbolName := name
+	if container != "" && (kind == KindMethod || node.Kind() == "property_declaration") {
+		symbolName = container + "." + name
+	}
+	return buildTreeSitterSymbol(filePath, "csharp", content, lines, node, symbolName, kind, extractCSharpLeadingDoc)
+}
+
+func csharpFieldSymbols(filePath string, content []byte, lines []string, node *sitter.Node, container string) []Symbol {
+	if node == nil {
+		return nil
+	}
+	var declaration *sitter.Node
+	cursor := node.Walk()
+	for _, child := range node.NamedChildren(cursor) {
+		c := child
+		if c.Kind() == "variable_declaration" {
+			declaration = &c
+			break
+		}
+	}
+	if declaration == nil {
+		return nil
+	}
+	children := declaration.NamedChildren(declaration.Walk())
+	out := make([]Symbol, 0, len(children))
+	for _, child := range children {
+		c := child
+		if c.Kind() != "variable_declarator" {
+			continue
+		}
+		name := treeSitterNodeName(&c, content)
+		if name == "" {
+			continue
+		}
+		if container != "" {
+			name = container + "." + name
+		}
+		if sym, ok := buildTreeSitterSymbol(filePath, "csharp", content, lines, node, name, KindVariable, extractCSharpLeadingDoc); ok {
+			out = append(out, sym)
+		}
+	}
+	return out
 }
 
 func extractTopLevelTSSymbols(filePath, language string, content []byte, lines []string, node *sitter.Node) []Symbol {
@@ -400,7 +532,7 @@ func collectTreeSitterCallNames(root *sitter.Node, content []byte, mapper func(*
 			return
 		}
 		switch node.Kind() {
-		case "call_expression", "new_expression", "call":
+		case "call_expression", "new_expression", "call", "invocation_expression", "object_creation_expression":
 			if name := strings.TrimSpace(mapper(node, content)); name != "" && !seen[name] {
 				seen[name] = true
 				out = append(out, name)
@@ -594,13 +726,35 @@ func treeSitterCallableName(node *sitter.Node, content []byte) string {
 	switch node.Kind() {
 	case "identifier", "type_identifier", "property_identifier":
 		return strings.TrimSpace(treeSitterNodeText(node, content))
-	case "member_expression", "attribute":
+	case "member_expression", "attribute", "member_access_expression":
 		if prop := node.ChildByFieldName("property"); prop != nil {
 			return strings.TrimSpace(treeSitterNodeText(prop, content))
 		}
 		if attr := node.ChildByFieldName("attribute"); attr != nil {
 			return strings.TrimSpace(treeSitterNodeText(attr, content))
 		}
+		if name := node.ChildByFieldName("name"); name != nil {
+			return strings.TrimSpace(treeSitterNodeText(name, content))
+		}
+	}
+	for i := int(node.NamedChildCount()) - 1; i >= 0; i-- {
+		child := node.NamedChild(uint(i))
+		if child == nil {
+			continue
+		}
+		if name := treeSitterCallableName(child, content); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func csharpCallNameFromNode(node *sitter.Node, content []byte) string {
+	if node == nil {
+		return ""
+	}
+	if fn := node.ChildByFieldName("function"); fn != nil {
+		return treeSitterCallableName(fn, content)
 	}
 	for i := int(node.NamedChildCount()) - 1; i >= 0; i-- {
 		child := node.NamedChild(uint(i))

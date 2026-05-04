@@ -78,7 +78,7 @@ func setupTestStore(t *testing.T) (*Store, *QueryEngine) {
 
 func TestBuildOrFallbackQuery_MultiWord(t *testing.T) {
 	got := buildOrFallbackQuery("hybrid memory pipeline")
-	want := "hybrid OR memory OR pipeline"
+	want := "\"hybrid\" OR \"memory\" OR \"pipeline\""
 	if got != want {
 		t.Errorf("buildOrFallbackQuery(%q) = %q, want %q", "hybrid memory pipeline", got, want)
 	}
@@ -86,7 +86,7 @@ func TestBuildOrFallbackQuery_MultiWord(t *testing.T) {
 
 func TestBuildOrFallbackQuery_SkipsOperators(t *testing.T) {
 	got := buildOrFallbackQuery("cache AND invalid")
-	want := "cache OR invalid"
+	want := "\"cache\" OR \"invalid\""
 	if got != want {
 		t.Errorf("buildOrFallbackQuery(%q) = %q, want %q", "cache AND invalid", got, want)
 	}
@@ -110,8 +110,8 @@ func TestBuildFallbackCandidates_Order(t *testing.T) {
 	if candidates[1] != `"hybrid memory"` {
 		t.Errorf("candidates[1] = %q, want %q", candidates[1], `"hybrid memory"`)
 	}
-	if candidates[2] != "hybrid OR memory" {
-		t.Errorf("candidates[2] = %q, want %q", candidates[2], "hybrid OR memory")
+	if candidates[2] != `"hybrid" OR "memory"` {
+		t.Errorf("candidates[2] = %q, want %q", candidates[2], `"hybrid" OR "memory"`)
 	}
 }
 
@@ -188,6 +188,19 @@ func TestSearch_SyntaxError_FallsBackToQuote(t *testing.T) {
 	}
 	if len(results) == 0 {
 		t.Error("expected results from quoted fallback, got 0")
+	}
+}
+
+func TestSearch_ColumnSyntaxError_FallsBackToSanitizedQuery(t *testing.T) {
+	_, qe := setupTestStore(t)
+	ctx := context.Background()
+
+	results, err := qe.Search(ctx, "Required evidence: pipeline", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) == 0 {
+		t.Error("expected results from sanitized fallback, got 0")
 	}
 }
 

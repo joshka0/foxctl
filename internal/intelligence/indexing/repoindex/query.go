@@ -170,7 +170,7 @@ func buildOrFallbackQuery(query string) string {
 		if t == "" {
 			continue
 		}
-		terms = append(terms, t)
+		terms = append(terms, quoteFTSQuery(t))
 	}
 	if len(terms) < 2 {
 		return ""
@@ -185,6 +185,7 @@ func isFTSSyntaxError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "fts5") ||
 		strings.Contains(msg, "syntax error") ||
+		strings.Contains(msg, "no such column") ||
 		strings.Contains(msg, "unterminated string")
 }
 

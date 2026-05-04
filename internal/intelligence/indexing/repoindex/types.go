@@ -145,6 +145,37 @@ type IndexMeta struct {
 	Languages       []string  `json:"languages,omitempty"`
 }
 
+// FileState records the indexed content state for one repo-relative file.
+type FileState struct {
+	RepoKey         string    `json:"repo_key,omitempty"`
+	Path            string    `json:"path"`
+	ContentHash     string    `json:"content_hash"`
+	SizeBytes       int64     `json:"size_bytes"`
+	MTimeUnix       int64     `json:"mtime_unix"`
+	Language        string    `json:"language,omitempty"`
+	IndexedAt       time.Time `json:"indexed_at"`
+	GitStatus       string    `json:"git_status,omitempty"`
+	LastSeenHeadSHA string    `json:"last_seen_head_sha,omitempty"`
+}
+
+// WorkspaceDelta describes differences between the stored file_state table and
+// the current workspace. It is the contract future partial builders consume.
+type WorkspaceDelta struct {
+	BaseHeadSHA     string   `json:"base_head_sha,omitempty"`
+	CurrentHeadSHA  string   `json:"current_head_sha,omitempty"`
+	DirtyStatusHash string   `json:"dirty_status_hash,omitempty"`
+	Added           []string `json:"added,omitempty"`
+	Modified        []string `json:"modified,omitempty"`
+	Deleted         []string `json:"deleted,omitempty"`
+	Untracked       []string `json:"untracked,omitempty"`
+	Unchanged       int      `json:"unchanged,omitempty"`
+}
+
+// Empty reports whether no indexed file changed.
+func (d WorkspaceDelta) Empty() bool {
+	return len(d.Added) == 0 && len(d.Modified) == 0 && len(d.Deleted) == 0 && len(d.Untracked) == 0
+}
+
 // GitSnapshot captures commit state for freshness comparisons.
 type GitSnapshot struct {
 	HeadSHA         string `json:"head_sha,omitempty"`
@@ -212,6 +243,7 @@ type BuildOptions struct {
 	IncludeGo             bool
 	IncludePython         bool
 	IncludeRust           bool
+	IncludeCSharp         bool
 	IncludeTypescript     bool
 	IncludeElixir         bool
 	IncludeTerraform      bool
@@ -220,6 +252,7 @@ type BuildOptions struct {
 	DryRun                bool
 	SummaryProvider       FileSummaryProvider
 	SymbolSummaryProvider SymbolSummaryProvider
+	Progress              func(BuildProgress)
 }
 
 // BuildResult captures build statistics.
@@ -229,6 +262,34 @@ type BuildResult struct {
 	Symbols  int `json:"symbols"`
 	Nodes    int `json:"nodes"`
 	Edges    int `json:"edges"`
+}
+
+// DeltaBuildMode describes how an incremental build request was handled.
+type DeltaBuildMode string
+
+const (
+	DeltaBuildModeNoop         DeltaBuildMode = "noop"
+	DeltaBuildModeFullFallback DeltaBuildMode = "full_fallback"
+)
+
+// BuildDeltaResult captures the result and handling mode for an incremental
+// build request. Non-empty deltas currently rebuild the full graph because
+// repoindex edge repair and rollups are global.
+type BuildDeltaResult struct {
+	Result       BuildResult    `json:"result"`
+	Delta        WorkspaceDelta `json:"delta"`
+	Mode         DeltaBuildMode `json:"mode"`
+	Reason       string         `json:"reason,omitempty"`
+	FullFallback bool           `json:"full_fallback,omitempty"`
+}
+
+// BuildProgress reports coarse repoindex build progress.
+type BuildProgress struct {
+	Phase     string      `json:"phase"`
+	Message   string      `json:"message,omitempty"`
+	ElapsedMs int64       `json:"elapsed_ms"`
+	Time      time.Time   `json:"time"`
+	Result    BuildResult `json:"result"`
 }
 
 // ExpandOptions controls graph expansion.

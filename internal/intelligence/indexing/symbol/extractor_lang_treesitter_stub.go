@@ -31,3 +31,11 @@ func extractRustSymbolsWithTreeSitter(_ context.Context, _ string, _ []byte) ([]
 func extractRustCallsWithTreeSitter(_ context.Context, _ Symbol, _ []byte) ([]string, bool, error) {
 	return nil, false, nil
 }
+
+func extractCSharpSymbolsWithTreeSitter(_ context.Context, _ string, _ []byte) ([]Symbol, bool, error) {
+	return nil, false, nil
+}
+
+func extractCSharpCallsWithTreeSitter(_ context.Context, _ Symbol, _ []byte) ([]string, bool, error) {
+	return nil, false, nil
+}

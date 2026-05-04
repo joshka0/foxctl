@@ -104,3 +104,21 @@ func RustSymbolKey(name string, exported bool, fileBasename string) SymbolKey {
 	}
 	return SymbolKey(fmt.Sprintf("%s/%s", fileBasename, name))
 }
+
+// CSharpSymbolKey creates a SymbolKey for a C# symbol.
+// Public symbols use their qualified name directly; private/internal symbols are
+// disambiguated by file basename.
+func CSharpSymbolKey(name string, exported bool, fileBasename string) SymbolKey {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if exported {
+		return SymbolKey(name)
+	}
+	fileBasename = strings.TrimSpace(fileBasename)
+	if fileBasename == "" {
+		return SymbolKey(name)
+	}
+	return SymbolKey(fmt.Sprintf("%s/%s", fileBasename, name))
+}

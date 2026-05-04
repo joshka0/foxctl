@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	schemaVersion            = 3
+	schemaVersion            = 4
 	openContextMinimumBudget = 10 * time.Second
 )
 
@@ -387,6 +387,101 @@ func (s *Store) ReplaceAll(ctx context.Context, nodes []Node, edges []Edge) erro
 	return tx.Commit()
 }
 
+// ReplaceFileStates replaces the indexed file-state table for this repository.
+func (s *Store) ReplaceFileStates(ctx context.Context, states []FileState) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback() //nolint:errcheck
+	}()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM file_state WHERE repo_key = ?`, s.repoKey); err != nil {
+		return err
+	}
+	if len(states) == 0 {
+		return tx.Commit()
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO file_state (
+			repo_key, path, content_hash, size_bytes, mtime_unix, language,
+			indexed_at_unix, git_status, last_seen_head_sha
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	now := time.Now().UTC()
+	for _, state := range states {
+		pathValue := filepath.ToSlash(strings.TrimSpace(state.Path))
+		if pathValue == "" {
+			continue
+		}
+		indexedAt := state.IndexedAt
+		if indexedAt.IsZero() {
+			indexedAt = now
+		}
+		if _, err := stmt.ExecContext(ctx,
+			s.repoKey,
+			pathValue,
+			state.ContentHash,
+			state.SizeBytes,
+			state.MTimeUnix,
+			nullIfEmpty(state.Language),
+			indexedAt.Unix(),
+			nullIfEmpty(state.GitStatus),
+			nullIfEmpty(state.LastSeenHeadSHA),
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ListFileStates returns the stored per-file index state for this repository.
+func (s *Store) ListFileStates(ctx context.Context) ([]FileState, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT repo_key, path, content_hash, size_bytes, mtime_unix, language,
+		       indexed_at_unix, git_status, last_seen_head_sha
+		FROM file_state
+		WHERE repo_key = ?
+		ORDER BY path ASC
+	`, s.repoKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var states []FileState
+	for rows.Next() {
+		var (
+			state       FileState
+			language    sql.NullString
+			indexedUnix int64
+			gitStatus   sql.NullString
+			head        sql.NullString
+		)
+		if err := rows.Scan(&state.RepoKey, &state.Path, &state.ContentHash, &state.SizeBytes, &state.MTimeUnix, &language, &indexedUnix, &gitStatus, &head); err != nil {
+			return nil, err
+		}
+		if language.Valid {
+			state.Language = language.String
+		}
+		if gitStatus.Valid {
+			state.GitStatus = gitStatus.String
+		}
+		if head.Valid {
+			state.LastSeenHeadSHA = head.String
+		}
+		state.IndexedAt = time.Unix(indexedUnix, 0).UTC()
+		states = append(states, state)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return states, nil
+}
+
 // SearchFTS searches nodes using full-text search.
 func (s *Store) SearchFTS(ctx context.Context, query string, limit int) ([]Node, error) {
 	if limit <= 0 {
@@ -740,6 +835,21 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(name);
 	CREATE INDEX IF NOT EXISTS idx_nodes_repo_key ON nodes(repo_key);
 
+	CREATE TABLE IF NOT EXISTS file_state (
+		repo_key TEXT NOT NULL,
+		path TEXT NOT NULL,
+		content_hash TEXT NOT NULL,
+		size_bytes INTEGER NOT NULL,
+		mtime_unix INTEGER NOT NULL,
+		language TEXT,
+		indexed_at_unix INTEGER NOT NULL,
+		git_status TEXT,
+		last_seen_head_sha TEXT,
+		PRIMARY KEY(repo_key, path)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_file_state_repo_key ON file_state(repo_key);
+
 	CREATE VIRTUAL TABLE IF NOT EXISTS node_fts USING fts5(
 		id UNINDEXED,
 		name,
@@ -844,6 +954,7 @@ func resetSchema(ctx context.Context, db *sql.DB) error {
 		DROP TABLE IF EXISTS node_fts;
 		DROP TABLE IF EXISTS edges;
 		DROP TABLE IF EXISTS nodes;
+		DROP TABLE IF EXISTS file_state;
 		DROP TABLE IF EXISTS pkg_state;
 	`)
 	return err

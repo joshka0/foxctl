@@ -91,6 +91,69 @@ export function foo() {
 	}
 }
 
+func TestBuilderAddsCSharpSymbolsAndCallEdges(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	storageRoot := t.TempDir()
+
+	srcDir := filepath.Join(workspace, "client", "Scripts", "Core")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	source := `namespace Overcharge.Client.Core;
+
+public class ControllerPolicy
+{
+    public FrameData Evaluate(InputState input) { return new FrameData(); }
+}
+
+public class ControllerDriver
+{
+    private readonly ControllerPolicy policy;
+    public ControllerDriver(ControllerPolicy policy) { this.policy = policy; }
+    public FrameData Tick(InputState input) { return policy.Evaluate(input); }
+}
+
+public record struct FrameData;
+public record struct InputState;
+`
+	if err := os.WriteFile(filepath.Join(srcDir, "ControllerDriver.cs"), []byte(source), 0o644); err != nil {
+		t.Fatalf("write csharp file: %v", err)
+	}
+
+	store, err := Open(ctx, storageRoot, workspace)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	builder := NewBuilder(store, workspace)
+	if _, err := builder.Build(ctx, BuildOptions{
+		RepoRoot:      workspace,
+		IncludeGo:     false,
+		IncludeCSharp: true,
+	}); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	repoKey := store.RepoKey()
+	pkgID := csharpPkgPrefix + "Overcharge.Client.Core"
+	driverID := SymbolID(repoKey, pkgID, "ControllerDriver")
+	tickID := SymbolID(repoKey, pkgID, "ControllerDriver.Tick")
+	evaluateID := SymbolID(repoKey, pkgID, "ControllerPolicy.Evaluate")
+
+	if _, err := store.GetNode(ctx, driverID); err != nil {
+		t.Fatalf("get driver symbol %s: %v", driverID, err)
+	}
+	outgoing, err := store.GetOutgoingEdges(ctx, tickID, []EdgeType{EdgeCalls}, 100)
+	if err != nil {
+		t.Fatalf("get outgoing edges: %v", err)
+	}
+	if !containsEdge(outgoing, tickID, evaluateID, EdgeCalls) {
+		t.Fatalf("expected CALLS edge %s -> %s, got %#v", tickID, evaluateID, outgoing)
+	}
+}
+
 func TestBuilderSkipsTypeScriptDeclAndPatchFiles(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()

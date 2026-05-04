@@ -94,8 +94,9 @@ func (r *ExtractorRegistry) SupportedLanguages() []string {
 }
 
 // DefaultRegistry creates a registry with built-in extractors.
-// In v1, this includes Go, TypeScript/JavaScript, Elixir, Python, and Rust support via
-// [GoExtractor], [TypeScriptExtractor], [ElixirExtractor], [PythonExtractor], and [RustExtractor].
+// In v1, this includes Go, TypeScript/JavaScript, Elixir, Python, Rust, and C# support via
+// [GoExtractor], [TypeScriptExtractor], [ElixirExtractor], [PythonExtractor], [RustExtractor],
+// and [CSharpExtractor].
 func DefaultRegistry() *ExtractorRegistry {
 	reg := NewExtractorRegistry()
 	reg.Register("go", NewGoExtractor())
@@ -104,5 +105,6 @@ func DefaultRegistry() *ExtractorRegistry {
 	reg.Register("elixir", NewElixirExtractor())
 	reg.Register("python", NewPythonExtractor())
 	reg.Register("rust", NewRustExtractor())
+	reg.Register("csharp", NewCSharpExtractor())
 	return reg
 }

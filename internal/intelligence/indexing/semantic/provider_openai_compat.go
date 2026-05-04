@@ -117,8 +117,9 @@ func (p *OpenAICompatProvider) EmbedBatch(ctx context.Context, texts []string) (
 	start := time.Now()
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
+		err = newOpenAICompatRequestError(p.model, p.baseURL, err)
 		p.emitEvent(ctx, start, len(texts), estimateTokens(texts), 0, false, err)
-		return nil, fmt.Errorf("openai-compatible: request failed: %w", err)
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -137,7 +138,7 @@ func (p *OpenAICompatProvider) EmbedBatch(ctx context.Context, texts []string) (
 				msg = truncateOpenAICompat(text, 240)
 			}
 		}
-		err = fmt.Errorf("openai-compatible: status %d: %s", resp.StatusCode, msg)
+		err = newOpenAICompatStatusError(p.model, p.baseURL, resp.StatusCode, msg)
 		p.emitEvent(ctx, start, len(texts), estimateTokens(texts), resp.StatusCode, false, err)
 		return nil, err
 	}

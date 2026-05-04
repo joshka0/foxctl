@@ -237,6 +237,9 @@ func FindFilesMatchingGlob(root, pattern string, excludePatterns []string) ([]st
 			return fmt.Errorf("walk %s: %w", path, err)
 		}
 		if info.IsDir() {
+			if path != root && IsCommonExclude(info.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
@@ -256,15 +259,10 @@ func FindFilesMatchingGlob(root, pattern string, excludePatterns []string) ([]st
 			return nil
 		}
 
-		// Check exclude patterns
-		for _, excl := range excludePatterns {
-			excluded, err := doublestar.Match(excl, relSlash)
-			if err != nil {
-				return fmt.Errorf("match exclude pattern %q for %q: %w", excl, rel, err)
-			}
-			if excluded {
-				return nil
-			}
+		if excluded, err := pathMatchesAnyExclude(relSlash, excludePatterns); err != nil {
+			return fmt.Errorf("match exclude pattern for %q: %w", rel, err)
+		} else if excluded {
+			return nil
 		}
 
 		files = append(files, rel)
@@ -328,19 +326,9 @@ func FindFilesRespectingGitignore(root, pattern string, excludePatterns []string
 			continue
 		}
 
-		// Check exclude patterns
-		excluded := false
-		for _, excl := range excludePatterns {
-			ex, err := doublestar.Match(excl, relSlash)
-			if err != nil {
-				return nil, fmt.Errorf("match exclude pattern %q for %q: %w", excl, line, err)
-			}
-			if ex {
-				excluded = true
-				break
-			}
-		}
-		if excluded {
+		if excluded, err := pathMatchesAnyExclude(relSlash, excludePatterns); err != nil {
+			return nil, fmt.Errorf("match exclude pattern for %q: %w", line, err)
+		} else if excluded {
 			continue
 		}
 
@@ -350,6 +338,39 @@ func FindFilesRespectingGitignore(root, pattern string, excludePatterns []string
 	}
 
 	return files, nil
+}
+
+func pathMatchesAnyExclude(relSlash string, excludePatterns []string) (bool, error) {
+	relSlash = filepath.ToSlash(strings.TrimSpace(relSlash))
+	if relSlash == "" {
+		return false, nil
+	}
+	base := filepath.Base(relSlash)
+	for _, raw := range excludePatterns {
+		for _, pattern := range strings.Split(raw, ",") {
+			pattern = filepath.ToSlash(strings.TrimSpace(pattern))
+			if pattern == "" {
+				continue
+			}
+			excluded, err := doublestar.Match(pattern, relSlash)
+			if err != nil {
+				return false, fmt.Errorf("%q: %w", pattern, err)
+			}
+			if excluded {
+				return true, nil
+			}
+			if !strings.Contains(pattern, "/") {
+				excluded, err = doublestar.Match(pattern, base)
+				if err != nil {
+					return false, fmt.Errorf("%q: %w", pattern, err)
+				}
+				if excluded {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
 }
 
 func gitTopLevel(root string) (string, error) {
