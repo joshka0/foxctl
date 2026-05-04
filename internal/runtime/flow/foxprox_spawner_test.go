@@ -916,9 +916,9 @@ func TestFoxproxSpawner_ExecPushMode_SpawnCreatesSessionWithDroidExec(t *testing
 		t.Fatalf("expected 1 CreateSession call, got %d", len(fpClient.createSessionReqs))
 	}
 	req := fpClient.createSessionReqs[0]
-	expectedCmd := []string{"droid", "exec", "--auto", "medium"}
-	if len(req.Cmd) < 4 {
-		t.Fatalf("expected cmd starting with [droid exec --auto medium <prompt>], got %v", req.Cmd)
+	expectedCmd := []string{"droid", "exec", "--skip-permissions-unsafe"}
+	if len(req.Cmd) < 3 {
+		t.Fatalf("expected cmd starting with [droid exec --skip-permissions-unsafe <prompt>], got %v", req.Cmd)
 	}
 	for i, v := range expectedCmd {
 		if req.Cmd[i] != v {
@@ -926,7 +926,7 @@ func TestFoxproxSpawner_ExecPushMode_SpawnCreatesSessionWithDroidExec(t *testing
 		}
 	}
 	// The last argument should be the prompt.
-	promptArg := strings.Join(req.Cmd[4:], " ")
+	promptArg := strings.Join(req.Cmd[3:], " ")
 	if !strings.Contains(promptArg, "Research the auth module") {
 		t.Errorf("expected prompt arg containing 'Research the auth module', got %q", promptArg)
 	}
@@ -999,7 +999,7 @@ func TestFoxproxSpawner_ExecPushMode_SpawnDoesNotInjectFlowContext(t *testing.T)
 		t.Fatalf("expected 1 CreateSession call, got %d", len(fpClient.createSessionReqs))
 	}
 	req := fpClient.createSessionReqs[0]
-	promptArg := strings.Join(req.Cmd[4:], " ")
+	promptArg := strings.Join(req.Cmd[3:], " ")
 
 	// The prompt should NOT contain the spawner's own flow output push
 	// configuration (the AgentExecutor handles that). It should be the
@@ -1040,7 +1040,7 @@ func TestFoxproxSpawner_ExecPushMode_SpawnIncludesPushInstructions(t *testing.T)
 		t.Fatalf("expected 1 CreateSession call, got %d", len(fpClient.createSessionReqs))
 	}
 	req := fpClient.createSessionReqs[0]
-	promptArg := strings.Join(req.Cmd[4:], " ")
+	promptArg := strings.Join(req.Cmd[3:], " ")
 
 	if !strings.Contains(promptArg, "Flow Output Push Configuration") {
 		t.Errorf("expected prompt to contain the push instructions from AgentExecutor, got: %q", promptArg)

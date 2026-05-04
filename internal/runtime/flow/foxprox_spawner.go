@@ -102,10 +102,11 @@ func NewFoxproxAgentSpawner(client FoxproxClient, config FoxproxSpawnerConfig) *
 // Spawn creates a foxprox PTY session. The behavior depends on whether push
 // mode is active (opts.OutputMode == "push"):
 //
-// Push mode: Uses `droid exec --auto medium "<prompt>"` to run droid
-// non-interactively with auto-approval. The prompt (including push
-// instructions already injected by AgentExecutor) is passed as the exec argument.
-// No room creation or join — droid exec doesn't need rooms.
+// Push mode: Uses `droid exec --skip-permissions-unsafe "<prompt>"` to run droid
+// non-interactively with all permissions bypassed. The flow engine runs agents
+// in foxprox PTY sessions which are isolated environments. The prompt (including
+// push instructions already injected by AgentExecutor) is passed as the exec
+// argument. No room creation or join — droid exec doesn't need rooms.
 //
 // Non-push mode: Creates a foxprox room, joins the session as a member. The
 // session ID serves as both agent_id and session_id. Tasks are sent via room
@@ -120,16 +121,16 @@ func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, op
 	// Determine the working directory.
 	cwd := opts.Workspace
 
-	// Push mode: when OutputMode is "push", use droid exec --auto medium to
-	// avoid droid's permission dialog blocking. The AgentExecutor already
-	// injects push instructions into the prompt, so we don't add our own.
+	// Push mode: when OutputMode is "push", use droid exec --skip-permissions-unsafe
+	// to bypass all permission dialogs. The AgentExecutor already injects push
+	// instructions into the prompt, so we don't add our own.
 	isPushMode := opts.OutputMode == "push"
 	s.execMode = isPushMode
 
 	var cmd []string
 	if isPushMode {
 		// In push mode, pass the full prompt as the droid exec argument.
-		cmd = []string{cliCmd, "exec", "--auto", "medium", prompt}
+		cmd = []string{cliCmd, "exec", "--skip-permissions-unsafe", prompt}
 	} else {
 		cmd = []string{cliCmd}
 	}

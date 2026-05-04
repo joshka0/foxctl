@@ -115,8 +115,16 @@ func (e *TransformExecutor) Execute(ctx context.Context, node FlowNode, input an
 		return NodeOutput{}, fmt.Errorf("flow: transform executor: invalid transform kind %q", kind)
 	}
 
+	// Use the nested config string if provided. Otherwise, pass the full
+	// node config JSON so transforms can use inline fields alongside
+	// the "transform" key.
+	configStr := cfg.Config
+	if configStr == "" {
+		configStr = string(node.Config)
+	}
+
 	// Apply the transform.
-	result, err := ApplyTransform(ctx, kind, cfg.Config, input)
+	result, err := ApplyTransform(ctx, kind, configStr, input)
 	duration := time.Since(start)
 
 	if err != nil {
