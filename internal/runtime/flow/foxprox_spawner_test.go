@@ -455,7 +455,12 @@ func TestFoxproxSpawner_Info_IdleSession(t *testing.T) {
 	fpClient := &mockFoxproxClient{
 		readinessResults: map[string][]*httpjson.ReadinessResponse{
 			"fp-session-1": {
-				{SessionID: "fp-session-1", Idle: true},
+				{SessionID: "fp-session-1", Idle: true, IdleForMS: 5000},
+			},
+		},
+		screenResults: map[string][]*vtscreen.Snapshot{
+			"fp-session-1": {
+				{Lines: []string{"agent output here"}},
 			},
 		},
 	}
@@ -469,9 +474,9 @@ func TestFoxproxSpawner_Info_IdleSession(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Idle means the session is still alive, just idle
-	if info.Status != "running" {
-		t.Errorf("expected status running (idle), got %q", info.Status)
+	// Idle means the agent finished producing output — report completed with screen as summary
+	if info.Status != "completed" {
+		t.Errorf("expected status completed, got %q", info.Status)
 	}
 }
 

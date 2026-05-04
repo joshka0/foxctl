@@ -171,9 +171,20 @@ func (s *foxproxAgentSpawner) Info(ctx context.Context, agentID string) (*AgentI
 		}, nil
 	}
 
-	// Session exists — it's running (may be idle or active).
-	// Use readiness info for optional summary detail.
-	_ = readiness
+	// Session exists — check if output is idle (agent finished producing).
+	// When idle, report "completed" and capture screen as summary so the
+	// flow engine's session_summary polling loop picks up the output.
+	if readiness.Idle {
+		screen, sErr := s.client.SessionScreen(ctx, agentID)
+		summary := fmt.Sprintf("output idle for %dms", readiness.IdleForMS)
+		if sErr == nil {
+			summary = screenToString(screen)
+		}
+		return &AgentInfoResult{
+			Status:  "completed",
+			Summary: summary,
+		}, nil
+	}
 	return &AgentInfoResult{
 		Status: "running",
 	}, nil
