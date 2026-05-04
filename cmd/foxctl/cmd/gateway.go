@@ -141,21 +141,21 @@ func newWebProxyHandler(_ context.Context, addr string, _ zerolog.Logger) (http.
 	}
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
-	// Wrap the director to inject Tailscale identity headers from the gateway
+	// Wrap the rewrite to inject Tailscale identity headers from the gateway
 	// context. This allows the downstream web server to know who is calling.
-	originalDirector := proxy.Director
-	proxy.Director = func(r *http.Request) {
-		originalDirector(r)
-		if info := gateway.IdentityFromRequest(r); info != nil {
-			r.Header.Set("X-Tailscale-User", info.UserLogin)
+	proxy.Rewrite = func(r *httputil.ProxyRequest) {
+		r.SetURL(target)
+		r.SetXForwarded()
+		if info := gateway.IdentityFromRequest(r.In); info != nil {
+			r.Out.Header.Set("X-Tailscale-User", info.UserLogin)
 			if info.UserName != "" {
-				r.Header.Set("X-Tailscale-User-Name", info.UserName)
+				r.Out.Header.Set("X-Tailscale-User-Name", info.UserName)
 			}
 			if info.NodeName != "" {
-				r.Header.Set("X-Tailscale-Node", info.NodeName)
+				r.Out.Header.Set("X-Tailscale-Node", info.NodeName)
 			}
 			if info.NodeID != "" {
-				r.Header.Set("X-Tailscale-Node-ID", info.NodeID)
+				r.Out.Header.Set("X-Tailscale-Node-ID", info.NodeID)
 			}
 		}
 	}

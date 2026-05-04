@@ -635,7 +635,7 @@ func initLocalWallet(ctx context.Context, rc *skillmain.RunContext, network, key
 		}
 
 		keyPath = filepath.Join(keyDir, fmt.Sprintf("x402_%s.key", network))
-		keyHex := hex.EncodeToString(privateKey.D.Bytes())
+		keyHex := hex.EncodeToString(privateKey.D.Bytes()) //nolint:staticcheck // SA1019: stub code, D never reached
 		if err := os.WriteFile(keyPath, []byte(keyHex), 0o600); err != nil {
 			return nil, skillerr.IO("save key file", skillerr.WithCause(err))
 		}

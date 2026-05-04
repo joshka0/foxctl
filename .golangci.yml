@@ -112,6 +112,6 @@ linters:
       # known command aggregators and long integration tests.
       - linters:
           - gocyclo
-        path: '(cmd/.*/main\.go|cmd/foxctl/cmd/.*|cmd/foxctl_viewer/.*|internal/adapters/skillslib/.*|internal/agent/.*|internal/context/.*|internal/domain/skill/.*|internal/intelligence/.*|internal/interfaces/.*|internal/platform/.*|internal/rlm/.*|internal/runtime/.*|internal/storage/.*|internal/tooling/.*|internal/v2/adapters/.*|internal/v2/services/.*|.*_test\.go)'
+        path: '(cmd/.*/main\.go|cmd/foxctl/cmd/.*|cmd/foxctl_viewer/.*|internal/adapters/skillslib/.*|internal/agent/.*|internal/context/.*|internal/domain/skill/.*|internal/intelligence/.*|internal/interfaces/.*|internal/platform/.*|internal/rlm/.*|internal/runtime/.*|internal/storage/.*|internal/tooling/.*|internal/v2/adapters/.*|internal/v2/services/.*|skills/.*|.*_test\.go)'
     # Exclude generated code
     generated: strict
