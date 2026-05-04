@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	foxproxclient "github.com/joshka/foxprox/foxprox/client"
+	foxproxd "github.com/joshka/foxprox/foxprox/daemon"
 	"github.com/joshka0/foxctl/internal/agent/optimization"
 	"github.com/joshka0/foxctl/internal/agent/runtime"
 	"github.com/joshka0/foxctl/internal/agent/toolnames"
@@ -36,8 +38,6 @@ import (
 	"github.com/joshka0/foxctl/internal/runtime/execution/runner"
 	"github.com/joshka0/foxctl/internal/runtime/flow"
 	"github.com/joshka0/foxctl/internal/runtime/hooks"
-	foxproxclient "github.com/joshka/foxprox/foxprox/client"
-	foxproxd "github.com/joshka/foxprox/foxprox/daemon"
 	"github.com/joshka0/foxctl/internal/storage"
 	agentstore "github.com/joshka0/foxctl/internal/storage/agents"
 	"github.com/joshka0/foxctl/internal/storage/blackboard"
@@ -2734,11 +2734,11 @@ type FlowStatusParams struct {
 
 // FlowStatusResult is the result of querying flow status.
 type FlowStatusResult struct {
-	FlowID string                 `json:"flow_id"`
-	State  string                 `json:"state"`
-	RunID  string                 `json:"run_id,omitempty"`
-	Nodes  []flow.NodeExecState   `json:"nodes,omitempty"`
-	Edges  []flow.EdgeExecState   `json:"edges,omitempty"`
+	FlowID string               `json:"flow_id"`
+	State  string               `json:"state"`
+	RunID  string               `json:"run_id,omitempty"`
+	Nodes  []flow.NodeExecState `json:"nodes,omitempty"`
+	Edges  []flow.EdgeExecState `json:"edges,omitempty"`
 }
 
 // handleFlowStatus returns the current status of a flow.
@@ -3038,9 +3038,9 @@ func (s *Service) startFlowEngine(ctx context.Context) error {
 	// Build the executor registry. Start with a skill executor that routes
 	// through the daemon's skill resolver (the same path as `foxctl run`).
 	executors := map[flow.NodeKind]flow.NodeExecutor{
-		flow.NodeSkill:    &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: s.opts.Workspace},
-		flow.NodeTransform: &passthroughExecutor{},
-		flow.NodeAgent:    &flow.AgentExecutor{
+		flow.NodeSkill:     &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: s.opts.Workspace},
+		flow.NodeTransform: &flow.TransformExecutor{},
+		flow.NodeAgent: &flow.AgentExecutor{
 			Spawner:   s.selectAgentSpawner(s.opts.Workspace),
 			Workspace: s.opts.Workspace,
 		},
@@ -3159,7 +3159,7 @@ func (s *Service) resolveFlowEngine(ctx context.Context, workspace string) (*flo
 	// Build executors for the workspace engine.
 	executors := map[flow.NodeKind]flow.NodeExecutor{
 		flow.NodeSkill:     &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: absWS},
-		flow.NodeTransform: &passthroughExecutor{},
+		flow.NodeTransform: &flow.TransformExecutor{},
 		flow.NodeAgent: &flow.AgentExecutor{
 			Spawner:   s.selectAgentSpawner(absWS),
 			Workspace: absWS,
