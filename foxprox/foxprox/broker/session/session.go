@@ -130,6 +130,7 @@ type PromptReadiness struct {
 	ScreenMatch bool
 	ScreenRegex string
 	ScreenLine  string
+	AltScreen   bool
 }
 
 // Readiness is the cheap readiness heuristic used before the screen-renderer
@@ -335,6 +336,12 @@ func (s *Session) ReadinessForProfile(profile ReadinessProfile, now time.Time) P
 		Readiness:   base,
 		ScreenRegex: profile.ScreenRegex,
 	}
+	if profile.RequireNotAltScreen {
+		out.AltScreen = s.Tracker().Snapshot().AltScreen
+		if out.AltScreen {
+			out.Idle = false
+		}
+	}
 	if profile.ScreenRegex == "" {
 		return out
 	}
@@ -346,7 +353,7 @@ func (s *Session) ReadinessForProfile(profile ReadinessProfile, now time.Time) P
 			break
 		}
 	}
-	out.Idle = base.Idle && out.ScreenMatch
+	out.Idle = base.Idle && out.ScreenMatch && !out.AltScreen
 	return out
 }
 

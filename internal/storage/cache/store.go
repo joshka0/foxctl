@@ -422,6 +422,9 @@ func canonicalArgs(input []byte) ([]byte, error) {
 }
 
 func (s *Store) evictExpired(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	now := timeutil.FormatNowUTC()
 	rows, err := s.db.QueryContext(ctx, `SELECT cache_key, digests FROM auto_cache WHERE expires_at <= $1`, now)
 	if err != nil {

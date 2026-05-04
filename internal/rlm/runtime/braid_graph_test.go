@@ -4443,7 +4443,7 @@ func TestAttemptSplitHelperExecution_TooSmallToSplit(t *testing.T) {
 	input := map[string]any{"query": "what is 2+2"}
 	handoff := BraidNodeHandoff{Node: node}
 
-	// No toolExec → returns false.
+	// No toolExec -> returns false.
 	result, ok := attemptSplitHelperExecution(context.TODO(), "phase", node, input, handoff, "", nil, nil)
 	if ok {
 		t.Fatalf("expected false for nil toolExec, got result=%q", result)

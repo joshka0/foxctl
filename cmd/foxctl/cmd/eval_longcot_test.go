@@ -1438,7 +1438,7 @@ func TestLongCoTChildPhasesForExtractSkipsScratch(t *testing.T) {
 	if len(phases[0].Tools) != 0 || len(phases[0].RequiredTools) != 0 {
 		t.Fatalf("extract phase should not expose scratch tools: tools=%v required=%v", phases[0].Tools, phases[0].RequiredTools)
 	}
-	for _, want := range []string{"Facts-only extraction", "Do not solve or verify", "status: solved"} {
+	for _, want := range []string{"Facts-only extraction", "Do not solve or verify", `"status":"solved"`} {
 		if !strings.Contains(phases[0].Prompt, want) {
 			t.Fatalf("extract prompt missing %q:\n%s", want, phases[0].Prompt)
 		}
@@ -2253,7 +2253,7 @@ func TestBuildLongCoTREPLTaskPromptMentionsGeneralHelper(t *testing.T) {
 	}, longcoteval.Condition{ID: longcoteval.ConditionRLMReplNoSubcalls}, rlmruntime.SandboxKindPython, true, true, true, false)
 	for _, want := range []string{
 		rlmruntime.EphemeralHelperSolveToolName,
-		"runtime to synthesize, validate, retry, and run",
+		"runtime owns helper synthesis, validation, repair, execution",
 		"first call ephemeral_helper_solve",
 	} {
 		if !strings.Contains(prompt, want) {

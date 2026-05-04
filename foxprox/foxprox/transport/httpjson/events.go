@@ -113,11 +113,27 @@ type sessionEventOptions struct {
 }
 
 func parseSessionEventOptions(w http.ResponseWriter, r *http.Request) (sessionEventOptions, bool) {
+	since, ok := parseSinceParam(w, r)
+	if !ok {
+		return sessionEventOptions{}, false
+	}
+	screen, ok := parseBoolQuery(w, r, "screen")
+	if !ok {
+		return sessionEventOptions{}, false
+	}
+	ready, ok := parseBoolQuery(w, r, "ready")
+	if !ok {
+		return sessionEventOptions{}, false
+	}
+	activity, ok := parseBoolQuery(w, r, "activity")
+	if !ok {
+		return sessionEventOptions{}, false
+	}
 	opts := sessionEventOptions{
-		since:            parseSinceParam(r),
-		includeScreen:    parseBoolParam(r, "screen"),
-		includeReady:     parseBoolParam(r, "ready"),
-		includeActivity:  parseBoolParam(r, "activity"),
+		since:            since,
+		includeScreen:    screen,
+		includeReady:     ready,
+		includeActivity:  activity,
 		activityInterval: time.Second,
 	}
 	if !opts.includeActivity {
@@ -245,7 +261,14 @@ func (s *Server) roomEvents(w http.ResponseWriter, r *http.Request, roomID strin
 		writeRoomError(w, err)
 		return
 	}
-	since := parseSinceParam(r)
+	since, ok := parseSinceParam(w, r)
+	if !ok {
+		return
+	}
+	if since != 0 {
+		writeError(w, http.StatusBadRequest, "room event streams do not accept scalar since cursors")
+		return
+	}
 	members, err := s.broker.Rooms().ActiveMembers(roomID)
 	if err != nil {
 		writeRoomError(w, err)
@@ -340,11 +363,13 @@ func newSSEEncoder(w http.ResponseWriter, f http.Flusher) *sseEncoder {
 // carried over SSE. Exported so clients in Go can decode it from the
 // envelope's raw body without redefining the shape.
 type TerminalOutputBody struct {
-	SessionID string `json:"session_id"`
-	RoomID    string `json:"room_id,omitempty"`
-	AgentID   string `json:"agent_id,omitempty"`
-	BytesB64  string `json:"bytes_b64"`
-	Dropped   uint64 `json:"dropped,omitempty"`
+	SessionID   string `json:"session_id"`
+	RoomID      string `json:"room_id,omitempty"`
+	AgentID     string `json:"agent_id,omitempty"`
+	BytesB64    string `json:"bytes_b64"`
+	Dropped     uint64 `json:"dropped,omitempty"`
+	Truncated   bool   `json:"truncated,omitempty"`
+	OriginalLen int    `json:"original_len,omitempty"`
 }
 
 // TerminalScreenSnapshotBody is the canonical body for
@@ -369,6 +394,7 @@ type TerminalReadyBody struct {
 	ScreenMatch   bool    `json:"screen_match,omitempty"`
 	ScreenRegex   string  `json:"screen_regex,omitempty"`
 	ScreenLine    string  `json:"screen_line,omitempty"`
+	AltScreen     bool    `json:"alt_screen,omitempty"`
 }
 
 // TerminalActivityBody is the canonical body for `terminal.activity` events.
@@ -380,22 +406,33 @@ type TerminalActivityBody = ActivityResponse
 // transit via base64 in the body.
 func (e *sseEncoder) writeChunk(sessionID string, c session.Chunk, dropped uint64) error {
 	body := TerminalOutputBody{
-		SessionID: sessionID,
-		BytesB64:  base64.StdEncoding.EncodeToString(limitBytes(c.Bytes, eventMaxBytes)),
-		Dropped:   dropped,
+		SessionID:   sessionID,
+		BytesB64:    base64.StdEncoding.EncodeToString(limitBytes(c.Bytes, eventMaxBytes)),
+		Dropped:     dropped,
+		Truncated:   len(c.Bytes) > eventMaxBytes,
+		OriginalLen: originalLenIfTruncated(c.Bytes, eventMaxBytes),
 	}
 	return e.writeEnvelope(kinds.TerminalOutput, "session:"+sessionID, c.Seq, c.Timestamp.UTC(), body)
 }
 
 func (e *sseEncoder) writeRoomChunk(roomID, agentID, sessionID string, c session.Chunk, dropped uint64) error {
 	body := TerminalOutputBody{
-		SessionID: sessionID,
-		RoomID:    roomID,
-		AgentID:   agentID,
-		BytesB64:  base64.StdEncoding.EncodeToString(limitBytes(c.Bytes, eventMaxBytes)),
-		Dropped:   dropped,
+		SessionID:   sessionID,
+		RoomID:      roomID,
+		AgentID:     agentID,
+		BytesB64:    base64.StdEncoding.EncodeToString(limitBytes(c.Bytes, eventMaxBytes)),
+		Dropped:     dropped,
+		Truncated:   len(c.Bytes) > eventMaxBytes,
+		OriginalLen: originalLenIfTruncated(c.Bytes, eventMaxBytes),
 	}
 	return e.writeEnvelope(kinds.TerminalOutput, "room:"+roomID, c.Seq, c.Timestamp.UTC(), body)
+}
+
+func originalLenIfTruncated(b []byte, n int) int {
+	if len(b) <= n {
+		return 0
+	}
+	return len(b)
 }
 
 func (e *sseEncoder) writeEnvelope(kind kinds.Kind, target string, seq uint64, ts time.Time, body any) error {
@@ -450,6 +487,7 @@ func (e *sseEncoder) writeTerminalReady(sessionID string, seq uint64, ready sess
 		ScreenMatch:   ready.ScreenMatch,
 		ScreenRegex:   ready.ScreenRegex,
 		ScreenLine:    ready.ScreenLine,
+		AltScreen:     ready.AltScreen,
 	}
 	env, err := envelope.New(string(kinds.TerminalReady), "session:"+sessionID, body)
 	if err != nil {
@@ -485,11 +523,14 @@ func (e *sseEncoder) writeTerminalActivity(sessionID string, seq uint64, body Te
 }
 
 func terminalReadyReason(ready session.PromptReadiness) string {
-	if !ready.Idle {
-		return "output_busy"
-	}
 	if ready.ScreenRegex != "" && !ready.ScreenMatch {
 		return "screen_regex_no_match"
+	}
+	if ready.AltScreen {
+		return "alt_screen"
+	}
+	if !ready.Idle {
+		return "output_busy"
 	}
 	return "ready"
 }
@@ -532,11 +573,15 @@ func parseRoomTarget(s string) (string, bool) {
 	return id, true
 }
 
-func parseBoolParam(r *http.Request, name string) bool {
+func parseBoolQuery(w http.ResponseWriter, r *http.Request, name string) (bool, bool) {
 	raw := strings.TrimSpace(r.URL.Query().Get(name))
 	if raw == "" {
-		return false
+		return false, true
 	}
 	ok, err := strconv.ParseBool(raw)
-	return err == nil && ok
+	if err != nil {
+		writeError(w, http.StatusBadRequest, name+" must be a boolean")
+		return false, false
+	}
+	return ok, true
 }
