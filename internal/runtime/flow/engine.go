@@ -745,15 +745,4 @@ func (e FlowEdge) ToNodeKind(nodes []FlowNode) NodeKind {
 	return ""
 }
 
-// makeEnvelope creates a simple envelope for error reporting.
-func makeEnvelope(status, command string, data any) envelope.Envelope {
-	return envelope.Envelope{
-		Version: 1,
-		Status:  status,
-		Command: command,
-		Data:    data,
-		Meta: envelope.Meta{
-			TS: time.Now().UTC().Format(time.RFC3339),
-		},
-	}
-}
+

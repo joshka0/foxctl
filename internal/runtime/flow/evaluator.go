@@ -1,3 +1,4 @@
+//nolint:forbidigo // log.Printf used for flow debug logging; TODO: migrate to observability.Emit
 package flow
 
 import (

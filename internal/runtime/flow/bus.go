@@ -3,8 +3,6 @@ package flow
 import (
 	"context"
 	"sync"
-
-	"github.com/joshka0/foxctl/internal/domain/envelope"
 )
 
 // OutputBus provides buffered channel-based fan-out for node outputs.
@@ -142,7 +140,7 @@ func (b *OutputBus) publish(nodeID string, out NodeOutput) {
 
 // stop cancels the dispatch loop for the given node, waits for it to exit,
 // and closes all subscriber channels.
-func (b *OutputBus) stop(nodeID string) {
+func (b *OutputBus) _stop(nodeID string) { //nolint:unused // kept for future per-node stop support
 	b.mu.Lock()
 	cancel := b.cancelFuncs[nodeID]
 	delete(b.cancelFuncs, nodeID)
@@ -196,10 +194,4 @@ func (b *OutputBus) stopAll() {
 	}
 }
 
-// makeErrorOutput creates a NodeOutput containing an error envelope.
-func makeErrorOutput(nodeID, code, message string) NodeOutput {
-	return NodeOutput{
-		Envelope: envelope.Error("flow/engine", code, message, nil),
-		NodeID:   nodeID,
-	}
-}
+

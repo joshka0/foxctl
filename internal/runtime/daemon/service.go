@@ -3331,16 +3331,7 @@ func (e *daemonSkillExecutor) Execute(ctx context.Context, node flow.FlowNode, i
 	}, nil
 }
 
-// passthroughExecutor is a no-op transform executor that passes input through unchanged.
-type passthroughExecutor struct{}
 
-func (e *passthroughExecutor) Execute(_ context.Context, node flow.FlowNode, input any) (flow.NodeOutput, error) {
-	return flow.NodeOutput{
-		Envelope: envelope.OK("transform/"+node.Label, input),
-		Duration: time.Millisecond,
-		NodeID:   node.ID,
-	}, nil
-}
 
 // resolveLLMConfig returns the LLM provider, API key, and model from centralized config.
 // Priority: configured provider > LM Studio default.

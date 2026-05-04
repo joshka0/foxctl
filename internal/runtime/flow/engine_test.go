@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -308,9 +309,7 @@ func makeEdge(id, flowID, fromID, toID string, transform TransformKind, conditio
 	}
 }
 
-func makeConfig(v string) json.RawMessage {
-	return json.RawMessage(v)
-}
+
 
 // ---------------------------------------------------------------------------
 // Tests: Topological Sort & Cycle Detection
@@ -518,7 +517,7 @@ func TestEngineStartLinearChain(t *testing.T) {
 	// Create flow: A → B → C
 	flow := makeFlow("f1", "linear")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+	_, _ = store.CreateFlow(context.Background(), flow)
 
 	nodes := []FlowNode{
 		makeNode("a", "f1", "source", NodeSkill, `{"skill":"code/search"}`),
@@ -526,14 +525,14 @@ func TestEngineStartLinearChain(t *testing.T) {
 		makeNode("c", "f1", "sink", NodeSkill, `{"skill":"code/search"}`),
 	}
 	for _, n := range nodes {
-		store.AddNode(context.Background(), n)
+		_, _ = store.AddNode(context.Background(), n)
 	}
 	edges := []FlowEdge{
 		makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""),
 		makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""),
 	}
 	for _, e := range edges {
-		store.AddEdge(context.Background(), e)
+		_, _ = store.AddEdge(context.Background(), e)
 	}
 
 	eng := NewEngine(store, registry, 16)
@@ -550,7 +549,7 @@ func TestEngineStartLinearChain(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Stop the engine
-	eng.Stop("f1")
+	_ = eng.Stop("f1")
 
 	// All three nodes should have been executed
 	records := exec.getRecords()
@@ -586,7 +585,7 @@ func TestEngineStartCycleDetection(t *testing.T) {
 	// A → B → C → A (cycle)
 	flow := makeFlow("f1", "cyclic")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+	_, _ = store.CreateFlow(context.Background(), flow)
 
 	nodes := []FlowNode{
 		makeNode("a", "f1", "A", NodeSkill, "{}"),
@@ -594,7 +593,7 @@ func TestEngineStartCycleDetection(t *testing.T) {
 		makeNode("c", "f1", "C", NodeSkill, "{}"),
 	}
 	for _, n := range nodes {
-		store.AddNode(context.Background(), n)
+		_, _ = store.AddNode(context.Background(), n)
 	}
 	edges := []FlowEdge{
 		makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""),
@@ -602,7 +601,7 @@ func TestEngineStartCycleDetection(t *testing.T) {
 		makeEdge("e3", "f1", "c", "a", TransformPassthrough, ""),
 	}
 	for _, e := range edges {
-		store.AddEdge(context.Background(), e)
+		_, _ = store.AddEdge(context.Background(), e)
 	}
 
 	eng := NewEngine(store, registry, 16)
@@ -632,13 +631,15 @@ func TestEngineStartAlreadyRunning(t *testing.T) {
 
 	flow := makeFlow("f1", "running-test")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "src", NodeSkill, "{}"))
+	_, err := store.CreateFlow(context.Background(), flow)
+	require.NoError(t, err)
+	_, err = store.AddNode(context.Background(), makeNode("a", "f1", "src", NodeSkill, "{}"))
+	require.NoError(t, err)
 
 	eng := NewEngine(store, registry, 16)
 
 	ctx := context.Background()
-	err := eng.Start(ctx, "f1")
+	err = eng.Start(ctx, "f1")
 	if err != nil {
 		t.Fatalf("first Start: %v", err)
 	}
@@ -650,7 +651,7 @@ func TestEngineStartAlreadyRunning(t *testing.T) {
 	}
 
 	// Cleanup
-	eng.Stop("f1")
+	_ = eng.Stop("f1")
 }
 
 func TestEngineStopNotRunning(t *testing.T) {
@@ -674,8 +675,8 @@ func TestEngineStatus(t *testing.T) {
 
 	flow := makeFlow("f1", "status-test")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	_, _ = store.CreateFlow(context.Background(), flow)
+	_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 
@@ -696,7 +697,7 @@ func TestEngineStatus(t *testing.T) {
 		t.Errorf("expected running or stopped state, got %s", status.FlowState)
 	}
 
-	eng.Stop("f1")
+	_ = eng.Stop("f1")
 }
 
 func TestEnginePauseAndResume(t *testing.T) {
@@ -715,17 +716,21 @@ func TestEnginePauseAndResume(t *testing.T) {
 
 	flow := makeFlow("f1", "pause-test")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+	_, err := store.CreateFlow(context.Background(), flow)
+	require.NoError(t, err)
 
 	// Source → sink
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+	_, err = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+	require.NoError(t, err)
+	_, err = store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+	require.NoError(t, err)
+	_, err = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+	require.NoError(t, err)
 
 	eng := NewEngine(store, registry, 16)
 
 	ctx := context.Background()
-	err := eng.Start(ctx, "f1")
+	err = eng.Start(ctx, "f1")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -750,7 +755,7 @@ func TestEnginePauseAndResume(t *testing.T) {
 		t.Fatalf("Resume (Start): %v", err)
 	}
 
-	eng.Stop("f1")
+	_ = eng.Stop("f1")
 }
 
 func TestEngineFlowNotFound(t *testing.T) {
@@ -771,14 +776,14 @@ func TestEngineNoSourceNodes(t *testing.T) {
 
 	flow := makeFlow("f1", "no-source")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// Add a non-source node (has incoming edge from another node, but no source)
-	store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
 	// B depends on A, but nothing feeds A → so if A has no incoming edges, it IS a source.
 	// For this test, make B a source by having only an edge FROM B:
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "b", "a", TransformPassthrough, ""))
+	_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "b", "a", TransformPassthrough, ""))
 	// Now B is a source and A is not. This should still work.
 	// To truly test "no source nodes", we'd need a graph where every node has at least one incoming edge.
 
@@ -813,16 +818,16 @@ func TestEngineFanOut(t *testing.T) {
 
 	flow := makeFlow("f1", "fanout")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B, A → C, A → D
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("d", "f1", "D", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e3", "f1", "a", "d", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+	_, _ = store.AddNode(context.Background(), makeNode("d", "f1", "D", NodeSkill, "{}"))
+	_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+	_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
+	_, _ = store.AddEdge(context.Background(), makeEdge("e3", "f1", "a", "d", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -835,7 +840,7 @@ func TestEngineFanOut(t *testing.T) {
 
 	// Wait for execution
 	time.Sleep(500 * time.Millisecond)
-	eng.Stop("f1")
+	_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -885,14 +890,14 @@ func TestEngineFanOutWithConditions(t *testing.T) {
 
 	flow := makeFlow("f1", "fanout-cond")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B (condition: status == ok), A → C (no condition)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, "status == ok"))
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, "status == ok"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -904,7 +909,7 @@ func TestEngineFanOutWithConditions(t *testing.T) {
 	}
 
 	time.Sleep(300 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -954,8 +959,8 @@ func TestEnginePanicRecovery(t *testing.T) {
 
 	flow := makeFlow("f1", "panic-test")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -992,7 +997,7 @@ func TestEnginePanicRecovery(t *testing.T) {
 		t.Error("expected error message on source node")
 	}
 
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,13 +1018,13 @@ func TestTransformExecutorAppliesTransform(t *testing.T) {
 
 	flow := makeFlow("f1", "transform-test")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// Source (skill) → Transform (jq_filter .name)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, `{"skill":"code/search"}`))
-	store.AddNode(context.Background(), makeNode("b", "f1", "jq", NodeTransform,
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, `{"skill":"code/search"}`))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "jq", NodeTransform,
 		`{"transform":"jq_filter","config":{"filter":".name"}}`))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1031,7 +1036,7 @@ func TestTransformExecutorAppliesTransform(t *testing.T) {
 	}
 
 	time.Sleep(200 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 }
 
 // ---------------------------------------------------------------------------
@@ -1073,8 +1078,8 @@ func TestEngineFlowRunCreatedOnStart(t *testing.T) {
 
 	flow := makeFlow("f1", "run-track")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1086,7 +1091,7 @@ func TestEngineFlowRunCreatedOnStart(t *testing.T) {
 	}
 
 	time.Sleep(200 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	// Check a run was created
 	found := false
@@ -1123,8 +1128,8 @@ func TestEngineRestartAfterStop(t *testing.T) {
 
 	flow := makeFlow("f1", "restart-test")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 	ctx := context.Background()
@@ -1135,7 +1140,7 @@ func TestEngineRestartAfterStop(t *testing.T) {
 		t.Fatalf("Start 1: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	firstCount := execCount.Load()
 
@@ -1145,7 +1150,7 @@ func TestEngineRestartAfterStop(t *testing.T) {
 		t.Fatalf("Start 2: %v", err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	secondCount := execCount.Load()
 	if secondCount <= firstCount {
@@ -1177,10 +1182,10 @@ func TestEngineNoGoroutineLeak(t *testing.T) {
 
 	flow := makeFlow("f1", "leak-test")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "a-sink", TransformPassthrough, ""))
-	store.AddNode(context.Background(), makeNode("a-sink", "f1", "sink", NodeSkill, "{}"))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "a-sink", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a-sink", "f1", "sink", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 
@@ -1195,7 +1200,7 @@ func TestEngineNoGoroutineLeak(t *testing.T) {
 	}
 
 	time.Sleep(100 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 	time.Sleep(100 * time.Millisecond)
 
 	after := countGoroutines()
@@ -1228,15 +1233,15 @@ func TestEngineDisconnectedSubgraphs(t *testing.T) {
 
 	flow := makeFlow("f1", "disconnected")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B, C → D
-	store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("d", "f1", "D", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "c", "d", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("d", "f1", "D", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "c", "d", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1248,7 +1253,7 @@ func TestEngineDisconnectedSubgraphs(t *testing.T) {
 	}
 
 	time.Sleep(300 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1279,8 +1284,8 @@ func TestEngineSingleSourceNode(t *testing.T) {
 
 	flow := makeFlow("f1", "single")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "only", NodeSkill, "{}"))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "only", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1292,7 +1297,7 @@ func TestEngineSingleSourceNode(t *testing.T) {
 	}
 
 	time.Sleep(100 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	records := exec.getRecords()
 	if len(records) < 1 {
@@ -1326,8 +1331,8 @@ func TestEngineContextCancellation(t *testing.T) {
 
 	flow := makeFlow("f1", "cancel-test")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 
@@ -1381,14 +1386,14 @@ func TestEngineErrorEnvelopeFlowsDownstream(t *testing.T) {
 
 	flow := makeFlow("f1", "error-flow")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B → C (no conditions, so error should propagate)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "mid", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "sink", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "mid", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "sink", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1400,7 +1405,7 @@ func TestEngineErrorEnvelopeFlowsDownstream(t *testing.T) {
 	}
 
 	time.Sleep(300 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1440,15 +1445,15 @@ func TestEngineFanOutDifferentTransforms(t *testing.T) {
 
 	flow := makeFlow("f1", "fanout-transform")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
 
 	// A → B with passthrough, A → C with passthrough
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1460,7 +1465,7 @@ func TestEngineFanOutDifferentTransforms(t *testing.T) {
 	}
 
 	time.Sleep(300 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1486,14 +1491,14 @@ func TestEngineGracefulShutdown(t *testing.T) {
 
 	flow := makeFlow("f1", "graceful")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// Build a multi-node graph
-	store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx := context.Background()
@@ -1541,10 +1546,10 @@ func TestEngineConcurrentStatusDuringExecution(t *testing.T) {
 
 	flow := makeFlow("f1", "concurrent-status")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx := context.Background()
@@ -1568,7 +1573,7 @@ func TestEngineConcurrentStatusDuringExecution(t *testing.T) {
 	}
 	wg.Wait()
 
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 }
 
 // ---------------------------------------------------------------------------
@@ -1584,12 +1589,12 @@ func TestEngineEdgeDeliveryState(t *testing.T) {
 
 	flow := makeFlow("f1", "edge-state")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1625,7 +1630,7 @@ func TestEngineEdgeDeliveryState(t *testing.T) {
 		t.Error("expected last_delivery_at to be set")
 	}
 
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 }
 
 // ---------------------------------------------------------------------------
@@ -1641,8 +1646,8 @@ func TestEngineRestartNewRun(t *testing.T) {
 
 	flow := makeFlow("f1", "restart-new-run")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 	ctx := context.Background()
@@ -1657,7 +1662,7 @@ func TestEngineRestartNewRun(t *testing.T) {
 	status1 := eng.Status("f1")
 	runID1 := status1.RunID
 
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	// Second run should produce a new run ID
 	err = eng.Start(ctx, "f1")
@@ -1669,7 +1674,7 @@ func TestEngineRestartNewRun(t *testing.T) {
 	status2 := eng.Status("f1")
 	runID2 := status2.RunID
 
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	if runID1 == runID2 {
 		t.Errorf("expected different run IDs, got same: %s", runID1)
@@ -1691,8 +1696,8 @@ func TestEngineStopErroredFlow(t *testing.T) {
 
 	flow := makeFlow("f1", "errored-stop")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1764,14 +1769,14 @@ func TestEngineCyclePathInError(t *testing.T) {
 
 	flow := makeFlow("f1", "cycle-path")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
-	store.AddNode(context.Background(), makeNode("a", "f1", "Alpha", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "Beta", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "Gamma", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e3", "f1", "c", "a", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "Alpha", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "Beta", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "Gamma", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e3", "f1", "c", "a", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 
@@ -1815,14 +1820,14 @@ func TestEngineLinearChainOrder(t *testing.T) {
 
 	flow := makeFlow("f1", "order-test")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B → C
-	store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1834,7 +1839,7 @@ func TestEngineLinearChainOrder(t *testing.T) {
 	}
 
 	time.Sleep(300 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1898,11 +1903,11 @@ func TestEngineSourceNodesReceiveNilInput(t *testing.T) {
 
 	flow := makeFlow("f1", "nil-input")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// Two source nodes
-	store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1914,7 +1919,7 @@ func TestEngineSourceNodesReceiveNilInput(t *testing.T) {
 	}
 
 	time.Sleep(200 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -1952,15 +1957,15 @@ func TestEngineStatusAfterStop(t *testing.T) {
 
 	flow := makeFlow("f1", "status-after-stop")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 	ctx := context.Background()
 
-	eng.Start(ctx, "f1")
+	require.NoError(t, eng.Start(ctx, "f1"))
 	time.Sleep(100 * time.Millisecond)
-	eng.Stop("f1")
+	_ = eng.Stop("f1")
 
 	// Status should return nil for stopped (removed from runs) flow.
 	status := eng.Status("f1")
@@ -1994,14 +1999,14 @@ func TestEngineConcurrentNodeExecution(t *testing.T) {
 
 	flow := makeFlow("f1", "concurrent")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B, A → C (fan-out, B and C should start concurrently)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "a", "c", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2013,7 +2018,7 @@ func TestEngineConcurrentNodeExecution(t *testing.T) {
 	}
 
 	time.Sleep(300 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	bStart, bOk := startTimes["b"]
@@ -2071,15 +2076,15 @@ func TestEngineFlowRunUpdatedOnCompletion(t *testing.T) {
 
 	flow := makeFlow("f1", "run-completion")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.CreateFlow(context.Background(), flow)
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
 
 	eng := NewEngine(store, registry, 16)
 	ctx := context.Background()
 
-	eng.Start(ctx, "f1")
+	require.NoError(t, eng.Start(ctx, "f1"))
 	time.Sleep(100 * time.Millisecond)
-	eng.Stop("f1")
+	_ = eng.Stop("f1")
 
 	// Check FlowRun was updated to completed
 	for _, run := range store.runs {
@@ -2119,22 +2124,22 @@ func TestEngineEnvelopeIntegrity(t *testing.T) {
 
 	flow := makeFlow("f1", "envelope-integrity")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B → C
-	store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
-	store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "A", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "B", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "C", NodeSkill, "{}"))
+_, _ = store.AddEdge(context.Background(), makeEdge("e1", "f1", "a", "b", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	eng.Start(ctx, "f1")
+	require.NoError(t, eng.Start(ctx, "f1"))
 	time.Sleep(300 * time.Millisecond)
-	eng.Stop("f1")
+	_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -2182,12 +2187,7 @@ func countGoroutines() int {
 	return runtime.NumGoroutine()
 }
 
-// Simple error wrapper for testing.
-type testError struct {
-	msg string
-}
 
-func (e testError) Error() string { return e.msg }
 
 // ---------------------------------------------------------------------------
 // Tests: Retry Policy (VAL-M2-038, VAL-M2-039, VAL-M2-040)
@@ -2229,14 +2229,14 @@ func TestRetryPolicyRetriesOnFailure(t *testing.T) {
 
 	flow := makeFlow("f1", "retry-test")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B with retry policy (max_attempts=2, delay_ms=10)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
 	edge := makeEdge("e1", "f1", "a", "b", TransformPassthrough, "")
 	edge.RetryPolicy = &RetryPolicy{MaxAttempts: 2, DelayMS: 10}
-	store.AddEdge(context.Background(), edge)
+_, _ = store.AddEdge(context.Background(), edge)
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2248,7 +2248,7 @@ func TestRetryPolicyRetriesOnFailure(t *testing.T) {
 	}
 
 	time.Sleep(300 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -2289,14 +2289,14 @@ func TestRetryPolicyDelayRespected(t *testing.T) {
 
 	flow := makeFlow("f1", "retry-delay")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B with retry policy (max_attempts=3, delay_ms=200)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
 	edge := makeEdge("e1", "f1", "a", "b", TransformPassthrough, "")
 	edge.RetryPolicy = &RetryPolicy{MaxAttempts: 3, DelayMS: 200}
-	store.AddEdge(context.Background(), edge)
+_, _ = store.AddEdge(context.Background(), edge)
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2308,7 +2308,7 @@ func TestRetryPolicyDelayRespected(t *testing.T) {
 	}
 
 	time.Sleep(1 * time.Second)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -2363,16 +2363,16 @@ func TestRetryPolicyExhaustedRetriesPropagateError(t *testing.T) {
 
 	flow := makeFlow("f1", "retry-exhausted")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B (with retry, max_attempts=2) → C
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "mid", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("c", "f1", "sink", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "mid", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("c", "f1", "sink", NodeSkill, "{}"))
 	edgeAB := makeEdge("e1", "f1", "a", "b", TransformPassthrough, "")
 	edgeAB.RetryPolicy = &RetryPolicy{MaxAttempts: 2, DelayMS: 10}
-	store.AddEdge(context.Background(), edgeAB)
-	store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
+_, _ = store.AddEdge(context.Background(), edgeAB)
+_, _ = store.AddEdge(context.Background(), makeEdge("e2", "f1", "b", "c", TransformPassthrough, ""))
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2384,7 +2384,7 @@ func TestRetryPolicyExhaustedRetriesPropagateError(t *testing.T) {
 	}
 
 	time.Sleep(500 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -2421,14 +2421,14 @@ func TestRetryPolicyZeroMeansNoRetry(t *testing.T) {
 
 	flow := makeFlow("f1", "no-retry")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B with no retry policy (default)
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
 	edge := makeEdge("e1", "f1", "a", "b", TransformPassthrough, "")
 	// No RetryPolicy set (nil)
-	store.AddEdge(context.Background(), edge)
+_, _ = store.AddEdge(context.Background(), edge)
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2440,7 +2440,7 @@ func TestRetryPolicyZeroMeansNoRetry(t *testing.T) {
 	}
 
 	time.Sleep(200 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -2477,14 +2477,14 @@ func TestRetryPolicyZeroMaxAttemptsNoRetry(t *testing.T) {
 
 	flow := makeFlow("f1", "zero-retry")
 	flow.State = FlowDraft
-	store.CreateFlow(context.Background(), flow)
+_, _ = store.CreateFlow(context.Background(), flow)
 
 	// A → B with max_attempts=0
-	store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
-	store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("a", "f1", "source", NodeSkill, "{}"))
+_, _ = store.AddNode(context.Background(), makeNode("b", "f1", "sink", NodeSkill, "{}"))
 	edge := makeEdge("e1", "f1", "a", "b", TransformPassthrough, "")
 	edge.RetryPolicy = &RetryPolicy{MaxAttempts: 0, DelayMS: 100}
-	store.AddEdge(context.Background(), edge)
+_, _ = store.AddEdge(context.Background(), edge)
 
 	eng := NewEngine(store, registry, 16)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -2496,7 +2496,7 @@ func TestRetryPolicyZeroMaxAttemptsNoRetry(t *testing.T) {
 	}
 
 	time.Sleep(300 * time.Millisecond)
-	eng.Stop("f1")
+_ = eng.Stop("f1")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -2518,10 +2518,10 @@ func seedABForSubmit(store *mockStore, flowID string) {
 	nodeA := makeNode(flowID+"-a", flowID, "src", NodeSkill, "{}")
 	nodeB := makeNode(flowID+"-b", flowID, "sink", NodeSkill, "{}")
 	edge := makeEdge(flowID+"-e1", flowID, nodeA.ID, nodeB.ID, TransformPassthrough, "")
-	store.CreateFlow(context.Background(), fl) //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeA) //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeB) //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edge)  //nolint:errcheck // test helper
+_, _ = store.CreateFlow(context.Background(), fl) //nolint:errcheck // test helper
+_, _ = store.AddNode(context.Background(), nodeA) //nolint:errcheck // test helper
+_, _ = store.AddNode(context.Background(), nodeB) //nolint:errcheck // test helper
+_, _ = store.AddEdge(context.Background(), edge)  //nolint:errcheck // test helper
 }
 
 func TestSubmitOutput_PublishesToOutputBus(t *testing.T) {
@@ -2741,8 +2741,8 @@ func TestSubmitOutput_SubscriberReceivesPushedOutput(t *testing.T) {
 	fl := makeFlow("f1", "test-flow")
 	fl.State = FlowDraft
 	nodeA := makeNode("f1-a", "f1", "source", NodeSkill, "{}")
-	store.CreateFlow(context.Background(), fl) //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeA) //nolint:errcheck // test helper
+_, _ = store.CreateFlow(context.Background(), fl) //nolint:errcheck // test helper
+_, _ = store.AddNode(context.Background(), nodeA) //nolint:errcheck // test helper
 
 	registry := map[NodeKind]NodeExecutor{
 		NodeSkill: newMockExecutor(nil),
