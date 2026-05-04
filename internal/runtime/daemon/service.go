@@ -2828,9 +2828,42 @@ func (s *Service) flowStatusFromStore(p FlowStatusParams) (*FlowStatusResult, er
 	if err != nil {
 		return nil, &flowRPCError{Code: "ENOTFOUND", Message: fmt.Sprintf("flow: not found: %s", p.FlowID)}
 	}
+
+	// Build node states from persisted data (all idle since not running).
+	persistedNodes, err := store.ListNodesByFlow(context.Background(), fl.ID)
+	if err != nil {
+		persistedNodes = nil
+	}
+	nodeStates := make([]flow.NodeExecState, 0, len(persistedNodes))
+	for _, n := range persistedNodes {
+		nodeStates = append(nodeStates, flow.NodeExecState{
+			ID:    n.ID,
+			Label: n.Label,
+			Kind:  n.Kind,
+			State: "idle",
+		})
+	}
+
+	// Build edge states from persisted data.
+	persistedEdges, err := store.ListEdgesByFlow(context.Background(), fl.ID)
+	if err != nil {
+		persistedEdges = nil
+	}
+	edgeStates := make([]flow.EdgeExecState, 0, len(persistedEdges))
+	for _, e := range persistedEdges {
+		edgeStates = append(edgeStates, flow.EdgeExecState{
+			ID:            e.ID,
+			From:          e.FromNodeID,
+			To:            e.ToNodeID,
+			DeliveryCount: 0,
+		})
+	}
+
 	return &FlowStatusResult{
 		FlowID: p.FlowID,
 		State:  string(fl.State),
+		Nodes:  nodeStates,
+		Edges:  edgeStates,
 	}, nil
 }
 

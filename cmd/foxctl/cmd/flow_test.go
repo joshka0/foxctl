@@ -13,6 +13,7 @@ import (
 
 	"github.com/joshka0/foxctl/internal/domain/envelope"
 	"github.com/joshka0/foxctl/internal/protocol"
+	"github.com/joshka0/foxctl/internal/runtime/daemon"
 	flowmodel "github.com/joshka0/foxctl/internal/runtime/flow"
 )
 
@@ -105,9 +106,6 @@ func executeFlowCommand(t *testing.T, args ...string) ([]byte, error) {
 	flowEdgeRetryFlag = ""
 
 	// Build a fresh command tree for isolation.
-	// We need to create a new rootCmd with the flow subcommand.
-	// Since flow commands use global vars, we just reset flags and re-parse.
-
 	var stdout bytes.Buffer
 	root := rootCmd
 	root.SetOut(&stdout)
@@ -119,6 +117,29 @@ func executeFlowCommand(t *testing.T, args ...string) ([]byte, error) {
 
 	err := root.Execute()
 	return stdout.Bytes(), err
+}
+
+func init() {
+	// By default, disable daemon routing in unit tests so they use in-process execution.
+	// Daemon routing tests in flow_daemon_test.go override this in their own setup.
+	flowDaemonAutoStart = false
+	newFlowDaemonClient = func() flowDaemonClient {
+		return &noDaemonClient{}
+	}
+}
+
+// noDaemonClient is a stub that always reports daemon as not running,
+// forcing in-process fallback for unit tests.
+type noDaemonClient struct{}
+
+func (n *noDaemonClient) IsRunning() bool                                                { return false }
+func (n *noDaemonClient) EnsureRunning() error                                           { return fmt.Errorf("no daemon") }
+func (n *noDaemonClient) FlowStart(_, _ string) (*daemon.FlowStartResult, error)         { return nil, fmt.Errorf("no daemon") }
+func (n *noDaemonClient) FlowStop(_, _ string) (*daemon.FlowStopResult, error)           { return nil, fmt.Errorf("no daemon") }
+func (n *noDaemonClient) FlowPause(_, _ string) (*daemon.FlowPauseResult, error)         { return nil, fmt.Errorf("no daemon") }
+func (n *noDaemonClient) FlowStatus(_, _ string) (*daemon.FlowStatusResult, error)       { return nil, fmt.Errorf("no daemon") }
+func (n *noDaemonClient) FlowOutput(_, _, _ string, _ json.RawMessage, _ string) (*daemon.FlowOutputResult, error) {
+	return nil, fmt.Errorf("no daemon")
 }
 
 // ---------------------------------------------------------------------------
