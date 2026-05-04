@@ -32,6 +32,7 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/joho/godotenv v1.5.1
 	github.com/joshka/foxprox v0.0.0-00010101000000-000000000000
+	github.com/joshka0/foxcular v0.0.0-00010101000000-000000000000
 	github.com/klauspost/compress v1.18.2
 	github.com/mark3labs/mcp-go v0.43.0
 	github.com/mattn/go-colorable v0.1.14
@@ -49,6 +50,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tetratelabs/wazero v1.7.0
 	github.com/traefik/yaegi v0.16.1
+	github.com/tree-sitter/tree-sitter-c-sharp v0.23.5
 	github.com/tursodatabase/go-libsql v0.0.0-20251025125656-00da49cd4a6e
 	golang.org/x/crypto v0.48.0
 	golang.org/x/net v0.51.0
@@ -57,7 +59,7 @@ require (
 	golang.org/x/tools v0.42.0
 	gonum.org/v1/gonum v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.49.1
+	modernc.org/sqlite v1.50.0
 	mvdan.cc/gofumpt v0.8.0
 	tailscale.com v1.96.5
 )
@@ -91,8 +93,8 @@ require (
 	github.com/tailscale/peercred v0.0.0-20250107143737-35a0c7bd7edc // indirect
 	github.com/tailscale/web-client-prebuilt v0.0.0-20250124233751-d4cd19a26976 // indirect
 	github.com/tailscale/wireguard-go v0.0.0-20250716170648-1d0488a3d7da // indirect
-	github.com/tree-sitter/tree-sitter-c-sharp v0.23.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	go.opentelemetry.io/otel/sdk/metric v1.43.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
@@ -384,3 +386,5 @@ require (
 replace github.com/tree-sitter/tree-sitter-elixir => github.com/elixir-lang/tree-sitter-elixir v0.3.5
 
 replace github.com/joshka/foxprox => ./foxprox
+
+replace github.com/joshka0/foxcular => /Users/joshka/repos/personal/foxcular
