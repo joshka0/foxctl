@@ -167,7 +167,7 @@ func TestAPIClientRequestJSONPropagatesContextCancellation(t *testing.T) {
 		t.Fatalf("NewAPIClient error: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
 	err = client.RequestJSON(ctx, http.MethodGet, "/api/agents", nil, nil)
