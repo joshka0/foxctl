@@ -1564,8 +1564,10 @@ func codeSearchSemanticProviderEnabled(sourceProfiles []contextengine.SourceProf
 	return false
 }
 
-const semanticEmbeddingCachePageSize = 5000
-const semanticEmbeddingCacheMaxEntries = 50000
+const (
+	semanticEmbeddingCachePageSize   = 5000
+	semanticEmbeddingCacheMaxEntries = 50000
+)
 
 var semanticEmbeddingCacheStore = struct {
 	sync.Mutex

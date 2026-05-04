@@ -5,8 +5,10 @@ import (
 	"fmt"
 )
 
-const deltaFullFallbackReason = "partial_graph_rebuild_not_supported_for_global_edges_yet"
-const deltaNoIndexedFileStateReason = "no_indexed_file_state"
+const (
+	deltaFullFallbackReason       = "partial_graph_rebuild_not_supported_for_global_edges_yet"
+	deltaNoIndexedFileStateReason = "no_indexed_file_state"
+)
 
 // BuildDelta is the incremental indexing entrypoint. It accepts a precomputed
 // workspace delta so callers can report freshness and skip clean rebuilds

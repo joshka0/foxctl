@@ -451,10 +451,12 @@ func (b ContextBundle) Validate() error {
 }
 
 // Ensure context bundle types satisfy the shared validator contract.
-var _ Validator = ContextFact{}
-var _ Validator = ContextSelectedPath{}
-var _ Validator = ContextAnswerCandidate{}
-var _ Validator = ContextCategory{}
-var _ Validator = ContextIntegrationEdge{}
-var _ Validator = ContextCertificate{}
-var _ Validator = ContextBundle{}
+var (
+	_ Validator = ContextFact{}
+	_ Validator = ContextSelectedPath{}
+	_ Validator = ContextAnswerCandidate{}
+	_ Validator = ContextCategory{}
+	_ Validator = ContextIntegrationEdge{}
+	_ Validator = ContextCertificate{}
+	_ Validator = ContextBundle{}
+)

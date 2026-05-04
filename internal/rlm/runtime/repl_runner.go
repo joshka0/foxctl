@@ -180,8 +180,10 @@ func addSandboxMetadata(metadata map[string]any, cfg SandboxConfig) {
 	}
 }
 
-const braidFinalHandoffSource = "rlm.braid.final_handoff"
-const verifierFinalHandoffSource = "rlm.verifier.final_handoff"
+const (
+	braidFinalHandoffSource    = "rlm.braid.final_handoff"
+	verifierFinalHandoffSource = "rlm.verifier.final_handoff"
+)
 
 // REPLRunner exposes a prompt-bound persistent scratch REPL to a parent model.
 type REPLRunner struct {
