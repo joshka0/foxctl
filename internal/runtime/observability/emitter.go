@@ -46,19 +46,43 @@ func Emit(ctx context.Context, event *WideEvent) {
 
 // EmitWithConfig emits a WideEvent with custom persistence configuration.
 //
+// When the foxcular pipeline is enabled (via InitFoxcular), events are routed
+// through foxcular's redaction and sampling pipeline. Foxcular handles the
+// cross-cutting concerns (sensitive data redaction, sampling decisions) while
+// foxctl retains control of SSE publishing and persistence configuration.
+//
 // Index:
-// - Purpose: Stream an event to SSE and optionally persist it to disk
-// - Flow: publish to SSE → resolve observability dir → apply sampling → persist event
-// - SideEffects: writes SSE output; optional NDJSON file writes
-// - FailureModes: persistence failures are logged; nil event returns early
-// - Observability: emits WideEvent to SSE and wide_events NDJSON persistence
-// - Related: Emit, EmitSync, persistEvent, publishToSSE
-// - Keywords: wide_events, observability_dir, sampler, sse, persist_event
+//   - Purpose: Stream an event to SSE and optionally persist it to disk
+//   - Flow: [foxcular path] redact+sample via foxcular→SSE→persist (with config)
+//     [legacy path] redact→publish SSE→apply sampling→persist event
+//   - SideEffects: writes SSE output; optional NDJSON file writes
+//   - FailureModes: persistence failures are logged; nil event returns early
+//   - Observability: emits WideEvent to SSE and wide_events NDJSON persistence
+//   - Related: Emit, EmitSync, persistEvent, publishToSSE, emitViaFoxcular
+//   - Keywords: wide_events, observability_dir, sampler, sse, persist_event, foxcular
 func EmitWithConfig(ctx context.Context, event *WideEvent, config *persistConfig) {
 	if event == nil {
 		return
 	}
 
+	// Try the foxcular-backed pipeline first. When enabled, foxcular handles
+	// redaction and sampling, then foxctl does SSE publishing and persistence
+	// with the redacted event and caller's persistConfig.
+	if redacted, handled := emitViaFoxcular(event, false); handled {
+		if redacted == nil {
+			// Event was dropped by foxcular sampling.
+			return
+		}
+		// Foxcular handled redaction+sampling; do SSE + persistence with config.
+		publishToSSE(redacted)
+		dir := getObsDir()
+		if dir != "" {
+			persistEvent(ctx, redacted, config)
+		}
+		return
+	}
+
+	// Legacy path: foxcular not initialized, use original foxctl emit logic.
 	// Scrub sensitive data before any downstream processing (SSE, persistence).
 	RedactEvent(event)
 
@@ -87,19 +111,38 @@ func EmitWithConfig(ctx context.Context, event *WideEvent, config *persistConfig
 
 // EmitSync writes a WideEvent synchronously, bypassing sampling.
 //
+// When the foxcular pipeline is enabled, events are routed through foxcular
+// with bypassSampling=true (forced), ensuring redaction runs but sampling is skipped.
+//
 // Index:
-// - Purpose: Persist a WideEvent immediately without sampling
-// - Flow: publish to SSE → resolve observability dir → append NDJSON
-// - SideEffects: writes SSE output; appends to wide_events NDJSON
-// - FailureModes: file write errors returned; nil event returns nil
-// - Observability: emits WideEvent to SSE and wide_events NDJSON persistence
-// - Related: EmitWithConfig, WriteEvent, publishToSSE
-// - Keywords: wide_events, emit_sync, sse, write_event, observability_dir
+//   - Purpose: Persist a WideEvent immediately without sampling
+//   - Flow: [foxcular path] redact via foxcular (forced)→SSE→write NDJSON
+//     [legacy path] redact→publish SSE→resolve dir→append NDJSON
+//   - SideEffects: writes SSE output; appends to wide_events NDJSON
+//   - FailureModes: file write errors returned; nil event returns nil
+//   - Observability: emits WideEvent to SSE and wide_events NDJSON persistence
+//   - Related: EmitWithConfig, WriteEvent, publishToSSE, emitViaFoxcular
+//   - Keywords: wide_events, emit_sync, sse, write_event, observability_dir, foxcular
 func EmitSync(ctx context.Context, event *WideEvent) error {
 	if event == nil {
 		return nil
 	}
 
+	// Try the foxcular-backed pipeline with bypassSampling=true (forced event).
+	if redacted, handled := emitViaFoxcular(event, true); handled {
+		if redacted == nil {
+			// Event was dropped (shouldn't happen with forced, but be safe).
+			return nil
+		}
+		publishToSSE(redacted)
+		dir := getObsDir()
+		if dir == "" {
+			return nil
+		}
+		return WriteEvent(ctx, WideEventFileName, redacted)
+	}
+
+	// Legacy path: foxcular not initialized.
 	RedactEvent(event)
 
 	// Always try to publish to SSE (even if file persistence is disabled)

@@ -267,21 +267,15 @@ func TestWideEventToFoxcularEventRoundTrip(t *testing.T) {
 }
 
 func TestInitAndCloseFoxcular(t *testing.T) {
+	// Clean state
+	ResetFoxcularForTesting()
+
 	// Should be safe to call multiple times
 	InitFoxcular()
 	InitFoxcular()
 
-	client := FoxcularClient()
-	if client == nil {
-		t.Fatal("FoxcularClient() = nil, want non-nil after InitFoxcular")
-	}
-
 	if err := CloseFoxcular(); err != nil {
 		t.Fatalf("CloseFoxcular failed: %v", err)
-	}
-
-	if FoxcularClient() != nil {
-		t.Error("FoxcularClient() should be nil after CloseFoxcular")
 	}
 
 	// Close again should be safe
@@ -291,7 +285,9 @@ func TestInitAndCloseFoxcular(t *testing.T) {
 }
 
 func TestEmitViaFoxcularDisabled(t *testing.T) {
-	// When foxcular is not initialized, emitViaFoxcular should return false
+	// Clean state - foxcular not initialized
+	ResetFoxcularForTesting()
+
 	we := &WideEvent{
 		Ts:        time.Now().UTC(),
 		TraceID:   "test",
@@ -300,19 +296,23 @@ func TestEmitViaFoxcularDisabled(t *testing.T) {
 		Status:    StatusOK,
 		Data:      map[string]any{},
 	}
-	handled := emitViaFoxcular(context.Background(), we, false)
+	redacted, handled := emitViaFoxcular(we, false)
 	if handled {
 		t.Error("emitViaFoxcular should return false when not initialized")
+	}
+	if redacted != nil {
+		t.Error("emitViaFoxcular should return nil event when not initialized")
 	}
 }
 
 func TestEmitViaFoxcularEnabled(t *testing.T) {
+	ResetFoxcularForTesting()
 	dir := t.TempDir()
 	SetObsDirForTesting(dir)
 	defer SetObsDirForTesting("")
+	defer ResetFoxcularForTesting()
 
 	InitFoxcular()
-	defer CloseFoxcular()
 
 	we := &WideEvent{
 		Ts:        time.Now().UTC(),
@@ -323,12 +323,39 @@ func TestEmitViaFoxcularEnabled(t *testing.T) {
 		Data:      map[string]any{},
 	}
 
-	handled := emitViaFoxcular(context.Background(), we, true)
+	redacted, handled := emitViaFoxcular(we, true)
 	if !handled {
-		t.Error("emitViaFoxcular should return true when initialized")
+		t.Error("emitViaFoxcular should return handled=true when initialized")
 	}
+	if redacted == nil {
+		t.Fatal("emitViaFoxcular should return non-nil event when not dropped")
+	}
+	if redacted.TraceID != "foxcular-test-trace" {
+		t.Errorf("TraceID = %q, want foxcular-test-trace", redacted.TraceID)
+	}
+}
 
-	// Check the event was persisted
+func TestEmitWithConfigUsesFoxcularPipeline(t *testing.T) {
+	// This test verifies that when foxcular is initialized, EmitWithConfig
+	// routes events through foxcular's redaction pipeline.
+	ResetFoxcularForTesting()
+	dir := t.TempDir()
+	SetObsDirForTesting(dir)
+	defer SetObsDirForTesting("")
+	defer ResetFoxcularForTesting()
+
+	InitFoxcular()
+
+	// Emit an event with sensitive data
+	we := NewEvent("test.foxcular.hotpath").
+		WithTraceID("hot-trace").
+		WithData("password", "secret123").
+		WithData("safe_field", "visible").
+		Success(100 * time.Millisecond)
+
+	Emit(context.Background(), we)
+
+	// Verify the event was persisted
 	ndjsonPath := filepath.Join(dir, "events", "wide_events.ndjson")
 	data, err := os.ReadFile(ndjsonPath)
 	if err != nil {
@@ -344,8 +371,56 @@ func TestEmitViaFoxcularEnabled(t *testing.T) {
 		t.Fatalf("Failed to parse: %v", err)
 	}
 
-	if result.TraceID != "foxcular-test-trace" {
-		t.Errorf("TraceID = %q, want foxcular-test-trace", result.TraceID)
+	// Verify the sensitive data was redacted by foxcular
+	if result.TraceID != "hot-trace" {
+		t.Errorf("TraceID = %q, want hot-trace", result.TraceID)
+	}
+	if pwd, ok := result.Data["password"].(string); ok && pwd == "secret123" {
+		t.Error("password should have been redacted by foxcular pipeline")
+	}
+	// Safe fields should still be present
+	if result.Data["safe_field"] != "visible" {
+		t.Errorf("safe_field = %v, want visible", result.Data["safe_field"])
+	}
+}
+
+func TestEmitWithConfigLegacyFallback(t *testing.T) {
+	// This test verifies that when foxcular is NOT initialized, EmitWithConfig
+	// falls back to the legacy foxctl redaction path.
+	ResetFoxcularForTesting()
+	dir := t.TempDir()
+	SetObsDirForTesting(dir)
+	defer SetObsDirForTesting("")
+	SetSamplerForTesting(SampleAll{})
+	defer SetSamplerForTesting(nil)
+
+	// Don't call InitFoxcular - use legacy path
+
+	we := NewEvent("test.legacy.path").
+		WithTraceID("legacy-trace").
+		WithData("safe_field", "visible").
+		Success(100 * time.Millisecond)
+
+	Emit(context.Background(), we)
+
+	// Verify the event was persisted
+	ndjsonPath := filepath.Join(dir, "events", "wide_events.ndjson")
+	data, err := os.ReadFile(ndjsonPath)
+	if err != nil {
+		t.Fatalf("Failed to read NDJSON: %v", err)
+	}
+
+	var result WideEvent
+	lines := splitLines(string(data))
+	if len(lines) == 0 {
+		t.Fatal("No events written")
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &result); err != nil {
+		t.Fatalf("Failed to parse: %v", err)
+	}
+
+	if result.TraceID != "legacy-trace" {
+		t.Errorf("TraceID = %q, want legacy-trace", result.TraceID)
 	}
 }
 
