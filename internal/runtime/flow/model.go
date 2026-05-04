@@ -397,6 +397,11 @@ type AgentConfig struct {
 
 	// Workspace overrides the workspace for the spawned agent.
 	Workspace string `json:"workspace,omitempty"`
+
+	// CLICmd specifies which CLI agent command to launch when using the
+	// foxprox spawner (e.g., "droid", "claude"). Default: "droid".
+	// This field is ignored by the daemon's internal agent runtime.
+	CLICmd string `json:"cli_cmd,omitempty"`
 }
 
 // Validate checks that the AgentConfig has valid field values.

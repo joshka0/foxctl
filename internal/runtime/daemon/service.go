@@ -36,6 +36,8 @@ import (
 	"github.com/joshka0/foxctl/internal/runtime/execution/runner"
 	"github.com/joshka0/foxctl/internal/runtime/flow"
 	"github.com/joshka0/foxctl/internal/runtime/hooks"
+	foxproxclient "github.com/joshka/foxprox/foxprox/client"
+	foxproxd "github.com/joshka/foxprox/foxprox/daemon"
 	"github.com/joshka0/foxctl/internal/storage"
 	agentstore "github.com/joshka0/foxctl/internal/storage/agents"
 	"github.com/joshka0/foxctl/internal/storage/blackboard"
@@ -2890,7 +2892,7 @@ func (s *Service) startFlowEngine(ctx context.Context) error {
 		flow.NodeSkill:    &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: s.opts.Workspace},
 		flow.NodeTransform: &passthroughExecutor{},
 		flow.NodeAgent:    &flow.AgentExecutor{
-			Spawner:   &daemonAgentSpawner{svc: s},
+			Spawner:   s.selectAgentSpawner(s.opts.Workspace),
 			Workspace: s.opts.Workspace,
 		},
 	}
@@ -2992,7 +2994,7 @@ func (s *Service) resolveFlowEngine(ctx context.Context, workspace string) (*flo
 		flow.NodeSkill:     &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: absWS},
 		flow.NodeTransform: &passthroughExecutor{},
 		flow.NodeAgent: &flow.AgentExecutor{
-			Spawner:   &daemonAgentSpawner{svc: s},
+			Spawner:   s.selectAgentSpawner(absWS),
 			Workspace: absWS,
 		},
 	}
@@ -3261,6 +3263,28 @@ func (d *daemonAgentSpawner) Info(ctx context.Context, agentID string) (*flow.Ag
 func (d *daemonAgentSpawner) Kill(ctx context.Context, sessionID string) error {
 	_, err := d.svc.dispatchAgentKill(ctx, mustMarshalParams(AgentKillParams{SessionID: sessionID}))
 	return err
+}
+
+// selectAgentSpawner returns the appropriate AgentSpawner for the given workspace.
+// If foxprox daemon is available (socket exists), it returns a foxprox-backed
+// spawner that drives CLI agents via PTY sessions. Otherwise, it falls back
+// to the daemon's internal agent runtime (daemonAgentSpawner).
+// The spawner selection is logged to stderr.
+func (s *Service) selectAgentSpawner(workspace string) flow.AgentSpawner {
+	socketPath := foxproxd.DefaultSocketPath()
+	info, err := os.Stat(socketPath)
+	if err == nil && info.Mode()&os.ModeSocket != 0 {
+		// Foxprox socket exists — use foxprox spawner.
+		fpClient := foxproxclient.ForSocket(socketPath)
+		fmt.Fprintf(os.Stderr, "flow engine: using foxprox spawner (socket=%s)\n", socketPath)
+		return flow.NewFoxproxAgentSpawner(fpClient, flow.FoxproxSpawnerConfig{
+			CLICmd: "droid",
+		})
+	}
+
+	// Foxprox unavailable — fall back to daemon agent runtime.
+	fmt.Fprintf(os.Stderr, "flow engine: foxprox not available (socket=%s), using daemon agent spawner\n", socketPath)
+	return &daemonAgentSpawner{svc: s}
 }
 
 // mustMarshalParams marshals params to json.RawMessage. Panics on error

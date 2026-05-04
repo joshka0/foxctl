@@ -195,6 +195,10 @@ type AgentSpawnOptions struct {
 	LLMModel      string
 	SkillsAllow   []string
 	Workspace     string
+	// CLICmd specifies which CLI agent command to launch when using the
+	// foxprox spawner (e.g., "droid", "claude"). Default: "droid".
+	// This field is ignored by the daemon's internal agent runtime.
+	CLICmd string
 }
 
 // AgentExecutor spawns a foxctl agent, waits for completion (or ask reply),
@@ -292,6 +296,7 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 		LLMModel:      cfg.LLMModel,
 		SkillsAllow:   cfg.SkillsAllow,
 		Workspace:     workspace,
+		CLICmd:        cfg.CLICmd,
 	}
 	spawnResult, err := e.Spawner.Spawn(spawnCtx, cfg.Role, prompt, spawnOpts)
 	duration := time.Since(start)

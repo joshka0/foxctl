@@ -157,6 +157,32 @@ func (c *Client) SessionScreen(ctx context.Context, id string) (vtscreen.Snapsho
 	return out, err
 }
 
+// --- terminal ---
+
+// TerminalSubmitRequest is the JSON body for POST /v1/terminal/submit.
+// The session_id field lives alongside the intent fields (same flat object).
+type TerminalSubmitRequest struct {
+	SessionID  string `json:"session_id"`
+	Text       string `json:"text"`
+	SubmitKey  string `json:"submit_key,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	LeaseID    string `json:"lease_id,omitempty"`
+}
+
+// TerminalSubmitResponse mirrors the TerminalResponse from the server.
+type TerminalSubmitResponse struct {
+	SessionID string `json:"session_id"`
+	Written   int    `json:"written"`
+}
+
+// TerminalSubmit sends a terminal.submit intent to the given session.
+// It types text and presses the submit key (default: Enter).
+func (c *Client) TerminalSubmit(ctx context.Context, req TerminalSubmitRequest) (TerminalSubmitResponse, error) {
+	var out TerminalSubmitResponse
+	err := c.do(ctx, http.MethodPost, "/v1/terminal/submit", req, &out)
+	return out, err
+}
+
 // --- rooms ---
 
 // CreateRoom mirrors POST /v1/rooms.
