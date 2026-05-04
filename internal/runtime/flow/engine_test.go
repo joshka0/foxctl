@@ -70,6 +70,7 @@ type mockStore struct {
 	nodes map[string]FlowNode
 	edges map[string]FlowEdge
 	runs  map[string]FlowRun
+	logs  map[string][]RunLog // runID -> logs
 	mu    sync.Mutex
 }
 
@@ -79,6 +80,7 @@ func newMockStore() *mockStore {
 		nodes: make(map[string]FlowNode),
 		edges: make(map[string]FlowEdge),
 		runs:  make(map[string]FlowRun),
+		logs:  make(map[string][]RunLog),
 	}
 }
 
@@ -245,11 +247,22 @@ func (s *mockStore) UpdateRun(_ context.Context, r FlowRun) (FlowRun, error) {
 }
 
 func (s *mockStore) WriteRunLog(_ context.Context, log RunLog) (RunLog, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logs[log.RunID] = append(s.logs[log.RunID], log)
 	return log, nil
 }
 
 func (s *mockStore) ListRunLogs(_ context.Context, runID string, opts ...RunLogOption) ([]RunLog, error) {
-	return []RunLog{}, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	logs := s.logs[runID]
+	if logs == nil {
+		return []RunLog{}, nil
+	}
+	cp := make([]RunLog, len(logs))
+	copy(cp, logs)
+	return cp, nil
 }
 
 func (s *mockStore) StreamRunLogs(_ context.Context, runID string, opts ...RunLogOption) (<-chan RunLog, error) {
@@ -2491,6 +2504,298 @@ func TestRetryPolicyZeroMaxAttemptsNoRetry(t *testing.T) {
 	// B should have been called exactly once (no retry with max_attempts=0)
 	if bCalls != 1 {
 		t.Errorf("expected exactly 1 call to B (max_attempts=0), got %d", bCalls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Engine.SubmitOutput
+// ---------------------------------------------------------------------------
+
+// seedABForSubmit creates a flow with A→B nodes in the store for SubmitOutput tests.
+func seedABForSubmit(store *mockStore, flowID string) {
+	fl := makeFlow(flowID, "test-flow")
+	fl.State = FlowDraft
+	nodeA := makeNode(flowID+"-a", flowID, "src", NodeSkill, "{}")
+	nodeB := makeNode(flowID+"-b", flowID, "sink", NodeSkill, "{}")
+	edge := makeEdge(flowID+"-e1", flowID, nodeA.ID, nodeB.ID, TransformPassthrough, "")
+	store.CreateFlow(context.Background(), fl)  //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA)   //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeB)   //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edge)    //nolint:errcheck // test helper
+}
+
+func TestSubmitOutput_PublishesToOutputBus(t *testing.T) {
+	store := newMockStore()
+	seedABForSubmit(store, "f1")
+
+	var sinkReceived atomic.Int32
+	sinkExec := newMockExecutor(func(ctx context.Context, node FlowNode, input any) (NodeOutput, error) {
+		sinkReceived.Add(1)
+		return NodeOutput{
+			Envelope: envelope.OK("mock", input),
+			Duration: time.Millisecond,
+			NodeID:   node.ID,
+		}, nil
+	})
+
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: sinkExec,
+	}
+	eng := NewEngine(store, registry, 16)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := eng.Start(ctx, "f1"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for source to execute and complete
+	time.Sleep(200 * time.Millisecond)
+
+	// Get the node IDs
+	nodes, _ := store.ListNodesByFlow(context.Background(), "f1")
+	var sinkID string
+	for _, n := range nodes {
+		if n.Label == "sink" {
+			sinkID = n.ID
+		}
+	}
+
+	// Now submit output directly to the sink node
+	pushData := map[string]any{"pushed": true, "value": "hello"}
+	if err := eng.SubmitOutput(ctx, "f1", sinkID, pushData); err != nil {
+		t.Fatalf("SubmitOutput: %v", err)
+	}
+
+	// Wait for edge evaluator to pick up the pushed output
+	time.Sleep(200 * time.Millisecond)
+
+	// The sink node should have received the pushed data
+	if sinkReceived.Load() < 2 {
+		t.Errorf("expected sink to receive at least 2 outputs (source + push), got %d", sinkReceived.Load())
+	}
+}
+
+func TestSubmitOutput_FlowNotRunning(t *testing.T) {
+	store := newMockStore()
+	eng := NewEngine(store, map[NodeKind]NodeExecutor{}, 16)
+
+	err := eng.SubmitOutput(context.Background(), "f1", "node1", "data")
+	if err == nil {
+		t.Fatal("expected error for non-running flow, got nil")
+	}
+	if !contains(err.Error(), "not running") {
+		t.Errorf("error = %q, want 'not running'", err.Error())
+	}
+}
+
+func TestSubmitOutput_NodeNotFound(t *testing.T) {
+	store := newMockStore()
+	seedABForSubmit(store, "f1")
+
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: newMockExecutor(nil),
+	}
+	eng := NewEngine(store, registry, 16)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := eng.Start(ctx, "f1"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for flow to start
+	time.Sleep(100 * time.Millisecond)
+
+	err := eng.SubmitOutput(ctx, "f1", "nonexistent-node", "data")
+	if err == nil {
+		t.Fatal("expected error for nonexistent node, got nil")
+	}
+	if !contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want 'not found'", err.Error())
+	}
+}
+
+func TestSubmitOutput_UpdatesNodeState(t *testing.T) {
+	store := newMockStore()
+	seedABForSubmit(store, "f1")
+
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: newMockExecutor(nil),
+	}
+	eng := NewEngine(store, registry, 16)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := eng.Start(ctx, "f1"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for source to complete
+	time.Sleep(200 * time.Millisecond)
+
+	// Get the sink node ID
+	nodes, _ := store.ListNodesByFlow(context.Background(), "f1")
+	var sinkID string
+	for _, n := range nodes {
+		if n.Label == "sink" {
+			sinkID = n.ID
+		}
+	}
+
+	// Submit output to sink — should transition from idle to completed
+	if err := eng.SubmitOutput(ctx, "f1", sinkID, "test-data"); err != nil {
+		t.Fatalf("SubmitOutput: %v", err)
+	}
+
+	// Check node state
+	status := eng.Status("f1")
+	if status == nil {
+		t.Fatal("expected non-nil status")
+	}
+
+	var sinkState *NodeExecState
+	for i := range status.Nodes {
+		if status.Nodes[i].ID == sinkID {
+			sinkState = &status.Nodes[i]
+			break
+		}
+	}
+
+	if sinkState == nil {
+		t.Fatal("sink node state not found")
+	}
+	if sinkState.State != "completed" {
+		t.Errorf("sink state = %q, want %q", sinkState.State, "completed")
+	}
+}
+
+func TestSubmitOutput_WritesRunLog(t *testing.T) {
+	store := newMockStore()
+	seedABForSubmit(store, "f1")
+
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: newMockExecutor(nil),
+	}
+	eng := NewEngine(store, registry, 16)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := eng.Start(ctx, "f1"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for source to complete
+	time.Sleep(200 * time.Millisecond)
+
+	// Get the sink node ID and run ID
+	nodes, _ := store.ListNodesByFlow(context.Background(), "f1")
+	var sinkID string
+	for _, n := range nodes {
+		if n.Label == "sink" {
+			sinkID = n.ID
+		}
+	}
+
+	status := eng.Status("f1")
+	runID := status.RunID
+
+	// Submit output
+	pushData := map[string]any{"test": "value"}
+	if err := eng.SubmitOutput(ctx, "f1", sinkID, pushData); err != nil {
+		t.Fatalf("SubmitOutput: %v", err)
+	}
+
+	// Verify a run log was written
+	logs, err := store.ListRunLogs(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("ListRunLogs: %v", err)
+	}
+
+	// Should have at least 2 logs: source output + pushed output
+	if len(logs) < 2 {
+		t.Errorf("expected at least 2 run logs, got %d", len(logs))
+	}
+
+	// Check that the pushed output log exists with correct node_id
+	var foundPushLog bool
+	for _, log := range logs {
+		if log.NodeID == sinkID {
+			foundPushLog = true
+			break
+		}
+	}
+	if !foundPushLog {
+		t.Error("expected run log entry for sink node from pushed output")
+	}
+}
+
+func TestSubmitOutput_SubscriberReceivesPushedOutput(t *testing.T) {
+	store := newMockStore()
+	// Create a flow with a single source node (no edges), so pushed output
+	// is the only output on the subscription channel.
+	fl := makeFlow("f1", "test-flow")
+	fl.State = FlowDraft
+	nodeA := makeNode("f1-a", "f1", "source", NodeSkill, "{}")
+	store.CreateFlow(context.Background(), fl)  //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA)   //nolint:errcheck // test helper
+
+	registry := map[NodeKind]NodeExecutor{
+		NodeSkill: newMockExecutor(nil),
+	}
+	eng := NewEngine(store, registry, 16)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := eng.Start(ctx, "f1"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Subscribe to all outputs FIRST, before pushing
+	sub := eng.SubscribeOutputs("f1")
+	if sub == nil {
+		t.Fatal("SubscribeOutputs returned nil")
+	}
+
+	// Wait for source node to complete
+	time.Sleep(200 * time.Millisecond)
+
+	// Drain source node output (from the mock executor)
+	select {
+	case <-sub:
+	default:
+	}
+
+	// Push output for source node (the only node in this flow)
+	pushData := map[string]any{"pushed": true, "source": "external"}
+	if err := eng.SubmitOutput(ctx, "f1", "f1-a", pushData); err != nil {
+		t.Fatalf("SubmitOutput: %v", err)
+	}
+
+	// Collect the pushed output with timeout
+	timeout := time.After(3 * time.Second)
+	for {
+		select {
+		case out, ok := <-sub:
+			if !ok {
+				t.Fatal("subscription channel closed prematurely")
+			}
+			// The pushed output should have command "flow/output"
+			if out.Envelope.Command == "flow/output" {
+				if out.Envelope.Data == nil {
+					t.Fatal("expected non-nil data in pushed output envelope")
+				}
+				return // success
+			}
+			// Other outputs (source node) - skip
+		case <-timeout:
+			t.Fatal("timed out waiting for pushed output on subscription")
+		}
 	}
 }
 

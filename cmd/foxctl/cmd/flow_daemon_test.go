@@ -25,6 +25,7 @@ type mockFlowDaemonClient struct {
 	flowStopFn    func(flowID, workspace string) (*daemon.FlowStopResult, error)
 	flowPauseFn   func(flowID, workspace string) (*daemon.FlowPauseResult, error)
 	flowStatusFn  func(flowID, workspace string) (*daemon.FlowStatusResult, error)
+	flowOutputFn  func(flowID, runID, nodeID string, data json.RawMessage, workspace string) (*daemon.FlowOutputResult, error)
 	ensureRunningCalled bool
 }
 
@@ -80,6 +81,18 @@ func (m *mockFlowDaemonClient) FlowStatus(flowID, workspace string) (*daemon.Flo
 		FlowID: flowID,
 		State:  "running",
 		RunID:  "run-mock-001",
+	}, nil
+}
+
+func (m *mockFlowDaemonClient) FlowOutput(flowID, runID, nodeID string, data json.RawMessage, workspace string) (*daemon.FlowOutputResult, error) {
+	if m.flowOutputFn != nil {
+		return m.flowOutputFn(flowID, runID, nodeID, data, workspace)
+	}
+	return &daemon.FlowOutputResult{
+		FlowID: flowID,
+		NodeID: nodeID,
+		RunID:  "run-mock-001",
+		OK:     true,
 	}, nil
 }
 

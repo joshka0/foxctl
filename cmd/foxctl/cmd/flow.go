@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -48,6 +49,10 @@ var (
 	flowEdgeTransformCfgFlag string
 	flowEdgeConditionFlag    string
 	flowEdgeRetryFlag        string
+
+	flowOutputNodeFlag    string
+	flowOutputDataFlag    string
+	flowOutputDataFileFlag string
 )
 
 // ---------------------------------------------------------------------------
@@ -148,6 +153,14 @@ var flowStatusCmd = &cobra.Command{
 	RunE:  runFlowStatus,
 }
 
+var flowOutputCmd = &cobra.Command{
+	Use:   "output <run-id>",
+	Short: "Push structured output to a running flow",
+	Long:  "Push structured output data directly into a running flow's node, allowing external agents to submit results back to the flow engine. The flow must be running and the node must exist.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runFlowOutput,
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -183,6 +196,12 @@ func init() {
 	_ = flowAddEdgeCmd.MarkFlagRequired("from")
 	_ = flowAddEdgeCmd.MarkFlagRequired("to")
 
+	// output flags
+	flowOutputCmd.Flags().StringVar(&flowOutputNodeFlag, "node", "", "node ID or label to push output to (required)")
+	flowOutputCmd.Flags().StringVar(&flowOutputDataFlag, "data", "", "JSON data to push (required unless --data-file is set)")
+	flowOutputCmd.Flags().StringVar(&flowOutputDataFileFlag, "data-file", "", "path to JSON file to push as data")
+	_ = flowOutputCmd.MarkFlagRequired("node")
+
 	flowCmd.AddCommand(flowCreateCmd)
 	flowCmd.AddCommand(flowListCmd)
 	flowCmd.AddCommand(flowShowCmd)
@@ -195,6 +214,7 @@ func init() {
 	flowCmd.AddCommand(flowStopCmd)
 	flowCmd.AddCommand(flowPauseCmd)
 	flowCmd.AddCommand(flowStatusCmd)
+	flowCmd.AddCommand(flowOutputCmd)
 }
 
 // ---------------------------------------------------------------------------
@@ -1077,6 +1097,133 @@ func runFlowStatus(cmd *cobra.Command, args []string) error {
 		"nodes":      nodeStates,
 		"edges":      edgeStates,
 		"workspace":  workspace,
+	})
+}
+
+func runFlowOutput(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	runID := args[0]
+	workspace := flowResolveWorkspace(flowWorkspaceFlag)
+
+	// Validate required flags
+	if flowOutputNodeFlag == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/output",
+			protocol.ErrorCodeEARG, "--node is required", nil)
+	}
+
+	// Get data from --data or --data-file
+	var dataBytes []byte
+	if flowOutputDataFlag != "" {
+		dataBytes = []byte(flowOutputDataFlag)
+	} else if flowOutputDataFileFlag != "" {
+		var err error
+		dataBytes, err = os.ReadFile(flowOutputDataFileFlag)
+		if err != nil {
+			return protocol.WriteError(cmd.OutOrStdout(), "flow/output",
+				protocol.ErrorCodeERuntime,
+				fmt.Sprintf("read data file: %v", err), nil)
+		}
+	} else {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/output",
+			protocol.ErrorCodeEARG, "--data or --data-file is required", nil)
+	}
+
+	// Validate data is valid JSON
+	if !json.Valid(dataBytes) {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/output",
+			protocol.ErrorCodeEParse,
+			fmt.Sprintf("invalid JSON: %s", string(dataBytes)), nil)
+	}
+
+	// Try daemon routing
+	handled, err := routeFlowOutputViaDaemon(cmd, runID, flowOutputNodeFlag, dataBytes, workspace)
+	if err != nil {
+		return err
+	}
+	if handled {
+		return nil
+	}
+
+	// Fallback: direct engine access (for in-process flows)
+	fmt.Fprintf(cmd.ErrOrStderr(), "flow: daemon unavailable, trying in-process engine\n")
+
+	// Search for the flow that has this runID
+	var flowID string
+	var nodeID string
+	store, err := openFlowStore(ctx, flowWorkspaceFlag)
+	if err != nil {
+		return writeFlowError(cmd, "flow/output", err)
+	}
+	defer store.Close()
+
+	// Resolve node reference (could be ID or label)
+	// We need to find the flow that contains this run. Try all flows.
+	flows, err := store.ListFlows(ctx, workspace)
+	if err != nil {
+		return writeFlowError(cmd, "flow/output", err)
+	}
+
+	for _, f := range flows {
+		eng := getEngine(f.ID)
+		if eng == nil {
+			continue
+		}
+		status := eng.Status(f.ID)
+		if status != nil && status.RunID == runID {
+			flowID = f.ID
+			break
+		}
+	}
+
+	if flowID == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/output",
+			protocol.ErrorCodeENotFound,
+			fmt.Sprintf("no running flow found with run_id %s", runID), nil)
+	}
+
+	// Resolve node reference within the flow
+	nodes, err := store.ListNodesByFlow(ctx, flowID)
+	if err != nil {
+		return writeFlowError(cmd, "flow/output", err)
+	}
+
+	for _, n := range nodes {
+		if n.ID == flowOutputNodeFlag || n.Label == flowOutputNodeFlag {
+			nodeID = n.ID
+			break
+		}
+	}
+	if nodeID == "" {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/output",
+			protocol.ErrorCodeENotFound,
+			fmt.Sprintf("node %q not found in flow", flowOutputNodeFlag), nil)
+	}
+
+	// Parse data and submit
+	var data any
+	if err := json.Unmarshal(dataBytes, &data); err != nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/output",
+			protocol.ErrorCodeEParse,
+			fmt.Sprintf("parse data: %v", err), nil)
+	}
+
+	eng := getEngine(flowID)
+	if eng == nil {
+		return protocol.WriteError(cmd.OutOrStdout(), "flow/output",
+			protocol.ErrorCodeENotFound,
+			fmt.Sprintf("no active engine for flow %s", flowID), nil)
+	}
+
+	if err := eng.SubmitOutput(ctx, flowID, nodeID, data); err != nil {
+		return writeFlowError(cmd, "flow/output", err)
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "flow/output", map[string]any{
+		"run_id":    runID,
+		"flow_id":   flowID,
+		"node_id":   nodeID,
+		"workspace": workspace,
+		"ok":        true,
 	})
 }
 

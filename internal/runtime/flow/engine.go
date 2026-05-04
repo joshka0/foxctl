@@ -481,6 +481,81 @@ func (e *Engine) ActiveFlowIDs() []string {
 	return ids
 }
 
+// SubmitOutput publishes structured output data directly into the active run's
+// OutputBus for the given flow and node. This allows external agents to push
+// results back into the flow engine without going through the normal node
+// executor pipeline. The published output triggers edge evaluators automatically.
+//
+// The caller provides the flowID to locate the active run, and the nodeID to
+// identify which node's output channel to publish on. The data parameter is
+// wrapped in a NodeOutput envelope before publishing.
+//
+// Returns an error if the flow is not running or the node is not found in the run.
+func (e *Engine) SubmitOutput(ctx context.Context, flowID, nodeID string, data any) error {
+	e.mu.Lock()
+	run, ok := e.runs[flowID]
+	if !ok {
+		e.mu.Unlock()
+		return fmt.Errorf("flow: %s not running", flowID)
+	}
+	if run.state != FlowRunning {
+		e.mu.Unlock()
+		return fmt.Errorf("flow: %s not running (state: %s)", flowID, run.state)
+	}
+
+	// Verify the node exists in this flow run.
+	nodeState, nodeOK := run.nodeStates[nodeID]
+	if !nodeOK {
+		e.mu.Unlock()
+		return fmt.Errorf("flow: node %s not found in flow %s", nodeID, flowID)
+	}
+
+	// Mark node as running (it may have been idle).
+	if nodeState.State == "idle" {
+		nodeState.State = "running"
+		run.nodeStates[nodeID] = nodeState
+	}
+
+	bus := run.bus
+	runID := run.runID
+	e.mu.Unlock()
+
+	// Build the output envelope.
+	env := envelope.OK("flow/output", data)
+
+	output := NodeOutput{
+		Envelope: env,
+		Duration: 0,
+		NodeID:   nodeID,
+	}
+
+	// Publish to the node's output channel on the bus.
+	// The existing edge evaluator goroutines will pick it up automatically.
+	bus.publish(nodeID, output)
+
+	// Update node state to completed.
+	e.mu.Lock()
+	if r, ok := e.runs[flowID]; ok {
+		if ns, ok := r.nodeStates[nodeID]; ok {
+			ns.State = "completed"
+			r.nodeStates[nodeID] = ns
+		}
+	}
+	e.mu.Unlock()
+
+	// Write log entry for the pushed output.
+	envBytes, err := json.Marshal(env)
+	if err == nil {
+		_, _ = e.store.WriteRunLog(ctx, RunLog{
+			RunID:    runID,
+			NodeID:   nodeID,
+			Envelope: json.RawMessage(envBytes),
+		})
+	}
+
+	return nil
+}
+
 // SubscribeOutputs returns a channel that receives all node outputs for the
 // given flow's active run. The channel is closed when the flow run ends or
 // the context is cancelled. Returns nil if the flow is not running.

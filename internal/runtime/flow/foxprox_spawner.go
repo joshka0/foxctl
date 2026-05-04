@@ -37,6 +37,13 @@ type FoxproxSpawnerConfig struct {
 	// ReadinessThresholdBPS is the bytes-per-second threshold below which
 	// output is considered idle. Default: 50.
 	ReadinessThresholdBPS float64
+
+	// FlowRunID, when set, is injected into the agent's prompt so the agent
+	// knows where to push output via `foxctl flow output`.
+	FlowRunID string
+
+	// FlowNodeID, when set, is injected into the agent's prompt.
+	FlowNodeID string
 }
 
 // defaults applies zero-value defaults.
@@ -77,6 +84,8 @@ func NewFoxproxAgentSpawner(client FoxproxClient, config FoxproxSpawnerConfig) *
 // Spawn creates a foxprox PTY session with the CLI agent command.
 // The session ID serves as both agent_id and session_id.
 // If opts.CLICmd is set, it overrides the spawner's default CLICmd.
+// If the config has FlowRunID and FlowNodeID set, these are injected
+// into the prompt so the agent knows where to push output.
 func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, opts AgentSpawnOptions) (*AgentSpawnResult, error) {
 	// Determine the CLI command: per-node override > spawner default.
 	cliCmd := s.config.CLICmd
@@ -86,6 +95,21 @@ func (s *foxproxAgentSpawner) Spawn(ctx context.Context, role, prompt string, op
 
 	// Determine the working directory.
 	cwd := opts.Workspace
+
+	// Inject flow run_id and node_id into the prompt if configured.
+	// This tells the agent where to push its output via `foxctl flow output`.
+	if s.config.FlowRunID != "" && s.config.FlowNodeID != "" {
+		flowContext := fmt.Sprintf(
+			"\n\n--- Flow Output Push Configuration ---\n"+
+				"You are running as part of a flow. When you have completed your task, "+
+				"push your structured output back to the flow engine by running:\n\n"+
+				"  foxctl flow output %s --node %s --data '<your-json-output>' --workspace '%s'\n\n"+
+				"Replace <your-json-output> with your actual result as a JSON object.\n"+
+				"This is REQUIRED as your final step before completing.\n",
+			s.config.FlowRunID, s.config.FlowNodeID, cwd,
+		)
+		prompt = prompt + flowContext
+	}
 
 	// Create the session with readiness profile for output-idle detection.
 	req := httpjson.CreateSessionRequest{

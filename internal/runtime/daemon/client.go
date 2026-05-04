@@ -614,6 +614,38 @@ func (c *Client) FlowStatus(flowID, workspace string) (*FlowStatusResult, error)
 	return &result, nil
 }
 
+// FlowOutput pushes structured output data into a running flow's OutputBus via the daemon.
+// Either flowID or runID should be provided. If flowID is empty, the daemon resolves it from runID.
+func (c *Client) FlowOutput(flowID, runID, nodeID string, data json.RawMessage, workspace string) (*FlowOutputResult, error) {
+	params := FlowOutputParams{
+		FlowID:    flowID,
+		RunID:     runID,
+		NodeID:    nodeID,
+		Data:      data,
+		Workspace: workspace,
+	}
+
+	resp, err := c.call("flow.output", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result FlowOutputResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
 // marshalResult marshals the given value to JSON and returns the resulting bytes.
 // If marshaling fails, the error is wrapped with context "marshal result".
 func marshalResult(v any) ([]byte, error) {

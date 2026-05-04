@@ -208,6 +208,11 @@ type AgentExecutor struct {
 	Spawner AgentSpawner
 	// Workspace is the default workspace for the agent. Overridden by config.
 	Workspace string
+	// SubscribeOutput is an optional function that subscribes to the OutputBus
+	// for a specific node in a specific flow. When set, the "push" output mode
+	// uses this to wait for externally pushed output instead of polling Info().
+	// Returns a channel that receives the pushed output, or nil if not available.
+	SubscribeOutput func(flowID, nodeID string) <-chan NodeOutput
 }
 
 // Execute runs the agent node: parses config, spawns agent, waits for output.
@@ -265,6 +270,29 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 		prompt = cfg.Prompt + "\n\n--- Upstream Data ---\n" + string(inputData)
 	}
 
+	// For push output mode, inject flow output push instructions into the prompt
+	// so the agent knows where to send its output.
+	if outputMode == "push" {
+		runID := ""
+		if e.SubscribeOutput != nil {
+			// Try to get run_id from engine status via the flow context
+			// The flowID is available from node.FlowID
+			// We need a way to get the run ID. Use a wrapper function.
+		}
+		if runID == "" {
+			runID = "unknown"
+		}
+		pushInstructions := fmt.Sprintf(
+			"\n\n--- Flow Output Push Configuration ---\n"+
+				"You are running as a node (%s) in flow (%s). When you have completed your task, "+
+				"push your structured output back to the flow engine by running:\n\n"+
+				"  foxctl flow output <run-id> --node %s --data '<your-json-output>'\n\n"+
+				"The run-id will be provided separately. Replace <your-json-output> with your actual result as a JSON object.\n",
+			node.Label, node.FlowID, node.ID,
+		)
+		prompt = prompt + pushInstructions
+	}
+
 	// Set up timeout context if configured.
 	spawnCtx := ctx
 	var cancel context.CancelFunc
@@ -319,6 +347,8 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 		return e.executeAskMode(spawnCtx, cfg, spawnResult, input, start, node, askTimeout)
 	case "session_summary":
 		return e.executeSessionSummaryMode(spawnCtx, spawnResult, start, node)
+	case "push":
+		return e.executePushMode(spawnCtx, cfg, spawnResult, input, start, node)
 	default:
 		return NodeOutput{
 			Envelope: envelope.Error("flow/agent", "EARG",
@@ -452,5 +482,59 @@ func (e *AgentExecutor) executeSessionSummaryMode(
 			}
 			// Agent still running (status "running", "active", etc.). Continue polling.
 		}
+	}
+}
+
+// executePushMode handles the push output mode: spawn agent, then subscribe
+// to the OutputBus and wait for the agent to push its output via
+// `foxctl flow output`. This avoids screen-scraping for output capture.
+func (e *AgentExecutor) executePushMode(
+	ctx context.Context,
+	cfg AgentConfig,
+	spawnResult *AgentSpawnResult,
+	input any,
+	start time.Time,
+	node FlowNode,
+) (NodeOutput, error) {
+	// The agent has been spawned. In push mode, we wait for the agent to
+	// push its output back via `foxctl flow output` instead of polling Info().
+	// This requires SubscribeOutput to be set on the executor.
+	if e.SubscribeOutput == nil {
+		// No subscription available — fall back to session_summary mode.
+		return e.executeSessionSummaryMode(ctx, spawnResult, start, node)
+	}
+
+	// Subscribe to this node's output channel on the engine's OutputBus.
+	// The flowID is embedded in the node's FlowID field.
+	sub := e.SubscribeOutput(node.FlowID, node.ID)
+	if sub == nil {
+		// Flow not running or bus not available — fall back.
+		return e.executeSessionSummaryMode(ctx, spawnResult, start, node)
+	}
+
+	// Wait for the pushed output or context cancellation.
+	select {
+	case out, ok := <-sub:
+		if !ok {
+			// Channel closed — flow stopped or context cancelled.
+			_ = e.Spawner.Kill(context.Background(), spawnResult.SessionID)
+			return NodeOutput{
+				Envelope: envelope.Error("flow/agent", "ECANCELED",
+					"output bus closed while waiting for pushed output", nil),
+				Duration: time.Since(start),
+				NodeID:   node.ID,
+			}, nil
+		}
+		// Agent pushed output successfully.
+		return out, nil
+	case <-ctx.Done():
+		// Context cancelled or timed out. Kill the agent.
+		_ = e.Spawner.Kill(context.Background(), spawnResult.SessionID)
+		return NodeOutput{
+			Envelope: envelope.Error("flow/agent", "ETIMEOUT",
+				"timed out waiting for pushed output", nil),
+			Duration: time.Since(start),
+			NodeID:   node.ID,
+		}, nil
 	}
 }

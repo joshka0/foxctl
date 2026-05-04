@@ -416,8 +416,8 @@ func (c AgentConfig) Validate() error {
 	if c.InputMode != "" && c.InputMode != "prompt" && c.InputMode != "ask" {
 		return fmt.Errorf("flow: agent config: invalid input_mode %q (must be prompt or ask)", c.InputMode)
 	}
-	if c.OutputMode != "" && c.OutputMode != "session_summary" && c.OutputMode != "ask" {
-		return fmt.Errorf("flow: agent config: invalid output_mode %q (must be session_summary or ask)", c.OutputMode)
+	if c.OutputMode != "" && c.OutputMode != "session_summary" && c.OutputMode != "ask" && c.OutputMode != "push" {
+		return fmt.Errorf("flow: agent config: invalid output_mode %q (must be session_summary, ask, or push)", c.OutputMode)
 	}
 	return nil
 }

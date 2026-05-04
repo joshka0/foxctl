@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 
@@ -21,6 +22,7 @@ type flowDaemonClient interface {
 	FlowStop(flowID, workspace string) (*daemon.FlowStopResult, error)
 	FlowPause(flowID, workspace string) (*daemon.FlowPauseResult, error)
 	FlowStatus(flowID, workspace string) (*daemon.FlowStatusResult, error)
+	FlowOutput(flowID, runID, nodeID string, data json.RawMessage, workspace string) (*daemon.FlowOutputResult, error)
 }
 
 // defaultFlowDaemonClient is the production implementation using the real daemon client.
@@ -50,6 +52,10 @@ func (d *defaultFlowDaemonClient) FlowPause(flowID, workspace string) (*daemon.F
 
 func (d *defaultFlowDaemonClient) FlowStatus(flowID, workspace string) (*daemon.FlowStatusResult, error) {
 	return d.client.FlowStatus(flowID, workspace)
+}
+
+func (d *defaultFlowDaemonClient) FlowOutput(flowID, runID, nodeID string, data json.RawMessage, workspace string) (*daemon.FlowOutputResult, error) {
+	return d.client.FlowOutput(flowID, runID, nodeID, data, workspace)
 }
 
 // newFlowDaemonClient is the factory for creating daemon clients.
@@ -308,6 +314,45 @@ func containsAny(s string, substrings ...string) bool {
 		}
 	}
 	return false
+}
+
+// routeFlowOutputViaDaemon routes flow output push through the daemon.
+func routeFlowOutputViaDaemon(cmd *cobra.Command, runID, nodeID string, data json.RawMessage, workspace string) (bool, error) {
+	stderr := cmd.ErrOrStderr()
+
+	daemonClient := newFlowDaemonClient()
+
+	// Check if daemon is running
+	if !daemonClient.IsRunning() {
+		if flowDaemonAutoStart {
+			fmt.Fprintf(stderr, "flow: daemon not running, attempting auto-start...\n")
+			if err := daemonClient.EnsureRunning(); err != nil {
+				fmt.Fprintf(stderr, "flow: auto-start failed (%v), falling back to in-process\n", err)
+				return false, nil
+			}
+		} else {
+			return false, nil
+		}
+	}
+
+	// Pass both run_id and node_id to the daemon. The daemon will
+	// resolve the flow_id from the run_id.
+	result, err := daemonClient.FlowOutput("", runID, nodeID, data, workspace)
+	if err != nil {
+		if isConnectionError(err) {
+			fmt.Fprintf(stderr, "flow: daemon connection lost, falling back to in-process\n")
+			return false, nil
+		}
+		return true, mapDaemonFlowError(cmd, "flow/output", err)
+	}
+
+	return true, protocol.WriteOK(cmd.OutOrStdout(), "flow/output", map[string]any{
+		"run_id":    runID,
+		"flow_id":   result.FlowID,
+		"node_id":   result.NodeID,
+		"workspace": workspace,
+		"ok":        result.OK,
+	})
 }
 
 // Compile-time interface checks.

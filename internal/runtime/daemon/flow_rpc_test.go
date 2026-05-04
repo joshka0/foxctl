@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -2075,7 +2076,7 @@ func TestPerWorkspace_StopWithoutWorkspace(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Stop WITHOUT workspace — should find the flow in the per-workspace engine.
+	// Stop without workspace parameter — should find it via engine search
 	stopParams := json.RawMessage(`{"flow_id":"flow-ws"}`)
 	result, err := svc.handleFlowStop(stopParams)
 	if err != nil {
@@ -2083,6 +2084,190 @@ func TestPerWorkspace_StopWithoutWorkspace(t *testing.T) {
 	}
 	if result.State != "stopped" {
 		t.Errorf("State = %q, want %q", result.State, "stopped")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: flow.output
+// ---------------------------------------------------------------------------
+
+func TestFlowOutput_HappyPath(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start the flow first
+	startParams := json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`)
+	startResult, err := svc.handleFlowStart(context.Background(), startParams)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Wait for source node to complete
+	time.Sleep(200 * time.Millisecond)
+
+	// Push output to the sink node
+	outputParams := json.RawMessage(fmt.Sprintf(
+		`{"flow_id":"flow-1","node_id":"%s-n2","data":{"pushed":true},"workspace":"/tmp/ws"}`,
+		"flow-1",
+	))
+	result, err := svc.handleFlowOutput(context.Background(), outputParams)
+	if err != nil {
+		t.Fatalf("handleFlowOutput: %v", err)
+	}
+
+	if !result.OK {
+		t.Error("expected OK=true")
+	}
+	if result.FlowID != "flow-1" {
+		t.Errorf("FlowID = %q, want %q", result.FlowID, "flow-1")
+	}
+	if result.RunID == "" {
+		t.Error("expected non-empty RunID")
+	}
+	if result.RunID != startResult.RunID {
+		t.Errorf("RunID = %q, want %q", result.RunID, startResult.RunID)
+	}
+}
+
+func TestFlowOutput_FlowNotRunning(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+
+	// Don't start the flow — output should fail
+	outputParams := json.RawMessage(`{"flow_id":"flow-1","node_id":"flow-1-n2","data":{},"workspace":"/tmp/ws"}`)
+	_, err := svc.handleFlowOutput(context.Background(), outputParams)
+	if err == nil {
+		t.Fatal("expected error for non-running flow, got nil")
+	}
+	if !strings.Contains(err.Error(), "not running") {
+		t.Errorf("error = %q, want 'not running'", err.Error())
+	}
+}
+
+func TestFlowOutput_NodeNotFound(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start the flow
+	_, _ = svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`))
+	time.Sleep(100 * time.Millisecond)
+
+	// Push output to nonexistent node
+	outputParams := json.RawMessage(`{"flow_id":"flow-1","node_id":"nonexistent","data":{},"workspace":"/tmp/ws"}`)
+	_, err := svc.handleFlowOutput(context.Background(), outputParams)
+	if err == nil {
+		t.Fatal("expected error for nonexistent node, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want 'not found'", err.Error())
+	}
+}
+
+func TestFlowOutput_MissingFlowID(t *testing.T) {
+	svc := newServiceWithFlowEngine(newMockFlowStore())
+	params := json.RawMessage(`{"node_id":"n1","data":{}}`)
+	_, err := svc.handleFlowOutput(context.Background(), params)
+	if err == nil {
+		t.Fatal("expected error for missing flow_id, got nil")
+	}
+	if !strings.Contains(err.Error(), "flow_id") {
+		t.Errorf("error = %q, want 'flow_id'", err.Error())
+	}
+}
+
+func TestFlowOutput_MissingNodeID(t *testing.T) {
+	svc := newServiceWithFlowEngine(newMockFlowStore())
+	params := json.RawMessage(`{"flow_id":"f1","data":{}}`)
+	_, err := svc.handleFlowOutput(context.Background(), params)
+	if err == nil {
+		t.Fatal("expected error for missing node_id, got nil")
+	}
+	if !strings.Contains(err.Error(), "node_id") {
+		t.Errorf("error = %q, want 'node_id'", err.Error())
+	}
+}
+
+func TestFlowOutput_MissingData(t *testing.T) {
+	svc := newServiceWithFlowEngine(newMockFlowStore())
+	params := json.RawMessage(`{"flow_id":"f1","node_id":"n1"}`)
+	_, err := svc.handleFlowOutput(context.Background(), params)
+	if err == nil {
+		t.Fatal("expected error for missing data, got nil")
+	}
+	if !strings.Contains(err.Error(), "data") {
+		t.Errorf("error = %q, want 'data'", err.Error())
+	}
+}
+
+func TestFlowOutput_InvalidJSON(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+
+	_, _ = svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`))
+	time.Sleep(100 * time.Millisecond)
+
+	params := json.RawMessage(`{"flow_id":"flow-1","node_id":"flow-1-n2","data":{invalid json},"workspace":"/tmp/ws"}`)
+	_, err := svc.handleFlowOutput(context.Background(), params)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON data, got nil")
+	}
+}
+
+func TestFlowOutput_ViaRPCConnection(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-1", "/tmp/ws")
+	svc := newServiceWithFlowEngine(store)
+	svc.started = time.Now()
+	svc.shutdownCh = make(chan struct{})
+
+	// Start the flow first
+	startResult, _ := svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`))
+	time.Sleep(200 * time.Millisecond)
+
+	client, server := netPipe(t)
+	defer client.Close()
+
+	go func() {
+		defer server.Close()
+		svc.handleConnection(context.Background(), server)
+	}()
+
+	req := Request{
+		Method: "flow.output",
+		ID:     "test-output-1",
+		Params: json.RawMessage(`{"flow_id":"flow-1","node_id":"flow-1-n2","data":{"key":"value"},"workspace":"/tmp/ws"}`),
+	}
+	if err := json.NewEncoder(client).Encode(&req); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	var resp Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if resp.ID != "test-output-1" {
+		t.Errorf("ID = %q, want %q", resp.ID, "test-output-1")
+	}
+	if resp.Error != nil {
+		t.Fatalf("Error = %+v, want nil", resp.Error)
+	}
+
+	// Verify result
+	payload, _ := json.Marshal(resp.Result)
+	var result FlowOutputResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !result.OK {
+		t.Error("expected OK=true")
+	}
+	if result.RunID != startResult.RunID {
+		t.Errorf("RunID = %q, want %q", result.RunID, startResult.RunID)
 	}
 }
 

@@ -737,6 +737,13 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 		} else {
 			resp.Result = result
 		}
+	case "flow.output":
+		result, err := s.handleFlowOutput(ctx, req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: flowErrorCode(err), Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
 	default:
 		resp.Error = &Error{Code: "EMETHOD", Message: fmt.Sprintf("unknown method: %s", req.Method)}
 	}
@@ -2832,6 +2839,148 @@ func (s *Service) flowStatusFromStore(p FlowStatusParams) (*FlowStatusResult, er
 func (s *Service) handleFlowStatusSafe(params json.RawMessage) *FlowStatusResult {
 	result, _ := s.handleFlowStatus(params)
 	return result
+}
+
+// FlowOutputParams are the parameters for flow.output.
+type FlowOutputParams struct {
+	FlowID    string          `json:"flow_id"`
+	RunID     string          `json:"run_id"`
+	NodeID    string          `json:"node_id"`
+	Data      json.RawMessage `json:"data"`
+	Workspace string          `json:"workspace,omitempty"`
+}
+
+// FlowOutputResult is the result of pushing output to a flow.
+type FlowOutputResult struct {
+	FlowID string `json:"flow_id"`
+	NodeID string `json:"node_id"`
+	RunID  string `json:"run_id"`
+	OK     bool   `json:"ok"`
+}
+
+// handleFlowOutput pushes structured output data into a running flow's OutputBus.
+// This allows external agents to submit results back to the flow engine
+// without going through the normal node executor pipeline.
+func (s *Service) handleFlowOutput(ctx context.Context, params json.RawMessage) (*FlowOutputResult, error) {
+	var p FlowOutputParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if len(p.Data) == 0 {
+		return nil, &flowRPCError{Code: "EARG", Message: "data is required"}
+	}
+
+	// Parse the data as JSON
+	var data any
+	if err := json.Unmarshal(p.Data, &data); err != nil {
+		return nil, &flowRPCError{Code: "EPARSE", Message: fmt.Sprintf("invalid JSON data: %v", err)}
+	}
+
+	// If flow_id is not provided but run_id is, look up the flow by run_id
+	flowID := strings.TrimSpace(p.FlowID)
+	nodeID := strings.TrimSpace(p.NodeID)
+	if flowID == "" && strings.TrimSpace(p.RunID) != "" {
+		// Search all engines for the run_id
+		foundFlowID, foundNodeID := s.resolveFlowIDFromRunID(p.RunID, nodeID, p.Workspace)
+		if foundFlowID != "" {
+			flowID = foundFlowID
+		}
+		if foundNodeID != "" && nodeID == "" {
+			nodeID = foundNodeID
+		}
+	}
+
+	if flowID == "" {
+		return nil, &flowRPCError{Code: "EARG", Message: "flow_id or run_id is required"}
+	}
+	if nodeID == "" {
+		return nil, &flowRPCError{Code: "EARG", Message: "node_id is required"}
+	}
+
+	// Resolve the flow engine
+	var engine *flow.Engine
+	var err error
+	if strings.TrimSpace(p.Workspace) != "" {
+		engine, err = s.resolveFlowEngine(ctx, p.Workspace)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Search all engines for the active flow
+		engine, _ = s.resolveFlowEngineForFlowID(flowID)
+	}
+
+	if engine == nil {
+		return nil, &flowRPCError{Code: "EFLOW", Message: "flow engine not initialized"}
+	}
+
+	// Submit the output to the engine
+	if err := engine.SubmitOutput(ctx, flowID, nodeID, data); err != nil {
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "not running"):
+			return nil, &flowRPCError{Code: "ESTATE", Message: errMsg}
+		case strings.Contains(errMsg, "not found"):
+			return nil, &flowRPCError{Code: "ENOTFOUND", Message: errMsg}
+		default:
+			return nil, err
+		}
+	}
+
+	// Get run_id from engine status
+	var runID string
+	if status := engine.Status(flowID); status != nil {
+		runID = status.RunID
+	}
+
+	return &FlowOutputResult{
+		FlowID: flowID,
+		NodeID: nodeID,
+		RunID:  runID,
+		OK:     true,
+	}, nil
+}
+
+// resolveFlowIDFromRunID searches all engines for a run with the given run_id
+// and returns the flow_id. If nodeID is a label, it also resolves it.
+func (s *Service) resolveFlowIDFromRunID(runID, nodeID, workspace string) (flowID, resolvedNodeID string) {
+	// Helper to check an engine for the run
+	checkEngine := func(engine *flow.Engine) (string, bool) {
+		if engine == nil {
+			return "", false
+		}
+		for _, fid := range engine.ActiveFlowIDs() {
+			status := engine.Status(fid)
+			if status != nil && status.RunID == runID {
+				return fid, true
+			}
+		}
+		return "", false
+	}
+
+	// Check default engine
+	s.flowMu.Lock()
+	defEngine := s.flowEngine
+	s.flowMu.Unlock()
+
+	if fid, found := checkEngine(defEngine); found {
+		flowID = fid
+	}
+
+	// Check per-workspace engines if not found yet
+	if flowID == "" {
+		s.wsEnginesMu.Lock()
+		for _, entry := range s.wsEngines {
+			if fid, found := checkEngine(entry.Engine); found {
+				flowID = fid
+				break
+			}
+		}
+		s.wsEnginesMu.Unlock()
+	}
+
+	return flowID, ""
 }
 
 // stopAllFlowRuns stops all active flow runs across all engines. Called during graceful shutdown.
