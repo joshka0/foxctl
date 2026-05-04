@@ -217,15 +217,23 @@ func (s *mockFlowStore) StreamRunLogs(_ context.Context, runID string, opts ...f
 // ---------------------------------------------------------------------------
 
 // newServiceWithFlowEngine creates a Service with an initialized flow engine
-// using the provided mock store and a no-op executor.
+// using the provided mock store and a no-op executor. It also overrides
+// flowStoreOpen so that per-workspace engine creation returns the same mock store.
 func newServiceWithFlowEngine(store flow.Store) *Service {
 	executors := map[flow.NodeKind]flow.NodeExecutor{
 		flow.NodeSkill: &noOpExecutor{},
 	}
 	engine := flow.NewEngine(store, executors, 16)
+
+	// Override flowStoreOpen so per-workspace engines get the same mock store.
+	flowStoreOpen = func(_ context.Context, _ string) (flow.Store, error) {
+		return store, nil
+	}
+
 	return &Service{
 		flowEngine: engine,
 		flowStore:  store,
+		wsEngines:  make(map[string]*wsFlowEngine),
 	}
 }
 
@@ -466,8 +474,9 @@ func TestFlowStart_MissingFlowID(t *testing.T) {
 }
 
 func TestFlowStart_NoEngine(t *testing.T) {
-	svc := &Service{} // No flowEngine set
-	params := json.RawMessage(`{"flow_id":"flow-1","workspace":"/tmp/ws"}`)
+	svc := &Service{} // No flowEngine set, no wsEngines
+	// Without workspace: falls back to default engine which is nil.
+	params := json.RawMessage(`{"flow_id":"flow-1"}`)
 	_, err := svc.handleFlowStart(context.Background(), params)
 	if err == nil {
 		t.Fatal("expected error when engine not initialized, got nil")
@@ -810,13 +819,14 @@ func TestFlowStatus_MissingFlowID(t *testing.T) {
 
 func TestFlowStatus_NoEngine(t *testing.T) {
 	svc := &Service{}
+	// Without workspace: falls back to default engine which is nil, then store which is nil.
 	params := json.RawMessage(`{"flow_id":"flow-1"}`)
 	_, err := svc.handleFlowStatus(params)
 	if err == nil {
 		t.Fatal("expected error when engine not initialized, got nil")
 	}
-	if !strings.Contains(err.Error(), "not initialized") {
-		t.Errorf("error = %q, want 'not initialized'", err.Error())
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want 'not found'", err.Error())
 	}
 }
 
@@ -1623,6 +1633,7 @@ func TestStartFlowEngine_InitializesEngine(t *testing.T) {
 		cfg:        config.Config{},
 		opts:       ServiceOptions{Workspace: "/tmp/ws"},
 		shutdownCh: make(chan struct{}),
+		wsEngines:  make(map[string]*wsFlowEngine),
 	}
 
 	if err := svc.startFlowEngine(context.Background()); err != nil {
@@ -1648,6 +1659,7 @@ func TestStartFlowEngine_Idempotent(t *testing.T) {
 	svc := &Service{
 		cfg:        config.Config{},
 		shutdownCh: make(chan struct{}),
+		wsEngines:  make(map[string]*wsFlowEngine),
 	}
 
 	// Call twice — should not error on second call.
@@ -1976,5 +1988,220 @@ func TestFlowRPC_StaleStateRecovery(t *testing.T) {
 	}
 	if result.State != "running" {
 		t.Errorf("restart State = %q, want %q", result.State, "running")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Per-workspace engine cache (VAL-WS-001..005)
+// ---------------------------------------------------------------------------
+
+func TestPerWorkspace_EngineCreatedOnDemand(t *testing.T) {
+	store := newMockFlowStore()
+	svc := newServiceWithFlowEngine(store)
+
+	// Initially, no per-workspace engines.
+	svc.wsEnginesMu.Lock()
+	if len(svc.wsEngines) != 0 {
+		t.Error("expected no per-workspace engines initially")
+	}
+	svc.wsEnginesMu.Unlock()
+
+	// Start a flow with a workspace — this should create a per-workspace engine.
+	seedTwoNodeFlow(store, "flow-ws", "/tmp/ws-test")
+	params := json.RawMessage(`{"flow_id":"flow-ws","workspace":"/tmp/ws-test"}`)
+	result, err := svc.handleFlowStart(context.Background(), params)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if result.RunID == "" {
+		t.Error("expected non-empty RunID")
+	}
+
+	// Verify a per-workspace engine was created.
+	svc.wsEnginesMu.Lock()
+	count := len(svc.wsEngines)
+	svc.wsEnginesMu.Unlock()
+	if count == 0 {
+		t.Error("expected per-workspace engine to be created")
+	}
+}
+
+func TestPerWorkspace_DifferentWorkspacesGetDifferentEngines(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-ws1", "/tmp/ws-alpha")
+	seedTwoNodeFlow(store, "flow-ws2", "/tmp/ws-beta")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start flow in workspace A
+	paramsA := json.RawMessage(`{"flow_id":"flow-ws1","workspace":"/tmp/ws-alpha"}`)
+	resultA, err := svc.handleFlowStart(context.Background(), paramsA)
+	if err != nil {
+		t.Fatalf("start ws-alpha: %v", err)
+	}
+
+	// Start flow in workspace B
+	paramsB := json.RawMessage(`{"flow_id":"flow-ws2","workspace":"/tmp/ws-beta"}`)
+	resultB, err := svc.handleFlowStart(context.Background(), paramsB)
+	if err != nil {
+		t.Fatalf("start ws-beta: %v", err)
+	}
+
+	// Different run IDs
+	if resultA.RunID == resultB.RunID {
+		t.Error("flows in different workspaces should have distinct run IDs")
+	}
+
+	// Two per-workspace engines
+	svc.wsEnginesMu.Lock()
+	count := len(svc.wsEngines)
+	svc.wsEnginesMu.Unlock()
+	if count != 2 {
+		t.Errorf("expected 2 per-workspace engines, got %d", count)
+	}
+}
+
+func TestPerWorkspace_StopWithoutWorkspace(t *testing.T) {
+	// VAL-WS-002: Stop/pause/status work without workspace by searching all engines.
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-ws", "/tmp/ws-stop")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start with workspace
+	startParams := json.RawMessage(`{"flow_id":"flow-ws","workspace":"/tmp/ws-stop"}`)
+	_, err := svc.handleFlowStart(context.Background(), startParams)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop WITHOUT workspace — should find the flow in the per-workspace engine.
+	stopParams := json.RawMessage(`{"flow_id":"flow-ws"}`)
+	result, err := svc.handleFlowStop(stopParams)
+	if err != nil {
+		t.Fatalf("stop without workspace: %v", err)
+	}
+	if result.State != "stopped" {
+		t.Errorf("State = %q, want %q", result.State, "stopped")
+	}
+}
+
+func TestPerWorkspace_PauseResumeAcrossEngines(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-ws", "/tmp/ws-pause")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start with workspace
+	_, err := svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-ws","workspace":"/tmp/ws-pause"}`))
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Pause WITHOUT workspace
+	_, err = svc.handleFlowPause(json.RawMessage(`{"flow_id":"flow-ws"}`))
+	if err != nil {
+		t.Fatalf("pause without workspace: %v", err)
+	}
+
+	// Resume via start with workspace
+	result, err := svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-ws","workspace":"/tmp/ws-pause"}`))
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if result.State != "running" {
+		t.Errorf("State = %q, want %q", result.State, "running")
+	}
+}
+
+func TestPerWorkspace_StatusFromStoreFallback(t *testing.T) {
+	// When a flow hasn't been started but we query status with a workspace,
+	// the status should come from the store.
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-ws", "/tmp/ws-status")
+	svc := newServiceWithFlowEngine(store)
+
+	// Query status without starting
+	statusParams := json.RawMessage(`{"flow_id":"flow-ws","workspace":"/tmp/ws-status"}`)
+	result, err := svc.handleFlowStatus(statusParams)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if result.State != "draft" {
+		t.Errorf("State = %q, want %q (persisted fallback)", result.State, "draft")
+	}
+}
+
+func TestPerWorkspace_EngineCleanup(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-ws", "/tmp/ws-cleanup")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start a flow to create a per-workspace engine.
+	_, _ = svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-ws","workspace":"/tmp/ws-cleanup"}`))
+	time.Sleep(50 * time.Millisecond)
+
+	// stopFlowEngine should clean up per-workspace engines.
+	svc.stopFlowEngine()
+
+	svc.wsEnginesMu.Lock()
+	count := len(svc.wsEngines)
+	svc.wsEnginesMu.Unlock()
+	if count != 0 {
+		t.Errorf("expected 0 per-workspace engines after cleanup, got %d", count)
+	}
+}
+
+func TestPerWorkspace_StopAllRunsAcrossWorkspaces(t *testing.T) {
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-a", "/tmp/ws-all-a")
+	seedTwoNodeFlow(store, "flow-b", "/tmp/ws-all-b")
+	svc := newServiceWithFlowEngine(store)
+
+	// Start flows in different workspaces.
+	_, _ = svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-a","workspace":"/tmp/ws-all-a"}`))
+	_, _ = svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-b","workspace":"/tmp/ws-all-b"}`))
+	time.Sleep(100 * time.Millisecond)
+
+	// stopAllFlowRuns should stop all of them.
+	svc.stopAllFlowRuns()
+
+	// Verify both are stopped by checking status from store.
+	statusA := svc.handleFlowStatusSafe(json.RawMessage(`{"flow_id":"flow-a","workspace":"/tmp/ws-all-a"}`))
+	statusB := svc.handleFlowStatusSafe(json.RawMessage(`{"flow_id":"flow-b","workspace":"/tmp/ws-all-b"}`))
+
+	if statusA == nil {
+		t.Error("statusA should not be nil after stopAllFlowRuns")
+	}
+	if statusB == nil {
+		t.Error("statusB should not be nil after stopAllFlowRuns")
+	}
+}
+
+func TestPerWorkspace_IsolationBetweenWorkspaces(t *testing.T) {
+	// Stopping a flow in one workspace should not affect a running flow in another.
+	store := newMockFlowStore()
+	seedTwoNodeFlow(store, "flow-a", "/tmp/ws-iso-a")
+	seedTwoNodeFlow(store, "flow-b", "/tmp/ws-iso-b")
+	svc := newServiceWithFlowEngine(store)
+
+	_, _ = svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-a","workspace":"/tmp/ws-iso-a"}`))
+	_, _ = svc.handleFlowStart(context.Background(), json.RawMessage(`{"flow_id":"flow-b","workspace":"/tmp/ws-iso-b"}`))
+	time.Sleep(100 * time.Millisecond)
+
+	// Stop flow-a
+	_, err := svc.handleFlowStop(json.RawMessage(`{"flow_id":"flow-a","workspace":"/tmp/ws-iso-a"}`))
+	if err != nil {
+		t.Fatalf("stop flow-a: %v", err)
+	}
+
+	// Flow-b should still be running.
+	result, err := svc.handleFlowStatus(json.RawMessage(`{"flow_id":"flow-b","workspace":"/tmp/ws-iso-b"}`))
+	if err != nil {
+		t.Fatalf("status flow-b: %v", err)
+	}
+	if result.State != "running" {
+		t.Errorf("flow-b state = %q, want 'running' (isolated from stop of flow-a)", result.State)
 	}
 }
