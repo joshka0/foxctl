@@ -545,8 +545,11 @@ func (s *Service) acceptLoop(ctx context.Context, listener net.Listener) {
 			case <-s.shutdownCh:
 				return
 			default:
-				// Transient error, continue
-				fmt.Fprintf(os.Stderr, "daemon: accept error: %v\n", err)
+				// Suppress "use of closed network connection" errors that occur
+				// during normal shutdown when the listener is closed concurrently.
+				if !strings.Contains(err.Error(), "use of closed network connection") {
+					fmt.Fprintf(os.Stderr, "daemon: accept error: %v\n", err)
+				}
 				continue
 			}
 		}
