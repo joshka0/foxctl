@@ -46,7 +46,9 @@ web-ui/.vite/
 # Use `make build` or `make skills-install` instead
 /foxctl
 /foxctl-cgo
+/foxctl_web
 /cove_verify
+/repoindex/
 
 # Skill binaries accidentally built in root (match skill directory names)
 # Pattern: any underscore-separated name that matches skills/*/ directories
