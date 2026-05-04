@@ -571,6 +571,23 @@ func (e *Engine) SubscribeOutputs(flowID string) <-chan NodeOutput {
 	return run.bus.subscribeAll()
 }
 
+// SubscribeNodeOutput returns a channel that receives outputs for a specific
+// node in the given flow's active run. The channel is closed when the flow run
+// ends or the context is cancelled. Returns nil if the flow is not running.
+// This is used by the push output mode to wait for externally pushed output
+// from agents.
+func (e *Engine) SubscribeNodeOutput(flowID, nodeID string) <-chan NodeOutput {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	run, ok := e.runs[flowID]
+	if !ok || run.bus == nil {
+		return nil
+	}
+
+	return run.bus.subscribe(nodeID)
+}
+
 // ---------------------------------------------------------------------------
 // Topological Sort
 // ---------------------------------------------------------------------------

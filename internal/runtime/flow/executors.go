@@ -213,6 +213,11 @@ type AgentExecutor struct {
 	// uses this to wait for externally pushed output instead of polling Info().
 	// Returns a channel that receives the pushed output, or nil if not available.
 	SubscribeOutput func(flowID, nodeID string) <-chan NodeOutput
+	// GetRunID is an optional function that returns the active run ID for a
+	// given flow. When set, push mode uses this to inject the actual run_id
+	// into the agent's prompt so it knows where to push output via
+	// `foxctl flow output`. Returns empty string if the flow is not running.
+	GetRunID func(flowID string) string
 }
 
 // Execute runs the agent node: parses config, spawns agent, waits for output.
@@ -274,21 +279,22 @@ func (e *AgentExecutor) Execute(ctx context.Context, node FlowNode, input any) (
 	// so the agent knows where to send its output.
 	if outputMode == "push" {
 		runID := ""
-		if e.SubscribeOutput != nil {
-			// Try to get run_id from engine status via the flow context
-			// The flowID is available from node.FlowID
-			// We need a way to get the run ID. Use a wrapper function.
+		if e.GetRunID != nil {
+			runID = e.GetRunID(node.FlowID)
 		}
 		if runID == "" {
 			runID = "unknown"
 		}
 		pushInstructions := fmt.Sprintf(
 			"\n\n--- Flow Output Push Configuration ---\n"+
-				"You are running as a node (%s) in flow (%s). When you have completed your task, "+
-				"push your structured output back to the flow engine by running:\n\n"+
-				"  foxctl flow output <run-id> --node %s --data '<your-json-output>'\n\n"+
-				"The run-id will be provided separately. Replace <your-json-output> with your actual result as a JSON object.\n",
-			node.Label, node.FlowID, node.ID,
+				"You are running as a node (%s/%s) in flow (%s), run (%s).\n"+
+				"When you have completed your task, push your structured output "+
+				"back to the flow engine by running:\n\n"+
+				"  foxctl flow output %s --node %s --data '<your-json-output>'\n\n"+
+				"Replace <your-json-output> with your actual result as a JSON object.\n"+
+				"This is REQUIRED as your final step before completing.\n",
+			node.Label, node.ID, node.FlowID, runID,
+			runID, node.ID,
 		)
 		prompt = prompt + pushInstructions
 	}

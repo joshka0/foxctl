@@ -3048,6 +3048,24 @@ func (s *Service) startFlowEngine(ctx context.Context) error {
 
 	engine := flow.NewEngine(store, executors, 0)
 
+	// Wire the SubscribeOutput function on the agent executor so push
+	// output_mode can subscribe to the engine's OutputBus per node.
+	for _, exec := range executors {
+		if agentExec, ok := exec.(*flow.AgentExecutor); ok {
+			eng := engine // capture for closure
+			agentExec.SubscribeOutput = func(flowID, nodeID string) <-chan flow.NodeOutput {
+				return eng.SubscribeNodeOutput(flowID, nodeID)
+			}
+			agentExec.GetRunID = func(flowID string) string {
+				status := eng.Status(flowID)
+				if status != nil {
+					return status.RunID
+				}
+				return ""
+			}
+		}
+	}
+
 	s.flowEngine = engine
 	s.flowStore = store
 
@@ -3149,6 +3167,24 @@ func (s *Service) resolveFlowEngine(ctx context.Context, workspace string) (*flo
 	}
 
 	engine := flow.NewEngine(store, executors, 0)
+
+	// Wire the SubscribeOutput function on the agent executor so push
+	// output_mode can subscribe to the engine's OutputBus per node.
+	for _, exec := range executors {
+		if agentExec, ok := exec.(*flow.AgentExecutor); ok {
+			eng := engine // capture for closure
+			agentExec.SubscribeOutput = func(flowID, nodeID string) <-chan flow.NodeOutput {
+				return eng.SubscribeNodeOutput(flowID, nodeID)
+			}
+			agentExec.GetRunID = func(flowID string) string {
+				status := eng.Status(flowID)
+				if status != nil {
+					return status.RunID
+				}
+				return ""
+			}
+		}
+	}
 
 	// Create a cancellable context for the workspace engine.
 	// This is derived from the daemon's main context so that daemon

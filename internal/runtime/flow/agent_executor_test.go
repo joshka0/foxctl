@@ -711,3 +711,349 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// Push Output Mode Tests
+// ---------------------------------------------------------------------------
+
+func TestAgentExecutor_PushMode_WaitsForPushedOutput(t *testing.T) {
+	// Simulate push mode: the executor spawns an agent, subscribes to the
+	// OutputBus, and waits for externally pushed output.
+	spawner := &mockAgentSpawner{
+		spawnResult: &AgentSpawnResult{
+			AgentID:   "agent-push-123",
+			SessionID: "session-push-456",
+		},
+	}
+
+	// Create a channel to simulate the pushed output.
+	pushCh := make(chan NodeOutput, 1)
+
+	// Push a result after a short delay.
+	expectedData := map[string]any{"result": "research complete", "files": []string{"a.go", "b.go"}}
+	expectedOutput := NodeOutput{
+		Envelope: envelope.OK("flow/output", expectedData),
+		NodeID:   "test-agent-node",
+	}
+	pushCh <- expectedOutput
+
+	executor := &AgentExecutor{
+		Spawner:   spawner,
+		Workspace: "/tmp",
+		SubscribeOutput: func(flowID, nodeID string) <-chan NodeOutput {
+			if flowID != "test-flow" || nodeID != "test-agent-node" {
+				t.Errorf("unexpected SubscribeOutput args: flowID=%q nodeID=%q", flowID, nodeID)
+			}
+			return pushCh
+		},
+		GetRunID: func(flowID string) string {
+			return "run-abc-123"
+		},
+	}
+
+	node := makeAgentNode(AgentConfig{
+		Role:       "researcher",
+		Prompt:     "Research the auth module",
+		OutputMode: "push",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	output, err := executor.Execute(ctx, node, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.Envelope.Status != "ok" {
+		t.Errorf("expected ok status, got %q; error: %v", output.Envelope.Status, output.Envelope.Error)
+	}
+	if output.NodeID != "test-agent-node" {
+		t.Errorf("expected node_id test-agent-node, got %q", output.NodeID)
+	}
+
+	// Verify the pushed data was returned.
+	data, ok := output.Envelope.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data, got %T", output.Envelope.Data)
+	}
+	if data["result"] != "research complete" {
+		t.Errorf("expected result 'research complete', got %v", data["result"])
+	}
+}
+
+func TestAgentExecutor_PushMode_IncludesRunIDInPrompt(t *testing.T) {
+	spawner := &mockAgentSpawner{
+		spawnResult: &AgentSpawnResult{
+			AgentID:   "agent-push-123",
+			SessionID: "session-push-456",
+		},
+	}
+
+	pushCh := make(chan NodeOutput, 1)
+	pushCh <- NodeOutput{
+		Envelope: envelope.OK("flow/output", map[string]any{"done": true}),
+		NodeID:   "test-agent-node",
+	}
+
+	executor := &AgentExecutor{
+		Spawner:   spawner,
+		Workspace: "/tmp",
+		SubscribeOutput: func(flowID, nodeID string) <-chan NodeOutput {
+			return pushCh
+		},
+		GetRunID: func(flowID string) string {
+			return "run-xyz-789"
+		},
+	}
+
+	node := makeAgentNode(AgentConfig{
+		Role:       "researcher",
+		Prompt:     "Do research",
+		OutputMode: "push",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := executor.Execute(ctx, node, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the prompt includes the run_id.
+	if len(spawner.spawnCalls) != 1 {
+		t.Fatalf("expected 1 spawn call, got %d", len(spawner.spawnCalls))
+	}
+	prompt := spawner.spawnCalls[0].Prompt
+	if !contains(prompt, "run-xyz-789") {
+		t.Errorf("expected prompt to contain run_id 'run-xyz-789', got: %q", prompt)
+	}
+	if !contains(prompt, "test-agent-node") {
+		t.Errorf("expected prompt to contain node_id 'test-agent-node', got: %q", prompt)
+	}
+	if !contains(prompt, "foxctl flow output") {
+		t.Errorf("expected prompt to contain 'foxctl flow output', got: %q", prompt)
+	}
+}
+
+func TestAgentExecutor_PushMode_FallsBackWithoutSubscribeOutput(t *testing.T) {
+	// When SubscribeOutput is nil, push mode falls back to session_summary.
+	spawner := &mockAgentSpawner{
+		spawnResult: &AgentSpawnResult{
+			AgentID:   "agent-push-123",
+			SessionID: "session-push-456",
+		},
+		infoResults: map[string][]*AgentInfoResult{
+			"agent-push-123": {
+				{Status: "completed", Summary: "Fallback summary"},
+			},
+		},
+	}
+
+	executor := &AgentExecutor{
+		Spawner:   spawner,
+		Workspace: "/tmp",
+		// SubscribeOutput is nil — should fall back
+	}
+
+	node := makeAgentNode(AgentConfig{
+		Role:       "researcher",
+		Prompt:     "Do research",
+		OutputMode: "push",
+	})
+
+	output, err := executor.Execute(context.Background(), node, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.Envelope.Status != "ok" {
+		t.Errorf("expected ok status, got %q", output.Envelope.Status)
+	}
+
+	data, ok := output.Envelope.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data, got %T", output.Envelope.Data)
+	}
+	// Should have session_summary output_mode since it fell back
+	if data["output_mode"] != "session_summary" {
+		t.Errorf("expected output_mode session_summary (fallback), got %v", data["output_mode"])
+	}
+}
+
+func TestAgentExecutor_PushMode_FallsBackWhenSubscriptionNil(t *testing.T) {
+	// When SubscribeOutput returns nil (flow not running), falls back to session_summary.
+	spawner := &mockAgentSpawner{
+		spawnResult: &AgentSpawnResult{
+			AgentID:   "agent-push-123",
+			SessionID: "session-push-456",
+		},
+		infoResults: map[string][]*AgentInfoResult{
+			"agent-push-123": {
+				{Status: "completed", Summary: "Fallback summary"},
+			},
+		},
+	}
+
+	executor := &AgentExecutor{
+		Spawner:   spawner,
+		Workspace: "/tmp",
+		SubscribeOutput: func(flowID, nodeID string) <-chan NodeOutput {
+			return nil // Simulate flow not running
+		},
+	}
+
+	node := makeAgentNode(AgentConfig{
+		Role:       "researcher",
+		Prompt:     "Do research",
+		OutputMode: "push",
+	})
+
+	output, err := executor.Execute(context.Background(), node, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.Envelope.Status != "ok" {
+		t.Errorf("expected ok status, got %q", output.Envelope.Status)
+	}
+
+	data, ok := output.Envelope.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data, got %T", output.Envelope.Data)
+	}
+	if data["output_mode"] != "session_summary" {
+		t.Errorf("expected output_mode session_summary (fallback), got %v", data["output_mode"])
+	}
+}
+
+func TestAgentExecutor_PushMode_Timeout(t *testing.T) {
+	spawner := &mockAgentSpawner{
+		spawnResult: &AgentSpawnResult{
+			AgentID:   "agent-push-123",
+			SessionID: "session-push-456",
+		},
+	}
+
+	// Channel that never receives — simulates no pushed output.
+	pushCh := make(chan NodeOutput)
+
+	executor := &AgentExecutor{
+		Spawner:   spawner,
+		Workspace: "/tmp",
+		SubscribeOutput: func(flowID, nodeID string) <-chan NodeOutput {
+			return pushCh
+		},
+	}
+
+	node := makeAgentNode(AgentConfig{
+		Role:       "researcher",
+		Prompt:     "Do research",
+		OutputMode: "push",
+		Timeout:    "100ms",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	output, err := executor.Execute(ctx, node, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.Envelope.Status != envelope.StatusError {
+		t.Errorf("expected error status, got %q", output.Envelope.Status)
+	}
+	if output.Envelope.Error.Code != "ETIMEOUT" {
+		t.Errorf("expected ETIMEOUT error code, got %q", output.Envelope.Error.Code)
+	}
+
+	// Verify kill was called
+	if len(spawner.killCalls) != 1 {
+		t.Errorf("expected 1 kill call, got %d", len(spawner.killCalls))
+	}
+}
+
+func TestAgentExecutor_PushMode_BusClosed(t *testing.T) {
+	spawner := &mockAgentSpawner{
+		spawnResult: &AgentSpawnResult{
+			AgentID:   "agent-push-123",
+			SessionID: "session-push-456",
+		},
+	}
+
+	// Channel that is immediately closed — simulates flow stopped.
+	pushCh := make(chan NodeOutput)
+	close(pushCh)
+
+	executor := &AgentExecutor{
+		Spawner:   spawner,
+		Workspace: "/tmp",
+		SubscribeOutput: func(flowID, nodeID string) <-chan NodeOutput {
+			return pushCh
+		},
+	}
+
+	node := makeAgentNode(AgentConfig{
+		Role:       "researcher",
+		Prompt:     "Do research",
+		OutputMode: "push",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	output, err := executor.Execute(ctx, node, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if output.Envelope.Status != envelope.StatusError {
+		t.Errorf("expected error status, got %q", output.Envelope.Status)
+	}
+	if output.Envelope.Error.Code != "ECANCELED" {
+		t.Errorf("expected ECANCELED error code, got %q", output.Envelope.Error.Code)
+	}
+}
+
+func TestAgentExecutor_PushMode_GetRunIDUnknown(t *testing.T) {
+	// When GetRunID returns empty string, the prompt should say "unknown".
+	spawner := &mockAgentSpawner{
+		spawnResult: &AgentSpawnResult{
+			AgentID:   "agent-push-123",
+			SessionID: "session-push-456",
+		},
+	}
+
+	pushCh := make(chan NodeOutput, 1)
+	pushCh <- NodeOutput{
+		Envelope: envelope.OK("flow/output", map[string]any{"done": true}),
+		NodeID:   "test-agent-node",
+	}
+
+	executor := &AgentExecutor{
+		Spawner:   spawner,
+		Workspace: "/tmp",
+		SubscribeOutput: func(flowID, nodeID string) <-chan NodeOutput {
+			return pushCh
+		},
+		GetRunID: func(flowID string) string {
+			return "" // Simulate unknown run ID
+		},
+	}
+
+	node := makeAgentNode(AgentConfig{
+		Role:       "researcher",
+		Prompt:     "Do research",
+		OutputMode: "push",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := executor.Execute(ctx, node, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	prompt := spawner.spawnCalls[0].Prompt
+	if !contains(prompt, "unknown") {
+		t.Errorf("expected prompt to contain 'unknown' run_id, got: %q", prompt)
+	}
+}
