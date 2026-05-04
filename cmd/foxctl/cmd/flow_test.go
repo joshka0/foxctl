@@ -132,12 +132,24 @@ func init() {
 // forcing in-process fallback for unit tests.
 type noDaemonClient struct{}
 
-func (n *noDaemonClient) IsRunning() bool                                                { return false }
-func (n *noDaemonClient) EnsureRunning() error                                           { return fmt.Errorf("no daemon") }
-func (n *noDaemonClient) FlowStart(_, _ string) (*daemon.FlowStartResult, error)         { return nil, fmt.Errorf("no daemon") }
-func (n *noDaemonClient) FlowStop(_, _ string) (*daemon.FlowStopResult, error)           { return nil, fmt.Errorf("no daemon") }
-func (n *noDaemonClient) FlowPause(_, _ string) (*daemon.FlowPauseResult, error)         { return nil, fmt.Errorf("no daemon") }
-func (n *noDaemonClient) FlowStatus(_, _ string) (*daemon.FlowStatusResult, error)       { return nil, fmt.Errorf("no daemon") }
+func (n *noDaemonClient) IsRunning() bool      { return false }
+func (n *noDaemonClient) EnsureRunning() error { return fmt.Errorf("no daemon") }
+func (n *noDaemonClient) FlowStart(_, _ string) (*daemon.FlowStartResult, error) {
+	return nil, fmt.Errorf("no daemon")
+}
+
+func (n *noDaemonClient) FlowStop(_, _ string) (*daemon.FlowStopResult, error) {
+	return nil, fmt.Errorf("no daemon")
+}
+
+func (n *noDaemonClient) FlowPause(_, _ string) (*daemon.FlowPauseResult, error) {
+	return nil, fmt.Errorf("no daemon")
+}
+
+func (n *noDaemonClient) FlowStatus(_, _ string) (*daemon.FlowStatusResult, error) {
+	return nil, fmt.Errorf("no daemon")
+}
+
 func (n *noDaemonClient) FlowOutput(_, _, _ string, _ json.RawMessage, _ string) (*daemon.FlowOutputResult, error) {
 	return nil, fmt.Errorf("no daemon")
 }

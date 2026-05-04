@@ -3364,8 +3364,6 @@ func (e *daemonSkillExecutor) Execute(ctx context.Context, node flow.FlowNode, i
 	}, nil
 }
 
-
-
 // resolveLLMConfig returns the LLM provider, API key, and model from centralized config.
 // Priority: configured provider > LM Studio default.
 //

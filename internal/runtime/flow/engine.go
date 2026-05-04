@@ -744,5 +744,3 @@ func (e FlowEdge) ToNodeKind(nodes []FlowNode) NodeKind {
 	}
 	return ""
 }
-
-
