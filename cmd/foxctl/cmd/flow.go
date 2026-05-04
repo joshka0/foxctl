@@ -50,8 +50,8 @@ var (
 	flowEdgeConditionFlag    string
 	flowEdgeRetryFlag        string
 
-	flowOutputNodeFlag    string
-	flowOutputDataFlag    string
+	flowOutputNodeFlag     string
+	flowOutputDataFlag     string
 	flowOutputDataFileFlag string
 )
 

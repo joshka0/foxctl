@@ -289,10 +289,10 @@ func seedTwoNodeFlow(store *mockFlowStore, flowID, workspace string) {
 	nodeB := makeTestNode(flowID+"-n2", flowID, "B", flow.NodeSkill)
 	edge := makeTestEdge(flowID+"-e1", flowID, nodeA.ID, nodeB.ID)
 
-	store.CreateFlow(context.Background(), fl)  //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeA)   //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeB)   //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edge)    //nolint:errcheck // test helper
+	store.CreateFlow(context.Background(), fl) //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA) //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeB) //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edge)  //nolint:errcheck // test helper
 }
 
 // ---------------------------------------------------------------------------
@@ -415,11 +415,11 @@ func TestFlowStart_NoSourceNodes(t *testing.T) {
 	nodeB := makeTestNode("n2", "flow-no-src", "B", flow.NodeSkill)
 	edge1 := makeTestEdge("e1", "flow-no-src", nodeA.ID, nodeB.ID)
 	edge2 := makeTestEdge("e2", "flow-no-src", nodeB.ID, nodeA.ID)
-	store.CreateFlow(context.Background(), fl)  //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeA)   //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeB)   //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edge1)   //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edge2)   //nolint:errcheck // test helper
+	store.CreateFlow(context.Background(), fl) //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA) //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeB) //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edge1) //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edge2) //nolint:errcheck // test helper
 
 	svc := newServiceWithFlowEngine(store)
 	params := json.RawMessage(`{"flow_id":"flow-no-src","workspace":"/tmp/ws"}`)
@@ -441,13 +441,13 @@ func TestFlowStart_CycleDetection(t *testing.T) {
 	edgeAB := makeTestEdge("ce1", "flow-cycle", nodeA.ID, nodeB.ID)
 	edgeBC := makeTestEdge("ce2", "flow-cycle", nodeB.ID, nodeC.ID)
 	edgeCA := makeTestEdge("ce3", "flow-cycle", nodeC.ID, nodeA.ID)
-	store.CreateFlow(context.Background(), fl)   //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeA)    //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeB)    //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeC)    //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edgeAB)   //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edgeBC)   //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edgeCA)   //nolint:errcheck // test helper
+	store.CreateFlow(context.Background(), fl)  //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA)  //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeB)  //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeC)  //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeAB) //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeBC) //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeCA) //nolint:errcheck // test helper
 
 	svc := newServiceWithFlowEngine(store)
 	params := json.RawMessage(`{"flow_id":"flow-cycle","workspace":"/tmp/ws"}`)
@@ -989,13 +989,13 @@ func TestFlowRPC_ErrorCodes_StartCycle(t *testing.T) {
 	edgeAB := makeTestEdge("ce1", "flow-cycle", nodeA.ID, nodeB.ID)
 	edgeBC := makeTestEdge("ce2", "flow-cycle", nodeB.ID, nodeC.ID)
 	edgeCA := makeTestEdge("ce3", "flow-cycle", nodeC.ID, nodeA.ID)
-	store.CreateFlow(context.Background(), fl)   //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeA)    //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeB)    //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeC)    //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edgeAB)   //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edgeBC)   //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edgeCA)   //nolint:errcheck // test helper
+	store.CreateFlow(context.Background(), fl)  //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA)  //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeB)  //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeC)  //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeAB) //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeBC) //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edgeCA) //nolint:errcheck // test helper
 
 	svc := newServiceWithFlowEngine(store)
 	svc.started = time.Now()

@@ -19,13 +19,13 @@ import (
 
 // mockFlowDaemonClient is a mock flowDaemonClient for testing.
 type mockFlowDaemonClient struct {
-	running       bool
-	autoStartErr  error
-	flowStartFn   func(flowID, workspace string) (*daemon.FlowStartResult, error)
-	flowStopFn    func(flowID, workspace string) (*daemon.FlowStopResult, error)
-	flowPauseFn   func(flowID, workspace string) (*daemon.FlowPauseResult, error)
-	flowStatusFn  func(flowID, workspace string) (*daemon.FlowStatusResult, error)
-	flowOutputFn  func(flowID, runID, nodeID string, data json.RawMessage, workspace string) (*daemon.FlowOutputResult, error)
+	running             bool
+	autoStartErr        error
+	flowStartFn         func(flowID, workspace string) (*daemon.FlowStartResult, error)
+	flowStopFn          func(flowID, workspace string) (*daemon.FlowStopResult, error)
+	flowPauseFn         func(flowID, workspace string) (*daemon.FlowPauseResult, error)
+	flowStatusFn        func(flowID, workspace string) (*daemon.FlowStatusResult, error)
+	flowOutputFn        func(flowID, runID, nodeID string, data json.RawMessage, workspace string) (*daemon.FlowOutputResult, error)
 	ensureRunningCalled bool
 }
 
@@ -629,7 +629,7 @@ func TestIsULID(t *testing.T) {
 		{"01HGWYNB5RABCDEF0000000000", true},
 		{"", false},
 		{"short", false},
-		{"01HGWYNB5R000000000000000", false},  // 25 chars
+		{"01HGWYNB5R000000000000000", false},   // 25 chars
 		{"01HGWYNB5R00000000000000012", false}, // 27 chars
 		{"01HGWYNB5R00000000000000ab", false},  // lowercase
 		{"my-flow-name", false},

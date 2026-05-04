@@ -1442,8 +1442,8 @@ func TestWriteRunLog(t *testing.T) {
 
 	envJSON := makeEnvelopeJSON(t, "ok", "skill/run", map[string]any{"result": "hello"})
 	log := flow.RunLog{
-		RunID:   run.ID,
-		NodeID:  "node-a",
+		RunID:    run.ID,
+		NodeID:   "node-a",
 		Envelope: envJSON,
 	}
 

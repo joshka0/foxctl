@@ -72,8 +72,8 @@ func TestFlowLogs_BasicInvocation(t *testing.T) {
 		}
 
 		_, err = store.WriteRunLog(ctx, flowmodel.RunLog{
-			RunID:  run.ID,
-			NodeID: n.ID,
+			RunID:    run.ID,
+			NodeID:   n.ID,
 			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{"result":"ok","node":"` + n.ID + `"},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`),
 		})
 		if err != nil {
@@ -140,11 +140,11 @@ func TestFlowLogs_BasicInvocation(t *testing.T) {
 		}
 
 		n1, _ := store.AddNode(ctx, flowmodel.FlowNode{
-			ID:     "seq-node-1", FlowID: f.ID, Kind: flowmodel.NodeSkill, Label: "src",
+			ID: "seq-node-1", FlowID: f.ID, Kind: flowmodel.NodeSkill, Label: "src",
 			Config: json.RawMessage(`{"skill":"test"}`),
 		})
 		n2, _ := store.AddNode(ctx, flowmodel.FlowNode{
-			ID:     "seq-node-2", FlowID: f.ID, Kind: flowmodel.NodeSkill, Label: "sink",
+			ID: "seq-node-2", FlowID: f.ID, Kind: flowmodel.NodeSkill, Label: "sink",
 			Config: json.RawMessage(`{"skill":"test"}`),
 		})
 
@@ -157,10 +157,14 @@ func TestFlowLogs_BasicInvocation(t *testing.T) {
 		}
 
 		// Write multiple logs.
-		_, _ = store.WriteRunLog(ctx, flowmodel.RunLog{RunID: run.ID, NodeID: n1.ID,
-			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`)})
-		_, _ = store.WriteRunLog(ctx, flowmodel.RunLog{RunID: run.ID, NodeID: n2.ID,
-			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`)})
+		_, _ = store.WriteRunLog(ctx, flowmodel.RunLog{
+			RunID: run.ID, NodeID: n1.ID,
+			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`),
+		})
+		_, _ = store.WriteRunLog(ctx, flowmodel.RunLog{
+			RunID: run.ID, NodeID: n2.ID,
+			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`),
+		})
 
 		// Complete the run.
 		completed := now
@@ -283,10 +287,14 @@ func TestFlowLogs_NodeFilter(t *testing.T) {
 		})
 
 		// Write logs from both nodes.
-		_, _ = store.WriteRunLog(ctx, flowmodel.RunLog{RunID: run.ID, NodeID: n1.ID,
-			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{"node":"src"},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`)})
-		_, _ = store.WriteRunLog(ctx, flowmodel.RunLog{RunID: run.ID, NodeID: n2.ID,
-			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{"node":"sink"},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`)})
+		_, _ = store.WriteRunLog(ctx, flowmodel.RunLog{
+			RunID: run.ID, NodeID: n1.ID,
+			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{"node":"src"},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`),
+		})
+		_, _ = store.WriteRunLog(ctx, flowmodel.RunLog{
+			RunID: run.ID, NodeID: n2.ID,
+			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{"node":"sink"},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`),
+		})
 
 		completed := now
 		run.State = flowmodel.RunCompleted
@@ -387,8 +395,10 @@ func TestFlowLogs_RunFlag(t *testing.T) {
 		run.CompletedAt = &completed
 		run, _ = store.UpdateRun(ctx, run)
 
-		_, _ = store.WriteRunLog(ctx, flowmodel.RunLog{RunID: run.ID, NodeID: n.ID,
-			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`)})
+		_, _ = store.WriteRunLog(ctx, flowmodel.RunLog{
+			RunID: run.ID, NodeID: n.ID,
+			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`),
+		})
 		store.Close()
 
 		// Positional form.
@@ -491,8 +501,8 @@ func TestFlowLogs_FollowStreaming(t *testing.T) {
 
 		// Write some log entries.
 		_, err = store.WriteRunLog(ctx, flowmodel.RunLog{
-			RunID:  run.ID,
-			NodeID: n.ID,
+			RunID:    run.ID,
+			NodeID:   n.ID,
 			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{"result":"ok"},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`),
 		})
 		if err != nil {
@@ -640,8 +650,8 @@ func TestFlowLogs_FollowStreaming(t *testing.T) {
 		}
 
 		_, err = store.WriteRunLog(ctx, flowmodel.RunLog{
-			RunID:  run.ID,
-			NodeID: n.ID,
+			RunID:    run.ID,
+			NodeID:   n.ID,
 			Envelope: json.RawMessage(`{"version":1,"status":"ok","command":"mock","data":{"result":"ok"},"meta":{"ts":"` + now.Format(time.RFC3339) + `"},"error":{}}`),
 		})
 		if err != nil {

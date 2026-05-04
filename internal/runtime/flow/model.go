@@ -246,12 +246,12 @@ type RetryPolicy struct {
 // RunLog captures a single log entry produced by a flow node during execution.
 // Each entry stores the full envelope JSON produced by the node.
 type RunLog struct {
-	ID        string            `json:"id"`
-	RunID     string            `json:"run_id"`
-	NodeID    string            `json:"node_id"`
-	Seq       int               `json:"seq"`
-	Envelope  json.RawMessage   `json:"envelope"`
-	CreatedAt time.Time         `json:"created_at"`
+	ID        string          `json:"id"`
+	RunID     string          `json:"run_id"`
+	NodeID    string          `json:"node_id"`
+	Seq       int             `json:"seq"`
+	Envelope  json.RawMessage `json:"envelope"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 // RunLogFilter holds optional parameters for querying run logs.

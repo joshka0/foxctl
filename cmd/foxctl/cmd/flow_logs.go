@@ -20,8 +20,8 @@ import (
 // ---------------------------------------------------------------------------
 
 var (
-	flowLogsRunFlag   string
-	flowLogsNodeFlag  string
+	flowLogsRunFlag    string
+	flowLogsNodeFlag   string
 	flowLogsFollowFlag bool
 )
 

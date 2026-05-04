@@ -896,5 +896,3 @@ func TestClient_FlowMethods_WorkspaceParam(t *testing.T) {
 		t.Errorf("Stop state = %q, want stopped", stop.State)
 	}
 }
-
-

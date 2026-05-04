@@ -29,7 +29,7 @@ type sqlStore struct {
 
 	// logSubs tracks active log subscribers for streaming.
 	logSubsMu sync.RWMutex
-	logSubs    map[string][]chan flow.RunLog // runID -> subscriber channels
+	logSubs   map[string][]chan flow.RunLog // runID -> subscriber channels
 }
 
 // Open creates or opens a SQLite-backed flow store at <root>/flow.db and runs

@@ -2518,10 +2518,10 @@ func seedABForSubmit(store *mockStore, flowID string) {
 	nodeA := makeNode(flowID+"-a", flowID, "src", NodeSkill, "{}")
 	nodeB := makeNode(flowID+"-b", flowID, "sink", NodeSkill, "{}")
 	edge := makeEdge(flowID+"-e1", flowID, nodeA.ID, nodeB.ID, TransformPassthrough, "")
-	store.CreateFlow(context.Background(), fl)  //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeA)   //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeB)   //nolint:errcheck // test helper
-	store.AddEdge(context.Background(), edge)    //nolint:errcheck // test helper
+	store.CreateFlow(context.Background(), fl) //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA) //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeB) //nolint:errcheck // test helper
+	store.AddEdge(context.Background(), edge)  //nolint:errcheck // test helper
 }
 
 func TestSubmitOutput_PublishesToOutputBus(t *testing.T) {
@@ -2741,8 +2741,8 @@ func TestSubmitOutput_SubscriberReceivesPushedOutput(t *testing.T) {
 	fl := makeFlow("f1", "test-flow")
 	fl.State = FlowDraft
 	nodeA := makeNode("f1-a", "f1", "source", NodeSkill, "{}")
-	store.CreateFlow(context.Background(), fl)  //nolint:errcheck // test helper
-	store.AddNode(context.Background(), nodeA)   //nolint:errcheck // test helper
+	store.CreateFlow(context.Background(), fl) //nolint:errcheck // test helper
+	store.AddNode(context.Background(), nodeA) //nolint:errcheck // test helper
 
 	registry := map[NodeKind]NodeExecutor{
 		NodeSkill: newMockExecutor(nil),
