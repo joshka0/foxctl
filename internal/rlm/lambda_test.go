@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +232,108 @@ func TestCapLambdaPlanForTask_RecomputesTauAfterKCap(t *testing.T) {
 	}
 	if plan.TauStar != 9 {
 		t.Fatalf("tau_star=%d want 9", plan.TauStar)
+	}
+}
+
+func TestBuildLambdaProgram_SmallProblemDirectLeaf(t *testing.T) {
+	t.Parallel()
+
+	plan := PlanLambda(TaskTypeCodeLocate, 4, LambdaConfig{ContextBudget: 10})
+	program := BuildLambdaProgram(plan, LambdaConfig{ContextBudget: 10})
+
+	if program.SplitMode != LambdaSplitNone {
+		t.Fatalf("split_mode=%s want none", program.SplitMode)
+	}
+	if program.BranchingFactor != 1 {
+		t.Fatalf("branching_factor=%d want 1", program.BranchingFactor)
+	}
+	if program.MaxDepth != 0 {
+		t.Fatalf("max_depth=%d want 0", program.MaxDepth)
+	}
+	if program.LeafThreshold != 4 {
+		t.Fatalf("leaf_threshold=%d want 4", program.LeafThreshold)
+	}
+	if program.EstimatedLeafCalls != 1 {
+		t.Fatalf("estimated_leaf_calls=%d want 1", program.EstimatedLeafCalls)
+	}
+}
+
+func TestBuildLambdaProgram_BoundedDepthAndCalls(t *testing.T) {
+	t.Parallel()
+
+	plan := LambdaPlan{
+		TaskType:     TaskTypeGeneral,
+		ComposeOp:    ComposeSynthesize,
+		KStar:        3,
+		TauStar:      5,
+		Depth:        2,
+		CostEstimate: 123,
+		N:            45,
+	}
+	program := BuildLambdaProgram(plan, LambdaConfig{ContextBudget: 10})
+
+	if program.SplitMode != LambdaSplitQueryVariants {
+		t.Fatalf("split_mode=%s want query_variants", program.SplitMode)
+	}
+	if program.ReduceMode != LambdaReduceSynthesize {
+		t.Fatalf("reduce_mode=%s want synthesize", program.ReduceMode)
+	}
+	if program.ReduceVerifierMode != LambdaVerifierReduceOracle {
+		t.Fatalf("reduce_verifier_mode=%s want reduce_oracle", program.ReduceVerifierMode)
+	}
+	if program.EstimatedLeafCalls != 9 {
+		t.Fatalf("estimated_leaf_calls=%d want 9", program.EstimatedLeafCalls)
+	}
+	if program.EstimatedReduceCalls != 4 {
+		t.Fatalf("estimated_reduce_calls=%d want 4", program.EstimatedReduceCalls)
+	}
+	if program.EstimatedTotalCalls != 67 {
+		t.Fatalf("estimated_total_calls=%d want 67", program.EstimatedTotalCalls)
+	}
+	if program.EstimatedCost != 123 {
+		t.Fatalf("estimated_cost=%.1f want 123", program.EstimatedCost)
+	}
+}
+
+func TestLambdaRunnerRunExposesProgramMetadataForDirectLeaf(t *testing.T) {
+	t.Parallel()
+
+	runner := LambdaRunner{
+		Config: LambdaConfig{
+			ContextBudget: 10,
+			LLM: LLMConfig{
+				Provider: "lambda-test-no-provider",
+				AuthMode: "header",
+			},
+		},
+		Tools: lambdaFakeToolExecutor{},
+	}
+	result, err := runner.Run(context.Background(), Task{
+		Prompt:      "find answer",
+		MaxSubcalls: 1,
+		Metadata: map[string]any{
+			"gather_context_payload": map[string]any{"task_type": "file_locate"},
+		},
+	}, Environment{Tools: []Tool{{Name: "gather_context", ReadOnly: true}, {Name: "load_evidence_ref", ReadOnly: true}}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	program, ok := result.Metadata["lambda_program"].(LambdaProgram)
+	if !ok {
+		t.Fatalf("lambda_program metadata type=%T want LambdaProgram", result.Metadata["lambda_program"])
+	}
+	if program.SplitMode != LambdaSplitNone {
+		t.Fatalf("split_mode=%s want none", program.SplitMode)
+	}
+	if program.MaxDepth != 0 {
+		t.Fatalf("max_depth=%d want 0", program.MaxDepth)
+	}
+	if result.Metadata["lambda_program_split_mode"] != string(LambdaSplitNone) {
+		t.Fatalf("lambda_program_split_mode=%v", result.Metadata["lambda_program_split_mode"])
+	}
+	if intFromAny(result.Metadata["lambda_program_estimated_total_calls"]) <= 0 {
+		t.Fatalf("missing positive estimated calls metadata: %#v", result.Metadata)
 	}
 }
 
@@ -654,6 +757,8 @@ func TestExtractCandidateEvidenceRefsIncludesLoadRefs(t *testing.T) {
 		"path:internal/context/contextengine/context_gather.go",
 		"path:internal/rlm/env/adapter.go",
 	}
+	sort.Strings(got)
+	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("refs=%v want %v", got, want)
 	}
@@ -690,7 +795,7 @@ func TestLambdaSearchArgsUsesGatherPayloadAndAnswerSurface(t *testing.T) {
 func TestExplicitLambdaTaskTypeUsesGatherPayload(t *testing.T) {
 	t.Parallel()
 
-	for _, taskTypeName := range []string{"file_locate", "symbol_inspect", "registration_trace", "execution_trace", "change_impact", "architecture_map", "subsystem_map", "integration_surface"} {
+	for _, taskTypeName := range []string{"file_locate", "symbol_inspect", "registration_trace"} {
 		taskTypeName := taskTypeName
 		t.Run(taskTypeName, func(t *testing.T) {
 			t.Parallel()
@@ -702,6 +807,18 @@ func TestExplicitLambdaTaskTypeUsesGatherPayload(t *testing.T) {
 			}
 		})
 	}
+	for _, taskTypeName := range []string{"execution_trace", "change_impact", "architecture_map", "subsystem_map", "integration_surface"} {
+		taskTypeName := taskTypeName
+		t.Run(taskTypeName, func(t *testing.T) {
+			t.Parallel()
+			taskType, source := explicitLambdaTaskType(Task{Metadata: map[string]any{
+				"gather_context_payload": map[string]any{"task_type": taskTypeName},
+			}})
+			if taskType != TaskTypeCodeUnderstand || source != "gather_context_payload" {
+				t.Fatalf("taskType=%s source=%s", taskType, source)
+			}
+		})
+	}
 }
 
 func TestLambdaShouldUseSingleGatherSurfaceForCodeLocateAnswerSurface(t *testing.T) {
@@ -709,7 +826,7 @@ func TestLambdaShouldUseSingleGatherSurfaceForCodeLocateAnswerSurface(t *testing
 
 	task := Task{Metadata: map[string]any{
 		"gather_context_payload": map[string]any{
-			"task_type":     "execution_trace",
+			"task_type":     "file_locate",
 			"response_mode": "answer_surface",
 		},
 	}}
@@ -718,6 +835,13 @@ func TestLambdaShouldUseSingleGatherSurfaceForCodeLocateAnswerSurface(t *testing
 	}
 	if lambdaShouldUseSingleGatherSurface(task, TaskTypeCodeUnderstand) {
 		t.Fatal("did not expect single gather surface for code understand")
+	}
+	task.Metadata["gather_context_payload"].(map[string]any)["task_type"] = "execution_trace"
+	if lambdaShouldUseSingleGatherSurface(task, TaskTypeCodeLocate) {
+		t.Fatal("did not expect single gather surface for dependency-sensitive payload")
+	}
+	if lambdaShouldUseSingleGatherSurface(task, TaskTypeCodeUnderstand) {
+		t.Fatal("did not expect single gather surface for dependency-sensitive task")
 	}
 }
 
@@ -741,6 +865,9 @@ func TestLambdaAnswerFromAnswerSurface(t *testing.T) {
 		"certificate": map[string]any{
 			"status":               "certified",
 			"required_evidence_ok": true,
+			"checks": []any{
+				map[string]any{"name": "selected_refs_loadable", "status": "pass"},
+			},
 		},
 		"answer_seed": map[string]any{
 			"paths": []any{"internal/rlm/env/code_search_ensemble.go"},
@@ -801,9 +928,19 @@ func TestLambdaAnswerFromAnswerSurfaceRejectsUntrustedSurface(t *testing.T) {
 		"copy_seed_disabled": {
 			"schema_version":  "context_answer_surface/v2",
 			"answerable":      true,
-			"certificate":     map[string]any{"status": "certified", "required_evidence_ok": true},
+			"certificate":     map[string]any{"status": "certified", "required_evidence_ok": true, "checks": []any{map[string]any{"name": "selected_refs_loadable", "status": "pass"}}},
 			"answer_contract": map[string]any{"copy_answer_seed": false},
 			"answer_seed":     map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
+		},
+		"selected_refs_not_loadable": {
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     true,
+			"certificate": map[string]any{
+				"status":               "certified",
+				"required_evidence_ok": true,
+				"checks":               []any{map[string]any{"name": "selected_refs_loadable", "status": "fail"}},
+			},
+			"answer_seed": map[string]any{"paths": []any{"internal/rlm/env/code_search_ensemble.go"}},
 		},
 	} {
 		payload := payload
@@ -813,6 +950,69 @@ func TestLambdaAnswerFromAnswerSurfaceRejectsUntrustedSurface(t *testing.T) {
 				t.Fatalf("lambdaAnswerFromAnswerSurface() ok=true answer=%s", answer)
 			}
 		})
+	}
+}
+
+func TestLambdaContextGraphTrusted(t *testing.T) {
+	t.Parallel()
+
+	trusted := map[string]any{
+		"confidence": map[string]any{
+			"overall":             0.9,
+			"completeness":        "high",
+			"trusted_for_proceed": true,
+		},
+	}
+	if !lambdaContextGraphTrusted(trusted) {
+		t.Fatal("expected high-confidence graph to be trusted")
+	}
+	for name, payload := range map[string]map[string]any{
+		"low_confidence": {
+			"confidence": map[string]any{"overall": 0.5, "completeness": "low", "trusted_for_proceed": false},
+		},
+		"missing_gap": {
+			"confidence": map[string]any{"overall": 0.9, "completeness": "high"},
+			"missing":    []any{map[string]any{"kind": "index_stale"}},
+		},
+	} {
+		payload := payload
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if lambdaContextGraphTrusted(payload) {
+				t.Fatalf("expected graph %s to be untrusted", name)
+			}
+		})
+	}
+}
+
+func TestLambdaLeafDoesNotSkipJudgeWhenRequiredGraphIsWeak(t *testing.T) {
+	t.Parallel()
+
+	runner := LambdaRunner{
+		Config: LambdaConfig{LLM: LLMConfig{Provider: "lambda-test-no-provider"}},
+		Tools:  lambdaGraphGateToolExecutor{},
+	}
+	result, err := runner.leaf(context.Background(), Task{
+		Prompt: "Trace execution through the service.",
+		Metadata: map[string]any{
+			"gather_context_payload": map[string]any{
+				"query":         "Trace execution through the service.",
+				"task_type":     "execution_trace",
+				"response_mode": "answer_surface",
+			},
+		},
+	}, Environment{}, LambdaPlan{TaskType: TaskTypeCodeUnderstand, TauStar: 2})
+	if err != nil {
+		t.Fatalf("leaf: %v", err)
+	}
+	if result.Metadata["lambda_answer_surface"] == true {
+		t.Fatalf("expected weak graph to prevent answer-surface skip: metadata=%v", result.Metadata)
+	}
+	if result.Metadata["lambda_context_graph_trusted"] != false {
+		t.Fatalf("graph trust metadata=%v", result.Metadata)
+	}
+	if result.Metadata["lambda_judge_error"] == nil {
+		t.Fatalf("expected fallback judge path with no-provider LLM: metadata=%v", result.Metadata)
 	}
 }
 
@@ -971,9 +1171,42 @@ type lambdaFakeToolExecutor struct {
 	delays map[string]time.Duration
 }
 
+type lambdaGraphGateToolExecutor struct{}
+
 type structuredLambdaAnswerForTest struct {
 	Paths []string `json:"paths"`
 	Facts []string `json:"facts"`
+}
+
+func (lambdaGraphGateToolExecutor) Execute(_ context.Context, name string, _ json.RawMessage) (map[string]any, error) {
+	switch name {
+	case "gather_context":
+		return map[string]any{
+			"schema_version": "context_answer_surface/v2",
+			"answerable":     true,
+			"certificate": map[string]any{
+				"status":               "certified",
+				"required_evidence_ok": true,
+				"checks":               []any{map[string]any{"name": "selected_refs_loadable", "status": "pass"}},
+			},
+			"answer_contract": map[string]any{"copy_answer_seed": true},
+			"answer_seed":     map[string]any{"paths": []any{"internal/service.go"}},
+			"path_set":        map[string]any{"must": []any{map[string]any{"path": "internal/service.go", "load_ref": "path:internal/service.go"}}},
+		}, nil
+	case "expand_context_graph":
+		return map[string]any{
+			"confidence": map[string]any{
+				"overall":             0.45,
+				"completeness":        "low",
+				"trusted_for_proceed": false,
+			},
+			"missing": []any{map[string]any{"kind": "index_stale"}},
+		}, nil
+	case "load_evidence_ref":
+		return map[string]any{"content": "package service"}, nil
+	default:
+		return map[string]any{}, nil
+	}
 }
 
 func (f lambdaFakeToolExecutor) Execute(ctx context.Context, _ string, args json.RawMessage) (map[string]any, error) {

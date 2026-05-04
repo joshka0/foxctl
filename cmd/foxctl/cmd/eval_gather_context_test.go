@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 )
 
 func TestExtractGatherContextPathsUsesRefsAndMetadata(t *testing.T) {
@@ -52,17 +53,30 @@ func TestSummarizeGatherContextEvalResults(t *testing.T) {
 	t.Parallel()
 
 	summary := summarizeGatherContextEvalResults([]gatherContextEvalResult{
-		{Status: "ok", Passed: true, PathRecall: 1, FactRecall: 1, DurationMS: 10, RawContextChars: 100, EmittedContextChars: 40, FactCount: 2, EvidenceCount: 2},
-		{Status: "error", Passed: false, PathRecall: 0.5, FactRecall: 0.25, DurationMS: 30, RawContextChars: 60, EmittedContextChars: 20, OmittedContextItems: 1, FactCount: 1, EvidenceCount: 1},
+		{Status: "ok", Passed: true, PathRecall: 1, RoleRecall: 1, FactRecall: 1, DurationMS: 10, RawContextChars: 100, EmittedContextChars: 40, FactCount: 2, EvidenceCount: 2},
+		{Status: "error", Passed: false, PathRecall: 0.5, RoleRecall: 0.5, FactRecall: 0.25, DurationMS: 30, RawContextChars: 60, EmittedContextChars: 20, OmittedContextItems: 1, FactCount: 1, EvidenceCount: 1},
+		{Status: "ok", StaleEval: true, PathRecall: 0, FactRecall: 0, DurationMS: 1000},
 	})
-	if summary.Count != 2 {
-		t.Fatalf("count=%d want 2", summary.Count)
+	if summary.Count != 3 {
+		t.Fatalf("count=%d want 3", summary.Count)
+	}
+	if summary.ScoredCount != 2 {
+		t.Fatalf("scored_count=%d want 2", summary.ScoredCount)
+	}
+	if summary.StaleEvalCount != 1 {
+		t.Fatalf("stale_eval_count=%d want 1", summary.StaleEvalCount)
 	}
 	if summary.PassRate != 0.5 {
 		t.Fatalf("pass_rate=%f want 0.5", summary.PassRate)
 	}
 	if summary.MeanPathRecall != 0.75 {
 		t.Fatalf("mean_path_recall=%f want 0.75", summary.MeanPathRecall)
+	}
+	if summary.MeanRoleRecall != 0.75 {
+		t.Fatalf("mean_role_recall=%f want 0.75", summary.MeanRoleRecall)
+	}
+	if len(summary.RoleRecallByRole) != 0 {
+		t.Fatalf("role_recall_by_role=%v want empty when no expected roles", summary.RoleRecallByRole)
 	}
 	if summary.MeanFactRecall != 0.625 {
 		t.Fatalf("mean_fact_recall=%f want 0.625", summary.MeanFactRecall)
@@ -75,6 +89,175 @@ func TestSummarizeGatherContextEvalResults(t *testing.T) {
 	}
 	if summary.ErrorCount != 1 {
 		t.Fatalf("error_count=%d want 1", summary.ErrorCount)
+	}
+}
+
+func TestSummarizeGatherContextEvalRoleDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	summary := summarizeGatherContextEvalResults([]gatherContextEvalResult{
+		{
+			Status:        "ok",
+			Passed:        true,
+			ExpectedRoles: []string{"router", "docs"},
+			MatchedRoles:  []string{"router"},
+			RoleRecall:    0.5,
+			RoleCoverage:  map[string]int{"router": 1, "tooling": 2, "test": 1},
+		},
+		{
+			Status:        "ok",
+			Passed:        true,
+			ExpectedRoles: []string{"router", "test"},
+			MatchedRoles:  []string{"router", "test"},
+			RoleRecall:    1,
+			RoleCoverage:  map[string]int{"router": 1, "test": 2, "generated": 1},
+		},
+		{
+			Status:        "ok",
+			StaleEval:     true,
+			ExpectedRoles: []string{"docs"},
+			MatchedRoles:  []string{"docs"},
+			RoleCoverage:  map[string]int{"vendor": 3},
+		},
+	})
+
+	if got := len(summary.RoleRecallByRole); got != 3 {
+		t.Fatalf("role scores=%d want 3: %+v", got, summary.RoleRecallByRole)
+	}
+	wantScores := map[string]gatherContextRoleRecallScore{
+		"docs":   {Role: "docs", ExpectedCases: 1, MatchedCases: 0, MissingCases: 1, Recall: 0},
+		"router": {Role: "router", ExpectedCases: 2, MatchedCases: 2, MissingCases: 0, Recall: 1},
+		"test":   {Role: "test", ExpectedCases: 1, MatchedCases: 1, MissingCases: 0, Recall: 1},
+	}
+	for _, score := range summary.RoleRecallByRole {
+		want, ok := wantScores[score.Role]
+		if !ok {
+			t.Fatalf("unexpected role score %+v", score)
+		}
+		if score != want {
+			t.Fatalf("score[%s]=%+v want %+v", score.Role, score, want)
+		}
+	}
+	if summary.PeripheralRoleCoverage["tooling"] != 2 || summary.WrongRolePeripheralCaseCount["tooling"] != 1 {
+		t.Fatalf("tooling diagnostics coverage=%v cases=%v", summary.PeripheralRoleCoverage, summary.WrongRolePeripheralCaseCount)
+	}
+	if summary.PeripheralRoleCoverage["test"] != 1 || summary.WrongRolePeripheralCaseCount["test"] != 1 {
+		t.Fatalf("test diagnostics coverage=%v cases=%v", summary.PeripheralRoleCoverage, summary.WrongRolePeripheralCaseCount)
+	}
+	if summary.PeripheralRoleCoverage["generated"] != 1 || summary.WrongRolePeripheralCaseCount["generated"] != 1 {
+		t.Fatalf("generated diagnostics coverage=%v cases=%v", summary.PeripheralRoleCoverage, summary.WrongRolePeripheralCaseCount)
+	}
+	if _, ok := summary.PeripheralRoleCoverage["vendor"]; ok {
+		t.Fatalf("stale eval peripheral role should be excluded: %v", summary.PeripheralRoleCoverage)
+	}
+}
+
+func TestRenderGatherContextRepoIndexFreshnessMarkdown(t *testing.T) {
+	t.Parallel()
+
+	markdown := renderGatherContextRepoIndexFreshnessMarkdown(map[string]any{
+		"index_head_sha":          "111111111111aaaaaaaa",
+		"current_head_sha":        "222222222222bbbbbbbb",
+		"index_worktree_dirty":    false,
+		"current_worktree_dirty":  true,
+		"stale_or_dirty_mismatch": true,
+		"freshness": repoindex.IndexFreshnessStatus{
+			Level: repoindex.FreshnessStale,
+		},
+	})
+	for _, want := range []string{
+		"Repoindex freshness: `stale`",
+		"index head `111111111111`",
+		"current head `222222222222`",
+		"index dirty `false`",
+		"current dirty `true`",
+		"stale/dirty mismatch `true`",
+	} {
+		if !strings.Contains(markdown, want) {
+			t.Fatalf("markdown missing %q: %s", want, markdown)
+		}
+	}
+}
+
+func TestRenderGatherContextEvalMarkdownIncludesRoleDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	markdown := renderGatherContextEvalMarkdown("/workspace", gatherContextEvalSummary{
+		Count:          1,
+		ScoredCount:    1,
+		MeanRoleRecall: 0.5,
+		RoleRecallByRole: []gatherContextRoleRecallScore{{
+			Role:          "router",
+			ExpectedCases: 2,
+			MatchedCases:  1,
+			MissingCases:  1,
+			Recall:        0.5,
+		}},
+		PeripheralRoleCoverage:       map[string]int{"tooling": 3},
+		WrongRolePeripheralCaseCount: map[string]int{"tooling": 2},
+	}, []gatherContextEvalResult{{
+		CaseID:     "case-1",
+		Status:     "ok",
+		RoleRecall: 0.5,
+	}}, nil, nil)
+	for _, want := range []string{
+		"## Role Diagnostics",
+		"| router | 0.50 | 1 | 2 | 1 |",
+		"Peripheral roles returned when not expected",
+		"| tooling | 3 | 2 |",
+		"| case-1 | no |",
+	} {
+		if !strings.Contains(markdown, want) {
+			t.Fatalf("markdown missing %q:\n%s", want, markdown)
+		}
+	}
+}
+
+func TestGatherContextRoleScoring(t *testing.T) {
+	t.Parallel()
+
+	evalCase := promptEvalCase{Metadata: map[string]any{
+		"expected_roles":      []any{"route_file", "router", "docs"},
+		"expected_file_roles": "deploy_config,test",
+	}}
+	expected := gatherContextEvalExpectedRoles(evalCase)
+	if got, want := strings.Join(expected, ","), "route,router,docs,deploy_config,test"; got != want {
+		t.Fatalf("expected roles=%q want %q", got, want)
+	}
+
+	coverage := gatherContextPathRoleCoverage([]string{
+		"apps/mobile/app/connection/[connectionId].tsx",
+		"apps/api/lib/praze_web/router.ex",
+		"docs/architecture/presence.md",
+		"charts/presence/values.yaml",
+		"apps/mobile/app/connection/[connectionId].test.tsx",
+	})
+	matched, recall := scoreGatherContextExpectedRoles(expected, coverage)
+	if recall != 1 {
+		t.Fatalf("recall=%f matched=%v coverage=%v", recall, matched, coverage)
+	}
+}
+
+func TestInferGatherContextPathRoles(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string][]string{
+		"apps/mobile/app/onboarding/_layout.tsx":        {"route"},
+		"lib/my_app_web/router.ex":                      {"router"},
+		"lib/my_app_web/controllers/page_controller.ex": {"controller"},
+		"docs/architecture/runtime.md":                  {"docs"},
+		"deploy/kubernetes/app.yaml":                    {"deploy_config"},
+		"test/support/fixtures/users.json":              {"test", "data"},
+		".factory/templates/vote-test-script.ts":        {"tooling", "test"},
+		"internal/generated/client.pb.go":               {"generated"},
+	}
+	for path, wants := range cases {
+		roles := inferGatherContextPathRoles(path)
+		for _, want := range wants {
+			if !containsString(roles, want) {
+				t.Fatalf("path %s roles=%v missing %s", path, roles, want)
+			}
+		}
 	}
 }
 
@@ -133,6 +316,29 @@ func TestGatherContextEvalPassedRequiresFactRecall(t *testing.T) {
 	result.FactRecall = 1
 	if !gatherContextEvalPassed(result, evalCase, 0.8) {
 		t.Fatalf("expected pass when path and fact recall pass")
+	}
+	result.StaleEval = true
+	if gatherContextEvalPassed(result, evalCase, 0.8) {
+		t.Fatalf("expected fail when eval expected paths are stale")
+	}
+}
+
+func TestGatherContextExpectedPathsMissingOnDisk(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, "internal", "rlm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "internal", "rlm", "lambda.go"), []byte("package rlm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	missing := gatherContextExpectedPathsMissingOnDisk(workspace, []string{
+		"internal/rlm/lambda.go",
+		"internal/rlm/missing.go",
+	})
+	if got := strings.Join(missing, ","); got != "internal/rlm/missing.go" {
+		t.Fatalf("missing=%v", missing)
 	}
 }
 

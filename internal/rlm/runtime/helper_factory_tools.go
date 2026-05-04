@@ -268,6 +268,12 @@ func (h *HelperFactoryTools) solve(ctx context.Context, prompt, instructions str
 			}
 			continue
 		}
+		// Verification is runtime-owned. A synthesized helper may return fields
+		// named verification/verified, but those are only claims until this
+		// wrapper runs Config.AnswerVerifier below.
+		delete(result.Output, "verification")
+		delete(result.Output, "verified")
+		delete(result.Output, "verifier_diagnostic")
 		answer, ok := helperFactoryAnswer(result.Output, h.Config.ExtractSolutionLine)
 		if !ok {
 			errText := "helper output did not include a usable answer"

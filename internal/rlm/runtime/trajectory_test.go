@@ -209,6 +209,14 @@ func TestRecorderJSONMarshalStable(t *testing.T) {
 		Max:     4,
 		Message: "near limit",
 	})
+	recorder.RecordContractEvent(ContractEvent{
+		Boundary:     "tool_input",
+		Tool:         RLMQueryToolName,
+		Status:       "repaired",
+		IssueKind:    "numeric_string",
+		RepairRule:   "parse_int_string",
+		RevalidateOK: true,
+	})
 	recorder.RecordFinalAnswer(FinalAnswerEvent{
 		Text:   "done",
 		Tokens: 24,

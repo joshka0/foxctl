@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,7 +70,7 @@ func TestRLMToolsWaitReturnsStructuredResults(t *testing.T) {
 			case "fail":
 				return NodeResult{}, errors.New("forced backend failure")
 			default:
-				return NodeResult{Summary: "done:" + input.Prompt, Metadata: map[string]any{
+				return NodeResult{Summary: `{"status":"solved","answer":"solution = 42","checks":["ok"],"confidence":1}`, Metadata: map[string]any{
 					"required_subcalls":         1,
 					"required_subcall_attempts": 2,
 					"recursive_subcalls_used":   1,
@@ -111,6 +113,12 @@ func TestRLMToolsWaitReturnsStructuredResults(t *testing.T) {
 		out.Completed[0]["recursive_subcalls_used"] != float64(1) {
 		t.Fatalf("completed recursive summary fields missing: %#v", out.Completed[0])
 	}
+	if out.Completed[0]["candidate_answer"] != "solution = 42" ||
+		out.Completed[0]["candidate_status"] != "solved" ||
+		!strings.HasPrefix(fmt.Sprint(out.Completed[0]["candidate_id"]), "child-1:sha256:") ||
+		!strings.HasPrefix(fmt.Sprint(out.Completed[0]["candidate_answer_hash"]), "sha256:") {
+		t.Fatalf("completed candidate fields missing: %#v", out.Completed[0])
+	}
 	if len(out.Failed) != 1 {
 		t.Fatalf("failed = %d, want 1", len(out.Failed))
 	}
@@ -122,13 +130,231 @@ func TestRLMToolsWaitReturnsStructuredResults(t *testing.T) {
 			if _, hasPrompt := item["prompt"]; hasPrompt {
 				t.Fatalf("wait summary should not include prompt: %#v", item)
 			}
-			if _, hasNodeID := item["node_id"]; hasNodeID {
-				t.Fatalf("wait summary should not expose node_id: %#v", item)
+			if _, hasNodeID := item["node_id"]; !hasNodeID {
+				t.Fatalf("wait summary should include runtime-issued node_id: %#v", item)
 			}
 			if _, hasChild := item["child"]; !hasChild {
 				t.Fatalf("wait summary missing child number: %#v", item)
 			}
 		}
+	}
+}
+
+func TestCandidateAnswerAndStatusDoesNotSolveBlockedSolutionLine(t *testing.T) {
+	t.Parallel()
+
+	answer, status := candidateAnswerAndStatus(&NodeResult{
+		Status:  NodeStatusCompleted,
+		Answer:  "solution = blocked - tool budget exhausted",
+		Summary: "ignored",
+	})
+	if answer != "" || status != "blocked" {
+		t.Fatalf("candidateAnswerAndStatus()=(%q,%q), want empty/blocked", answer, status)
+	}
+}
+
+func TestCandidateAnswerAndStatusCanonicalizesEmbeddedArtifactSolutionLine(t *testing.T) {
+	t.Parallel()
+
+	answer, status := candidateAnswerAndStatus(&NodeResult{
+		Status:  NodeStatusCompleted,
+		Summary: `{"status":"solved","answer":"solution = [node_4, node_2, node_7].","checks":["parsed"]}`,
+	})
+	if status != "solved" {
+		t.Fatalf("status = %q, want solved", status)
+	}
+	if answer != "solution = [node_4, node_2, node_7]" {
+		t.Fatalf("answer = %q, want canonical bracketed payload", answer)
+	}
+
+	record := childCandidateRecord(1, &NodeResult{
+		Status:  NodeStatusCompleted,
+		Summary: `{"status":"solved","answer":"solution = [node_4, node_2, node_7].","checks":["parsed"]}`,
+	})
+	if record.CandidateID != "" || record.CandidateStatus != "placeholder" {
+		t.Fatalf("record = %+v, want placeholder without candidate id", record)
+	}
+}
+
+func TestChildCandidateRecordRejectsPlaceholderSolutionLines(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		answer     string
+		wantStatus string
+		wantID     bool
+	}{
+		{
+			name:       "answer template list",
+			answer:     "solution = [answer for node_4, answer for node_2]",
+			wantStatus: "placeholder",
+		},
+		{
+			name:       "angle value",
+			answer:     "solution = <value>",
+			wantStatus: "placeholder",
+		},
+		{
+			name:       "json placeholder",
+			answer:     `solution = {"answer":"<value>"}`,
+			wantStatus: "placeholder",
+		},
+		{
+			name:       "unresolved node list",
+			answer:     "solution = [node_4, node_2, node_7].",
+			wantStatus: "placeholder",
+		},
+		{
+			name:       "json unresolved node list",
+			answer:     `solution = ["node_4","node_2"]`,
+			wantStatus: "placeholder",
+		},
+		{
+			name:       "metadata text in answer",
+			answer:     "solution = 5/2 = 2.5, checks: triangle area verified",
+			wantStatus: "placeholder",
+		},
+		{
+			name:       "symbolic power",
+			answer:     "solution = 2013^{4025}",
+			wantStatus: "solved",
+			wantID:     true,
+		},
+		{
+			name:       "json symbolic type",
+			answer:     `solution = {"type":"forall a. a -> a"}`,
+			wantStatus: "solved",
+			wantID:     true,
+		},
+		{
+			name:       "node literal",
+			answer:     "solution = node_4",
+			wantStatus: "solved",
+			wantID:     true,
+		},
+		{
+			name:       "numeric list",
+			answer:     "solution = [1, 0, 2]",
+			wantStatus: "solved",
+			wantID:     true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			record := childCandidateRecord(1, &NodeResult{
+				Status: NodeStatusCompleted,
+				Answer: tc.answer,
+			})
+			if record.CandidateStatus != tc.wantStatus {
+				t.Fatalf("CandidateStatus = %q, want %q (record=%+v)", record.CandidateStatus, tc.wantStatus, record)
+			}
+			if tc.wantID && record.CandidateID == "" {
+				t.Fatalf("CandidateID empty for concrete answer: %+v", record)
+			}
+			if !tc.wantID && record.CandidateID != "" {
+				t.Fatalf("CandidateID = %q, want empty for rejected answer", record.CandidateID)
+			}
+			if !tc.wantID && record.CandidateRejectionReason == "" {
+				t.Fatalf("CandidateRejectionReason empty for rejected answer: %+v", record)
+			}
+		})
+	}
+}
+
+func TestRLMToolsInputRepairNormalizesFiniteShapeMistakes(t *testing.T) {
+	t.Parallel()
+
+	recorder := NewRecorder()
+	seen := make(chan NodeInput, 1)
+	store := newSchedulerTestStore(t)
+	scheduler := newSchedulerForTest(t, SchedulerConfig{
+		Store: store,
+		Backend: NodeBackendFunc(func(ctx context.Context, node Node, input NodeInput) (NodeResult, error) {
+			seen <- input
+			return NodeResult{Summary: "ok"}, nil
+		}),
+		RunID:      "run-1",
+		RootNodeID: "root",
+		MaxWorkers: 1,
+	})
+	executor, err := NewRLMToolsExecutor(RLMToolsConfig{
+		Scheduler:    scheduler,
+		Store:        store,
+		RunID:        "run-1",
+		ParentNodeID: "root",
+		Recorder:     recorder,
+	})
+	if err != nil {
+		t.Fatalf("NewRLMToolsExecutor() error = %v", err)
+	}
+
+	_, err = executor.Execute(context.Background(), RLMQueryToolName, json.RawMessage(`{
+		"arguments": {
+			"prompt": "child",
+			"max_iterations": "3",
+			"metadata": "{\"role\":\"parser\"}",
+			"node_id": null
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("Execute(rlm_query) error = %v", err)
+	}
+	if _, err := executor.Execute(context.Background(), RLMWaitToolName, json.RawMessage(`{"timeout_ms":"1000"}`)); err != nil {
+		t.Fatalf("Execute(rlm_wait) error = %v", err)
+	}
+
+	select {
+	case input := <-seen:
+		if input.MaxIterations != 3 {
+			t.Fatalf("MaxIterations = %d, want 3", input.MaxIterations)
+		}
+		if input.Metadata["role"] != "parser" {
+			t.Fatalf("metadata role = %#v, want parser", input.Metadata["role"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("backend did not receive query input")
+	}
+
+	events := recorder.Events()
+	var repaired *ContractEvent
+	for idx := range events {
+		if events[idx].Type == EventTypeContract && events[idx].Contract != nil && events[idx].Contract.Boundary == "tool_input" {
+			repaired = events[idx].Contract
+			break
+		}
+	}
+	if repaired == nil {
+		t.Fatalf("missing tool input contract repair event: %#v", events)
+	}
+	if repaired.Tool != RLMQueryToolName || repaired.Status != "repaired" || repaired.RepairRule != "multiple" || !repaired.RevalidateOK {
+		t.Fatalf("repair event = %+v, want repaired multiple rlm_query event", *repaired)
+	}
+	if repaired.ToolInputBytes == 0 || repaired.RepairedInputBytes == 0 {
+		t.Fatalf("repair event should record input byte counts: %+v", *repaired)
+	}
+}
+
+func TestRLMToolsInputRepairRejectsNonEmptyRuntimeOwnedField(t *testing.T) {
+	t.Parallel()
+
+	store := newSchedulerTestStore(t)
+	scheduler := newSchedulerForTest(t, SchedulerConfig{
+		Store:      store,
+		Backend:    NodeBackendFunc(func(context.Context, Node, NodeInput) (NodeResult, error) { return NodeResult{Summary: "ok"}, nil }),
+		RunID:      "run-1",
+		RootNodeID: "root",
+		MaxWorkers: 1,
+	})
+	executor := newRLMToolsExecutorForTest(t, scheduler, store)
+
+	_, err := executor.Execute(context.Background(), RLMWaitToolName, json.RawMessage(`{"node_id":"root.1"}`))
+	if err == nil || !strings.Contains(err.Error(), `field "node_id" is runtime-owned`) || !strings.Contains(err.Error(), "Call rlm_wait with {}") {
+		t.Fatalf("Execute(rlm_wait) err=%v, want model-readable runtime-owned field rejection", err)
 	}
 }
 

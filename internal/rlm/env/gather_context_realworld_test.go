@@ -101,10 +101,11 @@ func TestReadOnlyAdapterGatherContextRealWorldStores(t *testing.T) {
 	adapter.SetTaskStore(taskStore)
 
 	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
-		"query": "ContextBundle certification",
-		"goal":  "recover design context for implementation",
-		"lanes": []string{"memory", "task", "context"},
-		"limit": 10,
+		"query":         "ContextBundle certification",
+		"goal":          "recover design context for implementation",
+		"lanes":         []string{"memory", "task", "context"},
+		"limit":         10,
+		"response_mode": "full",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context: %v", err)
@@ -212,9 +213,10 @@ type ContextBundle struct {
 	})
 
 	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
-		"query": "ContextBundle certified context",
-		"lanes": []string{"code"},
-		"limit": 5,
+		"query":         "ContextBundle certified context",
+		"lanes":         []string{"code"},
+		"limit":         5,
+		"response_mode": "full",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context: %v", err)
@@ -258,10 +260,11 @@ func TestReadOnlyAdapterGatherContextUsesExactCodeProbe(t *testing.T) {
 	})
 
 	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
-		"query":     "Where does memory_ensemble_retrieve live?",
-		"task_type": "file_locate",
-		"lanes":     []string{"code"},
-		"limit":     5,
+		"query":         "Where does memory_ensemble_retrieve live?",
+		"task_type":     "file_locate",
+		"lanes":         []string{"code"},
+		"limit":         5,
+		"response_mode": "full",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context: %v", err)
@@ -323,6 +326,7 @@ func TestReadOnlyAdapterGatherContextCanIncludeCandidateMemory(t *testing.T) {
 		"lanes":           []string{"memory"},
 		"memory_statuses": []string{"candidate"},
 		"limit":           5,
+		"response_mode":   "full",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context: %v", err)
@@ -357,10 +361,11 @@ func TestReadOnlyAdapterGatherContextUsesRegistrationTrace(t *testing.T) {
 	})
 
 	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
-		"query":     "Where does the eval command register code-search-ensemble?",
-		"task_type": "registration_trace",
-		"lanes":     []string{"code"},
-		"limit":     5,
+		"query":         "Where does the eval command register code-search-ensemble?",
+		"task_type":     "registration_trace",
+		"lanes":         []string{"code"},
+		"limit":         5,
+		"response_mode": "full",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context: %v", err)
@@ -409,6 +414,7 @@ func RetrieveContext(ctx context.Context, cfg LaneConfig, queryFn ContextQueryFu
 		"required_evidence": []string{"latest_handoff", "aca_retrieval"},
 		"lanes":             []string{"code"},
 		"limit":             5,
+		"response_mode":     "full",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context: %v", err)
@@ -450,6 +456,7 @@ func normalizeSemanticIndexProvider(provider string) string {
 		"required_evidence": []string{"openai_compat", "skills-build-cgo"},
 		"lanes":             []string{"code"},
 		"limit":             5,
+		"response_mode":     "full",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context: %v", err)
@@ -536,10 +543,11 @@ func TestReadOnlyAdapterGatherContextExecutionTraceUsesEnsembleBridgeFile(t *tes
 	})
 
 	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
-		"query":     "Which files connect runSingleCodeSearchEnsembleEval to code_search_ensemble execution?",
-		"task_type": "execution_trace",
-		"lanes":     []string{"code"},
-		"limit":     5,
+		"query":         "Which files connect runSingleCodeSearchEnsembleEval to code_search_ensemble execution?",
+		"task_type":     "execution_trace",
+		"lanes":         []string{"code"},
+		"limit":         5,
+		"response_mode": "full",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context: %v", err)
@@ -578,10 +586,11 @@ func TestReadOnlyAdapterGatherContextSymbolInspectUsesDefinitionPath(t *testing.
 	})
 
 	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
-		"query":     "Which file defines ReadOnlyAdapter?",
-		"task_type": "symbol_inspect",
-		"lanes":     []string{"code"},
-		"limit":     4,
+		"query":         "Which file defines ReadOnlyAdapter?",
+		"task_type":     "symbol_inspect",
+		"lanes":         []string{"code"},
+		"limit":         4,
+		"response_mode": "full",
 	}))
 	if err != nil {
 		t.Fatalf("gather_context: %v", err)

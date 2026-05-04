@@ -77,7 +77,7 @@ func TestBuildPlanStagedCodeRetrievalUsesCompositeTools(t *testing.T) {
 			}
 		}
 	}
-	if !reflect.DeepEqual(plan.Phases[0].RequireOneOf, []string{"retrieve_code"}) {
+	if !reflect.DeepEqual(plan.Phases[0].RequireOneOf, []string{"gather_context"}) {
 		t.Fatalf("discovery require_one_of=%v", plan.Phases[0].RequireOneOf)
 	}
 	if !reflect.DeepEqual(plan.Phases[1].RequireOneOf, []string{"load_evidence_ref"}) {

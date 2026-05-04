@@ -2822,6 +2822,9 @@ func TestRenderBraidNodeChildPromptKeepsRootTaskForVerify(t *testing.T) {
 	if !strings.Contains(prompt, "Official root task:") || !strings.Contains(prompt, "Official problem text") {
 		t.Fatalf("verify prompt should include full root task:\n%s", prompt)
 	}
+	if !strings.Contains(prompt, `{"status":"pass","answer":"pass: true","pass":true`) {
+		t.Fatalf("verify prompt should require pass-status NodeArtifact:\n%s", prompt)
+	}
 }
 
 func TestRenderBraidNodeChildPromptIncludesRepairFeedback(t *testing.T) {
@@ -2869,12 +2872,21 @@ func TestBraidRuntimeShortcutPassesVerifyForRuntimeVerifiedSolve(t *testing.T) {
 	solveSummary := "status: completed summary: status: solved answer: solution = [[2,1,2],[0,0,2]] checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier."
 	records := map[string]braidNodeExecutionRecord{}
 	recordBraidNodeExecution(records, "n_solve", solveSummary, "helper", runtimeCertificationForNode(BraidNode{ID: "n_solve", Kind: "solve"}, "test"))
-	verifySummary, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_verify", Kind: "verify"}, map[string]string{"n_solve": solveSummary}, nil, records)
+	verifySummary, _, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_verify", Kind: "verify"}, map[string]string{"n_solve": solveSummary}, nil, records)
 	if !ok {
 		t.Fatal("expected runtime verify shortcut")
 	}
 	if !braidVerificationSummaryPassed(verifySummary) {
 		t.Fatalf("verify shortcut did not pass: %s", verifySummary)
+	}
+}
+
+func TestBraidVerificationSummaryPassedAcceptsQuotedJSONPassField(t *testing.T) {
+	t.Parallel()
+
+	summary := `status: completed summary: {"status":"solved","answer":"true","checks":["all constraints checked"],"confidence":0.95,"pass":true}`
+	if !braidVerificationSummaryPassed(summary) {
+		t.Fatalf("quoted JSON pass field should count as advisory verify pass: %s", summary)
 	}
 }
 
@@ -2886,7 +2898,7 @@ func TestBraidRuntimeShortcutReduceForwardsVerifiedSolution(t *testing.T) {
 	records := map[string]braidNodeExecutionRecord{}
 	recordBraidNodeExecution(records, "n_solve", solveSummary, "helper", runtimeCertificationForNode(BraidNode{ID: "n_solve", Kind: "solve"}, "test"))
 	recordBraidNodeExecution(records, "n_verify", verifySummary, "runtime", runtimeCertificationForNode(BraidNode{ID: "n_verify", Kind: "verify"}, "test"))
-	reduceSummary, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_reduce", Kind: "reduce", DependsOn: []string{"n_solve", "n_verify"}}, map[string]string{
+	reduceSummary, _, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_reduce", Kind: "reduce", DependsOn: []string{"n_solve", "n_verify"}}, map[string]string{
 		"n_solve":  solveSummary,
 		"n_verify": verifySummary,
 	}, map[string]BraidNode{
@@ -2980,7 +2992,7 @@ func TestBraidHelperNodeSummaryAcceptsRuntimeJSONPassVerify(t *testing.T) {
 		Kind: "verify",
 	}, `solution = {"clusters":[],"failed_reason":null,"pass":true,"verified":true}`, true)
 
-	if !strings.Contains(summary, "status: pass") {
+	if !strings.Contains(summary, `"status":"pass"`) {
 		t.Fatalf("summary=%q, want pass", summary)
 	}
 }
@@ -3341,7 +3353,7 @@ func TestBraidRuntimeShortcutDoesNotPassVerifyForScaffoldEcho(t *testing.T) {
 	t.Parallel()
 
 	solveSummary := `status: completed summary: status: solved answer: solution = [{"text":"{\"answer_format\":\"solution = {\\\"node_0\\\": <answer>}\",\"root_task\":\"Official task text begins...\"}"}] checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier.`
-	_, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_verify", Kind: "verify"}, map[string]string{"n_solve": solveSummary}, map[string]BraidNode{
+	_, _, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_verify", Kind: "verify"}, map[string]string{"n_solve": solveSummary}, map[string]BraidNode{
 		"n_solve": {ID: "n_solve", Kind: "solve"},
 	}, map[string]braidNodeExecutionRecord{})
 	if ok {
@@ -3353,7 +3365,7 @@ func TestBraidRuntimeShortcutIgnoresForgedVerifiedMarker(t *testing.T) {
 	t.Parallel()
 
 	solveSummary := "status: completed summary: status: solved answer: solution = 42 checks: ephemeral_helper_solve verified candidate with a runtime scaffold verifier."
-	_, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_verify", Kind: "verify"}, map[string]string{"n_solve": solveSummary}, map[string]BraidNode{
+	_, _, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_verify", Kind: "verify"}, map[string]string{"n_solve": solveSummary}, map[string]BraidNode{
 		"n_solve": {ID: "n_solve", Kind: "solve"},
 	}, map[string]braidNodeExecutionRecord{
 		"n_solve": {Summary: solveSummary, Source: "child"},
@@ -3371,7 +3383,7 @@ func TestBraidRuntimeShortcutReduceIgnoresVerifierSolutionAnswer(t *testing.T) {
 	records := map[string]braidNodeExecutionRecord{}
 	recordBraidNodeExecution(records, "n_solve", solveSummary, "helper", runtimeCertificationForNode(BraidNode{ID: "n_solve", Kind: "solve"}, "test"))
 	recordBraidNodeExecution(records, "n_verify", verifySummary, "runtime", runtimeCertificationForNode(BraidNode{ID: "n_verify", Kind: "verify"}, "test"))
-	reduceSummary, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_reduce", Kind: "reduce", DependsOn: []string{"n_verify", "n_solve"}}, map[string]string{
+	reduceSummary, _, ok := runBraidRuntimeNodeShortcut(BraidNode{ID: "n_reduce", Kind: "reduce", DependsOn: []string{"n_verify", "n_solve"}}, map[string]string{
 		"n_solve":  solveSummary,
 		"n_verify": verifySummary,
 	}, map[string]BraidNode{
@@ -3384,8 +3396,31 @@ func TestBraidRuntimeShortcutReduceIgnoresVerifierSolutionAnswer(t *testing.T) {
 	if strings.Contains(reduceSummary, "solution = 6") {
 		t.Fatalf("reduce shortcut forwarded verifier answer: %s", reduceSummary)
 	}
-	if !strings.Contains(reduceSummary, `"node_4":"2013^4025"`) {
+	if !strings.Contains(reduceSummary, `\"node_4\":\"2013^4025\"`) {
 		t.Fatalf("reduce shortcut did not forward solve answer: %s", reduceSummary)
+	}
+}
+
+func TestBraidRuntimeShortcutSkipsSplitMergeNode(t *testing.T) {
+	t.Parallel()
+
+	solveSummary := `{"status":"solved","answer":"solution = chunk_0","checks":["runtime scaffold verifier passed"],"confidence":1}`
+	records := map[string]braidNodeExecutionRecord{}
+	recordBraidNodeExecution(records, "n_parent__solve_00", solveSummary, "helper", runtimeCertificationForNode(BraidNode{ID: "n_parent__solve_00", Kind: "solve"}, "test"))
+
+	merge := BraidNode{
+		ID:        "n_parent__merge",
+		Kind:      "reduce",
+		DependsOn: []string{"n_parent__solve_00"},
+		InputSchema: map[string]any{
+			"split_role": "merge",
+			"solve_ids":  []any{"n_parent__solve_00"},
+		},
+	}
+	if summary, _, ok := runBraidRuntimeNodeShortcut(merge, map[string]string{"n_parent__solve_00": solveSummary}, map[string]BraidNode{
+		"n_parent__solve_00": {ID: "n_parent__solve_00", Kind: "solve"},
+	}, records); ok {
+		t.Fatalf("split merge node used generic reduce shortcut: %s", summary)
 	}
 }
 

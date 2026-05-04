@@ -397,6 +397,30 @@ func applyCertificateToBundle(bundle *ContextBundle) {
 	if bundle == nil || bundle.Certificate == nil {
 		return
 	}
+	if bundle.Certificate.Trust != nil {
+		bundle.Trust = bundle.Certificate.Trust
+		if bundle.Metadata == nil {
+			bundle.Metadata = map[string]any{}
+		}
+		bundle.Metadata["trust_status"] = bundle.Certificate.Trust.Status
+		bundle.Metadata["internal_evidence_ok"] = bundle.Certificate.Trust.InternalEvidenceOK
+		bundle.Metadata["answer_context_ok"] = bundle.Certificate.Trust.AnswerContextOK
+		bundle.Metadata["graph_recommended"] = bundle.Certificate.Trust.GraphRecommended
+		bundle.Metadata["freshness_score"] = bundle.Certificate.Trust.FreshnessScore
+		if bundle.Certificate.Trust.CoverageScore > 0 || bundle.CoverageReport != nil {
+			bundle.Metadata["coverage_score"] = bundle.Certificate.Trust.CoverageScore
+		}
+		if bundle.Certificate.Trust.GraphConfidence > 0 {
+			bundle.Metadata["graph_confidence"] = bundle.Certificate.Trust.GraphConfidence
+		}
+		if bundle.Certificate.Trust.GraphRecommended {
+			bundle.Missing = appendContextGapUnique(bundle.Missing, ContextGap{
+				ID:       "graph-confidence",
+				Required: "context graph",
+				Reason:   "graph expansion recommended for this task type",
+			})
+		}
+	}
 	switch bundle.Certificate.Status {
 	case ContextCertificateStatusCertified:
 		bundle.Status = ContextBundleStatusSufficient
@@ -408,4 +432,16 @@ func applyCertificateToBundle(bundle *ContextBundle) {
 		bundle.Status = ContextBundleStatusBlocked
 		bundle.Answerable = false
 	}
+}
+
+func appendContextGapUnique(values []ContextGap, gap ContextGap) []ContextGap {
+	if gap.ID == "" && gap.Required == "" {
+		return values
+	}
+	for _, existing := range values {
+		if existing.ID == gap.ID && existing.Required == gap.Required {
+			return values
+		}
+	}
+	return append(values, gap)
 }

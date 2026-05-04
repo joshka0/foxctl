@@ -61,6 +61,14 @@ func TestDefaultToolsExposeGatherContext(t *testing.T) {
 		if _, ok := schema.Properties["memory_statuses"]; !ok {
 			t.Fatalf("gather_context schema missing memory_statuses: %v", schema.Properties)
 		}
+		if _, ok := schema.Properties["graph_mode"]; !ok {
+			t.Fatalf("gather_context schema missing graph_mode: %v", schema.Properties)
+		}
+		graphMode, _ := schema.Properties["graph_mode"].(map[string]interface{})
+		enumValues, _ := graphMode["enum"].([]interface{})
+		if len(enumValues) != 3 {
+			t.Fatalf("gather_context graph_mode enum=%v", graphMode["enum"])
+		}
 		for _, required := range schema.Required {
 			if required == "query" {
 				return
@@ -69,6 +77,46 @@ func TestDefaultToolsExposeGatherContext(t *testing.T) {
 		t.Fatalf("gather_context required=%v want query", schema.Required)
 	}
 	t.Fatal("DefaultTools() missing gather_context")
+}
+
+func TestDefaultToolsExposeSpecializedGatherContextSurfaces(t *testing.T) {
+	t.Parallel()
+
+	found := map[string]bool{}
+	for _, tool := range DefaultTools() {
+		switch tool.Name {
+		case "gather_test_context", "gather_docs_context":
+			found[tool.Name] = true
+			if !tool.ReadOnly {
+				t.Fatalf("%s must be read-only", tool.Name)
+			}
+			var schema struct {
+				Required   []string               `json:"required"`
+				Properties map[string]interface{} `json:"properties"`
+			}
+			if err := json.Unmarshal(tool.Parameters, &schema); err != nil {
+				t.Fatalf("%s schema decode: %v", tool.Name, err)
+			}
+			if _, ok := schema.Properties["query"]; !ok {
+				t.Fatalf("%s schema missing query: %v", tool.Name, schema.Properties)
+			}
+			requiredQuery := false
+			for _, required := range schema.Required {
+				if required == "query" {
+					requiredQuery = true
+					break
+				}
+			}
+			if !requiredQuery {
+				t.Fatalf("%s required=%v want query", tool.Name, schema.Required)
+			}
+		}
+	}
+	for _, name := range []string{"gather_test_context", "gather_docs_context"} {
+		if !found[name] {
+			t.Fatalf("DefaultTools() missing %s", name)
+		}
+	}
 }
 
 func TestDefaultToolsExposeExpandContextGraph(t *testing.T) {

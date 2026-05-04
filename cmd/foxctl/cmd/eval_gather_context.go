@@ -5,65 +5,94 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	obs "github.com/joshka0/foxctl/internal/adapters/skillslib/obs"
 	"github.com/joshka0/foxctl/internal/agent/optimization"
 	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/intelligence/indexing/repoindex"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/protocol"
 	"github.com/joshka0/foxctl/internal/rlm"
 	rlmenv "github.com/joshka0/foxctl/internal/rlm/env"
+	"github.com/joshka0/foxctl/internal/runtime/engine"
 	"github.com/joshka0/foxctl/internal/storage/sqliteutil"
 	"github.com/spf13/cobra"
 )
 
 type gatherContextEvalResult struct {
-	CaseID               string         `json:"case_id,omitempty"`
-	Category             string         `json:"category,omitempty"`
-	TaskType             string         `json:"task_type,omitempty"`
-	Status               string         `json:"status,omitempty"`
-	BundleStatus         string         `json:"bundle_status,omitempty"`
-	CertificateStatus    string         `json:"certificate_status,omitempty"`
-	Answerable           bool           `json:"answerable"`
-	Paths                []string       `json:"paths,omitempty"`
-	RawEvidencePaths     []string       `json:"raw_evidence_paths,omitempty"`
-	SelectedPaths        []string       `json:"selected_paths,omitempty"`
-	AnswerCandidatePaths []string       `json:"answer_candidate_paths,omitempty"`
-	MatchedPaths         []string       `json:"matched_paths,omitempty"`
-	RetrievalMisses      []string       `json:"retrieval_misses,omitempty"`
-	ReductionMisses      []string       `json:"reduction_misses,omitempty"`
-	PathRecall           float64        `json:"path_recall,omitempty"`
-	MatchedFacts         []string       `json:"matched_facts,omitempty"`
-	FactRecall           float64        `json:"fact_recall,omitempty"`
-	Lanes                []string       `json:"lanes,omitempty"`
-	MemoryStatuses       []string       `json:"memory_statuses,omitempty"`
-	SourceCoverage       map[string]int `json:"source_coverage,omitempty"`
-	RawContextChars      int            `json:"raw_context_chars,omitempty"`
-	EmittedContextChars  int            `json:"emitted_context_chars,omitempty"`
-	OmittedContextItems  int            `json:"omitted_context_items,omitempty"`
-	FactCount            int            `json:"fact_count,omitempty"`
-	EvidenceCount        int            `json:"evidence_count,omitempty"`
-	DurationMS           int64          `json:"duration_ms,omitempty"`
-	Passed               bool           `json:"passed,omitempty"`
-	Gaps                 []string       `json:"gaps,omitempty"`
-	Error                string         `json:"error,omitempty"`
+	CaseID                     string         `json:"case_id,omitempty"`
+	Category                   string         `json:"category,omitempty"`
+	TaskType                   string         `json:"task_type,omitempty"`
+	Status                     string         `json:"status,omitempty"`
+	BundleStatus               string         `json:"bundle_status,omitempty"`
+	CertificateStatus          string         `json:"certificate_status,omitempty"`
+	Answerable                 bool           `json:"answerable"`
+	Paths                      []string       `json:"paths,omitempty"`
+	ProviderSeenPaths          []string       `json:"provider_seen_paths,omitempty"`
+	ProviderCandidatePaths     []string       `json:"provider_candidate_paths,omitempty"`
+	RawEvidencePaths           []string       `json:"raw_evidence_paths,omitempty"`
+	SelectedPaths              []string       `json:"selected_paths,omitempty"`
+	AnswerCandidatePaths       []string       `json:"answer_candidate_paths,omitempty"`
+	MatchedPaths               []string       `json:"matched_paths,omitempty"`
+	ExpectedPathsMissingOnDisk []string       `json:"expected_paths_missing_on_disk,omitempty"`
+	StaleEval                  bool           `json:"stale_eval,omitempty"`
+	ProviderMisses             []string       `json:"provider_misses,omitempty"`
+	BundleEvidenceMisses       []string       `json:"bundle_evidence_misses,omitempty"`
+	RetrievalMisses            []string       `json:"retrieval_misses,omitempty"`
+	ReductionMisses            []string       `json:"reduction_misses,omitempty"`
+	PathRecall                 float64        `json:"path_recall,omitempty"`
+	ExpectedRoles              []string       `json:"expected_roles,omitempty"`
+	MatchedRoles               []string       `json:"matched_roles,omitempty"`
+	RoleRecall                 float64        `json:"role_recall,omitempty"`
+	RoleCoverage               map[string]int `json:"role_coverage,omitempty"`
+	MatchedFacts               []string       `json:"matched_facts,omitempty"`
+	FactRecall                 float64        `json:"fact_recall,omitempty"`
+	Lanes                      []string       `json:"lanes,omitempty"`
+	MemoryStatuses             []string       `json:"memory_statuses,omitempty"`
+	SourceCoverage             map[string]int `json:"source_coverage,omitempty"`
+	ProviderTelemetry          any            `json:"provider_telemetry,omitempty"`
+	RawContextChars            int            `json:"raw_context_chars,omitempty"`
+	EmittedContextChars        int            `json:"emitted_context_chars,omitempty"`
+	OmittedContextItems        int            `json:"omitted_context_items,omitempty"`
+	FactCount                  int            `json:"fact_count,omitempty"`
+	EvidenceCount              int            `json:"evidence_count,omitempty"`
+	DurationMS                 int64          `json:"duration_ms,omitempty"`
+	Passed                     bool           `json:"passed,omitempty"`
+	Gaps                       []string       `json:"gaps,omitempty"`
+	Error                      string         `json:"error,omitempty"`
 }
 
 type gatherContextEvalSummary struct {
-	Count                   int     `json:"count"`
-	PassRate                float64 `json:"pass_rate"`
-	MeanPathRecall          float64 `json:"mean_path_recall"`
-	MeanFactRecall          float64 `json:"mean_fact_recall"`
-	MeanDurationMS          float64 `json:"mean_duration_ms"`
-	MeanRawContextChars     float64 `json:"mean_raw_context_chars"`
-	MeanEmittedContextChars float64 `json:"mean_emitted_context_chars"`
-	MeanOmittedContextItems float64 `json:"mean_omitted_context_items"`
-	MeanFactCount           float64 `json:"mean_fact_count"`
-	MeanEvidenceCount       float64 `json:"mean_evidence_count"`
-	ErrorCount              int     `json:"error_count"`
+	Count                        int                            `json:"count"`
+	ScoredCount                  int                            `json:"scored_count,omitempty"`
+	StaleEvalCount               int                            `json:"stale_eval_count,omitempty"`
+	PassRate                     float64                        `json:"pass_rate"`
+	MeanPathRecall               float64                        `json:"mean_path_recall"`
+	MeanRoleRecall               float64                        `json:"mean_role_recall,omitempty"`
+	RoleRecallByRole             []gatherContextRoleRecallScore `json:"role_recall_by_role,omitempty"`
+	PeripheralRoleCoverage       map[string]int                 `json:"peripheral_role_coverage,omitempty"`
+	WrongRolePeripheralCaseCount map[string]int                 `json:"wrong_role_peripheral_case_count,omitempty"`
+	MeanFactRecall               float64                        `json:"mean_fact_recall"`
+	MeanDurationMS               float64                        `json:"mean_duration_ms"`
+	MeanRawContextChars          float64                        `json:"mean_raw_context_chars"`
+	MeanEmittedContextChars      float64                        `json:"mean_emitted_context_chars"`
+	MeanOmittedContextItems      float64                        `json:"mean_omitted_context_items"`
+	MeanFactCount                float64                        `json:"mean_fact_count"`
+	MeanEvidenceCount            float64                        `json:"mean_evidence_count"`
+	ErrorCount                   int                            `json:"error_count"`
+}
+
+type gatherContextRoleRecallScore struct {
+	Role          string  `json:"role"`
+	ExpectedCases int     `json:"expected_cases"`
+	MatchedCases  int     `json:"matched_cases"`
+	MissingCases  int     `json:"missing_cases"`
+	Recall        float64 `json:"recall"`
 }
 
 type gatherContextBaselineComparison struct {
@@ -89,6 +118,12 @@ type gatherContextBaselineComparison struct {
 	BaselineMeanCostUSD      float64 `json:"baseline_mean_cost_usd,omitempty"`
 	EmittedCharsPerTokenMean float64 `json:"emitted_chars_per_token_mean,omitempty"`
 }
+
+const (
+	rlmAgentPlanModePlanner          = "planner"
+	rlmAgentPlanModePlannerWithFacts = "planner-with-facts"
+	rlmAgentPlanModeRerank           = "rerank"
+)
 
 func newEvalGatherContextCommand() *cobra.Command {
 	var (
@@ -173,9 +208,11 @@ func newEvalGatherContextCommand() *cobra.Command {
 			}
 			baselineSummaries = summarizeAgentEvalResults(baselineResults)
 			baselineComparisons = compareGatherContextToAgentBaselines(summary, baselineSummaries)
+			repoIndexFreshness := gatherContextEvalRepoIndexFreshness(ctx, cfg.Storage.Root, absWorkspace)
 			report := map[string]any{
 				"operation":                   "eval.gather-context",
 				"workspace_id":                absWorkspace,
+				"repo_state":                  gatherContextEvalRepoState(ctx, absWorkspace),
 				"eval_case_count":             len(evalCases),
 				"eval_cases":                  evalCases,
 				"tool_profile":                toolProfile,
@@ -196,6 +233,9 @@ func newEvalGatherContextCommand() *cobra.Command {
 				"cli_command":                 cmd.CommandPath(),
 				"effective_contract":          map[string]any{"tool_name": "gather_context", "adapter_execution_path": "internal_adapter_bypass_v1"},
 			}
+			if repoIndexFreshness != nil {
+				report["repoindex_freshness"] = repoIndexFreshness
+			}
 			if strings.TrimSpace(reportFile) != "" {
 				payload, err := json.MarshalIndent(report, "", "  ")
 				if err != nil {
@@ -206,7 +246,7 @@ func newEvalGatherContextCommand() *cobra.Command {
 				}
 			}
 			return protocol.WriteOK(out, "eval.gather-context", map[string]any{
-				"markdown": renderGatherContextEvalMarkdown(absWorkspace, summary, results, baselineComparisons),
+				"markdown": renderGatherContextEvalMarkdown(absWorkspace, summary, results, baselineComparisons, repoIndexFreshness),
 				"report":   report,
 			}, protocol.WithSource("run"), protocol.WithWorkspace(absWorkspace))
 		},
@@ -232,6 +272,91 @@ func newEvalGatherContextCommand() *cobra.Command {
 	return cmd
 }
 
+func gatherContextEvalRepoState(ctx context.Context, workspace string) map[string]any {
+	state := map[string]any{
+		"workspace": workspace,
+	}
+	if strings.TrimSpace(workspace) == "" {
+		state["git_valid"] = false
+		state["error"] = "empty workspace"
+		return state
+	}
+	if out, err := gatherContextEvalGitOutput(ctx, workspace, "rev-parse", "--is-inside-work-tree"); err != nil || strings.TrimSpace(out) != "true" {
+		state["git_valid"] = false
+		if err != nil {
+			state["error"] = err.Error()
+		}
+		return state
+	}
+	state["git_valid"] = true
+	if out, err := gatherContextEvalGitOutput(ctx, workspace, "rev-parse", "HEAD"); err == nil {
+		state["head_sha"] = strings.TrimSpace(out)
+	}
+	if out, err := gatherContextEvalGitOutput(ctx, workspace, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+		state["branch"] = strings.TrimSpace(out)
+	}
+	if out, err := gatherContextEvalGitOutput(ctx, workspace, "remote", "get-url", "origin"); err == nil {
+		state["origin_url"] = strings.TrimSpace(out)
+	}
+	if out, err := gatherContextEvalGitOutput(ctx, workspace, "status", "--short"); err == nil {
+		status := strings.TrimSpace(out)
+		state["worktree_dirty"] = status != ""
+		if status != "" {
+			state["status_short"] = strings.Split(status, "\n")
+		}
+	}
+	return state
+}
+
+func gatherContextEvalRepoIndexFreshness(ctx context.Context, storageRoot, workspace string) map[string]any {
+	if strings.TrimSpace(storageRoot) == "" || strings.TrimSpace(workspace) == "" {
+		return nil
+	}
+	store, err := repoindex.Open(ctx, storageRoot, workspace)
+	if err != nil {
+		return nil
+	}
+	defer store.Close()
+
+	meta, err := store.GetMeta(ctx)
+	if err != nil {
+		return nil
+	}
+	current := repoindex.ResolveGitSnapshot(ctx, workspace)
+	freshness := repoindex.CompareIndexFreshness(meta, current)
+	staleOrDirtyMismatch := freshness.Level == repoindex.FreshnessStale ||
+		freshness.Level == repoindex.FreshnessDirty ||
+		freshness.Level == repoindex.FreshnessUnknown ||
+		meta.HeadSHA != current.HeadSHA ||
+		meta.WorktreeDirty != current.WorktreeDirty ||
+		(meta.DirtyStatusHash != "" && current.DirtyStatusHash != "" && meta.DirtyStatusHash != current.DirtyStatusHash)
+	return map[string]any{
+		"available":                 true,
+		"index_head_sha":            meta.HeadSHA,
+		"current_head_sha":          current.HeadSHA,
+		"index_worktree_dirty":      meta.WorktreeDirty,
+		"current_worktree_dirty":    current.WorktreeDirty,
+		"index_dirty_status_hash":   meta.DirtyStatusHash,
+		"current_dirty_status_hash": current.DirtyStatusHash,
+		"stale_or_dirty_mismatch":   staleOrDirtyMismatch,
+		"freshness":                 freshness,
+		"indexed_at":                meta.IndexedAt,
+	}
+}
+
+func gatherContextEvalGitOutput(ctx context.Context, workspace string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", workspace}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(out))
+		if text != "" {
+			return "", fmt.Errorf("%s: %s", err, text)
+		}
+		return "", err
+	}
+	return string(out), nil
+}
+
 func runSingleRLMSearchAgentEval(
 	ctx context.Context,
 	cfg config.Config,
@@ -249,6 +374,12 @@ func runSingleRLMSearchAgentEval(
 	routeProfile string,
 	planMode string,
 ) agentEvalResult {
+	if strings.EqualFold(strings.TrimSpace(planMode), rlmAgentPlanModeRerank) {
+		return runSingleRLMGatherRerankEval(ctx, cfg, workspace, vaultPath, target, evalCase, timeout, passThreshold, limit, maxContextChars, lanes, toolProfile)
+	}
+	if isRLMGatherPlannerMode(planMode) {
+		return runSingleRLMGatherPlannerEval(ctx, cfg, workspace, vaultPath, target, evalCase, timeout, passThreshold, limit, maxContextChars, lanes, toolProfile, routeProfile, planMode)
+	}
 	result := agentEvalResult{
 		CaseID:   strings.TrimSpace(evalCase.ID),
 		Category: strings.TrimSpace(evalCase.Category),
@@ -439,7 +570,383 @@ func runSingleRLMSearchAgentEval(
 	return result
 }
 
+type gatherContextPlannerOutput struct {
+	Query                string                              `json:"query,omitempty"`
+	Goal                 string                              `json:"goal,omitempty"`
+	TaskType             string                              `json:"task_type,omitempty"`
+	Lanes                []string                            `json:"lanes,omitempty"`
+	SourceProfiles       []string                            `json:"source_profiles,omitempty"`
+	RequiredEvidence     []string                            `json:"required_evidence,omitempty"`
+	CoverageRequirements []contextengine.CoverageRequirement `json:"coverage_requirements,omitempty"`
+	Languages            []string                            `json:"languages,omitempty"`
+	PathPrefixes         []string                            `json:"path_prefixes,omitempty"`
+	ExcludedPaths        []string                            `json:"excluded_paths,omitempty"`
+	Limit                int                                 `json:"limit,omitempty"`
+	MaxContextChars      int                                 `json:"max_context_chars,omitempty"`
+	Rationale            string                              `json:"rationale,omitempty"`
+}
+
+type gatherContextPlannerNoopTools struct{}
+
+func (gatherContextPlannerNoopTools) Execute(_ context.Context, name string, _ json.RawMessage) (map[string]any, error) {
+	return nil, fmt.Errorf("planner mode does not expose tools; attempted %s", name)
+}
+
+func runSingleRLMGatherPlannerEval(
+	ctx context.Context,
+	cfg config.Config,
+	workspace string,
+	vaultPath string,
+	target agentEvalTarget,
+	evalCase promptEvalCase,
+	timeout time.Duration,
+	passThreshold float64,
+	limit int,
+	maxContextChars int,
+	lanes []string,
+	toolProfile string,
+	routeProfile string,
+	planMode string,
+) agentEvalResult {
+	result := agentEvalResult{
+		CaseID:   strings.TrimSpace(evalCase.ID),
+		Category: strings.TrimSpace(evalCase.Category),
+		Role:     "rlm_search_planner",
+		Label:    target.Label,
+		Provider: target.Provider,
+		Model:    target.Model,
+		Runner:   target.Runner,
+		Status:   "ok",
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	includeFacts := strings.EqualFold(strings.TrimSpace(planMode), rlmAgentPlanModePlannerWithFacts)
+	plannerTask := rlm.Task{
+		Prompt:        buildRLMGatherPlannerEvalPrompt(evalCase, includeFacts),
+		WorkspaceRoot: workspace,
+		WorkspaceID:   workspace,
+		MaxDepth:      0,
+		MaxIterations: 1,
+		MaxSubcalls:   0,
+	}
+	plannerRunner := rlm.LLMRunner{
+		Config: rlm.LLMConfig{
+			Provider:       target.Provider,
+			APIKey:         target.APIKey,
+			BaseURL:        target.BaseURL,
+			Model:          target.Model,
+			Timeout:        timeout,
+			MaxIterations:  1,
+			RequireToolUse: false,
+			RouteProfile:   rlm.NormalizeRouteProfile(routeProfile),
+			PlanMode:       rlm.PlanModeFree,
+			ToolProfile:    string(rlm.ToolProfileLongCoTNoModelTools),
+		},
+		Tools: gatherContextPlannerNoopTools{},
+	}
+
+	start := time.Now()
+	plannerResult, err := plannerRunner.Run(runCtx, plannerTask, rlm.Environment{})
+	if err != nil {
+		result.DurationMS = time.Since(start).Milliseconds()
+		result.Status = "error"
+		result.Error = "planner: " + err.Error()
+		return result
+	}
+	result.InputTokens = firstPositiveInt(
+		evalIntFromAny(plannerResult.Metadata["parent_input_tokens_total"]),
+		evalIntFromAny(plannerResult.Metadata["parent_input_tokens"]),
+	)
+	result.OutputTokens = firstPositiveInt(
+		evalIntFromAny(plannerResult.Metadata["parent_output_tokens_total"]),
+		evalIntFromAny(plannerResult.Metadata["parent_output_tokens"]),
+	)
+	result.TotalTokens = firstPositiveInt(
+		evalIntFromAny(plannerResult.Metadata["parent_total_tokens_total"]),
+		evalIntFromAny(plannerResult.Metadata["parent_total_tokens"]),
+	)
+	cost := obs.CalculateTokenCost(target.Model, result.InputTokens, result.OutputTokens)
+	result.TotalCostUSD = cost.TotalCostUSD
+
+	plan, ok := parseGatherContextPlannerOutput(plannerResult.Answer)
+	if !ok {
+		result.DurationMS = time.Since(start).Milliseconds()
+		result.Status = "error"
+		result.Output = strings.TrimSpace(plannerResult.Answer)
+		result.Error = "planner did not return valid gather_context planning JSON"
+		return result
+	}
+
+	companionDB, companionClose, err := openRLMCompanionDB(runCtx, cfg)
+	if err != nil {
+		result.DurationMS = time.Since(start).Milliseconds()
+		result.Status = "error"
+		result.Error = err.Error()
+		return result
+	}
+	if companionClose != nil {
+		defer func() { _ = companionClose() }()
+	}
+
+	gatherTask := rlm.Task{
+		Prompt:        buildCodeSearchEnsembleEvalQuery(evalCase),
+		WorkspaceRoot: workspace,
+		WorkspaceID:   workspace,
+		MaxDepth:      0,
+		MaxIterations: 1,
+		MaxSubcalls:   0,
+	}
+	bootstrapper := rlmenv.NewBootstrapper(rlmenv.BootstrapConfig{
+		AppConfig:   cfg,
+		VaultPath:   vaultPath,
+		CompanionDB: companionDB,
+	})
+	env, err := bootstrapper.Build(runCtx, gatherTask)
+	if err != nil {
+		result.DurationMS = time.Since(start).Milliseconds()
+		result.Status = "error"
+		result.Error = err.Error()
+		return result
+	}
+	defer func() { _ = bootstrapper.Close() }()
+	env.Tools = rlmenv.FilterTools(env.Tools, toolProfile)
+
+	adapter := rlmenv.NewReadOnlyAdapter(cfg, workspace, vaultPath, companionDB, env)
+	adapter.SetContextEngineStore(bootstrapper.ContextEngineStore())
+	adapter.SetTaskStore(bootstrapper.TaskStore())
+
+	gatherPayload := buildRLMSearchAgentGatherPayloadForPlanner(evalCase, plan, includeFacts, limit, maxContextChars, lanes)
+	raw, err := json.Marshal(gatherPayload)
+	if err != nil {
+		result.DurationMS = time.Since(start).Milliseconds()
+		result.Status = "error"
+		result.Error = err.Error()
+		return result
+	}
+	out, err := adapter.ExecuteInternal(runCtx, "gather_context", raw)
+	result.DurationMS = time.Since(start).Milliseconds()
+	if err != nil {
+		result.Status = "error"
+		result.Error = "gather_context: " + err.Error()
+		return result
+	}
+	bundle, err := decodeGatherContextBundle(out)
+	if err != nil {
+		result.Status = "error"
+		result.Error = "decode gather_context bundle: " + err.Error()
+		return result
+	}
+
+	result.ToolCallCount = 1
+	result.ToolNames = []string{"gather_context"}
+	result.GatherSelectedPaths = extractGatherContextSelectedPaths(bundle)
+	result.GatherAnswerSeedPaths = extractGatherContextAnswerCandidatePaths(bundle)
+	result.GatherPathSetMust = append([]string(nil), result.GatherSelectedPaths...)
+	paths := extractGatherContextPaths(bundle)
+	factBlob := buildGatherContextFactBlob(bundle)
+	result.MatchedPaths, result.PathRecall = scoreExpectedPaths(evalCase.ExpectedPaths, strings.Join(paths, "\n"))
+	result.PathMatchCount = len(result.MatchedPaths)
+	result.MatchedFacts, result.FactRecall = scoreRequiredFacts(evalCase.RequiredFacts, factBlob)
+	result.CorrectnessScore = blendedCorrectnessScore(result.PathRecall, 0, 0, result.FactRecall, len(evalCase.ExpectedPaths) > 0, false, false, len(evalCase.RequiredFacts) > 0)
+	structured := structuredAgentEvalOutput{
+		Summary:   strings.TrimSpace(bundle.Summary),
+		Paths:     paths,
+		Facts:     gatherContextBundleFactStrings(bundle),
+		Rationale: "Cheap planner produced gather_context retrieval intent; deterministic runtime executed and scored the resulting bundle.",
+	}
+	if body, err := json.Marshal(structured); err == nil {
+		result.Output = string(body)
+	}
+	result.FinalAnswerLosses = expectedPathsPresentThenMissing(evalCase.ExpectedPaths, strings.Join(paths, "\n"), result.Output)
+	result.ExcludedPathHits, result.WrongScopePenalty = scoreExcludedPaths(evalCase.ExcludedPaths, result.Output)
+	result.Passed = shouldPassAgentEval(result, evalCase, passThreshold)
+	return result
+}
+
+type gatherContextRerankCandidate struct {
+	Path       string   `json:"path"`
+	Rank       int      `json:"rank,omitempty"`
+	Confidence float64  `json:"confidence,omitempty"`
+	Reason     string   `json:"reason,omitempty"`
+	Coverage   []string `json:"coverage,omitempty"`
+	Facts      []string `json:"facts,omitempty"`
+}
+
+type gatherContextRerankOutput struct {
+	Summary         string   `json:"summary,omitempty"`
+	Paths           []string `json:"paths,omitempty"`
+	MissingCoverage []string `json:"missing_coverage,omitempty"`
+	UncertainPaths  []string `json:"uncertain_paths,omitempty"`
+	Rationale       string   `json:"rationale,omitempty"`
+}
+
+func runSingleRLMGatherRerankEval(
+	ctx context.Context,
+	cfg config.Config,
+	workspace string,
+	vaultPath string,
+	target agentEvalTarget,
+	evalCase promptEvalCase,
+	timeout time.Duration,
+	passThreshold float64,
+	limit int,
+	maxContextChars int,
+	lanes []string,
+	toolProfile string,
+) agentEvalResult {
+	result := agentEvalResult{
+		CaseID:   strings.TrimSpace(evalCase.ID),
+		Category: strings.TrimSpace(evalCase.Category),
+		Role:     "rlm_search_reranker",
+		Label:    target.Label,
+		Provider: target.Provider,
+		Model:    target.Model,
+		Runner:   target.Runner,
+		Status:   "ok",
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	start := time.Now()
+	companionDB, companionClose, err := openRLMCompanionDB(runCtx, cfg)
+	if err != nil {
+		result.Status = "error"
+		result.Error = err.Error()
+		return result
+	}
+	if companionClose != nil {
+		defer func() { _ = companionClose() }()
+	}
+
+	task := rlm.Task{
+		Prompt:        buildCodeSearchEnsembleEvalQuery(evalCase),
+		WorkspaceRoot: workspace,
+		WorkspaceID:   workspace,
+		MaxDepth:      0,
+		MaxIterations: 1,
+		MaxSubcalls:   0,
+	}
+	bootstrapper := rlmenv.NewBootstrapper(rlmenv.BootstrapConfig{
+		AppConfig:   cfg,
+		VaultPath:   vaultPath,
+		CompanionDB: companionDB,
+	})
+	env, err := bootstrapper.Build(runCtx, task)
+	if err != nil {
+		result.Status = "error"
+		result.Error = err.Error()
+		return result
+	}
+	defer func() { _ = bootstrapper.Close() }()
+	env.Tools = rlmenv.FilterTools(env.Tools, toolProfile)
+
+	adapter := rlmenv.NewReadOnlyAdapter(cfg, workspace, vaultPath, companionDB, env)
+	adapter.SetContextEngineStore(bootstrapper.ContextEngineStore())
+	adapter.SetTaskStore(bootstrapper.TaskStore())
+
+	payload := buildRLMSearchAgentGatherPayload(evalCase, rerankGatherLimit(limit), rerankGatherMaxContextChars(evalCase, maxContextChars), lanes)
+	payload["response_mode"] = "full"
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		result.Status = "error"
+		result.Error = err.Error()
+		return result
+	}
+	out, err := adapter.ExecuteInternal(runCtx, "gather_context", raw)
+	if err != nil {
+		result.Status = "error"
+		result.Error = "gather_context: " + err.Error()
+		return result
+	}
+	bundle, err := decodeGatherContextBundle(out)
+	if err != nil {
+		result.Status = "error"
+		result.Error = "decode gather_context bundle: " + err.Error()
+		return result
+	}
+
+	candidates := buildGatherContextRerankCandidates(bundle, 24)
+	result.GatherSelectedPaths = extractGatherContextSelectedPaths(bundle)
+	result.GatherAnswerSeedPaths = extractGatherContextAnswerCandidatePaths(bundle)
+	result.GatherPathSetMust = append([]string(nil), result.GatherSelectedPaths...)
+	result.ToolCallCount = 1
+	result.ToolNames = []string{"gather_context", "rerank_model"}
+
+	rerankPrompt := buildGatherContextRerankPrompt(evalCase, candidates, rerankGatherLimit(limit))
+	llmCfg := engine.DefaultLLMChatConfig()
+	llmCfg.Provider = strings.TrimSpace(target.Provider)
+	llmCfg.APIKey = strings.TrimSpace(target.APIKey)
+	llmCfg.BaseURL = strings.TrimSpace(target.BaseURL)
+	llmCfg.Model = strings.TrimSpace(target.Model)
+	llmCfg.Timeout = timeout
+	llmCfg.MaxTokens = 1200
+	llmCfg.Temperature = 0
+	llm, err := engine.NewLLMChatEngine(llmCfg)
+	if err != nil {
+		result.Status = "error"
+		result.Error = "rerank model: " + err.Error()
+		result.DurationMS = time.Since(start).Milliseconds()
+		return result
+	}
+	modelOut, err := llm.Run(runCtx, engine.EngineInput{
+		SystemPrompt: "You are a bounded repo evidence reranker. Return JSON only. Select only from candidate paths supplied by the runtime.",
+		Messages:     []engine.Message{engine.NewUserMessage(rerankPrompt)},
+		Workspace:    workspace,
+		MaxTokens:    llmCfg.MaxTokens,
+		Temperature:  0,
+	})
+	result.DurationMS = time.Since(start).Milliseconds()
+	if err != nil {
+		result.Status = "error"
+		result.Error = "rerank model: " + err.Error()
+		return result
+	}
+	result.InputTokens = modelOut.Tokens.InputTokens
+	result.OutputTokens = modelOut.Tokens.OutputTokens
+	result.TotalTokens = modelOut.Tokens.TotalTokens
+	cost := obs.CalculateTokenCost(target.Model, result.InputTokens, result.OutputTokens)
+	result.TotalCostUSD = cost.TotalCostUSD
+
+	rerank, ok := parseGatherContextRerankOutput(modelOut.AssistantText)
+	if !ok {
+		result.Status = "error"
+		result.Output = strings.TrimSpace(modelOut.AssistantText)
+		result.Error = "rerank model did not return valid JSON"
+		return result
+	}
+	selectedPaths := filterRerankPathsToCandidates(rerank.Paths, candidates)
+	facts := gatherContextBundleFactStrings(bundle)
+	structured := structuredAgentEvalOutput{
+		Summary: strings.TrimSpace(rerank.Summary),
+		Paths:   selectedPaths,
+		Facts:   facts,
+		Rationale: strings.TrimSpace(firstNonEmpty(
+			rerank.Rationale,
+			"Gemini reranked a deterministic gather_context candidate set; runtime discarded paths not present in candidates.",
+		)),
+	}
+	if structured.Summary == "" {
+		structured.Summary = strings.TrimSpace(bundle.Summary)
+	}
+	body, _ := json.Marshal(structured)
+	result.Output = string(body)
+
+	result.MatchedPaths, result.PathRecall = scoreExpectedPaths(evalCase.ExpectedPaths, strings.Join(selectedPaths, "\n"))
+	result.PathMatchCount = len(result.MatchedPaths)
+	result.MatchedFacts, result.FactRecall = scoreRequiredFacts(evalCase.RequiredFacts, buildStructuredAgentJudgeText(structured))
+	result.CorrectnessScore = blendedCorrectnessScore(result.PathRecall, 0, 0, result.FactRecall, len(evalCase.ExpectedPaths) > 0, false, false, len(evalCase.RequiredFacts) > 0)
+	result.FinalAnswerLosses = expectedPathsPresentThenMissing(evalCase.ExpectedPaths, strings.Join(result.GatherSelectedPaths, "\n"), strings.Join(selectedPaths, "\n"))
+	result.ExcludedPathHits, result.WrongScopePenalty = scoreExcludedPaths(evalCase.ExcludedPaths, result.Output)
+	result.Passed = shouldPassAgentEval(result, evalCase, passThreshold)
+	return result
+}
+
 func buildRLMSearchAgentGatherPayload(evalCase promptEvalCase, limit int, maxContextChars int, lanes []string) map[string]any {
+	return buildRLMSearchAgentGatherPayloadWithFacts(evalCase, limit, maxContextChars, lanes, true)
+}
+
+func buildRLMSearchAgentGatherPayloadWithFacts(evalCase promptEvalCase, limit int, maxContextChars int, lanes []string, includeFacts bool) map[string]any {
 	payload := map[string]any{
 		"query":             buildCodeSearchEnsembleEvalQuery(evalCase),
 		"goal":              gatherContextEvalCaseString(evalCase, "goal", "repo_grounded_eval"),
@@ -449,7 +956,7 @@ func buildRLMSearchAgentGatherPayload(evalCase promptEvalCase, limit int, maxCon
 		"max_context_chars": gatherContextEvalCaseInt(evalCase, "max_context_chars", maxContextChars),
 		"response_mode":     "answer_surface",
 	}
-	if len(evalCase.RequiredFacts) > 0 {
+	if includeFacts && len(evalCase.RequiredFacts) > 0 {
 		payload["required_evidence"] = append([]string(nil), evalCase.RequiredFacts...)
 	}
 	if statuses := gatherContextEvalCaseStringSlice(evalCase, "memory_statuses", nil); len(statuses) > 0 {
@@ -464,7 +971,302 @@ func buildRLMSearchAgentGatherPayload(evalCase promptEvalCase, limit int, maxCon
 	if prefixes := gatherContextEvalCaseStringSlice(evalCase, "path_prefixes", nil); len(prefixes) > 0 {
 		payload["path_prefixes"] = prefixes
 	}
+	if excluded := gatherContextEvalExcludedPaths(evalCase); len(excluded) > 0 {
+		payload["excluded_paths"] = excluded
+	}
 	return payload
+}
+
+func buildRLMSearchAgentGatherPayloadForPlanner(evalCase promptEvalCase, plan gatherContextPlannerOutput, includeFacts bool, limit int, maxContextChars int, lanes []string) map[string]any {
+	payload := buildRLMSearchAgentGatherPayloadWithFacts(evalCase, limit, maxContextChars, lanes, includeFacts)
+	payload["response_mode"] = "full"
+	if value := strings.TrimSpace(plan.Query); value != "" {
+		payload["query"] = value
+	}
+	if value := strings.TrimSpace(plan.Goal); value != "" {
+		payload["goal"] = value
+	}
+	if value := strings.TrimSpace(plan.TaskType); value != "" {
+		payload["task_type"] = value
+	}
+	if values := compactGatherContextEvalStrings(plan.Lanes); len(values) > 0 {
+		payload["lanes"] = values
+	}
+	if values := compactGatherContextEvalStrings(plan.SourceProfiles); len(values) > 0 {
+		payload["source_profiles"] = values
+	}
+	if values := compactGatherContextEvalStrings(plan.RequiredEvidence); len(values) > 0 {
+		payload["required_evidence"] = values
+	}
+	if len(plan.CoverageRequirements) > 0 {
+		payload["coverage_requirements"] = plan.CoverageRequirements
+	}
+	if values := compactGatherContextEvalStrings(plan.Languages); len(values) > 0 {
+		payload["languages"] = values
+	}
+	if values := compactGatherContextEvalStrings(plan.PathPrefixes); len(values) > 0 {
+		payload["path_prefixes"] = values
+	}
+	if values := compactGatherContextEvalStrings(plan.ExcludedPaths); len(values) > 0 {
+		payload["excluded_paths"] = values
+	}
+	if plan.Limit > 0 && plan.Limit <= 50 {
+		payload["limit"] = plan.Limit
+	}
+	if plan.MaxContextChars > 0 && plan.MaxContextChars <= 50000 {
+		payload["max_context_chars"] = plan.MaxContextChars
+	}
+	return payload
+}
+
+func isRLMGatherPlannerMode(planMode string) bool {
+	switch strings.ToLower(strings.TrimSpace(planMode)) {
+	case rlmAgentPlanModePlanner, rlmAgentPlanModePlannerWithFacts:
+		return true
+	default:
+		return false
+	}
+}
+
+func buildRLMGatherPlannerEvalPrompt(evalCase promptEvalCase, includeFacts bool) string {
+	var b strings.Builder
+	b.WriteString("Plan a deterministic gather_context retrieval request for a repo-grounded coding question.\n")
+	b.WriteString("Do not answer the question. Do not output final repo paths. Return exactly one JSON object.\n")
+	b.WriteString("The runtime will execute your plan and score only runtime evidence, so your job is to describe retrieval intent: task_type, source_profiles, required_evidence, and coverage_requirements.\n")
+	b.WriteString("Allowed task_type values: file_locate, symbol_inspect, execution_trace, change_impact, registration_trace, architecture_map, subsystem_map, integration_surface.\n")
+	b.WriteString("Useful source_profiles: repo_code, repo_docs, codemaps, cochange_history, memory, task, session, vault_docs.\n")
+	b.WriteString("Useful lanes: code, memory, context, task.\n")
+	b.WriteString("JSON shape:\n")
+	b.WriteString(`{"query":"...","goal":"repo_grounded_eval","task_type":"file_locate","lanes":["code"],"source_profiles":["repo_code"],"required_evidence":["short concept or symbol"],"coverage_requirements":[{"id":"stable_id","kind":"subsystem_role","label":"role label","terms":["term","symbol"],"required":true,"min_paths":1,"weight":1,"source_profiles":["repo_code"]}],"languages":[],"path_prefixes":[],"excluded_paths":[],"limit":8,"max_context_chars":6000,"rationale":"why these coverage slots are needed"}`)
+	b.WriteByte('\n')
+	if strings.TrimSpace(evalCase.TaskType) != "" {
+		b.WriteString("Known task_type hint: " + strings.TrimSpace(evalCase.TaskType) + "\n")
+	}
+	if profiles := gatherContextEvalCaseStringSlice(evalCase, "source_profiles", nil); len(profiles) > 0 {
+		b.WriteString("Known source profile hint: " + strings.Join(profiles, ", ") + "\n")
+	}
+	if languages := gatherContextEvalCaseStringSlice(evalCase, "languages", nil); len(languages) > 0 {
+		b.WriteString("Known language hint: " + strings.Join(languages, ", ") + "\n")
+	}
+	if prefixes := gatherContextEvalCaseStringSlice(evalCase, "path_prefixes", nil); len(prefixes) > 0 {
+		b.WriteString("Known path prefix hint: " + strings.Join(prefixes, ", ") + "\n")
+	}
+	if excluded := gatherContextEvalExcludedPaths(evalCase); len(excluded) > 0 {
+		b.WriteString("Known excluded path hint: " + strings.Join(excluded, ", ") + "\n")
+	}
+	if includeFacts && len(evalCase.RequiredFacts) > 0 {
+		b.WriteString("Known answer coverage hints:\n")
+		for _, fact := range evalCase.RequiredFacts {
+			if fact = strings.TrimSpace(fact); fact != "" {
+				b.WriteString("- " + fact + "\n")
+			}
+		}
+	}
+	if strings.TrimSpace(evalCase.Context) != "" {
+		b.WriteString("\nContext:\n" + strings.TrimSpace(evalCase.Context) + "\n")
+	}
+	b.WriteString("\nQuestion:\n" + strings.TrimSpace(evalCase.Question) + "\n")
+	return b.String()
+}
+
+func parseGatherContextPlannerOutput(raw string) (gatherContextPlannerOutput, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return gatherContextPlannerOutput{}, false
+	}
+	var out gatherContextPlannerOutput
+	if err := json.Unmarshal([]byte(raw), &out); err == nil && gatherContextPlannerOutputUsable(out) {
+		return out, true
+	}
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start == -1 || end <= start {
+		return gatherContextPlannerOutput{}, false
+	}
+	if err := json.Unmarshal([]byte(raw[start:end+1]), &out); err == nil && gatherContextPlannerOutputUsable(out) {
+		return out, true
+	}
+	return gatherContextPlannerOutput{}, false
+}
+
+func gatherContextPlannerOutputUsable(out gatherContextPlannerOutput) bool {
+	return strings.TrimSpace(out.Query) != "" ||
+		strings.TrimSpace(out.TaskType) != "" ||
+		len(out.RequiredEvidence) > 0 ||
+		len(out.CoverageRequirements) > 0 ||
+		len(out.SourceProfiles) > 0 ||
+		len(out.Lanes) > 0
+}
+
+func gatherContextBundleFactStrings(bundle contextengine.ContextBundle) []string {
+	out := make([]string, 0, len(bundle.Facts))
+	for _, fact := range bundle.Facts {
+		if value := strings.TrimSpace(fact.Fact); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func rerankGatherLimit(limit int) int {
+	if limit <= 0 {
+		limit = 8
+	}
+	expanded := limit * 3
+	if expanded < limit {
+		expanded = limit
+	}
+	if expanded > 24 {
+		return 24
+	}
+	return expanded
+}
+
+func rerankGatherMaxContextChars(evalCase promptEvalCase, fallback int) int {
+	base := gatherContextEvalCaseInt(evalCase, "max_context_chars", fallback)
+	if base <= 0 {
+		base = 6000
+	}
+	expanded := base * 2
+	if expanded > 24000 {
+		return 24000
+	}
+	return expanded
+}
+
+func buildGatherContextRerankCandidates(bundle contextengine.ContextBundle, maxCandidates int) []gatherContextRerankCandidate {
+	factsByEvidence := map[string][]string{}
+	for _, fact := range bundle.Facts {
+		text := truncateEvalText(strings.TrimSpace(fact.Fact), 260)
+		if text == "" {
+			continue
+		}
+		for _, id := range fact.EvidenceIDs {
+			factsByEvidence[id] = append(factsByEvidence[id], text)
+		}
+	}
+	out := make([]gatherContextRerankCandidate, 0, len(bundle.SelectedPaths))
+	seen := map[string]struct{}{}
+	for _, selected := range bundle.SelectedPaths {
+		path := normalizeGatherContextPath(selected.Path)
+		if path == "" {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		facts := make([]string, 0, 2)
+		factSeen := map[string]struct{}{}
+		for _, id := range selected.EvidenceIDs {
+			for _, fact := range factsByEvidence[id] {
+				if _, ok := factSeen[fact]; ok {
+					continue
+				}
+				factSeen[fact] = struct{}{}
+				facts = append(facts, fact)
+				if len(facts) >= 2 {
+					break
+				}
+			}
+			if len(facts) >= 2 {
+				break
+			}
+		}
+		out = append(out, gatherContextRerankCandidate{
+			Path:       path,
+			Rank:       selected.Rank,
+			Confidence: selected.Confidence,
+			Reason:     truncateEvalText(selected.Reason, 220),
+			Coverage:   append([]string(nil), selected.CoverageIDs...),
+			Facts:      facts,
+		})
+		if maxCandidates > 0 && len(out) >= maxCandidates {
+			break
+		}
+	}
+	return out
+}
+
+func buildGatherContextRerankPrompt(evalCase promptEvalCase, candidates []gatherContextRerankCandidate, maxPaths int) string {
+	payload := map[string]any{
+		"question":        strings.TrimSpace(evalCase.Question),
+		"context":         strings.TrimSpace(evalCase.Context),
+		"task_type":       normalizeCodeSearchEvalTaskType(evalCase),
+		"required_facts":  append([]string(nil), evalCase.RequiredFacts...),
+		"candidate_paths": candidates,
+		"max_paths":       maxPaths,
+	}
+	if maxPaths <= 0 {
+		payload["max_paths"] = len(candidates)
+	}
+	body, _ := json.MarshalIndent(payload, "", "  ")
+	var b strings.Builder
+	b.WriteString("Rerank this runtime-produced repo evidence candidate set.\n")
+	b.WriteString("Select only paths from candidate_paths. Do not invent, rename, shorten, or add paths.\n")
+	b.WriteString("Prefer the smallest set that covers the question and required facts; keep supporting files only when they are needed for coverage.\n")
+	b.WriteString("Return JSON only with this exact shape:\n")
+	b.WriteString(`{"summary":"...","paths":["repo/relative/path.go"],"missing_coverage":["..."],"uncertain_paths":["..."],"rationale":"..."}`)
+	b.WriteString("\n\nInput:\n")
+	b.Write(body)
+	b.WriteByte('\n')
+	return b.String()
+}
+
+func parseGatherContextRerankOutput(raw string) (gatherContextRerankOutput, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return gatherContextRerankOutput{}, false
+	}
+	var out gatherContextRerankOutput
+	if err := json.Unmarshal([]byte(raw), &out); err == nil {
+		return out, true
+	}
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start == -1 || end <= start {
+		return gatherContextRerankOutput{}, false
+	}
+	if err := json.Unmarshal([]byte(raw[start:end+1]), &out); err == nil {
+		return out, true
+	}
+	return gatherContextRerankOutput{}, false
+}
+
+func filterRerankPathsToCandidates(paths []string, candidates []gatherContextRerankCandidate) []string {
+	allowed := make(map[string]string, len(candidates))
+	for _, candidate := range candidates {
+		path := normalizeGatherContextPath(candidate.Path)
+		if path != "" {
+			allowed[strings.ToLower(path)] = path
+		}
+	}
+	out := make([]string, 0, len(paths))
+	seen := map[string]struct{}{}
+	for _, path := range paths {
+		key := strings.ToLower(normalizeGatherContextPath(path))
+		canonical := allowed[key]
+		if canonical == "" {
+			continue
+		}
+		if _, ok := seen[canonical]; ok {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		out = append(out, canonical)
+	}
+	return out
+}
+
+func truncateEvalText(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	if max <= 3 {
+		return value[:max]
+	}
+	return strings.TrimSpace(value[:max-3]) + "..."
 }
 
 func buildRLMSearchAgentEvalPrompt(evalCase promptEvalCase, gatherPayload map[string]any) string {
@@ -631,6 +1433,7 @@ func runSingleGatherContextEval(
 		"lanes":             effectiveLanes,
 		"limit":             limit,
 		"max_context_chars": gatherContextEvalCaseInt(evalCase, "max_context_chars", maxContextChars),
+		"response_mode":     "full",
 	}
 	if len(evalCase.RequiredFacts) > 0 {
 		payload["required_evidence"] = evalCase.RequiredFacts
@@ -643,6 +1446,9 @@ func runSingleGatherContextEval(
 	}
 	if prefixes := gatherContextEvalCaseStringSlice(evalCase, "path_prefixes", nil); len(prefixes) > 0 {
 		payload["path_prefixes"] = prefixes
+	}
+	if excluded := gatherContextEvalExcludedPaths(evalCase); len(excluded) > 0 {
+		payload["excluded_paths"] = excluded
 	}
 	if len(effectiveMemoryStatuses) > 0 {
 		payload["memory_statuses"] = effectiveMemoryStatuses
@@ -673,13 +1479,33 @@ func runSingleGatherContextEval(
 	if bundle.Certificate != nil {
 		result.CertificateStatus = string(bundle.Certificate.Status)
 	}
+	result.ExpectedPathsMissingOnDisk = gatherContextExpectedPathsMissingOnDisk(workspace, evalCase.ExpectedPaths)
+	result.StaleEval = len(result.ExpectedPathsMissingOnDisk) > 0
 	result.Paths = extractGatherContextPaths(bundle)
 	result.RawEvidencePaths = extractGatherContextEvidencePaths(bundle)
 	result.SelectedPaths = extractGatherContextSelectedPaths(bundle)
 	result.AnswerCandidatePaths = extractGatherContextAnswerCandidatePaths(bundle)
 	result.MatchedPaths, result.PathRecall = scoreExpectedPaths(evalCase.ExpectedPaths, strings.Join(result.Paths, "\n"))
-	result.RetrievalMisses = missingExpectedPaths(evalCase.ExpectedPaths, strings.Join(result.RawEvidencePaths, "\n"))
-	result.ReductionMisses = expectedPathsPresentThenMissing(evalCase.ExpectedPaths, strings.Join(result.RawEvidencePaths, "\n"), strings.Join(result.SelectedPaths, "\n"))
+	result.ExpectedRoles = gatherContextEvalExpectedRoles(evalCase)
+	result.RoleCoverage = gatherContextPathRoleCoverage(result.Paths)
+	result.MatchedRoles, result.RoleRecall = scoreGatherContextExpectedRoles(result.ExpectedRoles, result.RoleCoverage)
+	if bundle.Metadata != nil {
+		result.ProviderTelemetry = bundle.Metadata["code_search_provider_telemetry"]
+	}
+	result.ProviderCandidatePaths = extractGatherContextProviderCandidatePaths(result.ProviderTelemetry)
+	result.ProviderSeenPaths = extractGatherContextProviderSeenPaths(result.ProviderTelemetry)
+	result.ProviderMisses = missingExpectedPaths(evalCase.ExpectedPaths, strings.Join(result.ProviderCandidatePaths, "\n"))
+	if len(result.ProviderCandidatePaths) > 0 {
+		result.RetrievalMisses = result.ProviderMisses
+	} else {
+		result.RetrievalMisses = missingExpectedPaths(evalCase.ExpectedPaths, strings.Join(result.RawEvidencePaths, "\n"))
+	}
+	result.BundleEvidenceMisses = expectedPathsPresentThenMissing(evalCase.ExpectedPaths, strings.Join(result.ProviderCandidatePaths, "\n"), strings.Join(result.RawEvidencePaths, "\n"))
+	reductionInputPaths := result.RawEvidencePaths
+	if len(result.ProviderCandidatePaths) > 0 {
+		reductionInputPaths = result.ProviderCandidatePaths
+	}
+	result.ReductionMisses = expectedPathsPresentThenMissing(evalCase.ExpectedPaths, strings.Join(reductionInputPaths, "\n"), strings.Join(result.SelectedPaths, "\n"))
 	result.MatchedFacts, result.FactRecall = scoreRequiredFacts(evalCase.RequiredFacts, buildGatherContextFactBlob(bundle))
 	result.SourceCoverage = bundle.SourceCoverage
 	result.RawContextChars = bundle.Telemetry.RawContextChars
@@ -752,6 +1578,51 @@ func extractGatherContextAnswerCandidatePaths(bundle contextengine.ContextBundle
 	return uniqueObservedPaths(paths)
 }
 
+func extractGatherContextProviderCandidatePaths(value any) []string {
+	paths := make([]string, 0)
+	groups, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]any)
+		if !ok {
+			continue
+		}
+		paths = append(paths, normalizeGatherContextProviderPaths(groupMap["merged_paths"])...)
+	}
+	return uniqueObservedPaths(paths)
+}
+
+func extractGatherContextProviderSeenPaths(value any) []string {
+	paths := make([]string, 0)
+	for _, entry := range gatherContextProviderTelemetryEntries(value) {
+		paths = append(paths, normalizeGatherContextProviderPaths(entry["paths"])...)
+	}
+	return uniqueObservedPaths(paths)
+}
+
+func normalizeGatherContextProviderPaths(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, path := range typed {
+			out = append(out, normalizeGatherContextPath(path))
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if path, ok := item.(string); ok {
+				out = append(out, normalizeGatherContextPath(path))
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 func missingExpectedPaths(expected []string, output string) []string {
 	normalized := normalizeExpectedPaths(expected)
 	if len(normalized) == 0 {
@@ -782,6 +1653,33 @@ func expectedPathsPresentThenMissing(expected []string, presentOutput string, mi
 		return nil
 	}
 	return missing
+}
+
+func gatherContextExpectedPathsMissingOnDisk(workspace string, expected []string) []string {
+	if len(expected) == 0 || strings.TrimSpace(workspace) == "" {
+		return nil
+	}
+	out := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, item := range normalizeExpectedPaths(expected) {
+		pathValue := strings.TrimSpace(item)
+		if pathValue == "" {
+			continue
+		}
+		absPath := pathValue
+		if !filepath.IsAbs(absPath) {
+			absPath = filepath.Join(workspace, filepath.FromSlash(pathValue))
+		}
+		if _, err := os.Stat(absPath); err == nil {
+			continue
+		}
+		if _, ok := seen[pathValue]; ok {
+			continue
+		}
+		seen[pathValue] = struct{}{}
+		out = append(out, pathValue)
+	}
+	return out
 }
 
 func normalizeGatherContextPath(path string) string {
@@ -866,6 +1764,9 @@ func gatherContextEvalPassed(result gatherContextEvalResult, evalCase promptEval
 	if result.Status != "ok" {
 		return false
 	}
+	if result.StaleEval {
+		return false
+	}
 	pathOK := true
 	if len(evalCase.ExpectedPaths) > 0 {
 		pathOK = result.PathRecall >= passThreshold
@@ -928,6 +1829,247 @@ func gatherContextEvalCaseStringSlice(evalCase promptEvalCase, key string, fallb
 	return out
 }
 
+func gatherContextEvalExcludedPaths(evalCase promptEvalCase) []string {
+	out := compactGatherContextEvalStrings(evalCase.ExcludedPaths)
+	out = append(out, gatherContextEvalCaseStringSlice(evalCase, "excluded_paths", nil)...)
+	return compactGatherContextEvalStrings(out)
+}
+
+func gatherContextEvalExpectedRoles(evalCase promptEvalCase) []string {
+	out := gatherContextEvalCaseStringSlice(evalCase, "expected_roles", nil)
+	out = append(out, gatherContextEvalCaseStringSlice(evalCase, "expected_file_roles", nil)...)
+	out = append(out, gatherContextEvalCaseStringSlice(evalCase, "role_requirements", nil)...)
+	return normalizeGatherContextEvalRoles(out)
+}
+
+func normalizeGatherContextEvalRoles(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		role := normalizeGatherContextEvalRole(value)
+		if role == "" {
+			continue
+		}
+		if _, ok := seen[role]; ok {
+			continue
+		}
+		seen[role] = struct{}{}
+		out = append(out, role)
+	}
+	return out
+}
+
+func normalizeGatherContextEvalRole(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	value = strings.ReplaceAll(value, "-", "_")
+	value = strings.ReplaceAll(value, " ", "_")
+	switch value {
+	case "doc", "docs", "documentation", "readme", "design_doc", "migration_doc":
+		return "docs"
+	case "route", "routes", "route_file", "layout", "layout_file", "screen", "screen_component", "page":
+		return "route"
+	case "router", "routing":
+		return "router"
+	case "controller", "controllers", "handler", "action":
+		return "controller"
+	case "service", "domain", "repository", "repo", "model":
+		return "domain"
+	case "api", "api_adapter", "client", "adapter":
+		return "api_adapter"
+	case "config", "configuration", "deploy", "deployment", "deployment_config", "helm", "values", "manifest":
+		return "deploy_config"
+	case "test", "tests", "spec", "specs", "test_companion":
+		return "test"
+	case "data", "fixture", "fixtures", "schema", "migration":
+		return "data"
+	case "worker", "job", "task":
+		return "worker"
+	case "tooling", "template", "generated", "vendor":
+		return value
+	default:
+		return value
+	}
+}
+
+func gatherContextPathRoleCoverage(paths []string) map[string]int {
+	coverage := map[string]int{}
+	for _, path := range paths {
+		for _, role := range inferGatherContextPathRoles(path) {
+			coverage[role]++
+		}
+	}
+	if len(coverage) == 0 {
+		return nil
+	}
+	return coverage
+}
+
+func inferGatherContextPathRoles(path string) []string {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	if path == "" {
+		return nil
+	}
+	lower := strings.ToLower(path)
+	base := strings.ToLower(filepath.Base(lower))
+	ext := strings.ToLower(filepath.Ext(lower))
+	roles := make([]string, 0, 4)
+	add := func(role string) {
+		role = normalizeGatherContextEvalRole(role)
+		if role == "" {
+			return
+		}
+		for _, existing := range roles {
+			if existing == role {
+				return
+			}
+		}
+		roles = append(roles, role)
+	}
+	if gatherContextPathHasToolingSegment(lower) {
+		add("tooling")
+	}
+	if strings.Contains(lower, "/generated/") || strings.Contains(lower, "/gen/") || strings.Contains(lower, ".generated.") || strings.Contains(lower, "_generated.") || strings.HasSuffix(lower, ".pb.go") {
+		add("generated")
+	}
+	if strings.Contains(lower, "/vendor/") || strings.Contains(lower, "/node_modules/") || strings.Contains(lower, "/deps/") {
+		add("vendor")
+	}
+	if strings.HasPrefix(lower, "docs/") || strings.Contains(lower, "/docs/") || base == "readme.md" || ext == ".md" || ext == ".mdx" || ext == ".rst" {
+		add("docs")
+	}
+	if isGatherContextRoutePath(lower, base) {
+		add("route")
+	}
+	if strings.Contains(base, "router") || strings.Contains(lower, "/router.") || strings.Contains(lower, "/routes.") || strings.Contains(lower, "/routes/") {
+		add("router")
+	}
+	if strings.Contains(base, "controller") || strings.Contains(base, "handler") || strings.Contains(lower, "/controllers/") || strings.Contains(lower, "/handlers/") {
+		add("controller")
+	}
+	if strings.Contains(lower, "/services/") || strings.Contains(lower, "/service/") || strings.Contains(lower, "/domain/") || strings.Contains(lower, "/repositories/") || strings.Contains(lower, "/repo/") || strings.Contains(base, "service") {
+		add("domain")
+	}
+	if strings.Contains(base, "api") || strings.Contains(base, "client") || strings.Contains(base, "adapter") || strings.Contains(lower, "/api/") || strings.Contains(lower, "/clients/") || strings.Contains(lower, "/adapters/") {
+		add("api_adapter")
+	}
+	if isGatherContextDeployConfigPath(lower, base, ext) {
+		add("deploy_config")
+	}
+	if isGatherContextTestPath(lower, base) {
+		add("test")
+	}
+	if isGatherContextDataPath(lower, ext) {
+		add("data")
+	}
+	if strings.Contains(lower, "/workers/") || strings.Contains(lower, "/jobs/") || strings.Contains(base, "worker") || strings.Contains(base, "job") {
+		add("worker")
+	}
+	return roles
+}
+
+func isGatherContextRoutePath(path, base string) bool {
+	if strings.Contains(path, "/app/") || strings.HasPrefix(path, "app/") || strings.Contains(path, "/pages/") || strings.HasPrefix(path, "pages/") {
+		switch {
+		case base == "_layout.tsx" || base == "_layout.ts" || base == "layout.tsx" || base == "layout.ts":
+			return true
+		case base == "index.tsx" || base == "index.ts" || base == "page.tsx" || base == "page.ts":
+			return true
+		case strings.Contains(path, "/[") && strings.HasSuffix(base, ".tsx"):
+			return true
+		case strings.HasSuffix(base, ".tsx") || strings.HasSuffix(base, ".jsx"):
+			return true
+		}
+	}
+	return false
+}
+
+func gatherContextPathHasToolingSegment(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	for i, part := range parts {
+		switch part {
+		case "", ".":
+			continue
+		case ".github", ".devcontainer", "tooling", "templates":
+			return true
+		case "scripts", "tools":
+			// Treat top-level repo automation as tooling, but do not penalize
+			// normal source roots such as Unity's client/Scripts.
+			return i == 0
+		default:
+			if strings.HasPrefix(part, ".") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isGatherContextDeployConfigPath(path, base, ext string) bool {
+	if strings.Contains(path, "/helm/") || strings.Contains(path, "/charts/") || strings.Contains(path, "/deploy/") || strings.Contains(path, "/deployment/") || strings.Contains(path, "/k8s/") || strings.Contains(path, "/kubernetes/") {
+		return true
+	}
+	switch base {
+	case "config.py", "config.ex", "config.exs", "settings.py", "settings.ex", "settings.exs":
+		return true
+	}
+	if strings.Contains(base, "values") || strings.Contains(base, "deployment") || strings.Contains(base, "serviceaccount") || strings.Contains(base, "ingress") {
+		return true
+	}
+	switch ext {
+	case ".yaml", ".yml", ".toml", ".tf":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGatherContextTestPath(path, base string) bool {
+	return strings.HasPrefix(path, "test/") || strings.HasPrefix(path, "tests/") ||
+		strings.Contains(path, "/test/") || strings.Contains(path, "/tests/") ||
+		strings.Contains(base, "_test.") || strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") ||
+		strings.HasPrefix(base, "test_") || strings.HasPrefix(base, "test-") || strings.Contains(base, "-test-")
+}
+
+func isGatherContextDataPath(path, ext string) bool {
+	if strings.Contains(path, "/fixtures/") || strings.Contains(path, "/fixture/") || strings.Contains(path, "/data/") || strings.Contains(path, "/schemas/") || strings.Contains(path, "/migrations/") {
+		return true
+	}
+	switch ext {
+	case ".json", ".jsonl", ".sql", ".proto", ".graphql", ".csv":
+		return true
+	default:
+		return false
+	}
+}
+
+func scoreGatherContextExpectedRoles(expected []string, coverage map[string]int) ([]string, float64) {
+	expected = normalizeGatherContextEvalRoles(expected)
+	if len(expected) == 0 {
+		return nil, 0
+	}
+	matched := make([]string, 0, len(expected))
+	for _, role := range expected {
+		if coverage[role] > 0 {
+			matched = append(matched, role)
+		}
+	}
+	return matched, float64(len(matched)) / float64(len(expected))
+}
+
+func gatherContextPeripheralRoles() []string {
+	return []string{"generated", "test", "tooling", "vendor"}
+}
+
+func isGatherContextPeripheralRole(role string) bool {
+	role = normalizeGatherContextEvalRole(role)
+	for _, candidate := range gatherContextPeripheralRoles() {
+		if role == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeGatherContextEvalStringSlice(value any) []string {
 	switch typed := value.(type) {
 	case []string:
@@ -973,7 +2115,42 @@ func summarizeGatherContextEvalResults(results []gatherContextEvalResult) gather
 		return summary
 	}
 	var passed int
+	roleExpectedCases := map[string]int{}
+	roleMatchedCases := map[string]int{}
+	peripheralCoverage := map[string]int{}
+	peripheralCaseCounts := map[string]int{}
 	for _, result := range results {
+		if result.StaleEval {
+			summary.StaleEvalCount++
+			continue
+		}
+		summary.ScoredCount++
+		expectedRoles := normalizeGatherContextEvalRoles(result.ExpectedRoles)
+		expectedRoleSet := make(map[string]struct{}, len(expectedRoles))
+		for _, role := range expectedRoles {
+			expectedRoleSet[role] = struct{}{}
+			roleExpectedCases[role]++
+		}
+		matchedRoleSet := make(map[string]struct{}, len(result.MatchedRoles))
+		for _, role := range normalizeGatherContextEvalRoles(result.MatchedRoles) {
+			matchedRoleSet[role] = struct{}{}
+		}
+		for role := range expectedRoleSet {
+			if _, ok := matchedRoleSet[role]; ok {
+				roleMatchedCases[role]++
+			}
+		}
+		for role, count := range result.RoleCoverage {
+			role = normalizeGatherContextEvalRole(role)
+			if role == "" || !isGatherContextPeripheralRole(role) {
+				continue
+			}
+			if _, expected := expectedRoleSet[role]; expected {
+				continue
+			}
+			peripheralCoverage[role] += count
+			peripheralCaseCounts[role]++
+		}
 		if result.Passed {
 			passed++
 		}
@@ -981,6 +2158,7 @@ func summarizeGatherContextEvalResults(results []gatherContextEvalResult) gather
 			summary.ErrorCount++
 		}
 		summary.MeanPathRecall += result.PathRecall
+		summary.MeanRoleRecall += result.RoleRecall
 		summary.MeanFactRecall += result.FactRecall
 		summary.MeanDurationMS += float64(result.DurationMS)
 		summary.MeanRawContextChars += float64(result.RawContextChars)
@@ -989,9 +2167,13 @@ func summarizeGatherContextEvalResults(results []gatherContextEvalResult) gather
 		summary.MeanFactCount += float64(result.FactCount)
 		summary.MeanEvidenceCount += float64(result.EvidenceCount)
 	}
-	denom := float64(len(results))
+	if summary.ScoredCount == 0 {
+		return summary
+	}
+	denom := float64(summary.ScoredCount)
 	summary.PassRate = float64(passed) / denom
 	summary.MeanPathRecall /= denom
+	summary.MeanRoleRecall /= denom
 	summary.MeanFactRecall /= denom
 	summary.MeanDurationMS /= denom
 	summary.MeanRawContextChars /= denom
@@ -999,7 +2181,53 @@ func summarizeGatherContextEvalResults(results []gatherContextEvalResult) gather
 	summary.MeanOmittedContextItems /= denom
 	summary.MeanFactCount /= denom
 	summary.MeanEvidenceCount /= denom
+	summary.RoleRecallByRole = gatherContextRoleRecallScores(roleExpectedCases, roleMatchedCases)
+	summary.PeripheralRoleCoverage = nonEmptyIntMap(peripheralCoverage)
+	summary.WrongRolePeripheralCaseCount = nonEmptyIntMap(peripheralCaseCounts)
 	return summary
+}
+
+func gatherContextRoleRecallScores(expected map[string]int, matched map[string]int) []gatherContextRoleRecallScore {
+	if len(expected) == 0 {
+		return nil
+	}
+	roles := make([]string, 0, len(expected))
+	for role := range expected {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	out := make([]gatherContextRoleRecallScore, 0, len(roles))
+	for _, role := range roles {
+		expectedCases := expected[role]
+		matchedCases := matched[role]
+		score := gatherContextRoleRecallScore{
+			Role:          role,
+			ExpectedCases: expectedCases,
+			MatchedCases:  matchedCases,
+			MissingCases:  expectedCases - matchedCases,
+		}
+		if expectedCases > 0 {
+			score.Recall = float64(matchedCases) / float64(expectedCases)
+		}
+		out = append(out, score)
+	}
+	return out
+}
+
+func nonEmptyIntMap(values map[string]int) map[string]int {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(values))
+	for key, value := range values {
+		if strings.TrimSpace(key) != "" && value > 0 {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func compareGatherContextToAgentBaselines(summary gatherContextEvalSummary, baselines []agentEvalSummary) []gatherContextBaselineComparison {
@@ -1042,28 +2270,74 @@ func emittedCharsPerBaselineToken(summary gatherContextEvalSummary, baseline age
 	return summary.MeanEmittedContextChars / baseline.MeanTokens
 }
 
-func renderGatherContextEvalMarkdown(workspace string, summary gatherContextEvalSummary, results []gatherContextEvalResult, comparisons []gatherContextBaselineComparison) string {
+func renderGatherContextEvalMarkdown(workspace string, summary gatherContextEvalSummary, results []gatherContextEvalResult, comparisons []gatherContextBaselineComparison, repoIndexFreshness map[string]any) string {
 	var b strings.Builder
 	b.WriteString("# gather_context Eval\n\n")
 	b.WriteString(fmt.Sprintf("Workspace: `%s`\n\n", workspace))
+	if summaryText := renderGatherContextRepoIndexFreshnessMarkdown(repoIndexFreshness); summaryText != "" {
+		b.WriteString(summaryText)
+		b.WriteString("\n")
+	}
 	b.WriteString(fmt.Sprintf("- Cases: %d\n", summary.Count))
+	if summary.StaleEvalCount > 0 {
+		b.WriteString(fmt.Sprintf("- Stale eval cases excluded from aggregate scoring: %d\n", summary.StaleEvalCount))
+	}
 	b.WriteString(fmt.Sprintf("- Pass rate: %.2f\n", summary.PassRate))
 	b.WriteString(fmt.Sprintf("- Mean path recall: %.2f\n", summary.MeanPathRecall))
+	if summary.MeanRoleRecall > 0 {
+		b.WriteString(fmt.Sprintf("- Mean role recall: %.2f\n", summary.MeanRoleRecall))
+	}
 	b.WriteString(fmt.Sprintf("- Mean fact recall: %.2f\n", summary.MeanFactRecall))
 	b.WriteString(fmt.Sprintf("- Mean duration ms: %.1f\n", summary.MeanDurationMS))
 	b.WriteString(fmt.Sprintf("- Mean emitted context chars: %.1f\n\n", summary.MeanEmittedContextChars))
-	b.WriteString("| Case | Pass | Path Recall | Fact Recall | Evidence | Chars | Paths |\n")
-	b.WriteString("| --- | --- | ---: | ---: | ---: | ---: | --- |\n")
+	if len(summary.RoleRecallByRole) > 0 || len(summary.PeripheralRoleCoverage) > 0 {
+		b.WriteString("## Role Diagnostics\n\n")
+		if len(summary.RoleRecallByRole) > 0 {
+			b.WriteString("| Role | Recall | Matched | Expected | Missing |\n")
+			b.WriteString("| --- | ---: | ---: | ---: | ---: |\n")
+			for _, score := range summary.RoleRecallByRole {
+				b.WriteString(fmt.Sprintf("| %s | %.2f | %d | %d | %d |\n",
+					markdownCell(score.Role),
+					score.Recall,
+					score.MatchedCases,
+					score.ExpectedCases,
+					score.MissingCases,
+				))
+			}
+			b.WriteByte('\n')
+		}
+		if len(summary.PeripheralRoleCoverage) > 0 {
+			b.WriteString("Peripheral roles returned when not expected:\n\n")
+			b.WriteString("| Role | Coverage Hits | Cases |\n")
+			b.WriteString("| --- | ---: | ---: |\n")
+			for _, role := range sortedIntMapKeys(summary.PeripheralRoleCoverage) {
+				b.WriteString(fmt.Sprintf("| %s | %d | %d |\n",
+					markdownCell(role),
+					summary.PeripheralRoleCoverage[role],
+					summary.WrongRolePeripheralCaseCount[role],
+				))
+			}
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteString("| Case | Pass | Path Recall | Role Recall | Fact Recall | Duration | Slowest Provider | Evidence | Chars | Paths |\n")
+	b.WriteString("| --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | --- |\n")
 	for _, result := range results {
 		pass := "no"
 		if result.Passed {
 			pass = "yes"
 		}
-		b.WriteString(fmt.Sprintf("| %s | %s | %.2f | %.2f | %d | %d | %s |\n",
+		if result.StaleEval {
+			pass = "stale"
+		}
+		b.WriteString(fmt.Sprintf("| %s | %s | %.2f | %.2f | %.2f | %dms | %s | %d | %d | %s |\n",
 			markdownCell(result.CaseID),
 			pass,
 			result.PathRecall,
+			result.RoleRecall,
 			result.FactRecall,
+			result.DurationMS,
+			markdownCell(slowestGatherContextProviderSummary(result.ProviderTelemetry)),
 			result.EvidenceCount,
 			result.EmittedContextChars,
 			markdownCell(strings.Join(result.Paths, "<br>")),
@@ -1085,6 +2359,143 @@ func renderGatherContextEvalMarkdown(workspace string, summary gatherContextEval
 		}
 	}
 	return b.String()
+}
+
+func sortedIntMapKeys(values map[string]int) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func renderGatherContextRepoIndexFreshnessMarkdown(freshness map[string]any) string {
+	if len(freshness) == 0 {
+		return ""
+	}
+	level := gatherContextFreshnessLevelString(freshness["freshness"])
+	if level == "" {
+		level = "unknown"
+	}
+	mismatch := boolFromAny(freshness["stale_or_dirty_mismatch"])
+	indexHead := shortSHA(stringFromAny(freshness["index_head_sha"]))
+	currentHead := shortSHA(stringFromAny(freshness["current_head_sha"]))
+	if indexHead == "" {
+		indexHead = "unknown"
+	}
+	if currentHead == "" {
+		currentHead = "unknown"
+	}
+	return fmt.Sprintf("Repoindex freshness: `%s` (index head `%s`, current head `%s`, index dirty `%t`, current dirty `%t`, stale/dirty mismatch `%t`)\n",
+		level,
+		indexHead,
+		currentHead,
+		boolFromAny(freshness["index_worktree_dirty"]),
+		boolFromAny(freshness["current_worktree_dirty"]),
+		mismatch,
+	)
+}
+
+func gatherContextFreshnessLevelString(value any) string {
+	switch typed := value.(type) {
+	case repoindex.IndexFreshnessStatus:
+		return string(typed.Level)
+	case map[string]any:
+		return stringFromAny(typed["level"])
+	default:
+		return ""
+	}
+}
+
+func stringFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	default:
+		return ""
+	}
+}
+
+func boolFromAny(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
+func shortSHA(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 12 {
+		return value
+	}
+	return value[:12]
+}
+
+func slowestGatherContextProviderSummary(value any) string {
+	var slowName string
+	var slowDuration float64
+	entries := gatherContextProviderTelemetryEntries(value)
+	for _, entry := range entries {
+		name, _ := entry["name"].(string)
+		duration := floatFromGatherContextAny(entry["duration_ms"])
+		if name != "" && duration >= slowDuration {
+			slowName = name
+			slowDuration = duration
+		}
+	}
+	if slowName == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s %.0fms", slowName, slowDuration)
+}
+
+func gatherContextProviderTelemetryEntries(value any) []map[string]any {
+	var entries []map[string]any
+	groups, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]any)
+		if !ok {
+			continue
+		}
+		providers, ok := groupMap["providers"].([]any)
+		if !ok {
+			continue
+		}
+		for _, provider := range providers {
+			if providerMap, ok := provider.(map[string]any); ok {
+				entries = append(entries, providerMap)
+			}
+		}
+	}
+	return entries
+}
+
+func floatFromGatherContextAny(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		got, _ := typed.Float64()
+		return got
+	default:
+		return 0
+	}
 }
 
 func markdownCell(value string) string {

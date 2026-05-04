@@ -137,6 +137,29 @@ type ContextCheck struct {
 	Message string `json:"message,omitempty"`
 }
 
+// ContextTrustGate records one deterministic gate contributing to answer trust.
+type ContextTrustGate struct {
+	Name    string   `json:"name"`
+	Status  string   `json:"status"`
+	Score   float64  `json:"score,omitempty"`
+	Message string   `json:"message,omitempty"`
+	Missing []string `json:"missing,omitempty"`
+}
+
+// ContextTrustReport distinguishes internally valid evidence from context that
+// is complete enough for answer-time use.
+type ContextTrustReport struct {
+	Status             string             `json:"status"`
+	InternalEvidenceOK bool               `json:"internal_evidence_ok"`
+	RequiredEvidenceOK bool               `json:"required_evidence_ok"`
+	AnswerContextOK    bool               `json:"answer_context_ok"`
+	GraphRecommended   bool               `json:"graph_recommended,omitempty"`
+	GraphConfidence    float64            `json:"graph_confidence,omitempty"`
+	CoverageScore      float64            `json:"coverage_score,omitempty"`
+	FreshnessScore     float64            `json:"freshness_score,omitempty"`
+	Gates              []ContextTrustGate `json:"gates,omitempty"`
+}
+
 // ContextSelectedPath is a runtime-ranked file path candidate that an answerer
 // can copy directly without re-inferring the file set from raw evidence.
 type ContextSelectedPath struct {
@@ -260,6 +283,9 @@ type ContextCertificate struct {
 	ConflictIDs        []string                 `json:"conflict_ids,omitempty"`
 	MissingEvidence    []string                 `json:"missing_evidence,omitempty"`
 	RequiredEvidenceOK bool                     `json:"required_evidence_ok"`
+	InternalEvidenceOK bool                     `json:"internal_evidence_ok"`
+	AnswerContextOK    bool                     `json:"answer_context_ok"`
+	Trust              *ContextTrustReport      `json:"trust,omitempty"`
 	IssuedAt           time.Time                `json:"issued_at"`
 	ExpiresAt          time.Time                `json:"expires_at,omitempty"`
 }
@@ -309,6 +335,7 @@ type ContextBundle struct {
 	SourceEpisodeIDs []string                 `json:"source_episode_ids,omitempty"`
 	Telemetry        EvidenceTelemetry        `json:"telemetry,omitempty"`
 	Certificate      *ContextCertificate      `json:"certificate,omitempty"`
+	Trust            *ContextTrustReport      `json:"trust,omitempty"`
 	CreatedAt        time.Time                `json:"created_at,omitempty"`
 	Metadata         map[string]any           `json:"metadata,omitempty"`
 }

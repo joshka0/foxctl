@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/rlm"
+	"github.com/joshka0/foxctl/internal/rlm/repl"
 	"github.com/joshka0/foxctl/internal/runtime/engine"
 )
 
@@ -523,6 +524,32 @@ func TestREPLToolExecutorIncludesExtraTools(t *testing.T) {
 	}
 	if raw != `{"value":"ok"}` {
 		t.Fatalf("raw=%s", raw)
+	}
+}
+
+func TestREPLToolExecutorPythonSchemaIncludesPackageCapability(t *testing.T) {
+	t.Parallel()
+
+	defs := (&replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandboxKind:  SandboxKindPython,
+	}).List()
+	if len(defs) == 0 {
+		t.Fatal("missing REPL tool definition")
+	}
+	if !strings.Contains(string(defs[0].Parameters), `"packages"`) {
+		t.Fatalf("python_repl schema missing packages field: %s", defs[0].Parameters)
+	}
+
+	goDefs := (&replToolExecutor{
+		replToolName: GoREPLToolName,
+		sandboxKind:  SandboxKindYaegi,
+	}).List()
+	if len(goDefs) == 0 {
+		t.Fatal("missing Go REPL tool definition")
+	}
+	if strings.Contains(string(goDefs[0].Parameters), `"packages"`) {
+		t.Fatalf("go_repl schema should not expose packages field: %s", goDefs[0].Parameters)
 	}
 }
 
@@ -1700,6 +1727,29 @@ func TestVerifiedAnswerFromBraidFinalHandoff(t *testing.T) {
 	}
 }
 
+func TestVerifierFinalHandoffForwardsOnlyValidatedArtifact(t *testing.T) {
+	t.Parallel()
+
+	artifact := minimalVerifierArtifact()
+	var output engine.EngineOutput
+	appendVerifierFinalHandoff(&output, artifact)
+
+	answer, ok := verifiedAnswerFromLatestVerifierFinalHandoff(output)
+	if !ok {
+		t.Fatal("verified verifier answer not found")
+	}
+	if answer != "solution = 42" {
+		t.Fatalf("answer=%q", answer)
+	}
+
+	artifact.Verified = false
+	var rejected engine.EngineOutput
+	appendVerifierFinalHandoff(&rejected, artifact)
+	if answer, ok := verifiedAnswerFromLatestVerifierFinalHandoff(rejected); ok {
+		t.Fatalf("unexpected unverified answer=%q", answer)
+	}
+}
+
 func TestBraidGraphRewriteSummaryReportsNormalizationChanges(t *testing.T) {
 	t.Parallel()
 
@@ -1818,6 +1868,7 @@ func TestExecutePhaseBraidGraphCanDisableHelperFirstFallback(t *testing.T) {
 
 	helper := &HelperFactoryTools{Config: HelperFactoryConfig{
 		Language: HelperLanguageGo,
+		Attempts: 1,
 		PresetSource: `func Solve(input map[string]any) map[string]any {
 	return map[string]any{"ok": false}
 }`,
@@ -2484,6 +2535,19 @@ func TestValidateChildSummaryRejectsNodeArtifactRuntimeProtocolBlocker(t *testin
 	}
 }
 
+func TestValidateChildSummaryRejectsUnprovedMissingLibraryBlocker(t *testing.T) {
+	t.Parallel()
+
+	text := `{"status":"blocked","answer":"","checks":["Chess library unavailable","manual simulation infeasible"],"confidence":0.1}`
+	err := validateChildSummaryFinalText(text)
+	if err == nil {
+		t.Fatal("validateChildSummaryFinalText() succeeded for unproved library blocker")
+	}
+	if !strings.Contains(err.Error(), "forbidden runtime protocol detail") {
+		t.Fatalf("validateChildSummaryFinalText() err=%v, want forbidden runtime protocol detail", err)
+	}
+}
+
 func TestValidateChildSummaryRejectsCircularDependencyBlocker(t *testing.T) {
 	t.Parallel()
 
@@ -2958,6 +3022,111 @@ func TestParseREPLCodePhaseTextExtractsSingleFence(t *testing.T) {
 	}
 }
 
+func TestParseREPLCodePhaseTextSalvagesSingleFenceWithProse(t *testing.T) {
+	t.Parallel()
+
+	code, err := parseREPLCodePhaseText("Here is the executable check:\n```python\nprint(42)\n```\nDone.")
+	if err != nil {
+		t.Fatalf("parseREPLCodePhaseText() error = %v", err)
+	}
+	if code != "print(42)" {
+		t.Fatalf("code=%q want print(42)", code)
+	}
+}
+
+func TestParseREPLCodePhaseTextUnwrapsJSONCodeObject(t *testing.T) {
+	t.Parallel()
+
+	code, err := parseREPLCodePhaseText(`{"code":"value = 40 + 2\nprint(value)"}`)
+	if err != nil {
+		t.Fatalf("parseREPLCodePhaseText() error = %v", err)
+	}
+	if code != "value = 40 + 2\nprint(value)" {
+		t.Fatalf("code=%q", code)
+	}
+}
+
+func TestParseREPLCodePhaseTextExtractsPseudoPythonToolCall(t *testing.T) {
+	t.Parallel()
+
+	raw := strings.Join([]string{
+		"<tool_call>python_repl",
+		"<arg_key>code</arg_key>",
+		"<arg_value>import json",
+		`print(json.dumps({"ok": true}))`,
+		"</arg_value>",
+		"</tool_call>",
+	}, "\n")
+	code, err := parseREPLCodePhaseText(raw)
+	if err != nil {
+		t.Fatalf("parseREPLCodePhaseText() error = %v", err)
+	}
+	want := strings.Join([]string{
+		"import json",
+		`print(json.dumps({"ok": true}))`,
+	}, "\n")
+	if code != want {
+		t.Fatalf("code=%q want %q", code, want)
+	}
+}
+
+func TestParseREPLCodePhaseTextRejectsIncompletePseudoToolCall(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseREPLCodePhaseText(strings.Join([]string{
+		"<tool_call>python_repl",
+		"<arg_key>code</arg_key>",
+		"<arg_value>print('truncated')",
+	}, "\n"))
+	if err == nil || !strings.Contains(err.Error(), "tool-call syntax is not allowed") {
+		t.Fatalf("parseREPLCodePhaseText() err=%v, want tool-call rejection", err)
+	}
+}
+
+func TestParseREPLCodePhaseTextCanSalvagePartialPseudoToolCallForPhase(t *testing.T) {
+	t.Parallel()
+
+	code, err := parseREPLCodePhaseTextForPhase(REPLRunnerPhase{AllowPartialPseudoToolCallCode: true}, strings.Join([]string{
+		"<tool_call>python_repl",
+		"<arg_key>code</arg_key>",
+		"<arg_value>accept('solution = 42')",
+	}, "\n"))
+	if err != nil {
+		t.Fatalf("parseREPLCodePhaseTextForPhase() error = %v", err)
+	}
+	if code != "accept('solution = 42')" {
+		t.Fatalf("code=%q", code)
+	}
+}
+
+func TestAutoExecuteREPLCodePhaseExecutesUnwrappedPseudoToolCall(t *testing.T) {
+	t.Parallel()
+
+	sandbox := &fakeSandbox{output: "ok"}
+	output := engine.EngineOutput{AssistantText: strings.Join([]string{
+		"<tool_call>python_repl",
+		"<arg_key>code</arg_key>",
+		"<arg_value>print('ok')</arg_value>",
+		"</tool_call>",
+	}, "\n")}
+	err := autoExecutePhaseREPLCode(context.Background(), "scratch", REPLRunnerPhase{
+		OutputKind:        REPLPhaseOutputKindREPLCode,
+		Tools:             []string{PythonREPLToolName},
+		RequireToolOutput: true,
+	}, engine.EngineOutput{}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      sandbox,
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err != nil {
+		t.Fatalf("autoExecutePhaseREPLCode() error = %v", err)
+	}
+	if len(sandbox.execs) != 1 || sandbox.execs[0] != "print('ok')" {
+		t.Fatalf("executed code=%v want print('ok')", sandbox.execs)
+	}
+}
+
 func TestParseREPLCodePhaseTextRejectsCommentOnly(t *testing.T) {
 	t.Parallel()
 
@@ -2978,7 +3147,7 @@ func TestAutoExecuteREPLCodePhaseRequiresOutput(t *testing.T) {
 		OutputKind:        REPLPhaseOutputKindREPLCode,
 		Tools:             []string{PythonREPLToolName},
 		RequireToolOutput: true,
-	}, &replToolExecutor{
+	}, engine.EngineOutput{}, &replToolExecutor{
 		replToolName: PythonREPLToolName,
 		sandbox:      &fakeSandbox{output: "   "},
 		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
@@ -3000,7 +3169,7 @@ func TestAutoExecuteREPLCodePhaseRequiresOutputRejectsExecutionError(t *testing.
 		OutputKind:        REPLPhaseOutputKindREPLCode,
 		Tools:             []string{PythonREPLToolName},
 		RequireToolOutput: true,
-	}, &replToolExecutor{
+	}, engine.EngineOutput{}, &replToolExecutor{
 		replToolName: PythonREPLToolName,
 		sandbox:      &fakeSandbox{err: fmt.Errorf("No module named 'sympy'")},
 		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
@@ -3034,7 +3203,7 @@ func TestAutoExecuteREPLCodePhaseRequiresConfiguredCodeSubstrings(t *testing.T) 
 		OutputKind:                 REPLPhaseOutputKindREPLCode,
 		Tools:                      []string{PythonREPLToolName},
 		RequiredREPLCodeSubstrings: []string{"cycle_json", "print("},
-	}, &replToolExecutor{
+	}, engine.EngineOutput{}, &replToolExecutor{
 		replToolName: PythonREPLToolName,
 		sandbox:      &fakeSandbox{output: "unused"},
 		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
@@ -3049,7 +3218,7 @@ func TestAutoExecuteREPLCodePhaseRequiresConfiguredCodeSubstrings(t *testing.T) 
 		OutputKind:                 REPLPhaseOutputKindREPLCode,
 		Tools:                      []string{PythonREPLToolName},
 		RequiredREPLCodeSubstrings: []string{"cycle_json", "print("},
-	}, &replToolExecutor{
+	}, engine.EngineOutput{}, &replToolExecutor{
 		replToolName: PythonREPLToolName,
 		sandbox:      &fakeSandbox{output: "cycle_json: {}"},
 		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
@@ -3067,7 +3236,7 @@ func TestAutoExecuteREPLCodePhaseRejectsDisallowedImportsBeforeSandbox(t *testin
 	err := autoExecutePhaseREPLCode(context.Background(), "scratch", REPLRunnerPhase{
 		OutputKind: REPLPhaseOutputKindREPLCode,
 		Tools:      []string{PythonREPLToolName},
-	}, &replToolExecutor{
+	}, engine.EngineOutput{}, &replToolExecutor{
 		replToolName: PythonREPLToolName,
 		sandbox:      &fakeSandbox{output: "should not run"},
 		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
@@ -3078,6 +3247,25 @@ func TestAutoExecuteREPLCodePhaseRejectsDisallowedImportsBeforeSandbox(t *testin
 	}
 	if len(output.ToolCalls) != 0 {
 		t.Fatalf("tool calls=%d want 0", len(output.ToolCalls))
+	}
+
+	output = engine.EngineOutput{AssistantText: "import sympy\nprint(42)"}
+	sandbox := &fakeSandbox{output: "ok"}
+	err = autoExecutePhaseREPLCode(context.Background(), "scratch", REPLRunnerPhase{
+		OutputKind:         REPLPhaseOutputKindREPLCode,
+		Tools:              []string{PythonREPLToolName},
+		AllowedREPLImports: []string{"sympy"},
+	}, engine.EngineOutput{}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      sandbox,
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err != nil {
+		t.Fatalf("autoExecutePhaseREPLCode() with allowed sympy error = %v", err)
+	}
+	if len(sandbox.execs) != 1 {
+		t.Fatalf("sandbox execs=%v want one allowed import execution", sandbox.execs)
 	}
 }
 
@@ -3095,7 +3283,7 @@ func TestAutoExecuteREPLCodePhaseRejectsVerboseCodeBeforeSandbox(t *testing.T) {
 		Tools:                   []string{PythonREPLToolName},
 		MaxREPLCodeLines:        3,
 		MaxREPLCodeCommentLines: 1,
-	}, &replToolExecutor{
+	}, engine.EngineOutput{}, &replToolExecutor{
 		replToolName: PythonREPLToolName,
 		sandbox:      &fakeSandbox{output: "should not run"},
 		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
@@ -3211,6 +3399,46 @@ func TestBuildREPLCodeFilterPromptPreservesExplorationContract(t *testing.T) {
 	}
 }
 
+func TestBuildREPLCodeFilterPromptPreservesVerifierPreludeContract(t *testing.T) {
+	t.Parallel()
+
+	prompt := buildREPLCodeFilterPrompt("solve", REPLRunnerPhase{
+		Name:                  "verify",
+		InjectVerifierPrelude: true,
+	}, engine.EngineOutput{}, "long verifier derivation")
+	for _, want := range []string{
+		"injects accept(answer, checks=[...], reason=...) and reject(reason) helpers",
+		"must call accept(...) with a complete final solution or reject(...)",
+		"ordinary print output is suppressed",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("filter prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestSummarizeRLMChildToolResultForPromptStripsRawMetadata(t *testing.T) {
+	t.Parallel()
+
+	content := `{"completed":[{"node_id":"root.1","candidate_id":"child-1:sha256:abc","candidate_status":"solved","candidate_answer_hash":"sha256:abc","candidate_answer":"solution = 42","metadata":{"guest_turn":"/workspace/turn.py","stdout":"debug"}}]}`
+	got := summarizeRLMChildToolResultForPrompt(content)
+	for _, want := range []string{
+		"node=root.1",
+		"candidate_id=child-1:sha256:abc",
+		"status=solved",
+		"answer=solution = 42",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary missing %q:\n%s", want, got)
+		}
+	}
+	for _, reject := range []string{"guest_turn", "/workspace/turn.py", "stdout"} {
+		if strings.Contains(got, reject) {
+			t.Fatalf("summary leaked raw metadata %q:\n%s", reject, got)
+		}
+	}
+}
+
 func TestBuildCyclePacketFilterPromptPreservesPacketContract(t *testing.T) {
 	t.Parallel()
 
@@ -3314,6 +3542,56 @@ func TestValidateREPLPhaseOutputCanRequireToolResultOK(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "ok=false") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRejectCopiedPromptLiteral(t *testing.T) {
+	t.Parallel()
+
+	longMoves := strings.Repeat("a2a3 b7b6 c2c3 d7d6 ", 120)
+	state := map[string]any{
+		"official_prompt": "Chess Move Sequence (UCI format): " + longMoves + "\nReturn solution = <FEN>",
+	}
+	err := rejectCopiedPromptLiteral("moves = `"+longMoves+"`", state)
+	if err == nil || !strings.Contains(err.Error(), "parse the existing `official_prompt` variable") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRejectCopiedPromptLiteralAllowsPromptVariableParsing(t *testing.T) {
+	t.Parallel()
+
+	longMoves := strings.Repeat("a2a3 b7b6 c2c3 d7d6 ", 120)
+	state := map[string]any{
+		"official_prompt": "Chess Move Sequence (UCI format): " + longMoves + "\nReturn solution = <FEN>",
+	}
+	code := `import re
+moves = re.findall(r'\b[a-h][1-8][a-h][1-8][nbrq]?\b', official_prompt)
+print(len(moves))`
+	if err := rejectCopiedPromptLiteral(code, state); err != nil {
+		t.Fatalf("unexpected rejection: %v", err)
+	}
+}
+
+func TestValidateREPLPhaseOutputAcceptsLaterRequiredToolOK(t *testing.T) {
+	t.Parallel()
+
+	err := validateREPLPhaseOutput(REPLRunnerPhase{
+		Name:                "tool_assist",
+		RequiredTools:       []string{PythonREPLToolName},
+		RequireToolResultOK: true,
+	}, engine.EngineOutput{
+		ToolCalls: []engine.ToolCall{
+			{ID: "call_1", Name: PythonREPLToolName},
+			{ID: "call_2", Name: PythonREPLToolName},
+		},
+		ToolResults: []engine.ToolResult{
+			{ToolCallID: "call_1", Content: `{"ok":false,"error":"first attempt failed"}`},
+			{ToolCallID: "call_2", Content: `{"ok":true,"output":"recovered"}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected later ok required tool result to satisfy phase, got %v", err)
 	}
 }
 
@@ -3906,6 +4184,29 @@ func TestBuildChildRuntimePromptClarifiesLeafDepth(t *testing.T) {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
+	}
+}
+
+func TestBuildChildRuntimePromptExternalizesLongParentPrompt(t *testing.T) {
+	t.Parallel()
+
+	longParent := "Return solution = <value>.\n" + strings.Repeat("move a2a3 b7b6 c2c3 d7d6 ", 120)
+	prompt := buildChildRuntimePrompt(longParent, "Parser child: use official_prompt.", 0, 0, 0)
+	for _, want := range []string{
+		"externalized parent task",
+		"official_prompt",
+		"Parent prompt size",
+		"Parser child: use official_prompt.",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, strings.Repeat("move a2a3 b7b6 c2c3 d7d6 ", 80)) {
+		t.Fatalf("long parent prompt was copied into child prompt")
+	}
+	if len(prompt) > 2000 {
+		t.Fatalf("externalized child prompt len=%d, want <= 2000:\n%s", len(prompt), prompt)
 	}
 }
 
@@ -4617,5 +4918,844 @@ func TestNormalizeREPLPhaseResponseFormatDowngradesJSONObjectForLMStudio(t *test
 	got = strings.TrimSpace(string(normalizeREPLPhaseResponseFormat("openrouter", json.RawMessage(`{"type":"json_object"}`))))
 	if got != `{"type":"json_object"}` {
 		t.Fatalf("openrouter response_format=%q want json_object preserved", got)
+	}
+}
+
+func TestFailedToolEvidenceReasonFromStructuredSentinel(t *testing.T) {
+	t.Parallel()
+
+	reason, failed := failedToolEvidenceReasonFromText(`stdout:
+RLM_CHECK_JSON={"pass":false,"reason":"goal state mismatch"}`)
+	if !failed {
+		t.Fatal("expected failed structured tool evidence")
+	}
+	if reason != "goal state mismatch" {
+		t.Fatalf("reason=%q", reason)
+	}
+
+	if reason, failed := failedToolEvidenceReasonFromText(`stdout:
+Goal reached: False`); failed || reason != "" {
+		t.Fatalf("unstructured prose should not be authoritative, failed=%v reason=%q", failed, reason)
+	}
+
+	if reason, failed := failedToolEvidenceReasonFromText(`stdout:
+RLM_CHECK_JSON={"pass":true,"reason":"verified"}`); failed || reason != "" {
+		t.Fatalf("passing evidence should not block final, failed=%v reason=%q", failed, reason)
+	}
+
+	reason, failed = failedToolEvidenceReason(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{{
+			Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":false,\"reason\":\"candidate replay did not reach goal\"}\n"}`,
+		}},
+	})
+	if !failed || reason != "candidate replay did not reach goal" {
+		t.Fatalf("wrapped failed evidence reason=%q failed=%v", reason, failed)
+	}
+
+	reason, failed = failedToolEvidenceReason(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{
+			{Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":false,\"reason\":\"old failure\"}\n"}`},
+			{Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":false,\"reason\":\"latest failure\"}\n"}`},
+		},
+	})
+	if !failed || reason != "latest failure" {
+		t.Fatalf("latest failed evidence reason=%q failed=%v", reason, failed)
+	}
+
+	reason, failed = failedToolEvidenceReason(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{
+			{Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":false,\"reason\":\"old failure\"}\n"}`},
+			{Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":false,\"reason\":\"repair syntax error\"}\n"}`},
+			{Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":true,\"reason\":\"accepted\"}\nRLM_ANSWER_JSON={\"answer\":\"solution = 42\",\"pass\":true,\"checks\":[\"computed\"]}\n"}`},
+		},
+	})
+	if failed || reason != "" {
+		t.Fatalf("newer passing verifier output should clear older repair failures, reason=%q failed=%v", reason, failed)
+	}
+
+	reason, failed = failedToolEvidenceReasonFromText(strings.Join([]string{
+		`RLM_CHECK_JSON={"pass":false,"reason":"first repair failed"}`,
+		`RLM_CHECK_JSON={"pass":true,"reason":"accepted"}`,
+		`RLM_ANSWER_JSON={"answer":"solution = 42","pass":true,"checks":["computed"]}`,
+	}, "\n"))
+	if failed || reason != "" {
+		t.Fatalf("latest passing check in one output should clear earlier failure, reason=%q failed=%v", reason, failed)
+	}
+}
+
+func TestValidateStructuredToolOutputOnlyRejectsMixedDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	valid := strings.Join([]string{
+		"stdout:",
+		`RLM_CHECK_JSON={"pass":true,"reason":"accepted"}`,
+		`RLM_ANSWER_JSON={"answer":"solution = 42","pass":true,"checks":["computed"]}`,
+	}, "\n")
+	if err := validateStructuredToolOutputOnly(valid); err != nil {
+		t.Fatalf("valid structured output rejected: %v", err)
+	}
+
+	plainSolution := strings.Join([]string{
+		"stdout:",
+		"solution = 42",
+	}, "\n")
+	if err := validateStructuredToolOutputOnly(plainSolution); err != nil {
+		t.Fatalf("plain executed solution line rejected: %v", err)
+	}
+
+	invalid := strings.Join([]string{
+		"stdout:",
+		"Illegal move: d6d4",
+		`RLM_CHECK_JSON={"pass":true,"reason":"All moves applied successfully"}`,
+		`RLM_ANSWER_JSON={"answer":"solution = wrong","pass":true,"checks":["claimed"]}`,
+	}, "\n")
+	err := validateStructuredToolOutputOnly(invalid)
+	if err == nil || !strings.Contains(err.Error(), "unstructured output line") {
+		t.Fatalf("validateStructuredToolOutputOnly() err=%v, want unstructured line rejection", err)
+	}
+}
+
+func TestAutoExecuteREPLCodePhaseCanRequireStructuredToolOutputOnly(t *testing.T) {
+	t.Parallel()
+
+	output := engine.EngineOutput{AssistantText: `print("Illegal move: d6d4")
+print('RLM_ANSWER_JSON={"answer":"solution = wrong","pass":true,"checks":["claimed"]}')`}
+	err := autoExecutePhaseREPLCode(context.Background(), "verify", REPLRunnerPhase{
+		OutputKind:                      REPLPhaseOutputKindREPLCode,
+		Tools:                           []string{PythonREPLToolName},
+		RequireToolOutput:               true,
+		RequireStructuredToolOutputOnly: true,
+	}, engine.EngineOutput{}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox: &fakeSandbox{output: strings.Join([]string{
+			"Illegal move: d6d4",
+			`RLM_ANSWER_JSON={"answer":"solution = wrong","pass":true,"checks":["claimed"]}`,
+		}, "\n")},
+		budget:   mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder: NewRecorder(),
+	}, &output)
+	if err == nil || !strings.Contains(err.Error(), "unstructured output line") {
+		t.Fatalf("autoExecutePhaseREPLCode() err=%v, want structured-only rejection", err)
+	}
+}
+
+func TestAutoExecuteREPLCodePhaseInjectsVerifierPrelude(t *testing.T) {
+	t.Parallel()
+
+	output := engine.EngineOutput{AssistantText: `accept("solution = 42", checks=["computed"], reason="ok")`}
+	err := autoExecutePhaseREPLCode(context.Background(), "verify", REPLRunnerPhase{
+		OutputKind:                      REPLPhaseOutputKindREPLCode,
+		Tools:                           []string{PythonREPLToolName},
+		RequireToolOutput:               true,
+		RequireStructuredToolOutputOnly: true,
+		InjectVerifierPrelude:           true,
+	}, engine.EngineOutput{}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox: &fakeSandbox{output: strings.Join([]string{
+			`RLM_CHECK_JSON={"pass":true,"reason":"ok"}`,
+			`RLM_ANSWER_JSON={"answer":"solution = 42","pass":true,"checks":["computed"]}`,
+		}, "\n")},
+		budget:   mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder: NewRecorder(),
+	}, &output)
+	if err != nil {
+		t.Fatalf("autoExecutePhaseREPLCode() error = %v", err)
+	}
+	if len(output.ToolCalls) != 1 {
+		t.Fatalf("tool calls=%d want 1", len(output.ToolCalls))
+	}
+	if !strings.Contains(string(output.ToolCalls[0].Arguments), "def accept") {
+		t.Fatalf("executed args missing verifier prelude: %s", output.ToolCalls[0].Arguments)
+	}
+}
+
+func TestVerifierPreludeSuppressesDiagnosticPrints(t *testing.T) {
+	t.Parallel()
+
+	sandbox := repl.NewPythonSession(repl.Options{})
+	if err := sandbox.Init(context.Background(), nil); err != nil {
+		t.Fatalf("init python sandbox: %v", err)
+	}
+	defer func() { _ = sandbox.Close(context.Background()) }()
+
+	output := engine.EngineOutput{AssistantText: strings.Join([]string{
+		`print("node_3 values: [2]")`,
+		`accept("solution = 42", checks=["computed"], reason="ok")`,
+	}, "\n")}
+	err := autoExecutePhaseREPLCode(context.Background(), "verify", REPLRunnerPhase{
+		OutputKind:                      REPLPhaseOutputKindREPLCode,
+		Tools:                           []string{PythonREPLToolName},
+		RequireToolOutput:               true,
+		RequireStructuredToolOutputOnly: true,
+		InjectVerifierPrelude:           true,
+	}, engine.EngineOutput{}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      sandbox,
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err != nil {
+		t.Fatalf("autoExecutePhaseREPLCode() error = %v", err)
+	}
+	text := replOutputText(output.ToolResults[0].Content)
+	if strings.Contains(text, "node_3 values") {
+		t.Fatalf("diagnostic print leaked into verifier output:\n%s", text)
+	}
+	answer, ok, blockReason := structuredToolAnswer(output, true)
+	if blockReason != "" || !ok || answer != "solution = 42" {
+		t.Fatalf("structured answer=%q ok=%v block=%q output=%s", answer, ok, blockReason, text)
+	}
+}
+
+func TestVerifierPreludeRejectsWhenNoAcceptOrReject(t *testing.T) {
+	t.Parallel()
+
+	sandbox := repl.NewPythonSession(repl.Options{})
+	if err := sandbox.Init(context.Background(), nil); err != nil {
+		t.Fatalf("init python sandbox: %v", err)
+	}
+	defer func() { _ = sandbox.Close(context.Background()) }()
+
+	output := engine.EngineOutput{AssistantText: strings.Join([]string{
+		`value = 40 + 2`,
+		`print("debug value", value)`,
+	}, "\n")}
+	err := autoExecutePhaseREPLCode(context.Background(), "verify", REPLRunnerPhase{
+		OutputKind:                      REPLPhaseOutputKindREPLCode,
+		Tools:                           []string{PythonREPLToolName},
+		RequireToolOutput:               true,
+		RequireStructuredToolOutputOnly: true,
+		InjectVerifierPrelude:           true,
+	}, engine.EngineOutput{}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      sandbox,
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err == nil || !strings.Contains(err.Error(), "repairable failed evidence") {
+		t.Fatalf("autoExecutePhaseREPLCode() err=%v, want repairable failed evidence", err)
+	}
+	text := replOutputText(output.ToolResults[0].Content)
+	if strings.Contains(text, "debug value") {
+		t.Fatalf("diagnostic print leaked into verifier output:\n%s", text)
+	}
+	reason, failed := failedToolEvidenceReason(output)
+	if !failed || !strings.Contains(reason, "produced no structured decision") {
+		t.Fatalf("failed evidence reason=%q failed=%v output=%s", reason, failed, text)
+	}
+}
+
+func TestVerifierPreludeAcceptCandidateEmitsRuntimeArtifact(t *testing.T) {
+	t.Parallel()
+
+	sandbox := repl.NewPythonSession(repl.Options{})
+	if err := sandbox.Init(context.Background(), nil); err != nil {
+		t.Fatalf("init python sandbox: %v", err)
+	}
+	defer func() { _ = sandbox.Close(context.Background()) }()
+
+	prior := engine.EngineOutput{ToolResults: []engine.ToolResult{{
+		Content: `{"completed":[{"child":1,"node_id":"root.1","node_status":"completed","status":"completed","candidate_id":"child-1:sha256:abc","candidate_status":"solved","candidate_answer_hash":"sha256:abc","candidate_answer":"solution = 42"}]}`,
+	}}}
+	output := engine.EngineOutput{AssistantText: strings.Join([]string{
+		`answer = candidate_answer("child-1:sha256:abc")`,
+		`checks = [`,
+		`    check("candidate_answer_helper", answer == "solution = 42", actual=answer),`,
+		`    check("constraint_replay_or_recompute", True, method="recompute", actual="42", expected="42"),`,
+		`    check("goal_or_requested_output", True, actual="42", expected="42", comparison="equality"),`,
+		`]`,
+		`accept_candidate("child-1:sha256:abc", checks=checks)`,
+	}, "\n")}
+	err := autoExecutePhaseREPLCode(context.Background(), "verify", REPLRunnerPhase{
+		OutputKind:                      REPLPhaseOutputKindREPLCode,
+		Tools:                           []string{PythonREPLToolName},
+		RequireToolOutput:               true,
+		RequireStructuredToolOutputOnly: true,
+		InjectVerifierPrelude:           true,
+		RequireVerifierArtifact:         true,
+	}, prior, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      sandbox,
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err != nil {
+		t.Fatalf("autoExecutePhaseREPLCode() error = %v; output=%s", err, replOutputText(output.ToolResults[0].Content))
+	}
+	text := replOutputText(output.ToolResults[0].Content)
+	if !strings.Contains(text, "VERIFIER_ARTIFACT_JSON=") {
+		t.Fatalf("missing verifier artifact output:\n%s", text)
+	}
+	if answer, ok := verifiedAnswerFromLatestVerifierFinalHandoff(output); !ok || answer != "solution = 42" {
+		t.Fatalf("verified final handoff answer=%q ok=%v", answer, ok)
+	}
+}
+
+func TestVerifierCandidatesFromOutputOnlyRegistersSolvedCompletedCandidates(t *testing.T) {
+	t.Parallel()
+
+	output := engine.EngineOutput{ToolResults: []engine.ToolResult{{
+		Content: `{
+			"completed": [
+				{"child":1,"node_id":"root.1","node_status":"completed","status":"completed","candidate_id":"child-1:sha256:ok","candidate_status":"solved","candidate_answer_hash":"sha256:ok","candidate_answer":"solution = 42"},
+				{"child":2,"node_id":"root.2","node_status":"completed","status":"completed","candidate_id":"child-2:sha256:blocked","candidate_status":"blocked","candidate_answer_hash":"sha256:blocked","candidate_answer":"solution = blocked - tool budget exhausted"},
+				{"child":3,"node_id":"root.3","node_status":"failed","status":"completed","candidate_id":"child-3:sha256:failed-node","candidate_status":"solved","candidate_answer_hash":"sha256:failed-node","candidate_answer":"solution = 7"},
+				{"child":6,"node_id":"root.6","node_status":"completed","status":"completed","candidate_id":"child-6:sha256:placeholder","candidate_status":"placeholder","candidate_answer_hash":"sha256:placeholder","candidate_answer":"solution = [answer for node_4]"}
+			],
+			"failed": [
+				{"child":4,"node_id":"root.4","node_status":"failed","status":"failed","candidate_id":"child-4:sha256:failed","candidate_status":"solved","candidate_answer_hash":"sha256:failed","candidate_answer":"solution = 9"}
+			],
+			"pending": [
+				{"child":5,"node_id":"root.5","node_status":"running","status":"running","candidate_id":"child-5:sha256:pending","candidate_status":"solved","candidate_answer_hash":"sha256:pending","candidate_answer":"solution = 11"}
+			]
+		}`,
+	}}}
+
+	candidates := verifierCandidatesFromOutput(output)
+	if len(candidates) != 1 {
+		t.Fatalf("candidate count = %d, want 1: %#v", len(candidates), candidates)
+	}
+	if candidate, ok := candidates["child-1:sha256:ok"]; !ok || candidate.Answer != "solution = 42" || candidate.Status != "solved" {
+		t.Fatalf("registered candidate = %#v, want only solved completed child 1", candidates)
+	}
+
+	event := verifierCandidateRegistryContractEvent("lambda_verify", output)
+	if event.Boundary != "candidate_registry" || event.Phase != "lambda_verify" || event.Status != "observed" {
+		t.Fatalf("candidate registry event identity = %+v", event)
+	}
+	if event.CandidateRegistered != 1 || event.CandidateSolved != 4 || event.CandidateRejected != 4 || event.CandidatePlaceholder != 1 {
+		t.Fatalf("candidate registry counts = %+v, want registered=1 solved=4 placeholder=1 rejected=4", event)
+	}
+	if event.CandidateBlocked != 1 || event.CandidateFailed != 1 || event.CandidatePending != 1 {
+		t.Fatalf("candidate registry status counts = %+v, want blocked=1 failed=1 pending=1", event)
+	}
+}
+
+func TestVerifierCandidatesFromOutputRequiresPromptPacketAnswerShape(t *testing.T) {
+	t.Parallel()
+
+	output := engine.EngineOutput{ToolResults: []engine.ToolResult{
+		{
+			Content: `{"ok":true,"output":"stdout:\nPROMPT_PACKET_JSON={\"answer_format\":\"solution = [answer for node_4, answer for node_2, answer for node_7]\"}\n"}`,
+		},
+		{
+			Content: `{
+				"completed": [
+					{"child":1,"node_id":"root.1","node_status":"completed","status":"completed","candidate_id":"child-1:sha256:subproblem","candidate_status":"solved","candidate_answer_hash":"sha256:subproblem","candidate_answer":"solution = 5/2"},
+					{"child":2,"node_id":"root.2","node_status":"completed","status":"completed","candidate_id":"child-2:sha256:list","candidate_status":"solved","candidate_answer_hash":"sha256:list","candidate_answer":"solution = [2013^{4025}, 2692, 26]"}
+				]
+			}`,
+		},
+	}}
+
+	candidates := verifierCandidatesFromOutput(output)
+	if len(candidates) != 1 {
+		t.Fatalf("candidate count = %d, want 1: %#v", len(candidates), candidates)
+	}
+	if _, ok := candidates["child-1:sha256:subproblem"]; ok {
+		t.Fatalf("subproblem scalar candidate should not match final list answer shape: %#v", candidates)
+	}
+	if candidate, ok := candidates["child-2:sha256:list"]; !ok || candidate.Answer != "solution = [2013^{4025}, 2692, 26]" {
+		t.Fatalf("list candidate = %#v, want final-shaped candidate registered", candidates)
+	}
+
+	event := verifierCandidateRegistryContractEvent("lambda_verify", engine.EngineOutput{ToolResults: []engine.ToolResult{
+		output.ToolResults[0],
+		{
+			Content: `{
+				"completed": [
+					{"child":1,"node_id":"root.1","node_status":"completed","status":"completed","candidate_id":"child-1:sha256:subproblem","candidate_status":"solved","candidate_answer_hash":"sha256:subproblem","candidate_answer":"solution = 5/2"}
+				]
+			}`,
+		},
+	}})
+	if event.CandidateRegistered != 0 || event.CandidateSolved != 1 || event.IssueKind != "final_answer_shape_candidates_rejected" {
+		t.Fatalf("shape rejection event = %+v, want solved=1 registered=0 final_answer_shape_candidates_rejected", event)
+	}
+}
+
+func TestVerifierArtifactPhaseFailsFastWithoutCandidates(t *testing.T) {
+	t.Parallel()
+
+	output := engine.EngineOutput{AssistantText: `accept_candidate("child-1:sha256:missing", checks=[])`}
+	err := autoExecutePhaseREPLCode(context.Background(), "verify", REPLRunnerPhase{
+		OutputKind:              REPLPhaseOutputKindREPLCode,
+		Tools:                   []string{PythonREPLToolName},
+		RequireToolOutput:       true,
+		InjectVerifierPrelude:   true,
+		RequireVerifierArtifact: true,
+	}, engine.EngineOutput{}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      &fakeSandbox{output: `VERIFIER_ARTIFACT_JSON={"verified":true}`},
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err == nil || !strings.Contains(err.Error(), "cannot verify without solved child candidates") {
+		t.Fatalf("autoExecutePhaseREPLCode() err=%v, want no-candidates failure", err)
+	}
+	if len(output.ToolCalls) != 0 {
+		t.Fatalf("verifier should fail before REPL execution when no candidates exist, calls=%d", len(output.ToolCalls))
+	}
+}
+
+func TestVerifierPreludeConvertsExceptionToReject(t *testing.T) {
+	t.Parallel()
+
+	sandbox := repl.NewPythonSession(repl.Options{})
+	if err := sandbox.Init(context.Background(), nil); err != nil {
+		t.Fatalf("init python sandbox: %v", err)
+	}
+	defer func() { _ = sandbox.Close(context.Background()) }()
+
+	output := engine.EngineOutput{AssistantText: `raise ValueError("bad check")`}
+	err := autoExecutePhaseREPLCode(context.Background(), "verify", REPLRunnerPhase{
+		OutputKind:                      REPLPhaseOutputKindREPLCode,
+		Tools:                           []string{PythonREPLToolName},
+		RequireToolOutput:               true,
+		RequireStructuredToolOutputOnly: true,
+		InjectVerifierPrelude:           true,
+	}, engine.EngineOutput{}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      sandbox,
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output)
+	if err == nil || !strings.Contains(err.Error(), "repairable failed evidence") {
+		t.Fatalf("autoExecutePhaseREPLCode() err=%v, want repairable failed evidence", err)
+	}
+	reason, failed := failedToolEvidenceReason(output)
+	if !failed || !strings.Contains(reason, "ValueError") {
+		t.Fatalf("failed evidence reason=%q failed=%v output=%s", reason, failed, replOutputText(output.ToolResults[0].Content))
+	}
+}
+
+func TestVerifierPreludeAcceptsGlobalStructuredDecision(t *testing.T) {
+	t.Parallel()
+
+	code := wrapVerifierCodeForTool(PythonREPLToolName, `
+RLM_CHECK_JSON = {"pass": True, "reason": "computed"}
+RLM_ANSWER_JSON = {"answer": "solution = 42", "pass": True, "checks": ["computed exact value"]}
+`, engine.EngineOutput{})
+
+	sandbox := repl.NewPythonSession(repl.Options{})
+	if err := sandbox.Init(context.Background(), nil); err != nil {
+		t.Fatalf("init python sandbox: %v", err)
+	}
+	defer func() { _ = sandbox.Close(context.Background()) }()
+	result, err := sandbox.Execute(context.Background(), code)
+	if err != nil {
+		t.Fatalf("execute verifier prelude code: %v", err)
+	}
+	answer, ok, blockReason := structuredToolAnswerFromText(result.Output)
+	if !ok || blockReason != "" || answer != "solution = 42" {
+		t.Fatalf("answer=%q ok=%v block=%q output=%s", answer, ok, blockReason, result.Output)
+	}
+}
+
+func TestVerifierPreludeAutoFinalizesAnswerWithChecks(t *testing.T) {
+	t.Parallel()
+
+	code := wrapVerifierCodeForTool(PythonREPLToolName, `
+answer = "solution = 2013^{4025}"
+checks = ["symbolic expression computed"]
+`, engine.EngineOutput{})
+
+	sandbox := repl.NewPythonSession(repl.Options{})
+	if err := sandbox.Init(context.Background(), nil); err != nil {
+		t.Fatalf("init python sandbox: %v", err)
+	}
+	defer func() { _ = sandbox.Close(context.Background()) }()
+	result, err := sandbox.Execute(context.Background(), code)
+	if err != nil {
+		t.Fatalf("execute verifier prelude code: %v", err)
+	}
+	answer, ok, blockReason := structuredToolAnswerFromText(result.Output)
+	if !ok || blockReason != "" || answer != "solution = 2013^{4025}" {
+		t.Fatalf("answer=%q ok=%v block=%q output=%s", answer, ok, blockReason, result.Output)
+	}
+}
+
+func TestVerifierPreludeDoesNotAutoAcceptBareAnswer(t *testing.T) {
+	t.Parallel()
+
+	code := wrapVerifierCodeForTool(PythonREPLToolName, `answer = "solution = 42"`, engine.EngineOutput{})
+
+	sandbox := repl.NewPythonSession(repl.Options{})
+	if err := sandbox.Init(context.Background(), nil); err != nil {
+		t.Fatalf("init python sandbox: %v", err)
+	}
+	defer func() { _ = sandbox.Close(context.Background()) }()
+	result, err := sandbox.Execute(context.Background(), code)
+	if err != nil {
+		t.Fatalf("execute verifier prelude code: %v", err)
+	}
+	answer, ok, blockReason := structuredToolAnswerFromText(result.Output)
+	if ok || answer != "" {
+		t.Fatalf("bare answer should not be accepted, answer=%q ok=%v output=%s", answer, ok, result.Output)
+	}
+	if !strings.Contains(result.Output, "produced no structured decision") && blockReason == "" {
+		t.Fatalf("missing model-readable no-decision failure, block=%q output=%s", blockReason, result.Output)
+	}
+}
+
+func TestExecuteAndRepairPhaseREPLCodeCanDisableModelRepair(t *testing.T) {
+	t.Parallel()
+
+	output := engine.EngineOutput{AssistantText: `print("debug only")`}
+	runner := &REPLRunner{Config: REPLRunnerConfig{ToolErrorRepairMaxAttempts: 3}}
+	err := runner.executeAndRepairPhaseREPLCode(context.Background(), nil, engine.LLMChatConfig{}, "", rlm.Task{
+		Prompt: "solve",
+	}, "verify", REPLRunnerPhase{
+		OutputKind:                      REPLPhaseOutputKindREPLCode,
+		Tools:                           []string{PythonREPLToolName},
+		RequireToolOutput:               true,
+		RequireStructuredToolOutputOnly: true,
+		DisableREPLCodeRepair:           true,
+	}, engine.EngineOutput{}, &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		sandbox:      &fakeSandbox{output: "debug only"},
+		budget:       mustBudget(t, BudgetConfig{MaxREPLCalls: 1}),
+		recorder:     NewRecorder(),
+	}, &output, 128)
+	if err == nil || !strings.Contains(err.Error(), "unstructured output line") {
+		t.Fatalf("executeAndRepairPhaseREPLCode() err=%v, want original structured-output failure", err)
+	}
+}
+
+func TestStateTransitionReplayVerifierCodeChecksPriorSolution(t *testing.T) {
+	t.Parallel()
+
+	prompt := `Initial state: [[0], [1, 2], []]
+Goal state: [[], [1], [2, 0]]`
+	goodCode, ok := buildStateTransitionReplayVerifierCode(prompt, "solution = [[2, 1, 2], [0, 0, 2]]")
+	if !ok {
+		t.Fatal("expected replay verifier code for parseable prompt")
+	}
+	if !strings.Contains(goodCode, "RLM_ANSWER_JSON=") {
+		t.Fatalf("verifier code should emit structured answer sentinel: %s", goodCode)
+	}
+	goodSandbox := repl.NewPythonSession(repl.Options{})
+	if err := goodSandbox.Init(context.Background(), nil); err != nil {
+		t.Fatalf("init good python sandbox: %v", err)
+	}
+	defer func() { _ = goodSandbox.Close(context.Background()) }()
+	good, err := goodSandbox.Execute(context.Background(), goodCode)
+	if err != nil {
+		t.Fatalf("good replay verifier failed: %v", err)
+	}
+	if reason, failed := failedToolEvidenceReasonFromText(good.Output); failed {
+		t.Fatalf("good replay produced failed evidence %q output=%s", reason, good.Output)
+	}
+	answer, accepted, blockReason := structuredToolAnswerFromText(good.Output)
+	if blockReason != "" || !accepted || answer != "solution = [[2, 1, 2], [0, 0, 2]]" {
+		t.Fatalf("good replay answer=%q accepted=%v block=%q output=%s", answer, accepted, blockReason, good.Output)
+	}
+
+	badCode, ok := buildStateTransitionReplayVerifierCode(prompt, "solution = [[0, 0, 2]]")
+	if !ok {
+		t.Fatal("expected bad replay verifier code for parseable prompt")
+	}
+	badSandbox := repl.NewPythonSession(repl.Options{})
+	if err := badSandbox.Init(context.Background(), nil); err != nil {
+		t.Fatalf("init bad python sandbox: %v", err)
+	}
+	defer func() { _ = badSandbox.Close(context.Background()) }()
+	bad, err := badSandbox.Execute(context.Background(), badCode)
+	if err != nil {
+		t.Fatalf("bad replay verifier should report structured failure, not execution error: %v", err)
+	}
+	reason, failed := failedToolEvidenceReasonFromText(bad.Output)
+	if failed || reason != "" {
+		t.Fatalf("runtime-repaired replay should not leave failed evidence, reason=%q failed=%v output=%s", reason, failed, bad.Output)
+	}
+	repairedAnswer, repaired, repairBlockReason := structuredToolAnswerFromText(bad.Output)
+	if repairBlockReason != "" || !repaired || repairedAnswer != "solution = [[2, 1, 2], [0, 0, 2]]" {
+		t.Fatalf("bad replay should emit repaired answer, answer=%q repaired=%v block=%q output=%s", repairedAnswer, repaired, repairBlockReason, bad.Output)
+	}
+}
+
+func TestStateTransitionReplayVerifierCodeSkipsUnrelatedPrompt(t *testing.T) {
+	t.Parallel()
+
+	code, ok := buildStateTransitionReplayVerifierCode("Chess Move Sequence (UCI format): e2e4", "solution = e4")
+	if ok || strings.TrimSpace(code) != "" {
+		t.Fatalf("state-transition auto verifier should skip unrelated prompts, ok=%v code=%q", ok, code)
+	}
+}
+
+func TestStructuredToolAnswerFromSentinel(t *testing.T) {
+	t.Parallel()
+
+	answer, ok, blockReason := structuredToolAnswerFromText(`stdout:
+RLM_ANSWER_JSON={"answer":"solution = [1, 2, 3]","pass":true,"checks":["unit"]}`)
+	if blockReason != "" {
+		t.Fatalf("blockReason=%q", blockReason)
+	}
+	if !ok || answer != "solution = [1, 2, 3]" {
+		t.Fatalf("answer=%q ok=%v", answer, ok)
+	}
+
+	answer, ok, blockReason = structuredToolAnswerFromText(`stdout:
+RLM_ANSWER_JSON={"answer":"solution = partial","pass":false,"reason":"check failed"}`)
+	if ok || answer != "" || blockReason != "check failed" {
+		t.Fatalf("answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswerFromText(`stdout:
+solution = unstructured`)
+	if ok || answer != "" || blockReason != "" {
+		t.Fatalf("unstructured prose forwarded: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswerFromText(`stdout:
+RLM_ANSWER_JSON={"answer":`)
+	if ok || answer != "" || blockReason != "malformed RLM_ANSWER_JSON" {
+		t.Fatalf("malformed sentinel: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswerFromText(`stdout:
+RLM_ANSWER_JSON={"answer":"solution = 7","pass": True, "checks":["Python True outside strings"]}`)
+	if blockReason != "" || !ok || answer != "solution = 7" {
+		t.Fatalf("python literal sentinel: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswerFromText(`stdout:
+RLM_ANSWER_JSON={"answer":"solution = True","pass": True, "checks":["string True preserved"]}`)
+	if blockReason != "" || !ok || answer != "solution = True" {
+		t.Fatalf("python literal sentinel with string: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+}
+
+func TestFailedToolEvidenceAcceptsPythonBoolLiterals(t *testing.T) {
+	t.Parallel()
+
+	if reason, failed := failedToolEvidenceReasonFromText(`RLM_CHECK_JSON={"pass": True, "reason":"ok"}`); failed {
+		t.Fatalf("python True should parse as passing check: reason=%q", reason)
+	}
+	if reason, failed := failedToolEvidenceReasonFromText(`RLM_CHECK_JSON={"pass": False, "reason":"bad"}`); !failed || reason != "bad" {
+		t.Fatalf("python False should parse as failed check: failed=%v reason=%q", failed, reason)
+	}
+}
+
+func TestStructuredToolAnswerFromOutput(t *testing.T) {
+	t.Parallel()
+
+	answer, ok, blockReason := structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{
+			{Content: "solution = unstructured"},
+			{Content: `{"ok":true,"output":"RLM_ANSWER_JSON={\"answer\":\"solution = 42\",\"pass\":true,\"checks\":[\"exact\"]}","metadata":{"output_uncapped":true}}`},
+		},
+	}, false)
+	if blockReason != "" {
+		t.Fatalf("blockReason=%q", blockReason)
+	}
+	if !ok || answer != "solution = 42" {
+		t.Fatalf("answer=%q ok=%v", answer, ok)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{
+			{Content: `RLM_ANSWER_JSON={"answer":"solution = partial","pass":false,"reason":"check failed"}`},
+		},
+	}, false)
+	if ok || answer != "" || blockReason != "check failed" {
+		t.Fatalf("answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{{
+			Content: `{"ok":true,"output":"stdout:\nRLM_ANSWER_JSON={\"answer\":\"solution = wrapped\",\"pass\":true,\"checks\":[\"exact\"]}\n","metadata":{"output_uncapped":true}}`,
+		}},
+	}, false)
+	if blockReason != "" || !ok || answer != "solution = wrapped" {
+		t.Fatalf("wrapped answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{{
+			Content: `{"ok":true,"output":"stdout:\nRLM_ANSWER_JSON={\"answer\":\"solution = self-certified\",\"pass\":true,\"checks\":[\"model claimed pass\"]}\n"}`,
+		}},
+	}, false)
+	if ok || answer != "" || !strings.Contains(blockReason, "not emitted by a runtime-certified verifier") {
+		t.Fatalf("untrusted structured answer forwarded: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{{
+			Content: `{"ok":true,"output":"stdout:\nRLM_ANSWER_JSON={\"answer\":\"solution = executed\",\"pass\":true,\"checks\":[\"computed in repl\"]}\n"}`,
+		}},
+	}, true)
+	if blockReason != "" || !ok || answer != "solution = executed" {
+		t.Fatalf("executed answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{{
+			Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":false,\"reason\":\"computed mismatch\"}\nRLM_ANSWER_JSON={\"answer\":\"solution = wrong\",\"pass\":true,\"checks\":[\"claimed\"]}\n"}`,
+		}},
+	}, true)
+	if ok || answer != "" || blockReason != "computed mismatch" {
+		t.Fatalf("failed check should block executed answer: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{{
+			Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":true,\"reason\":\"accepted\"}\nRLM_ANSWER_JSON={\"answer\":\"solution = envelope\",\"pass\":true,\"checks\":[\"accepted\"]}\n"}`,
+		}},
+	}, true)
+	if blockReason != "" || !ok || answer != "solution = envelope" {
+		t.Fatalf("enveloped answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{{
+			Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":true,\"reason\":\"computed\"}\nsolution = executed-plain\n"}`,
+		}},
+	}, true)
+	if blockReason != "" || !ok || answer != "solution = executed-plain" {
+		t.Fatalf("plain executed answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{{
+			Content: `{"ok":true,"output":"stdout:\nsolution = unverified-plain\n"}`,
+		}},
+	}, true)
+	if ok || answer != "" || !strings.Contains(blockReason, "missing passing RLM_CHECK_JSON") {
+		t.Fatalf("unverified plain answer should block: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{
+			{Content: `{"ok":true,"output":"stdout:\nIllegal move: a2a1\nsolution = stale\n"}`},
+			{Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":true,\"reason\":\"computed\"}\nsolution = latest\n"}`},
+		},
+	}, true)
+	if blockReason != "" || !ok || answer != "solution = latest" {
+		t.Fatalf("latest executed answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{{
+			Content: `{"ok":true,"output":"stdout:\nIllegal move: a2a1\nsolution = stale\n"}`,
+		}},
+	}, true)
+	if ok || answer != "" || !strings.Contains(blockReason, "unstructured output line") {
+		t.Fatalf("unstructured executed answer should block: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		AssistantText: `RLM_ANSWER_JSON={"answer":"solution = assistant","pass":true,"checks":["tool-derived"]}`,
+		ToolResults:   []engine.ToolResult{{Content: `{"ok":true,"output":"stdout:\nchecked=True\n"}`}},
+	}, true)
+	if ok || answer != "" || blockReason != "" {
+		t.Fatalf("assistant-authored structured answer after tool should not forward: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+
+	answer, ok, blockReason = structuredToolAnswer(engine.EngineOutput{
+		AssistantText: `RLM_ANSWER_JSON={"answer":"solution = assistant","pass":true,"checks":["no tool"]}`,
+	}, true)
+	if ok || answer != "" || blockReason != "" {
+		t.Fatalf("assistant answer without tool should not forward: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+}
+
+func TestStructuredToolAnswerMissingCanBeRequired(t *testing.T) {
+	t.Parallel()
+
+	answer, ok, blockReason := structuredToolAnswer(engine.EngineOutput{
+		ToolResults: []engine.ToolResult{{Content: "solution = unstructured"}},
+	}, false)
+	if ok || answer != "" || blockReason != "" {
+		t.Fatalf("unexpected structured answer: answer=%q ok=%v blockReason=%q", answer, ok, blockReason)
+	}
+}
+
+func TestPartialREPLResultSuppressesRawPseudoToolAnswer(t *testing.T) {
+	t.Parallel()
+
+	result := partialREPLResultFromOutput(engine.EngineOutput{
+		AssistantText: strings.Join([]string{
+			"I will inspect it.",
+			"<tool_call>python_repl",
+			"<arg_key>code</arg_key>",
+			"<arg_value>print(official_prompt[:3000])</arg_value>",
+			"</tool_call>",
+		}, "\n"),
+		ToolResults: []engine.ToolResult{{
+			Content: `{"ok":true,"output":"stdout:\nRLM_CHECK_JSON={\"pass\":true,\"reason\":\"computed\"}\nsolution = from-tool\n"}`,
+		}},
+	}, fmt.Errorf("failed"), engine.LLMChatConfig{Model: "test"}, SandboxConfig{Kind: SandboxKindPython}, "", &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		budget:       mustBudget(t, BudgetConfig{}),
+		recorder:     NewRecorder(),
+	}, mustBudget(t, BudgetConfig{}), NewRecorder(), IdentityPlan{}, nil, false)
+	if result.Answer != "solution = from-tool" {
+		t.Fatalf("partial answer=%q, want structured tool answer", result.Answer)
+	}
+
+	result = partialREPLResultFromOutput(engine.EngineOutput{
+		AssistantText: strings.Join([]string{
+			"I will inspect it.",
+			"<tool_call>python_repl",
+			"<arg_key>code</arg_key>",
+			"<arg_value>print(official_prompt[:3000])</arg_value>",
+			"</tool_call>",
+		}, "\n"),
+	}, fmt.Errorf("failed"), engine.LLMChatConfig{Model: "test"}, SandboxConfig{Kind: SandboxKindPython}, "", &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		budget:       mustBudget(t, BudgetConfig{}),
+		recorder:     NewRecorder(),
+	}, mustBudget(t, BudgetConfig{}), NewRecorder(), IdentityPlan{}, nil, false)
+	if result.Answer != "" {
+		t.Fatalf("partial raw pseudo tool leaked as answer=%q", result.Answer)
+	}
+}
+
+func TestPartialREPLResultFallsBackToChildSummaryFromScratchOutput(t *testing.T) {
+	t.Parallel()
+
+	result := partialREPLResultFromOutput(engine.EngineOutput{
+		ToolCalls: []engine.ToolCall{{ID: "call-1", Name: PythonREPLToolName}},
+		ToolResults: []engine.ToolResult{{
+			ToolCallID: "call-1",
+			Content:    `{"ok":true,"output":"stdout:\nnode_0=5/2\nnode_1=1232\n"}`,
+		}},
+	}, fmt.Errorf("rlm repl runner: final output repair failed for child_summary: empty"), engine.LLMChatConfig{Model: "test"}, SandboxConfig{Kind: SandboxKindPython}, "", &replToolExecutor{
+		replToolName: PythonREPLToolName,
+		budget:       mustBudget(t, BudgetConfig{}),
+		recorder:     NewRecorder(),
+	}, mustBudget(t, BudgetConfig{}), NewRecorder(), IdentityPlan{}, []REPLRunnerPhase{{
+		Name:            "child_final",
+		Final:           true,
+		FinalOutputKind: "child_summary",
+	}}, false)
+	if strings.TrimSpace(result.Answer) == "" {
+		t.Fatal("partial result did not synthesize fallback child summary")
+	}
+	if err := validateChildSummaryFinalText(result.Answer); err != nil {
+		t.Fatalf("fallback child summary invalid: %v\n%s", err, result.Answer)
+	}
+	if !strings.Contains(result.Answer, "node_1=1232") {
+		t.Fatalf("fallback summary missing scratch fact:\n%s", result.Answer)
+	}
+	if result.Metadata["child_summary_fallback"] != true {
+		t.Fatalf("metadata missing child_summary_fallback: %#v", result.Metadata)
+	}
+}
+
+func TestNormalizeSandboxKindSupportsSmolVM(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []SandboxKind{"smolvm", "smolvm-python", "smolvm_python", "python-smolvm"} {
+		if got := NormalizeSandboxKind(input); got != SandboxKindSmolVMPython {
+			t.Fatalf("NormalizeSandboxKind(%q)=%q want %q", input, got, SandboxKindSmolVMPython)
+		}
+		if !IsSupportedSandboxKind(input) {
+			t.Fatalf("IsSupportedSandboxKind(%q)=false", input)
+		}
+		if got := sandboxToolName(input); got != PythonREPLToolName {
+			t.Fatalf("sandboxToolName(%q)=%q want %q", input, got, PythonREPLToolName)
+		}
 	}
 }

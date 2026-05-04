@@ -13,6 +13,8 @@ func TestFilterToolsCodeIntel(t *testing.T) {
 
 	in := []rlm.Tool{
 		{Name: "gather_context"},
+		{Name: "gather_test_context"},
+		{Name: "gather_docs_context"},
 		{Name: "expand_context_graph"},
 		{Name: "load_evidence_ref"},
 		{Name: "code_search_ensemble"},
@@ -27,7 +29,7 @@ func TestFilterToolsCodeIntel(t *testing.T) {
 	for _, tool := range got {
 		names = append(names, tool.Name)
 	}
-	want := []string{"gather_context", "expand_context_graph", "load_evidence_ref", "code_search_ensemble", "retrieve_code"}
+	want := []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "code_search_ensemble", "retrieve_code"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("FilterTools()=%v want %v", names, want)
 	}
@@ -38,6 +40,8 @@ func TestFilterToolsGatherContext(t *testing.T) {
 
 	in := []rlm.Tool{
 		{Name: "gather_context"},
+		{Name: "gather_test_context"},
+		{Name: "gather_docs_context"},
 		{Name: "expand_context_graph"},
 		{Name: "load_evidence_ref"},
 		{Name: "retrieve_code"},
@@ -51,7 +55,31 @@ func TestFilterToolsGatherContext(t *testing.T) {
 	for _, tool := range got {
 		names = append(names, tool.Name)
 	}
-	want := []string{"gather_context", "expand_context_graph", "load_evidence_ref"}
+	want := []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("FilterTools()=%v want %v", names, want)
+	}
+}
+
+func TestFilterToolsNativeExplorer(t *testing.T) {
+	t.Parallel()
+
+	in := []rlm.Tool{
+		{Name: "gather_context"},
+		{Name: "gather_test_context"},
+		{Name: "gather_docs_context"},
+		{Name: "expand_context_graph"},
+		{Name: "load_evidence_ref"},
+		{Name: "code_search_ensemble"},
+		{Name: "retrieve_code"},
+		{Name: "retrieve_mixed"},
+	}
+	got := FilterTools(in, ToolProfileNativeExplorer)
+	var names []string
+	for _, tool := range got {
+		names = append(names, tool.Name)
+	}
+	want := []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("FilterTools()=%v want %v", names, want)
 	}
@@ -62,6 +90,8 @@ func TestFilterToolsMemoryRecall(t *testing.T) {
 
 	in := []rlm.Tool{
 		{Name: "gather_context"},
+		{Name: "gather_test_context"},
+		{Name: "gather_docs_context"},
 		{Name: "expand_context_graph"},
 		{Name: "load_evidence_ref"},
 		{Name: "retrieve_code"},
@@ -75,7 +105,7 @@ func TestFilterToolsMemoryRecall(t *testing.T) {
 	for _, tool := range got {
 		names = append(names, tool.Name)
 	}
-	want := []string{"gather_context", "expand_context_graph", "load_evidence_ref", "retrieve_memory", "retrieve_context"}
+	want := []string{"gather_context", "gather_test_context", "gather_docs_context", "expand_context_graph", "load_evidence_ref", "retrieve_memory", "retrieve_context"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("FilterTools()=%v want %v", names, want)
 	}

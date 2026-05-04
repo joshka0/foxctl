@@ -11,6 +11,7 @@ const (
 	ToolProfileDefault             ToolProfile = "default"
 	ToolProfileGatherContext       ToolProfile = "gather-context"
 	ToolProfileLambdaRepo          ToolProfile = "lambda-repo"
+	ToolProfileNativeExplorer      ToolProfile = "native-explorer"
 	ToolProfileCodeDebug           ToolProfile = "code-debug"
 	ToolProfileMemoryContext       ToolProfile = "memory-context"
 	ToolProfileFullDebug           ToolProfile = "full-debug"
@@ -76,12 +77,14 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 	}
 
 	switch resolvedProfile {
-	case ToolProfileDefault, ToolProfileGatherContext, ToolProfileLambdaRepo:
+	case ToolProfileDefault, ToolProfileGatherContext, ToolProfileLambdaRepo, ToolProfileNativeExplorer:
 		// Default/mini profile: force composite context gathering first, then
 		// allow bounded ref inspection only for verification. Raw lane tools
 		// require explicit debug profiles.
 		allow := map[string]struct{}{
 			"gather_context":       {},
+			"gather_test_context":  {},
+			"gather_docs_context":  {},
 			"expand_context_graph": {},
 			"load_evidence_ref":    {},
 		}
@@ -96,6 +99,8 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		// direct repo controller/raw code lane for retrieval diagnostics.
 		allow := map[string]struct{}{
 			"gather_context":       {},
+			"gather_test_context":  {},
+			"gather_docs_context":  {},
 			"expand_context_graph": {},
 			"load_evidence_ref":    {},
 			"code_search_ensemble": {},
@@ -112,6 +117,8 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		// ACA/context lanes for diagnostics.
 		allow := map[string]struct{}{
 			"gather_context":       {},
+			"gather_test_context":  {},
+			"gather_docs_context":  {},
 			"expand_context_graph": {},
 			"load_evidence_ref":    {},
 			"retrieve_memory":      {},
@@ -127,6 +134,8 @@ func ResolveToolPolicy(available []Tool, profile string) (ToolPolicy, error) {
 		allow := map[string]struct{}{
 			"expand_context_graph":     {},
 			"gather_context":           {},
+			"gather_test_context":      {},
+			"gather_docs_context":      {},
 			"load_evidence_ref":        {},
 			"code_search_ensemble":     {},
 			"retrieve_code":            {},
@@ -162,6 +171,8 @@ func NormalizeToolProfile(value string) (ToolProfile, error) {
 		return ToolProfileGatherContext, nil
 	case string(ToolProfileLambdaRepo):
 		return ToolProfileLambdaRepo, nil
+	case string(ToolProfileNativeExplorer), "explorer":
+		return ToolProfileNativeExplorer, nil
 	case string(ToolProfileCodeDebug):
 		return ToolProfileCodeDebug, nil
 	case string(ToolProfileMemoryContext):

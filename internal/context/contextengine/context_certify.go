@@ -33,6 +33,7 @@ func CertifyContextBundle(bundle ContextBundle, markers []StalenessMarker, opts 
 	staleEvidenceIDs := []string{}
 	conflictIDs := []string{}
 	missingEvidence := []string{}
+	internalMissingEvidence := []string{}
 
 	if err := bundle.Validate(); err != nil {
 		cert := ContextCertificate{
@@ -42,8 +43,23 @@ func CertifyContextBundle(bundle ContextBundle, markers []StalenessMarker, opts 
 			Status:             ContextCertificateStatusFailed,
 			Checks:             []ContextCheck{{Name: "bundle_validate", Status: "fail", Message: err.Error()}},
 			RequiredEvidenceOK: false,
+			InternalEvidenceOK: false,
+			AnswerContextOK:    false,
 			IssuedAt:           opts.Clock(),
 			ExpiresAt:          opts.ExpiresAt,
+		}
+		cert.Trust = &ContextTrustReport{
+			Status:             "blocked",
+			InternalEvidenceOK: false,
+			RequiredEvidenceOK: false,
+			AnswerContextOK:    false,
+			FreshnessScore:     1,
+			Gates: []ContextTrustGate{{
+				Name:    "internal_evidence",
+				Status:  "fail",
+				Score:   0,
+				Message: err.Error(),
+			}},
 		}
 		return cert, nil
 	}
@@ -74,6 +90,7 @@ func CertifyContextBundle(bundle ContextBundle, markers []StalenessMarker, opts 
 			if !ok {
 				unsupportedFacts = append(unsupportedFacts, fact.ID)
 				missingEvidence = append(missingEvidence, evidenceID)
+				internalMissingEvidence = append(internalMissingEvidence, evidenceID)
 				continue
 			}
 			marker, ok := markersByRef[evidenceRefKey(node.Ref)]
@@ -97,6 +114,7 @@ func CertifyContextBundle(bundle ContextBundle, markers []StalenessMarker, opts 
 	staleEvidenceIDs = append(staleEvidenceIDs, sourceDiag.StaleEvidenceIDs...)
 	if len(sourceDiag.UnloadableRefs) > 0 {
 		missingEvidence = append(missingEvidence, sourceDiag.BadEvidenceIDs...)
+		internalMissingEvidence = append(internalMissingEvidence, sourceDiag.BadEvidenceIDs...)
 		for _, fact := range bundle.Facts {
 			for _, evidenceID := range fact.EvidenceIDs {
 				if _, ok := sourceDiag.BadEvidenceSet[evidenceID]; ok {
@@ -112,11 +130,14 @@ func CertifyContextBundle(bundle ContextBundle, markers []StalenessMarker, opts 
 		missingEvidence = append(missingEvidence, "coverage:"+requirementID)
 	}
 
-	requiredEvidenceOK := len(bundle.Facts) > 0 && len(unsupportedFacts) == 0 && len(missingEvidence) == 0 && len(coverageMissing) == 0
+	internalEvidenceOK := len(bundle.Facts) > 0 && len(unsupportedFacts) == 0 && len(internalMissingEvidence) == 0
+	requiredEvidenceOK := internalEvidenceOK && len(coverageMissing) == 0
+	trust := buildContextTrustReport(bundle, internalEvidenceOK, requiredEvidenceOK, uniqueStrings(staleEvidenceIDs), uniqueStrings(conflictIDs), coverageMissing)
+	answerContextOK := trust.AnswerContextOK
 	status := ContextCertificateStatusCertified
-	if !requiredEvidenceOK {
+	if !internalEvidenceOK || len(coverageMissing) > 0 {
 		status = ContextCertificateStatusFailed
-	} else if len(staleEvidenceIDs) > 0 || len(conflictIDs) > 0 || len(bundle.Missing) > 0 {
+	} else if !answerContextOK {
 		status = ContextCertificateStatusPartial
 	}
 
@@ -137,6 +158,7 @@ func CertifyContextBundle(bundle ContextBundle, markers []StalenessMarker, opts 
 	} else if bundle.CoverageReport != nil && len(bundle.CoverageReport.Requirements) > 0 {
 		checks = append(checks, ContextCheck{Name: "coverage_requirements", Status: "pass"})
 	}
+	checks = append(checks, trustChecks(trust)...)
 
 	cert := ContextCertificate{
 		ID:                 opts.IDGen(),
@@ -150,6 +172,9 @@ func CertifyContextBundle(bundle ContextBundle, markers []StalenessMarker, opts 
 		ConflictIDs:        uniqueStrings(conflictIDs),
 		MissingEvidence:    uniqueStrings(missingEvidence),
 		RequiredEvidenceOK: requiredEvidenceOK,
+		InternalEvidenceOK: internalEvidenceOK,
+		AnswerContextOK:    answerContextOK,
+		Trust:              trust,
 		IssuedAt:           opts.Clock(),
 		ExpiresAt:          opts.ExpiresAt,
 	}
@@ -170,6 +195,241 @@ func coverageReportMissing(report *CoverageReport) []string {
 		}
 	}
 	return uniqueStrings(out)
+}
+
+const graphConfidenceRecommendedThreshold = 0.70
+
+func buildContextTrustReport(bundle ContextBundle, internalEvidenceOK, requiredEvidenceOK bool, staleEvidenceIDs, conflictIDs, coverageMissing []string) *ContextTrustReport {
+	freshnessScore := freshnessTrustScore(len(bundle.Evidence), len(staleEvidenceIDs), len(conflictIDs))
+	coverageScore, coverageAvailable := coverageTrustScore(bundle.CoverageReport)
+	graphConfidence, graphConfidenceAvailable := bundleGraphConfidence(bundle)
+	graphRecommended := false
+	gates := []ContextTrustGate{{
+		Name:   "internal_evidence",
+		Status: passFailStatus(internalEvidenceOK),
+		Score:  boolScore(internalEvidenceOK),
+	}}
+	if !internalEvidenceOK {
+		gates[0].Message = "bundle evidence failed internal validation"
+	}
+	if coverageAvailable {
+		gate := ContextTrustGate{
+			Name:   "coverage",
+			Status: passFailStatus(len(coverageMissing) == 0),
+			Score:  coverageScore,
+		}
+		if len(coverageMissing) > 0 {
+			gate.Message = fmt.Sprintf("%d required coverage slots missing", len(coverageMissing))
+			gate.Missing = append([]string(nil), coverageMissing...)
+		}
+		gates = append(gates, gate)
+	}
+	freshnessGate := ContextTrustGate{
+		Name:   "freshness",
+		Status: "pass",
+		Score:  freshnessScore,
+	}
+	if freshnessScore < 1 {
+		freshnessGate.Status = "warn"
+		freshnessGate.Message = fmt.Sprintf("%d stale evidence ids and %d conflicts", len(staleEvidenceIDs), len(conflictIDs))
+		freshnessGate.Missing = append([]string(nil), staleEvidenceIDs...)
+	}
+	gates = append(gates, freshnessGate)
+
+	if graphSensitiveTaskType(bundle.MetadataString("task_type")) {
+		graphGate := ContextTrustGate{
+			Name: "graph_confidence",
+		}
+		switch {
+		case !graphConfidenceAvailable:
+			graphRecommended = true
+			graphGate.Status = "warn"
+			graphGate.Score = 0
+			graphGate.Message = "graph-sensitive task has no graph confidence metadata"
+			graphGate.Missing = []string{"graph_confidence"}
+		case graphConfidence < graphConfidenceRecommendedThreshold:
+			graphRecommended = true
+			graphGate.Status = "warn"
+			graphGate.Score = graphConfidence
+			graphGate.Message = fmt.Sprintf("graph confidence %.2f is below %.2f", graphConfidence, graphConfidenceRecommendedThreshold)
+		default:
+			graphGate.Status = "pass"
+			graphGate.Score = graphConfidence
+		}
+		gates = append(gates, graphGate)
+	}
+
+	answerContextOK := requiredEvidenceOK && freshnessScore == 1 && len(bundle.Missing) == 0 && !graphRecommended
+	status := "trusted"
+	switch {
+	case !internalEvidenceOK || len(coverageMissing) > 0:
+		status = "blocked"
+	case !answerContextOK:
+		status = "partial"
+	}
+	report := &ContextTrustReport{
+		Status:             status,
+		InternalEvidenceOK: internalEvidenceOK,
+		RequiredEvidenceOK: requiredEvidenceOK,
+		AnswerContextOK:    answerContextOK,
+		GraphRecommended:   graphRecommended,
+		FreshnessScore:     freshnessScore,
+		Gates:              gates,
+	}
+	if coverageAvailable {
+		report.CoverageScore = coverageScore
+	}
+	if graphConfidenceAvailable {
+		report.GraphConfidence = graphConfidence
+	}
+	return report
+}
+
+func trustChecks(report *ContextTrustReport) []ContextCheck {
+	if report == nil {
+		return nil
+	}
+	checks := make([]ContextCheck, 0, len(report.Gates)+1)
+	for _, gate := range report.Gates {
+		status := gate.Status
+		if status == "" {
+			status = "pass"
+		}
+		checks = append(checks, ContextCheck{Name: gate.Name, Status: status, Message: gate.Message})
+	}
+	checks = append(checks, ContextCheck{Name: "answer_context", Status: answerContextCheckStatus(report), Message: answerContextTrustMessage(report)})
+	return checks
+}
+
+func answerContextCheckStatus(report *ContextTrustReport) string {
+	if report == nil || report.AnswerContextOK {
+		return "pass"
+	}
+	if report.Status == "blocked" {
+		return "fail"
+	}
+	return "warn"
+}
+
+func answerContextTrustMessage(report *ContextTrustReport) string {
+	if report == nil || report.AnswerContextOK {
+		return ""
+	}
+	if report.GraphRecommended {
+		return "answer context is partial; graph expansion recommended"
+	}
+	return "answer context is partial"
+}
+
+func graphSensitiveTaskType(taskType string) bool {
+	switch strings.TrimSpace(strings.ToLower(taskType)) {
+	case "subsystem_map", "integration_surface", "execution_trace", "change_impact":
+		return true
+	default:
+		return false
+	}
+}
+
+func coverageTrustScore(report *CoverageReport) (float64, bool) {
+	if report == nil || len(report.Requirements) == 0 {
+		return 0, false
+	}
+	required := 0
+	missing := map[string]struct{}{}
+	for _, id := range report.Missing {
+		if id = strings.TrimSpace(id); id != "" {
+			missing[id] = struct{}{}
+		}
+	}
+	for _, req := range report.Requirements {
+		if req.Required {
+			required++
+		}
+	}
+	if required == 0 {
+		return 1, true
+	}
+	covered := required - len(missing)
+	if covered < 0 {
+		covered = 0
+	}
+	return float64(covered) / float64(required), true
+}
+
+func freshnessTrustScore(totalEvidence, staleCount, conflictCount int) float64 {
+	if totalEvidence <= 0 {
+		return 0
+	}
+	penalty := staleCount + conflictCount
+	if penalty <= 0 {
+		return 1
+	}
+	if penalty >= totalEvidence {
+		return 0
+	}
+	return float64(totalEvidence-penalty) / float64(totalEvidence)
+}
+
+func bundleGraphConfidence(bundle ContextBundle) (float64, bool) {
+	for _, key := range []string{"graph_confidence", "context_graph_confidence", "repo_graph_confidence"} {
+		if value, ok := metadataFloat(bundle.Metadata, key); ok {
+			return value, true
+		}
+	}
+	for _, key := range []string{"graph_confidence", "context_graph_confidence", "graph_report"} {
+		if value, ok := nestedGraphConfidence(bundle.Metadata[key]); ok {
+			return value, true
+		}
+	}
+	for _, node := range bundle.Evidence {
+		for _, key := range []string{"graph_confidence", "context_graph_confidence", "repo_graph_confidence"} {
+			if value, ok := metadataFloat(node.Metadata, key); ok {
+				return value, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func nestedGraphConfidence(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"overall", "graph_coverage", "confidence"} {
+			if value, ok := metadataFloatValue(typed[key]); ok {
+				return value, true
+			}
+		}
+		if nested, ok := typed["confidence"]; ok {
+			return nestedGraphConfidence(nested)
+		}
+	case ContextGraphReport:
+		return typed.Confidence.Overall, typed.Confidence.Overall > 0
+	case *ContextGraphReport:
+		if typed != nil {
+			return typed.Confidence.Overall, typed.Confidence.Overall > 0
+		}
+	case ContextGraphConfidence:
+		return typed.Overall, typed.Overall > 0
+	case *ContextGraphConfidence:
+		if typed != nil {
+			return typed.Overall, typed.Overall > 0
+		}
+	}
+	return metadataFloatValue(value)
+}
+
+func passFailStatus(ok bool) string {
+	if ok {
+		return "pass"
+	}
+	return "fail"
+}
+
+func boolScore(ok bool) float64 {
+	if ok {
+		return 1
+	}
+	return 0
 }
 
 // StalenessLookupFunc returns staleness markers for refs relevant to a bundle.

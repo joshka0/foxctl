@@ -279,7 +279,7 @@ func (a *ReadOnlyAdapter) codeSearchEnsemble(ctx context.Context, args json.RawM
 	}
 
 	if taskType == codeSearchTaskSymbolInspect {
-		definitions := a.findGoDefinitions(preferredSymbolProbes)
+		definitions := a.findLocalDefinitions(ctx, preferredSymbolProbes, nil)
 		if len(definitions) > 0 {
 			addLane("symbol_definition")
 			for _, symbol := range sortedStringKeys(definitions) {
@@ -4734,6 +4734,22 @@ type codeSearchBridgeTuple struct {
 	Query        string
 }
 
+func shouldSkipCodeSearchEnsembleDir(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch name {
+	case "node_modules", "deps", "_build", "tmp", "temp", "dist", "build", "out", "archive", "vendor", "cover", "coverage", "prompt-exports", "Pods":
+		return true
+	default:
+		return false
+	}
+}
+
 func exactCodeProbeSearch(workspaceRoot, probe string, limit int) ([]codeSearchExactHit, error) {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	probe = strings.TrimSpace(probe)
@@ -4754,8 +4770,7 @@ func exactCodeProbeSearch(workspaceRoot, probe string, limit int) ([]codeSearchE
 			return nil
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", ".idea", ".vscode", "tmp", "dist", "build":
+			if shouldSkipCodeSearchEnsembleDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -4828,8 +4843,7 @@ func codeSearchPathProbeSearch(workspaceRoot, probe string, limit int) ([]codeSe
 			return nil
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", ".idea", ".vscode", "tmp", "dist", "build":
+			if shouldSkipCodeSearchEnsembleDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -4894,8 +4908,7 @@ func executionBridgeSearch(workspaceRoot, probe string, limit int) ([]codeSearch
 			return nil
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", ".idea", ".vscode", "tmp", "dist", "build":
+			if shouldSkipCodeSearchEnsembleDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -6248,8 +6261,7 @@ func registrationSiteSearch(workspaceRoot, symbol string, limit int) ([]registra
 			return nil
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", ".idea", ".vscode", "tmp", "dist", "build":
+			if shouldSkipCodeSearchEnsembleDir(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -6323,7 +6335,7 @@ func isLikelyTextCodeFile(path string) bool {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".go", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", ".yml", ".md", ".txt", ".sql", ".tf", ".sh", ".py", ".proto", ".ex", ".exs":
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", ".yml", ".md", ".txt", ".sql", ".tf", ".sh", ".py", ".proto", ".ex", ".exs", ".cs":
 		return true
 	default:
 		return false
@@ -6332,7 +6344,7 @@ func isLikelyTextCodeFile(path string) bool {
 
 func codeSearchFileWeight(path string) float64 {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".sql", ".tf", ".proto", ".ex", ".exs":
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".sql", ".tf", ".proto", ".ex", ".exs", ".cs":
 		return 0.98
 	case ".json", ".yaml", ".yml", ".sh":
 		return 0.8

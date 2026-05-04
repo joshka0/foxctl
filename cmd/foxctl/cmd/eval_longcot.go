@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,6 +71,36 @@ var longCoTConditionTemplates = map[longcoteval.ConditionID]longcoteval.Conditio
 		MaxDepth:        2,
 		MaxIterations:   32,
 		MaxSubcalls:     4,
+	},
+	longcoteval.ConditionRLMLambdaReplSingle: {
+		ID:              longcoteval.ConditionRLMLambdaReplSingle,
+		Kind:            longcoteval.ConditionKindRLM,
+		RLMRouteProfile: "longcot_lambda_repl",
+		RLMPlanMode:     "repl_lambda",
+		RLMToolProfile:  "longcot-repl-recursive",
+		MaxDepth:        2,
+		MaxIterations:   32,
+		MaxSubcalls:     4,
+	},
+	longcoteval.ConditionRLMLambdaAdaptiveSingle: {
+		ID:              longcoteval.ConditionRLMLambdaAdaptiveSingle,
+		Kind:            longcoteval.ConditionKindRLM,
+		RLMRouteProfile: "longcot_lambda_adaptive",
+		RLMPlanMode:     "repl_lambda_adaptive",
+		RLMToolProfile:  "longcot-repl-recursive",
+		MaxDepth:        2,
+		MaxIterations:   24,
+		MaxSubcalls:     4,
+	},
+	longcoteval.ConditionRLMLambdaThenBraidSingle: {
+		ID:              longcoteval.ConditionRLMLambdaThenBraidSingle,
+		Kind:            longcoteval.ConditionKindRLM,
+		RLMRouteProfile: "longcot_lambda_then_braid",
+		RLMPlanMode:     "repl_lambda_then_braid",
+		RLMToolProfile:  "longcot-repl-recursive",
+		MaxDepth:        2,
+		MaxIterations:   32,
+		MaxSubcalls:     16,
 	},
 	longcoteval.ConditionRLMBraidSingle: {
 		ID:              longcoteval.ConditionRLMBraidSingle,
@@ -254,7 +285,7 @@ func newEvalLongCoTCommand() *cobra.Command {
 			}
 			sandbox := rlmruntime.NormalizeSandboxKind(rlmruntime.SandboxKind(sandboxKind))
 			if !rlmruntime.IsSupportedSandboxKind(sandbox) {
-				return writeOptimizeError(out, evalLongCoTCommand, fmt.Sprintf("unsupported --sandbox %q (allowed: python, yaegi)", sandboxKind))
+				return writeOptimizeError(out, evalLongCoTCommand, fmt.Sprintf("unsupported --sandbox %q (allowed: python, smolvm, yaegi)", sandboxKind))
 			}
 			if requireEphemeralSkills {
 				ephemeralSkills = true
@@ -456,17 +487,23 @@ func newEvalLongCoTCommand() *cobra.Command {
 			}
 			var verifyResult *longcoteval.VerifyResult
 			if verify {
-				verifier := longcotbridge.NewPythonVerifier(longcotbridge.PythonVerifierConfig{
-					RepoPath:   strings.TrimSpace(longCoTRepo),
-					PythonBin:  strings.TrimSpace(longCoTPython),
-					NoFallback: noFallback,
-				})
-				verifiedAttempts, result, err := verifyLongCoTAttempts(ctx, attempts, questions, verifier)
-				if err != nil {
-					return writeOptimizeError(out, evalLongCoTCommand, err.Error())
+				if datasetSource == "dataset" {
+					verifiedAttempts, result := verifyLongCoTAttemptsAgainstDatasetAnswers(attempts, questions)
+					attempts = verifiedAttempts
+					verifyResult = &result
+				} else {
+					verifier := longcotbridge.NewPythonVerifier(longcotbridge.PythonVerifierConfig{
+						RepoPath:   strings.TrimSpace(longCoTRepo),
+						PythonBin:  strings.TrimSpace(longCoTPython),
+						NoFallback: noFallback,
+					})
+					verifiedAttempts, result, err := verifyLongCoTAttempts(ctx, attempts, questions, verifier)
+					if err != nil {
+						return writeOptimizeError(out, evalLongCoTCommand, err.Error())
+					}
+					attempts = verifiedAttempts
+					verifyResult = &result
 				}
-				attempts = verifiedAttempts
-				verifyResult = &result
 			}
 
 			comparisons := longCoTComparisonsForConditions(conditions)
@@ -605,7 +642,7 @@ func newEvalLongCoTCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&noThink, "no-think", false, "Prefix official prompts with /no_think for local reasoning models that otherwise hide final content")
 	cmd.Flags().StringVar(&longCoTRepo, "longcot-repo", "", "Path to local LongCoT repository checkout used for official verification")
 	cmd.Flags().StringVar(&longCoTPython, "longcot-python", "", "Python executable for LongCoT verification (optional; defaults to uv/python3 discovery)")
-	cmd.Flags().StringVar(&sandboxKind, "sandbox", string(rlmruntime.SandboxKindPython), "Scratch REPL sandbox for rlm_repl conditions: python or yaegi")
+	cmd.Flags().StringVar(&sandboxKind, "sandbox", string(rlmruntime.SandboxKindPython), "Scratch REPL sandbox for rlm_repl conditions: python, smolvm, or yaegi")
 	cmd.Flags().BoolVar(&ephemeralSkills, "ephemeral-skills", false, "Expose ephemeral_helper_solve to rlm_repl conditions")
 	cmd.Flags().BoolVar(&generalHelper, "general-helper", false, "Expose ephemeral_helper_solve, a runtime-managed short-lived Go helper factory for rlm_repl conditions")
 	cmd.Flags().BoolVar(&requireEphemeralSkills, "require-ephemeral-skills", false, "Require rlm_repl conditions to call ephemeral_helper_solve before finalizing")
@@ -797,6 +834,12 @@ func longCoTAllowedToolsForCondition(condition longcoteval.Condition, sandbox rl
 		return withEphemeral([]string{replToolName})
 	case longcoteval.ConditionRLMNoModelToolsSingle:
 		return []string{replToolName}
+	case longcoteval.ConditionRLMLambdaReplSingle, longcoteval.ConditionRLMLambdaAdaptiveSingle, longcoteval.ConditionRLMLambdaThenBraidSingle:
+		tools := []string{replToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName}
+		if ephemeralSkills {
+			tools = append(tools, rlmruntime.EphemeralHelperSolveToolName)
+		}
+		return tools
 	case longcoteval.ConditionRLMReplRecursive, longcoteval.ConditionRLMNoToolsSingle, longcoteval.ConditionRLMBraidSingle:
 		return withEphemeral([]string{replToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName})
 	}
@@ -1236,6 +1279,9 @@ func runLongCoTLiveAttempt(
 	case longCoTLiveRunnerRLM:
 		return runLongCoTRLMAttempt(ctx, cfg, workspaceRoot, companionDB, question, condition, target)
 	case longCoTLiveRunnerREPL:
+		if condition.ID == longcoteval.ConditionRLMLambdaThenBraidSingle {
+			return runLongCoTHybridLambdaThenBraidAttempt(ctx, workspaceRoot, question, condition, target, helperRuntime, sandbox, attemptID, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper, finalFromVerifiedHandoff)
+		}
 		return runLongCoTREPLAttempt(ctx, workspaceRoot, question, condition, target, helperRuntime, sandbox, attemptID, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper, finalFromVerifiedHandoff)
 	default:
 		return longCoTLiveAttemptOutcome{}, fmt.Errorf("unsupported condition runner for %s", condition.ID)
@@ -1248,6 +1294,9 @@ func longCoTRunnerForCondition(condition longcoteval.Condition) longCoTLiveRunne
 	}
 	if condition.ID == longcoteval.ConditionRLMReplNoSubcalls ||
 		condition.ID == longcoteval.ConditionRLMReplRecursive ||
+		condition.ID == longcoteval.ConditionRLMLambdaReplSingle ||
+		condition.ID == longcoteval.ConditionRLMLambdaAdaptiveSingle ||
+		condition.ID == longcoteval.ConditionRLMLambdaThenBraidSingle ||
 		condition.ID == longcoteval.ConditionRLMBraidSingle ||
 		condition.ID == longcoteval.ConditionRLMNoToolsSingle ||
 		condition.ID == longcoteval.ConditionRLMNoModelToolsSingle {
@@ -1483,6 +1532,7 @@ func runLongCoTREPLAttempt(
 
 	start := time.Now()
 	runnerCfg := longCoTREPLRunnerConfig(question, condition, target, helperRuntime, timeout, maxIterations, workspaceRoot, sandbox, ephemeralSkills, generalHelper, requireEphemeralSkills, blocksworldHelper, finalFromVerifiedHandoff)
+	longCoTApplyAttemptSandboxWorkDir(&runnerCfg, attemptID)
 	result, err := (&rlmruntime.REPLRunner{Config: runnerCfg}).Run(runCtx, task, rlm.Environment{})
 	if generalHelper {
 		markLongCoTGeneralHelperResult(&result)
@@ -1547,6 +1597,183 @@ func runLongCoTREPLAttempt(
 		DurationMS:   time.Since(start).Milliseconds(),
 		RLM:          longCoTRLMMetaFromResult(condition, result),
 	}, nil
+}
+
+func runLongCoTHybridLambdaThenBraidAttempt(
+	ctx context.Context,
+	workspaceRoot string,
+	question longcoteval.Question,
+	condition longcoteval.Condition,
+	target longCoTLiveTarget,
+	helperRuntime longCoTHelperRuntime,
+	sandbox rlmruntime.SandboxKind,
+	attemptID string,
+	ephemeralSkills bool,
+	generalHelper bool,
+	requireEphemeralSkills bool,
+	blocksworldHelper bool,
+	finalFromVerifiedHandoff bool,
+) (longCoTLiveAttemptOutcome, error) {
+	lambdaCondition := longCoTLambdaBranchCondition(condition)
+	lambdaOutcome, lambdaErr := runLongCoTREPLAttempt(
+		ctx,
+		workspaceRoot,
+		question,
+		lambdaCondition,
+		target,
+		helperRuntime,
+		sandbox,
+		attemptID+"-lambda",
+		ephemeralSkills,
+		generalHelper,
+		requireEphemeralSkills,
+		blocksworldHelper,
+		finalFromVerifiedHandoff,
+	)
+	if lambdaErr == nil && lambdaOutcome.Status == longcoteval.AttemptStatusOK && strings.TrimSpace(lambdaOutcome.ResponseText) != "" {
+		longCoTMarkHybridOutcome(&lambdaOutcome, condition, map[string]any{
+			"selected":           "lambda",
+			"lambda_status":      string(lambdaOutcome.Status),
+			"lambda_duration_ms": lambdaOutcome.DurationMS,
+			"fallback_invoked":   false,
+		})
+		return lambdaOutcome, nil
+	}
+
+	fallbackReason := strings.TrimSpace(lambdaOutcome.Error)
+	if fallbackReason == "" && lambdaErr != nil {
+		fallbackReason = strings.TrimSpace(lambdaErr.Error())
+	}
+	if fallbackReason == "" {
+		fallbackReason = fmt.Sprintf("lambda branch returned status=%s response_empty=%v", lambdaOutcome.Status, strings.TrimSpace(lambdaOutcome.ResponseText) == "")
+	}
+
+	braidCondition := longCoTBraidFallbackCondition(condition)
+	braidOutcome, braidErr := runLongCoTREPLAttempt(
+		ctx,
+		workspaceRoot,
+		question,
+		braidCondition,
+		target,
+		helperRuntime,
+		sandbox,
+		attemptID+"-braid",
+		ephemeralSkills,
+		generalHelper,
+		requireEphemeralSkills,
+		blocksworldHelper,
+		finalFromVerifiedHandoff,
+	)
+	braidOutcome.Usage = addLongCoTUsage(lambdaOutcome.Usage, braidOutcome.Usage)
+	braidOutcome.ToolEvents = mergeLongCoTToolEvents(lambdaOutcome.ToolEvents, braidOutcome.ToolEvents)
+	longCoTMarkHybridOutcome(&braidOutcome, condition, map[string]any{
+		"selected":                  "braid",
+		"fallback_invoked":          true,
+		"fallback_reason":           fallbackReason,
+		"lambda_status":             string(lambdaOutcome.Status),
+		"lambda_error":              firstNonEmpty(lambdaOutcome.Error, errorString(lambdaErr)),
+		"lambda_duration_ms":        lambdaOutcome.DurationMS,
+		"lambda_response_available": strings.TrimSpace(lambdaOutcome.ResponseText) != "",
+		"lambda_usage":              lambdaOutcome.Usage,
+		"lambda_tool_names":         longCoTToolNamesFromOutcome(lambdaOutcome),
+		"lambda_metadata":           longCoTRLMMetadataFromOutcome(lambdaOutcome),
+		"braid_timeout_ms":          braidCondition.TimeoutMS,
+		"braid_max_iterations":      braidCondition.MaxIterations,
+		"braid_max_subcalls":        braidCondition.MaxSubcalls,
+	})
+	return braidOutcome, braidErr
+}
+
+func longCoTLambdaBranchCondition(condition longcoteval.Condition) longcoteval.Condition {
+	branch := condition
+	branch.ID = longcoteval.ConditionRLMLambdaAdaptiveSingle
+	branch.RLMRouteProfile = "longcot_lambda_adaptive"
+	branch.RLMPlanMode = "repl_lambda_adaptive"
+	branch.RLMToolProfile = "longcot-repl-recursive"
+	if branch.MaxDepth <= 0 || branch.MaxDepth > 2 {
+		branch.MaxDepth = 2
+	}
+	if branch.MaxSubcalls <= 0 || branch.MaxSubcalls > 4 {
+		branch.MaxSubcalls = 4
+	}
+	if branch.MaxIterations <= 0 || branch.MaxIterations > 24 {
+		branch.MaxIterations = 24
+	}
+	return branch
+}
+
+func longCoTBraidFallbackCondition(condition longcoteval.Condition) longcoteval.Condition {
+	branch := condition
+	branch.ID = longcoteval.ConditionRLMBraidSingle
+	branch.RLMRouteProfile = "longcot_repl_braid"
+	branch.RLMPlanMode = "repl_braid"
+	branch.RLMToolProfile = "longcot-repl-recursive"
+	branch.MaxDepth = 1
+	branch.MaxIterations = maxInt(branch.MaxIterations, 32)
+	branch.MaxSubcalls = maxInt(branch.MaxSubcalls, 16)
+	branch.TimeoutMS = longCoTBraidFallbackTimeoutMS(condition.TimeoutMS)
+	return branch
+}
+
+func longCoTBraidFallbackTimeoutMS(lambdaTimeoutMS int64) int64 {
+	if lambdaTimeoutMS <= 0 {
+		lambdaTimeoutMS = (90 * time.Second).Milliseconds()
+	}
+	fallback := lambdaTimeoutMS * 2
+	minimum := (720 * time.Second).Milliseconds()
+	if fallback < minimum {
+		fallback = minimum
+	}
+	return fallback
+}
+
+func longCoTMarkHybridOutcome(outcome *longCoTLiveAttemptOutcome, condition longcoteval.Condition, hybrid map[string]any) {
+	if outcome == nil {
+		return
+	}
+	if outcome.RLM == nil {
+		outcome.RLM = &longcoteval.RLMAttemptMeta{}
+	}
+	outcome.RLM.RouteProfile = condition.RLMRouteProfile
+	outcome.RLM.PlanMode = condition.RLMPlanMode
+	outcome.RLM.ToolProfile = condition.RLMToolProfile
+	outcome.RLM.MaxDepth = longCoTConditionMaxDepth(condition)
+	outcome.RLM.MaxIterations = condition.MaxIterations
+	outcome.RLM.MaxSubcalls = condition.MaxSubcalls
+	if outcome.RLM.Metadata == nil {
+		outcome.RLM.Metadata = map[string]any{}
+	}
+	outcome.RLM.Metadata["hybrid"] = hybrid
+	outcome.RLM.Metadata["effective_contract"] = longCoTEffectiveContractMetadata(condition)
+}
+
+func longCoTRLMMetadataFromOutcome(outcome longCoTLiveAttemptOutcome) map[string]any {
+	if outcome.RLM == nil || len(outcome.RLM.Metadata) == 0 {
+		return nil
+	}
+	return outcome.RLM.Metadata
+}
+
+func longCoTToolNamesFromOutcome(outcome longCoTLiveAttemptOutcome) []string {
+	if outcome.RLM != nil && outcome.RLM.Metadata != nil {
+		if names := longCoTStringSliceFromAny(outcome.RLM.Metadata["tool_names"]); len(names) > 0 {
+			return names
+		}
+	}
+	out := make([]string, 0, len(outcome.ToolEvents))
+	for _, event := range outcome.ToolEvents {
+		if name := strings.TrimSpace(event.Name); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.TrimSpace(err.Error())
 }
 
 func markLongCoTGeneralHelperResult(result *rlm.Result) {
@@ -1851,6 +2078,7 @@ func longCoTBraidSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRu
 			MaxIterations:           1,
 			OutputKind:              rlmruntime.REPLPhaseOutputKindBraidGraph,
 			ResponseFormat:          json.RawMessage(`{"type":"json_object"}`),
+			MaxTokens:               longCoTBraidGraphPlanMaxTokens,
 			MaxGraphNodes:           12,
 			BraidGraphPolicy:        rlmruntime.BraidGraphPolicyLongCoTController,
 			RequireScaffoldContract: true,
@@ -1863,6 +2091,7 @@ func longCoTBraidSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRu
 				"Do not answer directly in this phase.",
 			}, "\n"),
 			Tools:                   []string{rlmruntime.RLMQueryToolName},
+			MaxTokens:               longCoTBraidGraphFanoutMaxTokens,
 			MaxIterations:           1,
 			AutoExecuteGraphNodes:   true,
 			BraidRepairAttempts:     2,
@@ -1875,12 +2104,22 @@ func longCoTBraidSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRu
 				"Final formatting phase only.",
 				"Your response must be exactly one line in this format: solution = <value>.",
 			}, "\n"),
+			MaxTokens:     longCoTBraidFinalMaxTokens,
 			MaxIterations: 1,
 			Final:         true,
 		},
 	}
 	return phases
 }
+
+const (
+	longCoTBraidGraphPlanMaxTokens   = 4096
+	longCoTBraidGraphFanoutMaxTokens = 4096
+	longCoTBraidFinalMaxTokens       = 2048
+	longCoTBraidChildMaxTokens       = 4096
+	longCoTBraidChildVerifyTokens    = 2048
+	longCoTBraidChildFilterTokens    = 2048
+)
 
 func longCoTRecursiveSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRunnerPhase {
 	replToolName := rlmruntime.PythonREPLToolName
@@ -1983,13 +2222,9 @@ func longCoTRecursiveSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.RE
 
 func longCoTDefaultContextREPLCode(sandbox rlmruntime.SandboxKind) string {
 	if rlmruntime.NormalizeSandboxKind(sandbox) == rlmruntime.SandboxKindYaegi {
-		return "println(official_prompt)"
+		return `println("PROMPT_PACKET_JSON={\"status\":\"blocked\",\"reason\":\"compact context parser is only implemented for Python sandbox\"}")`
 	}
-	return strings.Join([]string{
-		"print(official_prompt)",
-		"",
-		"# Next: identify dependencies, requested final nodes, and placeholders before rlm_query.",
-	}, "\n")
+	return longCoTPromptPacketREPLCode(sandbox)
 }
 
 func longCoTFanoutQueryCalls(prompts []string) []rlmruntime.REPLRunnerPhaseAutoToolCall {
@@ -2018,6 +2253,451 @@ func longCoTFanoutWorkerCount(maxSubcalls int) int {
 		return maxSubcalls
 	}
 	return 3
+}
+
+func longCoTLambdaReplSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRunnerPhase {
+	replToolName := rlmruntime.PythonREPLToolName
+	verifyCodeContract := []string{
+		"Return raw verifier code only. The runtime will execute this text with the scratch REPL.",
+		"Your first non-empty line must be executable code, not a comment.",
+		"Use official_prompt and the prior child summaries in this phase prompt as inputs.",
+		"Do not generate a new candidate from scratch. Extract one or more child candidate answers and verify them.",
+		"The runtime injects `rlm_candidates`, keyed by runtime-issued child candidate_id values from rlm_wait/rlm_result output.",
+		"For simple verifier code, read candidate answer strings from `rlm_candidate_answers[candidate_id]` or `candidate_answer(candidate_id)`; `rlm_candidates[candidate_id]` is metadata.",
+		"Use only a candidate_id present in `rlm_candidates`; do not invent child IDs, node IDs, answer hashes, or artifact JSON.",
+		"Use deterministic checks: replay state transitions, recompute arithmetic, type-check traces, parse candidate formats, or run independent consistency checks.",
+		"Use only built-in language features and standard library packages. Do not import unavailable third-party packages.",
+		"The runtime injects `check(name, pass_value, **evidence)` and `accept_candidate(candidate_id, checks=[...], final_answer=None)` helpers.",
+		"Build checks with `check(...)`; include at least one `constraint_replay_or_recompute` check and one `goal_or_requested_output` check.",
+		"Do not manually print VERIFIER_ARTIFACT_JSON. Call `accept_candidate(...)`; the runtime helper emits the artifact and binds the final answer to the registered child candidate.",
+		"If every child candidate fails, raise AssertionError with the first failed check instead of printing a solution.",
+		"Do not use shorthand string checks. Each check must be an object produced by `check(...)` with name/pass/evidence.",
+		"Do not call python_repl, go_repl, rlm_query, rlm_wait, or rlm_result yourself.",
+		"Do not include prose, markdown, or the final answer outside code.",
+	}
+	if rlmruntime.NormalizeSandboxKind(sandbox) == rlmruntime.SandboxKindYaegi {
+		replToolName = rlmruntime.GoREPLToolName
+		verifyCodeContract = append(verifyCodeContract,
+			"Use Go REPL statements such as fmt.Println(\"solution = ...\").",
+			"Do not include package declarations or import blocks.",
+		)
+	} else {
+		verifyCodeContract = append(verifyCodeContract,
+			"Use Python statements such as print('solution = ...').",
+			"If a small local package is essential and import fails, verify with a standard-library fallback or raise AssertionError.",
+		)
+	}
+	return []rlmruntime.REPLRunnerPhase{
+		{
+			Name: "lambda_fanout",
+			Prompt: strings.Join([]string{
+				"Submit recursive child solvers now.",
+				"The parent is the verifier, not the primary solver. Children should independently solve the task or a candidate-producing decomposition.",
+				"Do not answer directly in this phase.",
+			}, "\n"),
+			Tools:                   []string{rlmruntime.RLMQueryToolName},
+			RequiredTools:           []string{rlmruntime.RLMQueryToolName},
+			MaxIterations:           1,
+			AutoExecuteRequiredTool: true,
+			AutoExecuteToolCalls: longCoTFanoutQueryCalls([]string{
+				"Independent solver child A: solve the official task end-to-end if possible. Use scratch code for deterministic parsing/search/simulation/calculation. Return exactly one compact candidate line beginning solution = plus compact checks or blockers.",
+				"Independent solver child B: solve the same official task using a different decomposition or algorithm when possible. Use scratch code for deterministic checks. Return exactly one compact candidate line beginning solution = plus compact checks or blockers.",
+			}),
+		},
+		{
+			Name: "lambda_wait",
+			Prompt: strings.Join([]string{
+				"Wait for submitted child solvers.",
+				"Call rlm_wait with empty JSON arguments: {}.",
+				"Do not call rlm_query and do not produce the final answer in this phase.",
+			}, "\n"),
+			Tools:                   []string{rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName},
+			RequiredTools:           []string{rlmruntime.RLMWaitToolName},
+			MaxIterations:           1,
+			AutoExecuteRequiredTool: true,
+		},
+		{
+			Name: "lambda_verify",
+			Prompt: strings.Join(append([]string{
+				"Parent verification phase.",
+				"The parent must verify child candidates; do not solve directly unless needed to check a child candidate.",
+			}, verifyCodeContract...), "\n"),
+			OutputKind:                      rlmruntime.REPLPhaseOutputKindREPLCode,
+			Tools:                           []string{replToolName},
+			RequiredTools:                   []string{replToolName},
+			MaxTokens:                       900,
+			MaxIterations:                   1,
+			RequireToolResultOK:             true,
+			RequireToolOutput:               true,
+			RequireStructuredToolOutputOnly: true,
+			InjectVerifierPrelude:           true,
+			RequiredToolOutputSubstrings:    []string{"VERIFIER_ARTIFACT_JSON="},
+			RequireVerifierArtifact:         true,
+			MaxREPLCodeLines:                140,
+			FilterOverlongREPLCode:          true,
+			FilterREPLCodeMaxTokens:         1200,
+			DisableREPLCodeRepair:           true,
+		},
+		{
+			Name: "lambda_final",
+			Prompt: strings.Join([]string{
+				"Final answer phase.",
+				"Use the child solver summaries and the lambda_verify REPL output.",
+				"Do not call tools. Do not output code, markdown, scratch prose, or runtime/tool discussion.",
+				"The verifier output already satisfied the runtime verifier artifact requirement.",
+				"Return exactly one line beginning solution = with the requested final answer.",
+			}, "\n"),
+			MaxIterations:                 1,
+			Final:                         true,
+			ForwardVerifierArtifactAnswer: true,
+			RuntimeOnlyFinal:              true,
+		},
+	}
+}
+
+func longCoTLambdaAdaptiveSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRunnerPhase {
+	replToolName := rlmruntime.PythonREPLToolName
+	if rlmruntime.NormalizeSandboxKind(sandbox) == rlmruntime.SandboxKindYaegi {
+		replToolName = rlmruntime.GoREPLToolName
+	}
+	return []rlmruntime.REPLRunnerPhase{
+		{
+			Name: "solve_direct",
+			Prompt: strings.Join([]string{
+				"Direct solve phase.",
+				"Solve the official task as a normal model without calling tools.",
+				"Do not emit a BRAID graph, scratch code, or runtime discussion.",
+				"If the answer is clear, answer in the official requested format.",
+				"If you cannot solve directly, state the blocker briefly without inventing a partial solution.",
+			}, "\n"),
+			MaxIterations: 1,
+		},
+		{
+			Name: "tool_assist",
+			Prompt: strings.Join([]string{
+				"Candidate verification and repair phase.",
+				"If the prior phase produced a `solution = ...` answer, verify or repair that exact candidate with the scratch REPL before accepting it.",
+				"If the prior phase did not produce an answer, use tools only when they clearly reduce risk: compact parsing, simulation, arithmetic, consistency checks, or bounded child delegation.",
+				"If a small deterministic Python library is useful, request it through the python_repl packages field, for example packages:[\"python-chess\"] before importing chess. Do not run pip, subprocess, or shell commands from code.",
+				"For long inputs, never paste or retype the official task data into code. Read and parse the REPL variables `official_prompt` or `prompt` so the computation uses the exact input.",
+				"Do not emit a BRAID graph. Prefer a compact verifier/checker over a full generic solver.",
+				"When you run a deterministic candidate check in the REPL, print one structured line: RLM_CHECK_JSON={\"pass\":true,\"reason\":\"...\"}. If the candidate fails, print RLM_CHECK_JSON={\"pass\":false,\"reason\":\"...\"} with the first concrete failure and do not output an accepted answer.",
+				"If a tool-produced deterministic check accepts or repairs the answer, the REPL must also print one structured answer sentinel: RLM_ANSWER_JSON={\"answer\":\"solution = ...\",\"pass\":true,\"checks\":[...]}.",
+				"The answer field must contain the official final answer line exactly as `solution = ...`. Include deterministic check summaries in checks when available.",
+				"If blocked, briefly state the blocker and the runtime may escalate. Do not emit RLM_ANSWER_JSON unless the answer is accepted.",
+			}, "\n"),
+			Tools:                       []string{replToolName, rlmruntime.RLMQueryToolName, rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName},
+			RequiredTools:               []string{replToolName},
+			RequireToolResultOK:         true,
+			AutoVerifyPriorSolutionLine: true,
+			IncludePriorAssistantText:   true,
+			MaxIterations:               3,
+		},
+		{
+			Name: "final",
+			Prompt: strings.Join([]string{
+				"Final formatting phase.",
+				"Use the previous solve_direct structured answer sentinel.",
+				"Do not call tools. Do not add markdown, scratch prose, or runtime discussion.",
+				"Return the answer from exactly one prior RLM_ANSWER_JSON={\"answer\":\"solution = ...\",\"pass\":true,\"checks\":[...]} sentinel.",
+				"Do not invent, rewrite, or repair an answer in this phase.",
+			}, "\n"),
+			MaxIterations:                       1,
+			Final:                               true,
+			BlockFinalOnFailedToolEvidence:      true,
+			RuntimeOnlyFinal:                    true,
+			ForwardStructuredToolAnswer:         true,
+			ForwardExecutedStructuredToolAnswer: true,
+			RequireStructuredToolAnswer:         true,
+			ForwardPriorSolutionLine:            false,
+		},
+	}
+}
+
+func longCoTLambdaAdaptiveLongInputSolvePhases(sandbox rlmruntime.SandboxKind) []rlmruntime.REPLRunnerPhase {
+	replToolName := rlmruntime.PythonREPLToolName
+	if rlmruntime.NormalizeSandboxKind(sandbox) == rlmruntime.SandboxKindYaegi {
+		replToolName = rlmruntime.GoREPLToolName
+	}
+	return []rlmruntime.REPLRunnerPhase{
+		{
+			Name: "prompt_packet",
+			Prompt: strings.Join([]string{
+				"Runtime parser phase.",
+				"Use the scratch REPL to extract a compact structural packet from official_prompt.",
+				"Do not solve the task and do not produce a final answer.",
+				"The packet should include answer_format, section labels, compact section previews, counts, and likely exact-data fields.",
+			}, "\n"),
+			Tools:                   []string{replToolName},
+			RequiredTools:           []string{replToolName},
+			MaxIterations:           1,
+			AutoExecuteRequiredTool: true,
+			AutoExecuteToolCalls: []rlmruntime.REPLRunnerPhaseAutoToolCall{{
+				Tool: replToolName,
+				Args: mustLongCoTAutoToolArgs(map[string]any{
+					"code": longCoTPromptPacketREPLCode(sandbox),
+				}),
+			}},
+			RequireToolResultOK:          true,
+			RequireToolOutput:            true,
+			RequiredToolOutputSubstrings: []string{"PROMPT_PACKET_JSON="},
+		},
+		{
+			Name: "long_fanout",
+			Prompt: strings.Join([]string{
+				"Submit bounded recursive children now using the prompt packet from the prior REPL output.",
+				"The parent coordinates and verifies; children should have distinct roles: parser, solver, verifier.",
+				"Do not answer directly in this phase.",
+			}, "\n"),
+			Tools:                   []string{rlmruntime.RLMQueryToolName},
+			RequiredTools:           []string{rlmruntime.RLMQueryToolName},
+			MaxIterations:           1,
+			AutoExecuteRequiredTool: true,
+			AutoExecuteToolCalls: longCoTFanoutQueryCalls([]string{
+				"Parser child: extract exact structured inputs from the official task, including answer format and compact refs to long lists/tables/code. Do not solve unless trivial. Return compact JSON-like facts and blockers.",
+				"Solver child: use the parser facts and official task to produce one candidate answer. Use scratch code for deterministic calculation/simulation when useful. Return one compact candidate line beginning solution = plus checks or blockers.",
+				"Verifier child: design and, where possible, execute deterministic checks for the requested output. Return check strategy, first failure if any, and solution = only if independently verified.",
+			}),
+		},
+		{
+			Name: "long_wait",
+			Prompt: strings.Join([]string{
+				"Wait for submitted child solvers.",
+				"Call rlm_wait with empty JSON arguments: {}.",
+				"Do not call rlm_query and do not produce the final answer in this phase.",
+			}, "\n"),
+			Tools:                   []string{rlmruntime.RLMWaitToolName, rlmruntime.RLMResultToolName},
+			RequiredTools:           []string{rlmruntime.RLMWaitToolName},
+			MaxIterations:           1,
+			AutoExecuteRequiredTool: true,
+		},
+		{
+			Name: "long_tool_verify",
+			Prompt: strings.Join([]string{
+				"Executable integration and verification phase.",
+				"Return raw REPL code only. The runtime will execute it.",
+				"The code must read the task from `official_prompt`; it is a Python string variable, not a file path. Do not call open(...) to read it.",
+				"The runtime predefines accept(answer, checks=[...], reason=\"...\") and reject(reason). Use accept to emit the required RLM_CHECK_JSON and RLM_ANSWER_JSON sentinels; use reject for blockers.",
+				"Do not paste move lists, programs, SMILES strings, tables, formulas, or other long task data as literals.",
+				"When the prompt packet lists exact_data_sections, extract from that labeled section only. Do not regex the entire prompt if examples or format instructions contain similar tokens. Preserve full tokens, including suffixes such as promotion characters.",
+				"Use prior child summaries as candidate sources, but verify or repair candidates with deterministic parsing, recomputation, simulation, type checking, or constraint checks.",
+				longCoTCapabilityPromptLine(sandbox),
+				"Prefer compact library-backed verification over hand-written domain engines. If a library can parse/simulate/typecheck/recompute the task exactly, use that library instead of implementing those semantics yourself.",
+				"Keep verifier code compact: imports, small helper functions, computation, then accept/reject. Do not write a derivation in comments.",
+				"Keep comments brief. If the solution needs a long derivation, put the derivation into executable checks instead of comments.",
+				"Do not output tool-call XML, markdown, or prose; return only executable code.",
+				"Call reject(\"first concrete failed check\") when blocked.",
+				"When accepted, call accept(\"solution = ...\", checks=[...], reason=\"...\"). A bare print(\"solution = ...\") line is not enough for final forwarding.",
+				"The answer must contain exactly one official final answer line beginning `solution =`.",
+			}, "\n"),
+			OutputKind:                      rlmruntime.REPLPhaseOutputKindREPLCode,
+			Tools:                           []string{replToolName},
+			RequiredTools:                   []string{replToolName},
+			MaxTokens:                       4096,
+			MaxIterations:                   1,
+			RequireToolResultOK:             true,
+			RequireToolOutput:               true,
+			RequireStructuredToolOutputOnly: true,
+			InjectVerifierPrelude:           true,
+			AllowPartialPseudoToolCallCode:  true,
+			AllowedREPLImports:              longCoTVerifierAllowedImports(sandbox),
+			MaxREPLCodeLines:                140,
+			FilterOverlongREPLCode:          true,
+			FilterREPLCodeMaxTokens:         2048,
+		},
+		{
+			Name: "final",
+			Prompt: strings.Join([]string{
+				"Final formatting phase.",
+				"Return the answer from exactly one prior RLM_ANSWER_JSON={\"answer\":\"solution = ...\",\"pass\":true,\"checks\":[...]} sentinel.",
+				"Do not invent, rewrite, or repair an answer in this phase.",
+			}, "\n"),
+			MaxIterations:                       1,
+			Final:                               true,
+			BlockFinalOnFailedToolEvidence:      true,
+			RuntimeOnlyFinal:                    true,
+			ForwardStructuredToolAnswer:         true,
+			ForwardExecutedStructuredToolAnswer: true,
+			RequireStructuredToolAnswer:         true,
+			ForwardPriorSolutionLine:            false,
+		},
+	}
+}
+
+func longCoTVerifierAllowedImports(sandbox rlmruntime.SandboxKind) []string {
+	if rlmruntime.NormalizeSandboxKind(sandbox) != rlmruntime.SandboxKindSmolVMPython {
+		return nil
+	}
+	return []string{"chess", "rdkit", "sympy", "networkx", "numpy"}
+}
+
+func longCoTQuestionNeedsAdaptiveFanout(question longcoteval.Question) bool {
+	prompt := strings.TrimSpace(question.PromptText)
+	if len(prompt) >= 2000 {
+		return true
+	}
+	if len(question.RequiredSubcallRules) > 0 {
+		return true
+	}
+	return false
+}
+
+func longCoTPromptPacketREPLCode(sandbox rlmruntime.SandboxKind) string {
+	if rlmruntime.NormalizeSandboxKind(sandbox) == rlmruntime.SandboxKindYaegi {
+		return `println("PROMPT_PACKET_JSON={\"status\":\"blocked\",\"reason\":\"prompt packet auto-parser is only implemented for Python sandbox\"}")`
+	}
+	capabilityJSON := longCoTPythonCapabilityJSONLiteral(sandbox)
+	capabilitySpecsJSON := longCoTPythonCapabilitySpecsJSONLiteral(sandbox)
+	return strings.Join([]string{
+		"import importlib.util, json, re",
+		"p = official_prompt",
+		"runtime_capabilities = " + capabilityJSON,
+		"capability_specs = " + capabilitySpecsJSON,
+		"runtime_capabilities['python_modules'] = []",
+		"for spec in capability_specs:",
+		"    entry = dict(spec)",
+		"    module = entry.get('import', '')",
+		"    try:",
+		"        available = importlib.util.find_spec(module) is not None if module else False",
+		"    except Exception as exc:",
+		"        available = False",
+		"        entry['availability_error'] = repr(exc)",
+		"    entry['available'] = bool(available)",
+		"    runtime_capabilities['python_modules'].append(entry)",
+		"lines = p.splitlines()",
+		"sections = []",
+		"for i, line in enumerate(lines):",
+		"    s = line.strip()",
+		"    if not s:",
+		"        continue",
+		"    if re.match(r'^(Subproblem|Question|Task|Input|Output|Chess Move Sequence|UCI format|Please provide|When you are done|Return your answer)', s, re.I):",
+		"        sections.append({'line': i + 1, 'label': s[:120]})",
+		"answer_format = ''",
+		"m = re.search(r'(solution\\s*=\\s*<[^>]+>|solution\\s*=\\s*[^\\n\\.]+)', p, re.I)",
+		"if m:",
+		"    answer_format = m.group(1).strip()",
+		"uci_moves = re.findall(r'\\b[a-h][1-8][a-h][1-8][nbrq]?\\b', p)",
+		"smilesish = re.findall(r'(?<![A-Za-z0-9@+\\-\\[\\]\\(\\)=#/\\\\])([A-Za-z0-9@+\\-\\[\\]\\(\\)=#/\\\\]{8,})(?![A-Za-z0-9@+\\-\\[\\]\\(\\)=#/\\\\])', p)",
+		"numbers = re.findall(r'(?<![A-Za-z0-9])[-+]?\\d+(?:\\.\\d+)?(?:\\^\\d+)?(?![A-Za-z0-9])', p)",
+		"exact_data_sections = []",
+		"for i, line in enumerate(lines):",
+		"    if ':' not in line:",
+		"        continue",
+		"    label, value = line.split(':', 1)",
+		"    label_clean = label.strip()",
+		"    value = value.strip()",
+		"    if not value:",
+		"        continue",
+		"    section = {'line': i + 1, 'label': label_clean[:120], 'extraction_rule': 'parse only this labeled value, not examples or instructions elsewhere in the prompt'}",
+		"    section_uci = re.findall(r'\\b[a-h][1-8][a-h][1-8][nbrq]?\\b', value)",
+		"    if section_uci:",
+		"        section.update({'token_type': 'uci_moves', 'count': len(section_uci), 'head': section_uci[:5], 'tail': section_uci[-5:]})",
+		"        exact_data_sections.append(section)",
+		"        continue",
+		"    section_numbers = re.findall(r'(?<![A-Za-z0-9])[-+]?\\d+(?:\\.\\d+)?(?:\\^\\d+)?(?![A-Za-z0-9])', value)",
+		"    if section_numbers and len(section_numbers) >= 4:",
+		"        section.update({'token_type': 'numbers', 'count': len(section_numbers), 'head': section_numbers[:8], 'tail': section_numbers[-8:]})",
+		"        exact_data_sections.append(section)",
+		"packet = {",
+		"    'answer_format': answer_format,",
+		"    'line_count': len(lines),",
+		"    'char_count': len(p),",
+		"    'sections': sections[:40],",
+		"    'counts': {'uci_moves': len(uci_moves), 'smiles_like_tokens': len(smilesish), 'numbers': len(numbers)},",
+		"    'samples': {'uci_moves_head': uci_moves[:5], 'uci_moves_tail': uci_moves[-5:], 'smiles_like_head': smilesish[:8], 'numbers_head': numbers[:12]},",
+		"    'exact_data_sections': exact_data_sections[:12],",
+		"    'runtime_capabilities': runtime_capabilities,",
+		"    'exact_data_rule': 'Do not paste long literals into code. Parse exact data from official_prompt using these labels/counts.'",
+		"}",
+		"print('PROMPT_PACKET_JSON=' + json.dumps(packet, separators=(',', ':')))",
+	}, "\n")
+}
+
+func longCoTPythonCapabilityJSONLiteral(sandbox rlmruntime.SandboxKind) string {
+	body, err := json.Marshal(longCoTPythonCapabilities(sandbox))
+	if err != nil {
+		return "{}"
+	}
+	return string(body)
+}
+
+func longCoTPythonCapabilitySpecsJSONLiteral(sandbox rlmruntime.SandboxKind) string {
+	body, err := json.Marshal(longCoTPythonCapabilitySpecs(sandbox))
+	if err != nil {
+		return "[]"
+	}
+	return string(body)
+}
+
+func longCoTPythonCapabilities(sandbox rlmruntime.SandboxKind) map[string]any {
+	out := map[string]any{
+		"official_prompt_binding": "string_variable",
+		"official_prompt_rule":    "use official_prompt directly; do not open files or read /workspace/official_prompt",
+	}
+	if rlmruntime.NormalizeSandboxKind(sandbox) != rlmruntime.SandboxKindSmolVMPython {
+		out["python_modules"] = []any{}
+		out["package_install"] = "unavailable"
+		return out
+	}
+	out["package_install"] = "runtime_controlled_allowlist"
+	out["python_modules"] = longCoTPythonCapabilitySpecs(sandbox)
+	return out
+}
+
+func longCoTPythonCapabilitySpecs(sandbox rlmruntime.SandboxKind) []map[string]any {
+	if rlmruntime.NormalizeSandboxKind(sandbox) != rlmruntime.SandboxKindSmolVMPython {
+		return nil
+	}
+	return []map[string]any{
+		{
+			"import":  "chess",
+			"package": "python-chess",
+			"uses":    []string{"legal move replay", "FEN generation", "board-state simulation"},
+		},
+		{
+			"import":  "rdkit.Chem",
+			"package": "rdkit",
+			"uses":    []string{"SMILES parsing", "molecule validity checks", "formula/property helpers"},
+		},
+		{
+			"import":  "sympy",
+			"package": "sympy",
+			"uses":    []string{"symbolic algebra", "exact arithmetic", "equation solving"},
+		},
+		{
+			"import":  "networkx",
+			"package": "networkx",
+			"uses":    []string{"graph algorithms", "path search", "topology checks"},
+		},
+		{
+			"import":  "numpy",
+			"package": "numpy",
+			"uses":    []string{"numeric arrays", "vectorized arithmetic"},
+		},
+	}
+}
+
+func longCoTPythonCapabilityProbe(sandbox rlmruntime.SandboxKind) []string {
+	specs := longCoTPythonCapabilitySpecs(sandbox)
+	out := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		module, ok := spec["import"].(string)
+		if !ok {
+			continue
+		}
+		module = strings.TrimSpace(module)
+		if module != "" {
+			out = append(out, module)
+		}
+	}
+	return out
+}
+
+func longCoTCapabilityPromptLine(sandbox rlmruntime.SandboxKind) string {
+	if rlmruntime.NormalizeSandboxKind(sandbox) != rlmruntime.SandboxKindSmolVMPython {
+		return "Use Python standard library only unless a prior runtime capability packet lists an available deterministic module. Do not run pip, subprocess, shell commands, or network calls."
+	}
+	return "Runtime capability packet lists available deterministic Python modules. In this smolvm sandbox, prefer importing exact libraries when applicable: chess for UCI/FEN replay, rdkit.Chem for SMILES/molecules, sympy for algebra, networkx for graph algorithms, numpy for numeric arrays. Do not run pip, subprocess, shell commands, or network calls."
 }
 
 func mustLongCoTAutoToolArgs(value map[string]any) json.RawMessage {
@@ -2096,10 +2776,42 @@ func longCoTREPLRunnerConfig(
 			MaxDuration:    timeout,
 		},
 		Sandbox: rlmruntime.SandboxConfig{
-			Kind: sandbox,
+			Kind:            sandbox,
+			EvalImageID:     longCoTSmolVMImageID(),
+			MachineMode:     longCoTSmolVMMachineMode(),
+			CapabilityProbe: longCoTPythonCapabilityProbe(sandbox),
 			Python: repl.Options{
 				WorkDir:         filepath.Join(os.TempDir(), "foxctl-longcot-sandboxes", longCoTSandboxWorkDirName(question, condition)),
 				PreserveWorkDir: true,
+			},
+			SmolVMPython: repl.SmolVMPythonOptions{
+				MachineName:         longCoTSmolVMMachineName(),
+				Image:               longCoTSmolVMImage(),
+				GuestWorkDir:        "/workspace/foxctl-rlm-python/runs/" + longCoTSandboxWorkDirName(question, condition),
+				SitePackagesDir:     "/workspace/foxctl-rlm-python/site-packages",
+				Network:             false,
+				CreateOnInit:        false,
+				StartOnInit:         true,
+				StopOnClose:         false,
+				AllowPackageInstall: true,
+				AllowedPackages: []string{
+					"python-chess",
+					"sympy",
+					"networkx",
+					"numpy",
+					"rdkit",
+					"rdkit-pypi",
+					"requests",
+				},
+				PackageAliases: map[string]string{
+					"chess":    "python-chess",
+					"sympy":    "sympy",
+					"networkx": "networkx",
+					"numpy":    "numpy",
+					"rdkit":    "rdkit",
+					"requests": "requests",
+				},
+				PackageInstallTimeout: 180 * time.Second,
 			},
 		},
 		InitialState: map[string]any{
@@ -2148,9 +2860,21 @@ func longCoTREPLRunnerConfig(
 	cfg.RLMQueryFactory = longCoTREPLQueryFactory(&cfg)
 	if cfg.AsyncRecursion && !requireEphemeralSkills {
 		cfg.RecursionPolicy = rlmruntime.RecursionPolicyRequired
-		if strings.TrimSpace(condition.RLMPlanMode) == "repl_braid" {
+		switch strings.TrimSpace(condition.RLMPlanMode) {
+		case "repl_lambda_adaptive":
+			cfg.RecursionPolicy = rlmruntime.RecursionPolicyOptional
+			if longCoTQuestionNeedsAdaptiveFanout(question) {
+				cfg.Phases = longCoTLambdaAdaptiveLongInputSolvePhases(sandbox)
+			} else {
+				cfg.Phases = longCoTLambdaAdaptiveSolvePhases(sandbox)
+			}
+			cfg.LLM.RequireToolUse = false
+		case "repl_lambda":
+			cfg.Phases = longCoTLambdaReplSolvePhases(sandbox)
+			cfg.ToolErrorRepairMaxAttempts = 1
+		case "repl_braid":
 			cfg.Phases = longCoTBraidSolvePhases(sandbox)
-		} else {
+		default:
 			cfg.Phases = longCoTRecursiveSolvePhases(sandbox)
 		}
 		cfg.DefaultREPLCode = longCoTDefaultContextREPLCode(sandbox)
@@ -2165,8 +2889,44 @@ func longCoTREPLRunnerConfig(
 	return cfg
 }
 
+func longCoTSmolVMMachineName() string {
+	return firstNonEmpty(os.Getenv("FOXCTL_LONGCOT_SMOLVM_MACHINE"), "foxctl-rlm-longcot-clean-offline")
+}
+
+func longCoTSmolVMImage() string {
+	return firstNonEmpty(os.Getenv("FOXCTL_LONGCOT_SMOLVM_IMAGE"), "python:3.12-alpine")
+}
+
+func longCoTSmolVMImageID() string {
+	return firstNonEmpty(os.Getenv("FOXCTL_LONGCOT_SMOLVM_IMAGE_ID"), longCoTSmolVMImage())
+}
+
+func longCoTSmolVMMachineMode() string {
+	return firstNonEmpty(os.Getenv("FOXCTL_LONGCOT_SMOLVM_MACHINE_MODE"), "serialized_shared")
+}
+
+func longCoTApplyAttemptSandboxWorkDir(cfg *rlmruntime.REPLRunnerConfig, attemptID string) {
+	if cfg == nil {
+		return
+	}
+	suffix := sanitizeLongCoTSandboxPathPart(attemptID)
+	if suffix == "" {
+		return
+	}
+	if cfg.Sandbox.Python.WorkDir != "" {
+		cfg.Sandbox.Python.WorkDir = filepath.Join(cfg.Sandbox.Python.WorkDir, suffix)
+	}
+	if cfg.Sandbox.SmolVMPython.GuestWorkDir != "" {
+		cfg.Sandbox.SmolVMPython.GuestWorkDir = strings.TrimRight(cfg.Sandbox.SmolVMPython.GuestWorkDir, "/") + "/" + suffix
+	}
+}
+
 func longCoTSandboxWorkDirName(question longcoteval.Question, condition longcoteval.Condition) string {
 	name := strings.Join([]string{strings.TrimSpace(question.ID), string(condition.ID)}, "-")
+	return sanitizeLongCoTSandboxPathPart(name)
+}
+
+func sanitizeLongCoTSandboxPathPart(name string) string {
 	name = strings.Map(func(ch rune) rune {
 		switch {
 		case ch >= 'a' && ch <= 'z':
@@ -2205,7 +2965,7 @@ func longCoTLLMConfigFromTarget(target longCoTLiveTarget, condition longcoteval.
 		MaxTokens:      condition.MaxTokens,
 		Temperature:    condition.Temperature,
 		MaxIterations:  maxIterations,
-		RequireToolUse: true,
+		RequireToolUse: !longCoTConditionIsModelFirstAdaptive(condition),
 	}
 	if longCoTIsQwenModel(target.Model) {
 		cfg.QwenNoThink = true
@@ -2215,6 +2975,11 @@ func longCoTLLMConfigFromTarget(target longCoTLiveTarget, condition longcoteval.
 		cfg.ExtraBody = mergeLongCoTExtraBody(cfg.ExtraBody, longCoTDeepSeekNoThinkExtraBody())
 	}
 	return cfg
+}
+
+func longCoTConditionIsModelFirstAdaptive(condition longcoteval.Condition) bool {
+	return condition.ID == longcoteval.ConditionRLMLambdaAdaptiveSingle ||
+		strings.TrimSpace(condition.RLMPlanMode) == "repl_lambda_adaptive"
 }
 
 func longCoTIsQwenModel(model string) bool {
@@ -2353,6 +3118,10 @@ func longCoTREPLQueryFactory(cfg *rlmruntime.REPLRunnerConfig) func(parentTask r
 				childCfg.LLM.MaxIterations = childTask.MaxIterations
 			}
 			childCfg.LLM.MaxTokens = longCoTChildMaxTokens(childCfg.LLM)
+			isBraidChild := longCoTChildTaskIsBraid(childTask)
+			if isBraidChild && !longCoTIsQwenModel(childCfg.LLM.Model) {
+				childCfg.LLM.MaxTokens = maxInt(childCfg.LLM.MaxTokens, longCoTBraidChildMaxTokens)
+			}
 			childCfg.LLM.RequireToolUse = false
 			childCfg.RequiredSubcallRules = nil
 			childCfg.Phases = nil
@@ -2375,6 +3144,9 @@ func longCoTREPLQueryFactory(cfg *rlmruntime.REPLRunnerConfig) func(parentTask r
 				childCfg.RecursionPolicy = rlmruntime.RecursionPolicyDisabled
 				childCfg.RLMQueryFactory = nil
 				childCfg.Phases = longCoTChildPhasesForTask(childTask, childCfg.Sandbox.Kind, childCfg.HelperFactory != nil)
+				if isBraidChild && !longCoTIsQwenModel(childCfg.LLM.Model) {
+					childCfg.Phases = inflateLongCoTBraidChildPhaseBudgets(childCfg.Phases)
+				}
 			}
 			if longCoTIsSummaryRewriteTask(childTask) {
 				childCfg.AsyncRecursion = false
@@ -2392,11 +3164,75 @@ func longCoTREPLQueryFactory(cfg *rlmruntime.REPLRunnerConfig) func(parentTask r
 				childCfg.Budget.MaxConcurrent = 0
 				childCfg.Budget.MaxTotalNodes = 0
 			}
+			childCfg.Sandbox = longCoTChildSandboxConfig(childCfg.Sandbox, childTask)
 			childTask.MaxDepth = childDepth
 			childTask.MaxSubcalls = childSubcalls
 			return runLongCoTChildRLMWithRetry(ctx, childCfg, childTask, childEnv)
 		}
 	}
+}
+
+func longCoTChildSandboxConfig(cfg rlmruntime.SandboxConfig, childTask rlm.Task) rlmruntime.SandboxConfig {
+	suffix := longCoTChildSandboxSuffix(childTask)
+	if suffix == "" {
+		return cfg
+	}
+	if strings.TrimSpace(cfg.Python.WorkDir) != "" {
+		cfg.Python.WorkDir = filepath.Join(cfg.Python.WorkDir, "children", suffix)
+	}
+	if strings.TrimSpace(cfg.SmolVMPython.GuestWorkDir) != "" {
+		cfg.SmolVMPython.GuestWorkDir = strings.TrimRight(cfg.SmolVMPython.GuestWorkDir, "/") + "/children/" + suffix
+	}
+	return cfg
+}
+
+func longCoTChildSandboxSuffix(childTask rlm.Task) string {
+	raw := strings.TrimSpace(childTask.AgentID)
+	if raw == "" {
+		raw = strings.TrimSpace(childTask.OutputNamespace)
+	}
+	if raw == "" {
+		raw = strings.TrimSpace(childTask.ParentAgentID)
+	}
+	if raw == "" {
+		return ""
+	}
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '/' || r == '\\' || r == ':' || r == ' '
+	})
+	for i := len(parts) - 1; i >= 0; i-- {
+		if part := longCoTSandboxPathSegment(parts[i]); part != "" {
+			return part
+		}
+	}
+	return ""
+}
+
+func longCoTSandboxPathSegment(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	out := strings.Map(func(ch rune) rune {
+		switch {
+		case ch >= 'a' && ch <= 'z':
+			return ch
+		case ch >= 'A' && ch <= 'Z':
+			return ch
+		case ch >= '0' && ch <= '9':
+			return ch
+		case ch == '-' || ch == '_' || ch == '.':
+			return ch
+		default:
+			return '-'
+		}
+	}, raw)
+	out = strings.Trim(out, "-_.")
+	if len(out) > 80 {
+		sum := sha256.Sum256([]byte(out))
+		out = out[:56] + "-" + hex.EncodeToString(sum[:])[:16]
+	}
+	return out
 }
 
 func runLongCoTChildRLMWithRetry(ctx context.Context, cfg rlmruntime.REPLRunnerConfig, task rlm.Task, env rlm.Environment) (rlm.Result, error) {
@@ -2452,6 +3288,29 @@ func longCoTRetryableRLMError(err error) bool {
 	return false
 }
 
+func longCoTChildTaskIsBraid(task rlm.Task) bool {
+	return strings.Contains(strings.ToLower(task.Prompt), "braid node")
+}
+
+func inflateLongCoTBraidChildPhaseBudgets(phases []rlmruntime.REPLRunnerPhase) []rlmruntime.REPLRunnerPhase {
+	out := append([]rlmruntime.REPLRunnerPhase(nil), phases...)
+	for idx := range out {
+		switch out[idx].Name {
+		case "child_verify_scratch":
+			out[idx].MaxTokens = maxInt(out[idx].MaxTokens, longCoTBraidChildVerifyTokens)
+			out[idx].FilterREPLCodeMaxTokens = maxInt(out[idx].FilterREPLCodeMaxTokens, longCoTBraidChildFilterTokens)
+		case "child_cycle_packet", "child_cycle_witness":
+			out[idx].MaxTokens = maxInt(out[idx].MaxTokens, longCoTBraidChildMaxTokens)
+			out[idx].FilterOutputMaxTokens = maxInt(out[idx].FilterOutputMaxTokens, longCoTBraidChildFilterTokens)
+		default:
+			out[idx].MaxTokens = maxInt(out[idx].MaxTokens, longCoTBraidChildMaxTokens)
+			out[idx].FilterREPLCodeMaxTokens = maxInt(out[idx].FilterREPLCodeMaxTokens, longCoTBraidChildFilterTokens)
+			out[idx].FilterOutputMaxTokens = maxInt(out[idx].FilterOutputMaxTokens, longCoTBraidChildFilterTokens)
+		}
+	}
+	return out
+}
+
 func longCoTChildPhasesForTask(task rlm.Task, sandbox rlmruntime.SandboxKind, generalHelper bool) []rlmruntime.REPLRunnerPhase {
 	if longCoTChildTaskIsBraidKind(task, "extract") {
 		return longCoTChildExtractPhases()
@@ -2482,6 +3341,7 @@ func longCoTChildExtractPhases() []rlmruntime.REPLRunnerPhase {
 			"Do not call tools. Do not run scratch code. Do not solve or verify.",
 			"List placeholders, requested outputs, equations, and dependency constraints as data.",
 			"Do not mark cycles, circular references, or fixed-point constraints as blocked or partial.",
+			"Use status: solved for successful facts-only extraction.",
 			"Return one compact NodeArtifact JSON object only:",
 			`{"status":"solved","answer":"<facts-only extraction>","checks":["extracted requested outputs and dependency constraints"],"confidence":0.8}`,
 		}, "\n"),
@@ -2510,6 +3370,7 @@ func longCoTChildVerifyPhases(generalHelper bool) []rlmruntime.REPLRunnerPhase {
 			}, "\n"),
 			OutputKind:              rlmruntime.REPLPhaseOutputKindREPLCode,
 			Tools:                   []string{rlmruntime.PythonREPLToolName},
+			MaxTokens:               512,
 			MaxIterations:           1,
 			RequireToolResultOK:     true,
 			RequireToolOutput:       true,
@@ -2571,11 +3432,12 @@ func longCoTChildCycleSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper 
 				"- blockers: array, empty unless finite bounds are truly unavailable.",
 				"Keep the whole JSON under 1400 characters.",
 			}, "\n"),
-			OutputKind:           rlmruntime.REPLPhaseOutputKindCyclePacket,
-			ResponseFormat:       json.RawMessage(`{"type":"json_object"}`),
-			MaxTokens:            768,
-			MaxIterations:        1,
-			FilterOverlongOutput: true,
+			OutputKind:            rlmruntime.REPLPhaseOutputKindCyclePacket,
+			ResponseFormat:        json.RawMessage(`{"type":"json_object"}`),
+			MaxTokens:             768,
+			MaxIterations:         1,
+			FilterOverlongOutput:  true,
+			FilterOutputMaxTokens: 512,
 		},
 	}
 	phases = append(phases,
@@ -2611,7 +3473,7 @@ func longCoTChildCycleSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper 
 				"If cycle_witness_check emitted pass=false, return status: blocked and copy that pass=false cycle_json exactly.",
 				"If solved, the copied cycle_json must be one valid JSON object like {\"pass\":true,\"candidates\":{\"node_2\":123},\"checks\":[{\"name\":\"fixed_point\",\"ok\":true,\"observed\":6,\"expected\":6}]}",
 				"If blocked, block only because finite candidate bounds were not derivable or all tested candidates failed; include the attempted bounds/checks in the checks line.",
-				"Keep the complete response under 800 characters.",
+				"Keep the complete response under 600 characters.",
 				"Return one compact NodeArtifact JSON object only:",
 				`{"status":"solved|partial|blocked","answer":"cycle_json: {\"pass\":true,\"candidates\":{...},\"checks\":[{\"name\":\"...\",\"ok\":true,\"observed\":6,\"expected\":6}]}","checks":["pass=true|pass=false; bounds searched plus fixed-point/constraint result"],"confidence":0.8}`,
 			}, "\n"),
@@ -2669,6 +3531,7 @@ func longCoTChildSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper bool)
 			)...), "\n"),
 			OutputKind:              rlmruntime.REPLPhaseOutputKindREPLCode,
 			Tools:                   []string{replToolName},
+			MaxTokens:               1280,
 			MaxIterations:           1,
 			RequireToolResultOK:     true,
 			RequireToolOutput:       true,
@@ -2696,6 +3559,9 @@ func longCoTChildSolvePhases(sandbox rlmruntime.SandboxKind, generalHelper bool)
 func longCoTChildMaxTokens(cfg rlm.LLMConfig) int {
 	maxTokens := cfg.MaxTokens
 	if !longCoTIsQwenModel(cfg.Model) {
+		if maxTokens <= 0 {
+			return longCoTDefaultHelperMaxTokens(0)
+		}
 		return maxTokens
 	}
 	const qwenChildMaxTokens = 2048
@@ -2759,8 +3625,24 @@ func buildLongCoTREPLTaskPromptForQuestion(question longcoteval.Question, condit
 	var b strings.Builder
 	b.WriteString("LongCoT internal eval condition: ")
 	b.WriteString(string(condition.ID))
+	if condition.ID == longcoteval.ConditionRLMLambdaReplSingle {
+		b.WriteString("\nLambda-RLM contract: do not emit a BRAID graph. Work like a bounded coding agent: inspect the prompt, use the scratch REPL for deterministic parsing/simulation/calculation, optionally delegate compact subproblems with rlm_query, wait for children with rlm_wait, then synthesize one final answer.\n")
+		b.WriteString("Prefer executable checks over prose reasoning. Before finalizing, verify the candidate in the REPL whenever the task is stateful, numeric, symbolic, or algorithmic.\n")
+	}
+	if condition.ID == longcoteval.ConditionRLMLambdaAdaptiveSingle {
+		b.WriteString("\nAdaptive Lambda-RLM simplification contract: solve as a normal model first. Tools are optional and should be used only when they clearly improve reliability or reduce context burden.\n")
+		b.WriteString("The harness is intended to be additive, not ceremonial: no BRAID graph, no mandatory fanout, no mandatory verifier artifact.\n")
+	}
 	if ephemeralSkills {
-		b.WriteString("\nInternal runtime contract: before giving any final answer, first call ephemeral_helper_solve. The runtime owns helper selection, execution, verification, and final answer extraction.\n")
+		if condition.ID == longcoteval.ConditionRLMLambdaReplSingle || condition.ID == longcoteval.ConditionRLMLambdaAdaptiveSingle {
+			b.WriteString("\nInternal helper contract: ephemeral_helper_solve is available as an optional runtime-managed helper. Use it only when a compact generated helper is more reliable than direct REPL code.\n")
+		} else {
+			b.WriteString("\nInternal runtime contract: before giving any final answer, first call ephemeral_helper_solve. The runtime owns helper selection, execution, verification, and final answer extraction.\n")
+		}
+	} else if condition.ID == longcoteval.ConditionRLMLambdaAdaptiveSingle {
+		fmt.Fprintf(&b, "\nInternal runtime contract: a persistent %s REPL is available as %s, and recursive child tools are available when useful.\n", language, replToolName)
+		b.WriteString("Do not call tools just to satisfy the harness. Use the REPL for deterministic checks when it helps, and use child queries for bounded subproblems when direct solving is not enough.\n")
+		b.WriteString("The prompt is bound inside the REPL as variables `prompt` and `official_prompt` when the REPL is used.\n")
 	} else {
 		fmt.Fprintf(&b, "\nInternal runtime contract: before giving any final answer, first call %s with a short %s snippet that inspects the official_prompt variable.\n", replToolName, language)
 		fmt.Fprintf(&b, "A persistent %s REPL is available as %s. The prompt is also bound inside that REPL as variable `prompt`.\n", language, replToolName)
@@ -2772,7 +3654,8 @@ func buildLongCoTREPLTaskPromptForQuestion(question longcoteval.Question, condit
 	}
 	if ephemeralSkills {
 		b.WriteString("The general helper tool ephemeral_helper_solve is available as a model tool. Use it when a compact parser, simulator, verifier, or search helper would make the answer more reliable.\n")
-		b.WriteString("The runtime owns helper synthesis, validation, repair, execution, and final answer extraction. Do not manage helper source or helper IDs yourself.\n")
+		b.WriteString("Trust the runtime to synthesize, validate, retry, and run helper code; do not manage helper source or helper IDs yourself.\n")
+		b.WriteString("The runtime owns helper synthesis, validation, repair, execution, and final answer extraction.\n")
 		b.WriteString("If the helper returns an answer or solution field beginning with solution =, use that exact answer format unless REPL verification shows it is wrong.\n")
 		if requireEphemeralSkills {
 			b.WriteString("Runtime-enforced tool order: first call ephemeral_helper_solve, then produce the final answer. Direct final answers before the helper call are rejected.\n")
@@ -2781,7 +3664,11 @@ func buildLongCoTREPLTaskPromptForQuestion(question longcoteval.Question, condit
 	if condition.MaxSubcalls > 0 {
 		b.WriteString("Bounded recursive tools are available: rlm_query submits child solves, and rlm_wait gathers the child results submitted in this tool session.\n")
 		b.WriteString("When the dataset requires a child to recurse, the runtime enforces that shape and rejects flattened child answers.\n")
-		b.WriteString("Runtime-enforced recursive solve order: context REPL, rlm_query, rlm_wait, integration REPL, rlm_query, rlm_wait, final answer.\n")
+		if condition.ID == longcoteval.ConditionRLMLambdaReplSingle || condition.ID == longcoteval.ConditionRLMLambdaAdaptiveSingle {
+			b.WriteString("Recursive decomposition is optional. Use child queries for independent branches, long traces, or verifier cross-checks; solve directly when the answer is clear.\n")
+		} else {
+			b.WriteString("Runtime-enforced recursive solve order: context REPL, rlm_query, rlm_wait, integration REPL, rlm_query, rlm_wait, final answer.\n")
+		}
 		fmt.Fprintf(&b, "Use the first %s call to get a general idea of the problem context, requested values, known values, dependencies, and blockers before any child query.\n", replToolName)
 		b.WriteString("Use each rlm_query for a bounded branch, dependency cluster, or verification target. Use rlm_wait({}) after submitted child work.\n")
 		b.WriteString("rlm_query, rlm_wait, and rlm_result are separate model tools, not functions inside the REPL. Never call them in Python or Go code.\n")
@@ -2791,7 +3678,13 @@ func buildLongCoTREPLTaskPromptForQuestion(question longcoteval.Question, condit
 		b.WriteString("No recursive child-query tool is available in this condition. This is expected, not an environment failure; solve directly and do not ask the user to run anything locally.\n")
 	}
 	b.WriteString("If the official task uses a placeholder such as <value>, replace it with the actual answer requested by the task. Never return the placeholder itself.\n")
-	fmt.Fprintf(&b, "Do not answer directly before the first %s call. After using the internal tools, follow the official task exactly, including its required answer format. For math and puzzle tasks, the final answer should usually be one line.\n\n", replToolName)
+	if condition.ID == longcoteval.ConditionRLMLambdaAdaptiveSingle {
+		b.WriteString("Follow the official task exactly, including its required answer format. For math and puzzle tasks, the final answer should usually be one line.\n\n")
+	} else if condition.ID == longcoteval.ConditionRLMLambdaReplSingle || !ephemeralSkills {
+		fmt.Fprintf(&b, "Do not answer directly before the first %s call. After using the internal tools, follow the official task exactly, including its required answer format. For math and puzzle tasks, the final answer should usually be one line.\n\n", replToolName)
+	} else {
+		b.WriteString("After using the internal tools, follow the official task exactly, including its required answer format. For math and puzzle tasks, the final answer should usually be one line.\n\n")
+	}
 	b.WriteString("Official task text begins:\n")
 	b.WriteString(strings.TrimSpace(question.PromptText))
 	return b.String()
@@ -3429,9 +4322,17 @@ func longCoTComparisonsForConditions(conditions []longcoteval.Condition) []longc
 		{Baseline: longcoteval.ConditionBaselineNoToolsOfficial, Candidate: longcoteval.ConditionRLMNoToolsSingle},
 		{Baseline: longcoteval.ConditionBaselineNoToolsOfficial, Candidate: longcoteval.ConditionRLMReplNoSubcalls},
 		{Baseline: longcoteval.ConditionBaselineNoToolsOfficial, Candidate: longcoteval.ConditionRLMReplRecursive},
+		{Baseline: longcoteval.ConditionBaselineNoToolsOfficial, Candidate: longcoteval.ConditionRLMLambdaReplSingle},
+		{Baseline: longcoteval.ConditionBaselineNoToolsOfficial, Candidate: longcoteval.ConditionRLMLambdaAdaptiveSingle},
 		{Baseline: longcoteval.ConditionRLMNoToolsSingle, Candidate: longcoteval.ConditionRLMReplNoSubcalls},
 		{Baseline: longcoteval.ConditionRLMNoToolsSingle, Candidate: longcoteval.ConditionRLMReplRecursive},
+		{Baseline: longcoteval.ConditionRLMNoToolsSingle, Candidate: longcoteval.ConditionRLMLambdaReplSingle},
+		{Baseline: longcoteval.ConditionRLMNoToolsSingle, Candidate: longcoteval.ConditionRLMLambdaAdaptiveSingle},
 		{Baseline: longcoteval.ConditionRLMReplNoSubcalls, Candidate: longcoteval.ConditionRLMReplRecursive},
+		{Baseline: longcoteval.ConditionRLMReplRecursive, Candidate: longcoteval.ConditionRLMLambdaReplSingle},
+		{Baseline: longcoteval.ConditionRLMLambdaReplSingle, Candidate: longcoteval.ConditionRLMLambdaAdaptiveSingle},
+		{Baseline: longcoteval.ConditionRLMLambdaAdaptiveSingle, Candidate: longcoteval.ConditionRLMLambdaThenBraidSingle},
+		{Baseline: longcoteval.ConditionRLMBraidSingle, Candidate: longcoteval.ConditionRLMLambdaThenBraidSingle},
 		{Baseline: longcoteval.ConditionRLMNoToolsSingle, Candidate: longcoteval.ConditionRLMNoToolsStaged},
 		{Baseline: longcoteval.ConditionRLMNoToolsStaged, Candidate: longcoteval.ConditionRLMNoModelToolsStaged},
 	}
@@ -3492,6 +4393,148 @@ func verifyLongCoTAttempts(
 	}
 	verifiedAttempts := applyLongCoTVerificationRows(attempts, verifyResult.Rows)
 	return verifiedAttempts, verifyResult, nil
+}
+
+func verifyLongCoTAttemptsAgainstDatasetAnswers(
+	attempts []longcoteval.Attempt,
+	questions []longcoteval.Question,
+) ([]longcoteval.Attempt, longcoteval.VerifyResult) {
+	byID := make(map[string]longcoteval.Question, len(questions))
+	for _, question := range questions {
+		byID[question.ID] = question
+	}
+	rows := make([]longcoteval.VerifyRow, 0, len(attempts))
+	counts := map[string]int{"total": len(attempts)}
+	for _, attempt := range attempts {
+		question, ok := byID[attempt.QuestionID]
+		row := verifyLongCoTAttemptAgainstDatasetAnswer(attempt, question, ok)
+		rows = append(rows, row)
+		switch row.Status {
+		case longcoteval.VerifierStatusCorrect:
+			counts["correct"]++
+		case longcoteval.VerifierStatusIncorrect:
+			counts["incorrect"]++
+		case longcoteval.VerifierStatusWrongFormatting:
+			counts["wrong_formatting"]++
+		default:
+			counts["failed"]++
+		}
+	}
+	return applyLongCoTVerificationRows(attempts, rows), longcoteval.VerifyResult{
+		VerifierName:    "foxctl.dataset_answer",
+		VerifierVersion: "v1",
+		Counts:          counts,
+		Rows:            rows,
+	}
+}
+
+func verifyLongCoTAttemptAgainstDatasetAnswer(attempt longcoteval.Attempt, question longcoteval.Question, found bool) longcoteval.VerifyRow {
+	row := longcoteval.VerifyRow{
+		QuestionID: attempt.QuestionID,
+		Status:     longcoteval.VerifierStatusFailed,
+	}
+	if !found {
+		row.VerificationError = "missing_question"
+		return row
+	}
+	expected, ok := longCoTExpectedSolutionValue(question.Answer)
+	if !ok {
+		row.VerificationError = "missing_expected_solution"
+		return row
+	}
+	actual, ok := longCoTResponseSolutionValue(attempt.ResponseText)
+	if !ok {
+		row.Status = longcoteval.VerifierStatusWrongFormatting
+		row.WrongFormatting = true
+		row.VerificationError = "missing_solution_line"
+		return row
+	}
+	row.NormalizedAnswer = actual
+	if longCoTCanonicalSolutionValue(actual) == longCoTCanonicalSolutionValue(expected) {
+		row.Status = longcoteval.VerifierStatusCorrect
+		row.Correct = true
+		return row
+	}
+	row.Status = longcoteval.VerifierStatusIncorrect
+	return row
+}
+
+func longCoTExpectedSolutionValue(answer string) (string, bool) {
+	answer = strings.TrimSpace(answer)
+	if answer == "" || answer == "null" {
+		return "", false
+	}
+	var payload any
+	if err := json.Unmarshal([]byte(answer), &payload); err != nil {
+		return answer, true
+	}
+	return longCoTSolutionValueFromAny(payload)
+}
+
+func longCoTSolutionValueFromAny(value any) (string, bool) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"solution", "answer", "value"} {
+			if raw, ok := typed[key]; ok {
+				return longCoTSolutionValueFromAny(raw)
+			}
+		}
+		return "", false
+	case string:
+		return strings.TrimSpace(typed), strings.TrimSpace(typed) != ""
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64), true
+	case bool:
+		if typed {
+			return "true", true
+		}
+		return "false", true
+	case nil:
+		return "", false
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed)), strings.TrimSpace(fmt.Sprint(typed)) != ""
+	}
+}
+
+func longCoTResponseSolutionValue(response string) (string, bool) {
+	if answer, ok := rlm.ExtractSolutionLine(response); ok {
+		return strings.TrimSpace(strings.TrimPrefix(answer, "solution =")), strings.TrimSpace(strings.TrimPrefix(answer, "solution =")) != ""
+	}
+	response = strings.TrimSpace(response)
+	if strings.HasPrefix(response, "solution=") {
+		value := strings.TrimSpace(strings.TrimPrefix(response, "solution="))
+		return value, value != ""
+	}
+	return "", false
+}
+
+func longCoTCanonicalSolutionValue(value string) string {
+	value = strings.TrimSpace(value)
+	var payload any
+	if err := json.Unmarshal([]byte(value), &payload); err == nil {
+		if solution, ok := longCoTSolutionValueFromAny(payload); ok {
+			value = solution
+		}
+	}
+	value = strings.TrimSpace(value)
+	if number, ok := longCoTCanonicalNumber(value); ok {
+		return number
+	}
+	return strings.Join(strings.Fields(strings.ToLower(value)), " ")
+}
+
+func longCoTCanonicalNumber(value string) (string, bool) {
+	number := json.Number(strings.TrimSpace(value))
+	if number.String() == "" {
+		return "", false
+	}
+	if i, err := number.Int64(); err == nil {
+		return strconv.FormatInt(i, 10), true
+	}
+	if f, err := number.Float64(); err == nil {
+		return strconv.FormatFloat(f, 'f', -1, 64), true
+	}
+	return "", false
 }
 
 func applyLongCoTVerificationRows(attempts []longcoteval.Attempt, rows []longcoteval.VerifyRow) []longcoteval.Attempt {

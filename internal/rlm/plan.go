@@ -272,9 +272,9 @@ func buildPlanWithQueryPlan(route RouteProfile, mode PlanMode, qp QueryPlan) Pla
 		plan.Phases = []Phase{
 			{
 				Name:           "discovery",
-				Objective:      "Find likely repository files or canonical notes that answer the query.",
-				AllowedTools:   []string{"retrieve_code", "retrieve_mixed"},
-				RequireOneOf:   []string{"retrieve_code"},
+				Objective:      "Gather a reduced repository answer surface before considering raw retrieval lanes.",
+				AllowedTools:   []string{"gather_context", "retrieve_code", "retrieve_mixed"},
+				RequireOneOf:   []string{"gather_context"},
 				MaxIterations:  3,
 				RequireToolUse: true,
 			},
@@ -290,7 +290,7 @@ func buildPlanWithQueryPlan(route RouteProfile, mode PlanMode, qp QueryPlan) Pla
 				Name:           "verification",
 				Objective:      "Cross-check the strongest candidate and confirm the best supporting paths.",
 				AllowedTools:   []string{"load_evidence_ref", "retrieve_code", "retrieve_mixed"},
-				RequireOneOf:   []string{"load_evidence_ref", "retrieve_code"},
+				RequireOneOf:   []string{"load_evidence_ref"},
 				MaxIterations:  2,
 				RequireToolUse: true,
 			},
@@ -301,7 +301,7 @@ func buildPlanWithQueryPlan(route RouteProfile, mode PlanMode, qp QueryPlan) Pla
 				Name:           "recall",
 				Objective:      "Retrieve memory, context, and task evidence relevant to the query.",
 				AllowedTools:   []string{"gather_context", "retrieve_memory", "retrieve_context", "retrieve_task"},
-				RequireOneOf:   []string{"gather_context", "retrieve_memory", "retrieve_context"},
+				RequireOneOf:   []string{"gather_context"},
 				MaxIterations:  3,
 				RequireToolUse: true,
 			},
@@ -318,9 +318,9 @@ func buildPlanWithQueryPlan(route RouteProfile, mode PlanMode, qp QueryPlan) Pla
 		plan.Phases = []Phase{
 			{
 				Name:           "discovery",
-				Objective:      "Fan out across all retrieval lanes to gather evidence.",
+				Objective:      "Gather a reduced answer surface before considering raw retrieval lanes.",
 				AllowedTools:   []string{"gather_context", "retrieve_mixed", "retrieve_code", "retrieve_memory", "retrieve_context", "retrieve_task"},
-				RequireOneOf:   []string{"gather_context", "retrieve_mixed"},
+				RequireOneOf:   []string{"gather_context"},
 				MaxIterations:  3,
 				RequireToolUse: true,
 			},
@@ -337,9 +337,9 @@ func buildPlanWithQueryPlan(route RouteProfile, mode PlanMode, qp QueryPlan) Pla
 		plan.Phases = []Phase{
 			{
 				Name:           "audit",
-				Objective:      "Cross-check claims across multiple sources for consistency.",
+				Objective:      "Gather a certified evidence surface before raw cross-lane audit.",
 				AllowedTools:   []string{"gather_context", "retrieve_mixed", "retrieve_code", "retrieve_memory", "retrieve_context", "retrieve_task"},
-				RequireOneOf:   []string{"gather_context", "retrieve_mixed"},
+				RequireOneOf:   []string{"gather_context"},
 				MaxIterations:  3,
 				RequireToolUse: true,
 			},

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
+	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/platform/fsutil"
 	workspaceutil "github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/protocol"
@@ -253,28 +254,9 @@ func runSemanticIndexUpdate(cmd *cobra.Command, workspace string, files, deleted
 
 func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, chunkOverlap int, model, providerName string) (*semantic.Indexer, func(), error) {
 	// Load config
-	cfg, err := loadConfig(ctx)
+	cfg, err := loadConfig(ctx, config.WithWorkspacePath(workspace))
 	if err != nil {
 		return nil, nil, fmt.Errorf("load config: %w", err)
-	}
-
-	// Open memory store
-	storageDir := cfg.Storage.Root
-	if storageDir == "" {
-		storageDir = filepath.Join(cfg.Home, "storage")
-	}
-	casDir := cfg.Paths.CAS
-	if casDir == "" {
-		casDir = filepath.Join(cfg.Home, "cas")
-	}
-	store, err := memory.Open(ctx, storageDir, casDir)
-	if err != nil {
-		return nil, nil, fmt.Errorf("open memory store: %w", err)
-	}
-
-	cleanup := func() {
-		// Cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
 	}
 
 	// Create embedding provider based on preference
@@ -297,7 +279,6 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 	switch providerName {
 	case "voyage":
 		if voyageKey == "" {
-			cleanup()
 			return nil, nil, fmt.Errorf("voyage provider requires VOYAGE_API_KEY environment variable")
 		}
 		if model == "" {
@@ -308,14 +289,12 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 			Model:  model,
 		})
 		if err != nil {
-			cleanup()
 			return nil, nil, fmt.Errorf("create voyage provider: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Using Voyage AI %s (1024 dims)\n", model)
 
 	case "gemini":
 		if geminiKey == "" {
-			cleanup()
 			return nil, nil, fmt.Errorf("gemini provider requires GEMINI_API_KEY environment variable")
 		}
 		if model == "" {
@@ -326,7 +305,6 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 			Model:  model,
 		})
 		if err != nil {
-			cleanup()
 			return nil, nil, fmt.Errorf("create gemini provider: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Using Gemini %s (3072 dims)\n", model)
@@ -346,7 +324,6 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 			Dimensions: dimensions,
 		})
 		if err != nil {
-			cleanup()
 			return nil, nil, fmt.Errorf("create openai-compatible provider: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Using OpenAI-compatible embeddings %s (%d dims)\n", model, provider.Dimensions())
@@ -360,8 +337,21 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 		fmt.Fprintf(os.Stderr, "Using no-op provider (%d dims) - embeddings will be zero vectors\n", dims)
 
 	default:
-		cleanup()
 		return nil, nil, fmt.Errorf("unknown provider %q: use voyage, gemini, lmstudio/openai_compat, or noop", providerName)
+	}
+
+	if dims := provider.Dimensions(); dims > 0 {
+		cfg.Embedding.Dimensions = dims
+		cfg.Database.Vector.Dimensions = dims
+	}
+	store, err := memory.OpenWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open memory store: %w", err)
+	}
+
+	cleanup := func() {
+		// Cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
 	}
 
 	// Build indexer config

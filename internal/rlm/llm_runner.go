@@ -525,6 +525,19 @@ func toolSurfaceGuidance(tools []Tool) string {
 		}
 		guidance = append(guidance, text)
 	}
+	if has("expand_context_graph") {
+		guidance = append(guidance, "When gather_context reports graph.recommended_next_tool=\"expand_context_graph\" or trust.next_action=\"expand_context_graph\", call expand_context_graph with graph.root_refs before making dependency, integration, change-impact, or subsystem completeness claims.")
+	}
+	if has("gather_test_context") || has("gather_docs_context") {
+		var surfaces []string
+		if has("gather_test_context") {
+			surfaces = append(surfaces, "gather_test_context for explicit test/spec/fixture/mocking questions")
+		}
+		if has("gather_docs_context") {
+			surfaces = append(surfaces, "gather_docs_context for explicit docs/design/architecture/readme questions")
+		}
+		guidance = append(guidance, "Use specialized gather surfaces instead of broadening gather_context when source intent is explicit: "+strings.Join(surfaces, "; ")+".")
+	}
 	if has("retrieve_code") {
 		text := "Use retrieve_code only for narrow raw code lookup when gather_context is unavailable or too broad."
 		if has("load_evidence_ref") {
@@ -557,9 +570,10 @@ func toolSurfaceGuidance(tools []Tool) string {
 
 func gatherContextModelGuidance(hasLoadEvidenceRef bool) string {
 	var b strings.Builder
-	b.WriteString("For repo, memory, task, or mixed context questions, start with gather_context using response_mode=\"answer_surface\".")
-	b.WriteString(" Deterministic gather trust policy: for file_locate, execution_trace, change_impact, symbol/definition lookup, architecture_map, subsystem_map, and integration_surface tasks, if answerable=true, certificate.status is not failed, certificate.required_evidence_ok is not false, answer_seed has paths or categories, and gaps/conflicts are empty, copy answer_seed.paths, answer_seed.categories, and answer_seed.facts directly as the final answer seed. Do not spend extra tool/model turns re-ranking those paths.")
-	b.WriteString(" Fall back to verification or broader retrieval for package-owner/package-anchor questions without categories, broad synthesis beyond the returned map, stale/conflicting evidence, empty answer_seed, required evidence misses, or obvious wrong-scope paths.")
+	b.WriteString("For production code, memory, task, or mixed context questions, start with gather_context using response_mode=\"answer_surface\". It is production-code biased: tests and docs are separate explicit surfaces when available.")
+	b.WriteString(" Deterministic gather trust policy: for file_locate and symbol/definition lookup, if answerable=true, certificate.status is not failed, certificate.required_evidence_ok is not false, answer_seed has paths or categories, and gaps/conflicts are empty, copy answer_seed.paths, answer_seed.categories, and answer_seed.facts directly as the final answer seed. Do not spend extra tool/model turns re-ranking those paths.")
+	b.WriteString(" For execution_trace, change_impact, architecture_map, subsystem_map, and integration_surface tasks, first inspect the graph/trust metadata; when graph expansion is recommended, call expand_context_graph before claiming dependency or subsystem completeness.")
+	b.WriteString(" Fall back to verification or broader retrieval for package-owner/package-anchor questions without categories, broad synthesis beyond the returned map, stale/conflicting evidence, empty answer_seed, required evidence misses, graph gaps, or obvious wrong-scope paths.")
 	if hasLoadEvidenceRef {
 		b.WriteString(" Use load_evidence_ref only to verify a specific load_ref from path_set.must or load_queue; loading one ref must not narrow the final answer to only that file.")
 	}

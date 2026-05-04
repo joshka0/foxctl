@@ -210,12 +210,16 @@ func TestRetrieveCode_ReturnsEvidencePack(t *testing.T) {
 		t.Fatalf("expected 2 nodes, got %d", len(pack.Nodes))
 	}
 
-	// First node should have symbol ref.
-	if pack.Nodes[0].Ref.Type != RefTypeSymbol {
-		t.Errorf("expected symbol ref, got %q", pack.Nodes[0].Ref.Type)
+	// Code evidence uses the path as the primary ref so same-named symbols in
+	// different files do not collapse during bundle reduction.
+	if pack.Nodes[0].Ref.Type != RefTypePath {
+		t.Errorf("expected path ref, got %q", pack.Nodes[0].Ref.Type)
 	}
-	if pack.Nodes[0].Ref.Ref != "HandleAuth" {
-		t.Errorf("expected HandleAuth ref, got %q", pack.Nodes[0].Ref.Ref)
+	if pack.Nodes[0].Ref.Ref != "internal/auth/handler.go" {
+		t.Errorf("expected handler path ref, got %q", pack.Nodes[0].Ref.Ref)
+	}
+	if pack.Nodes[0].Metadata["symbol"] != "HandleAuth" {
+		t.Errorf("expected HandleAuth symbol metadata, got %v", pack.Nodes[0].Metadata["symbol"])
 	}
 	if pack.Nodes[0].NodeType != EvidenceNodeTypeCode {
 		t.Errorf("expected code node type, got %q", pack.Nodes[0].NodeType)

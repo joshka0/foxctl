@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,15 +37,20 @@ const (
 type SandboxKind string
 
 const (
-	SandboxKindPython SandboxKind = "python"
-	SandboxKindYaegi  SandboxKind = "yaegi"
+	SandboxKindPython       SandboxKind = "python"
+	SandboxKindYaegi        SandboxKind = "yaegi"
+	SandboxKindSmolVMPython SandboxKind = "smolvm-python"
 )
 
 // SandboxConfig configures the scratch sandbox. Python remains the default.
 type SandboxConfig struct {
-	Kind   SandboxKind
-	Python repl.Options
-	Yaegi  repl.YaegiOptions
+	Kind            SandboxKind
+	Python          repl.Options
+	Yaegi           repl.YaegiOptions
+	SmolVMPython    repl.SmolVMPythonOptions
+	EvalImageID     string
+	MachineMode     string
+	CapabilityProbe []string
 }
 
 // RLMQueryRunFunc executes one recursive child call for the optional rlm_query tool.
@@ -94,35 +100,52 @@ type REPLRunnerConfig struct {
 // let callers make protocol order deterministic while keeping one sandbox and
 // one recursive scheduler for the whole RLM attempt.
 type REPLRunnerPhase struct {
-	Name                       string
-	Prompt                     string
-	OutputKind                 string
-	MaxGraphNodes              int
-	BraidGraphPolicy           string
-	BraidRepairAttempts        int
-	FinalOutputKind            string
-	ResponseFormat             json.RawMessage
-	MaxTokens                  int
-	Tools                      []string
-	RequiredTools              []string
-	MaxIterations              int
-	Final                      bool
-	AutoExecuteRequiredTool    bool
-	AutoExecuteGraphNodes      bool
-	DisableHelperFirstFallback bool
-	AutoExecuteToolCalls       []REPLRunnerPhaseAutoToolCall
-	RequireToolResultOK        bool
-	RequireToolOutput          bool
-	ContinueOnREPLCodeError    bool
-	RequiredREPLCodeSubstrings []string
-	MaxREPLCodeLines           int
-	MaxREPLCodeCommentLines    int
-	IncludePriorAssistantText  bool
-	FilterOverlongREPLCode     bool
-	RequireScaffoldContract    bool
-	FilterREPLCodeMaxTokens    int
-	FilterOverlongOutput       bool
-	FilterOutputMaxTokens      int
+	Name                                string
+	Prompt                              string
+	OutputKind                          string
+	MaxGraphNodes                       int
+	BraidGraphPolicy                    string
+	BraidRepairAttempts                 int
+	FinalOutputKind                     string
+	ResponseFormat                      json.RawMessage
+	MaxTokens                           int
+	Tools                               []string
+	RequiredTools                       []string
+	MaxIterations                       int
+	Final                               bool
+	AutoExecuteRequiredTool             bool
+	AutoExecuteGraphNodes               bool
+	DisableHelperFirstFallback          bool
+	AutoExecuteToolCalls                []REPLRunnerPhaseAutoToolCall
+	RequireToolResultOK                 bool
+	RequireToolOutput                   bool
+	RequiredToolOutputSubstrings        []string
+	RequireStructuredToolOutputOnly     bool
+	InjectVerifierPrelude               bool
+	RequireVerifierArtifact             bool
+	ForwardVerifierArtifactAnswer       bool
+	VerifierRepairSubcalls              int
+	BlockFinalOnFailedToolEvidence      bool
+	RuntimeOnlyFinal                    bool
+	ForwardStructuredToolAnswer         bool
+	ForwardExecutedStructuredToolAnswer bool
+	RequireStructuredToolAnswer         bool
+	ForwardPriorSolutionLine            bool
+	SkipIfPriorSolutionLine             bool
+	AutoVerifyPriorSolutionLine         bool
+	ContinueOnREPLCodeError             bool
+	DisableREPLCodeRepair               bool
+	AllowPartialPseudoToolCallCode      bool
+	AllowedREPLImports                  []string
+	RequiredREPLCodeSubstrings          []string
+	MaxREPLCodeLines                    int
+	MaxREPLCodeCommentLines             int
+	IncludePriorAssistantText           bool
+	FilterOverlongREPLCode              bool
+	RequireScaffoldContract             bool
+	FilterREPLCodeMaxTokens             int
+	FilterOverlongOutput                bool
+	FilterOutputMaxTokens               int
 }
 
 type REPLRunnerPhaseAutoToolCall struct {
@@ -134,7 +157,31 @@ type replRunnerRunState struct {
 	braidGraph *BraidGraph
 }
 
+func addSandboxMetadata(metadata map[string]any, cfg SandboxConfig) {
+	if metadata == nil {
+		return
+	}
+	if value := strings.TrimSpace(cfg.EvalImageID); value != "" {
+		metadata["sandbox_eval_image_id"] = value
+	}
+	if value := strings.TrimSpace(cfg.MachineMode); value != "" {
+		metadata["sandbox_machine_mode"] = value
+	}
+	if len(cfg.CapabilityProbe) > 0 {
+		metadata["sandbox_capability_probe"] = append([]string(nil), cfg.CapabilityProbe...)
+	}
+	if NormalizeSandboxKind(cfg.Kind) == SandboxKindSmolVMPython {
+		if value := strings.TrimSpace(cfg.SmolVMPython.MachineName); value != "" {
+			metadata["sandbox_machine_name"] = value
+		}
+		if value := strings.TrimSpace(cfg.SmolVMPython.Image); value != "" {
+			metadata["sandbox_image"] = value
+		}
+	}
+}
+
 const braidFinalHandoffSource = "rlm.braid.final_handoff"
+const verifierFinalHandoffSource = "rlm.verifier.final_handoff"
 
 // REPLRunner exposes a prompt-bound persistent scratch REPL to a parent model.
 type REPLRunner struct {
@@ -232,6 +279,7 @@ func (r *REPLRunner) Run(ctx context.Context, task rlm.Task, env rlm.Environment
 		sandboxKind:        sandboxCfg.Kind,
 		defaultREPLCode:    strings.TrimSpace(r.Config.DefaultREPLCode),
 		defaultQueryPrompt: strings.TrimSpace(r.Config.DefaultRLMQueryPrompt),
+		initialState:       cloneAnyMap(initState),
 		extraToolExecutor:  extraToolExecutor,
 		helperFactory:      helperFactory,
 		toolResultMaxChars: r.Config.REPLToolResultMaxChars,
@@ -279,7 +327,7 @@ func (r *REPLRunner) Run(ctx context.Context, task rlm.Task, env rlm.Environment
 	output, pendingRetryCount, err := r.runREPLLoop(ctx, llm, llmCfg, systemPrompt, task, toolExec, recorder)
 	if err != nil {
 		if len(output.ToolCalls) > 0 || len(output.ToolResults) > 0 || len(output.Iterations) > 0 {
-			return partialREPLResultFromOutput(output, err, llmCfg, sandboxCfg, sandboxWorkDir, toolExec, budget, recorder, identity, r.Config.Phases), err
+			return partialREPLResultFromOutput(output, err, llmCfg, sandboxCfg, sandboxWorkDir, toolExec, budget, recorder, identity, r.Config.Phases, r.Config.LLM.RequireToolUse), err
 		}
 		return rlm.Result{}, err
 	}
@@ -331,18 +379,23 @@ func (r *REPLRunner) Run(ctx context.Context, task rlm.Task, env rlm.Environment
 		})
 		return rlm.Result{}, err
 	}
+	childSummaryFallback, childSummaryFallbackOK := fallbackChildSummaryFromToolOutputs(r.Config.Phases, output)
 	if answer == "" {
-		err := fmt.Errorf("rlm repl runner: empty assistant response")
-		recorder.RecordError(RuntimeErrorEvent{
-			Code:             "empty_response",
-			Message:          err.Error(),
-			RawChars:         len(output.AssistantText),
-			SanitizedChars:   len(answer),
-			RawExcerpt:       safeTelemetryExcerpt(output.AssistantText, 600),
-			SanitizedExcerpt: safeTelemetryExcerpt(answer, 600),
-			Artifacts:        append([]string(nil), sanitization.Artifacts...),
-		})
-		return rlm.Result{}, err
+		if childSummaryFallbackOK {
+			answer = childSummaryFallback
+		} else {
+			err := fmt.Errorf("rlm repl runner: empty assistant response")
+			recorder.RecordError(RuntimeErrorEvent{
+				Code:             "empty_response",
+				Message:          err.Error(),
+				RawChars:         len(output.AssistantText),
+				SanitizedChars:   len(answer),
+				RawExcerpt:       safeTelemetryExcerpt(output.AssistantText, 600),
+				SanitizedExcerpt: safeTelemetryExcerpt(answer, 600),
+				Artifacts:        append([]string(nil), sanitization.Artifacts...),
+			})
+			return rlm.Result{}, err
+		}
 	}
 	recorder.RecordFinalAnswer(FinalAnswerEvent{Text: answer, Tokens: output.Tokens.OutputTokens})
 
@@ -391,6 +444,7 @@ func (r *REPLRunner) Run(ctx context.Context, task rlm.Task, env rlm.Environment
 		"output_root":             identity.OutputRoot,
 		"output_namespace":        identity.OutputNamespace,
 	}
+	addSandboxMetadata(metadata, sandboxCfg)
 	if toolExec.allowAsyncRLMTools() {
 		if trace, traceErr := buildRecursiveTrace(ctx, toolExec.asyncNodeStore, toolExec.asyncRunID, toolExec.asyncRootNodeID); traceErr == nil && trace != nil {
 			metadata["recursive_trace"] = trace
@@ -411,6 +465,10 @@ func (r *REPLRunner) Run(ctx context.Context, task rlm.Task, env rlm.Environment
 			"changed":  true,
 			"raw_text": solutionRawText,
 		}
+	}
+	if childSummaryFallbackOK {
+		metadata["child_summary_fallback"] = true
+		metadata["child_summary_fallback_reason"] = "empty_final_with_scratch_output"
 	}
 	if helperTrace, ok := helperFactoryTraceFromToolResults(output.ToolResults); ok {
 		metadata["ephemeral_helper"] = helperTrace
@@ -434,6 +492,7 @@ func partialREPLResultFromOutput(
 	recorder *Recorder,
 	identity IdentityPlan,
 	phases []REPLRunnerPhase,
+	requireToolUse bool,
 ) rlm.Result {
 	toolNames := toolCallNames(output.ToolCalls)
 	subcallSummary := toolExec.subcallSummaryContext(context.Background())
@@ -446,7 +505,7 @@ func partialREPLResultFromOutput(
 		"tool_calls":              len(output.ToolCalls),
 		"tool_names":              toolNames,
 		"repl_calls":              countToolName(toolNames, toolExec.replToolName),
-		"require_tool_use":        true,
+		"require_tool_use":        requireToolUse,
 		"sandbox_kind":            string(sandboxCfg.Kind),
 		"sandbox_work_dir":        sandboxWorkDir,
 		"repl_tool_name":          toolExec.replToolName,
@@ -474,14 +533,28 @@ func partialREPLResultFromOutput(
 		"output_root":             identity.OutputRoot,
 		"output_namespace":        identity.OutputNamespace,
 	}
+	addSandboxMetadata(metadata, sandboxCfg)
 	if names := replPhaseNames(phases); len(names) > 0 {
 		metadata["staged_phases"] = names
 	}
 	if helperTrace, ok := helperFactoryTraceFromToolResults(output.ToolResults); ok {
 		metadata["ephemeral_helper"] = helperTrace
 	}
-	answer := strings.TrimSpace(output.AssistantText)
-	answer, _ = rlm.SanitizeOutputText(answer)
+	answer, _, _ := structuredToolAnswer(output, true)
+	if strings.TrimSpace(answer) == "" {
+		raw := strings.TrimSpace(output.AssistantText)
+		sanitized, _ := rlm.SanitizeOutputText(raw)
+		if line, ok := rlm.ExtractSolutionLine(sanitized); ok {
+			answer = line
+		}
+	}
+	if strings.TrimSpace(answer) == "" {
+		if fallback, ok := fallbackChildSummaryFromToolOutputs(phases, output); ok {
+			answer = fallback
+			metadata["child_summary_fallback"] = true
+			metadata["child_summary_fallback_reason"] = "partial_error_with_scratch_output"
+		}
+	}
 	return rlm.Result{
 		Answer:     answer,
 		Iterations: len(output.Iterations),
@@ -642,6 +715,21 @@ func (r *REPLRunner) runStagedREPLLoop(
 		if phase.Final {
 			phaseTools = nil
 		}
+		if phase.Final && phase.ForwardVerifierArtifactAnswer {
+			if answer, ok := verifiedAnswerFromLatestVerifierFinalHandoff(output); ok {
+				attemptOutput := engine.EngineOutput{
+					AssistantText: answer,
+					StopReason:    engine.StopReasonEndTurn,
+					InjectedContexts: []engine.InjectedContext{{
+						ToolCallID: "verifier-final-forward",
+						Source:     "rlm.verifier.final_answer_forwarded",
+						Content:    answer,
+					}},
+				}
+				output = mergeEngineOutputs(output, attemptOutput)
+				continue
+			}
+		}
 		if phase.Final && r.Config.FinalAnswerFromVerifiedHandoff {
 			if answer, ok := verifiedAnswerFromLatestBraidFinalHandoff(output); ok {
 				attemptOutput := engine.EngineOutput{
@@ -654,6 +742,80 @@ func (r *REPLRunner) runStagedREPLLoop(
 					}},
 				}
 				output = mergeEngineOutputs(output, attemptOutput)
+				continue
+			}
+		}
+		if phase.Final && phase.BlockFinalOnFailedToolEvidence {
+			if reason, ok := failedToolEvidenceReason(output); ok {
+				err := fmt.Errorf("rlm repl runner phase %q blocked final answer: prior tool evidence failed: %s", phaseName, reason)
+				recorder.RecordError(RuntimeErrorEvent{Code: "phase_" + phaseName, Message: err.Error()})
+				return output, 0, err
+			}
+		}
+		if phase.Final && phase.ForwardStructuredToolAnswer {
+			answer, ok, blockReason := structuredToolAnswer(output, phase.ForwardExecutedStructuredToolAnswer)
+			if blockReason != "" {
+				err := fmt.Errorf("rlm repl runner phase %q blocked final answer: structured tool answer rejected: %s", phaseName, blockReason)
+				recorder.RecordError(RuntimeErrorEvent{Code: "phase_" + phaseName, Message: err.Error()})
+				return output, 0, err
+			}
+			if ok {
+				attemptOutput := engine.EngineOutput{
+					AssistantText: answer,
+					StopReason:    engine.StopReasonEndTurn,
+					InjectedContexts: []engine.InjectedContext{{
+						ToolCallID: "structured-tool-answer-forward",
+						Source:     "rlm.structured_tool_answer.forwarded",
+						Content:    answer,
+					}},
+				}
+				output = mergeEngineOutputs(output, attemptOutput)
+				continue
+			}
+			if phase.RequireStructuredToolAnswer {
+				err := fmt.Errorf("rlm repl runner phase %q blocked final answer: missing RLM_ANSWER_JSON structured tool answer", phaseName)
+				recorder.RecordError(RuntimeErrorEvent{Code: "phase_" + phaseName, Message: err.Error()})
+				return output, 0, err
+			}
+		}
+		if phase.Final && phase.ForwardPriorSolutionLine {
+			if answer, ok := rlm.ExtractSolutionLine(output.AssistantText); ok {
+				attemptOutput := engine.EngineOutput{
+					AssistantText: answer,
+					StopReason:    engine.StopReasonEndTurn,
+					InjectedContexts: []engine.InjectedContext{{
+						ToolCallID: "prior-solution-line-forward",
+						Source:     "rlm.prior.solution_line_forwarded",
+						Content:    answer,
+					}},
+				}
+				output = mergeEngineOutputs(output, attemptOutput)
+				continue
+			}
+		}
+		if phase.Final && phase.RuntimeOnlyFinal {
+			err := fmt.Errorf("rlm repl runner phase %q blocked final answer: missing runtime-forwardable verified or structured tool answer", phaseName)
+			recorder.RecordError(RuntimeErrorEvent{Code: "phase_" + phaseName, Message: err.Error()})
+			return output, 0, err
+		}
+		if !phase.Final && phase.AutoVerifyPriorSolutionLine {
+			attemptOutput, handled, err := autoVerifyPriorSolutionLine(ctx, phaseName, phase, task.Prompt, output, toolExec)
+			if handled {
+				output = mergeEngineOutputs(output, attemptOutput)
+				if err != nil {
+					recorder.RecordError(RuntimeErrorEvent{Code: "phase_" + phaseName, Message: err.Error()})
+					return output, 0, err
+				}
+				if _, ok, blockReason := structuredToolAnswer(attemptOutput, phase.ForwardExecutedStructuredToolAnswer); ok && blockReason == "" {
+					continue
+				}
+				if _, failed := failedToolEvidenceReason(attemptOutput); !failed {
+					continue
+				}
+			}
+		}
+		if !phase.Final && phase.SkipIfPriorSolutionLine {
+			if _, ok := rlm.ExtractSolutionLine(output.AssistantText); ok {
 				continue
 			}
 		}
@@ -722,6 +884,14 @@ func (r *REPLRunner) runStagedREPLLoop(
 				WorkspaceID: task.WorkspaceID,
 			}))
 		}
+		if phase.RequireVerifierArtifact {
+			recordVerifierCandidateRegistryContract(recorder, phaseName, output)
+		}
+		if phase.RequireVerifierArtifact && len(verifierCandidatesFromOutput(output)) == 0 {
+			err := fmt.Errorf("rlm repl runner phase %q cannot verify without solved child candidates", phaseName)
+			recorder.RecordError(RuntimeErrorEvent{Code: "phase_" + phaseName, Message: err.Error()})
+			return output, 0, err
+		}
 		attemptOutput, err := runREPLLLMWithTransientRetry(ctx, phaseLLM, engine.EngineInput{
 			SystemPrompt: systemPrompt,
 			Messages: []engine.Message{engine.NewUserMessage(buildREPLPhasePrompt(
@@ -789,6 +959,20 @@ func (r *REPLRunner) runStagedREPLLoop(
 		}
 		if strings.TrimSpace(phase.OutputKind) == REPLPhaseOutputKindREPLCode && !skipREPLCodeExecution {
 			if err := r.executeAndRepairPhaseREPLCode(ctx, phaseLLM, llmCfg, systemPrompt, task, phaseName, phase, output, toolExec, &attemptOutput, phaseMaxTokens); err != nil {
+				if phase.RequireVerifierArtifact && phase.VerifierRepairSubcalls > 0 {
+					retryOutput, retryOK, retryErr := r.retryVerifierPhaseWithRepairSubcalls(ctx, phaseLLM, llmCfg, systemPrompt, task, phaseName, phase, output, attemptOutput, toolExec, err, phaseMaxTokens)
+					if len(retryOutput.Iterations) > 0 || len(retryOutput.ToolCalls) > 0 || len(retryOutput.ToolResults) > 0 || len(retryOutput.InjectedContexts) > 0 || strings.TrimSpace(retryOutput.AssistantText) != "" {
+						attemptOutput = mergeEngineOutputs(attemptOutput, retryOutput)
+					}
+					if retryOK && retryErr == nil {
+						output = mergeEngineOutputs(output, attemptOutput)
+						recordParentLLMIterations(recorder, llmCfg.Model, attemptOutput, len(output.Iterations)-len(attemptOutput.Iterations))
+						continue
+					}
+					if retryErr != nil {
+						err = retryErr
+					}
+				}
 				recorder.RecordError(RuntimeErrorEvent{Code: "phase_" + phaseName, Message: err.Error()})
 				output = mergeEngineOutputs(output, attemptOutput)
 				recordParentLLMIterations(recorder, llmCfg.Model, attemptOutput, len(output.Iterations)-len(attemptOutput.Iterations))
@@ -1065,7 +1249,7 @@ func (r *REPLRunner) executeAndRepairPhaseREPLCode(
 	output *engine.EngineOutput,
 	maxTokens int,
 ) error {
-	err := autoExecutePhaseREPLCode(ctx, phaseName, phase, toolExec, output)
+	err := autoExecutePhaseREPLCode(ctx, phaseName, phase, prior, toolExec, output)
 	if err == nil {
 		return nil
 	}
@@ -1096,7 +1280,7 @@ func (r *REPLRunner) executeAndRepairPhaseREPLCode(
 		*output = mergeEngineOutputs(*output, filterOutput)
 		if validationErr := validateREPLAttemptOutputForPhase(phase, filterOutput, filterErr, filterMaxTokens); validationErr != nil {
 			err = fmt.Errorf("rlm repl runner phase %q filter overlong repl_code output: %w", phaseName, validationErr)
-		} else if execErr := autoExecutePhaseREPLCode(ctx, phaseName, phase, toolExec, &filterOutput); execErr != nil {
+		} else if execErr := autoExecutePhaseREPLCode(ctx, phaseName, phase, prior, toolExec, &filterOutput); execErr != nil {
 			*output = mergeEngineOutputs(*output, filterOutput)
 			err = execErr
 		} else {
@@ -1104,7 +1288,7 @@ func (r *REPLRunner) executeAndRepairPhaseREPLCode(
 			return nil
 		}
 	}
-	if r == nil || r.Config.ToolErrorRepairMaxAttempts <= 0 || output == nil {
+	if phase.DisableREPLCodeRepair || r == nil || r.Config.ToolErrorRepairMaxAttempts <= 0 || output == nil {
 		if phase.ContinueOnREPLCodeError {
 			appendREPLCodeFailureContext(phaseName, phase, output, err)
 			return nil
@@ -1136,7 +1320,7 @@ func (r *REPLRunner) executeAndRepairPhaseREPLCode(
 			invalidCode = repairOutput.AssistantText
 			continue
 		}
-		if execErr := autoExecutePhaseREPLCode(ctx, phaseName, phase, toolExec, &repairOutput); execErr != nil {
+		if execErr := autoExecutePhaseREPLCode(ctx, phaseName, phase, prior, toolExec, &repairOutput); execErr != nil {
 			*output = mergeEngineOutputs(*output, repairOutput)
 			errText = execErr.Error()
 			invalidCode = repairOutput.AssistantText
@@ -1151,6 +1335,141 @@ func (r *REPLRunner) executeAndRepairPhaseREPLCode(
 		return nil
 	}
 	return finalErr
+}
+
+func (r *REPLRunner) retryVerifierPhaseWithRepairSubcalls(
+	ctx context.Context,
+	llm *engine.LLMChatEngine,
+	llmCfg engine.LLMChatConfig,
+	systemPrompt string,
+	task rlm.Task,
+	phaseName string,
+	phase REPLRunnerPhase,
+	prior engine.EngineOutput,
+	failedAttempt engine.EngineOutput,
+	toolExec *replToolExecutor,
+	verifierErr error,
+	maxTokens int,
+) (engine.EngineOutput, bool, error) {
+	if verifierErr == nil || toolExec == nil || phase.VerifierRepairSubcalls <= 0 {
+		return engine.EngineOutput{}, false, nil
+	}
+	var out engine.EngineOutput
+	repairOutput, err := autoExecuteVerifierRepairSubcalls(ctx, phaseName, phase, task.Prompt, verifierErr, prior, toolExec)
+	out = mergeEngineOutputs(out, repairOutput)
+	if err != nil {
+		return out, false, err
+	}
+	retryPrior := mergeEngineOutputs(prior, failedAttempt)
+	retryPrior = mergeEngineOutputs(retryPrior, repairOutput)
+	retryAttempt, runErr := runREPLLLMWithTransientRetry(ctx, llm, engine.EngineInput{
+		SystemPrompt: systemPrompt,
+		Messages: []engine.Message{engine.NewUserMessage(buildREPLPhasePrompt(
+			task.Prompt,
+			phase,
+			retryPrior,
+			replRunnerRunState{},
+		))},
+		Tools:       nil,
+		Workspace:   task.WorkspaceRoot,
+		MaxTokens:   maxTokens,
+		Temperature: llmCfg.Temperature,
+	})
+	out = mergeEngineOutputs(out, retryAttempt)
+	if validationErr := validateREPLAttemptOutputForPhase(phase, retryAttempt, runErr, maxTokens); validationErr != nil {
+		return out, false, validationErr
+	}
+	if err := autoExecutePhaseREPLCode(ctx, phaseName+"_repair", phase, retryPrior, toolExec, &retryAttempt); err != nil {
+		out = mergeEngineOutputs(out, retryAttempt)
+		return out, false, err
+	}
+	out = mergeEngineOutputs(out, retryAttempt)
+	return out, true, nil
+}
+
+func autoExecuteVerifierRepairSubcalls(ctx context.Context, phaseName string, phase REPLRunnerPhase, originalPrompt string, verifierErr error, prior engine.EngineOutput, toolExec *replToolExecutor) (engine.EngineOutput, error) {
+	var output engine.EngineOutput
+	count := phase.VerifierRepairSubcalls
+	if count <= 0 {
+		return output, nil
+	}
+	if count > 3 {
+		count = 3
+	}
+	for idx := 0; idx < count; idx++ {
+		args, err := json.Marshal(map[string]any{
+			"prompt":            buildVerifierRepairChildPrompt(originalPrompt, verifierErr, prior, idx+1, count),
+			"max_iterations":    12,
+			"max_summary_chars": 1200,
+		})
+		if err != nil {
+			return output, err
+		}
+		callID := fmt.Sprintf("auto_%s_repair_%02d_%s", sanitizeToolCallIDPart(phaseName), idx+1, sanitizeToolCallIDPart(RLMQueryToolName))
+		result, err := toolExec.Execute(ctx, RLMQueryToolName, args)
+		toolCall := engine.ToolCall{ID: callID, Name: RLMQueryToolName, Arguments: args}
+		toolResult := engine.ToolResult{ToolCallID: callID, Content: result}
+		if err != nil {
+			toolResult.IsError = true
+			toolResult.Content = err.Error()
+		}
+		output.ToolCalls = append(output.ToolCalls, toolCall)
+		output.ToolResults = append(output.ToolResults, toolResult)
+		if err != nil {
+			return output, err
+		}
+	}
+	waitArgs := json.RawMessage(`{}`)
+	callID := fmt.Sprintf("auto_%s_repair_wait_%s", sanitizeToolCallIDPart(phaseName), sanitizeToolCallIDPart(RLMWaitToolName))
+	result, err := toolExec.Execute(ctx, RLMWaitToolName, waitArgs)
+	toolCall := engine.ToolCall{ID: callID, Name: RLMWaitToolName, Arguments: waitArgs}
+	toolResult := engine.ToolResult{ToolCallID: callID, Content: result}
+	if err != nil {
+		toolResult.IsError = true
+		toolResult.Content = err.Error()
+	}
+	output.ToolCalls = append(output.ToolCalls, toolCall)
+	output.ToolResults = append(output.ToolResults, toolResult)
+	if err != nil {
+		return output, err
+	}
+	return output, nil
+}
+
+func buildVerifierRepairChildPrompt(originalPrompt string, verifierErr error, prior engine.EngineOutput, ordinal, total int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Verifier repair child %d of %d.\n", ordinal, total)
+	b.WriteString("A parent verifier rejected all current child candidates. Your job is to produce a corrected candidate, not to critique the verifier.\n")
+	b.WriteString("Use deterministic scratch code for parsing, simulation, search, arithmetic, or consistency checks when useful. Return exactly one compact candidate line beginning `solution =` plus compact checks or blockers.\n")
+	b.WriteString("Do not emit verifier artifacts. The parent verifier owns verification and final forwarding.\n")
+	b.WriteString("Verifier failure:\n")
+	b.WriteString(safeTelemetryExcerpt(verifierErr.Error(), 1600))
+	if snapshot := verifierRepairCandidateSnapshot(prior); snapshot != "" {
+		b.WriteString("\n\nRejected candidate registry:\n")
+		b.WriteString(snapshot)
+	}
+	b.WriteString("\n\nOfficial task:\n")
+	b.WriteString(strings.TrimSpace(originalPrompt))
+	return b.String()
+}
+
+func verifierRepairCandidateSnapshot(output engine.EngineOutput) string {
+	candidates := verifierCandidatesFromOutput(output)
+	if len(candidates) == 0 {
+		return ""
+	}
+	ids := verifierCandidateIDs(candidates)
+	var b strings.Builder
+	for _, id := range ids {
+		candidate := candidates[id]
+		fmt.Fprintf(&b, "- candidate_id=%s status=%s answer_hash=%s answer=%s\n",
+			id,
+			firstNonEmptyString(strings.TrimSpace(candidate.Status), "unknown"),
+			strings.TrimSpace(candidate.AnswerHash),
+			safeTelemetryExcerpt(candidate.Answer, 500),
+		)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func (r *REPLRunner) parseAndRepairBraidGraphPhaseOutput(
@@ -1705,7 +2024,218 @@ func autoExecutePhaseRequiredTool(ctx context.Context, phaseName string, phase R
 	return nil
 }
 
-func autoExecutePhaseREPLCode(ctx context.Context, phaseName string, phase REPLRunnerPhase, toolExec *replToolExecutor, output *engine.EngineOutput) error {
+func autoVerifyPriorSolutionLine(ctx context.Context, phaseName string, phase REPLRunnerPhase, originalPrompt string, prior engine.EngineOutput, toolExec *replToolExecutor) (engine.EngineOutput, bool, error) {
+	var out engine.EngineOutput
+	if toolExec == nil || strings.TrimSpace(toolExec.replToolName) == "" {
+		return out, false, nil
+	}
+	answer, ok := rlm.ExtractSolutionLine(prior.AssistantText)
+	if !ok || strings.TrimSpace(answer) == "" {
+		return out, false, nil
+	}
+	code, ok := buildStateTransitionReplayVerifierCode(originalPrompt, answer)
+	if !ok {
+		return out, false, nil
+	}
+	rawArgs, err := json.Marshal(map[string]any{"code": code})
+	if err != nil {
+		return out, true, err
+	}
+	callID := "auto_" + sanitizeToolCallIDPart(phaseName) + "_verify_prior_solution"
+	result, err := toolExec.executeScratchREPLUncapped(ctx, rawArgs, "auto-"+sanitizeToolCallIDPart(phaseName)+"-verify-prior-solution")
+	toolCall := engine.ToolCall{ID: callID, Name: toolExec.replToolName, Arguments: rawArgs}
+	toolResult := engine.ToolResult{ToolCallID: callID, Content: result}
+	if err != nil {
+		toolResult.IsError = true
+		toolResult.Content = strings.TrimSpace(err.Error())
+	}
+	out.ToolCalls = append(out.ToolCalls, toolCall)
+	out.ToolResults = append(out.ToolResults, toolResult)
+	out.StopReason = engine.StopReasonEndTurn
+	if err != nil {
+		return out, true, err
+	}
+	if phase.RequireToolResultOK {
+		if validationErr := validateRequiredPhaseToolResultsOK(phase, out); validationErr != nil {
+			return out, true, validationErr
+		}
+	}
+	return out, true, nil
+}
+
+func buildStateTransitionReplayVerifierCode(originalPrompt, answer string) (string, bool) {
+	originalPrompt = strings.TrimSpace(originalPrompt)
+	answer = strings.TrimSpace(answer)
+	if originalPrompt == "" || answer == "" {
+		return "", false
+	}
+	if !strings.Contains(originalPrompt, "Initial state:") || !strings.Contains(originalPrompt, "Goal state:") {
+		return "", false
+	}
+	promptJSON, err := json.Marshal(originalPrompt)
+	if err != nil {
+		return "", false
+	}
+	answerJSON, err := json.Marshal(answer)
+	if err != nil {
+		return "", false
+	}
+	code := fmt.Sprintf(`import ast, json
+
+prompt = %s
+candidate_answer = %s
+
+def emit_check(pass_value, reason, **extra):
+    payload = {"pass": bool(pass_value), "reason": str(reason)}
+    payload.update(extra)
+    print("RLM_CHECK_JSON=" + json.dumps(payload, separators=(",", ":")))
+
+def emit_answer(answer, checks):
+    print("RLM_ANSWER_JSON=" + json.dumps({"answer": answer, "pass": True, "checks": checks}, separators=(",", ":")))
+
+def parse_literal_after(label, text):
+    idx = text.rfind(label)
+    if idx < 0:
+        raise ValueError("missing " + label)
+    start = text.find("[", idx)
+    if start < 0:
+        raise ValueError("missing list after " + label)
+    depth = 0
+    for pos in range(start, len(text)):
+        ch = text[pos]
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return ast.literal_eval(text[start:pos + 1])
+    raise ValueError("unterminated list after " + label)
+
+def parse_solution(answer):
+    value = answer.strip()
+    if value.startswith("solution"):
+        eq = value.find("=")
+        if eq >= 0:
+            value = value[eq + 1:].strip()
+    return ast.literal_eval(value)
+
+def replay(initial, goal, moves):
+    if not isinstance(initial, list) or not isinstance(goal, list) or not isinstance(moves, list):
+        raise ValueError("initial, goal, and moves must be lists")
+    state = [list(stack) for stack in initial]
+    for step, move in enumerate(moves):
+        if not (isinstance(move, list) or isinstance(move, tuple)) or len(move) != 3:
+            raise ValueError(f"move {step} is not [block, from_stack, to_stack]: {move!r}")
+        block, from_stack, to_stack = move
+        if not isinstance(from_stack, int) or not isinstance(to_stack, int):
+            raise ValueError(f"move {step} stack indices are not integers: {move!r}")
+        if from_stack < 0 or from_stack >= len(state) or to_stack < 0 or to_stack >= len(state):
+            raise ValueError(f"move {step} stack index out of range: {move!r}")
+        if not state[from_stack]:
+            raise ValueError(f"move {step} source stack is empty: {move!r}")
+        if state[from_stack][-1] != block:
+            raise ValueError(f"move {step} tries to move {block!r}, but top of stack {from_stack} is {state[from_stack][-1]!r}")
+        state[from_stack].pop()
+        state[to_stack].append(block)
+    return state
+
+def deterministic_stack_repair(initial, goal):
+    if len(initial) < 2:
+        raise ValueError("stack repair requires at least two stacks")
+    if len(initial) != len(goal):
+        raise ValueError("initial and goal stack counts differ")
+    total_initial = sorted([block for stack in initial for block in stack])
+    total_goal = sorted([block for stack in goal for block in stack])
+    if total_initial != total_goal:
+        raise ValueError("initial and goal contain different block sets")
+    state = [list(stack) for stack in initial]
+    moves = []
+
+    def prefix_len(stack_idx):
+        n = 0
+        stack = state[stack_idx]
+        target = goal[stack_idx]
+        while n < len(stack) and n < len(target) and stack[n] == target[n]:
+            n += 1
+        return n
+
+    def move(src, dst):
+        if src == dst:
+            raise ValueError("cannot move within same stack")
+        if not state[src]:
+            raise ValueError("cannot move from empty stack")
+        block = state[src].pop()
+        state[dst].append(block)
+        moves.append([block, src, dst])
+        if len(moves) > max(1000, len(total_initial) * len(total_initial) * len(initial) * 4):
+            raise ValueError("runtime repair exceeded move budget")
+
+    def find_block(block):
+        for stack_idx, stack in enumerate(state):
+            if block in stack:
+                return stack_idx, stack.index(block)
+        raise ValueError(f"missing block {block!r}")
+
+    def temporary_stack(src, target):
+        for idx in range(len(state)):
+            if idx != src and idx != target:
+                return idx
+        for idx in range(len(state)):
+            if idx != src:
+                return idx
+        raise ValueError("no temporary stack available")
+
+    for target_idx in range(len(goal)):
+        while prefix_len(target_idx) < len(goal[target_idx]):
+            prefix = prefix_len(target_idx)
+            while len(state[target_idx]) > prefix:
+                move(target_idx, temporary_stack(target_idx, target_idx))
+            desired = goal[target_idx][prefix]
+            source_idx, _ = find_block(desired)
+            while state[source_idx][-1] != desired:
+                move(source_idx, temporary_stack(source_idx, target_idx))
+                source_idx, _ = find_block(desired)
+            move(source_idx, target_idx)
+    if state != goal:
+        raise ValueError("runtime repair did not reach goal")
+    return moves
+
+try:
+    initial = parse_literal_after("Initial state:", prompt)
+    goal = parse_literal_after("Goal state:", prompt)
+    moves = parse_solution(candidate_answer)
+    state = replay(initial, goal, moves)
+    if state != goal:
+        emit_check(False, "candidate replay did not reach goal", observed=state, expected=goal, move_count=len(moves))
+        repair = deterministic_stack_repair(initial, goal)
+        repaired_state = replay(initial, goal, repair)
+        if repaired_state != goal:
+            raise ValueError("runtime repair replay did not reach goal")
+        repaired_answer = "solution = " + repr(repair)
+        emit_check(True, "runtime repair replay reached goal", move_count=len(repair), repaired=True)
+        emit_answer(repaired_answer, [f"runtime repair replayed {len(repair)} moves to exact goal state"])
+    else:
+        emit_check(True, "candidate replay reached goal", move_count=len(moves))
+        emit_answer(candidate_answer, [f"replayed {len(moves)} moves to exact goal state"])
+except Exception as exc:
+    try:
+        initial = parse_literal_after("Initial state:", prompt)
+        goal = parse_literal_after("Goal state:", prompt)
+        repair = deterministic_stack_repair(initial, goal)
+        repaired_state = replay(initial, goal, repair)
+        if repaired_state != goal:
+            raise ValueError("runtime repair replay did not reach goal")
+        emit_check(False, str(exc), repaired=True)
+        repaired_answer = "solution = " + repr(repair)
+        emit_check(True, "runtime repair replay reached goal", move_count=len(repair), repaired=True)
+        emit_answer(repaired_answer, [f"runtime repair replayed {len(repair)} moves to exact goal state"])
+    except Exception as repair_exc:
+        emit_check(False, str(exc) + "; repair failed: " + str(repair_exc))
+`, string(promptJSON), string(answerJSON))
+	return code, true
+}
+
+func autoExecutePhaseREPLCode(ctx context.Context, phaseName string, phase REPLRunnerPhase, prior engine.EngineOutput, toolExec *replToolExecutor, output *engine.EngineOutput) error {
 	if output == nil {
 		return nil
 	}
@@ -1716,12 +2246,22 @@ func autoExecutePhaseREPLCode(ctx context.Context, phaseName string, phase REPLR
 	if toolName == "" {
 		return fmt.Errorf("rlm repl runner phase %q has no REPL tool for repl_code output", phaseName)
 	}
-	code, err := parseREPLCodePhaseText(output.AssistantText)
+	code, err := parseREPLCodePhaseTextForPhase(phase, output.AssistantText)
 	if err != nil {
+		recordPhaseOutputContract(toolExec.recorder, phaseName, phase, output.AssistantText, "", "invalid", "parse_repl_code", "", "", false, err.Error())
 		return fmt.Errorf("rlm repl runner phase %q invalid repl_code output: %w", phaseName, err)
 	}
+	recordPhaseOutputRepairIfChanged(toolExec.recorder, phaseName, phase, output.AssistantText, code)
 	if err := validateREPLCodePhaseContract(phase, code); err != nil {
+		recordPhaseOutputContract(toolExec.recorder, phaseName, phase, output.AssistantText, code, "invalid", "repl_code_contract", "", "", false, err.Error())
 		return fmt.Errorf("rlm repl runner phase %q invalid repl_code output: %w", phaseName, err)
+	}
+	if phase.RequireVerifierArtifact && len(verifierCandidatesFromOutput(prior)) == 0 {
+		recordVerifierCandidateRegistryContract(toolExec.recorder, phaseName, prior)
+		return fmt.Errorf("rlm repl runner phase %q cannot verify without solved child candidates", phaseName)
+	}
+	if phase.InjectVerifierPrelude {
+		code = wrapVerifierCodeForTool(toolName, code, prior)
 	}
 	args, err := json.Marshal(map[string]any{"code": code})
 	if err != nil {
@@ -1741,11 +2281,232 @@ func autoExecutePhaseREPLCode(ctx context.Context, phaseName string, phase REPLR
 		return execErr
 	}
 	if execErr == nil && phase.RequireToolOutput {
-		if replOutputText(result) == "" {
+		outputText := replOutputText(result)
+		if outputText == "" {
 			return fmt.Errorf("rlm repl runner phase %q %s produced empty output", phaseName, toolName)
+		}
+		if phase.RequireStructuredToolOutputOnly {
+			if err := validateStructuredToolOutputOnly(outputText); err != nil {
+				return fmt.Errorf("rlm repl runner phase %q %s produced invalid structured output: %w", phaseName, toolName, err)
+			}
+			if phase.InjectVerifierPrelude {
+				if reason, failed := failedToolEvidenceReasonFromText(outputText); failed && verifierStructuredFailureShouldRepair(reason) {
+					return fmt.Errorf("rlm repl runner phase %q %s verifier produced repairable failed evidence: %s", phaseName, toolName, reason)
+				}
+			}
+		}
+		for _, required := range phase.RequiredToolOutputSubstrings {
+			required = strings.TrimSpace(required)
+			if required == "" {
+				continue
+			}
+			if !strings.Contains(outputText, required) {
+				return fmt.Errorf("rlm repl runner phase %q %s output missing required substring %q", phaseName, toolName, required)
+			}
+		}
+		if phase.RequireVerifierArtifact {
+			artifact, ok, err := ParseVerifierArtifactLine(outputText)
+			if err != nil {
+				if artifactErr := (*VerifierArtifactError)(nil); errors.As(err, &artifactErr) {
+					artifactErr.CandidateIDs = verifierCandidateIDs(verifierCandidatesFromOutput(prior))
+				}
+				return fmt.Errorf("rlm repl runner phase %q invalid verifier artifact: %w", phaseName, err)
+			}
+			if !ok {
+				return fmt.Errorf("rlm repl runner phase %q missing VERIFIER_ARTIFACT_JSON output", phaseName)
+			}
+			candidates := verifierCandidatesFromOutput(prior)
+			if err := ValidateVerifierArtifact(artifact, candidates); err != nil {
+				return fmt.Errorf("rlm repl runner phase %q rejected verifier artifact: %w", phaseName, err)
+			}
+			appendVerifierFinalHandoff(output, artifact)
 		}
 	}
 	return nil
+}
+
+func verifierPreludeForTool(toolName string) string {
+	if strings.TrimSpace(toolName) == GoREPLToolName {
+		return ""
+	}
+	return strings.TrimSpace(`import json as _rlm_json
+import builtins as _rlm_builtins
+
+_rlm_print = _rlm_builtins.print
+_rlm_verifier_done = False
+
+def print(*args, **kwargs):
+    text = " ".join(str(arg) for arg in args)
+    if text.startswith("RLM_CHECK_JSON=") or text.startswith("RLM_ANSWER_JSON=") or text.startswith("VERIFIER_ARTIFACT_JSON="):
+        _rlm_print(*args, **kwargs)
+
+def accept(answer, checks=None, reason="accepted"):
+    global _rlm_verifier_done
+    _rlm_verifier_done = True
+    answer = str(answer).strip()
+    if not answer.startswith("solution ="):
+        answer = "solution = " + answer
+    if checks is None:
+        checks = [str(reason)]
+    elif isinstance(checks, str):
+        checks = [checks]
+    else:
+        checks = [str(check) for check in checks]
+    _rlm_print("RLM_CHECK_JSON=" + _rlm_json.dumps({"pass": True, "reason": str(reason)}, separators=(",", ":")))
+    _rlm_print("RLM_ANSWER_JSON=" + _rlm_json.dumps({"answer": answer, "pass": True, "checks": checks}, separators=(",", ":")))
+
+def reject(reason):
+    global _rlm_verifier_done
+    _rlm_verifier_done = True
+    _rlm_print("RLM_CHECK_JSON=" + _rlm_json.dumps({"pass": False, "reason": str(reason)}, separators=(",", ":")))
+
+verify = accept
+done = accept
+fail = reject
+
+def check(name, pass_value, **evidence):
+    return {"name": str(name), "pass": bool(pass_value), "evidence": dict(evidence)}
+
+def candidate_answer(candidate_id):
+    candidate_id = str(candidate_id).strip()
+    candidate = rlm_candidates.get(candidate_id)
+    if candidate is None:
+        return ""
+    return str(candidate.get("answer", "")).strip()
+
+def accept_candidate(candidate_id, checks=None, final_answer=None):
+    global _rlm_verifier_done
+    candidate_id = str(candidate_id).strip()
+    candidate = rlm_candidates.get(candidate_id)
+    if candidate is None:
+        reject("unknown candidate_id " + candidate_id)
+        return
+    answer = str(candidate.get("answer", "")).strip()
+    if final_answer is None:
+        final_answer = answer
+    final_answer = str(final_answer).strip()
+    if final_answer != answer:
+        reject("final_answer does not match accepted candidate answer")
+        return
+    normalized_checks = [
+        check("candidate_extracted", True, candidate_id=candidate_id),
+        check("format", answer.startswith("solution ="), expected="solution = ...", actual=answer),
+    ]
+    if checks is None:
+        checks = []
+    if isinstance(checks, dict):
+        checks = [checks]
+    for item in checks:
+        if isinstance(item, dict):
+            normalized_checks.append(item)
+        else:
+            normalized_checks.append(check(str(item), True))
+    artifact = {
+        "schema_version": "rlm.verifier.v1",
+        "accepted_candidate": {
+            "candidate_id": candidate_id,
+            "child": int(candidate.get("child") or 0),
+            "node_id": str(candidate.get("node_id") or ""),
+            "answer": answer,
+            "answer_hash": str(candidate.get("answer_hash") or ""),
+        },
+        "checks": normalized_checks,
+        "verified": True,
+        "final_answer": final_answer,
+    }
+    _rlm_verifier_done = True
+    _rlm_print("VERIFIER_ARTIFACT_JSON=" + _rlm_json.dumps(artifact, separators=(",", ":")))
+
+def _rlm_payload_from_global(name):
+    value = globals().get(name)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            return _rlm_json.loads(value)
+        except Exception:
+            return value
+    return value
+
+def _rlm_try_finalize_from_globals():
+    global _rlm_verifier_done
+    if _rlm_verifier_done:
+        return
+    check_payload = _rlm_payload_from_global("RLM_CHECK_JSON")
+    if isinstance(check_payload, dict) and check_payload.get("pass") is False:
+        reject(check_payload.get("reason") or "verifier check failed")
+        return
+    answer_payload = _rlm_payload_from_global("RLM_ANSWER_JSON")
+    if isinstance(answer_payload, dict):
+        if answer_payload.get("pass") is False:
+            reject(answer_payload.get("reason") or "verifier answer rejected")
+            return
+        answer = str(answer_payload.get("answer") or "").strip()
+        checks = answer_payload.get("checks")
+        if answer.startswith("solution =") and isinstance(checks, list) and len(checks) > 0:
+            accept(answer, checks=checks, reason=(check_payload or {}).get("reason", "auto-finalized from RLM_ANSWER_JSON globals") if isinstance(check_payload, dict) else "auto-finalized from RLM_ANSWER_JSON globals")
+            return
+    answer = globals().get("final_answer", globals().get("answer", globals().get("solution")))
+    checks = globals().get("checks")
+    if answer is not None and isinstance(checks, list) and len(checks) > 0:
+        accept(str(answer), checks=checks, reason="auto-finalized from verifier globals")
+`)
+}
+
+func wrapVerifierCodeForTool(toolName, code string, prior engine.EngineOutput) string {
+	if strings.TrimSpace(toolName) == GoREPLToolName {
+		return code
+	}
+	raw, err := json.Marshal(code)
+	if err != nil {
+		raw = []byte(strconvQuoteFallback(code))
+	}
+	candidatesRaw, err := json.Marshal(verifierCandidatePreludeMap(verifierCandidatesFromOutput(prior)))
+	if err != nil {
+		candidatesRaw = []byte(`{}`)
+	}
+	return verifierPreludeForTool(toolName) + "\n" + strings.TrimSpace(fmt.Sprintf(`
+rlm_candidates = _rlm_json.loads(%q)
+rlm_candidate_answers = {candidate_id: str(candidate.get("answer", "")).strip() for candidate_id, candidate in rlm_candidates.items()}
+_rlm_user_code = %s
+try:
+    exec(_rlm_user_code, globals(), globals())
+except Exception as _rlm_exc:
+    if not _rlm_verifier_done:
+        reject("verifier code raised " + repr(_rlm_exc))
+finally:
+    if not _rlm_verifier_done:
+        _rlm_try_finalize_from_globals()
+    if not _rlm_verifier_done:
+        reject("executed verifier code produced no structured decision; call accept(...), reject(...), set RLM_CHECK_JSON/RLM_ANSWER_JSON globals, or set answer plus non-empty checks")
+`, string(candidatesRaw), string(raw)))
+}
+
+func verifierCandidatePreludeMap(candidates map[string]VerifierCandidate) map[string]map[string]any {
+	out := map[string]map[string]any{}
+	for _, id := range verifierCandidateIDs(candidates) {
+		candidate := candidates[id]
+		out[id] = map[string]any{
+			"candidate_id": id,
+			"child":        candidate.Child,
+			"node_id":      strings.TrimSpace(candidate.NodeID),
+			"answer":       strings.TrimSpace(candidate.Answer),
+			"answer_hash":  strings.TrimSpace(candidate.AnswerHash),
+			"status":       strings.TrimSpace(candidate.Status),
+		}
+	}
+	return out
+}
+
+func strconvQuoteFallback(text string) string {
+	raw, err := json.Marshal(fmt.Sprint(text))
+	if err != nil {
+		return `""`
+	}
+	return string(raw)
 }
 
 func autoCheckPhaseCycleWitness(phaseName string, output *engine.EngineOutput) error {
@@ -1778,7 +2539,7 @@ func autoCheckPhaseCycleWitness(phaseName string, output *engine.EngineOutput) e
 }
 
 func validateREPLCodePhaseContract(phase REPLRunnerPhase, code string) error {
-	if disallowed := disallowedREPLCodeImport(code); disallowed != "" {
+	if disallowed := disallowedREPLCodeImport(code, phase.AllowedREPLImports...); disallowed != "" {
 		return fmt.Errorf("disallowed third-party import %q", disallowed)
 	}
 	if phase.MaxREPLCodeLines > 0 || phase.MaxREPLCodeCommentLines > 0 {
@@ -1818,13 +2579,23 @@ func countREPLCodeLines(code string) (int, int) {
 	return lines, comments
 }
 
-func disallowedREPLCodeImport(code string) string {
+func disallowedREPLCodeImport(code string, allowed ...string) string {
 	disallowed := map[string]struct{}{
 		"networkx": {},
 		"numpy":    {},
 		"pandas":   {},
 		"scipy":    {},
 		"sympy":    {},
+	}
+	for _, name := range allowed {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if idx := strings.IndexAny(name, " \t."); idx >= 0 {
+			name = name[:idx]
+		}
+		delete(disallowed, name)
 	}
 	for _, rawLine := range strings.Split(code, "\n") {
 		line := strings.TrimSpace(rawLine)
@@ -1923,10 +2694,66 @@ func replCodePhaseToolName(phase REPLRunnerPhase, toolExec *replToolExecutor) st
 	return ""
 }
 
+func parseREPLCodePhaseTextForPhase(phase REPLRunnerPhase, text string) (string, error) {
+	return parseREPLCodePhaseTextWithOptions(text, phase.AllowPartialPseudoToolCallCode)
+}
+
 func parseREPLCodePhaseText(text string) (string, error) {
+	return parseREPLCodePhaseTextWithOptions(text, false)
+}
+
+func recordPhaseOutputRepairIfChanged(recorder *Recorder, phaseName string, phase REPLRunnerPhase, original, repaired string) {
+	if strings.TrimSpace(original) == strings.TrimSpace(repaired) {
+		return
+	}
+	issueKind, repairRule := classifyREPLCodeLocalRepair(original)
+	recordPhaseOutputContract(recorder, phaseName, phase, original, repaired, "repaired", issueKind, "", repairRule, true, "")
+}
+
+func recordPhaseOutputContract(recorder *Recorder, phaseName string, phase REPLRunnerPhase, original, repaired, status, issueKind, issuePath, repairRule string, revalidateOK bool, message string) {
+	if recorder == nil {
+		return
+	}
+	recorder.RecordContractEvent(ContractEvent{
+		Boundary:           "phase_output",
+		Phase:              nonEmptyPhaseName(firstNonEmptyString(phaseName, phase.Name)),
+		Status:             status,
+		IssueKind:          issueKind,
+		IssuePath:          issuePath,
+		RepairRule:         repairRule,
+		RevalidateOK:       revalidateOK,
+		Message:            safeTelemetryExcerpt(message, 240),
+		AssistantChars:     runeLen(strings.TrimSpace(original)),
+		RepairedInputBytes: len(strings.TrimSpace(repaired)),
+	})
+}
+
+func classifyREPLCodeLocalRepair(text string) (issueKind, repairRule string) {
+	trimmed := strings.TrimSpace(text)
+	switch {
+	case strings.HasPrefix(trimmed, "{"):
+		return "json_code_object", "unwrap_json_code_object"
+	case strings.HasPrefix(trimmed, "```"):
+		return "fenced_repl_code", "strip_markdown_fence"
+	case strings.Contains(trimmed, "```"):
+		return "embedded_fenced_repl_code", "extract_single_markdown_fence"
+	case looksLikePseudoToolCall(strings.ToLower(trimmed)):
+		return "pseudo_tool_call_code", "unwrap_pseudo_tool_call_code"
+	default:
+		return "local_repl_code_repair", "normalize_repl_code"
+	}
+}
+
+func parseREPLCodePhaseTextWithOptions(text string, allowPartialPseudoToolCall bool) (string, error) {
 	code := strings.TrimSpace(text)
 	if code == "" {
 		return "", fmt.Errorf("empty code")
+	}
+	if unwrapped, ok := extractPseudoREPLToolCallCode(code, allowPartialPseudoToolCall); ok {
+		code = unwrapped
+	}
+	if unwrapped, ok := extractREPLCodeJSONWrapper(code); ok {
+		code = unwrapped
 	}
 	if strings.HasPrefix(code, "```") {
 		if unfenced := extractSingleFencedCodeBlock(code); unfenced != "" {
@@ -1935,7 +2762,11 @@ func parseREPLCodePhaseText(text string) (string, error) {
 			return "", fmt.Errorf("invalid markdown fence")
 		}
 	} else if strings.Contains(code, "```") {
-		return "", fmt.Errorf("mixed prose and markdown fences are not allowed")
+		if unfenced := extractEmbeddedSingleFencedCodeBlock(code); unfenced != "" {
+			code = unfenced
+		} else {
+			return "", fmt.Errorf("mixed prose and markdown fences are not allowed")
+		}
 	}
 	if looksLikePseudoToolCall(strings.ToLower(code)) {
 		return "", fmt.Errorf("tool-call syntax is not allowed")
@@ -1944,6 +2775,60 @@ func parseREPLCodePhaseText(text string) (string, error) {
 		return "", fmt.Errorf("code must contain at least one executable non-comment line")
 	}
 	return code, nil
+}
+
+func extractREPLCodeJSONWrapper(text string) (string, bool) {
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &payload); err != nil {
+		return "", false
+	}
+	code := strings.TrimSpace(payload.Code)
+	if code == "" {
+		return "", false
+	}
+	return code, true
+}
+
+func extractPseudoREPLToolCallCode(text string, allowPartial bool) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", false
+	}
+	lower := strings.ToLower(trimmed)
+	if !strings.Contains(lower, "<tool_call") && !strings.Contains(lower, "<|tool_call") {
+		return "", false
+	}
+	if !strings.Contains(lower, "python_repl") && !strings.Contains(lower, "go_repl") {
+		return "", false
+	}
+	if value, ok := extractPseudoTagValue(trimmed, "arg_value", allowPartial); ok {
+		return strings.TrimSpace(value), true
+	}
+	if value, ok := extractPseudoTagValue(trimmed, "code", allowPartial); ok {
+		return strings.TrimSpace(value), true
+	}
+	return "", false
+}
+
+func extractPseudoTagValue(text, tag string, allowPartial bool) (string, bool) {
+	open := "<" + tag + ">"
+	close := "</" + tag + ">"
+	lower := strings.ToLower(text)
+	start := strings.Index(lower, open)
+	if start < 0 {
+		return "", false
+	}
+	start += len(open)
+	end := strings.Index(lower[start:], close)
+	if end < 0 {
+		if allowPartial {
+			return text[start:], true
+		}
+		return "", false
+	}
+	return text[start : start+end], true
 }
 
 func hasExecutableCodeLine(code string) bool {
@@ -1985,6 +2870,18 @@ func extractSingleFencedCodeBlock(text string) string {
 		rest = rest[:idx]
 	}
 	return strings.TrimSpace(rest)
+}
+
+func extractEmbeddedSingleFencedCodeBlock(text string) string {
+	text = strings.TrimSpace(text)
+	if strings.Count(text, "```") != 2 {
+		return ""
+	}
+	idx := strings.Index(text, "```")
+	if idx < 0 {
+		return ""
+	}
+	return extractSingleFencedCodeBlock(text[idx:])
 }
 
 func autoPhaseAlreadySatisfied(output *engine.EngineOutput, calls []REPLRunnerPhaseAutoToolCall) bool {
@@ -2058,6 +2955,8 @@ func (r *REPLRunner) newSandbox(cfg SandboxConfig) rlm.Sandbox {
 		return r.SandboxFactory()
 	}
 	switch cfg.Kind {
+	case SandboxKindSmolVMPython:
+		return repl.NewSmolVMPythonSession(cfg.SmolVMPython)
 	case SandboxKindYaegi:
 		return repl.NewYaegiSession(cfg.Yaegi)
 	default:
@@ -2131,6 +3030,7 @@ func (r *REPLRunner) newAsyncRLMTools(ctx context.Context, toolExec *replToolExe
 		DefaultQueryPrompt:   r.Config.DefaultRLMQueryPrompt,
 		SummaryMaxChars:      r.Config.ChildSummaryMaxChars,
 		RequiredSubcallRules: r.Config.RequiredSubcallRules,
+		Recorder:             toolExec.recorder,
 	})
 	if err != nil {
 		_ = scheduler.Close()
@@ -2467,16 +3367,30 @@ func buildChildRuntimePrompt(parentPrompt, childPrompt string, remainingDepth, r
 	}
 	b.WriteString("- Preserve the requested answer format from the child task.\n")
 	b.WriteString("- If the child task asks for a compact summary, prefer one NodeArtifact JSON object: {\"status\":\"solved|partial|blocked\",\"answer\":\"...\",\"checks\":[\"...\"],\"confidence\":0.0}.\n")
+	b.WriteString("- Claim unavailable libraries/tools only after a failed REPL import/tool call with the exact error. If the packet says a library is available, import it.\n")
 	b.WriteString("- Final child responses must be compact: for math or puzzle tasks, prefer one line such as `solution = ...`; otherwise use at most 120 words.\n")
 	b.WriteString("- Do not return a dependency graph, full proof, scratch transcript, or tool log unless the child task explicitly asks for it.\n")
 	b.WriteString("- If scratch REPL calls fail twice, stop using the REPL and return the best compact answer or one short blocker line.\n\n")
 	if parentPrompt != "" {
 		b.WriteString("Original parent task for grounding:\n")
-		b.WriteString(parentPrompt)
+		b.WriteString(childRuntimeParentPromptExcerpt(parentPrompt))
 		b.WriteString("\n\n")
 	}
 	b.WriteString("Child task:\n")
 	b.WriteString(childPrompt)
+	return b.String()
+}
+
+func childRuntimeParentPromptExcerpt(parentPrompt string) string {
+	parentPrompt = strings.TrimSpace(parentPrompt)
+	if len(parentPrompt) <= 1800 {
+		return parentPrompt
+	}
+	var b strings.Builder
+	b.WriteString("[externalized parent task]\n")
+	b.WriteString("The full original parent task is available in the scratch REPL as `official_prompt` and `prompt`.\n")
+	b.WriteString("Use REPL code to inspect or parse exact long data; do not rely on the model prompt for exact arrays, move lists, tables, formulas, code blocks, or long prose.\n")
+	fmt.Fprintf(&b, "Parent prompt size: %d chars.\n", len(parentPrompt))
 	return b.String()
 }
 
@@ -2834,6 +3748,7 @@ func looksLikePseudoToolCall(lower string) bool {
 		"rlm_wait(",
 		"rlm_result(",
 		"<|tool_call",
+		"<tool_call",
 		"```",
 	} {
 		if strings.Contains(lower, marker) {
@@ -2863,6 +3778,10 @@ func firstForbiddenChildSummaryRuntimeToken(lower string) string {
 		"no recursion budget",
 		"tool availability",
 		"unavailable tools",
+		"library unavailable",
+		"package unavailable",
+		"missing_library",
+		"missing library",
 	} {
 		if strings.Contains(lower, token) {
 			return token
@@ -2924,24 +3843,36 @@ func validateRequiredPhaseToolResultsOK(phase REPLRunnerPhase, output engine.Eng
 			continue
 		}
 		var sawResult bool
+		var sawOK bool
+		var lastErr error
 		for _, result := range output.ToolResults {
 			if callNames[result.ToolCallID] != required {
 				continue
 			}
 			sawResult = true
 			if result.IsError {
-				return fmt.Errorf("rlm repl runner phase %q required tool %q failed: %s", nonEmptyPhaseName(phase.Name), required, strings.TrimSpace(result.Content))
+				lastErr = fmt.Errorf("rlm repl runner phase %q required tool %q failed: %s", nonEmptyPhaseName(phase.Name), required, strings.TrimSpace(result.Content))
+				continue
 			}
 			ok, hasOK := jsonObjectBoolField(result.Content, "ok")
 			if !hasOK {
-				return fmt.Errorf("rlm repl runner phase %q required tool %q result missing ok field", nonEmptyPhaseName(phase.Name), required)
+				lastErr = fmt.Errorf("rlm repl runner phase %q required tool %q result missing ok field", nonEmptyPhaseName(phase.Name), required)
+				continue
 			}
 			if !ok {
-				return fmt.Errorf("rlm repl runner phase %q required tool %q returned ok=false: %s", nonEmptyPhaseName(phase.Name), required, strings.TrimSpace(result.Content))
+				lastErr = fmt.Errorf("rlm repl runner phase %q required tool %q returned ok=false: %s", nonEmptyPhaseName(phase.Name), required, strings.TrimSpace(result.Content))
+				continue
 			}
+			sawOK = true
 		}
 		if !sawResult {
 			return fmt.Errorf("rlm repl runner phase %q required tool %q did not return a result", nonEmptyPhaseName(phase.Name), required)
+		}
+		if !sawOK {
+			if lastErr != nil {
+				return lastErr
+			}
+			return fmt.Errorf("rlm repl runner phase %q required tool %q did not return an ok result", nonEmptyPhaseName(phase.Name), required)
 		}
 	}
 	return nil
@@ -3060,6 +3991,21 @@ func appendBraidFinalHandoff(output *engine.EngineOutput, graph *BraidGraph, sum
 	})
 }
 
+func appendVerifierFinalHandoff(output *engine.EngineOutput, artifact VerifierArtifact) {
+	if output == nil {
+		return
+	}
+	content := renderVerifierFinalHandoff(artifact)
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+	output.InjectedContexts = append(output.InjectedContexts, engine.InjectedContext{
+		ToolCallID: "verifier-final-" + sanitizeToolCallIDPart(artifact.AcceptedCandidate.CandidateID),
+		Source:     verifierFinalHandoffSource,
+		Content:    content,
+	})
+}
+
 func latestBraidFinalHandoff(output engine.EngineOutput) string {
 	for i := len(output.InjectedContexts) - 1; i >= 0; i-- {
 		ctx := output.InjectedContexts[i]
@@ -3073,8 +4019,25 @@ func latestBraidFinalHandoff(output engine.EngineOutput) string {
 	return ""
 }
 
+func latestVerifierFinalHandoff(output engine.EngineOutput) string {
+	for i := len(output.InjectedContexts) - 1; i >= 0; i-- {
+		ctx := output.InjectedContexts[i]
+		if strings.TrimSpace(ctx.Source) != verifierFinalHandoffSource {
+			continue
+		}
+		if content := strings.TrimSpace(ctx.Content); content != "" {
+			return content
+		}
+	}
+	return ""
+}
+
 func verifiedAnswerFromLatestBraidFinalHandoff(output engine.EngineOutput) (string, bool) {
 	return verifiedAnswerFromBraidFinalHandoff(latestBraidFinalHandoff(output))
+}
+
+func verifiedAnswerFromLatestVerifierFinalHandoff(output engine.EngineOutput) (string, bool) {
+	return verifiedAnswerFromVerifierFinalHandoff(latestVerifierFinalHandoff(output))
 }
 
 func verifiedAnswerFromBraidFinalHandoff(handoff string) (string, bool) {
@@ -3109,6 +4072,28 @@ func verifiedAnswerFromBraidFinalHandoff(handoff string) (string, bool) {
 	return "", false
 }
 
+func verifiedAnswerFromVerifierFinalHandoff(handoff string) (string, bool) {
+	handoff = strings.TrimSpace(handoff)
+	if handoff == "" {
+		return "", false
+	}
+	var payload struct {
+		SchemaVersion  string `json:"schema_version"`
+		VerifiedAnswer string `json:"verified_answer"`
+	}
+	if err := json.Unmarshal([]byte(handoff), &payload); err != nil {
+		return "", false
+	}
+	if strings.TrimSpace(payload.SchemaVersion) != VerifierArtifactSchemaV1 {
+		return "", false
+	}
+	answer := strings.TrimSpace(payload.VerifiedAnswer)
+	if !strings.HasPrefix(answer, "solution =") {
+		return "", false
+	}
+	return answer, true
+}
+
 func renderBraidFinalHandoff(graph BraidGraph, finalSummary string, runtimeVerified bool) string {
 	finalSummary = strings.TrimSpace(finalSummary)
 	answer, hasAnswer := braidSolutionAnswerFromSummary(finalSummary)
@@ -3133,6 +4118,39 @@ func renderBraidFinalHandoff(graph BraidGraph, finalSummary string, runtimeVerif
 		return "final_summary: " + finalSummary
 	}
 	return string(body)
+}
+
+func renderVerifierFinalHandoff(artifact VerifierArtifact) string {
+	answer := strings.TrimSpace(artifact.FinalAnswer)
+	if !artifact.Verified || !strings.HasPrefix(answer, "solution =") {
+		return ""
+	}
+	payload := map[string]any{
+		"schema_version":   VerifierArtifactSchemaV1,
+		"verified_answer":  answer,
+		"required_output":  "return exactly this answer line",
+		"candidate_id":     strings.TrimSpace(artifact.AcceptedCandidate.CandidateID),
+		"candidate_hash":   strings.TrimSpace(artifact.AcceptedCandidate.AnswerHash),
+		"verifier_checks":  verifierArtifactCheckNames(artifact),
+		"certification_by": "runtime_validated_verifier_artifact",
+	}
+	body, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return ""
+	}
+	return string(body)
+}
+
+func verifierArtifactCheckNames(artifact VerifierArtifact) []string {
+	names := make([]string, 0, len(artifact.Checks))
+	for _, check := range artifact.Checks {
+		name := strings.TrimSpace(check.Name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func compactBraidFinalHandoffText(value string, limit int) string {
@@ -3209,13 +4227,32 @@ func buildREPLCodeRepairPrompt(originalPrompt string, phase REPLRunnerPhase, pri
 	b.WriteString("\n\nReturn raw executable code only. Do not use markdown fences, prose, JSON, or tool-call syntax.\n")
 	b.WriteString("The first non-empty line must be executable code, not a comment.\n")
 	b.WriteString("Do not explain, derive, or narrate in comments. Use at most one short comment if absolutely necessary.\n")
-	b.WriteString("The code must print a non-empty compact result in its first five executable lines.\n")
+	if phase.InjectVerifierPrelude {
+		if phase.RequireVerifierArtifact {
+			b.WriteString("This verifier phase injects rlm_candidates metadata, rlm_candidate_answers strings, candidate_answer(candidate_id), check(...), accept_candidate(...), and reject(reason). Ordinary print(...) output is suppressed.\n")
+			b.WriteString("Every successful execution path must call accept_candidate(...) with a runtime-issued candidate_id from rlm_candidates. Do not invent candidate IDs, node IDs, answer hashes, or verifier artifacts.\n")
+			b.WriteString("Use candidate_answer(candidate_id) or rlm_candidate_answers[candidate_id] when checking answer text; rlm_candidates[candidate_id] is a metadata object.\n")
+			b.WriteString("Do not manually print VERIFIER_ARTIFACT_JSON; use accept_candidate so the runtime binds the final answer to a registered child candidate.\n")
+		} else {
+			b.WriteString("This verifier phase injects accept(answer, checks=[...], reason=...) and reject(reason) helpers. Ordinary print(...) output is suppressed.\n")
+			b.WriteString("Every execution path must end by calling accept(...) with the final solution or reject(...) with a compact blocker.\n")
+			b.WriteString("Do not manually print RLM_CHECK_JSON or RLM_ANSWER_JSON; use accept/reject.\n")
+		}
+	} else {
+		b.WriteString("The code must print a non-empty compact result in its first five executable lines.\n")
+	}
 	if len(phase.RequiredREPLCodeSubstrings) > 0 {
 		b.WriteString("The code must include these exact substrings: ")
 		b.WriteString(strings.Join(phase.RequiredREPLCodeSubstrings, ", "))
 		b.WriteString(".\n")
 	}
-	b.WriteString("Use only built-in language features and standard library imports. Do not import sympy, numpy, scipy, pandas, networkx, or any third-party package.\n")
+	if len(phase.AllowedREPLImports) > 0 {
+		b.WriteString("Allowed third-party imports in this phase: ")
+		b.WriteString(strings.Join(phase.AllowedREPLImports, ", "))
+		b.WriteString(". Do not import other third-party packages.\n")
+	} else {
+		b.WriteString("Use only built-in language features and standard library imports. Do not import sympy, numpy, scipy, pandas, networkx, or any third-party package.\n")
+	}
 	b.WriteString("If the full solution is unclear, print a compact pass=false/blocker witness instead of writing a long derivation.\n")
 	b.WriteString("Use the same REPL language selected for this phase.")
 	return b.String()
@@ -3229,6 +4266,15 @@ func buildREPLCodeFilterPrompt(originalPrompt string, phase REPLRunnerPhase, pri
 	b.WriteString("Extract the smallest executable witness program that preserves the explored candidates, constraints, and checks.\n")
 	b.WriteString("Return raw executable code only. Do not add prose, markdown fences, JSON wrappers, or tool-call syntax.\n")
 	b.WriteString("The first non-empty line must be executable code, not a comment. Keep comments rare and short.\n")
+	if phase.InjectVerifierPrelude {
+		if phase.RequireVerifierArtifact {
+			b.WriteString("This verifier phase injects rlm_candidate_answers/candidate_answer(...) plus check(...), accept_candidate(...), and reject(reason). The filtered code must call accept_candidate(...) with a runtime-issued child candidate_id, or reject(...) with a compact blocker.\n")
+			b.WriteString("Do not preserve manually printed VERIFIER_ARTIFACT_JSON; the runtime helper emits it.\n")
+		} else {
+			b.WriteString("This verifier phase injects accept(answer, checks=[...], reason=...) and reject(reason) helpers. The filtered code must call accept(...) with a complete final solution or reject(...) with a compact blocker on every execution path.\n")
+		}
+		b.WriteString("Do not preserve ordinary diagnostic print(...) calls as the only output; ordinary print output is suppressed in this phase.\n")
+	}
 	if phase.MaxREPLCodeLines > 0 {
 		fmt.Fprintf(&b, "The filtered code must be at most %d non-empty lines.\n", phase.MaxREPLCodeLines)
 	}
@@ -3383,12 +4429,870 @@ func summarizeREPLPhaseToolResults(output engine.EngineOutput) string {
 			name = "tool"
 		}
 		content := strings.TrimSpace(result.Content)
+		switch name {
+		case RLMWaitToolName, RLMResultToolName:
+			if summary := summarizeRLMChildToolResultForPrompt(content); summary != "" {
+				content = summary
+			}
+		}
 		if len(content) > 2000 {
 			content = content[:2000] + "\n...[truncated]"
 		}
 		fmt.Fprintf(&b, "- %s: %s\n", name, content)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func fallbackChildSummaryFromToolOutputs(phases []REPLRunnerPhase, output engine.EngineOutput) (string, bool) {
+	if !hasFinalChildSummaryPhase(phases) || len(output.ToolResults) == 0 {
+		return "", false
+	}
+	callNames := make(map[string]string, len(output.ToolCalls))
+	for _, call := range output.ToolCalls {
+		callNames[call.ID] = strings.TrimSpace(call.Name)
+	}
+	var excerpts []string
+	for i := len(output.ToolResults) - 1; i >= 0; i-- {
+		result := output.ToolResults[i]
+		if result.IsError {
+			continue
+		}
+		name := strings.TrimSpace(callNames[result.ToolCallID])
+		switch name {
+		case RLMQueryToolName, RLMWaitToolName, RLMResultToolName:
+			continue
+		}
+		for _, candidate := range toolResultStructuredTextCandidates(result.Content) {
+			excerpt := compactChildScratchFallbackText(candidate.Text, 700)
+			if excerpt != "" {
+				excerpts = append(excerpts, excerpt)
+				break
+			}
+		}
+		if len(excerpts) >= 2 {
+			break
+		}
+	}
+	if len(excerpts) == 0 {
+		return "", false
+	}
+	check := "partial child fallback from scratch output: " + strings.Join(excerpts, " | ")
+	check = safeTelemetryExcerpt(check, 900)
+	payload := map[string]any{
+		"status":     "partial",
+		"answer":     "",
+		"checks":     []string{check},
+		"confidence": 0.2,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", false
+	}
+	return string(raw), true
+}
+
+func hasFinalChildSummaryPhase(phases []REPLRunnerPhase) bool {
+	for _, phase := range phases {
+		if phase.Final && strings.TrimSpace(phase.FinalOutputKind) == "child_summary" {
+			return true
+		}
+	}
+	return false
+}
+
+func compactChildScratchFallbackText(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	var lines []string
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" ||
+			line == "stdout:" ||
+			line == "stderr:" ||
+			strings.HasPrefix(line, "RLM_CHECK_JSON=") ||
+			strings.HasPrefix(line, "RLM_ANSWER_JSON=") ||
+			strings.HasPrefix(line, "VERIFIER_ARTIFACT_JSON=") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	compact := strings.Join(strings.Fields(strings.Join(lines, " ")), " ")
+	if compact == "" {
+		return ""
+	}
+	return safeTelemetryExcerpt(compact, limit)
+}
+
+func summarizeRLMChildToolResultForPrompt(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return ""
+	}
+	var lines []string
+	for _, bucket := range []string{"completed", "failed", "pending"} {
+		items, _ := payload[bucket].([]any)
+		for _, raw := range items {
+			item, _ := raw.(map[string]any)
+			if item == nil {
+				continue
+			}
+			line := summarizeRLMChildItemForPrompt(bucket, item)
+			if line != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+	if resultValue, _ := payload["result"].(map[string]any); resultValue != nil {
+		if line := summarizeRLMChildItemForPrompt("result", resultValue); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
+func summarizeRLMChildItemForPrompt(bucket string, item map[string]any) string {
+	nodeID := firstNonEmptyString(
+		stringFromAny(item["node_id"]),
+		stringFromAny(item["id"]),
+		stringFromAny(item["child_id"]),
+	)
+	candidateID := stringFromAny(item["candidate_id"])
+	status := firstNonEmptyString(
+		stringFromAny(item["candidate_status"]),
+		stringFromAny(item["status"]),
+		bucket,
+	)
+	answer := firstNonEmptyString(
+		stringFromAny(item["candidate_answer"]),
+		stringFromAny(item["answer"]),
+		stringFromAny(item["summary"]),
+	)
+	if nodeID == "" && candidateID == "" && answer == "" {
+		return ""
+	}
+	var parts []string
+	if nodeID != "" {
+		parts = append(parts, "node="+nodeID)
+	}
+	if candidateID != "" {
+		parts = append(parts, "candidate_id="+candidateID)
+	}
+	if status != "" {
+		parts = append(parts, "status="+status)
+	}
+	if hash := stringFromAny(item["candidate_answer_hash"]); hash != "" {
+		parts = append(parts, "answer_hash="+hash)
+	}
+	if answer != "" {
+		parts = append(parts, "answer="+safeTelemetryExcerpt(answer, 700))
+	}
+	if msg := firstNonEmptyString(stringFromAny(item["message"]), stringFromAny(item["error"])); msg != "" {
+		parts = append(parts, "message="+safeTelemetryExcerpt(msg, 300))
+	}
+	return "- " + strings.Join(parts, " ")
+}
+
+func validateStructuredToolOutputOnly(text string) error {
+	sawStructured := false
+	for _, rawLine := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		switch {
+		case line == "stdout:", line == "stderr:":
+			continue
+		case strings.HasPrefix(line, "solution ="):
+			sawStructured = true
+		case strings.HasPrefix(line, "RLM_CHECK_JSON="):
+			sawStructured = true
+			raw := strings.TrimSpace(line[len("RLM_CHECK_JSON="):])
+			if raw == "" {
+				return fmt.Errorf("empty RLM_CHECK_JSON")
+			}
+			var payload map[string]any
+			if err := unmarshalToolEvidenceJSON(raw, &payload); err != nil {
+				return fmt.Errorf("malformed RLM_CHECK_JSON")
+			}
+		case strings.HasPrefix(line, "RLM_ANSWER_JSON="):
+			sawStructured = true
+			raw := strings.TrimSpace(line[len("RLM_ANSWER_JSON="):])
+			if raw == "" {
+				return fmt.Errorf("empty RLM_ANSWER_JSON")
+			}
+			var payload map[string]any
+			if err := unmarshalToolEvidenceJSON(raw, &payload); err != nil {
+				return fmt.Errorf("malformed RLM_ANSWER_JSON")
+			}
+		case strings.HasPrefix(line, "VERIFIER_ARTIFACT_JSON="):
+			sawStructured = true
+			raw := strings.TrimSpace(line[len("VERIFIER_ARTIFACT_JSON="):])
+			if raw == "" {
+				return fmt.Errorf("empty VERIFIER_ARTIFACT_JSON")
+			}
+			var payload map[string]any
+			if err := unmarshalToolEvidenceJSON(raw, &payload); err != nil {
+				return fmt.Errorf("malformed VERIFIER_ARTIFACT_JSON")
+			}
+		default:
+			return fmt.Errorf("unstructured output line %q", safeTelemetryExcerpt(line, 160))
+		}
+	}
+	if !sawStructured {
+		return fmt.Errorf("missing structured RLM_*_JSON output")
+	}
+	return nil
+}
+
+func failedToolEvidenceReason(output engine.EngineOutput) (string, bool) {
+	for i := len(output.ToolResults) - 1; i >= 0; i-- {
+		result := output.ToolResults[i]
+		candidates := toolResultStructuredTextCandidates(result.Content)
+		for _, candidate := range candidates {
+			reason, failed := failedToolEvidenceReasonFromText(candidate.Text)
+			if failed {
+				return reason, true
+			}
+			if toolEvidenceResolvedFromText(candidate.Text) {
+				return "", false
+			}
+		}
+	}
+	return "", false
+}
+
+func failedToolEvidenceReasonFromText(text string) (string, bool) {
+	var latestReason string
+	var latestFailed bool
+	sawEvidence := false
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		idx := strings.Index(line, "RLM_CHECK_JSON=")
+		if idx < 0 {
+			continue
+		}
+		raw := strings.TrimSpace(line[idx+len("RLM_CHECK_JSON="):])
+		if raw == "" {
+			continue
+		}
+		var payload map[string]any
+		if err := unmarshalToolEvidenceJSON(raw, &payload); err != nil {
+			sawEvidence = true
+			latestReason = "malformed RLM_CHECK_JSON"
+			latestFailed = true
+			continue
+		}
+		if toolEvidenceBool(payload, "pass", true) &&
+			toolEvidenceBool(payload, "ok", true) &&
+			toolEvidenceBool(payload, "verified", true) {
+			sawEvidence = true
+			latestReason = ""
+			latestFailed = false
+			continue
+		}
+		if reason := firstToolEvidenceStringField(payload, "reason", "first_failure", "error", "message"); strings.TrimSpace(reason) != "" {
+			sawEvidence = true
+			latestReason = safeTelemetryExcerpt(reason, 240)
+			latestFailed = true
+			continue
+		}
+		sawEvidence = true
+		latestReason = "RLM_CHECK_JSON reported pass=false"
+		latestFailed = true
+	}
+	if !sawEvidence {
+		return "", false
+	}
+	return latestReason, latestFailed
+}
+
+func verifierStructuredFailureShouldRepair(reason string) bool {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return false
+	}
+	return strings.Contains(reason, "verifier code raised ") ||
+		strings.Contains(reason, "without calling accept() or reject()") ||
+		strings.Contains(reason, "produced no structured decision")
+}
+
+func passingToolEvidenceFromText(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		idx := strings.Index(line, "RLM_CHECK_JSON=")
+		if idx < 0 {
+			continue
+		}
+		raw := strings.TrimSpace(line[idx+len("RLM_CHECK_JSON="):])
+		if raw == "" {
+			continue
+		}
+		var payload map[string]any
+		if err := unmarshalToolEvidenceJSON(raw, &payload); err != nil {
+			continue
+		}
+		if toolEvidenceBool(payload, "pass", false) &&
+			toolEvidenceBool(payload, "ok", true) &&
+			toolEvidenceBool(payload, "verified", true) {
+			return true
+		}
+	}
+	return false
+}
+
+func toolEvidenceResolvedFromText(text string) bool {
+	if passingToolEvidenceFromText(text) {
+		return true
+	}
+	_, ok, blockReason := structuredToolAnswerFromText(text)
+	return ok && blockReason == ""
+}
+
+func structuredToolAnswer(output engine.EngineOutput, trustExecutedToolOutput bool) (answer string, ok bool, blockReason string) {
+	for i := len(output.ToolResults) - 1; i >= 0; i-- {
+		result := output.ToolResults[i]
+		for _, candidate := range toolResultStructuredTextCandidates(result.Content) {
+			if reason, failed := failedToolEvidenceReasonFromText(candidate.Text); failed {
+				return "", false, reason
+			}
+			answer, ok, blockReason := structuredToolAnswerFromText(candidate.Text)
+			if ok && !candidate.RuntimeTrusted {
+				if !(trustExecutedToolOutput && candidate.ExecutedTool) {
+					return "", false, "RLM_ANSWER_JSON was not emitted by a runtime-certified verifier"
+				}
+			}
+			if blockReason != "" || ok {
+				return answer, ok, blockReason
+			}
+			if trustExecutedToolOutput && candidate.ExecutedTool {
+				if answer, ok := rlm.ExtractSolutionLine(candidate.Text); ok {
+					if err := validateStructuredToolOutputOnly(candidate.Text); err != nil {
+						return "", false, err.Error()
+					}
+					if !passingToolEvidenceFromText(candidate.Text) {
+						return "", false, "plain executed solution line is missing passing RLM_CHECK_JSON evidence"
+					}
+					return answer, true, ""
+				}
+			}
+		}
+	}
+	return "", false, ""
+}
+
+type toolResultStructuredTextCandidate struct {
+	Text           string
+	RuntimeTrusted bool
+	ExecutedTool   bool
+}
+
+func toolResultStructuredTextCandidates(content string) []toolResultStructuredTextCandidate {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+	out := make([]toolResultStructuredTextCandidate, 0, 4)
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return []toolResultStructuredTextCandidate{{Text: content}}
+	}
+	runtimeTrusted := false
+	executedTool := toolEvidenceBool(payload, "ok", false)
+	if metadata, ok := payload["metadata"].(map[string]any); ok {
+		runtimeTrusted = toolEvidenceBool(metadata, "output_uncapped", false)
+	}
+	for _, key := range []string{"output", "stdout", "result"} {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		text, ok := value.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			continue
+		}
+		out = append(out, toolResultStructuredTextCandidate{Text: text, RuntimeTrusted: runtimeTrusted, ExecutedTool: executedTool})
+	}
+	if metadata, ok := payload["metadata"].(map[string]any); ok {
+		for _, key := range []string{"output", "stdout", "result"} {
+			value, ok := metadata[key]
+			if !ok {
+				continue
+			}
+			text, ok := value.(string)
+			if !ok || strings.TrimSpace(text) == "" {
+				continue
+			}
+			out = append(out, toolResultStructuredTextCandidate{Text: text, RuntimeTrusted: runtimeTrusted, ExecutedTool: executedTool})
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, toolResultStructuredTextCandidate{Text: content, RuntimeTrusted: runtimeTrusted, ExecutedTool: executedTool})
+	}
+	return out
+}
+
+func structuredToolAnswerFromText(text string) (answer string, ok bool, blockReason string) {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "RLM_ANSWER_JSON=") {
+			continue
+		}
+		raw := strings.TrimSpace(line[len("RLM_ANSWER_JSON="):])
+		if raw == "" {
+			return "", false, "empty RLM_ANSWER_JSON"
+		}
+		var payload map[string]any
+		if err := unmarshalToolEvidenceJSON(raw, &payload); err != nil {
+			return "", false, "malformed RLM_ANSWER_JSON"
+		}
+		if !toolEvidenceBool(payload, "pass", false) {
+			if reason := firstToolEvidenceStringField(payload, "reason", "first_failure", "error", "message"); strings.TrimSpace(reason) != "" {
+				return "", false, safeTelemetryExcerpt(reason, 240)
+			}
+			return "", false, "RLM_ANSWER_JSON reported pass=false"
+		}
+		answer := strings.TrimSpace(firstToolEvidenceStringField(payload, "answer"))
+		if answer == "" {
+			return "", false, "RLM_ANSWER_JSON answer is empty"
+		}
+		return answer, true, ""
+	}
+	return "", false, ""
+}
+
+func toolEvidenceBool(payload map[string]any, key string, defaultValue bool) bool {
+	value, exists := payload[key]
+	if !exists {
+		return defaultValue
+	}
+	boolValue, ok := value.(bool)
+	if !ok {
+		return false
+	}
+	return boolValue
+}
+
+func unmarshalToolEvidenceJSON(raw string, dst any) error {
+	if err := json.Unmarshal([]byte(raw), dst); err == nil {
+		return nil
+	}
+	normalized, changed := normalizePythonJSONLiterals(raw)
+	if !changed {
+		return json.Unmarshal([]byte(raw), dst)
+	}
+	return json.Unmarshal([]byte(normalized), dst)
+}
+
+func normalizePythonJSONLiterals(raw string) (string, bool) {
+	var b strings.Builder
+	b.Grow(len(raw))
+	changed := false
+	inString := false
+	escaped := false
+	for i := 0; i < len(raw); {
+		ch := raw[i]
+		if inString {
+			b.WriteByte(ch)
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == '"' {
+				inString = false
+			}
+			i++
+			continue
+		}
+		if ch == '"' {
+			inString = true
+			b.WriteByte(ch)
+			i++
+			continue
+		}
+		if hasJSONLiteralToken(raw, i, "True") {
+			b.WriteString("true")
+			i += len("True")
+			changed = true
+			continue
+		}
+		if hasJSONLiteralToken(raw, i, "False") {
+			b.WriteString("false")
+			i += len("False")
+			changed = true
+			continue
+		}
+		if hasJSONLiteralToken(raw, i, "None") {
+			b.WriteString("null")
+			i += len("None")
+			changed = true
+			continue
+		}
+		b.WriteByte(ch)
+		i++
+	}
+	return b.String(), changed
+}
+
+func hasJSONLiteralToken(raw string, idx int, token string) bool {
+	if idx < 0 || idx+len(token) > len(raw) || raw[idx:idx+len(token)] != token {
+		return false
+	}
+	if idx > 0 && isJSONLiteralTokenChar(raw[idx-1]) {
+		return false
+	}
+	next := idx + len(token)
+	if next < len(raw) && isJSONLiteralTokenChar(raw[next]) {
+		return false
+	}
+	return true
+}
+
+func isJSONLiteralTokenChar(ch byte) bool {
+	return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_'
+}
+
+func firstToolEvidenceStringField(payload map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func verifierCandidatesFromOutput(output engine.EngineOutput) map[string]VerifierCandidate {
+	out := map[string]VerifierCandidate{}
+	shape := verifierCandidateAnswerShapeFromOutput(output)
+	for _, result := range output.ToolResults {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(result.Content), &payload); err != nil {
+			continue
+		}
+		for _, bucket := range []string{"completed", "failed", "pending"} {
+			items, _ := payload[bucket].([]any)
+			for _, raw := range items {
+				item, _ := raw.(map[string]any)
+				addVerifierCandidateFromMap(out, item, bucket, shape)
+			}
+		}
+		if resultValue, _ := payload["result"].(map[string]any); resultValue != nil {
+			addVerifierCandidateFromMap(out, resultValue, "result", shape)
+		}
+	}
+	return out
+}
+
+func recordVerifierCandidateRegistryContract(recorder *Recorder, phaseName string, output engine.EngineOutput) {
+	if recorder == nil {
+		return
+	}
+	event := verifierCandidateRegistryContractEvent(phaseName, output)
+	recorder.RecordContractEvent(event)
+}
+
+func verifierCandidateRegistryContractEvent(phaseName string, output engine.EngineOutput) ContractEvent {
+	event := ContractEvent{
+		Boundary: "candidate_registry",
+		Phase:    nonEmptyPhaseName(phaseName),
+		Status:   "observed",
+	}
+	registered := verifierCandidatesFromOutput(output)
+	event.CandidateRegistered = len(registered)
+	for _, result := range output.ToolResults {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(result.Content), &payload); err != nil {
+			continue
+		}
+		for _, bucket := range []string{"completed", "failed", "pending"} {
+			items, _ := payload[bucket].([]any)
+			for _, raw := range items {
+				item, _ := raw.(map[string]any)
+				event.countCandidateRegistryItem(bucket, item)
+			}
+		}
+		if resultValue, _ := payload["result"].(map[string]any); resultValue != nil {
+			event.countCandidateRegistryItem("result", resultValue)
+		}
+	}
+	event.CandidateRejected = maxInt(0, event.CandidateSolved+event.CandidatePlaceholder-event.CandidateRegistered)
+	if event.CandidatePlaceholder > 0 {
+		event.IssueKind = "placeholder_candidates_rejected"
+		event.Message = "Placeholder-shaped solution lines were rejected before verifier candidate registration."
+	}
+	if shape := verifierCandidateAnswerShapeFromOutput(output); shape.Kind != "" && event.CandidateRegistered == 0 && event.CandidateSolved > 0 {
+		event.IssueKind = "final_answer_shape_candidates_rejected"
+		event.Message = "Solved child outputs did not match the requested final answer shape, so they were not registered as verifier candidates."
+	}
+	if event.CandidateRegistered == 0 && event.CandidateSolved == 0 {
+		event.IssueKind = "no_solved_candidates"
+		event.Message = "No solved child candidates were registered. Child outputs were blocked/partial/failed/pending, so verifier phase should be skipped."
+	}
+	return event
+}
+
+func (event *ContractEvent) countCandidateRegistryItem(bucket string, item map[string]any) {
+	if event == nil || item == nil {
+		return
+	}
+	switch bucket {
+	case "failed":
+		event.CandidateFailed++
+	case "pending":
+		event.CandidatePending++
+	}
+	status := strings.TrimSpace(stringFromAny(item["candidate_status"]))
+	switch status {
+	case "solved":
+		event.CandidateSolved++
+	case "blocked":
+		event.CandidateBlocked++
+	case "partial":
+		event.CandidatePartial++
+	case "placeholder":
+		event.CandidatePlaceholder++
+	}
+}
+
+func verifierCandidateIDs(candidates map[string]VerifierCandidate) []string {
+	ids := make([]string, 0, len(candidates))
+	for id := range candidates {
+		if strings.TrimSpace(id) != "" {
+			ids = append(ids, strings.TrimSpace(id))
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func addVerifierCandidateFromMap(out map[string]VerifierCandidate, item map[string]any, bucket string, shape verifierCandidateAnswerShape) {
+	if out == nil || item == nil {
+		return
+	}
+	candidateID := strings.TrimSpace(fmt.Sprint(item["candidate_id"]))
+	if candidateID == "" || candidateID == "<nil>" {
+		return
+	}
+	answer := strings.TrimSpace(fmt.Sprint(item["candidate_answer"]))
+	hash := strings.TrimSpace(fmt.Sprint(item["candidate_answer_hash"]))
+	status := strings.TrimSpace(fmt.Sprint(item["candidate_status"]))
+	if answer == "<nil>" {
+		answer = ""
+	}
+	if hash == "<nil>" {
+		hash = ""
+	}
+	if status == "<nil>" {
+		status = ""
+	}
+	nodeID := strings.TrimSpace(fmt.Sprint(item["node_id"]))
+	if nodeID == "<nil>" {
+		nodeID = ""
+	}
+	if !verifierCandidateMapItemEligible(item, bucket, answer, status, shape) {
+		return
+	}
+	out[candidateID] = VerifierCandidate{
+		CandidateID: candidateID,
+		Child:       intFromAny(item["child"]),
+		NodeID:      nodeID,
+		Answer:      answer,
+		AnswerHash:  hash,
+		Status:      status,
+	}
+}
+
+func verifierCandidateMapItemEligible(item map[string]any, bucket, answer, candidateStatus string, shape verifierCandidateAnswerShape) bool {
+	bucket = strings.TrimSpace(bucket)
+	if bucket != "completed" && bucket != "result" {
+		return false
+	}
+	if strings.TrimSpace(candidateStatus) != "solved" {
+		return false
+	}
+	answer = strings.TrimSpace(answer)
+	if !strings.HasPrefix(answer, "solution =") || solutionLineIsBlocked(answer) {
+		return false
+	}
+	if concrete := classifyCandidateConcreteness(answer, candidateStatus); concrete.Status != "solved" {
+		return false
+	}
+	if !candidateAnswerMatchesShape(answer, shape) {
+		return false
+	}
+	nodeStatus := strings.TrimSpace(stringFromAny(item["node_status"]))
+	status := strings.TrimSpace(stringFromAny(item["status"]))
+	if nodeStatus != "" && nodeStatus != string(NodeStatusCompleted) {
+		return false
+	}
+	if status != "" && status != string(NodeStatusCompleted) && status != "solved" {
+		return false
+	}
+	return true
+}
+
+type verifierCandidateAnswerShape struct {
+	Kind  string
+	Open  byte
+	Close byte
+	Arity int
+	Raw   string
+}
+
+func verifierCandidateAnswerShapeFromOutput(output engine.EngineOutput) verifierCandidateAnswerShape {
+	for _, result := range output.ToolResults {
+		for _, candidate := range toolResultStructuredTextCandidates(result.Content) {
+			if format := promptPacketAnswerFormatFromText(candidate.Text); format != "" {
+				if shape := verifierCandidateAnswerShapeFromFormat(format); shape.Kind != "" {
+					return shape
+				}
+			}
+		}
+	}
+	return verifierCandidateAnswerShape{}
+}
+
+func promptPacketAnswerFormatFromText(text string) string {
+	for _, rawLine := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if !strings.HasPrefix(line, "PROMPT_PACKET_JSON=") {
+			continue
+		}
+		raw := strings.TrimSpace(line[len("PROMPT_PACKET_JSON="):])
+		if raw == "" {
+			continue
+		}
+		var payload map[string]any
+		if err := unmarshalToolEvidenceJSON(raw, &payload); err != nil {
+			continue
+		}
+		if format := strings.TrimSpace(stringFromAny(payload["answer_format"])); format != "" {
+			return format
+		}
+	}
+	return ""
+}
+
+func verifierCandidateAnswerShapeFromFormat(format string) verifierCandidateAnswerShape {
+	format = strings.TrimSpace(format)
+	if !strings.HasPrefix(format, "solution =") {
+		return verifierCandidateAnswerShape{}
+	}
+	payload := strings.TrimSpace(solutionPayload(format))
+	if payload == "" {
+		return verifierCandidateAnswerShape{}
+	}
+	open := payload[0]
+	close := byte(0)
+	switch open {
+	case '[':
+		close = ']'
+	case '(':
+		close = ')'
+	default:
+		return verifierCandidateAnswerShape{}
+	}
+	if end := matchingPayloadCloseIndex(payload); end >= 0 {
+		payload = strings.TrimSpace(payload[:end+1])
+	}
+	if len(payload) < 2 || payload[len(payload)-1] != close {
+		return verifierCandidateAnswerShape{}
+	}
+	arity, ok := topLevelItemCount(payload[1 : len(payload)-1])
+	if !ok || arity <= 0 {
+		return verifierCandidateAnswerShape{}
+	}
+	return verifierCandidateAnswerShape{
+		Kind:  "delimited_list",
+		Open:  open,
+		Close: close,
+		Arity: arity,
+		Raw:   format,
+	}
+}
+
+func candidateAnswerMatchesShape(answer string, shape verifierCandidateAnswerShape) bool {
+	if shape.Kind == "" {
+		return true
+	}
+	if shape.Kind != "delimited_list" {
+		return true
+	}
+	payload := strings.TrimSpace(solutionPayload(canonicalSolutionLine(answer)))
+	if len(payload) < 2 || payload[0] != shape.Open || payload[len(payload)-1] != shape.Close {
+		return false
+	}
+	arity, ok := topLevelItemCount(payload[1 : len(payload)-1])
+	return ok && arity == shape.Arity
+}
+
+func topLevelItemCount(text string) (int, bool) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0, false
+	}
+	count := 1
+	var stack []byte
+	inString := false
+	escaped := false
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '[', '{', '(':
+			stack = append(stack, ch)
+		case ']':
+			if len(stack) == 0 || stack[len(stack)-1] != '[' {
+				return 0, false
+			}
+			stack = stack[:len(stack)-1]
+		case '}':
+			if len(stack) == 0 || stack[len(stack)-1] != '{' {
+				return 0, false
+			}
+			stack = stack[:len(stack)-1]
+		case ')':
+			if len(stack) == 0 || stack[len(stack)-1] != '(' {
+				return 0, false
+			}
+			stack = stack[:len(stack)-1]
+		case ',':
+			if len(stack) == 0 {
+				count++
+			}
+		}
+	}
+	if inString || len(stack) != 0 {
+		return 0, false
+	}
+	return count, true
 }
 
 func replPhaseNames(phases []REPLRunnerPhase) []string {
@@ -3513,7 +5417,13 @@ func buildSandboxSystemPrompt(kind SandboxKind, subcalls bool, asyncSubcalls boo
 		}
 		b.WriteString("rlm_query is a separate model tool, not a function inside the REPL. Never call it in Python or Go code.\n")
 	}
-	b.WriteString("Do not access the network, files, hidden datasets, official verifiers, answer keys, or external tools.\n")
+	if NormalizeSandboxKind(kind) == SandboxKindPython || NormalizeSandboxKind(kind) == SandboxKindSmolVMPython {
+		b.WriteString("For Python, the python_repl tool may expose an optional packages field. Use it only for allowlisted task-local libraries, then import those modules from code. Do not run pip, subprocess, shell commands, or package managers from inside REPL code.\n")
+		if NormalizeSandboxKind(kind) == SandboxKindSmolVMPython {
+			b.WriteString("This Python REPL runs inside a smolvm machine; runtime-controlled package installs happen inside that VM and do not modify host Python.\n")
+		}
+	}
+	b.WriteString("Do not access the network except through runtime-controlled package installation, and do not access files, hidden datasets, official verifiers, answer keys, or external tools.\n")
 	b.WriteString("If the task prompt says not to use tools or code, that restriction applies to\n")
 	if subcalls && asyncSubcalls {
 		fmt.Fprintf(&b, "leaderboard-visible solving aids; this internal %s scratchpad and bounded rlm_query/rlm_wait recursion are still allowed in this condition.\n", scratchpad)
@@ -3567,6 +5477,8 @@ func NormalizeSandboxKind(kind SandboxKind) SandboxKind {
 		return SandboxKindPython
 	case string(SandboxKindYaegi), "go", "golang":
 		return SandboxKindYaegi
+	case string(SandboxKindSmolVMPython), "smolvm", "smolvm_python", "python-smolvm":
+		return SandboxKindSmolVMPython
 	default:
 		return SandboxKind(strings.ToLower(strings.TrimSpace(string(kind))))
 	}
@@ -3575,7 +5487,7 @@ func NormalizeSandboxKind(kind SandboxKind) SandboxKind {
 // IsSupportedSandboxKind reports whether the kind is implemented.
 func IsSupportedSandboxKind(kind SandboxKind) bool {
 	switch NormalizeSandboxKind(kind) {
-	case SandboxKindPython, SandboxKindYaegi:
+	case SandboxKindPython, SandboxKindYaegi, SandboxKindSmolVMPython:
 		return true
 	default:
 		return false
@@ -3584,10 +5496,21 @@ func IsSupportedSandboxKind(kind SandboxKind) bool {
 
 func normalizeSandboxConfig(cfg SandboxConfig, legacyPython repl.Options) SandboxConfig {
 	cfg.Kind = NormalizeSandboxKind(cfg.Kind)
-	if cfg.Python == (repl.Options{}) {
+	if replOptionsZero(cfg.Python) {
 		cfg.Python = legacyPython
 	}
 	return cfg
+}
+
+func replOptionsZero(opts repl.Options) bool {
+	return strings.TrimSpace(opts.PythonPath) == "" &&
+		opts.MaxOutputBytes == 0 &&
+		strings.TrimSpace(opts.WorkDir) == "" &&
+		!opts.PreserveWorkDir &&
+		!opts.AllowPackageInstall &&
+		len(opts.AllowedPackages) == 0 &&
+		len(opts.PackageAliases) == 0 &&
+		opts.PackageInstallTimeout == 0
 }
 
 type subcallSummary struct {
@@ -3619,6 +5542,7 @@ type replToolExecutor struct {
 	sandboxKind        SandboxKind
 	defaultREPLCode    string
 	defaultQueryPrompt string
+	initialState       map[string]any
 	extraToolExecutor  engine.ToolExecutor
 	helperFactory      *HelperFactoryTools
 	toolResultMaxChars int
@@ -3633,7 +5557,7 @@ func (e *replToolExecutor) List() []engine.ToolDef {
 	tools := []engine.ToolDef{{
 		Name:        toolName,
 		Description: fmt.Sprintf("Execute %s code in a persistent prompt-bound scratch REPL. The variable prompt contains the task prompt.", language),
-		Parameters:  json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"code":{"type":"string","description":"%s code to execute in the persistent REPL."}},"required":["code"],"additionalProperties":false}`, language)),
+		Parameters:  replToolParameters(toolName, language),
 	}}
 	if e.allowAsyncRLMTools() {
 		tools = append(tools, e.asyncRLMTools.List()...)
@@ -3714,8 +5638,17 @@ func extraToolNameAllowed(executor engine.ToolExecutor, name string) bool {
 }
 
 func (e *replToolExecutor) executeScratchREPL(ctx context.Context, args json.RawMessage) (string, error) {
+	return e.executeScratchREPLWithMaxChars(ctx, args, "", e.effectiveToolResultMaxChars())
+}
+
+func (e *replToolExecutor) executeScratchREPLUncapped(ctx context.Context, args json.RawMessage, callID string) (string, error) {
+	return e.executeScratchREPLWithMaxChars(ctx, args, callID, 0)
+}
+
+func (e *replToolExecutor) executeScratchREPLWithMaxChars(ctx context.Context, args json.RawMessage, callID string, maxOutputChars int) (string, error) {
 	var input struct {
-		Code string `json:"code"`
+		Code     string   `json:"code"`
+		Packages []string `json:"packages,omitempty"`
 	}
 	if err := json.Unmarshal(args, &input); err != nil {
 		return "", fmt.Errorf("decode %s args: %w", e.replToolName, err)
@@ -3726,13 +5659,35 @@ func (e *replToolExecutor) executeScratchREPL(ctx context.Context, args json.Raw
 	if strings.TrimSpace(input.Code) == "" {
 		return "", fmt.Errorf("%s requires non-empty code", e.replToolName)
 	}
+	if err := rejectCopiedPromptLiteral(input.Code, e.initialState); err != nil {
+		return "", err
+	}
 	if err := e.budget.ConsumeREPLCall(ctx); err != nil {
 		e.recorder.RecordBudgetEvent(BudgetEvent{Limit: LimitREPLCalls, Message: err.Error()})
 		return "", err
 	}
 
-	e.nextID++
-	callID := fmt.Sprintf("repl-%d", e.nextID)
+	var installMetadata map[string]any
+	if len(input.Packages) > 0 {
+		installer, ok := e.sandbox.(interface {
+			InstallPackages(context.Context, []string) (rlm.ExecResult, error)
+		})
+		if !ok {
+			return "", fmt.Errorf("%s package installation is not supported by this sandbox", e.replToolName)
+		}
+		installResult, err := installer.InstallPackages(ctx, input.Packages)
+		if err != nil {
+			return "", err
+		}
+		installMetadata = cloneMetadataMap(installResult.Metadata)
+		installMetadata["output"] = installResult.Output
+		installMetadata["duration_ms"] = installResult.DurationMS
+	}
+
+	if strings.TrimSpace(callID) == "" {
+		e.nextID++
+		callID = fmt.Sprintf("repl-%d", e.nextID)
+	}
 	e.recorder.RecordREPLCall(REPLCallEvent{CallID: callID, Input: input.Code})
 	result, err := e.sandbox.Execute(ctx, input.Code)
 	if err != nil {
@@ -3745,13 +5700,18 @@ func (e *replToolExecutor) executeScratchREPL(ctx context.Context, args json.Raw
 	}
 	output := result.Output
 	metadata := cloneMetadataMap(result.Metadata)
-	maxOutputChars := e.effectiveToolResultMaxChars()
 	cappedOutput, outputTruncated, originalOutputChars := truncateREPLToolOutput(output, maxOutputChars)
 	if outputTruncated {
 		output = cappedOutput
 		metadata["output_truncated"] = true
 		metadata["output_original_chars"] = originalOutputChars
 		metadata["output_max_chars"] = maxOutputChars
+	}
+	if maxOutputChars <= 0 {
+		metadata["output_uncapped"] = true
+	}
+	if len(installMetadata) > 0 {
+		metadata["package_install"] = installMetadata
 	}
 	e.recorder.RecordREPLResult(REPLResultEvent{
 		CallID:     callID,
@@ -3771,6 +5731,78 @@ func (e *replToolExecutor) executeScratchREPL(ctx context.Context, args json.Raw
 	return string(body), nil
 }
 
+func replToolParameters(toolName, language string) json.RawMessage {
+	if strings.TrimSpace(toolName) != PythonREPLToolName {
+		return json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"code":{"type":"string","description":"%s code to execute in the persistent REPL."}},"required":["code"],"additionalProperties":false}`, language))
+	}
+	return json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"code":{"type":"string","description":"%s code to execute in the persistent REPL."},"packages":{"type":"array","items":{"type":"string"},"description":"Optional allowlisted pip package names to install into the sandbox before executing code. Use this for small deterministic libraries such as python-chess or sympy; do not run pip from code."}},"required":["code"],"additionalProperties":false}`, language))
+}
+
+func rejectCopiedPromptLiteral(code string, state map[string]any) error {
+	code = strings.TrimSpace(code)
+	if code == "" || len(state) == 0 {
+		return nil
+	}
+	for _, key := range []string{"official_prompt", "prompt"} {
+		prompt, ok := state[key].(string)
+		if !ok {
+			continue
+		}
+		prompt = strings.TrimSpace(prompt)
+		if len(prompt) < 2000 {
+			continue
+		}
+		match := longestSharedNormalizedSubstring(code, prompt, 240)
+		if match >= 240 {
+			return fmt.Errorf("repl code copied a %d-character literal from %s; parse the existing `%s` variable instead of pasting task data", match, key, key)
+		}
+	}
+	return nil
+}
+
+func longestSharedNormalizedSubstring(a, b string, min int) int {
+	a = normalizeLiteralCopyText(a)
+	b = normalizeLiteralCopyText(b)
+	if len(a) < min || len(b) < min {
+		return 0
+	}
+	shorter, longer := a, b
+	if len(shorter) > len(longer) {
+		shorter, longer = longer, shorter
+	}
+	for start := 0; start+min <= len(shorter); start++ {
+		if strings.Contains(longer, shorter[start:start+min]) {
+			return min
+		}
+	}
+	return 0
+}
+
+func normalizeLiteralCopyText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(text))
+	lastSpace := false
+	for _, r := range text {
+		if r == '\\' || r == '"' || r == '\'' || r == '`' {
+			continue
+		}
+		if r == '\n' || r == '\r' || r == '\t' || r == ' ' {
+			if !lastSpace {
+				b.WriteByte(' ')
+				lastSpace = true
+			}
+			continue
+		}
+		b.WriteRune(r)
+		lastSpace = false
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func (e *replToolExecutor) effectiveToolResultMaxChars() int {
 	if e == nil || e.toolResultMaxChars <= 0 {
 		return 0
@@ -3787,6 +5819,10 @@ func cloneMetadataMap(in map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+func cloneAnyMap(in map[string]any) map[string]any {
+	return cloneMetadataMap(in)
 }
 
 func truncateREPLToolOutput(output string, maxChars int) (string, bool, int) {

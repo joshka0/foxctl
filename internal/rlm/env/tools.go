@@ -11,7 +11,7 @@ func DefaultTools() []rlm.Tool {
 	return []rlm.Tool{
 		{
 			Name:        "gather_context",
-			Description: "Gather bounded context across code, memory, context, and task lanes. Defaults to response_mode=answer_surface for a reduced answer seed/path_set surface. Use response_mode=full only for eval/debug bundle inspection. Prefer copying answer_seed.paths and answer_seed.facts, using path_set.must/load_ref for verification before inferring from raw evidence.",
+			Description: "Gather bounded context across code, memory, context, and task lanes. Defaults to response_mode=answer_surface for a reduced answer seed/path_set surface. Graph-sensitive tasks include graph recommendation metadata by default; set graph_mode=summary to attach compact graph confidence/gaps/roots/top nodes. Use response_mode=full only for eval/debug bundle inspection. Prefer copying answer_seed.paths and answer_seed.facts, using path_set.must/load_ref for verification before inferring from raw evidence.",
 			Parameters: objectSchema(map[string]any{
 				"query": map[string]any{
 					"type":        "string",
@@ -93,6 +93,96 @@ func DefaultTools() []rlm.Tool {
 				"response_mode": map[string]any{
 					"type":        "string",
 					"description": "Optional response shape: defaults to answer_surface. Use full only for eval/debug bundle inspection; answer_surface or compact returns answer_seed/path_set/facts without raw evidence.",
+				},
+				"graph_mode": map[string]any{
+					"type":        "string",
+					"enum":        []string{"", "none", "summary"},
+					"description": "Optional context graph attachment mode: empty or none only emits graph recommendation metadata; summary attaches compact context_graph confidence, gaps, roots, and top nodes only for answer_surface/compact responses.",
+				},
+			}, "query"),
+			ReadOnly: true,
+		},
+		{
+			Name:        "gather_test_context",
+			Description: "Gather bounded test context for a repo question. This is the explicit test surface: use it only when tests, specs, fixtures, mocks, or test helpers are requested. Defaults to answer_surface and repo_code with test coverage enabled.",
+			Parameters: objectSchema(map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Test-context gathering query.",
+				},
+				"required_evidence": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional test terms, symbols, fixtures, or behaviors to cover.",
+				},
+				"task_type": map[string]any{
+					"type":        "string",
+					"description": "Optional task intent. Defaults to the shared gather_context reducer behavior.",
+				},
+				"languages": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional language constraints.",
+				},
+				"path_prefixes": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional repo-relative path prefixes.",
+				},
+				"excluded_paths": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional repo-relative paths, prefixes, or globs to suppress.",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "Maximum reduced context facts. Defaults to 10.",
+				},
+				"max_context_chars": map[string]any{
+					"type":        "integer",
+					"description": "Optional downstream context character budget.",
+				},
+				"response_mode": map[string]any{
+					"type":        "string",
+					"description": "Optional response shape: defaults to answer_surface.",
+				},
+			}, "query"),
+			ReadOnly: true,
+		},
+		{
+			Name:        "gather_docs_context",
+			Description: "Gather bounded repo documentation context. This is the explicit docs surface: use it for docs/design/architecture/readme questions. It defaults to repo_docs, documentation_map, and excludes embedded project noise under docs.",
+			Parameters: objectSchema(map[string]any{
+				"query": map[string]any{
+					"type":        "string",
+					"description": "Documentation-context gathering query.",
+				},
+				"required_evidence": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional doc topics or headings to cover.",
+				},
+				"path_prefixes": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional repo-relative docs path prefixes.",
+				},
+				"excluded_paths": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional repo-relative paths, prefixes, or globs to suppress in addition to default docs noise filters.",
+				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "Maximum reduced context facts. Defaults to 10.",
+				},
+				"max_context_chars": map[string]any{
+					"type":        "integer",
+					"description": "Optional downstream context character budget.",
+				},
+				"response_mode": map[string]any{
+					"type":        "string",
+					"description": "Optional response shape: defaults to answer_surface.",
 				},
 			}, "query"),
 			ReadOnly: true,

@@ -80,6 +80,7 @@ func (r LambdaRunner) Run(ctx context.Context, task Task, env Environment) (Resu
 		plan.ComposeOp = ComposeUnion
 		planCaps["lambda_single_gather_surface"] = true
 	}
+	program := BuildLambdaProgram(plan, cfg)
 
 	// Phase 3: Execute Phi.
 	result, err := r.executePhi(ctx, task, env, plan)
@@ -99,6 +100,13 @@ func (r LambdaRunner) Run(ctx context.Context, task Task, env Environment) (Resu
 	result.Metadata["lambda_cost_estimate"] = plan.CostEstimate
 	result.Metadata["lambda_n"] = plan.N
 	result.Metadata["lambda_compose_op"] = string(plan.ComposeOp)
+	result.Metadata["lambda_program"] = program
+	result.Metadata["lambda_program_split_mode"] = string(program.SplitMode)
+	result.Metadata["lambda_program_leaf_mode"] = string(program.LeafMode)
+	result.Metadata["lambda_program_reduce_mode"] = string(program.ReduceMode)
+	result.Metadata["lambda_program_leaf_verifier_mode"] = string(program.LeafVerifierMode)
+	result.Metadata["lambda_program_reduce_verifier_mode"] = string(program.ReduceVerifierMode)
+	result.Metadata["lambda_program_estimated_total_calls"] = program.EstimatedTotalCalls
 	result.Metadata["plan_mode"] = string(PlanModeLambda)
 	result.Metadata["lambda_classify_input_tokens"] = classifyUsage.InputTokens
 	result.Metadata["lambda_classify_output_tokens"] = classifyUsage.OutputTokens
@@ -214,7 +222,15 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 	}
 	evidenceRefs := extractEvidenceRefs(searchResult)
 	evidenceRefs = uniqueStringsRLM(append(evidenceRefs, candidateRefs...))
-	if answer, ok := lambdaAnswerFromAnswerSurface(searchResult, candidates); ok {
+	graphRequired := lambdaTaskRequiresContextGraph(task, plan.TaskType)
+	graphSurface := map[string]any{}
+	graphTrusted := true
+	if graphRequired {
+		graphResult, graphErr := r.expandContextGraphForLambda(ctx, task, plan, candidateRefs, candidates)
+		graphTrusted = lambdaContextGraphTrusted(graphResult)
+		graphSurface = lambdaContextGraphSurfaceMetadata(graphResult, graphErr)
+	}
+	if answer, ok := lambdaAnswerFromAnswerSurface(searchResult, candidates); ok && (!graphRequired || graphTrusted) {
 		result := Result{
 			Answer:         answer,
 			EvidenceRefs:   evidenceRefs,
@@ -238,6 +254,9 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 			},
 		}
 		for key, value := range gatherSurface {
+			result.Metadata[key] = value
+		}
+		for key, value := range graphSurface {
 			result.Metadata[key] = value
 		}
 		return result, nil
@@ -291,6 +310,9 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 		for key, value := range gatherSurface {
 			result.Metadata[key] = value
 		}
+		for key, value := range graphSurface {
+			result.Metadata[key] = value
+		}
 		return result, nil
 	}
 
@@ -317,6 +339,9 @@ func (r LambdaRunner) leaf(ctx context.Context, task Task, env Environment, plan
 		result.Metadata["output_sanitization"] = answerSanitization
 	}
 	for key, value := range gatherSurface {
+		result.Metadata[key] = value
+	}
+	for key, value := range graphSurface {
 		result.Metadata[key] = value
 	}
 	return result, nil
@@ -353,6 +378,11 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 	var gatherAnswerSeedPaths []string
 	var gatherPathSetMust []string
 	var gatherCertificateStatuses []string
+	var graphRequiredCount int
+	var graphTrustedCount int
+	var graphMissingCount int
+	var graphConfidences []float64
+	var graphCompleteness []string
 	var totalIterations int
 	var totalSubcalls int
 	var inputTokens int
@@ -368,6 +398,19 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 		gatherAnswerSeedPaths = append(gatherAnswerSeedPaths, stringSliceFromAny(p.Metadata["gather_context_answer_seed_paths"])...)
 		gatherPathSetMust = append(gatherPathSetMust, stringSliceFromAny(p.Metadata["gather_context_path_set_must"])...)
 		gatherCertificateStatuses = append(gatherCertificateStatuses, stringSliceFromAny(p.Metadata["gather_context_certificate_statuses"])...)
+		if boolValue(p.Metadata["lambda_context_graph_required"]) {
+			graphRequiredCount++
+		}
+		if boolValue(p.Metadata["lambda_context_graph_trusted"]) {
+			graphTrustedCount++
+		}
+		graphMissingCount += intFromAny(p.Metadata["lambda_context_graph_missing_count"])
+		if confidence, ok := floatValue(p.Metadata["lambda_context_graph_confidence"]); ok {
+			graphConfidences = append(graphConfidences, confidence)
+		}
+		if completeness := strings.TrimSpace(fmt.Sprint(p.Metadata["lambda_context_graph_completeness"])); completeness != "" && completeness != "<nil>" {
+			graphCompleteness = append(graphCompleteness, completeness)
+		}
 		totalIterations += p.Iterations
 		totalSubcalls += p.Subcalls
 		inputTokens += intFromAny(p.Metadata["parent_input_tokens"])
@@ -466,6 +509,19 @@ func (r LambdaRunner) reduce(ctx context.Context, task Task, plan LambdaPlan, pa
 	}
 	if gatherCertificateStatuses = uniqueStringsRLM(gatherCertificateStatuses); len(gatherCertificateStatuses) > 0 {
 		result.Metadata["gather_context_certificate_statuses"] = gatherCertificateStatuses
+	}
+	if graphRequiredCount > 0 {
+		result.Metadata["lambda_context_graph_required_count"] = graphRequiredCount
+		result.Metadata["lambda_context_graph_trusted_count"] = graphTrustedCount
+		result.Metadata["lambda_context_graph_all_trusted"] = graphTrustedCount == graphRequiredCount
+		result.Metadata["lambda_context_graph_missing_count"] = graphMissingCount
+	}
+	if len(graphConfidences) > 0 {
+		result.Metadata["lambda_context_graph_confidences"] = graphConfidences
+		result.Metadata["lambda_context_graph_min_confidence"] = minFloat64(graphConfidences)
+	}
+	if graphCompleteness = uniqueStringsRLM(graphCompleteness); len(graphCompleteness) > 0 {
+		result.Metadata["lambda_context_graph_completeness"] = graphCompleteness
 	}
 	return result, nil
 }
@@ -711,6 +767,11 @@ func collectEvidenceRefsRecursive(value any, out *[]string) {
 			*out = append(*out, ref)
 		}
 		for key, child := range v {
+			if key == "ref" && child != nil {
+				if ref := strings.TrimSpace(fmt.Sprint(child)); ref != "" && strings.Contains(ref, ":") {
+					*out = append(*out, ref)
+				}
+			}
 			if key == "load_ref" && child != nil {
 				if ref := strings.TrimSpace(fmt.Sprint(child)); ref != "" {
 					*out = append(*out, ref)
@@ -816,8 +877,10 @@ func explicitLambdaTaskType(task Task) (TaskType, string) {
 		return "", ""
 	}
 	switch strings.TrimSpace(fmt.Sprint(payload["task_type"])) {
-	case "file_locate", "symbol_inspect", "registration_trace", "execution_trace", "change_impact", "architecture_map", "subsystem_map", "integration_surface":
+	case "file_locate", "symbol_inspect", "registration_trace":
 		return TaskTypeCodeLocate, "gather_context_payload"
+	case "execution_trace", "change_impact", "architecture_map", "subsystem_map", "integration_surface":
+		return TaskTypeCodeUnderstand, "gather_context_payload"
 	case "memory_recall":
 		return TaskTypeMemoryRecall, "gather_context_payload"
 	case "evidence_audit":
@@ -831,11 +894,76 @@ func lambdaShouldUseSingleGatherSurface(task Task, taskType TaskType) bool {
 	if taskType != TaskTypeCodeLocate {
 		return false
 	}
+	if lambdaTaskRequiresContextGraph(task, taskType) {
+		return false
+	}
 	payload, ok := task.Metadata["gather_context_payload"].(map[string]any)
 	if !ok || len(payload) == 0 {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(fmt.Sprint(payload["response_mode"])), "answer_surface")
+}
+
+func lambdaTaskRequiresContextGraph(task Task, taskType TaskType) bool {
+	if taskType == TaskTypeCodeUnderstand {
+		return true
+	}
+	payload, _ := task.Metadata["gather_context_payload"].(map[string]any)
+	switch strings.TrimSpace(fmt.Sprint(payload["task_type"])) {
+	case "execution_trace", "change_impact", "architecture_map", "subsystem_map", "integration_surface":
+		return true
+	default:
+		return false
+	}
+}
+
+func (r LambdaRunner) expandContextGraphForLambda(ctx context.Context, task Task, plan LambdaPlan, candidateRefs []string, candidates []string) (map[string]any, error) {
+	roots := candidateRefs
+	if len(roots) == 0 {
+		roots = pathsToEvidenceRefs(candidates)
+	}
+	if len(roots) == 0 {
+		return nil, fmt.Errorf("lambda context graph: no roots")
+	}
+	if plan.TauStar > 0 && len(roots) > plan.TauStar {
+		roots = roots[:plan.TauStar]
+	}
+	payload, _ := task.Metadata["gather_context_payload"].(map[string]any)
+	taskType := strings.TrimSpace(fmt.Sprint(payload["task_type"]))
+	if taskType == "" {
+		taskType = lambdaGatherTaskType(plan.TaskType)
+	}
+	args := map[string]any{
+		"roots":            roots,
+		"query":            task.Prompt,
+		"task_type":        taskType,
+		"depth":            1,
+		"include_adjacent": true,
+		"budget": map[string]any{
+			"max_roots":       maxInt(1, plan.TauStar),
+			"max_nodes":       maxInt(20, plan.TauStar*8),
+			"max_edges":       maxInt(30, plan.TauStar*12),
+			"per_node_cap":    8,
+			"max_local_files": 200,
+			"max_local_bytes": 2 * 1024 * 1024,
+		},
+	}
+	if sourceProfiles, ok := payload["source_profiles"]; ok {
+		args["source_profiles"] = sourceProfiles
+	}
+	if coverageRequirements, ok := payload["coverage_requirements"]; ok {
+		args["coverage_requirements"] = coverageRequirements
+	}
+	if includeTests, ok := optionalBoolValue(payload["include_tests"]); ok {
+		args["include_tests"] = includeTests
+	}
+	if pathPrefixes, ok := payload["path_prefixes"]; ok {
+		args["path_prefixes"] = pathPrefixes
+	}
+	if excludedPaths, ok := payload["excluded_paths"]; ok {
+		args["excluded_paths"] = excludedPaths
+	}
+	return r.Tools.Execute(ctx, "expand_context_graph", jsonArgs(args))
 }
 
 func lambdaGatherTaskType(taskType TaskType) string {
@@ -874,6 +1002,54 @@ func lambdaGatherContextSurfaceMetadata(payload map[string]any, workspaceRoot st
 		return nil
 	}
 	return out
+}
+
+func lambdaContextGraphSurfaceMetadata(payload map[string]any, err error) map[string]any {
+	out := map[string]any{"lambda_context_graph_required": true}
+	if err != nil {
+		out["lambda_context_graph_error"] = err.Error()
+		out["lambda_context_graph_trusted"] = false
+		return out
+	}
+	if payload == nil {
+		out["lambda_context_graph_trusted"] = false
+		return out
+	}
+	out["lambda_context_graph_trusted"] = lambdaContextGraphTrusted(payload)
+	if overall, ok := floatValue(nestedMapValue(payload, []string{"confidence", "overall"})); ok {
+		out["lambda_context_graph_confidence"] = overall
+	}
+	if completeness := strings.TrimSpace(stringFromNestedMap(payload, []string{"confidence", "completeness"})); completeness != "" {
+		out["lambda_context_graph_completeness"] = completeness
+	}
+	if trusted, ok := optionalBoolValue(nestedMapValue(payload, []string{"confidence", "trusted_for_proceed"})); ok {
+		out["lambda_context_graph_trusted_for_proceed"] = trusted
+	}
+	if missing := anySliceFromAny(payload["missing"]); len(missing) > 0 {
+		out["lambda_context_graph_missing_count"] = len(missing)
+	}
+	return out
+}
+
+func lambdaContextGraphTrusted(payload map[string]any) bool {
+	if payload == nil {
+		return false
+	}
+	confidence := nestedMapValue(payload, []string{"confidence"})
+	if confidence == nil {
+		return false
+	}
+	if trusted, ok := optionalBoolValue(nestedMapValue(payload, []string{"confidence", "trusted_for_proceed"})); ok {
+		return trusted
+	}
+	completeness := strings.TrimSpace(stringFromNestedMap(payload, []string{"confidence", "completeness"}))
+	if !strings.EqualFold(completeness, "high") {
+		return false
+	}
+	if overall, ok := floatValue(nestedMapValue(payload, []string{"confidence", "overall"})); ok && overall < 0.82 {
+		return false
+	}
+	return len(anySliceFromAny(payload["missing"])) == 0
 }
 
 func lambdaAnswerFromAnswerSurface(payload map[string]any, candidates []string) (string, bool) {
@@ -918,6 +1094,9 @@ func lambdaAnswerSurfaceTrusted(payload map[string]any) bool {
 	if copySeed, ok := optionalBoolValue(nestedMapValue(payload, []string{"answer_contract", "copy_answer_seed"})); ok && !copySeed {
 		return false
 	}
+	if !lambdaCertificateCheckPassed(payload, "selected_refs_loadable") {
+		return false
+	}
 	if len(anySliceFromAny(payload["missing"])) > 0 || len(anySliceFromAny(payload["conflicts"])) > 0 {
 		return false
 	}
@@ -925,6 +1104,24 @@ func lambdaAnswerSurfaceTrusted(payload map[string]any) bool {
 		return false
 	}
 	return len(pathsFromNestedPathList(payload, []string{"answer_seed", "paths"}, "")) > 0
+}
+
+func lambdaCertificateCheckPassed(payload map[string]any, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, item := range anySliceFromAny(nestedMapValue(payload, []string{"certificate", "checks"})) {
+		check, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(check["name"])), name) {
+			continue
+		}
+		return strings.EqualFold(strings.TrimSpace(fmt.Sprint(check["status"])), "pass")
+	}
+	return false
 }
 
 func boolValue(value any) bool {
@@ -997,6 +1194,43 @@ func stringsFromAny(value any) []string {
 	default:
 		return nil
 	}
+}
+
+func floatValue(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case json.Number:
+		got, err := typed.Float64()
+		return got, err == nil
+	case string:
+		var got float64
+		if _, err := fmt.Sscanf(strings.TrimSpace(typed), "%f", &got); err == nil {
+			return got, true
+		}
+		return 0, false
+	default:
+		return 0, false
+	}
+}
+
+func minFloat64(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	min := values[0]
+	for _, value := range values[1:] {
+		if value < min {
+			min = value
+		}
+	}
+	return min
 }
 
 func anySliceFromAny(value any) []any {

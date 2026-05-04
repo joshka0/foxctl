@@ -127,3 +127,86 @@ That was one Codex user turn / Responses websocket request, but it included the
 subagent's full search-and-read exploration. Treat it as a batched-run total;
 per-case token estimates are only comparable to one-case-per-agent runs if the
 test harness distributes or records the shared transcript usage explicitly.
+
+## `gather_context` Pilot Harness
+
+Use the checked-in pilot wrapper for active cross-repo runs:
+
+```bash
+RUN_REPOS=praze,heartwood,dearday \
+RUN_NATIVE=1 \
+RUN_RLM=0 \
+REBUILD_INDEX=0 \
+scripts/evals/run-gather-context-pilots.sh
+```
+
+The default run uses existing local checkouts:
+
+- `PRAZE_REPO`, defaulting to `~/repos/personal/praze`
+- `HEARTWOOD_REPO`, defaulting to `~/repos/personal/heartwood`
+- `DEARDAY_REPO`, defaulting to `~/repos/personal/dearday`
+- `OVERCHARGE_REPO`, defaulting to `~/repos/personal/overcharge`
+
+For reproducible pilot snapshots, opt into fresh clones under `/tmp`:
+
+```bash
+FRESH_CLONE=1 \
+CLONE_ROOT=/tmp/gather-context-pilot-repos/$(date -u +%Y%m%dT%H%M%SZ) \
+RUN_REPOS=praze,heartwood,dearday \
+scripts/evals/run-gather-context-pilots.sh
+```
+
+Fresh clone mode is intentionally opt-in and non-destructive. The harness
+creates a new clone directory and fails if a destination already exists. If a
+repo needs a source other than the local checkout's `origin`, set
+`PRAZE_REPO_URL`, `HEARTWOOD_REPO_URL`, `DEARDAY_REPO_URL`, or
+`OVERCHARGE_REPO_URL`.
+
+Each repo output directory includes `repo-state.txt` and `repo-state.json`.
+Every generated JSON report also embeds the same object as top-level
+`repo_state`, including the workspace path, Git worktree flag, HEAD SHA,
+branch, origin URL, dirty flag, and short status. Use that field when comparing
+pilot reports across machines or dates.
+
+The active cross-repo pilot set should stay small and biased toward repos with
+valid Git metadata and representative language coverage:
+
+- `praze`: Elixir + TypeScript mixed app.
+- `heartwood`: TypeScript app/backend.
+- `dearday`: Python backend plus TypeScript/Expo frontend.
+
+`turtlr-v2` is intentionally omitted from the active pilot set for now. The
+available checkout shape includes nested `worktrees/` duplicates and stale local
+Git metadata, so it is a poor signal for generic retrieval quality until the
+harness has stronger path-exclusion enforcement.
+
+`overcharge` is useful as a C#/Rust pilot. It has Rust server code plus C#
+Godot client code. Build its repoindex with Rust, C#, and tests enabled:
+
+```bash
+foxctl index repo build --workspace "$OVERCHARGE_REPO" \
+  --go=false --typescript=false --python=false --rust --csharp --include-tests
+```
+
+C# repoindex support is intentionally lightweight and tree-sitter based. It
+extracts:
+
+- `.cs` file discovery and declaration summaries.
+- class/method/property symbol candidates.
+- test companion closure for `*.Tests/*.cs`.
+- Godot client structure signals such as `client/Scripts/*`.
+
+Overcharge is now a reasonable pilot for path recall, but it should not be the
+only C# quality gate until import/project references are indexed beyond
+best-effort symbol and call edges.
+
+Harness hardening should come before more scoring tweaks:
+
+1. Keep each pilot repo on a valid Git object store or use `FRESH_CLONE=1`.
+2. Record index metadata in every report.
+3. Apply `excluded_paths` to provider retrieval, not only final scoring.
+4. Report provider recall separately from reducer recall and final-answer recall.
+5. Keep generated, dependency, nested worktree, and vendored paths suppressed by
+   default unless explicitly requested by the case.
+6. Keep deterministic `gather_context` runs separate from native mini/subagent
+   baselines, then import native transcript token usage for fair cost comparison.

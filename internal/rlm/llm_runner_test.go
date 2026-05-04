@@ -434,6 +434,7 @@ func TestLLMSystemPromptUsesCompositeToolsOnlyWhenLegacyAbsent(t *testing.T) {
 		"Deterministic gather trust policy",
 		"Do not spend extra tool/model turns re-ranking those paths",
 		"Fall back to verification or broader retrieval for package-owner/package-anchor questions",
+		"call expand_context_graph before claiming dependency or subsystem completeness",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
@@ -470,6 +471,7 @@ func compositeOnlyTools() []Tool {
 		{Name: "retrieve_context", ReadOnly: true},
 		{Name: "retrieve_task", ReadOnly: true},
 		{Name: "gather_context", ReadOnly: true},
+		{Name: "expand_context_graph", ReadOnly: true},
 		{Name: "retrieve_mixed", ReadOnly: true},
 		{Name: "load_evidence_ref", ReadOnly: true},
 	}

@@ -1250,7 +1250,7 @@ func RenderBraidNodeHandoffPrompt(handoff BraidNodeHandoff) string {
 	if maxSummaryChars := handoff.Budget.MaxSummaryChars; maxSummaryChars > 0 {
 		fmt.Fprintf(&b, "Return a compact summary under %d characters.\n", maxSummaryChars)
 	}
-	b.WriteString("Return one compact NodeArtifact JSON object when this is the final child response: {\"status\":\"solved|partial|blocked\",\"answer\":\"...\",\"checks\":[\"...\"],\"confidence\":0.0}. For verify nodes, use status \"pass\" or set pass:true only when every original constraint is checked. Legacy status/answer/checks lines are accepted only as fallback.\n")
+	b.WriteString("Return one compact NodeArtifact JSON object when this is the final child response: {\"status\":\"solved|partial|blocked\",\"answer\":\"...\",\"checks\":[\"...\"],\"confidence\":0.0}. For verify nodes, use {\"status\":\"pass\",\"answer\":\"pass: true\",\"pass\":true,\"checks\":[...]} only when every original constraint is checked; use status \"blocked\" with pass:false for the first concrete failure. Legacy status/answer/checks lines are accepted only as fallback.\n")
 	return strings.TrimSpace(b.String())
 }
 
@@ -1328,7 +1328,7 @@ func RenderBraidHelperHandoffPrompt(handoff BraidNodeHandoff) string {
 		b.WriteString("Candidate-verify output contract:\n")
 		b.WriteString("- Treat the input as a candidate enumeration and verification problem, not prose generation.\n")
 		b.WriteString("- Evaluate every predicate for every candidate. Do not skip or short-circuit.\n")
-		b.WriteString("- If a required library is unavailable (e.g., rdkit, python-chess), return ok:false with missing_library immediately.\n")
+		b.WriteString("- Do not claim a required library is unavailable unless a REPL import actually failed and checks include the exact ImportError. If the prompt packet says a library is available, import it and use it.\n")
 		b.WriteString("- Return `solution = <answer>` matching the output_schema.\n")
 		b.WriteString("- If verification fails, return ok:false with first_failure, failed_candidate, observed, expected, and repair_hint.\n")
 	}

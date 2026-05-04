@@ -86,6 +86,13 @@ type RuntimeCertification struct {
 	Metadata        map[string]any   `json:"metadata,omitempty"`
 }
 
+const (
+	runtimeVerifierKindScaffold       = "runtime_scaffold"
+	runtimeVerifierKindForward        = "runtime_forward"
+	runtimeVerifierKindReducer        = "runtime_reducer"
+	runtimeVerifierKindExpectedAnswer = "runtime_expected_answer"
+)
+
 type NodeRepairCause struct {
 	FailureKind   string         `json:"failure_kind"`
 	FailedNode    string         `json:"failed_node,omitempty"`
@@ -220,10 +227,10 @@ graphLoop:
 					recordBraidNodeEvent(toolExec, phaseName, wave, node, "merge_blocked", reason)
 					return err
 				}
-				if summary, ok := runBraidRuntimeNodeShortcut(node, deps, nodesByID, executionRecords); ok {
+				if summary, cert, ok := runBraidRuntimeNodeShortcut(node, deps, nodesByID, executionRecords); ok {
 					recordBraidNodeEvent(toolExec, phaseName, wave, node, "runtime_shortcut", summary)
 					summaries[node.ID] = summary
-					recordBraidNodeExecution(executionRecords, node.ID, summary, "runtime", runtimeCertificationForNode(node, "runtime_shortcut"))
+					recordBraidNodeExecution(executionRecords, node.ID, summary, "runtime", cert)
 					executed[node.ID] = struct{}{}
 					commitSolverArtifact(solverState, node.ID, summary)
 					continue
@@ -274,13 +281,13 @@ graphLoop:
 					}
 				}
 				submitted++
-				if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+				if err := validateBraidNodeExecutionRecordInGraph(phaseName, node, executionRecords[node.ID], graph.FinalNode, graph); err != nil {
 					if !concreteVerifyFailure {
 						if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, node, rootPrompt, dependencySummarySubset(node, summaries), repairFeedbackByNode[node.ID], summary, toolExec, output); ok {
 							recordBraidNodeEvent(toolExec, phaseName, wave, node, "helper_recovered", recovered)
 							summaries[node.ID] = recovered
 							recordBraidNodeExecution(executionRecords, node.ID, recovered, "helper_recovered", certificationFromBraidSummary(node, recovered))
-							if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, node, recovered, graph.FinalNode, graph); recoveredErr == nil {
+							if recoveredErr := validateBraidNodeExecutionRecordInGraph(phaseName, node, executionRecords[node.ID], graph.FinalNode, graph); recoveredErr == nil {
 								commitSolverArtifact(solverState, node.ID, recovered)
 								continue
 							} else {
@@ -312,10 +319,10 @@ graphLoop:
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "merge_blocked", reason)
 				return err
 			}
-			if summary, ok := runBraidRuntimeNodeShortcut(node, deps, nodesByID, executionRecords); ok {
+			if summary, cert, ok := runBraidRuntimeNodeShortcut(node, deps, nodesByID, executionRecords); ok {
 				recordBraidNodeEvent(toolExec, phaseName, wave, node, "runtime_shortcut", summary)
 				summaries[node.ID] = summary
-				recordBraidNodeExecution(executionRecords, node.ID, summary, "runtime", runtimeCertificationForNode(node, "runtime_shortcut"))
+				recordBraidNodeExecution(executionRecords, node.ID, summary, "runtime", cert)
 				executed[node.ID] = struct{}{}
 				commitSolverArtifact(solverState, node.ID, summary)
 				continue
@@ -383,13 +390,13 @@ graphLoop:
 					recordBraidNodeExecution(executionRecords, nodeID, summary, "helper_recovered", certificationFromBraidSummary(nodesByID[nodeID], summary))
 				}
 			}
-			if err := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], summary, graph.FinalNode, graph); err != nil {
+			if err := validateBraidNodeExecutionRecordInGraph(phaseName, nodesByID[nodeID], executionRecords[nodeID], graph.FinalNode, graph); err != nil {
 				if !concreteVerifyFailure {
 					if recovered, ok := recoverBraidNodeWithHelper(ctx, phaseName, nodesByID[nodeID], rootPrompt, dependencySummarySubset(nodesByID[nodeID], summaries), repairFeedbackByNode[nodeID], summary, toolExec, output); ok {
 						recordBraidNodeEvent(toolExec, phaseName, wave, nodesByID[nodeID], "helper_recovered", recovered)
 						summaries[nodeID] = recovered
 						recordBraidNodeExecution(executionRecords, nodeID, recovered, "helper_recovered", certificationFromBraidSummary(nodesByID[nodeID], recovered))
-						if recoveredErr := validateBraidNodeExecutionSummaryInGraph(phaseName, nodesByID[nodeID], recovered, graph.FinalNode, graph); recoveredErr == nil {
+						if recoveredErr := validateBraidNodeExecutionRecordInGraph(phaseName, nodesByID[nodeID], executionRecords[nodeID], graph.FinalNode, graph); recoveredErr == nil {
 							commitSolverArtifact(solverState, nodeID, recovered)
 							continue
 						} else {
@@ -502,7 +509,7 @@ func runBraidNodeHelperFirst(
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_fallback", message)
 		return "", false, nil
 	}
-	if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+	if err := validateBraidNodeExecutionSummaryWithCertificationInGraph(phaseName, node, summary, certificationFromBraidSummary(node, summary), graph.FinalNode, graph); err != nil {
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "helper_first_rejected", "stage=verify duration_ms="+fmt.Sprintf("%d", duration.Milliseconds())+" "+err.Error())
 		if policy == BraidNodeHelperPolicyRequired || disableFallback {
 			return summary, true, fmt.Errorf("rlm repl runner phase %q: braid node %q helper-first failed: %w", phaseName, node.ID, err)
@@ -619,7 +626,7 @@ func runBraidNodeREPLFirst(
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "python_repl_first_unusable", safeTelemetryExcerpt(result, 300))
 		return "", false, nil
 	}
-	if err := validateBraidNodeExecutionSummaryInGraph(phaseName, node, summary, graph.FinalNode, graph); err != nil {
+	if err := validateBraidNodeExecutionSummaryWithCertificationInGraph(phaseName, node, summary, certificationFromBraidSummary(node, summary), graph.FinalNode, graph); err != nil {
 		recordBraidNodeEvent(toolExec, phaseName, 0, node, "python_repl_first_rejected", err.Error())
 		if braidPythonREPLSummaryIsSoftMiss(summary) {
 			return "", false, nil
@@ -768,12 +775,20 @@ func braidSummaryFromPythonREPLResult(result string) (string, bool) {
 	return "", false
 }
 
-func runBraidRuntimeNodeShortcut(node BraidNode, dependencySummaries map[string]string, nodesByID map[string]BraidNode, records map[string]braidNodeExecutionRecord) (string, bool) {
+func runBraidRuntimeNodeShortcut(node BraidNode, dependencySummaries map[string]string, nodesByID map[string]BraidNode, records map[string]braidNodeExecutionRecord) (string, *RuntimeCertification, bool) {
+	if isBraidSplitMergeNode(node) {
+		return "", nil, false
+	}
 	switch node.Kind {
 	case "verify":
 		for depID := range dependencySummaries {
 			if braidDependencyHasRuntimeVerifiedSolution(depID, records) {
-				return "status: pass summary: answer: pass: true checks: upstream solve dependency was already verified by the runtime scaffold verifier.", true
+				return formatRuntimeCertifiedArtifact(
+					"pass",
+					"pass: true",
+					[]any{"upstream solve dependency was already certified by the runtime"},
+					runtimeForwardCertification(node, depID, records[depID].Certification),
+				)
 			}
 		}
 	case "reduce":
@@ -786,11 +801,16 @@ func runBraidRuntimeNodeShortcut(node BraidNode, dependencySummaries map[string]
 				continue
 			}
 			if answer, ok := braidSolutionAnswerFromSummary(dependencySummaries[depID]); ok {
-				return "status: completed summary: status: solved answer: " + answer + " checks: reduce forwarded verified solve answer.", true
+				return formatRuntimeCertifiedArtifact(
+					"solved",
+					answer,
+					[]any{"reduce forwarded certified solve answer"},
+					runtimeForwardCertification(node, depID, records[depID].Certification),
+				)
 			}
 		}
 	}
-	return "", false
+	return "", nil, false
 }
 
 func braidDependencyHasRuntimeVerifiedSolution(nodeID string, records map[string]braidNodeExecutionRecord) bool {
@@ -806,6 +826,43 @@ func braidDependencyHasRuntimeVerifiedSolution(nodeID string, records map[string
 		return false
 	}
 	return true
+}
+
+func formatRuntimeCertifiedArtifact(status string, answer string, checks []any, cert *RuntimeCertification) (string, *RuntimeCertification, bool) {
+	if cert == nil || !cert.Pass {
+		return "", nil, false
+	}
+	artifact := braidNodeArtifact{
+		Status:     strings.ToLower(strings.TrimSpace(status)),
+		Answer:     strings.TrimSpace(answer),
+		Checks:     checks,
+		Confidence: 1,
+		Provenance: map[string]any{
+			"runtime_certification": cert,
+		},
+	}
+	body, err := json.Marshal(artifact)
+	if err != nil {
+		return "", nil, false
+	}
+	return string(body), cert, true
+}
+
+func runtimeForwardCertification(node BraidNode, sourceNodeID string, source *RuntimeCertification) *RuntimeCertification {
+	if source == nil || !source.Pass {
+		return nil
+	}
+	return &RuntimeCertification{
+		NodeID:       strings.TrimSpace(node.ID),
+		Pass:         true,
+		VerifierID:   "forward_certified_dependency",
+		VerifierKind: runtimeVerifierKindForward,
+		Metadata: map[string]any{
+			"source_node_id":     strings.TrimSpace(sourceNodeID),
+			"source_verifier_id": source.VerifierID,
+			"source_kind":        source.VerifierKind,
+		},
+	}
 }
 
 func braidDependencyVerificationPassed(dependencySummaries map[string]string) bool {
@@ -2937,7 +2994,7 @@ func formatBraidHelperNodeSummaryCertified(node BraidNode, answer string, cert *
 		}
 		if pass, ok := braidVerifyAnswerJSONPass(answer); ok {
 			if pass {
-				return "status: pass summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints."
+				return formatBraidCertifiedArtifactString("pass", answer, []any{"ephemeral_helper_solve simulated original constraints"}, cert)
 			}
 			return "status: blocked summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints and found a concrete failure."
 		}
@@ -2945,7 +3002,7 @@ func formatBraidHelperNodeSummaryCertified(node BraidNode, answer string, cert *
 			return "status: blocked summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints and found a concrete failure."
 		}
 		if braidPassTrueRE.MatchString(answer) || braidVerificationSummaryPassed(answer) {
-			return "status: pass summary: answer: " + answer + " checks: ephemeral_helper_solve simulated original constraints."
+			return formatBraidCertifiedArtifactString("pass", answer, []any{"ephemeral_helper_solve simulated original constraints"}, cert)
 		}
 		return "status: blocked summary: answer: pass: false checks: ephemeral_helper_solve simulated original constraints but did not produce a passing verification. detail: " + safeTelemetryExcerpt(answer, 600)
 	}
@@ -2970,21 +3027,25 @@ func formatBraidHelperNodeSummaryCertified(node BraidNode, answer string, cert *
 		}
 	}
 	if verified {
-		artifact := braidNodeArtifact{
-			Status:     "solved",
-			Answer:     answer,
-			Checks:     []any{"runtime scaffold verifier passed"},
-			Confidence: 1,
-			Provenance: map[string]any{
-				"runtime_certification": cert,
-			},
-		}
-		if body, err := json.Marshal(artifact); err == nil {
-			return string(body)
-		}
-		return "status: completed summary: status: solved answer: " + answer + " checks: runtime scaffold verifier passed."
+		return formatBraidCertifiedArtifactString("solved", answer, []any{"runtime scaffold verifier passed"}, cert)
 	}
 	return "status: completed summary: status: solved answer: " + answer + " checks: ephemeral_helper_solve produced and ran an executable helper for this node."
+}
+
+func formatBraidCertifiedArtifactString(status string, answer string, checks []any, cert *RuntimeCertification) string {
+	artifact := braidNodeArtifact{
+		Status:     strings.ToLower(strings.TrimSpace(status)),
+		Answer:     strings.TrimSpace(answer),
+		Checks:     checks,
+		Confidence: 1,
+		Provenance: map[string]any{
+			"runtime_certification": cert,
+		},
+	}
+	if body, err := json.Marshal(artifact); err == nil {
+		return string(body)
+	}
+	return "status: completed summary: status: " + status + " answer: " + answer + " checks: runtime certification passed."
 }
 
 func braidVerifyAnswerJSONPass(answer string) (bool, bool) {
@@ -3198,7 +3259,7 @@ func certificationFromHelperVerification(node BraidNode, verification map[string
 	pass, _ := verification["pass"].(bool)
 	verifierID := strings.TrimSpace(stringFromAny(verification["verifier_id"]))
 	verifierKind := strings.TrimSpace(stringFromAny(verification["verifier_kind"]))
-	if !pass || verifierID == "" || verifierKind != "runtime_scaffold" {
+	if !pass || verifierID == "" || verifierKind != runtimeVerifierKindScaffold {
 		return nil
 	}
 	return &RuntimeCertification{
@@ -3288,11 +3349,11 @@ func braidVerifyHelperAnswerContract(answer string, input map[string]any) (Helpe
 			RepairHint:   "return explicit pass true/false; do not return a solution line from a verify helper",
 		}, true
 	}
-	if braidPassTrueRE.MatchString(trimmed) || braidPassFalseRE.MatchString(trimmed) {
-		return HelperVerifierDiagnostic{Pass: true}, true
-	}
 	if diag, ok := braidVerifyAnswerJSONContract(trimmed); ok {
 		return diag, true
+	}
+	if braidPassTrueRE.MatchString(trimmed) || braidPassFalseRE.MatchString(trimmed) {
+		return HelperVerifierDiagnostic{Pass: true}, true
 	}
 	return HelperVerifierDiagnostic{
 		Pass:         false,
@@ -5742,8 +5803,8 @@ func braidNodeClosureFrom(graph BraidGraph, startID string) map[string]struct{} 
 
 var (
 	braidSummaryStatusRE = regexp.MustCompile(`(?i)(?:^|\s)status\s*:\s*([a-z][a-z0-9_-]*)`)
-	braidPassTrueRE      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*true(?:[^a-z0-9_]|$)`)
-	braidPassFalseRE     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])pass\s*[:=]\s*false(?:[^a-z0-9_]|$)`)
+	braidPassTrueRE      = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])"?pass"?\s*[:=]\s*true(?:[^a-z0-9_]|$)`)
+	braidPassFalseRE     = regexp.MustCompile(`(?i)(?:^|[^a-z0-9_])"?pass"?\s*[:=]\s*false(?:[^a-z0-9_]|$)`)
 )
 
 type braidNodeArtifact struct {
@@ -5808,6 +5869,14 @@ func validateBraidNodeExecutionSummary(phaseName string, node BraidNode, summary
 }
 
 func validateBraidNodeExecutionSummaryInGraph(phaseName string, node BraidNode, summary string, finalNodeID string, graph *BraidGraph) error {
+	return validateBraidNodeExecutionSummaryWithCertificationInGraph(phaseName, node, summary, nil, finalNodeID, graph)
+}
+
+func validateBraidNodeExecutionRecordInGraph(phaseName string, node BraidNode, record braidNodeExecutionRecord, finalNodeID string, graph *BraidGraph) error {
+	return validateBraidNodeExecutionSummaryWithCertificationInGraph(phaseName, node, record.Summary, record.Certification, finalNodeID, graph)
+}
+
+func validateBraidNodeExecutionSummaryWithCertificationInGraph(phaseName string, node BraidNode, summary string, cert *RuntimeCertification, finalNodeID string, graph *BraidGraph) error {
 	statuses := braidSummaryStatuses(summary)
 	if len(statuses) == 0 {
 		return fmt.Errorf("rlm repl runner phase %q: braid node %q returned no status field", phaseName, node.ID)
@@ -5843,8 +5912,14 @@ func validateBraidNodeExecutionSummaryInGraph(phaseName string, node BraidNode, 
 			return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) returned unsupported status %q", phaseName, node.ID, node.Kind, strings.Join(statuses, ","))
 		}
 	}
-	if node.Kind == "verify" && !braidVerificationSummaryPassed(summary) {
-		return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) did not report verification pass: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
+	if node.Kind == "verify" {
+		if !braidVerificationSummaryPassed(summary) {
+			return fmt.Errorf("rlm repl runner phase %q: braid node %q (%s) did not report verification pass: %s", phaseName, node.ID, node.Kind, safeTelemetryExcerpt(summary, 300))
+		}
+		// A text-only pass is accepted as an advisory node completion so legacy
+		// graph execution can continue, but it does not create RuntimeCertification
+		// and therefore cannot drive runtime shortcuts or verified final handoff.
+		_ = cert
 	}
 	return nil
 }
@@ -6292,7 +6367,7 @@ func runtimeCertificationForNode(node BraidNode, verifierID string) *RuntimeCert
 		NodeID:        strings.TrimSpace(node.ID),
 		Pass:          true,
 		VerifierID:    verifierID,
-		VerifierKind:  "runtime_scaffold",
+		VerifierKind:  runtimeVerifierKindScaffold,
 		ScaffoldClass: strings.TrimSpace(node.ScaffoldClass),
 		ScaffoldID:    strings.TrimSpace(node.ScaffoldID),
 	}
@@ -6314,7 +6389,7 @@ func certificationFromBraidSummary(node BraidNode, summary string) *RuntimeCerti
 	pass, _ := certMap["pass"].(bool)
 	verifierID := strings.TrimSpace(stringFromAny(certMap["verifier_id"]))
 	verifierKind := strings.TrimSpace(stringFromAny(certMap["verifier_kind"]))
-	if !pass || verifierID == "" || verifierKind != "runtime_scaffold" {
+	if !pass || verifierID == "" || verifierKind != runtimeVerifierKindScaffold {
 		return nil
 	}
 	scaffoldClass := strings.TrimSpace(stringFromAny(certMap["scaffold_class"]))

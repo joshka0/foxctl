@@ -40,6 +40,71 @@ const (
 	ComposeChronological ComposeOp = "chronological"
 )
 
+// LambdaSplitMode describes the deterministic split combinator used by a program.
+type LambdaSplitMode string
+
+const (
+	LambdaSplitNone          LambdaSplitMode = "none"
+	LambdaSplitQueryVariants LambdaSplitMode = "query_variants"
+)
+
+// LambdaLeafMode describes the bounded oracle at lambda leaves.
+type LambdaLeafMode string
+
+const (
+	LambdaLeafSearchThenJudge LambdaLeafMode = "search_then_judge"
+)
+
+// LambdaReduceMode describes how mapped partials are reduced.
+type LambdaReduceMode string
+
+const (
+	LambdaReduceUnion         LambdaReduceMode = "union"
+	LambdaReduceRerank        LambdaReduceMode = "rerank"
+	LambdaReduceSynthesize    LambdaReduceMode = "synthesize"
+	LambdaReduceIntersection  LambdaReduceMode = "intersection"
+	LambdaReduceChronological LambdaReduceMode = "chronological"
+)
+
+// LambdaVerifierMode describes the bounded model check used by leaves/reduces.
+type LambdaVerifierMode string
+
+const (
+	LambdaVerifierNone         LambdaVerifierMode = "none"
+	LambdaVerifierLeafOracle   LambdaVerifierMode = "leaf_oracle"
+	LambdaVerifierReduceOracle LambdaVerifierMode = "reduce_oracle"
+)
+
+// LambdaProgram is the explicit deterministic lambda-RLM combinator program.
+//
+// Shape:
+//
+//	phi(problem):
+//	  if depth == 0: leaf(problem)
+//	  parts = split(problem, branching_factor)
+//	  mapped = map(phi, parts)
+//	  return reduce(mapped)
+//
+// The model is represented as a bounded oracle at leaf nodes, and optionally at
+// reduce nodes for compose modes that synthesize or rerank.
+type LambdaProgram struct {
+	TaskType             TaskType           `json:"task_type"`
+	SplitMode            LambdaSplitMode    `json:"split_mode"`
+	LeafMode             LambdaLeafMode     `json:"leaf_mode"`
+	ReduceMode           LambdaReduceMode   `json:"reduce_mode"`
+	LeafVerifierMode     LambdaVerifierMode `json:"leaf_verifier_mode"`
+	ReduceVerifierMode   LambdaVerifierMode `json:"reduce_verifier_mode"`
+	LeafThreshold        int                `json:"leaf_threshold"`
+	BranchingFactor      int                `json:"branching_factor"`
+	MaxDepth             int                `json:"max_depth"`
+	EstimatedLeafCalls   int                `json:"estimated_leaf_calls"`
+	EstimatedReduceCalls int                `json:"estimated_reduce_calls"`
+	EstimatedSearchCalls int                `json:"estimated_search_calls"`
+	EstimatedLoadCalls   int                `json:"estimated_load_calls"`
+	EstimatedTotalCalls  int                `json:"estimated_total_calls"`
+	EstimatedCost        float64            `json:"estimated_cost"`
+}
+
 // compositionTable maps task type to composition operator.
 var compositionTable = map[TaskType]ComposeOp{
 	TaskTypeCodeLocate:     ComposeRerank,
@@ -207,6 +272,77 @@ func PlanLambda(taskType TaskType, n int, cfg LambdaConfig) LambdaPlan {
 	}
 }
 
+// BuildLambdaProgram converts the analytical plan into an explicit deterministic
+// combinator program. It is pure and does not inspect tools or call the model.
+func BuildLambdaProgram(plan LambdaPlan, cfg LambdaConfig) LambdaProgram {
+	cfg = cfg.Defaults()
+	leafThreshold := plan.TauStar
+	if leafThreshold <= 0 {
+		leafThreshold = minInt(cfg.ContextBudget, maxInt(1, plan.N))
+	}
+	branchingFactor := maxInt(1, plan.KStar)
+	maxDepth := maxInt(0, plan.Depth)
+
+	splitMode := LambdaSplitQueryVariants
+	if maxDepth == 0 || branchingFactor <= 1 {
+		splitMode = LambdaSplitNone
+		branchingFactor = 1
+		maxDepth = 0
+	}
+
+	reduceMode := LambdaReduceModeForComposeOp(plan.ComposeOp)
+	reduceVerifierMode := LambdaVerifierNone
+	if reduceMode == LambdaReduceRerank || reduceMode == LambdaReduceSynthesize {
+		reduceVerifierMode = LambdaVerifierReduceOracle
+	}
+
+	leafCalls := boundedPowInt(branchingFactor, maxDepth)
+	reduceCalls := 0
+	if reduceVerifierMode == LambdaVerifierReduceOracle && maxDepth > 0 {
+		reduceCalls = internalNodeCount(branchingFactor, maxDepth)
+	}
+	searchCalls := leafCalls
+	loadCalls := saturatingMulInt(leafCalls, leafThreshold)
+	totalCalls := saturatingAddInt(searchCalls, loadCalls, leafCalls, reduceCalls)
+
+	return LambdaProgram{
+		TaskType:             plan.TaskType,
+		SplitMode:            splitMode,
+		LeafMode:             LambdaLeafSearchThenJudge,
+		ReduceMode:           reduceMode,
+		LeafVerifierMode:     LambdaVerifierLeafOracle,
+		ReduceVerifierMode:   reduceVerifierMode,
+		LeafThreshold:        leafThreshold,
+		BranchingFactor:      branchingFactor,
+		MaxDepth:             maxDepth,
+		EstimatedLeafCalls:   leafCalls,
+		EstimatedReduceCalls: reduceCalls,
+		EstimatedSearchCalls: searchCalls,
+		EstimatedLoadCalls:   loadCalls,
+		EstimatedTotalCalls:  totalCalls,
+		EstimatedCost:        plan.CostEstimate,
+	}
+}
+
+// LambdaReduceModeForComposeOp maps the existing compose strategy onto the
+// explicit lambda program reduce combinator.
+func LambdaReduceModeForComposeOp(op ComposeOp) LambdaReduceMode {
+	switch op {
+	case ComposeUnion:
+		return LambdaReduceUnion
+	case ComposeRerank:
+		return LambdaReduceRerank
+	case ComposeSynthesize:
+		return LambdaReduceSynthesize
+	case ComposeIntersection:
+		return LambdaReduceIntersection
+	case ComposeChronological:
+		return LambdaReduceChronological
+	default:
+		return LambdaReduceSynthesize
+	}
+}
+
 func capLambdaPlanForTask(plan LambdaPlan, task Task, cfg LambdaConfig) (LambdaPlan, map[string]any) {
 	cfg = cfg.Defaults()
 	caps := map[string]any{}
@@ -242,6 +378,69 @@ func ceilDivInt(n, d int) int {
 		return 0
 	}
 	return (n + d - 1) / d
+}
+
+func boundedPowInt(base, exp int) int {
+	if exp <= 0 {
+		return 1
+	}
+	if base <= 1 {
+		return 1
+	}
+	result := 1
+	for i := 0; i < exp; i++ {
+		if result > math.MaxInt/base {
+			return math.MaxInt
+		}
+		result *= base
+	}
+	return result
+}
+
+func internalNodeCount(branchingFactor, depth int) int {
+	if branchingFactor <= 1 || depth <= 0 {
+		return 0
+	}
+	total := 0
+	level := 1
+	for i := 0; i < depth; i++ {
+		if total > math.MaxInt-level {
+			return math.MaxInt
+		}
+		total += level
+		if i == depth-1 {
+			break
+		}
+		if level > math.MaxInt/branchingFactor {
+			return math.MaxInt
+		}
+		level *= branchingFactor
+	}
+	return total
+}
+
+func saturatingMulInt(a, b int) int {
+	if a <= 0 || b <= 0 {
+		return 0
+	}
+	if a > math.MaxInt/b {
+		return math.MaxInt
+	}
+	return a * b
+}
+
+func saturatingAddInt(values ...int) int {
+	total := 0
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if total > math.MaxInt-value {
+			return math.MaxInt
+		}
+		total += value
+	}
+	return total
 }
 
 func clampInt(v, lo, hi int) int {
