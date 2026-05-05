@@ -25,8 +25,10 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-var configPath string
-var initConfigOnce sync.Once
+var (
+	configPath     string
+	initConfigOnce sync.Once
+)
 
 // Execute runs the root command with the supplied context.
 func Execute(ctx context.Context) error {
