@@ -3,7 +3,7 @@ kind: Skill
 metadata:
   name: session/restore
   version: 0.2.0
-  description: "Restore session state (tasks, plans, gotchas) after compaction with context injection"
+  description: "Restore session state (tasks, plans, memory records) after compaction with context injection"
   tags: ["session", "continuity", "hooks", "session-start", "plans"]
 distribution:
   type: exec

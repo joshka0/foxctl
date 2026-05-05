@@ -250,7 +250,7 @@ const SKILL_PATTERNS: Array<{ pattern: RegExp; hint: string }> = [
   // Memory patterns
   {
     pattern: /(gotcha|learned|remember.*that|don't\s+forget)/i,
-    hint: "**Skill hint:** Save a memory:\n```bash\nagentctl memory put --name \"gotcha-<topic>\" --type gotcha --summary \"<learning>\"\n```",
+    hint: "**Skill hint:** Save a memory record:\n```bash\nagentctl memory put --name \"memory-<topic>\" --type semantic_fact --summary \"<learning>\"\n```",
   },
 ];
 
@@ -363,7 +363,7 @@ const TODO_MODE_TTL_MS = 6 * 60 * 60 * 1000;
 
 const lastTodoContinuationBySession = new Map<string, { at: number; digest: string }>();
 const lastAnchorQuestionPingBySession = new Map<string, { at: number; digest: string }>();
-const lastGotchasInjectedAtCompactionBySession = new Map<string, number>();
+const lastMemoryRecordsInjectedAtCompactionBySession = new Map<string, number>();
 const todoModeBySession = new Map<string, number>();
 const anchorModeBySession = new Map<string, number>();
 
@@ -600,34 +600,45 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
      */
     tool: {
       /**
-       * Query foxctl memories (gotchas, decisions, patterns)
-       */
+     * Query foxctl memory records.
+     */
       "foxctl-memory": tool({
         description:
-          "Search foxctl memories for gotchas, decisions, and patterns relevant to a file or topic",
+          "Search foxctl memory records with lifecycle, trust, provenance, and usage labels",
         args: {
           query: z.string().describe("Search query or file path"),
-          types: z
-            .array(z.enum(["gotcha", "decision", "pattern", "codemap"]))
+          kinds: z
+            .array(
+              z.enum([
+                "semantic_fact",
+                "decision",
+                "procedural_skill",
+                "policy_rule",
+                "episodic_trace",
+                "reflection",
+                "eval_result",
+                "adapter_example",
+              ])
+            )
             .optional()
-            .describe("Filter by memory types"),
+            .describe("Filter by canonical memory kinds"),
         },
-        async execute({ query, types }) {
-          const result = await runSkill<{ memories: unknown[] }>(
+        async execute({ query, kinds }) {
+          const result = await runSkill<{ records: unknown[] }>(
             "memory/query",
             {
               query,
-              types: types?.join(","),
+              kinds: kinds?.join(","),
               limit: 5,
             },
             { workspace, ephemeral: true, timeout: 5000 }
           );
 
-          if (!result.success || !result.data?.memories?.length) {
-            return "No relevant memories found.";
+          if (!result.success || !result.data?.records?.length) {
+            return "No relevant memory records found.";
           }
 
-          return JSON.stringify(result.data.memories, null, 2);
+          return JSON.stringify(result.data.records, null, 2);
         },
       }),
 
@@ -1089,21 +1100,21 @@ Tool redirections:
       const MEMORY_SAVE_PATTERN = /^(remember|note|gotcha|learned|important|decision):?/i;
       const MEMORY_SAVE_INLINE = /(remember this|note this|save this|don't forget|the trick is|the key is|turns out|watch out)/i;
       if (MEMORY_SAVE_PATTERN.test(textLower) || MEMORY_SAVE_INLINE.test(textLower)) {
-        // Determine memory type
-        let memType = "context";
+        // Determine canonical memory kind for the stored record.
+        let memoryKind = "semantic_fact";
         if (/^gotcha/i.test(textLower) || /(trick|watch out|careful)/i.test(textLower)) {
-          memType = "gotcha";
+          memoryKind = "semantic_fact";
         } else if (/^learned/i.test(textLower) || /(turns out|realized)/i.test(textLower)) {
-          memType = "learning";
+          memoryKind = "semantic_fact";
         } else if (/^decision/i.test(textLower)) {
-          memType = "decision";
+          memoryKind = "decision";
         }
 
         const content = text.replace(MEMORY_SAVE_PATTERN, "").replace(MEMORY_SAVE_INLINE, "").trim();
         if (content.length > 10) {
           const saveResult = await runSkill<{ id?: string }>(
             "memory/put",
-            { summary: content, type: memType },
+            { summary: content, type: memoryKind },
             { workspace, ephemeral: true, timeout: 3000 }
           ).catch(() => ({ success: false, data: undefined }));
 
@@ -1111,14 +1122,14 @@ Tool redirections:
             await writePendingContext(
               input.sessionID,
               "Memory Saved",
-              `**[${memType}]:** ${content.slice(0, 100)}${content.length > 100 ? "..." : ""}\nID: ${saveResult.data?.id || "saved"}`
+              `**[${memoryKind}]:** ${content.slice(0, 100)}${content.length > 100 ? "..." : ""}\nID: ${saveResult.data?.id || "saved"}`
             );
           }
         } else {
           await writePendingContext(
             input.sessionID,
             "Memory Hint",
-            `Detected ${memType} pattern. Add more detail to auto-save.`
+            `Detected ${memoryKind} pattern. Add more detail to auto-save.`
           );
         }
       }
@@ -1421,29 +1432,35 @@ Tool redirections:
           }
 
           const compactionCount = anchorResult.data.anchor.compaction_count ?? 0;
-          const lastInjected = lastGotchasInjectedAtCompactionBySession.get(sessionID) ?? 0;
+          const lastInjected = lastMemoryRecordsInjectedAtCompactionBySession.get(sessionID) ?? 0;
           if (compactionCount > 0 && compactionCount !== lastInjected) {
-            const gotchasResult = await runSkill<{
-              memories: Array<{ name: string; summary: string }>;
+            const memoryRecordsResult = await runSkill<{
+              records: Array<{ source_id: string; summary: string }>;
             }>(
               "memory/query",
-              { workspace, session_id: sessionID, types: "gotcha", limit: 20 },
+              {
+                workspace,
+                session_id: sessionID,
+                query: "gotcha",
+                kinds: "semantic_fact",
+                limit: 20,
+              },
               { workspace, ephemeral: true, timeout: 3000 }
             );
 
-            if (gotchasResult.success && gotchasResult.data?.memories?.length) {
-              const gotchas = gotchasResult.data.memories
+            if (memoryRecordsResult.success && memoryRecordsResult.data?.records?.length) {
+              const memoryRecords = memoryRecordsResult.data.records
                 .map((m) => m.summary)
                 .filter((s) => typeof s === "string" && s.trim().length > 0)
                 .slice(0, 20)
                 .map((s) => `- ${s}`)
                 .join("\n");
-              if (gotchas) {
-                context.push(`**Session Gotchas (latest 20)**:\n${gotchas}`);
+              if (memoryRecords) {
+                context.push(`**Session Memory Records (latest 20)**:\n${memoryRecords}`);
               }
             }
 
-            lastGotchasInjectedAtCompactionBySession.set(sessionID, compactionCount);
+            lastMemoryRecordsInjectedAtCompactionBySession.set(sessionID, compactionCount);
           }
         }
 
@@ -1576,7 +1593,7 @@ Tool redirections:
 
 > Direct: \`foxctl run code/semantic_search --input '{"query": "${pattern.replace(/'/g, "\\'")}","scope": ["symbols"], "limit": 10}'\`
 > Scopes: \`symbols\`, \`memory\`, \`codemaps\`. Uses vector embeddings.
-> Memory scope supports date-based search (e.g., "January gotchas", "2026 decisions").`
+> Memory scope supports date-based search (e.g., "January memory records", "2026 decisions").`
           );
         }
 
@@ -1617,29 +1634,29 @@ Tool redirections:
                     .join("\n")
                 : "(no symbols found)";
 
-              // Search for relevant gotchas
-              const gotchasResult = await runSkill<{
+              // Search for relevant memory records
+              const memoryRecordsResult = await runSkill<{
                 results?: Array<{ name?: string; summary?: string; snippet?: string }>;
               }>(
                 "code/semantic_search",
-                { query: `${fileName} gotchas`, scope: "memory", limit: 3 },
+                { query: `${fileName} memory records`, scope: "memory", limit: 3 },
                 { workspace, ephemeral: true, timeout: 3000 }
               ).catch(() => ({ success: false, data: undefined }));
 
-              let gotchasSection = "";
-              if (gotchasResult.success && gotchasResult.data?.results?.length) {
-                const gotchasList = gotchasResult.data.results
+              let memoryRecordsSection = "";
+              if (memoryRecordsResult.success && memoryRecordsResult.data?.results?.length) {
+                const memoryRecordsList = memoryRecordsResult.data.results
                   .slice(0, 2)
-                  .map((g) => `- **${g.name || "gotcha"}**: ${(g.snippet || g.summary || "").split("\n")[0]}`)
+                  .map((g) => `- **${g.name || "memory"}**: ${(g.snippet || g.summary || "").split("\n")[0]}`)
                   .join("\n");
-                gotchasSection = `\n\n**Relevant Gotchas:**\n${gotchasList}`;
+                memoryRecordsSection = `\n\n**Relevant Memory Records:**\n${memoryRecordsList}`;
               }
 
               throw new Error(
                 `**[Foxctl Mode] Large File: ${fileName} (${lineCount} lines)**
 
 **Symbols:**
-${symbolsList}${gotchasSection}
+${symbolsList}${memoryRecordsSection}
 
 **To read specific lines:**
   \`foxctl run code/context_grep --input '{"mode": "line", "file_path": "${filePath}", "line_start": N, "line_end": M}'\`
@@ -1662,20 +1679,20 @@ ${symbolsList}${gotchasSection}
         const filePath = (args.file_path || args.path) as string;
         if (filePath) {
           const memResult = await runSkill<{
-            memories: Array<{ name: string; summary: string; type: string }>;
+            records: Array<{ source_id: string; summary: string; kind: string }>;
           }>(
             "memory/query",
-            { file: filePath, types: "gotcha,decision", limit: 5 },
+            { file: filePath, kinds: "semantic_fact,decision", limit: 5 },
             { workspace, ephemeral: true, timeout: 3000 }
           );
 
-          if (memResult.success && memResult.data?.memories?.length) {
-            const formatted = memResult.data.memories
-              .map((m) => `- **${m.name}** (${m.type}): ${m.summary}`)
+          if (memResult.success && memResult.data?.records?.length) {
+            const formatted = memResult.data.records
+              .map((m) => `- **${m.source_id}** (${m.kind}): ${m.summary}`)
               .join("\n");
             await writePendingContext(
               sessionID,
-              `File Memories: ${filePath.split("/").pop()}`,
+              `File Memory Records: ${filePath.split("/").pop()}`,
               formatted
             );
           }
@@ -1891,8 +1908,8 @@ ${symbolsList}${gotchasSection}
             if (completedTasks.length > 0) {
               const taskNames = completedTasks.map((t) => t.content).filter(Boolean).join(", ");
               const hint = completedTasks.length === 1
-                ? `**Memory prompt:** Task completed: "${taskNames}"\n\nIf you learned something useful or encountered a gotcha, save it:\n\`foxctl memory put --name "gotcha-<topic>" --type gotcha --summary "<learning>"\``
-                : `**Memory prompt:** Completed ${completedTasks.length} tasks.\n\nIf you learned something useful or encountered gotchas, save them:\n\`foxctl memory put --name "gotcha-<topic>" --type gotcha --summary "<learning>"\``;
+                ? `**Memory prompt:** Task completed: "${taskNames}"\n\nIf you learned something useful, save it as a canonical memory record:\n\`foxctl memory put --name "memory-<topic>" --type semantic_fact --summary "<learning>"\``
+                : `**Memory prompt:** Completed ${completedTasks.length} tasks.\n\nIf you learned something useful, save it as canonical memory records:\n\`foxctl memory put --name "memory-<topic>" --type semantic_fact --summary "<learning>"\``;
               await writePendingContext(input.sessionID, "Memory Prompt", hint);
             }
           }

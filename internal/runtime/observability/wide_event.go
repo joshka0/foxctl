@@ -97,4 +97,11 @@ const (
 	OpContextSemanticArtifactSearch = "context.semantic_artifact_search"
 	// OpContextLayeredBundle is emitted when layered context assembly completes with stable refs.
 	OpContextLayeredBundle = "context.layered_bundle"
+
+	// OpMemoryQuery is emitted when canonical memory records are retrieved.
+	OpMemoryQuery = "memory.query"
+	// OpMemoryCuratorReport is emitted when the memory curator plans or applies lifecycle actions.
+	OpMemoryCuratorReport = "memory.curator_report"
+	// OpMemorySessionRestore is emitted when session restore selects memory records for context.
+	OpMemorySessionRestore = "memory.session_restore"
 )

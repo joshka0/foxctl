@@ -109,9 +109,10 @@ func DefaultDefs() []coretool.ToolDef {
 			prop("limit", "integer", "Maximum result count"),
 		)),
 
-		def("memory/query", "Query stored memories for relevant context.", schemaObject(
+		def("memory/query", "Query canonical memory records for relevant context.", schemaObject(
 			req("query", "string", "Search query"),
-			prop("types", "string", "Optional memory type filter"),
+			prop("kinds", "string", "Optional canonical memory kind filter"),
+			prop("lifecycle_states", "string", "Optional lifecycle filter; default returns active plus strongly matching candidate/stale evidence"),
 			prop("file", "string", "Optional file filter"),
 			prop("limit", "integer", "Maximum result count"),
 		)),

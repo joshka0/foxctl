@@ -13,9 +13,11 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/joshka0/foxctl/internal/context/calibration"
+	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/context/sessionkit"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/joshka0/foxctl/internal/storage/sessions"
 	"github.com/joshka0/foxctl/internal/storage/tasks"
@@ -106,12 +108,6 @@ type SimilarSession struct {
 	EndedAt      time.Time `json:"ended_at,omitempty"`
 }
 
-// MemoryResult represents a relevant memory entry with type and summary information.
-type MemoryResult struct {
-	Type    string `json:"type"`    // gotcha, decision, user_pref, time_sink
-	Summary string `json:"summary"` // The memory content
-}
-
 // AnchorInfo represents a session anchor (epic/goal) with prompt and learning tracking.
 type AnchorInfo struct {
 	AnchorID        string   `json:"anchor_id"`
@@ -128,7 +124,7 @@ type Output struct {
 	ItemsRestored      int                    `json:"items_restored"`
 	KeyQuestions       []string               `json:"key_questions,omitempty"`
 	SearchResults      []SemanticSearchResult `json:"search_results,omitempty"`
-	RelevantMemories   []MemoryResult         `json:"relevant_memories,omitempty"`
+	RelevantRecords    []memorycore.Record    `json:"relevant_memory_records,omitempty"`
 	Anchor             *AnchorInfo            `json:"anchor,omitempty"`
 	CalibrationProfile bool                   `json:"calibration_profile,omitempty"` // Whether calibration profile was injected
 }
@@ -151,9 +147,12 @@ func main() {
 // - SideEffects: reads memory and session stores; performs semantic searches; injects context; clears pending restore flags
 // - FailureModes: missing stores, invalid snapshots, search failures, context formatting errors
 // - Observability: emits restoration context, search results, memory data, and comprehensive session state
-// - Related: runSemanticSearches, searchRelevantMemories, formatContextWithSearch, searchSimilarSessions
+// - Related: runSemanticSearches, searchRelevantMemoryRecords, formatContextWithSearch, searchSimilarSessions
 // - Keywords: session/restore, context_restoration, semantic_search, memory_retrieval, session_continuity
+//
+//nolint:gocyclo // Legacy restoration orchestrator; this slice only changes the memory record contract.
 func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
+	start := time.Now()
 	// Default workspace
 	input.Workspace = workspaceutil.Resolve(input.Workspace, "", rc.Workspace)
 
@@ -171,7 +170,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	memStore, err := rc.Stores.MemoryInCache(ctx)
 	if err != nil {
 		// No snapshot available - that's ok, just return empty context
-		return emitEmptyOutput(rc, "no memory store")
+		return emitEmptyOutput(ctx, rc, input, start, "no memory store")
 	}
 
 	// Open sessions store for fallback data
@@ -183,12 +182,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	// If check_pending is true, only proceed if there's a pending restore
 	if input.CheckPending {
 		if sessStore == nil {
-			return emitEmptyOutput(rc, "no sessions store for pending check")
+			return emitEmptyOutput(ctx, rc, input, start, "no sessions store for pending check")
 		}
 		pendingSession, err := sessStore.GetPendingRestore(ctx, input.Workspace)
 		if err != nil || pendingSession == nil {
 			// No pending restore - exit silently
-			return emitEmptyOutput(rc, "no pending restore")
+			return emitEmptyOutput(ctx, rc, input, start, "no pending restore")
 		}
 		// Use the pending session's ID if not provided
 		if input.SessionID == "" {
@@ -205,7 +204,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	// Search for most recent session snapshot
 	snapshots, err := memStore.Search(ctx, input.Workspace, "session-snapshot", 5)
 	if err != nil || len(snapshots) == 0 {
-		return emitEmptyOutput(rc, "no snapshots found")
+		return emitEmptyOutput(ctx, rc, input, start, "no snapshots found")
 	}
 
 	// Get the most recent one
@@ -214,7 +213,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	// Parse the snapshot
 	var snapshot SessionSnapshot
 	if err := json.Unmarshal(latestEntry.Result, &snapshot); err != nil {
-		return emitEmptyOutput(rc, "invalid snapshot format")
+		return emitEmptyOutput(ctx, rc, input, start, "invalid snapshot format")
 	}
 
 	// Use conversation summary from input (current context window) if provided
@@ -289,11 +288,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 		similarWindows = searchCurrentSessionWindows(ctx, sessStore, contextSummary, sessionID, 3, rc.Config, skillmain.EmbeddingGuard(rc))
 	}
 
-	// Search for relevant memories (gotchas, decisions, user_prefs) based on active task/plan
-	// Falls back to recent memories if no semantic search query available
-	var relevantMemories []MemoryResult
+	// Search for relevant canonical memory records based on active task/plan.
+	// Falls back to recent named memory records if no semantic search query is available.
+	var relevantRecords []memorycore.Record
 	contextQuery := buildContextQuery(snapshot)
-	relevantMemories = searchRelevantMemories(ctx, contextQuery, input.Workspace, 5, memStore)
+	relevantRecords = searchRelevantMemoryRecords(ctx, contextQuery, input.Workspace, 5, memStore)
 
 	// Fetch session anchor (epic/goal)
 	anchor := fetchAnchor(ctx, input.Workspace, sessionID)
@@ -304,8 +303,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 		calibProfile, _ = calibration.LoadProfile(ctx, memStore, input.Workspace)
 	}
 
-	// Format context for injection (with todo-based search results, memories, files modified, and related context)
-	contextStr := formatContextWithSearch(snapshot, input.Trigger, searchQueries, searchResults, relevantMemories, filesModified, similarSessions, similarWindows, anchor, calibProfile)
+	// Format context for injection (with todo-based search results, memory records, files modified, and related context)
+	contextStr := formatContextWithSearch(snapshot, input.Trigger, searchQueries, searchResults, relevantRecords, filesModified, similarSessions, similarWindows, anchor, calibProfile)
 	snapshotAge := formatAge(snapshot.Timestamp)
 
 	// Build output
@@ -324,7 +323,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 		ItemsRestored:      countItems(snapshot),
 		KeyQuestions:       searchQueries, // Now based on pending todos
 		SearchResults:      searchResults,
-		RelevantMemories:   relevantMemories,
+		RelevantRecords:    relevantRecords,
 		Anchor:             anchor,
 		CalibrationProfile: calibProfile != nil,
 	}
@@ -334,10 +333,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 		_ = sessStore.ClearPendingRestore(ctx, sessionID)
 	}
 
+	emitSessionRestoreTelemetry(ctx, rc, input, output, "", time.Since(start))
+
 	return skillout.Emit(rc, command, output)
 }
 
-func emitEmptyOutput(rc *skillmain.RunContext, reason string) error {
+func emitEmptyOutput(ctx context.Context, rc *skillmain.RunContext, input Input, start time.Time, reason string) error {
 	output := Output{
 		HookOutput: HookOutput{
 			Decision: "approve",
@@ -345,7 +346,48 @@ func emitEmptyOutput(rc *skillmain.RunContext, reason string) error {
 		},
 		ItemsRestored: 0,
 	}
+	emitSessionRestoreTelemetry(ctx, rc, input, output, reason, time.Since(start))
 	return skillout.Emit(rc, command, output)
+}
+
+func emitSessionRestoreTelemetry(ctx context.Context, rc *skillmain.RunContext, input Input, output Output, emptyReason string, duration time.Duration) {
+	sessionID := strings.TrimSpace(input.SessionID)
+	agentID := ""
+	if rc != nil {
+		if sessionID == "" {
+			sessionID = rc.SessionID
+		}
+		agentID = rc.AgentID
+	}
+	runSemanticSearch := true
+	if input.RunSemanticSearch != nil {
+		runSemanticSearch = *input.RunSemanticSearch
+	}
+	builder := observability.NewEvent(observability.OpMemorySessionRestore).
+		WithComponent(observability.ComponentSkill).
+		WithCommand(command).
+		WithWorkspace(input.Workspace).
+		WithSession(sessionID, agentID).
+		EnrichFromContext(ctx).
+		EnrichFromEnv().
+		WithData("always_sample", true).
+		WithData("trigger", input.Trigger).
+		WithData("check_pending", input.CheckPending).
+		WithData("run_semantic_search", runSemanticSearch).
+		WithData("max_search_results", input.MaxSearchResults).
+		WithData("items_restored", output.ItemsRestored).
+		WithData("empty", emptyReason != "").
+		WithData("empty_reason", emptyReason).
+		WithData("snapshot_id_present", output.SnapshotID != "").
+		WithData("key_questions", len(output.KeyQuestions)).
+		WithData("semantic_result_groups", len(output.SearchResults)).
+		WithData("semantic_result_items", semanticResultItemCount(output.SearchResults)).
+		WithData("relevant_memory_records", len(output.RelevantRecords)).
+		WithData("record_kind_counts", restoreRecordKindCounts(output.RelevantRecords)).
+		WithData("record_lifecycle_counts", restoreRecordLifecycleCounts(output.RelevantRecords)).
+		WithData("anchor_present", output.Anchor != nil).
+		WithData("calibration_profile", output.CalibrationProfile)
+	observability.Emit(ctx, builder.Success(duration))
 }
 
 func formatAge(t time.Time) string {
@@ -374,6 +416,36 @@ func countItems(snap SessionSnapshot) int {
 	count += len(snap.Decisions)
 	count += len(snap.Insights)
 	return count
+}
+
+func semanticResultItemCount(results []SemanticSearchResult) int {
+	count := 0
+	for _, result := range results {
+		count += len(result.Results)
+	}
+	return count
+}
+
+func restoreRecordKindCounts(records []memorycore.Record) map[string]int {
+	if len(records) == 0 {
+		return nil
+	}
+	counts := make(map[string]int)
+	for _, record := range records {
+		counts[string(record.Kind)]++
+	}
+	return counts
+}
+
+func restoreRecordLifecycleCounts(records []memorycore.Record) map[string]int {
+	if len(records) == 0 {
+		return nil
+	}
+	counts := make(map[string]int)
+	for _, record := range records {
+		counts[string(record.Lifecycle.State)]++
+	}
+	return counts
 }
 
 // runSemanticSearches executes semantic search for each key question using foxctl CLI.
@@ -451,7 +523,7 @@ func runSemanticSearches(ctx context.Context, keyQuestions []string, workspace s
 	return results
 }
 
-// buildContextQuery creates a search query from the snapshot to find relevant memories.
+// buildContextQuery creates a search query from the snapshot to find relevant memory records.
 func buildContextQuery(snap SessionSnapshot) string {
 	var parts []string
 	if snap.ActiveTask != nil && snap.ActiveTask.Title != "" {
@@ -473,11 +545,10 @@ func buildContextQuery(snap SessionSnapshot) string {
 	return strings.Join(parts, " ")
 }
 
-// searchRelevantMemories searches for relevant gotchas, decisions, user_prefs via semantic search
+// searchRelevantMemoryRecords searches for relevant canonical memory records via semantic search
 // with fallback to direct memory store query.
-func searchRelevantMemories(ctx context.Context, query, workspace string, limit int, memStore *memory.Store) []MemoryResult {
-	learningTypes := map[string]bool{"gotcha": true, "decision": true, "user_pref": true, "time_sink": true, "pattern": true}
-	var results []MemoryResult
+func searchRelevantMemoryRecords(ctx context.Context, query, workspace string, limit int, memStore *memory.Store) []memorycore.Record {
+	var results []memorycore.Record
 	seen := make(map[string]bool)
 
 	// Try semantic search first if query is provided
@@ -503,39 +574,37 @@ func searchRelevantMemories(ctx context.Context, query, workspace string, limit 
 			cancel()
 			if err == nil {
 				for _, r := range data.Results {
-					// Accept both "memory" and "memories" source names
-					if (r.Source != "memory" && r.Source != "memories") || !learningTypes[r.Type] || seen[r.Summary] {
+					if (r.Source != "memory" && r.Source != "memories") || seen[r.Summary] {
+						continue
+					}
+					record := memoryRecordFromSemanticSearch(r.Name, r.Summary, r.Type)
+					if !sessionRestoreMemoryKind(record.Kind) {
 						continue
 					}
 					seen[r.Summary] = true
-					results = append(results, MemoryResult{Type: r.Type, Summary: r.Summary})
+					results = append(results, record)
 				}
 			}
 		}
 	}
 
-	// Fallback: query memory store directly for recent memories by type if semantic search returned nothing
+	// Fallback: query memory store directly for recent named memory records if semantic search returned nothing.
 	if len(results) == 0 && memStore != nil {
-		for memType := range learningTypes {
-			entries, err := memStore.ListByType(ctx, workspace, memType, 3)
-			if err != nil {
-				continue
-			}
+		entries, err := memStore.List(ctx, workspace, limit*4)
+		if err == nil {
 			for _, entry := range entries {
-				if seen[entry.Entry.Summary] {
+				if seen[entry.Summary] {
 					continue
 				}
-				seen[entry.Entry.Summary] = true
-				results = append(results, MemoryResult{
-					Type:    entry.Entry.Type,
-					Summary: entry.Entry.Summary,
-				})
+				record := memorycore.RecordFromNamedEntry(entry, memorycore.NamedEntryOptions{})
+				if !sessionRestoreMemoryKind(record.Kind) {
+					continue
+				}
+				seen[entry.Summary] = true
+				results = append(results, record)
 				if len(results) >= limit {
 					break
 				}
-			}
-			if len(results) >= limit {
-				break
 			}
 		}
 	}
@@ -543,8 +612,59 @@ func searchRelevantMemories(ctx context.Context, query, workspace string, limit 
 	return results
 }
 
+func sessionRestoreMemoryKind(kind memorycore.Kind) bool {
+	switch kind {
+	case memorycore.KindSemanticFact, memorycore.KindDecision, memorycore.KindProceduralSkill, memorycore.KindPolicyRule:
+		return true
+	default:
+		return false
+	}
+}
+
+func memoryRecordFromSemanticSearch(name, summary, entryType string) memorycore.Record {
+	record := memorycore.Record{
+		ID:         strings.TrimSpace(name),
+		Kind:       memorycore.KindForNamedType(entryType),
+		SourceLane: memorycore.SourceLaneNamedMemory,
+		SourceID:   strings.TrimSpace(name),
+		Summary:    strings.TrimSpace(summary),
+		Temporal: memorycore.TemporalEnvelope{
+			TemporalScope: "unknown",
+		},
+		Provenance: memorycore.Provenance{
+			SourceType: "tool_result",
+			CreatedBy:  "foxctl.semantic_search",
+		},
+		Trust: memorycore.TrustEnvelope{
+			SourceTrust: "agent_generated",
+			Confidence:  0.5,
+			Authority:   0.2,
+			Tainted:     false,
+		},
+		Lifecycle: memorycore.LifecycleEnvelope{
+			State:        memorycore.LifecycleStateActive,
+			Pinned:       false,
+			ReviewStatus: memorycore.ReviewStatusUnreviewed,
+		},
+		Usage: memorycore.UsageEnvelope{
+			InstructionEligible: false,
+			EvidenceOnly:        true,
+			Reason:              "semantic memory search records are evidence unless promoted as validated policy or skill",
+		},
+	}
+	if record.ID == "" {
+		record.ID = record.Summary
+	}
+	if record.SourceID == "" {
+		record.SourceID = record.ID
+	}
+	return record
+}
+
 // formatContextWithSearch formats the context including todo-based search results, files modified, and related context.
-func formatContextWithSearch(snap SessionSnapshot, trigger string, todoQueries []string, searchResults []SemanticSearchResult, memories []MemoryResult, filesModified []string, similarSessions []SimilarSession, similarWindows []SimilarContextWindow, anchor *AnchorInfo, calibProfile *calibration.Profile) string {
+//
+//nolint:gocyclo // Legacy prompt formatter; keep behavioral shape stable during the memory record migration.
+func formatContextWithSearch(snap SessionSnapshot, trigger string, todoQueries []string, searchResults []SemanticSearchResult, memoryRecords []memorycore.Record, filesModified []string, similarSessions []SimilarSession, similarWindows []SimilarContextWindow, anchor *AnchorInfo, calibProfile *calibration.Profile) string {
 	// Start with the base context, wrapped in clear delimiters
 	var sb strings.Builder
 
@@ -672,18 +792,12 @@ func formatContextWithSearch(snap SessionSnapshot, trigger string, todoQueries [
 		sb.WriteString("\n")
 	}
 
-	// Relevant memories from semantic search
-	if len(memories) > 0 {
-		sb.WriteString("### Relevant Memories\n")
-		for _, m := range memories {
-			typeLabel := m.Type
-			switch m.Type {
-			case "user_pref":
-				typeLabel = "preference"
-			case "time_sink":
-				typeLabel = "time sink"
-			}
-			sb.WriteString(fmt.Sprintf("- **[%s]** %s\n", typeLabel, m.Summary))
+	// Relevant canonical memory records from semantic search or named memory fallback.
+	if len(memoryRecords) > 0 {
+		sb.WriteString("### Relevant Memory Records\n")
+		sb.WriteString("*Evidence only unless explicitly marked as active policy or validated skill.*\n")
+		for _, record := range memoryRecords {
+			sb.WriteString(fmt.Sprintf("- **[%s]** %s\n", record.Kind, record.Summary))
 		}
 		sb.WriteString("\n")
 	}
@@ -812,7 +926,7 @@ Run: ` + "`foxctl run <skill> --input '<json>'`" + ` | Help: ` + "`foxctl run <s
 | Skill | Purpose |
 |-------|---------|
 | ` + "`todo/manage`" + ` | Create/list/complete tasks |
-| ` + "`memory/query`" + ` | Query gotchas/decisions/patterns |
+| ` + "`memory/query`" + ` | Query canonical memory records |
 | ` + "`session/recall`" + ` | Search past sessions |
 
 **CLI Shortcuts**

@@ -18,7 +18,6 @@ func redactURL(rawURL string) string {
 	if err != nil {
 		return "<invalid-url>"
 	}
-	// Clear user info (credentials) and query params
 	parsed.User = nil
 	parsed.RawQuery = ""
 	return parsed.String()
@@ -47,7 +46,6 @@ func OpenWithConfig(ctx context.Context, cfg config.Config) (storage.MemoryStore
 	case dbdriver.DriverLibSQL:
 		return openLibSQLFromConfig(ctx, cfg)
 	default:
-		// SQLite fallback
 		return Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	}
 }
@@ -61,10 +59,9 @@ func openTursoFromConfig(ctx context.Context, cfg config.Config) (*TursoStore, e
 	tursoCfg := dbdriver.TursoConfig{
 		URL:                cfg.Database.Turso.URL,
 		AuthToken:          cfg.Database.Turso.AuthToken,
-		EnableVectorSearch: true, // Always enable for memory
+		EnableVectorSearch: true,
 		VectorDimensions:   cfg.Database.Vector.Dimensions,
-		// Use storage root for embedded replica persistence
-		ReplicaPath: cfg.Storage.Root + "/memory.turso.replica",
+		ReplicaPath:        cfg.Storage.Root + "/memory.turso.replica",
 	}
 
 	store, err := OpenTurso(ctx, tursoCfg)

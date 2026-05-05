@@ -136,6 +136,7 @@ var skillGroups = map[string][]string{
 		"fs/read",
 		"todo/manage",
 		"memory/query",
+		"memory/curator_report",
 		"session/recall",
 		"session/timeline",
 	},
@@ -356,7 +357,7 @@ Available skill groups:
   mux         - command-backed terminal collaboration tools
   collab      - room + mux collaboration tools
   code-write  - Code modification: smart_write
-  project     - Project management: todo/manage, memory/query, session/recall
+  project     - Project management: todo/manage, memory/query, memory/curator_report, session/recall
   foxctl-ci - CI/CD integration: checks, prcomments
 
 Configure backend MCP servers via --config or environment variables:

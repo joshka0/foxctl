@@ -49,6 +49,12 @@ type Stats = storage.MemoryStats
 // ListFilter aliases the shared filter type for backwards compatibility.
 type ListFilter = storage.MemoryListFilter
 
+// LifecycleUpdate aliases the shared lifecycle update type.
+type LifecycleUpdate = storage.MemoryLifecycleUpdate
+
+// TelemetryUpdate aliases the shared telemetry update type.
+type TelemetryUpdate = storage.MemoryTelemetryUpdate
+
 // SaveOptions aliases the shared save options type for backwards compatibility.
 type SaveOptions = storage.MemorySaveOptions
 
@@ -65,6 +71,14 @@ type WorkspaceMigrationSummary struct {
 	MetadataMoved bool   `json:"metadata_moved"`
 	DryRun        bool   `json:"dry_run"`
 }
+
+const namedEntrySelectColumns = `
+	id, name, type, workspace, summary, result, digests,
+	created_at, updated_at, last_accessed, access_count, session_id,
+	lifecycle_state, pinned, review_status, superseded_by, review_notes,
+	last_used_at, last_validated_at,
+	selected_count, use_count, success_count, failure_count, patch_count, restore_count,
+	last_selected_at, last_succeeded_at, last_failed_at, last_patched_at, last_restored_at`
 
 // Connection pool defaults for SQLite file-based storage
 // These values provide reasonable defaults for typical workloads with moderate concurrency
@@ -282,6 +296,12 @@ func (s *Store) Save(ctx context.Context, entry NamedEntry) (NamedEntry, error) 
 	if entry.Type == "" {
 		entry.Type = "result"
 	}
+	if strings.TrimSpace(entry.LifecycleState) == "" {
+		entry.LifecycleState = "active"
+	}
+	if strings.TrimSpace(entry.ReviewStatus) == "" {
+		entry.ReviewStatus = "unreviewed"
+	}
 	entry.Workspace = ws.CanonicalID(entry.Workspace)
 
 	// Format digests with proper error handling
@@ -291,8 +311,14 @@ func (s *Store) Save(ctx context.Context, entry NamedEntry) (NamedEntry, error) 
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO named_memory (id, name, type, workspace, summary, result, digests, session_id, created_at, updated_at, last_accessed, access_count)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0)
+INSERT INTO named_memory (
+	id, name, type, workspace, summary, result, digests, session_id,
+	created_at, updated_at, last_accessed, access_count,
+	lifecycle_state, pinned, review_status, superseded_by, review_notes, last_used_at, last_validated_at,
+	selected_count, use_count, success_count, failure_count, patch_count, restore_count,
+	last_selected_at, last_succeeded_at, last_failed_at, last_patched_at, last_restored_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
 ON CONFLICT(name, workspace) DO UPDATE SET
 	id = excluded.id,
 	type = excluded.type,
@@ -303,7 +329,13 @@ ON CONFLICT(name, workspace) DO UPDATE SET
 	updated_at = excluded.updated_at,
 	last_accessed = excluded.last_accessed
 `, entry.ID, entry.Name, entry.Type, entry.Workspace, entry.Summary, entry.Result, digestsJSON, entry.SessionID,
-		sqlutil.FormatTimestamp(entry.CreatedAt), sqlutil.FormatTimestamp(entry.UpdatedAt), sqlutil.FormatTimestamp(entry.LastAccess))
+		sqlutil.FormatTimestamp(entry.CreatedAt), sqlutil.FormatTimestamp(entry.UpdatedAt), sqlutil.FormatTimestamp(entry.LastAccess),
+		entry.LifecycleState, boolToInt(entry.Pinned), entry.ReviewStatus, entry.SupersededBy, entry.ReviewNotes,
+		sqlutil.FormatTimestamp(entry.LastUsedAt), sqlutil.FormatTimestamp(entry.LastValidatedAt),
+		entry.SelectedCount, entry.UseCount, entry.SuccessCount, entry.FailureCount, entry.PatchCount, entry.RestoreCount,
+		sqlutil.FormatTimestamp(entry.LastSelectedAt), sqlutil.FormatTimestamp(entry.LastSucceededAt),
+		sqlutil.FormatTimestamp(entry.LastFailedAt), sqlutil.FormatTimestamp(entry.LastPatchedAt),
+		sqlutil.FormatTimestamp(entry.LastRestoredAt))
 	if err != nil {
 		return NamedEntry{}, fmt.Errorf("memory: save: %w", err)
 	}
@@ -314,42 +346,16 @@ ON CONFLICT(name, workspace) DO UPDATE SET
 // Get fetches a named memory by name+workspace.
 func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, error) {
 	workspace = ws.CanonicalID(workspace)
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+	row := s.db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT %s
 		FROM named_memory
-		WHERE name = $1 AND workspace = $2`, name, workspace)
-	var entry NamedEntry
-	var digests string
-	var created, updated, last string
-	var sessionID sql.NullString
-	if err := row.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount, &sessionID); err != nil {
+		WHERE name = $1 AND workspace = $2`, namedEntrySelectColumns), name, workspace)
+	entry, err := scanEntry(row)
+	if err != nil {
 		if dbutil.IsNoRows(err) {
 			return NamedEntry{}, ErrNotFound
 		}
 		return NamedEntry{}, fmt.Errorf("memory: get: %w", err)
-	}
-
-	// Parse digests with proper error handling
-	if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
-		return NamedEntry{}, fmt.Errorf("memory: scan digests: %w", err)
-	}
-
-	// Parse timestamps with proper error handling
-	var err error
-	entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
-	if err != nil {
-		return NamedEntry{}, fmt.Errorf("memory: scan created_at: %w", err)
-	}
-	entry.UpdatedAt, err = sqlutil.ScanTimestamp(updated)
-	if err != nil {
-		return NamedEntry{}, fmt.Errorf("memory: scan updated_at: %w", err)
-	}
-	entry.LastAccess, err = sqlutil.ScanTimestamp(last)
-	if err != nil {
-		return NamedEntry{}, fmt.Errorf("memory: scan last_accessed: %w", err)
-	}
-	if sessionID.Valid {
-		entry.SessionID = sessionID.String
 	}
 
 	if _, updateErr := s.db.ExecContext(ctx, `
@@ -368,12 +374,12 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s
 		FROM named_memory
 		WHERE workspace = $1
 		ORDER BY updated_at DESC
-		LIMIT $2`, workspace, limit)
+		LIMIT $2`, namedEntrySelectColumns), workspace, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: list: %w", err)
 	}
@@ -381,41 +387,7 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 		errs.Ignore(rows.Close(), "close memory list rows")
 	}()
 
-	entries := make([]NamedEntry, 0, limit)
-	for rows.Next() {
-		var entry NamedEntry
-		var digests string
-		var created, updated, last string
-		var sessionID sql.NullString
-		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount, &sessionID); err != nil {
-			return nil, fmt.Errorf("memory: scan list: %w", err)
-		}
-
-		// Parse digests with proper error handling
-		if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
-			return nil, fmt.Errorf("memory: scan list digests: %w", err)
-		}
-
-		// Parse timestamps with proper error handling
-		entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
-		if err != nil {
-			return nil, fmt.Errorf("memory: scan list created_at: %w", err)
-		}
-		entry.UpdatedAt, err = sqlutil.ScanTimestamp(updated)
-		if err != nil {
-			return nil, fmt.Errorf("memory: scan list updated_at: %w", err)
-		}
-		entry.LastAccess, err = sqlutil.ScanTimestamp(last)
-		if err != nil {
-			return nil, fmt.Errorf("memory: scan list last_accessed: %w", err)
-		}
-		if sessionID.Valid {
-			entry.SessionID = sessionID.String
-		}
-
-		entries = append(entries, entry)
-	}
-	return entries, nil
+	return scanEntries(rows)
 }
 
 // ListFiltered returns named memories for a workspace with optional filters.
@@ -466,11 +438,11 @@ func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListF
 	}
 
 	q := fmt.Sprintf(`
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+		SELECT %s
 		FROM named_memory
 		WHERE %s
 		ORDER BY updated_at DESC
-		LIMIT $%d OFFSET $%d`, whereSQL, argIdx, argIdx+1)
+		LIMIT $%d OFFSET $%d`, namedEntrySelectColumns, whereSQL, argIdx, argIdx+1)
 	qArgs := append(append([]any{}, args...), limit, offset)
 
 	rows, err := s.db.QueryContext(ctx, q, qArgs...)
@@ -479,40 +451,9 @@ func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListF
 	}
 	defer func() { errs.Ignore(rows.Close(), "close memory list filtered rows") }()
 
-	entries := make([]NamedEntry, 0, limit)
-	for rows.Next() {
-		var entry NamedEntry
-		var digests string
-		var created, updated, last string
-		var sessionID sql.NullString
-		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount, &sessionID); err != nil {
-			return nil, 0, fmt.Errorf("memory: scan list filtered: %w", err)
-		}
-		if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
-			return nil, 0, fmt.Errorf("memory: scan list filtered digests: %w", err)
-		}
-
-		var parseErr error
-		entry.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
-		if parseErr != nil {
-			return nil, 0, fmt.Errorf("memory: scan list filtered created_at: %w", parseErr)
-		}
-		entry.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
-		if parseErr != nil {
-			return nil, 0, fmt.Errorf("memory: scan list filtered updated_at: %w", parseErr)
-		}
-		entry.LastAccess, parseErr = sqlutil.ScanTimestamp(last)
-		if parseErr != nil {
-			return nil, 0, fmt.Errorf("memory: scan list filtered last_accessed: %w", parseErr)
-		}
-		if sessionID.Valid {
-			entry.SessionID = sessionID.String
-		}
-
-		entries = append(entries, entry)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("memory: list filtered rows: %w", err)
+	entries, err := scanEntries(rows)
+	if err != nil {
+		return nil, 0, err
 	}
 	return entries, total, nil
 }
@@ -753,6 +694,52 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 		}
 	}
 
+	lifecycleColumns := []string{
+		`ALTER TABLE named_memory ADD COLUMN lifecycle_state TEXT NOT NULL DEFAULT 'active'`,
+		`ALTER TABLE named_memory ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE named_memory ADD COLUMN review_status TEXT NOT NULL DEFAULT 'unreviewed'`,
+		`ALTER TABLE named_memory ADD COLUMN superseded_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE named_memory ADD COLUMN review_notes TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE named_memory ADD COLUMN last_used_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE named_memory ADD COLUMN last_validated_at TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range lifecycleColumns {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			errMsg := strings.ToLower(err.Error())
+			if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
+				return fmt.Errorf("memory: add lifecycle column: %w", err)
+			}
+		}
+	}
+
+	telemetryColumns := []string{
+		`ALTER TABLE named_memory ADD COLUMN selected_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE named_memory ADD COLUMN use_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE named_memory ADD COLUMN success_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE named_memory ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE named_memory ADD COLUMN patch_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE named_memory ADD COLUMN restore_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE named_memory ADD COLUMN last_selected_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE named_memory ADD COLUMN last_succeeded_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE named_memory ADD COLUMN last_failed_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE named_memory ADD COLUMN last_patched_at TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE named_memory ADD COLUMN last_restored_at TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range telemetryColumns {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			errMsg := strings.ToLower(err.Error())
+			if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
+				return fmt.Errorf("memory: add telemetry column: %w", err)
+			}
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_named_memory_lifecycle ON named_memory(workspace, lifecycle_state, updated_at DESC);
+	`); err != nil {
+		return fmt.Errorf("memory: add lifecycle index: %w", err)
+	}
+
 	return nil
 }
 
@@ -763,12 +750,12 @@ func (s *Store) Search(ctx context.Context, workspace, query string, limit int) 
 		limit = 20
 	}
 	like := "%" + strings.ToLower(query) + "%"
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s
 		FROM named_memory
 		WHERE workspace = $1 AND (LOWER(name) LIKE $2 OR LOWER(summary) LIKE $3)
 		ORDER BY updated_at DESC
-		LIMIT $4`, workspace, like, like, limit)
+		LIMIT $4`, namedEntrySelectColumns), workspace, like, like, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search: %w", err)
 	}
@@ -819,12 +806,12 @@ func (s *Store) ListByType(ctx context.Context, workspace, entryType string, lim
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s
 		FROM named_memory
 		WHERE workspace = $1 AND type = $2
 		ORDER BY updated_at DESC
-		LIMIT $3`, workspace, entryType, limit)
+		LIMIT $3`, namedEntrySelectColumns), workspace, entryType, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: list by type: %w", err)
 	}
@@ -851,12 +838,12 @@ func (s *Store) ListWithoutEmbedding(ctx context.Context, workspace string, limi
 	if limit <= 0 {
 		limit = 1000
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s
 		FROM named_memory
 		WHERE workspace = $1 AND (embedding IS NULL OR LENGTH(embedding) = 0) AND summary IS NOT NULL AND summary != ''
 		ORDER BY created_at DESC
-		LIMIT $2`, workspace, limit)
+		LIMIT $2`, namedEntrySelectColumns), workspace, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: list without embedding: %w", err)
 	}
@@ -885,6 +872,123 @@ func (s *Store) Update(ctx context.Context, name, workspace string, summary, typ
 		SET summary = $1, type = $2, updated_at = $3
 		WHERE id = $4`, entry.Summary, entry.Type, sqlutil.FormatTimestamp(entry.UpdatedAt), entry.ID); err != nil {
 		return NamedEntry{}, fmt.Errorf("memory: update: %w", err)
+	}
+	return entry, nil
+}
+
+// UpdateLifecycle mutates lifecycle metadata for a named memory entry.
+func (s *Store) UpdateLifecycle(ctx context.Context, name, workspace string, update LifecycleUpdate) (NamedEntry, error) {
+	workspace = ws.CanonicalID(workspace)
+	entry, err := s.getWithoutTracking(ctx, name, workspace)
+	if err != nil {
+		return NamedEntry{}, err
+	}
+	if strings.TrimSpace(entry.LifecycleState) == "" {
+		entry.LifecycleState = "active"
+	}
+	if strings.TrimSpace(entry.ReviewStatus) == "" {
+		entry.ReviewStatus = "unreviewed"
+	}
+	if state := strings.TrimSpace(update.LifecycleState); state != "" {
+		entry.LifecycleState = state
+	}
+	if status := strings.TrimSpace(update.ReviewStatus); status != "" {
+		entry.ReviewStatus = status
+	}
+	entry.SupersededBy = strings.TrimSpace(update.SupersededBy)
+	entry.ReviewNotes = strings.TrimSpace(update.ReviewNotes)
+	if update.LastUsedAt != nil {
+		entry.LastUsedAt = update.LastUsedAt.UTC()
+	}
+	if update.LastValidatedAt != nil {
+		entry.LastValidatedAt = update.LastValidatedAt.UTC()
+	}
+	entry.UpdatedAt = timeutil.NowUTC()
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE named_memory
+		SET lifecycle_state = $1,
+		    review_status = $2,
+		    superseded_by = $3,
+		    review_notes = $4,
+		    last_used_at = $5,
+		    last_validated_at = $6,
+		    updated_at = $7
+		WHERE id = $8`,
+		entry.LifecycleState,
+		entry.ReviewStatus,
+		entry.SupersededBy,
+		entry.ReviewNotes,
+		sqlutil.FormatTimestamp(entry.LastUsedAt),
+		sqlutil.FormatTimestamp(entry.LastValidatedAt),
+		sqlutil.FormatTimestamp(entry.UpdatedAt),
+		entry.ID,
+	); err != nil {
+		return NamedEntry{}, fmt.Errorf("memory: update lifecycle: %w", err)
+	}
+	return entry, nil
+}
+
+// UpdateTelemetry records an explicit telemetry action for a named memory entry.
+func (s *Store) UpdateTelemetry(ctx context.Context, name, workspace string, update TelemetryUpdate) (NamedEntry, error) {
+	workspace = ws.CanonicalID(workspace)
+	entry, err := s.getWithoutTracking(ctx, name, workspace)
+	if err != nil {
+		return NamedEntry{}, err
+	}
+	at := timeutil.NowUTC()
+	if update.At != nil {
+		at = update.At.UTC()
+	}
+	column, timestampColumn, err := telemetryColumnsForAction(update.Action)
+	if err != nil {
+		return NamedEntry{}, err
+	}
+	entry.UpdatedAt = timeutil.NowUTC()
+	query := fmt.Sprintf(`
+		UPDATE named_memory
+		SET %s = %s + 1,
+		    %s = $1,
+		    updated_at = $2
+		WHERE id = $3`, column, column, timestampColumn)
+	if _, err := s.db.ExecContext(ctx, query, sqlutil.FormatTimestamp(at), sqlutil.FormatTimestamp(entry.UpdatedAt), entry.ID); err != nil {
+		return NamedEntry{}, fmt.Errorf("memory: update telemetry: %w", err)
+	}
+	return s.getWithoutTracking(ctx, name, workspace)
+}
+
+func telemetryColumnsForAction(action string) (string, string, error) {
+	switch strings.TrimSpace(action) {
+	case "viewed":
+		return "access_count", "last_accessed", nil
+	case "selected":
+		return "selected_count", "last_selected_at", nil
+	case "used":
+		return "use_count", "last_used_at", nil
+	case "succeeded":
+		return "success_count", "last_succeeded_at", nil
+	case "failed":
+		return "failure_count", "last_failed_at", nil
+	case "restored":
+		return "restore_count", "last_restored_at", nil
+	case "patched":
+		return "patch_count", "last_patched_at", nil
+	default:
+		return "", "", fmt.Errorf("memory: unknown telemetry action %q", action)
+	}
+}
+
+func (s *Store) getWithoutTracking(ctx context.Context, name, workspace string) (NamedEntry, error) {
+	workspace = ws.CanonicalID(workspace)
+	row := s.db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT %s
+		FROM named_memory
+		WHERE name = $1 AND workspace = $2`, namedEntrySelectColumns), name, workspace)
+	entry, err := scanEntry(row)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return NamedEntry{}, ErrNotFound
+		}
+		return NamedEntry{}, fmt.Errorf("memory: get: %w", err)
 	}
 	return entry, nil
 }
@@ -1169,12 +1273,12 @@ func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]Sc
 	// Fetch a larger window (500 most recently accessed entries) to score client-side.
 	// This prevents loading all entries for large datasets while still providing good ranking
 	const maxWindow = 500
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s
 		FROM named_memory
 		WHERE workspace = $1
 		ORDER BY last_accessed DESC, updated_at DESC
-		LIMIT $2`, workspace, maxWindow)
+		LIMIT $2`, namedEntrySelectColumns), workspace, maxWindow)
 	if err != nil {
 		return nil, fmt.Errorf("memory: relevant: %w", err)
 	}
@@ -1217,12 +1321,12 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 	}
 
 	// Load entries with embeddings from this workspace
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id, embedding
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s, embedding
 		FROM named_memory
 		WHERE workspace = $1 AND embedding IS NOT NULL AND LENGTH(embedding) > 0
 		LIMIT 1000
-	`, workspace)
+	`, namedEntrySelectColumns), workspace)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search similar: %w", err)
 	}
@@ -1236,22 +1340,10 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 	var candidates []entryWithEmbedding
 	for rows.Next() {
 		var entry NamedEntry
-		var digests string
-		var created, updated, last string
-		var sessionID sql.NullString
 		var embeddingJSON []byte
 
-		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result,
-			&digests, &created, &updated, &last, &entry.AccessCount, &sessionID, &embeddingJSON); err != nil {
+		if err := scanEntryValues(rows, &entry, &embeddingJSON); err != nil {
 			continue
-		}
-
-		_ = sqlutil.ScanJSON(digests, &entry.Digests)
-		entry.CreatedAt, _ = sqlutil.ScanTimestamp(created)
-		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updated)
-		entry.LastAccess, _ = sqlutil.ScanTimestamp(last)
-		if sessionID.Valid {
-			entry.SessionID = sessionID.String
 		}
 
 		if len(embeddingJSON) == 0 {
@@ -1324,12 +1416,12 @@ func (s *Store) SearchSimilarByType(ctx context.Context, workspace, entryType st
 		candidateLimit = 5000
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id, embedding
+	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT %s, embedding
 		FROM named_memory
 		WHERE workspace = $1 AND type = $2 AND embedding IS NOT NULL AND LENGTH(embedding) > 0
 		LIMIT $3
-	`, workspace, entryType, candidateLimit)
+	`, namedEntrySelectColumns), workspace, entryType, candidateLimit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search similar by type: %w", err)
 	}
@@ -1343,23 +1435,10 @@ func (s *Store) SearchSimilarByType(ctx context.Context, workspace, entryType st
 	var candidates []entryWithEmbedding
 	for rows.Next() {
 		var entry NamedEntry
-		var digests string
-		var created, updated, last string
-		var sessionID sql.NullString
 		var embeddingJSON []byte
 
-		if err := rows.Scan(
-			&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result,
-			&digests, &created, &updated, &last, &entry.AccessCount, &sessionID, &embeddingJSON); err != nil {
+		if err := scanEntryValues(rows, &entry, &embeddingJSON); err != nil {
 			continue
-		}
-
-		_ = sqlutil.ScanJSON(digests, &entry.Digests)
-		entry.CreatedAt, _ = sqlutil.ScanTimestamp(created)
-		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updated)
-		entry.LastAccess, _ = sqlutil.ScanTimestamp(last)
-		if sessionID.Valid {
-			entry.SessionID = sessionID.String
 		}
 
 		if len(embeddingJSON) == 0 {
@@ -1408,43 +1487,161 @@ func (s *Store) SearchSimilarByType(ctx context.Context, workspace, entryType st
 	return results, nil
 }
 
+type entryScanner interface {
+	Scan(dest ...any) error
+}
+
 func scanEntries(rows *sql.Rows) ([]NamedEntry, error) {
 	var out []NamedEntry
 	for rows.Next() {
 		var entry NamedEntry
-		var digests string
-		var created, updated, last string
-		var sessionID sql.NullString
-		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount, &sessionID); err != nil {
+		if err := scanEntryValues(rows, &entry); err != nil {
 			return nil, fmt.Errorf("memory: scan: %w", err)
 		}
-
-		// Parse digests with proper error handling
-		if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
-			return nil, fmt.Errorf("memory: scan digests: %w", err)
-		}
-
-		// Parse timestamps with proper error handling
-		var err error
-		entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
-		if err != nil {
-			return nil, fmt.Errorf("memory: scan created_at: %w", err)
-		}
-		entry.UpdatedAt, err = sqlutil.ScanTimestamp(updated)
-		if err != nil {
-			return nil, fmt.Errorf("memory: scan updated_at: %w", err)
-		}
-		entry.LastAccess, err = sqlutil.ScanTimestamp(last)
-		if err != nil {
-			return nil, fmt.Errorf("memory: scan last_accessed: %w", err)
-		}
-		if sessionID.Valid {
-			entry.SessionID = sessionID.String
-		}
-
 		out = append(out, entry)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: rows: %w", err)
+	}
 	return out, nil
+}
+
+func scanEntry(scanner entryScanner) (NamedEntry, error) {
+	var entry NamedEntry
+	if err := scanEntryValues(scanner, &entry); err != nil {
+		return NamedEntry{}, err
+	}
+	return entry, nil
+}
+
+func scanEntryValues(scanner entryScanner, entry *NamedEntry, extra ...any) error {
+	var digests string
+	var created, updated, last string
+	var sessionID sql.NullString
+	var lifecycleState, reviewStatus, supersededBy, reviewNotes sql.NullString
+	var lastUsedAt, lastValidatedAt sql.NullString
+	var lastSelectedAt, lastSucceededAt, lastFailedAt, lastPatchedAt, lastRestoredAt sql.NullString
+	var pinned int
+	dest := []any{
+		&entry.ID,
+		&entry.Name,
+		&entry.Type,
+		&entry.Workspace,
+		&entry.Summary,
+		&entry.Result,
+		&digests,
+		&created,
+		&updated,
+		&last,
+		&entry.AccessCount,
+		&sessionID,
+		&lifecycleState,
+		&pinned,
+		&reviewStatus,
+		&supersededBy,
+		&reviewNotes,
+		&lastUsedAt,
+		&lastValidatedAt,
+		&entry.SelectedCount,
+		&entry.UseCount,
+		&entry.SuccessCount,
+		&entry.FailureCount,
+		&entry.PatchCount,
+		&entry.RestoreCount,
+		&lastSelectedAt,
+		&lastSucceededAt,
+		&lastFailedAt,
+		&lastPatchedAt,
+		&lastRestoredAt,
+	}
+	dest = append(dest, extra...)
+	if err := scanner.Scan(dest...); err != nil {
+		return err
+	}
+	if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
+		return fmt.Errorf("scan digests: %w", err)
+	}
+	var err error
+	entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
+	if err != nil {
+		return fmt.Errorf("scan created_at: %w", err)
+	}
+	entry.UpdatedAt, err = sqlutil.ScanTimestamp(updated)
+	if err != nil {
+		return fmt.Errorf("scan updated_at: %w", err)
+	}
+	entry.LastAccess, err = sqlutil.ScanTimestamp(last)
+	if err != nil {
+		return fmt.Errorf("scan last_accessed: %w", err)
+	}
+	if sessionID.Valid {
+		entry.SessionID = sessionID.String
+	}
+	entry.LifecycleState = "active"
+	if lifecycleState.Valid && strings.TrimSpace(lifecycleState.String) != "" {
+		entry.LifecycleState = lifecycleState.String
+	}
+	entry.Pinned = pinned != 0
+	entry.ReviewStatus = "unreviewed"
+	if reviewStatus.Valid && strings.TrimSpace(reviewStatus.String) != "" {
+		entry.ReviewStatus = reviewStatus.String
+	}
+	if supersededBy.Valid {
+		entry.SupersededBy = supersededBy.String
+	}
+	if reviewNotes.Valid {
+		entry.ReviewNotes = reviewNotes.String
+	}
+	if lastUsedAt.Valid {
+		entry.LastUsedAt, err = sqlutil.ScanTimestamp(lastUsedAt.String)
+		if err != nil {
+			return fmt.Errorf("scan last_used_at: %w", err)
+		}
+	}
+	if lastValidatedAt.Valid {
+		entry.LastValidatedAt, err = sqlutil.ScanTimestamp(lastValidatedAt.String)
+		if err != nil {
+			return fmt.Errorf("scan last_validated_at: %w", err)
+		}
+	}
+	if lastSelectedAt.Valid {
+		entry.LastSelectedAt, err = sqlutil.ScanTimestamp(lastSelectedAt.String)
+		if err != nil {
+			return fmt.Errorf("scan last_selected_at: %w", err)
+		}
+	}
+	if lastSucceededAt.Valid {
+		entry.LastSucceededAt, err = sqlutil.ScanTimestamp(lastSucceededAt.String)
+		if err != nil {
+			return fmt.Errorf("scan last_succeeded_at: %w", err)
+		}
+	}
+	if lastFailedAt.Valid {
+		entry.LastFailedAt, err = sqlutil.ScanTimestamp(lastFailedAt.String)
+		if err != nil {
+			return fmt.Errorf("scan last_failed_at: %w", err)
+		}
+	}
+	if lastPatchedAt.Valid {
+		entry.LastPatchedAt, err = sqlutil.ScanTimestamp(lastPatchedAt.String)
+		if err != nil {
+			return fmt.Errorf("scan last_patched_at: %w", err)
+		}
+	}
+	if lastRestoredAt.Valid {
+		entry.LastRestoredAt, err = sqlutil.ScanTimestamp(lastRestoredAt.String)
+		if err != nil {
+			return fmt.Errorf("scan last_restored_at: %w", err)
+		}
+	}
+	return nil
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func scoreEntry(entry NamedEntry) float64 {

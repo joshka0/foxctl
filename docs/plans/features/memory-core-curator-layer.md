@@ -75,6 +75,42 @@ existing foxctl observability API so it remains portable on `main`.
   or validated skill.
 - Do not use ad hoc keyword rules for authority, promotion, or suppression.
 
+## Storage Direction
+
+The memory layer should keep SQLite as the cheap local default and treat
+Turso/libSQL as the vector-capable SQLite-family backend, not as dead legacy.
+Turso is now an open-source Rust reimplementation of SQLite with a published
+compatibility contract: SQLite file format is supported, SQLite-created
+databases should be readable by Turso, incompatible features are opt-in, and
+mixed SQLite/Turso multi-process access is explicitly unsupported. See
+[Turso SQLite Compatibility](https://github.com/tursodatabase/turso/blob/main/COMPAT.md).
+Its agent guide also frames Turso as a production database where correctness,
+SQLite compatibility, and differential tests are the core workflow:
+[Turso Agent Guidelines](https://github.com/tursodatabase/turso/blob/main/AGENTS.md).
+
+Implications for this memory slice:
+
+- Keep `internal/storage/memory` behavior portable across SQLite and
+  Turso/libSQL where the SQL surface is shared.
+- Keep vector search behind explicit vector-capable store paths; Turso's vector
+  extension is compatible with libSQL native vector search.
+- Do not rely on SQLite loadable extensions for Turso. Turso uses in-tree
+  extensions.
+- Treat FTS as a backend-specific capability: Turso implements FTS with Tantivy
+  and its own syntax rather than SQLite FTS3/FTS4/FTS5.
+- Avoid maintenance operations that depend on unsupported SQLite compatibility
+  areas such as `REINDEX`, recursive CTEs, or rollback-journal behavior.
+- Add behavior tests that exercise the same memory record lifecycle and
+  telemetry contract through SQLite and local libSQL/Turso-compatible paths,
+  without requiring networked Turso credentials for the default test suite.
+- Prefer parity/differential-style tests for storage behavior: the same memory
+  operations should preserve the same record contract through SQLite and
+  Turso/libSQL unless a backend-specific capability is explicitly under test.
+- Track a follow-up storage simplification: if open-source Turso covers the
+  libSQL behaviors foxctl uses and avoids the current libSQL linker issues, it
+  can become the canonical vector-capable SQLite-family backend. Do that as a
+  separate parity/differential slice, not inside the memory-core contract work.
+
 ## Canonical Types
 
 Add shared types in a context/memory family package before changing callers.

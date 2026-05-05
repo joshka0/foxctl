@@ -25,7 +25,7 @@ Use foxctl MCP tools to find relevant code by concept:
 | `mcp__agentctl__code_semantic_search` | "Where is X?" — find files by concept |
 | `mcp__agentctl__code_smart_search` | Don't know which files — auto-discover + extract |
 | `mcp__agentctl__code_dag_grep` | "What calls/uses X?" — relationship graphs |
-| `mcp__agentctl__memory_query` | "What gotchas exist?" — past learnings |
+| `mcp__agentctl__memory_query` | "What relevant memory records exist?" — past evidence and decisions |
 | `mcp__agentctl__session_recall` | "What did we do before?" — session history |
 | `mcp__agentctl__session_timeline` | "What happened in past sessions?" — timeline |
 
@@ -52,7 +52,7 @@ Use foxctl MCP tools for AI-powered analysis:
 ```
 Round 1: DISCOVER (foxctl MCP — semantic)
   ├─ code_semantic_search: find files by concept
-  ├─ memory_query: check for gotchas/decisions
+  ├─ memory_query: check canonical memory records
   └─ session_recall: check past session context
 
 Round 2: EXTRACT (native tools — fast)
@@ -88,7 +88,7 @@ Round 3: ANALYZE (foxctl MCP — deep, if needed)
 
 **Round 1** — Run discovery tools in parallel:
 - `mcp__agentctl__code_semantic_search` with `query`, `summarize: true`, `limit: 25`
-- `mcp__agentctl__memory_query` with `query`, `types: "gotcha,decision,pattern"`
+- `mcp__agentctl__memory_query` with `query`, `kinds: "semantic_fact,decision,procedural_skill"`
 - (if history question) `mcp__agentctl__session_recall` with `query`
 
 **Round 2** — From Round 1 results, extract with native tools in parallel:
@@ -115,7 +115,7 @@ Round 3: ANALYZE (foxctl MCP — deep, if needed)
 <relevant snippets from Read/Grep>
 
 ### Memory/History (if relevant)
-- <gotchas, past decisions>
+- <relevant memory records and past decisions>
 
 ### Open Questions (if any)
 ```

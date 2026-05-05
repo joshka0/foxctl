@@ -119,6 +119,16 @@ func (s *TursoStore) Update(_ context.Context, _ string, _ string, _ *string, _ 
 	return NamedEntry{}, errors.New("turso store not available")
 }
 
+// UpdateLifecycle is a stub.
+func (s *TursoStore) UpdateLifecycle(_ context.Context, _ string, _ string, _ LifecycleUpdate) (NamedEntry, error) {
+	return NamedEntry{}, errors.New("turso store not available")
+}
+
+// UpdateTelemetry is a stub.
+func (s *TursoStore) UpdateTelemetry(_ context.Context, _ string, _ string, _ TelemetryUpdate) (NamedEntry, error) {
+	return NamedEntry{}, errors.New("turso store not available")
+}
+
 // Relevant is a stub.
 func (s *TursoStore) Relevant(_ context.Context, _ string, _ int) ([]ScoredEntry, error) {
 	return nil, errors.New("turso store not available")

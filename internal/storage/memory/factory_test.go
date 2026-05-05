@@ -25,11 +25,11 @@ func TestOpenWithConfigLibSQLHonorsConfiguredVectorDimensions(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 
-	tursoStore, ok := store.(*TursoStore)
+	libSQLStore, ok := store.(*TursoStore)
 	if !ok {
 		t.Fatalf("OpenWithConfig() store type = %T, want *TursoStore", store)
 	}
-	if tursoStore.vectorDimension != 4 {
-		t.Fatalf("vectorDimension = %d, want 4", tursoStore.vectorDimension)
+	if libSQLStore.vectorDimension != 4 {
+		t.Fatalf("vectorDimension = %d, want 4", libSQLStore.vectorDimension)
 	}
 }

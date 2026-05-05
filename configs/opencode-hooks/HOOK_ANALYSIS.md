@@ -288,7 +288,7 @@ tool: {
 | `core/security-scanner.ts` | P1 | Secret detection |
 | `core/smart-read.ts` | P1 | File structure preview before reading |
 | `core/knowledge-router.ts` | P1 | Route context based on patterns |
-| `memory/file-memory-recall.ts` | P0 | Surface gotchas |
+| `memory/file-memory-recall.ts` | P0 | Surface memory records |
 | `memory/memory-prompt.ts` | P2 | Prompt to save |
 | `session/session-identity.ts` | P0 | Attribution |
 | `session/daemon-warmup.ts` | P1 | Startup perf |
@@ -353,8 +353,8 @@ Use `experimental.chat.system.transform` to inject context before EVERY AI turn:
   // 1. Get active task context
   const task = await runSkill("task/active", {});
 
-  // 2. Get relevant memories for conversation
-  const memories = await runSkill("memory/query", { session_id: sessionID });
+  // 2. Get relevant memory records for conversation
+  const memoryRecords = await runSkill("memory/query", { session_id: sessionID });
 
   // 3. Get overseer messages
   const messages = await runSkill("mailbox/unread", { recipient: "overseer" });
@@ -362,7 +362,7 @@ Use `experimental.chat.system.transform` to inject context before EVERY AI turn:
   // 4. Inject into system prompt
   const context = [];
   if (task.data) context.push(`## Active Task\n${task.data.title}`);
-  if (memories.data?.length) context.push(`## Relevant Memories\n${memories.data.join("\n")}`);
+  if (memoryRecords.data?.records?.length) context.push(`## Relevant Memory Records\n${formatMemoryRecords(memoryRecords.data.records)}`);
   if (messages.data?.length) context.push(`## Overseer Messages\n${formatMessages(messages.data)}`);
 
   if (context.length > 0) {
@@ -403,7 +403,7 @@ Combine both:
 Create `context-injector.ts` using `experimental.chat.system.transform`:
 - Active task summary
 - Urgent overseer messages
-- File-specific gotchas (when editing)
+- File-specific memory records (when editing)
 
 ### Phase 2: Custom Tools (P0)
 Create tools that AI calls explicitly:

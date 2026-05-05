@@ -1,17 +1,100 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/joshka0/foxctl/internal/context/memorycore"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Tests for constants
 
 func TestCommand(t *testing.T) {
 	assert.Equal(t, "session/restore", command)
+}
+
+func readWideEvents(t *testing.T, dir string) []observability.WideEvent {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(dir, "events", observability.WideEventFileName+".ndjson"))
+	require.NoError(t, err)
+	lines := bytes.Split(bytes.TrimSpace(body), []byte("\n"))
+	events := make([]observability.WideEvent, 0, len(lines))
+	for _, line := range lines {
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var event observability.WideEvent
+		require.NoError(t, json.Unmarshal(line, &event))
+		events = append(events, event)
+	}
+	return events
+}
+
+func TestEmitSessionRestoreTelemetry(t *testing.T) {
+	obsDir := t.TempDir()
+	observability.SetObsDirForTesting(obsDir)
+	observability.SetSamplerForTesting(observability.SampleAll{})
+	t.Cleanup(func() {
+		observability.SetObsDirForTesting("")
+		observability.SetSamplerForTesting(nil)
+	})
+
+	emitSessionRestoreTelemetry(context.Background(), nil, Input{
+		Trigger:          "compact",
+		Workspace:        "/workspace",
+		MaxSearchResults: 3,
+	}, Output{
+		SnapshotID:    "snap-123",
+		ItemsRestored: 2,
+		KeyQuestions:  []string{"question"},
+		SearchResults: []SemanticSearchResult{{Results: []string{"path-a", "path-b"}}},
+		RelevantRecords: []memorycore.Record{
+			{
+				Kind: memorycore.KindDecision,
+				Lifecycle: memorycore.LifecycleEnvelope{
+					State: memorycore.LifecycleStateActive,
+				},
+			},
+			{
+				Kind: memorycore.KindSemanticFact,
+				Lifecycle: memorycore.LifecycleEnvelope{
+					State: memorycore.LifecycleStateStale,
+				},
+			},
+		},
+	}, "", 10*time.Millisecond)
+
+	var found *observability.WideEvent
+	for _, event := range readWideEvents(t, obsDir) {
+		if event.Operation == observability.OpMemorySessionRestore {
+			found = &event
+			break
+		}
+	}
+	require.NotNil(t, found, "memory.session_restore event not emitted")
+	require.Equal(t, observability.ComponentSkill, found.Component)
+	require.Equal(t, command, found.Command)
+	require.Equal(t, "/workspace", found.WorkspaceID)
+	require.Equal(t, observability.StatusOK, found.Status)
+	require.Equal(t, "compact", found.Data["trigger"])
+	require.Equal(t, float64(2), found.Data["relevant_memory_records"])
+	require.Equal(t, float64(2), found.Data["semantic_result_items"])
+
+	kindCounts := found.Data["record_kind_counts"].(map[string]any)
+	require.Equal(t, float64(1), kindCounts["decision"])
+	require.Equal(t, float64(1), kindCounts["semantic_fact"])
+
+	lifecycleCounts := found.Data["record_lifecycle_counts"].(map[string]any)
+	require.Equal(t, float64(1), lifecycleCounts["active"])
+	require.Equal(t, float64(1), lifecycleCounts["stale"])
 }
 
 // Tests for Input structure
@@ -309,25 +392,22 @@ func TestSimilarSession_AllFields(t *testing.T) {
 	assert.Equal(t, end, session.EndedAt)
 }
 
-// Tests for MemoryResult structure
+// Tests for relevant canonical memory record structure.
 
-func TestMemoryResult_AllFields(t *testing.T) {
-	mem := MemoryResult{
-		Type:    "gotcha",
-		Summary: "Don't forget to check nil pointers",
+func TestRelevantMemoryRecord_AllFields(t *testing.T) {
+	record := memorycore.Record{
+		Kind:    memorycore.KindSemanticFact,
+		Summary: "Check nil pointer handling before changing this path",
+		Usage: memorycore.UsageEnvelope{
+			InstructionEligible: false,
+			EvidenceOnly:        true,
+		},
 	}
 
-	assert.Equal(t, "gotcha", mem.Type)
-	assert.Equal(t, "Don't forget to check nil pointers", mem.Summary)
-}
-
-func TestMemoryResult_TypeValues(t *testing.T) {
-	types := []string{"gotcha", "decision", "user_pref", "time_sink", "pattern"}
-
-	for _, memType := range types {
-		mem := MemoryResult{Type: memType}
-		assert.Equal(t, memType, mem.Type)
-	}
+	assert.Equal(t, memorycore.KindSemanticFact, record.Kind)
+	assert.Equal(t, "Check nil pointer handling before changing this path", record.Summary)
+	assert.False(t, record.Usage.InstructionEligible)
+	assert.True(t, record.Usage.EvidenceOnly)
 }
 
 // Tests for AnchorInfo structure
@@ -371,8 +451,8 @@ func TestOutput_AllFields(t *testing.T) {
 		SearchResults: []SemanticSearchResult{
 			{Question: "q1", Results: []string{"result1"}},
 		},
-		RelevantMemories: []MemoryResult{
-			{Type: "gotcha", Summary: "gotcha1"},
+		RelevantRecords: []memorycore.Record{
+			{Kind: memorycore.KindSemanticFact, Summary: "memory1"},
 		},
 		Anchor: &AnchorInfo{AnchorID: "anchor-1"},
 	}
@@ -383,7 +463,7 @@ func TestOutput_AllFields(t *testing.T) {
 	assert.Equal(t, 10, out.ItemsRestored)
 	assert.Len(t, out.KeyQuestions, 2)
 	assert.Len(t, out.SearchResults, 1)
-	assert.Len(t, out.RelevantMemories, 1)
+	assert.Len(t, out.RelevantRecords, 1)
 	assert.NotNil(t, out.Anchor)
 }
 
@@ -777,8 +857,8 @@ func TestOutput_FullJSONRoundTrip(t *testing.T) {
 		SearchResults: []SemanticSearchResult{
 			{Question: "q1", Results: []string{"r1", "r2"}},
 		},
-		RelevantMemories: []MemoryResult{
-			{Type: "gotcha", Summary: "memory1"},
+		RelevantRecords: []memorycore.Record{
+			{Kind: memorycore.KindSemanticFact, Summary: "memory1"},
 		},
 		Anchor: &AnchorInfo{
 			AnchorID:        "anchor-full",
@@ -801,7 +881,7 @@ func TestOutput_FullJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, out.ItemsRestored, decoded.ItemsRestored)
 	assert.Equal(t, out.KeyQuestions, decoded.KeyQuestions)
 	assert.Len(t, decoded.SearchResults, 1)
-	assert.Len(t, decoded.RelevantMemories, 1)
+	assert.Len(t, decoded.RelevantRecords, 1)
 	assert.NotNil(t, decoded.Anchor)
 	assert.Equal(t, "anchor-full", decoded.Anchor.AnchorID)
 }
