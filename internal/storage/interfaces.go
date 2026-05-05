@@ -301,7 +301,7 @@ type Session struct {
 	ErrorMessage    string `json:"error_message,omitempty"` // Error details when status=error
 	// Agent execution context
 	Prompt      string `json:"prompt,omitempty"`       // Original prompt/task for agent sessions
-	PromptHash  string `json:"prompt_hash,omitempty"`  // SHA256 hash for correlation with wide events
+	PromptHash  string `json:"prompt_hash,omitempty"`  // SHA256 hash for correlation with foxcular events
 	LLMProvider string `json:"llm_provider,omitempty"` // LLM provider (cerebras, openrouter, etc.)
 	LLMModel    string `json:"llm_model,omitempty"`    // Model name
 	// Pending restore flag for post-compact context injection

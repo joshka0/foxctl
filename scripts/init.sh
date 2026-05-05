@@ -731,7 +731,7 @@ check_var "TURSO_AUTH_TOKEN" "optional" "Turso authentication token"
 
 echo ""
 echo "Observability (optional):"
-check_var "FOXCTL_OBS_DIR" "optional" "Directory for wide events logging"
+check_var "FOXCTL_OBS_DIR" "optional" "Directory for foxcular events logging"
 echo ""
 
 # 7. Summary

@@ -18,7 +18,7 @@ signature:
     - name: trace_id
       type: string
       required: true
-      description: "The trace ID to look up (from wide event)"
+      description: "The trace ID to look up (from foxcular event)"
     - name: span_id
       type: string
       required: false
@@ -32,7 +32,7 @@ signature:
     long: |
       Use obs/replay to debug and reconstruct past skill executions.
 
-      It searches wide_events.ndjson for events matching the trace_id,
+      It searches foxcular_events.ndjson for events matching the trace_id,
       and optionally fetches any CAS artifacts (input, result, stderr)
       for full request/response replay.
 

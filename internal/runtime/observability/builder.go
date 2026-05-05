@@ -11,7 +11,7 @@ import (
 // version is set at build time via -ldflags.
 var version = "dev"
 
-// EventBuilder provides a fluent API for constructing WideEvents.
+// EventBuilder provides a fluent API for constructing Events.
 // It accumulates context throughout an operation's lifecycle and
 // produces a single comprehensive event on completion.
 //
@@ -31,7 +31,7 @@ var version = "dev"
 //	    observability.Emit(ctx, event.WithData("files", count).Success(time.Since(start)))
 //	}
 type EventBuilder struct {
-	event     *WideEvent
+	event     *Event
 	startTime time.Time
 	persist   *persistConfig // Optional persistence configuration
 }
@@ -40,20 +40,22 @@ type EventBuilder struct {
 // It initializes the event with a new SpanID and current timestamp.
 //
 // Index:
-// - Purpose: Initialize a WideEvent builder with base metadata and timing
+// - Purpose: Initialize a Event builder with base metadata and timing
 // - Flow: allocate event → set identifiers → initialize data map → start timer
 // - SideEffects: reads clock for timestamps
 // - Related: EventBuilder.Success, EventBuilder.Error, EventBuilder.Build
-// - Keywords: wide_event, span_id, trace_id, event_builder, observability
+// - Keywords: foxcular_event, span_id, trace_id, event_builder, observability
 func NewEvent(operation string) *EventBuilder {
 	return &EventBuilder{
-		event: &WideEvent{
-			Ts:        time.Now().UTC(),
+		event: &Event{
+			Timestamp: time.Now().UTC(),
 			SpanID:    ulid.Make().String(),
-			Service:   "foxctl",
-			Version:   version,
 			Operation: operation,
-			Data:      make(map[string]any),
+			Status:    StatusOK,
+			Data: map[string]any{
+				"service": "foxctl",
+				"version": version,
+			},
 		},
 		startTime: time.Now(),
 	}
@@ -74,39 +76,39 @@ func (b *EventBuilder) WithParentID(id string) *EventBuilder {
 
 // WithComponent sets the component that generated the event.
 func (b *EventBuilder) WithComponent(component string) *EventBuilder {
-	b.event.Component = component
-	return b
+	return b.WithData("component", component)
 }
 
 // WithCommand sets the command/skill/hook name.
 func (b *EventBuilder) WithCommand(cmd string) *EventBuilder {
-	b.event.Command = cmd
-	return b
+	b.event.Name = cmd
+	return b.WithData("command", cmd)
 }
 
 // WithSubtype sets additional operation classification.
 func (b *EventBuilder) WithSubtype(subtype string) *EventBuilder {
-	b.event.Subtype = subtype
-	return b
+	return b.WithData("subtype", subtype)
 }
 
 // WithSession sets session and agent IDs for business context.
 func (b *EventBuilder) WithSession(sessionID, agentID string) *EventBuilder {
-	b.event.SessionID = sessionID
-	b.event.AgentID = agentID
+	if sessionID != "" {
+		b.WithData("session_id", sessionID)
+	}
+	if agentID != "" {
+		b.WithData("agent_id", agentID)
+	}
 	return b
 }
 
 // WithWorkspace sets the logical workspace ID.
 func (b *EventBuilder) WithWorkspace(id string) *EventBuilder {
-	b.event.WorkspaceID = id
-	return b
+	return b.WithData("workspace_id", id)
 }
 
 // WithJobID sets the background job ID.
 func (b *EventBuilder) WithJobID(id string) *EventBuilder {
-	b.event.JobID = id
-	return b
+	return b.WithData("job_id", id)
 }
 
 // WithData adds a key-value pair to the domain-specific data.
@@ -177,16 +179,18 @@ func (b *EventBuilder) WithMailbox(mailboxMsgID string) *EventBuilder {
 // EnrichFromEnv populates business context from environment variables.
 // This pulls session, agent, and workspace IDs from standard env vars.
 func (b *EventBuilder) EnrichFromEnv() *EventBuilder {
-	if b.event.SessionID == "" {
+	if eventDataString(b.event, "session_id") == "" {
 		// Check foxctl-specific first, then fallbacks
 		if id := os.Getenv("FOXCTL_SESSION_ID"); id != "" {
-			b.event.SessionID = id
+			b.WithData("session_id", id)
 		} else if id := os.Getenv("CLAUDE_SESSION_ID"); id != "" {
-			b.event.SessionID = id
+			b.WithData("session_id", id)
 		}
 	}
-	if b.event.AgentID == "" {
-		b.event.AgentID = os.Getenv("FOXCTL_AGENT_ID")
+	if eventDataString(b.event, "agent_id") == "" {
+		if id := os.Getenv("FOXCTL_AGENT_ID"); id != "" {
+			b.WithData("agent_id", id)
+		}
 	}
 	return b
 }
@@ -201,16 +205,16 @@ func (b *EventBuilder) EnrichFromContext(ctx context.Context) *EventBuilder {
 	return b
 }
 
-// Success finalizes the event as successful and returns the WideEvent.
+// Success finalizes the event as successful and returns the Event.
 // If TraceID is empty, it generates one.
-func (b *EventBuilder) Success(duration time.Duration) *WideEvent {
+func (b *EventBuilder) Success(duration time.Duration) *Event {
 	b.finalize(StatusOK, duration)
 	return b.event
 }
 
-// Error finalizes the event as failed and returns the WideEvent.
+// Error finalizes the event as failed and returns the Event.
 // It extracts error type and message from the error.
-func (b *EventBuilder) Error(err error, duration time.Duration) *WideEvent {
+func (b *EventBuilder) Error(err error, duration time.Duration) *Event {
 	b.finalize(StatusError, duration)
 	if err != nil {
 		b.event.ErrorMessage = err.Error()
@@ -221,24 +225,24 @@ func (b *EventBuilder) Error(err error, duration time.Duration) *WideEvent {
 }
 
 // ErrorWithDetails finalizes the event with explicit error details.
-func (b *EventBuilder) ErrorWithDetails(errType, errCode, errMsg string, retriable bool, duration time.Duration) *WideEvent {
+func (b *EventBuilder) ErrorWithDetails(errType, errCode, errMsg string, retriable bool, duration time.Duration) *Event {
 	b.finalize(StatusError, duration)
 	b.event.ErrorType = errType
 	b.event.ErrorCode = errCode
 	b.event.ErrorMessage = errMsg
-	b.event.Retriable = &retriable
+	b.WithData("retriable", retriable)
 	return b.event
 }
 
-// Canceled finalizes the event as canceled and returns the WideEvent.
-func (b *EventBuilder) Canceled(duration time.Duration) *WideEvent {
+// Canceled finalizes the event as canceled and returns the Event.
+func (b *EventBuilder) Canceled(duration time.Duration) *Event {
 	b.finalize(StatusCanceled, duration)
 	return b.event
 }
 
-// Build returns the current WideEvent without finalizing status.
+// Build returns the current Event without finalizing status.
 // Use this for custom status handling.
-func (b *EventBuilder) Build() *WideEvent {
+func (b *EventBuilder) Build() *Event {
 	if b.event.TraceID == "" {
 		b.event.TraceID = ulid.Make().String()
 	}
@@ -247,7 +251,7 @@ func (b *EventBuilder) Build() *WideEvent {
 
 func (b *EventBuilder) finalize(status Status, duration time.Duration) {
 	b.event.Status = status
-	b.event.DurationMS = duration.Milliseconds()
+	b.event.Duration = duration
 	if b.event.TraceID == "" {
 		b.event.TraceID = ulid.Make().String()
 	}

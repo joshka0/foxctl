@@ -364,11 +364,11 @@ func (w *Worker) processBatch(ctx context.Context) {
 		}
 	}
 
-	// Emit wide event for completed batch
+	// Emit foxcular event for completed batch
 	w.emitBatchEvent(ctx, batchProcessed, 0, batchErrors, time.Since(start), nil)
 }
 
-// emitBatchEvent emits a wide event for batch processing.
+// emitBatchEvent emits a foxcular event for batch processing.
 func (w *Worker) emitBatchEvent(ctx context.Context, processed, skipped, errors int, duration time.Duration, err error) {
 	// Only emit if something interesting happened
 	if processed == 0 && errors == 0 {

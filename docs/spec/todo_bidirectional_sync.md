@@ -286,7 +286,7 @@ Either:
 
 ## 11. Observability (MUST)
 
-Each sync run SHOULD emit a wide event:
+Each sync run SHOULD emit a foxcular event:
 
 **Operation names:**
 * `todo.sync_in` (provider → foxctl)

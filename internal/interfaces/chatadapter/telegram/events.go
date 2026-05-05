@@ -24,7 +24,7 @@ type agentThread struct {
 }
 
 func agentKey(event observability.ActivityEvent) string {
-	// AgentID (WideEvent.AgentID) is the stable agent identifier (and is what the
+	// AgentID (Event.AgentID) is the stable agent identifier (and is what the
 	// web API expects for /api/agents/{id}/...).
 	if v := strings.TrimSpace(event.AgentID); v != "" {
 		return v

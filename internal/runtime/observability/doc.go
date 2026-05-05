@@ -1,10 +1,10 @@
-// Package observability provides wide event observability following loggingsucks.com principles.
+// Package observability provides foxcular event observability following loggingsucks.com principles.
 // Wide events capture comprehensive per-operation context instead of narrow per-component events.
 //
 // Persistence Options:
 //
 // Events can be persisted in multiple ways:
-//   - NDJSON file (default): Fast append-only writes to $FOXCTL_OBS_DIR/events/wide_events.ndjson
+//   - NDJSON file (default): Fast append-only writes to $FOXCTL_OBS_DIR/events/foxcular_events.ndjson
 //   - SQLite: Direct writes to $FOXCTL_OBS_DIR/events.db for queryability
 //   - Hybrid: NDJSON + background SQLite sync (recommended for high-value events)
 //

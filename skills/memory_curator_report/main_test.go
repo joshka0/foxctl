@@ -33,17 +33,17 @@ func decodeEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {
 	return env
 }
 
-func readWideEvents(t *testing.T, dir string) []observability.WideEvent {
+func readEvents(t *testing.T, dir string) []observability.Event {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join(dir, "events", observability.WideEventFileName+".ndjson"))
+	body, err := os.ReadFile(filepath.Join(dir, "events", observability.EventFileName+".ndjson"))
 	require.NoError(t, err)
 	lines := bytes.Split(bytes.TrimSpace(body), []byte("\n"))
-	events := make([]observability.WideEvent, 0, len(lines))
+	events := make([]observability.Event, 0, len(lines))
 	for _, line := range lines {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		var event observability.WideEvent
+		var event observability.Event
 		require.NoError(t, json.Unmarshal(line, &event))
 		events = append(events, event)
 	}
@@ -142,7 +142,7 @@ func TestMemoryCuratorReportPlansDemotion(t *testing.T) {
 	require.Equal(t, contextengine.ClaimStatusCurrent, got.Status)
 }
 
-func TestMemoryCuratorReportEmitsWideEventTelemetry(t *testing.T) {
+func TestMemoryCuratorReportEmitsEventTelemetry(t *testing.T) {
 	var buf bytes.Buffer
 	rc, cleanup := newTestContext(t, &buf)
 	defer cleanup()
@@ -170,17 +170,17 @@ func TestMemoryCuratorReportEmitsWideEventTelemetry(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	var found *observability.WideEvent
-	for _, event := range readWideEvents(t, obsDir) {
+	var found *observability.Event
+	for _, event := range readEvents(t, obsDir) {
 		if event.Operation == observability.OpMemoryCuratorReport {
 			found = &event
 			break
 		}
 	}
 	require.NotNil(t, found, "memory.curator_report event not emitted")
-	require.Equal(t, observability.ComponentSkill, found.Component)
-	require.Equal(t, command, found.Command)
-	require.Equal(t, rc.Workspace, found.WorkspaceID)
+	require.Equal(t, observability.ComponentSkill, observability.EventDataString(found, observability.DataKeyComponent))
+	require.Equal(t, command, found.Name)
+	require.Equal(t, rc.Workspace, observability.EventDataString(found, observability.DataKeyWorkspaceID))
 	require.Equal(t, observability.StatusOK, found.Status)
 	require.Equal(t, "dry_run", found.Data["mode"])
 	require.Equal(t, float64(1), found.Data["total_records"])

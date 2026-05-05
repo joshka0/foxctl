@@ -22,7 +22,7 @@ This active document contains only current v2 direction and execution guidance.
 - `docs/general/context-and-observability.md`
 - `docs/designs/hierarchical-memory-retrieval.md`
 - `docs/designs/progressive-memory-system.md`
-- `docs/observability/wide-events.md`
+- `docs/general/foxcular-events.md`
 
 ## Problem Statement
 

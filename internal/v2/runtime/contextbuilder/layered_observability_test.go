@@ -15,8 +15,8 @@ import (
 	"github.com/joshka0/foxctl/internal/v2/runtime/contextbuilder"
 )
 
-func TestContextBuilder_BuildLayered_SemanticEmitsWideEvent(t *testing.T) {
-	filePath := setupWideEvents(t)
+func TestContextBuilder_BuildLayered_SemanticEmitsEvent(t *testing.T) {
+	filePath := setupEvents(t)
 
 	builder := newObsBuilder("run-layered-obs")
 	builder.SetArtifactRetriever(&fakeArtifactRetriever{
@@ -60,8 +60,8 @@ func TestContextBuilder_BuildLayered_SemanticEmitsWideEvent(t *testing.T) {
 	}
 
 	evt := mustFindSemanticEvent(t, filePath, "run-layered-obs")
-	if evt.Component != observability.ComponentContextBuilder {
-		t.Fatalf("component=%q want %q", evt.Component, observability.ComponentContextBuilder)
+	if component := observability.EventDataString(&evt, observability.DataKeyComponent); component != observability.ComponentContextBuilder {
+		t.Fatalf("component=%q want %q", component, observability.ComponentContextBuilder)
 	}
 	if evt.TraceID != "trace-semantic-001" {
 		t.Fatalf("trace_id=%q want trace-semantic-001", evt.TraceID)
@@ -104,8 +104,8 @@ func TestContextBuilder_BuildLayered_SemanticEmitsWideEvent(t *testing.T) {
 	}
 }
 
-func TestContextBuilder_BuildLayered_SemanticErrorEmitsWideEvent(t *testing.T) {
-	filePath := setupWideEvents(t)
+func TestContextBuilder_BuildLayered_SemanticErrorEmitsEvent(t *testing.T) {
+	filePath := setupEvents(t)
 
 	builder := newObsBuilder("run-layered-obs-error")
 	builder.SetArtifactRetriever(&fakeArtifactRetriever{
@@ -146,8 +146,8 @@ func TestContextBuilder_BuildLayered_SemanticErrorEmitsWideEvent(t *testing.T) {
 	}
 }
 
-func TestContextBuilder_BuildLayered_SemanticDisabledEmitsWideEvent(t *testing.T) {
-	filePath := setupWideEvents(t)
+func TestContextBuilder_BuildLayered_SemanticDisabledEmitsEvent(t *testing.T) {
+	filePath := setupEvents(t)
 
 	builder := newObsBuilder("run-layered-obs-disabled")
 	// No artifact retriever configured: path must be disabled and still observable.
@@ -181,7 +181,7 @@ func TestContextBuilder_BuildLayered_SemanticDisabledEmitsWideEvent(t *testing.T
 }
 
 func TestContextBuilder_BuildLayered_EmitsLayeredBundleEventWithRefs(t *testing.T) {
-	filePath := setupWideEvents(t)
+	filePath := setupEvents(t)
 
 	builder := newObsBuilder("run-layered-obs-refs")
 	got, err := builder.BuildLayered(context.Background(), contextbuilder.LayeredRequest{
@@ -212,7 +212,7 @@ func TestContextBuilder_BuildLayered_EmitsLayeredBundleEventWithRefs(t *testing.
 	}
 }
 
-func setupWideEvents(t *testing.T) string {
+func setupEvents(t *testing.T) string {
 	t.Helper()
 
 	tmpDir := t.TempDir()
@@ -222,7 +222,7 @@ func setupWideEvents(t *testing.T) string {
 		observability.SetObsDirForTesting("")
 		observability.SetSamplerForTesting(nil)
 	})
-	return filepath.Join(tmpDir, "events", observability.WideEventFileName+".ndjson")
+	return filepath.Join(tmpDir, "events", observability.EventFileName+".ndjson")
 }
 
 func newObsBuilder(sessionID string) *contextbuilder.Builder {
@@ -247,12 +247,12 @@ func newObsBuilder(sessionID string) *contextbuilder.Builder {
 	return builder
 }
 
-func mustFindSemanticEvent(t *testing.T, filePath, sessionID string) observability.WideEvent {
+func mustFindSemanticEvent(t *testing.T, filePath, sessionID string) observability.Event {
 	t.Helper()
 	return mustFindOperationEvent(t, filePath, observability.OpContextSemanticArtifactSearch, sessionID)
 }
 
-func mustFindOperationEvent(t *testing.T, filePath, operation, sessionID string) observability.WideEvent {
+func mustFindOperationEvent(t *testing.T, filePath, operation, sessionID string) observability.Event {
 	t.Helper()
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -274,32 +274,32 @@ func mustFindOperationEvent(t *testing.T, filePath, operation, sessionID string)
 		t.Fatalf("missing %q event for session %s (last err: %v)", operation, sessionID, lastErr)
 	}
 	t.Fatalf("missing %q event for session %s", operation, sessionID)
-	return observability.WideEvent{}
+	return observability.Event{}
 }
 
-func findOperationEvent(filePath, operation, sessionID string) (observability.WideEvent, bool, error) {
+func findOperationEvent(filePath, operation, sessionID string) (observability.Event, bool, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
-		return observability.WideEvent{}, false, err
+		return observability.Event{}, false, err
 	}
 	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		var evt observability.WideEvent
+		var evt observability.Event
 		if err := json.Unmarshal(scanner.Bytes(), &evt); err != nil {
-			return observability.WideEvent{}, false, err
+			return observability.Event{}, false, err
 		}
 		if evt.Operation != operation {
 			continue
 		}
-		if evt.SessionID != sessionID {
+		if observability.EventDataString(&evt, observability.DataKeySessionID) != sessionID {
 			continue
 		}
 		return evt, true, nil
 	}
 	if err := scanner.Err(); err != nil {
-		return observability.WideEvent{}, false, err
+		return observability.Event{}, false, err
 	}
-	return observability.WideEvent{}, false, nil
+	return observability.Event{}, false, nil
 }

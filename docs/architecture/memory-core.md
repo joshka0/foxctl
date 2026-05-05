@@ -213,7 +213,7 @@ wins unless it violates a higher system/runtime policy.
 
 ## Observability
 
-Memory reads and curator maintenance emit aggregate wide events through
+Memory reads and curator maintenance emit aggregate foxcular events through
 `internal/runtime/observability`.
 
 Events should include:
@@ -227,7 +227,7 @@ Events should include:
 - status and duration
 
 Events must not include raw memory content, raw terminal output, or unredacted
-user queries. Wide events are telemetry and audit evidence, not new authority.
+user queries. Foxcular events are telemetry and audit evidence, not new authority.
 
 ## Agent Integration Rules
 

@@ -1821,7 +1821,7 @@ func TestReadOnlyAdapterCodeSearchEnsembleEmitsTelemetry(t *testing.T) {
 		t.Fatalf("QueryEventRecords() error = %v", err)
 	}
 	if len(entries) == 0 {
-		t.Fatal("expected code_search_ensemble wide event")
+		t.Fatal("expected code_search_ensemble foxcular event")
 	}
 	if entries[0].Data["total_tool_calls"] == nil {
 		t.Fatalf("event data=%v", entries[0].Data)

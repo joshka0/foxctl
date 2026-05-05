@@ -19,24 +19,28 @@ import (
 func TestLogCleanupHandlerDeletesMatchingEntries(t *testing.T) {
 	obsDir := t.TempDir()
 	t.Setenv("FOXCTL_OBS_DIR", obsDir)
-	writeWideEventsFileForAPITest(t, obsDir, []observability.WideEvent{
+	writeEventsFileForAPITest(t, obsDir, []observability.Event{
 		{
-			Ts:           time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC),
+			Timestamp:    time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC),
 			TraceID:      "trace-smoke",
-			SessionID:    "session-smoke",
-			Component:    observability.ComponentWeb,
 			Operation:    "web.error",
 			Status:       observability.StatusError,
 			ErrorMessage: "gui smoke failure",
+			Data: map[string]any{
+				observability.DataKeySessionID: "session-smoke",
+				observability.DataKeyComponent: observability.ComponentWeb,
+			},
 		},
 		{
-			Ts:           time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC),
+			Timestamp:    time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC),
 			TraceID:      "trace-keep",
-			SessionID:    "session-keep",
-			Component:    observability.ComponentAgent,
 			Operation:    "agent.iteration",
 			Status:       observability.StatusError,
 			ErrorMessage: "keep me",
+			Data: map[string]any{
+				observability.DataKeySessionID: "session-keep",
+				observability.DataKeyComponent: observability.ComponentAgent,
+			},
 		},
 	})
 
@@ -86,13 +90,13 @@ func TestLogCleanupHandlerDeletesMatchingEntries(t *testing.T) {
 	}
 }
 
-func writeWideEventsFileForAPITest(t *testing.T, obsDir string, events []observability.WideEvent) {
+func writeEventsFileForAPITest(t *testing.T, obsDir string, events []observability.Event) {
 	t.Helper()
 	eventsDir := filepath.Join(obsDir, "events")
 	if err := os.MkdirAll(eventsDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	f, err := os.Create(filepath.Join(eventsDir, observability.WideEventFileName+".ndjson"))
+	f, err := os.Create(filepath.Join(eventsDir, observability.EventFileName+".ndjson"))
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}

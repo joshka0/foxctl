@@ -60,7 +60,7 @@ func TestRedactEvent_NilEvent(t *testing.T) {
 }
 
 func TestRedactEvent_ErrorMessage(t *testing.T) {
-	event := &WideEvent{
+	event := &Event{
 		ErrorMessage: "auth failed: bearer tok_abc123xyz",
 	}
 	RedactEvent(event)
@@ -70,7 +70,7 @@ func TestRedactEvent_ErrorMessage(t *testing.T) {
 }
 
 func TestRedactEvent_SensitiveDataKeys(t *testing.T) {
-	event := &WideEvent{
+	event := &Event{
 		Data: map[string]any{
 			"token":      "secret-value",
 			"api_key":    "sk-12345",
@@ -115,7 +115,7 @@ func TestRedactEvent_SensitiveDataKeys(t *testing.T) {
 }
 
 func TestRedactEvent_EmptyData(t *testing.T) {
-	event := &WideEvent{
+	event := &Event{
 		ErrorMessage: "simple error",
 	}
 	RedactEvent(event)
@@ -125,7 +125,7 @@ func TestRedactEvent_EmptyData(t *testing.T) {
 }
 
 func TestRedactEvent_NilData(t *testing.T) {
-	event := &WideEvent{
+	event := &Event{
 		ErrorMessage: "context deadline exceeded",
 	}
 	RedactEvent(event)

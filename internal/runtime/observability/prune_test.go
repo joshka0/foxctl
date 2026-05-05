@@ -9,14 +9,14 @@ import (
 	"time"
 )
 
-func writeTestEvents(t *testing.T, dir string, events []WideEvent) {
+func writeTestEvents(t *testing.T, dir string, events []Event) {
 	t.Helper()
 	eventsDir := filepath.Join(dir, "events")
 	if err := os.MkdirAll(eventsDir, 0o755); err != nil {
 		t.Fatalf("create events dir: %v", err)
 	}
 
-	f, err := os.Create(filepath.Join(eventsDir, "wide_events.ndjson"))
+	f, err := os.Create(filepath.Join(eventsDir, "foxcular_events.ndjson"))
 	if err != nil {
 		t.Fatalf("create events file: %v", err)
 	}
@@ -34,12 +34,12 @@ func TestPrune_ByAge(t *testing.T) {
 	obsDir := t.TempDir()
 
 	now := time.Now()
-	events := []WideEvent{
-		{Ts: now.Add(-40 * 24 * time.Hour), Operation: "old1", Status: StatusOK},
-		{Ts: now.Add(-35 * 24 * time.Hour), Operation: "old2", Status: StatusOK},
-		{Ts: now.Add(-10 * 24 * time.Hour), Operation: "recent1", Status: StatusOK},
-		{Ts: now.Add(-5 * 24 * time.Hour), Operation: "recent2", Status: StatusOK},
-		{Ts: now.Add(-1 * 24 * time.Hour), Operation: "recent3", Status: StatusOK},
+	events := []Event{
+		{Timestamp: now.Add(-40 * 24 * time.Hour), Operation: "old1", Status: StatusOK},
+		{Timestamp: now.Add(-35 * 24 * time.Hour), Operation: "old2", Status: StatusOK},
+		{Timestamp: now.Add(-10 * 24 * time.Hour), Operation: "recent1", Status: StatusOK},
+		{Timestamp: now.Add(-5 * 24 * time.Hour), Operation: "recent2", Status: StatusOK},
+		{Timestamp: now.Add(-1 * 24 * time.Hour), Operation: "recent3", Status: StatusOK},
 	}
 	writeTestEvents(t, obsDir, events)
 
@@ -65,7 +65,7 @@ func TestPrune_ByAge(t *testing.T) {
 	}
 
 	// Verify the file contents
-	eventsFile := filepath.Join(obsDir, "events", "wide_events.ndjson")
+	eventsFile := filepath.Join(obsDir, "events", "foxcular_events.ndjson")
 	remaining := readEventsFromFile(t, eventsFile)
 	if len(remaining) != 3 {
 		t.Errorf("remaining events = %d, want 3", len(remaining))
@@ -83,9 +83,9 @@ func TestPrune_DryRun(t *testing.T) {
 	obsDir := t.TempDir()
 
 	now := time.Now()
-	events := []WideEvent{
-		{Ts: now.Add(-40 * 24 * time.Hour), Operation: "old1", Status: StatusOK},
-		{Ts: now.Add(-1 * 24 * time.Hour), Operation: "recent1", Status: StatusOK},
+	events := []Event{
+		{Timestamp: now.Add(-40 * 24 * time.Hour), Operation: "old1", Status: StatusOK},
+		{Timestamp: now.Add(-1 * 24 * time.Hour), Operation: "recent1", Status: StatusOK},
 	}
 	writeTestEvents(t, obsDir, events)
 
@@ -105,7 +105,7 @@ func TestPrune_DryRun(t *testing.T) {
 	}
 
 	// File should be unchanged in dry run
-	eventsFile := filepath.Join(obsDir, "events", "wide_events.ndjson")
+	eventsFile := filepath.Join(obsDir, "events", "foxcular_events.ndjson")
 	remaining := readEventsFromFile(t, eventsFile)
 	if len(remaining) != 2 {
 		t.Errorf("remaining events = %d, want 2 (dry run should not modify)", len(remaining))
@@ -135,9 +135,9 @@ func TestPrune_NothingToPrune(t *testing.T) {
 	obsDir := t.TempDir()
 
 	now := time.Now()
-	events := []WideEvent{
-		{Ts: now.Add(-1 * 24 * time.Hour), Operation: "recent1", Status: StatusOK},
-		{Ts: now.Add(-2 * 24 * time.Hour), Operation: "recent2", Status: StatusOK},
+	events := []Event{
+		{Timestamp: now.Add(-1 * 24 * time.Hour), Operation: "recent1", Status: StatusOK},
+		{Timestamp: now.Add(-2 * 24 * time.Hour), Operation: "recent2", Status: StatusOK},
 	}
 	writeTestEvents(t, obsDir, events)
 
@@ -165,17 +165,17 @@ func TestPruneBySize(t *testing.T) {
 
 	now := time.Now()
 	// Create events with known sizes
-	events := []WideEvent{
-		{Ts: now.Add(-5 * 24 * time.Hour), Operation: "oldest", Status: StatusOK},
-		{Ts: now.Add(-4 * 24 * time.Hour), Operation: "old", Status: StatusOK},
-		{Ts: now.Add(-3 * 24 * time.Hour), Operation: "middle", Status: StatusOK},
-		{Ts: now.Add(-2 * 24 * time.Hour), Operation: "recent", Status: StatusOK},
-		{Ts: now.Add(-1 * 24 * time.Hour), Operation: "newest", Status: StatusOK},
+	events := []Event{
+		{Timestamp: now.Add(-5 * 24 * time.Hour), Operation: "oldest", Status: StatusOK},
+		{Timestamp: now.Add(-4 * 24 * time.Hour), Operation: "old", Status: StatusOK},
+		{Timestamp: now.Add(-3 * 24 * time.Hour), Operation: "middle", Status: StatusOK},
+		{Timestamp: now.Add(-2 * 24 * time.Hour), Operation: "recent", Status: StatusOK},
+		{Timestamp: now.Add(-1 * 24 * time.Hour), Operation: "newest", Status: StatusOK},
 	}
 	writeTestEvents(t, obsDir, events)
 
 	// Get file size
-	eventsFile := filepath.Join(obsDir, "events", "wide_events.ndjson")
+	eventsFile := filepath.Join(obsDir, "events", "foxcular_events.ndjson")
 	info, err := os.Stat(eventsFile)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
@@ -210,8 +210,8 @@ func TestPruneBySize_UnderLimit(t *testing.T) {
 	obsDir := t.TempDir()
 
 	now := time.Now()
-	events := []WideEvent{
-		{Ts: now, Operation: "test", Status: StatusOK},
+	events := []Event{
+		{Timestamp: now, Operation: "test", Status: StatusOK},
 	}
 	writeTestEvents(t, obsDir, events)
 
@@ -230,7 +230,7 @@ func TestPruneBySize_UnderLimit(t *testing.T) {
 	}
 }
 
-func readEventsFromFile(t *testing.T, path string) []WideEvent {
+func readEventsFromFile(t *testing.T, path string) []Event {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {
@@ -238,10 +238,10 @@ func readEventsFromFile(t *testing.T, path string) []WideEvent {
 	}
 	defer f.Close()
 
-	var events []WideEvent
+	var events []Event
 	dec := json.NewDecoder(f)
 	for dec.More() {
-		var e WideEvent
+		var e Event
 		if err := dec.Decode(&e); err != nil {
 			t.Fatalf("decode: %v", err)
 		}

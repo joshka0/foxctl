@@ -32,6 +32,7 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/joho/godotenv v1.5.1
 	github.com/joshka/foxprox v0.0.0-00010101000000-000000000000
+	github.com/joshka0/foxcular v0.0.0
 	github.com/klauspost/compress v1.18.2
 	github.com/mark3labs/mcp-go v0.43.0
 	github.com/mattn/go-colorable v0.1.14
@@ -56,7 +57,7 @@ require (
 	golang.org/x/tools v0.42.0
 	gonum.org/v1/gonum v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.49.1
+	modernc.org/sqlite v1.50.0
 	mvdan.cc/gofumpt v0.8.0
 	tailscale.com v1.96.5
 	turso.tech/database/tursogo v0.6.0-pre.27
@@ -384,3 +385,5 @@ require (
 replace github.com/tree-sitter/tree-sitter-elixir => github.com/elixir-lang/tree-sitter-elixir v0.3.5
 
 replace github.com/joshka/foxprox => ./foxprox
+
+replace github.com/joshka0/foxcular => ../foxcular

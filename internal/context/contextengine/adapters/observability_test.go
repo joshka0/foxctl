@@ -8,27 +8,29 @@ import (
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
-func TestConvertWideEvent(t *testing.T) {
+func TestConvertEvent(t *testing.T) {
 	now := time.Now().UTC()
-	src := observability.WideEvent{
-		Ts:          now,
-		TraceID:     "trace1",
-		SpanID:      "span1",
-		ParentID:    "parent1",
-		Service:     "foxctl",
-		Version:     "1.0.0",
-		Component:   observability.ComponentSkill,
-		Operation:   observability.OpSkillRun,
-		Command:     "code/semantic_search",
-		SessionID:   "sess1",
-		WorkspaceID: "ws1",
-		JobID:       "job1",
-		Status:      observability.StatusOK,
-		DurationMS:  150,
-		Data:        map[string]any{"result_count": 5},
+	src := observability.Event{
+		Timestamp: now,
+		TraceID:   "trace1",
+		SpanID:    "span1",
+		ParentID:  "parent1",
+		Operation: observability.OpSkillRun,
+		Name:      "code/semantic_search",
+		Status:    observability.StatusOK,
+		Duration:  150 * time.Millisecond,
+		Data: map[string]any{
+			observability.DataKeyService:     "foxctl",
+			observability.DataKeyVersion:     "1.0.0",
+			observability.DataKeyComponent:   observability.ComponentSkill,
+			observability.DataKeySessionID:   "sess1",
+			observability.DataKeyWorkspaceID: "ws1",
+			observability.DataKeyJobID:       "job1",
+			"result_count":                   5,
+		},
 	}
 
-	got := ConvertWideEvent(src)
+	got := ConvertEvent(src)
 
 	if got.ID == "" {
 		t.Error("ID should not be empty")
@@ -62,22 +64,24 @@ func TestConvertWideEvent(t *testing.T) {
 	}
 }
 
-func TestConvertWideEvent_WithErrors(t *testing.T) {
-	src := observability.WideEvent{
-		Ts:           time.Now().UTC(),
+func TestConvertEvent_WithErrors(t *testing.T) {
+	src := observability.Event{
+		Timestamp:    time.Now().UTC(),
 		TraceID:      "trace2",
 		SpanID:       "span2",
-		Service:      "foxctl",
-		Component:    observability.ComponentCLI,
 		Operation:    "skill.run",
 		Status:       observability.StatusError,
 		ErrorType:    "validation",
 		ErrorCode:    "EPARSE",
 		ErrorMessage: "bad input",
-		Retriable:    &[]bool{true}[0],
+		Data: map[string]any{
+			observability.DataKeyService:   "foxctl",
+			observability.DataKeyComponent: observability.ComponentCLI,
+			observability.DataKeyRetriable: true,
+		},
 	}
 
-	got := ConvertWideEvent(src)
+	got := ConvertEvent(src)
 
 	if got.Data["error_type"] != "validation" {
 		t.Errorf("Data[error_type] = %v", got.Data["error_type"])
@@ -90,7 +94,7 @@ func TestConvertWideEvent_WithErrors(t *testing.T) {
 	}
 }
 
-func TestMapWideEventKind(t *testing.T) {
+func TestMapEventKind(t *testing.T) {
 	tests := []struct {
 		operation string
 		want      contextengine.ContextEventKind
@@ -110,10 +114,10 @@ func TestMapWideEventKind(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.operation, func(t *testing.T) {
-			src := observability.WideEvent{Operation: tt.operation}
-			got := mapWideEventKind(src)
+			src := observability.Event{Operation: tt.operation}
+			got := mapEventKind(src)
 			if got != tt.want {
-				t.Errorf("mapWideEventKind(%q) = %q, want %q", tt.operation, got, tt.want)
+				t.Errorf("mapEventKind(%q) = %q, want %q", tt.operation, got, tt.want)
 			}
 		})
 	}

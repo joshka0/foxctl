@@ -467,9 +467,9 @@ func (p *GeminiProvider) ResetUsage() {
 	p.tracker.reset()
 }
 
-// emitEvent emits a wide event for observability.
+// emitEvent emits a foxcular event for observability.
 func (p *GeminiProvider) emitEvent(ctx context.Context, start time.Time, textsCount int, estimatedTokens int64, status observability.Status, err error) {
-	durationMS := time.Since(start).Milliseconds()
+	duration := time.Since(start)
 
 	// Calculate cost for this operation
 	var costUSD float64
@@ -479,24 +479,24 @@ func (p *GeminiProvider) emitEvent(ctx context.Context, start time.Time, textsCo
 		costUSD = float64(estimatedTokens) * GeminiEmbeddingPricePerMillionTokens / 1_000_000
 	}
 
-	event := &observability.WideEvent{
-		Ts:         time.Now().UTC(),
-		TraceID:    observability.TraceIDFromContext(ctx),
-		SpanID:     ulid.Make().String(),
-		Service:    "foxctl",
-		Component:  observability.ComponentSkill,
-		Operation:  "embedding.generate",
-		Command:    "gemini",
-		Subtype:    p.model,
-		Status:     status,
-		DurationMS: durationMS,
+	event := &observability.Event{
+		Timestamp: time.Now().UTC(),
+		TraceID:   observability.TraceIDFromContext(ctx),
+		SpanID:    ulid.Make().String(),
+		Operation: "embedding.generate",
+		Name:      "gemini",
+		Status:    status,
+		Duration:  duration,
 		Data: map[string]any{
-			"provider":         "gemini",
-			"model":            p.model,
-			"texts_count":      textsCount,
-			"tokens_estimated": estimatedTokens,
-			"dimensions":       p.dimensions,
-			"cost_usd":         costUSD,
+			observability.DataKeyService:   "foxctl",
+			observability.DataKeyComponent: observability.ComponentSkill,
+			observability.DataKeySubtype:   p.model,
+			"provider":                     "gemini",
+			"model":                        p.model,
+			"texts_count":                  textsCount,
+			"tokens_estimated":             estimatedTokens,
+			"dimensions":                   p.dimensions,
+			"cost_usd":                     costUSD,
 		},
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage/trajectory"
 )
 
@@ -26,29 +27,10 @@ type input struct {
 	IncludeData bool   `json:"include_data,omitempty"` // Include full artifact data
 }
 
-// wideEvent represents a wide event from the NDJSON log with comprehensive observability data.
-type wideEvent struct {
-	Timestamp   string         `json:"ts"`
-	TraceID     string         `json:"trace_id"`
-	SpanID      string         `json:"span_id"`
-	Service     string         `json:"service"`
-	Version     string         `json:"version"`
-	Component   string         `json:"component"`
-	Operation   string         `json:"operation"`
-	Command     string         `json:"command"`
-	WorkspaceID string         `json:"workspace_id"`
-	JobID       string         `json:"job_id"`
-	Status      string         `json:"status"`
-	DurationMS  int64          `json:"duration_ms"`
-	ErrorCode   string         `json:"error_code,omitempty"`
-	ErrorMsg    string         `json:"error_message,omitempty"`
-	Data        map[string]any `json:"data,omitempty"`
-}
-
 // reconstructedEvent contains the event plus any fetched artifacts with full data reconstruction.
 type reconstructedEvent struct {
-	Event     wideEvent      `json:"event"`
-	Artifacts map[string]any `json:"artifacts,omitempty"`
+	Event     observability.Event `json:"event"`
+	Artifacts map[string]any      `json:"artifacts,omitempty"`
 }
 
 // trajectoryEvent contains trajectory data with full payload and artifact fetching capabilities.
@@ -73,12 +55,12 @@ func main() {
 // run orchestrates trace event reconstruction from multiple sources with artifact fetching.
 //
 // Index:
-// - Purpose: Reconstruct events from trace IDs by combining wide events and trajectory data with optional artifact fetching
-// - Flow: locate observability directory → find wide events → query trajectory events → fetch artifacts → emit results
+// - Purpose: Reconstruct events from trace IDs by combining observability events and trajectory data with optional artifact fetching
+// - Flow: locate observability directory → find events → query trajectory events → fetch artifacts → emit results
 // - SideEffects: reads NDJSON log files; queries trajectory store; fetches CAS artifacts; reconstructs event timelines
 // - FailureModes: missing observability data, trace not found, CAS access failures, file parsing errors
 // - Observability: emits reconstructed events, artifact data, event counts, and comprehensive trace summaries
-// - Related: findWideEvents, findTrajectoryEvents, fetchWideEventArtifacts, fetchCASContent
+// - Related: findEvents, findTrajectoryEvents, fetchEventArtifacts, fetchCASContent
 // - Keywords: obs/replay, trace_reconstruction, event_timeline, artifact_fetching, observability
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Find the events file
@@ -89,19 +71,19 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if obsDir == "" {
 		obsDir = filepath.Join(os.Getenv("HOME"), ".foxctl", "observability")
 	}
-	eventsFile := filepath.Join(obsDir, "events", "wide_events.ndjson")
+	eventsFile := filepath.Join(obsDir, "events", observability.EventFileName+".ndjson")
 
-	// Find matching wide events
-	var wideEvents []wideEvent
+	// Find matching events
+	var events []observability.Event
 	if _, err := os.Stat(eventsFile); err == nil {
-		wideEvents, _ = findWideEvents(eventsFile, in.TraceID, in.SpanID)
+		events, _ = findEvents(eventsFile, in.TraceID, in.SpanID)
 	}
 
 	// Find matching trajectory events
 	var trajEvents []trajectoryEvent
 	workspaceID := rc.Workspace
-	if workspaceID == "" && len(wideEvents) > 0 {
-		workspaceID = wideEvents[0].WorkspaceID
+	if workspaceID == "" && len(events) > 0 {
+		workspaceID = observability.EventDataString(&events[0], observability.DataKeyWorkspaceID)
 	}
 
 	if workspaceID != "" {
@@ -136,13 +118,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 	}
 
-	// Reconstruct wide events with artifacts
+	// Reconstruct events with artifacts
 	var reconstructed []reconstructedEvent
-	for _, evt := range wideEvents {
+	for _, evt := range events {
 		result := reconstructedEvent{Event: evt}
 
 		if in.IncludeData {
-			artifacts, err := fetchWideEventArtifacts(ctx, rc, evt)
+			artifacts, err := fetchEventArtifacts(ctx, rc, evt)
 			if err != nil {
 				rc.Logger.Warn().Err(err).Str("span_id", evt.SpanID).Msg("failed to fetch artifacts")
 			}
@@ -156,13 +138,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	// Build summary
 	var summary string
-	if len(wideEvents) > 0 {
-		primary := wideEvents[0]
-		summary = fmt.Sprintf("Found %d wide event(s), %d trajectory event(s) for trace %s: %s %s (%s, %dms)",
-			len(wideEvents), len(trajEvents),
+	if len(events) > 0 {
+		primary := events[0]
+		summary = fmt.Sprintf("Found %d event(s), %d trajectory event(s) for trace %s: %s %s (%s, %dms)",
+			len(events), len(trajEvents),
 			truncateID(in.TraceID),
-			primary.Operation, primary.Command,
-			primary.Status, primary.DurationMS)
+			primary.Operation, primary.Name,
+			primary.Status, primary.Duration.Milliseconds())
 	} else if len(trajEvents) > 0 {
 		summary = fmt.Sprintf("Found %d trajectory event(s) for trace %s", len(trajEvents), truncateID(in.TraceID))
 	} else {
@@ -171,9 +153,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	data := map[string]any{
 		"trace_id":          in.TraceID,
-		"wide_event_count":  len(reconstructed),
+		"event_count":       len(reconstructed),
 		"traj_event_count":  len(trajEvents),
-		"wide_events":       reconstructed,
+		"events":            reconstructed,
 		"trajectory_events": trajEvents,
 		"summary":           summary,
 	}
@@ -189,15 +171,15 @@ func truncateID(id string) string {
 	return id
 }
 
-// findWideEvents searches NDJSON log file for events matching trace ID and optional span ID.
-func findWideEvents(path, traceID, spanID string) ([]wideEvent, error) {
+// findEvents searches NDJSON log file for events matching trace ID and optional span ID.
+func findEvents(path, traceID, spanID string) ([]observability.Event, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { errs.Ignore(f.Close(), "close events file") }()
 
-	var events []wideEvent
+	var events []observability.Event
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
@@ -207,7 +189,7 @@ func findWideEvents(path, traceID, spanID string) ([]wideEvent, error) {
 			continue
 		}
 
-		var evt wideEvent
+		var evt observability.Event
 		if err := json.Unmarshal(line, &evt); err != nil {
 			continue
 		}
@@ -238,9 +220,9 @@ func findTrajectoryEvents(ctx context.Context, rc *skillmain.RunContext, workspa
 	return store.GetEventsByTraceID(ctx, workspaceID, traceID)
 }
 
-// fetchWideEventArtifacts retrieves CAS artifacts referenced in wide event data with error handling.
+// fetchEventArtifacts retrieves CAS artifacts referenced in event data with error handling.
 // It fetches artifacts from the CAS store, handling errors and returning the artifacts as a map.
-func fetchWideEventArtifacts(ctx context.Context, rc *skillmain.RunContext, evt wideEvent) (map[string]any, error) {
+func fetchEventArtifacts(ctx context.Context, rc *skillmain.RunContext, evt observability.Event) (map[string]any, error) {
 	if evt.Data == nil || rc.CASStore == nil {
 		return nil, nil
 	}

@@ -417,34 +417,34 @@ func (p *VoyageProvider) pricePerToken() float64 {
 	}
 }
 
-// emitEvent emits a wide event for observability.
+// emitEvent emits a foxcular event for observability.
 func (p *VoyageProvider) emitEvent(ctx context.Context, start time.Time, candidatesCount int, estimatedTokens, actualTokens int64, status observability.Status, err error) {
-	durationMS := time.Since(start).Milliseconds()
+	duration := time.Since(start)
 
 	costUSD := 0.0
 	if actualTokens > 0 {
 		costUSD = float64(actualTokens) * p.pricePerToken()
 	}
 
-	event := &observability.WideEvent{
-		Ts:         time.Now().UTC(),
-		TraceID:    observability.TraceIDFromContext(ctx),
-		SpanID:     ulid.Make().String(),
-		Service:    "foxctl",
-		Component:  observability.ComponentSkill,
-		Operation:  "rerank.execute",
-		Command:    "voyage",
-		Subtype:    p.model,
-		Status:     status,
-		DurationMS: durationMS,
+	event := &observability.Event{
+		Timestamp: time.Now().UTC(),
+		TraceID:   observability.TraceIDFromContext(ctx),
+		SpanID:    ulid.Make().String(),
+		Operation: "rerank.execute",
+		Name:      "voyage",
+		Status:    status,
+		Duration:  duration,
 		Data: map[string]any{
-			"provider":         "voyage",
-			"model":            p.model,
-			"candidates_count": candidatesCount,
-			"tokens_estimated": estimatedTokens,
-			"tokens_actual":    actualTokens,
-			"cost_usd":         costUSD,
-			"score_blend":      p.scoreBlend,
+			observability.DataKeyService:   "foxctl",
+			observability.DataKeyComponent: observability.ComponentSkill,
+			observability.DataKeySubtype:   p.model,
+			"provider":                     "voyage",
+			"model":                        p.model,
+			"candidates_count":             candidatesCount,
+			"tokens_estimated":             estimatedTokens,
+			"tokens_actual":                actualTokens,
+			"cost_usd":                     costUSD,
+			"score_blend":                  p.scoreBlend,
 		},
 	}
 

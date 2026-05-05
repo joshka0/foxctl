@@ -101,7 +101,7 @@ That pack covers:
 ### Observability
 | Skill | Purpose |
 |-------|---------|
-| `obs/logs` | Query wide events (filter by operation, command, status, component) |
+| `obs/logs` | Query foxcular events (filter by operation, command, status, component) |
 
 ### Integrations
 | Skill | Purpose |

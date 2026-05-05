@@ -22,7 +22,7 @@ Machine-friendly reference for proactive context injection and wide-event tracin
 | Primitive | Purpose |
 |----------|---------|
 | Trace ID propagation (`FOXCTL_TRACE_ID`) | Correlate operations across processes and events |
-| Wide events | Capture high-signal operation context in structured envelopes |
+| Foxcular events | Capture high-signal operation context in structured envelopes |
 | NDJSON persistence | Fast append-only event capture |
 | SQLite persistence | Queryable long-term event analysis (when enabled) |
 

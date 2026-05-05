@@ -111,8 +111,8 @@ func mainWithCode[I any](command string, run RunFunc[I], stdin io.Reader, stdout
 	// Load .env files
 	config.LoadDotEnv()
 
-	// Start observability span - one wide event per skill execution.
-	// Note: runservice may also emit a wide event; we differentiate using subtype.
+	// Start observability span - one foxcular event per skill execution.
+	// Note: runservice may also emit a foxcular event; we differentiate using subtype.
 	// The span starts early so we capture config/parse/validation failures too.
 	ctx, done, span := observability.StartSpan(ctx, observability.OpSkillRun,
 		observability.WithSpanComponent(observability.ComponentSkill),

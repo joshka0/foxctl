@@ -365,7 +365,7 @@ Based on research, the highest-impact integrations are:
 │  │   └── graph.db (unified dependency graph)                        │
 │  ├── cas/ (content-addressable storage)                             │
 │  ├── jobs/ (execution records)                                      │
-│  └── observability/ (wide events, tracing)                          │
+│  └── observability/ (foxcular events, tracing)                          │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 

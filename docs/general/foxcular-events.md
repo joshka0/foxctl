@@ -1,13 +1,13 @@
 # Wide Events Observability
 
-This document describes the wide events observability system, implementing
+This document describes the foxcular events observability system, implementing
 principles from [loggingsucks.com](https://loggingsucks.com).
 
 ## Overview
 
-Wide events (also known as "canonical log lines") are comprehensive observability
+Foxcular events (also known as "canonical log lines") are comprehensive observability
 events that capture the full context of an operation in a single event. Unlike
-narrow events that log what code does, wide events log **what happened to the
+narrow events that log what code does, foxcular events log **what happened to the
 request**.
 
 ### Key Principles
@@ -43,11 +43,11 @@ Set `FOXCTL_OBS_DIR` to enable observability:
 export FOXCTL_OBS_DIR=~/.foxctl/observability
 ```
 
-Events are written to `$FOXCTL_OBS_DIR/events/wide_events.ndjson`.
+Events are written to `$FOXCTL_OBS_DIR/events/foxcular_events.ndjson`.
 
 ## Event Schema
 
-Each line in the NDJSON file is a `WideEvent`:
+Each line in the NDJSON file is a `Event`:
 
 ```json
 {
@@ -140,7 +140,7 @@ Each line in the NDJSON file is a `WideEvent`:
 
 ### Using skillslib/obs (Recommended for Skills)
 
-The `skillslib/obs` package provides a clean API for skills to emit wide events
+The `skillslib/obs` package provides a clean API for skills to emit foxcular events
 without importing internal packages directly:
 
 ```go
@@ -297,7 +297,7 @@ Layered context responses also include per-request metadata:
 
 ### Wide Event Mapping (Implemented)
 
-When exporting semantic retrieval behavior as wide events, use:
+When exporting semantic retrieval behavior as foxcular events, use:
 
 - `component`: `contextbuilder`
 - `operation`: `context.semantic_artifact_search`
@@ -367,18 +367,18 @@ exporters:
 
 ```bash
 # Find all errors in the last hour
-jq -c 'select(.status == "error")' wide_events.ndjson
+jq -c 'select(.status == "error")' foxcular_events.ndjson
 
 # Find slow skill runs
-jq -c 'select(.operation == "skill.run" and .duration_ms > 1000)' wide_events.ndjson
+jq -c 'select(.operation == "skill.run" and .duration_ms > 1000)' foxcular_events.ndjson
 
 # Group by command
-jq -s 'group_by(.command) | map({command: .[0].command, count: length})' wide_events.ndjson
+jq -s 'group_by(.command) | map({command: .[0].command, count: length})' foxcular_events.ndjson
 ```
 
 ## Agent Orchestration Events
 
-Agent operations emit structured wide events for debugging multi-agent workflows.
+Agent operations emit structured foxcular events for debugging multi-agent workflows.
 
 ### Operation Types
 
@@ -394,16 +394,16 @@ Agent operations emit structured wide events for debugging multi-agent workflows
 
 ```bash
 # Find all spawn events for a session
-jq -c 'select(.operation == "agent.spawn" and .session_id == "01KFH...")' wide_events.ndjson
+jq -c 'select(.operation == "agent.spawn" and .session_id == "01KFH...")' foxcular_events.ndjson
 
 # Get iteration token usage for troubleshooting
-jq -c 'select(.operation == "agent.iteration") | {iter: .data.iteration, tokens: .data.total_tokens, finish: .data.finish_reason}' wide_events.ndjson
+jq -c 'select(.operation == "agent.iteration") | {iter: .data.iteration, tokens: .data.total_tokens, finish: .data.finish_reason}' foxcular_events.ndjson
 
 # Find agents that hit context budget
-jq -c 'select(.operation == "agent.iteration" and .data.budget_exceeded == true)' wide_events.ndjson
+jq -c 'select(.operation == "agent.iteration" and .data.budget_exceeded == true)' foxcular_events.ndjson
 
 # Trace spawn → wait → complete for an overseer
-jq -c 'select(.session_id == "01KFH..." and .operation | startswith("agent."))' wide_events.ndjson
+jq -c 'select(.session_id == "01KFH..." and .operation | startswith("agent."))' foxcular_events.ndjson
 ```
 
 ### Agent Data Fields
@@ -423,7 +423,7 @@ jq -c 'select(.session_id == "01KFH..." and .operation | startswith("agent."))' 
 
 ## Orchestration Events (Kanban)
 
-Symphony/Kanban runtime surfaces emit orchestration-focused wide events from web command handlers.
+Symphony/Kanban runtime surfaces emit orchestration-focused foxcular events from web command handlers.
 
 ### Operation Types
 
@@ -483,21 +483,21 @@ The existing `SweGrepEvent` and other narrow events continue to work. Wide
 events provide additional comprehensive context. For skills that emit both:
 
 - Narrow events go to `$FOXCTL_OBS_DIR/events/<skill_name>.ndjson`
-- Wide events go to `$FOXCTL_OBS_DIR/events/wide_events.ndjson`
+- Foxcular events go to `$FOXCTL_OBS_DIR/events/foxcular_events.ndjson`
 
-Eventually, narrow events may be deprecated in favor of the unified wide event
+Eventually, narrow events may be deprecated in favor of the unified foxcular event
 format with domain-specific data in the `data` map.
 
 ## Storage & Retention
 
 ### Directory Structure
 
-Wide events are stored under the observability directory:
+Foxcular events are stored under the observability directory:
 
 ```
 ~/.foxctl/observability/
 └── events/
-    ├── wide_events.ndjson    # Main wide event stream
+    ├── foxcular_events.ndjson    # Main foxcular event stream
     └── code_swe_grep.ndjson  # Legacy narrow events (if enabled)
 ```
 
@@ -570,7 +570,7 @@ Example cron job for daily pruning:
 
 ## Persistence Options
 
-By default, wide events are written to NDJSON files. For events that need
+By default, foxcular events are written to NDJSON files. For events that need
 queryability, you can enable SQL persistence with different modes:
 
 | Mode | Description |

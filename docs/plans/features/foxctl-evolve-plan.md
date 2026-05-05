@@ -124,7 +124,7 @@ as authority. Early examples:
 Those files may help humans and agents orient quickly, but they should be
 generated from DB state.
 
-### Observability via foxctl wide events
+### Observability via foxctl foxcular events
 
 `evolve` should use foxctl's existing observability layer for operational
 telemetry rather than inventing a parallel event store.
@@ -138,7 +138,7 @@ This means:
 
 - DB rows remain the source of truth for domain state
 - CAS remains the source of truth for bulky artifacts
-- wide events capture lifecycle telemetry, durations, correlations, and
+- foxcular events capture lifecycle telemetry, durations, correlations, and
   high-signal summaries
 
 Do not add a second `evolve_events` persistence subsystem unless a later need is
@@ -371,7 +371,7 @@ rendered from DB state rather than treated as canonical storage.
 
 ## Observability design
 
-`evolve` should emit structured wide events for all meaningful lifecycle
+`evolve` should emit structured foxcular events for all meaningful lifecycle
 transitions and long-running operations.
 
 ### Why this is the right fit
@@ -416,7 +416,7 @@ At minimum, include structured fields for:
 
 ### Event semantics
 
-- Use wide events for operational telemetry, not durable business truth
+- Use foxcular events for operational telemetry, not durable business truth
 - Emit start/end or success/error pairs around expensive operations
 - Preserve trace ID continuity across subprocesses
 - Attach CAS digests rather than large inline payloads

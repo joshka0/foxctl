@@ -94,7 +94,7 @@ func WithSpanDataMap(m map[string]any) SpanOpt {
 	}
 }
 
-// Artifact keys for wide events - these enable full request/response replay.
+// Artifact keys for foxcular events - these enable full request/response replay.
 const (
 	// ArtifactInput is the CAS digest of the input payload.
 	ArtifactInput = "input_artifact"
@@ -157,7 +157,7 @@ func WithSpanPersistenceFile(name string) SpanOpt {
 
 // StartSpan starts a span "now" and returns:
 //   - a context with trace ID attached
-//   - a done(err) func that emits one WideEvent on exit
+//   - a done(err) func that emits one Event on exit
 //   - the EventBuilder so callers can add more fields mid-flight
 //
 // Usage:
@@ -174,7 +174,7 @@ func WithSpanPersistenceFile(name string) SpanOpt {
 // - Flow: call StartSpanAt with time.Now → return context, done, builder
 // - SideEffects: reads clock for start time
 // - Related: StartSpanAt, EventBuilder
-// - Keywords: start_span, trace_id, wide_event, done_callback, event_builder
+// - Keywords: start_span, trace_id, event, done_callback, event_builder
 func StartSpan(ctx context.Context, op string, opts ...SpanOpt) (context.Context, func(error), *EventBuilder) {
 	return StartSpanAt(ctx, time.Now(), op, opts...)
 }
@@ -185,11 +185,11 @@ func StartSpan(ctx context.Context, op string, opts ...SpanOpt) (context.Context
 // Index:
 // - Purpose: Start a span with a caller-provided start time
 // - Flow: apply options → ensure trace → build event → enrich context → return done func
-// - SideEffects: reads env/context; emits WideEvent on done
+// - SideEffects: reads env/context; emits Event on done
 // - FailureModes: none (errors captured in emitted event)
-// - Observability: emits WideEvent via EmitWithConfig
+// - Observability: emits Event via EmitWithConfig
 // - Related: StartSpan, EmitWithConfig, EnsureTraceID
-// - Keywords: start_span_at, trace_id, emit, wide_event, persist_config
+// - Keywords: start_span_at, trace_id, emit, event, persist_config
 func StartSpanAt(ctx context.Context, startedAt time.Time, op string, opts ...SpanOpt) (context.Context, func(error), *EventBuilder) {
 	var o spanOpts
 	for _, opt := range opts {
@@ -240,7 +240,7 @@ func StartSpanAt(ctx context.Context, startedAt time.Time, op string, opts ...Sp
 
 	done := func(err error) {
 		dur := time.Since(startedAt)
-		var event *WideEvent
+		var event *Event
 		switch {
 		case err == nil:
 			event = b.Success(dur)

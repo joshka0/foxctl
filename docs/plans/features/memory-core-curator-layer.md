@@ -49,7 +49,7 @@ these stores, not a new broad storage backend.
 
 ## Observability Contract
 
-Memory reads and curator maintenance should emit aggregate wide events through
+Memory reads and curator maintenance should emit aggregate foxcular events through
 `internal/runtime/observability`. These events are telemetry and audit inputs,
 not new authority:
 
@@ -544,7 +544,7 @@ silently mutated.
 
 Status: partially implemented.
 
-Current branch work emits aggregate wide events for:
+Current branch work emits aggregate foxcular events for:
 
 - `memory.query`
 - `memory.session_restore`
@@ -556,7 +556,7 @@ queries.
 
 Remaining work:
 
-- project wide events into durable telemetry counters when an outcome is known
+- project foxcular events into durable telemetry counters when an outcome is known
 - distinguish `viewed`, `selected`, `used`, `succeeded`, and `failed`
 - add a small API or skill for explicit outcome marking
 - avoid mutating memory rows during internal curator reads
@@ -619,7 +619,7 @@ feedback loops.
 
 1. **Durable telemetry projection**
 
-   Wide events are useful for audits, but they are not yet the canonical
+   Foxcular events are useful for audits, but they are not yet the canonical
    counters that curator uses. Add a projection path from outcome events into
    `TelemetryEnvelope` fields:
 
@@ -749,7 +749,7 @@ Keep the first PR focused on the foundational hard cut:
 2. Project named memory and context claims into canonical records.
 3. Hard-cut `memory/query` and session restore to canonical records.
 4. Add deterministic curator report/apply path.
-5. Emit aggregate memory wide events.
+5. Emit aggregate memory foxcular events.
 
 Leave MCP bridge expansion, procedural skill validation, room sleep
 consolidation, and model-assisted curator edits for follow-up PRs.

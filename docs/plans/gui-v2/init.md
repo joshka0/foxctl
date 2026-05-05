@@ -2750,19 +2750,19 @@ Acceptance:
 
 ## Phase 6 — Observability integration (1–2 days)
 
-**Goal:** wide events for HTTP requests + console turns + tool exec.
+**Goal:** foxcular events for HTTP requests + console turns + tool exec.
 
 Tasks:
 
 * On each `/api/skills/run` and each WS ask:
 
   * ensure trace id (`observability.EnsureTraceID`)
-  * emit wide event on completion (`observability.Emit(...)`)
+  * emit foxcular event on completion (`observability.Emit(...)`)
 * Add `/api/obs/tail` (optional) that tails NDJSON
 
 Acceptance:
 
-* events appear in `$FOXCTL_OBS_DIR/events/wide_events.ndjson`
+* events appear in `$FOXCTL_OBS_DIR/events/foxcular_events.ndjson`
 * correlation_id matches WS correlation_id + job_id meta when applicable
 
 ---

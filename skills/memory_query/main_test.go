@@ -56,17 +56,17 @@ func getData(t *testing.T, env map[string]any) map[string]any {
 	return data
 }
 
-func readWideEvents(t *testing.T, dir string) []observability.WideEvent {
+func readEvents(t *testing.T, dir string) []observability.Event {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join(dir, "events", observability.WideEventFileName+".ndjson"))
+	body, err := os.ReadFile(filepath.Join(dir, "events", observability.EventFileName+".ndjson"))
 	require.NoError(t, err)
 	lines := bytes.Split(bytes.TrimSpace(body), []byte("\n"))
-	events := make([]observability.WideEvent, 0, len(lines))
+	events := make([]observability.Event, 0, len(lines))
 	for _, line := range lines {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		var event observability.WideEvent
+		var event observability.Event
 		require.NoError(t, json.Unmarshal(line, &event))
 		events = append(events, event)
 	}
@@ -212,7 +212,7 @@ func TestMemoryQuery_QueryOnly(t *testing.T) {
 	assert.NotNil(t, data["stats"])
 }
 
-func TestMemoryQueryEmitsWideEventTelemetry(t *testing.T) {
+func TestMemoryQueryEmitsEventTelemetry(t *testing.T) {
 	var buf bytes.Buffer
 	rc, cleanup := newTestContext(t, &buf)
 	defer cleanup()
@@ -235,17 +235,17 @@ func TestMemoryQueryEmitsWideEventTelemetry(t *testing.T) {
 	err := run(context.Background(), rc, Input{Query: "telemetry"})
 	require.NoError(t, err)
 
-	var found *observability.WideEvent
-	for _, event := range readWideEvents(t, obsDir) {
+	var found *observability.Event
+	for _, event := range readEvents(t, obsDir) {
 		if event.Operation == observability.OpMemoryQuery {
 			found = &event
 			break
 		}
 	}
 	require.NotNil(t, found, "memory.query event not emitted")
-	require.Equal(t, observability.ComponentSkill, found.Component)
-	require.Equal(t, "memory/query", found.Command)
-	require.Equal(t, rc.Workspace, found.WorkspaceID)
+	require.Equal(t, observability.ComponentSkill, observability.EventDataString(found, observability.DataKeyComponent))
+	require.Equal(t, "memory/query", found.Name)
+	require.Equal(t, rc.Workspace, observability.EventDataString(found, observability.DataKeyWorkspaceID))
 	require.Equal(t, observability.StatusOK, found.Status)
 	require.Equal(t, true, found.Data["query_present"])
 	require.Equal(t, float64(1), found.Data["records_returned"])

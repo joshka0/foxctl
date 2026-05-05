@@ -12,7 +12,7 @@ import (
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
-func TestObservabilityTelemetrySinkEmitsSanitizedWideEvent(t *testing.T) {
+func TestObservabilityTelemetrySinkEmitsSanitizedEvent(t *testing.T) {
 	obsDir := t.TempDir()
 	observability.SetObsDirForTesting(obsDir)
 	observability.SetSamplerForTesting(observability.SampleAll{})
@@ -36,7 +36,7 @@ func TestObservabilityTelemetrySinkEmitsSanitizedWideEvent(t *testing.T) {
 		},
 	})
 
-	records := readWideEventRecords(t, obsDir)
+	records := readEventRecords(t, obsDir)
 	if len(records) != 1 {
 		t.Fatalf("records=%d want 1", len(records))
 	}
@@ -44,14 +44,20 @@ func TestObservabilityTelemetrySinkEmitsSanitizedWideEvent(t *testing.T) {
 	if record.Operation != OpRLMREPLCall {
 		t.Fatalf("operation=%q want %q", record.Operation, OpRLMREPLCall)
 	}
-	if record.Component != observability.ComponentAgent {
-		t.Fatalf("component=%q want %q", record.Component, observability.ComponentAgent)
+	if component := observability.EventDataString(&record, observability.DataKeyComponent); component != observability.ComponentAgent {
+		t.Fatalf("component=%q want %q", component, observability.ComponentAgent)
 	}
-	if record.Command != "test.rlm" {
-		t.Fatalf("command=%q want test.rlm", record.Command)
+	if record.Name != "test.rlm" {
+		t.Fatalf("name=%q want test.rlm", record.Name)
 	}
-	if record.SessionID != "session-1" || record.AgentID != "agent-1" || record.WorkspaceID != "workspace-1" {
-		t.Fatalf("identity fields not preserved: session=%q agent=%q workspace=%q", record.SessionID, record.AgentID, record.WorkspaceID)
+	if sessionID := observability.EventDataString(&record, observability.DataKeySessionID); sessionID != "session-1" {
+		t.Fatalf("session_id=%q want session-1", sessionID)
+	}
+	if agentID := observability.EventDataString(&record, observability.DataKeyAgentID); agentID != "agent-1" {
+		t.Fatalf("agent_id=%q want agent-1", agentID)
+	}
+	if workspaceID := observability.EventDataString(&record, observability.DataKeyWorkspaceID); workspaceID != "workspace-1" {
+		t.Fatalf("workspace_id=%q want workspace-1", workspaceID)
 	}
 	if got := intFromData(record.Data, "input_chars"); got != len("print(secret_value)") {
 		t.Fatalf("input_chars=%d want %d", got, len("print(secret_value)"))
@@ -96,7 +102,7 @@ func TestObservabilityTelemetrySinkIncludesParentToolCallFields(t *testing.T) {
 		},
 	})
 
-	records := readWideEventRecords(t, obsDir)
+	records := readEventRecords(t, obsDir)
 	if len(records) != 1 {
 		t.Fatalf("records=%d want 1", len(records))
 	}
@@ -153,7 +159,7 @@ func TestObservabilityTelemetrySinkIncludesSubcallIdentityFields(t *testing.T) {
 		},
 	})
 
-	records := readWideEventRecords(t, obsDir)
+	records := readEventRecords(t, obsDir)
 	if len(records) != 1 {
 		t.Fatalf("records=%d want 1", len(records))
 	}
@@ -231,7 +237,7 @@ func TestObservabilityTelemetrySinkIncludesContractFields(t *testing.T) {
 		},
 	})
 
-	records := readWideEventRecords(t, obsDir)
+	records := readEventRecords(t, obsDir)
 	if len(records) != 1 {
 		t.Fatalf("records=%d want 1", len(records))
 	}
@@ -311,7 +317,7 @@ func TestObservabilityTelemetrySinkIncludesNodeAndWaitFields(t *testing.T) {
 		},
 	})
 
-	records := readWideEventRecords(t, obsDir)
+	records := readEventRecords(t, obsDir)
 	if len(records) != 2 {
 		t.Fatalf("records=%d want 2", len(records))
 	}
@@ -381,27 +387,27 @@ func TestObservabilityTelemetrySinkIncludesNodeAndWaitFields(t *testing.T) {
 	}
 }
 
-func readWideEventRecords(t *testing.T, obsDir string) []observability.WideEvent {
+func readEventRecords(t *testing.T, obsDir string) []observability.Event {
 	t.Helper()
 
-	filePath := filepath.Join(obsDir, "events", observability.WideEventFileName+".ndjson")
+	filePath := filepath.Join(obsDir, "events", observability.EventFileName+".ndjson")
 	f, err := os.Open(filePath)
 	if err != nil {
-		t.Fatalf("open wide events: %v", err)
+		t.Fatalf("open events: %v", err)
 	}
 	defer f.Close()
 
-	var records []observability.WideEvent
+	var records []observability.Event
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		var record observability.WideEvent
+		var record observability.Event
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			t.Fatalf("decode wide event: %v", err)
+			t.Fatalf("decode event: %v", err)
 		}
 		records = append(records, record)
 	}
 	if err := scanner.Err(); err != nil {
-		t.Fatalf("scan wide events: %v", err)
+		t.Fatalf("scan events: %v", err)
 	}
 	return records
 }

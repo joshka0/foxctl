@@ -25,7 +25,7 @@ func TestShouldPublishToSSE_ContextAndV2Prefixes(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := shouldPublishToSSE(&WideEvent{Operation: tc.op})
+			got := shouldPublishToSSE(&Event{Operation: tc.op})
 			if got != tc.want {
 				t.Fatalf("shouldPublishToSSE(%q)=%v want %v", tc.op, got, tc.want)
 			}
@@ -36,7 +36,7 @@ func TestShouldPublishToSSE_ContextAndV2Prefixes(t *testing.T) {
 func TestExtractActivityData_IncludesContextRefs(t *testing.T) {
 	t.Parallel()
 
-	event := &WideEvent{
+	event := &Event{
 		Data: map[string]any{
 			"search_path":        "vector",
 			"artifact_hit_count": 3,
@@ -72,7 +72,7 @@ func TestExtractActivityData_IncludesContextRefs(t *testing.T) {
 func TestExtractActivityData_IncludesOrchestrationFields(t *testing.T) {
 	t.Parallel()
 
-	event := &WideEvent{
+	event := &Event{
 		Data: map[string]any{
 			"request_id":       "req-123",
 			"issue_id":         "issue-123",
@@ -117,15 +117,15 @@ func TestPublishToSSE_EmitsActivityForContextLayeredBundle(t *testing.T) {
 		SetSSEPublisher(nil)
 	})
 
-	publishToSSE(&WideEvent{
-		Operation:  OpContextLayeredBundle,
-		Status:     StatusOK,
-		Component:  ComponentContextBuilder,
-		SessionID:  "session-ctx-1",
-		TraceID:    "trace-ctx-1",
-		Ts:         time.Date(2026, time.February, 27, 10, 0, 0, 0, time.UTC),
-		DurationMS: 12,
+	publishToSSE(&Event{
+		Operation: OpContextLayeredBundle,
+		Status:    StatusOK,
+		TraceID:   "trace-ctx-1",
+		Timestamp: time.Date(2026, time.February, 27, 10, 0, 0, 0, time.UTC),
+		Duration:  12 * time.Millisecond,
 		Data: map[string]any{
+			"component":  ComponentContextBuilder,
+			"session_id": "session-ctx-1",
 			"refs":       []string{"turn/t1", "turn/t2"},
 			"turn_refs":  []string{"turn/t1"},
 			"slice_refs": []string{"turn/t1#msg:m1:1-20"},

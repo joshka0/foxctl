@@ -382,7 +382,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 
 	// Persist to database if session store is configured
 	if r.config.SessionStore != nil {
-		// Compute prompt hash for correlation with wide events
+		// Compute prompt hash for correlation with foxcular events
 		var promptHash string
 		if resolvedPrompt != "" {
 			h := sha256.Sum256([]byte(resolvedPrompt))

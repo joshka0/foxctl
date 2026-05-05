@@ -226,7 +226,7 @@ func (h *Hub) broadcastEvent(ctx context.Context, event Event) {
 		select {
 		case client.Send <- msg:
 		default:
-			// Client buffer full, skip (too verbose for wide events)
+			// Client buffer full, skip (too verbose for foxcular events)
 		}
 	}
 }

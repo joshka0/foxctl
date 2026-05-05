@@ -16,41 +16,10 @@ func TestQueryEventRecordsFiltersAndSortsNewestFirst(t *testing.T) {
 	t.Parallel()
 
 	obsDir := t.TempDir()
-	writeWideEventsFile(t, obsDir, []WideEvent{
-		{
-			Ts:          time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC),
-			TraceID:     "trace-1",
-			SpanID:      "span-1",
-			Service:     "foxctl",
-			Component:   ComponentCLI,
-			Operation:   "watch.start",
-			WorkspaceID: "ws-a",
-			Status:      StatusOK,
-		},
-		{
-			Ts:           time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC),
-			TraceID:      "trace-2",
-			SpanID:       "span-2",
-			Service:      "foxctl",
-			Component:    ComponentAgent,
-			Operation:    "agent.iteration",
-			WorkspaceID:  "ws-a",
-			Status:       StatusError,
-			ErrorCode:    "EAGENT",
-			ErrorMessage: "agent failure",
-		},
-		{
-			Ts:           time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC),
-			TraceID:      "trace-3",
-			SpanID:       "span-3",
-			Service:      "foxctl",
-			Component:    ComponentCLI,
-			Operation:    "watch.error",
-			WorkspaceID:  "ws-b",
-			Status:       StatusError,
-			ErrorCode:    "EWATCH",
-			ErrorMessage: "watch failure",
-		},
+	writeEventsFile(t, obsDir, []Event{
+		testEvent(time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC), "watch.start", StatusOK, testTrace("trace-1"), testSpan("span-1"), testComponent(ComponentCLI), testWorkspace("ws-a")),
+		testEvent(time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC), "agent.iteration", StatusError, testTrace("trace-2"), testSpan("span-2"), testComponent(ComponentAgent), testWorkspace("ws-a"), testError("EAGENT", "agent failure")),
+		testEvent(time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC), "watch.error", StatusError, testTrace("trace-3"), testSpan("span-3"), testComponent(ComponentCLI), testWorkspace("ws-b"), testError("EWATCH", "watch failure")),
 	})
 
 	entries, err := QueryEventRecords(context.Background(), EventQueryOptions{
@@ -89,14 +58,16 @@ func TestQueryEventRecordsRespectsCancellation(t *testing.T) {
 	t.Parallel()
 
 	obsDir := t.TempDir()
-	writeWideEventsFile(t, obsDir, []WideEvent{{
-		Ts:        time.Now().UTC(),
+	writeEventsFile(t, obsDir, []Event{{
+		Timestamp: time.Now().UTC(),
 		TraceID:   "trace-1",
 		SpanID:    "span-1",
-		Service:   "foxctl",
-		Component: ComponentCLI,
 		Operation: "watch.error",
 		Status:    StatusError,
+		Data: map[string]any{
+			"service":   "foxctl",
+			"component": ComponentCLI,
+		},
 	}})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -120,42 +91,29 @@ func TestQueryEventRecordsFallsBackWhenTailScanIsPartial(t *testing.T) {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 
-	f, err := os.Create(filepath.Join(eventsDir, WideEventFileName+".ndjson"))
+	f, err := os.Create(filepath.Join(eventsDir, EventFileName+".ndjson"))
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	defer f.Close()
 
 	enc := json.NewEncoder(f)
-	target := WideEvent{
-		Ts:           time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC),
-		TraceID:      "trace-target",
-		SpanID:       "span-target",
-		Service:      "foxctl",
-		Component:    ComponentAgent,
-		Operation:    "agent.iteration",
-		Status:       StatusError,
-		ErrorCode:    "EAGENT",
-		ErrorMessage: "target failure",
-	}
+	target := testEvent(time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC), "agent.iteration", StatusError, testTrace("trace-target"), testSpan("span-target"), testComponent(ComponentAgent), testError("EAGENT", "target failure"))
 	if err := enc.Encode(target); err != nil {
 		t.Fatalf("Encode(target) error = %v", err)
 	}
 
 	padding := strings.Repeat("x", 4096)
 	for i := 0; i < 200; i++ {
-		event := WideEvent{
-			Ts:        time.Date(2026, 3, 20, 9, 0, 0, i, time.UTC),
-			TraceID:   "trace-padding",
-			SpanID:    "span-padding-" + time.Date(2026, 3, 20, 9, 0, 0, i, time.UTC).Format("150405.000000000"),
-			Service:   "foxctl",
-			Component: ComponentCLI,
-			Operation: "watch.ok",
-			Status:    StatusOK,
-			Data: map[string]any{
-				"padding": padding,
-			},
-		}
+		event := testEvent(
+			time.Date(2026, 3, 20, 9, 0, 0, i, time.UTC),
+			"watch.ok",
+			StatusOK,
+			testTrace("trace-padding"),
+			testSpan("span-padding-"+time.Date(2026, 3, 20, 9, 0, 0, i, time.UTC).Format("150405.000000000")),
+			testComponent(ComponentCLI),
+			testData("padding", padding),
+		)
 		if err := enc.Encode(event); err != nil {
 			t.Fatalf("Encode(padding) error = %v", err)
 		}
@@ -181,27 +139,9 @@ func TestQueryEventRecordsGolden(t *testing.T) {
 	t.Parallel()
 
 	obsDir := t.TempDir()
-	writeWideEventsFile(t, obsDir, []WideEvent{
-		{
-			Ts:           time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC),
-			TraceID:      "trace-a",
-			SpanID:       "span-a",
-			Service:      "foxctl",
-			Component:    ComponentCLI,
-			Operation:    "watch.error",
-			Status:       StatusError,
-			ErrorCode:    "EWATCH",
-			ErrorMessage: "watch failed",
-		},
-		{
-			Ts:        time.Date(2026, 3, 20, 8, 1, 0, 0, time.UTC),
-			TraceID:   "trace-b",
-			SpanID:    "span-b",
-			Service:   "foxctl",
-			Component: ComponentAgent,
-			Operation: "agent.iteration",
-			Status:    StatusOK,
-		},
+	writeEventsFile(t, obsDir, []Event{
+		testEvent(time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC), "watch.error", StatusError, testTrace("trace-a"), testSpan("span-a"), testComponent(ComponentCLI), testError("EWATCH", "watch failed")),
+		testEvent(time.Date(2026, 3, 20, 8, 1, 0, 0, time.UTC), "agent.iteration", StatusOK, testTrace("trace-b"), testSpan("span-b"), testComponent(ComponentAgent)),
 	})
 
 	entries, err := QueryEventRecords(context.Background(), EventQueryOptions{
@@ -227,14 +167,14 @@ func TestQueryEventRecordsGolden(t *testing.T) {
 	}
 }
 
-func writeWideEventsFile(t *testing.T, obsDir string, events []WideEvent) {
+func writeEventsFile(t *testing.T, obsDir string, events []Event) {
 	t.Helper()
 
 	eventsDir := filepath.Join(obsDir, "events")
 	if err := os.MkdirAll(eventsDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	f, err := os.Create(filepath.Join(eventsDir, WideEventFileName+".ndjson"))
+	f, err := os.Create(filepath.Join(eventsDir, EventFileName+".ndjson"))
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}

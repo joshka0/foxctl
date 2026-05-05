@@ -102,7 +102,7 @@ internal/context/contextengine/adapters/  # Bidirectional type conversions
   taskhistory.go       Pack, SessionSummary → canonical
   taskstore.go         Task, Epic → canonical
   trajectory.go        Event, Trajectory → canonical
-  observability.go     WideEvent → canonical
+  observability.go     Event → canonical
   rlm.go               NodeResult → canonical
 
 internal/storage/contextengine/           # Durable store

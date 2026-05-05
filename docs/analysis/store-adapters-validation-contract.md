@@ -215,9 +215,9 @@ Converting a `trajectory.Trajectory` → canonical `ContextEvent` → back must 
 **Tool:** `go test`
 **Evidence:** test output showing round-trip equality.
 
-### VAL-STORE-029: Observability WideEvent round-trip
+### VAL-STORE-029: Observability Event round-trip
 
-Converting an `observability.WideEvent` → canonical `ContextEvent` → back must preserve: `ts`, `trace_id`, `span_id`, `parent_id`, `service`, `version`, `component`, `operation`, `command`, `subtype`, `session_id`, `agent_id`, `workspace_id`, `job_id`, `status`, `duration_ms`, `error_type`, `error_code`, `error_message`, `retriable`, `data` (key set).
+Converting an `observability.Event` → canonical `ContextEvent` → back must preserve: `ts`, `trace_id`, `span_id`, `parent_id`, `service`, `version`, `component`, `operation`, `command`, `subtype`, `session_id`, `agent_id`, `workspace_id`, `job_id`, `status`, `duration_ms`, `error_type`, `error_code`, `error_message`, `retriable`, `data` (key set).
 
 **Tool:** `go test`
 **Evidence:** test output showing round-trip equality.

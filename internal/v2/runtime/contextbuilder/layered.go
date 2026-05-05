@@ -25,7 +25,7 @@ const (
 
 type semanticEventJob struct {
 	ctx   context.Context
-	event *observability.WideEvent
+	event *observability.Event
 }
 
 var (
@@ -626,7 +626,7 @@ func (b *Builder) emitSemanticArtifactSearchEvent(
 	}
 
 	if strings.TrimSpace(errText) != "" || path == run.ArtifactSearchPathError {
-		emitWideEventAsync(ctx, event.ErrorWithDetails(
+		emitEventAsync(ctx, event.ErrorWithDetails(
 			"semantic_retrieval",
 			"ESEMANTIC_RETRIEVAL",
 			strings.TrimSpace(errText),
@@ -634,7 +634,7 @@ func (b *Builder) emitSemanticArtifactSearchEvent(
 			duration))
 		return
 	}
-	emitWideEventAsync(ctx, event.Success(duration))
+	emitEventAsync(ctx, event.Success(duration))
 }
 
 func semanticLatencyBucket(duration time.Duration) string {
@@ -663,7 +663,7 @@ func semanticHitBucket(hitCount int) string {
 	}
 }
 
-func emitWideEventAsync(ctx context.Context, event *observability.WideEvent) {
+func emitEventAsync(ctx context.Context, event *observability.Event) {
 	if event == nil {
 		return
 	}
@@ -737,7 +737,7 @@ func (b *Builder) emitLayeredBundleEvent(ctx context.Context, bundle LayeredBund
 			event.WithData("working_context_applied", v)
 		}
 	}
-	emitWideEventAsync(ctx, event.Success(0))
+	emitEventAsync(ctx, event.Success(0))
 }
 
 func normalizeSemanticHits(hits []run.ScoredArtifact, minSimilarity float64, limit int) []run.ScoredArtifact {
@@ -913,7 +913,7 @@ func (b *Builder) resolveEpisodeLayer(
 		if !until.IsZero() {
 			event.WithData("until", until.UTC().Format(time.RFC3339))
 		}
-		emitWideEventAsync(ctx, event.ErrorWithDetails(
+		emitEventAsync(ctx, event.ErrorWithDetails(
 			"episode_layer",
 			"EEPISODE_LAYER",
 			strings.TrimSpace(err.Error()),

@@ -3,7 +3,7 @@ kind: Skill
 metadata:
   name: obs/logs
   version: 0.1.0
-  description: "Query and browse observability logs (wide events)"
+  description: "Query and browse observability logs (foxcular events)"
   tags: ["observability", "debugging", "logs", "monitoring"]
 distribution:
   type: exec
@@ -83,7 +83,7 @@ signature:
 returns:
   - name: events
     type: array
-    description: "List of wide events matching filters"
+    description: "List of foxcular events matching filters"
   - name: count
     type: integer
     description: "Number of events returned"

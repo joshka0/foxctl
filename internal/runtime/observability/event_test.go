@@ -18,8 +18,8 @@ func TestNewEvent(t *testing.T) {
 	if built.Operation != "test.operation" {
 		t.Errorf("Operation = %q, want test.operation", built.Operation)
 	}
-	if built.Service != "foxctl" {
-		t.Errorf("Service = %q, want foxctl", built.Service)
+	if eventDataString(built, "service") != "foxctl" {
+		t.Errorf("service = %q, want foxctl", eventDataString(built, "service"))
 	}
 	if built.SpanID == "" {
 		t.Error("SpanID should be auto-generated")
@@ -27,8 +27,8 @@ func TestNewEvent(t *testing.T) {
 	if built.TraceID == "" {
 		t.Error("TraceID should be auto-generated on Build()")
 	}
-	if built.Ts.IsZero() {
-		t.Error("Ts should be set")
+	if built.Timestamp.IsZero() {
+		t.Error("timestamp should be set")
 	}
 }
 
@@ -52,26 +52,26 @@ func TestEventBuilder_FluentAPI(t *testing.T) {
 	if event.ParentID != "parent-456" {
 		t.Errorf("ParentID = %q, want parent-456", event.ParentID)
 	}
-	if event.Component != ComponentSkill {
-		t.Errorf("Component = %q, want %q", event.Component, ComponentSkill)
+	if eventDataString(event, "component") != ComponentSkill {
+		t.Errorf("component = %q, want %q", eventDataString(event, "component"), ComponentSkill)
 	}
-	if event.Command != "code/snippet_extract" {
-		t.Errorf("Command = %q, want code/snippet_extract", event.Command)
+	if event.Name != "code/snippet_extract" {
+		t.Errorf("name = %q, want code/snippet_extract", event.Name)
 	}
-	if event.Subtype != "search" {
-		t.Errorf("Subtype = %q, want search", event.Subtype)
+	if eventDataString(event, "subtype") != "search" {
+		t.Errorf("subtype = %q, want search", eventDataString(event, "subtype"))
 	}
-	if event.SessionID != "session-abc" {
-		t.Errorf("SessionID = %q, want session-abc", event.SessionID)
+	if eventDataString(event, "session_id") != "session-abc" {
+		t.Errorf("session_id = %q, want session-abc", eventDataString(event, "session_id"))
 	}
-	if event.AgentID != "agent-def" {
-		t.Errorf("AgentID = %q, want agent-def", event.AgentID)
+	if eventDataString(event, "agent_id") != "agent-def" {
+		t.Errorf("agent_id = %q, want agent-def", eventDataString(event, "agent_id"))
 	}
-	if event.WorkspaceID != "workspace-xyz" {
-		t.Errorf("WorkspaceID = %q, want workspace-xyz", event.WorkspaceID)
+	if eventDataString(event, "workspace_id") != "workspace-xyz" {
+		t.Errorf("workspace_id = %q, want workspace-xyz", eventDataString(event, "workspace_id"))
 	}
-	if event.JobID != "job-789" {
-		t.Errorf("JobID = %q, want job-789", event.JobID)
+	if eventDataString(event, "job_id") != "job-789" {
+		t.Errorf("job_id = %q, want job-789", eventDataString(event, "job_id"))
 	}
 	if event.Data["files"] != 10 {
 		t.Errorf("Data[files] = %v, want 10", event.Data["files"])
@@ -90,8 +90,8 @@ func TestEventBuilder_Success(t *testing.T) {
 	if event.Status != StatusOK {
 		t.Errorf("Status = %q, want %q", event.Status, StatusOK)
 	}
-	if event.DurationMS != 500 {
-		t.Errorf("DurationMS = %d, want 500", event.DurationMS)
+	if event.Duration.Milliseconds() != 500 {
+		t.Errorf("duration_ms = %d, want 500", event.Duration.Milliseconds())
 	}
 }
 
@@ -103,8 +103,8 @@ func TestEventBuilder_Error(t *testing.T) {
 	if event.Status != StatusError {
 		t.Errorf("Status = %q, want %q", event.Status, StatusError)
 	}
-	if event.DurationMS != 100 {
-		t.Errorf("DurationMS = %d, want 100", event.DurationMS)
+	if event.Duration.Milliseconds() != 100 {
+		t.Errorf("duration_ms = %d, want 100", event.Duration.Milliseconds())
 	}
 	if event.ErrorMessage != err.Error() {
 		t.Errorf("ErrorMessage = %q, want %q", event.ErrorMessage, err.Error())
@@ -131,7 +131,7 @@ func TestEventBuilder_ErrorWithDetails(t *testing.T) {
 	if event.ErrorMessage != "field 'name' is required" {
 		t.Errorf("ErrorMessage = %q, want field 'name' is required", event.ErrorMessage)
 	}
-	if event.Retriable == nil || !*event.Retriable {
+	if retry := eventDataBoolPtr(event, "retriable"); retry == nil || !*retry {
 		t.Error("Retriable should be true")
 	}
 }
@@ -183,9 +183,6 @@ func TestEventBuilder_WithDataMap(t *testing.T) {
 	}
 	event := NewEvent("test.op").WithDataMap(data).Build()
 
-	if len(event.Data) != 3 {
-		t.Errorf("Data has %d keys, want 3", len(event.Data))
-	}
 	if event.Data["files"] != 10 {
 		t.Errorf("Data[files] = %v, want 10", event.Data["files"])
 	}
@@ -262,25 +259,25 @@ func TestTailSampler(t *testing.T) {
 	sampler := NewTailSampler(true, 1000, 0.0) // No random sampling
 
 	// Error events should always be sampled
-	errEvent := &WideEvent{Status: StatusError, DurationMS: 100}
+	errEvent := &Event{Status: StatusError, Duration: 100 * time.Millisecond}
 	if sampler.ShouldSample(errEvent) != AlwaysSample {
 		t.Error("Error events should always be sampled")
 	}
 
 	// Canceled events should always be sampled
-	canceledEvent := &WideEvent{Status: StatusCanceled, DurationMS: 100}
+	canceledEvent := &Event{Status: StatusCanceled, Duration: 100 * time.Millisecond}
 	if sampler.ShouldSample(canceledEvent) != AlwaysSample {
 		t.Error("Canceled events should always be sampled")
 	}
 
 	// Slow events should always be sampled
-	slowEvent := &WideEvent{Status: StatusOK, DurationMS: 1500}
+	slowEvent := &Event{Status: StatusOK, Duration: 1500 * time.Millisecond}
 	if sampler.ShouldSample(slowEvent) != AlwaysSample {
 		t.Error("Slow events should always be sampled")
 	}
 
 	// Fast successful events with 0 rate should be dropped
-	fastEvent := &WideEvent{Status: StatusOK, DurationMS: 100}
+	fastEvent := &Event{Status: StatusOK, Duration: 100 * time.Millisecond}
 	if sampler.ShouldSample(fastEvent) != Drop {
 		t.Error("Fast successful events with 0 rate should be dropped")
 	}
@@ -291,7 +288,7 @@ func TestTailSampler_DisabledErrorSampling(t *testing.T) {
 
 	// Even errors should be dropped when error sampling is disabled
 	// (except if they're slow)
-	errEvent := &WideEvent{Status: StatusError, DurationMS: 100}
+	errEvent := &Event{Status: StatusError, Duration: 100 * time.Millisecond}
 	if sampler.ShouldSample(errEvent) != Drop {
 		t.Error("Errors should be dropped when error sampling is disabled")
 	}
@@ -301,7 +298,7 @@ func TestTailSampler_RandomSampling(t *testing.T) {
 	// With 100% sampling rate, everything should be sampled
 	sampler := NewTailSampler(true, 1000, 1.0)
 
-	fastEvent := &WideEvent{Status: StatusOK, DurationMS: 100}
+	fastEvent := &Event{Status: StatusOK, Duration: 100 * time.Millisecond}
 	if sampler.ShouldSample(fastEvent) == Drop {
 		t.Error("With 100% rate, fast events should be sampled")
 	}
@@ -316,26 +313,26 @@ func TestTailSampler_AlwaysSampleAllowlist(t *testing.T) {
 		"workspace-1": {},
 	}
 
-	if sampler.ShouldSample(&WideEvent{Status: StatusOK, SessionID: "session-1"}) != AlwaysSample {
+	if sampler.ShouldSample(&Event{Status: StatusOK, Data: map[string]any{"session_id": "session-1"}}) != AlwaysSample {
 		t.Error("session allowlist should always sample")
 	}
-	if sampler.ShouldSample(&WideEvent{Status: StatusOK, WorkspaceID: "workspace-1"}) != AlwaysSample {
+	if sampler.ShouldSample(&Event{Status: StatusOK, Data: map[string]any{"workspace_id": "workspace-1"}}) != AlwaysSample {
 		t.Error("workspace allowlist should always sample")
 	}
-	if sampler.ShouldSample(&WideEvent{Status: StatusOK, Data: map[string]any{"debug": true}}) != AlwaysSample {
+	if sampler.ShouldSample(&Event{Status: StatusOK, Data: map[string]any{"debug": true}}) != AlwaysSample {
 		t.Error("debug flag should always sample")
 	}
-	if sampler.ShouldSample(&WideEvent{Status: StatusOK, Data: map[string]any{"always_sample": true}}) != AlwaysSample {
+	if sampler.ShouldSample(&Event{Status: StatusOK, Data: map[string]any{"always_sample": true}}) != AlwaysSample {
 		t.Error("always_sample flag should always sample")
 	}
-	if sampler.ShouldSample(&WideEvent{Status: StatusOK, SessionID: "session-other"}) != Drop {
+	if sampler.ShouldSample(&Event{Status: StatusOK, Data: map[string]any{"session_id": "session-other"}}) != Drop {
 		t.Error("non-allowlisted session should be dropped with 0 rate")
 	}
 }
 
 func TestSampleAll(t *testing.T) {
 	sampler := SampleAll{}
-	event := &WideEvent{Status: StatusOK, DurationMS: 1}
+	event := &Event{Status: StatusOK, Duration: time.Millisecond}
 	if sampler.ShouldSample(event) != AlwaysSample {
 		t.Error("SampleAll should always return AlwaysSample")
 	}
@@ -343,7 +340,7 @@ func TestSampleAll(t *testing.T) {
 
 func TestSampleNone(t *testing.T) {
 	sampler := SampleNone{}
-	event := &WideEvent{Status: StatusError, DurationMS: 10000}
+	event := &Event{Status: StatusError, Duration: 10 * time.Second}
 	if sampler.ShouldSample(event) != Drop {
 		t.Error("SampleNone should always return Drop")
 	}
@@ -375,7 +372,7 @@ func TestEmit_Enabled(t *testing.T) {
 	Emit(context.Background(), event)
 
 	// Verify file was written
-	filePath := filepath.Join(tmpDir, "events", WideEventFileName+".ndjson")
+	filePath := filepath.Join(tmpDir, "events", EventFileName+".ndjson")
 	f, err := os.Open(filePath)
 	if err != nil {
 		t.Fatalf("Failed to open events file: %v", err)
@@ -387,7 +384,7 @@ func TestEmit_Enabled(t *testing.T) {
 		t.Fatal("Expected at least one line in events file")
 	}
 
-	var decoded WideEvent
+	var decoded Event
 	if err := json.Unmarshal(scanner.Bytes(), &decoded); err != nil {
 		t.Fatalf("Failed to unmarshal event: %v", err)
 	}
@@ -398,14 +395,14 @@ func TestEmit_Enabled(t *testing.T) {
 	if decoded.Operation != OpSkillRun {
 		t.Errorf("Operation = %q, want %q", decoded.Operation, OpSkillRun)
 	}
-	if decoded.Command != "code/snippet_extract" {
-		t.Errorf("Command = %q, want code/snippet_extract", decoded.Command)
+	if decoded.Name != "code/snippet_extract" {
+		t.Errorf("name = %q, want code/snippet_extract", decoded.Name)
 	}
 	if decoded.Status != StatusOK {
 		t.Errorf("Status = %q, want %q", decoded.Status, StatusOK)
 	}
-	if decoded.DurationMS != 250 {
-		t.Errorf("DurationMS = %d, want 250", decoded.DurationMS)
+	if decoded.Duration.Milliseconds() != 250 {
+		t.Errorf("duration_ms = %d, want 250", decoded.Duration.Milliseconds())
 	}
 	if decoded.Data["files"] != float64(5) { // JSON numbers are float64
 		t.Errorf("Data[files] = %v, want 5", decoded.Data["files"])
@@ -427,7 +424,7 @@ func TestEmit_Sampled(t *testing.T) {
 	Emit(context.Background(), errEvent)
 
 	// Verify only error event was written
-	filePath := filepath.Join(tmpDir, "events", WideEventFileName+".ndjson")
+	filePath := filepath.Join(tmpDir, "events", EventFileName+".ndjson")
 	f, err := os.Open(filePath)
 	if err != nil {
 		t.Fatalf("Failed to open events file: %v", err)
@@ -438,7 +435,7 @@ func TestEmit_Sampled(t *testing.T) {
 	count := 0
 	for scanner.Scan() {
 		count++
-		var decoded WideEvent
+		var decoded Event
 		if err := json.Unmarshal(scanner.Bytes(), &decoded); err != nil {
 			t.Fatalf("Failed to unmarshal event: %v", err)
 		}

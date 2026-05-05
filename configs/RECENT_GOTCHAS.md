@@ -39,7 +39,7 @@
   - Also added RoleResearcher for information gathering agents
 - 2026-01-22 [feature]: Session persistence for agent prompts and turns
   - New session fields: prompt, prompt_hash, llm_provider, llm_model
-  - prompt_hash (SHA256) enables correlation with wide events task_hash
+  - prompt_hash (SHA256) enables correlation with foxcular events task_hash
   - Turn content stored in CAS via content_cas_digest for large responses
   - Query sessions by prompt: SELECT * FROM sessions WHERE prompt LIKE '%search%'
 - 2026-02-14 [feature]: Daemon agent persistence + autonomous_reactive mode

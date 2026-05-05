@@ -21,17 +21,17 @@ func TestCommand(t *testing.T) {
 	assert.Equal(t, "session/restore", command)
 }
 
-func readWideEvents(t *testing.T, dir string) []observability.WideEvent {
+func readEvents(t *testing.T, dir string) []observability.Event {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join(dir, "events", observability.WideEventFileName+".ndjson"))
+	body, err := os.ReadFile(filepath.Join(dir, "events", observability.EventFileName+".ndjson"))
 	require.NoError(t, err)
 	lines := bytes.Split(bytes.TrimSpace(body), []byte("\n"))
-	events := make([]observability.WideEvent, 0, len(lines))
+	events := make([]observability.Event, 0, len(lines))
 	for _, line := range lines {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		var event observability.WideEvent
+		var event observability.Event
 		require.NoError(t, json.Unmarshal(line, &event))
 		events = append(events, event)
 	}
@@ -72,17 +72,17 @@ func TestEmitSessionRestoreTelemetry(t *testing.T) {
 		},
 	}, "", 10*time.Millisecond)
 
-	var found *observability.WideEvent
-	for _, event := range readWideEvents(t, obsDir) {
+	var found *observability.Event
+	for _, event := range readEvents(t, obsDir) {
 		if event.Operation == observability.OpMemorySessionRestore {
 			found = &event
 			break
 		}
 	}
 	require.NotNil(t, found, "memory.session_restore event not emitted")
-	require.Equal(t, observability.ComponentSkill, found.Component)
-	require.Equal(t, command, found.Command)
-	require.Equal(t, "/workspace", found.WorkspaceID)
+	require.Equal(t, observability.ComponentSkill, observability.EventDataString(found, observability.DataKeyComponent))
+	require.Equal(t, command, found.Name)
+	require.Equal(t, "/workspace", observability.EventDataString(found, observability.DataKeyWorkspaceID))
 	require.Equal(t, observability.StatusOK, found.Status)
 	require.Equal(t, "compact", found.Data["trigger"])
 	require.Equal(t, float64(2), found.Data["relevant_memory_records"])
