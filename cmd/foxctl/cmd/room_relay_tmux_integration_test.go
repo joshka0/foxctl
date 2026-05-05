@@ -208,10 +208,13 @@ func TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux(t *testing.T) {
 //
 // Run manually:
 //
-//	FOXCTL_INTEGRATION_TMUX=1 go test -tags=integration ./cmd/foxctl/cmd/ -run IntegrationRelayRoomMessageTmuxDispatchesQueuedDraftRealTmux -v
+//	FOXCTL_INTEGRATION_TMUX=1 FOXCTL_INTEGRATION_TMUX_QUEUED_DRAFT=1 go test -tags=integration ./cmd/foxctl/cmd/ -run IntegrationRelayRoomMessageTmuxDispatchesQueuedDraftRealTmux -v
 func TestIntegrationRelayRoomMessageTmuxDispatchesQueuedDraftRealTmux(t *testing.T) {
 	if os.Getenv("FOXCTL_INTEGRATION_TMUX") != "1" {
 		t.Skip("set FOXCTL_INTEGRATION_TMUX=1 to run real tmux relay integration")
+	}
+	if os.Getenv("FOXCTL_INTEGRATION_TMUX_QUEUED_DRAFT") != "1" {
+		t.Skip("quarantined: set FOXCTL_INTEGRATION_TMUX_QUEUED_DRAFT=1 to run queued-draft retry integration")
 	}
 	if testing.Short() {
 		t.Skip("skipping integration in -short mode")

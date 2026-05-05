@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	foxproxclient "github.com/joshka/foxprox/foxprox/client"
+	foxproxd "github.com/joshka/foxprox/foxprox/daemon"
 	"github.com/joshka0/foxctl/internal/agent/optimization"
 	"github.com/joshka0/foxctl/internal/agent/runtime"
 	"github.com/joshka0/foxctl/internal/agent/toolnames"
@@ -34,6 +36,7 @@ import (
 	ws "github.com/joshka0/foxctl/internal/platform/workspace"
 	llmproviders "github.com/joshka0/foxctl/internal/providers/llm"
 	"github.com/joshka0/foxctl/internal/runtime/execution/runner"
+	"github.com/joshka0/foxctl/internal/runtime/flow"
 	"github.com/joshka0/foxctl/internal/runtime/hooks"
 	"github.com/joshka0/foxctl/internal/storage"
 	agentstore "github.com/joshka0/foxctl/internal/storage/agents"
@@ -43,6 +46,7 @@ import (
 	"github.com/joshka0/foxctl/internal/storage/contextbuffer"
 	"github.com/joshka0/foxctl/internal/storage/coordination"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
+	flowstore "github.com/joshka0/foxctl/internal/storage/flow"
 	"github.com/joshka0/foxctl/internal/storage/mailbox"
 	"github.com/joshka0/foxctl/internal/storage/memory"
 	"github.com/joshka0/foxctl/internal/storage/queue"
@@ -139,6 +143,24 @@ type Service struct {
 	agentMailboxStore   mailbox.Store         // Mailbox store for agent messaging (close on shutdown)
 	agentBoardStore     blackboard.BoardStore // Blackboard store for agent coordination (close on shutdown)
 	agentSessionMap     map[string]string     // agentID (agents.db) → sessionID (runtime); protected by agentMu
+
+	// Flow engine (default workspace, initialized on leader startup)
+	flowEngine *flow.Engine
+	flowStore  flow.Store
+	flowMu     sync.Mutex
+
+	// Per-workspace flow engine cache. Keyed by absolute workspace path.
+	// Each entry holds its own Engine + Store + cancel func. Lazily initialized
+	// on first flow RPC that specifies a workspace different from the default.
+	wsEngines   map[string]*wsFlowEngine
+	wsEnginesMu sync.Mutex
+}
+
+// wsFlowEngine groups a per-workspace flow engine with its store and cleanup.
+type wsFlowEngine struct {
+	Engine *flow.Engine
+	Store  flow.Store
+	Cancel context.CancelFunc
 }
 
 // NewService creates a new daemon service.
@@ -167,6 +189,7 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 		warmWorkspaces: make(map[string]bool),
 		shutdownCh:     make(chan struct{}),
 		dbPool:         pool,
+		wsEngines:      make(map[string]*wsFlowEngine),
 	}
 
 	// Pre-warm workspace if specified
@@ -334,6 +357,12 @@ func (s *Service) startLeaderWorkers(ctx context.Context) error {
 			firstErr = err
 		}
 	}
+	if err := s.startFlowEngine(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: flow engine failed to start: %v\n", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	return firstErr
 }
@@ -344,6 +373,7 @@ func (s *Service) stopLeaderWorkers() {
 	s.stopFileSummaryWorker()
 	s.stopAgentOrchestration()
 	s.stopACAMaintenanceLoop()
+	s.stopFlowEngine()
 }
 
 func (s *Service) stopLeaderLease(ctx context.Context) {
@@ -513,8 +543,11 @@ func (s *Service) acceptLoop(ctx context.Context, listener net.Listener) {
 			case <-s.shutdownCh:
 				return
 			default:
-				// Transient error, continue
-				fmt.Fprintf(os.Stderr, "daemon: accept error: %v\n", err)
+				// Suppress "use of closed network connection" errors that occur
+				// during normal shutdown when the listener is closed concurrently.
+				if !strings.Contains(err.Error(), "use of closed network connection") {
+					fmt.Fprintf(os.Stderr, "daemon: accept error: %v\n", err)
+				}
 				continue
 			}
 		}
@@ -674,6 +707,41 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 		result, err := s.handleAgentHierarchy(req.Params)
 		if err != nil {
 			resp.Error = &Error{Code: "EHIERARCHY", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "flow.start":
+		result, err := s.handleFlowStart(ctx, req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: flowErrorCode(err), Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "flow.stop":
+		result, err := s.handleFlowStop(req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: flowErrorCode(err), Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "flow.pause":
+		result, err := s.handleFlowPause(req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: flowErrorCode(err), Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "flow.status":
+		result, err := s.handleFlowStatus(req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: flowErrorCode(err), Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "flow.output":
+		result, err := s.handleFlowOutput(ctx, req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: flowErrorCode(err), Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
@@ -2447,6 +2515,856 @@ func daemonizeArgs(argv []string) []string {
 	return args
 }
 
+// --- Flow RPC Handlers ---
+
+// flowRPCError is a typed error that carries a specific RPC error code.
+// Flow handlers return these so the switch in handleConnection can map to
+// the correct error code (ENOTFOUND, EARG, EALREADY, etc.).
+type flowRPCError struct {
+	Code    string
+	Message string
+}
+
+func (e *flowRPCError) Error() string { return e.Message }
+
+// flowErrorCodes maps Go error substrings from the engine/store layer to
+// RPC-level error codes.  The switch in handleConnection uses this to
+// preserve the semantic error code instead of the generic EFLOW.
+func flowErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	// Check for typed flowRPCError first.
+	var fe *flowRPCError
+	if errors.As(err, &fe) {
+		return fe.Code
+	}
+	// Fallback: inspect the error message for known patterns.
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "not found"):
+		return "ENOTFOUND"
+	case strings.Contains(msg, "already running"):
+		return "EALREADY"
+	case strings.Contains(msg, "not running") || strings.Contains(msg, "already stopped"):
+		return "ESTATE"
+	case strings.Contains(msg, "cycle detected"):
+		return "ECYCLE"
+	case strings.Contains(msg, "no nodes") || strings.Contains(msg, "no source nodes"):
+		return "EINVALID"
+	default:
+		return "EFLOW"
+	}
+}
+
+// FlowStartParams are the parameters for flow.start.
+type FlowStartParams struct {
+	FlowID    string `json:"flow_id"`
+	Workspace string `json:"workspace,omitempty"`
+}
+
+// FlowStartResult is the result of starting a flow.
+type FlowStartResult struct {
+	FlowID string `json:"flow_id"`
+	RunID  string `json:"run_id"`
+	State  string `json:"state"`
+}
+
+// handleFlowStart starts a flow execution via the engine.
+func (s *Service) handleFlowStart(ctx context.Context, params json.RawMessage) (*FlowStartResult, error) {
+	var p FlowStartParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if strings.TrimSpace(p.FlowID) == "" {
+		return nil, &flowRPCError{Code: "EARG", Message: "flow_id is required"}
+	}
+
+	engine, err := s.resolveFlowEngine(ctx, p.Workspace)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := engine.Start(ctx, p.FlowID); err != nil {
+		// Map engine errors to typed RPC errors.
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "not found"):
+			return nil, &flowRPCError{Code: "ENOTFOUND", Message: errMsg}
+		case strings.Contains(errMsg, "already running"):
+			return nil, &flowRPCError{Code: "EALREADY", Message: errMsg}
+		case strings.Contains(errMsg, "cycle detected"):
+			return nil, &flowRPCError{Code: "ECYCLE", Message: errMsg}
+		case strings.Contains(errMsg, "no nodes"):
+			return nil, &flowRPCError{Code: "EINVALID", Message: errMsg}
+		case strings.Contains(errMsg, "no source nodes"):
+			return nil, &flowRPCError{Code: "EINVALID", Message: errMsg}
+		default:
+			return nil, err
+		}
+	}
+
+	// Get the run status from the engine to extract run_id
+	status := engine.Status(p.FlowID)
+	runID := ""
+	state := string(flow.FlowRunning)
+	if status != nil {
+		runID = status.RunID
+		state = string(status.FlowState)
+	}
+
+	return &FlowStartResult{
+		FlowID: p.FlowID,
+		RunID:  runID,
+		State:  state,
+	}, nil
+}
+
+// FlowStopParams are the parameters for flow.stop.
+type FlowStopParams struct {
+	FlowID    string `json:"flow_id"`
+	Workspace string `json:"workspace,omitempty"`
+}
+
+// FlowStopResult is the result of stopping a flow.
+type FlowStopResult struct {
+	FlowID string `json:"flow_id"`
+	State  string `json:"state"`
+}
+
+// handleFlowStop stops a running or paused flow.
+func (s *Service) handleFlowStop(params json.RawMessage) (*FlowStopResult, error) {
+	var p FlowStopParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if strings.TrimSpace(p.FlowID) == "" {
+		return nil, &flowRPCError{Code: "EARG", Message: "flow_id is required"}
+	}
+
+	var engine *flow.Engine
+	var err error
+	if strings.TrimSpace(p.Workspace) != "" {
+		engine, err = s.resolveFlowEngine(context.Background(), p.Workspace)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Search all engines for the active flow.
+		engine, _ = s.resolveFlowEngineForFlowID(p.FlowID)
+	}
+
+	if engine == nil {
+		return nil, &flowRPCError{Code: "EFLOW", Message: "flow engine not initialized"}
+	}
+
+	if err := engine.Stop(p.FlowID); err != nil {
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "not running"):
+			return nil, &flowRPCError{Code: "ESTATE", Message: errMsg}
+		case strings.Contains(errMsg, "already stopped"):
+			return nil, &flowRPCError{Code: "ESTATE", Message: errMsg}
+		default:
+			return nil, err
+		}
+	}
+
+	return &FlowStopResult{
+		FlowID: p.FlowID,
+		State:  string(flow.FlowStopped),
+	}, nil
+}
+
+// FlowPauseParams are the parameters for flow.pause.
+type FlowPauseParams struct {
+	FlowID    string `json:"flow_id"`
+	Workspace string `json:"workspace,omitempty"`
+}
+
+// FlowPauseResult is the result of pausing a flow.
+type FlowPauseResult struct {
+	FlowID string `json:"flow_id"`
+	State  string `json:"state"`
+}
+
+// handleFlowPause pauses a running flow.
+func (s *Service) handleFlowPause(params json.RawMessage) (*FlowPauseResult, error) {
+	var p FlowPauseParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if strings.TrimSpace(p.FlowID) == "" {
+		return nil, &flowRPCError{Code: "EARG", Message: "flow_id is required"}
+	}
+
+	var engine *flow.Engine
+	var err error
+	if strings.TrimSpace(p.Workspace) != "" {
+		engine, err = s.resolveFlowEngine(context.Background(), p.Workspace)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Search all engines for the active flow.
+		engine, _ = s.resolveFlowEngineForFlowID(p.FlowID)
+	}
+
+	if engine == nil {
+		return nil, &flowRPCError{Code: "EFLOW", Message: "flow engine not initialized"}
+	}
+
+	if err := engine.Pause(p.FlowID); err != nil {
+		return nil, err
+	}
+
+	return &FlowPauseResult{
+		FlowID: p.FlowID,
+		State:  string(flow.FlowPaused),
+	}, nil
+}
+
+// FlowStatusParams are the parameters for flow.status.
+type FlowStatusParams struct {
+	FlowID    string `json:"flow_id"`
+	Workspace string `json:"workspace,omitempty"`
+}
+
+// FlowStatusResult is the result of querying flow status.
+type FlowStatusResult struct {
+	FlowID string               `json:"flow_id"`
+	State  string               `json:"state"`
+	RunID  string               `json:"run_id,omitempty"`
+	Nodes  []flow.NodeExecState `json:"nodes,omitempty"`
+	Edges  []flow.EdgeExecState `json:"edges,omitempty"`
+}
+
+// handleFlowStatus returns the current status of a flow.
+func (s *Service) handleFlowStatus(params json.RawMessage) (*FlowStatusResult, error) {
+	var p FlowStatusParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if strings.TrimSpace(p.FlowID) == "" {
+		return nil, &flowRPCError{Code: "EARG", Message: "flow_id is required"}
+	}
+
+	var engine *flow.Engine
+	var err error
+	if strings.TrimSpace(p.Workspace) != "" {
+		engine, err = s.resolveFlowEngine(context.Background(), p.Workspace)
+		if err != nil {
+			// If we can't resolve an engine but have a workspace, the flow
+			// may not have been started yet. Try to open the store directly
+			// for persisted state.
+			return s.flowStatusFromStore(p)
+		}
+	} else {
+		// Search all engines for the active flow.
+		engine, _ = s.resolveFlowEngineForFlowID(p.FlowID)
+	}
+
+	// Check engine for live state
+	if engine != nil {
+		status := engine.Status(p.FlowID)
+		if status != nil {
+			return &FlowStatusResult{
+				FlowID: p.FlowID,
+				State:  string(status.FlowState),
+				RunID:  status.RunID,
+				Nodes:  status.Nodes,
+				Edges:  status.Edges,
+			}, nil
+		}
+	}
+
+	// Fallback: check the store for persisted state
+	return s.flowStatusFromStore(p)
+}
+
+// flowStatusFromStore returns a FlowStatusResult by reading persisted state
+// from the store associated with the given workspace.
+func (s *Service) flowStatusFromStore(p FlowStatusParams) (*FlowStatusResult, error) {
+	var store flow.Store
+	var err error
+
+	if p.Workspace != "" {
+		absWS, absErr := filepath.Abs(p.Workspace)
+		if absErr != nil {
+			return nil, &flowRPCError{Code: "EARG", Message: fmt.Sprintf("invalid workspace path: %v", absErr)}
+		}
+
+		// Check per-workspace cache first.
+		s.wsEnginesMu.Lock()
+		if s.wsEngines != nil {
+			if entry, ok := s.wsEngines[absWS]; ok {
+				store = entry.Store
+			}
+		}
+		s.wsEnginesMu.Unlock()
+
+		// Otherwise open a temporary store.
+		if store == nil {
+			store, err = flowStoreOpen(context.Background(), absWS)
+			if err != nil {
+				return nil, &flowRPCError{Code: "ENOTFOUND", Message: fmt.Sprintf("flow: not found: %s", p.FlowID)}
+			}
+			defer store.Close()
+		}
+	} else {
+		s.flowMu.Lock()
+		store = s.flowStore
+		s.flowMu.Unlock()
+	}
+
+	if store == nil {
+		return nil, &flowRPCError{Code: "ENOTFOUND", Message: fmt.Sprintf("flow: not found: %s", p.FlowID)}
+	}
+
+	fl, err := store.GetFlow(context.Background(), p.FlowID)
+	if err != nil {
+		return nil, &flowRPCError{Code: "ENOTFOUND", Message: fmt.Sprintf("flow: not found: %s", p.FlowID)}
+	}
+
+	// Build node states from persisted data (all idle since not running).
+	persistedNodes, err := store.ListNodesByFlow(context.Background(), fl.ID)
+	if err != nil {
+		persistedNodes = nil
+	}
+	nodeStates := make([]flow.NodeExecState, 0, len(persistedNodes))
+	for _, n := range persistedNodes {
+		nodeStates = append(nodeStates, flow.NodeExecState{
+			ID:    n.ID,
+			Label: n.Label,
+			Kind:  n.Kind,
+			State: "idle",
+		})
+	}
+
+	// Build edge states from persisted data.
+	persistedEdges, err := store.ListEdgesByFlow(context.Background(), fl.ID)
+	if err != nil {
+		persistedEdges = nil
+	}
+	edgeStates := make([]flow.EdgeExecState, 0, len(persistedEdges))
+	for _, e := range persistedEdges {
+		edgeStates = append(edgeStates, flow.EdgeExecState{
+			ID:            e.ID,
+			From:          e.FromNodeID,
+			To:            e.ToNodeID,
+			DeliveryCount: 0,
+		})
+	}
+
+	return &FlowStatusResult{
+		FlowID: p.FlowID,
+		State:  string(fl.State),
+		Nodes:  nodeStates,
+		Edges:  edgeStates,
+	}, nil
+}
+
+// handleFlowStatusSafe returns the status result or nil on error.
+// Used by tests to check post-shutdown state.
+func (s *Service) handleFlowStatusSafe(params json.RawMessage) *FlowStatusResult {
+	result, _ := s.handleFlowStatus(params)
+	return result
+}
+
+// FlowOutputParams are the parameters for flow.output.
+type FlowOutputParams struct {
+	FlowID    string          `json:"flow_id"`
+	RunID     string          `json:"run_id"`
+	NodeID    string          `json:"node_id"`
+	Data      json.RawMessage `json:"data"`
+	Workspace string          `json:"workspace,omitempty"`
+}
+
+// FlowOutputResult is the result of pushing output to a flow.
+type FlowOutputResult struct {
+	FlowID string `json:"flow_id"`
+	NodeID string `json:"node_id"`
+	RunID  string `json:"run_id"`
+	OK     bool   `json:"ok"`
+}
+
+// handleFlowOutput pushes structured output data into a running flow's OutputBus.
+// This allows external agents to submit results back to the flow engine
+// without going through the normal node executor pipeline.
+func (s *Service) handleFlowOutput(ctx context.Context, params json.RawMessage) (*FlowOutputResult, error) {
+	var p FlowOutputParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if len(p.Data) == 0 {
+		return nil, &flowRPCError{Code: "EARG", Message: "data is required"}
+	}
+
+	// Parse the data as JSON
+	var data any
+	if err := json.Unmarshal(p.Data, &data); err != nil {
+		return nil, &flowRPCError{Code: "EPARSE", Message: fmt.Sprintf("invalid JSON data: %v", err)}
+	}
+
+	// If flow_id is not provided but run_id is, look up the flow by run_id
+	flowID := strings.TrimSpace(p.FlowID)
+	nodeID := strings.TrimSpace(p.NodeID)
+	if flowID == "" && strings.TrimSpace(p.RunID) != "" {
+		// Search all engines for the run_id
+		foundFlowID, foundNodeID := s.resolveFlowIDFromRunID(p.RunID, nodeID, p.Workspace)
+		if foundFlowID != "" {
+			flowID = foundFlowID
+		}
+		if foundNodeID != "" && nodeID == "" {
+			nodeID = foundNodeID
+		}
+	}
+
+	if flowID == "" {
+		return nil, &flowRPCError{Code: "EARG", Message: "flow_id or run_id is required"}
+	}
+	if nodeID == "" {
+		return nil, &flowRPCError{Code: "EARG", Message: "node_id is required"}
+	}
+
+	// Resolve the flow engine
+	var engine *flow.Engine
+	var err error
+	if strings.TrimSpace(p.Workspace) != "" {
+		engine, err = s.resolveFlowEngine(ctx, p.Workspace)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Search all engines for the active flow
+		engine, _ = s.resolveFlowEngineForFlowID(flowID)
+	}
+
+	if engine == nil {
+		return nil, &flowRPCError{Code: "EFLOW", Message: "flow engine not initialized"}
+	}
+
+	// Submit the output to the engine
+	if err := engine.SubmitOutput(ctx, flowID, nodeID, data); err != nil {
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "not running"):
+			return nil, &flowRPCError{Code: "ESTATE", Message: errMsg}
+		case strings.Contains(errMsg, "not found"):
+			return nil, &flowRPCError{Code: "ENOTFOUND", Message: errMsg}
+		default:
+			return nil, err
+		}
+	}
+
+	// Get run_id from engine status
+	var runID string
+	if status := engine.Status(flowID); status != nil {
+		runID = status.RunID
+	}
+
+	return &FlowOutputResult{
+		FlowID: flowID,
+		NodeID: nodeID,
+		RunID:  runID,
+		OK:     true,
+	}, nil
+}
+
+// resolveFlowIDFromRunID searches all engines for a run with the given run_id
+// and returns the flow_id. If nodeID is a label, it also resolves it.
+func (s *Service) resolveFlowIDFromRunID(runID, nodeID, workspace string) (flowID, resolvedNodeID string) {
+	// Helper to check an engine for the run
+	checkEngine := func(engine *flow.Engine) (string, bool) {
+		if engine == nil {
+			return "", false
+		}
+		for _, fid := range engine.ActiveFlowIDs() {
+			status := engine.Status(fid)
+			if status != nil && status.RunID == runID {
+				return fid, true
+			}
+		}
+		return "", false
+	}
+
+	// Check default engine
+	s.flowMu.Lock()
+	defEngine := s.flowEngine
+	s.flowMu.Unlock()
+
+	if fid, found := checkEngine(defEngine); found {
+		flowID = fid
+	}
+
+	// Check per-workspace engines if not found yet
+	if flowID == "" {
+		s.wsEnginesMu.Lock()
+		for _, entry := range s.wsEngines {
+			if fid, found := checkEngine(entry.Engine); found {
+				flowID = fid
+				break
+			}
+		}
+		s.wsEnginesMu.Unlock()
+	}
+
+	return flowID, ""
+}
+
+// stopAllFlowRuns stops all active flow runs across all engines. Called during graceful shutdown.
+func (s *Service) stopAllFlowRuns() {
+	s.flowMu.Lock()
+	engine := s.flowEngine
+	s.flowMu.Unlock()
+
+	if engine != nil {
+		for _, flowID := range engine.ActiveFlowIDs() {
+			if err := engine.Stop(flowID); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to stop flow %s during shutdown: %v\n", flowID, err)
+			}
+		}
+	}
+
+	// Also stop all per-workspace engine runs.
+	s.wsEnginesMu.Lock()
+	if s.wsEngines != nil {
+		entries := make(map[string]*wsFlowEngine)
+		for k, v := range s.wsEngines {
+			entries[k] = v
+		}
+		s.wsEnginesMu.Unlock()
+
+		for ws, entry := range entries {
+			for _, flowID := range entry.Engine.ActiveFlowIDs() {
+				if err := entry.Engine.Stop(flowID); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to stop flow %s in workspace %s during shutdown: %v\n", flowID, ws, err)
+				}
+			}
+		}
+	} else {
+		s.wsEnginesMu.Unlock()
+	}
+}
+
+// startFlowEngine initializes the flow engine with a SQLite store.
+// Called during leader worker startup.
+func (s *Service) startFlowEngine(ctx context.Context) error {
+	s.flowMu.Lock()
+	defer s.flowMu.Unlock()
+
+	// Idempotency: allow leader transitions to call start repeatedly.
+	if s.flowEngine != nil {
+		return nil
+	}
+
+	// Open the flow SQLite store.
+	store, err := flowStoreOpen(ctx, s.cfg.Storage.Root)
+	if err != nil {
+		return fmt.Errorf("open flow store: %w", err)
+	}
+
+	// Build the executor registry. Start with a skill executor that routes
+	// through the daemon's skill resolver (the same path as `foxctl run`).
+	executors := map[flow.NodeKind]flow.NodeExecutor{
+		flow.NodeSkill:     &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: s.opts.Workspace},
+		flow.NodeTransform: &flow.TransformExecutor{},
+		flow.NodeAgent: &flow.AgentExecutor{
+			Spawner:   s.selectAgentSpawner(s.opts.Workspace),
+			Workspace: s.opts.Workspace,
+		},
+	}
+
+	engine := flow.NewEngine(store, executors, 0)
+
+	// Wire the SubscribeOutput function on the agent executor so push
+	// output_mode can subscribe to the engine's OutputBus per node.
+	for _, exec := range executors {
+		if agentExec, ok := exec.(*flow.AgentExecutor); ok {
+			eng := engine // capture for closure
+			agentExec.SubscribeOutput = func(flowID, nodeID string) <-chan flow.NodeOutput {
+				return eng.SubscribeNodeOutput(flowID, nodeID)
+			}
+			agentExec.GetRunID = func(flowID string) string {
+				status := eng.Status(flowID)
+				if status != nil {
+					return status.RunID
+				}
+				return ""
+			}
+		}
+	}
+
+	s.flowEngine = engine
+	s.flowStore = store
+
+	fmt.Fprintf(os.Stderr, "flow engine: initialized\n")
+	return nil
+}
+
+// stopFlowEngine stops all active flow runs and closes all stores (default + per-workspace).
+// Called during leader worker shutdown.
+func (s *Service) stopFlowEngine() {
+	s.stopAllFlowRuns()
+
+	s.flowMu.Lock()
+	if s.flowStore != nil {
+		s.flowStore.Close()
+		s.flowStore = nil
+	}
+	s.flowEngine = nil
+	s.flowMu.Unlock()
+
+	// Close all per-workspace engines.
+	s.wsEnginesMu.Lock()
+	if s.wsEngines != nil {
+		for ws, entry := range s.wsEngines {
+			entry.Cancel()
+			entry.Store.Close()
+			delete(s.wsEngines, ws)
+		}
+	}
+	s.wsEnginesMu.Unlock()
+}
+
+// flowStoreOpen opens the flow SQLite store. Extracted as a package-level
+// variable for testability (tests can override with mock stores).
+var flowStoreOpen = func(ctx context.Context, root string) (flow.Store, error) {
+	return flowStoreOpenImpl(ctx, root)
+}
+
+func flowStoreOpenImpl(ctx context.Context, root string) (flow.Store, error) {
+	return flowstore.Open(ctx, root)
+}
+
+// resolveFlowEngine returns the flow engine for the given workspace path.
+// If workspace is empty, it falls back to the default daemon engine.
+// If the flow is not found in the default engine but was started on a
+// per-workspace engine, it searches the per-workspace cache for the flow.
+// For non-empty workspace, it lazily creates a per-workspace engine keyed
+// by the absolute workspace path. Each engine opens its own SQLite store
+// from <workspace>/flow.db.
+func (s *Service) resolveFlowEngine(ctx context.Context, workspace string) (*flow.Engine, error) {
+	// Default: use the daemon's main engine (backed by ~/.foxctl/flow.db).
+	if strings.TrimSpace(workspace) == "" {
+		s.flowMu.Lock()
+		engine := s.flowEngine
+		s.flowMu.Unlock()
+
+		if engine != nil {
+			return engine, nil
+		}
+
+		// If default engine is nil, the daemon may not have initialized the
+		// default engine yet. Return error.
+		return nil, &flowRPCError{Code: "EFLOW", Message: "flow engine not initialized"}
+	}
+
+	// Normalize to absolute path for consistent cache keys.
+	absWS, err := filepath.Abs(workspace)
+	if err != nil {
+		return nil, &flowRPCError{Code: "EARG", Message: fmt.Sprintf("invalid workspace path: %v", err)}
+	}
+
+	s.wsEnginesMu.Lock()
+	defer s.wsEnginesMu.Unlock()
+
+	// Lazy-init the map if needed (Service may be constructed without wsEngines).
+	if s.wsEngines == nil {
+		s.wsEngines = make(map[string]*wsFlowEngine)
+	}
+
+	// Check cache.
+	if entry, ok := s.wsEngines[absWS]; ok {
+		return entry.Engine, nil
+	}
+
+	// Lazy-initialize a new engine for this workspace.
+	store, err := flowStoreOpen(ctx, absWS)
+	if err != nil {
+		return nil, &flowRPCError{Code: "EFLOW", Message: fmt.Sprintf("open flow store for workspace %s: %v", absWS, err)}
+	}
+
+	// Build executors for the workspace engine.
+	executors := map[flow.NodeKind]flow.NodeExecutor{
+		flow.NodeSkill:     &daemonSkillExecutor{resolver: s.skillResolver, cfg: s.cfg, workspace: absWS},
+		flow.NodeTransform: &flow.TransformExecutor{},
+		flow.NodeAgent: &flow.AgentExecutor{
+			Spawner:   s.selectAgentSpawner(absWS),
+			Workspace: absWS,
+		},
+	}
+
+	engine := flow.NewEngine(store, executors, 0)
+
+	// Wire the SubscribeOutput function on the agent executor so push
+	// output_mode can subscribe to the engine's OutputBus per node.
+	for _, exec := range executors {
+		if agentExec, ok := exec.(*flow.AgentExecutor); ok {
+			eng := engine // capture for closure
+			agentExec.SubscribeOutput = func(flowID, nodeID string) <-chan flow.NodeOutput {
+				return eng.SubscribeNodeOutput(flowID, nodeID)
+			}
+			agentExec.GetRunID = func(flowID string) string {
+				status := eng.Status(flowID)
+				if status != nil {
+					return status.RunID
+				}
+				return ""
+			}
+		}
+	}
+
+	// Create a cancellable context for the workspace engine.
+	// This is derived from the daemon's main context so that daemon
+	// shutdown propagates to all workspace engines.
+	wsCtx, wsCancel := context.WithCancel(context.Background())
+
+	_ = wsCtx // used for future goroutine lifecycle
+
+	s.wsEngines[absWS] = &wsFlowEngine{
+		Engine: engine,
+		Store:  store,
+		Cancel: wsCancel,
+	}
+
+	fmt.Fprintf(os.Stderr, "flow engine: initialized for workspace %s\n", absWS)
+	return engine, nil
+}
+
+// resolveFlowEngineForFlowID finds the engine that has the given flowID active,
+// searching all engines (default + per-workspace). Returns the engine and true
+// if found, or the default engine and false if not found in any active runs.
+// This is used by stop/pause/status handlers where the caller may not know
+// which workspace the flow was started in.
+func (s *Service) resolveFlowEngineForFlowID(flowID string) (*flow.Engine, bool) {
+	// Check default engine first.
+	s.flowMu.Lock()
+	defaultEngine := s.flowEngine
+	s.flowMu.Unlock()
+
+	if defaultEngine != nil {
+		if status := defaultEngine.Status(flowID); status != nil {
+			return defaultEngine, true
+		}
+	}
+
+	// Check per-workspace engines.
+	s.wsEnginesMu.Lock()
+	defer s.wsEnginesMu.Unlock()
+
+	if s.wsEngines != nil {
+		for _, entry := range s.wsEngines {
+			if status := entry.Engine.Status(flowID); status != nil {
+				return entry.Engine, true
+			}
+		}
+	}
+
+	// Not found in any active engine. Return default for store fallback.
+	return defaultEngine, false
+}
+
+// daemonSkillExecutor executes skill nodes by delegating to the daemon's
+// skill resolver and runner pipeline.
+type daemonSkillExecutor struct {
+	resolver  *SkillResolver
+	cfg       config.Config
+	workspace string
+}
+
+func (e *daemonSkillExecutor) Execute(ctx context.Context, node flow.FlowNode, input any) (flow.NodeOutput, error) {
+	// Extract skill name from node config.
+	var cfg struct {
+		Skill string          `json:"skill"`
+		Input json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(node.Config, &cfg); err != nil {
+		return flow.NodeOutput{}, fmt.Errorf("parse skill node config: %w", err)
+	}
+
+	if cfg.Skill == "" {
+		return flow.NodeOutput{}, fmt.Errorf("skill node %s: missing skill name", node.ID)
+	}
+
+	// Resolve skill handle.
+	handle, err := e.resolver.Resolve(cfg.Skill)
+	if err != nil {
+		return flow.NodeOutput{}, fmt.Errorf("resolve skill %s: %w", cfg.Skill, err)
+	}
+
+	// Build input envelope: use node config input if provided, else pass through.
+	skillInput := cfg.Input
+	if len(skillInput) == 0 {
+		if raw, ok := input.(json.RawMessage); ok && len(raw) > 0 {
+			skillInput = raw
+		} else if input != nil {
+			b, _ := json.Marshal(input)
+			skillInput = b
+		} else {
+			skillInput = []byte("{}")
+		}
+	}
+
+	// Execute skill.
+	start := time.Now()
+	extraEnv := []string{}
+	if e.workspace != "" {
+		extraEnv = append(extraEnv, "FOXCTL_WORKSPACE="+e.workspace)
+	}
+
+	stdout, stderr, err := runner.RunWithOptions(ctx, runner.RunOptions{
+		Manifest:     handle.Manifest,
+		ArtifactPath: handle.ArtifactPath,
+		Input:        skillInput,
+		ExtraEnv:     extraEnv,
+	})
+
+	duration := time.Since(start)
+
+	if err != nil {
+		errMsg := err.Error()
+		if len(stderr) > 0 {
+			errMsg = fmt.Sprintf("%s: %s", err, string(stderr))
+		}
+		return flow.NodeOutput{
+			Envelope: envelope.Error(cfg.Skill, "EEXEC", errMsg, nil),
+			Duration: duration,
+			NodeID:   node.ID,
+		}, nil
+	}
+
+	if len(stdout) == 0 {
+		return flow.NodeOutput{
+			Envelope: envelope.OK(cfg.Skill, nil),
+			Duration: duration,
+			NodeID:   node.ID,
+		}, nil
+	}
+
+	// Parse stdout as envelope.
+	var env envelope.Envelope
+	if jsonErr := json.Unmarshal(stdout, &env); jsonErr == nil && env.Version == 1 {
+		return flow.NodeOutput{
+			Envelope: env,
+			Duration: duration,
+			NodeID:   node.ID,
+		}, nil
+	}
+
+	// Fallback: wrap raw output as data.
+	return flow.NodeOutput{
+		Envelope: envelope.OK(cfg.Skill, map[string]any{"output": string(stdout)}),
+		Duration: duration,
+		NodeID:   node.ID,
+	}, nil
+}
+
 // resolveLLMConfig returns the LLM provider, API key, and model from centralized config.
 // Priority: configured provider > LM Studio default.
 //
@@ -2478,4 +3396,111 @@ func (s *Service) resolveLLMConfig() (provider, apiKey, model string) {
 		model = llmproviders.DefaultModelForProvider(provider)
 	}
 	return
+}
+
+// daemonAgentSpawner adapts the daemon's agent RPC methods to the
+// flow.AgentSpawner interface used by the flow engine's AgentExecutor.
+type daemonAgentSpawner struct {
+	svc *Service
+}
+
+func (d *daemonAgentSpawner) Spawn(ctx context.Context, role, prompt string, opts flow.AgentSpawnOptions) (*flow.AgentSpawnResult, error) {
+	params := AgentSpawnParams{
+		Role:          role,
+		Prompt:        prompt,
+		ExecMode:      opts.ExecMode,
+		MaxIterations: opts.MaxIterations,
+		MaxAutoTurns:  opts.MaxAutoTurns,
+		Timeout:       opts.Timeout,
+		LLMProvider:   opts.LLMProvider,
+		LLMModel:      opts.LLMModel,
+		SkillsAllow:   opts.SkillsAllow,
+		WorkspaceRoot: opts.Workspace,
+	}
+
+	result, err := d.svc.dispatchAgentSpawn(ctx, mustMarshalParams(params))
+	if err != nil {
+		return nil, err
+	}
+
+	return &flow.AgentSpawnResult{
+		AgentID:   result.AgentID,
+		SessionID: result.SessionID,
+	}, nil
+}
+
+func (d *daemonAgentSpawner) Ask(ctx context.Context, agentID string, message string, timeoutMS int) (*flow.AgentAskResult, error) {
+	params := AgentAskParams{
+		AgentID:   agentID,
+		Message:   message,
+		TimeoutMS: timeoutMS,
+	}
+
+	result, err := d.svc.handleAgentAskRPC(ctx, mustMarshalParams(params))
+	if err != nil {
+		return nil, err
+	}
+
+	return &flow.AgentAskResult{
+		Reply:  result.Reply,
+		Status: result.Status,
+	}, nil
+}
+
+func (d *daemonAgentSpawner) Info(ctx context.Context, agentID string) (*flow.AgentInfoResult, error) {
+	// Look up the session ID for this agent ID.
+	d.svc.agentMu.Lock()
+	sessionID, ok := d.svc.agentSessionMap[agentID]
+	d.svc.agentMu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("agent not found: %s", agentID)
+	}
+
+	result, err := d.svc.handleAgentStatus(mustMarshalParams(AgentStatusParams{SessionID: sessionID}))
+	if err != nil {
+		return nil, err
+	}
+
+	return &flow.AgentInfoResult{
+		Status:  result.Status,
+		Summary: result.Summary,
+		Error:   result.Error,
+	}, nil
+}
+
+func (d *daemonAgentSpawner) Kill(ctx context.Context, sessionID string) error {
+	_, err := d.svc.dispatchAgentKill(ctx, mustMarshalParams(AgentKillParams{SessionID: sessionID}))
+	return err
+}
+
+// selectAgentSpawner returns the appropriate AgentSpawner for the given workspace.
+// If foxprox daemon is available (socket exists), it returns a foxprox-backed
+// spawner that drives CLI agents via PTY sessions. Otherwise, it falls back
+// to the daemon's internal agent runtime (daemonAgentSpawner).
+// The spawner selection is logged to stderr.
+func (s *Service) selectAgentSpawner(workspace string) flow.AgentSpawner {
+	socketPath := foxproxd.DefaultSocketPath()
+	info, err := os.Stat(socketPath)
+	if err == nil && info.Mode()&os.ModeSocket != 0 {
+		// Foxprox socket exists — use foxprox spawner.
+		fpClient := foxproxclient.ForSocket(socketPath)
+		fmt.Fprintf(os.Stderr, "flow engine: using foxprox spawner (socket=%s)\n", socketPath)
+		return flow.NewFoxproxAgentSpawner(fpClient, flow.FoxproxSpawnerConfig{
+			CLICmd: "droid",
+		})
+	}
+
+	// Foxprox unavailable — fall back to daemon agent runtime.
+	fmt.Fprintf(os.Stderr, "flow engine: foxprox not available (socket=%s), using daemon agent spawner\n", socketPath)
+	return &daemonAgentSpawner{svc: s}
+}
+
+// mustMarshalParams marshals params to json.RawMessage. Panics on error
+// (should never happen with serializable structs).
+func mustMarshalParams(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(fmt.Sprintf("daemon: marshal params: %v", err))
+	}
+	return b
 }
