@@ -1,6 +1,6 @@
 # Context and Observability
 
-Machine-friendly reference for proactive context injection and wide-event tracing.
+Machine-friendly reference for proactive context injection and foxcular event tracing.
 
 ## Core Packages
 

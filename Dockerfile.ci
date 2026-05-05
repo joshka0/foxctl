@@ -15,6 +15,7 @@ WORKDIR /workspace
 
 COPY go.mod go.sum ./
 COPY foxprox/go.mod foxprox/go.sum ./foxprox/
+COPY foxcular/go.mod foxcular/go.sum ./foxcular/
 
 # Pre-warm module cache and install tools used by CI
 RUN go mod download \

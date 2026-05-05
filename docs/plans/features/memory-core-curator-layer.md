@@ -62,7 +62,7 @@ not new authority:
 Event payloads should contain counts, lifecycle states, source lanes, operation
 status, and timing. They must not include raw memory content, raw user queries,
 or terminal output. The payload shape is intentionally compatible with the
-foxcular wide-event migration path, but this memory slice should keep using the
+foxcular event migration path, but this memory slice should keep using the
 existing foxctl observability API so it remains portable on `main`.
 
 ## Non-Goals

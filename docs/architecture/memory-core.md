@@ -107,7 +107,7 @@ agent/task query
   -> canonical memorycore records
   -> lifecycle/trust/provenance filtering
   -> lane-labeled context
-  -> wide-event telemetry
+  -> foxcular event telemetry
 ```
 
 `memory/query` should be used for prior knowledge, decisions, gotchas, and

@@ -386,4 +386,4 @@ replace github.com/tree-sitter/tree-sitter-elixir => github.com/elixir-lang/tree
 
 replace github.com/joshka/foxprox => ./foxprox
 
-replace github.com/joshka0/foxcular => ../foxcular
+replace github.com/joshka0/foxcular => ./foxcular

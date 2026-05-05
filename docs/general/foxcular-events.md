@@ -337,7 +337,7 @@ Emission is best-effort and non-blocking with respect to context assembly:
 semantic retrieval still returns normally even if observability persistence is
 disabled or sampled out.
 
-This keeps semantic retrieval telemetry aligned with wide-event principles: one
+This keeps semantic retrieval telemetry aligned with foxcular event principles: one
 event per operation with both technical path and business context.
 
 ## Consumption Patterns
