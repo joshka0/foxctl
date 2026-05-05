@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DEFAULT_FOXCTL_BIN="${REPO_ROOT}/bin/foxctl-cgo"
+DEFAULT_FOXCTL_BIN="${REPO_ROOT}/bin/foxctl"
 DEFAULT_HEARTWOOD_ROOT="$(cd "${REPO_ROOT}/../heartwood" 2>/dev/null && pwd || true)"
 
 if [ -z "${FOXCTL_BIN:-}" ]; then

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/intelligence/indexing/semantic"
 	"github.com/joshka0/foxctl/internal/platform/config"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
 	contextstore "github.com/joshka0/foxctl/internal/storage/contextengine"
@@ -186,6 +186,7 @@ func normalizeInput(in *Input, rc *skillmain.RunContext) {
 	if in.Workspace == "" {
 		in.Workspace = rc.Workspace
 	}
+	in.Workspace = workspace.CanonicalID(in.Workspace)
 }
 
 // query executes memory search with filtering, vector search fallback, and result pagination.
@@ -219,9 +220,6 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	}
 
 	workspacePath := in.Workspace
-	if absPath, err := filepath.Abs(workspacePath); err == nil {
-		workspacePath = absPath
-	}
 
 	memStore, err := rc.Stores.Memory(ctx)
 	if err != nil {

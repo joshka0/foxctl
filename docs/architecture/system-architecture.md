@@ -19,7 +19,7 @@ flowchart TD
     Legacy[legacy agent runtime\ninternal/agent + internal/agent/daemon]
     V2[v2 services/runtime\ninternal/v2/services + internal/v2/runtime/*]
     Jido[Jido bridge\ninternal/v2/adapters/jido]
-    Stores[storage + libsql projections/CAS]
+    Stores[storage + Turso projections/CAS]
     Context[companion + contextbuilder]
     Indexing[indexing/retrieval]
     Obs[observability + hooks]
@@ -72,7 +72,8 @@ flowchart TD
 | V2 command and orchestration stack | `internal/v2/core/*`, `internal/v2/services`, `internal/v2/runtime/{runner,orchestration,supervisor,tools,snapshots,profiles}` | Typed v2 commands, event-sourced orchestration, staged turn execution, long-lived components | `docs/general/runtime-orchestration.md`, `docs/spec/v2_symphony_kanban_orchestration.md` |
 | Jido execution bridge | `internal/v2/adapters/jido` | JSON-RPC client, child spawn bridge, ask/runtime adapter, orchestration reconciliation, companion provider | `docs/general/runtime-orchestration.md` |
 | Companion and context assembly | `internal/context/companion`, `internal/v2/runtime/contextbuilder`, `internal/v2/runtime/enrichers` | Conversation memory, layered context assembly, async derived artifacts, companion bridge integration | `docs/general/companion-memory.md`, `docs/general/context-and-observability.md` |
-| State and persistence | `internal/storage/*`, `internal/v2/adapters/libsql/*` | Durable stores, CAS, mailbox/task/session persistence, v2 events and projections | `docs/general/storage.md`, `docs/architecture/postgres-storage.md` |
+| Memory core and curator | `internal/context/memorycore`, `internal/storage/memory`, `skills/memory_query`, `skills/memory_curator_report` | Typed, provenance-bearing memory records; lifecycle/telemetry sidecars; evidence-first retrieval; curator reports and gated apply workflows | `docs/architecture/memory-core.md`, `docs/general/memory.md` |
+| State and persistence | `internal/storage/*`, `internal/v2/adapters/libsql/*` | Durable stores, CAS, mailbox/task/session persistence, v2 events and projections. The `libsql` adapter path is historical and now opens Turso/SQLite-compatible stores through `dbdriver`. | `docs/general/storage.md`, `docs/architecture/postgres-storage.md` |
 | Retrieval and indexing | `internal/intelligence/indexing/*`, `internal/intelligence/retrieval`, `internal/intelligence/codecontext`, `internal/intelligence/codemap` | Semantic/symbol/repo indexing and context extraction | `docs/general/search.md`, `docs/general/repoindex.md` |
 | Interface layers | `internal/interfaces/web`, `internal/interfaces/chatadapter`, `internal/interfaces/openapi`, `internal/providers` | API/server surfaces and external platform integrations | `docs/general/api-server.md`, `docs/architecture/chat-platform-adapter.md` |
 | Observability and hooks | `internal/runtime/observability`, `internal/runtime/hooks`, `internal/context/updater` | Trace/event propagation, hook execution, proactive context surfacing | `docs/general/context-and-observability.md`, `docs/general/hooks.md` |

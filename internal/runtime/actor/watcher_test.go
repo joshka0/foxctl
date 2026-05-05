@@ -1,5 +1,3 @@
-//go:build sqlite_mattn
-
 package actor
 
 import (
@@ -8,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 func setupTestDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("Failed to open test db: %v", err)
 	}
@@ -258,7 +256,11 @@ func TestWatcher_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	defer w.Stop()
+	defer func() {
+		if err := w.Stop(); err != nil {
+			t.Errorf("stop watcher: %v", err)
+		}
+	}()
 
 	// Insert into mailbox (trigger fires)
 	_, err = db.Exec("INSERT INTO mailbox (to_ns, subject) VALUES ('actor-1', 'test')")

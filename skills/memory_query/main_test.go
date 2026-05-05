@@ -12,6 +12,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
 	contextstore "github.com/joshka0/foxctl/internal/storage/contextengine"
@@ -24,7 +25,9 @@ import (
 
 func newTestContext(t *testing.T, buf *bytes.Buffer) (*skillmain.RunContext, func()) {
 	t.Helper()
-	return skilltest.NewTestRunContext(t, buf, nil)
+	rc, cleanup := skilltest.NewTestRunContext(t, buf, nil)
+	rc.Workspace = workspace.CanonicalID(rc.Workspace)
+	return rc, cleanup
 }
 
 func decodeEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {
@@ -1132,6 +1135,33 @@ func TestMemoryQuery_MinSimilarityCustom(t *testing.T) {
 	}
 	normalizeInput(&in, rc)
 	assert.Equal(t, 0.8, in.MinSimilarity)
+}
+
+func TestMemoryQuery_NormalizeWorkspacePreservesWorkspaceID(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	in := Input{
+		Query:     "test",
+		Workspace: "ws-golden",
+	}
+	normalizeInput(&in, rc)
+	assert.Equal(t, "ws-golden", in.Workspace)
+}
+
+func TestMemoryQuery_NormalizeWorkspaceCanonicalizesPath(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	root := t.TempDir()
+	in := Input{
+		Query:     "test",
+		Workspace: root,
+	}
+	normalizeInput(&in, rc)
+	assert.Equal(t, workspace.CanonicalID(root), in.Workspace)
 }
 
 // Tests for file extraction helper

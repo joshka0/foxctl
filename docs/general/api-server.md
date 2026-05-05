@@ -103,7 +103,7 @@ other high-volume responses.
   acknowledging one emitted reminder follow-up does not cancel the schedule.
 - Reminder schedules can also stop automatically when linked `task_id`, `story_id`, or `milestone_id` work is satisfied, in addition to explicit cancel or `max_iterations`.
 - For room-runtime verification, prefer `bash tests/regression/run.sh` as the canonical regression bundle instead of composing ad hoc command sets.
-- If the symptom is "the message showed up in the pane but did not submit," follow that bundle with `FOXCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' ./cmd/foxctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` to prove the target terminal process actually consumed the relayed line.
+- If the symptom is "the message showed up in the pane but did not submit," follow that bundle with `FOXCTL_INTEGRATION_TMUX=1 go test -tags=integration ./cmd/foxctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` to prove the target terminal process actually consumed the relayed line.
 
 ### Search and inspection
 

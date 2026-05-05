@@ -1,5 +1,3 @@
-//go:build sqlite_mattn
-
 package actor
 
 import (
@@ -116,7 +114,11 @@ func TestSystem_NotifyTriggerExists(t *testing.T) {
 	if err := sys.Start(ctx); err != nil {
 		t.Fatalf("start system: %v", err)
 	}
-	defer sys.Stop(ctx)
+	defer func() {
+		if err := sys.Stop(ctx); err != nil {
+			t.Errorf("stop system: %v", err)
+		}
+	}()
 
 	// Verify mailbox_notify table exists
 	db := store.DB()
@@ -245,7 +247,11 @@ func TestSystem_RegisterActor(t *testing.T) {
 	if err := sys.Start(ctx); err != nil {
 		t.Fatalf("start system: %v", err)
 	}
-	defer sys.Stop(ctx)
+	defer func() {
+		if err := sys.Stop(ctx); err != nil {
+			t.Errorf("stop system: %v", err)
+		}
+	}()
 
 	// Register an actor
 	actor := &mockActorForSystem{id: "test-actor-1", ns: "test-actor"}

@@ -1,5 +1,3 @@
-//go:build cgo && !race
-
 package memory
 
 import (
@@ -54,18 +52,6 @@ func OpenTurso(ctx context.Context, cfg dbdriver.TursoConfig) (*TursoStore, erro
 	}, cfg.VectorDimensions, "turso")
 }
 
-// OpenLibSQL initializes a memory store using a local or synced libSQL database.
-func OpenLibSQL(ctx context.Context, cfg dbdriver.LibSQLConfig) (*TursoStore, error) {
-	cfg.EnableVectorSearch = true
-	if cfg.VectorDimensions == 0 {
-		cfg.VectorDimensions = dbdriver.GetDefaultVectorDimensions()
-	}
-	return openVectorStore(ctx, dbdriver.Config{
-		Driver: dbdriver.DriverLibSQL,
-		LibSQL: cfg,
-	}, cfg.VectorDimensions, "libsql")
-}
-
 func openVectorStore(ctx context.Context, cfg dbdriver.Config, vectorDimensions int, backend string) (*TursoStore, error) {
 	// Create migration function that uses configured dimensions.
 	migrate := func(ctx context.Context, db *sql.DB) error {
@@ -103,7 +89,7 @@ func openVectorStore(ctx context.Context, cfg dbdriver.Config, vectorDimensions 
 		// Auto-create vector index for faster similarity search
 		if err := store.CreateVectorIndex(ctx); err != nil {
 			// Non-fatal: log warning but continue with full-table scan fallback
-			// Vector index creation may fail on older libsql versions
+			// Vector index creation may fail on Turso versions without native ANN indexing.
 			logger.Warn().Err(err).Msg("vector index creation failed (will use ORDER BY fallback)")
 		}
 	}

@@ -13,11 +13,18 @@ Machine-friendly reference for named memory persistence and retrieval.
 |------|-------|
 | Status | Current |
 | Canonical packages | `internal/storage/memory`, `cmd/foxctl/cmd/memory*`, `skills/session_*` |
-| Last reviewed | 2026-02-17 |
+| Last reviewed | 2026-05-05 |
 
 ## Scope
 
 `memory` covers durable named entries in `memory.db`, workspace scoping, optional embeddings, and recall surfaces used by CLI, hooks, and session summarization.
+
+The canonical memory-core architecture is
+[docs/architecture/memory-core.md](../architecture/memory-core.md). This
+general reference focuses on storage and command surfaces; the architecture doc
+defines the agent-facing contract: memory records are typed, provenance-bearing
+evidence with mutable lifecycle/telemetry state, and retrieved memory is not an
+instruction unless it is an active policy or validated skill.
 
 ## Command Surfaces
 
@@ -44,6 +51,8 @@ Source: `cmd/foxctl/cmd/memory.go`.
 |--------|---------|
 | `session/summarize` + related session hooks | Extract and persist learnings |
 | hook scripts (for example `configs/hooks/memory-detector.sh`, `configs/hooks/memory-recall.sh`) | Prompt/capture/recall workflow |
+| `memory/query` | Canonical record retrieval with kind, source lane, trust, lifecycle, telemetry, and usage labels |
+| `memory/curator_report` | Deterministic curator report/apply workflow for lifecycle hygiene |
 | `code/semantic_search` with scope `memories` | Semantic retrieval path |
 
 ## Data Contract
@@ -113,3 +122,4 @@ foxctl run code/semantic_search --input '{"query":"oauth gotcha","scope":["memor
 - [docs/general/search.md](search.md)
 - [docs/general/hooks.md](hooks.md)
 - [docs/general/companion-memory.md](companion-memory.md)
+- [docs/architecture/memory-core.md](../architecture/memory-core.md)

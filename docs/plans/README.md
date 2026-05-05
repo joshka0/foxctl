@@ -14,6 +14,8 @@ This directory contains active planning documents and implementation roadmaps.
 - `features/internal-package-topology-migration.md` — incremental `internal/*` family cleanup plan; makes the legacy runtime vs `v2` boundary explicit and sequences package-family consolidation.
 - `features/eino-go-native-runtime-plan.md` — Eino `AgentEngine` integration + Go-native `RuntimeSpawner`/reconciler; Jido optional path.
 - `features/opentui-agent-terminal-facades.md` — facade backlog for a greenfield OpenTUI agent terminal over v2 runtime, room, orchestration, skills, jobs, MCP, and CAS APIs.
+- `features/remote-workbench-session-handoff.md` — plan for moving a pi-mono-inspired TUI workbench to a Tailscale remote and continuing from browser/terminal attachments.
+- `features/semantic-code-anchors.md` — plan for typed code comments as repo graph edges, semantic envelope anchors, and ACA retrieval signals.
 - `tui-agent-control-plane.md` — archived TypeScript TUI plan; current terminal work is `go-tui-agent-shell.md`.
 - `go-tui-agent-shell.md` — Go-native interactive coding shell plan with memory, continuity, and worker rails.
 - `v2-implementation-todo.md`

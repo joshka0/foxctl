@@ -342,7 +342,7 @@ func (h *HybridSearcher) Search(
 			LIMIT %d
 		`, vectorColumn, queryVector.String(), limit*2)
 	} else {
-		// libSQL: use vector_top_k virtual table
+		// Turso: use vector_top_k virtual table.
 		candidateQuery = fmt.Sprintf(`
 			SELECT
 				t.id as id,

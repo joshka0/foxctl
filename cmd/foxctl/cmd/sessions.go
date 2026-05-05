@@ -486,7 +486,7 @@ func newSessionsResynthesizeV2Command() *cobra.Command {
 		Long: `Read source conversation logs (Claude/Codex JSONL) and resynthesize
 deterministic v2 turn/artifact records.
 
-This command writes directly to the v2 turns store (libsql/sqlite fallback) and
+This command writes directly to the v2 turns store (Turso/SQLite) and
 does not require running the legacy v1 runtime path.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {

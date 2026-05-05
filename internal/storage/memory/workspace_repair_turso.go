@@ -1,5 +1,3 @@
-//go:build cgo && !race
-
 package memory
 
 import (
@@ -20,10 +18,10 @@ import (
 // - Purpose: Keep historical Turso-backed named-memory entries reachable when workspace paths change across machines/users
 // - Flow: detect path-like workspace values -> compute stable target IDs -> migrate -> log when rows move
 // - SideEffects: updates remote named_memory + embedding_metadata workspace values (conflicts skipped)
-// - FailureModes: libsql errors, tx errors (logged; does not fail Open)
+// - FailureModes: turso errors, tx errors (logged; does not fail Open)
 // - Observability: logs warnings on failures; logs info when a migration moves rows
 // - Related: ws.ID, ws.CanonicalID, (*TursoStore).migrateWorkspace
-// - Keywords: workspace, migration, repair, memory, turso, libsql
+// - Keywords: workspace, migration, repair, memory, turso
 func (s *TursoStore) repairWorkspaceIDs(ctx context.Context) {
 	if s == nil || s.db == nil {
 		return

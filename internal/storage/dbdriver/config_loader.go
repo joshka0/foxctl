@@ -72,16 +72,14 @@ func (cl *ConfigLoader) loadConfig(prefix, defaultPath string) Config {
 	driverType := DriverType(strings.ToLower(driver))
 
 	switch driverType {
-	case DriverLibSQL:
-		return cl.loadLibSQLConfig(prefix, defaultPath)
 	case DriverTurso:
 		return cl.loadTursoConfig(prefix, defaultPath, strings.ToLower(prefix))
 	case DriverPostgres:
 		return cl.loadPostgresConfig(prefix)
 	case DriverSQLite:
-		fallthrough
-	default:
 		return cl.loadSQLiteConfig(prefix, defaultPath)
+	default:
+		return Config{Driver: driverType}
 	}
 }
 
@@ -118,73 +116,6 @@ func (cl *ConfigLoader) loadSQLiteConfig(prefix, defaultPath string) Config {
 			Path:        dbPath,
 			EnableWAL:   enableWAL,
 			BusyTimeout: busyTimeout,
-		},
-	}
-}
-
-// loadLibSQLConfig loads local libSQL configuration
-func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
-	// Check for custom path via environment variable
-	// Format: FOXCTL_<PREFIX>_DB_PATH (e.g., FOXCTL_MEMORY_DB_PATH)
-	pathEnv := fmt.Sprintf("FOXCTL_%s_DB_PATH", strings.ToUpper(prefix))
-	dbPath := os.Getenv(pathEnv)
-
-	if dbPath == "" {
-		// Default to .libsql extension to distinguish from SQLite
-		dbPath = filepath.Join(cl.rootDir, strings.Replace(defaultPath, ".db", ".libsql", 1))
-	}
-
-	// Check if vector search should be enabled (default: true for MEMORY, false for others)
-	vectorEnv := fmt.Sprintf("FOXCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
-	// Default to true for memory database since it benefits most from vector search
-	enableVector := strings.ToUpper(prefix) == "MEMORY"
-	if vectorStr := os.Getenv(vectorEnv); vectorStr != "" {
-		enableVector = strings.ToLower(vectorStr) == "true" || vectorStr == "1"
-	}
-
-	// Get vector dimensions (check per-database env var, then global default)
-	dimsEnv := fmt.Sprintf("FOXCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
-	vectorDims := GetDefaultVectorDimensions()
-	if dimsStr := os.Getenv(dimsEnv); dimsStr != "" {
-		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
-			vectorDims = dims
-		}
-	}
-
-	// Check for remote sync URL (enables embedded replica mode)
-	// Format: FOXCTL_<PREFIX>_SYNC_URL or FOXCTL_LIBSQL_SYNC_URL (fallback)
-	syncURLEnv := fmt.Sprintf("FOXCTL_%s_SYNC_URL", strings.ToUpper(prefix))
-	syncURL := os.Getenv(syncURLEnv)
-	if syncURL == "" {
-		syncURL = os.Getenv("FOXCTL_LIBSQL_SYNC_URL")
-	}
-
-	// Check for sync auth token
-	// Format: FOXCTL_<PREFIX>_SYNC_TOKEN or FOXCTL_LIBSQL_SYNC_TOKEN (fallback)
-	syncTokenEnv := fmt.Sprintf("FOXCTL_%s_SYNC_TOKEN", strings.ToUpper(prefix))
-	syncToken := os.Getenv(syncTokenEnv)
-	if syncToken == "" {
-		syncToken = os.Getenv("FOXCTL_LIBSQL_SYNC_TOKEN")
-	}
-
-	// Check for sync interval (seconds, 0 = sync on demand)
-	syncIntervalEnv := fmt.Sprintf("FOXCTL_%s_SYNC_INTERVAL", strings.ToUpper(prefix))
-	syncInterval := 0
-	if intervalStr := os.Getenv(syncIntervalEnv); intervalStr != "" {
-		if interval, err := strconv.Atoi(intervalStr); err == nil && interval > 0 {
-			syncInterval = interval
-		}
-	}
-
-	return Config{
-		Driver: DriverLibSQL,
-		LibSQL: LibSQLConfig{
-			Path:               dbPath,
-			EnableVectorSearch: enableVector,
-			VectorDimensions:   vectorDims,
-			SyncURL:            syncURL,
-			AuthToken:          syncToken,
-			SyncInterval:       syncInterval,
 		},
 	}
 }
@@ -235,7 +166,6 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, defaultPath, dbName string) Conf
 	}
 
 	// Check for sync interval (seconds, 0 = sync on demand).
-	// We reuse the same per-store env var name as libSQL for consistency.
 	syncIntervalEnv := fmt.Sprintf("FOXCTL_%s_SYNC_INTERVAL", strings.ToUpper(prefix))
 	syncInterval := 0
 	if intervalStr := os.Getenv(syncIntervalEnv); intervalStr != "" {
@@ -247,6 +177,7 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, defaultPath, dbName string) Conf
 	return Config{
 		Driver: DriverTurso,
 		Turso: TursoConfig{
+			Path:               replicaPath,
 			URL:                url,
 			AuthToken:          token,
 			DatabaseName:       dbName,
@@ -291,7 +222,7 @@ func (cl *ConfigLoader) loadPostgresConfig(prefix string) Config {
 		}
 	}
 
-	// Vector search settings (same pattern as libSQL/Turso)
+	// Vector search settings (same pattern as other vector-capable stores)
 	vectorEnv := fmt.Sprintf("FOXCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
 	enableVector := strings.ToUpper(prefix) == "MEMORY"
 	if vectorStr := os.Getenv(vectorEnv); vectorStr != "" {
@@ -330,13 +261,11 @@ func GetConfigSummary(cfg Config) string {
 	switch cfg.Driver {
 	case DriverSQLite:
 		return fmt.Sprintf("SQLite: %s", cfg.SQLite.Path)
-	case DriverLibSQL:
-		if cfg.LibSQL.SyncURL != "" {
-			return fmt.Sprintf("LibSQL: %s (sync: %s, vector: %v)", cfg.LibSQL.Path, cfg.LibSQL.SyncURL, cfg.LibSQL.EnableVectorSearch)
-		}
-		return fmt.Sprintf("LibSQL: %s (local-only, vector: %v)", cfg.LibSQL.Path, cfg.LibSQL.EnableVectorSearch)
 	case DriverTurso:
-		return fmt.Sprintf("Turso: %s (vector: %v)", cfg.Turso.URL, cfg.Turso.EnableVectorSearch)
+		if cfg.Turso.URL != "" {
+			return fmt.Sprintf("Turso: %s (path: %s, vector: %v)", cfg.Turso.URL, cfg.Turso.Path, cfg.Turso.EnableVectorSearch)
+		}
+		return fmt.Sprintf("Turso: %s (local-only, vector: %v)", cfg.Turso.Path, cfg.Turso.EnableVectorSearch)
 	case DriverPostgres:
 		// Redact password from DSN for display
 		dsn := cfg.Postgres.DSN
@@ -381,23 +310,11 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 		return Config{
 			Driver: DriverTurso,
 			Turso: TursoConfig{
+				Path:               filepath.Join(cl.rootDir, dbName+".turso"),
 				URL:                settings.TursoURL,
 				AuthToken:          settings.TursoAuthToken,
 				DatabaseName:       dbName,
-				EnableVectorSearch: settings.VectorEnabled,
-				VectorDimensions:   dims,
-			},
-		}
-
-	case DriverLibSQL:
-		dims := settings.VectorDimensions
-		if dims == 0 {
-			dims = GetDefaultVectorDimensions()
-		}
-		return Config{
-			Driver: DriverLibSQL,
-			LibSQL: LibSQLConfig{
-				Path:               filepath.Join(cl.rootDir, dbName+".db"),
+				ReplicaPath:        filepath.Join(cl.rootDir, dbName+".turso"),
 				EnableVectorSearch: settings.VectorEnabled,
 				VectorDimensions:   dims,
 			},
@@ -424,33 +341,27 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 			},
 		}
 
-	default:
-		// SQLite (default)
+	case DriverSQLite:
 		return DefaultSQLiteConfig(filepath.Join(cl.rootDir, dbName+".db"))
+
+	default:
+		return Config{Driver: driver}
 	}
 }
 
 // Environment variable documentation:
 //
 // For SQLite databases:
-//   FOXCTL_<DB>_DB_DRIVER=sqlite       # Database driver (sqlite, libsql, or turso)
+//   FOXCTL_<DB>_DB_DRIVER=sqlite       # Database driver (sqlite, turso, or postgres)
 //   FOXCTL_<DB>_DB_PATH=/path/to/db    # Path to SQLite database file
 //   FOXCTL_<DB>_DB_WAL=true            # Enable WAL mode (default: true)
 //   FOXCTL_<DB>_DB_TIMEOUT=5000        # Busy timeout in milliseconds
 //
-// For libSQL databases (local-first with optional sync):
-//   FOXCTL_<DB>_DB_DRIVER=libsql       # Database driver
-//   FOXCTL_<DB>_DB_PATH=/path/to/db    # Path to libSQL database file
-//   FOXCTL_<DB>_SYNC_URL=http://...    # Remote sqld URL for sync (optional)
-//   FOXCTL_<DB>_SYNC_TOKEN=...         # Auth token for sync (optional)
-//   FOXCTL_<DB>_SYNC_INTERVAL=60       # Background sync interval in seconds (optional, 0=on-demand)
-//   FOXCTL_LIBSQL_SYNC_URL=http://...  # Fallback sync URL for all libSQL databases
-//   FOXCTL_LIBSQL_SYNC_TOKEN=...       # Fallback sync token for all libSQL databases
-//
-// For Turso databases (cloud-native):
+// For Turso databases (local or remote sync):
 //   FOXCTL_<DB>_DB_DRIVER=turso        # Database driver
-//   FOXCTL_<DB>_DB_URL=libsql://...    # Turso database URL
-//   FOXCTL_<DB>_DB_TOKEN=...           # Turso auth token
+//   FOXCTL_<DB>_DB_PATH=/path/to/db    # Local Turso database path
+//   FOXCTL_<DB>_DB_URL=libsql://...    # Optional remote Turso database URL
+//   FOXCTL_<DB>_DB_TOKEN=...           # Turso auth token when DB_URL is set
 //   FOXCTL_TURSO_URL=libsql://...      # Fallback Turso URL for all databases
 //   FOXCTL_TURSO_TOKEN=...             # Fallback Turso token for all databases
 //

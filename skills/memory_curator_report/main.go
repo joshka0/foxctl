@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/joshka0/foxctl/internal/context/contextengine"
 	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/domain/envelope"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
 	contextstore "github.com/joshka0/foxctl/internal/storage/contextengine"
@@ -218,9 +218,7 @@ func normalizeInput(in *Input, rc *skillmain.RunContext) (Mode, error) {
 	if in.Workspace == "" {
 		in.Workspace = rc.Workspace
 	}
-	if absPath, err := filepath.Abs(in.Workspace); err == nil {
-		in.Workspace = absPath
-	}
+	in.Workspace = workspace.CanonicalID(in.Workspace)
 	mode := Mode(strings.TrimSpace(in.Mode))
 	if mode == "" {
 		mode = ModeDryRun

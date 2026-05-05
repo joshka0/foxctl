@@ -323,7 +323,7 @@ Example completion note:
 
 ```text
 changed: wired durable loop GET/PATCH and runtime persistence
-verified: go test -tags=libsqlite3 ./internal/interfaces/web/api ./cmd/foxctl/cmd -run '...'; go build -tags=libsqlite3 ./cmd/foxctl
+verified: make test-short; make build
 remaining: gui-agent auth still uses local dev identity in local mode
 ```
 

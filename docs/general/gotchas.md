@@ -6,29 +6,25 @@ Common pitfalls and their solutions.
 
 ## Build & Installation
 
-### CGO Build Errors
+### Legacy SQLite CGO Storage Lane
 
-**Problem:** Duplicate SQLite symbols when building with CGO.
+**Problem:** Old instructions can point agents toward `go-libsql`,
+`github.com/mattn/go-sqlite3`, `-tags=libsqlite3`, `sqlite-vector`, or
+`foxctl-cgo`.
 
-```
-duplicate symbol '_sqlite3_...' in:
-    go-libsql/...
-    go-sqlite3/...
-```
-
-**Cause:** Both `go-libsql` (Turso) and `go-sqlite3` embed SQLite.
-
-**Solution:** Always use the Makefile target:
+**Solution:** Do not revive that lane. Turso is the canonical SQLite-family
+storage path and builds through the normal non-CGO targets:
 
 ```bash
-# Correct
-make build-cgo
-
-# Wrong
-CGO_ENABLED=1 go build ./...
+make build
+make test
 ```
 
-The Makefile uses `-tags=libsqlite3` to use system SQLite.
+**Current state:** `tursogo` and `dspy-go` may still pull
+`github.com/mattn/go-sqlite3` as a transitive module, but foxctl does not import
+it as a storage driver. With `CGO_ENABLED=0`, it resolves through non-CGO files
+and the full suite passes. Do not treat the indirect module entry as a reason to
+restore `CGO_ENABLED=1`, `-tags=libsqlite3`, `foxctl-cgo`, or sqlite-vector.
 
 ---
 
@@ -399,7 +395,7 @@ export CLAUDE_MAX_MODEL=claude-haiku-4-5
 
 | Gotcha | One-liner Fix |
 |--------|---------------|
-| CGO build error | `make build-cgo` |
+| Legacy SQLite CGO storage reference | Use default Turso storage path |
 | Skill not updating | `make skills-install` |
 | API keys missing | Add `config.LoadDotEnv()` |
 | Memory empty | Check workspace path |

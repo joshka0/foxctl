@@ -33,7 +33,7 @@ func TestCosineSimilarityExpr(t *testing.T) {
 			want:   "(1 - (\"embedding\" <=> '[0.100000,0.200000,0.300000]'))",
 		},
 		{
-			driver: DriverLibSQL,
+			driver: DriverTurso,
 			want:   "vector_distance_cos(embedding, '[0.100000,0.200000,0.300000]')",
 		},
 	}
@@ -57,7 +57,7 @@ func TestCosineSimilarityScoreExpr(t *testing.T) {
 			want:   "((1 - (\"embedding\" <=> '[0.100000,0.200000,0.300000]')) + 1.0) / 2.0",
 		},
 		{
-			driver: DriverLibSQL,
+			driver: DriverTurso,
 			want:   "(1 - (vector_distance_cos(embedding, '[0.100000,0.200000,0.300000]') / 2.0))",
 		},
 	}

@@ -26,4 +26,4 @@ if [[ -n "$POLICY" ]]; then
 fi
 
 cd "$ROOT"
-exec env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 go run -tags=libsqlite3 ./cmd/foxctl "${ARGS[@]}" "$@"
+exec env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED="${CGO_ENABLED:-0}" go run ./cmd/foxctl "${ARGS[@]}" "$@"

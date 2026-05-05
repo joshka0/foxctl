@@ -113,7 +113,7 @@ func (vh *VectorHelper) VectorExpression(vector Vector) string {
 // CosineSimilarity returns a SQL expression for cosine-based scoring between two vectors.
 // This method has driver-specific semantics:
 //   - PostgreSQL: 1 - distance, where higher values are more similar.
-//   - libSQL/Turso: vector_distance_cos distance, where lower values are more similar.
+//   - Turso: vector_distance_cos distance, where lower values are more similar.
 //
 // Prefer CosineSimilarityScore() when you need a consistent [0,1] score with
 // higher values meaning more similar across drivers.
@@ -151,7 +151,7 @@ func (vh *VectorHelper) EuclideanDistance(columnName string, queryVector Vector)
 }
 
 // VectorTopK performs a vector similarity search using the index.
-// For libSQL: returns a virtual table expression using vector_top_k().
+// For Turso: returns a virtual table expression using vector_top_k().
 // For PostgreSQL: returns empty string (Postgres uses ORDER BY <=> in the main query).
 // Callers should use SearchSimilar() for cross-driver compatibility.
 func (vh *VectorHelper) VectorTopK(indexName string, queryVector Vector, k int) string {
@@ -164,7 +164,7 @@ func (vh *VectorHelper) VectorTopK(indexName string, queryVector Vector, k int) 
 }
 
 // ExtractVector extracts a vector from the database into a string representation.
-// PostgreSQL returns vector columns directly; libSQL uses vector_extract().
+// PostgreSQL returns vector columns directly; Turso uses vector_extract().
 func (vh *VectorHelper) ExtractVector(columnName string) string {
 	if vh.db.GetDriverType() == DriverPostgres {
 		return columnName
@@ -201,7 +201,7 @@ func (vh *VectorHelper) SearchSimilar(
 			LIMIT %d
 		`, qVC, queryVector.String(), limit)
 	} else if indexName != "" {
-		// libSQL: Use vector index for fast approximate search
+		// Turso: use vector index for fast approximate search.
 		query = fmt.Sprintf(`
 			SELECT t.*
 			FROM %s vt

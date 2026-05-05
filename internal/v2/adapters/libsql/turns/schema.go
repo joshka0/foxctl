@@ -145,8 +145,8 @@ func MigrateSchema(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("v2 turns migrate narrative support: %w", err)
 	}
 
-	// Best-effort vector index for libsql deployments. SQLite fallback builds
-	// do not have libsql_vector_idx and should continue without failing.
+	// Best-effort vector index for Turso deployments. SQLite builds do not
+	// have libsql_vector_idx and should continue without failing.
 	_, err := db.ExecContext(ctx, fmt.Sprintf(`
 		CREATE INDEX IF NOT EXISTS %s
 		ON v2_turn_artifacts(libsql_vector_idx(embedding))
@@ -165,7 +165,8 @@ func isVectorIndexUnsupported(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "no such function") ||
 		strings.Contains(msg, "unknown function") ||
-		strings.Contains(msg, "syntax error")
+		strings.Contains(msg, "syntax error") ||
+		strings.Contains(msg, "invalid expression")
 }
 
 func ensureNarrativeArtifactTypeSupport(ctx context.Context, db *sql.DB, fallbackVectorDims int) error {

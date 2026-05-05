@@ -100,7 +100,7 @@ internal/
 - run/ask/spawn/list/kill services
 - event-sourced orchestration
 - runner/supervisor/contextbuilder runtime components
-- runtime adapters such as Jido and libsql-backed v2 stores
+- runtime adapters such as Jido and Turso-backed v2 stores
 
 It should not become a generic replacement namespace for:
 

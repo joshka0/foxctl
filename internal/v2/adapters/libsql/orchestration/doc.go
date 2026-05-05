@@ -1,2 +1,2 @@
-// Package orchestration provides libsql-backed v2 orchestration projection storage.
+// Package orchestration provides v2 orchestration projection storage.
 package orchestration

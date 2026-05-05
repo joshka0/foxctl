@@ -1,4 +1,4 @@
-# Cross-Device DB Consistency (LibSQL/Turso + Single-Leader Daemon)
+# Cross-Device DB Consistency (Turso + Single-Leader Daemon)
 
 Status: Draft (2026-02-08)
 
@@ -6,7 +6,7 @@ Status: Draft (2026-02-08)
 
 Make foxctl's DB-backed state consistent across multiple computers for a single user by:
 
-- Using libSQL sync or Turso as the shared source of truth (local-first embedded replicas).
+- Using Turso as the shared source of truth (local-first replicas).
 - Standardizing database driver configuration across all stores (not just cache/jobs/memory).
 - Enforcing a single active daemon via a DB-backed leader lease.
 - Making workspace identity path-independent everywhere.
@@ -36,7 +36,7 @@ Today, foxctl persists state across many SQLite databases under `~/.foxctl`. Thi
 
 ## Current State (Relevant)
 
-- There is a `dbdriver` abstraction (`internal/storage/dbdriver/`) supporting `sqlite`, `libsql`, and `turso` drivers.
+- There is a `dbdriver` abstraction (`internal/storage/dbdriver/`) supporting `sqlite`, `turso`, and `postgres` drivers.
 - `dbdriver.ConfigLoader` has named loader methods for `CACHE`, `JOBS`, `MEMORY`, plus a generic `LoadConfig(storeName, defaultPath)` that can load config for arbitrary stores via env vars. It also has a generic `ConfigFromPlatformSettings()` that can handle arbitrary store names.
 - `sqliteutil.OpenDBWithAutoConfig` was intended to bridge stores to `dbdriver` for those 3 stores, but it had **zero callsites** in production code (dead code) and has been removed.
 - Stores now open databases through `dbutil.OpenStoreDB` (or store-specific factory patterns), enabling `dbdriver` configuration across the codebase. Direct `sqliteutil.OpenDBShared` usage is now isolated to `dbutil` internals and tests/tools.
@@ -54,8 +54,7 @@ Today, foxctl persists state across many SQLite databases under `~/.foxctl`. Thi
 Each store continues to use a local file under `~/.foxctl` as its primary read path, with optional sync:
 
 - `sqlite`: local-only
-- `libsql`: local libSQL file, optionally with `SyncURL` + `SyncToken`
-- `turso`: embedded replica that syncs with Turso
+- `turso`: local Turso file, optionally synced with a remote Turso database
 
 Important invariant:
 
@@ -73,13 +72,9 @@ Implementation status:
 
 Proposed env conventions:
 
-- `FOXCTL_DB_DRIVER`: applies to all stores unless overridden (`sqlite`, `libsql`, `turso`). Implemented as a `ConfigLoader` fallback (callsites still need migration).
-- `FOXCTL_<STORE>_DB_DRIVER`: per-store driver override (`sqlite`, `libsql`, `turso`).
-- `FOXCTL_<STORE>_DB_PATH`: local replica file path (SQLite path, libSQL path, or Turso embedded replica path).
-- `FOXCTL_<STORE>_SYNC_URL`: libSQL sync URL (enables embedded replica sync mode).
-- `FOXCTL_<STORE>_SYNC_TOKEN`: libSQL sync auth token.
-- `FOXCTL_LIBSQL_SYNC_URL`: fallback libSQL sync URL for all stores.
-- `FOXCTL_LIBSQL_SYNC_TOKEN`: fallback libSQL sync token for all stores.
+- `FOXCTL_DB_DRIVER`: applies to all stores unless overridden (`sqlite`, `turso`, `postgres`).
+- `FOXCTL_<STORE>_DB_DRIVER`: per-store driver override (`sqlite`, `turso`, `postgres`).
+- `FOXCTL_<STORE>_DB_PATH`: local database or Turso replica file path.
 - `FOXCTL_<STORE>_DB_URL`: Turso database URL.
 - `FOXCTL_<STORE>_DB_TOKEN`: Turso auth token.
 - `FOXCTL_TURSO_URL`: fallback Turso URL for all stores.
@@ -88,13 +83,13 @@ Proposed env conventions:
 Notes:
 
 - `<STORE>` should be a stable, uppercase logical name matching the DB file. See the full canonical store list in section 2.2 below.
-- Default file paths should remain under `~/.foxctl` but use distinct extensions (`.db`, `.libsql`) to avoid accidental reuse.
+- Default file paths should remain under `~/.foxctl` but use distinct extensions (`.db`, `.turso`) to avoid accidental reuse.
 
 ### 2.1 Multi-DB vs Single DB (Direction)
 
 Near-term direction:
 
-- Prefer multiple databases (one per store) for local SQLite/libSQL.
+- Prefer multiple databases (one per store) for local SQLite/Turso.
 - Rationale: corruption and migration issues have a smaller blast radius; stores remain independently recoverable.
 
 Long-term direction:
@@ -238,7 +233,7 @@ Acceptance:
   - Baseline DB setup and migrations (PRAGMAs/foreign_keys/WAL, schema migration invocation, and "run once" semantics where needed).
   - SQLite pooling/shared-handle behavior (today in `sqliteutil`), but behind a driver-agnostic API.
 - Treat `sqliteutil` as a legacy implementation detail and gradually move callsites away from `sqliteutil.*`.
-- Update all stores that open DBs to use `dbutil` so they can select sqlite/libsql/turso.
+- Update all stores that open DBs to use `dbutil` so they can select sqlite/turso.
 - Ensure every store returns a closer and cleans up driver resources (connector/temp dirs) correctly.
 - **While touching each store's `Open()`**, also audit and fix workspace identity:
   - Ensure the store uses `workspace_id` (canonical ID) as the sole join/lookup key.
@@ -247,7 +242,7 @@ Acceptance:
 
 Acceptance:
 
-- A single env var change can route a store from SQLite to libSQL sync without code changes.
+- A single env var change can route a store from SQLite to Turso sync without code changes.
 - New code uses `dbutil` (not `sqliteutil`) as the opening/migration facade.
 - All workspace-scoped queries use `workspace_id` as the primary filter.
 
@@ -270,7 +265,7 @@ Acceptance:
 Sync frequency / latency:
 
 - Default (proposed): auto-sync on write with periodic background sync (configurable interval, e.g., 30s).
-- Implementation note: libSQL and Turso drivers can run an optional background sync loop when `SyncInterval > 0` (and for libSQL, when `SyncURL` is configured). `foxctl sync` provides an explicit on-demand sync for configured stores.
+- Implementation note: Turso can run an optional background sync loop when `SyncInterval > 0` and a remote URL is configured. `foxctl sync` provides an explicit on-demand sync for configured stores.
 - Provide `foxctl sync` as an explicit manual command for on-demand sync.
 - Expected cross-device lag: seconds in normal operation, minutes if one device is offline.
 
@@ -314,7 +309,7 @@ If needed later:
 
 ## Risks and Mitigations
 
-- CGO requirement for libSQL/Turso. Mitigation: keep `sqlite` fallback always available; sync is an opt-in capability.
+- Native Turso compatibility gaps. Mitigation: keep `sqlite` fallback always available; sync is an opt-in capability.
 - Initial data migration to remote. Mitigation: make migration explicit and reversible; do not auto-overwrite local DBs.
 - Duplicate work without leader gating. Mitigation: lease gate all daemon loops; keep at-least-once invariants, add dedupe where possible.
 - Workspace identity drift during migration. Mitigation: Phase 1 adds repair logic to all workspace-scoped stores before Phase 2 enables sync. Run `foxctl doctor` to verify workspace IDs are consistent.

@@ -1,5 +1,3 @@
-//go:build cgo && !race
-
 package turns
 
 import (
@@ -20,21 +18,20 @@ func requireNativeVectorSQL() bool {
 	}
 }
 
-func TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL(t *testing.T) {
+func TestTurnStore_SearchArtifactsByEmbedding_VectorPathTurso(t *testing.T) {
 	ctx := context.Background()
 	storageRoot := t.TempDir()
 	requireNative := requireNativeVectorSQL()
 
-	// Force libsql driver so this test validates the native vector SQL path.
-	t.Setenv("FOXCTL_V2_TURNS_DB_DRIVER", "libsql")
-	t.Setenv("FOXCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turns_vector.libsql"))
+	t.Setenv("FOXCTL_V2_TURNS_DB_DRIVER", "turso")
+	t.Setenv("FOXCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turns_vector.turso"))
 	t.Setenv("FOXCTL_V2_TURNS_VECTOR_SEARCH", "1")
 	t.Setenv("FOXCTL_V2_TURNS_VECTOR_DIMS", "4")
 	t.Setenv("FOXCTL_VECTOR_DIMS", "4")
 
 	store, err := Open(ctx, storageRoot)
 	if err != nil {
-		t.Fatalf("Open(libsql) error = %v", err)
+		t.Fatalf("Open(turso) error = %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
@@ -42,7 +39,7 @@ func TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL(t *testing.T) {
 		if requireNative {
 			t.Fatalf("native vector SQL required, but store initialized without vector capability")
 		}
-		t.Skip("skipping: libsql vector capability unavailable in this test environment")
+		t.Skip("skipping: turso vector capability unavailable in this test environment")
 	}
 
 	if err := store.SaveTurn(ctx, run.TurnRecord{ID: "turn-v1", SessionID: "run-vector"}); err != nil {
@@ -106,15 +103,15 @@ func TestTurnStore_Open_DefaultVectorDimensionsLocal(t *testing.T) {
 	ctx := context.Background()
 	storageRoot := t.TempDir()
 
-	t.Setenv("FOXCTL_V2_TURNS_DB_DRIVER", "libsql")
-	t.Setenv("FOXCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turns_default_dims.libsql"))
+	t.Setenv("FOXCTL_V2_TURNS_DB_DRIVER", "turso")
+	t.Setenv("FOXCTL_V2_TURNS_DB_PATH", filepath.Join(storageRoot, "turns_default_dims.turso"))
 	t.Setenv("FOXCTL_V2_TURNS_VECTOR_SEARCH", "1")
 	t.Setenv("FOXCTL_V2_TURNS_VECTOR_DIMS", "")
 	t.Setenv("FOXCTL_VECTOR_DIMS", "")
 
 	store, err := Open(ctx, storageRoot)
 	if err != nil {
-		t.Fatalf("Open(libsql) error = %v", err)
+		t.Fatalf("Open(turso) error = %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 

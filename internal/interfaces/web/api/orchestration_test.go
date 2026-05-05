@@ -1595,7 +1595,7 @@ func TestOrchestrationDBConfig_GlobalPostgresHonorsV2EventsPathOverride(t *testi
 	t.Setenv("FOXCTL_DB_DRIVER", "postgres")
 
 	root := t.TempDir()
-	overridePath := filepath.Join(root, "custom", "v2_events.libsql")
+	overridePath := filepath.Join(root, "custom", "v2_events.turso")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_PATH", overridePath)
 
 	cfg := orchestrationTestConfig(root)
@@ -1655,7 +1655,7 @@ func TestOrchestrationRefreshHandler_GlobalPostgresStillWorks(t *testing.T) {
 	}
 }
 
-func TestOrchestrationBoardGetHandler_DefaultLibSQLWithoutCGOFallsBackToSQLite(t *testing.T) {
+func TestOrchestrationBoardGetHandler_DefaultTursoLocalWorks(t *testing.T) {
 	t.Setenv("FOXCTL_DB_DRIVER", "")
 	t.Setenv("FOXCTL_V2_EVENTS_DB_DRIVER", "")
 

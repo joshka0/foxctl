@@ -51,8 +51,8 @@ Use the gather-context eval to test whether the controller finds the required
 repo context with bounded emitted context:
 
 ```bash
-env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 go build -tags=libsqlite3 -o /tmp/foxctl-rlm-cgo ./cmd/foxctl
-/tmp/foxctl-rlm-cgo eval gather-context \
+env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 go build -o /tmp/foxctl-rlm ./cmd/foxctl
+/tmp/foxctl-rlm eval gather-context \
   --workspace . \
   --eval-dataset-file /tmp/gather-context-eval.jsonl \
   --lane code \

@@ -107,11 +107,6 @@ else
     success "bin/foxctl exists"
 fi
 
-if [[ ! -f "$BIN_DIR/foxctl-cgo" ]]; then
-    warn "bin/foxctl-cgo not found. Run 'make build-cgo' for Turso support."
-else
-    success "bin/foxctl-cgo exists"
-fi
 echo ""
 
 # 2. Create directories
@@ -167,7 +162,6 @@ symlink_binary() {
 }
 
 symlink_binary "$BIN_DIR/foxctl" "$LOCAL_BIN/foxctl" "foxctl"
-symlink_binary "$BIN_DIR/foxctl-cgo" "$LOCAL_BIN/foxctl-cgo" "foxctl-cgo"
 echo ""
 
 # 4. Check PATH
@@ -766,7 +760,6 @@ if [[ $ERRORS -eq 0 ]]; then
     echo "  foxctl mcp serve --daemon --skills  - Start daemon"
     echo ""
     echo "For Turso remote search (cross-workspace):"
-    echo "  - Use foxctl-cgo binary (built with CGO)"
     echo "  - Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN"
 else
     error "Initialization completed with errors. Please fix and re-run."

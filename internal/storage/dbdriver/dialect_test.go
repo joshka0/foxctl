@@ -182,7 +182,6 @@ func TestDialectFor(t *testing.T) {
 		expect string
 	}{
 		{DriverSQLite, "sqlite"},
-		{DriverLibSQL, "sqlite"},
 		{DriverTurso, "sqlite"},
 		{DriverPostgres, "postgres"},
 		{"unknown", "sqlite"},

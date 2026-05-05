@@ -305,7 +305,7 @@ type SearchSettings struct {
 
 // DatabaseSettings configure database driver and connection.
 type DatabaseSettings struct {
-	// Driver specifies which database driver to use: "sqlite" (default), "libsql", "turso", or "postgres"
+	// Driver specifies which database driver to use: "sqlite" (default), "turso", or "postgres"
 	Driver string `mapstructure:"driver" json:"driver"`
 
 	// Turso holds Turso-specific configuration (when driver is "turso")
@@ -373,7 +373,7 @@ func (p PostgresSettings) MarshalJSON() ([]byte, error) {
 
 // VectorSettings configure native vector search capabilities.
 type VectorSettings struct {
-	// Enabled controls whether native vector search is active (requires Turso/libsql)
+	// Enabled controls whether native vector search is active (requires Turso or Postgres)
 	Enabled bool `mapstructure:"enabled" json:"enabled"`
 
 	// Dimensions specifies the embedding vector dimensions.
@@ -765,8 +765,8 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("indexing.post_review.enabled", false)
 	v.SetDefault("indexing.post_review.async", true)
 	v.SetDefault("indexing.post_review.indexers", []map[string]any{})
-	// Database defaults - libsql for local-first with optional sync
-	v.SetDefault("database.driver", "libsql")
+	// Database defaults - Turso for local-first vectors with optional sync
+	v.SetDefault("database.driver", "turso")
 	v.SetDefault("database.turso.url", "")
 	v.SetDefault("database.turso.auth_token", "")
 	v.SetDefault("database.postgres.dsn", "")

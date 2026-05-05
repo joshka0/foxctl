@@ -1,5 +1,3 @@
-//go:build sqlite_mattn
-
 package mailbox
 
 import (

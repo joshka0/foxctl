@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/storage"
@@ -27,41 +28,37 @@ var logger = zerolog.New(os.Stderr).With().Str("component", "memory").Timestamp(
 
 // OpenWithConfig opens a memory store based on the provided configuration.
 // It automatically selects the appropriate backend:
-//   - Turso: when database.driver=turso and Turso URL is configured
-//   - LibSQL: when database.driver=libsql (with optional sync)
-//   - SQLite: default fallback
+//   - Turso: when database.driver=turso (local or remote sync)
+//   - SQLite: when database.driver is empty or sqlite
 //
 // This is the recommended way to open a memory store in skills.
 func OpenWithConfig(ctx context.Context, cfg config.Config) (storage.MemoryStore, error) {
-	driver := dbdriver.DriverType(cfg.Database.Driver)
+	driver := dbdriver.DriverType(strings.ToLower(strings.TrimSpace(cfg.Database.Driver)))
 
 	// Check environment variable override
 	if envDriver := os.Getenv("FOXCTL_MEMORY_DB_DRIVER"); envDriver != "" {
-		driver = dbdriver.DriverType(envDriver)
+		driver = dbdriver.DriverType(strings.ToLower(strings.TrimSpace(envDriver)))
 	}
 
 	switch driver {
 	case dbdriver.DriverTurso:
 		return openTursoFromConfig(ctx, cfg)
-	case dbdriver.DriverLibSQL:
-		return openLibSQLFromConfig(ctx, cfg)
-	default:
+	case "", dbdriver.DriverSQLite:
 		return Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
+	default:
+		return nil, fmt.Errorf("memory: unsupported database driver %q", driver)
 	}
 }
 
 // openTursoFromConfig opens a TursoStore from platform config.
 func openTursoFromConfig(ctx context.Context, cfg config.Config) (*TursoStore, error) {
-	if cfg.Database.Turso.URL == "" {
-		return nil, fmt.Errorf("memory: turso URL not configured (set database.turso.url or FOXCTL_TURSO_URL)")
-	}
-
 	tursoCfg := dbdriver.TursoConfig{
 		URL:                cfg.Database.Turso.URL,
 		AuthToken:          cfg.Database.Turso.AuthToken,
 		EnableVectorSearch: true,
 		VectorDimensions:   cfg.Database.Vector.Dimensions,
-		ReplicaPath:        cfg.Storage.Root + "/memory.turso.replica",
+		Path:               cfg.Storage.Root + "/memory.turso",
+		ReplicaPath:        cfg.Storage.Root + "/memory.turso",
 	}
 
 	store, err := OpenTurso(ctx, tursoCfg)
@@ -69,45 +66,10 @@ func openTursoFromConfig(ctx context.Context, cfg config.Config) (*TursoStore, e
 		return nil, fmt.Errorf("memory: open turso: %w", err)
 	}
 
-	logger.Info().Str("url", redactURL(cfg.Database.Turso.URL)).Bool("vector", true).Msg("opened Turso store")
-	return store, nil
-}
-
-// openLibSQLFromConfig opens a LibSQL-backed memory store from platform config.
-// It supports both local-only libSQL files and embedded-replica sync mode.
-func openLibSQLFromConfig(ctx context.Context, cfg config.Config) (storage.MemoryStore, error) {
-	// Build LibSQL config from platform config and environment
-	loader := dbdriver.NewConfigLoader(cfg.Storage.Root)
-	dbCfg := loader.LoadMemoryConfig()
-
-	// If driver is libsql but config returned something else, force libsql
-	if dbCfg.Driver != dbdriver.DriverLibSQL {
-		dbCfg = dbdriver.Config{
-			Driver: dbdriver.DriverLibSQL,
-			LibSQL: dbdriver.LibSQLConfig{
-				Path:               cfg.Storage.Root + "/memory.libsql",
-				EnableVectorSearch: true,
-				VectorDimensions:   cfg.Database.Vector.Dimensions,
-			},
-		}
-	}
-
-	// Ensure vector search is enabled for memory
-	dbCfg.LibSQL.EnableVectorSearch = true
-	if cfg.Database.Vector.Dimensions > 0 {
-		dbCfg.LibSQL.VectorDimensions = cfg.Database.Vector.Dimensions
-	}
-
-	store, err := OpenLibSQL(ctx, dbCfg.LibSQL)
-	if err != nil {
-		return nil, fmt.Errorf("memory: open libsql: %w", err)
-	}
-
-	if dbCfg.LibSQL.SyncURL != "" {
-		logger.Info().Str("path", dbCfg.LibSQL.Path).Str("sync_url", dbCfg.LibSQL.SyncURL).Msg("opened LibSQL store with sync")
+	if cfg.Database.Turso.URL != "" {
+		logger.Info().Str("url", redactURL(cfg.Database.Turso.URL)).Bool("vector", true).Msg("opened Turso store with sync")
 	} else {
-		logger.Info().Str("path", dbCfg.LibSQL.Path).Msg("opened LibSQL store (local-only)")
+		logger.Info().Str("path", tursoCfg.Path).Bool("vector", true).Msg("opened local Turso store")
 	}
-
 	return store, nil
 }

@@ -60,7 +60,7 @@ func Open(ctx context.Context, dbPath string, opts Options) (*Store, error) {
 // foxctl store registry (e.g., SUMMARY_QUEUE).
 //
 // Index:
-// - Purpose: Open a queue DB via standardized store configuration (sqlite/libsql/turso)
+// - Purpose: Open a queue DB via standardized store configuration (sqlite/turso/postgres)
 // - Flow: normalize table → open store DB via dbutil.OpenStoreDB → migrate table → return store
 // - SideEffects: may create local replica files/dirs; may run schema migrations
 // - FailureModes: invalid table, open errors, migration errors, remote auth/network errors (sync drivers)

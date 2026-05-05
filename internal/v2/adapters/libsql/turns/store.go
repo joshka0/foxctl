@@ -146,13 +146,13 @@ func (s *Store) VectorDimensions() int {
 	return s.vectorDimensions
 }
 
-// Open opens a libsql-first v2 turns store.
+// Open opens a Turso-first v2 turns store.
 func Open(ctx context.Context, storageRoot string) (*Store, error) {
 	if strings.TrimSpace(storageRoot) == "" {
 		return nil, fmt.Errorf("v2 turns open: storageRoot is required")
 	}
 
-	defaultCfg := dbdriver.DefaultLibSQLConfig(filepath.Join(storageRoot, "v2_turns.libsql"), true)
+	defaultCfg := dbdriver.DefaultTursoLocalConfig(filepath.Join(storageRoot, "v2_turns.turso"), true)
 	cfg := defaultCfg
 	if hasDriverOverride() {
 		cfg = dbdriver.NewConfigLoader(storageRoot).LoadConfig("V2_TURNS", "v2_turns.db")
@@ -160,8 +160,6 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 	if !hasVectorDimsOverride() {
 		v2DefaultDims := defaultV2TurnsVectorDimensions()
 		switch cfg.Driver {
-		case dbdriver.DriverLibSQL:
-			cfg.LibSQL.VectorDimensions = v2DefaultDims
 		case dbdriver.DriverTurso:
 			cfg.Turso.VectorDimensions = v2DefaultDims
 		case dbdriver.DriverPostgres:
@@ -172,17 +170,12 @@ func Open(ctx context.Context, storageRoot string) (*Store, error) {
 	driverType := cfg.Driver
 	vectorDims := resolveVectorDimensions(cfg)
 	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, cfg, MigrateSchema)
-	if err != nil && cfg.Driver == dbdriver.DriverLibSQL {
-		fallback := dbdriver.DefaultSQLiteConfig(filepath.Join(storageRoot, "v2_turns.db"))
-		driverType = fallback.Driver
-		db, closeFn, err = dbdriver.OpenDBCompatWithCloser(ctx, fallback, MigrateSchema)
-	}
 	if err != nil {
 		return nil, fmt.Errorf("v2 turns open: %w", err)
 	}
 
 	store := NewStore(db, closeFn)
-	store.vectorEnabled.Store(driverType == dbdriver.DriverLibSQL || driverType == dbdriver.DriverTurso)
+	store.vectorEnabled.Store(driverType == dbdriver.DriverTurso)
 	store.vectorDimensions = detectArtifactVectorDimensions(ctx, db, vectorDims)
 	return store, nil
 }
@@ -1133,7 +1126,7 @@ func (s *Store) GetNarrative(ctx context.Context, sessionID, artifactVersion str
 }
 
 // SearchArtifactsByEmbedding returns top artifacts by embedding similarity.
-// It prefers native libsql vector functions and falls back to in-process cosine
+// It prefers native Turso vector functions and falls back to in-process cosine
 // scoring when vector SQL is unavailable.
 func (s *Store) SearchArtifactsByEmbedding(
 	ctx context.Context,
@@ -2314,10 +2307,6 @@ func vectorCandidateLimit(opts run.ArtifactSearchOptions) int {
 func resolveVectorDimensions(cfg dbdriver.Config) int {
 	dims := defaultV2TurnsVectorDimensions()
 	switch cfg.Driver {
-	case dbdriver.DriverLibSQL:
-		if cfg.LibSQL.VectorDimensions > 0 {
-			dims = cfg.LibSQL.VectorDimensions
-		}
 	case dbdriver.DriverTurso:
 		if cfg.Turso.VectorDimensions > 0 {
 			dims = cfg.Turso.VectorDimensions

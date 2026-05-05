@@ -72,7 +72,7 @@ func init() {
 	webServeCmd.Flags().BoolVar(&webDevCORS, "dev-cors", false, "Enable CORS for development (allows localhost:5174)")
 	webServeCmd.Flags().StringVar(&webUIDir, "ui-dir", "", "Directory containing static UI files to serve")
 	webServeCmd.Flags().StringVar(&webChat, "chat", "", "Chat adapter to enable (discord|telegram|teams)")
-	webServeCmd.Flags().StringVar(&webDBDriver, "db-driver", "", "Database driver (sqlite|libsql|turso|postgres)")
+	webServeCmd.Flags().StringVar(&webDBDriver, "db-driver", "", "Database driver (sqlite|turso|postgres)")
 	webServeCmd.Flags().StringVar(&webDBDSN, "db-dsn", "", "PostgreSQL DSN (overrides FOXCTL_POSTGRES_DSN)")
 	webServeCmd.Flags().BoolVar(&webFoxprox, "foxprox", false, "Start an embedded Foxprox daemon for terminal-backed agents")
 	webServeCmd.Flags().StringVar(&webFoxproxDir, "foxprox-data-dir", defaultWebFoxproxDataDir(), "Directory for embedded Foxprox state (empty = in-memory)")

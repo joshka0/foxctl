@@ -21,7 +21,7 @@ Use the room-runtime checks in this order:
 
 1. `bash tests/regression/run.sh`
 2. `make check-doc-links` after markdown updates
-3. `FOXCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' ./cmd/foxctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` when the symptom is "the message is visible in the pane but did not submit"
+3. `FOXCTL_INTEGRATION_TMUX=1 go test -tags=integration ./cmd/foxctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` when the symptom is "the message is visible in the pane but did not submit"
 
 The first command is the canonical regression bundle. The tmux integration test
 is intentionally narrower: it proves the target terminal process consumed the

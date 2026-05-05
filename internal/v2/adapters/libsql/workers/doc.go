@@ -1,2 +1,2 @@
-// Package workers provides a durable libsql-backed runtime worker registry.
+// Package workers provides a durable runtime worker registry.
 package workers

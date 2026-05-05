@@ -11,7 +11,7 @@ spec:
         args:
         - |
           mkdir -p /var/cache/foxctl /var/cache/foxctl/.foxctl /var/cache/foxctl/storage /var/cache/foxctl/cas
-          foxctl-cgo daemon start >/tmp/foxctl-daemon.log 2>&1 &
+          foxctl daemon start >/tmp/foxctl-daemon.log 2>&1 &
           daemon_pid=$!
           cleanup() {
             kill "$daemon_pid" 2>/dev/null || true
@@ -21,7 +21,7 @@ spec:
             [ -S "${FOXCTL_DAEMON_SOCKET}" ] && break
             sleep 0.2
           done
-          foxctl-cgo web serve --port=8080 &
+          foxctl web serve --port=8080 &
           web_pid=$!
           wait "$web_pid"
         env:

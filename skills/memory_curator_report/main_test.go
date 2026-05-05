@@ -12,6 +12,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skilltest"
 	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/platform/workspace"
 	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/joshka0/foxctl/internal/storage"
 	contextstore "github.com/joshka0/foxctl/internal/storage/contextengine"
@@ -20,7 +21,9 @@ import (
 
 func newTestContext(t *testing.T, buf *bytes.Buffer) (*skillmain.RunContext, func()) {
 	t.Helper()
-	return skilltest.NewTestRunContext(t, buf, nil)
+	rc, cleanup := skilltest.NewTestRunContext(t, buf, nil)
+	rc.Workspace = workspace.CanonicalID(rc.Workspace)
+	return rc, cleanup
 }
 
 func decodeEnvelope(t *testing.T, buf *bytes.Buffer) map[string]any {
@@ -75,6 +78,30 @@ func seedContextClaim(t *testing.T, store contextstore.Store, workspace string, 
 	saved, err := store.UpsertClaim(context.Background(), claim)
 	require.NoError(t, err)
 	return saved
+}
+
+func TestMemoryCuratorReportNormalizeWorkspacePreservesWorkspaceID(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	in := Input{Workspace: "ws-golden"}
+	mode, err := normalizeInput(&in, rc)
+	require.NoError(t, err)
+	require.Equal(t, ModeDryRun, mode)
+	require.Equal(t, "ws-golden", in.Workspace)
+}
+
+func TestMemoryCuratorReportNormalizeWorkspaceCanonicalizesPath(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	root := t.TempDir()
+	in := Input{Workspace: root}
+	_, err := normalizeInput(&in, rc)
+	require.NoError(t, err)
+	require.Equal(t, workspace.CanonicalID(root), in.Workspace)
 }
 
 func TestMemoryCuratorReportPlansDemotion(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -128,6 +129,46 @@ func TestMemoryPutCommand(t *testing.T) {
 	}
 	if entry.Summary == "" {
 		t.Fatalf("expected summary set")
+	}
+}
+
+func TestMemoryPutCommandUsesWorkspaceFlag(t *testing.T) {
+	cfg := setupMemoryTestEnv(t)
+	explicitWorkspace := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(explicitWorkspace, 0o755); err != nil {
+		t.Fatalf("mkdir explicit workspace: %v", err)
+	}
+	expectedWorkspaceID := workspace.ID(explicitWorkspace)
+	if expectedWorkspaceID != workspace.PathIdentity(explicitWorkspace) {
+		t.Fatalf("test setup expected path-derived workspace ID, got %s", expectedWorkspaceID)
+	}
+	if expectedWorkspaceID == workspace.ID(cfg.Home) {
+		t.Fatalf("test setup expected distinct workspace IDs, got %s for both", expectedWorkspaceID)
+	}
+	payload := `{"version":1,"status":"ok","command":"test","data":{"value":1},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`
+
+	env := runMemoryCommand(t, cfg, newMemoryPutCommand(),
+		"--workspace", explicitWorkspace,
+		"--name", "scoped",
+		"--type", "decision",
+		"--summary", "scoped memory",
+		"--data", payload,
+	)
+	data := env.Data.(map[string]any)
+	if got := data["workspace"]; got != expectedWorkspaceID {
+		t.Fatalf("workspace = %v, want %s", got, expectedWorkspaceID)
+	}
+
+	store, err := memstore.Open(context.Background(), cfg.Storage.Root, cfg.Paths.CAS)
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	defer requireClose(t, store, "memory store")
+	if _, err := store.Get(context.Background(), "scoped", expectedWorkspaceID); err != nil {
+		t.Fatalf("expected memory under explicit workspace %s: %v", expectedWorkspaceID, err)
+	}
+	if _, err := store.Get(context.Background(), "scoped", workspace.ID(cfg.Home)); err == nil {
+		t.Fatalf("memory unexpectedly stored under default workspace")
 	}
 }
 

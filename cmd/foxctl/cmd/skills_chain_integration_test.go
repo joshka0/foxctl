@@ -41,7 +41,7 @@ func buildFoxctlBinary(t *testing.T) string {
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/foxctl")
 	cmd.Dir = repoRoot(t)
 	// Build CLI without CGO to use pure-Go SQLite (modernc.org/sqlite) and avoid
-	// linker conflicts between go-libsql and mattn/go-sqlite3 when both are present.
+	// linker conflicts in sqlite-specific CGO paths.
 	env := append([]string{}, os.Environ()...)
 	env = withEnv(env, "CGO_ENABLED", "0")
 	env = withEnv(env, "GOFLAGS", "-modcacherw -buildvcs=false")

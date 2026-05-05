@@ -16,7 +16,7 @@ import (
 	v2events "github.com/joshka0/foxctl/internal/v2/core/events"
 )
 
-// Store persists append-only runtime events to a libsql-backed database.
+// Store persists append-only runtime events to a SQL database.
 type Store struct {
 	db      *sql.DB
 	closeFn func() error
@@ -42,28 +42,19 @@ func (s *Store) SetNowForTest(now func() time.Time) {
 	s.now = now
 }
 
-// Open opens a libsql-first v2 event store.
-//
-// Behavior:
-// 1) default to local libsql file (`v2_events.libsql`)
-// 2) respect explicit env driver overrides
-// 3) fallback to sqlite in environments without cgo/libsql support
+// Open opens a Turso-first v2 event store.
 func Open(ctx context.Context, storageRoot string) (*Store, error) {
 	if strings.TrimSpace(storageRoot) == "" {
 		return nil, fmt.Errorf("v2 events open: storageRoot is required")
 	}
 
-	defaultCfg := dbdriver.DefaultLibSQLConfig(filepath.Join(storageRoot, "v2_events.libsql"), true)
+	defaultCfg := dbdriver.DefaultTursoLocalConfig(filepath.Join(storageRoot, "v2_events.turso"), true)
 	cfg := defaultCfg
 	if hasDriverOverride() {
 		cfg = dbdriver.NewConfigLoader(storageRoot).LoadConfig("V2_EVENTS", "v2_events.db")
 	}
 
 	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, cfg, MigrateSchema)
-	if err != nil && cfg.Driver == dbdriver.DriverLibSQL {
-		fallback := dbdriver.DefaultSQLiteConfig(filepath.Join(storageRoot, "v2_events.db"))
-		db, closeFn, err = dbdriver.OpenDBCompatWithCloser(ctx, fallback, MigrateSchema)
-	}
 	if err != nil {
 		return nil, fmt.Errorf("v2 events open: %w", err)
 	}

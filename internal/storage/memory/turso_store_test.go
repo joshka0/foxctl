@@ -1,5 +1,3 @@
-//go:build cgo && !race
-
 package memory
 
 import (
@@ -37,9 +35,9 @@ func TestTursoStoreCloudOpenWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestLibSQLLocalStorePreservesLifecycleAndTelemetryAcrossReadPaths(t *testing.T) {
+func TestTursoLocalStorePreservesLifecycleAndTelemetryAcrossReadPaths(t *testing.T) {
 	ctx := context.Background()
-	store := openLocalLibSQLOrSkip(t, ctx)
+	store := openLocalTursoOrSkip(t, ctx)
 	defer func() { _ = store.Close() }()
 
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
@@ -86,7 +84,7 @@ func TestLibSQLLocalStorePreservesLifecycleAndTelemetryAcrossReadPaths(t *testin
 	if err != nil {
 		t.Fatalf("get alpha: %v", err)
 	}
-	assertLibSQLLifecycleTelemetry(t, got, validatedAt, telemetryAt)
+	assertTursoLifecycleTelemetry(t, got, validatedAt, telemetryAt)
 
 	listed, err := store.List(ctx, "ws", 10)
 	if err != nil {
@@ -110,12 +108,12 @@ func TestLibSQLLocalStorePreservesLifecycleAndTelemetryAcrossReadPaths(t *testin
 	if len(relevant) == 0 {
 		t.Fatalf("Relevant returned no entries")
 	}
-	assertLibSQLLifecycleTelemetry(t, relevant[0].Entry, validatedAt, telemetryAt)
+	assertTursoLifecycleTelemetry(t, relevant[0].Entry, validatedAt, telemetryAt)
 }
 
-func TestLibSQLLocalSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
+func TestTursoLocalSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
 	ctx := context.Background()
-	store := openLocalLibSQLOrSkip(t, ctx)
+	store := openLocalTursoOrSkip(t, ctx)
 	defer func() { _ = store.Close() }()
 
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
@@ -150,9 +148,9 @@ func TestLibSQLLocalSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
 	assertCanonicalSearchRecord(t, record)
 }
 
-func TestLibSQLLocalVectorSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
+func TestTursoLocalVectorSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
 	ctx := context.Background()
-	store := openLocalLibSQLOrSkip(t, ctx)
+	store := openLocalTursoOrSkip(t, ctx)
 	defer func() { _ = store.Close() }()
 
 	embedding := []float32{1, 0, 0, 0}
@@ -173,8 +171,8 @@ func TestLibSQLLocalVectorSearchResultsProjectToCanonicalMemoryRecord(t *testing
 		UseCount:       3,
 		SuccessCount:   1,
 	}, embedding, "test-model"); err != nil {
-		if isUnavailableLocalLibSQLError(err) {
-			t.Skipf("local libsql vector write unavailable: %v", err)
+		if isUnavailableLocalTursoError(err) {
+			t.Skipf("local turso vector write unavailable: %v", err)
 		}
 		t.Fatalf("save with embedding: %v", err)
 	}
@@ -182,8 +180,8 @@ func TestLibSQLLocalVectorSearchResultsProjectToCanonicalMemoryRecord(t *testing
 	assertVectorSearchRecord := func(name string, results []ScoredEntry, err error) {
 		t.Helper()
 		if err != nil {
-			if isUnavailableLocalLibSQLError(err) {
-				t.Skipf("%s unavailable with local libsql vector support: %v", name, err)
+			if isUnavailableLocalTursoError(err) {
+				t.Skipf("%s unavailable with local turso vector support: %v", name, err)
 			}
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -207,9 +205,9 @@ func TestLibSQLLocalVectorSearchResultsProjectToCanonicalMemoryRecord(t *testing
 	assertVectorSearchRecord("SearchSimilarMultiWorkspace", results, err)
 }
 
-func TestLibSQLLocalStoreListWithoutEmbeddingReturnsSavedMemoryFields(t *testing.T) {
+func TestTursoLocalStoreListWithoutEmbeddingReturnsSavedMemoryFields(t *testing.T) {
 	ctx := context.Background()
-	store := openLocalLibSQLOrSkip(t, ctx)
+	store := openLocalTursoOrSkip(t, ctx)
 	defer func() { _ = store.Close() }()
 
 	validatedAt := time.Date(2026, 5, 4, 13, 0, 0, 0, time.UTC)
@@ -265,26 +263,25 @@ func TestOpenWithConfigUsesSQLiteStoreByDefault(t *testing.T) {
 	}
 }
 
-func openLocalLibSQLOrSkip(t *testing.T, ctx context.Context) *TursoStore {
+func openLocalTursoOrSkip(t *testing.T, ctx context.Context) *TursoStore {
 	t.Helper()
 
-	store, err := OpenLibSQL(ctx, dbdriver.LibSQLConfig{
-		Path:             filepath.Join(t.TempDir(), "memory.libsql"),
+	store, err := OpenTurso(ctx, dbdriver.TursoConfig{
+		Path:             filepath.Join(t.TempDir(), "memory.turso"),
 		VectorDimensions: 4,
 	})
 	if err != nil {
-		if isUnavailableLocalLibSQLError(err) {
-			t.Skipf("local libsql vector support unavailable: %v", err)
+		if isUnavailableLocalTursoError(err) {
+			t.Skipf("local turso vector support unavailable: %v", err)
 		}
-		t.Fatalf("OpenLibSQL() error = %v", err)
+		t.Fatalf("OpenTurso() error = %v", err)
 	}
 	return store
 }
 
-func isUnavailableLocalLibSQLError(err error) bool {
+func isUnavailableLocalTursoError(err error) bool {
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "requires cgo") ||
-		strings.Contains(msg, "f32_blob") ||
+	return strings.Contains(msg, "f32_blob") ||
 		strings.Contains(msg, "vector") ||
 		strings.Contains(msg, "sqlite-vec")
 }
@@ -293,14 +290,14 @@ func assertEntryFromReadPath(t *testing.T, path string, entries []NamedEntry, va
 	t.Helper()
 	for _, entry := range entries {
 		if entry.Name == "alpha" {
-			assertLibSQLLifecycleTelemetry(t, entry, validatedAt, telemetryAt)
+			assertTursoLifecycleTelemetry(t, entry, validatedAt, telemetryAt)
 			return
 		}
 	}
 	t.Fatalf("%s did not return alpha: %#v", path, entries)
 }
 
-func assertLibSQLLifecycleTelemetry(t *testing.T, entry NamedEntry, validatedAt, telemetryAt time.Time) {
+func assertTursoLifecycleTelemetry(t *testing.T, entry NamedEntry, validatedAt, telemetryAt time.Time) {
 	t.Helper()
 	if entry.Name != "alpha" || entry.Type != "decision" || entry.SessionID != "session-a" {
 		t.Fatalf("unexpected entry identity: %#v", entry)

@@ -16,7 +16,6 @@ CYAN=$'\033[0;36m'
 NC=$'\033[0m'
 
 ASSUME_YES=false
-SKIP_CGO=false
 SKIP_BUN=false
 SKIP_PROVIDER_SETUP=false
 REPO_DIR="${FOXCTL_REPO_DIR:-}"
@@ -38,7 +37,6 @@ Usage:
 
 Options:
   --yes, -y               Run non-interactively with recommended defaults
-  --skip-cgo              Skip CGO/SQLite support and foxctl-cgo
   --skip-bun              Skip Bun installation and bun install
   --skip-provider-setup   Skip scripts/init.sh
   --repo-dir <path>       Repo checkout directory when not run from a clone
@@ -54,10 +52,6 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --yes|-y)
             ASSUME_YES=true
-            shift
-            ;;
-        --skip-cgo)
-            SKIP_CGO=true
             shift
             ;;
         --skip-bun)
@@ -135,14 +129,10 @@ prompt_install_options() {
 
     printf "%s\n" "Recommended install profile:"
     printf "%s\n" "- build the pure-Go CLI and skills"
-    printf "%s\n" "- build foxctl-cgo with SQLite/libsqlite3 support"
     printf "%s\n" "- install Bun for GUI/TUI/OpenCode workflows"
     printf "%s\n" "- run provider setup for Claude/Codex/OpenCode/Gemini"
     printf "\n"
 
-    if ! confirm "Install CGO/SQLite support?" "y"; then
-        SKIP_CGO=true
-    fi
     if ! confirm "Install Bun and bootstrap JS workspaces?" "y"; then
         SKIP_BUN=true
     fi
@@ -233,14 +223,10 @@ run_with_sudo() {
 install_core_packages() {
     local pkg_manager="$1"
     local want_bun="$2"
-    local want_cgo="$3"
 
     case "$pkg_manager" in
         brew)
             local packages=(git make jq go)
-            if [[ "$want_cgo" == "true" ]]; then
-                packages+=(sqlite)
-            fi
             info "Installing core packages with Homebrew: ${packages[*]}"
             brew install "${packages[@]}"
             if [[ "$want_bun" == "true" ]] && ! need_cmd bun; then
@@ -252,40 +238,25 @@ install_core_packages() {
             info "Installing core packages with apt-get"
             run_with_sudo apt-get update
             local packages=(git make jq curl golang-go)
-            if [[ "$want_cgo" == "true" ]]; then
-                packages+=(build-essential pkg-config libsqlite3-dev)
-            fi
             run_with_sudo apt-get install -y "${packages[@]}"
             ;;
         dnf)
             info "Installing core packages with dnf"
             local packages=(git make jq curl golang)
-            if [[ "$want_cgo" == "true" ]]; then
-                packages+=(gcc gcc-c++ make pkgconf-pkg-config sqlite-devel)
-            fi
             run_with_sudo dnf install -y "${packages[@]}"
             ;;
         yum)
             info "Installing core packages with yum"
             local packages=(git make jq curl golang)
-            if [[ "$want_cgo" == "true" ]]; then
-                packages+=(gcc gcc-c++ make pkgconfig sqlite-devel)
-            fi
             run_with_sudo yum install -y "${packages[@]}"
             ;;
         pacman)
             info "Installing core packages with pacman"
             local packages=(git make jq curl go)
-            if [[ "$want_cgo" == "true" ]]; then
-                packages+=(base-devel pkgconf sqlite)
-            fi
             run_with_sudo pacman -Sy --noconfirm "${packages[@]}"
             ;;
         *)
             warn "No supported package manager found. Install git, make, jq, and Go ${GO_VERSION_REQUIRED}+ manually."
-            if [[ "$want_cgo" == "true" ]]; then
-                warn "Also install a C toolchain and SQLite development headers for CGO support."
-            fi
             ;;
     esac
 }
@@ -326,13 +297,9 @@ ensure_dependencies() {
     local pkg_manager
     pkg_manager="$(detect_pkg_manager)"
     local want_bun="true"
-    local want_cgo="true"
 
     if [[ "$SKIP_BUN" == true ]]; then
         want_bun="false"
-    fi
-    if [[ "$SKIP_CGO" == true ]]; then
-        want_cgo="false"
     fi
 
     local missing_core=false
@@ -344,7 +311,7 @@ ensure_dependencies() {
         step "Installing core dependencies"
         info "Package manager: $pkg_manager"
         if confirm "Install or update the required toolchain packages?" "y"; then
-            install_core_packages "$pkg_manager" "$want_bun" "$want_cgo"
+            install_core_packages "$pkg_manager" "$want_bun"
         else
             warn "Skipping automatic dependency installation."
         fi
@@ -403,9 +370,6 @@ build_foxctl() {
     cd "$REPO_ROOT"
 
     make build
-    if [[ "$SKIP_CGO" == false ]]; then
-        make build-cgo
-    fi
 }
 
 install_skills() {
@@ -413,9 +377,6 @@ install_skills() {
     cd "$REPO_ROOT"
 
     make skills-install
-    if [[ "$SKIP_CGO" == false ]]; then
-        make skills-install-cgo
-    fi
 }
 
 link_binaries() {
@@ -423,9 +384,6 @@ link_binaries() {
     cd "$REPO_ROOT"
 
     ln -sf "$REPO_ROOT/bin/foxctl" "$LOCAL_BIN/foxctl"
-    if [[ -f "$REPO_ROOT/bin/foxctl-cgo" ]]; then
-        ln -sf "$REPO_ROOT/bin/foxctl-cgo" "$LOCAL_BIN/foxctl-cgo"
-    fi
     if [[ -f "$REPO_ROOT/bin/foxctl-mail" ]]; then
         ln -sf "$REPO_ROOT/bin/foxctl-mail" "$LOCAL_BIN/foxctl-mail"
     fi

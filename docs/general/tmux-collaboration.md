@@ -438,7 +438,7 @@ Operationally:
 - treat `last_delivery_trace` as the first place to inspect when someone asks “why did this message route here” or “did fallback happen”
 - the older top-level member fields (`backend`, `session`, `pane_id`, `transport_endpoint`, `transport_kind`) are compatibility mirrors and should not be the source of truth for new client work
 - use `bash tests/regression/run.sh` as the default room-runtime verification bundle before reaching for ad hoc command mixes
-- if the symptom is "the message is visible in the pane but looks unsent," run `FOXCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' ./cmd/foxctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` to verify the relay path is consumed by the target terminal process rather than left as drafted pane input
+- if the symptom is "the message is visible in the pane but looks unsent," run `FOXCTL_INTEGRATION_TMUX=1 go test -tags=integration ./cmd/foxctl/cmd -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' -count=1 -v` to verify the relay path is consumed by the target terminal process rather than left as drafted pane input
 
 ### Join vs Subscribe
 

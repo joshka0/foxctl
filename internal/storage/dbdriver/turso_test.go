@@ -1,5 +1,3 @@
-//go:build cgo && !race
-
 package dbdriver
 
 import (
@@ -30,6 +28,7 @@ func TestTursoConnection(t *testing.T) {
 	defer cancel()
 
 	cfg := TursoConfig{
+		Path:               t.TempDir() + "/remote.turso",
 		URL:                url,
 		AuthToken:          token,
 		EnableVectorSearch: false, // Test basic connection first
@@ -61,6 +60,7 @@ func TestTursoVectorSupport(t *testing.T) {
 	defer cancel()
 
 	cfg := TursoConfig{
+		Path:               t.TempDir() + "/remote-vector.turso",
 		URL:                url,
 		AuthToken:          token,
 		EnableVectorSearch: true,
@@ -105,6 +105,7 @@ func TestTursoVectorHelper(t *testing.T) {
 	defer cancel()
 
 	cfg := TursoConfig{
+		Path:               t.TempDir() + "/remote-helper.turso",
 		URL:                url,
 		AuthToken:          token,
 		EnableVectorSearch: true,
@@ -209,6 +210,42 @@ func TestTursoVectorHelper(t *testing.T) {
 	}
 
 	t.Logf("Vector search results: %+v", results)
+}
+
+func TestTursoLocalConnection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cfg := TursoConfig{
+		Path:               t.TempDir() + "/local.turso",
+		EnableVectorSearch: true,
+		VectorDimensions:   4,
+	}
+
+	db, err := openTurso(ctx, cfg, nil)
+	if err != nil {
+		t.Fatalf("openTurso(local) error = %v", err)
+	}
+	defer db.Close()
+
+	if got := db.GetDriverType(); got != DriverTurso {
+		t.Fatalf("GetDriverType() = %q, want %q", got, DriverTurso)
+	}
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE items (id INTEGER PRIMARY KEY, embedding F32_BLOB(4))`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO items (id, embedding) VALUES (1, vector('[0.1,0.2,0.3,0.4]'))`); err != nil {
+		t.Fatalf("insert vector: %v", err)
+	}
+
+	var distance float64
+	if err := db.QueryRowContext(ctx, `SELECT vector_distance_cos(embedding, vector('[0.1,0.2,0.3,0.4]')) FROM items WHERE id = 1`).Scan(&distance); err != nil {
+		t.Fatalf("query vector distance: %v", err)
+	}
+	if distance > 0.01 {
+		t.Fatalf("distance = %f, want near 0", distance)
+	}
 }
 
 func TestVectorTypeConversions(t *testing.T) {
@@ -319,23 +356,47 @@ func TestConfigFromPlatformSettings(t *testing.T) {
 	if cfg.Turso.VectorDimensions != DefaultVectorDimensions {
 		t.Errorf("Expected default %d dimensions, got %d", DefaultVectorDimensions, cfg.Turso.VectorDimensions)
 	}
+	if cfg.Turso.Path != "/tmp/foxctl-test/memory.turso" {
+		t.Errorf("Unexpected Turso path: %s", cfg.Turso.Path)
+	}
+}
 
-	// Test LibSQL
-	cfg = loader.ConfigFromPlatformSettings(PlatformDatabaseSettings{
-		Driver:           "libsql",
-		VectorEnabled:    true,
-		VectorDimensions: 768,
+func TestConfigLoaderUnknownDriverDoesNotFallBackToSQLite(t *testing.T) {
+	t.Setenv("FOXCTL_MEMORY_DB_DRIVER", "unknown-driver")
+
+	loader := NewConfigLoader(t.TempDir())
+	cfg := loader.LoadMemoryConfig()
+	if cfg.Driver != DriverType("unknown-driver") {
+		t.Fatalf("Driver = %q, want unknown-driver", cfg.Driver)
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want unsupported driver error")
+	}
+}
+
+func TestConfigFromPlatformSettingsUnknownDriverDoesNotFallBackToSQLite(t *testing.T) {
+	loader := NewConfigLoader(t.TempDir())
+
+	cfg := loader.ConfigFromPlatformSettings(PlatformDatabaseSettings{
+		Driver: "unknown-driver",
 	}, "memory")
-	if cfg.Driver != DriverLibSQL {
-		t.Errorf("Expected LibSQL driver, got %s", cfg.Driver)
+	if cfg.Driver != DriverType("unknown-driver") {
+		t.Fatalf("Driver = %q, want unknown-driver", cfg.Driver)
 	}
-	if cfg.LibSQL.Path != "/tmp/foxctl-test/memory.db" {
-		t.Errorf("Unexpected LibSQL path: %s", cfg.LibSQL.Path)
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want unsupported driver error")
 	}
-	if !cfg.LibSQL.EnableVectorSearch {
-		t.Error("Expected vector search to be enabled")
+}
+
+func TestDefaultTursoConfigIsValidWhenDBNameProvided(t *testing.T) {
+	cfg := DefaultTursoConfig("", "", "memory")
+	if cfg.Turso.Path != "memory.turso" {
+		t.Fatalf("Path = %q, want memory.turso", cfg.Turso.Path)
 	}
-	if cfg.LibSQL.VectorDimensions != 768 {
-		t.Errorf("Expected 768 dimensions, got %d", cfg.LibSQL.VectorDimensions)
+	if cfg.Turso.ReplicaPath != "memory.turso" {
+		t.Fatalf("ReplicaPath = %q, want memory.turso", cfg.Turso.ReplicaPath)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }

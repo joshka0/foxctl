@@ -2,6 +2,7 @@
 #
 # Append-only log of recent errors/gotchas and slow-to-resolve issues.
 # Format: - YYYY-MM-DD [gotcha|time]: note
+- 2026-05-05 [gotcha]: Old SQLite linker workaround is obsolete after Turso hard-cut. Default foxctl builds/tests run with `CGO_ENABLED=0`; do not restore `-tags=libsqlite3`, `foxctl-cgo`, or sqlite-vector storage. `github.com/mattn/go-sqlite3` may still appear as a transitive module through `tursogo`/`dspy-go`, but foxctl no longer imports it as a storage driver.
 - 2026-01-16 [gotcha]: 3 pre-existing test failures identified as unrelated to current changes
 - 2026-01-16 [time]: Cleanup of 82+ stale tasks
 - 2026-01-17 [refactor]: FC/IS audit found 24 violations - tracked in #168

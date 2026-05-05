@@ -549,7 +549,7 @@ make check       # All of the above
 | Changing `meta.*` or envelope fields                            | Wire contract break          |
 | `network:` not `"none"` in WASI manifest                        | Core v1 isolation            |
 | Non-JSON stdout from CLI/skills                                 | Envelopes-only forever       |
-| CGO build without `-tags=libsqlite3`                            | Duplicate SQLite symbols     |
+| Direct foxctl storage import of `github.com/mattn/go-sqlite3`, sqlite-vector extension loading, `-tags=libsqlite3`, or `foxctl-cgo` | Turso is the canonical SQLite-family storage path |
 | IO mixed into core logic (time.Now, env reads, DB in pure func) | Untestable; nondeterministic |
 
 ### Code Smells (Flag in Review)

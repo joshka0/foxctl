@@ -100,15 +100,15 @@ func TestRecordFromContextClaimMarksRejectedAsQuarantined(t *testing.T) {
 
 func TestRecordFromNamedEntryLabelsEvidenceOnly(t *testing.T) {
 	createdAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
-	raw, err := json.Marshal(map[string]any{"note": "watch sqlite tags"})
+	raw, err := json.Marshal(map[string]any{"note": "watch storage driver choice"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	record := RecordFromNamedEntry(storage.NamedEntry{
 		ID:              "mem-1",
-		Name:            "sqlite-tag-decision",
+		Name:            "storage-driver-decision",
 		Type:            "decision",
-		Summary:         "Use libsqlite3 tag for sqlite-linked tests.",
+		Summary:         "Use the canonical Turso storage path for SQLite-family tests.",
 		Result:          raw,
 		CreatedAt:       createdAt,
 		LastAccess:      createdAt,
