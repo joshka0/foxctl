@@ -96,18 +96,6 @@ func collectEvidenceRefsFromPayload(payload map[string]any) []string {
 	return uniqueStringsRLM(refs)
 }
 
-func decodeResults(value any) []map[string]any {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil
-	}
-	var out []map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil
-	}
-	return out
-}
-
 func stringField(value map[string]any, key string) string {
 	if value == nil {
 		return ""
@@ -144,13 +132,6 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
-}
-
-func boolToInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
 }
 
 func mustJSONRLM(value map[string]any) json.RawMessage {

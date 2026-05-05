@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -176,12 +175,6 @@ func TestCockpitScreen_AskStreamDoubleSubmitRejects(t *testing.T) {
 }
 
 func TestCockpitScreen_AskStreamNoGoroutineLeakOnDone(t *testing.T) {
-	t.Parallel()
-
-	runtime.GC()
-	time.Sleep(100 * time.Millisecond)
-	baseline := runtime.NumGoroutine()
-
 	source := AgentAskStreamSourceFunc(func(_ context.Context, onEvent func(AgentAskStreamEvent) error) error {
 		_ = onEvent(AgentAskStreamEvent{Phase: "delta", ContentDelta: "x"})
 		return nil
@@ -209,15 +202,29 @@ func TestCockpitScreen_AskStreamNoGoroutineLeakOnDone(t *testing.T) {
 		cs.ApplyAskStreamUpdate(u)
 	}
 
-	rt.Stop()
+	stopDone := make(chan struct{})
+	go func() {
+		rt.Stop()
+		close(stopDone)
+	}()
 
-	runtime.GC()
-	time.Sleep(200 * time.Millisecond)
-	after := runtime.NumGoroutine()
+	select {
+	case <-stopDone:
+	case <-time.After(1 * time.Second):
+		t.Fatal("ask stream runtime did not stop; possible goroutine leak")
+	}
 
-	delta := after - baseline
-	if delta > 2 {
-		t.Fatalf("potential goroutine leak: %d extra goroutines (baseline=%d, after=%d)", delta, baseline, after)
+	if rt.IsInFlight() {
+		t.Fatal("ask stream runtime remained in-flight after stop")
+	}
+
+	select {
+	case _, ok := <-rt.Updates():
+		if ok {
+			t.Fatal("ask stream updates channel remained open after stop")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for ask stream updates channel to close")
 	}
 }
 
