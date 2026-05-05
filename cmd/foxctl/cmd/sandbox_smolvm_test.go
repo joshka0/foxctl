@@ -10,8 +10,6 @@ import (
 )
 
 func TestSandboxSmolVMRunAgentExecutesWithInjectedRunner(t *testing.T) {
-	t.Parallel()
-
 	runner := smolvm.RunnerFunc(func(_ context.Context, plan smolvm.CommandPlan) (smolvm.CommandResult, error) {
 		if plan.Summary.Mode != "pack_run_agent" {
 			t.Fatalf("mode=%q", plan.Summary.Mode)
@@ -54,8 +52,6 @@ func TestSandboxSmolVMRunAgentExecutesWithInjectedRunner(t *testing.T) {
 }
 
 func TestSandboxSmolVMRunAgentExecutionFailureWritesErrorEnvelope(t *testing.T) {
-	t.Parallel()
-
 	runner := smolvm.RunnerFunc(func(context.Context, smolvm.CommandPlan) (smolvm.CommandResult, error) {
 		return smolvm.CommandResult{ExitCode: 3, Stderr: "pack run failed"}, nil
 	})
@@ -93,8 +89,6 @@ func TestSandboxSmolVMRunAgentExecutionFailureWritesErrorEnvelope(t *testing.T) 
 }
 
 func TestSandboxSmolVMFoxctlPackageExecutesWithInjectedRunner(t *testing.T) {
-	t.Parallel()
-
 	var calls []string
 	runner := smolvm.RunnerFunc(func(_ context.Context, plan smolvm.CommandPlan) (smolvm.CommandResult, error) {
 		calls = append(calls, plan.Summary.Mode)
@@ -134,8 +128,6 @@ func TestSandboxSmolVMFoxctlPackageExecutesWithInjectedRunner(t *testing.T) {
 }
 
 func TestSandboxSmolVMFoxctlPackageFailureWritesErrorEnvelope(t *testing.T) {
-	t.Parallel()
-
 	runner := smolvm.RunnerFunc(func(_ context.Context, plan smolvm.CommandPlan) (smolvm.CommandResult, error) {
 		if plan.Summary.Mode == "machine_create" {
 			return smolvm.CommandResult{ExitCode: 2, Stderr: "create failed"}, nil
