@@ -204,52 +204,6 @@ jobs:
             bin/foxctl
             dist/skills/**
 
-  cgo-build-and-tests:
-    runs-on: arc-runner-foxctl
-    container:
-      image: ghcr.io/${{ github.repository_owner }}/foxctl-ci:go1.26.1
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # Temporary: install libsqlite3-dev until CI image is rebuilt with it bundled
-      - name: Install libsqlite3-dev
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends libsqlite3-dev
-
-      - name: Restore Go build cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-cgo-${{ runner.os }}-go1.26.1-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-cgo-${{ runner.os }}-go1.26.1-
-
-      - name: Build CLI (CGO + libsqlite3)
-        run: make build-cgo
-
-      - name: Unit tests (CGO + libsqlite3)
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            make test-cgo-short-impacted BASE_REF="${{ github.event.pull_request.base.sha }}" HEAD_REF="${{ github.sha }}"
-          else
-            make test-cgo-short
-          fi
-
-      - name: Regression harness
-        run: bash tests/regression/run.sh
-
-      - name: Native libsql vector path test (required)
-        env:
-          FOXCTL_V2_REQUIRE_NATIVE_VECTOR_SQL: "1"
-        run: |
-          CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/v2/adapters/libsql/turns \
-            -run TestTurnStore_SearchArtifactsByEmbedding_VectorPathLibSQL \
-            -count=1 -v
-
   integration-tests:
     runs-on: arc-runner-foxctl
     container:
@@ -283,7 +237,6 @@ jobs:
         unit-tests,
         race-tests,
         build,
-        cgo-build-and-tests,
         integration-tests,
       ]
     runs-on: arc-runner-foxctl

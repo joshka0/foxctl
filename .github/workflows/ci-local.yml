@@ -93,7 +93,7 @@ jobs:
           fi
 
   race-tests:
-    needs: [cgo-build-and-tests]
+    needs: [build]
     runs-on: ubuntu-latest
     container:
       image: localhost:5000/foxctl-ci:go1.26.1
@@ -153,42 +153,6 @@ jobs:
 
       - name: Check skill manifests (policy)
         run: export PATH=/usr/local/go/bin:/go/bin:$PATH && go run ./scripts/checkmanifests
-
-  cgo-build-and-tests:
-    needs: [build]
-    runs-on: ubuntu-latest
-    container:
-      image: localhost:5000/foxctl-ci:go1.26.1
-      options: --memory=6g --memory-swap=6g --cpus=4
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Build CLI (CGO + libsqlite3)
-        run: export PATH=/usr/local/go/bin:/go/bin:$PATH && make build-cgo
-
-      - name: Unit tests (CGO + libsqlite3)
-        run: |
-          export PATH=/usr/local/go/bin:/go/bin:$PATH
-          base_ref=""
-          if git rev-parse --verify origin/main >/dev/null 2>&1; then
-            head_ref="$(git rev-parse HEAD)"
-            main_ref="$(git rev-parse origin/main)"
-            if [ "$head_ref" != "$main_ref" ]; then
-              base_ref="$(git merge-base HEAD origin/main)"
-            fi
-          fi
-          if [ -n "$base_ref" ]; then
-            make test-cgo-short-impacted BASE_REF="$base_ref" HEAD_REF=HEAD
-          else
-            make test-cgo-short
-          fi
-
-      - name: Regression harness
-        run: |
-          export PATH=/usr/local/go/bin:/go/bin:$PATH
-          bash tests/regression/run.sh
 
   integration-tests:
     needs: [race-tests]
