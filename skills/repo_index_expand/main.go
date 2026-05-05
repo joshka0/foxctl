@@ -26,6 +26,8 @@ type Input struct {
 	Depth      int      `json:"depth,omitempty"`
 	Budget     int      `json:"budget,omitempty"`
 	PerNodeCap int      `json:"per_node_cap,omitempty"`
+	// Semantic anchor traversal is explicit; nil/default edge filters remain structural-only.
+	IncludeSemanticAnchors bool `json:"include_semantic_anchors,omitempty"`
 }
 
 type Output struct {
@@ -83,6 +85,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if err != nil {
 		return skillerr.Arg(err.Error())
 	}
+	req.IncludeSemanticAnchors = in.IncludeSemanticAnchors
 
 	result, err := service.ExpandWithProjection(ctx, req)
 	if err != nil {

@@ -22,6 +22,7 @@ type RepoGraphBuildOptions struct {
 	MaxSymbolsPerPackage   int
 	IncludePackagePrefixes []string
 	ExcludePackagePrefixes []string
+	IncludeAnchorConcepts  bool
 }
 
 // RepoGraphBuildResult describes the generated draft bundle.
@@ -140,7 +141,7 @@ func BuildRepoGraphDrafts(ctx context.Context, writer *Writer, repo *repoindex.S
 		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(pkg.Pkg)), "k8s:") && fileBudget < 64 {
 			fileBudget = 64
 		}
-		fileNodes, conceptNodes, relatedIDs, err := collectPackageGraph(ctx, repo, pkg, fileBudget)
+		fileNodes, conceptNodes, relatedIDs, err := collectPackageGraph(ctx, repo, pkg, fileBudget, opts.IncludeAnchorConcepts)
 		if err != nil {
 			return RepoGraphBuildResult{}, fmt.Errorf("obsidian graph: collect package graph %s: %w", pkg.ID, err)
 		}
@@ -192,6 +193,9 @@ func BuildRepoGraphDrafts(ctx context.Context, writer *Writer, repo *repoindex.S
 	}
 	for _, draft := range drafts {
 		for _, concept := range limitConceptDrafts(draft.concepts, 6) {
+			if !includeConceptInRepoGraphDraft(concept, opts) {
+				continue
+			}
 			title := conceptDraftTitle(draft.title, concept)
 			if title == "" {
 				title = strings.TrimSpace(concept.File)
@@ -212,6 +216,9 @@ func BuildRepoGraphDrafts(ctx context.Context, writer *Writer, repo *repoindex.S
 		return RepoGraphBuildResult{}, fmt.Errorf("obsidian graph: list concepts: %w", err)
 	}
 	for _, concept := range conceptNodes {
+		if !includeConceptInRepoGraphDraft(concept, opts) {
+			continue
+		}
 		if !infraConceptAllowed(concept) {
 			continue
 		}
@@ -316,7 +323,7 @@ func PromoteRepoGraphDrafts(ctx context.Context, writer *Writer, sourceFolder, t
 	return result, nil
 }
 
-func collectPackageGraph(ctx context.Context, repo *repoindex.Store, pkg repoindex.Node, maxFiles int) ([]repoindex.Node, []repoindex.Node, []string, error) {
+func collectPackageGraph(ctx context.Context, repo *repoindex.Store, pkg repoindex.Node, maxFiles int, includeAnchorConcepts bool) ([]repoindex.Node, []repoindex.Node, []string, error) {
 	edges, err := repo.GetOutgoingEdges(ctx, pkg.ID, []repoindex.EdgeType{repoindex.EdgeContains, repoindex.EdgeImports}, 200)
 	if err != nil {
 		return nil, nil, nil, err
@@ -348,7 +355,9 @@ func collectPackageGraph(ctx context.Context, repo *repoindex.Store, pkg repoind
 		case repoindex.NodeFile:
 			allFiles = append(allFiles, node)
 		case repoindex.NodeConcept:
-			concepts = append(concepts, node)
+			if includeConceptInRepoGraphDraft(node, RepoGraphBuildOptions{IncludeAnchorConcepts: includeAnchorConcepts}) {
+				concepts = append(concepts, node)
+			}
 		}
 	}
 	sort.SliceStable(allFiles, func(i, j int) bool {
@@ -377,7 +386,7 @@ func collectPackageGraph(ctx context.Context, repo *repoindex.Store, pkg repoind
 				return nil, nil, nil, err
 			}
 			for _, node := range nodes {
-				if node.Kind == repoindex.NodeConcept {
+				if node.Kind == repoindex.NodeConcept && includeConceptInRepoGraphDraft(node, RepoGraphBuildOptions{IncludeAnchorConcepts: includeAnchorConcepts}) {
 					concepts = append(concepts, node)
 				}
 			}
@@ -899,6 +908,13 @@ func repoScopedTrimPrefix(items []string, workspaceRoot string) string {
 
 func packageGraphScore(files, concepts, symbols []repoindex.Node, relatedIDs []string) int {
 	return len(files)*5 + len(concepts)*4 + len(symbols)*2 + len(uniqueStrings(relatedIDs))*3
+}
+
+func includeConceptInRepoGraphDraft(node repoindex.Node, opts RepoGraphBuildOptions) bool {
+	if repoindex.IsAnchorConceptNode(node) && !opts.IncludeAnchorConcepts {
+		return false
+	}
+	return true
 }
 
 func limitConceptDrafts(items []repoindex.Node, maxItems int) []repoindex.Node {

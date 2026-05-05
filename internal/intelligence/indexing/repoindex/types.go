@@ -37,6 +37,21 @@ const (
 	EdgeEmitsEvent      EdgeType = "EMITS_EVENT"
 	EdgeDocRelated      EdgeType = "DOC_RELATED"
 	EdgeDocFlow         EdgeType = "DOC_FLOW"
+
+	EdgeEnforces             EdgeType = "ENFORCES"
+	EdgeProtectsAgainst      EdgeType = "PROTECTS_AGAINST"
+	EdgeVerifiedBy           EdgeType = "VERIFIED_BY"
+	EdgeDescribedBy          EdgeType = "DESCRIBED_BY"
+	EdgeDecidedBy            EdgeType = "DECIDED_BY"
+	EdgeImplementsProtocol   EdgeType = "IMPLEMENTS_PROTOCOL"
+	EdgeParticipatesIn       EdgeType = "PARTICIPATES_IN"
+	EdgeDeclaresAnchorTarget EdgeType = "DECLARES_ANCHOR_TARGET"
+
+	// Reserved in narrow PR-B. No emitter should produce this edge until anchor
+	// retrieval evals prove beacon anchors do not hijack broad queries.
+	EdgeBeaconFor EdgeType = "BEACON_FOR"
+	// Reserved in PR-B1. No emitter should produce this edge until PR-B.5.
+	EdgeCoChangesWith EdgeType = "CO_CHANGES_WITH"
 )
 
 // Concept node prefixes (repo-key namespacing added at ID creation).
@@ -84,7 +99,67 @@ var (
 		EdgeDocRelated,
 		EdgeDocFlow,
 	}
+	EdgeSetSemanticAnchors = []EdgeType{
+		EdgeEnforces,
+		EdgeProtectsAgainst,
+		EdgeVerifiedBy,
+		EdgeDescribedBy,
+		EdgeDecidedBy,
+		EdgeImplementsProtocol,
+		EdgeParticipatesIn,
+		EdgeDeclaresAnchorTarget,
+	}
+	EdgeSetEmpirical = []EdgeType{
+		EdgeCoChangesWith,
+	}
 )
+
+func CopyEdgeSet(values []EdgeType) []EdgeType {
+	if len(values) == 0 {
+		return nil
+	}
+	return append([]EdgeType(nil), values...)
+}
+
+func ConcatEdgeSets(sets ...[]EdgeType) []EdgeType {
+	var out []EdgeType
+	for _, set := range sets {
+		out = append(out, set...)
+	}
+	return out
+}
+
+func DeduplicateEdgeTypes(values []EdgeType) []EdgeType {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[EdgeType]struct{}, len(values))
+	out := make([]EdgeType, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func DefaultExpandEdgeTypes() []EdgeType {
+	return CopyEdgeSet(EdgeSetStructural)
+}
+
+func AllEdgeTypes() []EdgeType {
+	return DeduplicateEdgeTypes(ConcatEdgeSets(
+		EdgeSetStructural,
+		EdgeSetDoc,
+		EdgeSetSemanticAnchors,
+		EdgeSetEmpirical,
+	))
+}
 
 // Direction controls edge traversal direction.
 type Direction string
@@ -236,23 +311,24 @@ type SymbolSummaryProvider interface {
 
 // BuildOptions configure repoindex build behavior.
 type BuildOptions struct {
-	RepoRoot              string
-	RepoKey               string
-	Patterns              []string
-	IncludeTests          bool
-	IncludeGo             bool
-	IncludePython         bool
-	IncludeRust           bool
-	IncludeCSharp         bool
-	IncludeTypescript     bool
-	IncludeElixir         bool
-	IncludeTerraform      bool
-	IncludeKubernetes     bool
-	IncludeShell          bool
-	DryRun                bool
-	SummaryProvider       FileSummaryProvider
-	SymbolSummaryProvider SymbolSummaryProvider
-	Progress              func(BuildProgress)
+	RepoRoot               string
+	RepoKey                string
+	Patterns               []string
+	IncludeTests           bool
+	IncludeGo              bool
+	IncludePython          bool
+	IncludeRust            bool
+	IncludeCSharp          bool
+	IncludeTypescript      bool
+	IncludeElixir          bool
+	IncludeTerraform       bool
+	IncludeKubernetes      bool
+	IncludeShell           bool
+	IncludeSemanticAnchors bool
+	DryRun                 bool
+	SummaryProvider        FileSummaryProvider
+	SymbolSummaryProvider  SymbolSummaryProvider
+	Progress               func(BuildProgress)
 }
 
 // BuildResult captures build statistics.
@@ -294,11 +370,12 @@ type BuildProgress struct {
 
 // ExpandOptions controls graph expansion.
 type ExpandOptions struct {
-	Direction  Direction
-	EdgeTypes  []EdgeType
-	Depth      int
-	Budget     int
-	PerNodeCap int
+	Direction              Direction
+	EdgeTypes              []EdgeType
+	Depth                  int
+	Budget                 int
+	PerNodeCap             int
+	IncludeSemanticAnchors bool
 }
 
 // ExpandResult contains expanded nodes and edges.

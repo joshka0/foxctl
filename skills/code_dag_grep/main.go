@@ -36,7 +36,11 @@ type Input struct {
 	Budget         int      `json:"budget,omitempty"`
 	PerNodeCap     int      `json:"per_node_cap,omitempty"`
 	IncludeAnchors *bool    `json:"include_anchors,omitempty"`
-	Render         string   `json:"render,omitempty"`
+	// IncludeOwnerContainers is the explicit replacement for legacy IncludeAnchors.
+	IncludeOwnerContainers *bool `json:"include_owner_containers,omitempty"`
+	// Semantic anchor traversal is explicit; legacy IncludeAnchors never enables it.
+	IncludeSemanticAnchors bool   `json:"include_semantic_anchors,omitempty"`
+	Render                 string `json:"render,omitempty"`
 }
 
 // Output is the response for code/dag_grep.
@@ -106,18 +110,24 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if err != nil {
 		return skillerr.Arg(err.Error())
 	}
+	if in.IncludeOwnerContainers != nil {
+		req.IncludeOwnerContainers = *in.IncludeOwnerContainers
+	}
+	req.IncludeSemanticAnchors = in.IncludeSemanticAnchors
 
 	result, err := engine.DAGGrep(ctx, repoindex.DAGGrepRequest{
-		Query:          req.Query,
-		Mode:           req.Mode,
-		K:              req.K,
-		NodeKinds:      req.NodeKinds,
-		EdgeTypes:      req.EdgeTypes,
-		Direction:      req.Direction,
-		Depth:          req.Depth,
-		Budget:         req.Budget,
-		PerNodeCap:     req.PerNodeCap,
-		IncludeAnchors: req.IncludeAnchors,
+		Query:                  req.Query,
+		Mode:                   req.Mode,
+		K:                      req.K,
+		NodeKinds:              req.NodeKinds,
+		EdgeTypes:              req.EdgeTypes,
+		Direction:              req.Direction,
+		Depth:                  req.Depth,
+		Budget:                 req.Budget,
+		PerNodeCap:             req.PerNodeCap,
+		IncludeAnchors:         req.IncludeAnchors,
+		IncludeOwnerContainers: req.IncludeOwnerContainers,
+		IncludeSemanticAnchors: req.IncludeSemanticAnchors,
 	})
 	if err != nil {
 		return skillerr.WrapIO("dag_grep", err)

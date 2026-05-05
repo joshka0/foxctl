@@ -232,18 +232,7 @@ func (q *QueryEngine) Expand(ctx context.Context, seeds []string, opts ExpandOpt
 	if len(seeds) == 0 {
 		return ExpandResult{}, nil
 	}
-	if opts.Depth <= 0 {
-		opts.Depth = 1
-	}
-	if opts.Budget <= 0 {
-		opts.Budget = 50
-	}
-	if opts.PerNodeCap <= 0 {
-		opts.PerNodeCap = 50
-	}
-	if opts.Direction == "" {
-		opts.Direction = DirOut
-	}
+	opts = NormalizeExpandOptions(opts)
 
 	seenNodes := make(map[string]struct{})
 	seenEdges := make(map[string]Edge)
@@ -316,10 +305,36 @@ func (q *QueryEngine) Expand(ctx context.Context, seeds []string, opts ExpandOpt
 }
 
 func (q *QueryEngine) fetchEdges(ctx context.Context, nodeID string, opts ExpandOptions) ([]Edge, error) {
+	opts = NormalizeExpandOptions(opts)
 	if opts.Direction == DirIn {
 		return q.store.GetIncomingEdges(ctx, nodeID, opts.EdgeTypes, opts.PerNodeCap)
 	}
 	return q.store.GetOutgoingEdges(ctx, nodeID, opts.EdgeTypes, opts.PerNodeCap)
+}
+
+func NormalizeExpandOptions(opts ExpandOptions) ExpandOptions {
+	if opts.Depth <= 0 {
+		opts.Depth = 1
+	}
+	if opts.Budget <= 0 {
+		opts.Budget = 50
+	}
+	if opts.PerNodeCap <= 0 {
+		opts.PerNodeCap = 50
+	}
+	if opts.Direction == "" {
+		opts.Direction = DirOut
+	}
+	if len(opts.EdgeTypes) == 0 {
+		opts.EdgeTypes = DefaultExpandEdgeTypes()
+	} else {
+		opts.EdgeTypes = CopyEdgeSet(opts.EdgeTypes)
+	}
+	if opts.IncludeSemanticAnchors {
+		opts.EdgeTypes = append(opts.EdgeTypes, EdgeSetSemanticAnchors...)
+	}
+	opts.EdgeTypes = DeduplicateEdgeTypes(opts.EdgeTypes)
+	return opts
 }
 
 func edgeNeighbor(edge Edge, nodeID string, dir Direction) string {

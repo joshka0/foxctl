@@ -63,22 +63,24 @@ func NewSearchRequest(query string, limit int) (SearchRequest, error) {
 
 // ExpandRequest captures a typed repo-index expand request.
 type ExpandRequest struct {
-	Seeds         []string
-	EdgeTypes     []repoindex.EdgeType
-	EdgeTypeNames []string
-	Direction     repoindex.Direction
-	Depth         int
-	Budget        int
-	PerNodeCap    int
+	Seeds                  []string
+	EdgeTypes              []repoindex.EdgeType
+	EdgeTypeNames          []string
+	Direction              repoindex.Direction
+	Depth                  int
+	Budget                 int
+	PerNodeCap             int
+	IncludeSemanticAnchors bool
 }
 
 type expandRequestInput struct {
-	Seeds      []string `json:"seeds"`
-	EdgeTypes  []string `json:"edge_types,omitempty"`
-	Direction  string   `json:"direction,omitempty"`
-	Depth      int      `json:"depth,omitempty"`
-	Budget     int      `json:"budget,omitempty"`
-	PerNodeCap int      `json:"per_node_cap,omitempty"`
+	Seeds                  []string `json:"seeds"`
+	EdgeTypes              []string `json:"edge_types,omitempty"`
+	Direction              string   `json:"direction,omitempty"`
+	Depth                  int      `json:"depth,omitempty"`
+	Budget                 int      `json:"budget,omitempty"`
+	PerNodeCap             int      `json:"per_node_cap,omitempty"`
+	IncludeSemanticAnchors bool     `json:"include_semantic_anchors,omitempty"`
 }
 
 // ParseExpandRequest parses and validates an expand request from JSON.
@@ -87,7 +89,12 @@ func ParseExpandRequest(raw json.RawMessage) (ExpandRequest, error) {
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return ExpandRequest{}, err
 	}
-	return NewExpandRequest(input.Seeds, input.EdgeTypes, input.Direction, input.Depth, input.Budget, input.PerNodeCap)
+	req, err := NewExpandRequest(input.Seeds, input.EdgeTypes, input.Direction, input.Depth, input.Budget, input.PerNodeCap)
+	if err != nil {
+		return ExpandRequest{}, err
+	}
+	req.IncludeSemanticAnchors = input.IncludeSemanticAnchors
+	return req, nil
 }
 
 // NewExpandRequest builds and validates an expand request.
@@ -119,7 +126,7 @@ func NewExpandRequest(seeds, edgeTypes []string, direction string, depth, budget
 
 	return ExpandRequest{
 		Seeds:         append([]string(nil), seeds...),
-		EdgeTypes:     parsedEdgeTypes,
+		EdgeTypes:     repoindex.CopyEdgeSet(parsedEdgeTypes),
 		EdgeTypeNames: normalizedEdgeTypes,
 		Direction:     parsedDirection,
 		Depth:         depth,
@@ -156,32 +163,36 @@ func NewOpenRequest(id string) (OpenRequest, error) {
 
 // DAGGrepRequest captures a typed repo-index DAG request.
 type DAGGrepRequest struct {
-	Query          string
-	Mode           string
-	K              int
-	NodeKinds      []repoindex.NodeKind
-	EdgeTypes      []repoindex.EdgeType
-	Direction      repoindex.Direction
-	Depth          int
-	Budget         int
-	PerNodeCap     int
-	IncludeAnchors bool
-	Render         string
+	Query                  string
+	Mode                   string
+	K                      int
+	NodeKinds              []repoindex.NodeKind
+	EdgeTypes              []repoindex.EdgeType
+	Direction              repoindex.Direction
+	Depth                  int
+	Budget                 int
+	PerNodeCap             int
+	IncludeAnchors         bool
+	IncludeOwnerContainers bool
+	IncludeSemanticAnchors bool
+	Render                 string
 }
 
 type dagGrepRequestInput struct {
-	Query          string   `json:"query"`
-	Mode           string   `json:"mode,omitempty"`
-	K              int      `json:"k,omitempty"`
-	NodeKinds      []string `json:"node_kinds,omitempty"`
-	EdgeSets       []string `json:"edge_sets,omitempty"`
-	EdgeTypes      []string `json:"edge_types,omitempty"`
-	Direction      string   `json:"direction,omitempty"`
-	Depth          int      `json:"depth,omitempty"`
-	Budget         int      `json:"budget,omitempty"`
-	PerNodeCap     int      `json:"per_node_cap,omitempty"`
-	IncludeAnchors *bool    `json:"include_anchors,omitempty"`
-	Render         string   `json:"render,omitempty"`
+	Query                  string   `json:"query"`
+	Mode                   string   `json:"mode,omitempty"`
+	K                      int      `json:"k,omitempty"`
+	NodeKinds              []string `json:"node_kinds,omitempty"`
+	EdgeSets               []string `json:"edge_sets,omitempty"`
+	EdgeTypes              []string `json:"edge_types,omitempty"`
+	Direction              string   `json:"direction,omitempty"`
+	Depth                  int      `json:"depth,omitempty"`
+	Budget                 int      `json:"budget,omitempty"`
+	PerNodeCap             int      `json:"per_node_cap,omitempty"`
+	IncludeAnchors         *bool    `json:"include_anchors,omitempty"`
+	IncludeOwnerContainers *bool    `json:"include_owner_containers,omitempty"`
+	IncludeSemanticAnchors bool     `json:"include_semantic_anchors,omitempty"`
+	Render                 string   `json:"render,omitempty"`
 }
 
 // ParseDAGGrepRequest parses and validates a DAG request from JSON.
@@ -191,7 +202,7 @@ func ParseDAGGrepRequest(raw json.RawMessage) (DAGGrepRequest, error) {
 		return DAGGrepRequest{}, err
 	}
 
-	return NewDAGGrepRequest(
+	req, err := NewDAGGrepRequest(
 		input.Query,
 		input.Mode,
 		input.K,
@@ -205,6 +216,14 @@ func ParseDAGGrepRequest(raw json.RawMessage) (DAGGrepRequest, error) {
 		input.IncludeAnchors,
 		input.Render,
 	)
+	if err != nil {
+		return DAGGrepRequest{}, err
+	}
+	if input.IncludeOwnerContainers != nil {
+		req.IncludeOwnerContainers = *input.IncludeOwnerContainers
+	}
+	req.IncludeSemanticAnchors = input.IncludeSemanticAnchors
+	return req, nil
 }
 
 // NewDAGGrepRequest builds and validates a DAG request.
@@ -248,17 +267,18 @@ func NewDAGGrepRequest(query, mode string, k int, nodeKinds, edgeSets, edgeTypes
 	}
 
 	return DAGGrepRequest{
-		Query:          query,
-		Mode:           mode,
-		K:              k,
-		NodeKinds:      nodeKindValues,
-		EdgeTypes:      edgeTypeValues,
-		Direction:      parsedDirection,
-		Depth:          depth,
-		Budget:         budget,
-		PerNodeCap:     perNodeCap,
-		IncludeAnchors: anchors,
-		Render:         strings.TrimSpace(render),
+		Query:                  query,
+		Mode:                   mode,
+		K:                      k,
+		NodeKinds:              nodeKindValues,
+		EdgeTypes:              repoindex.CopyEdgeSet(edgeTypeValues),
+		Direction:              parsedDirection,
+		Depth:                  depth,
+		Budget:                 budget,
+		PerNodeCap:             perNodeCap,
+		IncludeAnchors:         anchors,
+		IncludeOwnerContainers: anchors,
+		Render:                 strings.TrimSpace(render),
 	}, nil
 }
 
@@ -588,11 +608,12 @@ func (s *QueryService) Expand(ctx context.Context, req ExpandRequest) (repoindex
 	}
 
 	return s.Engine.Expand(ctx, req.Seeds, repoindex.ExpandOptions{
-		Direction:  req.Direction,
-		EdgeTypes:  req.EdgeTypes,
-		Depth:      req.Depth,
-		Budget:     req.Budget,
-		PerNodeCap: req.PerNodeCap,
+		Direction:              req.Direction,
+		EdgeTypes:              req.EdgeTypes,
+		Depth:                  req.Depth,
+		Budget:                 req.Budget,
+		PerNodeCap:             req.PerNodeCap,
+		IncludeSemanticAnchors: req.IncludeSemanticAnchors,
 	})
 }
 
@@ -645,16 +666,18 @@ func (s *QueryService) DAGGrep(ctx context.Context, req DAGGrepRequest) (repoind
 	}
 
 	r := repoindex.DAGGrepRequest{
-		Query:          query,
-		Mode:           mode,
-		K:              req.K,
-		NodeKinds:      req.NodeKinds,
-		EdgeTypes:      req.EdgeTypes,
-		Direction:      direction,
-		Depth:          req.Depth,
-		Budget:         req.Budget,
-		PerNodeCap:     req.PerNodeCap,
-		IncludeAnchors: req.IncludeAnchors,
+		Query:                  query,
+		Mode:                   mode,
+		K:                      req.K,
+		NodeKinds:              req.NodeKinds,
+		EdgeTypes:              req.EdgeTypes,
+		Direction:              direction,
+		Depth:                  req.Depth,
+		Budget:                 req.Budget,
+		PerNodeCap:             req.PerNodeCap,
+		IncludeAnchors:         req.IncludeAnchors,
+		IncludeOwnerContainers: req.IncludeOwnerContainers,
+		IncludeSemanticAnchors: req.IncludeSemanticAnchors,
 	}
 	if r.K <= 0 {
 		r.K = defaultDAGK
@@ -731,22 +754,32 @@ func ParseEdgeTypes(values []string) ([]repoindex.EdgeType, error) {
 	}
 
 	allowed := map[string]repoindex.EdgeType{
-		string(repoindex.EdgeContains):        repoindex.EdgeContains,
-		string(repoindex.EdgeImports):         repoindex.EdgeImports,
-		string(repoindex.EdgeUsesSymbol):      repoindex.EdgeUsesSymbol,
-		string(repoindex.EdgeRefersTo):        repoindex.EdgeRefersTo,
-		string(repoindex.EdgeCalls):           repoindex.EdgeCalls,
-		string(repoindex.EdgeImplements):      repoindex.EdgeImplements,
-		string(repoindex.EdgeEmbeds):          repoindex.EdgeEmbeds,
-		string(repoindex.EdgeTests):           repoindex.EdgeTests,
-		string(repoindex.EdgeHasKeyword):      repoindex.EdgeHasKeyword,
-		string(repoindex.EdgeHasOutputField):  repoindex.EdgeHasOutputField,
-		string(repoindex.EdgeTouchesResource): repoindex.EdgeTouchesResource,
-		string(repoindex.EdgeEmitsEvent):      repoindex.EdgeEmitsEvent,
-		string(repoindex.EdgeDocRelated):      repoindex.EdgeDocRelated,
-		string(repoindex.EdgeDocFlow):         repoindex.EdgeDocFlow,
-		"REFERENCES":                          repoindex.EdgeRefersTo,
-		"DEFINES":                             repoindex.EdgeContains,
+		string(repoindex.EdgeContains):             repoindex.EdgeContains,
+		string(repoindex.EdgeImports):              repoindex.EdgeImports,
+		string(repoindex.EdgeUsesSymbol):           repoindex.EdgeUsesSymbol,
+		string(repoindex.EdgeRefersTo):             repoindex.EdgeRefersTo,
+		string(repoindex.EdgeCalls):                repoindex.EdgeCalls,
+		string(repoindex.EdgeImplements):           repoindex.EdgeImplements,
+		string(repoindex.EdgeEmbeds):               repoindex.EdgeEmbeds,
+		string(repoindex.EdgeTests):                repoindex.EdgeTests,
+		string(repoindex.EdgeHasKeyword):           repoindex.EdgeHasKeyword,
+		string(repoindex.EdgeHasOutputField):       repoindex.EdgeHasOutputField,
+		string(repoindex.EdgeTouchesResource):      repoindex.EdgeTouchesResource,
+		string(repoindex.EdgeEmitsEvent):           repoindex.EdgeEmitsEvent,
+		string(repoindex.EdgeDocRelated):           repoindex.EdgeDocRelated,
+		string(repoindex.EdgeDocFlow):              repoindex.EdgeDocFlow,
+		string(repoindex.EdgeEnforces):             repoindex.EdgeEnforces,
+		string(repoindex.EdgeProtectsAgainst):      repoindex.EdgeProtectsAgainst,
+		string(repoindex.EdgeVerifiedBy):           repoindex.EdgeVerifiedBy,
+		string(repoindex.EdgeDescribedBy):          repoindex.EdgeDescribedBy,
+		string(repoindex.EdgeDecidedBy):            repoindex.EdgeDecidedBy,
+		string(repoindex.EdgeImplementsProtocol):   repoindex.EdgeImplementsProtocol,
+		string(repoindex.EdgeParticipatesIn):       repoindex.EdgeParticipatesIn,
+		string(repoindex.EdgeDeclaresAnchorTarget): repoindex.EdgeDeclaresAnchorTarget,
+		string(repoindex.EdgeBeaconFor):            repoindex.EdgeBeaconFor,
+		string(repoindex.EdgeCoChangesWith):        repoindex.EdgeCoChangesWith,
+		"REFERENCES":                               repoindex.EdgeRefersTo,
+		"DEFINES":                                  repoindex.EdgeContains,
 	}
 
 	var parsed []repoindex.EdgeType
@@ -798,13 +831,15 @@ func ParseNodeKinds(values []string) ([]repoindex.NodeKind, error) {
 func parseEdgeSet(value string) ([]repoindex.EdgeType, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "structural":
-		return append([]repoindex.EdgeType(nil), repoindex.EdgeSetStructural...), nil
+		return repoindex.CopyEdgeSet(repoindex.EdgeSetStructural), nil
 	case "doc":
-		return append([]repoindex.EdgeType(nil), repoindex.EdgeSetDoc...), nil
+		return repoindex.CopyEdgeSet(repoindex.EdgeSetDoc), nil
+	case "semantic", "semantic_anchor", "semantic_anchors":
+		return repoindex.CopyEdgeSet(repoindex.EdgeSetSemanticAnchors), nil
+	case "empirical":
+		return repoindex.CopyEdgeSet(repoindex.EdgeSetEmpirical), nil
 	case "all":
-		all := append([]repoindex.EdgeType(nil), repoindex.EdgeSetStructural...)
-		all = append(all, repoindex.EdgeSetDoc...)
-		return all, nil
+		return repoindex.AllEdgeTypes(), nil
 	default:
 		if value == "" {
 			return nil, nil
@@ -832,7 +867,7 @@ func MergeEdgeTypes(edgeSets, edgeTypes []string) ([]repoindex.EdgeType, error) 
 	merged = append(merged, parsedEdgeTypes...)
 
 	if len(merged) == 0 {
-		return repoindex.EdgeSetStructural, nil
+		return repoindex.DefaultExpandEdgeTypes(), nil
 	}
 
 	return uniqueEdgeTypes(merged), nil

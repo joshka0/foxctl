@@ -231,6 +231,7 @@ Remote sync:
 	cmd.AddCommand(
 		newIndexInitCommand(),
 		newIndexStatusCommand(),
+		newIndexAnchorsCommand(),
 		newIndexRepoCommand(),
 		newIndexSyncCommand(),
 		newIndexGitDiffCommand(),
