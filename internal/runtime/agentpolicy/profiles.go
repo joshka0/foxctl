@@ -81,8 +81,13 @@ var explorerSkills = []SkillInfo{
 	},
 	{
 		Name:        "memory/query",
-		Description: "Query stored memories and gotchas",
-		Example:     `foxctl run memory/query --input '{"query":"database gotchas"}'`,
+		Description: "Query canonical memory records",
+		Example:     `foxctl run memory/query --input '{"query":"database context","kinds":"semantic_fact,decision"}'`,
+	},
+	{
+		Name:        "memory/curator_report",
+		Description: "Generate or explicitly apply memory lifecycle maintenance reports",
+		Example:     `foxctl run memory/curator_report --input '{"limit":1000}'`,
 	},
 }
 

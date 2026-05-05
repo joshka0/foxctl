@@ -104,12 +104,12 @@ type EventStore struct {
 // OpenEventStore opens or creates the events SQLite database.
 //
 // Index:
-// - Purpose: Initialize SQLite-backed persistence for wide events
+// - Purpose: Initialize SQLite-backed persistence for foxcular events
 // - Flow: resolve db path → open database → ensure schema → return store
 // - SideEffects: opens database connection; creates tables/indexes
 // - FailureModes: database open errors, schema creation errors
 // - Related: createEventSchema, EventStore.Insert
-// - Keywords: events_db, sqlite, wide_events, schema, persistence
+// - Keywords: events_db, sqlite, foxcular_events, schema, persistence
 func OpenEventStore(ctx context.Context, obsDir string) (*EventStore, error) {
 	dbPath := filepath.Join(obsDir, "events.db")
 
@@ -129,7 +129,7 @@ func OpenEventStore(ctx context.Context, obsDir string) (*EventStore, error) {
 
 func createEventSchema(ctx context.Context, db *sql.DB) error {
 	schema := `
-	CREATE TABLE IF NOT EXISTS wide_events (
+	CREATE TABLE IF NOT EXISTS foxcular_events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		span_id TEXT NOT NULL UNIQUE,
 		trace_id TEXT NOT NULL,
@@ -155,28 +155,28 @@ func createEventSchema(ctx context.Context, db *sql.DB) error {
 		created_at TEXT DEFAULT (datetime('now'))
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_wide_events_trace_id ON wide_events(trace_id);
-	CREATE INDEX IF NOT EXISTS idx_wide_events_ts ON wide_events(ts);
-	CREATE INDEX IF NOT EXISTS idx_wide_events_operation ON wide_events(operation);
-	CREATE INDEX IF NOT EXISTS idx_wide_events_command ON wide_events(command);
-	CREATE INDEX IF NOT EXISTS idx_wide_events_status ON wide_events(status);
-	CREATE INDEX IF NOT EXISTS idx_wide_events_session_id ON wide_events(session_id);
-	CREATE INDEX IF NOT EXISTS idx_wide_events_workspace_id ON wide_events(workspace_id);
+	CREATE INDEX IF NOT EXISTS idx_foxcular_events_trace_id ON foxcular_events(trace_id);
+	CREATE INDEX IF NOT EXISTS idx_foxcular_events_ts ON foxcular_events(ts);
+	CREATE INDEX IF NOT EXISTS idx_foxcular_events_operation ON foxcular_events(operation);
+	CREATE INDEX IF NOT EXISTS idx_foxcular_events_command ON foxcular_events(command);
+	CREATE INDEX IF NOT EXISTS idx_foxcular_events_status ON foxcular_events(status);
+	CREATE INDEX IF NOT EXISTS idx_foxcular_events_session_id ON foxcular_events(session_id);
+	CREATE INDEX IF NOT EXISTS idx_foxcular_events_workspace_id ON foxcular_events(workspace_id);
 	`
 	_, err := db.ExecContext(ctx, schema)
 	return err
 }
 
-// Insert writes a WideEvent to the database.
+// Insert writes an Event to the database.
 //
 // Index:
-// - Purpose: Persist a WideEvent row to SQLite
+// - Purpose: Persist an Event row to SQLite
 // - Flow: marshal data → lock store → validate state → insert/replace row
 // - SideEffects: database writes
 // - FailureModes: marshal errors, database execution errors
 // - Related: EventStore.Close, OpenEventStore
-// - Keywords: wide_events, insert, sqlite, span_id, trace_id
-func (s *EventStore) Insert(ctx context.Context, event *WideEvent) error {
+// - Keywords: foxcular_events, insert, sqlite, span_id, trace_id
+func (s *EventStore) Insert(ctx context.Context, event *Event) error {
 	if s == nil || event == nil {
 		return nil
 	}
@@ -193,25 +193,25 @@ func (s *EventStore) Insert(ctx context.Context, event *WideEvent) error {
 		return fmt.Errorf("failed to marshal event.Data: %w", err)
 	}
 	var retriable *int
-	if event.Retriable != nil {
+	if retry := eventDataBoolPtr(event, "retriable"); retry != nil {
 		v := 0
-		if *event.Retriable {
+		if *retry {
 			v = 1
 		}
 		retriable = &v
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT OR REPLACE INTO wide_events (
+		INSERT OR REPLACE INTO foxcular_events (
 			span_id, trace_id, parent_id, ts, service, version, component,
 			operation, command, subtype, session_id, agent_id, workspace_id, job_id,
 			status, duration_ms, error_type, error_code, error_message, retriable, data
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.SpanID, event.TraceID, event.ParentID,
-		event.Ts.Format(time.RFC3339Nano), event.Service, event.Version, event.Component,
-		event.Operation, event.Command, event.Subtype,
-		event.SessionID, event.AgentID, event.WorkspaceID, event.JobID,
-		string(event.Status), event.DurationMS,
+		event.Timestamp.Format(time.RFC3339Nano), eventDataString(event, "service"), eventDataString(event, "version"), eventDataString(event, "component"),
+		event.Operation, event.Name, eventDataString(event, "subtype"),
+		eventDataString(event, "session_id"), eventDataString(event, "agent_id"), eventDataString(event, "workspace_id"), eventDataString(event, "job_id"),
+		string(event.Status), event.Duration.Milliseconds(),
 		event.ErrorType, event.ErrorCode, event.ErrorMessage, retriable,
 		string(dataJSON),
 	)
@@ -354,7 +354,7 @@ func (s *Syncer) run() {
 // syncOnce performs a single NDJSON-to-SQLite sync cycle.
 //
 // Index:
-// - Purpose: Sync a batch of wide events from NDJSON to SQLite
+// - Purpose: Sync a batch of foxcular events from NDJSON to SQLite
 // - Flow: create timeout ctx → resolve obs dir → sync file → log results
 // - SideEffects: reads NDJSON file; writes SQLite; logs warnings
 // - FailureModes: missing obs dir, sync file errors
@@ -370,7 +370,7 @@ func (s *Syncer) syncOnce() {
 		return
 	}
 
-	ndjsonPath := filepath.Join(dir, "events", WideEventFileName+".ndjson")
+	ndjsonPath := filepath.Join(dir, "events", EventFileName+".ndjson")
 	synced, err := s.syncFile(ctx, ndjsonPath)
 	if err != nil {
 		s.logger.Warn().Err(err).Msg("sync failed")
@@ -436,7 +436,7 @@ func (s *Syncer) syncFile(ctx context.Context, path string) (int, error) {
 			continue
 		}
 
-		var event WideEvent
+		var event Event
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			s.logger.Warn().Err(err).Msg("decode error")
 			offset += lineLen
@@ -477,7 +477,7 @@ var (
 // - SideEffects: opens database; starts goroutine
 // - FailureModes: missing obs dir (no-op), database open errors
 // - Related: OpenEventStore, NewSyncer, ClosePersistence
-// - Keywords: init_persistence, sqlite, syncer, observability_dir, wide_events
+// - Keywords: init_persistence, sqlite, syncer, observability_dir, foxcular_events
 func InitPersistence(ctx context.Context) error {
 	var initErr error
 	globalInit.Do(func() {
@@ -533,14 +533,14 @@ func ClosePersistence() error {
 // persistEvent handles the persistence based on event configuration.
 //
 // Index:
-// - Purpose: Persist a WideEvent according to configured mode
+// - Purpose: Persist an Event according to configured mode
 // - Flow: resolve mode → select destination → write NDJSON and/or SQLite
 // - SideEffects: NDJSON writes; SQLite inserts; logs warnings
 // - FailureModes: insert/write errors logged; nil event returns early
 // - Observability: emits zerolog warnings for persistence failures
 // - Related: WriteEvent, EventStore.Insert
-// - Keywords: wide_events, persist_mode, ndjson, sqlite, hybrid
-func persistEvent(ctx context.Context, event *WideEvent, config *persistConfig) {
+// - Keywords: foxcular_events, persist_mode, ndjson, sqlite, hybrid
+func persistEvent(ctx context.Context, event *Event, config *persistConfig) {
 	if event == nil {
 		return
 	}
@@ -549,7 +549,7 @@ func persistEvent(ctx context.Context, event *WideEvent, config *persistConfig) 
 	defer cancel()
 
 	mode := PersistDefault
-	fileName := WideEventFileName
+	fileName := EventFileName
 	if config != nil {
 		mode = config.mode
 		if config.fileName != "" {

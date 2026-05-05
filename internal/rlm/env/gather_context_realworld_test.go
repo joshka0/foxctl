@@ -445,15 +445,15 @@ func normalizeSemanticIndexProvider(provider string) string {
 	return provider
 }
 `)
-	writeTestFile(t, filepath.Join(workspaceRoot, "Makefile"), "skills-build-cgo:\n\tgo build -tags=libsqlite3 ./skills/code_semantic_search\n")
+	writeTestFile(t, filepath.Join(workspaceRoot, "Makefile"), "skills-build:\n\tCGO_ENABLED=0 go build ./skills/code_semantic_search\n")
 
 	adapter := NewReadOnlyAdapter(config.Config{}, workspaceRoot, "", nil, rlm.Environment{
 		Tools: []rlm.Tool{{Name: "gather_context", ReadOnly: true}},
 	})
 
 	out, err := adapter.Execute(ctx, "gather_context", mustJSON(map[string]any{
-		"query":             "Which command implementation and build target let local embedding rebuilds use LM Studio through a CGO skill binary?",
-		"required_evidence": []string{"openai_compat", "skills-build-cgo"},
+		"query":             "Which command implementation and build target let local embedding rebuilds use LM Studio through the semantic search skill binary?",
+		"required_evidence": []string{"openai_compat", "skills-build"},
 		"lanes":             []string{"code"},
 		"limit":             5,
 		"response_mode":     "full",

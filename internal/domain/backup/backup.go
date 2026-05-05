@@ -18,7 +18,7 @@ const (
 	ComponentSessions Component = "sessions"
 	// ComponentJobs includes job artifacts.
 	ComponentJobs Component = "jobs"
-	// ComponentObservability includes wide event logs.
+	// ComponentObservability includes foxcular event logs.
 	ComponentObservability Component = "observability"
 )
 

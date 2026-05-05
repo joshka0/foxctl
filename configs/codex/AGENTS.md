@@ -96,7 +96,6 @@ foxctl run web/extract --input '{
 
 ```bash
 make test-short      # Quick tests
-make test-cgo-short  # CGO tests
 make test            # Full tests
 make test-race       # Race detection
 ```

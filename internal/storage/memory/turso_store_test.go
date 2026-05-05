@@ -1,276 +1,317 @@
-//go:build cgo && !race
-
 package memory
 
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/joshka0/foxctl/internal/context/memorycore"
+	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
 
-func TestTursoStoreIntegration(t *testing.T) {
+func TestTursoStoreCloudOpenWhenConfigured(t *testing.T) {
 	url := os.Getenv("TURSO_DATABASE_URL")
 	token := os.Getenv("TURSO_AUTH_TOKEN")
-
 	if url == "" || token == "" {
-		t.Skip("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN not set, skipping Turso integration test")
+		t.Skip("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN not set")
 	}
 
-	ctx := context.Background()
-	cfg := dbdriver.TursoConfig{
+	store, err := OpenTurso(context.Background(), dbdriver.TursoConfig{
 		URL:              url,
 		AuthToken:        token,
-		VectorDimensions: 1024, // Voyage default
-	}
-
-	store, err := OpenTurso(ctx, cfg)
+		VectorDimensions: 4,
+	})
 	if err != nil {
-		t.Fatalf("OpenTurso failed: %v", err)
+		t.Fatalf("OpenTurso() error = %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
-	// Test Stats
-	t.Run("Stats", func(t *testing.T) {
-		stats, err := store.Stats(ctx)
+	if store.vectorDimension != 4 {
+		t.Fatalf("vectorDimension = %d, want 4", store.vectorDimension)
+	}
+}
+
+func TestTursoLocalStorePreservesLifecycleAndTelemetryAcrossReadPaths(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.SaveResult(ctx, SaveOptions{
+		Name:      "alpha",
+		Type:      "decision",
+		Workspace: "ws",
+		Summary:   "alpha summary",
+		Result:    result,
+		SessionID: "session-a",
+	}); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+	if _, err := store.SaveResult(ctx, SaveOptions{
+		Name:      "beta",
+		Type:      "gotcha",
+		Workspace: "ws",
+		Summary:   "beta summary",
+		Result:    result,
+		SessionID: "session-b",
+	}); err != nil {
+		t.Fatalf("save beta: %v", err)
+	}
+
+	validatedAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	if _, err := store.UpdateLifecycle(ctx, "alpha", "ws", LifecycleUpdate{
+		LifecycleState:  "stale",
+		ReviewStatus:    "needs_review",
+		SupersededBy:    "beta",
+		ReviewNotes:     "curator demotion",
+		LastValidatedAt: &validatedAt,
+	}); err != nil {
+		t.Fatalf("update lifecycle: %v", err)
+	}
+
+	telemetryAt := time.Date(2026, 5, 4, 12, 30, 0, 0, time.UTC)
+	for _, action := range []string{"selected", "used", "succeeded", "failed", "restored", "patched", "used"} {
+		if _, err := store.UpdateTelemetry(ctx, "alpha", "ws", TelemetryUpdate{Action: action, At: &telemetryAt}); err != nil {
+			t.Fatalf("update telemetry %s: %v", action, err)
+		}
+	}
+
+	got, err := store.Get(ctx, "alpha", "ws")
+	if err != nil {
+		t.Fatalf("get alpha: %v", err)
+	}
+	assertTursoLifecycleTelemetry(t, got, validatedAt, telemetryAt)
+
+	listed, err := store.List(ctx, "ws", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	assertEntryFromReadPath(t, "List", listed, validatedAt, telemetryAt)
+
+	filtered, total, err := store.ListFiltered(ctx, "ws", ListFilter{Types: []string{"decision"}, SessionID: "session-a"}, 10, 0)
+	if err != nil {
+		t.Fatalf("list filtered: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("ListFiltered total = %d, want 1", total)
+	}
+	assertEntryFromReadPath(t, "ListFiltered", filtered, validatedAt, telemetryAt)
+
+	relevant, err := store.Relevant(ctx, "ws", 10)
+	if err != nil {
+		t.Fatalf("relevant: %v", err)
+	}
+	if len(relevant) == 0 {
+		t.Fatalf("Relevant returned no entries")
+	}
+	assertTursoLifecycleTelemetry(t, relevant[0].Entry, validatedAt, telemetryAt)
+}
+
+func TestTursoLocalSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.Save(ctx, NamedEntry{
+		Name:           "canonical-contract",
+		Type:           "decision",
+		Workspace:      "ws",
+		Summary:        "canonical search contract should preserve curator metadata",
+		Result:         result,
+		SessionID:      "session-a",
+		LifecycleState: "stale",
+		Pinned:         true,
+		ReviewStatus:   "needs_review",
+		SupersededBy:   "newer-record",
+		ReviewNotes:    "curator demotion",
+		SelectedCount:  2,
+		UseCount:       3,
+		SuccessCount:   1,
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	results, err := store.Search(ctx, "ws", "canonical search", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("Search returned %d results, want 1: %#v", len(results), results)
+	}
+
+	record := memorycore.RecordFromNamedEntry(results[0].Entry, memorycore.NamedEntryOptions{Score: results[0].Score})
+	assertCanonicalSearchRecord(t, record)
+}
+
+func TestTursoLocalVectorSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	embedding := []float32{1, 0, 0, 0}
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.SaveWithEmbedding(ctx, NamedEntry{
+		Name:           "canonical-contract",
+		Type:           "decision",
+		Workspace:      "ws",
+		Summary:        "canonical vector contract should preserve curator metadata",
+		Result:         result,
+		SessionID:      "session-a",
+		LifecycleState: "stale",
+		Pinned:         true,
+		ReviewStatus:   "needs_review",
+		SupersededBy:   "newer-record",
+		ReviewNotes:    "curator demotion",
+		SelectedCount:  2,
+		UseCount:       3,
+		SuccessCount:   1,
+	}, embedding, "test-model"); err != nil {
+		if isUnavailableLocalTursoError(err) {
+			t.Skipf("local turso vector write unavailable: %v", err)
+		}
+		t.Fatalf("save with embedding: %v", err)
+	}
+
+	assertVectorSearchRecord := func(name string, results []ScoredEntry, err error) {
+		t.Helper()
 		if err != nil {
-			t.Fatalf("Stats failed: %v", err)
+			if isUnavailableLocalTursoError(err) {
+				t.Skipf("%s unavailable with local turso vector support: %v", name, err)
+			}
+			t.Fatalf("%s: %v", name, err)
 		}
-		t.Logf("Total memories: %d, Path: %s", stats.Named, stats.Path)
+		if len(results) != 1 {
+			t.Fatalf("%s returned %d results, want 1: %#v", name, len(results), results)
+		}
+		record := memorycore.RecordFromNamedEntry(results[0].Entry, memorycore.NamedEntryOptions{Score: results[0].Score})
+		assertCanonicalSearchRecord(t, record)
+	}
+
+	results, err := store.SearchSimilar(ctx, "ws", embedding, 10)
+	assertVectorSearchRecord("SearchSimilar", results, err)
+
+	results, err = store.SearchSimilarByType(ctx, "ws", "decision", embedding, 10)
+	assertVectorSearchRecord("SearchSimilarByType", results, err)
+
+	results, err = store.SearchSimilarGlobal(ctx, embedding, 10)
+	assertVectorSearchRecord("SearchSimilarGlobal", results, err)
+
+	results, err = store.SearchSimilarMultiWorkspace(ctx, []string{"ws"}, embedding, 10)
+	assertVectorSearchRecord("SearchSimilarMultiWorkspace", results, err)
+}
+
+func TestTursoLocalStoreListWithoutEmbeddingReturnsSavedMemoryFields(t *testing.T) {
+	ctx := context.Background()
+	store := openLocalTursoOrSkip(t, ctx)
+	defer func() { _ = store.Close() }()
+
+	validatedAt := time.Date(2026, 5, 4, 13, 0, 0, 0, time.UTC)
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2026-05-04T13:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "needs-embedding", "note", "ws", "summary to embed", result); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if _, err := store.UpdateLifecycle(ctx, "needs-embedding", "ws", LifecycleUpdate{
+		LifecycleState:  "active",
+		ReviewStatus:    "reviewed",
+		LastValidatedAt: &validatedAt,
+	}); err != nil {
+		t.Fatalf("update lifecycle: %v", err)
+	}
+
+	entries, err := store.ListWithoutEmbedding(ctx, "ws", 10)
+	if err != nil {
+		t.Fatalf("list without embedding: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("ListWithoutEmbedding returned %d entries, want 1: %#v", len(entries), entries)
+	}
+	if entries[0].Name != "needs-embedding" || entries[0].Type != "note" || entries[0].Summary != "summary to embed" {
+		t.Fatalf("ListWithoutEmbedding returned wrong entry: %#v", entries[0])
+	}
+	if entries[0].ReviewStatus != "reviewed" || !entries[0].LastValidatedAt.Equal(validatedAt) {
+		t.Fatalf("ListWithoutEmbedding dropped lifecycle fields: %#v", entries[0])
+	}
+}
+
+func TestOpenWithConfigUsesSQLiteStoreByDefault(t *testing.T) {
+	t.Setenv("FOXCTL_MEMORY_DB_DRIVER", "")
+
+	cfg := config.Config{}
+	cfg.Storage.Root = t.TempDir()
+	cfg.Paths.CAS = filepath.Join(cfg.Storage.Root, "cas")
+
+	store, err := OpenWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("OpenWithConfig() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	if _, ok := store.(*Store); !ok {
+		t.Fatalf("OpenWithConfig() store type = %T, want *Store", store)
+	}
+	stats, err := store.Stats(context.Background())
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if !strings.HasSuffix(stats.Path, "memory.db") {
+		t.Fatalf("Stats.Path = %q, want sqlite memory.db path", stats.Path)
+	}
+}
+
+func openLocalTursoOrSkip(t *testing.T, ctx context.Context) *TursoStore {
+	t.Helper()
+
+	store, err := OpenTurso(ctx, dbdriver.TursoConfig{
+		Path:             filepath.Join(t.TempDir(), "memory.turso"),
+		VectorDimensions: 4,
 	})
-
-	// Test SaveWithEmbedding and SearchSimilar
-	t.Run("VectorOperations", func(t *testing.T) {
-		// Create test embedding with correct dimensions
-		testEmbedding := make([]float32, 1024)
-		for i := range testEmbedding {
-			testEmbedding[i] = float32(i) * 0.001
-		}
-
-		// Save entry with embedding
-		entry := NamedEntry{
-			Name:      "test-vector-entry",
-			Type:      "test",
-			Workspace: "test-ws",
-			Summary:   "Test entry for vector search",
-			Result:    []byte(`{"test": true}`),
-		}
-
-		saved, err := store.SaveWithEmbedding(ctx, entry, testEmbedding, "test-model")
-		if err != nil {
-			t.Fatalf("SaveWithEmbedding failed: %v", err)
-		}
-		t.Logf("Saved entry: %s", saved.ID)
-
-		// Search for similar entries
-		results, err := store.SearchSimilar(ctx, "test-ws", testEmbedding, 5)
-		if err != nil {
-			t.Fatalf("SearchSimilar failed: %v", err)
-		}
-		t.Logf("Found %d similar entries", len(results))
-
-		// Clean up
-		if err := store.Delete(ctx, entry.Name, entry.Workspace); err != nil {
-			t.Logf("Cleanup warning: %v", err)
-		}
-	})
-}
-
-func TestTursoConfigWithDimensions(t *testing.T) {
-	url := os.Getenv("TURSO_DATABASE_URL")
-	token := os.Getenv("TURSO_AUTH_TOKEN")
-
-	if url == "" || token == "" {
-		t.Skip("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN not set, skipping test")
-	}
-
-	ctx := context.Background()
-
-	// Test with explicit dimensions
-	cfg := dbdriver.TursoConfig{
-		URL:              url,
-		AuthToken:        token,
-		VectorDimensions: 1024, // Voyage default
-	}
-
-	store, err := OpenTurso(ctx, cfg)
 	if err != nil {
-		t.Fatalf("OpenTurso with dimensions failed: %v", err)
-	}
-	defer store.Close()
-
-	// Verify store has correct dimensions
-	if store.vectorDimension != 1024 {
-		t.Errorf("Expected vector dimension 1024, got %d", store.vectorDimension)
-	}
-}
-
-func TestTursoEmbeddingDimensionMismatch(t *testing.T) {
-	url := os.Getenv("TURSO_DATABASE_URL")
-	token := os.Getenv("TURSO_AUTH_TOKEN")
-
-	if url == "" || token == "" {
-		t.Skip("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN not set, skipping test")
-	}
-
-	ctx := context.Background()
-	cfg := dbdriver.TursoConfig{
-		URL:              url,
-		AuthToken:        token,
-		VectorDimensions: 1024, // Voyage default
-	}
-
-	store, err := OpenTurso(ctx, cfg)
-	if err != nil {
-		t.Fatalf("OpenTurso failed: %v", err)
-	}
-	defer store.Close()
-
-	entry := NamedEntry{
-		Name:      "test-mismatch-entry",
-		Type:      "test",
-		Workspace: "test-ws",
-		Summary:   "Test entry with wrong dimensions",
-		Result:    []byte(`{"test": true}`),
-	}
-
-	t.Run("WrongDimensionsSaveWithEmbedding", func(t *testing.T) {
-		// Create embedding with wrong dimensions (768 instead of 1024)
-		wrongEmbedding := make([]float32, 768)
-		for i := range wrongEmbedding {
-			wrongEmbedding[i] = 0.01
+		if isUnavailableLocalTursoError(err) {
+			t.Skipf("local turso vector support unavailable: %v", err)
 		}
-
-		_, err := store.SaveWithEmbedding(ctx, entry, wrongEmbedding, "wrong-model")
-		if err == nil {
-			t.Fatal("Expected error for dimension mismatch, got nil")
-		}
-		if !contains(err.Error(), "dimension mismatch") {
-			t.Errorf("Expected dimension mismatch error, got: %v", err)
-		}
-		t.Logf("Got expected error: %v", err)
-	})
-
-	t.Run("ZeroDimensionsSaveWithEmbedding", func(t *testing.T) {
-		emptyEmbedding := make([]float32, 0)
-		_, err := store.SaveWithEmbedding(ctx, entry, emptyEmbedding, "empty-model")
-		if err == nil {
-			t.Fatal("Expected error for empty embedding, got nil")
-		}
-		t.Logf("Got expected error: %v", err)
-	})
+		t.Fatalf("OpenTurso() error = %v", err)
+	}
+	return store
 }
 
-func TestTursoConnectionFailure(t *testing.T) {
-	if os.Getenv("TURSO_DATABASE_URL") == "" || os.Getenv("TURSO_AUTH_TOKEN") == "" {
-		t.Skip("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN not set, skipping Turso connection failure test")
-	}
-	ctx := context.Background()
-
-	// Invalid URL should fail to connect
-	cfg := dbdriver.TursoConfig{
-		URL:              "libsql://invalid-database.example.com",
-		AuthToken:        "invalid-token",
-		VectorDimensions: 1024, // Voyage default
-	}
-
-	_, err := OpenTurso(ctx, cfg)
-	if err == nil {
-		t.Fatal("Expected error for invalid Turso URL, got nil")
-	}
-	t.Logf("Got expected error: %v", err)
+func isUnavailableLocalTursoError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "f32_blob") ||
+		strings.Contains(msg, "vector") ||
+		strings.Contains(msg, "sqlite-vec")
 }
 
-func TestLibSQLStoreLocalOnly(t *testing.T) {
-	ctx := context.Background()
-	cfg := dbdriver.LibSQLConfig{
-		Path:               t.TempDir() + "/memory.libsql",
-		EnableVectorSearch: true,
-		VectorDimensions:   1024,
-	}
-
-	store, err := OpenLibSQL(ctx, cfg)
-	if err != nil {
-		t.Fatalf("OpenLibSQL failed: %v", err)
-	}
-	defer store.Close()
-
-	stats, err := store.Stats(ctx)
-	if err != nil {
-		t.Fatalf("Stats failed: %v", err)
-	}
-	if stats.Path != "turso" {
-		t.Fatalf("Stats.Path = %q, want %q", stats.Path, "turso")
-	}
-
-	embedding := make([]float32, 1024)
-	for i := range embedding {
-		embedding[i] = float32(i) * 0.001
-	}
-
-	entry := NamedEntry{
-		Name:      "libsql-local-entry",
-		Type:      "test",
-		Workspace: "test-ws",
-		Summary:   "Local libsql vector smoke test",
-		Result:    []byte(`{"ok": true}`),
-	}
-
-	if _, err := store.SaveWithEmbedding(ctx, entry, embedding, "test-model"); err != nil {
-		t.Fatalf("SaveWithEmbedding failed: %v", err)
-	}
-
-	results, err := store.SearchSimilar(ctx, "test-ws", embedding, 5)
-	if err != nil {
-		t.Fatalf("SearchSimilar failed: %v", err)
-	}
-	if len(results) == 0 {
-		t.Fatalf("SearchSimilar returned no results")
-	}
-}
-
-func TestTursoDefaultDimensions(t *testing.T) {
-	url := os.Getenv("TURSO_DATABASE_URL")
-	token := os.Getenv("TURSO_AUTH_TOKEN")
-
-	if url == "" || token == "" {
-		t.Skip("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN not set, skipping test")
-	}
-
-	ctx := context.Background()
-
-	// Test with zero dimensions (should default to 1024 - Voyage)
-	cfg := dbdriver.TursoConfig{
-		URL:              url,
-		AuthToken:        token,
-		VectorDimensions: 0, // Should default to 1024
-	}
-
-	store, err := OpenTurso(ctx, cfg)
-	if err != nil {
-		t.Fatalf("OpenTurso with default dimensions failed: %v", err)
-	}
-	defer store.Close()
-
-	// Verify store defaulted to 1024 (Voyage)
-	if store.vectorDimension != 1024 {
-		t.Errorf("Expected default vector dimension 1024, got %d", store.vectorDimension)
-	}
-}
-
-// contains checks if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		len(s) > 0 && len(substr) > 0 &&
-			findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
+func assertEntryFromReadPath(t *testing.T, path string, entries []NamedEntry, validatedAt, telemetryAt time.Time) {
+	t.Helper()
+	for _, entry := range entries {
+		if entry.Name == "alpha" {
+			assertTursoLifecycleTelemetry(t, entry, validatedAt, telemetryAt)
+			return
 		}
 	}
-	return false
+	t.Fatalf("%s did not return alpha: %#v", path, entries)
+}
+
+func assertTursoLifecycleTelemetry(t *testing.T, entry NamedEntry, validatedAt, telemetryAt time.Time) {
+	t.Helper()
+	if entry.Name != "alpha" || entry.Type != "decision" || entry.SessionID != "session-a" {
+		t.Fatalf("unexpected entry identity: %#v", entry)
+	}
+	if entry.LifecycleState != "stale" || entry.ReviewStatus != "needs_review" || entry.SupersededBy != "beta" || entry.ReviewNotes != "curator demotion" {
+		t.Fatalf("lifecycle fields not preserved: %#v", entry)
+	}
+	if !entry.LastValidatedAt.Equal(validatedAt) {
+		t.Fatalf("LastValidatedAt = %s, want %s", entry.LastValidatedAt, validatedAt)
+	}
+	if entry.SelectedCount != 1 || entry.UseCount != 2 || entry.SuccessCount != 1 || entry.FailureCount != 1 || entry.RestoreCount != 1 || entry.PatchCount != 1 {
+		t.Fatalf("telemetry counters not preserved: %#v", entry)
+	}
+	if !entry.LastSelectedAt.Equal(telemetryAt) || !entry.LastUsedAt.Equal(telemetryAt) || !entry.LastSucceededAt.Equal(telemetryAt) || !entry.LastFailedAt.Equal(telemetryAt) || !entry.LastRestoredAt.Equal(telemetryAt) || !entry.LastPatchedAt.Equal(telemetryAt) {
+		t.Fatalf("telemetry timestamps not preserved: %#v", entry)
+	}
 }

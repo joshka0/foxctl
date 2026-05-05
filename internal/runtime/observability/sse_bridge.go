@@ -121,8 +121,8 @@ var sseActivityOperations = map[string]struct{}{
 	OpContextLayeredBundle:          {},
 }
 
-// shouldPublishToSSE reports whether a WideEvent should be forwarded to SSE clients.
-func shouldPublishToSSE(event *WideEvent) bool {
+// shouldPublishToSSE reports whether an Event should be forwarded to SSE clients.
+func shouldPublishToSSE(event *Event) bool {
 	if event == nil {
 		return false
 	}
@@ -139,16 +139,16 @@ func shouldPublishToSSE(event *WideEvent) bool {
 	return false
 }
 
-// publishToSSE publishes a WideEvent to the configured SSE publisher as an ActivityEvent.
+// publishToSSE publishes an Event to the configured SSE publisher as an ActivityEvent.
 //
 // Index:
-// - Purpose: Stream eligible WideEvents to SSE clients as activity updates
+// - Purpose: Stream eligible Events to SSE clients as activity updates
 // - Flow: resolve publisher → filter by operation prefix → map to ActivityEvent → publish
 // - SideEffects: publishes SSE activity events
 // - FailureModes: no-op when publisher is nil or event is ineligible
 // - Related: shouldPublishToSSE, extractActivityData
-// - Keywords: sse, activity, wide_event, publish, operation_prefix
-func publishToSSE(event *WideEvent) {
+// - Keywords: sse, activity, event, publish, operation_prefix
+func publishToSSE(event *Event) {
 	pub := getSSEPublisher()
 	if pub == nil {
 		return
@@ -158,38 +158,38 @@ func publishToSSE(event *WideEvent) {
 		return
 	}
 
-	// Convert WideEvent to ActivityEvent (smaller, focused payload)
+	// Convert Event to ActivityEvent (smaller, focused payload)
 	activity := ActivityEvent{
 		Operation:    event.Operation,
-		Command:      event.Command,
+		Command:      event.Name,
 		Status:       string(event.Status),
-		Component:    event.Component,
+		Component:    eventDataString(event, "component"),
 		TraceID:      event.TraceID,
 		SpanID:       event.SpanID,
 		ParentID:     event.ParentID,
-		Service:      event.Service,
-		Version:      event.Version,
-		Subtype:      event.Subtype,
-		SessionID:    event.SessionID,
-		AgentID:      event.AgentID,
-		WorkspaceID:  event.WorkspaceID,
-		JobID:        event.JobID,
-		DurationMS:   event.DurationMS,
+		Service:      eventDataString(event, "service"),
+		Version:      eventDataString(event, "version"),
+		Subtype:      eventDataString(event, "subtype"),
+		SessionID:    eventDataString(event, "session_id"),
+		AgentID:      eventDataString(event, "agent_id"),
+		WorkspaceID:  eventDataString(event, "workspace_id"),
+		JobID:        eventDataString(event, "job_id"),
+		DurationMS:   event.Duration.Milliseconds(),
 		ErrorType:    event.ErrorType,
 		ErrorCode:    event.ErrorCode,
 		ErrorMessage: event.ErrorMessage,
-		Retriable:    event.Retriable,
-		Timestamp:    event.Ts.Format("2006-01-02T15:04:05.000Z07:00"),
+		Retriable:    eventDataBoolPtr(event, "retriable"),
+		Timestamp:    event.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
 		Data:         extractActivityData(event),
 	}
 
 	pub.Publish("activity", activity)
 }
 
-// extractActivityData builds a filtered map of user-facing fields from a WideEvent's Data.
+// extractActivityData builds a filtered map of user-facing fields from an Event's Data.
 // It selects a curated set of keys and returns nil if no relevant fields are present.
 // If event.ErrorMessage is non-empty it sets or overrides the "error" key with that message.
-func extractActivityData(event *WideEvent) map[string]any {
+func extractActivityData(event *Event) map[string]any {
 	if event.Data == nil {
 		return nil
 	}

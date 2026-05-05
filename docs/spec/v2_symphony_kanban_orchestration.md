@@ -306,7 +306,7 @@ Scheduler emits typed orchestration events at minimum:
 
 ### 11.3 SSE/Wide-Event Requirements
 
-1. Orchestration command handlers emit wide events for:
+1. Orchestration command handlers emit foxcular events for:
    - `web.orchestration.board_get`
    - `web.orchestration.board_card_get`
    - `web.orchestration.refresh`

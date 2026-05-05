@@ -33,7 +33,7 @@ signature:
       The subagent_stop hook handles SubagentStop events to:
 
       1. Release file reservations owned by the subagent
-      2. Emit observability wide events for lifecycle tracking
+      2. Emit observability foxcular events for lifecycle tracking
       3. Log completion status
 
       This hook always approves (never blocks) since the subagent

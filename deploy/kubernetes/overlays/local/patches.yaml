@@ -19,7 +19,7 @@ spec:
         args:
         - |
           mkdir -p /var/cache/foxctl/storage /var/cache/foxctl/cas
-          exec foxctl-cgo web serve --port=8080
+          exec foxctl web serve --port=8080
         # Override CAS to use file-based (emptyDir) instead of S3
         env:
         - name: HOME
@@ -39,7 +39,7 @@ spec:
         lifecycle:
           preStop:
             exec:
-              command: ["foxctl-cgo", "drain"]
+              command: ["foxctl", "drain"]
         resources:
           requests:
             memory: "128Mi"

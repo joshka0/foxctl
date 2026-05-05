@@ -20,40 +20,46 @@ func TestErrorsCommandUsesObservabilityEvents(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	workspaceID := workspace.ID(workspaceRoot)
 	now := time.Now().UTC()
-	observabilityEvents := []observability.WideEvent{
+	observabilityEvents := []observability.Event{
 		{
-			Ts:           now.Add(-2 * time.Hour),
+			Timestamp:    now.Add(-2 * time.Hour),
 			TraceID:      "trace-a",
 			SpanID:       "span-a",
-			Service:      "foxctl",
-			Component:    observability.ComponentAgent,
 			Operation:    "agent.iteration",
-			WorkspaceID:  workspaceID,
 			Status:       observability.StatusError,
 			ErrorCode:    "EAGENT",
 			ErrorMessage: "agent blew up",
+			Data: map[string]any{
+				observability.DataKeyService:     "foxctl",
+				observability.DataKeyComponent:   observability.ComponentAgent,
+				observability.DataKeyWorkspaceID: workspaceID,
+			},
 		},
 		{
-			Ts:          now.Add(-90 * time.Minute),
-			TraceID:     "trace-b",
-			SpanID:      "span-b",
-			Service:     "foxctl",
-			Component:   observability.ComponentCLI,
-			Operation:   "watch.start",
-			WorkspaceID: workspaceID,
-			Status:      observability.StatusOK,
+			Timestamp: now.Add(-90 * time.Minute),
+			TraceID:   "trace-b",
+			SpanID:    "span-b",
+			Operation: "watch.start",
+			Status:    observability.StatusOK,
+			Data: map[string]any{
+				observability.DataKeyService:     "foxctl",
+				observability.DataKeyComponent:   observability.ComponentCLI,
+				observability.DataKeyWorkspaceID: workspaceID,
+			},
 		},
 		{
-			Ts:           now.Add(-30 * time.Minute),
+			Timestamp:    now.Add(-30 * time.Minute),
 			TraceID:      "trace-c",
 			SpanID:       "span-c",
-			Service:      "foxctl",
-			Component:    observability.ComponentCLI,
 			Operation:    "watch.error",
-			WorkspaceID:  "other-workspace",
 			Status:       observability.StatusError,
 			ErrorCode:    "EWATCH",
 			ErrorMessage: "watch failed",
+			Data: map[string]any{
+				observability.DataKeyService:     "foxctl",
+				observability.DataKeyComponent:   observability.ComponentCLI,
+				observability.DataKeyWorkspaceID: "other-workspace",
+			},
 		},
 	}
 	writeErrorsTestEvents(t, obsDir, observabilityEvents)
@@ -119,14 +125,14 @@ func TestErrorsCommandUsesObservabilityEvents(t *testing.T) {
 	}
 }
 
-func writeErrorsTestEvents(t *testing.T, obsDir string, events []observability.WideEvent) {
+func writeErrorsTestEvents(t *testing.T, obsDir string, events []observability.Event) {
 	t.Helper()
 
 	eventsDir := filepath.Join(obsDir, "events")
 	if err := os.MkdirAll(eventsDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
-	f, err := os.Create(filepath.Join(eventsDir, observability.WideEventFileName+".ndjson"))
+	f, err := os.Create(filepath.Join(eventsDir, observability.EventFileName+".ndjson"))
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}

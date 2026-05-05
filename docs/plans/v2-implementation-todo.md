@@ -122,7 +122,7 @@ Primary docs:
   - [x] render projection-backed lanes/cards in Runtime
   - [x] route card actions through orchestration commands only
 - [x] PR-48: observability + quality gate hardening
-  - [x] align SSE/wide-events with orchestration metadata
+  - [x] align SSE/foxcular-events with orchestration metadata
   - [x] close with end-to-end replay/projection/UI smoke coverage
 - [x] PR-49: GUI v2 surface activation + focused events bridge
   - [x] activate strict v2 surface routing (`runtime/turns/context/artifacts/events/companion`)
@@ -241,7 +241,7 @@ Subagent Review
 
 Subagent Review
 - reviewer: 019cbae8-dfb7-7af3-885c-f8ac07504966
-- scope: internal/runtime/observability/sse_bridge.go, internal/runtime/observability/sse_bridge_test.go, internal/interfaces/web/api/orchestration.go, internal/interfaces/web/api/orchestration_test.go, docs/observability/wide-events.md, docs/spec/v2_symphony_kanban_orchestration.md
+- scope: internal/runtime/observability/sse_bridge.go, internal/runtime/observability/sse_bridge_test.go, internal/interfaces/web/api/orchestration.go, internal/interfaces/web/api/orchestration_test.go, docs/general/foxcular-events.md, docs/spec/v2_symphony_kanban_orchestration.md
 - findings: initial docs contract ambiguity and missing board-get/refresh SSE regression coverage identified; patched and re-reviewed with no remaining substantive findings
 - decision: approved
 

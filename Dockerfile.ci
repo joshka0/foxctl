@@ -9,19 +9,17 @@ RUN apt-get update \
     ca-certificates \
     git \
     make \
-    gcc \
-    libc6-dev \
-    libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
 
 COPY go.mod go.sum ./
 COPY foxprox/go.mod foxprox/go.sum ./foxprox/
+COPY foxcular/go.mod foxcular/go.sum ./foxcular/
 
 # Pre-warm module cache and install tools used by CI
 RUN go mod download \
     && go install mvdan.cc/gofumpt@v0.7.0 \
     && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 
-ENV CGO_ENABLED=1
+ENV CGO_ENABLED=0

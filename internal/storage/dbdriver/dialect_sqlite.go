@@ -2,7 +2,7 @@ package dbdriver
 
 import "fmt"
 
-// SQLiteDialect implements Dialect for SQLite and libSQL databases.
+// SQLiteDialect implements Dialect for SQLite-family databases.
 type SQLiteDialect struct{}
 
 func (SQLiteDialect) Name() string { return "sqlite" }

@@ -32,7 +32,7 @@ const (
 // Sampler determines whether events should be recorded.
 type Sampler interface {
 	// ShouldSample returns the sampling decision for the given event.
-	ShouldSample(event *WideEvent) SampleDecision
+	ShouldSample(event *Event) SampleDecision
 }
 
 // TailSampler implements tail-based sampling following loggingsucks.com principles:
@@ -137,11 +137,11 @@ func NewTailSamplerFromEnv() *TailSampler {
 // ShouldSample implements Sampler interface.
 //
 // Index:
-// - Purpose: Decide whether to sample a WideEvent based on tail-sampling rules
+// - Purpose: Decide whether to sample a Event based on tail-sampling rules
 // - Flow: check nil → evaluate error/canceled → evaluate slow → random sample → drop
 // - Related: TailSampler, SampleDecision
 // - Keywords: should_sample, status, duration_ms, random_rate, tail_sampling
-func (s *TailSampler) ShouldSample(event *WideEvent) SampleDecision {
+func (s *TailSampler) ShouldSample(event *Event) SampleDecision {
 	if event == nil {
 		return Drop
 	}
@@ -162,7 +162,7 @@ func (s *TailSampler) ShouldSample(event *WideEvent) SampleDecision {
 	}
 
 	// Rule 3: Always sample slow requests
-	if s.slowThresholdMS > 0 && event.DurationMS >= s.slowThresholdMS {
+	if s.slowThresholdMS > 0 && event.Duration.Milliseconds() >= s.slowThresholdMS {
 		return AlwaysSample
 	}
 
@@ -178,7 +178,7 @@ func (s *TailSampler) ShouldSample(event *WideEvent) SampleDecision {
 type SampleAll struct{}
 
 // ShouldSample always returns AlwaysSample.
-func (SampleAll) ShouldSample(event *WideEvent) SampleDecision {
+func (SampleAll) ShouldSample(event *Event) SampleDecision {
 	return AlwaysSample
 }
 
@@ -186,7 +186,7 @@ func (SampleAll) ShouldSample(event *WideEvent) SampleDecision {
 type SampleNone struct{}
 
 // ShouldSample always returns Drop.
-func (SampleNone) ShouldSample(event *WideEvent) SampleDecision {
+func (SampleNone) ShouldSample(event *Event) SampleDecision {
 	return Drop
 }
 
@@ -201,17 +201,17 @@ func parseBool(s string, defaultVal bool) bool {
 	}
 }
 
-func (s *TailSampler) shouldAlwaysSample(event *WideEvent) bool {
+func (s *TailSampler) shouldAlwaysSample(event *Event) bool {
 	if s == nil || event == nil {
 		return false
 	}
-	if event.SessionID != "" {
-		if _, ok := s.alwaysSampleSessions[event.SessionID]; ok {
+	if sessionID := eventDataString(event, "session_id"); sessionID != "" {
+		if _, ok := s.alwaysSampleSessions[sessionID]; ok {
 			return true
 		}
 	}
-	if event.WorkspaceID != "" {
-		if _, ok := s.alwaysSampleWorkspaces[event.WorkspaceID]; ok {
+	if workspaceID := eventDataString(event, "workspace_id"); workspaceID != "" {
+		if _, ok := s.alwaysSampleWorkspaces[workspaceID]; ok {
 			return true
 		}
 	}

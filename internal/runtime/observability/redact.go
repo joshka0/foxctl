@@ -3,6 +3,8 @@ package observability
 import (
 	"regexp"
 	"strings"
+
+	"github.com/joshka0/foxcular"
 )
 
 // redactPatterns are regex patterns for values that should be redacted from events.
@@ -27,18 +29,15 @@ func RedactString(s string) string {
 	return s
 }
 
-// RedactEvent applies redaction to sensitive fields of a WideEvent in place.
+// RedactEvent applies redaction to sensitive fields of a Event in place.
 // It scrubs ErrorMessage and recursively walks Data map values containing strings.
-func RedactEvent(event *WideEvent) {
+func RedactEvent(event *Event) {
 	if event == nil {
 		return
 	}
 
-	event.ErrorMessage = RedactString(event.ErrorMessage)
-
-	if event.Data != nil {
-		redactMap(event.Data)
-	}
+	redacted := foxcular.NewRedactionPolicy().RedactEvent(event)
+	*event = *redacted
 }
 
 // redactMap recursively walks a map and redacts string values.

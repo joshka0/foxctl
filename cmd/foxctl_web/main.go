@@ -22,7 +22,7 @@
 //	-chat string
 //	      Chat adapter to enable (discord|telegram|teams)
 //	-db-driver string
-//	      Database driver (sqlite|libsql|turso|postgres)
+//	      Database driver (sqlite|turso|postgres)
 //	-db-dsn string
 //	      PostgreSQL DSN (overrides FOXCTL_POSTGRES_DSN)
 //	-foxprox
@@ -70,7 +70,7 @@ func main() {
 	flag.StringVar(&uiDir, "ui-dir", "", "Path to built UI (e.g., ./packages/gui-agent/dist)")
 	flag.BoolVar(&devCORS, "dev-cors", true, "Enable permissive CORS for local dev")
 	flag.StringVar(&chat, "chat", "", "Chat adapter to enable (discord|telegram|teams)")
-	flag.StringVar(&dbDriverFlag, "db-driver", "", "Database driver (sqlite|libsql|turso|postgres)")
+	flag.StringVar(&dbDriverFlag, "db-driver", "", "Database driver (sqlite|turso|postgres)")
 	flag.StringVar(&dbDSNFlag, "db-dsn", "", "PostgreSQL DSN (overrides FOXCTL_POSTGRES_DSN)")
 	flag.BoolVar(&foxprox, "foxprox", false, "Start an embedded Foxprox daemon for terminal-backed agents")
 	flag.StringVar(&foxproxDataDir, "foxprox-data-dir", defaultFoxproxDataDir(), "Directory for embedded Foxprox state")

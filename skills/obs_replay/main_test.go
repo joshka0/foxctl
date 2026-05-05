@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -68,59 +70,62 @@ func TestInput_JSONOmitEmpty(t *testing.T) {
 	assert.NotContains(t, string(data), "include_data")
 }
 
-// Tests for wideEvent structure
+// Tests for canonical observability events
 
-func TestWideEvent_AllFields(t *testing.T) {
-	evt := wideEvent{
-		Timestamp:   "2026-01-15T10:30:00Z",
-		TraceID:     "trace-123",
-		SpanID:      "span-456",
-		Service:     "foxctl",
-		Version:     "1.0.0",
-		Component:   "skill",
-		Operation:   "run",
-		Command:     "code/search",
-		WorkspaceID: "/workspace/path",
-		JobID:       "job-789",
-		Status:      "success",
-		DurationMS:  150,
-		ErrorCode:   "",
-		ErrorMsg:    "",
-		Data:        map[string]any{"key": "value"},
+func TestEvent_AllFields(t *testing.T) {
+	ts := time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC)
+	evt := observability.Event{
+		Timestamp: ts,
+		TraceID:   "trace-123",
+		SpanID:    "span-456",
+		Operation: "run",
+		Name:      "code/search",
+		Status:    observability.StatusOK,
+		Duration:  150 * time.Millisecond,
+		Data: map[string]any{
+			observability.DataKeyService:     "foxctl",
+			observability.DataKeyVersion:     "1.0.0",
+			observability.DataKeyComponent:   "skill",
+			observability.DataKeyWorkspaceID: "/workspace/path",
+			observability.DataKeyJobID:       "job-789",
+			"key":                            "value",
+		},
 	}
 
-	assert.Equal(t, "2026-01-15T10:30:00Z", evt.Timestamp)
+	assert.Equal(t, ts, evt.Timestamp)
 	assert.Equal(t, "trace-123", evt.TraceID)
 	assert.Equal(t, "span-456", evt.SpanID)
-	assert.Equal(t, "foxctl", evt.Service)
-	assert.Equal(t, "1.0.0", evt.Version)
-	assert.Equal(t, "skill", evt.Component)
+	assert.Equal(t, "foxctl", observability.EventDataString(&evt, observability.DataKeyService))
+	assert.Equal(t, "1.0.0", observability.EventDataString(&evt, observability.DataKeyVersion))
+	assert.Equal(t, "skill", observability.EventDataString(&evt, observability.DataKeyComponent))
 	assert.Equal(t, "run", evt.Operation)
-	assert.Equal(t, "code/search", evt.Command)
-	assert.Equal(t, "/workspace/path", evt.WorkspaceID)
-	assert.Equal(t, "job-789", evt.JobID)
-	assert.Equal(t, "success", evt.Status)
-	assert.Equal(t, int64(150), evt.DurationMS)
+	assert.Equal(t, "code/search", evt.Name)
+	assert.Equal(t, "/workspace/path", observability.EventDataString(&evt, observability.DataKeyWorkspaceID))
+	assert.Equal(t, "job-789", observability.EventDataString(&evt, observability.DataKeyJobID))
+	assert.Equal(t, observability.StatusOK, evt.Status)
+	assert.Equal(t, int64(150), evt.Duration.Milliseconds())
 	assert.NotNil(t, evt.Data)
 }
 
-func TestWideEvent_JSONSerialization(t *testing.T) {
-	evt := wideEvent{
-		Timestamp:  "2026-01-15T10:00:00Z",
-		TraceID:    "trace-abc",
-		SpanID:     "span-def",
-		Service:    "test",
-		Operation:  "test-op",
-		Status:     "error",
-		DurationMS: 500,
-		ErrorCode:  "E001",
-		ErrorMsg:   "Something went wrong",
+func TestEvent_JSONSerialization(t *testing.T) {
+	evt := observability.Event{
+		Timestamp:    time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC),
+		TraceID:      "trace-abc",
+		SpanID:       "span-def",
+		Operation:    "test-op",
+		Status:       observability.StatusError,
+		Duration:     500 * time.Millisecond,
+		ErrorCode:    "E001",
+		ErrorMessage: "Something went wrong",
+		Data: map[string]any{
+			observability.DataKeyService: "test",
+		},
 	}
 
 	data, err := json.Marshal(evt)
 	assert.NoError(t, err)
 
-	var decoded wideEvent
+	var decoded observability.Event
 	err = json.Unmarshal(data, &decoded)
 	assert.NoError(t, err)
 
@@ -128,21 +133,22 @@ func TestWideEvent_JSONSerialization(t *testing.T) {
 	assert.Equal(t, evt.SpanID, decoded.SpanID)
 	assert.Equal(t, evt.Status, decoded.Status)
 	assert.Equal(t, evt.ErrorCode, decoded.ErrorCode)
-	assert.Equal(t, evt.ErrorMsg, decoded.ErrorMsg)
+	assert.Equal(t, evt.ErrorMessage, decoded.ErrorMessage)
+	assert.Equal(t, evt.Duration, decoded.Duration)
 }
 
-func TestWideEvent_EmptyFields(t *testing.T) {
-	evt := wideEvent{}
+func TestEvent_EmptyFields(t *testing.T) {
+	evt := observability.Event{}
 
-	assert.Empty(t, evt.Timestamp)
+	assert.True(t, evt.Timestamp.IsZero())
 	assert.Empty(t, evt.TraceID)
 	assert.Empty(t, evt.SpanID)
-	assert.Zero(t, evt.DurationMS)
+	assert.Zero(t, evt.Duration)
 	assert.Nil(t, evt.Data)
 }
 
-func TestWideEvent_WithData(t *testing.T) {
-	evt := wideEvent{
+func TestEvent_WithData(t *testing.T) {
+	evt := observability.Event{
 		TraceID: "trace-test",
 		Data: map[string]any{
 			"input_artifact":  "sha256:abc123",
@@ -161,11 +167,11 @@ func TestWideEvent_WithData(t *testing.T) {
 
 func TestReconstructedEvent_AllFields(t *testing.T) {
 	re := reconstructedEvent{
-		Event: wideEvent{
-			TraceID:    "trace-123",
-			Operation:  "test",
-			Status:     "success",
-			DurationMS: 100,
+		Event: observability.Event{
+			TraceID:   "trace-123",
+			Operation: "test",
+			Status:    observability.StatusOK,
+			Duration:  100 * time.Millisecond,
 		},
 		Artifacts: map[string]any{
 			"input_artifact": map[string]any{
@@ -182,10 +188,10 @@ func TestReconstructedEvent_AllFields(t *testing.T) {
 
 func TestReconstructedEvent_JSONSerialization(t *testing.T) {
 	re := reconstructedEvent{
-		Event: wideEvent{
+		Event: observability.Event{
 			TraceID: "trace-json",
 			SpanID:  "span-json",
-			Status:  "success",
+			Status:  observability.StatusOK,
 		},
 		Artifacts: map[string]any{
 			"test_artifact": "content",
@@ -205,7 +211,7 @@ func TestReconstructedEvent_JSONSerialization(t *testing.T) {
 
 func TestReconstructedEvent_EmptyArtifacts(t *testing.T) {
 	re := reconstructedEvent{
-		Event: wideEvent{
+		Event: observability.Event{
 			TraceID: "trace-no-artifacts",
 		},
 	}
@@ -335,55 +341,53 @@ func TestInput_FullJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, in.IncludeData, decoded.IncludeData)
 }
 
-func TestWideEvent_FullJSONRoundTrip(t *testing.T) {
-	evt := wideEvent{
-		Timestamp:   "2026-01-15T12:00:00Z",
-		TraceID:     "trace-round-trip",
-		SpanID:      "span-round-trip",
-		Service:     "foxctl",
-		Version:     "2.0.0",
-		Component:   "skill",
-		Operation:   "execute",
-		Command:     "code/search",
-		WorkspaceID: "/test/workspace",
-		JobID:       "job-test",
-		Status:      "success",
-		DurationMS:  250,
-		ErrorCode:   "",
-		ErrorMsg:    "",
+func TestEvent_FullJSONRoundTrip(t *testing.T) {
+	evt := observability.Event{
+		Timestamp: time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+		TraceID:   "trace-round-trip",
+		SpanID:    "span-round-trip",
+		Operation: "execute",
+		Name:      "code/search",
+		Status:    observability.StatusOK,
+		Duration:  250 * time.Millisecond,
 		Data: map[string]any{
-			"input_artifact":  "sha256:in",
-			"result_artifact": "sha256:out",
+			observability.DataKeyService:     "foxctl",
+			observability.DataKeyVersion:     "2.0.0",
+			observability.DataKeyComponent:   "skill",
+			observability.DataKeyWorkspaceID: "/test/workspace",
+			observability.DataKeyJobID:       "job-test",
+			"input_artifact":                 "sha256:in",
+			"result_artifact":                "sha256:out",
 		},
 	}
 
 	data, err := json.Marshal(evt)
 	assert.NoError(t, err)
 
-	var decoded wideEvent
+	var decoded observability.Event
 	err = json.Unmarshal(data, &decoded)
 	assert.NoError(t, err)
 
 	assert.Equal(t, evt.TraceID, decoded.TraceID)
-	assert.Equal(t, evt.DurationMS, decoded.DurationMS)
+	assert.Equal(t, evt.Duration, decoded.Duration)
 	assert.NotNil(t, decoded.Data)
 }
 
-func TestWideEvent_LargeDuration(t *testing.T) {
-	evt := wideEvent{
-		TraceID:    "trace-long",
-		DurationMS: 3600000, // 1 hour in milliseconds
-		Status:     "timeout",
+func TestEvent_LargeDuration(t *testing.T) {
+	evt := observability.Event{
+		TraceID:  "trace-long",
+		Duration: time.Hour,
+		Status:   observability.StatusCanceled,
 	}
 
 	data, err := json.Marshal(evt)
 	assert.NoError(t, err)
 
-	var decoded wideEvent
+	var decoded observability.Event
 	err = json.Unmarshal(data, &decoded)
 	assert.NoError(t, err)
 
-	assert.Equal(t, int64(3600000), decoded.DurationMS)
+	assert.Equal(t, time.Hour, decoded.Duration)
 }
 
 func TestTrajectoryEvent_KindValues(t *testing.T) {
@@ -397,7 +401,7 @@ func TestTrajectoryEvent_KindValues(t *testing.T) {
 
 func TestReconstructedEvent_ComplexArtifacts(t *testing.T) {
 	re := reconstructedEvent{
-		Event: wideEvent{TraceID: "trace-complex"},
+		Event: observability.Event{TraceID: "trace-complex"},
 		Artifacts: map[string]any{
 			"input_artifact": map[string]any{
 				"digest":  "sha256:input123",
@@ -425,11 +429,15 @@ func TestReconstructedEvent_ComplexArtifacts(t *testing.T) {
 	assert.Contains(t, decoded.Artifacts, "result_artifact")
 }
 
-func TestWideEvent_StatusValues(t *testing.T) {
-	statuses := []string{"success", "error", "timeout", "cancelled", "skipped"}
+func TestEvent_StatusValues(t *testing.T) {
+	statuses := []observability.Status{
+		observability.StatusOK,
+		observability.StatusError,
+		observability.StatusCanceled,
+	}
 
 	for _, status := range statuses {
-		evt := wideEvent{Status: status}
+		evt := observability.Event{Status: status}
 		assert.Equal(t, status, evt.Status)
 	}
 }

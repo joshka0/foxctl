@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/joshka0/foxctl/internal/context/memorycore"
 )
 
 func TestSaveAndGet(t *testing.T) {
@@ -116,6 +119,209 @@ func TestSearchAndUpdate(t *testing.T) {
 	}
 	if updated.Summary != newSummary {
 		t.Fatalf("expected updated summary")
+	}
+}
+
+func TestUpdateLifecyclePersistsNamedMemoryState(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "alpha", "result", "ws", "alpha summary", result); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+	validatedAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	updated, err := store.UpdateLifecycle(ctx, "alpha", "ws", LifecycleUpdate{
+		LifecycleState:  "stale",
+		ReviewStatus:    "needs_review",
+		SupersededBy:    "beta",
+		ReviewNotes:     "curator demotion",
+		LastValidatedAt: &validatedAt,
+	})
+	if err != nil {
+		t.Fatalf("update lifecycle: %v", err)
+	}
+	if updated.LifecycleState != "stale" || updated.ReviewStatus != "needs_review" {
+		t.Fatalf("unexpected updated lifecycle: %#v", updated)
+	}
+
+	got, err := store.Get(ctx, "alpha", "ws")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.LifecycleState != "stale" || got.ReviewStatus != "needs_review" || got.SupersededBy != "beta" || got.ReviewNotes != "curator demotion" {
+		t.Fatalf("lifecycle was not persisted: %#v", got)
+	}
+	if !got.LastValidatedAt.Equal(validatedAt) {
+		t.Fatalf("expected last_validated_at %s, got %s", validatedAt, got.LastValidatedAt)
+	}
+
+	listed, err := store.List(ctx, "ws", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(listed) != 1 || listed[0].LifecycleState != "stale" {
+		t.Fatalf("list did not include lifecycle state: %#v", listed)
+	}
+}
+
+func TestUpdateTelemetryPersistsExplicitNamedMemoryActions(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "alpha", "result", "ws", "alpha summary", result); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+
+	at := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	actions := []string{"selected", "used", "succeeded", "failed", "restored", "patched"}
+	for _, action := range actions {
+		if _, err := store.UpdateTelemetry(ctx, "alpha", "ws", TelemetryUpdate{Action: action, At: &at}); err != nil {
+			t.Fatalf("update telemetry %s: %v", action, err)
+		}
+	}
+	if _, err := store.UpdateTelemetry(ctx, "alpha", "ws", TelemetryUpdate{Action: "used", At: &at}); err != nil {
+		t.Fatalf("update telemetry used again: %v", err)
+	}
+
+	got, err := store.Get(ctx, "alpha", "ws")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.SelectedCount != 1 || got.UseCount != 2 || got.SuccessCount != 1 || got.FailureCount != 1 || got.RestoreCount != 1 || got.PatchCount != 1 {
+		t.Fatalf("unexpected telemetry counters: %#v", got)
+	}
+	if !got.LastSelectedAt.Equal(at) || !got.LastUsedAt.Equal(at) || !got.LastSucceededAt.Equal(at) || !got.LastFailedAt.Equal(at) || !got.LastRestoredAt.Equal(at) || !got.LastPatchedAt.Equal(at) {
+		t.Fatalf("unexpected telemetry timestamps: %#v", got)
+	}
+}
+
+func TestUpdateTelemetryRejectsUnknownAction(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "alpha", "result", "ws", "alpha summary", result); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+	if _, err := store.UpdateTelemetry(ctx, "alpha", "ws", TelemetryUpdate{Action: "queried"}); err == nil {
+		t.Fatalf("UpdateTelemetry accepted unknown action")
+	}
+}
+
+func TestSearchDoesNotIncrementUseTelemetry(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "alpha", "result", "ws", "alpha summary", result); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+	if _, err := store.Search(ctx, "ws", "alpha", 10); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	got, err := store.getWithoutTracking(ctx, "alpha", "ws")
+	if err != nil {
+		t.Fatalf("get without tracking: %v", err)
+	}
+	if got.UseCount != 0 || got.SuccessCount != 0 || got.FailureCount != 0 {
+		t.Fatalf("query visibility changed use telemetry: %#v", got)
+	}
+}
+
+func TestSQLiteSearchResultsProjectToCanonicalMemoryRecord(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{"file":"internal/storage/memory/store.go"},"meta":{"ts":"2026-05-04T12:00:00Z"},"error":{}}`)
+	if _, err := store.Save(ctx, NamedEntry{
+		Name:           "canonical-contract",
+		Type:           "decision",
+		Workspace:      "ws",
+		Summary:        "canonical search contract should preserve curator metadata",
+		Result:         result,
+		SessionID:      "session-a",
+		LifecycleState: "stale",
+		Pinned:         true,
+		ReviewStatus:   "needs_review",
+		SupersededBy:   "newer-record",
+		ReviewNotes:    "curator demotion",
+		SelectedCount:  2,
+		UseCount:       3,
+		SuccessCount:   1,
+	}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	results, err := store.Search(ctx, "ws", "canonical search", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("Search returned %d results, want 1: %#v", len(results), results)
+	}
+
+	record := memorycore.RecordFromNamedEntry(results[0].Entry, memorycore.NamedEntryOptions{Score: results[0].Score})
+	assertCanonicalSearchRecord(t, record)
+}
+
+func assertCanonicalSearchRecord(t *testing.T, record memorycore.Record) {
+	t.Helper()
+	if record.Kind != memorycore.KindDecision || record.SourceLane != memorycore.SourceLaneNamedMemory || record.SourceID != "canonical-contract" {
+		t.Fatalf("unexpected canonical identity: %#v", record)
+	}
+	if record.Provenance.SessionID != "session-a" {
+		t.Fatalf("session provenance was not preserved: %#v", record.Provenance)
+	}
+	if record.Lifecycle.State != memorycore.LifecycleStateStale || !record.Lifecycle.Pinned || record.Lifecycle.ReviewStatus != memorycore.ReviewStatusNeedsReview || record.Lifecycle.SupersededBy != "newer-record" {
+		t.Fatalf("lifecycle envelope was not preserved: %#v", record.Lifecycle)
+	}
+	if record.Telemetry.SelectedCount != 2 || record.Telemetry.UseCount != 3 || record.Telemetry.SuccessCount != 1 {
+		t.Fatalf("telemetry envelope was not preserved: %#v", record.Telemetry)
+	}
+	if record.Usage.InstructionEligible || !record.Usage.EvidenceOnly {
+		t.Fatalf("named memory record must remain evidence-only by default: %#v", record.Usage)
 	}
 }
 

@@ -51,7 +51,7 @@ func TestRecallFile(t *testing.T) {
 	defer store.Close()
 	_, err = store.Save(context.Background(), storage.NamedEntry{
 		Name:      "edit:auth",
-		Type:      "gotcha",
+		Type:      "semantic_fact",
 		Workspace: workspaceRoot,
 		Summary:   "auth.go: Remember to validate state before token exchange",
 		Result:    json.RawMessage(`{"file":"internal/auth/auth.go"}`),

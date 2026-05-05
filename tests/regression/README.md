@@ -14,7 +14,7 @@ building ad hoc test bundles. If a failure specifically involves live tmux pane
 submission, follow it with:
 
 ```bash
-FOXCTL_INTEGRATION_TMUX=1 go test -tags='integration libsqlite3' \
+FOXCTL_INTEGRATION_TMUX=1 go test -tags=integration \
   ./cmd/foxctl/cmd \
   -run 'TestIntegrationRelayRoomMessageTmuxConsumesInputRealTmux' \
   -count=1 -v

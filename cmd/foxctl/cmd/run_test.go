@@ -180,9 +180,8 @@ func buildSkillBinaryFromSource(t *testing.T, dest, pkg string) {
 	args := []string{"build", "-o", dest, pkg}
 	cmd := exec.Command("go", args...)
 	cmd.Dir = repoRoot(t)
-	// Skills are pure Go and don't require CGO. Force CGO_ENABLED=0 to avoid
-	// inheriting CGO_ENABLED=1 from test runners (e.g., `make test-cgo-short`),
-	// which can cause CGO toolchain issues on some systems (see Gotchas G1).
+	// Skills are pure Go. Force CGO_ENABLED=0 so subprocess builds stay on the
+	// canonical CLI/storage path even when the parent environment enables CGO.
 	env := append([]string{}, os.Environ()...)
 	env = withEnv(env, "CGO_ENABLED", "0")
 	env = withEnv(env, "GOFLAGS", "-modcacherw -buildvcs=false")

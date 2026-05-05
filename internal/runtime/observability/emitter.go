@@ -6,14 +6,18 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
+
+	"github.com/joshka0/foxcular"
 )
 
-// WideEventFileName is the NDJSON file for wide events.
-const WideEventFileName = "wide_events"
+// EventFileName is the NDJSON file for foxcular events.
+const EventFileName = "foxcular_events"
 
 var (
 	emitterSampler   Sampler
 	emitterSamplerMu sync.RWMutex
+	emitterClient    = foxcular.NewClient(foxcularDrain{}, foxcular.WithSampler(foxcular.AlwaysSample{}))
 )
 
 // SetSamplerForTesting overrides the sampler for testing purposes.
@@ -34,93 +38,60 @@ func getSampler() Sampler {
 	return DefaultSampler()
 }
 
-// Emit writes a WideEvent to the observability stream if:
+// Emit writes a Event to the observability stream if:
 // 1. FOXCTL_OBS_DIR is configured
 // 2. The sampler decides to sample the event
 //
 // This function is safe to call from any goroutine.
 // Errors are logged but not returned - observability is best-effort.
-func Emit(ctx context.Context, event *WideEvent) {
+func Emit(ctx context.Context, event *Event) {
 	EmitWithConfig(ctx, event, nil)
 }
 
-// EmitWithConfig emits a WideEvent with custom persistence configuration.
+// EmitWithConfig emits a Event with custom persistence configuration.
 //
 // Index:
 // - Purpose: Stream an event to SSE and optionally persist it to disk
 // - Flow: publish to SSE → resolve observability dir → apply sampling → persist event
 // - SideEffects: writes SSE output; optional NDJSON file writes
 // - FailureModes: persistence failures are logged; nil event returns early
-// - Observability: emits WideEvent to SSE and wide_events NDJSON persistence
+// - Observability: emits Event to SSE and foxcular_events NDJSON persistence
 // - Related: Emit, EmitSync, persistEvent, publishToSSE
-// - Keywords: wide_events, observability_dir, sampler, sse, persist_event
-func EmitWithConfig(ctx context.Context, event *WideEvent, config *persistConfig) {
+// - Keywords: foxcular_events, observability_dir, sampler, sse, persist_event
+func EmitWithConfig(ctx context.Context, event *Event, config *persistConfig) {
 	if event == nil {
 		return
 	}
-
-	// Scrub sensitive data before any downstream processing (SSE, persistence).
-	RedactEvent(event)
-
-	// Always try to publish to SSE (even if file persistence is disabled)
-	// This allows real-time activity streaming without requiring FOXCTL_OBS_DIR
-	publishToSSE(event)
-
-	// Check if file observability is enabled
-	dir := getObsDir()
-	if dir == "" {
-		return
-	}
-
-	// Apply sampling for file persistence
-	sampler := getSampler()
-	if sampler != nil {
-		decision := sampler.ShouldSample(event)
-		if decision == Drop {
-			return
-		}
-	}
-
-	// Use custom persistence if configured, otherwise default NDJSON
-	persistEvent(ctx, event, config)
+	ctx = context.WithValue(ctx, foxcularPersistConfigKey{}, foxcularPersistOptions{config: config})
+	emitterClient.EmitEvent(ctx, event)
 }
 
-// EmitSync writes a WideEvent synchronously, bypassing sampling.
+// EmitSync writes a Event synchronously, bypassing sampling.
 //
 // Index:
-// - Purpose: Persist a WideEvent immediately without sampling
+// - Purpose: Persist a Event immediately without sampling
 // - Flow: publish to SSE → resolve observability dir → append NDJSON
-// - SideEffects: writes SSE output; appends to wide_events NDJSON
+// - SideEffects: writes SSE output; appends to foxcular_events NDJSON
 // - FailureModes: file write errors returned; nil event returns nil
-// - Observability: emits WideEvent to SSE and wide_events NDJSON persistence
+// - Observability: emits Event to SSE and foxcular_events NDJSON persistence
 // - Related: EmitWithConfig, WriteEvent, publishToSSE
-// - Keywords: wide_events, emit_sync, sse, write_event, observability_dir
-func EmitSync(ctx context.Context, event *WideEvent) error {
+// - Keywords: foxcular_events, emit_sync, sse, write_event, observability_dir
+func EmitSync(ctx context.Context, event *Event) error {
 	if event == nil {
 		return nil
 	}
-
-	RedactEvent(event)
-
-	// Always try to publish to SSE (even if file persistence is disabled)
-	publishToSSE(event)
-
-	dir := getObsDir()
-	if dir == "" {
-		return nil
-	}
-
-	return WriteEvent(ctx, WideEventFileName, event)
+	ctx = context.WithValue(ctx, foxcularPersistConfigKey{}, foxcularPersistOptions{syncWrite: true})
+	return emitterClient.EmitEventSync(ctx, event)
 }
 
 // EmitBuilder builds and emits an event using builder persistence settings.
 //
 // Index:
-// - Purpose: Build a WideEvent and emit it with builder-specified persistence
+// - Purpose: Build a Event and emit it with builder-specified persistence
 // - Flow: build event → set status/duration → delegate to EmitWithConfig
 // - SideEffects: publishes SSE; optional NDJSON persistence
 // - FailureModes: nil builder returns early; persistence failures logged downstream
-// - Observability: emits WideEvent to SSE and optional persistence
+// - Observability: emits Event to SSE and optional persistence
 // - Related: EventBuilder.Build, EmitWithConfig
 // - Keywords: event_builder, emit, status, duration_ms, persist_config
 func EmitBuilder(ctx context.Context, builder *EventBuilder, status Status, duration int64) {
@@ -130,15 +101,15 @@ func EmitBuilder(ctx context.Context, builder *EventBuilder, status Status, dura
 
 	event := builder.Build()
 	event.Status = status
-	event.DurationMS = duration
+	event.Duration = time.Duration(duration) * time.Millisecond
 
 	// Pass builder's persist config to honor WithPersistence/WithPersistenceFile
 	EmitWithConfig(ctx, event, builder.PersistConfig())
 }
 
-// WideEventWriter provides a structured way to write wide events.
+// EventWriter provides a structured way to write canonical events.
 // It caches the file handle for better performance when writing many events.
-type WideEventWriter struct {
+type EventWriter struct {
 	mu       sync.Mutex
 	file     *os.File
 	encoder  *json.Encoder
@@ -146,16 +117,16 @@ type WideEventWriter struct {
 	filePath string
 }
 
-// NewWideEventWriter creates a new writer for wide events.
+// NewEventWriter creates a new writer for events.
 //
 // Index:
-// - Purpose: Initialize a cached NDJSON writer for WideEvents
+// - Purpose: Initialize a cached NDJSON writer for events
 // - Flow: resolve observability dir → ensure events dir → open file → select sampler
 // - SideEffects: creates directories; opens file handles
 // - FailureModes: directory creation errors, file open errors
-// - Related: WideEventWriter.Write, DefaultSampler
-// - Keywords: wide_events, ndjson, sampler, observability_dir, file_handle
-func NewWideEventWriter(sampler Sampler) (*WideEventWriter, error) {
+// - Related: EventWriter.Write, DefaultSampler
+// - Keywords: foxcular_events, ndjson, sampler, observability_dir, file_handle
+func NewEventWriter(sampler Sampler) (*EventWriter, error) {
 	dir := getObsDir()
 	if dir == "" {
 		return nil, nil // Observability disabled
@@ -166,7 +137,7 @@ func NewWideEventWriter(sampler Sampler) (*WideEventWriter, error) {
 		return nil, err
 	}
 
-	filePath := filepath.Join(eventsDir, WideEventFileName+".ndjson")
+	filePath := filepath.Join(eventsDir, EventFileName+".ndjson")
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, err
@@ -176,7 +147,7 @@ func NewWideEventWriter(sampler Sampler) (*WideEventWriter, error) {
 		sampler = DefaultSampler()
 	}
 
-	return &WideEventWriter{
+	return &EventWriter{
 		file:     f,
 		encoder:  json.NewEncoder(f),
 		sampler:  sampler,
@@ -186,7 +157,7 @@ func NewWideEventWriter(sampler Sampler) (*WideEventWriter, error) {
 
 // Write writes an event if the sampler allows it.
 // Sensitive fields are redacted before encoding.
-func (w *WideEventWriter) Write(event *WideEvent) error {
+func (w *EventWriter) Write(event *Event) error {
 	if w == nil || event == nil {
 		return nil
 	}
@@ -197,7 +168,7 @@ func (w *WideEventWriter) Write(event *WideEvent) error {
 		}
 	}
 
-	RedactEvent(event)
+	event = foxcular.NewRedactionPolicy().RedactEvent(event)
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -207,12 +178,12 @@ func (w *WideEventWriter) Write(event *WideEvent) error {
 
 // WriteAlways writes an event bypassing the sampler.
 // Sensitive fields are redacted before encoding.
-func (w *WideEventWriter) WriteAlways(event *WideEvent) error {
+func (w *EventWriter) WriteAlways(event *Event) error {
 	if w == nil || event == nil {
 		return nil
 	}
 
-	RedactEvent(event)
+	event = foxcular.NewRedactionPolicy().RedactEvent(event)
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -220,8 +191,49 @@ func (w *WideEventWriter) WriteAlways(event *WideEvent) error {
 	return w.encoder.Encode(event)
 }
 
+type foxcularPersistConfigKey struct{}
+
+type foxcularPersistOptions struct {
+	config    *persistConfig
+	syncWrite bool
+}
+
+type foxcularDrain struct{}
+
+func (foxcularDrain) Send(ctx context.Context, event *foxcular.Event) error {
+	if event == nil {
+		return nil
+	}
+	publishToSSE(event)
+	if getObsDir() == "" {
+		return nil
+	}
+	opts, _ := ctx.Value(foxcularPersistConfigKey{}).(foxcularPersistOptions)
+	if opts.syncWrite {
+		fileName := EventFileName
+		if opts.config != nil && opts.config.fileName != "" {
+			fileName = opts.config.fileName
+		}
+		return WriteEvent(ctx, fileName, event)
+	}
+	sampler := getSampler()
+	if sampler != nil && sampler.ShouldSample(event) == Drop {
+		return nil
+	}
+	persistEvent(ctx, event, opts.config)
+	return nil
+}
+
+func (foxcularDrain) Flush(context.Context) error {
+	return nil
+}
+
+func (foxcularDrain) Close() error {
+	return nil
+}
+
 // Close closes the underlying file handle.
-func (w *WideEventWriter) Close() error {
+func (w *EventWriter) Close() error {
 	if w == nil || w.file == nil {
 		return nil
 	}

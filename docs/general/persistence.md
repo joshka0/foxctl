@@ -1,11 +1,11 @@
 # Observability Persistence
 
-This document describes the persistence options for wide events, enabling SQLite
+This document describes the persistence options for foxcular events, enabling SQLite
 queryability alongside the default NDJSON file storage.
 
 ## Overview
 
-By default, wide events are written to NDJSON files for fast, append-only
+By default, foxcular events are written to NDJSON files for fast, append-only
 storage. For events that need queryability (debugging, analysis, auditing),
 you can enable SQL persistence.
 
@@ -155,7 +155,7 @@ defer syncer.Stop()
 Events persisted to SQLite use this schema:
 
 ```sql
-CREATE TABLE wide_events (
+CREATE TABLE foxcular_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     span_id TEXT NOT NULL UNIQUE,
     trace_id TEXT NOT NULL,
@@ -182,13 +182,13 @@ CREATE TABLE wide_events (
 );
 
 -- Indexes for common queries
-CREATE INDEX idx_wide_events_trace_id ON wide_events(trace_id);
-CREATE INDEX idx_wide_events_ts ON wide_events(ts);
-CREATE INDEX idx_wide_events_operation ON wide_events(operation);
-CREATE INDEX idx_wide_events_command ON wide_events(command);
-CREATE INDEX idx_wide_events_status ON wide_events(status);
-CREATE INDEX idx_wide_events_session_id ON wide_events(session_id);
-CREATE INDEX idx_wide_events_workspace_id ON wide_events(workspace_id);
+CREATE INDEX idx_foxcular_events_trace_id ON foxcular_events(trace_id);
+CREATE INDEX idx_foxcular_events_ts ON foxcular_events(ts);
+CREATE INDEX idx_foxcular_events_operation ON foxcular_events(operation);
+CREATE INDEX idx_foxcular_events_command ON foxcular_events(command);
+CREATE INDEX idx_foxcular_events_status ON foxcular_events(status);
+CREATE INDEX idx_foxcular_events_session_id ON foxcular_events(session_id);
+CREATE INDEX idx_foxcular_events_workspace_id ON foxcular_events(workspace_id);
 ```
 
 ## Querying Persisted Events
@@ -197,12 +197,12 @@ CREATE INDEX idx_wide_events_workspace_id ON wide_events(workspace_id);
 
 ```sql
 -- Find all agent spawn events
-SELECT * FROM wide_events
+SELECT * FROM foxcular_events
 WHERE operation = 'agent.spawn'
 ORDER BY ts DESC LIMIT 10;
 
 -- Find errors in session summarization
-SELECT * FROM wide_events
+SELECT * FROM foxcular_events
 WHERE command = 'session/summarize' AND status = 'error';
 
 -- Performance analysis by skill
@@ -210,24 +210,24 @@ SELECT command,
        COUNT(*) as count,
        AVG(duration_ms) as avg_ms,
        MAX(duration_ms) as max_ms
-FROM wide_events
+FROM foxcular_events
 WHERE operation = 'skill.run'
 GROUP BY command;
 
 -- Find slow operations (> 5s)
 SELECT operation, command, duration_ms, ts
-FROM wide_events
+FROM foxcular_events
 WHERE duration_ms > 5000
 ORDER BY duration_ms DESC;
 
 -- Trace a specific request
-SELECT * FROM wide_events
+SELECT * FROM foxcular_events
 WHERE trace_id = '01JFXYZ...'
 ORDER BY ts;
 
 -- Session activity timeline
 SELECT operation, command, status, duration_ms, ts
-FROM wide_events
+FROM foxcular_events
 WHERE session_id = 'sess_abc123'
 ORDER BY ts;
 ```
@@ -241,11 +241,11 @@ SELECT
     json_extract(data, '$.cache_hit') as cache_hit,
     json_extract(data, '$.files') as files,
     duration_ms
-FROM wide_events
+FROM foxcular_events
 WHERE operation = 'skill.run';
 
 -- Filter by data field
-SELECT * FROM wide_events
+SELECT * FROM foxcular_events
 WHERE json_extract(data, '$.iteration') > 10;
 ```
 
@@ -253,7 +253,7 @@ WHERE json_extract(data, '$.iteration') > 10;
 
 | File | Location | Purpose |
 |------|----------|---------|
-| NDJSON events | `$FOXCTL_OBS_DIR/events/wide_events.ndjson` | Default event stream |
+| NDJSON events | `$FOXCTL_OBS_DIR/events/foxcular_events.ndjson` | Default event stream |
 | SQLite database | `$FOXCTL_OBS_DIR/events.db` | Queryable events |
 | Custom NDJSON | `$FOXCTL_OBS_DIR/events/<name>.ndjson` | Skill-specific files |
 
@@ -280,7 +280,7 @@ Existing NDJSON events can be imported to SQLite:
 
 ```bash
 # Manual import via jq + sqlite3
-cat $FOXCTL_OBS_DIR/events/wide_events.ndjson | \
+cat $FOXCTL_OBS_DIR/events/foxcular_events.ndjson | \
   jq -c '.' | \
   while read line; do
     # Parse and insert each event

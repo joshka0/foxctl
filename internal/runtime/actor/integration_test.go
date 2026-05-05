@@ -1,4 +1,4 @@
-//go:build sqlite_mattn
+//go:build integration
 
 package actor
 
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // testMailboxStore is a test implementation of MailboxStore for integration tests.
@@ -265,7 +265,7 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 // TestIntegration_WatcherToSupervisor tests the Watcher → Supervisor flow.
 func TestIntegration_WatcherToSupervisor(t *testing.T) {
 	// Create in-memory SQLite database
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

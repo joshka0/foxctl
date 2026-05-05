@@ -102,7 +102,7 @@ internal/context/contextengine/adapters/  # Bidirectional type conversions
   taskhistory.go       Pack, SessionSummary → canonical
   taskstore.go         Task, Epic → canonical
   trajectory.go        Event, Trajectory → canonical
-  observability.go     WideEvent → canonical
+  observability.go     Event → canonical
   rlm.go               NodeResult → canonical
 
 internal/storage/contextengine/           # Durable store
@@ -167,7 +167,6 @@ Run the interactive installer from the repo root:
 That flow is intended to:
 
 - verify or install core local dependencies
-- optionally install CGO/SQLite headers for `foxctl-cgo`
 - optionally install Bun for GUI and OpenCode plugin workflows
 - build the CLI and skills
 - wire up provider integrations via `scripts/init.sh`
@@ -183,7 +182,6 @@ If you run the installer outside an existing checkout, it clones the repo from G
 Useful flags:
 
 ```bash
-./install.sh --yes --skip-cgo
 ./install.sh --yes --skip-bun
 ./install.sh --yes --skip-provider-setup
 ./install.sh --yes --repo-dir "$HOME/src/foxctl"
@@ -199,11 +197,11 @@ make init
 
 `make init` runs:
 
-- `build-all`
+- `build`
 - `skills-install-all`
 - `./scripts/init.sh`
 
-If you only want the pure-Go CLI path:
+If you only want the CLI path:
 
 ```bash
 make build
@@ -223,15 +221,13 @@ make skills-install
 
 ### Recommended For Full Setup
 
-- C compiler + SQLite development headers/libs
-  - needed for `make build-cgo`, `make test-cgo-short`, and `foxctl-cgo`
 - Bun
   - needed for `packages/gui-agent` and OpenCode plugin install flows
 
-On macOS, the full path usually means Homebrew `go`, `jq`, `sqlite`, and `bun`.
+On macOS, the full path usually means Homebrew `go`, `jq`, and `bun`.
 
-On Debian/Ubuntu, the full path usually means `build-essential`, `pkg-config`,
-`libsqlite3-dev`, `jq`, and a current Go toolchain.
+On Debian/Ubuntu, the full path usually means `git`, `make`, `jq`, `curl`, and
+a current Go toolchain.
 
 ## Environment
 
@@ -324,7 +320,7 @@ foxctl mcp serve --skills
 `scripts/init.sh` is the current source of truth for local provider wiring. It
 handles:
 
-- symlinking `foxctl` and `foxctl-cgo` into `~/.local/bin`
+- symlinking `foxctl` into `~/.local/bin`
 - creating `~/.foxctl/{storage,cache,cas,skills,jobs,observability,backups}`
 - installing provider skill packs from `configs/skills-pack`
 - configuring Claude Code hooks/settings
@@ -381,20 +377,17 @@ make fmt
 make lint
 make test
 make test-race
-make test-cgo-short
 ```
 
 Builds:
 
 ```bash
 make build
-make build-cgo
 make skills-install-all
 ```
 
-Important CGO rule: do not use raw `CGO_ENABLED=1 go build` for the full CLI.
-Use `make build-cgo`, which adds `-tags=libsqlite3` and avoids duplicate SQLite
-symbol problems.
+The CLI build is non-CGO by default. Turso is the canonical SQLite-family
+storage path; do not reintroduce the old libsqlite3/sqlite-vector build lane.
 
 For markdown/doc changes:
 

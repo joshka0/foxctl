@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/joshka0/foxctl/internal/context/contextengine"
+	"github.com/joshka0/foxctl/internal/context/memorycore"
 	"github.com/joshka0/foxctl/internal/context/todosync"
 	"github.com/joshka0/foxctl/internal/platform/config"
 	"github.com/joshka0/foxctl/internal/platform/workspace"
@@ -115,10 +116,10 @@ func DetectPrompt(req DetectorRequest) DetectorResponse {
 		return response
 	}
 
-	memoryType := detectMemoryType(prompt)
-	if memoryType != "" {
-		response.Context = "**Memory hint:** User wants to save a " + memoryType + ". Use `/remember` skill to:\n" +
-			"1. Store to foxctl memory\n2. Append to CLAUDE.md under Gotchas section"
+	memoryKind := detectMemoryKind(prompt)
+	if memoryKind != "" {
+		response.Context = "**Memory hint:** User wants to save a " + memoryKind + " record. Use `/remember` skill to:\n" +
+			"1. Store it as a foxctl memory record\n2. Treat it as evidence unless promoted as validated policy or skill"
 	}
 	return response
 }
@@ -154,10 +155,7 @@ func RecallFile(ctx context.Context, deps Dependencies, req RecallRequest) (Reca
 		if i >= 3 {
 			break
 		}
-		kind := strings.TrimSpace(item.Entry.Type)
-		if kind == "" {
-			kind = "note"
-		}
+		kind := string(memorycore.KindForNamedType(item.Entry.Type))
 		label := kind
 		if len(label) > 4 {
 			label = label[:4]
@@ -199,10 +197,10 @@ func HandleLifecycle(ctx context.Context, deps Dependencies, req LifecycleReques
 		}
 		if len(completed) == 1 {
 			response.Context = "**Memory prompt:** Task completed: \"" + completed[0] + "\"\n\n" +
-				"If you learned something useful or encountered a gotcha, save it:\n" +
-				"`foxctl memory put --name \"gotcha-<topic>\" --type gotcha --summary \"<learning>\"`"
+				"If you learned something useful, save it as a canonical memory record:\n" +
+				"`foxctl memory put --name \"memory-<topic>\" --type semantic_fact --summary \"<learning>\"`"
 		} else {
-			response.Context = fmt.Sprintf("**Memory prompt:** Completed %d tasks.\n\nIf you learned something useful or encountered gotchas, save them:\n`foxctl memory put --name \"gotcha-<topic>\" --type gotcha --summary \"<learning>\"`", len(completed))
+			response.Context = fmt.Sprintf("**Memory prompt:** Completed %d tasks.\n\nIf you learned something useful, save it as canonical memory records:\n`foxctl memory put --name \"memory-<topic>\" --type semantic_fact --summary \"<learning>\"`", len(completed))
 		}
 		return response, nil
 	case "Edit", "Write", "MultiEdit", "NotebookEdit":
@@ -323,16 +321,16 @@ func envEnabledInverse(name string, defaultOn bool) bool {
 	return value != "0" && value != "false" && value != "no" && value != "off"
 }
 
-func detectMemoryType(prompt string) string {
+func detectMemoryKind(prompt string) string {
 	switch {
 	case matchesAny(prompt, `(remember|note|save).*(this|that)`, `don.?t forget`, `do not forget`, `please don.?t`, `please do not`, `for future reference`, `(^|[[:space:]])remember([[:space:]]|$)`):
-		return "context"
+		return string(memorycore.KindSemanticFact)
 	case matchesAny(prompt, `^(gotcha|learned|learning|tricky):`, `the trick is`, `the key is`, `turns out`, `watch out for`, `be careful`, `keep in mind`, `til:`, `today i learned`, `pro tip`, `tip:`):
-		return "gotcha"
+		return string(memorycore.KindSemanticFact)
 	case matchesAny(prompt, `^(decision|decided|choosing):`):
-		return "decision"
+		return string(memorycore.KindDecision)
 	case matchesAny(prompt, `^(pattern|approach|solution):`):
-		return "pattern"
+		return string(memorycore.KindProceduralSkill)
 	default:
 		return ""
 	}

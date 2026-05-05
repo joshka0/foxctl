@@ -51,7 +51,7 @@ Help: `--help` | Examples: `--examples` | List: `foxctl skills list`
 | `session/save`, `session/restore` | Context preservation |
 | `session/anchor` | Durable goal |
 | `mailbox/manage` | Overseer inbox |
-| `memory/query` | Gotchas/decisions by file |
+| `memory/query` | Canonical memory records by file or kind |
 
 ### Room Coordination
 | Skill | Purpose |

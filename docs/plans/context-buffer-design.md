@@ -388,7 +388,7 @@ echo "$result" | jq '{
 
 ## Observability
 
-Emit wide events for:
+Emit foxcular events for:
 - `hook.context.enqueue` - source, priority, ttl, text_bytes
 - `hook.context.drain` - count, sources, total_bytes, consumer
 - `hook.context.prune` - expired_count, consumed_count

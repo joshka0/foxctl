@@ -11,15 +11,15 @@ import (
 )
 
 // Logger provides structured logging for skills.
-// It writes to stderr using zerolog and optionally emits wide events for warnings/errors.
+// It writes to stderr using zerolog and optionally emits foxcular events for warnings/errors.
 type Logger struct {
 	zl        zerolog.Logger
 	command   string
 	workspace string
 	sessionID string
 	agentID   string
-	emitWarn  bool // emit wide events for warnings
-	emitError bool // emit wide events for errors
+	emitWarn  bool // emit foxcular events for warnings
+	emitError bool // emit foxcular events for errors
 }
 
 // LoggerOption configures a Logger.
@@ -43,12 +43,12 @@ func WithLogSession(sessionID, agentID string) LoggerOption {
 	}
 }
 
-// WithEmitWarnings enables emitting wide events for warnings.
+// WithEmitWarnings enables emitting foxcular events for warnings.
 func WithEmitWarnings(emit bool) LoggerOption {
 	return func(l *Logger) { l.emitWarn = emit }
 }
 
-// WithEmitErrors enables emitting wide events for errors.
+// WithEmitErrors enables emitting foxcular events for errors.
 func WithEmitErrors(emit bool) LoggerOption {
 	return func(l *Logger) { l.emitError = emit }
 }
@@ -61,7 +61,7 @@ func WithWriter(w io.Writer) LoggerOption {
 }
 
 // NewLogger creates a new Logger for a skill.
-// By default, it writes structured logs to stderr and does not emit wide events.
+// By default, it writes structured logs to stderr and does not emit foxcular events.
 func NewLogger(opts ...LoggerOption) *Logger {
 	l := &Logger{
 		zl:        zerolog.New(os.Stderr).With().Timestamp().Logger(),
@@ -91,7 +91,7 @@ func (l *Logger) baseEvent(e *zerolog.Event) *zerolog.Event {
 	return e
 }
 
-// Debug logs a debug message (not emitted as wide event).
+// Debug logs a debug message (not emitted as foxcular event).
 func (l *Logger) Debug(msg string, fields ...Field) {
 	e := l.zl.Debug()
 	e = l.baseEvent(e)
@@ -101,7 +101,7 @@ func (l *Logger) Debug(msg string, fields ...Field) {
 	e.Msg(msg)
 }
 
-// Info logs an info message (not emitted as wide event).
+// Info logs an info message (not emitted as foxcular event).
 func (l *Logger) Info(msg string, fields ...Field) {
 	e := l.zl.Info()
 	e = l.baseEvent(e)
@@ -111,7 +111,7 @@ func (l *Logger) Info(msg string, fields ...Field) {
 	e.Msg(msg)
 }
 
-// Warn logs a warning message and optionally emits a wide event.
+// Warn logs a warning message and optionally emits a foxcular event.
 func (l *Logger) Warn(msg string, fields ...Field) {
 	e := l.zl.Warn()
 	e = l.baseEvent(e)
@@ -139,7 +139,7 @@ func (l *Logger) WarnCtx(ctx context.Context, msg string, fields ...Field) {
 	}
 }
 
-// Error logs an error message and optionally emits a wide event.
+// Error logs an error message and optionally emits a foxcular event.
 func (l *Logger) Error(msg string, err error, fields ...Field) {
 	e := l.zl.Error()
 	e = l.baseEvent(e)
@@ -175,7 +175,7 @@ func (l *Logger) ErrorCtx(ctx context.Context, msg string, err error, fields ...
 	}
 }
 
-// emitEvent creates and emits a wide event for the log entry.
+// emitEvent creates and emits a foxcular event for the log entry.
 func (l *Logger) emitEvent(ctx context.Context, level, msg string, fields []Field) {
 	op := "skill.log"
 	if l.command != "" {

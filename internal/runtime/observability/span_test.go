@@ -36,14 +36,14 @@ func TestStartSpan_Success(t *testing.T) {
 	if builder.event.Operation != OpSkillRun {
 		t.Errorf("expected operation %q, got %q", OpSkillRun, builder.event.Operation)
 	}
-	if builder.event.Component != ComponentSkill {
-		t.Errorf("expected component %q, got %q", ComponentSkill, builder.event.Component)
+	if eventDataString(builder.event, "component") != ComponentSkill {
+		t.Errorf("expected component %q, got %q", ComponentSkill, eventDataString(builder.event, "component"))
 	}
-	if builder.event.Command != "test/skill" {
-		t.Errorf("expected command %q, got %q", "test/skill", builder.event.Command)
+	if builder.event.Name != "test/skill" {
+		t.Errorf("expected command %q, got %q", "test/skill", builder.event.Name)
 	}
-	if builder.event.Subtype != "test" {
-		t.Errorf("expected subtype %q, got %q", "test", builder.event.Subtype)
+	if eventDataString(builder.event, "subtype") != "test" {
+		t.Errorf("expected subtype %q, got %q", "test", eventDataString(builder.event, "subtype"))
 	}
 
 	// Call done with nil error (success)
@@ -123,26 +123,26 @@ func TestStartSpan_AllOptions(t *testing.T) {
 	if ev.ParentID != "parent456" {
 		t.Errorf("expected parent ID %q, got %q", "parent456", ev.ParentID)
 	}
-	if ev.Component != ComponentHook {
-		t.Errorf("expected component %q, got %q", ComponentHook, ev.Component)
+	if eventDataString(ev, "component") != ComponentHook {
+		t.Errorf("expected component %q, got %q", ComponentHook, eventDataString(ev, "component"))
 	}
-	if ev.Command != "test/command" {
-		t.Errorf("expected command %q, got %q", "test/command", ev.Command)
+	if ev.Name != "test/command" {
+		t.Errorf("expected command %q, got %q", "test/command", ev.Name)
 	}
-	if ev.Subtype != "mysubtype" {
-		t.Errorf("expected subtype %q, got %q", "mysubtype", ev.Subtype)
+	if eventDataString(ev, "subtype") != "mysubtype" {
+		t.Errorf("expected subtype %q, got %q", "mysubtype", eventDataString(ev, "subtype"))
 	}
-	if ev.SessionID != "session789" {
-		t.Errorf("expected session ID %q, got %q", "session789", ev.SessionID)
+	if eventDataString(ev, "session_id") != "session789" {
+		t.Errorf("expected session ID %q, got %q", "session789", eventDataString(ev, "session_id"))
 	}
-	if ev.AgentID != "agent000" {
-		t.Errorf("expected agent ID %q, got %q", "agent000", ev.AgentID)
+	if eventDataString(ev, "agent_id") != "agent000" {
+		t.Errorf("expected agent ID %q, got %q", "agent000", eventDataString(ev, "agent_id"))
 	}
-	if ev.WorkspaceID != "/path/to/workspace" {
-		t.Errorf("expected workspace %q, got %q", "/path/to/workspace", ev.WorkspaceID)
+	if eventDataString(ev, "workspace_id") != "/path/to/workspace" {
+		t.Errorf("expected workspace %q, got %q", "/path/to/workspace", eventDataString(ev, "workspace_id"))
 	}
-	if ev.JobID != "job111" {
-		t.Errorf("expected job ID %q, got %q", "job111", ev.JobID)
+	if eventDataString(ev, "job_id") != "job111" {
+		t.Errorf("expected job ID %q, got %q", "job111", eventDataString(ev, "job_id"))
 	}
 	if ev.Data["key1"] != "value1" {
 		t.Errorf("expected data key1=%q, got %v", "value1", ev.Data["key1"])
@@ -182,8 +182,8 @@ func TestStartSpan_NilOptions(t *testing.T) {
 	)
 	defer done(nil)
 
-	if builder.event.Command != "test" {
-		t.Errorf("expected command %q, got %q", "test", builder.event.Command)
+	if builder.event.Name != "test" {
+		t.Errorf("expected command %q, got %q", "test", builder.event.Name)
 	}
 }
 

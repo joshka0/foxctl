@@ -18,7 +18,7 @@ Research-only agent using foxctl code intelligence tools. Read-only investigatio
 | `repo ask` | Architecture, relationships, impact, ownership |
 | `context_grep` | AST + ripgrep + function body extraction |
 | `codemap generate` | AI-traced code relationship maps |
-| `memory/query` | Past learnings, gotchas, decisions |
+| `memory/query` | Canonical memory records with lifecycle and trust labels |
 | `session/recall` | Past session context |
 
 ## Strategy

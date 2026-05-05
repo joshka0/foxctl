@@ -109,7 +109,7 @@ func deleteMatchingEventsFromFile(ctx context.Context, filePath string, sinceTim
 			continue
 		}
 
-		var event WideEvent
+		var event Event
 		if err := json.Unmarshal(line, &event); err != nil {
 			keptLines = append(keptLines, line)
 			keptCount++

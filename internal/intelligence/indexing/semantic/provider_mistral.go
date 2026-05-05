@@ -239,34 +239,34 @@ func (p *MistralProvider) ResetUsage() {
 	p.tracker.reset()
 }
 
-// emitEvent emits a wide event for observability.
+// emitEvent emits a foxcular event for observability.
 func (p *MistralProvider) emitEvent(ctx context.Context, start time.Time, textsCount int, estimatedTokens, actualTokens int64, status observability.Status, err error) {
-	durationMS := time.Since(start).Milliseconds()
+	duration := time.Since(start)
 
 	costUSD := 0.0
 	if actualTokens > 0 {
 		costUSD = float64(actualTokens) * MistralEmbedPricePerMillionTokens / 1_000_000
 	}
 
-	event := &observability.WideEvent{
-		Ts:         time.Now().UTC(),
-		TraceID:    observability.TraceIDFromContext(ctx),
-		SpanID:     ulid.Make().String(),
-		Service:    "foxctl",
-		Component:  observability.ComponentSkill,
-		Operation:  "embedding.generate",
-		Command:    "mistral",
-		Subtype:    p.model,
-		Status:     status,
-		DurationMS: durationMS,
+	event := &observability.Event{
+		Timestamp: time.Now().UTC(),
+		TraceID:   observability.TraceIDFromContext(ctx),
+		SpanID:    ulid.Make().String(),
+		Operation: "embedding.generate",
+		Name:      "mistral",
+		Status:    status,
+		Duration:  duration,
 		Data: map[string]any{
-			"provider":         "mistral",
-			"model":            p.model,
-			"texts_count":      textsCount,
-			"tokens_estimated": estimatedTokens,
-			"tokens_actual":    actualTokens,
-			"dimensions":       p.dimensions,
-			"cost_usd":         costUSD,
+			observability.DataKeyService:   "foxctl",
+			observability.DataKeyComponent: observability.ComponentSkill,
+			observability.DataKeySubtype:   p.model,
+			"provider":                     "mistral",
+			"model":                        p.model,
+			"texts_count":                  textsCount,
+			"tokens_estimated":             estimatedTokens,
+			"tokens_actual":                actualTokens,
+			"dimensions":                   p.dimensions,
+			"cost_usd":                     costUSD,
 		},
 	}
 

@@ -295,7 +295,7 @@ Example:
 
 ```text
 changed: wired loop PATCH and persisted runtime state
-verified: go test -tags=libsqlite3 ./internal/interfaces/web/api ./cmd/foxctl/cmd -run '...'; npm --prefix packages/gui-agent run build
+verified: make test-short; npm --prefix packages/gui-agent run build
 remaining: local GUI auth still uses dev-local-user fallback
 ```
 

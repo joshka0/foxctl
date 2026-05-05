@@ -297,7 +297,7 @@ ${symbols_formatted}${GOTCHAS_SECTION}
     if [[ "$COMMAND" =~ ^go[[:space:]]+test ]]; then
       jq -nc '{
         "decision": "block",
-        "reason": "**[Foxctl Mode] Use make test-* instead of go test**\n\n**Quick tests:** `make test-short`\n**CGO tests:** `make test-cgo-short`\n**Full tests:** `make test`\n**Race tests:** `make test-race`"
+        "reason": "**[Foxctl Mode] Use make test-* instead of go test**\n\n**Quick tests:** `make test-short`\n**Full tests:** `make test`\n**Race tests:** `make test-race`"
       }'
       exit 0
     fi

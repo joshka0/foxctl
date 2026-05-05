@@ -142,6 +142,27 @@ type NamedEntry struct {
 	AccessCount int
 	SessionID   string // AI coding tool session ID (Claude Code, OpenCode, Cursor, etc.)
 
+	// Lifecycle fields keep named memories aligned with the canonical memory
+	// envelope without rewriting result payloads on every curator/access update.
+	LifecycleState  string
+	Pinned          bool
+	ReviewStatus    string
+	SupersededBy    string
+	ReviewNotes     string
+	LastUsedAt      time.Time
+	LastValidatedAt time.Time
+	SelectedCount   int
+	UseCount        int
+	SuccessCount    int
+	FailureCount    int
+	PatchCount      int
+	RestoreCount    int
+	LastSelectedAt  time.Time
+	LastSucceededAt time.Time
+	LastFailedAt    time.Time
+	LastPatchedAt   time.Time
+	LastRestoredAt  time.Time
+
 	// Atomic processing fields (SimpleMem-style semantic lossless compression)
 	// See: https://github.com/aiming-lab/SimpleMem
 	AtomicText string   // Self-contained, disambiguated rewrite of summary
@@ -171,6 +192,22 @@ type MemorySaveOptions struct {
 	SessionID string // AI coding tool session ID (optional)
 }
 
+// MemoryLifecycleUpdate mutates durable lifecycle metadata for a named memory.
+type MemoryLifecycleUpdate struct {
+	LifecycleState  string
+	ReviewStatus    string
+	SupersededBy    string
+	ReviewNotes     string
+	LastUsedAt      *time.Time
+	LastValidatedAt *time.Time
+}
+
+// MemoryTelemetryUpdate records an explicit use/projection signal for a named memory.
+type MemoryTelemetryUpdate struct {
+	Action string
+	At     *time.Time
+}
+
 // MemoryListFilter provides filter options for listing memories.
 type MemoryListFilter struct {
 	Types     []string
@@ -198,6 +235,8 @@ type MemoryStore interface {
 	DeleteByNamePrefix(ctx context.Context, workspace, namePrefix string) (int, error)
 	Search(ctx context.Context, workspace, query string, limit int) ([]ScoredEntry, error)
 	Update(ctx context.Context, name, workspace string, summary, typ *string) (NamedEntry, error)
+	UpdateLifecycle(ctx context.Context, name, workspace string, update MemoryLifecycleUpdate) (NamedEntry, error)
+	UpdateTelemetry(ctx context.Context, name, workspace string, update MemoryTelemetryUpdate) (NamedEntry, error)
 	Relevant(ctx context.Context, workspace string, limit int) ([]ScoredEntry, error)
 	Stats(ctx context.Context) (MemoryStats, error)
 	// UpdateEmbedding stores an embedding vector for a named memory entry.
@@ -262,7 +301,7 @@ type Session struct {
 	ErrorMessage    string `json:"error_message,omitempty"` // Error details when status=error
 	// Agent execution context
 	Prompt      string `json:"prompt,omitempty"`       // Original prompt/task for agent sessions
-	PromptHash  string `json:"prompt_hash,omitempty"`  // SHA256 hash for correlation with wide events
+	PromptHash  string `json:"prompt_hash,omitempty"`  // SHA256 hash for correlation with foxcular events
 	LLMProvider string `json:"llm_provider,omitempty"` // LLM provider (cerebras, openrouter, etc.)
 	LLMModel    string `json:"llm_model,omitempty"`    // Model name
 	// Pending restore flag for post-compact context injection

@@ -37,15 +37,15 @@ func extractArtifacts(result []byte) resultArtifacts {
 	return artifacts
 }
 
-// emitWideEvent creates and emits a wide event for skill execution.
+// emitEvent creates and emits an event for skill execution.
 // This captures the full operation context in a single comprehensive event.
 // Uses StartSpanAt so trace_id follows correlation_id when available.
-func (e *Executor) emitWideEvent(startTime time.Time, source string, cacheHit bool, err error) {
-	e.emitWideEventWithArtifacts(startTime, source, cacheHit, err, resultArtifacts{})
+func (e *Executor) emitEvent(startTime time.Time, source string, cacheHit bool, err error) {
+	e.emitEventWithArtifacts(startTime, source, cacheHit, err, resultArtifacts{})
 }
 
-// emitWideEventWithArtifacts creates and emits a wide event with CAS artifacts.
-func (e *Executor) emitWideEventWithArtifacts(startTime time.Time, source string, cacheHit bool, err error, artifacts resultArtifacts) {
+// emitEventWithArtifacts creates and emits an event with CAS artifacts.
+func (e *Executor) emitEventWithArtifacts(startTime time.Time, source string, cacheHit bool, err error, artifacts resultArtifacts) {
 	// Use correlation_id as trace_id when available for cross-layer correlation.
 	_, done, builder := observability.StartSpanAt(
 		e.ctx,
@@ -75,24 +75,24 @@ func (e *Executor) emitWideEventWithArtifacts(startTime time.Time, source string
 	done(err)
 }
 
-// EmitCacheHitEvent emits a wide event for a cache hit.
+// EmitCacheHitEvent emits an event for a cache hit.
 func (e *Executor) EmitCacheHitEvent(startTime time.Time) {
-	e.emitWideEvent(startTime, "cache", true, nil)
+	e.emitEvent(startTime, "cache", true, nil)
 }
 
-// EmitRunEvent emits a wide event for a skill execution (cache miss).
+// EmitRunEvent emits an event for a skill execution (cache miss).
 func (e *Executor) EmitRunEvent(startTime time.Time, err error) {
-	e.emitWideEvent(startTime, "run", false, err)
+	e.emitEvent(startTime, "run", false, err)
 }
 
-// EmitRunEventWithResult emits a wide event with result artifacts.
+// EmitRunEventWithResult emits an event with result artifacts.
 // Use this when you have access to the result bytes to extract CAS digests.
 func (e *Executor) EmitRunEventWithResult(startTime time.Time, result []byte, err error) {
 	artifacts := extractArtifacts(result)
-	e.emitWideEventWithArtifacts(startTime, "run", false, err, artifacts)
+	e.emitEventWithArtifacts(startTime, "run", false, err, artifacts)
 }
 
-// EmitAsyncSubmitEvent emits a wide event for an async job submission.
+// EmitAsyncSubmitEvent emits an event for an async job submission.
 func (e *Executor) EmitAsyncSubmitEvent(startTime time.Time, jobID string, err error) {
 	_, done, _ := observability.StartSpanAt(
 		e.ctx,

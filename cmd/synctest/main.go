@@ -1,6 +1,4 @@
-//go:build cgo
-
-// synctest is a simple test to verify libsql sync functionality.
+// synctest is a simple test to verify Turso sync functionality.
 package main
 
 import (
@@ -17,27 +15,28 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// Configure libsql with sync
-	syncURL := os.Getenv("FOXCTL_LIBSQL_SYNC_URL")
+	// Configure Turso with sync
+	syncURL := os.Getenv("FOXCTL_TURSO_URL")
 	if syncURL == "" {
 		syncURL = "http://127.0.0.1:8080"
 	}
+	token := os.Getenv("FOXCTL_TURSO_TOKEN")
 
-	replicaPath := os.Getenv("FOXCTL_LIBSQL_PATH")
+	replicaPath := os.Getenv("FOXCTL_TURSO_PATH")
 	if replicaPath == "" {
 		replicaPath = os.ExpandEnv("$HOME/.foxctl/sync-test/replica.db")
 	}
 
 	cfg := dbdriver.Config{
-		Driver: dbdriver.DriverLibSQL,
-		LibSQL: dbdriver.LibSQLConfig{
-			Path:               replicaPath,
-			SyncURL:            syncURL,
-			EnableVectorSearch: false,
+		Driver: dbdriver.DriverTurso,
+		Turso: dbdriver.TursoConfig{
+			Path:      replicaPath,
+			URL:       syncURL,
+			AuthToken: token,
 		},
 	}
 
-	log.Printf("Opening libsql with sync: path=%s, syncURL=%s", replicaPath, syncURL)
+	log.Printf("Opening Turso with sync: path=%s, syncURL=%s", replicaPath, syncURL)
 
 	// Open database with migration
 	db, err := dbdriver.OpenDB(ctx, cfg, func(ctx context.Context, db *sql.DB) error {

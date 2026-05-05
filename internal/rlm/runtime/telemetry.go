@@ -27,7 +27,7 @@ const (
 	OpRLMError             = "rlm.error"
 )
 
-// ObservabilityTelemetrySink emits RLM events into foxctl wide-event
+// ObservabilityTelemetrySink emits RLM events into foxctl foxcular-event
 // observability. It intentionally avoids raw prompt/answer/code payloads.
 type ObservabilityTelemetrySink struct {
 	SessionID   string

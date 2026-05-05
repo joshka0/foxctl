@@ -16,6 +16,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillmain"
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	errs "github.com/joshka0/foxctl/internal/platform/errors"
+	"github.com/joshka0/foxctl/internal/runtime/observability"
 )
 
 const command = "obs/logs"
@@ -30,25 +31,6 @@ type input struct {
 	Since      string `json:"since,omitempty"`
 	Stats      bool   `json:"stats,omitempty"`
 	ErrorsOnly bool   `json:"errors_only,omitempty"`
-}
-
-// wideEvent represents a wide event from the NDJSON log with full context.
-type wideEvent struct {
-	Timestamp   time.Time      `json:"ts"`
-	TraceID     string         `json:"trace_id"`
-	SpanID      string         `json:"span_id"`
-	Service     string         `json:"service"`
-	Version     string         `json:"version"`
-	Component   string         `json:"component"`
-	Operation   string         `json:"operation"`
-	Command     string         `json:"command"`
-	WorkspaceID string         `json:"workspace_id"`
-	JobID       string         `json:"job_id,omitempty"`
-	Status      string         `json:"status"`
-	DurationMS  int64          `json:"duration_ms"`
-	ErrorCode   string         `json:"error_code,omitempty"`
-	ErrorMsg    string         `json:"error_message,omitempty"`
-	Data        map[string]any `json:"data,omitempty"`
 }
 
 // eventSummary is a condensed view for output with essential fields.
@@ -117,7 +99,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if obsDir == "" {
 		obsDir = filepath.Join(os.Getenv("HOME"), ".foxctl", "observability")
 	}
-	eventsFile := filepath.Join(obsDir, "events", "wide_events.ndjson")
+	eventsFile := filepath.Join(obsDir, "events", observability.EventFileName+".ndjson")
 
 	// Check if file exists
 	if _, err := os.Stat(eventsFile); os.IsNotExist(err) {
@@ -142,12 +124,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			Timestamp:  evt.Timestamp.Format(time.RFC3339),
 			TraceID:    truncateID(evt.TraceID),
 			Operation:  evt.Operation,
-			Command:    evt.Command,
-			Component:  evt.Component,
-			Status:     evt.Status,
-			DurationMS: evt.DurationMS,
+			Command:    evt.Name,
+			Component:  observability.EventDataString(&evt, observability.DataKeyComponent),
+			Status:     string(evt.Status),
+			DurationMS: evt.Duration.Milliseconds(),
 			ErrorCode:  evt.ErrorCode,
-			ErrorMsg:   evt.ErrorMsg,
+			ErrorMsg:   evt.ErrorMessage,
 		}
 	}
 
@@ -197,14 +179,14 @@ func parseSince(s string) time.Time {
 }
 
 // readEvents streams and filters NDJSON events with memory-efficient processing.
-func readEvents(path string, limit int, sinceTime time.Time, in input) ([]wideEvent, int, error) {
+func readEvents(path string, limit int, sinceTime time.Time, in input) ([]observability.Event, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer func() { errs.Ignore(f.Close(), "close events file") }()
 
-	var allEvents []wideEvent
+	var allEvents []observability.Event
 	totalScanned := 0
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -216,7 +198,7 @@ func readEvents(path string, limit int, sinceTime time.Time, in input) ([]wideEv
 		}
 		totalScanned++
 
-		var evt wideEvent
+		var evt observability.Event
 		if err := json.Unmarshal(line, &evt); err != nil {
 			continue
 		}
@@ -247,14 +229,14 @@ func readEvents(path string, limit int, sinceTime time.Time, in input) ([]wideEv
 }
 
 // matchesFilters applies all configured filters to determine if an event should be included.
-func matchesFilters(evt wideEvent, sinceTime time.Time, in input) bool {
+func matchesFilters(evt observability.Event, sinceTime time.Time, in input) bool {
 	// Time filter
 	if !sinceTime.IsZero() && evt.Timestamp.Before(sinceTime) {
 		return false
 	}
 
 	// Errors only
-	if in.ErrorsOnly && evt.Status != "error" {
+	if in.ErrorsOnly && evt.Status != observability.StatusError {
 		return false
 	}
 
@@ -264,17 +246,17 @@ func matchesFilters(evt wideEvent, sinceTime time.Time, in input) bool {
 	}
 
 	// Command filter (substring match)
-	if in.Command != "" && !strings.Contains(strings.ToLower(evt.Command), strings.ToLower(in.Command)) {
+	if in.Command != "" && !strings.Contains(strings.ToLower(evt.Name), strings.ToLower(in.Command)) {
 		return false
 	}
 
 	// Status filter (exact match)
-	if in.Status != "" && evt.Status != in.Status {
+	if in.Status != "" && string(evt.Status) != in.Status {
 		return false
 	}
 
 	// Component filter (exact match)
-	if in.Component != "" && evt.Component != in.Component {
+	if in.Component != "" && observability.EventDataString(&evt, observability.DataKeyComponent) != in.Component {
 		return false
 	}
 
@@ -282,7 +264,7 @@ func matchesFilters(evt wideEvent, sinceTime time.Time, in input) bool {
 }
 
 // computeStats calculates aggregate statistics from filtered events.
-func computeStats(events []wideEvent) stats {
+func computeStats(events []observability.Event) stats {
 	s := stats{
 		TotalEvents: len(events),
 		ByStatus:    make(map[string]int),
@@ -296,19 +278,21 @@ func computeStats(events []wideEvent) stats {
 	var minTime, maxTime time.Time
 
 	for _, evt := range events {
-		s.ByStatus[evt.Status]++
+		s.ByStatus[string(evt.Status)]++
 		s.ByOperation[evt.Operation]++
-		s.ByComponent[evt.Component]++
-		if evt.Command != "" {
-			s.ByCommand[evt.Command]++
+		component := observability.EventDataString(&evt, observability.DataKeyComponent)
+		s.ByComponent[component]++
+		if evt.Name != "" {
+			s.ByCommand[evt.Name]++
 		}
 
-		totalDuration += evt.DurationMS
-		if evt.DurationMS > s.MaxDurationMS {
-			s.MaxDurationMS = evt.DurationMS
+		durationMS := evt.Duration.Milliseconds()
+		totalDuration += durationMS
+		if durationMS > s.MaxDurationMS {
+			s.MaxDurationMS = durationMS
 		}
 
-		if evt.Status == "error" {
+		if evt.Status == observability.StatusError {
 			errorCount++
 		}
 

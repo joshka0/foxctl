@@ -29,19 +29,19 @@ type syncStoreResult struct {
 // newSyncCommand constructs the `foxctl sync` command.
 //
 // Index:
-// - Purpose: Provide an explicit, on-demand sync for configured libSQL/Turso embedded replicas
+// - Purpose: Provide an explicit, on-demand sync for configured Turso embedded replicas
 // - Flow: resolve target stores → load dbdriver config → open DB → call Syncer.Sync → emit envelope response
 // - SideEffects: may perform network I/O; may create/update embedded replica files; may block up to per-store timeout
 // - FailureModes: invalid store names, auth/network errors, sync timeouts, DB open failures
 // - Related: dbdriver.Syncer, dbdriver.ConfigLoader.LoadConfig, storage.CanonicalStores
-// - Keywords: sync, libsql, turso, replica, cross_device
+// - Keywords: sync, turso, replica, cross_device
 func newSyncCommand() *cobra.Command {
 	var storeNames []string
 	var perStoreTimeout time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Sync configured libSQL/Turso replicas with the remote",
+		Short: "Sync configured Turso replicas with the remote",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			cfg, ok := config.FromContext(ctx)
@@ -119,16 +119,14 @@ func newSyncCommand() *cobra.Command {
 					r.Reason = "sqlite (no remote sync configured)"
 					results = append(results, r)
 					continue
-				case dbdriver.DriverLibSQL:
-					r.SyncURL = strings.TrimSpace(dbCfg.LibSQL.SyncURL)
+				case dbdriver.DriverTurso:
+					r.SyncURL = strings.TrimSpace(dbCfg.Turso.URL)
 					if r.SyncURL == "" {
 						r.Skipped = true
-						r.Reason = "libsql local-only (no sync_url configured)"
+						r.Reason = "turso local-only (no remote url configured)"
 						results = append(results, r)
 						continue
 					}
-				case dbdriver.DriverTurso:
-					r.SyncURL = strings.TrimSpace(dbCfg.Turso.URL)
 				default:
 					r.Skipped = true
 					r.Reason = "unknown driver"

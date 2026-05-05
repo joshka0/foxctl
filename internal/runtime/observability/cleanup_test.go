@@ -10,36 +10,10 @@ func TestDeleteEventRecordsDeletesMatchingErrors(t *testing.T) {
 	t.Parallel()
 
 	obsDir := t.TempDir()
-	writeWideEventsFile(t, obsDir, []WideEvent{
-		{
-			Ts:           time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC),
-			TraceID:      "trace-smoke",
-			SessionID:    "session-smoke",
-			Component:    ComponentWeb,
-			Operation:    "web.smoke.failed",
-			Status:       StatusError,
-			ErrorMessage: "gui smoke failure",
-			Data: map[string]any{
-				"label": "smoke",
-			},
-		},
-		{
-			Ts:           time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC),
-			TraceID:      "trace-keep",
-			SessionID:    "session-keep",
-			Component:    ComponentAgent,
-			Operation:    "agent.iteration",
-			Status:       StatusError,
-			ErrorMessage: "keep me",
-		},
-		{
-			Ts:        time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC),
-			TraceID:   "trace-ok",
-			SessionID: "session-ok",
-			Component: ComponentAgent,
-			Operation: "agent.iteration",
-			Status:    StatusOK,
-		},
+	writeEventsFile(t, obsDir, []Event{
+		testEvent(time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC), "web.smoke.failed", StatusError, testTrace("trace-smoke"), testSession("session-smoke"), testComponent(ComponentWeb), testError("", "gui smoke failure"), testData("label", "smoke")),
+		testEvent(time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC), "agent.iteration", StatusError, testTrace("trace-keep"), testSession("session-keep"), testComponent(ComponentAgent), testError("", "keep me")),
+		testEvent(time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC), "agent.iteration", StatusOK, testTrace("trace-ok"), testSession("session-ok"), testComponent(ComponentAgent)),
 	})
 
 	result, err := DeleteEventRecords(context.Background(), DeleteEventOptions{
@@ -75,28 +49,10 @@ func TestDeleteEventRecordsMatchesFocusedTraceAndSession(t *testing.T) {
 	t.Parallel()
 
 	obsDir := t.TempDir()
-	writeWideEventsFile(t, obsDir, []WideEvent{
-		{
-			Ts:        time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC),
-			TraceID:   "trace-focus",
-			SessionID: "session-a",
-			Operation: "agent.iteration",
-			Status:    StatusError,
-		},
-		{
-			Ts:        time.Date(2026, 3, 20, 8, 1, 0, 0, time.UTC),
-			TraceID:   "trace-focus",
-			SessionID: "session-a",
-			Operation: "agent.tool",
-			Status:    StatusError,
-		},
-		{
-			Ts:        time.Date(2026, 3, 20, 8, 2, 0, 0, time.UTC),
-			TraceID:   "trace-other",
-			SessionID: "session-b",
-			Operation: "agent.iteration",
-			Status:    StatusError,
-		},
+	writeEventsFile(t, obsDir, []Event{
+		testEvent(time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC), "agent.iteration", StatusError, testTrace("trace-focus"), testSession("session-a")),
+		testEvent(time.Date(2026, 3, 20, 8, 1, 0, 0, time.UTC), "agent.tool", StatusError, testTrace("trace-focus"), testSession("session-a")),
+		testEvent(time.Date(2026, 3, 20, 8, 2, 0, 0, time.UTC), "agent.iteration", StatusError, testTrace("trace-other"), testSession("session-b")),
 	})
 
 	result, err := DeleteEventRecords(context.Background(), DeleteEventOptions{
@@ -132,14 +88,8 @@ func TestDeleteEventRecordsDryRunLeavesFileUntouched(t *testing.T) {
 	t.Parallel()
 
 	obsDir := t.TempDir()
-	writeWideEventsFile(t, obsDir, []WideEvent{
-		{
-			Ts:           time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC),
-			TraceID:      "trace-dry-run",
-			Operation:    "web.error",
-			Status:       StatusError,
-			ErrorMessage: "dry run target",
-		},
+	writeEventsFile(t, obsDir, []Event{
+		testEvent(time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC), "web.error", StatusError, testTrace("trace-dry-run"), testError("", "dry run target")),
 	})
 
 	result, err := DeleteEventRecords(context.Background(), DeleteEventOptions{

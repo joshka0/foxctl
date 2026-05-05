@@ -206,16 +206,16 @@ export const AgentctlPlugin: Plugin = async ({ $, directory }) => {
       }),
 
       agentctl_memory_query: tool({
-        description: "Query memories: gotchas, decisions, patterns, insights",
+        description: "Query canonical memory records with lifecycle, trust, provenance, and usage labels",
         args: {
           query: tool.schema.string().describe("Search query"),
-          types: tool.schema.array(tool.schema.string()).optional().describe("Memory types to search"),
+          kinds: tool.schema.array(tool.schema.string()).optional().describe("Canonical memory kinds to search"),
           limit: tool.schema.number().optional(),
         },
         async execute(args) {
           return runSkill("memory/query", {
             query: args.query,
-            types: args.types,
+            kinds: args.kinds,
             limit: args.limit || 10,
           });
         },

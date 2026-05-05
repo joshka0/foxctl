@@ -14,7 +14,7 @@ import (
 	"github.com/joshka0/foxctl/internal/adapters/skillslib/skillout"
 	"github.com/oklog/ulid/v2"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 const command = "presence/character"
@@ -83,7 +83,7 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Open companion database
 	dbPath := filepath.Join(rc.Config.Storage.Root, "companion.db")
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return skillerr.WrapIO("open companion database", err)
 	}

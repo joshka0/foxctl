@@ -61,7 +61,7 @@ import (
 func main() {
     ctx := context.Background()
 
-    // Automatically uses SQLite/libSQL/Turso based on env vars.
+    // Automatically uses SQLite or Turso based on env vars.
     // Env var prefix is derived from storeName: e.g., FOXCTL_MEMORY_DB_DRIVER, FOXCTL_DB_DRIVER.
     db, closeFn, err := dbutil.OpenStoreDB(ctx, "~/.foxctl/storage", "MEMORY", "memory.db", nil)
     if err != nil {
@@ -106,6 +106,8 @@ cfg := dbdriver.DefaultTursoConfig(
     "your_token_here",
     "memory",
 )
+// DefaultTursoConfig uses memory.turso as the local replica path. Set
+// cfg.Turso.Path when you need an absolute or storage-root-relative location.
 cfg.Turso.EnableVectorSearch = true
 cfg.Turso.VectorDimensions = 384
 

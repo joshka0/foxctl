@@ -1,7 +1,7 @@
 // Package main implements the hooks/subagent_stop skill.
 // This skill handles SubagentStop events to:
 //  1. Release any file reservations owned by the subagent
-//  2. Emit observability wide events for the subagent lifecycle
+//  2. Emit observability foxcular events for the subagent lifecycle
 package main
 
 import (

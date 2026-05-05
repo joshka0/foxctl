@@ -16,4 +16,5 @@ bash run.sh
 
 ## Notes
 - This case uses the repo's native Go test framework with a narrow selector across the touched packages.
-- It requires the `libsqlite3` CGO test path because several room-runtime/storage proofs run under `-tags=libsqlite3`.
+- It runs on the canonical non-CGO storage path. Turso-backed SQLite-family
+  storage should be tested through the default build, not a libsqlite3 tag.

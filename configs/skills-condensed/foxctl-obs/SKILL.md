@@ -1,11 +1,11 @@
 ---
 name: foxctl Observability
-description: Query and browse observability logs - wide events, errors, stats.
+description: Query and browse observability logs - foxcular events, errors, stats.
 ---
 
 # Observability Logs
 
-Query wide events without navigating to the observability directory.
+Query foxcular events without navigating to the observability directory.
 
 ```bash
 # Recent events (default: 20)
@@ -40,7 +40,7 @@ foxctl run obs/logs --input '{"operation": "skill.run", "status": "error"}'
 ## Output
 
 Returns events sorted by timestamp (most recent first) with:
-- `events[]`: Matching wide events
+- `events[]`: Matching foxcular events
 - `count`: Number of events returned
 - `total_scanned`: Total events in file
 - `stats`: Aggregate statistics (if requested)

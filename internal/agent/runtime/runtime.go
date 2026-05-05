@@ -382,7 +382,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 
 	// Persist to database if session store is configured
 	if r.config.SessionStore != nil {
-		// Compute prompt hash for correlation with wide events
+		// Compute prompt hash for correlation with foxcular events
 		var promptHash string
 		if resolvedPrompt != "" {
 			h := sha256.Sum256([]byte(resolvedPrompt))
@@ -1927,22 +1927,26 @@ func (e *agentToolExecutor) executeSessionTimeline(ctx context.Context, args map
 	return commandOutput(cmd, "session_timeline")
 }
 
-// executeMemoryQuery calls memory/query skill for gotchas, decisions, learnings
+// executeMemoryQuery calls memory/query skill for canonical memory records.
 func (e *agentToolExecutor) executeMemoryQuery(ctx context.Context, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
 	limit := intArg(args, 10, "limit")
-	types, _ := args["types"].(string)
+	kinds, _ := args["kinds"].(string)
+	lifecycleStates, _ := args["lifecycle_states"].(string)
 
 	inputMap := map[string]any{
 		"query":     query,
 		"workspace": e.workspaceRoot,
 		"limit":     limit,
 	}
-	if types != "" {
-		inputMap["types"] = types
+	if kinds != "" {
+		inputMap["kinds"] = kinds
+	}
+	if lifecycleStates != "" {
+		inputMap["lifecycle_states"] = lifecycleStates
 	}
 	inputBytes, err := json.Marshal(inputMap)
 	if err != nil {
@@ -2871,10 +2875,11 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "memory_query",
-				Description: "Search stored memories (gotchas, decisions, learnings) for relevant context about the codebase.",
+				Description: "Search canonical memory records with lifecycle, trust, provenance, and usage labels.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"What to search for"},
-					"types":{"type":"string","description":"Filter: gotcha,decision,learning,pattern (default: all)"},
+					"kinds":{"type":"string","description":"Filter canonical kinds: semantic_fact,decision,procedural_skill,policy_rule,episodic_trace,reflection,eval_result,adapter_example (default: all)"},
+					"lifecycle_states":{"type":"string","description":"Optional lifecycle filter: active,candidate,stale,archived,deprecated,quarantined. Default returns active plus strongly matching candidate/stale evidence."},
 					"limit":{"type":"integer","description":"Max results (default 10)"}
 				},"required":["query"]}`),
 			},
@@ -2946,10 +2951,11 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "memory_query",
-				Description: "Search stored memories (gotchas, decisions, learnings) for relevant context about the codebase.",
+				Description: "Search canonical memory records with lifecycle, trust, provenance, and usage labels.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"What to search for"},
-					"types":{"type":"string","description":"Filter: gotcha,decision,learning,pattern (default: all)"},
+					"kinds":{"type":"string","description":"Filter canonical kinds: semantic_fact,decision,procedural_skill,policy_rule,episodic_trace,reflection,eval_result,adapter_example (default: all)"},
+					"lifecycle_states":{"type":"string","description":"Optional lifecycle filter: active,candidate,stale,archived,deprecated,quarantined. Default returns active plus strongly matching candidate/stale evidence."},
 					"limit":{"type":"integer","description":"Max results (default 10)"}
 				},"required":["query"]}`),
 			},
@@ -3054,10 +3060,11 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "memory_query",
-				Description: "Search stored memories (gotchas, decisions, learnings) for relevant context about the codebase.",
+				Description: "Search canonical memory records with lifecycle, trust, provenance, and usage labels.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"What to search for"},
-					"types":{"type":"string","description":"Filter: gotcha,decision,learning,pattern (default: all)"},
+					"kinds":{"type":"string","description":"Filter canonical kinds: semantic_fact,decision,procedural_skill,policy_rule,episodic_trace,reflection,eval_result,adapter_example (default: all)"},
+					"lifecycle_states":{"type":"string","description":"Optional lifecycle filter: active,candidate,stale,archived,deprecated,quarantined. Default returns active plus strongly matching candidate/stale evidence."},
 					"limit":{"type":"integer","description":"Max results (default 10)"}
 				},"required":["query"]}`),
 			},
@@ -3093,10 +3100,11 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allow
 			},
 			engine.ToolDef{
 				Name:        "memory_query",
-				Description: "Search stored memories (gotchas, decisions, learnings) for relevant context about the codebase.",
+				Description: "Search canonical memory records with lifecycle, trust, provenance, and usage labels.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
 					"query":{"type":"string","description":"What to search for"},
-					"types":{"type":"string","description":"Filter: gotcha,decision,learning,pattern (default: all)"},
+					"kinds":{"type":"string","description":"Filter canonical kinds: semantic_fact,decision,procedural_skill,policy_rule,episodic_trace,reflection,eval_result,adapter_example (default: all)"},
+					"lifecycle_states":{"type":"string","description":"Optional lifecycle filter: active,candidate,stale,archived,deprecated,quarantined. Default returns active plus strongly matching candidate/stale evidence."},
 					"limit":{"type":"integer","description":"Max results (default 10)"}
 				},"required":["query"]}`),
 			},

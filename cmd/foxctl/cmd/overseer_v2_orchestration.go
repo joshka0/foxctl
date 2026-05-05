@@ -319,10 +319,6 @@ func openOverseerOrchestrationStore(ctx context.Context, cfg config.Config) (*li
 	}
 
 	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, libsqlorchestration.MigrateSchema)
-	if err != nil && shouldFallbackOrchestrationLibSQLToSQLite(dbCfg, err) {
-		sqliteCfg := dbdriver.DefaultSQLiteConfig(overseerLibSQLPathToSQLitePath(dbCfg.LibSQL.Path, filepath.Join(storageRoot, "v2_events.db")))
-		db, closeFn, err = dbdriver.OpenDBCompatWithCloser(ctx, sqliteCfg, libsqlorchestration.MigrateSchema)
-	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("orchestration store open: %w", err)
 	}
@@ -339,11 +335,6 @@ func openOverseerOrchestrationEventStore(ctx context.Context, cfg config.Config)
 		return nil, err
 	}
 	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, libsqlevents.MigrateSchema)
-	if err != nil && shouldFallbackOrchestrationLibSQLToSQLite(dbCfg, err) {
-		storageRoot := strings.TrimSpace(cfg.Storage.Root)
-		sqliteCfg := dbdriver.DefaultSQLiteConfig(overseerLibSQLPathToSQLitePath(dbCfg.LibSQL.Path, filepath.Join(storageRoot, "v2_events.db")))
-		db, closeFn, err = dbdriver.OpenDBCompatWithCloser(ctx, sqliteCfg, libsqlevents.MigrateSchema)
-	}
 	if err != nil {
 		return nil, fmt.Errorf("orchestration event store open: %w", err)
 	}
@@ -360,43 +351,37 @@ func overseerOrchestrationDBConfig(cfg config.Config) (dbdriver.Config, error) {
 		loader := dbdriver.NewConfigLoader(storageRoot)
 		dbCfg := loader.LoadConfig("V2_EVENTS", "v2_events.db")
 		switch dbCfg.Driver {
-		case dbdriver.DriverSQLite, dbdriver.DriverLibSQL, dbdriver.DriverTurso:
+		case dbdriver.DriverSQLite, dbdriver.DriverTurso:
 			return dbCfg, nil
 		case dbdriver.DriverPostgres:
-			return dbdriver.Config{}, fmt.Errorf("orchestration db config: postgres is not supported by v2 libsql orchestration projections")
+			return dbdriver.Config{}, fmt.Errorf("orchestration db config: postgres is not supported by v2 orchestration projections")
 		default:
 			return dbdriver.Config{}, fmt.Errorf("orchestration db config: unsupported database driver override %q", dbCfg.Driver)
 		}
 	}
 
 	switch strings.ToLower(strings.TrimSpace(cfg.Database.Driver)) {
-	case "", "libsql", "sqlite", "postgres":
+	case "sqlite", "postgres":
 		dbPath := filepath.Join(storageRoot, "v2_events.db")
 		if override := strings.TrimSpace(os.Getenv("FOXCTL_V2_EVENTS_DB_PATH")); override != "" {
 			dbPath = override
 		}
 		return dbdriver.DefaultSQLiteConfig(dbPath), nil
-	case "turso":
-		url := strings.TrimSpace(cfg.Database.Turso.URL)
-		token := strings.TrimSpace(cfg.Database.Turso.AuthToken)
-		if url == "" || token == "" {
-			return dbdriver.Config{}, fmt.Errorf("orchestration db config: turso url and auth_token are required")
-		}
+	case "", "turso":
 		dims := cfg.Database.Vector.Dimensions
 		if dims <= 0 {
 			dims = dbdriver.GetDefaultVectorDimensions()
 		}
-		replicaPath := filepath.Join(storageRoot, "v2_events.turso.replica")
+		path := filepath.Join(storageRoot, "v2_events.turso")
 		if override := strings.TrimSpace(os.Getenv("FOXCTL_V2_EVENTS_DB_PATH")); override != "" {
-			replicaPath = override
+			path = override
 		}
 		return dbdriver.Config{
 			Driver: dbdriver.DriverTurso,
 			Turso: dbdriver.TursoConfig{
-				URL:                url,
-				AuthToken:          token,
+				Path:               path,
 				DatabaseName:       "v2_events",
-				ReplicaPath:        replicaPath,
+				ReplicaPath:        path,
 				EnableVectorSearch: false,
 				VectorDimensions:   dims,
 			},
@@ -404,23 +389,4 @@ func overseerOrchestrationDBConfig(cfg config.Config) (dbdriver.Config, error) {
 	default:
 		return dbdriver.Config{}, fmt.Errorf("orchestration db config: unsupported database driver %q", cfg.Database.Driver)
 	}
-}
-
-func shouldFallbackOrchestrationLibSQLToSQLite(dbCfg dbdriver.Config, err error) bool {
-	if dbCfg.Driver != dbdriver.DriverLibSQL || err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, "libsql driver requires cgo")
-}
-
-func overseerLibSQLPathToSQLitePath(libsqlPath string, fallback string) string {
-	path := strings.TrimSpace(libsqlPath)
-	if path == "" {
-		return fallback
-	}
-	if strings.HasSuffix(path, ".libsql") {
-		return strings.TrimSuffix(path, ".libsql") + ".db"
-	}
-	return path + ".db"
 }

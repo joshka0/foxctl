@@ -211,9 +211,7 @@ const (
 func coordinationIsShared(cfg dbdriver.Config) bool {
 	switch cfg.Driver {
 	case dbdriver.DriverTurso:
-		return true
-	case dbdriver.DriverLibSQL:
-		return strings.TrimSpace(cfg.LibSQL.SyncURL) != ""
+		return strings.TrimSpace(cfg.Turso.URL) != ""
 	default:
 		return false
 	}

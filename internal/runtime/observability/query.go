@@ -30,7 +30,7 @@ type EventQueryOptions struct {
 	TraceIDs        []string
 }
 
-// EventRecord is the JSON-friendly shape used by the GUI and CLI error/log views.
+// EventRecord is the JSON-friendly read model used by the GUI and CLI error/log views.
 type EventRecord struct {
 	Timestamp    string         `json:"ts"`
 	Operation    string         `json:"operation"`
@@ -239,7 +239,7 @@ func readEventFileTail(ctx context.Context, path string, limit int, sinceTime ti
 			continue
 		}
 
-		var event WideEvent
+		var event Event
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			continue
 		}
@@ -284,7 +284,7 @@ func readEventFile(ctx context.Context, path string, limit int, sinceTime time.T
 			continue
 		}
 
-		var event WideEvent
+		var event Event
 		if err := json.Unmarshal(line, &event); err != nil {
 			continue
 		}
@@ -299,23 +299,23 @@ func readEventFile(ctx context.Context, path string, limit int, sinceTime time.T
 	return entries, reader.Err()
 }
 
-func matchesEventFilters(event WideEvent, sinceTime time.Time, componentFilter, operationFilter string, workspaceFilters []string, errorsOnly bool, textQuery, sessionID string, traceIDs []string) bool {
-	if !sinceTime.IsZero() && event.Ts.Before(sinceTime) {
+func matchesEventFilters(event Event, sinceTime time.Time, componentFilter, operationFilter string, workspaceFilters []string, errorsOnly bool, textQuery, sessionID string, traceIDs []string) bool {
+	if !sinceTime.IsZero() && event.Timestamp.Before(sinceTime) {
 		return false
 	}
-	if componentFilter != "" && event.Component != componentFilter {
+	if componentFilter != "" && eventDataString(&event, "component") != componentFilter {
 		return false
 	}
 	if operationFilter != "" && !strings.HasPrefix(event.Operation, operationFilter) {
 		return false
 	}
-	if len(workspaceFilters) > 0 && !matchesWorkspaceFilter(event.WorkspaceID, workspaceFilters) {
+	if len(workspaceFilters) > 0 && !matchesWorkspaceFilter(eventDataString(&event, "workspace_id"), workspaceFilters) {
 		return false
 	}
 	if errorsOnly && event.Status != StatusError {
 		return false
 	}
-	if trimmedSessionID := strings.TrimSpace(sessionID); trimmedSessionID != "" && strings.TrimSpace(event.SessionID) != trimmedSessionID {
+	if trimmedSessionID := strings.TrimSpace(sessionID); trimmedSessionID != "" && strings.TrimSpace(eventDataString(&event, "session_id")) != trimmedSessionID {
 		return false
 	}
 	if len(traceIDs) > 0 && !matchesTraceFilter(event.TraceID, traceIDs) {
@@ -347,7 +347,7 @@ func matchesTraceFilter(value string, filters []string) bool {
 	return false
 }
 
-func matchesTextQuery(event WideEvent, query string) bool {
+func matchesTextQuery(event Event, query string) bool {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
 		return true
@@ -355,7 +355,7 @@ func matchesTextQuery(event WideEvent, query string) bool {
 	if strings.Contains(strings.ToLower(event.Operation), query) {
 		return true
 	}
-	if strings.Contains(strings.ToLower(event.Command), query) {
+	if strings.Contains(strings.ToLower(event.Name), query) {
 		return true
 	}
 	if strings.Contains(strings.ToLower(event.ErrorMessage), query) {
@@ -371,31 +371,50 @@ func matchesTextQuery(event WideEvent, query string) bool {
 	return strings.Contains(strings.ToLower(string(raw)), query)
 }
 
-func eventToRecord(event WideEvent) timedEventRecord {
+func eventToRecord(event Event) timedEventRecord {
 	return timedEventRecord{
 		EventRecord: EventRecord{
-			Timestamp:    event.Ts.Format(time.RFC3339Nano),
+			Timestamp:    event.Timestamp.Format(time.RFC3339Nano),
 			Operation:    event.Operation,
-			Command:      event.Command,
+			Command:      event.Name,
 			Status:       string(event.Status),
-			Component:    event.Component,
+			Component:    eventDataString(&event, "component"),
 			TraceID:      event.TraceID,
 			SpanID:       event.SpanID,
 			ParentID:     event.ParentID,
-			Service:      event.Service,
-			Version:      event.Version,
-			Subtype:      event.Subtype,
-			SessionID:    event.SessionID,
-			AgentID:      event.AgentID,
-			WorkspaceID:  event.WorkspaceID,
-			JobID:        event.JobID,
-			DurationMS:   event.DurationMS,
+			Service:      eventDataString(&event, "service"),
+			Version:      eventDataString(&event, "version"),
+			Subtype:      eventDataString(&event, "subtype"),
+			SessionID:    eventDataString(&event, "session_id"),
+			AgentID:      eventDataString(&event, "agent_id"),
+			WorkspaceID:  eventDataString(&event, "workspace_id"),
+			JobID:        eventDataString(&event, "job_id"),
+			DurationMS:   event.Duration.Milliseconds(),
 			ErrorType:    event.ErrorType,
 			ErrorCode:    event.ErrorCode,
 			ErrorMessage: event.ErrorMessage,
-			Retriable:    event.Retriable,
-			Data:         event.Data,
+			Retriable:    eventDataBoolPtr(&event, "retriable"),
+			Data:         eventPayloadData(event.Data),
 		},
-		parsedAt: event.Ts,
+		parsedAt: event.Timestamp,
 	}
+}
+
+func eventPayloadData(data map[string]any) map[string]any {
+	if len(data) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(data))
+	for key, value := range data {
+		switch key {
+		case "service", "version", "component", "command", "subtype", "session_id", "agent_id", "workspace_id", "job_id", "retriable":
+			continue
+		default:
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

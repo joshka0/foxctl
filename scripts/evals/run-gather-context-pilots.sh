@@ -36,8 +36,8 @@ echo "Building foxctl -> $FOXCTL_BIN"
   cd "$ROOT"
   env -u GOROOT -u GOBIN -u GOTOOLDIR \
     GOCACHE="${GOCACHE:-/tmp/foxctl-go-build-cache}" \
-    CGO_ENABLED="${CGO_ENABLED:-1}" \
-    go build -tags=libsqlite3 -o "$FOXCTL_BIN" ./cmd/foxctl
+    CGO_ENABLED="${CGO_ENABLED:-0}" \
+    go build -o "$FOXCTL_BIN" ./cmd/foxctl
 )
 
 write_repo_state() {

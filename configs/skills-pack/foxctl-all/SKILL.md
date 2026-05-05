@@ -95,12 +95,13 @@ That pack covers:
 ### Memory
 | Skill | Purpose |
 |-------|---------|
-| `memory/query` | Query gotchas/decisions/patterns by file or semantic search |
+| `memory/query` | Query canonical memory records by kind, file, or semantic search |
+| `memory/curator_report` | Generate or explicitly apply memory lifecycle maintenance reports |
 
 ### Observability
 | Skill | Purpose |
 |-------|---------|
-| `obs/logs` | Query wide events (filter by operation, command, status, component) |
+| `obs/logs` | Query foxcular events (filter by operation, command, status, component) |
 
 ### Integrations
 | Skill | Purpose |

@@ -43,7 +43,7 @@ Important scope note:
 | `internal/v2/runtime/orchestration` | Long-lived scheduler/reconcile component for board-driven orchestration |
 | `internal/v2/runtime/contextbuilder`, `internal/v2/runtime/enrichers`, `internal/v2/runtime/supervisor` | Context assembly, async enrichment, and component lifecycle management |
 | `internal/v2/adapters/jido` | Jido JSON-RPC client, child spawner, ask/runtime adapter, orchestration reconciler, and optional companion provider |
-| `internal/v2/adapters/libsql/*` | v2 events, projections, orchestration, idmap, and turn stores |
+| `internal/v2/adapters/libsql/*` | v2 events, projections, orchestration, idmap, and turn stores. The path is historical; the runtime opens Turso/SQLite-compatible stores through the dbdriver layer. |
 | `internal/context/companion` | Companion chat/memory service and adapter layer into v2 context building |
 | `internal/agent`, `internal/agent/daemon` | Classic mailbox-driven agent runtime, overseer hierarchy, tool wiring, and foreground daemon loop |
 | `internal/runtime/daemon` | Local daemon service; currently mixes classic runtime behavior with newer v2-backed command helpers |

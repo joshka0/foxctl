@@ -12,7 +12,6 @@ The storage layer supports per-store database drivers through `internal/storage/
   - default: `sqlite`
 - Supported drivers in current implementation:
   - `sqlite` (default)
-  - `libsql`
   - `turso`
   - `postgres`
 

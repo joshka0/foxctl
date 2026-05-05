@@ -208,7 +208,7 @@ func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byt
 	// Ensure trace ID for observability
 	ctx, traceID := observability.EnsureTraceID(ctx)
 
-	// Build wide event for skill execution in background to avoid blocking on
+	// Build foxcular event for skill execution in background to avoid blocking on
 	// cloud metadata lookups (AWS/GCP/Azure) which can timeout in non-cloud environments.
 	type enrichResult struct {
 		builder *observability.EventBuilder

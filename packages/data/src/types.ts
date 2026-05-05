@@ -296,7 +296,7 @@ export interface OrchestrationRefreshResult {
   ts: string;
 }
 
-export type DatabaseDriver = "sqlite" | "turso" | "libsql";
+export type DatabaseDriver = "sqlite" | "turso" | "postgres";
 
 export interface SQLiteDatabase {
   name: string;

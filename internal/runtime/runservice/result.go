@@ -141,7 +141,7 @@ func buildOutputWrapperWithPolicy(original []byte, digest string, size, limitKB 
 	switch expose {
 	case config.ExposePolicyOff:
 		// Store for debugging, but don't expose in output
-		// The digest is still logged to stderr and available in wide events
+		// The digest is still logged to stderr and available in foxcular events
 		data["stored"] = true
 	case config.ExposePolicyDigest:
 		// Include raw digest

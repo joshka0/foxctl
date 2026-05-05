@@ -594,7 +594,7 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 // These contain timezone names and monotonic clock readings that break SQLite ordering.
 func (m *ConversationMemory) migrateTimestamps(ctx context.Context) error {
 	// Select rows whose created_at contains a timezone offset (not clean UTC format).
-	// The libsql driver auto-parses stored timestamps, so we read them as-is and check
+	// Some SQLite-compatible drivers auto-parse stored timestamps, so we read them as-is and check
 	// in Go whether they need conversion to clean UTC format.
 	rows, err := m.db.QueryContext(ctx, `SELECT id, created_at FROM companion_turns`)
 	if err != nil {
@@ -602,7 +602,7 @@ func (m *ConversationMemory) migrateTimestamps(ctx context.Context) error {
 	}
 	defer rows.Close()
 
-	// The libsql driver may auto-parse stored timestamps into RFC3339 format on read.
+	// SQLite-compatible drivers may auto-parse stored timestamps into RFC3339 format on read.
 	// We detect any timestamp not already in clean "YYYY-MM-DD HH:MM:SS.ffffff" UTC format
 	// and convert it.
 	const cleanFormat = "2006-01-02 15:04:05.000000"
@@ -622,7 +622,7 @@ func (m *ConversationMemory) migrateTimestamps(ctx context.Context) error {
 				continue
 			}
 		}
-		// Try RFC3339 (libsql driver format): "2026-01-20T10:14:42.397221+02:00"
+		// Try RFC3339 driver format: "2026-01-20T10:14:42.397221+02:00"
 		t, err := time.Parse(time.RFC3339Nano, raw)
 		if err != nil {
 			// Try Go's time.Time.String() format (raw SQLite): "2026-01-20 10:14:42.503658 +0200 EET m=+29.73"

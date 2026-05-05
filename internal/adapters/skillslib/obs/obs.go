@@ -9,11 +9,11 @@ import (
 
 // Re-export types for skill use
 type (
-	// EventBuilder provides a fluent API for constructing wide events.
+	// EventBuilder provides a fluent API for constructing observability events.
 	EventBuilder = observability.EventBuilder
 
-	// WideEvent is a comprehensive observability event.
-	WideEvent = observability.WideEvent
+	// Event is the canonical observability event.
+	Event = observability.Event
 
 	// SpanOpt configures a span created by StartSpan.
 	SpanOpt = observability.SpanOpt
@@ -103,7 +103,7 @@ func NewEvent(operation string) *EventBuilder {
 }
 
 // StartSpan starts a span and returns a context, done function, and event builder.
-// Call done(err) when the operation completes to emit the wide event.
+// Call done(err) when the operation completes to emit the foxcular event.
 //
 // Usage:
 //
@@ -122,16 +122,16 @@ func StartSpanAt(ctx context.Context, startedAt time.Time, operation string, opt
 	return observability.StartSpanAt(ctx, startedAt, operation, opts...)
 }
 
-// Emit writes a wide event to the observability stream.
+// Emit writes an event to the observability stream.
 // Events are sampled according to the configured sampler.
 // This is safe to call from any goroutine.
-func Emit(ctx context.Context, event *WideEvent) {
+func Emit(ctx context.Context, event *Event) {
 	observability.Emit(ctx, event)
 }
 
-// EmitSync writes a wide event synchronously, bypassing sampling.
+// EmitSync writes an event synchronously, bypassing sampling.
 // Use this for critical events that must always be recorded.
-func EmitSync(ctx context.Context, event *WideEvent) error {
+func EmitSync(ctx context.Context, event *Event) error {
 	return observability.EmitSync(ctx, event)
 }
 

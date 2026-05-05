@@ -8,7 +8,7 @@
 # - Reduces replicas to 1
 # - Uses locally-built Docker image (imagePullPolicy: Never)
 # - Disables S3 CAS (uses file-based local storage)
-# - Uses SQLite locally because the current libsql migration path crashes the daemon
+# - Uses local SQLite/Turso files only; no remote DB sync
 # - Removes embedding worker and suspends cronjobs (state is pod-local)
 
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -98,7 +98,7 @@ patches:
       name: foxctl
 
 # Suspend cronjobs in local mode. They run as separate pods and should not
-# point at the pod-local libsql files used by the single-replica dev server.
+# point at the pod-local DB files used by the single-replica dev server.
 - target:
     kind: CronJob
     name: foxctl-pagerank

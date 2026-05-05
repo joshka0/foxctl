@@ -1,14 +1,48 @@
-//go:build cgo && !race
-
 package sessions
 
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/joshka0/foxctl/internal/storage"
 	"github.com/joshka0/foxctl/internal/storage/dbdriver"
 )
+
+func TestTursoStoreLocalNoCGOPath(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenTurso(ctx, dbdriver.TursoConfig{
+		Path:             filepath.Join(t.TempDir(), "sessions.turso"),
+		VectorDimensions: 4,
+	})
+	if err != nil {
+		t.Fatalf("OpenTurso(local) failed: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	saved, err := store.Save(ctx, storage.Session{
+		ID:            "sess-local",
+		WorkspacePath: "/workspace/project",
+		ProjectName:   "project",
+		Summary:       "local turso session",
+		Status:        storage.SessionStatusOK,
+	})
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if saved.ID != "sess-local" {
+		t.Fatalf("saved ID = %q, want sess-local", saved.ID)
+	}
+
+	got, err := store.Get(ctx, "sess-local")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Summary != "local turso session" {
+		t.Fatalf("Summary = %q, want local turso session", got.Summary)
+	}
+}
 
 func TestTursoStoreIntegration(t *testing.T) {
 	url := os.Getenv("TURSO_DATABASE_URL")

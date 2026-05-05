@@ -951,10 +951,6 @@ func openOrchestrationStore(ctx context.Context, cfg config.Config) (*libsqlorch
 	}
 
 	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, libsqlorchestration.MigrateSchema)
-	if err != nil && shouldFallbackLibSQLToSQLite(dbCfg, err) {
-		sqliteCfg := dbdriver.DefaultSQLiteConfig(libsqlPathToSQLitePath(dbCfg.LibSQL.Path, filepath.Join(storageRoot, "v2_events.db")))
-		db, closeFn, err = dbdriver.OpenDBCompatWithCloser(ctx, sqliteCfg, libsqlorchestration.MigrateSchema)
-	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("orchestration store open: %w", err)
 	}
@@ -979,26 +975,19 @@ func orchestrationDBConfig(cfg config.Config) (dbdriver.Config, error) {
 		loader := dbdriver.NewConfigLoader(storageRoot)
 		cfg := loader.LoadConfig("V2_EVENTS", "v2_events.db")
 		switch cfg.Driver {
-		case dbdriver.DriverSQLite, dbdriver.DriverLibSQL, dbdriver.DriverTurso:
+		case dbdriver.DriverSQLite, dbdriver.DriverTurso:
 			return cfg, nil
 		case dbdriver.DriverPostgres:
-			return dbdriver.Config{}, fmt.Errorf("orchestration db config: postgres is not supported by v2 libsql orchestration projections")
+			return dbdriver.Config{}, fmt.Errorf("orchestration db config: postgres is not supported by v2 orchestration projections")
 		default:
 			return dbdriver.Config{}, fmt.Errorf("orchestration db config: unsupported database driver override %q", cfg.Driver)
 		}
 	}
 
 	switch strings.ToLower(strings.TrimSpace(cfg.Database.Driver)) {
-	case "", "libsql":
-		return dbdriver.DefaultSQLiteConfig(v2EventsDBPath(filepath.Join(storageRoot, "v2_events.db"))), nil
 	case "sqlite":
 		return dbdriver.DefaultSQLiteConfig(v2EventsDBPath(filepath.Join(storageRoot, "v2_events.db"))), nil
-	case "turso":
-		url := strings.TrimSpace(cfg.Database.Turso.URL)
-		token := strings.TrimSpace(cfg.Database.Turso.AuthToken)
-		if url == "" || token == "" {
-			return dbdriver.Config{}, fmt.Errorf("orchestration db config: turso url and auth_token are required")
-		}
+	case "", "turso":
 		dims := cfg.Database.Vector.Dimensions
 		if dims <= 0 {
 			dims = dbdriver.GetDefaultVectorDimensions()
@@ -1006,16 +995,15 @@ func orchestrationDBConfig(cfg config.Config) (dbdriver.Config, error) {
 		return dbdriver.Config{
 			Driver: dbdriver.DriverTurso,
 			Turso: dbdriver.TursoConfig{
-				URL:                url,
-				AuthToken:          token,
+				Path:               v2EventsDBPath(filepath.Join(storageRoot, "v2_events.turso")),
 				DatabaseName:       "v2_events",
-				ReplicaPath:        v2EventsDBPath(filepath.Join(storageRoot, "v2_events.turso.replica")),
+				ReplicaPath:        v2EventsDBPath(filepath.Join(storageRoot, "v2_events.turso")),
 				EnableVectorSearch: false,
 				VectorDimensions:   dims,
 			},
 		}, nil
 	case "postgres":
-		// Orchestration projections are always stored in sqlite/libsql tables and
+		// Orchestration projections are always stored in SQLite-compatible tables and
 		// intentionally decoupled from the primary runtime DB driver.
 		return dbdriver.DefaultSQLiteConfig(v2EventsDBPath(filepath.Join(storageRoot, "v2_events.db"))), nil
 	default:
@@ -1101,11 +1089,6 @@ func openOrchestrationEventStore(ctx context.Context, cfg config.Config) (*libsq
 		return nil, err
 	}
 	db, closeFn, err := dbdriver.OpenDBCompatWithCloser(ctx, dbCfg, libsqlevents.MigrateSchema)
-	if err != nil && shouldFallbackLibSQLToSQLite(dbCfg, err) {
-		storageRoot := strings.TrimSpace(cfg.Storage.Root)
-		sqliteCfg := dbdriver.DefaultSQLiteConfig(libsqlPathToSQLitePath(dbCfg.LibSQL.Path, filepath.Join(storageRoot, "v2_events.db")))
-		db, closeFn, err = dbdriver.OpenDBCompatWithCloser(ctx, sqliteCfg, libsqlevents.MigrateSchema)
-	}
 	if err != nil {
 		return nil, fmt.Errorf("orchestration event store open: %w", err)
 	}
@@ -1755,25 +1738,6 @@ func chooseNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func shouldFallbackLibSQLToSQLite(dbCfg dbdriver.Config, err error) bool {
-	if dbCfg.Driver != dbdriver.DriverLibSQL || err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, "libsql driver requires cgo")
-}
-
-func libsqlPathToSQLitePath(libsqlPath string, fallback string) string {
-	path := strings.TrimSpace(libsqlPath)
-	if path == "" {
-		return fallback
-	}
-	if strings.HasSuffix(path, ".libsql") {
-		return strings.TrimSuffix(path, ".libsql") + ".db"
-	}
-	return path + ".db"
 }
 
 func maybeArtifactizeBoard(ctx context.Context, cfg config.Config, board coreorchestration.BoardResponse) (data any, artifactized bool, err error) {

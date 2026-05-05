@@ -1,5 +1,3 @@
-//go:build cgo && !race
-
 package dbdriver
 
 import (
@@ -10,14 +8,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tursodatabase/go-libsql"
+	turso "turso.tech/database/tursogo"
 )
 
-// tursoDB wraps libsql connection to implement our DB interface
+// tursoDB wraps the Rust-backed Turso driver to implement our DB interface.
 type tursoDB struct {
 	db                 *sql.DB
-	connector          *libsql.Connector
-	tempDir            string
+	syncDB             *turso.TursoSyncDb
 	enableVectorSearch bool
 	vectorDimensions   int
 	driverType         DriverType
@@ -26,99 +23,75 @@ type tursoDB struct {
 	syncDone           chan struct{}
 }
 
-// openTurso opens a Turso database connection
+// openTurso opens a local Turso database or a local replica synced to a remote Turso database.
 func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB, error) {
-	// Set default vector dimensions if not specified
 	vectorDims := cfg.VectorDimensions
 	if vectorDims == 0 {
-		vectorDims = 384 // Default to all-MiniLM-L6-v2 dimensions
+		vectorDims = 384
 	}
 
-	// Determine replica path: use configured path or create temp directory
-	var dbPath, tempDir string
-	var useTempDir bool
-
-	if cfg.ReplicaPath != "" {
-		// Use configured persistent replica path
-		dbPath = cfg.ReplicaPath
-		// Ensure parent directory exists
+	dbPath := firstNonEmpty(cfg.Path, cfg.ReplicaPath)
+	if dbPath == "" {
+		return nil, fmt.Errorf("turso path is required")
+	}
+	if dbPath != ":memory:" {
 		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-			return nil, fmt.Errorf("failed to create replica directory: %w", err)
+			return nil, fmt.Errorf("failed to create turso database directory: %w", err)
 		}
-	} else {
-		// Create temporary directory for replica (will be cleaned on Close)
-		var err error
-		tempDir, err = os.MkdirTemp("", "turso-replica-*")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create temp dir for turso replica: %w", err)
-		}
-		dbPath = filepath.Join(tempDir, "replica.db")
-		useTempDir = true
-	}
-
-	connector, err := libsql.NewEmbeddedReplicaConnector(dbPath, cfg.URL,
-		libsql.WithAuthToken(cfg.AuthToken),
-	)
-	if err != nil {
-		// Cleanup temp dir on connector creation failure; error is not actionable.
-		if useTempDir {
-			_ = os.RemoveAll(tempDir) //nolint:errcheck
-		}
-		return nil, fmt.Errorf("failed to create turso connector: %w", err)
-	}
-
-	// Open database connection
-	db := sql.OpenDB(connector)
-
-	// Helper to cleanup resources on error
-	cleanup := func() {
-		// Cleanup on error path; errors are not actionable.
-		_ = db.Close()        //nolint:errcheck
-		_ = connector.Close() //nolint:errcheck
-		if useTempDir {
-			_ = os.RemoveAll(tempDir) //nolint:errcheck
-		}
-	}
-
-	// Test the connection
-	if err := db.PingContext(ctx); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("failed to connect to turso database: %w", err)
-	}
-
-	// Run migrations if provided
-	if migrate != nil {
-		if err := migrate(ctx, db); err != nil {
-			cleanup()
-			return nil, fmt.Errorf("failed to run migrations: %w", err)
-		}
-	}
-
-	// If vector search is enabled for memory database, ensure vector columns exist
-	if cfg.EnableVectorSearch {
-		if err := ensureVectorSupport(ctx, db, vectorDims); err != nil {
-			cleanup()
-			return nil, fmt.Errorf("failed to enable vector search: %w", err)
-		}
-	}
-
-	// Only store tempDir for cleanup if we created a temp directory
-	cleanupDir := ""
-	if useTempDir {
-		cleanupDir = tempDir
 	}
 
 	store := &tursoDB{
-		db:                 db,
-		connector:          connector,
-		tempDir:            cleanupDir,
 		enableVectorSearch: cfg.EnableVectorSearch,
 		vectorDimensions:   vectorDims,
 		driverType:         DriverTurso,
 		syncURL:            cfg.URL,
 	}
 
-	if cfg.SyncInterval > 0 {
+	var err error
+	if cfg.URL != "" {
+		store.syncDB, err = turso.NewTursoSyncDb(ctx, turso.TursoSyncDbConfig{
+			Path:      dbPath,
+			RemoteUrl: cfg.URL,
+			AuthToken: cfg.AuthToken,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create turso sync database: %w", err)
+		}
+		store.db, err = store.syncDB.Connect(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect to turso sync database: %w", err)
+		}
+	} else {
+		store.db, err = sql.Open("turso", dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open turso database: %w", err)
+		}
+	}
+
+	cleanup := func() {
+		_ = store.Close()
+	}
+
+	if err := store.db.PingContext(ctx); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to connect to turso database: %w", err)
+	}
+
+	if migrate != nil {
+		if err := migrate(ctx, store.db); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("failed to run migrations: %w", err)
+		}
+	}
+
+	if cfg.EnableVectorSearch {
+		if err := ensureVectorSupport(ctx, store.db, vectorDims); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("failed to enable vector search: %w", err)
+		}
+	}
+
+	if cfg.SyncInterval > 0 && store.syncDB != nil {
 		interval := time.Duration(cfg.SyncInterval) * time.Second
 		store.syncStop = make(chan struct{})
 		store.syncDone = make(chan struct{})
@@ -132,7 +105,7 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 				case <-store.syncStop:
 					return
 				case <-ticker.C:
-					_, _ = store.connector.Sync() // best-effort
+					_ = store.Sync()
 				}
 			}
 		}()
@@ -141,10 +114,17 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 	return store, nil
 }
 
-// ensureVectorSupport verifies that vector search is available
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// ensureVectorSupport verifies that vector search is available.
 func ensureVectorSupport(ctx context.Context, db *sql.DB, dimensions int) error {
-	// Test that vector functions are available by creating a temporary table
-	// This will fail if vector support is not enabled in the Turso group
 	testQuery := fmt.Sprintf(`
 		CREATE TEMP TABLE IF NOT EXISTS _vector_test (
 			id INTEGER PRIMARY KEY,
@@ -153,16 +133,13 @@ func ensureVectorSupport(ctx context.Context, db *sql.DB, dimensions int) error 
 	`, dimensions)
 
 	if _, err := db.ExecContext(ctx, testQuery); err != nil {
-		return fmt.Errorf("vector search not available (ensure your Turso group supports vectors): %w", err)
+		return fmt.Errorf("vector search not available in turso: %w", err)
 	}
 
-	// Clean up test table (ignore errors on cleanup)
 	_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS _vector_test") //nolint:errcheck
-
 	return nil
 }
 
-// Close closes the database connection
 func (t *tursoDB) Close() error {
 	var err error
 
@@ -176,141 +153,110 @@ func (t *tursoDB) Close() error {
 	if t.db != nil {
 		err = t.db.Close()
 	}
-	if t.connector != nil {
-		if closeErr := t.connector.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-	}
-	if t.tempDir != "" {
-		if removeErr := os.RemoveAll(t.tempDir); removeErr != nil && err == nil {
-			err = removeErr
-		}
-	}
 	return err
 }
 
-// Exec executes a query without returning any rows
 func (t *tursoDB) Exec(query string, args ...any) (sql.Result, error) {
 	return t.db.Exec(query, args...)
 }
 
-// ExecContext executes a query without returning any rows with context
 func (t *tursoDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return t.db.ExecContext(ctx, query, args...)
 }
 
-// Query executes a query that returns rows
 func (t *tursoDB) Query(query string, args ...any) (*sql.Rows, error) {
 	return t.db.Query(query, args...)
 }
 
-// QueryContext executes a query that returns rows with context
 func (t *tursoDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	return t.db.QueryContext(ctx, query, args...)
 }
 
-// QueryRow executes a query that is expected to return at most one row
 func (t *tursoDB) QueryRow(query string, args ...any) *sql.Row {
 	return t.db.QueryRow(query, args...)
 }
 
-// QueryRowContext executes a query that is expected to return at most one row with context
 func (t *tursoDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	return t.db.QueryRowContext(ctx, query, args...)
 }
 
-// Begin starts a transaction
 func (t *tursoDB) Begin() (*sql.Tx, error) {
 	return t.db.Begin()
 }
 
-// BeginTx starts a transaction with context
 func (t *tursoDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
 	return t.db.BeginTx(ctx, opts)
 }
 
-// Ping verifies a connection to the database is still alive
 func (t *tursoDB) Ping() error {
 	return t.db.Ping()
 }
 
-// PingContext verifies a connection to the database is still alive with context
 func (t *tursoDB) PingContext(ctx context.Context) error {
 	return t.db.PingContext(ctx)
 }
 
-// SetMaxOpenConns sets the maximum number of open connections
 func (t *tursoDB) SetMaxOpenConns(n int) {
 	t.db.SetMaxOpenConns(n)
 }
 
-// SetMaxIdleConns sets the maximum number of idle connections
 func (t *tursoDB) SetMaxIdleConns(n int) {
 	t.db.SetMaxIdleConns(n)
 }
 
-// SetConnMaxLifetime sets the maximum amount of time a connection may be reused
 func (t *tursoDB) SetConnMaxLifetime(d any) {
 	if dur, ok := parseConnDuration(d); ok {
 		t.db.SetConnMaxLifetime(dur)
 	}
 }
 
-// SetConnMaxIdleTime sets the maximum amount of time a connection may be idle
 func (t *tursoDB) SetConnMaxIdleTime(d any) {
 	if dur, ok := parseConnDuration(d); ok {
 		t.db.SetConnMaxIdleTime(dur)
 	}
 }
 
-// Stats returns database statistics
 func (t *tursoDB) Stats() sql.DBStats {
 	return t.db.Stats()
 }
 
-// GetUnderlyingDB returns the underlying *sql.DB
 func (t *tursoDB) GetUnderlyingDB() (*sql.DB, bool) {
 	return t.db, true
 }
 
-// IsVectorSearchEnabled returns true if vector search is enabled
 func (t *tursoDB) IsVectorSearchEnabled() bool {
 	return t.enableVectorSearch
 }
 
-// GetDriverType returns DriverTurso
 func (t *tursoDB) GetDriverType() DriverType {
 	return t.driverType
 }
 
-// GetDialect returns the SQLite dialect (Turso uses SQLite-compatible SQL).
 func (t *tursoDB) GetDialect() Dialect {
 	return SQLiteDialect{}
 }
 
-// GetVectorDimensions returns the configured vector dimensions
 func (t *tursoDB) GetVectorDimensions() int {
 	return t.vectorDimensions
 }
 
-// Sync triggers a manual sync with the remote Turso database.
 func (t *tursoDB) Sync() error {
-	if t.connector == nil {
+	if t.syncDB == nil {
 		return nil
 	}
-	_, err := t.connector.Sync()
-	if err != nil {
-		return fmt.Errorf("turso sync failed: %w", err)
+	if err := t.syncDB.Push(context.Background()); err != nil {
+		return fmt.Errorf("turso push failed: %w", err)
+	}
+	if _, err := t.syncDB.Pull(context.Background()); err != nil {
+		return fmt.Errorf("turso pull failed: %w", err)
 	}
 	return nil
 }
 
-// IsSyncEnabled returns true when a Turso URL is configured.
 func (t *tursoDB) IsSyncEnabled() bool {
-	return t.syncURL != ""
+	return t.syncDB != nil
 }
 
-// GetSyncURL returns the configured Turso URL.
 func (t *tursoDB) GetSyncURL() string {
 	return t.syncURL
 }

@@ -2,6 +2,7 @@
 #
 # Append-only log of recent errors/gotchas and slow-to-resolve issues.
 # Format: - YYYY-MM-DD [gotcha|time]: note
+- 2026-05-05 [gotcha]: Old SQLite linker workaround is obsolete after Turso hard-cut. Default foxctl builds/tests run with `CGO_ENABLED=0`; do not restore `-tags=libsqlite3`, `foxctl-cgo`, or sqlite-vector storage. `github.com/mattn/go-sqlite3` may still appear as a transitive module through `tursogo`/`dspy-go`, but foxctl no longer imports it as a storage driver.
 - 2026-01-16 [gotcha]: 3 pre-existing test failures identified as unrelated to current changes
 - 2026-01-16 [time]: Cleanup of 82+ stale tasks
 - 2026-01-17 [refactor]: FC/IS audit found 24 violations - tracked in #168
@@ -38,7 +39,7 @@
   - Also added RoleResearcher for information gathering agents
 - 2026-01-22 [feature]: Session persistence for agent prompts and turns
   - New session fields: prompt, prompt_hash, llm_provider, llm_model
-  - prompt_hash (SHA256) enables correlation with wide events task_hash
+  - prompt_hash (SHA256) enables correlation with foxcular events task_hash
   - Turn content stored in CAS via content_cas_digest for large responses
   - Query sessions by prompt: SELECT * FROM sessions WHERE prompt LIKE '%search%'
 - 2026-02-14 [feature]: Daemon agent persistence + autonomous_reactive mode

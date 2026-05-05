@@ -505,9 +505,9 @@ func TestExecutorWithSkillExecutor(t *testing.T) {
 	t.Log("Successfully created executor with mock SkillExecutor")
 }
 
-// TestExecutorEmitsWideEventOnSuccess verifies that successful skill execution
-// emits a wide event with status "ok".
-func TestExecutorEmitsWideEventOnSuccess(t *testing.T) {
+// TestExecutorEmitsEventOnSuccess verifies that successful skill execution
+// emits an event with status "ok".
+func TestExecutorEmitsEventOnSuccess(t *testing.T) {
 	// Set up observability
 	obsDir := t.TempDir()
 	observability.SetObsDirForTesting(obsDir)
@@ -537,14 +537,13 @@ func TestExecutorEmitsWideEventOnSuccess(t *testing.T) {
 		t.Fatalf("run skill: %v", err)
 	}
 
-	// Verify wide event was emitted
-	events := readWideEvents(t, obsDir)
+	events := readEvents(t, obsDir)
 	if len(events) == 0 {
-		t.Fatal("expected at least one wide event")
+		t.Fatal("expected at least one event")
 	}
 
 	// Find the skill.run event
-	var found *observability.WideEvent
+	var found *observability.Event
 	for i := range events {
 		if events[i].Operation == observability.OpSkillRun {
 			found = &events[i]
@@ -552,30 +551,30 @@ func TestExecutorEmitsWideEventOnSuccess(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatal("expected skill.run wide event")
+		t.Fatal("expected skill.run event")
 		return
 	}
 
 	if found.Status != observability.StatusOK {
 		t.Errorf("Status = %q, want %q", found.Status, observability.StatusOK)
 	}
-	if found.Command != "test/success-skill" {
-		t.Errorf("Command = %q, want test/success-skill", found.Command)
+	if found.Name != "test/success-skill" {
+		t.Errorf("Name = %q, want test/success-skill", found.Name)
 	}
-	if found.Component != observability.ComponentSkill {
-		t.Errorf("Component = %q, want %q", found.Component, observability.ComponentSkill)
+	if component := observability.EventDataString(found, observability.DataKeyComponent); component != observability.ComponentSkill {
+		t.Errorf("Component = %q, want %q", component, observability.ComponentSkill)
 	}
-	if found.DurationMS < 0 {
-		t.Error("DurationMS should be non-negative")
+	if found.Duration < 0 {
+		t.Error("Duration should be non-negative")
 	}
 	if found.Data["skill_version"] != "1.0.0" {
 		t.Errorf("Data[skill_version] = %v, want 1.0.0", found.Data["skill_version"])
 	}
 }
 
-// TestExecutorEmitsWideEventOnRunnerError verifies that runner failures emit
-// an error wide event.
-func TestExecutorEmitsWideEventOnRunnerError(t *testing.T) {
+// TestExecutorEmitsEventOnRunnerError verifies that runner failures emit
+// an error event.
+func TestExecutorEmitsEventOnRunnerError(t *testing.T) {
 	obsDir := t.TempDir()
 	observability.SetObsDirForTesting(obsDir)
 	observability.SetSamplerForTesting(observability.SampleAll{})
@@ -603,12 +602,12 @@ func TestExecutorEmitsWideEventOnRunnerError(t *testing.T) {
 		t.Fatal("expected error from skill execution")
 	}
 
-	events := readWideEvents(t, obsDir)
+	events := readEvents(t, obsDir)
 	if len(events) == 0 {
-		t.Fatal("expected at least one wide event")
+		t.Fatal("expected at least one event")
 	}
 
-	var found *observability.WideEvent
+	var found *observability.Event
 	for i := range events {
 		if events[i].Operation == observability.OpSkillRun {
 			found = &events[i]
@@ -616,25 +615,25 @@ func TestExecutorEmitsWideEventOnRunnerError(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatal("expected skill.run wide event")
+		t.Fatal("expected skill.run event")
 		return
 	}
 
 	if found.Status != observability.StatusError {
 		t.Errorf("Status = %q, want %q", found.Status, observability.StatusError)
 	}
-	if found.Command != "test/failing-skill" {
-		t.Errorf("Command = %q, want test/failing-skill", found.Command)
+	if found.Name != "test/failing-skill" {
+		t.Errorf("Name = %q, want test/failing-skill", found.Name)
 	}
 	if found.ErrorType != "network" {
 		t.Errorf("ErrorType = %q, want network", found.ErrorType)
 	}
 }
 
-// TestExecutorEmitsWideEventOnEnvelopeError verifies that when a skill returns
-// an error envelope (status="error"), it emits an error wide event with the
+// TestExecutorEmitsEventOnEnvelopeError verifies that when a skill returns
+// an error envelope (status="error"), it emits an error event with the
 // skill's error code.
-func TestExecutorEmitsWideEventOnEnvelopeError(t *testing.T) {
+func TestExecutorEmitsEventOnEnvelopeError(t *testing.T) {
 	obsDir := t.TempDir()
 	observability.SetObsDirForTesting(obsDir)
 	observability.SetSamplerForTesting(observability.SampleAll{})
@@ -665,12 +664,12 @@ func TestExecutorEmitsWideEventOnEnvelopeError(t *testing.T) {
 		t.Fatalf("run skill: %v", err)
 	}
 
-	events := readWideEvents(t, obsDir)
+	events := readEvents(t, obsDir)
 	if len(events) == 0 {
-		t.Fatal("expected at least one wide event")
+		t.Fatal("expected at least one event")
 	}
 
-	var found *observability.WideEvent
+	var found *observability.Event
 	for i := range events {
 		if events[i].Operation == observability.OpSkillRun {
 			found = &events[i]
@@ -678,7 +677,7 @@ func TestExecutorEmitsWideEventOnEnvelopeError(t *testing.T) {
 		}
 	}
 	if found == nil {
-		t.Fatal("expected skill.run wide event")
+		t.Fatal("expected skill.run event")
 		return
 	}
 
@@ -702,31 +701,31 @@ func TestExecutorEmitsWideEventOnEnvelopeError(t *testing.T) {
 	}
 }
 
-// readWideEvents reads all wide events from the observability directory.
-func readWideEvents(t *testing.T, obsDir string) []observability.WideEvent {
+// readEvents reads all events from the observability directory.
+func readEvents(t *testing.T, obsDir string) []observability.Event {
 	t.Helper()
 
-	filePath := filepath.Join(obsDir, "events", observability.WideEventFileName+".ndjson")
+	filePath := filepath.Join(obsDir, "events", observability.EventFileName+".ndjson")
 	f, err := os.Open(filePath)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
-		t.Fatalf("open wide events file: %v", err)
+		t.Fatalf("open events file: %v", err)
 	}
 	defer f.Close()
 
-	var events []observability.WideEvent
+	var events []observability.Event
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		var ev observability.WideEvent
+		var ev observability.Event
 		if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
-			t.Fatalf("unmarshal wide event: %v", err)
+			t.Fatalf("unmarshal event: %v", err)
 		}
 		events = append(events, ev)
 	}
 	if err := scanner.Err(); err != nil {
-		t.Fatalf("scan wide events: %v", err)
+		t.Fatalf("scan events: %v", err)
 	}
 	return events
 }

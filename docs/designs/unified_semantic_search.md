@@ -551,10 +551,9 @@ echo '{"decision": "approve"}'
 **Effort:** Medium (2-3 days) **Impact:** High - enables production-grade vector
 search at scale
 
-Native vector support via Turso/libsql provides:
+Native vector support via Turso provides:
 
 - **F32_BLOB columns** for efficient vector storage
-- **vector_top_k** for indexed ANN search
 - **vector_distance_cos/l2** for similarity calculation
 - **Embedded replicas** for local caching with sync
 
@@ -564,6 +563,7 @@ The `internal/storage/dbdriver/turso.go` provides:
 
 ```go
 type TursoConfig struct {
+    Path               string
     URL                string
     AuthToken          string
     DatabaseName       string
@@ -571,11 +571,9 @@ type TursoConfig struct {
     VectorDimensions   int
 }
 
-// Opens with embedded replica for local caching
+// Opens local Turso, or a local replica when URL is set
 db, err := openTurso(ctx, cfg, migrationFunc)
 ```
-
-Build tags: `//go:build cgo && !race && !vector`
 
 #### 6.2 Embedding metadata tracking
 
@@ -614,7 +612,6 @@ vh, _ := NewVectorHelper(db)
 vh.VectorExpression(vec)           // vector('[0.1,0.2,...]')
 vh.CosineSimilarity("col", query)  // vector_distance_cos(col, '[...]')
 vh.EuclideanDistance("col", query) // vector_distance_l2(col, '[...]')
-vh.VectorTopK("idx", query, 10)    // vector_top_k('idx', '[...]', 10)
 vh.ExtractVector("col")            // vector_extract(col)
 ```
 
@@ -624,8 +621,9 @@ Database settings in `~/.foxctl/config.yaml`:
 
 ```yaml
 database:
-  driver: turso # "sqlite" (default), "libsql", or "turso"
+  driver: turso # "sqlite", "turso", or "postgres"
   turso:
+    path: ~/.foxctl/storage/memory.turso
     url: libsql://your-db.turso.io # or TURSO_DATABASE_URL env
     auth_token: "" # or TURSO_AUTH_TOKEN env
   vector:
@@ -644,15 +642,14 @@ Environment variable overrides:
 | Driver | Vector Support | Fallback |
 | ------ | -------------- | -------- |
 | SQLite | No | BM25 only via FTS5 |
-| libsql | Optional (local) | BM25 if vectors disabled |
-| Turso | Full (cloud) | Hybrid BM25 + vector search |
+| Turso | Full local or synced | Hybrid BM25 + vector search |
 
 The `SearchableStore` automatically selects the best search strategy:
 
 ```go
 func (s *SearchableStore) HybridSearch(ctx, query, opts) ([]Result, error) {
     if s.vectorEnabled {
-        // Native vector_top_k + BM25 fusion
+        // Native vector distance + BM25 fusion
         return s.hybridVectorBM25(ctx, query, opts)
     }
     // Fallback: FTS5 BM25 only
@@ -660,19 +657,15 @@ func (s *SearchableStore) HybridSearch(ctx, query, opts) ([]Result, error) {
 }
 ```
 
-#### 6.6 Tests (CGO-tagged)
+#### 6.6 Tests
 
-Tests require Turso credentials and vector-enabled group:
+Local Turso vector tests do not require credentials:
 
 ```bash
-# Run tests with Turso credentials
-TURSO_DATABASE_URL=libsql://... \
-TURSO_AUTH_TOKEN=... \
-TURSO_VECTOR_ENABLED=1 \
-CGO_ENABLED=1 go test -v -tags 'cgo' ./internal/storage/dbdriver/...
+go test ./internal/storage/dbdriver ./internal/storage/memory
 ```
 
-Tests gracefully skip when credentials are not set.
+Remote sync tests require `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
 
 ## Configuration
 

@@ -13,9 +13,7 @@ type DriverType string
 const (
 	// DriverSQLite uses local SQLite database (standard SQLite, no vector search)
 	DriverSQLite DriverType = "sqlite"
-	// DriverLibSQL uses local libSQL database file (supports vector search locally)
-	DriverLibSQL DriverType = "libsql"
-	// DriverTurso uses Turso cloud database with libSQL (cloud, replicated)
+	// DriverTurso uses the Rust-backed Turso database locally or with remote sync.
 	DriverTurso DriverType = "turso"
 	// DriverPostgres uses PostgreSQL database (enterprise, shared state)
 	DriverPostgres DriverType = "postgres"
@@ -41,16 +39,13 @@ func GetDefaultVectorDimensions() int {
 
 // Config holds database configuration
 type Config struct {
-	// Driver specifies which database driver to use (sqlite, libsql, or turso)
+	// Driver specifies which database driver to use (sqlite, turso, or postgres)
 	Driver DriverType `json:"driver" yaml:"driver"`
 
 	// SQLite specific configuration
 	SQLite SQLiteConfig `json:"sqlite,omitempty" yaml:"sqlite,omitempty"`
 
-	// LibSQL specific configuration (local file-based libSQL)
-	LibSQL LibSQLConfig `json:"libsql,omitempty" yaml:"libsql,omitempty"`
-
-	// Turso specific configuration (cloud libSQL)
+	// Turso specific configuration (local Rust-backed database or remote sync)
 	Turso TursoConfig `json:"turso,omitempty" yaml:"turso,omitempty"`
 
 	// Postgres specific configuration (enterprise shared state)
@@ -69,39 +64,18 @@ type SQLiteConfig struct {
 	BusyTimeout int `json:"busy_timeout" yaml:"busy_timeout"`
 }
 
-// LibSQLConfig holds local libSQL-specific configuration
-type LibSQLConfig struct {
-	// Path to the libSQL database file
-	Path string `json:"path" yaml:"path"`
-
-	// EnableVectorSearch enables vector search capabilities
-	EnableVectorSearch bool `json:"enable_vector_search" yaml:"enable_vector_search"`
-
-	// VectorDimensions specifies the dimension of vector embeddings.
-	// If 0, uses GetDefaultVectorDimensions() (configurable via FOXCTL_VECTOR_DIMS).
-	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
-
-	// SyncURL is the remote sqld URL for sync (optional).
-	// When set, enables embedded replica mode with automatic sync.
-	// Example: "http://localhost:8080" or "libsql://your-db.turso.io"
-	SyncURL string `json:"sync_url,omitempty" yaml:"sync_url,omitempty"`
-
-	// AuthToken for remote sync authentication (optional, required for Turso cloud)
-	AuthToken string `json:"auth_token,omitempty" yaml:"auth_token,omitempty"`
-
-	// SyncInterval in seconds for periodic background sync (optional).
-	// When 0 (default), sync happens on-demand via Sync() calls.
-	// When > 0, a background goroutine syncs every N seconds.
-	SyncInterval int `json:"sync_interval,omitempty" yaml:"sync_interval,omitempty"`
-}
-
 // TursoConfig holds Turso-specific configuration
 type TursoConfig struct {
-	// URL is the Turso database URL (e.g., libsql://your-database.turso.io)
-	URL string `json:"url" yaml:"url"`
+	// Path is the local Turso database file path. It is required for local mode
+	// and used as the sync replica path when URL is set.
+	Path string `json:"path,omitempty" yaml:"path,omitempty"`
 
-	// AuthToken is the authentication token for Turso
-	AuthToken string `json:"auth_token" yaml:"auth_token"`
+	// URL is the remote Turso database URL for sync (e.g., libsql://your-database.turso.io).
+	// If empty, Turso opens Path as a local-only database.
+	URL string `json:"url,omitempty" yaml:"url,omitempty"`
+
+	// AuthToken is the authentication token for remote Turso sync.
+	AuthToken string `json:"auth_token,omitempty" yaml:"auth_token,omitempty"`
 
 	// DatabaseName is the logical name of the database (cache, jobs, or memory)
 	DatabaseName string `json:"database_name,omitempty" yaml:"database_name,omitempty"`
@@ -164,15 +138,11 @@ func (c *Config) Validate() error {
 		if c.SQLite.Path == "" {
 			return errors.New("sqlite path is required")
 		}
-	case DriverLibSQL:
-		if c.LibSQL.Path == "" {
-			return errors.New("libsql path is required")
-		}
 	case DriverTurso:
-		if c.Turso.URL == "" {
-			return errors.New("turso url is required")
+		if c.Turso.Path == "" && c.Turso.ReplicaPath == "" {
+			return errors.New("turso path is required")
 		}
-		if c.Turso.AuthToken == "" {
+		if c.Turso.URL != "" && c.Turso.AuthToken == "" {
 			return errors.New("turso auth_token is required")
 		}
 	case DriverPostgres:
@@ -199,27 +169,33 @@ func DefaultSQLiteConfig(path string) Config {
 	}
 }
 
-// DefaultLibSQLConfig returns a default local libSQL configuration
-func DefaultLibSQLConfig(path string, enableVectors bool) Config {
+// DefaultTursoConfig returns a default Turso configuration
+func DefaultTursoConfig(url, authToken, dbName string) Config {
+	path := ""
+	if dbName != "" {
+		path = dbName + ".turso"
+	}
 	return Config{
-		Driver: DriverLibSQL,
-		LibSQL: LibSQLConfig{
+		Driver: DriverTurso,
+		Turso: TursoConfig{
 			Path:               path,
-			EnableVectorSearch: enableVectors,
+			URL:                url,
+			AuthToken:          authToken,
+			DatabaseName:       dbName,
+			ReplicaPath:        path,
+			EnableVectorSearch: false,
 			VectorDimensions:   GetDefaultVectorDimensions(),
 		},
 	}
 }
 
-// DefaultTursoConfig returns a default Turso configuration
-func DefaultTursoConfig(url, authToken, dbName string) Config {
+// DefaultTursoLocalConfig returns a local Rust-backed Turso configuration.
+func DefaultTursoLocalConfig(path string, enableVectors bool) Config {
 	return Config{
 		Driver: DriverTurso,
 		Turso: TursoConfig{
-			URL:                url,
-			AuthToken:          authToken,
-			DatabaseName:       dbName,
-			EnableVectorSearch: false,
+			Path:               path,
+			EnableVectorSearch: enableVectors,
 			VectorDimensions:   GetDefaultVectorDimensions(),
 		},
 	}
