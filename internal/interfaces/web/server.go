@@ -384,6 +384,9 @@ func (s *Server) Handler() http.Handler {
 	// --- Health ---
 	apiMux.HandleFunc("/api/health", api.StatusHandler(s.cfg, s.log))
 
+	// --- Sink (Obsidian write route) ---
+	apiMux.HandleFunc("/api/sink", api.SinkHandler(s.cfg, s.log))
+
 	// --- SSE Events ---
 	apiMux.HandleFunc("/api/events", sse.Handler(s.sseHub))
 	apiMux.HandleFunc("/api/logs/cleanup", api.LogCleanupHandler(s.cfg, s.log))
