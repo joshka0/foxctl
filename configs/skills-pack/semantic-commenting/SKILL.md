@@ -49,12 +49,12 @@ or claims not proven by the owner.
 Use inline wikilink syntax in source-code comments:
 
 ```go
-// [[foxctl:invariant/no-send-without-read]]
-// [[foxctl:risk/agent-terminal-desync]]
-// [[foxctl:protocol/read-guard]]
-// [[foxctl:domain/agent-terminal-safety]]
-// [[foxctl:decision/evidence-only-anchors]]
-// [[foxctl:test-contract/read-before-write]]
+// [[invariant:no-send-without-read]]
+// [[risk:agent-terminal-desync]]
+// [[protocol:read-guard]]
+// [[domain:agent-terminal-safety]]
+// [[decision:evidence-only-anchors]]
+// [[test-contract:read-before-write]]
 // [[doc:docs/terminal-safety.md#Terminal Safety]]
 // [[test:internal/terminal/guard_test.go#TestGuardReadBeforeWrite]]
 ```
@@ -62,10 +62,14 @@ Use inline wikilink syntax in source-code comments:
 Rules:
 
 - Use lowercase slugs: `a-z`, `0-9`, `.`, `_`, `-`, and `/`.
-- Concept anchors use `[[scope:type/slug]]`; `foxctl` is the default project
-  scope in foxctl.
+- Use repo-local concept anchors by default: `[[type:slug]]`.
+- Use explicit scoped concept anchors, `[[scope:type/slug]]`, only when the
+  target repo or indexer defines that scope and cross-repo disambiguation is
+  needed. Discover the repo's scope from local tooling or configuration; do not
+  hardcode one repository name, including `foxctl`, into portable semantic
+  comments.
 - `doc:` and `test:` anchors are repo-local path anchors and must be unscoped:
-  use `[[doc:docs/foo.md#Heading]]`, not `[[foxctl:doc/docs/foo.md]]`.
+  use `[[doc:docs/foo.md#Heading]]`, not `[[project:doc/docs/foo.md]]`.
 - Paths must be repo-relative. Do not use URLs, absolute paths, `..`, env vars,
   shell expansions, control characters, emails, tokens, or session-like IDs.
 - Use `#Heading` for Markdown docs and `#TestName` for tests when a specific
@@ -114,8 +118,8 @@ Preferred shape:
 //   Keywords: terminal safety, read before write
 //   Related: GuardHelper
 //
-// [[foxctl:invariant/no-send-without-read]]
-// [[foxctl:risk/agent-terminal-desync]]
+// [[invariant:no-send-without-read]]
+// [[risk:agent-terminal-desync]]
 // [[doc:docs/terminal-safety.md#Terminal Safety]]
 // [[test:internal/terminal/guard_test.go#TestGuardReadBeforeWrite]]
 func Guard() {}
@@ -159,7 +163,8 @@ Before editing comments:
    that are true without that external target.
 6. Keep the prose short enough that the doc comment remains readable.
 
-After editing anchors in foxctl, run focused validation when practical:
+After editing anchors, run the project-native parser, repoindex, or E2E
+validation when practical. In foxctl specifically, use:
 
 ```bash
 GOWORK=off go test -count=1 ./internal/intelligence/indexing/semanticanchors ./internal/intelligence/indexing/repoindex
@@ -172,7 +177,19 @@ For repo-wide confidence, build the graph with semantic anchors enabled:
 ./bin/foxctl index repo build --workspace . --semantic-anchors --include-tests
 ```
 
-Use equivalent project-native parser/index tests in non-foxctl repos.
+In non-foxctl repos, prefer equivalent project-native parser/index tests. If
+foxctl is available there, lint anchors against that workspace instead of
+assuming a foxctl scope:
+
+```bash
+foxctl index anchors lint --workspace .
+foxctl index repo build --workspace . --semantic-anchors --include-tests
+```
+
+For AI-generated comments, score the resulting diff rather than the model's
+wording: anchors parse cleanly, concept anchors are repo-local unless a scope is
+configured, `doc:` and `test:` paths resolve, owners are adjacent, `beacon` is
+absent from ordinary code, and anchor count stays bounded.
 
 ## Review Checklist
 

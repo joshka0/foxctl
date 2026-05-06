@@ -143,10 +143,10 @@ func TestGuard(t *testing.T) {}
 `)
 	mustWriteFile(t, filepath.Join(workspace, "internal", "demo", "demo.go"), `package demo
 
-// [[foxctl:invariant/no-send-without-read]]
+// [[invariant:no-send-without-read]]
 // [[doc:docs/anchors.md#Overview]]
 // [[test:internal/demo/demo_test.go#TestGuard]]
-// [[foxctl:beacon/agent-terminal-safety]]
+// [[beacon:agent-terminal-safety]]
 func Guard() {}
 `)
 }
@@ -156,8 +156,8 @@ func writeDuplicateSemanticAnchorFixture(t *testing.T, workspace string) {
 	mustWriteFile(t, filepath.Join(workspace, "go.mod"), "module example.com/anchors\n\ngo 1.22\n")
 	mustWriteFile(t, filepath.Join(workspace, "internal", "demo", "demo.go"), `package demo
 
-// [[foxctl:invariant/no-send-without-read]]
-// [[foxctl:invariant/no-send-without-read]]
+// [[invariant:no-send-without-read]]
+// [[invariant:no-send-without-read]]
 func Guard() {}
 `)
 }

@@ -134,7 +134,7 @@ func TestGuardReadBeforeWrite(t *testing.T) {}
 //   Keywords: terminal safety, read before write
 //   Related: GuardHelper
 //
-// [[foxctl:invariant/no-send-without-read]]
+// [[invariant:no-send-without-read]]
 // [[doc:docs/terminal-safety.md#Terminal Safety]]
 // [[test:internal/demo/demo_test.go#TestGuardReadBeforeWrite]]
 func Guard() {
@@ -177,8 +177,12 @@ func semanticAnchorE2EAssertSemanticEdge(t *testing.T, edges []repoindex.Edge, e
 		if edge.Type != edgeType {
 			continue
 		}
-		if _, present, err := repoindex.DecodeAndValidateSemanticAnchorEdge(edge); err != nil || !present {
+		meta, present, err := repoindex.DecodeAndValidateSemanticAnchorEdge(edge)
+		if err != nil || !present {
 			t.Fatalf("semantic edge %s failed validation: present=%v err=%v edge=%+v", edgeType, present, err, edge)
+		}
+		if !strings.HasPrefix(string(meta.TargetID), "anchor:repo:") {
+			t.Fatalf("semantic edge %s target ID=%q, want repo-local target scope", edgeType, meta.TargetID)
 		}
 		return
 	}

@@ -17,7 +17,7 @@ func TestSemanticCommentingSkillExamplesMatchParser(t *testing.T) {
 		t.Fatal("semantic-commenting skill has no positive comment anchor examples")
 	}
 
-	policy := DefaultAnchorPolicy("foxctl", nil)
+	policy := DefaultAnchorPolicy("example.com/acme/project", nil)
 	seenTypes := make(map[AnchorType]bool)
 	for _, match := range matches {
 		syntax := match[1]
@@ -27,6 +27,9 @@ func TestSemanticCommentingSkillExamplesMatchParser(t *testing.T) {
 		}
 		if occ.Type == AnchorTypeBeacon {
 			t.Fatalf("skill presents beacon anchor as a positive example: %s", syntax)
+		}
+		if occ.Scope != RepoLocalAnchorScope {
+			t.Fatalf("portable skill example %s used scope %q, want repo-local", syntax, occ.Scope)
 		}
 		if (occ.Type == AnchorTypeDoc || occ.Type == AnchorTypeTest) && occ.Scope != RepoLocalAnchorScope {
 			t.Fatalf("path anchor %s used scope %q, want repo-local unscoped", syntax, occ.Scope)
@@ -58,15 +61,30 @@ func TestSemanticCommentingSkillKeepsSafetyContract(t *testing.T) {
 		"`Index:` blocks create broad repoindex soft edges for discoverability.",
 		"`[[...]]` semantic anchors create typed, evidence-only semantic edges.",
 		"they must not be treated as instruction, policy, or durable authority by themselves.",
+		"Use repo-local concept anchors by default: `[[type:slug]]`.",
+		"Use explicit scoped concept anchors, `[[scope:type/slug]]`, only when the target repo or indexer defines that scope",
+		"do not hardcode one repository name, including `foxctl`, into portable semantic comments.",
 		"`doc:` and `test:` anchors are repo-local path anchors and must be unscoped:",
-		"not `[[foxctl:doc/docs/foo.md]]`",
+		"not `[[project:doc/docs/foo.md]]`",
 		"Avoid `beacon` anchors in ordinary code.",
 		"Do not add `Index:` blocks to every exported symbol.",
+		"For AI-generated comments, score the resulting diff rather than the model's wording:",
 	}
 	for _, want := range required {
 		if !strings.Contains(normalizedContent, normalizeSkillContractText(want)) {
 			t.Fatalf("semantic-commenting skill missing required safety guidance %q", want)
 		}
+	}
+}
+
+func TestSemanticCommentingSkillHasNoHardcodedFoxctlExamples(t *testing.T) {
+	content := readSemanticCommentingSkill(t)
+	foxctlExampleRE := regexp.MustCompile(`(?m)^\s*//\s*\[\[foxctl:`)
+	if foxctlExampleRE.MatchString(content) {
+		t.Fatal("semantic-commenting skill has a foxctl-scoped positive example; examples must stay repo-portable")
+	}
+	if strings.Contains(content, "foxctl is the default project scope") {
+		t.Fatal("semantic-commenting skill still describes foxctl as the default project scope")
 	}
 }
 
