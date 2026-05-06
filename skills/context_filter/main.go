@@ -122,13 +122,16 @@ func main() {
 // run orchestrates intelligent context chunk selection using LLM assistance.
 //
 // Index:
-// - Purpose: Select most relevant text chunks from source data using LLM reasoning for context optimization
-// - Flow: validate input → build candidates → call LLM for selection → apply budget constraints → emit results
-// - SideEffects: LLM API calls; CAS store reads; text chunking; token estimation; budget enforcement
-// - FailureModes: invalid input, LLM errors, network failures, budget exceeded, parse errors
-// - Observability: emits selected chunks with scores, rationales, usage metrics, and token estimates
-// - Related: buildCandidates, callLLMForSelection, applySelection, buildLLMPrompt
-// - Keywords: context/filter, LLM, chunking, budget, relevance, selection
+//   Purpose: Select most relevant text chunks from source data using LLM reasoning for context optimization
+//   Flow: validate input → build candidates → call LLM for selection → apply budget constraints → emit results
+//   SideEffects: LLM API calls; CAS store reads; text chunking; token estimation; budget enforcement
+//   FailureModes: invalid input, LLM errors, network failures, budget exceeded, parse errors
+//   Observability: emits selected chunks with scores, rationales, usage metrics, and token estimates
+//   Related: buildCandidates, callLLMForSelection, applySelection, buildLLMPrompt
+//   Keywords: context/filter, LLM, chunking, budget, relevance, selection
+//
+// [[domain:llm-context-optimization]]
+// [[protocol:context-budget-enforcement]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate input
 	in.Prompt = strings.TrimSpace(in.Prompt)

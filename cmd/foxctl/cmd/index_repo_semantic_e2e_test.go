@@ -133,6 +133,10 @@ func TestGuardReadBeforeWrite(t *testing.T) {}
 //   Purpose: Protects terminal writes from stale unread output.
 //   Keywords: terminal safety, read before write
 //   Related: GuardHelper
+//   Flow: GuardHelper
+//   Resources: terminal
+//   Events: guard-invoked
+//   OutputFields: none
 //
 // [[invariant:no-send-without-read]]
 // [[doc:docs/terminal-safety.md#Terminal Safety]]

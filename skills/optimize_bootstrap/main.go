@@ -31,13 +31,15 @@ func main() {
 // run orchestrates trajectory bootstrapping with pattern analysis, example generation, and formatting.
 //
 // Index:
-// - Purpose: Generate few-shot examples from successful trajectories for agent optimization and prompt engineering
-// - Flow: validate input → resolve workspace → open stores → build config → get statistics → generate examples → format output
-// - SideEffects: reads trajectory store; accesses pattern store; processes successful trajectories; generates training examples
-// - FailureModes: missing role parameter, workspace resolution errors, store access failures, example generation errors
-// - Observability: emits example statistics, generated examples, formatted prompts, and comprehensive bootstrapping metrics
-// - Related: optimization.NewBootstrapOptimizer, optimization.DefaultBootstrapConfig
-// - Keywords: optimize/bootstrap, trajectory_analysis, few_shot_learning, example_generation, agent_optimization
+//   Purpose: Generate few-shot examples from successful trajectories for agent optimization and prompt engineering
+//   Keywords: optimize/bootstrap, trajectory_analysis, few_shot_learning, example_generation, agent_optimization
+//   Related: optimization.NewBootstrapOptimizer, optimization.DefaultBootstrapConfig
+//   Flow: validate input → resolve workspace → open stores → build config → get statistics → generate examples → format output
+//   Resources: trajectory store, pattern store
+//   Events: bootstrap example generation events
+//   OutputFields: examples, count, formatted, stats
+// [[domain:few-shot-example-generation]]
+// [[invariant:role-required-for-bootstrap]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate required fields
 	if in.Role == "" {

@@ -93,13 +93,16 @@ func main() {
 // run orchestrates embedding queue operations with multiple action support.
 //
 // Index:
-// - Purpose: Manage background symbol embedding queue with enqueue, stats, retrieval, and cleanup operations
-// - Flow: validate operation → open store → route to handler → emit operation-specific results
-// - SideEffects: database operations; job state management; embedding storage; queue cleanup
-// - FailureModes: invalid operations, store errors, missing required fields, job not found
-// - Observability: emits operation results with statistics, job IDs, and human-readable messages
-// - Related: handleEnqueue, handleStats, handleGet, handleGetByFile, handleJobStatus, handleCleanup
-// - Keywords: embedding/queue, background, jobs, symbols, batch_processing
+//   Purpose: Manage background symbol embedding queue with enqueue, stats, retrieval, and cleanup operations
+//   Flow: validate operation → open store → route to handler → emit operation-specific results
+//   SideEffects: database operations; job state management; embedding storage; queue cleanup
+//   FailureModes: invalid operations, store errors, missing required fields, job not found
+//   Observability: emits operation results with statistics, job IDs, and human-readable messages
+//   Related: handleEnqueue, handleStats, handleGet, handleGetByFile, handleJobStatus, handleCleanup
+//   Keywords: embedding/queue, background, jobs, symbols, batch_processing
+//
+// [[domain:symbol-embedding-queue]]
+// [[protocol:background-embedding-jobs]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))

@@ -60,13 +60,15 @@ func main() {
 // run orchestrates session archival with JSONL parsing, chunking, compression, and optional embedding generation.
 //
 // Index:
-// - Purpose: Archive session JSONL files with chunking, context window generation, compression, and optional embedding generation
-// - Flow: validate input → resolve session → locate JSONL → parse and chunk → compress → save chunks/windows → generate embeddings → update metadata
-// - SideEffects: reads JSONL files; writes compressed archives; saves chunk metadata; generates embeddings; updates session records
-// - FailureModes: missing session IDs, file access errors, parsing failures, storage errors, embedding generation failures
-// - Observability: emits archival statistics, compression ratios, chunk counts, embedding results, and comprehensive processing metrics
-// - Related: embedContextWindows, buildWindowEmbeddingText, filterEmbeddingContent, archive.ChunkFile
-// - Keywords: session/archive, jsonl_processing, chunking, compression, embedding_generation, context_windows
+//   Purpose: Archive session JSONL files with chunking, context window generation, compression, and optional embedding generation
+//   Keywords: session/archive, jsonl_processing, chunking, compression, embedding_generation, context_windows
+//   Related: embedContextWindows, buildWindowEmbeddingText, filterEmbeddingContent, archive.ChunkFile
+//   Flow: validate input → resolve session → locate JSONL → parse and chunk → compress → save chunks/windows → generate embeddings → update metadata
+//   Resources: session store, JSONL files, archive storage, embedding provider
+//   Events: session archival events
+//   OutputFields: session_id, archive_path, original_size, compressed_size, chunk_count, window_count, embedded_windows
+// [[domain:session-jsonl-archival]]
+// [[protocol:chunk-and-window-pipeline]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.SessionID == "" {
 		return skillerr.Arg("session_id is required")

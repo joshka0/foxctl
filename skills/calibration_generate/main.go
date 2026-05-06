@@ -103,13 +103,16 @@ func main() {
 // run orchestrates user profile calibration through session analysis and LLM signal extraction.
 //
 // Index:
-// - Purpose: Generate user calibration profiles by analyzing session context windows with LLM extraction
-// - Flow: resolve workspace → open stores → load/create profile → resolve sessions → process windows → extract signals via LLM → aggregate signals → save profile
-// - SideEffects: database operations (sessions/memory); LLM API calls; profile persistence; observability logging
-// - FailureModes: missing workspace, no sessions found, LLM provider errors, database failures, timeout
-// - Observability: emits profile_id/workspace/windows_analyzed/windows_skipped/signals_extracted/profile_changed/changes/status/message/provider
-// - Related: resolveSessions, buildWindowContent, extractSignals, convertSignals, calibration.AggregateSignals, calibration.SaveProfile
-// - Keywords: calibration/generate, profile, sessions, context_windows, signals, llm_extraction, workspace, scope
+//   Purpose: Generate user calibration profiles by analyzing session context windows with LLM extraction
+//   Flow: resolve workspace → open stores → load/create profile → resolve sessions → process windows → extract signals via LLM → aggregate signals → save profile
+//   SideEffects: database operations (sessions/memory); LLM API calls; profile persistence; observability logging
+//   FailureModes: missing workspace, no sessions found, LLM provider errors, database failures, timeout
+//   Observability: emits profile_id/workspace/windows_analyzed/windows_skipped/signals_extracted/profile_changed/changes/status/message/provider
+//   Related: resolveSessions, buildWindowContent, extractSignals, convertSignals, calibration.AggregateSignals, calibration.SaveProfile
+//   Keywords: calibration/generate, profile, sessions, context_windows, signals, llm_extraction, workspace, scope
+//
+// [[domain:user-calibration-profile]]
+// [[protocol:calibration-signal-extraction]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Initialize package logger
 	logger = obs.NewLogger(obs.WithLogCommand(command))
@@ -387,13 +390,16 @@ func hashContent(content string) string {
 // extractSignals uses LLM to extract calibration signals from window content.
 //
 // Index:
-// - Purpose: Extract user calibration signals from session content using LLM providers
-// - Flow: build extraction prompt → try providers in order (API or CLI) → parse LLM response → return structured signals
-// - SideEffects: LLM API calls or CLI execution; network requests
-// - FailureModes: LLM provider failures, API errors, response parsing errors, timeouts
-// - Observability: none (handled by caller)
-// - Related: buildExtractionPrompt, extractWithAPI, extractWithCLI, parseResponse
-// - Keywords: extractSignals, llm_providers, api, cli, prompt, response_parsing
+//   Purpose: Extract user calibration signals from session content using LLM providers
+//   Flow: build extraction prompt → try providers in order (API or CLI) → parse LLM response → return structured signals
+//   SideEffects: LLM API calls or CLI execution; network requests
+//   FailureModes: LLM provider failures, API errors, response parsing errors, timeouts
+//   Observability: none (handled by caller)
+//   Related: buildExtractionPrompt, extractWithAPI, extractWithCLI, parseResponse
+//   Keywords: extractSignals, llm_providers, api, cli, prompt, response_parsing
+//
+// [[protocol:calibration-signal-extraction]]
+// [[risk:llm-provider-failure]]
 type extractResult struct {
 	signals  *LLMSignals
 	provider string

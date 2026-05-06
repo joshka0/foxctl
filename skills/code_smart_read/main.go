@@ -113,13 +113,16 @@ func main() {
 // run orchestrates intelligent file reading with auto-selection and context extraction.
 //
 // Index:
-// - Purpose: Provide intelligent file reading with auto-selection, context-aware extraction, and multiple rendering modes
-// - Flow: apply defaults → determine candidates (explicit or auto) → collect evidence → scan for secrets → emit results
-// - SideEffects: file system reads; embedding API calls (auto-selection); secret scanning; artifact persistence
-// - FailureModes: invalid paths, file read errors, embedding provider errors, timeout errors
-// - Observability: emits evidence/candidates/secret_findings/stats
-// - Related: autoSelectFiles, codecontext.Collect, secretutil.ScanEvidence, mapMode
-// - Keywords: code/smart_read, evidence, snippets, auto_selection, secrets, structure, flow
+//   Purpose: Provide intelligent file reading with auto-selection, context-aware extraction, and multiple rendering modes
+//   Flow: apply defaults → determine candidates (explicit or auto) → collect evidence → scan for secrets → emit results
+//   SideEffects: file system reads; embedding API calls (auto-selection); secret scanning; artifact persistence
+//   FailureModes: invalid paths, file read errors, embedding provider errors, timeout errors
+//   Observability: emits evidence/candidates/secret_findings/stats
+//   Related: autoSelectFiles, codecontext.Collect, secretutil.ScanEvidence, mapMode
+//   Keywords: code/smart_read, evidence, snippets, auto_selection, secrets, structure, flow
+//
+// [[domain:intelligent-code-reading]]
+// [[protocol:code-context-funnel]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	start := time.Now()
 	logger := rc.Logger.With().Str("skill", command).Logger()

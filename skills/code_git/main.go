@@ -96,13 +96,16 @@ func main() {
 // run orchestrates git repository analysis with multiple query types and security validation.
 //
 // Index:
-// - Purpose: Execute various git queries with security validation and result persistence
-// - Flow: validate input → check git availability → resolve workspace → execute query → emit results
-// - SideEffects: git command execution; file system access; CAS storage for large result sets
-// - FailureModes: invalid git repo, command injection, git execution errors
-// - Observability: emits query results, statistics, and artifact hints for large result sets
-// - Related: queryRecent, queryHotspots, queryCochanged, queryBlame, queryAuthors, validateGitAuthor, validateGitSince, parseSinceArg
-// - Keywords: code/git, git_analysis, repository_queries, security_validation, command_injection_prevention
+//   Purpose: Execute various git queries with security validation and result persistence
+//   Flow: validate input → check git availability → resolve workspace → execute query → emit results
+//   SideEffects: git command execution; file system access; CAS storage for large result sets
+//   FailureModes: invalid git repo, command injection, git execution errors
+//   Observability: emits query results, statistics, and artifact hints for large result sets
+//   Related: queryRecent, queryHotspots, queryCochanged, queryBlame, queryAuthors, validateGitAuthor, validateGitSince, parseSinceArg
+//   Keywords: code/git, git_analysis, repository_queries, security_validation, command_injection_prevention
+//
+// [[domain:git-repository-analysis]]
+// [[invariant:git-input-validation]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.Since == "" {

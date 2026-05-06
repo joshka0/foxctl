@@ -28,10 +28,13 @@ type DefaultResolver struct {
 // NewDefaultResolver creates a resolver rooted at a skills directory.
 //
 // Index:
-// - Purpose: Build a resolver for installed hook skills
-// - Flow: capture skillsDir → return resolver
-// - Related: DefaultResolver.Resolve
-// - Keywords: skill_resolver, skills_dir, skill.yaml, artifact
+//   Purpose: Build a resolver for installed hook skills
+//   Keywords: skill_resolver, skills_dir, skill.yaml, artifact
+//   Related: DefaultResolver.Resolve
+//   Flow: capture skillsDir → return resolver
+//   Resources: filesystem skills directory
+//   Events: none
+//   OutputFields: *DefaultResolver
 func NewDefaultResolver(skillsDir string) *DefaultResolver {
 	return &DefaultResolver{SkillsDir: skillsDir}
 }
@@ -83,10 +86,13 @@ type ChainResolver struct {
 // NewChainResolver builds a resolver that tries each resolver in order.
 //
 // Index:
-// - Purpose: Compose multiple resolvers for fallback resolution
-// - Flow: collect resolvers → return chain
-// - Related: ChainResolver.Resolve
-// - Keywords: chain_resolver, skill_resolver, fallback, resolve
+//   Purpose: Compose multiple resolvers for fallback resolution
+//   Keywords: chain_resolver, skill_resolver, fallback, resolve
+//   Related: ChainResolver.Resolve
+//   Flow: collect resolvers → return chain
+//   Resources: []SkillResolver
+//   Events: none
+//   OutputFields: *ChainResolver
 func NewChainResolver(resolvers ...SkillResolver) *ChainResolver {
 	return &ChainResolver{Resolvers: resolvers}
 }

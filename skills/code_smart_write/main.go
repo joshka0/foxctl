@@ -52,13 +52,16 @@ func main() {
 // run orchestrates code/smart_write edits and delegates restore mode.
 //
 // Index:
-// - Purpose: Apply edits to files with optional backup and restore capabilities
-// - Flow: validate input → if restore_digest delegate to handleRestore → else resolve paths → apply edits → emit response
-// - SideEffects: writes files unless dry_run; optional CAS backup writes; CAS reads for restore
-// - FailureModes: invalid edits, path resolution errors, file I/O errors, CAS errors
-// - Observability: emits dry_run/total_edits/files_edited/files_checked; results/combined_diff in multi-file dry_run
-// - Related: handleRestore, codeedit.ApplyEditsToFile, skillmain.ResolvePaths, skillout.Emit
-// - Keywords: code/smart_write, dry_run, create_backup, restore_digest, total_edits, files_edited, files_checked, codeedit.ApplyEditsToFile
+//   Purpose: Apply edits to files with optional backup and restore capabilities
+//   Flow: validate input → if restore_digest delegate to handleRestore → else resolve paths → apply edits → emit response
+//   SideEffects: writes files unless dry_run; optional CAS backup writes; CAS reads for restore
+//   FailureModes: invalid edits, path resolution errors, file I/O errors, CAS errors
+//   Observability: emits dry_run/total_edits/files_edited/files_checked; results/combined_diff in multi-file dry_run
+//   Related: handleRestore, codeedit.ApplyEditsToFile, skillmain.ResolvePaths, skillout.Emit
+//   Keywords: code/smart_write, dry_run, create_backup, restore_digest, total_edits, files_edited, files_checked, codeedit.ApplyEditsToFile
+//
+// [[domain:symbol-aware-file-editing]]
+// [[protocol:smart-write-backup-restore]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.ContextLines <= 0 {
@@ -180,13 +183,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 // handleRestore restores a file from CAS backup.
 //
 // Index:
-// - Purpose: Restore file content from CAS to a specified path
-// - Flow: validate path → fetch from CAS → write unless dry_run → emit result
-// - SideEffects: CAS read; optional file write
-// - FailureModes: invalid digest, CAS read errors, file write errors
-// - Observability: emits path/restored/restore_digest/dry_run/size
-// - Related: skillmain.ValidatePath, CASStore.Get, skillout.Emit
-// - Keywords: restore_digest, dry_run, CASStore.Get, restored, size
+//   Purpose: Restore file content from CAS to a specified path
+//   Flow: validate path → fetch from CAS → write unless dry_run → emit result
+//   SideEffects: CAS read; optional file write
+//   FailureModes: invalid digest, CAS read errors, file write errors
+//   Observability: emits path/restored/restore_digest/dry_run/size
+//   Related: skillmain.ValidatePath, CASStore.Get, skillout.Emit
+//   Keywords: restore_digest, dry_run, CASStore.Get, restored, size
+//
+// [[domain:cas-backup-restore]]
 func handleRestore(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Require exactly one path for restore
 	if in.Path == "" {

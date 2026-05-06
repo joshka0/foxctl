@@ -51,12 +51,13 @@ type Server struct {
 // should be tied to the application's lifecycle.
 //
 // Index:
-// - Purpose: Initialize the web server and real-time hubs
-// - Flow: create hubs → wire persistence/runner factory → connect SSE publisher → return server
-// - SideEffects: sets global SSE publisher; starts hub dependencies
-// - FailureModes: NewServer does not fail on consoleapp.NewDefaultRunnerFactory; runner errors surface when the console transport invokes the per-session factory
-// - Related: consoleapp.NewDefaultRunnerFactory, sse.NewHub, consolews.NewHub
-// - Keywords: web_server, sse_hub, consolews, console_runner_factory
+//   Purpose: Initialize the web server and real-time hubs
+//   Flow: create hubs → wire persistence/runner factory → connect SSE publisher → return server
+//   Related: consoleapp.NewDefaultRunnerFactory, sse.NewHub, consolews.NewHub
+//   Keywords: web_server, sse_hub, consolews, console_runner_factory
+//
+// [[lifecycle:component]]
+// [[domain:web-server-initialization]]
 func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog.Logger) (*Server, error) {
 	sseHub := sse.NewHub()
 	consoleTransport := consolews.NewHub(ctx)
@@ -372,12 +373,13 @@ func (s *Server) StopChatAdapter(ctx context.Context) {
 // Handler returns the HTTP handler for the server.
 //
 // Index:
-// - Purpose: Build the HTTP mux and wire API routes
-// - Flow: register routes → return mux
-// - SideEffects: registers handlers
-// - FailureModes: none (handler construction)
-// - Related: api.* handlers, sse.Handler
-// - Keywords: api_routes, http_mux, handlers
+//   Purpose: Build the HTTP mux and wire API routes
+//   Flow: register routes → return mux
+//   Related: api.* handlers, sse.Handler
+//   Keywords: api_routes, http_mux, handlers
+//
+// [[protocol:http-api-routing]]
+// [[domain:web-request-handling]]
 func (s *Server) Handler() http.Handler {
 	apiMux := http.NewServeMux()
 

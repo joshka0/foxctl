@@ -84,13 +84,15 @@ func main() {
 // run orchestrates plan synchronization with task import and change detection across providers.
 //
 // Index:
-// - Purpose: Import Claude Code plans as tasks with change detection and multi-provider support
-// - Flow: resolve workspace → open stores → load sync states → detect plans → process each plan → import tasks → save states
-// - SideEffects: task creation; plan state tracking; atomic fact processing; memory store updates
-// - FailureModes: store access failures, plan parsing errors, task creation failures, provider detection errors
-// - Observability: emits sync statistics, per-plan results, task creation counts, and provider information
-// - Related: processPlan, loadSyncStates, sanitizeFileName, plans.UnifiedDetector, atomic.NewProcessorWithConfig
-// - Keywords: plan/sync, plan_import, task_creation, change_detection, claude_code, opencode
+//   Purpose: Import Claude Code plans as tasks with change detection and multi-provider support
+//   Keywords: plan/sync, plan_import, task_creation, change_detection, claude_code, opencode
+//   Related: processPlan, loadSyncStates, sanitizeFileName, plans.UnifiedDetector, atomic.NewProcessorWithConfig
+//   Flow: resolve workspace → open stores → load sync states → detect plans → process each plan → import tasks → save states
+//   Resources: memory store, task store, plan detector
+//   Events: plan sync events
+//   OutputFields: plans_processed, plans_changed, tasks_created, dry_run, provider, results
+// [[domain:plan-to-task-sync]]
+// [[protocol:plan-sync-state-tracking]]
 func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	// Default workspace
 	input.Workspace = workspaceutil.Resolve(input.Workspace, input.WorkspaceRoot, rc.Workspace)

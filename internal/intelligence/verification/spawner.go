@@ -51,12 +51,16 @@ type verificationResult struct {
 // This is the core "Swarm" implementation that enables high-throughput verification.
 //
 // Index:
-// - Purpose: Verify a batch of claims concurrently and aggregate results
-// - Flow: size worker pool → enqueue jobs → collect results → tally verdict counts
-// - SideEffects: spawns goroutines; LLM calls per claim
-// - FailureModes: none (per-claim errors captured in results)
-// - Related: Spawner.worker, Spawner.verifyClaim
-// - Keywords: verification, claims, parallelism, max_workers, queue_size, verdict
+//   Purpose: Verify a batch of claims concurrently and aggregate results
+//   Keywords: verification, claims, parallelism, max_workers, queue_size, verdict
+//   Related: Spawner.worker, Spawner.verifyClaim
+//   Flow: size worker pool → enqueue jobs → collect results → tally verdict counts
+//   Resources: LLM client
+//   Events: verification-batch-complete
+//   OutputFields: BatchVerificationResult
+//
+// [[protocol:claim-verification-swarm]]
+// [[invariant:per-claim-errors-captured]]
 func (s *Spawner) SpawnVerifiers(ctx context.Context, question string, claims []Claim) (*BatchVerificationResult, error) {
 	if len(claims) == 0 {
 		return &BatchVerificationResult{

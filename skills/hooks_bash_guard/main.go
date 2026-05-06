@@ -37,13 +37,16 @@ func main() {
 // run orchestrates bash command authorization with profile-based restrictions and sed rewriting.
 //
 // Index:
-// - Purpose: Enforce agent profile restrictions on bash commands with automatic sed-to-context_grep rewriting
-// - Flow: extract command → resolve profile → attempt sed rewrite → authorize command → emit decision
-// - SideEffects: command authorization; profile enforcement; automatic command rewriting
-// - FailureModes: invalid profiles, command extraction failures, authorization failures
-// - Observability: emits authorization decisions, profile context, and rewrite information
-// - Related: extractCommand, resolveProfile, rewriteSedToContextGrep, emitApprove, emitBlock
-// - Keywords: hooks/bash_guard, bash_authorization, profile_restrictions, command_rewriting, sed_to_grep
+//   Purpose: Enforce agent profile restrictions on bash commands with automatic sed-to-context_grep rewriting
+//   Keywords: hooks/bash_guard, bash_authorization, profile_restrictions, command_rewriting, sed_to_grep
+//   Related: extractCommand, resolveProfile, rewriteSedToContextGrep, emitApprove, emitBlock
+//   Flow: extract command → resolve profile → attempt sed rewrite → authorize command → emit decision
+//   Resources: agentpolicy.Profile, agentpolicy.AuthorizeBash
+//   Events: bash-authorized, bash-blocked, sed-rewritten
+//   OutputFields: decision, profile, parsed_skill, rewritten_from
+//
+// [[invariant:profile-restricted-bash]]
+// [[risk:unauthorized-command-execution]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	// Only process Bash tool calls
 	if in.ToolName != "Bash" {
@@ -116,13 +119,15 @@ func extractCommand(toolInput json.RawMessage) (string, error) {
 // resolveProfile determines the agent profile from environment or config.
 //
 // Index:
-// - Purpose: Determine agent profile from environment or config
-// - Flow: check environment variable → check hook config → default to unrestricted
-// - SideEffects: none
-// - FailureModes: invalid profiles
-// - Observability: emits profile information
-// - Related: run
-// - Keywords: profile_resolution, environment_variable, hook_config
+//   Purpose: Determine agent profile from environment or config
+//   Keywords: profile_resolution, environment_variable, hook_config
+//   Related: run
+//   Flow: check environment variable → check hook config → default to unrestricted
+//   Resources: FOXCTL_AGENT_PROFILE env var, hook config
+//   Events: profile-resolved
+//   OutputFields: profile
+//
+// [[domain:agent-policy]]
 func resolveProfile(in hooks.Input) agentpolicy.Profile {
 	// Check environment variable first
 	if envProfile := os.Getenv("FOXCTL_AGENT_PROFILE"); envProfile != "" {
@@ -160,13 +165,15 @@ type sedRange struct {
 // rewriteSedToContextGrep attempts to rewrite sed range commands to code/context_grep.
 //
 // Index:
-// - Purpose: Rewrite sed range commands to code/context_grep
-// - Flow: split command → parse sed range → extract file path → build context grep command
-// - SideEffects: command rewriting
-// - FailureModes: invalid sed commands, file path extraction failures
-// - Observability: emits rewrite information
-// - Related: run
-// - Keywords: sed_rewriting, context_grep
+//   Purpose: Rewrite sed range commands to code/context_grep
+//   Keywords: sed_rewriting, context_grep
+//   Related: run
+//   Flow: split command → parse sed range → extract file path → build context grep command
+//   Resources: regex patterns for sed parsing
+//   Events: sed-rewritten
+//   OutputFields: rewritten, file_path, line_start, line_end
+//
+// [[domain:command-rewriting]]
 func rewriteSedToContextGrep(command string) (string, sedRange, bool) {
 	segments := strings.Split(command, "|")
 	for idx, segment := range segments {
@@ -204,15 +211,6 @@ func rewriteSedToContextGrep(command string) (string, sedRange, bool) {
 }
 
 // parseSedRange extracts line range from sed command segment.
-//
-// Index:
-// - Purpose: Extract line range from sed command segment
-// - Flow: regex match → extract line numbers
-// - SideEffects: none
-// - FailureModes: invalid sed commands
-// - Observability: emits extraction errors
-// - Related: rewriteSedToContextGrep
-// - Keywords: sed_parsing, line_range
 func parseSedRange(segment string) (int, int, bool) {
 	matches := sedRangeRe.FindStringSubmatch(segment)
 	if len(matches) != 3 {
@@ -230,15 +228,6 @@ func parseSedRange(segment string) (int, int, bool) {
 }
 
 // extractSedFile extracts file path from sed command segment.
-//
-// Index:
-// - Purpose: Extract file path from sed command segment
-// - Flow: tokenize command → extract file path
-// - SideEffects: none
-// - FailureModes: invalid sed commands
-// - Observability: emits extraction errors
-// - Related: rewriteSedToContextGrep
-// - Keywords: sed_parsing, file_path
 func extractSedFile(segment string) string {
 	tokens := tokenizeCommand(segment)
 	for i, token := range tokens {
@@ -274,15 +263,6 @@ func extractSedFile(segment string) string {
 }
 
 // extractCatFile extracts file path from cat command segment.
-//
-// Index:
-// - Purpose: Extract file path from cat command segment
-// - Flow: tokenize command → extract file path
-// - SideEffects: none
-// - FailureModes: invalid cat commands
-// - Observability: emits extraction errors
-// - Related: rewriteSedToContextGrep
-// - Keywords: cat_parsing, file_path
 func extractCatFile(segment string) string {
 	tokens := tokenizeCommand(segment)
 	for i, token := range tokens {
@@ -307,15 +287,6 @@ func extractCatFile(segment string) string {
 }
 
 // buildContextGrepCommand builds a code/context_grep command from sed range info.
-//
-// Index:
-// - Purpose: Build code/context_grep command from sed range info
-// - Flow: create input map → marshal input → build command
-// - SideEffects: command building
-// - FailureModes: invalid input
-// - Observability: emits command building errors
-// - Related: rewriteSedToContextGrep
-// - Keywords: context_grep, command_building
 func buildContextGrepCommand(info sedRange) (string, error) {
 	input := map[string]any{
 		"mode":       "line",
@@ -331,15 +302,6 @@ func buildContextGrepCommand(info sedRange) (string, error) {
 }
 
 // buildUpdatedToolInput creates updated tool input for rewritten commands.
-//
-// Index:
-// - Purpose: Create updated tool input for rewritten commands
-// - Flow: marshal input → return updated input
-// - SideEffects: input creation
-// - FailureModes: invalid input
-// - Observability: emits input creation errors
-// - Related: rewriteSedToContextGrep
-// - Keywords: tool_input, input_creation
 func buildUpdatedToolInput(command string) (json.RawMessage, error) {
 	payload, err := json.Marshal(map[string]string{"command": command})
 	if err != nil {
@@ -349,15 +311,6 @@ func buildUpdatedToolInput(command string) (json.RawMessage, error) {
 }
 
 // shellQuote properly quotes a string for shell usage.
-//
-// Index:
-// - Purpose: Quote a string for shell usage
-// - Flow: check for quotes → quote string
-// - SideEffects: none
-// - FailureModes: none
-// - Observability: none
-// - Related: buildContextGrepCommand
-// - Keywords: shell_quoting, string_quoting
 func shellQuote(value string) string {
 	if value == "" {
 		return "''"
@@ -369,15 +322,6 @@ func shellQuote(value string) string {
 }
 
 // isValidFilePath validates that a file path is safe to use in a command.
-//
-// Index:
-// - Purpose: Validate file path safety
-// - Flow: check for null bytes → check for newlines → check for backticks → check for command substitution
-// - SideEffects: none
-// - FailureModes: invalid file paths
-// - Observability: emits validation errors
-// - Related: rewriteSedToContextGrep
-// - Keywords: file_path_validation, safety_validation
 func isValidFilePath(path string) bool {
 	// Reject null bytes
 	if strings.ContainsRune(path, 0) {
@@ -399,15 +343,6 @@ func isValidFilePath(path string) bool {
 }
 
 // tokenizeCommand splits a command string into tokens respecting quotes.
-//
-// Index:
-// - Purpose: Split command string into tokens
-// - Flow: iterate over characters → handle quotes → handle whitespace
-// - SideEffects: none
-// - FailureModes: none
-// - Observability: none
-// - Related: extractSedFile, extractCatFile
-// - Keywords: command_tokenization, tokenization
 func tokenizeCommand(command string) []string {
 	var tokens []string
 	var buf strings.Builder
@@ -451,15 +386,6 @@ func tokenizeCommand(command string) []string {
 }
 
 // trimQuotes removes surrounding quotes from a string.
-//
-// Index:
-// - Purpose: Remove surrounding quotes from a string
-// - Flow: check for quotes → remove quotes
-// - SideEffects: none
-// - FailureModes: none
-// - Observability: none
-// - Related: extractSedFile, extractCatFile
-// - Keywords: quote_removal, string_trimming
 func trimQuotes(value string) string {
 	if len(value) < 2 {
 		return value
@@ -471,30 +397,12 @@ func trimQuotes(value string) string {
 }
 
 // emitApprove emits an approve hook output.
-//
-// Index:
-// - Purpose: Emit approve hook output
-// - Flow: create output → emit output
-// - SideEffects: output emission
-// - FailureModes: none
-// - Observability: none
-// - Related: run
-// - Keywords: hook_output, approve_output
 func emitApprove(rc *skillmain.RunContext, reason string, meta map[string]any) error {
 	output := hooks.NewApprove(reason, meta)
 	return emitOutput(rc, output)
 }
 
 // emitApproveWithUpdate emits an approve hook output with updated tool input.
-//
-// Index:
-// - Purpose: Emit approve hook output with updated tool input
-// - Flow: create output → set updated input → emit output
-// - SideEffects: output emission
-// - FailureModes: none
-// - Observability: none
-// - Related: run
-// - Keywords: hook_output, approve_output, updated_input
 func emitApproveWithUpdate(rc *skillmain.RunContext, reason string, meta map[string]any, updatedInput json.RawMessage) error {
 	output := hooks.NewApprove(reason, meta)
 	output.UpdatedToolInput = updatedInput

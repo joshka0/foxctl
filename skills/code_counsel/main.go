@@ -160,13 +160,16 @@ func main() {
 // run orchestrates multi-perspective code analysis using LLMs with evidence gathering and secret detection.
 //
 // Index:
-// - Purpose: Analyze code from multiple perspectives (security, performance, readability, correctness) using LLMs
-// - Flow: apply defaults → gather evidence → scan for secrets → detect provider → run parallel perspectives → generate summary
-// - SideEffects: makes HTTP API calls to LLM providers; reads file contents; scans for secrets
-// - FailureModes: missing API keys, file access errors, LLM API failures, parsing errors, timeout
-// - Observability: emits analysis results, secret warnings, timing metrics, and provider information
-// - Related: gatherEvidence, runPerspectiveAnalysis, detectProvider, renderEvidenceForLLM
-// - Keywords: code/counsel, code_analysis, multi_perspective, llm_analysis, security_review, performance_review
+//   Purpose: Analyze code from multiple perspectives (security, performance, readability, correctness) using LLMs
+//   Flow: apply defaults → gather evidence → scan for secrets → detect provider → run parallel perspectives → generate summary
+//   SideEffects: makes HTTP API calls to LLM providers; reads file contents; scans for secrets
+//   FailureModes: missing API keys, file access errors, LLM API failures, parsing errors, timeout
+//   Observability: emits analysis results, secret warnings, timing metrics, and provider information
+//   Related: gatherEvidence, runPerspectiveAnalysis, detectProvider, renderEvidenceForLLM
+//   Keywords: code/counsel, code_analysis, multi_perspective, llm_analysis, security_review, performance_review
+//
+// [[domain:multi-perspective-code-analysis]]
+// [[protocol:llm-code-counsel]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	start := time.Now()
 	logger := rc.Logger.With().Str("skill", command).Logger()

@@ -423,7 +423,7 @@ func writeSemanticDryRun(cmd *cobra.Command, command string, files []string, wor
 }
 
 func writeSemanticError(cmd *cobra.Command, code, message string) error {
-	env := protocol.Error("semantic_index", protocol.ErrorCode(code), message, protocol.WithSource("cli"))
+	env := protocol.Error("semantic_index", protocol.ErrorCode(code), message, nil, protocol.WithSource("cli"))
 	if err := protocol.Write(cmd.OutOrStdout(), env); err != nil {
 		return fmt.Errorf("write error envelope: %w", err)
 	}

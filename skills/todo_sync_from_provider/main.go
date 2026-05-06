@@ -55,13 +55,16 @@ func main() {
 // run orchestrates inbound todo synchronization from external providers into foxctl's task system.
 //
 // Index:
-// - Purpose: Sync todos FROM a provider (e.g., Claude Code) INTO foxctl's task management system
-// - Flow: open task store → resolve session ID → get todos from input or file → run inbound sync → emit results
-// - SideEffects: task creation/updates; completion tracking; dependency management; dry-run simulation
-// - FailureModes: task store access failures, provider file read errors, sync operation failures
-// - Observability: emits sync statistics, created/updated/completed counts, warnings, and dry-run status
-// - Related: todosync.Service, todosync.InboundSyncInput
-// - Keywords: todo/sync_from_provider, todo_sync, inbound_sync, claude_code, task_management
+//   Purpose: Sync todos FROM a provider (e.g., Claude Code) INTO foxctl's task management system
+//   Keywords: todo/sync_from_provider, todo_sync, inbound_sync, claude_code, task_management
+//   Related: todosync.Service, todosync.InboundSyncInput
+//   Flow: open task store → resolve session ID → get todos from input or file → run inbound sync → emit results
+//   Resources: task store, provider todo file
+//   Events: none
+//   OutputFields: created, updated, completed, removed, mapped, unmapped, deps_added, warnings, dry_run
+//
+// [[protocol:inbound_todo_sync]]
+// [[domain:provider_integration]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Open task store
 	taskStore, err := rc.Stores.Tasks(ctx)

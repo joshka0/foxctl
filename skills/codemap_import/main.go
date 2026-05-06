@@ -49,13 +49,16 @@ func main() {
 // run orchestrates codemap import from files with optional embedding and deduplication.
 //
 // Index:
-// - Purpose: Import .codemap files from disk into memory store with optional embedding generation
-// - Flow: validate input → collect .codemap files → parse each file → store with deduplication → generate embeddings optionally
-// - SideEffects: file system reads; database storage; embedding generation; path validation
-// - FailureModes: invalid paths, file read errors, parse errors, storage errors, embedding failures
-// - Observability: emits import statistics with imported/skipped/error counts and IDs
-// - Related: collectCodemapFiles, parseCodemapPayload, buildSummary
-// - Keywords: codemap/import, embedding, deduplication, batch_import, statistics
+//   Purpose: Import .codemap files from disk into memory store with optional embedding generation
+//   Flow: validate input → collect .codemap files → parse each file → store with deduplication → generate embeddings optionally
+//   SideEffects: file system reads; database storage; embedding generation; path validation
+//   FailureModes: invalid paths, file read errors, parse errors, storage errors, embedding failures
+//   Observability: emits import statistics with imported/skipped/error counts and IDs
+//   Related: collectCodemapFiles, parseCodemapPayload, buildSummary
+//   Keywords: codemap/import, embedding, deduplication, batch_import, statistics
+//
+// [[domain:codemap-batch-import]]
+// [[protocol:codemap-embedding-storage]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if strings.TrimSpace(in.Path) == "" {
 		return skillerr.Arg("path is required", skillerr.WithHint("Provide a .codemap file or a directory containing .codemap files."))

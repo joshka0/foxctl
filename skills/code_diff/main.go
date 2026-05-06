@@ -61,13 +61,15 @@ func main() {
 // run orchestrates file diff generation with multiple output formats.
 //
 // Index:
-// - Purpose: Generate unified diffs between files with statistics and hunk analysis
-// - Flow: validate paths → read files → normalize whitespace (optional) → compute LCS diff → build hunks → calculate stats → format output
-// - SideEffects: file system reads; artifact persistence for large diffs; whitespace normalization
-// - FailureModes: invalid paths, file read errors, memory pressure for large files
-// - Observability: emits diff/statistics/old_file/new_file/hunks/unified/artifact based on format
-// - Related: normalizeWhitespace, computeDiff, longestCommonSubsequence, buildHunks, computeStats, generateUnifiedDiff
-// - Keywords: code/diff, unified, stats, summary, hunk, lcs, whitespace, context_lines
+//   Purpose: Generate unified diffs between files with statistics and hunk analysis
+//   Flow: validate paths → read files → normalize whitespace (optional) → compute LCS diff → build hunks → calculate stats → format output
+//   SideEffects: file system reads; artifact persistence for large diffs; whitespace normalization
+//   FailureModes: invalid paths, file read errors, memory pressure for large files
+//   Observability: emits diff/statistics/old_file/new_file/hunks/unified/artifact based on format
+//   Related: normalizeWhitespace, computeDiff, longestCommonSubsequence, buildHunks, computeStats, generateUnifiedDiff
+//   Keywords: code/diff, unified, stats, summary, hunk, lcs, whitespace, context_lines
+//
+// [[domain:file-diff-generation]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.Format == "" {

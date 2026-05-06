@@ -92,6 +92,16 @@ func OpenCollector(ctx context.Context, storageRoot, workspacePath, vaultPath st
 	}, cleanup, nil
 }
 
+// TranscriptSummaryWorkerConfig builds a transcript summary worker from platform config.
+//
+// Index:
+//   Purpose: Configure transcript summary worker with provider/model overrides
+//   Flow: resolve provider → resolve model → construct worker
+//   Related: TranscriptSummaryWorker
+//   Keywords: transcript_summary, worker, provider, model, config
+//
+// [[domain:transcript-summary-worker-config]]
+// [[context:memory]]
 func TranscriptSummaryWorkerConfig(cfg platformcfg.Config, providerOverride, modelOverride string) *TranscriptSummaryWorker {
 	provider := strings.ToLower(strings.TrimSpace(providerOverride))
 	if provider == "" {

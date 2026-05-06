@@ -51,13 +51,16 @@ func main() {
 // run orchestrates communication with the Godot Editor AI Bridge plugin.
 //
 // Index:
-// - Purpose: Interface with Godot Editor through AI Bridge plugin for various editor operations
-// - Flow: validate input → resolve handler → build plugin request → call plugin → handle response → emit results
-// - SideEffects: HTTP requests to plugin; artifact storage for large responses; error handling
-// - FailureModes: invalid actions, plugin connection errors, handler validation errors, network failures
-// - Observability: emits action results with summaries, optional artifacts, and error details
-// - Related: callPlugin, emitPluginError, emitSuccess
-// - Keywords: editor/godot, Godot, plugin, HTTP, bridge, editor_integration
+//   Purpose: Interface with Godot Editor through AI Bridge plugin for various editor operations
+//   Flow: validate input → resolve handler → build plugin request → call plugin → handle response → emit results
+//   SideEffects: HTTP requests to plugin; artifact storage for large responses; error handling
+//   FailureModes: invalid actions, plugin connection errors, handler validation errors, network failures
+//   Observability: emits action results with summaries, optional artifacts, and error details
+//   Related: callPlugin, emitPluginError, emitSuccess
+//   Keywords: editor/godot, Godot, plugin, HTTP, bridge, editor_integration
+//
+// [[domain:godot-editor-integration]]
+// [[protocol:godot-ai-bridge]]
 func run(ctx context.Context, rc *skillmain.RunContext, in handlers.Input) error {
 	// Validate
 	if strings.TrimSpace(in.Action) == "" {

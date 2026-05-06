@@ -34,12 +34,15 @@ type Store struct {
 // Open opens a SQLite-backed queue store and applies table migrations.
 //
 // Index:
-// - Purpose: Initialize queue storage for a named table
-// - Flow: normalize table -> open shared db -> migrate -> return store
-// - SideEffects: opens/creates SQLite DB; runs DDL migrations
-// - FailureModes: invalid table name, open errors, migration errors
-// - Related: dbutil.OpenSQLiteDBShared, Migrate
-// - Keywords: queue, migrate, table, dbutil.OpenSQLiteDBShared, Migrate
+//   Purpose: Initialize queue storage for a named table
+//   Keywords: queue, migrate, table, dbutil.OpenSQLiteDBShared, Migrate
+//   Related: dbutil.OpenSQLiteDBShared, Migrate
+//   Flow: normalize table -> open shared db -> migrate -> return store
+//   Resources: sqlite DB, queue table
+//   Events: none
+//   OutputFields: *Store
+// [[invariant:table-name-alphanumeric-underscore-only]]
+// [[risk:sql-injection-via-table-name]]
 func Open(ctx context.Context, dbPath string, opts Options) (*Store, error) {
 	table, err := normalizeTableName(opts.Table)
 	if err != nil {
@@ -60,12 +63,15 @@ func Open(ctx context.Context, dbPath string, opts Options) (*Store, error) {
 // foxctl store registry (e.g., SUMMARY_QUEUE).
 //
 // Index:
-// - Purpose: Open a queue DB via standardized store configuration (sqlite/turso/postgres)
-// - Flow: normalize table → open store DB via dbutil.OpenStoreDB → migrate table → return store
-// - SideEffects: may create local replica files/dirs; may run schema migrations
-// - FailureModes: invalid table, open errors, migration errors, remote auth/network errors (sync drivers)
-// - Related: dbutil.OpenStoreDB, Migrate
-// - Keywords: queue, store_db, dbdriver, migrate, summary_queue
+//   Purpose: Open a queue DB via standardized store configuration (sqlite/turso/postgres)
+//   Keywords: queue, store_db, dbdriver, migrate, summary_queue
+//   Related: dbutil.OpenStoreDB, Migrate
+//   Flow: normalize table → open store DB via dbutil.OpenStoreDB → migrate table → return store
+//   Resources: sqlite/turso/postgres DB
+//   Events: none
+//   OutputFields: *Store
+// [[protocol:store-driver-abstraction]]
+// [[invariant:table-name-alphanumeric-underscore-only]]
 func OpenStore(ctx context.Context, storageRoot, storeName, defaultFile string, opts Options) (*Store, error) {
 	table, err := normalizeTableName(opts.Table)
 	if err != nil {
@@ -159,12 +165,15 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult
 // EnqueueBatch adds multiple jobs to the queue in one transaction.
 //
 // Index:
-// - Purpose: Insert queued jobs with dedupe protection
-// - Flow: begin tx -> prepare insert -> validate fields -> insert jobs -> commit
-// - SideEffects: writes queue table
-// - FailureModes: invalid inputs, tx/prepare/insert/commit errors
-// - Related: sqlutil.FormatTimestamp, ulid.Make
-// - Keywords: enqueue, group_id, dedupe_key, priority, max_attempts, ulid.Make
+//   Purpose: Insert queued jobs with dedupe protection
+//   Keywords: enqueue, group_id, dedupe_key, priority, max_attempts, ulid.Make
+//   Related: sqlutil.FormatTimestamp, ulid.Make
+//   Flow: begin tx -> prepare insert -> validate fields -> insert jobs -> commit
+//   Resources: queue table
+//   Events: none
+//   OutputFields: EnqueueResult.Queued, EnqueueResult.Skipped, EnqueueResult.JobIDs
+// [[invariant:dedupe-via-unique-group-dedupe-key]]
+// [[test-contract:enqueue-batch-atomicity]]
 func (s *Store) EnqueueBatch(ctx context.Context, reqs []EnqueueRequest) (*EnqueueResult, error) {
 	result := &EnqueueResult{}
 	if len(reqs) == 0 {

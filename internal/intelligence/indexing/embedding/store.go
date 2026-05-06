@@ -199,12 +199,16 @@ func migrateLegacyJobs(ctx context.Context, db *sql.DB) error {
 // Enqueue adds symbols to the embedding queue.
 //
 // Index:
-// - Purpose: Queue embedding jobs with optional deduplication
-// - Flow: compute digest → check existing embeddings → enqueue jobs → return counts
-// - SideEffects: database reads; queue writes
-// - FailureModes: marshal errors, queue errors, database errors
-// - Related: queue.Store.EnqueueBatch, dedupeKeyForSymbol
-// - Keywords: embedding_queue, dedupe, content_digest, workspace_id
+//   Purpose: Queue embedding jobs with optional deduplication
+//   Keywords: embedding_queue, dedupe, content_digest, workspace_id
+//   Related: queue.Store.EnqueueBatch, dedupeKeyForSymbol
+//   Flow: compute digest → check existing embeddings → enqueue jobs → return counts
+//   Resources: embedding_queue.db, symbol_embeddings table
+//   Events: embedding-enqueue
+//   OutputFields: EnqueueResult
+//
+// [[protocol:embedding-job-enqueue]]
+// [[invariant:dedupe-by-content-digest]]
 func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult, error) {
 	result := &EnqueueResult{}
 	if len(req.Symbols) == 0 {

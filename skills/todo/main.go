@@ -271,13 +271,16 @@ func main() {
 // run orchestrates comprehensive task management operations with validation, graph analysis, and review gate enforcement.
 //
 // Index:
-// - Purpose: Manage tasks with CRUD operations, dependency tracking, graph analysis, semantic search, and review workflows
-// - Flow: validate operation → open task store → route to handler → perform operation → update graph metrics → emit results
-// - SideEffects: updates task store; modifies dependency graphs; triggers atomic processing; manages review states; updates PageRank scores
-// - FailureModes: invalid operations, task store failures, dependency cycles, review gate violations, embedding provider errors
-// - Observability: emits operation results, task counts, graph metrics, search results, and comprehensive status tracking
-// - Related: handleAdd, handleUpdate, handleComplete, handleSearch, handlePlan, persistPageRanks
-// - Keywords: todo/manage, task_management, dependency_graph, review_gate, semantic_search, atomic_processing
+//   Purpose: Manage tasks with CRUD operations, dependency tracking, graph analysis, semantic search, and review workflows
+//   Keywords: todo/manage, task_management, dependency_graph, review_gate, semantic_search, atomic_processing
+//   Related: handleAdd, handleUpdate, handleComplete, handleSearch, handlePlan, persistPageRanks
+//   Flow: validate operation → open task store → route to handler → perform operation → update graph metrics → emit results
+//   Resources: task store, memory store, graph store, CAS store
+//   Events: plan.created, plan.updated
+//   OutputFields: task, total_tasks, pending_tasks, summary, tasks, ranked, active, plan, recommendation, results, total_found, query, applied, groups, groups_count, duplicate_tasks, canceled_tasks, updated_tasks, total_open_tasks
+//
+// [[domain:task_management]]
+// [[invariant:review_gate_enforcement]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	cfg := rc.Config
 	// Open SQLite-backed task store

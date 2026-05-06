@@ -55,6 +55,13 @@ func TestIndexRepoBuildEmitsHumanProgressOnStderrByDefault(t *testing.T) {
 	progress := stderr.String()
 	for _, want := range []string{
 		"repoindex build:",
+		"phase=init",
+		"families=terraform",
+		"include_tests=false",
+		"semantic_anchors=false",
+		"phase=config",
+		"phase=storage",
+		"phase=build",
 		"phase=start",
 		"phase=terraform",
 		"phase=done",

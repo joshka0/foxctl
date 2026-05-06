@@ -33,8 +33,7 @@ type VectorMemoryStore interface {
 type TursoStore struct {
 	db              dbdriver.DB
 	vh              *dbdriver.VectorHelper
-	hasIndex        bool // true if vector index exists
-	vectorDimension int  // configured embedding dimensions
+	vectorDimension int // configured embedding dimensions
 }
 
 // DefaultEmbeddingModel is the default model for embeddings.
@@ -81,17 +80,6 @@ func openVectorStore(ctx context.Context, cfg dbdriver.Config, vectorDimensions 
 	if err := store.validateDimensions(ctx, vectorDimensions); err != nil {
 		_ = db.Close()
 		return nil, err
-	}
-
-	// Check if vector index exists, create if missing
-	store.hasIndex = store.checkVectorIndex(ctx)
-	if !store.hasIndex {
-		// Auto-create vector index for faster similarity search
-		if err := store.CreateVectorIndex(ctx); err != nil {
-			// Non-fatal: log warning but continue with full-table scan fallback
-			// Vector index creation may fail on Turso versions without native ANN indexing.
-			logger.Warn().Err(err).Msg("vector index creation failed (will use ORDER BY fallback)")
-		}
 	}
 
 	store.repairWorkspaceIDs(ctx)
@@ -162,8 +150,8 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 		return fmt.Errorf("create indexer_state index: %w", err)
 	}
 
-	// Create named_memory table with F32_BLOB for native vector search
-	memoryQuery := fmt.Sprintf(`
+	// Create named_memory table with BLOB embeddings for Turso vector32() values.
+	memoryQuery := `
 		CREATE TABLE IF NOT EXISTS named_memory (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -177,11 +165,11 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 			updated_at TEXT NOT NULL,
 			last_accessed TEXT NOT NULL,
 			access_count INTEGER NOT NULL DEFAULT 0,
-			embedding F32_BLOB(%d),
+			embedding BLOB,
 			embedding_model TEXT,
 			UNIQUE(name, workspace)
 		)
-	`, dimensions)
+	`
 	if _, err = db.ExecContext(ctx, memoryQuery); err != nil {
 		return fmt.Errorf("create named_memory table: %w", err)
 	}
@@ -243,26 +231,6 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 		return fmt.Errorf("create lifecycle index: %w", err)
 	}
 
-	return nil
-}
-
-// checkVectorIndex checks if the vector index exists.
-func (s *TursoStore) checkVectorIndex(ctx context.Context) bool {
-	var count int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM sqlite_master
-		WHERE type='index' AND name='idx_memory_embedding_vec'
-	`).Scan(&count)
-	return err == nil && count > 0
-}
-
-// CreateVectorIndex creates a vector index for faster similarity search.
-func (s *TursoStore) CreateVectorIndex(ctx context.Context) error {
-	err := s.vh.CreateVectorIndex(ctx, "named_memory", "embedding", "idx_memory_embedding_vec")
-	if err != nil {
-		return fmt.Errorf("memory: create vector index: %w", err)
-	}
-	s.hasIndex = true
 	return nil
 }
 
@@ -335,8 +303,9 @@ func (s *TursoStore) SaveWithEmbedding(ctx context.Context, entry NamedEntry, em
 		return NamedEntry{}, fmt.Errorf("memory: format digests: %w", err)
 	}
 
-	// Convert embedding to vector string
-	vectorStr := float32sToVectorString(embedding)
+	vec := make(dbdriver.Vector, len(embedding))
+	copy(vec, embedding)
+	vectorExpr := s.vh.VectorExpression(vec)
 
 	query := fmt.Sprintf(`
 		INSERT INTO named_memory (
@@ -346,7 +315,7 @@ func (s *TursoStore) SaveWithEmbedding(ctx context.Context, entry NamedEntry, em
 			selected_count, use_count, success_count, failure_count, patch_count, restore_count,
 			last_selected_at, last_succeeded_at, last_failed_at, last_patched_at, last_restored_at,
 			embedding, embedding_model
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector('%s'), ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, %s, ?)
 		ON CONFLICT(name, workspace) DO UPDATE SET
 			id = excluded.id,
 			type = excluded.type,
@@ -358,7 +327,7 @@ func (s *TursoStore) SaveWithEmbedding(ctx context.Context, entry NamedEntry, em
 			last_accessed = excluded.last_accessed,
 			embedding = excluded.embedding,
 			embedding_model = excluded.embedding_model
-	`, vectorStr)
+	`, vectorExpr)
 
 	_, err = s.db.ExecContext(ctx, query,
 		entry.ID, entry.Name, entry.Type, entry.Workspace, entry.Summary, entry.Result, digestsJSON, entry.SessionID,
@@ -377,15 +346,6 @@ func (s *TursoStore) SaveWithEmbedding(ctx context.Context, entry NamedEntry, em
 	return entry, nil
 }
 
-// float32sToVectorString converts a float32 slice to Turso vector string format.
-func float32sToVectorString(values []float32) string {
-	parts := make([]string, len(values))
-	for i, v := range values {
-		parts[i] = fmt.Sprintf("%f", v)
-	}
-	return "[" + strings.Join(parts, ",") + "]"
-}
-
 // SearchSimilar finds entries similar to the given embedding using native vector search.
 func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, embedding []float32, limit int) ([]ScoredEntry, error) {
 	if limit <= 0 {
@@ -397,38 +357,15 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, embedd
 	vec := make(dbdriver.Vector, len(embedding))
 	copy(vec, embedding)
 
-	var query string
-	var rows *sql.Rows
-	var err error
-
-	if s.hasIndex {
-		// Use vector_top_k for fast indexed search
-		topKExpr := s.vh.VectorTopK("idx_memory_embedding_vec", vec, limit*2)
-		distExpr := s.vh.CosineSimilarity("m.embedding", vec)
-		query = fmt.Sprintf(`
-			SELECT m.id, m.name, m.type, m.workspace, m.summary, m.result, m.digests,
-				m.created_at, m.updated_at, m.last_accessed, m.access_count, m.session_id,
-				m.lifecycle_state, m.pinned, m.review_status, m.superseded_by, m.review_notes,
-				m.last_used_at, m.last_validated_at,
-				m.selected_count, m.use_count, m.success_count, m.failure_count, m.patch_count, m.restore_count,
-				m.last_selected_at, m.last_succeeded_at, m.last_failed_at, m.last_patched_at, m.last_restored_at,
-				%s as distance
-			FROM %s vt
-			JOIN named_memory m ON m.rowid = vt.id
-			WHERE m.workspace = ?`, distExpr, topKExpr)
-		rows, err = s.db.QueryContext(ctx, query, workspace)
-	} else {
-		// Fallback to full table scan with cosine distance
-		distExpr := s.vh.CosineSimilarity("embedding", vec)
-		query = fmt.Sprintf(`
-			SELECT %s,
-				%s as distance
-			FROM named_memory
-			WHERE embedding IS NOT NULL AND workspace = ?
-			ORDER BY distance ASC
-			LIMIT ?`, namedEntrySelectColumns, distExpr)
-		rows, err = s.db.QueryContext(ctx, query, workspace, limit)
-	}
+	distExpr := s.vh.CosineSimilarity("embedding", vec)
+	query := fmt.Sprintf(`
+		SELECT %s,
+			%s as distance
+		FROM named_memory
+		WHERE embedding IS NOT NULL AND workspace = ?
+		ORDER BY distance ASC
+		LIMIT ?`, namedEntrySelectColumns, distExpr)
+	rows, err := s.db.QueryContext(ctx, query, workspace, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search similar: %w", err)
 	}
@@ -480,36 +417,15 @@ func (s *TursoStore) SearchSimilarByType(ctx context.Context, workspace, entryTy
 	vec := make(dbdriver.Vector, len(embedding))
 	copy(vec, embedding)
 
-	var query string
-	var rows *sql.Rows
-	var err error
-
-	if s.hasIndex {
-		topKExpr := s.vh.VectorTopK("idx_memory_embedding_vec", vec, limit*2)
-		distExpr := s.vh.CosineSimilarity("m.embedding", vec)
-		query = fmt.Sprintf(`
-			SELECT m.id, m.name, m.type, m.workspace, m.summary, m.result, m.digests,
-				m.created_at, m.updated_at, m.last_accessed, m.access_count, m.session_id,
-				m.lifecycle_state, m.pinned, m.review_status, m.superseded_by, m.review_notes,
-				m.last_used_at, m.last_validated_at,
-				m.selected_count, m.use_count, m.success_count, m.failure_count, m.patch_count, m.restore_count,
-				m.last_selected_at, m.last_succeeded_at, m.last_failed_at, m.last_patched_at, m.last_restored_at,
-				%s as distance
-			FROM %s vt
-			JOIN named_memory m ON m.rowid = vt.id
-			WHERE m.workspace = ? AND m.type = ?`, distExpr, topKExpr)
-		rows, err = s.db.QueryContext(ctx, query, workspace, entryType)
-	} else {
-		distExpr := s.vh.CosineSimilarity("embedding", vec)
-		query = fmt.Sprintf(`
-			SELECT %s,
-				%s as distance
-			FROM named_memory
-			WHERE embedding IS NOT NULL AND workspace = ? AND type = ?
-			ORDER BY distance ASC
-			LIMIT ?`, namedEntrySelectColumns, distExpr)
-		rows, err = s.db.QueryContext(ctx, query, workspace, entryType, limit)
-	}
+	distExpr := s.vh.CosineSimilarity("embedding", vec)
+	query := fmt.Sprintf(`
+		SELECT %s,
+			%s as distance
+		FROM named_memory
+		WHERE embedding IS NOT NULL AND workspace = ? AND type = ?
+		ORDER BY distance ASC
+		LIMIT ?`, namedEntrySelectColumns, distExpr)
+	rows, err := s.db.QueryContext(ctx, query, workspace, entryType, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search similar by type: %w", err)
 	}
@@ -737,14 +653,15 @@ func (s *TursoStore) UpdateEmbedding(ctx context.Context, name, workspace string
 		return fmt.Errorf("memory: embedding dimension mismatch: got %d, expected %d", len(embedding), s.vectorDimension)
 	}
 
-	// Convert embedding to vector string for Turso
-	vectorStr := float32sToVectorString(embedding)
+	vec := make(dbdriver.Vector, len(embedding))
+	copy(vec, embedding)
+	vectorExpr := s.vh.VectorExpression(vec)
 
 	query := fmt.Sprintf(`
 		UPDATE named_memory
-		SET embedding = vector('%s'), updated_at = ?
+		SET embedding = %s, updated_at = ?
 		WHERE name = ? AND workspace = ?
-	`, vectorStr)
+	`, vectorExpr)
 
 	_, err := s.db.ExecContext(ctx, query, sqlutil.FormatTimestamp(timeutil.NowUTC()), name, workspace)
 	if err != nil {
@@ -764,37 +681,15 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, embedding []float3
 	vec := make(dbdriver.Vector, len(embedding))
 	copy(vec, embedding)
 
-	var query string
-	var rows *sql.Rows
-	var err error
-
-	if s.hasIndex {
-		// Use vector_top_k for fast indexed search across all workspaces
-		topKExpr := s.vh.VectorTopK("idx_memory_embedding_vec", vec, limit*2)
-		distExpr := s.vh.CosineSimilarity("m.embedding", vec)
-		query = fmt.Sprintf(`
-			SELECT m.id, m.name, m.type, m.workspace, m.summary, m.result, m.digests,
-				m.created_at, m.updated_at, m.last_accessed, m.access_count, m.session_id,
-				m.lifecycle_state, m.pinned, m.review_status, m.superseded_by, m.review_notes,
-				m.last_used_at, m.last_validated_at,
-				m.selected_count, m.use_count, m.success_count, m.failure_count, m.patch_count, m.restore_count,
-				m.last_selected_at, m.last_succeeded_at, m.last_failed_at, m.last_patched_at, m.last_restored_at,
-				%s as distance
-			FROM %s vt
-			JOIN named_memory m ON m.rowid = vt.id`, distExpr, topKExpr)
-		rows, err = s.db.QueryContext(ctx, query)
-	} else {
-		// Fallback to full table scan with cosine distance (no workspace filter)
-		distExpr := s.vh.CosineSimilarity("embedding", vec)
-		query = fmt.Sprintf(`
-			SELECT %s,
-				%s as distance
-			FROM named_memory
-			WHERE embedding IS NOT NULL
-			ORDER BY distance ASC
-			LIMIT ?`, namedEntrySelectColumns, distExpr)
-		rows, err = s.db.QueryContext(ctx, query, limit)
-	}
+	distExpr := s.vh.CosineSimilarity("embedding", vec)
+	query := fmt.Sprintf(`
+		SELECT %s,
+			%s as distance
+		FROM named_memory
+		WHERE embedding IS NOT NULL
+		ORDER BY distance ASC
+		LIMIT ?`, namedEntrySelectColumns, distExpr)
+	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("memory: search similar global: %w", err)
 	}
@@ -1182,7 +1077,7 @@ func (s *TursoStore) ListWithoutEmbedding(ctx context.Context, workspace string,
 	}
 	workspace = ws.CanonicalID(workspace)
 
-	// Check for NULL or zero-length embedding (F32_BLOB comparison)
+	// Check for NULL or zero-length BLOB embedding.
 	rows, err := s.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT %s
 		FROM named_memory

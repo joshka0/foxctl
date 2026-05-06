@@ -41,6 +41,25 @@ func TestSemanticIndexCommand_Init(t *testing.T) {
 	}
 }
 
+func TestWriteSemanticErrorSerializesEnvelope(t *testing.T) {
+	cmd := newSemanticIndexCommand()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+
+	err := writeSemanticError(cmd, "EARG", "bad input")
+	if err == nil {
+		t.Fatal("expected returned command error")
+	}
+
+	var env map[string]any
+	if decodeErr := json.Unmarshal(buf.Bytes(), &env); decodeErr != nil {
+		t.Fatalf("decode envelope: %v\nbody=%s", decodeErr, buf.String())
+	}
+	if env["status"] != "error" || env["command"] != "semantic_index" {
+		t.Fatalf("unexpected envelope: %v", env)
+	}
+}
+
 func TestSemanticIndexInit_Flags(t *testing.T) {
 	cmd := newSemanticIndexInitCommand()
 
@@ -182,6 +201,13 @@ func TestSemanticIndexOpenAICompatDimensionsKnownLocalModel(t *testing.T) {
 	got := semanticIndexOpenAICompatDimensions("text-embedding-embeddinggemma-300m-qat", 1024)
 	if got != 768 {
 		t.Fatalf("dimensions=%d want 768", got)
+	}
+}
+
+func TestSemanticIndexOpenAICompatDimensionsKnownQwenLocalModel(t *testing.T) {
+	got := semanticIndexOpenAICompatDimensions("text-embedding-qwen3-embedding-8b", 1024)
+	if got != 4096 {
+		t.Fatalf("dimensions=%d want 4096", got)
 	}
 }
 

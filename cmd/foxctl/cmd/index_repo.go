@@ -206,13 +206,28 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 	ctx := cmd.Context()
 	start := time.Now()
 
-	absWorkspace, err := filepath.Abs(workspace)
-	if err != nil {
-		return fmt.Errorf("resolve workspace: %w", err)
+	var progressFn func(repoindex.BuildProgress)
+	var progressLogger *repoIndexBuildProgressLogger
+	var stopProgressHeartbeat func()
+	if progress {
+		progressLogger = newRepoIndexBuildProgressLogger(cmd.ErrOrStderr(), start)
+		progressFn = progressLogger.Report
+		stopProgressHeartbeat = progressLogger.StartHeartbeat(ctx, 15*time.Second)
+		defer stopProgressHeartbeat()
+		progressLogger.ReportPhase("init", "starting repoindex build")
 	}
 
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		progressLogger.ReportPhase("error", fmt.Sprintf("resolve workspace failed: %v", err))
+		return fmt.Errorf("resolve workspace: %w", err)
+	}
+	progressLogger.ReportPhase("init", repoIndexBuildOptionsMessage(absWorkspace, patterns, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, incremental, includeSemanticAnchors, includeCoChange))
+
+	progressLogger.ReportPhase("config", "loading foxctl configuration")
 	cfg, err := loadConfig(ctx)
 	if err != nil {
+		progressLogger.ReportPhase("error", fmt.Sprintf("load config failed: %v", err))
 		return fmt.Errorf("load config: %w", err)
 	}
 
@@ -220,28 +235,36 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 	if casDir == "" {
 		casDir = filepath.Join(cfg.Home, "cas")
 	}
+	progressLogger.ReportPhase("storage", "opening memory summary store")
 	memStore, err := memory.Open(ctx, cfg.Storage.Root, casDir)
 	if err != nil {
+		progressLogger.ReportPhase("error", fmt.Sprintf("open memory store failed: %v", err))
 		return fmt.Errorf("open memory store: %w", err)
 	}
 	defer memStore.Close()
 
+	progressLogger.ReportPhase("storage", "opening repoindex store")
 	store, err := repoindex.Open(ctx, cfg.Storage.Root, absWorkspace)
 	if err != nil {
+		progressLogger.ReportPhase("error", fmt.Sprintf("open repoindex store failed: %v", err))
 		return fmt.Errorf("open repoindex store: %w", err)
 	}
 	defer store.Close()
+	progressLogger.ReportPhase("storage", fmt.Sprintf("repoindex store ready path=%s", store.Path()))
 
 	var delta repoindex.WorkspaceDelta
 	var deltaAvailable bool
 	if incremental {
+		progressLogger.ReportPhase("delta", "computing workspace delta")
 		if computed, err := store.ComputeDelta(ctx); err == nil {
 			delta = computed
 			deltaAvailable = true
+			progressLogger.ReportPhase("delta", fmt.Sprintf("workspace delta %s", formatRepoIndexDeltaCounts(computed)))
 			meta, metaErr := store.GetMeta(ctx)
 			current := repoindex.ResolveGitSnapshot(ctx, absWorkspace)
 			freshness := repoindex.CompareIndexFreshness(meta, current)
 			if computed.Empty() && computed.Unchanged > 0 && freshness.Level == repoindex.FreshnessCurrent {
+				progressLogger.ReportPhase("done", "repoindex is current; skipping rebuild")
 				data := map[string]any{
 					"workspace":    absWorkspace,
 					"store_path":   store.Path(),
@@ -258,23 +281,17 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 					data["meta"] = meta
 				}
 				env := protocol.OK("index.repo.build", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+				progressLogger.ReportPhase("done", "writing success envelope")
 				return protocol.Write(cmd.OutOrStdout(), env)
 			}
+		} else {
+			progressLogger.ReportPhase("delta", fmt.Sprintf("workspace delta unavailable; running full build: %v", err))
 		}
 	}
 
 	summaryProvider := &memorySummaryProvider{store: memStore, workspace: absWorkspace}
 	symbolSummaryProvider := &memorySymbolSummaryProvider{store: memStore, workspace: absWorkspace}
 	builder := repoindex.NewBuilder(store, absWorkspace)
-	var progressFn func(repoindex.BuildProgress)
-	var progressLogger *repoIndexBuildProgressLogger
-	var stopProgressHeartbeat func()
-	if progress {
-		progressLogger = newRepoIndexBuildProgressLogger(cmd.ErrOrStderr(), start)
-		progressFn = progressLogger.Report
-		stopProgressHeartbeat = progressLogger.StartHeartbeat(ctx, 15*time.Second)
-		defer stopProgressHeartbeat()
-	}
 	buildOpts := repoindex.BuildOptions{
 		RepoRoot:               absWorkspace,
 		Patterns:               patterns,
@@ -298,12 +315,18 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 	var result repoindex.BuildResult
 	var deltaBuild repoindex.BuildDeltaResult
 	if incremental && deltaAvailable {
+		progressLogger.ReportPhase("build", "running incremental repoindex build")
+	} else {
+		progressLogger.ReportPhase("build", "running full repoindex build")
+	}
+	if incremental && deltaAvailable {
 		deltaBuild, err = builder.BuildDelta(ctx, buildOpts, delta)
 		result = deltaBuild.Result
 	} else {
 		result, err = builder.Build(ctx, buildOpts)
 	}
 	if err != nil {
+		progressLogger.ReportPhase("error", fmt.Sprintf("repo index build failed: %v", err))
 		hint := "Verify repo index configuration, input files, and permissions."
 		data := protocol.ErrorData{Hint: hint}
 		env := protocol.Error("index.repo.build", protocol.ErrorCodeERuntime, "repo index build failed", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
@@ -314,6 +337,7 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 
 	}
 	meta, metaErr := store.GetMeta(ctx)
+	progressLogger.ReportPhaseResult("done", "repoindex build complete", result)
 
 	data := map[string]any{
 		"workspace":        absWorkspace,
@@ -340,6 +364,7 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 	}
 
 	env := protocol.OK("index.repo.build", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	progressLogger.ReportPhase("done", "writing success envelope")
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
@@ -373,6 +398,25 @@ func (l *repoIndexBuildProgressLogger) Report(progress repoindex.BuildProgress) 
 	l.written = true
 	fmt.Fprintln(l.writer, line)
 	l.mu.Unlock()
+}
+
+func (l *repoIndexBuildProgressLogger) ReportPhase(phase, message string) {
+	if l == nil {
+		return
+	}
+	l.ReportPhaseResult(phase, message, repoindex.BuildResult{})
+}
+
+func (l *repoIndexBuildProgressLogger) ReportPhaseResult(phase, message string, result repoindex.BuildResult) {
+	if l == nil {
+		return
+	}
+	l.Report(repoindex.BuildProgress{
+		Phase:   phase,
+		Message: message,
+		Time:    time.Now().UTC(),
+		Result:  result,
+	})
 }
 
 func (l *repoIndexBuildProgressLogger) StartHeartbeat(ctx context.Context, interval time.Duration) func() {
@@ -450,7 +494,70 @@ func repoIndexProgressElapsed(start time.Time, elapsedMs int64) time.Duration {
 }
 
 func formatRepoIndexBuildCounts(result repoindex.BuildResult) string {
+	if result.Packages == 0 && result.Files == 0 && result.Symbols == 0 && result.Nodes == 0 && result.Edges == 0 {
+		return ""
+	}
 	return fmt.Sprintf(" (packages=%d files=%d symbols=%d nodes=%d edges=%d)", result.Packages, result.Files, result.Symbols, result.Nodes, result.Edges)
+}
+
+func repoIndexBuildOptionsMessage(absWorkspace string, patterns []string, includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell, includeTests, dryRun, incremental, includeSemanticAnchors, includeCoChange bool) string {
+	families := repoIndexBuildFamilies(includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell)
+	return fmt.Sprintf("workspace=%s families=%s go_patterns=%s include_tests=%t semantic_anchors=%t cochange=%t incremental=%t dry_run=%t",
+		absWorkspace,
+		strings.Join(families, ","),
+		strings.Join(patterns, ","),
+		includeTests,
+		includeSemanticAnchors,
+		includeCoChange,
+		incremental,
+		dryRun,
+	)
+}
+
+func repoIndexBuildFamilies(includeGo, includePython, includeRust, includeCSharp, includeTS, includeElixir, includeTerraform, includeKubernetes, includeShell bool) []string {
+	var families []string
+	if includeGo {
+		families = append(families, "go")
+	}
+	if includePython {
+		families = append(families, "python")
+	}
+	if includeRust {
+		families = append(families, "rust")
+	}
+	if includeCSharp {
+		families = append(families, "csharp")
+	}
+	if includeTS {
+		families = append(families, "typescript")
+	}
+	if includeElixir {
+		families = append(families, "elixir")
+	}
+	if includeTerraform {
+		families = append(families, "terraform")
+	}
+	if includeKubernetes {
+		families = append(families, "kubernetes")
+	}
+	if includeShell {
+		families = append(families, "shell")
+	}
+	if len(families) == 0 {
+		return []string{"none"}
+	}
+	return families
+}
+
+func formatRepoIndexDeltaCounts(delta repoindex.WorkspaceDelta) string {
+	counts := repoIndexDeltaCounts(delta)
+	return fmt.Sprintf("added=%d modified=%d deleted=%d untracked=%d unchanged=%d",
+		counts["added"],
+		counts["modified"],
+		counts["deleted"],
+		counts["untracked"],
+		counts["unchanged"],
+	)
 }
 
 func emptyFallback(value, fallback string) string {

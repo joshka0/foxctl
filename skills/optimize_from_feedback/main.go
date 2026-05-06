@@ -81,13 +81,15 @@ func main() {
 // run orchestrates feedback analysis with filtering, pattern detection, and recommendation generation.
 //
 // Index:
-// - Purpose: Analyze session feedback patterns to identify trends, issues, and generate optimization recommendations
-// - Flow: validate input → parse date filters → open memory store → collect feedback entries → apply filters → analyze patterns → generate recommendations → emit results
-// - SideEffects: reads memory store entries; processes feedback data; calculates statistics; generates analytical insights
-// - FailureModes: invalid date formats, memory store access errors, JSON parsing failures, insufficient data
-// - Observability: emits feedback statistics, pattern frequencies, outcome distributions, tool usage, and prioritized recommendations
-// - Related: analyzeFeedback, topPatterns, generateRecommendations, memory.OpenWithConfig
-// - Keywords: optimize/from_feedback, feedback_analysis, pattern_detection, optimization_recommendations, session_analytics
+//   Purpose: Analyze session feedback patterns to identify trends, issues, and generate optimization recommendations
+//   Keywords: optimize/from_feedback, feedback_analysis, pattern_detection, optimization_recommendations, session_analytics
+//   Related: analyzeFeedback, topPatterns, generateRecommendations, memory.OpenWithConfig
+//   Flow: validate input → parse date filters → open memory store → collect feedback entries → apply filters → analyze patterns → generate recommendations → emit results
+//   Resources: memory store
+//   Events: feedback analysis events
+//   OutputFields: feedback_count, avg_rating, outcome_distribution, top_successes, top_failures, top_blockers, top_suggestions, tool_usage_stats, recommendations
+// [[domain:feedback-pattern-analysis]]
+// [[protocol:session-feedback-schema]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Set defaults
 	if in.MinRating == 0 {

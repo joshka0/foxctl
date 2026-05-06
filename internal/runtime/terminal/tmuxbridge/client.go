@@ -512,9 +512,7 @@ func (c *Client) Read(ctx context.Context, target string, lines int) (ReadResult
 //   Related: Read, resolveSenderPane, relayPostPasteKeys
 //
 // [[invariant:sender-resolved-before-inject]]
-// [[risk:empty-message-rejected]]
 // [[test:internal/runtime/terminal/tmuxbridge/client_test.go#TestSendWithExplicitSenderLabel]]
-// [[test:internal/runtime/terminal/tmuxbridge/client_test.go#TestSendRequiresSenderOutsideTmux]]
 func (c *Client) Send(ctx context.Context, sender string, target string, text string) (SendResult, error) {
 	content := strings.TrimSpace(text)
 	if content == "" {

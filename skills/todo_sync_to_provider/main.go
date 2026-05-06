@@ -69,13 +69,16 @@ func main() {
 // run orchestrates outbound todo synchronization with permission checks, task projection, and provider file writing.
 //
 // Index:
-// - Purpose: Sync tasks from foxctl to external providers (Claude Code) with configurable formatting and ordering
-// - Flow: check permissions → open task store → resolve session → build projection config → sync tasks → write provider file → emit results
-// - SideEffects: writes to provider state files outside workspace; modifies external todo systems; handles file conflicts
-// - FailureModes: permission denied, task store errors, provider file write failures, sync conflicts, invalid configurations
-// - Observability: emits sync statistics, file operation results, warning messages, dry-run outputs, and comprehensive sync tracking
-// - Related: todosync.NewService, todos.NewStore, sessionkit.OpenTasks
-// - Keywords: todo/sync_to_provider, outbound_sync, provider_integration, task_projection, claude_code_sync
+//   Purpose: Sync tasks from foxctl to external providers (Claude Code) with configurable formatting and ordering
+//   Keywords: todo/sync_to_provider, outbound_sync, provider_integration, task_projection, claude_code_sync
+//   Related: todosync.NewService, todos.NewStore, sessionkit.OpenTasks
+//   Flow: check permissions → open task store → resolve session → build projection config → sync tasks → write provider file → emit results
+//   Resources: task store, provider state files
+//   Events: none
+//   OutputFields: written, updated, unchanged, file_path, file_hash, todos, warnings, dry_run
+//
+// [[protocol:outbound_todo_sync]]
+// [[risk:provider_state_write]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Check write permission
 	allowProviderState := in.AllowProviderState || os.Getenv("FOXCTL_ALLOW_PROVIDER_STATE") == "1"

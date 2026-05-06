@@ -31,13 +31,16 @@ func main() {
 // run orchestrates PageRank computation for graph nodes using gonum library.
 //
 // Index:
-// - Purpose: Compute PageRank scores for all nodes in a graph workspace using gonum algorithms
-// - Flow: validate input → open store → load nodes/edges → build directed graph → compute PageRank → update store → emit results
-// - SideEffects: graph database updates; degree recalculation; PageRank score modifications
-// - FailureModes: database errors, graph building failures, computation errors
-// - Observability: emits computation statistics, top nodes, performance metrics
-// - Related: gonum PageRank algorithm, graph database operations, bulk updates
-// - Keywords: graph/pagerank, pagerank_algorithm, graph_analysis, node_ranking, gonum
+//   Purpose: Compute PageRank scores for all nodes in a graph workspace using gonum algorithms
+//   Keywords: graph/pagerank, pagerank_algorithm, graph_analysis, node_ranking, gonum
+//   Related: gonum PageRank algorithm, graph database operations, bulk updates
+//   Flow: validate input → open store → load nodes/edges → build directed graph → compute PageRank → update store → emit results
+//   Resources: graph database (SQLite); gonum graph library
+//   Events: pagerank-computed
+//   OutputFields: nodes_updated, edges_processed, compute_time_ms, top_nodes
+//
+// [[domain:graph-database]]
+// [[protocol:pagerank-computation]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Use workspace from input or from runner context
 	workspace := in.Workspace

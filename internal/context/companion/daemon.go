@@ -57,10 +57,13 @@ type DaemonConfig struct {
 // NewCompressionDaemon creates a hybrid maintenance daemon with default intervals.
 //
 // Index:
-// - Purpose: Configure periodic conversation hybrid maintenance
-// - Flow: apply defaults → construct daemon → return
-// - Related: CompressionDaemon.Start, CompressionDaemon.Stop
-// - Keywords: hybrid_daemon, daily_interval, weekly_interval, maintenance
+//   Purpose: Configure periodic conversation hybrid maintenance
+//   Flow: apply defaults → construct daemon → return
+//   Related: CompressionDaemon.Start, CompressionDaemon.Stop
+//   Keywords: hybrid_daemon, daily_interval, weekly_interval, maintenance
+//
+// [[lifecycle:component]]
+// [[domain:conversation-memory-maintenance]]
 func NewCompressionDaemon(cfg DaemonConfig) *CompressionDaemon {
 	if cfg.DailyInterval <= 0 {
 		cfg.DailyInterval = 1 * time.Hour
@@ -90,12 +93,13 @@ func NewCompressionDaemon(cfg DaemonConfig) *CompressionDaemon {
 // Start begins daily and weekly hybrid maintenance loops.
 //
 // Index:
-// - Purpose: Run periodic maintenance loops for conversation memory
-// - Flow: validate deps → spawn daily/weekly loops → return
-// - SideEffects: starts goroutines; runs maintenance jobs
-// - FailureModes: missing dependencies prevents start
-// - Related: runDailyLoop, runWeeklyLoop
-// - Keywords: maintenance_start, daily_loop, weekly_loop, conversation_memory
+//   Purpose: Run periodic maintenance loops for conversation memory
+//   Flow: validate deps → spawn daily/weekly loops → return
+//   Related: runDailyLoop, runWeeklyLoop
+//   Keywords: maintenance_start, daily_loop, weekly_loop, conversation_memory
+//
+// [[lifecycle:component]]
+// [[domain:hybrid-maintenance-scheduler]]
 func (d *CompressionDaemon) Start(ctx context.Context) {
 	if d.memory == nil || d.db == nil {
 		d.logger.Error().
@@ -114,10 +118,13 @@ func (d *CompressionDaemon) Start(ctx context.Context) {
 // Stop signals maintenance loops to stop and waits for completion.
 //
 // Index:
-// - Purpose: Stop maintenance daemon loops
-// - Flow: close stop channel → wait for workers → close done channel
-// - Related: CompressionDaemon.Start
-// - Keywords: maintenance_stop, stop_channel, waitgroup, done
+//   Purpose: Stop maintenance daemon loops
+//   Flow: close stop channel → wait for workers → close done channel
+//   Related: CompressionDaemon.Start
+//   Keywords: maintenance_stop, stop_channel, waitgroup, done
+//
+// [[lifecycle:component]]
+// [[domain:hybrid-maintenance-shutdown]]
 func (d *CompressionDaemon) Stop() {
 	close(d.stopCh)
 	d.wg.Wait()

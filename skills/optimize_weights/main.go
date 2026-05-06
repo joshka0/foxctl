@@ -29,13 +29,15 @@ func main() {
 // run orchestrates weight management operations with workspace resolution and scorer initialization.
 //
 // Index:
-// - Purpose: Manage learnable scorer weights for task prioritization with show and learn actions
-// - Flow: resolve workspace → open trajectory store → create weight store and scorer → execute action → emit results
-// - SideEffects: reads trajectory data; updates weight store; performs machine learning optimization
-// - FailureModes: workspace resolution errors, trajectory store access failures, invalid actions, learning failures
-// - Observability: emits current weights, learning updates, sample sizes, and comprehensive weight change tracking
-// - Related: showWeights, learnWeights, optimization.NewLearnableScorer, optimization.NewInMemoryWeightStore
-// - Keywords: optimize/weights, task_prioritization, machine_learning, weight_optimization, learnable_scorer
+//   Purpose: Manage learnable scorer weights for task prioritization with show and learn actions
+//   Keywords: optimize/weights, task_prioritization, machine_learning, weight_optimization, learnable_scorer
+//   Related: showWeights, learnWeights, optimization.NewLearnableScorer, optimization.NewInMemoryWeightStore
+//   Flow: resolve workspace → open trajectory store → create weight store and scorer → execute action → emit results
+//   Resources: trajectory store, in-memory weight store
+//   Events: weight learning events
+//   OutputFields: weights, update, workspace
+// [[domain:learnable-scorer-weights]]
+// [[protocol:weight-action-dispatch]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Resolve workspace
 	workspace := in.Workspace

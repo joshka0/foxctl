@@ -52,13 +52,15 @@ func main() {
 // run orchestrates knowledge pack recommendation based on prompt content and file paths.
 //
 // Index:
-// - Purpose: Surface relevant knowledge packs based on prompt content and file paths with threshold-based filtering
-// - Flow: load config → open store → extract search context → find matches → filter by threshold → emit recommendations
-// - SideEffects: knowledge store queries; context injection; recommendation scoring
-// - FailureModes: store access failures, keyword extraction errors
-// - Observability: emits recommendation counts, scores, and configuration info
-// - Related: extractPrompt, findMatches, extractKeywords, scoreKeywordMatch
-// - Keywords: hooks/knowledge_router, knowledge_recommendation, content_matching, path_matching, threshold_filtering
+//   Purpose: Surface relevant knowledge packs based on prompt content and file paths with threshold-based filtering
+//   Keywords: hooks/knowledge_router, knowledge_recommendation, content_matching, path_matching, threshold_filtering
+//   Related: extractPrompt, findMatches, extractKeywords, scoreKeywordMatch
+//   Flow: load config → open store → extract search context → find matches → filter by threshold → emit recommendations
+//   Resources: knowledge store (SQLite)
+//   Events: knowledge-recommended
+//   OutputFields: recommended, threshold, scores
+//
+// [[domain:knowledge-routing]]
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 	routerCfg := DefaultConfig()

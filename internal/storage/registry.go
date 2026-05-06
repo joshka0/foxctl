@@ -107,12 +107,15 @@ var canonicalStoreByName = func() map[string]StoreSpec {
 // CanonicalStores returns the canonical registry of foxctl-managed stores.
 //
 // Index:
-// - Purpose: Provide a single source of truth for store names, default DB filenames, and sync classification
-// - Flow: copy static registry slice → return copy
-// - SideEffects: none
-// - FailureModes: none
-// - Related: FindStore, StoreSpec, StoreName, StoreClass
-// - Keywords: store_registry, db_files, sync_classification
+//   Purpose: Provide a single source of truth for store names, default DB filenames, and sync classification
+//   Keywords: store_registry, db_files, sync_classification
+//   Related: FindStore, StoreSpec, StoreName, StoreClass
+//   Flow: copy static registry slice → return copy
+//   Resources: canonicalStores slice
+//   Events: none
+//   OutputFields: []StoreSpec
+// [[domain:store-classification-sync-critical-local-observability]]
+// [[doc:docs/architecture/storage.md]]
 func CanonicalStores() []StoreSpec {
 	out := make([]StoreSpec, len(canonicalStores))
 	copy(out, canonicalStores)
@@ -122,12 +125,15 @@ func CanonicalStores() []StoreSpec {
 // FindStore returns the store spec for name, if present.
 //
 // Index:
-// - Purpose: Resolve a store name into its canonical spec
-// - Flow: normalize name → map lookup → return spec
-// - SideEffects: none
-// - FailureModes: none
-// - Related: CanonicalStores
-// - Keywords: store_lookup, canonical_store
+//   Purpose: Resolve a store name into its canonical spec
+//   Keywords: store_lookup, canonical_store
+//   Related: CanonicalStores
+//   Flow: normalize name → map lookup → return spec
+//   Resources: canonicalStoreByName map
+//   Events: none
+//   OutputFields: StoreSpec, bool
+// [[domain:store-classification-sync-critical-local-observability]]
+// [[test-contract:store-name-lookup-is-case-insensitive]]
 func FindStore(name string) (StoreSpec, bool) {
 	key := strings.ToUpper(strings.TrimSpace(name))
 	spec, ok := canonicalStoreByName[key]

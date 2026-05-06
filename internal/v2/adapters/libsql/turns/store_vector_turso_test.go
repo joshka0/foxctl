@@ -76,13 +76,6 @@ func TestTurnStore_SearchArtifactsByEmbedding_VectorPathTurso(t *testing.T) {
 		t.Fatalf("SearchArtifactsByEmbedding() error = %v", err)
 	}
 	if result.SearchPath != run.ArtifactSearchPathVector {
-		if result.SearchPath == run.ArtifactSearchPathFallback &&
-			result.VectorCapability == run.ArtifactVectorCapabilityDisabled {
-			if requireNative {
-				t.Fatalf("native vector SQL required, but search downgraded to fallback (vector_capability=%q)", result.VectorCapability)
-			}
-			t.Skip("skipping: vector SQL unavailable at runtime; store downgraded to fallback path")
-		}
 		t.Fatalf("search_path=%q want %q", result.SearchPath, run.ArtifactSearchPathVector)
 	}
 	if result.VectorCapability != run.ArtifactVectorCapabilityEnabled {

@@ -204,13 +204,16 @@ func detectAvailableProviders(keys APIKeys) []string {
 // run is the main skill logic orchestrating multi-provider LLM ranking with parallel execution.
 //
 // Index:
-// - Purpose: Send candidates to multiple LLM providers for relevance ranking and combine results into unified ranking
-// - Flow: load API keys → detect providers → create provider instances → execute ranking in parallel → merge results
-// - SideEffects: HTTP requests to LLM APIs; parallel provider execution; result aggregation and ranking
-// - FailureModes: missing API keys, provider failures, timeouts, invalid responses, ranking parse errors
-// - Observability: emits ranking statistics, provider latencies, unified candidate scores, and per-provider results
-// - Related: mergeProviderResults, createProvider, buildRankingPrompt, parseRankingResponse
-// - Keywords: code/llm_search, llm_ranking, multi_provider, relevance_scoring, parallel_execution
+//   Purpose: Send candidates to multiple LLM providers for relevance ranking and combine results into unified ranking
+//   Flow: load API keys → detect providers → create provider instances → execute ranking in parallel → merge results
+//   SideEffects: HTTP requests to LLM APIs; parallel provider execution; result aggregation and ranking
+//   FailureModes: missing API keys, provider failures, timeouts, invalid responses, ranking parse errors
+//   Observability: emits ranking statistics, provider latencies, unified candidate scores, and per-provider results
+//   Related: mergeProviderResults, createProvider, buildRankingPrompt, parseRankingResponse
+//   Keywords: code/llm_search, llm_ranking, multi_provider, relevance_scoring, parallel_execution
+//
+// [[domain:llm-code-search-ranking]]
+// [[protocol:multi-provider-llm-ranking]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// FC/IS: Load API keys at boundary
 	apiKeys := LoadAPIKeys()

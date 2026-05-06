@@ -55,12 +55,16 @@ func NewBuilder(store *Store, repoRoot string) *Builder {
 // Build builds and replaces the repo graph index.
 //
 // Index:
-// - Purpose: Build repo graph nodes/edges for enabled languages and persist to store
-// - Flow: validate opts → buildGo/TS/Elixir → rollups → comment edges → replace store → set meta
-// - SideEffects: reads workspace files; runs language tooling; writes repoindex SQLite
-// - FailureModes: package load errors, file read errors, store write errors
-// - Related: buildGo, buildTS, buildElixir, applyCommentEdges, Store.ReplaceAll
-// - Keywords: repo_index_build, repoindex, nodes, edges, repo_key, schema_version, buildGo, buildTS, buildElixir, ReplaceAll
+//   Purpose: Build repo graph nodes/edges for enabled languages and persist to store
+//   Keywords: repo_index_build, repoindex, nodes, edges, repo_key, schema_version, buildGo, buildTS, buildElixir, ReplaceAll
+//   Related: buildGo, buildTS, buildElixir, applyCommentEdges, Store.ReplaceAll
+//   Flow: validate opts → buildGo/TS/Elixir → rollups → comment edges → replace store → set meta
+//   Resources: repoindex SQLite store, workspace files, language tooling
+//   Events: repoindex-build-progress
+//   OutputFields: Nodes, Edges, Packages, Files, Symbols
+//
+// [[protocol:repoindex-build]]
+// [[invariant:at-least-one-language-enabled]]
 func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, error) {
 	result := BuildResult{}
 	start := time.Now()

@@ -57,12 +57,16 @@ func (idx *Indexer) ID() string {
 // Index processes a post-review event and updates file embeddings.
 //
 // Index:
-// - Purpose: Update semantic file embeddings for post-review changes
-// - Flow: validate config → loop files → delete removed → embed/update → record results
-// - SideEffects: reads files; writes embeddings to memory store
-// - FailureModes: file I/O errors, embedding provider errors, store errors
-// - Related: deleteFileEmbedding, indexFile
-// - Keywords: semantic_file_index, embeddings, post_review, files_indexed, files_failed
+//   Purpose: Update semantic file embeddings for post-review changes
+//   Keywords: semantic_file_index, embeddings, post_review, files_indexed, files_failed
+//   Related: deleteFileEmbedding, indexFile
+//   Flow: validate config → loop files → delete removed → embed/update → record results
+//   Resources: memory store, embedding provider, workspace files
+//   Events: semantic-index-complete
+//   OutputFields: IndexerResult
+//
+// [[protocol:semantic-file-index-post-review]]
+// [[invariant:workspace-id-canonicalization]]
 func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (*indexing.IndexerResult, error) {
 	if !idx.config.Enabled {
 		return &indexing.IndexerResult{

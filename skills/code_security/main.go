@@ -356,13 +356,16 @@ func main() {
 // run orchestrates security vulnerability scanning with pattern matching and severity filtering.
 //
 // Index:
-// - Purpose: Scan code for security vulnerabilities using regex patterns with configurable severity and category filtering
-// - Flow: validate input → resolve path → scan directory/file → filter by severity → sort results → emit findings
-// - SideEffects: file system traversal; pattern matching; sensitive data redaction; result persistence
-// - FailureModes: invalid paths, file access errors, pattern matching failures
-// - Observability: emits vulnerability counts, severity breakdown, category statistics, and risk scores
-// - Related: scanDirectory, scanFile, selectPatterns, filterBySeverity, calculateStats
-// - Keywords: code/security, vulnerability_scanning, security_patterns, injection_detection, secret_detection
+//   Purpose: Scan code for security vulnerabilities using regex patterns with configurable severity and category filtering
+//   Flow: validate input → resolve path → scan directory/file → filter by severity → sort results → emit findings
+//   SideEffects: file system traversal; pattern matching; sensitive data redaction; result persistence
+//   FailureModes: invalid paths, file access errors, pattern matching failures
+//   Observability: emits vulnerability counts, severity breakdown, category statistics, and risk scores
+//   Related: scanDirectory, scanFile, selectPatterns, filterBySeverity, calculateStats
+//   Keywords: code/security, vulnerability_scanning, security_patterns, injection_detection, secret_detection
+//
+// [[domain:security-vulnerability-scanning]]
+// [[invariant:secret-redaction]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.ScanMode == "" {

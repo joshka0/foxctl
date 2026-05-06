@@ -18,9 +18,14 @@ func DimensionsForModel(model string) int {
 		return 1536
 	case "text-embedding-3-large":
 		return 3072
+	case "text-embedding-qwen3-embedding-8b":
+		return 4096
 	case "text-embedding-embeddinggemma-300m-qat":
 		return 768
 	default:
+		if strings.Contains(normalized, "qwen3-embedding") {
+			return 4096
+		}
 		if strings.Contains(normalized, "embeddinggemma") {
 			return 768
 		}

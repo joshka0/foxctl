@@ -37,13 +37,16 @@ func main() {
 // run orchestrates file writing with content validation, mode checking, and checksum generation.
 //
 // Index:
-// - Purpose: Write files with content validation, multiple modes, and checksum generation
-// - Flow: validate input → resolve path → get content → check mode → write file → generate checksum → emit results
-// - SideEffects: file creation/modification; directory creation; CAS access; checksum generation
-// - FailureModes: invalid paths, permission errors, mode conflicts, write errors, CAS errors
-// - Observability: emits write statistics, file metadata, checksum, and mode information
-// - Related: getContent, parsePermissions, checkWriteMode, performWrite
-// - Keywords: fs/write, file_writing, content_validation, checksum_generation, file_modes
+//   Purpose: Write files with content validation, multiple modes, and checksum generation
+//   Flow: validate input → resolve path → get content → check mode → write file → generate checksum → emit results
+//   SideEffects: file creation/modification; directory creation; CAS access; checksum generation
+//   FailureModes: invalid paths, permission errors, mode conflicts, write errors, CAS errors
+//   Observability: emits write statistics, file metadata, checksum, and mode information
+//   Related: getContent, parsePermissions, checkWriteMode, performWrite
+//   Keywords: fs/write, file_writing, content_validation, checksum_generation, file_modes
+//
+// [[domain:safe-file-writing]]
+// [[protocol:write-mode-validation]]
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.Mode == "" {

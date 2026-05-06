@@ -56,13 +56,16 @@ func main() {
 // run orchestrates file system search with filtering, fuzzy matching, and result persistence.
 //
 // Index:
-// - Purpose: Find files and directories with advanced filtering, fuzzy search, and result ranking
-// - Flow: validate input → resolve path → walk directory → apply filters → score results → sort → emit results
-// - SideEffects: directory traversal; file system access; CAS storage for large result sets
-// - FailureModes: invalid paths, permission errors, time filter parsing errors
-// - Observability: emits search results with scores, match types, and artifact hints for large sets
-// - Related: parseTimeFilter, fuzzyScore, sortResults
-// - Keywords: fs/find, file_search, fuzzy_matching, directory_traversal, filtering
+//   Purpose: Find files and directories with advanced filtering, fuzzy search, and result ranking
+//   Flow: validate input → resolve path → walk directory → apply filters → score results → sort → emit results
+//   SideEffects: directory traversal; file system access; CAS storage for large result sets
+//   FailureModes: invalid paths, permission errors, time filter parsing errors
+//   Observability: emits search results with scores, match types, and artifact hints for large sets
+//   Related: parseTimeFilter, fuzzyScore, sortResults
+//   Keywords: fs/find, file_search, fuzzy_matching, directory_traversal, filtering
+//
+// [[domain:file-system-search]]
+// [[protocol:fuzzy-file-ranking]]
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.Type == "" {

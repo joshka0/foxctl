@@ -36,12 +36,13 @@ func Path(rootDir string) string {
 // foxctl restarts on the same machine. It must not contain secrets.
 //
 // Index:
-// - Purpose: Provide a stable machine identifier for cross-device coordination (leader leases, debugging, provenance)
-// - Flow: read existing → if missing, atomically create → read back → return device_id
-// - SideEffects: may create "<rootDir>/device.json"
-// - FailureModes: filesystem permissions, invalid JSON, concurrent creation races
-// - Related: Path
-// - Keywords: device_id, coordination, leader_lease
+//   Purpose: Provide a stable machine identifier for cross-device coordination (leader leases, debugging, provenance)
+//   Flow: read existing → if missing, atomically create → read back → return device_id
+//   Related: Path
+//   Keywords: device_id, coordination, leader_lease
+//
+// [[invariant:stable-device-id]]
+// [[domain:machine-identity]]
 func LoadOrCreate(rootDir string) (string, error) {
 	if rootDir == "" {
 		return "", fmt.Errorf("deviceid: root dir is required")

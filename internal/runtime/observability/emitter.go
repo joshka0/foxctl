@@ -51,13 +51,13 @@ func Emit(ctx context.Context, event *Event) {
 // EmitWithConfig emits a Event with custom persistence configuration.
 //
 // Index:
-// - Purpose: Stream an event to SSE and optionally persist it to disk
-// - Flow: publish to SSE → resolve observability dir → apply sampling → persist event
-// - SideEffects: writes SSE output; optional NDJSON file writes
-// - FailureModes: persistence failures are logged; nil event returns early
-// - Observability: emits Event to SSE and foxcular_events NDJSON persistence
-// - Related: Emit, EmitSync, persistEvent, publishToSSE
-// - Keywords: foxcular_events, observability_dir, sampler, sse, persist_event
+//   Purpose: Stream an event to SSE and optionally persist it to disk
+//   Flow: publish to SSE → resolve observability dir → apply sampling → persist event
+//   Related: Emit, EmitSync, persistEvent, publishToSSE
+//   Keywords: foxcular_events, observability_dir, sampler, sse, persist_event
+//
+// [[protocol:event-emit-with-config]]
+// [[domain:observability-event-streaming]]
 func EmitWithConfig(ctx context.Context, event *Event, config *persistConfig) {
 	if event == nil {
 		return
@@ -69,13 +69,13 @@ func EmitWithConfig(ctx context.Context, event *Event, config *persistConfig) {
 // EmitSync writes a Event synchronously, bypassing sampling.
 //
 // Index:
-// - Purpose: Persist a Event immediately without sampling
-// - Flow: publish to SSE → resolve observability dir → append NDJSON
-// - SideEffects: writes SSE output; appends to foxcular_events NDJSON
-// - FailureModes: file write errors returned; nil event returns nil
-// - Observability: emits Event to SSE and foxcular_events NDJSON persistence
-// - Related: EmitWithConfig, WriteEvent, publishToSSE
-// - Keywords: foxcular_events, emit_sync, sse, write_event, observability_dir
+//   Purpose: Persist a Event immediately without sampling
+//   Flow: publish to SSE → resolve observability dir → append NDJSON
+//   Related: EmitWithConfig, WriteEvent, publishToSSE
+//   Keywords: foxcular_events, emit_sync, sse, write_event, observability_dir
+//
+// [[protocol:event-emit-sync]]
+// [[domain:observability-synchronous-persistence]]
 func EmitSync(ctx context.Context, event *Event) error {
 	if event == nil {
 		return nil
@@ -87,13 +87,13 @@ func EmitSync(ctx context.Context, event *Event) error {
 // EmitBuilder builds and emits an event using builder persistence settings.
 //
 // Index:
-// - Purpose: Build a Event and emit it with builder-specified persistence
-// - Flow: build event → set status/duration → delegate to EmitWithConfig
-// - SideEffects: publishes SSE; optional NDJSON persistence
-// - FailureModes: nil builder returns early; persistence failures logged downstream
-// - Observability: emits Event to SSE and optional persistence
-// - Related: EventBuilder.Build, EmitWithConfig
-// - Keywords: event_builder, emit, status, duration_ms, persist_config
+//   Purpose: Build a Event and emit it with builder-specified persistence
+//   Flow: build event → set status/duration → delegate to EmitWithConfig
+//   Related: EventBuilder.Build, EmitWithConfig
+//   Keywords: event_builder, emit, status, duration_ms, persist_config
+//
+// [[protocol:event-builder-emit]]
+// [[domain:observability-builder-pattern]]
 func EmitBuilder(ctx context.Context, builder *EventBuilder, status Status, duration int64) {
 	if builder == nil {
 		return
@@ -120,12 +120,13 @@ type EventWriter struct {
 // NewEventWriter creates a new writer for events.
 //
 // Index:
-// - Purpose: Initialize a cached NDJSON writer for events
-// - Flow: resolve observability dir → ensure events dir → open file → select sampler
-// - SideEffects: creates directories; opens file handles
-// - FailureModes: directory creation errors, file open errors
-// - Related: EventWriter.Write, DefaultSampler
-// - Keywords: foxcular_events, ndjson, sampler, observability_dir, file_handle
+//   Purpose: Initialize a cached NDJSON writer for events
+//   Flow: resolve observability dir → ensure events dir → open file → select sampler
+//   Related: EventWriter.Write, DefaultSampler
+//   Keywords: foxcular_events, ndjson, sampler, observability_dir, file_handle
+//
+// [[lifecycle:component]]
+// [[domain:observability-event-writer]]
 func NewEventWriter(sampler Sampler) (*EventWriter, error) {
 	dir := getObsDir()
 	if dir == "" {
