@@ -32,10 +32,12 @@ const (
 	semanticAnchorEdgeMetaKind          = "semantic_anchor_edge"
 )
 
-type AnchorType string
-type AnchorScope string
-type AnchorTargetID string
-type RepoIndexAnchorNodeID string
+type (
+	AnchorType            string
+	AnchorScope           string
+	AnchorTargetID        string
+	RepoIndexAnchorNodeID string
+)
 
 const (
 	AnchorTypeInvariant    AnchorType = "invariant"
