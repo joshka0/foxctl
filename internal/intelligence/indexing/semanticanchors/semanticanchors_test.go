@@ -278,7 +278,7 @@ func TestSemanticAnchorsCoreImportGuard(t *testing.T) {
 		t.Fatal("runtime.Caller failed")
 	}
 	dir := filepath.Dir(file)
-	pkgs, err := parser.ParseDir(token.NewFileSet(), dir, nil, parser.ImportsOnly)
+	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,14 +291,17 @@ func TestSemanticAnchorsCoreImportGuard(t *testing.T) {
 		"/internal/obsidian",
 		"/internal/v2",
 	}
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			for _, imp := range file.Imports {
-				path := strings.Trim(imp.Path.Value, `"`)
-				for _, forbidden := range blocked {
-					if strings.Contains(path, forbidden) {
-						t.Fatalf("semanticanchors core imports forbidden package %q", path)
-					}
+	fset := token.NewFileSet()
+	for _, file := range files {
+		parsed, err := parser.ParseFile(fset, file, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range parsed.Imports {
+			path := strings.Trim(imp.Path.Value, `"`)
+			for _, forbidden := range blocked {
+				if strings.Contains(path, forbidden) {
+					t.Fatalf("semanticanchors core imports forbidden package %q", path)
 				}
 			}
 		}

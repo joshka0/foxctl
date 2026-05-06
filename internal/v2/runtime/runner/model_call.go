@@ -284,7 +284,7 @@ func (p *Pipeline) invokeTool(ctx context.Context, st *executionState, iteration
 	}
 
 	replayPolicy := p.toolReplayPolicy(st.tools, call.Name)
-	res, toolErr, replayed, key, verr := p.prepareToolEffect(ctx, st, iteration, callID, call, replayPolicy)
+	res, replayed, key, verr, toolErr := p.prepareToolEffect(ctx, st, iteration, callID, call, replayPolicy)
 	if verr != nil {
 		return callID, ToolResult{}, verr
 	}
@@ -347,7 +347,7 @@ func (p *Pipeline) invokeTool(ctx context.Context, st *executionState, iteration
 	return callID, res, nil
 }
 
-func (p *Pipeline) prepareToolEffect(ctx context.Context, st *executionState, iteration int, callID string, call run.ToolCall, replayPolicy coretool.EffectReplayPolicy) (ToolResult, error, bool, run.EffectKey, *v2errors.V2Error) {
+func (p *Pipeline) prepareToolEffect(ctx context.Context, st *executionState, iteration int, callID string, call run.ToolCall, replayPolicy coretool.EffectReplayPolicy) (ToolResult, bool, run.EffectKey, *v2errors.V2Error, error) {
 	key := run.EffectKey{
 		RunID:          st.in.RunID,
 		RequestID:      st.in.RequestID,
@@ -356,22 +356,22 @@ func (p *Pipeline) prepareToolEffect(ctx context.Context, st *executionState, it
 		ToolCallID:     callID,
 	}
 	if p.cfg.EffectJournal == nil {
-		return ToolResult{}, nil, false, key, nil
+		return ToolResult{}, false, key, nil, nil
 	}
 
 	record, err := p.cfg.EffectJournal.GetToolEffect(ctx, key)
 	if err == nil {
 		if !toolEffectMatchesCall(record, call) {
-			return ToolResult{}, nil, true, key, effectConflict("tool effect input does not match current tool call", map[string]any{
+			return ToolResult{}, true, key, effectConflict("tool effect input does not match current tool call", map[string]any{
 				"tool_call_id": callID,
 				"tool_name":    strings.TrimSpace(call.Name),
-			})
+			}), nil
 		}
 		if record.Status.IsTerminal() {
 			var stored ToolResult
 			if len(record.ResultJSON) > 0 {
 				if err := decodeJSON(record.ResultJSON, &stored); err != nil {
-					return ToolResult{}, nil, true, key, asStageError(StageModelCall, err, true)
+					return ToolResult{}, true, key, asStageError(StageModelCall, err, true), nil
 				}
 			}
 			if record.Status == run.ToolEffectFailed {
@@ -379,14 +379,14 @@ func (p *Pipeline) prepareToolEffect(ctx context.Context, st *executionState, it
 				if message == "" {
 					message = "stored tool effect failed"
 				}
-				return stored, errors.New(message), true, key, nil
+				return stored, true, key, nil, errors.New(message)
 			}
-			return stored, nil, true, key, nil
+			return stored, true, key, nil, nil
 		}
 		if toolEffectReplayPolicy(record, replayPolicy).AllowsIncompleteEffectRetry() {
-			return ToolResult{}, nil, false, key, nil
+			return ToolResult{}, false, key, nil, nil
 		}
-		return ToolResult{}, nil, true, key, &v2errors.V2Error{
+		return ToolResult{}, true, key, &v2errors.V2Error{
 			Kind:      v2errors.ErrConflict,
 			Message:   "tool effect has intent without terminal result",
 			Cause:     run.ErrEffectIncomplete,
@@ -396,10 +396,10 @@ func (p *Pipeline) prepareToolEffect(ctx context.Context, st *executionState, it
 				"tool_call_id": callID,
 				"tool_name":    strings.TrimSpace(call.Name),
 			},
-		}
+		}, nil
 	}
 	if !errors.Is(err, run.ErrEffectNotFound) {
-		return ToolResult{}, nil, false, key, asStageError(StageModelCall, err, true)
+		return ToolResult{}, false, key, asStageError(StageModelCall, err, true), nil
 	}
 
 	if _, err := p.cfg.EffectJournal.BeginToolEffect(ctx, run.ToolEffectRecord{
@@ -409,9 +409,9 @@ func (p *Pipeline) prepareToolEffect(ctx context.Context, st *executionState, it
 		ReplayPolicy: string(replayPolicy),
 		Status:       run.ToolEffectIntent,
 	}); err != nil {
-		return ToolResult{}, nil, false, key, asStageError(StageModelCall, err, true)
+		return ToolResult{}, false, key, asStageError(StageModelCall, err, true), nil
 	}
-	return ToolResult{}, nil, false, key, nil
+	return ToolResult{}, false, key, nil, nil
 }
 
 func (p *Pipeline) completeToolEffect(ctx context.Context, key run.EffectKey, call run.ToolCall, replayPolicy coretool.EffectReplayPolicy, res ToolResult, toolErr error) *v2errors.V2Error {
