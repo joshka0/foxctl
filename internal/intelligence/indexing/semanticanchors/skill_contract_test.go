@@ -17,8 +17,9 @@ func TestSemanticCommentingSkillExamplesMatchParser(t *testing.T) {
 		t.Fatal("semantic-commenting skill has no positive comment anchor examples")
 	}
 
-	policy := DefaultAnchorPolicy("example.com/acme/project", nil)
+	policy := DefaultAnchorPolicy("example.com/acme/project", []AnchorScope{"acme"})
 	seenTypes := make(map[AnchorType]bool)
+	scopedConceptExamples := 0
 	for _, match := range matches {
 		syntax := match[1]
 		occ, findings := ParseInlineAnchor(policy, syntax)
@@ -29,7 +30,10 @@ func TestSemanticCommentingSkillExamplesMatchParser(t *testing.T) {
 			t.Fatalf("skill presents beacon anchor as a positive example: %s", syntax)
 		}
 		if occ.Scope != RepoLocalAnchorScope {
-			t.Fatalf("portable skill example %s used scope %q, want repo-local", syntax, occ.Scope)
+			if occ.Scope != AnchorScope("acme") || occ.Type == AnchorTypeDoc || occ.Type == AnchorTypeTest {
+				t.Fatalf("portable skill example %s used unexpected scope/type %q/%q", syntax, occ.Scope, occ.Type)
+			}
+			scopedConceptExamples++
 		}
 		if (occ.Type == AnchorTypeDoc || occ.Type == AnchorTypeTest) && occ.Scope != RepoLocalAnchorScope {
 			t.Fatalf("path anchor %s used scope %q, want repo-local unscoped", syntax, occ.Scope)
@@ -51,6 +55,9 @@ func TestSemanticCommentingSkillExamplesMatchParser(t *testing.T) {
 			t.Fatalf("semantic-commenting skill examples missing anchor type %q; seen=%v", want, seenTypes)
 		}
 	}
+	if scopedConceptExamples != 1 {
+		t.Fatalf("semantic-commenting skill has %d scoped concept examples, want exactly one configured-scope example", scopedConceptExamples)
+	}
 }
 
 func TestSemanticCommentingSkillKeepsSafetyContract(t *testing.T) {
@@ -64,6 +71,8 @@ func TestSemanticCommentingSkillKeepsSafetyContract(t *testing.T) {
 		"Use repo-local concept anchors by default: `[[type:slug]]`.",
 		"Use explicit scoped concept anchors, `[[scope:type/slug]]`, only when the target repo or indexer defines that scope",
 		"do not hardcode one repository name, including `foxctl`, into portable semantic comments.",
+		"Configured-scope example, only after confirming the repo/indexer defines `acme` as a valid scope:",
+		"Example: `[[acme:protocol/read-guard]]`.",
 		"`doc:` and `test:` anchors are repo-local path anchors and must be unscoped:",
 		"not `[[project:doc/docs/foo.md]]`",
 		"Avoid `beacon` anchors in ordinary code.",

@@ -48,6 +48,8 @@ or claims not proven by the owner.
 
 Use inline wikilink syntax in source-code comments:
 
+Default repo-local examples:
+
 ```go
 // [[invariant:no-send-without-read]]
 // [[risk:agent-terminal-desync]]
@@ -59,6 +61,13 @@ Use inline wikilink syntax in source-code comments:
 // [[test:internal/terminal/guard_test.go#TestGuardReadBeforeWrite]]
 ```
 
+Configured-scope example, only after confirming the repo/indexer defines
+`acme` as a valid scope:
+
+```go
+// [[acme:protocol/read-guard]]
+```
+
 Rules:
 
 - Use lowercase slugs: `a-z`, `0-9`, `.`, `_`, `-`, and `/`.
@@ -68,6 +77,8 @@ Rules:
   needed. Discover the repo's scope from local tooling or configuration; do not
   hardcode one repository name, including `foxctl`, into portable semantic
   comments.
+- Scoped anchors still use the same type/slug grammar: `[[scope:type/slug]]`.
+  Example: `[[acme:protocol/read-guard]]`.
 - `doc:` and `test:` anchors are repo-local path anchors and must be unscoped:
   use `[[doc:docs/foo.md#Heading]]`, not `[[project:doc/docs/foo.md]]`.
 - Paths must be repo-relative. Do not use URLs, absolute paths, `..`, env vars,
